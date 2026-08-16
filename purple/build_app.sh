@@ -40,6 +40,7 @@ cd "$RepoPath"
 cmake -B "$BuildPath" -G Ninja . \
     -D CMAKE_BUILD_TYPE="$BuildType" \
     -D DESKTOP_APP_DISABLE_SWIFT6=ON \
+    -D TDESKTOP_VENDORED_FIDO2=ON \
     -D CMAKE_C_FLAGS="$QtFrameworkFlag" \
     -D CMAKE_CXX_FLAGS="$QtFrameworkFlag" \
     -D CMAKE_OBJC_FLAGS="$QtFrameworkFlag" \

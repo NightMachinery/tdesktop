@@ -126,6 +126,48 @@ Two flags are worth knowing about:
   enabled updater would eventually fetch an official build and overwrite the
   rebranded one.
 
+### Xcode 15 and parenthesized aggregate initialization
+
+Apple clang 15, the newest compiler that runs on macOS 14.4 and below, does
+not implement P0960 — initialising an aggregate with parentheses,
+`TextWithEntities(text, entities)`, a C++20 feature that arrived in upstream
+Clang 16. Current Telegram Desktop sources use it. The failures look like
+
+    no member named 'Orientation' in 'QAccessible::Attribute'
+    no matching constructor for initialization of 'TextWithEntities'
+
+and appear one file at a time, since each only surfaces when that translation
+unit compiles. `ninja -k 0` builds past failures and collects them all in one
+pass, which is much faster than fixing them one rebuild at a time.
+
+There turned out to be only three, patched in place to brace initialization:
+
+- `SourceFiles/api/api_transcribes.cpp`
+- `SourceFiles/info/profile/info_profile_top_bar.cpp`
+- `SourceFiles/boxes/url_auth_box.cpp`, where the argument was
+  `make_state<SwitchAccountResult>(nullptr)` — the member it set already
+  defaults to `nullptr`, so dropping the argument is equivalent.
+
+These are local patches against upstream and will come back as conflicts or
+as fresh call sites whenever you pull. On a machine with Xcode 16 or newer
+they are unnecessary — the real fix is a newer toolchain, which needs
+macOS 14.5+.
+
+### A system libfido2 older than 1.14
+
+`Telegram/cmake/lib_fido2.cmake` prefers a system libfido2 over the copy this
+repository vendors as a submodule. Anything below 1.14 lacks
+`fido_assert_authdata_raw_ptr` and `fido_assert_authdata_raw_len`, which
+`SourceFiles/webauthn/webauthn_common.cpp` calls, so the build fails late with
+undeclared identifiers.
+
+`build_app.sh` passes `-D TDESKTOP_VENDORED_FIDO2=ON` to ignore the system
+copy and build the vendored 1.17.0 instead. That is also what upstream's
+packaged CI does, since it never installs libfido2 at all.
+
+Upgrading the Homebrew formula would work too, but `openssh` links against it,
+so the vendored route avoids touching anything outside the build.
+
 ### If Homebrew's full "qt" formula is also installed
 
 This is worth understanding before changing anything in the scripts, because

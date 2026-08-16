@@ -9,7 +9,14 @@
 # On Windows it serves only systems without webauthn.dll (Win7/8/8.1,
 # Win10 < 1903); winhello.c is left out.
 
-if (DESKTOP_APP_USE_PACKAGED)
+# A system libfido2 older than 1.14 lacks fido_assert_authdata_raw_ptr/_len,
+# which webauthn/webauthn_common.cpp needs, and the failure only shows up as
+# undeclared identifiers deep in the build. Set this to ignore whatever the
+# system offers and use the vendored copy, which is the version this repository
+# pins as a submodule.
+option(TDESKTOP_VENDORED_FIDO2 "Ignore any system libfido2 and build the bundled one." OFF)
+
+if (DESKTOP_APP_USE_PACKAGED AND NOT TDESKTOP_VENDORED_FIDO2)
     find_package(PkgConfig)
     if (PkgConfig_FOUND)
         pkg_check_modules(TDESKTOP_FIDO2 IMPORTED_TARGET libfido2)
