@@ -73,6 +73,9 @@ Version **1.8.15** was the last that supports older systems
 * [macOS][mac]
 * [GNU/Linux using Docker][linux]
 
+This checkout also carries a local macOS fork build, "Purple Telegram", which
+installs alongside the official app for development: [docs/mac/build.md][purple_mac].
+
 [//]: # (LINKS)
 [telegram]: https://telegram.org
 [telegram_desktop]: https://desktop.telegram.org
@@ -82,6 +85,7 @@ Version **1.8.15** was the last that supports older systems
 [win]: docs/building-win.md
 [mac]: docs/building-mac.md
 [linux]: docs/building-linux.md
+[purple_mac]: docs/mac/build.md
 [preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
 [preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png
 
