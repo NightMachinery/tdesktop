@@ -205,6 +205,30 @@ sees this because it installs only the four `qt*` module formulae.
   `../tdesktop-libs/local/qt/frameworks`, a separate real directory of
   symlinks to the same frameworks, and that is what `-F` points at.
 
+The same clash bites once more at deploy time, with a different symptom: the
+app builds, starts, and then aborts with
+
+    This application failed to start because no Qt platform plugin could be
+    initialized
+
+and, under `QT_DEBUG_PLUGINS=1`,
+`Ignoring QPA plugin due to mismatching Qt versions 396032 395520`
+(0x60B00 = 6.11.0 against 0x60900 = 6.9.0). Homebrew builds qtbase with
+`/opt/homebrew` as its prefix, so `QLibraryInfo` — and therefore macdeployqt —
+looks for plugins in `/opt/homebrew/share/qt/plugins`, which the `qt` formula
+owns. The bundle ends up with a 6.9.2 `libqcocoa.dylib` inside a 6.11.1 app.
+
+`merge_qt_prefix.py` handles this by putting a real copy of macdeployqt in the
+merged prefix's `bin` (a symlink would resolve back to the keg and read the
+wrong qt.conf) next to a `qt.conf` pointing at the merged prefix, and
+`install.sh` runs that copy. Verify with:
+
+```bash
+otool -L "/Applications/Purple Telegram.app/Contents/PlugIns/platforms/libqcocoa.dylib" | grep QtCore
+```
+
+which should report `current version 6.11.1`.
+
 `merge_qt_prefix.py` additionally drops `WrapVulkanHeaders` from Qt6::Gui's
 interface. Homebrew's qtbase records the Vulkan headers as living in
 `/opt/homebrew/include`, which put that directory in the include path of

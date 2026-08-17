@@ -9,7 +9,10 @@ AppName="${AppName:-Purple Telegram}"
 BundleId="com.tdesktop.PurpleTelegram"
 Source="$BuildPath/$AppName.app"
 Target="/Applications/$AppName.app"
-MacDeployQt="${MacDeployQt:-/opt/homebrew/opt/qtbase/bin/macdeployqt}"
+LibrariesPath="${LibrariesPath:-$(dirname "$RepoPath")/tdesktop-libs}"
+# Must be the merged prefix's copy, so the bundled plugins match the Qt the
+# app was linked against - see pin_deploy_tool() in merge_qt_prefix.py.
+MacDeployQt="${MacDeployQt:-$LibrariesPath/local/qt/bin/macdeployqt}"
 
 if [ ! -d "$Source" ]; then
     echo "No bundle at $Source - build it first." >&2

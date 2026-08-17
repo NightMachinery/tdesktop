@@ -62,8 +62,37 @@ def main():
 
     drop_vulkan_headers(destination)
     make_framework_search_dir(destination)
+    pin_deploy_tool(destination)
     print("merged Qt prefix at", destination)
     return 0
+
+
+def pin_deploy_tool(destination):
+    """Makes macdeployqt take its plugins from this prefix.
+
+    Homebrew builds qtbase with /opt/homebrew as its prefix, so QLibraryInfo
+    reports /opt/homebrew/share/qt/plugins — a path the full "qt" formula owns
+    when it is installed. macdeployqt then bundles that formula's plugins, and
+    the app dies at startup with "no Qt platform plugin could be initialized",
+    because libqcocoa.dylib and the Qt it is loaded into disagree on version.
+
+    Qt tools read a qt.conf sitting beside the executable, so a real copy of
+    macdeployqt here (not a symlink, which would resolve back to the keg) plus
+    a qt.conf pointing at this prefix makes it deploy the right plugins.
+    """
+    binary = os.path.join(destination, "bin/macdeployqt")
+    if os.path.islink(binary):
+        real = os.path.realpath(binary)
+        os.remove(binary)
+        shutil.copy2(real, binary)
+    with open(os.path.join(destination, "bin/qt.conf"), "w") as handle:
+        handle.write(
+            "[Paths]\n"
+            f"Prefix = {destination}\n"
+            "Libraries = lib\n"
+            "Plugins = share/qt/plugins\n"
+            "Binaries = bin\n")
+    print("pinned macdeployqt to the merged prefix")
 
 
 def make_framework_search_dir(destination):
