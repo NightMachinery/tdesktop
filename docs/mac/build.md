@@ -65,7 +65,8 @@ The build refuses to configure without them — see
 [api_credentials.md](../api_credentials.md) for how to obtain a pair.
 
 They are passed through the environment rather than written into any tracked
-file, because this checkout's `origin` is upstream `telegramdesktop/tdesktop`:
+file, because `origin` here is a public fork that gets pushed to (upstream
+`telegramdesktop/tdesktop` is the `upstream` remote):
 
 ```bash
 export TDESKTOP_API_ID=... TDESKTOP_API_HASH=...
