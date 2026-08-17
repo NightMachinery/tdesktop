@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_config.h"
 #include "ui/chat/sponsored_message_bar.h"
 #include "ui/text/text_utilities.h" // tr::rich.
 
@@ -60,6 +61,17 @@ SponsoredMessages::SponsoredMessages(not_null<Main::Session*> session)
 		_session
 	) | rpl::on_next([=](bool premium) {
 		if (premium) {
+			clear();
+		}
+	}, _lifetime);
+
+	// Only reacts to the switch being turned on later; canHaveFor() is what
+	// keeps ads away when it is already on. Skipping the current value matters:
+	// clear() destroys _lifetime, and the default is on, so without the skip
+	// every session would tear this subscription down inside its constructor.
+	Purple::LocalPremiumValue(
+	) | rpl::skip(1) | rpl::on_next([=](bool noAds) {
+		if (noAds) {
 			clear();
 		}
 	}, _lifetime);
@@ -239,6 +251,9 @@ void SponsoredMessages::inject(
 }
 
 bool SponsoredMessages::canHaveFor(not_null<History*> history) const {
+	if (Purple::LocalPremium()) {
+		return false;
+	}
 	if (history->peer->isChannel()) {
 		return true;
 	} else if (const auto user = history->peer->asUser()) {
@@ -248,11 +263,17 @@ bool SponsoredMessages::canHaveFor(not_null<History*> history) const {
 }
 
 bool SponsoredMessages::canHaveFor(not_null<HistoryItem*> item) const {
+	if (Purple::LocalPremium()) {
+		return false;
+	}
 	return item->history()->peer->isBroadcast()
 		&& item->isRegular();
 }
 
 bool SponsoredMessages::isTopBarFor(not_null<History*> history) const {
+	if (Purple::LocalPremium()) {
+		return false;
+	}
 	if (peerIsUser(history->peer->id)) {
 		if (const auto user = history->peer->asUser()) {
 			return user->isBot();

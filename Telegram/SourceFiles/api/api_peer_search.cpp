@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "dialogs/ui/chat_search_in.h" // IsHashOrCashtagSearchQuery
 #include "main/main_session.h"
+#include "purple/purple_config.h"
 
 namespace Api {
 namespace {
@@ -53,9 +54,13 @@ void PeerSearch::request(
 	}
 	cache.requested = true;
 	cache.result.query = _query;
-	if (_query.size() < kMinSponsoredQueryLength) {
+	// Every path that skips requestSponsored() has to mark the sponsored half
+	// ready, or finishPeers() never calls finish() and the search hangs.
+	if (_query.size() < kMinSponsoredQueryLength
+		|| _type != Type::WithSponsored
+		|| Purple::LocalPremium()) {
 		cache.sponsoredReady = true;
-	} else if (_type == Type::WithSponsored) {
+	} else {
 		requestSponsored();
 	}
 	requestPeers();
