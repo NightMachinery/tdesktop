@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_config.h"
 #include "platform/platform_translate_provider.h"
 #include "settings/settings_common.h"
 #include "spellcheck/spellcheck_types.h"
@@ -1610,7 +1611,10 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 	}
 
 	using namespace rpl::mappers;
-	auto premium = Data::AmPremiumValue(&_controller->session());
+	auto premium = rpl::producer<bool>(rpl::combine(
+		Data::AmPremiumValue(&_controller->session()),
+		Purple::LocalPremiumValue(),
+		_1 || _2));
 	const auto translateChat = container->add(object_ptr<Ui::SettingsButton>(
 		container,
 		tr::lng_translate_settings_chat(),
@@ -1628,7 +1632,8 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 
 	translateChat->toggledValue(
 	) | rpl::filter([=](bool checked) {
-		const auto premium = _controller->session().premium();
+		const auto premium = _controller->session().premium()
+			|| Purple::LocalPremium();
 		if (checked && !premium) {
 			ShowPremiumPreviewToBuy(
 				_controller,
