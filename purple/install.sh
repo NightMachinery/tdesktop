@@ -29,8 +29,14 @@ if [ -d "$Target" ]; then
     fi
 fi
 
+# -no-strip keeps the local symbols and the debug map that link the binary back
+# to the .o files under out/. Without it macdeployqt strips the binary in place,
+# which destroys the build output's debuggability as well as the bundle's, and
+# every crash report comes back as bare hex offsets. Costs a much larger binary.
+# Generate the matching .dSYM with:
+#     dsymutil "out/Purple Telegram.app/Contents/MacOS/Purple Telegram"
 echo "=== macdeployqt ==="
-"$MacDeployQt" "$Source"
+"$MacDeployQt" "$Source" -no-strip
 
 echo "=== signing ad-hoc ==="
 codesign --force --deep --sign - "$Source"
