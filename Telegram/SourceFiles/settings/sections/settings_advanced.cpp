@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "purple/purple_config.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
@@ -1256,6 +1257,41 @@ void BuildExportSection(SectionBuilder &builder) {
 	});
 }
 
+// Purple Telegram, not upstream. See docs/purple/premium.md.
+void BuildPurplePremiumSection(SectionBuilder &builder) {
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/purple_premium"_q,
+		.title = rpl::single(u"Purple"_q),
+		.keywords = { u"purple"_q, u"premium"_q },
+	});
+
+	const auto toggle = builder.addButton({
+		.id = u"advanced/purple_premium_toggle"_q,
+		.title = rpl::single(u"Local Premium features"_q),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = Purple::LocalPremiumValue(),
+		.keywords = { u"purple"_q, u"premium"_q, u"ads"_q, u"translate"_q },
+	});
+
+	if (toggle) {
+		toggle->toggledValue(
+		) | rpl::filter([=](bool value) {
+			return (value != Purple::LocalPremium());
+		}) | rpl::on_next([=](bool value) {
+			Purple::SetLocalPremium(value);
+		}, toggle->lifetime());
+	}
+
+	builder.addDividerText(rpl::single(u"Unlocks the Premium features that "
+		"Telegram Desktop gates on the client alone: no sponsored messages, "
+		"exact \"last seen\" times, real-time chat translation, and up to six "
+		"accounts instead of three. Features the server enforces stay locked. "
+		"Stored in "_q + Purple::SettingsFilePath() + '.'));
+	builder.addSkip();
+}
+
 void BuildScreenReaderSection(SectionBuilder &builder) {
 	const auto detected = base::ScreenReaderState::Instance()->active();
 	const auto disabled = Ui::ScreenReaderModeDisabled();
@@ -1328,6 +1364,7 @@ const auto kMeta = BuildHelper({
 	BuildSystemIntegrationSection(builder);
 	BuildPerformanceSection(builder);
 	BuildSpellcheckerSection(builder);
+	BuildPurplePremiumSection(builder);
 	BuildScreenReaderSection(builder);
 	if (autoUpdate) {
 		BuildUpdateSection(builder, false);
