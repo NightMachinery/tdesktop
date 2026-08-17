@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "purple/purple_config.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
 #include "data/data_user.h"
@@ -503,6 +504,11 @@ void Domain::scheduleWriteAccounts() {
 }
 
 int Domain::maxAccounts() const {
+	// Never above kPremiumMaxAccounts: Domain::add() asserts on it, so a
+	// higher ceiling here would abort the app rather than refuse the account.
+	if (Purple::LocalPremium()) {
+		return kPremiumMaxAccounts;
+	}
 	const auto premiumCount = ranges::count_if(accounts(), [](
 			const Main::Domain::AccountWithIndex &d) {
 		return d.account->sessionExists()
