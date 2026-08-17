@@ -36,15 +36,38 @@ export CMAKE_PREFIX_PATH="$QtPrefix:/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt
 # why it has to be the "frameworks" directory rather than "lib".
 QtFrameworkFlag="-F$QtPrefix/frameworks"
 
+# Same problem as Qt, and it corrupts memory rather than failing to build. We
+# link ffmpeg@6, but a machine with the full "ffmpeg" formula has its headers
+# linked into /opt/homebrew/include, which reaches the compiler as "-isystem"
+# ahead of ffmpeg@6's own "-isystem". Every FFmpeg struct then gets the wrong
+# layout: offsetof(AVCodecParameters, coded_side_data) is 32 in ffmpeg 8 and
+# 176 in ffmpeg 6, so the app reads pointers out of the wrong fields and
+# crashes inside libavcodec.
+#
+# "-I" wins because clang searches the whole angled list before any "-isystem"
+# directory, whatever the order on the command line. It has to be a directory of
+# its own, though: clang resolves search paths to real directories and drops
+# duplicates, so pointing "-I" at ffmpeg@6's own include dir - already on the
+# command line as "-isystem" - is silently a no-op. Same trap as Qt, see
+# make_framework_search_dir() in merge_qt_prefix.py.
+FFmpegInclude="$LibrariesPath/local/ffmpeg6-include"
+if [ ! -d "$FFmpegInclude" ]; then
+    mkdir -p "$FFmpegInclude"
+    for dir in /opt/homebrew/opt/ffmpeg@6/include/*/; do
+        ln -sfn "${dir%/}" "$FFmpegInclude/$(basename "$dir")"
+    done
+fi
+CompilerFlags="$QtFrameworkFlag -I$FFmpegInclude"
+
 cd "$RepoPath"
 cmake -B "$BuildPath" -G Ninja . \
     -D CMAKE_BUILD_TYPE="$BuildType" \
     -D DESKTOP_APP_DISABLE_SWIFT6=ON \
     -D TDESKTOP_VENDORED_FIDO2=ON \
-    -D CMAKE_C_FLAGS="$QtFrameworkFlag" \
-    -D CMAKE_CXX_FLAGS="$QtFrameworkFlag" \
-    -D CMAKE_OBJC_FLAGS="$QtFrameworkFlag" \
-    -D CMAKE_OBJCXX_FLAGS="$QtFrameworkFlag" \
+    -D CMAKE_C_FLAGS="$CompilerFlags" \
+    -D CMAKE_CXX_FLAGS="$CompilerFlags" \
+    -D CMAKE_OBJC_FLAGS="$CompilerFlags" \
+    -D CMAKE_OBJCXX_FLAGS="$CompilerFlags" \
     -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
     -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 

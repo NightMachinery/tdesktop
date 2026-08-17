@@ -240,6 +240,55 @@ OpenGL on macOS and never needs it.
 None of this applies on a machine without the `qt` formula; the merged prefix
 is harmless there.
 
+### If Homebrew's full "ffmpeg" formula is also installed
+
+The same shadowing problem, with a much worse failure mode: it builds and links
+cleanly and then corrupts memory at runtime.
+
+We link `ffmpeg@6` (libavcodec 60), which is what upstream's packaged CI pins.
+A machine that also has the full `ffmpeg` formula has *its* headers linked into
+`/opt/homebrew/include` — libavcodec 62 at the time of writing — and that
+directory reaches the compiler as `-isystem` ahead of `ffmpeg@6`'s own
+`-isystem`. Every translation unit then compiles against FFmpeg 8 headers while
+linking and running against FFmpeg 6 libraries.
+
+Nothing complains, because the API surface Telegram Desktop uses exists in both.
+The struct layouts do not match, though:
+
+```
+offsetof(AVCodecParameters, coded_side_data)   32 in ffmpeg 8,  176 in ffmpeg 6
+sizeof(AVCodecParameters)                     184 in ffmpeg 8,  192 in ffmpeg 6
+```
+
+So the app reads pointers out of the wrong fields. The symptoms are segfaults
+and `malloc: pointer being freed was not allocated` aborts inside libavcodec,
+from any code path that touches media — playing a GIF, opening a video, even
+the notification sound.
+
+The fix is a `-I` pointing at a directory holding symlinks to `ffmpeg@6`'s
+header directories, which `build_app.sh` creates at
+`../tdesktop-libs/local/ffmpeg6-include`. Two things make that specific shape
+necessary:
+
+- `-I` rather than reordering, because clang searches the entire angled list
+  before any `-isystem` directory, whatever the command-line order.
+- A directory of its own, because clang resolves search paths to real
+  directories and drops duplicates. Pointing `-I` at
+  `/opt/homebrew/opt/ffmpeg@6/include` is silently a no-op: it is a symlink to
+  the Cellar path that is already present as `-isystem`. This is the same trap
+  as the Qt framework directory above.
+
+To check which headers a build actually resolved, compile a static assert with
+the same flags:
+
+```c
+#include <libavcodec/avcodec.h>
+#include <stddef.h>
+_Static_assert(offsetof(AVCodecParameters, coded_side_data) == 176, "wrong headers");
+```
+
+As with Qt, none of this applies on a machine without the full formula.
+
 ### Install
 
 ```bash
