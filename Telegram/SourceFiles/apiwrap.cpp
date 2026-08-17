@@ -83,6 +83,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/main_account.h"
+#include "purple/purple_config.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/emoji_stake_box.h"
 #include "ui/controls/ton_common.h"
@@ -2126,7 +2127,10 @@ void ApiWrap::saveDraftToCloudDelayed(not_null<Data::Thread*> thread) {
 
 void ApiWrap::updatePrivacyLastSeens() {
 	const auto now = base::unixtime::now();
-	if (!_session->premium()) {
+
+	// The server sends the real online_till either way; without Premium the
+	// client is the one throwing the precision away.
+	if (!_session->premium() && !Purple::LocalPremium()) {
 		_session->data().enumerateUsers([&](not_null<UserData*> user) {
 			if (user->isSelf()
 				|| !user->isLoaded()
