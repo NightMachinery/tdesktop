@@ -329,9 +329,21 @@ Ninja rebuilds only what the change touched, which for a few files is seconds
 to a couple of minutes. Re-run `install.sh` to push the result to
 `/Applications`.
 
+Editing any `CMakeLists.txt` is a different matter. The reconfigure that follows
+invalidates the whole graph — around a thousand objects, including targets your
+change could not possibly affect, such as `lib_fido2`. Budget for a full rebuild,
+and batch CMake edits rather than discovering a second one halfway through.
+
+Never run two builds against `out/` at once. `build_app.sh` both configures and
+builds, so starting it while a `cmake --build` is running gives you two ninja
+processes fighting over the same objects; the load average goes to three digits
+and neither finishes.
+
 ### Rebasing onto upstream
 
 The local diff is the three rebranding lines, the recoloured icon binaries,
-and the scripts under `purple/`. The icons are the only
-awkward part: an upstream change to the artwork lands as a binary conflict.
-Resolve it by taking upstream's files and re-running `recolour_icons.py`.
+the scripts under `purple/`, and the fork features under
+`Telegram/SourceFiles/purple/` — `git grep Purple::` finds every call site where
+those hook into upstream code. The icons are the only awkward part: an upstream
+change to the artwork lands as a binary conflict. Resolve it by taking upstream's
+files and re-running `recolour_icons.py`.
