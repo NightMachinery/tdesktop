@@ -545,6 +545,14 @@ void TranslateTracker::checkRecognized(const std::vector<LanguageId> &skip) {
 	} else if (translatable >= threshold) {
 		_history->translateOfferFrom(
 			ranges::max_element(languages, ranges::less(), p)->first);
+	} else if (was && translatable >= kEnoughForTranslation) {
+		// Purple: keep an offer we have already made. The threshold scales
+		// with how many messages have loaded, so in a chat that mixes
+		// languages it climbs past a foreign-message count that is not itself
+		// falling - six of ten offers, and six of twelve withdraws it a moment
+		// later. The bar then appears and vanishes within a second while
+		// history loads, which is unusable however much you wanted to
+		// translate. Withdraw only once the foreign messages really are gone.
 	} else {
 		_history->translateOfferFrom({});
 	}
