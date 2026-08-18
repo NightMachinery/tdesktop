@@ -436,6 +436,13 @@ enabled = true
 	CHECK(result.ok());
 	CHECK(result.settings.premium.enabled);
 
+	// A file that predates Work Mode is complete, not half-configured: it must
+	// not log a warning on every single start.
+	CHECK(result.warnings.empty());
+	CHECK_EQ(result.settings.lists.size(), size_t(4));
+	CHECK(result.settings.presets.empty());
+	CHECK(!result.settings.focusSync.enabled);
+
 	const auto off = Parse(u"[premium]\nenabled = false\n"_q);
 	CHECK(off.ok());
 	CHECK(!off.settings.premium.enabled);
@@ -769,6 +776,90 @@ void TestNameSanitising() {
 	CHECK(Parse(result.text).ok());
 }
 
+void TestSetTableBool() {
+	Begin("set table bool");
+
+	// The Premium toggle writes into a file the user owns, so it may change
+	// nothing but the one token it is responsible for.
+	const auto text = uR"(# my settings
+[premium]
+# keep the ads away
+enabled   =    true   # this comment matters
+
+[other]
+untouched = 1
+)"_q;
+	const auto off = Purple::SetTableBool(
+		text,
+		Path(),
+		u"premium"_q,
+		u"enabled"_q,
+		false);
+	CHECK(off.ok());
+	CHECK(off.changed);
+	CHECK(off.text.contains(u"enabled   =    false   # this comment matters"_q));
+	CHECK(off.text.contains(u"# keep the ads away"_q));
+	CHECK(off.text.contains(u"# my settings"_q));
+	CHECK(off.text.contains(u"untouched = 1"_q));
+	CHECK_EQ(off.text.count('\n'), text.count('\n'));
+
+	// Setting what is already set writes nothing at all.
+	const auto same = Purple::SetTableBool(
+		text,
+		Path(),
+		u"premium"_q,
+		u"enabled"_q,
+		true);
+	CHECK(same.ok());
+	CHECK(!same.changed);
+	CHECK_EQ(same.text, text);
+
+	// A missing key joins the existing table rather than starting a new one.
+	const auto added = Purple::SetTableBool(
+		u"[premium]\n# a note\n\n[other]\nx = 1\n"_q,
+		Path(),
+		u"premium"_q,
+		u"enabled"_q,
+		true);
+	CHECK(added.ok());
+	CHECK(added.text.contains(u"enabled = true"_q));
+	CHECK(added.text.contains(u"# a note"_q));
+	CHECK_EQ(Parse(added.text).settings.premium.enabled, true);
+	CHECK(Parse(added.text).ok());
+
+	// A missing table is appended, and an empty file gains no leading blank.
+	const auto fresh = Purple::SetTableBool(
+		QString(),
+		Path(),
+		u"premium"_q,
+		u"enabled"_q,
+		false);
+	CHECK(fresh.ok());
+	CHECK_EQ(fresh.text, u"[premium]\nenabled = false\n"_q);
+
+	const auto appended = Purple::SetTableBool(
+		u"[other]\nx = 1\n"_q,
+		Path(),
+		u"premium"_q,
+		u"enabled"_q,
+		false);
+	CHECK(appended.ok());
+	CHECK(appended.text.startsWith(u"[other]\nx = 1\n"_q));
+	CHECK(appended.text.contains(u"[premium]\nenabled = false"_q));
+	CHECK(Parse(appended.text).ok());
+
+	// A file mid-edit is left exactly as it is.
+	const auto broken = Purple::SetTableBool(
+		u"[premium\nenabled = true"_q,
+		Path(),
+		u"premium"_q,
+		u"enabled"_q,
+		false);
+	CHECK(!broken.ok());
+	CHECK(!broken.changed);
+	CHECK_EQ(broken.text, u"[premium\nenabled = true"_q);
+}
+
 void TestStateRoundTrip() {
 	Begin("state round trip");
 
@@ -883,6 +974,7 @@ int main() {
 	TestSpliceOddFormatting();
 	TestSpliceCrlf();
 	TestNameSanitising();
+	TestSetTableBool();
 	TestStateRoundTrip();
 	TestStateDefaults();
 	TestStateQuoting();

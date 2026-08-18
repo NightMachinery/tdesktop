@@ -47,6 +47,17 @@ struct SpliceResult {
 	PeerIdValue id,
 	const MemberTitle &title);
 
+// Sets one boolean under one table, keeping the key, the spacing and any
+// trailing comment exactly as the user wrote them. Adds the key, and the table,
+// if either is missing. Used for the Premium toggle in Settings, which is the
+// only scalar the app owns in an otherwise hand-written file.
+[[nodiscard]] SpliceResult SetTableBool(
+	const QString &text,
+	const QString &path,
+	const QString &table,
+	const QString &key,
+	bool value);
+
 // Exposed for the tests: the ids a list holds, in file order.
 [[nodiscard]] std::vector<PeerIdValue> ListMembers(
 	const QString &text,

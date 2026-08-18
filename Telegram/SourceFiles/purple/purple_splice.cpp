@@ -375,6 +375,108 @@ SpliceResult RemoveListMember(
 	return Splice(text, path, list, id, title, false);
 }
 
+SpliceResult SetTableBool(
+		const QString &text,
+		const QString &path,
+		const QString &table,
+		const QString &key,
+		bool value) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		// Never write to a file that does not parse: the user may be halfway
+		// through an edit, and a blind append would leave them a duplicate
+		// table to untangle on top of whatever they were already fixing.
+		const auto &error = parsed.error();
+		return Refuse(text, u"%1:%2: %3"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description())));
+	}
+	const auto tableUtf8 = table.toUtf8();
+	const auto keyUtf8 = key.toUtf8();
+	const auto tableView = std::string_view(
+		tableUtf8.constData(),
+		tableUtf8.size());
+	const auto keyView = std::string_view(keyUtf8.constData(), keyUtf8.size());
+	const auto tableNode = parsed.table().get(tableView);
+	const auto existing = tableNode ? tableNode->as_table() : nullptr;
+	const auto node = existing ? existing->get(keyView) : nullptr;
+	if (node && node->value<bool>() == value) {
+		return Unchanged(text);
+	}
+
+	auto lines = text.split('\n');
+	const auto line = node ? int(node->source().begin.line) : 0;
+	auto done = false;
+	if (line >= 1 && line <= lines.size()) {
+		// Replace just the value token, so "enabled   =   true   # keep ads
+		// away" keeps its spacing and its comment.
+		auto &target = lines[line - 1];
+		const auto assign = target.indexOf('=');
+		if (assign >= 0) {
+			auto from = assign + 1;
+			while (from < target.size() && target[from].isSpace()) {
+				++from;
+			}
+			auto till = from;
+			while (till < target.size()
+				&& !target[till].isSpace()
+				&& target[till] != '#') {
+				++till;
+			}
+			if (till > from) {
+				target.replace(
+					from,
+					till - from,
+					value ? u"true"_q : u"false"_q);
+				done = true;
+			}
+		}
+	}
+	auto result = QString();
+	if (done) {
+		result = lines.join('\n');
+	} else {
+		const auto assignment = u"%1 = %2"_q
+			.arg(key, value ? u"true"_q : u"false"_q);
+		const auto header = (existing && !existing->is_inline())
+			? int(existing->source().begin.line)
+			: 0;
+		if (header >= 1 && header <= lines.size()) {
+			lines.insert(header, assignment);
+			result = lines.join('\n');
+		} else {
+			result = text;
+			if (!result.isEmpty()) {
+				if (!result.endsWith('\n')) {
+					result += '\n';
+				}
+				result += '\n';
+			}
+			result += u"[%1]\n%2\n"_q.arg(table, assignment);
+		}
+	}
+
+	const auto verifyUtf8 = result.toUtf8();
+	auto verify = toml::parse(
+		std::string_view(verifyUtf8.constData(), verifyUtf8.size()),
+		path.toStdString());
+	if (!verify) {
+		return Refuse(text, u"the edit would not parse back"_q);
+	}
+	const auto written = verify.table()[tableView][keyView].value<bool>();
+	if (written != value) {
+		return Refuse(text, u"the edit did not set %1.%2"_q.arg(table, key));
+	}
+	auto splice = SpliceResult();
+	splice.text = result;
+	splice.changed = true;
+	return splice;
+}
+
 std::vector<PeerIdValue> ListMembers(
 		const QString &text,
 		const QString &path,
