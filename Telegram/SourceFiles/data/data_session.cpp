@@ -1844,20 +1844,40 @@ void Session::refreshPurpleWorkMode() {
 	for (const auto &[peerId, peer] : _peers) {
 		peers.push_back(peer.get());
 	}
+	auto chats = 0;
+	auto hidden = 0;
+	auto silenced = 0;
 	for (const auto peer : peers) {
 		// Mute first: hiding the chat takes its unread out of every running
 		// total, and it has to already be counted as muted or not when it
 		// goes, or the totals drift by whatever that chat was carrying.
 		_notifySettings->purpleRefreshMute(peer);
-		if (const auto history = historyLoaded(peer->id)) {
-			// Both, in this order. The first drops a chat that is now hidden;
-			// the second is what brings one back, because leaving the chat
-			// list zeroes the sort key and setChatListExistence(true) refuses
-			// to add an entry that has none.
-			history->updateChatListExistence();
-			history->updateChatListSortPosition();
+		const auto history = historyLoaded(peer->id);
+		if (!history) {
+			continue;
 		}
+		++chats;
+		const auto visible = Purple::VisibleFor(peer);
+		if (!visible.show) {
+			++hidden;
+		}
+		if (!visible.notify) {
+			++silenced;
+		}
+
+		// Both, in this order. The first drops a chat that is now hidden; the
+		// second is what brings one back, because leaving the chat list zeroes
+		// the sort key and setChatListExistence(true) refuses to add an entry
+		// that has none.
+		history->updateChatListExistence();
+		history->updateChatListSortPosition();
 	}
+
+	// A preset that hides nothing looks exactly like a preset that is working,
+	// and the usual cause is a list named slightly wrong. Say what it did once
+	// per change rather than leaving it to be guessed at from the chat list.
+	LOG(("Purple: %1 of %2 loaded chats hidden, %3 silenced."
+		).arg(hidden).arg(chats).arg(silenced));
 }
 
 Session::~Session() = default;

@@ -81,6 +81,22 @@ The walk is triggered by `Purple::ActiveChanges()`, which fires only when the
 resolution actually differs. A state write that merely moved a peek deadline
 compares equal and rebuilds nothing.
 
+It logs what it did:
+
+    Purple: preset 'test', 6 lists.
+    Purple: 100 of 2725 loaded chats hidden, 318 silenced.
+
+That line exists because a preset that hides nothing looks exactly like a preset
+that is working, and the usual cause is a list named slightly wrong. It is also
+the only practical way to check the feature: an occluded macOS window is not
+repainted, so screenshotting the chat list to see what changed returns the frame
+from before the change.
+
+The very first resolution, computed while `Data::Session` is still constructing,
+fires before that session has finished subscribing, so nobody walks the peers
+for it. That costs nothing: no peers exist yet at that point, and every chat is
+filtered as it loads, through `shouldBeInChatList()`.
+
 ## When the active preset stops resolving
 
 A preset can be deleted or renamed while it is active, or have its inheritance
