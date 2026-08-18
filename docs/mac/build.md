@@ -295,9 +295,38 @@ As with Qt, none of this applies on a machine without the full formula.
 purple/install.sh
 ```
 
-This runs `macdeployqt` to copy the Qt frameworks into the bundle, re-signs it
-ad-hoc, and replaces `/Applications/Purple Telegram.app`. Ad-hoc signing is
-enough for a locally built app; it is not enough to distribute one.
+This copies the Qt frameworks into the bundle, re-signs it ad-hoc, and replaces
+`/Applications/Purple Telegram.app`. Ad-hoc signing is enough for a locally
+built app; it is not enough to distribute one.
+
+The first install runs `macdeployqt`. Later ones do not, because they do not
+need to: the frameworks and plugins in the bundle are already there and already
+relinked, and the only thing a rebuild changes is the main binary. All
+`macdeployqt` still has to do is repoint that binary's 121 non-system load
+commands from Homebrew and the Qt prefix into the bundle — and it does that with
+one `install_name_tool` run per dependency, each rewriting the whole binary.
+
+`purple/relink_bundle.py` does the same 121 changes in a single pass. It was
+written by diffing the load commands of the pre-deploy binary against
+`macdeployqt`'s output and deriving the rule, then checking that the rule
+reproduces all 121 rewrites and both `LC_RPATH` edits byte for byte. The
+`@executable_path/../Frameworks` rpath is part of that: the bundled Qt
+frameworks resolve some of their own dependencies through `@rpath`, so without
+it they would load from the build prefix instead of the bundle.
+
+It refuses the fast path and hands back to `macdeployqt` whenever the bundle is
+not something it can finish — never deployed, missing plugins or `qt.conf`, or
+linking a library the bundle does not carry, which is what a newly added
+dependency looks like. `ForceDeploy=1 purple/install.sh` skips it entirely.
+
+The three measurements, same machine, same bundle:
+
+    625s   unstripped binary, macdeployqt
+    427s   stripped binary, macdeployqt
+      4s   stripped binary, single-pass relink
+
+Verify a fast-path install with `vmmap` on the running app: `QtCore` must
+resolve inside `Contents/Frameworks`, not in the Qt prefix.
 
 ### Symbolicating a crash
 

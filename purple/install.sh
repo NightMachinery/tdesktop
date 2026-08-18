@@ -46,8 +46,31 @@ echo "=== keeping symbols in $Unstripped ==="
 cp "$Binary" "$Unstripped"
 strip -S -x "$Binary"
 
-echo "=== macdeployqt ==="
-"$MacDeployQt" "$Source"
+# macdeployqt only needs to do its real work once. After the first deploy the
+# frameworks and plugins in the bundle are already there and already relinked,
+# and the only thing that changed is the main binary. Fixing that up takes one
+# install_name_tool pass; macdeployqt takes one per dependency, and there are
+# 121 of them, each rewriting the whole binary.
+#
+# relink_bundle.py hands back to macdeployqt whenever the bundle is not in a
+# state it can finish - never deployed, missing plugins or qt.conf, or linking
+# something the bundle does not carry. Set ForceDeploy=1 to skip it entirely.
+if [ -n "$ForceDeploy" ]; then
+    RelinkStatus=2
+else
+    set +e
+    python3 "$RepoPath/purple/relink_bundle.py" "$Source"
+    RelinkStatus=$?
+    set -e
+fi
+
+if [ "$RelinkStatus" -eq 2 ]; then
+    echo "=== macdeployqt ==="
+    "$MacDeployQt" "$Source"
+elif [ "$RelinkStatus" -ne 0 ]; then
+    echo "Relinking failed." >&2
+    exit "$RelinkStatus"
+fi
 
 echo "=== signing ad-hoc ==="
 codesign --force --deep --sign - "$Source"
