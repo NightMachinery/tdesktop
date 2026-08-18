@@ -1030,6 +1030,12 @@ private:
 	void setupPeerNameViewer();
 	void setupUserIsContactViewer();
 
+	// Purple: a work preset moves whole lists of chats in and out of view at
+	// once. Nothing about any individual peer changed, so no upstream signal
+	// fires and we re-evaluate them ourselves. See docs/purple/work_mode.md.
+	void setupPurpleWorkMode();
+	void refreshPurpleWorkMode();
+
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
 

@@ -61,6 +61,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
+#include "purple/purple_gate.h"
 #include "window/notifications_manager.h"
 #include "window/window_session_controller.h"
 #include "calls/calls_instance.h"
@@ -3371,6 +3372,14 @@ bool History::trackUnreadMessages() const {
 }
 
 bool History::shouldBeInChatList() const {
+	// Purple: a work preset hides whole lists of chats. This has to come before
+	// the pinned shortcut below, or pinning a chat would exempt it from every
+	// preset. Dropping the entry here is also what keeps the unread badges
+	// honest for free: MainList accumulates its counters as entries come and
+	// go, so a chat that is in no list is in no total either.
+	if (Purple::Filtering() && !Purple::VisibleFor(peer).show) {
+		return false;
+	}
 	if (peer->migrateTo() || !folderKnown()) {
 		return false;
 	} else if (const auto community = peer->asChannel()

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "history/history.h"
 #include "main/main_session.h"
+#include "purple/purple_gate.h"
 #include "window/notifications_manager.h"
 
 namespace Data {
@@ -366,6 +367,10 @@ void NotifySettings::updateLocal(not_null<Thread*> thread) {
 	cacheSound(topic->notify().sound());
 }
 
+void NotifySettings::purpleRefreshMute(not_null<PeerData*> peer) {
+	updateLocal(peer);
+}
+
 void NotifySettings::updateLocal(not_null<PeerData*> peer) {
 	const auto history = _owner->historyLoaded(peer->id);
 	auto changesIn = crl::time(0);
@@ -547,6 +552,20 @@ bool NotifySettings::soundUnknown(not_null<const Thread*> thread) const {
 bool NotifySettings::isMuted(
 		not_null<const PeerData*> peer,
 		crl::time *changesIn) const {
+	// Purple: a work preset can silence a list, never unsilence one - a chat
+	// the user muted stays muted whichever list it falls into - so this is
+	// only ever an extra mute, and belongs first. Going through the same
+	// accessor the rest of the app uses is deliberate: History::muted() is
+	// cached from here, and the unread badges split muted from unmuted by that
+	// flag, so the badges follow without a second gate anywhere.
+	if (Purple::Filtering() && !Purple::VisibleFor(peer).notify) {
+		if (changesIn) {
+			// Nothing here expires on a clock. The preset changing is what
+			// lifts it, and that path re-evaluates every peer explicitly.
+			*changesIn = kMaxNotifyCheckDelay;
+		}
+		return true;
+	}
 	if (const auto until = peer->notify().muteUntil()) {
 		return MutedFromUntil(*until, changesIn);
 	} else if (const auto community = CommunityFallback(peer)) {

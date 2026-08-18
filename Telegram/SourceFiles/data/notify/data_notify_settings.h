@@ -104,6 +104,11 @@ public:
 		not_null<const PeerData*> peer) const;
 	[[nodiscard]] bool soundUnknown(not_null<const PeerData*> peer) const;
 
+	// Purple: re-evaluates the cached mute after a work preset moved this chat
+	// between lists. Nothing about the peer itself changed, so none of the
+	// upstream update paths reach it. See docs/purple/work_mode.md.
+	void purpleRefreshMute(not_null<PeerData*> peer);
+
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;
 	[[nodiscard]] auto exceptionsUpdatesRealtime() const

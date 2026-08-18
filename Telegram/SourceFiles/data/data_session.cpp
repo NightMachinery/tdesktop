@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/export_manager.h"
 #include "export/view/export_view_panel_controller.h"
 #include "mtproto/mtproto_config.h"
+#include "purple/purple_gate.h"
 #include "window/notifications_manager.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -282,6 +283,7 @@ Session::Session(not_null<Main::Session*> session)
 	setupChannelLeavingViewer();
 	setupPeerNameViewer();
 	setupUserIsContactViewer();
+	setupPurpleWorkMode();
 
 	_chatsList.unreadStateChanges(
 	) | rpl::on_next([=] {
@@ -1825,6 +1827,37 @@ void Session::setupUserIsContactViewer() {
 			_contactsList.remove(history);
 		}
 	}, _lifetime);
+}
+
+void Session::setupPurpleWorkMode() {
+	Purple::ActiveChanges(
+	) | rpl::on_next([=] {
+		refreshPurpleWorkMode();
+	}, _lifetime);
+}
+
+void Session::refreshPurpleWorkMode() {
+	// Snapshot first: re-evaluating a mute notifies, and a handler that reacts
+	// by resolving a peer would insert into _peers while we walked it.
+	auto peers = std::vector<not_null<PeerData*>>();
+	peers.reserve(_peers.size());
+	for (const auto &[peerId, peer] : _peers) {
+		peers.push_back(peer.get());
+	}
+	for (const auto peer : peers) {
+		// Mute first: hiding the chat takes its unread out of every running
+		// total, and it has to already be counted as muted or not when it
+		// goes, or the totals drift by whatever that chat was carrying.
+		_notifySettings->purpleRefreshMute(peer);
+		if (const auto history = historyLoaded(peer->id)) {
+			// Both, in this order. The first drops a chat that is now hidden;
+			// the second is what brings one back, because leaving the chat
+			// list zeroes the sort key and setChatListExistence(true) refuses
+			// to add an entry that has none.
+			history->updateChatListExistence();
+			history->updateChatListSortPosition();
+		}
+	}
 }
 
 Session::~Session() = default;
