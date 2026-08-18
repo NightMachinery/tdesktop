@@ -86,6 +86,21 @@ cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 - **`Telegram/build/version`** - Version information
 - **`out/`** - Build output directory
 
+## The Purple fork
+
+Everything this fork adds beyond upstream lives under `Purple::` and is findable
+with `git grep Purple::`. Read the docs before changing any of it:
+
+- **`docs/mac/build.md`** - the packaged macOS build, install and symbolication
+- **`docs/purple/premium.md`** - the client-side-only Premium unlocks
+- **`docs/purple/config.md`** - `settings.toml`, `state.toml`, live reload
+- **`docs/purple/work_mode.md`** - presets, lists, visibility and notify gating
+
+`purple/test_config.sh` compiles the parser, the splice engine and the
+resolution engine into a standalone harness and runs it in about a second. Run
+it after touching anything in `Telegram/SourceFiles/purple/`; a full app build
+to test a config change is never necessary.
+
 ## Troubleshooting
 
 ### "Libraries not found"

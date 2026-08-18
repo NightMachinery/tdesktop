@@ -76,8 +76,10 @@ Version **1.8.15** was the last that supports older systems
 This checkout also carries a local macOS fork build, "Purple Telegram", which
 installs alongside the official app for development: [docs/mac/build.md][purple_mac].
 It unlocks the Premium features that are gated on the client alone
-([docs/purple/premium.md][purple_premium]) and keeps its own settings in TOML
-([docs/purple/config.md][purple_config]).
+([docs/purple/premium.md][purple_premium]), adds Work Mode - named presets that
+decide which chats you can see and which may interrupt you
+([docs/purple/work_mode.md][purple_work_mode]) - and keeps its own settings in
+TOML ([docs/purple/config.md][purple_config]).
 
 [//]: # (LINKS)
 [telegram]: https://telegram.org
@@ -91,6 +93,7 @@ It unlocks the Premium features that are gated on the client alone
 [purple_mac]: docs/mac/build.md
 [purple_premium]: docs/purple/premium.md
 [purple_config]: docs/purple/config.md
+[purple_work_mode]: docs/purple/work_mode.md
 [preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
 [preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png
 

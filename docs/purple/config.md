@@ -44,6 +44,11 @@ whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
 never touch the mtime of the file you are editing by hand.
 
+It is reloaded live too, which is not what a machine-owned file needs but is how
+you pick a preset until the Work Mode UI exists - see
+[work_mode.md](work_mode.md). The app's own writes come back through the same
+watch, compare equal to what it just wrote, and do nothing.
+
 Both are written through `QSaveFile`, which writes a temporary alongside the
 target and renames over it, so a crash mid-write cannot leave a truncated config.
 
