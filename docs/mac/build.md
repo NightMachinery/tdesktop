@@ -317,12 +317,16 @@ after**, or run `dsymutil` once to freeze the line info into a `.dSYM`.
 
 Do not be tempted to pass `-no-strip` to keep symbols in the bundle instead.
 `macdeployqt` runs `install_name_tool` once per Qt framework reference and each
-run rewrites the entire binary, so deploying the 788MB unstripped binary means
-rewriting it eight times: over nine minutes, measured, against seconds for the
-stripped 180MB one. `sample` on a stalled install shows exactly this:
+run rewrites the entire binary. `sample` on a slow install shows exactly that:
 
     deployQtFrameworks -> changeInstallName -> runInstallNameTool
         -> QProcess::waitForFinished    (child: install_name_tool)
+
+`macdeployqt` does strip, but only after that loop finishes, so leaving the
+binary unstripped for it costs the whole difference: 625 seconds measured, for a
+914MB bundle. `install.sh` therefore strips before calling it — two seconds,
+788MB down to 232MB, `LC_UUID` unchanged — which leaves the relink loop a third
+of the work and the installed bundle at 384MB.
 
 ### What makes it "Purple Telegram"
 

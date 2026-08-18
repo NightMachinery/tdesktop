@@ -29,21 +29,22 @@ if [ -d "$Target" ]; then
     fi
 fi
 
-# macdeployqt strips the binary in place, which takes the symbols out of out/ as
-# well as out of the bundle and leaves every crash report as bare hex offsets.
-# So keep a copy first. It has the same LC_UUID as the shipped binary, so reports
-# symbolicate against it, and it still carries the debug map pointing at out/'s
-# object files:
+# macdeployqt strips the binary, but only at the very end - after it has run
+# install_name_tool once per Qt framework reference, each of which rewrites the
+# whole binary. On the 788MB unstripped binary that measured at 625 seconds.
+# Stripping it ourselves first leaves 232MB for that loop to chew through, and
+# the strip itself takes two seconds.
+#
+# Keep the symbols before we do. This copy has the same LC_UUID as the shipped
+# binary, so crash reports symbolicate against it, and it still carries the
+# debug map pointing at out/'s object files:
 #     atos -o "out/Purple Telegram.unstripped" -l <load address> <address>
 #     dsymutil "out/Purple Telegram.unstripped"     # for a standalone .dSYM
-#
-# Letting it strip matters for far more than bundle size. macdeployqt runs
-# install_name_tool once per Qt framework reference, and each run rewrites the
-# whole binary - so deploying unstripped means rewriting 788MB eight times, which
-# measured at over nine minutes against seconds for the stripped 180MB one.
+Binary="$Source/Contents/MacOS/$AppName"
 Unstripped="$BuildPath/$AppName.unstripped"
 echo "=== keeping symbols in $Unstripped ==="
-cp "$Source/Contents/MacOS/$AppName" "$Unstripped"
+cp "$Binary" "$Unstripped"
+strip -S -x "$Binary"
 
 echo "=== macdeployqt ==="
 "$MacDeployQt" "$Source"
