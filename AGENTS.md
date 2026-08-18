@@ -156,6 +156,43 @@ because the user is testing it. Do not terminate it or delete locked build
 outputs without explicit permission. Report the exact locked path and ask the
 user to close that checkout's Telegram/debugger before rebuilding.
 
+### Quitting the fork on macOS: never by name
+
+Several Telegram clients are usually installed side by side, and their names
+collide:
+
+    /Applications/Purple Telegram.app   com.tdesktop.PurpleTelegram
+    /Applications/Telegram.app          com.tdesktop.Telegram
+    /Applications/Telegram_macOS.app    ru.keepcoder.Telegram
+
+`osascript -e 'quit app "Purple Telegram"'` resolves the name through
+LaunchServices rather than targeting one bundle, and has quit the user's real
+Telegram instead of the fork. Losing someone's messaging client mid-conversation
+to a build step is not an acceptable side effect of installing.
+
+Target the bundle identifier, which is unambiguous:
+
+```bash
+osascript -e 'tell application id "com.tdesktop.PurpleTelegram" to quit'
+```
+
+Or signal explicit pids, matched against the full executable path rather than a
+process name:
+
+```bash
+Binary="/Applications/Purple Telegram.app/Contents/MacOS/Purple Telegram"
+ps -Ao pid=,comm= | awk -v b="$Binary" '$0 ~ b { print $1 }'
+```
+
+Do not use `killall Telegram`, `pkill Telegram`, or any `-f` pattern containing
+"Telegram": the first two match by short name across every client, and `-f`
+additionally matches the shell running the command itself.
+
+Only quit what the current task started. `install.sh` replaces the bundle at
+`/Applications`, so it does need the fork closed - ask the user to quit it, or
+quit it by bundle id if they have said you may. Never quit a client you did not
+launch on the assumption that it is "probably the fork".
+
 ## Best Practices
 
 1. **Always use Debug builds** - Release builds are extremely heavy
