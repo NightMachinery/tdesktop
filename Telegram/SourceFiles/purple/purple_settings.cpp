@@ -337,6 +337,18 @@ void ReadMembers(
 		}
 		folder.name = *name;
 		folder.notify = ReadBool(*table, "notify", context, warnings);
+		if (folder.notify.has_value()) {
+			// Silencing a whole folder is not implemented, and the reason is
+			// not effort: a folder carrying Telegram's "Exclude muted" flag
+			// stops containing a chat the moment we silence it, which
+			// un-silences it, which puts it back. That needs a rule, and
+			// guessing one would be worse than saying so. Per-chat lists
+			// already cover the same ground.
+			warnings.push_back(
+				u"%1: folder '%2' asks for 'notify', which is not implemented "
+				"yet; use a list to silence those chats instead."_q
+					.arg(context, folder.name));
+		}
 		if (ReadBool(*table, "filtered", context, warnings).value_or(false)) {
 			warnings.push_back(
 				u"%1: folder '%2' asks for 'filtered', which is not "
