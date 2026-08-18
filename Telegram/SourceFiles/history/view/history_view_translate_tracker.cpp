@@ -76,6 +76,21 @@ void TranslateTracker::setup() {
 		_1 && (_2 || _3 || _4));
 	_trackingLanguage.value() | rpl::on_next([=](bool tracking) {
 		_trackingLifetime.destroy();
+
+		// Purple: once per run, so "the toggle is on but nothing happens" can
+		// be told apart from "the feature never switched on" without a build.
+		static auto reported = false;
+		if (!reported) {
+			reported = true;
+			LOG(("Purple: language tracking %1 - translate chats %2, premium "
+				"%3, local premium %4."
+				).arg(tracking ? u"ON"_q : u"OFF"_q
+				).arg(Core::App().settings().translateChatEnabled()
+					? u"on"_q
+					: u"off"_q
+				).arg(_history->session().premium() ? u"yes"_q : u"no"_q
+				).arg(Purple::LocalPremium() ? u"yes"_q : u"no"_q));
+		}
 		if (tracking) {
 			recognizeCollected();
 			trackSkipLanguages();
@@ -524,6 +539,7 @@ void TranslateTracker::checkRecognized(const std::vector<LanguageId> &skip) {
 		0,
 		ranges::plus(),
 		p);
+	const auto was = _history->translateOfferedFrom();
 	if (count < kEnoughForTranslation) {
 		// Don't change offer by small amount of messages.
 	} else if (translatable >= threshold) {
@@ -531,6 +547,29 @@ void TranslateTracker::checkRecognized(const std::vector<LanguageId> &skip) {
 			ranges::max_element(languages, ranges::less(), p)->first);
 	} else {
 		_history->translateOfferFrom({});
+	}
+
+	// Purple: the translate bar only appears once a chat has enough messages
+	// in a language that is not on the "do not translate" list, so "nothing
+	// happened" has several innocent explanations. Log the decision - it
+	// changes rarely, so this is one line per chat that starts or stops
+	// offering, not per scroll.
+	const auto now = _history->translateOfferedFrom();
+	if (now != was) {
+		LOG(("Purple: %1 translation of %2 - %3 of %4 messages recognised, "
+			"threshold %5."
+			).arg(now ? u"offering"_q : u"withdrawing"_q
+			).arg(_history->peer->name()
+			).arg(translatable
+			).arg(count
+			).arg(threshold));
+	} else if (!now && count >= kEnoughForTranslation && !languages.empty()) {
+		LOG(("Purple: not offering translation of %1 - %2 of %3 messages "
+			"recognised, need %4."
+			).arg(_history->peer->name()
+			).arg(translatable
+			).arg(count
+			).arg(threshold));
 	}
 }
 
