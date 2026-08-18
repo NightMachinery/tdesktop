@@ -64,6 +64,10 @@ struct ListOverride {
 struct PresetFolder {
 	QString name;
 	std::optional<bool> notify;
+
+	friend bool operator==(
+		const PresetFolder &,
+		const PresetFolder &) = default;
 };
 
 struct Preset {

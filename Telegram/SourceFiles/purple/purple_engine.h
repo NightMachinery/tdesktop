@@ -37,6 +37,10 @@ struct EffectiveList {
 	// Only meaningful for lists that can hold groups; resolved per list so a
 	// preset can exempt one list from the mention gate without exempting all.
 	bool groupsRequireMention = true;
+
+	friend bool operator==(
+		const EffectiveList &,
+		const EffectiveList &) = default;
 };
 
 struct Resolved {
@@ -52,6 +56,10 @@ struct Resolved {
 	bool groupsRequireMention = true;
 
 	[[nodiscard]] const EffectiveList *list(const QString &name) const;
+
+	// Used to decide whether a reload actually changed anything, so a state
+	// write that only moved a peek deadline does not rebuild every chat list.
+	friend bool operator==(const Resolved &, const Resolved &) = default;
 };
 
 // Nothing if the preset does not exist or its inheritance chain is broken. The

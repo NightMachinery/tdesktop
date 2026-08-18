@@ -1724,6 +1724,10 @@ PRIVATE
     profile/profile_cover_drop_area.h
     purple/purple_config.cpp
     purple/purple_config.h
+    purple/purple_engine.cpp
+    purple/purple_engine.h
+    purple/purple_gate.cpp
+    purple/purple_gate.h
     purple/purple_settings.cpp
     purple/purple_settings.h
     purple/purple_splice.cpp
