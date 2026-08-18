@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/scroll_area.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
+#include "purple/purple_gate.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "styles/style_dialogs.h" // dialogsSearchTabs
@@ -67,7 +68,7 @@ void ShowMenu(
 
 	auto id = FilterId(0);
 	{
-		const auto &list = session->data().chatsFilters().list();
+		const auto &list = session->data().chatsFilters().purpleShownList();
 		if (index < 0 || index >= list.size()) {
 			return;
 		}
@@ -142,7 +143,7 @@ void ShowFiltersListMenu(
 		not_null<State*> state,
 		int active,
 		Fn<void(int)> changeActive) {
-	const auto &list = session->data().chatsFilters().list();
+	const auto &list = session->data().chatsFilters().purpleShownList();
 
 	state->menu = base::make_unique_q<Ui::PopupMenu>(
 		parent,
@@ -233,7 +234,7 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 	const auto state = wrap->lifetime().make_state<State>();
 	const auto reassignUnreadValue = [=] {
 		state->reorderLifetime.destroy();
-		const auto &list = session->data().chatsFilters().list();
+		const auto &list = session->data().chatsFilters().purpleShownList();
 		auto includeMuted = Data::IncludeMutedCounterFoldersValue();
 		for (auto i = 0; i < list.size(); i++) {
 			rpl::combine(
@@ -260,6 +261,16 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 				int oldPosition,
 				int newPosition) {
 			if (newPosition == oldPosition) {
+				return;
+			}
+
+			// Purple: the positions are indices into the strip, which a work
+			// preset may have reduced to a subset. Reordering the real list by
+			// them would move the wrong folders, and saving the result would
+			// drop the hidden ones from the account. ChatFilters::saveOrder
+			// refuses either way; stopping here also avoids the local
+			// moveAllToFront() below.
+			if (Purple::FoldersRestricted()) {
 				return;
 			}
 
@@ -314,7 +325,7 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 						: slider->width();
 					if (x >= left && x < right) {
 						const auto &list
-							= session->data().chatsFilters().list();
+							= session->data().chatsFilters().purpleShownList();
 						return (i < list.size())
 							? list[i].id()
 							: FilterId();
@@ -324,7 +335,7 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 			},
 			[=] { return state->lastFilterId.value_or(FilterId()); },
 			[=](FilterId id) {
-				const auto &list = session->data().chatsFilters().list();
+				const auto &list = session->data().chatsFilters().purpleShownList();
 				for (auto i = 0; i < list.size(); i++) {
 					if (list[i].id() == id) {
 						slider->selectSection(i);
@@ -372,13 +383,13 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 	};
 
 	const auto filterByIndex = [=](int index) -> const Data::ChatFilter& {
-		const auto &list = session->data().chatsFilters().list();
+		const auto &list = session->data().chatsFilters().purpleShownList();
 		Assert(index >= 0 && index < list.size());
 		return list[index];
 	};
 
 	const auto rebuild = [=] {
-		const auto &list = session->data().chatsFilters().list();
+		const auto &list = session->data().chatsFilters().purpleShownList();
 		if ((list.size() <= 1 && !slider->width()) || state->ignoreRefresh) {
 			return;
 		}
@@ -467,7 +478,7 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 		if (trackActiveFilterAndUnreadAndReorder) {
 			controller->activeChatsFilter(
 			) | rpl::on_next([=](FilterId id) {
-				const auto &list = session->data().chatsFilters().list();
+				const auto &list = session->data().chatsFilters().purpleShownList();
 				for (auto i = 0; i < list.size(); ++i) {
 					if (list[i].id() == id) {
 						slider->setActiveSection(i);
@@ -526,7 +537,7 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 		if (!id || !state->lastFilterId || (id != state->lastFilterId)) {
 			return;
 		}
-		for (const auto &filter : session->data().chatsFilters().list()) {
+		for (const auto &filter : session->data().chatsFilters().purpleShownList()) {
 			if (filter.id() == id) {
 				applyFilter(filter);
 				return;

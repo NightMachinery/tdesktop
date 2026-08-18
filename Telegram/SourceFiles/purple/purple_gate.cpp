@@ -167,6 +167,15 @@ Visibility VisibleFor(not_null<const PeerData*> peer) {
 		KindOf(peer));
 }
 
+const std::optional<std::vector<PresetFolder>> &ShownFolders() {
+	return Instance().resolved().folders;
+}
+
+bool FoldersRestricted() {
+	const auto &resolved = Instance().resolved();
+	return !resolved.normal && resolved.folders.has_value();
+}
+
 const EffectiveList *ListFor(not_null<const PeerData*> peer) {
 	if (peer->isSelf()) {
 		return nullptr;

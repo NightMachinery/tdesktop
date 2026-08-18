@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/more_chats_bar.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
+#include "purple/purple_gate.h"
 #include "apiwrap.h"
 
 namespace Data {
@@ -392,6 +393,64 @@ ChatFilters::ChatFilters(not_null<Session*> owner)
 , _moreChatsTimer([=] { checkLoadMoreChatsLists(); }) {
 	_list.emplace_back();
 	crl::on_main(&owner->session(), [=] { load(); });
+
+	// Purple: the shown view depends on both halves - which folders exist and
+	// which the preset names - so it is rebuilt when either moves. This runs
+	// before Session's own peer walk, because ChatFilters is constructed in
+	// Session's member list and therefore subscribes first.
+	rpl::merge(
+		changed(),
+		Purple::ActiveChanges()
+	) | rpl::on_next([=] {
+		purpleRefreshShown();
+	}, _purpleLifetime);
+}
+
+void ChatFilters::purpleRefreshShown() {
+	const auto &shown = Purple::ShownFolders();
+	if (!Purple::FoldersRestricted()) {
+		_purpleShown.clear();
+		return;
+	}
+	auto result = std::vector<ChatFilter>();
+
+	// The id-0 entry is "All chats", and it is never dropped: it is the only
+	// view that shows a chat belonging to no folder, and the preset has
+	// already decided what that view contains. Left on its own it takes
+	// has() below the threshold and the folder UI disappears by itself, which
+	// is exactly what "folders = []" is asking for.
+	const auto all = ranges::find(_list, FilterId(), &ChatFilter::id);
+	if (all != end(_list)) {
+		result.push_back(*all);
+	}
+
+	auto missing = QStringList();
+	for (const auto &wanted : *shown) {
+		const auto i = ranges::find_if(_list, [&](const ChatFilter &filter) {
+			return filter.id()
+				&& !filter.title().text.text.compare(
+					wanted.name,
+					Qt::CaseInsensitive);
+		});
+		if (i == end(_list)) {
+			missing.push_back(wanted.name);
+		} else if (!ranges::contains(result, i->id(), &ChatFilter::id)) {
+			result.push_back(*i);
+		}
+	}
+	if (!missing.isEmpty()) {
+		// Same reasoning as the hidden-chat count: a folder name that matches
+		// nothing looks identical to a folder the preset meant to hide.
+		LOG(("Purple: preset names folders that do not exist: %1."
+			).arg(missing.join(u", "_q)));
+	}
+	LOG(("Purple: folder strip showing %1 of %2, including All chats."
+		).arg(result.size()).arg(_list.size()));
+	_purpleShown = std::move(result);
+}
+
+const std::vector<ChatFilter> &ChatFilters::purpleShownList() const {
+	return Purple::FoldersRestricted() ? _purpleShown : _list;
 }
 
 ChatFilters::~ChatFilters() = default;
@@ -869,6 +928,17 @@ const ChatFilter &ChatFilters::applyUpdatedPinned(
 void ChatFilters::saveOrder(
 		const std::vector<FilterId> &order,
 		mtpRequestId after) {
+	// Purple: this replaces the whole server-side order with exactly what it
+	// is handed. While a preset restricts the folder strip the UI only knows
+	// about a subset, so saving would drop every folder the preset is hiding -
+	// from the account, not just from the view. Refuse rather than reorder
+	// blind; this is the one choke point, so a display surface that was missed
+	// still cannot do damage here.
+	if (Purple::FoldersRestricted()) {
+		LOG(("Purple: not saving folder order while a preset restricts "
+			"folders. Switch to the normal preset to reorder them."));
+		return;
+	}
 	if (after) {
 		_saveOrderAfterId = after;
 	}

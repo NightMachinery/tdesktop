@@ -162,6 +162,15 @@ public:
 	void remove(FilterId id);
 	void moveAllToFront();
 	[[nodiscard]] const std::vector<ChatFilter> &list() const;
+
+	// Purple: list() restricted to the folders the active Work Mode preset
+	// shows, in the order it named them. Literally the same object as list()
+	// whenever nothing restricts them, which is always under Normal. Display
+	// surfaces read this; everything that edits or saves reads list(), because
+	// this one is a view and does not describe what the account actually has.
+	// See docs/purple/work_mode.md.
+	[[nodiscard]] const std::vector<ChatFilter> &purpleShownList() const;
+
 	[[nodiscard]] rpl::producer<> changed() const;
 	[[nodiscard]] rpl::producer<FilterId> isChatlistChanged() const;
 	[[nodiscard]] rpl::producer<TagColorChanged> tagColorChanged() const;
@@ -234,9 +243,13 @@ private:
 	void checkLoadMoreChatsLists();
 	void loadMoreChatsList(FilterId id);
 
+	void purpleRefreshShown();
+
 	const not_null<Session*> _owner;
 
 	std::vector<ChatFilter> _list;
+	std::vector<ChatFilter> _purpleShown;
+	rpl::lifetime _purpleLifetime;
 	base::flat_map<FilterId, std::unique_ptr<Dialogs::MainList>> _chatsLists;
 	rpl::event_stream<> _listChanged;
 	rpl::event_stream<FilterId> _isChatlistChanged;
