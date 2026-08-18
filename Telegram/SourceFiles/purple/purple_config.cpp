@@ -236,6 +236,18 @@ void Config::applyText(const QString &text) {
 		return;
 	}
 	_settings = std::move(parsed.settings);
+
+	// One line per load, so "the toggle looks off" can be answered from the log
+	// instead of from a rebuild. The file is hand-edited and lives outside
+	// tdata, so which one we actually read is worth stating too.
+	LOG(("Purple: %1, %2 lists, %3 presets, read from %4."
+		).arg(_settings.premium.enabled
+			? u"local premium ON"_q
+			: u"local premium OFF"_q
+		).arg(_settings.lists.size()
+		).arg(_settings.presets.size()
+		).arg(SettingsFilePath()));
+
 	_localPremium = _settings.premium.enabled;
 	_changes.fire({});
 }
