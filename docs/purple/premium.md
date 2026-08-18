@@ -50,9 +50,23 @@ in `apiwrap.cpp` walks every loaded user and rounds a real `online_till` down to
 "recently", "within week" or "within month". The precise value is already in the
 client, so the unlock is simply not discarding it.
 
-Note that this is not retroactive. Values already coarsened stay coarse until
-those users are reloaded; the `contacts.GetStatuses` request that immediately
-follows refreshes contacts, and the rest re-resolve as they load.
+Two things follow from *how* it is hidden, and both have caught me out:
+
+**It does nothing unless you have hidden your own last seen.** The whole feature
+is the removal of a reciprocity penalty. With your own setting on "Everybody"
+there is no penalty to remove: people who share theirs already show exact times,
+and people who hide theirs are hidden on the server, where the fork cannot
+reach. If nothing looks different after switching this on, check
+Settings > Privacy > Last Seen & Online first.
+
+**Values coarsened before the switch was on need a refetch.** The precise time is
+overwritten in memory and in local storage, so flipping the switch cannot bring
+it back on its own. Upstream handles this for real Premium in
+`Info::Profile::TopBar::setupShowLastSeen()`, which calls `updateFullForced()`
+when it sees a status hidden by us; that gate reads local premium too, so opening
+someone's profile re-resolves them. The `contacts.GetStatuses` request that
+follows the privacy update refreshes contacts, and the rest re-resolve as they
+load.
 
 ### Real-time chat translation
 

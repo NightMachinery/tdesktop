@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_multi_player.h"
 #include "main/main_session.h"
 #include "menu/menu_mute.h"
+#include "purple/purple_config.h"
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_information.h"
 #include "settings/sections/settings_premium.h"
@@ -3061,7 +3062,11 @@ void TopBar::setupShowLastSeen(
 		return;
 	}
 
-	if (user->session().premium()) {
+	// Reciprocity is applied locally in ApiWrap::updatePrivacyLastSeens(), which
+	// overwrites the exact time it was given. Recovering it takes a refetch -
+	// that is what upstream does for Premium here, and local premium needs the
+	// same, or times coarsened before the switch was flipped stay coarse.
+	if (user->session().premium() || Purple::LocalPremium()) {
 		if (user->lastseen().isHiddenByMe()) {
 			user->updateFullForced();
 		}
@@ -3073,8 +3078,10 @@ void TopBar::setupShowLastSeen(
 		user->session().changes().peerFlagsValue(
 			user,
 			Data::PeerUpdate::Flag::OnlineStatus),
-		Data::AmPremiumValue(&user->session())
-	) | rpl::on_next([=](auto, bool premium) {
+		Data::AmPremiumValue(&user->session()),
+		Purple::LocalPremiumValue()
+	) | rpl::on_next([=](auto, bool amPremium, bool localPremium) {
+		const auto premium = amPremium || localPremium;
 		const auto wasShown = _showLastSeen->toggled();
 		const auto hiddenByMe = user->lastseen().isHiddenByMe();
 		const auto shown = hiddenByMe
