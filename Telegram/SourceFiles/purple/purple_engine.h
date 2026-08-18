@@ -52,7 +52,12 @@ struct Resolved {
 
 	// Priority order, first match wins.
 	std::vector<EffectiveList> lists;
-	std::vector<PresetFolder> folders;
+
+	// Nothing means the preset says nothing about folders, so every folder
+	// shows. An empty vector means it named none, which is a deliberate "hide
+	// the folder strip" and not the same thing at all.
+	std::optional<std::vector<PresetFolder>> folders;
+
 	bool groupsRequireMention = true;
 
 	[[nodiscard]] const EffectiveList *list(const QString &name) const;

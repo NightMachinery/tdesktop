@@ -878,7 +878,9 @@ void TestStateRoundTrip() {
 		{ u"os"_q, true, true },
 		{ u"@private"_q, true, false },
 	};
-	state.resolvedCache.folders = { { u"Music"_q, false } };
+	state.resolvedCache.folders = std::vector<Purple::PresetFolder>{
+		{ u"Music"_q, false },
+	};
 
 	const auto text = Purple::SerializeState(state);
 	const auto back = Purple::ParseState(text, u"state.toml"_q);
@@ -897,10 +899,11 @@ void TestStateRoundTrip() {
 	CHECK_EQ(back.resolvedCache.lists[1].list, u"@private"_q);
 	CHECK(back.resolvedCache.lists[1].show);
 	CHECK(!back.resolvedCache.lists[1].notify);
-	CHECK_EQ(back.resolvedCache.folders.size(), size_t(1));
-	CHECK_EQ(back.resolvedCache.folders[0].name, u"Music"_q);
-	CHECK(back.resolvedCache.folders[0].notify.has_value());
-	CHECK(!back.resolvedCache.folders[0].notify.value_or(true));
+	CHECK(back.resolvedCache.folders.has_value());
+	CHECK_EQ(back.resolvedCache.folders->size(), size_t(1));
+	CHECK_EQ(back.resolvedCache.folders->at(0).name, u"Music"_q);
+	CHECK(back.resolvedCache.folders->at(0).notify.has_value());
+	CHECK(!back.resolvedCache.folders->at(0).notify.value_or(true));
 
 	// Serialising the round-tripped state reproduces the file exactly, so
 	// nothing drifts as the app rewrites it over and over.
@@ -1039,7 +1042,9 @@ void TestResolveDefault() {
 	CHECK(resolved->list(u"@private"_q)->show);
 	CHECK(resolved->list(u"@private"_q)->notify);
 	CHECK(resolved->list(u"@channels"_q)->show);
-	CHECK(resolved->folders.empty());
+	// The default preset says nothing about folders, which is not the same
+	// as naming none - every folder shows.
+	CHECK(!resolved->folders.has_value());
 	CHECK(resolved->groupsRequireMention);
 
 	// An empty name means the same thing, since that is what a fresh state
@@ -1091,10 +1096,16 @@ void TestResolveInheritance() {
 
 	// Folders are replaced whole, not merged: work names one, strict inherits
 	// that one, lockdown deliberately empties the selection.
-	CHECK_EQ(work->folders.size(), size_t(1));
-	CHECK_EQ(work->folders[0].name, u"Music"_q);
-	CHECK_EQ(strict->folders.size(), size_t(1));
-	CHECK(lockdown->folders.empty());
+	CHECK(work->folders.has_value());
+	CHECK_EQ(work->folders->size(), size_t(1));
+	CHECK_EQ(work->folders->at(0).name, u"Music"_q);
+	CHECK(strict->folders.has_value());
+	CHECK_EQ(strict->folders->size(), size_t(1));
+
+	// "folders = []" is a deliberate "hide them all", and has to stay
+	// distinguishable from a preset that never mentioned folders.
+	CHECK(lockdown->folders.has_value());
+	CHECK(lockdown->folders->empty());
 }
 
 void TestResolveLocked() {
@@ -1259,7 +1270,8 @@ void TestResolvedCache() {
 	CHECK(restored->list(u"@private"_q)->show);
 	CHECK(!restored->list(u"@private"_q)->notify);
 	CHECK(!restored->list(u"@channels"_q)->show);
-	CHECK_EQ(restored->folders.size(), size_t(1));
+	CHECK(restored->folders.has_value());
+	CHECK_EQ(restored->folders->size(), size_t(1));
 
 	// Normal caches nothing - there is no resolution to remember.
 	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);

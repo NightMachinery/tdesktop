@@ -98,6 +98,9 @@ namespace {
 	}
 	if (const auto folders = table->get("folders")) {
 		if (const auto array = folders->as_array()) {
+			// Present but empty is meaningful, so the vector is created here
+			// rather than by the first entry pushed into it.
+			result.folders.emplace();
 			for (auto &&element : *array) {
 				const auto fields = element.as_table();
 				if (!fields) {
@@ -113,7 +116,7 @@ namespace {
 						folder.notify = *value;
 					}
 				}
-				result.folders.push_back(std::move(folder));
+				result.folders->push_back(std::move(folder));
 			}
 		}
 	}
@@ -218,14 +221,19 @@ QString SerializeState(const State &state) {
 			.arg(Quoted(list.list), Boolean(list.show), Boolean(list.notify));
 	}
 	result += u"]\n"_q;
-	result += u"folders = [\n"_q;
-	for (const auto &folder : cache.folders) {
-		result += folder.notify
-			? u"  { name = %1, notify = %2 },\n"_q
-				.arg(Quoted(folder.name), Boolean(*folder.notify))
-			: u"  { name = %1 },\n"_q.arg(Quoted(folder.name));
+	// Written only when the preset said something about folders, so that its
+	// absence reads back as "said nothing" and an empty array keeps meaning
+	// "named none". See ResolvedCache::folders.
+	if (cache.folders) {
+		result += u"folders = [\n"_q;
+		for (const auto &folder : *cache.folders) {
+			result += folder.notify
+				? u"  { name = %1, notify = %2 },\n"_q
+					.arg(Quoted(folder.name), Boolean(*folder.notify))
+				: u"  { name = %1 },\n"_q.arg(Quoted(folder.name));
+		}
+		result += u"]\n"_q;
 	}
-	result += u"]\n"_q;
 	return result;
 }
 

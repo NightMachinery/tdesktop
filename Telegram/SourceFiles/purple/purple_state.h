@@ -40,7 +40,11 @@ struct ResolvedCache {
 	QString preset;
 	std::vector<ResolvedList> lists;
 	bool groupsRequireMention = true;
-	std::vector<PresetFolder> folders;
+
+	// Nothing and an empty vector mean different things - see Resolved::folders
+	// - so the key is written only when the preset said something, and its
+	// absence round-trips as "said nothing".
+	std::optional<std::vector<PresetFolder>> folders;
 
 	[[nodiscard]] bool valid() const {
 		return !preset.isEmpty();
