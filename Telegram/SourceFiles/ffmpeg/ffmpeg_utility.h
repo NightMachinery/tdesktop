@@ -25,6 +25,18 @@ extern "C" {
 #include <libavutil/version.h>
 } // extern "C"
 
+// Purple: the headers we compile against must be the major version we link, or
+// every FFmpeg struct silently gets the wrong layout - offsetof(
+// AVCodecParameters, coded_side_data) is 176 in libavcodec 60 and 32 in 62, so
+// the app reads pointers out of the wrong fields and crashes inside libavcodec
+// with no hint of where the mismatch came from. purple/build_app.sh pins
+// ffmpeg@6; keep this in step with it. Nothing else detects the mismatch: every
+// function tdesktop calls exists in both, so it builds and links cleanly.
+static_assert(LIBAVCODEC_VERSION_MAJOR == 60,
+	"Building against the wrong FFmpeg headers. See purple/build_app.sh - a "
+	"machine with the full \"ffmpeg\" formula installed has its headers in "
+	"/opt/homebrew/include, which the compiler reaches before ffmpeg@6's own.");
+
 #define DA_FFMPEG_CONST_WRITE_CALLBACK (LIBAVFORMAT_VERSION_INT >= \
 	AV_VERSION_INT(61, 01, 100))
 
