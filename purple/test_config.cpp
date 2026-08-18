@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // free of tdesktop dependencies, so they compile straight into this harness.
 // Run with purple/test_config.sh.
 
+#include "purple/purple_engine.h"
 #include "purple/purple_settings.h"
 #include "purple/purple_splice.h"
 #include "purple/purple_state.h"
@@ -953,6 +954,319 @@ void TestStateQuoting() {
 	CHECK_EQ(back.resolvedCache.lists[0].list, u"tab\there"_q);
 }
 
+// A file exercising every resolution rule at once: a locked list, a chat in two
+// lists, a three-deep inheritance chain, and a child that empties its folders.
+[[nodiscard]] QString Presets() {
+	return uR"(
+list_order = ["os", "emergency", "colleagues"]
+
+[lists.os]
+show   = true
+notify = true
+locked = true
+members = [ 100 ]
+
+[lists.emergency]
+show   = true
+notify = true
+locked = true
+members = [ 200, 300 ]
+
+[lists.colleagues]
+show   = true
+notify = true
+members = [ 300, 400 ]
+
+[lists."@private"]
+show   = true
+notify = true
+
+[lists."@groups"]
+show   = true
+notify = true
+
+[lists."@channels"]
+show   = true
+notify = true
+
+[lists."@bots"]
+show   = true
+notify = true
+
+[presets.work]
+inherit = "default"
+groups_require_mention = true
+folders = [ { name = "Music", notify = false } ]
+
+[presets.work.overrides."@private"]
+notify = false
+
+[presets.work.overrides."@channels"]
+show = false
+
+[presets.strict]
+inherit = "work"
+
+[presets.strict.overrides."@private"]
+show = false
+
+[presets.strict.overrides.colleagues]
+groups_require_mention = false
+
+[presets.lockdown]
+inherit = "strict"
+folders = []
+
+[presets.lockdown.overrides."@groups"]
+show = false
+
+[presets.lockdown.overrides.os]
+show = false
+)"_q;
+}
+
+void TestResolveDefault() {
+	Begin("resolve default");
+
+	const auto parsed = Parse(Presets());
+	CHECK(parsed.ok());
+
+	// The list defaults ARE the implicit default preset.
+	const auto resolved = Purple::Resolve(parsed.settings, u"default"_q);
+	CHECK(resolved.has_value());
+	CHECK(!resolved->normal);
+	CHECK_EQ(resolved->lists.size(), size_t(7));
+	CHECK(resolved->list(u"@private"_q)->show);
+	CHECK(resolved->list(u"@private"_q)->notify);
+	CHECK(resolved->list(u"@channels"_q)->show);
+	CHECK(resolved->folders.empty());
+	CHECK(resolved->groupsRequireMention);
+
+	// An empty name means the same thing, since that is what a fresh state
+	// file with no active preset resolves to.
+	CHECK(Purple::Resolve(parsed.settings, QString()).has_value());
+
+	// Normal is a bypass, not a preset with everything switched on.
+	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);
+	CHECK(normal.has_value());
+	CHECK(normal->normal);
+	CHECK(normal->lists.empty());
+	CHECK(Purple::MatchList(
+		parsed.settings,
+		*normal,
+		400,
+		Purple::ChatKind::Private) == nullptr);
+
+	// A preset the settings no longer describe cannot be resolved, and the
+	// caller is meant to fall back rather than to defaults.
+	CHECK(!Purple::Resolve(parsed.settings, u"ghost"_q).has_value());
+}
+
+void TestResolveInheritance() {
+	Begin("resolve inheritance");
+
+	const auto parsed = Parse(Presets());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+	const auto strict = Purple::Resolve(parsed.settings, u"strict"_q);
+	const auto lockdown = Purple::Resolve(parsed.settings, u"lockdown"_q);
+	CHECK(work.has_value());
+	CHECK(strict.has_value());
+	CHECK(lockdown.has_value());
+
+	// work: DMs visible but silent, channels hidden.
+	CHECK(work->list(u"@private"_q)->show);
+	CHECK(!work->list(u"@private"_q)->notify);
+	CHECK(!work->list(u"@channels"_q)->show);
+
+	// strict inherits the hidden channels without restating them, and adds
+	// hidden DMs on top - while the silenced notify from work still applies.
+	CHECK(!strict->list(u"@channels"_q)->show);
+	CHECK(!strict->list(u"@private"_q)->show);
+	CHECK(!strict->list(u"@private"_q)->notify);
+
+	// lockdown inherits both and hides groups too.
+	CHECK(!lockdown->list(u"@groups"_q)->show);
+	CHECK(!lockdown->list(u"@channels"_q)->show);
+	CHECK(!lockdown->list(u"@private"_q)->show);
+
+	// Folders are replaced whole, not merged: work names one, strict inherits
+	// that one, lockdown deliberately empties the selection.
+	CHECK_EQ(work->folders.size(), size_t(1));
+	CHECK_EQ(work->folders[0].name, u"Music"_q);
+	CHECK_EQ(strict->folders.size(), size_t(1));
+	CHECK(lockdown->folders.empty());
+}
+
+void TestResolveLocked() {
+	Begin("resolve locked");
+
+	const auto parsed = Parse(Presets());
+
+	// lockdown tries to hide os. The parser drops the override with a warning
+	// and the engine keeps the list's own defaults regardless.
+	CHECK(WarnsAbout(parsed, u"is locked"_q));
+	const auto lockdown = Purple::Resolve(parsed.settings, u"lockdown"_q);
+	CHECK(lockdown.has_value());
+	CHECK(lockdown->list(u"os"_q)->show);
+	CHECK(lockdown->list(u"os"_q)->notify);
+	CHECK(lockdown->list(u"emergency"_q)->show);
+	CHECK(lockdown->list(u"emergency"_q)->notify);
+
+	// And that holds through the chat-level answer, in the preset that hides
+	// every catch-all there is.
+	const auto visible = Purple::Visible(
+		parsed.settings,
+		*lockdown,
+		100,
+		Purple::ChatKind::Channel);
+	CHECK(visible.show);
+	CHECK(visible.notify);
+}
+
+void TestMatchPriority() {
+	Begin("match priority");
+
+	const auto parsed = Parse(Presets());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+
+	// 300 is in both emergency and colleagues; the earlier list wins.
+	const auto matched = Purple::MatchList(
+		parsed.settings,
+		*work,
+		300,
+		Purple::ChatKind::Private);
+	CHECK(matched != nullptr);
+	CHECK_EQ(matched->list, u"emergency"_q);
+
+	// 400 is only in colleagues.
+	CHECK_EQ(Purple::MatchList(
+		parsed.settings,
+		*work,
+		400,
+		Purple::ChatKind::Private)->list, u"colleagues"_q);
+
+	// An unlisted chat falls to the catch-all for its kind, and every kind has
+	// one - there is no unmatched case.
+	CHECK_EQ(Purple::MatchList(
+		parsed.settings,
+		*work,
+		999,
+		Purple::ChatKind::Private)->list, u"@private"_q);
+	CHECK_EQ(Purple::MatchList(
+		parsed.settings,
+		*work,
+		999,
+		Purple::ChatKind::Bot)->list, u"@bots"_q);
+	CHECK_EQ(Purple::MatchList(
+		parsed.settings,
+		*work,
+		999,
+		Purple::ChatKind::Group)->list, u"@groups"_q);
+	CHECK_EQ(Purple::MatchList(
+		parsed.settings,
+		*work,
+		999,
+		Purple::ChatKind::Channel)->list, u"@channels"_q);
+
+	// Reordering list_order flips which of the two wins.
+	auto swapped = Presets();
+	swapped.replace(
+		u"list_order = [\"os\", \"emergency\", \"colleagues\"]"_q,
+		u"list_order = [\"os\", \"colleagues\", \"emergency\"]"_q);
+	const auto reparsed = Parse(swapped);
+	CHECK(reparsed.ok());
+	const auto after = Purple::Resolve(reparsed.settings, u"work"_q);
+	CHECK_EQ(Purple::MatchList(
+		reparsed.settings,
+		*after,
+		300,
+		Purple::ChatKind::Private)->list, u"colleagues"_q);
+}
+
+void TestMentionGate() {
+	Begin("mention gate");
+
+	const auto parsed = Parse(Presets());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+	const auto strict = Purple::Resolve(parsed.settings, u"strict"_q);
+
+	// A visible group is gated when the preset asks for it.
+	const auto group = Purple::Visible(
+		parsed.settings,
+		*work,
+		999,
+		Purple::ChatKind::Group);
+	CHECK(group.show);
+	CHECK(group.mentionGated);
+
+	// Channels and DMs never are.
+	CHECK(!Purple::Visible(
+		parsed.settings,
+		*work,
+		999,
+		Purple::ChatKind::Private).mentionGated);
+	CHECK(!Purple::Visible(
+		parsed.settings,
+		*work,
+		100,
+		Purple::ChatKind::Channel).mentionGated);
+
+	// strict exempts colleagues from the gate without exempting anything else.
+	CHECK(!Purple::Visible(
+		parsed.settings,
+		*strict,
+		400,
+		Purple::ChatKind::Group).mentionGated);
+	CHECK(Purple::Visible(
+		parsed.settings,
+		*strict,
+		999,
+		Purple::ChatKind::Group).mentionGated);
+
+	// A hidden chat is hidden whether or not anyone mentioned us in it.
+	const auto lockdown = Purple::Resolve(parsed.settings, u"lockdown"_q);
+	const auto hidden = Purple::Visible(
+		parsed.settings,
+		*lockdown,
+		999,
+		Purple::ChatKind::Group);
+	CHECK(!hidden.show);
+	CHECK(!hidden.mentionGated);
+}
+
+void TestResolvedCache() {
+	Begin("resolved cache");
+
+	const auto parsed = Parse(Presets());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+	const auto cache = Purple::ToCache(*work);
+	CHECK(cache.valid());
+	CHECK_EQ(cache.preset, u"work"_q);
+	CHECK_EQ(cache.lists.size(), work->lists.size());
+
+	// It survives the trip through state.toml, which is the point: a settings
+	// file that stops parsing between runs must not reshuffle the chat list.
+	const auto text = Purple::SerializeState([&] {
+		auto state = Purple::State();
+		state.activePreset = u"work"_q;
+		state.resolvedCache = cache;
+		return state;
+	}());
+	const auto reloaded = Purple::ParseState(text, u"state.toml"_q);
+	const auto restored = Purple::FromCache(reloaded.resolvedCache);
+	CHECK(restored.has_value());
+	CHECK_EQ(restored->preset, u"work"_q);
+	CHECK(restored->list(u"@private"_q)->show);
+	CHECK(!restored->list(u"@private"_q)->notify);
+	CHECK(!restored->list(u"@channels"_q)->show);
+	CHECK_EQ(restored->folders.size(), size_t(1));
+
+	// Normal caches nothing - there is no resolution to remember.
+	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);
+	CHECK(!Purple::ToCache(*normal).valid());
+	CHECK(!Purple::FromCache(Purple::ResolvedCache()).has_value());
+}
+
 } // namespace
 
 int main() {
@@ -978,6 +1292,12 @@ int main() {
 	TestStateRoundTrip();
 	TestStateDefaults();
 	TestStateQuoting();
+	TestResolveDefault();
+	TestResolveInheritance();
+	TestResolveLocked();
+	TestMatchPriority();
+	TestMentionGate();
+	TestResolvedCache();
 
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
