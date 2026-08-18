@@ -299,6 +299,31 @@ This runs `macdeployqt` to copy the Qt frameworks into the bundle, re-signs it
 ad-hoc, and replaces `/Applications/Purple Telegram.app`. Ad-hoc signing is
 enough for a locally built app; it is not enough to distribute one.
 
+### Symbolicating a crash
+
+`macdeployqt` strips the binary in place, so `install.sh` first copies the
+unstripped one to `out/Purple Telegram.unstripped`. That copy has the same
+`LC_UUID` as the installed binary, so a crash report matches it directly:
+
+```bash
+atos -o "out/Purple Telegram.unstripped" -l <load address> <address>
+dsymutil "out/Purple Telegram.unstripped"     # standalone .dSYM, if preferred
+```
+
+Function names live in that copy and survive anything. Line numbers come from a
+debug map of 1842 `OSO` entries pointing at the `.o` files under `out/`, so they
+only resolve while those are intact — **symbolicate before the next build, not
+after**, or run `dsymutil` once to freeze the line info into a `.dSYM`.
+
+Do not be tempted to pass `-no-strip` to keep symbols in the bundle instead.
+`macdeployqt` runs `install_name_tool` once per Qt framework reference and each
+run rewrites the entire binary, so deploying the 788MB unstripped binary means
+rewriting it eight times: over nine minutes, measured, against seconds for the
+stripped 180MB one. `sample` on a stalled install shows exactly this:
+
+    deployQtFrameworks -> changeInstallName -> runInstallNameTool
+        -> QProcess::waitForFinished    (child: install_name_tool)
+
 ### What makes it "Purple Telegram"
 
 The rebranding is deliberately three lines, so it survives rebasing onto

@@ -29,14 +29,24 @@ if [ -d "$Target" ]; then
     fi
 fi
 
-# -no-strip keeps the local symbols and the debug map that link the binary back
-# to the .o files under out/. Without it macdeployqt strips the binary in place,
-# which destroys the build output's debuggability as well as the bundle's, and
-# every crash report comes back as bare hex offsets. Costs a much larger binary.
-# Generate the matching .dSYM with:
-#     dsymutil "out/Purple Telegram.app/Contents/MacOS/Purple Telegram"
+# macdeployqt strips the binary in place, which takes the symbols out of out/ as
+# well as out of the bundle and leaves every crash report as bare hex offsets.
+# So keep a copy first. It has the same LC_UUID as the shipped binary, so reports
+# symbolicate against it, and it still carries the debug map pointing at out/'s
+# object files:
+#     atos -o "out/Purple Telegram.unstripped" -l <load address> <address>
+#     dsymutil "out/Purple Telegram.unstripped"     # for a standalone .dSYM
+#
+# Letting it strip matters for far more than bundle size. macdeployqt runs
+# install_name_tool once per Qt framework reference, and each run rewrites the
+# whole binary - so deploying unstripped means rewriting 788MB eight times, which
+# measured at over nine minutes against seconds for the stripped 180MB one.
+Unstripped="$BuildPath/$AppName.unstripped"
+echo "=== keeping symbols in $Unstripped ==="
+cp "$Source/Contents/MacOS/$AppName" "$Unstripped"
+
 echo "=== macdeployqt ==="
-"$MacDeployQt" "$Source" -no-strip
+"$MacDeployQt" "$Source"
 
 echo "=== signing ad-hoc ==="
 codesign --force --deep --sign - "$Source"
