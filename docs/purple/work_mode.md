@@ -97,6 +97,70 @@ fires before that session has finished subscribing, so nobody walks the peers
 for it. That costs nothing: no peers exist yet at that point, and every chat is
 filtered as it loads, through `shouldBeInChatList()`.
 
+## Folders
+
+A preset may also name which chat folders appear, in the order it names them:
+
+    [presets.work]
+    folders = [ { name = "Work" }, { name = "Uni" } ]
+
+Saying nothing about folders leaves all of them showing. Saying `folders = []`
+is different, and deliberate: it names none, which collapses the folder strip
+altogether. That distinction has to survive resolution and the `state.toml`
+cache, so both carry an optional rather than a plain list, and the cache writes
+the key only when the preset said something.
+
+Names are matched against folder titles, case-insensitively. A name matching no
+folder is skipped and logged, for the same reason the hidden-chat count is
+logged - a folder named slightly wrong is indistinguishable from a folder the
+preset meant to hide.
+
+"All chats" is never dropped. It is the only view that shows a chat belonging to
+no folder, and the preset has already decided what that view contains. It is
+also what makes `folders = []` work without a special case: left alone it takes
+`ChatFilters::has()` below its threshold and the folder UI removes itself.
+
+### Why a second accessor rather than filtering the real list
+
+`ChatFilters::list()` is the account's actual folders, and far more than the
+strip reads it - the folder settings page, the "add to folder" menu, the
+Premium folder-count limit, the per-row folder tags, and the code that computes
+which filters a chat belongs to. Restricting that one accessor would quietly
+corrupt all of them.
+
+So display surfaces read `purpleShownList()` and everything that edits or counts
+keeps reading `list()`. When nothing is restricted the two are the same object,
+not a copy, so Normal costs nothing.
+
+The rule inside a display surface is all-or-nothing: those files convert between
+a strip index and a filter constantly, and mixing the two lists would make
+right-clicking the third tab act on the wrong folder.
+
+### Reordering
+
+Reordering is refused while a preset restricts folders, in two places.
+
+`ChatFilters::saveOrder()` replaces the whole server-side order with exactly the
+ids it is handed. Handed a subset, it would drop every hidden folder from the
+account rather than from the view. That guard is the one that matters, because
+it is a choke point: a display surface that was missed still cannot do damage
+through it.
+
+The two drag handlers also bail out early, so a drag is simply inert rather than
+appearing to work and then snapping back.
+
+To reorder folders, switch to `normal` first.
+
+### notify is parsed but not implemented
+
+`{ name = "Work", notify = false }` parses and warns. Silencing a whole folder
+is not implemented, and the reason is not effort: a folder carrying Telegram's
+"Exclude muted" flag stops containing a chat the moment it is silenced, which
+un-silences it, which puts it back. That needs a decided rule rather than a
+guessed one, and per-chat lists already cover the same ground.
+
+`filtered` is likewise parsed and warned about.
+
 ## When the active preset stops resolving
 
 A preset can be deleted or renamed while it is active, or have its inheritance
@@ -120,7 +184,8 @@ settings in place.
   nothing acts on it, so a group configured to appear only on an unread mention
   currently just appears. That is the safe direction to be wrong in - nothing
   disappears unexpectedly.
-- Folders, peek, scheduling and OS focus sync. All parsed, none consumed.
+- Peek, scheduling and OS focus sync. All parsed, none consumed.
+- Per-folder `notify` and `filtered`, as above.
 - The UI. There is no way to choose a preset from inside the app yet. Set
   `active_preset` in `state.toml` by hand - it is reloaded live, like
   `settings.toml`, so the chat list rearranges as you save.
