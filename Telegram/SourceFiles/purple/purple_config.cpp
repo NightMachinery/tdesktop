@@ -7,22 +7,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
 
+#include "base/timer.h"
+
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QSaveFile>
-
-// Return parse errors instead of throwing, so a hand-edited file with a typo
-// degrades to "keep the defaults and log it" rather than to an exception
-// crossing a Qt event handler.
-#define TOML_EXCEPTIONS 0
-#include <toml.hpp>
 
 namespace Purple {
 namespace {
 
-constexpr auto kPremiumTable = "premium";
-constexpr auto kPremiumEnabledKey = "enabled";
-constexpr auto kPremiumEnabledDefault = true;
+// Editors write a file in several steps, and some replace it wholesale. Wait
+// for the flurry to settle rather than reloading a half-written file - which
+// would parse as broken and flash an error banner on every save.
+constexpr auto kReloadDelay = crl::time(250);
 
 // Written once, on first run. Everything the user may want to change should be
 // present and commented, because an empty file teaches nobody what is possible.
@@ -35,10 +35,115 @@ constexpr auto kStarterSettings = R"([premium]
 # custom emoji, emoji status, message effects and the rest - are unaffected by
 # this and stay locked. See docs/purple/premium.md.
 enabled = true
+
+
+# Everything below configures Work Mode: named presets that decide which chats
+# are visible and which may interrupt you. Nothing is active until you pick a
+# preset; until then the app behaves exactly like stock Telegram Desktop.
+#
+# This file is yours. The app only ever edits list members and the toggle
+# above, one line at a time, and never touches your comments or layout.
+# See docs/purple/config.md.
+
+# Priority order, top wins - the first list holding a chat decides how it
+# behaves. The four built-in catch-alls always sort below your own lists.
+list_order = ["os", "emergency"]
+
+# Locked lists are never overridden by any preset. Use them for the chats that
+# must always get through, so no amount of preset editing can silence them.
+[lists.os]
+title  = "OS"
+show   = true
+notify = true
+locked = true
+members = [
+]
+
+[lists.emergency]
+title  = "Emergency"
+show   = true
+notify = true
+locked = true
+members = [
+]
+
+# The catch-alls match any chat of that kind not caught by a list above. Only
+# their defaults are configurable; membership is by chat type.
+[lists."@private"]
+show   = true
+notify = true
+
+[lists."@groups"]
+show   = true
+notify = true
+
+[lists."@channels"]
+show   = true
+notify = true
+
+[lists."@bots"]
+show   = true
+notify = true
+
+# An example preset. Uncomment and adjust, or write your own - the defaults
+# above are themselves the implicit "default" preset every other one inherits.
+#
+# [presets.work]
+# inherit = "default"
+# groups_require_mention = true
+#
+# [presets.work.overrides."@private"]
+# notify = false                       # visible, but they do not interrupt
+#
+# [presets.work.overrides."@channels"]
+# show = false
+
+[schedule]
+enabled = true
+
+# Disabled until you point it at a preset you have actually written.
+[[schedule.rules]]
+enabled = false
+days    = ["mon", "tue", "wed", "thu", "fri"]
+from    = "09:00"
+to      = "17:00"
+preset  = "work"
+
+[peek]
+# Temporarily reveal what the active preset is hiding.
+hotkey   = "Ctrl+Shift+P"
+auto_off = "2m"
 )";
 
-// Everything here runs on the main thread, in response to either startup or a
-// click in Settings, so no locking.
+[[nodiscard]] std::optional<QString> ReadFile(const QString &path) {
+	auto file = QFile(path);
+	if (!file.exists()) {
+		return std::nullopt;
+	} else if (!file.open(QIODevice::ReadOnly)) {
+		LOG(("Purple Error: Could not read %1.").arg(path));
+		return std::nullopt;
+	}
+	return QString::fromUtf8(file.readAll());
+}
+
+// QSaveFile writes a temporary alongside the target and renames over it, so a
+// crash mid-write cannot leave a truncated config behind.
+[[nodiscard]] bool WriteFile(const QString &path, const QString &text) {
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		LOG(("Purple Error: Could not write %1.").arg(path));
+		return false;
+	}
+	file.write(text.toUtf8());
+	if (!file.commit()) {
+		LOG(("Purple Error: Could not commit %1.").arg(path));
+		return false;
+	}
+	return true;
+}
+
+// Everything here runs on the main thread, in response to startup, a click in
+// Settings or a file change notification, so no locking.
 class Config final {
 public:
 	Config();
@@ -47,77 +152,144 @@ public:
 	[[nodiscard]] rpl::producer<bool> localPremiumValue() const;
 	void setLocalPremium(bool value);
 
+	[[nodiscard]] const Settings &settings() const;
+	[[nodiscard]] const Problems &problems() const;
+	[[nodiscard]] rpl::producer<> changes() const;
+
+	bool addToList(
+		const QString &list,
+		PeerIdValue id,
+		const MemberTitle &title);
+	bool removeFromList(
+		const QString &list,
+		PeerIdValue id,
+		const MemberTitle &title);
+
+	[[nodiscard]] const State &state() const;
+	[[nodiscard]] rpl::producer<> stateChanges() const;
+	void updateState(Fn<void(State&)> apply);
+
 private:
-	void load();
-	bool parse();
-	void createStarterFile();
-	[[nodiscard]] bool writeBool(const char *table, const char *key, bool value);
-	[[nodiscard]] bool replaceValueOnLine(int line, bool value);
-	void save();
+	void loadSettings();
+	void loadState();
+	void applyText(const QString &text);
+	[[nodiscard]] bool writeSettings(const QString &text);
+	void startWatching();
+	void reloadFromDisk();
+	[[nodiscard]] bool splice(
+		const SpliceResult &result,
+		const QString &what);
 
 	QString _text;
-	toml::table _parsed;
+	Settings _settings;
+	Problems _problems;
 
-	// False when the file on disk could not be read or does not parse. We never
-	// write to such a file: the user may be halfway through editing it, and a
-	// blind append would leave them with a duplicate table to untangle.
-	bool _valid = false;
+	State _state;
+	QString _stateText;
 
-	rpl::variable<bool> _localPremium = kPremiumEnabledDefault;
+	rpl::variable<bool> _localPremium = true;
+	rpl::event_stream<> _changes;
+	rpl::event_stream<> _stateChanges;
+
+	std::unique_ptr<QFileSystemWatcher> _watcher;
+	base::Timer _reload;
 
 };
 
-Config::Config() {
-	load();
+Config::Config() : _reload([=] { reloadFromDisk(); }) {
+	loadSettings();
+	loadState();
+	startWatching();
 }
 
-void Config::load() {
+void Config::loadSettings() {
 	const auto path = SettingsFilePath();
-	auto file = QFile(path);
-	if (!file.exists()) {
-		createStarterFile();
+	if (auto text = ReadFile(path)) {
+		applyText(*text);
 		return;
-	} else if (!file.open(QIODevice::ReadOnly)) {
-		LOG(("Purple Error: Could not read %1.").arg(path));
+	} else if (!QDir().mkpath(ConfigDirectory())) {
+		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		applyText(QString());
 		return;
 	}
-	_text = QString::fromUtf8(file.readAll());
-	file.close();
-	if (parse()) {
-		_localPremium = _parsed[kPremiumTable][kPremiumEnabledKey].value_or(
-			kPremiumEnabledDefault);
+	const auto starter = QString::fromUtf8(kStarterSettings);
+	if (WriteFile(path, starter)) {
+		applyText(starter);
+	} else {
+		applyText(QString());
 	}
 }
 
-bool Config::parse() {
-	const auto utf8 = _text.toUtf8();
-	auto result = toml::parse(
-		std::string_view(utf8.constData(), utf8.size()),
-		SettingsFilePath().toStdString());
-	if (!result) {
-		const auto &error = result.error();
-		LOG(("Purple Error: %1:%2:%3: %4."
-			).arg(SettingsFilePath()
-			).arg(error.source().begin.line
-			).arg(error.source().begin.column
-			).arg(QString::fromStdString(std::string(error.description()))));
-		_valid = false;
+void Config::applyText(const QString &text) {
+	_text = text;
+	auto parsed = ParseSettings(text, SettingsFilePath());
+	_problems.warnings = std::move(parsed.warnings);
+	_problems.error = parsed.error;
+	for (const auto &warning : _problems.warnings) {
+		LOG(("Purple Warning: %1").arg(warning));
+	}
+	if (!parsed.ok()) {
+		// Keep the last good settings. A file that stops parsing mid-edit
+		// should not reshuffle the chat list under the user's hands.
+		LOG(("Purple Error: %1: %2.").arg(SettingsFilePath(), parsed.error));
+		_changes.fire({});
+		return;
+	}
+	_settings = std::move(parsed.settings);
+	_localPremium = _settings.premium.enabled;
+	_changes.fire({});
+}
+
+bool Config::writeSettings(const QString &text) {
+	if (!QDir().mkpath(ConfigDirectory())) {
+		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		return false;
+	} else if (!WriteFile(SettingsFilePath(), text)) {
 		return false;
 	}
-	_parsed = std::move(result).table();
-	_valid = true;
+	applyText(text);
 	return true;
 }
 
-void Config::createStarterFile() {
-	const auto directory = ConfigDirectory();
-	if (!QDir().mkpath(directory)) {
-		LOG(("Purple Error: Could not create %1.").arg(directory));
+void Config::startWatching() {
+	if (!QCoreApplication::instance()) {
 		return;
 	}
-	_text = QString::fromUtf8(kStarterSettings);
-	save();
-	parse();
+	_watcher = std::make_unique<QFileSystemWatcher>();
+
+	// Watch the directory rather than only the file: editors that save by
+	// writing a temporary and renaming it over the original leave a watch on
+	// the file itself pointing at an inode nobody will ever write to again.
+	_watcher->addPath(ConfigDirectory());
+	if (QFileInfo::exists(SettingsFilePath())) {
+		_watcher->addPath(SettingsFilePath());
+	}
+	const auto queue = [=] { _reload.callOnce(kReloadDelay); };
+	QObject::connect(
+		_watcher.get(),
+		&QFileSystemWatcher::directoryChanged,
+		_watcher.get(),
+		queue);
+	QObject::connect(
+		_watcher.get(),
+		&QFileSystemWatcher::fileChanged,
+		_watcher.get(),
+		queue);
+}
+
+void Config::reloadFromDisk() {
+	if (_watcher
+		&& !_watcher->files().contains(SettingsFilePath())
+		&& QFileInfo::exists(SettingsFilePath())) {
+		// Re-arm after a rename-on-save replaced the file we were watching.
+		_watcher->addPath(SettingsFilePath());
+	}
+	auto text = ReadFile(SettingsFilePath());
+	if (!text || *text == _text) {
+		// Our own writes come back through the watcher too.
+		return;
+	}
+	applyText(*text);
 }
 
 bool Config::localPremium() const {
@@ -131,7 +303,14 @@ rpl::producer<bool> Config::localPremiumValue() const {
 void Config::setLocalPremium(bool value) {
 	if (_localPremium.current() == value) {
 		return;
-	} else if (!writeBool(kPremiumTable, kPremiumEnabledKey, value)) {
+	}
+	const auto result = SetTableBool(
+		_text,
+		SettingsFilePath(),
+		u"premium"_q,
+		u"enabled"_q,
+		value);
+	if (!splice(result, u"the Premium toggle"_q)) {
 		// Keep memory and disk agreeing. Changing the setting anyway would
 		// apply now and silently revert on the next start.
 		return;
@@ -139,103 +318,88 @@ void Config::setLocalPremium(bool value) {
 	_localPremium = value;
 }
 
-// Rewrites a single scalar in place, leaving every comment and every other line
-// of the file untouched. The user owns this file; we only ever edit the exact
-// token we are responsible for.
-bool Config::writeBool(const char *table, const char *key, bool value) {
-	if (!_valid) {
-		if (!_text.isEmpty()) {
-			LOG(("Purple Error: Not writing to %1, it does not parse."
-				).arg(SettingsFilePath()));
-			return false;
-		}
-		createStarterFile();
-		if (!_valid) {
-			return false;
-		}
-	}
-	const auto node = _parsed[table][key].node();
-	if (node && replaceValueOnLine(node->source().begin.line, value)) {
-		save();
-		parse();
+const Settings &Config::settings() const {
+	return _settings;
+}
+
+const Problems &Config::problems() const {
+	return _problems;
+}
+
+rpl::producer<> Config::changes() const {
+	return _changes.events();
+}
+
+bool Config::splice(const SpliceResult &result, const QString &what) {
+	if (!result.ok()) {
+		LOG(("Purple Error: Could not write %1 to %2: %3."
+			).arg(what, SettingsFilePath(), result.error));
+		return false;
+	} else if (!result.changed) {
 		return true;
 	}
-
-	// The key is missing - add it, either under the existing table header or in
-	// a fresh table appended to the end of the file.
-	const auto line = u"%1 = %2"_q
-		.arg(QString::fromLatin1(key))
-		.arg(value ? u"true"_q : u"false"_q);
-	const auto existing = _parsed[table].as_table();
-	if (existing && !existing->is_inline()) {
-		auto lines = _text.split('\n');
-		const auto after = int(existing->source().begin.line);
-		if (after > 0 && after <= lines.size()) {
-			lines.insert(after, line);
-			_text = lines.join('\n');
-			save();
-			parse();
-			return true;
-		}
-	}
-	if (!_text.isEmpty()) {
-		if (!_text.endsWith('\n')) {
-			_text += '\n';
-		}
-		_text += '\n';
-	}
-	_text += u"[%1]\n%2\n"_q.arg(QString::fromLatin1(table)).arg(line);
-	save();
-	parse();
-	return true;
+	return writeSettings(result.text);
 }
 
-// Replaces the value token on a "key = value" line, keeping the key, the
-// spacing and any trailing comment exactly as the user wrote them.
-bool Config::replaceValueOnLine(int line, bool value) {
-	auto lines = _text.split('\n');
-	if (line < 1 || line > lines.size()) {
-		return false;
-	}
-	auto &text = lines[line - 1];
-	const auto assign = text.indexOf('=');
-	if (assign < 0) {
-		return false;
-	}
-	auto from = assign + 1;
-	while (from < text.size() && text[from].isSpace()) {
-		++from;
-	}
-	auto till = from;
-	while (till < text.size()
-		&& !text[till].isSpace()
-		&& text[till] != '#') {
-		++till;
-	}
-	if (till == from) {
-		return false;
-	}
-	text.replace(from, till - from, value ? u"true"_q : u"false"_q);
-	_text = lines.join('\n');
-	return true;
+bool Config::addToList(
+		const QString &list,
+		PeerIdValue id,
+		const MemberTitle &title) {
+	return splice(
+		AddListMember(_text, SettingsFilePath(), list, id, title),
+		u"list '%1'"_q.arg(list));
 }
 
-void Config::save() {
-	const auto path = SettingsFilePath();
-	auto file = QSaveFile(path);
-	if (!file.open(QIODevice::WriteOnly)) {
-		LOG(("Purple Error: Could not write %1.").arg(path));
+bool Config::removeFromList(
+		const QString &list,
+		PeerIdValue id,
+		const MemberTitle &title) {
+	return splice(
+		RemoveListMember(_text, SettingsFilePath(), list, id, title),
+		u"list '%1'"_q.arg(list));
+}
+
+void Config::loadState() {
+	_stateText = ReadFile(StateFilePath()).value_or(QString());
+	_state = ParseState(_stateText, StateFilePath());
+}
+
+const State &Config::state() const {
+	return _state;
+}
+
+rpl::producer<> Config::stateChanges() const {
+	return _stateChanges.events();
+}
+
+void Config::updateState(Fn<void(State&)> apply) {
+	Expects(apply != nullptr);
+
+	auto updated = _state;
+	apply(updated);
+	auto text = SerializeState(updated);
+	if (text == _stateText) {
 		return;
 	}
-	file.write(_text.toUtf8());
-	if (!file.commit()) {
-		LOG(("Purple Error: Could not commit %1.").arg(path));
+	_state = std::move(updated);
+	_stateText = std::move(text);
+
+	// Unlike settings.toml, a failed write here is not worth refusing the
+	// change over: the state is what the app is already doing, and losing it
+	// costs the user a preset to re-pick after a restart, nothing more.
+	if (!QDir().mkpath(ConfigDirectory())
+		|| !WriteFile(StateFilePath(), _stateText)) {
+		LOG(("Purple Error: Could not save %1.").arg(StateFilePath()));
 	}
+	_stateChanges.fire({});
 }
 
+// Deliberately never destroyed. It owns QObjects - a watcher and a timer - and
+// a function-local static would tear them down at exit, after Qt has already
+// gone, for no benefit whatsoever.
 [[nodiscard]] Config &Instance() {
-	static auto result = Config();
-	return result;
+	static const auto result = new Config();
+	return *result;
 }
 
 } // namespace
@@ -251,6 +415,10 @@ QString SettingsFilePath() {
 	return ConfigDirectory() + u"/settings.toml"_q;
 }
 
+QString StateFilePath() {
+	return ConfigDirectory() + u"/state.toml"_q;
+}
+
 bool LocalPremium() {
 	return Instance().localPremium();
 }
@@ -261,6 +429,44 @@ rpl::producer<bool> LocalPremiumValue() {
 
 void SetLocalPremium(bool value) {
 	Instance().setLocalPremium(value);
+}
+
+const Settings &ActiveSettings() {
+	return Instance().settings();
+}
+
+const Problems &SettingsProblems() {
+	return Instance().problems();
+}
+
+rpl::producer<> SettingsChanges() {
+	return Instance().changes();
+}
+
+bool AddToList(
+		const QString &list,
+		PeerIdValue id,
+		const MemberTitle &title) {
+	return Instance().addToList(list, id, title);
+}
+
+bool RemoveFromList(
+		const QString &list,
+		PeerIdValue id,
+		const MemberTitle &title) {
+	return Instance().removeFromList(list, id, title);
+}
+
+const State &CurrentState() {
+	return Instance().state();
+}
+
+rpl::producer<> StateChanges() {
+	return Instance().stateChanges();
+}
+
+void UpdateState(Fn<void(State&)> apply) {
+	Instance().updateState(std::move(apply));
 }
 
 } // namespace Purple

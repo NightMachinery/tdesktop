@@ -1724,6 +1724,12 @@ PRIVATE
     profile/profile_cover_drop_area.h
     purple/purple_config.cpp
     purple/purple_config.h
+    purple/purple_settings.cpp
+    purple/purple_settings.h
+    purple/purple_splice.cpp
+    purple/purple_splice.h
+    purple/purple_state.cpp
+    purple/purple_state.h
     settings/business/settings_away_message.cpp
     settings/business/settings_away_message.h
     settings/business/settings_shortcut_messages.cpp
@@ -2319,10 +2325,13 @@ target_include_directories(Telegram PRIVATE ${src_loc})
 
 # toml++ is vendored as a single header rather than pulled from Homebrew, so the
 # packaged build has one less keg that can shadow or conflict with another - see
-# docs/mac/build.md. Scoped to the one file that includes it: putting a 486KB
+# docs/mac/build.md. Scoped to the files that include it: putting a 486KB
 # header-only parser on the include path of every translation unit would change
 # their compile commands and force a full rebuild for no reason.
-set_source_files_properties(${src_loc}/purple/purple_config.cpp
+set_source_files_properties(
+    ${src_loc}/purple/purple_settings.cpp
+    ${src_loc}/purple/purple_splice.cpp
+    ${src_loc}/purple/purple_state.cpp
     PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/tomlplusplus)
 
 target_compile_definitions(Telegram
