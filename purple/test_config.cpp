@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_settings.h"
 #include "purple/purple_splice.h"
+#include "purple/purple_state.h"
 
 #include <QtCore/QStringList>
 
@@ -768,6 +769,99 @@ void TestNameSanitising() {
 	CHECK(Parse(result.text).ok());
 }
 
+void TestStateRoundTrip() {
+	Begin("state round trip");
+
+	auto state = Purple::State();
+	state.activePreset = u"work"_q;
+	state.activeSource = Purple::PresetSource::Schedule;
+	state.previousPreset = u"normal"_q;
+	state.previousSource = Purple::PresetSource::Manual;
+	state.schedulePaused = true;
+	state.peekActive = true;
+	state.peekDeadlineUnix = 1755400000;
+	state.resolvedCache.preset = u"work"_q;
+	state.resolvedCache.groupsRequireMention = false;
+	state.resolvedCache.lists = {
+		{ u"os"_q, true, true },
+		{ u"@private"_q, true, false },
+	};
+	state.resolvedCache.folders = { { u"Music"_q, false } };
+
+	const auto text = Purple::SerializeState(state);
+	const auto back = Purple::ParseState(text, u"state.toml"_q);
+	CHECK_EQ(back.activePreset, u"work"_q);
+	CHECK(back.activeSource == Purple::PresetSource::Schedule);
+	CHECK_EQ(back.previousPreset, u"normal"_q);
+	CHECK(back.previousSource == Purple::PresetSource::Manual);
+	CHECK(back.schedulePaused);
+	CHECK(back.peekActive);
+	CHECK_EQ(back.peekDeadlineUnix, int64(1755400000));
+
+	CHECK(back.resolvedCache.valid());
+	CHECK_EQ(back.resolvedCache.preset, u"work"_q);
+	CHECK(!back.resolvedCache.groupsRequireMention);
+	CHECK_EQ(back.resolvedCache.lists.size(), size_t(2));
+	CHECK_EQ(back.resolvedCache.lists[1].list, u"@private"_q);
+	CHECK(back.resolvedCache.lists[1].show);
+	CHECK(!back.resolvedCache.lists[1].notify);
+	CHECK_EQ(back.resolvedCache.folders.size(), size_t(1));
+	CHECK_EQ(back.resolvedCache.folders[0].name, u"Music"_q);
+	CHECK(back.resolvedCache.folders[0].notify.has_value());
+	CHECK(!back.resolvedCache.folders[0].notify.value_or(true));
+
+	// Serialising the round-tripped state reproduces the file exactly, so
+	// nothing drifts as the app rewrites it over and over.
+	CHECK_EQ(Purple::SerializeState(back), text);
+}
+
+void TestStateDefaults() {
+	Begin("state defaults");
+
+	// No file, and a file we cannot read, both start from stock behaviour
+	// rather than from a preset the user never chose.
+	for (const auto &text : { QString(), u"active_preset = ["_q }) {
+		const auto state = Purple::ParseState(text, u"state.toml"_q);
+		CHECK_EQ(state.activePreset, u"normal"_q);
+		CHECK(state.activeSource == Purple::PresetSource::Manual);
+		CHECK(!state.schedulePaused);
+		CHECK(!state.peekActive);
+		CHECK(!state.resolvedCache.valid());
+	}
+
+	// A cache that names a preset but describes no lists is not usable: the
+	// engine would resolve nothing and quietly default every chat.
+	const auto partial = Purple::ParseState(
+		u"active_preset = \"work\"\n[resolved_cache]\npreset = \"work\"\n"_q,
+		u"state.toml"_q);
+	CHECK_EQ(partial.activePreset, u"work"_q);
+	CHECK(!partial.resolvedCache.valid());
+
+	// An unknown source name is not a reason to refuse the rest of the file.
+	const auto odd = Purple::ParseState(
+		u"active_preset = \"work\"\nactive_preset_source = \"telepathy\"\n"_q,
+		u"state.toml"_q);
+	CHECK_EQ(odd.activePreset, u"work"_q);
+	CHECK(odd.activeSource == Purple::PresetSource::Manual);
+}
+
+void TestStateQuoting() {
+	Begin("state quoting");
+
+	// Preset names come out of the hand-written settings.toml, so they can
+	// hold anything a TOML key can hold.
+	auto state = Purple::State();
+	state.activePreset = u"quote\" and \\ backslash"_q;
+	state.resolvedCache.preset = state.activePreset;
+	state.resolvedCache.lists = { { u"tab\there"_q, true, true } };
+
+	const auto text = Purple::SerializeState(state);
+	const auto back = Purple::ParseState(text, u"state.toml"_q);
+	CHECK_EQ(back.activePreset, state.activePreset);
+	CHECK(back.resolvedCache.valid());
+	CHECK_EQ(back.resolvedCache.lists[0].list, u"tab\there"_q);
+}
+
 } // namespace
 
 int main() {
@@ -789,6 +883,9 @@ int main() {
 	TestSpliceOddFormatting();
 	TestSpliceCrlf();
 	TestNameSanitising();
+	TestStateRoundTrip();
+	TestStateDefaults();
+	TestStateQuoting();
 
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;

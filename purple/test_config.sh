@@ -24,6 +24,7 @@ clang++ -std=c++20 -g -O0 -o "$Output" \
     "$RepoPath/purple/test_config.cpp" \
     "$RepoPath/Telegram/SourceFiles/purple/purple_settings.cpp" \
     "$RepoPath/Telegram/SourceFiles/purple/purple_splice.cpp" \
+    "$RepoPath/Telegram/SourceFiles/purple/purple_state.cpp" \
     -I"$RepoPath/Telegram/SourceFiles" \
     -I"$RepoPath/Telegram/lib_base" \
     -I"$RepoPath/Telegram/ThirdParty/GSL/include" \
