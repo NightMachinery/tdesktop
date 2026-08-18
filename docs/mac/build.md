@@ -378,10 +378,20 @@ Ninja rebuilds only what the change touched, which for a few files is seconds
 to a couple of minutes. Re-run `install.sh` to push the result to
 `/Applications`.
 
-Editing any `CMakeLists.txt` is a different matter. The reconfigure that follows
-invalidates the whole graph — around a thousand objects, including targets your
-change could not possibly affect, such as `lib_fido2`. Budget for a full rebuild,
-and batch CMake edits rather than discovering a second one halfway through.
+Editing `CMakeLists.txt` costs more, but less than it first appears. Adding
+source files triggers a reconfigure that rebuilds `lib_fido2` in full — around
+sixty objects it could not possibly have affected — plus the automatic MOC pass,
+and then only the files you actually added. That is a couple of minutes, not a
+rebuild.
+
+Changing a compiler flag is the expensive case. `CMAKE_CXX_FLAGS` and its
+siblings are part of every object's compile command, so touching them correctly
+invalidates all ~1500 of them. That is a full rebuild, and on this machine it
+needs `--parallel 4`: ninja's default of ten clang processes exhausts memory,
+and macOS responds by suspending all of them, leaving a build that appears to
+hang forever with every child in state `T`.
+
+Either way, batch the edits rather than discovering a second one halfway through.
 
 Never run two builds against `out/` at once. `build_app.sh` both configures and
 builds, so starting it while a `cmake --build` is running gives you two ninja
