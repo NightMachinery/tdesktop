@@ -176,6 +176,7 @@ private:
 	[[nodiscard]] bool writeSettings(const QString &text);
 	void startWatching();
 	void reloadFromDisk();
+	void reloadStateFromDisk();
 	[[nodiscard]] bool splice(
 		const SpliceResult &result,
 		const QString &what);
@@ -296,12 +297,29 @@ void Config::reloadFromDisk() {
 		// Re-arm after a rename-on-save replaced the file we were watching.
 		_watcher->addPath(SettingsFilePath());
 	}
+	reloadStateFromDisk();
+
 	auto text = ReadFile(SettingsFilePath());
 	if (!text || *text == _text) {
 		// Our own writes come back through the watcher too.
 		return;
 	}
 	applyText(*text);
+}
+
+void Config::reloadStateFromDisk() {
+	// state.toml is the app's file, so this is not the point of the watch. It
+	// is here because picking a preset by hand is the only way to pick one
+	// until the Work Mode UI lands, and requiring a restart for that would make
+	// the whole engine untestable. Our own writes land here too and compare
+	// equal, so they cost a read and nothing else.
+	auto text = ReadFile(StateFilePath());
+	if (!text || *text == _stateText) {
+		return;
+	}
+	_stateText = std::move(*text);
+	_state = ParseState(_stateText, StateFilePath());
+	_stateChanges.fire({});
 }
 
 bool Config::localPremium() const {
