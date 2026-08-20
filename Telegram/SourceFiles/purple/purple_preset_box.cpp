@@ -11,9 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_schedule.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
@@ -147,6 +149,41 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 		peek->setDisabled(ActiveResolved().normal);
 		peek->setText(peekText());
 	}, peek->lifetime());
+
+	// Only worth a row when the file describes a schedule, since a switch that
+	// holds off nothing explains nothing. Wrapped rather than hidden so the
+	// space goes with it when a reload takes the last rule away.
+	const auto paused = container->add(
+		object_ptr<Ui::SlideWrap<Ui::Checkbox>>(
+			container,
+			object_ptr<Ui::Checkbox>(
+				container,
+				u"Pause the schedule"_q,
+				SchedulePaused(),
+				st::defaultCheckbox),
+			padding));
+	paused->toggle(ScheduleConfigured(), anim::type::instant);
+
+	const auto pause = paused->entity();
+	pause->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (checked != SchedulePaused()) {
+			SetSchedulePaused(checked);
+		}
+	}, pause->lifetime());
+
+	// state.toml is still hand-editable and the schedule writes to it too, so
+	// the tick follows the file rather than only the click.
+	StateChanges(
+	) | rpl::on_next([=] {
+		pause->setChecked(
+			SchedulePaused(),
+			Ui::Checkbox::NotifyAboutChange::DontNotify);
+	}, pause->lifetime());
+	SettingsChanges(
+	) | rpl::on_next([=] {
+		paused->toggle(ScheduleConfigured(), anim::type::normal);
+	}, paused->lifetime());
 
 	container->add(
 		object_ptr<Ui::FlatLabel>(
