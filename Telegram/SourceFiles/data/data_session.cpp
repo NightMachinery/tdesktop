@@ -1846,6 +1846,8 @@ void Session::refreshPurpleWorkMode() {
 	}
 	auto chats = 0;
 	auto hidden = 0;
+	auto gated = 0;
+	auto mentioned = 0;
 	auto silenced = 0;
 	for (const auto peer : peers) {
 		// Mute first: hiding the chat takes its unread out of every running
@@ -1864,20 +1866,26 @@ void Session::refreshPurpleWorkMode() {
 		if (!visible.notify) {
 			++silenced;
 		}
-
-		// Both, in this order. The first drops a chat that is now hidden; the
-		// second is what brings one back, because leaving the chat list zeroes
-		// the sort key and setChatListExistence(true) refuses to add an entry
-		// that has none.
-		history->updateChatListExistence();
-		history->updateChatListSortPosition();
+		history->purpleRefreshChatListMembership();
+		if (visible.mentionGated) {
+			++gated;
+			if (history->inChatList()) {
+				++mentioned;
+			}
+		}
 	}
 
 	// A preset that hides nothing looks exactly like a preset that is working,
 	// and the usual cause is a list named slightly wrong. Say what it did once
 	// per change rather than leaving it to be guessed at from the chat list.
-	LOG(("Purple: %1 of %2 loaded chats hidden, %3 silenced."
-		).arg(hidden).arg(chats).arg(silenced));
+	// Gated groups are counted apart from hidden ones because they are not the
+	// same claim: a gated group is only out of the list while it has nothing
+	// to say, so the count that means anything is how many of them are still
+	// showing. Zero gated means the gate is off rather than that it did
+	// nothing.
+	LOG(("Purple: %1 of %2 loaded chats hidden, %3 mention-gated "
+		"(%4 showing), %5 silenced."
+		).arg(hidden).arg(chats).arg(gated).arg(mentioned).arg(silenced));
 }
 
 Session::~Session() = default;

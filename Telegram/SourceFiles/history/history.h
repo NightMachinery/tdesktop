@@ -424,6 +424,11 @@ public:
 
 	void refreshChatListNameSortKey();
 
+	// Purple: re-evaluate whether a work preset still lets this chat into the
+	// chat list. Nothing about the peer changed, so no upstream signal fires
+	// and the caller has to ask for this by hand.
+	void purpleRefreshChatListMembership();
+
 	void setFakeChatListMessageFrom(const MTPmessages_Messages &data);
 	void checkChatListMessageRemoved(not_null<HistoryItem*> item);
 

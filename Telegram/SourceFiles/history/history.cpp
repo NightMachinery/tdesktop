@@ -3377,8 +3377,19 @@ bool History::shouldBeInChatList() const {
 	// preset. Dropping the entry here is also what keeps the unread badges
 	// honest for free: MainList accumulates its counters as entries come and
 	// go, so a chat that is in no list is in no total either.
-	if (Purple::Filtering() && !Purple::VisibleFor(peer).show) {
-		return false;
+	if (Purple::Filtering()) {
+		const auto visible = Purple::VisibleFor(peer);
+		if (!visible.show) {
+			return false;
+		} else if (visible.mentionGated
+			&& !chatListUnreadState().mentions) {
+			// A gated group appears exactly while its mention badge would be
+			// lit, so the rule is legible from the chat list itself. Reading
+			// the mention is what takes it away again, which means a group
+			// opened from a mention leaves the list while you are still in it.
+			// That is the feature working, not a glitch: the chat stays open.
+			return false;
+		}
 	}
 	if (peer->migrateTo() || !folderKnown()) {
 		return false;
@@ -3404,6 +3415,15 @@ bool History::shouldBeInChatList() const {
 	}
 	return !lastMessageKnown()
 		|| (lastMessage() != nullptr);
+}
+
+void History::purpleRefreshChatListMembership() {
+	// Both, in this order. Neither call does both directions: the first drops
+	// an entry that should now be gone, and only the second brings one back,
+	// because leaving the chat list zeroes the sort key and
+	// setChatListExistence(true) quietly removes an entry that has none.
+	updateChatListExistence();
+	updateChatListSortPosition();
 }
 
 void History::unknownMessageDeleted(MsgId messageId) {

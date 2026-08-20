@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
+#include "purple/purple_gate.h"
 #include "apiwrap.h"
 
 namespace HistoryUnreadThings {
@@ -94,13 +95,39 @@ void Proxy::setCount(int count) {
 		list.setCount(count);
 	}
 	const auto has = (count > 0);
-	if (has != had && _thread->inChatList()) {
+	if (has == had) {
+		return;
+	}
+	if (_thread->inChatList()) {
 		if (_type == Type::Mentions) {
 			_thread->hasUnreadMentionChanged(has);
 		} else if (_type == Type::Reactions) {
 			_thread->hasUnreadReactionChanged(has);
 		} else if (_type == Type::PollVotes) {
 			_thread->hasUnreadPollVoteChanged(has);
+		}
+	}
+
+	// Purple: a work preset can make a group appear only while it holds an
+	// unread mention, so this edge decides chat list membership and not just
+	// the badge drawn on it. It has to sit outside the inChatList() branch
+	// above, because the chat that needs bringing back is precisely the one
+	// that is not in the list. It also has to come after that branch: for a
+	// forum the parent's mention count is the sum over its topics, and the
+	// call above is what updates the sum.
+	if (_type == Type::Mentions && Purple::Filtering()) {
+		const auto history = _thread->owningHistory();
+		if (Purple::VisibleFor(history->peer).mentionGated) {
+			const auto was = history->inChatList();
+			history->purpleRefreshChatListMembership();
+			if (history->inChatList() != was) {
+				// The one event that explains a chat appearing or vanishing on
+				// its own, so it is worth a line. It is rare by construction:
+				// only gated chats reach here, and only on the edge.
+				LOG(("Purple: mention gate %1 peer %2."
+					).arg(was ? u"hid"_q : u"revealed"_q
+					).arg(history->peer->id.value));
+			}
 		}
 	}
 }
