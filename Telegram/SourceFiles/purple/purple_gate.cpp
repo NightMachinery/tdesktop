@@ -7,12 +7,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_gate.h"
 
+#include "base/timer.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
 #include "purple/purple_config.h"
 
+#include <QtCore/QDateTime>
+
 namespace Purple {
 namespace {
+
+// Local wall-clock seconds, matching what peek_deadline_unix holds. Not
+// base::unixtime::now(), which is the server's clock and needs a connection:
+// a peek is a two-minute local affair and must expire while offline too.
+[[nodiscard]] int64 NowUnix() {
+	return QDateTime::currentSecsSinceEpoch();
+}
 
 [[nodiscard]] Resolved NormalResolution() {
 	auto result = Resolved();
@@ -37,15 +47,28 @@ public:
 
 private:
 	void refresh();
+	void refreshPeekTimer(const State &state, bool peeking);
 
 	Resolved _resolved = NormalResolution();
 	bool _refreshing = false;
+
+	// Nothing else would look at the deadline again, so without this a peek
+	// would sit there until the next unrelated config change. It is the only
+	// thing that ends one on time.
+	base::Timer _peekTimer;
+
 	rpl::event_stream<> _changes;
 	rpl::lifetime _lifetime;
 
 };
 
 Gate::Gate() {
+	_peekTimer.setCallback([] {
+		UpdateState([](State &state) {
+			state.peekActive = false;
+			state.peekDeadlineUnix = 0;
+		});
+	});
 	refresh();
 
 	rpl::merge(
@@ -86,13 +109,25 @@ void Gate::refresh() {
 				? u"keeping the cached resolution"_q
 				: u"keeping the one already in effect"_q));
 	}
-	if (!next || *next == _resolved) {
+	if (!next) {
+		return;
+	}
+
+	// Peek suspends the hiding of whatever resolution is in force; it is not
+	// part of the resolution itself, which is why it is applied here rather
+	// than in Resolve(). ToCache() below ignores the flag, so a peek can never
+	// be persisted into the fallback.
+	next->peeking = !next->normal && PeekLive(state, NowUnix());
+	refreshPeekTimer(state, next->peeking);
+
+	if (*next == _resolved) {
 		return;
 	}
 	_resolved = std::move(*next);
-	LOG(("Purple: preset '%1'%2, %3 lists."
+	LOG(("Purple: preset '%1'%2%3, %4 lists."
 		).arg(_resolved.preset
 		).arg(_resolved.normal ? u" (stock behaviour)"_q : QString()
+		).arg(_resolved.peeking ? u" (peeking)"_q : QString()
 		).arg(_resolved.lists.size()));
 	_changes.fire({});
 
@@ -102,6 +137,26 @@ void Gate::refresh() {
 		auto cache = ToCache(_resolved);
 		UpdateState([&](State &state) {
 			state.resolvedCache = cache;
+		});
+	}
+}
+
+void Gate::refreshPeekTimer(const State &state, bool peeking) {
+	_peekTimer.cancel();
+	if (peeking) {
+		if (const auto deadline = state.peekDeadlineUnix) {
+			// At least a second, so a deadline that has just landed still goes
+			// through the timer instead of writing state from inside refresh().
+			const auto left = std::max(deadline - NowUnix(), int64(1));
+			_peekTimer.callOnce(left * crl::time(1000));
+		}
+	} else if (state.peekActive) {
+		// A peek that outlived the app, or the preset it was revealing. Clear
+		// it rather than leave state.toml claiming a peek that is not running:
+		// the flag is what the next toggle reads to decide which way to go.
+		UpdateState([](State &state) {
+			state.peekActive = false;
+			state.peekDeadlineUnix = 0;
 		});
 	}
 }
@@ -168,7 +223,32 @@ Visibility VisibleFor(not_null<const PeerData*> peer) {
 }
 
 const std::optional<std::vector<PresetFolder>> &ShownFolders() {
-	return Instance().resolved().folders;
+	// A hidden folder is hidden, so a peek brings it back with everything else.
+	// Nothing means "the preset said nothing about folders", which is exactly
+	// what a peek makes true for as long as it runs.
+	static const auto kAll = std::optional<std::vector<PresetFolder>>();
+	const auto &resolved = Instance().resolved();
+	return resolved.peeking ? kAll : resolved.folders;
+}
+
+bool Peeking() {
+	return Instance().resolved().peeking;
+}
+
+PeekChange TogglePeek() {
+	const auto &resolved = Instance().resolved();
+	if (resolved.normal) {
+		// Nothing to reveal, and starting one anyway would leave a peek
+		// running that no chat list could show the end of.
+		return { .refused = true };
+	}
+	const auto wanted = !resolved.peeking;
+	const auto seconds = wanted ? ActiveSettings().peek.autoOffSeconds : 0;
+	UpdateState([&](State &state) {
+		state.peekActive = wanted;
+		state.peekDeadlineUnix = (seconds > 0) ? (NowUnix() + seconds) : 0;
+	});
+	return { .peeking = wanted, .seconds = seconds };
 }
 
 bool SilencedByPreset(not_null<const PeerData*> peer) {
@@ -177,7 +257,9 @@ bool SilencedByPreset(not_null<const PeerData*> peer) {
 
 bool FoldersRestricted() {
 	const auto &resolved = Instance().resolved();
-	return !resolved.normal && resolved.folders.has_value();
+	return !resolved.normal
+		&& !resolved.peeking
+		&& resolved.folders.has_value();
 }
 
 const EffectiveList *ListFor(not_null<const PeerData*> peer) {

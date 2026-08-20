@@ -37,6 +37,26 @@ namespace Purple {
 [[nodiscard]] Visibility VisibleFor(not_null<const PeerData*> peer);
 [[nodiscard]] const EffectiveList *ListFor(not_null<const PeerData*> peer);
 
+// Whether a peek is running: the active preset's hiding is suspended - every
+// chat shows, no group is mention-gated, every folder is back - while its
+// silencing is left exactly where it was. See docs/purple/work_mode.md.
+[[nodiscard]] bool Peeking();
+
+struct PeekChange {
+	bool peeking = false;
+
+	// Normal hides nothing, so there was nothing to reveal and nothing was
+	// written. Worth reporting rather than leaving a keypress look broken.
+	bool refused = false;
+
+	// How long the peek that just started will run, or zero for "until it is
+	// turned off", which is what auto_off = "off" means.
+	int seconds = 0;
+};
+
+// Starts a peek, or ends the one running.
+PeekChange TogglePeek();
+
 // Whether the active preset is what is silencing this chat. Distinct from
 // "muted": the preset only ever adds a mute, so a chat can be both, and the UI
 // has to say which one an Unmute would actually lift.
