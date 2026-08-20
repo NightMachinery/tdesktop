@@ -71,6 +71,12 @@ A preset may say `groups_require_mention = true`, and a list may override it.
 A group in a gated list appears in the chat list only while it holds an unread
 mention, and leaves again once that mention is read.
 
+It is off unless a preset asks for it. That default was the other way round
+until the gate was implemented - the value resolved but nothing consumed it, so
+nothing felt it - and it is the worst default available: a preset written to
+hide bots and nothing else would also have emptied the chat list of every group
+nobody had mentioned you in.
+
 Only groups are gated, and only ones that are showing at all. Channels have no
 mentions in the relevant sense, and a hidden chat is hidden whether or not
 anyone mentioned you in it - so `mentionGated` implies `show`.
@@ -285,9 +291,16 @@ back to muted.
 
 It now says `Silenced by 'work'` and opens the preset box, which is the only
 control that actually moves it. Below that, the ordinary mute item is chosen
-from the user's own `muteUntil` rather than from the effective answer, so muting
-a chat yourself stays reachable while a preset is silencing it - and stays in
+from `purpleMutedWithoutPreset()` rather than from the effective answer, so
+muting a chat yourself stays reachable while a preset silences it - and stays in
 force once the preset stops.
+
+That is the real accessor with the preset gate removed, not a peek at the
+chat's `muteUntil`. The peek was the first attempt and it was wrong: a channel
+can be muted by the account-wide default for its type with nothing set on the
+chat at all, and it read those as unmuted. The split is one function boundary -
+`isMuted()` is the gate plus the original body, and the body is what the UI
+asks for separately.
 
 The mute bell drawn on the chat list row is left alone. It is not a lie: the
 chat really is silenced.
