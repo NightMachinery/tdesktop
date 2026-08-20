@@ -111,6 +111,43 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 	const auto problems = container->add(
 		object_ptr<Ui::VerticalLayout>(container));
 
+	// Peek is otherwise a hotkey and nothing else, and a hotkey with no visible
+	// affordance is a hotkey nobody remembers. This is where someone would
+	// look for it, next to the preset it suspends. Under Normal it says why it
+	// does nothing rather than sitting there greyed out with no explanation.
+	const auto peekText = [] {
+		return ActiveResolved().normal
+			? u"Peek - nothing is hidden under Normal"_q
+			: u"Peek - show what the preset hides (%1)"_q.arg(
+				ActiveSettings().peek.hotkey);
+	};
+	const auto peek = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			peekText(),
+			Peeking(),
+			st::defaultCheckbox),
+		padding);
+	peek->setDisabled(ActiveResolved().normal);
+	peek->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		if (checked != Peeking()) {
+			TogglePeek();
+		}
+	}, peek->lifetime());
+
+	// Follows the engine rather than the click, so a peek started from the
+	// hotkey, or ended by its own timer, moves the tick here too. Disabled
+	// under Normal, which hides nothing there is anything to peek at.
+	ActiveChanges(
+	) | rpl::on_next([=] {
+		peek->setChecked(
+			Peeking(),
+			Ui::Checkbox::NotifyAboutChange::DontNotify);
+		peek->setDisabled(ActiveResolved().normal);
+		peek->setText(peekText());
+	}, peek->lifetime());
+
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
@@ -222,6 +259,10 @@ rpl::producer<QString> PresetMenuLabel() {
 		const auto &resolved = ActiveResolved();
 		return resolved.normal
 			? u"Work Mode"_q
+			: resolved.peeking
+			// A peek reveals the chats a preset hides, which is the one time
+			// the chat list stops matching the preset the label names.
+			? u"Work Mode: %1 (peeking)"_q.arg(resolved.preset)
 			: u"Work Mode: %1"_q.arg(resolved.preset);
 	});
 }
