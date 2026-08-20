@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "base/options.h"
 #include "base/crc32hash.h"
+#include "purple/purple_peek.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/shadow.h"
@@ -456,6 +457,11 @@ MainWindow::MainWindow(not_null<Controller*> controller)
 	}
 
 	Shortcuts::Listen(this);
+
+	// Purple: the peek key is configured in settings.toml rather than in
+	// tdesktop's shortcuts file, so it is bound alongside rather than through
+	// Shortcuts. See purple/purple_peek.h.
+	Purple::ListenPeekHotkey(this);
 }
 
 Main::Account &MainWindow::account() const {

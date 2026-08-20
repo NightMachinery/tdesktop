@@ -1728,6 +1728,8 @@ PRIVATE
     purple/purple_engine.h
     purple/purple_gate.cpp
     purple/purple_gate.h
+    purple/purple_peek.cpp
+    purple/purple_peek.h
     purple/purple_preset_box.cpp
     purple/purple_preset_box.h
     purple/purple_settings.cpp
