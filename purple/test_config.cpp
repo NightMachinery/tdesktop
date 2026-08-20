@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_splice.h"
 #include "purple/purple_state.h"
 
+#include <QtCore/QDateTime>
 #include <QtCore/QStringList>
 
 #include <cstdio>
@@ -870,6 +871,7 @@ void TestStateRoundTrip() {
 	state.previousPreset = u"normal"_q;
 	state.previousSource = Purple::PresetSource::Manual;
 	state.schedulePaused = true;
+	state.scheduleTarget = u"work"_q;
 	state.peekActive = true;
 	state.peekDeadlineUnix = 1755400000;
 	state.resolvedCache.preset = u"work"_q;
@@ -889,6 +891,7 @@ void TestStateRoundTrip() {
 	CHECK_EQ(back.previousPreset, u"normal"_q);
 	CHECK(back.previousSource == Purple::PresetSource::Manual);
 	CHECK(back.schedulePaused);
+	CHECK_EQ(back.scheduleTarget, u"work"_q);
 	CHECK(back.peekActive);
 	CHECK_EQ(back.peekDeadlineUnix, int64(1755400000));
 
@@ -1320,6 +1323,81 @@ void TestPeek() {
 	CHECK(!Purple::PeekLive(state, 0));
 }
 
+void TestScheduleTarget() {
+	Begin("schedule target");
+
+	// 2026-08-17 is a Monday, so dayOfWeek() runs 1..7 across that week.
+	const auto at = [](int weekday, int hour, int minute) {
+		return QDateTime(
+			QDate(2026, 8, 16 + weekday),
+			QTime(hour, minute));
+	};
+	const auto rule = [](
+			std::vector<int> days,
+			int from,
+			int till,
+			const QString &preset) {
+		auto result = Purple::ScheduleRule();
+		result.days = std::move(days);
+		result.from = from;
+		result.till = till;
+		result.preset = preset;
+		return result;
+	};
+	const auto target = [](
+			const Purple::Schedule &schedule,
+			const QDateTime &when) {
+		const auto result = Purple::ScheduleTarget(schedule, when);
+		return result ? *result : u"<nothing>"_q;
+	};
+
+	// A schedule with no rules drives nothing. It must not read as "wants
+	// Normal", or an empty section would override every other way of choosing.
+	auto schedule = Purple::Schedule();
+	CHECK_EQ(target(schedule, at(1, 10, 0)), u"<nothing>"_q);
+
+	schedule.rules.push_back(rule({ 1, 2, 3, 4, 5 }, 9 * 60, 17 * 60, u"work"_q));
+	CHECK_EQ(target(schedule, at(1, 10, 0)), u"work"_q);
+
+	// Half-open: the start belongs to the window, the end does not, so
+	// neighbouring windows cannot both claim the moment they meet.
+	CHECK_EQ(target(schedule, at(1, 9, 0)), u"work"_q);
+	CHECK_EQ(target(schedule, at(1, 8, 59)), u"normal"_q);
+	CHECK_EQ(target(schedule, at(1, 16, 59)), u"work"_q);
+	CHECK_EQ(target(schedule, at(1, 17, 0)), u"normal"_q);
+
+	// Saturday is not listed.
+	CHECK_EQ(target(schedule, at(6, 10, 0)), u"normal"_q);
+
+	// Switching the whole schedule off is not the same as it wanting Normal:
+	// it stops driving, and whatever is active stays.
+	schedule.enabled = false;
+	CHECK_EQ(target(schedule, at(1, 10, 0)), u"<nothing>"_q);
+	schedule.enabled = true;
+
+	// A window crossing midnight belongs to the day it starts on.
+	auto night = Purple::Schedule();
+	night.rules.push_back(rule({ 1 }, 22 * 60, 6 * 60, u"sleep"_q));
+	CHECK_EQ(target(night, at(1, 22, 0)), u"sleep"_q);
+	CHECK_EQ(target(night, at(1, 23, 59)), u"sleep"_q);
+	CHECK_EQ(target(night, at(2, 5, 59)), u"sleep"_q);
+	CHECK_EQ(target(night, at(2, 6, 0)), u"normal"_q);
+
+	// ... and not to the morning of the day it is listed for, which is the
+	// trap: Monday 02:00 is the tail of a Sunday window, not of Monday's.
+	CHECK_EQ(target(night, at(1, 2, 0)), u"normal"_q);
+	night.rules[0].days = { 7 };
+	CHECK_EQ(target(night, at(1, 2, 0)), u"sleep"_q);
+
+	// First match wins in file order, and a disabled rule is not a match.
+	auto several = Purple::Schedule();
+	several.rules.push_back(rule({ 1 }, 9 * 60, 17 * 60, u"first"_q));
+	several.rules.push_back(rule({ 1 }, 9 * 60, 17 * 60, u"second"_q));
+	CHECK_EQ(target(several, at(1, 10, 0)), u"first"_q);
+	several.rules[0].enabled = false;
+	CHECK_EQ(target(several, at(1, 10, 0)), u"second"_q);
+}
+
 void TestResolvedCache() {
 	Begin("resolved cache");
 
@@ -1385,6 +1463,7 @@ int main() {
 	TestMatchPriority();
 	TestMentionGate();
 	TestPeek();
+	TestScheduleTarget();
 	TestResolvedCache();
 
 	std::printf("%d checks, %d failures\n", Checks, Failures);

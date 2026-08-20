@@ -177,6 +177,7 @@ State ParseState(const QString &text, const QString &path) {
 	result.previousSource = PresetSourceFromName(
 		ReadString(root, "previous_source"));
 	result.schedulePaused = ReadBool(root, "schedule_paused", false);
+	result.scheduleTarget = ReadString(root, "schedule_target");
 	result.peekActive = ReadBool(root, "peek_active", false);
 	if (const auto deadline = root.get("peek_deadline_unix")) {
 		result.peekDeadlineUnix = deadline->value_or(int64(0));
@@ -207,6 +208,8 @@ QString SerializeState(const State &state) {
 		.arg(Quoted(PresetSourceName(state.previousSource)));
 	result += u"schedule_paused      = %1\n"_q
 		.arg(Boolean(state.schedulePaused));
+	result += u"schedule_target      = %1\n"_q
+		.arg(Quoted(state.scheduleTarget));
 	result += u"peek_active          = %1\n"_q.arg(Boolean(state.peekActive));
 	result += u"peek_deadline_unix   = %1\n"_q.arg(state.peekDeadlineUnix);
 

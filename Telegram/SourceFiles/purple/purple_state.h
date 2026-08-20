@@ -61,6 +61,14 @@ struct State {
 	PresetSource previousSource = PresetSource::Manual;
 
 	bool schedulePaused = false;
+
+	// The last preset the schedule computed, so it can act on a change rather
+	// than on every tick. That is what lets a preset chosen by hand survive
+	// until the next boundary instead of being overwritten a second later, and
+	// what lets a boundary missed while the app was closed still be caught up
+	// on the next launch. Empty means it has never run.
+	QString scheduleTarget;
+
 	bool peekActive = false;
 	int64 peekDeadlineUnix = 0;
 	ResolvedCache resolvedCache;

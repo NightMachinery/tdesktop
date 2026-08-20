@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_settings.h"
 #include "purple/purple_state.h"
 
+class QDateTime;
+
 // Turns a preset and the lists it inherits from into a flat table of "for this
 // list, show and notify are these". Resolution happens once per config or
 // preset change; nothing here may be called per repaint.
@@ -112,5 +114,15 @@ struct Visibility {
 
 [[nodiscard]] ResolvedCache ToCache(const Resolved &resolved);
 [[nodiscard]] std::optional<Resolved> FromCache(const ResolvedCache &cache);
+
+// What the schedule wants active at this local time: the preset of the first
+// rule covering the moment, or Normal when rules exist and none does.
+//
+// Nothing at all when the schedule is off or has no rules, which is a different
+// answer from wanting Normal and has to be: otherwise an empty [schedule]
+// section would quietly force Normal over every other way of choosing a preset.
+[[nodiscard]] std::optional<QString> ScheduleTarget(
+	const Schedule &schedule,
+	const QDateTime &now);
 
 } // namespace Purple

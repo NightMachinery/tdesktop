@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_engine.h"
 
+#include <QtCore/QDateTime>
+
 #include <algorithm>
 
 namespace Purple {
@@ -248,6 +250,48 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 		});
 	}
 	return result;
+}
+
+std::optional<QString> ScheduleTarget(
+		const Schedule &schedule,
+		const QDateTime &now) {
+	if (!schedule.enabled || schedule.rules.empty()) {
+		return std::nullopt;
+	}
+	const auto covers = [](const ScheduleRule &rule, int day) {
+		return std::find(rule.days.begin(), rule.days.end(), day)
+			!= rule.days.end();
+	};
+	const auto time = now.time();
+	const auto minutes = time.hour() * 60 + time.minute();
+	const auto today = now.date().dayOfWeek();
+	const auto yesterday = (today == 1) ? 7 : (today - 1);
+
+	// First match wins, in file order, the same rule the lists follow. Two
+	// rules covering one moment is a thing a hand-written file will do, and
+	// picking by position is the only answer that can be predicted by reading.
+	for (const auto &rule : schedule.rules) {
+		if (!rule.enabled) {
+			continue;
+		} else if (rule.from < rule.till) {
+			// Half-open, so 09:00-12:00 and 12:00-17:00 hand over cleanly
+			// rather than both claiming noon. The parser has already refused
+			// a rule whose ends are equal, so there is no empty window here.
+			if (covers(rule, today)
+				&& minutes >= rule.from
+				&& minutes < rule.till) {
+				return rule.preset;
+			}
+		} else if ((covers(rule, today) && minutes >= rule.from)
+			|| (covers(rule, yesterday) && minutes < rule.till)) {
+			// A window crossing midnight belongs to the day it starts on, so
+			// "mon, 22:00 to 06:00" runs into Tuesday morning instead of
+			// stopping at midnight or needing Tuesday listed as well - which
+			// would also have claimed Tuesday 00:00 to 06:00 twice over.
+			return rule.preset;
+		}
+	}
+	return NormalPreset();
 }
 
 } // namespace Purple
