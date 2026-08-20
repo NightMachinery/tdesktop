@@ -99,7 +99,9 @@ list, for the banner described in the Work Mode spec.
 The Work Mode half - lists, presets, folders, schedule, focus sync and peek - is
 documented by the starter file the app writes on first run, which carries a
 commented example of each section. The parser reads the whole schema today;
-`[focus_sync]` is the one section nothing consumes yet.
+Every section is consumed now, `[focus_sync]` included - though nothing yet sets
+the `focus_active` flag it acts on, for the reasons under focus sync in
+[work_mode.md](work_mode.md).
 
 `[peek] hotkey` is read as Qt portable text, so on macOS `Ctrl` means Command
 and `Meta` means the physical Control key. It is deliberately not part of

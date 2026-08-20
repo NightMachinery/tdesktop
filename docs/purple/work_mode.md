@@ -456,9 +456,53 @@ survives all of them by construction.
 A settings or state change re-ticks immediately, since either can change the
 answer sooner than the next thirty seconds would.
 
+## OS focus sync
+
+    [focus_sync]
+    enabled      = true
+    enter_preset = "work"
+    exit_preset  = "previous"
+
+When the OS says a focus mode is on, the named preset takes over. When it goes
+off, `previous` puts back both the preset and the reason it was active - so a
+window the schedule had opened still closes at its own boundary afterwards. A
+preset named outright instead was put there by neither the user nor the
+schedule, so it lands as a manual choice and stays until something moves it.
+
+### The flag and the detector are separate
+
+`focus_active` in `state.toml` is the entire input. Everything above reads it;
+nothing in the app writes it yet.
+
+The split is deliberate. The policy - what to enter, what to put back, what to
+leave alone - is worth getting right once, and it is provable. Detecting a macOS
+focus mode is neither. There is no public API for it; the usual route is an
+undocumented JSON file under `~/Library/DoNotDisturb/DB` that Apple owns and can
+change in a point release, and the sanctioned route - an App Intents focus
+filter - needs its own extension target and a per-mode opt-in in System
+Settings.
+
+Keeping them apart means the fragile half can be replaced, or live outside the
+app entirely as a Hammerspoon watcher writing one line of `state.toml`, without
+touching anything already proven.
+
+### Edges again
+
+`focus_seen` records the last value acted on - the same shape as
+`schedule_target`, for the same reason. A preset chosen by hand in the middle of
+a focus session stands, because nothing fires again until focus itself changes;
+and when focus does end, the preset in force is not the one focus imposed, so it
+is left alone.
+
+Turning `enabled` off while focus is holding a preset hands that preset back. A
+preset that nothing on screen explains and nothing still running would ever lift
+is the one state this must not be able to reach.
+
 ## Not yet implemented
 
-- OS focus sync. Parsed, not consumed.
+- Nothing sets `focus_active`. The policy above is real; the detector is not
+  written, and which mechanism it should use is an open question - see the
+  reasoning under focus sync.
 - Per-folder `notify` and `filtered`, as above.
 - Every other mute surface - the profile page toggle, the chat top bar - still
   shows a preset-imposed mute as the user's own. They are honest about the
@@ -475,6 +519,7 @@ resolves itself as soon as the entries load.
 ## Implementation
 
     Telegram/SourceFiles/purple/purple_engine.{h,cpp}     resolution, pure data
+    Telegram/SourceFiles/purple/purple_focus.{h,cpp}      OS focus sync
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
     Telegram/SourceFiles/purple/purple_peek.{h,cpp}       the peek hotkey
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
