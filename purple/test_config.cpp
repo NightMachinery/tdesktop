@@ -1045,7 +1045,15 @@ void TestResolveDefault() {
 	// The default preset says nothing about folders, which is not the same
 	// as naming none - every folder shows.
 	CHECK(!resolved->folders.has_value());
-	CHECK(resolved->groupsRequireMention);
+
+	// Off unless a preset asks for it. This assertion said the opposite until
+	// the gate was implemented and nothing was consuming the value to notice:
+	// defaulting it on means a preset that only hides bots also empties the
+	// chat list of every group nobody has mentioned you in.
+	CHECK(!resolved->groupsRequireMention);
+	for (const auto &list : resolved->lists) {
+		CHECK(!list.groupsRequireMention);
+	}
 
 	// An empty name means the same thing, since that is what a fresh state
 	// file with no active preset resolves to.

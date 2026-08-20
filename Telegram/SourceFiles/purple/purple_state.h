@@ -39,7 +39,7 @@ struct ResolvedList {
 struct ResolvedCache {
 	QString preset;
 	std::vector<ResolvedList> lists;
-	bool groupsRequireMention = true;
+	bool groupsRequireMention = false;
 
 	// Nothing and an empty vector mean different things - see Resolved::folders
 	// - so the key is written only when the preset said something, and its

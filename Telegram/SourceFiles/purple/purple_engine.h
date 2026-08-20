@@ -36,7 +36,9 @@ struct EffectiveList {
 
 	// Only meaningful for lists that can hold groups; resolved per list so a
 	// preset can exempt one list from the mention gate without exempting all.
-	bool groupsRequireMention = true;
+	// Off unless a preset asks for it: a preset that only hides bots must not
+	// also empty the chat list of every group nobody has mentioned you in.
+	bool groupsRequireMention = false;
 
 	friend bool operator==(
 		const EffectiveList &,
@@ -58,7 +60,9 @@ struct Resolved {
 	// the folder strip" and not the same thing at all.
 	std::optional<std::vector<PresetFolder>> folders;
 
-	bool groupsRequireMention = true;
+	// The preset-wide default every list starts from. Off when no preset in the
+	// chain says otherwise - see EffectiveList.
+	bool groupsRequireMention = false;
 
 	[[nodiscard]] const EffectiveList *list(const QString &name) const;
 

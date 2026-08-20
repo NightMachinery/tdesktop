@@ -77,7 +77,7 @@ namespace {
 	result.groupsRequireMention = ReadBool(
 		*table,
 		"groups_require_mention",
-		true);
+		false);
 	if (const auto lists = table->get("lists")) {
 		if (const auto array = lists->as_array()) {
 			for (auto &&element : *array) {
