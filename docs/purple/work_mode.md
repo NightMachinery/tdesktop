@@ -33,14 +33,17 @@ default.
 
 ## What it does today
 
-Two things, both derived from the resolved list a chat falls into:
+Three things, all derived from the resolved list a chat falls into:
 
 - `show = false` removes the chat from every chat list.
 - `notify = false` mutes it.
+- `groups_require_mention = true` leaves a group out until it holds an unread
+  mention.
 
-`show` is enforced in `History::shouldBeInChatList()`, ahead of every other
-condition there - including the shortcut that keeps pinned dialogs, or pinning a
-chat would exempt it from every preset.
+`show` and the mention gate are both enforced in
+`History::shouldBeInChatList()`, ahead of every other condition there -
+including the shortcut that keeps pinned dialogs, or pinning a chat would exempt
+it from every preset.
 
 That single hook also settles the unread badges, which was the part that looked
 like it would need its own gate. `Dialogs::MainList` does not compute its totals
@@ -62,6 +65,60 @@ behind your back.
 Saved Messages is never hidden and never gated. Nothing arrives in it unbidden,
 and a chat list that does not show it offers no way back to it.
 
+## The mention gate
+
+A preset may say `groups_require_mention = true`, and a list may override it.
+A group in a gated list appears in the chat list only while it holds an unread
+mention, and leaves again once that mention is read.
+
+Only groups are gated, and only ones that are showing at all. Channels have no
+mentions in the relevant sense, and a hidden chat is hidden whether or not
+anyone mentioned you in it - so `mentionGated` implies `show`.
+
+The gate reads `chatListUnreadState().mentions`, which is the same number the
+mention badge is drawn from. That is deliberate: the rule becomes legible from
+the chat list itself - the group is there exactly while the badge would be lit.
+It also gets forums right for free, since for a forum that number is the sum
+over its topics rather than a count on the group.
+
+Reading the mention is what takes the group away again, which means a group you
+opened *from* its mention leaves the list while you are still standing in it.
+The chat stays open; only the row goes. That is the feature working. The
+alternative - exempting whichever chat is currently open - would mean the data
+layer asking the window layer what is on screen, and would only postpone the
+disappearance to the moment you look away.
+
+Gating is orthogonal to `notify`. A gated group with `notify = true` still
+announces every message, which mostly defeats the point; the combination worth
+writing is `notify = false` with the gate on, which is "silent, and out of sight
+until someone actually wants me". They are kept separate because a list decides
+both, and collapsing them would remove a choice rather than add one.
+
+### Re-checking it
+
+Membership now depends on something that changes constantly, which the chat
+list has no reason to re-examine on its own - `shouldBeInChatList()` is not
+re-evaluated when an unread count moves.
+
+The trigger is `HistoryUnreadThings::Proxy::setCount()`, which is the single
+funnel every mention count change passes through, and which already computes
+the has-any/has-none edge for the badge. The Purple hook sits just after that
+existing dispatch, and outside its `inChatList()` guard, for two reasons: the
+chat that needs bringing back is precisely the one that is not in the list, and
+for a forum it is that dispatch which rolls the topic's count up into the
+parent's sum.
+
+It is guarded on the chat actually being gated. A mention edge cannot change
+membership otherwise, and the refresh repaints a chat list row.
+
+A transition is logged, by peer id:
+
+    Purple: mention gate revealed peer 1234567890.
+
+That is the one event which explains a chat appearing or vanishing with nobody
+touching anything, so it is worth a line. It stays rare by construction - only
+gated chats reach it, and only on the edge.
+
 ## Applying a preset change
 
 Nothing about any peer changes when a preset does, so no upstream signal fires.
@@ -75,7 +132,8 @@ Membership takes two calls, `updateChatListExistence()` then
 `updateChatListSortPosition()`, because neither does both directions. The first
 drops a chat that is now hidden. Only the second brings one back: leaving the
 chat list zeroes the sort key, and `setChatListExistence(true)` quietly removes
-rather than adds when the entry has none.
+rather than adds when the entry has none. Both callers go through
+`History::purpleRefreshChatListMembership()` so that ordering is stated once.
 
 The walk is triggered by `Purple::ActiveChanges()`, which fires only when the
 resolution actually differs. A state write that merely moved a peek deadline
@@ -84,7 +142,12 @@ compares equal and rebuilds nothing.
 It logs what it did:
 
     Purple: preset 'test', 6 lists.
-    Purple: 100 of 2725 loaded chats hidden, 318 silenced.
+    Purple: 43 of 2251 loaded chats hidden, 203 mention-gated (2 showing), 0 silenced.
+
+Gated groups are counted apart from hidden ones because it is a different
+claim. A gated group is only out of the list while it has nothing to say, so
+the number that means anything is how many of them are still showing - and a
+zero gated count means the gate is off rather than that it found nothing.
 
 That line exists because a preset that hides nothing looks exactly like a preset
 that is working, and the usual cause is a list named slightly wrong. It is also
@@ -180,10 +243,6 @@ settings in place.
 
 ## Not yet implemented
 
-- The mention gate. `Visibility::mentionGated` is resolved and available, but
-  nothing acts on it, so a group configured to appear only on an unread mention
-  currently just appears. That is the safe direction to be wrong in - nothing
-  disappears unexpectedly.
 - Peek, scheduling and OS focus sync. All parsed, none consumed.
 - Per-folder `notify` and `filtered`, as above.
 - The UI. There is no way to choose a preset from inside the app yet. Set
