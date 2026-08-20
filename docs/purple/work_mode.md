@@ -241,16 +241,65 @@ reload. List *membership* is not cached: it comes from `settings.toml`, which
 parsed successfully, since a file that did not parse leaves the previous
 settings in place.
 
+## Choosing a preset
+
+The main menu carries the switch, above Settings rather than inside it: a work
+preset is changed several times a day and settings are not. The entry reads
+`Work Mode` under Normal and `Work Mode: work` otherwise, so the current mode is
+legible without opening anything.
+
+The box lists Normal and every preset in the file, each with a one-line summary
+of what it does - `work  -  hides 2 lists, silences 1 list, 3 folders` - built by
+resolving the preset rather than by describing what was typed. Choosing one
+applies it immediately and leaves the box open, so a wrong guess is one click
+from being undone.
+
+`state.toml` remains the source of truth and is still hand-editable; the box is
+a second writer to the same field, not a replacement for it.
+
+### What the box says when something is wrong
+
+`settings.toml` problems - the error, and every warning - are shown here. Until
+now they only reached the log, which meant a preset that silently did nothing
+because of a mistyped list name looked exactly like a preset that was working.
+
+If the active preset is not in the file at all - deleted, renamed, or lost to a
+half-finished edit - no row is checked, and the box says so. Checking Normal
+instead would look tidier and would be a disaster: the selection callback would
+fire and switch the account to Normal, unhiding every chat the missing preset
+was hiding, over a typo. This is the same rule as the `resolved_cache` fallback,
+enforced in the UI rather than in the engine.
+
+The rows are rebuilt when `settings.toml` changes, but deliberately *not* when
+`state.toml` does. Choosing a preset is itself a state write, so rebuilding
+there would destroy the radio button whose click was still on the stack. The
+selection alone follows the state, which is what lets a schedule move it under
+an open box.
+
+## The mute a preset imposed
+
+`Data::NotifySettings::isMuted()` answers the effective question, and a preset
+can be what makes it true. The chat list context menu used to take that at face
+value and offer `Unmute`, which lifted nothing - the next call went straight
+back to muted.
+
+It now says `Silenced by 'work'` and opens the preset box, which is the only
+control that actually moves it. Below that, the ordinary mute item is chosen
+from the user's own `muteUntil` rather than from the effective answer, so muting
+a chat yourself stays reachable while a preset is silencing it - and stays in
+force once the preset stops.
+
+The mute bell drawn on the chat list row is left alone. It is not a lie: the
+chat really is silenced.
+
 ## Not yet implemented
 
 - Peek, scheduling and OS focus sync. All parsed, none consumed.
 - Per-folder `notify` and `filtered`, as above.
-- The UI. There is no way to choose a preset from inside the app yet. Set
-  `active_preset` in `state.toml` by hand - it is reloaded live, like
-  `settings.toml`, so the chat list rearranges as you save.
-- The mute bell and the chat context menu show a preset-imposed mute as if you
-  had set it, and unmuting will not lift it. Making the UI say so is part of the
-  read-only mirrors milestone.
+- Every other mute surface - the profile page toggle, the chat top bar - still
+  shows a preset-imposed mute as the user's own. They are honest about the
+  chat being silent and dishonest about who silenced it, and each needs the
+  same two lines the context menu got.
 
 ## Cloud unread counts
 
@@ -261,8 +310,9 @@ resolves itself as soon as the entries load.
 
 ## Implementation
 
-    Telegram/SourceFiles/purple/purple_engine.{h,cpp}   resolution, pure data
-    Telegram/SourceFiles/purple/purple_gate.{h,cpp}     the seam to tdesktop
+    Telegram/SourceFiles/purple/purple_engine.{h,cpp}     resolution, pure data
+    Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
+    Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
 
 `purple_engine` has no tdesktop dependency at all - it never sees a `PeerData`,
 only an id and a `ChatKind` - for the same reason the parser does not: every
