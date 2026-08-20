@@ -44,10 +44,10 @@ whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
 never touch the mtime of the file you are editing by hand.
 
-It is reloaded live too, which is not what a machine-owned file needs but is how
-you pick a preset until the Work Mode UI exists - see
-[work_mode.md](work_mode.md). The app's own writes come back through the same
-watch, compare equal to what it just wrote, and do nothing.
+It is reloaded live too, which is not something a machine-owned file needs but
+keeps it hand-editable now that the preset box is a second writer to the same
+fields - see [work_mode.md](work_mode.md). The app's own writes come back
+through the same watch, compare equal to what it just wrote, and do nothing.
 
 Both are written through `QSaveFile`, which writes a temporary alongside the
 target and renames over it, so a crash mid-write cannot leave a truncated config.
@@ -98,7 +98,11 @@ list, for the banner described in the Work Mode spec.
 The Work Mode half - lists, presets, folders, schedule, focus sync and peek - is
 documented by the starter file the app writes on first run, which carries a
 commented example of each section. The parser reads the whole schema today;
-nothing consumes it yet beyond `[premium]`.
+`[schedule]` and `[focus_sync]` are the two sections nothing consumes yet.
+
+`[peek] hotkey` is read as Qt portable text, so on macOS `Ctrl` means Command
+and `Meta` means the physical Control key. It is deliberately not part of
+tdesktop's own shortcut table - see [work_mode.md](work_mode.md).
 
 ## Implementation
 

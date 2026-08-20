@@ -305,9 +305,89 @@ asks for separately.
 The mute bell drawn on the chat list row is left alone. It is not a lie: the
 chat really is silenced.
 
+## Peek
+
+A preset hides chats, and sometimes you want one of them without ending the
+preset. `Ctrl+Shift+P` suspends the hiding for two minutes: every chat is back
+in the list, no group is waiting for a mention, and every folder is in the
+strip. Press it again to end it early.
+
+    [peek]
+    hotkey   = "Ctrl+Shift+P"
+    auto_off = "2m"
+
+`auto_off = "off"` leaves it running until it is turned off by hand.
+
+### It reveals; it does not un-silence
+
+A peek does not touch `notify`. The two halves of a preset answer different
+questions - hiding is about what you can find, silencing is about what may
+interrupt you - and a peek is a deliberate look at the chat list. Unmuting for
+it would deliver a burst of notifications for chats already on the screen and
+then take the mute back before you had dealt with them.
+
+It also keeps the rest of the UI honest through a peek: `Silenced by 'work'` in
+the chat list menu still says the true thing, because it still is.
+
+### It is not part of the resolution
+
+`Resolve()` never sets `peeking`. The gate does, from `state.toml`, after the
+`resolved_cache` snapshot has been taken - so a peek can never be persisted
+into the fallback. A cached resolution restored with a peek in it would come
+back revealed, with nothing left running to put it back.
+
+Everything else follows for free. `peeking` is a field of `Resolved`, so
+toggling it fires `Purple::ActiveChanges()` and the peer walk in
+`Data::Session::refreshPurpleWorkMode()` rebuilds every chat list exactly as it
+does for a preset change.
+
+### The flag and the clock
+
+`peek_active` and `peek_deadline_unix` live in `state.toml`. The deadline is
+local wall-clock seconds rather than the server clock: a two-minute peek has to
+expire while offline too.
+
+Persisting them is what would otherwise let a peek outlive an app that was
+killed in the middle of one, and the deadline is what makes that safe - by the
+time anything reads the flag again it has passed, so the peek is already over.
+A peek with `auto_off` turned off has no deadline, and that one does come back,
+which is what "until you turn it off" has to mean if it means anything.
+
+The gate clears a flag it finds expired rather than leaving `state.toml`
+claiming a peek that ended, because that flag is what the next press reads to
+decide which way to toggle.
+
+The timer belongs to the gate for the same reason: the gate is what must re-run
+when it fires. Nothing else would look at the deadline again, so without it a
+peek would sit there until the next unrelated config change.
+
+### Why the key is not a Shortcuts::Command
+
+tdesktop's shortcut table is owned by `tdata/shortcuts-custom.json` and by the
+shortcuts settings page. This key is owned by `settings.toml`, where the rest of
+Work Mode is configured, and two files claiming one binding is the situation the
+config split exists to avoid. So `purple_peek.cpp` keeps one `QAction` and adds
+it to every window - exactly what `Shortcuts::Manager` does - and re-points it
+when the file changes, so the hotkey reloads live like everything else in there.
+
+The sequence is read as Qt portable text, which means that on macOS `Ctrl` is
+Command and `Meta` is the physical Control key. That is the same convention
+tdesktop writes into its own shortcuts file.
+
+### Finding it
+
+The main menu entry reads `Work Mode: work (peeking)` while one is running, and
+the preset box carries a checkbox naming the key: a hotkey with no visible
+affordance is a hotkey nobody remembers. Under Normal the checkbox is inert and
+says why - `Peek - nothing is hidden under Normal` - rather than sitting there
+greyed out with no explanation.
+
+Pressing the key shows a toast saying which way it went - including under
+Normal, where the answer is that there was nothing to do.
+
 ## Not yet implemented
 
-- Peek, scheduling and OS focus sync. All parsed, none consumed.
+- Scheduling and OS focus sync. Both parsed, neither consumed.
 - Per-folder `notify` and `filtered`, as above.
 - Every other mute surface - the profile page toggle, the chat top bar - still
   shows a preset-imposed mute as the user's own. They are honest about the
@@ -325,6 +405,7 @@ resolves itself as soon as the entries load.
 
     Telegram/SourceFiles/purple/purple_engine.{h,cpp}     resolution, pure data
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
+    Telegram/SourceFiles/purple/purple_peek.{h,cpp}       the peek hotkey
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
 
 `purple_engine` has no tdesktop dependency at all - it never sees a `PeerData`,
