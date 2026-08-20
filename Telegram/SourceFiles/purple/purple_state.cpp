@@ -176,6 +176,8 @@ State ParseState(const QString &text, const QString &path) {
 	result.previousPreset = ReadString(root, "previous_preset");
 	result.previousSource = PresetSourceFromName(
 		ReadString(root, "previous_source"));
+	result.focusActive = ReadBool(root, "focus_active", false);
+	result.focusSeen = ReadBool(root, "focus_seen", false);
 	result.schedulePaused = ReadBool(root, "schedule_paused", false);
 	result.scheduleTarget = ReadString(root, "schedule_target");
 	result.peekActive = ReadBool(root, "peek_active", false);
@@ -206,6 +208,8 @@ QString SerializeState(const State &state) {
 		.arg(Quoted(state.previousPreset));
 	result += u"previous_source      = %1\n"_q
 		.arg(Quoted(PresetSourceName(state.previousSource)));
+	result += u"focus_active         = %1\n"_q.arg(Boolean(state.focusActive));
+	result += u"focus_seen           = %1\n"_q.arg(Boolean(state.focusSeen));
 	result += u"schedule_paused      = %1\n"_q
 		.arg(Boolean(state.schedulePaused));
 	result += u"schedule_target      = %1\n"_q

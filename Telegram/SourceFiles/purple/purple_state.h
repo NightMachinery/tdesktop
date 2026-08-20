@@ -60,6 +60,18 @@ struct State {
 	QString previousPreset;
 	PresetSource previousSource = PresetSource::Manual;
 
+	// Whether the OS says a focus mode is on. Written by whatever is watching
+	// for that, which is deliberately not the same thing as what acts on it:
+	// the policy below is worth proving, and the detection is a moving target
+	// that Apple owns. See docs/purple/work_mode.md.
+	bool focusActive = false;
+
+	// The last value of focusActive that was acted on, so focus sync moves on
+	// a change rather than on a value - the same shape as scheduleTarget, and
+	// for the same reason. A preset chosen by hand in the middle of a focus
+	// session stands, because nothing fires again until focus itself changes.
+	bool focusSeen = false;
+
 	bool schedulePaused = false;
 
 	// The last preset the schedule computed, so it can act on a change rather

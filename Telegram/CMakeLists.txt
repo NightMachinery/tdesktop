@@ -1726,6 +1726,8 @@ PRIVATE
     purple/purple_config.h
     purple/purple_engine.cpp
     purple/purple_engine.h
+    purple/purple_focus.cpp
+    purple/purple_focus.h
     purple/purple_gate.cpp
     purple/purple_gate.h
     purple/purple_peek.cpp

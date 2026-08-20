@@ -146,6 +146,10 @@ struct ParseResult {
 // them for the implicit root and for the stock-behaviour bypass.
 [[nodiscard]] bool IsReservedPresetName(const QString &name);
 
+// Whether exit_preset says "previous" - put back whatever was active when the
+// focus mode came on, rather than a preset named outright.
+[[nodiscard]] bool IsPreviousPresetName(const QString &name);
+
 // "90s", "2m", "1h", "0" / "off" for no timer. Nothing for unparseable input.
 [[nodiscard]] std::optional<int> ParseDuration(const QString &value);
 

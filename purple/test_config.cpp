@@ -870,6 +870,8 @@ void TestStateRoundTrip() {
 	state.activeSource = Purple::PresetSource::Schedule;
 	state.previousPreset = u"normal"_q;
 	state.previousSource = Purple::PresetSource::Manual;
+	state.focusActive = true;
+	state.focusSeen = true;
 	state.schedulePaused = true;
 	state.scheduleTarget = u"work"_q;
 	state.peekActive = true;
@@ -890,6 +892,8 @@ void TestStateRoundTrip() {
 	CHECK(back.activeSource == Purple::PresetSource::Schedule);
 	CHECK_EQ(back.previousPreset, u"normal"_q);
 	CHECK(back.previousSource == Purple::PresetSource::Manual);
+	CHECK(back.focusActive);
+	CHECK(back.focusSeen);
 	CHECK(back.schedulePaused);
 	CHECK_EQ(back.scheduleTarget, u"work"_q);
 	CHECK(back.peekActive);
@@ -923,6 +927,8 @@ void TestStateDefaults() {
 		CHECK_EQ(state.activePreset, u"normal"_q);
 		CHECK(state.activeSource == Purple::PresetSource::Manual);
 		CHECK(!state.schedulePaused);
+		CHECK(!state.focusActive);
+		CHECK(!state.focusSeen);
 		CHECK(!state.peekActive);
 		CHECK(!state.resolvedCache.valid());
 	}

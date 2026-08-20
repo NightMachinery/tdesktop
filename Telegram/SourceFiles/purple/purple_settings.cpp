@@ -721,6 +721,12 @@ bool IsReservedPresetName(const QString &name) {
 			Qt::CaseInsensitive);
 }
 
+bool IsPreviousPresetName(const QString &name) {
+	return !name.compare(
+		QLatin1String(kPreviousPreset),
+		Qt::CaseInsensitive);
+}
+
 std::optional<int> ParseDuration(const QString &value) {
 	const auto trimmed = value.trimmed();
 	if (trimmed.isEmpty()) {

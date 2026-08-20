@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
+#include "purple/purple_focus.h"
 #include "purple/purple_schedule.h"
 #include "base/unixtime.h"
 #include "core/core_settings.h"
@@ -306,10 +307,11 @@ void Application::run() {
 	Ui::PreloadTextSpoilerMask();
 	startShortcuts();
 
-	// Purple: the schedule moves the active preset on its own clock, with no
-	// window and no account involved, so it starts with the other app-level
-	// services rather than being hung off one of them.
+	// Purple: both of these move the active preset with no window and no
+	// account involved, so they start with the other app-level services rather
+	// than being hung off one of them.
 	Purple::StartSchedule();
+	Purple::StartFocusSync();
 
 	startEmojiImageLoader();
 	startSystemDarkModeViewer();
