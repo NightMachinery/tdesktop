@@ -1732,6 +1732,8 @@ PRIVATE
     purple/purple_peek.h
     purple/purple_preset_box.cpp
     purple/purple_preset_box.h
+    purple/purple_schedule.cpp
+    purple/purple_schedule.h
     purple/purple_settings.cpp
     purple/purple_settings.h
     purple/purple_splice.cpp
