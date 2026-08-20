@@ -64,6 +64,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_preset_box.h"
 #include "menu/menu_mute.h"
 #include "menu/menu_ttl_validator.h"
 #include "apiwrap.h"
@@ -251,7 +253,22 @@ void PeerMenuAddMuteSubmenuAction(
 			}
 		};
 	};
-	const auto isMuted = notifySettings->isMuted(thread);
+	// Purple: isMuted() is the effective answer, and a work preset can be what
+	// makes it true. Offering Unmute then would be a lie - the next call goes
+	// straight back to muted. Say what is actually holding it, offer the one
+	// control that moves it, and pick the item below from the user's own
+	// setting rather than the effective one, so their own mute stays reachable.
+	const auto byPreset = Purple::SilencedByPreset(thread->peer());
+	if (byPreset) {
+		const auto show = controller->uiShow();
+		addAction(
+			u"Silenced by '%1'"_q.arg(Purple::ActiveResolved().preset),
+			[=] { show->showBox(Box(Purple::PresetBox)); },
+			&st::menuIconMute);
+	}
+	const auto isMuted = byPreset
+		? (thread->notify().muteUntil().value_or(0) > base::unixtime::now())
+		: notifySettings->isMuted(thread);
 	if (isMuted) {
 		const auto text = tr::lng_context_unmute(tr::now)
 			+ '\t'

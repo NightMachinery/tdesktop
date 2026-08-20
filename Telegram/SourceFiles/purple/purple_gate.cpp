@@ -171,6 +171,10 @@ const std::optional<std::vector<PresetFolder>> &ShownFolders() {
 	return Instance().resolved().folders;
 }
 
+bool SilencedByPreset(not_null<const PeerData*> peer) {
+	return Filtering() && !VisibleFor(peer).notify;
+}
+
 bool FoldersRestricted() {
 	const auto &resolved = Instance().resolved();
 	return !resolved.normal && resolved.folders.has_value();

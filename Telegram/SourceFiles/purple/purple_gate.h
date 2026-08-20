@@ -37,6 +37,11 @@ namespace Purple {
 [[nodiscard]] Visibility VisibleFor(not_null<const PeerData*> peer);
 [[nodiscard]] const EffectiveList *ListFor(not_null<const PeerData*> peer);
 
+// Whether the active preset is what is silencing this chat. Distinct from
+// "muted": the preset only ever adds a mute, so a chat can be both, and the UI
+// has to say which one an Unmute would actually lift.
+[[nodiscard]] bool SilencedByPreset(not_null<const PeerData*> peer);
+
 // The chat folders the active preset shows, in the order it named them.
 // Nothing means it said nothing about folders, so all of them show; an empty
 // vector means it named none, which hides the folder strip outright.
