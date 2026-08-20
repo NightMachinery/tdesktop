@@ -267,7 +267,7 @@ void PeerMenuAddMuteSubmenuAction(
 			&st::menuIconMute);
 	}
 	const auto isMuted = byPreset
-		? (thread->notify().muteUntil().value_or(0) > base::unixtime::now())
+		? notifySettings->purpleMutedWithoutPreset(thread)
 		: notifySettings->isMuted(thread);
 	if (isMuted) {
 		const auto text = tr::lng_context_unmute(tr::now)

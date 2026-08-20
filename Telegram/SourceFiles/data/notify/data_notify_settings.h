@@ -109,6 +109,14 @@ public:
 	// upstream update paths reach it. See docs/purple/work_mode.md.
 	void purpleRefreshMute(not_null<PeerData*> peer);
 
+	// Purple: what isMuted() would say if no work preset were imposing one.
+	// The UI needs both answers - one to know the chat is silent, the other to
+	// know whether offering Unmute would lift anything - and this has to be
+	// the real accessor rather than a peek at muteUntil, because a chat can be
+	// muted by the account-wide default for its type with nothing set on it.
+	[[nodiscard]] bool purpleMutedWithoutPreset(
+		not_null<const Thread*> thread) const;
+
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;
 	[[nodiscard]] auto exceptionsUpdatesRealtime() const
@@ -131,6 +139,12 @@ private:
 		not_null<const Thread*> thread,
 		crl::time *changesIn) const;
 	[[nodiscard]] bool isMuted(
+		not_null<const PeerData*> peer,
+		crl::time *changesIn) const;
+
+	// The body of isMuted() below the Purple gate, split out so both can be
+	// asked separately. See purpleMutedWithoutPreset above.
+	[[nodiscard]] bool purpleMutedWithoutPreset(
 		not_null<const PeerData*> peer,
 		crl::time *changesIn) const;
 

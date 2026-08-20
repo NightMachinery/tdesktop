@@ -529,6 +529,17 @@ bool NotifySettings::isMuted(not_null<const Thread*> thread) const {
 	return isMuted(thread, nullptr);
 }
 
+bool NotifySettings::purpleMutedWithoutPreset(
+		not_null<const Thread*> thread) const {
+	// Same shape as isMuted(thread) above: a topic's own setting wins, and
+	// everything else falls through to the peer.
+	const auto topic = thread->asTopic();
+	const auto until = topic ? topic->notify().muteUntil() : std::nullopt;
+	return until
+		? MutedFromUntil(*until, nullptr)
+		: purpleMutedWithoutPreset(thread->peer(), nullptr);
+}
+
 NotifySound NotifySettings::sound(not_null<const Thread*> thread) const {
 	const auto topic = thread->asTopic();
 	const auto sound = topic ? topic->notify().sound() : std::nullopt;
@@ -566,6 +577,12 @@ bool NotifySettings::isMuted(
 		}
 		return true;
 	}
+	return purpleMutedWithoutPreset(peer, changesIn);
+}
+
+bool NotifySettings::purpleMutedWithoutPreset(
+		not_null<const PeerData*> peer,
+		crl::time *changesIn) const {
 	if (const auto until = peer->notify().muteUntil()) {
 		return MutedFromUntil(*until, changesIn);
 	} else if (const auto community = CommunityFallback(peer)) {
