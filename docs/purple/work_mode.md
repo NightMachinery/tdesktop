@@ -385,9 +385,80 @@ greyed out with no explanation.
 Pressing the key shows a toast saying which way it went - including under
 Normal, where the answer is that there was nothing to do.
 
+## The schedule
+
+    [[schedule.rules]]
+    days   = ["mon", "tue", "wed", "thu", "fri"]
+    from   = "09:00"
+    to     = "17:00"
+    preset = "work"
+
+Rules are matched in file order, first match wins - the same rule the lists
+follow. Two rules covering one moment is something a hand-written file will do,
+and picking by position is the only answer that can be predicted by reading.
+
+Windows are half-open: `09:00` is inside one and `17:00` is not, so
+neighbouring windows hand over cleanly instead of both claiming the minute they
+meet.
+
+A window whose `to` is earlier than its `from` crosses midnight, and belongs to
+the day it starts on. `days = ["mon"]` with `22:00` to `06:00` runs from Monday
+evening into Tuesday morning - not until midnight, and not also over Monday's
+own small hours, which is what listing Tuesday as well would have produced.
+
+### It acts at boundaries, not on every tick
+
+The schedule compares what it wants against `schedule_target` in `state.toml`
+and does something only when that changes.
+
+That is what lets a preset chosen by hand stand. Pick `normal` at ten in the
+morning inside a nine-to-five window and it stays, because the schedule's answer
+has not moved since nine. Applying the answer on every tick instead would put
+`work` back a second later and make the picker useless during exactly the hours
+it matters.
+
+It is also what makes a boundary missed with the app closed still happen. Open
+the app at noon and the target has moved from whatever was recorded to `work`,
+so it applies - once.
+
+### What a boundary does, and what it leaves alone
+
+A window starting overrides a preset chosen by hand. It is a positive
+instruction, written down in advance: at nine, work mode.
+
+A window ending does not. Its end only means the reason for that preset has
+passed, which is no reason to undo something asked for, so Normal is applied
+only when the preset in force is one the schedule itself put there. The
+asymmetry is the point, and it is why `state.toml` records what put the current
+preset in place rather than only what it is.
+
+Focus is left alone in both directions. It is the more immediate signal, and a
+schedule fighting it would leave neither of them predictable.
+
+### Pausing
+
+`schedule_paused` holds it off entirely, and the preset box carries the switch.
+Nothing in `settings.toml` turns it on, because it is a decision about today
+rather than about the configuration. The row is there only when the file
+describes a schedule at all - a switch that holds off nothing explains nothing.
+
+Unpausing catches up with wherever the schedule has got to, by the same boundary
+rule: the target moved while it was not looking.
+
+### The tick
+
+Thirty seconds, which is therefore how late a boundary can be. Computing the
+exact moment of the next one and sleeping until it would be tidier, and would
+then have to survive every way a wall clock can move underneath it - a laptop
+waking, a timezone change, the DST hour. Re-reading the clock on a cheap tick
+survives all of them by construction.
+
+A settings or state change re-ticks immediately, since either can change the
+answer sooner than the next thirty seconds would.
+
 ## Not yet implemented
 
-- Scheduling and OS focus sync. Both parsed, neither consumed.
+- OS focus sync. Parsed, not consumed.
 - Per-folder `notify` and `filtered`, as above.
 - Every other mute surface - the profile page toggle, the chat top bar - still
   shows a preset-imposed mute as the user's own. They are honest about the
@@ -407,6 +478,7 @@ resolves itself as soon as the entries load.
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
     Telegram/SourceFiles/purple/purple_peek.{h,cpp}       the peek hotkey
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
+    Telegram/SourceFiles/purple/purple_schedule.{h,cpp}   the schedule clock
 
 `purple_engine` has no tdesktop dependency at all - it never sees a `PeerData`,
 only an id and a `ChatKind` - for the same reason the parser does not: every

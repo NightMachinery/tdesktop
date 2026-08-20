@@ -39,7 +39,8 @@ key order all survive. `enabled   =    true   # keep ads away` comes back as
 `enabled   =    false   # keep ads away`, spacing and comment intact.
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
-focus-sync memory, the schedule pause flag and the peek timer. It is rewritten
+focus-sync memory, the schedule's pause flag and last target, and the peek
+timer. It is rewritten
 whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
 never touch the mtime of the file you are editing by hand.
@@ -98,7 +99,7 @@ list, for the banner described in the Work Mode spec.
 The Work Mode half - lists, presets, folders, schedule, focus sync and peek - is
 documented by the starter file the app writes on first run, which carries a
 commented example of each section. The parser reads the whole schema today;
-`[schedule]` and `[focus_sync]` are the two sections nothing consumes yet.
+`[focus_sync]` is the one section nothing consumes yet.
 
 `[peek] hotkey` is read as Qt portable text, so on macOS `Ctrl` means Command
 and `Meta` means the physical Control key. It is deliberately not part of
