@@ -188,6 +188,11 @@ State ParseState(const QString &text, const QString &path) {
 	return result;
 }
 
+bool PeekLive(const State &state, int64 nowUnix) {
+	return state.peekActive
+		&& (!state.peekDeadlineUnix || state.peekDeadlineUnix > nowUnix);
+}
+
 QString SerializeState(const State &state) {
 	auto result = QString();
 	result += u"# Purple Telegram runtime state. This file is written by the "

@@ -1253,6 +1253,73 @@ void TestMentionGate() {
 	CHECK(!hidden.mentionGated);
 }
 
+void TestPeek() {
+	Begin("peek");
+
+	const auto parsed = Parse(Presets());
+	auto work = *Purple::Resolve(parsed.settings, u"work"_q);
+
+	// What work does without a peek: channels are gone, DMs are silent, groups
+	// wait for a mention.
+	const auto channel = [&] {
+		return Purple::Visible(
+			parsed.settings,
+			work,
+			999,
+			Purple::ChatKind::Channel);
+	};
+	const auto priv = [&] {
+		return Purple::Visible(
+			parsed.settings,
+			work,
+			999,
+			Purple::ChatKind::Private);
+	};
+	const auto group = [&] {
+		return Purple::Visible(
+			parsed.settings,
+			work,
+			999,
+			Purple::ChatKind::Group);
+	};
+	CHECK(!channel().show);
+	CHECK(!priv().notify);
+	CHECK(group().mentionGated);
+
+	// A peek reveals everything the preset hides and lifts the mention gate,
+	// and deliberately leaves the silencing alone: it is a look at the chat
+	// list, not two minutes of notifications for chats already on the screen.
+	work.peeking = true;
+	CHECK(channel().show);
+	CHECK(channel().notify);
+	CHECK(group().show);
+	CHECK(!group().mentionGated);
+	CHECK(priv().show);
+	CHECK(!priv().notify);
+
+	// It never reaches the cache, so a resolution restored from state.toml
+	// cannot come back still revealed with nothing left to end it.
+	const auto restored = Purple::FromCache(Purple::ToCache(work));
+	CHECK(restored.has_value());
+	CHECK(!restored->peeking);
+	CHECK(!restored->list(u"@channels"_q)->show);
+
+	// The deadline is what expires a peek that outlived the app.
+	auto state = Purple::State();
+	state.peekActive = true;
+	state.peekDeadlineUnix = 2000;
+	CHECK(Purple::PeekLive(state, 1999));
+	CHECK(!Purple::PeekLive(state, 2000));
+	CHECK(!Purple::PeekLive(state, 5000));
+
+	// No deadline is auto_off = "off": it runs until it is turned off by hand.
+	state.peekDeadlineUnix = 0;
+	CHECK(Purple::PeekLive(state, 5000));
+
+	state.peekActive = false;
+	CHECK(!Purple::PeekLive(state, 0));
+}
+
 void TestResolvedCache() {
 	Begin("resolved cache");
 
@@ -1317,6 +1384,7 @@ int main() {
 	TestResolveLocked();
 	TestMatchPriority();
 	TestMentionGate();
+	TestPeek();
 	TestResolvedCache();
 
 	std::printf("%d checks, %d failures\n", Checks, Failures);

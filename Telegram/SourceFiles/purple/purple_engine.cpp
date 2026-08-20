@@ -198,6 +198,17 @@ Visibility Visible(
 	result.mentionGated = result.show
 		&& (kind == ChatKind::Group)
 		&& effective->groupsRequireMention;
+
+	// Peek reveals; it does not un-silence. Both halves of a preset could be
+	// suspended together, but they answer different questions: hiding is about
+	// what you can find, silencing is about what may interrupt you, and a peek
+	// is a deliberate look at the chat list. Unmuting for it would deliver a
+	// burst of notifications for chats you are already looking at, and then
+	// take the mute back before you had dealt with them.
+	if (resolved.peeking) {
+		result.show = true;
+		result.mentionGated = false;
+	}
 	return result;
 }
 

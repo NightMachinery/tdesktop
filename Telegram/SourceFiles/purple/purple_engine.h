@@ -64,6 +64,13 @@ struct Resolved {
 	// chain says otherwise - see EffectiveList.
 	bool groupsRequireMention = false;
 
+	// A peek is running, so the preset's hiding is suspended - but not its
+	// silencing. Set by the gate from state.toml rather than by Resolve(): a
+	// peek is transient and expires on a clock, which is also why ToCache()
+	// does not carry it. A cached resolution restored with a peek in it would
+	// leave the chat list revealed with nothing left running to put it back.
+	bool peeking = false;
+
 	[[nodiscard]] const EffectiveList *list(const QString &name) const;
 
 	// Used to decide whether a reload actually changed anything, so a state

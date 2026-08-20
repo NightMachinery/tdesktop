@@ -66,6 +66,13 @@ struct State {
 	ResolvedCache resolvedCache;
 };
 
+// Whether the peek recorded in state is still running. A deadline of zero means
+// auto_off is turned off, so the peek runs until it is turned off by hand -
+// which is the only reason the flag is persisted rather than kept in memory.
+// The comparison is what makes a peek that outlived the app expire on its own:
+// the deadline is in the past by the time anything reads it again.
+[[nodiscard]] bool PeekLive(const State &state, int64 nowUnix);
+
 // The name that means "behave exactly like stock Telegram Desktop".
 [[nodiscard]] const QString &NormalPreset();
 
