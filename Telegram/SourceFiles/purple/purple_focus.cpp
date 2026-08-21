@@ -7,11 +7,42 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_focus.h"
 
+#include "base/timer.h"
 #include "purple/purple_config.h"
 #include "purple/purple_engine.h"
 
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QFileSystemWatcher>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+
 namespace Purple {
 namespace {
+
+// One save can produce several filesystem events, and the app has no reason to
+// re-read the file three times for one change of focus.
+constexpr auto kDebounce = crl::time(250);
+
+// A backstop under the watch. A file watch that quietly stops working would
+// take focus sync with it and nothing would say so; re-reading two kilobytes a
+// minute costs nothing beside that.
+constexpr auto kPoll = crl::time(60 * 1000);
+
+// Where macOS records the focus modes that are held right now. There is no
+// public API for this - the file is undocumented, Apple owns its shape, and a
+// point release may change it - so everything below is written to fail loudly
+// and to change nothing when it cannot make sense of what it read. Reporting
+// "focus is off" on a parse error would end a session that is still running.
+[[nodiscard]] QString AssertionsPath() {
+#ifdef Q_OS_MAC
+	return QDir::homePath() + u"/Library/DoNotDisturb/DB/Assertions.json"_q;
+#else // Q_OS_MAC
+	return QString();
+#endif // !Q_OS_MAC
+}
 
 class Runner final {
 public:
@@ -120,8 +151,96 @@ void Runner::leave() {
 	LOG(("Purple: focus off, -> '%1' (%2).").arg(preset, PresetSourceName(source)));
 }
 
-// Never destroyed, for the same reason as the config singleton: it holds an
-// rpl subscription to something with static storage duration.
+class Detector final {
+public:
+	Detector();
+
+private:
+	void check();
+	[[nodiscard]] std::optional<bool> read() const;
+
+	const QString _path;
+	QFileSystemWatcher _watcher;
+	base::Timer _debounce;
+	base::Timer _poll;
+	bool _complained = false;
+
+};
+
+Detector::Detector() : _path(AssertionsPath()) {
+	if (_path.isEmpty()) {
+		// Nothing to watch anywhere but macOS. focus_active stays whatever it
+		// is, which lets something outside the app still drive it.
+		return;
+	}
+	_debounce.setCallback([=] { check(); });
+	_poll.setCallback([=] { check(); });
+
+	// The directory, not the file: it is replaced rather than rewritten, and a
+	// watch on the file itself would be left pointing at an inode nobody will
+	// ever write to again - the same trap settings.toml has.
+	_watcher.addPath(QFileInfo(_path).absolutePath());
+	QObject::connect(&_watcher, &QFileSystemWatcher::directoryChanged, [=] {
+		_debounce.callOnce(kDebounce);
+	});
+
+	_poll.callEach(kPoll);
+	check();
+}
+
+std::optional<bool> Detector::read() const {
+	auto file = QFile(_path);
+	if (!file.exists()) {
+		// No focus mode has ever been set on this machine.
+		return false;
+	} else if (!file.open(QIODevice::ReadOnly)) {
+		return std::nullopt;
+	}
+	auto error = QJsonParseError();
+	const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+	if (error.error != QJsonParseError::NoError || !document.isObject()) {
+		return std::nullopt;
+	}
+	const auto data = document.object().value(u"data"_q).toArray();
+	if (data.isEmpty()) {
+		return false;
+	} else if (!data.first().isObject()) {
+		return std::nullopt;
+	}
+	const auto records = data.first().toObject().value(
+		u"storeAssertionRecords"_q);
+	if (records.isUndefined() || records.isNull()) {
+		// The key is absent until something holds an assertion, which is the
+		// ordinary shape of the file with no focus mode on.
+		return false;
+	} else if (!records.isArray()) {
+		return std::nullopt;
+	}
+	// Live assertions only: a mode that has ended moves to the invalidation
+	// records beside this key, so anything left here is a focus mode that is on.
+	return !records.toArray().isEmpty();
+}
+
+void Detector::check() {
+	const auto active = read();
+	if (!active) {
+		if (!_complained) {
+			// Once per spell of not understanding it, not once a minute.
+			_complained = true;
+			LOG(("Purple Error: Could not read the focus state from %1. "
+				"Focus sync is holding whatever it last saw."_q).arg(_path));
+		}
+		return;
+	}
+	_complained = false;
+	if (*active != FocusActive()) {
+		LOG(("Purple: focus mode %1.").arg(*active ? u"on"_q : u"off"_q));
+		SetFocusActive(*active);
+	}
+}
+
+// Never destroyed, for the same reason as the config singleton: they hold rpl
+// subscriptions and a file watch on things with static storage duration.
 [[nodiscard]] Runner &Instance() {
 	static const auto result = new Runner();
 	return *result;
@@ -130,7 +249,12 @@ void Runner::leave() {
 } // namespace
 
 void StartFocusSync() {
+	// The policy first, so the detector's opening read arrives at something
+	// already listening rather than only landing in state.
 	Instance();
+
+	static const auto detector = new Detector();
+	(void)detector;
 }
 
 bool FocusActive() {

@@ -9,18 +9,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 
-// Acts on the OS focus flag: enters the preset [focus_sync] names when a focus
-// mode comes on, and puts back what was there when it goes off. Idempotent.
+// Starts both halves: the watcher that notices macOS entering a focus mode, and
+// the policy that enters the preset [focus_sync] names and puts back what was
+// there afterwards. Idempotent.
 void StartFocusSync();
 
-// The flag itself, which this file only reads. Whatever notices that macOS has
-// entered a focus mode writes it - and that is deliberately a different thing
-// from what acts on it, because the policy below is worth proving once while
-// the detection is an undocumented moving target Apple owns.
+// The flag between them. They are two things on purpose: the policy is worth
+// proving once and does not change, while the detection reads a file Apple owns
+// and can reshape in a point release. Keeping the seam here means the fragile
+// half can be replaced without touching the proven one.
 //
-// SetFocusActive is for a detector living inside the app. The flag is also
-// plain `focus_active` in state.toml, so a detector living outside it - a
-// Hammerspoon watcher, a shortcut - needs nothing from this header.
+// It is also plain `focus_active` in state.toml, so a detector living outside
+// the app needs nothing from this header - though it would then be a second
+// writer to a file the app rewrites itself, which is a race a dedicated file
+// would not have.
 [[nodiscard]] bool FocusActive();
 void SetFocusActive(bool active);
 
