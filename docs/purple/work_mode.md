@@ -471,20 +471,39 @@ schedule, so it lands as a manual choice and stays until something moves it.
 
 ### The flag and the detector are separate
 
-`focus_active` in `state.toml` is the entire input. Everything above reads it;
-nothing in the app writes it yet.
+`focus_active` in `state.toml` is the entire input. Everything above reads it,
+and one thing writes it.
 
-The split is deliberate. The policy - what to enter, what to put back, what to
-leave alone - is worth getting right once, and it is provable. Detecting a macOS
-focus mode is neither. There is no public API for it; the usual route is an
-undocumented JSON file under `~/Library/DoNotDisturb/DB` that Apple owns and can
-change in a point release, and the sanctioned route - an App Intents focus
-filter - needs its own extension target and a per-mode opt-in in System
-Settings.
+The split is deliberate, because the two halves age differently. The policy -
+what to enter, what to put back, what to leave alone - is worth getting right
+once and then does not change. Detecting a macOS focus mode is the opposite:
+there is no public API for it, so the detector reads
+`~/Library/DoNotDisturb/DB/Assertions.json`, which is undocumented, owned by
+Apple, and free to change shape in a point release.
 
-Keeping them apart means the fragile half can be replaced, or live outside the
-app entirely as a Hammerspoon watcher writing one line of `state.toml`, without
-touching anything already proven.
+Keeping them apart means the fragile half can be rewritten, or replaced by
+something outside the app, without touching anything already proven.
+
+### Reading the focus state
+
+A focus mode that is on is an assertion held in `data[0].storeAssertionRecords`.
+The key is simply absent while nothing holds one, and a mode that has ended
+moves to the invalidation records beside it - so a non-empty array is a focus
+mode running now, and there is no need to interpret timestamps.
+
+Every failure to make sense of the file leaves `focus_active` exactly as it was
+and logs, once per spell rather than once per read. The alternative - reading a
+parse error as "focus is off" - would end a session that is still running, which
+is the one wrong answer that acts.
+
+The watch is on the directory rather than the file, because the file is replaced
+rather than rewritten and a watch on it would end up pointing at an inode nobody
+will write to again. That is the same trap `settings.toml` has. A sixty-second
+poll sits underneath as a backstop: a watch that quietly stopped working would
+take focus sync with it and nothing would say so.
+
+The path is macOS-only and empty everywhere else, where the detector does
+nothing at all and leaves the flag to whatever else wants to set it.
 
 ### Edges again
 
@@ -500,9 +519,6 @@ is the one state this must not be able to reach.
 
 ## Not yet implemented
 
-- Nothing sets `focus_active`. The policy above is real; the detector is not
-  written, and which mechanism it should use is an open question - see the
-  reasoning under focus sync.
 - Per-folder `notify` and `filtered`, as above.
 - Every other mute surface - the profile page toggle, the chat top bar - still
   shows a preset-imposed mute as the user's own. They are honest about the
