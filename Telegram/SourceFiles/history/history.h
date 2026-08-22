@@ -407,6 +407,7 @@ public:
 	int fixedOnTopIndex() const override;
 	void updateChatListExistence() override;
 	bool shouldBeInChatList() const override;
+	bool purpleHiddenFromChatList() const override;
 	Dialogs::UnreadState chatListUnreadState() const override;
 	Dialogs::BadgesState chatListBadgesState() const override;
 	HistoryItem *chatListMessage() const override;

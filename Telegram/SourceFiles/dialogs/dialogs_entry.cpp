@@ -472,7 +472,18 @@ not_null<Row*> Entry::addToChatList(
 void Entry::removeFromChatList(
 		FilterId filterId,
 		not_null<MainList*> list) {
-	if (isPinnedDialog(filterId)) {
+	// Purple: a preset takes a chat out of the view, not out of the account, so
+	// a chat it hides has to keep its pin. Unpinning here lost it the moment a
+	// preset hid a pinned chat, and the pin did not come back when the preset
+	// stopped - there is nothing left to restore it from.
+	//
+	// Worse than the local loss: this pinned list is exactly what
+	// ApiWrap::savePinnedOrder() sends, so the next time the user dragged their
+	// pins about, every chat a preset was hiding would be missing from the
+	// order - and it goes with f_force, which unpins them on the account and on
+	// every other device. Upstream's unpin here is a mirror of a chat that has
+	// genuinely gone; a hidden one has not gone anywhere.
+	if (isPinnedDialog(filterId) && !purpleHiddenFromChatList()) {
 		list->pinned()->setPinned(this, false);
 		owner().notifyPinnedDialogsOrderUpdated();
 	}

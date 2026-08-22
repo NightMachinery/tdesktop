@@ -3371,25 +3371,32 @@ bool History::trackUnreadMessages() const {
 	return true;
 }
 
+bool History::purpleHiddenFromChatList() const {
+	if (!Purple::Filtering()) {
+		return false;
+	}
+	const auto visible = Purple::VisibleFor(peer);
+	if (!visible.show) {
+		return true;
+	} else if (visible.mentionGated && !chatListUnreadState().mentions) {
+		// A gated group appears exactly while its mention badge would be lit,
+		// so the rule is legible from the chat list itself. Reading the
+		// mention is what takes it away again, which means a group opened from
+		// a mention leaves the list while you are still in it. That is the
+		// feature working, not a glitch: the chat stays open.
+		return true;
+	}
+	return false;
+}
+
 bool History::shouldBeInChatList() const {
 	// Purple: a work preset hides whole lists of chats. This has to come before
 	// the pinned shortcut below, or pinning a chat would exempt it from every
 	// preset. Dropping the entry here is also what keeps the unread badges
 	// honest for free: MainList accumulates its counters as entries come and
 	// go, so a chat that is in no list is in no total either.
-	if (Purple::Filtering()) {
-		const auto visible = Purple::VisibleFor(peer);
-		if (!visible.show) {
-			return false;
-		} else if (visible.mentionGated
-			&& !chatListUnreadState().mentions) {
-			// A gated group appears exactly while its mention badge would be
-			// lit, so the rule is legible from the chat list itself. Reading
-			// the mention is what takes it away again, which means a group
-			// opened from a mention leaves the list while you are still in it.
-			// That is the feature working, not a glitch: the chat stays open.
-			return false;
-		}
+	if (purpleHiddenFromChatList()) {
+		return false;
 	}
 	if (peer->migrateTo() || !folderKnown()) {
 		return false;

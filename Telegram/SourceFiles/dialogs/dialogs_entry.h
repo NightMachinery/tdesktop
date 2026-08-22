@@ -143,6 +143,14 @@ public:
 	static constexpr auto kTopPromotionFixOnTopIndex = 2;
 
 	[[nodiscard]] virtual bool shouldBeInChatList() const = 0;
+
+	// Purple: whether a work preset is what is keeping this entry out of the
+	// chat list, rather than it having left for a reason of its own. Only
+	// histories are ever hidden that way. See removeFromChatList().
+	[[nodiscard]] virtual bool purpleHiddenFromChatList() const {
+		return false;
+	}
+
 	[[nodiscard]] virtual UnreadState chatListUnreadState() const = 0;
 	[[nodiscard]] virtual BadgesState chatListBadgesState() const = 0;
 	[[nodiscard]] virtual HistoryItem *chatListMessage() const = 0;
