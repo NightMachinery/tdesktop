@@ -45,6 +45,36 @@ Three things, all derived from the resolved list a chat falls into:
 including the shortcut that keeps pinned dialogs, or pinning a chat would exempt
 it from every preset.
 
+### Hiding is a view, not an edit
+
+A preset takes a chat out of what is on screen. It must never change anything
+the account would still be carrying tomorrow, and there is one place that was
+not true.
+
+`Dialogs::Entry::removeFromChatList()` unpins whatever it removes. That is
+right upstream, where an entry leaves because it has genuinely gone - you left
+the group, it was deleted - and the server has unpinned it too. It is wrong
+here: the chat is still on the account and comes back the moment the preset
+stops, but the pin did not, because nothing was left to restore it from.
+
+The quieter half was worse. That same pinned list is what
+`ApiWrap::savePinnedOrder()` sends, and it sends it with `f_force`, so
+reordering pins while a preset hid one would have dropped the hidden chat from
+the account and from every other device. Exactly the hazard the folder
+`saveOrder()` guard exists for, in a place nobody had looked.
+
+So the unpin is skipped when `purpleHiddenFromChatList()` is what is taking the
+entry away. The pin index and the pinned-list entry both survive, the chat
+leaves the view and returns pinned where it was, and the order sent to the
+server stays complete. Reordering is safe rather than refused, because
+`reorderTwoPinnedChats()` works on keys rather than row indices: a hidden pin
+between two visible ones rides along in the rotation instead of being swapped
+by mistake.
+
+The mute path was checked for the same shape and is clean.
+`NotifySettings::purpleRefreshMute()` goes to `updateLocal()`, which never
+issues a request.
+
 That single hook also settles the unread badges, which was the part that looked
 like it would need its own gate. `Dialogs::MainList` does not compute its totals
 on demand; it accumulates them as entries enter and leave, through
