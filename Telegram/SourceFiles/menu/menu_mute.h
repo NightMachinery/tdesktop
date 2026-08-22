@@ -35,6 +35,12 @@ struct Descriptor {
 	Fn<void(Data::NotifySound)> updateSound;
 	Fn<void(TimeId)> updateMutePeriod;
 	Data::VolumeController volumeController;
+
+	// Purple: the work preset silencing this chat, if one is. Everything else
+	// here answers for the user's own setting, which is what these controls
+	// move - so without this the menu would be quietly correct and completely
+	// baffling, offering Mute for a chat that is already silent.
+	QString purplePreset;
 };
 
 [[nodiscard]] Descriptor ThreadDescriptor(not_null<Data::Thread*> thread);

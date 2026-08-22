@@ -116,6 +116,8 @@ public:
 	// muted by the account-wide default for its type with nothing set on it.
 	[[nodiscard]] bool purpleMutedWithoutPreset(
 		not_null<const Thread*> thread) const;
+	[[nodiscard]] bool purpleMutedWithoutPreset(
+		not_null<const PeerData*> peer) const;
 
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;

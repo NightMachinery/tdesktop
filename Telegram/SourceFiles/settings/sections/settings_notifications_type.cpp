@@ -336,7 +336,13 @@ std::unique_ptr<PeerListRow> ExceptionsController::createRow(
 
 void ExceptionsController::refreshStatus(not_null<PeerListRow*> row) const {
 	const auto peer = row->peer();
-	const auto status = peer->owner().notifySettings().isMuted(peer)
+	// Purple: this list is the user's own notification exceptions, and the
+	// status describes the exception rather than whether the chat happens to
+	// be silent right now - a preset can make that true for a chat with no
+	// exception at all, and reading "muted" here would send them looking for
+	// one that is not there.
+	const auto status = peer->owner().notifySettings()
+		.purpleMutedWithoutPreset(peer)
 		? tr::lng_notification_exceptions_muted(tr::now)
 		: tr::lng_notification_exceptions_unmuted(tr::now);
 	row->setCustomStatus(status);

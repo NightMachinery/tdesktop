@@ -335,6 +335,37 @@ asks for separately.
 The mute bell drawn on the chat list row is left alone. It is not a lie: the
 chat really is silenced.
 
+### The rule that settles every other surface
+
+Controls answer for the setting they move; indicators answer for the truth.
+
+The bell is an indicator, so it shows silence. Everything you can click to
+change the mute is a control, and each of them now reads
+`purpleMutedWithoutPreset()` - which is `isMuted()` with only the preset gate
+removed, and therefore identical whenever no preset is silencing anything:
+
+- the Mute/Unmute button on the profile top bar, through
+  `Info::Profile::NotificationsEnabledValue()`,
+- the mute menu's checked state, which is that same value,
+- the MUTE/UNMUTE bar at the bottom of a channel.
+
+Two of those were worse than mislabelled. `MuteMenu::ToggleMuteForever()` and
+`HistoryWidget::toggleMuteUnmute()` both computed the value to write by
+negating the effective answer, so while a preset silenced a chat they always
+saw "already muted" and sent an *unmute* - clearing a mute the user had set, or
+writing one for a chat they had never muted, and changing nothing on screen
+either way because the preset still held. A control that quietly edits the
+account while appearing inert is the worst of the three failures here.
+
+The mute menu also carries `Silenced by 'work'`, the same line and the same
+box as the chat list menu, because a menu offering Mute for a chat that is
+already silent is correct and baffling at once.
+
+The notification-exceptions list in Settings reads it too. That page lists the
+exceptions the user has set, and a preset can silence a chat that has none at
+all - "muted" there would send someone looking for an exception that is not
+there.
+
 ## Peek
 
 A preset hides chats, and sometimes you want one of them without ending the
@@ -549,11 +580,7 @@ is the one state this must not be able to reach.
 
 ## Not yet implemented
 
-- Per-folder `notify` and `filtered`, as above.
-- Every other mute surface - the profile page toggle, the chat top bar - still
-  shows a preset-imposed mute as the user's own. They are honest about the
-  chat being silent and dishonest about who silenced it, and each needs the
-  same two lines the context menu got.
+- Per-folder `notify`, as above.
 
 ## Cloud unread counts
 

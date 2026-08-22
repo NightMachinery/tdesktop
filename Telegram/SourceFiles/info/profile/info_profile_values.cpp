@@ -341,7 +341,9 @@ rpl::producer<bool> NotificationsEnabledValue(
 		) | rpl::to_empty,
 		topic->owner().notifySettings().defaultUpdates(topic->peer())
 	) | rpl::map([=] {
-		return !topic->owner().notifySettings().isMuted(topic);
+		// Purple: see the peer overload below.
+		return !topic->owner().notifySettings().purpleMutedWithoutPreset(
+			topic);
 	}) | rpl::distinct_until_changed();
 }
 
@@ -353,7 +355,13 @@ rpl::producer<bool> NotificationsEnabledValue(not_null<PeerData*> peer) {
 		) | rpl::to_empty,
 		peer->owner().notifySettings().defaultUpdates(peer)
 	) | rpl::map([=] {
-		return !peer->owner().notifySettings().isMuted(peer);
+		// Purple: this drives controls - the profile Mute/Unmute button, and
+		// the checked state of the mute menu - so it has to answer for the
+		// setting those controls actually move, which is the user's own. The
+		// effective answer would leave the button saying Unmute over a preset
+		// it cannot lift, which is where this started. Identical to isMuted()
+		// whenever no preset is silencing the chat.
+		return !peer->owner().notifySettings().purpleMutedWithoutPreset(peer);
 	}) | rpl::distinct_until_changed();
 }
 

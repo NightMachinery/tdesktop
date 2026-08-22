@@ -16,6 +16,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "purple/purple_engine.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_preset_box.h"
 #include "ui/boxes/choose_time.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/time_picker_box.h"
@@ -252,6 +255,9 @@ Descriptor ThreadDescriptor(not_null<Data::Thread*> thread) {
 		.updateSound = updateSound,
 		.updateMutePeriod = updateMutePeriod,
 		.volumeController = Data::ThreadRingtonesVolumeController(thread),
+		.purplePreset = Purple::SilencedByPreset(thread->peer())
+			? Purple::ActiveResolved().preset
+			: QString(),
 	};
 }
 
@@ -295,7 +301,13 @@ Descriptor DefaultDescriptor(
 
 bool ToggleMuteForever(not_null<Data::Thread*> thread) {
 	const auto settings = &thread->owner().notifySettings();
-	const auto muted = !settings->isMuted(thread);
+
+	// Purple: the user's own setting, not the effective one. Deriving the new
+	// value from the effective answer meant that while a preset silenced a
+	// chat this always computed "already muted" and sent an unmute - clearing
+	// a mute the user had set, or writing one for a chat they had never muted,
+	// and either way changing nothing on screen because the preset held.
+	const auto muted = !settings->purpleMutedWithoutPreset(thread);
 	settings->update(thread, muted
 		? Data::MuteValue{ .forever = true }
 		: Data::MuteValue{ .unmute = true });
@@ -307,6 +319,18 @@ void FillMuteMenu(
 		Descriptor descriptor,
 		std::shared_ptr<Ui::Show> show) {
 	const auto session = descriptor.session;
+
+	// Purple: name what is actually holding the chat silent, and offer the one
+	// control that moves it. Everything below this answers for the user's own
+	// setting, which is right - it is what these items change - and would read
+	// as a lie without this line above it.
+	if (!descriptor.purplePreset.isEmpty()) {
+		menu->addAction(
+			u"Silenced by '%1'"_q.arg(descriptor.purplePreset),
+			[=] { show->showBox(Box(Purple::PresetBox)); },
+			&st::menuIconMute);
+	}
+
 	const auto soundSelect = [=] {
 		if (const auto currentSound = descriptor.currentSound()) {
 			show->showBox(Box(

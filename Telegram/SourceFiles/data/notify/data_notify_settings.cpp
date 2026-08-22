@@ -600,6 +600,11 @@ bool NotifySettings::isMuted(not_null<const PeerData*> peer) const {
 	return isMuted(peer, nullptr);
 }
 
+bool NotifySettings::purpleMutedWithoutPreset(
+		not_null<const PeerData*> peer) const {
+	return purpleMutedWithoutPreset(peer, nullptr);
+}
+
 bool NotifySettings::silentPosts(not_null<const PeerData*> peer) const {
 	if (const auto silent = peer->notify().silentPosts()) {
 		return *silent;

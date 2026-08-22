@@ -3635,7 +3635,10 @@ void HistoryWidget::updateNotifyControls() {
 		return;
 	}
 
-	_muteUnmute->setText((_history->muted()
+	// Purple: the label has to name what the button will do, and the button
+	// moves the user's own setting - see toggleMuteUnmute().
+	_muteUnmute->setText((session().data().notifySettings()
+		.purpleMutedWithoutPreset(_history)
 		? tr::lng_channel_unmute(tr::now)
 		: tr::lng_channel_mute(tr::now)).toUpper());
 	if (!session().data().notifySettings().silentPostsUnknown(_peer)) {
@@ -5842,7 +5845,12 @@ void HistoryWidget::joinChannel() {
 }
 
 void HistoryWidget::toggleMuteUnmute() {
-	const auto wasMuted = _history->muted();
+	// Purple: History::muted() is the effective answer, cached from isMuted(),
+	// and a preset can be what makes it true. Toggling from it sent an unmute
+	// for a chat the user may never have muted, and the bar did not change
+	// because the preset was still holding it. Ask for their own setting.
+	const auto wasMuted = session().data().notifySettings()
+		.purpleMutedWithoutPreset(_history);
 	const auto muteForSeconds = Data::MuteValue{
 		.unmute = wasMuted,
 		.forever = !wasMuted,
