@@ -157,7 +157,7 @@ public:
 
 private:
 	void check();
-	[[nodiscard]] std::optional<bool> read() const;
+	[[nodiscard]] std::optional<bool> read(QString &problem) const;
 
 	const QString _path;
 	QFileSystemWatcher _watcher;
@@ -188,23 +188,30 @@ Detector::Detector() : _path(AssertionsPath()) {
 	check();
 }
 
-std::optional<bool> Detector::read() const {
+std::optional<bool> Detector::read(QString &problem) const {
 	auto file = QFile(_path);
 	if (!file.exists()) {
 		// No focus mode has ever been set on this machine.
 		return false;
 	} else if (!file.open(QIODevice::ReadOnly)) {
+		// The file mode is ordinary, so this is macOS refusing rather than the
+		// filesystem: the focus database is behind Full Disk Access, and a
+		// denied read is indistinguishable from any other one from here.
+		problem = u"cannot open it (%1) - Full Disk Access for Purple "
+			"Telegram is what this usually wants"_q.arg(file.errorString());
 		return std::nullopt;
 	}
 	auto error = QJsonParseError();
 	const auto document = QJsonDocument::fromJson(file.readAll(), &error);
 	if (error.error != QJsonParseError::NoError || !document.isObject()) {
+		problem = u"it is not a JSON object (%1)"_q.arg(error.errorString());
 		return std::nullopt;
 	}
 	const auto data = document.object().value(u"data"_q).toArray();
 	if (data.isEmpty()) {
 		return false;
 	} else if (!data.first().isObject()) {
+		problem = u"'data' no longer holds objects"_q;
 		return std::nullopt;
 	}
 	const auto records = data.first().toObject().value(
@@ -214,6 +221,7 @@ std::optional<bool> Detector::read() const {
 		// ordinary shape of the file with no focus mode on.
 		return false;
 	} else if (!records.isArray()) {
+		problem = u"'storeAssertionRecords' is no longer an array"_q;
 		return std::nullopt;
 	}
 	// Live assertions only: a mode that has ended moves to the invalidation
@@ -222,13 +230,14 @@ std::optional<bool> Detector::read() const {
 }
 
 void Detector::check() {
-	const auto active = read();
+	auto problem = QString();
+	const auto active = read(problem);
 	if (!active) {
 		if (!_complained) {
 			// Once per spell of not understanding it, not once a minute.
 			_complained = true;
-			LOG(("Purple Error: Could not read the focus state from %1. "
-				"Focus sync is holding whatever it last saw."_q).arg(_path));
+			LOG(("Purple Error: Focus state unreadable, %1. Holding whatever "
+				"it last saw. (%2)"_q).arg(problem, _path));
 		}
 		return;
 	}
