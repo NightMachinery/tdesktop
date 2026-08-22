@@ -250,6 +250,27 @@ appearing to work and then snapping back.
 
 To reorder folders, switch to `normal` first.
 
+### Exempting a folder
+
+    folders = [ { name = "Family", filtered = false } ]
+
+`filtered = false` is an escape hatch: the chats in that folder ignore the
+preset's hiding, and its mention gate with it. A folder that opted out of the
+preset deciding what is on screen opted out of all of it, not half.
+
+They stay visible **everywhere**, All chats included, not only inside the
+folder. That is not a shortcut, it is the only cheap answer: hiding a chat from
+the main list while keeping it in a folder's list would put an entry in a
+filter that is absent from the main list, and tdesktop guarantees the opposite
+throughout - `Entry::notifyUnreadStateChange()` asserts on it outright.
+
+Saying nothing leaves a folder filtered, which is what every folder the preset
+does not name already is. Only an explicit `false` exempts.
+
+The lookup is free for everyone who does not use it. It runs only for a chat
+the preset would otherwise hide, and only when some folder actually asked, so a
+preset with no exemptions never walks the folder list at all.
+
 ### notify is parsed but not implemented
 
 `{ name = "Work", notify = false }` parses and warns. Silencing a whole folder

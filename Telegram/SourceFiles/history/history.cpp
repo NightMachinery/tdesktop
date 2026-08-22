@@ -3371,20 +3371,53 @@ bool History::trackUnreadMessages() const {
 	return true;
 }
 
+bool History::purpleInExemptFolder() const {
+	const auto &exempt = Purple::ExemptFolders();
+	if (exempt.empty()) {
+		return false;
+	}
+	// Only reached for a chat the preset would otherwise hide, and only when
+	// some folder actually asked to be exempt, so the walk below costs nothing
+	// for every preset that does not use the escape hatch.
+	const auto self = const_cast<History*>(this);
+	for (const auto &filter : owner().chatsFilters().list()) {
+		if (!filter.id()) {
+			continue;
+		}
+		for (const auto &name : exempt) {
+			if (!filter.title().text.text.compare(name, Qt::CaseInsensitive)
+				&& filter.contains(self)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool History::purpleHiddenFromChatList() const {
 	if (!Purple::Filtering()) {
 		return false;
 	}
 	const auto visible = Purple::VisibleFor(peer);
 	if (!visible.show) {
-		return true;
+		// An exempt folder is the one way out: its chats ignore the preset's
+		// hiding entirely, which means they stay in every list including All
+		// chats. Hiding them from the main list but not the folder would put
+		// an entry in a filter that is absent from the main list, and tdesktop
+		// guarantees the opposite everywhere - Entry::notifyUnreadStateChange
+		// asserts on it.
+		return !purpleInExemptFolder();
 	} else if (visible.mentionGated && !chatListUnreadState().mentions) {
 		// A gated group appears exactly while its mention badge would be lit,
 		// so the rule is legible from the chat list itself. Reading the
 		// mention is what takes it away again, which means a group opened from
 		// a mention leaves the list while you are still in it. That is the
 		// feature working, not a glitch: the chat stays open.
-		return true;
+		//
+		// Exempt the same way as hiding: the gate is the preset deciding what
+		// is on screen, and a folder that opted out of that opted out of all
+		// of it rather than half.
+		return !purpleInExemptFolder();
 	}
 	return false;
 }

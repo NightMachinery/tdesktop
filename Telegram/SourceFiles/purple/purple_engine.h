@@ -31,6 +31,12 @@ enum class ChatKind : uchar {
 
 [[nodiscard]] ListKind CatchAllFor(ChatKind kind);
 
+// The folders a preset selection exempts from hiding - the ones that said
+// `filtered = false'. Saying nothing leaves a folder filtered, like every
+// folder the preset does not name at all.
+[[nodiscard]] std::vector<QString> ExemptFolderNames(
+	const std::optional<std::vector<PresetFolder>> &folders);
+
 struct EffectiveList {
 	QString list;
 	bool show = true;
@@ -61,6 +67,11 @@ struct Resolved {
 	// shows. An empty vector means it named none, which is a deliberate "hide
 	// the folder strip" and not the same thing at all.
 	std::optional<std::vector<PresetFolder>> folders;
+
+	// Names from `folders' that said `filtered = false', lifted out so the
+	// common case - nobody asked - is an empty vector to test rather than a
+	// walk of the folder list per hidden chat.
+	std::vector<QString> exemptFolders;
 
 	// The preset-wide default every list starts from. Off when no preset in the
 	// chain says otherwise - see EffectiveList.

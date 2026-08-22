@@ -119,6 +119,7 @@ std::optional<Resolved> Resolve(
 			break;
 		}
 	}
+	result.exemptFolders = ExemptFolderNames(result.folders);
 
 	result.lists.reserve(settings.lists.size());
 	for (const auto &list : settings.lists) {
@@ -145,6 +146,22 @@ std::optional<Resolved> Resolve(
 			).value_or(result.groupsRequireMention);
 		}
 		result.lists.push_back(std::move(effective));
+	}
+	return result;
+}
+
+std::vector<QString> ExemptFolderNames(
+		const std::optional<std::vector<PresetFolder>> &folders) {
+	auto result = std::vector<QString>();
+	if (!folders) {
+		return result;
+	}
+	for (const auto &folder : *folders) {
+		// Only an explicit false exempts. Saying nothing leaves the folder
+		// filtered, which is what every folder the preset does not name is.
+		if (folder.filtered.has_value() && !*folder.filtered) {
+			result.push_back(folder.name);
+		}
 	}
 	return result;
 }
@@ -237,6 +254,7 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	result.preset = cache.preset;
 	result.groupsRequireMention = cache.groupsRequireMention;
 	result.folders = cache.folders;
+	result.exemptFolders = ExemptFolderNames(result.folders);
 	result.lists.reserve(cache.lists.size());
 	for (const auto &entry : cache.lists) {
 		// The cache does not carry per-list mention gating: it exists to keep

@@ -65,6 +65,10 @@ struct PresetFolder {
 	QString name;
 	std::optional<bool> notify;
 
+	// `filtered = false' exempts the folder's chats from the preset's hiding.
+	// Nothing means filtered, which is what every other folder is.
+	std::optional<bool> filtered;
+
 	friend bool operator==(
 		const PresetFolder &,
 		const PresetFolder &) = default;

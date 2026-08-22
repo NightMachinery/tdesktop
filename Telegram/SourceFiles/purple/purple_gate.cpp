@@ -255,6 +255,17 @@ bool SilencedByPreset(not_null<const PeerData*> peer) {
 	return Filtering() && !VisibleFor(peer).notify;
 }
 
+const std::vector<QString> &ExemptFolders() {
+	static const auto kNone = std::vector<QString>();
+	const auto &resolved = Instance().resolved();
+	if (resolved.normal || resolved.peeking || !resolved.folders) {
+		// Peeking already reveals everything, so there is nothing to exempt
+		// from, and asking would only cost a folder walk per hidden chat.
+		return kNone;
+	}
+	return resolved.exemptFolders;
+}
+
 bool FoldersRestricted() {
 	const auto &resolved = Instance().resolved();
 	return !resolved.normal

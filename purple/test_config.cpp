@@ -883,7 +883,8 @@ void TestStateRoundTrip() {
 		{ u"@private"_q, true, false },
 	};
 	state.resolvedCache.folders = std::vector<Purple::PresetFolder>{
-		{ u"Music"_q, false },
+		{ .name = u"Music"_q, .notify = false },
+		{ .name = u"Family"_q, .filtered = false },
 	};
 
 	const auto text = Purple::SerializeState(state);
@@ -907,10 +908,14 @@ void TestStateRoundTrip() {
 	CHECK(back.resolvedCache.lists[1].show);
 	CHECK(!back.resolvedCache.lists[1].notify);
 	CHECK(back.resolvedCache.folders.has_value());
-	CHECK_EQ(back.resolvedCache.folders->size(), size_t(1));
+	CHECK_EQ(back.resolvedCache.folders->size(), size_t(2));
 	CHECK_EQ(back.resolvedCache.folders->at(0).name, u"Music"_q);
 	CHECK(back.resolvedCache.folders->at(0).notify.has_value());
 	CHECK(!back.resolvedCache.folders->at(0).notify.value_or(true));
+	CHECK(!back.resolvedCache.folders->at(0).filtered.has_value());
+	CHECK_EQ(back.resolvedCache.folders->at(1).name, u"Family"_q);
+	CHECK(back.resolvedCache.folders->at(1).filtered.has_value());
+	CHECK(!back.resolvedCache.folders->at(1).filtered.value_or(true));
 
 	// Serialising the round-tripped state reproduces the file exactly, so
 	// nothing drifts as the app rewrites it over and over.
@@ -1431,6 +1436,26 @@ void TestResolvedCache() {
 	CHECK(!restored->list(u"@channels"_q)->show);
 	CHECK(restored->folders.has_value());
 	CHECK_EQ(restored->folders->size(), size_t(1));
+
+	// `filtered = false' survives the cache, since a broken settings.toml must
+	// not quietly start hiding the chats a folder was exempting.
+	auto folders = std::vector<Purple::PresetFolder>{
+		{ .name = u"Work"_q },
+		{ .name = u"Family"_q, .filtered = false },
+		{ .name = u"Loud"_q, .filtered = true },
+	};
+	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(1));
+	CHECK_EQ(Purple::ExemptFolderNames(folders).front(), u"Family"_q);
+	CHECK(Purple::ExemptFolderNames(std::nullopt).empty());
+
+	auto withFolders = *work;
+	withFolders.folders = folders;
+	const auto cachedFolders = Purple::FromCache(
+		Purple::ToCache(withFolders));
+	CHECK(cachedFolders.has_value());
+	CHECK_EQ(cachedFolders->exemptFolders.size(), size_t(1));
+	CHECK_EQ(cachedFolders->exemptFolders.front(), u"Family"_q);
+	CHECK_EQ(cachedFolders->folders->size(), size_t(3));
 
 	// Normal caches nothing - there is no resolution to remember.
 	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);

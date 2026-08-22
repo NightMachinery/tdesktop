@@ -349,12 +349,7 @@ void ReadMembers(
 				"yet; use a list to silence those chats instead."_q
 					.arg(context, folder.name));
 		}
-		if (ReadBool(*table, "filtered", context, warnings).value_or(false)) {
-			warnings.push_back(
-				u"%1: folder '%2' asks for 'filtered', which is not "
-				"implemented yet; showing the folder unfiltered."_q
-					.arg(context, folder.name));
-		}
+		folder.filtered = ReadBool(*table, "filtered", context, warnings);
 		result.push_back(std::move(folder));
 	}
 	return result;

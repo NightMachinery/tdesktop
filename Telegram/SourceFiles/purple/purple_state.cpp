@@ -116,6 +116,11 @@ namespace {
 						folder.notify = *value;
 					}
 				}
+				if (const auto filtered = fields->get("filtered")) {
+					if (const auto value = filtered->value<bool>()) {
+						folder.filtered = *value;
+					}
+				}
 				result.folders->push_back(std::move(folder));
 			}
 		}
@@ -239,10 +244,17 @@ QString SerializeState(const State &state) {
 	if (cache.folders) {
 		result += u"folders = [\n"_q;
 		for (const auto &folder : *cache.folders) {
-			result += folder.notify
-				? u"  { name = %1, notify = %2 },\n"_q
-					.arg(Quoted(folder.name), Boolean(*folder.notify))
-				: u"  { name = %1 },\n"_q.arg(Quoted(folder.name));
+			//: Each key is written only when the preset said something about
+			//: it, for the same reason the folders array itself is: nothing
+			//: and false mean different things all the way down.
+			auto fields = u"name = %1"_q.arg(Quoted(folder.name));
+			if (folder.notify) {
+				fields += u", notify = %1"_q.arg(Boolean(*folder.notify));
+			}
+			if (folder.filtered) {
+				fields += u", filtered = %1"_q.arg(Boolean(*folder.filtered));
+			}
+			result += u"  { %1 },\n"_q.arg(fields);
 		}
 		result += u"]\n"_q;
 	}

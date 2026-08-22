@@ -71,4 +71,11 @@ PeekChange TogglePeek();
 // display of the folder strip and, more importantly, saving its order.
 [[nodiscard]] bool FoldersRestricted();
 
+// Folders the preset marked `filtered = false': their chats are exempt from
+// its hiding. Empty for every preset that does not ask, which is what keeps
+// the folder lookup in History::purpleHiddenFromChatList() free - it is only
+// reached for a chat that would otherwise be hidden, and only when this is
+// non-empty.
+[[nodiscard]] const std::vector<QString> &ExemptFolders();
+
 } // namespace Purple
