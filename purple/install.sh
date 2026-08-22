@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Bundles the Qt frameworks into the built app, signs it ad-hoc and installs
-# it to /Applications. See docs/mac/build.md.
+# Bundles the Qt frameworks into the built app, signs it and installs it to
+# /Applications. See docs/mac/build.md.
 set -e
 
 RepoPath="$(cd "$(dirname "$0")/.." && pwd)"
@@ -72,8 +72,22 @@ elif [ "$RelinkStatus" -ne 0 ]; then
     exit "$RelinkStatus"
 fi
 
-echo "=== signing ad-hoc ==="
-codesign --force --deep --sign - "$Source"
+#: Signed with a certificate when there is one, because TCC keys its grants -
+#: Full Disk Access for the focus detector, in particular - to the app's
+#: designated requirement. Ad-hoc has no certificate, so that requirement is
+#: the code hash of one exact binary and every build invalidates it. With a
+#: certificate the requirement names the identifier and the certificate, and
+#: neither moves when the code does. purple/make_signing_cert.sh creates it.
+SigningIdentity="${SigningIdentity:-Purple Telegram Local Signing}"
+if security find-identity -v -p codesigning \
+        | grep -qF "$SigningIdentity"; then
+    echo "=== signing as '$SigningIdentity' ==="
+    codesign --force --deep --sign "$SigningIdentity" "$Source"
+else
+    echo "=== signing ad-hoc ==="
+    echo "    (run purple/make_signing_cert.sh to keep TCC grants across builds)"
+    codesign --force --deep --sign - "$Source"
+fi
 
 echo "=== installing to $Target ==="
 rm -rf "$Target"

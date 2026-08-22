@@ -328,28 +328,47 @@ The three measurements, same machine, same bundle:
 Verify a fast-path install with `vmmap` on the running app: `QtCore` must
 resolve inside `Contents/Frameworks`, not in the Qt prefix.
 
-### Full Disk Access, and why every install loses it
+### The signing certificate, and Full Disk Access
 
 Work Mode's focus sync reads `~/Library/DoNotDisturb/DB/Assertions.json`, which
 macOS keeps behind Full Disk Access. The file mode is an ordinary
-`-rw-r--r--`, and the read still fails with `Operation not permitted`. Grant it
+`-rw-r--r--` and the read still fails with `Operation not permitted`. Grant it
 under System Settings, Privacy & Security, Full Disk Access, then relaunch -
 macOS does not hand a new permission to a process that is already running.
 
-The grant does not survive `install.sh`. TCC keys it to the app's designated
-requirement, and for an ad-hoc signature that is the code hash of one exact
-binary, which every build changes. Measured rather than assumed: the grant was
-made, the app rebuilt and reinstalled, and the next launch logged
+Grant it once. Making that true took a change.
 
-    Purple Error: Focus state unreadable, cannot open it (Operation not
-    permitted) - Full Disk Access for Purple Telegram is what this usually
-    wants.
+TCC keys its grants to the app's designated requirement, and an ad-hoc
+signature has no certificate, so the requirement is the code hash of one exact
+binary. Every build produced a different one, so every install silently revoked
+the permission and focus sync went quiet until somebody read the log. Signed
+with a certificate the requirement names the certificate instead:
 
-So re-approving is part of installing, for as long as the signature is ad-hoc.
-Signing with a stable self-signed certificate would fix it properly: the
-designated requirement would then name the identifier and the certificate
-rather than a hash, and would hold across rebuilds. That means a keychain
-certificate to create and a change to `install.sh`, and it has not been done.
+    designated => identifier "com.tdesktop.PurpleTelegram"
+        and certificate leaf = H"950fd0cb3fe60586d00eeb4d99343f33055ea0b9"
+
+That hash is the certificate's own and does not move when the code does.
+Verified rather than reasoned about: grant, rebuild, reinstall, relaunch, and
+the refusal that used to appear every time is gone.
+
+Create the certificate once:
+
+    purple/make_signing_cert.sh
+
+It is self-signed, needs no Apple developer account, lives in the login
+keychain, and is idempotent. `install.sh` signs with it when it is present and
+falls back to ad-hoc with a hint when it is not, so a fresh checkout still
+installs on a machine that has never run it.
+
+Switching an app that is already installed from ad-hoc to the certificate
+changes its identity, so any permission it already held has to be granted once
+more. Remove the stale entry with `-` and add the app again rather than
+toggling the switch.
+
+The script pins itself to `/usr/bin/openssl` deliberately. A Homebrew or
+anaconda OpenSSL 3 earlier in `PATH` writes PKCS#12 with a SHA-256 MAC that
+macOS's Security framework will not read, and `security import` then rejects it
+claiming the password is wrong. The system LibreSSL writes what it expects.
 
 Nothing else in the fork wants the permission. Everything but focus sync works
 without it, and the detector says so once per launch instead of going quiet.
