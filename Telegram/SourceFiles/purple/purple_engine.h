@@ -37,6 +37,10 @@ enum class ChatKind : uchar {
 [[nodiscard]] std::vector<QString> ExemptFolderNames(
 	const std::optional<std::vector<PresetFolder>> &folders);
 
+// The folders a preset silences - the ones that said `notify = false'.
+[[nodiscard]] std::vector<QString> SilencedFolderNames(
+	const std::optional<std::vector<PresetFolder>> &folders);
+
 struct EffectiveList {
 	QString list;
 	bool show = true;
@@ -72,6 +76,11 @@ struct Resolved {
 	// common case - nobody asked - is an empty vector to test rather than a
 	// walk of the folder list per hidden chat.
 	std::vector<QString> exemptFolders;
+
+	// Names from `folders' that said `notify = false'. Same reason as above:
+	// the common case is nobody asked, and that has to be one empty vector to
+	// test rather than a folder walk per mute query.
+	std::vector<QString> silencedFolders;
 
 	// The preset-wide default every list starts from. Off when no preset in the
 	// chain says otherwise - see EffectiveList.

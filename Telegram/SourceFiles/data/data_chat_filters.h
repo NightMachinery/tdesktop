@@ -96,9 +96,16 @@ public:
 	[[nodiscard]] const std::vector<not_null<History*>> &pinned() const;
 	[[nodiscard]] const base::flat_set<not_null<History*>> &never() const;
 
+	// Purple: ignorePresetMute asks what "Exclude muted" would say if no work
+	// preset were imposing a mute. Deciding which chats a preset silences by
+	// folder needs it, because otherwise the answer feeds itself: silencing a
+	// chat takes it out of an exclude-muted folder, which un-silences it,
+	// which puts it back. The input to the decision must not depend on its
+	// output. See docs/purple/work_mode.md.
 	[[nodiscard]] bool contains(
 		not_null<History*> history,
-		bool ignoreFakeUnread = false) const;
+		bool ignoreFakeUnread = false,
+		bool ignorePresetMute = false) const;
 
 private:
 	FilterId _id = 0;

@@ -1448,6 +1448,15 @@ void TestResolvedCache() {
 	CHECK_EQ(Purple::ExemptFolderNames(folders).front(), u"Family"_q);
 	CHECK(Purple::ExemptFolderNames(std::nullopt).empty());
 
+	// notify and filtered are independent: a folder can be silenced without
+	// being exempt, and exempt without being silenced.
+	folders.push_back({ .name = u"Noise"_q, .notify = false });
+	folders.push_back({ .name = u"Loud2"_q, .notify = true });
+	CHECK_EQ(Purple::SilencedFolderNames(folders).size(), size_t(1));
+	CHECK_EQ(Purple::SilencedFolderNames(folders).front(), u"Noise"_q);
+	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(1));
+	CHECK(Purple::SilencedFolderNames(std::nullopt).empty());
+
 	auto withFolders = *work;
 	withFolders.folders = folders;
 	const auto cachedFolders = Purple::FromCache(
@@ -1455,7 +1464,9 @@ void TestResolvedCache() {
 	CHECK(cachedFolders.has_value());
 	CHECK_EQ(cachedFolders->exemptFolders.size(), size_t(1));
 	CHECK_EQ(cachedFolders->exemptFolders.front(), u"Family"_q);
-	CHECK_EQ(cachedFolders->folders->size(), size_t(3));
+	CHECK_EQ(cachedFolders->silencedFolders.size(), size_t(1));
+	CHECK_EQ(cachedFolders->silencedFolders.front(), u"Noise"_q);
+	CHECK_EQ(cachedFolders->folders->size(), size_t(5));
 
 	// Normal caches nothing - there is no resolution to remember.
 	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);

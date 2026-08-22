@@ -119,6 +119,12 @@ public:
 	[[nodiscard]] bool purpleMutedWithoutPreset(
 		not_null<const PeerData*> peer) const;
 
+	// Purple: whether the active preset silences this chat by naming a folder
+	// it is in, rather than by naming a list. False the moment no preset asks,
+	// which is what keeps a folder walk out of every other mute query.
+	[[nodiscard]] bool purpleSilencedByFolder(
+		not_null<const PeerData*> peer) const;
+
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;
 	[[nodiscard]] auto exceptionsUpdatesRealtime() const

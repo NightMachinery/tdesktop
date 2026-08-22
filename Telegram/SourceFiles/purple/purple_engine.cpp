@@ -120,6 +120,7 @@ std::optional<Resolved> Resolve(
 		}
 	}
 	result.exemptFolders = ExemptFolderNames(result.folders);
+	result.silencedFolders = SilencedFolderNames(result.folders);
 
 	result.lists.reserve(settings.lists.size());
 	for (const auto &list : settings.lists) {
@@ -160,6 +161,20 @@ std::vector<QString> ExemptFolderNames(
 		// Only an explicit false exempts. Saying nothing leaves the folder
 		// filtered, which is what every folder the preset does not name is.
 		if (folder.filtered.has_value() && !*folder.filtered) {
+			result.push_back(folder.name);
+		}
+	}
+	return result;
+}
+
+std::vector<QString> SilencedFolderNames(
+		const std::optional<std::vector<PresetFolder>> &folders) {
+	auto result = std::vector<QString>();
+	if (!folders) {
+		return result;
+	}
+	for (const auto &folder : *folders) {
+		if (folder.notify.has_value() && !*folder.notify) {
 			result.push_back(folder.name);
 		}
 	}
@@ -255,6 +270,7 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	result.groupsRequireMention = cache.groupsRequireMention;
 	result.folders = cache.folders;
 	result.exemptFolders = ExemptFolderNames(result.folders);
+	result.silencedFolders = SilencedFolderNames(result.folders);
 	result.lists.reserve(cache.lists.size());
 	for (const auto &entry : cache.lists) {
 		// The cache does not carry per-list mention gating: it exists to keep

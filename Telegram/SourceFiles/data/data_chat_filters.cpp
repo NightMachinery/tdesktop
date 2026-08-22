@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_channel.h"
 #include "data/data_session.h"
+#include "data/notify/data_notify_settings.h"
 #include "data/data_folder.h"
 #include "data/data_histories.h"
 #include "dialogs/dialogs_main_list.h"
@@ -339,7 +340,8 @@ const base::flat_set<not_null<History*>> &ChatFilter::never() const {
 
 bool ChatFilter::contains(
 		not_null<History*> history,
-		bool ignoreFakeUnread) const {
+		bool ignoreFakeUnread,
+		bool ignorePresetMute) const {
 	const auto flag = [&] {
 		const auto peer = history->peer;
 		if (const auto user = peer->asUser()) {
@@ -372,10 +374,14 @@ bool ChatFilter::contains(
 	const auto state = (_flags & (Flag::NoMuted | Flag::NoRead))
 		? history->chatListBadgesState()
 		: Dialogs::BadgesState();
+	const auto muted = ignorePresetMute
+		? history->owner().notifySettings().purpleMutedWithoutPreset(
+			history->peer)
+		: history->muted();
 	return false
 		|| ((_flags & flag)
 			&& (!(_flags & Flag::NoMuted)
-				|| !history->muted()
+				|| !muted
 				|| (state.mention
 					&& history->folderKnown()
 					&& !history->folder()))

@@ -78,4 +78,10 @@ PeekChange TogglePeek();
 // non-empty.
 [[nodiscard]] const std::vector<QString> &ExemptFolders();
 
+// Folders the preset marked `notify = false': their chats are silenced. Empty
+// unless a preset asks, which is what keeps the folder walk out of every mute
+// query that does not need it. Unaffected by peek, which reveals but does not
+// un-silence.
+[[nodiscard]] const std::vector<QString> &SilencedFolders();
+
 } // namespace Purple

@@ -271,15 +271,48 @@ The lookup is free for everyone who does not use it. It runs only for a chat
 the preset would otherwise hide, and only when some folder actually asked, so a
 preset with no exemptions never walks the folder list at all.
 
-### notify is parsed but not implemented
+### Silencing a folder
 
-`{ name = "Work", notify = false }` parses and warns. Silencing a whole folder
-is not implemented, and the reason is not effort: a folder carrying Telegram's
-"Exclude muted" flag stops containing a chat the moment it is silenced, which
-un-silences it, which puts it back. That needs a decided rule rather than a
-guessed one, and per-chat lists already cover the same ground.
+    folders = [ { name = "Noise", notify = false } ]
 
-`filtered` is likewise parsed and warned about.
+The chats in that folder are silenced, on the same terms as a silenced list:
+the preset only ever adds a mute, so a chat muted by hand stays muted whichever
+folder it is in.
+
+A list can already do this when the folder is a hand-picked set - the same ids
+with `notify = false` - and for those the list is the simpler tool. What a list
+cannot do is track a folder defined by a *rule*: "all groups", "non-contacts",
+"everything except these three". Membership there moves on its own as chats
+arrive, and only the folder form follows it.
+
+#### Breaking the loop
+
+The obvious implementation eats itself. A folder carrying Telegram's "Exclude
+muted" flag stops containing a chat the moment that chat is silenced, which
+un-silences it, which puts it back, forever.
+
+The rule that settles it: **membership is decided as though this preset
+silenced nothing.** `ChatFilter::contains()` takes `ignorePresetMute`, which
+swaps the cached effective mute for `purpleMutedWithoutPreset()`, so the input
+to the decision cannot depend on its output. An exclude-muted folder therefore
+holds exactly the chats it would hold with the preset switched off, and the
+preset silences those.
+
+#### What it costs, and one thing it does not do
+
+`Purple::SilencedFolders()` is empty unless a preset names a folder with
+`notify = false`, and that emptiness is checked first, so every mute query in
+every other configuration is untouched. When it is non-empty the walk is over
+the folder list, and `contains()` for a hand-picked folder is a set lookup.
+
+One honest limitation. A chat *entering* a silenced rule-based folder - by
+receiving the message that makes an unread-filtered folder include it - does
+not immediately refresh the cached `History::muted()` that sorting and the
+badge split read. Every live `isMuted()` answer is right from the moment it
+changes; the cached one catches up on the next notify refresh. Making it
+immediate needs a hook on filter-membership changes, the way the mention gate
+hooks `setCount()`, and that is worth doing with a real trigger rather than by
+re-walking every peer whenever any message arrives.
 
 ## When the active preset stops resolving
 
@@ -601,7 +634,8 @@ is the one state this must not be able to reach.
 
 ## Not yet implemented
 
-- Per-folder `notify`, as above.
+- A chat entering a silenced rule-based folder does not refresh the cached
+  mute immediately, as above.
 
 ## Cloud unread counts
 

@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "history/history.h"
 #include "main/main_session.h"
+#include "data/data_chat_filters.h"
+#include "history/history.h"
 #include "purple/purple_gate.h"
 #include "window/notifications_manager.h"
 
@@ -569,7 +571,9 @@ bool NotifySettings::isMuted(
 	// accessor the rest of the app uses is deliberate: History::muted() is
 	// cached from here, and the unread badges split muted from unmuted by that
 	// flag, so the badges follow without a second gate anywhere.
-	if (Purple::Filtering() && !Purple::VisibleFor(peer).notify) {
+	if (Purple::Filtering()
+		&& (!Purple::VisibleFor(peer).notify
+			|| purpleSilencedByFolder(peer))) {
 		if (changesIn) {
 			// Nothing here expires on a clock. The preset changing is what
 			// lifts it, and that path re-evaluates every peer explicitly.
@@ -603,6 +607,41 @@ bool NotifySettings::isMuted(not_null<const PeerData*> peer) const {
 bool NotifySettings::purpleMutedWithoutPreset(
 		not_null<const PeerData*> peer) const {
 	return purpleMutedWithoutPreset(peer, nullptr);
+}
+
+bool NotifySettings::purpleSilencedByFolder(
+		not_null<const PeerData*> peer) const {
+	const auto &silenced = Purple::SilencedFolders();
+	if (silenced.empty()) {
+		return false;
+	}
+	const auto history = _owner->historyLoaded(peer->id);
+	if (!history) {
+		// Reached from the History constructor, among other places, before
+		// there is a history to ask a folder about. The answer corrects itself
+		// on the next refresh, and guessing here would mean asking a filter
+		// about a half-built object.
+		return false;
+	}
+	for (const auto &filter : _owner->chatsFilters().list()) {
+		if (!filter.id()) {
+			continue;
+		}
+		for (const auto &name : silenced) {
+			if (name.compare(
+					filter.title().text.text,
+					Qt::CaseInsensitive)) {
+				continue;
+			}
+			// ignorePresetMute: the membership question must be answered as
+			// if this preset silenced nothing, or an exclude-muted folder
+			// would drop the chat the moment we silenced it and oscillate.
+			if (filter.contains(history, false, true)) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 bool NotifySettings::silentPosts(not_null<const PeerData*> peer) const {

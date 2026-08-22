@@ -266,6 +266,12 @@ const std::vector<QString> &ExemptFolders() {
 	return resolved.exemptFolders;
 }
 
+const std::vector<QString> &SilencedFolders() {
+	static const auto kNone = std::vector<QString>();
+	const auto &resolved = Instance().resolved();
+	return resolved.normal ? kNone : resolved.silencedFolders;
+}
+
 bool FoldersRestricted() {
 	const auto &resolved = Instance().resolved();
 	return !resolved.normal
