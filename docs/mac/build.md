@@ -328,6 +328,32 @@ The three measurements, same machine, same bundle:
 Verify a fast-path install with `vmmap` on the running app: `QtCore` must
 resolve inside `Contents/Frameworks`, not in the Qt prefix.
 
+### Full Disk Access, and why every install loses it
+
+Work Mode's focus sync reads `~/Library/DoNotDisturb/DB/Assertions.json`, which
+macOS keeps behind Full Disk Access. The file mode is an ordinary
+`-rw-r--r--`, and the read still fails with `Operation not permitted`. Grant it
+under System Settings, Privacy & Security, Full Disk Access, then relaunch -
+macOS does not hand a new permission to a process that is already running.
+
+The grant does not survive `install.sh`. TCC keys it to the app's designated
+requirement, and for an ad-hoc signature that is the code hash of one exact
+binary, which every build changes. Measured rather than assumed: the grant was
+made, the app rebuilt and reinstalled, and the next launch logged
+
+    Purple Error: Focus state unreadable, cannot open it (Operation not
+    permitted) - Full Disk Access for Purple Telegram is what this usually
+    wants.
+
+So re-approving is part of installing, for as long as the signature is ad-hoc.
+Signing with a stable self-signed certificate would fix it properly: the
+designated requirement would then name the identifier and the certificate
+rather than a hash, and would hold across rebuilds. That means a keychain
+certificate to create and a change to `install.sh`, and it has not been done.
+
+Nothing else in the fork wants the permission. Everything but focus sync works
+without it, and the detector says so once per launch instead of going quiet.
+
 ### Symbolicating a crash
 
 `macdeployqt` strips the binary in place, so `install.sh` first copies the
