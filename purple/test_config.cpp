@@ -878,6 +878,7 @@ void TestStateRoundTrip() {
 	state.peekDeadlineUnix = 1755400000;
 	state.resolvedCache.preset = u"work"_q;
 	state.resolvedCache.groupsRequireMention = false;
+	state.resolvedCache.hideEverywhere = true;
 	state.resolvedCache.lists = {
 		{ u"os"_q, true, true },
 		{ u"@private"_q, true, false },
@@ -903,6 +904,7 @@ void TestStateRoundTrip() {
 	CHECK(back.resolvedCache.valid());
 	CHECK_EQ(back.resolvedCache.preset, u"work"_q);
 	CHECK(!back.resolvedCache.groupsRequireMention);
+	CHECK(back.resolvedCache.hideEverywhere);
 	CHECK_EQ(back.resolvedCache.lists.size(), size_t(2));
 	CHECK_EQ(back.resolvedCache.lists[1].list, u"@private"_q);
 	CHECK(back.resolvedCache.lists[1].show);
@@ -1069,6 +1071,11 @@ void TestResolveDefault() {
 		CHECK(!list.groupsRequireMention);
 	}
 
+	// Off unless a preset asks, and for the same kind of reason: hiding a chat
+	// from the work view is a small thing to get wrong, and taking it out of
+	// the forward picker as well is not.
+	CHECK(!resolved->hideEverywhere);
+
 	// An empty name means the same thing, since that is what a fresh state
 	// file with no active preset resolves to.
 	CHECK(Purple::Resolve(parsed.settings, QString()).has_value());
@@ -1128,6 +1135,27 @@ void TestResolveInheritance() {
 	// distinguishable from a preset that never mentioned folders.
 	CHECK(lockdown->folders.has_value());
 	CHECK(lockdown->folders->empty());
+
+	// hide_everywhere walks the chain like every other preset-wide switch,
+	// first explicit value wins, and a child can turn its parent's back off.
+	const auto scoped = Parse(uR"(
+[presets.away]
+hide_everywhere = true
+
+[presets.deeper]
+inherit = "away"
+
+[presets.relaxed]
+inherit = "away"
+hide_everywhere = false
+)"_q);
+	CHECK(scoped.ok());
+	const auto away = Purple::Resolve(scoped.settings, u"away"_q);
+	const auto deeper = Purple::Resolve(scoped.settings, u"deeper"_q);
+	const auto relaxed = Purple::Resolve(scoped.settings, u"relaxed"_q);
+	CHECK(away.has_value() && away->hideEverywhere);
+	CHECK(deeper.has_value() && deeper->hideEverywhere);
+	CHECK(relaxed.has_value() && !relaxed->hideEverywhere);
 }
 
 void TestResolveLocked() {

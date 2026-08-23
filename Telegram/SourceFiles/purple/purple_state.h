@@ -40,6 +40,7 @@ struct ResolvedCache {
 	QString preset;
 	std::vector<ResolvedList> lists;
 	bool groupsRequireMention = false;
+	bool hideEverywhere = false;
 
 	// Nothing and an empty vector mean different things - see Resolved::folders
 	// - so the key is written only when the preset said something, and its

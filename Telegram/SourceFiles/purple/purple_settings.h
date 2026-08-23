@@ -79,6 +79,13 @@ struct Preset {
 	QString inherit;
 	std::optional<bool> groupsRequireMention;
 
+	// Whether a chat this preset hides is gone from the whole app rather than
+	// only from the preset's own view of the chat list - so out of the forward
+	// picker, out of search, out of recent chats. Nothing means no, which is
+	// the default because a work mode is about what you are looking at, not
+	// about what you are allowed to reach. See docs/purple/work_mode.md.
+	std::optional<bool> hideEverywhere;
+
 	// Inherited whole: a preset that names any folder replaces its parent's
 	// selection outright rather than merging element by element.
 	std::optional<std::vector<PresetFolder>> folders;

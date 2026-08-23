@@ -42,6 +42,16 @@ namespace Purple {
 // silencing is left exactly where it was. See docs/purple/work_mode.md.
 [[nodiscard]] bool Peeking();
 
+// Whether the active preset takes the chats it hides out of the whole app
+// rather than out of its own view of the chat list. False for every preset
+// that does not ask, and false while peeking, which hides nothing at all.
+//
+// The difference is what the rest of the app can still reach: under the
+// default a hidden chat is missing from the preset's view and from nowhere
+// else, so forwarding to it, searching for it and the recent-chats row all
+// still work. See docs/purple/work_mode.md.
+[[nodiscard]] bool HideEverywhere();
+
 struct PeekChange {
 	bool peeking = false;
 

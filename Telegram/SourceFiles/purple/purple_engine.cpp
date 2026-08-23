@@ -110,6 +110,13 @@ std::optional<Resolved> Resolve(
 		}
 	}
 
+	for (const auto entry : *chain) {
+		if (entry->hideEverywhere) {
+			result.hideEverywhere = *entry->hideEverywhere;
+			break;
+		}
+	}
+
 	// Folders are inherited whole: the first preset in the chain that names any
 	// replaces its parent's selection outright, rather than merging entry by
 	// entry, so a child can also deliberately show none by writing "[]".
@@ -253,6 +260,7 @@ ResolvedCache ToCache(const Resolved &resolved) {
 	}
 	result.preset = resolved.preset;
 	result.groupsRequireMention = resolved.groupsRequireMention;
+	result.hideEverywhere = resolved.hideEverywhere;
 	result.folders = resolved.folders;
 	result.lists.reserve(resolved.lists.size());
 	for (const auto &entry : resolved.lists) {
@@ -268,6 +276,7 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	auto result = Resolved();
 	result.preset = cache.preset;
 	result.groupsRequireMention = cache.groupsRequireMention;
+	result.hideEverywhere = cache.hideEverywhere;
 	result.folders = cache.folders;
 	result.exemptFolders = ExemptFolderNames(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);

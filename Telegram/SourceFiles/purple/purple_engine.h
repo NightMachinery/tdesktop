@@ -86,6 +86,12 @@ struct Resolved {
 	// chain says otherwise - see EffectiveList.
 	bool groupsRequireMention = false;
 
+	// Whether hiding means "gone from the app" rather than "absent from this
+	// preset's view of the chat list". Off by default: a hidden chat stays
+	// reachable through the forward picker, search and recent chats, and only
+	// the view leaves it out. See Preset::hideEverywhere.
+	bool hideEverywhere = false;
+
 	// A peek is running, so the preset's hiding is suspended - but not its
 	// silencing. Set by the gate from state.toml rather than by Resolve(): a
 	// peek is transient and expires on a clock, which is also why ToCache()

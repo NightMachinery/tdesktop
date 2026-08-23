@@ -418,6 +418,11 @@ void ReadMembers(
 			"groups_require_mention",
 			context,
 			warnings);
+		preset.hideEverywhere = ReadBool(
+			*table,
+			"hide_everywhere",
+			context,
+			warnings);
 		if (const auto folders = table->get("folders")) {
 			if (const auto array = folders->as_array()) {
 				preset.folders = ReadFolders(*array, context, warnings);

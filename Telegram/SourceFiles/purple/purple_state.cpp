@@ -78,6 +78,7 @@ namespace {
 		*table,
 		"groups_require_mention",
 		false);
+	result.hideEverywhere = ReadBool(*table, "hide_everywhere", false);
 	if (const auto lists = table->get("lists")) {
 		if (const auto array = lists->as_array()) {
 			for (auto &&element : *array) {
@@ -232,6 +233,8 @@ QString SerializeState(const State &state) {
 	result += u"preset = %1\n"_q.arg(Quoted(cache.preset));
 	result += u"groups_require_mention = %1\n"_q
 		.arg(Boolean(cache.groupsRequireMention));
+	result += u"hide_everywhere = %1\n"_q
+		.arg(Boolean(cache.hideEverywhere));
 	result += u"lists = [\n"_q;
 	for (const auto &list : cache.lists) {
 		result += u"  { list = %1, show = %2, notify = %3 },\n"_q

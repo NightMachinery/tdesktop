@@ -235,6 +235,13 @@ bool Peeking() {
 	return Instance().resolved().peeking;
 }
 
+bool HideEverywhere() {
+	const auto &resolved = Instance().resolved();
+	return !resolved.normal
+		&& !resolved.peeking
+		&& resolved.hideEverywhere;
+}
+
 PeekChange TogglePeek() {
 	const auto &resolved = Instance().resolved();
 	if (resolved.normal) {
