@@ -88,9 +88,16 @@ notify = true
 # An example preset. Uncomment and adjust, or write your own - the defaults
 # above are themselves the implicit "default" preset every other one inherits.
 #
+# A running preset does not empty your chat list. It replaces the "All chats"
+# tab with a view of its own, named after the preset, holding what it does not
+# hide - so a hidden chat is still pinned, still searchable and still there in
+# the forward picker. Set hide_everywhere = true if you would rather it were
+# gone from the whole app.
+#
 # [presets.work]
 # inherit = "default"
 # groups_require_mention = true
+# hide_everywhere = false
 #
 # [presets.work.overrides."@private"]
 # notify = false                       # visible, but they do not interrupt

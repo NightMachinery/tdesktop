@@ -35,15 +35,101 @@ default.
 
 Three things, all derived from the resolved list a chat falls into:
 
-- `show = false` removes the chat from every chat list.
+- `show = false` keeps the chat out of the preset's view of the chat list.
 - `notify = false` mutes it.
 - `groups_require_mention = true` leaves a group out until it holds an unread
   mention.
 
-`show` and the mention gate are both enforced in
-`History::shouldBeInChatList()`, ahead of every other condition there -
-including the shortcut that keeps pinned dialogs, or pinning a chat would exempt
-it from every preset.
+## The preset view
+
+A running preset does not empty the chat list. It shows a **different one**.
+
+The main list keeps every chat, exactly as it would under `normal`. Alongside
+it the fork maintains one more chat list - the *preset view* - holding the
+chats the preset does not hide, and the folder strip offers that view where
+"All chats" would be, labelled with the preset's name. All chats itself is
+gone from the strip for as long as the preset runs.
+
+That is the whole design, and it is worth stating why it is not the obvious
+one. The obvious one - the fork's first - was to make `shouldBeInChatList()`
+answer no, so a hidden chat was in no list at all. It works, and everything
+downstream comes free, but it fights tdesktop the whole way:
+
+- **The invariant.** Being in a filter implies being in the main list;
+  `Entry::notifyUnreadStateChange()` asserts it outright. Removing a chat from
+  the main list therefore removes it from every folder too, whether or not that
+  was wanted, and "hidden from All chats but present in its own folder" was not
+  expressible at any price.
+- **Pins.** `Entry::removeFromChatList()` unpins what it removes, which is
+  right for a chat that has genuinely gone and wrong for one that is merely out
+  of view. It cost a real pin loss on a real account before it was caught, and
+  a latent `f_force` path that would have taken the pins off every device.
+- **Everything else that reads the main list.** The forward picker, search
+  suggestions, recent chats. A chat in no list is missing from all of them,
+  which is a much larger claim than "keep my chat list quiet".
+
+As a view, all three stop being problems rather than being solved one at a
+time. The main list is complete, so the invariant holds by construction, the
+pin logic never fires, and a hidden chat is still reachable everywhere the
+preset is not looking.
+
+The view is a filter, with the reserved id `Data::kPurpleViewFilterId`. Being a
+filter rather than a special case is what makes the chat list machinery accept
+it: `Dialogs::MainList` accumulates unread totals through `addEntry`/
+`removeEntry` and sorts by `Row::sortKey(filterId)`, so the view's badge and
+order are right for the same reason every folder's are. Membership is
+maintained in `Session::refreshChatListEntry()`, next to the loop that does the
+same for real folders.
+
+Folders belong to the view exactly as they belong to All chats - the Archive
+row is in it. Archived chats are not, and neither are forum topics or
+Saved Messages sublists, which live in lists of their own.
+
+### What the badge counts
+
+`Session::purpleBadgeList()` returns the view while a preset runs and the main
+list otherwise, and the seven badge accessors read it. This is the one place
+the design costs something the removal-based one got free: the main list is now
+complete, so counting it would leave the dock badge claiming unread messages
+that nothing on screen accounts for.
+
+They are the same object under `normal`, so nothing is paid there.
+
+### Pins in the view
+
+The view's pinned list is a **copy** of the main list's, minus the chats the
+preset hides, retaken by `Session::refreshPurpleViewPinned()` whenever either
+moves. Pinning is a fact about the account, not about the view, so the view is
+never allowed to own pins of its own:
+
+- Pinning or unpinning inside the view acts on the main list and sends the
+  ordinary `messages.toggleDialogPin`.
+- Dragging pins about inside the view reorders the main list. Two chats
+  adjacent in the view may have a hidden chat between them in the main list;
+  `PinnedList::reorder()` works on keys rather than indices, so the hidden one
+  rides along instead of being swapped by mistake.
+- The order saved to the server is the main list's, complete. The view is never
+  sent anywhere - it is not a folder and no server has heard of it.
+
+`Entry::removeFromChatList()` leaves the view's pinned list alone for the same
+reason: the copy owns it, and the next copy would undo anything done here.
+
+### hide_everywhere
+
+    [presets.away]
+    hide_everywhere = true
+
+Global absence is a real thing to want from a work mode, so it is available -
+but as a request rather than a side effect. `hide_everywhere = true` restores
+the original behaviour: `History::shouldBeInChatList()` answers no, the chat
+leaves the main list, and with it the forward picker, search suggestions and
+recent chats.
+
+It inherits down a preset chain like every other preset-wide switch, first
+explicit value wins, and a child can turn its parent's back off.
+
+Under it the exempt-folder rule below tightens back up, and for the original
+reason: a chat out of the main list cannot be in a folder either.
 
 ### Hiding is a view, not an edit
 
@@ -53,9 +139,9 @@ not true.
 
 `Dialogs::Entry::removeFromChatList()` unpins whatever it removes. That is
 right upstream, where an entry leaves because it has genuinely gone - you left
-the group, it was deleted - and the server has unpinned it too. It is wrong
-here: the chat is still on the account and comes back the moment the preset
-stops, but the pin did not, because nothing was left to restore it from.
+the group, it was deleted - and the server has unpinned it too. It was wrong
+here: the chat was still on the account and came back the moment the preset
+stopped, but the pin did not, because nothing was left to restore it from.
 
 The quieter half was worse. That same pinned list is what
 `ApiWrap::savePinnedOrder()` sends, and it sends it with `f_force`, so
@@ -63,24 +149,14 @@ reordering pins while a preset hid one would have dropped the hidden chat from
 the account and from every other device. Exactly the hazard the folder
 `saveOrder()` guard exists for, in a place nobody had looked.
 
-So the unpin is skipped when `purpleHiddenFromChatList()` is what is taking the
-entry away. The pin index and the pinned-list entry both survive, the chat
-leaves the view and returns pinned where it was, and the order sent to the
-server stays complete. Reordering is safe rather than refused, because
-`reorderTwoPinnedChats()` works on keys rather than row indices: a hidden pin
-between two visible ones rides along in the rotation instead of being swapped
-by mistake.
+The view design retires the whole hazard: nothing is removed from the main
+list, so the unpin never fires. The guard survives for `hide_everywhere`, where
+it does - `purpleHiddenFromChatList()` is what asks - and the reasoning above is
+kept because that is the case it still covers.
 
 The mute path was checked for the same shape and is clean.
 `NotifySettings::purpleRefreshMute()` goes to `updateLocal()`, which never
 issues a request.
-
-That single hook also settles the unread badges, which was the part that looked
-like it would need its own gate. `Dialogs::MainList` does not compute its totals
-on demand; it accumulates them as entries enter and leave, through
-`addEntry`/`removeEntry`. A chat that `shouldBeInChatList()` rejects is not in
-any list, so it is in no total either - main list, archive and every chat filter
-alike - and there is nothing left to subtract by hand.
 
 `notify` is enforced in the private `Data::NotifySettings::isMuted(peer, ...)`,
 which is the single root every mute question flows through: the notification
@@ -214,10 +290,21 @@ folder is skipped and logged, for the same reason the hidden-chat count is
 logged - a folder named slightly wrong is indistinguishable from a folder the
 preset meant to hide.
 
-"All chats" is never dropped. It is the only view that shows a chat belonging to
-no folder, and the preset has already decided what that view contains. It is
-also what makes `folders = []` work without a special case: left alone it takes
-`ChatFilters::has()` below its threshold and the folder UI removes itself.
+"All chats" is dropped, and the preset view stands in its place - see
+[The preset view](#the-preset-view). It is the only tab that shows a chat
+belonging to no folder, so something has to be there, and the view is what the
+preset means by "the chat list" anyway. It is also what makes `folders = []`
+work without a special case: left as the only entry it takes the strip below
+its "more than one tab" threshold and the strip hides itself.
+
+The view is not a folder and does not pretend to be one. Right-clicking it
+offers Mark as read and the Work Mode box, not Edit and Delete; it wears the
+All chats icon; and every path that edits, deletes, reorders or saves a folder
+tests `Data::IsPurpleView()` and refuses.
+
+`ChatFilters::defaultId()` returns the view while a preset runs, so a new
+window opens on it and closing the archive falls back to it rather than to the
+complete list.
 
 ### Why a second accessor rather than filtering the real list
 
@@ -248,24 +335,39 @@ through it.
 The two drag handlers also bail out early, so a drag is simply inert rather than
 appearing to work and then snapping back.
 
-To reorder folders, switch to `normal` first.
+A preset that says nothing about folders still allows reordering. Its shown
+list is the real one with the view standing exactly where All chats stood, so
+every index still means the folder it did before.
+
+To reorder folders while a preset restricts them, switch to `normal` first.
 
 ### Exempting a folder
 
     folders = [ { name = "Family", filtered = false } ]
 
 `filtered = false` is an escape hatch: the chats in that folder ignore the
-preset's hiding, and its mention gate with it. A folder that opted out of the
-preset deciding what is on screen opted out of all of it, not half.
-
-They stay visible **everywhere**, All chats included, not only inside the
-folder. That is not a shortcut, it is the only cheap answer: hiding a chat from
-the main list while keeping it in a folder's list would put an entry in a
-filter that is absent from the main list, and tdesktop guarantees the opposite
-throughout - `Entry::notifyUnreadStateChange()` asserts on it outright.
+preset's hiding, and its mention gate with it, so they show in the preset view
+alongside the lists it did not hide. A folder that opted out of the preset
+deciding what is on screen opted out of all of it, not half.
 
 Saying nothing leaves a folder filtered, which is what every folder the preset
 does not name already is. Only an explicit `false` exempts.
+
+Note what a *filtered* folder now means, because it changed with the view. The
+preset decides the view; a folder decides its own tab. So a chat the preset
+hides is missing from the view and still present inside its folder. That is the
+strict reading, it is what "a folder shows what the folder says" implies, and
+it was not affordable before the view existed.
+
+If a folder's contents do not belong in a work mode, do not show the folder -
+that is what naming folders is for. `filtered = false` is the opposite lever:
+it pulls the folder's chats *into* the view.
+
+Under `hide_everywhere` the old rule comes back, and must: a chat out of the
+main list cannot be in a folder either, because tdesktop guarantees the reverse
+throughout - `Entry::notifyUnreadStateChange()` asserts on it outright. So an
+exempt folder's chats stay visible everywhere, and a hidden chat is gone from
+its folder as well.
 
 The lookup is free for everyone who does not use it. It runs only for a chat
 the preset would otherwise hide, and only when some folder actually asked, so a
@@ -667,5 +769,13 @@ this chat visible" is a table lookup rather than a walk of every list.
 Call sites test `Purple::Filtering()` first. It is false under `normal`, which
 is what keeps an unconfigured fork at one bool load per query rather than a peer
 classification.
+
+The preset view lives outside `purple/`, because it is a chat list rather than
+a policy:
+
+    Telegram/SourceFiles/data/data_chat_filters.h     kPurpleViewFilterId
+    Telegram/SourceFiles/data/data_chat_filters.cpp   purpleViewFilter, defaultId
+    Telegram/SourceFiles/data/data_session.cpp        membership, pins, badges
+    Telegram/SourceFiles/history/history.cpp          purpleHiddenFromView
 
 The fork's whole diff is findable with `git grep Purple::`.
