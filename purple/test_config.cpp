@@ -501,6 +501,28 @@ list_order = [ { list = "b" } ]
 	// however many tabs are showing it.
 	CHECK(WarnsAbout(result, u"'notify_p' means nothing inside a view"_q));
 
+	// But only when the view wrote it. A list_set exists to be reused, and it
+	// was written for a preset's own order where notify_p is exactly what it
+	// should say - warning about it every time the set is spread onto a tab
+	// would make the idiom unusable while saying nothing to act on.
+	const auto spread = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[list_sets.core]
+list_order = [ { list = "a", show_p = true, notify_p = true } ]
+
+[presets.work]
+list_order = [ "*core" ]
+
+[[presets.work.views]]
+name = "Focus"
+list_order = [ "*core" ]
+)"_q);
+	CHECK(spread.ok());
+	CHECK(!WarnsAbout(spread, u"'notify_p' means nothing inside a view"_q));
+	CHECK_EQ(int(spread.settings.preset(u"work"_q)->views.size()), 1);
+
 	const auto work = result.settings.preset(u"work"_q);
 	CHECK_EQ(int(work->views.size()), 1);
 	CHECK_EQ(work->views[0].name, u"Focus"_q);

@@ -568,6 +568,32 @@ void Expander::expandFolders(
 		}
 		if (const auto order = fields->get("list_order")) {
 			if (const auto ids = order->as_array()) {
+				// Before expanding, so this only ever sees what the view
+				// itself wrote. A view picks which chats appear on one tab.
+				// Silence is a property of the chat, not of the tab it is
+				// being looked at on, so a notify here would be a setting
+				// that cannot mean anything.
+				//
+				// A "*name" spread is deliberately not checked: the set was
+				// written for a preset's own order, where notify_p is
+				// exactly what it should say, and reusing it on a tab is the
+				// whole point of having sets. Warning there would make the
+				// idiom unusable without saying anything to act on.
+				for (auto &&element : *ids) {
+					const auto entry = element.as_table();
+					if (!entry || !entry->get("notify_p")) {
+						continue;
+					}
+					const auto named = entry->get_as<std::string>("list");
+					warnings.push_back(
+						u"%1: 'notify_p' means nothing inside a view - a "
+						"chat has one mute state however many tabs show "
+						"it - ignoring it on '%2'."_q.arg(
+							inner,
+							named
+								? QString::fromStdString(named->get())
+								: u"?"_q));
+				}
 				view.listOrder = expander.listOrder(*ids, inner);
 			} else {
 				warnings.push_back(u"%1: 'list_order' should be an array (%2)."_q
@@ -579,17 +605,6 @@ void Expander::expandFolders(
 				u"%1: names no list, so the tab would always be empty; "
 				"ignoring it."_q.arg(inner));
 			continue;
-		}
-		// A view picks which chats appear on one tab. Silence is a property of
-		// the chat, not of the tab it is being looked at on, so a notify here
-		// would be a setting that cannot mean anything.
-		for (const auto &entry : view.listOrder) {
-			if (entry.notify.has_value()) {
-				warnings.push_back(
-					u"%1: 'notify_p' means nothing inside a view - a chat has "
-					"one mute state however many tabs show it - ignoring it on "
-					"'%2'."_q.arg(inner, entry.list));
-			}
 		}
 		result.push_back(std::move(view));
 	}
