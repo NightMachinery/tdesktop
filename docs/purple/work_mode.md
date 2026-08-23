@@ -468,6 +468,57 @@ there would destroy the radio button whose click was still on the stack. The
 selection alone follows the state, which is what lets a schedule move it under
 an open box.
 
+## Putting a chat in a list
+
+Right-clicking a chat - in the chat list, or from its profile - offers
+`Work Mode`, a submenu of every list you wrote in `settings.toml`, checked
+where the chat is already a member. Clicking one adds or removes it. That is
+the whole of it, and it exists because the alternative was hunting for a peer
+id by hand: the ids in `members` are not shown anywhere in Telegram's UI, so
+building a list used to mean turning on an experimental option, reading the
+number off a profile, and typing it into the file.
+
+The write goes through the same splice as everything else the app writes to
+that file, so your comments, your ordering and your blank lines survive it, and
+the line it adds carries the chat's name as a trailing comment. Names go stale,
+so the comment is regenerated whenever its line is rewritten rather than read
+back and trusted.
+
+Four things the submenu deliberately does:
+
+- **It leaves the catch-alls out.** `@private`, `@groups`, `@channels` and
+  `@bots` match by chat type; there is no membership to toggle. Their defaults
+  are set in the file and explained in the preset box.
+- **It offers locked lists like any other.** `locked` stops a *preset*
+  overriding what a list does. It says nothing about who is in it, and an
+  Emergency list nobody can add to is not much of an emergency list.
+- **It does not appear at all** unless you have written a list of your own, so
+  an unconfigured fork's menus are exactly upstream's.
+- **It names what is deciding the chat**, while a preset is running: a first
+  line reading `In 'Essentials': shown` or `In '@bots': hidden`, which opens the
+  preset box. That is the question that brings anyone to this menu, and the
+  answer is as often a catch-all as one of your own lists.
+
+That last line reports what actually happened to the chat, not what the list
+asked for. The two come apart for a chat an exempt folder rescued - `@bots`
+says hide, the folder says keep - and there the line reads
+`In '@bots': silenced, shown by a folder`. Printing the list's verdict instead
+would put the word `hidden` over a chat sitting in the list, which is worse
+than saying nothing. A gated group reads `hidden until a mention` for the same
+reason: that is where it stands right now.
+
+Membership is global, not per preset. A chat is in Essentials or it is not;
+what changes between presets is what Essentials *does*. The line above tells
+you which list won, which matters because the first list in `list_order`
+holding a chat is the one that decides it - adding a chat to a list that ranks
+below one already holding it changes nothing, and the line is how you see that.
+
+Writing the file reloads it, which re-resolves the preset and rebuilds the chat
+lists, so a chat you have just hidden or revealed moves immediately. If the
+write fails - the file is not writable, or the list is written as an inline
+table the splice will not edit a line at a time - nothing changes on disk or in
+memory and a toast says so, with the details in the log.
+
 ## The mute a preset imposed
 
 `Data::NotifySettings::isMuted()` answers the effective question, and a preset
@@ -751,6 +802,7 @@ resolves itself as soon as the entries load.
     Telegram/SourceFiles/purple/purple_engine.{h,cpp}     resolution, pure data
     Telegram/SourceFiles/purple/purple_focus.{h,cpp}      OS focus sync
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
+    Telegram/SourceFiles/purple/purple_list_menu.{h,cpp}  list membership menu
     Telegram/SourceFiles/purple/purple_peek.{h,cpp}       the peek hotkey
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
     Telegram/SourceFiles/purple/purple_schedule.{h,cpp}   the schedule clock

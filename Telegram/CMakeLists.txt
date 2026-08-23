@@ -1730,6 +1730,8 @@ PRIVATE
     purple/purple_focus.h
     purple/purple_gate.cpp
     purple/purple_gate.h
+    purple/purple_list_menu.cpp
+    purple/purple_list_menu.h
     purple/purple_peek.cpp
     purple/purple_peek.h
     purple/purple_preset_box.cpp

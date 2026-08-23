@@ -65,6 +65,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_list_menu.h"
 #include "purple/purple_preset_box.h"
 #include "menu/menu_mute.h"
 #include "menu/menu_ttl_validator.h"
@@ -134,6 +135,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h" // st::windowMinWidth
 #include "styles/style_menu_icons.h"
 #include "styles/style_premium.h"
+#include "styles/style_widgets.h" // st::popupMenuWithIcons
 
 #include <QAction>
 #include <QtWidgets/QApplication>
@@ -323,6 +325,7 @@ private:
 	void addNewWindow(bool addSeparator = true);
 	void addUngroup();
 	void addToggleFolder();
+	void addPurpleLists();
 	void addToggleUnreadMark();
 	void addToggleArchive();
 	void addClearHistory();
@@ -711,6 +714,31 @@ void Filler::addToggleFolder() {
 			FillChooseFilterMenu(controller, menu, history);
 		},
 		.submenuSt = &st::foldersMenu,
+	});
+}
+
+// Purple: the same shape as addToggleFolder() above, for the lists Work Mode
+// reads out of settings.toml. Left out entirely unless the user has written a
+// list of their own, so an unconfigured fork's menus are untouched.
+void Filler::addPurpleLists() {
+	if (!_peer || _peer->isSelf() || _topic || _sublist) {
+		// Saved Messages is exempt from every preset, and a topic or a sublist
+		// is not a chat the lists can name - its peer is, and offering the
+		// parent's membership from inside it would be a quiet lie.
+		return;
+	} else if (!Purple::HasCustomLists()) {
+		return;
+	}
+	const auto peer = _peer;
+	const auto show = _controller->uiShow();
+	_addAction(PeerMenuCallback::Args{
+		.text = u"Work Mode"_q,
+		.handler = nullptr,
+		.icon = &st::menuIconAddToFolder,
+		.fillSubmenu = [=](not_null<Ui::PopupMenu*> menu) {
+			Purple::FillListsMenu(menu, show, peer);
+		},
+		.submenuSt = &st::popupMenuWithIcons,
 	});
 }
 
@@ -1872,6 +1900,7 @@ void Filler::fillContextMenuActions() {
 	addToggleUnreadMark();
 	addToggleTopicClosed();
 	addToggleFolder();
+	addPurpleLists();
 	if (const auto user = _peer->asUser()) {
 		if (!user->isContact()) {
 			addBlockUser();
@@ -1927,6 +1956,7 @@ void Filler::fillProfileActions() {
 	addExportChat();
 	addToggleNoForwards();
 	addToggleFolder();
+	addPurpleLists();
 	addBlockUser();
 	addReport();
 	addLeaveChat();

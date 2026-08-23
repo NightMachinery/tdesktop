@@ -32,6 +32,8 @@ to it, both surgical:
 - the Premium toggle in Settings, which rewrites the single value token of
   `[premium] enabled`,
 - adding and removing list members, which edits one line of a `members` array.
+  That is the `Work Mode` submenu on a chat's context menu - see
+  [work_mode.md](work_mode.md).
 
 Neither re-serializes the document. Both locate what they need through toml++
 source regions and edit the raw lines, so comments, blank lines, alignment and
