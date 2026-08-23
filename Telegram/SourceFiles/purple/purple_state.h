@@ -38,6 +38,12 @@ struct ResolvedList {
 // running on this rather than falling back to showing everything. See spec 8.5.
 struct ResolvedCache {
 	QString preset;
+
+	// Cached alongside the rest so a broken reload does not also rename the
+	// tab. Absent in a file written by an older build, which is why reading it
+	// falls back to the preset name rather than to an empty label.
+	QString viewName;
+
 	std::vector<ResolvedList> lists;
 	bool groupsRequireMention = false;
 	bool hideEverywhere = false;

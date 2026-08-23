@@ -77,6 +77,14 @@ struct PresetFolder {
 struct Preset {
 	QString name;
 	QString inherit;
+
+	// What the preset's tab is called where All chats used to be. Empty means
+	// the preset's own name with its first letter capitalised, which is what
+	// almost everyone wants and nobody should have to type. Deliberately NOT
+	// inherited: a name is the one thing a child preset must never take from
+	// its parent. See docs/purple/work_mode.md.
+	QString viewName;
+
 	std::optional<bool> groupsRequireMention;
 
 	// Whether a chat this preset hides is gone from the whole app rather than
@@ -160,6 +168,13 @@ struct ParseResult {
 // Whether exit_preset says "previous" - put back whatever was active when the
 // focus mode came on, rather than a preset named outright.
 [[nodiscard]] bool IsPreviousPresetName(const QString &name);
+
+// The preset name with its first letter capitalised, which is what a preset
+// that did not write `default_view_name' calls its tab. Only the first letter:
+// a preset called "deep focus" becomes "Deep focus", not "Deep Focus", because
+// guessing at word boundaries in a name the user chose is how you end up
+// mangling one.
+[[nodiscard]] QString DefaultViewName(const QString &preset);
 
 // "90s", "2m", "1h", "0" / "off" for no timer. Nothing for unparseable input.
 [[nodiscard]] std::optional<int> ParseDuration(const QString &value);

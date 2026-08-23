@@ -413,6 +413,12 @@ void ReadMembers(
 		preset.name = name;
 		preset.inherit = ReadString(*table, "inherit", context, warnings)
 			.value_or(QString::fromLatin1(kDefaultPresetName));
+		preset.viewName = ReadString(
+			*table,
+			"default_view_name",
+			context,
+			warnings
+		).value_or(QString()).trimmed();
 		preset.groupsRequireMention = ReadBool(
 			*table,
 			"groups_require_mention",
@@ -713,6 +719,17 @@ bool IsPreviousPresetName(const QString &name) {
 	return !name.compare(
 		QLatin1String(kPreviousPreset),
 		Qt::CaseInsensitive);
+}
+
+QString DefaultViewName(const QString &preset) {
+	auto result = preset.trimmed();
+	if (result.isEmpty()) {
+		return result;
+	}
+	// In place, and only the first character: QString::toUpper() on the whole
+	// name would shout a preset deliberately written in caps back at the user.
+	result[0] = result[0].toUpper();
+	return result;
 }
 
 std::optional<int> ParseDuration(const QString &value) {

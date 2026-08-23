@@ -74,6 +74,10 @@ namespace {
 	if (result.preset.isEmpty()) {
 		return result;
 	}
+	result.viewName = ReadString(*table, "view_name");
+	if (result.viewName.isEmpty()) {
+		result.viewName = DefaultViewName(result.preset);
+	}
 	result.groupsRequireMention = ReadBool(
 		*table,
 		"groups_require_mention",
@@ -231,6 +235,7 @@ QString SerializeState(const State &state) {
 		"leaves the\n# app running on known-good settings instead of on "
 		"defaults.\n[resolved_cache]\n"_q;
 	result += u"preset = %1\n"_q.arg(Quoted(cache.preset));
+	result += u"view_name = %1\n"_q.arg(Quoted(cache.viewName));
 	result += u"groups_require_mention = %1\n"_q
 		.arg(Boolean(cache.groupsRequireMention));
 	result += u"hide_everywhere = %1\n"_q

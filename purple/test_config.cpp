@@ -877,6 +877,7 @@ void TestStateRoundTrip() {
 	state.peekActive = true;
 	state.peekDeadlineUnix = 1755400000;
 	state.resolvedCache.preset = u"work"_q;
+	state.resolvedCache.viewName = u"Deep Work"_q;
 	state.resolvedCache.groupsRequireMention = false;
 	state.resolvedCache.hideEverywhere = true;
 	state.resolvedCache.lists = {
@@ -903,6 +904,7 @@ void TestStateRoundTrip() {
 
 	CHECK(back.resolvedCache.valid());
 	CHECK_EQ(back.resolvedCache.preset, u"work"_q);
+	CHECK_EQ(back.resolvedCache.viewName, u"Deep Work"_q);
 	CHECK(!back.resolvedCache.groupsRequireMention);
 	CHECK(back.resolvedCache.hideEverywhere);
 	CHECK_EQ(back.resolvedCache.lists.size(), size_t(2));
@@ -1156,6 +1158,44 @@ hide_everywhere = false
 	CHECK(away.has_value() && away->hideEverywhere);
 	CHECK(deeper.has_value() && deeper->hideEverywhere);
 	CHECK(relaxed.has_value() && !relaxed->hideEverywhere);
+
+	// default_view_name is the one preset field that is NOT inherited: a tab
+	// label taken from a parent would put the parent's name over a child's
+	// chat list. Absent, it is the preset's own name capitalised.
+	const auto named = Parse(uR"(
+[presets.work]
+default_view_name = "Deep Work"
+
+[presets.child]
+inherit = "work"
+
+[presets."deep focus"]
+inherit = "work"
+)"_q);
+	CHECK(named.ok());
+	const auto work2 = Purple::Resolve(named.settings, u"work"_q);
+	const auto child = Purple::Resolve(named.settings, u"child"_q);
+	const auto spaced = Purple::Resolve(named.settings, u"deep focus"_q);
+	CHECK(work2.has_value() && work2->viewName == u"Deep Work"_q);
+	CHECK(child.has_value() && child->viewName == u"Child"_q);
+
+	// Only the first letter, so a name with a space in it is not title-cased
+	// into something the user did not write.
+	CHECK(spaced.has_value() && spaced->viewName == u"Deep focus"_q);
+	CHECK_EQ(Purple::DefaultViewName(u"work"_q), u"Work"_q);
+	CHECK_EQ(Purple::DefaultViewName(u"WORK"_q), u"WORK"_q);
+	CHECK(Purple::DefaultViewName(QString()).isEmpty());
+
+	// The cache carries it, so a broken reload does not also rename the tab.
+	const auto cached = Purple::FromCache(Purple::ToCache(*work2));
+	CHECK(cached.has_value() && cached->viewName == u"Deep Work"_q);
+
+	// A cache written by a build that did not know the key still names the
+	// tab something, rather than leaving it blank.
+	auto older = Purple::ToCache(*work2);
+	older.viewName = QString();
+	const auto restored = Purple::FromCache(older);
+	CHECK(restored.has_value() && restored->viewName == u"Work"_q);
 }
 
 void TestResolveLocked() {

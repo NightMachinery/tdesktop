@@ -424,7 +424,7 @@ ChatFilter ChatFilters::purpleViewFilter() const {
 	// falls through to the All chats one and every edit path refuses it.
 	return ChatFilter(
 		kPurpleViewFilterId,
-		{ TextWithEntities{ Purple::ActiveResolved().preset } },
+		{ TextWithEntities{ Purple::ViewName() } },
 		QString(),
 		std::nullopt,
 		ChatFilter::Flags(),

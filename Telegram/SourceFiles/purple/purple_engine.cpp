@@ -92,6 +92,7 @@ std::optional<Resolved> Resolve(
 	auto result = Resolved();
 	if (!preset.compare(NormalPreset(), Qt::CaseInsensitive)) {
 		result.preset = NormalPreset();
+		result.viewName = DefaultViewName(result.preset);
 		result.normal = true;
 		return result;
 	}
@@ -102,6 +103,13 @@ std::optional<Resolved> Resolve(
 	result.preset = IsDefaultName(preset)
 		? QString::fromLatin1(kDefaultPresetName)
 		: preset;
+
+	// The preset's OWN name only - chain->front() rather than a walk. A tab
+	// label inherited from a parent would put the parent's name over a child's
+	// chat list, which is the opposite of what a name is for.
+	result.viewName = (!chain->empty() && !chain->front()->viewName.isEmpty())
+		? chain->front()->viewName
+		: DefaultViewName(result.preset);
 
 	for (const auto entry : *chain) {
 		if (entry->groupsRequireMention) {
@@ -259,6 +267,7 @@ ResolvedCache ToCache(const Resolved &resolved) {
 		return result;
 	}
 	result.preset = resolved.preset;
+	result.viewName = resolved.viewName;
 	result.groupsRequireMention = resolved.groupsRequireMention;
 	result.hideEverywhere = resolved.hideEverywhere;
 	result.folders = resolved.folders;
@@ -275,6 +284,9 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	}
 	auto result = Resolved();
 	result.preset = cache.preset;
+	result.viewName = cache.viewName.isEmpty()
+		? DefaultViewName(cache.preset)
+		: cache.viewName;
 	result.groupsRequireMention = cache.groupsRequireMention;
 	result.hideEverywhere = cache.hideEverywhere;
 	result.folders = cache.folders;

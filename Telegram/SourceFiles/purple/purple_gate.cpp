@@ -204,6 +204,13 @@ rpl::producer<> ActiveChanges() {
 	return Instance().changes();
 }
 
+QString ViewName() {
+	const auto &resolved = Instance().resolved();
+	return resolved.viewName.isEmpty()
+		? DefaultViewName(resolved.preset)
+		: resolved.viewName;
+}
+
 bool Filtering() {
 	return !Instance().resolved().normal;
 }

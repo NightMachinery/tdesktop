@@ -26,6 +26,10 @@ namespace Purple {
 [[nodiscard]] const Resolved &ActiveResolved();
 [[nodiscard]] rpl::producer<> ActiveChanges();
 
+// What to write on the preset's tab: its `default_view_name', or its name with
+// the first letter capitalised. Never empty while a preset is running.
+[[nodiscard]] QString ViewName();
+
 // False under Normal, which is the whole point: every gate in the app tests
 // this first, so an unconfigured fork pays one bool load and behaves exactly
 // like upstream. Call sites must not skip it - the engine answers "show

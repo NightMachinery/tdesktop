@@ -60,6 +60,11 @@ struct EffectiveList {
 struct Resolved {
 	QString preset;
 
+	// What to call the preset's tab, resolved from the preset's own
+	// `default_view_name' or from its name. Never inherited, so a chain of
+	// presets does not end up with three tabs sharing one label.
+	QString viewName;
+
 	// Normal is not "a preset with everything on" but a bypass: the engine is
 	// skipped entirely, so it cannot drift as preset features are added.
 	bool normal = false;

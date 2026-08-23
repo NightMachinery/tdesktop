@@ -47,8 +47,32 @@ A running preset does not empty the chat list. It shows a **different one**.
 The main list keeps every chat, exactly as it would under `normal`. Alongside
 it the fork maintains one more chat list - the *preset view* - holding the
 chats the preset does not hide, and the folder strip offers that view where
-"All chats" would be, labelled with the preset's name. All chats itself is
-gone from the strip for as long as the preset runs.
+"All chats" would be. All chats itself is gone from the strip for as long as
+the preset runs.
+
+### What the tab is called
+
+`default_view_name` on the preset, or - when it says nothing, which is the
+usual case - the preset's own name with its first letter capitalised, so
+`[presets.work]` gives a tab reading `Work`.
+
+Only the first letter. A preset called `deep focus` becomes `Deep focus`, not
+`Deep Focus`: guessing at word boundaries in a name someone chose is how you
+end up mangling one, and a preset written `[presets.OS]` should not come back
+shouted differently than it was typed.
+
+It is the one preset field that is **not** inherited. Everything else walks the
+chain and takes the first explicit value - `hide_everywhere`, the folder
+selection, the list overrides - because those are policy, and a child that says
+nothing means "same as my parent". A name is not policy. A child preset that
+inherited its parent's label would put the parent's name over a different chat
+list, which is the exact opposite of what a label is for, so a preset that does
+not name its own view falls back to its own name rather than to its parent's.
+
+The preset box and the `Work Mode: work` menu entry keep using the preset's
+real name, because that is its identity - the string you type in `settings.toml`
+and in a schedule rule. `default_view_name` is a label for one tab, not a
+rename.
 
 That is the whole design, and it is worth stating why it is not the obvious
 one. The obvious one - the fork's first - was to make `shouldBeInChatList()`
