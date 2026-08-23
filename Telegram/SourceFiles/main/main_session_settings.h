@@ -219,7 +219,12 @@ private:
 	bool _hadLegacyCallsPeerToPeerNobody = false;
 	Data::AutoDownload::Full _autoDownload;
 	rpl::variable<bool> _archiveCollapsed = false;
-	rpl::variable<bool> _archiveInMainMenu = false;
+
+	// Purple: upstream leaves the Archived chats row at the top of the chat
+	// list; this fork keeps it in the main menu. Only reaches a fresh tdata -
+	// an account that has run before has this serialised already, and there is
+	// no "never chosen" value to tell apart from a deliberate false.
+	rpl::variable<bool> _archiveInMainMenu = true;
 	base::flat_map<ThreadId, MsgId> _hiddenPinnedMessages;
 	base::flat_map<PeerId, qint32> _subsectionTabsModes;
 	base::flat_map<Data::DefaultNotify, ushort> _ringtoneDefaultVolumes;
