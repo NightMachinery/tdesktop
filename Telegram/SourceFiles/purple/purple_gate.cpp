@@ -229,11 +229,13 @@ Visibility VisibleFor(not_null<const PeerData*> peer) {
 		KindOf(peer));
 }
 
-const std::optional<std::vector<PresetFolder>> &ShownFolders() {
-	// A hidden folder is hidden, so a peek brings it back with everything else.
-	// Nothing means "the preset said nothing about folders", which is exactly
-	// what a peek makes true for as long as it runs.
-	static const auto kAll = std::optional<std::vector<PresetFolder>>();
+const std::vector<PresetFolder> &ShownFolders() {
+	// A hidden folder is hidden, so a peek brings it back with everything else
+	// - which under the new model is spelled "*ALL", the same thing a preset
+	// writes when it wants the whole strip.
+	static const auto kAll = std::vector<PresetFolder>{
+		PresetFolder{ .name = AllFoldersName() },
+	};
 	const auto &resolved = Instance().resolved();
 	return resolved.peeking ? kAll : resolved.folders;
 }
@@ -272,7 +274,7 @@ bool SilencedByPreset(not_null<const PeerData*> peer) {
 const std::vector<QString> &ExemptFolders() {
 	static const auto kNone = std::vector<QString>();
 	const auto &resolved = Instance().resolved();
-	if (resolved.normal || resolved.peeking || !resolved.folders) {
+	if (resolved.normal || resolved.peeking || resolved.folders.empty()) {
 		// Peeking already reveals everything, so there is nothing to exempt
 		// from, and asking would only cost a folder walk per hidden chat.
 		return kNone;
@@ -288,9 +290,19 @@ const std::vector<QString> &SilencedFolders() {
 
 bool FoldersRestricted() {
 	const auto &resolved = Instance().resolved();
-	return !resolved.normal
-		&& !resolved.peeking
-		&& resolved.folders.has_value();
+	if (resolved.normal || resolved.peeking) {
+		return false;
+	}
+	// "*ALL" on its own is every folder in the account's own order, so nothing
+	// is restricted and reordering stays safe. Any other shape - a subset, a
+	// chosen order, a folder with flags on it - means a strip index no longer
+	// matches the server's, and saveOrder() must refuse.
+	const auto &folders = resolved.folders;
+	return (folders.size() != 1)
+		|| !IsAllFolders(folders.front())
+		|| folders.front().show.has_value()
+		|| folders.front().notify.has_value()
+		|| folders.front().includeInMainView.has_value();
 }
 
 const EffectiveList *ListFor(not_null<const PeerData*> peer) {

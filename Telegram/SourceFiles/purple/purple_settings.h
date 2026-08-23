@@ -25,67 +25,101 @@ namespace Purple {
 // is the engine's job; the parser stays ignorant of what a peer is.
 using PeerIdValue = int64;
 
-enum class ListKind : uchar {
-	Custom,
+// What a chat is, for lists that match by type rather than by member. Lives
+// here rather than in the engine because a list definition names these, and
+// the engine sits above the parser.
+enum class ChatKind : uchar {
 	Private,
-	Groups,
-	Channels,
-	Bots,
+	Group,
+	Channel,
+	Bot,
 };
 
-[[nodiscard]] bool IsCatchAll(ListKind kind);
+// "private", "groups", "channels", "bots" - the spellings `kinds' accepts.
+[[nodiscard]] std::optional<ChatKind> ParseChatKind(const QString &value);
+[[nodiscard]] QString ChatKindName(ChatKind kind);
 
-// The four catch-alls in their canonical priority order, bottom of the list.
-[[nodiscard]] const std::vector<QString> &CatchAllNames();
-[[nodiscard]] ListKind CatchAllKind(const QString &name);
-
+// A list says who is in it and nothing else. What happens to those chats is
+// decided entirely by the preset that names the list, which is what lets one
+// list mean "let through" in one preset and "swallow silently" in another
+// without a second table saying so. See docs/purple/work_mode.md.
 struct List {
 	QString name;
 	QString title;
-	bool show = true;
-	bool notify = true;
-	bool locked = false;
-	ListKind kind = ListKind::Custom;
 
-	// Empty for catch-alls, which match by chat type instead.
+	// A chat matches when its id is here, or when its kind is in `kinds'. Both
+	// may be empty, which is a list that matches nothing - useful as a
+	// placeholder you fill in from the chat menu later.
 	std::vector<PeerIdValue> members;
+	std::vector<ChatKind> kinds;
 };
 
-// Absent fields inherit from the parent preset, and from the list defaults at
-// the root of the chain. Tri-state throughout, so "explicitly false" and "not
-// mentioned" stay distinguishable all the way down.
-struct ListOverride {
+// One step of a preset's ordered list_order: the list it names, and what the
+// preset does with the chats that list claims. Order is priority AND capture -
+// the first entry whose list holds a chat decides it, and later entries never
+// see that chat again.
+//
+// Tri-state so that "said nothing" stays distinguishable from "said false",
+// which matters for warnings rather than for behaviour: an unset flag takes
+// the documented default below.
+struct ListEntry {
 	QString list;
-	std::optional<bool> show;
-	std::optional<bool> notify;
+
+	std::optional<bool> show;   // Default true.
+	std::optional<bool> notify; // Default true.
+
+	// Groups only, and only while shown: the chat appears exactly while it has
+	// an unread mention. Default false - a preset that only hides bots must not
+	// also empty the list of every group nobody has mentioned you in.
 	std::optional<bool> groupsRequireMention;
+
+	friend bool operator==(const ListEntry &, const ListEntry &) = default;
 };
 
+// One of the account's real Telegram folders, as a preset sees it.
 struct PresetFolder {
 	QString name;
+
+	// Whether the folder's tab appears in the strip. Default true: naming a
+	// folder at all is normally how you ask for it.
+	std::optional<bool> show;
+
+	// False silences the folder's chats, on top of whatever their list said.
 	std::optional<bool> notify;
 
-	// `filtered = false' exempts the folder's chats from the preset's hiding.
-	// Nothing means filtered, which is what every other folder is.
-	std::optional<bool> filtered;
+	// True pulls the folder's chats into the preset's main view whatever the
+	// lists decided - the escape hatch for "hide everything except what is in
+	// here". Default false.
+	std::optional<bool> includeInMainView;
 
 	friend bool operator==(
 		const PresetFolder &,
 		const PresetFolder &) = default;
 };
 
+// An extra tab a preset invents, alongside its main view. Its list_order picks
+// membership only: a chat an entry claims with show = false is dropped from
+// this tab, and `notify' means nothing here because a chat has one mute state
+// however many tabs it appears in.
+struct PresetView {
+	QString name;
+
+	// The tab's pinned order, in the order it should appear. Owned by the file
+	// rather than by the server, which knows nothing about a tab you invented.
+	std::vector<PeerIdValue> pinned;
+
+	std::vector<ListEntry> listOrder;
+
+	friend bool operator==(const PresetView &, const PresetView &) = default;
+};
+
 struct Preset {
 	QString name;
-	QString inherit;
 
-	// What the preset's tab is called where All chats used to be. Empty means
-	// the preset's own name with its first letter capitalised, which is what
-	// almost everyone wants and nobody should have to type. Deliberately NOT
-	// inherited: a name is the one thing a child preset must never take from
-	// its parent. See docs/purple/work_mode.md.
+	// What the preset's main tab is called where All chats used to be. Empty
+	// means the preset's own name with its first letter capitalised, which is
+	// what almost everyone wants and nobody should have to type.
 	QString viewName;
-
-	std::optional<bool> groupsRequireMention;
 
 	// Whether a chat this preset hides is gone from the whole app rather than
 	// only from the preset's own view of the chat list - so out of the forward
@@ -94,11 +128,15 @@ struct Preset {
 	// about what you are allowed to reach. See docs/purple/work_mode.md.
 	std::optional<bool> hideEverywhere;
 
-	// Inherited whole: a preset that names any folder replaces its parent's
-	// selection outright rather than merging element by element.
-	std::optional<std::vector<PresetFolder>> folders;
+	// Priority order, first match wins. A chat no entry claims is hidden and
+	// silenced: a preset names what gets through.
+	std::vector<ListEntry> listOrder;
 
-	std::vector<ListOverride> overrides;
+	// The real folders this preset shows. Empty means no folder tabs at all -
+	// write "*ALL" to get them back.
+	std::vector<PresetFolder> folders;
+
+	std::vector<PresetView> views;
 };
 
 struct ScheduleRule {
@@ -132,7 +170,7 @@ struct Premium {
 struct Settings {
 	Premium premium;
 
-	// Priority order, first match wins, catch-alls forced to the bottom.
+	// Definitions only, in file order. Priority is a preset's business.
 	std::vector<List> lists;
 
 	std::vector<Preset> presets;
@@ -145,8 +183,8 @@ struct Settings {
 };
 
 // Everything recoverable is a warning and leaves usable settings behind; only
-// a TOML syntax error or an inheritance cycle sets `error`, because neither
-// leaves anything meaningful to run on. See docs/purple/config.md.
+// a TOML syntax error sets `error', because nothing else leaves the file
+// without something meaningful to run on. See docs/purple/config.md.
 struct ParseResult {
 	Settings settings;
 	std::vector<QString> warnings;
@@ -161,8 +199,8 @@ struct ParseResult {
 	const QString &text,
 	const QString &path);
 
-// Names the parser will not accept for a user preset, because the engine uses
-// them for the implicit root and for the stock-behaviour bypass.
+// The name the parser will not accept for a preset, because the engine uses it
+// for the stock-behaviour bypass.
 [[nodiscard]] bool IsReservedPresetName(const QString &name);
 
 // Whether exit_preset says "previous" - put back whatever was active when the
@@ -175,6 +213,22 @@ struct ParseResult {
 // guessing at word boundaries in a name the user chose is how you end up
 // mangling one.
 [[nodiscard]] QString DefaultViewName(const QString &preset);
+
+// The spread marker: "*core" in a list_order or folders array splices in the
+// entries of [list_sets.core] or [folder_sets.core]. Nothing if the string is
+// not a reference at all.
+[[nodiscard]] std::optional<QString> SpreadReference(const QString &value);
+
+// The one built-in folder set, written "*ALL": every real folder the account
+// has, with whatever flags the entry carries. It survives parsing as a
+// PresetFolder holding this exact name, because the parser has never heard of
+// a Telegram folder and cannot expand it - the display side does, in place, so
+// the entry keeps its position in the strip and its flags. The asterisk stays
+// in the name so it can never collide with a folder actually called "ALL".
+[[nodiscard]] const QString &AllFoldersName();
+
+// Whether this entry is that marker rather than a folder of the user's.
+[[nodiscard]] bool IsAllFolders(const PresetFolder &folder);
 
 // "90s", "2m", "1h", "0" / "off" for no timer. Nothing for unparseable input.
 [[nodiscard]] std::optional<int> ParseDuration(const QString &value);

@@ -34,7 +34,7 @@ constexpr auto kStarterSettings = R"([premium]
 # Features the server enforces - large uploads, faster downloads, voice-to-text,
 # custom emoji, emoji status, message effects and the rest - are unaffected by
 # this and stay locked. See docs/purple/premium.md.
-enabled = true
+enabled_p = true
 
 
 # Everything below configures Work Mode: named presets that decide which chats
@@ -44,77 +44,100 @@ enabled = true
 # This file is yours. The app only ever edits list members and the toggle
 # above, one line at a time, and never touches your comments or layout.
 # See docs/purple/config.md.
+#
+# Two ideas, and that is the whole model:
+#
+#   - a LIST says who is in it, and nothing else;
+#   - a PRESET names the lists it wants, in order, and says what each one does.
+#
+# Order is priority: the first entry whose list holds a chat decides that chat,
+# and nothing further down ever sees it. A chat no entry claims is hidden and
+# silenced - a preset names what gets through.
 
-# Priority order, top wins - the first list holding a chat decides how it
-# behaves. The four built-in catch-alls always sort below your own lists.
-list_order = ["os", "emergency"]
-
-# Locked lists are never overridden by any preset. Use them for the chats that
-# must always get through, so no amount of preset editing can silence them.
+# A list matches a chat by id, by kind, or by both. Add and remove members by
+# right-clicking a chat: Work Mode > the list.
 [lists.os]
-title  = "OS"
-show   = true
-notify = true
-locked = true
+title = "OS"
 members = [
 ]
 
 [lists.emergency]
-title  = "Emergency"
-show   = true
-notify = true
-locked = true
+title = "Emergency"
 members = [
 ]
 
-# The catch-alls match any chat of that kind not caught by a list above. Only
-# their defaults are configurable; membership is by chat type.
-[lists."@private"]
-show   = true
-notify = true
+# Matching by kind rather than by member. "private", "groups", "channels" and
+# "bots" are the four a chat can be.
+[lists.private]
+title = "Private chats"
+kinds = ["private"]
 
-[lists."@groups"]
-show   = true
-notify = true
+[lists.groups]
+title = "Groups"
+kinds = ["groups"]
 
-[lists."@channels"]
-show   = true
-notify = true
+[lists.channels]
+title = "Channels"
+kinds = ["channels"]
 
-[lists."@bots"]
-show   = true
-notify = true
+[lists.bots]
+title = "Bots"
+kinds = ["bots"]
 
-# An example preset. Uncomment and adjust, or write your own - the defaults
-# above are themselves the implicit "default" preset every other one inherits.
+# A named sequence you can splice into any preset with "*name", the way Python
+# spreads a list. This is what replaces preset inheritance: reuse without a
+# chain to follow when you are trying to read what a preset actually does.
+[list_sets.always]
+list_order = [
+  { list = "os",        show_p = true, notify_p = true },
+  { list = "emergency", show_p = true, notify_p = true },
+]
+
+[list_sets.the_rest]
+list_order = [
+  { list = "private",  show_p = true, notify_p = true },
+  { list = "groups",   show_p = true, notify_p = true },
+  { list = "channels", show_p = true, notify_p = true },
+  { list = "bots",     show_p = true, notify_p = true },
+]
+
+# An example preset. Uncomment and adjust, or write your own.
 #
 # A running preset does not empty your chat list. It replaces the "All chats"
 # tab with a view of its own, named after the preset, holding what it does not
 # hide - so a hidden chat is still pinned, still searchable and still there in
-# the forward picker. Set hide_everywhere = true if you would rather it were
+# the forward picker. Set hide_everywhere_p = true if you would rather it were
 # gone from the whole app.
 #
 # [presets.work]
-# inherit = "default"
-# groups_require_mention = true
-# hide_everywhere = false
+# list_order = [
+#   "*always",
+#   { list = "groups", show_p = true, notify_p = true, groups_require_mention_p = true },
+#   { list = "bots",   show_p = false, notify_p = false },
+# ]
 #
-# [presets.work.overrides."@private"]
-# notify = false                       # visible, but they do not interrupt
+# # Folders are named the same way. "*ALL" is every folder you have; leaving
+# # this key out entirely means no folder tabs at all.
+# folders = [
+#   "*ALL",
+#   { name = "Music", notify_p = false, include_in_main_view_p = true },
+# ]
 #
-# [presets.work.overrides."@channels"]
-# show = false
+# # An extra tab of its own, with its own unread badge and its own pins.
+# [[presets.work.views]]
+# name = "People"
+# list_order = [ { list = "private", show_p = true } ]
 
 [schedule]
-enabled = true
+enabled_p = true
 
 # Disabled until you point it at a preset you have actually written.
 [[schedule.rules]]
-enabled = false
-days    = ["mon", "tue", "wed", "thu", "fri"]
-from    = "09:00"
-to      = "17:00"
-preset  = "work"
+enabled_p = false
+days      = ["mon", "tue", "wed", "thu", "fri"]
+from      = "09:00"
+to        = "17:00"
+preset    = "work"
 
 [peek]
 # Temporarily reveal what the active preset is hiding.
@@ -345,7 +368,7 @@ void Config::setLocalPremium(bool value) {
 		_text,
 		SettingsFilePath(),
 		u"premium"_q,
-		u"enabled"_q,
+		u"enabled_p"_q,
 		value);
 	if (!splice(result, u"the Premium toggle"_q)) {
 		// Keep memory and disk agreeing. Changing the setting anyway would

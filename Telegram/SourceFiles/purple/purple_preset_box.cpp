@@ -30,42 +30,50 @@ namespace {
 	if (!resolved) {
 		return u"does not resolve"_q;
 	}
-	auto hidden = 0;
+	auto through = 0;
 	auto silenced = 0;
 	auto gated = 0;
 	for (const auto &list : resolved->lists) {
 		if (!list.show) {
-			++hidden;
-		} else {
-			if (!list.notify) {
-				++silenced;
-			}
-			if (list.groupsRequireMention) {
-				++gated;
-			}
+			continue;
+		}
+		++through;
+		if (!list.notify) {
+			++silenced;
+		}
+		if (list.groupsRequireMention) {
+			++gated;
 		}
 	}
 	const auto lists = [](int count) {
 		return (count == 1) ? u"1 list"_q : u"%1 lists"_q.arg(count);
 	};
-	auto parts = QStringList();
-	if (hidden) {
-		parts.push_back(u"hides "_q + lists(hidden));
-	}
+
+	// Said the way the model now works: everything is hidden until a list lets
+	// it through, so counting what it hides would be counting the whole account.
+	auto parts = QStringList{
+		through
+			? u"lets through "_q + lists(through)
+			: u"lets nothing through"_q,
+	};
 	if (silenced) {
 		parts.push_back(u"silences "_q + lists(silenced));
 	}
 	if (gated) {
 		parts.push_back(u"mentions only in "_q + lists(gated));
 	}
-	if (resolved->folders) {
-		parts.push_back(resolved->folders->empty()
-			? u"no folders"_q
-			: u"%1 folders"_q.arg(resolved->folders->size()));
+	const auto all = ranges::any_of(resolved->folders, IsAllFolders);
+	parts.push_back(all
+		? u"every folder"_q
+		: resolved->folders.empty()
+		? u"no folders"_q
+		: u"%1 folders"_q.arg(resolved->folders.size()));
+	if (const auto views = int(resolved->views.size())) {
+		parts.push_back((views == 1)
+			? u"1 extra view"_q
+			: u"%1 extra views"_q.arg(views));
 	}
-	return parts.empty()
-		? u"changes nothing"_q
-		: parts.join(u", "_q);
+	return parts.join(u", "_q);
 }
 
 [[nodiscard]] QString RowText(const Settings &settings, const QString &name) {

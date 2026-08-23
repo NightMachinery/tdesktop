@@ -53,12 +53,7 @@ MemberTitle TitleResolver(not_null<Main::Session*> session) {
 }
 
 bool HasCustomLists() {
-	for (const auto &list : ActiveSettings().lists) {
-		if (!IsCatchAll(list.kind)) {
-			return true;
-		}
-	}
-	return false;
+	return !ActiveSettings().lists.empty();
 }
 
 void FillListsMenu(
@@ -71,52 +66,51 @@ void FillListsMenu(
 	}
 	const auto title = TitleResolver(&peer->session());
 
-	// Which list is deciding this chat right now. It is the answer to the
-	// question that brings anyone here - "why is this hidden?" - and it names a
-	// catch-all just as readily as one of the user's own lists, because
-	// "@bots is hiding it" is exactly as useful an answer.
+	// Which entry is deciding this chat right now. It is the answer to the
+	// question that brings anyone here - "why is this hidden?" - and no entry
+	// at all is as real an answer as any, because a preset names what gets
+	// through and silence about a chat is a decision too.
 	if (Filtering()) {
-		if (const auto effective = ListFor(peer)) {
-			if (const auto list = ActiveSettings().list(effective->list)) {
-				// What the list wanted, and what actually happened - which are
-				// not the same thing for a chat an exempt folder rescued. The
-				// state has to be the second: a line reading "hidden" over a
-				// chat sitting in the list is worse than no line at all.
-				const auto verdict = VisibleFor(peer);
-				const auto history = peer->owner().historyLoaded(peer);
-				const auto hidden = history && history->purpleHiddenFromView();
-				const auto state = hidden
-					? (verdict.mentionGated
-						? u"hidden until a mention"_q
-						: u"hidden"_q)
-					: verdict.notify
-					? u"shown"_q
-					: u"silenced"_q;
-				const auto folder = (!hidden && !verdict.show)
-					? u", shown by a folder"_q
-					: QString();
-				menu->addAction(
-					u"In '%1': %2%3"_q.arg(DisplayTitle(*list), state, folder),
-					[=] { show->showBox(Box(PresetBox)); },
-					&st::menuIconInfo);
-				menu->addSeparator();
-			}
-		}
+		// What the entry wanted, and what actually happened - which are not the
+		// same thing for a chat a folder pulled back in. The state has to be
+		// the second: a line reading "hidden" over a chat sitting in the list
+		// is worse than no line at all.
+		const auto verdict = VisibleFor(peer);
+		const auto history = peer->owner().historyLoaded(peer);
+		const auto hidden = history && history->purpleHiddenFromView();
+		const auto state = hidden
+			? (verdict.mentionGated
+				? u"hidden until a mention"_q
+				: u"hidden"_q)
+			: verdict.notify
+			? u"shown"_q
+			: u"silenced"_q;
+		const auto folder = (!hidden && !verdict.show)
+			? u", shown by a folder"_q
+			: QString();
+		const auto effective = ListFor(peer);
+		const auto list = effective
+			? ActiveSettings().list(effective->list)
+			: nullptr;
+		const auto where = list
+			? u"In '%1'"_q.arg(DisplayTitle(*list))
+			: u"In no list '%1' names"_q.arg(ActiveResolved().preset);
+		menu->addAction(
+			u"%1: %2%3"_q.arg(where, state, folder),
+			[=] { show->showBox(Box(PresetBox)); },
+			&st::menuIconInfo);
+		menu->addSeparator();
 	}
 
 	for (const auto &list : ActiveSettings().lists) {
-		if (IsCatchAll(list.kind)) {
-			// Membership is by chat type, so there is nothing to toggle. The
-			// preset box is where their defaults are explained.
-			continue;
-		}
 		const auto name = list.name;
 		const auto member = std::find(
 			list.members.begin(),
 			list.members.end(),
 			id) != list.members.end();
-		// Locked lists are offered like any other: `locked' stops a preset
-		// overriding what the list does, not the user deciding who is in it.
+		// Every list, including one that matches by kind: adding a chat there
+		// writes an explicit member id, which is how you pull one chat out of
+		// a rule that would otherwise have swept it up somewhere else.
 		menu->addAction(
 			Ui::Text::FixAmpersandInAction(DisplayTitle(list)),
 			[=] {

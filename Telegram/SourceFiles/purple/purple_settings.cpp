@@ -18,11 +18,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 namespace {
 
-constexpr auto kDefaultPresetName = "default";
 constexpr auto kNormalPresetName = "normal";
 constexpr auto kPreviousPreset = "previous";
 constexpr auto kDefaultHotkey = "Ctrl+Shift+P";
 constexpr auto kDefaultPeekAutoOff = 120;
+
+// How deep a "*name" spread may nest before we call it a loop. Sets referring
+// to sets is the point of them; a set referring to itself is a typo.
+constexpr auto kMaxSpreadDepth = 8;
 
 [[nodiscard]] QString Text(std::string_view value) {
 	return QString::fromUtf8(value.data(), int(value.size()));
@@ -33,8 +36,8 @@ constexpr auto kDefaultPeekAutoOff = 120;
 }
 
 // toml++ keeps tables sorted by key, but the user wrote them in some order and
-// both the priority fallback and the preset list in the UI should follow the
-// file rather than the alphabet.
+// both the preset list in the UI and every warning should follow the file
+// rather than the alphabet.
 [[nodiscard]] auto TablesInFileOrder(
 		const toml::table &parent,
 		const QString &context,
@@ -89,13 +92,25 @@ constexpr auto kDefaultPeekAutoOff = 120;
 	return std::nullopt;
 }
 
+// Warns when a key the file no longer understands is still sitting there. The
+// config model was rebuilt and the old spellings are gone; silence would let a
+// preset that is doing nothing look exactly like a preset that is working.
+void WarnRetired(
+		const toml::table &table,
+		std::string_view key,
+		const QString &context,
+		const QString &instead,
+		std::vector<QString> &warnings) {
+	if (const auto node = table.get(key)) {
+		warnings.push_back(u"%1: '%2' is no longer a setting (%3); %4."_q
+			.arg(context, Text(key), At(*node), instead));
+	}
+}
+
 [[nodiscard]] bool KnownPresetReference(
 		const std::vector<Preset> &presets,
 		const QString &name) {
-	if (!name.compare(QLatin1String(kDefaultPresetName), Qt::CaseInsensitive)
-		|| !name.compare(
-			QLatin1String(kNormalPresetName),
-			Qt::CaseInsensitive)) {
+	if (!name.compare(QLatin1String(kNormalPresetName), Qt::CaseInsensitive)) {
 		return true;
 	}
 	return std::any_of(presets.begin(), presets.end(), [&](const Preset &p) {
@@ -103,46 +118,59 @@ constexpr auto kDefaultPeekAutoOff = 120;
 	});
 }
 
-void ReadMembers(
-		List &list,
+// Peer ids out of an array, deduplicated without reordering: the file is the
+// user's, and the order they wrote is the order everything shows back to them.
+[[nodiscard]] std::vector<PeerIdValue> ReadIds(
+		const toml::array &array,
+		const QString &context,
+		const QString &what,
+		std::vector<QString> &warnings) {
+	auto result = std::vector<PeerIdValue>();
+	for (auto &&element : array) {
+		const auto id = element.value<int64>();
+		if (!id) {
+			warnings.push_back(
+				u"%1: %2 entries should be peer ids (%3), ignoring one."_q
+					.arg(context, what, At(element)));
+		} else if (std::find(result.begin(), result.end(), *id)
+			== result.end()) {
+			result.push_back(*id);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<ChatKind> ReadKinds(
 		const toml::table &table,
 		const QString &context,
 		std::vector<QString> &warnings) {
-	const auto node = table.get("members");
+	auto result = std::vector<ChatKind>();
+	const auto node = table.get("kinds");
 	if (!node) {
-		return;
-	} else if (IsCatchAll(list.kind)) {
-		warnings.push_back(
-			u"%1: catch-all lists match by chat type and cannot have members "
-			"(%2), ignoring them."_q.arg(context, At(*node)));
-		return;
+		return result;
 	}
 	const auto array = node->as_array();
 	if (!array) {
-		warnings.push_back(u"%1: 'members' should be an array (%2)."_q
+		warnings.push_back(u"%1: 'kinds' should be an array (%2)."_q
 			.arg(context, At(*node)));
-		return;
+		return result;
 	}
 	for (auto &&element : *array) {
-		if (const auto id = element.value<int64>()) {
-			list.members.push_back(*id);
-		} else {
+		const auto name = element.value<std::string_view>();
+		const auto kind = name ? ParseChatKind(Text(*name)) : std::nullopt;
+		if (!kind) {
 			warnings.push_back(
-				u"%1: member entries should be peer ids (%2), ignoring one."_q
-					.arg(context, At(element)));
+				u"%1: '%2' is not one of private, groups, channels, bots "
+				"(%3)."_q.arg(
+					context,
+					name ? Text(*name) : u"?"_q,
+					At(element)));
+		} else if (std::find(result.begin(), result.end(), *kind)
+			== result.end()) {
+			result.push_back(*kind);
 		}
 	}
-
-	// Dedupe without reordering: the file is the user's, and the order they
-	// wrote is the order the settings page shows back to them.
-	auto unique = std::vector<PeerIdValue>();
-	unique.reserve(list.members.size());
-	for (const auto id : list.members) {
-		if (std::find(unique.begin(), unique.end(), id) == unique.end()) {
-			unique.push_back(id);
-		}
-	}
-	list.members = std::move(unique);
+	return result;
 }
 
 [[nodiscard]] std::vector<List> ReadLists(
@@ -150,240 +178,446 @@ void ReadMembers(
 		std::vector<QString> &warnings) {
 	auto result = std::vector<List>();
 	const auto node = root.get("lists");
-	if (node && !node->as_table()) {
+	if (!node) {
+		return result;
+	} else if (!node->as_table()) {
 		warnings.push_back(u"'lists' should be a table (%1)."_q.arg(At(*node)));
-	} else if (node) {
-		const auto &entries = TablesInFileOrder(
-			*node->as_table(),
-			u"lists"_q,
-			warnings);
-		for (const auto &[name, table] : entries) {
-			const auto context = u"list '%1'"_q.arg(name);
-			auto list = List();
-			list.name = name;
-			list.kind = CatchAllKind(name);
-			if (list.kind == ListKind::Custom && name.startsWith('@')) {
-				warnings.push_back(
-					u"%1: names starting with '@' are reserved for the "
-					"built-in catch-all lists, ignoring this list."_q
-						.arg(context));
-				continue;
-			}
-			list.title = ReadString(*table, "title", context, warnings)
-				.value_or(name);
-			list.show = ReadBool(*table, "show", context, warnings)
-				.value_or(true);
-			list.notify = ReadBool(*table, "notify", context, warnings)
-				.value_or(true);
-			if (const auto locked = ReadBool(
-					*table,
-					"locked",
+		return result;
+	}
+	const auto &entries = TablesInFileOrder(
+		*node->as_table(),
+		u"lists"_q,
+		warnings);
+	for (const auto &[name, table] : entries) {
+		const auto context = u"list '%1'"_q.arg(name);
+		if (name.startsWith('*')) {
+			warnings.push_back(
+				u"%1: names starting with '*' are reserved for set references, "
+				"ignoring this list."_q.arg(context));
+			continue;
+		}
+		auto list = List();
+		list.name = name;
+		list.title = ReadString(*table, "title", context, warnings)
+			.value_or(name);
+		list.kinds = ReadKinds(*table, context, warnings);
+		if (const auto members = table->get("members")) {
+			if (const auto array = members->as_array()) {
+				list.members = ReadIds(
+					*array,
 					context,
-					warnings)) {
-				if (IsCatchAll(list.kind) && *locked) {
-					warnings.push_back(
-						u"%1: catch-all lists cannot be locked, ignoring it."_q
-							.arg(context));
-				} else {
-					list.locked = *locked;
-				}
+					u"'members'"_q,
+					warnings);
+			} else {
+				warnings.push_back(u"%1: 'members' should be an array (%2)."_q
+					.arg(context, At(*members)));
 			}
-			ReadMembers(list, *table, context, warnings);
-			result.push_back(std::move(list));
 		}
-	}
-
-	// Every chat has to match exactly one list, so the four catch-alls always
-	// exist whether or not the file mentions them. That is what lets the rest
-	// of the engine skip an "unlisted" special case entirely.
-	for (const auto &name : CatchAllNames()) {
-		const auto i = std::find_if(
-			result.begin(),
-			result.end(),
-			[&](const List &list) { return list.name == name; });
-		if (i == result.end()) {
-			auto list = List();
-			list.name = name;
-			list.title = name;
-			list.kind = CatchAllKind(name);
-			result.push_back(std::move(list));
-		}
+		WarnRetired(
+			*table,
+			"show",
+			context,
+			u"a preset decides that, per entry in its 'list_order'"_q,
+			warnings);
+		WarnRetired(
+			*table,
+			"notify",
+			context,
+			u"a preset decides that, per entry in its 'list_order'"_q,
+			warnings);
+		WarnRetired(
+			*table,
+			"locked",
+			context,
+			u"a preset can only reach a list it names"_q,
+			warnings);
+		result.push_back(std::move(list));
 	}
 	return result;
 }
 
-// Applies `list_order` as the priority order, leniently: anything the file
-// forgot is appended, anything it names that does not exist is dropped, and the
-// catch-alls are forced to the bottom whatever the file says.
-[[nodiscard]] std::vector<List> ApplyListOrder(
-		std::vector<List> lists,
+// The named sequences a "*name" reference splices in. Held as raw arrays and
+// expanded on use, so a set that refers to another set costs nothing to declare
+// in whichever order reads best.
+using SetTables = std::vector<std::pair<QString, const toml::array*>>;
+
+[[nodiscard]] SetTables ReadSets(
 		const toml::table &root,
+		std::string_view section,
+		std::string_view key,
 		std::vector<QString> &warnings) {
-	auto order = std::vector<QString>();
-	if (const auto node = root.get("list_order")) {
-		if (const auto array = node->as_array()) {
-			for (auto &&element : *array) {
-				if (const auto name = element.value<std::string_view>()) {
-					order.push_back(Text(*name));
-				} else {
-					warnings.push_back(
-						u"'list_order' entries should be strings (%1)."_q
-							.arg(At(element)));
-				}
-			}
+	auto result = SetTables();
+	const auto node = root.get(section);
+	if (!node) {
+		return result;
+	} else if (!node->as_table()) {
+		warnings.push_back(u"'%1' should be a table (%2)."_q
+			.arg(Text(section), At(*node)));
+		return result;
+	}
+	const auto context = Text(section);
+	for (const auto &[name, table] : TablesInFileOrder(
+			*node->as_table(),
+			context,
+			warnings)) {
+		const auto inner = u"%1 '%2'"_q.arg(context, name);
+		const auto entries = table->get(key);
+		if (SpreadReference(AllFoldersName()) == name) {
+			warnings.push_back(
+				u"%1: '%2' is the built-in \"every folder\" set and cannot be "
+				"redefined, ignoring it."_q.arg(inner, AllFoldersName()));
+		} else if (!entries) {
+			warnings.push_back(u"%1: needs a '%2' array, ignoring it."_q
+				.arg(inner, Text(key)));
+		} else if (const auto array = entries->as_array()) {
+			result.emplace_back(name, array);
 		} else {
-			warnings.push_back(u"'list_order' should be an array (%1)."_q
-				.arg(At(*node)));
+			warnings.push_back(u"%1: '%2' should be an array (%3)."_q
+				.arg(inner, Text(key), At(*entries)));
 		}
 	}
-
-	const auto find = [&](const QString &name) {
-		return std::find_if(
-			lists.begin(),
-			lists.end(),
-			[&](const List &list) { return list.name == name; });
-	};
-
-	auto custom = std::vector<List>();
-	auto catchAll = std::vector<List>();
-	auto taken = std::vector<QString>();
-	auto lastCustom = -1;
-	auto firstCatchAll = -1;
-	for (auto i = 0; i != int(order.size()); ++i) {
-		const auto &name = order[i];
-		if (std::find(taken.begin(), taken.end(), name) != taken.end()) {
-			warnings.push_back(
-				u"'list_order' names '%1' more than once, keeping the first."_q
-					.arg(name));
-			continue;
-		}
-		const auto j = find(name);
-		if (j == lists.end()) {
-			warnings.push_back(
-				u"'list_order' names '%1', which has no [lists.%1] table."_q
-					.arg(name));
-			continue;
-		}
-		taken.push_back(name);
-		if (IsCatchAll(j->kind)) {
-			if (firstCatchAll < 0) {
-				firstCatchAll = i;
-			}
-			catchAll.push_back(std::move(*j));
-		} else {
-			lastCustom = i;
-			custom.push_back(std::move(*j));
-		}
-		lists.erase(j);
-	}
-	if (firstCatchAll >= 0 && firstCatchAll < lastCustom) {
-		warnings.push_back(
-			u"'list_order': the built-in @private, @groups, @channels and "
-			"@bots lists always sort below your own lists, so their position "
-			"in list_order only orders them among themselves."_q);
-	}
-
-	// Whatever the file left out. Custom lists keep file order and get a
-	// warning, because a forgotten list silently landing at the bottom of the
-	// priority order is exactly the kind of surprise this config should not
-	// have. Catch-alls are documented as optional, so they stay quiet.
-	for (auto &list : lists) {
-		if (!IsCatchAll(list.kind)) {
-			warnings.push_back(
-				u"list '%1' is missing from 'list_order', adding it at the "
-				"bottom priority."_q.arg(list.name));
-			custom.push_back(std::move(list));
-		}
-	}
-
-	// The catch-alls list_order did name keep the order it gave them - the user
-	// is allowed to reorder them among themselves - and the rest follow in the
-	// canonical order rather than in whatever order they were declared in.
-	for (const auto &name : CatchAllNames()) {
-		const auto i = find(name);
-		if (i != lists.end()) {
-			catchAll.push_back(std::move(*i));
-			lists.erase(i);
-		}
-	}
-
-	auto result = std::move(custom);
-	result.insert(
-		result.end(),
-		std::make_move_iterator(catchAll.begin()),
-		std::make_move_iterator(catchAll.end()));
 	return result;
 }
 
-[[nodiscard]] std::vector<PresetFolder> ReadFolders(
+[[nodiscard]] const toml::array *FindSet(
+		const SetTables &sets,
+		const QString &name) {
+	const auto i = std::find_if(sets.begin(), sets.end(), [&](const auto &s) {
+		return s.first == name;
+	});
+	return (i == sets.end()) ? nullptr : i->second;
+}
+
+// Expands the two array shapes a preset writes: a list_order and a folders
+// selection. Both accept inline tables and "*name" references to a set, and
+// both resolve a name mentioned twice to its first mention - which for a
+// list_order is forced, since order there is capture, and which folders follow
+// so there is one rule to remember rather than two.
+class Expander final {
+public:
+	Expander(
+		SetTables listSets,
+		SetTables folderSets,
+		std::vector<QString> &warnings)
+	: _listSets(std::move(listSets))
+	, _folderSets(std::move(folderSets))
+	, _warnings(warnings) {
+	}
+
+	[[nodiscard]] std::vector<ListEntry> listOrder(
+			const toml::array &array,
+			const QString &context) {
+		auto result = std::vector<ListEntry>();
+		auto visited = QStringList();
+		expandLists(array, context, visited, result);
+		return result;
+	}
+
+	[[nodiscard]] std::vector<PresetFolder> folders(
+			const toml::array &array,
+			const QString &context) {
+		auto result = std::vector<PresetFolder>();
+		auto visited = QStringList();
+		expandFolders(array, context, visited, result);
+		return result;
+	}
+
+private:
+	// Shared by both shapes: an element is either a "*name" reference, an
+	// inline table, or a mistake. Returns the set contents to recurse into,
+	// nothing when the caller should read the element as a table.
+	[[nodiscard]] const toml::array *reference(
+		const toml::node &element,
+		const QString &context,
+		const SetTables &sets,
+		const QString &what,
+		QStringList &visited,
+		bool *isAllFolders);
+
+	void expandLists(
 		const toml::array &array,
 		const QString &context,
-		std::vector<QString> &warnings) {
-	auto result = std::vector<PresetFolder>();
+		QStringList &visited,
+		std::vector<ListEntry> &out);
+	void expandFolders(
+		const toml::array &array,
+		const QString &context,
+		QStringList &visited,
+		std::vector<PresetFolder> &out);
+
+	SetTables _listSets;
+	SetTables _folderSets;
+	std::vector<QString> &_warnings;
+
+};
+
+const toml::array *Expander::reference(
+		const toml::node &element,
+		const QString &context,
+		const SetTables &sets,
+		const QString &what,
+		QStringList &visited,
+		bool *isAllFolders) {
+	const auto text = element.value<std::string_view>();
+	if (!text) {
+		return nullptr;
+	}
+	const auto value = Text(*text);
+	const auto name = SpreadReference(value);
+	if (!name) {
+		_warnings.push_back(
+			u"%1: '%2' is neither a table nor a \"*set\" reference (%3), "
+			"ignoring it."_q.arg(context, value, At(element)));
+		return nullptr;
+	}
+	if (isAllFolders && value == AllFoldersName()) {
+		*isAllFolders = true;
+		return nullptr;
+	}
+	if (visited.contains(*name) || visited.size() >= kMaxSpreadDepth) {
+		_warnings.push_back(
+			u"%1: '%2' refers back into itself (%3), ignoring it."_q
+				.arg(context, value, At(element)));
+		return nullptr;
+	}
+	const auto found = FindSet(sets, *name);
+	if (!found) {
+		_warnings.push_back(u"%1: there is no %2 called '%3' (%4)."_q
+			.arg(context, what, *name, At(element)));
+		return nullptr;
+	}
+	visited.push_back(*name);
+	return found;
+}
+
+void Expander::expandLists(
+		const toml::array &array,
+		const QString &context,
+		QStringList &visited,
+		std::vector<ListEntry> &out) {
 	for (auto &&element : array) {
-		const auto table = element.as_table();
-		if (!table) {
-			warnings.push_back(
-				u"%1: 'folders' entries should look like "
-				"{ name = \"Music\" } (%2)."_q.arg(context, At(element)));
+		if (const auto table = element.as_table()) {
+			const auto name = ReadString(*table, "list", context, _warnings);
+			if (!name || name->isEmpty()) {
+				_warnings.push_back(
+					u"%1: an entry needs 'list' (%2), ignoring it."_q
+						.arg(context, At(element)));
+				continue;
+			}
+			const auto inner = u"%1 entry '%2'"_q.arg(context, *name);
+			const auto known = std::any_of(out.begin(), out.end(), [&](
+					const ListEntry &entry) {
+				return entry.list == *name;
+			});
+			if (known) {
+				// Silent when the earlier mention came from a spread: naming
+				// an entry and then splicing in a set that also holds it is
+				// how you override one thing and take the defaults for the
+				// rest, and warning would punish exactly the idiom the spread
+				// exists for. An explicit duplicate is still a mistake.
+				if (visited.isEmpty()) {
+					_warnings.push_back(
+						u"%1: '%2' is already claimed further up, so this "
+						"entry never decides anything (%3)."_q
+							.arg(context, *name, At(element)));
+				}
+				continue;
+			}
+			auto entry = ListEntry();
+			entry.list = *name;
+			entry.show = ReadBool(*table, "show_p", inner, _warnings);
+			entry.notify = ReadBool(*table, "notify_p", inner, _warnings);
+			entry.groupsRequireMention = ReadBool(
+				*table,
+				"groups_require_mention_p",
+				inner,
+				_warnings);
+			out.push_back(std::move(entry));
 			continue;
 		}
-		auto folder = PresetFolder();
-		const auto name = ReadString(*table, "name", context, warnings);
+		const auto nested = reference(
+			element,
+			context,
+			_listSets,
+			u"list_set"_q,
+			visited,
+			nullptr);
+		if (nested) {
+			expandLists(*nested, context, visited, out);
+			visited.removeLast();
+		}
+	}
+}
+
+void Expander::expandFolders(
+		const toml::array &array,
+		const QString &context,
+		QStringList &visited,
+		std::vector<PresetFolder> &out) {
+	const auto push = [&](PresetFolder &&folder, const toml::node &at) {
+		const auto known = std::any_of(out.begin(), out.end(), [&](
+				const PresetFolder &entry) {
+			return !entry.name.compare(folder.name, Qt::CaseInsensitive);
+		});
+		if (known) {
+			_warnings.push_back(
+				u"%1: '%2' is named more than once, keeping the first (%3)."_q
+					.arg(context, folder.name, At(at)));
+			return;
+		}
+		out.push_back(std::move(folder));
+	};
+	for (auto &&element : array) {
+		if (const auto table = element.as_table()) {
+			const auto name = ReadString(*table, "name", context, _warnings);
+			if (!name || name->isEmpty()) {
+				_warnings.push_back(
+					u"%1: a folder needs 'name' (%2), ignoring it."_q
+						.arg(context, At(element)));
+				continue;
+			}
+			const auto inner = u"%1 folder '%2'"_q.arg(context, *name);
+			auto folder = PresetFolder();
+			folder.name = *name;
+			folder.show = ReadBool(*table, "show_p", inner, _warnings);
+			folder.notify = ReadBool(*table, "notify_p", inner, _warnings);
+			folder.includeInMainView = ReadBool(
+				*table,
+				"include_in_main_view_p",
+				inner,
+				_warnings);
+			WarnRetired(
+				*table,
+				"filtered",
+				inner,
+				u"use 'include_in_main_view_p', which says the same thing the "
+				"right way round"_q,
+				_warnings);
+			push(std::move(folder), element);
+			continue;
+		}
+		auto all = false;
+		const auto nested = reference(
+			element,
+			context,
+			_folderSets,
+			u"folder_set"_q,
+			visited,
+			&all);
+		if (all) {
+			auto folder = PresetFolder();
+			folder.name = AllFoldersName();
+			push(std::move(folder), element);
+		} else if (nested) {
+			expandFolders(*nested, context, visited, out);
+			visited.removeLast();
+		}
+	}
+}
+
+[[nodiscard]] std::vector<PresetView> ReadViews(
+		const toml::table &table,
+		Expander &expander,
+		const QString &context,
+		std::vector<QString> &warnings) {
+	auto result = std::vector<PresetView>();
+	const auto node = table.get("views");
+	if (!node) {
+		return result;
+	}
+	const auto array = node->as_array();
+	if (!array) {
+		warnings.push_back(u"%1: 'views' should be an array of tables (%2)."_q
+			.arg(context, At(*node)));
+		return result;
+	}
+	for (auto &&element : *array) {
+		const auto fields = element.as_table();
+		if (!fields) {
+			warnings.push_back(
+				u"%1: should be a [[presets.x.views]] table (%2)."_q
+					.arg(context, At(element)));
+			continue;
+		}
+		const auto name = ReadString(*fields, "name", context, warnings);
 		if (!name || name->isEmpty()) {
-			warnings.push_back(u"%1: a folder entry has no 'name' (%2)."_q
+			warnings.push_back(u"%1: a view needs 'name' (%2), ignoring it."_q
 				.arg(context, At(element)));
 			continue;
 		}
-		folder.name = *name;
-		folder.notify = ReadBool(*table, "notify", context, warnings);
-		folder.filtered = ReadBool(*table, "filtered", context, warnings);
-		result.push_back(std::move(folder));
+		const auto inner = u"%1 view '%2'"_q.arg(context, *name);
+		const auto known = std::any_of(result.begin(), result.end(), [&](
+				const PresetView &view) {
+			return !view.name.compare(*name, Qt::CaseInsensitive);
+		});
+		if (known) {
+			warnings.push_back(
+				u"%1: there is already a view called '%2', ignoring it."_q
+					.arg(context, *name));
+			continue;
+		}
+		auto view = PresetView();
+		view.name = *name;
+		if (const auto pinned = fields->get("pinned")) {
+			if (const auto ids = pinned->as_array()) {
+				view.pinned = ReadIds(*ids, inner, u"'pinned'"_q, warnings);
+			} else {
+				warnings.push_back(u"%1: 'pinned' should be an array (%2)."_q
+					.arg(inner, At(*pinned)));
+			}
+		}
+		if (const auto order = fields->get("list_order")) {
+			if (const auto ids = order->as_array()) {
+				view.listOrder = expander.listOrder(*ids, inner);
+			} else {
+				warnings.push_back(u"%1: 'list_order' should be an array (%2)."_q
+					.arg(inner, At(*order)));
+			}
+		}
+		if (view.listOrder.empty()) {
+			warnings.push_back(
+				u"%1: names no list, so the tab would always be empty; "
+				"ignoring it."_q.arg(inner));
+			continue;
+		}
+		// A view picks which chats appear on one tab. Silence is a property of
+		// the chat, not of the tab it is being looked at on, so a notify here
+		// would be a setting that cannot mean anything.
+		for (const auto &entry : view.listOrder) {
+			if (entry.notify.has_value()) {
+				warnings.push_back(
+					u"%1: 'notify_p' means nothing inside a view - a chat has "
+					"one mute state however many tabs show it - ignoring it on "
+					"'%2'."_q.arg(inner, entry.list));
+			}
+		}
+		result.push_back(std::move(view));
 	}
 	return result;
 }
 
-[[nodiscard]] std::vector<ListOverride> ReadOverrides(
-		const toml::table &table,
+void WarnUnknownLists(
+		const std::vector<ListEntry> &entries,
 		const std::vector<List> &lists,
 		const QString &context,
 		std::vector<QString> &warnings) {
-	auto result = std::vector<ListOverride>();
-	const auto entries = TablesInFileOrder(table, context, warnings);
-	for (const auto &[name, fields] : entries) {
-		const auto i = std::find_if(
-			lists.begin(),
-			lists.end(),
-			[&](const List &list) { return list.name == name; });
-		if (i == lists.end()) {
+	for (const auto &entry : entries) {
+		const auto known = std::any_of(lists.begin(), lists.end(), [&](
+				const List &list) {
+			return list.name == entry.list;
+		});
+		if (!known) {
 			warnings.push_back(
-				u"%1: overrides '%2', which is not a list, ignoring it."_q
-					.arg(context, name));
-			continue;
-		} else if (i->locked) {
-			warnings.push_back(
-				u"%1: list '%2' is locked, so its defaults win and this "
-				"override is ignored."_q.arg(context, name));
-			continue;
+				u"%1: names list '%2', which has no [lists.%2] table, so it "
+				"claims nothing."_q.arg(context, entry.list));
 		}
-		const auto nested = u"%1 override '%2'"_q.arg(context, name);
-		auto entry = ListOverride();
-		entry.list = name;
-		entry.show = ReadBool(*fields, "show", nested, warnings);
-		entry.notify = ReadBool(*fields, "notify", nested, warnings);
-		entry.groupsRequireMention = ReadBool(
-			*fields,
-			"groups_require_mention",
-			nested,
-			warnings);
-		result.push_back(std::move(entry));
 	}
-	return result;
 }
 
 [[nodiscard]] std::vector<Preset> ReadPresets(
 		const toml::table &root,
 		const std::vector<List> &lists,
+		Expander &expander,
 		std::vector<QString> &warnings) {
 	auto result = std::vector<Preset>();
 	const auto node = root.get("presets");
@@ -399,8 +633,6 @@ void ReadMembers(
 		u"presets"_q,
 		warnings);
 
-	// Two passes: `inherit` can name a preset declared further down the file,
-	// so nothing can be validated against the preset list until it is complete.
 	for (const auto &[name, table] : entries) {
 		if (IsReservedPresetName(name)) {
 			warnings.push_back(
@@ -411,96 +643,89 @@ void ReadMembers(
 		const auto context = u"preset '%1'"_q.arg(name);
 		auto preset = Preset();
 		preset.name = name;
-		preset.inherit = ReadString(*table, "inherit", context, warnings)
-			.value_or(QString::fromLatin1(kDefaultPresetName));
 		preset.viewName = ReadString(
 			*table,
 			"default_view_name",
 			context,
 			warnings
 		).value_or(QString()).trimmed();
-		preset.groupsRequireMention = ReadBool(
-			*table,
-			"groups_require_mention",
-			context,
-			warnings);
 		preset.hideEverywhere = ReadBool(
 			*table,
-			"hide_everywhere",
+			"hide_everywhere_p",
 			context,
 			warnings);
+
+		if (const auto order = table->get("list_order")) {
+			if (const auto array = order->as_array()) {
+				preset.listOrder = expander.listOrder(*array, context);
+			} else {
+				warnings.push_back(u"%1: 'list_order' should be an array (%2)."_q
+					.arg(context, At(*order)));
+			}
+		}
+		WarnUnknownLists(preset.listOrder, lists, context, warnings);
+
 		if (const auto folders = table->get("folders")) {
 			if (const auto array = folders->as_array()) {
-				preset.folders = ReadFolders(*array, context, warnings);
+				preset.folders = expander.folders(*array, context);
 			} else {
 				warnings.push_back(u"%1: 'folders' should be an array (%2)."_q
 					.arg(context, At(*folders)));
 			}
 		}
-		if (const auto overrides = table->get("overrides")) {
-			if (const auto nested = overrides->as_table()) {
-				preset.overrides = ReadOverrides(
-					*nested,
-					lists,
-					context,
-					warnings);
-			} else {
-				warnings.push_back(u"%1: 'overrides' should be a table (%2)."_q
-					.arg(context, At(*overrides)));
-			}
+		preset.views = ReadViews(*table, expander, context, warnings);
+		for (const auto &view : preset.views) {
+			WarnUnknownLists(
+				view.listOrder,
+				lists,
+				u"%1 view '%2'"_q.arg(context, view.name),
+				warnings);
+		}
+
+		// A view showing a chat the preset has taken out of the app entirely
+		// is not a preference, it is a crash: tdesktop asserts that being in a
+		// filter implies being in the main chat list.
+		if (preset.hideEverywhere.value_or(false) && !preset.views.empty()) {
+			warnings.push_back(
+				u"%1: 'hide_everywhere_p' takes hidden chats out of the whole "
+				"app, which leaves nothing for an extra view to show; dropping "
+				"its %2 view(s)."_q.arg(context).arg(preset.views.size()));
+			preset.views.clear();
+		}
+
+		WarnRetired(
+			*table,
+			"inherit",
+			context,
+			u"write what the preset does, or spread a \"*set\" into it"_q,
+			warnings);
+		WarnRetired(
+			*table,
+			"overrides",
+			context,
+			u"put the flags on the 'list_order' entry itself"_q,
+			warnings);
+		WarnRetired(
+			*table,
+			"groups_require_mention",
+			context,
+			u"set 'groups_require_mention_p' on the entries it applies to"_q,
+			warnings);
+		WarnRetired(
+			*table,
+			"hide_everywhere",
+			context,
+			u"it is spelled 'hide_everywhere_p' now"_q,
+			warnings);
+
+		if (preset.listOrder.empty()) {
+			warnings.push_back(
+				u"%1: names no list, so it hides and silences everything."_q
+					.arg(context));
 		}
 		result.push_back(std::move(preset));
 	}
-
-	for (auto &preset : result) {
-		const auto normal = !preset.inherit.compare(
-			QLatin1String(kNormalPresetName),
-			Qt::CaseInsensitive);
-		if (normal) {
-			warnings.push_back(
-				u"preset '%1' inherits 'normal', which bypasses the whole "
-				"feature and cannot be a parent; using 'default'."_q
-					.arg(preset.name));
-			preset.inherit = QString::fromLatin1(kDefaultPresetName);
-		} else if (!KnownPresetReference(result, preset.inherit)) {
-			warnings.push_back(
-				u"preset '%1' inherits '%2', which does not exist; using "
-				"'default'."_q.arg(preset.name, preset.inherit));
-			preset.inherit = QString::fromLatin1(kDefaultPresetName);
-		}
-	}
 	return result;
-}
-
-// A cycle has no root to resolve against, so unlike everything else in this
-// parser it cannot be repaired into something usable. Spec 1.2: reject the
-// whole config and keep running on the last good one.
-[[nodiscard]] QString DetectInheritanceCycle(
-		const std::vector<Preset> &presets) {
-	for (const auto &preset : presets) {
-		auto chain = QStringList{ preset.name };
-		auto current = preset.inherit;
-		while (!current.isEmpty()
-			&& current.compare(
-				QLatin1String(kDefaultPresetName),
-				Qt::CaseInsensitive)) {
-			if (chain.contains(current)) {
-				chain.push_back(current);
-				return u"preset inheritance loops: %1."_q
-					.arg(chain.join(u" -> "_q));
-			}
-			chain.push_back(current);
-			const auto i = std::find_if(
-				presets.begin(),
-				presets.end(),
-				[&](const Preset &p) { return p.name == current; });
-			if (i == presets.end()) {
-				break;
-			}
-			current = i->inherit;
-		}
-	}
-	return QString();
 }
 
 [[nodiscard]] Schedule ReadSchedule(
@@ -517,7 +742,7 @@ void ReadMembers(
 		return result;
 	}
 	const auto &table = *node->as_table();
-	result.enabled = ReadBool(table, "enabled", u"schedule"_q, warnings)
+	result.enabled = ReadBool(table, "enabled_p", u"schedule"_q, warnings)
 		.value_or(true);
 
 	const auto rules = table.get("rules");
@@ -540,7 +765,7 @@ void ReadMembers(
 			continue;
 		}
 		auto rule = ScheduleRule();
-		rule.enabled = ReadBool(*fields, "enabled", context, warnings)
+		rule.enabled = ReadBool(*fields, "enabled_p", context, warnings)
 			.value_or(true);
 		const auto from = ReadString(*fields, "from", context, warnings);
 		const auto till = ReadString(*fields, "to", context, warnings);
@@ -563,7 +788,11 @@ void ReadMembers(
 				u"%1: 'from' and 'to' are the same time, skipping it."_q
 					.arg(context));
 			continue;
-		} else if (!KnownPresetReference(presets, *preset)) {
+		} else if (rule.enabled && !KnownPresetReference(presets, *preset)) {
+			// Only for a rule that would actually fire. A disabled rule aimed
+			// at a preset you have not written yet is the normal state of the
+			// example in the starter file, and warning about it would mean a
+			// fresh install complains on every single start.
 			warnings.push_back(
 				u"%1: preset '%2' does not exist, skipping it."_q
 					.arg(context, *preset));
@@ -623,7 +852,7 @@ void ReadMembers(
 	}
 	const auto &table = *node->as_table();
 	const auto context = u"focus_sync"_q;
-	result.enabled = ReadBool(table, "enabled", context, warnings)
+	result.enabled = ReadBool(table, "enabled_p", context, warnings)
 		.value_or(false);
 	result.enterPreset = ReadString(table, "enter_preset", context, warnings)
 		.value_or(QString());
@@ -682,37 +911,34 @@ void ReadMembers(
 
 } // namespace
 
-bool IsCatchAll(ListKind kind) {
-	return kind != ListKind::Custom;
+std::optional<ChatKind> ParseChatKind(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"private"_q) {
+		return ChatKind::Private;
+	} else if (trimmed == u"groups"_q) {
+		return ChatKind::Group;
+	} else if (trimmed == u"channels"_q) {
+		return ChatKind::Channel;
+	} else if (trimmed == u"bots"_q) {
+		return ChatKind::Bot;
+	}
+	return std::nullopt;
 }
 
-const std::vector<QString> &CatchAllNames() {
-	static const auto result = std::vector<QString>{
-		u"@private"_q,
-		u"@groups"_q,
-		u"@channels"_q,
-		u"@bots"_q,
-	};
-	return result;
-}
-
-ListKind CatchAllKind(const QString &name) {
-	return (name == u"@private"_q)
-		? ListKind::Private
-		: (name == u"@groups"_q)
-		? ListKind::Groups
-		: (name == u"@channels"_q)
-		? ListKind::Channels
-		: (name == u"@bots"_q)
-		? ListKind::Bots
-		: ListKind::Custom;
+QString ChatKindName(ChatKind kind) {
+	switch (kind) {
+	case ChatKind::Private: return u"private"_q;
+	case ChatKind::Group: return u"groups"_q;
+	case ChatKind::Channel: return u"channels"_q;
+	case ChatKind::Bot: return u"bots"_q;
+	}
+	return QString();
 }
 
 bool IsReservedPresetName(const QString &name) {
-	return !name.compare(QLatin1String(kDefaultPresetName), Qt::CaseInsensitive)
-		|| !name.compare(
-			QLatin1String(kNormalPresetName),
-			Qt::CaseInsensitive);
+	return !name.compare(
+		QLatin1String(kNormalPresetName),
+		Qt::CaseInsensitive);
 }
 
 bool IsPreviousPresetName(const QString &name) {
@@ -730,6 +956,23 @@ QString DefaultViewName(const QString &preset) {
 	// name would shout a preset deliberately written in caps back at the user.
 	result[0] = result[0].toUpper();
 	return result;
+}
+
+std::optional<QString> SpreadReference(const QString &value) {
+	const auto trimmed = value.trimmed();
+	if (trimmed.size() < 2 || !trimmed.startsWith('*')) {
+		return std::nullopt;
+	}
+	return trimmed.mid(1);
+}
+
+const QString &AllFoldersName() {
+	static const auto result = u"*ALL"_q;
+	return result;
+}
+
+bool IsAllFolders(const PresetFolder &folder) {
+	return (folder.name == AllFoldersName());
 }
 
 std::optional<int> ParseDuration(const QString &value) {
@@ -821,28 +1064,37 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 		if (const auto table = premium->as_table()) {
 			result.settings.premium.enabled = ReadBool(
 				*table,
-				"enabled",
+				"enabled_p",
 				u"premium"_q,
 				result.warnings).value_or(true);
+			WarnRetired(
+				*table,
+				"enabled",
+				u"premium"_q,
+				u"it is spelled 'enabled_p' now"_q,
+				result.warnings);
 		} else {
 			result.warnings.push_back(u"'premium' should be a table (%1)."_q
 				.arg(At(*premium)));
 		}
 	}
+	if (const auto retired = root.get("list_order")) {
+		result.warnings.push_back(
+			u"'list_order' at the top of the file is no longer a setting (%1); "
+			"each preset writes its own."_q.arg(At(*retired)));
+	}
 
-	result.settings.lists = ApplyListOrder(
-		ReadLists(root, result.warnings),
-		root,
+	result.settings.lists = ReadLists(root, result.warnings);
+
+	auto expander = Expander(
+		ReadSets(root, "list_sets", "list_order", result.warnings),
+		ReadSets(root, "folder_sets", "folders", result.warnings),
 		result.warnings);
 	result.settings.presets = ReadPresets(
 		root,
 		result.settings.lists,
+		expander,
 		result.warnings);
-	if (auto cycle = DetectInheritanceCycle(result.settings.presets);
-		!cycle.isEmpty()) {
-		result.error = std::move(cycle);
-		return result;
-	}
 	result.settings.schedule = ReadSchedule(
 		root,
 		result.settings.presets,

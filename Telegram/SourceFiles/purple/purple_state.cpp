@@ -63,6 +63,60 @@ namespace {
 	return node ? node->value_or(fallback) : fallback;
 }
 
+[[nodiscard]] QString SerializeLists(const std::vector<ResolvedList> &lists) {
+	auto result = u"lists = [\n"_q;
+	for (const auto &list : lists) {
+		result += u"  { list = %1, show = %2, notify = %3, "
+			"groups_require_mention = %4 },\n"_q.arg(
+				Quoted(list.list),
+				Boolean(list.show),
+				Boolean(list.notify),
+				Boolean(list.groupsRequireMention));
+	}
+	return result + u"]\n"_q;
+}
+
+void ReadOptionalBool(
+		const toml::table &table,
+		std::string_view key,
+		std::optional<bool> &into) {
+	if (const auto node = table.get(key)) {
+		if (const auto value = node->value<bool>()) {
+			into = *value;
+		}
+	}
+}
+
+[[nodiscard]] std::vector<ResolvedList> ReadResolvedLists(
+		const toml::table &table,
+		std::string_view key) {
+	auto result = std::vector<ResolvedList>();
+	const auto node = table.get(key);
+	const auto array = node ? node->as_array() : nullptr;
+	if (!array) {
+		return result;
+	}
+	for (auto &&element : *array) {
+		const auto fields = element.as_table();
+		if (!fields) {
+			continue;
+		}
+		auto entry = ResolvedList();
+		entry.list = ReadString(*fields, "list");
+		if (entry.list.isEmpty()) {
+			continue;
+		}
+		entry.show = ReadBool(*fields, "show", true);
+		entry.notify = ReadBool(*fields, "notify", true);
+		entry.groupsRequireMention = ReadBool(
+			*fields,
+			"groups_require_mention",
+			false);
+		result.push_back(std::move(entry));
+	}
+	return result;
+}
+
 [[nodiscard]] ResolvedCache ReadResolvedCache(const toml::table &root) {
 	auto result = ResolvedCache();
 	const auto node = root.get("resolved_cache");
@@ -78,34 +132,10 @@ namespace {
 	if (result.viewName.isEmpty()) {
 		result.viewName = DefaultViewName(result.preset);
 	}
-	result.groupsRequireMention = ReadBool(
-		*table,
-		"groups_require_mention",
-		false);
 	result.hideEverywhere = ReadBool(*table, "hide_everywhere", false);
-	if (const auto lists = table->get("lists")) {
-		if (const auto array = lists->as_array()) {
-			for (auto &&element : *array) {
-				const auto fields = element.as_table();
-				if (!fields) {
-					continue;
-				}
-				auto entry = ResolvedList();
-				entry.list = ReadString(*fields, "list");
-				if (entry.list.isEmpty()) {
-					continue;
-				}
-				entry.show = ReadBool(*fields, "show", true);
-				entry.notify = ReadBool(*fields, "notify", true);
-				result.lists.push_back(std::move(entry));
-			}
-		}
-	}
+	result.lists = ReadResolvedLists(*table, "lists");
 	if (const auto folders = table->get("folders")) {
 		if (const auto array = folders->as_array()) {
-			// Present but empty is meaningful, so the vector is created here
-			// rather than by the first entry pushed into it.
-			result.folders.emplace();
 			for (auto &&element : *array) {
 				const auto fields = element.as_table();
 				if (!fields) {
@@ -116,17 +146,39 @@ namespace {
 				if (folder.name.isEmpty()) {
 					continue;
 				}
-				if (const auto notify = fields->get("notify")) {
-					if (const auto value = notify->value<bool>()) {
-						folder.notify = *value;
+				ReadOptionalBool(*fields, "show", folder.show);
+				ReadOptionalBool(*fields, "notify", folder.notify);
+				ReadOptionalBool(
+					*fields,
+					"include_in_main_view",
+					folder.includeInMainView);
+				result.folders.push_back(std::move(folder));
+			}
+		}
+	}
+	if (const auto views = table->get("views")) {
+		if (const auto array = views->as_array()) {
+			for (auto &&element : *array) {
+				const auto fields = element.as_table();
+				if (!fields) {
+					continue;
+				}
+				auto view = ResolvedCacheView();
+				view.name = ReadString(*fields, "name");
+				view.lists = ReadResolvedLists(*fields, "lists");
+				if (view.name.isEmpty() || view.lists.empty()) {
+					continue;
+				}
+				if (const auto pinned = fields->get("pinned")) {
+					if (const auto ids = pinned->as_array()) {
+						for (auto &&id : *ids) {
+							if (const auto value = id.value<int64>()) {
+								view.pinned.push_back(*value);
+							}
+						}
 					}
 				}
-				if (const auto filtered = fields->get("filtered")) {
-					if (const auto value = filtered->value<bool>()) {
-						folder.filtered = *value;
-					}
-				}
-				result.folders->push_back(std::move(folder));
+				result.views.push_back(std::move(view));
 			}
 		}
 	}
@@ -236,35 +288,44 @@ QString SerializeState(const State &state) {
 		"defaults.\n[resolved_cache]\n"_q;
 	result += u"preset = %1\n"_q.arg(Quoted(cache.preset));
 	result += u"view_name = %1\n"_q.arg(Quoted(cache.viewName));
-	result += u"groups_require_mention = %1\n"_q
-		.arg(Boolean(cache.groupsRequireMention));
 	result += u"hide_everywhere = %1\n"_q
 		.arg(Boolean(cache.hideEverywhere));
-	result += u"lists = [\n"_q;
-	for (const auto &list : cache.lists) {
-		result += u"  { list = %1, show = %2, notify = %3 },\n"_q
-			.arg(Quoted(list.list), Boolean(list.show), Boolean(list.notify));
-	}
-	result += u"]\n"_q;
-	// Written only when the preset said something about folders, so that its
-	// absence reads back as "said nothing" and an empty array keeps meaning
-	// "named none". See ResolvedCache::folders.
-	if (cache.folders) {
+	result += SerializeLists(cache.lists);
+	if (!cache.folders.empty()) {
 		result += u"folders = [\n"_q;
-		for (const auto &folder : *cache.folders) {
+		for (const auto &folder : cache.folders) {
 			//: Each key is written only when the preset said something about
-			//: it, for the same reason the folders array itself is: nothing
-			//: and false mean different things all the way down.
+			//: it, because nothing and false mean different things all the way
+			//: down - see PresetFolder.
 			auto fields = u"name = %1"_q.arg(Quoted(folder.name));
+			if (folder.show) {
+				fields += u", show = %1"_q.arg(Boolean(*folder.show));
+			}
 			if (folder.notify) {
 				fields += u", notify = %1"_q.arg(Boolean(*folder.notify));
 			}
-			if (folder.filtered) {
-				fields += u", filtered = %1"_q.arg(Boolean(*folder.filtered));
+			if (folder.includeInMainView) {
+				fields += u", include_in_main_view = %1"_q
+					.arg(Boolean(*folder.includeInMainView));
 			}
 			result += u"  { %1 },\n"_q.arg(fields);
 		}
 		result += u"]\n"_q;
+	}
+
+	// Their own tables rather than inline ones: a view carries a nested array,
+	// and TOML inline tables have to fit on a single line.
+	for (const auto &view : cache.views) {
+		result += u"\n[[resolved_cache.views]]\n"_q;
+		result += u"name = %1\n"_q.arg(Quoted(view.name));
+		if (!view.pinned.empty()) {
+			auto ids = QStringList();
+			for (const auto id : view.pinned) {
+				ids.push_back(QString::number(id));
+			}
+			result += u"pinned = [%1]\n"_q.arg(ids.join(u", "_q));
+		}
+		result += SerializeLists(view.lists);
 	}
 	return result;
 }

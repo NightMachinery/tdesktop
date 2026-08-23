@@ -68,6 +68,10 @@ template <typename T>
 
 void Begin(const char *name) {
 	Section = name;
+	if (qEnvironmentVariableIsSet("PURPLE_TEST_TRACE")) {
+		std::printf("== %s\n", name);
+		std::fflush(stdout);
+	}
 }
 
 [[nodiscard]] QString Path() {
@@ -109,24 +113,18 @@ void Begin(const char *name) {
 	};
 }
 
-// The file the spec documents, used as the baseline for most checks.
+// The file the docs describe, used as the baseline for most checks.
 [[nodiscard]] QString Example() {
 	return uR"(# my settings
 
-list_order = ["os", "emergency", "colleagues"]
-
 [lists.os]
 title  = "OS"
-show   = true
-notify = true
-locked = true
 members = [
   1234567890,   # My Todo Channel
 ]
 
 [lists.emergency]
 title  = "Emergency"
-locked = true
 members = [
   111222333,    # Maman
 ]
@@ -139,80 +137,97 @@ members = [
   987654321,    # Backend Team
 ]
 
-[lists."@private"]
-show   = true
-notify = true
+[lists.people]
+title = "Everyone else"
+kinds = ["private"]
+
+[lists.noise]
+kinds = ["channels", "bots"]
+
+[list_sets.core]
+list_order = [
+  { list = "os",        show_p = true, notify_p = true },
+  { list = "emergency", show_p = true, notify_p = true },
+]
+
+[folder_sets.work_folders]
+folders = [
+  { name = "Music", notify_p = false },
+]
 
 [presets.work]
-inherit = "default"
-groups_require_mention = true
-folders = [ { name = "Music", notify = false } ]
-
-[presets.work.overrides."@private"]
-notify = false
+list_order = [
+  "*core",
+  { list = "colleagues", show_p = true,  notify_p = true, groups_require_mention_p = true },
+  { list = "people",     show_p = true,  notify_p = false },
+  { list = "noise",      show_p = false, notify_p = false },
+]
+folders = [ "*work_folders" ]
 
 [presets.strict]
-inherit = "work"
-
-[presets.strict.overrides."@private"]
-show = false
+list_order = [ "*core" ]
+folders = []
 )"_q;
 }
 
-void TestCatchAlls() {
-	Begin("catch-alls");
+void TestLists() {
+	Begin("lists");
 	const auto result = Parse(Example());
 	CHECK(result.ok());
+	CHECK(result.warnings.empty());
 
-	// Only @private is declared; the other three have to exist anyway, or the
-	// engine would need an "unlisted chat" case everywhere.
-	const auto names = ListNames(result.settings);
-	CHECK_EQ(names.size(), qsizetype(7));
-	CHECK_EQ(names.join(u","_q),
-		u"os,emergency,colleagues,@private,@groups,@channels,@bots"_q);
+	// Definitions only, in file order. There is no priority here any more -
+	// that belongs to whichever preset names them.
+	CHECK_EQ(ListNames(result.settings).join(u","_q),
+		u"os,emergency,colleagues,people,noise"_q);
 
-	const auto groups = result.settings.list(u"@groups"_q);
-	CHECK(groups != nullptr);
-	CHECK(groups->show);
-	CHECK(groups->notify);
-	CHECK(groups->kind == Purple::ListKind::Groups);
-	CHECK(groups->members.empty());
+	const auto noise = result.settings.list(u"noise"_q);
+	CHECK(noise != nullptr);
+	CHECK_EQ(noise->title, u"noise"_q);
+	CHECK(noise->members.empty());
+	CHECK_EQ(int(noise->kinds.size()), 2);
+	CHECK(noise->kinds[0] == Purple::ChatKind::Channel);
+	CHECK(noise->kinds[1] == Purple::ChatKind::Bot);
+
+	// A list carrying what a preset used to override is a file written against
+	// the old model; saying so beats behaving differently in silence.
+	const auto stale = Parse(uR"(
+[lists.a]
+show   = true
+notify = false
+locked = true
+)"_q);
+	CHECK(stale.ok());
+	CHECK(WarnsAbout(stale, u"'show' is no longer a setting"_q));
+	CHECK(WarnsAbout(stale, u"'notify' is no longer a setting"_q));
+	CHECK(WarnsAbout(stale, u"'locked' is no longer a setting"_q));
+	CHECK(WarnsAbout(stale, u"only reach a list it names"_q));
 }
 
-void TestListOrder() {
-	Begin("list_order");
+void TestKinds() {
+	Begin("kinds");
 
-	// Names a list that does not exist, and forgets one that does.
 	const auto result = Parse(uR"(
-list_order = ["ghosts", "b"]
-
 [lists.a]
-title = "A"
+kinds = ["private", "bots", "bots", "wombats"]
 
 [lists.b]
-title = "B"
+kinds = "bots"
 )"_q);
 	CHECK(result.ok());
-	CHECK(WarnsAbout(result, u"'ghosts'"_q));
-	CHECK(WarnsAbout(result, u"missing from 'list_order'"_q));
-	CHECK_EQ(ListNames(result.settings).join(u","_q),
-		u"b,a,@private,@groups,@channels,@bots"_q);
+	CHECK(WarnsAbout(result, u"'wombats' is not one of"_q));
+	CHECK(WarnsAbout(result, u"'kinds' should be an array"_q));
 
-	// Catch-alls always sink below custom lists whatever the file says.
-	const auto sunk = Parse(uR"(
-list_order = ["@bots", "@private", "work"]
+	// Deduplicated, order kept, the bad one dropped rather than the whole key.
+	const auto a = result.settings.list(u"a"_q);
+	CHECK_EQ(int(a->kinds.size()), 2);
+	CHECK(a->kinds[0] == Purple::ChatKind::Private);
+	CHECK(a->kinds[1] == Purple::ChatKind::Bot);
+	CHECK(result.settings.list(u"b"_q)->kinds.empty());
 
-[lists.work]
-title = "Work"
-)"_q);
-	CHECK(sunk.ok());
-	CHECK(WarnsAbout(sunk, u"always sort below"_q));
-
-	// @bots before @private because the file said so - reordering the
-	// catch-alls among themselves is allowed, hoisting them above a user list
-	// is not - and the two the file never mentioned follow in canonical order.
-	CHECK_EQ(ListNames(sunk.settings).join(u","_q),
-		u"work,@bots,@private,@groups,@channels"_q);
+	CHECK(Purple::ParseChatKind(u"Channels"_q) == Purple::ChatKind::Channel);
+	CHECK(!Purple::ParseChatKind(u"channel"_q).has_value());
+	CHECK_EQ(Purple::ChatKindName(Purple::ChatKind::Group), u"groups"_q);
 }
 
 void TestPresets() {
@@ -225,28 +240,34 @@ void TestPresets() {
 	CHECK_EQ(result.settings.presets[0].name, u"work"_q);
 	CHECK_EQ(result.settings.presets[1].name, u"strict"_q);
 
+	// "*core" spliced in at the front, then the three written inline.
 	const auto work = result.settings.preset(u"work"_q);
 	CHECK(work != nullptr);
-	CHECK_EQ(work->inherit, u"default"_q);
-	CHECK(work->groupsRequireMention.value_or(false));
-	CHECK(work->folders.has_value());
-	CHECK_EQ(work->folders->size(), size_t(1));
-	CHECK_EQ(work->folders->front().name, u"Music"_q);
-	CHECK(work->folders->front().notify.has_value());
-	CHECK(!work->folders->front().notify.value_or(true));
+	CHECK_EQ(int(work->listOrder.size()), 5);
+	CHECK_EQ(work->listOrder[0].list, u"os"_q);
+	CHECK_EQ(work->listOrder[1].list, u"emergency"_q);
+	CHECK_EQ(work->listOrder[2].list, u"colleagues"_q);
+	CHECK(work->listOrder[2].groupsRequireMention.value_or(false));
+	CHECK_EQ(work->listOrder[3].list, u"people"_q);
+	CHECK(!work->listOrder[3].notify.value_or(true));
+	CHECK_EQ(work->listOrder[4].list, u"noise"_q);
+	CHECK(!work->listOrder[4].show.value_or(true));
 
-	CHECK_EQ(work->overrides.size(), size_t(1));
-	CHECK_EQ(work->overrides[0].list, u"@private"_q);
-	CHECK(!work->overrides[0].show.has_value());
-	CHECK(work->overrides[0].notify.has_value());
-	CHECK(!work->overrides[0].notify.value_or(true));
+	// Absent flags stay absent, so a warning can tell "false" from "unsaid".
+	CHECK(!work->listOrder[0].groupsRequireMention.has_value());
 
-	// strict says nothing about folders, so the engine will walk up to work.
+	CHECK_EQ(int(work->folders.size()), 1);
+	CHECK_EQ(work->folders.front().name, u"Music"_q);
+	CHECK(!work->folders.front().notify.value_or(true));
+	CHECK(!work->folders.front().show.has_value());
+
+	// strict shares the same set and asks for no folder tabs at all.
 	const auto strict = result.settings.preset(u"strict"_q);
 	CHECK(strict != nullptr);
-	CHECK_EQ(strict->inherit, u"work"_q);
-	CHECK(!strict->folders.has_value());
-	CHECK(!strict->groupsRequireMention.has_value());
+	CHECK_EQ(int(strict->listOrder.size()), 2);
+	CHECK_EQ(strict->listOrder[0].list, u"os"_q);
+	CHECK(strict->folders.empty());
+	CHECK(strict->views.empty());
 }
 
 void TestPresetPolicies() {
@@ -254,70 +275,256 @@ void TestPresetPolicies() {
 
 	const auto reserved = Parse(uR"(
 [presets.Normal]
-inherit = "default"
+list_order = [ { list = "a" } ]
 
 [presets.keep]
-inherit = "default"
+list_order = [ { list = "a" } ]
+
+[lists.a]
+kinds = ["bots"]
 )"_q);
 	CHECK(reserved.ok());
 	CHECK(WarnsAbout(reserved, u"reserved"_q));
 	CHECK_EQ(reserved.settings.presets.size(), size_t(1));
 	CHECK_EQ(reserved.settings.presets[0].name, u"keep"_q);
 
-	const auto unknown = Parse(uR"(
+	// "default" was the implicit root of the old inheritance chain. There is no
+	// chain now, so it is an ordinary name.
+	const auto plain = Parse(uR"(
+[presets.default]
+list_order = [ { list = "a" } ]
+
+[lists.a]
+kinds = ["bots"]
+)"_q);
+	CHECK(plain.ok());
+	CHECK_EQ(plain.settings.presets.size(), size_t(1));
+
+	// Naming a list that is not defined claims nothing, which is worth saying
+	// out loud - it looks exactly like a preset that is working.
+	const auto ghost = Parse(uR"(
 [presets.work]
-inherit = "nowhere"
+list_order = [ { list = "ghosts" } ]
 )"_q);
-	CHECK(unknown.ok());
-	CHECK(WarnsAbout(unknown, u"does not exist"_q));
-	CHECK_EQ(unknown.settings.presets[0].inherit, u"default"_q);
+	CHECK(ghost.ok());
+	CHECK(WarnsAbout(ghost, u"has no [lists.ghosts] table"_q));
 
-	// A cycle has no root to resolve against, so it is fatal by design.
-	const auto cycle = Parse(uR"(
-[presets.a]
-inherit = "b"
+	// An empty preset is legal and hides everything; silence about that would
+	// be the single most confusing thing this parser could do.
+	const auto empty = Parse(u"[presets.work]\n"_q);
+	CHECK(empty.ok());
+	CHECK(WarnsAbout(empty, u"hides and silences everything"_q));
 
-[presets.b]
-inherit = "a"
+	// Everything the old model spelled differently.
+	const auto stale = Parse(uR"(
+[presets.work]
+inherit = "default"
+groups_require_mention = true
+hide_everywhere = true
+
+[presets.work.overrides.a]
+show = false
 )"_q);
-	CHECK(!cycle.ok());
-	CHECK(cycle.error.contains(u"loops"_q));
-
-	const auto selfCycle = Parse(uR"(
-[presets.a]
-inherit = "a"
-)"_q);
-	CHECK(!selfCycle.ok());
+	CHECK(stale.ok());
+	CHECK(WarnsAbout(stale, u"'inherit' is no longer a setting"_q));
+	CHECK(WarnsAbout(stale, u"'overrides' is no longer a setting"_q));
+	CHECK(WarnsAbout(stale, u"'groups_require_mention' is no longer"_q));
+	CHECK(WarnsAbout(stale, u"spelled 'hide_everywhere_p' now"_q));
+	CHECK(!stale.settings.preset(u"work"_q)->hideEverywhere.has_value());
 }
 
-void TestOverridePolicies() {
-	Begin("override policies");
+void TestSpread() {
+	Begin("spread");
 
+	// Nested sets, a duplicate the second mention of which never decides
+	// anything, and a name that is not a set at all.
 	const auto result = Parse(uR"(
-[lists.os]
-locked = true
+[lists.a]
+kinds = ["bots"]
+[lists.b]
+kinds = ["channels"]
+[lists.c]
+kinds = ["groups"]
 
-[lists.free]
-show = true
+[list_sets.inner]
+list_order = [ { list = "a", show_p = false } ]
 
-[presets.work.overrides.os]
-show = false
+[list_sets.outer]
+list_order = [ "*inner", { list = "b" } ]
 
-[presets.work.overrides.ghosts]
-show = false
-
-[presets.work.overrides.free]
-show = false
+[presets.work]
+list_order = [ "*outer", { list = "a", show_p = true }, "*ghosts", { list = "c" } ]
 )"_q);
 	CHECK(result.ok());
-	CHECK(WarnsAbout(result, u"is locked"_q));
-	CHECK(WarnsAbout(result, u"not a list"_q));
+	CHECK(WarnsAbout(result, u"there is no list_set called 'ghosts'"_q));
+	CHECK(WarnsAbout(result, u"already claimed further up"_q));
 
-	// Only the override of the unlocked, existing list survives.
 	const auto work = result.settings.preset(u"work"_q);
-	CHECK(work != nullptr);
-	CHECK_EQ(work->overrides.size(), size_t(1));
-	CHECK_EQ(work->overrides[0].list, u"free"_q);
+	CHECK_EQ(int(work->listOrder.size()), 3);
+	CHECK_EQ(work->listOrder[0].list, u"a"_q);
+	CHECK_EQ(work->listOrder[1].list, u"b"_q);
+	CHECK_EQ(work->listOrder[2].list, u"c"_q);
+
+	// First mention wins, so the "a" inside the set keeps its show_p = false
+	// and the later one is ignored rather than overriding it.
+	CHECK(!work->listOrder[0].show.value_or(true));
+
+	// The other way round is the idiom the spread exists for - override one
+	// entry, then splice in the defaults - so it is silent.
+	const auto overriding = Parse(uR"(
+[lists.a]
+kinds = ["bots"]
+[lists.b]
+kinds = ["channels"]
+
+[list_sets.defaults]
+list_order = [ { list = "a", show_p = true }, { list = "b", show_p = true } ]
+
+[presets.work]
+list_order = [ { list = "a", show_p = false }, "*defaults" ]
+)"_q);
+	CHECK(overriding.ok());
+	CHECK(!WarnsAbout(overriding, u"already claimed"_q));
+	const auto tuned = overriding.settings.preset(u"work"_q);
+	CHECK_EQ(int(tuned->listOrder.size()), 2);
+	CHECK_EQ(tuned->listOrder[0].list, u"a"_q);
+	CHECK(!tuned->listOrder[0].show.value_or(true));
+	CHECK_EQ(tuned->listOrder[1].list, u"b"_q);
+
+	// A set referring to itself is a typo, not a feature.
+	const auto loop = Parse(uR"(
+[lists.a]
+kinds = ["bots"]
+
+[list_sets.one]
+list_order = [ "*two" ]
+
+[list_sets.two]
+list_order = [ "*one", { list = "a" } ]
+
+[presets.work]
+list_order = [ "*one" ]
+)"_q);
+	CHECK(loop.ok());
+	CHECK(WarnsAbout(loop, u"refers back into itself"_q));
+	CHECK_EQ(int(loop.settings.preset(u"work"_q)->listOrder.size()), 1);
+
+	// A bare string that is not a reference is a mistake worth naming.
+	const auto bare = Parse(uR"(
+[presets.work]
+list_order = [ "colleagues" ]
+)"_q);
+	CHECK(bare.ok());
+	CHECK(WarnsAbout(bare, u"neither a table nor a \"*set\" reference"_q));
+}
+
+void TestFolderSelection() {
+	Begin("folders");
+
+	const auto result = Parse(uR"(
+[folder_sets.mine]
+folders = [ { name = "B", include_in_main_view_p = true } ]
+
+[presets.work]
+folders = [ "*mine", "*ALL", { name = "B", show_p = false } ]
+
+[presets.none]
+list_order = []
+
+[presets.every]
+folders = [ "*ALL" ]
+)"_q);
+	CHECK(result.ok());
+	CHECK(WarnsAbout(result, u"named more than once"_q));
+
+	// The set first, then the marker; the third entry is B again and is
+	// dropped, so B keeps the flags its first mention gave it.
+	const auto work = result.settings.preset(u"work"_q);
+	CHECK_EQ(int(work->folders.size()), 2);
+	CHECK_EQ(work->folders[0].name, u"B"_q);
+	CHECK(work->folders[0].includeInMainView.value_or(false));
+	CHECK(Purple::IsAllFolders(work->folders[1]));
+
+	// Saying nothing about folders is saying none, the same rule the lists
+	// follow. "*ALL" is how you ask for the strip back.
+	CHECK(result.settings.preset(u"none"_q)->folders.empty());
+	const auto every = result.settings.preset(u"every"_q);
+	CHECK_EQ(int(every->folders.size()), 1);
+	CHECK(Purple::IsAllFolders(every->folders[0]));
+
+	// The old spelling, and an attempt to redefine the built-in set.
+	const auto stale = Parse(uR"(
+[folder_sets.ALL]
+folders = [ { name = "B" } ]
+
+[presets.work]
+folders = [ { name = "B", filtered = false } ]
+)"_q);
+	CHECK(stale.ok());
+	CHECK(WarnsAbout(stale, u"cannot be redefined"_q));
+	CHECK(WarnsAbout(stale, u"use 'include_in_main_view_p'"_q));
+}
+
+void TestViews() {
+	Begin("views");
+
+	const auto result = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+[lists.b]
+kinds = ["bots"]
+
+[presets.work]
+list_order = [ { list = "a" } ]
+
+[[presets.work.views]]
+name   = "Focus"
+pinned = [ 5, 6, 5 ]
+list_order = [ { list = "a", show_p = true, notify_p = false } ]
+
+[[presets.work.views]]
+name = "Focus"
+list_order = [ { list = "b" } ]
+
+[[presets.work.views]]
+name = "Empty"
+
+[[presets.work.views]]
+list_order = [ { list = "b" } ]
+)"_q);
+	CHECK(result.ok());
+	CHECK(WarnsAbout(result, u"already a view called 'Focus'"_q));
+	CHECK(WarnsAbout(result, u"names no list"_q));
+	CHECK(WarnsAbout(result, u"a view needs 'name'"_q));
+
+	// notify_p inside a view cannot mean anything: a chat has one mute state
+	// however many tabs are showing it.
+	CHECK(WarnsAbout(result, u"'notify_p' means nothing inside a view"_q));
+
+	const auto work = result.settings.preset(u"work"_q);
+	CHECK_EQ(int(work->views.size()), 1);
+	CHECK_EQ(work->views[0].name, u"Focus"_q);
+	CHECK_EQ(work->views[0].pinned,
+		(std::vector<Purple::PeerIdValue>{ 5, 6 }));
+	CHECK_EQ(int(work->views[0].listOrder.size()), 1);
+
+	// A view showing a chat the preset has taken out of the app entirely is not
+	// a preference, it is an assertion failure waiting to happen.
+	const auto gone = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[presets.work]
+hide_everywhere_p = true
+list_order = [ { list = "a" } ]
+
+[[presets.work.views]]
+name = "Focus"
+list_order = [ { list = "a" } ]
+)"_q);
+	CHECK(gone.ok());
+	CHECK(WarnsAbout(gone, u"leaves nothing for an extra view to show"_q));
+	CHECK(gone.settings.preset(u"work"_q)->views.empty());
 }
 
 void TestMembers() {
@@ -327,17 +534,23 @@ void TestMembers() {
 [lists.a]
 members = [ 1, 2, 2, 3, 1 ]
 
-[lists."@groups"]
-members = [ 7 ]
-locked = true
+[lists.b]
+members = [ "nope", 4 ]
+
+[lists."*sneaky"]
+members = [ 9 ]
 )"_q);
 	CHECK(result.ok());
 	CHECK_EQ(result.settings.list(u"a"_q)->members,
 		(std::vector<Purple::PeerIdValue>{ 1, 2, 3 }));
-	CHECK(WarnsAbout(result, u"cannot have members"_q));
-	CHECK(WarnsAbout(result, u"cannot be locked"_q));
-	CHECK(result.settings.list(u"@groups"_q)->members.empty());
-	CHECK(!result.settings.list(u"@groups"_q)->locked);
+	CHECK(WarnsAbout(result, u"should be peer ids"_q));
+	CHECK_EQ(result.settings.list(u"b"_q)->members,
+		(std::vector<Purple::PeerIdValue>{ 4 }));
+
+	// A list whose name starts with '*' could never be told apart from a set
+	// reference by anyone reading the file.
+	CHECK(WarnsAbout(result, u"reserved for set references"_q));
+	CHECK(result.settings.list(u"*sneaky"_q) == nullptr);
 }
 
 void TestScheduleAndFocus() {
@@ -345,10 +558,10 @@ void TestScheduleAndFocus() {
 
 	const auto result = Parse(uR"(
 [presets.work]
-inherit = "default"
+list_order = []
 
 [schedule]
-enabled = true
+enabled_p = true
 
 [[schedule.rules]]
 days   = ["mon", "tue"]
@@ -367,7 +580,7 @@ to     = "09:00"
 preset = "work"
 
 [focus_sync]
-enabled      = true
+enabled_p    = true
 enter_preset = "work"
 exit_preset  = "previous"
 
@@ -395,10 +608,26 @@ auto_off = "90s"
 	CHECK_EQ(result.settings.peek.hotkey, u"Ctrl+Alt+K"_q);
 	CHECK_EQ(result.settings.peek.autoOffSeconds, 90);
 
+	// A DISABLED rule aimed at a preset that does not exist is kept and quiet:
+	// that is the normal state of the example in the starter file, and a fresh
+	// install must not complain on every start.
+	const auto sleeping = Parse(uR"(
+[[schedule.rules]]
+enabled_p = false
+days      = ["mon"]
+from      = "09:00"
+to        = "17:00"
+preset    = "ghost"
+)"_q);
+	CHECK(sleeping.ok());
+	CHECK(sleeping.warnings.empty());
+	CHECK_EQ(sleeping.settings.schedule.rules.size(), size_t(1));
+	CHECK(!sleeping.settings.schedule.rules[0].enabled);
+
 	// Focus sync pointing at nothing turns itself off rather than half-working.
 	const auto broken = Parse(uR"(
 [focus_sync]
-enabled      = true
+enabled_p    = true
 enter_preset = "ghost"
 )"_q);
 	CHECK(broken.ok());
@@ -430,30 +659,42 @@ void TestScalarParsers() {
 void TestPremiumStillParses() {
 	Begin("premium");
 
-	// The file already on disk from the premium work has to keep working.
 	const auto result = Parse(uR"([premium]
 # Unlock the client-side features.
-enabled = true
+enabled_p = true
 )"_q);
 	CHECK(result.ok());
 	CHECK(result.settings.premium.enabled);
 
-	// A file that predates Work Mode is complete, not half-configured: it must
-	// not log a warning on every single start.
+	// A file with nothing but the Premium toggle is complete, not
+	// half-configured: it must not log a warning on every single start.
 	CHECK(result.warnings.empty());
-	CHECK_EQ(result.settings.lists.size(), size_t(4));
+	CHECK(result.settings.lists.empty());
 	CHECK(result.settings.presets.empty());
 	CHECK(!result.settings.focusSync.enabled);
 
-	const auto off = Parse(u"[premium]\nenabled = false\n"_q);
+	const auto off = Parse(u"[premium]\nenabled_p = false\n"_q);
 	CHECK(off.ok());
 	CHECK(!off.settings.premium.enabled);
+
+	// The old spelling is gone, and gone loudly - silently defaulting to true
+	// would turn the toggle off-looking and on-behaving.
+	const auto stale = Parse(u"[premium]\nenabled = false\n"_q);
+	CHECK(stale.ok());
+	CHECK(stale.settings.premium.enabled);
+	CHECK(WarnsAbout(stale, u"spelled 'enabled_p' now"_q));
 
 	// No file content at all is still a usable configuration.
 	const auto empty = Parse(QString());
 	CHECK(empty.ok());
 	CHECK(empty.settings.premium.enabled);
-	CHECK_EQ(empty.settings.lists.size(), size_t(4));
+	CHECK(empty.settings.lists.empty());
+	CHECK(empty.warnings.empty());
+
+	// A top-level list_order is where priority used to live.
+	const auto order = Parse(u"list_order = [\"a\"]\n"_q);
+	CHECK(order.ok());
+	CHECK(WarnsAbout(order, u"each preset writes its own"_q));
 }
 
 void TestBrokenFile() {
@@ -878,15 +1119,22 @@ void TestStateRoundTrip() {
 	state.peekDeadlineUnix = 1755400000;
 	state.resolvedCache.preset = u"work"_q;
 	state.resolvedCache.viewName = u"Deep Work"_q;
-	state.resolvedCache.groupsRequireMention = false;
 	state.resolvedCache.hideEverywhere = true;
 	state.resolvedCache.lists = {
-		{ u"os"_q, true, true },
-		{ u"@private"_q, true, false },
+		{ u"os"_q, true, true, false },
+		{ u"people"_q, true, false, true },
 	};
-	state.resolvedCache.folders = std::vector<Purple::PresetFolder>{
+	state.resolvedCache.folders = {
 		{ .name = u"Music"_q, .notify = false },
-		{ .name = u"Family"_q, .filtered = false },
+		{ .name = u"Family"_q, .includeInMainView = true },
+		{ .name = Purple::AllFoldersName(), .show = false },
+	};
+	state.resolvedCache.views = {
+		{
+			u"Focus"_q,
+			{ 5, 6 },
+			{ { u"os"_q, true, true, false } },
+		},
 	};
 
 	const auto text = Purple::SerializeState(state);
@@ -905,21 +1153,29 @@ void TestStateRoundTrip() {
 	CHECK(back.resolvedCache.valid());
 	CHECK_EQ(back.resolvedCache.preset, u"work"_q);
 	CHECK_EQ(back.resolvedCache.viewName, u"Deep Work"_q);
-	CHECK(!back.resolvedCache.groupsRequireMention);
 	CHECK(back.resolvedCache.hideEverywhere);
 	CHECK_EQ(back.resolvedCache.lists.size(), size_t(2));
-	CHECK_EQ(back.resolvedCache.lists[1].list, u"@private"_q);
+	CHECK_EQ(back.resolvedCache.lists[1].list, u"people"_q);
 	CHECK(back.resolvedCache.lists[1].show);
 	CHECK(!back.resolvedCache.lists[1].notify);
-	CHECK(back.resolvedCache.folders.has_value());
-	CHECK_EQ(back.resolvedCache.folders->size(), size_t(2));
-	CHECK_EQ(back.resolvedCache.folders->at(0).name, u"Music"_q);
-	CHECK(back.resolvedCache.folders->at(0).notify.has_value());
-	CHECK(!back.resolvedCache.folders->at(0).notify.value_or(true));
-	CHECK(!back.resolvedCache.folders->at(0).filtered.has_value());
-	CHECK_EQ(back.resolvedCache.folders->at(1).name, u"Family"_q);
-	CHECK(back.resolvedCache.folders->at(1).filtered.has_value());
-	CHECK(!back.resolvedCache.folders->at(1).filtered.value_or(true));
+	CHECK(back.resolvedCache.lists[1].groupsRequireMention);
+	CHECK(!back.resolvedCache.lists[0].groupsRequireMention);
+	CHECK_EQ(int(back.resolvedCache.folders.size()), 3);
+	CHECK_EQ(back.resolvedCache.folders[0].name, u"Music"_q);
+	CHECK(back.resolvedCache.folders[0].notify.has_value());
+	CHECK(!back.resolvedCache.folders[0].notify.value_or(true));
+	CHECK(!back.resolvedCache.folders[0].includeInMainView.has_value());
+	CHECK_EQ(back.resolvedCache.folders[1].name, u"Family"_q);
+	CHECK(back.resolvedCache.folders[1].includeInMainView.value_or(false));
+	CHECK(Purple::IsAllFolders(back.resolvedCache.folders[2]));
+	CHECK(!back.resolvedCache.folders[2].show.value_or(true));
+
+	CHECK_EQ(int(back.resolvedCache.views.size()), 1);
+	CHECK_EQ(back.resolvedCache.views[0].name, u"Focus"_q);
+	CHECK_EQ(back.resolvedCache.views[0].pinned,
+		(std::vector<Purple::PeerIdValue>{ 5, 6 }));
+	CHECK_EQ(int(back.resolvedCache.views[0].lists.size()), 1);
+	CHECK_EQ(back.resolvedCache.views[0].lists[0].list, u"os"_q);
 
 	// Serialising the round-tripped state reproduces the file exactly, so
 	// nothing drifts as the app rewrites it over and over.
@@ -979,108 +1235,94 @@ void TestStateQuoting() {
 // lists, a three-deep inheritance chain, and a child that empties its folders.
 [[nodiscard]] QString Presets() {
 	return uR"(
-list_order = ["os", "emergency", "colleagues"]
-
 [lists.os]
-show   = true
-notify = true
-locked = true
 members = [ 100 ]
 
 [lists.emergency]
-show   = true
-notify = true
-locked = true
 members = [ 200, 300 ]
 
 [lists.colleagues]
-show   = true
-notify = true
 members = [ 300, 400 ]
 
-[lists."@private"]
-show   = true
-notify = true
+[lists.private]
+kinds = ["private"]
 
-[lists."@groups"]
-show   = true
-notify = true
+[lists.groups]
+kinds = ["groups"]
 
-[lists."@channels"]
-show   = true
-notify = true
+[lists.channels]
+kinds = ["channels"]
 
-[lists."@bots"]
-show   = true
-notify = true
+[lists.bots]
+kinds = ["bots"]
+
+[lists.everything]
+kinds = ["private", "groups", "channels", "bots"]
+
+[list_sets.protected]
+list_order = [
+  { list = "os",        show_p = true, notify_p = true },
+  { list = "emergency", show_p = true, notify_p = true },
+]
 
 [presets.work]
-inherit = "default"
-groups_require_mention = true
-folders = [ { name = "Music", notify = false } ]
-
-[presets.work.overrides."@private"]
-notify = false
-
-[presets.work.overrides."@channels"]
-show = false
+list_order = [
+  "*protected",
+  { list = "colleagues", show_p = true,  notify_p = true, groups_require_mention_p = true },
+  { list = "private",    show_p = true,  notify_p = false },
+  { list = "groups",     show_p = true,  notify_p = true, groups_require_mention_p = true },
+  { list = "channels",   show_p = false, notify_p = false },
+  { list = "bots",       show_p = true,  notify_p = true },
+]
+folders = [ { name = "Music", notify_p = false } ]
 
 [presets.strict]
-inherit = "work"
-
-[presets.strict.overrides."@private"]
-show = false
-
-[presets.strict.overrides.colleagues]
-groups_require_mention = false
+list_order = [
+  "*protected",
+  { list = "colleagues", show_p = true,  notify_p = true },
+  { list = "private",    show_p = false, notify_p = false },
+  { list = "groups",     show_p = true,  notify_p = true, groups_require_mention_p = true },
+  { list = "channels",   show_p = false, notify_p = false },
+]
+folders = [ "*ALL" ]
 
 [presets.lockdown]
-inherit = "strict"
+list_order = [ "*protected" ]
 folders = []
-
-[presets.lockdown.overrides."@groups"]
-show = false
-
-[presets.lockdown.overrides.os]
-show = false
 )"_q;
 }
 
-void TestResolveDefault() {
-	Begin("resolve default");
+void TestResolveBasics() {
+	Begin("resolve basics");
 
 	const auto parsed = Parse(Presets());
 	CHECK(parsed.ok());
 
-	// The list defaults ARE the implicit default preset.
-	const auto resolved = Purple::Resolve(parsed.settings, u"default"_q);
-	CHECK(resolved.has_value());
-	CHECK(!resolved->normal);
-	CHECK_EQ(resolved->lists.size(), size_t(7));
-	CHECK(resolved->list(u"@private"_q)->show);
-	CHECK(resolved->list(u"@private"_q)->notify);
-	CHECK(resolved->list(u"@channels"_q)->show);
-	// The default preset says nothing about folders, which is not the same
-	// as naming none - every folder shows.
-	CHECK(!resolved->folders.has_value());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+	CHECK(work.has_value());
+	CHECK(!work->normal);
 
-	// Off unless a preset asks for it. This assertion said the opposite until
-	// the gate was implemented and nothing was consuming the value to notice:
-	// defaulting it on means a preset that only hides bots also empties the
-	// chat list of every group nobody has mentioned you in.
-	CHECK(!resolved->groupsRequireMention);
-	for (const auto &list : resolved->lists) {
-		CHECK(!list.groupsRequireMention);
-	}
+	// The preset's own entries, in its own order, with "*protected" spliced in
+	// at the front - not every list in the file.
+	CHECK_EQ(work->lists.size(), size_t(7));
+	CHECK_EQ(work->lists[0].list, u"os"_q);
+	CHECK(work->list(u"private"_q)->show);
+	CHECK(!work->list(u"private"_q)->notify);
+	CHECK(!work->list(u"channels"_q)->show);
+	CHECK(work->list(u"everything"_q) == nullptr);
 
-	// Off unless a preset asks, and for the same kind of reason: hiding a chat
-	// from the work view is a small thing to get wrong, and taking it out of
-	// the forward picker as well is not.
-	CHECK(!resolved->hideEverywhere);
+	// Tri-states collapse here, so nothing downstream has to ask twice.
+	CHECK(work->list(u"os"_q)->show);
+	CHECK(!work->list(u"os"_q)->groupsRequireMention);
+	CHECK(work->list(u"colleagues"_q)->groupsRequireMention);
 
-	// An empty name means the same thing, since that is what a fresh state
-	// file with no active preset resolves to.
-	CHECK(Purple::Resolve(parsed.settings, QString()).has_value());
+	CHECK_EQ(int(work->folders.size()), 1);
+	CHECK_EQ(work->folders[0].name, u"Music"_q);
+	CHECK(work->views.empty());
+
+	// Off unless a preset asks: hiding a chat from the work view is a small
+	// thing to get wrong, and taking it out of the forward picker is not.
+	CHECK(!work->hideEverywhere);
 
 	// Normal is a bypass, not a preset with everything switched on.
 	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);
@@ -1092,92 +1334,39 @@ void TestResolveDefault() {
 		*normal,
 		400,
 		Purple::ChatKind::Private) == nullptr);
+	CHECK(Purple::Visible(
+		parsed.settings,
+		*normal,
+		400,
+		Purple::ChatKind::Private).show);
 
-	// A preset the settings no longer describe cannot be resolved, and the
-	// caller is meant to fall back rather than to defaults.
+	// A preset the settings do not describe cannot be resolved, and the caller
+	// is meant to fall back rather than to defaults. With no inheritance there
+	// is no implicit root to land on either.
 	CHECK(!Purple::Resolve(parsed.settings, u"ghost"_q).has_value());
+	CHECK(!Purple::Resolve(parsed.settings, u"default"_q).has_value());
+	CHECK(!Purple::Resolve(parsed.settings, QString()).has_value());
 }
 
-void TestResolveInheritance() {
-	Begin("resolve inheritance");
+void TestResolveViewName() {
+	Begin("resolve view name");
 
-	const auto parsed = Parse(Presets());
-	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
-	const auto strict = Purple::Resolve(parsed.settings, u"strict"_q);
-	const auto lockdown = Purple::Resolve(parsed.settings, u"lockdown"_q);
-	CHECK(work.has_value());
-	CHECK(strict.has_value());
-	CHECK(lockdown.has_value());
-
-	// work: DMs visible but silent, channels hidden.
-	CHECK(work->list(u"@private"_q)->show);
-	CHECK(!work->list(u"@private"_q)->notify);
-	CHECK(!work->list(u"@channels"_q)->show);
-
-	// strict inherits the hidden channels without restating them, and adds
-	// hidden DMs on top - while the silenced notify from work still applies.
-	CHECK(!strict->list(u"@channels"_q)->show);
-	CHECK(!strict->list(u"@private"_q)->show);
-	CHECK(!strict->list(u"@private"_q)->notify);
-
-	// lockdown inherits both and hides groups too.
-	CHECK(!lockdown->list(u"@groups"_q)->show);
-	CHECK(!lockdown->list(u"@channels"_q)->show);
-	CHECK(!lockdown->list(u"@private"_q)->show);
-
-	// Folders are replaced whole, not merged: work names one, strict inherits
-	// that one, lockdown deliberately empties the selection.
-	CHECK(work->folders.has_value());
-	CHECK_EQ(work->folders->size(), size_t(1));
-	CHECK_EQ(work->folders->at(0).name, u"Music"_q);
-	CHECK(strict->folders.has_value());
-	CHECK_EQ(strict->folders->size(), size_t(1));
-
-	// "folders = []" is a deliberate "hide them all", and has to stay
-	// distinguishable from a preset that never mentioned folders.
-	CHECK(lockdown->folders.has_value());
-	CHECK(lockdown->folders->empty());
-
-	// hide_everywhere walks the chain like every other preset-wide switch,
-	// first explicit value wins, and a child can turn its parent's back off.
-	const auto scoped = Parse(uR"(
-[presets.away]
-hide_everywhere = true
-
-[presets.deeper]
-inherit = "away"
-
-[presets.relaxed]
-inherit = "away"
-hide_everywhere = false
-)"_q);
-	CHECK(scoped.ok());
-	const auto away = Purple::Resolve(scoped.settings, u"away"_q);
-	const auto deeper = Purple::Resolve(scoped.settings, u"deeper"_q);
-	const auto relaxed = Purple::Resolve(scoped.settings, u"relaxed"_q);
-	CHECK(away.has_value() && away->hideEverywhere);
-	CHECK(deeper.has_value() && deeper->hideEverywhere);
-	CHECK(relaxed.has_value() && !relaxed->hideEverywhere);
-
-	// default_view_name is the one preset field that is NOT inherited: a tab
-	// label taken from a parent would put the parent's name over a child's
-	// chat list. Absent, it is the preset's own name capitalised.
 	const auto named = Parse(uR"(
 [presets.work]
 default_view_name = "Deep Work"
 
-[presets.child]
-inherit = "work"
+[presets.plain]
+list_order = []
 
 [presets."deep focus"]
-inherit = "work"
+list_order = []
 )"_q);
 	CHECK(named.ok());
-	const auto work2 = Purple::Resolve(named.settings, u"work"_q);
-	const auto child = Purple::Resolve(named.settings, u"child"_q);
+	const auto work = Purple::Resolve(named.settings, u"work"_q);
+	const auto plain = Purple::Resolve(named.settings, u"plain"_q);
 	const auto spaced = Purple::Resolve(named.settings, u"deep focus"_q);
-	CHECK(work2.has_value() && work2->viewName == u"Deep Work"_q);
-	CHECK(child.has_value() && child->viewName == u"Child"_q);
+	CHECK(work.has_value() && work->viewName == u"Deep Work"_q);
+	CHECK(plain.has_value() && plain->viewName == u"Plain"_q);
 
 	// Only the first letter, so a name with a space in it is not title-cased
 	// into something the user did not write.
@@ -1187,41 +1376,65 @@ inherit = "work"
 	CHECK(Purple::DefaultViewName(QString()).isEmpty());
 
 	// The cache carries it, so a broken reload does not also rename the tab.
-	const auto cached = Purple::FromCache(Purple::ToCache(*work2));
+	const auto cached = Purple::FromCache(Purple::ToCache(*work));
 	CHECK(cached.has_value() && cached->viewName == u"Deep Work"_q);
 
 	// A cache written by a build that did not know the key still names the
 	// tab something, rather than leaving it blank.
-	auto older = Purple::ToCache(*work2);
+	auto older = Purple::ToCache(*work);
 	older.viewName = QString();
 	const auto restored = Purple::FromCache(older);
 	CHECK(restored.has_value() && restored->viewName == u"Work"_q);
 }
 
-void TestResolveLocked() {
-	Begin("resolve locked");
+void TestFallThrough() {
+	Begin("fall-through");
 
 	const auto parsed = Parse(Presets());
 
-	// lockdown tries to hide os. The parser drops the override with a warning
-	// and the engine keeps the list's own defaults regardless.
-	CHECK(WarnsAbout(parsed, u"is locked"_q));
+	// lockdown names two lists and nothing else. Everything they do not hold is
+	// hidden AND silenced: a preset names what gets through, and saying nothing
+	// about a chat is saying no.
 	const auto lockdown = Purple::Resolve(parsed.settings, u"lockdown"_q);
 	CHECK(lockdown.has_value());
-	CHECK(lockdown->list(u"os"_q)->show);
-	CHECK(lockdown->list(u"os"_q)->notify);
-	CHECK(lockdown->list(u"emergency"_q)->show);
-	CHECK(lockdown->list(u"emergency"_q)->notify);
+	CHECK(Purple::MatchList(
+		parsed.settings,
+		*lockdown,
+		999,
+		Purple::ChatKind::Private) == nullptr);
+	const auto missed = Purple::Visible(
+		parsed.settings,
+		*lockdown,
+		999,
+		Purple::ChatKind::Private);
+	CHECK(!missed.show);
+	CHECK(!missed.notify);
+	CHECK(!missed.mentionGated);
 
-	// And that holds through the chat-level answer, in the preset that hides
-	// every catch-all there is.
-	const auto visible = Purple::Visible(
+	// What it does name still comes through, by id and by kind alike.
+	const auto kept = Purple::Visible(
 		parsed.settings,
 		*lockdown,
 		100,
 		Purple::ChatKind::Channel);
-	CHECK(visible.show);
-	CHECK(visible.notify);
+	CHECK(kept.show);
+	CHECK(kept.notify);
+
+	// An entry naming a list that does not exist claims nothing, so the chat
+	// falls through rather than being swallowed by a name that means nothing.
+	const auto ghost = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[presets.work]
+list_order = [ { list = "ghosts", show_p = true }, { list = "a", show_p = true } ]
+)"_q);
+	const auto resolved = Purple::Resolve(ghost.settings, u"work"_q);
+	CHECK_EQ(Purple::MatchList(
+		ghost.settings,
+		*resolved,
+		1,
+		Purple::ChatKind::Private)->list, u"a"_q);
 }
 
 void TestMatchPriority() {
@@ -1230,7 +1443,7 @@ void TestMatchPriority() {
 	const auto parsed = Parse(Presets());
 	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
 
-	// 300 is in both emergency and colleagues; the earlier list wins.
+	// 300 is in both emergency and colleagues; the earlier entry wins.
 	const auto matched = Purple::MatchList(
 		parsed.settings,
 		*work,
@@ -1246,42 +1459,136 @@ void TestMatchPriority() {
 		400,
 		Purple::ChatKind::Private)->list, u"colleagues"_q);
 
-	// An unlisted chat falls to the catch-all for its kind, and every kind has
-	// one - there is no unmatched case.
+	// A member id beats a kind rule further down, which is the whole point of
+	// being able to name one chat out of a sweeping rule.
+	CHECK_EQ(Purple::MatchList(
+		parsed.settings,
+		*work,
+		100,
+		Purple::ChatKind::Channel)->list, u"os"_q);
 	CHECK_EQ(Purple::MatchList(
 		parsed.settings,
 		*work,
 		999,
-		Purple::ChatKind::Private)->list, u"@private"_q);
+		Purple::ChatKind::Channel)->list, u"channels"_q);
 	CHECK_EQ(Purple::MatchList(
 		parsed.settings,
 		*work,
 		999,
-		Purple::ChatKind::Bot)->list, u"@bots"_q);
-	CHECK_EQ(Purple::MatchList(
-		parsed.settings,
-		*work,
-		999,
-		Purple::ChatKind::Group)->list, u"@groups"_q);
-	CHECK_EQ(Purple::MatchList(
-		parsed.settings,
-		*work,
-		999,
-		Purple::ChatKind::Channel)->list, u"@channels"_q);
+		Purple::ChatKind::Bot)->list, u"bots"_q);
 
-	// Reordering list_order flips which of the two wins.
+	// A list matches when either half does; both empty matches nothing.
+	const auto os = parsed.settings.list(u"os"_q);
+	CHECK(Purple::ListHolds(*os, 100, Purple::ChatKind::Bot));
+	CHECK(!Purple::ListHolds(*os, 101, Purple::ChatKind::Bot));
+	const auto bots = parsed.settings.list(u"bots"_q);
+	CHECK(Purple::ListHolds(*bots, 12345, Purple::ChatKind::Bot));
+	CHECK(!Purple::ListHolds(*bots, 12345, Purple::ChatKind::Group));
+
+	// Moving an entry flips which of the two wins - the order in the preset IS
+	// the priority, and nothing else decides it. The spread stays in the file,
+	// just below colleagues, so this is a reorder rather than a deletion.
+	const auto before =
+		u"  \"*protected\",\n"
+		"  { list = \"colleagues\", show_p = true,  notify_p = true, "
+		"groups_require_mention_p = true },\n"_q;
 	auto swapped = Presets();
+	CHECK(swapped.contains(before));
 	swapped.replace(
-		u"list_order = [\"os\", \"emergency\", \"colleagues\"]"_q,
-		u"list_order = [\"os\", \"colleagues\", \"emergency\"]"_q);
+		before,
+		u"  { list = \"colleagues\", show_p = true,  notify_p = true, "
+		"groups_require_mention_p = true },\n  \"*protected\",\n"_q);
 	const auto reparsed = Parse(swapped);
 	CHECK(reparsed.ok());
 	const auto after = Purple::Resolve(reparsed.settings, u"work"_q);
+
+	// Still seven entries: emergency moved, it did not disappear.
+	CHECK_EQ(after->lists.size(), size_t(7));
+	CHECK(after->list(u"emergency"_q) != nullptr);
 	CHECK_EQ(Purple::MatchList(
 		reparsed.settings,
 		*after,
 		300,
 		Purple::ChatKind::Private)->list, u"colleagues"_q);
+
+	// And 200, which only emergency holds, still lands there.
+	CHECK_EQ(Purple::MatchList(
+		reparsed.settings,
+		*after,
+		200,
+		Purple::ChatKind::Private)->list, u"emergency"_q);
+}
+
+void TestViewMembership() {
+	Begin("view membership");
+
+	const auto parsed = Parse(uR"(
+[lists.team]
+members = [ 10, 20 ]
+
+[lists.people]
+kinds = ["private"]
+
+[presets.work]
+list_order = [ { list = "people", show_p = true } ]
+
+[[presets.work.views]]
+name   = "Focus"
+pinned = [ 20, 10 ]
+list_order = [
+  { list = "team",   show_p = false },
+  { list = "people", show_p = true },
+]
+)"_q);
+	CHECK(parsed.ok());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+	CHECK(work.has_value());
+	CHECK_EQ(int(work->views.size()), 1);
+
+	const auto &view = work->views[0];
+	CHECK_EQ(view.name, u"Focus"_q);
+	CHECK_EQ(view.pinned, (std::vector<Purple::PeerIdValue>{ 20, 10 }));
+
+	// The first entry claims the team ids and drops them; everyone else who is
+	// a DM is on the tab. A kind nothing names is off it.
+	CHECK(!Purple::ViewHolds(
+		parsed.settings,
+		view,
+		10,
+		Purple::ChatKind::Private));
+	CHECK(Purple::ViewHolds(
+		parsed.settings,
+		view,
+		30,
+		Purple::ChatKind::Private));
+	CHECK(!Purple::ViewHolds(
+		parsed.settings,
+		view,
+		30,
+		Purple::ChatKind::Bot));
+
+	// A view selects membership; it never changes what a chat may do. Both
+	// those team ids are still shown and still notifying on the main view.
+	const auto visible = Purple::Visible(
+		parsed.settings,
+		*work,
+		10,
+		Purple::ChatKind::Private);
+	CHECK(visible.show);
+	CHECK(visible.notify);
+
+	// And the cache carries the whole thing, pins included.
+	const auto cached = Purple::FromCache(Purple::ToCache(*work));
+	CHECK(cached.has_value());
+	CHECK_EQ(int(cached->views.size()), 1);
+	CHECK_EQ(cached->views[0].name, u"Focus"_q);
+	CHECK_EQ(cached->views[0].pinned,
+		(std::vector<Purple::PeerIdValue>{ 20, 10 }));
+	CHECK(!Purple::ViewHolds(
+		parsed.settings,
+		cached->views[0],
+		10,
+		Purple::ChatKind::Private));
 }
 
 void TestMentionGate() {
@@ -1291,7 +1598,7 @@ void TestMentionGate() {
 	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
 	const auto strict = Purple::Resolve(parsed.settings, u"strict"_q);
 
-	// A visible group is gated when the preset asks for it.
+	// A visible group is gated when its entry asks for it.
 	const auto group = Purple::Visible(
 		parsed.settings,
 		*work,
@@ -1300,7 +1607,7 @@ void TestMentionGate() {
 	CHECK(group.show);
 	CHECK(group.mentionGated);
 
-	// Channels and DMs never are.
+	// Channels and DMs never are, whatever the entry says.
 	CHECK(!Purple::Visible(
 		parsed.settings,
 		*work,
@@ -1312,7 +1619,8 @@ void TestMentionGate() {
 		100,
 		Purple::ChatKind::Channel).mentionGated);
 
-	// strict exempts colleagues from the gate without exempting anything else.
+	// The gate is per entry, so strict can leave colleagues ungated while
+	// gating everything the "groups" entry sweeps up.
 	CHECK(!Purple::Visible(
 		parsed.settings,
 		*strict,
@@ -1324,7 +1632,7 @@ void TestMentionGate() {
 		999,
 		Purple::ChatKind::Group).mentionGated);
 
-	// A hidden chat is hidden whether or not anyone mentioned us in it.
+	// A chat nothing claims is hidden whether or not anyone mentioned us in it.
 	const auto lockdown = Purple::Resolve(parsed.settings, u"lockdown"_q);
 	const auto hidden = Purple::Visible(
 		parsed.settings,
@@ -1373,7 +1681,10 @@ void TestPeek() {
 	// list, not two minutes of notifications for chats already on the screen.
 	work.peeking = true;
 	CHECK(channel().show);
-	CHECK(channel().notify);
+
+	// Revealed and still silent, which is the rule stated as plainly as it can
+	// be: a peek changes what you can see and nothing about what may interrupt.
+	CHECK(!channel().notify);
 	CHECK(group().show);
 	CHECK(!group().mentionGated);
 	CHECK(priv().show);
@@ -1384,7 +1695,7 @@ void TestPeek() {
 	const auto restored = Purple::FromCache(Purple::ToCache(work));
 	CHECK(restored.has_value());
 	CHECK(!restored->peeking);
-	CHECK(!restored->list(u"@channels"_q)->show);
+	CHECK(!restored->list(u"channels"_q)->show);
 
 	// The deadline is what expires a peek that outlived the app.
 	auto state = Purple::State();
@@ -1499,31 +1810,31 @@ void TestResolvedCache() {
 	const auto restored = Purple::FromCache(reloaded.resolvedCache);
 	CHECK(restored.has_value());
 	CHECK_EQ(restored->preset, u"work"_q);
-	CHECK(restored->list(u"@private"_q)->show);
-	CHECK(!restored->list(u"@private"_q)->notify);
-	CHECK(!restored->list(u"@channels"_q)->show);
-	CHECK(restored->folders.has_value());
-	CHECK_EQ(restored->folders->size(), size_t(1));
+	CHECK(restored->list(u"private"_q)->show);
+	CHECK(!restored->list(u"private"_q)->notify);
+	CHECK(!restored->list(u"channels"_q)->show);
+	CHECK(restored->list(u"colleagues"_q)->groupsRequireMention);
+	CHECK_EQ(int(restored->folders.size()), 1);
 
-	// `filtered = false' survives the cache, since a broken settings.toml must
-	// not quietly start hiding the chats a folder was exempting.
+	// include_in_main_view_p survives the cache, since a broken settings.toml
+	// must not quietly start hiding the chats a folder was pulling in.
 	auto folders = std::vector<Purple::PresetFolder>{
 		{ .name = u"Work"_q },
-		{ .name = u"Family"_q, .filtered = false },
-		{ .name = u"Loud"_q, .filtered = true },
+		{ .name = u"Family"_q, .includeInMainView = true },
+		{ .name = u"Loud"_q, .includeInMainView = false },
 	};
 	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(1));
 	CHECK_EQ(Purple::ExemptFolderNames(folders).front(), u"Family"_q);
-	CHECK(Purple::ExemptFolderNames(std::nullopt).empty());
+	CHECK(Purple::ExemptFolderNames({}).empty());
 
-	// notify and filtered are independent: a folder can be silenced without
-	// being exempt, and exempt without being silenced.
+	// notify and include_in_main_view are independent: a folder can be silenced
+	// without being pulled in, and pulled in without being silenced.
 	folders.push_back({ .name = u"Noise"_q, .notify = false });
 	folders.push_back({ .name = u"Loud2"_q, .notify = true });
 	CHECK_EQ(Purple::SilencedFolderNames(folders).size(), size_t(1));
 	CHECK_EQ(Purple::SilencedFolderNames(folders).front(), u"Noise"_q);
 	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(1));
-	CHECK(Purple::SilencedFolderNames(std::nullopt).empty());
+	CHECK(Purple::SilencedFolderNames({}).empty());
 
 	auto withFolders = *work;
 	withFolders.folders = folders;
@@ -1534,7 +1845,16 @@ void TestResolvedCache() {
 	CHECK_EQ(cachedFolders->exemptFolders.front(), u"Family"_q);
 	CHECK_EQ(cachedFolders->silencedFolders.size(), size_t(1));
 	CHECK_EQ(cachedFolders->silencedFolders.front(), u"Noise"_q);
-	CHECK_EQ(cachedFolders->folders->size(), size_t(5));
+	CHECK_EQ(int(cachedFolders->folders.size()), 5);
+
+	// The marker survives too, so a broken reload does not take the whole
+	// folder strip away along with everything else it cannot read.
+	auto everyFolder = *work;
+	everyFolder.folders = { { .name = Purple::AllFoldersName() } };
+	const auto cachedAll = Purple::FromCache(Purple::ToCache(everyFolder));
+	CHECK(cachedAll.has_value());
+	CHECK_EQ(int(cachedAll->folders.size()), 1);
+	CHECK(Purple::IsAllFolders(cachedAll->folders[0]));
 
 	// Normal caches nothing - there is no resolution to remember.
 	const auto normal = Purple::Resolve(parsed.settings, u"normal"_q);
@@ -1545,11 +1865,13 @@ void TestResolvedCache() {
 } // namespace
 
 int main() {
-	TestCatchAlls();
-	TestListOrder();
+	TestLists();
+	TestKinds();
 	TestPresets();
 	TestPresetPolicies();
-	TestOverridePolicies();
+	TestSpread();
+	TestFolderSelection();
+	TestViews();
 	TestMembers();
 	TestScheduleAndFocus();
 	TestScalarParsers();
@@ -1567,10 +1889,11 @@ int main() {
 	TestStateRoundTrip();
 	TestStateDefaults();
 	TestStateQuoting();
-	TestResolveDefault();
-	TestResolveInheritance();
-	TestResolveLocked();
+	TestResolveBasics();
+	TestResolveViewName();
+	TestFallThrough();
 	TestMatchPriority();
+	TestViewMembership();
 	TestMentionGate();
 	TestPeek();
 	TestScheduleTarget();

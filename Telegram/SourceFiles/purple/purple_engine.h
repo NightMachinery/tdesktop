@@ -12,44 +12,36 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class QDateTime;
 
-// Turns a preset and the lists it inherits from into a flat table of "for this
-// list, show and notify are these". Resolution happens once per config or
-// preset change; nothing here may be called per repaint.
+// Turns a preset into a flat table of "for this list, show and notify are
+// these", and answers what that means for one chat. Resolution happens once per
+// config or preset change; nothing here may be called per repaint.
 //
 // Kept free of tdesktop dependencies for the same reason as the parser: every
 // policy in the spec is a rule about data, and rules about data are far easier
 // to prove outside a running app. See docs/purple/config.md.
 namespace Purple {
 
-// What a chat is, for the catch-all lists. The engine never sees a PeerData.
-enum class ChatKind : uchar {
-	Private,
-	Group,
-	Channel,
-	Bot,
-};
-
-[[nodiscard]] ListKind CatchAllFor(ChatKind kind);
-
-// The folders a preset selection exempts from hiding - the ones that said
-// `filtered = false'. Saying nothing leaves a folder filtered, like every
-// folder the preset does not name at all.
+// The folders a preset selection pulls into its main view - the ones that said
+// `include_in_main_view_p = true'. Saying nothing leaves a folder's chats to
+// whatever the lists decided, like every folder the preset does not name.
 [[nodiscard]] std::vector<QString> ExemptFolderNames(
-	const std::optional<std::vector<PresetFolder>> &folders);
+	const std::vector<PresetFolder> &folders);
 
-// The folders a preset silences - the ones that said `notify = false'.
+// The folders a preset silences - the ones that said `notify_p = false'.
 [[nodiscard]] std::vector<QString> SilencedFolderNames(
-	const std::optional<std::vector<PresetFolder>> &folders);
+	const std::vector<PresetFolder> &folders);
 
+// One step of a resolved order, with every tri-state collapsed to the value
+// that will actually be applied.
 struct EffectiveList {
 	QString list;
 	bool show = true;
 	bool notify = true;
 
-	// Only meaningful for lists that can hold groups; resolved per list so a
-	// preset can exempt one list from the mention gate without exempting all.
-	// Off unless a preset asks for it: a preset that only hides bots must not
-	// also empty the chat list of every group nobody has mentioned you in.
+	// Only meaningful for lists that can hold groups, and resolved per entry so
+	// a preset can gate one list without gating all of them. Off unless the
+	// entry asks: a preset that only hides bots must not also empty the chat
+	// list of every group nobody has mentioned you in.
 	bool groupsRequireMention = false;
 
 	friend bool operator==(
@@ -57,39 +49,49 @@ struct EffectiveList {
 		const EffectiveList &) = default;
 };
 
+// An extra tab the preset invents. Its order picks membership only - a chat an
+// entry claims with `show' false is off this tab - because silence belongs to
+// the chat rather than to the tab it is being looked at on.
+struct ResolvedView {
+	QString name;
+	std::vector<PeerIdValue> pinned;
+	std::vector<EffectiveList> lists;
+
+	friend bool operator==(const ResolvedView &, const ResolvedView &) = default;
+};
+
 struct Resolved {
 	QString preset;
 
-	// What to call the preset's tab, resolved from the preset's own
-	// `default_view_name' or from its name. Never inherited, so a chain of
-	// presets does not end up with three tabs sharing one label.
+	// What to call the preset's main tab, from its own `default_view_name' or
+	// from its name. See DefaultViewName().
 	QString viewName;
 
 	// Normal is not "a preset with everything on" but a bypass: the engine is
 	// skipped entirely, so it cannot drift as preset features are added.
 	bool normal = false;
 
-	// Priority order, first match wins.
+	// Priority order, first match wins. A chat no entry claims is hidden and
+	// silenced - a preset names what gets through, and saying nothing about a
+	// chat is saying no.
 	std::vector<EffectiveList> lists;
 
-	// Nothing means the preset says nothing about folders, so every folder
-	// shows. An empty vector means it named none, which is a deliberate "hide
-	// the folder strip" and not the same thing at all.
-	std::optional<std::vector<PresetFolder>> folders;
+	// The real folders the preset shows, in strip order, possibly including the
+	// "*ALL" marker. Empty means no folder tabs at all.
+	std::vector<PresetFolder> folders;
 
-	// Names from `folders' that said `filtered = false', lifted out so the
-	// common case - nobody asked - is an empty vector to test rather than a
-	// walk of the folder list per hidden chat.
+	// Names from `folders' that asked to be pulled into the main view, lifted
+	// out so the common case - nobody asked - is an empty vector to test rather
+	// than a walk of the folder list per hidden chat.
 	std::vector<QString> exemptFolders;
 
-	// Names from `folders' that said `notify = false'. Same reason as above:
+	// Names from `folders' that said `notify_p = false'. Same reason as above:
 	// the common case is nobody asked, and that has to be one empty vector to
 	// test rather than a folder walk per mute query.
 	std::vector<QString> silencedFolders;
 
-	// The preset-wide default every list starts from. Off when no preset in the
-	// chain says otherwise - see EffectiveList.
-	bool groupsRequireMention = false;
+	// The extra tabs, in the order the file gave them, after the main view.
+	std::vector<ResolvedView> views;
 
 	// Whether hiding means "gone from the app" rather than "absent from this
 	// preset's view of the chat list". Off by default: a hidden chat stays
@@ -111,17 +113,23 @@ struct Resolved {
 	friend bool operator==(const Resolved &, const Resolved &) = default;
 };
 
-// Nothing if the preset does not exist or its inheritance chain is broken. The
-// caller is expected to fall back to the last good resolution rather than to
-// defaults - defaulting would quietly unhide every chat the user hid.
+// Nothing if the preset does not exist. The caller is expected to fall back to
+// the last good resolution rather than to defaults - defaulting would quietly
+// unhide every chat the user hid.
 [[nodiscard]] std::optional<Resolved> Resolve(
 	const Settings &settings,
 	const QString &preset);
 
-// The list a chat belongs to under this resolution: the first in priority order
-// holding it, or the catch-all for its kind. Never null for a resolution built
-// from settings that went through ParseSettings, which guarantees the four
-// catch-alls exist.
+// Whether a list claims this chat: its id is a member, or its kind is one the
+// list matches.
+[[nodiscard]] bool ListHolds(
+	const List &list,
+	PeerIdValue id,
+	ChatKind kind);
+
+// The entry that decides a chat under this resolution: the first in the
+// preset's order whose list claims it. Null means no entry claimed it, which is
+// the fall-through - hidden and silenced.
 [[nodiscard]] const EffectiveList *MatchList(
 	const Settings &settings,
 	const Resolved &resolved,
@@ -140,6 +148,14 @@ struct Visibility {
 [[nodiscard]] Visibility Visible(
 	const Settings &settings,
 	const Resolved &resolved,
+	PeerIdValue id,
+	ChatKind kind);
+
+// Whether one of the preset's extra views shows this chat. Views select
+// membership; they never change what a chat is allowed to do.
+[[nodiscard]] bool ViewHolds(
+	const Settings &settings,
+	const ResolvedView &view,
 	PeerIdValue id,
 	ChatKind kind);
 

@@ -448,21 +448,38 @@ void ChatFilters::purpleRefreshShown() {
 	// folder UI disappears by itself, which is what "folders = []" asks for.
 	result.push_back(purpleViewFilter());
 
-	if (!Purple::FoldersRestricted()) {
-		// The preset said nothing about folders, so every real one still
-		// shows - only the All chats tab has been replaced.
-		for (const auto &filter : _list) {
-			if (filter.id()) {
-				result.push_back(filter);
-			}
-		}
-		_purpleShown = std::move(result);
-		return;
-	}
-
 	const auto &shown = Purple::ShownFolders();
 	auto missing = QStringList();
-	for (const auto &wanted : *shown) {
+	for (const auto &wanted : shown) {
+		if (Purple::IsAllFolders(wanted)) {
+			// Every folder the selection does not name elsewhere, in the
+			// account's own order, at this position. The parser cannot expand
+			// it - it has never heard of a Telegram folder - so it arrives here
+			// as a marker and is expanded in place, which is what keeps its
+			// position in the strip meaningful.
+			for (const auto &filter : _list) {
+				if (!filter.id()) {
+					continue;
+				}
+				const auto named = ranges::any_of(shown, [&](
+						const Purple::PresetFolder &entry) {
+					return !Purple::IsAllFolders(entry)
+						&& !filter.title().text.text.compare(
+							entry.name,
+							Qt::CaseInsensitive);
+				});
+				if (!named
+					&& !ranges::contains(result, filter.id(), &ChatFilter::id)) {
+					result.push_back(filter);
+				}
+			}
+			continue;
+		} else if (!wanted.show.value_or(true)) {
+			// Named, but deliberately not on the strip. Worth being able to say
+			// separately from leaving it out: a folder can be silenced or fed
+			// into the main view without its tab being there.
+			continue;
+		}
 		const auto i = ranges::find_if(_list, [&](const ChatFilter &filter) {
 			return filter.id()
 				&& !filter.title().text.text.compare(

@@ -30,7 +30,7 @@ the repository in `../tdesktop-libs/api_credentials.sh`, as
 to it, both surgical:
 
 - the Premium toggle in Settings, which rewrites the single value token of
-  `[premium] enabled`,
+  `[premium] enabled_p`,
 - adding and removing list members, which edits one line of a `members` array.
   That is the `Work Mode` submenu on a chat's context menu - see
   [work_mode.md](work_mode.md).
@@ -69,39 +69,69 @@ flash an error banner every time you hit save.
 The file is hand-written, so nearly everything recoverable is a warning that
 leaves usable settings behind rather than a hard failure:
 
-- A missing catch-all list is synthesized. All four of `@private`, `@groups`,
-  `@channels` and `@bots` always exist, which is what lets the rest of the
-  engine skip an "unlisted chat" case entirely.
-- `list_order` is reconciled: names with no list are dropped, lists it forgot are
-  appended at the bottom, and the catch-alls are forced below your own lists
-  whatever it says. Reordering the catch-alls among themselves is respected.
-- An override of a list that does not exist, or of a locked one, is dropped.
-- A preset named `default` or `normal` is refused; those names are reserved.
-- A preset inheriting from something that does not exist falls back to
-  `default`.
+- An entry naming a list with no `[lists.x]` table claims nothing, and says so.
+  It looks identical to an entry that is working, which is exactly why it warns.
+- A `"*name"` reference to a set that does not exist is dropped. So is one that
+  refers back into itself, however many hops it takes.
+- A name mentioned twice in the same directive keeps its first mention. That is
+  forced for a `list_order`, where order *is* capture, and folders follow the
+  same rule so there is one to remember rather than two. The duplicate is
+  reported unless the earlier mention came from a spread - overriding one entry
+  and then splicing in the defaults is the idiom spreads exist for.
+- A preset named `normal` is refused; that name is the bypass.
+- A preset that names no list at all is legal and hides everything, which is
+  said out loud rather than left to be discovered.
 - A schedule rule or focus-sync action naming a preset that does not exist is
-  skipped.
+  skipped. A *disabled* rule is left alone, so the example in the starter file
+  does not complain on every start.
+- Keys the old model used - `show`, `notify` and `locked` on a list, `inherit`
+  and `overrides` on a preset, `filtered` on a folder, `enabled` anywhere, a
+  top-level `list_order` - are reported by name, with what to write instead.
+  Silence there would let a file that is doing nothing look like one that works.
 - Duplicate member ids are deduplicated on read, keeping the order you wrote.
+- A list whose name starts with `*` is refused: nobody reading the file could
+  tell it from a set reference.
 
-Only two things are fatal, because neither leaves anything meaningful to run on:
-a TOML syntax error, and a loop in preset inheritance. In both cases the app
-keeps the last settings that worked, logs the line and column, and refuses to
-write to the file at all - you may be halfway through an edit, and a blind write
-would leave you with a mess to untangle on top of whatever you were already
-fixing.
+Only one thing is fatal, because it leaves nothing meaningful to run on: a TOML
+syntax error. The app keeps the last settings that worked, logs the line and
+column, and refuses to write to the file at all - you may be halfway through an
+edit, and a blind write would leave you with a mess to untangle on top of
+whatever you were already fixing.
 
 Everything the app could not make sense of is available to the UI as a warning
 list, for the banner described in the Work Mode spec.
 
 ## Schema
 
-`[premium] enabled` controls the client-side Premium unlocks; see
+`[premium] enabled_p` controls the client-side Premium unlocks; see
 [premium.md](premium.md) for what that covers and what it deliberately does not.
 
-The Work Mode half - lists, presets, folders, schedule, focus sync and peek - is
-documented by the starter file the app writes on first run, which carries a
-commented example of each section. The parser reads the whole schema today;
-Every section is consumed now, `[focus_sync]` included.
+Every boolean key in this file ends in `_p`. That is a naming convention, not a
+type distinction - it just means the answer is yes or no, and it makes a flag
+recognisable as one without looking it up.
+
+The Work Mode half is two ideas. A **list** says who is in it: `members` by peer
+id, `kinds` by chat type (`private`, `groups`, `channels`, `bots`), or both. A
+**preset** names the lists it wants in a `list_order`, each entry carrying
+`show_p`, `notify_p` and `groups_require_mention_p`. Order is priority and
+capture: the first entry whose list holds a chat decides it, and nothing further
+down sees that chat. A chat no entry claims is hidden and silenced.
+
+`folders` names the account's real folders, each with `show_p` (its tab is in
+the strip), `notify_p` (false silences its chats) and `include_in_main_view_p`
+(its chats join the preset's own view whatever the lists decided). A preset with
+no `folders` key shows no folder tabs; `"*ALL"` is every folder you have.
+
+A bare `"*name"` string inside either array splices in `[list_sets.name]` or
+`[folder_sets.name]`, the way Python spreads a list. That is what replaces
+preset inheritance: reuse without a chain to walk when you are trying to read
+what a preset actually does.
+
+`[[presets.x.views]]` adds a tab of its own, with a `name`, an optional `pinned`
+order and a `list_order` that selects membership only.
+
+The rest - `[schedule]`, `[focus_sync]`, `[peek]` - is documented by the starter
+file the app writes on first run, which carries a commented example of each.
 
 `[peek] hotkey` is read as Qt portable text, so on macOS `Ctrl` means Command
 and `Meta` means the physical Control key. It is deliberately not part of

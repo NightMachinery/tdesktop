@@ -76,20 +76,25 @@ PeekChange TogglePeek();
 // has to say which one an Unmute would actually lift.
 [[nodiscard]] bool SilencedByPreset(not_null<const PeerData*> peer);
 
-// The chat folders the active preset shows, in the order it named them.
-// Nothing means it said nothing about folders, so all of them show; an empty
-// vector means it named none, which hides the folder strip outright.
-[[nodiscard]] const std::optional<std::vector<PresetFolder>> &ShownFolders();
+// The chat folders the active preset shows, in the order it named them,
+// possibly including the "*ALL" marker that stands for every folder the entry
+// did not name. Empty means no folder tabs at all, which is what a preset that
+// says nothing about folders asks for.
+[[nodiscard]] const std::vector<PresetFolder> &ShownFolders();
 
 // Whether anything is restricting the folder list at all. Guards both the
 // display of the folder strip and, more importantly, saving its order.
+//
+// False only for a preset whose whole folder selection is "*ALL" - every
+// folder, in the account's own order, with default flags - because that is the
+// one shape where a strip index still means the folder it meant before.
 [[nodiscard]] bool FoldersRestricted();
 
-// Folders the preset marked `filtered = false': their chats are exempt from
-// its hiding. Empty for every preset that does not ask, which is what keeps
-// the folder lookup in History::purpleHiddenFromChatList() free - it is only
-// reached for a chat that would otherwise be hidden, and only when this is
-// non-empty.
+// Folders the preset marked `include_in_main_view_p = true': their chats join
+// the main view whatever the lists decided. Empty for every preset that does
+// not ask, which is what keeps the folder lookup in
+// History::purpleHiddenFromView() free - it is only reached for a chat that
+// would otherwise be hidden, and only when this is non-empty.
 [[nodiscard]] const std::vector<QString> &ExemptFolders();
 
 // Folders the preset marked `notify = false': their chats are silenced. Empty

@@ -31,11 +31,18 @@ struct ResolvedList {
 	QString list;
 	bool show = true;
 	bool notify = true;
+	bool groupsRequireMention = false;
+};
+
+struct ResolvedCacheView {
+	QString name;
+	std::vector<PeerIdValue> pinned;
+	std::vector<ResolvedList> lists;
 };
 
 // The last resolution that worked. When a reload leaves the active preset
-// unresolvable - deleted, or its inheritance chain broken - the engine keeps
-// running on this rather than falling back to showing everything. See spec 8.5.
+// unresolvable - deleted or renamed mid-edit - the engine keeps running on this
+// rather than falling back to showing everything. See spec 8.5.
 struct ResolvedCache {
 	QString preset;
 
@@ -45,13 +52,15 @@ struct ResolvedCache {
 	QString viewName;
 
 	std::vector<ResolvedList> lists;
-	bool groupsRequireMention = false;
 	bool hideEverywhere = false;
 
-	// Nothing and an empty vector mean different things - see Resolved::folders
-	// - so the key is written only when the preset said something, and its
-	// absence round-trips as "said nothing".
-	std::optional<std::vector<PresetFolder>> folders;
+	// Empty means no folder tabs, which is what a preset naming no folders
+	// asks for - there is no "said nothing" case left to distinguish.
+	std::vector<PresetFolder> folders;
+
+	// Cached too, so a settings.toml broken mid-edit does not take the extra
+	// tabs away along with everything else it cannot read.
+	std::vector<ResolvedCacheView> views;
 
 	[[nodiscard]] bool valid() const {
 		return !preset.isEmpty();
