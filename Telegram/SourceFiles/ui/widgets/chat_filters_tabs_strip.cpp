@@ -81,14 +81,15 @@ void ShowMenu(
 	const auto addAction = Ui::Menu::CreateAddActionCallback(
 		state->menu.get());
 
-	// Purple: the preset view is not a folder, so there is nothing to edit and
+	// Purple: a preset view is not a folder, so there is nothing to edit and
 	// nothing to delete - but marking it read is exactly as meaningful as it
-	// is for All chats, and it is the only tab that offers it while a preset
+	// is for All chats, and these are the only tabs that offer it while a preset
 	// is running.
 	if (Data::IsPurpleView(id)) {
+		const auto index = Data::PurpleViewIndex(id);
 		Window::MenuAddMarkAsReadChatListAction(
 			controller,
-			[=] { return session->data().purpleViewList(); },
+			[=] { return session->data().purpleViewList(index); },
 			addAction);
 		addAction(
 			u"Work Mode"_q,

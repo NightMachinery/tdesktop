@@ -25,11 +25,12 @@ namespace Data {
 
 class Session;
 
-// Purple: the id of the chat list a work preset shows in place of All chats.
-// It is a filter like any other as far as the chat list machinery is
-// concerned, which is the whole point - the main list stays complete, so pins,
-// unread totals and "in a filter implies in the main list" all keep working,
-// and the preset only decides what this one view contains.
+// Purple: the id of the chat list a work preset shows in place of All chats,
+// and the first of a small reserved run - the preset's main view, then one id
+// per extra view it defines. They are filters like any other as far as the chat
+// list machinery is concerned, which is the whole point - the main list stays
+// complete, so pins, unread totals and "in a filter implies in the main list"
+// all keep working, and a preset only decides what its views contain.
 //
 // The value is "PURP" as ASCII, which no server will ever hand out - real
 // folder ids are small - and is recognisable on sight in a log line.
@@ -37,13 +38,31 @@ class Session;
 // Positive on purpose, even though "not a real folder" would read better as a
 // negative: the dialogs code already spends `id < 0' on its own sentinels (the
 // side bar's Edit button, FiltersMenu's cleared-drag marker), and a negative id
-// would silently inherit all of that. The places that must not treat the view
-// as an editable folder test IsPurpleView() instead, where the intent is
-// written down. See docs/purple/work_mode.md.
+// would silently inherit all of that. The places that must not treat a view as
+// an editable folder test IsPurpleView() instead, where the intent is written
+// down. See docs/purple/work_mode.md.
 inline constexpr auto kPurpleViewFilterId = FilterId(0x50555250);
 
+// How many ids the run reserves. A preset asking for more tabs than this is
+// asking for a strip nobody can read, and the cap is what keeps the test below
+// a range check rather than an open-ended one that could collide with a real
+// folder id if the server ever grew them.
+inline constexpr auto kPurpleViewLimit = 16;
+
 [[nodiscard]] inline bool IsPurpleView(FilterId id) {
-	return (id == kPurpleViewFilterId);
+	return (id >= kPurpleViewFilterId)
+		&& (id < kPurpleViewFilterId + kPurpleViewLimit);
+}
+
+// Which view an id names: 0 is the preset's main view - the one that stands
+// where All chats stands and carries the badge - and n > 0 its nth extra one.
+// Only meaningful for an id IsPurpleView() accepts.
+[[nodiscard]] inline int PurpleViewIndex(FilterId id) {
+	return int(id - kPurpleViewFilterId);
+}
+
+[[nodiscard]] inline FilterId PurpleViewFilterId(int index) {
+	return kPurpleViewFilterId + index;
 }
 
 struct ChatFilterTitle {
@@ -199,6 +218,13 @@ public:
 	// See docs/purple/work_mode.md.
 	[[nodiscard]] const std::vector<ChatFilter> &purpleShownList() const;
 
+	// Purple: how many of the active preset's views are live - its main one plus
+	// as many extra ones as the reserved id run has room for. Zero under Normal,
+	// which is what every loop over the views tests first. The cap is applied
+	// here rather than in the parser, because the parser knows nothing about
+	// filter ids and a config file is not the place to learn about them.
+	[[nodiscard]] int purpleViewCount() const;
+
 	[[nodiscard]] rpl::producer<> changed() const;
 	[[nodiscard]] rpl::producer<FilterId> isChatlistChanged() const;
 	[[nodiscard]] rpl::producer<TagColorChanged> tagColorChanged() const;
@@ -213,6 +239,12 @@ public:
 	void refreshHistory(not_null<History*> history);
 
 	[[nodiscard]] not_null<Dialogs::MainList*> chatsList(FilterId filterId);
+
+	// The same list, but without creating one that is not there. For sweeping a
+	// range of ids clean: chatsList() would build the very lists the sweep is
+	// checking are empty.
+	[[nodiscard]] Dialogs::MainList *chatsListLoaded(FilterId filterId);
+
 	void clear();
 
 	const ChatFilter &applyUpdatedPinned(
@@ -272,12 +304,13 @@ private:
 	void loadMoreChatsList(FilterId id);
 
 	void purpleRefreshShown();
-	[[nodiscard]] ChatFilter purpleViewFilter() const;
+	[[nodiscard]] ChatFilter purpleViewFilter(int index) const;
 
 	const not_null<Session*> _owner;
 
 	std::vector<ChatFilter> _list;
 	std::vector<ChatFilter> _purpleShown;
+	int _purpleViewCount = 0;
 	rpl::lifetime _purpleLifetime;
 	base::flat_map<FilterId, std::unique_ptr<Dialogs::MainList>> _chatsLists;
 	rpl::event_stream<> _listChanged;

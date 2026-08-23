@@ -211,6 +211,29 @@ QString ViewName() {
 		: resolved.viewName;
 }
 
+const std::vector<ResolvedView> &ExtraViews() {
+	static const auto kNone = std::vector<ResolvedView>();
+	const auto &resolved = Instance().resolved();
+	return resolved.normal ? kNone : resolved.views;
+}
+
+bool ExtraViewHolds(int index, not_null<const PeerData*> peer) {
+	const auto &views = ExtraViews();
+	if (index < 0 || index >= int(views.size())) {
+		return false;
+	} else if (peer->isSelf()) {
+		// Saved Messages is exempt from hiding, but that is not the same as
+		// belonging on every tab: an extra view holds what it names, and nothing
+		// about it says the user wants their own notes on it.
+		return false;
+	}
+	return ViewHolds(
+		ActiveSettings(),
+		views[index],
+		IdOf(peer),
+		KindOf(peer));
+}
+
 bool Filtering() {
 	return !Instance().resolved().normal;
 }
@@ -290,7 +313,16 @@ const std::vector<QString> &SilencedFolders() {
 
 bool FoldersRestricted() {
 	const auto &resolved = Instance().resolved();
-	if (resolved.normal || resolved.peeking) {
+	if (resolved.normal) {
+		return false;
+	} else if (!resolved.views.empty()) {
+		// Extra views sit on the strip too, so a strip index is no longer the
+		// real list's index shifted by one - the preset's main view standing in
+		// for All chats is what made that arithmetic work. Checked before the
+		// peek below, because a peek reveals folders and leaves the extra views
+		// exactly where they were.
+		return true;
+	} else if (resolved.peeking) {
 		return false;
 	}
 	// "*ALL" on its own is every folder in the account's own order, so nothing

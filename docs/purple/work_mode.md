@@ -168,6 +168,16 @@ order are right for the same reason every folder's are. Membership is
 maintained in `Session::refreshChatListEntry()`, next to the loop that does the
 same for real folders.
 
+That id is the first of a run of `Data::kPurpleViewLimit` reserved ids - the
+preset's main view, then one per extra view it declares. `Data::IsPurpleView()`
+is a range test and `Data::PurpleViewIndex()` says which one, so the twenty-odd
+places that only need "is this a tab the server never sent" stay a boolean and
+the handful that need the identity ask for it. The cap lives here rather than in
+the parser because it is a fact about filter ids, which a config file has no
+business knowing about; a preset naming more views than that gets the first
+fifteen and a log line saying so, because silently drawing fifteen would read as
+"the rest are empty".
+
 Folders belong to the view exactly as they belong to All chats - the Archive
 row is in it. Archived chats are not, and neither are forum topics or
 Saved Messages sublists, which live in lists of their own.
@@ -223,8 +233,11 @@ A preset may invent more tabs than its own:
     pinned = [ 1234567890 ]
     list_order = [ { list = "essentials", show_p = true } ]
 
-**Parsed and resolved, not yet drawn.** The config half is done - it survives
-the `resolved_cache` too - and the chat-list half is the next milestone.
+Each becomes a tab of its own on the strip, after the preset's main view and
+before any folder - a preset's tabs belong next to each other rather than
+scattered through the account's folders. Each carries its own unread badge, for
+the same reason the main view does: it is a `Dialogs::MainList` like any other,
+so its total is accumulated by the same `addEntry`/`removeEntry` path.
 
 A view's `list_order` selects membership and nothing else. `show_p = false` on
 an entry drops the chats that entry claims from this tab; falling through drops
@@ -239,10 +252,28 @@ tdesktop's "in a filter implies in the main list" invariant makes the pairing an
 assertion failure rather than a preference. The parser refuses it with a warning
 rather than leaving it to crash.
 
-Unlike the main view, an extra view is meant to own its pinned order - it is not
-standing in for All chats, so there is no main-list order for it to copy. That
-order lives in `settings.toml`, and pinning from the UI will splice it back the
-same way list membership is spliced today.
+Three things an extra view deliberately does not do:
+
+- **It holds no folders.** The Archive row is on the main view, as it is on All
+  chats; an extra view's membership comes from lists of peers, and there is
+  nothing a list could say that would put the archive on one. Its badge is
+  counted accordingly: `Data::UnreadStateValue()` takes the archive's own total
+  out of the main view, which would otherwise count it twice, and must not do
+  that for an extra view - subtracting a total that was never added drove the
+  first working build's tabs to `-334` and `-314`.
+- **A peek does not touch it.** Peek suspends *hiding*, and an extra view hides
+  nothing - it is a selection asked for by name, and filling it with every chat
+  for two minutes would only take it away.
+- **Saved Messages is not on it either.** Saved Messages is exempt from a
+  preset's hiding, but that is not the same as belonging on every tab.
+
+**Its pinned order is not implemented yet.** Unlike the main view, an extra view
+is meant to own that order - it is not standing in for All chats, so there is no
+main-list order for it to copy - and until it does, the `pinned` array is parsed
+and cached but nothing reads it. In the meantime an extra view shows its chats
+by date, and "Pin" from a context menu inside one pins in the main chat list
+without appearing to do anything on the tab. That order will live in
+`settings.toml`, spliced back the same way list membership is spliced today.
 
 ### hide_everywhere
 
@@ -490,6 +521,13 @@ shown list is the real one with the view standing exactly where All chats stood,
 so every index still means the folder it did before. Any other shape - a subset,
 a chosen order, a folder carrying flags - means a strip index no longer matches
 the server's, and `saveOrder()` refuses.
+
+Extra views break that alignment too, whatever the folder selection says: a
+preset's own tabs stand between the main view and the first folder, so the
+one-for-one swap of All chats for the view is no longer what the strip is. A
+preset declaring any view is treated as restricting folders, and a peek does not
+lift it - a peek reveals folders and leaves the extra views exactly where they
+were, so the arithmetic stays wrong.
 
 To reorder folders while a preset restricts them, switch to `normal` first.
 
@@ -952,8 +990,9 @@ is the one state this must not be able to reach.
 
 ## Not yet implemented
 
-- A preset's extra views. `[[presets.x.views]]` parses, resolves and survives
-  the cache; nothing draws them yet. See "Extra views" above for what they mean.
+- A pinned order of a preset's extra view. `[[presets.x.views]] pinned` parses,
+  resolves and survives the cache; nothing reads it, so an extra view sorts by
+  date and pinning inside one acts on the main chat list. See "Extra views".
 - A chat entering a silenced rule-based folder does not refresh the cached
   mute immediately, as above.
 - No hotkey for switching presets. `Purple::ListenPeekHotkey()` generalises to

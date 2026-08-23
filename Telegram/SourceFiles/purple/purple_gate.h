@@ -26,9 +26,22 @@ namespace Purple {
 [[nodiscard]] const Resolved &ActiveResolved();
 [[nodiscard]] rpl::producer<> ActiveChanges();
 
-// What to write on the preset's tab: its `default_view_name', or its name with
-// the first letter capitalised. Never empty while a preset is running.
+// What to write on the preset's main tab: its `default_view_name', or its name
+// with the first letter capitalised. Never empty while a preset is running.
 [[nodiscard]] QString ViewName();
+
+// The extra tabs the active preset invents, in the order the file gave them and
+// after its main view. Empty for every preset that does not ask, which is what
+// keeps the whole feature out of the way of a preset that only hides chats.
+[[nodiscard]] const std::vector<ResolvedView> &ExtraViews();
+
+// Whether extra view `index' shows this chat. Membership only: an extra view
+// never changes what a chat may do, so there is no notify half to ask about.
+//
+// Unaffected by peek, unlike the main view. A peek suspends *hiding*, and an
+// extra view hides nothing - it is a selection the user asked for by name, and
+// filling it with every chat during a peek would only take it away.
+[[nodiscard]] bool ExtraViewHolds(int index, not_null<const PeerData*> peer);
 
 // False under Normal, which is the whole point: every gate in the app tests
 // this first, so an unconfigured fork pays one bool load and behaves exactly

@@ -760,12 +760,13 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 		i->second.get(),
 		st::popupMenuWithIcons);
 	const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
-	// Purple: the preset view is not a folder - nothing to edit, nothing to
+	// Purple: a preset view is not a folder - nothing to edit, nothing to
 	// delete. Marking it read means what it means for All chats.
 	if (Data::IsPurpleView(id)) {
+		const auto index = Data::PurpleViewIndex(id);
 		Window::MenuAddMarkAsReadChatListAction(
 			_session,
-			[=] { return _session->session().data().purpleViewList(); },
+			[=] { return _session->session().data().purpleViewList(index); },
 			addAction);
 		addAction(
 			u"Work Mode"_q,

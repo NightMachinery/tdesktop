@@ -922,10 +922,12 @@ public:
 	[[nodiscard]] not_null<Dialogs::IndexedList*> contactsList();
 	[[nodiscard]] not_null<Dialogs::IndexedList*> contactsNoChatsList();
 
-	// Purple: the chat list a work preset shows in place of All chats. Holds
-	// whatever the main list holds, minus the chats the preset hides, and is
-	// empty whenever no preset is running. See kPurpleViewFilterId.
-	[[nodiscard]] not_null<Dialogs::MainList*> purpleViewList();
+	// Purple: one of the chat lists a work preset shows. View 0 is its main one,
+	// standing in place of All chats and holding whatever the main list holds
+	// minus the chats the preset hides; view n > 0 is its nth extra tab, holding
+	// only what that tab's own order names. All of them are empty whenever no
+	// preset is running. See kPurpleViewFilterId.
+	[[nodiscard]] not_null<Dialogs::MainList*> purpleViewList(int index = 0);
 
 	// Purple: the list the app-wide unread badge should count. The main list
 	// is complete now - it keeps the chats a preset hides - so counting it

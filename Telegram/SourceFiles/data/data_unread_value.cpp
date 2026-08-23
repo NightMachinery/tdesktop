@@ -46,7 +46,16 @@ rpl::producer<Dialogs::UnreadState> UnreadStateValue(
 		const auto filters = &session->data().chatsFilters();
 		return MainListUnreadState(filters->chatsList(filterId));
 	}
-	// Purple: the preset view stands where All chats stands, so its tab is
+	// Purple: an extra view holds chats and no folders, so the Archive row is
+	// not in its total and there is nothing to take out of it. Subtracting the
+	// archive anyway drives the tab's badge negative by exactly the archive's
+	// own unread count, which is what it did.
+	const auto index = IsPurpleView(filterId) ? PurpleViewIndex(filterId) : 0;
+	if (index > 0) {
+		return MainListUnreadState(session->data().purpleViewList(index));
+	}
+
+	// The preset's main view stands where All chats stands, so its tab is
 	// counted the same way - the Archive row is in it and carries its own
 	// count, and adding that to the tab would count it twice.
 	return MainListUnreadState(IsPurpleView(filterId)

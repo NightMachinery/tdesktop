@@ -1893,23 +1893,34 @@ void Session::refreshPurpleWorkMode() {
 }
 
 void Session::refreshPurpleView() {
-	const auto viewList = purpleViewList();
-	if (!Purple::Filtering()) {
-		// Walk the view rather than the main list: an entry can outlive its
-		// place in the main list, and leaving it linked to a list nothing will
-		// ever refresh again is how a stale row survives into the next preset.
+	// Every view above the live count, emptied. That covers both leaving a
+	// preset altogether and switching to one with fewer tabs, which is the case
+	// that used not to exist: a view nothing refreshes again keeps its rows, and
+	// they come back the moment some later preset reuses the id.
+	//
+	// Walk each view rather than the main list: an entry can outlive its place
+	// in the main list, and leaving it linked to a list nothing will ever
+	// refresh again is how a stale row survives into the next preset.
+	for (auto i = chatsFilters().purpleViewCount(); i != kPurpleViewLimit; ++i) {
+		const auto id = PurpleViewFilterId(i);
+		const auto viewList = chatsFilters().chatsListLoaded(id);
+		if (!viewList || viewList->indexed()->empty()) {
+			continue;
+		}
 		auto stale = std::vector<not_null<Dialogs::Entry*>>();
 		for (const auto &row : viewList->indexed()->all()) {
 			stale.push_back(row->entry());
 		}
 		for (const auto &entry : stale) {
-			entry->removeFromChatList(kPurpleViewFilterId, viewList);
+			entry->removeFromChatList(id, viewList);
 			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
 				.key = Dialogs::Key(entry),
-				.filterId = kPurpleViewFilterId,
+				.filterId = id,
 				.existenceChanged = true
 			});
 		}
+	}
+	if (!Purple::Filtering()) {
 		return;
 	}
 
@@ -2485,10 +2496,14 @@ void Session::notifyPinnedDialogsOrderUpdated() {
 }
 
 void Session::refreshPurpleViewPinned() {
-	// Purple: the view's pinned list is a copy of the main list's, minus the
-	// chats the preset hides. Pinning is an account-level fact, so the view
+	// Purple: the main view's pinned list is a copy of the main list's, minus
+	// the chats the preset hides. Pinning is an account-level fact, so the view
 	// must not own pins of its own - it only reflects them, and the one place
 	// that says the order moved is where the copy is retaken.
+	//
+	// Only the main view. An extra view is the preset's own invention and its
+	// order is the preset's to state, so it holds no pins at all until the file
+	// can say what they are.
 	//
 	// The guard is what stops that copy reporting itself: applying a pinned
 	// index re-sorts the entry, which comes back through here.
@@ -5516,8 +5531,8 @@ not_null<Dialogs::IndexedList*> Session::contactsNoChatsList() {
 	return &_contactsNoChatsList;
 }
 
-not_null<Dialogs::MainList*> Session::purpleViewList() {
-	return chatsFilters().chatsList(kPurpleViewFilterId);
+not_null<Dialogs::MainList*> Session::purpleViewList(int index) {
+	return chatsFilters().chatsList(PurpleViewFilterId(index));
 }
 
 FilterId Session::purpleBadgeFilterId() const {
@@ -5557,22 +5572,26 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		_chatListEntryRefreshes.fire(std::move(event));
 	}
 
-	// Purple: the preset view, which is a filter no server knows about. It has
-	// to be maintained here rather than folded into shouldBeInChatList()
+	// Purple: the preset's views, which are filters no server knows about. They
+	// have to be maintained here rather than folded into shouldBeInChatList()
 	// because that is the whole point of the design: the main list above stays
-	// complete and only this one view leaves anything out.
+	// complete and only these views leave anything out.
 	//
-	// Folders belong to it as they belong to All chats, which is why this is
-	// above the history-only work below - the Archive row would otherwise
-	// disappear the moment a preset started.
-	if (Purple::Filtering()) {
-		const auto id = kPurpleViewFilterId;
-		const auto viewList = purpleViewList();
-		const auto belongs = (history || entry->asFolder())
-			// Archived chats are not in All chats and are not in the view;
-			// topics and sublists live in lists of their own.
-			&& !entry->folder()
-			&& !entry->purpleHiddenFromView();
+	// Folders belong to the main view as they belong to All chats, which is why
+	// this is above the history-only work below - the Archive row would
+	// otherwise disappear the moment a preset started. An extra view holds only
+	// chats: its membership comes from lists of peers, and there is nothing a
+	// list could say that would put the archive on one.
+	for (auto i = 0, count = chatsFilters().purpleViewCount(); i != count; ++i) {
+		const auto id = PurpleViewFilterId(i);
+		const auto viewList = purpleViewList(i);
+		const auto belongs = i
+			? (history && Purple::ExtraViewHolds(i - 1, history->peer))
+			: ((history || entry->asFolder())
+				// Archived chats are not in All chats and are not in the view;
+				// topics and sublists live in lists of their own.
+				&& !entry->folder()
+				&& !entry->purpleHiddenFromView());
 		auto event = ChatListEntryRefresh{ .key = key, .filterId = id };
 		if (belongs) {
 			event.existenceChanged = !entry->inChatList(id);
@@ -5589,9 +5608,10 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		if (event) {
 			_chatListEntryRefreshes.fire(std::move(event));
 		}
-		if (joinedOrLeft) {
-			// A pinned chat that has just entered the view needs its place in
-			// the order, and one that has just left needs to stop holding it.
+		if (joinedOrLeft && !i) {
+			// A pinned chat that has just entered the main view needs its place
+			// in the order, and one that has just left needs to stop holding it.
+			// Extra views do not mirror those pins - see refreshPurpleViewPinned.
 			refreshPurpleViewPinned();
 		}
 	}
@@ -5677,14 +5697,19 @@ void Session::removeChatListEntry(Dialogs::Key key) {
 			});
 		}
 	}
-	// Purple: same as the loop above, for the one filter that is not in it.
-	if (entry->inChatList(kPurpleViewFilterId)) {
-		entry->removeFromChatList(kPurpleViewFilterId, purpleViewList());
-		_chatListEntryRefreshes.fire(ChatListEntryRefresh{
-			.key = key,
-			.filterId = kPurpleViewFilterId,
-			.existenceChanged = true
-		});
+	// Purple: same as the loop above, for the filters that are not in it. Every
+	// id in the reserved run rather than only the live ones: a chat leaving for
+	// good must not stay linked to a view the preset dropped a moment earlier.
+	for (auto i = 0; i != kPurpleViewLimit; ++i) {
+		const auto id = PurpleViewFilterId(i);
+		if (entry->inChatList(id)) {
+			entry->removeFromChatList(id, purpleViewList(i));
+			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
+				.key = key,
+				.filterId = id,
+				.existenceChanged = true
+			});
+		}
 	}
 	const auto mainList = chatsListFor(entry);
 	entry->removeFromChatList(0, mainList);

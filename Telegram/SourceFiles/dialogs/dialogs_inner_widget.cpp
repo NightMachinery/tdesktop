@@ -6192,7 +6192,10 @@ void InnerWidget::setupShortcuts() {
 
 		if (session().data().chatsFilters().has()) {
 			const auto filters = &session().data().chatsFilters();
-			const auto filtersCount = int(filters->list().size());
+			// Purple: the shown list, because the shortcuts mean "the Nth tab I
+			// can see" - and with a preset's extra views on the strip that can
+			// now be more tabs than the account has folders, not only fewer.
+			const auto filtersCount = int(filters->purpleShownList().size());
 			auto &&folders = ranges::views::zip(
 				Shortcuts::kShowFolder,
 				ranges::views::ints(0, ranges::unreachable));

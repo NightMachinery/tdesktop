@@ -417,14 +417,18 @@ ChatFilters::ChatFilters(not_null<Session*> owner)
 	purpleRefreshShown();
 }
 
-ChatFilter ChatFilters::purpleViewFilter() const {
-	// Named after the preset, because that is the honest label: the tab is
-	// what this preset shows, and the user picked the name. Nothing else about
-	// it is a folder - no rules, no members - which is why every icon lookup
-	// falls through to the All chats one and every edit path refuses it.
+ChatFilter ChatFilters::purpleViewFilter(int index) const {
+	// Named after the preset, or after the view, because that is the honest
+	// label: the tab is what this preset shows, and the user picked the name.
+	// Nothing else about it is a folder - no rules, no members - which is why
+	// every icon lookup falls through to the All chats one and every edit path
+	// refuses it.
+	const auto title = index
+		? Purple::ExtraViews()[index - 1].name
+		: Purple::ViewName();
 	return ChatFilter(
-		kPurpleViewFilterId,
-		{ TextWithEntities{ Purple::ViewName() } },
+		PurpleViewFilterId(index),
+		{ TextWithEntities{ title } },
 		QString(),
 		std::nullopt,
 		ChatFilter::Flags(),
@@ -433,20 +437,41 @@ ChatFilter ChatFilters::purpleViewFilter() const {
 		{});
 }
 
+int ChatFilters::purpleViewCount() const {
+	return _purpleViewCount;
+}
+
 void ChatFilters::purpleRefreshShown() {
 	if (!Purple::Filtering()) {
 		_purpleShown.clear();
+		_purpleViewCount = 0;
 		return;
 	}
 	auto result = std::vector<ChatFilter>();
 
-	// The preset's view stands where All chats stands, and All chats itself is
-	// dropped. That is what makes the whole design work: the main list keeps
+	// The preset's main view stands where All chats stands, and All chats itself
+	// is dropped. That is what makes the whole design work: the main list keeps
 	// every chat, so nothing has to be torn out of it, and the one place the
 	// user would notice the difference is the one place a preset is meant to
 	// change. Left on its own the view takes has() below the threshold and the
 	// folder UI disappears by itself, which is what "folders = []" asks for.
-	result.push_back(purpleViewFilter());
+	//
+	// Then the extra views, in file order, before any folder: they are the
+	// preset's own tabs, and a preset's tabs belong next to each other rather
+	// than scattered through the account's folders.
+	const auto extra = int(Purple::ExtraViews().size());
+	_purpleViewCount = std::min(extra + 1, kPurpleViewLimit);
+	if (extra + 1 > kPurpleViewLimit) {
+		// Silently drawing the first fifteen would read as "the rest are empty",
+		// which is the one thing it does not mean.
+		LOG(("Purple: preset '%1' defines %2 extra views; showing %3."
+			).arg(Purple::ActiveResolved().preset
+			).arg(extra
+			).arg(kPurpleViewLimit - 1));
+	}
+	for (auto i = 0; i != _purpleViewCount; ++i) {
+		result.push_back(purpleViewFilter(i));
+	}
 
 	const auto &shown = Purple::ShownFolders();
 	auto missing = QStringList();
@@ -498,8 +523,8 @@ void ChatFilters::purpleRefreshShown() {
 		LOG(("Purple: preset names folders that do not exist: %1."
 			).arg(missing.join(u", "_q)));
 	}
-	LOG(("Purple: folder strip showing %1 of %2, including the preset view."
-		).arg(result.size()).arg(_list.size()));
+	LOG(("Purple: folder strip showing %1 of %2, including %3 preset view(s)."
+		).arg(result.size()).arg(_list.size()).arg(_purpleViewCount));
 	_purpleShown = std::move(result);
 }
 
@@ -528,6 +553,11 @@ not_null<Dialogs::MainList*> ChatFilters::chatsList(FilterId filterId) {
 				: _owner->maxPinnedChatsLimitValue(filterId));
 	}
 	return pointer.get();
+}
+
+Dialogs::MainList *ChatFilters::chatsListLoaded(FilterId filterId) {
+	const auto i = _chatsLists.find(filterId);
+	return (i != end(_chatsLists)) ? i->second.get() : nullptr;
 }
 
 void ChatFilters::clear() {
@@ -1035,7 +1065,13 @@ FilterId ChatFilters::defaultId() const {
 }
 
 FilterId ChatFilters::lookupId(int index) const {
-	Expects(index >= 0 && index < _list.size());
+	// Purple: bounded against whichever list the answer comes from. A preset's
+	// extra views make the shown list longer than the real one, so asserting on
+	// _list alone would fire on a tab that is genuinely on screen.
+	Expects(index >= 0
+		&& index < int(Purple::Filtering() && !_purpleShown.empty()
+			? _purpleShown.size()
+			: _list.size()));
 
 	// Purple: everyone who asks this means "the Nth tab I can see" - the
 	// window that is opening, the folder shortcuts, closing a folder, Escape

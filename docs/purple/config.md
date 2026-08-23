@@ -128,7 +128,9 @@ preset inheritance: reuse without a chain to walk when you are trying to read
 what a preset actually does.
 
 `[[presets.x.views]]` adds a tab of its own, with a `name`, an optional `pinned`
-order and a `list_order` that selects membership only.
+order and a `list_order` that selects membership only. The tabs are drawn after
+the preset's main view and before any folder, each with its own unread badge;
+`pinned` is parsed but not yet applied, so a view sorts by date for now.
 
 The rest - `[schedule]`, `[focus_sync]`, `[peek]` - is documented by the starter
 file the app writes on first run, which carries a commented example of each.
