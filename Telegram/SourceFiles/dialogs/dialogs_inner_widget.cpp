@@ -676,7 +676,11 @@ void InnerWidget::refreshWithCollapsedRows(bool toTop) {
 			clearPressed();
 		}
 		_skipTopDialog = true;
-		if (!inMainMenu && !_filterId) {
+		// Purple: the preset view holds the Archive row exactly as All chats
+		// does, so it gets the collapsed row too. Without this the row is
+		// skipped above and never drawn anywhere - and needCollapsedRowsRefresh()
+		// then never settles, which the Assert after it would catch.
+		if (!inMainMenu && (!_filterId || Data::IsPurpleView(_filterId))) {
 			_collapsedRows.push_back(
 				std::make_unique<CollapsedRow>(archive));
 		}

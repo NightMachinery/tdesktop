@@ -246,6 +246,20 @@ int Entry::lookupPinnedIndex(FilterId filterId) const {
 }
 
 uint64 Entry::computeSortPosition(FilterId filterId) const {
+	// Purple: the preset view stands in for All chats, so what is fixed on top
+	// there is fixed on top here - the Archive row above everything, where it
+	// belongs. Only the main list's own sort key applies fixedOnTopIndex(), so
+	// without this the archive sorts into the view by date and lands wherever
+	// its last message happens to put it.
+	//
+	// Deliberately not done for real folders. A top-promoted chat is fixed on
+	// top too, and upstream sorts it by date inside a folder; changing that
+	// here would move it in every folder the user has.
+	if (Data::IsPurpleView(filterId)) {
+		if (const auto fixedIndex = fixedOnTopIndex()) {
+			return FixedOnTopDialogPos(fixedIndex);
+		}
+	}
 	const auto index = lookupPinnedIndex(filterId);
 	if (index) {
 		return PinnedDialogPos(index);
