@@ -1014,19 +1014,25 @@ const std::vector<ChatFilter> &ChatFilters::list() const {
 }
 
 FilterId ChatFilters::defaultId() const {
-	// Purple: the preset's view is where All chats was, so it is what a window
-	// opens on and what closing a folder falls back to. Without this the app
-	// would land on the complete main list, which is the one thing a running
-	// preset is meant to keep off the screen.
-	if (Purple::Filtering() && !_purpleShown.empty()) {
-		return _purpleShown.front().id();
-	}
 	return lookupId(0);
 }
 
 FilterId ChatFilters::lookupId(int index) const {
 	Expects(index >= 0 && index < _list.size());
 
+	// Purple: everyone who asks this means "the Nth tab I can see" - the
+	// window that is opening, the folder shortcuts, closing a folder, Escape
+	// going home. Under a preset that is the shown list, which carries the
+	// preset's view where All chats was; answering 0 would send all of them to
+	// the complete chat list the preset exists to replace.
+	//
+	// Clamped because a preset naming folders can make the shown list shorter
+	// than the real one, and the callers bound their index against the real
+	// one.
+	if (Purple::Filtering() && !_purpleShown.empty()) {
+		const auto last = int(_purpleShown.size()) - 1;
+		return _purpleShown[std::min(index, last)].id();
+	}
 	if (_owner->session().user()->isPremium() || !_list.front().id()) {
 		return _list[index].id();
 	}

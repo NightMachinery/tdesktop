@@ -2019,14 +2019,23 @@ rpl::producer<> SessionController::filtersMenuChanged() const {
 
 void SessionController::checkOpenedFilter() {
 	activateFirstChatsFilter();
-	if (const auto filterId = activeChatsFilterCurrent()) {
-		const auto &list = session().data().chatsFilters().purpleShownList();
-		const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
-		if (i == end(list)) {
-			setActiveChatsFilter(
-				0,
-				{ anim::type::normal, anim::activation::background });
-		}
+
+	// Purple: no `if (filterId)' guard, because All chats is exactly what
+	// stops being offered when a preset starts - the shown list holds the
+	// preset's view in its place, so sitting on id 0 means sitting on the
+	// complete chat list the preset is there to replace. Falling back to
+	// defaultId() rather than to 0 closes the same gap in reverse: when the
+	// preset stops, the view is what is no longer in the list.
+	//
+	// Under Normal both ends are 0 and this is what it always was.
+	const auto filters = &session().data().chatsFilters();
+	const auto &list = filters->purpleShownList();
+	const auto filterId = activeChatsFilterCurrent();
+	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
+	if (i == end(list)) {
+		setActiveChatsFilter(
+			filters->defaultId(),
+			{ anim::type::normal, anim::activation::background });
 	}
 }
 

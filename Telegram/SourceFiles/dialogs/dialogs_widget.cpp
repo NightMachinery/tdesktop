@@ -2928,8 +2928,12 @@ void Widget::escape() {
 		} else if (controller()->activeChatEntryCurrent().key) {
 			controller()->content()->dialogsCancelled();
 		} else if (controller()->isPrimary()) {
+			// Purple: Escape goes home, and home is the first tab that is
+			// actually offered. Under a preset that is its view; the real
+			// list's front() is All chats, which is precisely what the preset
+			// took off the strip.
 			const auto filters = &session().data().chatsFilters();
-			const auto &list = filters->list();
+			const auto &list = filters->purpleShownList();
 			const auto first = list.empty() ? FilterId() : list.front().id();
 			if (controller()->activeChatsFilterCurrent() != first) {
 				controller()->setActiveChatsFilter(first);

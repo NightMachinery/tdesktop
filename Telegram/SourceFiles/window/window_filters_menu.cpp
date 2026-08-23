@@ -384,7 +384,8 @@ void FiltersMenu::refresh() {
 	for (const auto &filter : filters->purpleShownList()) {
 		const auto nextIsLocked = (now.size() >= premiumFrom);
 		if (nextIsLocked && (currentFilter == filter.id())) {
-			_session->setActiveChatsFilter(FilterId(0));
+			// Purple: home, not All chats - see ChatFilters::lookupId().
+			_session->setActiveChatsFilter(filters->defaultId());
 		}
 		auto button = prepareButton(
 			_list,
