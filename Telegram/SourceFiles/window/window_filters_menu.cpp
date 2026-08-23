@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_media_prepare.h"
 #include "api/api_chat_filters.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_preset_box.h"
 #include "apiwrap.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
@@ -149,7 +150,12 @@ void FiltersMenu::setup() {
 
 	const auto filters = &_session->session().data().chatsFilters();
 	rpl::combine(
-		rpl::single(rpl::empty) | rpl::then(filters->changed()),
+		rpl::single(rpl::empty) | rpl::then(rpl::merge(
+			filters->changed(),
+			// Purple: a preset changes what the side bar shows - which folders
+			// are in it, and the name on the view standing in for All chats -
+			// without the account's own folders moving at all.
+			Purple::ActiveChanges())),
 		std::move(premium)
 	) | rpl::on_next([=] {
 		refresh();
@@ -384,7 +390,11 @@ void FiltersMenu::refresh() {
 			_list,
 			filter.id(),
 			filter.title(),
-			Ui::ComputeFilterIcon(filter),
+			// Purple: the view wears the All chats icon, as the tab it stands
+			// in for. It has no rules for ComputeFilterIcon to read anyway.
+			Data::IsPurpleView(filter.id())
+				? Ui::FilterIcon::All
+				: Ui::ComputeFilterIcon(filter),
 			nextIsLocked);
 		now.emplace(filter.id(), std::move(button));
 	}
@@ -749,7 +759,20 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 		i->second.get(),
 		st::popupMenuWithIcons);
 	const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
-	if (id) {
+	// Purple: the preset view is not a folder - nothing to edit, nothing to
+	// delete. Marking it read means what it means for All chats.
+	if (Data::IsPurpleView(id)) {
+		Window::MenuAddMarkAsReadChatListAction(
+			_session,
+			[=] { return _session->session().data().purpleViewList(); },
+			addAction);
+		addAction(
+			u"Work Mode"_q,
+			crl::guard(&_outer, [=] {
+				_session->show(Box(Purple::PresetBox));
+			}),
+			&st::menuIconEdit);
+	} else if (id) {
 		addAction(
 			tr::lng_filters_context_edit(tr::now),
 			crl::guard(&_outer, [=] { EditExistingFilter(_session, id); }),

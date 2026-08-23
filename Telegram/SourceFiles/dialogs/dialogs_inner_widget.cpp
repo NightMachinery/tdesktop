@@ -2716,9 +2716,13 @@ void InnerWidget::savePinnedOrder() {
 		session().api().savePinnedOrder(&session().data().savedMessages());
 	} else if (_openedForum) {
 		session().api().savePinnedOrder(_openedForum);
-	} else if (_filterId) {
+	} else if (_filterId && !Data::IsPurpleView(_filterId)) {
 		Api::SaveNewFilterPinned(&session(), _filterId);
 	} else {
+		// Purple: dragging pins about inside the preset view moved the main
+		// list, because that is where its pins live, so this is the ordinary
+		// save. Sending the view to the server as a folder would be a way to
+		// lose the real order.
 		session().api().savePinnedOrder(_openedFolder);
 	}
 }
@@ -3756,9 +3760,15 @@ void InnerWidget::refreshShownList() {
 		? _openedForum->topicsList()->indexed()
 		: _openedCommunity
 		? _openedCommunity->chatsList()->indexed()
+		// Purple: an open folder wins over the filter. Upstream forces the
+		// filter back to All chats before opening one, so this changes nothing
+		// there; the preset view is not All chats, and the archive has to keep
+		// showing the archive.
+		: _openedFolder
+		? session().data().chatsList(_openedFolder)->indexed()
 		: _filterId
 		? session().data().chatsFilters().chatsList(_filterId)->indexed()
-		: session().data().chatsList(_openedFolder)->indexed();
+		: session().data().chatsList()->indexed();
 	if (_shownList != list) {
 		_shownList->unfreeze();
 		_shownList = list;
@@ -4879,7 +4889,7 @@ void InnerWidget::refreshEmpty() {
 			: EmptyState::None)
 		: (!_filterId && data->contactsLoaded().current())
 		? EmptyState::NoContacts
-		: (_filterId > 0) && data->chatsList()->loaded()
+		: _filterId && data->chatsList()->loaded()
 		? EmptyState::EmptyFolder
 		: EmptyState::Loading;
 	if (state == EmptyState::None) {
@@ -5540,11 +5550,15 @@ void InnerWidget::switchToFilter(FilterId filterId) {
 		return;
 	}
 	const auto &list = session().data().chatsFilters().list();
-	const auto filterIt = filterId
+	// Purple: the preset view is a filter the server never sent, so it is not
+	// in the list to be found - and falling back to All chats for it would put
+	// the very chats the preset hides back on screen.
+	const auto view = Data::IsPurpleView(filterId);
+	const auto filterIt = (filterId && !view)
 		? ranges::find(list, filterId, &Data::ChatFilter::id)
 		: end(list);
 	const auto found = (filterIt != end(list));
-	if (!found) {
+	if (!found && !view) {
 		filterId = 0;
 	}
 	if (_filterId == filterId) {

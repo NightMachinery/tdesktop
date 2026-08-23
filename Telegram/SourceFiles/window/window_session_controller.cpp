@@ -2071,8 +2071,12 @@ void SessionController::openFolder(not_null<Data::Folder*> folder) {
 	} else if (_openedFolder.current() != folder) {
 		resetFakeUnreadWhileOpened();
 	}
-	if (activeChatsFilterCurrent() != 0) {
-		setActiveChatsFilter(0);
+	// Purple: back to whatever stands for All chats, which under a preset is
+	// its own view - going to the real All chats would show what the preset
+	// hides as soon as the archive was closed again.
+	const auto home = session().data().chatsFilters().defaultId();
+	if (activeChatsFilterCurrent() != home) {
+		setActiveChatsFilter(home);
 	} else if (adaptive().isOneColumn()) {
 		clearSectionStack(SectionShow::Way::ClearStack);
 	}
@@ -2110,8 +2114,10 @@ void SessionController::openCommunity(not_null<Data::CommunityInfo*> info) {
 	} else if (_openedCommunity.current() != info) {
 		resetFakeUnreadWhileOpened();
 	}
-	if (activeChatsFilterCurrent() != 0) {
-		setActiveChatsFilter(0);
+	// Purple: same as openFolder above.
+	const auto home = session().data().chatsFilters().defaultId();
+	if (activeChatsFilterCurrent() != home) {
+		setActiveChatsFilter(home);
 	} else if (adaptive().isOneColumn()) {
 		clearSectionStack(SectionShow::Way::ClearStack);
 	}

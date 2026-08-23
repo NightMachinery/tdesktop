@@ -410,26 +410,57 @@ ChatFilters::ChatFilters(not_null<Session*> owner)
 	) | rpl::on_next([=] {
 		purpleRefreshShown();
 	}, _purpleLifetime);
+
+	// Once up front as well: a preset that was already active when the app
+	// started never fires a change, and defaultId() has to know about the view
+	// before the first window asks it what to open on.
+	purpleRefreshShown();
+}
+
+ChatFilter ChatFilters::purpleViewFilter() const {
+	// Named after the preset, because that is the honest label: the tab is
+	// what this preset shows, and the user picked the name. Nothing else about
+	// it is a folder - no rules, no members - which is why every icon lookup
+	// falls through to the All chats one and every edit path refuses it.
+	return ChatFilter(
+		kPurpleViewFilterId,
+		{ TextWithEntities{ Purple::ActiveResolved().preset } },
+		QString(),
+		std::nullopt,
+		ChatFilter::Flags(),
+		{},
+		{},
+		{});
 }
 
 void ChatFilters::purpleRefreshShown() {
-	const auto &shown = Purple::ShownFolders();
-	if (!Purple::FoldersRestricted()) {
+	if (!Purple::Filtering()) {
 		_purpleShown.clear();
 		return;
 	}
 	auto result = std::vector<ChatFilter>();
 
-	// The id-0 entry is "All chats", and it is never dropped: it is the only
-	// view that shows a chat belonging to no folder, and the preset has
-	// already decided what that view contains. Left on its own it takes
-	// has() below the threshold and the folder UI disappears by itself, which
-	// is exactly what "folders = []" is asking for.
-	const auto all = ranges::find(_list, FilterId(), &ChatFilter::id);
-	if (all != end(_list)) {
-		result.push_back(*all);
+	// The preset's view stands where All chats stands, and All chats itself is
+	// dropped. That is what makes the whole design work: the main list keeps
+	// every chat, so nothing has to be torn out of it, and the one place the
+	// user would notice the difference is the one place a preset is meant to
+	// change. Left on its own the view takes has() below the threshold and the
+	// folder UI disappears by itself, which is what "folders = []" asks for.
+	result.push_back(purpleViewFilter());
+
+	if (!Purple::FoldersRestricted()) {
+		// The preset said nothing about folders, so every real one still
+		// shows - only the All chats tab has been replaced.
+		for (const auto &filter : _list) {
+			if (filter.id()) {
+				result.push_back(filter);
+			}
+		}
+		_purpleShown = std::move(result);
+		return;
 	}
 
+	const auto &shown = Purple::ShownFolders();
 	auto missing = QStringList();
 	for (const auto &wanted : *shown) {
 		const auto i = ranges::find_if(_list, [&](const ChatFilter &filter) {
@@ -450,13 +481,13 @@ void ChatFilters::purpleRefreshShown() {
 		LOG(("Purple: preset names folders that do not exist: %1."
 			).arg(missing.join(u", "_q)));
 	}
-	LOG(("Purple: folder strip showing %1 of %2, including All chats."
+	LOG(("Purple: folder strip showing %1 of %2, including the preset view."
 		).arg(result.size()).arg(_list.size()));
 	_purpleShown = std::move(result);
 }
 
 const std::vector<ChatFilter> &ChatFilters::purpleShownList() const {
-	return Purple::FoldersRestricted() ? _purpleShown : _list;
+	return Purple::Filtering() ? _purpleShown : _list;
 }
 
 ChatFilters::~ChatFilters() = default;
@@ -472,7 +503,12 @@ not_null<Dialogs::MainList*> ChatFilters::chatsList(FilterId filterId) {
 		pointer = std::make_unique<Dialogs::MainList>(
 			&_owner->session(),
 			filterId,
-			_owner->maxPinnedChatsLimitValue(filterId));
+			// Purple: the view's pinned list is a copy of the main list's, so
+			// it has to be allowed to hold exactly as much - the folder limit
+			// is a different number for a different thing.
+			IsPurpleView(filterId)
+				? _owner->maxPinnedChatsLimitValue((Data::Folder*)nullptr)
+				: _owner->maxPinnedChatsLimitValue(filterId));
 	}
 	return pointer.get();
 }
@@ -978,6 +1014,13 @@ const std::vector<ChatFilter> &ChatFilters::list() const {
 }
 
 FilterId ChatFilters::defaultId() const {
+	// Purple: the preset's view is where All chats was, so it is what a window
+	// opens on and what closing a folder falls back to. Without this the app
+	// would land on the complete main list, which is the one thing a running
+	// preset is meant to keep off the screen.
+	if (Purple::Filtering() && !_purpleShown.empty()) {
+		return _purpleShown.front().id();
+	}
 	return lookupId(0);
 }
 

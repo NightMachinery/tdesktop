@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_preset_box.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "styles/style_dialogs.h" // dialogsSearchTabs
@@ -80,7 +81,20 @@ void ShowMenu(
 	const auto addAction = Ui::Menu::CreateAddActionCallback(
 		state->menu.get());
 
-	if (id) {
+	// Purple: the preset view is not a folder, so there is nothing to edit and
+	// nothing to delete - but marking it read is exactly as meaningful as it
+	// is for All chats, and it is the only tab that offers it while a preset
+	// is running.
+	if (Data::IsPurpleView(id)) {
+		Window::MenuAddMarkAsReadChatListAction(
+			controller,
+			[=] { return session->data().purpleViewList(); },
+			addAction);
+		addAction(
+			u"Work Mode"_q,
+			[=] { controller->show(Box(Purple::PresetBox)); },
+			&st::menuIconEdit);
+	} else if (id) {
 		addAction(
 			tr::lng_filters_context_edit(tr::now),
 			[=] { EditExistingFilter(controller, id); },
@@ -412,9 +426,12 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 		slider->setSectionIcons(ranges::views::all(
 			list
 		) | ranges::views::transform([](const Data::ChatFilter &filter) {
-			return LookupFilterIcon(filter.id()
-				? ComputeFilterIcon(filter)
-				: FilterIcon::All).tabs.get();
+			// Purple: the preset view wears the All chats icon, because that
+			// is the tab it is standing in for.
+			return LookupFilterIcon(
+				(filter.id() && !Data::IsPurpleView(filter.id()))
+					? ComputeFilterIcon(filter)
+					: FilterIcon::All).tabs.get();
 		}) | ranges::to_vector);
 		if (!sectionsChanged) {
 			return;
@@ -522,7 +539,11 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 		}
 	};
 	rpl::combine(
-		session->data().chatsFilters().changed(),
+		rpl::merge(
+			session->data().chatsFilters().changed(),
+			// Purple: same as the side bar - a preset moves what the strip
+			// shows without the account's folders changing.
+			Purple::ActiveChanges()),
 		Data::AmPremiumValue(session) | rpl::to_empty
 	) | rpl::on_next(rebuild, wrap->lifetime());
 	Core::App().settings().chatFiltersTabsModeValue(

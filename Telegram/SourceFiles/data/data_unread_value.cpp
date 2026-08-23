@@ -42,12 +42,16 @@ rpl::producer<Dialogs::UnreadState> MainListUnreadState(
 rpl::producer<Dialogs::UnreadState> UnreadStateValue(
 		not_null<Main::Session*> session,
 		FilterId filterId) {
-	if (filterId > 0) {
+	if (filterId > 0 && !IsPurpleView(filterId)) {
 		const auto filters = &session->data().chatsFilters();
 		return MainListUnreadState(filters->chatsList(filterId));
 	}
-	return MainListUnreadState(
-		session->data().chatsList()
+	// Purple: the preset view stands where All chats stands, so its tab is
+	// counted the same way - the Archive row is in it and carries its own
+	// count, and adding that to the tab would count it twice.
+	return MainListUnreadState(IsPurpleView(filterId)
+		? session->data().purpleViewList()
+		: session->data().chatsList()
 	) | rpl::map([=](const Dialogs::UnreadState &state) {
 		return MainListMapUnreadState(session, state);
 	});
