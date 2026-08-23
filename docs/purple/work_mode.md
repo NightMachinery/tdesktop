@@ -16,29 +16,92 @@ cannot drift away from stock behaviour, a permissive preset can.
 
 ## The model
 
-A **list** is a named set of chats with a `show` and a `notify` flag. Lists are
-in priority order, top wins, so the first list holding a chat decides how it
-behaves. Four **catch-alls** - `@private`, `@groups`, `@channels`, `@bots` -
-always sort below your own lists and are always present, synthesized if the file
-omits them. Every chat therefore matches exactly one list, and there is no
-"unlisted chat" case anywhere in the engine.
+Two ideas, and that is all of it.
 
-A list may be **locked**, which means no preset can override it. That is what
-makes an emergency list trustworthy: no amount of preset editing can silence it.
+A **list** says who is in it. `members` names peer ids; `kinds` names chat types
+- `private`, `groups`, `channels`, `bots` - and a chat matches when either half
+does. A list carries no behaviour at all: nothing in `[lists.x]` says what
+happens to those chats.
 
-A **preset** is a set of overrides on those lists, plus an optional parent to
-inherit from. Resolution walks the chain from the most derived preset upwards
-and takes the first explicit value for each list, falling back to the list's own
-default.
+A **preset** says what happens. It writes an ordered `list_order`, and each
+entry names a list and what that list means *for this preset*:
+
+    [presets.work]
+    list_order = [
+      { list = "essentials", show_p = true,  notify_p = true },
+      { list = "bots",       show_p = false, notify_p = false },
+    ]
+
+Order is priority **and** capture. Walking the order, the first entry whose list
+holds a chat decides that chat, and nothing further down ever sees it again. A
+chat no entry claims is **hidden and silenced**: a preset names what gets
+through, and saying nothing about a chat is saying no - to both halves, because
+a chat you are not looking at has no business interrupting you either.
+
+### Why the model was rebuilt
+
+It used to be two mechanisms doing one job. A list carried global `show` and
+`notify` defaults, every preset then overrode them through a separate
+`[presets.x.overrides.<list>]` table, a single top-level `list_order` fixed
+priority for every preset at once, and `locked` existed only to stop overrides
+reaching a list. Answering "what does this preset do to this chat" meant reading
+four places at once and knowing which won.
+
+Folding the flags into the ordered entry collapses all of it. Priority,
+inclusion and behaviour become one statement in one place. `overrides` has
+nothing left to do; `locked` has nothing to protect against, because a preset
+can only reach a list it names.
+
+The four catch-alls went with it. `@private`, `@groups`, `@channels` and `@bots`
+were a special case threaded through the parser, the sort, the engine and the
+menu - and a list with `kinds = ["bots"]` is the same thing without any of it.
+`ListKind`, `IsCatchAll`, the forced-to-bottom sort and the synthesize-if-absent
+pass are all gone. So is the "every chat matches exactly one list" invariant
+they existed to provide: matching nothing is now a real answer, and it is the
+one that means hidden.
+
+### Reuse without inheritance
+
+Presets used to inherit. `list_order` cannot be merged sensibly - two ordered
+capture sequences do not compose - so a child would have had to restate its
+whole order anyway, leaving inheritance to save only the odd flag. Against that
+it cost a chain walk, loop detection, a reserved `default` name and an implicit
+root preset.
+
+It is replaced by spread. A bare `"*name"` string inside a `list_order` or
+`folders` array splices in `[list_sets.name]` or `[folder_sets.name]`, the way
+Python spreads a list:
+
+    [list_sets.always]
+    list_order = [
+      { list = "os",        show_p = true, notify_p = true },
+      { list = "emergency", show_p = true, notify_p = true },
+    ]
+
+    [presets.work]
+    list_order = [ "*always", { list = "bots", show_p = false } ]
+
+Sets may refer to sets. A name mentioned twice keeps its first mention, which is
+forced for a `list_order` - order *is* capture - and folders follow the same
+rule so there is one to remember rather than two. Writing an entry and *then*
+spreading a set that also holds it is the idiom this exists for: override one
+thing, take the defaults for the rest. That case is silent. An explicit
+duplicate still warns.
 
 ## What it does today
 
-Three things, all derived from the resolved list a chat falls into:
+Three things, all derived from the entry a chat falls into - or from falling
+through, which is a decision too:
 
-- `show = false` keeps the chat out of the preset's view of the chat list.
-- `notify = false` mutes it.
-- `groups_require_mention = true` leaves a group out until it holds an unread
+- `show_p = false` keeps the chat out of the preset's view of the chat list.
+- `notify_p = false` mutes it.
+- `groups_require_mention_p = true` leaves a group out until it holds an unread
   mention.
+- no entry at all does the first two.
+
+Every boolean key in `settings.toml` ends in `_p`. It is a naming convention
+rather than a type distinction - it just means the answer is yes or no, and it
+makes a flag recognisable as one without looking it up.
 
 ## The preset view
 
@@ -61,13 +124,13 @@ Only the first letter. A preset called `deep focus` becomes `Deep focus`, not
 end up mangling one, and a preset written `[presets.OS]` should not come back
 shouted differently than it was typed.
 
-It is the one preset field that is **not** inherited. Everything else walks the
-chain and takes the first explicit value - `hide_everywhere`, the folder
-selection, the list overrides - because those are policy, and a child that says
-nothing means "same as my parent". A name is not policy. A child preset that
-inherited its parent's label would put the parent's name over a different chat
-list, which is the exact opposite of what a label is for, so a preset that does
-not name its own view falls back to its own name rather than to its parent's.
+There is nowhere else it could come from. When presets inherited, this was the
+one field deliberately exempted - a child taking its parent's label would have
+put the parent's name over a different chat list, which is the exact opposite of
+what a label is for. Inheritance is gone, so the exemption is now just how names
+work, but the rule it encoded is worth keeping in mind if inheritance is ever
+missed: a name is not policy, and spreading a set into a preset does not spread
+a name into it either.
 
 The preset box and the `Work Mode: work` menu entry keep using the preset's
 real name, because that is its identity - the string you type in `settings.toml`
@@ -109,6 +172,19 @@ Folders belong to the view exactly as they belong to All chats - the Archive
 row is in it. Archived chats are not, and neither are forum topics or
 Saved Messages sublists, which live in lists of their own.
 
+### The Archive row is hidden by default
+
+Upstream leaves "Archived chats" sitting at the top of the chat list; this fork
+defaults it to the main menu instead, which is where right-clicking it and
+choosing "Move to main menu" puts it. The preset view honours the setting
+exactly as All chats does, so the row is in neither or in both.
+
+It is a plain default and nothing more, which means it only reaches a fresh
+`tdata`. The setting lives in tdesktop's own per-account blob, which is
+serialised whether or not anyone ever chose anything, so an account that has run
+before already has a value there and keeps it. Right-click the row to move it
+yourself on an existing account.
+
 ### What the badge counts
 
 `Session::purpleBadgeList()` returns the view while a preset runs and the main
@@ -138,22 +214,52 @@ never allowed to own pins of its own:
 `Entry::removeFromChatList()` leaves the view's pinned list alone for the same
 reason: the copy owns it, and the next copy would undo anything done here.
 
+### Extra views
+
+A preset may invent more tabs than its own:
+
+    [[presets.work.views]]
+    name   = "Focus"
+    pinned = [ 1234567890 ]
+    list_order = [ { list = "essentials", show_p = true } ]
+
+**Parsed and resolved, not yet drawn.** The config half is done - it survives
+the `resolved_cache` too - and the chat-list half is the next milestone.
+
+A view's `list_order` selects membership and nothing else. `show_p = false` on
+an entry drops the chats that entry claims from this tab; falling through drops
+them too, the same rule the main view follows. `notify_p` is meaningless here
+and warns: a chat has one mute state however many tabs are showing it, and
+silence belongs to the chat rather than to where you happen to be looking at it.
+
+A view may show a chat the preset hides from its main view - a "later" tab for
+what you are not looking at is a reasonable thing to want. The one exception is
+`hide_everywhere_p`, where the chat is gone from the main chat list entirely and
+tdesktop's "in a filter implies in the main list" invariant makes the pairing an
+assertion failure rather than a preference. The parser refuses it with a warning
+rather than leaving it to crash.
+
+Unlike the main view, an extra view is meant to own its pinned order - it is not
+standing in for All chats, so there is no main-list order for it to copy. That
+order lives in `settings.toml`, and pinning from the UI will splice it back the
+same way list membership is spliced today.
+
 ### hide_everywhere
 
     [presets.away]
-    hide_everywhere = true
+    hide_everywhere_p = true
 
 Global absence is a real thing to want from a work mode, so it is available -
-but as a request rather than a side effect. `hide_everywhere = true` restores
+but as a request rather than a side effect. `hide_everywhere_p = true` restores
 the original behaviour: `History::shouldBeInChatList()` answers no, the chat
 leaves the main list, and with it the forward picker, search suggestions and
 recent chats.
 
-It inherits down a preset chain like every other preset-wide switch, first
-explicit value wins, and a child can turn its parent's back off.
-
-Under it the exempt-folder rule below tightens back up, and for the original
-reason: a chat out of the main list cannot be in a folder either.
+Under it the folder rule below tightens back up, and for the original reason: a
+chat out of the main list cannot be in a folder either. For the same reason a
+preset that sets it may not also declare extra views - see below - because a
+view showing a chat that is not in the main list is an assertion failure rather
+than a preference. The parser refuses that pairing with a warning.
 
 ### Hiding is a view, not an edit
 
@@ -174,7 +280,7 @@ the account and from every other device. Exactly the hazard the folder
 `saveOrder()` guard exists for, in a place nobody had looked.
 
 The view design retires the whole hazard: nothing is removed from the main
-list, so the unpin never fires. The guard survives for `hide_everywhere`, where
+list, so the unpin never fires. The guard survives for `hide_everywhere_p`, where
 it does - `purpleHiddenFromChatList()` is what asks - and the reasoning above is
 kept because that is the case it still covers.
 
@@ -182,14 +288,14 @@ The mute path was checked for the same shape and is clean.
 `NotifySettings::purpleRefreshMute()` goes to `updateLocal()`, which never
 issues a request.
 
-`notify` is enforced in the private `Data::NotifySettings::isMuted(peer, ...)`,
+`notify_p` is enforced in the private `Data::NotifySettings::isMuted(peer, ...)`,
 which is the single root every mute question flows through: the notification
 manager, the mute bell in the chat list, sorting, and `History::muted()` - which
 is what splits unread counts into muted and unmuted for the badge. Hooking one
 accessor gets all of them.
 
 The preset can only ever *add* a mute. A chat you muted yourself stays muted
-whichever list it lands in, so switching presets can never un-silence something
+whichever entry claims it, so switching presets can never un-silence something
 behind your back.
 
 Saved Messages is never hidden and never gated. Nothing arrives in it unbidden,
@@ -197,11 +303,15 @@ and a chat list that does not show it offers no way back to it.
 
 ## The mention gate
 
-A preset may say `groups_require_mention = true`, and a list may override it.
-A group in a gated list appears in the chat list only while it holds an unread
-mention, and leaves again once that mention is read.
+An entry may say `groups_require_mention_p = true`. A group that entry claims
+appears in the chat list only while it holds an unread mention, and leaves again
+once that mention is read.
 
-It is off unless a preset asks for it. That default was the other way round
+It is per entry, not per preset. That is what lets one list of groups be gated
+while another comes through unconditionally, without a second table saying so -
+the same reason every other flag lives on the entry.
+
+It is off unless an entry asks for it. That default was the other way round
 until the gate was implemented - the value resolved but nothing consumed it, so
 nothing felt it - and it is the worst default available: a preset written to
 hide bots and nothing else would also have emptied the chat list of every group
@@ -224,11 +334,11 @@ alternative - exempting whichever chat is currently open - would mean the data
 layer asking the window layer what is on screen, and would only postpone the
 disappearance to the moment you look away.
 
-Gating is orthogonal to `notify`. A gated group with `notify = true` still
+Gating is orthogonal to `notify_p`. A gated group with `notify_p = true` still
 announces every message, which mostly defeats the point; the combination worth
-writing is `notify = false` with the gate on, which is "silent, and out of sight
-until someone actually wants me". They are kept separate because a list decides
-both, and collapsing them would remove a choice rather than add one.
+writing is `notify_p = false` with the gate on, which is "silent, and out of
+sight until someone actually wants me". They are kept separate because one entry
+decides both, and collapsing them would remove a choice rather than add one.
 
 ### Re-checking it
 
@@ -298,28 +408,44 @@ filtered as it loads, through `shouldBeInChatList()`.
 
 ## Folders
 
-A preset may also name which chat folders appear, in the order it names them:
+A preset names which chat folders appear, in the order it names them:
 
     [presets.work]
     folders = [ { name = "Work" }, { name = "Uni" } ]
 
-Saying nothing about folders leaves all of them showing. Saying `folders = []`
-is different, and deliberate: it names none, which collapses the folder strip
-altogether. That distinction has to survive resolution and the `state.toml`
-cache, so both carry an optional rather than a plain list, and the cache writes
-the key only when the preset said something.
+Saying nothing about folders shows none, which collapses the folder strip
+altogether. That is the same rule the lists follow - a preset names what it
+wants - and it is why there is no "said nothing" case left to distinguish from
+an empty one.
+
+To get the whole strip back, ask for it:
+
+    folders = [ "*ALL" ]
+
+`"*ALL"` is the one built-in set: every folder the selection does not name
+elsewhere, at that position, with default flags. It is the only spread the
+parser cannot expand, because the parser has never heard of a Telegram folder -
+it survives as a folder entry holding that exact name and
+`ChatFilters::purpleRefreshShown()` expands it in place, which is what keeps its
+position in the strip meaningful. So `[ { name = "B", ... }, "*ALL" ]` reads as
+"B on my terms, then everything else on default terms".
+
+Each named folder carries three flags. `show_p` puts its tab in the strip and
+defaults to true, since naming a folder is normally how you ask for it -
+`show_p = false` is for a folder you want silenced or pulled into the view
+without its tab being there. `notify_p` and `include_in_main_view_p` are below.
 
 Names are matched against folder titles, case-insensitively. A name matching no
 folder is skipped and logged, for the same reason the hidden-chat count is
 logged - a folder named slightly wrong is indistinguishable from a folder the
-preset meant to hide.
+preset meant to leave out.
 
 "All chats" is dropped, and the preset view stands in its place - see
 [The preset view](#the-preset-view). It is the only tab that shows a chat
 belonging to no folder, so something has to be there, and the view is what the
-preset means by "the chat list" anyway. It is also what makes `folders = []`
-work without a special case: left as the only entry it takes the strip below
-its "more than one tab" threshold and the strip hides itself.
+preset means by "the chat list" anyway. It is also what makes a preset with no
+folders work without a special case: left as the only entry it takes the strip
+below its "more than one tab" threshold and the strip hides itself.
 
 The view is not a folder and does not pretend to be one. Right-clicking it
 offers Mark as read and the Work Mode box, not Edit and Delete; it wears the
@@ -359,38 +485,45 @@ through it.
 The two drag handlers also bail out early, so a drag is simply inert rather than
 appearing to work and then snapping back.
 
-A preset that says nothing about folders still allows reordering. Its shown
-list is the real one with the view standing exactly where All chats stood, so
-every index still means the folder it did before.
+A preset whose whole folder selection is `"*ALL"` still allows reordering. Its
+shown list is the real one with the view standing exactly where All chats stood,
+so every index still means the folder it did before. Any other shape - a subset,
+a chosen order, a folder carrying flags - means a strip index no longer matches
+the server's, and `saveOrder()` refuses.
 
 To reorder folders while a preset restricts them, switch to `normal` first.
 
-### Exempting a folder
+### Pulling a folder into the view
 
-    folders = [ { name = "Family", filtered = false } ]
+    folders = [ { name = "Family", include_in_main_view_p = true } ]
 
-`filtered = false` is an escape hatch: the chats in that folder ignore the
-preset's hiding, and its mention gate with it, so they show in the preset view
-alongside the lists it did not hide. A folder that opted out of the preset
-deciding what is on screen opted out of all of it, not half.
+An escape hatch, and the positive form of what used to be spelled
+`filtered = false`. The chats in that folder join the preset's view whatever the
+lists decided, and the mention gate is lifted for them too: a folder that opted
+out of the preset deciding what is on screen opted out of all of it, not half.
 
-Saying nothing leaves a folder filtered, which is what every folder the preset
-does not name already is. Only an explicit `false` exempts.
+The polarity is worth the rename. `filtered = false` described the mechanism
+from the inside - "this folder is not subject to filtering" - and left you to
+work out what appeared where. `include_in_main_view_p = true` says what happens.
 
-Note what a *filtered* folder now means, because it changed with the view. The
-preset decides the view; a folder decides its own tab. So a chat the preset
-hides is missing from the view and still present inside its folder. That is the
-strict reading, it is what "a folder shows what the folder says" implies, and
-it was not affordable before the view existed.
+Saying nothing leaves a folder's chats to whatever their entry decided, which is
+what every folder the preset does not name is left to. Only an explicit `true`
+pulls them in.
 
-If a folder's contents do not belong in a work mode, do not show the folder -
-that is what naming folders is for. `filtered = false` is the opposite lever:
-it pulls the folder's chats *into* the view.
+Note what a folder tab shows, because it changed with the view. The preset
+decides the view; a folder decides its own tab. So a chat the preset hides is
+missing from the view and still present inside its folder. That is the strict
+reading, it is what "a folder shows what the folder says" implies, and it was
+not affordable before the view existed.
 
-Under `hide_everywhere` the old rule comes back, and must: a chat out of the
+If a folder's contents do not belong in a work mode, do not name the folder -
+that is what naming folders is for. `include_in_main_view_p` is the opposite
+lever: it pulls the folder's chats *into* the view.
+
+Under `hide_everywhere_p` the old rule comes back, and must: a chat out of the
 main list cannot be in a folder either, because tdesktop guarantees the reverse
-throughout - `Entry::notifyUnreadStateChange()` asserts on it outright. So an
-exempt folder's chats stay visible everywhere, and a hidden chat is gone from
+throughout - `Entry::notifyUnreadStateChange()` asserts on it outright. So a
+pulled-in folder's chats stay visible everywhere, and a hidden chat is gone from
 its folder as well.
 
 The lookup is free for everyone who does not use it. It runs only for a chat
@@ -399,14 +532,14 @@ preset with no exemptions never walks the folder list at all.
 
 ### Silencing a folder
 
-    folders = [ { name = "Noise", notify = false } ]
+    folders = [ { name = "Noise", notify_p = false } ]
 
-The chats in that folder are silenced, on the same terms as a silenced list:
+The chats in that folder are silenced, on the same terms as a silenced entry:
 the preset only ever adds a mute, so a chat muted by hand stays muted whichever
 folder it is in.
 
 A list can already do this when the folder is a hand-picked set - the same ids
-with `notify = false` - and for those the list is the simpler tool. What a list
+with `notify_p = false` - and for those the list is the simpler tool. What a list
 cannot do is track a folder defined by a *rule*: "all groups", "non-contacts",
 "everything except these three". Membership there moves on its own as chats
 arrive, and only the folder form follows it.
@@ -427,7 +560,7 @@ preset silences those.
 #### What it costs, and one thing it does not do
 
 `Purple::SilencedFolders()` is empty unless a preset names a folder with
-`notify = false`, and that emptiness is checked first, so every mute query in
+`notify_p = false`, and that emptiness is checked first, so every mute query in
 every other configuration is untouched. When it is non-empty the walk is over
 the folder list, and `contains()` for a hand-picked folder is a set lookup.
 
@@ -442,20 +575,24 @@ re-walking every peer whenever any message arrives.
 
 ## When the active preset stops resolving
 
-A preset can be deleted or renamed while it is active, or have its inheritance
-chain broken mid-edit. The engine then runs on `resolved_cache` in `state.toml` -
-the last resolution that worked - rather than falling back to defaults.
+A preset can be deleted or renamed while it is active, or the file can stop
+parsing mid-edit. The engine then runs on `resolved_cache` in `state.toml` - the
+last resolution that worked - rather than falling back to defaults.
 
 This is deliberate and worth stating plainly: defaulting would unhide every chat
 you had hidden, which is the one outcome a work mode must never produce by
 accident. If there is no cache either, the resolution already in effect stays in
 effect and the reason is logged.
 
-The cache carries `show` and `notify` per list, but not per-list mention gating -
-one preset-wide value is enough to keep behaviour stable through a broken
-reload. List *membership* is not cached: it comes from `settings.toml`, which
-parsed successfully, since a file that did not parse leaves the previous
-settings in place.
+The cache carries the resolved entries in order, each with its `show`, `notify`
+and mention gate; the folder selection, marker included; the tab's name; and any
+extra views, their pins among them. In short, everything a reload would
+otherwise take away - the point being that a `settings.toml` broken halfway
+through an edit changes nothing you can see.
+
+List *membership* is not cached, and does not need to be: it comes from
+`settings.toml`, which parsed successfully, since a file that did not parse
+leaves the previous settings in place.
 
 ## Choosing a preset
 
@@ -465,10 +602,14 @@ preset is changed several times a day and settings are not. The entry reads
 legible without opening anything.
 
 The box lists Normal and every preset in the file, each with a one-line summary
-of what it does - `work  -  hides 2 lists, silences 1 list, 3 folders` - built by
-resolving the preset rather than by describing what was typed. Choosing one
-applies it immediately and leaves the box open, so a wrong guess is one click
-from being undone.
+of what it does - `work  -  lets through 3 lists, silences 1 list, 2 folders` -
+built by resolving the preset rather than by describing what was typed. Choosing
+one applies it immediately and leaves the box open, so a wrong guess is one
+click from being undone.
+
+The summary counts what gets *through*, not what is hidden. Under this model
+counting the hidden would be counting the whole account, since anything a preset
+does not name is hidden by falling through.
 
 `state.toml` remains the source of truth and is still hand-editable; the box is
 a second writer to the same field, not a replacement for it.
@@ -508,34 +649,34 @@ the line it adds carries the chat's name as a trailing comment. Names go stale,
 so the comment is regenerated whenever its line is rewritten rather than read
 back and trusted.
 
-Four things the submenu deliberately does:
+Three things the submenu deliberately does:
 
-- **It leaves the catch-alls out.** `@private`, `@groups`, `@channels` and
-  `@bots` match by chat type; there is no membership to toggle. Their defaults
-  are set in the file and explained in the preset box.
-- **It offers locked lists like any other.** `locked` stops a *preset*
-  overriding what a list does. It says nothing about who is in it, and an
-  Emergency list nobody can add to is not much of an emergency list.
-- **It does not appear at all** unless you have written a list of your own, so
-  an unconfigured fork's menus are exactly upstream's.
+- **It offers every list**, including one that matches by `kinds`. Adding a chat
+  to a rule-based list writes an explicit member id, which is how you pull one
+  chat out of a rule that would otherwise have swept it up somewhere else.
+- **It does not appear at all** unless you have written a list, so an
+  unconfigured fork's menus are exactly upstream's.
 - **It names what is deciding the chat**, while a preset is running: a first
-  line reading `In 'Essentials': shown` or `In '@bots': hidden`, which opens the
-  preset box. That is the question that brings anyone to this menu, and the
-  answer is as often a catch-all as one of your own lists.
+  line reading `In 'Essentials': shown` or `In 'bots': hidden`, which opens the
+  preset box. That is the question that brings anyone to this menu.
 
-That last line reports what actually happened to the chat, not what the list
-asked for. The two come apart for a chat an exempt folder rescued - `@bots`
-says hide, the folder says keep - and there the line reads
-`In '@bots': silenced, shown by a folder`. Printing the list's verdict instead
-would put the word `hidden` over a chat sitting in the list, which is worse
-than saying nothing. A gated group reads `hidden until a mention` for the same
+When no entry claims the chat the line says so - `In no list 'work' names:
+hidden` - because that is a real answer under this model rather than a gap.
+
+The line reports what actually happened to the chat, not what the entry asked
+for. The two come apart for a chat a folder pulled back in: the entry says hide,
+`include_in_main_view_p` says keep, and there it reads
+`In 'bots': silenced, shown by a folder`. Printing the entry's verdict instead
+would put the word `hidden` over a chat sitting in the list, which is worse than
+saying nothing. A gated group reads `hidden until a mention` for the same
 reason: that is where it stands right now.
 
-Membership is global, not per preset. A chat is in Essentials or it is not;
-what changes between presets is what Essentials *does*. The line above tells
-you which list won, which matters because the first list in `list_order`
-holding a chat is the one that decides it - adding a chat to a list that ranks
-below one already holding it changes nothing, and the line is how you see that.
+Membership is global, not per preset. A chat is in Essentials or it is not; what
+changes between presets is what Essentials *does*, and whether the preset names
+it at all. The line above tells you which entry won, which matters because
+priority is per preset now - the same chat in the same two lists can be decided
+by a different one under a different preset, and adding it to a list that entry
+ranks below one already holding it changes nothing there.
 
 Writing the file reloads it, which re-resolves the preset and rebuilds the chat
 lists, so a chat you have just hidden or revealed moves immediately. If the
@@ -751,7 +892,7 @@ answer sooner than the next thirty seconds would.
 ## OS focus sync
 
     [focus_sync]
-    enabled      = true
+    enabled_p    = true
     enter_preset = "work"
     exit_preset  = "previous"
 
@@ -805,14 +946,18 @@ a focus session stands, because nothing fires again until focus itself changes;
 and when focus does end, the preset in force is not the one focus imposed, so it
 is left alone.
 
-Turning `enabled` off while focus is holding a preset hands that preset back. A
+Turning `enabled_p` off while focus is holding a preset hands that preset back. A
 preset that nothing on screen explains and nothing still running would ever lift
 is the one state this must not be able to reach.
 
 ## Not yet implemented
 
+- A preset's extra views. `[[presets.x.views]]` parses, resolves and survives
+  the cache; nothing draws them yet. See "Extra views" above for what they mean.
 - A chat entering a silenced rule-based folder does not refresh the cached
   mute immediately, as above.
+- No hotkey for switching presets. `Purple::ListenPeekHotkey()` generalises to
+  one; nothing has asked yet.
 
 ## Cloud unread counts
 
@@ -823,7 +968,11 @@ resolves itself as soon as the entries load.
 
 ## Implementation
 
+    Telegram/SourceFiles/purple/purple_settings.{h,cpp}   the model and parser
     Telegram/SourceFiles/purple/purple_engine.{h,cpp}     resolution, pure data
+    Telegram/SourceFiles/purple/purple_state.{h,cpp}      state.toml, the cache
+    Telegram/SourceFiles/purple/purple_splice.{h,cpp}     the surgical writes
+    Telegram/SourceFiles/purple/purple_config.{h,cpp}     file IO and watcher
     Telegram/SourceFiles/purple/purple_focus.{h,cpp}      OS focus sync
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
     Telegram/SourceFiles/purple/purple_list_menu.{h,cpp}  list membership menu
@@ -831,11 +980,13 @@ resolves itself as soon as the entries load.
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
     Telegram/SourceFiles/purple/purple_schedule.{h,cpp}   the schedule clock
 
-`purple_engine` has no tdesktop dependency at all - it never sees a `PeerData`,
-only an id and a `ChatKind` - for the same reason the parser does not: every
-policy in the spec is a rule about data, and rules about data are far easier to
-prove outside a running app. `purple/test_config.sh` compiles it standalone and
-covers the resolution acceptance tests along with the config ones.
+The first four have no tdesktop dependency at all. The engine never sees a
+`PeerData`, only an id and a `ChatKind`, for the same reason the parser does
+not: every policy here is a rule about data, and rules about data are far easier
+to prove outside a running app. `purple/test_config.sh` compiles those four
+standalone and runs the whole acceptance suite against them in about a second -
+which is also a constraint, since anything tdesktop-shaped that creeps into one
+of them breaks the harness.
 
 `purple_gate` is the single file that knows both sides. It classifies a
 `PeerData` into a `ChatKind`, maps its `PeerId` to the plain numeric id the
