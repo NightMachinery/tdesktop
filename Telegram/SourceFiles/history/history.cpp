@@ -3394,18 +3394,15 @@ bool History::purpleInExemptFolder() const {
 	return false;
 }
 
-bool History::purpleHiddenFromChatList() const {
+bool History::purpleHiddenFromView() const {
 	if (!Purple::Filtering()) {
 		return false;
 	}
 	const auto visible = Purple::VisibleFor(peer);
 	if (!visible.show) {
 		// An exempt folder is the one way out: its chats ignore the preset's
-		// hiding entirely, which means they stay in every list including All
-		// chats. Hiding them from the main list but not the folder would put
-		// an entry in a filter that is absent from the main list, and tdesktop
-		// guarantees the opposite everywhere - Entry::notifyUnreadStateChange
-		// asserts on it.
+		// hiding entirely, so they show in the preset's view alongside the
+		// lists it did not hide.
 		return !purpleInExemptFolder();
 	} else if (visible.mentionGated && !chatListUnreadState().mentions) {
 		// A gated group appears exactly while its mention badge would be lit,
@@ -3422,12 +3419,19 @@ bool History::purpleHiddenFromChatList() const {
 	return false;
 }
 
+bool History::purpleHiddenFromChatList() const {
+	// Only a preset that asked for it takes a chat out of the app rather than
+	// out of its own view. Everything else keeps the chat where it is and
+	// leaves it out of the view alone, which is what lets it stay pinned,
+	// searchable and reachable from the forward picker. See
+	// docs/purple/work_mode.md.
+	return Purple::HideEverywhere() && purpleHiddenFromView();
+}
+
 bool History::shouldBeInChatList() const {
-	// Purple: a work preset hides whole lists of chats. This has to come before
-	// the pinned shortcut below, or pinning a chat would exempt it from every
-	// preset. Dropping the entry here is also what keeps the unread badges
-	// honest for free: MainList accumulates its counters as entries come and
-	// go, so a chat that is in no list is in no total either.
+	// Purple: a preset asking to hide everywhere really does drop the entry.
+	// This has to come before the pinned shortcut below, or pinning a chat
+	// would exempt it from every preset.
 	if (purpleHiddenFromChatList()) {
 		return false;
 	}

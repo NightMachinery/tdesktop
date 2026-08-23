@@ -112,15 +112,16 @@ void Proxy::setCount(int count) {
 	// unread mention, so this edge decides chat list membership and not just
 	// the badge drawn on it. It has to sit outside the inChatList() branch
 	// above, because the chat that needs bringing back is precisely the one
-	// that is not in the list. It also has to come after that branch: for a
-	// forum the parent's mention count is the sum over its topics, and the
-	// call above is what updates the sum.
+	// that is not in the preset's view. It also has to come after that branch:
+	// for a forum the parent's mention count is the sum over its topics, and
+	// the call above is what updates the sum.
 	if (_type == Type::Mentions && Purple::Filtering()) {
 		const auto history = _thread->owningHistory();
 		if (Purple::VisibleFor(history->peer).mentionGated) {
-			const auto was = history->inChatList();
+			const auto view = Data::kPurpleViewFilterId;
+			const auto was = history->inChatList(view);
 			history->purpleRefreshChatListMembership();
-			if (history->inChatList() != was) {
+			if (history->inChatList(view) != was) {
 				// The one event that explains a chat appearing or vanishing on
 				// its own, so it is worth a line. It is rare by construction:
 				// only gated chats reach here, and only on the edge.

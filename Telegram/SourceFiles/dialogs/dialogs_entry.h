@@ -146,8 +146,17 @@ public:
 
 	// Purple: whether a work preset is what is keeping this entry out of the
 	// chat list, rather than it having left for a reason of its own. Only
-	// histories are ever hidden that way. See removeFromChatList().
+	// histories are ever hidden that way, and only under a preset that asked
+	// to hide everywhere. See removeFromChatList().
 	[[nodiscard]] virtual bool purpleHiddenFromChatList() const {
+		return false;
+	}
+
+	// Purple: whether a work preset leaves this entry out of the view it shows
+	// in place of All chats. Folders are never left out - the Archive row
+	// belongs to the view exactly like it belongs to All chats - and neither
+	// are topics or sublists, which live in lists of their own.
+	[[nodiscard]] virtual bool purpleHiddenFromView() const {
 		return false;
 	}
 

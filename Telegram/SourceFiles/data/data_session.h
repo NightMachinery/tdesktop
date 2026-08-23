@@ -922,6 +922,20 @@ public:
 	[[nodiscard]] not_null<Dialogs::IndexedList*> contactsList();
 	[[nodiscard]] not_null<Dialogs::IndexedList*> contactsNoChatsList();
 
+	// Purple: the chat list a work preset shows in place of All chats. Holds
+	// whatever the main list holds, minus the chats the preset hides, and is
+	// empty whenever no preset is running. See kPurpleViewFilterId.
+	[[nodiscard]] not_null<Dialogs::MainList*> purpleViewList();
+
+	// Purple: the list the app-wide unread badge should count. The main list
+	// is complete now - it keeps the chats a preset hides - so counting it
+	// would put the badge at odds with everything on screen.
+	[[nodiscard]] not_null<const Dialogs::MainList*> purpleBadgeList() const;
+
+	// Purple: which chat list purpleBadgeList() is, for callers that have to
+	// ask an entry whether it is in it.
+	[[nodiscard]] FilterId purpleBadgeFilterId() const;
+
 	struct ChatListEntryRefresh {
 		Dialogs::Key key;
 		Dialogs::PositionChange moved;
@@ -1035,6 +1049,14 @@ private:
 	// fires and we re-evaluate them ourselves. See docs/purple/work_mode.md.
 	void setupPurpleWorkMode();
 	void refreshPurpleWorkMode();
+
+	// Purple: rebuilds the preset view from scratch, and empties it when no
+	// preset is running. Membership is maintained entry by entry the rest of
+	// the time; this is for the moment the rules themselves change.
+	void refreshPurpleView();
+
+	// Purple: retakes the view's copy of the main list's pinned order.
+	void refreshPurpleViewPinned();
 
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
@@ -1341,6 +1363,9 @@ private:
 		std::vector<not_null<ViewElement*>>> _views;
 
 	rpl::event_stream<> _pinnedDialogsOrderUpdated;
+
+	// Purple: re-entrancy guard for refreshPurpleViewPinned().
+	bool _purpleViewPinning = false;
 
 	base::flat_set<not_null<ViewElement*>> _heavyViewParts;
 

@@ -483,7 +483,12 @@ void Entry::removeFromChatList(
 	// order - and it goes with f_force, which unpins them on the account and on
 	// every other device. Upstream's unpin here is a mirror of a chat that has
 	// genuinely gone; a hidden one has not gone anywhere.
-	if (isPinnedDialog(filterId) && !purpleHiddenFromChatList()) {
+	//
+	// The preset view's own pinned list is a mirror of the main one, rebuilt
+	// whenever either moves, so nothing here should touch it either.
+	if (isPinnedDialog(filterId)
+		&& !purpleHiddenFromChatList()
+		&& !Data::IsPurpleView(filterId)) {
 		list->pinned()->setPinned(this, false);
 		owner().notifyPinnedDialogsOrderUpdated();
 	}

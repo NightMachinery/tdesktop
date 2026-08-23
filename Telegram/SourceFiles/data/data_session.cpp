@@ -1846,9 +1846,9 @@ void Session::refreshPurpleWorkMode() {
 	}
 	auto chats = 0;
 	auto hidden = 0;
-	auto gated = 0;
 	auto mentioned = 0;
 	auto silenced = 0;
+	auto gated = std::vector<not_null<History*>>();
 	for (const auto peer : peers) {
 		// Mute first: hiding the chat takes its unread out of every running
 		// total, and it has to already be counted as muted or not when it
@@ -1866,12 +1866,15 @@ void Session::refreshPurpleWorkMode() {
 		if (!visible.notify) {
 			++silenced;
 		}
-		history->purpleRefreshChatListMembership();
 		if (visible.mentionGated) {
-			++gated;
-			if (history->inChatList()) {
-				++mentioned;
-			}
+			gated.push_back(history);
+		}
+		history->purpleRefreshChatListMembership();
+	}
+	refreshPurpleView();
+	for (const auto &history : gated) {
+		if (history->inChatList(kPurpleViewFilterId)) {
+			++mentioned;
 		}
 	}
 
@@ -1879,13 +1882,48 @@ void Session::refreshPurpleWorkMode() {
 	// and the usual cause is a list named slightly wrong. Say what it did once
 	// per change rather than leaving it to be guessed at from the chat list.
 	// Gated groups are counted apart from hidden ones because they are not the
-	// same claim: a gated group is only out of the list while it has nothing
+	// same claim: a gated group is only out of the view while it has nothing
 	// to say, so the count that means anything is how many of them are still
 	// showing. Zero gated means the gate is off rather than that it did
 	// nothing.
 	LOG(("Purple: %1 of %2 loaded chats hidden, %3 mention-gated "
-		"(%4 showing), %5 silenced."
-		).arg(hidden).arg(chats).arg(gated).arg(mentioned).arg(silenced));
+		"(%4 showing), %5 silenced, view holds %6."
+		).arg(hidden).arg(chats).arg(gated.size()).arg(mentioned).arg(silenced
+		).arg(purpleViewList()->indexed()->size()));
+}
+
+void Session::refreshPurpleView() {
+	const auto viewList = purpleViewList();
+	if (!Purple::Filtering()) {
+		// Walk the view rather than the main list: an entry can outlive its
+		// place in the main list, and leaving it linked to a list nothing will
+		// ever refresh again is how a stale row survives into the next preset.
+		auto stale = std::vector<not_null<Dialogs::Entry*>>();
+		for (const auto &row : viewList->indexed()->all()) {
+			stale.push_back(row->entry());
+		}
+		for (const auto &entry : stale) {
+			entry->removeFromChatList(kPurpleViewFilterId, viewList);
+			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
+				.key = Dialogs::Key(entry),
+				.filterId = kPurpleViewFilterId,
+				.existenceChanged = true
+			});
+		}
+		return;
+	}
+
+	// The main list is what the view is drawn from, so it is also the complete
+	// set of candidates - and unlike a walk over the peers it includes the
+	// Archive row, which is not a peer at all.
+	auto entries = std::vector<not_null<Dialogs::Entry*>>();
+	for (const auto &row : _chatsList.indexed()->all()) {
+		entries.push_back(row->entry());
+	}
+	for (const auto &entry : entries) {
+		refreshChatListEntry(entry);
+	}
+	refreshPurpleViewPinned();
 }
 
 Session::~Session() = default;
@@ -2442,7 +2480,34 @@ void Session::sendHistoryChangeNotifications() {
 }
 
 void Session::notifyPinnedDialogsOrderUpdated() {
+	refreshPurpleViewPinned();
 	_pinnedDialogsOrderUpdated.fire({});
+}
+
+void Session::refreshPurpleViewPinned() {
+	// Purple: the view's pinned list is a copy of the main list's, minus the
+	// chats the preset hides. Pinning is an account-level fact, so the view
+	// must not own pins of its own - it only reflects them, and the one place
+	// that says the order moved is where the copy is retaken.
+	//
+	// The guard is what stops that copy reporting itself: applying a pinned
+	// index re-sorts the entry, which comes back through here.
+	if (!Purple::Filtering() || _purpleViewPinning) {
+		return;
+	}
+	_purpleViewPinning = true;
+	auto pinned = std::vector<not_null<History*>>();
+	for (const auto &key : _chatsList.pinned()->order()) {
+		// Folders are sorted fixed-on-top rather than by pinned index, so the
+		// archive never needs a place here even when the server sends one.
+		if (const auto history = key.history()) {
+			if (history->inChatList(kPurpleViewFilterId)) {
+				pinned.push_back(history);
+			}
+		}
+	}
+	purpleViewList()->pinned()->applyList(pinned);
+	_purpleViewPinning = false;
 }
 
 rpl::producer<> Session::pinnedDialogsOrderUpdated() const {
@@ -2654,7 +2719,10 @@ void Session::setChatPinned(
 		bool pinned) {
 	Expects(key.entry()->folderKnown());
 
-	const auto list = (filterId
+	// Purple: pinning in the preset view is pinning in the chat list. The view
+	// only mirrors the order, so writing to its own list would be writing to
+	// something the next mirror overwrites.
+	const auto list = ((filterId && !IsPurpleView(filterId))
 		? chatsFilters().chatsList(filterId)
 		: chatsListFor(key.entry()))->pinned();
 	list->setPinned(key, pinned);
@@ -2803,6 +2871,11 @@ bool Session::pinnedCanPin(
 		not_null<History*> history) const {
 	Expects(filterId != 0);
 
+	// Purple: the view holds the main list's pins, so the limit that applies
+	// is the ordinary chat pin limit.
+	if (IsPurpleView(filterId)) {
+		return pinnedCanPin(history);
+	}
 	const auto &list = chatsFilters().list();
 	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
 	return (i == end(list))
@@ -2923,9 +2996,12 @@ void Session::reorderTwoPinnedChats(
 	Expects(filterId || (key1.entry()->folder() == key2.entry()->folder()));
 
 	const auto topic = key1.topic();
+	// Purple: dragging pins about inside the view drags the main list's, for
+	// the same reason as setChatPinned above. The two are adjacent in the
+	// view and may not be in the main list, which reorder() handles.
 	const auto list = topic
 		? topic->forum()->topicsList()
-		: filterId
+		: (filterId && !IsPurpleView(filterId))
 		? chatsFilters().chatsList(filterId)
 		: chatsListFor(key1.entry());
 	list->pinned()->reorder(key1, key2);
@@ -3438,12 +3514,17 @@ HistoryItem *Session::addNewMessage(
 	return result;
 }
 
+// Purple: every one of these counts purpleBadgeList() rather than _chatsList.
+// They are the same object whenever no preset is running, and while one is the
+// main list deliberately still holds the chats it hides - so counting it would
+// leave the dock badge claiming unread messages that nothing on screen can
+// account for. See Session::purpleBadgeList().
 int Session::unreadBadge() const {
-	return computeUnreadBadge(_chatsList.unreadState());
+	return computeUnreadBadge(purpleBadgeList()->unreadState());
 }
 
 int Session::unreadWithMentionsBadge() const {
-	auto state = _chatsList.unreadState();
+	auto state = purpleBadgeList()->unreadState();
 	if (state.mentions) {
 		state.messages -= state.mentions;
 	}
@@ -3451,33 +3532,35 @@ int Session::unreadWithMentionsBadge() const {
 }
 
 bool Session::unreadBadgeMuted() const {
-	return computeUnreadBadgeMuted(_chatsList.unreadState());
+	return computeUnreadBadgeMuted(purpleBadgeList()->unreadState());
 }
 
 bool Session::unreadWithMentionsBadgeMuted() const {
-	const auto state = _chatsList.unreadState();
+	const auto state = purpleBadgeList()->unreadState();
 	return !state.mentions && computeUnreadBadgeMuted(state);
 }
 
 int Session::unreadBadgeIgnoreOne(Dialogs::Key key) const {
-	const auto remove = (key && key.entry()->inChatList())
+	// Purple: ask about the list being counted. Subtracting a chat the badge
+	// list never held would take the total below what is on screen.
+	const auto remove = (key && key.entry()->inChatList(purpleBadgeFilterId()))
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadge(_chatsList.unreadState() - remove);
+	return computeUnreadBadge(purpleBadgeList()->unreadState() - remove);
 }
 
 bool Session::unreadBadgeMutedIgnoreOne(Dialogs::Key key) const {
 	if (!Core::App().settings().includeMutedCounter()) {
 		return false;
 	}
-	const auto remove = (key && key.entry()->inChatList())
+	const auto remove = (key && key.entry()->inChatList(purpleBadgeFilterId()))
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadgeMuted(_chatsList.unreadState() - remove);
+	return computeUnreadBadgeMuted(purpleBadgeList()->unreadState() - remove);
 }
 
 int Session::unreadOnlyMutedBadge() const {
-	const auto state = _chatsList.unreadState();
+	const auto state = purpleBadgeList()->unreadState();
 	return Core::App().settings().countUnreadMessages()
 		? state.messagesMuted
 		: state.chatsMuted;
@@ -5433,6 +5516,24 @@ not_null<Dialogs::IndexedList*> Session::contactsNoChatsList() {
 	return &_contactsNoChatsList;
 }
 
+not_null<Dialogs::MainList*> Session::purpleViewList() {
+	return chatsFilters().chatsList(kPurpleViewFilterId);
+}
+
+FilterId Session::purpleBadgeFilterId() const {
+	return Purple::Filtering() ? kPurpleViewFilterId : FilterId();
+}
+
+not_null<const Dialogs::MainList*> Session::purpleBadgeList() const {
+	if (!Purple::Filtering()) {
+		return &_chatsList;
+	}
+	// The view is created on demand like every other filter list, and asking
+	// for the badge is as good a demand as any - it is asked for constantly
+	// and always outlives the first call.
+	return const_cast<Session*>(this)->purpleViewList();
+}
+
 void Session::refreshChatListEntry(Dialogs::Key key) {
 	Expects(key.entry()->folderKnown());
 
@@ -5455,6 +5556,46 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 	if (event) {
 		_chatListEntryRefreshes.fire(std::move(event));
 	}
+
+	// Purple: the preset view, which is a filter no server knows about. It has
+	// to be maintained here rather than folded into shouldBeInChatList()
+	// because that is the whole point of the design: the main list above stays
+	// complete and only this one view leaves anything out.
+	//
+	// Folders belong to it as they belong to All chats, which is why this is
+	// above the history-only work below - the Archive row would otherwise
+	// disappear the moment a preset started.
+	if (Purple::Filtering()) {
+		const auto id = kPurpleViewFilterId;
+		const auto viewList = purpleViewList();
+		const auto belongs = (history || entry->asFolder())
+			// Archived chats are not in All chats and are not in the view;
+			// topics and sublists live in lists of their own.
+			&& !entry->folder()
+			&& !entry->purpleHiddenFromView();
+		auto event = ChatListEntryRefresh{ .key = key, .filterId = id };
+		if (belongs) {
+			event.existenceChanged = !entry->inChatList(id);
+			if (event.existenceChanged) {
+				entry->addToChatList(id, viewList);
+			} else {
+				event.moved = entry->adjustByPosInChatList(id, viewList);
+			}
+		} else if (entry->inChatList(id)) {
+			entry->removeFromChatList(id, viewList);
+			event.existenceChanged = true;
+		}
+		const auto joinedOrLeft = event.existenceChanged;
+		if (event) {
+			_chatListEntryRefreshes.fire(std::move(event));
+		}
+		if (joinedOrLeft) {
+			// A pinned chat that has just entered the view needs its place in
+			// the order, and one that has just left needs to stop holding it.
+			refreshPurpleViewPinned();
+		}
+	}
+
 	if (!history) {
 		return;
 	}
@@ -5535,6 +5676,15 @@ void Session::removeChatListEntry(Dialogs::Key key) {
 				.existenceChanged = true
 			});
 		}
+	}
+	// Purple: same as the loop above, for the one filter that is not in it.
+	if (entry->inChatList(kPurpleViewFilterId)) {
+		entry->removeFromChatList(kPurpleViewFilterId, purpleViewList());
+		_chatListEntryRefreshes.fire(ChatListEntryRefresh{
+			.key = key,
+			.filterId = kPurpleViewFilterId,
+			.existenceChanged = true
+		});
 	}
 	const auto mainList = chatsListFor(entry);
 	entry->removeFromChatList(0, mainList);

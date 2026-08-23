@@ -25,6 +25,27 @@ namespace Data {
 
 class Session;
 
+// Purple: the id of the chat list a work preset shows in place of All chats.
+// It is a filter like any other as far as the chat list machinery is
+// concerned, which is the whole point - the main list stays complete, so pins,
+// unread totals and "in a filter implies in the main list" all keep working,
+// and the preset only decides what this one view contains.
+//
+// The value is "PURP" as ASCII, which no server will ever hand out - real
+// folder ids are small - and is recognisable on sight in a log line.
+//
+// Positive on purpose, even though "not a real folder" would read better as a
+// negative: the dialogs code already spends `id < 0' on its own sentinels (the
+// side bar's Edit button, FiltersMenu's cleared-drag marker), and a negative id
+// would silently inherit all of that. The places that must not treat the view
+// as an editable folder test IsPurpleView() instead, where the intent is
+// written down. See docs/purple/work_mode.md.
+inline constexpr auto kPurpleViewFilterId = FilterId(0x50555250);
+
+[[nodiscard]] inline bool IsPurpleView(FilterId id) {
+	return (id == kPurpleViewFilterId);
+}
+
 struct ChatFilterTitle {
 	TextWithEntities text;
 	bool isStatic = false;
@@ -251,6 +272,7 @@ private:
 	void loadMoreChatsList(FilterId id);
 
 	void purpleRefreshShown();
+	[[nodiscard]] ChatFilter purpleViewFilter() const;
 
 	const not_null<Session*> _owner;
 

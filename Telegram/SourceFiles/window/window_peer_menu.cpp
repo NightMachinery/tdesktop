@@ -4396,7 +4396,11 @@ void TogglePinnedThread(
 		not_null<Dialogs::Entry*> entry,
 		FilterId filterId,
 		Fn<void()> onToggled) {
-	if (!filterId) {
+	// Purple: pinning inside the preset view is pinning in the chat list. The
+	// view's pinned order is a mirror of the main one, so there is nothing of
+	// its own to toggle and nothing to save to a server that has never heard
+	// of it. See Data::kPurpleViewFilterId.
+	if (!filterId || Data::IsPurpleView(filterId)) {
 		return TogglePinnedThread(controller, entry, onToggled);
 	}
 	const auto history = entry->asHistory();
