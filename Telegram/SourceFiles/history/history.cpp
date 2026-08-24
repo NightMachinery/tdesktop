@@ -3691,10 +3691,17 @@ void History::purpleRefreshShowMode() {
 	const auto was = inChatList(view);
 	purpleRefreshChatListMembership();
 	if (inChatList(view) != was) {
-		// The one event that explains a chat appearing or vanishing with
-		// nobody touching anything, so it is worth a line. It stays rare by
+		// An event that explains a chat appearing or vanishing with nobody
+		// touching anything, so it is worth a line. It stays rare by
 		// construction: only unread-gated chats reach here, and only on the
 		// edge.
+		//
+		// Rarer than it looks, and measured: on an account with real folders
+		// this never fires for a plain message. notifyUnreadStateChange() calls
+		// chatsFilters().refreshHistory() first, which fixes the membership
+		// before Data::Changes delivers here, so `was' already matches. The
+		// subscription earns its keep only when refreshHistory() returns early
+		// on list().empty() - an account with no folders at all.
 		LOG(("Purple: show_mode '%1' %2 peer %3."
 			).arg(Purple::ShowModeName(mode)
 			).arg(was ? u"hid"_q : u"revealed"_q

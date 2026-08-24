@@ -1398,26 +1398,45 @@ is the one state this must not be able to reach.
 Most of this has been exercised on a real account with a live log line to read
 off - `N of M loaded chats never shown, K unread-gated (J showing), view holds
 X` is the regression check, and switching a preset off and on again prints it.
-Three things have not been, and are written down rather than assumed:
 
-- **The app badge with `badge_p = false`.** The folder's own tab losing its
-  count is confirmed. The chats leaving the *app* badge rests on an argument
-  rather than a measurement: `kPurpleQuietFilterId` holds exactly the view
-  members in an uncounted folder, so `view - quiet` subtracts a subset. To
-  check it: read the window title, which carries the total unread when
-  "Total unread count" is on, toggle `badge_p` in `settings.toml`, read it
-  again. No GUI driving needed.
-- **A gated chat leaving the view after being read.** Appearing on unread is
-  confirmed; the open-then-close transition is not. The
-  `setFakeUnreadWhileOpened()` hook stands on the reasoning in "Re-checking
-  it" rather than on an observed failure. Beware when checking: a chat in a
-  list the preset gives `show_mode = "always"` is not gated at all, and reading
-  a badge move as a membership change is the mistake that wasted an afternoon.
-- **Which re-check trigger actually fires for a plain message.**
-  `notifyUnreadStateChange()` also calls `chatsFilters().refreshHistory()` on
-  the same 0-to-1 boundary, so the `Data::Changes` subscription may be
-  redundant there. It is not redundant in general - `refreshHistory()` is
-  guarded on the account having real folders - but that has not been shown.
+The three things this section used to list as unverified were measured on
+2026-08-24. All three held, and the third turned up something.
+
+- **The app badge with `badge_p = false`: measured.** The window title carries
+  the badge, through `Session::unreadBadge()` and so through
+  `purpleBadgeUnread()`. With the Music folder pulled into the view, the title
+  read **2,005,908** with `badge_p = false` and **2,244,361** with it true. The
+  quiet-list subtraction is real, not an argument.
+
+  Note the setup that makes it measurable at all: a folder whose
+  `include_in_main_view` is `"none"` contributes nothing to view 0, so the quiet
+  list is empty and `badge_p` has nothing to subtract. The flag only bites for a
+  folder whose chats are actually in the view.
+
+- **A gated chat leaving the view after being read: confirmed.** With `[recent]`
+  off, marking a close person unread put them in the view, and opening them and
+  then clicking away took them out again on that frame.
+
+  "Mark as unread" is the way to test this without waiting for someone to write
+  to you: `purpleShowModeSatisfied()` counts `state.marks` as a message on
+  purpose, and opening the chat clears the mark, which is exactly the transition
+  in question. It is also reversible, unlike reading somebody's actual messages.
+
+- **Which trigger fires for a plain message: `refreshHistory()`, and the log
+  line is misleading about it.** Neither the entering nor the leaving transition
+  above printed a `show_mode ... revealed/hid` line. That is not a failure - it
+  is `Entry::notifyUnreadStateChange()` calling
+  `chatsFilters().refreshHistory()` first, which reaches
+  `Session::refreshChatListEntry()` and fixes the membership before the
+  `Data::Changes` subscription runs. By the time `purpleRefreshShowMode()`
+  looks, `inChatList(view)` already matches and there is nothing to report.
+
+  So on an account with real folders the `Data::Changes` hook is a no-op for a
+  plain message, and the transition log is effectively dead. It is still not
+  redundant in general: `refreshHistory()` returns early on
+  `list().empty()`, so on an account with no folders at all the subscription is
+  the only path. That half is read off the source rather than measured - it
+  needs an account with no folders, which this is not.
 
 ## A chat with no conversation
 
