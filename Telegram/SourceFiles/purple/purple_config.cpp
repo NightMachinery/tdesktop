@@ -194,6 +194,11 @@ public:
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title);
+	bool setViewPins(
+		const QString &preset,
+		const QString &view,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title);
 
 	[[nodiscard]] const State &state() const;
 	[[nodiscard]] rpl::producer<> stateChanges() const;
@@ -419,6 +424,16 @@ bool Config::removeFromList(
 		u"list '%1'"_q.arg(list));
 }
 
+bool Config::setViewPins(
+		const QString &preset,
+		const QString &view,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	return splice(
+		SetViewPinned(_text, SettingsFilePath(), preset, view, ids, title),
+		u"the pins of view '%1'"_q.arg(view));
+}
+
 void Config::loadState() {
 	_stateText = ReadFile(StateFilePath()).value_or(QString());
 	_state = ParseState(_stateText, StateFilePath());
@@ -515,6 +530,14 @@ bool RemoveFromList(
 		PeerIdValue id,
 		const MemberTitle &title) {
 	return Instance().removeFromList(list, id, title);
+}
+
+bool SetViewPins(
+		const QString &preset,
+		const QString &view,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	return Instance().setViewPins(preset, view, ids, title);
 }
 
 const State &CurrentState() {

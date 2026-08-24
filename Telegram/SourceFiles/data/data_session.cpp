@@ -1907,6 +1907,10 @@ void Session::refreshPurpleView() {
 		if (!viewList || viewList->indexed()->empty()) {
 			continue;
 		}
+		// Before the rows go, while the pins still have entries to point at. A
+		// pinned index nothing clears would outlive its view and reappear the
+		// moment some later preset reused the id.
+		viewList->pinned()->clear();
 		auto stale = std::vector<not_null<Dialogs::Entry*>>();
 		for (const auto &row : viewList->indexed()->all()) {
 			stale.push_back(row->entry());
@@ -1935,6 +1939,14 @@ void Session::refreshPurpleView() {
 		refreshChatListEntry(entry);
 	}
 	refreshPurpleViewPinned();
+
+	// After the membership pass above, not during it: a view's pinned order is
+	// stated over the chats the view holds, and until every row has arrived
+	// there is no way to tell "the file pins a chat this tab does not show"
+	// from "it has not been added yet".
+	for (auto i = 1, count = chatsFilters().purpleViewCount(); i != count; ++i) {
+		refreshPurpleViewPins(i);
+	}
 }
 
 Session::~Session() = default;
@@ -2525,6 +2537,88 @@ void Session::refreshPurpleViewPinned() {
 	_purpleViewPinning = false;
 }
 
+void Session::refreshPurpleViewPins(int index) {
+	Expects(index > 0);
+
+	// Purple: an extra view's order is the preset's own statement, so it is
+	// seeded from settings.toml rather than mirrored from the chat list. An id
+	// the file names that this tab does not hold is not an error and is not
+	// dropped - the chat may not have loaded yet, and savePurpleViewPins()
+	// writes it back where it was.
+	//
+	// Same re-entrancy guard as the mirror above, and for the same reason:
+	// applying a pinned index re-sorts the entry, which comes back through
+	// refreshChatListEntry() and lands here again.
+	if (_purpleViewPinning) {
+		return;
+	}
+	_purpleViewPinning = true;
+	const auto guard = gsl::finally([&] { _purpleViewPinning = false; });
+
+	const auto &wanted = Purple::ExtraViewPins(index - 1);
+	const auto viewList = purpleViewList(index);
+	auto pinned = std::vector<not_null<History*>>();
+	if (!wanted.empty()) {
+		auto byId = base::flat_map<Purple::PeerIdValue, not_null<History*>>();
+		for (const auto &row : viewList->indexed()->all()) {
+			if (const auto history = row->key().history()) {
+				byId.emplace(Purple::IdOf(history->peer), history);
+			}
+		}
+		pinned.reserve(wanted.size());
+		for (const auto id : wanted) {
+			const auto i = byId.find(id);
+			if (i != end(byId)) {
+				pinned.push_back(i->second);
+			}
+		}
+	}
+	viewList->pinned()->applyList(pinned);
+}
+
+void Session::savePurpleViewPins(int index) {
+	Expects(index > 0);
+
+	const auto viewList = purpleViewList(index);
+	auto ids = std::vector<Purple::PeerIdValue>();
+	for (const auto &key : viewList->pinned()->order()) {
+		if (const auto history = key.history()) {
+			if (const auto id = Purple::IdOf(history->peer)) {
+				ids.push_back(id);
+			}
+		}
+	}
+	auto present = base::flat_set<Purple::PeerIdValue>();
+	for (const auto &row : viewList->indexed()->all()) {
+		if (const auto history = row->key().history()) {
+			present.emplace(Purple::IdOf(history->peer));
+		}
+	}
+	// An id the file pins that this tab does not currently hold keeps the place
+	// the file gave it. Dropping it would silently unpin whatever it names the
+	// first time anything else in the tab moved, and the usual reason a pinned
+	// chat is missing is that it has not finished loading.
+	const auto &before = Purple::ExtraViewPins(index - 1);
+	for (auto i = 0, count = int(before.size()); i != count; ++i) {
+		if (!present.contains(before[i])) {
+			ids.insert(ids.begin() + std::min(i, int(ids.size())), before[i]);
+		}
+	}
+
+	const auto title = Purple::TitleResolver(&session());
+	crl::on_main(&session(), [=, this] {
+		// The write lands back here as a settings reload, which rebuilds every
+		// chat list. Doing that from inside the drag handler that asked for it
+		// would be pulling the rows out from under it.
+		if (!Purple::SaveExtraViewPins(index - 1, ids, title)) {
+			// Refused: the file does not parse, or the view is written inline.
+			// Put the tab back to what the file says rather than leave it
+			// showing an order nothing is going to remember.
+			refreshPurpleViewPins(index);
+		}
+	});
+}
+
 rpl::producer<> Session::pinnedDialogsOrderUpdated() const {
 	return _pinnedDialogsOrderUpdated.events();
 }
@@ -2734,7 +2828,18 @@ void Session::setChatPinned(
 		bool pinned) {
 	Expects(key.entry()->folderKnown());
 
-	// Purple: pinning in the preset view is pinning in the chat list. The view
+	// Purple: an extra view keeps pins of its own, in settings.toml, because
+	// its order is the preset's statement about its own tab and has nowhere
+	// else to live. Pinning there does not pin in the chat list.
+	const auto view = IsPurpleView(filterId) ? PurpleViewIndex(filterId) : 0;
+	if (view > 0) {
+		purpleViewList(view)->pinned()->setPinned(key, pinned);
+		savePurpleViewPins(view);
+		notifyPinnedDialogsOrderUpdated();
+		return;
+	}
+
+	// Pinning in the preset's main view is pinning in the chat list. That view
 	// only mirrors the order, so writing to its own list would be writing to
 	// something the next mirror overwrites.
 	const auto list = ((filterId && !IsPurpleView(filterId))
@@ -2886,10 +2991,24 @@ bool Session::pinnedCanPin(
 		not_null<History*> history) const {
 	Expects(filterId != 0);
 
-	// Purple: the view holds the main list's pins, so the limit that applies
-	// is the ordinary chat pin limit.
+	// Purple: the main view holds the main list's pins, so the limit that
+	// applies is the ordinary chat pin limit. An extra view keeps its own, in a
+	// local file no server bounds - but the same allowance is what keeps a tab
+	// from turning into a wall of pinned rows, so it uses that too.
 	if (IsPurpleView(filterId)) {
-		return pinnedCanPin(history);
+		const auto view = PurpleViewIndex(filterId);
+		if (!view) {
+			return pinnedCanPin(history);
+		}
+		const auto pinned = const_cast<Session*>(this)
+			->purpleViewList(view)
+			->pinned();
+		const auto limit = pinnedChatsLimit((Data::Folder*)nullptr);
+		return (int(pinned->order().size()) < limit)
+			|| ranges::contains(
+				pinned->order(),
+				history.get(),
+				&Dialogs::Key::history);
 	}
 	const auto &list = chatsFilters().list();
 	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
@@ -3011,11 +3130,17 @@ void Session::reorderTwoPinnedChats(
 	Expects(filterId || (key1.entry()->folder() == key2.entry()->folder()));
 
 	const auto topic = key1.topic();
-	// Purple: dragging pins about inside the view drags the main list's, for
-	// the same reason as setChatPinned above. The two are adjacent in the
-	// view and may not be in the main list, which reorder() handles.
+	// Purple: dragging pins about inside the preset's main view drags the main
+	// list's, for the same reason as setChatPinned above - the two are adjacent
+	// in the view and may not be in the main list, which reorder() handles. An
+	// extra view owns its order, so there it drags its own.
+	const auto view = (!topic && IsPurpleView(filterId))
+		? PurpleViewIndex(filterId)
+		: 0;
 	const auto list = topic
 		? topic->forum()->topicsList()
+		: (view > 0)
+		? purpleViewList(view)
 		: (filterId && !IsPurpleView(filterId))
 		? chatsFilters().chatsList(filterId)
 		: chatsListFor(key1.entry());
@@ -5608,11 +5733,20 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		if (event) {
 			_chatListEntryRefreshes.fire(std::move(event));
 		}
-		if (joinedOrLeft && !i) {
+		if (!joinedOrLeft) {
+			continue;
+		} else if (!i) {
 			// A pinned chat that has just entered the main view needs its place
 			// in the order, and one that has just left needs to stop holding it.
-			// Extra views do not mirror those pins - see refreshPurpleViewPinned.
 			refreshPurpleViewPinned();
+		} else if (history && ranges::contains(
+				Purple::ExtraViewPins(i - 1),
+				Purple::IdOf(history->peer))) {
+			// The same for an extra view, except that the order it is taking a
+			// place in is the file's. Tested against what the file pins rather
+			// than what the tab currently shows, so a chat that loads late still
+			// lands where the preset put it.
+			refreshPurpleViewPins(i);
 		}
 	}
 

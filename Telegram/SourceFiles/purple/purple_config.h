@@ -56,6 +56,15 @@ bool RemoveFromList(
 	PeerIdValue id,
 	const MemberTitle &title);
 
+// The pinned order of one of a preset's extra views, which the app owns the
+// same way it owns list membership: the file is where it lives, and dragging a
+// row is an edit to the file. See SetViewPinned().
+bool SetViewPins(
+	const QString &preset,
+	const QString &view,
+	const std::vector<PeerIdValue> &ids,
+	const MemberTitle &title);
+
 [[nodiscard]] const State &CurrentState();
 [[nodiscard]] rpl::producer<> StateChanges();
 

@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
+#include "data/data_session.h"
+#include "main/main_session.h"
 #include "purple/purple_config.h"
 
 #include <QtCore/QDateTime>
@@ -196,6 +198,26 @@ PeerIdValue IdOf(not_null<const PeerData*> peer) {
 	return 0;
 }
 
+MemberTitle TitleResolver(not_null<Main::Session*> session) {
+	const auto owner = &session->data();
+	return [=](PeerIdValue id) {
+		const auto bare = BareId(id);
+		// The file keeps the bare id, which is all IdOf() ever had, so the type
+		// has to be guessed back. Bare ids are unique across the three kinds in
+		// practice; if they ever were not, the worst case is a stale name in a
+		// comment nothing reads back.
+		const auto peer = [&]() -> PeerData* {
+			if (const auto user = owner->peerLoaded(peerFromUser(bare))) {
+				return user;
+			} else if (const auto chat = owner->peerLoaded(peerFromChat(bare))) {
+				return chat;
+			}
+			return owner->peerLoaded(peerFromChannel(bare));
+		}();
+		return peer ? peer->name() : QString();
+	};
+}
+
 const Resolved &ActiveResolved() {
 	return Instance().resolved();
 }
@@ -232,6 +254,26 @@ bool ExtraViewHolds(int index, not_null<const PeerData*> peer) {
 		views[index],
 		IdOf(peer),
 		KindOf(peer));
+}
+
+const std::vector<PeerIdValue> &ExtraViewPins(int index) {
+	static const auto kNone = std::vector<PeerIdValue>();
+	const auto &views = ExtraViews();
+	return (index < 0 || index >= int(views.size()))
+		? kNone
+		: views[index].pinned;
+}
+
+bool SaveExtraViewPins(
+		int index,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	const auto &resolved = Instance().resolved();
+	const auto &views = ExtraViews();
+	if (index < 0 || index >= int(views.size())) {
+		return false;
+	}
+	return SetViewPins(resolved.preset, views[index].name, ids, title);
 }
 
 bool Filtering() {

@@ -498,8 +498,9 @@ void Entry::removeFromChatList(
 	// every other device. Upstream's unpin here is a mirror of a chat that has
 	// genuinely gone; a hidden one has not gone anywhere.
 	//
-	// The preset view's own pinned list is a mirror of the main one, rebuilt
-	// whenever either moves, so nothing here should touch it either.
+	// A preset view's own pinned list is not this list's to edit either: the
+	// main view mirrors the chat list and an extra view is seeded from
+	// settings.toml, and both are retaken when a chat joins or leaves.
 	if (isPinnedDialog(filterId)
 		&& !purpleHiddenFromChatList()
 		&& !Data::IsPurpleView(filterId)) {

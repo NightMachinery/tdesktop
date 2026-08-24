@@ -4426,7 +4426,36 @@ void TogglePinnedThread(
 		not_null<Dialogs::Entry*> entry,
 		FilterId filterId,
 		Fn<void()> onToggled) {
-	// Purple: pinning inside the preset view is pinning in the chat list. The
+	// Purple: an extra view owns its pinned order and keeps it in
+	// settings.toml, so this toggles the tab's own list and the account never
+	// hears about it. Data::Session::setChatPinned() writes the file.
+	const auto view = Data::IsPurpleView(filterId)
+		? Data::PurpleViewIndex(filterId)
+		: 0;
+	if (view > 0) {
+		const auto history = entry->asHistory();
+		if (!history) {
+			return;
+		}
+		const auto owner = &history->owner();
+		const auto isPinned = !history->isPinnedDialog(filterId);
+		if (isPinned && !owner->pinnedCanPin(filterId, history)) {
+			// Not FilterPinsLimitBox: the allowance being spent is the ordinary
+			// chat one, and this is not a folder to offer more of.
+			controller->show(Box(PinsLimitBox, &history->session()));
+			return;
+		}
+		owner->setChatPinned(history, filterId, isPinned);
+		if (isPinned) {
+			controller->content()->dialogsToUp();
+			if (onToggled) {
+				onToggled();
+			}
+		}
+		return;
+	}
+
+	// Pinning inside the preset's main view is pinning in the chat list. That
 	// view's pinned order is a mirror of the main one, so there is nothing of
 	// its own to toggle and nothing to save to a server that has never heard
 	// of it. See Data::kPurpleViewFilterId.

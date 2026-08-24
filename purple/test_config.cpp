@@ -1041,6 +1041,162 @@ void TestNameSanitising() {
 	CHECK(Parse(result.text).ok());
 }
 
+// A preset with two views, the first of them already pinning somebody. The
+// pinned array is written the way the splice writes one, so a round trip can be
+// checked byte for byte rather than "near enough".
+[[nodiscard]] QString Viewed() {
+	return uR"(# my settings
+
+[lists.a]
+kinds = ["private"]
+
+[presets.work]
+list_order = [ { list = "a" } ]
+
+# the tab I actually watch
+[[presets.work.views]]
+name = "Focus"
+pinned = [
+  123456789, # Ali Rezaei
+]
+list_order = [ { list = "a" } ]
+
+[[presets.work.views]]
+name = "Rest"
+list_order = [ { list = "a" } ]
+)"_q;
+}
+
+void TestSpliceViewPinned() {
+	Begin("splice view pins");
+
+	using Ids = std::vector<Purple::PeerIdValue>;
+	const auto before = Viewed();
+	CHECK_EQ(Purple::ViewPinned(before, Path(), u"work"_q, u"Focus"_q),
+		(Ids{ 123456789 }));
+	CHECK(Purple::ViewPinned(before, Path(), u"work"_q, u"Rest"_q).empty());
+
+	// Reordering rewrites the array and nothing else in the file.
+	const auto moved = Purple::SetViewPinned(
+		before,
+		Path(),
+		u"work"_q,
+		u"Focus"_q,
+		Ids{ 987654321, 123456789 },
+		Titles());
+	CHECK(moved.ok());
+	CHECK(moved.changed);
+	CHECK_EQ(Purple::ViewPinned(moved.text, Path(), u"work"_q, u"Focus"_q),
+		(Ids{ 987654321, 123456789 }));
+	CHECK(moved.text.contains(u"# my settings"_q));
+	CHECK(moved.text.contains(u"# the tab I actually watch"_q));
+	CHECK(moved.text.contains(u"\n  987654321, # Backend Team\n"_q));
+
+	// The other view is not the one that moved, and stays without a key.
+	CHECK(Purple::ViewPinned(moved.text, Path(), u"work"_q, u"Rest"_q).empty());
+	CHECK_EQ(moved.text.count(u"pinned = ["_q), 1);
+
+	// And back again, byte for byte. This is the property that matters: the
+	// file is the user's, and the app has to be able to touch one array in it
+	// without leaving a trace anywhere else.
+	const auto back = Purple::SetViewPinned(
+		moved.text,
+		Path(),
+		u"work"_q,
+		u"Focus"_q,
+		Ids{ 123456789 },
+		Titles());
+	CHECK(back.ok());
+	CHECK(back.changed);
+	CHECK_EQ(back.text, before);
+
+	// Writing what is already there writes nothing.
+	const auto same = Purple::SetViewPinned(
+		before,
+		Path(),
+		u"work"_q,
+		u"Focus"_q,
+		Ids{ 123456789 },
+		Titles());
+	CHECK(same.ok());
+	CHECK(!same.changed);
+	CHECK_EQ(same.text, before);
+
+	// A view with no array yet gets one, under its own name rather than at the
+	// top of the block, and matched case-insensitively the way the parser
+	// decides two views are the same one.
+	const auto added = Purple::SetViewPinned(
+		before,
+		Path(),
+		u"work"_q,
+		u"rest"_q,
+		Ids{ 111222333 },
+		Titles());
+	CHECK(added.ok());
+	CHECK(added.changed);
+	CHECK_EQ(Purple::ViewPinned(added.text, Path(), u"work"_q, u"Rest"_q),
+		(Ids{ 111222333 }));
+	CHECK(added.text.contains(
+		u"name = \"Rest\"\npinned = [\n  111222333, # Maman\n]\n"_q));
+
+	// Emptying leaves the array rather than the key, which is the shape the
+	// next pin will write into.
+	const auto emptied = Purple::SetViewPinned(
+		before,
+		Path(),
+		u"work"_q,
+		u"Focus"_q,
+		Ids(),
+		Titles());
+	CHECK(emptied.ok());
+	CHECK(emptied.changed);
+	CHECK(Purple::ViewPinned(emptied.text, Path(), u"work"_q, u"Focus"_q)
+		.empty());
+	CHECK(emptied.text.contains(u"pinned = [\n]\n"_q));
+
+	// Nothing is written for a preset or a view that is not there.
+	for (const auto &[preset, view] : { std::pair{ u"work"_q, u"Gone"_q },
+			std::pair{ u"missing"_q, u"Focus"_q } }) {
+		const auto refused = Purple::SetViewPinned(
+			before,
+			Path(),
+			preset,
+			view,
+			Ids{ 123456789 },
+			Titles());
+		CHECK(!refused.ok());
+		CHECK(!refused.changed);
+		CHECK_EQ(refused.text, before);
+	}
+
+	// An inline view is refused rather than mangled: there is no line to edit.
+	const auto inlined = uR"([presets.work]
+list_order = [ { list = "a" } ]
+views = [ { name = "Focus", list_order = [ { list = "a" } ] } ]
+)"_q;
+	const auto squashed = Purple::SetViewPinned(
+		inlined,
+		Path(),
+		u"work"_q,
+		u"Focus"_q,
+		Ids{ 123456789 },
+		Titles());
+	CHECK(!squashed.ok());
+	CHECK_EQ(squashed.text, inlined);
+
+	// A file that does not parse is never written to, same as every other
+	// splice: the user may be halfway through an edit of their own.
+	const auto broken = Purple::SetViewPinned(
+		u"[presets.work"_q,
+		Path(),
+		u"work"_q,
+		u"Focus"_q,
+		Ids{ 123456789 },
+		Titles());
+	CHECK(!broken.ok());
+	CHECK(!broken.changed);
+}
+
 void TestSetTableBool() {
 	Begin("set table bool");
 
@@ -1907,6 +2063,7 @@ int main() {
 	TestSpliceOddFormatting();
 	TestSpliceCrlf();
 	TestNameSanitising();
+	TestSpliceViewPinned();
 	TestSetTableBool();
 	TestStateRoundTrip();
 	TestStateDefaults();

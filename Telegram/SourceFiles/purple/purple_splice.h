@@ -47,6 +47,23 @@ struct SpliceResult {
 	PeerIdValue id,
 	const MemberTitle &title);
 
+// Rewrites one extra view's pinned order. Unlike a list's members this is an
+// ordered array the app owns outright, so the whole bracketed span is replaced
+// rather than edited a line at a time: the ids move relative to one another on
+// every drag, and there is no stable line for a comment to belong to.
+//
+// The view is addressed by name rather than by position. The file may hold
+// views the parser dropped - unnamed, duplicated, listing no list - so the nth
+// [[presets.x.views]] block in the file is not the nth tab on the strip, and a
+// pin written by index would land on a different view than the one dragged.
+[[nodiscard]] SpliceResult SetViewPinned(
+	const QString &text,
+	const QString &path,
+	const QString &preset,
+	const QString &view,
+	const std::vector<PeerIdValue> &ids,
+	const MemberTitle &title);
+
 // Sets one boolean under one table, keeping the key, the spacing and any
 // trailing comment exactly as the user wrote them. Adds the key, and the table,
 // if either is missing. Used for the Premium toggle in Settings, which is the
@@ -63,5 +80,12 @@ struct SpliceResult {
 	const QString &text,
 	const QString &path,
 	const QString &list);
+
+// Exposed for the tests: the ids a view pins, in file order.
+[[nodiscard]] std::vector<PeerIdValue> ViewPinned(
+	const QString &text,
+	const QString &path,
+	const QString &preset,
+	const QString &view);
 
 } // namespace Purple
