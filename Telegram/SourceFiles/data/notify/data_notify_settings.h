@@ -125,6 +125,13 @@ public:
 	[[nodiscard]] bool purpleSilencedByFolder(
 		not_null<const PeerData*> peer) const;
 
+	// Purple: notice when the answer above flips and re-evaluate the mute.
+	// A rule-based folder decides membership from the chat's own properties, so
+	// a chat can drift into one with nobody sending a notification about it -
+	// and History::muted() is a cache, so it would go on ringing. Cheap for
+	// every preset that silences no folder: one empty-vector test.
+	void purpleRefreshFolderMute(not_null<PeerData*> peer);
+
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;
 	[[nodiscard]] auto exceptionsUpdatesRealtime() const
@@ -177,6 +184,11 @@ private:
 
 	DefaultValue _defaultValues[3];
 	std::unordered_set<not_null<const PeerData*>> _mutedPeers;
+
+	// Purple: who purpleSilencedByFolder() said yes to last time we looked, so
+	// a flip is detectable. Keyed by PeerId rather than by pointer because it
+	// outlives nothing and must not keep anything alive.
+	base::flat_set<PeerId> _purpleSilencedByFolder;
 	std::unordered_map<not_null<ForumTopic*>, rpl::lifetime> _mutedTopics;
 	base::Timer _unmuteByFinishedTimer;
 
