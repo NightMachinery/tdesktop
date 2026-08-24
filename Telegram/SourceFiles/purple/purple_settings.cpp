@@ -92,6 +92,25 @@ constexpr auto kMaxSpreadDepth = 8;
 	return std::nullopt;
 }
 
+[[nodiscard]] std::optional<ShowMode> ReadShowMode(
+		const toml::table &table,
+		const QString &context,
+		std::vector<QString> &warnings) {
+	const auto node = table.get("show_mode");
+	if (!node) {
+		return std::nullopt;
+	}
+	const auto text = node->value<std::string_view>();
+	const auto value = text ? ParseShowMode(Text(*text)) : std::nullopt;
+	if (!value) {
+		warnings.push_back(
+			u"%1: 'show_mode' should be one of always, message, "
+			"message_or_reaction, mention, never (%2), ignoring it."_q
+				.arg(context, At(*node)));
+	}
+	return value;
+}
+
 [[nodiscard]] std::optional<FolderInclude> ReadFolderInclude(
 		const toml::table &table,
 		std::string_view key,
@@ -444,12 +463,22 @@ void Expander::expandLists(
 			}
 			auto entry = ListEntry();
 			entry.list = *name;
-			entry.show = ReadBool(*table, "show_p", inner, _warnings);
+			entry.show = ReadShowMode(*table, inner, _warnings);
 			entry.notify = ReadBool(*table, "notify_p", inner, _warnings);
-			entry.groupsRequireMention = ReadBool(
+			WarnRetired(
+				*table,
+				"show_p",
+				inner,
+				u"it is no longer a yes-or-no: write show_mode = \"always\" "
+				"or \"never\", or leave it out for the default that suits "
+				"the chat"_q,
+				_warnings);
+			WarnRetired(
 				*table,
 				"groups_require_mention_p",
 				inner,
+				u"write show_mode = \"mention\" instead - and note that it "
+				"is what a group already defaults to"_q,
 				_warnings);
 			out.push_back(std::move(entry));
 			continue;
@@ -500,6 +529,7 @@ void Expander::expandFolders(
 			folder.name = *name;
 			folder.show = ReadBool(*table, "show_p", inner, _warnings);
 			folder.notify = ReadBool(*table, "notify_p", inner, _warnings);
+			folder.showMode = ReadShowMode(*table, inner, _warnings);
 			folder.include = ReadFolderInclude(
 				*table,
 				"include_in_main_view",
@@ -980,6 +1010,65 @@ QString ChatKindName(ChatKind kind) {
 	case ChatKind::Bot: return u"bots"_q;
 	}
 	return QString();
+}
+
+std::optional<ShowMode> ParseShowMode(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"always"_q) {
+		return ShowMode::Always;
+	} else if (trimmed == u"message"_q) {
+		return ShowMode::Message;
+	} else if (trimmed == u"message_or_reaction"_q) {
+		return ShowMode::MessageOrReaction;
+	} else if (trimmed == u"mention"_q) {
+		return ShowMode::Mention;
+	} else if (trimmed == u"never"_q) {
+		return ShowMode::Never;
+	}
+	return std::nullopt;
+}
+
+QString ShowModeName(ShowMode value) {
+	switch (value) {
+	case ShowMode::Always: return u"always"_q;
+	case ShowMode::Message: return u"message"_q;
+	case ShowMode::MessageOrReaction: return u"message_or_reaction"_q;
+	case ShowMode::Mention: return u"mention"_q;
+	case ShowMode::Never: return u"never"_q;
+	}
+	return QString();
+}
+
+ShowMode DefaultShowMode(ChatKind kind) {
+	switch (kind) {
+	case ChatKind::Channel:
+	case ChatKind::Bot: return ShowMode::Always;
+	case ChatKind::Group: return ShowMode::Mention;
+	case ChatKind::Private: return ShowMode::Message;
+	}
+	return ShowMode::Message;
+}
+
+int ShowModeRank(ShowMode value) {
+	switch (value) {
+	case ShowMode::Never: return 0;
+	case ShowMode::Mention: return 1;
+	case ShowMode::Message: return 2;
+	case ShowMode::MessageOrReaction: return 3;
+	case ShowMode::Always: return 4;
+	}
+	return 0;
+}
+
+bool ShowModeWatchesUnread(ShowMode value) {
+	switch (value) {
+	case ShowMode::Always:
+	case ShowMode::Never: return false;
+	case ShowMode::Message:
+	case ShowMode::MessageOrReaction:
+	case ShowMode::Mention: return true;
+	}
+	return false;
 }
 
 std::optional<FolderInclude> ParseFolderInclude(const QString &value) {

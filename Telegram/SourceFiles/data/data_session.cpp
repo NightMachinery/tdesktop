@@ -1834,6 +1834,18 @@ void Session::setupPurpleWorkMode() {
 	) | rpl::on_next([=] {
 		refreshPurpleWorkMode();
 	}, _lifetime);
+
+	// A show_mode that watches unread makes membership depend on something the
+	// chat list has no reason to re-examine on its own. This is the funnel:
+	// Entry::notifyUnreadStateChange() fires UnreadView for every unread move,
+	// and Changes batches those onto the main loop - so the refresh cannot
+	// re-enter the unread bookkeeping that triggered it, which a hook placed
+	// inside notifyUnreadStateChange() itself would.
+	session().changes().historyUpdates(
+		Data::HistoryUpdate::Flag::UnreadView
+	) | rpl::on_next([=](const Data::HistoryUpdate &update) {
+		update.history->purpleRefreshShowMode();
+	}, _lifetime);
 }
 
 void Session::refreshPurpleWorkMode() {
@@ -1860,13 +1872,13 @@ void Session::refreshPurpleWorkMode() {
 		}
 		++chats;
 		const auto visible = Purple::VisibleFor(peer);
-		if (!visible.show) {
+		if (visible.show == Purple::ShowMode::Never) {
 			++hidden;
 		}
 		if (!visible.notify) {
 			++silenced;
 		}
-		if (visible.mentionGated) {
+		if (Purple::ShowModeWatchesUnread(visible.show)) {
 			gated.push_back(history);
 		}
 		history->purpleRefreshChatListMembership();
@@ -1881,12 +1893,11 @@ void Session::refreshPurpleWorkMode() {
 	// A preset that hides nothing looks exactly like a preset that is working,
 	// and the usual cause is a list named slightly wrong. Say what it did once
 	// per change rather than leaving it to be guessed at from the chat list.
-	// Gated groups are counted apart from hidden ones because they are not the
-	// same claim: a gated group is only out of the view while it has nothing
-	// to say, so the count that means anything is how many of them are still
-	// showing. Zero gated means the gate is off rather than that it did
-	// nothing.
-	LOG(("Purple: %1 of %2 loaded chats hidden, %3 mention-gated "
+	// Unread-gated chats are counted apart from hidden ones because they are
+	// not the same claim: a gated chat is only out of the view while it has
+	// nothing to say, so the count that means anything is how many of them are
+	// still showing.
+	LOG(("Purple: %1 of %2 loaded chats never shown, %3 unread-gated "
 		"(%4 showing), %5 silenced, view holds %6."
 		).arg(hidden).arg(chats).arg(gated.size()).arg(mentioned).arg(silenced
 		).arg(purpleViewList()->indexed()->size()));

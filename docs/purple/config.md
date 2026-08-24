@@ -85,8 +85,9 @@ leaves usable settings behind rather than a hard failure:
   skipped. A *disabled* rule is left alone, so the example in the starter file
   does not complain on every start.
 - Keys the old model used - `show`, `notify` and `locked` on a list, `inherit`
-  and `overrides` on a preset, `filtered`, `include_in_main_view_p` and
-  `pinned_only_p` on a folder, `enabled` anywhere, a top-level `list_order` -
+  and `overrides` on a preset, `show_p` and `groups_require_mention_p` on an
+  entry, `filtered`, `include_in_main_view_p` and `pinned_only_p` on a folder,
+  `enabled` anywhere, a top-level `list_order` -
   are reported by name, with what to write instead. Silence there would let a
   file that is doing nothing look like one that works, which is exactly what a
   folder still saying `include_in_main_view_p` would do: include nothing.
@@ -115,12 +116,22 @@ recognisable as one without looking it up.
 The Work Mode half is two ideas. A **list** says who is in it: `members` by peer
 id, `kinds` by chat type (`private`, `groups`, `channels`, `bots`), or both. A
 **preset** names the lists it wants in a `list_order`, each entry carrying
-`show_p`, `notify_p` and `groups_require_mention_p`. Order is priority and
-capture: the first entry whose list holds a chat decides it, and nothing further
-down sees that chat. A chat no entry claims is hidden and silenced.
+`show_mode` and `notify_p`. Order is priority and capture: the first entry whose
+list holds a chat decides it, and nothing further down sees that chat. A chat no
+entry claims is hidden and silenced.
 
-`folders` names the account's real folders, each with `show_p` (its tab is in
-the strip), `notify_p` (false silences its chats) and `include_in_main_view`,
+`show_mode` is `"always"`, `"message"`, `"message_or_reaction"`, `"mention"` or
+`"never"`, and the three in the middle depend on the chat's unread state, so a
+chat comes and goes on its own. Leaving it out takes the default for what the
+chat *is*: a channel or a bot is `"always"`, a group is `"mention"`, a private
+chat is `"message"`. It replaces `show_p` and `groups_require_mention_p`, both of
+which are now retired keys that warn with the replacement.
+
+`folders` names the account's real folders, each with `show_p` (its **tab** is in
+the strip - the only one of the four about the tab rather than the chats),
+`notify_p` (false silences its chats), `show_mode` (the mode its chats take, on
+the same terms as `notify_p`; leaving it out gives each chat the default for
+what it is) and `include_in_main_view`,
 which is `"none"` (the default), `"pinned"` or `"all"` - how much of the folder
 joins the preset's own view whatever the lists decided. What it lets in comes in
 even if the chat is archived, since under a preset the preset is what controls

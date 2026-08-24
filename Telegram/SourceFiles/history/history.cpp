@@ -2342,6 +2342,13 @@ void History::setFakeUnreadWhileOpened(bool enabled) {
 		_flags &= ~Flag::FakeUnreadWhileOpened;
 	}
 	owner().chatsFilters().refreshHistory(this);
+
+	// Purple: this flag is half the answer for an unread-gated chat - it is
+	// what stops one vanishing from under you while you read it - so the moment
+	// it changes is a moment membership can change. Nothing else says so: no
+	// unread event fires when a chat is merely closed, and refreshHistory()
+	// above is guarded on the account having real folders at all.
+	purpleRefreshShowMode();
 }
 
 [[nodiscard]] bool History::fakeUnreadWhileOpened() const {
@@ -3371,22 +3378,31 @@ bool History::trackUnreadMessages() const {
 	return true;
 }
 
-bool History::purpleInExemptFolder() const {
+std::optional<Purple::ShowMode> History::purpleExemptFolderMode() const {
 	const auto &exempt = Purple::ExemptFolders();
 	if (exempt.empty()) {
-		return false;
+		return std::nullopt;
 	}
 	// Only reached for a chat the preset would otherwise hide, and only when
 	// some folder actually asked to be exempt, so the walk below costs nothing
 	// for every preset that does not use the escape hatch.
-	const auto &pinnedOnly = Purple::ExemptPinnedOnlyFolders();
+	//
+	// A folder that names no mode leaves its chats to the default for what they
+	// are. The folder decides WHICH chats come in; the kind decides WHEN they
+	// show. Forcing Always here would be the folder answering a question it was
+	// not asked, and would quietly override the kind defaults for everything
+	// filed in it.
+	const auto fallback = Purple::DefaultShowMode(Purple::KindOf(peer));
 	const auto self = const_cast<History*>(this);
+	auto result = std::optional<Purple::ShowMode>();
 	for (const auto &filter : owner().chatsFilters().list()) {
 		if (!filter.id()) {
 			continue;
 		}
-		for (const auto &name : exempt) {
-			if (filter.title().text.text.compare(name, Qt::CaseInsensitive)
+		for (const auto &folder : exempt) {
+			if (filter.title().text.text.compare(
+					folder.name,
+					Qt::CaseInsensitive)
 				|| !filter.contains(self)) {
 				continue;
 			}
@@ -3395,54 +3411,81 @@ bool History::purpleInExemptFolder() const {
 			// rest are not dropped so much as left where they already were -
 			// with whatever their own list decided, which for a preset that
 			// names nothing else is hidden.
-			//
-			// Kept inside the loop rather than short-circuiting the match,
-			// because a chat can sit in two exempt folders and a narrow one
-			// saying no must not speak for a wide one that would say yes.
-			const auto narrowed = !pinnedOnly.empty()
-				&& ranges::any_of(pinnedOnly, [&](const QString &folder) {
-					return !folder.compare(name, Qt::CaseInsensitive);
-				});
-			if (!narrowed
-				|| ranges::contains(
+			if (folder.include == Purple::FolderInclude::Pinned
+				&& !ranges::contains(
 					filter.pinned(),
 					not_null<History*>(self))) {
-				return true;
+				continue;
+			}
+			// A chat can sit in two exempt folders, and the most permissive
+			// wins: a narrow one saying no must not speak for a wide one that
+			// would say yes.
+			const auto mode = folder.showMode.value_or(fallback);
+			if (!result
+				|| (Purple::ShowModeRank(mode)
+					> Purple::ShowModeRank(*result))) {
+				result = mode;
 			}
 		}
 	}
-	return false;
+	return result;
+}
+
+bool History::purpleShowModeSatisfied(Purple::ShowMode mode) const {
+	switch (mode) {
+	case Purple::ShowMode::Always: return true;
+	case Purple::ShowMode::Never: return false;
+	default: break;
+	}
+
+	// A chat you are reading must not vanish from under you. tdesktop keeps a
+	// "fake unread while opened" flag for exactly this shape of problem - it is
+	// what stops a badge blinking off the moment you open something - and the
+	// same flag is the honest answer here: the messages are only read in the
+	// sense that you are looking at them right now.
+	if (fakeUnreadWhileOpened()) {
+		return true;
+	}
+	const auto state = chatListUnreadState();
+
+	// A manual unread mark counts as a message: it is the user saying "I still
+	// have to deal with this", which is the question being asked.
+	const auto message = (state.messages > 0) || (state.marks > 0);
+	switch (mode) {
+	case Purple::ShowMode::Message: return message;
+	case Purple::ShowMode::MessageOrReaction:
+		return message || (state.reactions > 0);
+	case Purple::ShowMode::Mention: return (state.mentions > 0);
+	default: break;
+	}
+	return true;
 }
 
 bool History::purpleHiddenFromView() const {
 	if (!Purple::Filtering()) {
 		return false;
 	}
-	const auto visible = Purple::VisibleFor(peer);
-	if (!visible.show) {
-		// An exempt folder is the one way out: its chats ignore the preset's
-		// hiding entirely, so they show in the preset's view alongside the
-		// lists it did not hide.
-		return !purpleInExemptFolder();
-	} else if (visible.mentionGated && !chatListUnreadState().mentions) {
-		// A gated group appears exactly while its mention badge would be lit,
-		// so the rule is legible from the chat list itself. Reading the
-		// mention is what takes it away again, which means a group opened from
-		// a mention leaves the list while you are still in it. That is the
-		// feature working, not a glitch: the chat stays open.
-		//
-		// Exempt the same way as hiding: the gate is the preset deciding what
-		// is on screen, and a folder that opted out of that opted out of all
-		// of it rather than half.
-		return !purpleInExemptFolder();
+	// A folder the preset pulls in decides first, because it is the more
+	// specific statement: it named this folder, where a list entry named a kind
+	// or a set of ids. What it does not decide is WHEN - a folder saying nothing
+	// about a mode leaves its chats to the default for what they are.
+	if (const auto folder = purpleExemptFolderMode()) {
+		return !purpleShowModeSatisfied(*folder);
 	}
-	return false;
+	// Otherwise the entry that claimed this chat, or the default for whatever
+	// the chat is. A mode that watches unread means the chat comes and goes on
+	// its own as messages arrive and are read - a group appears exactly while
+	// its mention badge would be lit, which is the rule being legible from the
+	// chat list itself rather than only from the file.
+	return !purpleShowModeSatisfied(Purple::VisibleFor(peer).show);
 }
 
 bool History::purpleShownFromArchive() const {
 	// Only asked of an archived chat, and only then does the folder walk run.
 	// A preset that pulls in no folders never pays for this at all.
-	return folder() && Purple::Filtering() && purpleInExemptFolder();
+	return folder()
+		&& Purple::Filtering()
+		&& purpleExemptFolderMode().has_value();
 }
 
 bool History::purpleHiddenFromChatList() const {
@@ -3485,6 +3528,35 @@ bool History::shouldBeInChatList() const {
 	}
 	return !lastMessageKnown()
 		|| (lastMessage() != nullptr);
+}
+
+void History::purpleRefreshShowMode() {
+	if (!Purple::Filtering()) {
+		return;
+	}
+	// The guard that keeps this off the hot path: a preset made of Always and
+	// Never answers here without touching the chat list at all, and so does
+	// every chat a folder pulled in without naming a mode.
+	const auto folder = purpleExemptFolderMode();
+	const auto mode = folder
+		? *folder
+		: Purple::VisibleFor(peer).show;
+	if (!Purple::ShowModeWatchesUnread(mode)) {
+		return;
+	}
+	const auto view = Data::kPurpleViewFilterId;
+	const auto was = inChatList(view);
+	purpleRefreshChatListMembership();
+	if (inChatList(view) != was) {
+		// The one event that explains a chat appearing or vanishing with
+		// nobody touching anything, so it is worth a line. It stays rare by
+		// construction: only unread-gated chats reach here, and only on the
+		// edge.
+		LOG(("Purple: show_mode '%1' %2 peer %3."
+			).arg(Purple::ShowModeName(mode)
+			).arg(was ? u"hid"_q : u"revealed"_q
+			).arg(peer->id.value));
+	}
 }
 
 void History::purpleRefreshChatListMembership() {

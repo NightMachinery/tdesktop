@@ -56,6 +56,45 @@ enum class FolderInclude : uchar {
 	const QString &value);
 [[nodiscard]] QString FolderIncludeName(FolderInclude value);
 
+// When a chat is in the view at all. Everything except Always and Never
+// depends on the chat's unread state, so a chat can enter and leave the view
+// on its own as messages arrive and are read.
+//
+// Mention is the narrow one and is what `groups_require_mention_p' used to
+// spell; it is now simply what a group defaults to.
+enum class ShowMode : uchar {
+	Always,
+	Message,          // An unread message, or a manual unread mark.
+	MessageOrReaction,
+	Mention,
+	Never,
+};
+
+// "always", "message", "message_or_reaction", "mention", "never".
+[[nodiscard]] std::optional<ShowMode> ParseShowMode(const QString &value);
+[[nodiscard]] QString ShowModeName(ShowMode value);
+
+// What a chat of this kind does when nothing says otherwise. Channels and bots
+// are things you subscribed to or started, so they stay; groups are the noisy
+// ones and only speak up when they name you; a private chat appears when the
+// person has said something.
+//
+// The default depending on the chat rather than being flat is why a resolved
+// entry cannot collapse its mode: one list_order entry can match several kinds.
+[[nodiscard]] ShowMode DefaultShowMode(ChatKind kind);
+
+// Whether the mode needs the chat's unread state to answer. False for exactly
+// Always and Never, which is what keeps a preset made of those two out of the
+// re-check path entirely.
+[[nodiscard]] bool ShowModeWatchesUnread(ShowMode value);
+
+// How often the mode shows a chat, as a number, so "the most permissive of
+// these two wins" is a comparison rather than a table of special cases. Spelt
+// out rather than taken from the declaration order, which does not match:
+// MessageOrReaction shows strictly more often than Message and is declared
+// after it.
+[[nodiscard]] int ShowModeRank(ShowMode value);
+
 // A list says who is in it and nothing else. What happens to those chats is
 // decided entirely by the preset that names the list, which is what lets one
 // list mean "let through" in one preset and "swallow silently" in another
@@ -82,13 +121,12 @@ struct List {
 struct ListEntry {
 	QString list;
 
-	std::optional<bool> show;   // Default true.
-	std::optional<bool> notify; // Default true.
+	// Unset means DefaultShowMode() for whatever kind the chat turns out to be,
+	// which is not knowable here: one entry can claim private chats, groups and
+	// channels at once. Collapsed by Visible(), which has the chat in hand.
+	std::optional<ShowMode> show;
 
-	// Groups only, and only while shown: the chat appears exactly while it has
-	// an unread mention. Default false - a preset that only hides bots must not
-	// also empty the list of every group nobody has mentioned you in.
-	std::optional<bool> groupsRequireMention;
+	std::optional<bool> notify; // Default true.
 
 	friend bool operator==(const ListEntry &, const ListEntry &) = default;
 };
@@ -103,6 +141,13 @@ struct PresetFolder {
 
 	// False silences the folder's chats, on top of whatever their list said.
 	std::optional<bool> notify;
+
+	// The mode for the chats this folder contributes, on the same terms as
+	// `notify' above - it is about the folder's chats, not about its tab, which
+	// is what `show' means. Unset leaves them to the default for what they are,
+	// because naming a folder chose which chats come in rather than when they
+	// show.
+	std::optional<ShowMode> showMode;
 
 	// How much of this folder joins the preset's main view. Default None.
 	//

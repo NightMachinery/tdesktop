@@ -28,8 +28,8 @@ entry names a list and what that list means *for this preset*:
 
     [presets.work]
     list_order = [
-      { list = "essentials", show_p = true,  notify_p = true },
-      { list = "bots",       show_p = false, notify_p = false },
+      { list = "essentials", show_mode = "always", notify_p = true },
+      { list = "bots",       show_mode = "never",  notify_p = false },
     ]
 
 Order is priority **and** capture. Walking the order, the first entry whose list
@@ -74,12 +74,12 @@ Python spreads a list:
 
     [list_sets.always]
     list_order = [
-      { list = "os",        show_p = true, notify_p = true },
-      { list = "emergency", show_p = true, notify_p = true },
+      { list = "os",        show_mode = "always", notify_p = true },
+      { list = "emergency", show_mode = "always", notify_p = true },
     ]
 
     [presets.work]
-    list_order = [ "*always", { list = "bots", show_p = false } ]
+    list_order = [ "*always", { list = "bots", show_mode = "never" } ]
 
 Sets may refer to sets. A name mentioned twice keeps its first mention, which is
 forced for a `list_order` - order *is* capture - and folders follow the same
@@ -90,18 +90,40 @@ duplicate still warns.
 
 ## What it does today
 
-Three things, all derived from the entry a chat falls into - or from falling
+Two things, both derived from the entry a chat falls into - or from falling
 through, which is a decision too:
 
-- `show_p = false` keeps the chat out of the preset's view of the chat list.
+- `show_mode` decides **when** the chat is in the preset's view of the chat
+  list. Five values, and the ones in the middle depend on unread state, so a
+  chat can come and go on its own:
+  - `"always"` - it is simply there.
+  - `"message"` - only while it has an unread message. A mention or a reply is
+    a message; a reaction on its own is not. A manual unread mark counts.
+  - `"message_or_reaction"` - as above, and a reaction alone is enough.
+  - `"mention"` - only while it holds an unread mention. The narrow one.
+  - `"never"` - out of the view.
 - `notify_p = false` mutes it.
-- `groups_require_mention_p = true` leaves a group out until it holds an unread
-  mention.
-- no entry at all does the first two.
+- no entry at all is `"never"` and muted, both.
 
-Every boolean key in `settings.toml` ends in `_p`. It is a naming convention
-rather than a type distinction - it just means the answer is yes or no, and it
-makes a flag recognisable as one without looking it up.
+**The default depends on what the chat is**, which is the part worth
+remembering:
+
+- a **channel** or a **bot** defaults to `"always"` - things you subscribed to
+  or started, which you would not have if you did not want them;
+- a **group** defaults to `"mention"` - the noisy ones speak up when they name
+  you;
+- a **private chat** defaults to `"message"` - it appears when the person has
+  said something.
+
+That is why `show_mode` cannot be collapsed when a preset resolves: one
+`list_order` entry can claim private chats, groups and channels at once, so
+`EffectiveList::show` stays unset and `Visible()` finishes the job with the
+chat's `ChatKind` in hand.
+
+Every *boolean* key in `settings.toml` ends in `_p`. `show_mode` and
+`include_in_main_view` do not, because they are not yes-or-no - which is also
+the visible sign that the two retired keys, `show_p` and
+`groups_require_mention_p`, were the wrong shape for the question.
 
 ## The preset view
 
@@ -232,7 +254,7 @@ A preset may invent more tabs than its own:
     [[presets.work.views]]
     name   = "Focus"
     pinned = [ 1234567890 ]
-    list_order = [ { list = "essentials", show_p = true } ]
+    list_order = [ { list = "essentials" } ]
 
 Each becomes a tab of its own on the strip, after the preset's main view and
 before any folder - a preset's tabs belong next to each other rather than
@@ -240,11 +262,17 @@ scattered through the account's folders. Each carries its own unread badge, for
 the same reason the main view does: it is a `Dialogs::MainList` like any other,
 so its total is accumulated by the same `addEntry`/`removeEntry` path.
 
-A view's `list_order` selects membership and nothing else. `show_p = false` on
-an entry drops the chats that entry claims from this tab; falling through drops
-them too, the same rule the main view follows. `notify_p` is meaningless here
-and warns: a chat has one mute state however many tabs are showing it, and
+A view's `list_order` selects membership and nothing else. `show_mode = "never"`
+on an entry drops the chats that entry claims from this tab; falling through
+drops them too, the same rule the main view follows. `notify_p` is meaningless
+here and warns: a chat has one mute state however many tabs are showing it, and
 silence belongs to the chat rather than to where you happen to be looking at it.
+
+The unread-watching modes are deliberately **not** honoured on a view, and
+neither are the per-kind defaults. A view is a selection you asked for by name,
+and a "Focus" tab that emptied itself whenever its chats went quiet would be the
+opposite of the point. Only `"never"` removes; everything else, including
+saying nothing, means "on this tab".
 
 A view may show a chat the preset hides from its main view - a "later" tab for
 what you are not looking at is a reasonable thing to want. The one exception is
@@ -367,15 +395,28 @@ behind your back.
 Saved Messages is never hidden and never gated. Nothing arrives in it unbidden,
 and a chat list that does not show it offers no way back to it.
 
-## The mention gate
+## Modes that watch unread
 
-An entry may say `groups_require_mention_p = true`. A group that entry claims
-appears in the chat list only while it holds an unread mention, and leaves again
-once that mention is read.
+`"message"`, `"message_or_reaction"` and `"mention"` make membership depend on
+something that moves on its own. A chat appears when it has something to say and
+leaves when you have dealt with it, which is the whole idea of a work mode
+stated as a rule rather than as a chore.
 
 It is per entry, not per preset. That is what lets one list of groups be gated
 while another comes through unconditionally, without a second table saying so -
 the same reason every other flag lives on the entry.
+
+`groups_require_mention_p` was the first version of this, and `"mention"` is
+exactly what it did. It is retired rather than deleted: writing it warns and
+names the replacement, and since a group defaults to `"mention"` now, most files
+that used it can simply drop it.
+
+**A chat you are reading does not vanish from under you.** Opening a chat marks
+it read, which would take it straight back out of the view. `History::
+purpleShowModeSatisfied()` checks `fakeUnreadWhileOpened()` first - the flag
+tdesktop already keeps to stop a badge blinking off the moment you open
+something - so the messages count as unread for exactly as long as you are
+looking at them.
 
 It is off unless an entry asks for it. That default was the other way round
 until the gate was implemented - the value resolved but nothing consumed it, so
@@ -412,24 +453,41 @@ Membership now depends on something that changes constantly, which the chat
 list has no reason to re-examine on its own - `shouldBeInChatList()` is not
 re-evaluated when an unread count moves.
 
-The trigger is `HistoryUnreadThings::Proxy::setCount()`, which is the single
-funnel every mention count change passes through, and which already computes
-the has-any/has-none edge for the badge. The Purple hook sits just after that
-existing dispatch, and outside its `inChatList()` guard, for two reasons: the
-chat that needs bringing back is precisely the one that is not in the list, and
-for a forum it is that dispatch which rolls the topic's count up into the
-parent's sum.
+There are two triggers, because unread arrives by two routes.
 
-It is guarded on the chat actually being gated. A mention edge cannot change
-membership otherwise, and the refresh repaints a chat list row.
+**Messages** come through `Data::Changes`. `Entry::notifyUnreadStateChange()`
+already fires `HistoryUpdate::Flag::UnreadView` on every unread move, and
+`Changes` batches those onto the main loop through `crl::on_main`. That batching
+is the point: a hook placed inside `notifyUnreadStateChange()` itself would
+re-enter the unread bookkeeping that triggered it, halfway through a walk of
+`_chatListLinks`. `Session::setupPurpleWorkMode()` subscribes once.
+
+**Mentions and reactions** also come through
+`HistoryUnreadThings::Proxy::setCount()`, which is their own funnel. That hook
+stays, sitting outside the `inChatList()` guard and after the existing dispatch,
+for two reasons: the chat that needs bringing back is precisely the one that is
+not in the list, and for a forum it is that dispatch which rolls the topic's
+count up into the parent's sum. It overlaps with the first trigger, and the
+extra pass is harmless - refreshing membership twice settles on the same answer.
+
+Both land in `History::purpleRefreshShowMode()`, which is where the cost is
+kept down. It returns immediately unless the chat's effective mode actually
+watches unread, so a preset built from `"always"` and `"never"` never touches
+the chat list at all, and neither does any chat under `normal`.
 
 A transition is logged, by peer id:
 
-    Purple: mention gate revealed peer 1234567890.
+    Purple: show_mode 'mention' revealed peer 1234567890.
 
 That is the one event which explains a chat appearing or vanishing with nobody
 touching anything, so it is worth a line. It stays rare by construction - only
-gated chats reach it, and only on the edge.
+unread-gated chats reach it, and only on the edge.
+
+One honest hole: under `hide_everywhere_p` the chat leaves the main list
+entirely, so `notifyUnreadStateChange()` never fires for it and an unread-gated
+chat cannot come back on its own. The combination asks for two opposite things -
+"take this out of the app" and "bring it back when it speaks" - so it is
+documented rather than engineered around.
 
 ## Applying a preset change
 
@@ -496,10 +554,11 @@ it survives as a folder entry holding that exact name and
 position in the strip meaningful. So `[ { name = "B", ... }, "*ALL" ]` reads as
 "B on my terms, then everything else on default terms".
 
-Each named folder carries three flags. `show_p` puts its tab in the strip and
+Each named folder carries four flags. `show_p` puts its **tab** in the strip and
 defaults to true, since naming a folder is normally how you ask for it -
 `show_p = false` is for a folder you want silenced or pulled into the view
-without its tab being there. `notify_p` and `include_in_main_view_p` are below.
+without its tab being there. `notify_p`, `show_mode` and `include_in_main_view`
+are below, and all three are about the folder's **chats** rather than its tab.
 
 Names are matched against folder titles, case-insensitively. A name matching no
 folder is skipped and logged, for the same reason the hidden-chat count is
@@ -574,8 +633,13 @@ To reorder folders while a preset restricts them, switch to `normal` first.
 
 An escape hatch, and the positive form of what used to be spelled
 `filtered = false`. The chats in that folder join the preset's view whatever the
-lists decided, and the mention gate is lifted for them too: a folder that opted
-out of the preset deciding what is on screen opted out of all of it, not half.
+lists decided.
+
+What it does **not** decide is *when* they show. A folder that names no
+`show_mode` leaves its chats to the default for what each one is - so a channel
+filed there is simply present, and a group filed there still waits to be
+mentioned. The folder chose which chats come in; the kind still decides when.
+Write `show_mode` on the folder to answer both at once.
 
 The polarity is worth the rename. `filtered = false` described the mechanism
 from the inside - "this folder is not subject to filtering" - and left you to

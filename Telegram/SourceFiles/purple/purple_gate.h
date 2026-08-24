@@ -130,12 +130,7 @@ PeekChange TogglePeek();
 // not ask, which is what keeps the folder lookup in
 // History::purpleHiddenFromView() free - it is only reached for a chat that
 // would otherwise be hidden, and only when this is non-empty.
-[[nodiscard]] const std::vector<QString> &ExemptFolders();
-
-// Of those, the ones that pull in only the chats pinned inside them. Always a
-// subset of the above, so a caller tests that first and only reaches here for a
-// folder it has already matched.
-[[nodiscard]] const std::vector<QString> &ExemptPinnedOnlyFolders();
+[[nodiscard]] const std::vector<ExemptFolder> &ExemptFolders();
 
 // Folders the preset marked `notify = false': their chats are silenced. Empty
 // unless a preset asks, which is what keeps the folder walk out of every mute

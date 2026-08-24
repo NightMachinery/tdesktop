@@ -17,9 +17,8 @@ namespace {
 [[nodiscard]] EffectiveList Effective(const ListEntry &entry) {
 	auto result = EffectiveList();
 	result.list = entry.list;
-	result.show = entry.show.value_or(true);
+	result.show = entry.show;
 	result.notify = entry.notify.value_or(true);
-	result.groupsRequireMention = entry.groupsRequireMention.value_or(false);
 	return result;
 }
 
@@ -68,9 +67,7 @@ std::optional<Resolved> Resolve(
 	result.hideEverywhere = found->hideEverywhere.value_or(false);
 	result.lists = Effective(found->listOrder);
 	result.folders = found->folders;
-	result.exemptFolders = ExemptFolderNames(result.folders);
-	result.exemptPinnedOnlyFolders = ExemptPinnedOnlyFolderNames(
-		result.folders);
+	result.exemptFolders = ExemptFolderList(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
 
 	result.views.reserve(found->views.size());
@@ -84,28 +81,16 @@ std::optional<Resolved> Resolve(
 	return result;
 }
 
-std::vector<QString> ExemptFolderNames(
+std::vector<ExemptFolder> ExemptFolderList(
 		const std::vector<PresetFolder> &folders) {
-	auto result = std::vector<QString>();
+	auto result = std::vector<ExemptFolder>();
 	for (const auto &folder : folders) {
 		// Only an explicit include pulls a folder's chats in. Saying nothing
 		// leaves them to whatever their list decided, which is what every
 		// folder the preset does not name is left to.
-		if (folder.include.value_or(FolderInclude::None)
-			!= FolderInclude::None) {
-			result.push_back(folder.name);
-		}
-	}
-	return result;
-}
-
-std::vector<QString> ExemptPinnedOnlyFolderNames(
-		const std::vector<PresetFolder> &folders) {
-	auto result = std::vector<QString>();
-	for (const auto &folder : folders) {
-		if (folder.include.value_or(FolderInclude::None)
-			== FolderInclude::Pinned) {
-			result.push_back(folder.name);
+		const auto include = folder.include.value_or(FolderInclude::None);
+		if (include != FolderInclude::None) {
+			result.push_back({ folder.name, include, folder.showMode });
 		}
 	}
 	return result;
@@ -162,20 +147,16 @@ Visibility Visible(
 		return result;
 	}
 	if (const auto effective = MatchList(settings, resolved, id, kind)) {
-		result.show = effective->show;
+		// The last collapse: an entry that said nothing takes the default for
+		// what this chat actually is, which is the one thing resolution could
+		// not decide because one entry can claim several kinds.
+		result.show = effective->show.value_or(DefaultShowMode(kind));
 		result.notify = effective->notify;
-
-		// Only groups are gated, and only while they are visible at all.
-		// Channels have no mentions in the relevant sense, and a hidden chat is
-		// hidden whether or not anyone mentioned us in it.
-		result.mentionGated = result.show
-			&& (kind == ChatKind::Group)
-			&& effective->groupsRequireMention;
 	} else {
 		// Nothing claimed it. A preset names what gets through, so saying
 		// nothing about a chat is saying no - to both halves, because a chat
 		// you are not looking at has no business interrupting you either.
-		result.show = false;
+		result.show = ShowMode::Never;
 		result.notify = false;
 	}
 
@@ -185,9 +166,11 @@ Visibility Visible(
 	// is a deliberate look at the chat list. Unmuting for it would deliver a
 	// burst of notifications for chats you are already looking at, and then
 	// take the mute back before you had dealt with them.
+	//
+	// A peek reveals what a mode was holding back too - a group nobody has
+	// mentioned you in is exactly the kind of thing you peek to check.
 	if (resolved.peeking) {
-		result.show = true;
-		result.mentionGated = false;
+		result.show = ShowMode::Always;
 	}
 	return result;
 }
@@ -200,7 +183,14 @@ bool ViewHolds(
 	for (const auto &effective : view.lists) {
 		const auto list = settings.list(effective.list);
 		if (list && ListHolds(*list, id, kind)) {
-			return effective.show;
+			// Only "never" drops a chat from a tab. A view is a selection you
+			// asked for by name, so the unread-watching modes are deliberately
+			// not honoured here - a "Focus" tab that emptied itself whenever
+			// its chats went quiet would be the opposite of the point - and an
+			// entry that said nothing means "on this tab", not the per-kind
+			// default that governs the main view.
+			return (effective.show.value_or(ShowMode::Always)
+				!= ShowMode::Never);
 		}
 	}
 	// Same rule as the main view: a tab holds what it names, and nothing else.
@@ -220,7 +210,6 @@ ResolvedCache ToCache(const Resolved &resolved) {
 				entry.list,
 				entry.show,
 				entry.notify,
-				entry.groupsRequireMention,
 			});
 		}
 		return result;
@@ -249,7 +238,6 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 				entry.list,
 				entry.show,
 				entry.notify,
-				entry.groupsRequireMention,
 			});
 		}
 		return result;
@@ -261,9 +249,7 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 		: cache.viewName;
 	result.hideEverywhere = cache.hideEverywhere;
 	result.folders = cache.folders;
-	result.exemptFolders = ExemptFolderNames(result.folders);
-	result.exemptPinnedOnlyFolders = ExemptPinnedOnlyFolderNames(
-		result.folders);
+	result.exemptFolders = ExemptFolderList(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
 	result.lists = restored(cache.lists);
 	result.views.reserve(cache.views.size());
