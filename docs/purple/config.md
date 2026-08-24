@@ -161,6 +161,30 @@ even if the chat is archived, since under a preset the preset is what controls
 visibility. A preset with no `folders` key shows no folder tabs; `"*ALL"` is
 every folder you have.
 
+### Saved Messages
+
+Saved Messages is an ordinary chat to the lists. It has no exemption: a preset
+that does not name it hides and silences it like anything else, because a preset
+names what gets through and a chat that ignored that would be one you could not
+reason about from the file.
+
+To keep it, put it in a list. The easy way is the chat itself - right-click
+Saved Messages, Work Mode, and pick the list, exactly as for any other chat. The
+app writes your own user id into that list's `members`:
+
+```toml
+[lists.os]
+title = "OS"
+members = [
+  1234567890, # Saved Messages
+]
+```
+
+There is nothing special about the id; it is your account's user id, and the
+trailing comment is regenerated like every other. If you would rather write it
+by hand, Settings > My Profile shows it, or add it from the menu once and read
+it back out of the file.
+
 A bare `"*name"` string inside either array splices in `[list_sets.name]` or
 `[folder_sets.name]`, the way Python spreads a list. That is what replaces
 preset inheritance: reuse without a chain to walk when you are trying to read
