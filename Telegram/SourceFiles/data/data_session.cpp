@@ -1902,6 +1902,7 @@ void Session::refreshPurpleWorkMode() {
 		"(%4 showing), %5 silenced, view holds %6."
 		).arg(hidden).arg(chats).arg(gated.size()).arg(mentioned).arg(silenced
 		).arg(purpleViewList()->indexed()->size()));
+
 }
 
 void Session::purpleWatchGrace(not_null<History*> history) {
@@ -5866,6 +5867,15 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		}
 		// Deliberately no _chatListEntryRefreshes here. Nothing draws this
 		// list, so telling the UI a row moved in it is pure noise.
+	}
+
+	// Purple: and the other thing a folder can decide about a chat that drifts
+	// into it. A rule-based folder computes membership from the chat's own
+	// properties, so nothing announces the crossing, and History::muted() is a
+	// cache that would go on ringing. Same place and same shape as the quiet
+	// list above, and free for a preset that silences no folder.
+	if (history) {
+		_notifySettings->purpleRefreshFolderMute(history->peer);
 	}
 
 	if (!history) {

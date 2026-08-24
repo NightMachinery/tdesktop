@@ -373,6 +373,37 @@ void NotifySettings::purpleRefreshMute(not_null<PeerData*> peer) {
 	updateLocal(peer);
 }
 
+void NotifySettings::purpleRefreshFolderMute(not_null<PeerData*> peer) {
+	if (Purple::SilencedFolders().empty()) {
+		// Nothing to drift into. Clearing the set here rather than leaving it
+		// is what stops a stale yes surviving a change of preset: the next
+		// preset that does silence a folder starts from nobody.
+		if (!_purpleSilencedByFolder.empty()) {
+			_purpleSilencedByFolder.clear();
+		}
+		return;
+	}
+	const auto id = peer->id;
+	const auto now = purpleSilencedByFolder(peer);
+	if (now == _purpleSilencedByFolder.contains(id)) {
+		return;
+	} else if (now) {
+		_purpleSilencedByFolder.emplace(id);
+	} else {
+		_purpleSilencedByFolder.remove(id);
+	}
+	// Deferred, because the caller is Session::refreshChatListEntry() and this
+	// notifies: re-evaluating a mute moves the chat's unread through every list
+	// holding it, and doing that inside the walk that is currently placing the
+	// chat in those lists is how the totals drift.
+	const auto session = &peer->session();
+	crl::on_main(session, [=] {
+		if (const auto found = session->data().peerLoaded(id)) {
+			updateLocal(found);
+		}
+	});
+}
+
 void NotifySettings::updateLocal(not_null<PeerData*> peer) {
 	const auto history = _owner->historyLoaded(peer->id);
 	auto changesIn = crl::time(0);

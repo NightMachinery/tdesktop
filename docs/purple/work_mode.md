@@ -1468,10 +1468,25 @@ not model the main order's first-match-wins capture - over-approximating costs
 nothing, since the only consequence is keeping a row for a chat the user typed
 in by hand.
 
+## A folder that silences, and a chat that drifts into it
+
+A rule-based folder computes membership from the chat's own properties, so a
+chat can cross into one with nothing announcing it - and `History::muted()` is a
+cache, so it would go on ringing.
+
+`NotifySettings::purpleRefreshFolderMute()` keeps the set of peers
+`purpleSilencedByFolder()` last said yes to, and re-evaluates the mute when the
+answer flips. It is called from `Session::refreshChatListEntry()`, next to the
+quiet-list block and for the same reason: that is where membership is already
+being recomputed. A preset that silences no folder pays one empty-vector test.
+
+The refresh is deferred through `crl::on_main`. Re-evaluating a mute moves the
+chat's unread through every list holding it, and doing that inside the walk
+currently placing the chat in those lists is how the totals drift - the same
+hazard the mute-before-hide ordering in `refreshPurpleWorkMode()` exists for.
+
 ## Not yet implemented
 
-- A chat entering a silenced rule-based folder does not refresh the cached
-  mute immediately, as above.
 - No hotkey for switching presets. `Purple::ListenPeekHotkey()` generalises to
   one; nothing has asked yet.
 
