@@ -132,6 +132,11 @@ PeekChange TogglePeek();
 // would otherwise be hidden, and only when this is non-empty.
 [[nodiscard]] const std::vector<QString> &ExemptFolders();
 
+// Of those, the ones that pull in only the chats pinned inside them. Always a
+// subset of the above, so a caller tests that first and only reaches here for a
+// folder it has already matched.
+[[nodiscard]] const std::vector<QString> &ExemptPinnedOnlyFolders();
+
 // Folders the preset marked `notify = false': their chats are silenced. Empty
 // unless a preset asks, which is what keeps the folder walk out of every mute
 // query that does not need it. Unaffected by peek, which reveals but does not

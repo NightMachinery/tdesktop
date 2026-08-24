@@ -92,6 +92,13 @@ struct PresetFolder {
 	// here". Default false.
 	std::optional<bool> includeInMainView;
 
+	// Narrows the line above to the chats pinned inside that folder. For a
+	// folder you keep a handful of current things at the top of, this is the
+	// difference between "the two albums I am listening to" and every channel
+	// that has ever been filed there. Means nothing without includeInMainView,
+	// and the parser says so rather than leaving it to be noticed.
+	std::optional<bool> pinnedOnly;
+
 	friend bool operator==(
 		const PresetFolder &,
 		const PresetFolder &) = default;

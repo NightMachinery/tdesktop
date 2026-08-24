@@ -347,6 +347,17 @@ const std::vector<QString> &ExemptFolders() {
 	return resolved.exemptFolders;
 }
 
+const std::vector<QString> &ExemptPinnedOnlyFolders() {
+	static const auto kNone = std::vector<QString>();
+	const auto &resolved = Instance().resolved();
+	if (resolved.normal || resolved.peeking || resolved.folders.empty()) {
+		// Same guard as ExemptFolders(): a peek already reveals everything, so
+		// there is nothing left for this to narrow.
+		return kNone;
+	}
+	return resolved.exemptPinnedOnlyFolders;
+}
+
 const std::vector<QString> &SilencedFolders() {
 	static const auto kNone = std::vector<QString>();
 	const auto &resolved = Instance().resolved();

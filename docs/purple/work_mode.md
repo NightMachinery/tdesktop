@@ -605,6 +605,36 @@ The lookup is free for everyone who does not use it. It runs only for a chat
 the preset would otherwise hide, and only when some folder actually asked, so a
 preset with no exemptions never walks the folder list at all.
 
+#### Only the pinned ones
+
+    folders = [
+      { name = "Music", include_in_main_view_p = true, pinned_only_p = true },
+    ]
+
+`pinned_only_p` narrows the line above it to the chats pinned *inside that
+folder*. For a folder you keep a handful of current things at the top of, this
+is the difference between "the two albums I am listening to" and every channel
+ever filed there.
+
+It narrows an inclusion rather than granting one, so it means nothing on its own
+and the parser says so instead of leaving a line that reads like it does
+something. A folder with only `pinned_only_p` behaves exactly as it would with
+no line at all - its chats are left to their own lists, which for a preset that
+names nothing else is hidden.
+
+"Pinned" is the folder's own pinned order, `ChatFilter::pinned()`, which is what
+Telegram itself puts at the top of that tab - not the main chat list's pins and
+not a preset view's. A folder with nothing pinned in it therefore contributes
+nothing, which is worth knowing before wondering where the folder went.
+
+The narrowing is per folder, and a chat filed in two exempt folders needs only
+one of them to let it through: a narrow folder saying no does not speak for a
+wide one that would say yes.
+
+What it does **not** touch is the folder's own tab. That still shows the
+folder's real contents, pinned or not, for the same reason as everything above -
+the preset decides the view, a folder decides its own tab.
+
 ### Silencing a folder
 
     folders = [ { name = "Noise", notify_p = false } ]
