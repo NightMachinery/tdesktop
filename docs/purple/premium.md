@@ -68,6 +68,38 @@ someone's profile re-resolves them. The `contacts.GetStatuses` request that
 follows the privacy update refreshes contacts, and the rest re-resolve as they
 load.
 
+#### Measured, and it is worse than the description above
+
+A temporary probe over the account's own contacts, 2026-08-24, with the unlock
+on and the user's own last seen set to "Nobody":
+
+    1913 contacts (0 unloaded), exact 1, localvalue 0,
+    hidden by me 536, hidden by server 1376.
+
+`localvalue` counts `LastseenStatus::isLocalOnlineValue()` - a status marked
+unavailable that nevertheless still carries a real timestamp. That is the exact
+shape of "the precise value is already in the client", and **it is zero**. Not
+one contact of 1913 is holding a real time behind a bucket.
+
+So the first paragraph of this section overstates the case. The server is not
+sending `was_online` and leaving the client to round it off; for these contacts
+it is sending `userStatusRecently` and friends outright, with the `by_me` flag
+set - which is what the 536 are. `by_me` means *the server* withheld it because
+you hide your own, not that this client coarsened anything. There is nothing
+local to reveal, and no client-side change can produce one.
+
+The 1376 are people who hide their last seen from everybody, which was never
+recoverable. The single exact one is the whole of what the unlock yields here.
+
+Which leaves one thing genuinely unsettled: whether some of the 536 are stale
+values this client coarsened during an earlier run - `updatePrivacyLastSeens()`
+also passes `by_me = true` when it rounds, so a locally-rounded status and a
+server bucket are indistinguishable once written. Settling it needs a forced
+`contacts.GetStatuses` and a second probe. **Do not settle it by toggling
+`enabled_p` off and on**: with the unlock off the coarsening loop runs and
+persists, destroying any real values still held, which is the trap this section
+already warns about one paragraph up.
+
 ### Real-time chat translation
 
 Three separate gates, which is why the feature looks server-side at first glance:
