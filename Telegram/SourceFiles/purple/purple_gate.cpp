@@ -267,11 +267,6 @@ bool ExtraViewHolds(int index, not_null<const PeerData*> peer) {
 	const auto &views = ExtraViews();
 	if (index < 0 || index >= int(views.size())) {
 		return false;
-	} else if (peer->isSelf()) {
-		// Saved Messages is exempt from hiding, but that is not the same as
-		// belonging on every tab: an extra view holds what it names, and nothing
-		// about it says the user wants their own notes on it.
-		return false;
 	}
 	return ViewHolds(
 		ActiveSettings(),
@@ -314,12 +309,11 @@ RecentScope RecentAppliesTo() {
 }
 
 Visibility VisibleFor(not_null<const PeerData*> peer) {
-	// Saved Messages is never hidden. It is where the user files things for
-	// themselves, nothing arrives in it unbidden, and there is no route back to
-	// it from a chat list that does not show it.
-	if (peer->isSelf()) {
-		return Visibility();
-	}
+	// No exemption for Saved Messages. It used to be unconditionally visible
+	// and unconditionally audible, on the argument that nothing arrives in it
+	// unbidden - but a preset names what gets through, and a chat that ignores
+	// that is a chat you cannot reason about from the file. Naming the self id
+	// in a list is how you keep it; see docs/purple/config.md.
 	return Visible(
 		ActiveSettings(),
 		Instance().resolved(),
@@ -422,9 +416,6 @@ bool FoldersRestricted() {
 }
 
 const EffectiveList *ListFor(not_null<const PeerData*> peer) {
-	if (peer->isSelf()) {
-		return nullptr;
-	}
 	return MatchList(
 		ActiveSettings(),
 		Instance().resolved(),

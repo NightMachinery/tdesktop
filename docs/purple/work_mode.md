@@ -328,8 +328,8 @@ Three things an extra view deliberately does not do:
 - **A peek does not touch it.** Peek suspends *hiding*, and an extra view hides
   nothing - it is a selection asked for by name, and filling it with every chat
   for two minutes would only take it away.
-- **Saved Messages is not on it either.** Saved Messages is exempt from a
-  preset's hiding, but that is not the same as belonging on every tab.
+Saved Messages used to be a fourth item here, exempted from every tab the way
+it was exempted from everything else. It is not any more; see below.
 
 ### Pins in an extra view
 
@@ -427,8 +427,29 @@ The preset can only ever *add* a mute. A chat you muted yourself stays muted
 whichever entry claims it, so switching presets can never un-silence something
 behind your back.
 
-Saved Messages is never hidden and never gated. Nothing arrives in it unbidden,
-and a chat list that does not show it offers no way back to it.
+### Saved Messages has no exemption
+
+It used to. `VisibleFor()` returned a default `Visibility` for `isSelf()`, which
+is `{ Always, notify }`, and `ListFor()` and `ExtraViewHolds()` refused it as
+well - so Saved Messages was unconditionally visible and unconditionally
+audible whatever the file said. The argument was that nothing arrives in it
+unbidden and a chat list that does not show it offers no way back.
+
+Both halves were wrong. It does not offer no way back: Saved Messages is in the
+main menu, in search, and behind its own shortcut, none of which the chat list
+mediates. And the exemption made it the one chat a preset governed on paper but
+not in fact, which is precisely what nobody can reason about from the file.
+
+Worse, a fourth exemption made the first three unfixable. `window_peer_menu.cpp`
+skipped Saved Messages when building the `Work Mode` submenu, so the one chat
+that ignored the lists was also the one chat you could not put in a list. That
+is not a design with an escape hatch; it is a design with a hole.
+
+All four are gone. Saved Messages is an ordinary chat: a preset that does not
+name it hides and silences it, and naming it in a list is how you keep it -
+which the chat's own context menu will now do for you.
+[config.md](config.md) spells that out for whoever meets the empty chat list
+first and the reason second.
 
 ## Modes that watch unread
 

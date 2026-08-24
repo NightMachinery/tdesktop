@@ -722,10 +722,12 @@ void Filler::addToggleFolder() {
 // reads out of settings.toml. Left out entirely unless the user has written a
 // list of their own, so an unconfigured fork's menus are untouched.
 void Filler::addPurpleLists() {
-	if (!_peer || _peer->isSelf() || _topic || _sublist) {
-		// Saved Messages is exempt from every preset, and a topic or a sublist
-		// is not a chat the lists can name - its peer is, and offering the
-		// parent's membership from inside it would be a quiet lie.
+	if (!_peer || _topic || _sublist) {
+		// A topic or a sublist is not a chat the lists can name - its peer is,
+		// and offering the parent's membership from inside it would be a quiet
+		// lie. Saved Messages used to be excluded here too, which made it the
+		// one chat a preset governed but nobody could assign; it is an ordinary
+		// chat to the lists now.
 		return;
 	} else if (!Purple::HasCustomLists()) {
 		return;
