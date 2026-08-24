@@ -145,4 +145,32 @@ void FillListsMenu(
 	}
 }
 
+void AddListsSubmenu(
+		const Ui::Menu::MenuCallback &add,
+		std::shared_ptr<Ui::Show> show,
+		not_null<PeerData*> peer) {
+	if (!HasCustomLists() || !IdOf(peer)) {
+		// Left out entirely rather than opening on an empty submenu, so an
+		// unconfigured fork's menus are untouched.
+		return;
+	}
+	// Set apart above and below. Everything around it acts on the chat itself;
+	// this one acts on the preset that is deciding the chat, and reaching for
+	// it by mistake edits a file. No separator style named: the chat list
+	// builds its menu with popupMenuExpandedSeparator, so this is the thick
+	// divider there and the ordinary hairline elsewhere, which is right in
+	// both.
+	add(Ui::Menu::MenuCallback::Args{ .isSeparator = true });
+	add(Ui::Menu::MenuCallback::Args{
+		.text = u"Work Mode"_q,
+		.handler = nullptr,
+		.icon = &st::menuIconAddToFolder,
+		.fillSubmenu = [=](not_null<Ui::PopupMenu*> menu) {
+			FillListsMenu(menu, show, peer);
+		},
+		.submenuSt = &st::popupMenuWithIcons,
+	});
+	add(Ui::Menu::MenuCallback::Args{ .isSeparator = true });
+}
+
 } // namespace Purple

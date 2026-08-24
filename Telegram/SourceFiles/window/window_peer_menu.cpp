@@ -719,8 +719,9 @@ void Filler::addToggleFolder() {
 }
 
 // Purple: the same shape as addToggleFolder() above, for the lists Work Mode
-// reads out of settings.toml. Left out entirely unless the user has written a
-// list of their own, so an unconfigured fork's menus are untouched.
+// reads out of settings.toml. The row itself is built in purple_list_menu.cpp,
+// because the recent-contacts list builds its menu through a different path and
+// has to be able to offer the same thing.
 void Filler::addPurpleLists() {
 	if (!_peer || _topic || _sublist) {
 		// A topic or a sublist is not a chat the lists can name - its peer is,
@@ -729,20 +730,8 @@ void Filler::addPurpleLists() {
 		// one chat a preset governed but nobody could assign; it is an ordinary
 		// chat to the lists now.
 		return;
-	} else if (!Purple::HasCustomLists()) {
-		return;
 	}
-	const auto peer = _peer;
-	const auto show = _controller->uiShow();
-	_addAction(PeerMenuCallback::Args{
-		.text = u"Work Mode"_q,
-		.handler = nullptr,
-		.icon = &st::menuIconAddToFolder,
-		.fillSubmenu = [=](not_null<Ui::PopupMenu*> menu) {
-			Purple::FillListsMenu(menu, show, peer);
-		},
-		.submenuSt = &st::popupMenuWithIcons,
-	});
+	Purple::AddListsSubmenu(_addAction, _controller->uiShow(), _peer);
 }
 
 void Filler::addToggleUnreadMark() {

@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_list_menu.h"
 #include "settings/settings_common.h"
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_premium.h"
@@ -209,6 +210,11 @@ void FillEntryMenu(
 			.submenuSt = &st::foldersMenu,
 		});
 	}
+	// Purple: beside the folders, for the same reason it sits beside them in
+	// the chat list - a chat reached from here is as assignable as one reached
+	// from there, and having the row in only one of the two menus made it look
+	// like the recents were somehow outside Work Mode.
+	Purple::AddListsSubmenu(add, controller->uiShow(), peer);
 	const auto viewProfileText = community
 		? tr::lng_context_view_community(tr::now)
 		: group
