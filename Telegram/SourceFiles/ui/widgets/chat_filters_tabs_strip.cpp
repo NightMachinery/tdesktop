@@ -93,7 +93,7 @@ void ShowMenu(
 			addAction);
 		addAction(
 			u"Work Mode"_q,
-			[=] { controller->show(Box(Purple::PresetBox)); },
+			[=] { controller->show(Box(Purple::PresetBox, session)); },
 			&st::menuIconEdit);
 	} else if (id) {
 		addAction(

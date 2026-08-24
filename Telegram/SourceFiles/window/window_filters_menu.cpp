@@ -778,7 +778,8 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 		addAction(
 			u"Work Mode"_q,
 			crl::guard(&_outer, [=] {
-				_session->show(Box(Purple::PresetBox));
+				_session->show(
+					Box(Purple::PresetBox, &_session->session()));
 			}),
 			&st::menuIconEdit);
 	} else if (id) {

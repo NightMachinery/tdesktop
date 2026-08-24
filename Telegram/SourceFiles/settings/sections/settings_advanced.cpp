@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
+#include "purple/purple_preset_box.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
@@ -1257,15 +1258,41 @@ void BuildExportSection(SectionBuilder &builder) {
 	});
 }
 
-// Purple Telegram, not upstream. See docs/purple/premium.md.
-void BuildPurplePremiumSection(SectionBuilder &builder) {
+// Purple Telegram, not upstream. See docs/purple/premium.md and
+// docs/purple/work_mode.md.
+void BuildPurpleSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	const auto session = builder.session();
 	builder.addDivider();
 	builder.addSkip();
 	builder.addSubsectionTitle({
-		.id = u"advanced/purple_premium"_q,
+		.id = u"advanced/purple"_q,
 		.title = rpl::single(u"Purple"_q),
-		.keywords = { u"purple"_q, u"premium"_q },
+		.keywords = { u"purple"_q, u"premium"_q, u"work"_q },
 	});
+
+	// The main menu carries it too, and that is where it belongs for something
+	// switched several times a day. But Settings is where people look for a
+	// feature they have heard of and cannot find, and searching "work mode"
+	// finding nothing is how a feature stays unused.
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_work_mode"_q,
+			.title = rpl::single(u"Work Mode"_q),
+			.icon = { &st::menuIconTagFilter },
+			.onClick = [=] {
+				controller->show(Box(Purple::PresetBox, session));
+			},
+			.keywords = {
+				u"purple"_q,
+				u"work"_q,
+				u"mode"_q,
+				u"preset"_q,
+				u"focus"_q,
+				u"hide"_q,
+			},
+		});
+	}
 
 	const auto toggle = builder.addButton({
 		.id = u"advanced/purple_premium_toggle"_q,
@@ -1364,7 +1391,7 @@ const auto kMeta = BuildHelper({
 	BuildSystemIntegrationSection(builder);
 	BuildPerformanceSection(builder);
 	BuildSpellcheckerSection(builder);
-	BuildPurplePremiumSection(builder);
+	BuildPurpleSection(builder);
 	BuildScreenReaderSection(builder);
 	if (autoUpdate) {
 		BuildUpdateSection(builder, false);
