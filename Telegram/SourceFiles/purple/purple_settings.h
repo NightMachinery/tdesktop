@@ -135,6 +135,20 @@ struct ListEntry {
 struct PresetFolder {
 	QString name;
 
+	// False makes the preset ignore this entry entirely: no tab, nothing
+	// silenced, nothing fed into the main view, nothing counted. Default true.
+	//
+	// Distinct from show_p below, which only takes the tab off the strip - a
+	// folder with show_p = false still silences, still feeds the main view and
+	// still counts. This one is the comment character you do not have to add
+	// and remove: an entry you are keeping around for a preset you are still
+	// tuning, with the settings you chose for it intact and doing nothing.
+	//
+	// It also beats "*ALL". A folder you disabled by hand stays disabled in a
+	// preset that also asks for every folder, because otherwise disabling one
+	// would silently stop working the day you added the spread.
+	std::optional<bool> enabled;
+
 	// Whether the folder's tab appears in the strip. Default true: naming a
 	// folder at all is normally how you ask for it.
 	std::optional<bool> show;

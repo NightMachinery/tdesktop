@@ -241,6 +241,12 @@ folders = [
 ]
 ```
 
+- `enabled_p` - false makes the preset ignore the entry outright: no tab,
+  nothing silenced, nothing fed into the view, nothing counted. Default true.
+  The comment character you do not have to add and remove, for an entry you are
+  keeping around with its settings intact. Not the same as `show_p = false`,
+  which only takes the tab off the strip. It also beats `"*ALL"`: a folder
+  switched off by hand stays off in a preset that also asks for every folder.
 - `show_p` - whether the folder's **tab** is in the strip. The only one of these
   about the tab rather than about the chats. Default true.
 - `notify_p` - false silences the folder's chats.

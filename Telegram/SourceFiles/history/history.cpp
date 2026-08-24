@@ -3558,8 +3558,10 @@ bool History::purpleReachableElsewhere() const {
 		}
 		for (const auto &folder : shown) {
 			// show_p = false takes the tab off the strip, and a folder with no
-			// tab is not somewhere you can reach the chat from.
+			// tab is not somewhere you can reach the chat from. Nor is one the
+			// preset switched off entirely.
 			if (!Purple::IsAllFolders(folder)
+				&& Purple::FolderEnabled(folder)
 				&& folder.show.value_or(true)
 				&& !filter.title().text.text.compare(
 					folder.name,

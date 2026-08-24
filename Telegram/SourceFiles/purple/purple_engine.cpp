@@ -34,6 +34,10 @@ namespace {
 
 } // namespace
 
+bool FolderEnabled(const PresetFolder &folder) {
+	return folder.enabled.value_or(true);
+}
+
 const EffectiveList *Resolved::list(const QString &name) const {
 	const auto i = std::find_if(
 		lists.begin(),
@@ -86,6 +90,9 @@ std::vector<ExemptFolder> ExemptFolderList(
 		const std::vector<PresetFolder> &folders) {
 	auto result = std::vector<ExemptFolder>();
 	for (const auto &folder : folders) {
+		if (!FolderEnabled(folder)) {
+			continue;
+		}
 		// Only an explicit include pulls a folder's chats in. Saying nothing
 		// leaves them to whatever their list decided, which is what every
 		// folder the preset does not name is left to.
@@ -101,7 +108,9 @@ std::vector<QString> SilencedFolderNames(
 		const std::vector<PresetFolder> &folders) {
 	auto result = std::vector<QString>();
 	for (const auto &folder : folders) {
-		if (folder.notify.has_value() && !*folder.notify) {
+		if (FolderEnabled(folder)
+			&& folder.notify.has_value()
+			&& !*folder.notify) {
 			result.push_back(folder.name);
 		}
 	}
@@ -112,7 +121,9 @@ std::vector<QString> QuietFolderNames(
 		const std::vector<PresetFolder> &folders) {
 	auto result = std::vector<QString>();
 	for (const auto &folder : folders) {
-		if (folder.badge.has_value() && !*folder.badge) {
+		if (FolderEnabled(folder)
+			&& folder.badge.has_value()
+			&& !*folder.badge) {
 			result.push_back(folder.name);
 		}
 	}
