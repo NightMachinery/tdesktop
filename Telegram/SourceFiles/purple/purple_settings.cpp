@@ -775,6 +775,20 @@ void WarnUnknownLists(
 			}
 		}
 
+		if (const auto pinned = table->get("pinned")) {
+			if (const auto array = pinned->as_array()) {
+				preset.pinned = ReadIds(
+					*array,
+					context,
+					u"'pinned'"_q,
+					warnings);
+			} else {
+				warnings.push_back(
+					u"%1: 'pinned' should be an array (%2)."_q
+						.arg(context, At(*pinned)));
+			}
+		}
+
 		if (const auto order = table->get("list_order")) {
 			if (const auto array = order->as_array()) {
 				preset.listOrder = expander.listOrder(*array, context);

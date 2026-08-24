@@ -228,6 +228,10 @@ public:
 		const QString &view,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title);
+	bool setPresetPins(
+		const QString &preset,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title);
 
 	[[nodiscard]] const State &state() const;
 	[[nodiscard]] rpl::producer<> stateChanges() const;
@@ -468,6 +472,15 @@ bool Config::setViewPins(
 		u"the pins of view '%1'"_q.arg(view));
 }
 
+bool Config::setPresetPins(
+		const QString &preset,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	return splice(
+		SetPresetPinned(_text, SettingsFilePath(), preset, ids, title),
+		u"the pins of preset '%1'"_q.arg(preset));
+}
+
 void Config::loadState() {
 	_stateText = ReadFile(StateFilePath()).value_or(QString());
 	_state = ParseState(_stateText, StateFilePath());
@@ -572,6 +585,13 @@ bool SetViewPins(
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
 	return Instance().setViewPins(preset, view, ids, title);
+}
+
+bool SetPresetPins(
+		const QString &preset,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	return Instance().setPresetPins(preset, ids, title);
 }
 
 const State &CurrentState() {

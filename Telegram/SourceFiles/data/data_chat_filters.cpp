@@ -550,14 +550,15 @@ not_null<Dialogs::MainList*> ChatFilters::chatsList(FilterId filterId) {
 		pointer = std::make_unique<Dialogs::MainList>(
 			&_owner->session(),
 			filterId,
-			// Purple: the main view's pinned list is a copy of the main list's,
-			// so it has to be allowed to hold exactly as much - the folder
-			// limit is a different number for a different thing. An extra view
-			// keeps its own pins in a local file nothing bounds, and uses the
-			// same allowance so that a tab cannot become all pins.
-			IsPurpleView(filterId)
-				? _owner->maxPinnedChatsLimitValue((Data::Folder*)nullptr)
-				: _owner->maxPinnedChatsLimitValue(filterId));
+			// Purple: a purple view's pins live in settings.toml, where nothing
+			// bounds them, so the container is sized to the client-side folder
+			// allowance rather than to the account's five. A main view that is
+			// still mirroring the account's order is capped at pin time by
+			// Session::pinnedCanPin() instead, which is where the account's
+			// limit actually belongs - PinnedList::applyList() ignores this
+			// number entirely, so sizing down here would only truncate an order
+			// the file legitimately holds.
+			_owner->maxPinnedChatsLimitValue(filterId));
 	}
 	return pointer.get();
 }

@@ -65,6 +65,25 @@ bool SaveExtraViewPins(
 	const std::vector<PeerIdValue> &ids,
 	const MemberTitle &title);
 
+// The ids the active preset pins in its own main view, in the order
+// settings.toml gave them. Empty - the usual case - means the preset has said
+// nothing about pins and the main view mirrors the account's own order, which
+// is what it has always done.
+[[nodiscard]] const std::vector<PeerIdValue> &PresetPins();
+
+// Whether the main view owns its order rather than mirroring. The whole
+// difference in behaviour hangs off this: an owned order is kept in
+// settings.toml, never travels to the server, and is bounded by nothing, while
+// a mirrored one is the account's and carries the server's five-pin limit.
+[[nodiscard]] bool PresetOwnsPins();
+
+// Writes the main view's order back. The counterpart of SaveExtraViewPins, and
+// only ever called for a preset that already owns its pins - dragging a row in
+// a mirroring preset pins in the chat list, as it always did.
+bool SavePresetPins(
+	const std::vector<PeerIdValue> &ids,
+	const MemberTitle &title);
+
 // False under Normal, which is the whole point: every gate in the app tests
 // this first, so an unconfigured fork pays one bool load and behaves exactly
 // like upstream. Call sites must not skip it - the engine answers "show

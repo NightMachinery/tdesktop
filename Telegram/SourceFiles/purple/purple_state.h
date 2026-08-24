@@ -61,6 +61,10 @@ struct ResolvedCache {
 	std::vector<ResolvedList> lists;
 	bool hideEverywhere = false;
 
+	// The main view's own pinned order. Empty means the preset mirrors the
+	// account's, which is the default and what an older file restores as.
+	std::vector<PeerIdValue> pinned;
+
 	// What the stories strip does. Follow in a file written by an older build,
 	// which is also the default, so an upgrade changes nothing here.
 	StoryPolicy stories = StoryPolicy::Follow;

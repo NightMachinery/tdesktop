@@ -351,6 +351,26 @@ bool SaveExtraViewPins(
 	return SetViewPins(resolved.preset, views[index].name, ids, title);
 }
 
+const std::vector<PeerIdValue> &PresetPins() {
+	static const auto kNone = std::vector<PeerIdValue>();
+	const auto &resolved = Instance().resolved();
+	return resolved.normal ? kNone : resolved.pinned;
+}
+
+bool PresetOwnsPins() {
+	return !PresetPins().empty();
+}
+
+bool SavePresetPins(
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	const auto &resolved = Instance().resolved();
+	if (resolved.normal) {
+		return false;
+	}
+	return SetPresetPins(resolved.preset, ids, title);
+}
+
 bool Filtering() {
 	return !Instance().resolved().normal;
 }

@@ -271,6 +271,19 @@ struct Preset {
 	// back for being quiet keeps theirs.
 	std::optional<StoryPolicy> stories;
 
+	// The main view's pinned order, when the preset wants one of its own.
+	//
+	// Empty - the usual case - means the main view mirrors the account's own
+	// pinned chats, which is what it has always done and what a preset saying
+	// nothing about pins should keep doing. Non-empty means the preset owns the
+	// order outright: a pin made inside it stays inside it, never reaches the
+	// server, and so leaves the account's order and your other devices alone.
+	//
+	// That is also what lifts the five-pin ceiling. Five is the server's limit
+	// on the thing the mirror was mirroring; an order kept in this file is
+	// bounded by nothing.
+	std::vector<PeerIdValue> pinned;
+
 	// Priority order, first match wins. A chat no entry claims is hidden and
 	// silenced: a preset names what gets through.
 	std::vector<ListEntry> listOrder;
