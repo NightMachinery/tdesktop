@@ -1110,10 +1110,27 @@ QString DefaultViewName(const QString &preset) {
 	if (result.isEmpty()) {
 		return result;
 	}
+	// A capital anywhere means the casing was already decided. "iH" is a name,
+	// not a lower-case word waiting to be tidied, and capitalising it hands
+	// back something the user did not write. Only a name with no capital at all
+	// is one nobody has expressed an opinion about.
+	for (const auto ch : result) {
+		if (ch.isUpper()) {
+			return result;
+		}
+	}
 	// In place, and only the first character: QString::toUpper() on the whole
 	// name would shout a preset deliberately written in caps back at the user.
 	result[0] = result[0].toUpper();
 	return result;
+}
+
+QString PresetTitle(const QString &name, const QString &viewName) {
+	return viewName.isEmpty() ? DefaultViewName(name) : viewName;
+}
+
+QString PresetTitle(const Preset &preset) {
+	return PresetTitle(preset.name, preset.viewName);
 }
 
 std::optional<QString> SpreadReference(const QString &value) {
