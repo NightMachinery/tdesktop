@@ -3480,6 +3480,28 @@ bool History::purpleHiddenFromView() const {
 	return !purpleShowModeSatisfied(Purple::VisibleFor(peer).show);
 }
 
+bool History::purpleInQuietFolder() const {
+	const auto &quiet = Purple::QuietFolders();
+	if (quiet.empty()) {
+		return false;
+	}
+	// Same shape as the exempt and silenced walks, and free for the same
+	// reason: a preset that asks for nothing here never reaches the loop.
+	const auto self = const_cast<History*>(this);
+	for (const auto &filter : owner().chatsFilters().list()) {
+		if (!filter.id()) {
+			continue;
+		}
+		for (const auto &name : quiet) {
+			if (!filter.title().text.text.compare(name, Qt::CaseInsensitive)
+				&& filter.contains(self)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool History::purpleShownFromArchive() const {
 	// Only asked of an archived chat, and only then does the folder walk run.
 	// A preset that pulls in no folders never pays for this at all.

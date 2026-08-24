@@ -65,6 +65,18 @@ inline constexpr auto kPurpleViewLimit = 16;
 	return kPurpleViewFilterId + index;
 }
 
+// One more reserved id, just past the run, for the "quiet" list: the main
+// view's members that sit in a folder which asked not to be counted. It is
+// never a tab and never in purpleShownList() - it exists so the app badge can
+// be "the view, minus these" with the subtraction guaranteed non-negative,
+// because a real MainList accumulates its total through the same
+// addEntry/removeEntry path as the list it is subtracted from.
+//
+// Deliberately outside the run above, so IsPurpleView() stays a clean range
+// test and nothing treats this as a view to be drawn.
+inline constexpr auto kPurpleQuietFilterId
+	= FilterId(kPurpleViewFilterId + kPurpleViewLimit);
+
 struct ChatFilterTitle {
 	TextWithEntities text;
 	bool isStatic = false;

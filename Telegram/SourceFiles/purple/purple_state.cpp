@@ -151,6 +151,7 @@ void ReadOptionalBool(
 				}
 				ReadOptionalBool(*fields, "show", folder.show);
 				ReadOptionalBool(*fields, "notify", folder.notify);
+				ReadOptionalBool(*fields, "badge", folder.badge);
 				if (const auto mode = fields->get("show_mode")) {
 					if (const auto text = mode->value<std::string_view>()) {
 						folder.showMode = ParseShowMode(Text(*text));
@@ -313,6 +314,9 @@ QString SerializeState(const State &state) {
 			}
 			if (folder.notify) {
 				fields += u", notify = %1"_q.arg(Boolean(*folder.notify));
+			}
+			if (folder.badge) {
+				fields += u", badge = %1"_q.arg(Boolean(*folder.badge));
 			}
 			if (folder.showMode) {
 				fields += u", show_mode = %1"_q

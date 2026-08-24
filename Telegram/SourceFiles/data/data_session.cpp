@@ -1935,7 +1935,19 @@ void Session::refreshPurpleView() {
 			});
 		}
 	}
+	// The quiet list goes with them. It is not a view, so it is not in the run
+	// above, but it is just as empty once no preset is running.
 	if (!Purple::Filtering()) {
+		if (const auto quiet = chatsFilters().chatsListLoaded(
+				kPurpleQuietFilterId)) {
+			auto stale = std::vector<not_null<Dialogs::Entry*>>();
+			for (const auto &row : quiet->indexed()->all()) {
+				stale.push_back(row->entry());
+			}
+			for (const auto &entry : stale) {
+				entry->removeFromChatList(kPurpleQuietFilterId, quiet);
+			}
+		}
 		return;
 	}
 
@@ -3680,11 +3692,11 @@ HistoryItem *Session::addNewMessage(
 // leave the dock badge claiming unread messages that nothing on screen can
 // account for. See Session::purpleBadgeList().
 int Session::unreadBadge() const {
-	return computeUnreadBadge(purpleBadgeList()->unreadState());
+	return computeUnreadBadge(purpleBadgeUnread());
 }
 
 int Session::unreadWithMentionsBadge() const {
-	auto state = purpleBadgeList()->unreadState();
+	auto state = purpleBadgeUnread();
 	if (state.mentions) {
 		state.messages -= state.mentions;
 	}
@@ -3692,11 +3704,11 @@ int Session::unreadWithMentionsBadge() const {
 }
 
 bool Session::unreadBadgeMuted() const {
-	return computeUnreadBadgeMuted(purpleBadgeList()->unreadState());
+	return computeUnreadBadgeMuted(purpleBadgeUnread());
 }
 
 bool Session::unreadWithMentionsBadgeMuted() const {
-	const auto state = purpleBadgeList()->unreadState();
+	const auto state = purpleBadgeUnread();
 	return !state.mentions && computeUnreadBadgeMuted(state);
 }
 
@@ -3706,7 +3718,7 @@ int Session::unreadBadgeIgnoreOne(Dialogs::Key key) const {
 	const auto remove = (key && key.entry()->inChatList(purpleBadgeFilterId()))
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadge(purpleBadgeList()->unreadState() - remove);
+	return computeUnreadBadge(purpleBadgeUnread() - remove);
 }
 
 bool Session::unreadBadgeMutedIgnoreOne(Dialogs::Key key) const {
@@ -3716,11 +3728,11 @@ bool Session::unreadBadgeMutedIgnoreOne(Dialogs::Key key) const {
 	const auto remove = (key && key.entry()->inChatList(purpleBadgeFilterId()))
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadgeMuted(purpleBadgeList()->unreadState() - remove);
+	return computeUnreadBadgeMuted(purpleBadgeUnread() - remove);
 }
 
 int Session::unreadOnlyMutedBadge() const {
-	const auto state = purpleBadgeList()->unreadState();
+	const auto state = purpleBadgeUnread();
 	return Core::App().settings().countUnreadMessages()
 		? state.messagesMuted
 		: state.chatsMuted;
@@ -5680,6 +5692,21 @@ not_null<Dialogs::MainList*> Session::purpleViewList(int index) {
 	return chatsFilters().chatsList(PurpleViewFilterId(index));
 }
 
+Dialogs::UnreadState Session::purpleBadgeUnread() const {
+	auto result = purpleBadgeList()->unreadState();
+
+	// The quiet list holds exactly the view members that sit in a folder which
+	// asked not to be counted, so this is a subset by construction and cannot
+	// drive the badge negative. That is the whole reason it is a real MainList
+	// rather than a walk: the total is accumulated through the same
+	// addEntry/removeEntry path as the list it is being taken out of.
+	const auto filters = &const_cast<Session*>(this)->chatsFilters();
+	if (const auto quiet = filters->chatsListLoaded(kPurpleQuietFilterId)) {
+		result = result - quiet->unreadState();
+	}
+	return result;
+}
+
 FilterId Session::purpleBadgeFilterId() const {
 	return Purple::Filtering() ? kPurpleViewFilterId : FilterId();
 }
@@ -5772,6 +5799,29 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		}
 	}
 
+	// Purple: the quiet list - the main view's members that sit in a folder
+	// which asked not to be counted. Maintained here, right after the views, so
+	// it is always a subset of view 0: purpleBadgeUnread() subtracts it, and a
+	// subtraction that is not a subset is how a badge goes negative.
+	{
+		const auto id = kPurpleQuietFilterId;
+		const auto quiet = chatsFilters().chatsList(id);
+		const auto belongs = history
+			&& entry->inChatList(kPurpleViewFilterId)
+			&& history->purpleInQuietFolder();
+		if (belongs) {
+			if (!entry->inChatList(id)) {
+				entry->addToChatList(id, quiet);
+			} else {
+				entry->adjustByPosInChatList(id, quiet);
+			}
+		} else if (entry->inChatList(id)) {
+			entry->removeFromChatList(id, quiet);
+		}
+		// Deliberately no _chatListEntryRefreshes here. Nothing draws this
+		// list, so telling the UI a row moved in it is pure noise.
+	}
+
 	if (!history) {
 		return;
 	}
@@ -5853,6 +5903,13 @@ void Session::removeChatListEntry(Dialogs::Key key) {
 			});
 		}
 	}
+	// Purple: and the quiet list, which is not a view and not in the run.
+	if (entry->inChatList(kPurpleQuietFilterId)) {
+		entry->removeFromChatList(
+			kPurpleQuietFilterId,
+			chatsFilters().chatsList(kPurpleQuietFilterId));
+	}
+
 	// Purple: same as the loop above, for the filters that are not in it. Every
 	// id in the reserved run rather than only the live ones: a chat leaving for
 	// good must not stay linked to a view the preset dropped a moment earlier.

@@ -69,6 +69,7 @@ std::optional<Resolved> Resolve(
 	result.folders = found->folders;
 	result.exemptFolders = ExemptFolderList(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
+	result.quietFolders = QuietFolderNames(result.folders);
 
 	result.views.reserve(found->views.size());
 	for (const auto &view : found->views) {
@@ -101,6 +102,17 @@ std::vector<QString> SilencedFolderNames(
 	auto result = std::vector<QString>();
 	for (const auto &folder : folders) {
 		if (folder.notify.has_value() && !*folder.notify) {
+			result.push_back(folder.name);
+		}
+	}
+	return result;
+}
+
+std::vector<QString> QuietFolderNames(
+		const std::vector<PresetFolder> &folders) {
+	auto result = std::vector<QString>();
+	for (const auto &folder : folders) {
+		if (folder.badge.has_value() && !*folder.badge) {
 			result.push_back(folder.name);
 		}
 	}
@@ -251,6 +263,7 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	result.folders = cache.folders;
 	result.exemptFolders = ExemptFolderList(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
+	result.quietFolders = QuietFolderNames(result.folders);
 	result.lists = restored(cache.lists);
 	result.views.reserve(cache.views.size());
 	for (const auto &view : cache.views) {

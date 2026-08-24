@@ -129,9 +129,10 @@ which are now retired keys that warn with the replacement.
 
 `folders` names the account's real folders, each with `show_p` (its **tab** is in
 the strip - the only one of the four about the tab rather than the chats),
-`notify_p` (false silences its chats), `show_mode` (the mode its chats take, on
-the same terms as `notify_p`; leaving it out gives each chat the default for
-what it is) and `include_in_main_view`,
+`notify_p` (false silences its chats), `badge_p` (false takes the folder out of
+every count - no number on its tab, its chats out of the app badge), `show_mode`
+(the mode its chats take, on the same terms as `notify_p`; leaving it out gives
+each chat the default for what it is) and `include_in_main_view`,
 which is `"none"` (the default), `"pinned"` or `"all"` - how much of the folder
 joins the preset's own view whatever the lists decided. What it lets in comes in
 even if the chat is archived, since under a preset the preset is what controls

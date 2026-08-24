@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat_filters.h"
 #include "data/data_folder.h"
 #include "data/data_session.h"
+#include "purple/purple_gate.h"
 #include "main/main_session.h"
 #include "window/notifications_manager.h"
 
@@ -24,6 +25,26 @@ rpl::producer<Dialogs::UnreadState> MainListUnreadState(
 		list->unreadStateChanges() | rpl::to_empty
 	) | rpl::map([=] {
 		return list->unreadState();
+	});
+}
+
+// Whether this real folder is one the active preset asked to keep quiet. By
+// title, like every other folder rule here - the file names folders the way the
+// user sees them, not by an id the server assigned.
+[[nodiscard]] bool QuietFolderId(
+		not_null<Main::Session*> session,
+		FilterId filterId) {
+	const auto &quiet = Purple::QuietFolders();
+	if (quiet.empty()) {
+		return false;
+	}
+	const auto &list = session->data().chatsFilters().list();
+	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
+	if (i == end(list)) {
+		return false;
+	}
+	return ranges::any_of(quiet, [&](const QString &name) {
+		return !i->title().text.text.compare(name, Qt::CaseInsensitive);
 	});
 }
 
@@ -44,7 +65,17 @@ rpl::producer<Dialogs::UnreadState> UnreadStateValue(
 		FilterId filterId) {
 	if (filterId > 0 && !IsPurpleView(filterId)) {
 		const auto filters = &session->data().chatsFilters();
-		return MainListUnreadState(filters->chatsList(filterId));
+
+		// Purple: a folder can ask to carry no count at all. Re-asked on every
+		// resolution change, because the answer lives in settings.toml and the
+		// tab is not rebuilt when only a flag on it moved.
+		return rpl::single(rpl::empty) | rpl::then(
+			Purple::ActiveChanges()
+		) | rpl::map([=]() -> rpl::producer<Dialogs::UnreadState> {
+			return QuietFolderId(session, filterId)
+				? rpl::single(Dialogs::UnreadState())
+				: MainListUnreadState(filters->chatsList(filterId));
+		}) | rpl::flatten_latest();
 	}
 	// Purple: an extra view holds chats and no folders, so the Archive row is
 	// not in its total and there is nothing to take out of it. Subtracting the

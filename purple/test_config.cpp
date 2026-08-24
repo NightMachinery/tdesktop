@@ -641,17 +641,26 @@ list_order = [ { list = "everything", show_mode = "sometimes" } ]
 	CHECK_EQ(Mode(*Purple::ParseShowMode(u"  MENTION "_q)),
 		Mode(Purple::ShowMode::Mention));
 
-	// A folder carries one too, for the chats it contributes.
+	// A folder carries one too, for the chats it contributes - and badge_p
+	// alongside it, which is a different question again.
 	const auto folders = Parse(uR"(
 [presets.work]
 folders = [
-  { name = "Music", include_in_main_view = "pinned", show_mode = "message" },
+  { name = "Music", include_in_main_view = "pinned", show_mode = "message", badge_p = false },
+  { name = "B" },
 ]
 )"_q);
 	CHECK(folders.ok());
-	CHECK_EQ(
-		Mode(folders.settings.preset(u"work"_q)->folders[0].showMode),
-		Mode(Purple::ShowMode::Message));
+	const auto shaped = folders.settings.preset(u"work"_q);
+	CHECK(shaped != nullptr);
+	CHECK_EQ(int(shaped->folders.size()), 2);
+	CHECK_EQ(Mode(shaped->folders[0].showMode), Mode(Purple::ShowMode::Message));
+	CHECK(!shaped->folders[0].badge.value_or(true));
+
+	// Saying nothing leaves a folder counted, which is what almost every
+	// folder wants and nobody should have to write.
+	CHECK(!shaped->folders[1].badge.has_value());
+	CHECK(shaped->folders[1].badge.value_or(true));
 }
 
 void TestViews() {
@@ -2219,6 +2228,15 @@ void TestResolvedCache() {
 	CHECK_EQ(Purple::ExemptFolderList(folders).size(), size_t(1));
 	CHECK(Purple::SilencedFolderNames({}).empty());
 
+	// badge_p is its own axis: a folder can be pulled in, silenced and quiet
+	// independently, and only an explicit false makes it quiet.
+	CHECK(Purple::QuietFolderNames(folders).empty());
+	folders.push_back({ .name = u"Hush"_q, .badge = false });
+	folders.push_back({ .name = u"Counted"_q, .badge = true });
+	CHECK_EQ(Purple::QuietFolderNames(folders).size(), size_t(1));
+	CHECK_EQ(Purple::QuietFolderNames(folders).front(), u"Hush"_q);
+	CHECK(Purple::QuietFolderNames({}).empty());
+
 	// "pinned" and a mode ride along on the exempt entry, so the one walk in
 	// History::purpleExemptFolderMode() has everything it needs.
 	folders.push_back({
@@ -2251,7 +2269,9 @@ void TestResolvedCache() {
 		Mode(Purple::ShowMode::Message));
 	CHECK_EQ(cachedFolders->silencedFolders.size(), size_t(1));
 	CHECK_EQ(cachedFolders->silencedFolders.front(), u"Noise"_q);
-	CHECK_EQ(int(cachedFolders->folders.size()), 7);
+	CHECK_EQ(cachedFolders->quietFolders.size(), size_t(1));
+	CHECK_EQ(cachedFolders->quietFolders.front(), u"Hush"_q);
+	CHECK_EQ(int(cachedFolders->folders.size()), 9);
 
 	// The marker survives too, so a broken reload does not take the whole
 	// folder strip away along with everything else it cannot read.

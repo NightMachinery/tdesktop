@@ -939,6 +939,12 @@ public:
 	// would put the badge at odds with everything on screen.
 	[[nodiscard]] not_null<const Dialogs::MainList*> purpleBadgeList() const;
 
+	// Purple: that list's unread, minus the chats in a folder which asked not
+	// to be counted. Every app-badge accessor goes through this rather than
+	// reading purpleBadgeList() directly, so there is one place the
+	// subtraction happens and one place to be wrong.
+	[[nodiscard]] Dialogs::UnreadState purpleBadgeUnread() const;
+
 	// Purple: which chat list purpleBadgeList() is, for callers that have to
 	// ask an entry whether it is in it.
 	[[nodiscard]] FilterId purpleBadgeFilterId() const;
