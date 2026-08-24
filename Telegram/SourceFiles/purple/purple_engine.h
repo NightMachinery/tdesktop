@@ -46,6 +46,19 @@ struct ExemptFolder {
 // on a folder asks this first.
 [[nodiscard]] bool FolderEnabled(const PresetFolder &folder);
 
+// A folder that said something about its people's stories, paired with what it
+// said. Same shape as ExemptFolder, and for the same reason.
+struct StoryFolder {
+	QString name;
+	StoryMode mode = StoryMode::Always;
+
+	friend bool operator==(const StoryFolder &, const StoryFolder &) = default;
+};
+
+// The folders that named a `stories' mode of their own.
+[[nodiscard]] std::vector<StoryFolder> StoryFolderList(
+	const std::vector<PresetFolder> &folders);
+
 // The folders a preset selection pulls into its main view. Saying nothing
 // leaves a folder's chats to whatever the lists decided, like every folder the
 // preset does not name.
@@ -67,6 +80,10 @@ struct EffectiveList {
 	QString list;
 	std::optional<ShowMode> show;
 	bool notify = true;
+
+	// What this entry's people's stories do. Unset leaves them to the preset's
+	// own policy, which is the usual case.
+	std::optional<StoryMode> stories;
 
 	friend bool operator==(
 		const EffectiveList &,
@@ -116,6 +133,13 @@ struct Resolved {
 
 	// Names from `folders' that said `badge_p = false'. Same shape again.
 	std::vector<QString> quietFolders;
+
+	// What the stories strip does while this preset runs.
+	StoryPolicy stories = StoryPolicy::Follow;
+
+	// The folders that said something about stories, lifted out for the same
+	// reason as the three lists above - the common case is nobody asked.
+	std::vector<StoryFolder> storyFolders;
 
 	// The extra tabs, in the order the file gave them, after the main view.
 	std::vector<ResolvedView> views;

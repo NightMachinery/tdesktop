@@ -8,9 +8,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 
 #include "base/timer.h"
+#include "data/data_chat_filters.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
+#include "history/history.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 
@@ -194,6 +196,60 @@ void Gate::refreshPeekTimer(const State &state, bool peeking) {
 [[nodiscard]] Gate &Instance() {
 	static const auto result = new Gate();
 	return *result;
+}
+
+// What the folders holding this chat said about its stories, if any did.
+//
+// Most permissive wins, as with the exempt walk: a narrow folder saying no must
+// not speak for a wide one that would say yes. The enum's declaration order is
+// the permissiveness order here - unlike ShowMode's, which is why that one
+// needs ShowModeRank() and this one does not.
+[[nodiscard]] std::optional<StoryMode> StoryFolderMode(
+		not_null<const PeerData*> peer) {
+	const auto &folders = Instance().resolved().storyFolders;
+	if (folders.empty()) {
+		// The common case, and free: a preset that said nothing about any
+		// folder's stories never reaches the walk below.
+		return std::nullopt;
+	}
+	const auto history = peer->owner().historyLoaded(peer->id);
+	if (!history) {
+		return std::nullopt;
+	}
+	auto result = std::optional<StoryMode>();
+	for (const auto &filter : peer->owner().chatsFilters().list()) {
+		if (!filter.id()) {
+			continue;
+		}
+		for (const auto &folder : folders) {
+			if (filter.title().text.text.compare(
+					folder.name,
+					Qt::CaseInsensitive)
+				|| !filter.contains(history)) {
+				continue;
+			}
+			if (!result || int(folder.mode) < int(*result)) {
+				result = folder.mode;
+			}
+		}
+	}
+	return result;
+}
+
+// Whether the preset excludes this chat outright, rather than merely holding it
+// back for being quiet. The distinction is the whole of what `follow' means: a
+// story IS new activity, so somebody the preset admits under `message' or
+// `mention' keeps theirs, and only somebody it refuses altogether loses it.
+[[nodiscard]] bool ExcludedOutright(not_null<const PeerData*> peer) {
+	if (VisibleFor(peer).show != ShowMode::Never) {
+		return false;
+	}
+	// A folder that pulls the chat into the view speaks for it here too, the
+	// same way it overrides hiding in purpleHiddenFromView().
+	if (const auto history = peer->owner().historyLoaded(peer->id)) {
+		return !history->purpleExemptFolderMode().has_value();
+	}
+	return true;
 }
 
 } // namespace
@@ -428,6 +484,47 @@ const EffectiveList *ListFor(not_null<const PeerData*> peer) {
 		Instance().resolved(),
 		IdOf(peer),
 		KindOf(peer));
+}
+
+bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen) {
+	if (!Filtering()) {
+		return true;
+	}
+	const auto &resolved = Instance().resolved();
+	if (resolved.stories == StoryPolicy::None) {
+		return false;
+	} else if (resolved.peeking) {
+		// A peek reveals stories along with the chats they belong to. It is one
+		// deliberate look at what the preset is keeping from you, and a strip
+		// that stayed filtered through it would be answering a question nobody
+		// asked twice.
+		return true;
+	}
+
+	// A folder beats a list entry, the same way a folder already beats one for
+	// hiding, and both beat the preset's own policy.
+	auto mode = StoryFolderMode(peer);
+	if (!mode) {
+		if (const auto entry = ListFor(peer)) {
+			mode = entry->stories;
+		}
+	}
+	if (mode) {
+		switch (*mode) {
+		case StoryMode::Always: return true;
+		case StoryMode::Unseen: return hasUnseen;
+		case StoryMode::Never: return false;
+		}
+	}
+	switch (resolved.stories) {
+	case StoryPolicy::All: return true;
+	case StoryPolicy::AllUnseen: return hasUnseen;
+	case StoryPolicy::Follow: return !ExcludedOutright(peer);
+	case StoryPolicy::FollowUnseen:
+		return hasUnseen && !ExcludedOutright(peer);
+	case StoryPolicy::None: return false;
+	}
+	return true;
 }
 
 } // namespace Purple

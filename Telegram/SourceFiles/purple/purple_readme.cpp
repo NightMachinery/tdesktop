@@ -192,6 +192,45 @@ kinds of chat at once, and it is why leaving it out is usually right.
 The preset only ever *adds* a mute, so a chat can be silenced by both, and the
 mute menu says which one an Unmute would actually lift. Default true.
 
+### stories
+
+On a **preset**, what the stories strip does while it runs. Each value hides
+strictly more than the one before it:
+
+- `"all"` - no filtering; the strip is stock Telegram.
+- `"all_unseen"` - everybody, but only while they have something unseen.
+- `"follow"` - the default. Hide whoever the preset excludes outright.
+- `"follow_unseen"` - `follow`, and only while unseen.
+- `"none"` - no strip at all.
+
+`follow` turns on one distinction. Somebody the preset excludes **outright** -
+no list claims them, or one claims them with `show_mode = "never"` - loses
+their story. Somebody it admits and is only holding back for being quiet
+(`"message"`, `"message_or_reaction"`, `"mention"`) keeps theirs, because a
+story *is* new activity, which is what those modes are asking to be shown.
+
+On a **`list_order` entry or a folder**, the same key takes a narrower
+vocabulary - `"always"`, `"unseen"`, `"never"` - and speaks only for that
+entry's own people. There is no `"all"` there, and writing one warns: an entry
+is already a set of people.
+
+```toml
+[presets.work]
+stories = "follow_unseen"
+list_order = [
+  { list = "close_people", show_mode = "message_or_reaction",
+    stories = "always" },
+]
+folders = [ { name = "Music", stories = "never" } ]
+```
+
+A folder beats an entry, and both beat the preset's policy. A peek reveals
+stories along with the chats they belong to.
+
+Your own "add a story" button is governed like anyone else's, so under
+`follow` it goes unless a list names you. Put your own id in a list, or write
+`stories = "all"`, to keep it.
+
 ## Staying visible a little longer
 
 An unread-watching mode has one sharp edge: reading a chat is exactly what

@@ -19,6 +19,7 @@ namespace {
 	result.list = entry.list;
 	result.show = entry.show;
 	result.notify = entry.notify.value_or(true);
+	result.stories = entry.stories;
 	return result;
 }
 
@@ -74,6 +75,8 @@ std::optional<Resolved> Resolve(
 	result.exemptFolders = ExemptFolderList(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
 	result.quietFolders = QuietFolderNames(result.folders);
+	result.stories = found->stories.value_or(StoryPolicy::Follow);
+	result.storyFolders = StoryFolderList(result.folders);
 
 	result.views.reserve(found->views.size());
 	for (const auto &view : found->views) {
@@ -82,6 +85,17 @@ std::optional<Resolved> Resolve(
 		resolved.pinned = view.pinned;
 		resolved.lists = Effective(view.listOrder);
 		result.views.push_back(std::move(resolved));
+	}
+	return result;
+}
+
+std::vector<StoryFolder> StoryFolderList(
+		const std::vector<PresetFolder> &folders) {
+	auto result = std::vector<StoryFolder>();
+	for (const auto &folder : folders) {
+		if (FolderEnabled(folder) && folder.stories.has_value()) {
+			result.push_back({ folder.name, *folder.stories });
+		}
 	}
 	return result;
 }
@@ -270,6 +284,7 @@ ResolvedCache ToCache(const Resolved &resolved) {
 				entry.list,
 				entry.show,
 				entry.notify,
+				entry.stories,
 			});
 		}
 		return result;
@@ -278,6 +293,7 @@ ResolvedCache ToCache(const Resolved &resolved) {
 	result.viewName = resolved.viewName;
 	result.hideEverywhere = resolved.hideEverywhere;
 	result.folders = resolved.folders;
+	result.stories = resolved.stories;
 	result.lists = cached(resolved.lists);
 	result.views.reserve(resolved.views.size());
 	for (const auto &view : resolved.views) {
@@ -298,6 +314,7 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 				entry.list,
 				entry.show,
 				entry.notify,
+				entry.stories,
 			});
 		}
 		return result;
@@ -312,6 +329,8 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	result.exemptFolders = ExemptFolderList(result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
 	result.quietFolders = QuietFolderNames(result.folders);
+	result.stories = cache.stories;
+	result.storyFolders = StoryFolderList(result.folders);
 	result.lists = restored(cache.lists);
 	result.views.reserve(cache.views.size());
 	for (const auto &view : cache.views) {

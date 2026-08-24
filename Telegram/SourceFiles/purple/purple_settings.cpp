@@ -111,6 +111,27 @@ constexpr auto kMaxSpreadDepth = 8;
 	return value;
 }
 
+[[nodiscard]] std::optional<StoryMode> ReadStoryMode(
+		const toml::table &table,
+		const QString &context,
+		std::vector<QString> &warnings) {
+	const auto node = table.get("stories");
+	if (!node) {
+		return std::nullopt;
+	}
+	const auto text = node->value<std::string_view>();
+	const auto value = text ? ParseStoryMode(Text(*text)) : std::nullopt;
+	if (!value) {
+		// Deliberately not naming the preset-level spellings here. "all" on an
+		// entry would be a category error - the entry is already a set of
+		// people - and offering it would invite writing it.
+		warnings.push_back(
+			u"%1: 'stories' should be one of always, unseen, never (%2), "
+			"ignoring it."_q.arg(context, At(*node)));
+	}
+	return value;
+}
+
 [[nodiscard]] std::optional<FolderInclude> ReadFolderInclude(
 		const toml::table &table,
 		std::string_view key,
@@ -465,6 +486,7 @@ void Expander::expandLists(
 			entry.list = *name;
 			entry.show = ReadShowMode(*table, inner, _warnings);
 			entry.notify = ReadBool(*table, "notify_p", inner, _warnings);
+			entry.stories = ReadStoryMode(*table, inner, _warnings);
 			WarnRetired(
 				*table,
 				"show_p",
@@ -537,6 +559,7 @@ void Expander::expandFolders(
 				"include_in_main_view",
 				inner,
 				_warnings);
+			folder.stories = ReadStoryMode(*table, inner, _warnings);
 			WarnRetired(
 				*table,
 				"filtered",
@@ -739,6 +762,18 @@ void WarnUnknownLists(
 			context,
 			warnings
 		).value_or(QString()).trimmed();
+		if (const auto node = table->get("stories")) {
+			const auto text = node->value<std::string_view>();
+			preset.stories = text
+				? ParseStoryPolicy(Text(*text))
+				: std::nullopt;
+			if (!preset.stories) {
+				warnings.push_back(
+					u"%1: 'stories' should be one of all, all_unseen, follow, "
+					"follow_unseen, none (%2), ignoring it."_q
+						.arg(context, At(*node)));
+			}
+		}
 
 		if (const auto order = table->get("list_order")) {
 			if (const auto array = order->as_array()) {
@@ -1102,6 +1137,54 @@ QString ShowModeName(ShowMode value) {
 	case ShowMode::MessageOrReaction: return u"message_or_reaction"_q;
 	case ShowMode::Mention: return u"mention"_q;
 	case ShowMode::Never: return u"never"_q;
+	}
+	return QString();
+}
+
+std::optional<StoryPolicy> ParseStoryPolicy(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"all"_q) {
+		return StoryPolicy::All;
+	} else if (trimmed == u"all_unseen"_q) {
+		return StoryPolicy::AllUnseen;
+	} else if (trimmed == u"follow"_q) {
+		return StoryPolicy::Follow;
+	} else if (trimmed == u"follow_unseen"_q) {
+		return StoryPolicy::FollowUnseen;
+	} else if (trimmed == u"none"_q) {
+		return StoryPolicy::None;
+	}
+	return std::nullopt;
+}
+
+QString StoryPolicyName(StoryPolicy value) {
+	switch (value) {
+	case StoryPolicy::All: return u"all"_q;
+	case StoryPolicy::AllUnseen: return u"all_unseen"_q;
+	case StoryPolicy::Follow: return u"follow"_q;
+	case StoryPolicy::FollowUnseen: return u"follow_unseen"_q;
+	case StoryPolicy::None: return u"none"_q;
+	}
+	return QString();
+}
+
+std::optional<StoryMode> ParseStoryMode(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"always"_q) {
+		return StoryMode::Always;
+	} else if (trimmed == u"unseen"_q) {
+		return StoryMode::Unseen;
+	} else if (trimmed == u"never"_q) {
+		return StoryMode::Never;
+	}
+	return std::nullopt;
+}
+
+QString StoryModeName(StoryMode value) {
+	switch (value) {
+	case StoryMode::Always: return u"always"_q;
+	case StoryMode::Unseen: return u"unseen"_q;
+	case StoryMode::Never: return u"never"_q;
 	}
 	return QString();
 }

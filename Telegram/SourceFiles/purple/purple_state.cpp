@@ -74,6 +74,10 @@ namespace {
 			fields += u", show = %1"_q.arg(Quoted(ShowModeName(*list.show)));
 		}
 		fields += u", notify = %1"_q.arg(Boolean(list.notify));
+		if (list.stories) {
+			fields += u", stories = %1"_q.arg(
+				Quoted(StoryModeName(*list.stories)));
+		}
 		result += u"  { %1 },\n"_q.arg(fields);
 	}
 	return result + u"]\n"_q;
@@ -115,6 +119,11 @@ void ReadOptionalBool(
 			}
 		}
 		entry.notify = ReadBool(*fields, "notify", true);
+		if (const auto stories = fields->get("stories")) {
+			if (const auto text = stories->value<std::string_view>()) {
+				entry.stories = ParseStoryMode(Text(*text));
+			}
+		}
 		result.push_back(std::move(entry));
 	}
 	return result;
@@ -136,6 +145,14 @@ void ReadOptionalBool(
 		result.viewName = DefaultViewName(result.preset);
 	}
 	result.hideEverywhere = ReadBool(*table, "hide_everywhere", false);
+	if (const auto stories = table->get("stories")) {
+		if (const auto text = stories->value<std::string_view>()) {
+			// Falls back to Follow, which is also the default, so a file
+			// written by an older build restores unchanged.
+			result.stories = ParseStoryPolicy(Text(*text))
+				.value_or(StoryPolicy::Follow);
+		}
+	}
 	result.lists = ReadResolvedLists(*table, "lists");
 	if (const auto folders = table->get("folders")) {
 		if (const auto array = folders->as_array()) {
@@ -149,9 +166,15 @@ void ReadOptionalBool(
 				if (folder.name.isEmpty()) {
 					continue;
 				}
+				ReadOptionalBool(*fields, "enabled", folder.enabled);
 				ReadOptionalBool(*fields, "show", folder.show);
 				ReadOptionalBool(*fields, "notify", folder.notify);
 				ReadOptionalBool(*fields, "badge", folder.badge);
+				if (const auto stories = fields->get("stories")) {
+					if (const auto text = stories->value<std::string_view>()) {
+						folder.stories = ParseStoryMode(Text(*text));
+					}
+				}
 				if (const auto mode = fields->get("show_mode")) {
 					if (const auto text = mode->value<std::string_view>()) {
 						folder.showMode = ParseShowMode(Text(*text));
@@ -301,6 +324,7 @@ QString SerializeState(const State &state) {
 	result += u"view_name = %1\n"_q.arg(Quoted(cache.viewName));
 	result += u"hide_everywhere = %1\n"_q
 		.arg(Boolean(cache.hideEverywhere));
+	result += u"stories = %1\n"_q.arg(Quoted(StoryPolicyName(cache.stories)));
 	result += SerializeLists(cache.lists);
 	if (!cache.folders.empty()) {
 		result += u"folders = [\n"_q;
@@ -309,6 +333,9 @@ QString SerializeState(const State &state) {
 			//: it, because nothing and false mean different things all the way
 			//: down - see PresetFolder.
 			auto fields = u"name = %1"_q.arg(Quoted(folder.name));
+			if (folder.enabled) {
+				fields += u", enabled = %1"_q.arg(Boolean(*folder.enabled));
+			}
 			if (folder.show) {
 				fields += u", show = %1"_q.arg(Boolean(*folder.show));
 			}
@@ -321,6 +348,10 @@ QString SerializeState(const State &state) {
 			if (folder.showMode) {
 				fields += u", show_mode = %1"_q
 					.arg(Quoted(ShowModeName(*folder.showMode)));
+			}
+			if (folder.stories) {
+				fields += u", stories = %1"_q
+					.arg(Quoted(StoryModeName(*folder.stories)));
 			}
 			if (folder.include) {
 				fields += u", include_in_main_view = %1"_q

@@ -74,6 +74,43 @@ enum class ShowMode : uchar {
 [[nodiscard]] std::optional<ShowMode> ParseShowMode(const QString &value);
 [[nodiscard]] QString ShowModeName(ShowMode value);
 
+// What a PRESET does with the stories strip as a whole. A ladder: each value
+// hides strictly more than the one before it.
+//
+// Follow is the default, and the interesting one. It hides a peer the preset
+// excludes OUTRIGHT - one no list claims, or one claimed with "never" - and
+// keeps a peer the preset admits but happens to be holding back because they
+// are quiet. A story IS new activity, which is exactly what `message',
+// `message_or_reaction' and `mention' are asking to be shown; suppressing the
+// one thing such a person does have would invert the setting.
+enum class StoryPolicy : uchar {
+	All,          // No peer filtering. Stock Telegram.
+	AllUnseen,    // Everyone, but only while they have something unseen.
+	Follow,       // Hide whoever the preset excludes outright.
+	FollowUnseen, // Follow, and only while unseen.
+	None,         // No strip at all.
+};
+
+// "all", "all_unseen", "follow", "follow_unseen", "none".
+[[nodiscard]] std::optional<StoryPolicy> ParseStoryPolicy(const QString &value);
+[[nodiscard]] QString StoryPolicyName(StoryPolicy value);
+
+// What ONE list entry or folder entry says about its own people's stories.
+//
+// A narrower vocabulary than StoryPolicy on purpose: an entry is already
+// scoped to a set of people, so "all" would mean nothing here. It is the
+// vocabulary `show_mode' already uses next door, which is the point - these sit
+// side by side in the same inline table.
+enum class StoryMode : uchar {
+	Always, // Seen or not, whatever the preset's policy says.
+	Unseen, // Only while unseen.
+	Never,  // None of them.
+};
+
+// "always", "unseen", "never".
+[[nodiscard]] std::optional<StoryMode> ParseStoryMode(const QString &value);
+[[nodiscard]] QString StoryModeName(StoryMode value);
+
 // What a chat of this kind does when nothing says otherwise. Channels and bots
 // are things you subscribed to or started, so they stay; groups are the noisy
 // ones and only speak up when they name you; a private chat appears when the
@@ -128,6 +165,10 @@ struct ListEntry {
 
 	std::optional<bool> notify; // Default true.
 
+	// What this entry's people's stories do, overriding the preset's own
+	// stories policy for them. Unset leaves them to it.
+	std::optional<StoryMode> stories;
+
 	friend bool operator==(const ListEntry &, const ListEntry &) = default;
 };
 
@@ -178,6 +219,10 @@ struct PresetFolder {
 	// view, the way a real Telegram folder holds archived chats too.
 	std::optional<FolderInclude> include;
 
+	// What this folder's people's stories do. Beats a list entry, the same way
+	// a folder already beats one for hiding, and beats the preset's policy.
+	std::optional<StoryMode> stories;
+
 	friend bool operator==(
 		const PresetFolder &,
 		const PresetFolder &) = default;
@@ -219,6 +264,12 @@ struct Preset {
 	// the default because a work mode is about what you are looking at, not
 	// about what you are allowed to reach. See docs/purple/work_mode.md.
 	std::optional<bool> hideEverywhere;
+
+	// What the stories strip does while this preset runs. Unset means Follow:
+	// the strip follows the preset's decision about the person, so somebody it
+	// excludes outright loses their story and somebody it is merely holding
+	// back for being quiet keeps theirs.
+	std::optional<StoryPolicy> stories;
 
 	// Priority order, first match wins. A chat no entry claims is hidden and
 	// silenced: a preset names what gets through.
