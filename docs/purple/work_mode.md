@@ -676,24 +676,70 @@ preset is changed several times a day and settings are not. The entry reads
 `Work Mode` under Normal and `Work Mode: work` otherwise, so the current mode is
 legible without opening anything.
 
-The box lists Normal and every preset in the file, each with a one-line summary
-of what it does - `work  -  lets through 3 lists, silences 1 list, 2 folders` -
-built by resolving the preset rather than by describing what was typed. Choosing
-one applies it immediately and leaves the box open, so a wrong guess is one
-click from being undone.
+Settings > Advanced > Purple carries a second entry to the same box. Not because
+the main menu is hard to reach, but because Settings is where someone looks for
+a feature they have heard of and cannot find, and a search for "work mode"
+turning up nothing is how a feature stays unused.
+
+The box lists Normal and every preset in the file, each with a summary of what
+it does - `work  -  lets through 3 lists, silences 1 list, 2 folders` - built by
+resolving the preset rather than by describing what was typed. Choosing one
+applies it immediately and leaves the box open, so a wrong guess is one click
+from being undone.
+
+Those rows wrap. A `Ui::Checkbox` is one elided line by default, which is fine
+for `Show tray icon` and wrong for a sentence: elided, every preset read
+`lets through 3 lists, silences 1 li...`, which is worse than no summary at all
+because it looks like the whole answer.
 
 The summary counts what gets *through*, not what is hidden. Under this model
 counting the hidden would be counting the whole account, since anything a preset
 does not name is hidden by falling through.
 
+### What it is doing, as opposed to what it says
+
+Under the rows, while a preset is running, is the one line the file cannot
+give you:
+
+    Showing 535 of 641 loaded chats.
+    People 128, Inner 3.
+
+The summaries above it are read off `settings.toml` and would look exactly the
+same if a list name were misspelled - the preset would resolve, name a list that
+holds nobody, and quietly hide everything. This line is read off the chat lists
+themselves, so it is the answer to the question anyone actually has.
+
+It is refreshed on `ActiveChanges()` but through `crl::on_main`, because that
+signal is what the session subscribes to in order to *rebuild* those lists.
+Counting from inside the handler would count whatever the previous preset left
+behind.
+
 `state.toml` remains the source of truth and is still hand-editable; the box is
 a second writer to the same field, not a replacement for it.
+
+### Reaching the file
+
+The line naming `settings.toml` at the bottom of the box is a link, and clicking
+it reveals the file in the system file manager. Everything the box cannot do -
+writing a preset, editing a list, naming a folder - is done in that file, and
+until it was clickable, getting there meant retyping a path out of a label.
+
+It reveals rather than opens: `.toml` has no registered handler on most installs,
+and the file opening in whatever happens to have claimed the extension is a
+worse surprise than a file manager window.
 
 ### What the box says when something is wrong
 
 `settings.toml` problems - the error, and every warning - are shown here. Until
 now they only reached the log, which meant a preset that silently did nothing
 because of a mistyped list name looked exactly like a preset that was working.
+
+Errors are drawn in the colour the rest of the app uses for something that needs
+attention; warnings stay in the muted text of a note. The difference is the
+whole point of having two words for them - an error means the file did not load,
+a warning means it loaded with something ignored - and in one column of body
+text they read identically. The `Error:` and `Warning:` prefixes stay, so this
+does not rest on colour alone.
 
 If the active preset is not in the file at all - deleted, renamed, or lost to a
 half-finished edit - no row is checked, and the box says so. Checking Normal
@@ -889,6 +935,20 @@ the preset box carries a checkbox naming the key: a hotkey with no visible
 affordance is a hotkey nobody remembers. Under Normal the checkbox is inert and
 says why - `Peek - nothing is hidden under Normal` - rather than sitting there
 greyed out with no explanation.
+
+The key is named in *native* text. The file holds Qt portable text, because that
+is what `QKeySequence` parses and what these docs can describe once for every
+platform, but on macOS Qt reads `Ctrl` as Command - so a label repeating the file
+would print `Ctrl+Shift+P` next to a key that does nothing. The checkbox runs the
+sequence back through `QKeySequence::NativeText` and shows what the keyboard has
+on it.
+
+While a peek is running the same checkbox counts it down - `Peeking - 1:23 left`,
+or `Peeking - until you turn it off` when `auto_off` is off. A peek ends on a
+clock and nothing anywhere said when: the toast at the start was the only
+warning, so chats reappearing and then going again two minutes later had no
+visible cause. The timer runs only while the box is open, which is the only time
+there is anyone to read it.
 
 Pressing the key shows a toast saying which way it went - including under
 Normal, where the answer is that there was nothing to do.

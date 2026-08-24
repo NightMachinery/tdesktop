@@ -745,7 +745,7 @@ void MainMenu::setupMenu() {
 		Purple::PresetMenuLabel(),
 		{ &st::menuIconTagFilter }
 	)->setClickedCallback([=] {
-		controller->show(Box(Purple::PresetBox));
+		controller->show(Box(Purple::PresetBox, &controller->session()));
 	});
 
 	addAction(

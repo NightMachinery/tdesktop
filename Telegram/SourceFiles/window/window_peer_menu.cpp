@@ -263,9 +263,10 @@ void PeerMenuAddMuteSubmenuAction(
 	const auto byPreset = Purple::SilencedByPreset(thread->peer());
 	if (byPreset) {
 		const auto show = controller->uiShow();
+		const auto session = &controller->session();
 		addAction(
 			u"Silenced by '%1'"_q.arg(Purple::ActiveResolved().preset),
-			[=] { show->showBox(Box(Purple::PresetBox)); },
+			[=] { show->showBox(Box(Purple::PresetBox, session)); },
 			&st::menuIconMute);
 	}
 	const auto isMuted = byPreset

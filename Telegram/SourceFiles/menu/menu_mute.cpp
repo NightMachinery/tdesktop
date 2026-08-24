@@ -327,7 +327,7 @@ void FillMuteMenu(
 	if (!descriptor.purplePreset.isEmpty()) {
 		menu->addAction(
 			u"Silenced by '%1'"_q.arg(descriptor.purplePreset),
-			[=] { show->showBox(Box(Purple::PresetBox)); },
+			[=] { show->showBox(Box(Purple::PresetBox, session)); },
 			&st::menuIconMute);
 	}
 

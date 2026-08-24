@@ -75,9 +75,14 @@ void FillListsMenu(
 		const auto where = list
 			? u"In '%1'"_q.arg(DisplayTitle(*list))
 			: u"In no list '%1' names"_q.arg(ActiveResolved().preset);
+		const auto session = &peer->session();
 		menu->addAction(
-			u"%1: %2%3"_q.arg(where, state, folder),
-			[=] { show->showBox(Box(PresetBox)); },
+			// A list title is the user's own text and can hold an '&', which a
+			// menu would otherwise eat as a mnemonic - the same reason the list
+			// rows below are fixed.
+			Ui::Text::FixAmpersandInAction(
+				u"%1: %2%3"_q.arg(where, state, folder)),
+			[=] { show->showBox(Box(PresetBox, session)); },
 			&st::menuIconInfo);
 		menu->addSeparator();
 	}

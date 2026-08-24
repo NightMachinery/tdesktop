@@ -7,18 +7,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_preset_box.h"
 
+#include "base/timer.h"
+#include "core/file_utilities.h"
+#include "data/data_session.h"
+#include "dialogs/dialogs_indexed_list.h"
+#include "dialogs/dialogs_main_list.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_schedule.h"
 #include "ui/layers/generic_box.h"
+#include "ui/text/text_utilities.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
+
+#include <QtCore/QDateTime>
+#include <QtGui/QKeySequence>
 
 namespace Purple {
 namespace {
@@ -86,20 +96,58 @@ namespace {
 	return u"%1  -  %2"_q.arg(name, Summary(settings, name));
 }
 
-[[nodiscard]] QString ProblemsText(const Problems &problems) {
-	auto lines = QStringList();
-	if (!problems.error.isEmpty()) {
-		lines.push_back(u"Error: "_q + problems.error);
+// settings.toml holds the hotkey as Qt portable text, because that is what
+// QKeySequence parses and what the docs can describe once for every platform.
+// What is printed on the keyboard is another matter: on macOS Qt reads "Ctrl"
+// as Command, so a label repeating the file would send someone to a key that
+// does nothing.
+[[nodiscard]] QString HotkeyText() {
+	const auto keys = ActiveSettings().peek.hotkey;
+	const auto sequence = QKeySequence(keys, QKeySequence::PortableText);
+	return sequence.isEmpty()
+		? keys
+		: sequence.toString(QKeySequence::NativeText);
+}
+
+[[nodiscard]] QString Remaining(int seconds) {
+	return u"%1:%2"_q
+		.arg(seconds / 60)
+		.arg(seconds % 60, 2, 10, QChar('0'));
+}
+
+// What the preset is doing at this moment, rather than what it says it will do.
+// The rows above are read off the file and would look exactly the same if a
+// list name were misspelled; this is read off the chat list, and it is the line
+// that answers the question everyone actually has - is it working.
+[[nodiscard]] QString EffectText(not_null<Main::Session*> session) {
+	if (!Filtering()) {
+		return QString();
 	}
-	for (const auto &warning : problems.warnings) {
-		lines.push_back(u"Warning: "_q + warning);
+	const auto owner = &session->data();
+	const auto total = owner->chatsList()->indexed()->size();
+	const auto shown = owner->purpleViewList()->indexed()->size();
+	auto result = u"Showing %1 of %2 loaded chats."_q.arg(shown).arg(total);
+
+	// Named rather than numbered, because a count against a tab nobody can
+	// identify is not worth the line it costs.
+	const auto &views = ExtraViews();
+	auto extras = QStringList();
+	for (auto i = 0; i != int(views.size()); ++i) {
+		extras.push_back(u"%1 %2"_q
+			.arg(views[i].name)
+			.arg(owner->purpleViewList(i + 1)->indexed()->size()));
 	}
-	return lines.join('\n');
+	if (!extras.isEmpty()) {
+		result += '\n' + extras.join(u", "_q) + '.';
+	}
+	return result;
 }
 
 } // namespace
 
-void PresetBox(not_null<Ui::GenericBox*> box) {
+void PresetBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session) {
 	box->setTitle(rpl::single(u"Work Mode"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -118,6 +166,20 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 
 	const auto rows = container->add(
 		object_ptr<Ui::VerticalLayout>(container));
+
+	// Directly under the choice it describes, and wrapped rather than hidden so
+	// that switching to Normal takes the space with it instead of leaving a gap
+	// where a number used to be.
+	const auto effect = container->add(
+		object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
+			container,
+			object_ptr<Ui::FlatLabel>(
+				container,
+				EffectText(session),
+				st::boxDividerLabel),
+			padding));
+	effect->toggle(Filtering(), anim::type::instant);
+
 	const auto problems = container->add(
 		object_ptr<Ui::VerticalLayout>(container));
 
@@ -125,11 +187,28 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 	// affordance is a hotkey nobody remembers. This is where someone would
 	// look for it, next to the preset it suspends. Under Normal it says why it
 	// does nothing rather than sitting there greyed out with no explanation.
+	//
+	// A peek also ends on a clock, and nothing anywhere said when. The toast at
+	// the start was the only warning, so chats reappearing and then going again
+	// two minutes later had no visible cause. The countdown below runs only
+	// while this box is open, which is the only time there is anyone to read it.
 	const auto peekText = [] {
-		return ActiveResolved().normal
-			? u"Peek - nothing is hidden under Normal"_q
-			: u"Peek - show what the preset hides (%1)"_q.arg(
-				ActiveSettings().peek.hotkey);
+		const auto &resolved = ActiveResolved();
+		if (resolved.normal) {
+			return u"Peek - nothing is hidden under Normal"_q;
+		} else if (!resolved.peeking) {
+			return u"Peek - show what the preset hides (%1)"_q.arg(HotkeyText());
+		}
+		const auto deadline = CurrentState().peekDeadlineUnix;
+		if (!deadline) {
+			// auto_off = "off": it runs until it is turned off, and saying so
+			// is the whole difference from a countdown that never moves.
+			return u"Peeking - until you turn it off"_q;
+		}
+		const auto left = std::max(
+			int(deadline - QDateTime::currentSecsSinceEpoch()),
+			0);
+		return u"Peeking - %1 left"_q.arg(Remaining(left));
 	};
 	const auto peek = container->add(
 		object_ptr<Ui::Checkbox>(
@@ -146,16 +225,41 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 		}
 	}, peek->lifetime());
 
+	// Ticks the countdown while one is running, and only then: a timer left
+	// running behind a closed box would repaint a label nobody is looking at
+	// once a second for as long as the app is up.
+	const auto ticker = box->lifetime().make_state<base::Timer>();
+	ticker->setCallback([=] { peek->setText(peekText()); });
+
 	// Follows the engine rather than the click, so a peek started from the
 	// hotkey, or ended by its own timer, moves the tick here too. Disabled
 	// under Normal, which hides nothing there is anything to peek at.
-	ActiveChanges(
-	) | rpl::on_next([=] {
+	const auto refreshPeek = [=] {
 		peek->setChecked(
 			Peeking(),
 			Ui::Checkbox::NotifyAboutChange::DontNotify);
 		peek->setDisabled(ActiveResolved().normal);
 		peek->setText(peekText());
+		if (Peeking() && CurrentState().peekDeadlineUnix) {
+			ticker->callEach(crl::time(1000));
+		} else {
+			ticker->cancel();
+		}
+	};
+	refreshPeek();
+
+	ActiveChanges(
+	) | rpl::on_next([=] {
+		refreshPeek();
+
+		// Deferred, because this fires from the gate and the chat lists it is
+		// about are rebuilt by another subscriber to the same signal. Counting
+		// here would count whatever the previous preset left behind.
+		crl::on_main(effect, [=] {
+			const auto text = EffectText(session);
+			effect->entity()->setText(text);
+			effect->toggle(!text.isEmpty(), anim::type::normal);
+		});
 	}, peek->lifetime());
 
 	// Only worth a row when the file describes a schedule, since a switch that
@@ -193,14 +297,26 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 		paused->toggle(ScheduleConfigured(), anim::type::normal);
 	}, paused->lifetime());
 
-	container->add(
+	// The path was already here, and already the answer to "where do I write
+	// one". Clicking it is the part that was missing: everything this box can
+	// do beyond choosing is done in that file, and until now finding it meant
+	// retyping a path out of a label.
+	auto written = TextWithEntities{ u"Presets are written in "_q };
+	written.append(Ui::Text::Link(SettingsFilePath()));
+	written.append(u", which reloads as you save it."_q);
+	const auto path = container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			u"Presets are written in "_q
-				+ SettingsFilePath()
-				+ u", which reloads as you save it."_q,
+			rpl::single(std::move(written)),
 			st::boxDividerLabel),
 		st::boxRowPadding);
+	path->setClickHandlerFilter([=](const auto &...) {
+		// Reveal rather than open: the file has no registered handler on most
+		// installs, and a TOML file opening in whatever claimed .toml is a
+		// worse surprise than a Finder window.
+		File::ShowInFolder(SettingsFilePath());
+		return false;
+	});
 
 	// Indices into the radio group, so the callback can name what was picked.
 	const auto names = box->lifetime().make_state<std::vector<QString>>();
@@ -240,7 +356,7 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 			if (name == active) {
 				selected = i;
 			}
-			rows->add(
+			const auto row = rows->add(
 				object_ptr<Ui::Radiobutton>(
 					rows,
 					group,
@@ -248,25 +364,57 @@ void PresetBox(not_null<Ui::GenericBox*> box) {
 					RowText(settings, name),
 					st::defaultCheckbox),
 				padding);
+
+			// A checkbox is one elided line by default, and a summary saying
+			// what a preset lets through, silences and gates does not fit in
+			// one. Elided, the box was describing every preset as "lets
+			// through 3 lists, silences 1 li..." - which is worse than no
+			// summary, because it looks like the whole answer.
+			row->setAllowTextLines(0);
 		}
 		if (selected >= 0) {
 			group->setValue(selected);
 		}
 
 		problems->clear();
-		auto text = ProblemsText(SettingsProblems());
+		const auto &found = SettingsProblems();
+		auto errors = QStringList();
 		if (selected < 0) {
 			// Nothing is checked, which is the honest picture. Selecting Normal
 			// instead would look tidier and would be a disaster: the callback
 			// would fire and switch the user to Normal, unhiding every chat the
 			// missing preset was hiding, over a typo mid-edit.
-			text = u"The active preset '%1' is not in this file. The last "
-				"resolution that worked is still in effect."_q.arg(active)
-				+ (text.isEmpty() ? QString() : ('\n' + text));
+			errors.push_back(u"Error: the active preset '%1' is not in this "
+				"file. The last resolution that worked is still in "
+				"effect."_q.arg(active));
 		}
-		if (!text.isEmpty()) {
+		if (!found.error.isEmpty()) {
+			errors.push_back(u"Error: "_q + found.error);
+		}
+		if (!errors.isEmpty()) {
+			const auto label = problems->add(
+				object_ptr<Ui::FlatLabel>(
+					problems,
+					errors.join('\n'),
+					st::boxLabel),
+				padding);
+
+			// An error and a warning read identically in body text, and the
+			// difference is the whole point: one means the file did not load,
+			// the other means it loaded with something ignored. The "Error:"
+			// prefix stays, so this does not rest on colour alone.
+			label->setTextColorOverride(st::attentionButtonFg->c);
+		}
+		if (!found.warnings.empty()) {
+			auto lines = QStringList();
+			for (const auto &warning : found.warnings) {
+				lines.push_back(u"Warning: "_q + warning);
+			}
 			problems->add(
-				object_ptr<Ui::FlatLabel>(problems, text, st::boxLabel),
+				object_ptr<Ui::FlatLabel>(
+					problems,
+					lines.join('\n'),
+					st::boxDividerLabel),
 				padding);
 		}
 	};
