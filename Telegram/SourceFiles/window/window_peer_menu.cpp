@@ -4418,13 +4418,17 @@ void TogglePinnedThread(
 		not_null<Dialogs::Entry*> entry,
 		FilterId filterId,
 		Fn<void()> onToggled) {
-	// Purple: an extra view owns its pinned order and keeps it in
-	// settings.toml, so this toggles the tab's own list and the account never
-	// hears about it. Data::Session::setChatPinned() writes the file.
-	const auto view = Data::IsPurpleView(filterId)
-		? Data::PurpleViewIndex(filterId)
-		: 0;
-	if (view > 0) {
+	// Purple: a view that owns its pinned order keeps it in settings.toml, so
+	// this toggles the tab's own list and the account never hears about it.
+	// Data::Session::setChatPinned() writes the file.
+	//
+	// Always true of an extra view, and true of the main view exactly when the
+	// preset states a `pinned' order of its own - otherwise that view mirrors
+	// the account's and falls through to the ordinary path below, which pins in
+	// the chat list as it always did.
+	const auto purple = Data::IsPurpleView(filterId);
+	const auto view = purple ? Data::PurpleViewIndex(filterId) : 0;
+	if (view > 0 || (purple && Purple::PresetOwnsPins())) {
 		const auto history = entry->asHistory();
 		if (!history) {
 			return;
@@ -4447,10 +4451,11 @@ void TogglePinnedThread(
 		return;
 	}
 
-	// Pinning inside the preset's main view is pinning in the chat list. That
-	// view's pinned order is a mirror of the main one, so there is nothing of
-	// its own to toggle and nothing to save to a server that has never heard
-	// of it. See Data::kPurpleViewFilterId.
+	// Pinning inside a MIRRORING main view is pinning in the chat list: that
+	// view's order is a copy of the main one, so there is nothing of its own to
+	// toggle and nothing to save to a server that has never heard of it. A
+	// preset that owns its order took the branch above instead. See
+	// Data::kPurpleViewFilterId.
 	if (!filterId || Data::IsPurpleView(filterId)) {
 		return TogglePinnedThread(controller, entry, onToggled);
 	}
