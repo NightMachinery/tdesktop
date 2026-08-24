@@ -3488,6 +3488,14 @@ bool History::purpleHiddenFromView() const {
 	if (purpleShownAsRecent()) {
 		return false;
 	}
+	// A peek reveals, and says so here rather than leaving it to fall out of
+	// what the two rules below happen to answer. It used to be implicit twice
+	// over - VisibleFor() forces Always while peeking, and ExemptFolders() went
+	// empty - and the second of those was hiding archived chats a folder had
+	// pulled in, because an empty exempt list also means "not in the view".
+	if (Purple::Peeking()) {
+		return false;
+	}
 	// A folder the preset pulls in decides first, because it is the more
 	// specific statement: it named this folder, where a list entry named a kind
 	// or a set of ids. What it does not decide is WHEN - a folder saying nothing
