@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 
 #include "base/timer.h"
+#include "purple/purple_readme.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -239,6 +240,11 @@ private:
 Config::Config() : _reload([=] { reloadFromDisk(); }) {
 	loadSettings();
 	loadState();
+
+	// Before the watch, so that writing it on a fresh install - or after this
+	// document changes - cannot queue a reload of the file we have just read.
+	RefreshReadme();
+
 	startWatching();
 }
 
