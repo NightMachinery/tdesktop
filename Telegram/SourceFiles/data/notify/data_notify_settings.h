@@ -119,9 +119,17 @@ public:
 	[[nodiscard]] bool purpleMutedWithoutPreset(
 		not_null<const PeerData*> peer) const;
 
-	// Purple: whether the active preset silences this chat by naming a folder
-	// it is in, rather than by naming a list. False the moment no preset asks,
-	// which is what keeps a folder walk out of every other mute query.
+	// Purple: whether the active preset is what is silencing this chat, by
+	// either of the two ways it can - no list it names lets the chat notify, or
+	// a folder it names silences it. Both halves, because a menu built from
+	// half of it disagrees with the mute it is describing: a chat silenced only
+	// by a folder used to get no "Silenced by 'Work'" row and an Unmute item
+	// that lifted nothing, since the preset put the mute straight back.
+	[[nodiscard]] bool purpleSilenced(not_null<const PeerData*> peer) const;
+
+	// Purple: the folder half on its own, for the places that have already
+	// established the list half. False the moment no preset asks, which is what
+	// keeps a folder walk out of every other mute query.
 	[[nodiscard]] bool purpleSilencedByFolder(
 		not_null<const PeerData*> peer) const;
 

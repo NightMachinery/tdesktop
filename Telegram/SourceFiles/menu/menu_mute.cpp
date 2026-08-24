@@ -255,7 +255,8 @@ Descriptor ThreadDescriptor(not_null<Data::Thread*> thread) {
 		.updateSound = updateSound,
 		.updateMutePeriod = updateMutePeriod,
 		.volumeController = Data::ThreadRingtonesVolumeController(thread),
-		.purplePreset = Purple::SilencedByPreset(thread->peer())
+		.purplePreset = thread->owner().notifySettings().purpleSilenced(
+			thread->peer())
 			? Purple::ViewName()
 			: QString(),
 	};
