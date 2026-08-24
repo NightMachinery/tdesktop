@@ -1935,6 +1935,15 @@ void Session::refreshPurpleView() {
 	for (const auto &row : _chatsList.indexed()->all()) {
 		entries.push_back(row->entry());
 	}
+	// And the Archive's own list, because a folder can pull an archived chat
+	// into the view and nothing walking the main list would ever reach it.
+	// Cheap when the preset asks for nothing: the entries are visited, decide
+	// they do not belong, and leave.
+	if (const auto archive = folderLoaded(Data::Folder::kId)) {
+		for (const auto &row : archive->chatsList()->indexed()->all()) {
+			entries.push_back(row->entry());
+		}
+	}
 	for (const auto &entry : entries) {
 		refreshChatListEntry(entry);
 	}
@@ -5713,9 +5722,11 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		const auto belongs = i
 			? (history && Purple::ExtraViewHolds(i - 1, history->peer))
 			: ((history || entry->asFolder())
-				// Archived chats are not in All chats and are not in the view;
-				// topics and sublists live in lists of their own.
-				&& !entry->folder()
+				// Archived chats are not in All chats and so are not in the
+				// view either - unless a folder the preset pulls in holds
+				// them, which is the one thing that overrides the archive.
+				// Topics and sublists live in lists of their own.
+				&& (!entry->folder() || entry->purpleShownFromArchive())
 				&& !entry->purpleHiddenFromView());
 		auto event = ChatListEntryRefresh{ .key = key, .filterId = id };
 		if (belongs) {

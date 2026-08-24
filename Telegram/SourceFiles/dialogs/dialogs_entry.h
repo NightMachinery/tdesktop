@@ -160,6 +160,15 @@ public:
 		return false;
 	}
 
+	// Purple: whether an archived entry is in the view anyway, because a folder
+	// the preset pulls in holds it. Archiving is how visibility is controlled
+	// in stock Telegram; under a preset the preset controls it, so a folder
+	// that asked for its chats gets them wherever they are filed. Only a
+	// History can be: nothing else is inside the Archive.
+	[[nodiscard]] virtual bool purpleShownFromArchive() const {
+		return false;
+	}
+
 	[[nodiscard]] virtual UnreadState chatListUnreadState() const = 0;
 	[[nodiscard]] virtual BadgesState chatListBadgesState() const = 0;
 	[[nodiscard]] virtual HistoryItem *chatListMessage() const = 0;

@@ -148,11 +148,12 @@ void ReadOptionalBool(
 				}
 				ReadOptionalBool(*fields, "show", folder.show);
 				ReadOptionalBool(*fields, "notify", folder.notify);
-				ReadOptionalBool(
-					*fields,
-					"include_in_main_view",
-					folder.includeInMainView);
-				ReadOptionalBool(*fields, "pinned_only", folder.pinnedOnly);
+				if (const auto include = fields->get("include_in_main_view")) {
+					if (const auto text
+						= include->value<std::string_view>()) {
+						folder.include = ParseFolderInclude(Text(*text));
+					}
+				}
 				result.folders.push_back(std::move(folder));
 			}
 		}
@@ -305,13 +306,9 @@ QString SerializeState(const State &state) {
 			if (folder.notify) {
 				fields += u", notify = %1"_q.arg(Boolean(*folder.notify));
 			}
-			if (folder.includeInMainView) {
+			if (folder.include) {
 				fields += u", include_in_main_view = %1"_q
-					.arg(Boolean(*folder.includeInMainView));
-			}
-			if (folder.pinnedOnly) {
-				fields += u", pinned_only = %1"_q
-					.arg(Boolean(*folder.pinnedOnly));
+					.arg(Quoted(FolderIncludeName(*folder.include)));
 			}
 			result += u"  { %1 },\n"_q.arg(fields);
 		}

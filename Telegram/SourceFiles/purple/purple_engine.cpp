@@ -88,10 +88,11 @@ std::vector<QString> ExemptFolderNames(
 		const std::vector<PresetFolder> &folders) {
 	auto result = std::vector<QString>();
 	for (const auto &folder : folders) {
-		// Only an explicit true pulls a folder's chats in. Saying nothing
+		// Only an explicit include pulls a folder's chats in. Saying nothing
 		// leaves them to whatever their list decided, which is what every
 		// folder the preset does not name is left to.
-		if (folder.includeInMainView.value_or(false)) {
+		if (folder.include.value_or(FolderInclude::None)
+			!= FolderInclude::None) {
 			result.push_back(folder.name);
 		}
 	}
@@ -102,10 +103,8 @@ std::vector<QString> ExemptPinnedOnlyFolderNames(
 		const std::vector<PresetFolder> &folders) {
 	auto result = std::vector<QString>();
 	for (const auto &folder : folders) {
-		// Both flags, because this one narrows the other and a folder that
-		// never asked to be pulled in has nothing to narrow.
-		if (folder.includeInMainView.value_or(false)
-			&& folder.pinnedOnly.value_or(false)) {
+		if (folder.include.value_or(FolderInclude::None)
+			== FolderInclude::Pinned) {
 			result.push_back(folder.name);
 		}
 	}

@@ -409,6 +409,7 @@ public:
 	bool shouldBeInChatList() const override;
 	bool purpleHiddenFromChatList() const override;
 	bool purpleHiddenFromView() const override;
+	bool purpleShownFromArchive() const override;
 	[[nodiscard]] bool purpleInExemptFolder() const;
 	Dialogs::UnreadState chatListUnreadState() const override;
 	Dialogs::BadgesState chatListBadgesState() const override;

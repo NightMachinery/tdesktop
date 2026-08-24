@@ -3439,6 +3439,12 @@ bool History::purpleHiddenFromView() const {
 	return false;
 }
 
+bool History::purpleShownFromArchive() const {
+	// Only asked of an archived chat, and only then does the folder walk run.
+	// A preset that pulls in no folders never pays for this at all.
+	return folder() && Purple::Filtering() && purpleInExemptFolder();
+}
+
 bool History::purpleHiddenFromChatList() const {
 	// Only a preset that asked for it takes a chat out of the app rather than
 	// out of its own view. Everything else keeps the chat where it is and
