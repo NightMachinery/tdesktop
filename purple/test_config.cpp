@@ -2526,6 +2526,92 @@ list_order = [ { list = "all" } ]
 	CHECK_EQ(peek.settings.peek.hotkey, u"Ctrl+Shift+Y"_q);
 }
 
+void TestOverrides() {
+	Begin("until overrides");
+
+	CHECK_EQ(
+		int(*Purple::ParseOverrideKind(u" NOTIFY "_q)),
+		int(Purple::OverrideKind::Notify));
+	CHECK(!Purple::ParseOverrideKind(u"maybe"_q).has_value());
+	CHECK_EQ(
+		Purple::OverrideKindName(Purple::OverrideKind::Hide),
+		u"hide"_q);
+
+	auto state = Purple::State();
+	state.activePreset = u"work"_q;
+	state.overrides = {
+		{ 10, Purple::OverrideKind::Show, 2000, u"work"_q },
+		{ 11, Purple::OverrideKind::Hide, 1500, u"work"_q },
+		{ 12, Purple::OverrideKind::Notify, 3000, u"deep"_q },
+		{ 13, Purple::OverrideKind::Show, 500, u"work"_q },
+	};
+
+	// Scoped to the preset it was made under. The one made in "deep" is
+	// invisible from "work" even though it has not expired.
+	CHECK(Purple::OverrideFor(state, 10, u"work"_q, 1000) != nullptr);
+	CHECK(Purple::OverrideFor(state, 12, u"work"_q, 1000) == nullptr);
+	CHECK(Purple::OverrideFor(state, 12, u"deep"_q, 1000) != nullptr);
+	CHECK(Purple::OverrideFor(state, 12, u"DEEP"_q, 1000) != nullptr);
+
+	// And already filtered for expiry, so a caller is one test rather than
+	// three. Entry 13 ran out at 500.
+	CHECK(Purple::OverrideFor(state, 13, u"work"_q, 1000) == nullptr);
+	CHECK(Purple::OverrideFor(state, 13, u"work"_q, 400) != nullptr);
+
+	// Nothing matches under Normal, which has no preset name at all.
+	CHECK(Purple::OverrideFor(state, 10, QString(), 1000) == nullptr);
+
+	CHECK_EQ(
+		int(Purple::OverrideFor(state, 11, u"work"_q, 1000)->kind),
+		int(Purple::OverrideKind::Hide));
+
+	// The timer is armed for the earliest still outstanding under the running
+	// preset - "deep"'s later one must not hold "work"'s timer open.
+	CHECK_EQ(Purple::NextOverrideDeadline(state, u"work"_q), int64(500));
+	CHECK_EQ(Purple::NextOverrideDeadline(state, u"deep"_q), int64(3000));
+	CHECK_EQ(Purple::NextOverrideDeadline(state, QString()), int64(0));
+
+	// Pruning reports whether anything went, so the caller knows if a rebuild
+	// is owed rather than doing one every tick.
+	CHECK(!Purple::PruneOverrides(state, 400));
+	CHECK_EQ(int(state.overrides.size()), 4);
+	CHECK(Purple::PruneOverrides(state, 1600));
+	CHECK_EQ(int(state.overrides.size()), 2);
+	CHECK(Purple::OverrideFor(state, 11, u"work"_q, 1000) == nullptr);
+	CHECK(Purple::OverrideFor(state, 10, u"work"_q, 1000) != nullptr);
+
+	// They survive the state.toml round trip, deadlines and all - the whole
+	// reason the deadline is unix seconds rather than crl::time.
+	const auto text = Purple::SerializeState(state);
+	const auto back = Purple::ParseState(text, Path());
+	CHECK_EQ(int(back.overrides.size()), 2);
+	CHECK_EQ(back.overrides.front().peer, Purple::PeerIdValue(10));
+	CHECK_EQ(back.overrides.front().untilUnix, int64(2000));
+	CHECK_EQ(back.overrides.front().preset, u"work"_q);
+	CHECK_EQ(
+		int(back.overrides.back().kind),
+		int(Purple::OverrideKind::Notify));
+
+	// A state with none writes no key at all, so the common file stays quiet.
+	auto empty = Purple::State();
+	empty.activePreset = u"work"_q;
+	CHECK(!Purple::SerializeState(empty).contains(u"overrides"_q));
+
+	// An entry missing anything it needs is skipped rather than fought over,
+	// like every other reader in that file.
+	const auto broken = Purple::ParseState(uR"(
+active_preset = "work"
+overrides = [
+  { peer = 1, kind = "show", until = 99, preset = "work" },
+  { peer = 0, kind = "show", until = 99, preset = "work" },
+  { peer = 2, kind = "nonsense", until = 99, preset = "work" },
+  { peer = 3, kind = "show", preset = "work" },
+]
+)"_q, Path());
+	CHECK_EQ(int(broken.overrides.size()), 1);
+	CHECK_EQ(broken.overrides.front().peer, Purple::PeerIdValue(1));
+}
+
 void TestReservedHotkeys() {
 	Begin("reserved hotkeys");
 
@@ -3007,6 +3093,7 @@ int main() {
 	TestPeek();
 	TestNamedExplicitly();
 	TestPresetHotkeys();
+	TestOverrides();
 	TestReservedHotkeys();
 	TestStories();
 	TestRecent();

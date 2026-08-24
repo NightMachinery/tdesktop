@@ -106,6 +106,24 @@ bool SavePresetPins(
 // not be confused for each other.
 [[nodiscard]] bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen);
 
+// The "until" decision in force for this chat, or none. Scoped to the running
+// preset and already filtered for expiry, so a caller is one test rather than
+// three. See OverrideKind.
+[[nodiscard]] std::optional<OverrideKind> OverrideFor(
+	not_null<const PeerData*> peer);
+
+// Makes one, replacing whatever this chat already had. `seconds' is measured
+// from now; zero clears instead.
+void SetOverride(not_null<const PeerData*> peer, OverrideKind kind, int seconds);
+void ClearOverride(not_null<const PeerData*> peer);
+
+// Drops what has expired and says whether anything went, so Data::Session can
+// rebuild exactly when it has to.
+bool PruneOverrides();
+
+// When the next one runs out, in unix seconds, or 0 for none outstanding.
+[[nodiscard]] int64 NextOverrideDeadline();
+
 // Whether a peek is running: the active preset's hiding is suspended - every
 // chat shows, no group is mention-gated, every folder is back - while its
 // silencing is left exactly where it was. See docs/purple/work_mode.md.

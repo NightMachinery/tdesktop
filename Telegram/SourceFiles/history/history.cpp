@@ -3489,12 +3489,26 @@ bool History::purpleHiddenFromView() const {
 		return false;
 	}
 	// A peek reveals, and says so here rather than leaving it to fall out of
-	// what the two rules below happen to answer. It used to be implicit twice
-	// over - VisibleFor() forces Always while peeking, and ExemptFolders() went
+	// what the rules below happen to answer. It used to be implicit twice over
+	// - VisibleFor() forces Always while peeking, and ExemptFolders() went
 	// empty - and the second of those was hiding archived chats a folder had
 	// pulled in, because an empty exempt list also means "not in the view".
+	//
+	// Above the "until" decisions on purpose, so a peek reveals a chat you hid
+	// as well as one the preset hides. That is what makes a hide-until
+	// cancellable: the row has to come back for you to be able to right-click
+	// it, and a peek is the one gesture that means "show me everything".
 	if (Purple::Peeking()) {
 		return false;
+	}
+	// A decision you made about this one chat, which outranks the preset for as
+	// long as it lasts.
+	if (const auto override = Purple::OverrideFor(peer)) {
+		switch (*override) {
+		case Purple::OverrideKind::Show: return false;
+		case Purple::OverrideKind::Hide: return true;
+		case Purple::OverrideKind::Notify: break;
+		}
 	}
 	// A folder the preset pulls in decides first, because it is the more
 	// specific statement: it named this folder, where a list entry named a kind
@@ -3680,6 +3694,14 @@ bool History::shouldBeInChatList() const {
 }
 
 bool History::purpleKeptForView() const {
+	// A "show until" on a chat with no conversation needs the same two gates a
+	// hand-named one does, or it would be let through by every rule and still
+	// have no row to appear in.
+	if (const auto override = Purple::OverrideFor(peer)) {
+		if (*override == Purple::OverrideKind::Show) {
+			return true;
+		}
+	}
 	return Purple::NamedExplicitly(peer);
 }
 

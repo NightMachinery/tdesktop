@@ -56,6 +56,14 @@ private:
 	void refreshPeekTimer(const State &state, bool peeking);
 
 	Resolved _resolved = NormalResolution();
+
+	// What the "until" decisions were last time we looked. They live in the
+	// state rather than in the resolution - they are about one chat, not about
+	// what the preset means - so a new one produces a bit-identical Resolved
+	// and would otherwise tell nobody. Exactly the shape of the membership bug
+	// the comment in refresh() describes.
+	std::vector<Override> _overrides;
+
 	bool _refreshing = false;
 
 	// Nothing else would look at the deadline again, so without this a peek
@@ -108,6 +116,9 @@ void Gate::refresh(bool settingsChanged) {
 		? NormalPreset()
 		: state.activePreset;
 
+	const auto overridesChanged = (state.overrides != _overrides);
+	_overrides = state.overrides;
+
 	auto next = Resolve(settings, wanted);
 	if (!next) {
 		// The preset was deleted or renamed while it was active, or its
@@ -148,7 +159,7 @@ void Gate::refresh(bool settingsChanged) {
 		// Normal has nothing to rebuild at all: an unconfigured fork must go on
 		// paying nothing for a file it is not using. A settings change that
 		// *starts* a preset moves the resolution and never reaches here.
-		if (settingsChanged && !_resolved.normal) {
+		if ((settingsChanged || overridesChanged) && !_resolved.normal) {
 			_changes.fire({});
 		}
 		return;
@@ -369,6 +380,70 @@ bool SavePresetPins(
 		return false;
 	}
 	return SetPresetPins(resolved.preset, ids, title);
+}
+
+std::optional<OverrideKind> OverrideFor(not_null<const PeerData*> peer) {
+	const auto &resolved = Instance().resolved();
+	if (resolved.normal) {
+		// Normal is a bypass, and an override is a statement about a preset.
+		return std::nullopt;
+	}
+	const auto found = Purple::OverrideFor(
+		CurrentState(),
+		IdOf(peer),
+		resolved.preset,
+		NowUnix());
+	return found ? std::make_optional(found->kind) : std::nullopt;
+}
+
+void SetOverride(
+		not_null<const PeerData*> peer,
+		OverrideKind kind,
+		int seconds) {
+	const auto id = IdOf(peer);
+	const auto &resolved = Instance().resolved();
+	if (!id || resolved.normal) {
+		return;
+	}
+	const auto preset = resolved.preset;
+	const auto until = NowUnix() + seconds;
+	UpdateState([&](State &state) {
+		// One per chat per preset: a second "until" replaces the first rather
+		// than queueing behind it, because the menu offers a decision and not
+		// a schedule.
+		auto kept = std::vector<Override>();
+		kept.reserve(state.overrides.size() + 1);
+		for (auto &entry : state.overrides) {
+			if (entry.peer != id
+				|| entry.preset.compare(preset, Qt::CaseInsensitive)) {
+				kept.push_back(std::move(entry));
+			}
+		}
+		if (seconds > 0) {
+			kept.push_back({ id, kind, until, preset });
+		}
+		state.overrides = std::move(kept);
+	});
+}
+
+void ClearOverride(not_null<const PeerData*> peer) {
+	SetOverride(peer, OverrideKind::Show, 0);
+}
+
+bool PruneOverrides() {
+	auto dropped = false;
+	const auto now = NowUnix();
+	UpdateState([&](State &state) {
+		dropped = Purple::PruneOverrides(state, now);
+	});
+	return dropped;
+}
+
+int64 NextOverrideDeadline() {
+	const auto &resolved = Instance().resolved();
+	return resolved.normal
+		? 0
+		: Purple::NextOverrideDeadline(CurrentState(), resolved.preset);
 }
 
 bool Filtering() {

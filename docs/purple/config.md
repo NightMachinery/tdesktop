@@ -180,6 +180,34 @@ It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
 also asks for every folder - otherwise switching one off would quietly stop
 working the day you added the spread.
 
+### Show until, Hide until, Notify until
+
+Three entries in the `Work Mode` submenu, each offering 30 minutes, 2 hours, 8
+hours or 24 hours. They are decisions about one chat that outrank the preset
+until they run out:
+
+- **Show until** puts the chat in the view past the preset's rules. It does not
+  un-silence it - visible and quiet are different questions.
+- **Hide until** takes it out of the view, and silences it while it is gone,
+  because a notification from a chat you have deliberately hidden is
+  incoherent.
+- **Notify until** lets a preset-silenced chat interrupt you. It lifts **only**
+  the preset's mute; a chat you muted yourself stays muted, which is the rule
+  the whole mute path is built on.
+
+A fourth entry, `Cancel '... until'`, appears only while one is running.
+
+They are **scoped to the preset they were made under**. "Show this until six" is
+a statement about the work you are doing now, and carrying it into every other
+preset would be a larger promise than the menu offered. Switching away and back
+keeps a live one; it simply does nothing while another preset is running.
+
+They live in `state.toml`, not here - they are the app's, they expire by
+themselves, and they must never touch the mtime of the file you are editing.
+The deadline is a unix timestamp rather than a monotonic clock, because unlike
+the `[recent]` buffer these are measured in hours and have to survive a
+restart.
+
 ### Making a list from the chat menu
 
 `New list...` at the foot of the `Work Mode` submenu appends an empty table:

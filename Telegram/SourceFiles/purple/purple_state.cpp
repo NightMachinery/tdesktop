@@ -63,6 +63,22 @@ namespace {
 	return node ? node->value_or(fallback) : fallback;
 }
 
+[[nodiscard]] QString SerializeOverrides(
+		const std::vector<Override> &overrides) {
+	if (overrides.empty()) {
+		return QString();
+	}
+	auto result = u"\noverrides = [\n"_q;
+	for (const auto &entry : overrides) {
+		result += u"  { peer = %1, kind = %2, until = %3, preset = %4 },\n"_q
+			.arg(QString::number(entry.peer))
+			.arg(Quoted(OverrideKindName(entry.kind)))
+			.arg(QString::number(entry.untilUnix))
+			.arg(Quoted(entry.preset));
+	}
+	return result + u"]\n"_q;
+}
+
 [[nodiscard]] QString SerializeLists(const std::vector<ResolvedList> &lists) {
 	auto result = u"lists = [\n"_q;
 	for (const auto &list : lists) {
@@ -124,6 +140,42 @@ void ReadOptionalBool(
 				entry.stories = ParseStoryMode(Text(*text));
 			}
 		}
+		result.push_back(std::move(entry));
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<Override> ReadOverrides(const toml::table &root) {
+	auto result = std::vector<Override>();
+	const auto node = root.get("overrides");
+	const auto array = node ? node->as_array() : nullptr;
+	if (!array) {
+		return result;
+	}
+	for (auto &&element : *array) {
+		const auto fields = element.as_table();
+		if (!fields) {
+			continue;
+		}
+		auto entry = Override();
+		const auto peer = fields->get("peer");
+		const auto until = fields->get("until");
+		const auto kind = fields->get("kind");
+		entry.peer = peer ? peer->value<int64>().value_or(0) : 0;
+		entry.untilUnix = until ? until->value<int64>().value_or(0) : 0;
+		const auto name = kind
+			? kind->value<std::string_view>()
+			: std::optional<std::string_view>();
+		const auto parsed = name
+			? ParseOverrideKind(Text(*name))
+			: std::nullopt;
+		if (!entry.peer || !entry.untilUnix || !parsed) {
+			// Skipped rather than fought over, like every other reader here:
+			// the file is ours and a line we cannot read is one lost decision.
+			continue;
+		}
+		entry.kind = *parsed;
+		entry.preset = ReadString(*fields, "preset");
 		result.push_back(std::move(entry));
 	}
 	return result;
@@ -286,6 +338,7 @@ State ParseState(const QString &text, const QString &path) {
 	result.schedulePaused = ReadBool(root, "schedule_paused", false);
 	result.scheduleTarget = ReadString(root, "schedule_target");
 	result.peekActive = ReadBool(root, "peek_active", false);
+	result.overrides = ReadOverrides(root);
 	if (const auto deadline = root.get("peek_deadline_unix")) {
 		result.peekDeadlineUnix = deadline->value_or(int64(0));
 	}
@@ -299,6 +352,87 @@ State ParseState(const QString &text, const QString &path) {
 bool PeekLive(const State &state, int64 nowUnix) {
 	return state.peekActive
 		&& (!state.peekDeadlineUnix || state.peekDeadlineUnix > nowUnix);
+}
+
+std::optional<OverrideKind> ParseOverrideKind(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"show"_q) {
+		return OverrideKind::Show;
+	} else if (trimmed == u"hide"_q) {
+		return OverrideKind::Hide;
+	} else if (trimmed == u"notify"_q) {
+		return OverrideKind::Notify;
+	}
+	return std::nullopt;
+}
+
+QString OverrideKindName(OverrideKind value) {
+	switch (value) {
+	case OverrideKind::Show: return u"show"_q;
+	case OverrideKind::Hide: return u"hide"_q;
+	case OverrideKind::Notify: return u"notify"_q;
+	}
+	return QString();
+}
+
+const Override *OverrideFor(
+		const State &state,
+		PeerIdValue peer,
+		const QString &preset,
+		int64 nowUnix) {
+	if (!peer || preset.isEmpty()) {
+		return nullptr;
+	}
+	for (const auto &entry : state.overrides) {
+		if (entry.peer == peer
+			&& entry.untilUnix > nowUnix
+			&& !entry.preset.compare(preset, Qt::CaseInsensitive)) {
+			return &entry;
+		}
+	}
+	return nullptr;
+}
+
+bool PruneOverrides(State &state, int64 nowUnix) {
+	// Decided before anything moves. Building the kept list first and then
+	// discarding it when nothing expired would leave every entry that stayed
+	// moved-from - which is to say with an empty preset name, which is to say
+	// invisible to OverrideFor(). The common call is the one that finds
+	// nothing, so that would have emptied the whole feature on the first tick.
+	auto expired = false;
+	for (const auto &entry : state.overrides) {
+		if (entry.untilUnix <= nowUnix) {
+			expired = true;
+			break;
+		}
+	}
+	if (!expired) {
+		return false;
+	}
+	auto kept = std::vector<Override>();
+	kept.reserve(state.overrides.size());
+	for (auto &entry : state.overrides) {
+		if (entry.untilUnix > nowUnix) {
+			kept.push_back(std::move(entry));
+		}
+	}
+	state.overrides = std::move(kept);
+	return true;
+}
+
+int64 NextOverrideDeadline(const State &state, const QString &preset) {
+	auto result = int64(0);
+	if (preset.isEmpty()) {
+		return result;
+	}
+	for (const auto &entry : state.overrides) {
+		if (entry.preset.compare(preset, Qt::CaseInsensitive)) {
+			continue;
+		} else if (!result || entry.untilUnix < result) {
+			result = entry.untilUnix;
+		}
+	}
+	return result;
 }
 
 QString SerializeState(const State &state) {
@@ -321,6 +455,7 @@ QString SerializeState(const State &state) {
 		.arg(Quoted(state.scheduleTarget));
 	result += u"peek_active          = %1\n"_q.arg(Boolean(state.peekActive));
 	result += u"peek_deadline_unix   = %1\n"_q.arg(state.peekDeadlineUnix);
+	result += SerializeOverrides(state.overrides);
 
 	const auto &cache = state.resolvedCache;
 	if (!cache.valid()) {

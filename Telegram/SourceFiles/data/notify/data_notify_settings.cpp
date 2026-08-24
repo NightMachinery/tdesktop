@@ -639,9 +639,21 @@ bool NotifySettings::purpleMutedWithoutPreset(
 }
 
 bool NotifySettings::purpleSilenced(not_null<const PeerData*> peer) const {
-	return Purple::Filtering()
-		&& (!Purple::VisibleFor(peer).notify
-			|| purpleSilencedByFolder(peer));
+	if (!Purple::Filtering()) {
+		return false;
+	}
+	// An "until" decision outranks the preset here too. Notify lifts the
+	// preset's mute and only the preset's - purpleMutedWithoutPreset() below
+	// still has the last word, so a chat you muted yourself stays muted, which
+	// is the rule this whole path is built on.
+	if (const auto override = Purple::OverrideFor(peer)) {
+		switch (*override) {
+		case Purple::OverrideKind::Notify: return false;
+		case Purple::OverrideKind::Hide: return true;
+		case Purple::OverrideKind::Show: break;
+		}
+	}
+	return !Purple::VisibleFor(peer).notify || purpleSilencedByFolder(peer);
 }
 
 bool NotifySettings::purpleSilencedByFolder(

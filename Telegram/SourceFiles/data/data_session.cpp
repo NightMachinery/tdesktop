@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/view/export_view_panel_controller.h"
 #include "mtproto/mtproto_config.h"
 #include "purple/purple_gate.h"
+
+#include <QtCore/QDateTime>
 #include "window/notifications_manager.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -1915,11 +1917,21 @@ void Session::purpleWatchGrace(not_null<History*> history) {
 }
 
 void Session::purpleRearmGraceTimer() {
-	if (_purpleGrace.empty()) {
+	auto earliest = crl::time(0);
+
+	// The "until" decisions share this timer. Their deadlines are unix seconds
+	// because they outlive a restart, so they are converted to the monotonic
+	// clock here rather than kept in two units - and the conversion is only
+	// ever done against a deadline that has not passed, which keeps the
+	// arithmetic away from a wall clock that may have been dragged backwards.
+	if (const auto deadline = Purple::NextOverrideDeadline()) {
+		const auto left = deadline - QDateTime::currentSecsSinceEpoch();
+		earliest = crl::now() + std::max(left, int64(0)) * crl::time(1000);
+	}
+	if (_purpleGrace.empty() && !earliest) {
 		_purpleGraceTimer.cancel();
 		return;
 	}
-	auto earliest = crl::time(0);
 	for (const auto &[peerId, until] : _purpleGrace) {
 		if (!earliest || until < earliest) {
 			earliest = until;
@@ -1946,6 +1958,12 @@ void Session::purpleGraceExpired() {
 		if (const auto history = historyLoaded(peerId)) {
 			history->purpleRefreshChatListMembership();
 		}
+	}
+	// An "until" that has run out has to move the chat AND re-evaluate its
+	// mute, which is more than membership - so it goes through the same full
+	// refresh a preset change does rather than the narrow one above.
+	if (Purple::PruneOverrides()) {
+		refreshPurpleWorkMode();
 	}
 	purpleRearmGraceTimer();
 }
