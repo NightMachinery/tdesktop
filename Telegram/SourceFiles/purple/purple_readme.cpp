@@ -430,7 +430,7 @@ enter_preset = "work"
 exit_preset  = "previous"
 
 [peek]
-hotkey   = "Ctrl+Shift+P"
+hotkey   = "Ctrl+Shift+E"
 auto_off = "2m"
 ```
 

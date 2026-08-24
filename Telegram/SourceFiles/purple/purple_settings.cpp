@@ -20,7 +20,11 @@ namespace {
 
 constexpr auto kNormalPresetName = "normal";
 constexpr auto kPreviousPreset = "previous";
-constexpr auto kDefaultHotkey = "Ctrl+Shift+P";
+// Not Ctrl+Shift+P, which it used to be: that is the spoiler shortcut every
+// message field registers (kSpoilerSequence in lib_ui's input_field.h), so with
+// the composer focused Qt saw two claims on the sequence, called it ambiguous
+// and fired neither. See ReservedByInputField() below.
+constexpr auto kDefaultHotkey = "Ctrl+Shift+E";
 constexpr auto kDefaultPeekAutoOff = 120;
 
 // How deep a "*name" spread may nest before we call it a loop. Sets referring
@@ -1458,6 +1462,35 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 	const auto normalise = [](const QString &keys) {
 		return keys.trimmed().toLower().remove(QChar(' '));
 	};
+
+	// A key a message field claims for itself. Those are registered as
+	// Qt::WidgetShortcut on the field, so they only join the contest while one
+	// has focus - which is why a clash here looks like "my key works until I
+	// click the message box". Qt calls the sequence ambiguous and fires
+	// neither, so the loss is silent and there is nothing to see in the log.
+	//
+	// Compared as normalised text rather than as QKeySequence because this file
+	// is compiled standalone against Qt Core, and QKeySequence is QtGui.
+	const auto reservedBy = [](const QString &key) -> QString {
+		static const auto kReserved = std::vector<std::pair<QString, QString>>{
+			{ u"ctrl+b"_q, u"bold"_q },
+			{ u"ctrl+i"_q, u"italic"_q },
+			{ u"ctrl+u"_q, u"underline"_q },
+			{ u"ctrl+k"_q, u"insert link"_q },
+			{ u"ctrl+shift+x"_q, u"strikethrough"_q },
+			{ u"ctrl+shift+m"_q, u"monospace"_q },
+			{ u"ctrl+shift+n"_q, u"clear formatting"_q },
+			{ u"ctrl+shift+p"_q, u"spoiler"_q },
+			{ u"ctrl+shift+d"_q, u"edit date"_q },
+			{ u"ctrl+shift+."_q, u"blockquote"_q },
+		};
+		for (const auto &[taken, what] : kReserved) {
+			if (taken == key) {
+				return what;
+			}
+		}
+		return QString();
+	};
 	auto claimed = std::vector<std::pair<QString, QString>>();
 	const auto owner = [&](const QString &key) -> const QString* {
 		for (const auto &[taken, by] : claimed) {
@@ -1468,9 +1501,14 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 		return nullptr;
 	};
 	if (!result.settings.peek.hotkey.isEmpty()) {
-		claimed.emplace_back(
-			normalise(result.settings.peek.hotkey),
-			u"peek"_q);
+		const auto key = normalise(result.settings.peek.hotkey);
+		if (const auto what = reservedBy(key); !what.isEmpty()) {
+			result.warnings.push_back(
+				u"peek: hotkey '%1' is what a message field uses for %2, so it "
+				"will do nothing while the composer has focus. Pick another."_q
+					.arg(result.settings.peek.hotkey, what));
+		}
+		claimed.emplace_back(key, u"peek"_q);
 	}
 	for (auto &preset : result.settings.presets) {
 		if (preset.hotkey.isEmpty()) {
@@ -1483,6 +1521,12 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 				"would fire neither."_q.arg(preset.name, preset.hotkey, *by));
 			preset.hotkey = QString();
 			continue;
+		}
+		if (const auto what = reservedBy(key); !what.isEmpty()) {
+			result.warnings.push_back(
+				u"preset '%1': hotkey '%2' is what a message field uses for "
+				"%3, so it will do nothing while the composer has focus. Pick "
+				"another."_q.arg(preset.name, preset.hotkey, what));
 		}
 		claimed.emplace_back(key, u"preset '%1'"_q.arg(preset.name));
 	}

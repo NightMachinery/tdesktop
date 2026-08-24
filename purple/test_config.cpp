@@ -2472,13 +2472,13 @@ hotkey = "Ctrl+Shift+W"
 list_order = [ { list = "all" } ]
 
 [presets.deep]
-hotkey = "Ctrl+Shift+D"
+hotkey = "Ctrl+Shift+G"
 list_order = [ { list = "all" } ]
 )"_q);
 	CHECK(parsed.ok());
 	CHECK(parsed.warnings.empty());
 	CHECK_EQ(parsed.settings.preset(u"work"_q)->hotkey, u"Ctrl+Shift+W"_q);
-	CHECK_EQ(parsed.settings.preset(u"deep"_q)->hotkey, u"Ctrl+Shift+D"_q);
+	CHECK_EQ(parsed.settings.preset(u"deep"_q)->hotkey, u"Ctrl+Shift+G"_q);
 
 	// No key is the normal case and says nothing.
 	const auto silent = Parse(
@@ -2514,16 +2514,79 @@ list_order = [ { list = "all" } ]
 kinds = ["private"]
 
 [peek]
-hotkey = "Ctrl+Shift+P"
+hotkey = "Ctrl+Shift+Y"
 
 [presets.work]
-hotkey = "Ctrl+Shift+P"
+hotkey = "Ctrl+Shift+Y"
 list_order = [ { list = "all" } ]
 )"_q);
 	CHECK(peek.ok());
 	CHECK_EQ(int(peek.warnings.size()), 1);
 	CHECK(peek.settings.preset(u"work"_q)->hotkey.isEmpty());
-	CHECK_EQ(peek.settings.peek.hotkey, u"Ctrl+Shift+P"_q);
+	CHECK_EQ(peek.settings.peek.hotkey, u"Ctrl+Shift+Y"_q);
+}
+
+void TestReservedHotkeys() {
+	Begin("reserved hotkeys");
+
+	// Ctrl+Shift+P is the spoiler shortcut every message field registers, as a
+	// Qt::WidgetShortcut on the field itself. It therefore only joins the
+	// contest while a field has focus, Qt calls the sequence ambiguous and
+	// fires neither - so the key works until you click the composer, with
+	// nothing in the log to say why. Warned about rather than silently
+	// dropped: it is the user's key and it does work most of the time.
+	const auto spoiler = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[peek]
+hotkey = "ctrl+shift+p"
+
+[presets.work]
+list_order = [ { list = "a" } ]
+)"_q);
+	CHECK(spoiler.ok());
+	CHECK_EQ(int(spoiler.warnings.size()), 1);
+	CHECK(spoiler.warnings.front().contains(u"spoiler"_q));
+	CHECK_EQ(spoiler.settings.peek.hotkey, u"ctrl+shift+p"_q);
+
+	// A preset's key is checked the same way, and spacing and case do not let
+	// one slip past.
+	const auto preset = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[presets.work]
+hotkey = "Ctrl + Shift + M"
+list_order = [ { list = "a" } ]
+)"_q);
+	CHECK(preset.ok());
+	CHECK_EQ(int(preset.warnings.size()), 1);
+	CHECK(preset.warnings.front().contains(u"monospace"_q));
+
+	// The default is not one of them any more, which was the bug: every fork
+	// shipped with a peek key that died the moment you clicked the composer.
+	const auto fresh = Parse(u"[presets.work]\nlist_order = []\n"_q);
+	CHECK(fresh.ok());
+	CHECK_EQ(fresh.settings.peek.hotkey, u"Ctrl+Shift+E"_q);
+	for (const auto &warning : fresh.warnings) {
+		CHECK(!warning.contains(u"message field"_q));
+	}
+
+	// And a key nobody claims says nothing at all.
+	const auto fine = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[peek]
+hotkey = "Ctrl+Shift+E"
+
+[presets.work]
+hotkey = "Ctrl+Shift+W"
+list_order = [ { list = "a" } ]
+)"_q);
+	CHECK(fine.ok());
+	CHECK(fine.warnings.empty());
 }
 
 void TestStories() {
@@ -2944,6 +3007,7 @@ int main() {
 	TestPeek();
 	TestNamedExplicitly();
 	TestPresetHotkeys();
+	TestReservedHotkeys();
 	TestStories();
 	TestRecent();
 	TestScheduleTarget();
