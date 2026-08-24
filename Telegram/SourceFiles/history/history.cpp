@@ -2598,6 +2598,15 @@ TimeId History::adjustedChatListTimeId() const {
 			return std::max(result, draft->date);
 		}
 	}
+	// Purple: the second gate. A chat with no messages has no date, and
+	// DialogPosFromDate(0) is 0 - which Entry::setChatListExistence() reads as
+	// "has no place in the list" and refuses, however loudly
+	// shouldBeInChatList() said yes. One second past the epoch is a real
+	// position, and sorts below every real chat, which is where a conversation
+	// that has not happened yet belongs.
+	if (!result && purpleKeptForView()) {
+		return TimeId(1);
+	}
 	return result;
 }
 
@@ -3649,8 +3658,19 @@ bool History::shouldBeInChatList() const {
 			return true;
 		}
 	}
+	// Purple: last, so every structural check above still applies - a channel
+	// you have left stays out, and so does a chat whose folder is unknown,
+	// which refreshChatListEntry() asserts on. The only verdict being overruled
+	// is "this conversation is empty", and only for a chat the preset names by
+	// hand: an empty chat has no row, and without a row it cannot be on one of
+	// the preset's tabs either.
 	return !lastMessageKnown()
-		|| (lastMessage() != nullptr);
+		|| (lastMessage() != nullptr)
+		|| purpleKeptForView();
+}
+
+bool History::purpleKeptForView() const {
+	return Purple::NamedExplicitly(peer);
 }
 
 void History::purpleRefreshShowMode() {
@@ -3683,6 +3703,21 @@ void History::purpleRefreshShowMode() {
 }
 
 void History::purpleRefreshChatListMembership() {
+	// A chat the preset names by hand, with no dialog on the server, has never
+	// been told which folder it is in - and shouldBeInChatList() refuses
+	// anything whose folder is unknown, long before it gets as far as asking
+	// whether the preset wants it. That check is right and stays: an entry with
+	// no folder would trip the Expects() in refreshChatListEntry().
+	//
+	// So answer the question instead of skipping it. "The main list, then" is
+	// the truthful answer for a conversation that does not exist yet, and the
+	// server overwrites it the moment one does. setFolderPointer() takes it from
+	// there, including the sort position, because a folder going from unknown to
+	// known is exactly the case it already handles.
+	if (!folderKnown() && purpleKeptForView()) {
+		setFolderPointer(nullptr);
+	}
+
 	// Both, in this order. Neither call does both directions: the first drops
 	// an entry that should now be gone, and only the second brings one back,
 	// because leaving the chat list zeroes the sort key and

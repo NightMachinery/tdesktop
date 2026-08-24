@@ -442,6 +442,13 @@ public:
 	// timer to come back and re-decide. Zero when none is running.
 	[[nodiscard]] crl::time purpleGraceUntil() const;
 
+	// Purple: whether a running preset writes this chat's id out by hand, which
+	// is grounds for keeping it in the chat list even with no conversation in
+	// it - a person you have never messaged is exactly who you want one click
+	// away. Forces both of the gates that would otherwise drop it: the tail of
+	// shouldBeInChatList(), and the zero sort key in adjustedChatListTimeId().
+	[[nodiscard]] bool purpleKeptForView() const;
+
 	// Purple: whether this chat is already one click away somewhere else in the
 	// running preset - on one of its extra views, or in a folder whose tab is
 	// showing. What "any_open_chat_except_in_folder" excepts.

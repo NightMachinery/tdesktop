@@ -299,6 +299,14 @@ bool Filtering() {
 	return !Instance().resolved().normal;
 }
 
+bool NamedExplicitly(not_null<const PeerData*> peer) {
+	return Filtering()
+		&& NamedExplicitly(
+			ActiveSettings(),
+			Instance().resolved(),
+			IdOf(peer));
+}
+
 int RecentStaySeconds() {
 	// Nothing is hidden under Normal, so nothing has to be kept from going.
 	return Filtering() ? ActiveSettings().recent.staySecondsAfterClose : 0;

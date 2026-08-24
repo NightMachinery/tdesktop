@@ -178,6 +178,24 @@ struct Visibility {
 	PeerIdValue id,
 	ChatKind kind);
 
+// Whether the running resolution names this id OUTRIGHT - written into the
+// `members' of a list the preset or one of its views orders - as opposed to
+// merely matching it through a `kinds' rule.
+//
+// The distinction carries weight the other predicates here do not: it is the
+// difference between the user asking for one particular chat and the user
+// describing a category that happens to contain it. Only the first is grounds
+// for keeping a chat in the chat list that tdesktop would otherwise drop, and
+// reading a `kinds' match as an explicit request would sweep in every contact
+// with no conversation. See History::purpleKeptForView().
+//
+// Entries whose show is Never are skipped: an entry naming a chat in order to
+// hide it has not asked for it to be anywhere.
+[[nodiscard]] bool NamedExplicitly(
+	const Settings &settings,
+	const Resolved &resolved,
+	PeerIdValue id);
+
 [[nodiscard]] ResolvedCache ToCache(const Resolved &resolved);
 [[nodiscard]] std::optional<Resolved> FromCache(const ResolvedCache &cache);
 

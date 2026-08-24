@@ -1419,6 +1419,55 @@ Three things have not been, and are written down rather than assumed:
   redundant there. It is not redundant in general - `refreshHistory()` is
   guarded on the account having real folders - but that has not been shown.
 
+## A chat with no conversation
+
+A person you have never messaged is exactly who you want one click away, and
+until this was fixed they could not be. Naming an id in a list did nothing for a
+contact with an empty chat: they were simply absent from every tab, with no
+warning and no way to tell that from a typo.
+
+Two separate gates were dropping them, and forcing either one alone looks like a
+fix and changes nothing:
+
+- `History::shouldBeInChatList()` ends at
+  `!lastMessageKnown() || (lastMessage() != nullptr)`. An empty conversation is
+  false.
+- Even past that, `Entry::setChatListExistence()` is
+  `if (exists && _sortKeyInChatList)`, and the key comes from
+  `DialogPosFromDate(adjustedChatListTimeId())`, which returns **0** for date 0.
+  A chat with no messages has no date, so it has no sort key, so it is refused
+  however loudly the first gate says yes.
+
+Failing either sends the entry to `removeChatListEntry()`, which never reaches
+the extra-view loop in `Session::refreshChatListEntry()`. Hence "in a list, on
+no tab".
+
+Both are now overridden for a chat the preset names, through
+`History::purpleKeptForView()`: the `shouldBeInChatList()` override goes **last**
+so every structural check above it still applies - a channel you have left stays
+out, and so does a chat whose folder is unknown, which `refreshChatListEntry()`
+asserts on - and `adjustedChatListTimeId()` returns `TimeId(1)` instead of 0,
+which is a real position that sorts below every real chat. That is where a
+conversation which has not happened yet belongs.
+
+### Named, not merely matched
+
+The guard is `Purple::NamedExplicitly()`, and it is the whole safety of the
+thing. It asks whether the id is **written out** in the `members` of a list the
+preset or one of its views orders - not whether some list matches the chat.
+
+A `kinds` rule describes a category; `members` names a chat. Only the second is
+a reason to keep an empty chat in the chat list. Read a `kinds` match as an
+explicit request and `{ kinds = ["private"] }` drags every contact you have
+never messaged into the list, which on this account is most of nineteen hundred
+of them.
+
+Entries whose `show_mode` is `"never"` are skipped too: naming a chat in order
+to hide it is not asking for it to be anywhere. The predicate deliberately does
+not model the main order's first-match-wins capture - over-approximating costs
+nothing, since the only consequence is keeping a row for a chat the user typed
+in by hand.
+
 ## Not yet implemented
 
 - A chat entering a silenced rule-based folder does not refresh the cached
