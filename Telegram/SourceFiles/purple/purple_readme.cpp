@@ -160,6 +160,42 @@ kinds of chat at once, and it is why leaving it out is usually right.
 The preset only ever *adds* a mute, so a chat can be silenced by both, and the
 mute menu says which one an Unmute would actually lift. Default true.
 
+## Staying visible a little longer
+
+An unread-watching mode has one sharp edge: reading a chat is exactly what
+takes it out of the view, so it vanishes on the frame you click away from it.
+Having just read something is decent evidence that you are still working on it,
+so it can be made to linger:
+
+```toml
+[recent]
+stay_visible_after_close = "2m"
+applies_to = "already_in_view"
+```
+
+`stay_visible_after_close` takes the same spellings as `auto_off` above:
+`"90s"`, `"2m"`, `"1h"`, a bare number of seconds, or `"off"`. It is `"off"`
+unless you write it, and the clock starts when you stop looking at the chat -
+not when you open it - so reading something for an hour still buys the full
+period afterwards.
+
+`applies_to` decides which chats it covers:
+
+- `"already_in_view"` (the default) - only a chat that was in the view when you
+  opened it. The narrow repair: nothing you open can pull in a chat the preset
+  was hiding.
+- `"any_open_chat"` - any chat you open, hidden or not. One rule, and the only
+  one of the three that helps when you reach a hidden chat through search or
+  through an extra view: it appears in the main view while you have it open and
+  for the period after.
+- `"any_open_chat_except_in_folder"` - the above, minus the chats that are
+  already one click away in this preset: on an extra view, or in a folder whose
+  tab is showing. If it is on P0 already, it does not also need to be in Work.
+
+None of it is remembered across a restart, which is deliberate: a grace period
+that survived one would mean the app remembering that you glanced at somebody
+yesterday.
+
 ## Folders
 
 `folders` names the account's real Telegram folders. **A preset with no

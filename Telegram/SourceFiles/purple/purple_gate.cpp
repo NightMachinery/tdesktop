@@ -304,6 +304,15 @@ bool Filtering() {
 	return !Instance().resolved().normal;
 }
 
+int RecentStaySeconds() {
+	// Nothing is hidden under Normal, so nothing has to be kept from going.
+	return Filtering() ? ActiveSettings().recent.staySecondsAfterClose : 0;
+}
+
+RecentScope RecentAppliesTo() {
+	return ActiveSettings().recent.scope;
+}
+
 Visibility VisibleFor(not_null<const PeerData*> peer) {
 	// Saved Messages is never hidden. It is where the user files things for
 	// themselves, nothing arrives in it unbidden, and there is no route back to

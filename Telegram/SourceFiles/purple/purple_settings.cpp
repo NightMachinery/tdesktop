@@ -987,7 +987,66 @@ void WarnUnknownLists(
 	return result;
 }
 
+[[nodiscard]] Recent ReadRecent(
+		const toml::table &root,
+		std::vector<QString> &warnings) {
+	auto result = Recent();
+	const auto node = root.get("recent");
+	if (!node) {
+		return result;
+	} else if (!node->as_table()) {
+		warnings.push_back(
+			u"'recent' should be a table (%1)."_q.arg(At(*node)));
+		return result;
+	}
+	const auto &table = *node->as_table();
+	const auto context = u"recent"_q;
+	const auto key = "stay_visible_after_close";
+	if (const auto stay = ReadString(table, key, context, warnings)) {
+		if (const auto seconds = ParseDuration(*stay)) {
+			result.staySecondsAfterClose = *seconds;
+		} else {
+			warnings.push_back(
+				u"recent: 'stay_visible_after_close' should look like \"2m\", "
+				"\"90s\", \"1h\" or \"off\", keeping it off."_q);
+		}
+	}
+	if (const auto scope = ReadString(table, "applies_to", context, warnings)) {
+		if (const auto parsed = ParseRecentScope(*scope)) {
+			result.scope = *parsed;
+		} else {
+			warnings.push_back(
+				u"recent: 'applies_to' should be \"already_in_view\", "
+				"\"any_open_chat\" or \"any_open_chat_except_in_folder\", "
+				"keeping \"%1\"."_q.arg(RecentScopeName(result.scope)));
+		}
+	}
+	return result;
+}
+
 } // namespace
+
+std::optional<RecentScope> ParseRecentScope(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"already_in_view"_q) {
+		return RecentScope::AlreadyInView;
+	} else if (trimmed == u"any_open_chat"_q) {
+		return RecentScope::AnyOpenChat;
+	} else if (trimmed == u"any_open_chat_except_in_folder"_q) {
+		return RecentScope::AnyOpenChatExceptInFolder;
+	}
+	return std::nullopt;
+}
+
+QString RecentScopeName(RecentScope value) {
+	switch (value) {
+	case RecentScope::AlreadyInView: return u"already_in_view"_q;
+	case RecentScope::AnyOpenChat: return u"any_open_chat"_q;
+	case RecentScope::AnyOpenChatExceptInFolder:
+		return u"any_open_chat_except_in_folder"_q;
+	}
+	return u"already_in_view"_q;
+}
 
 std::optional<ChatKind> ParseChatKind(const QString &value) {
 	const auto trimmed = value.trimmed().toLower();
@@ -1279,6 +1338,7 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 		result.settings.presets,
 		result.warnings);
 	result.settings.peek = ReadPeek(root, result.warnings);
+	result.settings.recent = ReadRecent(root, result.warnings);
 	return result;
 }
 

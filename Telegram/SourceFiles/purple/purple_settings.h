@@ -235,6 +235,36 @@ struct Peek {
 	int autoOffSeconds = 0; // Zero disables the timer.
 };
 
+// Which chats a recently-closed grace period covers.
+enum class RecentScope : uchar {
+	// Only a chat that was in the preset's view when it was opened. Reading it
+	// is what would have taken it out, so this is the narrow repair: nothing
+	// you open can pull in a chat the preset was hiding.
+	AlreadyInView,
+
+	// Any chat you open, hidden or not. One rule - a chat you have looked at
+	// recently is in the view - and the only one of the three that helps when
+	// you reach a hidden chat through search or through an extra view.
+	AnyOpenChat,
+
+	// The above, minus the chats that are already one click away somewhere else
+	// in this preset: on an extra view, or in a folder whose tab is showing.
+	AnyOpenChatExceptInFolder,
+};
+
+// "already_in_view", "any_open_chat", "any_open_chat_except_in_folder".
+[[nodiscard]] std::optional<RecentScope> ParseRecentScope(const QString &value);
+[[nodiscard]] QString RecentScopeName(RecentScope value);
+
+// Keeping a chat in the view for a while after you stop looking at it. Without
+// it a gated chat vanishes on the exact frame you click away from it, which is
+// both startling and wrong: having just read something is the best evidence
+// there is that you are still working on it.
+struct Recent {
+	int staySecondsAfterClose = 0; // Zero disables it entirely.
+	RecentScope scope = RecentScope::AlreadyInView;
+};
+
 struct Premium {
 	bool enabled = true;
 };
@@ -249,6 +279,7 @@ struct Settings {
 	Schedule schedule;
 	FocusSync focusSync;
 	Peek peek;
+	Recent recent;
 
 	[[nodiscard]] const List *list(const QString &name) const;
 	[[nodiscard]] const Preset *preset(const QString &name) const;

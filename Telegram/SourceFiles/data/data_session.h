@@ -949,6 +949,13 @@ public:
 	// ask an entry whether it is in it.
 	[[nodiscard]] FilterId purpleBadgeFilterId() const;
 
+	// Purple: come back when this chat's recently-looked-at grace period runs
+	// out, because nothing else will - no message arrives and no unread moves
+	// when a clock expires. One timer for the whole session, armed for the
+	// earliest deadline outstanding: a timer per History would be thousands of
+	// them, and only a handful of chats are ever in grace at once.
+	void purpleWatchGrace(not_null<History*> history);
+
 	struct ChatListEntryRefresh {
 		Dialogs::Key key;
 		Dialogs::PositionChange moved;
@@ -1071,6 +1078,11 @@ private:
 	// Purple: retakes the view's copy of the main list's pinned order.
 	void refreshPurpleViewPinned();
 	void refreshPurpleViewPins(int index);
+
+	// Purple: the grace-period timer. Keyed by PeerId rather than by History*
+	// so an entry left behind by a chat that went away cannot dangle.
+	void purpleRearmGraceTimer();
+	void purpleGraceExpired();
 
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
@@ -1417,6 +1429,11 @@ private:
 
 	std::vector<WallPaper> _wallpapers;
 	uint64 _wallpapersHash = 0;
+
+	// Purple: chats whose recently-looked-at grace period has not run out yet,
+	// and the one timer that comes back for the earliest of them.
+	base::flat_map<PeerId, crl::time> _purpleGrace;
+	base::Timer _purpleGraceTimer;
 
 	base::flat_map<not_null<UserData*>, TimeId> _watchingForOffline;
 	base::Timer _watchForOfflineTimer;

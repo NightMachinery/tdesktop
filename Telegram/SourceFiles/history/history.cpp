@@ -2325,6 +2325,12 @@ void History::setUnreadMark(bool unread) {
 }
 
 void History::setFakeUnreadWhileOpened(bool enabled) {
+	// Purple: above every guard below, because this setter is already exactly
+	// "this chat became, or stopped being, the one you are looking at" - it
+	// simply declines to raise its flag for a chat that arrived with nothing
+	// unread, and that chat is open just the same.
+	purpleSetOpened(enabled);
+
 	if (fakeUnreadWhileOpened() == enabled) {
 		return;
 	} else if (enabled) {
@@ -3465,6 +3471,14 @@ bool History::purpleHiddenFromView() const {
 	if (!Purple::Filtering()) {
 		return false;
 	}
+	// Before every rule below it, because it is not a statement about what the
+	// preset lets through: it is the chat you are looking at, or were looking at
+	// a moment ago. Having just read something is the best evidence there is
+	// that you are still working on it, and a chat that vanishes on the frame
+	// you click away is startling in a way no policy justifies.
+	if (purpleShownAsRecent()) {
+		return false;
+	}
 	// A folder the preset pulls in decides first, because it is the more
 	// specific statement: it named this folder, where a list entry named a kind
 	// or a set of ids. What it does not decide is WHEN - a folder saying nothing
@@ -3500,6 +3514,93 @@ bool History::purpleInQuietFolder() const {
 		}
 	}
 	return false;
+}
+
+bool History::purpleReachableElsewhere() const {
+	const auto filters = &owner().chatsFilters();
+
+	// The preset's own extra tabs first: cheap, and the common case for a chat
+	// somebody keeps deliberately to hand. View 0 is the main view and is the
+	// thing being decided, so it is not "elsewhere".
+	for (auto i = 1, count = filters->purpleViewCount(); i != count; ++i) {
+		if (inChatList(Data::PurpleViewFilterId(i))) {
+			return true;
+		}
+	}
+	const auto &shown = Purple::ShownFolders();
+	if (shown.empty()) {
+		return false;
+	}
+	const auto self = const_cast<History*>(this);
+	const auto all = ranges::any_of(shown, Purple::IsAllFolders);
+	for (const auto &filter : filters->list()) {
+		if (!filter.id() || !filter.contains(self)) {
+			continue;
+		} else if (all) {
+			return true;
+		}
+		for (const auto &folder : shown) {
+			// show_p = false takes the tab off the strip, and a folder with no
+			// tab is not somewhere you can reach the chat from.
+			if (!Purple::IsAllFolders(folder)
+				&& folder.show.value_or(true)
+				&& !filter.title().text.text.compare(
+					folder.name,
+					Qt::CaseInsensitive)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void History::purpleSetOpened(bool opened) {
+	if (_purpleOpened == opened) {
+		return;
+	}
+	_purpleOpened = opened;
+	const auto seconds = Purple::RecentStaySeconds();
+	if (opened) {
+		// Decided now rather than on close, because two of the three scopes ask
+		// where the chat was when you opened it - and reading it is exactly what
+		// moves that answer.
+		_purpleGraceUntil = 0;
+		_purpleGraceEligible = (seconds > 0) && [&] {
+			switch (Purple::RecentAppliesTo()) {
+			case Purple::RecentScope::AlreadyInView:
+				return inChatList(Data::kPurpleViewFilterId);
+			case Purple::RecentScope::AnyOpenChat:
+				return true;
+			case Purple::RecentScope::AnyOpenChatExceptInFolder:
+				return !purpleReachableElsewhere();
+			}
+			return false;
+		}();
+	} else if (_purpleGraceEligible && seconds > 0) {
+		_purpleGraceUntil = crl::now() + seconds * crl::time(1000);
+		owner().purpleWatchGrace(this);
+	}
+	if (seconds > 0 && Purple::Filtering()) {
+		// Both directions. Opening can reveal a chat the preset hides, under the
+		// wider scopes, and closing one the grace does not cover has to take it
+		// away again - the flag below only speaks for chats that had unread.
+		purpleRefreshChatListMembership();
+	}
+}
+
+bool History::purpleShownAsRecent() const {
+	if (!_purpleGraceEligible || !Purple::RecentStaySeconds()) {
+		// The second test is what makes turning [recent] off take effect at
+		// once rather than at the end of whatever was already running.
+		return false;
+	} else if (_purpleOpened) {
+		return true;
+	}
+	return _purpleGraceUntil && (crl::now() < _purpleGraceUntil);
+}
+
+crl::time History::purpleGraceUntil() const {
+	return _purpleGraceUntil;
 }
 
 bool History::purpleShownFromArchive() const {

@@ -2136,6 +2136,74 @@ void TestPeek() {
 	CHECK(!Purple::PeekLive(state, 0));
 }
 
+void TestRecent() {
+	Begin("recent");
+
+	// Off unless the file asks, and the narrow scope unless it says otherwise:
+	// nothing a preset hides should start appearing because a key was added
+	// with no `applies_to' beside it.
+	const auto silent = Parse(u"[presets.work]\nlist_order = []\n"_q);
+	CHECK(silent.ok());
+	CHECK_EQ(silent.settings.recent.staySecondsAfterClose, 0);
+	CHECK(silent.settings.recent.scope
+		== Purple::RecentScope::AlreadyInView);
+
+	const auto parsed = Parse(uR"(
+[recent]
+stay_visible_after_close = "2m"
+applies_to = "any_open_chat"
+)"_q);
+	CHECK(parsed.ok());
+	CHECK(parsed.warnings.empty());
+	CHECK_EQ(parsed.settings.recent.staySecondsAfterClose, 120);
+	CHECK(parsed.settings.recent.scope == Purple::RecentScope::AnyOpenChat);
+
+	// The same duration spellings as [peek] auto_off, which is the point of
+	// reusing ParseDuration rather than inventing a seconds-only key.
+	const auto units = [](const QString &text) {
+		const auto one = Parse(
+			u"[recent]\nstay_visible_after_close = \"%1\"\n"_q.arg(text));
+		return one.settings.recent.staySecondsAfterClose;
+	};
+	CHECK_EQ(units(u"90s"_q), 90);
+	CHECK_EQ(units(u"1h"_q), 3600);
+	CHECK_EQ(units(u"45"_q), 45);
+	CHECK_EQ(units(u"off"_q), 0);
+
+	// Unparseable leaves it off and says so, rather than guessing at a number.
+	const auto broken = Parse(
+		u"[recent]\nstay_visible_after_close = \"soon\"\n"_q);
+	CHECK(broken.ok());
+	CHECK_EQ(broken.settings.recent.staySecondsAfterClose, 0);
+	CHECK_EQ(int(broken.warnings.size()), 1);
+
+	// A misspelt scope keeps the narrow default rather than the widest one.
+	const auto scope = Parse(uR"(
+[recent]
+stay_visible_after_close = "2m"
+applies_to = "any_chat"
+)"_q);
+	CHECK(scope.ok());
+	CHECK_EQ(int(scope.warnings.size()), 1);
+	CHECK(scope.settings.recent.scope == Purple::RecentScope::AlreadyInView);
+
+	CHECK(Purple::ParseRecentScope(u"  ANY_OPEN_CHAT  "_q)
+		== Purple::RecentScope::AnyOpenChat);
+	CHECK(Purple::ParseRecentScope(
+		u"any_open_chat_except_in_folder"_q)
+			== Purple::RecentScope::AnyOpenChatExceptInFolder);
+	CHECK(!Purple::ParseRecentScope(QString()).has_value());
+
+	// Round trip, so a warning can name back what it kept.
+	for (const auto value : {
+			Purple::RecentScope::AlreadyInView,
+			Purple::RecentScope::AnyOpenChat,
+			Purple::RecentScope::AnyOpenChatExceptInFolder }) {
+		CHECK(Purple::ParseRecentScope(Purple::RecentScopeName(value))
+			== value);
+	}
+}
+
 void TestScheduleTarget() {
 	Begin("schedule target");
 
@@ -2358,6 +2426,7 @@ int main() {
 	TestViewMembership();
 	TestMentionGate();
 	TestPeek();
+	TestRecent();
 	TestScheduleTarget();
 	TestResolvedCache();
 

@@ -524,6 +524,63 @@ chat cannot come back on its own. The combination asks for two opposite things -
 "take this out of the app" and "bring it back when it speaks" - so it is
 documented rather than engineered around.
 
+### Staying a little longer after you close it
+
+An unread-watching mode has one sharp edge, and it is the edge you meet first:
+reading a chat is exactly what takes it out of the view. Click away and it is
+gone on that frame. `[recent]` puts a grace period on it.
+
+    [recent]
+    stay_visible_after_close = "2m"
+    applies_to = "already_in_view"
+
+**The clock starts on close, not on open**, which is the whole difference
+between a setting that works and one that does not. Reading something for five
+minutes must not burn the grace before you have finished with it; while the
+chat is open it stays regardless, and the period begins when it stops being the
+active chat.
+
+`applies_to` decides what it covers. `"already_in_view"` is the narrow repair -
+only a chat that was in the view when it was opened, so nothing you open can
+pull in a chat the preset was hiding. `"any_open_chat"` is the single rule -
+a chat you have looked at recently is in the view - and is the only one that
+helps when you reach a hidden chat through search or through an extra view.
+`"any_open_chat_except_in_folder"` is that, minus the chats already one click
+away in this preset: on an extra view, or in a folder whose tab is showing.
+
+Eligibility is decided **when the chat is opened**, not when it is closed, and
+that is not an optimisation. Two of the three scopes ask where the chat was at
+that moment, and reading it is precisely what moves the answer: by the time you
+close it, "was it in the view" has become "was it in the view before I read it",
+which is a question nothing can answer afterwards.
+
+Three implementation notes, each of which was the obvious approach's undoing:
+
+- **The seam is `History::setFakeUnreadWhileOpened()`**, above its own guards.
+  That setter already *is* "this chat became, or stopped being, the one you are
+  looking at" - every caller means exactly that, including the four
+  `resetFakeUnreadWhileOpened()` sites, which are all genuine navigations away.
+  It simply declines to raise its flag for a chat that arrived with nothing
+  unread, and that chat is open just the same. Hooking the flag itself would
+  have missed exactly the chats the wider scopes exist for.
+- **One timer, on `Data::Session`**, armed for the earliest deadline
+  outstanding. Nothing else would ever come back: no message arrives and no
+  unread moves when a clock runs out. A `base::Timer` per `History` would be
+  thousands of them, and only a handful of chats are in grace at once. The map
+  is keyed by `PeerId` rather than by `History*` so an entry left behind by a
+  chat that went away cannot dangle.
+- **None of it is persisted.** Not `state.toml`, which would then be rewritten
+  on every chat switch and would touch the mtime of the file you are
+  hand-editing; and not anywhere else either, because a grace period that
+  survived a restart would mean the app remembering that you glanced at somebody
+  yesterday, which is not what anybody means by "recently".
+
+`purpleShownAsRecent()` is tested before every other rule in
+`purpleHiddenFromView()`, because it is not a statement about what the preset
+lets through. It re-reads `Purple::RecentStaySeconds()` each time, so turning
+`[recent]` off takes effect at once rather than at the end of whatever was
+already running.
+
 ## Applying a preset change
 
 Nothing about any peer changes when a preset does, so no upstream signal fires.

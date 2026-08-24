@@ -173,6 +173,15 @@ its own pinned order. `pinned` is the tab's, not the account's: pinning a chat
 there does not pin it in the chat list, and the app writes the array back the
 same way it writes list membership. A view with no `pinned` sorts by date.
 
+`[recent]` keeps a chat in the view for a while after you stop looking at it,
+which is the one thing an unread-watching `show_mode` cannot express on its own:
+reading a chat is exactly what takes it out. `stay_visible_after_close` is a
+duration in the same spellings as `auto_off`, off unless written, and the clock
+starts on close rather than on open. `applies_to` is `"already_in_view"` (the
+default), `"any_open_chat"` or `"any_open_chat_except_in_folder"` - the last
+skipping chats that are already reachable on an extra view or in a shown folder.
+It is per-install rather than per-preset, and lives in memory only.
+
 The rest - `[schedule]`, `[focus_sync]`, `[peek]` - is documented by the starter
 file the app writes on first run, which carries a commented example of each.
 
