@@ -19,9 +19,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/show.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
+#include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/popup_menu.h"
 #include "styles/style_media_player.h" // mediaPlayerMenuCheck
 #include "styles/style_menu_icons.h"
+#include "styles/style_widgets.h" // defaultFlatLabel
 
 namespace Purple {
 namespace {
@@ -88,14 +90,29 @@ void FillListsMenu(
 			? u"In '%1'"_q.arg(DisplayTitle(*list))
 			: u"In no list '%1' names"_q.arg(ViewName());
 		const auto session = &peer->session();
-		menu->addAction(
-			// A list title is the user's own text and can hold an '&', which a
-			// menu would otherwise eat as a mnemonic - the same reason the list
-			// rows below are fixed.
-			Ui::Text::FixAmpersandInAction(
-				u"%1: %2%3"_q.arg(where, state, folder)),
-			[=] { show->showBox(Box(PresetBox, session)); },
+
+		// A wrapping label rather than an ordinary row. An ordinary one elides
+		// at the menu's widthMax, which cut this off after about thirty-five
+		// characters - and the tail is where the answer is, so what survived
+		// was the half nobody came here to read.
+		//
+		// No FixAmpersandInAction on this one, unlike the list rows below: a
+		// label draws '&' as itself, and only an action's text reads it as a
+		// mnemonic.
+		const auto &st = menu->st().menu;
+		auto label = base::make_unique_q<Ui::Menu::MultilineAction>(
+			menu->menu(),
+			st,
+			st::defaultFlatLabel,
+			// Where an ordinary row puts its text, so this lines up with the
+			// list rows under it and clears the icon on its left.
+			QPoint(st.itemPadding.left(), st.itemPadding.top()),
+			TextWithEntities{ u"%1: %2%3"_q.arg(where, state, folder) },
 			&st::menuIconInfo);
+		const auto action = menu->addAction(std::move(label));
+		QObject::connect(action, &QAction::triggered, action, [=] {
+			show->showBox(Box(PresetBox, session));
+		});
 		menu->addSeparator();
 	}
 
