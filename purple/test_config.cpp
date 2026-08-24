@@ -2136,6 +2136,88 @@ void TestPeek() {
 	CHECK(!Purple::PeekLive(state, 0));
 }
 
+void TestNamedExplicitly() {
+	Begin("named explicitly");
+
+	const auto parsed = Parse(uR"(
+[lists.close_people]
+members = [ 111, 222 ]
+
+[lists.everyone]
+kinds = ["private"]
+
+[lists.banned]
+members = [ 333 ]
+
+[presets.work]
+list_order = [
+  { list = "close_people" },
+  { list = "banned", show_mode = "never" },
+  { list = "everyone" },
+]
+
+[[presets.work.views]]
+name       = "P0"
+list_order = [ { list = "close_people" } ]
+
+[presets.plain]
+list_order = [ { list = "everyone" } ]
+)"_q);
+	CHECK(parsed.ok());
+	const auto work = Purple::Resolve(parsed.settings, u"work"_q);
+	const auto plain = Purple::Resolve(parsed.settings, u"plain"_q);
+	CHECK(work.has_value() && plain.has_value());
+
+	const auto named = [&](const std::optional<Purple::Resolved> &resolved,
+			Purple::PeerIdValue id) {
+		return Purple::NamedExplicitly(parsed.settings, *resolved, id);
+	};
+
+	// Written into a list's members, and that list is ordered: yes.
+	CHECK(named(work, 111));
+	CHECK(named(work, 222));
+
+	// The whole point of the predicate. 999 is a private chat, so
+	// { list = "everyone" } matches it and it is very much in the view - but
+	// nobody wrote it down, so it is not grounds for keeping an empty chat in
+	// the chat list. Getting this wrong drags in every contact with no
+	// conversation.
+	CHECK(!named(work, 999));
+
+	// Named in order to be hidden is not a request for it to be anywhere.
+	CHECK(!named(work, 333));
+
+	// A view counts, which is the case that motivated all of this: the main
+	// order may gate the chat while a tab holds it unconditionally.
+	const auto viewOnly = Parse(uR"(
+[lists.close_people]
+members = [ 111 ]
+
+[presets.work]
+list_order = []
+
+[[presets.work.views]]
+name       = "P0"
+list_order = [ { list = "close_people" } ]
+)"_q);
+	CHECK(viewOnly.ok());
+	const auto held = Purple::Resolve(viewOnly.settings, u"work"_q);
+	CHECK(held.has_value());
+	CHECK(Purple::NamedExplicitly(viewOnly.settings, *held, 111));
+
+	// A preset that does not order the list gets nothing from it, even though
+	// the list is right there in the file.
+	CHECK(!named(plain, 111));
+
+	// Normal is a bypass, and must not be keeping anything anywhere.
+	const auto normal = Purple::Resolve(parsed.settings, Purple::NormalPreset());
+	CHECK(normal.has_value());
+	CHECK(!Purple::NamedExplicitly(parsed.settings, *normal, 111));
+
+	// An id of zero is "we could not work out what this peer is", never a match.
+	CHECK(!named(work, 0));
+}
+
 void TestRecent() {
 	Begin("recent");
 
@@ -2426,6 +2508,7 @@ int main() {
 	TestViewMembership();
 	TestMentionGate();
 	TestPeek();
+	TestNamedExplicitly();
 	TestRecent();
 	TestScheduleTarget();
 	TestResolvedCache();

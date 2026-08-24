@@ -209,6 +209,43 @@ bool ViewHolds(
 	return false;
 }
 
+bool NamedExplicitly(
+		const Settings &settings,
+		const Resolved &resolved,
+		PeerIdValue id) {
+	if (resolved.normal || !id) {
+		return false;
+	}
+	const auto named = [&](const std::vector<EffectiveList> &order) {
+		for (const auto &effective : order) {
+			if (effective.show == ShowMode::Never) {
+				continue;
+			}
+			const auto list = settings.list(effective.list);
+			if (list
+				&& (std::find(list->members.begin(), list->members.end(), id)
+					!= list->members.end())) {
+				return true;
+			}
+		}
+		return false;
+	};
+	// The main order and every view, without regard to which entry would win
+	// the main order's first-match-wins race. Over-approximating costs nothing
+	// here - the only consequence is keeping a chat in the chat list that the
+	// user wrote down by hand - and reasoning about capture would make the
+	// answer depend on the order of two things that are not in competition.
+	if (named(resolved.lists)) {
+		return true;
+	}
+	for (const auto &view : resolved.views) {
+		if (named(view.lists)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 ResolvedCache ToCache(const Resolved &resolved) {
 	auto result = ResolvedCache();
 	if (resolved.normal) {

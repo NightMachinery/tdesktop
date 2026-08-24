@@ -91,6 +91,12 @@ bool SaveExtraViewPins(
 // still work. See docs/purple/work_mode.md.
 [[nodiscard]] bool HideEverywhere();
 
+// Whether the running preset writes this chat's id out by hand, in the
+// `members' of a list it or one of its views orders - rather than catching it
+// with a `kinds' rule. False under Normal. See the engine overload for why the
+// distinction is worth a predicate of its own.
+[[nodiscard]] bool NamedExplicitly(not_null<const PeerData*> peer);
+
 // How long a chat stays in the view after you stop looking at it, and which
 // chats that covers. Zero seconds - the default, and what Normal always answers
 // - means the whole mechanism is off and nothing has to be tracked.
