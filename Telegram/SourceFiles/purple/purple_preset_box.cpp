@@ -33,6 +33,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 namespace {
 
+// settings.toml holds a hotkey as Qt portable text, because that is what
+// QKeySequence parses and what the docs can describe once for every platform.
+// What is printed on the keyboard is another matter: on macOS Qt reads "Ctrl"
+// as Command, so a label repeating the file would send someone to a key that
+// does nothing.
+[[nodiscard]] QString HotkeyText(const QString &keys) {
+	const auto sequence = QKeySequence(keys, QKeySequence::PortableText);
+	return sequence.isEmpty()
+		? keys
+		: sequence.toString(QKeySequence::NativeText);
+}
+
 // What a preset will do, in the words a chat list would use, so the choice can
 // be made from the box rather than from memory of what was typed in the file.
 [[nodiscard]] QString Summary(const Settings &settings, const QString &name) {
@@ -100,22 +112,20 @@ namespace {
 	// A picker offering "work" above a tab reading "Work" is one thing with two
 	// names, and a preset that renamed its tab had no way to say so here at all.
 	const auto preset = settings.preset(name);
-	return u"%1  -  %2"_q.arg(
+	// The key beside the preset it presses, in the spelling the keyboard has -
+	// a binding nothing displays is a binding nobody remembers, which is the
+	// same reason the peek checkbox prints its own.
+	const auto key = (preset && !preset->hotkey.isEmpty())
+		? u"  (%1)"_q.arg(HotkeyText(preset->hotkey))
+		: QString();
+	return u"%1%2  -  %3"_q.arg(
 		preset ? PresetTitle(*preset) : DefaultViewName(name),
+		key,
 		Summary(settings, name));
 }
 
-// settings.toml holds the hotkey as Qt portable text, because that is what
-// QKeySequence parses and what the docs can describe once for every platform.
-// What is printed on the keyboard is another matter: on macOS Qt reads "Ctrl"
-// as Command, so a label repeating the file would send someone to a key that
-// does nothing.
 [[nodiscard]] QString HotkeyText() {
-	const auto keys = ActiveSettings().peek.hotkey;
-	const auto sequence = QKeySequence(keys, QKeySequence::PortableText);
-	return sequence.isEmpty()
-		? keys
-		: sequence.toString(QKeySequence::NativeText);
+	return HotkeyText(ActiveSettings().peek.hotkey);
 }
 
 [[nodiscard]] QString Remaining(int seconds) {

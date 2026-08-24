@@ -461,7 +461,7 @@ MainWindow::MainWindow(not_null<Controller*> controller)
 	// Purple: the peek key is configured in settings.toml rather than in
 	// tdesktop's shortcuts file, so it is bound alongside rather than through
 	// Shortcuts. See purple/purple_peek.h.
-	Purple::ListenPeekHotkey(this);
+	Purple::ListenHotkeys(this);
 }
 
 Main::Account &MainWindow::account() const {

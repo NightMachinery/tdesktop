@@ -2218,6 +2218,72 @@ list_order = [ { list = "close_people" } ]
 	CHECK(!named(work, 0));
 }
 
+void TestPresetHotkeys() {
+	Begin("preset hotkeys");
+
+	const auto parsed = Parse(uR"(
+[lists.all]
+kinds = ["private"]
+
+[presets.work]
+hotkey = "Ctrl+Shift+W"
+list_order = [ { list = "all" } ]
+
+[presets.deep]
+hotkey = "Ctrl+Shift+D"
+list_order = [ { list = "all" } ]
+)"_q);
+	CHECK(parsed.ok());
+	CHECK(parsed.warnings.empty());
+	CHECK_EQ(parsed.settings.preset(u"work"_q)->hotkey, u"Ctrl+Shift+W"_q);
+	CHECK_EQ(parsed.settings.preset(u"deep"_q)->hotkey, u"Ctrl+Shift+D"_q);
+
+	// No key is the normal case and says nothing.
+	const auto silent = Parse(
+		u"[lists.all]\nkinds = [\"private\"]\n"
+		"[presets.work]\nlist_order = [ { list = \"all\" } ]\n"_q);
+	CHECK(silent.ok());
+	CHECK(silent.warnings.empty());
+	CHECK(silent.settings.preset(u"work"_q)->hotkey.isEmpty());
+
+	// Two presets on one key: Qt fires NEITHER action when a sequence is
+	// ambiguous, so the second is dropped rather than left to break both.
+	const auto clash = Parse(uR"(
+[lists.all]
+kinds = ["private"]
+
+[presets.work]
+hotkey = "Ctrl+Shift+W"
+list_order = [ { list = "all" } ]
+
+[presets.deep]
+hotkey = "ctrl+shift+W"
+list_order = [ { list = "all" } ]
+)"_q);
+	CHECK(clash.ok());
+	CHECK_EQ(int(clash.warnings.size()), 1);
+	CHECK_EQ(clash.settings.preset(u"work"_q)->hotkey, u"Ctrl+Shift+W"_q);
+	CHECK(clash.settings.preset(u"deep"_q)->hotkey.isEmpty());
+
+	// And against peek, which is claimed first because it is not a preset and
+	// cannot be renamed out of the way.
+	const auto peek = Parse(uR"(
+[lists.all]
+kinds = ["private"]
+
+[peek]
+hotkey = "Ctrl+Shift+P"
+
+[presets.work]
+hotkey = "Ctrl+Shift+P"
+list_order = [ { list = "all" } ]
+)"_q);
+	CHECK(peek.ok());
+	CHECK_EQ(int(peek.warnings.size()), 1);
+	CHECK(peek.settings.preset(u"work"_q)->hotkey.isEmpty());
+	CHECK_EQ(peek.settings.peek.hotkey, u"Ctrl+Shift+P"_q);
+}
+
 void TestRecent() {
 	Begin("recent");
 
@@ -2509,6 +2575,7 @@ int main() {
 	TestMentionGate();
 	TestPeek();
 	TestNamedExplicitly();
+	TestPresetHotkeys();
 	TestRecent();
 	TestScheduleTarget();
 	TestResolvedCache();

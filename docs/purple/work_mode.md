@@ -1485,10 +1485,31 @@ chat's unread through every list holding it, and doing that inside the walk
 currently placing the chat in those lists is how the totals drift - the same
 hazard the mute-before-hide ordering in `refreshPurpleWorkMode()` exists for.
 
+## Hotkeys
+
+`[peek] hotkey` binds the peek key; `hotkey` on a preset binds that preset.
+Pressing a preset's key while it is already running turns it off rather than
+doing nothing, so one key means both "get to work" and "come back" - a key that
+is a no-op half the time reads as broken.
+
+They are not `Shortcuts::Command`s. That table is owned by
+`tdata/shortcuts-custom.json` and by the shortcuts settings page; these keys are
+owned by `settings.toml`, where the rest of a preset lives. Two files claiming
+one binding is the situation the config split exists to avoid.
+
+`Purple::ListenHotkeys()` holds one `QAction` per binding for the whole
+application and re-points them when the file changes, rebuilding the set only
+when a signature of the declared keys actually moves. The parser refuses a
+duplicate key, and that is not tidiness: two actions holding the same sequence
+make it ambiguous and Qt fires **neither**, so a silent duplicate breaks both
+keys rather than picking a winner.
+
+The format is documented in [config.md](config.md), including the macOS trap
+that `Ctrl` is Command and `Meta` is the physical Control key.
+
 ## Not yet implemented
 
-- No hotkey for switching presets. `Purple::ListenPeekHotkey()` generalises to
-  one; nothing has asked yet.
+Nothing outstanding here at the moment.
 
 ## Cloud unread counts
 
