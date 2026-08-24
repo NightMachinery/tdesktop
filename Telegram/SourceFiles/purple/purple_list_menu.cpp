@@ -22,12 +22,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/popup_menu.h"
+
+#include <array>
 #include "styles/style_media_player.h" // mediaPlayerMenuCheck
 #include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h" // defaultFlatLabel
 
 namespace Purple {
 namespace {
+
+// What the "until" submenus offer. Deliberately coarse: these are decisions
+// about the rest of an afternoon, and a minute-accurate picker would be a
+// worse answer to the question than four good guesses.
+constexpr auto kOverrideSpans = std::array{
+	std::pair{ "30 minutes", 30 * 60 },
+	std::pair{ "2 hours", 2 * 3600 },
+	std::pair{ "8 hours", 8 * 3600 },
+	std::pair{ "24 hours", 24 * 3600 },
+};
 
 [[nodiscard]] QString DisplayTitle(const List &list) {
 	return list.title.isEmpty() ? list.name : list.title;
@@ -175,6 +187,45 @@ void FillListsMenu(
 				}
 			},
 			(member ? &st::mediaPlayerMenuCheck : nullptr));
+	}
+
+	// The "until" decisions, one submenu each. Set apart from the lists above,
+	// because a list is a standing rule and these are a thing you are doing
+	// this afternoon.
+	if (Filtering()) {
+		const auto current = OverrideFor(peer);
+		const auto fill = [&](
+				const QString &text,
+				OverrideKind kind,
+				const style::icon *icon) {
+			auto submenu = std::make_unique<Ui::PopupMenu>(
+				menu.get(),
+				st::popupMenuWithIcons);
+			for (const auto &span : kOverrideSpans) {
+				const auto seconds = span.second;
+				submenu->addAction(QString::fromLatin1(span.first), [=] {
+					// Hidden first, as everywhere else here: the write reloads
+					// state.toml and rebuilds the chat lists from inside this
+					// callback, with the menu that owns it still open.
+					menu->hideMenu();
+					SetOverride(peer, kind, seconds);
+				});
+			}
+			menu->addAction(text, std::move(submenu), icon);
+		};
+		menu->addSeparator();
+		fill(u"Show until..."_q, OverrideKind::Show, &st::menuIconShowInChat);
+		fill(u"Hide until..."_q, OverrideKind::Hide, &st::menuIconClear);
+		fill(u"Notify until..."_q, OverrideKind::Notify, &st::menuIconUnmute);
+		if (current) {
+			// Only offered when there is one, so the menu does not carry a
+			// permanently greyed-out row for a feature most chats never use.
+			menu->addAction(u"Cancel '%1 until'"_q.arg(
+				OverrideKindName(*current)), [=] {
+				menu->hideMenu();
+				ClearOverride(peer);
+			}, &st::menuIconCancel);
+		}
 	}
 
 	menu->addSeparator();

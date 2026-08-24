@@ -82,6 +82,37 @@ struct ResolvedCache {
 	}
 };
 
+// A decision about one chat that outranks the preset, until a deadline.
+//
+// Scoped to the preset it was made under rather than global: "show this until
+// six" is a statement about the work you are doing now, and carrying it into
+// every other preset would make it a different, larger promise than the one
+// the menu offered.
+enum class OverrideKind : uchar {
+	Show,   // In the view past the preset's rules. Does not un-silence.
+	Hide,   // Out of the view, and silenced with it.
+	Notify, // May interrupt, lifting only the preset's mute - never your own.
+};
+
+// "show", "hide", "notify".
+[[nodiscard]] std::optional<OverrideKind> ParseOverrideKind(
+	const QString &value);
+[[nodiscard]] QString OverrideKindName(OverrideKind value);
+
+struct Override {
+	PeerIdValue peer = 0;
+	OverrideKind kind = OverrideKind::Show;
+
+	// Unix seconds, like peekDeadlineUnix and for the same reason: crl::now()
+	// is monotonic and would mean nothing after a restart, and an override is
+	// measured in hours.
+	int64 untilUnix = 0;
+
+	QString preset;
+
+	friend bool operator==(const Override &, const Override &) = default;
+};
+
 struct State {
 	QString activePreset;
 	PresetSource activeSource = PresetSource::Manual;
@@ -114,6 +145,11 @@ struct State {
 
 	bool peekActive = false;
 	int64 peekDeadlineUnix = 0;
+
+	// Live "until" decisions, in the order they were made. Small by nature -
+	// each one is a thing you did on purpose and it expires by itself.
+	std::vector<Override> overrides;
+
 	ResolvedCache resolvedCache;
 };
 
@@ -129,5 +165,24 @@ struct State {
 
 [[nodiscard]] State ParseState(const QString &text, const QString &path);
 [[nodiscard]] QString SerializeState(const State &state);
+
+// The override in force for this chat right now, or null. Expired entries and
+// entries made under a different preset are both invisible here, which is what
+// makes every caller a single test rather than three.
+[[nodiscard]] const Override *OverrideFor(
+	const State &state,
+	PeerIdValue peer,
+	const QString &preset,
+	int64 nowUnix);
+
+// Drops whatever has run out. True if anything went, so the caller knows
+// whether a rebuild is owed.
+bool PruneOverrides(State &state, int64 nowUnix);
+
+// The earliest deadline still outstanding under this preset, or 0. What the
+// timer is armed for.
+[[nodiscard]] int64 NextOverrideDeadline(
+	const State &state,
+	const QString &preset);
 
 } // namespace Purple

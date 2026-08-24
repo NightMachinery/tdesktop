@@ -192,6 +192,23 @@ kinds of chat at once, and it is why leaving it out is usually right.
 The preset only ever *adds* a mute, so a chat can be silenced by both, and the
 mute menu says which one an Unmute would actually lift. Default true.
 
+## Show until, Hide until, Notify until
+
+Three entries in the `Work Mode` submenu, each offering 30 minutes, 2 hours, 8
+hours or 24 hours:
+
+- **Show until** - in the view past the preset's rules. Does not un-silence it.
+- **Hide until** - out of the view, and silenced while it is gone.
+- **Notify until** - may interrupt you. Lifts only the preset's mute, never a
+  mute you set yourself.
+
+`Cancel '... until'` appears while one is running.
+
+Each is scoped to the preset it was made under, so switching preset puts it
+aside rather than carrying it along, and switching back brings it out again if
+it has not run out. They are kept in `state.toml`, expire by themselves, and
+survive a restart.
+
 ## Making a list from the chat menu
 
 `New list...` at the foot of the `Work Mode` submenu writes an empty table
