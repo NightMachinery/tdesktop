@@ -1184,12 +1184,12 @@ there.
 ## Peek
 
 A preset hides chats, and sometimes you want one of them without ending the
-preset. `Ctrl+Shift+P` suspends the hiding for two minutes: every chat is back
+preset. `Ctrl+Shift+E` suspends the hiding for two minutes: every chat is back
 in the list, no group is waiting for a mention, and every folder is in the
 strip. Press it again to end it early.
 
     [peek]
-    hotkey   = "Ctrl+Shift+P"
+    hotkey   = "Ctrl+Shift+E"
     auto_off = "2m"
 
 `auto_off = "off"` leaves it running until it is turned off by hand.
@@ -1261,7 +1261,7 @@ greyed out with no explanation.
 The key is named in *native* text. The file holds Qt portable text, because that
 is what `QKeySequence` parses and what these docs can describe once for every
 platform, but on macOS Qt reads `Ctrl` as Command - so a label repeating the file
-would print `Ctrl+Shift+P` next to a key that does nothing. The checkbox runs the
+would print `Ctrl+Shift+E` next to a key that does nothing. The checkbox runs the
 sequence back through `QKeySequence::NativeText` and shows what the keyboard has
 on it.
 
@@ -1565,6 +1565,33 @@ wired together by mistake.
 ## Hotkeys
 
 `[peek] hotkey` binds the peek key; `hotkey` on a preset binds that preset.
+
+### Keys a message field has already taken
+
+The peek key used to default to `Ctrl+Shift+E`'s predecessor, `Ctrl+Shift+P`,
+and it did not work - but only while the composer had focus, which made it look
+like a focus bug rather than a clash. It is neither.
+
+`Ctrl+Shift+P` is the **spoiler** shortcut. `Ui::InputField` registers ten
+markdown sequences (`kSpoilerSequence` and friends, in lib_ui's
+`input_field.h`) as `Qt::WidgetShortcut` on the field itself, so they join the
+contest only while a field has focus. Qt then sees two claims on the sequence,
+declares it ambiguous, and fires **neither** - silently, with nothing in the
+log. Measured rather than reasoned about: an event filter logging
+`QShortcutEvent::isAmbiguous()` showed `ambiguous=0` with no chat open and
+`ambiguous=1` with the composer focused, and `triggerPeek()` never running in
+the second case.
+
+Two things came out of it. The default moved to `Ctrl+Shift+E`, which nothing
+claims. And `ParseSettings()` now warns when any configured hotkey is one of
+the ten, naming the formatting action it collides with - because the failure is
+otherwise invisible, and "it works until I click the message box" is a terrible
+thing to have to debug twice.
+
+The reserved sequences are `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+K`, and
+`Ctrl+Shift+` with `X`, `M`, `N`, `P`, `D` or `.`. They are compared as
+normalised text rather than as `QKeySequence`, because `purple_settings.cpp` is
+compiled standalone against Qt Core and `QKeySequence` is QtGui.
 Pressing a preset's key while it is already running turns it off rather than
 doing nothing, so one key means both "get to work" and "come back" - a key that
 is a no-op half the time reads as broken.

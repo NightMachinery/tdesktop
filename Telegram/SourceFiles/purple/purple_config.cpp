@@ -152,7 +152,7 @@ preset    = "work"
 
 [peek]
 # Temporarily reveal what the active preset is hiding.
-hotkey   = "Ctrl+Shift+P"
+hotkey   = "Ctrl+Shift+E"
 auto_off = "2m"
 
 [recent]

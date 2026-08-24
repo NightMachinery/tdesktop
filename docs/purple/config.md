@@ -119,6 +119,11 @@ leaves usable settings behind rather than a hard failure:
 - Duplicate member ids are deduplicated on read, keeping the order you wrote.
 - A list whose name starts with `*` is refused: nobody reading the file could
   tell it from a set reference.
+- A hotkey that a message field has already claimed for a formatting action is
+  warned about, naming the action. Such a key works everywhere except with the
+  composer focused, where Qt calls the sequence ambiguous and fires neither
+  binding - silently. The reserved ones are `Ctrl+B`, `Ctrl+I`, `Ctrl+U`,
+  `Ctrl+K`, and `Ctrl+Shift+` with `X`, `M`, `N`, `P`, `D` or `.`.
 
 Only one thing is fatal, because it leaves nothing meaningful to run on: a TOML
 syntax error. The app keeps the last settings that worked, logs the line and
