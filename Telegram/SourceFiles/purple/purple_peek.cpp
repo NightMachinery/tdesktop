@@ -12,8 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_state.h"
+#include "ui/layers/show.h"
 #include "ui/rp_widget.h"
 #include "window/window_controller.h"
+#include "window/window_session_controller.h"
 
 #include <QtGui/QAction>
 
@@ -135,13 +137,27 @@ void Hotkeys::apply() {
 	}
 }
 
+// Purple: Window::Controller::showToast() builds a throwaway Ui::Show for every
+// call, and it is the Show that remembers the last toast in order to hide it -
+// so toasts raised that way pile up on screen instead of replacing each other.
+// A SessionController caches its Show, so going through one gets the
+// replacement behaviour that was always intended. There is not always a session
+// to go through, hence the fallback.
+void ShowToast(not_null<Window::Controller*> window, const QString &text) {
+	if (const auto session = window->sessionController()) {
+		session->uiShow()->showToast(text);
+	} else {
+		window->showToast(text);
+	}
+}
+
 void Hotkeys::triggerPeek() {
 	const auto change = TogglePeek();
 	const auto window = Core::App().activeWindow();
 	if (!window) {
 		return;
 	}
-	window->showToast(change.refused
+	ShowToast(window, change.refused
 		? u"Work Mode is off - nothing is hidden to peek at."_q
 		: !change.peeking
 		? u"Peek over."_q
@@ -167,7 +183,7 @@ void Hotkeys::triggerPreset(const QString &preset) {
 	if (const auto window = Core::App().activeWindow()) {
 		const auto settings = &ActiveSettings();
 		const auto found = settings->preset(wanted);
-		window->showToast(found
+		ShowToast(window, found
 			? u"Work Mode: %1."_q.arg(PresetTitle(*found))
 			: u"Work Mode off - stock Telegram Desktop."_q);
 	}
