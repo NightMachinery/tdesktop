@@ -48,7 +48,9 @@ public:
 	}
 
 private:
-	void refresh();
+	// `settingsChanged' says which of the two signals brought us here. It
+	// matters only when the resolution comes out identical - see refresh().
+	void refresh(bool settingsChanged);
 	void refreshPeekTimer(const State &state, bool peeking);
 
 	Resolved _resolved = NormalResolution();
@@ -71,17 +73,23 @@ Gate::Gate() {
 			state.peekDeadlineUnix = 0;
 		});
 	});
-	refresh();
+	refresh(false);
 
-	rpl::merge(
-		SettingsChanges(),
-		StateChanges()
+	// Kept apart rather than merged, because the two are not interchangeable
+	// once the resolution comes out identical: a settings change can still mean
+	// something, and a state change cannot.
+	SettingsChanges(
 	) | rpl::on_next([=] {
-		refresh();
+		refresh(true);
+	}, _lifetime);
+
+	StateChanges(
+	) | rpl::on_next([=] {
+		refresh(false);
 	}, _lifetime);
 }
 
-void Gate::refresh() {
+void Gate::refresh(bool settingsChanged) {
 	// Persisting the cache below fires StateChanges(), which lands back here.
 	// The nested pass would resolve to the same thing and write nothing, so it
 	// is only wasted work and a duplicate notification - but the notification
@@ -123,6 +131,24 @@ void Gate::refresh() {
 	refreshPeekTimer(state, next->peeking);
 
 	if (*next == _resolved) {
+		// Membership is not part of a resolution. Resolved holds the list
+		// *names* a preset ordered, and MatchList() looks the members up live
+		// against ActiveSettings() - so adding a chat to a list produces a
+		// byte-different file and a bit-identical resolution. Without this
+		// nobody would be told, and the chat would sit exactly where it was
+		// until some later change moved the resolution: switching presets and
+		// back, which is what made the context menu look broken.
+		//
+		// Only for a settings change, and only while a preset is running. A
+		// state change lands here from inside this very function - the cache
+		// write below - and from the peek timer, and firing there would rebuild
+		// every chat list for a write that changed nothing anyone can see.
+		// Normal has nothing to rebuild at all: an unconfigured fork must go on
+		// paying nothing for a file it is not using. A settings change that
+		// *starts* a preset moves the resolution and never reaches here.
+		if (settingsChanged && !_resolved.normal) {
+			_changes.fire({});
+		}
 		return;
 	}
 	_resolved = std::move(*next);

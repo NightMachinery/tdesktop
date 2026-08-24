@@ -505,19 +505,38 @@ chat list zeroes the sort key, and `setChatListExistence(true)` quietly removes
 rather than adds when the entry has none. Both callers go through
 `History::purpleRefreshChatListMembership()` so that ordering is stated once.
 
-The walk is triggered by `Purple::ActiveChanges()`, which fires only when the
-resolution actually differs. A state write that merely moved a peek deadline
-compares equal and rebuilds nothing.
+The walk is triggered by `Purple::ActiveChanges()`, which fires when the
+resolution differs - and, separately, whenever `settings.toml` changed at all
+while a preset is running, even though the resolution came out identical.
+
+That second case is not a belt-and-braces addition; without it the feature was
+half broken. A `Resolved` holds the list **names** a preset ordered, as
+`EffectiveList { list, show, notify }`, and membership is looked up live by
+`MatchList()` against `ActiveSettings()`. So adding a chat to a list - the
+`Work Mode` submenu, the main way lists are meant to be edited - produces a
+byte-different file and a bit-identical resolution. The equality check returned
+early, nobody was told, and the chat sat exactly where it was until some later
+change moved the resolution. Switching presets and back appeared to fix it,
+which is a good description of a notification bug and a bad description of
+anything else.
+
+The two guards on it are the point. A **state** write never forces it:
+`UpdateState()` is called from inside `Gate::refresh()` itself to persist the
+resolved cache, and from the peek timer, and firing there would rebuild every
+chat list for a write nobody can see. And **Normal** never forces it either: an
+unconfigured fork must go on paying nothing for a file it is not using, and a
+settings change that *starts* a preset moves the resolution and never reaches
+that branch.
 
 It logs what it did:
 
-    Purple: preset 'test', 6 lists.
-    Purple: 43 of 2251 loaded chats hidden, 203 mention-gated (2 showing), 0 silenced.
+    Purple: preset 'work', 3 lists.
+    Purple: 41 of 2251 loaded chats never shown, 203 unread-gated (2 showing), 0 silenced, view holds 262.
 
-Gated groups are counted apart from hidden ones because it is a different
-claim. A gated group is only out of the list while it has nothing to say, so
-the number that means anything is how many of them are still showing - and a
-zero gated count means the gate is off rather than that it found nothing.
+Unread-gated chats are counted apart from hidden ones because it is a different
+claim. A gated chat is only out of the list while it has nothing to say, so the
+number that means anything is how many of them are still showing - and a zero
+gated count means the gate is off rather than that it found nothing.
 
 That line exists because a preset that hides nothing looks exactly like a preset
 that is working, and the usual cause is a list named slightly wrong. It is also
