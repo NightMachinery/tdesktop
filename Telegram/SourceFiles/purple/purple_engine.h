@@ -27,6 +27,12 @@ namespace Purple {
 [[nodiscard]] std::vector<QString> ExemptFolderNames(
 	const std::vector<PresetFolder> &folders);
 
+// Of those, the ones that also said `pinned_only_p = true': they pull in only
+// the chats pinned inside them. Always a subset of the names above, because the
+// flag narrows that inclusion rather than granting one of its own.
+[[nodiscard]] std::vector<QString> ExemptPinnedOnlyFolderNames(
+	const std::vector<PresetFolder> &folders);
+
 // The folders a preset silences - the ones that said `notify_p = false'.
 [[nodiscard]] std::vector<QString> SilencedFolderNames(
 	const std::vector<PresetFolder> &folders);
@@ -84,6 +90,11 @@ struct Resolved {
 	// out so the common case - nobody asked - is an empty vector to test rather
 	// than a walk of the folder list per hidden chat.
 	std::vector<QString> exemptFolders;
+
+	// The subset of those that only want their pinned chats. Kept apart rather
+	// than folded into the vector above so that the common case stays one
+	// emptiness test, and only a preset that asked pays for the second lookup.
+	std::vector<QString> exemptPinnedOnlyFolders;
 
 	// Names from `folders' that said `notify_p = false'. Same reason as above:
 	// the common case is nobody asked, and that has to be one empty vector to

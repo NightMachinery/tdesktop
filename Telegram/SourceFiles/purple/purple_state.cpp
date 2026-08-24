@@ -152,6 +152,7 @@ void ReadOptionalBool(
 					*fields,
 					"include_in_main_view",
 					folder.includeInMainView);
+				ReadOptionalBool(*fields, "pinned_only", folder.pinnedOnly);
 				result.folders.push_back(std::move(folder));
 			}
 		}
@@ -307,6 +308,10 @@ QString SerializeState(const State &state) {
 			if (folder.includeInMainView) {
 				fields += u", include_in_main_view = %1"_q
 					.arg(Boolean(*folder.includeInMainView));
+			}
+			if (folder.pinnedOnly) {
+				fields += u", pinned_only = %1"_q
+					.arg(Boolean(*folder.pinnedOnly));
 			}
 			result += u"  { %1 },\n"_q.arg(fields);
 		}

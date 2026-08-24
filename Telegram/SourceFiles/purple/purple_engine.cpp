@@ -69,6 +69,8 @@ std::optional<Resolved> Resolve(
 	result.lists = Effective(found->listOrder);
 	result.folders = found->folders;
 	result.exemptFolders = ExemptFolderNames(result.folders);
+	result.exemptPinnedOnlyFolders = ExemptPinnedOnlyFolderNames(
+		result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
 
 	result.views.reserve(found->views.size());
@@ -90,6 +92,20 @@ std::vector<QString> ExemptFolderNames(
 		// leaves them to whatever their list decided, which is what every
 		// folder the preset does not name is left to.
 		if (folder.includeInMainView.value_or(false)) {
+			result.push_back(folder.name);
+		}
+	}
+	return result;
+}
+
+std::vector<QString> ExemptPinnedOnlyFolderNames(
+		const std::vector<PresetFolder> &folders) {
+	auto result = std::vector<QString>();
+	for (const auto &folder : folders) {
+		// Both flags, because this one narrows the other and a folder that
+		// never asked to be pulled in has nothing to narrow.
+		if (folder.includeInMainView.value_or(false)
+			&& folder.pinnedOnly.value_or(false)) {
 			result.push_back(folder.name);
 		}
 	}
@@ -247,6 +263,8 @@ std::optional<Resolved> FromCache(const ResolvedCache &cache) {
 	result.hideEverywhere = cache.hideEverywhere;
 	result.folders = cache.folders;
 	result.exemptFolders = ExemptFolderNames(result.folders);
+	result.exemptPinnedOnlyFolders = ExemptPinnedOnlyFolderNames(
+		result.folders);
 	result.silencedFolders = SilencedFolderNames(result.folders);
 	result.lists = restored(cache.lists);
 	result.views.reserve(cache.views.size());

@@ -3379,14 +3379,34 @@ bool History::purpleInExemptFolder() const {
 	// Only reached for a chat the preset would otherwise hide, and only when
 	// some folder actually asked to be exempt, so the walk below costs nothing
 	// for every preset that does not use the escape hatch.
+	const auto &pinnedOnly = Purple::ExemptPinnedOnlyFolders();
 	const auto self = const_cast<History*>(this);
 	for (const auto &filter : owner().chatsFilters().list()) {
 		if (!filter.id()) {
 			continue;
 		}
 		for (const auto &name : exempt) {
-			if (!filter.title().text.text.compare(name, Qt::CaseInsensitive)
-				&& filter.contains(self)) {
+			if (filter.title().text.text.compare(name, Qt::CaseInsensitive)
+				|| !filter.contains(self)) {
+				continue;
+			}
+			// A folder that asked for its pinned chats only lets through
+			// exactly those. Being filed there is no longer enough, and the
+			// rest are not dropped so much as left where they already were -
+			// with whatever their own list decided, which for a preset that
+			// names nothing else is hidden.
+			//
+			// Kept inside the loop rather than short-circuiting the match,
+			// because a chat can sit in two exempt folders and a narrow one
+			// saying no must not speak for a wide one that would say yes.
+			const auto narrowed = !pinnedOnly.empty()
+				&& ranges::any_of(pinnedOnly, [&](const QString &folder) {
+					return !folder.compare(name, Qt::CaseInsensitive);
+				});
+			if (!narrowed
+				|| ranges::contains(
+					filter.pinned(),
+					not_null<History*>(self))) {
 				return true;
 			}
 		}

@@ -463,6 +463,27 @@ folders = [ { name = "B", filtered = false } ]
 	CHECK(stale.ok());
 	CHECK(WarnsAbout(stale, u"cannot be redefined"_q));
 	CHECK(WarnsAbout(stale, u"use 'include_in_main_view_p'"_q));
+
+	// pinned_only_p narrows the inclusion above it, and warns when there is no
+	// inclusion for it to narrow rather than sitting there doing nothing.
+	const auto pinned = Parse(uR"(
+[presets.work]
+folders = [
+  { name = "Music", include_in_main_view_p = true, pinned_only_p = true },
+  { name = "B",     include_in_main_view_p = true },
+  { name = "Solo",  pinned_only_p = true },
+]
+)"_q);
+	CHECK(pinned.ok());
+	const auto narrowed = pinned.settings.preset(u"work"_q);
+	CHECK(narrowed->folders[0].pinnedOnly.value_or(false));
+	CHECK(!narrowed->folders[1].pinnedOnly.value_or(false));
+	CHECK(WarnsAbout(pinned, u"does nothing without it"_q));
+
+	// The warning is about 'Solo' alone - a folder that asked for both is
+	// exactly the intended shape and must not be warned at.
+	CHECK(WarnsAbout(pinned, u"folder 'Solo'"_q));
+	CHECK(!WarnsAbout(pinned, u"folder 'Music': 'pinned_only_p'"_q));
 }
 
 void TestViews() {
@@ -2014,16 +2035,33 @@ void TestResolvedCache() {
 	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(1));
 	CHECK(Purple::SilencedFolderNames({}).empty());
 
+	// pinned_only_p narrows include_in_main_view_p and never stands alone: it
+	// is only ever a subset of what is already being pulled in.
+	folders.push_back({
+		.name = u"Music"_q,
+		.includeInMainView = true,
+		.pinnedOnly = true,
+	});
+	folders.push_back({ .name = u"Alone"_q, .pinnedOnly = true });
+	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(2));
+	CHECK_EQ(Purple::ExemptPinnedOnlyFolderNames(folders).size(), size_t(1));
+	CHECK_EQ(
+		Purple::ExemptPinnedOnlyFolderNames(folders).front(),
+		u"Music"_q);
+	CHECK(Purple::ExemptPinnedOnlyFolderNames({}).empty());
+
 	auto withFolders = *work;
 	withFolders.folders = folders;
 	const auto cachedFolders = Purple::FromCache(
 		Purple::ToCache(withFolders));
 	CHECK(cachedFolders.has_value());
-	CHECK_EQ(cachedFolders->exemptFolders.size(), size_t(1));
+	CHECK_EQ(cachedFolders->exemptFolders.size(), size_t(2));
 	CHECK_EQ(cachedFolders->exemptFolders.front(), u"Family"_q);
+	CHECK_EQ(cachedFolders->exemptPinnedOnlyFolders.size(), size_t(1));
+	CHECK_EQ(cachedFolders->exemptPinnedOnlyFolders.front(), u"Music"_q);
 	CHECK_EQ(cachedFolders->silencedFolders.size(), size_t(1));
 	CHECK_EQ(cachedFolders->silencedFolders.front(), u"Noise"_q);
-	CHECK_EQ(int(cachedFolders->folders.size()), 5);
+	CHECK_EQ(int(cachedFolders->folders.size()), 7);
 
 	// The marker survives too, so a broken reload does not take the whole
 	// folder strip away along with everything else it cannot read.

@@ -486,6 +486,22 @@ void Expander::expandFolders(
 				"include_in_main_view_p",
 				inner,
 				_warnings);
+			folder.pinnedOnly = ReadBool(
+				*table,
+				"pinned_only_p",
+				inner,
+				_warnings);
+			if (folder.pinnedOnly.value_or(false)
+				&& !folder.includeInMainView.value_or(false)) {
+				// It narrows an inclusion, so on its own there is nothing for
+				// it to narrow. Said here rather than left to be discovered,
+				// because the symptom is a folder behaving exactly as it would
+				// have without the line.
+				_warnings.push_back(
+					u"%1: 'pinned_only_p' narrows 'include_in_main_view_p' "
+					"and does nothing without it - the folder's chats are "
+					"already left to their own lists."_q.arg(inner));
+			}
 			WarnRetired(
 				*table,
 				"filtered",
