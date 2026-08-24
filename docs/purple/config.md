@@ -172,6 +172,59 @@ It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
 also asks for every folder - otherwise switching one off would quietly stop
 working the day you added the spread.
 
+### Stories
+
+`stories` on a preset says what the stories strip does while it runs. Five
+values, each hiding strictly more than the one before it:
+
+- `"all"` - no filtering. The strip is exactly stock Telegram.
+- `"all_unseen"` - everybody, but only while they have something you have not
+  seen. A person drops off the strip once you have watched everything they
+  posted.
+- `"follow"` - the default. Hides whoever the preset excludes **outright** and
+  keeps whoever it merely has nothing to show you from.
+- `"follow_unseen"` - `follow`, and only while unseen.
+- `"none"` - no strip at all.
+
+The distinction inside `follow` is the whole idea. A person the preset excludes
+outright - nobody's list claims them, or one claims them with
+`show_mode = "never"` - loses their story, because the preset already refused
+them. A person the preset admits and is only holding back for being quiet -
+`"message"`, `"message_or_reaction"`, `"mention"` - keeps theirs, because a
+story *is* new activity, which is exactly what those modes are asking to be
+shown. Suppressing the one thing such a person does have would invert the
+setting.
+
+A `list_order` entry or a folder entry can override that for **its own** people,
+with a narrower vocabulary:
+
+- `"always"` - their stories show, seen or not, whatever the policy says.
+- `"unseen"` - only while unseen.
+- `"never"` - none of theirs.
+
+There is no `"all"` here, and writing one warns: an entry is already a set of
+people, so "everybody" would mean nothing. The three spellings are the ones
+`show_mode` uses next door, which is the point - they sit in the same inline
+table.
+
+```toml
+[presets.work]
+stories = "follow_unseen"
+list_order = [
+  { list = "close_people", show_mode = "message_or_reaction", stories = "always" },
+]
+folders = [ { name = "Music", stories = "never" } ]
+```
+
+A folder beats a `list_order` entry, the same way a folder already beats one for
+hiding, and both beat the preset's policy. A peek reveals stories along with the
+chats they belong to.
+
+Note that your own "add a story" button is governed like anybody else's, since
+Saved Messages has no exemption either (below) - under `follow` it goes away
+unless a list names you. Write `stories = "all"`, or put your own id in a list,
+if you would rather keep it.
+
 ### Saved Messages
 
 Saved Messages is an ordinary chat to the lists. It has no exemption: a preset

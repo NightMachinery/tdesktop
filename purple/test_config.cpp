@@ -2336,6 +2336,130 @@ list_order = [ { list = "all" } ]
 	CHECK_EQ(peek.settings.peek.hotkey, u"Ctrl+Shift+P"_q);
 }
 
+void TestStories() {
+	Begin("stories");
+
+	// Two vocabularies, because there are two questions. A preset can talk
+	// about everybody; an entry is already a set of people, so "all" there
+	// would be a category error and is not accepted.
+	CHECK_EQ(
+		int(*Purple::ParseStoryPolicy(u"  FOLLOW_UNSEEN "_q)),
+		int(Purple::StoryPolicy::FollowUnseen));
+	CHECK(!Purple::ParseStoryPolicy(u"unseen"_q).has_value());
+	CHECK_EQ(
+		Purple::StoryPolicyName(Purple::StoryPolicy::AllUnseen),
+		u"all_unseen"_q);
+	CHECK_EQ(
+		int(*Purple::ParseStoryMode(u"Unseen"_q)),
+		int(Purple::StoryMode::Unseen));
+	CHECK(!Purple::ParseStoryMode(u"all"_q).has_value());
+	CHECK(!Purple::ParseStoryMode(u"follow"_q).has_value());
+	CHECK_EQ(Purple::StoryModeName(Purple::StoryMode::Never), u"never"_q);
+
+	const auto result = Parse(uR"(
+[lists.close]
+members = [ 5 ]
+[lists.rest]
+kinds = ["channels"]
+
+[presets.work]
+stories = "follow_unseen"
+list_order = [
+  { list = "close", show_mode = "message", stories = "always" },
+  { list = "rest" },
+]
+folders = [
+  { name = "Music", stories = "never" },
+  { name = "B" },
+]
+)"_q);
+	CHECK(result.ok());
+	CHECK(result.warnings.empty());
+
+	const auto work = result.settings.preset(u"work"_q);
+	CHECK(work != nullptr);
+	CHECK_EQ(
+		int(*work->stories),
+		int(Purple::StoryPolicy::FollowUnseen));
+	CHECK_EQ(
+		int(*work->listOrder[0].stories),
+		int(Purple::StoryMode::Always));
+	CHECK(!work->listOrder[1].stories.has_value());
+
+	const auto resolved = Purple::Resolve(result.settings, u"work"_q);
+	CHECK(resolved.has_value());
+	CHECK_EQ(int(resolved->stories), int(Purple::StoryPolicy::FollowUnseen));
+
+	// The entry's mode rides along on the resolved list, so the strip does not
+	// have to go back to the settings for it.
+	CHECK_EQ(
+		int(*resolved->lists[0].stories),
+		int(Purple::StoryMode::Always));
+	CHECK(!resolved->lists[1].stories.has_value());
+
+	// Only the folders that said something are lifted out, so a preset that
+	// said nothing about any of them tests one empty vector.
+	CHECK_EQ(int(resolved->storyFolders.size()), 1);
+	CHECK_EQ(resolved->storyFolders.front().name, u"Music"_q);
+	CHECK_EQ(
+		int(resolved->storyFolders.front().mode),
+		int(Purple::StoryMode::Never));
+	CHECK(Purple::StoryFolderList({}).empty());
+
+	// A disabled folder says nothing about anything, stories included.
+	auto disabled = work->folders;
+	disabled[0].enabled = false;
+	CHECK(Purple::StoryFolderList(disabled).empty());
+
+	// Unset means Follow, so a preset written before any of this existed
+	// behaves the way the default describes rather than the way "all" would.
+	const auto quiet = Parse(u"[presets.b]\nlist_order = []\n"_q);
+	CHECK(quiet.ok());
+	CHECK(!quiet.settings.preset(u"b"_q)->stories.has_value());
+	const auto fallback = Purple::Resolve(quiet.settings, u"b"_q);
+	CHECK(fallback.has_value());
+	CHECK_EQ(int(fallback->stories), int(Purple::StoryPolicy::Follow));
+
+	// Both survive the state.toml round trip. The policy has to, or a broken
+	// settings.toml would silently restore the strip to Follow; the entry mode
+	// has to for the same reason `show' does.
+	const auto cached = Purple::FromCache(Purple::ToCache(*resolved));
+	CHECK(cached.has_value());
+	CHECK_EQ(int(cached->stories), int(Purple::StoryPolicy::FollowUnseen));
+	CHECK_EQ(
+		int(*cached->lists[0].stories),
+		int(Purple::StoryMode::Always));
+	CHECK(!cached->lists[1].stories.has_value());
+	CHECK_EQ(int(cached->storyFolders.size()), 1);
+	CHECK_EQ(
+		int(cached->storyFolders.front().mode),
+		int(Purple::StoryMode::Never));
+
+	// enabled_p travels with it. Without this a folder switched off came back
+	// switched on the moment the app fell back to its cached resolution.
+	auto withDisabled = *resolved;
+	withDisabled.folders[1].enabled = false;
+	const auto round = Purple::FromCache(Purple::ToCache(withDisabled));
+	CHECK(round.has_value());
+	CHECK(!Purple::FolderEnabled(round->folders[1]));
+	CHECK(Purple::FolderEnabled(round->folders[0]));
+
+	// A spelling from the wrong vocabulary warns and is ignored rather than
+	// being taken for something else.
+	const auto wrong = Parse(uR"(
+[lists.a]
+kinds = ["private"]
+
+[presets.work]
+stories = "sometimes"
+list_order = [ { list = "a", stories = "follow" } ]
+)"_q);
+	CHECK(wrong.ok());
+	CHECK_EQ(int(wrong.warnings.size()), 2);
+	CHECK(!wrong.settings.preset(u"work"_q)->stories.has_value());
+	CHECK(!wrong.settings.preset(u"work"_q)->listOrder[0].stories.has_value());
+}
+
 void TestRecent() {
 	Begin("recent");
 
@@ -2628,6 +2752,7 @@ int main() {
 	TestPeek();
 	TestNamedExplicitly();
 	TestPresetHotkeys();
+	TestStories();
 	TestRecent();
 	TestScheduleTarget();
 	TestResolvedCache();

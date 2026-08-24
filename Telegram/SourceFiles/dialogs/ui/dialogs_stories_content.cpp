@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "main/main_session.h"
 #include "media/stories/media_stories_stealth.h"
+#include "purple/purple_gate.h"
 #include "lang/lang_keys.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
@@ -57,7 +58,7 @@ State::State(not_null<Data::Stories*> data, Data::StorySourcesList list)
 
 Content State::next() {
 	const auto &sources = _data->sources(_list);
-	auto result = Content{ .total = int(sources.size()) };
+	auto result = Content();
 	result.elements.reserve(sources.size());
 	for (const auto &info : sources) {
 		const auto source = _data->source(info.id);
@@ -65,6 +66,14 @@ Content State::next() {
 
 		auto userpic = std::shared_ptr<Ui::DynamicImage>();
 		const auto peer = source->peer;
+
+		// Purple: the one place the strip is filtered, because it is the one
+		// place that is only about the strip. Data::Stories also feeds the
+		// counters, the archive strip and the upstream hidden/unhidden
+		// machinery, none of which has anything to do with a work preset.
+		if (!Purple::StoryShown(peer, info.unreadCount > 0)) {
+			continue;
+		}
 		if (const auto i = _userpics.find(peer); i != end(_userpics)) {
 			userpic = i->second;
 		} else {
@@ -81,6 +90,9 @@ Content State::next() {
 			.skipSmall = peer->isSelf() ? 1U : 0U,
 		});
 	}
+	// Purple: counted after the loop rather than from sources.size() before it,
+	// or the strip would report a total it is not showing.
+	result.total = int(result.elements.size());
 	return result;
 }
 
@@ -95,9 +107,16 @@ rpl::producer<Content> ContentForSession(
 		const auto state = result.make_state<State>(stories, list);
 		rpl::single(
 			rpl::empty
-		) | rpl::then(
-			stories->sourcesChanged(list)
-		) | rpl::on_next([=] {
+		) | rpl::then(rpl::merge(
+			stories->sourcesChanged(list),
+
+			// Purple: nothing about the sources changes when a preset does, so
+			// without this the strip would keep whatever it was showing until
+			// the next story arrived. Merged in here rather than re-firing
+			// _storiesContents from Dialogs::Widget, which would rebuild State
+			// and throw away its userpic cache on every preset change.
+			Purple::ActiveChanges()
+		)) | rpl::on_next([=] {
 			consumer.put_next(state->next());
 		}, result);
 		return result;

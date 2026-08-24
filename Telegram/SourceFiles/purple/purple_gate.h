@@ -76,6 +76,17 @@ bool SaveExtraViewPins(
 [[nodiscard]] Visibility VisibleFor(not_null<const PeerData*> peer);
 [[nodiscard]] const EffectiveList *ListFor(not_null<const PeerData*> peer);
 
+// Whether this peer's stories belong on the strip while the preset runs.
+//
+// `hasUnseen' is the peer's own unread-story count, which the strip already has
+// in hand - passing it in keeps this out of Data::Stories, which also feeds
+// counters and the archive strip and has no business knowing about presets.
+//
+// Named away from "hidden" on purpose: upstream already has hidden stories,
+// meaning the ones you moved to the archive strip yourself, and the two must
+// not be confused for each other.
+[[nodiscard]] bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen);
+
 // Whether a peek is running: the active preset's hiding is suspended - every
 // chat shows, no group is mention-gated, every folder is back - while its
 // silencing is left exactly where it was. See docs/purple/work_mode.md.

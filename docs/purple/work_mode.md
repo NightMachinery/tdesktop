@@ -1518,6 +1518,50 @@ chat's unread through every list holding it, and doing that inside the walk
 currently placing the chat in those lists is how the totals drift - the same
 hazard the mute-before-hide ordering in `refreshPurpleWorkMode()` exists for.
 
+## Stories
+
+The strip follows the preset, and the interesting part is what "follows" means.
+
+A chat is out of the view for one of two quite different reasons. Either the
+preset **excludes** it - no list claims it, or one claims it with
+`show_mode = "never"` - or the preset **admits** it and it happens to be quiet,
+which is what `message`, `message_or_reaction` and `mention` say. Only the first
+of those hides a story. A story *is* new activity, so a person admitted under an
+unread-watching mode keeps theirs; suppressing the one thing they do have would
+invert the setting that let them in.
+
+That is `follow`, the default. `all` skips the peer filter, `all_unseen` and
+`follow_unseen` add a seen filter on top, and `none` turns the strip off. A
+`list_order` entry or a folder overrides it for its own people with `always`,
+`unseen` or `never` - a narrower vocabulary on purpose, since "all" would be a
+category error on something that is already a set of people. A folder beats an
+entry, and both beat the policy, matching the order already used for hiding.
+
+Three implementation choices worth recording.
+
+**Filtered in `State::next()`, not in `Data::Stories`.** The latter also feeds
+the story counters, the archive strip and the upstream hidden/unhidden
+machinery, none of which has anything to do with a work preset - filtering there
+would be lying to code that never asked. `dialogs_stories_content.cpp` is the
+one place that is only about the strip. `Content::total` moved to after the loop
+at the same time, or the strip would report a count it is not showing.
+
+**`hasUnseen` is passed in rather than looked up.** Each source already carries
+`unreadCount` right where the filter runs, so the seen half of the ladder costs
+nothing and the gate needs no access to story state at all.
+
+**The producer merges `Purple::ActiveChanges()`.** `ContentForSession()`
+subscribed only to `sourcesChanged`, and nothing about the sources changes when
+a preset does, so the strip would have kept whatever it was showing until the
+next story arrived. Merging into the existing producer rather than re-firing
+`_storiesContents` from `Dialogs::Widget` keeps `State` alive, and with it the
+userpic cache that would otherwise be thrown away on every preset change.
+
+The name avoids "hidden" throughout - `StoryShown`, not `StoryHidden` - because
+upstream already has hidden stories, meaning the ones you moved to the archive
+strip yourself. Two different ideas with one word is how they eventually get
+wired together by mistake.
+
 ## Hotkeys
 
 `[peek] hotkey` binds the peek key; `hotkey` on a preset binds that preset.

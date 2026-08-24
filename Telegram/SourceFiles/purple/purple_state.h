@@ -35,6 +35,10 @@ struct ResolvedList {
 	std::optional<ShowMode> show;
 
 	bool notify = true;
+
+	// Unset here too, and for the same reason: it is what leaves this entry's
+	// people to the preset's own stories policy.
+	std::optional<StoryMode> stories;
 };
 
 struct ResolvedCacheView {
@@ -56,6 +60,10 @@ struct ResolvedCache {
 
 	std::vector<ResolvedList> lists;
 	bool hideEverywhere = false;
+
+	// What the stories strip does. Follow in a file written by an older build,
+	// which is also the default, so an upgrade changes nothing here.
+	StoryPolicy stories = StoryPolicy::Follow;
 
 	// Empty means no folder tabs, which is what a preset naming no folders
 	// asks for - there is no "said nothing" case left to distinguish.
