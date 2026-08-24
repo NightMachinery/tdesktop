@@ -426,6 +426,26 @@ public:
 	// Purple: whether a folder holding this chat asked to be left out of every
 	// count. See Data::kPurpleQuietFilterId.
 	[[nodiscard]] bool purpleInQuietFolder() const;
+
+	// Purple: this chat became, or stopped being, the one you are looking at.
+	// Called from History::setFakeUnreadWhileOpened() above its own guards,
+	// because that setter is already exactly this event - it simply declines to
+	// raise its flag for a chat that had nothing unread.
+	void purpleSetOpened(bool opened);
+
+	// Purple: whether the chat is in the view because you have it open or have
+	// just closed it, rather than because the preset lets it through. False
+	// whenever [recent] is off, which is the default.
+	[[nodiscard]] bool purpleShownAsRecent() const;
+
+	// Purple: the moment the grace period runs out, for Data::Session's single
+	// timer to come back and re-decide. Zero when none is running.
+	[[nodiscard]] crl::time purpleGraceUntil() const;
+
+	// Purple: whether this chat is already one click away somewhere else in the
+	// running preset - on one of its extra views, or in a folder whose tab is
+	// showing. What "any_open_chat_except_in_folder" excepts.
+	[[nodiscard]] bool purpleReachableElsewhere() const;
 	Dialogs::UnreadState chatListUnreadState() const override;
 	Dialogs::BadgesState chatListBadgesState() const override;
 	HistoryItem *chatListMessage() const override;
@@ -689,6 +709,18 @@ private:
 	HistoryItem *_newPeerPhotoChange = nullptr;
 	bool _loadedAtTop = false;
 	bool _loadedAtBottom = true;
+
+	// Purple: the recently-looked-at grace period. In memory only and never
+	// persisted - a grace period that survived a restart would mean the app
+	// remembering that you glanced at somebody yesterday, which is not what
+	// anyone means by "recently".
+	//
+	// `_purpleGraceEligible' is decided when the chat is opened rather than
+	// when it is closed, because two of the three scopes ask where the chat was
+	// at that moment, and by the time you close it the answer has moved.
+	bool _purpleOpened = false;
+	bool _purpleGraceEligible = false;
+	crl::time _purpleGraceUntil = 0;
 
 	std::optional<Data::Folder*> _folder;
 	Data::CommunityInfo *_communityInfo = nullptr;

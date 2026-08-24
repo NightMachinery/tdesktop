@@ -148,6 +148,24 @@ preset    = "work"
 # Temporarily reveal what the active preset is hiding.
 hotkey   = "Ctrl+Shift+P"
 auto_off = "2m"
+
+[recent]
+# Reading a chat is what takes an unread-gated one out of the view, so without
+# this it vanishes on the frame you click away from it. The clock starts when
+# you stop looking at the chat, not when you open it. Same spellings as
+# auto_off above; "off" to turn it off.
+stay_visible_after_close = "2m"
+
+# Which chats that covers:
+#
+#   "already_in_view"                - only a chat that was in the view when
+#                                      you opened it. Nothing you open can pull
+#                                      in a chat the preset was hiding.
+#   "any_open_chat"                  - any chat you open, hidden or not.
+#   "any_open_chat_except_in_folder" - the above, minus the chats that are
+#                                      already one click away on an extra view
+#                                      or in a folder whose tab is showing.
+applies_to = "already_in_view"
 )";
 
 [[nodiscard]] std::optional<QString> ReadFile(const QString &path) {

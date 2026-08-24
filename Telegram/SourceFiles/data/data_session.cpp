@@ -247,6 +247,7 @@ Session::Session(not_null<Main::Session*> session)
 , _formattedDateTimer([=] { checkFormattedDateUpdates(); })
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
 , _pollsClosingTimer([=] { checkPollsClosings(); })
+, _purpleGraceTimer([=] { purpleGraceExpired(); })
 , _watchForOfflineTimer([=] { checkLocalUsersWentOffline(); })
 , _groups(this)
 , _aiComposeTones(std::make_unique<AiComposeTones>(session))
@@ -1901,6 +1902,51 @@ void Session::refreshPurpleWorkMode() {
 		"(%4 showing), %5 silenced, view holds %6."
 		).arg(hidden).arg(chats).arg(gated.size()).arg(mentioned).arg(silenced
 		).arg(purpleViewList()->indexed()->size()));
+}
+
+void Session::purpleWatchGrace(not_null<History*> history) {
+	const auto until = history->purpleGraceUntil();
+	if (!until) {
+		return;
+	}
+	_purpleGrace[history->peer->id] = until;
+	purpleRearmGraceTimer();
+}
+
+void Session::purpleRearmGraceTimer() {
+	if (_purpleGrace.empty()) {
+		_purpleGraceTimer.cancel();
+		return;
+	}
+	auto earliest = crl::time(0);
+	for (const auto &[peerId, until] : _purpleGrace) {
+		if (!earliest || until < earliest) {
+			earliest = until;
+		}
+	}
+	// At least a tick, so a deadline that has already gone by still comes back
+	// through the timer rather than re-entering the walk that armed it.
+	_purpleGraceTimer.callOnce(
+		std::max(earliest - crl::now(), crl::time(1)));
+}
+
+void Session::purpleGraceExpired() {
+	const auto now = crl::now();
+	auto due = std::vector<PeerId>();
+	for (const auto &[peerId, until] : _purpleGrace) {
+		if (until <= now) {
+			due.push_back(peerId);
+		}
+	}
+	// Collected first: the refresh below moves chat lists, and a handler that
+	// reacted by opening a chat would edit the map we were walking.
+	for (const auto &peerId : due) {
+		_purpleGrace.remove(peerId);
+		if (const auto history = historyLoaded(peerId)) {
+			history->purpleRefreshChatListMembership();
+		}
+	}
+	purpleRearmGraceTimer();
 }
 
 void Session::refreshPurpleView() {

@@ -91,6 +91,16 @@ bool SaveExtraViewPins(
 // still work. See docs/purple/work_mode.md.
 [[nodiscard]] bool HideEverywhere();
 
+// How long a chat stays in the view after you stop looking at it, and which
+// chats that covers. Zero seconds - the default, and what Normal always answers
+// - means the whole mechanism is off and nothing has to be tracked.
+//
+// Read from the settings rather than from the resolution: it is about how you
+// use the app rather than about what one preset lets through, so it lives
+// beside [peek] and is the same whichever preset is running.
+[[nodiscard]] int RecentStaySeconds();
+[[nodiscard]] RecentScope RecentAppliesTo();
+
 struct PeekChange {
 	bool peeking = false;
 
