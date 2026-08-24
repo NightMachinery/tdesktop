@@ -44,14 +44,17 @@ namespace {
 	auto silenced = 0;
 	auto gated = 0;
 	for (const auto &list : resolved->lists) {
-		if (!list.show) {
+		if (list.show == ShowMode::Never) {
 			continue;
 		}
 		++through;
 		if (!list.notify) {
 			++silenced;
 		}
-		if (list.groupsRequireMention) {
+		// An entry that said nothing counts as gated too, because the per-kind
+		// defaults gate everything except channels - calling it ungated would
+		// be the wrong way round for most of a file.
+		if (!list.show || ShowModeWatchesUnread(*list.show)) {
 			++gated;
 		}
 	}
@@ -70,7 +73,7 @@ namespace {
 		parts.push_back(u"silences "_q + lists(silenced));
 	}
 	if (gated) {
-		parts.push_back(u"mentions only in "_q + lists(gated));
+		parts.push_back(lists(gated) + u" only when unread"_q);
 	}
 	const auto all = ranges::any_of(resolved->folders, IsAllFolders);
 	parts.push_back(all

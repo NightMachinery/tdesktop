@@ -66,12 +66,15 @@ namespace {
 [[nodiscard]] QString SerializeLists(const std::vector<ResolvedList> &lists) {
 	auto result = u"lists = [\n"_q;
 	for (const auto &list : lists) {
-		result += u"  { list = %1, show = %2, notify = %3, "
-			"groups_require_mention = %4 },\n"_q.arg(
-				Quoted(list.list),
-				Boolean(list.show),
-				Boolean(list.notify),
-				Boolean(list.groupsRequireMention));
+		// show is written only when the entry said something. Writing a
+		// collapsed value would freeze the chat-kind default into the cache,
+		// so a restored resolution would stop following it.
+		auto fields = u"list = %1"_q.arg(Quoted(list.list));
+		if (list.show) {
+			fields += u", show = %1"_q.arg(Quoted(ShowModeName(*list.show)));
+		}
+		fields += u", notify = %1"_q.arg(Boolean(list.notify));
+		result += u"  { %1 },\n"_q.arg(fields);
 	}
 	return result + u"]\n"_q;
 }
@@ -106,12 +109,12 @@ void ReadOptionalBool(
 		if (entry.list.isEmpty()) {
 			continue;
 		}
-		entry.show = ReadBool(*fields, "show", true);
+		if (const auto show = fields->get("show")) {
+			if (const auto text = show->value<std::string_view>()) {
+				entry.show = ParseShowMode(Text(*text));
+			}
+		}
 		entry.notify = ReadBool(*fields, "notify", true);
-		entry.groupsRequireMention = ReadBool(
-			*fields,
-			"groups_require_mention",
-			false);
 		result.push_back(std::move(entry));
 	}
 	return result;
@@ -148,6 +151,11 @@ void ReadOptionalBool(
 				}
 				ReadOptionalBool(*fields, "show", folder.show);
 				ReadOptionalBool(*fields, "notify", folder.notify);
+				if (const auto mode = fields->get("show_mode")) {
+					if (const auto text = mode->value<std::string_view>()) {
+						folder.showMode = ParseShowMode(Text(*text));
+					}
+				}
 				if (const auto include = fields->get("include_in_main_view")) {
 					if (const auto text
 						= include->value<std::string_view>()) {
@@ -305,6 +313,10 @@ QString SerializeState(const State &state) {
 			}
 			if (folder.notify) {
 				fields += u", notify = %1"_q.arg(Boolean(*folder.notify));
+			}
+			if (folder.showMode) {
+				fields += u", show_mode = %1"_q
+					.arg(Quoted(ShowModeName(*folder.showMode)));
 			}
 			if (folder.include) {
 				fields += u", include_in_main_view = %1"_q

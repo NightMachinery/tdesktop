@@ -44,6 +44,13 @@ class Row;
 class IndexedList;
 } // namespace Dialogs
 
+namespace Purple {
+// Opaque rather than an include: a fixed underlying type makes this a complete
+// type, and history.h is included in half the app - purple_settings.h has no
+// business travelling with it.
+enum class ShowMode : uchar;
+} // namespace Purple
+
 namespace HistoryView {
 class Element;
 } // namespace HistoryView
@@ -410,7 +417,11 @@ public:
 	bool purpleHiddenFromChatList() const override;
 	bool purpleHiddenFromView() const override;
 	bool purpleShownFromArchive() const override;
-	[[nodiscard]] bool purpleInExemptFolder() const;
+	// Purple: the mode an exempt folder gives this chat, or nothing when no
+	// folder the preset pulls in holds it. See purpleHiddenFromView().
+	[[nodiscard]] auto purpleExemptFolderMode() const
+		-> std::optional<Purple::ShowMode>;
+	[[nodiscard]] bool purpleShowModeSatisfied(Purple::ShowMode mode) const;
 	Dialogs::UnreadState chatListUnreadState() const override;
 	Dialogs::BadgesState chatListBadgesState() const override;
 	HistoryItem *chatListMessage() const override;
@@ -432,6 +443,11 @@ public:
 	// chat list. Nothing about the peer changed, so no upstream signal fires
 	// and the caller has to ask for this by hand.
 	void purpleRefreshChatListMembership();
+
+	// Purple: re-decide membership after this chat's unread state moved, for
+	// the modes that depend on it. Cheap and silent for a chat whose mode does
+	// not, which is every chat under Normal and most chats under a preset.
+	void purpleRefreshShowMode();
 
 	void setFakeChatListMessageFrom(const MTPmessages_Messages &data);
 	void checkChatListMessageRemoved(not_null<HistoryItem*> item);

@@ -108,28 +108,24 @@ void Proxy::setCount(int count) {
 		}
 	}
 
-	// Purple: a work preset can make a group appear only while it holds an
-	// unread mention, so this edge decides chat list membership and not just
-	// the badge drawn on it. It has to sit outside the inChatList() branch
+	// Purple: a show_mode can make a chat appear only while it holds an unread
+	// mention or reaction, so this edge decides chat list membership and not
+	// just the badge drawn on it. It has to sit outside the inChatList() branch
 	// above, because the chat that needs bringing back is precisely the one
 	// that is not in the preset's view. It also has to come after that branch:
 	// for a forum the parent's mention count is the sum over its topics, and
 	// the call above is what updates the sum.
-	if (_type == Type::Mentions && Purple::Filtering()) {
+	//
+	// Messages are not handled here. Their edge arrives through
+	// Data::Changes as HistoryUpdate::Flag::UnreadView, which is batched onto
+	// the main loop and so cannot re-enter the unread bookkeeping mid-update -
+	// see Session::setupPurpleWorkMode(). Mentions and reactions come through
+	// here as well as there, and the extra pass is harmless: refreshing
+	// membership twice settles on the same answer.
+	if ((_type == Type::Mentions || _type == Type::Reactions)
+		&& Purple::Filtering()) {
 		const auto history = _thread->owningHistory();
-		if (Purple::VisibleFor(history->peer).mentionGated) {
-			const auto view = Data::kPurpleViewFilterId;
-			const auto was = history->inChatList(view);
-			history->purpleRefreshChatListMembership();
-			if (history->inChatList(view) != was) {
-				// The one event that explains a chat appearing or vanishing on
-				// its own, so it is worth a line. It is rare by construction:
-				// only gated chats reach here, and only on the edge.
-				LOG(("Purple: mention gate %1 peer %2."
-					).arg(was ? u"hid"_q : u"revealed"_q
-					).arg(history->peer->id.value));
-			}
-		}
+		history->purpleRefreshShowMode();
 	}
 }
 

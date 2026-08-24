@@ -21,34 +21,38 @@ class QDateTime;
 // to prove outside a running app. See docs/purple/config.md.
 namespace Purple {
 
-// The folders a preset selection pulls into its main view - the ones that said
-// `include_in_main_view_p = true'. Saying nothing leaves a folder's chats to
-// whatever the lists decided, like every folder the preset does not name.
-[[nodiscard]] std::vector<QString> ExemptFolderNames(
-	const std::vector<PresetFolder> &folders);
+// A folder a preset pulls into its main view, with everything the decision
+// needs: how much of it comes (Pinned or All - never None, those are not here)
+// and what mode its chats take once in.
+struct ExemptFolder {
+	QString name;
+	FolderInclude include = FolderInclude::All;
 
-// Of those, the ones that also said `pinned_only_p = true': they pull in only
-// the chats pinned inside them. Always a subset of the names above, because the
-// flag narrows that inclusion rather than granting one of its own.
-[[nodiscard]] std::vector<QString> ExemptPinnedOnlyFolderNames(
+	// Unset leaves the chats to DefaultShowMode() for whatever they are: the
+	// folder chose which chats come in, not when they show.
+	std::optional<ShowMode> showMode;
+
+	friend bool operator==(const ExemptFolder &, const ExemptFolder &)
+		= default;
+};
+
+// The folders a preset selection pulls into its main view. Saying nothing
+// leaves a folder's chats to whatever the lists decided, like every folder the
+// preset does not name.
+[[nodiscard]] std::vector<ExemptFolder> ExemptFolderList(
 	const std::vector<PresetFolder> &folders);
 
 // The folders a preset silences - the ones that said `notify_p = false'.
 [[nodiscard]] std::vector<QString> SilencedFolderNames(
 	const std::vector<PresetFolder> &folders);
 
-// One step of a resolved order, with every tri-state collapsed to the value
-// that will actually be applied.
+// One step of a resolved order. `notify' is collapsed here; `show' cannot be,
+// because its default depends on what the chat turns out to be and one entry
+// can claim several kinds at once. Visible() does that last step.
 struct EffectiveList {
 	QString list;
-	bool show = true;
+	std::optional<ShowMode> show;
 	bool notify = true;
-
-	// Only meaningful for lists that can hold groups, and resolved per entry so
-	// a preset can gate one list without gating all of them. Off unless the
-	// entry asks: a preset that only hides bots must not also empty the chat
-	// list of every group nobody has mentioned you in.
-	bool groupsRequireMention = false;
 
 	friend bool operator==(
 		const EffectiveList &,
@@ -86,15 +90,10 @@ struct Resolved {
 	// "*ALL" marker. Empty means no folder tabs at all.
 	std::vector<PresetFolder> folders;
 
-	// Names from `folders' that asked to be pulled into the main view, lifted
-	// out so the common case - nobody asked - is an empty vector to test rather
-	// than a walk of the folder list per hidden chat.
-	std::vector<QString> exemptFolders;
-
-	// The subset of those that only want their pinned chats. Kept apart rather
-	// than folded into the vector above so that the common case stays one
-	// emptiness test, and only a preset that asked pays for the second lookup.
-	std::vector<QString> exemptPinnedOnlyFolders;
+	// The folders that asked to be pulled into the main view, lifted out so the
+	// common case - nobody asked - is an empty vector to test rather than a
+	// walk of the folder list per hidden chat.
+	std::vector<ExemptFolder> exemptFolders;
 
 	// Names from `folders' that said `notify_p = false'. Same reason as above:
 	// the common case is nobody asked, and that has to be one empty vector to
@@ -148,12 +147,14 @@ struct Resolved {
 	ChatKind kind);
 
 // What the chat list and the notification gate actually ask.
+//
+// `show' is a mode rather than an answer, because everything except Always and
+// Never depends on the chat's unread state - and the engine deliberately knows
+// nothing about unread counts. The caller with the chat in hand finishes the
+// job; see History::purpleHiddenFromView().
 struct Visibility {
-	bool show = true;
+	ShowMode show = ShowMode::Always;
 	bool notify = true;
-
-	// The chat is a group that only appears once it has an unread mention.
-	bool mentionGated = false;
 };
 
 [[nodiscard]] Visibility Visible(

@@ -336,8 +336,8 @@ bool SilencedByPreset(not_null<const PeerData*> peer) {
 	return Filtering() && !VisibleFor(peer).notify;
 }
 
-const std::vector<QString> &ExemptFolders() {
-	static const auto kNone = std::vector<QString>();
+const std::vector<ExemptFolder> &ExemptFolders() {
+	static const auto kNone = std::vector<ExemptFolder>();
 	const auto &resolved = Instance().resolved();
 	if (resolved.normal || resolved.peeking || resolved.folders.empty()) {
 		// Peeking already reveals everything, so there is nothing to exempt
@@ -345,17 +345,6 @@ const std::vector<QString> &ExemptFolders() {
 		return kNone;
 	}
 	return resolved.exemptFolders;
-}
-
-const std::vector<QString> &ExemptPinnedOnlyFolders() {
-	static const auto kNone = std::vector<QString>();
-	const auto &resolved = Instance().resolved();
-	if (resolved.normal || resolved.peeking || resolved.folders.empty()) {
-		// Same guard as ExemptFolders(): a peek already reveals everything, so
-		// there is nothing left for this to narrow.
-		return kNone;
-	}
-	return resolved.exemptPinnedOnlyFolders;
 }
 
 const std::vector<QString> &SilencedFolders() {

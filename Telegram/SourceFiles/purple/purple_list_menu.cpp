@@ -58,14 +58,26 @@ void FillListsMenu(
 		const auto verdict = VisibleFor(peer);
 		const auto history = peer->owner().historyLoaded(peer);
 		const auto hidden = history && history->purpleHiddenFromView();
+
+		// A chat held back by a mode is a different answer from one hidden
+		// outright: it says what would bring it back, which is the only useful
+		// thing to say to somebody asking why they cannot see it.
+		const auto waiting = [&] {
+			switch (verdict.show) {
+			case ShowMode::Message: return u"hidden until a message"_q;
+			case ShowMode::MessageOrReaction:
+				return u"hidden until a message or reaction"_q;
+			case ShowMode::Mention: return u"hidden until a mention"_q;
+			default: break;
+			}
+			return u"hidden"_q;
+		};
 		const auto state = hidden
-			? (verdict.mentionGated
-				? u"hidden until a mention"_q
-				: u"hidden"_q)
+			? waiting()
 			: verdict.notify
 			? u"shown"_q
 			: u"silenced"_q;
-		const auto folder = (!hidden && !verdict.show)
+		const auto folder = (!hidden && verdict.show == ShowMode::Never)
 			? u", shown by a folder"_q
 			: QString();
 		const auto effective = ListFor(peer);

@@ -89,16 +89,20 @@ kinds = ["bots"]
 # chain to follow when you are trying to read what a preset actually does.
 [list_sets.always]
 list_order = [
-  { list = "os",        show_p = true, notify_p = true },
-  { list = "emergency", show_p = true, notify_p = true },
+  { list = "os",        show_mode = "always", notify_p = true },
+  { list = "emergency", show_mode = "always", notify_p = true },
 ]
 
+# No show_mode here, so each entry takes the default for whatever the chat
+# turns out to be: channels and bots always, groups only when they name you,
+# private chats when they have something unread. The five spellings are
+# "always", "message", "message_or_reaction", "mention" and "never".
 [list_sets.the_rest]
 list_order = [
-  { list = "private",  show_p = true, notify_p = true },
-  { list = "groups",   show_p = true, notify_p = true },
-  { list = "channels", show_p = true, notify_p = true },
-  { list = "bots",     show_p = true, notify_p = true },
+  { list = "private",  notify_p = true },
+  { list = "groups",   notify_p = true },
+  { list = "channels", notify_p = true },
+  { list = "bots",     notify_p = true },
 ]
 
 # An example preset. Uncomment and adjust, or write your own.
@@ -112,8 +116,8 @@ list_order = [
 # [presets.work]
 # list_order = [
 #   "*always",
-#   { list = "groups", show_p = true, notify_p = true, groups_require_mention_p = true },
-#   { list = "bots",   show_p = false, notify_p = false },
+#   { list = "groups", show_mode = "mention", notify_p = true },
+#   { list = "bots",   show_mode = "never",   notify_p = false },
 # ]
 #
 # # Folders are named the same way. "*ALL" is every folder you have; leaving
@@ -126,7 +130,7 @@ list_order = [
 # # An extra tab of its own, with its own unread badge and its own pins.
 # [[presets.work.views]]
 # name = "People"
-# list_order = [ { list = "private", show_p = true } ]
+# list_order = [ { list = "private" } ]
 
 [schedule]
 enabled_p = true

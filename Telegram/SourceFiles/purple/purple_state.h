@@ -29,9 +29,12 @@ enum class PresetSource : uchar {
 
 struct ResolvedList {
 	QString list;
-	bool show = true;
+
+	// Unset is meaningful and has to survive the round trip: it is what makes
+	// the entry take the default for whatever kind the chat turns out to be.
+	std::optional<ShowMode> show;
+
 	bool notify = true;
-	bool groupsRequireMention = false;
 };
 
 struct ResolvedCacheView {
