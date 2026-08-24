@@ -2722,11 +2722,16 @@ void InnerWidget::savePinnedOrder() {
 		session().api().savePinnedOrder(_openedForum);
 	} else if (_filterId && !Data::IsPurpleView(_filterId)) {
 		Api::SaveNewFilterPinned(&session(), _filterId);
+	} else if (Data::IsPurpleView(_filterId)
+		&& Data::PurpleViewIndex(_filterId) > 0) {
+		// Purple: an extra view's order is the preset's own and lives in
+		// settings.toml. Nothing about it is the server's business.
+		session().data().savePurpleViewPins(Data::PurpleViewIndex(_filterId));
 	} else {
-		// Purple: dragging pins about inside the preset view moved the main
-		// list, because that is where its pins live, so this is the ordinary
-		// save. Sending the view to the server as a folder would be a way to
-		// lose the real order.
+		// Purple: dragging pins about inside the preset's main view moved the
+		// main list, because that is where its pins live, so this is the
+		// ordinary save. Sending the view to the server as a folder would be a
+		// way to lose the real order.
 		session().api().savePinnedOrder(_openedFolder);
 	}
 }

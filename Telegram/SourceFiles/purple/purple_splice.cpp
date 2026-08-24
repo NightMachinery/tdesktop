@@ -145,6 +145,26 @@ struct Position {
 	return indent + QString::number(id) + u","_q + CommentText(title, id);
 }
 
+// A whole canonical array, written out: the '[' left on whatever came before
+// it, one id per line, the ']' alone at the key's own indentation. `head' is
+// the text preceding the bracket and `tail' whatever followed the closing one,
+// so the caller decides how much of the surrounding line it is replacing.
+[[nodiscard]] QStringList IdArrayLines(
+		const QString &keyIndent,
+		const QString &head,
+		const QString &tail,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title,
+		const QString &ending) {
+	const auto indent = keyIndent + QString::fromLatin1(kDefaultIndent);
+	auto result = QStringList{ head + u"["_q + ending };
+	for (const auto id : ids) {
+		result.push_back(MemberLine(indent, id, title) + ending);
+	}
+	result.push_back(keyIndent + u"]"_q + tail);
+	return result;
+}
+
 [[nodiscard]] const toml::table *FindListTable(
 		const toml::table &root,
 		const QString &list,
@@ -166,6 +186,51 @@ struct Position {
 		return nullptr;
 	}
 	return node->as_table();
+}
+
+// The [[presets.<preset>.views]] block that calls itself <view>. Case-folded,
+// matching the parser's own rule for deciding two views are the same one.
+[[nodiscard]] const toml::table *FindViewTable(
+		const toml::table &root,
+		const QString &preset,
+		const QString &view,
+		QString &error) {
+	const auto presets = root.get("presets");
+	if (!presets || !presets->as_table()) {
+		error = u"settings.toml has no [presets] tables."_q;
+		return nullptr;
+	}
+	const auto utf8 = preset.toUtf8();
+	const auto node = presets->as_table()->get(
+		std::string_view(utf8.constData(), utf8.size()));
+	if (!node || !node->as_table()) {
+		error = u"settings.toml has no [presets.%1] table."_q.arg(preset);
+		return nullptr;
+	}
+	const auto views = node->as_table()->get("views");
+	const auto array = views ? views->as_array() : nullptr;
+	if (!array) {
+		error = u"[presets.%1] has no views."_q.arg(preset);
+		return nullptr;
+	}
+	for (auto &&element : *array) {
+		const auto fields = element.as_table();
+		if (!fields) {
+			continue;
+		}
+		const auto name = fields->get_as<std::string>("name");
+		if (!name || Text(name->get()).compare(view, Qt::CaseInsensitive)) {
+			continue;
+		} else if (fields->is_inline()) {
+			error = u"the view '%1' of [presets.%2] is written inline; rewrite "
+				"it as a [[presets.%2.views]] table before pinning inside "
+				"it."_q.arg(view, preset);
+			return nullptr;
+		}
+		return fields;
+	}
+	error = u"[presets.%1] has no view called '%2'."_q.arg(preset, view);
+	return nullptr;
 }
 
 [[nodiscard]] std::vector<PeerIdValue> IdsOf(const toml::array &array) {
@@ -209,6 +274,39 @@ struct Position {
 	if (ids != expected) {
 		return u"the edit left [lists.%1] holding the wrong members"_q
 			.arg(list);
+	}
+	return QString();
+}
+
+// The same refusal as VerifySplice, for the other array we own.
+[[nodiscard]] QString VerifyViewPinned(
+		const QString &text,
+		const QString &path,
+		const QString &preset,
+		const QString &view,
+		const std::vector<PeerIdValue> &expected) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		const auto &error = parsed.error();
+		return u"the edit would not parse back (%1:%2: %3)"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description()));
+	}
+	auto ignored = QString();
+	const auto table = FindViewTable(parsed.table(), preset, view, ignored);
+	if (!table) {
+		return u"the edit lost the view '%1'"_q.arg(view);
+	}
+	const auto pinned = table->get("pinned");
+	const auto array = pinned ? pinned->as_array() : nullptr;
+	const auto ids = array ? IdsOf(*array) : std::vector<PeerIdValue>();
+	if (ids != expected) {
+		return u"the edit left the view '%1' pinning the wrong chats"_q
+			.arg(view);
 	}
 	return QString();
 }
@@ -286,10 +384,16 @@ struct Position {
 			return Refuse(text, u"could not locate [lists.%1]."_q.arg(list));
 		}
 		const auto indent = Indentation(lines[header - 1]);
-		const auto inner = indent + QString::fromLatin1(kDefaultIndent);
-		lines.insert(header, indent + u"]"_q + ending);
-		lines.insert(header, MemberLine(inner, id, title) + ending);
-		lines.insert(header, indent + u"members = ["_q + ending);
+		const auto written = IdArrayLines(
+			indent,
+			indent + u"members = "_q,
+			ending,
+			expected,
+			title,
+			ending);
+		for (auto i = written.size(); i != 0;) {
+			lines.insert(header, written[--i]);
+		}
 	} else {
 		const auto open = Position{
 			int(array->source().begin.line),
@@ -328,15 +432,13 @@ struct Position {
 			// Squashed onto one line, or otherwise not something we can edit a
 			// line at a time. Rewrite exactly the bracketed span - that is the
 			// whole permissible blast radius - and leave the rest alone.
-			const auto indent = keyIndent + QString::fromLatin1(kDefaultIndent);
-			const auto head = lines[open.line - 1].left(open.column - 1);
-			const auto tail = lines[close->line - 1].mid(close->column);
-			auto replacement = QStringList{ head + u"["_q + ending };
-			for (const auto member : expected) {
-				replacement.push_back(
-					MemberLine(indent, member, title) + ending);
-			}
-			replacement.push_back(keyIndent + u"]"_q + tail);
+			const auto replacement = IdArrayLines(
+				keyIndent,
+				lines[open.line - 1].left(open.column - 1),
+				lines[close->line - 1].mid(close->column),
+				expected,
+				title,
+				ending);
 
 			auto rebuilt = lines.mid(0, open.line - 1);
 			rebuilt += replacement;
@@ -373,6 +475,110 @@ SpliceResult RemoveListMember(
 		PeerIdValue id,
 		const MemberTitle &title) {
 	return Splice(text, path, list, id, title, false);
+}
+
+SpliceResult SetViewPinned(
+		const QString &text,
+		const QString &path,
+		const QString &preset,
+		const QString &view,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		const auto &error = parsed.error();
+		return Refuse(text, u"%1:%2: %3"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description())));
+	}
+	auto error = QString();
+	const auto table = FindViewTable(parsed.table(), preset, view, error);
+	if (!table) {
+		return Refuse(text, error);
+	}
+	const auto pinned = table->get("pinned");
+	const auto array = pinned ? pinned->as_array() : nullptr;
+	if (pinned && !array) {
+		return Refuse(text, u"the view '%1' has a 'pinned' that is not an "
+			"array."_q.arg(view));
+	} else if ((array ? IdsOf(*array) : std::vector<PeerIdValue>()) == ids) {
+		return Unchanged(text);
+	}
+
+	auto lines = text.split('\n');
+	const auto crlf = std::any_of(lines.begin(), lines.end(), [](
+			const QString &line) {
+		return line.endsWith('\r');
+	});
+	const auto ending = crlf ? u"\r"_q : QString();
+
+	if (!array) {
+		// No key yet, which is the ordinary case: pins only exist once somebody
+		// has dragged one. Put the array under the view's name, where a reader
+		// looking for what this tab does will already be looking.
+		const auto header = int(table->source().begin.line);
+		if (header < 1 || header > lines.size()) {
+			return Refuse(text, u"could not locate the view '%1'."_q.arg(view));
+		}
+		auto after = header;
+		if (const auto name = table->get("name")) {
+			const auto line = int(name->source().begin.line);
+			if (line >= header && line <= lines.size()) {
+				after = line;
+			}
+		}
+		const auto indent = Indentation(lines[header - 1]);
+		const auto written = IdArrayLines(
+			indent,
+			indent + u"pinned = "_q,
+			ending,
+			ids,
+			title,
+			ending);
+		for (auto i = written.size(); i != 0;) {
+			lines.insert(after, written[--i]);
+		}
+	} else {
+		const auto open = Position{
+			int(array->source().begin.line),
+			int(array->source().begin.column),
+		};
+		if (open.line < 1 || open.line > lines.size()) {
+			return Refuse(text, u"could not locate the pins of the view "
+				"'%1'."_q.arg(view));
+		}
+		const auto close = FindClosing(lines, open);
+		if (!close) {
+			return Refuse(text, u"the pinned array of the view '%1' is not "
+				"closed."_q.arg(view));
+		}
+		const auto keyIndent = Indentation(lines[open.line - 1]);
+		const auto replacement = IdArrayLines(
+			keyIndent,
+			lines[open.line - 1].left(open.column - 1),
+			lines[close->line - 1].mid(close->column),
+			ids,
+			title,
+			ending);
+
+		auto rebuilt = lines.mid(0, open.line - 1);
+		rebuilt += replacement;
+		rebuilt += lines.mid(close->line);
+		lines = std::move(rebuilt);
+	}
+
+	auto result = SpliceResult();
+	result.text = lines.join('\n');
+	if (auto failed = VerifyViewPinned(result.text, path, preset, view, ids);
+		!failed.isEmpty()) {
+		return Refuse(text, failed);
+	}
+	result.changed = true;
+	return result;
 }
 
 SpliceResult SetTableBool(
@@ -495,6 +701,28 @@ std::vector<PeerIdValue> ListMembers(
 	}
 	const auto members = table->get("members");
 	const auto array = members ? members->as_array() : nullptr;
+	return array ? IdsOf(*array) : std::vector<PeerIdValue>();
+}
+
+std::vector<PeerIdValue> ViewPinned(
+		const QString &text,
+		const QString &path,
+		const QString &preset,
+		const QString &view) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		return {};
+	}
+	auto ignored = QString();
+	const auto table = FindViewTable(parsed.table(), preset, view, ignored);
+	if (!table) {
+		return {};
+	}
+	const auto pinned = table->get("pinned");
+	const auto array = pinned ? pinned->as_array() : nullptr;
 	return array ? IdsOf(*array) : std::vector<PeerIdValue>();
 }
 

@@ -32,26 +32,6 @@ namespace {
 
 } // namespace
 
-MemberTitle TitleResolver(not_null<Main::Session*> session) {
-	const auto owner = &session->data();
-	return [=](PeerIdValue id) {
-		const auto bare = BareId(id);
-		// The file keeps the bare id, which is all Purple::IdOf() ever had, so
-		// the type has to be guessed back. Bare ids are unique across the three
-		// kinds in practice; if they ever were not, the worst case is a stale
-		// name in a comment nothing reads back.
-		const auto peer = [&]() -> PeerData* {
-			if (const auto user = owner->peerLoaded(peerFromUser(bare))) {
-				return user;
-			} else if (const auto chat = owner->peerLoaded(peerFromChat(bare))) {
-				return chat;
-			}
-			return owner->peerLoaded(peerFromChannel(bare));
-		}();
-		return peer ? peer->name() : QString();
-	};
-}
-
 bool HasCustomLists() {
 	return !ActiveSettings().lists.empty();
 }

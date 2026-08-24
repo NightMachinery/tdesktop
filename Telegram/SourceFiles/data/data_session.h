@@ -929,6 +929,11 @@ public:
 	// preset is running. See kPurpleViewFilterId.
 	[[nodiscard]] not_null<Dialogs::MainList*> purpleViewList(int index = 0);
 
+	// Purple: writes extra view `index''s pinned order back to settings.toml,
+	// where a view's pins live. Called once a drag has settled rather than per
+	// step, because every write comes back as a config reload.
+	void savePurpleViewPins(int index);
+
 	// Purple: the list the app-wide unread badge should count. The main list
 	// is complete now - it keeps the chats a preset hides - so counting it
 	// would put the badge at odds with everything on screen.
@@ -1059,6 +1064,7 @@ private:
 
 	// Purple: retakes the view's copy of the main list's pinned order.
 	void refreshPurpleViewPinned();
+	void refreshPurpleViewPins(int index);
 
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();

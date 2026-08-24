@@ -8,8 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_engine.h"
+#include "purple/purple_splice.h" // MemberTitle
 
 class PeerData;
+
+namespace Main {
+class Session;
+} // namespace Main
 
 // The seam between the engine and the app. Everything below purple_engine.h is
 // pure data and is tested standalone; this is the one file that knows what a
@@ -19,6 +24,11 @@ namespace Purple {
 
 [[nodiscard]] ChatKind KindOf(not_null<const PeerData*> peer);
 [[nodiscard]] PeerIdValue IdOf(not_null<const PeerData*> peer);
+
+// The other direction, for the trailing comments the app writes beside the ids
+// it splices into settings.toml. Names go stale, so a comment is regenerated
+// every time its line is rewritten rather than read back from the file.
+[[nodiscard]] MemberTitle TitleResolver(not_null<Main::Session*> session);
 
 // The resolution the active preset produced, recomputed whenever settings.toml
 // or state.toml changes. Normal until a preset is chosen, and Normal is a
@@ -42,6 +52,18 @@ namespace Purple {
 // extra view hides nothing - it is a selection the user asked for by name, and
 // filling it with every chat during a peek would only take it away.
 [[nodiscard]] bool ExtraViewHolds(int index, not_null<const PeerData*> peer);
+
+// The ids extra view `index' pins, in the order settings.toml gave them. Empty
+// for a view that has never had anything dragged in it, which is most of them.
+[[nodiscard]] const std::vector<PeerIdValue> &ExtraViewPins(int index);
+
+// Writes that order back. Unlike everything else about a view this is a fact
+// the app discovers rather than reads - the user drags a row - so it is the one
+// thing a view owns that has to travel in this direction.
+bool SaveExtraViewPins(
+	int index,
+	const std::vector<PeerIdValue> &ids,
+	const MemberTitle &title);
 
 // False under Normal, which is the whole point: every gate in the app tests
 // this first, so an unconfigured fork pays one bool load and behaves exactly

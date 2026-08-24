@@ -205,11 +205,11 @@ that nothing on screen accounts for.
 
 They are the same object under `normal`, so nothing is paid there.
 
-### Pins in the view
+### Pins in the main view
 
-The view's pinned list is a **copy** of the main list's, minus the chats the
+The main view's pinned list is a **copy** of the main list's, minus the chats the
 preset hides, retaken by `Session::refreshPurpleViewPinned()` whenever either
-moves. Pinning is a fact about the account, not about the view, so the view is
+moves. Pinning is a fact about the account, not about the main view, so it is
 never allowed to own pins of its own:
 
 - Pinning or unpinning inside the view acts on the main list and sends the
@@ -222,7 +222,8 @@ never allowed to own pins of its own:
   sent anywhere - it is not a folder and no server has heard of it.
 
 `Entry::removeFromChatList()` leaves the view's pinned list alone for the same
-reason: the copy owns it, and the next copy would undo anything done here.
+reason: the copy owns it, and the next copy would undo anything done here. That
+holds for an extra view too, where the seed below owns it instead.
 
 ### Extra views
 
@@ -267,13 +268,47 @@ Three things an extra view deliberately does not do:
 - **Saved Messages is not on it either.** Saved Messages is exempt from a
   preset's hiding, but that is not the same as belonging on every tab.
 
-**Its pinned order is not implemented yet.** Unlike the main view, an extra view
-is meant to own that order - it is not standing in for All chats, so there is no
-main-list order for it to copy - and until it does, the `pinned` array is parsed
-and cached but nothing reads it. In the meantime an extra view shows its chats
-by date, and "Pin" from a context menu inside one pins in the main chat list
-without appearing to do anything on the tab. That order will live in
-`settings.toml`, spliced back the same way list membership is spliced today.
+### Pins in an extra view
+
+An extra view **owns** its pinned order. It is not standing in for All chats, so
+there is no main-list order to copy, and nothing on the server has heard of the
+tab. The order lives in the file:
+
+    [[presets.work.views]]
+    name   = "Focus"
+    pinned = [
+      1234567890, # Some Person
+    ]
+    list_order = [ { list = "essentials" } ]
+
+`Session::refreshPurpleViewPins()` seeds the tab's `Dialogs::PinnedList` from
+that array whenever the config or the membership changes, and pinning or
+dragging inside the tab writes it back through `Purple::SetViewPinned()` - the
+same splice that maintains `[lists.x] members`, so the rest of the file keeps
+its bytes. Pinning inside an extra view does **not** pin on the account.
+
+Four consequences worth stating, because each is a thing that could have gone
+the other way:
+
+- **The array is addressed by the view's name, not its position.** The file may
+  hold `[[presets.x.views]]` blocks the parser dropped - unnamed, duplicated,
+  naming no list - so the nth block in the file is not the nth tab on the strip.
+  A pin written by index would land on a different view than the one dragged.
+- **An id the tab does not currently hold keeps its place.** The usual reason a
+  pinned chat is missing from a tab is that it has not finished loading, and
+  dropping it would silently unpin it the first time anything else moved.
+  `Session::savePurpleViewPins()` splices such ids back at the index the file
+  gave them, so an unchanged order rewrites the file to the same bytes and the
+  splice reports nothing changed.
+- **The write is deferred to the next main-loop turn.** It comes back as a
+  config reload, which rebuilds every chat list; doing that from inside the drag
+  handler that asked for it would pull the rows out from under it.
+- **The limit is the ordinary chat pin limit.** Nothing on the server bounds a
+  local file, but a tab that is all pins is not a tab, so
+  `Session::pinnedCanPin()` applies the same allowance.
+
+A view whose ids no longer resolve to anything sorts by date, which is what an
+empty `pinned` means anyway.
 
 ### hide_everywhere
 
@@ -992,9 +1027,6 @@ is the one state this must not be able to reach.
 
 ## Not yet implemented
 
-- A pinned order of a preset's extra view. `[[presets.x.views]] pinned` parses,
-  resolves and survives the cache; nothing reads it, so an extra view sorts by
-  date and pinning inside one acts on the main chat list. See "Extra views".
 - A chat entering a silenced rule-based folder does not refresh the cached
   mute immediately, as above.
 - No hotkey for switching presets. `Purple::ListenPeekHotkey()` generalises to

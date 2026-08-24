@@ -26,12 +26,6 @@ class Show;
 // comments and its layout. See docs/purple/work_mode.md.
 namespace Purple {
 
-// Resolves a peer id back to a display name for the comment the splice writes
-// next to a member line. Needed as a general lookup rather than "the name of
-// the chat we are editing": rewriting a squashed members array regenerates the
-// comment on every line, so the splice asks about ids the menu never saw.
-[[nodiscard]] MemberTitle TitleResolver(not_null<Main::Session*> session);
-
 // Whether settings.toml defines a list a chat could be put into at all. False
 // for an unconfigured fork, and for one that only tuned the four catch-alls -
 // in both cases the menu item is left out entirely rather than opening on an
