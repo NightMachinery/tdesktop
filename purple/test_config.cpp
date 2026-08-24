@@ -423,7 +423,7 @@ void TestFolderSelection() {
 
 	const auto result = Parse(uR"(
 [folder_sets.mine]
-folders = [ { name = "B", include_in_main_view_p = true } ]
+folders = [ { name = "B", include_in_main_view = "all" } ]
 
 [presets.work]
 folders = [ "*mine", "*ALL", { name = "B", show_p = false } ]
@@ -442,7 +442,8 @@ folders = [ "*ALL" ]
 	const auto work = result.settings.preset(u"work"_q);
 	CHECK_EQ(int(work->folders.size()), 2);
 	CHECK_EQ(work->folders[0].name, u"B"_q);
-	CHECK(work->folders[0].includeInMainView.value_or(false));
+	CHECK_EQ(int(work->folders[0].include.value_or(
+		Purple::FolderInclude::None)), int(Purple::FolderInclude::All));
 	CHECK(Purple::IsAllFolders(work->folders[1]));
 
 	// Saying nothing about folders is saying none, the same rule the lists
@@ -462,28 +463,48 @@ folders = [ { name = "B", filtered = false } ]
 )"_q);
 	CHECK(stale.ok());
 	CHECK(WarnsAbout(stale, u"cannot be redefined"_q));
-	CHECK(WarnsAbout(stale, u"use 'include_in_main_view_p'"_q));
+	CHECK(WarnsAbout(stale, u"include_in_main_view = \"all\""_q));
 
-	// pinned_only_p narrows the inclusion above it, and warns when there is no
-	// inclusion for it to narrow rather than sitting there doing nothing.
-	const auto pinned = Parse(uR"(
+	// The enum, and the two spellings it replaced. Both of those are retired
+	// rather than quietly accepted: a folder still saying include_in_main_view_p
+	// would otherwise include nothing and look exactly like one that meant to.
+	const auto modes = Parse(uR"(
 [presets.work]
 folders = [
-  { name = "Music", include_in_main_view_p = true, pinned_only_p = true },
-  { name = "B",     include_in_main_view_p = true },
-  { name = "Solo",  pinned_only_p = true },
+  { name = "Music", include_in_main_view = "pinned" },
+  { name = "B",     include_in_main_view = "all" },
+  { name = "Quiet", include_in_main_view = "none" },
+  { name = "Plain" },
+  { name = "Old",   include_in_main_view_p = true },
+  { name = "Older", pinned_only_p = true },
+  { name = "Typo",  include_in_main_view = "some" },
 ]
 )"_q);
-	CHECK(pinned.ok());
-	const auto narrowed = pinned.settings.preset(u"work"_q);
-	CHECK(narrowed->folders[0].pinnedOnly.value_or(false));
-	CHECK(!narrowed->folders[1].pinnedOnly.value_or(false));
-	CHECK(WarnsAbout(pinned, u"does nothing without it"_q));
+	CHECK(modes.ok());
+	const auto shaped = modes.settings.preset(u"work"_q);
+	const auto mode = [&](int index) {
+		return int(shaped->folders[index].include.value_or(
+			Purple::FolderInclude::None));
+	};
+	CHECK_EQ(mode(0), int(Purple::FolderInclude::Pinned));
+	CHECK_EQ(mode(1), int(Purple::FolderInclude::All));
+	CHECK_EQ(mode(2), int(Purple::FolderInclude::None));
+	CHECK(!shaped->folders[3].include.has_value());
+	CHECK(WarnsAbout(modes, u"no longer a yes-or-no"_q));
+	CHECK(WarnsAbout(modes, u"write include_in_main_view = \"pinned\""_q));
+	CHECK(WarnsAbout(modes, u"one of none, pinned, all"_q));
 
-	// The warning is about 'Solo' alone - a folder that asked for both is
-	// exactly the intended shape and must not be warned at.
-	CHECK(WarnsAbout(pinned, u"folder 'Solo'"_q));
-	CHECK(!WarnsAbout(pinned, u"folder 'Music': 'pinned_only_p'"_q));
+	// A misspelt value is ignored rather than guessed at, so the folder falls
+	// back to contributing nothing.
+	CHECK(!shaped->folders[6].include.has_value());
+
+	CHECK_EQ(
+		Purple::FolderIncludeName(Purple::FolderInclude::Pinned),
+		u"pinned"_q);
+	CHECK(!Purple::ParseFolderInclude(u"some"_q).has_value());
+	CHECK_EQ(
+		int(*Purple::ParseFolderInclude(u"  ALL "_q)),
+		int(Purple::FolderInclude::All));
 }
 
 void TestViews() {
@@ -1325,7 +1346,7 @@ void TestStateRoundTrip() {
 	};
 	state.resolvedCache.folders = {
 		{ .name = u"Music"_q, .notify = false },
-		{ .name = u"Family"_q, .includeInMainView = true },
+		{ .name = u"Family"_q, .include = Purple::FolderInclude::All },
 		{ .name = Purple::AllFoldersName(), .show = false },
 	};
 	state.resolvedCache.views = {
@@ -1363,9 +1384,12 @@ void TestStateRoundTrip() {
 	CHECK_EQ(back.resolvedCache.folders[0].name, u"Music"_q);
 	CHECK(back.resolvedCache.folders[0].notify.has_value());
 	CHECK(!back.resolvedCache.folders[0].notify.value_or(true));
-	CHECK(!back.resolvedCache.folders[0].includeInMainView.has_value());
+	CHECK(!back.resolvedCache.folders[0].include.has_value());
 	CHECK_EQ(back.resolvedCache.folders[1].name, u"Family"_q);
-	CHECK(back.resolvedCache.folders[1].includeInMainView.value_or(false));
+	CHECK_EQ(
+		int(back.resolvedCache.folders[1].include.value_or(
+			Purple::FolderInclude::None)),
+		int(Purple::FolderInclude::All));
 	CHECK(Purple::IsAllFolders(back.resolvedCache.folders[2]));
 	CHECK(!back.resolvedCache.folders[2].show.value_or(true));
 
@@ -2019,8 +2043,8 @@ void TestResolvedCache() {
 	// must not quietly start hiding the chats a folder was pulling in.
 	auto folders = std::vector<Purple::PresetFolder>{
 		{ .name = u"Work"_q },
-		{ .name = u"Family"_q, .includeInMainView = true },
-		{ .name = u"Loud"_q, .includeInMainView = false },
+		{ .name = u"Family"_q, .include = Purple::FolderInclude::All },
+		{ .name = u"Loud"_q, .include = Purple::FolderInclude::None },
 	};
 	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(1));
 	CHECK_EQ(Purple::ExemptFolderNames(folders).front(), u"Family"_q);
@@ -2039,10 +2063,9 @@ void TestResolvedCache() {
 	// is only ever a subset of what is already being pulled in.
 	folders.push_back({
 		.name = u"Music"_q,
-		.includeInMainView = true,
-		.pinnedOnly = true,
+		.include = Purple::FolderInclude::Pinned,
 	});
-	folders.push_back({ .name = u"Alone"_q, .pinnedOnly = true });
+	folders.push_back({ .name = u"Alone"_q });
 	CHECK_EQ(Purple::ExemptFolderNames(folders).size(), size_t(2));
 	CHECK_EQ(Purple::ExemptPinnedOnlyFolderNames(folders).size(), size_t(1));
 	CHECK_EQ(

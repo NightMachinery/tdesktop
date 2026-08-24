@@ -570,7 +570,7 @@ To reorder folders while a preset restricts them, switch to `normal` first.
 
 ### Pulling a folder into the view
 
-    folders = [ { name = "Family", include_in_main_view_p = true } ]
+    folders = [ { name = "Family", include_in_main_view = "all" } ]
 
 An escape hatch, and the positive form of what used to be spelled
 `filtered = false`. The chats in that folder join the preset's view whatever the
@@ -579,11 +579,19 @@ out of the preset deciding what is on screen opted out of all of it, not half.
 
 The polarity is worth the rename. `filtered = false` described the mechanism
 from the inside - "this folder is not subject to filtering" - and left you to
-work out what appeared where. `include_in_main_view_p = true` says what happens.
+work out what appeared where. `include_in_main_view` says what happens.
 
-Saying nothing leaves a folder's chats to whatever their entry decided, which is
-what every folder the preset does not name is left to. Only an explicit `true`
-pulls them in.
+It takes three values, and no `_p` suffix, because it is not a yes-or-no:
+
+- `"none"` - the default. The folder's chats are left to whatever their entry
+  decided, which is what every folder the preset does not name is left to.
+- `"pinned"` - only the chats pinned *inside that folder*.
+- `"all"` - everything in it.
+
+The two spellings this replaced, `include_in_main_view_p` and `pinned_only_p`,
+are retired keys that warn with the replacement. Accepting them quietly would
+be worse than breaking them: a folder still saying `include_in_main_view_p`
+would include nothing and look exactly like one that meant to.
 
 Note what a folder tab shows, because it changed with the view. The preset
 decides the view; a folder decides its own tab. So a chat the preset hides is
@@ -592,7 +600,7 @@ reading, it is what "a folder shows what the folder says" implies, and it was
 not affordable before the view existed.
 
 If a folder's contents do not belong in a work mode, do not name the folder -
-that is what naming folders is for. `include_in_main_view_p` is the opposite
+that is what naming folders is for. `include_in_main_view` is the opposite
 lever: it pulls the folder's chats *into* the view.
 
 Under `hide_everywhere_p` the old rule comes back, and must: a chat out of the
@@ -605,22 +613,43 @@ The lookup is free for everyone who does not use it. It runs only for a chat
 the preset would otherwise hide, and only when some folder actually asked, so a
 preset with no exemptions never walks the folder list at all.
 
+#### It overrides the archive
+
+Whatever a folder lets in comes in **even when the chat is archived**.
+
+Archiving is how visibility gets controlled in stock Telegram - you archive a
+channel to get it out of the way. Under a preset the preset controls visibility,
+precisely and by name, so a folder that asked for its chats should get them
+wherever they happen to be filed. Otherwise you would have to unarchive things
+to make a preset work, which is editing the account to change a view.
+
+The chats stay archived. They are simply also in the preset's view, exactly the
+way a real Telegram folder holds archived chats unless it sets `NoArchived`.
+
+This one needed care, because it looks like it should break tdesktop's "in a
+filter implies in the main list" invariant. It does not:
+`Entry::notifyUnreadStateChange()` asserts `inChatList()`, and for an archived
+chat that means *the Archive's* list, which it is in. Two places knew otherwise
+and were taught:
+
+- `Session::refreshChatListEntry()` excluded `entry->folder()` from the view
+  outright, mirroring All chats. It now asks `purpleShownFromArchive()` first.
+- `Session::refreshPurpleView()` walked only `_chatsList`, so nothing would ever
+  visit an archived chat on a preset change. It walks the Archive's list too.
+
+The unread arithmetic works out without a change, which is worth stating because
+it looks like it should not. The Archive *row* is in the view and carries the
+whole archive's unread; `Data::UnreadStateValue()` already subtracts the archive
+total to stop it being counted twice. Adding some archived chats individually
+therefore leaves them counted exactly once: `normal + archive + pulled - archive`.
+
 #### Only the pinned ones
 
-    folders = [
-      { name = "Music", include_in_main_view_p = true, pinned_only_p = true },
-    ]
+    folders = [ { name = "Music", include_in_main_view = "pinned" } ]
 
-`pinned_only_p` narrows the line above it to the chats pinned *inside that
-folder*. For a folder you keep a handful of current things at the top of, this
-is the difference between "the two albums I am listening to" and every channel
-ever filed there.
-
-It narrows an inclusion rather than granting one, so it means nothing on its own
-and the parser says so instead of leaving a line that reads like it does
-something. A folder with only `pinned_only_p` behaves exactly as it would with
-no line at all - its chats are left to their own lists, which for a preset that
-names nothing else is hidden.
+For a folder you keep a handful of current things at the top of, this is the
+difference between "the two albums I am listening to" and every channel ever
+filed there.
 
 "Pinned" is the folder's own pinned order, `ChatFilter::pinned()`, which is what
 Telegram itself puts at the top of that tab - not the main chat list's pins and

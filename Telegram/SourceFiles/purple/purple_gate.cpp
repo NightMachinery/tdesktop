@@ -387,7 +387,7 @@ bool FoldersRestricted() {
 		|| !IsAllFolders(folders.front())
 		|| folders.front().show.has_value()
 		|| folders.front().notify.has_value()
-		|| folders.front().includeInMainView.has_value();
+		|| folders.front().include.has_value();
 }
 
 const EffectiveList *ListFor(not_null<const PeerData*> peer) {

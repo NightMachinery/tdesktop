@@ -39,6 +39,23 @@ enum class ChatKind : uchar {
 [[nodiscard]] std::optional<ChatKind> ParseChatKind(const QString &value);
 [[nodiscard]] QString ChatKindName(ChatKind kind);
 
+// How much of a folder a preset pulls into its own view, whatever the lists
+// decided - the escape hatch for "hide everything except what is in here".
+//
+// `Pinned' is for a folder you keep a handful of current things at the top of:
+// the difference between the two albums you are listening to and every channel
+// ever filed there.
+enum class FolderInclude : uchar {
+	None,
+	Pinned,
+	All,
+};
+
+// "none", "pinned", "all" - the spellings `include_in_main_view' accepts.
+[[nodiscard]] std::optional<FolderInclude> ParseFolderInclude(
+	const QString &value);
+[[nodiscard]] QString FolderIncludeName(FolderInclude value);
+
 // A list says who is in it and nothing else. What happens to those chats is
 // decided entirely by the preset that names the list, which is what lets one
 // list mean "let through" in one preset and "swallow silently" in another
@@ -87,17 +104,14 @@ struct PresetFolder {
 	// False silences the folder's chats, on top of whatever their list said.
 	std::optional<bool> notify;
 
-	// True pulls the folder's chats into the preset's main view whatever the
-	// lists decided - the escape hatch for "hide everything except what is in
-	// here". Default false.
-	std::optional<bool> includeInMainView;
-
-	// Narrows the line above to the chats pinned inside that folder. For a
-	// folder you keep a handful of current things at the top of, this is the
-	// difference between "the two albums I am listening to" and every channel
-	// that has ever been filed there. Means nothing without includeInMainView,
-	// and the parser says so rather than leaving it to be noticed.
-	std::optional<bool> pinnedOnly;
+	// How much of this folder joins the preset's main view. Default None.
+	//
+	// Whatever it lets in comes in even when the chat is archived. Archiving is
+	// how visibility is controlled in stock Telegram; under a preset the preset
+	// controls it, so a folder that asked for its chats gets them wherever they
+	// happen to be filed. The chats stay archived - they are simply also in the
+	// view, the way a real Telegram folder holds archived chats too.
+	std::optional<FolderInclude> include;
 
 	friend bool operator==(
 		const PresetFolder &,

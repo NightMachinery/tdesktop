@@ -85,9 +85,11 @@ leaves usable settings behind rather than a hard failure:
   skipped. A *disabled* rule is left alone, so the example in the starter file
   does not complain on every start.
 - Keys the old model used - `show`, `notify` and `locked` on a list, `inherit`
-  and `overrides` on a preset, `filtered` on a folder, `enabled` anywhere, a
-  top-level `list_order` - are reported by name, with what to write instead.
-  Silence there would let a file that is doing nothing look like one that works.
+  and `overrides` on a preset, `filtered`, `include_in_main_view_p` and
+  `pinned_only_p` on a folder, `enabled` anywhere, a top-level `list_order` -
+  are reported by name, with what to write instead. Silence there would let a
+  file that is doing nothing look like one that works, which is exactly what a
+  folder still saying `include_in_main_view_p` would do: include nothing.
 - Duplicate member ids are deduplicated on read, keeping the order you wrote.
 - A list whose name starts with `*` is refused: nobody reading the file could
   tell it from a set reference.
@@ -118,11 +120,12 @@ capture: the first entry whose list holds a chat decides it, and nothing further
 down sees that chat. A chat no entry claims is hidden and silenced.
 
 `folders` names the account's real folders, each with `show_p` (its tab is in
-the strip), `notify_p` (false silences its chats) and `include_in_main_view_p`
-(its chats join the preset's own view whatever the lists decided). Adding
-`pinned_only_p` narrows that last one to the chats pinned inside that folder; it
-does nothing on its own and warns when written alone. A preset with no `folders`
-key shows no folder tabs; `"*ALL"` is every folder you have.
+the strip), `notify_p` (false silences its chats) and `include_in_main_view`,
+which is `"none"` (the default), `"pinned"` or `"all"` - how much of the folder
+joins the preset's own view whatever the lists decided. What it lets in comes in
+even if the chat is archived, since under a preset the preset is what controls
+visibility. A preset with no `folders` key shows no folder tabs; `"*ALL"` is
+every folder you have.
 
 A bare `"*name"` string inside either array splices in `[list_sets.name]` or
 `[folder_sets.name]`, the way Python spreads a list. That is what replaces

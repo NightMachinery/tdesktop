@@ -92,6 +92,25 @@ constexpr auto kMaxSpreadDepth = 8;
 	return std::nullopt;
 }
 
+[[nodiscard]] std::optional<FolderInclude> ReadFolderInclude(
+		const toml::table &table,
+		std::string_view key,
+		const QString &context,
+		std::vector<QString> &warnings) {
+	const auto node = table.get(key);
+	if (!node) {
+		return std::nullopt;
+	}
+	const auto text = node->value<std::string_view>();
+	const auto value = text ? ParseFolderInclude(Text(*text)) : std::nullopt;
+	if (!value) {
+		warnings.push_back(
+			u"%1: '%2' should be one of none, pinned, all (%3), "
+			"ignoring it."_q.arg(context, Text(key), At(*node)));
+	}
+	return value;
+}
+
 // Warns when a key the file no longer understands is still sitting there. The
 // config model was rebuilt and the old spellings are gone; silence would let a
 // preset that is doing nothing look exactly like a preset that is working.
@@ -481,33 +500,30 @@ void Expander::expandFolders(
 			folder.name = *name;
 			folder.show = ReadBool(*table, "show_p", inner, _warnings);
 			folder.notify = ReadBool(*table, "notify_p", inner, _warnings);
-			folder.includeInMainView = ReadBool(
+			folder.include = ReadFolderInclude(
 				*table,
-				"include_in_main_view_p",
+				"include_in_main_view",
 				inner,
 				_warnings);
-			folder.pinnedOnly = ReadBool(
-				*table,
-				"pinned_only_p",
-				inner,
-				_warnings);
-			if (folder.pinnedOnly.value_or(false)
-				&& !folder.includeInMainView.value_or(false)) {
-				// It narrows an inclusion, so on its own there is nothing for
-				// it to narrow. Said here rather than left to be discovered,
-				// because the symptom is a folder behaving exactly as it would
-				// have without the line.
-				_warnings.push_back(
-					u"%1: 'pinned_only_p' narrows 'include_in_main_view_p' "
-					"and does nothing without it - the folder's chats are "
-					"already left to their own lists."_q.arg(inner));
-			}
 			WarnRetired(
 				*table,
 				"filtered",
 				inner,
-				u"use 'include_in_main_view_p', which says the same thing the "
-				"right way round"_q,
+				u"use include_in_main_view = \"all\", which says the same "
+				"thing the right way round"_q,
+				_warnings);
+			WarnRetired(
+				*table,
+				"include_in_main_view_p",
+				inner,
+				u"it is no longer a yes-or-no: write "
+				"include_in_main_view = \"all\" or \"pinned\""_q,
+				_warnings);
+			WarnRetired(
+				*table,
+				"pinned_only_p",
+				inner,
+				u"write include_in_main_view = \"pinned\" instead"_q,
 				_warnings);
 			push(std::move(folder), element);
 			continue;
@@ -962,6 +978,27 @@ QString ChatKindName(ChatKind kind) {
 	case ChatKind::Group: return u"groups"_q;
 	case ChatKind::Channel: return u"channels"_q;
 	case ChatKind::Bot: return u"bots"_q;
+	}
+	return QString();
+}
+
+std::optional<FolderInclude> ParseFolderInclude(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"none"_q) {
+		return FolderInclude::None;
+	} else if (trimmed == u"pinned"_q) {
+		return FolderInclude::Pinned;
+	} else if (trimmed == u"all"_q) {
+		return FolderInclude::All;
+	}
+	return std::nullopt;
+}
+
+QString FolderIncludeName(FolderInclude value) {
+	switch (value) {
+	case FolderInclude::None: return u"none"_q;
+	case FolderInclude::Pinned: return u"pinned"_q;
+	case FolderInclude::All: return u"all"_q;
 	}
 	return QString();
 }
