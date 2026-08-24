@@ -367,10 +367,6 @@ PeekChange TogglePeek() {
 	return { .peeking = wanted, .seconds = seconds };
 }
 
-bool SilencedByPreset(not_null<const PeerData*> peer) {
-	return Filtering() && !VisibleFor(peer).notify;
-}
-
 const std::vector<ExemptFolder> &ExemptFolders() {
 	static const auto kNone = std::vector<ExemptFolder>();
 	const auto &resolved = Instance().resolved();

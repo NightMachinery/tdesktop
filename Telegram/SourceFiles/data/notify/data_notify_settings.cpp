@@ -602,9 +602,7 @@ bool NotifySettings::isMuted(
 	// accessor the rest of the app uses is deliberate: History::muted() is
 	// cached from here, and the unread badges split muted from unmuted by that
 	// flag, so the badges follow without a second gate anywhere.
-	if (Purple::Filtering()
-		&& (!Purple::VisibleFor(peer).notify
-			|| purpleSilencedByFolder(peer))) {
+	if (purpleSilenced(peer)) {
 		if (changesIn) {
 			// Nothing here expires on a clock. The preset changing is what
 			// lifts it, and that path re-evaluates every peer explicitly.
@@ -638,6 +636,12 @@ bool NotifySettings::isMuted(not_null<const PeerData*> peer) const {
 bool NotifySettings::purpleMutedWithoutPreset(
 		not_null<const PeerData*> peer) const {
 	return purpleMutedWithoutPreset(peer, nullptr);
+}
+
+bool NotifySettings::purpleSilenced(not_null<const PeerData*> peer) const {
+	return Purple::Filtering()
+		&& (!Purple::VisibleFor(peer).notify
+			|| purpleSilencedByFolder(peer));
 }
 
 bool NotifySettings::purpleSilencedByFolder(

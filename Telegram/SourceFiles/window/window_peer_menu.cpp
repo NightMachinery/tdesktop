@@ -260,7 +260,7 @@ void PeerMenuAddMuteSubmenuAction(
 	// straight back to muted. Say what is actually holding it, offer the one
 	// control that moves it, and pick the item below from the user's own
 	// setting rather than the effective one, so their own mute stays reachable.
-	const auto byPreset = Purple::SilencedByPreset(thread->peer());
+	const auto byPreset = notifySettings->purpleSilenced(thread->peer());
 	if (byPreset) {
 		const auto show = controller->uiShow();
 		const auto session = &controller->session();

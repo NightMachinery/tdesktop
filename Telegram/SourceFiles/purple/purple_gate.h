@@ -122,11 +122,6 @@ struct PeekChange {
 // Starts a peek, or ends the one running.
 PeekChange TogglePeek();
 
-// Whether the active preset is what is silencing this chat. Distinct from
-// "muted": the preset only ever adds a mute, so a chat can be both, and the UI
-// has to say which one an Unmute would actually lift.
-[[nodiscard]] bool SilencedByPreset(not_null<const PeerData*> peer);
-
 // The chat folders the active preset shows, in the order it named them,
 // possibly including the "*ALL" marker that stands for every folder the entry
 // did not name. Empty means no folder tabs at all, which is what a preset that
