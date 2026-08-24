@@ -124,7 +124,7 @@ list_order = [
 # # this key out entirely means no folder tabs at all.
 # folders = [
 #   "*ALL",
-#   { name = "Music", notify_p = false, include_in_main_view = "pinned" },
+#   { name = "Music", notify_p = false, badge_p = false, include_in_main_view = "pinned" },
 # ]
 #
 # # An extra tab of its own, with its own unread badge and its own pins.

@@ -422,6 +422,10 @@ public:
 	[[nodiscard]] auto purpleExemptFolderMode() const
 		-> std::optional<Purple::ShowMode>;
 	[[nodiscard]] bool purpleShowModeSatisfied(Purple::ShowMode mode) const;
+
+	// Purple: whether a folder holding this chat asked to be left out of every
+	// count. See Data::kPurpleQuietFilterId.
+	[[nodiscard]] bool purpleInQuietFolder() const;
 	Dialogs::UnreadState chatListUnreadState() const override;
 	Dialogs::BadgesState chatListBadgesState() const override;
 	HistoryItem *chatListMessage() const override;

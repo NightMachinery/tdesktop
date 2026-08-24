@@ -347,6 +347,15 @@ const std::vector<ExemptFolder> &ExemptFolders() {
 	return resolved.exemptFolders;
 }
 
+const std::vector<QString> &QuietFolders() {
+	static const auto kNone = std::vector<QString>();
+	const auto &resolved = Instance().resolved();
+
+	// Not lifted by a peek, unlike hiding. A peek is a look at the chat list;
+	// it is not a request to be interrupted by a folder you asked to be quiet.
+	return resolved.normal ? kNone : resolved.quietFolders;
+}
+
 const std::vector<QString> &SilencedFolders() {
 	static const auto kNone = std::vector<QString>();
 	const auto &resolved = Instance().resolved();

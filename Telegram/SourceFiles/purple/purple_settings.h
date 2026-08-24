@@ -142,6 +142,12 @@ struct PresetFolder {
 	// False silences the folder's chats, on top of whatever their list said.
 	std::optional<bool> notify;
 
+	// False takes this folder out of every count: no number on its own tab, and
+	// its chats left out of the app badge. Default true. For a folder that is
+	// background noise on purpose, a count is just a number you have decided in
+	// advance not to act on.
+	std::optional<bool> badge;
+
 	// The mode for the chats this folder contributes, on the same terms as
 	// `notify' above - it is about the folder's chats, not about its tab, which
 	// is what `show' means. Unset leaves them to the default for what they are,

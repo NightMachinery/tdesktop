@@ -46,6 +46,10 @@ struct ExemptFolder {
 [[nodiscard]] std::vector<QString> SilencedFolderNames(
 	const std::vector<PresetFolder> &folders);
 
+// The folders that asked to be left out of every count - `badge_p = false'.
+[[nodiscard]] std::vector<QString> QuietFolderNames(
+	const std::vector<PresetFolder> &folders);
+
 // One step of a resolved order. `notify' is collapsed here; `show' cannot be,
 // because its default depends on what the chat turns out to be and one entry
 // can claim several kinds at once. Visible() does that last step.
@@ -99,6 +103,9 @@ struct Resolved {
 	// the common case is nobody asked, and that has to be one empty vector to
 	// test rather than a folder walk per mute query.
 	std::vector<QString> silencedFolders;
+
+	// Names from `folders' that said `badge_p = false'. Same shape again.
+	std::vector<QString> quietFolders;
 
 	// The extra tabs, in the order the file gave them, after the main view.
 	std::vector<ResolvedView> views;

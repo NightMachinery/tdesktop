@@ -529,6 +529,7 @@ void Expander::expandFolders(
 			folder.name = *name;
 			folder.show = ReadBool(*table, "show_p", inner, _warnings);
 			folder.notify = ReadBool(*table, "notify_p", inner, _warnings);
+			folder.badge = ReadBool(*table, "badge_p", inner, _warnings);
 			folder.showMode = ReadShowMode(*table, inner, _warnings);
 			folder.include = ReadFolderInclude(
 				*table,

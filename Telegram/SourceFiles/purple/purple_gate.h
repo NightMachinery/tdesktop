@@ -138,4 +138,9 @@ PeekChange TogglePeek();
 // un-silence.
 [[nodiscard]] const std::vector<QString> &SilencedFolders();
 
+// Folders that said `badge_p = false': no count on their own tab, and their
+// chats left out of the app badge. Empty unless a preset asks, which is what
+// keeps the folder walk out of every badge query that does not need it.
+[[nodiscard]] const std::vector<QString> &QuietFolders();
+
 } // namespace Purple

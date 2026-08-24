@@ -728,6 +728,51 @@ What it does **not** touch is the folder's own tab. That still shows the
 folder's real contents, pinned or not, for the same reason as everything above -
 the preset decides the view, a folder decides its own tab.
 
+### Leaving a folder out of the counts
+
+    folders = [ { name = "Music", badge_p = false } ]
+
+No number on that folder's tab, and its chats left out of the app badge. For a
+folder that is background on purpose, a count is a number you have already
+decided not to act on, and the dock icon claiming attention on its behalf is
+exactly the interruption a work mode exists to stop.
+
+It is a third axis, independent of the other two: a folder can be silenced
+without being uncounted (you want the number, just not the sound) and uncounted
+without being silenced. Only an explicit `false` does it; saying nothing leaves
+a folder counted, which is what almost every folder wants.
+
+The tab half is easy - `Data::UnreadStateValue()` returns an empty state for
+such a folder, re-asked on every resolution change because the answer lives in
+`settings.toml` and the strip is not rebuilt when only a flag on a tab moved.
+
+The app-badge half is the interesting one, because it is a *subtraction*, and
+the last subtraction in this file drove a badge to `-334`. The rule that keeps
+it honest: **subtract a subset, never an estimate.** There is a second reserved
+filter id, `Data::kPurpleQuietFilterId`, just past the view run, holding exactly
+the main view's members that sit in an uncounted folder. It is never a tab and
+never in `purpleShownList()`; it exists so that
+
+    app badge = view unread - quiet unread
+
+cannot go negative, because the quiet list is a real `Dialogs::MainList` whose
+total is accumulated through the same `addEntry`/`removeEntry` path as the list
+it is taken out of. Its membership is maintained in
+`Session::refreshChatListEntry()` immediately after the views, so it is a subset
+by construction rather than by argument.
+
+`Session::purpleBadgeUnread()` is the one place the subtraction happens, and all
+seven app-badge accessors go through it - one place to be wrong rather than
+seven.
+
+A peek does not lift it. A peek is a look at the chat list; it is not a request
+to be interrupted on behalf of a folder you asked to keep quiet.
+
+One thing it deliberately does not touch: the preset's own view badge. A chat an
+uncounted folder pulled into the view still counts toward the tab standing where
+All chats stands, because that tab is counting what is on screen in front of
+you, which is a different question from whether the app icon should light up.
+
 ### Silencing a folder
 
     folders = [ { name = "Noise", notify_p = false } ]
@@ -1207,6 +1252,32 @@ is left alone.
 Turning `enabled_p` off while focus is holding a preset hands that preset back. A
 preset that nothing on screen explains and nothing still running would ever lift
 is the one state this must not be able to reach.
+
+## Verified, and not verified
+
+Most of this has been exercised on a real account with a live log line to read
+off - `N of M loaded chats never shown, K unread-gated (J showing), view holds
+X` is the regression check, and switching a preset off and on again prints it.
+Three things have not been, and are written down rather than assumed:
+
+- **The app badge with `badge_p = false`.** The folder's own tab losing its
+  count is confirmed. The chats leaving the *app* badge rests on an argument
+  rather than a measurement: `kPurpleQuietFilterId` holds exactly the view
+  members in an uncounted folder, so `view - quiet` subtracts a subset. To
+  check it: read the window title, which carries the total unread when
+  "Total unread count" is on, toggle `badge_p` in `settings.toml`, read it
+  again. No GUI driving needed.
+- **A gated chat leaving the view after being read.** Appearing on unread is
+  confirmed; the open-then-close transition is not. The
+  `setFakeUnreadWhileOpened()` hook stands on the reasoning in "Re-checking
+  it" rather than on an observed failure. Beware when checking: a chat in a
+  list the preset gives `show_mode = "always"` is not gated at all, and reading
+  a badge move as a membership change is the mistake that wasted an afternoon.
+- **Which re-check trigger actually fires for a plain message.**
+  `notifyUnreadStateChange()` also calls `chatsFilters().refreshHistory()` on
+  the same 0-to-1 boundary, so the `Data::Changes` subscription may be
+  redundant there. It is not redundant in general - `refreshHistory()` is
+  guarded on the account having real folders - but that has not been shown.
 
 ## Not yet implemented
 
