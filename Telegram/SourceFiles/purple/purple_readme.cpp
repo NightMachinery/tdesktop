@@ -192,6 +192,28 @@ kinds of chat at once, and it is why leaving it out is usually right.
 The preset only ever *adds* a mute, so a chat can be silenced by both, and the
 mute menu says which one an Unmute would actually lift. Default true.
 
+## Making a list from the chat menu
+
+`New list...` at the foot of the `Work Mode` submenu writes an empty table
+here, after the last list already in the file:
+
+```toml
+[lists.reading]
+title = "Reading"
+members = [
+]
+```
+
+and nothing else. **The new list does nothing until a preset names it.** There
+is no write in the app that edits a `list_order`, and guessing which preset
+wanted the list would be worse than saying so - which the toast does. Tick
+chats into it from the same menu right away; add `{ list = "reading" }` to a
+preset's `list_order` by hand when you want it to start deciding anything.
+
+The submenu itself only appears once this file defines at least one list, so
+the very first one has to be written by hand. Every one after it can come from
+the menu.
+
 ### pinned
 
 A list of peer ids, and writing it changes who owns the main view's order.

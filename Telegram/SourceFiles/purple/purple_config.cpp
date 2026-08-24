@@ -232,6 +232,7 @@ public:
 		const QString &preset,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title);
+	bool createList(const QString &name, const QString &title);
 
 	[[nodiscard]] const State &state() const;
 	[[nodiscard]] rpl::producer<> stateChanges() const;
@@ -481,6 +482,12 @@ bool Config::setPresetPins(
 		u"the pins of preset '%1'"_q.arg(preset));
 }
 
+bool Config::createList(const QString &name, const QString &title) {
+	return splice(
+		AddList(_text, SettingsFilePath(), name, title),
+		u"the list '%1'"_q.arg(name));
+}
+
 void Config::loadState() {
 	_stateText = ReadFile(StateFilePath()).value_or(QString());
 	_state = ParseState(_stateText, StateFilePath());
@@ -592,6 +599,10 @@ bool SetPresetPins(
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
 	return Instance().setPresetPins(preset, ids, title);
+}
+
+bool CreateList(const QString &name, const QString &title) {
+	return Instance().createList(name, title);
 }
 
 const State &CurrentState() {

@@ -357,6 +357,82 @@ struct Position {
 	return QString();
 }
 
+// A bare TOML key where the name allows one, a quoted key otherwise. The parser
+// accepts either; a bare key is what a person would have typed.
+[[nodiscard]] QString TableKey(const QString &name) {
+	auto bare = !name.isEmpty();
+	for (const auto ch : name) {
+		if (!ch.isLetterOrNumber() || ch.unicode() > 127) {
+			if (ch != '_' && ch != '-') {
+				bare = false;
+				break;
+			}
+		}
+	}
+	if (bare) {
+		return name;
+	}
+	auto escaped = QString();
+	escaped.reserve(name.size() + 2);
+	for (const auto ch : name) {
+		if (ch == '"' || ch == '\\') {
+			escaped += '\\';
+		}
+		escaped += ch;
+	}
+	return '"' + escaped + '"';
+}
+
+// A TOML basic string. Control characters are dropped rather than escaped: a
+// list title arrives from a text field, and a stray newline in one is a
+// mis-paste rather than something worth preserving.
+[[nodiscard]] QString QuotedValue(const QString &value) {
+	auto result = QString('"');
+	for (const auto ch : value.simplified()) {
+		if (ch == '"' || ch == '\\') {
+			result += '\\';
+			result += ch;
+		} else if (ch.unicode() >= 0x20) {
+			result += ch;
+		}
+	}
+	return result + '"';
+}
+
+// Where a new [lists.x] table should go: just after the last one already
+// there, so the lists stay together and a reader finds the new one where they
+// were already looking. Returns a line index to insert before, or the line
+// count for "at the end of the file".
+[[nodiscard]] int AfterLastList(
+		const toml::table &root,
+		const QStringList &lines) {
+	const auto lists = root.get("lists");
+	const auto table = lists ? lists->as_table() : nullptr;
+	if (!table || table->empty()) {
+		return lines.size();
+	}
+	auto last = 0;
+	for (auto &&[key, value] : *table) {
+		if (const auto inner = value.as_table()) {
+			last = std::max(last, int(inner->source().begin.line));
+		}
+	}
+	if (last < 1 || last > lines.size()) {
+		return lines.size();
+	}
+	// Scan to the next table header rather than trusting the region end -
+	// nothing here does, which is why FindClosing() exists. Blank lines before
+	// that header belong to whatever follows, so back over them.
+	auto i = last;
+	while (i < lines.size() && !lines[i].trimmed().startsWith('[')) {
+		++i;
+	}
+	while (i > last && lines[i - 1].trimmed().isEmpty()) {
+		--i;
+	}
+	return i;
+}
+
 [[nodiscard]] SpliceResult Refuse(const QString &text, const QString &error) {
 	auto result = SpliceResult();
 	result.text = text;
@@ -687,6 +763,100 @@ SpliceResult SetPresetPinned(
 		[&](const QString &edited) {
 			return VerifyPresetPinned(edited, path, preset, ids);
 		});
+}
+
+SpliceResult AddList(
+		const QString &text,
+		const QString &path,
+		const QString &name,
+		const QString &title) {
+	const auto trimmed = name.trimmed();
+	if (trimmed.isEmpty()) {
+		return Refuse(text, u"a list needs a name."_q);
+	} else if (trimmed.startsWith('*')) {
+		// The parser refuses these for the same reason: nobody reading the file
+		// could tell such a list from a "*set" spread.
+		return Refuse(text, u"a list name cannot start with '*'."_q);
+	}
+	const auto utf8text = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8text.constData(), utf8text.size()),
+		path.toStdString());
+	if (!parsed) {
+		const auto &error = parsed.error();
+		return Refuse(text, u"%1:%2: %3"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description())));
+	}
+	auto ignored = QString();
+	if (FindListTable(parsed.table(), trimmed, ignored)) {
+		return Refuse(text, u"there is already a list called '%1'."_q
+			.arg(trimmed));
+	}
+
+	auto lines = text.split('\n');
+	const auto crlf = std::any_of(lines.begin(), lines.end(), [](
+			const QString &line) {
+		return line.endsWith('\r');
+	});
+	const auto ending = crlf ? u"\r"_q : QString();
+	const auto at = AfterLastList(parsed.table(), lines);
+
+	// An empty members array in canonical shape, so the very next tick from the
+	// chat menu splices one line into it rather than rewriting the block.
+	auto block = QStringList();
+	block.push_back(ending);
+	block.push_back(u"[lists.%1]"_q.arg(TableKey(trimmed)) + ending);
+	if (!title.trimmed().isEmpty() && title.trimmed() != trimmed) {
+		block.push_back(u"title = %1"_q.arg(QuotedValue(title)) + ending);
+	}
+	block.push_back(u"members = ["_q + ending);
+	block.push_back(u"]"_q + ending);
+	if (at >= lines.size()) {
+		// At the end of the file, where there may be no trailing newline.
+		if (!lines.isEmpty() && lines.back().trimmed().isEmpty()) {
+			lines.removeLast();
+		}
+		lines += block;
+		lines.push_back(QString());
+	} else {
+		block.push_back(QString());
+		for (auto i = block.size(); i != 0;) {
+			lines.insert(at, block[--i]);
+		}
+	}
+
+	auto result = SpliceResult();
+	result.text = lines.join('\n');
+
+	// Verified like every other splice: re-parse and confirm the list is there
+	// and empty. A name the app allowed but TOML did not would otherwise leave
+	// the user a file that no longer loads.
+	const auto utf8 = result.text.toUtf8();
+	auto back = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!back) {
+		const auto &error = back.error();
+		return Refuse(text, u"the edit would not parse back (%1:%2: %3)"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description())));
+	}
+	auto why = QString();
+	const auto table = FindListTable(back.table(), trimmed, why);
+	if (!table) {
+		return Refuse(text, u"the edit did not create '%1'"_q.arg(trimmed));
+	}
+	const auto members = table->get("members");
+	const auto array = members ? members->as_array() : nullptr;
+	if (!array || !array->empty()) {
+		return Refuse(text, u"the edit left '%1' with members it should not "
+			"have"_q.arg(trimmed));
+	}
+	result.changed = true;
+	return result;
 }
 
 SpliceResult SetTableBool(

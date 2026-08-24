@@ -1317,6 +1317,103 @@ list_order = [ { list = "a" } ]
 )"_q;
 }
 
+void TestSpliceAddList() {
+	Begin("splice add list");
+
+	const auto before = uR"(# Mine.
+[lists.os]
+title = "OS"
+members = [
+  1, # One
+]
+
+[lists.people]
+members = [
+]
+
+[presets.work]
+list_order = [ { list = "os" } ]
+)"_q;
+
+	const auto added = Purple::AddList(
+		before,
+		Path(),
+		u"reading"_q,
+		u"Reading"_q);
+	CHECK(added.ok());
+	CHECK(added.changed);
+
+	// Lands after the last list, not at the end of the file, so [presets.work]
+	// is still below every [lists.*].
+	CHECK(added.text.indexOf(u"[lists.reading]"_q)
+		> added.text.indexOf(u"[lists.people]"_q));
+	CHECK(added.text.indexOf(u"[lists.reading]"_q)
+		< added.text.indexOf(u"[presets.work]"_q));
+
+	// It parses, it is empty, and the comment above the first list survived.
+	const auto parsed = Parse(added.text);
+	CHECK(parsed.ok());
+	const auto list = parsed.settings.list(u"reading"_q);
+	CHECK(list != nullptr);
+	CHECK(list->members.empty());
+	CHECK_EQ(list->title, u"Reading"_q);
+	CHECK(added.text.startsWith(u"# Mine."_q));
+
+	// And the members array it wrote is the canonical shape, so the very next
+	// tick from the chat menu splices one line in rather than rewriting it.
+	const auto ticked = Purple::AddListMember(
+		added.text,
+		Path(),
+		u"reading"_q,
+		42,
+		[](Purple::PeerIdValue) { return u"Someone"_q; });
+	CHECK(ticked.ok());
+	CHECK_EQ(
+		Purple::ListMembers(ticked.text, Path(), u"reading"_q),
+		(std::vector<Purple::PeerIdValue>{ 42 }));
+
+	// A title that only repeats the name is not written - it would be noise in
+	// a file somebody reads.
+	const auto plain = Purple::AddList(before, Path(), u"inbox"_q, u"inbox"_q);
+	CHECK(plain.ok());
+	CHECK(!plain.text.contains(u"title = \"inbox\""_q));
+
+	// Names the parser would refuse are refused here, before anything is
+	// written, and so are duplicates.
+	for (const auto &bad : { u""_q, u"   "_q, u"*core"_q, u"os"_q }) {
+		const auto refused = Purple::AddList(before, Path(), bad, QString());
+		CHECK(!refused.ok());
+		CHECK_EQ(refused.text, before);
+	}
+
+	// A name TOML cannot hold bare is quoted rather than rejected.
+	const auto odd = Purple::AddList(
+		before,
+		Path(),
+		u"day one"_q,
+		u"Day one"_q);
+	CHECK(odd.ok());
+	CHECK(odd.text.contains(u"[lists.\"day one\"]"_q));
+	CHECK(Parse(odd.text).settings.list(u"day one"_q) != nullptr);
+
+	// A file with no lists at all gets one at the end.
+	const auto bare = Purple::AddList(
+		u"[presets.work]\nlist_order = []\n"_q,
+		Path(),
+		u"first"_q,
+		QString());
+	CHECK(bare.ok());
+	CHECK(Parse(bare.text).settings.list(u"first"_q) != nullptr);
+
+	// A file that does not parse is never written to.
+	const auto broken = Purple::AddList(
+		u"[lists.a\n"_q,
+		Path(),
+		u"b"_q,
+		QString());
+	CHECK(!broken.ok());
+}
+
 void TestSplicePresetPinned() {
 	Begin("splice preset pinned");
 
@@ -2831,6 +2928,7 @@ int main() {
 	TestSpliceOddFormatting();
 	TestSpliceCrlf();
 	TestNameSanitising();
+	TestSpliceAddList();
 	TestSplicePresetPinned();
 	TestSpliceViewPinned();
 	TestSetTableBool();

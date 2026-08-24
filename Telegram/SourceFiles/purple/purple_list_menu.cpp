@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 #include "purple/purple_preset_box.h"
 #include "ui/layers/generic_box.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/layers/show.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
@@ -30,6 +31,38 @@ namespace {
 
 [[nodiscard]] QString DisplayTitle(const List &list) {
 	return list.title.isEmpty() ? list.name : list.title;
+}
+
+// The fork's one input field. Deliberately one field: a list is a name and a
+// set of members, the members are ticked in from this same menu, and everything
+// a preset does with a list is written in settings.toml beside the preset.
+void NewListBox(
+		not_null<Ui::GenericBox*> box,
+		Fn<void(QString)> create) {
+	box->setTitle(rpl::single(u"New list"_q));
+
+	const auto field = box->addRow(object_ptr<Ui::InputField>(
+		box,
+		st::defaultInputField,
+		Ui::InputField::Mode::SingleLine,
+		rpl::single(u"Name"_q)));
+	box->setFocusCallback([=] { field->setFocusFast(); });
+
+	const auto submit = [=] {
+		const auto name = field->getLastText().trimmed();
+		if (name.isEmpty() || name.startsWith('*')) {
+			// The two the parser refuses. Everything else it will take, and
+			// the splice verifies the result before anything is written.
+			field->showError();
+			return;
+		}
+		create(name);
+		box->closeBox();
+	};
+	field->submits() | rpl::on_next(submit, field->lifetime());
+
+	box->addButton(rpl::single(u"Create"_q), submit);
+	box->addButton(rpl::single(u"Cancel"_q), [=] { box->closeBox(); });
 }
 
 } // namespace
@@ -143,6 +176,27 @@ void FillListsMenu(
 			},
 			(member ? &st::mediaPlayerMenuCheck : nullptr));
 	}
+
+	menu->addSeparator();
+	menu->addAction(u"New list..."_q, [=] {
+		// Same reason the rows above hide first: a successful write reloads
+		// settings.toml and rebuilds every chat list from inside this callback.
+		menu->hideMenu();
+		show->showBox(Box(NewListBox, [=](QString name) {
+			if (!CreateList(name, name)) {
+				show->showToast(u"Could not edit %1. See the log."_q.arg(
+					SettingsFilePath()));
+				return;
+			}
+			// Said out loud, because the list is real and does nothing: no
+			// preset names it yet, and there is no way to guess which one
+			// should. Ticking chats into it works from this menu immediately.
+			show->showToast(u"List '%1' created. Add it to a preset's "
+				"list_order in %2 to make it do anything."_q.arg(
+					name,
+					SettingsFilePath()));
+		}));
+	}, &st::menuIconAdd);
 }
 
 void AddListsSubmenu(

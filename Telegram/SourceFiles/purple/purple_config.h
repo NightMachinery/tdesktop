@@ -72,6 +72,11 @@ bool SetPresetPins(
 	const std::vector<PeerIdValue> &ids,
 	const MemberTitle &title);
 
+// Writes a new empty [lists.x] table. The list exists and does nothing until a
+// preset names it, which is deliberate - there is no splice that edits a
+// list_order, and guessing which preset wanted it would be worse than saying so.
+bool CreateList(const QString &name, const QString &title);
+
 [[nodiscard]] const State &CurrentState();
 [[nodiscard]] rpl::producer<> StateChanges();
 
