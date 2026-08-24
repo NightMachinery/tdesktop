@@ -2601,6 +2601,13 @@ void Session::refreshPurpleViewPinned() {
 	if (!Purple::Filtering() || _purpleViewPinning) {
 		return;
 	}
+	if (Purple::PresetOwnsPins()) {
+		// The preset states its own order, so there is nothing to mirror. Seeded
+		// from settings.toml exactly as an extra view's is - see
+		// refreshPurpleViewPins(), which this then shares.
+		refreshPurpleViewPins(0);
+		return;
+	}
 	_purpleViewPinning = true;
 	auto pinned = std::vector<not_null<History*>>();
 	for (const auto &key : _chatsList.pinned()->order()) {
@@ -2617,7 +2624,7 @@ void Session::refreshPurpleViewPinned() {
 }
 
 void Session::refreshPurpleViewPins(int index) {
-	Expects(index > 0);
+	Expects(index >= 0);
 
 	// Purple: an extra view's order is the preset's own statement, so it is
 	// seeded from settings.toml rather than mirrored from the chat list. An id
@@ -2634,7 +2641,9 @@ void Session::refreshPurpleViewPins(int index) {
 	_purpleViewPinning = true;
 	const auto guard = gsl::finally([&] { _purpleViewPinning = false; });
 
-	const auto &wanted = Purple::ExtraViewPins(index - 1);
+	const auto &wanted = index
+		? Purple::ExtraViewPins(index - 1)
+		: Purple::PresetPins();
 	const auto viewList = purpleViewList(index);
 	auto pinned = std::vector<not_null<History*>>();
 	if (!wanted.empty()) {
@@ -2656,7 +2665,7 @@ void Session::refreshPurpleViewPins(int index) {
 }
 
 void Session::savePurpleViewPins(int index) {
-	Expects(index > 0);
+	Expects(index >= 0);
 
 	const auto viewList = purpleViewList(index);
 	auto ids = std::vector<Purple::PeerIdValue>();
@@ -2677,7 +2686,9 @@ void Session::savePurpleViewPins(int index) {
 	// the file gave it. Dropping it would silently unpin whatever it names the
 	// first time anything else in the tab moved, and the usual reason a pinned
 	// chat is missing is that it has not finished loading.
-	const auto &before = Purple::ExtraViewPins(index - 1);
+	const auto &before = index
+		? Purple::ExtraViewPins(index - 1)
+		: Purple::PresetPins();
 	for (auto i = 0, count = int(before.size()); i != count; ++i) {
 		if (!present.contains(before[i])) {
 			ids.insert(ids.begin() + std::min(i, int(ids.size())), before[i]);
@@ -2689,7 +2700,10 @@ void Session::savePurpleViewPins(int index) {
 		// The write lands back here as a settings reload, which rebuilds every
 		// chat list. Doing that from inside the drag handler that asked for it
 		// would be pulling the rows out from under it.
-		if (!Purple::SaveExtraViewPins(index - 1, ids, title)) {
+		const auto saved = index
+			? Purple::SaveExtraViewPins(index - 1, ids, title)
+			: Purple::SavePresetPins(ids, title);
+		if (!saved) {
 			// Refused: the file does not parse, or the view is written inline.
 			// Put the tab back to what the file says rather than leave it
 			// showing an order nothing is going to remember.
@@ -2911,7 +2925,14 @@ void Session::setChatPinned(
 	// its order is the preset's statement about its own tab and has nowhere
 	// else to live. Pinning there does not pin in the chat list.
 	const auto view = IsPurpleView(filterId) ? PurpleViewIndex(filterId) : 0;
-	if (view > 0) {
+	const auto ownsMain = IsPurpleView(filterId)
+		&& !view
+		&& Purple::PresetOwnsPins();
+	if (view > 0 || ownsMain) {
+		// The main view only lands here when the preset states an order of its
+		// own. Otherwise it mirrors the chat list, and writing to its own list
+		// would be writing to something the next mirror overwrites - so the
+		// branch below pins in the chat list instead, as it always has.
 		purpleViewList(view)->pinned()->setPinned(key, pinned);
 		savePurpleViewPins(view);
 		notifyPinnedDialogsOrderUpdated();
@@ -3070,19 +3091,27 @@ bool Session::pinnedCanPin(
 		not_null<History*> history) const {
 	Expects(filterId != 0);
 
-	// Purple: the main view holds the main list's pins, so the limit that
-	// applies is the ordinary chat pin limit. An extra view keeps its own, in a
-	// local file no server bounds - but the same allowance is what keeps a tab
-	// from turning into a wall of pinned rows, so it uses that too.
+	// Purple: a main view that mirrors the account's pins is subject to the
+	// account's limit, because the server enforces it on the thing being
+	// mirrored. Everything else here - an extra view, or a main view whose
+	// preset states an order of its own - keeps its pins in settings.toml,
+	// where nothing bounds them, so it gets the client-side folder allowance
+	// instead of the five the server would have imposed.
 	if (IsPurpleView(filterId)) {
 		const auto view = PurpleViewIndex(filterId);
-		if (!view) {
+		if (!view && !Purple::PresetOwnsPins()) {
+			// Mirroring the account's order, so the account's limit applies -
+			// the server enforces it on the thing being mirrored.
 			return pinnedCanPin(history);
 		}
 		const auto pinned = const_cast<Session*>(this)
 			->purpleViewList(view)
 			->pinned();
-		const auto limit = pinnedChatsLimit((Data::Folder*)nullptr);
+		// An order kept in settings.toml is bounded by nothing, so the folder
+		// number is the honest analogue - it is what a client-side list of
+		// chats gets. The account's five is the server's limit on the account's
+		// own order, and only a mirroring main view is subject to it.
+		const auto limit = pinnedChatsLimit(filterId);
 		return (int(pinned->order().size()) < limit)
 			|| ranges::contains(
 				pinned->order(),

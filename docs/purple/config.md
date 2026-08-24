@@ -172,6 +172,31 @@ It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
 also asks for every folder - otherwise switching one off would quietly stop
 working the day you added the spread.
 
+### Pinned chats in the main view
+
+`pinned` on a preset is a list of peer ids, and writing it changes who owns the
+main view's order.
+
+Without it - the default - the preset's main tab **mirrors** your account's
+pinned chats, minus whatever the preset hides. Pinning there pins in the chat
+list, travels to the server, and is capped at the account's five.
+
+With it, the preset **owns** the order. A pin made inside the preset stays
+inside it: it is written back to `settings.toml`, never reaches the server, and
+so leaves your account's order and your other devices exactly as they were. That
+is also what lifts the five-chat ceiling, since five is the server's limit on
+the account order the mirror was mirroring, and a list kept in this file is
+bounded by nothing.
+
+```toml
+[presets.work]
+pinned = [ 1234567890, 987654321 ]
+```
+
+Dragging a pinned row inside the preset rewrites this array, the same way
+dragging one in an extra view rewrites that view's `pinned`. Delete the key to
+go back to mirroring.
+
 ### Stories
 
 `stories` on a preset says what the stories strip does while it runs. Five

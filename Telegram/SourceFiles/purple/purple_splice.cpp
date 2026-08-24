@@ -190,10 +190,9 @@ struct Position {
 
 // The [[presets.<preset>.views]] block that calls itself <view>. Case-folded,
 // matching the parser's own rule for deciding two views are the same one.
-[[nodiscard]] const toml::table *FindViewTable(
+[[nodiscard]] const toml::table *FindPresetTable(
 		const toml::table &root,
 		const QString &preset,
-		const QString &view,
 		QString &error) {
 	const auto presets = root.get("presets");
 	if (!presets || !presets->as_table()) {
@@ -206,8 +205,24 @@ struct Position {
 	if (!node || !node->as_table()) {
 		error = u"settings.toml has no [presets.%1] table."_q.arg(preset);
 		return nullptr;
+	} else if (node->as_table()->is_inline()) {
+		error = u"[presets.%1] is written inline; rewrite it as a table "
+			"before pinning inside it."_q.arg(preset);
+		return nullptr;
 	}
-	const auto views = node->as_table()->get("views");
+	return node->as_table();
+}
+
+[[nodiscard]] const toml::table *FindViewTable(
+		const toml::table &root,
+		const QString &preset,
+		const QString &view,
+		QString &error) {
+	const auto found = FindPresetTable(root, preset, error);
+	if (!found) {
+		return nullptr;
+	}
+	const auto views = found->get("views");
 	const auto array = views ? views->as_array() : nullptr;
 	if (!array) {
 		error = u"[presets.%1] has no views."_q.arg(preset);
@@ -311,6 +326,37 @@ struct Position {
 	return QString();
 }
 
+[[nodiscard]] QString VerifyPresetPinned(
+		const QString &text,
+		const QString &path,
+		const QString &preset,
+		const std::vector<PeerIdValue> &expected) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		const auto &error = parsed.error();
+		return u"the edit would not parse back (%1:%2: %3)"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description()));
+	}
+	auto ignored = QString();
+	const auto table = FindPresetTable(parsed.table(), preset, ignored);
+	if (!table) {
+		return u"the edit lost [presets.%1]"_q.arg(preset);
+	}
+	const auto pinned = table->get("pinned");
+	const auto array = pinned ? pinned->as_array() : nullptr;
+	const auto ids = array ? IdsOf(*array) : std::vector<PeerIdValue>();
+	if (ids != expected) {
+		return u"the edit left [presets.%1] pinning the wrong chats"_q
+			.arg(preset);
+	}
+	return QString();
+}
+
 [[nodiscard]] SpliceResult Refuse(const QString &text, const QString &error) {
 	auto result = SpliceResult();
 	result.text = text;
@@ -321,6 +367,100 @@ struct Position {
 [[nodiscard]] SpliceResult Unchanged(const QString &text) {
 	auto result = SpliceResult();
 	result.text = text;
+	return result;
+}
+
+// The lines half of writing a `pinned' array. Shared, because a preset's main
+// view and an extra view differ only in which table was located, what it is
+// called when something goes wrong, and whether there is a key to sit the fresh
+// array under.
+[[nodiscard]] SpliceResult SetPinnedIn(
+		const QString &text,
+		const toml::table &table,
+		const QString &what,
+		std::string_view anchor,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title,
+		const Fn<QString(const QString&)> &verify) {
+	const auto pinned = table.get("pinned");
+	const auto array = pinned ? pinned->as_array() : nullptr;
+	if (pinned && !array) {
+		return Refuse(text, u"%1 has a 'pinned' that is not an array."_q
+			.arg(what));
+	} else if ((array ? IdsOf(*array) : std::vector<PeerIdValue>()) == ids) {
+		return Unchanged(text);
+	}
+
+	auto lines = text.split('\n');
+	const auto crlf = std::any_of(lines.begin(), lines.end(), [](
+			const QString &line) {
+		return line.endsWith('\r');
+	});
+	const auto ending = crlf ? u"\r"_q : QString();
+
+	if (!array) {
+		// No key yet, which is the ordinary case: pins only exist once somebody
+		// has dragged one. Put the array where a reader looking for what this
+		// tab does will already be looking.
+		const auto header = int(table.source().begin.line);
+		if (header < 1 || header > lines.size()) {
+			return Refuse(text, u"could not locate %1."_q.arg(what));
+		}
+		auto after = header;
+		if (!anchor.empty()) {
+			if (const auto name = table.get(anchor)) {
+				const auto line = int(name->source().begin.line);
+				if (line >= header && line <= lines.size()) {
+					after = line;
+				}
+			}
+		}
+		const auto indent = Indentation(lines[header - 1]);
+		const auto written = IdArrayLines(
+			indent,
+			indent + u"pinned = "_q,
+			ending,
+			ids,
+			title,
+			ending);
+		for (auto i = written.size(); i != 0;) {
+			lines.insert(after, written[--i]);
+		}
+	} else {
+		const auto open = Position{
+			int(array->source().begin.line),
+			int(array->source().begin.column),
+		};
+		if (open.line < 1 || open.line > lines.size()) {
+			return Refuse(text, u"could not locate the pins of %1."_q
+				.arg(what));
+		}
+		const auto close = FindClosing(lines, open);
+		if (!close) {
+			return Refuse(text, u"the pinned array of %1 is not closed."_q
+				.arg(what));
+		}
+		const auto keyIndent = Indentation(lines[open.line - 1]);
+		const auto replacement = IdArrayLines(
+			keyIndent,
+			lines[open.line - 1].left(open.column - 1),
+			lines[close->line - 1].mid(close->column),
+			ids,
+			title,
+			ending);
+
+		auto rebuilt = lines.mid(0, open.line - 1);
+		rebuilt += replacement;
+		rebuilt += lines.mid(close->line);
+		lines = std::move(rebuilt);
+	}
+
+	auto result = SpliceResult();
+	result.text = lines.join('\n');
+	if (auto failed = verify(result.text); !failed.isEmpty()) {
+		return Refuse(text, failed);
+	}
+	result.changed = true;
 	return result;
 }
 
@@ -500,85 +640,53 @@ SpliceResult SetViewPinned(
 	if (!table) {
 		return Refuse(text, error);
 	}
-	const auto pinned = table->get("pinned");
-	const auto array = pinned ? pinned->as_array() : nullptr;
-	if (pinned && !array) {
-		return Refuse(text, u"the view '%1' has a 'pinned' that is not an "
-			"array."_q.arg(view));
-	} else if ((array ? IdsOf(*array) : std::vector<PeerIdValue>()) == ids) {
-		return Unchanged(text);
+	return SetPinnedIn(
+		text,
+		*table,
+		u"the view '%1'"_q.arg(view),
+		"name",
+		ids,
+		title,
+		[&](const QString &edited) {
+			return VerifyViewPinned(edited, path, preset, view, ids);
+		});
+}
+
+SpliceResult SetPresetPinned(
+		const QString &text,
+		const QString &path,
+		const QString &preset,
+		const std::vector<PeerIdValue> &ids,
+		const MemberTitle &title) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		const auto &error = parsed.error();
+		return Refuse(text, u"%1:%2: %3"_q
+			.arg(error.source().begin.line)
+			.arg(error.source().begin.column)
+			.arg(Text(error.description())));
 	}
-
-	auto lines = text.split('\n');
-	const auto crlf = std::any_of(lines.begin(), lines.end(), [](
-			const QString &line) {
-		return line.endsWith('\r');
-	});
-	const auto ending = crlf ? u"\r"_q : QString();
-
-	if (!array) {
-		// No key yet, which is the ordinary case: pins only exist once somebody
-		// has dragged one. Put the array under the view's name, where a reader
-		// looking for what this tab does will already be looking.
-		const auto header = int(table->source().begin.line);
-		if (header < 1 || header > lines.size()) {
-			return Refuse(text, u"could not locate the view '%1'."_q.arg(view));
-		}
-		auto after = header;
-		if (const auto name = table->get("name")) {
-			const auto line = int(name->source().begin.line);
-			if (line >= header && line <= lines.size()) {
-				after = line;
-			}
-		}
-		const auto indent = Indentation(lines[header - 1]);
-		const auto written = IdArrayLines(
-			indent,
-			indent + u"pinned = "_q,
-			ending,
-			ids,
-			title,
-			ending);
-		for (auto i = written.size(); i != 0;) {
-			lines.insert(after, written[--i]);
-		}
-	} else {
-		const auto open = Position{
-			int(array->source().begin.line),
-			int(array->source().begin.column),
-		};
-		if (open.line < 1 || open.line > lines.size()) {
-			return Refuse(text, u"could not locate the pins of the view "
-				"'%1'."_q.arg(view));
-		}
-		const auto close = FindClosing(lines, open);
-		if (!close) {
-			return Refuse(text, u"the pinned array of the view '%1' is not "
-				"closed."_q.arg(view));
-		}
-		const auto keyIndent = Indentation(lines[open.line - 1]);
-		const auto replacement = IdArrayLines(
-			keyIndent,
-			lines[open.line - 1].left(open.column - 1),
-			lines[close->line - 1].mid(close->column),
-			ids,
-			title,
-			ending);
-
-		auto rebuilt = lines.mid(0, open.line - 1);
-		rebuilt += replacement;
-		rebuilt += lines.mid(close->line);
-		lines = std::move(rebuilt);
+	auto error = QString();
+	const auto table = FindPresetTable(parsed.table(), preset, error);
+	if (!table) {
+		return Refuse(text, error);
 	}
-
-	auto result = SpliceResult();
-	result.text = lines.join('\n');
-	if (auto failed = VerifyViewPinned(result.text, path, preset, view, ids);
-		!failed.isEmpty()) {
-		return Refuse(text, failed);
-	}
-	result.changed = true;
-	return result;
+	// No anchor key: a preset has no `name' to sit under, so a fresh array goes
+	// straight below the [presets.x] header - which is also where a reader
+	// looking for what the preset does starts.
+	return SetPinnedIn(
+		text,
+		*table,
+		u"[presets.%1]"_q.arg(preset),
+		std::string_view(),
+		ids,
+		title,
+		[&](const QString &edited) {
+			return VerifyPresetPinned(edited, path, preset, ids);
+		});
 }
 
 SpliceResult SetTableBool(
@@ -701,6 +809,27 @@ std::vector<PeerIdValue> ListMembers(
 	}
 	const auto members = table->get("members");
 	const auto array = members ? members->as_array() : nullptr;
+	return array ? IdsOf(*array) : std::vector<PeerIdValue>();
+}
+
+std::vector<PeerIdValue> PresetPinned(
+		const QString &text,
+		const QString &path,
+		const QString &preset) {
+	const auto utf8 = text.toUtf8();
+	auto parsed = toml::parse(
+		std::string_view(utf8.constData(), utf8.size()),
+		path.toStdString());
+	if (!parsed) {
+		return {};
+	}
+	auto ignored = QString();
+	const auto table = FindPresetTable(parsed.table(), preset, ignored);
+	if (!table) {
+		return {};
+	}
+	const auto pinned = table->get("pinned");
+	const auto array = pinned ? pinned->as_array() : nullptr;
 	return array ? IdsOf(*array) : std::vector<PeerIdValue>();
 }
 

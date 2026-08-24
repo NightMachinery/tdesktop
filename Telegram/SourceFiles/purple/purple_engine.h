@@ -112,6 +112,10 @@ struct Resolved {
 	// skipped entirely, so it cannot drift as preset features are added.
 	bool normal = false;
 
+	// The main view's own pinned order, or empty for a preset that mirrors the
+	// account's. See Preset::pinned.
+	std::vector<PeerIdValue> pinned;
+
 	// Priority order, first match wins. A chat no entry claims is hidden and
 	// silenced - a preset names what gets through, and saying nothing about a
 	// chat is saying no.

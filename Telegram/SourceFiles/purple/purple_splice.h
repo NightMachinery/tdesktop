@@ -64,6 +64,20 @@ struct SpliceResult {
 	const std::vector<PeerIdValue> &ids,
 	const MemberTitle &title);
 
+// The same, for the preset's own main view. Separate from the view version
+// above only because the table is found differently - a preset has no `name'
+// key to sit a fresh array under, so it goes straight below the header.
+//
+// A preset that names `pinned' owns its main view's order outright, instead of
+// mirroring the account's. That is the point of the key: a pin made inside a
+// work preset stays inside it and never reaches the server.
+[[nodiscard]] SpliceResult SetPresetPinned(
+	const QString &text,
+	const QString &path,
+	const QString &preset,
+	const std::vector<PeerIdValue> &ids,
+	const MemberTitle &title);
+
 // Sets one boolean under one table, keeping the key, the spacing and any
 // trailing comment exactly as the user wrote them. Adds the key, and the table,
 // if either is missing. Used for the Premium toggle in Settings, which is the
@@ -82,6 +96,11 @@ struct SpliceResult {
 	const QString &list);
 
 // Exposed for the tests: the ids a view pins, in file order.
+[[nodiscard]] std::vector<PeerIdValue> PresetPinned(
+	const QString &text,
+	const QString &path,
+	const QString &preset);
+
 [[nodiscard]] std::vector<PeerIdValue> ViewPinned(
 	const QString &text,
 	const QString &path,

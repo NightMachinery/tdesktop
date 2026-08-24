@@ -1317,6 +1317,99 @@ list_order = [ { list = "a" } ]
 )"_q;
 }
 
+void TestSplicePresetPinned() {
+	Begin("splice preset pinned");
+
+	const auto before = uR"([lists.a]
+kinds = ["private"]
+
+[presets.work]
+list_order = [ { list = "a" } ]
+
+[[presets.work.views]]
+name = "Focus"
+)"_q;
+	CHECK(Purple::PresetPinned(before, Path(), u"work"_q).empty());
+
+	// The array is written straight under the header, since a preset has no
+	// `name' key to sit below.
+	const auto added = Purple::SetPresetPinned(
+		before,
+		Path(),
+		u"work"_q,
+		{ 7, 8 },
+		[](Purple::PeerIdValue id) {
+			return (id == 7) ? u"Seven"_q : u"Eight"_q;
+		});
+	CHECK(added.ok());
+	CHECK(added.changed);
+	CHECK_EQ(
+		Purple::PresetPinned(added.text, Path(), u"work"_q),
+		(std::vector<Purple::PeerIdValue>{ 7, 8 }));
+	CHECK(added.text.contains(u"# Seven"_q));
+
+	// The view's own pins are a different array and are left alone, which is
+	// the whole reason the two functions locate different tables.
+	CHECK(Purple::ViewPinned(added.text, Path(), u"work"_q, u"Focus"_q).empty());
+
+	// Past five, which is the point: the ceiling was the server's limit on the
+	// account order the main view used to mirror, and this order is ours.
+	const auto many = Purple::SetPresetPinned(
+		added.text,
+		Path(),
+		u"work"_q,
+		{ 1, 2, 3, 4, 5, 6, 7 },
+		[](Purple::PeerIdValue id) { return QString::number(id); });
+	CHECK(many.ok());
+	CHECK_EQ(
+		int(Purple::PresetPinned(many.text, Path(), u"work"_q).size()),
+		7);
+
+	// Writing the same order back is not a write at all, so the file's mtime
+	// does not move and the watcher does not wake.
+	const auto same = Purple::SetPresetPinned(
+		many.text,
+		Path(),
+		u"work"_q,
+		{ 1, 2, 3, 4, 5, 6, 7 },
+		[](Purple::PeerIdValue id) { return QString::number(id); });
+	CHECK(same.ok());
+	CHECK(!same.changed);
+
+	// Clearing it puts the preset back to mirroring the account.
+	const auto cleared = Purple::SetPresetPinned(
+		many.text,
+		Path(),
+		u"work"_q,
+		{},
+		[](Purple::PeerIdValue id) { return QString::number(id); });
+	CHECK(cleared.ok());
+	CHECK(Purple::PresetPinned(cleared.text, Path(), u"work"_q).empty());
+
+	// A preset that is not there is refused rather than created.
+	const auto missing = Purple::SetPresetPinned(
+		before,
+		Path(),
+		u"nope"_q,
+		{ 1 },
+		[](Purple::PeerIdValue id) { return QString::number(id); });
+	CHECK(!missing.ok());
+	CHECK_EQ(missing.text, before);
+
+	// And the parser reads back what the splice wrote.
+	const auto parsed = Parse(added.text);
+	CHECK(parsed.ok());
+	CHECK_EQ(
+		parsed.settings.preset(u"work"_q)->pinned,
+		(std::vector<Purple::PeerIdValue>{ 7, 8 }));
+
+	// Saying nothing leaves it empty, which is what keeps the main view
+	// mirroring for every preset that never asked.
+	const auto quiet = Parse(u"[presets.b]\nlist_order = []\n"_q);
+	CHECK(quiet.ok());
+	CHECK(quiet.settings.preset(u"b"_q)->pinned.empty());
+}
+
 void TestSpliceViewPinned() {
 	Begin("splice view pins");
 
@@ -2738,6 +2831,7 @@ int main() {
 	TestSpliceOddFormatting();
 	TestSpliceCrlf();
 	TestNameSanitising();
+	TestSplicePresetPinned();
 	TestSpliceViewPinned();
 	TestSetTableBool();
 	TestStateRoundTrip();

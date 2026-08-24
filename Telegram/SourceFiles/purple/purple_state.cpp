@@ -153,6 +153,15 @@ void ReadOptionalBool(
 				.value_or(StoryPolicy::Follow);
 		}
 	}
+	if (const auto pinned = table->get("pinned")) {
+		if (const auto array = pinned->as_array()) {
+			for (auto &&element : *array) {
+				if (const auto id = element.value<int64>()) {
+					result.pinned.push_back(*id);
+				}
+			}
+		}
+	}
 	result.lists = ReadResolvedLists(*table, "lists");
 	if (const auto folders = table->get("folders")) {
 		if (const auto array = folders->as_array()) {
@@ -325,6 +334,13 @@ QString SerializeState(const State &state) {
 	result += u"hide_everywhere = %1\n"_q
 		.arg(Boolean(cache.hideEverywhere));
 	result += u"stories = %1\n"_q.arg(Quoted(StoryPolicyName(cache.stories)));
+	if (!cache.pinned.empty()) {
+		auto ids = QStringList();
+		for (const auto id : cache.pinned) {
+			ids.push_back(QString::number(id));
+		}
+		result += u"pinned = [%1]\n"_q.arg(ids.join(u", "_q));
+	}
 	result += SerializeLists(cache.lists);
 	if (!cache.folders.empty()) {
 		result += u"folders = [\n"_q;

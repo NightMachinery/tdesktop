@@ -65,6 +65,13 @@ bool SetViewPins(
 	const std::vector<PeerIdValue> &ids,
 	const MemberTitle &title);
 
+// The same for the preset's own main view. Writing a non-empty order is what
+// takes the main view off the account's pins and onto its own.
+bool SetPresetPins(
+	const QString &preset,
+	const std::vector<PeerIdValue> &ids,
+	const MemberTitle &title);
+
 [[nodiscard]] const State &CurrentState();
 [[nodiscard]] rpl::producer<> StateChanges();
 

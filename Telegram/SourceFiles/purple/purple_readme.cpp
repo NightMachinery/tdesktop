@@ -192,6 +192,27 @@ kinds of chat at once, and it is why leaving it out is usually right.
 The preset only ever *adds* a mute, so a chat can be silenced by both, and the
 mute menu says which one an Unmute would actually lift. Default true.
 
+### pinned
+
+A list of peer ids, and writing it changes who owns the main view's order.
+
+Without it, the preset's main tab **mirrors** your account's pinned chats.
+Pinning there pins in the chat list, reaches the server, and stops at the
+account's five.
+
+With it, the preset **owns** the order: a pin made inside the preset is written
+back here, never travels to the server, and leaves your other devices alone.
+That is also what lifts the five-chat limit - five is the server's cap on the
+account order the mirror was copying.
+
+```toml
+[presets.work]
+pinned = [ 1234567890, 987654321 ]
+```
+
+Dragging a pinned row inside the preset rewrites this array. Delete the key to
+go back to mirroring.
+
 ### stories
 
 On a **preset**, what the stories strip does while it runs. Each value hides
