@@ -370,11 +370,14 @@ PeekChange TogglePeek() {
 const std::vector<ExemptFolder> &ExemptFolders() {
 	static const auto kNone = std::vector<ExemptFolder>();
 	const auto &resolved = Instance().resolved();
-	if (resolved.normal || resolved.peeking || resolved.folders.empty()) {
-		// Peeking already reveals everything, so there is nothing to exempt
-		// from, and asking would only cost a folder walk per hidden chat.
+	if (resolved.normal || resolved.folders.empty()) {
 		return kNone;
 	}
+	// Not short-circuited by a peek, although it used to be. Revealing is
+	// History::purpleHiddenFromView()'s job and it says so itself now; this
+	// list also answers "is this archived chat in the view at all", which a
+	// peek does not change - an archived chat a folder pulled in used to LEAVE
+	// the view the moment you started peeking, which is backwards.
 	return resolved.exemptFolders;
 }
 
