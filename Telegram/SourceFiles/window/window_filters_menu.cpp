@@ -357,15 +357,22 @@ void FiltersMenu::refresh() {
 	_reorder->cancel();
 
 	_reorder->clearPinnedIntervals();
+	const auto shown = int(filters->purpleShownList().size());
 	const auto maxLimit = (reorderAll ? 1 : 0)
 		+ Data::PremiumLimits(&_session->session()).dialogFiltersCurrent();
 	const auto premiumFrom = (reorderAll ? 0 : 1) + maxLimit;
-	if (!reorderAll) {
-		_reorder->addPinnedInterval(0, 1);
+	if (Purple::FoldersRestricted()) {
+		// Purple: applyReorder() below refuses a strip a preset has reshaped,
+		// because a position in it is not a position in the account's own list.
+		// Say so by not offering the drag rather than by letting it lift,
+		// animate and snap back with nothing to explain what happened.
+		_reorder->addPinnedInterval(0, std::max(shown, 1));
+	} else {
+		if (!reorderAll) {
+			_reorder->addPinnedInterval(0, 1);
+		}
+		_reorder->addPinnedInterval(premiumFrom, std::max(1, shown - maxLimit));
 	}
-	_reorder->addPinnedInterval(
-		premiumFrom,
-		std::max(1, int(filters->purpleShownList().size()) - maxLimit));
 
 	// Remember which folder holds keyboard focus so the roving Tab-stop can be
 	// re-established on its replacement after the rebuild: the new buttons are

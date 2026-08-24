@@ -453,12 +453,22 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 			if (state->reorder) {
 				state->reorder->cancel();
 				state->reorder->clearPinnedIntervals();
-				if (!reorderAll) {
-					state->reorder->addPinnedInterval(0, 1);
+				if (Purple::FoldersRestricted()) {
+					// Purple: applyReorder() refuses a strip a preset has
+					// reshaped, because a position in it is not a position in
+					// the account's own list. Say so by not offering the drag
+					// rather than by letting it animate and snap back.
+					state->reorder->addPinnedInterval(
+						0,
+						std::max(int(list.size()), 1));
+				} else {
+					if (!reorderAll) {
+						state->reorder->addPinnedInterval(0, 1);
+					}
+					state->reorder->addPinnedInterval(
+						premiumFrom,
+						std::max(1, int(list.size()) - maxLimit));
 				}
-				state->reorder->addPinnedInterval(
-					premiumFrom,
-					std::max(1, int(list.size()) - maxLimit));
 			}
 		}
 		if (trackActiveFilterAndUnreadAndReorder) {

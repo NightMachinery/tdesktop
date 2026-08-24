@@ -513,8 +513,10 @@ account rather than from the view. That guard is the one that matters, because
 it is a choke point: a display surface that was missed still cannot do damage
 through it.
 
-The two drag handlers also bail out early, so a drag is simply inert rather than
-appearing to work and then snapping back.
+The two drag handlers also bail out early. Better than that, both mark the whole
+strip as a pinned interval while a preset restricts it, so `Ui::Reorder` never
+starts the drag at all: the tab does not lift, rather than lifting, animating
+back and leaving nothing to explain what just happened.
 
 A preset whose whole folder selection is `"*ALL"` still allows reordering. Its
 shown list is the real one with the view standing exactly where All chats stood,
