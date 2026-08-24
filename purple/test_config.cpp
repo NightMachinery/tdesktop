@@ -1759,6 +1759,16 @@ list_order = []
 	CHECK_EQ(Purple::DefaultViewName(u"WORK"_q), u"WORK"_q);
 	CHECK(Purple::DefaultViewName(QString()).isEmpty());
 
+	// A capital anywhere means the casing was chosen, so it is left alone
+	// rather than tidied into something the user did not write.
+	CHECK_EQ(Purple::DefaultViewName(u"iH"_q), u"iH"_q);
+	CHECK_EQ(Purple::DefaultViewName(u"deep Focus"_q), u"deep Focus"_q);
+	CHECK_EQ(Purple::DefaultViewName(u"eBay"_q), u"eBay"_q);
+
+	// Digits and punctuation are not capitals and decide nothing.
+	CHECK_EQ(Purple::DefaultViewName(u"p0"_q), u"P0"_q);
+	CHECK_EQ(Purple::DefaultViewName(u"9to5"_q), u"9to5"_q);
+
 	// The cache carries it, so a broken reload does not also rename the tab.
 	const auto cached = Purple::FromCache(Purple::ToCache(*work));
 	CHECK(cached.has_value() && cached->viewName == u"Deep Work"_q);
@@ -1769,6 +1779,30 @@ list_order = []
 	older.viewName = QString();
 	const auto restored = Purple::FromCache(older);
 	CHECK(restored.has_value() && restored->viewName == u"Work"_q);
+
+	// The same answer from the parsed preset, without resolving it. This is
+	// what the preset picker reads: it lists presets from the file, and a row
+	// naming one has to agree with the tab that preset produces.
+	const auto presets = &named.settings;
+	CHECK(presets->preset(u"work"_q) != nullptr);
+	CHECK_EQ(
+		Purple::PresetTitle(*presets->preset(u"work"_q)),
+		u"Deep Work"_q);
+	CHECK_EQ(Purple::PresetTitle(*presets->preset(u"plain"_q)), u"Plain"_q);
+	CHECK_EQ(
+		Purple::PresetTitle(*presets->preset(u"deep focus"_q)),
+		u"Deep focus"_q);
+
+	// The two-argument form is what the gate has in hand, since a resolution
+	// carries the name and the view name rather than the preset.
+	CHECK_EQ(Purple::PresetTitle(u"work"_q, QString()), u"Work"_q);
+	CHECK_EQ(Purple::PresetTitle(u"work"_q, u"Deep Work"_q), u"Deep Work"_q);
+
+	// A name whose casing was chosen comes back as it was written, whichever
+	// letter carries the capital.
+	CHECK_EQ(Purple::PresetTitle(u"WORK"_q, QString()), u"WORK"_q);
+	CHECK_EQ(Purple::PresetTitle(u"iH"_q, QString()), u"iH"_q);
+	CHECK(Purple::PresetTitle(QString(), QString()).isEmpty());
 }
 
 void TestFallThrough() {

@@ -284,7 +284,22 @@ struct ParseResult {
 // a preset called "deep focus" becomes "Deep focus", not "Deep Focus", because
 // guessing at word boundaries in a name the user chose is how you end up
 // mangling one.
+//
+// And only when there is no capital in it anywhere. A name that already has one
+// has had its casing decided - "iH" stays "iH" - and the whole point of the
+// rule is to tidy a name nobody thought about, not to overrule one somebody
+// did.
 [[nodiscard]] QString DefaultViewName(const QString &preset);
+
+// The label a preset carries wherever one is shown to the user: its own
+// `default_view_name', or the above. The tab standing in for All chats, the
+// preset picker and every line naming the preset that silenced a chat all read
+// the same word this way - the picker used to offer "work" above a tab that
+// said "Work", and a preset that renamed its tab was two names for one thing.
+[[nodiscard]] QString PresetTitle(
+	const QString &name,
+	const QString &viewName);
+[[nodiscard]] QString PresetTitle(const Preset &preset);
 
 // The spread marker: "*core" in a list_order or folders array splices in the
 // entries of [list_sets.core] or [folder_sets.core]. Nothing if the string is

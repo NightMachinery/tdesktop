@@ -96,7 +96,13 @@ namespace {
 		// "the one that is not running".
 		return u"Normal  -  stock Telegram Desktop"_q;
 	}
-	return u"%1  -  %2"_q.arg(name, Summary(settings, name));
+	// The name the preset's own tab will carry, not the TOML key underneath it.
+	// A picker offering "work" above a tab reading "Work" is one thing with two
+	// names, and a preset that renamed its tab had no way to say so here at all.
+	const auto preset = settings.preset(name);
+	return u"%1  -  %2"_q.arg(
+		preset ? PresetTitle(*preset) : DefaultViewName(name),
+		Summary(settings, name));
 }
 
 // settings.toml holds the hotkey as Qt portable text, because that is what
@@ -458,8 +464,8 @@ rpl::producer<QString> PresetMenuLabel() {
 			: resolved.peeking
 			// A peek reveals the chats a preset hides, which is the one time
 			// the chat list stops matching the preset the label names.
-			? u"Work Mode: %1 (peeking)"_q.arg(resolved.preset)
-			: u"Work Mode: %1"_q.arg(resolved.preset);
+			? u"Work Mode: %1 (peeking)"_q.arg(ViewName())
+			: u"Work Mode: %1"_q.arg(ViewName());
 	});
 }
 

@@ -254,9 +254,7 @@ rpl::producer<> ActiveChanges() {
 
 QString ViewName() {
 	const auto &resolved = Instance().resolved();
-	return resolved.viewName.isEmpty()
-		? DefaultViewName(resolved.preset)
-		: resolved.viewName;
+	return PresetTitle(resolved.preset, resolved.viewName);
 }
 
 const std::vector<ResolvedView> &ExtraViews() {

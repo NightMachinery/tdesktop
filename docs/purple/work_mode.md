@@ -143,8 +143,12 @@ usual case - the preset's own name with its first letter capitalised, so
 
 Only the first letter. A preset called `deep focus` becomes `Deep focus`, not
 `Deep Focus`: guessing at word boundaries in a name someone chose is how you
-end up mangling one, and a preset written `[presets.OS]` should not come back
-shouted differently than it was typed.
+end up mangling one.
+
+And only when the name has no capital in it anywhere. `[presets.OS]` must not
+come back shouted differently than it was typed, and `[presets.iH]` must not
+come back as `IH`. A capital anywhere means the casing was decided; the rule is
+there to tidy a name nobody thought about, not to overrule one somebody did.
 
 There is nowhere else it could come from. When presets inherited, this was the
 one field deliberately exempted - a child taking its parent's label would have
@@ -154,10 +158,21 @@ work, but the rule it encoded is worth keeping in mind if inheritance is ever
 missed: a name is not policy, and spreading a set into a preset does not spread
 a name into it either.
 
-The preset box and the `Work Mode: work` menu entry keep using the preset's
-real name, because that is its identity - the string you type in `settings.toml`
-and in a schedule rule. `default_view_name` is a label for one tab, not a
-rename.
+That one name is then used everywhere a preset is shown to a person: the tab,
+the rows of the preset picker, the `Work Mode: Work` menu entry, the
+`Silenced by 'Work'` line on a chat the preset muted, and the
+`In no list 'Work' names` line at the top of the chat menu. `PresetTitle()` in
+`purple_settings.cpp` is the single answer, and `Purple::ViewName()` is how the
+four sites that mean *the active preset* ask for it.
+
+They were split for a while, and it was worse than it sounds: the picker
+offered `work` directly above a tab reading `Work`, and a preset that had
+written a `default_view_name` had one name in the picker and a different one on
+the tab it produced, with nothing anywhere saying they were the same preset.
+
+The raw key survives in exactly one place - the `LOG()` lines - because a log
+line is about the file rather than about the chat list, and the thing you would
+go on to grep for is `[presets.work]`.
 
 That is the whole design, and it is worth stating why it is not the obvious
 one. The obvious one - the fork's first - was to make `shouldBeInChatList()`

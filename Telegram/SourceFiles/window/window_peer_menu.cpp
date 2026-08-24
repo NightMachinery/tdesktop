@@ -265,7 +265,7 @@ void PeerMenuAddMuteSubmenuAction(
 		const auto show = controller->uiShow();
 		const auto session = &controller->session();
 		addAction(
-			u"Silenced by '%1'"_q.arg(Purple::ActiveResolved().preset),
+			u"Silenced by '%1'"_q.arg(Purple::ViewName()),
 			[=] { show->showBox(Box(Purple::PresetBox, session)); },
 			&st::menuIconMute);
 	}

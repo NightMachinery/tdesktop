@@ -86,7 +86,7 @@ void FillListsMenu(
 			: nullptr;
 		const auto where = list
 			? u"In '%1'"_q.arg(DisplayTitle(*list))
-			: u"In no list '%1' names"_q.arg(ActiveResolved().preset);
+			: u"In no list '%1' names"_q.arg(ViewName());
 		const auto session = &peer->session();
 		menu->addAction(
 			// A list title is the user's own text and can hold an '&', which a
