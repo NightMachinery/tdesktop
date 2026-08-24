@@ -686,11 +686,25 @@ it survives as a folder entry holding that exact name and
 position in the strip meaningful. So `[ { name = "B", ... }, "*ALL" ]` reads as
 "B on my terms, then everything else on default terms".
 
-Each named folder carries four flags. `show_p` puts its **tab** in the strip and
+Each named folder carries five flags. `show_p` puts its **tab** in the strip and
 defaults to true, since naming a folder is normally how you ask for it -
 `show_p = false` is for a folder you want silenced or pulled into the view
 without its tab being there. `notify_p`, `show_mode` and `include_in_main_view`
 are below, and all three are about the folder's **chats** rather than its tab.
+
+`enabled_p = false` is the fifth, and it is about the entry rather than about
+either. It makes the preset ignore the whole thing - no tab, nothing silenced,
+nothing pulled in, nothing counted - while the entry keeps everything configured
+on it. It is for a preset you are still tuning, where deleting a folder's
+settings to try life without it means writing them again afterwards.
+
+A disabled entry stays in the *resolution*, rather than being filtered out of
+it, and the reason is `"*ALL"`. That marker is expanded late, against the
+account's real folders, and skips whatever the selection already names. Filter
+the disabled entry out early and `"*ALL"` no longer sees the name, so it hands
+the folder straight back - switching a folder off would silently stop working
+the day the preset gained a spread. So the entry stays, claimed and inert, and
+every place that acts on a folder asks `FolderEnabled()` first.
 
 Names are matched against folder titles, case-insensitively. A name matching no
 folder is skipped and logged, for the same reason the hidden-chat count is

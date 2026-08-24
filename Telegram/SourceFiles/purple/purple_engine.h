@@ -36,6 +36,16 @@ struct ExemptFolder {
 		= default;
 };
 
+// Whether a folder entry is switched on - `enabled_p', defaulting to true.
+//
+// A disabled entry stays in the resolution rather than being filtered out of
+// it, because "*ALL" is expanded later, against the account's real folders, and
+// skips whatever the selection already names. Dropping the entry here would
+// therefore hand a disabled folder straight back to any preset that also asks
+// for every folder. So it stays, claimed and inert, and every place that acts
+// on a folder asks this first.
+[[nodiscard]] bool FolderEnabled(const PresetFolder &folder);
+
 // The folders a preset selection pulls into its main view. Saying nothing
 // leaves a folder's chats to whatever the lists decided, like every folder the
 // preset does not name.

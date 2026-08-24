@@ -661,6 +661,58 @@ folders = [
 	// folder wants and nobody should have to write.
 	CHECK(!shaped->folders[1].badge.has_value());
 	CHECK(shaped->folders[1].badge.value_or(true));
+
+	// enabled_p survives the parse as written, and the resolution is what
+	// drops it - so a disabled entry keeps whatever was configured on it and
+	// simply does nothing.
+	const auto off = Parse(uR"(
+[lists.all]
+kinds = ["private"]
+
+[presets.work]
+list_order = [ { list = "all" } ]
+folders = [
+  { name = "XP", enabled_p = false, show_mode = "always", notify_p = false },
+  { name = "Uni", enabled_p = false, include_in_main_view = "all" },
+  { name = "B" },
+]
+)"_q);
+	CHECK(off.ok());
+	const auto written = off.settings.preset(u"work"_q);
+	CHECK(written != nullptr);
+	CHECK_EQ(int(written->folders.size()), 3);
+	CHECK(!written->folders[0].enabled.value_or(true));
+	CHECK_EQ(
+		Mode(written->folders[0].showMode),
+		Mode(Purple::ShowMode::Always));
+	CHECK(!written->folders[2].enabled.has_value());
+
+	// A disabled entry stays in the resolution, claimed and inert. It has to:
+	// "*ALL" is expanded later against the account's real folders and skips
+	// whatever the selection already names, so filtering the entry out here
+	// would hand the folder straight back to a preset that also asked for all
+	// of them.
+	const auto only = Purple::Resolve(off.settings, u"work"_q);
+	CHECK(only.has_value());
+	CHECK_EQ(int(only->folders.size()), 3);
+	CHECK(!Purple::FolderEnabled(only->folders[0]));
+	CHECK(!Purple::FolderEnabled(only->folders[1]));
+	CHECK(Purple::FolderEnabled(only->folders[2]));
+
+	// What it does not do is act. All three derivations skip it, so a disabled
+	// folder cannot silence, exempt or quieten anything from the grave - even
+	// though XP said notify_p = false and Uni asked to be pulled in.
+	CHECK(only->silencedFolders.empty());
+	CHECK(only->exemptFolders.empty());
+	CHECK(only->quietFolders.empty());
+
+	// And the derivations still see the enabled ones beside it.
+	auto mixed = *written;
+	mixed.folders[2].notify = false;
+	CHECK_EQ(
+		Purple::SilencedFolderNames(mixed.folders).size(),
+		size_t(1));
+	CHECK_EQ(Purple::SilencedFolderNames(mixed.folders).front(), u"B"_q);
 }
 
 void TestViews() {

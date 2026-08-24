@@ -527,6 +527,7 @@ void Expander::expandFolders(
 			const auto inner = u"%1 folder '%2'"_q.arg(context, *name);
 			auto folder = PresetFolder();
 			folder.name = *name;
+			folder.enabled = ReadBool(*table, "enabled_p", inner, _warnings);
 			folder.show = ReadBool(*table, "show_p", inner, _warnings);
 			folder.notify = ReadBool(*table, "notify_p", inner, _warnings);
 			folder.badge = ReadBool(*table, "badge_p", inner, _warnings);

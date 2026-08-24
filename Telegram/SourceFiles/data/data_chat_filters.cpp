@@ -499,6 +499,11 @@ void ChatFilters::purpleRefreshShown() {
 				}
 			}
 			continue;
+		} else if (!Purple::FolderEnabled(wanted)) {
+			// Switched off. Still named, so the "*ALL" above skipped it rather
+			// than handing it back, which is the whole reason a disabled entry
+			// stays in the resolution instead of being filtered out of it.
+			continue;
 		} else if (!wanted.show.value_or(true)) {
 			// Named, but deliberately not on the strip. Worth being able to say
 			// separately from leaving it out: a folder can be silenced or fed

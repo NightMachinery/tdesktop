@@ -149,8 +149,9 @@ chat *is*: a channel or a bot is `"always"`, a group is `"mention"`, a private
 chat is `"message"`. It replaces `show_p` and `groups_require_mention_p`, both of
 which are now retired keys that warn with the replacement.
 
-`folders` names the account's real folders, each with `show_p` (its **tab** is in
-the strip - the only one of the four about the tab rather than the chats),
+`folders` names the account's real folders, each with `enabled_p` (false makes
+the preset ignore the entry outright - see below), `show_p` (its **tab** is in
+the strip - the only one of the rest about the tab rather than the chats),
 `notify_p` (false silences its chats), `badge_p` (false takes the folder out of
 every count - no number on its tab, its chats out of the app badge), `show_mode`
 (the mode its chats take, on the same terms as `notify_p`; leaving it out gives
@@ -160,6 +161,16 @@ joins the preset's own view whatever the lists decided. What it lets in comes in
 even if the chat is archived, since under a preset the preset is what controls
 visibility. A preset with no `folders` key shows no folder tabs; `"*ALL"` is
 every folder you have.
+
+`enabled_p = false` is the comment character you do not have to add and remove.
+The entry keeps everything configured on it and does none of it: no tab, nothing
+silenced, nothing fed into the view, nothing counted. It is not the same as
+`show_p = false`, which only takes the tab off the strip while the folder goes
+on silencing and feeding and counting.
+
+It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
+also asks for every folder - otherwise switching one off would quietly stop
+working the day you added the spread.
 
 ### Saved Messages
 
