@@ -732,6 +732,12 @@ void WarnUnknownLists(
 			"hide_everywhere_p",
 			context,
 			warnings);
+		preset.hotkey = ReadString(
+			*table,
+			"hotkey",
+			context,
+			warnings
+		).value_or(QString()).trimmed();
 
 		if (const auto order = table->get("list_order")) {
 			if (const auto array = order->as_array()) {
@@ -1339,6 +1345,49 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 		result.warnings);
 	result.settings.peek = ReadPeek(root, result.warnings);
 	result.settings.recent = ReadRecent(root, result.warnings);
+
+	// Hotkeys last, because this is the one check that needs the presets and
+	// [peek] at once. Two actions holding the same sequence make it ambiguous
+	// and Qt then fires NEITHER, so a silent duplicate does not pick a winner -
+	// it breaks both keys, which is worth a warning even though nothing here
+	// can stop it.
+	//
+	// Compared after a crude normalisation rather than through QKeySequence:
+	// this file is compiled standalone against Qt Core by purple/test_config.sh,
+	// and QKeySequence is QtGui. So "Ctrl+Shift+W" twice is caught and
+	// "Ctrl+Shift+W" against "Shift+Ctrl+W" is not - the common mistake, not
+	// every mistake.
+	const auto normalise = [](const QString &keys) {
+		return keys.trimmed().toLower().remove(QChar(' '));
+	};
+	auto claimed = std::vector<std::pair<QString, QString>>();
+	const auto owner = [&](const QString &key) -> const QString* {
+		for (const auto &[taken, by] : claimed) {
+			if (taken == key) {
+				return &by;
+			}
+		}
+		return nullptr;
+	};
+	if (!result.settings.peek.hotkey.isEmpty()) {
+		claimed.emplace_back(
+			normalise(result.settings.peek.hotkey),
+			u"peek"_q);
+	}
+	for (auto &preset : result.settings.presets) {
+		if (preset.hotkey.isEmpty()) {
+			continue;
+		}
+		const auto key = normalise(preset.hotkey);
+		if (const auto by = owner(key)) {
+			result.warnings.push_back(
+				u"preset '%1': hotkey '%2' is already %3's; dropping it, or Qt "
+				"would fire neither."_q.arg(preset.name, preset.hotkey, *by));
+			preset.hotkey = QString();
+			continue;
+		}
+		claimed.emplace_back(key, u"preset '%1'"_q.arg(preset.name));
+	}
 	return result;
 }
 

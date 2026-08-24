@@ -120,8 +120,40 @@ list_order = [
 ]
 ```
 
-Optional keys: `default_view_name` renames the tab, and `hide_everywhere_p`
-takes hidden chats out of the whole app rather than only out of this view.
+Optional keys: `default_view_name` renames the tab, `hide_everywhere_p` takes
+hidden chats out of the whole app rather than only out of this view, and
+`hotkey` binds a key to it.
+
+### hotkey
+
+```toml
+[presets.work]
+hotkey = "Ctrl+Shift+W"
+```
+
+Pressing it turns the preset on. Pressing it while that preset is already
+running turns it **off**, back to stock behaviour - so one key means both "get
+to work" and "come back", rather than being a no-op half the time.
+
+The string is **Qt portable text**, exactly as `[peek] hotkey` uses it:
+
+- modifiers are spelled `Ctrl`, `Shift`, `Alt` and `Meta`
+- they join to the key, and to each other, with `+`
+- the key itself is a letter, a digit, or a name like `F5`, `Space`, `Home`
+- examples: `"Ctrl+Shift+W"`, `"Alt+1"`, `"Meta+Shift+F5"`
+
+**On macOS `Ctrl` means Command, and `Meta` means the physical Control key.**
+That is Qt's convention, not a choice made here, and it is the same one
+tdesktop's own shortcuts file uses. The Work Mode box prints each key the way
+your keyboard actually has it, so check there if you are unsure.
+
+Two presets on one key is refused with a warning, and so is a preset on the
+peek key. That is not tidiness: two actions holding the same sequence make it
+ambiguous, and Qt then fires **neither**, so a silent duplicate would break both
+keys rather than pick a winner.
+
+These keys are not in Settings > Shortcuts. They belong to this file, along with
+everything else about a preset.
 
 Without `default_view_name` the tab is the preset's name with its first letter
 capitalised - unless the name already has a capital somewhere, in which case it

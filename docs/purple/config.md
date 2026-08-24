@@ -209,9 +209,25 @@ It is per-install rather than per-preset, and lives in memory only.
 The rest - `[schedule]`, `[focus_sync]`, `[peek]` - is documented by the starter
 file the app writes on first run, which carries a commented example of each.
 
-`[peek] hotkey` is read as Qt portable text, so on macOS `Ctrl` means Command
-and `Meta` means the physical Control key. It is deliberately not part of
-tdesktop's own shortcut table - see [work_mode.md](work_mode.md).
+`[peek] hotkey`, and `hotkey` on a preset, are read as **Qt portable text**:
+modifiers spelled `Ctrl`, `Shift`, `Alt` and `Meta`, joined to the key and to
+each other with `+`, and a key that is a letter, a digit or a name like `F5`,
+`Space` or `Home` - `"Ctrl+Shift+W"`, `"Alt+1"`, `"Meta+Shift+F5"`. **On macOS
+`Ctrl` means Command and `Meta` means the physical Control key**, which is Qt's
+convention and the one tdesktop's own shortcuts file uses; the Work Mode box
+prints each key back in the platform's own spelling.
+
+A preset's `hotkey` turns it on, and turns it off again if it is already
+running, so one key covers both directions. Two presets sharing a key is
+refused with a warning, and so is a preset taking the peek key: two actions
+holding the same sequence make it ambiguous and Qt then fires *neither*, so a
+silent duplicate would break both rather than pick a winner. The comparison is a
+crude case-and-space normalisation rather than a real `QKeySequence` one,
+because this parser is compiled standalone against Qt Core and `QKeySequence` is
+QtGui - it catches the same key written twice, not every spelling of it.
+
+None of these are part of tdesktop's own shortcut table - see
+[work_mode.md](work_mode.md).
 
 ## Implementation
 

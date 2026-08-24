@@ -193,6 +193,12 @@ struct Preset {
 	// what almost everyone wants and nobody should have to type.
 	QString viewName;
 
+	// A key that turns this preset on, and off again if it is already on. Qt
+	// portable text, the same spelling `[peek] hotkey' uses - so on macOS
+	// "Ctrl" is Command and "Meta" is the physical Control key. Empty for a
+	// preset you only ever pick from the box.
+	QString hotkey;
+
 	// Whether a chat this preset hides is gone from the whole app rather than
 	// only from the preset's own view of the chat list - so out of the forward
 	// picker, out of search, out of recent chats. Nothing means no, which is

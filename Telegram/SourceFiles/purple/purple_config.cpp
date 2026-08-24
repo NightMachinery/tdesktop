@@ -115,6 +115,12 @@ list_order = [
 # gone from the whole app.
 #
 # [presets.work]
+# # A key that turns this preset on, and off again if it is already on. Qt
+# # portable text: Ctrl, Shift, Alt and Meta joined with "+". On macOS "Ctrl"
+# # means Command and "Meta" means the physical Control key. Two presets may
+# # not share a key, and none may take the peek key below - Qt fires neither
+# # action when a sequence is ambiguous.
+# hotkey = "Ctrl+Shift+W"
 # list_order = [
 #   "*always",
 #   { list = "groups", show_mode = "mention", notify_p = true },
