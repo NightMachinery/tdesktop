@@ -55,6 +55,28 @@ through the same watch, compare equal to what it just wrote, and do nothing.
 Both are written through `QSaveFile`, which writes a temporary alongside the
 target and renames over it, so a crash mid-write cannot leave a truncated config.
 
+## The third file, which is nobody's
+
+`readme.md` in the same directory is generated. It is written from `kReadme` in
+`purple_readme.cpp` on every launch, only when what is on disk differs, and
+anything hand-written into it is lost the next time the app starts - which it
+says in its own first line.
+
+It exists because the config directory taught nobody anything. `settings.toml`
+carries comments, but the schema lived only here, in a repository the person
+editing the file may not have checked out. A reference beside the file being
+edited answers the question where it is asked.
+
+It is a different document from this one on purpose. This file is about why the
+config works the way it does; `readme.md` is about what you may type, in the
+order the questions arrive: the keys, then the defaults, then what to do when it
+is not doing what you meant. Design reasoning stays in
+[work_mode.md](work_mode.md). Both have to be updated when a key changes, and
+the parser is the arbiter of which one is right.
+
+The only thing in it that is not a constant is the path to `log.txt`, which is
+substituted from `cWorkingDir()` because it is the one line nobody can guess.
+
 ## Editing it while the app runs
 
 `settings.toml` is watched and reloaded live. The watch is on the directory
@@ -164,6 +186,7 @@ tdesktop's own shortcut table - see [work_mode.md](work_mode.md).
     Telegram/SourceFiles/purple/purple_splice.{h,cpp}     the surgical writes
     Telegram/SourceFiles/purple/purple_state.{h,cpp}      state.toml
     Telegram/SourceFiles/purple/purple_config.{h,cpp}     file IO, watcher, API
+    Telegram/SourceFiles/purple/purple_readme.{h,cpp}     the generated readme
 
 The Work Mode spec puts the parser and the splice engine inside `purple_config`.
 They are split out here for one reason: both are free of every tdesktop
