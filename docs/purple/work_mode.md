@@ -778,6 +778,14 @@ If a folder's contents do not belong in a work mode, do not name the folder -
 that is what naming folders is for. `include_in_main_view` is the opposite
 lever: it pulls the folder's chats *into* the view.
 
+This was left open for a long time, as "should a folder tab be filtered by the
+preset too", and is now settled: **it should not**. Opening a folder is a
+deliberate act. You went there, by name, having chosen which folders the preset
+shows at all - and a preset that then second-guessed you inside the folder would
+leave nowhere to look at the thing you went looking for. The strict reading is
+also the useful one, and the lever for the other behaviour already exists: drop
+the folder from `folders`.
+
 Under `hide_everywhere_p` the old rule comes back, and must: a chat out of the
 main list cannot be in a folder either, because tdesktop guarantees the reverse
 throughout - `Entry::notifyUnreadStateChange()` asserts on it outright. So a
