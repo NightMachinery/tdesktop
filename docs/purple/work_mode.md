@@ -267,9 +267,9 @@ holds for an extra view too, where the seed below owns it instead.
 A preset may invent more tabs than its own:
 
     [[presets.work.views]]
-    name   = "Focus"
+    name   = "P0"
     pinned = [ 1234567890 ]
-    list_order = [ { list = "essentials" } ]
+    list_order = [ { list = "close_people" } ]
 
 Each becomes a tab of its own on the strip, after the preset's main view and
 before any folder - a preset's tabs belong next to each other rather than
@@ -285,9 +285,29 @@ silence belongs to the chat rather than to where you happen to be looking at it.
 
 The unread-watching modes are deliberately **not** honoured on a view, and
 neither are the per-kind defaults. A view is a selection you asked for by name,
-and a "Focus" tab that emptied itself whenever its chats went quiet would be the
+and a "P0" tab that emptied itself whenever its chats went quiet would be the
 opposite of the point. Only `"never"` removes; everything else, including
 saying nothing, means "on this tab".
+
+That asymmetry is what makes the useful pattern possible, and it is worth
+naming, because it is not obvious from either half on its own. A list can be
+**gated in the main view and unconditional on a tab of its own**:
+
+    [list_sets.core]
+    list_order = [
+      { list = "close_people", show_mode = "message_or_reaction" },
+    ]
+
+    [[presets.work.views]]
+    name       = "P0"
+    list_order = [ { list = "close_people" } ]
+
+The same three people are out of the Work tab until they have actually said
+something, and permanently one click to the right of it. Nothing coordinates
+the two: the main view asks `Visible()`, which collapses the mode, and the tab
+asks `ViewHolds()`, which ignores it. Wanting quiet in the chat list and wanting
+the people reachable are different wants, and they were being traded off against
+each other only because there was one place to express both.
 
 A view may show a chat the preset hides from its main view - a "later" tab for
 what you are not looking at is a reasonable thing to want. The one exception is
