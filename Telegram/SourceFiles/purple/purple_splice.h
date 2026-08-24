@@ -78,6 +78,19 @@ struct SpliceResult {
 	const std::vector<PeerIdValue> &ids,
 	const MemberTitle &title);
 
+// Appends a new empty [lists.x] table, just after the last one already there so
+// the lists stay together. The list is created and nothing else: no preset
+// names it yet, so it changes nothing until one does.
+//
+// Refuses a name the parser would refuse - empty, or starting with '*' - and a
+// name already taken. `title' is written only when it says something the name
+// does not.
+[[nodiscard]] SpliceResult AddList(
+	const QString &text,
+	const QString &path,
+	const QString &name,
+	const QString &title);
+
 // Sets one boolean under one table, keeping the key, the spacing and any
 // trailing comment exactly as the user wrote them. Adds the key, and the table,
 // if either is missing. Used for the Premium toggle in Settings, which is the

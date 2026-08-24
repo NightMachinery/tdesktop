@@ -26,14 +26,17 @@ the repository in `../tdesktop-libs/api_credentials.sh`, as
 
 ## Two files, two owners
 
-`settings.toml` is yours. The app reads it and makes exactly two kinds of write
-to it, both surgical:
+`settings.toml` is yours. The app reads it and makes only surgical writes to it:
 
 - the Premium toggle in Settings, which rewrites the single value token of
   `[premium] enabled_p`,
 - adding and removing list members, which edits one line of a `members` array.
   That is the `Work Mode` submenu on a chat's context menu - see
   [work_mode.md](work_mode.md).
+- creating a list, from `New list...` at the foot of that same submenu, which
+  appends an empty `[lists.x]` table after the last one already there,
+- pinned orders, when a preset or one of its views owns one - dragging a pinned
+  row rewrites that array.
 
 Neither re-serializes the document. Both locate what they need through toml++
 source regions and edit the raw lines, so comments, blank lines, alignment and
@@ -171,6 +174,31 @@ on silencing and feeding and counting.
 It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
 also asks for every folder - otherwise switching one off would quietly stop
 working the day you added the spread.
+
+### Making a list from the chat menu
+
+`New list...` at the foot of the `Work Mode` submenu appends an empty table:
+
+```toml
+[lists.reading]
+title = "Reading"
+members = [
+]
+```
+
+and nothing else. **The list does nothing until a preset names it.** There is no
+write that edits a `list_order` - those hold strings and inline tables, and
+nothing in the app writes those - and guessing which preset wanted the new list
+would be worse than saying so, which the toast does.
+
+Tick chats into it from the same menu straight away; add
+`{ list = "reading" }` to a preset's `list_order` by hand when you want it to
+start deciding anything.
+
+One limitation, kept on purpose: the whole `Work Mode` submenu is left out until
+`settings.toml` defines at least one list, so an unconfigured fork's menus are
+untouched. That means the *first* list has to be written by hand. Every one
+after it can come from the menu.
 
 ### Pinned chats in the main view
 
