@@ -1854,6 +1854,14 @@ void Session::setupPurpleWorkMode() {
 
 void Session::refreshPurpleWorkMode() {
 	purpleStartTicking();
+
+	// Every "until" arrives here - one being made, one being cancelled, a
+	// preset switch putting a different set of them in force - and this is the
+	// only place that sees all three. Without it the deadline timer was armed
+	// only by the [recent] close buffer, so an override made while nothing was
+	// in that buffer would sit there past its time until some unrelated event
+	// happened to rearm it.
+	purpleRearmGraceTimer();
 	// Snapshot first: re-evaluating a mute notifies, and a handler that reacts
 	// by resolving a peer would insert into _peers while we walked it.
 	auto peers = std::vector<not_null<PeerData*>>();
