@@ -1083,6 +1083,8 @@ private:
 	// so an entry left behind by a chat that went away cannot dangle.
 	void purpleRearmGraceTimer();
 	void purpleGraceExpired();
+	void purpleTickTemporary();
+	void purpleStartTicking();
 
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
@@ -1434,6 +1436,12 @@ private:
 	// and the one timer that comes back for the earliest of them.
 	base::flat_map<PeerId, crl::time> _purpleGrace;
 	base::Timer _purpleGraceTimer;
+
+	// Purple: repaints the rows a countdown ring is drawn on, once a second
+	// and only while there is one. Nothing else redraws a row for the passage
+	// of time, and the ring is the one thing here that changes without any
+	// event to hang a repaint on.
+	base::Timer _purpleTickTimer;
 
 	base::flat_map<not_null<UserData*>, TimeId> _watchingForOffline;
 	base::Timer _watchForOfflineTimer;

@@ -70,9 +70,11 @@ namespace {
 	}
 	auto result = u"\noverrides = [\n"_q;
 	for (const auto &entry : overrides) {
-		result += u"  { peer = %1, kind = %2, until = %3, preset = %4 },\n"_q
+		result += u"  { peer = %1, kind = %2, "
+			"started = %3, until = %4, preset = %5 },\n"_q
 			.arg(QString::number(entry.peer))
 			.arg(Quoted(OverrideKindName(entry.kind)))
+			.arg(QString::number(entry.startedUnix))
 			.arg(QString::number(entry.untilUnix))
 			.arg(Quoted(entry.preset));
 	}
@@ -163,6 +165,8 @@ void ReadOptionalBool(
 		const auto kind = fields->get("kind");
 		entry.peer = peer ? peer->value<int64>().value_or(0) : 0;
 		entry.untilUnix = until ? until->value<int64>().value_or(0) : 0;
+		const auto started = fields->get("started");
+		entry.startedUnix = started ? started->value<int64>().value_or(0) : 0;
 		const auto name = kind
 			? kind->value<std::string_view>()
 			: std::optional<std::string_view>();

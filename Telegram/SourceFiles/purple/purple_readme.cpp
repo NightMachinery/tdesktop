@@ -192,6 +192,24 @@ kinds of chat at once, and it is why leaving it out is usually right.
 The preset only ever *adds* a mute, so a chat can be silenced by both, and the
 mute menu says which one an Unmute would actually lift. Default true.
 
+### after_close_chat_style
+
+How the chat list marks a row that is only in the view for the moment - inside
+its close buffer, or held open by a **Show until**:
+
+- `"none"` - the default. Nothing is drawn.
+- `"stripe"` - a bar down the row's left edge.
+- `"timer"` - a ring where the unread badge would sit, emptying as it runs out.
+
+```toml
+[recent]
+stay_visible_after_close = "2m"
+after_close_chat_style   = "timer"
+```
+
+The ring gives up the badge slot to a count or a pin, which are facts about the
+chat rather than about how long the row has left.
+
 ## Show until, Hide until, Notify until
 
 Three entries in the `Work Mode` submenu, each offering 30 minutes, 2 hours, 8

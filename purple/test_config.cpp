@@ -2540,10 +2540,10 @@ void TestOverrides() {
 	auto state = Purple::State();
 	state.activePreset = u"work"_q;
 	state.overrides = {
-		{ 10, Purple::OverrideKind::Show, 2000, u"work"_q },
-		{ 11, Purple::OverrideKind::Hide, 1500, u"work"_q },
-		{ 12, Purple::OverrideKind::Notify, 3000, u"deep"_q },
-		{ 13, Purple::OverrideKind::Show, 500, u"work"_q },
+		{ 10, Purple::OverrideKind::Show, 2000, 200, u"work"_q },
+		{ 11, Purple::OverrideKind::Hide, 1500, 300, u"work"_q },
+		{ 12, Purple::OverrideKind::Notify, 3000, 400, u"deep"_q },
+		{ 13, Purple::OverrideKind::Show, 500, 100, u"work"_q },
 	};
 
 	// Scoped to the preset it was made under. The one made in "deep" is
@@ -2587,6 +2587,7 @@ void TestOverrides() {
 	CHECK_EQ(int(back.overrides.size()), 2);
 	CHECK_EQ(back.overrides.front().peer, Purple::PeerIdValue(10));
 	CHECK_EQ(back.overrides.front().untilUnix, int64(2000));
+	CHECK_EQ(back.overrides.front().startedUnix, int64(200));
 	CHECK_EQ(back.overrides.front().preset, u"work"_q);
 	CHECK_EQ(
 		int(back.overrides.back().kind),
@@ -2602,10 +2603,10 @@ void TestOverrides() {
 	const auto broken = Purple::ParseState(uR"(
 active_preset = "work"
 overrides = [
-  { peer = 1, kind = "show", until = 99, preset = "work" },
-  { peer = 0, kind = "show", until = 99, preset = "work" },
-  { peer = 2, kind = "nonsense", until = 99, preset = "work" },
-  { peer = 3, kind = "show", preset = "work" },
+  { peer = 1, kind = "show", started = 9, until = 99, preset = "work" },
+  { peer = 0, kind = "show", started = 9, until = 99, preset = "work" },
+  { peer = 2, kind = "nonsense", started = 9, until = 99, preset = "work" },
+  { peer = 3, kind = "show", started = 9, preset = "work" },
 ]
 )"_q, Path());
 	CHECK_EQ(int(broken.overrides.size()), 1);

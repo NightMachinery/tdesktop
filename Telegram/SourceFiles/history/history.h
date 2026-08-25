@@ -442,6 +442,16 @@ public:
 	// timer to come back and re-decide. Zero when none is running.
 	[[nodiscard]] crl::time purpleGraceUntil() const;
 
+	// Purple: the span this row is temporary for, on the monotonic clock, or
+	// zeroes when it is not. Covers both reasons a row can be here on a timer -
+	// the close buffer and a "show until" - because the chat list draws one
+	// mark for both and should not have to know which it is looking at.
+	struct PurpleTemporary {
+		crl::time from = 0;
+		crl::time until = 0;
+	};
+	[[nodiscard]] PurpleTemporary purpleTemporary() const;
+
 	// Purple: whether a running preset writes this chat's id out by hand, which
 	// is grounds for keeping it in the chat list even with no conversation in
 	// it - a person you have never messaged is exactly who you want one click
