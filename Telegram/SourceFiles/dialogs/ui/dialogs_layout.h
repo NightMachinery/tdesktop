@@ -67,6 +67,13 @@ struct PaintContext {
 	FilterId filter = 0;
 	float64 topicsExpanded = 0.;
 	crl::time now = 0;
+
+	// Purple: when this row stops being temporary, or 0 when it is not one.
+	// Set per row beside rightButton and quickActionContext below, and read
+	// only when `recentStyle' asks for something.
+	crl::time purpleTemporaryUntil = 0;
+	crl::time purpleTemporaryFrom = 0;
+
 	QStringView searchLowerText;
 	int width = 0;
 	bool active = false;

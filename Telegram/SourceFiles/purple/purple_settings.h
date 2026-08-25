@@ -344,9 +344,24 @@ enum class RecentScope : uchar {
 // it a gated chat vanishes on the exact frame you click away from it, which is
 // both startling and wrong: having just read something is the best evidence
 // there is that you are still working on it.
+// How the chat list marks a row that is only there for the moment - one inside
+// its close buffer, or one a "show until" is holding open. Both are chats that
+// will leave on a clock, and neither is otherwise distinguishable from a chat
+// the preset simply lets through.
+enum class RecentStyle : uchar {
+	None,   // The default. Nothing is drawn.
+	Stripe, // A bar down the row's left edge.
+	Timer,  // A ring where the date sits, emptying as the time runs out.
+};
+
+// "none", "stripe", "timer".
+[[nodiscard]] std::optional<RecentStyle> ParseRecentStyle(const QString &value);
+[[nodiscard]] QString RecentStyleName(RecentStyle value);
+
 struct Recent {
 	int staySecondsAfterClose = 0; // Zero disables it entirely.
 	RecentScope scope = RecentScope::AlreadyInView;
+	RecentStyle style = RecentStyle::None;
 };
 
 struct Premium {

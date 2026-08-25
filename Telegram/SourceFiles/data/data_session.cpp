@@ -250,6 +250,7 @@ Session::Session(not_null<Main::Session*> session)
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
 , _pollsClosingTimer([=] { checkPollsClosings(); })
 , _purpleGraceTimer([=] { purpleGraceExpired(); })
+, _purpleTickTimer([=] { purpleTickTemporary(); })
 , _watchForOfflineTimer([=] { checkLocalUsersWentOffline(); })
 , _groups(this)
 , _aiComposeTones(std::make_unique<AiComposeTones>(session))
@@ -1852,6 +1853,7 @@ void Session::setupPurpleWorkMode() {
 }
 
 void Session::refreshPurpleWorkMode() {
+	purpleStartTicking();
 	// Snapshot first: re-evaluating a mute notifies, and a handler that reacts
 	// by resolving a peer would insert into _peers while we walked it.
 	auto peers = std::vector<not_null<PeerData*>>();
@@ -1914,6 +1916,7 @@ void Session::purpleWatchGrace(not_null<History*> history) {
 	}
 	_purpleGrace[history->peer->id] = until;
 	purpleRearmGraceTimer();
+	purpleStartTicking();
 }
 
 void Session::purpleRearmGraceTimer() {
@@ -1941,6 +1944,33 @@ void Session::purpleRearmGraceTimer() {
 	// through the timer rather than re-entering the walk that armed it.
 	_purpleGraceTimer.callOnce(
 		std::max(earliest - crl::now(), crl::time(1)));
+}
+
+void Session::purpleStartTicking() {
+	// Cheap to ask and cheap to be wrong about: the tick stops itself the
+	// first time it finds nothing to redraw.
+	if (Purple::RecentMarkStyle() == Purple::RecentStyle::Timer
+		&& !_purpleTickTimer.isActive()) {
+		_purpleTickTimer.callOnce(crl::time(1000));
+	}
+}
+
+void Session::purpleTickTemporary() {
+	// Only the rows that actually carry a ring, so a preset with none pays one
+	// walk of the loaded peers and then stops the timer. Walks _peers and asks
+	// for the history, the way refreshPurpleWorkMode() does - Session owns no
+	// map of History objects to iterate.
+	auto any = false;
+	for (const auto &[peerId, peer] : _peers) {
+		const auto history = historyLoaded(peerId);
+		if (history && history->purpleTemporary().until) {
+			any = true;
+			history->updateChatListEntryPostponed();
+		}
+	}
+	if (any) {
+		_purpleTickTimer.callOnce(crl::time(1000));
+	}
 }
 
 void Session::purpleGraceExpired() {

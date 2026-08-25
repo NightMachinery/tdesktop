@@ -62,6 +62,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "main/main_session.h"
 #include "purple/purple_gate.h"
+
+#include <QtCore/QDateTime>
 #include "window/notifications_manager.h"
 #include "window/window_session_controller.h"
 #include "calls/calls_instance.h"
@@ -3634,6 +3636,33 @@ bool History::purpleShownAsRecent() const {
 
 crl::time History::purpleGraceUntil() const {
 	return _purpleGraceUntil;
+}
+
+History::PurpleTemporary History::purpleTemporary() const {
+	const auto span = Purple::OverrideDeadline(peer);
+	if (span.untilUnix) {
+		// Unix seconds, so it is converted here rather than stored twice. Only
+		// ever against a deadline still in the future, which keeps the
+		// arithmetic away from a wall clock that has been dragged backwards.
+		const auto now = QDateTime::currentSecsSinceEpoch();
+		const auto left = span.untilUnix - now;
+		if (left <= 0) {
+			return {};
+		}
+		return {
+			crl::now() - std::max(now - span.startedUnix, int64(0))
+				* crl::time(1000),
+			crl::now() + left * crl::time(1000),
+		};
+	} else if (_purpleOpened) {
+		// Open, so it is not counting down yet - the clock starts when you
+		// stop looking at it.
+		return {};
+	} else if (purpleShownAsRecent() && _purpleGraceUntil) {
+		const auto span = Purple::RecentStaySeconds() * crl::time(1000);
+		return { _purpleGraceUntil - span, _purpleGraceUntil };
+	}
+	return {};
 }
 
 bool History::purpleShownFromArchive() const {

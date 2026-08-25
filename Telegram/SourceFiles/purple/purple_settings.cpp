@@ -1071,6 +1071,16 @@ void WarnUnknownLists(
 				"\"90s\", \"1h\" or \"off\", keeping it off."_q);
 		}
 	}
+	const auto styleKey = "after_close_chat_style";
+	if (const auto style = ReadString(table, styleKey, context, warnings)) {
+		if (const auto parsed = ParseRecentStyle(*style)) {
+			result.style = *parsed;
+		} else {
+			warnings.push_back(
+				u"recent: 'after_close_chat_style' should be \"none\", "
+				"\"stripe\" or \"timer\", drawing nothing."_q);
+		}
+	}
 	if (const auto scope = ReadString(table, "applies_to", context, warnings)) {
 		if (const auto parsed = ParseRecentScope(*scope)) {
 			result.scope = *parsed;
@@ -1155,6 +1165,27 @@ QString ShowModeName(ShowMode value) {
 	case ShowMode::MessageOrReaction: return u"message_or_reaction"_q;
 	case ShowMode::Mention: return u"mention"_q;
 	case ShowMode::Never: return u"never"_q;
+	}
+	return QString();
+}
+
+std::optional<RecentStyle> ParseRecentStyle(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"none"_q) {
+		return RecentStyle::None;
+	} else if (trimmed == u"stripe"_q) {
+		return RecentStyle::Stripe;
+	} else if (trimmed == u"timer"_q) {
+		return RecentStyle::Timer;
+	}
+	return std::nullopt;
+}
+
+QString RecentStyleName(RecentStyle value) {
+	switch (value) {
+	case RecentStyle::None: return u"none"_q;
+	case RecentStyle::Stripe: return u"stripe"_q;
+	case RecentStyle::Timer: return u"timer"_q;
 	}
 	return QString();
 }

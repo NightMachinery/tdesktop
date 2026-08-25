@@ -1085,7 +1085,20 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			: _chatPreviewRow.key
 			? (row->key() == _chatPreviewRow.key)
 			: selected;
+		// Purple: a temporary row's mark leaves on a clock, and the cache is
+		// keyed by Entry* alone - so a baked-in stripe or a frozen ring would
+		// outlive the thing it was reporting. Refused rather than invalidated,
+		// because there are only ever a handful of these at once and the cache
+		// exists to make long scrolls cheap, not short lists.
+		const auto rowHistory = row->entry()->asHistory();
+		const auto temporary = rowHistory
+			? rowHistory->purpleTemporary()
+			: History::PurpleTemporary();
+		context.purpleTemporaryUntil = temporary.until;
+		context.purpleTemporaryFrom = temporary.from;
+
 		const auto cacheAllowed = _rowsScrollCache.scrolling()
+			&& !context.purpleTemporaryUntil
 			&& (!videoUserpic || !context.narrow)
 			&& !active
 			&& !cacheSelected

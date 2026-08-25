@@ -155,6 +155,19 @@ bool PruneOverrides();
 [[nodiscard]] int RecentStaySeconds();
 [[nodiscard]] RecentScope RecentAppliesTo();
 
+// How the chat list should mark a row that is only there for the moment. None
+// unless the file asks, so nothing is drawn and nothing is measured by default.
+[[nodiscard]] RecentStyle RecentMarkStyle();
+
+// Both ends of this chat's "until", in unix seconds, or zeroes if none is
+// running. Separate from OverrideFor() because the row painter needs the span
+// and every other caller needs only the kind.
+struct OverrideSpan {
+	int64 startedUnix = 0;
+	int64 untilUnix = 0;
+};
+[[nodiscard]] OverrideSpan OverrideDeadline(not_null<const PeerData*> peer);
+
 struct PeekChange {
 	bool peeking = false;
 

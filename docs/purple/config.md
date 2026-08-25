@@ -180,6 +180,33 @@ It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
 also asks for every folder - otherwise switching one off would quietly stop
 working the day you added the spread.
 
+### Marking a row that is only there for the moment
+
+`after_close_chat_style` in `[recent]` says how the chat list marks a row that
+is in the view on a clock - one inside its close buffer, or one a **Show until**
+is holding open. Both leave by themselves, and neither is otherwise
+distinguishable from a chat the preset simply allows.
+
+- `"none"` - the default. Nothing is drawn.
+- `"stripe"` - a bar down the row's left edge.
+- `"timer"` - a ring where the unread badge would sit, emptying as the time
+  runs out.
+
+```toml
+[recent]
+stay_visible_after_close = "2m"
+after_close_chat_style   = "timer"
+```
+
+`timer` only takes the badge slot when nothing else wants it: a count or a pin
+is a fact about the chat, and those win. It is also the only style that costs
+anything - a row has to be redrawn once a second for a ring to move, so a
+one-second tick runs while any row carries one and stops as soon as none does.
+
+Neither style is cached. The chat list caches rendered rows by entry alone, so
+a baked-in stripe or a frozen ring would outlive the thing it was reporting;
+rows carrying a mark are drawn fresh instead. There are only ever a handful.
+
 ### Show until, Hide until, Notify until
 
 Three entries in the `Work Mode` submenu, each offering 30 minutes, 2 hours, 8

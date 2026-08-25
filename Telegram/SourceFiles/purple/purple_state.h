@@ -108,6 +108,11 @@ struct Override {
 	// measured in hours.
 	int64 untilUnix = 0;
 
+	// When it was made. Only the ring in the chat list needs this - it is what
+	// makes the arc proportional rather than guessed - but the file reads
+	// better for having both ends of the span written down.
+	int64 startedUnix = 0;
+
 	QString preset;
 
 	friend bool operator==(const Override &, const Override &) = default;

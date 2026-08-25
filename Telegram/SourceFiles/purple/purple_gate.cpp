@@ -420,7 +420,7 @@ void SetOverride(
 			}
 		}
 		if (seconds > 0) {
-			kept.push_back({ id, kind, until, preset });
+			kept.push_back({ id, kind, until, until - seconds, preset });
 		}
 		state.overrides = std::move(kept);
 	});
@@ -465,6 +465,25 @@ int RecentStaySeconds() {
 
 RecentScope RecentAppliesTo() {
 	return ActiveSettings().recent.scope;
+}
+
+RecentStyle RecentMarkStyle() {
+	return Filtering() ? ActiveSettings().recent.style : RecentStyle::None;
+}
+
+OverrideSpan OverrideDeadline(not_null<const PeerData*> peer) {
+	const auto &resolved = Instance().resolved();
+	if (resolved.normal) {
+		return OverrideSpan();
+	}
+	const auto found = Purple::OverrideFor(
+		CurrentState(),
+		IdOf(peer),
+		resolved.preset,
+		NowUnix());
+	return found
+		? OverrideSpan{ found->startedUnix, found->untilUnix }
+		: OverrideSpan();
 }
 
 Visibility VisibleFor(not_null<const PeerData*> peer) {

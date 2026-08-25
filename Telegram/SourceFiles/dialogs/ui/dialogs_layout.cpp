@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/unread_badge.h"
 #include "ui/unread_badge_paint.h"
 #include "ui/unread_counter_format.h"
+#include "purple/purple_gate.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_dialogs_layout.h"
 #include "styles/style_widgets.h"
@@ -82,6 +83,67 @@ const auto kPsaBadgePrefix = "cloud_lng_badge_psa_";
 	}
 	return !history->peer->displayAsForum()
 		&& !history->amMonoforumAdmin();
+}
+
+// Purple: the two marks for a row that is only here for the moment - inside its
+// close buffer, or held open by a "show until". Both leave on a clock, and
+// neither is otherwise distinguishable from a chat the preset simply allows.
+void PaintPurpleTemporaryStripe(
+		QPainter &p,
+		const PaintContext &context,
+		const QRect &geometry) {
+	auto hq = PainterHighQualityEnabler(p);
+	const auto width = st::lineWidth * 3;
+	const auto skip = context.st->padding.top();
+	const auto radius = width / 2.;
+	p.setPen(Qt::NoPen);
+	p.setBrush(context.active
+		? st::dialogsTextFgActive
+		: st::dialogsUnreadBg);
+	p.drawRoundedRect(
+		QRectF(
+			geometry.x(),
+			geometry.y() + skip,
+			width,
+			geometry.height() - 2 * skip),
+		radius,
+		radius);
+}
+
+// Returns the width it used, so the caller can move the date left by it.
+[[nodiscard]] int PaintPurpleTemporaryTimer(
+		QPainter &p,
+		const PaintContext &context,
+		int right,
+		int top) {
+	const auto total = context.purpleTemporaryUntil
+		- context.purpleTemporaryFrom;
+	if (total <= 0) {
+		return 0;
+	}
+	const auto left = context.purpleTemporaryUntil - context.now;
+	const auto part = std::clamp(left / float64(total), 0., 1.);
+	const auto size = st::dialogsUnreadHeight;
+	const auto inner = QRectF(
+		right - size,
+		top,
+		size,
+		size).marginsRemoved({ 1.5, 1.5, 1.5, 1.5 });
+
+	auto hq = PainterHighQualityEnabler(p);
+	auto pen = QPen(context.active
+		? st::dialogsTextFgActive->c
+		: st::dialogsUnreadBg->c);
+	pen.setWidthF(st::lineWidth * 1.5);
+	pen.setCapStyle(Qt::RoundCap);
+	p.setPen(pen);
+	p.setBrush(Qt::NoBrush);
+
+	// Anticlockwise from the top, so it empties the way a clock face would
+	// fill. Qt's angles are sixteenths of a degree, measured from three
+	// o'clock.
+	p.drawArc(inner, 90 * 16, int(part * 360 * 16));
+	return size + st::dialogsUnreadPadding;
 }
 
 void PaintRowTopRight(
@@ -241,6 +303,12 @@ int PaintBadges(
 			context.selected);
 		icon.paint(p, right - icon.width(), pinnedIconTop, context.width);
 		right -= icon.width() + st::dialogsUnreadPadding;
+	} else if (context.purpleTemporaryUntil
+		&& Purple::RecentMarkStyle() == Purple::RecentStyle::Timer) {
+		// Purple: the badge slot, and only when nothing else wants it. A count
+		// or a pin is a fact about the chat; this is a fact about how long the
+		// row has left, and the count is the more important of the two.
+		right -= PaintPurpleTemporaryTimer(p, context, right, top);
 	}
 	if ((!narrow || (painted < 2))
 		&& (badgesState.mention || badgesState.reaction)) {
@@ -485,6 +553,10 @@ void PaintRow(
 		p.translate(-swipeTranslation, 0);
 	}
 	p.fillRect(geometry, bg);
+	if (context.purpleTemporaryUntil
+		&& Purple::RecentMarkStyle() == Purple::RecentStyle::Stripe) {
+		PaintPurpleTemporaryStripe(p, context, geometry);
+	}
 	if (!(flags & Flag::TopicJumpRipple)) {
 		auto ripple = context.active
 			? st::dialogsRippleBgActive
