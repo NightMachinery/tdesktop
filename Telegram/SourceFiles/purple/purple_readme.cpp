@@ -227,6 +227,21 @@ aside rather than carrying it along, and switching back brings it out again if
 it has not run out. They are kept in `state.toml`, expire by themselves, and
 survive a restart.
 
+A hide always leaves the preset's view. How far it goes beyond that is yours:
+
+```toml
+[overrides]
+hide_scope = "keep_in_folder_but_exclude_from_badge_count"
+```
+
+- `keep_in_folder_but_exclude_from_badge_count` - the default. The row stays on
+  its folder tabs and keeps its own badge, but stops counting towards theirs.
+- `hide_everywhere` - out of the chat list altogether while it lasts, tabs
+  included.
+- `keep_in_folder` - the row stays and keeps counting.
+
+A peek puts all of it back for as long as you are peeking.
+
 ## Making a list from the chat menu
 
 `New list...` at the foot of the `Work Mode` submenu writes an empty table

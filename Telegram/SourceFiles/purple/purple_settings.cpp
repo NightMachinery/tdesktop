@@ -1094,6 +1094,34 @@ void WarnUnknownLists(
 	return result;
 }
 
+[[nodiscard]] Overrides ReadOverrides(
+		const toml::table &root,
+		std::vector<QString> &warnings) {
+	auto result = Overrides();
+	const auto node = root.get("overrides");
+	if (!node) {
+		return result;
+	} else if (!node->as_table()) {
+		warnings.push_back(
+			u"'overrides' should be a table (%1)."_q.arg(At(*node)));
+		return result;
+	}
+	const auto &table = *node->as_table();
+	const auto context = u"overrides"_q;
+	if (const auto scope = ReadString(table, "hide_scope", context, warnings)) {
+		if (const auto parsed = ParseHideScope(*scope)) {
+			result.hideScope = *parsed;
+		} else {
+			warnings.push_back(
+				u"overrides: 'hide_scope' should be \"hide_everywhere\", "
+				"\"keep_in_folder_but_exclude_from_badge_count\" or "
+				"\"keep_in_folder\", keeping \"%1\"."_q.arg(
+					HideScopeName(result.hideScope)));
+		}
+	}
+	return result;
+}
+
 } // namespace
 
 std::optional<RecentScope> ParseRecentScope(const QString &value) {
@@ -1186,6 +1214,28 @@ QString RecentStyleName(RecentStyle value) {
 	case RecentStyle::None: return u"none"_q;
 	case RecentStyle::Stripe: return u"stripe"_q;
 	case RecentStyle::Timer: return u"timer"_q;
+	}
+	return QString();
+}
+
+std::optional<HideScope> ParseHideScope(const QString &value) {
+	const auto trimmed = value.trimmed().toLower();
+	if (trimmed == u"hide_everywhere"_q) {
+		return HideScope::Everywhere;
+	} else if (trimmed == u"keep_in_folder_but_exclude_from_badge_count"_q) {
+		return HideScope::KeepInFolderUncounted;
+	} else if (trimmed == u"keep_in_folder"_q) {
+		return HideScope::KeepInFolder;
+	}
+	return std::nullopt;
+}
+
+QString HideScopeName(HideScope value) {
+	switch (value) {
+	case HideScope::Everywhere: return u"hide_everywhere"_q;
+	case HideScope::KeepInFolderUncounted:
+		return u"keep_in_folder_but_exclude_from_badge_count"_q;
+	case HideScope::KeepInFolder: return u"keep_in_folder"_q;
 	}
 	return QString();
 }
@@ -1478,6 +1528,7 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 		result.warnings);
 	result.settings.peek = ReadPeek(root, result.warnings);
 	result.settings.recent = ReadRecent(root, result.warnings);
+	result.settings.overrides = ReadOverrides(root, result.warnings);
 
 	// Hotkeys last, because this is the one check that needs the presets and
 	// [peek] at once. Two actions holding the same sequence make it ambiguous

@@ -1883,6 +1883,12 @@ void Session::refreshPurpleWorkMode() {
 		if (!history) {
 			continue;
 		}
+		// And then whether its unread counts at all, for the same reason and in
+		// the same order: a "hide until" under
+		// `keep_in_folder_but_exclude_from_badge_count' takes this chat out of
+		// every total it is in, and that has to be paid across before hiding
+		// the chat moves it between lists.
+		history->purpleRefreshUncounted();
 		++chats;
 		const auto visible = Purple::VisibleFor(peer);
 		if (visible.show == Purple::ShowMode::Never) {

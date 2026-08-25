@@ -364,6 +364,39 @@ struct Recent {
 	RecentStyle style = RecentStyle::None;
 };
 
+// How far a "hide until" reaches. It always takes the chat out of the preset's
+// own view; the question this answers is what happens to the folder tabs, where
+// the chat is a member of somebody else's list and the preset has no say over
+// the rows at all.
+enum class HideScope : uchar {
+	// Out of the chat list entirely, the way `hide_everywhere_p' does it for a
+	// whole preset: no row anywhere, on any tab, for as long as it lasts.
+	Everywhere,
+
+	// The default. The row stays on its folder tabs, but its unread stops
+	// counting towards them - so the folder does not sit there with a badge for
+	// a chat you have just put away. A hidden chat that still drives a number
+	// is the one thing that would keep pulling your eye back to it.
+	KeepInFolderUncounted,
+
+	// The row stays and keeps counting. What a "hide until" did before this key
+	// existed, kept because "out of my view, but still part of that folder's
+	// total" is a coherent thing to want.
+	KeepInFolder,
+};
+
+// "hide_everywhere", "keep_in_folder_but_exclude_from_badge_count",
+// "keep_in_folder".
+[[nodiscard]] std::optional<HideScope> ParseHideScope(const QString &value);
+[[nodiscard]] QString HideScopeName(HideScope value);
+
+// The `[overrides]' table: how the three "until" menu entries behave. Not part
+// of a preset - the menu offers the same decision whichever preset is running,
+// and the overrides themselves live in state.toml rather than here.
+struct Overrides {
+	HideScope hideScope = HideScope::KeepInFolderUncounted;
+};
+
 struct Premium {
 	bool enabled = true;
 };
@@ -379,6 +412,7 @@ struct Settings {
 	FocusSync focusSync;
 	Peek peek;
 	Recent recent;
+	Overrides overrides;
 
 	[[nodiscard]] const List *list(const QString &name) const;
 	[[nodiscard]] const Preset *preset(const QString &name) const;

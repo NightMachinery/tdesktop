@@ -117,6 +117,12 @@ bool SavePresetPins(
 void SetOverride(not_null<const PeerData*> peer, OverrideKind kind, int seconds);
 void ClearOverride(not_null<const PeerData*> peer);
 
+// How far a "hide until" reaches - out of the preset's view only, or out of the
+// folder tabs' badges with it, or out of the chat list altogether. From
+// [overrides] hide_scope, so it is the same whichever preset is running, and it
+// says nothing about whether a hide is in force: ask OverrideFor() for that.
+[[nodiscard]] HideScope HideUntilScope();
+
 // Drops what has expired and says whether anything went, so Data::Session can
 // rebuild exactly when it has to.
 bool PruneOverrides();
