@@ -486,7 +486,7 @@ OverrideSpan OverrideDeadline(not_null<const PeerData*> peer) {
 		resolved.preset,
 		NowUnix());
 	return found
-		? OverrideSpan{ found->startedUnix, found->untilUnix }
+		? OverrideSpan{ found->startedUnix, found->untilUnix, found->kind }
 		: OverrideSpan();
 }
 
