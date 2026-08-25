@@ -168,9 +168,14 @@ bool PruneOverrides();
 // Both ends of this chat's "until", in unix seconds, or zeroes if none is
 // running. Separate from OverrideFor() because the row painter needs the span
 // and every other caller needs only the kind.
+//
+// The kind comes with it because the painter needs both and this is one lookup:
+// only a "show until" makes a row temporary, and it is asked of every row on
+// every paint.
 struct OverrideSpan {
 	int64 startedUnix = 0;
 	int64 untilUnix = 0;
+	OverrideKind kind = OverrideKind::Show;
 };
 [[nodiscard]] OverrideSpan OverrideDeadline(not_null<const PeerData*> peer);
 

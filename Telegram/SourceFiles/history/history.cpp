@@ -3706,7 +3706,14 @@ crl::time History::purpleGraceUntil() const {
 
 History::PurpleTemporary History::purpleTemporary() const {
 	const auto span = Purple::OverrideDeadline(peer);
-	if (span.untilUnix) {
+
+	// A "show until" and nothing else. The mark means "this row is here on a
+	// clock", and that is only true of a row the override put there: a chat a
+	// "hide until" has put away is still a permanent member of whatever folder
+	// tab is still showing it, and marking it as leaving would say the opposite
+	// of what is happening. A "notify until" does not touch visibility at all.
+	// What is on a clock in those two cases is the decision, not the row.
+	if (span.untilUnix && (span.kind == Purple::OverrideKind::Show)) {
 		// Unix seconds, so it is converted here rather than stored twice. Only
 		// ever against a deadline still in the future, which keeps the
 		// arithmetic away from a wall clock that has been dragged backwards.
