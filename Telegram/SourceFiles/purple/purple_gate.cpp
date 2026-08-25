@@ -430,6 +430,10 @@ void ClearOverride(not_null<const PeerData*> peer) {
 	SetOverride(peer, OverrideKind::Show, 0);
 }
 
+HideScope HideUntilScope() {
+	return ActiveSettings().overrides.hideScope;
+}
+
 bool PruneOverrides() {
 	auto dropped = false;
 	const auto now = NowUnix();

@@ -390,6 +390,63 @@ preset that sets it may not also declare extra views - see below - because a
 view showing a chat that is not in the main list is an assertion failure rather
 than a preference. The parser refuses that pairing with a warning.
 
+### How far a "hide until" reaches
+
+    [overrides]
+    hide_scope = "keep_in_folder_but_exclude_from_badge_count"
+
+A "hide until" always takes the chat out of the preset's view; that much is what
+the menu entry says. The folder tabs are a different question, because there the
+chat is a member of a list the preset does not own, and hiding it there is
+overruling a folder you built rather than applying a preset you chose.
+
+Three answers, and the middle one is the default:
+
+- `keep_in_folder_but_exclude_from_badge_count` takes the chat's unread out of
+  every running total while the hide lasts. The row stays on its tabs and keeps
+  its own badge - that is a fact about the chat - but the tab stops adding it
+  up. This is the default because a badge is the part that pulls your eye back:
+  a chat you put away half an hour ago should not be the reason a folder is lit.
+- `hide_everywhere` reuses `purpleHiddenFromChatList()`, so one chat gets for a
+  while what `hide_everywhere_p` gives a whole preset. It inherits that switch's
+  honest hole too: a chat out of the chat list has no unread bookkeeping, so an
+  unread-gated chat cannot come back on its own until the hide expires.
+- `keep_in_folder` is what a hide did before the key existed.
+
+Global rather than per-preset: the menu offers the same decision whichever
+preset is running, and a reach that changed under you when a schedule swapped
+presets would be a worse surprise than a key you have to set twice.
+
+A peek suspends all three, and so does the `[recent]` close buffer, because both
+are already answered by `History::purpleHiddenFromView()` - which
+`purpleHideUntilReaches()` asks last, after the two cheap tests. A hide that is
+not hiding anything at this moment has nothing to take out of a count. The order
+of those tests matters: `shouldBeInChatList()` asks this of every row on every
+refresh, so under a scope the file did not name it has to come to nothing on a
+single enum comparison, without reaching the override list or the clock.
+
+**The exclusion is cached, and that is the whole design.** Every list holding a
+chat keeps a running unread total, moved by `notifyUnreadStateChange()` from the
+old value to the new one. A predicate answered live would change both sides of
+that subtraction at the same instant - the preset moves, and now the "before"
+value is also the "after" value - and leave every total wrong until a restart,
+silently. So `History::_purpleUncounted` is a flag, flipped only inside
+`unreadStateChangeNotifier()`, which is the thing that pays the difference
+across. `Session::refreshPurpleWorkMode()` flips it for every loaded chat
+whenever the preset, the overrides or the peek move, in that order: mute first,
+then the count, then the membership, each one settled before the next can move
+the chat between lists.
+
+It is set in the `History` constructor too, from the override alone. A chat that
+loads while a hide is running would otherwise count towards its folders until
+the next preset change, and at construction there is nothing to notify - the
+chat is in no list yet, so the first list it joins simply reads the right
+answer.
+
+`chatListUnreadState()` carries `known` across rather than resetting it:
+`Dialogs::MainList` asserts that a total which was known stays known, and it is
+still known. It is zero.
+
 ### Hiding is a view, not an edit
 
 A preset takes a chat out of what is on screen. It must never change anything

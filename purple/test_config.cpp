@@ -2868,6 +2868,62 @@ applies_to = "any_chat"
 	}
 }
 
+void TestHideScope() {
+	Begin("hide scope");
+
+	// The default is the middle one: a "hide until" leaves the chat on its
+	// folder tabs and stops it counting there. A file that says nothing gets it
+	// without having to know the key exists.
+	const auto silent = Parse(u"[presets.work]\nlist_order = []\n"_q);
+	CHECK(silent.ok());
+	CHECK(silent.settings.overrides.hideScope
+		== Purple::HideScope::KeepInFolderUncounted);
+
+	const auto parsed = Parse(uR"(
+[overrides]
+hide_scope = "hide_everywhere"
+)"_q);
+	CHECK(parsed.ok());
+	CHECK(parsed.warnings.empty());
+	CHECK(parsed.settings.overrides.hideScope
+		== Purple::HideScope::Everywhere);
+
+	const auto keep = Parse(
+		u"[overrides]\nhide_scope = \"keep_in_folder\"\n"_q);
+	CHECK(keep.ok());
+	CHECK(keep.settings.overrides.hideScope
+		== Purple::HideScope::KeepInFolder);
+
+	// A misspelling keeps the default and says which one it kept, rather than
+	// quietly picking the widest reading of a key about hiding things.
+	const auto broken = Parse(
+		u"[overrides]\nhide_scope = \"everywhere\"\n"_q);
+	CHECK(broken.ok());
+	CHECK_EQ(int(broken.warnings.size()), 1);
+	CHECK(broken.settings.overrides.hideScope
+		== Purple::HideScope::KeepInFolderUncounted);
+	CHECK(WarnsAbout(broken, u"keep_in_folder_but_exclude_from_badge_count"_q));
+
+	// Not a table at all is a warning too, not a parse failure.
+	const auto wrong = Parse(u"overrides = true\n"_q);
+	CHECK(wrong.ok());
+	CHECK_EQ(int(wrong.warnings.size()), 1);
+	CHECK(wrong.settings.overrides.hideScope
+		== Purple::HideScope::KeepInFolderUncounted);
+
+	CHECK(Purple::ParseHideScope(u"  HIDE_EVERYWHERE  "_q)
+		== Purple::HideScope::Everywhere);
+	CHECK(!Purple::ParseHideScope(QString()).has_value());
+
+	// Round trip, so a warning can name back what it kept.
+	for (const auto value : {
+			Purple::HideScope::Everywhere,
+			Purple::HideScope::KeepInFolderUncounted,
+			Purple::HideScope::KeepInFolder }) {
+		CHECK(Purple::ParseHideScope(Purple::HideScopeName(value)) == value);
+	}
+}
+
 void TestScheduleTarget() {
 	Begin("schedule target");
 
@@ -3098,6 +3154,7 @@ int main() {
 	TestReservedHotkeys();
 	TestStories();
 	TestRecent();
+	TestHideScope();
 	TestScheduleTarget();
 	TestResolvedCache();
 

@@ -235,6 +235,36 @@ The deadline is a unix timestamp rather than a monotonic clock, because unlike
 the `[recent]` buffer these are measured in hours and have to survive a
 restart.
 
+#### How far a Hide until reaches
+
+A hide always takes the chat out of the preset's own view. What it does about
+the folder tabs - where the chat is a member of a list the preset does not own -
+is up to you:
+
+```toml
+[overrides]
+hide_scope = "keep_in_folder_but_exclude_from_badge_count"
+```
+
+- `keep_in_folder_but_exclude_from_badge_count` - the default. The row stays on
+  its folder tabs, but its unread stops counting towards them, so the folder
+  does not sit there with a badge for a chat you have just put away. The row
+  keeps its own count: what changed is what the tab adds up, not what the chat
+  says about itself.
+- `hide_everywhere` - out of the chat list altogether, the way
+  `hide_everywhere_p` does it for a whole preset. No row on any tab, and no
+  count anywhere, until it runs out.
+- `keep_in_folder` - the row stays and keeps counting. This is what a hide did
+  before the key existed, and it is still a coherent thing to want: out of my
+  view, but still part of that folder's total.
+
+The key is global rather than per-preset because the menu offers the same
+decision whichever preset is running.
+
+A **peek suspends all of it**, exactly as it suspends the hiding itself: while
+you are peeking the row is back, and so is its contribution to every count. So
+is a chat sitting in the `[recent]` close buffer, which is a chat you have open.
+
 ### Making a list from the chat menu
 
 `New list...` at the foot of the `Work Mode` submenu appends an empty table:

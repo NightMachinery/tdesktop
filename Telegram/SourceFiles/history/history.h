@@ -49,6 +49,7 @@ namespace Purple {
 // type, and history.h is included in half the app - purple_settings.h has no
 // business travelling with it.
 enum class ShowMode : uchar;
+enum class HideScope : uchar;
 } // namespace Purple
 
 namespace HistoryView {
@@ -427,6 +428,18 @@ public:
 	// count. See Data::kPurpleQuietFilterId.
 	[[nodiscard]] bool purpleInQuietFolder() const;
 
+	// Purple: whether a "hide until" is hiding this chat right now AND the file
+	// asked hides to reach as far as `scope'. False for the other two kinds of
+	// override, and false while a peek or the close buffer is suspending the
+	// hide. See [overrides] hide_scope.
+	[[nodiscard]] bool purpleHideUntilReaches(Purple::HideScope scope) const;
+
+	// Purple: re-decides whether this chat's unread counts towards the lists
+	// holding it, moving the totals across if the answer changed. Called for
+	// every chat whenever the preset, the overrides or the peek move, because
+	// all three can change the answer without a message arriving.
+	void purpleRefreshUncounted();
+
 	// Purple: this chat became, or stopped being, the one you are looking at.
 	// Called from History::setFakeUnreadWhileOpened() above its own guards,
 	// because that setter is already exactly this event - it simply declines to
@@ -738,6 +751,19 @@ private:
 	bool _purpleOpened = false;
 	bool _purpleGraceEligible = false;
 	crl::time _purpleGraceUntil = 0;
+
+	// Purple: whether chatListUnreadState() is currently reporting nothing, for
+	// a chat a "hide until" has put away under
+	// `keep_in_folder_but_exclude_from_badge_count'.
+	//
+	// Cached rather than asked live, and this is the whole reason the flag
+	// exists: every list holding the chat keeps a running total, moved by
+	// notifyUnreadStateChange() from the old value to the new one. A predicate
+	// that changed the moment the preset did would change both sides of that
+	// subtraction at once and leave every total wrong until a restart. It flips
+	// only inside unreadStateChangeNotifier(), which is what pays the totals
+	// across. See purpleRefreshUncounted().
+	bool _purpleUncounted = false;
 
 	std::optional<Data::Folder*> _folder;
 	Data::CommunityInfo *_communityInfo = nullptr;

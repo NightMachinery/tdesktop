@@ -171,6 +171,20 @@ History::History(not_null<Data::Session*> owner, PeerId peerId)
 , _sendActionPainter(this) {
 	Thread::setMuted(owner->notifySettings().isMuted(peer));
 
+	// Purple: right from the start, because a chat that loads while a "hide
+	// until" is running on it would otherwise count towards its folders' badges
+	// until the next preset change. Nothing is notified and nothing needs to be
+	// - the chat is in no list yet, so the first list it joins simply reads the
+	// right answer. The peek test purpleRefreshUncounted() makes is skipped
+	// deliberately: a half-built History has no business walking folders, and
+	// the worst it costs is one peek during which this one chat stays
+	// uncounted.
+	const auto hide = Purple::OverrideFor(peer);
+	_purpleUncounted = hide
+		&& (*hide == Purple::OverrideKind::Hide)
+		&& (Purple::HideUntilScope()
+			== Purple::HideScope::KeepInFolderUncounted);
+
 	if (const auto user = peer->asUser()) {
 		if (user->isBot()) {
 			_outboxReadBefore = std::numeric_limits<MsgId>::max();
@@ -2755,13 +2769,31 @@ History *History::migrateSibling() const {
 }
 
 Dialogs::UnreadState History::chatListUnreadState() const {
-	if (const auto forum = peer->forum()) {
-		return AdjustedForumUnreadState(forum->topicsList()->unreadState());
-	} else if (const auto monoforum = peer->monoforum()) {
-		return AdjustedForumUnreadState(
-			withMyMuted(monoforum->chatsList()->unreadState()));;
+	const auto real = [&] {
+		if (const auto forum = peer->forum()) {
+			return AdjustedForumUnreadState(forum->topicsList()->unreadState());
+		} else if (const auto monoforum = peer->monoforum()) {
+			return AdjustedForumUnreadState(
+				withMyMuted(monoforum->chatsList()->unreadState()));;
+		}
+		return computeUnreadState();
+	}();
+	if (!_purpleUncounted) {
+		return real;
 	}
-	return computeUnreadState();
+	// Purple: nothing to add to any total, for a chat a "hide until" has put
+	// away under `keep_in_folder_but_exclude_from_badge_count'. The row keeps
+	// its own badge on the folder tabs that still hold it - that is a fact
+	// about the chat and is drawn from computeUnreadState() below - but the
+	// tabs stop counting it, which is what stops a chat you have deliberately
+	// hidden from lighting up a folder.
+	//
+	// `known' is carried across rather than reset: Dialogs::MainList asserts
+	// that a total which was known stays known, and it is still known. It is
+	// zero.
+	auto result = Dialogs::UnreadState();
+	result.known = real.known;
+	return result;
 }
 
 Dialogs::BadgesState History::chatListBadgesState() const {
@@ -3549,6 +3581,40 @@ bool History::purpleInQuietFolder() const {
 	return false;
 }
 
+bool History::purpleHideUntilReaches(Purple::HideScope scope) const {
+	// The file's answer first, because it is a single comparison and every
+	// other test here costs something: shouldBeInChatList() asks this on every
+	// refresh of every row, and under the default scope that has to come to
+	// nothing without looking anything up.
+	if (Purple::HideUntilScope() != scope) {
+		return false;
+	}
+	const auto override = Purple::OverrideFor(peer);
+	if (!override || (*override != Purple::OverrideKind::Hide)) {
+		return false;
+	}
+	// And whether the hide is hiding anything at this moment. It is not while a
+	// peek is running, or while you have the chat open and the close buffer is
+	// holding it - and neither is a moment to take a row off a folder tab or a
+	// number out of a badge, since both put the row back themselves. Which is
+	// why this asks the view rather than the override.
+	return purpleHiddenFromView();
+}
+
+void History::purpleRefreshUncounted() {
+	const auto uncounted = purpleHideUntilReaches(
+		Purple::HideScope::KeepInFolderUncounted);
+	if (uncounted == _purpleUncounted) {
+		return;
+	}
+	// Notified unconditionally, unlike setMuted() which first works out whether
+	// there is anything to move: the flag only ever changes for a chat with a
+	// live "hide until" on it, so this runs for a handful of chats at most and
+	// there is nothing worth saving.
+	const auto notifier = unreadStateChangeNotifier(true);
+	_purpleUncounted = uncounted;
+}
+
 bool History::purpleReachableElsewhere() const {
 	const auto filters = &owner().chatsFilters();
 
@@ -3679,7 +3745,13 @@ bool History::purpleHiddenFromChatList() const {
 	// leaves it out of the view alone, which is what lets it stay pinned,
 	// searchable and reachable from the forward picker. See
 	// docs/purple/work_mode.md.
-	return Purple::HideEverywhere() && purpleHiddenFromView();
+	//
+	// And the one-chat version of the same request: a "hide until" made while
+	// `hide_scope = "hide_everywhere"'. A preset-wide switch and a decision
+	// about a single chat, doing the same thing for the same reason - the
+	// second one simply expires by itself.
+	return (Purple::HideEverywhere() && purpleHiddenFromView())
+		|| purpleHideUntilReaches(Purple::HideScope::Everywhere);
 }
 
 bool History::shouldBeInChatList() const {
