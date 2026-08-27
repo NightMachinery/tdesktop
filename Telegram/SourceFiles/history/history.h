@@ -424,6 +424,20 @@ public:
 		-> std::optional<Purple::ShowMode>;
 	[[nodiscard]] bool purpleShowModeSatisfied(Purple::ShowMode mode) const;
 
+	// Purple: what the preset alone says about this chat - the folder it pulls
+	// in, or the entry that claimed it - with the close buffer, the "until"
+	// decisions and the peek all taken out. The tail of purpleHiddenFromView().
+	[[nodiscard]] bool purpleHiddenByPreset() const;
+
+	// Purple: whether this row goes when whatever clock is holding it runs out.
+	// The preset's verdict plus a "hide until", which is a reason the row would
+	// be gone rather than a reason it is here; a "show until" and the close
+	// buffer are the temporary things being asked about, so they are left out.
+	//
+	// This is what the row mark actually claims, and a chat the preset lets
+	// through anyway must not carry one - it is not going anywhere.
+	[[nodiscard]] bool purpleWouldLeaveTheView() const;
+
 	// Purple: whether a folder holding this chat asked to be left out of every
 	// count. See Data::kPurpleQuietFilterId.
 	[[nodiscard]] bool purpleInQuietFolder() const;

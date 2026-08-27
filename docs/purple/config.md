@@ -187,6 +187,12 @@ is in the view on a clock - one inside its close buffer, or one a **Show until**
 is holding open. Both leave by themselves, and neither is otherwise
 distinguishable from a chat the preset simply allows.
 
+**Only a row that will actually go is marked.** The close buffer holds every
+chat you open, including the ones the preset shows anyway - and those are not on
+a clock, so they carry nothing. What is marked is the row the preset would hide
+the moment the clock stopped: a chat gated on unread that you have just read, or
+one nothing in the preset claims at all.
+
 - `"none"` - the default. Nothing is drawn.
 - `"stripe"` - a bar down the row's left edge.
 - `"timer"` - a ring where the unread badge would sit, emptying as the time

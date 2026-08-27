@@ -3544,6 +3544,10 @@ bool History::purpleHiddenFromView() const {
 		case Purple::OverrideKind::Notify: break;
 		}
 	}
+	return purpleHiddenByPreset();
+}
+
+bool History::purpleHiddenByPreset() const {
 	// A folder the preset pulls in decides first, because it is the more
 	// specific statement: it named this folder, where a list entry named a kind
 	// or a set of ids. What it does not decide is WHEN - a folder saying nothing
@@ -3557,6 +3561,22 @@ bool History::purpleHiddenFromView() const {
 	// its mention badge would be lit, which is the rule being legible from the
 	// chat list itself rather than only from the file.
 	return !purpleShowModeSatisfied(Purple::VisibleFor(peer).show);
+}
+
+bool History::purpleWouldLeaveTheView() const {
+	if (!Purple::Filtering() || Purple::Peeking()) {
+		// A peek shows everything, so nothing on screen during one is on screen
+		// because of a clock.
+		return false;
+	} else if (const auto override = Purple::OverrideFor(peer)) {
+		// A hide stays in the reckoning - it is a reason the row would be gone,
+		// not a reason it is here. A show is taken out, because it is exactly
+		// the temporary thing being asked about.
+		if (*override == Purple::OverrideKind::Hide) {
+			return true;
+		}
+	}
+	return purpleHiddenByPreset();
 }
 
 bool History::purpleInQuietFolder() const {
@@ -3713,7 +3733,15 @@ History::PurpleTemporary History::purpleTemporary() const {
 	// tab is still showing it, and marking it as leaving would say the opposite
 	// of what is happening. A "notify until" does not touch visibility at all.
 	// What is on a clock in those two cases is the decision, not the row.
-	if (span.untilUnix && (span.kind == Purple::OverrideKind::Show)) {
+	//
+	// And in both branches below, purpleWouldLeaveTheView() - the whole claim
+	// the mark makes is that the row goes when the clock stops, so a chat the
+	// preset lets through anyway must not carry one. Asked last because it is
+	// the expensive test and the two cheap ones drop every ordinary row before
+	// it, which matters: this runs per row per paint.
+	if (span.untilUnix
+		&& (span.kind == Purple::OverrideKind::Show)
+		&& purpleWouldLeaveTheView()) {
 		// Unix seconds, so it is converted here rather than stored twice. Only
 		// ever against a deadline still in the future, which keeps the
 		// arithmetic away from a wall clock that has been dragged backwards.
@@ -3731,7 +3759,9 @@ History::PurpleTemporary History::purpleTemporary() const {
 		// Open, so it is not counting down yet - the clock starts when you
 		// stop looking at it.
 		return {};
-	} else if (purpleShownAsRecent() && _purpleGraceUntil) {
+	} else if (purpleShownAsRecent()
+		&& _purpleGraceUntil
+		&& purpleWouldLeaveTheView()) {
 		const auto span = Purple::RecentStaySeconds() * crl::time(1000);
 		return { _purpleGraceUntil - span, _purpleGraceUntil };
 	}
