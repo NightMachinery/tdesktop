@@ -210,6 +210,9 @@ after_close_chat_style   = "timer"
 The ring gives up the badge slot to a count or a pin, which are facts about the
 chat rather than about how long the row has left.
 
+Only rows that will actually go are marked. A chat the preset lets through
+anyway is not on a clock, however recently you closed it, so it carries nothing.
+
 ## Show until, Hide until, Notify until
 
 Three entries in the `Work Mode` submenu, each offering 30 minutes, 2 hours, 8
