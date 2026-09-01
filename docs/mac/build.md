@@ -404,7 +404,7 @@ of the work and the installed bundle at 384MB.
 
 ### What makes it "Purple Telegram"
 
-The rebranding is deliberately three lines, so it survives rebasing onto
+The rebranding is deliberately four lines, so it survives rebasing onto
 upstream:
 
 - `Telegram/SourceFiles/core/version.h` — `AppName`. This is the important
@@ -416,11 +416,22 @@ upstream:
   the executable inside it, and `bundle_identifier`
   (`com.tdesktop.PurpleTelegram`), which is what Launch Services, the
   notification centre and the `tg://` handler key off.
+- `Telegram/SourceFiles/core/file_utilities.cpp` —
+  `DefaultDownloadPathFolder()`, which upstream derives from `AppName` and the
+  fork pins to `"Telegram Desktop"` instead. This is the one place the rebrand
+  is deliberately undone.
 
 Renaming only the built bundle would not be enough. `AppName` is compiled in,
 so a renamed stock build would still point at
 `~/Library/Application Support/Telegram Desktop`, and the two apps would fight
 over one data directory.
+
+The data directory is the only path that should be purple. `AppName` also names
+the folder downloads and exports go to, and that one belongs to you, not to the
+app — a rebrand is no reason for saved files to start landing somewhere new,
+next to years of them under the old name. Hence the fourth line: everything
+through `File::DefaultDownloadPath()` keeps writing to
+`~/Downloads/Telegram Desktop/`, shared with a stock build if you run one.
 
 ### The icon
 
@@ -503,7 +514,7 @@ and neither finishes.
 
 ### Rebasing onto upstream
 
-The local diff is the three rebranding lines, the recoloured icon binaries,
+The local diff is the four rebranding lines, the recoloured icon binaries,
 the scripts under `purple/`, and the fork features under
 `Telegram/SourceFiles/purple/` — `git grep Purple::` finds every call site where
 those hook into upstream code. The icons are the only awkward part: an upstream
