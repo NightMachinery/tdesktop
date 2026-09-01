@@ -166,7 +166,10 @@ QString DefaultDownloadPathFolder(not_null<Main::Session*> session) {
 #if OS_MAC_STORE
 	return u"Telegram Lite"_q;
 #else // OS_MAC_STORE
-	return session->supportMode() ? u"Tsupport Desktop"_q : AppName.utf16();
+	// Purple: upstream's name, not AppName. The rebrand is for the app, not
+	// for the user's files - downloads and exports stay where they have
+	// always been. Only the data directory is ours.
+	return session->supportMode() ? u"Tsupport Desktop"_q : u"Telegram Desktop"_q;
 #endif // OS_MAC_STORE
 }
 
