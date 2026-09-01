@@ -88,6 +88,21 @@ const auto kPsaBadgePrefix = "cloud_lng_badge_psa_";
 // Purple: the two marks for a row that is only here for the moment - inside its
 // close buffer, or held open by a "show until". Both leave on a clock, and
 // neither is otherwise distinguishable from a chat the preset simply allows.
+//
+// Told apart by colour, because they are not the same claim. The buffer takes
+// the accent the unread badge already uses: it is the app's own doing, and it
+// is over in a couple of minutes. A "show until" is green - a decision you made
+// and will want to recognise, hours from now, as the reason a chat is sitting
+// somewhere it does not belong.
+[[nodiscard]] const style::color &PurpleTemporaryFg(
+		const PaintContext &context) {
+	return context.active
+		? st::dialogsTextFgActive
+		: context.purpleTemporaryHeld
+		? st::boxTextFgGood
+		: st::dialogsUnreadBg;
+}
+
 void PaintPurpleTemporaryStripe(
 		QPainter &p,
 		const PaintContext &context,
@@ -97,9 +112,7 @@ void PaintPurpleTemporaryStripe(
 	const auto skip = context.st->padding.top();
 	const auto radius = width / 2.;
 	p.setPen(Qt::NoPen);
-	p.setBrush(context.active
-		? st::dialogsTextFgActive
-		: st::dialogsUnreadBg);
+	p.setBrush(PurpleTemporaryFg(context));
 	p.drawRoundedRect(
 		QRectF(
 			geometry.x(),
@@ -131,9 +144,7 @@ void PaintPurpleTemporaryStripe(
 		size).marginsRemoved({ 1.5, 1.5, 1.5, 1.5 });
 
 	auto hq = PainterHighQualityEnabler(p);
-	auto pen = QPen(context.active
-		? st::dialogsTextFgActive->c
-		: st::dialogsUnreadBg->c);
+	auto pen = QPen(PurpleTemporaryFg(context)->c);
 	pen.setWidthF(st::lineWidth * 1.5);
 	pen.setCapStyle(Qt::RoundCap);
 	p.setPen(pen);

@@ -74,6 +74,10 @@ struct PaintContext {
 	crl::time purpleTemporaryUntil = 0;
 	crl::time purpleTemporaryFrom = 0;
 
+	// Purple: whether a "show until" is holding this row, rather than the close
+	// buffer. Only the mark's colour depends on it.
+	bool purpleTemporaryHeld = false;
+
 	QStringView searchLowerText;
 	int width = 0;
 	bool active = false;

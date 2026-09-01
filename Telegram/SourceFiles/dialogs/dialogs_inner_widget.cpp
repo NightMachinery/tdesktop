@@ -1096,6 +1096,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			: History::PurpleTemporary();
 		context.purpleTemporaryUntil = temporary.until;
 		context.purpleTemporaryFrom = temporary.from;
+		context.purpleTemporaryHeld = temporary.held;
 
 		const auto cacheAllowed = _rowsScrollCache.scrolling()
 			&& !context.purpleTemporaryUntil
