@@ -27,7 +27,10 @@ constexpr auto kReloadDelay = crl::time(250);
 
 // Written once, on first run. Everything the user may want to change should be
 // present and commented, because an empty file teaches nobody what is possible.
-constexpr auto kStarterSettings = R"([premium]
+constexpr auto kStarterSettings = R"(# The layout this file is written to, so a newer app can tell. Leave it alone.
+version = 1
+
+[premium]
 # Unlock the Telegram Premium features that Telegram Desktop gates on the
 # client alone: no sponsored messages, exact "last seen" times, real-time chat
 # translation, and up to six accounts instead of three.

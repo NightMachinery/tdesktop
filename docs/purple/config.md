@@ -119,6 +119,9 @@ leaves usable settings behind rather than a hard failure:
 - Duplicate member ids are deduplicated on read, keeping the order you wrote.
 - A list whose name starts with `*` is refused: nobody reading the file could
   tell it from a set reference.
+- A `version` newer than the build understands is warned about and then read
+  anyway; one that is not a whole number, or is below 1, is warned about and
+  read as 1. A missing one is not warned about at all.
 - A hotkey that a message field has already claimed for a formatting action is
   warned about, naming the action. Such a key works everywhere except with the
   composer focused, where Qt calls the sequence ambiguous and fires neither
@@ -135,6 +138,27 @@ Everything the app could not make sense of is available to the UI as a warning
 list, for the banner described in the Work Mode spec.
 
 ## Schema
+
+`version` at the top of the file is the schema the file is written to. It is
+there so a build that meets a file from a newer one can say so, rather than
+quietly doing half of what the file asks:
+
+- **Absent** is version 1, silently. Every file written before the key existed
+  is a version 1 file, and there is nothing to report about that - a config
+  that started warning the day it was read by a newer build would teach you to
+  ignore the banner.
+- **Higher than the build understands** warns, naming both numbers, and the
+  file is read anyway. The keys this build knows are still where they were, and
+  the ones it has never heard of were already being ignored.
+- **Not a whole number, or below 1**, warns and is read as version 1.
+
+The number moves only when a key changes *meaning*, since that is the only kind
+of change an older build gets wrong rather than merely misses. Adding a key
+does not move it. Bumping it every release would make it noise.
+
+It says nothing about your messages. How recent they are, and what has and has
+not been synced from the server, live in `tdata` and are none of this file's
+business; this number describes the shape of `settings.toml` alone.
 
 `[premium] enabled_p` controls the client-side Premium unlocks; see
 [premium.md](premium.md) for what that covers and what it deliberately does not.
