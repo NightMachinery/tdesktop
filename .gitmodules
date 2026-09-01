@@ -108,4 +108,4 @@
 	url = https://github.com/Yubico/libfido2.git
 [submodule "Telegram/ThirdParty/purple_core"]
 	path = Telegram/ThirdParty/purple_core
-	url = git@github.com:NightMachinery/purple-core.git
+	url = https://github.com/NightMachinery/purple-core.git
