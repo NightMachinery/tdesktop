@@ -3754,6 +3754,7 @@ History::PurpleTemporary History::purpleTemporary() const {
 			crl::now() - std::max(now - span.startedUnix, int64(0))
 				* crl::time(1000),
 			crl::now() + left * crl::time(1000),
+			true, // Held open by the override, not lingering from the buffer.
 		};
 	} else if (_purpleOpened) {
 		// Open, so it is not counting down yet - the clock starts when you

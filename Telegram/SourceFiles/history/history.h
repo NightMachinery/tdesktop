@@ -476,6 +476,13 @@ public:
 	struct PurpleTemporary {
 		crl::time from = 0;
 		crl::time until = 0;
+
+		// Whether a "show until" is what is holding the row here, rather than
+		// the close buffer. The chat list draws the same mark either way but in
+		// a different colour, because the two mean different things: one is a
+		// decision you made and will remember making, the other is a chat you
+		// happened to look at a minute ago.
+		bool held = false;
 	};
 	[[nodiscard]] PurpleTemporary purpleTemporary() const;
 

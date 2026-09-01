@@ -198,6 +198,13 @@ one nothing in the preset claims at all.
 - `"timer"` - a ring where the unread badge would sit, emptying as the time
   runs out.
 
+The two reasons are told apart by colour. The close buffer takes the accent the
+unread badge already uses; a **Show until** is green. They are not the same
+claim - one is the app keeping a chat you just closed, over in a couple of
+minutes, and the other is a decision you made and will want to recognise hours
+later as the reason a chat is sitting somewhere it does not belong. On the row
+you have selected both go white, like everything else on it.
+
 ```toml
 [recent]
 stay_visible_after_close = "2m"
