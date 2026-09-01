@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "purple/purple_preset_box.h"
+#include "purple/purple_sync.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
@@ -1290,6 +1291,29 @@ void BuildPurpleSection(SectionBuilder &builder) {
 				u"preset"_q,
 				u"focus"_q,
 				u"hide"_q,
+			},
+		});
+	}
+
+	// The other half of settings.toml being a plain file: it is per-install,
+	// and Saved Messages is the one place both machines can already see.
+	// See docs/purple/sync.md.
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_send_settings"_q,
+			.title = rpl::single(u"Send settings to Saved Messages"_q),
+			.icon = { &st::menuIconSavedMessages },
+			.onClick = [=] {
+				Purple::SendSettingsToSavedMessages(
+					session,
+					controller->uiShow());
+			},
+			.keywords = {
+				u"purple"_q,
+				u"sync"_q,
+				u"settings"_q,
+				u"backup"_q,
+				u"saved"_q,
 			},
 		});
 	}

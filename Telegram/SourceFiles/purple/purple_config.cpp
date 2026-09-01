@@ -18,6 +18,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QSaveFile>
 
 namespace Purple {
+
+bool WriteConfigFile(const QString &path, const QString &text) {
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		LOG(("Purple Error: Could not write %1.").arg(path));
+		return false;
+	}
+	file.write(text.toUtf8());
+	if (!file.commit()) {
+		LOG(("Purple Error: Could not commit %1.").arg(path));
+		return false;
+	}
+	return true;
+}
+
 namespace {
 
 // Editors write a file in several steps, and some replace it wholesale. Wait
@@ -188,22 +203,6 @@ applies_to = "already_in_view"
 	return QString::fromUtf8(file.readAll());
 }
 
-// QSaveFile writes a temporary alongside the target and renames over it, so a
-// crash mid-write cannot leave a truncated config behind.
-[[nodiscard]] bool WriteFile(const QString &path, const QString &text) {
-	auto file = QSaveFile(path);
-	if (!file.open(QIODevice::WriteOnly)) {
-		LOG(("Purple Error: Could not write %1.").arg(path));
-		return false;
-	}
-	file.write(text.toUtf8());
-	if (!file.commit()) {
-		LOG(("Purple Error: Could not commit %1.").arg(path));
-		return false;
-	}
-	return true;
-}
-
 // Everything here runs on the main thread, in response to startup, a click in
 // Settings or a file change notification, so no locking.
 class Config final {
@@ -291,7 +290,7 @@ void Config::loadSettings() {
 		return;
 	}
 	const auto starter = QString::fromUtf8(kStarterSettings);
-	if (WriteFile(path, starter)) {
+	if (WriteConfigFile(path, starter)) {
 		applyText(starter);
 	} else {
 		applyText(QString());
@@ -334,7 +333,7 @@ bool Config::writeSettings(const QString &text) {
 	if (!QDir().mkpath(ConfigDirectory())) {
 		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
 		return false;
-	} else if (!WriteFile(SettingsFilePath(), text)) {
+	} else if (!WriteConfigFile(SettingsFilePath(), text)) {
 		return false;
 	}
 	applyText(text);
@@ -520,7 +519,7 @@ void Config::updateState(Fn<void(State&)> apply) {
 	// change over: the state is what the app is already doing, and losing it
 	// costs the user a preset to re-pick after a restart, nothing more.
 	if (!QDir().mkpath(ConfigDirectory())
-		|| !WriteFile(StateFilePath(), _stateText)) {
+		|| !WriteConfigFile(StateFilePath(), _stateText)) {
 		LOG(("Purple Error: Could not save %1.").arg(StateFilePath()));
 	}
 	_stateChanges.fire({});

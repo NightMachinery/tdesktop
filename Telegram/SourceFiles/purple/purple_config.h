@@ -19,6 +19,13 @@ namespace Purple {
 [[nodiscard]] QString SettingsFilePath();
 [[nodiscard]] QString StateFilePath();
 
+// The write every file in that directory goes through: QSaveFile puts a
+// temporary alongside the target and renames over it, so a crash mid-write
+// cannot leave a truncated config behind. Exposed because importing a
+// settings.toml from elsewhere is a write to the same file with the same
+// requirement, and a second implementation of it would be one to keep in step.
+bool WriteConfigFile(const QString &path, const QString &text);
+
 // The Premium features Telegram Desktop gates on the client alone. Features
 // the server enforces are deliberately not covered - see docs/purple/premium.md.
 [[nodiscard]] bool LocalPremium();

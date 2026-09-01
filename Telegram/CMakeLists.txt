@@ -1743,6 +1743,8 @@ PRIVATE
     purple/purple_readme.h
     purple/purple_schedule.cpp
     purple/purple_schedule.h
+    purple/purple_sync.cpp
+    purple/purple_sync.h
     settings/business/settings_away_message.cpp
     settings/business/settings_away_message.h
     settings/business/settings_shortcut_messages.cpp

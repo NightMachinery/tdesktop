@@ -95,6 +95,8 @@ with `git grep Purple::`. Read the docs before changing any of it:
 - **`docs/purple/premium.md`** - the client-side-only Premium unlocks
 - **`docs/purple/config.md`** - `settings.toml`, `state.toml`, live reload
 - **`docs/purple/work_mode.md`** - presets, lists, visibility and notify gating
+- **`docs/purple/sync.md`** - moving `settings.toml` between installs through
+  Saved Messages, and the alternatives that were not built
 
 The parser, the splice engine, the state store and the resolution engine are the
 Work Mode core, and they live in the `purple-core` submodule at

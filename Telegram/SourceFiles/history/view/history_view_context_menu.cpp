@@ -105,6 +105,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
+#include "purple/purple_sync.h"
 #include "spellcheck/spellcheck_types.h"
 #include "apiwrap.h"
 #include "styles/style_chat.h"
@@ -346,6 +347,11 @@ void AddDocumentActions(
 		}
 	}
 	AddSaveDocumentAction(menu, item, document, list);
+	Purple::AddImportSettingsAction(
+		menu,
+		item,
+		document,
+		controller->uiShow());
 	AddCopyFilename(
 		menu,
 		document,
