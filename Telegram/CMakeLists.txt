@@ -24,6 +24,11 @@ add_subdirectory(codegen)
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
+# The Work Mode core (parser, splicer, state, engine) lives in the purple-core
+# submodule so the Android app can compile the very same sources - see
+# docs/purple/config.md. Only the platform layer around it is in SourceFiles.
+get_filename_component(purple_core_loc ThirdParty/purple_core REALPATH)
+
 include(cmake/telegram_options.cmake)
 include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)
@@ -1724,8 +1729,6 @@ PRIVATE
     profile/profile_cover_drop_area.h
     purple/purple_config.cpp
     purple/purple_config.h
-    purple/purple_engine.cpp
-    purple/purple_engine.h
     purple/purple_focus.cpp
     purple/purple_focus.h
     purple/purple_gate.cpp
@@ -1740,12 +1743,6 @@ PRIVATE
     purple/purple_readme.h
     purple/purple_schedule.cpp
     purple/purple_schedule.h
-    purple/purple_settings.cpp
-    purple/purple_settings.h
-    purple/purple_splice.cpp
-    purple/purple_splice.h
-    purple/purple_state.cpp
-    purple/purple_state.h
     settings/business/settings_away_message.cpp
     settings/business/settings_away_message.h
     settings/business/settings_shortcut_messages.cpp
@@ -2105,6 +2102,19 @@ PRIVATE
     tray.h
 )
 
+nice_target_sources(Telegram ${purple_core_loc}
+PRIVATE
+    purple/purple_engine.cpp
+    purple/purple_engine.h
+    purple/purple_settings.cpp
+    purple/purple_settings.h
+    purple/purple_splice.cpp
+    purple/purple_splice.h
+    purple/purple_state.cpp
+    purple/purple_state.h
+    purple/purple_types.h
+)
+
 if (APPLE)
     nice_target_sources(Telegram ${src_loc}
     PRIVATE
@@ -2337,7 +2347,7 @@ set(entitlement_sources
 target_sources(Telegram PRIVATE ${entitlement_sources})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/Telegram PREFIX Resources FILES ${entitlement_sources})
 
-target_include_directories(Telegram PRIVATE ${src_loc})
+target_include_directories(Telegram PRIVATE ${src_loc} ${purple_core_loc})
 
 # toml++ is vendored as a single header rather than pulled from Homebrew, so the
 # packaged build has one less keg that can shadow or conflict with another - see
@@ -2345,10 +2355,10 @@ target_include_directories(Telegram PRIVATE ${src_loc})
 # header-only parser on the include path of every translation unit would change
 # their compile commands and force a full rebuild for no reason.
 set_source_files_properties(
-    ${src_loc}/purple/purple_settings.cpp
-    ${src_loc}/purple/purple_splice.cpp
-    ${src_loc}/purple/purple_state.cpp
-    PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/tomlplusplus)
+    ${purple_core_loc}/purple/purple_settings.cpp
+    ${purple_core_loc}/purple/purple_splice.cpp
+    ${purple_core_loc}/purple/purple_state.cpp
+    PROPERTIES INCLUDE_DIRECTORIES ${purple_core_loc}/tomlplusplus)
 
 target_compile_definitions(Telegram
 PRIVATE

@@ -1681,10 +1681,11 @@ resolves itself as soon as the entries load.
 
 ## Implementation
 
-    Telegram/SourceFiles/purple/purple_settings.{h,cpp}   the model and parser
-    Telegram/SourceFiles/purple/purple_engine.{h,cpp}     resolution, pure data
-    Telegram/SourceFiles/purple/purple_state.{h,cpp}      state.toml, the cache
-    Telegram/SourceFiles/purple/purple_splice.{h,cpp}     the surgical writes
+    Telegram/ThirdParty/purple_core/purple/   the submodule, shared verbatim
+        purple_settings.{h,cpp}   the model and parser
+        purple_engine.{h,cpp}     resolution, pure data
+        purple_state.{h,cpp}      state.toml, the cache
+        purple_splice.{h,cpp}     the surgical writes
     Telegram/SourceFiles/purple/purple_config.{h,cpp}     file IO and watcher
     Telegram/SourceFiles/purple/purple_focus.{h,cpp}      OS focus sync
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
@@ -1693,7 +1694,8 @@ resolves itself as soon as the entries load.
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
     Telegram/SourceFiles/purple/purple_schedule.{h,cpp}   the schedule clock
 
-The first four have no tdesktop dependency at all. The engine never sees a
+The four in the submodule have no tdesktop dependency at all - which is what
+lets the Android app compile them verbatim. The engine never sees a
 `PeerData`, only an id and a `ChatKind`, for the same reason the parser does
 not: every policy here is a rule about data, and rules about data are far easier
 to prove outside a running app. `purple/test_config.sh` compiles those four

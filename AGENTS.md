@@ -96,10 +96,18 @@ with `git grep Purple::`. Read the docs before changing any of it:
 - **`docs/purple/config.md`** - `settings.toml`, `state.toml`, live reload
 - **`docs/purple/work_mode.md`** - presets, lists, visibility and notify gating
 
-`purple/test_config.sh` compiles the parser, the splice engine and the
-resolution engine into a standalone harness and runs it in about a second. Run
-it after touching anything in `Telegram/SourceFiles/purple/`; a full app build
-to test a config change is never necessary.
+The parser, the splice engine, the state store and the resolution engine are the
+Work Mode core, and they live in the `purple-core` submodule at
+`Telegram/ThirdParty/purple_core` so the Android app compiles the very same
+sources. Only the platform layer around them is in
+`Telegram/SourceFiles/purple/`. Schema and core changes are made in the
+purple-core repository, committed and pushed there, and the submodule pointer
+bumped here.
+
+`purple/test_config.sh` compiles that core into a standalone harness and runs it
+in about a second. Run it after touching the core or anything in
+`Telegram/SourceFiles/purple/`; a full app build to test a config change is
+never necessary.
 
 ## Troubleshooting
 

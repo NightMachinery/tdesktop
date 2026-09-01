@@ -475,18 +475,23 @@ None of these are part of tdesktop's own shortcut table - see
 
 ## Implementation
 
-    Telegram/SourceFiles/purple/purple_settings.{h,cpp}   data model and parser
-    Telegram/SourceFiles/purple/purple_splice.{h,cpp}     the surgical writes
-    Telegram/SourceFiles/purple/purple_state.{h,cpp}      state.toml
-    Telegram/SourceFiles/purple/purple_config.{h,cpp}     file IO, watcher, API
-    Telegram/SourceFiles/purple/purple_readme.{h,cpp}     the generated readme
+    Telegram/ThirdParty/purple_core/purple/   the submodule, shared verbatim
+        purple_settings.{h,cpp}   data model and parser
+        purple_splice.{h,cpp}     the surgical writes
+        purple_state.{h,cpp}      state.toml
+    Telegram/SourceFiles/purple/
+        purple_config.{h,cpp}     file IO, watcher, API
+        purple_readme.{h,cpp}     the generated readme
 
 The Work Mode spec puts the parser and the splice engine inside `purple_config`.
 They are split out here for one reason: both are free of every tdesktop
-dependency beyond `base/` and Qt Core, which lets `purple/test_config.sh`
+dependency, needing nothing but Qt Core, which lets `purple/test_config.sh`
 compile them into a standalone harness and run a few hundred fixture edits in a
-second. Proving that a splice leaves a hand-written file alone takes many more
-iterations than a full app build would ever make practical, and tdesktop has no
+second - and is what let them move into a repository of their own, shared with
+the Android app. Changes to them are made in purple-core and the submodule
+pointer bumped here. Proving that a splice leaves a hand-written file alone
+takes many more iterations than a full app build would ever make practical, and
+tdesktop has no
 unit-test framework in the app target - `cmake/tests.cmake` builds visual GUI
 test apps behind `DESKTOP_APP_TEST_APPS`.
 
@@ -504,9 +509,10 @@ against what was intended before handing it back. A bug there refuses the edit
 rather than leaving you a file to repair by hand.
 
 toml++ is vendored as a single header at
-`Telegram/ThirdParty/tomlplusplus/toml.hpp` (v3.4.0, MIT) rather than taken from
-Homebrew, so the packaged build has one less keg that can shadow or conflict with
-another - `docs/mac/build.md` covers what that cost us with Qt and with FFmpeg.
+`Telegram/ThirdParty/purple_core/tomlplusplus/toml.hpp` (v3.4.0, MIT) rather
+than taken from Homebrew, so the packaged build has one less keg that can shadow
+or conflict with another - `docs/mac/build.md` covers what that cost us with Qt
+and with FFmpeg.
 It is compiled with `TOML_EXCEPTIONS 0`, so a malformed file returns an error to
 check instead of throwing through a Qt event handler. It is on the include path
 of only the three files that need it; putting a 486KB header-only parser in front
