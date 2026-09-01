@@ -504,6 +504,30 @@ folder - and deliberately leaves the silencing exactly where it was. It ends on
 `Meta` means the physical Control key. The Work Mode box prints the combination
 the way your keyboard actually has it.
 
+## The `version` at the top
+
+```toml
+version = 1
+```
+
+The layout this file is written to. It is there so an app that meets a file
+written by a newer one can tell you, instead of quietly doing half of what the
+file asks. You never need to change it.
+
+- Leaving it out means version 1, and says nothing - every file written before
+  the key existed is one.
+- A number newer than the app knows is a warning, and the file is read anyway:
+  everything the app does understand is still where it was.
+- Anything that is not a whole number, or is below 1, is a warning and is read
+  as version 1.
+
+It only moves when a key changes what it *means*. A new key does not move it,
+because an app that has never heard of a key ignores it and loses nothing.
+
+It has nothing to do with your messages - not how recent they are, and not what
+has been synced. That is Telegram's own data directory. This number is about
+the shape of `settings.toml` and nothing else.
+
 ## Every boolean key ends in `_p`
 
 A naming convention, not a type distinction. It means the answer is yes or no,

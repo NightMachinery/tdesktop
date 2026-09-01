@@ -1122,6 +1122,41 @@ void WarnUnknownLists(
 	return result;
 }
 
+// The one key that is about the file rather than about anything in it. A
+// number this build does not recognise is not an error: the keys it does know
+// are still where they were, so it reads what it understands and says out loud
+// that there may be more of the file than it can see.
+[[nodiscard]] int ReadVersion(
+		const toml::table &root,
+		std::vector<QString> &warnings) {
+	const auto result = kSettingsVersion;
+	const auto node = root.get("version");
+	if (!node) {
+		return result;
+	}
+	const auto value = node->value<int>();
+	if (!value) {
+		warnings.push_back(
+			u"'version' should be a whole number (%1), reading the file as "
+			"version %2."_q.arg(At(*node)).arg(result));
+		return result;
+	} else if (*value < 1) {
+		warnings.push_back(
+			u"'version' should be 1 or more (%1), reading the file as version "
+			"%2."_q.arg(At(*node)).arg(result));
+		return result;
+	} else if (*value > kSettingsVersion) {
+		warnings.push_back(
+			u"settings.toml is version %1, written by a newer Purple Telegram "
+			"(%2); this build understands version %3 and may ignore keys it "
+			"has never heard of."_q
+				.arg(*value)
+				.arg(At(*node))
+				.arg(kSettingsVersion));
+	}
+	return *value;
+}
+
 } // namespace
 
 std::optional<RecentScope> ParseRecentScope(const QString &value) {
@@ -1482,6 +1517,8 @@ ParseResult ParseSettings(const QString &text, const QString &path) {
 		return result;
 	}
 	const auto root = std::move(parsed).table();
+
+	result.settings.version = ReadVersion(root, result.warnings);
 
 	if (const auto premium = root.get("premium")) {
 		if (const auto table = premium->as_table()) {

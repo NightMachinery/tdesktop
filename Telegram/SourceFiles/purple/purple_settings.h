@@ -21,6 +21,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // easier to prove outside a running app.
 namespace Purple {
 
+// The schema this build speaks, and what a file's own `version' is measured
+// against. It moves only when a key changes MEANING, because that is the only
+// change an older build gets wrong rather than merely misses: adding a key
+// costs an old build nothing, since it ignores what it has never heard of.
+//
+// So it is not a build number and not a date. Bumping it on every release
+// would make it noise, and a warning nobody has a reason to act on is a
+// warning everybody learns to skip.
+inline constexpr auto kSettingsVersion = 1;
+
 // Peer ids exactly as written in the file. Turning these into tdesktop PeerIds
 // is the engine's job; the parser stays ignorant of what a peer is.
 using PeerIdValue = int64;
@@ -402,6 +412,12 @@ struct Premium {
 };
 
 struct Settings {
+	// What the file says it is, as written. A file with no `version' at all is
+	// one - every file written before the key existed is - and that is read in
+	// silence rather than warned about, since an absent key here is a fact
+	// about when the file was written and not a mistake in it.
+	int version = kSettingsVersion;
+
 	Premium premium;
 
 	// Definitions only, in file order. Priority is a preset's business.

@@ -969,6 +969,43 @@ enabled_p = true
 	CHECK(WarnsAbout(order, u"each preset writes its own"_q));
 }
 
+void TestVersion() {
+	Begin("version");
+
+	// Absent is the ordinary case - every file written before the key existed
+	// says nothing - so it must be silent. A file that starts nagging the day
+	// it is read by a newer build would teach the banner to be ignored.
+	const auto absent = Parse(Example());
+	CHECK(absent.ok());
+	CHECK_EQ(absent.settings.version, 1);
+	CHECK(absent.warnings.empty());
+
+	const auto current = Parse(u"version = 1\n"_q + Example());
+	CHECK(current.ok());
+	CHECK_EQ(current.settings.version, 1);
+	CHECK(current.warnings.empty());
+
+	// A file from a newer build parses as far as this one understands it, and
+	// says so. Everything this build knows about is still exactly where it was.
+	const auto newer = Parse(u"version = 2\n"_q + Example());
+	CHECK(newer.ok());
+	CHECK_EQ(newer.settings.version, 2);
+	CHECK(WarnsAbout(newer, u"version 2"_q));
+	CHECK_EQ(ListNames(newer.settings).join(u","_q),
+		u"os,emergency,colleagues,people,noise"_q);
+	CHECK_EQ(int(newer.settings.presets.size()), 2);
+
+	const auto text = Parse(u"version = \"abc\"\n"_q + Example());
+	CHECK(text.ok());
+	CHECK_EQ(text.settings.version, 1);
+	CHECK(WarnsAbout(text, u"should be a whole number"_q));
+
+	const auto zero = Parse(u"version = 0\n"_q + Example());
+	CHECK(zero.ok());
+	CHECK_EQ(zero.settings.version, 1);
+	CHECK(WarnsAbout(zero, u"should be 1 or more"_q));
+}
+
 void TestBrokenFile() {
 	Begin("broken file");
 
@@ -3125,6 +3162,7 @@ int main() {
 	TestScheduleAndFocus();
 	TestScalarParsers();
 	TestPremiumStillParses();
+	TestVersion();
 	TestBrokenFile();
 	TestSpliceAdd();
 	TestSpliceRemove();
