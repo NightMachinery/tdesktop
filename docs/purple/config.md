@@ -38,6 +38,9 @@ the repository in `../tdesktop-libs/api_credentials.sh`, as
 - pinned orders, when a preset or one of its views owns one - dragging a pinned
   row rewrites that array.
 
+The one write that is not surgical is an import from Saved Messages, which
+replaces the whole file after asking - see below.
+
 Neither re-serializes the document. Both locate what they need through toml++
 source regions and edit the raw lines, so comments, blank lines, alignment and
 key order all survive. `enabled   =    true   # keep ads away` comes back as
@@ -79,6 +82,37 @@ the parser is the arbiter of which one is right.
 
 The only thing in it that is not a constant is the path to `log.txt`, which is
 substituted from `cWorkingDir()` because it is the one line nobody can guess.
+
+## Syncing between devices
+
+`settings.toml` is per-install: two machines have two files, and nothing keeps
+them in step by itself. Two actions move one to the other, with Saved Messages
+as the transport:
+
+- **Settings > Advanced > Purple > Send settings to Saved Messages** posts the
+  current file to your own Saved Messages as a document called `settings.toml`,
+  captioned with its schema version, the local time and the platform. It asks
+  first, because the file names chats.
+- **Right-click that message > Import Purple settings**, in Saved Messages,
+  reads it back. It parses before it writes, so a file that is not valid TOML
+  is reported and nothing is touched; otherwise it shows the date, the schema
+  version and the number of parser warnings, and replaces the file on confirm.
+  The watcher then reloads it like any other edit.
+
+Saved Messages is the version history. Every send is a message with a date on
+it, they stack up in one chat, and picking an older one is picking an older
+config - so there is nothing here that keeps revisions, because the chat
+already does.
+
+The previous file is kept as `settings.toml.bak` beside it. There is exactly
+one, overwritten on every import: it is there for the "that was the wrong
+file" moment, and a numbered series would silt up a directory people read by
+hand when Saved Messages is already holding every version worth going back to.
+
+`state.toml` is not sent and not touched. The active preset and the running
+timers are what *this* machine is doing, not what your settings are.
+
+See [sync.md](sync.md) for why it is Saved Messages and not git or a server.
 
 ## Editing it while the app runs
 

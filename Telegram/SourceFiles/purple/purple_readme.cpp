@@ -36,9 +36,11 @@ save it - there is no restart and no Apply button.
 
 ## The two files
 
-`settings.toml` is yours. The app reads it and makes only the three surgical
-writes below, each of which edits the lines it needs and leaves your comments,
-blank lines, alignment and key order exactly where they were.
+`settings.toml` is yours. The app reads it and makes only the surgical writes
+below, each of which edits the lines it needs and leaves your comments, blank
+lines, alignment and key order exactly where they were. The one exception is an
+import from Saved Messages, which replaces the whole file - and asks first, and
+keeps what was there as `settings.toml.bak`.
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
 focus-sync memory, the schedule's pause flag, the peek timer, and a cache of the
@@ -503,6 +505,31 @@ folder - and deliberately leaves the silencing exactly where it was. It ends on
 `hotkey` is read as Qt portable text, so **on macOS `Ctrl` means Command** and
 `Meta` means the physical Control key. The Work Mode box prints the combination
 the way your keyboard actually has it.
+
+## Moving this file to another machine
+
+This file belongs to this install. Another Purple Telegram on another machine
+has its own, and nothing keeps the two in step by itself. Two actions move one
+across, through your own Saved Messages:
+
+- **Settings > Advanced > Purple > Send settings to Saved Messages** posts a
+  copy of `settings.toml` there, captioned with its schema version, the time
+  and the platform. It asks first: the file names your chats.
+- **Right-click that message > Import Purple settings**, in Saved Messages, on
+  the machine you want it. It tells you the date, the schema version and how
+  many warnings the file produces, and asks before replacing anything.
+
+The chat is the history. Every send is one message with a date on it, so going
+back to last week's settings is finding last week's message and importing it.
+
+Your previous file is kept beside this one as `settings.toml.bak`. There is
+only ever one, overwritten each time you import.
+
+A file that is not valid TOML is refused at both ends, with the line and column
+- nothing is sent and nothing is replaced.
+
+`state.toml` is not part of any of this. Which preset is running is about the
+machine you are sitting at.
 
 ## The `version` at the top
 
