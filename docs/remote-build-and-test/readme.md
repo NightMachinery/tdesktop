@@ -74,6 +74,32 @@ password is written in the clear in the scripts. The emulator refuses to
 install an unsigned APK, and that is the only thing this key is for. Anything a
 person installs is signed on the Mac with the real key instead.
 
+## Building an uncommitted patch
+
+Commits are authored on the Mac and the build box only pulls, so a change
+that is not pushed yet cannot be built through `bin/rebuild.sh`. For that
+there is `bin/build-patch.sh`: it resets the checkout to `origin/master`,
+applies a diff, builds, and signs the result with the throwaway key exactly
+as `rebuild.sh` does.
+
+The diff is sent first and the build started detached, because a build takes
+minutes and the patch must not be read from the stdin of a backgrounded
+process:
+
+```
+git add -N path/to/NewFile.java      # intent-to-add, so the diff includes new files
+git diff HEAD --binary | ssh pi 'cat > /tmp/purple-android/pending.patch'
+ssh pi 'nohup /tmp/purple-android/bin/build-patch.sh > /tmp/purple-android/fork-b/build.log 2>&1 &'
+```
+
+Poll the log for `BUILD_EXIT=`; a compile error shows up as `error:` lines
+above it. Because the checkout is reset every time, nothing from a previous
+patch survives, and a patch that applies on the Mac applies there too.
+
+This is the loop a delegated implementation agent uses to verify its work
+before anything is committed. The one thing it must never do is copy
+anything but the patch to the box.
+
 ## Running the emulator
 
 An x86_64 system image with Google APIs runs the arm64-only APK through
