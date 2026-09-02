@@ -162,3 +162,26 @@ For a settings.toml round trip, push the file to the emulator's `Download`
 folder, open Saved Messages through the chat search (an empty Saved Messages is
 not in the chat list), then attach it from inside the chat with the paperclip,
 choosing File and then Internal Storage.
+
+## Keeping the login between test runs
+
+Logging in needs a code read out of another device, so do it once and keep the
+result. `bin/session-save.sh` snapshots the app's whole data directory into
+`session-org.purple.telegram.tar.gz`, and `bin/session-restore.sh` puts it back
+after a reinstall or a `pm clear`. Both stop the app first, and the restore
+fixes up ownership afterwards, because the package's uid changes on every
+reinstall.
+
+Take the snapshot once, right after logging in. From then on, a test run is
+install, restore, go.
+
+Reinstalling over the top with `adb install -r` already keeps the data, so the
+snapshot is for the cases that do not: a wiped AVD, a deliberate `pm clear`, or
+a rebuilt emulator. Take a fresh snapshot whenever the account's state changes
+in a way worth keeping.
+
+The snapshot contains a live Telegram authorization key. It is written mode 600
+inside the mode-700 working directory, and it must only ever hold a throwaway
+test account. If one leaks, or when testing is over for good, terminate that
+session from Telegram's Settings, Devices on the real phone: deleting the file
+does not revoke the key.
