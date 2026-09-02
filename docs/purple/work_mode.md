@@ -1668,6 +1668,58 @@ keys rather than picking a winner.
 The format is documented in [config.md](config.md), including the macOS trap
 that `Ctrl` is Command and `Meta` is the physical Control key.
 
+## On Android
+
+The Android fork runs the same core, compiled through the NDK into
+`libpurplecore.so`, so a `settings.toml` written on the desktop means the same
+thing on the phone. What is ported so far is the chat list: a preset decides
+what is in it, and a picker chooses the preset.
+
+Three things make that possible, and they are the contract between the two
+apps rather than an implementation detail of either:
+
+- **Four kinds and nothing else.** A bot, then a user, then a broadcast
+  channel, then everything else is a group. Basic groups and supergroups are
+  one kind on both, because being upgraded must not move a chat between lists.
+- **The bare id.** The file keeps the peer id with its type stripped, which on
+  Android is the absolute value of the dialog id. There is no `-100` channel
+  prefix in the Android client; that is the Bot API's convention, not this
+  codebase's. An encrypted chat resolves to the user behind it.
+- **The engine answers with a `show_mode`, not a yes.** The unread half is
+  finished by the app, against its own unread counts, exactly as the desktop
+  finishes it in `purpleShowModeSatisfied()`.
+
+The Android seam is `PurpleGate.java`, which is `purple_gate.cpp`'s opposite
+number: the one file that knows both what a `TLRPC.Dialog` is and what the core
+wants. It hides by leaving rows out of the list `DialogsActivity` draws, never
+by touching the model, so a hidden chat is still pinned, still in search and
+still in the forward picker.
+
+Two deliberate narrowings, both taken from this document:
+
+- **The archive and the folder tabs are not filtered.** A preset decides its
+  own view; a folder decides its own tab. Which folders a preset shows at all
+  is the desktop's `folders` key and is not ported yet.
+- **Pin dragging is refused while a preset runs.** Android turns a drop into a
+  server-side order by reading the model list and sending it with `force`, so
+  dragging inside a filtered list would drop the hidden chats' pins from the
+  account and from every other device. That is the same hazard the desktop
+  guards in `ChatFilters::saveOrder()`, met in a different place.
+
+The picker lives in the chat list's overflow menu, labelled with the running
+preset, and again in Settings - for the same reason it is in two places on the
+desktop. When the active preset is not in the file, no row is checked and the
+box says so, because checking Normal would fire the selection callback and
+unhide everything over a typo.
+
+### Not ported yet
+
+`notify_p`, so a preset hides without silencing; the badge, which still counts
+hidden chats; folders, extra views, overrides, peek, the schedule and the
+`[recent]` grace period. There is no hot reload either: the file is read at
+startup and after an import or a preset switch, which is enough on a phone
+where nothing else writes it.
+
 ## Not yet implemented
 
 Nothing outstanding here at the moment.
