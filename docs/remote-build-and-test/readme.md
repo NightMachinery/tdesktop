@@ -180,8 +180,15 @@ snapshot is for the cases that do not: a wiped AVD, a deliberate `pm clear`, or
 a rebuilt emulator. Take a fresh snapshot whenever the account's state changes
 in a way worth keeping.
 
-The snapshot contains a live Telegram authorization key. It is written mode 600
-inside the mode-700 working directory, and it must only ever hold a throwaway
-test account. If one leaks, or when testing is over for good, terminate that
-session from Telegram's Settings, Devices on the real phone: deleting the file
-does not revoke the key.
+The snapshot contains a live Telegram authorization key, so treat it like one.
+It is written mode 600 inside the mode-700 working directory, which is
+deliberately outside every checkout, and it must only ever hold a throwaway
+test account. The Android fork also ignores `session-*.tar.gz`, so a snapshot
+that ends up inside the repository by accident cannot be committed. If one
+leaks, or when testing is over for good, terminate that session from Telegram's
+Settings, Devices on the real phone: deleting the file does not revoke the key.
+
+The archive is built inside the guest and then pulled, rather than streamed out
+of `adb exec-out`. The emulator can segfault mid-stream, and streaming left a
+zero-byte archive that looked like a success. The script now refuses to keep
+anything implausibly small and checks the pulled size against the original.
