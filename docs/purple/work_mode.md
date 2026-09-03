@@ -1826,6 +1826,8 @@ unhide everything over a typo.
 ### Not ported yet
 
 Extra views, overrides, peek, the schedule and the `[recent]` grace period.
+The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
+`include_in_main_view` all work.
 
 A folder's `notify_p` is ported. A folder silences its chats here the way it
 does on the desktop and by the same shape: `PurpleGate.silencedByFolder()` is
@@ -1871,9 +1873,32 @@ desktop's: a chat in an uncounted folder still counts toward All chats, because
 that tab is counting what is on screen in front of you, which is a different
 question from whether the launcher icon should light up.
 
-A folder's `include` is still not ported, though the mechanism it needs now
-exists. Until it is, a `settings.toml` that pulls a folder into the view does
-that on the desktop only.
+`include_in_main_view` is ported, and with it the folder mechanism is complete.
+The walk is the desktop's `History::purpleExemptFolderMode()`: `"pinned"` reads
+the folder's own pinned order, a chat in two exempt folders takes the most
+permissive answer, and a folder that names no `show_mode` leaves its chats to
+`DefaultShowMode()` for whatever they are - which the bridge hands over as four
+numbers rather than a second native, since a chat asking for its own default is
+on the row-drawing path. The folder decides first when it claims a chat at all,
+the way `purpleHiddenByPreset()` orders it: it named this folder, where a list
+entry named a kind or a set of ids.
+
+Two things it does not do, and both are worth saying because they look like
+bugs.
+
+**A pulled-in chat is visible, not un-silenced.** The notify half still comes
+from whatever list claimed the chat, and a chat no list claims has nothing to
+say about notifying, so it arrives in the view silenced. `notify_p` on the
+folder is the separate lever, and the two are independent on purpose.
+
+**It does not override the archive here.** On the desktop a folder's chats come
+in wherever they are filed, and two places had to be taught the invariant still
+held. Android hides by leaving rows out of the list `DialogsActivity` builds, so
+a chat can only be pulled into a list it was already a candidate for, and an
+archived chat is never a candidate for the main one. Pulling it in would mean
+synthesising a row rather than keeping one, which is a different mechanism from
+the one this fork uses everywhere. So on Android an archived chat stays in the
+archive whatever a folder says.
 
 There is no hot reload either: the file is read at startup and after an
 import or a preset switch, which is enough on a phone where nothing else writes
