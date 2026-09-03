@@ -263,6 +263,31 @@ Enable it by writing `<boolean name="logsEnabled" value="true" />` into
 `shared_prefs/systemConfig.xml`, then read
 `/sdcard/Android/data/<applicationId>/files/logs/*_net.txt`.
 
+### Which surfaces actually read back
+
+Screenshots work fine when the box is quiet, and at load ~1 they are the fastest
+way to answer "is this chat in the list". Two things learned the hard way about
+what the pixels mean:
+
+- **The muted bell is not drawn for a verified chat.** `DialogCell` guards it
+  with `&& !drawVerified`, and most seeded test chats are verified, so a missing
+  bell says nothing about whether a chat is muted. The **unread dot's colour**
+  is the observable to use instead: grey is `isCounterMuted()`, which reads the
+  effective mute, so it is what shows a preset's silencing.
+- **A folder tab's counter includes muted chats** unless that folder carries
+  Telegram's "Exclude Muted" flag - `unreadCount -= channels[0][1]` is skipped
+  only then. So a tab that still shows a number over a silenced chat is stock
+  behaviour, not a gap.
+
+`uiautomator` reads tab counters as `content-desc="News&#10;1 unread chat"`,
+which is the same number without needing to judge a colour, and action-bar
+buttons as `content-desc="Mute"` / `"Unmute"`, which is the only readable
+evidence of what a Mute/Unmute control is offering.
+
+To give a folder the "Exclude Muted" flag - the setup an oscillation test needs
+- long-press its tab, *Edit folder*, *Add Chats to Exclude*, *Muted*, the tick,
+then SAVE. Removing it again is a long-press on the *Muted* row, *Remove*.
+
 ## Logging in a test account
 
 Use a real account on the production servers. Telegram's test data centres and
