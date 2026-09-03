@@ -1776,11 +1776,22 @@ unhide everything over a typo.
 
 ### Not ported yet
 
-The badge, which still counts hidden chats when the app is set to count muted
-ones; folders, extra views, overrides, peek, the schedule and the `[recent]`
-grace period. There is no hot reload either: the file is read at startup and
-after an import or a preset switch, which is enough on a phone where nothing
-else writes it.
+Folders, extra views, overrides, peek, the schedule and the `[recent]` grace
+period. There is no hot reload either: the file is read at startup and after an
+import or a preset switch, which is enough on a phone where nothing else writes
+it - though it does mean the "running from the last good copy" warning stays up
+until the next reload after the real file comes back.
+
+The badge and notifications are done, and were verified against a real inbound
+message rather than by reading the code: with the chat hidden the gate logged
+`value is false`, posted no notification and left the badge untouched; under
+Normal the same chat logged `value is true`, posted one and moved the badge to
+2. One rough edge stays. With "Include muted chats" turned on, the in-app "All
+chats" tab counter still includes hidden chats, while the launcher badge does
+not - that counter is computed in `MessagesStorage` from a SQL cursor rather
+than from dialog objects, so excluding them there needs a gate entry point that
+works without a dialog in hand and still honours mention-gating. In the default
+configuration it is already right, so this is left as a known limit.
 
 ## Not yet implemented
 
