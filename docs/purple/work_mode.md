@@ -1672,8 +1672,9 @@ that `Ctrl` is Command and `Meta` is the physical Control key.
 
 The Android fork runs the same core, compiled through the NDK into
 `libpurplecore.so`, so a `settings.toml` written on the desktop means the same
-thing on the phone. What is ported so far is the chat list: a preset decides
-what is in it, and a picker chooses the preset.
+thing on the phone. What is ported so far is the chat list and silencing: a
+preset decides what is in the list and what may interrupt you, and a picker
+chooses the preset.
 
 Three things make that possible, and they are the contract between the two
 apps rather than an implementation detail of either:
@@ -1706,6 +1707,52 @@ Two deliberate narrowings, both taken from this document:
   account and from every other device. That is the same hazard the desktop
   guards in `ChatFilters::saveOrder()`, met in a different place.
 
+### Three mute roots, not one
+
+Silencing is the one place where the port could not follow the desktop's shape.
+The desktop has a single root - `Data::NotifySettings::isMuted` - and hooking it
+made the bell, the sorting, the notifications and the badge follow at once.
+Android decides muted-ness in three separate places, and two of them have to be
+hooked:
+
+- `MessagesController.isDialogMuted` reads the `notify2_` preferences and is
+  what every visible surface asks: the bell in the chat list, the grey unread
+  counter, the folder "exclude muted" predicate, and the muted buckets the
+  unread counters are built from.
+- `NotificationsController.getNotifyOverride` decodes the *same* preferences
+  again, independently, and is the only thing the delivery path consults -
+  `NotificationsController` never calls `isDialogMuted` when deciding whether to
+  ring. Without this second hook a preset would show the muted bell and count
+  nothing while the phone still rang.
+- A SQLite mirror, `dialog_settings.flags`, is read once at cold start to decide
+  which chats are eligible for a push. This one is deliberately left alone: it
+  runs on the storage thread before the users and chats are loaded, so the gate
+  could not tell a bot from a person there, and the counts it seeds are
+  corrected by the first counter pass anyway.
+
+The rule is the desktop's, unchanged: **a preset only ever adds a mute.** A chat
+you muted by hand stays muted whichever entry claims it, and switching presets
+never un-silences anything. That makes the split the desktop needs necessary
+here too. `MessagesController.mutedWithoutPreset` is Android's
+`purpleMutedWithoutPreset`, and everything that labels or drives a Mute/Unmute
+toggle reads it: the chat list's long-press menu and swipe label, the action
+mode's mute icon, the notification popup, the chat header, the profile row, the
+topic menus, and the notification-exceptions list, which is a list of your own
+exceptions by definition. Everything asking whether a chat is *quiet* - the
+bell, the grey counter, the title icons, the counters - keeps the effective
+answer.
+
+The exclude-muted folder predicate reads it for a different reason, and it is
+the same loop this document describes under "Breaking the loop": membership is
+decided as though this preset silenced nothing, or a folder that excludes muted
+chats would eject a chat the moment the preset silenced it, which would
+un-silence it, which would put it back.
+
+One consequence worth stating, because it looks like a bug and is not: a
+preset-silenced chat stays *in* an exclude-muted folder but drops out of that
+folder's unmuted count. The folder still holds the chat; the badge no longer
+shouts about it. That is the same asymmetry the desktop has.
+
 The picker lives in the chat list's overflow menu, labelled with the running
 preset, and again in Settings - for the same reason it is in two places on the
 desktop. When the active preset is not in the file, no row is checked and the
@@ -1714,11 +1761,11 @@ unhide everything over a typo.
 
 ### Not ported yet
 
-`notify_p`, so a preset hides without silencing; the badge, which still counts
-hidden chats; folders, extra views, overrides, peek, the schedule and the
-`[recent]` grace period. There is no hot reload either: the file is read at
-startup and after an import or a preset switch, which is enough on a phone
-where nothing else writes it.
+The badge, which still counts hidden chats when the app is set to count muted
+ones; folders, extra views, overrides, peek, the schedule and the `[recent]`
+grace period. There is no hot reload either: the file is read at startup and
+after an import or a preset switch, which is enough on a phone where nothing
+else writes it.
 
 ## Not yet implemented
 
