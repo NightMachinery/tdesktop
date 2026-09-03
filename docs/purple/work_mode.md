@@ -1827,15 +1827,37 @@ unhide everything over a typo.
 
 Extra views, overrides, peek, the schedule and the `[recent]` grace period.
 
-A folder's `notify_p`, `badge_p` and `include` are not ported either, though its
-tab is. All three need to ask whether a given chat is inside a given folder, on
-the notification and counter paths, which is one mechanism rather than three -
-and it is the mechanism that makes the exclude-muted loop this document
-describes real on Android for the first time. The loop breaker is already in
-place (the predicate reads `mutedWithoutPreset`); the loop is not yet there to
-break. Until then a `folders` entry decides whether a tab appears and nothing
-else, so a `settings.toml` that silences a folder silences it on the desktop
-only.
+A folder's `notify_p` is ported. A folder silences its chats here the way it
+does on the desktop and by the same shape: `PurpleGate.silencedByFolder()` is
+`NotifySettings::purpleSilencedByFolder()`, matching the preset's silenced
+folder names against the account's real folder titles and asking each match
+whether it holds the chat. Answered live on every query rather than from a
+snapshot - folder membership moves with every message that arrives, so there is
+nothing worth caching - and behind the same emptiness check the desktop puts in
+front of its own walk, so a preset that silences no folder never reaches it.
+
+The snapshot was the tempting design and it is the wrong one here.
+`sortDialogs()` maintains a folder's membership list only for the tabs currently
+on screen, and returns immediately while the interface is paused, so a cached
+set would be stale in exactly the case that matters - a notification arriving
+with no chat list open.
+
+This is what makes the exclude-muted loop described above real on Android for
+the first time, and the breaker put in place pre-emptively is now load-bearing:
+`DialogFilter.includesDialog()` reads `mutedWithoutPreset`, so membership is
+decided as though this preset silenced nothing.
+
+Two limits worth stating. The walk is reached from the storage and
+notifications threads and it reads lists the UI thread owns; a walk that throws
+answers "not a member", which is the safe direction - the preset silences
+nothing it was not already silencing, and the next query gets it right. And a
+folder can only answer once the folder list has loaded, so the first push after
+a cold start, arriving before the dialog list, is not folder-silenced. The
+desktop has the same hole for the same reason and says so.
+
+A folder's `badge_p` and `include` are still not ported, though the mechanism
+they need now exists. Until they are, a `settings.toml` that leaves a folder out
+of the counts or pulls one into the view does that on the desktop only.
 
 There is no hot reload either: the file is read at startup and after an
 import or a preset switch, which is enough on a phone where nothing else writes
