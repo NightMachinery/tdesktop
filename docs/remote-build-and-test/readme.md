@@ -191,6 +191,66 @@ earlier run.
 `bin/anr.sh` dismisses a dialog that does appear, by finding its Wait button
 rather than guessing where it is.
 
+## Wait for the box; do not skip the test
+
+Shrinking the display buys a lot, but it does not buy everything. At a load
+average around 100 on 96 cores the emulator cannot render at all - not at any
+resolution, not after an emulator restart, and *System UI* itself starts to
+ANR. Two data points so far: unusable at load ~100, and a clean 25 second cold
+start of the same APK on the same 480x1040 display at load 1.6.
+
+A test that cannot run is not a test that passed. When the box is loaded, wait
+and poll rather than shipping on a compile:
+
+```
+ssh pi /tmp/purple-android/bin/boxready.sh
+```
+
+prints READY or BUSY and exits non-zero while busy, so it drives a poll loop
+directly. The bar is "at least 8 of the 96 cores idle"; pass a load figure to
+override it. Poll every 30 minutes - the load here comes from other people's
+batch jobs, which run for hours, so a tighter loop learns nothing.
+
+While you wait, the failure signature is worth confirming rather than assuming:
+the ANR trace under starvation is `HardwareRenderer.nSetStopped` with no
+application frames, and the app's own `FileLog.d` output keeps arriving and
+keeps being correct. If application code *is* in the stack, the box is not your
+problem.
+
+### Load history
+
+`sar` is installed but the system-wide collector is off and there is no sudo on
+this box, so `bin/sysmon.sh start` runs a `sadc` of our own. It only reads
+`/proc`, which is world-readable, so it records the same samples the real
+collector would; the files land in `/tmp/purple-android/sa/` under our own
+`0700` directory, named `saDD` like the real thing.
+
+```
+ssh pi /tmp/purple-android/bin/sysmon.sh start     # idempotent
+sar -f /tmp/purple-android/sa/sa03 -q             # run queue and load
+sar -f /tmp/purple-android/sa/sa03 -u             # cpu
+sar -f /tmp/purple-android/sa/sa03 -S -W          # swap
+```
+
+It is worth having because "the box was busy" is otherwise unfalsifiable after
+the fact, and because it distinguishes a machine that was saturated for an hour
+from one that is saturated now.
+
+### Why the emulator is the first casualty
+
+Beyond the software renderer, two standing conditions on this box make memory
+pressure worse than the core count suggests. `/dev/shm` is a 504 GB tmpfs that
+another user keeps at 99% full; tmpfs pages cannot be dropped, only swapped, so
+that space is held out of the page cache and about 50 GB of swap stays in use.
+And swap (`/dev/sdb1`) is a partition of the same physical disk as `/tmp`
+(`/dev/sdb2`), where the SDK, the emulator's disk image and the build tree all
+live, so emulator I/O queues behind swap I/O.
+
+Neither is ours to fix - it is other people's data on a shared machine - and
+with several hundred GB still available neither is usually the binding
+constraint. They are the reason a busy box degrades sharply rather than
+gracefully.
+
 ## Verifying without the screen
 
 Telegram draws its chat list and message cells as custom views with no text
