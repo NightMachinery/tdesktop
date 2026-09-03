@@ -1714,13 +1714,56 @@ still in the forward picker.
 Two deliberate narrowings, both taken from this document:
 
 - **The archive and the folder tabs are not filtered.** A preset decides its
-  own view; a folder decides its own tab. Which folders a preset shows at all
-  is the desktop's `folders` key and is not ported yet.
+  own view; a folder decides its own tab. *Which* folders a preset shows is the
+  `folders` key and is ported; what is inside one is the folder's business.
 - **Pin dragging is refused while a preset runs.** Android turns a drop into a
   server-side order by reading the model list and sending it with `force`, so
   dragging inside a filtered list would drop the hidden chats' pins from the
   account and from every other device. That is the same hazard the desktop
   guards in `ChatFilters::saveOrder()`, met in a different place.
+
+### The folder strip
+
+The two-accessor rule is the desktop's, met in Android's shape.
+`MessagesController.getDialogFilters()` is now a display-only view - the folders
+the preset named, in the order it named them - and
+`getDialogFiltersUnrestricted()` holds what that method used to be. Everything
+that edits a folder, counts them, resolves membership or uploads an order reads
+the second one, or the folder settings page, the add-to-folder menu and the
+premium limit start describing an account the user does not have.
+
+One divergence, and it is the interesting one: **"All chats" always leads the
+strip.** The desktop drops it, because the preset's own main view stands in its
+place. Android has no extra views yet and does not need one here - the default
+tab already draws the preset's filtered list, because the hiding happens inside
+the list `DialogsActivity` builds rather than in a separate view object. So on
+Android All chats *is* the preset's main view, and taking it off the strip would
+leave nowhere to see the preset at all.
+
+`"*ALL"` is expanded on the Java side, in place, exactly as
+`ChatFilters::purpleRefreshShown()` expands it: the core has never heard of a
+Telegram folder, so the marker arrives as a marker. A named folder that matches
+nothing is skipped and logged, because a folder named slightly wrong looks
+exactly like one the preset meant to leave out. And a preset that says nothing
+about folders shows no folder tabs at all - the same rule as the desktop, and
+the reason `"*ALL"` exists.
+
+**Folder reordering is refused while the strip is restricted**, in three layers:
+the drag itself (`FilterTabsView.TouchHelperCallback.getMovementFlags`), the
+Reorder menu entry, and the two adapter methods that rewrite the real filters'
+`order` fields in place. Android is worse than the desktop here rather than
+merely different: `TL_messages_updateDialogFiltersOrder` sends the complete
+positional id list, *and* the drag mutates the accessor's return value before
+uploading it. A restricted copy would silently lose the reorder; a restricted
+view would corrupt real order values. The guard keys off "the strip is not the
+account's own folders in the account's own order", not off "a preset is
+running", so `folders = [ "*ALL" ]` leaves dragging alone - the same test as
+`Purple::FoldersRestricted()`.
+
+Switching presets forces the selection back to All chats. The tab the user is on
+is an index into a list whose membership just changed, and the stable-id walk in
+`updateFilterTabs` only rescues a tab that left the strip - an index that is
+still in range quietly means a different folder.
 
 ### Three mute roots, not one
 
@@ -1776,8 +1819,19 @@ unhide everything over a typo.
 
 ### Not ported yet
 
-Folders, extra views, overrides, peek, the schedule and the `[recent]` grace
-period. There is no hot reload either: the file is read at startup and after an
+Extra views, overrides, peek, the schedule and the `[recent]` grace period.
+
+A folder's `notify_p`, `badge_p` and `include` are not ported either, though its
+tab is. All three need to ask whether a given chat is inside a given folder, on
+the notification and counter paths, which is one mechanism rather than three -
+and it is the mechanism that makes the exclude-muted loop this document
+describes real on Android for the first time. The loop breaker is already in
+place (the predicate reads `mutedWithoutPreset`); the loop is not yet there to
+break. Until then a `folders` entry decides whether a tab appears and nothing
+else, so a `settings.toml` that silences a folder silences it on the desktop
+only.
+
+There is no hot reload either: the file is read at startup and after an
 import or a preset switch, which is enough on a phone where nothing else writes
 it - though it does mean the "running from the last good copy" warning stays up
 until the next reload after the real file comes back.
