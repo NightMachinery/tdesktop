@@ -1891,14 +1891,32 @@ from whatever list claimed the chat, and a chat no list claims has nothing to
 say about notifying, so it arrives in the view silenced. `notify_p` on the
 folder is the separate lever, and the two are independent on purpose.
 
-**It does not override the archive here.** On the desktop a folder's chats come
-in wherever they are filed, and two places had to be taught the invariant still
-held. Android hides by leaving rows out of the list `DialogsActivity` builds, so
-a chat can only be pulled into a list it was already a candidate for, and an
-archived chat is never a candidate for the main one. Pulling it in would mean
-synthesising a row rather than keeping one, which is a different mechanism from
-the one this fork uses everywhere. So on Android an archived chat stays in the
-archive whatever a folder says.
+**It overrides the archive here too**, and the reason it looked as though it
+could not is worth recording, because the reasoning was wrong in an instructive
+way. Hiding on Android works by leaving rows out of the list `DialogsActivity`
+builds, and the argument was that an archived chat could therefore never be
+pulled in without inventing a row. It does not: `getDialogs(1)` hands back the
+account's own `TLRPC.Dialog` objects, and `PurpleGate.filter()` already returns
+a fresh list whenever it hides anything, so pulling one in is an append and a
+re-sort. Worse, half of it had already shipped by accident - `shown()` answers
+for an archived chat without ever asking where it is filed, so such a chat was
+already counting toward the badge while being unable to appear in the list.
+
+The two real complications are ordering, not invariants:
+
+- The main list arrives already sorted, so a pulled-in chat has to merge by
+  date rather than land at the end.
+- An archived chat's `pinned` flag is a pin *inside the Archive*. Letting it
+  sort into the main list's pinned run would put it above chats the user
+  actually pinned, so the merge comparator counts only `pinned && folder_id ==
+  0` as a pin, and `getPinnedCount()` ends the divider's run at the first row
+  from another folder.
+
+The chats stay archived - they are still in the Archive row's own list, which is
+exactly what a real Telegram folder does with archived chats unless it sets
+`NoArchived`. Android needs none of the unread arithmetic the desktop needed
+here, because its counters are built from `allDialogs` and from storage rather
+than by summing the list on screen.
 
 There is no hot reload either: the file is read at startup and after an
 import or a preset switch, which is enough on a phone where nothing else writes
