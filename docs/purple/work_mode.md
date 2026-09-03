@@ -1044,9 +1044,24 @@ extra views, their pins among them. In short, everything a reload would
 otherwise take away - the point being that a `settings.toml` broken halfway
 through an edit changes nothing you can see.
 
-List *membership* is not cached, and does not need to be: it comes from
-`settings.toml`, which parsed successfully, since a file that did not parse
-leaves the previous settings in place.
+List *membership* is not cached, and this is the assumption to watch: it comes
+from `settings.toml`, and the argument that it need not be cached is that a file
+which did not parse leaves the previous settings standing in memory.
+
+That argument holds only while the process is still running. It does not survive
+a cold start, and it does not survive the file going *missing* rather than going
+bad - and with no settings at all, no list claims anything, so a preset that
+names what gets through hides the entire account. The cache faithfully restores
+an order that now refers to lists nobody can look up.
+
+The Android fork closes this by keeping `settings.toml.good`, a copy of the last
+file the core accepted, and parsing that when the real one is missing or
+unusable. Keeping the file rather than extending the cache is deliberate: it
+needs no second schema, it cannot disagree with the real file about what a list
+means, and it covers both failures with one mechanism. The picker says when it
+is running from the copy, because a preset resolved from a file the user cannot
+see should not be a silent state. The desktop has the same shape on a cold start
+and does not do this yet.
 
 ## Choosing a preset
 
