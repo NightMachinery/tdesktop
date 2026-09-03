@@ -1740,6 +1740,12 @@ the list `DialogsActivity` builds rather than in a separate view object. So on
 Android All chats *is* the preset's main view, and taking it off the strip would
 leave nowhere to see the preset at all.
 
+One footgun, shared with the desktop and worth stating out loud because it
+fails quietly: a folder is named with a table, `{ name = "News" }`. A bare
+string in `folders` is a `"*set"` reference and nothing else, so
+`folders = [ "News" ]` names no folder — it warns and shows nothing. `"*ALL"`
+is the one bare string that means something there.
+
 `"*ALL"` is expanded on the Java side, in place, exactly as
 `ChatFilters::purpleRefreshShown()` expands it: the core has never heard of a
 Telegram folder, so the marker arrives as a marker. A named folder that matches

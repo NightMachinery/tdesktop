@@ -381,6 +381,11 @@ folders = [
 ]
 ```
 
+A folder is named with a **table**, `{ name = "Music" }`, the way a `list_order`
+entry is named with `{ list = "..." }`. A bare string is a `"*set"` reference and
+nothing else, so `folders = [ "Music" ]` names no folder: it warns and shows
+nothing. `"*ALL"` is the one bare string that means something here.
+
 - `enabled_p` - false makes the preset ignore the entry outright: no tab,
   nothing silenced, nothing fed into the view, nothing counted. Default true.
   The comment character you do not have to add and remove, for an entry you are
