@@ -161,6 +161,36 @@ when a step is fragile, and check `grep EXIT= emulator.log` after each.
 Attaching gdb is not worth it. QEMU uses SIGUSR1 constantly, and a debugger
 that stops on signals slows the boot past any useful timeout.
 
+## Shrink the display before driving the UI
+
+The single most effective thing to do when the box is busy. The build box has
+96 cores and is often at a load average of 96, so the emulator gets its share
+and no more, and the software renderer is the first thing to starve: the app
+runs and logs happily while every frame times out, and Android puts an
+"isn't responding" dialog over the top of it. The ANR trace is always the same,
+`HardwareRenderer.nSetStopped` waiting on the render thread, with no
+application code in the stack at all - which is how you tell it apart from a
+real hang in your own code.
+
+The tell is that it scales with what is drawn. A chat list filtered down to
+nothing never stalls; one visible row stalls within seconds.
+
+The fix is to give the renderer a quarter of the work:
+
+```
+adb shell wm size 540x1200
+adb shell wm density 210
+```
+
+That made the difference between not being able to open a menu all afternoon
+and driving the whole UI without a single stall. Reset with `wm size reset` and
+`wm density reset`. Remember that every coordinate you tap changes with it, so
+re-read the bounds out of `bin/ui.sh` rather than reusing numbers from an
+earlier run.
+
+`bin/anr.sh` dismisses a dialog that does appear, by finding its Wait button
+rather than guessing where it is.
+
 ## Verifying without the screen
 
 Telegram draws its chat list and message cells as custom views with no text
