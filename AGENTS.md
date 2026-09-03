@@ -91,6 +91,7 @@ cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 Everything this fork adds beyond upstream lives under `Purple::` and is findable
 with `git grep Purple::`. Read the docs before changing any of it:
 
+- **`docs/purple/roadmap.md`** - what the Android port has and what is left
 - **`docs/mac/build.md`** - the packaged macOS build, install and symbolication
 - **`docs/purple/premium.md`** - the client-side-only Premium unlocks
 - **`docs/purple/config.md`** - `settings.toml`, `state.toml`, live reload

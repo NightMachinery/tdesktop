@@ -52,15 +52,31 @@ from upstream regardless of Work Mode.
   serialised whether or not anyone chose anything and the default therefore only
   ever reaches a fresh profile. Worth saying out loud in the docs when it lands.
 
-- **Client-side premium.** `UserConfig.isPremium()` is the single hook. The
-  reason it belongs on this roadmap rather than in a list of cosmetics is that
-  `lockFiltersInternal()` locks every folder past the non-premium limit, and
-  locked folders are exactly what a `folders` preset needs. Two things to
-  establish rather than assume: the folder *count* limit is enforced by the
-  server as well, so this may unlock folders that already exist without allowing
-  new ones past that limit; and because the folder code consults `isPremium()`
-  in several places, it has to be re-checked against the A3 and A4 folder
-  behaviour rather than tested on its own.
+- **Local Premium, ported.** The desktop fork already has this, and
+  [premium.md](premium.md) is the design rather than a starting point: a small
+  `Purple::` helper consulted at a handful of named call sites, governed by
+  `[premium] enabled` in `settings.toml` and on by default. What it explicitly
+  does **not** do is make the session claim to be Premium - that would light up
+  a couple of hundred call sites offering things the server refuses, and put a
+  badge on your own profile that nobody else can see. Android should follow the
+  same shape, and the same settings key, so one file still means one thing in
+  both clients.
+
+  The per-feature split has to be redone rather than copied, because which gates
+  are client-only differs by client: sponsored messages, the translate-chats
+  gates, and the account limit each live somewhere else here. Sponsored messages
+  look portable - `getSponsoredMessages()` carries no Premium check at all, so
+  the client is the only thing that would stop asking, which is exactly the
+  desktop's reasoning.
+
+  One candidate the desktop does not have: `lockFiltersInternal()` locks every
+  folder past the non-premium limit, and locked folders are exactly what a
+  `folders` preset needs. It fits the doc's own criterion - the client declining
+  to use something it already holds - but the folder *count* limit is enforced
+  by the server too, so this may unlock folders that already exist without
+  allowing new ones. Establish that rather than assume it, and re-check it
+  against the A3 and A4 folder behaviour, since the folder code reads the
+  Premium state in several places.
 
 - **Background Connection on by default.** There is no FCM push in this fork and
   no way to get it back, so the background connection is the only way a
@@ -69,11 +85,6 @@ from upstream regardless of Work Mode.
   silently unable to notify. The setting reads as `pushConnection` falling back
   to `MessagesController.backgroundConnection`, so changing that fallback is the
   whole change and an explicit choice still wins.
-
-- **Sponsored messages dropped.** Worth listing separately from premium, because
-  the obvious assumption is wrong: `getSponsoredMessages()` has no premium guard
-  at all, so it asks the server regardless and the server decides. Faking
-  premium locally will not remove them; declining them in the client will.
 
 - **A Purple identity, off by default.** The app installs alongside official
   Telegram under its own application id, but on screen it is indistinguishable
