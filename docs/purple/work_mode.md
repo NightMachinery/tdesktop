@@ -1855,9 +1855,25 @@ folder can only answer once the folder list has loaded, so the first push after
 a cold start, arriving before the dialog list, is not folder-silenced. The
 desktop has the same hole for the same reason and says so.
 
-A folder's `badge_p` and `include` are still not ported, though the mechanism
-they need now exists. Until they are, a `settings.toml` that leaves a folder out
-of the counts or pulls one into the view does that on the desktop only.
+`badge_p` is ported too, and it is the same query asked of a different path.
+The two branches of `getTotalAllUnreadCount()` that already walk every dialog
+get the check next to the one that skips hidden chats. The other two take
+`total_unread_count` and `pushDialogs.size()`, both maintained incrementally in
+five places each, so taking an uncounted folder off them would be a subtraction
+- and the last subtraction in this document drove a badge to `-334`. Android
+gets the same guarantee by a cheaper route than the desktop's reserved filter
+id: the totals are **rebuilt** over `pushDialogs`, the very collection they are
+accumulated from, so the answer is a subset by construction and cannot go
+negative. The rebuild only ever runs when a preset actually named such a folder.
+
+The tab half is one line, and the rule about what it does *not* touch is the
+desktop's: a chat in an uncounted folder still counts toward All chats, because
+that tab is counting what is on screen in front of you, which is a different
+question from whether the launcher icon should light up.
+
+A folder's `include` is still not ported, though the mechanism it needs now
+exists. Until it is, a `settings.toml` that pulls a folder into the view does
+that on the desktop only.
 
 There is no hot reload either: the file is read at startup and after an
 import or a preset switch, which is enough on a phone where nothing else writes
