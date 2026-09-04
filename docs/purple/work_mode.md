@@ -1911,11 +1911,74 @@ the target moved but the rules say leave the preset alone, it records the target
 and rebuilds nothing - there is no view change to show, and the write is what
 makes that boundary happen once rather than on every tick from then on.
 
+### The "until" decisions, and the line that says why
+
+Both are ported, and they landed together because they share one surface: on
+the desktop the line is the header of the chat-list context menu and the three
+"until" entries sit under a separator in the same menu. Here that surface is the
+list box.
+
+**The overrides ride in the load result, not a query.** They are per-chat state
+read on the row-drawing path, so the shape peek established is the one they use:
+the bridge prunes what has expired, hands over the running preset's live ones
+with everything else, and Java answers from that list with a clock comparison.
+Nothing reaches JNI per row. The bridge is also where the pruning happens,
+because `load()` is already the one place that rewrites `state.toml` - so an
+entry leaves the file at the moment it stops being true rather than at the next
+unrelated change. One timer, armed for the earliest deadline, the same as peek's
+and for the same reason.
+
+Two hooks, matching the desktop's two exactly: the view (`show` reveals, `hide`
+takes away) and the silencing (`notify` lifts the preset's mute and only the
+preset's, `hide` adds one). The ordering against a peek is the desktop's too and
+it is not arbitrary - **a peek outranks a hide, and that is what makes a hide
+cancellable**, since the row has to come back for you to reach the menu that
+cancels it. It does not outrank `notify`, because a peek is a look at the chat
+list and not a request to be interrupted.
+
+**A bug worth recording, because the fix is the interesting part.** The hooks
+went into `shown()` and `silenced()`, which is where the desktop puts them - and
+nothing happened. `PurpleGate.filter()`, which is what actually builds the chat
+list, does not call `shown()`: it inlines the same decision because it is also
+counting what it saw, for the log line and the unread-gated tally. So the one
+caller that mattered went straight past both hooks. The repair was not to add a
+third copy of the test but to put the part that is not the preset's answer -
+a peek, an "until" - behind one `byHand()` helper that all three call. A compile
+proved nothing here; the emulator's count line proved it in one run.
+
+**`hide_scope`, honestly narrowed.** `hide_everywhere` cannot port, because the
+preset-wide `hide_everywhere_p` it reuses is not ported either; it is parsed and
+carried, and behaves as the default. The default's launcher-badge half is one
+test on the `countedForBadge()` seam A4 built, which already asks exactly "does
+this chat's unread belong in the running totals".
+
+Its **folder-tab** half is deferred, and the reason is a real difference between
+the clients rather than an oversight. On the desktop a folder's unread is a
+running total per list, which is why that side needed a cached flag and a
+notifier to pay the difference across. Here it is recomputed from scratch by
+`MessagesStorage.calcUnreadCounters()`, but not as a sum over dialogs: each chat
+is tallied into a `contacts`/`nonContacts`/`groups`/`channels`/`bots`
+`[folder][muted]` bucket, and every folder then adds up the buckets its flags
+select. Taking one chat out means skipping its increment in six places across
+two methods, and those same buckets also feed `mainUnreadCount` - so the change
+reaches further than the scope's own wording, which is about folders keeping the
+row while dropping the count. The seam is real and now written down; it wants
+its own pass rather than a rider on this one.
+
+**The line** is `In 'Keep': shown`, or `In no list 'Work' names: hidden until a
+mention`. Where comes from the entry that claimed the chat, asked of the
+resolution rather than of the file - a list the preset does not name has no say
+in what is happening now, however many members it has. What comes from the same
+`shown()` the chat list asked, not from the mode alone, because a chat a folder
+pulled back in is shown whatever its list said and a line reading "hidden" over
+a row sitting in the list is worse than no line at all.
+
 ### Not ported yet
 
-Extra views, the "... until" overrides, the `[recent]` grace period, and the
-line naming which entry is deciding a chat. Hot reload, the list-membership
-menu, peek and the schedule are done; see above.
+Extra views and the `[recent]` grace period. Hot reload, the list-membership
+menu, peek, the schedule, the "... until" overrides and the line naming which
+entry decides a chat are done; see above. Of `hide_scope`, the folder-tab half
+of the default is the one piece deliberately left, for the reason given there.
 The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 

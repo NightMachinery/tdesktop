@@ -26,6 +26,25 @@ what is untested is the entry point itself. What to check:
 - Adding and removing from there behaves as it does from the overflow, and the
   chat list reflects it immediately.
 
+## The list box's new rows
+
+The box grew a verdict line at the top and the three "Show/Hide/Notify
+until..." rows at the bottom, and none of it has been on a screen: both ways in
+- the selection overflow and the preview menu - are popups, and popups are what
+kills the software renderer. Three attempts, three `EXIT=139`.
+
+What is untested is the presentation, not the decision. Every rule underneath is
+verified through the file and the log: a hide takes the chat out of the list and
+silences it, a show reveals without un-silencing, a notify un-silences without
+revealing, a peek outranks a hide, and an expiry prunes itself. What to check:
+
+- The verdict line reads correctly for a chat in a list, for one in none, for a
+  gated one ("hidden until a mention"), and for one a folder pulled in
+  (", shown by a folder"). This is the only path that exercises
+  `deciderNative()`.
+- The three rows open the spans, and a span writes the decision.
+- The Cancel row appears only while something is running, and names it.
+
 ## The reorder guard during a peek
 
 `PurpleGate.foldersRestricted()` answers false while a peek is running, so the

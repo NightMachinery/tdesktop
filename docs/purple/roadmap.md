@@ -38,13 +38,13 @@ chat is inside a given folder, right now.
 
 ## Next
 
-**A5 - the rest of Work Mode.** Extra views, the "... until" overrides, the
-`[recent]` grace period, the line naming which entry is deciding a chat, and
+**A5 - the rest of Work Mode.** Extra views, the `[recent]` grace period, and
 offering the settings import on launch rather than only from Settings.
 
 Landed so far: hot reload of `settings.toml`, filing a chat into a list from the
-chat list, and the two things that move on a clock rather than on an edit - peek
-and the schedule. Peek was almost free, and that is worth recording as evidence
+chat list, the two things that move on a clock rather than on an edit - peek and
+the schedule - and the "until" decisions with the line that explains what is
+deciding a chat. Peek was almost free, and that is worth recording as evidence
 the seam is in the right place: the engine already reveals everything while its
 `peeking` flag is set, and the same function the chat list has always called
 answered differently the moment the bridge set it. What the port had to add was
