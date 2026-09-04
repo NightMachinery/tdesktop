@@ -308,6 +308,35 @@ To give a folder the "Exclude Muted" flag - the setup an oscillation test needs
 - long-press its tab, *Edit folder*, *Add Chats to Exclude*, *Muted*, the tick,
 then SAVE. Removing it again is a long-press on the *Muted* row, *Remove*.
 
+A settings checkbox reads back, but the state is on the **container** node, not
+on the text. `TextCheckCell` puts its label and its subtitle in child
+`TextView`s that are always `checked="false"`; the row itself carries the real
+`checked`. So grep the dump for the row's bounds and read that attribute, and
+pick a neighbouring row whose default you did *not* change as the control - two
+rows of the same widget, one true and one false, is much stronger evidence than
+one row read alone.
+
+### Swiping a chat row
+
+`adb shell input swipe` does drive the chat list's swipe gesture, which is the
+only way to archive or unarchive without a long-press popup. Two things stop it
+silently:
+
+- **The gesture is not archive by default.** `SharedConfig.getChatSwipeAction`
+  returns *Folders* whenever the account has any folders, and the test account
+  has three, so the swipe opens a folder chooser instead. Write
+  `<int name="ChatSwipeAction" value="2" />` into `shared_prefs/mainconfig.xml`
+  with the app stopped to get archive; the constants are in
+  `SwipeGestureSettingsView`.
+- **Saved Messages and 777000 refuse it** while the action is archive, and a
+  fast flick is taken by the tab pager rather than the row. Use a slow swipe -
+  `input swipe 380 <y> 90 <y> 600` - and remember the rows begin just under the
+  tab strip, about 81px apart at `wm density 210`.
+
+Put the account back afterwards: unarchiving is the same swipe inside the
+Archive, and the two preference keys should be deleted rather than set back, so
+the next test starts from "never chosen" the way a fresh install does.
+
 ### Driving the clock without a clock
 
 Peek and the schedule both read `state.toml` and the wall clock, and both are
