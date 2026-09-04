@@ -111,6 +111,40 @@ appear not to respond to its own writes, which is worse. It matters less than it
 did before this change, since the default the two now fall back to is the same
 one.
 
+## The app calls itself by its own name
+
+`strings.xml` in this fork has said `AppName = "Purple Telegram"` for a long
+time, and the launcher has always shown it - `android:label` is resolved from
+resources when the package is installed. The running app disagreed with its own
+launcher entry and said **Telegram** in the chat list header and in every
+notification.
+
+The cause is not that the rename was forgotten. It is that
+`LocaleController.getStringInternal()` reads the downloaded language pack
+*before* the app's resources:
+
+    String value = BuildVars.USE_CLOUD_STRINGS ? localeValues.get(key) : null;
+    if (value == null) { ... getString(res) ... }
+
+Telegram's English pack carries `AppName = "Telegram"`, so the fork's own string
+was shadowed at runtime by a value fetched from Telegram's servers. Any fork
+that renames itself only in `strings.xml` has this bug and will not see it in
+the launcher, which is the obvious place to look.
+
+The fix is to exempt the two keys that name the app - `AppName` and
+`AppNameBeta` - from the language-pack lookup. That is not a general distrust of
+cloud strings; it is that these two keys are statements about *this build*,
+which a server has no standing to make. Everything else still comes from the
+pack, including every translation of every other string.
+
+It is deliberately not a setting. A switch here would mean choosing to be called
+Telegram in the app while the launcher entry underneath says Purple Telegram,
+which is the inconsistency this removes rather than a preference worth offering.
+
+The **launcher icon** is still Telegram's, and that one *is* worth an opt-in:
+see the roadmap. Nothing about the name change makes the app harder to mistake
+for stock at a glance, which is the thing an icon fixes.
+
 ## Also on by default, elsewhere
 
 **Local Premium** is on by default too, and is its own document:
