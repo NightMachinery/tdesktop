@@ -85,29 +85,56 @@ than the screen:
 - The unread-counter colours, which are the readable evidence of an effective
   mute and were only ever checked on one screenshot.
 
-## Local Premium: translation and the folder unlock
+## Local Premium: seen in the log, not yet on the screen
 
-Sponsored messages are verified in both directions - the app's own log carries
+Each unlock writes a line saying what it decided, because the build box's
+software renderer could not be relied on to draw anything while another user's
+97-thread job held the machine at load ~100. What that got, and what it did not:
+
+**Sponsored messages - both directions, settled.**
 `Purple: sponsored for 981122490: requested.` with `[premium] enabled_p = false`
-and `not requested (local premium).` with the section absent - but the other two
-unlocks were only compiled and reasoned about, because the build box went to
-load ~101 before they could be driven and both need the renderer.
+against `not requested (local premium).` with the section absent.
 
-- **The translate bar.** `TranslateController.isFeatureAvailable()` is the only
-  fence in front of it on Android, and the prerequisites are already satisfied
-  on the test device: `translate_chat_button` defaults to true and the app
-  config does not disable translations. Three French messages are sitting in the
-  bot chat for exactly this. The bar should be at the top of that chat with the
-  unlock on and gone with it off - a screenshot pair, since the bar is a custom
-  view.
+**Translation - one direction only.** `Purple: translate for 981122490:
+available (local premium).` appears with the unlock on, and the "(local
+premium)" clause is the discriminating part: the account is not Premium, so
+nothing else could have granted it. The withheld side does **not** appear, and
+that is structural rather than a gap in the test - upstream skips language
+detection entirely when the feature is unavailable, so the dialog never enters
+`translatableDialogs` and a log line placed on that predicate cannot run. Move
+the decision log next to the sponsored one in `ChatActivity`, which runs per
+chat open regardless of detection, and the pair completes.
 
-- **The folder unlock.** `lockFiltersInternal()` needs more folders than the
-  limit, and the test account has three against a default limit of ten. Rather
-  than making eight more, write `<int name="dialogFiltersLimitDefault" value="1" />`
-  into `shared_prefs/mainconfig.xml` with the app stopped: the field is read
-  straight from that key, so three folders then exceed the limit and two should
-  come up locked with the unlock off and none with it on.
+**The folder unlock - not exercised at all**, and the reason is worth keeping.
+The plan was to write `dialogFiltersLimitDefault = 1` into `mainconfig.xml` so
+the account's three folders would exceed the limit. That does not work: the
+server sends `dialog_filters_limit_default` in the app config and
+`MessagesController.applyAppConfig` writes it straight back over the injected
+value - it was 10 again within seconds. This is the second time in one day that
+a preference turned out to be the server's rather than ours; the first was
+`backgroundConnection`, in defaults.md. **A key the server writes cannot be used
+as a test fixture.**
 
-- **`VideoAds.load()`**, the media viewer's video ads, has the same guard as the
-  channel path and got no log line of its own. It is the one sponsored surface
-  not driven.
+So this one needs eleven real folders on the test account, made through the UI,
+and a renderer healthy enough to draw the tab strip. Worth doing when the box is
+quiet, because it is also the case A3's folder strip and A4's folder mechanism
+have never been seen against: every folder test so far has used three.
+
+### Still wanted on the screen, whatever the log says
+
+A log line proves the branch was taken; it does not prove the surface it governs
+changed. None of these has been seen:
+
+- a sponsored post failing to appear in a channel that serves one, and the
+  sponsored top bar in a bot chat;
+- the translate bar at the top of a foreign-language chat, appearing and
+  disappearing with the unlock. Three French messages are sitting in the bot
+  chat for exactly this;
+- a folder tab drawn without its padlock, and reachable rather than opening the
+  upsell;
+- **`VideoAds.load()`**, the media viewer's video ads, which shares the channel
+  path's guard and has no log line of its own - the one sponsored surface with
+  no evidence at all.
+
+For next time: **a build degrades gracefully at load ~100 and a renderer does
+not.** That is why the log route was taken rather than waiting for the box.

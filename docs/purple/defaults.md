@@ -64,6 +64,12 @@ becomes whatever the server says.
 So the fork's answer has to be its own constant, consulted where the preference
 is *absent*, rather than a different default for a key somebody else owns.
 
+The same trap caught a *test* later the same day: `dialogFiltersLimitDefault`
+was written by hand to make a folder limit easy to exceed, and the app config
+put it back within seconds. Worth stating as a rule rather than an anecdote - **a
+preference the server writes is neither a place to put a default nor a fixture
+to test with.** `git grep applyAppConfig` names the ones it owns.
+
 ### Three places have to agree
 
 This is the part worth writing down, because the seam looks like one line and
