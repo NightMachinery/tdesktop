@@ -1973,12 +1973,52 @@ in what is happening now, however many members it has. What comes from the same
 pulled back in is shown whatever its list said and a line reading "hidden" over
 a row sitting in the list is worse than no line at all.
 
+### The close buffer
+
+Ported, and it completes the family: peek, the "until" decisions and this are
+the three things that decide a chat without the preset having a say, and all
+three now meet in one `byHand()` helper. `[recent]` is tested first of the
+three, ahead even of a hide - it is not a statement about what the preset lets
+through but about what you were doing ten seconds ago.
+
+**The seam found itself.** The desktop hooks `setFakeUnreadWhileOpened()`
+because that setter already means "this chat became, or stopped being, the one
+you are looking at". Android has a method that means exactly that and nothing
+else - `NotificationsController.setOpenedDialogId()`, called by `ChatActivity`
+with the id on the way in and with zero on the way out - so the port is one line
+at the top of it. Above the queue post rather than inside it, because the
+eligibility test reads the chat list and the UI thread owns that.
+
+Everything else follows the desktop. Eligibility is decided **when the chat is
+opened**, not when it is closed, because two of the three scopes ask where the
+chat was at that moment and reading it is precisely what moves the answer. The
+clock starts on close, so reading something for five minutes does not burn the
+grace before you have finished with it. One timer for all of them, armed for the
+earliest deadline, because nothing else would ever bring the row back - no
+message arrives and no unread moves when a clock runs out. And none of it is
+persisted: a grace period that survived a restart would mean the app remembering
+that you glanced at somebody yesterday.
+
+Two small differences, both from Android's shape rather than from choice. The
+grace map is a short list rather than a map keyed by id, because the account has
+to be part of the key and only a handful of chats are ever in grace at once. And
+`any_open_chat_except_in_folder` asks the *strip* - the folders the preset is
+actually showing - rather than the account's folders, which is the desktop's
+rule met through `shownFilters()`; the desktop also checks its extra views
+there, and this is one of the places that will need them when they land.
+
+`[recent] style`, which marks a row that is only there on a clock, is not
+ported. It is a `DialogCell` painting change and it belongs with the same mark a
+"show until" wants, so the two should land together rather than separately.
+
 ### Not ported yet
 
-Extra views and the `[recent]` grace period. Hot reload, the list-membership
-menu, peek, the schedule, the "... until" overrides and the line naming which
-entry decides a chat are done; see above. Of `hide_scope`, the folder-tab half
-of the default is the one piece deliberately left, for the reason given there.
+Extra views. Hot reload, the list-membership menu, peek, the schedule, the
+"... until" overrides, the line naming which entry decides a chat and the
+`[recent]` close buffer are done; see above. Two smaller pieces are deliberately
+left: the folder-tab half of `hide_scope`'s default, for the reason given there,
+and the chat-list mark for a row that is only present on a clock - `[recent]
+style` and a "show until" want the same mark, so they belong in one pass.
 The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 

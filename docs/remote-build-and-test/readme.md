@@ -342,6 +342,30 @@ matters on this box, where the overflow menus are what the software renderer
 dies on. Its label counts down once a second while the box is open, so two dumps
 six seconds apart are enough to prove the timer is live.
 
+### Opening a chat without touching the chat list
+
+Chat rows are custom views: invisible to a `uiautomator` dump, so there is no
+way to find one to tap. A deep link opens one directly and costs no popup:
+
+    adb shell am start -a android.intent.action.VIEW \
+      -d "https://t.me/spiritwellbot" org.purple.telegram
+
+then `input keyevent KEYCODE_BACK` to leave. That pair is enough to drive the
+whole `[recent]` close buffer, whose observable is the ordinary count line:
+`7 of 8 dialogs hidden` becoming `6 of 8` after a chat is closed and going back
+at the deadline.
+
+The line carries the discriminating detail as well. A gated chat held by the
+grace reads `7 of 8 hidden, 0 unread-gated (0 showing)` - nothing unread left,
+so the mode had already let go, and the row is there for the other reason. That
+one line is both halves of the assertion.
+
+**The bot's chat is `981122490`, not the id the seeded data uses.** Messages sent
+with `tsend` arrive in the chat with the *bot's own* user id; a preset naming any
+other bot will look as though nothing arrived. The tell is in the log:
+`process new messages, value is ... (981122490, ...)` names the dialog it landed
+in.
+
 ## Logging in a test account
 
 Use a real account on the production servers. Telegram's test data centres and
