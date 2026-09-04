@@ -38,8 +38,17 @@ chat is inside a given folder, right now.
 
 ## Next
 
-**A5 - the rest of Work Mode.** All that is left is offering the settings import
-on launch rather than only from Settings.
+**A5 - the rest of Work Mode.** Everything is done except the launch-time offer
+of a settings import, and that one is **held back on purpose rather than left
+over**. [sync.md](sync.md) owns the feature and says why: an offer that appears
+on every launch of a machine you never sync is worse than no offer, and the rule
+for suppressing it is easier to write once there is real use to look at. The
+manual path it is meant to improve has not been exercised end to end even once
+yet. Building it now would be guessing at the suppression rule, on Android
+first, where the desktop does not have it either.
+
+The criterion for starting it is therefore not effort: it is the desktop
+export/import round trip having been used for a while.
 
 Landed so far: hot reload of `settings.toml`, filing a chat into a list from the
 chat list, the two things that move on a clock rather than on an edit - peek and
@@ -103,9 +112,22 @@ from upstream regardless of Work Mode.
   no way to get it back, so the background connection is the only way a
   notification ever arrives - and it currently ships off, with the README asking
   for it to be turned on by hand after signing in. A fresh install is therefore
-  silently unable to notify. The setting reads as `pushConnection` falling back
-  to `MessagesController.backgroundConnection`, so changing that fallback is the
-  whole change and an explicit choice still wins.
+  silently unable to notify.
+
+  The seam is `ConnectionsManager.isPushConnectionEnabled()`, and it is worth
+  writing down precisely, because the obvious place is the wrong one. It reads
+  `pushConnection` when that key exists - the user's own choice, which must keep
+  winning - and otherwise reads the `backgroundConnection` **preference**
+  directly, with its own `false` default. It does not read
+  `MessagesController.backgroundConnection`, so changing that field's default
+  where it is loaded would do nothing here. And that field is not ours to set
+  anyway: `background_connection` arrives in Telegram's server-pushed app
+  config, so anything written from the server would overwrite a local default a
+  moment later.
+
+  The change is therefore the `else` branch of `isPushConnectionEnabled()` and
+  nothing else. Note that file is not in the sparse checkout: `git
+  sparse-checkout add` first.
 
 - **A Purple identity, off by default.** The app installs alongside official
   Telegram under its own application id, but on screen it is indistinguishable
