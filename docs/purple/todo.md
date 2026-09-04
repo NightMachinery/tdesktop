@@ -26,6 +26,18 @@ what is untested is the entry point itself. What to check:
 - Adding and removing from there behaves as it does from the overflow, and the
   chat list reflects it immediately.
 
+## The reorder guard during a peek
+
+`PurpleGate.foldersRestricted()` answers false while a peek is running, so the
+folder tab's long-press menu should offer **Reorder** again for as long as it
+lasts. The strip half of that is verified - the log says
+`folder strip showing 4 of 4 (peeking)` where the same preset says `2 of 4`
+without one - but the menu entry itself has not been seen, because reaching it
+means a long-press popup and that is what the software renderer dies on.
+
+Both answers come from the same flag on the same line, so what is untested is
+the menu, not the decision.
+
 ## Verifying under a real renderer
 
 Worth re-running on a GPU-backed emulator even though they passed under

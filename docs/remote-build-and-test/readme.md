@@ -308,6 +308,40 @@ To give a folder the "Exclude Muted" flag - the setup an oscillation test needs
 - long-press its tab, *Edit folder*, *Add Chats to Exclude*, *Muted*, the tick,
 then SAVE. Removing it again is a long-press on the *Muted* row, *Remove*.
 
+### Driving the clock without a clock
+
+Peek and the schedule both read `state.toml` and the wall clock, and both are
+therefore testable without waiting for anything real to happen: write the state
+you want the app to wake up in and restart it. `bin/setboth.sh SETTINGS STATE`
+pushes both files, fixes the ownership and relaunches; `bin/setpreset.sh` only
+ever moved the preset line, which is not enough here.
+
+The log lines to read:
+
+- `Purple: preset 'work', 1 lists (peeking). (peek)` - the reason in brackets
+  names what did it, so `(peek)` is the checkbox, `(peek over)` is the gate's own
+  timer expiring it, and `(schedule)` is a boundary.
+- `Purple: folder strip showing 4 of 4 (peeking).` against a restricted preset's
+  `2 of 4`. This is the only readable evidence that the strip followed the peek:
+  the tabs are custom views and never appear in a `uiautomator` dump.
+- `0 of 8 dialogs hidden ... 7 silenced` during a peek, against `7 of 8 hidden`
+  without one. The second half not moving is the point - a peek reveals and does
+  not un-silence - so the two numbers on one line are the whole assertion.
+- `Purple: schedule wants 'normal', keeping 'work' (manual).` is the asymmetry:
+  a window ending does not undo a preset chosen by hand. `schedule wants 'work'.`
+  with no clause is a window starting, which does override one.
+
+A window covering the moment of the test is `from = "00:00"`, `to = "23:59"`
+with no `days` key; one that cannot fire is any half hour in the small hours.
+`days` omitted warns and means every day, which is worth keeping in the fixture
+- the picker shows that warning, so it doubles as a check that warnings surface.
+
+The peek checkbox is in the preset picker, and the picker is reachable without
+opening any popup at all: the **Settings** tab, then the *Work Mode* row. That
+matters on this box, where the overflow menus are what the software renderer
+dies on. Its label counts down once a second while the box is open, so two dumps
+six seconds apart are enough to prove the timer is live.
+
 ## Logging in a test account
 
 Use a real account on the production servers. Telegram's test data centres and
