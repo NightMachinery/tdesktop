@@ -316,6 +316,23 @@ pick a neighbouring row whose default you did *not* change as the control - two
 rows of the same widget, one true and one false, is much stronger evidence than
 one row read alone.
 
+### The network log will not tell you which request was sent
+
+`*_net.txt` is the right place to answer "is the connection up", "did a push
+connection start", "how many responses came back". It is the wrong place to
+answer "did the client send *this* API call". Requests are logged by their C++
+wrapper - `send request 0x… - 14TL_api_request` - and responses either by that
+same wrapper or as a bare constructor hex for the ones it does not parse. The TL
+constructor of the request never appears, so grepping for
+`TL_messages_getSponsoredMessages`, or for its constructor `0x3d6ce850`, finds
+nothing whether or not it went out.
+
+Two runs were spent proving a change worked by the absence of something that was
+never going to be there. When the assertion is "the client declined to ask", log
+the decision instead, with its reason and the id it applies to, and read that.
+An absence in a log you have not established writes the thing you are looking
+for is not evidence.
+
 ### Swiping a chat row
 
 `adb shell input swipe` does drive the chat list's swipe gesture, which is the
