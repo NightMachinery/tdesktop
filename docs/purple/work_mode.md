@@ -1823,10 +1823,42 @@ desktop. When the active preset is not in the file, no row is checked and the
 box says so, because checking Normal would fire the selection callback and
 unhide everything over a typo.
 
+### Putting a chat in a list
+
+Ported, and it is the same splice: selecting one chat and choosing **Work Mode
+lists** offers every list in the file, checked where the chat is already a
+member, and a tap adds or removes it. The line the splice writes carries the
+chat's name as a trailing comment, regenerated from the model rather than read
+back out of the file, and every other byte - comments, ordering, blank lines -
+is left where it was.
+
+The naming callback the desktop passes as a `std::function` becomes a JSON map
+of id to name, handed over with the request. Calling back into Java per id would
+mean holding a `JNIEnv` across the splice; the caller already knows the names of
+everyone in the list, so it sends them.
+
+Two divergences, both about where the menu lives rather than what it does. It
+hangs off the selection mode's overflow, next to *Add to folder*, because
+Android has no right-click and the preview menu that would be the closer
+analogue is not reachable on the test emulator - shipping UI that cannot be
+verified is not worth the closer match. And it is offered for **one chat at a
+time**: membership is a property of a chat, and a tick meaning "some of these"
+would have no honest answer.
+
+The rest is the desktop's, unchanged. Every list is offered, including one that
+matches by `kinds`. Nothing appears at all unless a list has been written.
+Membership is global, not per preset. And a failed splice - an unwritable file,
+or a list written as an inline array it will not edit a line at a time - leaves
+the file and the running resolution exactly as they were.
+
+Not ported: the line naming what is currently deciding the chat
+(`In 'bots': hidden`). That needs the resolution to say which entry won, which
+is a question the bridge cannot answer yet.
+
 ### Not ported yet
 
 Extra views, overrides, peek, the schedule and the `[recent]` grace period.
-Hot reload is done; see above.
+Hot reload and the list-membership menu are done; see above.
 The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 

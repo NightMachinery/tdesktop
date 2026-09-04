@@ -139,7 +139,22 @@ segmentation fault under heavy drawing. The whole emulator process exits with
 status 139 and adb reports `error: closed`. It is a host-side renderer crash,
 not a crash of the app, and it takes the app down with it.
 
-Three things reduce it, and none eliminates it:
+**The one large improvement found so far is `-gpu guest`.** With
+`-gpu swiftshader_indirect` the emulator dies reliably the moment a popup window
+is put up - the chat list's long-press overflow was unreachable, several boots
+running, on a box at load 2. Booting with `-gpu guest` instead survived the same
+sequence: long-press, overflow, a dialog with checkable rows, and taps within
+it. The difference is where the software rasterising happens - `swiftshader_
+indirect` marshals the guest's GL out to a SwiftShader context on the host,
+while `guest` keeps it inside Android's own renderer - and the host-side path is
+the one that segfaults. It is slower, and it is worth it.
+
+Note what it is *not*: the crash is not about animation. Setting
+`window_animation_scale`, `transition_animation_scale` and
+`animator_duration_scale` to 0 let a long-press through that had been fatal, and
+then the emulator died on the popup anyway. It is new surfaces, not movement.
+
+Three further things reduce it, and none eliminates it:
 
 - Put the app in full power-saver mode, which turns off chat blur and every
   animation. Write `<int name="lite_mode" value="0" />` into the app's
