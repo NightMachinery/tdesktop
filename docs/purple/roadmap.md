@@ -38,15 +38,22 @@ chat is inside a given folder, right now.
 
 ## Next
 
-**A5 - the rest of Work Mode.** Extra views, and offering the settings import on
-launch rather than only from Settings.
+**A5 - the rest of Work Mode.** All that is left is offering the settings import
+on launch rather than only from Settings.
 
 Landed so far: hot reload of `settings.toml`, filing a chat into a list from the
 chat list, the two things that move on a clock rather than on an edit - peek and
 the schedule - the "until" decisions with the line that explains what is
-deciding a chat, and the `[recent]` close buffer. Those last three are one
-family - three ways a chat is decided without the preset having a say - and they
-meet in one helper, which is why each cost less than the one before. Peek was almost free, and that is worth recording as evidence
+deciding a chat, the `[recent]` close buffer, and extra views. The middle three
+are one family - three ways a chat is decided without the preset having a say -
+and they meet in one helper, which is why each cost less than the one before.
+
+Extra views were the last structural piece and the cheapest surprise in the
+port: an invented tab is a synthetic `DialogFilter` that only the display
+accessor can see, so A3's two-accessor rule turned out to be what made them
+nearly free. Membership rides one bit per view on the per-chat answer the gate
+already caches, which is the only shape a predicate called once per chat per
+sort could afford. Peek was almost free, and that is worth recording as evidence
 the seam is in the right place: the engine already reveals everything while its
 `peeking` flag is set, and the same function the chat list has always called
 answered differently the moment the bridge set it. What the port had to add was

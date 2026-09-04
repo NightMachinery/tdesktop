@@ -2011,14 +2011,58 @@ there, and this is one of the places that will need them when they land.
 ported. It is a `DialogCell` painting change and it belongs with the same mark a
 "show until" wants, so the two should land together rather than separately.
 
+### Extra views
+
+Ported, and cheaper than it looked, because A3 had already paid for it. An
+extra view here is a **synthetic `DialogFilter`** - a folder object the account
+never had - inserted into the *display* accessor `getDialogFilters()` and
+nowhere else. Everything that edits, uploads, counts or limits folders reads
+`getDialogFiltersUnrestricted()` and cannot see one. The two-accessor rule was
+built for the folder strip; this is what it was really for.
+
+**Membership rides the packed per-chat answer.** `visibleNative` returns one bit
+per view alongside the show mode and the notify flag, so `PurpleGate.viewHolds()`
+is a shift and a mask over the value the gate already caches. That matters more
+here than anywhere else: the caller is `DialogFilter.includesDialog()`, asked
+once per chat per sort for every tab that is showing, and a JNI call there would
+be a call per chat per view. Sixteen is the core's own view limit, so the field
+cannot overflow. One hook at the top of `includesDialog()` is the whole
+integration - `sortDialogs()` then fills the tab exactly as it fills a folder's.
+
+The rules a view follows are the core's, unchanged: it selects membership and
+nothing else, the unread-watching modes are not honoured on it, and neither are
+the per-kind defaults. That is what makes the useful pattern work, and it is the
+one thing worth checking by hand after a change - a list can be **gated in the
+main view and unconditional on a tab of its own**.
+
+**Two things a view needs that a folder gets for free.** Its badge is walked
+rather than read: `filter.unreadCount` is summed from buckets a synthetic filter
+was never counted into, so it would read zero over a tab full of unread chats.
+The walk runs only when a preset declared a view. And its pinned order is its
+own - the file's `pinned` holds bare ids, so the sign has to be recovered before
+the comparator can match a dialog id, and a pin naming a peer the client has not
+loaded yet is skipped until the next reload. That is the same cold-start hole
+the folder walks have and it is harmless for the same reason: there is no row to
+order either.
+
+A view restricts the strip whether or not a peek is running, and that test comes
+first, because extra views sit on the strip and a peek leaves them exactly where
+they were - so a strip index no longer matches a server-side position even
+mid-peek. A peek does not fill a view, either: a view hides nothing, and filling
+it with every chat for two minutes would only take it away.
+
 ### Not ported yet
 
-Extra views. Hot reload, the list-membership menu, peek, the schedule, the
-"... until" overrides, the line naming which entry decides a chat and the
-`[recent]` close buffer are done; see above. Two smaller pieces are deliberately
-left: the folder-tab half of `hide_scope`'s default, for the reason given there,
-and the chat-list mark for a row that is only present on a clock - `[recent]
-style` and a "show until" want the same mark, so they belong in one pass.
+Only the launch-time offer of the settings import is left of A5 proper. Hot
+reload, the list-membership menu, peek, the schedule, the "... until" overrides,
+the line naming which entry decides a chat, the `[recent]` close buffer and
+extra views are all done; see above.
+
+Two smaller pieces are deliberately left, both because they belong with
+something else rather than because they are hard: the folder-tab half of
+`hide_scope`'s default, for the reason given there, and the chat-list mark for a
+row that is only present on a clock - `[recent] style` and a "show until" want
+the same mark, so they want one pass.
 The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 
