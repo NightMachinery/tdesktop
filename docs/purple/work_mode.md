@@ -1826,6 +1826,7 @@ unhide everything over a typo.
 ### Not ported yet
 
 Extra views, overrides, peek, the schedule and the `[recent]` grace period.
+Hot reload is done; see above.
 The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 
@@ -1918,10 +1919,22 @@ exactly what a real Telegram folder does with archived chats unless it sets
 here, because its counters are built from `allDialogs` and from storage rather
 than by summing the list on screen.
 
-There is no hot reload either: the file is read at startup and after an
-import or a preset switch, which is enough on a phone where nothing else writes
-it - though it does mean the "running from the last good copy" warning stays up
-until the next reload after the real file comes back.
+`settings.toml` is reloaded when it changes on disk, so an edit lands without a
+restart. `PurpleWatcher` is `purple_config.cpp`'s `QFileSystemWatcher` in
+Android's shape, with two differences that matter:
+
+- **It watches the directory, not the file.** An import - and most editors -
+  replace `settings.toml` through a temp file and a rename rather than rewriting
+  it in place, and a watch on the old inode goes deaf the moment that happens,
+  without saying so.
+- **Deletion counts as a change.** That is what takes the "running from the last
+  good copy" warning down once the real file comes back, and what puts it up the
+  moment the file goes away, rather than at the next restart.
+
+Events are coalesced on a short timer, because one save is several of them and
+reloading on each would parse a half-written file and report a syntax error
+nobody made. An import reloads twice as a result - once for its own write and
+once for the watch - which is idempotent, and the log line says which is which.
 
 The badge and notifications are done, and were verified against a real inbound
 message rather than by reading the code: with the chat hidden the gate logged

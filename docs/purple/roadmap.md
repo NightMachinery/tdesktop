@@ -36,9 +36,9 @@ chat is inside a given folder, right now.
 ## Next
 
 **A5 - the rest of Work Mode.** Extra views, the "... until" overrides, peek,
-the schedule, the `[recent]` grace period, hot reload of `settings.toml` while
-the app runs, the list-membership long-press menu, and offering the settings
-import on launch rather than only from Settings. The current gap is listed
+the schedule, the `[recent]` grace period, the list-membership long-press menu,
+and offering the settings import on launch rather than only from Settings. Hot
+reload of `settings.toml` while the app runs has landed. The current gap is listed
 precisely under "Not ported yet" in `work_mode.md`, which shrinks as each lands.
 
 **A6 - the fork's own defaults.** Everything above makes the phone behave like
