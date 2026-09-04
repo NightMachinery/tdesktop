@@ -85,31 +85,27 @@ one leaves the switch rendering off while the connection runs.
 
 Left:
 
-- **Local Premium, ported.** The desktop fork already has this, and
-  [premium.md](premium.md) is the design rather than a starting point: a small
-  `Purple::` helper consulted at a handful of named call sites, governed by
-  `[premium] enabled` in `settings.toml` and on by default. What it explicitly
-  does **not** do is make the session claim to be Premium - that would light up
-  a couple of hundred call sites offering things the server refuses, and put a
-  badge on your own profile that nobody else can see. Android should follow the
-  same shape, and the same settings key, so one file still means one thing in
-  both clients.
+- **Local Premium, ported.** Landed, apart from what turned out not to exist -
+  [premium.md](premium.md) has the Android section and the reasoning. `[premium]
+  enabled_p` reaches the phone through the bridge, so one settings.toml still
+  means one thing in both clients, and sponsored messages and whole-chat
+  translation are unlocked here as they are on the desktop.
 
-  The per-feature split has to be redone rather than copied, because which gates
-  are client-only differs by client: sponsored messages, the translate-chats
-  gates, and the account limit each live somewhere else here. Sponsored messages
-  look portable - `getSponsoredMessages()` carries no Premium check at all, so
-  the client is the only thing that would stop asking, which is exactly the
-  desktop's reasoning.
+  The per-feature split did have to be redone rather than copied, and two of the
+  desktop's four did not survive the crossing. The account limit has **no gate
+  to remove**: every site that offers "Add Account" tests a constant of 4 with
+  no Premium check, so everyone already has four, and going further means
+  resizing every per-account array - adding capacity, which is not what this
+  feature is. Exact last seen is skipped on the strength of the measurement
+  already in that document: one contact in 1913 held a recoverable value, and
+  the *off* path of such a loop destroys real ones.
 
-  One candidate the desktop does not have: `lockFiltersInternal()` locks every
-  folder past the non-premium limit, and locked folders are exactly what a
-  `folders` preset needs. It fits the doc's own criterion - the client declining
-  to use something it already holds - but the folder *count* limit is enforced
-  by the server too, so this may unlock folders that already exist without
-  allowing new ones. Establish that rather than assume it, and re-check it
-  against the A3 and A4 folder behaviour, since the folder code reads the
-  Premium state in several places.
+  Going the other way, Android has a candidate the desktop does not:
+  `lockFiltersInternal()` locks every folder past the non-Premium limit, and
+  those folders are already in hand. That is unlocked, and it matters more here
+  than upstream - a `folders` preset naming a locked folder is asking for a tab
+  the app will not draw. It does not touch the folder *count* limit, which the
+  server enforces on creation.
 
 - **A Purple identity, off by default.** The app installs alongside official
   Telegram under its own application id, but on screen it is indistinguishable

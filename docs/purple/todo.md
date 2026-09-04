@@ -84,3 +84,30 @@ than the screen:
   order, with the Archive row still holding them.
 - The unread-counter colours, which are the readable evidence of an effective
   mute and were only ever checked on one screenshot.
+
+## Local Premium: translation and the folder unlock
+
+Sponsored messages are verified in both directions - the app's own log carries
+`Purple: sponsored for 981122490: requested.` with `[premium] enabled_p = false`
+and `not requested (local premium).` with the section absent - but the other two
+unlocks were only compiled and reasoned about, because the build box went to
+load ~101 before they could be driven and both need the renderer.
+
+- **The translate bar.** `TranslateController.isFeatureAvailable()` is the only
+  fence in front of it on Android, and the prerequisites are already satisfied
+  on the test device: `translate_chat_button` defaults to true and the app
+  config does not disable translations. Three French messages are sitting in the
+  bot chat for exactly this. The bar should be at the top of that chat with the
+  unlock on and gone with it off - a screenshot pair, since the bar is a custom
+  view.
+
+- **The folder unlock.** `lockFiltersInternal()` needs more folders than the
+  limit, and the test account has three against a default limit of ten. Rather
+  than making eight more, write `<int name="dialogFiltersLimitDefault" value="1" />`
+  into `shared_prefs/mainconfig.xml` with the app stopped: the field is read
+  straight from that key, so three folders then exceed the limit and two should
+  come up locked with the unlock off and none with it on.
+
+- **`VideoAds.load()`**, the media viewer's video ads, has the same guard as the
+  channel path and got no log line of its own. It is the one sponsored surface
+  not driven.
