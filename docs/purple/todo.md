@@ -45,6 +45,20 @@ revealing, a peek outranks a hide, and an expiry prunes itself. What to check:
 - The three rows open the spans, and a span writes the decision.
 - The Cancel row appears only while something is running, and names it.
 
+## An extra view's pinned order, and the reorder guard it forces
+
+A view owns its pinned order, and the order itself has not been seen: chat rows
+are custom views and invisible to a dump, so there is no way to read the order
+off the screen. What is verified is that the pins are built and break nothing -
+the tab, its membership and its badge all behave with a `pinned` key present.
+What to check is simply that the named chat is at the top of that tab.
+
+The same run should check the reorder guard, which a view now forces on:
+`foldersRestricted()` returns true whenever a preset declares one, ahead of the
+peek test, so the folder tab's long-press menu must offer no **Reorder** even
+mid-peek. That needs a long-press popup, which is what the software renderer
+dies on.
+
 ## The reorder guard during a peek
 
 `PurpleGate.foldersRestricted()` answers false while a peek is running, so the
