@@ -38,13 +38,20 @@ chat is inside a given folder, right now.
 
 ## Next
 
-**A5 - the rest of Work Mode.** Extra views, the "... until" overrides, peek,
-the schedule, the `[recent]` grace period, the line naming which entry is
-deciding a chat, and offering the settings import on launch rather than only
-from Settings. Hot
-reload of `settings.toml`, and filing a chat into a list from the chat list,
-have landed. The current gap is listed
-precisely under "Not ported yet" in `work_mode.md`, which shrinks as each lands.
+**A5 - the rest of Work Mode.** Extra views, the "... until" overrides, the
+`[recent]` grace period, the line naming which entry is deciding a chat, and
+offering the settings import on launch rather than only from Settings.
+
+Landed so far: hot reload of `settings.toml`, filing a chat into a list from the
+chat list, and the two things that move on a clock rather than on an edit - peek
+and the schedule. Peek was almost free, and that is worth recording as evidence
+the seam is in the right place: the engine already reveals everything while its
+`peeking` flag is set, and the same function the chat list has always called
+answered differently the moment the bridge set it. What the port had to add was
+the folder strip, the reorder guard, a timer and a checkbox.
+
+The current gap is listed precisely under "Not ported yet" in `work_mode.md`,
+which shrinks as each lands.
 
 **A6 - the fork's own defaults.** Everything above makes the phone behave like
 the desktop. This one is about the things the fork should decide differently

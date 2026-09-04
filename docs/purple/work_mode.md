@@ -1837,13 +1837,17 @@ of id to name, handed over with the request. Calling back into Java per id would
 mean holding a `JNIEnv` across the splice; the caller already knows the names of
 everyone in the list, so it sends them.
 
-Two divergences, both about where the menu lives rather than what it does. It
-hangs off the selection mode's overflow, next to *Add to folder*, because
-Android has no right-click and the preview menu that would be the closer
-analogue is not reachable on the test emulator - shipping UI that cannot be
-verified is not worth the closer match. And it is offered for **one chat at a
-time**: membership is a property of a chat, and a tick meaning "some of these"
-would have no honest answer.
+One divergence, and it is about where the menu lives rather than what it does:
+it is offered for **one chat at a time**, because membership is a property of a
+chat and a tick meaning "some of these" would have no honest answer.
+
+There are two ways in. The selection mode's overflow, next to *Add to folder*,
+is the verified one. The per-chat preview menu - long-press with preview, the
+closer analogue of the desktop's right-click - carries the same entry, but the
+software renderer on the test box cannot put a preview up at all, so that entry
+point has never been driven; both call the same `PurpleListBox.show()` behind
+the same `PurpleListMenu.available()`, so what is untested is the entry rather
+than the behaviour. It is written down in `todo.md` rather than claimed here.
 
 The rest is the desktop's, unchanged. Every list is offered, including one that
 matches by `kinds`. Nothing appears at all unless a list has been written.
@@ -1855,10 +1859,63 @@ Not ported: the line naming what is currently deciding the chat
 (`In 'bots': hidden`). That needs the resolution to say which entry won, which
 is a question the bridge cannot answer yet.
 
+### Peek and the schedule
+
+Both are ported, and both are the same shape: the core decides, and Android is
+the clock that asks it.
+
+**Peek cost almost nothing, and that is the point of the seam.** `Visible()`
+already answers `ShowMode::Always` for every chat while `resolved.peeking` is
+set, and Android's `visibleNative` asks it the same question it always did - so
+the moment the bridge sets that one flag, every row, every notification decision
+and every badge honours the peek without a line of Java. What did not come free
+is the folder strip, which a peek puts back whole, and the reorder guard, which
+a peek lifts because the strip is the account's own again.
+
+The flag is set in the bridge after the resolution, exactly where the desktop
+sets it and for the same reason: `ToCache()` has no field for it, so a peek can
+never be persisted into the fallback and come back revealed with nothing left
+running to put it back. An expired flag is cleared there too, and rides home in
+the state rewrite the load already returns - which is why the Android timer has
+no clearing half of its own.
+
+**There is no hotkey, so the checkbox is the control rather than its
+affordance.** `[peek] hotkey` is read and ignored on Android; a phone has no
+key to bind, and the desktop's own reason for the checkbox - that a hotkey with
+no visible affordance is a hotkey nobody remembers - is the whole of what is
+left. It sits in the preset picker, next to the preset it suspends, saying
+`Peek - nothing is hidden under Normal` when there is nothing to do, and
+counting itself down while one is running. `auto_off` is honoured, including
+`"off"`, which reads as *until you turn it off* rather than as a countdown that
+never moves.
+
+**The schedule is a pure function in the bridge and a `Handler` in Java.**
+`scheduleTickNative()` mirrors `Runner::tick()` line for line - the same first
+match wins, the same half-open windows, the same asymmetry where a window
+starting overrides a preset chosen by hand and a window ending only undoes one
+the schedule itself put there - and returns nothing at all on every tick that is
+not at a boundary, which is almost all of them.
+
+Thirty seconds, the desktop's interval, for the desktop's reason: re-reading the
+clock survives a device waking, a timezone change and the DST hour by
+construction, where computing the next boundary and sleeping until it would have
+to survive each of them by hand. The tick runs while the process does, which on
+this fork is whenever the background connection is up - and that is exactly when
+a boundary still has to land, because silencing has to change with no UI on
+screen. It stops entirely when the file describes no schedule, or when the
+switch in the picker has paused it, so an account with no rules pays nothing.
+
+Two things the tick does *not* do, both inherited. It never writes when only the
+clock moved, so a preset chosen by hand stands until the next boundary. And when
+the target moved but the rules say leave the preset alone, it records the target
+and rebuilds nothing - there is no view change to show, and the write is what
+makes that boundary happen once rather than on every tick from then on.
+
 ### Not ported yet
 
-Extra views, overrides, peek, the schedule and the `[recent]` grace period.
-Hot reload and the list-membership menu are done; see above.
+Extra views, the "... until" overrides, the `[recent]` grace period, and the
+line naming which entry is deciding a chat. Hot reload, the list-membership
+menu, peek and the schedule are done; see above.
 The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 
