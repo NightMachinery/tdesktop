@@ -4,6 +4,9 @@ Where the Android port stands, and what is left. The desktop fork is the
 reference implementation throughout: when a behaviour is described here in one
 line, `work_mode.md` has the long version and the reasoning.
 
+Anything written but not yet driven on a device is in [todo.md](todo.md)
+rather than described as done here.
+
 Milestones are numbered A1 upwards because they are the *Android* ones. Each
 lands as its own commits in both repositories, with the documentation changed
 in the same commit as the behaviour.
@@ -37,8 +40,8 @@ chat is inside a given folder, right now.
 
 **A5 - the rest of Work Mode.** Extra views, the "... until" overrides, peek,
 the schedule, the `[recent]` grace period, the line naming which entry is
-deciding a chat, the same membership menu in the per-chat preview menu, and
-offering the settings import on launch rather than only from Settings. Hot
+deciding a chat, and offering the settings import on launch rather than only
+from Settings. Hot
 reload of `settings.toml`, and filing a chat into a list from the chat list,
 have landed. The current gap is listed
 precisely under "Not ported yet" in `work_mode.md`, which shrinks as each lands.

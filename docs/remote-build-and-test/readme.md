@@ -139,15 +139,20 @@ segmentation fault under heavy drawing. The whole emulator process exits with
 status 139 and adb reports `error: closed`. It is a host-side renderer crash,
 not a crash of the app, and it takes the app down with it.
 
-**The one large improvement found so far is `-gpu guest`.** With
-`-gpu swiftshader_indirect` the emulator dies reliably the moment a popup window
-is put up - the chat list's long-press overflow was unreachable, several boots
-running, on a box at load 2. Booting with `-gpu guest` instead survived the same
-sequence: long-press, overflow, a dialog with checkable rows, and taps within
-it. The difference is where the software rasterising happens - `swiftshader_
-indirect` marshals the guest's GL out to a SwiftShader context on the host,
-while `guest` keeps it inside Android's own renderer - and the host-side path is
-the one that segfaults. It is slower, and it is worth it.
+**`-gpu guest` may improve the odds. It is not a fix.** With
+`-gpu swiftshader_indirect` the emulator died on every attempt to put up the
+chat list's long-press overflow, several boots running, on a box at load 2.
+Booting with `-gpu guest` got one complete run through that sequence -
+long-press, overflow, a dialog with checkable rows, and taps within it - which
+was enough to finish a verification that had been impossible. Later the same
+day, on a clean boot with the same display size and the same animation
+settings, `-gpu guest` segfaulted on that same sequence.
+
+So treat it as a die roll worth taking rather than a setting that works. The two
+paths differ in where the software rasterising happens - `swiftshader_indirect`
+marshals the guest's GL out to a SwiftShader context on the host, `guest` keeps
+it inside Android's own renderer - and the crash is in software rasterising
+either way. The real fix is an emulator with a GPU behind it.
 
 Note what it is *not*: the crash is not about animation. Setting
 `window_animation_scale`, `transition_animation_scale` and
