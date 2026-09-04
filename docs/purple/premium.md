@@ -162,8 +162,10 @@ Two candidates were left undecided rather than guessed at:
 
 ## Turning it off
 
-Flip the toggle in Settings > Advanced, or set `enabled = false` under
-`[premium]` in the settings file and restart.
+Flip the toggle in Settings > Advanced, or set `enabled_p = false` under
+`[premium]` in the settings file and restart. (`enabled` without the suffix is
+the retired spelling; the parser warns and ignores it, so a file using it is
+still unlocked.)
 
 Everything reverts, with two rough edges worth knowing:
 
@@ -173,6 +175,100 @@ Everything reverts, with two rough edges worth knowing:
   one shows Telegram's "accounts limit" box each time. That box only offers the
   subscription page and Cancel; it never logs anything out.
 
+
+## On Android
+
+The same settings key governs the same idea, so one `settings.toml` still means
+one thing in both clients: `PurpleGate.localPremium()` is `Purple::LocalPremium()`'s
+opposite number, reading `[premium] enabled_p` through the bridge.
+
+One difference in the accessor is worth stating, because it inverts this port's
+usual rule. Every other gate in `PurpleGate` answers "stock behaviour" until the
+settings have been read - that is what makes the fork cost nothing when it is
+not running. This one answers **true** before anything is loaded and after a
+load that fails, because the key's own default is on, and a gate that defaulted
+the other way would withhold on a fresh install exactly the thing the settings
+it has not read yet would grant.
+
+There is no toggle in the Android UI. The file is the switch here, and the
+desktop already has the checkbox that writes it.
+
+### What ported
+
+**No sponsored messages**, and the reasoning survives intact even though the
+code does not look the same. Upstream Android skips them only when
+`getUserConfig().isPremium() && getMessagesController().isSponsoredDisabled()` -
+that second half reads `userFull.sponsored_enabled`, so the ability to turn ads
+off is itself a *server-side* Premium setting rather than a client decision. But
+`messages.getSponsoredMessages` carries no Premium check of any kind, so the
+client is still the only thing that can decline to ask, which is the criterion.
+Two sites: `ChatActivity.addSponsoredMessages()`, which both a channel's
+sponsored posts and a bot chat's sponsored top bar hang off, and
+`VideoAds.load()` for the media viewer.
+
+The desktop's fourth sponsored surface has no counterpart. Search ads reach the
+desktop through `api/api_peer_search.cpp`; on Android nothing ever sends
+`contacts.getSponsoredPeers`. The rendering exists - `ProfileSearchCell` can
+draw a `TL_sponsoredPeer` - but no code path fetches one, so there is nothing to
+skip.
+
+**Real-time chat translation**, with one gate fewer than the desktop needed. The
+desktop had to unlock the "Translate chats" master switch as well, because that
+switch is itself Premium-locked in `language_box.cpp`. Android's equivalent, the
+"Show Translate Chat Button" row, is not gated at all, so
+`TranslateController.isFeatureAvailable()` and its per-dialog overload are the
+whole fence.
+
+Android also has a gate the desktop document never listed:
+`isLanguageRestricted()` gives Premium accounts their "Do Not Translate" list
+and everyone else a hardcoded "your own language only". That is a local
+preference being ignored, so it is unlocked too.
+
+### What is new here
+
+**Locked folders.** `MessagesController.lockFiltersInternal()` marks every
+folder past the non-Premium limit `locked`, which greys its tab and puts an
+upsell behind it. The folders are already in hand - the server sent them, they
+are in the local database, and the preset machinery in A3 and A4 resolves them
+normally - so this is the client refusing to use what it holds, which is exactly
+the criterion the desktop's four were picked on. It matters more here than it
+would upstream: a `folders` preset naming a locked folder is otherwise asking
+for a tab the app will not draw.
+
+This does **not** touch the folder *count* limit, which the server enforces on
+creation. The expected shape is that folders already in the account become
+usable and new ones past the limit are still refused, which is the honest
+outcome rather than a workaround.
+
+The locks settle on restart rather than on a hot reload of `settings.toml`.
+Everything else here follows the file immediately, but the `locked` flags are
+computed in a pass that only runs when the filter list changes; re-running it
+from the reload path would be a second mechanism for a switch that is flipped
+about once.
+
+### What did not port, and why
+
+**Six accounts: there is no gate to remove.** All three places that decide
+whether "Add Account" is offered - `UserInfoActivity`, `MainTabsActivity`,
+`LogoutActivity` - test `getActivatedAccountsCount() < UserConfig.MAX_ACCOUNT_COUNT`,
+and that constant is 4 with no Premium check anywhere near it. Everyone already
+gets four accounts. `UserConfig.getMaxAccountCount()`, which does read Premium
+and returns 3 or 5, feeds nothing but a hint string - and note that its Premium
+answer of 5 exceeds the array bound of 4 that every per-account array is sized
+by, which is upstream's inconsistency and a good reason not to build on it.
+
+Going past four would mean resizing every one of those arrays. That is *adding
+capacity*, not declining to withhold something already held, and it fails this
+document's own criterion. It is a separate decision if it is ever wanted.
+
+**Exact "last seen": measured, and not worth porting.** The measurement above
+settles this. On the desktop, with the unlock on, exactly one contact in 1913
+was holding a real timestamp behind a bucket; the server simply does not send
+`was_online` for the rest. Android would need its own coarsening loop found and
+its own unlock written, and the *off* path of such a loop destroys real values
+- the trap this document already warns about. Writing a destructive loop to
+recover one contact's timestamp is a bad trade, so it is deliberately skipped
+rather than pending.
 
 ## Verifying
 

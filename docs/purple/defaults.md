@@ -105,10 +105,14 @@ appear not to respond to its own writes, which is worse. It matters less than it
 did before this change, since the default the two now fall back to is the same
 one.
 
+## Also on by default, elsewhere
+
+**Local Premium** is on by default too, and is its own document:
+[premium.md](premium.md). It is not listed here because it is a feature rather
+than a value - the client declining to withhold things it already holds, without
+claiming to the server that the session is Premium.
+
 ## Still to come
 
-- **Local Premium**, whose design is [premium.md](premium.md) - the client
-  declining to withhold things it already holds, without claiming to the server
-  that the session is Premium.
 - **A Purple identity**, off by default: the fork's own name and launcher icon
   instead of Telegram's. Off, because looking like stock is sometimes the point.
