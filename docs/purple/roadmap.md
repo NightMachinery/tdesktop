@@ -107,8 +107,27 @@ Left:
   the app will not draw. It does not touch the folder *count* limit, which the
   server enforces on creation.
 
-- **A Purple identity, off by default.** The app installs alongside official
-  Telegram under its own application id, but on screen it is indistinguishable
-  from it - the chat list header and the notifications both say Telegram. A
-  setting, unchecked by default, to use the fork's own name and launcher icon
-  instead. Off by default because looking like stock is sometimes the point.
+- **A Purple identity.** Half of this turned out to be a bug rather than a
+  missing feature, and the premise above was wrong: the fork *had* renamed
+  itself, in `strings.xml`, and the launcher had always shown it. What said
+  "Telegram" was the running app, because `LocaleController` reads the
+  downloaded language pack ahead of its own resources and Telegram's pack
+  carries `AppName`. Fixed, and not behind a setting - see
+  [defaults.md](defaults.md), "The app calls itself by its own name". Offering
+  to be called Telegram in the app while the launcher entry says Purple
+  Telegram would be preserving an inconsistency, not a preference.
+
+  What is left is the **launcher icon**, and that one is a real opt-in, because
+  it is the only thing that makes the app distinguishable at a glance and
+  looking like stock is sometimes the point. The design is settled and cheap:
+  upstream already ships `LauncherIconController` plus one `activity-alias` per
+  alternative icon, and `setIcon()` already does the mutual exclusion, so a
+  Purple entry rides the machinery that is there and appears in Telegram's own
+  App Icon picker rather than needing a setting of its own. Deriving its state
+  from `isEnabled(PURPLE)` rather than a preference is what keeps the two from
+  disagreeing.
+
+  The work is assets rather than logic: an adaptive icon (a purple background
+  behind the existing foreground, the way the Aqua icon is built), a legacy
+  bitmap for API 21-25, and the alias. Note that `res/drawable` and the
+  `mipmap-*` directories are outside the sparse checkout.

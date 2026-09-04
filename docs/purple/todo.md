@@ -87,38 +87,34 @@ than the screen:
 
 ## Local Premium: seen in the log, not yet on the screen
 
-Each unlock writes a line saying what it decided, because the build box's
-software renderer could not be relied on to draw anything while another user's
-97-thread job held the machine at load ~100. What that got, and what it did not:
+Sponsored messages and whole-chat translation are now each confirmed both ways
+by lines the app writes:
 
-**Sponsored messages - both directions, settled.**
-`Purple: sponsored for 981122490: requested.` with `[premium] enabled_p = false`
-against `not requested (local premium).` with the section absent.
+    sponsored for 981122490: requested.                 (enabled_p = false)
+    sponsored for 981122490: not requested (local premium).
 
-**Translation - one direction only.** `Purple: translate for 981122490:
-available (local premium).` appears with the unlock on, and the "(local
-premium)" clause is the discriminating part: the account is not Premium, so
-nothing else could have granted it. The withheld side does **not** appear, and
-that is structural rather than a gap in the test - upstream skips language
-detection entirely when the feature is unavailable, so the dialog never enters
-`translatableDialogs` and a log line placed on that predicate cannot run. Move
-the decision log next to the sponsored one in `ChatActivity`, which runs per
-chat open regardless of detection, and the pair completes.
+    translate for 981122490: withheld. chat translate on.        (enabled_p = false)
+    translate for 981122490: available (local premium). chat translate on.
 
-**The folder unlock - not exercised at all**, and the reason is worth keeping.
-The plan was to write `dialogFiltersLimitDefault = 1` into `mainconfig.xml` so
-the account's three folders would exceed the limit. That does not work: the
-server sends `dialog_filters_limit_default` in the app config and
-`MessagesController.applyAppConfig` writes it straight back over the injected
-value - it was 10 again within seconds. This is the second time in one day that
-a preference turned out to be the server's rather than ours; the first was
-`backgroundConnection`, in defaults.md. **A key the server writes cannot be used
-as a test fixture.**
+The `chat translate on` clause matters: it rules out the master switch as the
+reason, so the only thing that moved is the unlock. The translate line had to be
+moved out of `isDialogTranslatable` to get the withheld half at all - upstream
+skips language detection when the feature is unavailable, so a line on that
+predicate can only ever fire one way.
 
-So this one needs eleven real folders on the test account, made through the UI,
-and a renderer healthy enough to draw the tab strip. Worth doing when the box is
-quiet, because it is also the case A3's folder strip and A4's folder mechanism
-have never been seen against: every folder test so far has used three.
+**The folder unlock is still unexercised.** The plan was to write
+`dialogFiltersLimitDefault = 1` into `mainconfig.xml` so the account's three
+folders would exceed the limit. That does not work: the server sends
+`dialog_filters_limit_default` in the app config and
+`MessagesController.applyAppConfig` writes it straight back - it was 10 again
+within seconds. Second time in a day that a preference turned out to be
+Telegram's rather than ours, after `backgroundConnection`. **A key the server
+writes cannot be used as a test fixture.**
+
+So it needs eleven real folders on the test account, made through the UI, and a
+renderer healthy enough to draw the tab strip. Worth doing when the box is quiet,
+because it is also the case A3's folder strip and A4's folder mechanism have
+never been seen against - every folder test so far has used three.
 
 ### Still wanted on the screen, whatever the log says
 
@@ -138,3 +134,11 @@ changed. None of these has been seen:
 
 For next time: **a build degrades gracefully at load ~100 and a renderer does
 not.** That is why the log route was taken rather than waiting for the box.
+
+## The app's own name
+
+Fixed and seen: the chat list header reads `Purple Telegram` in a `uiautomator`
+dump where it read `Telegram` before, and the system's own ANR dialog says
+"Purple Telegram isn't responding". What has not been checked is the other
+surface the language pack was shadowing - a **notification's** title - which
+needs an inbound message with the app in the background.
