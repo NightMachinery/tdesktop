@@ -232,6 +232,13 @@ serialised whether or not anyone ever chose anything, so an account that has run
 before already has a value there and keeps it. Right-click the row to move it
 yourself on an existing account.
 
+Android does the same and reaches further with it: there the value is written
+only when the row is actually swiped, so an install that never touched it has
+no stored value at all and picks the new default up on upgrade, while anyone
+who did swipe keeps what they chose. The default is
+`PurpleDefaults.ARCHIVE_HIDDEN`; see [defaults.md](defaults.md) for the rest of
+what this fork decides differently before anybody configures anything.
+
 ### What the badge counts
 
 `Session::purpleBadgeList()` returns the view while a preset runs and the main

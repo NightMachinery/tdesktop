@@ -94,6 +94,8 @@ with `git grep Purple::`. Read the docs before changing any of it:
 - **`docs/purple/roadmap.md`** - what the Android port has and what is left
 - **`docs/mac/build.md`** - the packaged macOS build, install and symbolication
 - **`docs/purple/premium.md`** - the client-side-only Premium unlocks
+- **`docs/purple/defaults.md`** - the values this fork decides differently from
+  upstream before anybody configures anything
 - **`docs/purple/config.md`** - `settings.toml`, `state.toml`, live reload
 - **`docs/purple/work_mode.md`** - presets, lists, visibility and notify gating
 - **`docs/purple/sync.md`** - moving `settings.toml` between installs through

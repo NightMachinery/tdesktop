@@ -75,12 +75,15 @@ which shrinks as each lands.
 the desktop. This one is about the things the fork should decide differently
 from upstream regardless of Work Mode.
 
-- **The Archive row is hidden by default.** The desktop fork already does this;
-  the setting here is `SharedConfig.archiveHidden`, which is written only when
-  the row is swiped, so changing the default also reaches installs that have
-  never touched it - which is better than the desktop, where the value is
-  serialised whether or not anyone chose anything and the default therefore only
-  ever reaches a fresh profile. Worth saying out loud in the docs when it lands.
+Landed so far: the two defaults a fresh install needs, both in
+[defaults.md](defaults.md) - the Archive row off the top of the chat list, and
+the background connection on. They went together because they are one question,
+"what should this do before anybody configures anything". The second was the
+one with a surprise in it: it is three places that have to agree on the same
+answer, not the single line this file used to claim, and changing only the real
+one leaves the switch rendering off while the connection runs.
+
+Left:
 
 - **Local Premium, ported.** The desktop fork already has this, and
   [premium.md](premium.md) is the design rather than a starting point: a small
@@ -107,27 +110,6 @@ from upstream regardless of Work Mode.
   allowing new ones. Establish that rather than assume it, and re-check it
   against the A3 and A4 folder behaviour, since the folder code reads the
   Premium state in several places.
-
-- **Background Connection on by default.** There is no FCM push in this fork and
-  no way to get it back, so the background connection is the only way a
-  notification ever arrives - and it currently ships off, with the README asking
-  for it to be turned on by hand after signing in. A fresh install is therefore
-  silently unable to notify.
-
-  The seam is `ConnectionsManager.isPushConnectionEnabled()`, and it is worth
-  writing down precisely, because the obvious place is the wrong one. It reads
-  `pushConnection` when that key exists - the user's own choice, which must keep
-  winning - and otherwise reads the `backgroundConnection` **preference**
-  directly, with its own `false` default. It does not read
-  `MessagesController.backgroundConnection`, so changing that field's default
-  where it is loaded would do nothing here. And that field is not ours to set
-  anyway: `background_connection` arrives in Telegram's server-pushed app
-  config, so anything written from the server would overwrite a local default a
-  moment later.
-
-  The change is therefore the `else` branch of `isPushConnectionEnabled()` and
-  nothing else. Note that file is not in the sparse checkout: `git
-  sparse-checkout add` first.
 
 - **A Purple identity, off by default.** The app installs alongside official
   Telegram under its own application id, but on screen it is indistinguishable
