@@ -101,8 +101,9 @@ with `git grep Purple::`. Read the docs before changing any of it:
 - **`docs/purple/sync.md`** - moving `settings.toml` between installs through
   Saved Messages, and the alternatives that were not built
 - **`docs/remote-build-and-test/readme.md`** - building the Android fork on the
-  shared build box and testing it in a headless emulator there, including how
-  the session is kept private from the machine's other users
+  shared build box, keeping the test session private from that machine's other
+  users, and running the emulator on the laptop's own GPU rather than the box's
+  software renderer
 
 The parser, the splice engine, the state store and the resolution engine are the
 Work Mode core, and they live in the `purple-core` submodule at

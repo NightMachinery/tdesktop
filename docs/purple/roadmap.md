@@ -103,5 +103,7 @@ The port is done. What is left is not a milestone:
   that is only present on a clock, which `[recent] style` and a "show until"
   both want.
 - The verification debt in [todo.md](todo.md) - behaviour that is written and
-  reasoned about but has not been driven on a screen. Most of it needs a build
-  box that is not at load 100, or a local emulator.
+  reasoned about but has not been driven on a screen. It was waiting on a
+  renderer, and is not any more: the laptop runs the APK natively on its own
+  GPU, so the popups that killed the build box's software rasteriser are
+  reachable.

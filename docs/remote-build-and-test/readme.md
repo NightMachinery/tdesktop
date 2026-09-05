@@ -100,7 +100,92 @@ This is the loop a delegated implementation agent uses to verify its work
 before anything is committed. The one thing it must never do is copy
 anything but the patch to the box.
 
-## Running the emulator
+## Run the emulator on the laptop, not the box
+
+The box stays the build machine. It should not be the test machine any more.
+
+The M2 laptop runs the same APK on the **GPU**, and that is the difference
+between the two hosts, not a matter of degree. The APK is arm64 only, so an
+arm64 system image executes it with nothing translated, and the emulator
+renders through MoltenVK on the M2 itself - the boot log says
+`Selecting Vulkan device: Apple M2` and `Graphics API Version OpenGL ES 3.0
+(4.1 Metal - 88)`. Every renderer failure this project has recorded came from
+the box's software rasteriser starving against another user's job; none of it
+is a property of the app.
+
+The loop is therefore: build a patch on the box, fetch the APK, test locally.
+
+    ssh pi 'cat /tmp/purple-android/app-emu.apk' > ~/.purple-android-test/app-emu.apk
+
+`scp` is broken by the box's profile, so read the file over `ssh` and check the
+`md5sum` on both sides rather than trusting the byte count.
+
+### What the laptop needed
+
+The SDK at `~/Library/Android/sdk` already had `emulator`, `platform-tools` and
+`build-tools`. Two things were missing:
+
+- `cmdline-tools`, which is where `sdkmanager` and `avdmanager` live. Unzip the
+  `commandlinetools-mac-*_latest.zip` into
+  `~/Library/Android/sdk/cmdline-tools/latest`, so it manages the SDK it sits
+  in and needs no `--sdk_root` on every call. It runs fine under the Homebrew
+  JDK 26 already on the machine.
+- `system-images;android-36;google_apis;arm64-v8a`, 4.3 GB. **arm64** so the
+  APK runs natively, **android-36** because that is the app's `targetSdkVersion`,
+  and **`google_apis` rather than `google_apis_playstore`** because a Play image
+  refuses `adb root`, and restoring a saved login writes straight into
+  `/data/data`.
+
+The AVD came out of `avdmanager` with `hw.gpu.enabled=no`, exactly as it did on
+the box - the same trap, and here it would have thrown away the entire reason
+for moving. The settings that matter in `~/.android/avd/purple.avd/config.ini`:
+
+```ini
+hw.gpu.enabled=yes
+hw.gpu.mode=host
+hw.ramSize=6144
+hw.cpu.ncore=4
+vm.heapSize=512M
+hw.keyboard=yes
+```
+
+`hw.gpu.mode=host` is the one that is not comfort. The core and memory counts
+are deliberately half the machine: this laptop is in use while the emulator
+runs.
+
+### The scripts, and the one that is not needed
+
+`~/.purple-android-test/bin/` holds local counterparts of the box's helpers -
+`emu-start.sh`, `ui.sh`, `shot.sh`, `log.sh`, `setpreset.sh`, `session-save.sh`,
+`session-restore.sh` - all sourcing `env.sh` for the paths. They are the box's
+scripts with one layer removed.
+
+The layer removed is `emu-ns.sh`. On the box every port the emulator and adb
+listen on lives inside a private network namespace, because a signed-in test
+account on a shared host is otherwise readable by every other user. A
+single-user laptop has nobody to hide it from, so the namespace buys nothing
+and costs a `nsenter` in front of every command.
+
+The session snapshot still holds a live auth key, so it keeps the rules it had:
+mode 600, inside a mode-700 directory, outside every git checkout, and only
+ever a throwaway test account. `~/.purple-android-test` rather than a session
+scratchpad, so a login survives between sessions - re-logging in costs a phone
+code.
+
+### It takes about 6 GB while it runs
+
+Boot it when the machine is free and kill it when the run is done:
+
+    adb emu kill
+
+Then confirm the resource is actually free rather than trusting the command:
+`adb devices` empty, and `pgrep -x qemu-system-aarch64` finding nothing. Note
+the `-x`: `pgrep -f qemu` would match the shell running it.
+
+First boot takes about four minutes because the data partition is built from
+scratch; later ones are under a minute.
+
+## Running the emulator on the box
 
 An x86_64 system image with Google APIs runs the arm64-only APK through
 Android's ARM translation, so no separate arm64 image is needed. `/dev/kvm`
@@ -133,6 +218,9 @@ The memory and core counts are comfort rather than necessity. The GPU lines are
 the fix.
 
 ## The emulator still segfaults sometimes
+
+All of this is about the box's software renderer, and none of it has been seen
+on the laptop's GPU. It is kept because the box is still the fallback.
 
 Even configured correctly, the emulator's software renderer dies with a
 segmentation fault under heavy drawing. The whole emulator process exits with
@@ -182,6 +270,10 @@ Attaching gdb is not worth it. QEMU uses SIGUSR1 constantly, and a debugger
 that stops on signals slows the boot past any useful timeout.
 
 ## Shrink the display before driving the UI
+
+Also a box remedy. On the laptop the pixel count is not what is scarce, so the
+guest stays at a realistic 1080x2400 - which matters, because a surface like
+the App Icon picker should be verified at the size a person would see it.
 
 The single most effective thing to do when the box is busy. The build box has
 96 cores and is often at a load average of 96, so the emulator gets its share
