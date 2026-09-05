@@ -36,8 +36,6 @@ view when they are archived. They were one milestone rather than three because
 all three need the same question answered off the UI thread - whether a given
 chat is inside a given folder, right now.
 
-## Next
-
 **A5 - the rest of Work Mode.** Everything is done except the launch-time offer
 of a settings import, and that one is **held back on purpose rather than left
 over**. [sync.md](sync.md) owns the feature and says why: an offer that appears
@@ -71,63 +69,39 @@ the folder strip, the reorder guard, a timer and a checkbox.
 The current gap is listed precisely under "Not ported yet" in `work_mode.md`,
 which shrinks as each lands.
 
-**A6 - the fork's own defaults.** Everything above makes the phone behave like
-the desktop. This one is about the things the fork should decide differently
-from upstream regardless of Work Mode.
+**A6 - the fork's own defaults.** What this fork decides differently from
+upstream regardless of Work Mode, all of it in [defaults.md](defaults.md): the
+Archive row off the top of the chat list, the background connection on because
+without push nothing else here can notify, Local Premium ported, and the app
+calling itself by its own name with its own launcher icon on offer.
 
-Landed so far: the two defaults a fresh install needs, both in
-[defaults.md](defaults.md) - the Archive row off the top of the chat list, and
-the background connection on. They went together because they are one question,
-"what should this do before anybody configures anything". The second was the
-one with a surprise in it: it is three places that have to agree on the same
-answer, not the single line this file used to claim, and changing only the real
-one leaves the switch rendering off while the connection runs.
+Two of the four were not what they looked like. The connection default is three
+sites that must agree, not the one line this file used to name - change only the
+one that decides the behaviour and the switch renders off while the connection
+runs. And the identity was half a bug rather than a missing feature: the fork
+had renamed itself in `strings.xml` long ago and the launcher had always shown
+it; only the running app disagreed, because `LocaleController` reads the
+downloaded language pack ahead of its own resources and Telegram's pack carries
+`AppName`.
 
-Left:
+Local Premium lost two of the desktop's four and gained one the desktop has no
+equivalent of. The account limit has no gate to remove - every site that offers
+"Add Account" tests a constant of 4 with no Premium check - and exact last seen
+was measured to be worth a single contact in 1913. Locked folders are the new
+one, and this fork needs them more than upstream does, since a `folders` preset
+naming a locked folder asks for a tab the app will not draw.
 
-- **Local Premium, ported.** Landed, apart from what turned out not to exist -
-  [premium.md](premium.md) has the Android section and the reasoning. `[premium]
-  enabled_p` reaches the phone through the bridge, so one settings.toml still
-  means one thing in both clients, and sponsored messages and whole-chat
-  translation are unlocked here as they are on the desktop.
+## Nothing after A6
 
-  The per-feature split did have to be redone rather than copied, and two of the
-  desktop's four did not survive the crossing. The account limit has **no gate
-  to remove**: every site that offers "Add Account" tests a constant of 4 with
-  no Premium check, so everyone already has four, and going further means
-  resizing every per-account array - adding capacity, which is not what this
-  feature is. Exact last seen is skipped on the strength of the measurement
-  already in that document: one contact in 1913 held a recoverable value, and
-  the *off* path of such a loop destroys real ones.
+The port is done. What is left is not a milestone:
 
-  Going the other way, Android has a candidate the desktop does not:
-  `lockFiltersInternal()` locks every folder past the non-Premium limit, and
-  those folders are already in hand. That is unlocked, and it matters more here
-  than upstream - a `folders` preset naming a locked folder is asking for a tab
-  the app will not draw. It does not touch the folder *count* limit, which the
-  server enforces on creation.
-
-- **A Purple identity.** Half of this turned out to be a bug rather than a
-  missing feature, and the premise above was wrong: the fork *had* renamed
-  itself, in `strings.xml`, and the launcher had always shown it. What said
-  "Telegram" was the running app, because `LocaleController` reads the
-  downloaded language pack ahead of its own resources and Telegram's pack
-  carries `AppName`. Fixed, and not behind a setting - see
-  [defaults.md](defaults.md), "The app calls itself by its own name". Offering
-  to be called Telegram in the app while the launcher entry says Purple
-  Telegram would be preserving an inconsistency, not a preference.
-
-  What is left is the **launcher icon**, and that one is a real opt-in, because
-  it is the only thing that makes the app distinguishable at a glance and
-  looking like stock is sometimes the point. The design is settled and cheap:
-  upstream already ships `LauncherIconController` plus one `activity-alias` per
-  alternative icon, and `setIcon()` already does the mutual exclusion, so a
-  Purple entry rides the machinery that is there and appears in Telegram's own
-  App Icon picker rather than needing a setting of its own. Deriving its state
-  from `isEnabled(PURPLE)` rather than a preference is what keeps the two from
-  disagreeing.
-
-  The work is assets rather than logic: an adaptive icon (a purple background
-  behind the existing foreground, the way the Aqua icon is built), a legacy
-  bitmap for API 21-25, and the alias. Note that `res/drawable` and the
-  `mipmap-*` directories are outside the sparse checkout.
+- A5's **launch-time import offer**, held back on purpose until the manual
+  export/import path has been used for a while. The criterion is above, and
+  [sync.md](sync.md) owns the decision.
+- Two small pieces waiting to land with something else rather than alone: the
+  folder-tab half of `hide_scope`'s default, and the chat-list mark for a row
+  that is only present on a clock, which `[recent] style` and a "show until"
+  both want.
+- The verification debt in [todo.md](todo.md) - behaviour that is written and
+  reasoned about but has not been driven on a screen. Most of it needs a build
+  box that is not at load 100, or a local emulator.

@@ -142,3 +142,19 @@ dump where it read `Telegram` before, and the system's own ANR dialog says
 "Purple Telegram isn't responding". What has not been checked is the other
 surface the language pack was shadowing - a **notification's** title - which
 needs an inbound message with the app in the background.
+
+## The launcher icon, in the picker
+
+The alias is verified as far as the package manager goes: `PurpleIcon` is
+registered, the only launcher entry on a fresh install is `DefaultIcon`, and
+enabling ours makes it the launcher entry and disabling it puts the stock one
+back. What that does *not* cover is the two things a person would actually do:
+
+- open **Settings > Chat Settings > App Icon** and see a Purple tile in the
+  list, drawn from `icon_purple_background_sa` behind the stock foreground;
+- tap it, and have `LauncherIconController.setIcon()` leave exactly one alias
+  enabled - the guarantee that stops two Purple Telegram entries appearing on
+  the home screen at once.
+
+Both need the picker on screen, so both are waiting on a renderer. The artwork
+itself has been looked at outside the app and is right.
