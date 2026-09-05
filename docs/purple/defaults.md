@@ -141,9 +141,30 @@ It is deliberately not a setting. A switch here would mean choosing to be called
 Telegram in the app while the launcher entry underneath says Purple Telegram,
 which is the inconsistency this removes rather than a preference worth offering.
 
-The **launcher icon** is still Telegram's, and that one *is* worth an opt-in:
-see the roadmap. Nothing about the name change makes the app harder to mistake
-for stock at a glance, which is the thing an icon fixes.
+### The launcher icon is an opt-in
+
+The name change does nothing for the thing you actually see on a home screen, so
+the icon is offered separately - and, unlike the name, it *is* off by default,
+because looking like stock is sometimes the point.
+
+It needed no setting. Upstream already ships alternative launcher icons: an
+`activity-alias` per icon, all but one disabled, and
+`LauncherIconController.setIcon()` enabling exactly one and disabling the rest.
+A Purple entry rides that, appears in Telegram's own **App Icon** picker where
+somebody would look for it, and inherits the mutual exclusion for free. Its
+state is `isEnabled(PURPLE)` and nothing else, so there is no preference that
+can disagree with what the launcher is showing - which is the failure mode a
+separate switch would have introduced the moment anyone picked a different icon
+from the same list.
+
+The artwork is deliberately unoriginal: the stock foreground over a purple
+gradient, built exactly the way the Aqua icon is built, and cut to the stock
+silhouette. It should read as Telegram at a glance and never be confused with
+the official app sitting next to it. The pre-adaptive bitmaps for API 21-25 are
+generated from those same pieces rather than drawn, so they cannot drift from
+the adaptive version.
+
+It is not Premium-gated, unlike three of upstream's. It is ours to give.
 
 ## Also on by default, elsewhere
 
