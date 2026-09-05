@@ -1,12 +1,18 @@
-# Waiting on a better emulator
+# Not yet driven on a screen
 
 Things that are written and compile, but have not been driven on a device.
-Nothing here is claimed as working. The test emulator on the shared build box
-renders in software, and some surfaces cannot be reached there at all; this file
-is what to walk through once an emulator with a real GPU is available.
+Nothing here is claimed as working.
 
-See `remote-build-and-test/readme.md` for the renderer's limits, and
-`roadmap.md` for what is actually done.
+Most of it has been waiting on a renderer. That wait is over: the laptop now
+runs the APK natively on the M2's own GPU, so the popup-heavy items that
+segfaulted the build box's software rasteriser are reachable. See
+"Run the emulator on the laptop, not the box" in
+`remote-build-and-test/readme.md`; `roadmap.md` has what is actually done.
+
+The order to work through it, cheapest first and sharing setup: the list box's
+new rows and the preview-menu entry, then the reorder guard and an extra view's
+pinned order, then the App Icon picker, then Local Premium on the screen, then
+the folder unlock - which needs its own trick, described below.
 
 ## The Work Mode list box in the per-chat preview menu
 
@@ -102,19 +108,42 @@ moved out of `isDialogTranslatable` to get the withheld half at all - upstream
 skips language detection when the feature is unavailable, so a line on that
 predicate can only ever fire one way.
 
-**The folder unlock is still unexercised.** The plan was to write
-`dialogFiltersLimitDefault = 1` into `mainconfig.xml` so the account's three
-folders would exceed the limit. That does not work: the server sends
+**The folder unlock is still unexercised**, and both plans for it so far
+were wrong. Worth writing down, because the second wrong one looked obvious.
+
+The first was to write `dialogFiltersLimitDefault = 1` into `mainconfig.xml` so
+the account's three folders would exceed the limit. The server sends
 `dialog_filters_limit_default` in the app config and
 `MessagesController.applyAppConfig` writes it straight back - it was 10 again
-within seconds. Second time in a day that a preference turned out to be
-Telegram's rather than ours, after `backgroundConnection`. **A key the server
-writes cannot be used as a test fixture.**
+within seconds. **A key the server writes cannot be used as a test fixture.**
 
-So it needs eleven real folders on the test account, made through the UI, and a
-renderer healthy enough to draw the tab strip. Worth doing when the box is quiet,
-because it is also the case A3's folder strip and A4's folder mechanism have
-never been seen against - every folder test so far has used three.
+The second was to make eleven real folders through the UI. That cannot be done
+at all: `FiltersSetupActivity:737` refuses to open the create screen once
+`count - 1 >= dialogFiltersLimitDefault && !getUserConfig().isPremium()`, and
+the server enforces the same cap behind it. A non-premium account cannot hold
+eleven folders, which is the point - the locked state does not arise from
+making too many, it arises from *having had* Premium and losing it, leaving
+folders the limit no longer covers.
+
+Note what that means for the feature as shipped: Local Premium removes the
+padlock from folders beyond the limit, and deliberately does **not** raise the
+creation limit, because the server would refuse the eleventh folder anyway.
+Unlocking what exists is the whole of what the client can honestly offer.
+
+The route that should work is to stop the app config from arriving rather than
+to fight it after it does: with the radio off, `applyAppConfig` never runs, and
+the value read out of `mainconfig.xml` at `MessagesController:1714` stands. Set
+it to 1 with the app stopped, enable airplane mode, launch, and read
+
+    Purple: N folders against a limit of M, K locked
+
+both with `enabled_p = true` and with it false. Three folders against a limit of
+1 should be 2 locked without the unlock and 0 with it, and the padlock should
+appear and disappear on the tab strip to match.
+
+That also gives A3's folder strip and A4's folder mechanism their first test
+against a limit that bites, though not against more than three folders - which,
+per the above, this account can never have.
 
 ### Still wanted on the screen, whatever the log says
 
