@@ -106,7 +106,8 @@ The port is done. What is left is not a milestone:
   laptop runs the APK natively on its own GPU, and the first run on it put the
   list box, its verdict line in four readings, the three "until" spans, the
   preview menu, the App Icon picker and the folder unlock on a screen for the
-  first time - with no ANR, crash or segfault anywhere. What is left is one
-  real bug (the preview menu's entry to the list box opens nothing, because it
-  posts the dialog into a fragment that is still being dismissed), two fixtures
-  nobody has written, and two surfaces this emulator cannot reach at all.
+  first time - with no ANR, crash or segfault anywhere. It also found and fixed
+  one real bug: the preview menu's entry to the list box opened nothing,
+  because it posted the dialog into a fragment that was still being dismissed.
+  What is left is two fixtures nobody has written, and two surfaces this
+  emulator cannot reach at all.

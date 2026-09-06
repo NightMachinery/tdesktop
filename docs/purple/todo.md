@@ -6,49 +6,18 @@ Nothing here is claimed as working.
 Most of this file used to be waiting on a renderer. That wait is over - the
 laptop runs the APK natively on the M2's own GPU (see "Run the emulator on the
 laptop, not the box" in `remote-build-and-test/readme.md`) - and the first run
-on it cleared most of the backlog in one sitting. What is left is below, and it
-is a different kind of list: one real bug, two things that need a fixture
-nobody has written yet, and two that the emulator cannot reach at all.
+on it cleared most of the backlog in one sitting. It also found one real bug and fixed it in
+the same night: the preview menu's "Work Mode lists" entry opened nothing,
+because it posted the dialog with a zero-delay `runOnUIThread` - the next loop
+iteration rather than after the preview's dismissal animation, so the box was
+attached to a window on its way out. It now waits, and opens. What is left
+below is two things that need a fixture nobody has written yet, and two the
+emulator cannot reach at all.
 
 For the record, that run put up chat previews, long-press popups, overflow
 menus, alert dialogs and the icon picker with **no ANR, no crash and no
 renderer segfault**. Every `EXIT=139` in this project's history belongs to the
 build box's software rasteriser, not to the app.
-
-## A bug: "Work Mode lists" in the preview menu opens nothing
-
-**This is the one failure the run found, and it is real.** Long-press a chat's
-*avatar* in the chat list (not the row - `onItemLongClick` only offers the
-preview when `cell.isPointInsideAvatar(x, y)`, which is why pressing the middle
-of the row gives selection mode instead). The preview and its menu draw
-correctly and **"Work Mode lists" is there**, between "Mark as unread" and
-"Pin". Tapping it dismisses the preview and then does nothing at all: no box,
-no dialog, nothing in the log, no exception.
-
-The same box opens correctly from the selection mode's overflow on the same
-chat, seconds apart, so `PurpleListBox.show()` and `PurpleListMenu.available()`
-are not the problem. What differs is only the entry point:
-
-```java
-workModeItem.setOnClickListener(e -> {
-    finishPreviewFragment();
-    AndroidUtilities.runOnUIThread(() ->
-            PurpleListBox.show(DialogsActivity.this, currentAccount, dialogId));
-});
-```
-
-The comment above it says "after the preview is gone", but a zero-delay
-`runOnUIThread` is not after the dismissal - it is the next loop iteration,
-while the dismissal animation is still running. It was copied from the pin
-action a few lines below, and that is the mistake: pinning is a data operation
-that only needs the fragment alive, whereas showing a dialog needs a window
-that is not mid-teardown.
-
-Two candidate fixes, and the second is the one to prefer: post with a delay
-long enough to clear the animation, or hang the call off the dismissal's own
-completion rather than guessing at a duration. Whichever is chosen, the pin
-action's comment should stop being cited as the precedent, because it is not
-one.
 
 ## The reorder guard during a peek
 
@@ -102,9 +71,6 @@ kind. It shares the channel path's guard and has no log line of its own.
   out not to be a string at all.
 - The unread-counter colours, the readable evidence of an effective mute, only
   ever checked on one screenshot.
-- The list box's checkboxes: adding and removing a chat from a list through the
-  box, and the chat list reflecting it immediately. The box itself is verified,
-  its checkboxes are not.
 - The verdict line's `"hidden until a message"` wording. The other four
   readings are confirmed on screen; this one needs a chat that is *currently
   hidden*, and a hidden chat cannot be long-pressed out of a list it is not in.
