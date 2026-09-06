@@ -98,10 +98,12 @@ The port is done. What is left is not a milestone:
 - A5's **launch-time import offer**, held back on purpose until the manual
   export/import path has been used for a while. The criterion is above, and
   [sync.md](sync.md) owns the decision.
-- Two small pieces waiting to land with something else rather than alone: the
-  folder-tab half of `hide_scope`'s default, and the chat-list mark for a row
-  that is only present on a clock, which `[recent] style` and a "show until"
-  both want.
+- The two small pieces that waited here - the folder-tab half of
+  `hide_scope`'s default, and the chat-list mark for a row that is only
+  present on a clock - landed on 2026-09-06. The first is a guard on the
+  bucket increments both unread-counter passes are summed from, and the
+  second is the desktop's stripe and timer drawn by `DialogCell`. Both are in
+  [todo.md](todo.md) until a screen has shown them.
 - The verification debt in [todo.md](todo.md), most of which is now paid. The
   laptop runs the APK natively on its own GPU, and the first run on it put the
   list box, its verdict line in four readings, the three "until" spans, the
