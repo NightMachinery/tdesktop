@@ -36,17 +36,20 @@ view when they are archived. They were one milestone rather than three because
 all three need the same question answered off the UI thread - whether a given
 chat is inside a given folder, right now.
 
-**A5 - the rest of Work Mode.** Everything is done except the launch-time offer
-of a settings import, and that one is **held back on purpose rather than left
-over**. [sync.md](sync.md) owns the feature and says why: an offer that appears
-on every launch of a machine you never sync is worse than no offer, and the rule
-for suppressing it is easier to write once there is real use to look at. The
-manual path it is meant to improve has not been exercised end to end even once
-yet. Building it now would be guessing at the suppression rule, on Android
-first, where the desktop does not have it either.
+**A5 - the rest of Work Mode.** Done, including the launch-time offer of a
+settings import, whose Android half landed on 2026-09-06. The thing that had
+been held back was never the code but the suppression rule, and the rule is now
+decided: **one offer per message, ever**. Each account remembers the id of the
+newest `settings.toml` message it has already had an opinion about, and a
+message earns a line on the screen only if its id is higher than that and its
+date is later than the local file's - so the machine you never sync sees each
+file you post exactly once and then nothing. [sync.md](sync.md) owns the feature
+and carries the reasoning.
 
-The criterion for starting it is therefore not effort: it is the desktop
-export/import round trip having been used for a while.
+It went to Android first on purpose. The phone is the machine you pick up after
+editing settings somewhere else, so it is where the offer is worth having and
+where the rule gets tested against real use. The desktop half follows, with the
+same rule.
 
 Landed so far: hot reload of `settings.toml`, filing a chat into a list from the
 chat list, the two things that move on a clock rather than on an edit - peek and
@@ -95,9 +98,10 @@ naming a locked folder asks for a tab the app will not draw.
 
 The port is done. What is left is not a milestone:
 
-- A5's **launch-time import offer**, held back on purpose until the manual
-  export/import path has been used for a while. The criterion is above, and
-  [sync.md](sync.md) owns the decision.
+- A5's **launch-time import offer**, whose Android half landed on 2026-09-06
+  under the "one offer per message, ever" rule described above. What is left is
+  the desktop half, which gets the same rule and the same wording;
+  [sync.md](sync.md) owns both.
 - The two small pieces that waited here - the folder-tab half of
   `hide_scope`'s default, and the chat-list mark for a row that is only
   present on a clock - landed on 2026-09-06. The first is a guard on the

@@ -36,8 +36,9 @@ the same encryption, and the fork has added no new place for it to leak from.
 
 The cost is that it is manual. You press a button on one machine and pick a
 menu item on the other, and nothing happens on its own. That is not an
-oversight - see the next section - but it is the honest weakness, and if it
-turns out to be annoying in daily use, the fix is phase 2 rather than a server.
+oversight - see the next section - but it is the honest weakness, and the fix
+for it was always phase 2 rather than a server. Phase 2 has since been built on
+Android: the pressing is still manual, but the noticing is not.
 
 ## What it does not do
 
@@ -46,26 +47,52 @@ as `settings.toml.bak` beside it, a single file that is overwritten each time.
 There is no three-way merge and no attempt at one, because a merge needs a
 common ancestor and there is nowhere here that would hold one.
 
-It does not run automatically, and it does not notice that the other machine
-has a newer file. It does not touch `state.toml` - the active preset, the peek
-timer and the `... until` overrides are about what *this* machine is doing right
-now, and carrying them across would be a much larger claim than "these are my
-settings".
+It does not run automatically. On Android it does notice that the other machine
+has a newer file, and says so once - see phase 2 below - but noticing is as far
+as it goes; the write still waits for a press. It does not touch `state.toml` -
+the active preset, the peek timer and the `... until` overrides are about what
+*this* machine is doing right now, and carrying them across would be a much
+larger claim than "these are my settings".
 
 ## Phase 2: offering an import on launch
 
-The obvious next step, and deliberately not in the first version: on startup,
-look at the most recent `settings.toml` in Saved Messages, and if it is newer
-than the local file, offer to import it - one line, dismissible, no automatic
-write.
+Implemented on Android, on 2026-09-06. On the first chat list a process builds,
+the fork asks Saved Messages for the newest `settings.toml`, and if it is newer
+than the local file it puts one dismissible line on the screen - "A newer Work
+Mode settings file is in Saved Messages", with an Import button. Nothing is
+written unless that button is pressed, and pressing it lands in the same
+`PurpleSettings.importFrom` the chat's own menu item uses, confirmation dialog
+and all. This is the whole of the automatic half: a search of one chat for one
+filename, and a snackbar.
 
-That is a small amount of code on top of what exists (the import path is
-already written; what is missing is a search of one chat for one filename), and
-it turns the feature from "sync when you remember" into "sync when you sit
-down". It is held back only because it needs the manual path to be proven first:
-an offer that appears on every launch of a machine you never sync is worse than
-no offer, and the right rule for suppressing it is easier to write once there is
-a month of real use to look at.
+The thing that was actually hard here was never the code. It was the worry that
+stated the hold: an offer that appears on every launch of a machine you never
+sync is worse than no offer. The rule that answers it is **one offer per
+message, ever**. Each account remembers the id of the newest `settings.toml`
+message it has already had an opinion about, and a message only earns an offer
+if its id is higher than that *and* its date is later than the local file's. The
+id is written before the line is drawn, so dismissing it, letting it time out,
+and crashing halfway through all record the same thing. A machine you never sync
+therefore sees each file you post exactly once and then never again, which is
+the behaviour a notification should have: it tells you something happened, and
+it does not keep telling you.
+
+Two smaller decisions fall out of that rule. A message *older* than the local
+file advances the remembered id too, without ever being shown - it is not worth
+offering now and will not become worth offering later, and leaving it behind
+would mean re-deciding it on every launch. And the freshness of the local copy
+is read from the file's own mtime rather than from a recorded message date,
+because an import writes the bytes and nothing else; since the write necessarily
+happens after the message was sent, the mtime is always the later of the two and
+the comparison stays honest.
+
+This is Android-first by design, which inverts the usual direction: the desktop
+is where the feature was described and it is the half that does not have it yet.
+The reason is where the annoyance lives. The phone is the machine you pick up
+after editing settings somewhere else, so it is where "sync when you sit down"
+is worth something and where the suppression rule gets tested against real use.
+The desktop half is next, with the same rule and the same wording; nothing about
+either is platform-specific beyond the snackbar.
 
 ## Rejected: git, driven from Termux
 
@@ -138,3 +165,24 @@ that is not valid TOML never reaches the disk. The write goes through the same
 `Purple::WriteConfigFile`, and the directory watcher picks the change up and
 hot-reloads it - the import path deliberately knows nothing about applying
 settings, only about producing a valid file.
+
+The launch-time offer is Android only so far, and lives in
+
+    TMessagesProj/src/main/java/org/telegram/messenger/purple/PurpleSyncOffer.java
+
+with a single call from `DialogsActivity.onFragmentCreate`, right after the one
+that resolves the active preset. It sends a `messages.search` at the self peer
+with a document filter, picks out the newest result whose document is actually
+named `settings.toml` and is small enough to be one, and stops there unless the
+two comparisons above both say yes. The remembered id is an ordinary per-account
+preference, `purple_sync_offered_id`. Everything that can go wrong on the way -
+no network, a search that answers with an error, a download that never lands -
+is a line in the log and nothing on the screen, because the user did not ask for
+any of this and the manual import is still sitting in the message's own menu.
+
+The one place it guesses is the search query. It asks for `settings.toml` by
+name, which relies on the server indexing document filenames the way the
+shared-files search box does, and if that comes back with nothing at all it asks
+once more with no query and sorts the newest twenty documents out itself. The
+second request costs one small round trip on a machine that has never used the
+feature, which is the price of the feature never silently failing to exist.
