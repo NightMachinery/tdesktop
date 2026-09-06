@@ -19,10 +19,10 @@ menus, alert dialogs and the icon picker with **no ANR, no crash and no
 renderer segfault**. Every `EXIT=139` in this project's history belongs to the
 build box's software rasteriser, not to the app.
 
-## Two features that landed on 2026-09-06 and have not been seen
+## Five features that landed on 2026-09-06 and have not been seen
 
-Both were written against the desktop's behaviour and compile; neither has
-been on a screen.
+All were written against the desktop's behaviour and compile; none has been
+on a screen.
 
 **The folder-count half of `hide_scope`.** Set a "hide until" on a chat with
 unread that sits in a folder without "Exclude muted": that folder's tab pill,
@@ -38,6 +38,26 @@ draw a green bar down the row's leading edge, and a chat just closed under a
 anyway must carry none. With `style = "timer"`, a ring in the badge slot that
 empties anticlockwise, and only on a row with no count or mention. Both need
 a screenshot; a `uiautomator` dump cannot see either.
+
+**One rule for a folder pill.** The folders popup in the tabs activity must
+show the same number the strip's pill shows: nothing for a folder with
+`badge_p = false`, its own count for an extra view.
+
+**hide_everywhere_p.** Under a preset that sets it, a hidden chat must be gone
+from All chats, from its folder tab, from the forward picker, the share sheet,
+search suggestions, recent chats and the frequent-chats strip; the log's
+dialog count must drop; and switching to normal must bring it back with its
+pin exactly where it was. Pinning another chat while it runs must still pin
+it on the server. `hide_scope = "hide_everywhere"` does the same for one chat
+under a "hide until".
+
+**The launch-time import offer.** With a newer `settings.toml` in Saved
+Messages than the local file, the first chat list after a cold start must show
+one line offering Import, and the log
+`Purple: sync offer: newest settings.toml is msg N ... -> offering`. Import
+must apply it; a second cold start must show nothing and log
+`skipped (already offered)`. Send the file to Saved Messages from the emulator
+itself; nothing else may post there.
 
 ## The reorder guard during a peek
 
