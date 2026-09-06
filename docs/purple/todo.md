@@ -19,6 +19,26 @@ menus, alert dialogs and the icon picker with **no ANR, no crash and no
 renderer segfault**. Every `EXIT=139` in this project's history belongs to the
 build box's software rasteriser, not to the app.
 
+## Two features that landed on 2026-09-06 and have not been seen
+
+Both were written against the desktop's behaviour and compile; neither has
+been on a screen.
+
+**The folder-count half of `hide_scope`.** Set a "hide until" on a chat with
+unread that sits in a folder without "Exclude muted": that folder's tab pill,
+All chats and the archive number must all drop by that chat's count at once,
+while the row on the folder tab keeps its own badge. Cancel the hide and the
+numbers must come back, never negative. The log line to read is
+`Purple: N chats under a hide until left out of the folder counts`.
+
+**The mark on a row that is only there on a clock.** With
+`[recent] style = "stripe"`, a "show until" on a chat the preset hides must
+draw a green bar down the row's leading edge, and a chat just closed under a
+`[recent]` buffer a bar in the unread accent; a chat the preset lets through
+anyway must carry none. With `style = "timer"`, a ring in the badge slot that
+empties anticlockwise, and only on a row with no count or mention. Both need
+a screenshot; a `uiautomator` dump cannot see either.
+
 ## The reorder guard during a peek
 
 `PurpleGate.foldersRestricted()` answers false while a peek is running, so the

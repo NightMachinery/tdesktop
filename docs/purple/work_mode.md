@@ -2034,9 +2034,31 @@ actually showing - rather than the account's folders, which is the desktop's
 rule met through `shownFilters()`; the desktop also checks its extra views
 there, and this is one of the places that will need them when they land.
 
-`[recent] style`, which marks a row that is only there on a clock, is not
-ported. It is a `DialogCell` painting change and it belongs with the same mark a
-"show until" wants, so the two should land together rather than separately.
+`[recent] style`, which marks a row that is only there on a clock, is ported,
+and it landed as one pass with the "show until" mark because both are the same
+claim. One accessor answers for both: `PurpleGate.temporary()` mirrors
+`History::purpleTemporary()`, returning the span on `elapsedRealtime()` and
+whether a "show until" is what is holding the row - held or lingering, drawn the
+same way in different colours. It carries the desktop's rules unchanged: a "show
+until" and nothing else, a chat you have open is not counting down yet, and in
+every branch the row must actually leave the view when the clock stops, asked
+last because it is the expensive test.
+
+`DialogCell` draws the two styles. The stripe goes down the row's leading edge
+immediately after the row background and inside the swipe translation, so it
+belongs to the row rather than to the strip behind it. The timer is a ring in
+the badge slot, and only when nothing else wants that slot - a count, a mention,
+a reaction mention or an error is a fact about the chat, where this is a fact
+about how long the row has left. The pin is not in that reckoning here, because
+Android draws it beside the date rather than in the badge slot. While a ring is
+showing, the cell re-arms one repaint a second from the draw that needs it -
+nothing else would come back for a mark that moves on a clock alone, and arming
+it only from there is what stops it: a row that stops drawing a ring stops
+re-arming.
+
+The bridge carries two new fields for it: each override's start time as `from`,
+so the ring has both ends of the span, and `recentStyle` alongside `recentSeconds`
+and `recentScope`.
 
 ### Extra views
 
@@ -2085,12 +2107,10 @@ reload, the list-membership menu, peek, the schedule, the "... until" overrides,
 the line naming which entry decides a chat, the `[recent]` close buffer and
 extra views are all done; see above.
 
-Two smaller pieces are deliberately left, both because they belong with
-something else rather than because they are hard: the folder-tab half of
-`hide_scope`'s default, for the reason given there, and the chat-list mark for a
-row that is only present on a clock - `[recent] style` and a "show until" want
-the same mark, so they want one pass.
-The `folders` key itself is complete: the tab, `notify_p`, `badge_p` and
+The two smaller pieces that used to wait here - the folder-tab half of
+`hide_scope`'s default, and the chat-list mark for a row that is only present
+on a clock - landed on 2026-09-06, each described in its own section above. The
+`folders` key itself is complete: the tab, `notify_p`, `badge_p` and
 `include_in_main_view` all work.
 
 A folder's `notify_p` is ported. A folder silences its chats here the way it
