@@ -2102,10 +2102,11 @@ it with every chat for two minutes would only take it away.
 
 ### Not ported yet
 
-Only the launch-time offer of the settings import is left of A5 proper. Hot
-reload, the list-membership menu, peek, the schedule, the "... until" overrides,
-the line naming which entry decides a chat, the `[recent]` close buffer and
-extra views are all done; see above.
+Nothing of A5 proper is left. Hot reload, the list-membership menu, peek, the
+schedule, the "... until" overrides, the line naming which entry decides a
+chat, the `[recent]` close buffer, extra views and, since 2026-09-06, the
+launch-time offer of a settings import are all done; see above and
+[sync.md](sync.md).
 
 The two smaller pieces that used to wait here - the folder-tab half of
 `hide_scope`'s default, and the chat-list mark for a row that is only present
