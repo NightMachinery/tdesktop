@@ -246,6 +246,33 @@ computed in a pass that only runs when the filter list changes; re-running it
 from the reload path would be a second mechanism for a switch that is flipped
 about once.
 
+**Verified on a device, both ways** - and the way to do it is worth recording,
+because two earlier plans for it were unworkable.
+
+The obvious fixture, eleven folders, cannot exist: `FiltersSetupActivity:737`
+refuses the create screen once
+`count - 1 >= dialogFiltersLimitDefault && !isPremium()`, and the server
+enforces the same cap behind it. The locked state does not arise from making
+too many folders - it arises from having *had* Premium and lost it. Writing
+`dialogFiltersLimitDefault = 1` into `mainconfig.xml` does not work either: the
+server sends `dialog_filters_limit_default` in the app config and
+`applyAppConfig` writes it straight back within seconds.
+
+What works is to stop the app config from arriving rather than to fight it
+afterwards. With the radio off, `applyAppConfig` never runs and the value read
+at `MessagesController:1714` stands:
+
+    adb shell cmd connectivity airplane-mode enable
+
+Then, on an account with three folders and the limit pinned to 1:
+
+    Purple: 3 folders against a limit of 1, 0 locked (local premium).   enabled_p = true
+    Purple: 3 folders against a limit of 1, 2 locked.                   enabled_p = false
+
+and the padlock is drawn on the folder's tab in the second case, absent in the
+first, with the tab opening its contents rather than an upsell. That is the
+whole feature, on the screen, in both directions.
+
 ### What did not port, and why
 
 **Six accounts: there is no gate to remove.** All three places that decide

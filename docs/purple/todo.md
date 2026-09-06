@@ -3,187 +3,109 @@
 Things that are written and compile, but have not been driven on a device.
 Nothing here is claimed as working.
 
-Most of it has been waiting on a renderer. That wait is over: the laptop now
-runs the APK natively on the M2's own GPU, so the popup-heavy items that
-segfaulted the build box's software rasteriser are reachable. See
-"Run the emulator on the laptop, not the box" in
-`remote-build-and-test/readme.md`; `roadmap.md` has what is actually done.
+Most of this file used to be waiting on a renderer. That wait is over - the
+laptop runs the APK natively on the M2's own GPU (see "Run the emulator on the
+laptop, not the box" in `remote-build-and-test/readme.md`) - and the first run
+on it cleared most of the backlog in one sitting. What is left is below, and it
+is a different kind of list: one real bug, two things that need a fixture
+nobody has written yet, and two that the emulator cannot reach at all.
 
-The order to work through it, cheapest first and sharing setup: the list box's
-new rows and the preview-menu entry, then the reorder guard and an extra view's
-pinned order, then the App Icon picker, then Local Premium on the screen, then
-the folder unlock - which needs its own trick, described below.
+For the record, that run put up chat previews, long-press popups, overflow
+menus, alert dialogs and the icon picker with **no ANR, no crash and no
+renderer segfault**. Every `EXIT=139` in this project's history belongs to the
+build box's software rasteriser, not to the app.
 
-## The Work Mode list box in the per-chat preview menu
+## A bug: "Work Mode lists" in the preview menu opens nothing
 
-The membership box is offered from two places. The selection mode's overflow is
-verified. The **per-chat preview menu** - long-press with preview, which is the
-closer analogue of the desktop's right-click - is not: reaching it needs a
-preview that the software renderer does not put up, and the emulator segfaults
-when it tries.
+**This is the one failure the run found, and it is real.** Long-press a chat's
+*avatar* in the chat list (not the row - `onItemLongClick` only offers the
+preview when `cell.isPointInsideAvatar(x, y)`, which is why pressing the middle
+of the row gives selection mode instead). The preview and its menu draw
+correctly and **"Work Mode lists" is there**, between "Mark as unread" and
+"Pin". Tapping it dismisses the preview and then does nothing at all: no box,
+no dialog, nothing in the log, no exception.
 
-Both entry points call the same `PurpleListBox.show()` behind the same
-`PurpleListMenu.available()`, so the logic underneath is the verified one and
-what is untested is the entry point itself. What to check:
+The same box opens correctly from the selection mode's overflow on the same
+chat, seconds apart, so `PurpleListBox.show()` and `PurpleListMenu.available()`
+are not the problem. What differs is only the entry point:
 
-- The entry appears in the preview menu, and only when a list has been written.
-- Choosing it dismisses the preview and then shows the box, rather than putting
-  the box behind the fragment being dismissed.
-- Adding and removing from there behaves as it does from the overflow, and the
-  chat list reflects it immediately.
+```java
+workModeItem.setOnClickListener(e -> {
+    finishPreviewFragment();
+    AndroidUtilities.runOnUIThread(() ->
+            PurpleListBox.show(DialogsActivity.this, currentAccount, dialogId));
+});
+```
 
-## The list box's new rows
+The comment above it says "after the preview is gone", but a zero-delay
+`runOnUIThread` is not after the dismissal - it is the next loop iteration,
+while the dismissal animation is still running. It was copied from the pin
+action a few lines below, and that is the mistake: pinning is a data operation
+that only needs the fragment alive, whereas showing a dialog needs a window
+that is not mid-teardown.
 
-The box grew a verdict line at the top and the three "Show/Hide/Notify
-until..." rows at the bottom, and none of it has been on a screen: both ways in
-- the selection overflow and the preview menu - are popups, and popups are what
-kills the software renderer. Three attempts, three `EXIT=139`.
-
-What is untested is the presentation, not the decision. Every rule underneath is
-verified through the file and the log: a hide takes the chat out of the list and
-silences it, a show reveals without un-silencing, a notify un-silences without
-revealing, a peek outranks a hide, and an expiry prunes itself. What to check:
-
-- The verdict line reads correctly for a chat in a list, for one in none, for a
-  gated one ("hidden until a mention"), and for one a folder pulled in
-  (", shown by a folder"). This is the only path that exercises
-  `deciderNative()`.
-- The three rows open the spans, and a span writes the decision.
-- The Cancel row appears only while something is running, and names it.
-
-## An extra view's pinned order, and the reorder guard it forces
-
-A view owns its pinned order, and the order itself has not been seen: chat rows
-are custom views and invisible to a dump, so there is no way to read the order
-off the screen. What is verified is that the pins are built and break nothing -
-the tab, its membership and its badge all behave with a `pinned` key present.
-What to check is simply that the named chat is at the top of that tab.
-
-The same run should check the reorder guard, which a view now forces on:
-`foldersRestricted()` returns true whenever a preset declares one, ahead of the
-peek test, so the folder tab's long-press menu must offer no **Reorder** even
-mid-peek. That needs a long-press popup, which is what the software renderer
-dies on.
+Two candidate fixes, and the second is the one to prefer: post with a delay
+long enough to clear the animation, or hang the call off the dismissal's own
+completion rather than guessing at a duration. Whichever is chosen, the pin
+action's comment should stop being cited as the precedent, because it is not
+one.
 
 ## The reorder guard during a peek
 
 `PurpleGate.foldersRestricted()` answers false while a peek is running, so the
 folder tab's long-press menu should offer **Reorder** again for as long as it
-lasts. The strip half of that is verified - the log says
-`folder strip showing 4 of 4 (peeking)` where the same preset says `2 of 4`
-without one - but the menu entry itself has not been seen, because reaching it
-means a long-press popup and that is what the software renderer dies on.
+lasts, and offer none without one. The strip half is verified through the log.
 
-Both answers come from the same flag on the same line, so what is untested is
-the menu, not the decision.
+Still open, and no longer for renderer reasons: it needs a `state.toml` with
+`peek_active` set and a deadline in the future, pushed under a preset that
+names folders, and then the tab's long-press menu read in both states. Two
+attempts at the long-press on the tab itself did not raise the menu at all at
+the coordinates tried, which is worth a moment's care rather than a third blind
+swipe - the strip's vertical position moves with whether the search bar is
+showing.
 
-## Verifying under a real renderer
+## An extra view's pinned order
 
-Worth re-running on a GPU-backed emulator even though they passed under
-software rendering, because several were driven through the app's log rather
-than the screen:
+A view owns its pinned order, and the order itself has not been seen: chat rows
+are custom views and invisible to a `uiautomator` dump, so it has to be read off
+a screenshot. What is verified is that the pins are built and break nothing.
+What to check is simply that the named chat is at the top of that tab. Needs a
+fixture with a `[[presets.*.views]]` carrying `pinned`.
 
-- The folder strip cases: a preset naming a subset, `"*ALL"` in place, a
-  misspelled name, and the reorder guard appearing and disappearing with
-  `foldersRestricted()`.
-- The archive override: a folder's archived chats pulled into the view, in date
-  order, with the Archive row still holding them.
-- The unread-counter colours, which are the readable evidence of an effective
-  mute and were only ever checked on one screenshot.
+## Two the emulator cannot reach
 
-## Local Premium: seen in the log, not yet on the screen
+Neither is a fork problem, and neither should be attempted again on this setup.
 
-Sponsored messages and whole-chat translation are now each confirmed both ways
-by lines the app writes:
+**The translate bar.** The decision is confirmed both ways in the log
+(`translate for …: available (local premium). chat translate on.`), and the
+three French messages are sitting in the bot chat for it, but the bar never
+appears - because Telegram raises it from a *detected* language and detection
+is Google ML Kit, whose dynamic modules a `google_apis` image cannot fetch:
 
-    sponsored for 981122490: requested.                 (enabled_p = false)
-    sponsored for 981122490: not requested (local premium).
+    MlKitModuleManager: Modules download failed. Error code: 8
+    ZappDownloader: No successful Zapp module downloads for requested modules
 
-    translate for 981122490: withheld. chat translate on.        (enabled_p = false)
-    translate for 981122490: available (local premium). chat translate on.
+A Play Store image or a real device would settle it. Nothing else will.
 
-The `chat translate on` clause matters: it rules out the master switch as the
-reason, so the only thing that moved is the unlock. The translate line had to be
-moved out of `isDialogTranslatable` to get the withheld half at all - upstream
-skips language detection when the feature is unavailable, so a line on that
-predicate can only ever fire one way.
+**`VideoAds.load()`**, the media viewer's video ads: still no evidence of any
+kind. It shares the channel path's guard and has no log line of its own.
 
-**The folder unlock is still unexercised**, and both plans for it so far
-were wrong. Worth writing down, because the second wrong one looked obvious.
+## Still wanted on a screen
 
-The first was to write `dialogFiltersLimitDefault = 1` into `mainconfig.xml` so
-the account's three folders would exceed the limit. The server sends
-`dialog_filters_limit_default` in the app config and
-`MessagesController.applyAppConfig` writes it straight back - it was 10 again
-within seconds. **A key the server writes cannot be used as a test fixture.**
-
-The second was to make eleven real folders through the UI. That cannot be done
-at all: `FiltersSetupActivity:737` refuses to open the create screen once
-`count - 1 >= dialogFiltersLimitDefault && !getUserConfig().isPremium()`, and
-the server enforces the same cap behind it. A non-premium account cannot hold
-eleven folders, which is the point - the locked state does not arise from
-making too many, it arises from *having had* Premium and losing it, leaving
-folders the limit no longer covers.
-
-Note what that means for the feature as shipped: Local Premium removes the
-padlock from folders beyond the limit, and deliberately does **not** raise the
-creation limit, because the server would refuse the eleventh folder anyway.
-Unlocking what exists is the whole of what the client can honestly offer.
-
-The route that should work is to stop the app config from arriving rather than
-to fight it after it does: with the radio off, `applyAppConfig` never runs, and
-the value read out of `mainconfig.xml` at `MessagesController:1714` stands. Set
-it to 1 with the app stopped, enable airplane mode, launch, and read
-
-    Purple: N folders against a limit of M, K locked
-
-both with `enabled_p = true` and with it false. Three folders against a limit of
-1 should be 2 locked without the unlock and 0 with it, and the padlock should
-appear and disappear on the tab strip to match.
-
-That also gives A3's folder strip and A4's folder mechanism their first test
-against a limit that bites, though not against more than three folders - which,
-per the above, this account can never have.
-
-### Still wanted on the screen, whatever the log says
-
-A log line proves the branch was taken; it does not prove the surface it governs
-changed. None of these has been seen:
-
-- a sponsored post failing to appear in a channel that serves one, and the
-  sponsored top bar in a bot chat;
-- the translate bar at the top of a foreign-language chat, appearing and
-  disappearing with the unlock. Three French messages are sitting in the bot
-  chat for exactly this;
-- a folder tab drawn without its padlock, and reachable rather than opening the
-  upsell;
-- **`VideoAds.load()`**, the media viewer's video ads, which shares the channel
-  path's guard and has no log line of its own - the one sponsored surface with
-  no evidence at all.
-
-For next time: **a build degrades gracefully at load ~100 and a renderer does
-not.** That is why the log route was taken rather than waiting for the box.
-
-## The app's own name
-
-Fixed and seen: the chat list header reads `Purple Telegram` in a `uiautomator`
-dump where it read `Telegram` before, and the system's own ANR dialog says
-"Purple Telegram isn't responding". What has not been checked is the other
-surface the language pack was shadowing - a **notification's** title - which
-needs an inbound message with the app in the background.
-
-## The launcher icon, in the picker
-
-The alias is verified as far as the package manager goes: `PurpleIcon` is
-registered, the only launcher entry on a fresh install is `DefaultIcon`, and
-enabling ours makes it the launcher entry and disabling it puts the stock one
-back. What that does *not* cover is the two things a person would actually do:
-
-- open **Settings > Chat Settings > App Icon** and see a Purple tile in the
-  list, drawn from `icon_purple_background_sa` behind the stock foreground;
-- tap it, and have `LauncherIconController.setIcon()` leave exactly one alias
-  enabled - the guarantee that stops two Purple Telegram entries appearing on
-  the home screen at once.
-
-Both need the picker on screen, so both are waiting on a renderer. The artwork
-itself has been looked at outside the app and is right.
+- A sponsored post failing to appear in a channel that serves one, and the
+  sponsored top bar in a bot chat. The log says
+  `sponsored for …: not requested (local premium).` both ways; what has not
+  been seen is the surface it governs.
+- A **notification's** title, the last surface Telegram's language pack was
+  shadowing. Needs an inbound message with the app in the background - and see
+  "The app's own name" in `defaults.md`, because the chat list header turned
+  out not to be a string at all.
+- The unread-counter colours, the readable evidence of an effective mute, only
+  ever checked on one screenshot.
+- The list box's checkboxes: adding and removing a chat from a list through the
+  box, and the chat list reflecting it immediately. The box itself is verified,
+  its checkboxes are not.
+- The verdict line's `"hidden until a message"` wording. The other four
+  readings are confirmed on screen; this one needs a chat that is *currently
+  hidden*, and a hidden chat cannot be long-pressed out of a list it is not in.
+  Reaching it means search, or the folder tab, rather than the chat list.

@@ -172,6 +172,52 @@ ever a throwaway test account. `~/.purple-android-test` rather than a session
 scratchpad, so a login survives between sessions - re-logging in costs a phone
 code.
 
+### Things that cost a run each, on any host
+
+**The saved session's uid is not the app's uid.** `session-restore.sh` used to
+take the owner from `stat` on the directory it had just extracted - which
+carries whatever uid the snapshot was taken under, not the uid the package has
+now. It happened to match on the box and did not here, and the failure is
+silent: every file is in place, correct, and unreadable by the app, which draws
+the login screen as though nothing had ever been restored. Ask the package
+manager instead:
+
+    uid=$(adb shell "pm list packages -U | grep -x 'package:$PKG uid:[0-9]*'" | sed 's/.*uid://')
+
+**`adb emu kill` is not a clean shutdown.** Killing the emulator moments after
+writing to `/data` loses the unflushed ext4 writes. A restore that reported
+success can be gone on the next boot.
+
+**Logging is `systemConfig`, not `mainconfig`.** `BuildVars` reads
+`logsEnabled` out of the `systemConfig` preferences; writing it into
+`mainconfig.xml` sets a key nothing reads, and the logs directory just stays
+empty. And the directory holds three files per run - pick the *unsuffixed*
+`*.txt`, because `ls -t | head -1` will hand you `*_net.txt`.
+
+**Long-press the avatar, not the row.** The chat list's preview menu - the
+close analogue of the desktop's right-click - only opens when
+`onItemLongClick` sees `cell.isPointInsideAvatar(x, y)`. A long press anywhere
+else on the row gives selection mode instead. Both are useful; they are
+different menus, and one of them is easy to think is missing.
+
+**`uiautomator` misses popups, and lies about pictures.** Overflow menus
+sometimes dump as nothing at all while being plainly on screen, so a screenshot
+is the arbiter for a popup. Worse, a dump reports the text a view *declares*:
+an `ImageSpan` covering a string reports the string while painting a picture.
+Where text and pixels can disagree, only a screenshot settles it.
+
+**Do not chain blind taps.** Coordinates shift with the search bar's visibility
+and with any change to the list, so a three-tap chain built on an earlier
+screenshot lands somewhere else - twice in one session it walked out of the app
+and into the launcher, once into Google's sign-in flow. One action, one look.
+Two BACKs in a row will leave the app entirely; dismiss a dialog with its own
+Close button.
+
+**ML Kit is unavailable on a `google_apis` image.** Its dynamic modules cannot
+be fetched without the Play Store (`Modules download failed. Error code: 8`),
+so anything built on language identification - Telegram's translate bar, for
+one - can never appear. That needs a Play Store image or a real device.
+
 ### It takes about 6 GB while it runs
 
 Boot it when the machine is free and kill it when the run is done:

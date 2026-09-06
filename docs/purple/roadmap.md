@@ -102,8 +102,11 @@ The port is done. What is left is not a milestone:
   folder-tab half of `hide_scope`'s default, and the chat-list mark for a row
   that is only present on a clock, which `[recent] style` and a "show until"
   both want.
-- The verification debt in [todo.md](todo.md) - behaviour that is written and
-  reasoned about but has not been driven on a screen. It was waiting on a
-  renderer, and is not any more: the laptop runs the APK natively on its own
-  GPU, so the popups that killed the build box's software rasteriser are
-  reachable.
+- The verification debt in [todo.md](todo.md), most of which is now paid. The
+  laptop runs the APK natively on its own GPU, and the first run on it put the
+  list box, its verdict line in four readings, the three "until" spans, the
+  preview menu, the App Icon picker and the folder unlock on a screen for the
+  first time - with no ANR, crash or segfault anywhere. What is left is one
+  real bug (the preview menu's entry to the list box opens nothing, because it
+  posts the dialog into a fragment that is still being dismissed), two fixtures
+  nobody has written, and two surfaces this emulator cannot reach at all.

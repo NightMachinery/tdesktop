@@ -141,6 +141,35 @@ It is deliberately not a setting. A switch here would mean choosing to be called
 Telegram in the app while the launcher entry underneath says Purple Telegram,
 which is the inconsistency this removes rather than a preference worth offering.
 
+### The one surface the fix cannot reach: the header is a picture
+
+Driving this on a real screen turned up something the earlier `uiautomator`
+check could not see. The chat list header still *renders* the word Telegram,
+and the fix is not at fault - the header is not text:
+
+```java
+SpannableStringBuilder ssb = new SpannableStringBuilder(getString(R.string.AppName));
+ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+actionBar.setTitle(ssb, statusDrawable);
+```
+
+`AppName` supplies the span's *length* and nothing else; every pixel drawn comes
+from `R.drawable.telegram_logo_2`, Telegram's wordmark. So the accessibility
+text really does read `Purple Telegram` - which is exactly what the dump
+reported, correctly - while what a person sees is the stock logo. A string fix
+can never change that, and no amount of re-checking the string will reveal it.
+
+The lesson generalises past this fork: **a `uiautomator` dump reports the text a
+view declares, not the pixels it paints.** Where the two can disagree - an
+`ImageSpan`, a custom-drawn cell, an icon carrying a `contentDescription` - only
+a screenshot settles it.
+
+Left as it is for now, deliberately. Changing it means either dropping the span,
+which costs the logo the header was designed around, or drawing a Purple
+wordmark to replace it - a piece of artwork, not a bug fix, and a decision about
+how far the fork wants to look like itself. What is *not* acceptable is the
+current documentation implying the header was fixed, so it says this instead.
+
 ### The launcher icon is an opt-in
 
 The name change does nothing for the thing you actually see on a home screen, so
@@ -165,6 +194,15 @@ generated from those same pieces rather than drawn, so they cannot drift from
 the adaptive version.
 
 It is not Premium-gated, unlike three of upstream's. It is ours to give.
+
+Verified on a screen: the **Purple** tile is the second in the picker, straight
+after Default, drawn from the gradient behind the stock foreground. Tapping it
+leaves `resolve-activity` answering
+`org.purple.telegram/org.telegram.messenger.PurpleIcon`, and a query for every
+enabled launcher entry in the package returns exactly one - which is the
+guarantee that stops two Purple Telegram entries appearing on a home screen at
+once. The padlocked Premium tiles in the same row stay locked, which is correct:
+Local Premium covers four named features and app icons are not among them.
 
 ## Also on by default, elsewhere
 
