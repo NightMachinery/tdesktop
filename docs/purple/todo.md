@@ -32,12 +32,12 @@ numbers must come back, never negative. The log line to read is
 `Purple: N chats under a hide until left out of the folder counts`.
 
 **The mark on a row that is only there on a clock.** With
-`[recent] style = "stripe"`, a "show until" on a chat the preset hides must
-draw a green bar down the row's leading edge, and a chat just closed under a
-`[recent]` buffer a bar in the unread accent; a chat the preset lets through
-anyway must carry none. With `style = "timer"`, a ring in the badge slot that
-empties anticlockwise, and only on a row with no count or mention. Both need
-a screenshot; a `uiautomator` dump cannot see either.
+`after_close_chat_style = "stripe"` in `[recent]`, a "show until" on a chat the
+preset hides must draw a green bar down the row's leading edge, and a chat just
+closed under a `[recent]` buffer a bar in the unread accent; a chat the preset
+lets through anyway must carry none. With `"timer"`, a ring in the badge slot
+that empties anticlockwise, and only on a row with no count or mention. Both
+need a screenshot; a `uiautomator` dump cannot see either.
 
 **One rule for a folder pill.** The folders popup in the tabs activity must
 show the same number the strip's pill shows: nothing for a folder with
