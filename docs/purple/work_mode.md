@@ -1953,24 +1953,44 @@ third copy of the test but to put the part that is not the preset's answer -
 a peek, an "until" - behind one `byHand()` helper that all three call. A compile
 proved nothing here; the emulator's count line proved it in one run.
 
-**`hide_scope`, honestly narrowed.** `hide_everywhere` cannot port, because the
-preset-wide `hide_everywhere_p` it reuses is not ported either; it is parsed and
-carried, and behaves as the default. The default's launcher-badge half is one
-test on the `countedForBadge()` seam A4 built, which already asks exactly "does
-this chat's unread belong in the running totals".
+**`hide_scope`, ported in both halves.** `hide_everywhere` still cannot port,
+because the preset-wide `hide_everywhere_p` it reuses is not ported either; it
+is parsed and carried, and behaves as the default. The default's launcher-badge
+half is one test on the `countedForBadge()` seam A4 built, which already asks
+exactly "does this chat's unread belong in the running totals".
 
-Its **folder-tab** half is deferred, and the reason is a real difference between
-the clients rather than an oversight. On the desktop a folder's unread is a
-running total per list, which is why that side needed a cached flag and a
+Its **folder-tab** half is now done too, and the shape of the clients is what
+made it a separate pass rather than a hard one. On the desktop a folder's unread
+is a running total per list, which is why that side needed a cached flag and a
 notifier to pay the difference across. Here it is recomputed from scratch by
 `MessagesStorage.calcUnreadCounters()`, but not as a sum over dialogs: each chat
 is tallied into a `contacts`/`nonContacts`/`groups`/`channels`/`bots`
 `[folder][muted]` bucket, and every folder then adds up the buckets its flags
-select. Taking one chat out means skipping its increment in six places across
-two methods, and those same buckets also feed `mainUnreadCount` - so the change
-reaches further than the scope's own wording, which is about folders keeping the
-row while dropping the count. The seam is real and now written down; it wants
-its own pass rather than a rider on this one.
+select. So taking one chat out is a guard on the bucket increment in each of the
+three loops - users, encrypted chats, chats - in both of the passes that keep
+these numbers: `calcUnreadCounters()`, which rebuilds them, and
+`updateFiltersReadCounter()`, which moves them by a delta as a chat goes unread
+or is read. The same guard goes on the per-folder exception walks that follow
+each pass, over `alwaysShow` and `neverShow`, and there it matters in both
+directions: a chat that was never added must not be added back through an
+exception, and - the half that actually breaks things - a chat that was never
+added must not be subtracted either, which is how a tab ends up showing a
+negative number. Each pass logs one line when it dropped anything, which is the
+only readable evidence that it ran.
+
+The earlier note here said the change "reaches further than the scope's own
+wording", on the grounds that the same buckets feed `mainUnreadCount`. That was
+wrong, and worth correcting rather than quietly dropping: the scope says every
+running total, and `keep_in_folder` is a promise about the **row**, not about the
+sum. All chats is a running total like any other, so the main count and the
+archive's were in scope from the start, along with every folder tab's and the
+preset's own extra views.
+
+What the guard keys on is the "hide until" and nothing else. A chat the preset
+itself hides still reaches the totals, as a muted chat, through the hooked
+`isDialogMuted` those loops already call - unchanged, and deliberate: a preset is
+a standing arrangement about what you look at, an "until" is a decision you just
+made about one chat, and only the second is worth rewriting a number over.
 
 **The line** is `In 'Keep': shown`, or `In no list 'Work' names: hidden until a
 mention`. Where comes from the entry that claimed the chat, asked of the
