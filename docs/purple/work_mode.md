@@ -1953,11 +1953,19 @@ third copy of the test but to put the part that is not the preset's answer -
 a peek, an "until" - behind one `byHand()` helper that all three call. A compile
 proved nothing here; the emulator's count line proved it in one run.
 
-**`hide_scope`, ported in both halves.** `hide_everywhere` still cannot port,
-because the preset-wide `hide_everywhere_p` it reuses is not ported either; it
-is parsed and carried, and behaves as the default. The default's launcher-badge
+**`hide_scope`, ported in both halves.** `hide_everywhere` is ported now, and so
+is the preset-wide `hide_everywhere_p` it reuses. Both are answered at one seam,
+`MessagesController.sortDialogs()` - the single method that rebuilds every list
+derived from `dialogs_dict`, so a chat skipped there is missing from the chat
+list, the folder tabs, the forward picker and the kind-limited pickers at once,
+while `dialogs_dict` itself is left whole and the chat still opens from a
+notification or a link. The share sheet and search build their own lists and ask
+the same predicate for themselves. The default's launcher-badge
 half is one test on the `countedForBadge()` seam A4 built, which already asks
-exactly "does this chat's unread belong in the running totals".
+exactly "does this chat's unread belong in the running totals". A community
+row's folded badge and the folder list in the tabs activity's popup are
+running totals over rows too, and ask the same question through
+`countedInTotals()`.
 
 Its **folder-tab** half is now done too, and the shape of the clients is what
 made it a separate pass rather than a hard one. On the desktop a folder's unread
