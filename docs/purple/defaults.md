@@ -111,6 +111,28 @@ appear not to respond to its own writes, which is worse. It matters less than it
 did before this change, since the default the two now fall back to is the same
 one.
 
+## The Keep-Alive Service is on
+
+The switch next to the background connection, and on for the same reason: with
+no push, the process has to be alive for anything to arrive, and this is the
+one switch that asks the OS to bring it back after killing it. Upstream's
+fallback is `keepAliveService`, a flag the server sets for the few vendors it
+knows kill background processes and leaves false for everyone else; it is still
+honoured, but it can no longer turn the default off.
+
+What it actually costs is less than its name suggests. `NotificationsService`
+never calls `startForeground()`: it is a sticky service, plus a broadcast from
+`onDestroy()` that starts it again. So there is no permanent notification - the
+earlier note here that there was one was wrong, and was the reason this default
+was left off at first. What it can and cannot do is the OS's decision - a
+vendor battery manager that kills the app will kill the relaunch too, and the
+setting is not a substitute for excluding the app from that.
+
+Same seam as the connection, three places: `ApplicationLoader.startPushService()`
+decides, and `NotificationsSettingsActivity` draws the switch and reads it back
+before toggling. All three read `PurpleDefaults.KEEP_ALIVE_SERVICE` when the
+`pushService` key is absent, and the user's own choice wins once it exists.
+
 ## The app calls itself by its own name
 
 `strings.xml` in this fork has said `AppName = "Purple Telegram"` for a long
@@ -170,11 +192,25 @@ wordmark to replace it - a piece of artwork, not a bug fix, and a decision about
 how far the fork wants to look like itself. What is *not* acceptable is the
 current documentation implying the header was fixed, so it says this instead.
 
-### The launcher icon is an opt-in
+### The launcher icon is the fork's own
 
 The name change does nothing for the thing you actually see on a home screen, so
-the icon is offered separately - and, unlike the name, it *is* off by default,
-because looking like stock is sometimes the point.
+the icon is its own piece - and, since 2026-09-08, it is on by default. It
+started off, on the grounds that looking like stock is sometimes the point;
+the stock icon is still there for that, as the first tile of the App Icon
+picker, and the choice is remembered the way every icon choice is.
+
+How the default is expressed is worth a line, because there is no preference
+behind it. An alias nobody has chosen sits in `COMPONENT_ENABLED_STATE_DEFAULT`,
+which resolves to whatever `android:enabled` says in the manifest - so the
+manifest enables `PurpleIcon` and disables `DefaultIcon`, and
+`LauncherIconController.isEnabled()` reads the unset state as Purple rather
+than as Default. An install that never opened the picker therefore switches to
+the purple icon on upgrade, and one that did keeps what it picked, because a
+picked alias is in an explicit state the manifest no longer speaks for. The
+launcher itself decides what happens to the tile on the home screen when the
+entry underneath it changes; most drop the old one and add the new one at the
+end.
 
 It needed no setting. Upstream already ships alternative launcher icons: an
 `activity-alias` per icon, all but one disabled, and
@@ -213,5 +249,5 @@ claiming to the server that the session is Premium.
 
 ## Still to come
 
-- **A Purple identity**, off by default: the fork's own name and launcher icon
-  instead of Telegram's. Off, because looking like stock is sometimes the point.
+Nothing is on the list. The Purple identity - name and launcher icon - that
+used to sit here is above.
