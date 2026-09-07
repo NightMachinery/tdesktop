@@ -104,16 +104,18 @@ The port is done. What is left is not a milestone:
   [sync.md](sync.md) owns both.
 - The two small pieces that waited here - the folder-tab half of
   `hide_scope`'s default, and the chat-list mark for a row that is only
-  present on a clock - landed on 2026-09-06. The first is a guard on the
-  bucket increments both unread-counter passes are summed from, and the
-  second is the desktop's stripe and timer drawn by `DialogCell`. Both are in
-  [todo.md](todo.md) until a screen has shown them.
-- The verification debt in [todo.md](todo.md), most of which is now paid. The
-  laptop runs the APK natively on its own GPU, and the first run on it put the
-  list box, its verdict line in four readings, the three "until" spans, the
-  preview menu, the App Icon picker and the folder unlock on a screen for the
-  first time - with no ANR, crash or segfault anywhere. It also found and fixed
-  one real bug: the preview menu's entry to the list box opened nothing,
-  because it posted the dialog into a fragment that was still being dismissed.
-  What is left is two fixtures nobody has written, and two surfaces this
-  emulator cannot reach at all.
+  present on a clock - landed on 2026-09-06, and both have since been seen on
+  a screen in both directions.
+- The verification debt in [todo.md](todo.md) is paid, apart from the two
+  surfaces this emulator cannot reach. The laptop runs the APK natively on its
+  own GPU, and two runs - 2026-09-07 and 2026-09-08 - cleared the backlog: the
+  list box and its verdict line in every reading, the three "until" spans, the
+  preview menu, the App Icon picker, the folder unlock, the peek reorder guard
+  in all three of its cases, sponsored on both surfaces, and the first
+  empirical proof that a preset suppresses a notification rather than merely
+  looking as though it would. No ANR, crash or segfault anywhere. Each run
+  found one real bug and fixed it the same night: the preview menu's entry
+  opened nothing, because it posted the dialog into a fragment still being
+  dismissed; and an extra view lost its pinned order on every cold start,
+  because the pins were resolved against a dialog list that had not loaded yet
+  and nothing retried them.
