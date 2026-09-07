@@ -5,81 +5,27 @@ Nothing here is claimed as working.
 
 Most of this file used to be waiting on a renderer. That wait is over - the
 laptop runs the APK natively on the M2's own GPU (see "Run the emulator on the
-laptop, not the box" in `remote-build-and-test/readme.md`) - and the first run
-on it cleared most of the backlog in one sitting. It also found one real bug and fixed it in
-the same night: the preview menu's "Work Mode lists" entry opened nothing,
-because it posted the dialog with a zero-delay `runOnUIThread` - the next loop
-iteration rather than after the preview's dismissal animation, so the box was
-attached to a window on its way out. It now waits, and opens. What is left
-below is two things that need a fixture nobody has written yet, and two the
-emulator cannot reach at all.
+laptop, not the box" in `remote-build-and-test/readme.md`) - and two runs on it,
+on the nights of 2026-09-07 and 2026-09-08, cleared the whole backlog except the
+two things the emulator cannot reach at all.
 
-For the record, that run put up chat previews, long-press popups, overflow
+Each run found one real bug, both now fixed:
+
+- the preview menu's "Work Mode lists" entry opened nothing, because it posted
+  the dialog with a zero-delay `runOnUIThread` - the next loop iteration rather
+  than after the preview's dismissal animation, so the box was attached to a
+  window on its way out. It now waits, and opens;
+- an extra view's pinned order was lost on every cold start. `fillViewPins()`
+  resolves each bare id in the file against the in-memory dialogs to recover the
+  sign the file strips, and the gate loads long before the dialog list is read,
+  so every pin was skipped and nothing put it back. `sortDialogs()` now retries
+  the outstanding ones, which is both the moment the peers arrive and ahead of
+  the sort that reads them.
+
+For the record, those runs put up chat previews, long-press popups, overflow
 menus, alert dialogs and the icon picker with **no ANR, no crash and no
 renderer segfault**. Every `EXIT=139` in this project's history belongs to the
 build box's software rasteriser, not to the app.
-
-## Five features that landed on 2026-09-06 and have not been seen
-
-All were written against the desktop's behaviour and compile; none has been
-on a screen.
-
-**The folder-count half of `hide_scope`.** Set a "hide until" on a chat with
-unread that sits in a folder without "Exclude muted": that folder's tab pill,
-All chats and the archive number must all drop by that chat's count at once,
-while the row on the folder tab keeps its own badge. Cancel the hide and the
-numbers must come back, never negative. The log line to read is
-`Purple: N chats under a hide until left out of the folder counts`.
-
-**The mark on a row that is only there on a clock.** With
-`after_close_chat_style = "stripe"` in `[recent]`, a "show until" on a chat the
-preset hides must draw a green bar down the row's leading edge, and a chat just
-closed under a `[recent]` buffer a bar in the unread accent; a chat the preset
-lets through anyway must carry none. With `"timer"`, a ring in the badge slot
-that empties anticlockwise, and only on a row with no count or mention. Both
-need a screenshot; a `uiautomator` dump cannot see either.
-
-**One rule for a folder pill.** The folders popup in the tabs activity must
-show the same number the strip's pill shows: nothing for a folder with
-`badge_p = false`, its own count for an extra view.
-
-**hide_everywhere_p.** Under a preset that sets it, a hidden chat must be gone
-from All chats, from its folder tab, from the forward picker, the share sheet,
-search suggestions, recent chats and the frequent-chats strip; the log's
-dialog count must drop; and switching to normal must bring it back with its
-pin exactly where it was. Pinning another chat while it runs must still pin
-it on the server. `hide_scope = "hide_everywhere"` does the same for one chat
-under a "hide until".
-
-**The launch-time import offer.** With a newer `settings.toml` in Saved
-Messages than the local file, the first chat list after a cold start must show
-one line offering Import, and the log
-`Purple: sync offer: newest settings.toml is msg N ... -> offering`. Import
-must apply it; a second cold start must show nothing and log
-`skipped (already offered)`. Send the file to Saved Messages from the emulator
-itself; nothing else may post there.
-
-## The reorder guard during a peek
-
-`PurpleGate.foldersRestricted()` answers false while a peek is running, so the
-folder tab's long-press menu should offer **Reorder** again for as long as it
-lasts, and offer none without one. The strip half is verified through the log.
-
-Still open, and no longer for renderer reasons: it needs a `state.toml` with
-`peek_active` set and a deadline in the future, pushed under a preset that
-names folders, and then the tab's long-press menu read in both states. Two
-attempts at the long-press on the tab itself did not raise the menu at all at
-the coordinates tried, which is worth a moment's care rather than a third blind
-swipe - the strip's vertical position moves with whether the search bar is
-showing.
-
-## An extra view's pinned order
-
-A view owns its pinned order, and the order itself has not been seen: chat rows
-are custom views and invisible to a `uiautomator` dump, so it has to be read off
-a screenshot. What is verified is that the pins are built and break nothing.
-What to check is simply that the named chat is at the top of that tab. Needs a
-fixture with a `[[presets.*.views]]` carrying `pinned`.
 
 ## Two the emulator cannot reach
 
@@ -97,21 +43,108 @@ is Google ML Kit, whose dynamic modules a `google_apis` image cannot fetch:
 A Play Store image or a real device would settle it. Nothing else will.
 
 **`VideoAds.load()`**, the media viewer's video ads: still no evidence of any
-kind. It shares the channel path's guard and has no log line of its own.
+kind. It shares the channel path's guard, which is now confirmed on screen for
+both the channel and the bot surface, but it has no log line of its own and the
+media viewer never asked for one here.
 
-## Still wanted on a screen
+## What the two runs actually showed
 
-- A sponsored post failing to appear in a channel that serves one, and the
-  sponsored top bar in a bot chat. The log says
-  `sponsored for …: not requested (local premium).` both ways; what has not
-  been seen is the surface it governs.
-- A **notification's** title, the last surface Telegram's language pack was
-  shadowing. Needs an inbound message with the app in the background - and see
-  "The app's own name" in `defaults.md`, because the chat list header turned
-  out not to be a string at all.
-- The unread-counter colours, the readable evidence of an effective mute, only
-  ever checked on one screenshot.
-- The verdict line's `"hidden until a message"` wording. The other four
-  readings are confirmed on screen; this one needs a chat that is *currently
-  hidden*, and a hidden chat cannot be long-pressed out of a list it is not in.
-  Reaching it means search, or the folder tab, rather than the chat list.
+Kept because each line names the observable to re-check, not because anything
+here is still open.
+
+**The folder-count half of `hide_scope`.** With include-muted on, the default
+scope took the held chat out of All chats (3 to 2) and removed the folder pill,
+while the row kept its own badge on the folder tab; `keep_in_folder` put both
+numbers back. The line `Purple: N chats under a hide until left out of the
+folder counts` appears only in the scope that should drop the count.
+
+**The mark on a row that is only there on a clock.** Green stripe on a held row
+and on no other; the timer ring in the badge slot only on a row with no count;
+the ring emptied anticlockwise unattended over ninety seconds and the row left
+at expiry.
+
+**One rule for a folder pill.** The folders popup on a long-press of the Chats
+bottom tab shows the strip's numbers pill for pill: All chats 3, the extra view
+P0 2, News nothing at all under `badge_p = false` - with a News chat genuinely
+unread, so the absence discriminates - and News 1 the moment `badge_p` is
+dropped from the same fixture.
+
+**hide_everywhere_p.** Nine dialogs to one; gone from local search, from Recent
+and from the forward picker; normal brought them all back. Pins survived the
+round trip, including one made *while* everything was hidden, which is the case
+the reorder guard exists for.
+
+**The launch-time import offer.** Offer, bulletin, Import, confirmation, the
+import itself and `settings.toml.bak`; a second launch suppressed by the
+remembered message id alone, with the file still backdated.
+
+**The reorder guard during a peek.** Three ways, all on screen: no **Reorder**
+in the folder tab's long-press menu under a preset that restricts the strip;
+Reorder back during a peek, when the strip is the account's own order again;
+and still no Reorder during a peek when the preset carries an extra view,
+because a strip index is then no longer a server-side position. That last one
+is what `foldersRestricted()` checks before it looks at the peek at all.
+
+**An extra view's pinned order.** After the fix above, a cold start draws the
+view's pinned chat first, ahead of a chat pinned in the main list, and the log
+says `Purple: extra view pins resolved.` a few hundred milliseconds after the
+strip is built.
+
+**Sponsored.** A channel and a bot chat, both directions. With Local Premium on
+the log says `sponsored for …: not requested (local premium).` and no request
+leaves the client; with `[premium] enabled_p = false` the same two chats log
+`requested.` and `TL_messages_getSponsoredMessages` appears in the network log
+(the server answered `sponsoredMessagesEmpty` both times, which is why the
+request itself, not the empty surface, is the evidence).
+
+**A notification's title.** With the bot's message let through, the shade
+carries a notification titled with the *chat's* name and the message text, and
+`NotificationsController` logs `value is true`. Under a preset that does not
+name the bot, the same inbound message produces no notification at all and
+logs `value is false` - the first empirical proof of suppression rather than
+an inspection of the code path.
+
+One caveat on that test: this fork has no FCM, so notifications come from the
+background connection, and a backgrounded emulator process is frozen hard
+enough that nothing arrives until it is resumed. Send the message, then bring
+the app forward; the notification is posted then, for a chat that is not on
+screen, which is the same code path.
+
+**The unread-counter colours.** Seen both ways in one sitting: grey counters
+with the bell under a preset that silences, blue on the same rows with the
+preset lifted.
+
+**The verdict line's `"hidden until a message"`.** Reached the way the desktop
+reaches it - a row that is on screen while `shown()` is false, which on Android
+means a chat an extra view holds and the preset gates. The box reads
+`In 'gate': hidden until a message`, naming the rule-based list that decided it.
+
+## What the stress suite showed
+
+Scripted only - files, restarts, scrolls and rotation, never `monkey`, because
+a random tap in a chat list can send a message to a real contact.
+
+100 preset switches, 60 rewrites of `settings.toml`, 20 force-stop-and-launch
+cycles, 80 scroll swipes and 20 rotations, back to back: **no crash, no ANR,
+no native abort**, and total PSS went *down* over the run, 145 MB to 134 MB.
+Six consecutive launches under the same preset logged the identical line, to
+the chat - `6 of 9 dialogs hidden, 0 unread-gated (0 showing), 6 silenced` -
+so the resolution is deterministic across restarts.
+
+The hot-reload path coalesces and survives: 20 rewrites of `settings.toml` in
+six seconds produced exactly one `settings.toml changed on disk` line, and a
+single later edit still fired immediately, so the `FileObserver` is not lost
+to the storm.
+
+One thing the suite was not testing, now fixed in its own comment: its preset
+phase rewrites `state.toml`, which is the app's own file and which nothing
+watches, so a running app ignores every one of those writes and reads only the
+last at its next launch. Twenty switches, zero reload lines. `settings.toml` is
+the hot-reload path.
+
+## Driving the preview menu
+
+Worth writing down, because two earlier attempts read as "this emulator has no
+preview": the chat preview opens only when the long-press lands **inside the
+avatar** (`DialogsActivity` checks `cell.isPointInsideAvatar`). A long-press
+anywhere else on the row is selection mode, however long it is held.
