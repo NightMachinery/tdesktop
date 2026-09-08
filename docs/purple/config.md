@@ -519,15 +519,67 @@ and keeping a chat out of a suggestion is a different claim from making it
 unreachable: the second one is `hide_everywhere_p`, it is per preset, and it is
 yours to ask for separately.
 
-Like `[peek]`, `[recent]` and `[overrides]` it sits outside the presets,
+`[suggestions] recommended_channels_p` is the other key in that table, and it
+is the only one there that defaults to **false**. It decides whether the
+"similar channels" strip - the recommendations under the Channels tab of global
+search, and the ones a channel offers when you open it - is shown at all.
+
+It is off by default because it is the one suggestion that is not assembled out
+of your own chats: the server picks it. Everything else `[suggestions]` covers
+is a strip of people you already talk to, filtered; this is a strip of channels
+you do not, proposed. A fork about deciding who reaches you should not be
+switching that on for you.
+
+Unlike `hide_invisible_p` it is asked under every preset, Normal included,
+because it is a claim about the strip itself rather than about what a preset
+lets through. Writing `recommended_channels_p = true` brings the strip back
+everywhere, which is stock Telegram's behaviour.
+
+The "My channels" list beside it is a strip like any other and follows
+`hide_invisible_p`, not this key: those are your channels, and hiding one is
+the same decision as hiding any other chat.
+
+Like `[peek]`, `[recent]` and `[overrides]` the table sits outside the presets,
 because it is a decision about those strips rather than about what any one
-preset lets through. The test it applies is the preset's alone - no close
-buffer and no "until", so a chat does not drift in and out of a strip while a
-timer runs - and a chat the preset still keeps one click away, on an extra view
-or in a folder whose tab is showing, was never hidden and stays.
+preset lets through. The test `hide_invisible_p` applies is the preset's alone
+- no close buffer and no "until", so a chat does not drift in and out of a
+strip while a timer runs - and a chat the preset still keeps one click away, on
+an extra view or in a folder whose tab is showing, was never hidden and stays.
 
 The rest - `[focus_sync]` and `[peek]` - is documented by the starter file the
 app writes on first run, which carries a commented example of each.
+
+### Sending the file on every save
+
+    [sync]
+    send_after_save_p = false
+
+`[sync] send_after_save_p` says whether a write the app itself makes to
+`settings.toml` also posts the file to Saved Messages, where your other machines
+find it. Off unless you ask for it, and it is meant to stay that way: sending is
+a message in a real chat, so it should be something you turned on in words
+rather than something an upgrade started doing on your behalf.
+
+Only the app's own writes. Editing the file in a text editor does not post it -
+that write arrives through the file watcher, and the fork does not treat a file
+it did not write as a thing it was asked to send.
+
+A run of writes is one document. The send waits five seconds after the last one,
+so six checkbox taps in a row post what you settled on rather than six copies of
+what you passed through.
+
+Two keys in `state.toml` keep two machines from handing the same file back and
+forth: `last_sent_fingerprint` and `last_imported_fingerprint`, each the length
+and SHA-256 of a `settings.toml` written as `"<length>:<hex>"`. Nothing is sent
+whose bytes match either one, and **an import never sends at all** - the bytes
+came from the other machine, and returning them is exactly the loop this is here
+to stop. Both are empty in an older `state.toml`, which is the same thing they
+say on a fresh install, so the first send after an upgrade happens normally.
+
+The whole of that rule is one pure function in the core, `ShouldAutoSend()`,
+because the app around it - a network, a Saved Messages history, a file watcher
+- is precisely the place a rule like this is hardest to prove anything about.
+See [sync.md](sync.md).
 
 ### The schedule
 
