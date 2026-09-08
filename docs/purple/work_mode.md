@@ -2026,7 +2026,8 @@ to the longest, and its own active share. Clicking one opens its own page: day
 by day, and when in the day. Then "reading load" - every day in the period
 folded onto one clock, which is what a schedule window is placed by - and for a
 month, an hour-by-weekday heat map. Then "hidden while peeking" as its own
-number, the budgets, and an export.
+number, the budgets - which are added and edited here, not only listed - and an
+export.
 
 The export is CSV through the save dialog, and it writes sessions rather than
 buckets: a bucket is one way of looking at the log and a session is what the
@@ -2044,10 +2045,28 @@ A budget is an `[[screen_time.budgets]]` entry: a target (`all`, `chat:<id>`,
 is derived from the raw events like everything else, so a changed threshold
 applies to today's total and not only to tomorrow's.
 
-The box lists them with what they have spent against what they allow, and does
-not write them. There is no splice op that appends an array-of-tables entry
-generically - the schedule has one, and it is the schedule's - so adding a
-budget is an edit to `settings.toml`, which reloads live like every other edit.
+The box lists them with what they have spent against what they allow, and
+writes them. "Add a budget" under the list opens an editor: the target as four
+radio rows - everything, one chat, one kind of chat, the time under one preset
+- with the app's usual chat picker behind the chat row, the app's presets
+behind the preset row, and Normal offered by name; hours and minutes for the
+allowance; soft or hard; and, for a hard cap only, how long a snooze lasts and
+how many there are in a day. A budget's own row opens the same editor on it,
+with Delete beside Save. A chat's own screen time page carries the editor too,
+opened on that chat, which is the one place "this chat" means something without
+going through the picker.
+
+The writes are the core's own splice ops, the shape the schedule's rule editor
+already had: appended after the last budget, edited in place key by key,
+addressed by position in the raw array - the budgets the parser threw away
+counted in - and refused unless the budget still at that position says the
+target the box was opened on. A refusal is shown in the core's own words rather
+than only logged, and the editor closes either way, because on a refusal the
+file is not what it was opened on any more.
+
+A write is an edit to `settings.toml` and reloads live, so the list behind the
+editor is redrawn from what the file now says rather than from what the editor
+thought it did. Hand-editing the file is still the same thing by another route.
 
 A soft budget shows a bulletin once per chat per day when its allowance is
 gone. The "once" is remembered in memory, so a restart says it once more, which

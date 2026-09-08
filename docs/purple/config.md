@@ -663,10 +663,23 @@ hard cap absolute. The desktop keeps the day's snooze count in
 `screentime_snoozes` in this directory rather than in `state.toml`, which is
 the core's schema and shared with Android.
 
-Budgets are written by hand. The screen time box lists them with what they have
-spent against what they allow and does not add one: there is no splice op that
-appends an array-of-tables entry generically, and an edit here reloads live
-like every other edit to this file.
+The screen time box writes these. "Add a budget" under the list opens an editor
+for the target, the allowance, the mode and - for a hard cap - the snooze; a
+budget's own row opens the same editor on it, with Delete beside Save. A write
+from the app is an edit to this file and reloads live like every other one, so
+the two ways of writing a budget are the same way, and hand-editing still works
+exactly as it did.
+
+The app leaves `mode`, `snooze` and `snoozes_per_day` out when they are what
+they would have meant anyway, and takes the line out again when a value goes
+back to its default: a file where every budget spells out the defaults is
+harder to read for no gain. An edit is addressed by the budget's position in
+the array, counting the ones the parser threw away, and is refused unless the
+budget still at that position says the target the box was opened on. So a box
+left open while the file changed underneath cannot rewrite a budget nobody
+looked at, and a broken budget in the middle of the file cannot shift the ones
+after it. A budget the parser threw away is not on the list and so cannot be
+edited from the app - fix its target in the file and it comes back.
 
 A budget missing `target` or `per_day` is skipped with a warning naming its
 position, and so is one whose target does not parse. The rest of the file is

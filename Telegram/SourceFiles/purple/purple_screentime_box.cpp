@@ -11,13 +11,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "data/data_thread.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_schedule.h"
 #include "purple/purple_screentime.h"
 #include "purple/purple_screentime_recorder.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/choose_date_time.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
@@ -26,8 +30,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "window/window_peer_menu.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "styles/style_widgets.h"
@@ -665,6 +672,382 @@ void ExportCsv(
 		}));
 }
 
+// Every write this box makes. A refusal is the core saying no in words - "the
+// budget at that index is not the one you read" - and those words are the only
+// useful thing to put in front of somebody whose edit did not land, so they go
+// on screen rather than only in the log.
+bool Write(
+		not_null<Ui::GenericBox*> box,
+		Fn<SpliceResult(const QString&)> op,
+		const QString &what) {
+	const auto result = WriteSettings(std::move(op), what);
+	if (!result.ok) {
+		box->uiShow()->showBox(Ui::MakeInformBox(result.error));
+	}
+	return result.ok;
+}
+
+// The `target' string as the file spells it, rebuilt from what the box was
+// asked for. The parser's grammar and nothing else: a target this got wrong
+// would look saved and then not be there, which is why the splice re-reads
+// what it wrote before agreeing that it landed.
+[[nodiscard]] QString TargetText(const ScreenTimeBudget &budget) {
+	switch (budget.kind) {
+	case BudgetTarget::All: return u"all"_q;
+	case BudgetTarget::Chat: return u"chat:%1"_q.arg(budget.chat);
+	case BudgetTarget::Kind:
+		return u"kind:%1"_q.arg(ScreenTimeKindName(budget.chatKind));
+	case BudgetTarget::Preset: return u"preset:%1"_q.arg(budget.preset);
+	}
+	return budget.target;
+}
+
+// The same target in words. A budget row used to print the file's spelling,
+// which was the honest thing to do while the file was the only place budgets
+// came from; now that this box writes them, `chat:7654321' is a row nobody can
+// read and the name is right there to use.
+[[nodiscard]] QString TargetName(
+		not_null<Main::Session*> session,
+		const ScreenTimeBudget &budget) {
+	switch (budget.kind) {
+	case BudgetTarget::All: return u"Everything"_q;
+	case BudgetTarget::Chat: return ChatText(session, budget.chat);
+	case BudgetTarget::Kind: return KindText(budget.chatKind);
+	case BudgetTarget::Preset:
+		return u"Preset: %1"_q.arg(
+			PresetDisplayName(ActiveSettings(), budget.preset));
+	}
+	return budget.target;
+}
+
+// A whole non-negative number, or nothing. An empty field is zero rather than
+// a mistake, so "2 hours and no minutes" can be typed as one number.
+[[nodiscard]] std::optional<int> FieldNumber(not_null<Ui::InputField*> field) {
+	const auto text = field->getLastText().trimmed();
+	if (text.isEmpty()) {
+		return 0;
+	}
+	auto ok = false;
+	const auto value = text.toInt(&ok);
+	return (ok && value >= 0) ? std::make_optional(value) : std::nullopt;
+}
+
+// One budget, and the only place the app writes one. `existing' is the budget
+// as it was read: what the fields start on, and - through its target - the
+// fingerprint the write is checked against, so a box left open while the file
+// changed underneath refuses rather than rewriting a budget nobody looked at.
+//
+// `chat' is a chat to offer as the target outright, which is what this gets
+// when it was opened from that chat's own page. Zero when it was opened from
+// the list, where the picker is the only way to name a chat.
+void BudgetBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session,
+		std::optional<ScreenTimeBudget> existing,
+		PeerIdValue chat) {
+	box->setTitle(rpl::single(existing ? u"Budget"_q : u"New budget"_q));
+	box->setWidth(st::boxWideWidth);
+
+	const auto padding = st::boxRowPadding;
+	const auto container = box->verticalLayout();
+	const auto start = existing.value_or(ScreenTimeBudget{
+		.kind = chat ? BudgetTarget::Chat : BudgetTarget::All,
+		.chat = chat,
+		.perDaySeconds = 60 * 60,
+	});
+
+	// What each of the three narrow targets would be if it were picked. Kept
+	// beside the radio rather than in it, because switching from a chat to a
+	// kind and back should not lose the chat that was already chosen.
+	struct Chosen {
+		PeerIdValue chat = 0;
+		ScreenTimeKind kind = ScreenTimeKind::Private;
+		QString preset;
+	};
+	const auto state = box->lifetime().make_state<Chosen>(Chosen{
+		.chat = (start.kind == BudgetTarget::Chat) ? start.chat : chat,
+		.kind = (start.kind == BudgetTarget::Kind)
+			? start.chatKind
+			: ScreenTimeKind::Private,
+		.preset = (start.kind == BudgetTarget::Preset)
+			? start.preset
+			: NormalPreset(),
+	});
+
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			u"This budget counts"_q,
+			st::boxLabel),
+		padding);
+	const auto target = std::make_shared<Ui::RadiobuttonGroup>(
+		int(start.kind));
+	const auto addTarget = [&](BudgetTarget value, const QString &text) {
+		container->add(
+			object_ptr<Ui::Radiobutton>(
+				container,
+				target,
+				int(value),
+				text,
+				st::defaultCheckbox),
+			padding);
+	};
+	addTarget(BudgetTarget::All, u"Everything"_q);
+	addTarget(BudgetTarget::Chat, u"One chat"_q);
+	addTarget(BudgetTarget::Kind, u"One kind of chat"_q);
+	addTarget(BudgetTarget::Preset, u"Time under one preset"_q);
+
+	const auto chatLabel = box->lifetime().make_state<
+		rpl::event_stream<QString>>();
+	const auto chatName = [=] {
+		return state->chat ? ChatText(session, state->chat) : u"Choose"_q;
+	};
+	const auto chatRow = ::Settings::AddButtonWithLabel(
+		container,
+		rpl::single(u"Chat"_q),
+		chatLabel->events_starting_with(chatName()),
+		st::settingsButtonNoIcon);
+	chatRow->setClickedCallback([=] {
+		// The app's own chooser, PrepareChooseRecipientBox() out of
+		// window_peer_menu.h: the same list every forward and every "send to"
+		// opens, so a chat is picked here the way it is picked everywhere.
+		// It only wants a session, which is all this box has.
+		box->uiShow()->showBox(Window::PrepareChooseRecipientBox(
+			session,
+			crl::guard(box, [=](not_null<Data::Thread*> thread) {
+				state->chat = IdOf(thread->peer());
+				chatLabel->fire(chatName());
+
+				// Picking a chat is saying the budget is about that chat.
+				target->setValue(int(BudgetTarget::Chat));
+				return true;
+			}),
+			rpl::single(u"Chat"_q)));
+	});
+
+	const auto kindLabel = box->lifetime().make_state<
+		rpl::event_stream<QString>>();
+	const auto kindRow = ::Settings::AddButtonWithLabel(
+		container,
+		rpl::single(u"Kind"_q),
+		kindLabel->events_starting_with(KindText(state->kind)),
+		st::settingsButtonNoIcon);
+	kindRow->setClickedCallback([=] {
+		box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> inner) {
+			inner->setTitle(rpl::single(u"Kind"_q));
+			for (const auto &kind : kKinds) {
+				const auto row = ::Settings::AddButtonWithLabel(
+					inner->verticalLayout(),
+					rpl::single(KindText(kind)),
+					rpl::single(QString()),
+					st::settingsButtonNoIcon);
+				row->setClickedCallback([=] {
+					state->kind = kind;
+					kindLabel->fire(KindText(kind));
+					target->setValue(int(BudgetTarget::Kind));
+					inner->closeBox();
+				});
+			}
+			inner->addButton(tr::lng_cancel(), [=] { inner->closeBox(); });
+		}));
+	});
+
+	const auto presetLabel = box->lifetime().make_state<
+		rpl::event_stream<QString>>();
+	const auto presetRow = ::Settings::AddButtonWithLabel(
+		container,
+		rpl::single(u"Preset"_q),
+		presetLabel->events_starting_with(
+			PresetDisplayName(ActiveSettings(), state->preset)),
+		st::settingsButtonNoIcon);
+	presetRow->setClickedCallback([=] {
+		box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> inner) {
+			inner->setTitle(rpl::single(u"Preset"_q));
+			const auto add = [=](const QString &name) {
+				const auto display = PresetDisplayName(ActiveSettings(), name);
+				const auto row = ::Settings::AddButtonWithLabel(
+					inner->verticalLayout(),
+					rpl::single(display),
+					rpl::single(QString()),
+					st::settingsButtonNoIcon);
+				row->setClickedCallback([=] {
+					state->preset = name;
+					presetLabel->fire_copy(display);
+					target->setValue(int(BudgetTarget::Preset));
+					inner->closeBox();
+				});
+			};
+
+			// Normal first, and by name: it is a bypass with no table of its
+			// own, and it is the preset most of a day is spent under.
+			add(NormalPreset());
+			for (const auto &preset : ActiveSettings().presets) {
+				add(preset.name);
+			}
+			inner->addButton(tr::lng_cancel(), [=] { inner->closeBox(); });
+		}));
+	});
+
+	// Two fields rather than one duration string. The file spells an allowance
+	// the way every other duration in it is spelled and the splice writes that
+	// spelling; what a person picking an allowance is choosing is a number of
+	// hours and a number of minutes, and asking for those two directly is one
+	// less grammar to get wrong.
+	const auto hours = box->addRow(object_ptr<Ui::InputField>(
+		box,
+		st::defaultInputField,
+		Ui::InputField::Mode::SingleLine,
+		rpl::single(u"Hours a day"_q),
+		QString::number(start.perDaySeconds / 3600)));
+	const auto minutes = box->addRow(object_ptr<Ui::InputField>(
+		box,
+		st::defaultInputField,
+		Ui::InputField::Mode::SingleLine,
+		rpl::single(u"Minutes a day"_q),
+		QString::number((start.perDaySeconds % 3600) / 60)));
+
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			u"When the allowance is gone"_q,
+			st::boxLabel),
+		padding);
+	const auto mode = std::make_shared<Ui::RadiobuttonGroup>(int(start.mode));
+	const auto addMode = [&](BudgetMode value, const QString &text) {
+		container->add(
+			object_ptr<Ui::Radiobutton>(
+				container,
+				mode,
+				int(value),
+				text,
+				st::defaultCheckbox),
+			padding);
+	};
+	addMode(BudgetMode::Soft, u"Soft - a bulletin, once a chat a day"_q);
+	addMode(BudgetMode::Hard, u"Hard - a cover over the chat"_q);
+
+	// Only a hard cap puts up anything to snooze, so the two fields follow the
+	// mode rather than sitting there meaning nothing. Wrapped rather than
+	// hidden so the space goes with them.
+	const auto snoozeWrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto snoozeRows = snoozeWrap->entity();
+	const auto snooze = snoozeRows->add(
+		object_ptr<Ui::InputField>(
+			snoozeRows,
+			st::defaultInputField,
+			Ui::InputField::Mode::SingleLine,
+			rpl::single(u"Snooze minutes"_q),
+			QString::number(start.snoozeSeconds / 60)),
+		padding);
+	const auto snoozes = snoozeRows->add(
+		object_ptr<Ui::InputField>(
+			snoozeRows,
+			st::defaultInputField,
+			Ui::InputField::Mode::SingleLine,
+			rpl::single(u"Snoozes a day"_q),
+			QString::number(start.snoozesPerDay)),
+		padding);
+	snoozeRows->add(
+		object_ptr<Ui::FlatLabel>(
+			snoozeRows,
+			u"Zero for either leaves the cover with no way past it."_q,
+			st::boxDividerLabel),
+		padding);
+	snoozeWrap->toggle(start.mode == BudgetMode::Hard, anim::type::instant);
+	mode->setChangedCallback([=](int value) {
+		snoozeWrap->toggle(
+			value == int(BudgetMode::Hard),
+			anim::type::normal);
+	});
+
+	const auto save = [=] {
+		auto budget = ScreenTimeBudget();
+		budget.kind = BudgetTarget(target->current());
+		switch (budget.kind) {
+		case BudgetTarget::Chat: budget.chat = state->chat; break;
+		case BudgetTarget::Kind: budget.chatKind = state->kind; break;
+		case BudgetTarget::Preset: budget.preset = state->preset; break;
+		default: break;
+		}
+		if (budget.kind == BudgetTarget::Chat && !budget.chat) {
+			box->uiShow()->showBox(Ui::MakeInformBox(
+				u"Pick the chat this budget is about."_q));
+			return;
+		}
+		budget.target = TargetText(budget);
+
+		const auto perDayHours = FieldNumber(hours);
+		const auto perDayMinutes = FieldNumber(minutes);
+		if (!perDayHours) {
+			hours->showError();
+			return;
+		} else if (!perDayMinutes) {
+			minutes->showError();
+			return;
+		} else if (hours->getLastText().trimmed().isEmpty()
+			&& minutes->getLastText().trimmed().isEmpty()) {
+			// An allowance of nothing is a coherent thing to ask for - the
+			// core says so - but it is not a thing two empty fields meant, so
+			// it has to be typed as a zero rather than left blank.
+			hours->showError();
+			box->uiShow()->showBox(Ui::MakeInformBox(
+				u"Say how long a day this budget allows."_q));
+			return;
+		}
+		budget.perDaySeconds = *perDayHours * 3600 + *perDayMinutes * 60;
+
+		// Read whatever the mode, so that turning a hard budget soft and back
+		// again does not quietly put its snooze settings back to the defaults.
+		// The file keeps them either way; a soft budget simply never uses them.
+		const auto snoozeMinutes = FieldNumber(snooze);
+		const auto snoozeCount = FieldNumber(snoozes);
+		if (!snoozeMinutes || !snoozeCount) {
+			snoozeWrap->toggle(true, anim::type::normal);
+			(!snoozeMinutes ? snooze : snoozes)->showError();
+			return;
+		}
+		budget.mode = BudgetMode(mode->current());
+		budget.snoozeSeconds = *snoozeMinutes * 60;
+		budget.snoozesPerDay = *snoozeCount;
+
+		const auto path = SettingsFilePath();
+		const auto index = start.sourceIndex;
+		const auto expected = start.target;
+		if (existing) {
+			Write(box, [=](const QString &text) {
+				return SetBudget(text, path, index, expected, budget);
+			}, u"a screen time budget"_q);
+		} else {
+			Write(box, [=](const QString &text) {
+				return AppendBudget(text, path, budget);
+			}, u"a new screen time budget"_q);
+		}
+
+		// Closed either way. On a refusal the file is not what this box was
+		// opened on any more, and the list behind it has already rebuilt itself
+		// from what the file now says - so the honest next step is to look at
+		// that list rather than to keep editing a budget out of a stale copy.
+		box->closeBox();
+	};
+
+	box->addButton(rpl::single(u"Save"_q), save);
+	if (existing) {
+		const auto path = SettingsFilePath();
+		const auto index = start.sourceIndex;
+		const auto expected = start.target;
+		box->addLeftButton(rpl::single(u"Delete"_q), [=] {
+			Write(box, [=](const QString &text) {
+				return RemoveBudget(text, path, index, expected);
+			}, u"deleting a screen time budget"_q);
+			box->closeBox();
+		});
+	}
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+}
+
 void ChatScreenTimeBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Main::Session*> session,
@@ -707,6 +1090,24 @@ void ChatScreenTimeBox(
 			container,
 			Columns(own, range, Period::Today, activeOnly)),
 		st::boxRowPadding);
+
+	// The one place a budget is offered with a chat already in hand, which is
+	// why the editor takes one: from the list behind this there is nothing to
+	// mean by "this chat" and the picker is the only way to name one.
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	const auto budget = ::Settings::AddButtonWithLabel(
+		container,
+		rpl::single(u"Set a daily budget"_q),
+		rpl::single(QString()),
+		st::settingsButtonNoIcon);
+	budget->setClickedCallback([=] {
+		box->uiShow()->showBox(Box(
+			BudgetBox,
+			session,
+			std::optional<ScreenTimeBudget>(),
+			dialogId));
+	});
 
 	Ui::AddSkip(container);
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
@@ -1082,13 +1483,12 @@ void ScreenTimeBox(
 			rows->add(
 				object_ptr<Ui::FlatLabel>(
 					rows,
-					u"None. A budget is an [[screen_time.budgets]] entry in "
-					"%1, with a target - all, chat:<id>, kind:<kind> or "
-					"preset:<name> - a per_day, and a mode: soft shows a "
-					"bulletin at the limit, hard puts a cover over the chat "
-					"with one snooze on it. Nothing here writes them, because "
-					"there is no splice op that appends an array-of-tables "
-					"entry yet."_q.arg(SettingsFilePath()),
+					u"None yet. A budget is a day's allowance for one thing - "
+					"everything, one chat, one kind of chat, or the time under "
+					"one preset - and it either shows a bulletin when the "
+					"allowance is gone or puts a cover over the chat. Adding "
+					"one writes an [[screen_time.budgets]] entry in %1, which "
+					"you can also edit by hand."_q.arg(SettingsFilePath()),
 					st::boxDividerLabel),
 				padding);
 		}
@@ -1096,11 +1496,11 @@ void ScreenTimeBox(
 			if (spent.index < 0 || spent.index >= int(config.budgets.size())) {
 				continue;
 			}
-			const auto &budget = config.budgets[spent.index];
-			::Settings::AddButtonWithLabel(
+			const auto budget = config.budgets[spent.index];
+			const auto row = ::Settings::AddButtonWithLabel(
 				rows,
 				rpl::single(u"%1 · %2"_q.arg(
-					budget.target,
+					TargetName(session, budget),
 					BudgetModeName(budget.mode))),
 				rpl::single(spent.reached
 					? u"%1 of %2 · reached"_q.arg(
@@ -1110,7 +1510,27 @@ void ScreenTimeBox(
 						DurationText(spent.spentMs),
 						DurationText(spent.perDayMs))),
 				st::settingsButtonNoIcon);
+			row->setClickedCallback([=] {
+				box->uiShow()->showBox(Box(
+					BudgetBox,
+					session,
+					std::make_optional(budget),
+					PeerIdValue(0)));
+			});
 		}
+
+		const auto addBudget = ::Settings::AddButtonWithLabel(
+			rows,
+			rpl::single(u"Add a budget"_q),
+			rpl::single(QString()),
+			st::settingsButtonNoIcon);
+		addBudget->setClickedCallback([=] {
+			box->uiShow()->showBox(Box(
+				BudgetBox,
+				session,
+				std::optional<ScreenTimeBudget>(),
+				PeerIdValue(0)));
+		});
 
 		Ui::AddSkip(rows);
 		Ui::AddDivider(rows);
