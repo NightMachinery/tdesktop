@@ -34,6 +34,16 @@ void SendSettingsToSavedMessages(
 	not_null<Main::Session*> session,
 	std::shared_ptr<Ui::Show> show);
 
+// Posts these bytes to the account's own Saved Messages as settings.toml, with
+// no confirmation box - this is what the automatic send calls, and the
+// confirmation for that was given once, in words, when the switch was turned
+// on. The manual action above still asks.
+//
+// False when there is no signed-in session to post into. That is a reason to
+// try again after the next write rather than an error worth a message: the app
+// can be up, and the file editable, before anyone has signed in.
+[[nodiscard]] bool Upload(const QByteArray &content, int version);
+
 // The "Import Purple settings" row on a message's context menu. Offered only
 // for a document called settings.toml sitting in Saved Messages: anywhere else
 // it would be someone else's file, and the point of the feature is that the

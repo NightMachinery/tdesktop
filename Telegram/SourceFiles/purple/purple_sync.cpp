@@ -19,6 +19,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "core/application.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "storage/localimageloader.h"
@@ -26,6 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/layers/show.h"
 #include "ui/widgets/popup_menu.h"
+#include "window/window_controller.h"
+#include "window/window_session_controller.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
@@ -107,6 +112,11 @@ void WriteImported(
 			u"Could not write %1. See the log."_q.arg(path)));
 		return;
 	}
+	// The bytes as they landed on disk, which is what the automatic send will
+	// fingerprint the next time anything writes this file. Recording them here
+	// is what stops this machine from offering back to the other one exactly
+	// what it just received. See ShouldAutoSend().
+	NoteSettingsImported(text.toUtf8());
 	// Nothing else to do: the directory watcher sees the write and reloads,
 	// exactly as it would for an edit made in a text editor.
 	show->showToast(u"Settings imported"_q);
@@ -198,7 +208,26 @@ void ResolveAndImport(
 	}, *lifetime);
 }
 
-void Upload(
+// Any session that could post the file. The active window's first, because
+// that is the account the person is looking at, and whichever one is signed in
+// otherwise - Saved Messages exists on all of them and the file is not about
+// any particular account.
+[[nodiscard]] Main::Session *SomeSession() {
+	if (const auto window = Core::App().activeWindow()) {
+		if (const auto controller = window->sessionController()) {
+			return &controller->session();
+		}
+	}
+	auto &domain = Core::App().domain();
+	if (!domain.started()) {
+		return nullptr;
+	} else if (const auto account = domain.maybeLastOrSomeAuthedAccount()) {
+		return account->maybeSession();
+	}
+	return nullptr;
+}
+
+void UploadTo(
 		not_null<Main::Session*> session,
 		const QByteArray &content,
 		int version) {
@@ -227,6 +256,15 @@ void Upload(
 }
 
 } // namespace
+
+bool Upload(const QByteArray &content, int version) {
+	const auto session = SomeSession();
+	if (!session) {
+		return false;
+	}
+	UploadTo(session, content, version);
+	return true;
+}
 
 void SendSettingsToSavedMessages(
 		not_null<Main::Session*> session,
@@ -258,7 +296,12 @@ void SendSettingsToSavedMessages(
 			"where any Purple Telegram can import it."_q,
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			Upload(session, content, version);
+			UploadTo(session, content, version);
+
+			// The same bookkeeping the automatic send does, because this puts
+			// the same file in the same chat: without it, turning the switch on
+			// after sending by hand would send the identical file again.
+			NoteSettingsSent(content);
 			show->showToast(u"Sent to Saved Messages"_q);
 		},
 		.confirmText = u"Send"_q,
