@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_preset_box.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_schedule_box.h"
+#include "purple/purple_screentime_box.h"
 #include "purple/purple_sync.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
@@ -1357,6 +1358,54 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
+// Purple Telegram, not upstream. How long the app has had you, out of a log
+// this machine keeps and never sends. See docs/purple/work_mode.md.
+void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	const auto session = builder.session();
+	if (!controller) {
+		return;
+	}
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/purple_screen_time"_q,
+		.title = rpl::single(u"Screen time"_q),
+		.keywords = { u"purple"_q, u"screen"_q, u"time"_q },
+	});
+
+	// The digest on the row is the whole feature for most days: a line that
+	// answers the question without opening anything.
+	builder.addButton({
+		.id = u"advanced/purple_screen_time_open"_q,
+		.title = rpl::single(u"Screen time"_q),
+		.st = &st::settingsButtonNoIcon,
+		.label = Purple::ScreenTimeDigestValue(session),
+		.onClick = [=] {
+			controller->show(Box(Purple::ScreenTimeBox, session));
+		},
+		.keywords = {
+			u"purple"_q,
+			u"screen"_q,
+			u"time"_q,
+			u"usage"_q,
+			u"budget"_q,
+			u"limit"_q,
+		},
+	});
+
+	builder.addDividerText(rpl::single(u"Off until you switch it on. Once on, "
+		"one line per event - a chat opening, an action in the composer, the "
+		"app leaving the front - is appended to screentime.log beside "
+		"settings.toml, and everything on the screen is derived from it when "
+		"you look, so changing a threshold re-reads the history you already "
+		"have. The file never leaves this machine. Budgets are written in "
+		"settings.toml: a soft one says so once at the limit, a hard one puts "
+		"a cover over the chat with one snooze on it, and neither touches "
+		"messages or notifications."_q));
+	builder.addSkip();
+}
+
 // Purple Telegram, not upstream. See docs/purple/premium.md and
 // docs/purple/work_mode.md.
 void BuildPurpleSection(SectionBuilder &builder) {
@@ -1519,6 +1568,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	BuildPurpleLastSeenSection(builder);
+	BuildPurpleScreenTimeSection(builder);
 }
 
 void BuildScreenReaderSection(SectionBuilder &builder) {
