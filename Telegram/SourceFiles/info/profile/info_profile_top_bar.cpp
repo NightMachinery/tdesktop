@@ -68,7 +68,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_information.h"
 #include "settings/sections/settings_premium.h"
-#include "ui/boxes/show_or_premium_box.h"
 #include "ui/color_contrast.h"
 #include "ui/controls/stars_rating.h"
 #include "ui/controls/swipe_handler.h"
@@ -329,11 +328,15 @@ TopBar::TopBar(
 , _status(this, QString(), statusStyle())
 , _statusLabel(std::make_unique<StatusLabel>(_status.data(), _peer))
 , _customStatus(std::move(descriptor.customStatus))
+// Purple: upstream's "when?" asked a question this button answered by handing
+// your last seen to everybody, for good. It opens the fork's trade now, and it
+// says so: the status line beside it still carries the reason, and the words on
+// the button are the ones the sheet is titled with.
 , _showLastSeen(
 	this,
 	object_ptr<Ui::RoundButton>(
 		this,
-		tr::lng_status_lastseen_when(),
+		rpl::single(u"show mine"_q),
 		st::infoProfileTopBarShowLastSeen))
 , _forumButton([&, controller = descriptor.controller] {
 	const auto topic = _key.topic();
@@ -3090,20 +3093,30 @@ void TopBar::setupShowLastSeen(
 		return;
 	}
 
+	// Purple: `[last_seen] trade_p' is one of the things that decides whether
+	// the button is there at all, rather than something checked once it has
+	// been pressed. With the offer off the fork has nothing to put here: it
+	// will not fall back to upstream's one tap, and last-seen privacy is then
+	// changed in Settings > Privacy, deliberately, where it can be changed
+	// back. The sheet's own "Don't offer this again" writes that switch while
+	// this profile is still on screen behind it, which is why the switch is
+	// read from SettingsChanges() and not once on construction.
 	rpl::combine(
 		user->session().changes().peerFlagsValue(
 			user,
 			Data::PeerUpdate::Flag::OnlineStatus),
 		Data::AmPremiumValue(&user->session()),
-		Purple::LocalPremiumValue()
-	) | rpl::on_next([=](auto, bool amPremium, bool localPremium) {
+		Purple::LocalPremiumValue(),
+		rpl::single(rpl::empty) | rpl::then(Purple::SettingsChanges())
+	) | rpl::on_next([=](auto, bool amPremium, bool localPremium, auto) {
 		const auto premium = amPremium || localPremium;
 		const auto wasShown = _showLastSeen->toggled();
 		const auto hiddenByMe = user->lastseen().isHiddenByMe();
 		const auto shown = hiddenByMe
 			&& !user->lastseen().isOnline(base::unixtime::now())
 			&& !premium
-			&& user->session().premiumPossible();
+			&& user->session().premiumPossible()
+			&& Purple::LastSeenTradeOffered();
 		_showLastSeen->toggle(shown, anim::type::instant);
 		if (wasShown && premium && hiddenByMe) {
 			user->updateFullForced();
@@ -3124,20 +3137,13 @@ void TopBar::setupShowLastSeen(
 
 	_showLastSeen->entity()->setFullRadius(true);
 
+	// Purple: upstream offered two ways out here - buy Premium, or save an
+	// empty LastSeen rule set, which means everybody, forever, with nothing in
+	// the app to put it back. The trade buys the same answer by naming one
+	// person for a few seconds and restoring the rules afterwards, so it is the
+	// whole of what this button does now.
 	_showLastSeen->entity()->setClickedCallback([=] {
-		const auto type = Ui::ShowOrPremium::LastSeen;
-		controller->show(Box(
-			Ui::ShowOrPremiumBox,
-			type,
-			user->shortName(),
-			[=] {
-				controller->session().api().userPrivacy().save(
-					::Api::UserPrivacy::Key::LastSeen,
-					{});
-			},
-			[=] {
-				::Settings::ShowPremium(controller, u"lastseen_hidden"_q);
-			}));
+		Purple::ShowLastSeenTradeBox(controller, user);
 	});
 }
 

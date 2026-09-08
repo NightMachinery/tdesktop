@@ -58,6 +58,13 @@ struct LastSeenNote {
 	bool full,
 	bool narrow);
 
+// Whether `[last_seen] trade_p' still offers the trade at all. The sheet
+// already refuses when it does not, but a control whose only job is to open it
+// has to know before it is drawn: the profile's button is upstream's own
+// last-seen button rewired, and with the offer off the fork draws nothing
+// there rather than falling back to what upstream had it do.
+[[nodiscard]] bool LastSeenTradeOffered();
+
 // The sheet. Refuses in a toast rather than opening when there is nothing to
 // trade for, or when the last trade with this person is too recent, so a call
 // site is a click handler and not a copy of the rules.
