@@ -2786,6 +2786,14 @@ away.
 them saying what is running now and on which device. A file that never grew a
 ruleset shows the one `Rules` row and reads as the screen always did.
 
+The top-level **Outside these windows** row shows `[schedule] outside` as the
+file spells it, because that is the key it writes - not what this device works
+out from it, which a ruleset naming its own `outside` overrides. When the two
+differ the line under the row names the ruleset that is winning and what it
+runs instead. Without it a save would look like it never took: the row would
+read back exactly what was written while the schedule went on doing something
+else. Android's schedule screen says the same thing in the same place.
+
 Tapping a ruleset opens the rules it holds, with three rows above them. **Mode**
 is Disabled, Enabled or Always. **Applies to** offers Any, Desktop, Mobile,
 Android, iOS, This device, and `Other device...` with a name field - the last

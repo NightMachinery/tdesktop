@@ -975,6 +975,39 @@ void ScheduleBox(not_null<Ui::GenericBox*> box) {
 				})));
 		});
 
+		// The row above shows [schedule] outside as the file spells it, which
+		// is the key it edits - and a chosen ruleset may name its own and win.
+		// Unsaid, a save would look like it never took: the row would read back
+		// exactly what was written while the schedule went on doing something
+		// else. So the ruleset that is winning is named here, which is also
+		// where the change has to be made instead.
+		const auto running = ActiveSchedule(settings.schedule, ThisDevice());
+		if (running.outside != outside) {
+			// Walked in the order ActiveSchedule() walks it - most specific
+			// first, file order among equals - so this names the ruleset the
+			// core actually obeyed rather than one that merely could have.
+			auto winner = QString();
+			for (const auto ruleset : running.chosen) {
+				if (ruleset->outside) {
+					winner = ruleset->name;
+					break;
+				}
+			}
+			rows->add(
+				object_ptr<Ui::FlatLabel>(
+					rows,
+					(winner.isEmpty()
+						? u"On this device a ruleset overrides it and runs "
+							"%1 instead."_q.arg(
+								PresetDisplayName(settings, running.outside))
+						: u"On this device the ruleset %1 overrides it and "
+							"runs %2 instead."_q.arg(
+								winner,
+								PresetDisplayName(settings, running.outside))),
+					st::boxDividerLabel),
+				padding);
+		}
+
 		Ui::AddSkip(rows);
 		Ui::AddDivider(rows);
 		Ui::AddSubsectionTitle(rows, rpl::single(u"Rulesets"_q));
