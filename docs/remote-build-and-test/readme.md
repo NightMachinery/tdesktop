@@ -172,6 +172,38 @@ ever a throwaway test account. `~/.purple-android-test` rather than a session
 scratchpad, so a login survives between sessions - re-logging in costs a phone
 code.
 
+### The nightly run
+
+`bin/nightly.sh` is the whole loop with nobody watching it: the core's own
+tests, an incremental desktop build, a build of whatever is on `origin/master`
+on the box, then the emulator - install, stress, crashcheck - and a shutdown.
+It writes `~/.purple-android-test/reports/<stamp>.md`, a line per step saying
+PASS, FAIL or SKIP, with the full log and the screenshots beside it.
+
+It is scheduled by a user LaunchAgent, `~/Library/LaunchAgents/
+com.purple.nightly.plist`, at one in the morning:
+
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.purple.nightly.plist
+    launchctl kickstart -p gui/$(id -u)/com.purple.nightly   # run it now
+    launchctl bootout gui/$(id -u)/com.purple.nightly        # stop scheduling it
+
+`StartCalendarInterval` rather than a crontab line, because launchd runs a job
+whose moment passed while the Mac was asleep as soon as it wakes and cron
+simply skips it. A build that only happens on the nights the laptop was left
+awake is not a nightly. It does not wake a sleeping Mac - nothing without root
+can - so a machine shut down overnight runs it at the next login instead.
+
+Three things it deliberately does not do. It never taps: an unattended run
+cannot look at a screenshot to see where a tap landed, and a tap that lands in
+a chat sends something to a real person, so the driving is files, restarts,
+scrolls and rotation only. It installs the box's `app-emu.apk` rather than
+signing `app-aligned.apk` with the real keystore, because the emulator's
+installed copy carries the box's throwaway key and a changed signer would make
+Android refuse the upgrade and take the test account's data with it. And it
+clears `[sync] send_after_save_p` on the test account before it starts, since
+auto-send posts a document to Saved Messages after every write and a stress run
+is thousands of writes.
+
 ### Things that cost a run each, on any host
 
 **The saved session's uid is not the app's uid.** `session-restore.sh` used to
