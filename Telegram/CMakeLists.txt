@@ -1745,6 +1745,8 @@ PRIVATE
     purple/purple_readme.h
     purple/purple_schedule.cpp
     purple/purple_schedule.h
+    purple/purple_schedule_box.cpp
+    purple/purple_schedule_box.h
     purple/purple_sync.cpp
     purple/purple_sync.h
     settings/business/settings_away_message.cpp

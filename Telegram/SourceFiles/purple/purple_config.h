@@ -52,6 +52,32 @@ struct Problems {
 // Fires when either of the two above changes, including on hot reload.
 [[nodiscard]] rpl::producer<> SettingsChanges();
 
+// What a write to settings.toml did, for a screen that has to say so. A
+// refusal is not the app failing: every splice op checks the file before and
+// after its edit and says no in words - "there is already a list called 'os'",
+// "the rule at that index is not the one you read" - and those words are the
+// only useful thing to put in front of someone whose edit did not land.
+//
+// `ok' with an empty `error' also covers "the file already said that", which is
+// a write that changed nothing and is not worth telling anybody about.
+struct WriteResult {
+	bool ok = false;
+	QString error;
+};
+
+// The one path every write the app makes to settings.toml goes through. The
+// callback is handed the file as the app last read it and hands back the splice
+// op's result; nothing is written when the op changed nothing, and the reload
+// that follows a write is what updates everything reading these settings.
+//
+// A callback rather than a finished SpliceResult because the text to splice is
+// Config's and giving it out would be handing callers a copy to go stale in
+// their hands. `what' names the edit in the log, in the same words the writers
+// below use.
+WriteResult WriteSettings(
+	Fn<SpliceResult(const QString &text)> splice,
+	const QString &what);
+
 // The only writes to settings.toml besides the Premium toggle. Both return
 // false if the file could not be edited, having changed nothing.
 bool AddToList(
@@ -83,6 +109,19 @@ bool SetPresetPins(
 // preset names it, which is deliberate - there is no splice that edits a
 // list_order, and guessing which preset wanted it would be worse than saying so.
 bool CreateList(const QString &name, const QString &title);
+
+// Remembers that this device has just posted these exact bytes to Saved
+// Messages, so nothing posts them a second time. Called by the manual "Send
+// settings to Saved Messages" as well as by the automatic send, because the two
+// put the same file in the same chat and a fingerprint that only one of them
+// wrote would let the other repeat it.
+void NoteSettingsSent(const QByteArray &bytes);
+
+// The same for a file that arrived from somewhere else and has just been
+// written over the local one. This is the half of the rule that stops a
+// ping-pong: without it the machine that imported a file would offer it
+// straight back to the machine that sent it. See ShouldAutoSend().
+void NoteSettingsImported(const QByteArray &bytes);
 
 [[nodiscard]] const State &CurrentState();
 [[nodiscard]] rpl::producer<> StateChanges();

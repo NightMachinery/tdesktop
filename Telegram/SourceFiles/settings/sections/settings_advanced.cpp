@@ -35,7 +35,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
+#include "purple/purple_device.h"
 #include "purple/purple_preset_box.h"
+#include "purple/purple_schedule.h"
+#include "purple/purple_schedule_box.h"
 #include "purple/purple_sync.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
@@ -1295,6 +1298,44 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		});
 	}
 
+	// The schedule was file-only until now, which meant the one feature that
+	// changes the app without being asked was also the one with nothing on
+	// screen to read it back from. The status line under it is what the
+	// picker shows too, so the two cannot drift.
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_schedule"_q,
+			.title = rpl::single(u"Schedule"_q),
+			.icon = { &st::menuIconSchedule },
+			.onClick = [=] {
+				controller->show(Box(Purple::ScheduleBox));
+			},
+			.keywords = {
+				u"purple"_q,
+				u"schedule"_q,
+				u"work"_q,
+				u"hours"_q,
+				u"ruleset"_q,
+				u"timetable"_q,
+			},
+		});
+	}
+
+	// One settings.toml is meant to travel between machines, so each one has to
+	// be able to say which it is. The id is what a ruleset names; the name is
+	// what every device reading the file calls it.
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_this_device"_q,
+			.title = rpl::single(u"This device"_q),
+			.st = &st::settingsButtonNoIcon,
+			.onClick = [=] {
+				controller->show(Box(Purple::DeviceLabelBox));
+			},
+			.keywords = { u"purple"_q, u"device"_q, u"name"_q, u"id"_q },
+		});
+	}
+
 	// The other half of settings.toml being a plain file: it is per-install,
 	// and Saved Messages is the one place both machines can already see.
 	// See docs/purple/sync.md.
@@ -1316,6 +1357,46 @@ void BuildPurpleSection(SectionBuilder &builder) {
 				u"saved"_q,
 			},
 		});
+	}
+
+	// Opt-in, and it stays opt-in: this posts a document to a real chat, and
+	// an upgrade that started doing that on somebody's behalf would be doing
+	// it behind their back. See ShouldAutoSend() for what stops two machines
+	// from handing the same file back and forth.
+	const auto autoSend = builder.addButton({
+		.id = u"advanced/purple_send_after_save"_q,
+		.title = rpl::single(u"Send to Saved Messages after every save"_q),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::single(
+			rpl::empty
+		) | rpl::then(
+			Purple::SettingsChanges()
+		) | rpl::map([] {
+			return Purple::ActiveSettings().sync.sendAfterSave;
+		}),
+		.keywords = {
+			u"purple"_q,
+			u"sync"_q,
+			u"saved"_q,
+			u"send"_q,
+			u"backup"_q,
+		},
+	});
+
+	if (autoSend) {
+		autoSend->toggledValue(
+		) | rpl::filter([=](bool value) {
+			return (value != Purple::ActiveSettings().sync.sendAfterSave);
+		}) | rpl::on_next([=](bool value) {
+			Purple::WriteSettings([=](const QString &text) {
+				return Purple::SetTableBool(
+					text,
+					Purple::SettingsFilePath(),
+					u"sync"_q,
+					u"send_after_save_p"_q,
+					value);
+			}, u"the automatic send"_q);
+		}, autoSend->lifetime());
 	}
 
 	const auto toggle = builder.addButton({
