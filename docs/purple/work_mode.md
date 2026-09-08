@@ -448,6 +448,24 @@ OS rather than drawn, so they are republished on every reload; a preset that
 hides a chat and left a shortcut to it on the launcher would have hidden
 nothing.
 
+The **Channels tab of global search** is two strips stacked, and they follow
+different rules because they are different claims.
+
+"My channels" is your own channels, so it is a strip like the rest and takes
+`hide_invisible_p`: a channel the preset hides is not offered here either. The
+list is rebuilt on `Purple::ActiveChanges()` rather than filtered once, exactly
+as the Recent row is, because a preset change can put a channel back as easily
+as take one away - a filtered copy could only ever lose rows.
+
+"Similar channels" underneath it is not your chats at all: the server picks it.
+That makes it the one suggestion no per-chat test can express, so it is a
+switch instead - `[suggestions] recommended_channels_p`, off by default, and
+asked under every preset including Normal. While a preset filters and the key
+says no, the section is empty and the request is never even sent: asking the
+server which channels resemble the ones you read is not a question a work
+preset should be putting on your behalf. Turning the key on brings the strip
+back everywhere, which is stock behaviour.
+
 Untouched on both, and this is the line the key promises not to cross: typed
 search, the forward picker, the share box and the Ctrl+Tab switcher. Somewhere
 you went looking for a chat by name is not somewhere the app is suggesting one.
@@ -1612,6 +1630,54 @@ back to a sentence that would be a lie in it. A schedule switched off in the
 file says so, and one whose every ruleset is for some other device says that -
 neither is allowed to read as `home until 09:00`.
 
+### Editing it from the app
+
+Settings > Advanced > Purple > Schedule opens the whole thing: the two
+switches, the preset between windows, and one row per ruleset - `phone · Any
+phone · On · 2 windows` - with the flat `[[schedule.rules]]` array shown as a
+ruleset called **Rules**, since that is what the parser makes of it. Tapping a
+ruleset opens its mode, its scope, its own `outside`, and its windows; tapping a
+window opens the seven days, the two times, the preset and the enabled switch,
+with Delete on one that already exists.
+
+**It writes the file, one key at a time.** Every edit goes through the core's
+splice ops - the same ones the phone uses - so a `settings.toml` full of
+comments and hand-chosen spacing comes back out of an edit still full of them.
+The file remains the thing that decides; this is one more way of writing it, not
+a second place the schedule lives. There is nothing here you could not have
+typed, and nothing you typed that this cannot show.
+
+**An edit lands on the rule you were looking at, or not at all.** A rule has no
+name, so it is addressed by its raw position, and the box sends the window and
+preset it read off that rule along with the write. If the rule at that position
+no longer says the same thing - you edited the file in a text editor while the
+box was open - the core refuses, the box says so in the core's own words, and
+closes. The list behind it has already rebuilt itself from what the file now
+says, so the honest next step is to look at that rather than to keep editing a
+copy that has gone stale.
+
+The times are text fields spelling `09:00`, validated with the same
+`ParseTimeOfDay()` the parser uses, rather than a clock widget. A picker would
+be a second notion of what a time is, and the one case where the two disagreed
+would be the one that mattered. The box refuses a window with no length and one
+with no days before writing, so those two come back as a sentence rather than
+as a refusal explaining itself after the fact.
+
+**Rules the parser threw away are listed, not hidden.** A broken rule never
+reaches the app as a rule - all that survives is the warning, `schedule rule 3:
+'from' and 'to' are the same time, skipping it` - so the box shows those
+warnings under the windows of the ruleset they belong to. Without that, a rule
+you wrote and cannot see would look like a rule the box had eaten.
+
+Every write is followed by a rebuild whether or not it landed, so a switch ends
+up where the *file* is rather than where the click left it. Changes made from
+outside rebuild it too.
+
+Beside the Schedule row, **This device** shows the id this machine reports for
+itself and lets you name it. The name goes into `[devices]` in `settings.toml`
+rather than into anything local, so it travels with the file that uses it and
+every machine reading that file calls this one the same thing.
+
 ### The tick
 
 Thirty seconds, which is therefore how late a boundary can be. Computing the
@@ -1622,6 +1688,35 @@ survives all of them by construction.
 
 A settings or state change re-ticks immediately, since either can change the
 answer sooner than the next thirty seconds would.
+
+## Sending the file after every save
+
+`[sync] send_after_save_p`, off by default, posts `settings.toml` to Saved
+Messages whenever the app itself writes it - a switch, a list edit, a rule -
+debounced five seconds so a run of taps is one document. It is the same upload
+the manual **Send settings to Saved Messages** performs, with the confirmation
+box left out: the confirmation was given once, in words, when the switch was
+turned on.
+
+Only the app's own writes go through it. There is exactly one function in
+`Purple::Config` that writes `settings.toml`, and the hook is on it, which is
+why a switch added next year gets this for free. An edit made in a text editor
+arrives through the file watcher instead and is deliberately not this.
+
+**It never sends after an import, and never sends bytes it has already sent or
+received.** `state.toml` keeps two fingerprints - length and SHA-256 - one for
+the last file this machine sent and one for the last it wrote because another
+machine sent it. The second is what stops the ping-pong: A saves and sends, B
+imports and writes, and without that fingerprint B would then send back what it
+had just been given, A would import it, and the file would bounce between two
+machines that already agree.
+
+The rule is `ShouldAutoSend()` in the core, pure and tested there, taking the
+settings, the state, the bytes and whether this write is an import. Asked twice
+- when the write happens, and again five seconds later before anything is
+posted - because in between, the switch can have been turned off, the file put
+back to what it was, or an import can have landed the very bytes that were about
+to be offered to the machine that sent them.
 
 ## OS focus sync
 
