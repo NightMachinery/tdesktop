@@ -9,6 +9,11 @@ encrypted `tdata`:
 falling back to `~/.purple-telegram/` when `XDG_CONFIG_HOME` is unset.
 `settings.toml` is created with commented defaults on first run.
 
+Two more files appear in the same directory once screen time is switched on:
+`screentime.log`, the append-only event log, and `screentime_snoozes`, the
+day's snooze count for a hard budget's cover. Neither exists while
+`[screen_time] enabled_p` is false, and neither ever leaves the machine.
+
 ## Why a separate file
 
 Telegram's own settings are a single serialized blob inside `tdata`. Adding a
@@ -621,14 +626,16 @@ next write.
     snooze         = "5m"
     snoozes_per_day = 2
 
-**Nothing records this yet, on either client.** The keys are parsed and the
-core carries the log format, its parser and all the aggregation; no app writes
-an event and no screen draws one. The table is documented here because it is
-already in the schema, not because writing it does anything today.
+The desktop records and draws this; Android does neither yet. Switched on, the
+desktop appends one line per event to `screentime.log` in this directory,
+beside `settings.toml`, and everything Settings -> Advanced -> Purple -> Screen
+time shows is derived from that file when you look at it. The log never leaves
+the machine. See docs/purple/work_mode.md for the events, the active rule and
+the cover.
 
-`enabled_p` is false and stays false until both ends exist. It is a log of what
-you looked at and for how long, and nothing should start keeping one of those
-because a version number moved.
+`enabled_p` is false and stays false until you say otherwise. It is a log of
+what you looked at and for how long, and nothing should start keeping one of
+those because a version number moved.
 
 The three durations are the thresholds a raw log is read back *through* rather
 than recorded with: `action_span` is how long one send action counts as active
@@ -652,7 +659,14 @@ the default) or `"hard"` (the chat goes behind a cover naming the budget). A
 hard cap never touches messages or notifications: it is a screen, not a mute.
 `snooze` is how long one snooze lasts and `snoozes_per_day` how many are
 offered; zero for either disables snoozing, so `snoozes_per_day = 0` makes a
-hard cap absolute.
+hard cap absolute. The desktop keeps the day's snooze count in
+`screentime_snoozes` in this directory rather than in `state.toml`, which is
+the core's schema and shared with Android.
+
+Budgets are written by hand. The screen time box lists them with what they have
+spent against what they allow and does not add one: there is no splice op that
+appends an array-of-tables entry generically, and an edit here reloads live
+like every other edit to this file.
 
 A budget missing `target` or `per_day` is skipped with a warning naming its
 position, and so is one whose target does not parse. The rest of the file is
