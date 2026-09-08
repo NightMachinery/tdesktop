@@ -850,8 +850,9 @@ void ScheduleBox(not_null<Ui::GenericBox*> box) {
 		object_ptr<Ui::FlatLabel>(
 			container,
 			u"A window is a time of day, on some days of the week, that wants "
-			"a preset. The first one that covers the moment decides; between "
-			"them the schedule falls back to the preset below."_q,
+			"a preset. Where windows overlap the narrowest one decides, so a "
+			"lunch break inside a work day wins over it; between them the "
+			"schedule falls back to the preset below."_q,
 			st::boxLabel),
 		st::boxRowPadding);
 
