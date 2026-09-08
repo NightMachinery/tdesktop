@@ -59,6 +59,19 @@ if [ ! -d "$FFmpegInclude" ]; then
 fi
 CompilerFlags="$QtFrameworkFlag -I$FFmpegInclude"
 
+# Debug info: line tables, not full DWARF. "-O2 -g" put 122MB of DWARF into a
+# single object file - 90% of history_widget.cpp.o, and 17GB across out/ - and
+# none of it is reachable by anything this fork does. Symbolication goes
+# through atos and the debug map, which resolves function names and file:line
+# from the line tables alone; nothing here runs a debugger, so the variable
+# and type information is the whole cost and none of the benefit. See
+# docs/mac/build.md.
+#
+# This has to override the per-config flags rather than join CompilerFlags:
+# CMake emits CMAKE_<LANG>_FLAGS first and CMAKE_<LANG>_FLAGS_<CONFIG> after
+# it, so RelWithDebInfo's own "-g" would win over anything appended above.
+RelWithDebInfoFlags="${RelWithDebInfoFlags:--O2 -gline-tables-only -DNDEBUG}"
+
 cd "$RepoPath"
 cmake -B "$BuildPath" -G Ninja . \
     -D CMAKE_BUILD_TYPE="$BuildType" \
@@ -68,6 +81,10 @@ cmake -B "$BuildPath" -G Ninja . \
     -D CMAKE_CXX_FLAGS="$CompilerFlags" \
     -D CMAKE_OBJC_FLAGS="$CompilerFlags" \
     -D CMAKE_OBJCXX_FLAGS="$CompilerFlags" \
+    -D CMAKE_C_FLAGS_RELWITHDEBINFO="$RelWithDebInfoFlags" \
+    -D CMAKE_CXX_FLAGS_RELWITHDEBINFO="$RelWithDebInfoFlags" \
+    -D CMAKE_OBJC_FLAGS_RELWITHDEBINFO="$RelWithDebInfoFlags" \
+    -D CMAKE_OBJCXX_FLAGS_RELWITHDEBINFO="$RelWithDebInfoFlags" \
     -D TDESKTOP_API_ID="$TDESKTOP_API_ID" \
     -D TDESKTOP_API_HASH="$TDESKTOP_API_HASH"
 
