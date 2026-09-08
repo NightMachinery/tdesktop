@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_device.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_schedule.h"
@@ -28,10 +29,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QLocale>
 #include <QtGui/QKeySequence>
 
 namespace Purple {
 namespace {
+
+// How often the schedule line below re-reads the clock. The same period the
+// schedule's own tick uses: a line that were more precise than the thing it
+// describes would show a boundary that has not happened yet.
+constexpr auto kScheduleTick = crl::time(30 * 1000);
 
 // settings.toml holds a hotkey as Qt portable text, because that is what
 // QKeySequence parses and what the docs can describe once for every platform.
@@ -126,6 +133,126 @@ namespace {
 
 [[nodiscard]] QString HotkeyText() {
 	return HotkeyText(ActiveSettings().peek.hotkey);
+}
+
+// The word for a preset in a sentence, rather than the TOML key underneath it -
+// the same rule the rows above follow, for the same reason. Normal is named
+// outright because it is a bypass and has no table to carry a display name.
+[[nodiscard]] QString PresetName(
+		const Settings &settings,
+		const QString &name) {
+	if (name == NormalPreset()) {
+		return u"Normal"_q;
+	}
+	const auto preset = settings.preset(name);
+	return preset ? PresetTitle(*preset) : DefaultViewName(name);
+}
+
+// When the next window opens, so the line between windows can say how long the
+// preset in force has left. The engine has no such helper and should not: it
+// answers "what is true now", which is all a tick needs, and a boundary in the
+// future is only ever wanted by something with a screen.
+//
+// A schedule repeats weekly, so the search is bounded: each rule's start, on
+// each day it names, at its next occurrence from now. Nothing here worries
+// about which rule would actually win at that moment - the earliest start is
+// the earliest moment the answer can change, which is when this line is due to
+// be rewritten anyway.
+[[nodiscard]] std::optional<QDateTime> NextWindowStart(
+		const ScheduleForDevice &active,
+		const QDateTime &now) {
+	auto result = std::optional<QDateTime>();
+	const auto today = now.date().dayOfWeek();
+	for (const auto pointer : active.rules) {
+		const auto &rule = *pointer;
+		for (const auto day : rule.days) {
+			const auto ahead = (day - today + 7) % 7;
+			const auto start = now.date().addDays(ahead).startOfDay();
+			if (!start.isValid()) {
+				// A date whose midnight does not exist, which is a real thing
+				// in the timezones that move the clock at midnight. Skipping it
+				// costs one candidate out of seven and keeps every comparison
+				// below between two valid moments.
+				continue;
+			}
+			auto when = start.addSecs(rule.from * 60);
+			if (when <= now) {
+				when = when.addDays(7);
+			}
+			if (!result || when < *result) {
+				result = when;
+			}
+		}
+	}
+	return result;
+}
+
+// "09:00" for a window opening later today, "Mon 09:00" for one that is not. A
+// bare time three days out would read as three hours out.
+//
+// QLocale rather than the core's WeekdayName(), which answers "mon" because it
+// is the spelling settings.toml uses. That is the right answer for a file and
+// the wrong one for a sentence.
+[[nodiscard]] QString WindowStartText(
+		const QDateTime &start,
+		const QDateTime &now) {
+	const auto time = start.time();
+	const auto text = TimeOfDayText(time.hour() * 60 + time.minute());
+	return (start.date() == now.date())
+		? text
+		: u"%1 %2"_q.arg(
+			QLocale().dayName(start.date().dayOfWeek(), QLocale::ShortFormat),
+			text);
+}
+
+// What the schedule is doing, in one line, for someone who is looking at the
+// pause switch and wondering what it would be pausing. Every branch is a state
+// the file can genuinely be in, and each says which one it is rather than
+// falling back to a sentence that would be a lie in it - a schedule switched
+// off in the file, or one whose every ruleset is for the phone, must not read
+// as "home until 09:00".
+[[nodiscard]] QString ScheduleText() {
+	if (!ScheduleConfigured()) {
+		return QString();
+	}
+	const auto &state = CurrentState();
+	if (state.schedulePaused) {
+		return state.schedulePausedUntil
+			? u"Schedule paused until %1"_q.arg(langDateTime(
+				QDateTime::fromSecsSinceEpoch(state.schedulePausedUntil)))
+			: u"Schedule paused"_q;
+	}
+	const auto &settings = ActiveSettings();
+	if (!settings.schedule.enabled) {
+		return u"Schedule: switched off in the file"_q;
+	}
+	const auto now = QDateTime::currentDateTime();
+	const auto active = ActiveSchedule(settings.schedule, ThisDevice());
+	if (active.rules.empty()) {
+		return u"Schedule: no rules for this device"_q;
+	} else if (const auto rule = ScheduleRuleNow(active, now)) {
+		return u"Schedule: %1 until %2, then %3"_q.arg(
+			PresetName(settings, rule->preset),
+			TimeOfDayText(rule->till),
+			PresetName(settings, active.outside));
+	}
+	const auto next = NextWindowStart(active, now);
+	return next
+		? u"Schedule: %1 until %2"_q.arg(
+			PresetName(settings, active.outside),
+			WindowStartText(*next, now))
+		: u"Schedule: %1"_q.arg(PresetName(settings, active.outside));
+}
+
+// Which device the line above is about. It is worth a line of its own the
+// moment a file can hold rulesets: two machines reading the same settings.toml
+// show different schedules, and without the id there is nothing on screen that
+// says why. It is also where the id to type into a ruleset comes from.
+[[nodiscard]] QString DeviceText() {
+	const auto &device = ThisDevice();
+	return device.id.isEmpty()
+		? u"This device reports no id, so rulesets naming one skip it."_q
+		: u"(this device: %1)"_q.arg(DeviceLabelText(device.id));
 }
 
 [[nodiscard]] QString Remaining(int seconds) {
@@ -315,6 +442,55 @@ void PresetBox(
 	) | rpl::on_next([=] {
 		paused->toggle(ScheduleConfigured(), anim::type::normal);
 	}, paused->lifetime());
+
+	// The switch above says the schedule can be paused and nothing said what it
+	// would be pausing. The file is the only place the windows were written and
+	// working out which one is running from a list of times is exactly the sort
+	// of arithmetic a screen should do for you.
+	//
+	// Two lines rather than one: the first is what is happening, the second is
+	// which machine it is happening on. That second question did not exist
+	// until one settings.toml could describe several devices, and it has to be
+	// answerable from here, because a rule that runs on the phone and not on
+	// this laptop otherwise looks like a rule that does not work.
+	const auto status = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)),
+		padding);
+	const auto lines = status->entity();
+	const auto schedule = lines->add(
+		object_ptr<Ui::FlatLabel>(lines, QString(), st::boxLabel));
+	const auto device = lines->add(
+		object_ptr<Ui::FlatLabel>(lines, QString(), st::boxDividerLabel));
+
+	const auto refreshSchedule = [=](anim::type animated) {
+		const auto text = ScheduleText();
+		schedule->setText(text);
+		device->setText(DeviceText());
+		status->toggle(!text.isEmpty(), animated);
+	};
+	refreshSchedule(anim::type::instant);
+
+	// A clock line goes stale on its own, without anything happening that would
+	// fire a signal: seventeen o'clock arrives whether or not the file or the
+	// state moved. Thirty seconds is the schedule's own resolution, so this is
+	// never more wrong than the schedule itself is, and the timer lives and
+	// dies with the box - there is nobody reading the label once it is closed.
+	const auto scheduleTicker = box->lifetime().make_state<base::Timer>();
+	scheduleTicker->setCallback([=] { refreshSchedule(anim::type::normal); });
+	scheduleTicker->callEach(kScheduleTick);
+
+	// The two files rather than ActiveChanges(), which is the resolution moving
+	// and is deliberately not fired when a settings change resolves to the same
+	// thing. Editing a rule under Normal is exactly that change, and it is one
+	// this line has to show.
+	rpl::merge(
+		SettingsChanges(),
+		StateChanges()
+	) | rpl::on_next([=] {
+		refreshSchedule(anim::type::normal);
+	}, status->lifetime());
 
 	// The path was already here, and already the answer to "where do I write
 	// one". Clicking it is the part that was missing: everything this box can
