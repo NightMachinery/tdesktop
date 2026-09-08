@@ -239,6 +239,13 @@ who did swipe keeps what they chose. The default is
 `PurpleDefaults.ARCHIVE_HIDDEN`; see [defaults.md](defaults.md) for the rest of
 what this fork decides differently before anybody configures anything.
 
+A preset can go further and take the archive away entirely while it runs -
+`hide_archive_p`, on by default, documented in
+[config.md](config.md#schema). That is a preset's decision rather than a
+default, it is only asked while one is filtering, and on the desktop nothing
+consumes it yet: there is no pull gesture here and the row is in the main menu
+already.
+
 ### What the badge counts
 
 `Session::purpleBadgeList()` returns the view while a preset runs and the main
@@ -396,6 +403,54 @@ chat out of the main list cannot be in a folder either. For the same reason a
 preset that sets it may not also declare extra views - see below - because a
 view showing a chat that is not in the main list is an assertion failure rather
 than a preference. The parser refuses that pairing with a warning.
+
+### The strips the app fills for you
+
+    [suggestions]
+    hide_invisible_p = true
+
+`hide_everywhere_p` above is about what you can *reach*. This is about what the
+app *offers*, which is a smaller thing and a far more common thing to want: a
+chat you can still search for by name, still forward to and still reach with
+Ctrl+Tab, but that the app stops putting in front of you while a preset runs.
+It is global rather than per preset, beside `[peek]` and `[recent]`, because it
+is a decision about those strips and not about what any one preset lets
+through.
+
+The test is "visible anywhere in the profile", and it is deliberately not the
+test the chat list uses. `Purple::HiddenFromSuggestions()` asks the preset alone
+- `History::purpleHiddenByPreset()`, with the close buffer, the "until"
+decisions and the peek all left out of it - and then asks
+`History::purpleReachableElsewhere()`, which is the same walk
+`any_open_chat_except_in_folder` uses: an extra view of the preset's, or a
+folder whose tab is on the strip. A chat that is one click away somewhere was
+never hidden. A chat you closed two minutes ago, on the other hand, is not a
+chat the preset lets through - it is one on a clock, and a strip that gained
+and lost a row as that clock ran would be noise rather than information. A
+strip is a standing list, not a view you are looking at, and it should not move
+on a timer.
+
+On the desktop the strips are the search panel's frequent-contacts row and its
+Recent list, the quick-share popup a message's share button opens, and the
+frequent contacts offered when you choose who to send a gift to. The two in the
+panel re-push on `Purple::ActiveChanges()`, exactly as the stories strip does
+and for exactly the same reason: nothing about a top peer changes when a preset
+does, so without it the panel would sit there showing what the last preset let
+through until the account itself moved.
+
+On Android it is the same predicate over more surfaces, because more of the OS
+asks: the People strip in search, the recent searches, the share sheet's hints
+row and the quick-share overlay, the contact pickers a boost or a gift opens,
+and - the one that leaves the app entirely - the **direct-share targets**, which
+are the conversation shortcuts the system share sheet and a long-press on the
+launcher icon or a notification put in front of you. Those are published to the
+OS rather than drawn, so they are republished on every reload; a preset that
+hides a chat and left a shortcut to it on the launcher would have hidden
+nothing.
+
+Untouched on both, and this is the line the key promises not to cross: typed
+search, the forward picker, the share box and the Ctrl+Tab switcher. Somewhere
+you went looking for a chat by name is not somewhere the app is suggesting one.
 
 ### How far a "hide until" reaches
 
@@ -1778,6 +1833,39 @@ is an index into a list whose membership just changed, and the stable-id walk in
 `updateFilterTabs` only rescues a tab that left the strip - an index that is
 still in range quietly means a different folder.
 
+That switch back carried a bug worth recording, because the symptom was the
+whole chat list going blank and the cause was several layers away from anything
+about presets. The fork called `selectFirstTab()` on every reload - and a
+reload is not a preset change: a peek, a schedule tick, an "until" expiring and
+the watcher's echo of the app's own write all produce one. `selectFirstTab` has
+no "already there" guard, so on All chats it still ran the tab animation.
+`onPageSelected` then returned early, because the selected type had not moved,
+leaving the second page hidden - while every intermediate animation frame went
+on translating the first page by `progress * width`. The last frame hit the
+guard and returned before the swap that resets that translation, so the list
+was parked exactly one screen width off-screen. Switching tabs by hand did a
+real swap and put it back, which is why it read as intermittent rather than as
+a broken tab.
+
+Three things fix it, and only the last is about Work Mode at all.
+`onPageScrolled` now returns whenever the second page is not visible and no
+search is running, rather than only on the terminal frame - no page is in
+flight, so there is nothing to translate. The call site selects the first tab
+only when it is not already selected, mirroring the guard `scrollToFolder`
+already had. And "the preset changed" is now the strip's own identity - the
+running preset's name, the extra views' names and a digest of the folders -
+rather than the gate's generation counter, which moves on every reload of any
+kind. Extra-view tab ids are carried across reloads by view index so the
+stable-id rescue can match them at all, which is what makes that last change
+safe for somebody sitting on a folder tab.
+
+The amplifier is gone too: the watcher now compares the file it was woken for
+against the length and digest of the bytes the gate is running on, and skips
+when they match. That is the app's own write coming back at it, and suppressing
+it there covers every writer - a list edit, an import, the editor - without a
+hook in `writeAtomic`, which is shared with `state.toml`. An explicit reload is
+never suppressed; only the echo is.
+
 ### Three mute roots, not one
 
 Silencing is the one place where the port could not follow the desktop's shape.
@@ -2107,6 +2195,64 @@ first, because extra views sit on the strip and a peek leaves them exactly where
 they were - so a strip index no longer matches a server-side position even
 mid-peek. A peek does not fill a view, either: a view hides nothing, and filling
 it with every chat for two minutes would only take it away.
+
+### Editing the file on the phone
+
+Everything above assumed the file arrived from somewhere else.
+`settings.toml` lives in app-private storage, so on an unrooted phone nothing
+but this app can open it - and the only thing the app itself ever wrote into it
+was list membership, one line at a time. Everything else had to be written on a
+desktop and carried over. Three screens close that, and none of them is a second
+source of truth: each reads the file it is about to change, writes through the
+splicer, and lets the reload decide what the app now believes.
+
+**The Purple settings screen** is a `UniversalFragment` reached from Settings,
+where the old entry opened the picker directly. Work Mode, with the running
+preset as its subtitle; the schedule, with its next boundary; Local Premium and
+"hide hidden chats from suggestions" as checks; and then the settings file
+itself - its status, the editor, sending it to Saved Messages, checking Saved
+Messages for a newer one, importing from a file, sharing it out, and the path,
+which copies when tapped. The checks read the file rather than a preference and
+are rebuilt from `PurpleGate.state()` whenever the list updates, so a write that
+fails leaves the switch where the file is without a line of code to put it
+there.
+
+Two things are deliberately not on it. `PurpleDefaults` values are defaults
+rather than settings - a thing this fork decided before you configured
+anything, and [defaults.md](defaults.md) is where they are argued. And
+`hide_archive_p` is per preset, so it belongs in the preset, not in a global
+switch that would have to mean something under Normal.
+
+**The editor** is a monospace text box with the action bar's tick as Save. It
+validates in the background about a third of a second after you stop typing, by
+calling `PurpleCore.parse()` on the bytes in the box - a pure function that
+touches no file, which is the only reason live validation is affordable at all.
+The status line says OK, or "N warnings", or the parser's own
+`LINE:COLUMN: message`, and tapping a red one moves the cursor there. Save
+refuses a file that does not parse, refuses one over the 64 KB ceiling, refuses
+when the file changed on disk since it was opened, writes `settings.toml.bak`
+first, and then shows the warnings - which the app had until now been throwing
+away.
+
+**The schedule screen** lists the rules, with the window, the days and the
+preset on each, a check for `enabled_p`, and an editor behind a tap: the preset
+by radio list, seven day chips, both times through the system time picker.
+Rules are addressed by their raw position in the file and every write carries
+the window and preset the screen read off the rule, so a screen left open while
+the file changed underneath refuses rather than rewriting the wrong one. Rules
+the parser threw away are shown greyed with their warning text - they are not
+in the rule list at all, so the screen recovers them from the warnings, which
+name a rule by the same position, counting from one.
+
+The writes themselves are three new splice ops in the shared core -
+`SetScheduleRule`, `AppendScheduleRule`, `RemoveScheduleRule` - built to the
+same contract as everything else that edits this file: replace the value where
+it stands, re-parse what came out, compare it against what was intended, and
+refuse rather than hand back a file to repair by hand. Comments, spacing and
+keys the app has never heard of come through untouched. `[schedule] enabled_p`
+found the one hole in `SetTableBool` on the way: a `[schedule]` with no header
+of its own is an implicit table pointing at its first rule, so the insert went
+into the rule. It now writes the header, which fixes it for every caller.
 
 ### Not ported yet
 

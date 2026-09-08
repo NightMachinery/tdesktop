@@ -238,6 +238,25 @@ It also beats `"*ALL"`. A folder switched off by hand stays off in a preset that
 also asks for every folder - otherwise switching one off would quietly stop
 working the day you added the spread.
 
+`hide_archive_p` on a preset puts the archive away with everything else that
+preset hides: no row for it in the chat list, and on Android no pull gesture at
+the top of the list either - the state an account that has never archived
+anything is in.
+
+Leaving the key out means **yes**, which is the opposite default from
+`hide_everywhere_p` and is meant to be. The archive is where you put what you
+are not dealing with, so a preset that has already named what gets through has
+no reason to leave a door open to the rest of it. Write `hide_archive_p = false`
+to keep the archive where it was.
+
+It is only ever asked while a preset is filtering, so Normal is untouched, and
+it says nothing about what is *inside* the archive: an archived chat a list
+names, or a folder pulls in, is in the view either way. On the desktop there is
+no pull gesture and the Archive row already lives in the main menu rather than
+at the top of the list, so nothing here consumes the key yet - it is parsed,
+carried and resolved so that one file means one thing on both, and it is the
+Android app that acts on it.
+
 ### Marking a row that is only there for the moment
 
 `after_close_chat_style` in `[recent]` says how the chat list marks a row that
@@ -484,8 +503,46 @@ default), `"any_open_chat"` or `"any_open_chat_except_in_folder"` - the last
 skipping chats that are already reachable on an extra view or in a shown folder.
 It is per-install rather than per-preset, and lives in memory only.
 
+`[suggestions] hide_invisible_p` decides whether the strips of chats the app
+offers you unasked leave out what the running preset hides. True unless you say
+otherwise, and asked only while a preset is filtering.
+
+It covers the people and recent rows in the search panel, the quick-share popup
+a message's share button opens, the frequent contacts offered when you choose
+who to send a gift to, and on Android the recent searches, the share sheet's
+hints and the direct-share targets the OS itself keeps - including the
+conversation shortcuts a launcher icon's long-press offers.
+
+It never touches typed search, the forward picker, the share box or the
+Ctrl+Tab switcher. Those are the places you went looking for a chat by name,
+and keeping a chat out of a suggestion is a different claim from making it
+unreachable: the second one is `hide_everywhere_p`, it is per preset, and it is
+yours to ask for separately.
+
+Like `[peek]`, `[recent]` and `[overrides]` it sits outside the presets,
+because it is a decision about those strips rather than about what any one
+preset lets through. The test it applies is the preset's alone - no close
+buffer and no "until", so a chat does not drift in and out of a strip while a
+timer runs - and a chat the preset still keeps one click away, on an extra view
+or in a folder whose tab is showing, was never hidden and stays.
+
 The rest - `[schedule]`, `[focus_sync]`, `[peek]` - is documented by the starter
 file the app writes on first run, which carries a commented example of each.
+
+A schedule rule has no name, and none is coming: it is addressed by its **raw
+position**, the `[[schedule.rules]]` blocks counted from the top of the file. A
+name would be a second thing to keep in step with the file, and a screen editing
+a rule already has to say which rule it read. That address is what an editor
+sends back, together with the window and preset it read off the rule, so an edit
+lands on the rule you were looking at or is refused - never on whatever is third
+now.
+
+A rule the parser threw away keeps its position in that count. A broken rule in
+the middle of the file does not shift the ones below it, and repairing it does
+not shift them back, which is the only reason editing a file with one in it is
+safe at all. The warnings name rules the same way but counting from one -
+`schedule rule 3: ...` - since that is a line for a person to read rather than
+an index for the app.
 
 `[peek] hotkey`, and `hotkey` on a preset, are read as **Qt portable text**:
 modifiers spelled `Ctrl`, `Shift`, `Alt` and `Meta`, joined to the key and to
