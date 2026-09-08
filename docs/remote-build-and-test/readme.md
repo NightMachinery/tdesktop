@@ -180,10 +180,11 @@ on the box, then the emulator - install, stress, crashcheck - and a shutdown.
 It writes `~/.purple-android-test/reports/<stamp>.md`, a line per step saying
 PASS, FAIL or SKIP, with the full log and the screenshots beside it.
 
-It is started by the agent's own scheduler rather than by the OS, so the run
-happens inside a session that can read the report, work out what a failure
-means and fix it - which is most of the value. The script is what does the
-work either way, and it takes no arguments, so any scheduler will do:
+Nothing schedules it on its own. The overnight run is a note in the agent's own
+scheduler saying what needs doing, and the session that wakes up decides how -
+because the value of running at night is the judgement, not the sequence: what a
+crash means, which screen to open, whether a wrong line is a bug or a fixture.
+This script is a convenience that session can reach for, not the task itself:
 
     ~/.purple-android-test/bin/nightly.sh                  # the whole run
     ~/.purple-android-test/bin/nightly.sh --no-build       # stress what is installed
