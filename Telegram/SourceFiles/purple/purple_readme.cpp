@@ -67,6 +67,9 @@ you are editing by hand.
   legible on every machine reading this file.
 - **The two sync switches**, `[sync] send_after_save_p` and the Premium one
   above, from the same Settings section.
+- **The two last seen switches**, `[last_seen] reasons_p` and `trade_p`, from
+  the same section - and `trade_p` again from the trade sheet's "Don't offer
+  this again".
 
 Every one of these re-parses what it produced and checks it against what was
 intended before handing it back. A bug there refuses the edit rather than
@@ -508,6 +511,10 @@ auto_off = "2m"
 `days` are `mon` to `sun`, times are `HH:MM` local. A rule whose `to` is earlier
 than its `from` spans midnight and is handled as such.
 
+Among the rules covering a moment the **narrowest window wins**, so a
+`12:00-14:00` lunch inside an `08:00-17:00` work day gives lunch at one o'clock
+whichever order they are written in, and two o'clock puts work back.
+
 `[schedule] outside` names the preset in force between the windows - `"normal"`
 unless you say otherwise - and `[[schedule.rulesets]]` blocks let one file carry
 several machines' schedules at once. Settings > Advanced > Purple > Schedule
@@ -524,6 +531,36 @@ folder - and deliberately leaves the silencing exactly where it was. It ends on
 `hotkey` is read as Qt portable text, so **on macOS `Ctrl` means Command** and
 `Meta` means the physical Control key. The Work Mode box prints the combination
 the way your keyboard actually has it.
+
+## Why a last seen is coarse
+
+```toml
+[last_seen]
+reasons_p      = true
+trade_p        = true
+trade_hold     = "10s"
+trade_remember = "24h"
+trade_cooldown = "5m"
+```
+
+Telegram hides somebody's exact "last seen" from you when your own privacy hides
+yours from them, and it says so. With `reasons_p` the status line in the chat
+header and the profile says it too, adding `share yours to see` - or an eyes
+mark where there is no room for the words. When the coarseness is their own
+setting, nothing is added; when the status is "a long time ago", nothing is
+added either, because that is what an abandoned account and a block both look
+like and there is no field saying which.
+
+That line is a link. It offers to show them your last seen for `trade_hold`,
+read theirs once, and put your privacy back exactly as it was - always, whether
+anything was read or not. Nobody is told, and no other person's view of you
+changes. `trade_p = false` takes the offer away and leaves the explanation;
+so does "Don't offer this again" in the sheet.
+
+A read is shown in place of the coarse phrase for `trade_remember` - `last seen
+14:32 - as of 3 min ago` - and then dropped. One trade per person per
+`trade_cooldown`. The reads are in `state.toml`, on this machine only, and
+Settings > Advanced > Purple > Trades lists them.
 
 ## Moving this file to another machine
 

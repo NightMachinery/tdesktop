@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
+#include "purple/purple_last_seen.h"
 #include "purple/purple_preset_box.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_schedule_box.h"
@@ -1262,6 +1263,100 @@ void BuildExportSection(SectionBuilder &builder) {
 	});
 }
 
+// Purple Telegram, not upstream. Why a coarse "last seen" is coarse, and the
+// one-off trade that reads an exact one. See docs/purple/work_mode.md.
+void BuildPurpleLastSeenSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	const auto session = builder.session();
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/purple_last_seen"_q,
+		.title = rpl::single(u"Last seen"_q),
+		.keywords = { u"purple"_q, u"last"_q, u"seen"_q, u"online"_q },
+	});
+
+	const auto flag = [&](
+			const QString &id,
+			const QString &title,
+			bool (*read)(),
+			const QString &key,
+			const QString &what) {
+		const auto toggle = builder.addButton({
+			.id = id,
+			.title = rpl::single(title),
+			.st = &st::settingsButtonNoIcon,
+			.toggled = rpl::single(
+				rpl::empty
+			) | rpl::then(
+				Purple::SettingsChanges()
+			) | rpl::map(read),
+			.keywords = {
+				u"purple"_q,
+				u"last"_q,
+				u"seen"_q,
+				u"privacy"_q,
+			},
+		});
+		if (!toggle) {
+			return;
+		}
+		toggle->toggledValue(
+		) | rpl::filter([=](bool value) {
+			return (value != read());
+		}) | rpl::on_next([=](bool value) {
+			Purple::WriteSettings([=](const QString &text) {
+				return Purple::SetTableBool(
+					text,
+					Purple::SettingsFilePath(),
+					u"last_seen"_q,
+					key,
+					value);
+			}, what);
+		}, toggle->lifetime());
+	};
+
+	flag(
+		u"advanced/purple_last_seen_reasons"_q,
+		u"Say why a last seen is hidden"_q,
+		[] { return Purple::ActiveSettings().lastSeen.reasons; },
+		u"reasons_p"_q,
+		u"the last seen reasons"_q);
+	flag(
+		u"advanced/purple_last_seen_trade"_q,
+		u"Offer to show mine to see theirs"_q,
+		[] { return Purple::ActiveSettings().lastSeen.trade; },
+		u"trade_p"_q,
+		u"the last seen trade"_q);
+
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_last_seen_trades"_q,
+			.title = rpl::single(u"Trades"_q),
+			.st = &st::settingsButtonNoIcon,
+			.onClick = [=] {
+				controller->show(Box(Purple::LastSeenTradesBox, session));
+			},
+			.keywords = {
+				u"purple"_q,
+				u"last"_q,
+				u"seen"_q,
+				u"trade"_q,
+				u"log"_q,
+			},
+		});
+	}
+
+	builder.addDividerText(rpl::single(u"Telegram coarsens somebody's last "
+		"seen when your own privacy hides yours from them. The first switch "
+		"says so in the chat header and the profile; the second makes that "
+		"line offer a trade, which shows them your last seen for a few "
+		"seconds, reads theirs once, and puts your privacy back exactly as "
+		"it was. Never says anyone blocked you: the server does not say so, "
+		"and the fork does not guess."_q));
+	builder.addSkip();
+}
+
 // Purple Telegram, not upstream. See docs/purple/premium.md and
 // docs/purple/work_mode.md.
 void BuildPurpleSection(SectionBuilder &builder) {
@@ -1422,6 +1517,8 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		"accounts instead of three. Features the server enforces stay locked. "
 		"Stored in "_q + Purple::SettingsFilePath() + '.'));
 	builder.addSkip();
+
+	BuildPurpleLastSeenSection(builder);
 }
 
 void BuildScreenReaderSection(SectionBuilder &builder) {
