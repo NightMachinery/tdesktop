@@ -94,7 +94,33 @@ was measured to be worth a single contact in 1913. Locked folders are the new
 one, and this fork needs them more than upstream does, since a `folders` preset
 naming a locked folder asks for a tab the app will not draw.
 
-## Nothing after A6
+**A7 - the phone edits its own settings.** Android master `057714c2`, core
+`661195b`, both on 2026-09-08. The first day of the fork on a real phone
+produced seven complaints; this is all seven of them.
+
+Two were bugs, one root cause each. The chat list went blank after a preset
+switch because the fork asked for the first tab on every reload, and the tab
+animation then translated a list that was never swapped one screen width
+off-screen. The list-membership box closed on every checkbox because it was
+built to, and nothing had noticed that ticking two boxes in a row is the normal
+case. Both are written up in [work_mode.md](work_mode.md).
+
+The rest is a way in. There is a Purple settings screen, a monospace editor for
+`settings.toml` with live validation and a status line that points at the
+offending line and column, and a schedule screen that adds, edits and deletes
+rules - which needed three new splice ops in the core, since nothing there could
+edit an array of tables before. The file can be sent to Saved Messages, imported
+from wherever the file picker reaches, and shared out. Until now it lived in
+app-private storage and could only be written somewhere else and carried over.
+
+Two file keys landed with them, both meaning the same thing on both clients.
+`[suggestions] hide_invisible_p` keeps a hidden chat out of the strips the app
+offers unasked, including the direct-share targets the OS itself holds; a
+preset's `hide_archive_p` puts the archive away with everything else that preset
+hides. The desktop has no pull gesture and keeps the Archive row in the main
+menu already, so it carries the second key rather than acting on it.
+
+## Nothing after A7
 
 The port is done. What is left is not a milestone:
 
