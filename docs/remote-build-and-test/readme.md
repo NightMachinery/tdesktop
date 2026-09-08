@@ -180,18 +180,19 @@ on the box, then the emulator - install, stress, crashcheck - and a shutdown.
 It writes `~/.purple-android-test/reports/<stamp>.md`, a line per step saying
 PASS, FAIL or SKIP, with the full log and the screenshots beside it.
 
-It is scheduled by a user LaunchAgent, `~/Library/LaunchAgents/
-com.purple.nightly.plist`, at one in the morning:
+It is started by the agent's own scheduler rather than by the OS, so the run
+happens inside a session that can read the report, work out what a failure
+means and fix it - which is most of the value. The script is what does the
+work either way, and it takes no arguments, so any scheduler will do:
 
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.purple.nightly.plist
-    launchctl kickstart -p gui/$(id -u)/com.purple.nightly   # run it now
-    launchctl bootout gui/$(id -u)/com.purple.nightly        # stop scheduling it
+    ~/.purple-android-test/bin/nightly.sh                  # the whole run
+    ~/.purple-android-test/bin/nightly.sh --no-build       # stress what is installed
+    ~/.purple-android-test/bin/nightly.sh --no-emulator    # tests and builds only
 
-`StartCalendarInterval` rather than a crontab line, because launchd runs a job
-whose moment passed while the Mac was asleep as soon as it wakes and cron
-simply skips it. A build that only happens on the nights the laptop was left
-awake is not a nightly. It does not wake a sleeping Mac - nothing without root
-can - so a machine shut down overnight runs it at the next login instead.
+The cost of the agent's scheduler is that it holds no state on disk: the
+session has to still be alive at the appointed hour, and a laptop asleep at one
+o'clock does nothing at all rather than catching up on waking. Run it by hand
+in the morning when that happens - the report says what it did either way.
 
 Three things it deliberately does not do. It never taps: an unattended run
 cannot look at a screenshot to see where a tap landed, and a tap that lands in
