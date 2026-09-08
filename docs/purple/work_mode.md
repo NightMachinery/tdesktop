@@ -1900,24 +1900,169 @@ and the rules going back.
 
 ## Screen time
 
-Not recording yet, on either client.
+How long the app has had you, out of a log this machine keeps and never sends.
+Off until `[screen_time] enabled_p` says otherwise: it is a record of what you
+looked at and for how long, and nothing should start keeping one of those
+because a version number moved. The desktop records and draws it; Android does
+neither yet.
 
-The core carries the whole of it - `purple_screentime.{h,cpp}`: the append-only
-event log's format, its parser, session derivation from raw events, and the
-aggregation - and `[screen_time]` is parsed, so a file can already describe what
-it wants. Nothing writes an event, and no screen draws one.
+### What is recorded
 
-That order is deliberate. Every threshold - `action_span`, `active_gap`,
-`idle_after` - is applied when the log is read rather than when it is written,
-which is the whole reason the log stores events and not totals: changing a
-threshold re-derives the history you already have instead of only affecting
-tomorrow. A recorder that landed before the reader was settled would have
-written a format nobody could change.
+One line per event, and nothing else. No totals, no sessions, no days - every
+threshold in `[screen_time]` is applied when the log is read rather than when
+it is written, which is the whole reason the file holds events: changing
+`action_span` or `idle_after` re-derives the history you already have instead
+of only affecting tomorrow. A log of totals would have baked yesterday's
+settings into yesterday forever.
 
-The design - what a session is, when time counts as active rather than reading,
-the budgets and what a hard one does - is Phase 8 of the plan this was built
-from. `[screen_time] enabled_p` defaults to false and stays false until there
-is something on both ends of it.
+The events are deliberately few. Anything the core can work out for itself -
+which chat a session belongs to, how long it ran, whether it was active - is
+not one.
+
+- `open` and `close`: a chat came to the front, and went away with the app
+  still in front. The `open` carries the chat, its kind, the running preset,
+  and whether the preset hides it.
+- `foreground` and `background`: the app arrived and left. Background ends
+  whatever session was running, because a chat you cannot see is not screen
+  time.
+- `preset`: the running preset changed, which cuts the session so that every
+  second of it has exactly one preset.
+- `action`: something you did in the composer - a burst of typing, a send,
+  voice recording starting, a file chosen, a reply or an edit begun.
+- `idle` and `resume`: input stopped for `idle_after`, and started again.
+
+Time that is not in a chat - the chat list, search, settings - is recorded as a
+session with no chat and the kind `elsewhere`, so the splits add up to
+foreground time rather than to something smaller with no name.
+
+### The active rule
+
+Actions are the signal, and everything else in a session is reading.
+
+Each action counts as active for `action_span` from where it lands, which is
+why a burst of typing is one event and not one per keystroke. When the next
+action lands within `active_gap` of it, the whole gap between them counts as
+well - that is what makes a conversation read as active time rather than as a
+row of three-second spikes. A lone action counts only its span, and the total
+is clipped to the session it is inside: send and close instantly and you were
+active for the moment you were there, not for three seconds afterwards.
+
+Idle pauses the session rather than ending it, and the pause is stamped back to
+where input actually stopped rather than to the moment the watchdog noticed.
+Time spent paused is subtracted from the session, which is what makes the
+totals add up to time actually spent looking.
+
+### The log
+
+`screentime.log`, beside `settings.toml` in the config directory. Append-only,
+tab-separated, seven fields:
+
+    unix_ms  kind  dialog_id  chat_kind  preset  action  hidden
+
+Tabs rather than commas because a preset name is whatever you typed and a comma
+in one is likelier than a tab. A line that cannot be read is skipped in
+silence: the file is append-only and written from several places, so a
+truncated last line after a crash is expected rather than exceptional, and one
+lost event is worth far less than the rest of the history.
+
+It never leaves the machine. Nothing in the fork reads it for sending, and
+nothing will: two devices would double-count nothing useful, and this is a
+record of what you looked at. It is pruned to `retention_days` when the app
+starts and every six hours after that, and a pass that finds nothing to drop
+reads the file and writes nothing.
+
+### What the desktop hooks
+
+- **The chat in front** is `Window::SessionController::activeChatValue()`, one
+  subscription per window. Whichever window last changed its active chat is the
+  one the log follows, so a second window open on a second chat is counted as
+  one chat at a time rather than two.
+- **Foreground and background** is `Core::App().appDeactivatedValue()`, which
+  also covers the screen locking on the platforms that deactivate the app for
+  it. There is no separate lock signal on the desktop - `screenIsLocked()` is a
+  flag with nothing to subscribe to - so a platform that locks without
+  deactivating would be counted as still in front.
+- **The preset** is `Purple::ActiveChanges()`, so a preset moved by the
+  schedule or by a focus mode cuts the session exactly as one chosen by hand
+  does.
+- **Actions** are `HistoryWidget` and `ComposeControls`: the field's changes
+  (throttled to one event per `action_span`, in the recorder rather than at the
+  call site), the send stream, the voice recorder starting, a file actually
+  chosen rather than the picker opening, and a reply or an edit begun.
+- **Idle** is `Core::App().lastNonIdleTime()`, checked every five seconds. That
+  is the app's own idle clock - key presses, wheel, mouse and touch anywhere in
+  the app, plus the system's last input time - which is wider than the history
+  and the composer, and narrower than it looks: the app leaving the front ends
+  the session anyway.
+- **Hidden while peeking** is `Filtering()` and `History::purpleHiddenByPreset()`
+  at the moment the chat opens. That predicate is the preset's verdict with the
+  peek taken out, which is exactly the question: during a peek nothing is
+  hidden, and the number wanted is what would have been.
+
+Everything above returns immediately while `enabled_p` is false. No file is
+opened, no timer runs, and no hook does anything.
+
+### The box
+
+Settings -> Advanced -> Purple -> Screen time. The row itself carries the
+digest - "This week: 6 h 12 m, 41 % active, top: Alice" - which is the whole
+feature on most days: a line that answers the question without opening
+anything.
+
+Inside: the switch that turns recording on, a period (Today, this week, this
+month, or a custom range picked as two dates), a headline with the total, the
+active share and the change against the period before it, and a bar chart -
+hours for a day, days for anything longer - stacked by chat kind and painted
+with the palette's userpic colours, so a theme that repaints the app repaints
+the chart.
+
+Then the filters: "Active only", which switches which of a session's two clocks
+every number on the screen reads rather than dropping the reading sessions; one
+switch per kind; and a preset, with Normal offered by name because the log
+spells it as the empty preset.
+
+Then the chats, ranked longest first, each with its userpic, a bar proportional
+to the longest, and its own active share. Clicking one opens its own page: day
+by day, and when in the day. Then "reading load" - every day in the period
+folded onto one clock, which is what a schedule window is placed by - and for a
+month, an hour-by-weekday heat map. Then "hidden while peeking" as its own
+number, the budgets, and an export.
+
+The export is CSV through the save dialog, and it writes sessions rather than
+buckets: a bucket is one way of looking at the log and a session is what the
+log actually says, so an export anybody can re-bucket is worth more than a
+picture of this box's choices.
+
+Nothing here is stored in the shape it is drawn in. Every number comes out of
+the raw log through the core when you look, so an edit to `settings.toml` while
+the box is open redraws it.
+
+### Budgets and the cover
+
+A budget is an `[[screen_time.budgets]]` entry: a target (`all`, `chat:<id>`,
+`kind:<kind>` or `preset:<name>`), a `per_day`, and a `mode`. The day's ledger
+is derived from the raw events like everything else, so a changed threshold
+applies to today's total and not only to tomorrow's.
+
+The box lists them with what they have spent against what they allow, and does
+not write them. There is no splice op that appends an array-of-tables entry
+generically - the schedule has one, and it is the schedule's - so adding a
+budget is an edit to `settings.toml`, which reloads live like every other edit.
+
+A soft budget shows a bulletin once per chat per day when its allowance is
+gone. The "once" is remembered in memory, so a restart says it once more, which
+is the smaller of the two mistakes a bulletin can make.
+
+A hard budget puts a cover over everything below the chat's top bar - the
+history and the composer with it - naming the budget and its allowance. The
+chat stays nameable and closeable, messages and notifications are untouched,
+and the session keeps running behind the cover, counted as reading, so time
+spent sitting on it still shows in the total. One button offers another
+`snooze` minutes, up to `snoozes_per_day` of them; the count is kept in
+`screentime_snoozes` beside the log, because `state.toml` is the core's schema
+shared with Android and a desktop cover's snooze count is this client's
+bookkeeping about one afternoon. `snoozes_per_day = 0` makes the cap absolute
+and leaves the button out.
 
 ## Verified, and not verified
 
