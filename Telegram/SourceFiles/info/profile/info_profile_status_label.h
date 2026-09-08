@@ -26,6 +26,13 @@ public:
 	[[nodiscard]] Fn<void()> membersLinkCallback() const;
 	void setHiddenLinkCallback(Fn<void()> callback);
 	[[nodiscard]] Fn<void()> hiddenLinkCallback() const;
+
+	// Purple: the "share yours to see" tail on a coarse last seen opens the
+	// trade sheet, which needs a controller this class has no business
+	// holding, so the owner hands the click over the way it does for the two
+	// links above.
+	void setLastSeenLinkCallback(Fn<void()> callback);
+	[[nodiscard]] Fn<void()> lastSeenLinkCallback() const;
 	void setOnlineCount(int count);
 	void setColorized(bool enabled);
 
@@ -36,6 +43,7 @@ private:
 	bool _colorized = true;
 	Fn<void()> _membersLinkCallback;
 	Fn<void()> _hiddenLinkCallback;
+	Fn<void()> _lastSeenLinkCallback;
 	base::Timer _refreshTimer;
 	rpl::lifetime _lifetime;
 

@@ -193,6 +193,7 @@ private:
 		int availableWidth,
 		int outerWidth);
 	bool paintConnectingState(Painter &p, int left, int top, int outerWidth);
+	[[nodiscard]] QRect purpleLastSeenGeometry() const;
 	[[nodiscard]] QRect getMembersShowAreaGeometry() const;
 	[[nodiscard]] bool trackOnlineOf(not_null<PeerData*> user) const;
 	void updateMembersShowArea();
@@ -264,6 +265,8 @@ private:
 
 	Ui::Text::String _titlePeerText;
 	bool _titlePeerTextOnline = false;
+	bool _purpleReasonShown = false;
+	int _purpleReasonFrom = 0;
 	int _leftTaken = 0;
 	int _rightTaken = 0;
 	float64 _titleShownRatio = 1.;

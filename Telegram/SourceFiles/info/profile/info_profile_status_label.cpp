@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_config.h"
+#include "purple/purple_last_seen.h"
 #include "ui/widgets/labels.h"
 #include "ui/text/text_utilities.h"
 #include "ui/basic_click_handlers.h"
@@ -115,6 +117,18 @@ StatusLabel::StatusLabel(
 			refresh();
 		}, _lifetime);
 	}
+
+	// Purple: a trade that has just landed, and the two [last_seen] switches,
+	// change this line without the peer changing at all, so neither would ever
+	// reach the screen off the OnlineStatus update the owner listens to.
+	if (_peer->isUser()) {
+		rpl::merge(
+			Purple::StateChanges(),
+			Purple::SettingsChanges()
+		) | rpl::on_next([=] {
+			refresh();
+		}, _lifetime);
+	}
 }
 
 void StatusLabel::setOnlineCount(int count) {
@@ -130,11 +144,16 @@ void StatusLabel::refresh() {
 		}
 		return false;
 	}();
+	auto hasLastSeenLink = false;
 	auto statusText = [&]() -> TextWithEntities {
 		using namespace Ui::Text;
 		auto currentTime = base::unixtime::now();
 		if (auto user = _peer->asUser()) {
-			const auto result = Data::OnlineTextFull(user, currentTime);
+			const auto note = Purple::LastSeenNoteFor(
+				user,
+				currentTime,
+				true,
+				false);
 			const auto showOnline = Data::OnlineTextActive(
 				user,
 				currentTime);
@@ -144,11 +163,17 @@ void StatusLabel::refresh() {
 			if (showOnline) {
 				_refreshTimer.callOnce(updateIn);
 			}
-			return MaybeHiddenPrefixed(
-				(showOnline && _colorized)
-					? Ui::Text::Colorized(result)
-					: TextWithEntities{ .text = result },
-				hidden);
+			auto body = (showOnline && _colorized)
+				? Ui::Text::Colorized(note.base)
+				: TextWithEntities{ .text = note.base };
+			if (!note.link.isEmpty()) {
+				hasLastSeenLink = (_lastSeenLinkCallback != nullptr);
+				body.append(QString::fromUtf8(" \xC2\xB7 "));
+				body.append(hasLastSeenLink
+					? Link(note.link, 3)
+					: TextWithEntities{ .text = note.link });
+			}
+			return MaybeHiddenPrefixed(std::move(body), hidden);
 		} else if (auto chat = _peer->asChat()) {
 			if (!chat->amIn()) {
 				return tr::lng_chat_status_unaccessible(
@@ -205,6 +230,21 @@ void StatusLabel::refresh() {
 			2,
 			std::make_shared<LambdaClickHandler>(_hiddenLinkCallback));
 	}
+
+	// Purple: the profile cover makes the status transparent to the mouse for
+	// a user, so the whole cover stays one target. The one line here that is
+	// worth clicking has to take that back while it is showing, and give it
+	// straight back when it stops.
+	if (_lastSeenLinkCallback) {
+		_label->setAttribute(
+			Qt::WA_TransparentForMouseEvents,
+			!hasLastSeenLink);
+		if (hasLastSeenLink) {
+			_label->setLink(
+				3,
+				std::make_shared<LambdaClickHandler>(_lastSeenLinkCallback));
+		}
+	}
 }
 
 void StatusLabel::setHiddenLinkCallback(Fn<void()> callback) {
@@ -213,6 +253,15 @@ void StatusLabel::setHiddenLinkCallback(Fn<void()> callback) {
 
 Fn<void()> StatusLabel::hiddenLinkCallback() const {
 	return _hiddenLinkCallback;
+}
+
+void StatusLabel::setLastSeenLinkCallback(Fn<void()> callback) {
+	_lastSeenLinkCallback = std::move(callback);
+	refresh();
+}
+
+Fn<void()> StatusLabel::lastSeenLinkCallback() const {
+	return _lastSeenLinkCallback;
 }
 
 void StatusLabel::setMembersLinkCallback(Fn<void()> callback) {
