@@ -18,7 +18,12 @@ void StartSchedule();
 // runtime decision, so it lives in state.toml beside the active preset.
 // Unpausing catches up with wherever the schedule has got to in the meantime.
 [[nodiscard]] bool SchedulePaused();
-void SetSchedulePaused(bool paused);
+
+// `until' is unix seconds, and zero - the default, and what an unpause always
+// writes - means the pause lasts until it is lifted by hand. A deadline is
+// checked by the tick rather than by a timer, so a pause that ran out while
+// the app was closed has expired by the time anything reads it again.
+void SetSchedulePaused(bool paused, int64 until = 0);
 
 // Whether the file describes a schedule at all, so the UI can leave the pause
 // switch out rather than offer a control over nothing.

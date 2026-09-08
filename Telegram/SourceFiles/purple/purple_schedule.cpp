@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "purple/purple_config.h"
+#include "purple/purple_device.h"
 #include "purple/purple_engine.h"
 
 #include <QtCore/QDateTime>
@@ -53,13 +54,26 @@ Runner::Runner() {
 }
 
 void Runner::tick() {
+	const auto now = QDateTime::currentDateTime();
+	if (ScheduleUnpauseDue(CurrentState(), now.toSecsSinceEpoch())) {
+		// A pause given a deadline lifts itself, and then this same tick runs
+		// the ordinary boundary rule below. That is what catches up, once and
+		// immediately, on the windows that opened and closed while it was
+		// paused - waiting for the next window edge instead would leave the
+		// preset wherever the pause found it, possibly for a day.
+		UpdateState([](State &state) {
+			state.schedulePaused = false;
+			state.schedulePausedUntil = 0;
+		});
+	}
 	const auto &state = CurrentState();
 	if (state.schedulePaused) {
 		return;
 	}
 	const auto target = ScheduleTarget(
 		ActiveSettings().schedule,
-		QDateTime::currentDateTime());
+		now,
+		ThisDevice());
 	if (!target || *target == state.scheduleTarget) {
 		// Acting on the change rather than on the value is the whole design.
 		// It is what lets a preset chosen by hand stand until the next
@@ -72,7 +86,11 @@ void Runner::tick() {
 	const auto source = state.activeSource;
 	const auto active = state.activePreset;
 	const auto apply = (source != PresetSource::Focus)
-		&& (wanted != NormalPreset() || source == PresetSource::Schedule);
+		&& ScheduleApplies(
+			ActiveSettings().schedule,
+			ThisDevice(),
+			wanted,
+			source);
 
 	// Two rules, and the asymmetry between them is deliberate. A window
 	// starting is a positive instruction - "at nine, work mode" - and it
@@ -80,6 +98,12 @@ void Runner::tick() {
 	// for that preset has passed, which is no reason at all to undo something
 	// asked for. Focus is left alone in both directions: it is the more
 	// immediate signal, and a schedule fighting it would make both unreadable.
+	//
+	// The second clause is the core's now, because "a window ending" stopped
+	// being "the target is Normal" once the preset between windows became a
+	// key: five o'clock aiming at Home is a window ending too, and must not
+	// steamroll a preset chosen by hand either. Which preset that is depends
+	// on the rulesets this device runs, so the device goes with the question.
 	UpdateState([&](State &state) {
 		state.scheduleTarget = wanted;
 		if (apply) {
@@ -111,14 +135,27 @@ bool SchedulePaused() {
 	return CurrentState().schedulePaused;
 }
 
-void SetSchedulePaused(bool paused) {
+void SetSchedulePaused(bool paused, int64 until) {
 	UpdateState([&](State &state) {
 		state.schedulePaused = paused;
+
+		// Both fields, always. A deadline left behind by a pause that has
+		// since been lifted would expire under the next one and cut it short.
+		state.schedulePausedUntil = paused ? until : 0;
 	});
 }
 
 bool ScheduleConfigured() {
-	return !ActiveSettings().schedule.rules.empty();
+	// Every ruleset the file describes, including the implicit one the parser
+	// wraps a flat [[schedule.rules]] array in - so this is still "the file
+	// says something about a schedule", the way it always was, and a file
+	// written before rulesets existed answers the same as before.
+	//
+	// Deliberately not narrowed to the rulesets that run on this device. A
+	// ruleset written for the phone is a schedule the user is in the middle of
+	// editing, and a pause row that vanished from the laptop while they wrote
+	// it would read as the file having broken.
+	return !ActiveSettings().schedule.rulesets.empty();
 }
 
 } // namespace Purple
