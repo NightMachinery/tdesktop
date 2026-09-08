@@ -1749,6 +1749,12 @@ PRIVATE
     purple/purple_schedule.h
     purple/purple_schedule_box.cpp
     purple/purple_schedule_box.h
+    purple/purple_screentime_box.cpp
+    purple/purple_screentime_box.h
+    purple/purple_screentime_cover.cpp
+    purple/purple_screentime_cover.h
+    purple/purple_screentime_recorder.cpp
+    purple/purple_screentime_recorder.h
     purple/purple_sync.cpp
     purple/purple_sync.h
     settings/business/settings_away_message.cpp

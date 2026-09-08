@@ -87,6 +87,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_session.h"
 #include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
+#include "purple/purple_screentime_recorder.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -2294,6 +2295,35 @@ void ComposeControls::init() {
 
 	initLikeButton();
 
+	// Purple: the screen time recorder wants the actions rather than the
+	// keystrokes, and these are the streams that already mean exactly one
+	// action each. `_history' is read at the moment it fires, because these
+	// controls outlive the chat they were last shown for. See
+	// purple/purple_screentime_recorder.h.
+	const auto noteAction = [=](const QString &action) {
+		Purple::NoteScreenTimeAction(
+			_history ? _history->peer.get() : nullptr,
+			action);
+	};
+	sendRequests(
+	) | rpl::on_next([=] {
+		noteAction(u"send"_q);
+	}, _wrap->lifetime());
+	// The attach request rather than the file that comes back: these controls
+	// hand the choosing to whoever owns them, so this is the last moment they
+	// see. A picker cancelled therefore counts here, unlike in HistoryWidget,
+	// and the difference is one action_span.
+	_attachRequests.events(
+	) | rpl::on_next([=] {
+		noteAction(u"attach"_q);
+	}, _wrap->lifetime());
+	_voiceRecordBar->recordingStateChanges(
+	) | rpl::filter([](bool active) {
+		return active;
+	}) | rpl::on_next([=] {
+		noteAction(u"voice"_q);
+	}, _wrap->lifetime());
+
 	_wrap->sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		updateControlsGeometry(size);
@@ -2780,6 +2810,12 @@ bool ComposeControls::suppressSendAction() const {
 }
 
 void ComposeControls::fieldChanged() {
+	// Purple: one composer burst is one action; the throttle that makes that
+	// true lives in the recorder, because this fires per keystroke.
+	Purple::NoteScreenTimeAction(
+		_history ? _history->peer.get() : nullptr,
+		u"typing"_q);
+
 	const auto typing = (!_inlineBot
 		&& !_header->isEditingMessage()
 		&& (_textUpdateEvents & TextUpdateEvent::SendTyping)
@@ -4742,6 +4778,10 @@ void ComposeControls::editMessage(
 void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 	Expects(_history != nullptr);
 
+	// Purple: the composer has been claimed, which is a thing you did rather
+	// than a thing you read.
+	Purple::NoteScreenTimeAction(_history->peer, u"edit"_q);
+
 	if (draftKey(DraftType::Edit) == Data::DraftKey::None()) {
 		return;
 	}
@@ -4860,6 +4900,9 @@ void ComposeControls::maybeCancelEditMessage() {
 
 void ComposeControls::replyToMessage(FullReplyTo id) {
 	Expects(_history != nullptr);
+
+	// Purple: the same as an edit.
+	Purple::NoteScreenTimeAction(_history->peer, u"reply"_q);
 
 	if (draftKey(DraftType::Normal) == Data::DraftKey::None()) {
 		return;
