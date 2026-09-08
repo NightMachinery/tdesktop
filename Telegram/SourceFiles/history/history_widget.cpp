@@ -159,6 +159,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_timecode_action.h"
 #include "mtproto/mtproto_config.h"
 #include "lang/lang_keys.h"
+#include "purple/purple_screentime_cover.h"
+#include "purple/purple_screentime_recorder.h"
 #include "settings/business/settings_quick_replies.h"
 #include "settings/settings_credits_graphics.h"
 #include "storage/localimageloader.h"
@@ -371,6 +373,14 @@ HistoryWidget::HistoryWidget(
 		return _list && _list->itemTop(view) >= 0;
 	}))
 , _topShadow(this) {
+	// Purple: first, because updateControlsGeometry() and
+	// updateControlsVisibility() both talk to it and either can run before the
+	// rest of the constructor has finished. Created unconditionally rather than
+	// on demand: it is three widgets and no work while [screen_time] is off,
+	// and the alternative is a settings reload reaching into every open chat
+	// pane to build one. See purple/purple_screentime_cover.h.
+	_purpleScreenTimeCover = std::make_unique<Purple::ScreenTimeCover>(this);
+
 	setAcceptDrops(true);
 
 	session().downloaderTaskFinished() | rpl::on_next([=] {
@@ -1274,6 +1284,12 @@ void HistoryWidget::initVoiceRecordBar() {
 		} else if (showSlowmodeError()) {
 			return true;
 		}
+
+		// Purple: the filter says yes, so recording is about to start. The
+		// last return of the filter is the one place that means that and
+		// nothing else. See purple/purple_screentime_recorder.h.
+		Purple::NoteScreenTimeAction(_peer, u"voice"_q);
+
 		return false;
 	});
 	_voiceRecordBar->setTTLFilter([=] {
@@ -2120,6 +2136,11 @@ bool HistoryWidget::suppressSendAction() const {
 }
 
 void HistoryWidget::fieldChanged() {
+	// Purple: one composer burst is one action, and the throttle that makes
+	// that true is in the recorder rather than here - this fires per
+	// keystroke. See purple/purple_screentime_recorder.h.
+	Purple::NoteScreenTimeAction(_peer, u"typing"_q);
+
 	const auto updateTyping = (_textUpdateEvents
 		& TextUpdateEvent::SendTyping);
 
@@ -3862,6 +3883,10 @@ bool HistoryWidget::canWriteMessage() const {
 }
 
 void HistoryWidget::updateControlsVisibility() {
+	// Purple: the one place that runs on every change of what this pane is
+	// showing, which is exactly when the cover has to ask again.
+	_purpleScreenTimeCover->setPeer(_peer);
+
 	auto fieldDisabledRemoved = (_fieldDisabled != nullptr);
 	auto fieldVisibilityChanged = false;
 	const auto hideExtra = hideExtraButtons();
@@ -5480,7 +5505,13 @@ void HistoryWidget::sendVoice(const VoiceToSend &data) {
 void HistoryWidget::send(Api::SendOptions options) {
 	if (!_history) {
 		return;
-	} else if (_editMsgId) {
+	}
+
+	// Purple: before the branches, so an edit saved from here and a scheduled
+	// message count the same as a plain send. See purple_screentime_recorder.h.
+	Purple::NoteScreenTimeAction(_peer, u"send"_q);
+
+	if (_editMsgId) {
 		saveEditMessage({});
 		return;
 	} else if (const auto page = shownRichMessage()) {
@@ -6129,6 +6160,10 @@ void HistoryWidget::chooseAttach(
 		if (result.paths.isEmpty() && result.remoteContent.isEmpty()) {
 			return;
 		}
+
+		// Purple: a file actually chosen, not the dialog opening - a picker
+		// cancelled is not something you did in the chat.
+		Purple::NoteScreenTimeAction(_peer, u"attach"_q);
 
 		if (!result.remoteContent.isEmpty()) {
 			auto read = Images::Read({
@@ -7959,6 +7994,14 @@ void HistoryWidget::updateControlsGeometry() {
 		_topBar->bottomNoMargins(),
 		width - topShadowLeft - topShadowRight,
 		st::lineWidth);
+
+	// Purple: everything under the top bar - the history and the composer with
+	// it. See purple/purple_screentime_cover.h.
+	_purpleScreenTimeCover->setGeometry(QRect(
+		0,
+		_topBar->bottomNoMargins(),
+		width,
+		std::max(height() - _topBar->bottomNoMargins(), 0)));
 }
 
 void HistoryWidget::itemRemoved(not_null<const HistoryItem*> item) {
@@ -10009,6 +10052,10 @@ void HistoryWidget::replyToMessage(
 }
 
 void HistoryWidget::processReply() {
+	// Purple: beginning a reply is an action even when nothing is sent after
+	// it - it is the moment you started writing rather than reading.
+	Purple::NoteScreenTimeAction(_peer, u"reply"_q);
+
 	const auto processContinue = [=] {
 		return crl::guard(_list, [=] {
 			if (!_peer || !_processingReplyTo) {
@@ -10142,6 +10189,10 @@ void HistoryWidget::editMessage(
 	if (Iv::Editor::ActivateEditWindowFor(&session(), item->fullId())) {
 		return;
 	}
+
+	// Purple: the same as a reply - the composer has been claimed.
+	Purple::NoteScreenTimeAction(_peer, u"edit"_q);
+
 	if (item->richPage()) {
 		Iv::Editor::ShowEditBox(controller(), item);
 		return;

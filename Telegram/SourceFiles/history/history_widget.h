@@ -105,6 +105,12 @@ class FieldAutocomplete;
 struct FileChosen;
 } // namespace ChatHelpers
 
+// Purple: the hard-budget cover over the chat pane. See
+// purple/purple_screentime_cover.h.
+namespace Purple {
+class ScreenTimeCover;
+} // namespace Purple
+
 namespace HistoryView {
 class StickerToast;
 class PaidReactionToast;
@@ -860,6 +866,11 @@ private:
 
 	object_ptr<HistoryView::TopBarWidget> _topBar;
 	object_ptr<Ui::ElasticScroll> _scroll;
+
+	// Purple: always here and hidden almost always - it is three widgets and
+	// no work while [screen_time] is off. What it covers is everything below
+	// _topBar, so the chat stays nameable and closeable while its time is up.
+	std::unique_ptr<Purple::ScreenTimeCover> _purpleScreenTimeCover;
 	QPointer<HistoryInner> _list;
 	History *_migrated = nullptr;
 	History *_history = nullptr;
