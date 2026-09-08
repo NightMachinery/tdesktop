@@ -47,9 +47,18 @@ as `settings.toml.bak` beside it, a single file that is overwritten each time.
 There is no three-way merge and no attempt at one, because a merge needs a
 common ancestor and there is nowhere here that would hold one.
 
-It does not run automatically. On Android it does notice that the other machine
-has a newer file, and says so once - see phase 2 below - but noticing is as far
-as it goes; the write still waits for a press. It does not touch `state.toml` -
+It does not import on its own. The *sending* half can now be automatic -
+`[sync] send_after_save_p`, off unless you turn it on, posts the file whenever
+the app itself writes it, five seconds after the last write so a run of taps is
+one document - but nothing about the receiving half changed. On Android the fork
+notices that the other machine has a newer file and says so once, see phase 2
+below, and the write still waits for a press. Two fingerprints in `state.toml`,
+of the last file this machine sent and the last it wrote from an import, keep
+two machines from handing the same bytes back and forth; an import never sends.
+The rule is `ShouldAutoSend()` in the core, and
+[work_mode.md](work_mode.md) has the reasoning.
+
+It does not touch `state.toml` -
 the active preset, the peek timer and the `... until` overrides are about what
 *this* machine is doing right now, and carrying them across would be a much
 larger claim than "these are my settings".

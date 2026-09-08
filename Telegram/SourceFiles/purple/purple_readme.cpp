@@ -59,6 +59,14 @@ you are editing by hand.
 - **The pinned order of an extra view.** Drag a row on one of a preset's own
   tabs and the `pinned` array is rewritten to match.
 - **The Premium toggle**, from Settings. It rewrites one value token.
+- **The schedule**, from Settings > Advanced > Purple > Schedule: a rule's
+  days, times, preset and `enabled_p`; a ruleset's `mode`, `device` and
+  `outside`; `[schedule] enabled_p` and `outside`. Each key is rewritten where
+  it stands, and a rule you added by hand keeps the comment you put above it.
+- **This device's name**, into `[devices]`, so the id a ruleset names is
+  legible on every machine reading this file.
+- **The two sync switches**, `[sync] send_after_save_p` and the Premium one
+  above, from the same Settings section.
 
 Every one of these re-parses what it produced and checks it against what was
 intended before handing it back. A bug there refuses the edit rather than
@@ -500,6 +508,12 @@ auto_off = "2m"
 `days` are `mon` to `sun`, times are `HH:MM` local. A rule whose `to` is earlier
 than its `from` spans midnight and is handled as such.
 
+`[schedule] outside` names the preset in force between the windows - `"normal"`
+unless you say otherwise - and `[[schedule.rulesets]]` blocks let one file carry
+several machines' schedules at once. Settings > Advanced > Purple > Schedule
+edits all of it without touching the rest of the file, and says which rules the
+parser had to throw away.
+
 `focus_sync` follows the system Focus mode. `exit_preset = "previous"` puts back
 whatever was active when the focus came on, rather than a preset named outright.
 
@@ -523,6 +537,13 @@ across, through your own Saved Messages:
 - **Right-click that message > Import Purple settings**, in Saved Messages, on
   the machine you want it. It tells you the date, the schema version and how
   many warnings the file produces, and asks before replacing anything.
+
+`[sync] send_after_save_p = true`, or the switch beside the send button, does
+the first of those for you whenever the app writes this file - five seconds
+after the last write, so a run of taps is one message. It never posts a file it
+has just imported, and never one whose bytes it has already sent, so two
+machines cannot hand the same settings back and forth. The importing is still
+yours to ask for.
 
 The chat is the history. Every send is one message with a date on it, so going
 back to last week's settings is finding last week's message and importing it.
