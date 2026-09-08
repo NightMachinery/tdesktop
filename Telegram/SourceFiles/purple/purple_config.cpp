@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "purple/purple_readme.h"
+#include "purple/purple_sync.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -39,6 +40,13 @@ namespace {
 // for the flurry to settle rather than reloading a half-written file - which
 // would parse as broken and flash an error banner on every save.
 constexpr auto kReloadDelay = crl::time(250);
+
+// How long the automatic send waits after a write before posting the file. A
+// run of checkbox taps is one document rather than six, and a preset switched
+// twice in a row posts what it settled on rather than what it passed through.
+// Long enough to cover a hand changing its mind, short enough that the file is
+// on its way before anyone has moved on to something else.
+constexpr auto kAutoSendDelay = crl::time(5 * 1000);
 
 // Written once, on first run. Everything the user may want to change should be
 // present and commented, because an empty file teaches nobody what is possible.
@@ -164,13 +172,62 @@ list_order = [
 [schedule]
 enabled_p = true
 
-# Disabled until you point it at a preset you have actually written.
+# Which preset the schedule wants whenever no window covers the moment. Five
+# o'clock puts this back, not necessarily stock Telegram: if your default is
+# something quieter, name it here and the working day becomes the exception.
+outside = "normal"
+
+# A window: these days, between these times, this preset. Disabled until you
+# point it at a preset you have actually written.
 [[schedule.rules]]
 enabled_p = false
 days      = ["mon", "tue", "wed", "thu", "fri"]
 from      = "09:00"
 to        = "17:00"
 preset    = "work"
+
+# One file, several machines. A ruleset says which devices its windows are for,
+# so the same settings.toml can carry the laptop's schedule and the phone's
+# without either one running the other's. The rules above belong to no ruleset
+# and are therefore for every device.
+#
+#   device  = "any" | "desktop" | "mobile" | "android" | "ios" | "macos" |
+#             "windows" | "linux" | a device id, as listed under [devices]
+#   mode    = "disabled" | "enabled" | "always"
+#   outside = this ruleset's own answer to the key above, when it wants one
+#
+# Among the enabled rulesets that name this device only the most specific one
+# runs - a ruleset naming this machine's id REPLACES the one for desktops
+# rather than piling on top of it - and every "always" ruleset runs as well,
+# whatever won, for the windows that are true everywhere.
+[[schedule.rulesets]]
+name    = "laptop"
+device  = "desktop"
+mode    = "disabled"
+outside = "normal"
+
+[[schedule.rulesets.rules]]
+enabled_p = false
+days      = ["sat", "sun"]
+from      = "10:00"
+to        = "14:00"
+preset    = "work"
+
+# What to call the device ids a ruleset can name. Nothing depends on a device
+# being listed - an unnamed one shows as its id - but an id is unreadable and
+# this is where it stops being. Settings > Advanced > Purple prints the id this
+# machine reports for itself, which is the one to paste in.
+#
+# [devices]
+# "macos-3f9a2c1d" = "the laptop"
+
+[sync]
+# Whether saving settings.toml also posts it to your Saved Messages, so the
+# other machines have something newer to find on their next start. Off by
+# default: sending is a message in a real chat, and that should be something
+# you asked for in words rather than something an upgrade started doing on
+# your behalf. See docs/purple/sync.md.
+send_after_save_p = false
 
 [peek]
 # Temporarily reveal what the active preset is hiding.
@@ -247,6 +304,11 @@ public:
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title);
 	bool createList(const QString &name, const QString &title);
+	WriteResult write(
+		const Fn<SpliceResult(const QString&)> &op,
+		const QString &what);
+	void noteSent(const QByteArray &bytes);
+	void noteImported(const QByteArray &bytes);
 
 	[[nodiscard]] const State &state() const;
 	[[nodiscard]] rpl::producer<> stateChanges() const;
@@ -261,8 +323,10 @@ private:
 	void reloadFromDisk();
 	void reloadStateFromDisk();
 	[[nodiscard]] bool splice(
-		const SpliceResult &result,
+		const Fn<SpliceResult(const QString&)> &op,
 		const QString &what);
+	void autoSendLater();
+	void autoSendNow();
 
 	QString _text;
 	Settings _settings;
@@ -277,10 +341,13 @@ private:
 
 	std::unique_ptr<QFileSystemWatcher> _watcher;
 	base::Timer _reload;
+	base::Timer _autoSend;
 
 };
 
-Config::Config() : _reload([=] { reloadFromDisk(); }) {
+Config::Config()
+: _reload([=] { reloadFromDisk(); })
+, _autoSend([=] { autoSendNow(); }) {
 	loadSettings();
 	loadState();
 
@@ -349,7 +416,55 @@ bool Config::writeSettings(const QString &text) {
 		return false;
 	}
 	applyText(text);
+
+	// Every write the app makes to the file passes through here, which is the
+	// whole reason there is one of these rather than a QSaveFile in each
+	// writer: the automatic send has exactly one place to hook, and a switch
+	// added next year gets it for free. Writes from outside - an editor, an
+	// import - come in through the watcher instead and are deliberately not
+	// this. See ShouldAutoSend() in purple_state.h.
+	autoSendLater();
 	return true;
+}
+
+void Config::autoSendLater() {
+	if (ShouldAutoSend(_settings, _state, _text.toUtf8(), false)) {
+		// Restarted rather than left to run, so the clock measures the quiet
+		// after the last write instead of the noise after the first.
+		_autoSend.callOnce(kAutoSendDelay);
+	}
+}
+
+void Config::autoSendNow() {
+	// Asked again rather than trusted from five seconds ago. In between, the
+	// switch can have been turned off, the file can have been put back to what
+	// it was, and an import can have landed the very bytes we were about to
+	// offer the machine that sent them.
+	const auto bytes = _text.toUtf8();
+	if (!ShouldAutoSend(_settings, _state, bytes, false)) {
+		return;
+	} else if (!Upload(bytes, _settings.version)) {
+		// No session to post into - not signed in yet, or signed out since.
+		// Nothing is recorded, so the next write tries again, which is what
+		// somebody who turned this on would expect over a silent giving up.
+		LOG(("Purple: nothing to send settings.toml to, not sending."));
+		return;
+	}
+	noteSent(bytes);
+}
+
+void Config::noteSent(const QByteArray &bytes) {
+	const auto fingerprint = SettingsFingerprint(bytes);
+	updateState([&](State &state) {
+		state.lastSentFingerprint = fingerprint;
+	});
+}
+
+void Config::noteImported(const QByteArray &bytes) {
+	const auto fingerprint = SettingsFingerprint(bytes);
+	updateState([&](State &state) {
+		state.lastImportedFingerprint = fingerprint;
+	});
 }
 
 void Config::startWatching() {
@@ -422,13 +537,15 @@ void Config::setLocalPremium(bool value) {
 	if (_localPremium.current() == value) {
 		return;
 	}
-	const auto result = SetTableBool(
-		_text,
-		SettingsFilePath(),
-		u"premium"_q,
-		u"enabled_p"_q,
-		value);
-	if (!splice(result, u"the Premium toggle"_q)) {
+	const auto written = splice([&](const QString &text) {
+		return SetTableBool(
+			text,
+			SettingsFilePath(),
+			u"premium"_q,
+			u"enabled_p"_q,
+			value);
+	}, u"the Premium toggle"_q);
+	if (!written) {
 		// Keep memory and disk agreeing. Changing the setting anyway would
 		// apply now and silently revert on the next start.
 		return;
@@ -448,33 +565,50 @@ rpl::producer<> Config::changes() const {
 	return _changes.events();
 }
 
-bool Config::splice(const SpliceResult &result, const QString &what) {
+WriteResult Config::write(
+		const Fn<SpliceResult(const QString&)> &op,
+		const QString &what) {
+	Expects(op != nullptr);
+
+	const auto result = op(_text);
 	if (!result.ok()) {
 		LOG(("Purple Error: Could not write %1 to %2: %3."
 			).arg(what, SettingsFilePath(), result.error));
-		return false;
+		return { .error = result.error };
 	} else if (!result.changed) {
-		return true;
+		// The file already said that. Not an error and not worth a message:
+		// the screen that asked is now showing what the file holds, which is
+		// what it wanted.
+		return { .ok = true };
+	} else if (!writeSettings(result.text)) {
+		return { .error = u"Could not write %1. See the log."_q.arg(
+			SettingsFilePath()) };
 	}
-	return writeSettings(result.text);
+	return { .ok = true };
+}
+
+bool Config::splice(
+		const Fn<SpliceResult(const QString&)> &op,
+		const QString &what) {
+	return write(op, what).ok;
 }
 
 bool Config::addToList(
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
-	return splice(
-		AddListMember(_text, SettingsFilePath(), list, id, title),
-		u"list '%1'"_q.arg(list));
+	return splice([&](const QString &text) {
+		return AddListMember(text, SettingsFilePath(), list, id, title);
+	}, u"list '%1'"_q.arg(list));
 }
 
 bool Config::removeFromList(
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
-	return splice(
-		RemoveListMember(_text, SettingsFilePath(), list, id, title),
-		u"list '%1'"_q.arg(list));
+	return splice([&](const QString &text) {
+		return RemoveListMember(text, SettingsFilePath(), list, id, title);
+	}, u"list '%1'"_q.arg(list));
 }
 
 bool Config::setViewPins(
@@ -482,24 +616,24 @@ bool Config::setViewPins(
 		const QString &view,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
-	return splice(
-		SetViewPinned(_text, SettingsFilePath(), preset, view, ids, title),
-		u"the pins of view '%1'"_q.arg(view));
+	return splice([&](const QString &text) {
+		return SetViewPinned(text, SettingsFilePath(), preset, view, ids, title);
+	}, u"the pins of view '%1'"_q.arg(view));
 }
 
 bool Config::setPresetPins(
 		const QString &preset,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
-	return splice(
-		SetPresetPinned(_text, SettingsFilePath(), preset, ids, title),
-		u"the pins of preset '%1'"_q.arg(preset));
+	return splice([&](const QString &text) {
+		return SetPresetPinned(text, SettingsFilePath(), preset, ids, title);
+	}, u"the pins of preset '%1'"_q.arg(preset));
 }
 
 bool Config::createList(const QString &name, const QString &title) {
-	return splice(
-		AddList(_text, SettingsFilePath(), name, title),
-		u"the list '%1'"_q.arg(name));
+	return splice([&](const QString &text) {
+		return AddList(text, SettingsFilePath(), name, title);
+	}, u"the list '%1'"_q.arg(name));
 }
 
 void Config::loadState() {
@@ -617,6 +751,20 @@ bool SetPresetPins(
 
 bool CreateList(const QString &name, const QString &title) {
 	return Instance().createList(name, title);
+}
+
+WriteResult WriteSettings(
+		Fn<SpliceResult(const QString &text)> splice,
+		const QString &what) {
+	return Instance().write(splice, what);
+}
+
+void NoteSettingsSent(const QByteArray &bytes) {
+	Instance().noteSent(bytes);
+}
+
+void NoteSettingsImported(const QByteArray &bytes) {
+	Instance().noteImported(bytes);
 }
 
 const State &CurrentState() {
