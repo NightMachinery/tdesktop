@@ -112,8 +112,36 @@ Never run two builds against `out/` at once. Ninja does not lock the build
 directory, so a second one silently competes for the same outputs.
 
 `RelWithDebInfo` is the useful default for a client you both use and modify:
-optimized enough to live in the Dock, but with symbols so a debugger can
-still attach to code you are changing.
+optimized enough to live in the Dock, but with enough symbols to say where a
+crash landed in code you are changing.
+
+### How much debug info
+
+The debug info is deliberately line tables only. `build_app.sh` overrides
+`CMAKE_<LANG>_FLAGS_RELWITHDEBINFO` to `-O2 -gline-tables-only -DNDEBUG`, and it
+has to override the per-config flags rather than join `CompilerFlags`: CMake
+emits `CMAKE_<LANG>_FLAGS` first and `CMAKE_<LANG>_FLAGS_<CONFIG>` after it, so
+a `-gline-tables-only` appended to the former loses to the config's own `-g`
+and the change is silently a no-op.
+
+Full `-g` costs far more than it looks. It put 122MB of DWARF into
+`history_widget.cpp.o` alone - 90% of that one object, 76MB of it
+`__debug_str` - and 17GB across `out/`, which is most of what a configured
+build tree here weighs. Almost none of it was reachable: line tables keep both
+things this fork actually symbolicates with, function names in the binary and
+file:line through the debug map (see "Symbolicating a crash"). What they drop
+is variable and type information, so a debugger still gives a correct
+backtrace but cannot print a local.
+
+If you need the full thing, reconfigure with
+
+```bash
+RelWithDebInfoFlags='-O2 -g -DNDEBUG' purple/build_app.sh
+```
+
+and pay one full rebuild, because a flag change invalidates every translation
+unit. The recorded ninja timings put that at 23.3 hours of compile time, about
+three hours of wall clock on eight cores.
 
 Two flags are worth knowing about:
 
@@ -388,6 +416,10 @@ Function names live in that copy and survive anything. Line numbers come from a
 debug map of 1842 `OSO` entries pointing at the `.o` files under `out/`, so they
 only resolve while those are intact — **symbolicate before the next build, not
 after**, or run `dsymutil` once to freeze the line info into a `.dSYM`.
+
+That debug map carries line tables and nothing else, which is all `atos` and
+`dsymutil` want from it; see "How much debug info" for what is missing and how
+to get it back.
 
 Do not be tempted to pass `-no-strip` to keep symbols in the bundle instead.
 `macdeployqt` runs `install_name_tool` once per Qt framework reference and each
