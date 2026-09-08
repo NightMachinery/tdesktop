@@ -152,6 +152,10 @@ list_order = [
 #   { name = "Music", notify_p = false, badge_p = false, include_in_main_view = "pinned" },
 # ]
 #
+# # The archive goes with everything else this preset hides: no row in the list,
+# # and on Android no pull gesture either. Uncomment to keep it reachable.
+# # hide_archive_p = false
+#
 # # An extra tab of its own, with its own unread badge and its own pins.
 # [[presets.work.views]]
 # name = "People"
@@ -190,6 +194,14 @@ stay_visible_after_close = "2m"
 #                                      already one click away on an extra view
 #                                      or in a folder whose tab is showing.
 applies_to = "already_in_view"
+
+[suggestions]
+# The strips of chats the app offers unasked - the people and recent rows in
+# the search panel, the quick-share popup, the frequent contacts a gift is sent
+# to - leave out what the running preset hides. Typed search, the forward picker
+# and the Ctrl+Tab switcher are never touched: this is about what the app
+# suggests, not about what you can still reach.
+hide_invisible_p = true
 )";
 
 [[nodiscard]] std::optional<QString> ReadFile(const QString &path) {
