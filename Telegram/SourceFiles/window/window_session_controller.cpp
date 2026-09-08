@@ -103,6 +103,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_screentime_recorder.h"
 #include "main/main_session_settings.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
@@ -1736,6 +1737,11 @@ SessionController::SessionController(
 	}, _lifetime);
 
 	session->addWindow(this);
+
+	// Purple: which chat is in front is a per-window fact, so the screen time
+	// recorder is told here rather than from the app. It does nothing until
+	// [screen_time] enabled_p is on. See purple/purple_screentime_recorder.h.
+	Purple::WatchScreenTime(this);
 
 	crl::on_main(this, [=] {
 		activateFirstChatsFilter();

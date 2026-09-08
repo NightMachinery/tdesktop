@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "purple/purple_focus.h"
 #include "purple/purple_schedule.h"
+#include "purple/purple_screentime_recorder.h"
 #include "base/unixtime.h"
 #include "core/core_settings.h"
 #include "core/update_checker.h"
@@ -312,6 +313,11 @@ void Application::run() {
 	// than being hung off one of them.
 	Purple::StartSchedule();
 	Purple::StartFocusSync();
+
+	// Purple: the screen time recorder watches the app rather than a window -
+	// foreground, background, the preset, the no-input watchdog - so it starts
+	// here too. It does nothing at all until [screen_time] enabled_p is on.
+	Purple::StartScreenTime();
 
 	startEmojiImageLoader();
 	startSystemDarkModeViewer();
