@@ -9,8 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "purple/purple_config.h"
+#include "purple/purple_device.h"
 #include "purple/purple_engine.h"
 
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -50,8 +52,18 @@ public:
 
 private:
 	void tick();
-	void enter();
-	void leave();
+
+	// What the schedule wanted at the moment focus took over, or nothing when
+	// no session is running - and nothing again after a restart, which is the
+	// whole reason it is here rather than in state.toml. It is not a decision,
+	// only a note the core reads on the way out of a session, and state.toml's
+	// schema is the core's and shared with Android; a key for a note would be a
+	// schema change for something that may legitimately be forgotten.
+	//
+	// Forgetting it costs one restore: the core then puts the pre-focus preset
+	// back exactly as this fork did before the rule existed. Android keeps the
+	// same note in a preference file of its own, for the same reasons.
+	std::optional<QString> _enterTarget;
 
 	rpl::lifetime _lifetime;
 
@@ -71,84 +83,53 @@ Runner::Runner() {
 }
 
 void Runner::tick() {
-	const auto &sync = ActiveSettings().focusSync;
-	const auto &state = CurrentState();
-	const auto imposed = (state.activeSource == PresetSource::Focus);
-	if (!sync.enabled) {
-		// Switching focus sync off while it is holding a preset has to hand
-		// that preset back. Leaving it in force would be a preset nothing on
-		// screen explains and nothing left running would ever lift.
-		if (imposed) {
-			leave();
-		} else if (state.focusSeen) {
-			UpdateState([](State &state) {
-				state.focusSeen = false;
-			});
-		}
-		return;
-	} else if (state.focusActive == state.focusSeen) {
-		// No edge, so nothing happens - which is exactly what makes a preset
-		// chosen by hand mid-session stand until focus itself changes.
-		return;
-	} else if (state.focusActive) {
-		enter();
-	} else {
-		leave();
-	}
-}
-
-void Runner::enter() {
-	const auto &state = CurrentState();
-	const auto from = state.activePreset;
-
-	// Focus cannot be what we remember returning to, or a hand-edited state
-	// file could leave the two pointing at each other.
-	const auto fromSource = (state.activeSource == PresetSource::Focus)
-		? PresetSource::Manual
-		: state.activeSource;
-	const auto preset = ActiveSettings().focusSync.enterPreset;
-	UpdateState([&](State &state) {
-		state.focusSeen = true;
-		state.previousPreset = from;
-		state.previousSource = fromSource;
-		state.activePreset = preset;
-		state.activeSource = PresetSource::Focus;
-	});
-	LOG(("Purple: focus on, '%1' -> '%2'.").arg(from, preset));
-}
-
-void Runner::leave() {
-	const auto &sync = ActiveSettings().focusSync;
-	const auto &state = CurrentState();
-	if (state.activeSource != PresetSource::Focus) {
-		// The preset in force is not the one focus imposed: it was chosen
-		// while focus was on, and that choice outlives the focus session.
-		UpdateState([](State &state) {
-			state.focusSeen = false;
-		});
-		LOG(("Purple: focus off, keeping '%1' (%2)."
-			).arg(state.activePreset
-			).arg(PresetSourceName(state.activeSource)));
+	// Both halves of the policy are FocusStep() in the core - entering, the
+	// four ways of leaving, and the rule that a preset chosen by hand
+	// mid-session outlives the session. They were written here and in the
+	// Android bridge, and the two had already parted company; see below.
+	//
+	// The flag goes in as it stands, because on this client the Detector below
+	// is what writes it and this pass only acts on it. Android has one caller
+	// for both halves and hands in what it just read.
+	const auto step = FocusStep(
+		ActiveSettings(),
+		CurrentState(),
+		CurrentState().focusActive,
+		_enterTarget,
+		QDateTime::currentDateTime(),
+		ThisDevice());
+	if (!step) {
 		return;
 	}
-	const auto restore = IsPreviousPresetName(sync.exitPreset);
-	const auto previous = state.previousPreset;
-	const auto wanted = restore ? previous : sync.exitPreset;
+	const auto session = (step->state.activeSource == PresetSource::Focus);
+	if (step->enterTarget) {
+		_enterTarget = step->enterTarget;
+	} else if (!session) {
+		// The session is over, so the note is not about anything any more.
+		// Keeping it would leave a value from one session to be read as the
+		// next one's.
+		_enterTarget = std::nullopt;
+	}
 
-	// Restoring puts back the reason as well as the preset, so a window the
-	// schedule had opened still closes at its own boundary afterwards. A preset
-	// named outright was not put there by either, so it is the user's until
-	// something moves it.
-	const auto source = restore ? state.previousSource : PresetSource::Manual;
-	const auto preset = wanted.isEmpty() ? NormalPreset() : wanted;
+	// The whole state, not field by field: what came back is a copy of the very
+	// CurrentState() handed in a line ago, and both run on the UI thread, so
+	// there is nothing in between for this to overwrite.
+	const auto preset = step->state.activePreset;
+	const auto source = step->state.activeSource;
 	UpdateState([&](State &state) {
-		state.focusSeen = false;
-		state.activePreset = preset;
-		state.activeSource = source;
-		state.previousPreset = QString();
-		state.previousSource = PresetSource::Manual;
+		state = step->state;
 	});
-	LOG(("Purple: focus off, -> '%1' (%2).").arg(preset, PresetSourceName(source)));
+	if (step->change == FocusChange::None) {
+		// Only the flag moved, which is every change of focus that is not an
+		// edge for the policy - focus coming on while sync is off, say. Nothing
+		// about the view changed, so there is nothing to say about it, and the
+		// write above is what makes the next edge an edge.
+		return;
+	}
+	LOG(("Purple: focus %1 -> '%2' (%3)."
+		).arg(FocusChangeName(step->change)
+		).arg(preset.isEmpty() ? NormalPreset() : preset
+		).arg(PresetSourceName(source)));
 }
 
 class Detector final {

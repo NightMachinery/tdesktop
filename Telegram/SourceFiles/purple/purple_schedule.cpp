@@ -56,107 +56,56 @@ Runner::Runner() {
 }
 
 void Runner::tick() {
-	const auto now = QDateTime::currentDateTime();
-	if (ScheduleUnpauseDue(CurrentState(), now.toSecsSinceEpoch())) {
-		// A pause given a deadline lifts itself, and then this same tick runs
-		// the ordinary boundary rule below. That is what catches up, once and
-		// immediately, on the windows that opened and closed while it was
-		// paused - waiting for the next window edge instead would leave the
-		// preset wherever the pause found it, possibly for a day.
-		UpdateState([](State &state) {
-			state.schedulePaused = false;
-			state.schedulePausedUntil = 0;
-		});
-	}
-	const auto &state = CurrentState();
-	if (state.schedulePaused) {
-		return;
-	}
-	const auto target = ScheduleTarget(
-		ActiveSettings().schedule,
-		now,
+	// Every word of the policy is in the core - the pause that lifts itself and
+	// then catches up in the same pass, and the asymmetry where a window
+	// starting overrides a preset chosen by hand while a window ending does
+	// not. See ScheduleStep(). It was written here and in the Android bridge,
+	// twice, with the same comments copied between them and a test on neither.
+	const auto step = ScheduleStep(
+		ActiveSettings(),
+		CurrentState(),
+		QDateTime::currentDateTime(),
 		ThisDevice());
-	if (!target || *target == state.scheduleTarget) {
-		// Acting on the change rather than on the value is the whole design.
-		// It is what lets a preset chosen by hand stand until the next
-		// boundary instead of being overwritten on the next tick, and what
-		// makes a boundary missed while the app was closed still happen, once,
-		// at the next launch.
+	if (!step) {
 		return;
 	}
-	const auto wanted = *target;
-	const auto source = state.activeSource;
-	const auto active = state.activePreset;
-	const auto apply = (source != PresetSource::Focus)
-		&& ScheduleApplies(
-			ActiveSettings().schedule,
-			ThisDevice(),
-			wanted,
-			source);
 
-	// Two rules, and the asymmetry between them is deliberate. A window
-	// starting is a positive instruction - "at nine, work mode" - and it
-	// overrides a preset chosen by hand. A window ending only means the reason
-	// for that preset has passed, which is no reason at all to undo something
-	// asked for. Focus is left alone in both directions: it is the more
-	// immediate signal, and a schedule fighting it would make both unreadable.
-	//
-	// The second clause is the core's now, because "a window ending" stopped
-	// being "the target is Normal" once the preset between windows became a
-	// key: five o'clock aiming at Home is a window ending too, and must not
-	// steamroll a preset chosen by hand either. Which preset that is depends
-	// on the rulesets this device runs, so the device goes with the question.
+	// The whole state, not field by field: what came back is a copy of the very
+	// CurrentState() handed in a line ago, and both run on the UI thread, so
+	// there is nothing in between for this to overwrite.
 	UpdateState([&](State &state) {
-		state.scheduleTarget = wanted;
-		if (apply) {
-			state.activePreset = wanted;
-			state.activeSource = PresetSource::Schedule;
-		}
+		state = step->state;
 	});
+	if (step->unpaused) {
+		LOG(("Purple: the schedule pause ran out."));
+	}
+	if (step->target.isEmpty()) {
+		// Which happens on the one step that lifted a pause with no window to
+		// catch up on. Saying the schedule wants '' would be a line about
+		// nothing.
+		return;
+	}
 	LOG(("Purple: schedule wants '%1'%2."
-		).arg(wanted
-		).arg(apply
+		).arg(step->target
+		).arg(step->applied
 			? QString()
-			: u", keeping '%1' (%2)"_q.arg(active, PresetSourceName(source))));
+			: u", keeping '%1' (%2)"_q.arg(
+				step->kept,
+				PresetSourceName(step->keptSource))));
 }
 
-// When the next window opens, so the line between windows can say how long the
-// preset in force has left. The engine has no such helper and should not: it
-// answers "what is true now", which is all a tick needs, and a boundary in the
-// future is only ever wanted by something with a screen.
+// The schedule as it stands right now, asked of the core.
 //
-// A schedule repeats weekly, so the search is bounded: each rule's start, on
-// each day it names, at its next occurrence from now. Nothing here worries
-// about which rule would actually win at that moment - the earliest start is
-// the earliest moment the answer can change, which is when this line is due to
-// be rewritten anyway.
-[[nodiscard]] std::optional<QDateTime> NextWindowStart(
-		const ScheduleForDevice &active,
-		const QDateTime &now) {
-	auto result = std::optional<QDateTime>();
-	const auto today = now.date().dayOfWeek();
-	for (const auto pointer : active.rules) {
-		const auto &rule = *pointer;
-		for (const auto day : rule.days) {
-			const auto ahead = (day - today + 7) % 7;
-			const auto start = now.date().addDays(ahead).startOfDay();
-			if (!start.isValid()) {
-				// A date whose midnight does not exist, which is a real thing
-				// in the timezones that move the clock at midnight. Skipping it
-				// costs one candidate out of seven and keeps every comparison
-				// below between two valid moments.
-				continue;
-			}
-			auto when = start.addSecs(rule.from * 60);
-			if (when <= now) {
-				when = when.addDays(7);
-			}
-			if (!result || when < *result) {
-				result = when;
-			}
-		}
-	}
-	return result;
+// A free function rather than a cached value: both callers below are drawing a
+// line for somebody looking at it, they are called on a change or once a
+// minute, and the answer is a walk over a handful of rules. Caching it would
+// only add a thing that can be stale.
+[[nodiscard]] ScheduleStatus Status() {
+	return ScheduleStatusNow(
+		ActiveSettings(),
+		CurrentState(),
+		QDateTime::currentDateTime(),
+		ThisDevice());
 }
 
 // "09:00" for a window opening later today, "Mon 09:00" for one that is not. A
@@ -165,9 +114,8 @@ void Runner::tick() {
 // QLocale rather than the core's WeekdayName(), which answers "mon" because it
 // is the spelling settings.toml uses. That is the right answer for a file and
 // the wrong one for a sentence.
-[[nodiscard]] QString WindowStartText(
-		const QDateTime &start,
-		const QDateTime &now) {
+[[nodiscard]] QString WindowStartText(int64 startUnix, const QDateTime &now) {
+	const auto start = QDateTime::fromSecsSinceEpoch(startUnix);
 	const auto time = start.time();
 	const auto text = TimeOfDayText(time.hour() * 60 + time.minute());
 	return (start.date() == now.date())
@@ -215,49 +163,50 @@ QString PresetDisplayName(
 }
 
 bool ScheduleConfigured() {
-	// Every ruleset the file describes, including the implicit one the parser
-	// wraps a flat [[schedule.rules]] array in - so this is still "the file
-	// says something about a schedule", the way it always was, and a file
-	// written before rulesets existed answers the same as before.
-	//
-	// Deliberately not narrowed to the rulesets that run on this device. A
-	// ruleset written for the phone is a schedule the user is in the middle of
-	// editing, and a pause row that vanished from the laptop while they wrote
-	// it would read as the file having broken.
-	return !ActiveSettings().schedule.rulesets.empty();
+	// "The file says something about a schedule at all", and the reasoning for
+	// that - in particular why it is deliberately not narrowed to the rulesets
+	// this device runs - is on ScheduleStatusNow() in the core now, along with
+	// the sentence that answers the narrower question instead.
+	return Status().kind != ScheduleStatusKind::NotConfigured;
 }
 
 QString ScheduleStatusText() {
-	if (!ScheduleConfigured()) {
-		return QString();
-	}
-	const auto &state = CurrentState();
-	if (state.schedulePaused) {
-		return state.schedulePausedUntil
-			? u"Schedule paused until %1"_q.arg(langDateTime(
-				QDateTime::fromSecsSinceEpoch(state.schedulePausedUntil)))
-			: u"Schedule paused"_q;
-	}
 	const auto &settings = ActiveSettings();
-	if (!settings.schedule.enabled) {
+	const auto status = Status();
+	const auto name = [&](const QString &preset) {
+		return PresetDisplayName(settings, preset);
+	};
+	switch (status.kind) {
+	case ScheduleStatusKind::NotConfigured:
+		return QString();
+	case ScheduleStatusKind::Paused:
+		return u"Schedule paused"_q;
+	case ScheduleStatusKind::PausedUntil:
+		return u"Schedule paused until %1"_q.arg(langDateTime(
+			QDateTime::fromSecsSinceEpoch(status.pausedUntil)));
+	case ScheduleStatusKind::Off:
 		return u"Schedule: switched off in the file"_q;
-	}
-	const auto now = QDateTime::currentDateTime();
-	const auto active = ActiveSchedule(settings.schedule, ThisDevice());
-	if (active.rules.empty()) {
+	case ScheduleStatusKind::NoRules:
+		return u"Schedule: no rules yet"_q;
+	case ScheduleStatusKind::NoneHere:
+		// Told apart from the line above because the core tells them apart, and
+		// they are different things to be told: a file with nothing in it, and
+		// a file with nothing in it for here. With rulesets the second is what
+		// a laptop holding only the phone's schedule goes on seeing.
 		return u"Schedule: no rules for this device"_q;
-	} else if (const auto rule = ScheduleRuleNow(active, now)) {
+	case ScheduleStatusKind::InsideWindow:
 		return u"Schedule: %1 until %2, then %3"_q.arg(
-			PresetDisplayName(settings, rule->preset),
-			TimeOfDayText(rule->till),
-			PresetDisplayName(settings, active.outside));
+			name(status.preset),
+			TimeOfDayText(status.till),
+			name(status.outside));
+	case ScheduleStatusKind::OutsideWindow:
+		return status.nextStart
+			? u"Schedule: %1 until %2"_q.arg(
+				name(status.outside),
+				WindowStartText(status.nextStart, QDateTime::currentDateTime()))
+			: u"Schedule: %1"_q.arg(name(status.outside));
 	}
-	const auto next = NextWindowStart(active, now);
-	return next
-		? u"Schedule: %1 until %2"_q.arg(
-			PresetDisplayName(settings, active.outside),
-			WindowStartText(*next, now))
-		: u"Schedule: %1"_q.arg(PresetDisplayName(settings, active.outside));
+	return QString();
 }
 
 QString ScheduleDeviceText() {
