@@ -2069,8 +2069,12 @@ editor is redrawn from what the file now says rather than from what the editor
 thought it did. Hand-editing the file is still the same thing by another route.
 
 A soft budget shows a bulletin once per chat per day when its allowance is
-gone. The "once" is remembered in memory, so a restart says it once more, which
-is the smaller of the two mistakes a bulletin can make.
+gone. The "once" is remembered in `screentime_notices` beside the log, a line
+per bulletin holding the day, the budget's index and the chat, so restarting
+the app is not a reason to say it again. It is beside the log rather than in
+`state.toml` for the same reason the snooze count is: which chat has already
+heard about one afternoon is this client's bookkeeping, not a fact about Work
+Mode.
 
 A hard budget puts a cover over everything below the chat's top bar - the
 history and the composer with it - naming the budget and its allowance. The

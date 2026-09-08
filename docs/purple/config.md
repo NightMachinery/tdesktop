@@ -9,10 +9,11 @@ encrypted `tdata`:
 falling back to `~/.purple-telegram/` when `XDG_CONFIG_HOME` is unset.
 `settings.toml` is created with commented defaults on first run.
 
-Two more files appear in the same directory once screen time is switched on:
-`screentime.log`, the append-only event log, and `screentime_snoozes`, the
-day's snooze count for a hard budget's cover. Neither exists while
-`[screen_time] enabled_p` is false, and neither ever leaves the machine.
+Three more files appear in the same directory once screen time is switched on:
+`screentime.log`, the append-only event log, `screentime_snoozes`, the day's
+snooze count for a hard budget's cover, and `screentime_notices`, the soft
+budget bulletins already shown today. None of them exists while
+`[screen_time] enabled_p` is false, and none of them ever leaves the machine.
 
 ## Why a separate file
 
@@ -660,8 +661,9 @@ hard cap never touches messages or notifications: it is a screen, not a mute.
 `snooze` is how long one snooze lasts and `snoozes_per_day` how many are
 offered; zero for either disables snoozing, so `snoozes_per_day = 0` makes a
 hard cap absolute. The desktop keeps the day's snooze count in
-`screentime_snoozes` in this directory rather than in `state.toml`, which is
-the core's schema and shared with Android.
+`screentime_snoozes` in this directory, and the soft bulletins it has already
+shown today in `screentime_notices` beside it, rather than in `state.toml`,
+which is the core's schema and shared with Android.
 
 The screen time box writes these. "Add a budget" under the list opens an editor
 for the target, the allowance, the mode and - for a hard cap - the snooze; a

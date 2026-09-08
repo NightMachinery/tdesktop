@@ -119,6 +119,61 @@ void WriteSnoozes(const std::vector<Snooze> &list) {
 	WriteConfigFile(SnoozeFilePath(), text);
 }
 
+[[nodiscard]] QString NoticeFilePath() {
+	return ConfigDirectory() + u"/screentime_notices"_q;
+}
+
+// Today's soft budget bulletins, one line each: day, budget index, and the
+// peer the bulletin was said in. Kept beside the log for the same reason the
+// snoozes above are, and for the reason spelled out there.
+struct Notice {
+	QDate day;
+	int index = 0;
+	uint64 peerId = 0;
+};
+
+[[nodiscard]] std::vector<Notice> ReadNotices() {
+	auto file = QFile(NoticeFilePath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return {};
+	}
+	const auto text = QString::fromUtf8(file.readAll());
+	const auto today = QDate::currentDate();
+	auto result = std::vector<Notice>();
+	for (const auto &line : text.split('\n', Qt::SkipEmptyParts)) {
+		const auto parts = line.split('\t');
+		if (parts.size() != 3) {
+			continue;
+		}
+		auto entry = Notice();
+		entry.day = QDate::fromString(parts[0], Qt::ISODate);
+		// Yesterday's bulletins are not today's, and the file is rewritten
+		// whole, so dropping them on the way in is also what clears them out.
+		if (entry.day != today) {
+			continue;
+		}
+		entry.index = parts[1].toInt();
+		entry.peerId = parts[2].toULongLong();
+		result.push_back(entry);
+	}
+	return result;
+}
+
+void WriteNotices(const std::vector<Notice> &list) {
+	auto text = QString();
+	for (const auto &entry : list) {
+		text += entry.day.toString(Qt::ISODate)
+			+ '\t' + QString::number(entry.index)
+			+ '\t' + QString::number(entry.peerId)
+			+ '\n';
+	}
+	if (!QDir().mkpath(ConfigDirectory())) {
+		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		return;
+	}
+	WriteConfigFile(NoticeFilePath(), text);
+}
+
 class Recorder final {
 public:
 	Recorder();
@@ -592,6 +647,31 @@ void NoteScreenTimeSnooze(int budgetIndex) {
 		.untilMs = until,
 	});
 	WriteSnoozes(list);
+}
+
+bool ScreenTimeNoticeShown(int budgetIndex, uint64 peerId) {
+	const auto list = ReadNotices();
+	for (const auto &entry : list) {
+		if (entry.index == budgetIndex && entry.peerId == peerId) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void NoteScreenTimeNotice(int budgetIndex, uint64 peerId) {
+	auto list = ReadNotices();
+	for (const auto &entry : list) {
+		if (entry.index == budgetIndex && entry.peerId == peerId) {
+			return;
+		}
+	}
+	list.push_back({
+		.day = QDate::currentDate(),
+		.index = budgetIndex,
+		.peerId = peerId,
+	});
+	WriteNotices(list);
 }
 
 } // namespace Purple

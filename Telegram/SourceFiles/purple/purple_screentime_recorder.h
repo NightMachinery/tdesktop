@@ -66,4 +66,10 @@ void NoteScreenTimeSnooze(int budgetIndex);
 // running. The cover asks, because a snooze is what puts it away.
 [[nodiscard]] int64 ScreenTimeSnoozeUntil(int budgetIndex);
 
+// Whether today's bulletin for a soft budget has already been said in this
+// chat, and the note that it just has. One line per bulletin in
+// screentime_notices, so the app restarting is not a reason to say it again.
+[[nodiscard]] bool ScreenTimeNoticeShown(int budgetIndex, uint64 peerId);
+void NoteScreenTimeNotice(int budgetIndex, uint64 peerId);
+
 } // namespace Purple

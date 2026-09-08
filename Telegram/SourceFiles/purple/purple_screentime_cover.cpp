@@ -90,7 +90,7 @@ protected:
 private:
 	void check();
 	void layout();
-	void noteSoft(const ScreenTimeBudget &budget);
+	void noteSoft(int index, const ScreenTimeBudget &budget);
 
 	PeerData *_peer = nullptr;
 
@@ -105,11 +105,6 @@ private:
 	object_ptr<Ui::RoundButton> _snooze;
 
 	base::Timer _timer;
-
-	// The soft budgets already announced today, as "day|index|peer". In memory
-	// only: a restart says it once more, which is the smaller of the two
-	// mistakes a bulletin can make.
-	base::flat_set<QString> _announced;
 
 	rpl::lifetime _lifetime;
 
@@ -194,7 +189,7 @@ void ScreenTimeCover::Widget::check() {
 			continue;
 		}
 		if (budget.mode == BudgetMode::Soft) {
-			noteSoft(budget);
+			noteSoft(spent.index, budget);
 			continue;
 		}
 		if (ScreenTimeSnoozeUntil(spent.index) > now) {
@@ -227,18 +222,22 @@ void ScreenTimeCover::Widget::check() {
 	raise();
 }
 
-void ScreenTimeCover::Widget::noteSoft(const ScreenTimeBudget &budget) {
+// Once per chat per budget per day, and what remembers that is the
+// screentime_notices file beside the log rather than a member of this widget:
+// a bulletin the app says again every time it starts is one you learn to
+// ignore. Beside the log rather than in state.toml because state.toml's schema
+// is the core's, shared with Android, and which chat has already heard about
+// one afternoon is this cover's bookkeeping, not a fact about Work Mode.
+void ScreenTimeCover::Widget::noteSoft(
+		int index,
+		const ScreenTimeBudget &budget) {
 	if (!_peer) {
 		return;
 	}
-	const auto key = u"%1|%2|%3"_q.arg(
-		QDate::currentDate().toString(Qt::ISODate),
-		TargetText(budget),
-		QString::number(_peer->id.value));
-	if (_announced.contains(key)) {
+	if (ScreenTimeNoticeShown(index, _peer->id.value)) {
 		return;
 	}
-	_announced.emplace(key);
+	NoteScreenTimeNotice(index, _peer->id.value);
 	Ui::Toast::Show(
 		parentWidget(),
 		u"Screen time: the budget for %1 is spent."_q.arg(
