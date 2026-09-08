@@ -1735,6 +1735,8 @@ PRIVATE
     purple/purple_focus.h
     purple/purple_gate.cpp
     purple/purple_gate.h
+    purple/purple_last_seen.cpp
+    purple/purple_last_seen.h
     purple/purple_list_menu.cpp
     purple/purple_list_menu.h
     purple/purple_peek.cpp
@@ -2112,6 +2114,8 @@ nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
     purple/purple_engine.cpp
     purple/purple_engine.h
+    purple/purple_screentime.cpp
+    purple/purple_screentime.h
     purple/purple_settings.cpp
     purple/purple_settings.h
     purple/purple_splice.cpp
