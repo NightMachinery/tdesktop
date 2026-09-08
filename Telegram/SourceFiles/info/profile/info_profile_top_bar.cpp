@@ -64,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "menu/menu_mute.h"
 #include "purple/purple_config.h"
+#include "purple/purple_last_seen.h"
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_information.h"
 #include "settings/sections/settings_premium.h"
@@ -403,6 +404,18 @@ TopBar::TopBar(
 		setupShowLastSeen(controller);
 	}
 
+	// Purple: after setupStatusWithRating(), which makes the status label
+	// transparent to the mouse for a user - installing this earlier would have
+	// the label's own refresh undone by that call. The tail on a coarse "last
+	// seen" opens the trade sheet, and the sheet decides whether there is
+	// anything to trade for, so this is a click handler and not a second copy
+	// of the rules.
+	if (const auto user = _peer->asUser()) {
+		_statusLabel->setLastSeenLinkCallback([=] {
+			Purple::ShowLastSeenTradeBox(controller, user);
+		});
+	}
+
 	bindStatus();
 
 	_title->setSelectable(true);
@@ -581,6 +594,8 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 	{
 		const auto membersLinkCallback = _statusLabel->membersLinkCallback();
 		const auto hiddenLinkCallback = _statusLabel->hiddenLinkCallback();
+		const auto lastSeenLinkCallback
+			= _statusLabel->lastSeenLinkCallback();
 		{
 			_statusLabel = nullptr;
 			delete _status.release();
@@ -607,6 +622,7 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 		_statusLabel = std::make_unique<StatusLabel>(_status.data(), _peer);
 		_statusLabel->setMembersLinkCallback(membersLinkCallback);
 		_statusLabel->setHiddenLinkCallback(hiddenLinkCallback);
+		_statusLabel->setLastSeenLinkCallback(lastSeenLinkCallback);
 		if (_customStatus) {
 			rpl::duplicate(
 				_customStatus
