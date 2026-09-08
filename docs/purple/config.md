@@ -48,7 +48,8 @@ key order all survive. `enabled   =    true   # keep ads away` comes back as
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
 focus-sync memory, the schedule's pause flag, the moment that pause runs out and
-its last target, and the peek timer. It is rewritten
+its last target, the peek timer, and the last seens read by trading. It is
+rewritten
 whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
 never touch the mtime of the file you are editing by hand.
@@ -549,6 +550,114 @@ an extra view or in a folder whose tab is showing, was never hidden and stays.
 The rest - `[focus_sync]` and `[peek]` - is documented by the starter file the
 app writes on first run, which carries a commented example of each.
 
+### Why a last seen is coarse
+
+    [last_seen]
+    reasons_p      = true
+    trade_p        = true
+    trade_hold     = "10s"
+    trade_remember = "24h"
+    trade_cooldown = "5m"
+
+`reasons_p` decides whether the status line in the chat header and the profile
+says *why* it will not give an exact "last seen". There are only two answers it
+will ever give - your own privacy caused it, or nothing is added - and the
+reasoning behind that, including why "a long time ago" is never explained, is
+in [work_mode.md](work_mode.md).
+
+`trade_p` decides whether that line also offers the one-off trade: show them
+your last seen for a moment, read theirs, put your privacy back. Turning it off
+leaves the explanation and takes away the offer, and it is what the sheet's
+"Don't offer this again" writes.
+
+`trade_hold` is how long to wait for their status after asking before restoring
+your rules. Ten seconds by design: the whole exposure is that window, and a
+trade that has not answered in ten seconds is not going to.
+
+`trade_remember` is how long a read stays worth showing. Past it the record is
+dropped rather than shown as older and older news - "as of 3 min ago" is useful
+and "as of 2 days ago" is not.
+
+`trade_cooldown` is the least time between two trades with the same person.
+
+All three durations are written the way every other duration in this file is -
+`"10s"`, `"5m"`, `"24h"` - and a spelling the parser cannot read warns and keeps
+the default rather than guessing at a number. Like `[peek]`, `[recent]`,
+`[overrides]` and `[suggestions]`, the table sits outside the presets: it is a
+decision about how a status line reads, not about what any one preset lets
+through.
+
+The reads themselves are in `state.toml`, and they never leave the machine:
+
+    [[last_seen_trades]]
+    peer = 123456789
+    read_at = 1757320000
+    was_online = 1757319120
+
+`peer` is the plain numeric id this file uses everywhere. `read_at` is when the
+trade ran, in unix seconds, and is what both the age in the status line and the
+cooldown are measured from. `was_online` is the moment that was read, or `0` for
+a trade whose hold ran out with nothing arriving - still written down, because
+the cooldown counts attempts rather than successes.
+
+One record per person: a second trade with somebody replaces the first rather
+than piling up, so the file is bounded by how many people you have traded with
+and not by how often. Records older than `trade_remember` are dropped on the
+next write.
+
+### Screen time
+
+    [screen_time]
+    enabled_p      = false
+    action_span    = "3s"
+    active_gap     = "30s"
+    idle_after     = "60s"
+    retention_days = 90
+
+    [[screen_time.budgets]]
+    target         = "kind:channels"
+    per_day        = "45m"
+    mode           = "soft"
+    snooze         = "5m"
+    snoozes_per_day = 2
+
+**Nothing records this yet, on either client.** The keys are parsed and the
+core carries the log format, its parser and all the aggregation; no app writes
+an event and no screen draws one. The table is documented here because it is
+already in the schema, not because writing it does anything today.
+
+`enabled_p` is false and stays false until both ends exist. It is a log of what
+you looked at and for how long, and nothing should start keeping one of those
+because a version number moved.
+
+The three durations are the thresholds a raw log is read back *through* rather
+than recorded with: `action_span` is how long one send action counts as active
+for, `active_gap` is how close two actions have to be for the whole gap between
+them to count as active too, and `idle_after` is how long without any input
+pauses a session. Applying them at read time is the whole reason the log stores
+events instead of totals - changing one re-derives the history you already
+have. `retention_days` is how much of the log to keep, with `0` keeping
+everything.
+
+`[[screen_time.budgets]]` is a day's allowance for one thing. `target` is a
+single string - `"all"`, `"chat:<id>"`, `"kind:<kind>"` or `"preset:<name>"` -
+because a budget counts exactly one thing, and four mutually exclusive keys
+would let a file ask it to count two. The kinds are the chat kinds a list uses,
+spelled the same, plus `"elsewhere"` for the time that was not in a chat at all
+- the list, search, settings - so that the splits add up to foreground time
+rather than to something smaller with no name.
+
+`per_day` is the allowance, and `mode` is `"soft"` (a bulletin at the limit,
+the default) or `"hard"` (the chat goes behind a cover naming the budget). A
+hard cap never touches messages or notifications: it is a screen, not a mute.
+`snooze` is how long one snooze lasts and `snoozes_per_day` how many are
+offered; zero for either disables snoozing, so `snoozes_per_day = 0` makes a
+hard cap absolute.
+
+A budget missing `target` or `per_day` is skipped with a warning naming its
+position, and so is one whose target does not parse. The rest of the file is
+read normally.
+
 ### Sending the file on every save
 
     [sync]
@@ -582,6 +691,14 @@ because the app around it - a network, a Saved Messages history, a file watcher
 See [sync.md](sync.md).
 
 ### The schedule
+
+Among the enabled rules covering a moment the **narrowest window wins**, not the
+first one written. `08:00-17:00` for work with `12:00-14:00` for lunch cut out
+of it gives lunch at one o'clock in either order, and two o'clock puts work
+back. A window crossing midnight is measured the long way round, and two windows
+of the same length keep the order they were merged in - ruleset specificity
+first, then file position. Why it is nesting rather than position is in
+[work_mode.md](work_mode.md).
 
 `[schedule] outside` names the preset in force whenever no rule covers the
 moment. It defaults to `"normal"`, which is what the schedule did before the key
@@ -707,8 +824,10 @@ None of these are part of tdesktop's own shortcut table - see
         purple_settings.{h,cpp}   data model and parser
         purple_splice.{h,cpp}     the surgical writes
         purple_state.{h,cpp}      state.toml
+        purple_screentime.{h,cpp} the screen-time log, nothing records it yet
     Telegram/SourceFiles/purple/
         purple_config.{h,cpp}     file IO, watcher, API
+        purple_last_seen.{h,cpp}  the reasons and the trade
         purple_readme.{h,cpp}     the generated readme
 
 The Work Mode spec puts the parser and the splice engine inside `purple_config`.

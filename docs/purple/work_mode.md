@@ -1435,9 +1435,25 @@ Normal, where the answer is that there was nothing to do.
     to     = "17:00"
     preset = "work"
 
-Rules are matched in file order, first match wins - the same rule the lists
-follow. Two rules covering one moment is something a hand-written file will do,
-and picking by position is the only answer that can be predicted by reading.
+Among the rules covering a moment the **narrowest window wins**. A day of
+`08:00-17:00 work` with `12:00-14:00 lunch` cut out of it gives lunch at one
+o'clock whichever of the two was written first. Windows nest because that is
+what people write them for - a long stretch with something taken out of the
+middle - and the rule that reads as the exception has to beat the one it is an
+exception to, or writing it down does nothing.
+
+A window that crosses midnight is measured the long way round, through
+midnight, so `22:00-06:00` is eight hours and not sixteen. Two windows of the
+same length covering one moment keep the order they were merged in: ruleset
+specificity first, then file position. That is the tie-break rather than the
+rule, because two equally wide windows over one minute is a file saying two
+things about it, and position is the only answer that can be predicted by
+reading.
+
+Leaving the inner window is a move to the **outer** rule's preset rather than
+to `outside`, and it counts as a window starting - so work comes back at two
+o'clock even if a preset was chosen by hand over lunch. Leaving the outer one
+is a window ending, which is the asymmetry two sections below.
 
 Windows are half-open: `09:00` is inside one and `17:00` is not, so
 neighbouring windows hand over cleanly instead of both claiming the minute they
@@ -1778,6 +1794,130 @@ is left alone.
 Turning `enabled_p` off while focus is holding a preset hands that preset back. A
 preset that nothing on screen explains and nothing still running would ever lift
 is the one state this must not be able to reach.
+
+## Last seen
+
+Telegram will not always say when somebody was last seen. It does say *why*,
+and the fork passes that on rather than leaving "last seen recently" standing
+there as the whole answer.
+
+A coarse status is one of three things, and the server tells the two apart that
+can be told apart:
+
+- **Coarse because of your own privacy.** You hide your last seen from them, so
+  Telegram hides theirs from you - its reciprocity rule. The status carries a
+  `by_me` flag saying exactly that, and the fork appends `share yours to see`
+  to the line, after the same middle dot every other status suffix uses. It is
+  the one case with something to do about it.
+- **Coarse because of theirs.** The same words with no flag. Their setting,
+  nothing to offer, so nothing is added.
+- **"a long time ago"** - `userStatusEmpty`. Nothing is added, and that is the
+  considered answer rather than a gap. An abandoned account and an account that
+  blocked you look identical here, and there is no field that says which. The
+  fork does not guess at a block: it is the one thing here that would be
+  unforgivable to be wrong about, and being right about it half the time is not
+  a feature.
+
+`[last_seen] reasons_p = false` takes the whole tail away and leaves the status
+line as upstream writes it.
+
+Where the line is short of room - the chat header, on a narrow window - the
+words collapse to an eyes mark. The choice is made against the width the header
+actually has, not against a guess: a sentence the header would only elide into
+nothing is worse than the mark it had room for. The profile has room and always
+gets the words.
+
+### Show mine to see theirs
+
+The tail is a link. It opens a sheet that explains the moment of exposure and
+offers to make the trade once:
+
+1. Your current last-seen privacy rules are fetched.
+2. That one person is added to the allowed exceptions - and taken out of the
+   disallowed ones, if that is where they were.
+3. Their status is asked for, and the answer waited on for `trade_hold`.
+4. Your rules are put back exactly as they were. Always: on a read, on a
+   timeout, and on an error.
+
+They are not told. Nothing else about your privacy changes, and no other
+person's view of you moves for those few seconds - the rule that changed names
+them and nobody else.
+
+It can come back with nothing, and that is a real answer rather than a failure:
+if they hide their last seen for their own reasons, showing them yours buys
+nothing. The trade is still written down, because the cooldown counts attempts
+rather than successes.
+
+`trade_p = false` takes the offer away and leaves the explanation. That is also
+what the sheet's "Don't offer this again" checkbox writes, rather than a second
+flag somewhere meaning the same thing - the switch already exists, it is in
+Settings > Advanced > Purple, and it is in the file you can read.
+
+### The memory, and the cooldown
+
+A read is remembered for `trade_remember` (a day, by default) and shown in
+place of the coarse phrase: `last seen 14:32 · as of 3 min ago`. Both halves
+are needed. The time is what you traded for; the age is what stops it reading
+as live. Past the window the record is dropped rather than shown as older and
+older news, and the line falls back to the coarse phrase and its tail.
+
+The records live in `state.toml`, one per person - a second trade replaces the
+first - and they never leave the machine. Settings > Advanced > Purple > Trades
+lists them.
+
+One trade per person per `trade_cooldown`. A trade is a moment of exposure
+chosen on purpose; one offered again every time their chat opens would be a
+standing subscription nobody agreed to. Asking inside the cooldown refuses in a
+toast and says how long the wait is.
+
+### What each side does
+
+The core owns the rule (`ReasonFor`, on the three facts a status carries), the
+memory (`RememberTrade`, `RememberedTrade`, `TradeAllowed`) and the keys.
+Both apps ask it the same questions.
+
+The privacy calls are per client, because the API layer is. On the desktop the
+fetch, the save and the restore all go through
+`Api::UserPrivacy` - `reload(Key::LastSeen)`, `value(Key::LastSeen)` and
+`save(Key::LastSeen, rules)`, the same three calls the Privacy and Security
+screen makes - and the status is asked for with `users.getUsers`. The `by_me`
+flag arrives as `Data::LastseenStatus::isHiddenByMe()`, which upstream already
+reads for its own "Show my Last Seen" button, so this is the same signal used
+for the same purpose rather than a second interpretation of it.
+
+One consequence of going through that layer: the rules are put back as the
+round trip understood them. `Api::UserPrivacy` reduces the server's rules to
+allowed and disallowed peers plus an option, and anything it cannot represent
+would not survive - the same reduction the Privacy screen's own save does. The
+chats a rule names come back in the same response that carries the rule, so
+they are loaded by the time it is read.
+
+Only one trade runs at a time, for the whole app. Two would be two windows of
+exposure that were agreed to once.
+
+Each step is logged: reading our rules, showing ours, the read or the timeout,
+and the rules going back.
+
+## Screen time
+
+Not recording yet, on either client.
+
+The core carries the whole of it - `purple_screentime.{h,cpp}`: the append-only
+event log's format, its parser, session derivation from raw events, and the
+aggregation - and `[screen_time]` is parsed, so a file can already describe what
+it wants. Nothing writes an event, and no screen draws one.
+
+That order is deliberate. Every threshold - `action_span`, `active_gap`,
+`idle_after` - is applied when the log is read rather than when it is written,
+which is the whole reason the log stores events and not totals: changing a
+threshold re-derives the history you already have instead of only affecting
+tomorrow. A recorder that landed before the reader was settled would have
+written a format nobody could change.
+
+The design - what a session is, when time counts as active rather than reading,
+the budgets and what a hard one does - is Phase 8 of the plan this was built
+from. `[screen_time] enabled_p` defaults to false and stays false until there
+is something on both ends of it.
 
 ## Verified, and not verified
 
@@ -2660,21 +2800,23 @@ resolves itself as soon as the entries load.
     Telegram/ThirdParty/purple_core/purple/   the submodule, shared verbatim
         purple_settings.{h,cpp}   the model and parser
         purple_engine.{h,cpp}     resolution, pure data
+        purple_screentime.{h,cpp} the screen-time log, not recorded yet
         purple_state.{h,cpp}      state.toml, the cache
         purple_splice.{h,cpp}     the surgical writes
     Telegram/SourceFiles/purple/purple_config.{h,cpp}     file IO and watcher
     Telegram/SourceFiles/purple/purple_focus.{h,cpp}      OS focus sync
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
+    Telegram/SourceFiles/purple/purple_last_seen.{h,cpp}  reasons and the trade
     Telegram/SourceFiles/purple/purple_list_menu.{h,cpp}  list membership menu
     Telegram/SourceFiles/purple/purple_peek.{h,cpp}       the peek hotkey
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker
     Telegram/SourceFiles/purple/purple_schedule.{h,cpp}   the schedule clock
 
-The four in the submodule have no tdesktop dependency at all - which is what
+Every file in the submodule has no tdesktop dependency at all - which is what
 lets the Android app compile them verbatim. The engine never sees a
 `PeerData`, only an id and a `ChatKind`, for the same reason the parser does
 not: every policy here is a rule about data, and rules about data are far easier
-to prove outside a running app. `purple/test_config.sh` compiles those four
+to prove outside a running app. `purple/test_config.sh` compiles them
 standalone and runs the whole acceptance suite against them in about a second -
 which is also a constraint, since anything tdesktop-shaped that creeps into one
 of them breaks the harness.
