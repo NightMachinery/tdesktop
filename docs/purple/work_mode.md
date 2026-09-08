@@ -1747,6 +1747,20 @@ window the schedule had opened still closes at its own boundary afterwards. A
 preset named outright instead was put there by neither the user nor the
 schedule, so it lands as a manual choice and stays until something moves it.
 
+One exception to putting the preset back, and it is what a long focus session
+needs. A schedule boundary that passed while focus held the preset was recorded
+by the tick and never applied, because focus is the more immediate signal.
+Restoring the pre-focus preset would then leave the tick nothing to do - the
+target it compares against has already moved - and the window would be missed
+until the next boundary, which for an evening session is the next morning. So
+leaving runs the boundary rule itself, on the pre-focus source: a window that
+has opened takes over, and one that has closed only undoes a preset the
+schedule itself set. It needs to know what the schedule wanted when the session
+began, which is a note rather than a decision and so is kept beside
+`state.toml` rather than in it - in memory on the desktop, in a preference file
+on Android. After a restart there is no note, and leaving restores exactly as it
+did before this rule existed.
+
 ### The flag and the detector are separate
 
 `focus_active` in `state.toml` is the entire input. Everything above reads it,
@@ -2531,11 +2545,24 @@ counting itself down while one is running. `auto_off` is honoured, including
 never moves.
 
 **The schedule is a pure function in the bridge and a `Handler` in Java.**
-`scheduleTickNative()` mirrors `Runner::tick()` line for line - the same first
-match wins, the same half-open windows, the same asymmetry where a window
-starting overrides a preset chosen by hand and a window ending only undoes one
-the schedule itself put there - and returns nothing at all on every tick that is
-not at a boundary, which is almost all of them.
+`scheduleTickNative()` and the desktop's `Runner::tick()` are two calls to one
+core function, `ScheduleStep()` - the same half-open windows, the same
+narrowest-window-wins, the same asymmetry where a window starting overrides a
+preset chosen by hand and a window ending only undoes one the schedule itself
+put there - which returns nothing at all on every tick that is not at a
+boundary, which is almost all of them.
+
+They were two implementations until 2026-09-08, written in C++ both times, with
+the same explanatory comments copied between them and a test on neither. What
+was easy to get subtly wrong was exactly what was duplicated: the order of "lift
+the pause, then run the boundary rule", and the asymmetry above. Focus sync went
+the same way, into `FocusStep()`, and there the two had already parted company -
+the missed-window rule above was only ever in the bridge. So had the status
+line, into `ScheduleStatusNow()`, where one client could tell "no rules" from
+"none of them are this device's" and the other could not, and each hunted for
+the next window its own way. The core says which sentence and hands over its
+parts; the wording stays in each app, because Android's is in `strings.xml` and
+goes through its translation pipeline.
 
 Thirty seconds, the desktop's interval, for the desktop's reason: re-reading the
 clock survives a device waking, a timezone change and the DST hour by
