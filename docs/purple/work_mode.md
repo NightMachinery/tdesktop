@@ -1451,13 +1451,121 @@ A window starting overrides a preset chosen by hand. It is a positive
 instruction, written down in advance: at nine, work mode.
 
 A window ending does not. Its end only means the reason for that preset has
-passed, which is no reason to undo something asked for, so Normal is applied
-only when the preset in force is one the schedule itself put there. The
-asymmetry is the point, and it is why `state.toml` records what put the current
-preset in place rather than only what it is.
+passed, which is no reason to undo something asked for, so the preset between
+windows is applied only when the preset in force is one the schedule itself put
+there. The asymmetry is the point, and it is why `state.toml` records what put
+the current preset in place rather than only what it is.
 
 Focus is left alone in both directions. It is the more immediate signal, and a
 schedule fighting it would leave neither of them predictable.
+
+### The preset between windows
+
+    [schedule]
+    outside = "home"
+
+`outside` is what the schedule wants whenever no rule covers the moment. It used
+to be a constant - Normal - and it is a key because not every day has stock
+Telegram at its edges: if your default is Home, five o'clock should put Home
+back rather than hand you the unfiltered account. A name no preset backs warns
+and falls back to `normal`, the same rule a rule's own `preset` follows.
+
+It does not make the schedule pushier, and the paragraph above is why. A window
+ending is now a move to `outside` rather than a move to Normal, and it is still
+a window ending: it lands only when the schedule was what put the running preset
+there. Five o'clock aiming at Home does not overrule a preset you chose at four.
+
+That is the one part of this easy to get subtly wrong twice over. "The target is
+Normal" was a serviceable stand-in for "a window is ending" right up until the
+day it stopped being one, and there are two ticks that would each have to be
+fixed. So the test is a single function in the shared core, `ScheduleApplies`,
+and both clients ask it rather than spelling it out.
+
+### One file, many devices
+
+A phone and a laptop want different schedules and the same `settings.toml`. The
+file is what travels - Saved Messages carries it, see [sync.md](sync.md) - so
+the answer is for the file to describe the devices, rather than for each device
+to keep a copy of its own to drift out of step with the others.
+
+    [[schedule.rulesets]]
+    name   = "phone"
+    device = "mobile"
+    mode   = "enabled"
+
+    [[schedule.rulesets.rules]]
+    days   = ["mon", "tue", "wed", "thu", "fri"]
+    from   = "09:00"
+    to     = "17:00"
+    preset = "work"
+
+A ruleset is a named group of rules plus the answer to "which devices is this
+for". The tier is per ruleset rather than per rule, because "for the phone" is a
+property of a group of rules written together, and per-rule targeting would mean
+repeating the device on every line of a block that is plainly one block.
+
+**Which rulesets run.** A ruleset applies to a device when its `device` matches
+and its `mode` is not `disabled`. Among the applicable `enabled` ones only the
+most specific tier runs: a ruleset naming this device's id beats one naming its
+platform, which beats one naming its class, which beats `any`. Every applicable
+`always` ruleset runs as well, whatever won there.
+
+Replacing rather than layering is the whole point. A ruleset written for this
+one laptop *replaces* the desktop one instead of piling on top of it, which is
+what makes "one file everywhere, refined per device" work at all - the
+refinement is a substitution, so you never have to reason about what the general
+rules would still have been doing underneath it. `always` is the escape hatch
+for the rules that really are true everywhere - never during the night - so they
+do not have to be copied into each device's ruleset and kept in step by hand.
+
+Specificity is a property of what the ruleset asked for and of nothing else, so
+two devices always agree on which of two rulesets is the more specific. That is
+what keeps the answer readable from the file alone, on a machine you are not
+holding.
+
+**Merge order.** The chosen rulesets' enabled rules are concatenated, the most
+specific ruleset's first and file order among equals. Everything downstream sees
+one flat list of rules and one `outside`, so first-match-wins is exactly what it
+was before rulesets existed - which is also how the flat `[[schedule.rules]]`
+array keeps working: the parser reads it as an implicit ruleset, device `any`,
+mode `enabled`, placed first, and it resolves through the same path as the rest.
+
+**The `outside` between them.** The most specific chosen ruleset that names one
+wins; when none does, `[schedule] outside`. A ruleset that leaves the key out is
+not saying `normal`, it is saying nothing, and the question goes up a level.
+
+**The device id is the operating system's.** Android's `ANDROID_ID`, macOS's
+`IOPlatformUUID`, the Windows `MachineGuid`, `/etc/machine-id` on Linux. Each is
+hashed with SHA-256 and cut to its first four bytes, and what a ruleset sees is
+`macos-3f9a2c1d` - the platform, a dash, eight hex characters.
+
+Two reasons for the hash rather than the identifier itself. `settings.toml` is a
+file people mail to themselves and paste into bug reports, and the raw value is
+the one the rest of the system uses to mean this machine, so it never leaves the
+function that reads it. And eight characters is short enough to type into a
+ruleset by hand, which is how it gets there.
+
+The OS's identifier rather than one the app makes up, because it survives what
+the app can lose: a wiped data directory, a reinstall, a `settings.toml` deleted
+by hand. An id that changed every time you reinstalled would need its ruleset
+rewritten with it, and hand-editing per device is the thing rulesets exist to
+remove.
+
+A device that will not say - no `/etc/machine-id`, a platform that refuses -
+reports no id at all. That is a legitimate answer and is treated as one: it
+matches the rulesets that asked for no device in particular, and skips every
+ruleset naming an id. Nothing is invented to fill the gap. An invented id would
+be another file in the config directory and would still be lost by the very
+reset it was meant to survive.
+
+**Labels.** `[devices]` maps an id to a name:
+
+    [devices]
+    "macos-3f9a2c1d" = "the laptop"
+
+An id nobody named shows as itself, which is also where you get the id to type
+in the first place. The labels live in `settings.toml` rather than on each
+machine so that they travel with the file that uses them.
 
 ### Pausing
 
@@ -1465,9 +1573,44 @@ schedule fighting it would leave neither of them predictable.
 Nothing in `settings.toml` turns it on, because it is a decision about today
 rather than about the configuration. The row is there only when the file
 describes a schedule at all - a switch that holds off nothing explains nothing.
+"At all" counts any ruleset, including one written for another device: a row
+that vanished from the laptop while you were writing the phone's schedule would
+read as the file having broken.
 
 Unpausing catches up with wherever the schedule has got to, by the same boundary
 rule: the target moved while it was not looking.
+
+`schedule_paused_until` gives the pause a deadline rather than leaving it open.
+The tick treats a pause whose moment has passed as unpaused, clears both fields,
+and then runs the ordinary boundary rule in the same pass - so the windows that
+opened and closed while it was paused are caught up on once, immediately, rather
+than at the next window edge, which could be a day away. Zero, which is what an
+older `state.toml` says because the key did not exist, means what a pause has
+always meant: until you lift it.
+
+It is a moment rather than a countdown, for the same reason as the peek
+deadline: a pause is measured in hours or days, so a pause that ran out while
+the app was closed has already expired by the time anything reads it again.
+
+Under the switch, the box says what is being held off - `Schedule: work until
+17:00, then home` inside a window, `Schedule: home until 09:00` between them,
+`Schedule paused until` a date while it is paused. The file was the only place
+the windows were ever written down, and reading a list of times to work out
+which one is running now is exactly the arithmetic a screen should be doing for
+you. It re-reads the clock every thirty seconds while the box is open, the
+schedule's own resolution, so it is never more wrong than the schedule is.
+
+A second, dimmer line under it says which machine that is about - `(this device:
+the laptop)`. That question did not exist until one file could describe several
+devices, and it has to be answerable from here: a rule that runs on the phone
+and not on this laptop otherwise looks like a rule that does not work. It is
+also where the id to type into a ruleset comes from, on a device the file has
+not named yet.
+
+Every branch of that line says which state the file is in rather than falling
+back to a sentence that would be a lie in it. A schedule switched off in the
+file says so, and one whose every ruleset is for some other device says that -
+neither is allowed to read as `home until 09:00`.
 
 ### The tick
 
@@ -2234,15 +2377,36 @@ when the file changed on disk since it was opened, writes `settings.toml.bak`
 first, and then shows the warnings - which the app had until now been throwing
 away.
 
-**The schedule screen** lists the rules, with the window, the days and the
-preset on each, a check for `enabled_p`, and an editor behind a tap: the preset
-by radio list, seven day chips, both times through the system time picker.
-Rules are addressed by their raw position in the file and every write carries
-the window and preset the screen read off the rule, so a screen left open while
-the file changed underneath refuses rather than rewriting the wrong one. Rules
-the parser threw away are shown greyed with their warning text - they are not
-in the rule list at all, so the screen recovers them from the warnings, which
-name a rule by the same position, counting from one.
+**The schedule screen** is the ruleset list. A row per ruleset -
+`phone - Mobile - Enabled` - with the flat `[[schedule.rules]]` array shown as
+`Rules` when the file has any, an `Add ruleset` row, and the status line above
+them saying what is running now and on which device. A file that never grew a
+ruleset shows the one `Rules` row and reads as the screen always did.
+
+Tapping a ruleset opens the rules it holds, with three rows above them. **Mode**
+is Disabled, Enabled or Always. **Applies to** offers Any, Desktop, Mobile,
+Android, iOS, This device, and `Other device...` with a name field - the last
+listing whatever `[devices]` has named, so picking the laptop from the phone is
+choosing from a list rather than retyping a hash. **Outside these windows** is
+the ruleset's own `outside`, with "leave it to the schedule" as the first
+choice, because leaving the key out is not the same as writing `normal`.
+
+Under the rules themselves nothing changed: the window, the days and the preset
+on each, a check for `enabled_p`, and an editor behind a tap with the preset by
+radio list, seven day chips and both times through the system time picker. Rules
+are addressed by their raw position and every write carries the window and the
+preset the screen read off the rule, so a screen left open while the file
+changed underneath refuses rather than rewriting the wrong one. The ruleset
+goes with that address by **name**, never by position - a ruleset moves whenever
+one above it is added or removed, and an index read a minute ago would edit the
+wrong block. Rules the parser threw away are shown greyed with their warning
+text - they are not in the rule list at all, so the screen recovers them from
+the warnings, which name a rule by the same position, counting from one.
+
+**The settings screen gained a "This device" row**, showing the id and the label
+`[devices]` gives it, and writing that label when tapped. It is the only place
+the phone's own id is legible, and a ruleset that names a device has to be typed
+against something.
 
 The writes themselves are three new splice ops in the shared core -
 `SetScheduleRule`, `AppendScheduleRule`, `RemoveScheduleRule` - built to the

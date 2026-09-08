@@ -47,8 +47,8 @@ key order all survive. `enabled   =    true   # keep ads away` comes back as
 `enabled   =    false   # keep ads away`, spacing and comment intact.
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
-focus-sync memory, the schedule's pause flag and last target, and the peek
-timer. It is rewritten
+focus-sync memory, the schedule's pause flag, the moment that pause runs out and
+its last target, and the peek timer. It is rewritten
 whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
 never touch the mtime of the file you are editing by hand.
@@ -526,16 +526,93 @@ buffer and no "until", so a chat does not drift in and out of a strip while a
 timer runs - and a chat the preset still keeps one click away, on an extra view
 or in a folder whose tab is showing, was never hidden and stays.
 
-The rest - `[schedule]`, `[focus_sync]`, `[peek]` - is documented by the starter
-file the app writes on first run, which carries a commented example of each.
+The rest - `[focus_sync]` and `[peek]` - is documented by the starter file the
+app writes on first run, which carries a commented example of each.
+
+### The schedule
+
+`[schedule] outside` names the preset in force whenever no rule covers the
+moment. It defaults to `"normal"`, which is what the schedule did before the key
+existed, and it is a key at all because not every day has stock Telegram at its
+edges - someone whose default is Home wants five o'clock to put Home back, not
+Normal. A name no preset backs warns and falls back to `normal`, the same rule a
+rule's own `preset` follows.
+
+`schedule_paused_until` in `state.toml` is when a pause runs out, in unix
+seconds, and `0` - which is what every older `state.toml` says, since the key
+did not exist - means the pause lasts until it is lifted by hand. Unix seconds
+rather than a countdown, for the same reason as the peek deadline: a pause is
+measured in hours or days, so it has to mean the same thing after the app has
+been closed and reopened.
+
+### One file, many devices
+
+`[[schedule.rulesets]]` blocks let one `settings.toml` describe several
+machines. A ruleset names the devices it is for and whether it is off, on, or on
+regardless; the enabled rulesets that apply to a device are merged into the one
+schedule that device runs:
+
+    [schedule]
+    enabled_p = true
+    outside   = "normal"
+
+    [[schedule.rulesets]]
+    name    = "phone"
+    device  = "mobile"
+    mode    = "enabled"
+    outside = "home"
+
+    [[schedule.rulesets.rules]]
+    days   = ["mon", "tue", "wed", "thu", "fri"]
+    from   = "09:00"
+    to     = "17:00"
+    preset = "work"
+
+`name` is required, unique ignoring case, and the address every later edit goes
+through. A ruleset with no name, or with one already taken, is skipped with a
+warning.
+
+`device` is `"any"` (the default), a class - `"desktop"` or `"mobile"` - a
+platform - `"android"`, `"ios"`, `"macos"`, `"windows"`, `"linux"` - or a device
+id outright. Anything else is read as a device id: the list of platforms is
+closed, and the list of devices belongs to whoever is carrying them.
+
+`mode` is `"enabled"` (the default), `"disabled"` or `"always"`. A disabled
+ruleset is written down and switched off - a ruleset you are not using this
+month is not a mistake in the file, so it is parsed and never warned about, just
+never chosen. An `always` one is merged in on every device it applies to,
+whatever else won, for the rules that are true everywhere.
+
+`outside` on a ruleset overrides `[schedule] outside` for the devices that
+ruleset runs on. Leaving it out is not the same as writing `"normal"`: it leaves
+the question to `[schedule]`.
+
+The flat `[[schedule.rules]]` array is not going anywhere. It is read as an
+implicit ruleset called `rules` - device `any`, mode `enabled`, no `outside` of
+its own - placed first, so a file written before rulesets existed resolves
+through exactly the same path and means exactly what it always meant.
+
+Which rulesets a device ends up running, and why the rule is specificity rather
+than layering, is in [work_mode.md](work_mode.md).
+
+`[devices]` gives ids names:
+
+    [devices]
+    "macos-3f9a2c1d" = "the laptop"
+    "android-7b1e04c2" = "the phone"
+
+Nothing depends on it - an id nobody named shows as itself - and it is in
+`settings.toml` rather than on each machine so that the names travel with the
+file that uses them.
+
+### Addressing a rule, and a ruleset
 
 A schedule rule has no name, and none is coming: it is addressed by its **raw
-position**, the `[[schedule.rules]]` blocks counted from the top of the file. A
-name would be a second thing to keep in step with the file, and a screen editing
-a rule already has to say which rule it read. That address is what an editor
-sends back, together with the window and preset it read off the rule, so an edit
-lands on the rule you were looking at or is refused - never on whatever is third
-now.
+position**, the rule blocks counted from the top of the array it is in. A name
+would be a second thing to keep in step with the file, and a screen editing a
+rule already has to say which rule it read. That address is what an editor sends
+back, together with the window and preset it read off the rule, so an edit lands
+on the rule you were looking at or is refused - never on whatever is third now.
 
 A rule the parser threw away keeps its position in that count. A broken rule in
 the middle of the file does not shift the ones below it, and repairing it does
@@ -543,6 +620,14 @@ not shift them back, which is the only reason editing a file with one in it is
 safe at all. The warnings name rules the same way but counting from one -
 `schedule rule 3: ...` - since that is a line for a person to read rather than
 an index for the app.
+
+A **ruleset**, by contrast, is addressed by its name and never by its position,
+and this is the one place the two differ deliberately. A ruleset's position
+moves whenever one above it is added or taken away, so an index a screen read a
+minute ago would edit the wrong ruleset; a rule's position within a ruleset
+moves only when that ruleset's own rules do, which is the edit the screen is
+making. An edit says which ruleset by name and which rule by position inside it,
+and an empty name means the flat array.
 
 `[peek] hotkey`, and `hotkey` on a preset, are read as **Qt portable text**:
 modifiers spelled `Ctrl`, `Shift`, `Alt` and `Meta`, joined to the key and to
