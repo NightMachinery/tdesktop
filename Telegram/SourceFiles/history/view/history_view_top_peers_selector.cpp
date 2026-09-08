@@ -18,6 +18,7 @@
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "main/session/session_show.h"
+#include "purple/purple_gate.h"
 #include "ui/controls/dynamic_images_strip.h"
 #include "ui/controls/popup_selector.h"
 #include "ui/dynamic_image.h"
@@ -42,6 +43,13 @@ constexpr auto kMaxPeers = 5;
 	if (it != topPeers.end()) {
 		topPeers.erase(it);
 	}
+
+	// Purple: this strip is a suggestion, so the running preset decides what
+	// is in it. Saved Messages below is not one - it is where the user always
+	// gets to send - so it is added after this and never dropped.
+	topPeers.erase(ranges::remove_if(topPeers, [](not_null<PeerData*> peer) {
+		return Purple::HiddenFromSuggestions(peer->owner().history(peer));
+	}), topPeers.end());
 	auto result = std::vector<not_null<PeerData*>>();
 	result.push_back(user);
 	for (const auto &peer : topPeers | ranges::views::take(kMaxPeers - 1)) {

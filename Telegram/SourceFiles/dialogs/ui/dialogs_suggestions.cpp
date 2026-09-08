@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_gate.h"
 #include "purple/purple_list_menu.h"
 #include "settings/settings_common.h"
 #include "settings/settings_credits_graphics.h"
@@ -439,6 +440,18 @@ const style::PeerListItem &ChannelRow::computeSt(
 	return _active ? st::recentPeersItemActive : st::recentPeersItem;
 }
 
+// Purple: which of the chats the app would suggest may still be suggested.
+// A copy rather than an erase in place: the list belongs to the session and
+// every other reader of it - typed search among them - must still see all of
+// it. See Purple::HiddenFromSuggestions().
+[[nodiscard]] std::vector<not_null<PeerData*>> ShownInSuggestions(
+		std::vector<not_null<PeerData*>> peers) {
+	peers.erase(ranges::remove_if(peers, [](not_null<PeerData*> peer) {
+		return Purple::HiddenFromSuggestions(peer->owner().history(peer));
+	}), end(peers));
+	return peers;
+}
+
 } // namespace
 
 
@@ -520,6 +533,7 @@ public:
 
 private:
 	void setupDivider();
+	void refreshRows();
 	void subscribeToEvents();
 	[[nodiscard]] Fn<void()> removeAllCallback();
 
@@ -840,14 +854,19 @@ RecentsController::RecentsController(
 
 void RecentsController::prepare() {
 	setupDivider();
+	refreshRows();
+	subscribeToEvents();
+}
 
+void RecentsController::refreshRows() {
+	while (delegate()->peerListFullRowsCount() > 0) {
+		delegate()->peerListRemoveRow(delegate()->peerListRowAt(0));
+	}
 	for (const auto &peer : _recent.list) {
 		delegate()->peerListAppendRow(std::make_unique<RecentRow>(peer));
 	}
 	delegate()->peerListRefreshRows();
 	setCount(_recent.list.size());
-
-	subscribeToEvents();
 }
 
 Fn<void()> RecentsController::removeAllCallback() {
@@ -984,6 +1003,16 @@ void RecentsController::subscribeToEvents() {
 				delegate()->peerListUpdateRow(row);
 			}
 		}
+	}, _lifetime);
+
+	// Purple: the strip is a snapshot taken when the panel opened, and nothing
+	// about the peers themselves changes when a preset does - so without this
+	// a chat the new preset hides would sit here until the panel closed. Read
+	// back from the session rather than filtered down, because a preset change
+	// can put a chat back as easily as take one away.
+	Purple::ActiveChanges() | rpl::on_next([=] {
+		_recent.list = ShownInSuggestions(session().recentPeers().list());
+		refreshRows();
 	}, _lifetime);
 }
 
@@ -2802,41 +2831,58 @@ rpl::producer<TopPeersList> TopPeersContent(
 			bool scheduled = true;
 		};
 		auto state = lifetime.make_state<State>();
-		const auto top = session->topPeers().list();
-		auto &entries = state->data.entries;
-		auto &indices = state->indices;
-		entries.reserve(top.size());
-		indices.reserve(top.size());
-		const auto now = base::unixtime::now();
-		for (const auto &peer : top) {
-			const auto user = peer->asUser();
-			if (user->isInaccessible()) {
-				continue;
+
+		// Purple: rebuilt rather than filtered once, because a preset change
+		// can bring a chat back as well as take one away, and the entries hold
+		// indices into each other that a removal would have to fix up.
+		const auto fill = [=] {
+			auto &entries = state->data.entries;
+			auto &indices = state->indices;
+			entries.clear();
+			indices.clear();
+			const auto top = session->topPeers().list();
+			entries.reserve(top.size());
+			indices.reserve(top.size());
+			const auto now = base::unixtime::now();
+			for (const auto &peer : top) {
+				const auto user = peer->asUser();
+				if (user->isInaccessible()) {
+					continue;
+				}
+				const auto self = user && user->isSelf();
+				const auto history = peer->owner().history(peer);
+
+				// Purple: this strip is something the app offers
+				// unasked, so a chat the running preset hides has no
+				// business in it. HiddenFromSuggestions() is where
+				// the whole rule lives.
+				if (Purple::HiddenFromSuggestions(history)) {
+					continue;
+				}
+				const auto badges = history->chatListBadgesState();
+				entries.push_back({
+					.id = peer->id.value,
+					.name = (self
+						? tr::lng_saved_messages(tr::now)
+						: peer->shortName()),
+					.userpic = (self
+						? Ui::MakeSavedMessagesThumbnail()
+						: Ui::MakeUserpicThumbnail(peer)),
+					.badge = uint32(badges.unreadCounter),
+					.unread = badges.unread,
+					.muted = !self && history->muted(),
+					.online = user && !self && Data::IsUserOnline(user, now),
+				});
+				if (entries.back().online) {
+					user->owner().watchForOffline(user, now);
+				}
+				indices.emplace(peer, Entry{
+					.history = peer->owner().history(peer),
+					.index = int(entries.size()) - 1,
+				});
 			}
-			const auto self = user && user->isSelf();
-			const auto history = peer->owner().history(peer);
-			const auto badges = history->chatListBadgesState();
-			entries.push_back({
-				.id = peer->id.value,
-				.name = (self
-					? tr::lng_saved_messages(tr::now)
-					: peer->shortName()),
-				.userpic = (self
-					? Ui::MakeSavedMessagesThumbnail()
-					: Ui::MakeUserpicThumbnail(peer)),
-				.badge = uint32(badges.unreadCounter),
-				.unread = badges.unread,
-				.muted = !self && history->muted(),
-				.online = user && !self && Data::IsUserOnline(user, now),
-			});
-			if (entries.back().online) {
-				user->owner().watchForOffline(user, now);
-			}
-			indices.emplace(peer, Entry{
-				.history = peer->owner().history(peer),
-				.index = int(entries.size()) - 1,
-			});
-		}
+		};
+		fill();
 
 		const auto push = [=] {
 			if (!state->scheduled) {
@@ -2852,6 +2898,15 @@ rpl::producer<TopPeersList> TopPeersContent(
 			state->scheduled = true;
 			crl::on_main(&state->guard, push);
 		};
+
+		// Purple: nothing about the top peers themselves changes when a preset
+		// does, so without this the strip would keep showing whatever the last
+		// preset let through until the account sent a message. Same shape as
+		// the stories strip - see dialogs_stories_content.cpp.
+		Purple::ActiveChanges() | rpl::on_next([=] {
+			fill();
+			schedule();
+		}, lifetime);
 
 		using Flag = Data::PeerUpdate::Flag;
 		session->changes().peerUpdates(
@@ -2932,7 +2987,7 @@ rpl::producer<TopPeersList> TopPeersContent(
 }
 
 RecentPeersList RecentPeersContent(not_null<Main::Session*> session) {
-	return RecentPeersList{ session->recentPeers().list() };
+	return RecentPeersList{ ShownInSuggestions(session->recentPeers().list()) };
 }
 
 object_ptr<Ui::BoxContent> StarsExamplesBox(

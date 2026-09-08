@@ -76,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "payments/payments_form.h"
 #include "payments/payments_checkout_process.h"
 #include "payments/payments_non_panel_process.h"
+#include "purple/purple_gate.h"
 #include "settings/sections/settings_credits.h"
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_premium.h"
@@ -2326,6 +2327,13 @@ std::vector<not_null<UserData*>> CollectGiftFrequentUsers(
 			continue;
 		}
 		if (ranges::contains(exclude, peerToUser(user->id))) {
+			continue;
+		}
+
+		// Purple: a frequent-contacts strip is a suggestion, so the running
+		// preset decides who is in it. Searching for the person by name still
+		// finds them, exactly as everywhere else this hook is used.
+		if (Purple::HiddenFromSuggestions(user->owner().history(user))) {
 			continue;
 		}
 		result.push_back(user);

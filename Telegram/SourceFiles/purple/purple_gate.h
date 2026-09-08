@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_engine.h"
 #include "purple/purple_splice.h" // MemberTitle
 
+class History;
 class PeerData;
 
 namespace Main {
@@ -144,6 +145,22 @@ bool PruneOverrides();
 // else, so forwarding to it, searching for it and the recent-chats row all
 // still work. See docs/purple/work_mode.md.
 [[nodiscard]] bool HideEverywhere();
+
+// Whether the strips of chats the app offers unasked - the people and recent
+// rows in the search panel, the quick-share popup, the contacts offered when
+// a gift is sent - should leave this one out. False under Normal, false while
+// peeking, and false when [suggestions] hide_invisible_p says to leave them
+// alone.
+//
+// The preset alone decides here: no close buffer, no "until". A strip is a
+// standing list rather than a view you are looking at, so a chat drifting in
+// and out of one as a timer runs would be noise rather than information. A
+// chat the preset still keeps one click away - on an extra view, or in a
+// folder whose tab is showing - was never hidden, so it stays.
+//
+// Only the strips. Typed search, the forward picker and the switcher all still
+// find the chat, exactly as hide_everywhere_p being false leaves them.
+[[nodiscard]] bool HiddenFromSuggestions(not_null<History*> history);
 
 // Whether the running preset writes this chat's id out by hand, in the
 // `members' of a list it or one of its views orders - rather than catching it

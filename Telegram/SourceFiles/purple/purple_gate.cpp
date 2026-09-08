@@ -525,6 +525,18 @@ bool HideEverywhere() {
 		&& resolved.hideEverywhere;
 }
 
+bool HiddenFromSuggestions(not_null<History*> history) {
+	// Ordered so that a chat under Normal costs one bool: the two History
+	// questions below both walk the preset's lists, and this runs once per
+	// row of every strip the app draws.
+	const auto &resolved = Instance().resolved();
+	return !resolved.normal
+		&& !resolved.peeking
+		&& ActiveSettings().suggestions.hideInvisible
+		&& history->purpleHiddenByPreset()
+		&& !history->purpleReachableElsewhere();
+}
+
 PeekChange TogglePeek() {
 	const auto &resolved = Instance().resolved();
 	if (resolved.normal) {
