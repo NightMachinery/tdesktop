@@ -1867,6 +1867,16 @@ what the sheet's "Don't offer this again" checkbox writes, rather than a second
 flag somewhere meaning the same thing - the switch already exists, it is in
 Settings > Advanced > Purple, and it is in the file you can read.
 
+Upstream's own one-tap offer is gone on both clients. Telegram puts a small
+button beside a coarse last seen - `when?` on the desktop - and confirming it
+saves an empty last-seen rule, which means *everybody*, permanently, with
+nothing anywhere in the app to put it back. That button opens the trade now,
+and with `trade_p` off it is not drawn at all rather than falling back to what
+it used to do. Leaving it standing beside the trade would have kept the
+footgun and merely parked a safer path next to it; anybody who does want to be
+visible to everybody can still say so in Settings > Privacy, on a screen that
+can say the opposite again tomorrow.
+
 ### The memory, and the cooldown
 
 A read is remembered for `trade_remember` (a day, by default) and shown in

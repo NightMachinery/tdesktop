@@ -315,7 +315,7 @@ void Trade::restore() {
 
 [[nodiscard]] QString Refusal(not_null<UserData*> user, TimeId now) {
 	const auto &config = Config();
-	if (!config.trade) {
+	if (!LastSeenTradeOffered()) {
 		return u"The last seen trade is switched off."_q;
 	} else if (ReasonForUser(user) != LastSeenReason::ByMe) {
 		return u"%1's last seen is not coarse because of your own privacy, "
@@ -383,6 +383,10 @@ LastSeenNote LastSeenNoteFor(
 	result.link = narrow ? kShortReason : kLongReason;
 	result.text = result.base + kSeparator + result.link;
 	return result;
+}
+
+bool LastSeenTradeOffered() {
+	return Config().trade;
 }
 
 void ShowLastSeenTradeBox(
