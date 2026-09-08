@@ -514,6 +514,73 @@ What is not possible is pointing both apps at one data directory. The second
 one to launch would find the first's local socket and hand over to it instead
 of starting, so only one could ever be running.
 
+### An isolated instance, for testing
+
+An instance can be given its own everything, so a test run cannot reach your
+account, your chats or your `settings.toml`:
+
+```bash
+XDG_CONFIG_HOME=/tmp/sandbox/config \
+    "/Applications/Purple Telegram.app/Contents/MacOS/Purple Telegram" \
+    -workdir /tmp/sandbox/tdata
+```
+
+`-workdir` moves `tdata`, and `XDG_CONFIG_HOME` moves `settings.toml` and
+`state.toml` - see `ConfigDirectory()` in `purple_config.cpp`. The instance
+starts logged out with a freshly written starter file, and the single-instance
+socket is derived from the working directory, so it runs beside your own copy.
+
+Log it in as a second session of a throwaway account rather than cloning
+`tdata`, for the reason above: one authorization is one session. The account
+the emulator harness uses is the obvious one, and its number is in
+`~/.purple-android-test/test-account.env` - mode 600, outside every git tree,
+because both forks push to public remotes. The login code arrives in the
+phone's session and can be read without opening a chat:
+
+```bash
+adb shell dumpsys notification --noredact | grep -i 'login\|code'
+```
+
+**Run the deployed bundle, not `out/`.** The freshly linked binary in `out/`
+resolves `@rpath` against the merged Qt prefix while the plugins macdeployqt
+left in its bundle point at `Contents/Frameworks`, so launching it directly
+loads two sets of Qt binaries and dies before the first window ("You might be
+loading two sets of Qt binaries into the same process"). `purple/install.sh` is
+what makes a runnable bundle. It is only ever launched through Finder or
+`open`, which is why nothing noticed.
+
+### Headless, and how far it gets
+
+Not far enough yet, and it is worth knowing exactly how far. The Qt **offscreen
+platform plugin is not deployed** - `macdeployqt` copies only the plugin the
+app asks for - but it exists in the merged prefix. Copied into the bundle and
+relinked against the bundled Qt it loads:
+
+```bash
+cp "$LibrariesPath/local/qt/share/qt/plugins/platforms/libqoffscreen.dylib" \
+   "$App/Contents/PlugIns/platforms/"
+for f in QtGui QtCore; do
+    install_name_tool -change "@rpath/$f.framework/Versions/A/$f" \
+        "@executable_path/../Frameworks/$f.framework/Versions/A/$f" \
+        "$App/Contents/PlugIns/platforms/libqoffscreen.dylib"
+done
+codesign --force --sign - "$App/Contents/PlugIns/platforms/libqoffscreen.dylib"
+```
+
+The relinking is the part that matters: the prefix's copy carries an rpath of
+its own pointing back at the prefix, so without it the plugin drags in a second
+Qt and the process dies the same way `out/` does.
+
+With `QT_QPA_PLATFORM=offscreen` the app then gets all the way through the
+config load - it writes `settings.toml`, `state.toml` and `readme.md`, runs the
+schedule tick and logs it - and dies at the first window with `QRhiWidget: QRhi
+is not supported on this platform`. The RHI probe itself succeeds (it finds
+Metal); it is the widget that has no offscreen path. The lever is the app's own
+**Enable hardware acceleration**, which lives in `tdata` and has no
+command-line switch, so it would need one visible run to turn off before the
+rest could be headless. Until somebody tries that, driving the desktop means a
+real window on a real screen.
+
 ### Rebuilding after a change
 
 ```bash
