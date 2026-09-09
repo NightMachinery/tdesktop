@@ -619,3 +619,53 @@ the scripts under `purple/`, and the fork features under
 those hook into upstream code. The icons are the only awkward part: an upstream
 change to the artwork lands as a binary conflict. Resolve it by taking upstream's
 files and re-running `recolour_icons.py`.
+
+### The Qt this build does not patch
+
+Upstream's macOS build takes Qt 6.11.1 and applies the patch set from
+`desktop-app/patches` (46 files for `qtbase_6.11.2` at the time of writing)
+before building it. This build takes Homebrew's `qtbase`, which is the same
+Qt version with none of them. Most of the set is Windows and Linux; the
+ones that matter here are the macOS rendering fixes, because the app
+composites its whole main window through Metal (`Renderer: [QRhi] (Window)`
+in `log.txt`, primed by `EnsureWindowRhi()` in `lib_ui/ui/rhi/rhi_surface.cpp`):
+
+- `0037-fix-backing-store-rhi-upload-dirty-rects`: stock Qt uploads the
+  bounding rectangle of the dirty region to the GPU, so two small updates
+  far apart re-upload the whole window. A CPU-resource report for this app
+  (`/Library/Logs/DiagnosticReports/Purple Telegram_2026-09-03-*.cpu_resource.diag`)
+  shows exactly that: the main thread at 81% for two minutes, not even
+  frontmost, inside `QRhiMetal::enqueueSubresUpload` doing `memmove`.
+- `0032-optimize-macos-rhi-metal-render`, `0033`, `0034`, `0035`, `0016`:
+  John Preston's rework of the Metal backing-store path.
+- `0039-macos-widget-updates-via-display-link`, `0040-backport-metal-monitor-plug-fix`,
+  `0041`/`0043` guarding windows across a screen change: what happens when
+  the external display sleeps or is unplugged, which this machine's log
+  shows several times a day (`qt.qpa.drawing: Display requested for
+  non-online display`).
+
+The symptom on this machine is an app that gets sluggish after hours of
+uptime and display sleep/wake cycles, and is fine again after a restart,
+while the official build beside it is fine throughout. The stack samples
+show the process idle between interactions, so it is not a spin; it is the
+per-frame cost of the unpatched compositor.
+
+Two ways out, cheapest first:
+
+- Turn off "Use Qt RHI renderer" in Settings → Advanced → Experimental
+  settings (`kOptionUseQtRhi`, default on for Qt ≥ 6.7). The window then
+  goes back to the raster CALayer backing store, which the patches do not
+  touch. Restart required. This is the experiment to run first.
+- Build Qt with upstream's patches instead of taking Homebrew's, which is
+  what `Telegram/build/prepare/prepare.py` does for the official build.
+  That is a few hours of build and the merged-prefix scripts under `purple/`
+  would need to point at it.
+
+A separate defect seen twice in normal use (crash reports on 2026-09-07
+20:31 and 2026-09-08 22:56): a native notification with a user photo dies
+in `Platform::Notifications::Manager::Private::showNotification` →
+`Platform::Q2NSImage` → `QImage::toCGImage()` → `CGColorSpaceGetType` on a
+dead pointer. The fork does not touch that code; it is upstream's
+UserNotifications manager on unpatched Qt. Symbolicate any new report with
+`atos -o "out/Purple Telegram.unstripped" -l <load address>`, which
+`install.sh` keeps for this purpose.
