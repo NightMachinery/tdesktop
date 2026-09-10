@@ -8,11 +8,26 @@ BuildPath="${BuildPath:-$RepoPath/out}"
 AppName="${AppName:-Purple Telegram}"
 BundleId="com.tdesktop.PurpleTelegram"
 Source="$BuildPath/$AppName.app"
-Target="/Applications/$AppName.app"
+# Overridable so a test deploy can go somewhere that is not the installed app.
+Target="${Target:-/Applications/$AppName.app}"
 LibrariesPath="${LibrariesPath:-$(dirname "$RepoPath")/tdesktop-libs}"
-# Must be the merged prefix's copy, so the bundled plugins match the Qt the
-# app was linked against - see pin_deploy_tool() in merge_qt_prefix.py.
-MacDeployQt="${MacDeployQt:-$LibrariesPath/local/qt/bin/macdeployqt}"
+
+# macdeployqt has to come from the same prefix the app was linked against, or
+# the bundled plugins disagree on Qt version with the Qt they are loaded into
+# and the app dies with "no Qt platform plugin could be initialized". Same rule
+# as build_app.sh, and it has the long version of the comment: the patched
+# prefix when purple/build_qt.sh has produced one, otherwise the merged
+# Homebrew prefix - whose copy of macdeployqt is additionally pinned by
+# pin_deploy_tool() in merge_qt_prefix.py. Setting QtPrefix overrides both.
+if [ -z "$QtPrefix" ]; then
+    if [ -d "$LibrariesPath/qt-patched" ]; then
+        QtPrefix="$LibrariesPath/qt-patched"
+    else
+        QtPrefix="$LibrariesPath/local/qt"
+    fi
+fi
+MacDeployQt="${MacDeployQt:-$QtPrefix/bin/macdeployqt}"
+echo "=== Qt prefix: $QtPrefix ==="
 
 if [ ! -d "$Source" ]; then
     echo "No bundle at $Source - build it first." >&2
