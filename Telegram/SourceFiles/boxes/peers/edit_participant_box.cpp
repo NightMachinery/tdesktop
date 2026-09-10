@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/replace_boost_box.h"
 #include "settings/settings_common.h"
 #include "data/data_peer_values.h"
+#include "purple/purple_last_seen.h"
 #include "data/data_channel.h"
 #include "data/data_changes.h"
 #include "data/data_chat.h"
@@ -195,7 +196,8 @@ Cover::Cover(
 				? tr::lng_status_bot_reads_all
 				: tr::lng_status_bot_not_reads_all)(tr::now);
 		}
-		return Data::OnlineText(_user->lastseen(), base::unixtime::now());
+		const auto now = base::unixtime::now();
+		return Purple::LastSeenNoteFor(_user, now, false, true).text;
 	}();
 	_status = object_ptr<Ui::FlatLabel>(this, _st.status);
 	_status->setText(statusText);
@@ -334,7 +336,8 @@ void EditParticipantBox::Inner::paintEvent(QPaintEvent *e) {
 				? tr::lng_status_bot_reads_all
 				: tr::lng_status_bot_not_reads_all)(tr::now);
 		}
-		return Data::OnlineText(_user->lastseen(), base::unixtime::now());
+		const auto now = base::unixtime::now();
+		return Purple::LastSeenNoteFor(_user, now, false, true).text;
 	}();
 	p.setFont(st::contactsStatusFont);
 	p.setPen(st::contactsStatusFg);

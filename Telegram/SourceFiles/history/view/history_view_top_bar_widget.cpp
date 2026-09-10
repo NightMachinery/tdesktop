@@ -1949,7 +1949,7 @@ void TopBarWidget::updateOnlineDisplay() {
 				- _leftTaken
 				- st::topBarNameRightPadding;
 			auto note = Purple::LastSeenNoteFor(user, now, false, false);
-			if (!note.link.isEmpty()
+			if (!note.tail.isEmpty()
 				&& (st::dialogsTextStyle.font->width(note.text)
 					> available)) {
 				note = Purple::LastSeenNoteFor(user, now, false, true);

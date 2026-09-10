@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_history_messages.h"
 #include "data/data_peer.h"
 #include "data/data_peer_values.h"
+#include "purple/purple_last_seen.h"
 #include "data/data_replies_list.h"
 #include "data/data_saved_sublist.h"
 #include "data/data_session.h"
@@ -234,7 +235,7 @@ struct StatusFields {
 		if (const auto user = peer->asUser()) {
 			const auto now = base::unixtime::now();
 			return {
-				.text = Data::OnlineText(user, now),
+				.text = Purple::LastSeenNoteFor(user, now, false, true).text,
 				.active = Data::OnlineTextActive(user, now),
 			};
 		} else if (const auto chat = peer->asChat()) {
