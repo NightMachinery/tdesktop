@@ -583,6 +583,26 @@ loading two sets of Qt binaries into the same process"). `purple/install.sh` is
 what makes a runnable bundle. It is only ever launched through Finder or
 `open`, which is why nothing noticed.
 
+**Launch it from a process that is not sandboxed, and drive it with the
+screen clear.** Two things cost the first attempt at driving an instance
+(2026-09-11) the whole session. A binary started from an agent's sandboxed
+shell inherits the sandbox: the instance came up, drew, and logged `Purple
+Error: Focus state unreadable ... Operation not permitted` for the Do Not
+Disturb database the deployed bundle can otherwise read, so start it through
+something outside the sandbox - Hammerspoon's `hs.task.new(path, nil, args)`
+with `setEnvironment` carrying `XDG_CONFIG_HOME` and `HOME`, or `open -n`.
+And while a keychain authorization dialog (`SecurityAgent`, "wants to use the
+System keychain") was waiting on screen from an unrelated command, nothing
+synthesized reached anything: `hs.eventtap` clicks and keystrokes, an
+`AXPress` on the intro's `Start Messaging` button, even an `AXPress` on the
+dialog's own Deny all did nothing, while the app sat idle in its event loop
+and the accessibility tree still listed the button. Only a hand at the
+keyboard clears that dialog. Check for one with `pgrep -x SecurityAgent`
+before starting, and treat a click that changes nothing as "look for a
+dialog", not as a bug in the window. The window's own controls are reachable
+through accessibility (`hs.axuielement`; the button reports its frame), which
+is the way to find where to click without reading pixels.
+
 ### Headless, and how far it gets
 
 Not far enough yet, and it is worth knowing exactly how far. The Qt **offscreen
