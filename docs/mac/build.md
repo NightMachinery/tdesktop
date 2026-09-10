@@ -360,6 +360,10 @@ reproduces all 121 rewrites and both `LC_RPATH` edits byte for byte. The
 frameworks resolve some of their own dependencies through `@rpath`, so without
 it they would load from the build prefix instead of the bundle.
 
+It also strips every absolute rpath from the executable, leaving only the
+bundle's own - see "The rpath trap a relocatable Qt brings" for why that is
+load-bearing rather than tidiness, and for the check that keeps it safe.
+
 It refuses the fast path and hands back to `macdeployqt` whenever the bundle is
 not something it can finish — never deployed, missing plugins or `qt.conf`, or
 linking a library the bundle does not carry, which is what a newly added
@@ -807,6 +811,49 @@ libraries "yes"; macOS deployment tool "yes". `qt-patched/lib` comes to 54 MB,
 the same as `/opt/homebrew/opt/qtbase/lib`, and the plugin set is identical to
 the union of the four Homebrew kegs'.
 
+#### The rpath trap a relocatable Qt brings
+
+This one cost a launch. Homebrew's qtbase records absolute install names -
+`/opt/homebrew/opt/qtbase/lib/QtCore.framework/Versions/A/QtCore` - so the app
+linked against it carried absolute paths, `macdeployqt` rewrote each of them to
+`@executable_path/../Frameworks/...`, and nothing in the bundle ever resolved
+Qt through `@rpath` at all.
+
+The patched Qt is built `FEATURE_relocatable=ON`, like every normal Qt, so its
+install name is `@rpath/QtCore.framework/Versions/A/QtCore`. `macdeployqt` does
+not rewrite `@rpath` entries - it has no need to, since it adds the bundle's
+own rpath - and it deletes only the per-formula `/opt/homebrew/opt/<formula>/`
+rpaths. What it left behind was:
+
+    /opt/homebrew/lib
+    @executable_path/../Frameworks
+
+in that order. `/opt/homebrew/lib/QtCore.framework` is a symlink into the full
+`qt` formula, 6.9.2, and dyld searches the rpath list in order, so the app
+loaded 6.9.2 and died before the first window:
+
+    Symbol not found: __ZN10QByteArray19fromPercentEncodingEOS_c
+      Expected in: /opt/homebrew/Cellar/qt/6.9.2/lib/QtCore.framework/...
+
+The same trap in a quieter form was already there under the Homebrew route:
+several bundled libraries - abseil, libwebp, libbrotlicommon, libjxl_cms - do
+use `@rpath`, and with `/opt/homebrew/lib` ahead of the bundle they were being
+resolved from Homebrew rather than from the copies `macdeployqt` had just
+placed in the bundle. It happened to work because the versions matched.
+
+`relink_bundle.py` now drops **every** absolute rpath and keeps only
+`@executable_path/../Frameworks`, and `install.sh` runs it after `macdeployqt`
+as well as instead of it. Removing them is only safe if the bundle really does
+carry everything reached through `@rpath`, so the script checks exactly that
+first - across the executable, the bundled frameworks and the plugins - and
+keeps the absolute rpaths, naming what is missing, if anything is not there.
+
+Verify on a running instance:
+
+```bash
+vmmap <pid> | grep QtCore     # must be inside Contents/Frameworks
+```
+
 #### How the scripts choose a prefix
 
 `build_app.sh` takes `QtPrefix` from the environment if it is set. Otherwise
@@ -879,3 +926,25 @@ copied before `install.sh` overwrote `out/Purple Telegram.unstripped`, so a
 crash report from the old binary still symbolicates — see "Symbolicating a
 crash", and remember the line numbers were already gone the moment `out/` was
 rebuilt.
+
+#### The check that was actually run
+
+Building is not evidence. The bundle was deployed to a scratch `Target` and
+launched as an isolated instance (see "An isolated instance, for testing"),
+with its own `XDG_CONFIG_HOME` and `-workdir`, so it could not reach a real
+account. What the log has to show is `Renderer: [QRhi] (Window)` — that is the
+Metal path the patches are for; anything else means the app fell back and the
+patches are not being exercised — followed by the app reaching the intro
+screen with no new report in `~/Library/Logs/DiagnosticReports/`.
+
+It earned its keep the first time it ran: the app died at launch on the wrong
+QtCore, which is the rpath problem above, and nothing short of starting the
+binary would have shown it. The second run reached the intro screen, logged
+
+    RHI: Probe backend=Metal device=Apple M2 compute=yes.
+    QRhi: backing store primed for window
+    Renderer: [QRhi] (Window)
+    QRhi: SurfaceRhi created
+
+stayed up, and left no crash report. `vmmap` on it confirmed `QtCore` loaded
+from `Contents/Frameworks`.
