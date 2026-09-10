@@ -2866,6 +2866,57 @@ found the one hole in `SetTableBool` on the way: a `[schedule]` with no header
 of its own is an implicit table pointing at its first rule, so the insert went
 into the rule. It now writes the header, which fixes it for every caller.
 
+### Stories
+
+Ported, and the desktop's one rule holds: filter the strip, and nothing else.
+
+The seam is one accessor. `StoriesController.getDialogListStoriesShown()` is
+the filtered view of `dialogListStories`, and everything that draws the strip
+reads it - the strip itself, its collapsed three-avatar form, the "is there
+anything to draw" test `DialogsActivity` gates the cell on, and the chain the
+story viewer walks onward along as new stories arrive under it. The raw list
+stays where it was, because it also feeds the counters, the archive strip and
+the upstream hidden/unhidden machinery, none of which has anything to do with a
+work preset. That is `dialogs_stories_content.cpp`'s reasoning met in Android's
+shape: one place that is only about the strip.
+
+`Purple::StoryShown()` becomes `storyShownNative`, and it takes two arguments
+the desktop's does not: what the folders holding this chat said about its
+stories, and whether one of them pulls the chat into the view. Both are folder
+questions, and folder membership is Java's to answer here - the core has never
+heard of a Telegram folder, which is the same reason `exemptFolders` and
+`silencedFolders` arrive as names. Everything else is the desktop's function
+line for line, including the order: a peek reveals, then a folder beats a list
+entry, and both beat the preset's policy.
+
+`hasUnseen` is passed in on this side too, and it buys the same thing: the
+caller has the unread state right where the filter runs. What is different is
+that the answer is cached. `PurpleGate.storyCache` keeps both halves of the
+seen ladder per chat in one int and is cleared with `modeCache` on every
+reload, so a chat costs one native call per resolution rather than one per
+pass - and the second half is a second call at fill time rather than a call
+every time, because a story's seen state flips exactly once. It is filled only
+for a preset that mentions no folder, which is nearly all of them: folder
+membership moves without a reload, and a cache with no way to hear about that
+would go stale in exactly the case it was built for.
+
+The strip is rebuilt on a preset change by posting `storiesUpdated` from
+`postRefresh()`, next to the two signals already there. `DialogsActivity`
+listens for it and re-runs `updateStoriesVisibility()`, which is both the
+visibility test and the rebuild. Same reason as the desktop's merge of
+`Purple::ActiveChanges()` into the strip's producer: nothing about the sources
+changes when a preset does, so without it the strip would show what the last
+preset let through until the next story arrived.
+
+Two consequences worth stating. Your own row goes through the gate like anybody
+else's - Saved Messages has no exemption from the lists, and `hasOnlySelfStories()`
+had to learn about that or the cell would have stayed on screen with nothing in
+it, since `DialogsActivity` draws it when *either* that or `hasStories()` is
+true. And the count in the strip's title counts what the strip is showing while
+a preset filters, rather than what the server said, which is `Content::total`
+moving after the loop by another name: a title announcing five stories over two
+avatars is the leak said out loud.
+
 ### Not ported yet
 
 Nothing of A5 proper is left. Hot reload, the list-membership menu, peek, the
