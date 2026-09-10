@@ -150,24 +150,6 @@ struct View {
 	return st::windowSubTextFg;
 }
 
-// "6 h 12 m", "41 m", "18 s", "0 m". Two units at most: a third is precision
-// nobody reads, and the number beside it is the one being compared.
-[[nodiscard]] QString DurationText(int64 ms) {
-	const auto seconds = ms / 1000;
-	if (seconds < 60) {
-		return u"%1 s"_q.arg(seconds);
-	}
-	const auto minutes = seconds / 60;
-	if (minutes < 60) {
-		return u"%1 m"_q.arg(minutes);
-	}
-	const auto hours = minutes / 60;
-	const auto rest = minutes % 60;
-	return rest
-		? u"%1 h %2 m"_q.arg(hours).arg(rest)
-		: u"%1 h"_q.arg(hours);
-}
-
 [[nodiscard]] QString ShareText(int64 part, int64 whole) {
 	if (whole <= 0) {
 		return QString();
@@ -1070,7 +1052,7 @@ void ChatScreenTimeBox(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			u"%1 in this chat, %2 of it active."_q.arg(
-				DurationText(totals.totalMs),
+				FormatSpan(totals.totalMs),
 				ShareText(totals.activeMs, totals.totalMs)),
 			st::boxLabel),
 		st::boxRowPadding);
@@ -1260,9 +1242,9 @@ void ScreenTimeBox(
 		const auto total = Metric(totals, activeOnly);
 		const auto change = ChangeText(comparison, activeOnly);
 		auto headline = activeOnly
-			? u"%1 active"_q.arg(DurationText(totals.activeMs))
+			? u"%1 active"_q.arg(FormatSpan(totals.activeMs))
 			: u"%1, %2 of it active"_q.arg(
-				DurationText(totals.totalMs),
+				FormatSpan(totals.totalMs),
 				ShareText(totals.activeMs, totals.totalMs));
 		if (!change.isEmpty()) {
 			headline += u" - "_q + change;
@@ -1285,7 +1267,7 @@ void ScreenTimeBox(
 		for (const auto &kind : totals.kinds) {
 			legend.push_back(u"%1 %2"_q.arg(
 				KindText(kind.chatKind),
-				DurationText(activeOnly ? kind.activeMs : kind.totalMs)));
+				FormatSpan(activeOnly ? kind.activeMs : kind.totalMs)));
 		}
 		if (!legend.isEmpty()) {
 			rows->add(
@@ -1406,9 +1388,9 @@ void ScreenTimeBox(
 				? PeerFor(session, chat.dialogId)
 				: nullptr;
 			const auto right = activeOnly
-				? DurationText(chat.activeMs)
+				? FormatSpan(chat.activeMs)
 				: u"%1 · %2 active"_q.arg(
-					DurationText(chat.totalMs),
+					FormatSpan(chat.totalMs),
 					ShareText(chat.activeMs, chat.totalMs));
 			const auto row = rows->add(
 				object_ptr<ChatRow>(
@@ -1466,7 +1448,7 @@ void ScreenTimeBox(
 			object_ptr<Ui::FlatLabel>(
 				rows,
 				u"Hidden while peeking: %1."_q.arg(
-					DurationText(totals.hiddenMs)),
+					FormatSpan(totals.hiddenMs)),
 				st::boxLabel),
 			padding);
 
@@ -1504,11 +1486,11 @@ void ScreenTimeBox(
 					BudgetModeName(budget.mode))),
 				rpl::single(spent.reached
 					? u"%1 of %2 · reached"_q.arg(
-						DurationText(spent.spentMs),
-						DurationText(spent.perDayMs))
+						FormatSpan(spent.spentMs),
+						FormatSpan(spent.perDayMs))
 					: u"%1 of %2"_q.arg(
-						DurationText(spent.spentMs),
-						DurationText(spent.perDayMs))),
+						FormatSpan(spent.spentMs),
+						FormatSpan(spent.perDayMs))),
 				st::settingsButtonNoIcon);
 			row->setClickedCallback([=] {
 				box->uiShow()->showBox(Box(
@@ -1586,7 +1568,7 @@ rpl::producer<QString> ScreenTimeDigestValue(
 			return u"Nothing this week"_q;
 		}
 		auto result = u"This week: %1, %2 active"_q.arg(
-			DurationText(totals.totalMs),
+			FormatSpan(totals.totalMs),
 			ShareText(totals.activeMs, totals.totalMs));
 		if (!totals.chats.empty()) {
 			result += u", top: "_q
