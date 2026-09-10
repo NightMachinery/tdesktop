@@ -95,6 +95,24 @@ elif [ "$RelinkStatus" -ne 0 ]; then
     exit "$RelinkStatus"
 fi
 
+# The bundle should now carry the patched Qt. If it carries Homebrew's instead,
+# the build silently fell back to the merged prefix - a renamed qt-patched, a
+# stale CMake cache, a QtPrefix left set - and with it comes back the
+# use-after-free of a CGColorSpace that kills the app on a notification
+# carrying a userpic with an unusual embedded ICC profile. Byte-identical
+# frameworks are the cheapest possible test for that. Not fatal: the Homebrew
+# route is still supported, it just has that defect.
+BundledQtGui="$Source/Contents/Frameworks/QtGui.framework/Versions/A/QtGui"
+BrewQtGui="/opt/homebrew/opt/qtbase/lib/QtGui.framework/Versions/A/QtGui"
+if [ -f "$BundledQtGui" ] && [ -f "$BrewQtGui" ] \
+        && cmp -s "$BundledQtGui" "$BrewQtGui"; then
+    echo "=== warning: this bundle carries Homebrew's unpatched Qt ==="
+    echo "    QtGui is byte-identical to /opt/homebrew/opt/qtbase, so none of"
+    echo "    upstream's patches are in it - including the fix for the"
+    echo "    notification crash. Run purple/build_qt.sh, delete"
+    echo "    out/CMakeCache.txt, and rebuild if that was not intended."
+fi
+
 #: Signed with a certificate when there is one, because TCC keys its grants -
 #: Full Disk Access for the focus detector, in particular - to the app's
 #: designated requirement. Ad-hoc has no certificate, so that requirement is
