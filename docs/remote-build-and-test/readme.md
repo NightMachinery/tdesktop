@@ -235,9 +235,16 @@ After installing and before starting the app, the run turns the app's own
 logging on: `logsEnabled` true in the account's
 `shared_prefs/systemConfig.xml`, owned and moded like the prefs files beside it
 (the mode is read with `stat` at the time, not assumed). That is there because
-the sweep at the end greps the app's log for load errors, the account had
-logging off, and a nought-byte log passes a grep for errors exactly as a clean
-one does. `systemConfig`, not `mainconfig` - see below.
+the sweep at the end greps for load errors, the account had logging off, and a
+nought-byte log passes a grep for errors exactly as a clean one does.
+`systemConfig`, not `mainconfig` - see below.
+
+The sweep itself reads logcat, not that file. The first run with logging on
+(2026-09-11) wrote a 34 KB log with the network trace and not one `Purple:`
+line in it: those go out under the `tmessages` tag and only logcat has them.
+So the run collects `logcat -d -s tmessages`, appends whatever the file has,
+and greps that. The file is still worth turning on because logcat is a ring
+buffer and a long run can push its own first phases out of it.
 
 Two things it deliberately does not do. It never taps: an unattended run
 cannot look at a screenshot to see where a tap landed, and a tap that lands in
