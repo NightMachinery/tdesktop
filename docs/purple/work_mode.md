@@ -1346,6 +1346,64 @@ strip. Press it again to end it early.
 
 `auto_off = "off"` leaves it running until it is turned off by hand.
 
+### How long, and which gesture
+
+    [peek]
+    tap           = "5m"
+    hotkey_length = "2m"
+
+The two ways of starting one are not the same gesture. A tap on the control is a
+decision made while looking at the box it is in; the key is fired mid-sentence,
+one hand, to check one thing. `tap` and `hotkey_length` give them their own
+lengths, each falling back to `auto_off` when it is not written - so one key
+still governs both for anybody who does not care about the difference. `"off"`
+from either is a real answer, a peek with no clock on it, and that is why the
+fallback is a function in the core rather than a `.value_or(0)` at each place
+that reads them.
+
+### The second press extends
+
+Pressing the key while a peek is running adds another `hotkey_length` to it,
+measured from the deadline it already has rather than from now - so two quick
+presses buy two lengths and not one and a bit - and the toast says where that
+landed: `Peeking - extended to 7:00 left`.
+
+The old second press ended the peek, which made the key useless for the thing
+the second press nearly always means. A peek is running because something is
+still being looked at, and the only way to buy two more minutes was to end it
+and start it again: nothing new revealed, every chat list rebuilt twice for it.
+
+It stops at an hour. Past that it is not a peek any more, it is the preset off,
+and there is a plainer way to say that than pressing a key twelve times. The
+press that finds the cap already spent ends the peek instead, and says so -
+`Peek over - it was already as long as a peek gets` - and so does the press that
+finds a peek with no clock on it, which has no deadline for an extension to move.
+A key that can start something it cannot stop would be worse than a key that
+means two things.
+
+### Chips, not a checkbox alone
+
+The preset box carries the lengths as a row of chips under the checkbox: one
+minute to an hour, and `until I stop` one position past the end of them. The
+checkbox is still the on/off - tapping it starts a peek of `tap` - and the chips
+are the same switch with a number on it.
+
+Tapping a chip while a peek is running **restarts** it at that length rather
+than adding to it. A chip that says `5 min` and leaves you with eleven is a chip
+lying about what it did; adding is the key's job, where there is no number on
+screen to contradict.
+
+The lit chip follows what is *left*, not what was asked for, so a five-minute
+peek with ninety seconds on it lights `2 min`. Nothing anywhere remembers the
+length a peek was started with - `state.toml` holds a deadline and that is all -
+and inventing a memory for it so that a highlight could sit still would be
+storing a fact to make a picture tidier.
+
+The row itself is `PeekDetentsSeconds()` in the core, and so is the rounding
+that picks the lit one. Two hand-written lists is exactly how a phone's chips
+and a desktop's row come to offer different minutes for the same feature, and a
+list of lengths is the kind of thing somebody edits on one side only.
+
 ### It reveals; it does not un-silence
 
 A peek does not touch `notify`. The two halves of a preset answer different
@@ -1404,8 +1462,14 @@ tdesktop writes into its own shortcuts file.
 
 ### Finding it
 
-The main menu entry reads `Work Mode: work (peeking)` while one is running, and
-the preset box carries a checkbox naming the key: a hotkey with no visible
+The main menu entry reads `Work Mode: work (peeking, 4:12 left)` while one is
+running - the word alone raised the question of how long and did not answer it -
+and it drops back to `(peeking)` for a peek with no clock. That second hand
+ticks only while there is a countdown to move: the menu stays open for as long
+as somebody leaves it open, and a label rewritten once a second for a preset
+that is not going anywhere would be a timer running for nothing.
+
+The preset box carries a checkbox naming the key: a hotkey with no visible
 affordance is a hotkey nobody remembers. Under Normal the checkbox is inert and
 says why - `Peek - nothing is hidden under Normal` - rather than sitting there
 greyed out with no explanation.

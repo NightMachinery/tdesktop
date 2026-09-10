@@ -234,6 +234,14 @@ send_after_save_p = false
 hotkey   = "Ctrl+Shift+E"
 auto_off = "2m"
 
+# How long each way of starting one lasts, when the two want to differ: tap is
+# what the checkbox and the chips in the Work Mode box start, hotkey_length
+# what the key starts. Unset means "whatever auto_off says"; "off" is a peek
+# with no clock on it. Pressing the key again while one is running adds another
+# hotkey_length, up to an hour.
+# tap           = "5m"
+# hotkey_length = "2m"
+
 [recent]
 # Reading a chat is what takes an unread-gated one out of the view, so without
 # this it vanishes on the frame you click away from it. The clock starts when

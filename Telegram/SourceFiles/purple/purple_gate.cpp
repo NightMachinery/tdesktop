@@ -537,20 +537,45 @@ bool HiddenFromSuggestions(not_null<History*> history) {
 		&& !history->purpleReachableElsewhere();
 }
 
-PeekChange TogglePeek() {
-	const auto &resolved = Instance().resolved();
-	if (resolved.normal) {
+PeekChange StartPeekFor(int seconds) {
+	if (Instance().resolved().normal) {
 		// Nothing to reveal, and starting one anyway would leave a peek
 		// running that no chat list could show the end of.
 		return { .refused = true };
 	}
-	const auto wanted = !resolved.peeking;
-	const auto seconds = wanted ? ActiveSettings().peek.autoOffSeconds : 0;
+	const auto now = NowUnix();
 	UpdateState([&](State &state) {
-		state.peekActive = wanted;
-		state.peekDeadlineUnix = (seconds > 0) ? (NowUnix() + seconds) : 0;
+		[[maybe_unused]] const auto started = StartPeek(state, now, seconds);
 	});
-	return { .peeking = wanted, .seconds = seconds };
+	return {
+		.peeking = true,
+		.seconds = seconds,
+		.leftSeconds = PeekLeftSeconds(CurrentState(), NowUnix()),
+	};
+}
+
+PeekChange ExtendPeekBy(int seconds) {
+	if (Instance().resolved().normal) {
+		return { .refused = true };
+	}
+	const auto now = NowUnix();
+	auto extended = false;
+	UpdateState([&](State &state) {
+		extended = ExtendPeek(state, now, seconds, kPeekExtendCapSeconds);
+	});
+	return {
+		.peeking = Instance().resolved().peeking,
+		.extended = extended,
+		.seconds = seconds,
+		.leftSeconds = PeekLeftSeconds(CurrentState(), NowUnix()),
+	};
+}
+
+PeekChange EndPeek() {
+	UpdateState([](State &state) {
+		StopPeek(state);
+	});
+	return {};
 }
 
 const std::vector<ExemptFolder> &ExemptFolders() {
