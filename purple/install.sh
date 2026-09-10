@@ -82,6 +82,14 @@ fi
 if [ "$RelinkStatus" -eq 2 ]; then
     echo "=== macdeployqt ==="
     "$MacDeployQt" "$Source"
+
+    # macdeployqt leaves the generic Homebrew rpath in place, and with a
+    # relocatable Qt that is fatal: QtCore resolves out of /opt/homebrew/lib,
+    # which the full "qt" formula owns, before the copy in the bundle.
+    # relink_bundle.py drops the absolute rpaths; there is nothing for it to
+    # -change by now, so this is only that.
+    echo "=== fixing rpaths after macdeployqt ==="
+    python3 "$RepoPath/purple/relink_bundle.py" "$Source"
 elif [ "$RelinkStatus" -ne 0 ]; then
     echo "Relinking failed." >&2
     exit "$RelinkStatus"

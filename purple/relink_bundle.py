@@ -6,7 +6,10 @@ into the bundle, relinks each of them, and writes qt.conf. But it only needs to
 do any of that once. On every rebuild after the first, the frameworks in the
 bundle are already there and already correct, and the single thing that has
 changed is the main binary, freshly linked against absolute paths in Homebrew
-and in the merged Qt prefix.
+and in whichever Qt prefix build_app.sh used. Nothing here is tied to that
+path: every absolute, non-system dependency is rewritten by its framework or
+file name, so the merged Homebrew prefix and the patched one are handled the
+same way.
 
 macdeployqt fixes those by running install_name_tool once per dependency, and
 each run rewrites the whole binary. There are 81 of them, so a 232MB binary gets
@@ -36,13 +39,25 @@ FRAMEWORK_TAIL = re.compile(
 
 BUNDLE_RPATH = "@executable_path/../Frameworks"
 
-# Per-formula Homebrew paths. Left in place they sit ahead of the bundle in the
-# search order and can shadow a library we bundled with whatever the machine
-# happens to have - the same trap that made us compile against FFmpeg 8 headers
-# while linking FFmpeg 6. macdeployqt drops them; so do we. The generic
-# /opt/homebrew/lib and the Qt prefix are left alone, which is also what
-# macdeployqt does.
-KEG_RPATH = re.compile(r"^/opt/homebrew/opt/[^/]+/")
+# Every absolute rpath is dropped, leaving the bundle's own. Any of them sits
+# ahead of @executable_path/../Frameworks in the search order and resolves a
+# library we bundled to whatever the machine happens to have instead - the same
+# trap that made us compile against FFmpeg 8 headers while linking FFmpeg 6.
+#
+# macdeployqt only drops the per-formula ones, /opt/homebrew/opt/<formula>/,
+# and that used to be enough: Homebrew's Qt records absolute install names, so
+# nothing in the bundle resolved Qt through @rpath at all. The patched Qt from
+# purple/build_qt.sh is built relocatable and records
+# @rpath/QtCore.framework/..., which turned the leftovers fatal. With
+# /opt/homebrew/lib still on the list the app loaded QtCore out of the full
+# "qt" formula - 6.9.2 - and died before the first window:
+#
+#     Symbol not found: __ZN10QByteArray19fromPercentEncodingEOS_c
+#       Expected in: /opt/homebrew/Cellar/qt/6.9.2/lib/QtCore.framework/...
+#
+# and the build prefix's own rpath would have loaded a second, unbundled copy
+# of the right Qt, which fails the same way for a subtler reason.
+ABSOLUTE_RPATH = re.compile(r"^/")
 
 
 def dependencies(binary):
@@ -73,6 +88,33 @@ def bundled_path(dependency):
     """Where this dependency lives inside the bundle, relative to Frameworks."""
     match = FRAMEWORK_TAIL.search(dependency)
     return match.group(1) if match else os.path.basename(dependency)
+
+
+def unresolved(app):
+    """@rpath dependencies of anything in the bundle that the bundle lacks.
+
+    Scanned across the executable, the bundled frameworks and the plugins,
+    because an absolute rpath removed here is removed for all of them.
+    """
+    frameworks = os.path.join(app, "Contents", "Frameworks")
+    missing = set()
+    for root in ("MacOS", "Frameworks", "PlugIns"):
+        for directory, _, files in os.walk(os.path.join(app, "Contents", root)):
+            for name in files:
+                path = os.path.join(directory, name)
+                if os.path.islink(path):
+                    continue
+                try:
+                    deps = dependencies(path)
+                except subprocess.CalledProcessError:
+                    continue        # not Mach-O; otool refuses it
+                for dependency in deps:
+                    if not dependency.startswith("@rpath/"):
+                        continue
+                    tail = dependency[len("@rpath/"):]
+                    if not os.path.exists(os.path.join(frameworks, tail)):
+                        missing.add(tail)
+    return missing
 
 
 def main():
@@ -124,11 +166,20 @@ def main():
     # this one is load-bearing rather than cosmetic.
     existing = rpaths(binary)
     rpath_changes = []
-    for path in existing:
-        if KEG_RPATH.match(path):
-            rpath_changes += ["-delete_rpath", path]
     if BUNDLE_RPATH not in existing:
         rpath_changes += ["-add_rpath", BUNDLE_RPATH]
+
+    # Only safe to drop the absolute ones once everything reached through
+    # @rpath is actually in the bundle. If something is missing, keeping them
+    # is what makes the app start at all, so say so and leave them.
+    missing = unresolved(app)
+    if missing:
+        print("keeping absolute rpaths; not in the bundle: "
+              + ", ".join(sorted(missing)))
+    else:
+        for path in existing:
+            if ABSOLUTE_RPATH.match(path):
+                rpath_changes += ["-delete_rpath", path]
 
     if not changes and not rpath_changes:
         print("nothing to relink")
@@ -142,7 +193,7 @@ def main():
         stderr=subprocess.DEVNULL)
 
     print(f"relinked {len(changes) // 2} dependencies"
-          f" and {len(rpath_changes) // 2} rpaths in one pass")
+          f" and {len(rpath_changes) // 2} rpath entries in one pass")
     return 0
 
 
