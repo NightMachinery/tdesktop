@@ -443,6 +443,18 @@ That debug map carries line tables and nothing else, which is all `atos` and
 `dsymutil` want from it; see "How much debug info" for what is missing and how
 to get it back.
 
+`atos` sometimes prints the addresses straight back at you, unchanged, for this
+binary — no name, no file. When that happens, do not conclude the symbols are
+gone. Dump them and look the address up by hand:
+
+```bash
+nm -n "out/Purple Telegram.unstripped" > /tmp/syms.txt
+```
+
+`nm -n` sorts by address, so the symbol you want is the last one at or below
+the address in the report, once you have subtracted the load address. That is
+what actually resolved the notification crash below.
+
 Do not be tempted to pass `-no-strip` to keep symbols in the bundle instead.
 `macdeployqt` runs `install_name_tool` once per Qt framework reference and each
 run rewrites the entire binary. `sample` on a slow install shows exactly that:
@@ -679,6 +691,13 @@ while the official build beside it was fine throughout. The stack samples
 show the process idle between interactions, so it is not a spin; it is the
 per-frame cost of the unpatched compositor.
 
+A separate defect killed the app outright twice in normal use: a native
+notification carrying a user photo, dying on a freed `CGColorSpace` inside
+`QImage::toCGImage()`. The High Sierra set's
+`0026-fix-cgimage-colorspace-use-after-free` is that fix, and it is why that
+set is applied here rather than only the main one. "The notification crash,
+and why the patched Qt fixes it" below has the whole diagnosis.
+
 If you want to test the theory without any of this, there is still a cheaper
 lever: turn off "Use Qt RHI renderer" in Settings → Advanced → Experimental
 settings (`kOptionUseQtRhi`, default on for Qt ≥ 6.7). The window then goes
@@ -908,6 +927,80 @@ Disk, on a volume that started with 24 GB free:
 Build trees are removed as each module installs, so peak usage is one module's
 tree rather than four. The sources are worth keeping: they carry the applied
 patches and the stamp, so a re-run rebuilds without re-cloning or re-patching.
+
+#### The notification crash, and why the patched Qt fixes it
+
+The two reports (2026-09-07 20:31, 2026-09-08 22:56) are the same crash
+byte for byte — identical image offsets on every frame. `EXC_BAD_ACCESS`,
+`KERN_INVALID_ADDRESS`, main thread, on the notification timer:
+
+    base::Timer::timerEvent
+      Window::Notifications::System::showNext
+        NativeManager::doShowNotification
+          Platform::Notifications::Manager::Private::showNotification
+            Platform::Q2NSImage -> QImage::toCGImage()
+              CGImageCreate -> verify_image_parameters
+                valid_image_colorspace -> CGColorSpaceGetType -> objc_msgSend
+
+`x0`, the `CGColorSpaceRef`, was a well-formed MALLOC_NANO pointer whose first
+word had been overwritten with a nano free-list link. The colour space had been
+freed and the memory recycled.
+
+The defect is in Qt 6.11.1's `qt_mac_cgImageFormatForImage`
+(`src/gui/painting/qcoregraphics.mm`). It builds the colour space into a local
+`QCFType<CGColorSpaceRef>` and returns it inside a plain `vImage_CGImageFormat`,
+which does not retain — so the caller receives a pointer to an object that has
+already been released once. Whether that is fatal depends entirely on who else
+holds a reference, which is why it looked intermittent:
+
+- An image with no colour space at all, the common case, takes
+  `CGColorSpaceCreateWithName(kCGColorSpaceSRGB)`, an immortal process-wide
+  singleton with a retain count of `UINT32_MAX`. Releasing it does nothing.
+  Same for ICC data CoreGraphics recognises as a system profile.
+- An unrecognised embedded profile — a camera or phone profile in a real
+  photo — produces an ordinary object, kept alive only by a bounded internal
+  CoreGraphics cache. When that entry is evicted the pointer dangles, and the
+  next notification carrying that userpic dies.
+
+Qt's JPEG and PNG readers attach embedded profiles by default
+(`qjpeghandler.cpp` calls `setColorSpace(QColorSpace::fromIccProfile(...))`,
+`qpnghandler.cpp` does the same on `iCCP`/`sRGB`/`gAMA` chunks), `QImage::scaled`
+and `convertToFormat` keep them, and nothing in this tree ever calls
+`setColorSpace` or `convertToColorSpace`. So the fatal input is a peer's cloud
+userpic photo with an unusual profile, reaching `Q2NSImage` through
+`GenerateUserpic` and `PeerData::GenerateUserpicImage` (`data_peer.cpp`) in the
+legacy `NSUserNotification` manager (`platform/mac/notifications_manager_mac.mm`).
+Letter avatars and Saved Messages are painted into a fresh image and are safe.
+The `UNUserNotificationCenter` manager writes a PNG and never calls `Q2NSImage`,
+but it sits behind the experimental `kOptionMacModernNotifications`, off by
+default — so every stock build takes the crashing route, and the only thing
+that differs from upstream's own build is the Qt underneath.
+
+Upstream Qt fixed it in qtbase `08e464f8559719662c5b2207d1d4c84c251eca07`,
+"Fix regression in QImage::toCGImage() with custom color space"
+(QTBUG-147602, June 2026), which landed in 6.11.2 — after the version this
+build pins. The High Sierra set's `0026-fix-cgimage-colorspace-use-after-free`,
+which this build applies, reaches the same end for the three call sites that
+exist (`QImage::toCGImage`, `QMacCGContext`, `qfontengine_coretext.mm`) by
+returning +1 and adopting at each caller, and additionally falls back to named
+sRGB when the ICC data is rejected.
+
+Note that upstream's `0013-convert-qimage-to-srgb` and `0014-lcms2` do not
+avoid this on their own: they leave decoded images with a still-valid sRGB
+`QColorSpace`, so the ICC path stays in use. It is 0026 that makes it safe.
+
+There is deliberately no guard in `Q2NSImage`. The defect is gone at its source
+in the Qt this build now ships; a guard would cover one of the three doors;
+`lib_base` is a submodule with only upstream's remote, so a change there is
+either an uncommittable dirty submodule or a fork remote to carry across every
+bump; and `setColorSpace(QColorSpace())` would render a Display P3 userpic
+slightly desaturated.
+
+That leaves exactly one residual risk: a rebuild that quietly falls back to
+Homebrew's Qt brings the crash straight back. `install.sh` therefore compares
+the bundle's `QtGui` against `/opt/homebrew/opt/qtbase`'s after deploying, and
+prints a warning naming this crash if they are byte-identical. It does not
+fail — the Homebrew route is still supported, it simply has this defect.
 
 #### Rolling back an install
 
