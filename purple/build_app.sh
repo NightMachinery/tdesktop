@@ -22,13 +22,35 @@ fi
 
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13}"
 
-# Qt must come first, and must be the merged prefix: a machine with the full
+# Qt must come first, and must be a prefix of our own: a machine with the full
 # "qt" formula installed has it linked into /opt/homebrew, where CMake would
 # otherwise find it and compile against the wrong Qt version.
-QtPrefix="$LibrariesPath/local/qt"
-if [ ! -d "$QtPrefix" ]; then
+#
+# There are two such prefixes. purple/build_qt.sh builds Qt 6.11.1 with
+# upstream's patch set into "qt-patched"; when that exists it wins, because it
+# is the same version with the macOS rendering fixes the stock build lacks.
+# Otherwise merge_qt_prefix.py assembles Homebrew's four unlinked Qt kegs into
+# one prefix, which is the original route and still works.
+#
+# Set QtPrefix in the environment to force either one. install.sh takes
+# macdeployqt from the same prefix by the same rule - change one, change both.
+QtMergedPrefix="$LibrariesPath/local/qt"
+QtPatchedPrefix="$LibrariesPath/qt-patched"
+if [ -z "$QtPrefix" ]; then
+    if [ -d "$QtPatchedPrefix" ]; then
+        QtPrefix="$QtPatchedPrefix"
+    else
+        QtPrefix="$QtMergedPrefix"
+    fi
+fi
+if [ "$QtPrefix" = "$QtMergedPrefix" ] && [ ! -d "$QtPrefix" ]; then
     python3 "$(dirname "$0")/merge_qt_prefix.py" "$QtPrefix"
 fi
+if [ ! -d "$QtPrefix" ]; then
+    echo "No Qt prefix at $QtPrefix - run purple/build_qt.sh, or unset QtPrefix." >&2
+    exit 1
+fi
+echo "=== Qt prefix: $QtPrefix ==="
 export CMAKE_PREFIX_PATH="$QtPrefix:/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt/openal-soft:/opt/homebrew/opt/openssl@3$(find "$LibrariesPath/local" -mindepth 1 -maxdepth 1 -type d -exec printf ':%s' {} +)"
 
 # Pins every translation unit to the Qt we configured against; see
