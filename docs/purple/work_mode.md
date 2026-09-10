@@ -1841,6 +1841,35 @@ actually has, not against a guess: a sentence the header would only elide into
 nothing is worse than the mark it had room for. The profile has room and always
 gets the words.
 
+### Where the line is drawn
+
+Six places in the app write a last seen, and they do not all have the same room
+or the same click. The chat header and the profile carry the words *and* the
+link: the tail is what opens the sheet, and both have somewhere to put a second
+click that is not already spoken for. Member lists, the contacts box,
+add-participants, the forward and share pickers, the chat preview popup, the
+short info box and the participant editor carry the mark alone - `· 👀` after
+the status - which says the fork has something to add about this last seen and
+leaves the two places above to be where you act on it.
+
+Informational on purpose, and not for want of trying. A `PeerListRow` has
+exactly one click and it belongs to the row: opening that person, or ticking
+them. The status is painted as one elided string with no per-region hit test
+anywhere in the class, so a link there would mean inventing a seam rather than
+using one, and a row that sometimes opens a sheet and sometimes opens the
+person is worse than a row that always does the one thing.
+
+A remembered read replaces the coarse phrase in all six, not only in the two
+that can trade. What a trade bought is a fact about that person, and a member
+list still saying `last seen recently` beside a profile saying `last seen
+14:32` would be the fork disagreeing with itself in two windows of the same
+app.
+
+Rows have no status subscription of their own - the list re-derives a status
+when the time it was given runs out - so a row carrying the fork's tail asks
+for at most a minute of that time. The remembered line ages inside its own
+words (`as of 3 min ago`), and a minute is the resolution those words have.
+
 ### Show mine to see theirs
 
 The tail is a link. It opens a sheet that explains the moment of exposure and
@@ -1891,8 +1920,42 @@ lists them.
 
 One trade per person per `trade_cooldown`. A trade is a moment of exposure
 chosen on purpose; one offered again every time their chat opens would be a
-standing subscription nobody agreed to. Asking inside the cooldown refuses in a
-toast and says how long the wait is.
+standing subscription nobody agreed to.
+
+The remembered line is a link too, and that is a repair rather than a flourish.
+The tail used to be the only door into the sheet, so the first trade replaced
+the door with the read and the second trade was unreachable for a whole
+`trade_remember` - a day, by default - unless the record happened to expire
+first. The remembered line now carries a `· refresh` of its own, and the same
+eyes mark where there is no room for the word, and it opens the same sheet. It
+stops being a link when their last seen is no longer coarse because of *your*
+rules: they have changed their own privacy since, and there is nothing left to
+trade for.
+
+Inside the cooldown that sheet opens rather than refusing. It says `You can
+refresh in 3:12`, counting down every second from the read already written
+down, with the button held disabled and greyed beside it; when the wait runs
+out the line becomes `You can refresh now` and the button - `Refresh now`
+rather than `Share once`, because this is a second look at somebody already
+traded with - becomes pressable without the box having to be closed and opened
+again. A wait is not a refusal, and a toast that fires and vanishes cannot say
+how much of one is left.
+
+The number is recomputed from the clock on every tick rather than decremented,
+so a box left open across a suspend does not go on counting a wait that
+wall-clock time has already spent.
+
+The other refusals are still toasts, because none of them is a wait: the offer
+switched off, a last seen that is not coarse because of your own rules, and a
+trade already running are each a "no" that will not turn into a "yes" while the
+box sits there.
+
+The profile's button agrees with the line beside it. It is drawn exactly when
+the status line is tappable - one answer, asked of the core - so it stands for
+a remembered read as well, and it goes when `trade_p` does. It no longer hides
+for a premium account: upstream's button was a promo, this one is not, and the
+fork's own local premium was hiding the trade from precisely the people who had
+gone looking for the fork's features.
 
 ### What each side does
 

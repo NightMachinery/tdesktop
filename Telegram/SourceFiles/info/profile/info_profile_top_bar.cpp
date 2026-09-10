@@ -3093,14 +3093,22 @@ void TopBar::setupShowLastSeen(
 		return;
 	}
 
-	// Purple: `[last_seen] trade_p' is one of the things that decides whether
-	// the button is there at all, rather than something checked once it has
-	// been pressed. With the offer off the fork has nothing to put here: it
-	// will not fall back to upstream's one tap, and last-seen privacy is then
-	// changed in Settings > Privacy, deliberately, where it can be changed
-	// back. The sheet's own "Don't offer this again" writes that switch while
-	// this profile is still on screen behind it, which is why the switch is
-	// read from SettingsChanges() and not once on construction.
+	// Purple: the button is there exactly when the status line beside it is
+	// tappable, which is the core's answer and not a second chain of tests
+	// here - so it stands for a remembered read too, where it opens the sheet
+	// that counts the cooldown down, and it goes when `[last_seen] trade_p'
+	// takes the offer away. With the offer off the fork has nothing to put
+	// here: it will not fall back to upstream's one tap, and last-seen privacy
+	// is then changed in Settings > Privacy, deliberately, where it can be
+	// changed back. The sheet's own "Don't offer this again" writes that
+	// switch while this profile is still on screen behind it, which is why the
+	// switch is read from SettingsChanges() and not once on construction.
+	//
+	// Premium is not part of it. Upstream's button was a promo - buy Premium
+	// or open your last seen to everybody - and this one is neither, so a
+	// premium account (local premium included) hiding it would only hide the
+	// trade from the people most likely to have turned their own last seen
+	// off.
 	rpl::combine(
 		user->session().changes().peerFlagsValue(
 			user,
@@ -3112,11 +3120,9 @@ void TopBar::setupShowLastSeen(
 		const auto premium = amPremium || localPremium;
 		const auto wasShown = _showLastSeen->toggled();
 		const auto hiddenByMe = user->lastseen().isHiddenByMe();
-		const auto shown = hiddenByMe
-			&& !user->lastseen().isOnline(base::unixtime::now())
-			&& !premium
-			&& user->session().premiumPossible()
-			&& Purple::LastSeenTradeOffered();
+		const auto now = base::unixtime::now();
+		const auto shown = !user->lastseen().isOnline(now)
+			&& Purple::LastSeenNoteFor(user, now, true, false).tappable;
 		_showLastSeen->toggle(shown, anim::type::instant);
 		if (wasShown && premium && hiddenByMe) {
 			user->updateFullForced();

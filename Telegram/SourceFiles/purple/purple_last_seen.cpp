@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "data/data_changes.h"
+#include "data/data_lastseen_status.h"
 #include "data/data_peer_values.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -22,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
@@ -41,6 +43,7 @@ namespace {
 // one that ran into the first.
 const auto kSeparator = QString::fromUtf8(" \xC2\xB7 ");
 const auto kLongReason = u"share yours to see"_q;
+const auto kLongRefresh = u"refresh"_q;
 const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 
 [[nodiscard]] const LastSeen &Config() {
@@ -103,23 +106,46 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 	return (hours == 1) ? u"an hour"_q : u"%1 hours"_q.arg(hours);
 }
 
-[[nodiscard]] QString RememberedText(
-		const LastSeenTrade &trade,
-		TimeId now) {
-	return u"last seen %1%2as of %3"_q.arg(
-		ExactMoment(TimeId(trade.wasOnlineUnix), now),
-		kSeparator,
-		AgeText(std::max(now - TimeId(trade.readAtUnix), 0)));
+// The wait the sheet counts down, as a clock rather than as a phrase: it is
+// ticking on screen, and "about 3 minutes" that stands still for sixty seconds
+// reads as a stuck box.
+[[nodiscard]] QString CooldownText(int seconds) {
+	const auto hours = seconds / 3600;
+	const auto rest = seconds % 60;
+	return hours
+		? u"%1:%2:%3"_q.arg(hours)
+			.arg((seconds / 60) % 60, 2, 10, QChar('0'))
+			.arg(rest, 2, 10, QChar('0'))
+		: u"%1:%2"_q.arg(seconds / 60).arg(rest, 2, 10, QChar('0'));
 }
 
-[[nodiscard]] std::optional<LastSeenTrade> TradeFor(
-		not_null<UserData*> user,
-		TimeId now) {
-	return RememberedTrade(
+[[nodiscard]] QString RememberedText(const LastSeenNote &note, TimeId now) {
+	return u"last seen %1%2as of %3"_q.arg(
+		ExactMoment(TimeId(note.wasOnlineUnix), now),
+		kSeparator,
+		AgeText(std::max(now - TimeId(note.readAtUnix), 0)));
+}
+
+// The one fact about a status the core cannot read for itself: whether it is
+// one of the three vague spellings. Everything after this is a rule about
+// data, and those live in the core.
+[[nodiscard]] bool CoarseStatus(Data::LastseenStatus status) {
+	return status.isRecently()
+		|| status.isWithinWeek()
+		|| status.isWithinMonth();
+}
+
+[[nodiscard]] LastSeenNote NoteFor(not_null<UserData*> user, TimeId now) {
+	if (!Eligible(user)) {
+		return LastSeenNote();
+	}
+	return LastSeenNoteNow(
+		ActiveSettings(),
 		CurrentState(),
 		IdOf(user),
-		int64(now),
-		Config().tradeRememberSeconds);
+		ReasonForUser(user),
+		CoarseStatus(user->lastseen()),
+		int64(now));
 }
 
 // One trade, from the click to the rules going back. At most one runs at a time
@@ -313,8 +339,11 @@ void Trade::restore() {
 		*_previous);
 }
 
-[[nodiscard]] QString Refusal(not_null<UserData*> user, TimeId now) {
-	const auto &config = Config();
+// What the sheet will not open for at all. The cooldown is deliberately not
+// here: a wait is not a refusal, and refusing it in a toast is what made the
+// remembered line a dead end - the sheet opens, counts the wait down and
+// offers the re-trade when it is spent.
+[[nodiscard]] QString Refusal(not_null<UserData*> user) {
 	if (!LastSeenTradeOffered()) {
 		return u"The last seen trade is switched off."_q;
 	} else if (ReasonForUser(user) != LastSeenReason::ByMe) {
@@ -322,14 +351,6 @@ void Trade::restore() {
 			"so there is nothing to trade."_q.arg(user->shortName());
 	} else if (Running) {
 		return u"A trade is already running."_q;
-	} else if (!TradeAllowed(
-			CurrentState(),
-			IdOf(user),
-			int64(now),
-			config.tradeCooldownSeconds)) {
-		return u"You traded with %1 less than %2 ago."_q.arg(
-			user->shortName(),
-			DurationText(config.tradeCooldownSeconds));
 	}
 	return QString();
 }
@@ -347,41 +368,45 @@ LastSeenReason ReasonForUser(not_null<UserData*> user) {
 	return ReasonFor(!status.isHidden(), coarse, status.isHiddenByMe());
 }
 
-LastSeenNote LastSeenNoteFor(
+LastSeenText LastSeenNoteFor(
 		not_null<UserData*> user,
 		TimeId now,
 		bool full,
 		bool narrow) {
-	auto result = LastSeenNote();
+	auto result = LastSeenText();
 	result.base = full
 		? Data::OnlineTextFull(user, now)
 		: Data::OnlineText(user, now);
 	result.text = result.base;
 
-	const auto &config = Config();
-	if (!config.reasons || !Eligible(user)) {
+	const auto note = NoteFor(user, now);
+	result.tappable = note.tappable;
+	switch (note.line) {
+	case LastSeenLine::Plain:
 		return result;
-	}
-	const auto status = user->lastseen();
-	if (!status.isHidden() || status.isOnline(now)) {
-		return result;
-	}
 
 	// A read that is still fresh replaces the coarse phrase rather than hanging
 	// off it: "last seen recently, and also 14:32" would be the app saying the
-	// vaguer half first.
-	if (const auto trade = TradeFor(user, now)) {
-		if (trade->wasOnlineUnix) {
-			result.base = RememberedText(*trade, now);
-			result.text = result.base;
-			return result;
+	// vaguer half first. What hangs off it instead is the way back into the
+	// sheet, because the trade took the tail that used to be the only door.
+	case LastSeenLine::Remembered:
+		result.base = RememberedText(note, now);
+		result.text = result.base;
+		if (note.tappable) {
+			result.tail = narrow ? kShortReason : kLongRefresh;
+		}
+		break;
+
+	case LastSeenLine::ByMeTail:
+		result.tail = narrow ? kShortReason : kLongReason;
+		break;
+	}
+	if (!result.tail.isEmpty()) {
+		result.text = result.base + kSeparator + result.tail;
+		if (note.tappable) {
+			result.link = result.tail;
 		}
 	}
-	if (ReasonForUser(user) != LastSeenReason::ByMe) {
-		return result;
-	}
-	result.link = narrow ? kShortReason : kLongReason;
-	result.text = result.base + kSeparator + result.link;
 	return result;
 }
 
@@ -393,13 +418,26 @@ void ShowLastSeenTradeBox(
 		not_null<Window::SessionController*> controller,
 		not_null<UserData*> user) {
 	const auto now = base::unixtime::now();
-	if (const auto refusal = Refusal(user, now); !refusal.isEmpty()) {
+	if (const auto refusal = Refusal(user); !refusal.isEmpty()) {
 		controller->showToast(refusal);
 		return;
 	}
 	const auto session = &controller->session();
 	const auto show = controller->uiShow();
+	const auto peer = IdOf(user);
 	const auto seconds = Config().tradeHoldSeconds;
+	const auto cooldown = Config().tradeCooldownSeconds;
+	const auto left = TradeCooldownLeft(
+		CurrentState(),
+		peer,
+		int64(now),
+		cooldown);
+	const auto again = (left > 0)
+		|| RememberedTrade(
+			CurrentState(),
+			peer,
+			int64(now),
+			Config().tradeRememberSeconds).has_value();
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(u"Show mine to see theirs"_q));
 
@@ -417,6 +455,15 @@ void ShowLastSeenTradeBox(
 					DurationText(seconds)),
 				st::boxLabel),
 			st::boxRowPadding);
+
+		const auto countdown = (left > 0)
+			? container->add(
+				object_ptr<Ui::FlatLabel>(
+					container,
+					QString(),
+					st::boxDividerLabel),
+				st::boxRowPadding)
+			: nullptr;
 
 		// "Don't offer this again" is the same switch as Settings -> Advanced
 		// -> Purple -> "Offer the last seen trade", written to settings.toml,
@@ -445,16 +492,48 @@ void ShowLastSeenTradeBox(
 			}, u"the last seen trade"_q);
 		};
 
-		box->addButton(rpl::single(u"Share once"_q), [=] {
-			apply();
-			box->closeBox();
-			if (Running) {
-				show->showToast(u"A trade is already running."_q);
-				return;
-			}
-			Running = std::make_unique<Trade>(session, user, show);
-			Running->start();
-		});
+		const auto share = box->addButton(
+			rpl::single(again ? u"Refresh now"_q : u"Share once"_q),
+			[=] {
+				apply();
+				box->closeBox();
+				if (Running) {
+					show->showToast(u"A trade is already running."_q);
+					return;
+				}
+				Running = std::make_unique<Trade>(session, user, show);
+				Running->start();
+			});
+
+		// One trade per person per `trade_cooldown', counted from the read
+		// that is already written down, so the wait is the same number the
+		// line behind this box is offering to refresh. It is recomputed from
+		// the clock on every tick rather than decremented, because a box left
+		// open through a suspend would otherwise finish counting a wait that
+		// wall-clock time had already spent.
+		if (countdown) {
+			share->setDisabled(true);
+			share->setTextFgOverride(st::windowSubTextFg->c);
+			const auto timer = box->lifetime().make_state<base::Timer>();
+			const auto tick = [=] {
+				const auto left = TradeCooldownLeft(
+					CurrentState(),
+					peer,
+					int64(base::unixtime::now()),
+					cooldown);
+				if (left > 0) {
+					countdown->setText(
+						u"You can refresh in %1."_q.arg(CooldownText(left)));
+					timer->callOnce(crl::time(1000));
+					return;
+				}
+				countdown->setText(u"You can refresh now."_q);
+				share->setDisabled(false);
+				share->setTextFgOverride(std::nullopt);
+			};
+			timer->setCallback(tick);
+			tick();
+		}
 		box->addButton(tr::lng_cancel(), [=] {
 			apply();
 			box->closeBox();

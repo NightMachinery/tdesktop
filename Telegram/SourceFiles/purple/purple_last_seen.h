@@ -30,18 +30,23 @@ class SessionController;
 namespace Purple {
 
 // A status line as the fork writes it, in the pieces a caller has to have
-// separately: `base' is what upstream would have written, `link' is the words
-// that open the trade and nothing else, and `text' is the two joined the way
-// they are shown. A caller that cannot make a link - the chat header paints a
-// plain string - shows `text' and hit-tests the tail; one that can - the
-// profile - builds `base' plus a link out of `link'.
+// separately: `base' is what upstream would have written - or the remembered
+// read that replaces it outright - `tail' is what the fork appends after the
+// middle dot, and `text' is the two joined the way they are shown. `link' is
+// the tail again, and only when tapping it opens the trade sheet: a caller
+// that cannot make a link - a peer list row paints one elided string - shows
+// `text' and stops there, one that can hit-tests or wraps `link'.
 //
-// Every field is already gated: `link' is empty unless there is something to
-// offer, so no call site repeats the rules.
-struct LastSeenNote {
+// Every field is already gated: `link' is empty, and `tappable' false, unless
+// there is a sheet worth opening, so no call site repeats the rules. The
+// decision behind all of it is `Purple::LastSeenNoteNow' in the core; this is
+// only the words for it, which is why the two names differ.
+struct LastSeenText {
 	QString text;
 	QString base;
+	QString tail;
 	QString link;
+	bool tappable = false;
 };
 
 // Why this person's last seen is coarse, or None when it is not coarse, when
@@ -52,7 +57,7 @@ struct LastSeenNote {
 // `full' picks Data::OnlineTextFull over Data::OnlineText, the way the profile
 // and the chat header already differ. `narrow' asks for the short mark instead
 // of the words, for a line with no room for a sentence.
-[[nodiscard]] LastSeenNote LastSeenNoteFor(
+[[nodiscard]] LastSeenText LastSeenNoteFor(
 	not_null<UserData*> user,
 	TimeId now,
 	bool full,

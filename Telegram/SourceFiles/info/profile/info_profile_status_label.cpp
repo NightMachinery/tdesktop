@@ -166,12 +166,13 @@ void StatusLabel::refresh() {
 			auto body = (showOnline && _colorized)
 				? Ui::Text::Colorized(note.base)
 				: TextWithEntities{ .text = note.base };
-			if (!note.link.isEmpty()) {
-				hasLastSeenLink = (_lastSeenLinkCallback != nullptr);
+			if (!note.tail.isEmpty()) {
+				hasLastSeenLink = !note.link.isEmpty()
+					&& (_lastSeenLinkCallback != nullptr);
 				body.append(QString::fromUtf8(" \xC2\xB7 "));
 				body.append(hasLastSeenLink
-					? Link(note.link, 3)
-					: TextWithEntities{ .text = note.link });
+					? Link(note.tail, 3)
+					: TextWithEntities{ .text = note.tail });
 			}
 			return MaybeHiddenPrefixed(std::move(body), hidden);
 		} else if (auto chat = _peer->asChat()) {

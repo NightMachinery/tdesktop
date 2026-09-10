@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "storage/file_download.h"
 #include "data/data_peer_values.h"
+#include "purple/purple_last_seen.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_session.h"
@@ -42,6 +43,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <xxhash.h> // XXH64.
 #include <QtWidgets/QApplication>
+
+namespace {
+
+// Purple: how long a status line carrying the fork's last-seen tail may stand
+// before it is worked out again. A remembered read ages inside the words it is
+// written in - "as of 3 min ago" - and a row has no cheaper hook than the
+// repaint the list already schedules off this number.
+constexpr auto kPurpleLastSeenRefresh = crl::time(60000);
+
+} // namespace
 
 [[nodiscard]] PeerListRowId UniqueRowIdFromString(const QString &d) {
 	return XXH64(d.data(), d.size() * sizeof(ushort), 0);
@@ -727,12 +738,22 @@ void PeerListRow::refreshStatus() {
 			setStatusText(_savedMessagesStatus);
 		} else {
 			auto time = base::unixtime::now();
-			setStatusText(Data::OnlineText(user, time));
+
+			// Purple: a row carries the fork's words but never its link. A
+			// PeerListRow has one click and it belongs to the row, so the tail
+			// here only says that the coarse time is our own privacy's doing,
+			// and the trade stays with the chat header and the profile, which
+			// have somewhere to put a second click.
+			const auto note = Purple::LastSeenNoteFor(user, time, false, true);
+			setStatusText(note.text);
 			if (Data::OnlineTextActive(user, time)) {
 				_statusType = StatusType::Online;
 			}
+			const auto timeout = Data::OnlineChangeTimeout(user, time);
 			_statusValidTill = crl::now()
-				+ Data::OnlineChangeTimeout(user, time);
+				+ (note.tail.isEmpty()
+					? timeout
+					: std::min(timeout, kPurpleLastSeenRefresh));
 		}
 	} else if (auto chat = peer()->asChat()) {
 		if (!chat->amIn()) {

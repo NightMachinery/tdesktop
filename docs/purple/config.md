@@ -565,16 +565,26 @@ app writes on first run, which carries a commented example of each.
     trade_remember = "24h"
     trade_cooldown = "5m"
 
-`reasons_p` decides whether the status line in the chat header and the profile
-says *why* it will not give an exact "last seen". There are only two answers it
-will ever give - your own privacy caused it, or nothing is added - and the
-reasoning behind that, including why "a long time ago" is never explained, is
-in [work_mode.md](work_mode.md).
+`reasons_p` decides whether a status line says *why* it will not give an exact
+"last seen". There are only two answers it will ever give - your own privacy
+caused it, or nothing is added - and the reasoning behind that, including why
+"a long time ago" is never explained, is in [work_mode.md](work_mode.md). It
+governs every place a last seen is written, not only the chat header and the
+profile: member lists, the pickers, the chat preview popup and the short info
+box get the eyes mark where those two get the words.
 
-`trade_p` decides whether that line also offers the one-off trade: show them
-your last seen for a moment, read theirs, put your privacy back. Turning it off
+What it does *not* govern is a read a trade came back with. That line is shown
+with `reasons_p` off, because it is not the fork explaining a status - it is
+the fork showing the answer to a question asked out loud, and a switch that
+turns explanations off should not swallow it.
+
+`trade_p` decides whether a line also offers the one-off trade: show them your
+last seen for a moment, read theirs, put your privacy back. Turning it off
 leaves the explanation and takes away the offer, and it is what the sheet's
-"Don't offer this again" writes.
+"Don't offer this again" writes. It is the only key that decides whether a line
+is tappable - both the reason tail and a remembered read open the sheet while
+it is on, and neither does while it is off - and it takes the profile's own
+button with it.
 
 `trade_hold` is how long to wait for their status after asking before restoring
 your rules. Ten seconds by design: the whole exposure is that window, and a
@@ -585,6 +595,8 @@ dropped rather than shown as older and older news - "as of 3 min ago" is useful
 and "as of 2 days ago" is not.
 
 `trade_cooldown` is the least time between two trades with the same person.
+Inside it the sheet still opens, counts the wait down and offers the re-trade
+once it is spent, rather than refusing in a toast.
 
 All three durations are written the way every other duration in this file is -
 `"10s"`, `"5m"`, `"24h"` - and a spelling the parser cannot read warns and keeps

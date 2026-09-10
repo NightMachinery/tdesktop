@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_peer.h"
 #include "data/data_peer_values.h"
+#include "purple/purple_last_seen.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
@@ -254,7 +255,8 @@ void ProcessFullPhoto(
 			auto lifetime = rpl::lifetime();
 			const auto timer = lifetime.make_state<base::Timer>();
 			const auto push = [=] {
-				consumer.put_next(Data::OnlineText(user, now));
+				consumer.put_next(
+					Purple::LastSeenNoteFor(user, now, false, true).text);
 				timer->callOnce(Data::OnlineChangeTimeout(user, now));
 			};
 			timer->setCallback(push);
