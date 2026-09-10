@@ -504,8 +504,10 @@ enter_preset = "work"
 exit_preset  = "previous"
 
 [peek]
-hotkey   = "Ctrl+Shift+E"
-auto_off = "2m"
+hotkey        = "Ctrl+Shift+E"
+auto_off      = "2m"
+tap           = "5m"
+hotkey_length = "2m"
 ```
 
 `days` are `mon` to `sun`, times are `HH:MM` local. A rule whose `to` is earlier
@@ -527,6 +529,12 @@ whatever was active when the focus came on, rather than a preset named outright.
 A **peek** temporarily reveals what the active preset hides - every chat, every
 folder - and deliberately leaves the silencing exactly where it was. It ends on
 `auto_off`: `"90s"`, `"2m"`, `"1h"`, or `"off"` to run until you turn it off.
+
+`tap` and `hotkey_length` give the two ways of starting one their own lengths -
+`tap` for the checkbox and the chips in the Work Mode box, `hotkey_length` for
+the key - and each falls back to `auto_off` when it is not written. Pressing the
+key again while a peek is running **extends** it by another `hotkey_length`, up
+to an hour; past that, or on a peek with no clock, the same press ends it.
 
 `hotkey` is read as Qt portable text, so **on macOS `Ctrl` means Command** and
 `Meta` means the physical Control key. The Work Mode box prints the combination

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_preset_box.h"
 
 #include "base/timer.h"
+#include "base/timer_rpl.h"
 #include "core/file_utilities.h"
 #include "data/data_session.h"
 #include "dialogs/dialogs_indexed_list.h"
@@ -18,9 +19,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_device.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_peek.h"
 #include "purple/purple_schedule.h"
 #include "ui/layers/generic_box.h"
+#include "ui/qt_object_factory.h"
 #include "ui/text/text_utilities.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
@@ -134,10 +138,19 @@ constexpr auto kScheduleTick = crl::time(30 * 1000);
 	return HotkeyText(ActiveSettings().peek.hotkey);
 }
 
-[[nodiscard]] QString Remaining(int seconds) {
-	return u"%1:%2"_q
-		.arg(seconds / 60)
-		.arg(seconds % 60, 2, 10, QChar('0'));
+// A length as a chip names it. Zero is the position one past the last detent,
+// where the core puts "no clock on it at all".
+[[nodiscard]] QString ChipText(int seconds) {
+	if (!seconds) {
+		return u"until I stop"_q;
+	} else if (seconds >= 3600 && !(seconds % 3600)) {
+		return u"%1 h"_q.arg(seconds / 3600);
+	}
+	return u"%1 min"_q.arg(seconds / 60);
+}
+
+[[nodiscard]] int64 NowSeconds() {
+	return QDateTime::currentSecsSinceEpoch();
 }
 
 // What the preset is doing at this moment, rather than what it says it will do.
@@ -233,7 +246,7 @@ void PresetBox(
 		const auto left = std::max(
 			int(deadline - QDateTime::currentSecsSinceEpoch()),
 			0);
-		return u"Peeking - %1 left"_q.arg(Remaining(left));
+		return u"Peeking - %1 left"_q.arg(PeekRemainingText(left));
 	};
 	const auto peek = container->add(
 		object_ptr<Ui::Checkbox>(
@@ -245,16 +258,89 @@ void PresetBox(
 	peek->setDisabled(ActiveResolved().normal);
 	peek->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
-		if (checked != Peeking()) {
-			TogglePeek();
+		if (checked == Peeking()) {
+			return;
+		} else if (checked) {
+			StartPeekFor(PeekTapSeconds(ActiveSettings()));
+		} else {
+			EndPeek();
 		}
 	}, peek->lifetime());
+
+	// The checkbox is still the on/off, and this row is the same switch with a
+	// number on it. One length in the file was never going to be right for
+	// both "check one thing" and "the rest of this call", and the lengths come
+	// from the core so a phone's chips and this row cannot drift apart.
+	//
+	// A chip pressed while a peek is running RESTARTS it at that length rather
+	// than adding to it. The chip names a length and the peek then has it,
+	// which is the only thing a row of lengths can be read as; adding belongs
+	// to the hotkey, where there is no number on screen to contradict.
+	const auto chips = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		padding);
+	auto lengths = PeekDetentsSeconds();
+	lengths.push_back(0);
+	auto row = std::vector<Ui::RoundButton*>();
+	for (const auto seconds : lengths) {
+		const auto chip = Ui::CreateChild<Ui::RoundButton>(
+			chips,
+			rpl::single(ChipText(seconds)),
+			st::defaultTableSmallButton);
+		chip->setFullRadius(true);
+		chip->setClickedCallback([=] { StartPeekFor(seconds); });
+		row.push_back(chip);
+	}
+	chips->widthValue(
+	) | rpl::on_next([=](int width) {
+		const auto skip = st::normalFont->spacew;
+		auto left = 0;
+		auto top = 0;
+		auto height = 0;
+		for (const auto chip : row) {
+			if (left && (left + chip->width() > width)) {
+				left = 0;
+				top += chip->height() + skip;
+			}
+			chip->moveToLeft(left, top, width);
+			left += chip->width() + skip;
+			height = top + chip->height();
+		}
+		chips->resize(width, height);
+	}, chips->lifetime());
+
+	const auto refreshChips = [=] {
+		const auto normal = ActiveResolved().normal;
+
+		// Which chip is lit follows what is LEFT rather than what was asked
+		// for, so a five minute peek with ninety seconds on it lights the two
+		// minute chip. The row is a picture of the peek now, and nothing
+		// anywhere remembers the length it was started with.
+		const auto lit = !Peeking()
+			? -1
+			: PeekUntilStopped(CurrentState())
+			? int(PeekDetentsSeconds().size())
+			: PeekDetentIndex(PeekLeftSeconds(CurrentState(), NowSeconds()));
+		for (auto i = 0; i != int(row.size()); ++i) {
+			const auto on = (i == lit);
+			row[i]->setDisabled(normal);
+			row[i]->setBrushOverride(on
+				? std::make_optional(QBrush(st::activeButtonBg->c))
+				: std::nullopt);
+			row[i]->setTextFgOverride(on
+				? std::make_optional(st::activeButtonFg->c)
+				: std::nullopt);
+		}
+	};
 
 	// Ticks the countdown while one is running, and only then: a timer left
 	// running behind a closed box would repaint a label nobody is looking at
 	// once a second for as long as the app is up.
 	const auto ticker = box->lifetime().make_state<base::Timer>();
-	ticker->setCallback([=] { peek->setText(peekText()); });
+	ticker->setCallback([=] {
+		peek->setText(peekText());
+		refreshChips();
+	});
 
 	// Follows the engine rather than the click, so a peek started from the
 	// hotkey, or ended by its own timer, moves the tick here too. Disabled
@@ -265,6 +351,7 @@ void PresetBox(
 			Ui::Checkbox::NotifyAboutChange::DontNotify);
 		peek->setDisabled(ActiveResolved().normal);
 		peek->setText(peekText());
+		refreshChips();
 		if (Peeking() && CurrentState().peekDeadlineUnix) {
 			ticker->callEach(crl::time(1000));
 		} else {
@@ -518,19 +605,35 @@ void PresetBox(
 }
 
 rpl::producer<QString> PresetMenuLabel() {
-	return rpl::single(
-		rpl::empty
-	) | rpl::then(
-		ActiveChanges()
+	// The second source is the peek's own second hand, and it emits only while
+	// there is a countdown to move: the menu is open for as long as somebody
+	// leaves it open, and a label rewritten once a second for a preset that is
+	// not going anywhere would be a timer running for nothing.
+	return rpl::merge(
+		rpl::single(rpl::empty) | rpl::then(ActiveChanges()),
+		base::timer_each(
+			crl::time(1000)
+		) | rpl::filter([] {
+			return Peeking() && CurrentState().peekDeadlineUnix;
+		}) | rpl::to_empty
 	) | rpl::map([] {
 		const auto &resolved = ActiveResolved();
-		return resolved.normal
-			? u"Work Mode"_q
-			: resolved.peeking
-			// A peek reveals the chats a preset hides, which is the one time
-			// the chat list stops matching the preset the label names.
-			? u"Work Mode: %1 (peeking)"_q.arg(ViewName())
-			: u"Work Mode: %1"_q.arg(ViewName());
+		if (resolved.normal) {
+			return u"Work Mode"_q;
+		} else if (!resolved.peeking) {
+			return u"Work Mode: %1"_q.arg(ViewName());
+		}
+
+		// A peek reveals the chats a preset hides, which is the one time the
+		// chat list stops matching the preset the label names - and how long
+		// that goes on is the question the word "peeking" raises without
+		// answering.
+		const auto left = PeekLeftSeconds(CurrentState(), NowSeconds());
+		return left
+			? u"Work Mode: %1 (peeking, %2 left)"_q.arg(
+				ViewName(),
+				PeekRemainingText(left))
+			: u"Work Mode: %1 (peeking)"_q.arg(ViewName());
 	});
 }
 

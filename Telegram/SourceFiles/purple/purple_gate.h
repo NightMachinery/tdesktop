@@ -196,6 +196,7 @@ struct OverrideSpan {
 };
 [[nodiscard]] OverrideSpan OverrideDeadline(not_null<const PeerData*> peer);
 
+// What a peek gesture did, for the toast or the label that reports it.
 struct PeekChange {
 	bool peeking = false;
 
@@ -203,13 +204,34 @@ struct PeekChange {
 	// written. Worth reporting rather than leaving a keypress look broken.
 	bool refused = false;
 
-	// How long the peek that just started will run, or zero for "until it is
-	// turned off", which is what auto_off = "off" means.
+	// An extension actually moved the deadline. False when there was nothing
+	// to move: no clock on the peek, or the cap already spent.
+	bool extended = false;
+
+	// The length that was asked for, or zero for "until it is turned off",
+	// which is what auto_off = "off" means.
 	int seconds = 0;
+
+	// What is left on the clock now. Zero when nothing is running AND when the
+	// running peek has no clock, exactly as the core's PeekLeftSeconds()
+	// answers it.
+	int leftSeconds = 0;
 };
 
-// Starts a peek, or ends the one running.
-PeekChange TogglePeek();
+// Starts a peek of `seconds', or one with no clock when `seconds' is zero.
+// Restarts the one already running rather than adding to it: a control that
+// names a length is asking for that length, not for more.
+PeekChange StartPeekFor(int seconds);
+
+// Adds to the running one, capped at `kPeekExtendCapSeconds' from now.
+// `extended' comes back false, with nothing written, when there is nothing to
+// extend - no peek, no clock on it, or the cap already reached.
+PeekChange ExtendPeekBy(int seconds);
+
+// Ends the one running. Named apart from the core's `StopPeek(State&)' rather
+// than overloading it: the two would sit in one namespace, and a call site
+// should not have to count arguments to see which layer it is in.
+PeekChange EndPeek();
 
 // The chat folders the active preset shows, in the order it named them,
 // possibly including the "*ALL" marker that stands for every folder the entry

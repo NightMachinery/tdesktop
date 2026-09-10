@@ -25,4 +25,10 @@ namespace Purple {
 // they belong to.
 void ListenHotkeys(not_null<Ui::RpWidget*> widget);
 
+// What is left of a peek, as a clock: "4:12". A countdown that moves every
+// second wants a second hand, which is why this is not `Purple::FormatSpan' -
+// that one rounds to whole minutes, which is right for a chart and wrong for a
+// number the reader is watching tick.
+[[nodiscard]] QString PeekRemainingText(int seconds);
+
 } // namespace Purple
