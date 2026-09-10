@@ -187,24 +187,64 @@ crash means, which screen to open, whether a wrong line is a bug or a fixture.
 This script is a convenience that session can reach for, not the task itself:
 
     ~/.purple-android-test/bin/nightly.sh                  # the whole run
-    ~/.purple-android-test/bin/nightly.sh --no-build       # stress what is installed
+    ~/.purple-android-test/bin/nightly.sh --no-build       # fetch, sign and install what is on the box
+    ~/.purple-android-test/bin/nightly.sh --no-install     # stress what is installed
     ~/.purple-android-test/bin/nightly.sh --no-emulator    # tests and builds only
+    ~/.purple-android-test/bin/nightly.sh --keep-emulator  # leave the emulator up at the end
 
-The cost of the agent's scheduler is that it holds no state on disk: the
-session has to still be alive at the appointed hour, and a laptop asleep at one
-o'clock does nothing at all rather than catching up on waking. Run it by hand
-in the morning when that happens - the report says what it did either way.
+`--no-build` skips only the forty minutes on the box: it still fetches, signs
+and installs the `app-aligned.apk` already sitting there, which is how the
+night's build gets stressed a second time without being built a second time.
+`--no-install` is the meaning `--no-build` used to have - touch neither the box
+nor the package, and stress whatever the emulator already holds.
+`--keep-emulator` skips the shutdown, worth six gigabytes only when somebody is
+about to look at the thing.
 
-Three things it deliberately does not do. It never taps: an unattended run
+The APK is signed on this machine, not on the box. The emulator's installed
+copy carries the release key, and Android will not upgrade a package whose
+signer has changed: the install comes back
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and the only way past that is an uninstall
+that takes the test account's session and settings with it. The box cannot sign
+with the real key either, because the keystore must never go there. So the run
+fetches the box's *unsigned* `app-aligned.apk` and hands it to
+`purple/sign.sh`, which signs it with the release keystore here - outside every
+git checkout, and never copied to the box. The certificate DN `sign.sh` prints
+goes to the log and not into the report.
+
+It was the other way round until 2026-09-11: the run installed the box's
+`app-emu.apk`, signed with the throwaway key, on the theory that matching the
+box's signer was what kept the upgrade possible. It was not - the emulator had
+been given a real-key build by hand in the meantime - and the 2026-09-10 run is
+what that cost. The install was refused, one FAIL line said so, and all five
+stress phases then ran against a build three days old while every other line of
+the report read green. So the install step now reads `versionName` and
+`lastUpdateTime` back out of `dumpsys package` and puts them in the note, and
+the build note carries the SHA the box actually had checked out, which is not
+always this machine's HEAD. If the keystore env file is unreadable - a
+different machine, a volume not mounted - the run records FAIL "release key not
+on this machine" and installs nothing, rather than falling back to a signature
+the emulator would refuse.
+
+If an emulator is already up, the run uses it and says so instead of starting
+one. `emu-start.sh` kills the adb server and boots on port 5554, so calling it
+while something is already there takes out the instance it was meant to test
+against; the run reads `sys.boot_completed` before it ever reaches the start
+script.
+
+After installing and before starting the app, the run turns the app's own
+logging on: `logsEnabled` true in the account's
+`shared_prefs/systemConfig.xml`, owned and moded like the prefs files beside it
+(the mode is read with `stat` at the time, not assumed). That is there because
+the sweep at the end greps the app's log for load errors, the account had
+logging off, and a nought-byte log passes a grep for errors exactly as a clean
+one does. `systemConfig`, not `mainconfig` - see below.
+
+Two things it deliberately does not do. It never taps: an unattended run
 cannot look at a screenshot to see where a tap landed, and a tap that lands in
 a chat sends something to a real person, so the driving is files, restarts,
-scrolls and rotation only. It installs the box's `app-emu.apk` rather than
-signing `app-aligned.apk` with the real keystore, because the emulator's
-installed copy carries the box's throwaway key and a changed signer would make
-Android refuse the upgrade and take the test account's data with it. And it
-clears `[sync] send_after_save_p` on the test account before it starts, since
-auto-send posts a document to Saved Messages after every write and a stress run
-is thousands of writes.
+scrolls and rotation only. And it clears `[sync] send_after_save_p` on the test
+account before it starts, since auto-send posts a document to Saved Messages
+after every write and a stress run is thousands of writes.
 
 ### Things that cost a run each, on any host
 
