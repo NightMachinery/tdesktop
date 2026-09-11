@@ -2726,6 +2726,23 @@ carries the row and the tap length in the load JSON (`peekDetents`, `peekTap`,
 letting Java round: a second copy of "nearest, and a tie reads as the shorter"
 is exactly the kind of thing that comes to differ by one chip on one platform.
 
+**The dial is above them, and it has to ask for the touch rather than take
+it.** The desktop's dial lives in a box that nothing else is dragging; the
+phone's sits in a sheet that scrolls and dismisses, where a widget that claims
+every finger that lands on it turns a mis-aimed swipe into a peek. So a press on
+the ring band is watched rather than claimed: the gesture becomes the dial's
+only on a press-and-hold, or on movement *along* the ring past the touch slop,
+and until one of those happens the sheet is free to take it as a scroll. A press
+anywhere but the band is handed straight back. Once it is claimed the dial calls
+`requestDisallowInterceptTouchEvent`, ticks the haptic once per stop crossed -
+the detents a finger can feel, where the desktop has a wheel's own notches - and
+starts the peek on the release, at the stop under the finger; a release away
+from the band abandons it, which is this side's answer to the desktop's release
+off the ring. A plain tap on a tick is the short way in, and is exactly a chip
+press with a smaller target. The angle-to-stop rounding is the widget's own,
+since the core has never heard of an angle, but it rounds the desktop's way -
+nearest, with a tie going to the shorter.
+
 **Android has no starter `settings.toml`,** so there is nowhere to put a
 `tap = "5m"` that a fresh phone would read. The desktop writes one on first run
 and the phone does not: a file arrives by import from Saved Messages or is
