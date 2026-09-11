@@ -95,6 +95,56 @@ script leaves behind in `../tdesktop-libs/` are another 700 MB or so and are
 not needed once the installs succeed; delete them to reclaim the space, at the
 cost of a full re-clone if you ever rebuild a dependency.
 
+`build_deps.sh` has no job cap of its own. The `tg_owt` step is a
+`cmake --build`, so `CMAKE_BUILD_PARALLEL_LEVEL=4` in the environment is
+enough to keep it off every core.
+
+#### When Homebrew upgrades abseil
+
+`tg_owt` is a static library, and abseil puts its release date in an inline
+namespace, so every symbol `tg_owt` compiled against abseil carries the
+version it was built with. Upgrade the keg and the app is compiled against
+`absl::lts_20260526` while `libtg_owt.a` still refers to `absl::lts_20250814`;
+nothing reconciles the two. The upgrade is easy to miss because abseil is
+rarely what you asked for — it comes in under `protobuf`, so installing or
+reinstalling something unrelated is enough to bump it.
+
+It surfaces in two stages. First `ninja` in `out/` fails without compiling
+anything, on a library that is simply gone:
+
+```
+ninja: error: '/opt/homebrew/lib/libabsl_flags_parse.2508.0.0.dylib', needed by
+'Purple Telegram.app/Contents/MacOS/Purple Telegram', missing and no known
+rule to make it
+```
+
+Re-running `cmake .` in `out/` picks up the new keg and gets the whole tree
+compiling again, and then the link fails on the disagreement itself:
+
+```
+rtc::AsyncPacketSocket::RegisterReceivedPacketCallback(absl::lts_20260526::AnyInvocable<...>)
+absl::lts_20250814::base_internal::ThrowStdOutOfRange(char const*), referenced from ... libtg_owt.a(video_encoder.cc.o)
+```
+
+Pointing the build back at the old keg is not a fix. Its dylibs still carry
+the install name `/opt/homebrew/opt/abseil/lib/libabsl_*.2508.0.0.dylib`, and
+that symlink now resolves to the new keg, where those files do not exist — so
+the app would link and then fail to start. `brew cleanup` deletes the old keg
+outright.
+
+The fix is to rebuild the library against what is installed now. Move the old
+prefix aside rather than deleting it, so it can go back if the rebuild fails:
+
+```bash
+mv ../tdesktop-libs/local/tg_owt ../tdesktop-libs/local/tg_owt.abseil-2508
+CMAKE_BUILD_PARALLEL_LEVEL=4 purple/build_deps.sh
+```
+
+The script skips the dependencies that are still installed and rebuilds only
+this one, from a fresh clone. Then re-run `cmake .` in `out/` if the config
+changed, and relink. Once the app links, the set-aside prefix and the new
+clone tree under `../tdesktop-libs/` are both disposable.
+
 ### Configure and build
 
 ```bash
