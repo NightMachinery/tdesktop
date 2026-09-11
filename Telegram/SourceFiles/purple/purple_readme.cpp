@@ -508,6 +508,7 @@ hotkey        = "Ctrl+Shift+E"
 auto_off      = "2m"
 tap           = "5m"
 hotkey_length = "2m"
+tap_mobile    = "5m"
 ```
 
 `days` are `mon` to `sun`, times are `HH:MM` local. A rule whose `to` is earlier
@@ -535,6 +536,13 @@ folder - and deliberately leaves the silencing exactly where it was. It ends on
 the key - and each falls back to `auto_off` when it is not written. Pressing the
 key again while a peek is running **extends** it by another `hotkey_length`, up
 to an hour; past that, or on a peek with no clock, the same press ends it.
+
+`tap_mobile` is what a tap is worth on the phone, which reads this file but has
+no way to edit it. It is the one length here that does **not** fall back: a
+phone whose file leaves it out taps for five minutes rather than for `tap` or
+`auto_off`, because those were chosen at a keyboard and a phone should not
+inherit a decision nobody made for it. `"off"` works here too, and the desktop
+keys go on meaning exactly what they meant.
 
 The box offers those lengths twice: as a row of chips, and above them as a dial
 you can flick with the wheel or drag around - it snaps to the same stops, never

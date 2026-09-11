@@ -239,13 +239,20 @@ send_after_save_p = false
 hotkey   = "Ctrl+Shift+E"
 auto_off = "2m"
 
-# How long each way of starting one lasts, when the two want to differ: tap is
+# How long each way of starting one lasts, when they want to differ: tap is
 # what the checkbox and the chips in the Work Mode box start, hotkey_length
 # what the key starts. Unset means "whatever auto_off says"; "off" is a peek
 # with no clock on it. Pressing the key again while one is running adds another
 # hotkey_length, up to an hour.
 # tap           = "5m"
 # hotkey_length = "2m"
+#
+# What a tap is worth on the phone, which reads this file but has no way to
+# edit it. The one length here that does not fall back: a phone without this
+# key taps for five minutes rather than for tap or auto_off, since those were
+# chosen at a keyboard and a phone should not inherit a decision nobody made
+# for it. "off" works here too.
+# tap_mobile    = "5m"
 
 [recent]
 # Reading a chat is what takes an unread-gated one out of the view, so without
