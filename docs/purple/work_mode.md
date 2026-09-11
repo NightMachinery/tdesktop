@@ -2672,14 +2672,47 @@ the state rewrite the load already returns - which is why the Android timer has
 no clearing half of its own.
 
 **There is no hotkey, so the checkbox is the control rather than its
-affordance.** `[peek] hotkey` is read and ignored on Android; a phone has no
-key to bind, and the desktop's own reason for the checkbox - that a hotkey with
-no visible affordance is a hotkey nobody remembers - is the whole of what is
-left. It sits in the preset picker, next to the preset it suspends, saying
-`Peek - nothing is hidden under Normal` when there is nothing to do, and
-counting itself down while one is running. `auto_off` is honoured, including
+affordance.** `[peek] hotkey` and `hotkey_length` are read and ignored on
+Android; a phone has no key to bind, and the desktop's own reason for the
+checkbox - that a hotkey with no visible affordance is a hotkey nobody
+remembers - is the whole of what is left. It sits in the preset picker, next to
+the preset it suspends, saying `Peek - nothing is hidden under Normal` when
+there is nothing to do, and counting itself down while one is running. A tap
+starts a peek of `tap`, which falls back to `auto_off` in the core, including
 `"off"`, which reads as *until you turn it off* rather than as a countdown that
 never moves.
+
+**The three gestures land differently, because the hotkey is not there to take
+one of them.** A tap while a peek is running *extends* it by another `tap`,
+where the desktop's checkbox ends it; ending is the **long press**. On the
+desktop the checkbox can afford to mean "stop" because the key means "more",
+and on a phone there is no key, so the two meanings have to be two gestures on
+the one control. The tap gets the extension rather than the stop because a tap
+while the chats are back is nearly always "not yet" rather than "done" - the
+peek is running because something is still being looked at. It still ends the
+peek when there is nothing left to extend, with the same hour cap and the same
+two sentences the hotkey uses, for the same reason: a control that can start
+something it cannot stop is worse than one that means two things.
+
+**The chips are the desktop's row, laid out for a thumb**: a horizontally
+scrolling strip under the checkbox rather than a wrapping block, so the row
+keeps its height whatever the core's lengths are, and a tap on one starts or
+restarts a peek at that length. Every decision in them is the desktop's,
+because all of them are the core's - `PeekDetentsSeconds()` for the lengths,
+`PeekDetentIndex()` for which one is lit, `PeekLeftSeconds()` for what it is an
+index of, and "until I stop" one position past the last detent. The bridge
+carries the row and the tap length in the load JSON (`peekDetents`, `peekTap`,
+`peekUntilStopped`) and exposes the rounding as a native of its own, rather than
+letting Java round: a second copy of "nearest, and a tie reads as the shorter"
+is exactly the kind of thing that comes to differ by one chip on one platform.
+
+**Android has no starter `settings.toml`,** so there is nowhere to put a
+`tap = "5m"` that a fresh phone would read. The desktop writes one on first run
+and the phone does not: a file arrives by import from Saved Messages or is
+typed into the editor, and until then the picker says the file is empty and
+names it. A file that says nothing about `tap` gets `auto_off`, and one that
+says nothing about either gets a peek with no clock on it - which is the honest
+answer to "how long", not a default hidden in the Java.
 
 **The schedule is a pure function in the bridge and a `Handler` in Java.**
 `scheduleTickNative()` and the desktop's `Runner::tick()` are two calls to one
