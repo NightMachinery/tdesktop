@@ -126,13 +126,29 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 		AgeText(std::max(now - TimeId(note.readAtUnix), 0)));
 }
 
-// The one fact about a status the core cannot read for itself: whether it is
-// one of the three vague spellings. Everything after this is a rule about
-// data, and those live in the core.
-[[nodiscard]] bool CoarseStatus(Data::LastseenStatus status) {
-	return status.isRecently()
+// The one fact about a status the core cannot read for itself: which of the
+// three kinds it is. Everything after this is a rule about data, and those
+// live in the core.
+//
+// The split is on `isLongAgo' rather than on `isHidden', which is the near
+// miss worth naming: `isHidden' is every status the server did not hand a
+// `was_online' with, so it covers the three vague spellings AND the locally
+// guessed online moment - the one `madeAction' writes when we watched somebody
+// act in a chat, and the one `LastseenFromMTP' keeps when a coarse status
+// arrives over the top of it. That moment is real and upstream already prints
+// it as a time, so it is Exact: the app has the truth and a read from some
+// hours ago put over it would be older news dressed as newer. `isLongAgo' is
+// exactly `userStatusEmpty' - and the offline status with nothing usable in it,
+// which folds into the same value - so the three cases stay exhaustive.
+[[nodiscard]] LastSeenShape ShapeOf(Data::LastseenStatus status) {
+	const auto coarse = status.isRecently()
 		|| status.isWithinWeek()
 		|| status.isWithinMonth();
+	return coarse
+		? LastSeenShape::Coarse
+		: status.isLongAgo()
+		? LastSeenShape::LongAgo
+		: LastSeenShape::Exact;
 }
 
 [[nodiscard]] LastSeenNote NoteFor(not_null<UserData*> user, TimeId now) {
@@ -144,7 +160,7 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 		CurrentState(),
 		IdOf(user),
 		ReasonForUser(user),
-		CoarseStatus(user->lastseen()),
+		ShapeOf(user->lastseen()),
 		int64(now));
 }
 
@@ -362,10 +378,7 @@ LastSeenReason ReasonForUser(not_null<UserData*> user) {
 		return LastSeenReason::None;
 	}
 	const auto status = user->lastseen();
-	const auto coarse = status.isRecently()
-		|| status.isWithinWeek()
-		|| status.isWithinMonth();
-	return ReasonFor(!status.isHidden(), coarse, status.isHiddenByMe());
+	return ReasonFor(ShapeOf(status), status.isHiddenByMe());
 }
 
 LastSeenText LastSeenNoteFor(
@@ -385,10 +398,14 @@ LastSeenText LastSeenNoteFor(
 	case LastSeenLine::Plain:
 		return result;
 
-	// A read that is still fresh replaces the coarse phrase rather than hanging
-	// off it: "last seen recently, and also 14:32" would be the app saying the
-	// vaguer half first. What hangs off it instead is the way back into the
-	// sheet, because the trade took the tail that used to be the only door.
+	// A read that is still fresh replaces the phrase underneath rather than
+	// hanging off it: "last seen recently, and also 14:32" would be the app
+	// saying the vaguer half first, and over "a long time ago" - where the core
+	// now also shows it - the two halves would contradict each other outright.
+	// What hangs off it instead is the way back into the sheet, because the
+	// trade took the tail that used to be the only door. Over "a long time ago"
+	// nothing hangs off it at all: such a status has no reason, so the note is
+	// not tappable and there is no offer to make.
 	case LastSeenLine::Remembered:
 		result.base = RememberedText(note, now);
 		result.text = result.base;
