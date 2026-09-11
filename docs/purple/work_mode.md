@@ -1404,6 +1404,26 @@ that picks the lit one. Two hand-written lists is exactly how a phone's chips
 and a desktop's row come to offer different minutes for the same feature, and a
 list of lengths is the kind of thing somebody edits on one side only.
 
+Above the chips the same stops are a dial: a ring with a tick per length, the
+selection drawn as a filled arc from the first stop round to it, and the length -
+or the countdown, while a peek is running - written in the middle. The wheel
+steps one stop per notch, and a trackpad's smaller deltas are added up rather
+than rounded away, so a flick does not skip; a drag around the ring snaps to the
+stop nearest the finger, committing on release, and a release away from the ring
+abandons it. Arrow keys step it when it has focus and Enter commits. It never
+reads a continuous angle: between two stops it takes the nearer one, and a tie
+takes the shorter, because a control that quietly rounds a peek up reveals more
+than was asked for. "Until I stop" is one position past the last detent, which
+is what makes the track a single run of stops rather than a track with a
+checkbox beside it.
+
+The chips stay, and the dial is not a replacement for them. A row of words is
+the discoverable path - a tick you have to find is not an affordance - while the
+dial is the quick one once you know it is there: a peek is started mid-sentence,
+and the far end of an hour is one flick here against seven targets to read
+before clicking. Both call the same thing with the same number, and both are
+disabled and dimmed under Normal, where there is nothing hidden to peek at.
+
 ### It reveals; it does not un-silence
 
 A peek does not touch `notify`. The two halves of a preset answer different

@@ -22,18 +22,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_peek.h"
 #include "purple/purple_schedule.h"
 #include "ui/layers/generic_box.h"
+#include "ui/painter.h"
 #include "ui/qt_object_factory.h"
+#include "ui/rp_widget.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "styles/style_basic.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
 
 #include <QtCore/QDateTime>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QKeySequence>
+#include <QtGui/QMouseEvent>
+#include <QtGui/QWheelEvent>
 
 namespace Purple {
 namespace {
@@ -153,6 +159,362 @@ constexpr auto kScheduleTick = crl::time(30 * 1000);
 	return QDateTime::currentSecsSinceEpoch();
 }
 
+// The dial's track, in the degrees QPainter counts - zero at three o'clock,
+// positive counter-clockwise. It starts at half past seven and runs clockwise
+// three quarters of the way round, so the gap sits at the bottom. A full circle
+// would put the first stop and the last one in the same place, and "1 min" and
+// "until I stop" meeting at twelve o'clock is the one confusion a dial of
+// lengths cannot afford.
+constexpr auto kDialStart = 225.;
+constexpr auto kDialSweep = 270.;
+
+// One notch of a mouse wheel, in the eighths of a degree Qt reports for one.
+// Trackpads send a stream of much smaller deltas, so they are added up rather
+// than rounded away and a flick still moves the same number of stops.
+constexpr auto kWheelNotch = 120;
+
+// How long the dial waits, after the wheel stops, before starting the peek it
+// is showing. Every peek rebuilds every chat list, and a wheel rolled three
+// notches would otherwise do that three times on its way past.
+constexpr auto kWheelCommit = crl::time(400);
+
+// The same stops the chips offer, on a track a wheel or a drag can run along.
+// The chips stay: a row of words is the discoverable path, and a tick you have
+// to find is not an affordance. This is the one that is quick once you know it
+// is there - a peek is started mid-sentence, and reaching the far end of an
+// hour is one flick here against seven targets to read there.
+//
+// It never reports an angle, only a stop. The lengths are the core's row, the
+// rounding is the core's rounding, and "until I stop" is the position one past
+// the last detent - so the track is a single run of stops rather than a track
+// plus a checkbox somewhere else.
+class PeekDial final : public Ui::RpWidget {
+public:
+	explicit PeekDial(QWidget *parent);
+
+	// The resting position and the words in the middle, both decided by the
+	// engine: the length while nothing is running, the countdown while it is.
+	void showSelected(int index, const QString &center);
+	void setDisabled(bool disabled);
+
+	[[nodiscard]] rpl::producer<int> commitRequests() const;
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
+
+private:
+	[[nodiscard]] static int Stops();
+
+	[[nodiscard]] QRect ring() const;
+	[[nodiscard]] bool overRing(QPoint point) const;
+	[[nodiscard]] int shown() const;
+	[[nodiscard]] float64 degreesAt(int index) const;
+	[[nodiscard]] std::optional<int> detentAt(QPoint point) const;
+
+	void preview(int index);
+	void commit();
+	void cancel();
+	void refreshTooltip();
+
+	rpl::event_stream<int> _commitRequests;
+	base::Timer _wheelCommit;
+	QString _center;
+	std::optional<int> _pending;
+	int _selected = 0;
+	int _wheelAccumulated = 0;
+	bool _dragging = false;
+	bool _disabled = false;
+
+};
+
+int PeekDial::Stops() {
+	return int(PeekDetentsSeconds().size()) + 1;
+}
+
+PeekDial::PeekDial(QWidget *parent)
+: RpWidget(parent) {
+	const auto side = st::boxWidth / 4;
+	resize(side, side);
+	setFocusPolicy(Qt::StrongFocus);
+	setCursor(style::cur_pointer);
+	_wheelCommit.setCallback([=] { commit(); });
+	refreshTooltip();
+}
+
+QRect PeekDial::ring() const {
+	const auto side = height();
+	const auto inset = st::radialLine
+		+ st::radialLine / 2
+		+ st::lineWidth * 2;
+	return QRect((width() - side) / 2, 0, side, side).marginsRemoved(
+		QMargins(inset, inset, inset, inset));
+}
+
+bool PeekDial::overRing(QPoint point) const {
+	const auto inner = ring();
+	const auto center = QRectF(inner).center();
+	const auto radius = inner.width() / 2.;
+	const auto distance = std::hypot(
+		point.x() - center.x(),
+		point.y() - center.y());
+	const auto band = st::radialLine * 2;
+	return (distance >= radius - band) && (distance <= radius + band);
+}
+
+int PeekDial::shown() const {
+	return std::clamp(_pending.value_or(_selected), 0, Stops() - 1);
+}
+
+float64 PeekDial::degreesAt(int index) const {
+	return kDialStart - (kDialSweep * index) / (Stops() - 1);
+}
+
+std::optional<int> PeekDial::detentAt(QPoint point) const {
+	const auto inner = ring();
+	const auto center = QRectF(inner).center();
+	const auto x = point.x() - center.x();
+	const auto y = center.y() - point.y();
+	if (!x && !y) {
+		return std::nullopt;
+	}
+	auto degrees = std::atan2(y, x) * 180. / M_PI;
+	if (degrees < kDialStart - 360.) {
+		degrees += 360.;
+	}
+
+	// Where along the track the angle falls: 0 at the first stop, 1 at the
+	// last, and up to 4/3 in the quarter turn of gap below. That gap is split
+	// down the middle rather than clamped to one end, so a point just past the
+	// end of the track reads as the end and one just short of the beginning
+	// reads as the beginning.
+	const auto position = (kDialStart - degrees) / kDialSweep;
+	const auto last = Stops() - 1;
+	if (position > 1.) {
+		const auto half = 1. + (360. - kDialSweep) / (2. * kDialSweep);
+		return (position > half) ? 0 : last;
+	}
+
+	// Rounded to the nearer stop, with a tie going to the SHORTER one, which
+	// is the core's rule: a control that silently rounds a peek up is a control
+	// that reveals more than was asked for.
+	return std::clamp(int(std::ceil(position * last - 0.5)), 0, last);
+}
+
+void PeekDial::preview(int index) {
+	const auto clamped = std::clamp(index, 0, Stops() - 1);
+	if (_pending && (*_pending == clamped)) {
+		return;
+	}
+	_pending = clamped;
+	refreshTooltip();
+	update();
+}
+
+void PeekDial::commit() {
+	_wheelCommit.cancel();
+	_wheelAccumulated = 0;
+	const auto index = shown();
+	_pending = std::nullopt;
+	update();
+	_commitRequests.fire_copy(index);
+}
+
+void PeekDial::cancel() {
+	_wheelCommit.cancel();
+	_wheelAccumulated = 0;
+	if (!_pending) {
+		return;
+	}
+	_pending = std::nullopt;
+	refreshTooltip();
+	update();
+}
+
+void PeekDial::refreshTooltip() {
+	const auto seconds = PeekDetentSecondsAt(shown());
+	setToolTip(seconds
+		? u"Peek for %1"_q.arg(ChipText(seconds))
+		: u"Peek until I stop it"_q);
+}
+
+void PeekDial::showSelected(int index, const QString &center) {
+	const auto clamped = std::clamp(index, 0, Stops() - 1);
+	if ((_selected == clamped) && (_center == center)) {
+		return;
+	}
+	_selected = clamped;
+	_center = center;
+	refreshTooltip();
+	update();
+}
+
+void PeekDial::setDisabled(bool disabled) {
+	if (_disabled == disabled) {
+		return;
+	}
+	_disabled = disabled;
+	_dragging = false;
+	cancel();
+	setCursor(disabled ? style::cur_default : style::cur_pointer);
+	update();
+}
+
+rpl::producer<int> PeekDial::commitRequests() const {
+	return _commitRequests.events();
+}
+
+void PeekDial::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	auto hq = PainterHighQualityEnabler(p);
+
+	const auto inner = ring();
+	const auto center = QRectF(inner).center();
+	const auto radius = inner.width() / 2.;
+	const auto last = Stops() - 1;
+	const auto index = shown();
+	const auto line = st::radialLine;
+	const auto active = _disabled ? st::windowSubTextFg : st::activeButtonBg;
+
+	auto pen = QPen(st::windowBgOver->c);
+	pen.setWidth(line);
+	pen.setCapStyle(Qt::RoundCap);
+	p.setPen(pen);
+	p.setBrush(Qt::NoBrush);
+	p.drawArc(inner, int(kDialStart * 16), int(-kDialSweep * 16));
+
+	pen.setColor(active->c);
+	p.setPen(pen);
+	p.drawArc(
+		inner,
+		int(kDialStart * 16),
+		int((-kDialSweep * 16 * index) / last));
+
+	const auto point = [&](float64 degrees, float64 distance) {
+		const auto radians = degrees * M_PI / 180.;
+		return QPointF(
+			center.x() + std::cos(radians) * distance,
+			center.y() - std::sin(radians) * distance);
+	};
+	const auto tickFrom = radius + line / 2. + st::lineWidth * 2;
+	const auto tickTo = tickFrom + line;
+	pen.setColor((_disabled ? st::windowBgOver : st::windowSubTextFg)->c);
+	pen.setWidth(st::lineWidth);
+	p.setPen(pen);
+	for (auto i = 0; i <= last; ++i) {
+		const auto degrees = degreesAt(i);
+		p.drawLine(point(degrees, tickFrom), point(degrees, tickTo));
+	}
+
+	// The stop itself, not only the arc that reaches it: the shortest length is
+	// the start of the track, where an arc has no length to be seen by.
+	p.setPen(Qt::NoPen);
+	p.setBrush(active);
+	p.drawEllipse(point(degreesAt(index), radius), line, line);
+
+	const auto text = _pending
+		? ChipText(PeekDetentSecondsAt(*_pending))
+		: _center;
+	const auto side = int((inner.width() - line * 2) / std::sqrt(2.));
+	p.setFont(st::normalFont);
+	p.setPen(_disabled ? st::windowSubTextFg : st::windowFg);
+	p.drawText(
+		QRect(
+			int(center.x()) - side / 2,
+			int(center.y()) - side / 2,
+			side,
+			side),
+		Qt::AlignCenter | Qt::TextWordWrap,
+		text);
+}
+
+void PeekDial::mousePressEvent(QMouseEvent *e) {
+	if (_disabled
+		|| (e->button() != Qt::LeftButton)
+		|| !overRing(e->pos())) {
+		e->ignore();
+		return;
+	}
+	setFocus();
+	_dragging = true;
+	if (const auto index = detentAt(e->pos())) {
+		preview(*index);
+	}
+}
+
+void PeekDial::mouseMoveEvent(QMouseEvent *e) {
+	if (!_dragging) {
+		return;
+	} else if (const auto index = detentAt(e->pos())) {
+		preview(*index);
+	}
+}
+
+void PeekDial::mouseReleaseEvent(QMouseEvent *e) {
+	if (!_dragging) {
+		e->ignore();
+		return;
+	}
+	_dragging = false;
+
+	// Released away from the track, the drag is abandoned rather than
+	// committed: a dial is dragged by eye, and dragging off it is how a mouse
+	// says "not that after all" when there is no other way to take it back.
+	if (overRing(e->pos())) {
+		commit();
+	} else {
+		cancel();
+	}
+}
+
+void PeekDial::wheelEvent(QWheelEvent *e) {
+	const auto delta = e->angleDelta().y()
+		? e->angleDelta().y()
+		: e->angleDelta().x();
+	if (_disabled || !delta) {
+		e->ignore();
+		return;
+	}
+	_wheelAccumulated += delta;
+	const auto steps = _wheelAccumulated / kWheelNotch;
+	if (steps) {
+		_wheelAccumulated -= steps * kWheelNotch;
+		preview(shown() + steps);
+		_wheelCommit.callOnce(kWheelCommit);
+	}
+	e->accept();
+}
+
+void PeekDial::keyPressEvent(QKeyEvent *e) {
+	const auto key = e->key();
+	if (_disabled) {
+		e->ignore();
+		return;
+	} else if (key == Qt::Key_Escape) {
+		if (!_pending) {
+			e->ignore();
+			return;
+		}
+		cancel();
+	} else if ((key == Qt::Key_Up) || (key == Qt::Key_Right)) {
+		preview(shown() + 1);
+	} else if ((key == Qt::Key_Down) || (key == Qt::Key_Left)) {
+		preview(shown() - 1);
+	} else if ((key == Qt::Key_Enter)
+		|| (key == Qt::Key_Return)
+		|| (key == Qt::Key_Space)) {
+		commit();
+	} else {
+		e->ignore();
+		return;
+	}
+	e->accept();
+}
+
 // What the preset is doing at this moment, rather than what it says it will do.
 // The rows above are read off the file and would look exactly the same if a
 // list name were misspelled; this is read off the chat list, and it is the line
@@ -267,6 +629,51 @@ void PresetBox(
 		}
 	}, peek->lifetime());
 
+	// Which stop the peek is at: the chip that lights and the place the dial
+	// rests are the same number, read once here so the two pictures of one
+	// peek cannot come to disagree about it.
+	//
+	// It follows what is LEFT rather than what was asked for, so a five minute
+	// peek with ninety seconds on it sits at two minutes. Nothing anywhere
+	// remembers the length a peek was started with - state.toml holds a
+	// deadline and that is all.
+	const auto litIndex = [] {
+		return !Peeking()
+			? -1
+			: PeekUntilStopped(CurrentState())
+			? int(PeekDetentsSeconds().size())
+			: PeekDetentIndex(PeekLeftSeconds(CurrentState(), NowSeconds()));
+	};
+
+	// The same stops as the chips below, as a track. The chips are the
+	// discoverable path and this is the quick one: a peek is started
+	// mid-sentence, and the far end of the row is one flick away here.
+	const auto dial = container->add(
+		object_ptr<PeekDial>(container),
+		padding);
+	dial->commitRequests(
+	) | rpl::on_next([=](int index) {
+		StartPeekFor(PeekDetentSecondsAt(index));
+	}, dial->lifetime());
+
+	const auto refreshDial = [=] {
+		const auto lit = litIndex();
+
+		// With nothing running the dial rests on the length the checkbox would
+		// start, so it shows the peek a commit would give rather than an empty
+		// track pointing at a number nobody chose.
+		const auto index = (lit >= 0)
+			? lit
+			: PeekDetentIndex(PeekTapSeconds(ActiveSettings()));
+		const auto left = (lit >= 0)
+			? PeekLeftSeconds(CurrentState(), NowSeconds())
+			: 0;
+		dial->showSelected(index, left
+			? PeekRemainingText(left)
+			: ChipText(PeekDetentSecondsAt(index)));
+		dial->setDisabled(ActiveResolved().normal);
+	};
+
 	// The checkbox is still the on/off, and this row is the same switch with a
 	// number on it. One length in the file was never going to be right for
 	// both "check one thing" and "the rest of this call", and the lengths come
@@ -312,15 +719,7 @@ void PresetBox(
 	const auto refreshChips = [=] {
 		const auto normal = ActiveResolved().normal;
 
-		// Which chip is lit follows what is LEFT rather than what was asked
-		// for, so a five minute peek with ninety seconds on it lights the two
-		// minute chip. The row is a picture of the peek now, and nothing
-		// anywhere remembers the length it was started with.
-		const auto lit = !Peeking()
-			? -1
-			: PeekUntilStopped(CurrentState())
-			? int(PeekDetentsSeconds().size())
-			: PeekDetentIndex(PeekLeftSeconds(CurrentState(), NowSeconds()));
+		const auto lit = litIndex();
 		for (auto i = 0; i != int(row.size()); ++i) {
 			const auto on = (i == lit);
 			row[i]->setDisabled(normal);
@@ -340,6 +739,7 @@ void PresetBox(
 	ticker->setCallback([=] {
 		peek->setText(peekText());
 		refreshChips();
+		refreshDial();
 	});
 
 	// Follows the engine rather than the click, so a peek started from the
@@ -352,6 +752,7 @@ void PresetBox(
 		peek->setDisabled(ActiveResolved().normal);
 		peek->setText(peekText());
 		refreshChips();
+		refreshDial();
 		if (Peeking() && CurrentState().peekDeadlineUnix) {
 			ticker->callEach(crl::time(1000));
 		} else {

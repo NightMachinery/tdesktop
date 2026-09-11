@@ -536,6 +536,11 @@ the key - and each falls back to `auto_off` when it is not written. Pressing the
 key again while a peek is running **extends** it by another `hotkey_length`, up
 to an hour; past that, or on a peek with no clock, the same press ends it.
 
+The box offers those lengths twice: as a row of chips, and above them as a dial
+you can flick with the wheel or drag around - it snaps to the same stops, never
+to an angle in between, and `until I stop` is the position one past the longest
+of them.
+
 `hotkey` is read as Qt portable text, so **on macOS `Ctrl` means Command** and
 `Meta` means the physical Control key. The Work Mode box prints the combination
 the way your keyboard actually has it.
