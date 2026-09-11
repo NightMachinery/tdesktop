@@ -722,6 +722,17 @@ XDG_CONFIG_HOME=/tmp/sandbox/config \
 starts logged out with a freshly written starter file, and the single-instance
 socket is derived from the working directory, so it runs beside your own copy.
 
+One thing not to isolate without meaning to: **`HOME`**. Launching through
+`hs.task` means `setEnvironment` *replaces* the environment rather than adding
+to it, so `HOME` has to be passed back in or the app gets none - and it is
+tempting to point it at the sandbox alongside `XDG_CONFIG_HOME`. Focus sync
+then goes quiet rather than wrong. `AssertionsPath()` in `purple_focus.cpp`
+builds `QDir::homePath() + "/Library/DoNotDisturb/DB/Assertions.json"`, a fake
+home has no such file, and `Detector::read` reads a missing file as "no focus
+mode has ever been set" - `false`, not an error. The instance reports focus
+off, for ever, and logs nothing about it. Carry the real `HOME` through when
+the run is meant to exercise focus.
+
 Log it in as a second session of a throwaway account rather than cloning
 `tdata`, for the reason above: one authorization is one session. The account
 the emulator harness uses is the obvious one, and its number is in
@@ -760,6 +771,64 @@ before starting, and treat a click that changes nothing as "look for a
 dialog", not as a bug in the window. The window's own controls are reachable
 through accessibility (`hs.axuielement`; the button reports its frame), which
 is the way to find where to click without reading pixels.
+
+**Whether the deployed bundle still has Full Disk Access, without opening
+System Settings.** An ad-hoc re-sign was expected to be able to drop it, and
+the bundle's own log is the cheapest way to ask. `StartFocusSync` builds the
+`Detector` unconditionally (`core/application.cpp`), which checks once on the
+way up and every minute after, and a refused open is logged - once per spell of
+failure, not once a minute - as `Purple Error: Focus state unreadable ... Full
+Disk Access for Purple Telegram is what this usually wants`. So an instance
+that has been up for hours with no `Purple Error` line anywhere in
+`~/Library/Application Support/Purple Telegram/log.txt` has been reading the
+focus database successfully that whole time, and that is the answer. Checked
+2026-09-11 on the re-signed build: 11h45m of log, zero `Purple Error`, so the
+access survived the re-sign. What makes the file a usable probe is that the
+denial is specific - a shell without Full Disk Access gets `Operation not
+permitted` from `head ~/Library/DoNotDisturb/DB/Assertions.json` while `ls` on
+the same path succeeds.
+
+**And check the input lock, not just the dialog.** The second attempt
+(2026-09-11, 23:00) lost its session to a different swallower with the same
+symptom. The Hammerspoon config on this machine carries an input-lock module,
+`blackout-lock.lua`, whose tap takes `keyDown`, `keyUp`, `systemDefined` and
+every mouse type and returns `true` - delete - for all of them. While it is up
+nothing synthesized reaches anything: not `hs.eventtap` clicks, not keystrokes,
+not a click on the title bar, and not on this app only - a click on the empty
+desktop does not raise Finder either. Its default expiry is two weeks, so
+waiting it out is not a plan. Ask before starting:
+
+```bash
+hs -q -c 'return blackoutLockActive()'
+```
+
+A `true` there is a stop, and an agent should stop rather than clear it.
+`blackoutLockOff()` would give the input back, but it also drops `lockFirst` -
+the mark that says the screen is to be locked when the blackout ends - and
+that mark is a deliberate choice by whoever armed the lock. Only the chord
+that armed it should end it: hyper (F18) held, then shift+F2.
+
+So the pre-flight for a driving run is two checks, not one: `pgrep -x
+SecurityAgent` empty, and `blackoutLockActive()` false.
+
+**The discriminator is an accessibility write.** When a click changes nothing,
+the question is whether the events are being eaten or the window is wedged,
+and an AX write answers it:
+
+```lua
+w:setAttributeValue("AXPosition", {x = f.x + 30, y = f.y})
+```
+
+If the window moves, the app is turning its event loop and acting on input -
+AX arrives through the accessibility API, not the event stream - so the clicks
+are being swallowed somewhere between the tap and the window. Reads alone will
+not tell the two apart as clearly, since a tree can be served from a state that
+is no longer being redrawn. Two more readings that cost nothing: the button
+under the pointer does not take its hover highlight, and the window reports
+`AXMain` true with `AXFocused` false and stays that way after a title-bar
+click. An `hs.eventtap` listener still *sees* the event you posted, which is
+the trap - posting works, delivery is what does not, so seeing your own event
+come back proves nothing.
 
 ### Headless, and how far it gets
 
