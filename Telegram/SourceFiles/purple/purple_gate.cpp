@@ -646,6 +646,25 @@ bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen) {
 		return true;
 	}
 	const auto &resolved = Instance().resolved();
+
+	// Your own row at the head of the strip is the "add a story" button, and it
+	// answers to `hide_add_story_p' alone - not to `stories', not to a list and
+	// not to a folder. It is a door to posting rather than a chat the preset is
+	// judging, and deciding it the usual way meant it came and went with
+	// whether some list happened to name Saved Messages, which has nothing to
+	// do with it.
+	//
+	// Answered here rather than from an AddStoryShown() of its own so that the
+	// strip keeps the single call site it has: this is still "does this peer
+	// belong on the strip", and a caller that had to remember to ask a second
+	// function for one peer is a caller that will one day forget. The branch
+	// sits above the `stories' test on purpose, so None does not swallow it,
+	// and above the peek test because a peek putting the button back is the
+	// clients' rule rather than the flag's.
+	if (peer->isSelf()) {
+		return resolved.peeking || !resolved.hideAddStory;
+	}
+
 	if (resolved.stories == StoryPolicy::None) {
 		return false;
 	} else if (resolved.peeking) {

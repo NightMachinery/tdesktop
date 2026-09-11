@@ -105,6 +105,11 @@ bool SavePresetPins(
 // Named away from "hidden" on purpose: upstream already has hidden stories,
 // meaning the ones you moved to the archive strip yourself, and the two must
 // not be confused for each other.
+//
+// Your own row - the "add a story" button - is the one peer this does not
+// decide the usual way. It answers to the preset's `hide_add_story_p' and to
+// nothing else: not `stories', not a list, not a folder. A peek puts it back,
+// and Normal never took it away.
 [[nodiscard]] bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen);
 
 // The "until" decision in force for this chat, or none. Scoped to the running
