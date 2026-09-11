@@ -88,16 +88,51 @@ purple/build_deps.sh
 
 This mirrors the corresponding CI steps and installs into
 `../tdesktop-libs/local/`. It skips anything already installed there, so it is
-safe to re-run. `tg_owt` is the slow one, at well over a thousand objects.
+safe to re-run. `tg_owt` is the biggest of the three, at 1401 objects.
 
-The installed prefixes come to about 190 MB. The clone and build trees the
-script leaves behind in `../tdesktop-libs/` are another 700 MB or so and are
-not needed once the installs succeed; delete them to reclaim the space, at the
-cost of a full re-clone if you ever rebuild a dependency.
+Big is not the same as slow here, and it is worth knowing which. Measured on
+the M2 at `CMAKE_BUILD_PARALLEL_LEVEL=4`, the whole `tg_owt` build is about
+1030 seconds of compile time, so roughly four to five minutes of wall clock —
+not the hours the object count suggests. The slowest single translation unit
+was `src/pc/peer_connection.cc` at 5.7 seconds, and the mean was 0.73. Budget
+minutes for this script, not an evening.
+
+The reason it is that fast is that the library is built unoptimized; see
+"tg_owt is built without optimization" below.
+
+The installed prefixes come to about 190 MB, of which `tg_owt` alone is 173 MB
+(a 160 MB `libtg_owt.a`). The clone and build trees the script leaves behind in
+`../tdesktop-libs/` are another 700 MB or so — `tg_owt/` is 400 MB of that once
+built — and are not needed once the installs succeed; delete them to reclaim
+the space, at the cost of a full re-clone if you ever rebuild a dependency.
 
 `build_deps.sh` has no job cap of its own. The `tg_owt` step is a
 `cmake --build`, so `CMAKE_BUILD_PARALLEL_LEVEL=4` in the environment is
 enough to keep it off every core.
+
+#### tg_owt is built without optimization
+
+`build_deps.sh` configures `tg_owt` with no `CMAKE_BUILD_TYPE` at all, and
+neither `tg_owt`'s own `CMakeLists.txt` nor the script supplies one. The
+compile line that results carries no `-O` flag of any kind, so the entire
+WebRTC stack the client links against is `-O0`. It does get `-DNDEBUG` —
+`tg_owt` adds that to its own `DEFINES` unconditionally — so `assert()` is
+compiled out even though the code is not optimized.
+
+This is inherited, not introduced here. Upstream's `mac_packaged.yml` runs the
+same bare `cmake -Bbuild . -DCMAKE_INSTALL_PREFIX=...`; it merely sets
+`CMAKE_BUILD_TYPE: "Debug"` as a workflow-level environment variable, which
+CMake 3.22 and newer pick up as the cache default. Debug is also `-O0`, plus
+`-g`. So upstream's packaged macOS build has an unoptimized WebRTC too, and
+leaving the variable unset here differs from CI only in dropping debug info we
+would not use.
+
+Whether that is acceptable is a real question rather than a settled one: this
+is the media path, so it runs during every call. Nothing here has measured the
+cost. Building it optimized is a matter of passing `-DCMAKE_BUILD_TYPE=Release`
+to the `cmake -Bbuild` line, and given the timings above the experiment costs
+about five minutes plus a relink — cheap enough that it should be measured
+before anyone argues about it.
 
 #### When Homebrew upgrades abseil
 
@@ -109,8 +144,30 @@ nothing reconciles the two. The upgrade is easy to miss because abseil is
 rarely what you asked for — it comes in under `protobuf`, so installing or
 reinstalling something unrelated is enough to bump it.
 
-It surfaces in two stages. First `ninja` in `out/` fails without compiling
-anything, on a library that is simply gone:
+That is not hypothetical. The 20250814 → 20260526 bump on this machine came
+from a `brew install --HEAD mosh` followed by a `brew reinstall mosh`, typed
+interactively while debugging a mosh UDP port. `mosh` depends on `protobuf`,
+the current `protobuf` is 35.1, and 35.1 wants abseil 20260526, so Homebrew
+poured the new keg forty seconds later and relinked `/opt/homebrew/lib` to it.
+No `brew upgrade` was involved and no build script did it. The receipts are
+what prove this, and they are worth knowing how to read when it happens again:
+
+```bash
+python3 -c "import json;d=json.load(open('/opt/homebrew/Cellar/abseil/20260526.0/INSTALL_RECEIPT.json'));print(d['installed_on_request'],d['time'])"
+```
+
+`installed_on_request: false` says it arrived as somebody's dependency. The
+same field on `protobuf` is false and on `mosh` is true, and the `time` fields
+order the three, which is enough to name the formula that dragged it in. The
+per-formula build logs under `~/Library/Logs/Homebrew/` corroborate it, and
+the timestamped shell history pins the command.
+
+The lesson is that anything depending on `protobuf` is a tripwire for this
+build. `brew deps <formula>` before installing something new will say whether
+it is one.
+
+Whatever bumped it, the breakage surfaces in two stages. First `ninja` in
+`out/` fails without compiling anything, on a library that is simply gone:
 
 ```
 ninja: error: '/opt/homebrew/lib/libabsl_flags_parse.2508.0.0.dylib', needed by
@@ -141,9 +198,60 @@ CMAKE_BUILD_PARALLEL_LEVEL=4 purple/build_deps.sh
 ```
 
 The script skips the dependencies that are still installed and rebuilds only
-this one, from a fresh clone. Then re-run `cmake .` in `out/` if the config
-changed, and relink. Once the app links, the set-aside prefix and the new
-clone tree under `../tdesktop-libs/` are both disposable.
+this one, from a fresh clone. Expect four to five minutes at `-j4`, not an
+evening — see the timings above.
+
+Note that `purple/build_deps.sh` cannot resume a `tg_owt` build. Its `tg_owt`
+block opens with `rm -rf tg_owt` and re-clones, so pointing it at a tree that a
+previous run left half-finished throws that work away. If you have one — a
+killed run, a machine that slept — resume it by hand instead, which is what
+the script would have run anyway:
+
+```bash
+cd ../tdesktop-libs/tg_owt
+CMAKE_BUILD_PARALLEL_LEVEL=4 MACOSX_DEPLOYMENT_TARGET=13 cmake --build build
+cmake --install build
+```
+
+This is safe because ninja only records an edge in `.ninja_log` once it has
+finished; an object the killed compiler left half-written has no entry and is
+simply rebuilt. Check first that the tree was configured after the abseil
+upgrade — `grep absl_DIR build/CMakeCache.txt` should point at
+`/opt/homebrew/lib/cmake/absl`, and `cat /opt/homebrew/lib/cmake/absl/abslConfigVersion.cmake`
+names the version it resolves to today. If the configure predates the upgrade,
+delete the tree and let the script start over.
+
+Then relink. Re-running `cmake .` in `out/` is *not* part of this step: the
+rebuilt library installs to the same prefix under whatever name it had before,
+so nothing about the configuration changed and ninja picks the new archive up
+on its timestamp alone. The reconfigure belongs to the first stage of the
+failure — the missing-dylib one above, where the build graph still names a
+file that no longer exists. Here the relink recompiled 130 edges, mostly
+`lib_tgcalls` and `lib_webrtc` picking up changed `tg_owt` headers, and took
+under a minute.
+
+Two checks are worth running before you conclude it worked. The library should
+no longer mention the old release:
+
+```bash
+nm -u ../tdesktop-libs/local/tg_owt/lib/libtg_owt.a | grep -o 'lts_[0-9]*' | sort -u
+```
+
+and the binary's abseil references should all resolve to the installed keg:
+
+```bash
+otool -L 'out/Purple Telegram.app/Contents/MacOS/Purple Telegram' | grep absl
+```
+
+There are about fifty of those, and they name versioned dylibs
+(`/opt/homebrew/opt/abseil/lib/libabsl_flags_parse.2605.0.0.dylib` and so on;
+the keg ships both those and unversioned symlinks beside them). If any still
+carry the old version number, the relink did not actually happen.
+
+Once the app links, the set-aside prefix and the new clone tree under
+`../tdesktop-libs/` are both disposable — but keep the set-aside prefix until
+the rebuilt app has actually been run, not merely linked. It is the only
+rollback, and `brew cleanup` will have destroyed the matching keg.
 
 ### Configure and build
 
