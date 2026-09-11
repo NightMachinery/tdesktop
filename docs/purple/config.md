@@ -556,6 +556,36 @@ an extra view or in a folder whose tab is showing, was never hidden and stays.
 The rest - `[focus_sync]` and `[peek]` - is documented by the starter file the
 app writes on first run, which carries a commented example of each.
 
+### How long a peek lasts
+
+    [peek]
+    hotkey        = "Ctrl+Shift+E"
+    auto_off      = "2m"
+    tap           = "5m"
+    hotkey_length = "2m"
+
+`auto_off` is the length a peek has when nothing more specific is said, and
+`"off"` is a peek with no clock on it. `tap` is what tapping the control
+starts - the checkbox and the chips in the Work Mode box, the Peek row in the
+Android picker - and `hotkey_length` what the desktop key starts; each falls
+back to `auto_off` when it is not written, so one key still governs both for
+anybody who does not care about the difference. `"off"` is a real answer for
+either. The length key is not called `hotkey` because that name is the key
+sequence, and it was documented and in use before there was a second way to
+start a peek. A spelling the parser cannot read warns and leaves the key
+unset, which falls back to `auto_off` rather than to a number nobody wrote.
+
+Android reads `tap` and ignores `hotkey` and `hotkey_length`: a phone has no
+key to bind. It has no starter file either, so a phone with no `tap` line taps
+for `auto_off`; write `tap = "5m"` to get the longer look the plan asked for.
+
+The lengths a control offers - 1, 2, 5, 10, 15, 30 and 60 minutes, then "until
+I stop" one position past the last - are not configurable. They are the core's
+row, so a phone's chips and a desktop's dial cannot come to offer different
+minutes, and an extension by tapping or pressing again is capped at an hour
+from the press: past that it is not a peek any more, it is the preset off, and
+there is a plainer way to say that. See [work_mode.md](work_mode.md), "Peek".
+
 ### Why a last seen is coarse
 
     [last_seen]
