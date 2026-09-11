@@ -164,6 +164,11 @@ list_order = [
 # # and on Android no pull gesture either. Uncomment to keep it reachable.
 # # hide_archive_p = false
 #
+# # The "add a story" button - your own row at the head of the stories strip -
+# # goes too, for the same reason and on a key of its own rather than on
+# # whether a list happens to name Saved Messages. Uncomment to keep it.
+# # hide_add_story_p = false
+#
 # # An extra tab of its own, with its own unread badge and its own pins.
 # [[presets.work.views]]
 # name = "People"
