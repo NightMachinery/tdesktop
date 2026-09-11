@@ -264,6 +264,22 @@ at the top of the list, so nothing here consumes the key yet - it is parsed,
 carried and resolved so that one file means one thing on both, and it is the
 Android app that acts on it.
 
+`hide_add_story_p` is the same shape for the **add a story** button - your own
+row at the head of the stories strip. Leaving the key out means **yes**, for
+the same reason: the button is a door to posting rather than a chat, and a
+preset that has already named what gets through has no reason to leave one
+standing on the strip. Write `hide_add_story_p = false` to keep it.
+
+It is a key of its own rather than a consequence of `stories` and the lists,
+which is how the row used to be decided. That tied a door to posting to whether
+some list happened to name Saved Messages, and the two have nothing to do with
+each other. So the button now answers to this key and to nothing else - not
+`stories`, not a `list_order` entry, not a folder.
+
+Like the archive flag it is only ever asked while a preset is filtering, so
+Normal is untouched. A peek puts the button back, along with everything else
+the preset was hiding. Both clients act on this one.
+
 ### Marking a row that is only there for the moment
 
 `after_close_chat_style` in `[recent]` says how the chat list marks a row that
@@ -460,10 +476,10 @@ A folder beats a `list_order` entry, the same way a folder already beats one for
 hiding, and both beat the preset's policy. A peek reveals stories along with the
 chats they belong to.
 
-Note that your own "add a story" button is governed like anybody else's, since
-Saved Messages has no exemption either (below) - under `follow` it goes away
-unless a list names you. Write `stories = "all"`, or put your own id in a list,
-if you would rather keep it.
+None of this reaches your own "add a story" button. It used to: the row was
+gated like anybody else's, so under `follow` it came and went with whether a
+list happened to name Saved Messages. It has its own preset key now -
+`hide_add_story_p`, above - which is the only thing that decides it.
 
 ### Saved Messages
 
@@ -563,6 +579,7 @@ app writes on first run, which carries a commented example of each.
     auto_off      = "2m"
     tap           = "5m"
     hotkey_length = "2m"
+    tap_mobile    = "5m"
 
 `auto_off` is the length a peek has when nothing more specific is said, and
 `"off"` is a peek with no clock on it. `tap` is what tapping the control
@@ -573,11 +590,25 @@ anybody who does not care about the difference. `"off"` is a real answer for
 either. The length key is not called `hotkey` because that name is the key
 sequence, and it was documented and in use before there was a second way to
 start a peek. A spelling the parser cannot read warns and leaves the key
-unset, which falls back to `auto_off` rather than to a number nobody wrote.
+unset, so it falls back to wherever it would have fallen back had it not been
+written at all - `auto_off` for these two - rather than to a number nobody
+wrote. The warning says which, because the third key below does not fall back
+to `auto_off` at all.
 
-Android reads `tap` and ignores `hotkey` and `hotkey_length`: a phone has no
-key to bind. It has no starter file either, so a phone with no `tap` line taps
-for `auto_off`; write `tap = "5m"` to get the longer look the plan asked for.
+`tap_mobile` is the same decision for a phone, and it is the one key here that
+does **not** fall back. A phone with no `tap_mobile` line taps for **five
+minutes** - not for `tap`, not for `auto_off`. Android ignores `hotkey` and
+`hotkey_length` too, since a phone has no key to bind.
+
+That it does not fall back is the point of it. A phone has no `settings.toml`
+of its own: it reads the one written at a keyboard and carried over, so any
+fallback would hand every phone a length chosen for a shortcut fired
+mid-sentence, and a tap on the list in your hand is a longer look than that.
+Five minutes stands until the file says otherwise, and the desktop keys go on
+meaning exactly what they always meant - the desktop never reads `tap_mobile`.
+`"off"` is a real answer here as well, and a spelling the parser cannot read
+warns, leaves the key unset and lands the phone on the five minutes rather than
+on the desktop's number.
 
 The lengths a control offers - 1, 2, 5, 10, 15, 30 and 60 minutes, then "until
 I stop" one position past the last - are not configurable. They are the core's
@@ -608,6 +639,18 @@ with `reasons_p` off, because it is not the fork explaining a status - it is
 the fork showing the answer to a question asked out loud, and a switch that
 turns explanations off should not swallow it.
 
+Nor does the status underneath govern it. A remembered read is shown for as
+long as the memory is within `trade_remember`, **including** after their status
+has gone to "a long time ago" - which is when it is worth the most, since it is
+then the only moment anybody has. The one thing that takes its place is a real
+exact time arriving from the server, and that takes it by being newer rather
+than by being a different kind of answer.
+
+Over "a long time ago" the line is not tappable, though. Such a status has no
+reason at all - the server is not withholding a moment there, it is saying
+there is no recent one - and a trade cannot buy back somebody who has gone
+quiet or shut you out. So the read is shown and no offer is made with it.
+
 `trade_p` decides whether a line also offers the one-off trade: show them your
 last seen for a moment, read theirs, put your privacy back. Turning it off
 leaves the explanation and takes away the offer, and it is what the sheet's
@@ -620,9 +663,10 @@ button with it.
 your rules. Ten seconds by design: the whole exposure is that window, and a
 trade that has not answered in ten seconds is not going to.
 
-`trade_remember` is how long a read stays worth showing. Past it the record is
-dropped rather than shown as older and older news - "as of 3 min ago" is useful
-and "as of 2 days ago" is not.
+`trade_remember` is how long a read stays worth showing, and it is the *only*
+thing that ages one out. Past it the record is dropped rather than shown as
+older and older news - "as of 3 min ago" is useful and "as of 2 days ago" is
+not.
 
 `trade_cooldown` is the least time between two trades with the same person.
 Inside it the sheet still opens, counts the wait down and offers the re-trade

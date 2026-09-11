@@ -1351,6 +1351,7 @@ strip. Press it again to end it early.
     [peek]
     tap           = "5m"
     hotkey_length = "2m"
+    tap_mobile    = "5m"
 
 The two ways of starting one are not the same gesture. A tap on the control is a
 decision made while looking at the box it is in; the key is fired mid-sentence,
@@ -1360,6 +1361,24 @@ still governs both for anybody who does not care about the difference. `"off"`
 from either is a real answer, a peek with no clock on it, and that is why the
 fallback is a function in the core rather than a `.value_or(0)` at each place
 that reads them.
+
+`tap_mobile` is a third gesture in the same sense: a tap on the list in your
+hand. It is read only on a phone, and it is the one length here that does **not**
+fall back - a phone with no `tap_mobile` taps for five minutes rather than for
+`tap` or `auto_off`. The asymmetry is the point. A phone has no `settings.toml`
+of its own; it reads the one written at a keyboard and carried over, so falling
+back would mean every phone tapping for a length chosen for a shortcut fired
+mid-sentence, and nobody ever made that decision *for the phone*. Five minutes
+stands until the file says otherwise. `"off"` works here too.
+
+It is the only one of the three that has to know what the device is, so it is
+read through `PeekTapSeconds(settings, device)` in the engine rather than beside
+its two siblings in the settings header: the file describes devices, the device
+describes itself. The desktop never reads it - `PeekTapSeconds(settings)` is
+still the whole of what the checkbox, the chips and the dial ask - and a client
+that did not say what it is gets the desktop answer, because the reason a phone
+is special is that it cannot edit the file, and a device we cannot name is not
+one.
 
 ### The second press extends
 
@@ -1909,12 +1928,14 @@ can be told apart:
   the one case with something to do about it.
 - **Coarse because of theirs.** The same words with no flag. Their setting,
   nothing to offer, so nothing is added.
-- **"a long time ago"** - `userStatusEmpty`. Nothing is added, and that is the
-  considered answer rather than a gap. An abandoned account and an account that
-  blocked you look identical here, and there is no field that says which. The
-  fork does not guess at a block: it is the one thing here that would be
+- **"a long time ago"** - `userStatusEmpty`. Nothing is *explained*, and that is
+  the considered answer rather than a gap. An abandoned account and an account
+  that blocked you look identical here, and there is no field that says which.
+  The fork does not guess at a block: it is the one thing here that would be
   unforgivable to be wrong about, and being right about it half the time is not
-  a feature.
+  a feature. A read a trade already bought is still shown over it, though - see
+  "The memory, and the cooldown" - because that is not an explanation, it is a
+  moment somebody went and got.
 
 `[last_seen] reasons_p = false` takes the whole tail away and leaves the status
 line as upstream writes it.
@@ -1943,7 +1964,7 @@ anywhere in the class, so a link there would mean inventing a seam rather than
 using one, and a row that sometimes opens a sheet and sometimes opens the
 person is worse than a row that always does the one thing.
 
-A remembered read replaces the coarse phrase in all six, not only in the two
+A remembered read replaces the phrase underneath in all six, not only in the two
 that can trade. What a trade bought is a fact about that person, and a member
 list still saying `last seen recently` beside a profile saying `last seen
 14:32` would be the fork disagreeing with itself in two windows of the same
@@ -1993,10 +2014,20 @@ can say the opposite again tomorrow.
 ### The memory, and the cooldown
 
 A read is remembered for `trade_remember` (a day, by default) and shown in
-place of the coarse phrase: `last seen 14:32 · as of 3 min ago`. Both halves
-are needed. The time is what you traded for; the age is what stops it reading
-as live. Past the window the record is dropped rather than shown as older and
-older news, and the line falls back to the coarse phrase and its tail.
+place of whatever the status line would otherwise say: `last seen 14:32 · as of
+3 min ago`. Both halves are needed. The time is what you traded for; the age is
+what stops it reading as live. Past the window the record is dropped rather than
+shown as older and older news, and the line falls back to the status underneath
+and its tail.
+
+The age of the *memory* is the only gate on that - not the shape of the status
+sitting under it. A read stays shown after their status has gone to **"a long
+time ago"**, which is precisely when it matters most: it is then the only moment
+anyone has, and dropping it would mean a line that had been saying `last seen
+14:32` falling back to saying nothing on the day somebody went quiet. The one
+thing that displaces a remembered read is a real exact time arriving from the
+server - the question the trade was sent to answer, answered fresher - and it
+displaces it by being newer rather than by being a different kind of answer.
 
 The records live in `state.toml`, one per person - a second trade replaces the
 first - and they never leave the machine. Settings > Advanced > Purple > Trades
@@ -2014,7 +2045,10 @@ first. The remembered line now carries a `· refresh` of its own, and the same
 eyes mark where there is no room for the word, and it opens the same sheet. It
 stops being a link when their last seen is no longer coarse because of *your*
 rules: they have changed their own privacy since, and there is nothing left to
-trade for.
+trade for. That covers a remembered read sitting over "a long time ago" without
+needing a rule of its own - such a status has no reason at all - and the answer
+is the right one for it. They have gone quiet or shut you out, and a trade
+cannot buy back either. The read is shown; no offer is made with it.
 
 Inside the cooldown that sheet opens rather than refusing. It says `You can
 refresh in 3:12`, counting down every second from the read already written
@@ -2388,6 +2422,30 @@ That is `follow`, the default. `all` skips the peer filter, `all_unseen` and
 category error on something that is already a set of people. A folder beats an
 entry, and both beat the policy, matching the order already used for hiding.
 
+### The add a story button is not one of those people
+
+Your own row at the head of the strip went through all of that too, which was
+wrong in a way that only showed once the exemptions were gone. Saved Messages is
+an ordinary chat to the lists (below), so under `follow` the **add a story**
+button came and went with whether some list happened to name it - a door to
+posting, decided by the membership of a chat it has nothing to do with.
+
+`hide_add_story_p` is its own preset key now, the same shape as
+`hide_archive_p` and defaulting the same way: nothing means the button is off
+the strip while the preset runs, because a preset that has already named what
+gets through has no reason to leave a way in standing on it. Write
+`hide_add_story_p = false` to keep it. Nothing else decides the row - not
+`stories`, not a `list_order` entry, not a folder - and a peek puts it back
+along with everything else the preset was hiding. Normal never took it away.
+
+On the desktop that is a branch at the top of `StoryShown()` rather than an
+`AddStoryShown()` beside it, so the strip keeps its single call site: this is
+still "does this peer belong on the strip", and a second function that one peer
+needed is a function a caller will one day forget to ask. The branch sits above
+the `stories` test so `none` does not swallow it, and above the peek test
+because putting the button back for a peek is the client's rule rather than the
+flag's.
+
 Three implementation choices worth recording.
 
 **Filtered in `State::next()`, not in `Data::Stories`.** The latter also feeds
@@ -2698,16 +2756,17 @@ checkbox - that a hotkey with no visible affordance is a hotkey nobody
 remembers - is the whole of what is left. It sits in the preset picker, next to
 the preset it suspends, saying `Peek - nothing is hidden under Normal` when
 there is nothing to do, and counting itself down while one is running. A tap
-starts a peek of `tap`, which falls back to `auto_off` in the core, including
-`"off"`, which reads as *until you turn it off* rather than as a countdown that
-never moves.
+starts a peek of `tap_mobile`, which is five minutes in the core when the file
+does not name it - not `tap`, not `auto_off`, for the reason under "How long,
+and which gesture" above. `"off"` is a real answer here too, and reads as *until
+you turn it off* rather than as a countdown that never moves.
 
 **The three gestures land differently, because the hotkey is not there to take
-one of them.** A tap while a peek is running *extends* it by another `tap`,
-where the desktop's checkbox ends it; ending is the **long press**. On the
-desktop the checkbox can afford to mean "stop" because the key means "more",
-and on a phone there is no key, so the two meanings have to be two gestures on
-the one control. The tap gets the extension rather than the stop because a tap
+one of them.** A tap while a peek is running *extends* it by another of that
+same length, where the desktop's checkbox ends it; ending is the **long press**.
+On the desktop the checkbox can afford to mean "stop" because the key means
+"more", and on a phone there is no key, so the two meanings have to be two
+gestures on the one control. The tap gets the extension rather than the stop because a tap
 while the chats are back is nearly always "not yet" rather than "done" - the
 peek is running because something is still being looked at. It still ends the
 peek when there is nothing left to extend, with the same hour cap and the same
@@ -2744,12 +2803,13 @@ since the core has never heard of an angle, but it rounds the desktop's way -
 nearest, with a tie going to the shorter.
 
 **Android has no starter `settings.toml`,** so there is nowhere to put a
-`tap = "5m"` that a fresh phone would read. The desktop writes one on first run
-and the phone does not: a file arrives by import from Saved Messages or is
-typed into the editor, and until then the picker says the file is empty and
-names it. A file that says nothing about `tap` gets `auto_off`, and one that
-says nothing about either gets a peek with no clock on it - which is the honest
-answer to "how long", not a default hidden in the Java.
+`tap_mobile = "5m"` that a fresh phone would read. The desktop writes one on
+first run and the phone does not: a file arrives by import from Saved Messages
+or is typed into the editor, and until then the picker says the file is empty
+and names it. That is exactly why `tap_mobile` is the key here and why it does
+not fall back: the phone's answer when the file says nothing has to be a length
+somebody chose for a phone, and five minutes in the core is that, rather than
+`auto_off` or a default hidden in the Java.
 
 **The schedule is a pure function in the bridge and a `Handler` in Java.**
 `scheduleTickNative()` and the desktop's `Runner::tick()` are two calls to one
@@ -3105,14 +3165,14 @@ visibility test and the rebuild. Same reason as the desktop's merge of
 changes when a preset does, so without it the strip would show what the last
 preset let through until the next story arrived.
 
-Two consequences worth stating. Your own row goes through the gate like anybody
-else's - Saved Messages has no exemption from the lists, and `hasOnlySelfStories()`
-had to learn about that or the cell would have stayed on screen with nothing in
-it, since `DialogsActivity` draws it when *either* that or `hasStories()` is
-true. And the count in the strip's title counts what the strip is showing while
-a preset filters, rather than what the server said, which is `Content::total`
-moving after the loop by another name: a title announcing five stories over two
-avatars is the leak said out loud.
+Two consequences worth stating. Your own row goes through the gate as well - it
+answers to `hide_add_story_p` rather than to the lists, but either way it can be
+absent, and `hasOnlySelfStories()` had to learn about that or the cell would
+have stayed on screen with nothing in it, since `DialogsActivity` draws it when
+*either* that or `hasStories()` is true. And the count in the strip's title
+counts what the strip is showing while a preset filters, rather than what the
+server said, which is `Content::total` moving after the loop by another name: a
+title announcing five stories over two avatars is the leak said out loud.
 
 ### Not ported yet
 
