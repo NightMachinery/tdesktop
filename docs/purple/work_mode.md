@@ -1147,8 +1147,12 @@ and does not do this yet.
 
 The main menu carries the switch, above Settings rather than inside it: a work
 preset is changed several times a day and settings are not. The entry reads
-`Work Mode` under Normal and `Work Mode: work` otherwise, so the current mode is
-legible without opening anything.
+`Work Mode` under Normal and `Work Mode: Work` otherwise, so the current mode is
+legible without opening anything. The name is the preset's display name and not
+the key it is written under: a preset called `work` in the file is `Work` on
+screen, because a name with no capital in it is one nobody has expressed an
+opinion about, while `iH` or a `default_view_name` is left exactly as it was
+typed.
 
 Settings > Advanced > Purple carries a second entry to the same box. Not because
 the main menu is hard to reach, but because Settings is where someone looks for
@@ -1551,7 +1555,7 @@ tdesktop writes into its own shortcuts file.
 
 ### Finding it
 
-The main menu entry reads `Work Mode: work (peeking, 4:12 left)` while one is
+The main menu entry reads `Work Mode: Work (peeking, 4:12 left)` while one is
 running - the word alone raised the question of how long and did not answer it -
 and it drops back to `(peeking)` for a peek with no clock. That second hand
 ticks only while there is a countdown to move: the menu stays open for as long
@@ -1779,13 +1783,17 @@ It is a moment rather than a countdown, for the same reason as the peek
 deadline: a pause is measured in hours or days, so a pause that ran out while
 the app was closed has already expired by the time anything reads it again.
 
-Under the switch, the box says what is being held off - `Schedule: work until
-17:00, then home` inside a window, `Schedule: home until 09:00` between them,
-`Schedule paused until` a date while it is paused. The file was the only place
-the windows were ever written down, and reading a list of times to work out
-which one is running now is exactly the arithmetic a screen should be doing for
-you. It re-reads the clock every thirty seconds while the box is open, the
-schedule's own resolution, so it is never more wrong than the schedule is.
+Under the switch, the box says what is being held off - `Schedule: Work until
+17:00, then Home` inside a window, `Schedule: Home until 09:00` between them,
+`Schedule paused until` a date while it is paused. The presets are named the way
+the menu names them, display names rather than the keys they are written under,
+and a next window that is not today's carries its weekday - `Schedule: Home
+until Mon 09:00` - because a bare `09:00` for a window three days out reads as
+nine hours away. The file was the only place the windows were ever written
+down, and reading a list of times to work out which one is running now is
+exactly the arithmetic a screen should be doing for you. It re-reads the clock
+every thirty seconds while the box is open, the schedule's own resolution, so
+it is never more wrong than the schedule is.
 
 A second, dimmer line under it says which machine that is about - `(this device:
 the laptop)`. That question did not exist until one file could describe several
