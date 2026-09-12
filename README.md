@@ -79,7 +79,9 @@ It unlocks the Premium features that are gated on the client alone
 ([docs/purple/premium.md][purple_premium]), adds Work Mode - named presets that
 decide which chats you can see and which may interrupt you
 ([docs/purple/work_mode.md][purple_work_mode]) - and keeps its own settings in
-TOML ([docs/purple/config.md][purple_config]).
+TOML ([docs/purple/config.md][purple_config]). Its other fork defaults and the
+desktop dash-replacement preference are documented in
+[docs/purple/defaults.md][purple_defaults].
 
 [//]: # (LINKS)
 [telegram]: https://telegram.org
@@ -93,6 +95,7 @@ TOML ([docs/purple/config.md][purple_config]).
 [purple_mac]: docs/mac/build.md
 [purple_premium]: docs/purple/premium.md
 [purple_config]: docs/purple/config.md
+[purple_defaults]: docs/purple/defaults.md
 [purple_work_mode]: docs/purple/work_mode.md
 [preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
 [preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png

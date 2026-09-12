@@ -473,6 +473,13 @@ public:
 	[[nodiscard]] rpl::producer<bool> replaceEmojiChanges() const {
 		return _replaceEmoji.changes();
 	}
+	void setReplaceDashes(bool value);
+	[[nodiscard]] bool replaceDashes() const {
+		return _replaceDashes.current();
+	}
+	[[nodiscard]] rpl::producer<bool> replaceDashesValue() const {
+		return _replaceDashes.value();
+	}
 	void setSystemTextReplace(bool value) {
 		_systemTextReplace = value;
 	}
@@ -1129,6 +1136,7 @@ private:
 	bool _loopAnimatedStickers = true;
 	rpl::variable<bool> _largeEmoji = true;
 	rpl::variable<bool> _replaceEmoji = true;
+	rpl::variable<bool> _replaceDashes = false;
 	rpl::variable<bool> _systemTextReplace = true;
 	bool _suggestEmoji = true;
 	bool _suggestStickersByEmoji = true;

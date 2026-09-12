@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
+#include "purple/purple_instant_replaces.h"
 #include "settings/settings_common.h"
 #include "settings/sections/settings_premium.h"
 #include "styles/style_layers.h"
@@ -169,7 +170,7 @@ void EditLinkBox(
 			tr::lng_formatting_link_text(),
 			startText),
 		st::markdownLinkFieldPadding);
-	text->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(text);
 	text->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
@@ -539,7 +540,7 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 	}, [paused] {
 		return On(PowerSaving::kChatSpoiler) || paused();
 	});
-	field->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(field);
 	field->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
@@ -640,7 +641,7 @@ Fn<void(not_null<Ui::InputField*>)> FactcheckFieldIniter(
 			}
 			return TextUtilities::JoinTag(all);
 		});
-		field->setInstantReplaces(Ui::InstantReplaces::Default());
+		Purple::InstallInstantReplaces(field);
 		field->setInstantReplacesEnabled(
 			Core::App().settings().replaceEmojiValue(),
 			Core::App().settings().systemTextReplaceValue());

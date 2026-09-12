@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_generic.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_instant_replaces.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/effects/path_shift_gradient.h"
@@ -373,7 +374,9 @@ EditTagControl::EditTagControl(
 		: tr::lng_rights_edit_admin_rank_name()),
 	TextUtilities::RemoveEmoji(currentRank))) {
 	_field->setMaxLength(kRankLimit);
-	_field->setInstantReplaces(Ui::InstantReplaces::TextOnly());
+	Purple::InstallInstantReplaces(
+		_field,
+		Purple::InstantReplacesType::TextOnly);
 
 	_field->changes(
 	) | rpl::on_next([=] {

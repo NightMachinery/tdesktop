@@ -1735,6 +1735,8 @@ PRIVATE
     purple/purple_focus.h
     purple/purple_gate.cpp
     purple/purple_gate.h
+    purple/purple_instant_replaces.cpp
+    purple/purple_instant_replaces.h
     purple/purple_last_seen.cpp
     purple/purple_last_seen.h
     purple/purple_list_menu.cpp

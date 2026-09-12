@@ -2,20 +2,44 @@
 
 Work Mode is a feature you turn on. This file is about the other thing a fork
 does: the handful of values it decides differently from upstream for everyone,
-before anybody configures anything.
+before anybody configures anything, plus the settings that expose those choices.
 
 Each of these is a **default and nothing more**. It is the answer given when the
 user has never chosen. The moment they choose, the choice is written to a
-preference and wins from then on, exactly as it does upstream - so none of this
-takes a setting away, and none of it is worth a setting of its own.
+preference and wins from then on, exactly as it does upstream.
 
 On Android they live together in
 `TMessagesProj/src/main/java/org/telegram/messenger/purple/PurpleDefaults.java`,
 as compile-time constants, so a default that several places have to agree about
 cannot drift between them and so that the whole set is one file to read. The
-desktop has no equivalent file - its one changed default is a member
-initialiser, `MainSession::Settings::_archiveInMainMenu = true`, because
-nothing else reads it.
+desktop has no equivalent file. Its archive default is a member initialiser,
+`MainSession::Settings::_archiveInMainMenu = true`, because nothing else reads
+it. The desktop-only dash replacement choice below is an app preference rather
+than a compile-time default.
+
+## Double hyphens stay as typed by default
+
+Telegram Desktop's ordinary instant replacement map turns a typed `--` into an
+em dash. Purple Telegram defaults that one replacement off and exposes
+**Replace double hyphens with an em dash** beside **Replace emoji
+automatically** under Settings > Chat Settings. The existing replace-emoji
+switch remains the master control for instant replacements in ordinary fields:
+while it is off the dash checkbox is disabled, its saved choice is preserved,
+and no dash replacement runs in those fields. The text-only admin-rank field
+keeps its previous independent enablement behavior while using the same dash
+choice.
+
+The choice is stored per installation in Telegram's generic settings preference
+map under `purple-replace-dashes`. It survives restart, updates already-open
+fields immediately, and is cleared on the last account logout. It is not part
+of `settings.toml`, Purple sync, `purple-core`, or the Android client.
+
+The implementation copies Telegram's cached default and text-only replacement
+maps once, then masks only the terminal `--` entry with an empty replacement.
+Longer suffix branches and every other instant replacement remain intact.
+Telegram's input field invokes this path only for a single newly typed
+character, so pasting text does not convert dashes; code and preformatted spans
+retain the input field's existing exemption.
 
 ## The Archive row is not at the top of the chat list
 
