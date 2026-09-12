@@ -1400,6 +1400,18 @@ finds a peek with no clock on it, which has no deadline for an extension to move
 A key that can start something it cannot stop would be worse than a key that
 means two things.
 
+"Already spent" means **within half a minute of the cap**, and it has to mean
+something like that rather than "exactly at it". A peek started AT the cap never
+reads as exactly an hour again: the deadline stands still while the clock walks
+towards it, so an hour-long peek has an hour less a second or two left for as
+long as it runs. The rule used to ask whether the deadline had reached `now +
+cap`, which that peek never answers yes to - so the refusal never fired, every
+press reported `Peeking - extended to 60:00 left` after moving the deadline two
+seconds, and the peek ran on for ever. Half a minute is wide enough for the hand
+that moved from the `1 h` chip to the keyboard, and narrower than the shortest
+length the control offers, so no press that still had a whole minute to buy is
+turned into an ending.
+
 ### Chips, not a checkbox alone
 
 The preset box carries the lengths as a row of chips under the checkbox: one

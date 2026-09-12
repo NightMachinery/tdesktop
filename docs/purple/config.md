@@ -615,7 +615,11 @@ I stop" one position past the last - are not configurable. They are the core's
 row, so a phone's chips and a desktop's dial cannot come to offer different
 minutes, and an extension by tapping or pressing again is capped at an hour
 from the press: past that it is not a peek any more, it is the preset off, and
-there is a plainer way to say that. See [work_mode.md](work_mode.md), "Peek".
+there is a plainer way to say that. A press that finds the peek already within
+half a minute of that hour ends it instead of extending it, which is what
+"already as long as a peek gets" has to mean - a peek started at the cap never
+reads as exactly an hour again, since the deadline stands still while the clock
+walks towards it. See [work_mode.md](work_mode.md), "Peek".
 
 ### Why a last seen is coarse
 
