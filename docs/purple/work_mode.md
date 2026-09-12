@@ -1498,6 +1498,44 @@ The timer belongs to the gate for the same reason: the gate is what must re-run
 when it fires. Nothing else would look at the deadline again, so without it a
 peek would sit there until the next unrelated config change.
 
+### A lock can end it, and the phone is not the desktop
+
+A peek ends by itself, and a lock is the other natural moment for it to end: a
+machine nobody is sitting at should not be left showing what the preset hides.
+Three keys under `[peek]` say which lock, on which device:
+
+    end_on_screen_lock_p     = true   # the OS session or screen lock. Desktop only.
+    end_on_app_lock_p        = true   # Telegram's own passcode lock, here.
+    end_on_app_lock_mobile_p = false  # the same lock, on the phone.
+
+On the desktop both are on. A desktop locks because somebody got up and walked
+away, which is exactly the case this is for, and the peek ends through the
+ordinary stop path - no new timer, no second deadline.
+
+On the phone the device's screen lock **never** ends a peek and has no key to
+make it. A phone's screen locks all day by itself - a timeout, a pocket, a
+glance away - so a peek that could not survive that would be useless on the one
+device where the screen is always going off. Its app lock has a key, and that
+key is off, because a phone's passcode lock is usually on a short timer of its
+own; somebody who locks the app by hand can switch it on. `end_on_screen_lock_p`
+still parses on a phone - one file describes every device - and does nothing
+there.
+
+That is one rule applied to two machines rather than an inconsistency waiting to
+be tidied away. What is deliberately **not** done is guessing whether a lock was
+performed or timed out. Both clients would have to tell a user's lock from an
+auto-lock at the call site, on two platforms, and be wrong quietly; a key says
+the same thing out loud and can be changed by the person it is wrong for.
+
+A peek ended this way is ended with nobody there to be told, so `state.toml`
+carries `peek_ended_by` - `"screen_lock"`, `"app_lock"`, `"manual"`, or nothing
+- and the app says it once when the machine comes back: `Peek over - the screen
+locked.` A chat list that has quietly gone back to hiding things with no word
+about why is the kind of thing that reads as a bug. The note is cleared as it is
+said, and by the next peek starting. A peek that simply ran out leaves no note,
+because nothing ends it: the deadline is in the past by the time anything reads
+it again, so there is no moment at which a reason could be written.
+
 ### Why the key is not a Shortcuts::Command
 
 tdesktop's shortcut table is owned by `tdata/shortcuts-custom.json` and by the

@@ -25,6 +25,18 @@ namespace Purple {
 // they belong to.
 void ListenHotkeys(not_null<Ui::RpWidget*> widget);
 
+// Says what ended the last peek, once, if a lock did.
+//
+// Called when the machine comes back - the screen unlocked, or the passcode
+// entered - because that is the first moment there is anybody to tell. A peek
+// ended by a lock is ended while nobody is looking, and a chat list that has
+// quietly gone back to hiding things with no word about why is the kind of
+// thing that reads as a bug.
+//
+// The reason is cleared as it is said, so it is said once and not on every
+// unlock afterwards.
+void PeekEndedNotice();
+
 // What is left of a peek, as a clock: "4:12". A countdown that moves every
 // second wants a second hand, which is why this is not `Purple::FormatSpan' -
 // that one rounds to whole minutes, which is right for a chart and wrong for a

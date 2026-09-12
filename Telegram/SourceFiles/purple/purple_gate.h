@@ -238,6 +238,24 @@ PeekChange ExtendPeekBy(int seconds);
 // should not have to count arguments to see which layer it is in.
 PeekChange EndPeek();
 
+// The session or screen locked, or the app's own passcode lock engaged.
+//
+// A report, not a decision: whether a lock ends a running peek is
+// `[peek] end_on_screen_lock_p' and `end_on_app_lock_p', which the core reads,
+// so the two clients cannot come to disagree about a rule that is written in
+// one file. Both are on by default here - a desktop locks because somebody got
+// up, and a machine nobody is sitting at should not be left showing what the
+// preset hides - while a phone's screen lock has no key at all and its app lock
+// is off by default, because a phone's locks happen by themselves all day.
+//
+// Nothing here tries to tell a lock the user performed from one a timer fired.
+// That would be a guess, made at several call sites, wrong quietly; a key says
+// it out loud and can be changed by the person it is wrong for.
+//
+// True when a peek was actually ended. The reason is left in state so that the
+// screen the user comes back to can say what happened - see PeekEndedNotice().
+bool ReportLock(LockKind kind);
+
 // The chat folders the active preset shows, in the order it named them,
 // possibly including the "*ALL" marker that stands for every folder the entry
 // did not name. Empty means no folder tabs at all, which is what a preset that

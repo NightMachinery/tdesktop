@@ -621,6 +621,36 @@ half a minute of that hour ends it instead of extending it, which is what
 reads as exactly an hour again, since the deadline stands still while the clock
 walks towards it. See [work_mode.md](work_mode.md), "Peek".
 
+### What ends a peek besides its clock
+
+    [peek]
+    end_on_screen_lock_p     = true
+    end_on_app_lock_p        = true
+    end_on_app_lock_mobile_p = false
+
+Three keys, three defaults, and the defaults are what a file that says nothing
+gets. `end_on_screen_lock_p` is the OS session or screen lock and is the
+**desktop's alone**: a phone locks all day by itself - a timeout, a pocket, a
+glance away - so nothing on Android reads this key and there is deliberately no
+mobile counterpart to turn that behaviour on. It still parses on a phone, like
+every other key in a file one device writes and another reads; it simply has no
+effect there.
+
+`end_on_app_lock_p` is Telegram's own passcode lock on the desktop, on by
+default for the same reason as the screen lock: a machine nobody is sitting at
+should not be left showing what the preset hides.
+`end_on_app_lock_mobile_p` is that lock on a phone, and it is the one key here
+that defaults to **false** - a phone's passcode lock is usually on a short timer
+of its own, so on by default would end a peek every few minutes for most people.
+Somebody who locks the app by hand can turn it on.
+
+None of this tries to tell a lock you performed from one a timer fired. That
+would be a guess made at several call sites on two platforms, and wrong quietly;
+a key says which way it goes out loud, and can be changed by the person it is
+wrong for. The client reports that the screen or the app locked and the core
+answers out of these keys, so the two apps cannot drift apart on a rule that is
+written in one file. See [work_mode.md](work_mode.md), "A lock can end it".
+
 ### Why a last seen is coarse
 
     [last_seen]
