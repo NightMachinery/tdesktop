@@ -1715,9 +1715,9 @@ void Settings::resetOnLastLogout() {
 	_ipRevealWarning = true;
 	_loopAnimatedStickers = true;
 	_largeEmoji = true;
-	_replaceEmoji = true;
+	_replaceEmoji = false;
 	_replaceDashes = false;
-	_systemTextReplace = true;
+	_systemTextReplace = false;
 	_suggestEmoji = true;
 	_suggestStickersByEmoji = true;
 	_suggestAnimatedEmoji = true;

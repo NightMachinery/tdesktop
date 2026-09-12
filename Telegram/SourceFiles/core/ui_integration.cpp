@@ -474,6 +474,10 @@ const Ui::Emoji::One *UiIntegration::defaultEmojiVariant(
 	return result;
 }
 
+rpl::producer<bool> UiIntegration::systemTextReplacesEnabled() {
+	return Core::App().settings().systemTextReplaceValue();
+}
+
 QString UiIntegration::phraseContextCopyText() {
 	return tr::lng_context_copy_text(tr::now);
 }
