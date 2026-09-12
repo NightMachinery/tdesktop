@@ -157,6 +157,21 @@ struct View {
 	return u"%1 %"_q.arg((part * 100 + whole / 2) / whole);
 }
 
+// How much peek there was, in a sentence. A different question from the line
+// above it on the screen: that one is time spent IN the chats the preset hides,
+// and a peek started to look at the chat list itself - which most are - leaves
+// no mark on it at all. Peek is the way out of the preset, so how often it is
+// taken is how much of the period the preset was not being kept to.
+[[nodiscard]] QString PeekedText(const PeekUsage &peeked) {
+	return !peeked.count
+		? u"Peeked: not once in this period."_q
+		: (peeked.count == 1)
+		? u"Peeked: once, %1."_q.arg(FormatSpan(peeked.totalMs))
+		: u"Peeked: %1 times, %2."_q
+			.arg(peeked.count)
+			.arg(FormatSpan(peeked.totalMs));
+}
+
 [[nodiscard]] int64 MsAt(const QDate &date, const QTimeZone &zone) {
 	return QDateTime(date, QTime(0, 0), zone).toMSecsSinceEpoch();
 }
@@ -1449,6 +1464,15 @@ void ScreenTimeBox(
 				rows,
 				u"Hidden while peeking: %1."_q.arg(
 					FormatSpan(totals.hiddenMs)),
+				st::boxLabel),
+			padding);
+		rows->add(
+			object_ptr<Ui::FlatLabel>(
+				rows,
+				PeekedText(PeekUsageIn(
+					DerivePeeks(state->events),
+					range.fromMs,
+					range.toMs)),
 				st::boxLabel),
 			padding);
 

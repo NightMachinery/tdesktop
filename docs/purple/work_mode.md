@@ -2158,8 +2158,8 @@ and the rules going back.
 How long the app has had you, out of a log this machine keeps and never sends.
 Off until `[screen_time] enabled_p` says otherwise: it is a record of what you
 looked at and for how long, and nothing should start keeping one of those
-because a version number moved. The desktop records and draws it; Android does
-neither yet.
+because a version number moved. Both clients record it and both draw it, out of
+the same log format and the same core derivations.
 
 ### What is recorded
 
@@ -2185,6 +2185,12 @@ not one.
 - `action`: something you did in the composer - a burst of typing, a send,
   voice recording starting, a file chosen, a reply or an edit begun.
 - `idle` and `resume`: input stopped for `idle_after`, and started again.
+- `peek` and `peek_end`: a peek started, and the one running ended. Neither
+  cuts a session and neither touches a total - a peek does not change which
+  chat is in front of you, it changes what the list beside it is willing to
+  show. A `peek` is written again whenever a running peek's deadline moves,
+  carrying the new deadline; that is not a second peek and is not counted as
+  one.
 
 Time that is not in a chat - the chat list, search, settings - is recorded as a
 session with no chat and the kind `elsewhere`, so the splits add up to
@@ -2215,10 +2221,18 @@ tab-separated, seven fields:
     unix_ms  kind  dialog_id  chat_kind  preset  action  hidden
 
 Tabs rather than commas because a preset name is whatever you typed and a comma
-in one is likelier than a tab. A line that cannot be read is skipped in
-silence: the file is append-only and written from several places, so a
-truncated last line after a crash is expected rather than exceptional, and one
-lost event is worth far less than the rest of the history.
+in one is likelier than a tab. `action` says which action for an `action` line,
+and carries the deadline - unix milliseconds - for a `peek`, which is the one
+field that means two things: a line has seven fields, and a reader that has to
+count them is a reader the two apps can come to disagree with. The deadline is
+what keeps a peek that outlived the app from being counted as every hour until
+the app was next opened, since a peek with no end in the log runs to the last
+thing the log knows happened or to its own deadline, whichever came first.
+
+A line that cannot be read is skipped in silence: the file is append-only and
+written from several places, so a truncated last line after a crash is expected
+rather than exceptional, and one lost event is worth far less than the rest of
+the history.
 
 It never leaves the machine. Nothing in the fork reads it for sending, and
 nothing will: two devices would double-count nothing useful, and this is a
@@ -2240,6 +2254,10 @@ reads the file and writes nothing.
 - **The preset** is `Purple::ActiveChanges()`, so a preset moved by the
   schedule or by a focus mode cuts the session exactly as one chosen by hand
   does.
+- **Peek** is the same subscription. Starting, extending and stopping all write
+  `state.toml` and reload, and so does the timer that ends a peek at its
+  deadline, so every one of the three arrives as a change in the resolution and
+  the recorder needs no clock of its own.
 - **Actions** are `HistoryWidget` and `ComposeControls`: the field's changes
   (throttled to one event per `action_span`, in the recorder rather than at the
   call site), the send stream, the voice recorder starting, a file actually
@@ -2281,8 +2299,15 @@ to the longest, and its own active share. Clicking one opens its own page: day
 by day, and when in the day. Then "reading load" - every day in the period
 folded onto one clock, which is what a schedule window is placed by - and for a
 month, an hour-by-weekday heat map. Then "hidden while peeking" as its own
-number, the budgets - which are added and edited here, not only listed - and an
-export.
+number and "peeked" under it - `Peeked: 4 times, 23 m` - then the budgets,
+which are added and edited here and not only listed, and an export.
+
+Those two lines are not the same number, which is the reason both are drawn.
+Hidden-while-peeking is time spent *in* the chats the preset hides; most peeks
+are a look at the chat list itself, and those leave no mark on it at all. Peek
+is the way out of the preset, so how often it is taken is how much of the
+period the preset was not being kept to - which is the figure worth having on a
+screen about how the app is used.
 
 The export is CSV through the save dialog, and it writes sessions rather than
 buckets: a bucket is one way of looking at the log and a session is what the
