@@ -980,6 +980,17 @@ void BuildStickersEmojiSection(SectionBuilder &builder) {
 
 	builder.add(nullptr, [] {
 		return SearchEntry{
+			.id = u"chat/replace-dashes"_q,
+			.title = tr::lng_settings_replace_dashes(tr::now),
+			.keywords = { u"replace"_q, u"hyphens"_q, u"dash"_q },
+			.checkIcon = Core::App().settings().replaceDashes()
+				? SearchEntryCheckIcon::Checked
+				: SearchEntryCheckIcon::Unchecked,
+		};
+	});
+
+	builder.add(nullptr, [] {
+		return SearchEntry{
 			.id = u"chat/suggest-emoji"_q,
 			.title = tr::lng_settings_suggest_emoji(tr::now),
 			.keywords = { u"suggest"_q, u"emoji"_q, u"autocomplete"_q },
@@ -1473,6 +1484,23 @@ void SetupStickersEmoji(
 	if (highlights) {
 		highlights->push_back({ u"chat/replace-emoji"_q, {
 			replaceEmoji,
+			{ .radius = st::boxRadius },
+		} });
+	}
+	const auto replaceDashes = addWithReturn(
+		tr::lng_settings_replace_dashes(tr::now),
+		Core::App().settings().replaceDashes(),
+		[=](bool checked) {
+			Core::App().settings().setReplaceDashes(checked);
+			Core::App().saveSettingsDelayed();
+		});
+	Core::App().settings().replaceEmojiValue(
+	) | rpl::on_next([=](bool enabled) {
+		replaceDashes->setDisabled(!enabled);
+	}, replaceDashes->lifetime());
+	if (highlights) {
+		highlights->push_back({ u"chat/replace-dashes"_q, {
+			replaceDashes,
 			{ .radius = st::boxRadius },
 		} });
 	}

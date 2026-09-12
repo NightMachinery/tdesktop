@@ -26,6 +26,7 @@ namespace {
 constexpr auto kInitialVideoQuality = 480; // Start with SD.
 constexpr auto kMinIvZoom = 25;
 constexpr auto kMaxIvZoom = 400;
+constexpr auto kReplaceDashesPref = "purple-replace-dashes"_cs;
 
 [[nodiscard]] int DefaultIvZoom() {
 	const auto exact = cScale() * 100 / cScreenScale();
@@ -1127,6 +1128,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_loopAnimatedStickers = (loopAnimatedStickers == 1);
 	_largeEmoji = (largeEmoji == 1);
 	_replaceEmoji = (replaceEmoji == 1);
+	_replaceDashes = readPref<bool>(kReplaceDashesPref, false);
 	_systemTextReplace = (systemTextReplace == 1);
 	_suggestEmoji = (suggestEmoji == 1);
 	_suggestStickersByEmoji = (suggestStickersByEmoji == 1);
@@ -1327,6 +1329,11 @@ void Settings::writePrefGeneric(
 		_prefs.emplace(raw, value);
 	}
 	_saveDelayed.fire({});
+}
+
+void Settings::setReplaceDashes(bool value) {
+	_replaceDashes = value;
+	writePref<bool>(kReplaceDashesPref, value);
 }
 
 std::optional<QByteArray> Settings::readPrefGeneric(std::string_view key) {
@@ -1709,6 +1716,7 @@ void Settings::resetOnLastLogout() {
 	_loopAnimatedStickers = true;
 	_largeEmoji = true;
 	_replaceEmoji = true;
+	_replaceDashes = false;
 	_systemTextReplace = true;
 	_suggestEmoji = true;
 	_suggestStickersByEmoji = true;

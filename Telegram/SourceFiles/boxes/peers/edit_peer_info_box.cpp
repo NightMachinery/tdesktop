@@ -64,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mtproto/sender.h"
 #include "main/main_app_config.h"
+#include "purple/purple_instant_replaces.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/boost_box.h"
 #include "ui/controls/emoji_button.h"
@@ -726,7 +727,7 @@ object_ptr<Ui::RpWidget> Controller::createTitleEdit() {
 			_peer->name()),
 		st::editPeerTitleMargins);
 	result->entity()->setMaxLength(Ui::EditPeer::kMaxGroupChannelTitle);
-	result->entity()->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(result->entity());
 	result->entity()->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
@@ -835,7 +836,7 @@ object_ptr<Ui::RpWidget> Controller::createDescriptionEdit() {
 			_peer->about()),
 		st::editPeerDescriptionMargins);
 	result->entity()->setMaxLength(Ui::EditPeer::kMaxChannelDescription);
-	result->entity()->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(result->entity());
 	result->entity()->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());

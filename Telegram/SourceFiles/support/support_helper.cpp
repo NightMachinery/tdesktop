@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "purple/purple_instant_replaces.h"
 #include "apiwrap.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -92,7 +93,7 @@ EditInfoBox::EditInfoBox(
 	_field->setMaxLength(kMaxSupportInfoLength);
 	_field->setSubmitSettings(
 		Core::App().settings().sendSubmitWay());
-	_field->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(_field);
 	_field->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());

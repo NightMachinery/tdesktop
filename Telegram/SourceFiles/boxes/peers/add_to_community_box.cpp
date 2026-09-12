@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_hardcoded.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_instant_replaces.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/userpic_button.h"
@@ -170,7 +171,7 @@ void CommunityIdentityBox::prepare() {
 		st::defaultInputField,
 		tr::lng_community_create_name());
 	_title->setMaxLength(Ui::EditPeer::kMaxGroupChannelTitle);
-	_title->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(_title);
 	_title->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());

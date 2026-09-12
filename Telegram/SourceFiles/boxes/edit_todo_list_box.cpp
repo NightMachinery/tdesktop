@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
+#include "purple/purple_instant_replaces.h"
 #include "ui/controls/emoji_button.h"
 #include "ui/controls/emoji_button_factory.h"
 #include "ui/rect.h"
@@ -182,7 +183,7 @@ void InitField(
 		not_null<QWidget*> container,
 		not_null<Ui::InputField*> field,
 		not_null<Main::Session*> session) {
-	field->setInstantReplaces(Ui::InstantReplaces::Default());
+	Purple::InstallInstantReplaces(field);
 	field->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
