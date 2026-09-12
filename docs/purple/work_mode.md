@@ -2844,14 +2844,20 @@ does not name it - not `tap`, not `auto_off`, for the reason under "How long,
 and which gesture" above. `"off"` is a real answer here too, and reads as *until
 you turn it off* rather than as a countdown that never moves.
 
-**The three gestures land differently, because the hotkey is not there to take
-one of them.** A tap while a peek is running *extends* it by another of that
-same length, where the desktop's checkbox ends it; ending is the **long press**.
-On the desktop the checkbox can afford to mean "stop" because the key means
-"more", and on a phone there is no key, so the two meanings have to be two
-gestures on the one control. The tap gets the extension rather than the stop because a tap
-while the chats are back is nearly always "not yet" rather than "done" - the
-peek is running because something is still being looked at. It still ends the
+**The hotkey is not there to take one of the two meanings, so they are two
+gestures on the one control - but the tap is the one the checkbox promises.** A
+second tap ends the peek, exactly as the desktop's checkbox does, and the **long
+press** extends it by another `tap_mobile`. It was the other way round to begin
+with, on the reasoning that a tap while the chats are back is nearly always "not
+yet" rather than "done", the peek being running because something is still being
+looked at. That is a fair reading of the intent and the wrong thing to build out
+of it: a checkbox that will not uncheck is broken however good the reason, and
+the first person to tap a checked one watched the peek get *longer*. So the
+extension takes the gesture nobody would guess unaided, and a grey line under
+the row, the dial and the chips says `Long press to extend` while a peek is
+running - which is the only time it is true, so it is drawn at no other time and
+never under Normal. On the desktop the checkbox can afford to mean "stop"
+because the key means "more"; here the long press is the key. It still ends the
 peek when there is nothing left to extend, with the same hour cap and the same
 two sentences the hotkey uses, for the same reason: a control that can start
 something it cannot stop is worse than one that means two things.
