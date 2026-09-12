@@ -1135,9 +1135,9 @@ private:
 	bool _ipRevealWarning = true;
 	bool _loopAnimatedStickers = true;
 	rpl::variable<bool> _largeEmoji = true;
-	rpl::variable<bool> _replaceEmoji = true;
+	rpl::variable<bool> _replaceEmoji = false;
 	rpl::variable<bool> _replaceDashes = false;
-	rpl::variable<bool> _systemTextReplace = true;
+	rpl::variable<bool> _systemTextReplace = false;
 	bool _suggestEmoji = true;
 	bool _suggestStickersByEmoji = true;
 	bool _suggestAnimatedEmoji = true;

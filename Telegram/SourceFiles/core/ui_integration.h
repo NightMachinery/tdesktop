@@ -65,6 +65,7 @@ public:
 	rpl::producer<> forcePopupMenuHideRequests() override;
 	const Ui::Emoji::One *defaultEmojiVariant(
 		const Ui::Emoji::One *emoji) override;
+	rpl::producer<bool> systemTextReplacesEnabled() override;
 
 	QString phraseContextCopyText() override;
 	QString phraseContextCopyEmail() override;

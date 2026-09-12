@@ -17,22 +17,33 @@ desktop has no equivalent file. Its archive default is a member initialiser,
 it. The desktop-only dash replacement choice below is an app preference rather
 than a compile-time default.
 
-## Double hyphens stay as typed by default
+## Automatic text replacements are off by default
 
-Telegram Desktop's ordinary instant replacement map turns a typed `--` into an
-em dash. Purple Telegram defaults that one replacement off and exposes
-**Replace double hyphens with an em dash** beside **Replace emoji
-automatically** under Settings > Chat Settings. The existing replace-emoji
-switch remains the master control for instant replacements in ordinary fields:
-while it is off the dash checkbox is disabled, its saved choice is preserved,
-and no dash replacement runs in those fields. The text-only admin-rank field
-keeps its previous independent enablement behavior while using the same dash
-choice.
+Purple Telegram defaults **Replace emoji automatically** under Settings > Chat
+Settings off. That switch controls Telegram's built-in instant replacements,
+including `<<` to `«`, `>>` to `»`, `:shrug:`, emoticons and emoji codes. It is
+also the master control for **Replace double hyphens with an em dash**: while
+the master switch is off the dash checkbox is disabled, its saved choice is
+preserved, and no dash replacement runs. The text-only admin-rank field uses
+the same master control and dash choice, but retains its text-only replacement
+map, so opting in does not add emoji replacements to that field.
 
-The choice is stored per installation in Telegram's generic settings preference
-map under `purple-replace-dashes`. It survives restart, updates already-open
-fields immediately, and is cleared on the last account logout. It is not part
-of `settings.toml`, Purple sync, `purple-core`, or the Android client.
+On macOS, **System text replacements** under Settings > Advanced also defaults
+off. It remains a separate switch for substitutions configured in the operating
+system, and applies to every input field unless that field explicitly disables
+system replacements for its editing mode. Such field-specific disabling keeps
+priority over later setting changes. The emoji suggestion settings are
+independent and keep their upstream defaults.
+
+These are defaults for missing settings and for the reset performed on last
+account logout. Existing installations keep their serialized replace-emoji and
+system-replacement booleans, including values originally written from upstream
+defaults; the legacy serialized format cannot tell those apart from deliberate
+choices. There is no migration that changes them. The dash choice is stored per
+installation in Telegram's generic settings preference map under
+`purple-replace-dashes`. It survives restart, updates already-open fields
+immediately, and is cleared on the last account logout. None of these settings
+is part of `settings.toml`, Purple sync, `purple-core`, or the Android client.
 
 The implementation copies Telegram's cached default and text-only replacement
 maps once, then masks only the terminal `--` entry with an empty replacement.

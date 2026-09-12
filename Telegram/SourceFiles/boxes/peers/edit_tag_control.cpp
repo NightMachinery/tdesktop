@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_tag_control.h"
 
 #include "base/unixtime.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_session.h"
@@ -377,6 +379,9 @@ EditTagControl::EditTagControl(
 	Purple::InstallInstantReplaces(
 		_field,
 		Purple::InstantReplacesType::TextOnly);
+	_field->setInstantReplacesEnabled(
+		Core::App().settings().replaceEmojiValue(),
+		Core::App().settings().systemTextReplaceValue());
 
 	_field->changes(
 	) | rpl::on_next([=] {

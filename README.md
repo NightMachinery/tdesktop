@@ -80,7 +80,7 @@ It unlocks the Premium features that are gated on the client alone
 decide which chats you can see and which may interrupt you
 ([docs/purple/work_mode.md][purple_work_mode]) - and keeps its own settings in
 TOML ([docs/purple/config.md][purple_config]). Its other fork defaults and the
-desktop dash-replacement preference are documented in
+automatic text-replacement preferences are documented in
 [docs/purple/defaults.md][purple_defaults].
 
 [//]: # (LINKS)
