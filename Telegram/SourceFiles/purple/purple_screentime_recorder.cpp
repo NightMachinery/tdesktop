@@ -193,6 +193,7 @@ private:
 
 	void refreshEnabled();
 	void checkPreset();
+	void checkPeek();
 	void setForeground(bool value);
 	void setActiveChat(Dialogs::Key key);
 
@@ -226,6 +227,14 @@ private:
 
 	QString _preset;
 	bool _idle = false;
+
+	// The peek last written into the log, and the deadline it had. Both,
+	// because a deadline that moves is worth a line of its own: the core reads
+	// a second Peek with no end between as the same peek carrying a newer
+	// deadline, which is what keeps a peek that outlived the app from being
+	// counted as every hour until the app was next opened.
+	bool _peeking = false;
+	int64 _peekDeadlineMs = 0;
 
 	// When the last "typing" went in, for the throttle. Monotonic rather than
 	// wall clock: it is a duration between two keystrokes and nothing else
@@ -262,6 +271,7 @@ Recorder::Recorder() {
 	ActiveChanges(
 	) | rpl::on_next([=] {
 		checkPreset();
+		checkPeek();
 	}, _lifetime);
 
 	base::qt_signal_producer(
@@ -281,6 +291,7 @@ void Recorder::refreshEnabled() {
 	if (enabled == _enabled) {
 		if (_enabled) {
 			checkPreset();
+			checkPeek();
 		}
 		return;
 	}
@@ -288,6 +299,12 @@ void Recorder::refreshEnabled() {
 	if (_enabled) {
 		_preset = CurrentPreset();
 		_idle = false;
+
+		// Forgotten rather than remembered across the switch, so that turning
+		// the log back on announces whatever is running then instead of
+		// trusting a flag from before the gap in the file.
+		_peeking = false;
+		_peekDeadlineMs = 0;
 		_watchdogTimer.callEach(kWatchdogTick);
 		prune();
 		if (_foreground) {
@@ -297,10 +314,13 @@ void Recorder::refreshEnabled() {
 			append(EventKind::Foreground);
 			openSession();
 		}
+		checkPeek();
 	} else {
 		closeSession();
 		_watchdogTimer.cancel();
 		flush();
+		_peeking = false;
+		_peekDeadlineMs = 0;
 	}
 }
 
@@ -416,6 +436,42 @@ void Recorder::checkPreset() {
 		return;
 	}
 	append(EventKind::Preset);
+}
+
+// Writes the peek line when a peek starts, ends, or has its deadline moved.
+//
+// Every one of those is a change in the resolution, so ActiveChanges carries
+// all three - starting, extending and stopping write state, and the timer that
+// ends a peek at its deadline reloads. Nothing here needs a clock of its own.
+//
+// It does not cut a session and is not tied to one, unlike everything else in
+// this file. A peek is not a chat being in front of you: most are started to
+// look at the chat list itself, and that use is invisible in the "time in
+// hidden chats" number, which is precisely why the count is worth having.
+void Recorder::checkPeek() {
+	const auto peeking = Peeking();
+	const auto deadline = peeking
+		? (CurrentState().peekDeadlineUnix * 1000)
+		: int64(0);
+	if (peeking == _peeking && deadline == _peekDeadlineMs) {
+		return;
+	}
+	_peeking = peeking;
+	_peekDeadlineMs = deadline;
+	if (!_enabled) {
+		return;
+	}
+	append(Event{
+		.kind = peeking ? EventKind::Peek : EventKind::PeekEnd,
+		.preset = _preset,
+
+		// The deadline rides in the action field, which is where the core
+		// reads it from. A peek with no clock on it has none and is bounded by
+		// nothing - that one really does run until it is stopped.
+		.action = (peeking && deadline)
+			? QString::number(deadline)
+			: QString(),
+	});
 }
 
 void Recorder::noteAction(PeerData *peer, const QString &action) {
