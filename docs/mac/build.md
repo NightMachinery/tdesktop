@@ -758,8 +758,26 @@ screen clear.** Two things cost the first attempt at driving an instance
 shell inherits the sandbox: the instance came up, drew, and logged `Purple
 Error: Focus state unreadable ... Operation not permitted` for the Do Not
 Disturb database the deployed bundle can otherwise read, so start it through
-something outside the sandbox - Hammerspoon's `hs.task.new(path, nil, args)`
-with `setEnvironment` carrying `XDG_CONFIG_HOME` and `HOME`, or `open -n`.
+something outside the sandbox.
+
+**Whichever process starts it is the one macOS asks about.** A privacy
+permission is attributed to the *responsible* process rather than to the bundle
+being run, so an instance started through Hammerspoon's `hs.task.new(path, nil,
+args)` - with `setEnvironment` carrying `XDG_CONFIG_HOME` and `HOME`, which is
+otherwise the convenient way to launch one - is judged by Hammerspoon's grants,
+and Hammerspoon has no Full Disk Access. That instance logs the same `Purple
+Error: Focus state unreadable` line, and focus sync then reads as "no focus
+mode" for the rest of the run without ever saying so again. The bundle's own
+Full Disk Access is intact the whole time; it is simply not what is being
+consulted.
+
+Two things follow, and the second cost an hour on 2026-09-11. A driving harness
+built on `hs.task` cannot exercise focus sync at all. And that log line is **not
+a probe for whether the bundle still has Full Disk Access** - it says this
+launch could not read the database, which is a fact about the launcher. Use
+`open -n`, where launchd starts the app and it answers for itself, when the run
+is meant to exercise focus or to answer that question.
+
 And while a keychain authorization dialog (`SecurityAgent`, "wants to use the
 System keychain") was waiting on screen from an unrelated command, nothing
 synthesized reached anything: `hs.eventtap` clicks and keystrokes, an
@@ -774,11 +792,15 @@ is the way to find where to click without reading pixels.
 
 **Whether the deployed bundle still has Full Disk Access, without opening
 System Settings.** An ad-hoc re-sign was expected to be able to drop it, and
-the bundle's own log is the cheapest way to ask. `StartFocusSync` builds the
-`Detector` unconditionally (`core/application.cpp`), which checks once on the
-way up and every minute after, and a refused open is logged - once per spell of
-failure, not once a minute - as `Purple Error: Focus state unreadable ... Full
-Disk Access for Purple Telegram is what this usually wants`. So an instance
+the bundle's own log is the cheapest way to ask - of an instance launched the
+ordinary way, through Finder or `open`. One launched by something else is
+answering for that something else, as the section above explains, so the
+absence of the error is an answer and its presence is not. `StartFocusSync`
+builds the `Detector` unconditionally (`core/application.cpp`), which checks
+once on the way up and every minute after, and a refused open is logged - once
+per spell of failure, not once a minute - as `Purple Error: Focus state
+unreadable ... Full Disk Access for Purple Telegram is what this usually
+wants`. So an instance
 that has been up for hours with no `Purple Error` line anywhere in
 `~/Library/Application Support/Purple Telegram/log.txt` has been reading the
 focus database successfully that whole time, and that is the answer. Checked
@@ -786,7 +808,9 @@ focus database successfully that whole time, and that is the answer. Checked
 access survived the re-sign. What makes the file a usable probe is that the
 denial is specific - a shell without Full Disk Access gets `Operation not
 permitted` from `head ~/Library/DoNotDisturb/DB/Assertions.json` while `ls` on
-the same path succeeds.
+the same path succeeds. What it is not is a probe that can be run through a
+launcher: an instance Hammerspoon started logs the line with the bundle's grant
+untouched.
 
 **And check the input lock, not just the dialog.** The second attempt
 (2026-09-11, 23:00) lost its session to a different swallower with the same
@@ -823,12 +847,33 @@ If the window moves, the app is turning its event loop and acting on input -
 AX arrives through the accessibility API, not the event stream - so the clicks
 are being swallowed somewhere between the tap and the window. Reads alone will
 not tell the two apart as clearly, since a tree can be served from a state that
-is no longer being redrawn. Two more readings that cost nothing: the button
-under the pointer does not take its hover highlight, and the window reports
-`AXMain` true with `AXFocused` false and stays that way after a title-bar
-click. An `hs.eventtap` listener still *sees* the event you posted, which is
-the trap - posting works, delivery is what does not, so seeing your own event
-come back proves nothing.
+is no longer being redrawn. One more reading that costs nothing: the button
+under the pointer does not take its hover highlight. An `hs.eventtap` listener
+still *sees* the event you posted, which is the trap - posting works, delivery
+is what does not, so seeing your own event come back proves nothing.
+
+**`AXFocused` is not one of those readings.** The window reports `AXMain` true
+with `AXFocused` false and stays that way after a title-bar click - and also
+while typing into it is landing perfectly well. It says nothing either way on
+this app, so do not read a false there as "the events are being eaten".
+
+**How to post events that actually arrive.** The two kinds of event want
+different destinations, which is the whole of it:
+
+```lua
+hs.eventtap.event.newMouseEvent(kind, point):post()          -- session
+hs.eventtap.event.newKeyEvent(key, true):post(app)           -- process
+```
+
+A mouse event goes to the session: posted at a pid it is dropped in silence,
+with the same nothing-happened signature as a swallowed click. A key event goes
+to the process, because one posted to the session goes to whatever holds
+keyboard focus at that instant, which during a driving run is quite often not
+the window being driven. The app has to be activated again before keys will
+land - a click into it is not enough - and the two paths can arrive out of
+order, since one is queued through the window server and the other is delivered
+straight to the process, so put a pause between a click and the typing that
+follows it rather than firing them back to back.
 
 ### Headless, and how far it gets
 
