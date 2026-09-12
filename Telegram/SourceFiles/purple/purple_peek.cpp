@@ -243,6 +243,24 @@ void ListenHotkeys(not_null<Ui::RpWidget*> widget) {
 	Instance().listen(widget);
 }
 
+void PeekEndedNotice() {
+	const auto reason = CurrentState().peekEnded;
+	if (reason != PeekEnd::ScreenLock && reason != PeekEnd::AppLock) {
+		return;
+	}
+
+	// Cleared as it is said, so it is said once rather than at every unlock
+	// from here to the next peek.
+	UpdateState([](State &state) {
+		state.peekEnded = PeekEnd::None;
+	});
+	if (const auto window = Core::App().activeWindow()) {
+		ShowToast(window, (reason == PeekEnd::ScreenLock)
+			? u"Peek over - the screen locked."_q
+			: u"Peek over - Telegram locked."_q);
+	}
+}
+
 QString PeekRemainingText(int seconds) {
 	return u"%1:%2"_q
 		.arg(seconds / 60)

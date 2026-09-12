@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_device.h"
 
 #include <QtCore/QDateTime>
 
@@ -576,6 +577,25 @@ PeekChange EndPeek() {
 		StopPeek(state);
 	});
 	return {};
+}
+
+bool ReportLock(LockKind kind) {
+	if (!Instance().resolved().peeking) {
+		// Nothing to end, and the ordinary case: every lock of either kind
+		// arrives here, and almost none of them find a peek running.
+		return false;
+	}
+	const auto now = NowUnix();
+	auto ended = false;
+	UpdateState([&](State &state) {
+		ended = EndPeekForLock(
+			state,
+			now,
+			ActiveSettings(),
+			ThisDevice(),
+			kind);
+	});
+	return ended;
 }
 
 const std::vector<ExemptFolder> &ExemptFolders() {
