@@ -263,10 +263,11 @@ purple/build_app.sh
 That script both configures and builds — it is not a configure-only step.
 It wraps a normal CMake invocation: Ninja, `RelWithDebInfo`, the Homebrew and
 `../tdesktop-libs/local` prefixes on `CMAKE_PREFIX_PATH`, and a build tree in
-`out/`. Override `BuildType=Debug` in the environment if you want the `-O0`
-build instead, and `BuildJobs=N` to cap parallelism — the default saturates
-every core, which makes the machine unpleasant to use for the couple of hours
-this takes.
+`out/`. For a disposable `-O0` build, set both `BuildType=Debug` and a separate
+`BuildPath`, for example `BuildPath="$PWD/out-debug"`; never reconfigure the
+daily-use `out/` tree as Debug. Set `BuildJobs=N` to cap parallelism — the
+default saturates every core, which makes the machine unpleasant to use for
+the couple of hours this takes.
 
 Never run two builds against `out/` at once. Ninja does not lock the build
 directory, so a second one silently competes for the same outputs.
@@ -274,6 +275,21 @@ directory, so a second one silently competes for the same outputs.
 `RelWithDebInfo` is the useful default for a client you both use and modify:
 optimized enough to live in the Dock, but with enough symbols to say where a
 crash landed in code you are changing.
+
+This distinction is part of the data-safety boundary. The bundle installed at
+`/Applications/Purple Telegram.app` must come from `RelWithDebInfo`; do not set
+`BuildType=Debug` when preparing that client. On non-Windows `_DEBUG` builds,
+startup first tries the executable directory as its working directory. A
+writable macOS app bundle can therefore acquire a separate `tdata` beside its
+executable and present an empty login screen while the established account is
+still safe under `~/Library/Application Support/Purple Telegram/tdata`.
+
+Use Debug bundles only as disposable test artifacts. Give them a separate
+`BuildPath`, install them to a separate `Target` while passing that same
+`BuildPath` to `purple/install.sh`, and launch them with an explicit isolated
+`-workdir`. Literal CMake `Release` is not the Purple Telegram application
+configuration either; this fork uses `RelWithDebInfo` for the daily-use client.
+Documented dependency builds may still require `Release`.
 
 ### How much debug info
 
@@ -487,9 +503,19 @@ As with Qt, none of this applies on a machine without the full formula.
 
 ### Install
 
+Before installing, confirm `CMAKE_BUILD_TYPE` in the selected `BuildPath` is
+`RelWithDebInfo`. The following command must print the matching cache entry
+before replacing `/Applications/Purple Telegram.app`:
+
 ```bash
-purple/install.sh
+BuildPath="${BuildPath:-$PWD/out}"
+command grep -Fx 'CMAKE_BUILD_TYPE:STRING=RelWithDebInfo' \
+    "$BuildPath/CMakeCache.txt"
+BuildPath="$BuildPath" purple/install.sh
 ```
+
+If it does not match, stop. A Debug bundle belongs in a separate `BuildPath`,
+at a separate `Target`, with isolated account data.
 
 This copies the Qt frameworks into the bundle, re-signs it ad-hoc, and replaces
 `/Applications/Purple Telegram.app`. Ad-hoc signing is enough for a locally
