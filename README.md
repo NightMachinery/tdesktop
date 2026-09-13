@@ -75,6 +75,9 @@ Version **1.8.15** was the last that supports older systems
 
 This checkout also carries a local macOS fork build, "Purple Telegram", which
 installs alongside the official app for development: [docs/mac/build.md][purple_mac].
+The installed daily-use bundle is `RelWithDebInfo`; Debug bundles use separate
+build paths, install targets, and working directories as described in the
+macOS instructions.
 It unlocks the Premium features that are gated on the client alone
 ([docs/purple/premium.md][purple_premium]), adds Work Mode - named presets that
 decide which chats you can see and which may interrupt you

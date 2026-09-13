@@ -60,7 +60,14 @@ Telegram/build/docker/centos_env/build_debug.sh
 cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 ```
 
-**Never build Release** - it's extremely heavy and not needed for testing changes.
+Use these Debug commands for development and verification builds. They are not
+the macOS installation workflow for the Purple fork. See the macOS rules below
+before replacing `/Applications/Purple Telegram.app`.
+
+Never build the Purple Telegram application in the literal CMake `Release`
+configuration. It is extremely heavy and is not the packaged configuration
+used by this fork. This does not apply to dependency builds whose documented
+workflow explicitly requires `Release`, such as the patched Qt build.
 
 ## Platform-Specific Requirements
 
@@ -76,6 +83,25 @@ cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 - Requires Xcode
 - Dependencies: `../Libraries/local/Qt-*`
 - Set `QT` environment variable: `export QT=6.8`
+
+For the Purple fork, distinguish a test build from the installed daily-use
+client:
+
+- Development and disposable test bundles use `Debug`.
+- `/Applications/Purple Telegram.app` must be built with the default
+  `RelWithDebInfo` configuration from `purple/build_app.sh`, then installed
+  with `purple/install.sh`. Do not pass `BuildType=Debug` for this target.
+- Do not use literal CMake `Release` for the Purple Telegram application;
+  `RelWithDebInfo` is the optimized, symbolicated configuration intended for
+  an installed Purple client.
+- A non-Windows `_DEBUG` build first tries `cExeDir()` as its working directory.
+  If an installed app bundle is writable, that can create a fresh `tdata`
+  beside the executable and make the app appear logged out even though the
+  established account remains under
+  `~/Library/Application Support/Purple Telegram/tdata`. Never install a Debug
+  bundle over the daily-use Purple app. Give Debug builds a separate
+  `BuildPath`, install them to a separate `Target`, pass that same `BuildPath`
+  to `purple/install.sh`, and launch them with an explicit isolated `-workdir`.
 
 ### Linux
 - Build dependencies in `../Libraries`
@@ -227,8 +253,11 @@ launch on the assumption that it is "probably the fork".
 
 ## Best Practices
 
-1. **Always use Debug builds** - Release builds are extremely heavy
-2. **Don't build Release configuration** - it's too heavy for testing
+1. Use Debug for ordinary development and verification.
+2. Use `RelWithDebInfo` for the installed macOS Purple client.
+3. Never build the Purple Telegram application in the literal CMake `Release`
+   configuration; follow documented configuration requirements for dependency
+   builds.
 
 ## Text File Format
 
