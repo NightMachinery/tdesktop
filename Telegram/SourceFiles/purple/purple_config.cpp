@@ -303,6 +303,7 @@ public:
 	void setLocalPremium(bool value);
 
 	[[nodiscard]] const Settings &settings() const;
+	[[nodiscard]] bool usingLastGoodSettings() const;
 	[[nodiscard]] const Problems &problems() const;
 	[[nodiscard]] rpl::producer<> changes() const;
 
@@ -337,7 +338,8 @@ public:
 private:
 	void loadSettings();
 	void loadState();
-	void applyText(const QString &text);
+	void applyText(const std::optional<QString> &text);
+	void applySettings(Settings settings, const QString &path);
 	[[nodiscard]] bool writeSettings(const QString &text);
 	void startWatching();
 	void reloadFromDisk();
@@ -351,6 +353,8 @@ private:
 	QString _text;
 	Settings _settings;
 	Problems _problems;
+	bool _primaryExists = false;
+	bool _usingLastGoodSettings = false;
 
 	State _state;
 	QString _stateText;
@@ -381,37 +385,68 @@ Config::Config()
 void Config::loadSettings() {
 	const auto path = SettingsFilePath();
 	if (auto text = ReadFile(path)) {
-		applyText(*text);
+		applyText(text);
+		return;
+	} else if (QFileInfo::exists(path)
+		|| QFileInfo::exists(LastGoodSettingsFilePath())) {
+		applyText(std::nullopt);
 		return;
 	} else if (!QDir().mkpath(ConfigDirectory())) {
 		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
-		applyText(QString());
+		applyText(std::nullopt);
 		return;
 	}
 	const auto starter = QString::fromUtf8(kStarterSettings);
 	if (WriteConfigFile(path, starter)) {
 		applyText(starter);
 	} else {
-		applyText(QString());
+		applyText(std::nullopt);
 	}
 }
 
-void Config::applyText(const QString &text) {
-	_text = text;
-	auto parsed = ParseSettings(text, SettingsFilePath());
-	_problems.warnings = std::move(parsed.warnings);
-	_problems.error = parsed.error;
-	for (const auto &warning : _problems.warnings) {
-		LOG(("Purple Warning: %1").arg(warning));
-	}
-	if (!parsed.ok()) {
-		// Keep the last good settings. A file that stops parsing mid-edit
-		// should not reshuffle the chat list under the user's hands.
+void Config::applyText(const std::optional<QString> &text) {
+	_text = text.value_or(QString());
+	_primaryExists = bool(text);
+	_usingLastGoodSettings = false;
+	if (!text) {
+		_problems.warnings.clear();
+		_problems.error = QFileInfo::exists(SettingsFilePath())
+			? u"Could not read settings.toml."_q
+			: u"settings.toml is missing."_q;
+	} else {
+		auto parsed = ParseSettings(*text, SettingsFilePath());
+		_problems.warnings = std::move(parsed.warnings);
+		_problems.error = parsed.error;
+		for (const auto &warning : _problems.warnings) {
+			LOG(("Purple Warning: %1").arg(warning));
+		}
+		if (parsed.ok()) {
+			if (!WriteConfigFile(LastGoodSettingsFilePath(), *text)) {
+				LOG(("Purple Error: Could not save %1.").arg(
+					LastGoodSettingsFilePath()));
+			}
+			applySettings(std::move(parsed.settings), SettingsFilePath());
+			_changes.fire({});
+			return;
+		}
 		LOG(("Purple Error: %1: %2.").arg(SettingsFilePath(), parsed.error));
-		_changes.fire({});
-		return;
 	}
-	_settings = std::move(parsed.settings);
+	const auto lastGood = ReadFile(LastGoodSettingsFilePath());
+	if (lastGood) {
+		auto parsed = ParseSettings(*lastGood, LastGoodSettingsFilePath());
+		if (parsed.ok()) {
+			_usingLastGoodSettings = true;
+			applySettings(std::move(parsed.settings), LastGoodSettingsFilePath());
+		} else {
+			LOG(("Purple Error: %1: %2.").arg(
+				LastGoodSettingsFilePath(), parsed.error));
+		}
+	}
+	_changes.fire({});
+}
+
+void Config::applySettings(Settings settings, const QString &path) {
+	_settings = std::move(settings);
 
 	// One line per load, so "the toggle looks off" can be answered from the log
 	// instead of from a rebuild. The file is hand-edited and lives outside
@@ -422,10 +457,13 @@ void Config::applyText(const QString &text) {
 			: u"local premium OFF"_q
 		).arg(_settings.lists.size()
 		).arg(_settings.presets.size()
-		).arg(SettingsFilePath()));
+		).arg(path));
 
 	_localPremium = _settings.premium.enabled;
-	_changes.fire({});
+}
+
+bool Config::usingLastGoodSettings() const {
+	return _usingLastGoodSettings;
 }
 
 bool Config::writeSettings(const QString &text) {
@@ -523,11 +561,11 @@ void Config::reloadFromDisk() {
 	reloadStateFromDisk();
 
 	auto text = ReadFile(SettingsFilePath());
-	if (!text || *text == _text) {
+	if (bool(text) == _primaryExists && text.value_or(QString()) == _text) {
 		// Our own writes come back through the watcher too.
 		return;
 	}
-	applyText(*text);
+	applyText(text);
 }
 
 void Config::reloadStateFromDisk() {
@@ -712,6 +750,10 @@ QString SettingsFilePath() {
 	return ConfigDirectory() + u"/settings.toml"_q;
 }
 
+QString LastGoodSettingsFilePath() {
+	return ConfigDirectory() + u"/settings.toml.good"_q;
+}
+
 QString StateFilePath() {
 	return ConfigDirectory() + u"/state.toml"_q;
 }
@@ -730,6 +772,10 @@ void SetLocalPremium(bool value) {
 
 const Settings &ActiveSettings() {
 	return Instance().settings();
+}
+
+bool UsingLastGoodSettings() {
+	return Instance().usingLastGoodSettings();
 }
 
 const Problems &SettingsProblems() {

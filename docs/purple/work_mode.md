@@ -1134,14 +1134,13 @@ bad - and with no settings at all, no list claims anything, so a preset that
 names what gets through hides the entire account. The cache faithfully restores
 an order that now refers to lists nobody can look up.
 
-The Android fork closes this by keeping `settings.toml.good`, a copy of the last
-file the core accepted, and parsing that when the real one is missing or
-unusable. Keeping the file rather than extending the cache is deliberate: it
-needs no second schema, it cannot disagree with the real file about what a list
-means, and it covers both failures with one mechanism. The picker says when it
-is running from the copy, because a preset resolved from a file the user cannot
-see should not be a silent state. The desktop has the same shape on a cold start
-and does not do this yet.
+Both clients keep `settings.toml.good`, a copy of the last file the core
+accepted, and parse that when the real one is missing or unusable. Keeping the
+file rather than extending the cache is deliberate: it needs no second schema,
+it cannot disagree with the real file about what a list means, and it covers
+both failures with one mechanism. The picker says when it is running from the
+copy, because a preset resolved from a file the user cannot see should not be a
+silent state.
 
 ## Choosing a preset
 

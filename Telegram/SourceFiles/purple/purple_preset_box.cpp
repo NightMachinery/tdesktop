@@ -941,6 +941,9 @@ void PresetBox(
 		problems->clear();
 		const auto &found = SettingsProblems();
 		auto errors = QStringList();
+		if (UsingLastGoodSettings()) {
+			errors.push_back(u"Running from the last good copy of settings.toml."_q);
+		}
 		if (selected < 0) {
 			// Nothing is checked, which is the honest picture. Selecting Normal
 			// instead would look tidier and would be a disaster: the callback

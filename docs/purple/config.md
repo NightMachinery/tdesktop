@@ -4,6 +4,7 @@ Purple Telegram keeps its own settings in plain TOML, outside Telegram's
 encrypted `tdata`:
 
     $XDG_CONFIG_HOME/purple-telegram/settings.toml
+    $XDG_CONFIG_HOME/purple-telegram/settings.toml.good
     $XDG_CONFIG_HOME/purple-telegram/state.toml
 
 falling back to `~/.purple-telegram/` when `XDG_CONFIG_HOME` is unset.
@@ -68,6 +69,14 @@ through the same watch, compare equal to what it just wrote, and do nothing.
 Both are written through `QSaveFile`, which writes a temporary alongside the
 target and renames over it, so a crash mid-write cannot leave a truncated config.
 
+`settings.toml.good` is the app's last accepted copy of `settings.toml`. Each
+successful parse of the real file replaces it atomically. If the real file is
+missing or has a syntax error, the app parses this copy for its active settings
+while retaining the real file's text and parse problem for any later surgical
+write. The Work Mode box says when it is using the copy. It is not an import
+backup: `settings.toml.bak` remains the pre-import file and `.good` must not be
+edited by hand.
+
 ## The third file, which is nobody's
 
 `readme.md` in the same directory is generated. It is written from `kReadme` in
@@ -129,6 +138,9 @@ renaming it over the original leave a file watch pointing at an inode nobody
 will ever write to again. Reloads are debounced by 250ms, since a single save
 can produce several filesystem events and reloading halfway through one would
 flash an error banner every time you hit save.
+
+Deleting `settings.toml` is also a reload. If `settings.toml.good` is parseable,
+the app keeps running from that last accepted copy until the real file returns.
 
 ## What happens when it is wrong
 
