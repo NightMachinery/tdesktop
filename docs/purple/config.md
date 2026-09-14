@@ -685,17 +685,18 @@ reason at all - the server is not withholding a moment there, it is saying
 there is no recent one - and a peek cannot reveal somebody who has gone
 quiet or shut you out. So the read is shown and no peek action is shown with it.
 
-`trade_p` enables Last Seen Peek: temporarily show this person only your Last
-Seen, read theirs once, and put your privacy back. Turning it off leaves the
-explanation and removes every peek link, button, and menu action. The sheet's
-**Disable Last Seen Peek everywhere** checkbox writes the same key when Peek or
-Cancel closes the sheet.
+`trade_p` defaults to true and enables Last Seen Peek: temporarily show this
+person only your Last Seen, read theirs once, and put your privacy back.
+Explicitly setting it to false removes the `Peek Last Seen` suffix and every
+peek link, button, and menu action. A still-valid remembered exact read remains
+visible, but inert. The sheet's **Disable Last Seen Peek everywhere** checkbox
+writes the same key when Peek or Cancel closes the sheet.
 
 The chat menu and the profile's **More** menu show **Peek Last Seen** only when
 the other person's coarse status carries `by_me`. The full last-seen line on a
-person's profile is clickable under the same condition. The action remains
-available when `reasons_p` is off because that switch controls the explanatory
-suffix, while `trade_p` controls Last Seen Peek itself.
+person's profile is clickable under the same condition. With `trade_p` on, the
+action remains available when `reasons_p` is off because that switch controls
+the explanatory suffix, while `trade_p` controls Last Seen Peek itself.
 
 `trade_hold` is how long to wait for their status after asking before restoring
 your rules. Ten seconds by design: the whole exposure is that window, and a
