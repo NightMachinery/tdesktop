@@ -1981,9 +1981,9 @@ can be told apart:
 
 - **Coarse because of your own privacy.** You hide your last seen from them, so
   Telegram hides theirs from you - its reciprocity rule. The status carries a
-  `by_me` flag saying exactly that, and the fork appends `Peek Last Seen`
-  to the line, after the same middle dot every other status suffix uses. It is
-  the one case with something to do about it.
+  `by_me` flag saying exactly that. With `trade_p` and `reasons_p` on, the fork
+  appends `Peek Last Seen` to the line, after the same middle dot every other
+  status suffix uses. It is the one case with something to do about it.
 - **Coarse because of theirs.** The same words with no flag. Their setting,
   nothing to peek, so nothing is added.
 - **"a long time ago"** - `userStatusEmpty`. Nothing is *explained*, and that is
@@ -2054,10 +2054,11 @@ if they hide their last seen for their own reasons, showing them yours reveals
 nothing. The peek is still written down, because the cooldown counts attempts
 rather than successes.
 
-`trade_p = false` disables Last Seen Peek and leaves the explanation. The
+`trade_p` defaults to true. Explicit `trade_p = false` disables Last Seen Peek,
+removes its `Peek Last Seen` suffix, and removes every tap, button, and menu
+action. A still-valid remembered exact read remains visible but inert. The
 sheet's **Disable Last Seen Peek everywhere** checkbox writes this same setting
-when Peek or Cancel closes the sheet. Its help text says that every Last Seen
-Peek link and menu action will disappear.
+when Peek or Cancel closes the sheet.
 
 Upstream's own one-tap control is gone on both clients. Telegram puts a small
 button beside a coarse last seen - `when?` on the desktop - and confirming it
@@ -2104,7 +2105,8 @@ One peek per person per `trade_cooldown`. A peek is a moment of exposure
 chosen on purpose; starting one again every time their chat opens would be a
 standing subscription nobody agreed to.
 
-The remembered line is a link too, and that is a repair rather than a flourish.
+With `trade_p` on, the remembered line is a link too, and that is a repair
+rather than a flourish.
 The tail used to be the only door into the sheet, so the first peek replaced
 the door with the read and the second peek was unreachable for a whole
 `trade_remember` - a day, by default - unless the record happened to expire
@@ -2115,7 +2117,9 @@ rules: they have changed their own privacy since, and there is nothing left to
 peek. That covers a remembered read sitting over "a long time ago" without
 needing a rule of its own - such a status has no reason at all - and the answer
 is the right one for it. They have gone quiet or shut you out, and a peek
-cannot reveal either. The read is shown; no peek action is shown with it.
+cannot reveal either. The read is shown; no peek action is shown with it. An
+explicit `trade_p = false` also leaves a still-valid remembered read shown, but
+inert.
 
 Inside the cooldown that sheet opens rather than refusing. It says `You can
 peek again in 3:12`, counting down every second from the read already written

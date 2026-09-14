@@ -575,8 +575,10 @@ like and there is no field saying which.
 Last Seen Peek temporarily shares your Last Seen with that person only for
 `trade_hold`, reads theirs once, and puts your privacy back exactly as it was -
 always, whether anything was read or not. Nobody is told, and no other person's
-view of you changes. `trade_p = false` removes every peek link and action while
-leaving the explanation; so does the sheet's global disable checkbox.
+view of you changes. `trade_p` defaults to true. Explicit `trade_p = false`
+removes the `Peek Last Seen` suffix and every peek link and action. A
+still-valid remembered exact read remains visible, but inert. The sheet's
+global disable checkbox writes the same false setting.
 
 The chat menu and the profile's **More** menu show **Peek Last Seen** only when
 the other person's status is hidden by your own privacy. The full last-seen line
