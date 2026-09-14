@@ -1,24 +1,46 @@
-# Building and testing the Android fork on a remote machine
+# Building and testing the Android fork
 
-The Android side of Purple Telegram, `NightMachinery/purple-telegram-android`,
-is built on a shared institutional Linux server referred to here as the build
-box, and tested there in a headless emulator. The Mac only holds the release
-keystore and signs the artifacts it hands out.
+The normal Android workflow for `NightMachinery/purple-telegram-android` runs
+on the Apple-silicon laptop: build the arm64 APK locally, then install and test
+it in the laptop's Android 36 arm64 emulator with host GPU acceleration. The
+shared Linux build box is an optional compile worker when local disk space,
+toolchain availability, or machine load makes that useful. Its emulator is not
+reliable enough for acceptance testing.
 
-Everything here assumes the layout that repository's README describes: the
-checkout, the Android SDK, the Qt for Android prefix and a gitignored
-`local.properties` carrying the api credentials.
+Release signing keys and their credentials stay on the Mac. The remote security
+and recovery details below remain useful whenever the box is used for
+compilation or a limited diagnostic run.
 
-## Why a remote box at all
+## Build locally on the laptop
 
-An Android build wants 20 GB and a lot of cores. The Mac has neither to spare.
-The build box has 96 cores and a terabyte of memory, so a clean build takes
-about an hour there even while other people are using it, and an incremental
-one a few minutes.
+Follow the Android repository's README for the exact setup. The checkout needs
+its submodules, Android SDK 36 with build-tools 36.0.0, Android NDK
+27.2.12479018, and Qt 6 for Android arm64. A gitignored `local.properties` at
+the repository root points to the SDK and Qt prefix and supplies the Telegram
+api id and hash. Never commit that file or put release-keystore credentials in
+it.
+
+From the Android repository root, build the standalone flavor with:
+
+```bash
+./gradlew :TMessagesProj_AppStandalone:assembleAfatStandalone
+```
+
+The output is an unsigned arm64-v8a APK. Sign artifacts for personal installs
+on the Mac with the release key kept outside the checkout. A disposable
+emulator may instead use a throwaway signing key, provided subsequent upgrades
+use the same signer.
+
+## Use the build box only when it helps
+
+The box has substantially more CPU, memory, and disk than the laptop, so it can
+be a useful compile worker for a clean build or while the laptop is busy. It is
+an option rather than a prerequisite: a working local toolchain and enough free
+space make the local Gradle command the shorter path.
 
 The cost is that the machine is shared. Other users and administrators can read
-anything world-readable, so a test account signed in inside an emulator there
-would otherwise be visible to them.
+anything world-readable, so keep its checkout, caches, temporary signing key,
+and any diagnostic AVD private. Do not put a personal Telegram session there.
 
 ## Keeping the session private
 
@@ -74,13 +96,15 @@ password is written in the clear in the scripts. The emulator refuses to
 install an unsigned APK, and that is the only thing this key is for. Anything a
 person installs is signed on the Mac with the real key instead.
 
-## Building an uncommitted patch
+## Building an uncommitted patch on the box
 
-Commits are authored on the Mac and the build box only pulls, so a change
-that is not pushed yet cannot be built through `bin/rebuild.sh`. For that
-there is `bin/build-patch.sh`: it resets the checkout to `origin/master`,
-applies a diff, builds, and signs the result with the throwaway key exactly
-as `rebuild.sh` does.
+The normal way to compile an uncommitted change is the local Gradle command
+above. When the box is deliberately selected as the compile worker, commits
+are still authored on the Mac and the box only pulls. A change that is not
+pushed yet cannot be built through `bin/rebuild.sh`; use
+`bin/build-patch.sh`. It resets the remote checkout to `origin/master`, applies
+a diff, builds, and signs the result with the throwaway key exactly as
+`rebuild.sh` does.
 
 The diff is sent first and the build started detached, because a build takes
 minutes and the patch must not be read from the stdin of a backgrounded
@@ -96,13 +120,14 @@ Poll the log for `BUILD_EXIT=`; a compile error shows up as `error:` lines
 above it. Because the checkout is reset every time, nothing from a previous
 patch survives, and a patch that applies on the Mac applies there too.
 
-This is the loop a delegated implementation agent uses to verify its work
-before anything is committed. The one thing it must never do is copy
-anything but the patch to the box.
+This is an optional remote compile loop, not the default verification path. Do
+not copy a checkout, credentials, release key, or Telegram session to the box;
+send only the patch.
 
 ## Run the emulator on the laptop, not the box
 
-The box stays the build machine. It should not be the test machine any more.
+The emulator stays on the laptop whether the APK was compiled locally or on
+the optional build worker.
 
 The M2 laptop runs the same APK on the **GPU**, and that is the difference
 between the two hosts, not a matter of degree. The APK is arm64 only, so an
@@ -113,7 +138,7 @@ renders through MoltenVK on the M2 itself - the boot log says
 the box's software rasteriser starving against another user's job; none of it
 is a property of the app.
 
-The loop is therefore: build a patch on the box, fetch the APK, test locally.
+When using the box, fetch its APK and test that artifact locally:
 
     ssh pi 'cat /tmp/purple-android/app-emu.apk' > ~/.purple-android-test/app-emu.apk
 
@@ -174,11 +199,17 @@ code.
 
 ### The nightly run
 
-`bin/nightly.sh` is the whole loop with nobody watching it: the core's own
-tests, an incremental desktop build, a build of whatever is on `origin/master`
-on the box, then the emulator - install, stress, crashcheck - and a shutdown.
-It writes `~/.purple-android-test/reports/<stamp>.md`, a line per step saying
-PASS, FAIL or SKIP, with the full log and the screenshots beside it.
+The intended unattended loop runs the core tests and incremental desktop
+build, builds the Android standalone flavor locally, then uses the laptop
+emulator for install, stress, crashcheck, and shutdown. It writes
+`~/.purple-android-test/reports/<stamp>.md`, a line per step saying PASS, FAIL
+or SKIP, with the full log and screenshots beside it.
+
+The current `~/.purple-android-test/bin/nightly.sh` predates the local-build
+default: its build phase still invokes the box and fetches `app-aligned.apk`.
+Treat that phase as an optional remote-worker path until the script is updated;
+it does not make the box a requirement. `--no-build` retains its remote-artifact
+path; `--no-install` only stresses the APK already installed in the emulator.
 
 Nothing schedules it on its own. The overnight run is a note in the agent's own
 scheduler saying what needs doing, and the session that wakes up decides how -
@@ -186,7 +217,7 @@ because the value of running at night is the judgement, not the sequence: what a
 crash means, which screen to open, whether a wrong line is a bug or a fixture.
 This script is a convenience that session can reach for, not the task itself:
 
-    ~/.purple-android-test/bin/nightly.sh                  # the whole run
+    ~/.purple-android-test/bin/nightly.sh                  # currently uses the optional box for its build phase
     ~/.purple-android-test/bin/nightly.sh --no-build       # fetch, sign and install what is on the box
     ~/.purple-android-test/bin/nightly.sh --no-install     # stress what is installed
     ~/.purple-android-test/bin/nightly.sh --no-emulator    # tests and builds only
@@ -312,7 +343,13 @@ the `-x`: `pgrep -f qemu` would match the shell running it.
 First boot takes about four minutes because the data partition is built from
 scratch; later ones are under a minute.
 
-## Running the emulator on the box
+## Legacy fallback: running the emulator on the box
+
+This section records recovery and diagnostic techniques for the old headless
+box setup. The box lacks reliable GPU and KVM acceleration, and its software
+renderer can crash as soon as Telegram draws ordinary UI. Its emulator route is
+diagnostic only and never acceptance evidence; use the laptop's Android 36
+arm64 image with host GPU acceleration for UI verification.
 
 An x86_64 system image with Google APIs runs the arm64-only APK through
 Android's ARM translation, so no separate arm64 image is needed. `/dev/kvm`
@@ -327,7 +364,7 @@ line, including the command you are running. Calling `pkill -f qemu…` inline
 over ssh kills the ssh session itself. Inside a script file the pattern is not
 in the script's own command line, so it is safe there.
 
-## The AVD settings that matter
+### The box AVD settings that matter
 
 A freshly created AVD came out with GPU emulation disabled, which sends the
 emulator down a rendering path that segfaults within seconds of the app drawing
@@ -341,10 +378,11 @@ hw.cpu.ncore=8
 vm.heapSize=512M
 ```
 
-The memory and core counts are comfort rather than necessity. The GPU lines are
-the fix.
+The memory and core counts are comfort rather than necessity. The GPU lines
+avoid the immediately broken GPU-disabled path, but they do not make this
+emulator reliable.
 
-## The emulator still segfaults sometimes
+### Why the box emulator still segfaults
 
 All of this is about the box's software renderer, and none of it has been seen
 on the laptop's GPU. It is kept because the box is still the fallback.
@@ -396,7 +434,7 @@ when a step is fragile, and check `grep EXIT= emulator.log` after each.
 Attaching gdb is not worth it. QEMU uses SIGUSR1 constantly, and a debugger
 that stops on signals slows the boot past any useful timeout.
 
-## Shrink the display before driving the UI
+### Shrink the display for a fallback diagnostic
 
 Also a box remedy. On the laptop the pixel count is not what is scarce, so the
 guest stays at a realistic 1080x2400 - which matters, because a surface like
@@ -430,7 +468,7 @@ earlier run.
 `bin/anr.sh` dismisses a dialog that does appear, by finding its Wait button
 rather than guessing where it is.
 
-## Wait for the box; do not skip the test
+### Do not substitute a box run for acceptance testing
 
 Shrinking the display buys a lot, but it does not buy everything. At a load
 average around 100 on 96 cores the emulator cannot render at all - not at any
@@ -438,8 +476,9 @@ resolution, not after an emulator restart, and *System UI* itself starts to
 ANR. Two data points so far: unusable at load ~100, and a clean 25 second cold
 start of the same APK on the same 480x1040 display at load 1.6.
 
-A test that cannot run is not a test that passed. When the box is loaded, wait
-and poll rather than shipping on a compile:
+A diagnostic that cannot run is not a test that passed. When the box is loaded,
+wait and poll if that diagnostic is still useful, or move directly to the
+laptop for the authoritative emulator run:
 
 ```
 ssh pi /tmp/purple-android/bin/boxready.sh
@@ -456,7 +495,7 @@ application frames, and the app's own `FileLog.d` output keeps arriving and
 keeps being correct. If application code *is* in the stack, the box is not your
 problem.
 
-### Load history
+#### Load history
 
 `sar` is installed but the system-wide collector is off and there is no sudo on
 this box, so `bin/sysmon.sh start` runs a `sadc` of our own. It only reads
@@ -475,7 +514,7 @@ It is worth having because "the box was busy" is otherwise unfalsifiable after
 the fact, and because it distinguishes a machine that was saturated for an hour
 from one that is saturated now.
 
-### Why the emulator is the first casualty
+#### Why the emulator is the first casualty
 
 Beyond the software renderer, two standing conditions on this box make memory
 pressure worse than the core count suggests. `/dev/shm` is a 504 GB tmpfs that
@@ -490,7 +529,12 @@ with several hundred GB still available neither is usually the binding
 constraint. They are the reason a busy box degrades sharply rather than
 gracefully.
 
-## Verifying without the screen
+## Inspecting an emulator without direct UI
+
+The following readback techniques work on the laptop emulator and can also help
+diagnose the legacy box emulator. A box screenshot or log can narrow a problem,
+but only the laptop's host-GPU emulator or a suitable real device supplies UI
+acceptance evidence.
 
 Telegram draws its chat list and message cells as custom views with no text
 nodes, so `uiautomator dump` shows almost nothing for them. Ordinary dialogs
@@ -504,9 +548,10 @@ Enable it by writing `<boolean name="logsEnabled" value="true" />` into
 
 ### Which surfaces actually read back
 
-Screenshots work fine when the box is quiet, and at load ~1 they are the fastest
-way to answer "is this chat in the list". Two things learned the hard way about
-what the pixels mean:
+Screenshots on the laptop are the fastest way to answer "is this chat in the
+list". The box can sometimes capture the same evidence when it is quiet, but
+that remains diagnostic only. Two things learned the hard way about what the
+pixels mean:
 
 - **The muted bell is not drawn for a verified chat.** `DialogCell` guards it
   with `&& !drawVerified`, and most seeded test chats are verified, so a missing
