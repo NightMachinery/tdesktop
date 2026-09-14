@@ -838,68 +838,56 @@ the same path succeeds. What it is not is a probe that can be run through a
 launcher: an instance Hammerspoon started logs the line with the bundle's grant
 untouched.
 
-**And check the input lock, not just the dialog.** The second attempt
-(2026-09-11, 23:00) lost its session to a different swallower with the same
-symptom. The Hammerspoon config on this machine carries an input-lock module,
-`blackout-lock.lua`, whose tap takes `keyDown`, `keyUp`, `systemDefined` and
-every mouse type and returns `true` - delete - for all of them. While it is up
-nothing synthesized reaches anything: not `hs.eventtap` clicks, not keystrokes,
-not a click on the title bar, and not on this app only - a click on the empty
-desktop does not raise Finder either. Its default expiry is two weeks, so
-waiting it out is not a plan. Ask before starting:
+**Preflight the input lock as well as the dialog.** Before driving an isolated
+instance, require `pgrep -x SecurityAgent` to be empty and record the lock
+state:
 
 ```bash
 hs -q -c 'return blackoutLockActive()'
 ```
 
-A `true` there is a stop, and an agent should stop rather than clear it.
+A `true` is no longer a reason to abandon the run. The lock still swallows
+physical input, but now lets synthesized events through when their source
+state is neither HID (`1`) nor combined-session (`0`). It deliberately still
+swallows combined-session events: `hs.eventtap.leftClick` uses that source and
+does not advance the intro. An AppleScript click can make a button look
+pressed without completing its action, so do not use it as the fallback.
+
 `blackoutLockOff()` would give the input back, but it also drops `lockFirst` -
 the mark that says the screen is to be locked when the blackout ends - and
-that mark is a deliberate choice by whoever armed the lock. Only the chord
-that armed it should end it: hyper (F18) held, then shift+F2.
+that mark is a deliberate choice by whoever armed the lock. Do not call it.
 
-So the pre-flight for a driving run is two checks, not one: `pgrep -x
-SecurityAgent` empty, and `blackoutLockActive()` false.
-
-**The discriminator is an accessibility write.** When a click changes nothing,
-the question is whether the events are being eaten or the window is wedged,
-and an AX write answers it:
+For a safe run, resolve the PID of the isolated Telegram instance and verify
+its executable path before posting. Target every event at that PID; never post
+to the frontmost application or a remembered PID. Activate that exact app
+first. Hammerspoon keyboard events can then be delivered directly to it:
 
 ```lua
-w:setAttributeValue("AXPosition", {x = f.x + 30, y = f.y})
+app:activate()
+hs.eventtap.keyStroke({}, "tab", 0, app)
+hs.eventtap.keyStrokes("text", app)
 ```
 
-If the window moves, the app is turning its event loop and acting on input -
-AX arrives through the accessibility API, not the event stream - so the clicks
-are being swallowed somewhere between the tap and the window. Reads alone will
-not tell the two apart as clearly, since a tree can be served from a state that
-is no longer being redrawn. One more reading that costs nothing: the button
-under the pointer does not take its hover highlight. An `hs.eventtap` listener
-still *sees* the event you posted, which is the trap - posting works, delivery
-is what does not, so seeing your own event come back proves nothing.
+For mouse input, create a CoreGraphics source with `.privateState`, make the
+event sequence from that source, and post each event to the same PID. An
+up/down/up sequence from that source delivered to the isolated intro while
+the lock was active; the private source is what distinguishes it from the
+combined-session Hammerspoon click.
 
-**`AXFocused` is not one of those readings.** The window reports `AXMain` true
-with `AXFocused` false and stays that way after a title-bar click - and also
-while typing into it is landing perfectly well. It says nothing either way on
-this app, so do not read a false there as "the events are being eaten".
-
-**How to post events that actually arrive.** The two kinds of event want
-different destinations, which is the whole of it:
-
-```lua
-hs.eventtap.event.newMouseEvent(kind, point):post()          -- session
-hs.eventtap.event.newKeyEvent(key, true):post(app)           -- process
+```swift
+let source = CGEventSource(stateID: .privateState)!
+for type in [.leftMouseUp, .leftMouseDown, .leftMouseUp] {
+    CGEvent(
+        mouseEventSource: source,
+        mouseType: type,
+        mouseCursorPosition: point,
+        mouseButton: .left)?.postToPid(pid)
+}
 ```
 
-A mouse event goes to the session: posted at a pid it is dropped in silence,
-with the same nothing-happened signature as a swallowed click. A key event goes
-to the process, because one posted to the session goes to whatever holds
-keyboard focus at that instant, which during a driving run is quite often not
-the window being driven. The app has to be activated again before keys will
-land - a click into it is not enough - and the two paths can arrive out of
-order, since one is queued through the window server and the other is delivered
-straight to the process, so put a pause between a click and the typing that
-follows it rather than firing them back to back.
+Keep the mouse and keyboard steps sequential, with a short pause after a click
+before typing. `AXFocused` is not a reliable delivery test in this app; observe
+the expected UI transition instead.
 
 ### Headless, and how far it gets
 
