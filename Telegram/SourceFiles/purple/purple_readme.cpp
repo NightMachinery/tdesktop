@@ -566,7 +566,7 @@ trade_cooldown = "5m"
 
 Telegram hides somebody's exact "last seen" from you when your own privacy hides
 yours from them, and it says so. With `reasons_p` the status line in the chat
-header and the profile says it too, adding `peek Last Seen` - or an eyes
+header and the profile says it too, adding `Peek Last Seen` - or an eyes
 mark where there is no room for the words. When the coarseness is their own
 setting, nothing is added; when the status is "a long time ago", nothing is
 added either, because that is what an abandoned account and a block both look

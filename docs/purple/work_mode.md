@@ -1981,7 +1981,7 @@ can be told apart:
 
 - **Coarse because of your own privacy.** You hide your last seen from them, so
   Telegram hides theirs from you - its reciprocity rule. The status carries a
-  `by_me` flag saying exactly that, and the fork appends `peek Last Seen`
+  `by_me` flag saying exactly that, and the fork appends `Peek Last Seen`
   to the line, after the same middle dot every other status suffix uses. It is
   the one case with something to do about it.
 - **Coarse because of theirs.** The same words with no flag. Their setting,
