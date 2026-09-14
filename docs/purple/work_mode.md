@@ -3398,12 +3398,14 @@ The badge and notifications are done, and were verified against a real inbound
 message rather than by reading the code: with the chat hidden the gate logged
 `value is false`, posted no notification and left the badge untouched; under
 Normal the same chat logged `value is true`, posted one and moved the badge to
-2. One rough edge stays. With "Include muted chats" turned on, the in-app "All
-chats" tab counter still includes hidden chats, while the launcher badge does
-not - that counter is computed in `MessagesStorage` from a SQL cursor rather
-than from dialog objects, so excluding them there needs a gate entry point that
-works without a dialog in hand and still honours mention-gating. In the default
-configuration it is already right, so this is left as a known limit.
+2. `MessagesStorage` now files every SQL counter row into both a complete bucket
+and a shown-only bucket after loading its peer identity. All Chats sums the
+shown-only bucket, while folders retain the complete one. The launcher follows
+the same policy when "Include muted chats" is on: it walks loaded dialogs and
+counts only those the preset shows. Incremental updates that cannot safely
+derive the shown-only change defer to that complete recount instead of guessing.
+The brief server count before dialog entries load is still the separate cold
+start caveat described below.
 
 ## Not yet implemented
 
