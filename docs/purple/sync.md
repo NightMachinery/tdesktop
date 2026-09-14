@@ -169,19 +169,21 @@ that is not valid TOML never reaches the disk. The write goes through the same
 hot-reloads it - the import path deliberately knows nothing about applying
 settings, only about producing a valid file.
 
-The launch-time offer is Android only so far, and lives in
-
-    TMessagesProj/src/main/java/org/telegram/messenger/purple/PurpleSyncOffer.java
-
-with a single call from `DialogsActivity.onFragmentCreate`, right after the one
-that resolves the active preset. It sends a `messages.search` at the self peer
-with a document filter, picks out the newest result whose document is actually
-named `settings.toml` and is small enough to be one, and stops there unless the
-two comparisons above both say yes. The remembered id is an ordinary per-account
-preference, `purple_sync_offered_id`. Everything that can go wrong on the way -
-no network, a search that answers with an error, a download that never lands -
-is a line in the log and nothing on the screen, because the user did not ask for
-any of this and the manual import is still sitting in the message's own menu.
+On Android the launch-time offer lives in
+`TMessagesProj/src/main/java/org/telegram/messenger/purple/PurpleSyncOffer.java`
+and starts from `DialogsActivity.onFragmentCreate`. On desktop it lives in
+`Telegram/SourceFiles/purple/purple_sync.cpp` and starts only when the primary
+chat list has a usable UI host. Both search the self peer with a document
+filter, choose the newest result actually named `settings.toml` and small enough
+to be one, and compare its date with the local file mtime. The remembered id is
+per account: Android uses `purple_sync_offered_id`; desktop appends it to
+`Main::SessionSettings`. A message that has already been considered cannot
+offer again, and an older local file advances the remembered id silently.
+Everything that can go wrong on the way - no network, a search that answers with
+an error, a download that never lands - is a line in the log and nothing on the
+screen, because the user did not ask for any of this and the manual import is
+still sitting in the message's own menu. The desktop flow still needs a
+signed-in Saved Messages account for end-to-end verification.
 
 The one place it guesses is the search query. It asks for `settings.toml` by
 name, which relies on the server indexing document filenames the way the

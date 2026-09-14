@@ -69,8 +69,8 @@ the seam is in the right place: the engine already reveals everything while its
 answered differently the moment the bridge set it. What the port had to add was
 the folder strip, the reorder guard, a timer and a checkbox.
 
-The current gap is listed precisely under "Not ported yet" in `work_mode.md`,
-which shrinks as each lands.
+Nothing of A5 remains outside the account-backed desktop verification recorded
+in [sync.md](sync.md).
 
 **A6 - the fork's own defaults.** What this fork decides differently from
 upstream regardless of Work Mode, all of it in [defaults.md](defaults.md): the
@@ -124,10 +124,9 @@ menu already, so it carries the second key rather than acting on it.
 
 The port is done. What is left is not a milestone:
 
-- A5's **launch-time import offer**, whose Android half landed on 2026-09-06
-  under the "one offer per message, ever" rule described above. What is left is
-  the desktop half, which gets the same rule and the same wording;
-  [sync.md](sync.md) owns both.
+- A5's **launch-time import offer** now runs on Android and desktop under the
+  "one offer per message, ever" rule described above. The desktop search and
+  import path await account-backed verification; [sync.md](sync.md) owns both.
 - The two small pieces that waited here - the folder-tab half of
   `hide_scope`'s default, and the chat-list mark for a row that is only
   present on a clock - landed on 2026-09-06, and both have since been seen on
