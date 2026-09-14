@@ -3278,7 +3278,7 @@ title announcing five stories over two avatars is the leak said out loud.
 
 Nothing of A5 proper is left. Hot reload, the list-membership menu, peek, the
 schedule, the "... until" overrides, the line naming which entry decides a
-chat, the `[recent]` close buffer, extra views and, since 2026-09-06, the
+chat, the `[recent]` close buffer, extra views and the Android-and-desktop
 launch-time offer of a settings import are all done; see above and
 [sync.md](sync.md).
 
