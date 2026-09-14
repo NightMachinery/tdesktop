@@ -37,7 +37,7 @@ all three need the same question answered off the UI thread - whether a given
 chat is inside a given folder, right now.
 
 **A5 - the rest of Work Mode.** Done, including the launch-time offer of a
-settings import, whose Android half landed on 2026-09-06. The thing that had
+settings import on Android and desktop. The thing that had
 been held back was never the code but the suppression rule, and the rule is now
 decided: **one offer per message, ever**. Each account remembers the id of the
 newest `settings.toml` message it has already had an opinion about, and a
@@ -48,8 +48,8 @@ and carries the reasoning.
 
 It went to Android first on purpose. The phone is the machine you pick up after
 editing settings somewhere else, so it is where the offer is worth having and
-where the rule gets tested against real use. The desktop half follows, with the
-same rule.
+where the rule was tested against real use. Desktop now follows the same rule
+and wording; end-to-end desktop verification remains account-backed.
 
 Landed so far: hot reload of `settings.toml`, filing a chat into a list from the
 chat list, the two things that move on a clock rather than on an edit - peek and

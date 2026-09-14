@@ -104,6 +104,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_screentime_recorder.h"
+#include "purple/purple_sync.h"
 #include "main/main_session_settings.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
@@ -1590,6 +1591,9 @@ SessionController::SessionController(
 		crl::on_main(base::make_weak(this), [=] {
 			Theme::CheckChatThemeWallPaper(this);
 		});
+	}
+	if (_isPrimary && _hasDialogs) {
+		Purple::OfferNewerSettingsFromSavedMessages(session, uiShow());
 	}
 	style::PaletteChanged(
 	) | rpl::on_next([=] {
