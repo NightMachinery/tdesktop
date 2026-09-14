@@ -205,11 +205,19 @@ emulator for install, stress, crashcheck, and shutdown. It writes
 `~/.purple-android-test/reports/<stamp>.md`, a line per step saying PASS, FAIL
 or SKIP, with the full log and screenshots beside it.
 
-The current `~/.purple-android-test/bin/nightly.sh` predates the local-build
-default: its build phase still invokes the box and fetches `app-aligned.apk`.
-Treat that phase as an optional remote-worker path until the script is updated;
-it does not make the box a requirement. `--no-build` retains its remote-artifact
-path; `--no-install` only stresses the APK already installed in the emulator.
+`~/.purple-android-test/bin/nightly.sh` now checks the laptop first. It builds
+locally only when `local.properties`, the pinned SDK build tools and NDK, the Qt
+Android prefix, Java, the native submodules and at least 40 GiB of free space
+are all present. The check prints only missing prerequisite names, never values
+from `local.properties`. If the laptop is not ready, the run records why and
+uses the Pi as the optional compile worker. `--remote-build` chooses the Pi
+deliberately even when the laptop is ready. A local compiler failure is not
+retried remotely in the same run: that would spend a second build merely to
+hide the failure that needs reading.
+
+`--no-build` retains its remote-artifact path; it fetches the unsigned APK
+already on the Pi, signs it on the laptop and installs it. `--no-install` only
+stresses the APK already installed in the emulator.
 
 Nothing schedules it on its own. The overnight run is a note in the agent's own
 scheduler saying what needs doing, and the session that wakes up decides how -
@@ -217,7 +225,8 @@ because the value of running at night is the judgement, not the sequence: what a
 crash means, which screen to open, whether a wrong line is a bug or a fixture.
 This script is a convenience that session can reach for, not the task itself:
 
-    ~/.purple-android-test/bin/nightly.sh                  # currently uses the optional box for its build phase
+    ~/.purple-android-test/bin/nightly.sh                  # local build when ready; Pi fallback otherwise
+    ~/.purple-android-test/bin/nightly.sh --remote-build   # deliberately compile on the Pi
     ~/.purple-android-test/bin/nightly.sh --no-build       # fetch, sign and install what is on the box
     ~/.purple-android-test/bin/nightly.sh --no-install     # stress what is installed
     ~/.purple-android-test/bin/nightly.sh --no-emulator    # tests and builds only
