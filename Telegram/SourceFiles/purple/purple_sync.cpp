@@ -265,7 +265,7 @@ void OfferImportCandidate(
 		return;
 	}
 	settings.setPurpleSettingsOfferMessageId(candidate.itemId.msg);
-	session->saveSettingsDelayed();
+	session->saveSettings();
 	if (candidate.date <= QFileInfo(SettingsFilePath()).lastModified()
 			.toSecsSinceEpoch()) {
 		return;
