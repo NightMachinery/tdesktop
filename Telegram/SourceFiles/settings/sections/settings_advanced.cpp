@@ -1265,7 +1265,7 @@ void BuildExportSection(SectionBuilder &builder) {
 }
 
 // Purple Telegram, not upstream. Why a coarse "last seen" is coarse, and the
-// one-off trade that reads an exact one. See docs/purple/work_mode.md.
+// one-off peek that reads an exact one. See docs/purple/work_mode.md.
 void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto session = builder.session();
@@ -1324,37 +1324,31 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 		u"reasons_p"_q,
 		u"the last seen reasons"_q);
 	flag(
-		u"advanced/purple_last_seen_trade"_q,
-		u"Offer to show mine to see theirs"_q,
+		u"advanced/purple_last_seen_peek"_q,
+		tr::lng_lastseen_peek_setting(tr::now),
 		[] { return Purple::ActiveSettings().lastSeen.trade; },
 		u"trade_p"_q,
-		u"the last seen trade"_q);
+		u"Last Seen Peek"_q);
 
 	if (controller) {
 		builder.addButton({
-			.id = u"advanced/purple_last_seen_trades"_q,
-			.title = rpl::single(u"Trades"_q),
+			.id = u"advanced/purple_last_seen_peeks"_q,
+			.title = tr::lng_lastseen_peeks_title(),
 			.st = &st::settingsButtonNoIcon,
 			.onClick = [=] {
-				controller->show(Box(Purple::LastSeenTradesBox, session));
+				controller->show(Box(Purple::LastSeenPeeksBox, session));
 			},
 			.keywords = {
 				u"purple"_q,
 				u"last"_q,
 				u"seen"_q,
-				u"trade"_q,
+				u"peek"_q,
 				u"log"_q,
 			},
 		});
 	}
 
-	builder.addDividerText(rpl::single(u"Telegram coarsens somebody's last "
-		"seen when your own privacy hides yours from them. The first switch "
-		"says so in the chat header and the profile; the second makes that "
-		"line offer a trade, which shows them your last seen for a few "
-		"seconds, reads theirs once, and puts your privacy back exactly as "
-		"it was. Never says anyone blocked you: the server does not say so, "
-		"and the fork does not guess."_q));
+	builder.addDividerText(tr::lng_lastseen_peek_settings_about());
 	builder.addSkip();
 }
 

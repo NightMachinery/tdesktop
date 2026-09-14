@@ -118,7 +118,8 @@ StatusLabel::StatusLabel(
 		}, _lifetime);
 	}
 
-	// Purple: a trade that has just landed, and the two [last_seen] switches,
+	// Purple: a Last Seen Peek that has just landed, and the two [last_seen]
+	// switches,
 	// change this line without the peer changing at all, so neither would ever
 	// reach the screen off the OnlineStatus update the owner listens to.
 	if (_peer->isUser()) {
@@ -163,16 +164,17 @@ void StatusLabel::refresh() {
 			if (showOnline) {
 				_refreshTimer.callOnce(updateIn);
 			}
+			hasLastSeenLink = note.tappable
+				&& (_lastSeenLinkCallback != nullptr);
 			auto body = (showOnline && _colorized)
 				? Ui::Text::Colorized(note.base)
 				: TextWithEntities{ .text = note.base };
 			if (!note.tail.isEmpty()) {
-				hasLastSeenLink = !note.link.isEmpty()
-					&& (_lastSeenLinkCallback != nullptr);
 				body.append(QString::fromUtf8(" \xC2\xB7 "));
-				body.append(hasLastSeenLink
-					? Link(note.tail, 3)
-					: TextWithEntities{ .text = note.tail });
+				body.append(note.tail);
+			}
+			if (hasLastSeenLink) {
+				body = Link(std::move(body), 3);
 			}
 			return MaybeHiddenPrefixed(std::move(body), hidden);
 		} else if (auto chat = _peer->asChat()) {

@@ -42,8 +42,6 @@ namespace {
 // so the fork's addition reads as part of the same line rather than as a second
 // one that ran into the first.
 const auto kSeparator = QString::fromUtf8(" \xC2\xB7 ");
-const auto kLongReason = u"share yours to see"_q;
-const auto kLongRefresh = u"refresh"_q;
 const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 
 [[nodiscard]] const LastSeen &Config() {
@@ -60,8 +58,8 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 }
 
 // The moment itself, in clock time rather than as "20 minutes ago": the point
-// of a traded read is that it is exact, and rounding it back into a phrase
-// would throw away the only thing the trade bought.
+// of a peeked read is that it is exact, and rounding it back into a phrase
+// would throw away the only thing the peek found.
 [[nodiscard]] QString ExactMoment(TimeId till, TimeId now) {
 	const auto moment = base::unixtime::parse(till);
 	const auto today = base::unixtime::parse(now);
@@ -70,10 +68,16 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 	if (moment.date() == today.date()) {
 		return time;
 	} else if (moment.date().addDays(1) == today.date()) {
-		return u"yesterday %1"_q.arg(time);
+		return tr::lng_lastseen_peek_moment_yesterday(
+			tr::now,
+			lt_time,
+			time);
 	}
-	return u"%1 %2"_q.arg(
+	return tr::lng_lastseen_peek_moment_date(
+		tr::now,
+		lt_date,
 		locale.toString(moment.date(), QLocale::ShortFormat),
+		lt_time,
 		time);
 }
 
@@ -82,28 +86,32 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 // precise half of the sentence.
 [[nodiscard]] QString AgeText(int seconds) {
 	if (seconds < 60) {
-		return u"just now"_q;
+		return tr::lng_lastseen_peek_age_now(tr::now);
 	}
 	const auto minutes = seconds / 60;
 	if (minutes < 60) {
-		return (minutes == 1) ? u"1 min ago"_q : u"%1 min ago"_q.arg(minutes);
+		return tr::lng_lastseen_peek_age_minutes(
+			tr::now,
+			lt_count,
+			minutes);
 	}
 	const auto hours = seconds / 3600;
-	return (hours == 1) ? u"1 hour ago"_q : u"%1 hours ago"_q.arg(hours);
+	return tr::lng_lastseen_peek_age_hours(
+		tr::now,
+		lt_count,
+		hours);
 }
 
 [[nodiscard]] QString DurationText(int seconds) {
 	if (seconds < 60) {
-		return (seconds == 1)
-			? u"1 second"_q
-			: u"%1 seconds"_q.arg(seconds);
+		return tr::lng_seconds(tr::now, lt_count, seconds);
 	}
 	const auto minutes = seconds / 60;
 	if (minutes < 60) {
-		return (minutes == 1) ? u"a minute"_q : u"%1 minutes"_q.arg(minutes);
+		return tr::lng_minutes(tr::now, lt_count, minutes);
 	}
 	const auto hours = seconds / 3600;
-	return (hours == 1) ? u"an hour"_q : u"%1 hours"_q.arg(hours);
+	return tr::lng_hours(tr::now, lt_count, hours);
 }
 
 // The wait the sheet counts down, as a clock rather than as a phrase: it is
@@ -120,9 +128,11 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 }
 
 [[nodiscard]] QString RememberedText(const LastSeenNote &note, TimeId now) {
-	return u"last seen %1%2as of %3"_q.arg(
+	return tr::lng_lastseen_peek_remembered(
+		tr::now,
+		lt_last_seen,
 		ExactMoment(TimeId(note.wasOnlineUnix), now),
-		kSeparator,
+		lt_age,
 		AgeText(std::max(now - TimeId(note.readAtUnix), 0)));
 }
 
@@ -164,18 +174,18 @@ const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 		int64(now));
 }
 
-// One trade, from the click to the rules going back. At most one runs at a time
-// for the whole app, which is not a limitation worth working around: a trade is
+// One peek, from the click to the rules going back. At most one runs at a time
+// for the whole app, which is not a limitation worth working around: a peek is
 // a window in which somebody can see our last seen, and two of them open at
 // once would be two windows we did not separately agree to.
 //
 // Held in a file-static pointer with an explicit reset rather than in the
 // session's lifetime, because "is one running" has to be answerable. Everything
 // it touches goes through a weak session pointer, so an account logged out
-// mid-trade leaves it with nothing to do rather than with a dangling one.
-class Trade final {
+// mid-peek leaves it with nothing to do rather than with a dangling one.
+class LastSeenPeek final {
 public:
-	Trade(
+	LastSeenPeek(
 		not_null<Main::Session*> session,
 		not_null<UserData*> user,
 		std::shared_ptr<Ui::Show> show);
@@ -202,9 +212,9 @@ private:
 
 };
 
-std::unique_ptr<Trade> Running;
+std::unique_ptr<LastSeenPeek> RunningPeek;
 
-Trade::Trade(
+LastSeenPeek::LastSeenPeek(
 	not_null<Main::Session*> session,
 	not_null<UserData*> user,
 	std::shared_ptr<Ui::Show> show)
@@ -215,12 +225,12 @@ Trade::Trade(
 , _hold([=] { finish(u"the hold ran out"_q, false); }) {
 }
 
-void Trade::start() {
+void LastSeenPeek::start() {
 	const auto session = _session.get();
 	if (!session) {
 		return;
 	}
-	LOG(("Purple: last seen trade with %1 - reading our rules."
+	LOG(("Purple: Last Seen Peek with %1 - reading our rules."
 		).arg(QString::number(_peer)));
 
 	// The cached rules fire the moment we subscribe, and they are whatever was
@@ -241,13 +251,13 @@ void Trade::start() {
 
 	session->api().userPrivacy().reload(Api::UserPrivacy::Key::LastSeen);
 
-	// Covers the fetch as well as the read: a trade that cannot even learn our
+	// Covers the fetch as well as the read: a peek that cannot even learn our
 	// own rules must not sit there forever, and the hold is the one number the
 	// file gives for how long any of this may take.
 	_hold.callOnce(crl::time(1000) * std::max(Config().tradeHoldSeconds, 1));
 }
 
-void Trade::showOurs(const Api::UserPrivacy::Rule &rule) {
+void LastSeenPeek::showOurs(const Api::UserPrivacy::Rule &rule) {
 	const auto session = _session.get();
 	if (!session) {
 		return;
@@ -260,7 +270,7 @@ void Trade::showOurs(const Api::UserPrivacy::Rule &rule) {
 	if (!ranges::contains(always, peer)) {
 		always.push_back(peer);
 	}
-	LOG(("Purple: last seen trade with %1 - showing ours."
+	LOG(("Purple: Last Seen Peek with %1 - showing ours."
 		).arg(QString::number(_peer)));
 	session->api().userPrivacy().save(
 		Api::UserPrivacy::Key::LastSeen,
@@ -268,7 +278,7 @@ void Trade::showOurs(const Api::UserPrivacy::Rule &rule) {
 	requestStatus();
 }
 
-void Trade::requestStatus() {
+void LastSeenPeek::requestStatus() {
 	const auto session = _session.get();
 	if (!session) {
 		return;
@@ -281,7 +291,7 @@ void Trade::requestStatus() {
 		// Only a status carrying a real moment ends the wait. A coarse one is
 		// the server still saying no, and the local "online till" the client
 		// keeps beside a coarse status is our own old knowledge rather than
-		// anything this trade bought.
+		// anything this peek found.
 		const auto status = user->lastseen();
 		const auto till = status.onlineTill();
 		if (status.isHidden() || !till) {
@@ -292,7 +302,7 @@ void Trade::requestStatus() {
 		UpdateState([&](State &state) {
 			RememberTrade(state, _peer, int64(now), int64(moment));
 		});
-		LOG(("Purple: last seen trade with %1 - read %2."
+		LOG(("Purple: Last Seen Peek with %1 - read %2."
 			).arg(QString::number(_peer), QString::number(moment)));
 		finish(u"read"_q, true);
 	}, _lifetime);
@@ -304,12 +314,12 @@ void Trade::requestStatus() {
 			strong->data().processUsers(result);
 		}
 	}).fail([=](const MTP::Error &error) {
-		LOG(("Purple Error: last seen trade could not ask about %1, %2."
+		LOG(("Purple Error: Last Seen Peek could not ask about %1, %2."
 			).arg(QString::number(_peer), error.type()));
 	}).send();
 }
 
-void Trade::finish(const QString &reason, bool read) {
+void LastSeenPeek::finish(const QString &reason, bool read) {
 	if (_done) {
 		return;
 	}
@@ -317,18 +327,17 @@ void Trade::finish(const QString &reason, bool read) {
 	_hold.cancel();
 	if (!read) {
 		// Written down even though nothing was read, because this is what the
-		// cooldown counts: a trade that answered nothing is still a window
+		// cooldown counts: a peek that answered nothing is still a window
 		// somebody could have looked through, and repeating it every time the
 		// chat opens is the thing the cooldown exists to stop.
 		const auto now = base::unixtime::now();
 		UpdateState([&](State &state) {
 			RememberTrade(state, _peer, int64(now), 0);
 		});
-		LOG(("Purple: last seen trade with %1 - nothing read, %2."
+		LOG(("Purple: Last Seen Peek with %1 - nothing read, %2."
 			).arg(QString::number(_peer), reason));
 		if (_show) {
-			_show->showToast(u"Nothing was read - they hide their last seen "
-				"for their own reasons."_q);
+			_show->showToast(tr::lng_lastseen_peek_empty_result(tr::now));
 		}
 	}
 	restore();
@@ -336,10 +345,10 @@ void Trade::finish(const QString &reason, bool read) {
 	// The subscriptions are dropped from inside one of their own handlers, so
 	// the object goes a turn later rather than under the stack still walking
 	// it.
-	crl::on_main([] { Running = nullptr; });
+	crl::on_main([] { RunningPeek = nullptr; });
 }
 
-void Trade::restore() {
+void LastSeenPeek::restore() {
 	if (_restored) {
 		return;
 	}
@@ -348,7 +357,7 @@ void Trade::restore() {
 	if (!session || !_previous) {
 		return;
 	}
-	LOG(("Purple: last seen trade with %1 - rules back."
+	LOG(("Purple: Last Seen Peek with %1 - rules back."
 		).arg(QString::number(_peer)));
 	session->api().userPrivacy().save(
 		Api::UserPrivacy::Key::LastSeen,
@@ -358,15 +367,17 @@ void Trade::restore() {
 // What the sheet will not open for at all. The cooldown is deliberately not
 // here: a wait is not a refusal, and refusing it in a toast is what made the
 // remembered line a dead end - the sheet opens, counts the wait down and
-// offers the re-trade when it is spent.
+// enables another peek when it is spent.
 [[nodiscard]] QString Refusal(not_null<UserData*> user) {
-	if (!LastSeenTradeOffered()) {
-		return u"The last seen trade is switched off."_q;
+	if (!Config().trade) {
+		return tr::lng_lastseen_peek_disabled(tr::now);
 	} else if (ReasonForUser(user) != LastSeenReason::ByMe) {
-		return u"%1's last seen is not coarse because of your own privacy, "
-			"so there is nothing to trade."_q.arg(user->shortName());
-	} else if (Running) {
-		return u"A trade is already running."_q;
+		return tr::lng_lastseen_peek_unavailable(
+			tr::now,
+			lt_user,
+			user->shortName());
+	} else if (RunningPeek) {
+		return tr::lng_lastseen_peek_running(tr::now);
 	}
 	return QString();
 }
@@ -381,6 +392,11 @@ LastSeenReason ReasonForUser(not_null<UserData*> user) {
 	return ReasonFor(ShapeOf(status), status.isHiddenByMe());
 }
 
+bool CanPeekLastSeen(not_null<UserData*> user) {
+	return Config().trade
+		&& (ReasonForUser(user) == LastSeenReason::ByMe);
+}
+
 LastSeenText LastSeenNoteFor(
 		not_null<UserData*> user,
 		TimeId now,
@@ -393,7 +409,7 @@ LastSeenText LastSeenNoteFor(
 	result.text = result.base;
 
 	const auto note = NoteFor(user, now);
-	result.tappable = note.tappable;
+	result.tappable = CanPeekLastSeen(user);
 	switch (note.line) {
 	case LastSeenLine::Plain:
 		return result;
@@ -403,35 +419,35 @@ LastSeenText LastSeenNoteFor(
 	// saying the vaguer half first, and over "a long time ago" - where the core
 	// now also shows it - the two halves would contradict each other outright.
 	// What hangs off it instead is the way back into the sheet, because the
-	// trade took the tail that used to be the only door. Over "a long time ago"
+	// peek took the tail that used to be the only door. Over "a long time ago"
 	// nothing hangs off it at all: such a status has no reason, so the note is
-	// not tappable and there is no offer to make.
+	// not tappable and there is no peek to start.
 	case LastSeenLine::Remembered:
 		result.base = RememberedText(note, now);
 		result.text = result.base;
-		if (note.tappable) {
-			result.tail = narrow ? kShortReason : kLongRefresh;
+		if (result.tappable) {
+			result.tail = narrow
+				? kShortReason
+				: tr::lng_lastseen_peek_again_suffix(tr::now);
 		}
 		break;
 
 	case LastSeenLine::ByMeTail:
-		result.tail = narrow ? kShortReason : kLongReason;
+		result.tail = narrow
+			? kShortReason
+			: tr::lng_lastseen_peek_suffix(tr::now);
 		break;
 	}
 	if (!result.tail.isEmpty()) {
 		result.text = result.base + kSeparator + result.tail;
-		if (note.tappable) {
+		if (result.tappable) {
 			result.link = result.tail;
 		}
 	}
 	return result;
 }
 
-bool LastSeenTradeOffered() {
-	return Config().trade;
-}
-
-void ShowLastSeenTradeBox(
+void ShowLastSeenPeekBox(
 		not_null<Window::SessionController*> controller,
 		not_null<UserData*> user) {
 	const auto now = base::unixtime::now();
@@ -456,19 +472,17 @@ void ShowLastSeenTradeBox(
 			int64(now),
 			Config().tradeRememberSeconds).has_value();
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(u"Show mine to see theirs"_q));
+		box->setTitle(tr::lng_lastseen_peek_title());
 
 		const auto container = box->verticalLayout();
 		container->add(
 			object_ptr<Ui::FlatLabel>(
 				container,
-				u"Telegram hides %1's exact last seen from you because you "
-				"hide yours from them.\n\nFor up to %2 this will let %1 see "
-				"your last seen, read theirs once, and put your privacy back "
-				"exactly as it was. Nobody is told, and nothing else about "
-				"your privacy changes. If they hide their last seen for their "
-				"own reasons, nothing will be read."_q.arg(
+				tr::lng_lastseen_peek_about(
+					tr::now,
+					lt_user,
 					user->shortName(),
+					lt_duration,
 					DurationText(seconds)),
 				st::boxLabel),
 			st::boxRowPadding);
@@ -482,17 +496,18 @@ void ShowLastSeenTradeBox(
 				st::boxRowPadding)
 			: nullptr;
 
-		// "Don't offer this again" is the same switch as Settings -> Advanced
-		// -> Purple -> "Offer the last seen trade", written to settings.toml,
-		// rather than a second flag meaning the same thing somewhere else. It
-		// takes the offer away everywhere and leaves the explanation, which is
-		// what somebody who never wants to be asked is asking for.
 		const auto never = container->add(
 			object_ptr<Ui::Checkbox>(
 				container,
-				u"Don't offer this again"_q,
+				tr::lng_lastseen_peek_disable(tr::now),
 				false,
 				st::defaultCheckbox),
+			st::boxRowPadding);
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				tr::lng_lastseen_peek_disable_about(),
+				st::boxDividerLabel),
 			st::boxRowPadding);
 
 		const auto apply = [=] {
@@ -506,25 +521,28 @@ void ShowLastSeenTradeBox(
 					u"last_seen"_q,
 					u"trade_p"_q,
 					false);
-			}, u"the last seen trade"_q);
+			}, u"Last Seen Peek"_q);
 		};
 
 		const auto share = box->addButton(
-			rpl::single(again ? u"Refresh now"_q : u"Share once"_q),
+			(again
+				? tr::lng_lastseen_peek_again()
+				: tr::lng_lastseen_peek_now()),
 			[=] {
 				apply();
 				box->closeBox();
-				if (Running) {
-					show->showToast(u"A trade is already running."_q);
+				if (RunningPeek) {
+					show->showToast(
+						tr::lng_lastseen_peek_running(tr::now));
 					return;
 				}
-				Running = std::make_unique<Trade>(session, user, show);
-				Running->start();
+				RunningPeek = std::make_unique<LastSeenPeek>(session, user, show);
+				RunningPeek->start();
 			});
 
-		// One trade per person per `trade_cooldown', counted from the read
+		// One peek per person per `trade_cooldown', counted from the read
 		// that is already written down, so the wait is the same number the
-		// line behind this box is offering to refresh. It is recomputed from
+		// line behind this box lets the user refresh. It is recomputed from
 		// the clock on every tick rather than decremented, because a box left
 		// open through a suspend would otherwise finish counting a wait that
 		// wall-clock time had already spent.
@@ -540,11 +558,15 @@ void ShowLastSeenTradeBox(
 					cooldown);
 				if (left > 0) {
 					countdown->setText(
-						u"You can refresh in %1."_q.arg(CooldownText(left)));
+						tr::lng_lastseen_peek_wait(
+							tr::now,
+							lt_time,
+							CooldownText(left)));
 					timer->callOnce(crl::time(1000));
 					return;
 				}
-				countdown->setText(u"You can refresh now."_q);
+				countdown->setText(
+					tr::lng_lastseen_peek_ready(tr::now));
 				share->setDisabled(false);
 				share->setTextFgOverride(std::nullopt);
 			};
@@ -558,45 +580,53 @@ void ShowLastSeenTradeBox(
 	}));
 }
 
-void LastSeenTradesBox(
+void LastSeenPeeksBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Main::Session*> session) {
-	box->setTitle(rpl::single(u"Last seen trades"_q));
+	box->setTitle(tr::lng_lastseen_peeks_title());
 	box->setWidth(st::boxWideWidth);
 
 	const auto container = box->verticalLayout();
 	const auto now = base::unixtime::now();
 	const auto title = TitleResolver(session);
-	auto trades = CurrentState().lastSeenTrades;
-	ranges::sort(trades, ranges::greater(), &LastSeenTrade::readAtUnix);
+	auto peeks = CurrentState().lastSeenTrades;
+	ranges::sort(peeks, ranges::greater(), &LastSeenTrade::readAtUnix);
 
 	auto lines = QStringList();
-	for (const auto &trade : trades) {
-		const auto name = title(trade.peer);
+	for (const auto &peek : peeks) {
+		const auto name = title(peek.peer);
 		const auto who = name.isEmpty()
-			? QString::number(trade.peer)
+			? QString::number(peek.peer)
 			: name;
-		const auto age = AgeText(std::max(now - TimeId(trade.readAtUnix), 0));
-		lines.push_back(trade.wasOnlineUnix
-			? u"%1 - last seen %2, read %3"_q.arg(
+		const auto age = AgeText(std::max(now - TimeId(peek.readAtUnix), 0));
+		lines.push_back(peek.wasOnlineUnix
+			? tr::lng_lastseen_peeks_read(
+				tr::now,
+				lt_user,
 				who,
-				ExactMoment(TimeId(trade.wasOnlineUnix), now),
+				lt_last_seen,
+				ExactMoment(TimeId(peek.wasOnlineUnix), now),
+				lt_age,
 				age)
-			: u"%1 - nothing was read, %2"_q.arg(who, age));
+			: tr::lng_lastseen_peeks_no_read(
+				tr::now,
+				lt_user,
+				who,
+				lt_age,
+				age));
 	}
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
 			(lines.isEmpty()
-				? u"Nothing has been traded for yet."_q
+				? tr::lng_lastseen_peeks_empty(tr::now)
 				: lines.join('\n')),
 			st::boxLabel),
 		st::boxRowPadding);
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			u"Kept in state.toml on this machine only, and dropped once a "
-			"read is older than [last_seen] trade_remember."_q,
+			tr::lng_lastseen_peeks_about(),
 			st::boxDividerLabel),
 		st::boxRowPadding);
 

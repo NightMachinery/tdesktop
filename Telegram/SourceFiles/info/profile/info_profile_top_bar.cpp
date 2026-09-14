@@ -328,15 +328,11 @@ TopBar::TopBar(
 , _status(this, QString(), statusStyle())
 , _statusLabel(std::make_unique<StatusLabel>(_status.data(), _peer))
 , _customStatus(std::move(descriptor.customStatus))
-// Purple: upstream's "when?" asked a question this button answered by handing
-// your last seen to everybody, for good. It opens the fork's trade now, and it
-// says so: the status line beside it still carries the reason, and the words on
-// the button are the ones the sheet is titled with.
 , _showLastSeen(
 	this,
 	object_ptr<Ui::RoundButton>(
 		this,
-		rpl::single(u"show mine"_q),
+		tr::lng_lastseen_peek_now(),
 		st::infoProfileTopBarShowLastSeen))
 , _forumButton([&, controller = descriptor.controller] {
 	const auto topic = _key.topic();
@@ -410,12 +406,12 @@ TopBar::TopBar(
 	// Purple: after setupStatusWithRating(), which makes the status label
 	// transparent to the mouse for a user - installing this earlier would have
 	// the label's own refresh undone by that call. The tail on a coarse "last
-	// seen" opens the trade sheet, and the sheet decides whether there is
-	// anything to trade for, so this is a click handler and not a second copy
+	// seen" opens the peek sheet, and the sheet decides whether there is
+	// anything to peek, so this is a click handler and not a second copy
 	// of the rules.
 	if (const auto user = _peer->asUser()) {
 		_statusLabel->setLastSeenLinkCallback([=] {
-			Purple::ShowLastSeenTradeBox(controller, user);
+			Purple::ShowLastSeenPeekBox(controller, user);
 		});
 	}
 
@@ -3097,17 +3093,17 @@ void TopBar::setupShowLastSeen(
 	// tappable, which is the core's answer and not a second chain of tests
 	// here - so it stands for a remembered read too, where it opens the sheet
 	// that counts the cooldown down, and it goes when `[last_seen] trade_p'
-	// takes the offer away. With the offer off the fork has nothing to put
+	// disables peeking. With peeking off the fork has nothing to put
 	// here: it will not fall back to upstream's one tap, and last-seen privacy
 	// is then changed in Settings > Privacy, deliberately, where it can be
-	// changed back. The sheet's own "Don't offer this again" writes that
+	// changed back. The sheet's global disable checkbox writes that
 	// switch while this profile is still on screen behind it, which is why the
 	// switch is read from SettingsChanges() and not once on construction.
 	//
 	// Premium is not part of it. Upstream's button was a promo - buy Premium
 	// or open your last seen to everybody - and this one is neither, so a
 	// premium account (local premium included) hiding it would only hide the
-	// trade from the people most likely to have turned their own last seen
+	// peek from the people most likely to have turned their own last seen
 	// off.
 	rpl::combine(
 		user->session().changes().peerFlagsValue(
@@ -3122,7 +3118,7 @@ void TopBar::setupShowLastSeen(
 		const auto hiddenByMe = user->lastseen().isHiddenByMe();
 		const auto now = base::unixtime::now();
 		const auto shown = !user->lastseen().isOnline(now)
-			&& Purple::LastSeenNoteFor(user, now, true, false).tappable;
+			&& Purple::CanPeekLastSeen(user);
 		_showLastSeen->toggle(shown, anim::type::instant);
 		if (wasShown && premium && hiddenByMe) {
 			user->updateFullForced();
@@ -3143,13 +3139,13 @@ void TopBar::setupShowLastSeen(
 
 	_showLastSeen->entity()->setFullRadius(true);
 
-	// Purple: upstream offered two ways out here - buy Premium, or save an
+	// Purple: upstream provided two ways out here - buy Premium, or save an
 	// empty LastSeen rule set, which means everybody, forever, with nothing in
-	// the app to put it back. The trade buys the same answer by naming one
+	// the app to put it back. The peek gets the same answer by naming one
 	// person for a few seconds and restoring the rules afterwards, so it is the
 	// whole of what this button does now.
 	_showLastSeen->entity()->setClickedCallback([=] {
-		Purple::ShowLastSeenTradeBox(controller, user);
+		Purple::ShowLastSeenPeekBox(controller, user);
 	});
 }
 

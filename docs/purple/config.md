@@ -668,8 +668,8 @@ governs every place a last seen is written, not only the chat header and the
 profile: member lists, the pickers, the chat preview popup and the short info
 box get the eyes mark where those two get the words.
 
-What it does *not* govern is a read a trade came back with. That line is shown
-with `reasons_p` off, because it is not the fork explaining a status - it is
+What it does *not* govern is a read a Last Seen Peek came back with. That line
+is shown with `reasons_p` off, because it is not the fork explaining a status - it is
 the fork showing the answer to a question asked out loud, and a switch that
 turns explanations off should not swallow it.
 
@@ -682,28 +682,32 @@ than by being a different kind of answer.
 
 Over "a long time ago" the line is not tappable, though. Such a status has no
 reason at all - the server is not withholding a moment there, it is saying
-there is no recent one - and a trade cannot buy back somebody who has gone
-quiet or shut you out. So the read is shown and no offer is made with it.
+there is no recent one - and a peek cannot reveal somebody who has gone
+quiet or shut you out. So the read is shown and no peek action is shown with it.
 
-`trade_p` decides whether a line also offers the one-off trade: show them your
-last seen for a moment, read theirs, put your privacy back. Turning it off
-leaves the explanation and takes away the offer, and it is what the sheet's
-"Don't offer this again" writes. It is the only key that decides whether a line
-is tappable - both the reason tail and a remembered read open the sheet while
-it is on, and neither does while it is off - and it takes the profile's own
-button with it.
+`trade_p` enables Last Seen Peek: temporarily show this person only your Last
+Seen, read theirs once, and put your privacy back. Turning it off leaves the
+explanation and removes every peek link, button, and menu action. The sheet's
+**Disable Last Seen Peek everywhere** checkbox writes the same key when Peek or
+Cancel closes the sheet.
+
+The chat menu and the profile's **More** menu show **Peek Last Seen** only when
+the other person's coarse status carries `by_me`. The full last-seen line on a
+person's profile is clickable under the same condition. The action remains
+available when `reasons_p` is off because that switch controls the explanatory
+suffix, while `trade_p` controls Last Seen Peek itself.
 
 `trade_hold` is how long to wait for their status after asking before restoring
 your rules. Ten seconds by design: the whole exposure is that window, and a
-trade that has not answered in ten seconds is not going to.
+peek that has not answered in ten seconds is not going to.
 
 `trade_remember` is how long a read stays worth showing, and it is the *only*
 thing that ages one out. Past it the record is dropped rather than shown as
 older and older news - "as of 3 min ago" is useful and "as of 2 days ago" is
 not.
 
-`trade_cooldown` is the least time between two trades with the same person.
-Inside it the sheet still opens, counts the wait down and offers the re-trade
+`trade_cooldown` is the least time between two peeks with the same person.
+Inside it the sheet still opens, counts the wait down and enables another peek
 once it is spent, rather than refusing in a toast.
 
 All three durations are written the way every other duration in this file is -
@@ -721,13 +725,13 @@ The reads themselves are in `state.toml`, and they never leave the machine:
     was_online = 1757319120
 
 `peer` is the plain numeric id this file uses everywhere. `read_at` is when the
-trade ran, in unix seconds, and is what both the age in the status line and the
+peek ran, in unix seconds, and is what both the age in the status line and the
 cooldown are measured from. `was_online` is the moment that was read, or `0` for
-a trade whose hold ran out with nothing arriving - still written down, because
+a peek whose hold ran out with nothing arriving - still written down, because
 the cooldown counts attempts rather than successes.
 
-One record per person: a second trade with somebody replaces the first rather
-than piling up, so the file is bounded by how many people you have traded with
+One record per person: a second peek with somebody replaces the first rather
+than piling up, so the file is bounded by how many people you have peeked
 and not by how often. Records older than `trade_remember` are dropped on the
 next write.
 
@@ -976,7 +980,7 @@ None of these are part of tdesktop's own shortcut table - see
         purple_screentime.{h,cpp} the screen-time log, nothing records it yet
     Telegram/SourceFiles/purple/
         purple_config.{h,cpp}     file IO, watcher, API
-        purple_last_seen.{h,cpp}  the reasons and the trade
+        purple_last_seen.{h,cpp}  the reasons and Last Seen Peek
         purple_readme.{h,cpp}     the generated readme
 
 The Work Mode spec puts the parser and the splice engine inside `purple_config`.

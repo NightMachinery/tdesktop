@@ -1981,17 +1981,17 @@ can be told apart:
 
 - **Coarse because of your own privacy.** You hide your last seen from them, so
   Telegram hides theirs from you - its reciprocity rule. The status carries a
-  `by_me` flag saying exactly that, and the fork appends `share yours to see`
+  `by_me` flag saying exactly that, and the fork appends `peek Last Seen`
   to the line, after the same middle dot every other status suffix uses. It is
   the one case with something to do about it.
 - **Coarse because of theirs.** The same words with no flag. Their setting,
-  nothing to offer, so nothing is added.
+  nothing to peek, so nothing is added.
 - **"a long time ago"** - `userStatusEmpty`. Nothing is *explained*, and that is
   the considered answer rather than a gap. An abandoned account and an account
   that blocked you look identical here, and there is no field that says which.
   The fork does not guess at a block: it is the one thing here that would be
   unforgivable to be wrong about, and being right about it half the time is not
-  a feature. A read a trade already bought is still shown over it, though - see
+  a feature. A read from an earlier peek is still shown over it, though - see
   "The memory, and the cooldown" - because that is not an explanation, it is a
   moment somebody went and got.
 
@@ -2007,9 +2007,9 @@ gets the words.
 ### Where the line is drawn
 
 Six places in the app write a last seen, and they do not all have the same room
-or the same click. The chat header and the profile carry the words *and* the
-link: the tail is what opens the sheet, and both have somewhere to put a second
-click that is not already spoken for. Member lists, the contacts box,
+or the same click. The chat header links its suffix, while the profile links the
+whole last-seen line whenever Last Seen Peek is eligible. Member lists, the
+contacts box,
 add-participants, the forward and share pickers, the chat preview popup, the
 short info box and the participant editor carry the mark alone - `· 👀` after
 the status - which says the fork has something to add about this last seen and
@@ -2023,7 +2023,7 @@ using one, and a row that sometimes opens a sheet and sometimes opens the
 person is worse than a row that always does the one thing.
 
 A remembered read replaces the phrase underneath in all six, not only in the two
-that can trade. What a trade bought is a fact about that person, and a member
+that can start a peek. What a peek read is a fact about that person, and a member
 list still saying `last seen recently` beside a profile saying `last seen
 14:32` would be the fork disagreeing with itself in two windows of the same
 app.
@@ -2033,10 +2033,10 @@ when the time it was given runs out - so a row carrying the fork's tail asks
 for at most a minute of that time. The remembered line ages inside its own
 words (`as of 3 min ago`), and a minute is the resolution those words have.
 
-### Show mine to see theirs
+### Last Seen Peek
 
-The tail is a link. It opens a sheet that explains the moment of exposure and
-offers to make the trade once:
+Last Seen Peek temporarily shares your Last Seen with this person only so the
+client can read theirs once:
 
 1. Your current last-seen privacy rules are fetched.
 2. That one person is added to the allowed exceptions - and taken out of the
@@ -2050,30 +2050,39 @@ person's view of you moves for those few seconds - the rule that changed names
 them and nobody else.
 
 It can come back with nothing, and that is a real answer rather than a failure:
-if they hide their last seen for their own reasons, showing them yours buys
-nothing. The trade is still written down, because the cooldown counts attempts
+if they hide their last seen for their own reasons, showing them yours reveals
+nothing. The peek is still written down, because the cooldown counts attempts
 rather than successes.
 
-`trade_p = false` takes the offer away and leaves the explanation. That is also
-what the sheet's "Don't offer this again" checkbox writes, rather than a second
-flag somewhere meaning the same thing - the switch already exists, it is in
-Settings > Advanced > Purple, and it is in the file you can read.
+`trade_p = false` disables Last Seen Peek and leaves the explanation. The
+sheet's **Disable Last Seen Peek everywhere** checkbox writes this same setting
+when Peek or Cancel closes the sheet. Its help text says that every Last Seen
+Peek link and menu action will disappear.
 
-Upstream's own one-tap offer is gone on both clients. Telegram puts a small
+Upstream's own one-tap control is gone on both clients. Telegram puts a small
 button beside a coarse last seen - `when?` on the desktop - and confirming it
 saves an empty last-seen rule, which means *everybody*, permanently, with
-nothing anywhere in the app to put it back. That button opens the trade now,
-and with `trade_p` off it is not drawn at all rather than falling back to what
-it used to do. Leaving it standing beside the trade would have kept the
+nothing anywhere in the app to put it back. That button opens Last Seen Peek
+now, and with `trade_p` off it is not drawn at all rather than falling back to
+what it used to do. Leaving it standing beside Last Seen Peek would have kept the
 footgun and merely parked a safer path next to it; anybody who does want to be
 visible to everybody can still say so in Settings > Privacy, on a screen that
 can say the opposite again tomorrow.
+
+The chat menu includes **Peek Last Seen** beside the other peer actions, and the
+profile's **More** menu includes the same action. Both are present only when the
+other person's coarse status has `by_me`: they share a Last Seen in principle,
+but Telegram hides it because your privacy currently hides yours from them.
+The same central eligibility function drives these actions, the profile button,
+and the full clickable Last Seen line on the profile. Bots, service users, self,
+inaccessible users, exact statuses, and statuses hidden for the other person's
+own reasons never get the action.
 
 ### The memory, and the cooldown
 
 A read is remembered for `trade_remember` (a day, by default) and shown in
 place of whatever the status line would otherwise say: `last seen 14:32 · as of
-3 min ago`. Both halves are needed. The time is what you traded for; the age is
+3 min ago`. Both halves are needed. The time is what the peek found; the age is
 what stops it reading as live. Past the window the record is dropped rather than
 shown as older and older news, and the line falls back to the status underneath
 and its tail.
@@ -2084,36 +2093,36 @@ time ago"**, which is precisely when it matters most: it is then the only moment
 anyone has, and dropping it would mean a line that had been saying `last seen
 14:32` falling back to saying nothing on the day somebody went quiet. The one
 thing that displaces a remembered read is a real exact time arriving from the
-server - the question the trade was sent to answer, answered fresher - and it
+server - the question the peek was sent to answer, answered fresher - and it
 displaces it by being newer rather than by being a different kind of answer.
 
-The records live in `state.toml`, one per person - a second trade replaces the
-first - and they never leave the machine. Settings > Advanced > Purple > Trades
-lists them.
+The records live in `state.toml`, one per person - a second peek replaces the
+first - and they never leave the machine. Settings > Advanced > Purple > Last
+Seen Peeks lists them.
 
-One trade per person per `trade_cooldown`. A trade is a moment of exposure
-chosen on purpose; one offered again every time their chat opens would be a
+One peek per person per `trade_cooldown`. A peek is a moment of exposure
+chosen on purpose; starting one again every time their chat opens would be a
 standing subscription nobody agreed to.
 
 The remembered line is a link too, and that is a repair rather than a flourish.
-The tail used to be the only door into the sheet, so the first trade replaced
-the door with the read and the second trade was unreachable for a whole
+The tail used to be the only door into the sheet, so the first peek replaced
+the door with the read and the second peek was unreachable for a whole
 `trade_remember` - a day, by default - unless the record happened to expire
-first. The remembered line now carries a `· refresh` of its own, and the same
+first. The remembered line now carries a `· peek again` of its own, and the same
 eyes mark where there is no room for the word, and it opens the same sheet. It
 stops being a link when their last seen is no longer coarse because of *your*
 rules: they have changed their own privacy since, and there is nothing left to
-trade for. That covers a remembered read sitting over "a long time ago" without
+peek. That covers a remembered read sitting over "a long time ago" without
 needing a rule of its own - such a status has no reason at all - and the answer
-is the right one for it. They have gone quiet or shut you out, and a trade
-cannot buy back either. The read is shown; no offer is made with it.
+is the right one for it. They have gone quiet or shut you out, and a peek
+cannot reveal either. The read is shown; no peek action is shown with it.
 
 Inside the cooldown that sheet opens rather than refusing. It says `You can
-refresh in 3:12`, counting down every second from the read already written
+peek again in 3:12`, counting down every second from the read already written
 down, with the button held disabled and greyed beside it; when the wait runs
-out the line becomes `You can refresh now` and the button - `Refresh now`
-rather than `Share once`, because this is a second look at somebody already
-traded with - becomes pressable without the box having to be closed and opened
+out the line becomes `You can peek again now` and the button - `Peek again`
+rather than `Peek now`, because this is a second look at somebody already
+peeked - becomes pressable without the box having to be closed and opened
 again. A wait is not a refusal, and a toast that fires and vanishes cannot say
 how much of one is left.
 
@@ -2121,22 +2130,21 @@ The number is recomputed from the clock on every tick rather than decremented,
 so a box left open across a suspend does not go on counting a wait that
 wall-clock time has already spent.
 
-The other refusals are still toasts, because none of them is a wait: the offer
+The other refusals are still toasts, because none of them is a wait: peeking
 switched off, a last seen that is not coarse because of your own rules, and a
-trade already running are each a "no" that will not turn into a "yes" while the
+peek already running are each a "no" that will not turn into a "yes" while the
 box sits there.
 
 The profile's button agrees with the line beside it. It is drawn exactly when
 the status line is tappable - one answer, asked of the core - so it stands for
 a remembered read as well, and it goes when `trade_p` does. It no longer hides
 for a premium account: upstream's button was a promo, this one is not, and the
-fork's own local premium was hiding the trade from precisely the people who had
-gone looking for the fork's features.
+fork's own local premium was hiding Last Seen Peek from precisely the people who
+had gone looking for the fork's features.
 
 ### What each side does
 
-The core owns the rule (`ReasonFor`, on the three facts a status carries), the
-memory (`RememberTrade`, `RememberedTrade`, `TradeAllowed`) and the keys.
+The core owns the reason, remembered reads, cooldown, and configuration keys.
 Both apps ask it the same questions.
 
 The privacy calls are per client, because the API layer is. On the desktop the
@@ -2155,8 +2163,8 @@ would not survive - the same reduction the Privacy screen's own save does. The
 chats a rule names come back in the same response that carries the rule, so
 they are loaded by the time it is read.
 
-Only one trade runs at a time, for the whole app. Two would be two windows of
-exposure that were agreed to once.
+Only one Last Seen Peek runs at a time, for the whole app. Two would be two
+windows of exposure that were agreed to once.
 
 Each step is logged: reading our rules, showing ours, the read or the timeout,
 and the rules going back.
@@ -3416,7 +3424,7 @@ resolves itself as soon as the entries load.
     Telegram/SourceFiles/purple/purple_config.{h,cpp}     file IO and watcher
     Telegram/SourceFiles/purple/purple_focus.{h,cpp}      OS focus sync
     Telegram/SourceFiles/purple/purple_gate.{h,cpp}       the seam to tdesktop
-    Telegram/SourceFiles/purple/purple_last_seen.{h,cpp}  reasons and the trade
+    Telegram/SourceFiles/purple/purple_last_seen.{h,cpp}  reasons and Last Seen Peek
     Telegram/SourceFiles/purple/purple_list_menu.{h,cpp}  list membership menu
     Telegram/SourceFiles/purple/purple_peek.{h,cpp}       the peek hotkey
     Telegram/SourceFiles/purple/purple_preset_box.{h,cpp} the preset picker

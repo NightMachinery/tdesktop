@@ -27,8 +27,8 @@ public:
 	void setHiddenLinkCallback(Fn<void()> callback);
 	[[nodiscard]] Fn<void()> hiddenLinkCallback() const;
 
-	// Purple: the "share yours to see" tail on a coarse last seen opens the
-	// trade sheet, which needs a controller this class has no business
+	// Purple: an eligible Last Seen line opens the peek sheet, which needs a
+	// controller this class has no business
 	// holding, so the owner hands the click over the way it does for the two
 	// links above.
 	void setLastSeenLinkCallback(Fn<void()> callback);

@@ -33,7 +33,7 @@ namespace Purple {
 // separately: `base' is what upstream would have written - or the remembered
 // read that replaces it outright - `tail' is what the fork appends after the
 // middle dot, and `text' is the two joined the way they are shown. `link' is
-// the tail again, and only when tapping it opens the trade sheet: a caller
+// the tail again, and only when tapping it opens the peek sheet: a caller
 // that cannot make a link - a peer list row paints one elided string - shows
 // `text' and stops there, one that can hit-tests or wraps `link'.
 //
@@ -63,22 +63,13 @@ struct LastSeenText {
 	bool full,
 	bool narrow);
 
-// Whether `[last_seen] trade_p' still offers the trade at all. The sheet
-// already refuses when it does not, but a control whose only job is to open it
-// has to know before it is drawn: the profile's button is upstream's own
-// last-seen button rewired, and with the offer off the fork draws nothing
-// there rather than falling back to what upstream had it do.
-[[nodiscard]] bool LastSeenTradeOffered();
+[[nodiscard]] bool CanPeekLastSeen(not_null<UserData*> user);
 
-// The sheet. Refuses in a toast rather than opening when there is nothing to
-// trade for, or when the last trade with this person is too recent, so a call
-// site is a click handler and not a copy of the rules.
-void ShowLastSeenTradeBox(
+void ShowLastSeenPeekBox(
 	not_null<Window::SessionController*> controller,
 	not_null<UserData*> user);
 
-// What the trades read, newest first. Settings -> Advanced -> Purple.
-void LastSeenTradesBox(
+void LastSeenPeeksBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Main::Session*> session);
 
