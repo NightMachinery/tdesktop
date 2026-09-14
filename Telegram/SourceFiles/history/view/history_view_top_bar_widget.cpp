@@ -143,7 +143,8 @@ TopBarWidget::TopBarWidget(
 		refreshLang();
 	}, lifetime());
 
-	// Purple: a trade that has just landed, and the two [last_seen] switches,
+	// Purple: a Last Seen Peek that has just landed, and the two [last_seen]
+	// switches,
 	// rewrite this line without the peer's status moving at all.
 	rpl::merge(
 		Purple::StateChanges(),
@@ -804,8 +805,8 @@ void TopBarWidget::paintStatus(
 	}
 }
 
-// Purple: where the "share yours to see" tail sits, so a click on it can open
-// the trade instead of the profile the rest of the bar opens. Empty while there
+// Purple: where the Last Seen Peek suffix sits, so a click on it can open
+// the peek instead of the profile the rest of the bar opens. Empty while there
 // is no tail, and empty when the line is elided - a mark the user cannot see in
 // full is not a target they meant to hit.
 QRect TopBarWidget::purpleLastSeenGeometry() const {
@@ -849,7 +850,7 @@ void TopBarWidget::mousePressEvent(QMouseEvent *e) {
 		const auto peer = _activeChat.key.peer();
 		const auto user = peer ? peer->asUser() : nullptr;
 		if (user && purpleLastSeenGeometry().contains(e->pos())) {
-			Purple::ShowLastSeenTradeBox(_controller, user);
+			Purple::ShowLastSeenPeekBox(_controller, user);
 			return;
 		}
 		const auto archiveTop = (_activeChat.section == Section::ChatsList)

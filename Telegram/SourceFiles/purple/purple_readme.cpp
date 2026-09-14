@@ -68,8 +68,8 @@ you are editing by hand.
 - **The two sync switches**, `[sync] send_after_save_p` and the Premium one
   above, from the same Settings section.
 - **The two last seen switches**, `[last_seen] reasons_p` and `trade_p`, from
-  the same section - and `trade_p` again from the trade sheet's "Don't offer
-  this again".
+  the same section - and `trade_p` again from the Last Seen Peek sheet's
+  **Disable Last Seen Peek everywhere** checkbox.
 
 Every one of these re-parses what it produced and checks it against what was
 intended before handing it back. A bug there refuses the edit rather than
@@ -566,22 +566,26 @@ trade_cooldown = "5m"
 
 Telegram hides somebody's exact "last seen" from you when your own privacy hides
 yours from them, and it says so. With `reasons_p` the status line in the chat
-header and the profile says it too, adding `share yours to see` - or an eyes
+header and the profile says it too, adding `peek Last Seen` - or an eyes
 mark where there is no room for the words. When the coarseness is their own
 setting, nothing is added; when the status is "a long time ago", nothing is
 added either, because that is what an abandoned account and a block both look
 like and there is no field saying which.
 
-That line is a link. It offers to show them your last seen for `trade_hold`,
-read theirs once, and put your privacy back exactly as it was - always, whether
-anything was read or not. Nobody is told, and no other person's view of you
-changes. `trade_p = false` takes the offer away and leaves the explanation;
-so does "Don't offer this again" in the sheet.
+Last Seen Peek temporarily shares your Last Seen with that person only for
+`trade_hold`, reads theirs once, and puts your privacy back exactly as it was -
+always, whether anything was read or not. Nobody is told, and no other person's
+view of you changes. `trade_p = false` removes every peek link and action while
+leaving the explanation; so does the sheet's global disable checkbox.
+
+The chat menu and the profile's **More** menu show **Peek Last Seen** only when
+the other person's status is hidden by your own privacy. The full last-seen line
+on their profile is clickable under the same condition.
 
 A read is shown in place of the coarse phrase for `trade_remember` - `last seen
-14:32 - as of 3 min ago` - and then dropped. One trade per person per
+14:32 - as of 3 min ago` - and then dropped. One peek per person per
 `trade_cooldown`. The reads are in `state.toml`, on this machine only, and
-Settings > Advanced > Purple > Trades lists them.
+Settings > Advanced > Purple > Last Seen Peeks lists them.
 
 ## Moving this file to another machine
 

@@ -65,6 +65,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_last_seen.h"
 #include "purple/purple_list_menu.h"
 #include "purple/purple_preset_box.h"
 #include "menu/menu_mute.h"
@@ -339,6 +340,7 @@ private:
 	void addCreatePoll();
 	void addCreateTodoList();
 	void addThemeEdit();
+	void addLastSeenPeek();
 	void addToggleNoForwards();
 	void addBlockUser();
 	void addViewDiscussion();
@@ -1470,6 +1472,18 @@ void Filler::addThemeEdit() {
 		&st::menuIconChangeColors);
 }
 
+void Filler::addLastSeenPeek() {
+	const auto user = _peer ? _peer->asUser() : nullptr;
+	if (!user || !Purple::CanPeekLastSeen(user)) {
+		return;
+	}
+	const auto controller = _controller;
+	_addAction(
+		tr::lng_lastseen_peek_action(tr::now),
+		[=] { Purple::ShowLastSeenPeekBox(controller, user); },
+		&st::menuIconStealth);
+}
+
 void ShowDisableSharingBox(
 		not_null<SessionController*> controller,
 		not_null<PeerData*> peer,
@@ -1908,6 +1922,7 @@ void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
 	addCreateTopic();
 	addInfo();
+	addLastSeenPeek();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();
@@ -1929,6 +1944,7 @@ void Filler::fillHistoryActions() {
 
 void Filler::fillProfileActions() {
 	addTTLSubmenu(true);
+	addLastSeenPeek();
 	addSupportInfo();
 	addNewContact();
 	addShareContact();

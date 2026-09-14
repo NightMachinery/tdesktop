@@ -190,6 +190,37 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_lastseen_premium_button" = "Subscribe to Telegram Premium";
 "lng_lastseen_shown_toast" = "Your last seen time is now visible.";
 
+"lng_lastseen_peek_action" = "Peek Last Seen";
+"lng_lastseen_peek_suffix" = "Peek Last Seen";
+"lng_lastseen_peek_again_suffix" = "Peek Last Seen again";
+"lng_lastseen_peek_title" = "Last Seen Peek";
+"lng_lastseen_peek_about" = "Temporarily share your Last Seen with {user} only, for up to {duration}, so you can read theirs once. Your privacy settings will then be restored exactly as they were. Nobody is notified.\n\nIf they hide their Last Seen for another reason, nothing will be read.";
+"lng_lastseen_peek_disable" = "Disable Last Seen Peek everywhere";
+"lng_lastseen_peek_disable_about" = "If checked when you choose Peek or Cancel, this turns off the setting and removes every Last Seen Peek link and menu action.";
+"lng_lastseen_peek_now" = "Peek now";
+"lng_lastseen_peek_again" = "Peek again";
+"lng_lastseen_peek_wait" = "You can peek again in {time}.";
+"lng_lastseen_peek_ready" = "You can peek again now.";
+"lng_lastseen_peek_disabled" = "Last Seen Peek is switched off.";
+"lng_lastseen_peek_unavailable" = "{user}'s Last Seen is not hidden by your privacy settings, so it cannot be peeked.";
+"lng_lastseen_peek_running" = "A Last Seen Peek is already running.";
+"lng_lastseen_peek_empty_result" = "Nothing was read — they hide their Last Seen for another reason.";
+"lng_lastseen_peeks_title" = "Last Seen Peeks";
+"lng_lastseen_peeks_empty" = "No Last Seen Peeks yet.";
+"lng_lastseen_peeks_read" = "{user} — last seen {last_seen}, read {age}";
+"lng_lastseen_peeks_no_read" = "{user} — nothing was read, {age}";
+"lng_lastseen_peeks_about" = "Kept in state.toml on this machine only and removed after the configured memory period.";
+"lng_lastseen_peek_setting" = "Enable Last Seen Peek";
+"lng_lastseen_peek_settings_about" = "Telegram hides someone's exact Last Seen when your privacy settings hide yours from them. Last Seen Peek briefly shares yours with that person only, reads theirs once, and restores your settings.";
+"lng_lastseen_peek_moment_yesterday" = "yesterday {time}";
+"lng_lastseen_peek_moment_date" = "{date} {time}";
+"lng_lastseen_peek_age_now" = "just now";
+"lng_lastseen_peek_age_minutes#one" = "{count} minute ago";
+"lng_lastseen_peek_age_minutes#other" = "{count} minutes ago";
+"lng_lastseen_peek_age_hours#one" = "{count} hour ago";
+"lng_lastseen_peek_age_hours#other" = "{count} hours ago";
+"lng_lastseen_peek_remembered" = "last seen {last_seen} · as of {age}";
+
 "lng_readtime_show_title" = "Show Your Read Date";
 "lng_readtime_show_about" = "To see when **{user}** read the message,\neither start showing your own read time...";
 "lng_readtime_show_button" = "Show My Read Time";
