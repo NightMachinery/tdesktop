@@ -858,9 +858,9 @@ the mark that says the screen is to be locked when the blackout ends - and
 that mark is a deliberate choice by whoever armed the lock. Do not call it.
 
 For a safe run, resolve the PID of the isolated Telegram instance and verify
-its executable path before posting. Target every event at that PID; never post
-to the frontmost application or a remembered PID. Activate that exact app
-first. Hammerspoon keyboard events can then be delivered directly to it:
+its executable path before posting. Never use the frontmost application or a
+remembered PID. Activate that exact app first. Hammerspoon keyboard events can
+then be delivered directly to it:
 
 ```lua
 app:activate()
@@ -868,10 +868,13 @@ hs.eventtap.keyStroke({}, "tab", 0, app)
 hs.eventtap.keyStrokes("text", app)
 ```
 
-For mouse input, create a CoreGraphics source with `.privateState`, make the
-event sequence from that source, and post each event to the same PID. An
-up/down/up sequence from that source delivered to the isolated intro while
-the lock was active; the private source is what distinguishes it from the
+For mouse input, derive the point from that exact app's current window, verify
+the point is still inside it, then create a CoreGraphics source with
+`.privateState` and post the event sequence to the session HID event tap. A
+mouse event posted to a PID is dropped; the PID identifies and activates the
+target window, while the coordinates and the window server route the event.
+An up/down/up sequence from the private source delivered to the isolated intro
+while the lock was active; the source is what distinguishes it from the
 combined-session Hammerspoon click.
 
 ```swift
@@ -881,7 +884,7 @@ for type in [.leftMouseUp, .leftMouseDown, .leftMouseUp] {
         mouseEventSource: source,
         mouseType: type,
         mouseCursorPosition: point,
-        mouseButton: .left)?.postToPid(pid)
+        mouseButton: .left)?.post(tap: .cghidEventTap)
 }
 ```
 
