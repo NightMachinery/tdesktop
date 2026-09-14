@@ -42,8 +42,9 @@ file once at launch, but neither writes anything until you choose Import.
 
 It does not merge. Import replaces the file wholesale; the previous one is kept
 as `settings.toml.bak` beside it, a single file that is overwritten each time.
-There is no three-way merge and no attempt at one, because a merge needs a
-common ancestor and there is nowhere here that would hold one.
+If that backup cannot be refreshed, the import aborts and leaves the current
+file unchanged. There is no three-way merge and no attempt at one, because a
+merge needs a common ancestor and there is nowhere here that would hold one.
 
 It does not import on its own. The *sending* half can now be automatic -
 `[sync] send_after_save_p`, off unless you turn it on, posts the file whenever

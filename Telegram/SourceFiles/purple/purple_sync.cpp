@@ -102,12 +102,14 @@ void WriteImported(
 		const std::shared_ptr<Ui::Show> &show) {
 	const auto path = SettingsFilePath();
 	if (QFile::exists(path)) {
-		// One backup, overwritten. A numbered series would accumulate in a
-		// directory the user reads by hand, and the file it protects against
-		// losing is one Saved Messages is already keeping every version of.
-		QFile::remove(BackupFilePath());
-		if (!QFile::copy(path, BackupFilePath())) {
+		const auto backup = BackupFilePath();
+		if ((QFile::exists(backup) && !QFile::remove(backup))
+			|| !QFile::copy(path, backup)) {
 			LOG(("Purple Error: Could not back up %1.").arg(path));
+			show->showBox(Ui::MakeInformBox(
+				u"Could not back up %1, so nothing was imported. See the log."_q
+					.arg(path)));
+			return;
 		}
 	}
 	if (!WriteConfigFile(path, text)) {
