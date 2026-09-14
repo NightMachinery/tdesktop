@@ -188,6 +188,6 @@ signed-in Saved Messages account for end-to-end verification.
 The one place it guesses is the search query. It asks for `settings.toml` by
 name, which relies on the server indexing document filenames the way the
 shared-files search box does, and if that comes back with nothing at all it asks
-once more with no query and sorts the newest twenty documents out itself. The
+once more with no query and sorts the newest hundred documents out itself. The
 second request costs one small round trip on a machine that has never used the
 feature, which is the price of the feature never silently failing to exist.
