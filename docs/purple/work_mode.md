@@ -3413,10 +3413,13 @@ Nothing outstanding here at the moment.
 
 ## Cloud unread counts
 
-`Dialogs::MainList` keeps a second total, `_cloudUnreadState`, from what the
-server reports for chats that have not loaded yet. It is not gated, so a badge
-can briefly count hidden chats between launch and the dialog list arriving. It
-resolves itself as soon as the entries load.
+Server cloud unread totals belong only to real `Data::Folder` lists. Purple's
+dock badge does not read them while a preset runs: it reads the synthetic main
+Purple view, whose entries are added only after their peers have loaded and
+been classified. The count can therefore grow during startup, but it cannot
+briefly include a chat that the preset hides. Folder tabs keep their server
+totals, as they do upstream: those counts describe folder membership, rather
+than the preset's main view.
 
 ## Implementation
 
