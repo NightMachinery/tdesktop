@@ -56,4 +56,8 @@ void AddImportSettingsAction(
 	not_null<DocumentData*> document,
 	std::shared_ptr<Ui::Show> show);
 
+void OfferNewerSettingsFromSavedMessages(
+	not_null<Main::Session*> session,
+	std::shared_ptr<Ui::Show> show);
+
 } // namespace Purple

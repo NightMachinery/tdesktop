@@ -34,11 +34,9 @@ want on infrastructure you have to reason about. In Saved Messages it sits
 exactly where the messages it describes already sit, under the same account and
 the same encryption, and the fork has added no new place for it to leak from.
 
-The cost is that it is manual. You press a button on one machine and pick a
-menu item on the other, and nothing happens on its own. That is not an
-oversight - see the next section - but it is the honest weakness, and the fix
-for it was always phase 2 rather than a server. Phase 2 has since been built on
-Android: the pressing is still manual, but the noticing is not.
+The cost is that importing is manual. You press a button on one machine and
+confirm the import on the other. The desktop and Android clients notice a newer
+file once at launch, but neither writes anything until you choose Import.
 
 ## What it does not do
 
@@ -65,14 +63,13 @@ larger claim than "these are my settings".
 
 ## Phase 2: offering an import on launch
 
-Implemented on Android, on 2026-09-06. On the first chat list a process builds,
-the fork asks Saved Messages for the newest `settings.toml`, and if it is newer
-than the local file it puts one dismissible line on the screen - "A newer Work
-Mode settings file is in Saved Messages", with an Import button. Nothing is
-written unless that button is pressed, and pressing it lands in the same
-`PurpleSettings.importFrom` the chat's own menu item uses, confirmation dialog
-and all. This is the whole of the automatic half: a search of one chat for one
-filename, and a snackbar.
+Implemented on Android and desktop. Once a primary chat list has a usable UI
+host, the client searches Saved Messages for `settings.toml` documents by name,
+then once with an empty document search if needed. If the newest qualifying file
+is newer than the local file it offers “A newer Work Mode settings file is in
+Saved Messages” with an Import button. Nothing is written unless that button is
+pressed, and pressing it uses the same import, confirmation, and download flow
+as the message menu action.
 
 The thing that was actually hard here was never the code. It was the worry that
 stated the hold: an offer that appears on every launch of a machine you never
@@ -95,13 +92,10 @@ because an import writes the bytes and nothing else; since the write necessarily
 happens after the message was sent, the mtime is always the later of the two and
 the comparison stays honest.
 
-This is Android-first by design, which inverts the usual direction: the desktop
-is where the feature was described and it is the half that does not have it yet.
-The reason is where the annoyance lives. The phone is the machine you pick up
-after editing settings somewhere else, so it is where "sync when you sit down"
-is worth something and where the suppression rule gets tested against real use.
-The desktop half is next, with the same rule and the same wording; nothing about
-either is platform-specific beyond the snackbar.
+The Android and desktop implementations share the same suppression rule and
+wording. Desktop verification remains account-backed: exercising the search,
+watermark, and confirmation flow requires a signed-in account with Saved
+Messages, so local checks cannot verify the end-to-end offer alone.
 
 ## Rejected: git, driven from Termux
 

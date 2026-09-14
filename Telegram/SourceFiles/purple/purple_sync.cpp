@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 
 #include "styles/style_menu_icons.h"
 
@@ -47,6 +48,7 @@ constexpr auto kFileName = "settings.toml";
 // the file, and offering to import it would be offering to import something
 // the download path cannot even hold.
 constexpr auto kMaxSize = 4 * 1024 * 1024;
+constexpr auto kSearchLimit = 100;
 
 [[nodiscard]] QString SettingsFileName() {
 	return QString::fromLatin1(kFileName);
@@ -208,6 +210,118 @@ void ResolveAndImport(
 	}, *lifetime);
 }
 
+struct ImportCandidate {
+	not_null<DocumentData*> document;
+	FullMsgId itemId;
+	TimeId date = 0;
+};
+
+[[nodiscard]] std::optional<ImportCandidate> FindImportCandidate(
+		not_null<Main::Session*> session,
+		const MTPmessages_Messages &result) {
+	auto messages = (const QVector<MTPMessage>*)nullptr;
+	result.match([](const MTPDmessages_messagesNotModified &) {
+	}, [&](const auto &data) {
+		session->data().processUsers(data.vusers());
+		session->data().processChats(data.vchats());
+		messages = &data.vmessages().v;
+	});
+	if (!messages) {
+		return std::nullopt;
+	}
+	session->data().processMessages(*messages, NewMessageType::Existing);
+
+	auto candidate = std::optional<ImportCandidate>();
+	for (const auto &message : *messages) {
+		const auto itemId = FullMsgId(
+			PeerFromMessage(message),
+			IdFromMessage(message));
+		const auto item = session->data().message(itemId);
+		const auto media = item ? item->media() : nullptr;
+		const auto document = media ? media->document() : nullptr;
+		if (!document
+			|| (document->size > kMaxSize)
+			|| (document->filename().compare(
+				SettingsFileName(),
+				Qt::CaseInsensitive) != 0)) {
+			continue;
+		}
+		if (!candidate || (itemId.msg > candidate->itemId.msg)) {
+			candidate = ImportCandidate{ document, itemId, item->date() };
+		}
+	}
+	return candidate;
+}
+
+void OfferImportCandidate(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
+		const ImportCandidate &candidate) {
+	if (!show || !(*show)) {
+		return;
+	}
+	auto &settings = session->settings();
+	if (candidate.itemId.msg <= settings.purpleSettingsOfferMessageId()) {
+		return;
+	}
+	settings.setPurpleSettingsOfferMessageId(candidate.itemId.msg);
+	session->saveSettingsDelayed();
+	if (candidate.date <= QFileInfo(SettingsFilePath()).lastModified()
+			.toSecsSinceEpoch()) {
+		return;
+	}
+	show->showBox(Ui::MakeConfirmBox({
+		.text = u"A newer Work Mode settings file is in Saved Messages"_q,
+		.confirmed = [=](Fn<void()> close) {
+			close();
+			ResolveAndImport(
+				candidate.document,
+				candidate.itemId,
+				candidate.date,
+				show);
+		},
+		.confirmText = u"Import"_q,
+	}));
+}
+
+[[nodiscard]] auto SettingsSearchRequest(
+		not_null<Main::Session*> session,
+		const QString &query) {
+	return MTPmessages_Search(
+		MTP_flags(0),
+		session->user()->input(),
+		MTP_string(query),
+		MTP_inputPeerEmpty(),
+		MTPInputPeer(),
+		MTPVector<MTPReaction>(),
+		MTPint(),
+		MTP_inputMessagesFilterDocument(),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_int(kSearchLimit),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_long(0));
+}
+
+void SearchForSettingsOffer(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
+		bool fallback) {
+	const auto query = fallback ? QString() : SettingsFileName();
+	session->api().request(SettingsSearchRequest(session, query)).done(
+		crl::guard(session, [=](const MTPmessages_Messages &result) {
+			if (const auto candidate = FindImportCandidate(session, result)) {
+				OfferImportCandidate(session, show, *candidate);
+			} else if (!fallback) {
+				SearchForSettingsOffer(session, show, true);
+			}
+		})
+	).send();
+}
+
 // Any session that could post the file. The active window's first, because
 // that is the account the person is looking at, and whichever one is signed in
 // otherwise - Saved Messages exists on all of them and the file is not about
@@ -327,6 +441,16 @@ void AddImportSettingsAction(
 	menu->addAction(u"Import Purple settings"_q, [=] {
 		ResolveAndImport(document, itemId, date, show);
 	}, &st::menuIconDownload);
+}
+
+void OfferNewerSettingsFromSavedMessages(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show) {
+	if (!show || !(*show)
+		|| !session->settings().takePurpleSettingsOfferStart()) {
+		return;
+	}
+	SearchForSettingsOffer(session, std::move(show), false);
 }
 
 } // namespace Purple
