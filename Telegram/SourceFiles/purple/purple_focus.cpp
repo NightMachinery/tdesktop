@@ -241,7 +241,7 @@ void Detector::check() {
 void StartFocusSync() {
 	// The policy first, so the detector's opening read arrives at something
 	// already listening rather than only landing in state.
-	Instance();
+	static_cast<void>(Instance());
 
 	static const auto detector = new Detector();
 	(void)detector;

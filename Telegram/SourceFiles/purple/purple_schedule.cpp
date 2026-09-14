@@ -135,7 +135,7 @@ void Runner::tick() {
 } // namespace
 
 void StartSchedule() {
-	Instance();
+	static_cast<void>(Instance());
 }
 
 bool SchedulePaused() {
