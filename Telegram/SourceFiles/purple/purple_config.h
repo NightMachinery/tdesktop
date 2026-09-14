@@ -17,6 +17,7 @@ namespace Purple {
 // encrypted settings blob. See docs/purple/config.md.
 [[nodiscard]] QString ConfigDirectory();
 [[nodiscard]] QString SettingsFilePath();
+[[nodiscard]] QString LastGoodSettingsFilePath();
 [[nodiscard]] QString StateFilePath();
 
 // The write every file in that directory goes through: QSaveFile puts a
@@ -36,6 +37,7 @@ void SetLocalPremium(bool value);
 // stops parsing leaves this at the last good value rather than reverting to
 // defaults, so a typo mid-edit does not reshuffle the user's chat list.
 [[nodiscard]] const Settings &ActiveSettings();
+[[nodiscard]] bool UsingLastGoodSettings();
 
 struct Problems {
 	QString error;

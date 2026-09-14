@@ -34,13 +34,19 @@ you type into it is lost. It is a reference, not a setting.
 What you edit is `settings.toml`, in this same directory. It is reloaded as you
 save it - there is no restart and no Apply button.
 
-## The two files
+## The settings and state files
 
 `settings.toml` is yours. The app reads it and makes only the surgical writes
 below, each of which edits the lines it needs and leaves your comments, blank
 lines, alignment and key order exactly where they were. The one exception is an
 import from Saved Messages, which replaces the whole file - and asks first, and
 keeps what was there as `settings.toml.bak`.
+
+`settings.toml.good` is the last `settings.toml` the app accepted. It is
+rewritten atomically after every successful read of the real file. If the real
+file is missing or stops parsing, the app runs from this copy until the real
+file is fixed. Do not edit it: the Work Mode box says when it is in use, and
+the parse error still describes the real file.
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
 focus-sync memory, the schedule's pause flag, the peek timer, and a cache of the
