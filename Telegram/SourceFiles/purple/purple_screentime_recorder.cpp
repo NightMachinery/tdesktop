@@ -645,7 +645,7 @@ QString ScreenTimeLogPath() {
 }
 
 void StartScreenTime() {
-	Instance();
+	static_cast<void>(Instance());
 }
 
 void WatchScreenTime(not_null<Window::SessionController*> controller) {
