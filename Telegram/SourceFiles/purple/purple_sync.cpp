@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "storage/localimageloader.h"
 #include "ui/boxes/confirm_box.h"
@@ -319,6 +320,10 @@ void SearchForSettingsOffer(
 				SearchForSettingsOffer(session, show, true);
 			}
 		})
+	).fail(crl::guard(session, [=](const MTP::Error &error) {
+		LOG(("Purple Error: Saved Messages settings search failed: %1."
+			).arg(error.type()));
+	})
 	).send();
 }
 
