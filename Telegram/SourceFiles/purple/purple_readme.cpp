@@ -534,8 +534,9 @@ parser had to throw away.
 whatever was active when the focus came on, rather than a preset named outright.
 
 A **peek** temporarily reveals what the active preset hides - every chat, every
-folder - and deliberately leaves the silencing exactly where it was. It ends on
-`auto_off`: `"90s"`, `"2m"`, `"1h"`, or `"off"` to run until you turn it off.
+folder - and suspends every mute the preset added, including list, folder and
+Hide until silencing. Your ordinary Telegram mute settings still apply. It ends
+on `auto_off`: `"90s"`, `"2m"`, `"1h"`, or `"off"` to run until you turn it off.
 
 `tap` and `hotkey_length` give the two ways of starting one their own lengths -
 `tap` for the checkbox and the chips in the Work Mode box, `hotkey_length` for
