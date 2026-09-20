@@ -39,6 +39,17 @@ Dependencies are located relative to the repository: `../Libraries`, `../win64/L
 
 ## Build Configuration
 
+### Build scheduling
+
+Run full Purple Telegram desktop and Android application builds only between
+01:00 and 07:00 Europe/Berlin. Prepare source changes and lightweight checks at
+other times, then delegate the application build to a worker during that night
+window. Do not leave an active agent waiting for the window to open, and do not
+start a build so late that it is expected to run past 07:00.
+
+The short `purple/test_config.sh` core harness and non-building static checks
+may run outside this window.
+
 ### Build Commands
 
 **From repository root, run:**
