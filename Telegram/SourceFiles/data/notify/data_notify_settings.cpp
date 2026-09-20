@@ -639,7 +639,7 @@ bool NotifySettings::purpleMutedWithoutPreset(
 }
 
 bool NotifySettings::purpleSilenced(not_null<const PeerData*> peer) const {
-	if (!Purple::Filtering()) {
+	if (!Purple::Filtering() || Purple::Peeking()) {
 		return false;
 	}
 	// An "until" decision outranks the preset here too. Notify lifts the

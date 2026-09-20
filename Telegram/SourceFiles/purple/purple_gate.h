@@ -136,9 +136,9 @@ bool PruneOverrides();
 // When the next one runs out, in unix seconds, or 0 for none outstanding.
 [[nodiscard]] int64 NextOverrideDeadline();
 
-// Whether a peek is running: the active preset's hiding is suspended - every
-// chat shows, no group is mention-gated, every folder is back - while its
-// silencing is left exactly where it was. See docs/purple/work_mode.md.
+// Whether a peek is running: the active preset's hiding and added silencing
+// are suspended, while normal Telegram mute settings remain in force. See
+// docs/purple/work_mode.md.
 [[nodiscard]] bool Peeking();
 
 // Whether the active preset takes the chats it hides out of the whole app

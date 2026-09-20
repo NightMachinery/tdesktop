@@ -1458,16 +1458,14 @@ and the far end of an hour is one flick here against seven targets to read
 before clicking. Both call the same thing with the same number, and both are
 disabled and dimmed under Normal, where there is nothing hidden to peek at.
 
-### It reveals; it does not un-silence
+### It reveals and un-silences the preset's additions
 
-A peek does not touch `notify`. The two halves of a preset answer different
-questions - hiding is about what you can find, silencing is about what may
-interrupt you - and a peek is a deliberate look at the chat list. Unmuting for
-it would deliver a burst of notifications for chats already on the screen and
-then take the mute back before you had dealt with them.
-
-It also keeps the rest of the UI honest through a peek: `Silenced by 'work'` in
-the chat list menu still says the true thing, because it still is.
+A peek suspends every mute the preset added: a list's `notify_p = false`, a
+folder's `notify_p = false`, and Hide until. It does not alter ordinary
+Telegram mute settings. Per-chat and per-topic settings still win, followed by
+the linked community fallback and the account's default setting. When the peek
+ends, `ActiveChanges()` runs the existing refresh and the preset's added mute
+returns.
 
 ### It is not part of the resolution
 
@@ -2831,10 +2829,11 @@ the clock that asks it.
 **Peek cost almost nothing, and that is the point of the seam.** `Visible()`
 already answers `ShowMode::Always` for every chat while `resolved.peeking` is
 set, and Android's `visibleNative` asks it the same question it always did - so
-the moment the bridge sets that one flag, every row, every notification decision
-and every badge honours the peek without a line of Java. What did not come free
-is the folder strip, which a peek puts back whole, and the reorder guard, which
-a peek lifts because the strip is the account's own again.
+the moment the bridge sets that one flag, every row and badge honours the peek.
+Notification decisions have a separate rule: a peek adds no Purple mute, so
+ordinary Telegram mute settings decide them. What did not come free is the
+folder strip, which a peek puts back whole, and the reorder guard, which a peek
+lifts because the strip is the account's own again.
 
 The flag is set in the bridge after the resolution, exactly where the desktop
 sets it and for the same reason: `ToCache()` has no field for it, so a peek can
@@ -2965,11 +2964,11 @@ and for the same reason.
 
 Two hooks, matching the desktop's two exactly: the view (`show` reveals, `hide`
 takes away) and the silencing (`notify` lifts the preset's mute and only the
-preset's, `hide` adds one). The ordering against a peek is the desktop's too and
-it is not arbitrary - **a peek outranks a hide, and that is what makes a hide
-cancellable**, since the row has to come back for you to reach the menu that
-cancels it. It does not outrank `notify`, because a peek is a look at the chat
-list and not a request to be interrupted.
+preset's, `hide` adds one). A peek outranks every Purple mute addition,
+including Hide until, and leaves ordinary Telegram mute settings to decide
+whether a chat may interrupt. It also outranks a hide, which makes a hide
+cancellable because the row comes back for you to reach the menu that cancels
+it.
 
 **A bug worth recording, because the fix is the interesting part.** The hooks
 went into `shown()` and `silenced()`, which is where the desktop puts them - and

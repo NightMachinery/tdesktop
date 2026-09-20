@@ -593,6 +593,10 @@ app writes on first run, which carries a commented example of each.
     hotkey_length = "2m"
     tap_mobile    = "5m"
 
+A peek reveals every chat and suspends every mute the preset added, including
+list, folder and Hide until silencing. Your ordinary Telegram mute settings
+still apply.
+
 `auto_off` is the length a peek has when nothing more specific is said, and
 `"off"` is a peek with no clock on it. `tap` is what tapping the control
 starts - the checkbox and the chips in the Work Mode box, the Peek row in the
