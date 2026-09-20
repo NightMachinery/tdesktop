@@ -131,9 +131,10 @@ The port is done. What is left is not a milestone:
   `hide_scope`'s default, and the chat-list mark for a row that is only
   present on a clock - landed on 2026-09-06, and both have since been seen on
   a screen in both directions.
-- The verification debt in [todo.md](todo.md) is paid, apart from the two
-  surfaces this emulator cannot reach. The laptop runs the APK natively on its
-  own GPU, and two runs - 2026-09-07 and 2026-09-08 - cleared the backlog: the
+- The verification debt in [todo.md](todo.md) is closed. It records the two
+  retired surfaces that are closed without further device work. The laptop runs
+  the APK natively on its own GPU, and two runs - 2026-09-07 and 2026-09-08 -
+  cleared the rest of the backlog: the
   list box and its verdict line in every reading, the three "until" spans, the
   preview menu, the App Icon picker, the folder unlock, the peek reorder guard
   in all three of its cases, sponsored on both surfaces, and the first

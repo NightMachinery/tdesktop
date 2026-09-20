@@ -204,7 +204,8 @@ off is itself a *server-side* Premium setting rather than a client decision. But
 client is still the only thing that can decline to ask, which is the criterion.
 Two sites: `ChatActivity.addSponsoredMessages()`, which both a channel's
 sponsored posts and a bot chat's sponsored top bar hang off, and
-`VideoAds.load()` for the media viewer.
+`VideoAds.load()` for the media viewer. The `VideoAds.load()` device-verification
+item is retired, so this describes the code path rather than a verified surface.
 
 The desktop's fourth sponsored surface has no counterpart. Search ads reach the
 desktop through `api/api_peer_search.cpp`; on Android nothing ever sends
@@ -217,7 +218,8 @@ desktop had to unlock the "Translate chats" master switch as well, because that
 switch is itself Premium-locked in `language_box.cpp`. Android's equivalent, the
 "Show Translate Chat Button" row, is not gated at all, so
 `TranslateController.isFeatureAvailable()` and its per-dialog overload are the
-whole fence.
+whole fence. The translate-bar device-verification item is retired, so this
+describes the gate rather than a verified bar.
 
 Android also has a gate the desktop document never listed:
 `isLanguageRestricted()` gives Premium accounts their "Do Not Translate" list

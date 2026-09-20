@@ -6,8 +6,8 @@ Nothing here is claimed as working.
 Most of this file used to be waiting on a renderer. That wait is over - the
 laptop runs the APK natively on the M2's own GPU (see "Run the emulator on the
 laptop, not the box" in `remote-build-and-test/readme.md`) - and two runs on it,
-on the nights of 2026-09-07 and 2026-09-08, cleared the whole backlog except the
-two things the emulator cannot reach at all.
+on the nights of 2026-09-07 and 2026-09-08, cleared the backlog. The two device
+checks recorded below are retired.
 
 Each run found one real bug, both now fixed:
 
@@ -27,11 +27,11 @@ menus, alert dialogs and the icon picker with **no ANR, no crash and no
 renderer segfault**. Every `EXIT=139` in this project's history belongs to the
 build box's software rasteriser, not to the app.
 
-## Two the emulator cannot reach
+## Retired verification items
 
-Neither is a fork problem, and neither should be attempted again on this setup.
+Neither item is pending. Both are closed without further device work.
 
-**The translate bar.** The decision is confirmed both ways in the log
+**The translate bar is retired.** The decision is confirmed both ways in the log
 (`translate for …: available (local premium). chat translate on.`), and the
 three French messages are sitting in the bot chat for it, but the bar never
 appears - because Telegram raises it from a *detected* language and detection
@@ -40,12 +40,14 @@ is Google ML Kit, whose dynamic modules a `google_apis` image cannot fetch:
     MlKitModuleManager: Modules download failed. Error code: 8
     ZappDownloader: No successful Zapp module downloads for requested modules
 
-A Play Store image or a real device would settle it. Nothing else will.
+A Play Store image or a real device would settle it, but no further attempt is
+planned. This is not an implementation or device-verification result.
 
-**`VideoAds.load()`**, the media viewer's video ads: still no evidence of any
-kind. It shares the channel path's guard, which is now confirmed on screen for
-both the channel and the bot surface, but it has no log line of its own and the
-media viewer never asked for one here.
+**`VideoAds.load()` verification is retired.** The media viewer's video ads
+still have no evidence of any kind. It shares the channel path's guard, which
+is now confirmed on screen for both the channel and the bot surface, but it has
+no log line of its own and the media viewer never asked for one here. No further
+attempt is planned; this is not an implementation or verification result.
 
 ## What the two runs actually showed
 
