@@ -1330,6 +1330,29 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 		u"trade_p"_q,
 		u"Last Seen Peek"_q);
 
+	const auto confirm = builder.addButton({
+		.id = u"advanced/purple_last_seen_peek_confirm"_q,
+		.title = tr::lng_lastseen_peek_confirm_setting(),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::single(!Purple::SkipLastSeenPeekConfirmation()),
+		.keywords = {
+			u"purple"_q,
+			u"last"_q,
+			u"seen"_q,
+			u"peek"_q,
+			u"confirm"_q,
+		},
+	});
+	if (confirm) {
+		confirm->toggledValue(
+		) | rpl::on_next([](bool value) {
+			const auto skip = !value;
+			if (skip != Purple::SkipLastSeenPeekConfirmation()) {
+				Purple::SetSkipLastSeenPeekConfirmation(skip);
+			}
+		}, confirm->lifetime());
+	}
+
 	if (controller) {
 		builder.addButton({
 			.id = u"advanced/purple_last_seen_peeks"_q,

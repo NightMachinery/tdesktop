@@ -74,8 +74,8 @@ you are editing by hand.
 - **The two sync switches**, `[sync] send_after_save_p` and the Premium one
   above, from the same Settings section.
 - **The two last seen switches**, `[last_seen] reasons_p` and `trade_p`, from
-  the same section - and `trade_p` again from the Last Seen Peek sheet's
-  **Disable Last Seen Peek everywhere** checkbox.
+  the same section. The Last Seen Peek sheet has a separate, device-local
+  **Skip confirmation for all future peeks on this device** checkbox.
 
 Every one of these re-parses what it produced and checks it against what was
 intended before handing it back. A bug there refuses the edit rather than
@@ -585,7 +585,9 @@ always, whether anything was read or not. Nobody is told, and no other person's
 view of you changes. `trade_p` defaults to true. Explicit `trade_p = false`
 removes the `Peek Last Seen` suffix and every peek link and action. A
 still-valid remembered exact read remains visible, but inert. The sheet's
-global disable checkbox writes the same false setting.
+checkbox skips future confirmations on this device without changing `trade_p`.
+Settings > Advanced > Purple > Confirm before Last Seen Peek restores the
+confirmation. It is on by default.
 
 The chat menu and the profile's **More** menu show **Peek Last Seen** only when
 the other person's status is hidden by your own privacy. The full last-seen line

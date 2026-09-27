@@ -65,6 +65,9 @@ struct LastSeenText {
 
 [[nodiscard]] bool CanPeekLastSeen(not_null<UserData*> user);
 
+[[nodiscard]] bool SkipLastSeenPeekConfirmation();
+void SetSkipLastSeenPeekConfirmation(bool skip);
+
 void ShowLastSeenPeekBox(
 	not_null<Window::SessionController*> controller,
 	not_null<UserData*> user);

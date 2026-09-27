@@ -705,8 +705,13 @@ quiet or shut you out. So the read is shown and no peek action is shown with it.
 person only your Last Seen, read theirs once, and put your privacy back.
 Explicitly setting it to false removes the `Peek Last Seen` suffix and every
 peek link, button, and menu action. A still-valid remembered exact read remains
-visible, but inert. The sheet's **Disable Last Seen Peek everywhere** checkbox
-writes the same key when Peek or Cancel closes the sheet.
+visible, but inert. The sheet's **Skip confirmation for all future peeks on this
+device** checkbox saves a separate local preference when Peek or Cancel closes
+the sheet. It leaves `trade_p` unchanged, so eligible peeks remain available and
+start directly after the cooldown. During a cooldown, the sheet still opens to
+show the remaining wait. Settings > Advanced > Purple > **Confirm before Last
+Seen Peek** restores the confirmation. Confirmation is on by default, and this
+preference is absent from `settings.toml` and its sync copies.
 
 The chat menu and the profile's **More** menu show **Peek Last Seen** only when
 the other person's coarse status carries `by_me`. The full last-seen line on a
