@@ -84,7 +84,9 @@ decide which chats you can see and which may interrupt you
 ([docs/purple/work_mode.md][purple_work_mode]) - and keeps its own settings in
 TOML ([docs/purple/config.md][purple_config]). Its other fork defaults and the
 automatic text-replacement preferences are documented in
-[docs/purple/defaults.md][purple_defaults].
+[docs/purple/defaults.md][purple_defaults]. Local passcodes also accept the
+English key sequence entered with a Persian keyboard layout, as described in
+[docs/purple/passcode.md][purple_passcode].
 
 [//]: # (LINKS)
 [telegram]: https://telegram.org
@@ -99,6 +101,7 @@ automatic text-replacement preferences are documented in
 [purple_premium]: docs/purple/premium.md
 [purple_config]: docs/purple/config.md
 [purple_defaults]: docs/purple/defaults.md
+[purple_passcode]: docs/purple/passcode.md
 [purple_work_mode]: docs/purple/work_mode.md
 [preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
 [preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png

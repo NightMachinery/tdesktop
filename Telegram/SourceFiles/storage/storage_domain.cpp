@@ -7,13 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "storage/storage_domain.h"
 
+#include "base/random.h"
 #include "core/version.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "mtproto/mtproto_config.h"
+#include "purple/purple_passcode.h"
 #include "storage/details/storage_file_utilities.h"
 #include "storage/serialize_common.h"
-#include "mtproto/mtproto_config.h"
-#include "main/main_domain.h"
-#include "main/main_account.h"
-#include "base/random.h"
 
 namespace Storage {
 namespace {
@@ -28,6 +29,10 @@ using namespace details;
 	// We dropped old test authorizations when migrated to multi auth.
 	//return "key_" + dataName + (cTestMode() ? "[test]" : "");
 	return "key_" + dataName;
+}
+
+[[nodiscard]] QByteArray PersianKeyboardPasscode(const QByteArray &passcode) {
+	return Purple::PersianKeyboardToEnglish(QString::fromUtf8(passcode)).toUtf8();
 }
 
 } // namespace
@@ -53,10 +58,20 @@ StartResult Domain::start(const QByteArray &passcode) {
 		return StartResult::Success;
 	}
 	auto legacy = std::make_unique<Main::Account>(_owner, _dataName, 0);
-	const auto result = legacy->legacyStart(passcode);
+	auto effectivePasscode = passcode;
+	auto result = legacy->legacyStart(effectivePasscode);
+	if (result == StartResult::IncorrectPasscodeLegacy) {
+		const auto mapped = PersianKeyboardPasscode(passcode);
+		if (mapped != passcode) {
+			result = legacy->legacyStart(mapped);
+			if (result == StartResult::Success) {
+				effectivePasscode = mapped;
+			}
+		}
+	}
 	if (result == StartResult::Success) {
 		_oldVersion = legacy->local().oldMapVersion();
-		startWithSingleAccount(passcode, std::move(legacy));
+		startWithSingleAccount(effectivePasscode, std::move(legacy));
 	}
 	return result;
 }
@@ -138,9 +153,18 @@ Domain::StartModernResult Domain::startModern(
 
 	EncryptedDescriptor keyInnerData, info;
 	if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
-		LOG(("App Info: could not decrypt pass-protected key from info file, "
-			"maybe bad password..."));
-		return StartModernResult::IncorrectPasscode;
+		const auto mapped = PersianKeyboardPasscode(passcode);
+		if (mapped == passcode) {
+			LOG(("App Info: could not decrypt pass-protected key from info file, "
+				"maybe bad password..."));
+			return StartModernResult::IncorrectPasscode;
+		}
+		_passcodeKey = CreateLocalKey(mapped, salt);
+		if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
+			LOG(("App Info: could not decrypt pass-protected key from info file, "
+				"maybe bad password..."));
+			return StartModernResult::IncorrectPasscode;
+		}
 	}
 	auto key = Serialize::read<MTP::AuthKey::Data>(keyInnerData.stream);
 	if (keyInnerData.stream.status() != QDataStream::Ok
@@ -248,7 +272,12 @@ bool Domain::checkPasscode(const QByteArray &passcode) const {
 	Expects(_passcodeKey != nullptr);
 
 	const auto checkKey = CreateLocalKey(passcode, _passcodeKeySalt);
-	return checkKey->equals(_passcodeKey);
+	if (checkKey->equals(_passcodeKey)) {
+		return true;
+	}
+	const auto mapped = PersianKeyboardPasscode(passcode);
+	return (mapped != passcode)
+		&& CreateLocalKey(mapped, _passcodeKeySalt)->equals(_passcodeKey);
 }
 
 void Domain::setPasscode(const QByteArray &passcode) {
