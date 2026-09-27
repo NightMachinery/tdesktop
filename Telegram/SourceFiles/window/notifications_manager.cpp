@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "platform/platform_notifications_manager.h"
+#include "purple/purple_config.h"
+#include "purple/purple_gate.h"
 #include "window/notifications_manager_default.h"
 #include "media/audio/media_audio_track.h"
 #include "media/audio/media_audio.h"
@@ -1080,12 +1082,12 @@ void System::playSound(
 }
 
 Manager::DisplayOptions Manager::getNotificationOptions(
+		not_null<PeerData*> peer,
 		HistoryItem *item,
 		Data::ItemNotificationType type) const {
 	const auto hideEverything = Core::App().passcodeLocked()
 		|| forceHideDetails();
 	const auto view = Core::App().settings().notifyView();
-	const auto peer = item ? item->history()->peer.get() : nullptr;
 	const auto topic = item ? item->topic() : nullptr;
 
 	auto result = DisplayOptions();
@@ -1108,6 +1110,14 @@ Manager::DisplayOptions Manager::getNotificationOptions(
 		&& !item->out()
 		&& (peer->isNotificationsUser()
 			|| peer->isVerifyCodes());
+	result.previewAlways = Purple::PreviewAlways(
+		Purple::ActiveSettings(),
+		Purple::IdOf(peer),
+		Purple::KindOf(peer));
+	if (result.previewAlways) {
+		result.hideNameAndPhoto = false;
+		result.hideMessageText = false;
+	}
 	return result;
 }
 
@@ -1552,9 +1562,9 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 			? Data::ItemNotificationType::PollVote
 			: Data::ItemNotificationType::Reaction)
 		: Data::ItemNotificationType::Message;
-	const auto options = getNotificationOptions(fields.item, type);
 	const auto item = fields.item;
 	const auto peer = item->history()->peer;
+	const auto options = getNotificationOptions(peer, item, type);
 	const auto reactionFrom = fields.reactionFrom;
 	if (reactionFrom && options.hideNameAndPhoto) {
 		return;
@@ -1580,6 +1590,7 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		: subWithChat();
 	const auto fullTitle = addTargetAccountName(title, &peer->session());
 	const auto hideReactionSender = reactionFrom
+		&& !options.previewAlways
 		&& !peer->session().api().reactionsNotifySettings()
 			.showPreviewsCurrent();
 	const auto subtitle = reactionFrom

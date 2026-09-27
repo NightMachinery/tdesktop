@@ -190,6 +190,31 @@ whatever you were already fixing.
 Everything the app could not make sense of is available to the UI as a warning
 list, for the banner described in the Work Mode spec.
 
+## Notification previews
+
+`[notifications].preview_always` lists chats whose desktop notifications show
+the chat title, sender and message preview even when Telegram's own preview
+setting or its passcode and screen-lock mirror would hide them. The default
+covers all bots and channels:
+
+```toml
+[notifications]
+preview_always = ["MAGIC_BOTS", "MAGIC_CHANNELS"]
+```
+
+Set `preview_always = []` to disable the exceptions. A present array replaces
+the defaults. It can contain either magic name and entries such as
+`"private:123"`, `"bot:456"`, `"group:789"` and `"channel:321"`. These are
+positive bare peer IDs, matched together with their chat type, so an ID in one
+type cannot match a chat of another type. `user` is accepted as an alias for
+`private`. The file is reloaded live, so the next notification uses the new
+list. Secret chats are not eligible for this desktop exception.
+
+This changes only the payload of notifications that already qualify for
+delivery. Work Mode and ordinary chat mutes still decide whether one is sent.
+Notification actions remain subject to the app's existing lock and preview
+rules. The operating system may separately hide previews on its lock screen.
+
 ## Schema
 
 `version` at the top of the file is the schema the file is written to. It is

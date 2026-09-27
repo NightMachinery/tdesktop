@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_local_cache.h"
 
 class History;
+class PeerData;
 
 namespace Data {
 class Session;
@@ -319,8 +320,10 @@ public:
 		bool hideMarkAsRead : 1 = false;
 		bool hideReplyButton : 1 = false;
 		bool spoilerLoginCode : 1 = false;
+		bool previewAlways : 1 = false;
 	};
 	[[nodiscard]] DisplayOptions getNotificationOptions(
+		not_null<PeerData*> peer,
 		HistoryItem *item,
 		Data::ItemNotificationType type) const;
 	[[nodiscard]] static TextWithEntities ComposeReactionEmoji(

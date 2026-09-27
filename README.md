@@ -86,7 +86,9 @@ TOML ([docs/purple/config.md][purple_config]). Its other fork defaults and the
 automatic text-replacement preferences are documented in
 [docs/purple/defaults.md][purple_defaults]. Local passcodes also accept the
 English key sequence entered with a Persian keyboard layout, as described in
-[docs/purple/passcode.md][purple_passcode].
+[docs/purple/passcode.md][purple_passcode]. Desktop notification preview
+exceptions for selected chats are configured in
+[docs/purple/config.md][purple_config].
 
 [//]: # (LINKS)
 [telegram]: https://telegram.org

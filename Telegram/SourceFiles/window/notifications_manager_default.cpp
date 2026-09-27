@@ -870,6 +870,7 @@ void Notification::updateNotifyDisplay() {
 	}
 
 	const auto options = manager()->getNotificationOptions(
+		_history->peer,
 		_item,
 		(_reaction.empty()
 			? Data::ItemNotificationType::Message
