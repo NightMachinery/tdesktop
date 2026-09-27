@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 #include "purple/purple_last_seen.h"
 #include "purple/purple_list_menu.h"
+#include "purple/purple_pinned_music.h"
 #include "purple/purple_preset_box.h"
 #include "menu/menu_mute.h"
 #include "menu/menu_ttl_validator.h"
@@ -322,6 +323,7 @@ private:
 	void addTogglePin();
 	void addToggleMuteSubmenu(bool addSeparator);
 	void addSupportInfo();
+	void addDownloadPinnedMusic();
 	void addInfo();
 	void addStoryArchive();
 	void addNewWindow(bool addSeparator = true);
@@ -1918,8 +1920,22 @@ void Filler::fillContextMenuActions() {
 	addDeleteTopic();
 }
 
+void Filler::addDownloadPinnedMusic() {
+	if (!_thread || _sublist) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto weak = base::make_weak(_thread);
+	_addAction(tr::lng_pinned_music_menu(tr::now), [=] {
+		if (const auto strong = weak.get()) {
+			Purple::ShowPinnedMusicBox(controller, strong);
+		}
+	}, &st::menuIconDownload);
+}
+
 void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
+	addDownloadPinnedMusic();
 	addCreateTopic();
 	addInfo();
 	addLastSeenPeek();
@@ -1974,6 +1990,7 @@ void Filler::fillProfileActions() {
 
 void Filler::fillRepliesActions() {
 	if (_topic) {
+		addDownloadPinnedMusic();
 		addInfo();
 		addManageTopic();
 	}

@@ -401,6 +401,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_pinned_unpin_all_sure" = "Do you want to unpin all messages?";
 "lng_pinned_hide_all_sure" = "Do you want to hide the pinned message bar? It will stay hidden until a new message is pinned.";
 "lng_pinned_hide_all_hide" = "Hide";
+"lng_pinned_music_menu" = "Download all pinned songs";
+"lng_pinned_music_title" = "Download pinned songs";
+"lng_pinned_music_before" = "Songs before each pinned song (0–20)";
+"lng_pinned_music_after" = "Songs after each pinned song (0–20)";
+"lng_pinned_music_album" = "Include the whole audio album";
+"lng_pinned_music_none" = "This chat has no pinned songs.";
+"lng_pinned_music_started#one" = "Downloading {count} song into Telegram's cache.";
+"lng_pinned_music_started#other" = "Downloading {count} songs into Telegram's cache.";
+"lng_pinned_music_failed" = "Could not finish loading pinned songs. Some downloads may have started.";
 
 "lng_edit_media_album_error" = "This file cannot be saved as a part of an album.";
 "lng_edit_media_invalid_file" = "Sorry, no way to use this file.";

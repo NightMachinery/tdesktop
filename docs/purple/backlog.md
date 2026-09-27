@@ -7,8 +7,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 
 - **Android notification preview exceptions:** shared core and desktop support
   are done; Android notification formatting is pending.
-- **Pinned music menu:** add “download all pinned songs” to both clients. Default
-  neighbor counts to `M=N=1` and enable album expansion by default.
+- **Pinned music menu:** desktop prefetches pinned songs into Telegram's cache
+  from the open-chat menu, with one music neighbor on each side and album
+  expansion by default. The Android action remains pending. See
+  [pinned_music.md](pinned_music.md).
 - **Per-chat download cache setting:** expose it from the chat menu. Semantics
   need clarification. Desktop has an automatic media download override; Android
   has no per-chat override.

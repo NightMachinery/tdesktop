@@ -1743,6 +1743,8 @@ PRIVATE
     purple/purple_list_menu.h
     purple/purple_peek.cpp
     purple/purple_peek.h
+    purple/purple_pinned_music.cpp
+    purple/purple_pinned_music.h
     purple/purple_preset_box.cpp
     purple/purple_preset_box.h
     purple/purple_readme.cpp
