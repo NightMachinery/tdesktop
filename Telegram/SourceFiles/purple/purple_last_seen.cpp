@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_changes.h"
 #include "data/data_lastseen_status.h"
 #include "data/data_peer_values.h"
@@ -43,6 +45,7 @@ namespace {
 // one that ran into the first.
 const auto kSeparator = QString::fromUtf8(" \xC2\xB7 ");
 const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
+constexpr auto kSkipPeekConfirmationPref = "purple-skip-last-seen-peek-confirmation";
 
 [[nodiscard]] const LastSeen &Config() {
 	return ActiveSettings().lastSeen;
@@ -382,6 +385,18 @@ void LastSeenPeek::restore() {
 	return QString();
 }
 
+void StartPeek(
+		not_null<Main::Session*> session,
+		not_null<UserData*> user,
+		std::shared_ptr<Ui::Show> show) {
+	if (RunningPeek) {
+		show->showToast(tr::lng_lastseen_peek_running(tr::now));
+		return;
+	}
+	RunningPeek = std::make_unique<LastSeenPeek>(session, user, show);
+	RunningPeek->start();
+}
+
 } // namespace
 
 LastSeenReason ReasonForUser(not_null<UserData*> user) {
@@ -395,6 +410,15 @@ LastSeenReason ReasonForUser(not_null<UserData*> user) {
 bool CanPeekLastSeen(not_null<UserData*> user) {
 	return Config().trade
 		&& (ReasonForUser(user) == LastSeenReason::ByMe);
+}
+
+bool SkipLastSeenPeekConfirmation() {
+	return Core::App().settings().readPref<bool>(kSkipPeekConfirmationPref);
+}
+
+void SetSkipLastSeenPeekConfirmation(bool skip) {
+	Core::App().settings().writePref<bool>(kSkipPeekConfirmationPref, skip);
+	Core::App().saveSettingsDelayed();
 }
 
 LastSeenText LastSeenNoteFor(
@@ -471,6 +495,10 @@ void ShowLastSeenPeekBox(
 			peer,
 			int64(now),
 			Config().tradeRememberSeconds).has_value();
+	if ((left <= 0) && SkipLastSeenPeekConfirmation()) {
+		StartPeek(session, user, show);
+		return;
+	}
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(tr::lng_lastseen_peek_title());
 
@@ -496,32 +524,25 @@ void ShowLastSeenPeekBox(
 				st::boxRowPadding)
 			: nullptr;
 
-		const auto never = container->add(
+		const auto skipConfirmation = container->add(
 			object_ptr<Ui::Checkbox>(
 				container,
-				tr::lng_lastseen_peek_disable(tr::now),
-				false,
+				tr::lng_lastseen_peek_skip_confirmation(tr::now),
+				SkipLastSeenPeekConfirmation(),
 				st::defaultCheckbox),
 			st::boxRowPadding);
 		container->add(
 			object_ptr<Ui::FlatLabel>(
 				container,
-				tr::lng_lastseen_peek_disable_about(),
+				tr::lng_lastseen_peek_skip_confirmation_about(),
 				st::boxDividerLabel),
 			st::boxRowPadding);
 
 		const auto apply = [=] {
-			if (!never->checked()) {
-				return;
+			const auto skip = skipConfirmation->checked();
+			if (skip != SkipLastSeenPeekConfirmation()) {
+				SetSkipLastSeenPeekConfirmation(skip);
 			}
-			WriteSettings([=](const QString &text) {
-				return SetTableBool(
-					text,
-					SettingsFilePath(),
-					u"last_seen"_q,
-					u"trade_p"_q,
-					false);
-			}, u"Last Seen Peek"_q);
 		};
 
 		const auto share = box->addButton(
@@ -531,13 +552,7 @@ void ShowLastSeenPeekBox(
 			[=] {
 				apply();
 				box->closeBox();
-				if (RunningPeek) {
-					show->showToast(
-						tr::lng_lastseen_peek_running(tr::now));
-					return;
-				}
-				RunningPeek = std::make_unique<LastSeenPeek>(session, user, show);
-				RunningPeek->start();
+				StartPeek(session, user, show);
 			});
 
 		// One peek per person per `trade_cooldown', counted from the read

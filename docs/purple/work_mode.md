@@ -2054,8 +2054,12 @@ rather than successes.
 `trade_p` defaults to true. Explicit `trade_p = false` disables Last Seen Peek,
 removes its `Peek Last Seen` suffix, and removes every tap, button, and menu
 action. A still-valid remembered exact read remains visible but inert. The
-sheet's **Disable Last Seen Peek everywhere** checkbox writes this same setting
-when Peek or Cancel closes the sheet.
+sheet's **Skip confirmation for all future peeks on this device** checkbox
+saves a separate local preference when Peek or Cancel closes the sheet. It
+leaves `trade_p` on and makes the next eligible peek start directly once its
+cooldown has ended. During a cooldown, the sheet still shows the remaining
+wait. Settings > Advanced > Purple > **Confirm before Last Seen Peek** restores
+the confirmation, which is on by default.
 
 Upstream's own one-tap control is gone on both clients. Telegram puts a small
 button beside a coarse last seen - `when?` on the desktop - and confirming it

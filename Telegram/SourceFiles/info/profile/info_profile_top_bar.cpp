@@ -3096,9 +3096,8 @@ void TopBar::setupShowLastSeen(
 	// disables peeking. With peeking off the fork has nothing to put
 	// here: it will not fall back to upstream's one tap, and last-seen privacy
 	// is then changed in Settings > Privacy, deliberately, where it can be
-	// changed back. The sheet's global disable checkbox writes that
-	// switch while this profile is still on screen behind it, which is why the
-	// switch is read from SettingsChanges() and not once on construction.
+	// changed back. The switch is read from SettingsChanges() so a change in
+	// Purple settings updates this profile while it is still on screen.
 	//
 	// Premium is not part of it. Upstream's button was a promo - buy Premium
 	// or open your last seen to everybody - and this one is neither, so a
