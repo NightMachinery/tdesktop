@@ -20,8 +20,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   already matches normal behavior.
 - **Contacts filter:** the empty state is misleading and needs correction.
 - **Android passcode package:** Persian-layout passcode input is implemented in
-  both clients. A signed Android APK for `89376627`, including the passcode fix,
-  is pending overnight.
+  both clients. A signed Android APK for `a61b6ae3`, including the passcode,
+  badge refresh, and clarified Peek wording, is pending overnight.
 
 ## Retired
 
