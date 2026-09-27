@@ -2122,6 +2122,8 @@ nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
     purple/purple_engine.cpp
     purple/purple_engine.h
+    purple/purple_passcode.cpp
+    purple/purple_passcode.h
     purple/purple_screentime.cpp
     purple/purple_screentime.h
     purple/purple_settings.cpp
