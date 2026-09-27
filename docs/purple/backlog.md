@@ -15,12 +15,13 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The current Android APK at `85ec9cff` includes the
   checkbox but predates the Persian-layout passcode fix. An account-backed test
-  of the eligible Peek UI is
-  still needed. Android badge refresh on open and close transitions remains
-  pending; mute behavior already matches normal behavior.
+  of the eligible Peek UI is still needed. Android badge refresh on open and
+  close transitions is committed in `89376627` but awaits an APK; mute behavior
+  already matches normal behavior.
 - **Contacts filter:** the empty state is misleading and needs correction.
 - **Android passcode package:** Persian-layout passcode input is implemented in
-  both clients. A new signed Android APK for `883f0189` is pending overnight.
+  both clients. A signed Android APK for `89376627`, including the passcode fix,
+  is pending overnight.
 
 ## Retired
 
