@@ -12,6 +12,9 @@ This is the complete source code and the build instructions for the official [Te
 
 The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
 
+This Purple fork adds a [pinned music cache action](docs/purple/pinned_music.md)
+to the open-chat menu.
+
 ## Supported systems
 
 The latest version is available for
