@@ -41,8 +41,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   source `1593b8d1`. The signed `bce320af` candidate showed the effective
   default duration in the chat menu, changed to a per-chat Forever exception,
   and returned to the default after deleting the exception. Long-term cache
-  expiry still needs runtime verification. Desktop remains global-only for
-  cache retention; per-chat desktop retention is deferred.
+  expiry still needs runtime verification. An audit found that cleanup needs a
+  file-to-chat record to apply the exception, and the size limit may evict
+  finite-retention files early. Desktop remains global-only for cache
+  retention; per-chat desktop retention is deferred.
   See [keep_media.md](keep_media.md) for the current scope.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
