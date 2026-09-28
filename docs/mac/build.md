@@ -816,6 +816,12 @@ dialog", not as a bug in the window. The window's own controls are reachable
 through accessibility (`hs.axuielement`; the button reports its frame), which
 is the way to find where to click without reading pixels.
 
+Do not set the Qt phone-login field's `AXValue` directly as a fallback for
+typing. On 2026-09-28 that Accessibility setter entered
+`QLineEdit::textChanged`, triggered the `sandbox.cpp:602` nested-loop assertion,
+and crashed only the isolated test instance. Check focus and blocking dialogs
+before retrying normal input; do not copy a daily-use profile to bypass login.
+
 **Whether the deployed bundle still has Full Disk Access, without opening
 System Settings.** An ad-hoc re-sign was expected to be able to drop it, and
 the bundle's own log is the cheapest way to ask - of an instance launched the
