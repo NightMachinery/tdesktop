@@ -30,11 +30,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.
   Mute behavior already matches normal behavior.
-- **Android passcode verification:** Persian-layout passcode input is
-  implemented in both clients and included in the release from Android source
-  `5e428532`, built with core `e7bf8544`. Desktop passcode-lock launch was
-  tested; Android device unlock runtime behavior still needs focused
-  verification.
+
+## Verified
+
+- **Persian-layout passcode:** the Android APK from source `5e428532`, built
+  with core `e7bf8544`, unlocked a text passcode set as `qwer` with Persian
+  keyboard input `ضصثق`. The exact ASCII passcode also unlocked it. The test
+  account remained logged in after Passcode Lock was turned off. Desktop
+  passcode-lock launch was also tested. See [passcode.md](passcode.md).
 
 ## Retired
 
