@@ -24,11 +24,14 @@ rewrites the payload will omit the unknown tail and discard the overrides.
 For enforcement, associate each cached key with every chat that references it
 and both cache database kinds. A shared key should expire according to the
 longest applicable time limit among its owners; an unknown owner uses the
-global limit. `Never` is the longest limit. The existing size cap may still
-evict any cached entry. Externally saved files must not be affected. Existing
-cache entries have no recoverable chat owner and must keep the global rule
-until ownership is observed. Removing a chat or message should remove its
-ownership without removing an entry still used elsewhere.
+global limit only when no chat owner is known. A separate non-chat reference
+uses the global limit when that reference can be identified explicitly; a
+cache write alone does not establish one. `Never` is the longest limit. The
+existing size cap may still evict any cached entry. Externally saved files
+must not be affected. Existing cache entries have no recoverable chat owner
+and must keep the global rule until ownership is observed. Removing a chat or
+message should remove its ownership without removing an entry still used
+elsewhere.
 
 Implementation must change both stale-entry selection and the delayed prune
 schedule in `storage_cache_database_object.cpp`. Merely skipping entries in
