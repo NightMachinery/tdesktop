@@ -9,21 +9,23 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   are done; Android notification formatting is pending.
 - **Pinned music menu:** desktop prefetches pinned songs into Telegram's cache
   from the open-chat menu, with one music neighbor on each side and album
-  expansion by default. The Android action remains pending. See
+  expansion by default. The desktop source is committed and pushed, but the
+  installed daily-use app is still older. The Android action remains pending. See
   [pinned_music.md](pinned_music.md).
 - **Per-chat download cache setting:** expose it from the chat menu. Semantics
   need clarification. Desktop has an automatic media download override; Android
   has no per-chat override.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
-  default in both clients. The current Android APK at `85ec9cff` includes the
-  checkbox but predates the Persian-layout passcode fix. An account-backed test
-  of the eligible Peek UI is still needed. Android badge refresh on open and
-  close transitions is committed in `89376627` but awaits an APK; mute behavior
-  already matches normal behavior.
+  default in both clients. Android APK `ef73312d0e50c0b561fb264ac4b3556d9835be7a`
+  includes the checkbox, badge refresh source, and Persian-layout passcode
+  mapping. An account-backed test of the eligible Peek UI is still needed. The
+  badge refresh runtime behavior has not been independently verified; mute
+  behavior already matches normal behavior.
 - **Contacts filter:** the empty state is misleading and needs correction.
-- **Android passcode package:** Persian-layout passcode input is implemented in
-  both clients. A signed Android APK for `a61b6ae3`, including the passcode,
-  badge refresh, and clarified Peek wording, is pending overnight.
+- **Android passcode verification:** Persian-layout passcode input is
+  implemented in both clients and included in the delivered release-signed APK
+  above, built with core `e7bf8544`. Device unlock runtime behavior has not been
+  independently verified.
 
 ## Retired
 
