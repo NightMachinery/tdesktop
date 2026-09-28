@@ -29,16 +29,11 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   passed an app launch smoke test, but its menu and cache behavior still need
   runtime verification.
   See [pinned_music.md](pinned_music.md).
-- **Per-chat Keep Media:** the user clarified that the chat-menu setting means
-  cache retention, not automatic download. Android already has per-chat
-  retention exceptions; its chat-menu display and editor are committed in
-  Android source `1593b8d1` and await an updated APK. Desktop currently exposes
-  global cache retention and a separate per-peer automatic-download override,
-  but no matching per-chat retention setting. Its cache records a media key,
-  category tag, and access time without a chat identifier. A desktop per-chat
-  retention rule therefore needs ownership tracking, including a policy for
-  media shared across chats, before the menu can show an enforceable value.
-  See [keep_media.md](keep_media.md) for the implementation contract.
+- **Per-chat Keep Media:** the chat-menu request means local cache retention,
+  not automatic download. Android's per-chat retention editor is committed in
+  source `1593b8d1` and awaits an updated APK and runtime check. Desktop remains
+  global-only for cache retention; per-chat desktop retention is deferred.
+  See [keep_media.md](keep_media.md) for the current scope.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.

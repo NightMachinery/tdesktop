@@ -30,7 +30,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "settings/settings_credits_graphics.h" // ShowRefundInfoBox.
 #include "storage/file_upload.h"
-#include "storage/storage_account.h"
 #include "storage/storage_shared_media.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
@@ -2259,7 +2258,6 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	} else {
 		removeFromSharedMediaIndex();
 		if (mediaCheck == MediaCheckResult::Unsupported) {
-			_history->session().local().removeCacheOwnership(fullId());
 			_media = nullptr;
 			_flags &= ~MessageFlag::HasPostAuthor;
 			_flags |= MessageFlag::Legacy;
@@ -2366,7 +2364,6 @@ void HistoryItem::applyChanges(not_null<Data::Story*> story) {
 	Expects(_flags & MessageFlag::StoryItem);
 	Expects(StoryIdFromMsgId(id) == story->id());
 
-	_history->session().local().removeCacheOwnership(fullId());
 	_media = nullptr;
 	setStoryFields(story);
 
@@ -2433,7 +2430,6 @@ void HistoryItem::applyEdition(const MTPDmessageService &message) {
 					true);
 			}
 		}
-		_history->session().local().removeCacheOwnership(fullId());
 		_media = nullptr;
 		_media = std::make_unique<Data::MediaCall>(this, info);
 		addToSharedMediaIndex();
@@ -2615,7 +2611,6 @@ void HistoryItem::updateSentContent(
 		}
 	}
 	if (mediaCheck == MediaCheckResult::Unsupported) {
-		_history->session().local().removeCacheOwnership(fullId());
 		_media = nullptr;
 	} else if (_flags & MessageFlag::FromInlineBot) {
 		if (!media || !_media || !_media->updateInlineResultMedia(*media)) {
@@ -2943,9 +2938,6 @@ void HistoryItem::setRealId(MsgId newId) {
 	Expects(IsClientMsgId(id));
 
 	const auto oldId = std::exchange(id, newId);
-	_history->session().local().moveCacheOwnership(
-		{ _history->peer->id, oldId },
-		fullId());
 	_flags &= ~(MessageFlag::BeingSent | MessageFlag::Local);
 	if (textAppearing()) {
 		markTextAppearingStarted();
@@ -5159,9 +5151,6 @@ void HistoryItem::refreshMedia(const MTPMessageMedia *media) {
 			return;
 		}
 	}
-	if (was) {
-		_history->session().local().removeCacheOwnership(fullId());
-	}
 	_media = nullptr;
 	if (media) {
 		setMedia(*media);
@@ -5635,27 +5624,7 @@ void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
 }
 
 void HistoryItem::setMedia(const MTPMessageMedia &media) {
-	const auto oldPhoto = _media ? _media->photo() : nullptr;
-	const auto oldDocument = _media ? _media->document() : nullptr;
-	if (_media) {
-		_history->session().local().removeCacheOwnership(fullId());
-	}
 	_media = CreateMedia(this, media);
-	if (_media && media.type() == mtpc_messageMediaPhoto) {
-		if (const auto photo = _media->photo()) {
-			if (oldPhoto == photo) {
-				_history->owner().registerPhotoItem(photo, this);
-			}
-			_history->owner().observePhotoItemCache(photo, this);
-		}
-	} else if (_media && media.type() == mtpc_messageMediaDocument) {
-		if (const auto document = _media->document()) {
-			if (oldDocument == document) {
-				_history->owner().registerDocumentItem(document, this);
-			}
-			_history->owner().observeDocumentItemCache(document, this);
-		}
-	}
 	checkStoryForwardInfo();
 	checkBuyButton();
 }

@@ -42,9 +42,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webview/webview_interface.h"
 #include "window/themes/window_theme.h"
 
-#include <QtCore/QFileInfo>
-#include <algorithm>
-
 namespace Storage {
 namespace {
 
@@ -54,43 +51,6 @@ using Database = Cache::Database;
 constexpr auto kDelayedWriteTimeout = crl::time(1000);
 constexpr auto kWriteSearchSuggestionsDelay = 5 * crl::time(1000);
 constexpr auto kMaxSavedPlaybackPositions = 256;
-constexpr auto kCacheOwnershipWriteDelay = 30 * crl::time(1000);
-constexpr auto kCacheOwnershipVersion = quint32(1);
-constexpr auto kCacheOwnershipMaxBytes = 8 * 1024 * 1024;
-constexpr auto kCacheOwnershipMaxMessages = 100'000;
-constexpr auto kCacheOwnershipMaxLinks = 250'000;
-constexpr auto kCacheOwnershipMaxKeysPerMessage = 16;
-constexpr auto kCacheOwnershipHeaderBytes = 4 + 8 + 1 + 4 + 4;
-constexpr auto kCacheOwnershipMessageBytes = 8 + 8 + 4;
-constexpr auto kCacheOwnershipKeyBytes = 8 + 8;
-const auto kCacheOwnershipName = u"cache_ownership"_q;
-const auto kCacheOwnershipStateName = u"cache_ownership_state"_q;
-
-[[nodiscard]] bool ValidCacheOwnershipMessage(FullMsgId message) {
-	return message.msg
-		&& (peerIsUser(message.peer)
-			|| peerIsChat(message.peer)
-			|| peerIsChannel(message.peer));
-}
-
-[[nodiscard]] uint64 CacheOwnershipBytes(uint64 messages, uint64 links) {
-	return kCacheOwnershipHeaderBytes
-		+ messages * kCacheOwnershipMessageBytes
-		+ links * kCacheOwnershipKeyBytes;
-}
-
-[[nodiscard]] bool CacheOwnershipFileWithinLimit(
-		const QString &basePath,
-		const QString &name,
-		qint64 limit) {
-	for (const auto suffix : { 's', '0', '1' }) {
-		const auto file = QFileInfo(basePath + name + suffix);
-		if (file.exists() && file.size() > limit) {
-			return false;
-		}
-	}
-	return true;
-}
 
 constexpr auto kStickersVersionTag = quint32(-1);
 constexpr auto kStickersSerializeVersion = 4;
@@ -223,17 +183,13 @@ Account::Account(not_null<Main::Account*> owner, const QString &dataName)
 , _writeMapTimer([=] { writeMap(); })
 , _writePrefsTimer([=] { writePrefs(); })
 , _writeLocationsTimer([=] { writeLocations(); })
-, _writeSearchSuggestionsTimer([=] { writeSearchSuggestions(); })
-, _writeCacheOwnershipTimer([=] { writeCacheOwnership(); }) {
+, _writeSearchSuggestionsTimer([=] { writeSearchSuggestions(); }) {
 }
 
 Account::~Account() {
 	Expects(!_writeSearchSuggestionsTimer.isActive());
 
 	if (_localKey) {
-		if (_cacheOwnershipDirty) {
-			writeCacheOwnership();
-		}
 		if (_prefsChanged) {
 			writePrefs();
 		}
@@ -241,350 +197,6 @@ Account::~Account() {
 			writeMap();
 		}
 	}
-}
-
-void Account::readCacheOwnership() {
-	_cacheOwnership.clear();
-	_cacheOwnershipLinks = 0;
-	_cacheOwnershipGeneration = 0;
-	_cacheOwnershipUncertain = true;
-	_cacheOwnershipDirty = false;
-
-	if (!CacheOwnershipFileWithinLimit(
-			_basePath,
-			kCacheOwnershipName,
-			kCacheOwnershipMaxBytes + 4096)
-		|| !CacheOwnershipFileWithinLimit(
-			_basePath,
-			kCacheOwnershipStateName,
-			4096)) {
-		return;
-	}
-	FileReadDescriptor snapshot;
-	if (!ReadEncryptedFile(
-			snapshot,
-			kCacheOwnershipName,
-			_basePath,
-			_localKey)
-		|| snapshot.data.size() > kCacheOwnershipMaxBytes + 4) {
-		return;
-	}
-
-	auto version = quint32(0);
-	auto generation = quint64(0);
-	auto uncertain = quint8(1);
-	auto messages = quint32(0);
-	auto links = quint32(0);
-	snapshot.stream >> version >> generation >> uncertain >> messages >> links;
-	if (!CheckStreamStatus(snapshot.stream)
-		|| version != kCacheOwnershipVersion
-		|| uncertain > 1
-		|| messages > kCacheOwnershipMaxMessages
-		|| links > kCacheOwnershipMaxLinks
-		|| CacheOwnershipBytes(messages, links)
-			!= uint64(snapshot.data.size() - 4)) {
-		return;
-	}
-
-	auto parsed = base::flat_map<FullMsgId, std::vector<Cache::Key>>();
-	auto parsedLinks = quint32(0);
-	auto previous = FullMsgId();
-	for (auto i = quint32(0); i != messages; ++i) {
-		auto peer = quint64(0);
-		auto msg = qint64(0);
-		auto count = quint32(0);
-		snapshot.stream >> peer >> msg >> count;
-		const auto id = FullMsgId(DeserializePeerId(peer), MsgId(msg));
-		if (!CheckStreamStatus(snapshot.stream)
-			|| !ValidCacheOwnershipMessage(id)
-			|| SerializePeerId(id.peer) != peer
-			|| (i && !(previous < id))
-			|| !count
-			|| count > kCacheOwnershipMaxKeysPerMessage
-			|| count > links - parsedLinks) {
-			return;
-		}
-		auto keys = std::vector<Cache::Key>();
-		keys.reserve(count);
-		for (auto j = quint32(0); j != count; ++j) {
-			auto high = quint64(0);
-			auto low = quint64(0);
-			snapshot.stream >> high >> low;
-			const auto key = Cache::Key{ high, low };
-			if (!CheckStreamStatus(snapshot.stream)
-				|| !key
-				|| (!keys.empty() && !(keys.back() < key))) {
-				return;
-			}
-			keys.push_back(key);
-		}
-		parsed.emplace(id, std::move(keys));
-		parsedLinks += count;
-		previous = id;
-	}
-	if (parsedLinks != links || !snapshot.stream.atEnd()) {
-		return;
-	}
-
-	_cacheOwnership = std::move(parsed);
-	_cacheOwnershipLinks = links;
-	_cacheOwnershipGeneration = generation;
-	_cacheOwnershipUncertain = (uncertain != 0);
-
-	FileReadDescriptor state;
-	auto stateVersion = quint32(0);
-	auto stateGeneration = quint64(0);
-	auto dirty = quint8(1);
-	if (!ReadEncryptedFile(
-			state,
-			kCacheOwnershipStateName,
-			_basePath,
-			_localKey)) {
-		_cacheOwnershipUncertain = true;
-		return;
-	}
-	state.stream >> stateVersion >> stateGeneration >> dirty;
-	if (!CheckStreamStatus(state.stream)
-		|| !state.stream.atEnd()
-		|| stateVersion != kCacheOwnershipVersion
-		|| stateGeneration != generation
-		|| dirty != 0) {
-		_cacheOwnershipUncertain = true;
-	}
-}
-
-bool Account::writeCacheOwnershipState(bool dirty) {
-	EncryptedDescriptor data(sizeof(quint32) + sizeof(quint64) + sizeof(quint8));
-	data.stream << kCacheOwnershipVersion
-		<< quint64(_cacheOwnershipGeneration)
-		<< quint8(dirty);
-	{
-		FileWriteDescriptor file(kCacheOwnershipStateName, _basePath, true);
-		file.writeEncrypted(data, _localKey);
-	}
-	FileReadDescriptor check;
-	auto version = quint32(0);
-	auto generation = quint64(0);
-	auto storedDirty = quint8(0);
-	if (!ReadEncryptedFile(
-			check,
-			kCacheOwnershipStateName,
-			_basePath,
-			_localKey)) {
-		return false;
-	}
-	check.stream >> version >> generation >> storedDirty;
-	return CheckStreamStatus(check.stream)
-		&& check.stream.atEnd()
-		&& version == kCacheOwnershipVersion
-		&& generation == _cacheOwnershipGeneration
-		&& storedDirty == quint8(dirty);
-}
-
-bool Account::markCacheOwnershipDirty() {
-	if (!_localKey) {
-		return false;
-	}
-	if (!_cacheOwnershipDirty && !writeCacheOwnershipState(true)) {
-		_cacheOwnershipUncertain = true;
-		return false;
-	}
-	_cacheOwnershipDirty = true;
-	_writeCacheOwnershipTimer.callOnce(kCacheOwnershipWriteDelay);
-	return true;
-}
-
-void Account::writeCacheOwnership() {
-	if (!_cacheOwnershipDirty || !_localKey) {
-		return;
-	}
-	const auto size = CacheOwnershipBytes(
-		_cacheOwnership.size(),
-		_cacheOwnershipLinks);
-	if (size > kCacheOwnershipMaxBytes) {
-		_cacheOwnershipUncertain = true;
-		return;
-	}
-	const auto generation = _cacheOwnershipGeneration + 1;
-	EncryptedDescriptor data{ uint32(size) };
-	data.stream << kCacheOwnershipVersion
-		<< quint64(generation)
-		<< quint8(_cacheOwnershipUncertain)
-		<< quint32(_cacheOwnership.size())
-		<< quint32(_cacheOwnershipLinks);
-	for (const auto &[id, keys] : _cacheOwnership) {
-		data.stream << SerializePeerId(id.peer)
-			<< qint64(id.msg.bare)
-			<< quint32(keys.size());
-		for (const auto &key : keys) {
-			data.stream << quint64(key.high) << quint64(key.low);
-		}
-	}
-	if (data.stream.status() != QDataStream::Ok
-		|| data.buffer.pos() != qint64(size + sizeof(quint32))) {
-		_cacheOwnershipUncertain = true;
-		return;
-	}
-	{
-		FileWriteDescriptor file(kCacheOwnershipName, _basePath, true);
-		file.writeEncrypted(data, _localKey);
-	}
-	FileReadDescriptor check;
-	auto version = quint32(0);
-	auto storedGeneration = quint64(0);
-	if (!ReadEncryptedFile(
-			check,
-			kCacheOwnershipName,
-			_basePath,
-			_localKey)) {
-		_cacheOwnershipUncertain = true;
-		return;
-	}
-	check.stream >> version >> storedGeneration;
-	if (!CheckStreamStatus(check.stream)
-		|| version != kCacheOwnershipVersion
-		|| storedGeneration != generation) {
-		_cacheOwnershipUncertain = true;
-		return;
-	}
-	_cacheOwnershipGeneration = generation;
-	_cacheOwnershipDirty = false;
-	if (!writeCacheOwnershipState(false)) {
-		_cacheOwnershipUncertain = true;
-	}
-}
-
-void Account::observeCacheOwnership(
-		FullMsgId message,
-		const std::vector<Cache::Key> &keys) {
-	if (!ValidCacheOwnershipMessage(message)) {
-		return;
-	}
-	auto normalized = keys;
-	normalized.erase(
-		std::remove_if(
-			normalized.begin(),
-			normalized.end(),
-			[](const Cache::Key &key) { return !key; }),
-		normalized.end());
-	std::sort(normalized.begin(), normalized.end());
-	normalized.erase(
-		std::unique(normalized.begin(), normalized.end()),
-		normalized.end());
-	if (normalized.empty()
-		|| normalized.size() > kCacheOwnershipMaxKeysPerMessage) {
-		if (!normalized.empty()
-			&& !_cacheOwnershipUncertain
-			&& markCacheOwnershipDirty()) {
-			_cacheOwnershipUncertain = true;
-		}
-		return;
-	}
-	const auto i = _cacheOwnership.find(message);
-	if (i != _cacheOwnership.end() && i->second == normalized) {
-		return;
-	}
-	const auto messages = _cacheOwnership.size()
-		+ (i == _cacheOwnership.end());
-	const auto links = _cacheOwnershipLinks
-		- (i == _cacheOwnership.end() ? 0 : i->second.size())
-		+ normalized.size();
-	if (messages > kCacheOwnershipMaxMessages
-		|| links > kCacheOwnershipMaxLinks
-		|| CacheOwnershipBytes(messages, links)
-			> kCacheOwnershipMaxBytes) {
-		if (!_cacheOwnershipUncertain && markCacheOwnershipDirty()) {
-			_cacheOwnershipUncertain = true;
-		}
-		return;
-	}
-	if (!markCacheOwnershipDirty()) {
-		return;
-	}
-	_cacheOwnershipLinks = links;
-	if (i == _cacheOwnership.end()) {
-		_cacheOwnership.emplace(message, std::move(normalized));
-	} else {
-		i->second = std::move(normalized);
-	}
-}
-
-void Account::removeCacheOwnership(FullMsgId message) {
-	const auto i = _cacheOwnership.find(message);
-	if (i == _cacheOwnership.end() || !markCacheOwnershipDirty()) {
-		return;
-	}
-	_cacheOwnershipLinks -= i->second.size();
-	_cacheOwnership.erase(i);
-}
-
-void Account::removeNonChannelCacheOwnership(MsgId message) {
-	auto matches = std::vector<FullMsgId>();
-	for (const auto &[id, keys] : _cacheOwnership) {
-		if (id.msg == message && !peerIsChannel(id.peer)) {
-			matches.push_back(id);
-		}
-	}
-	for (const auto &id : matches) {
-		removeCacheOwnership(id);
-	}
-}
-
-void Account::removePeerServerCacheOwnership(PeerId peerId) {
-	const auto first = _cacheOwnership.lower_bound(
-		FullMsgId(peerId, MsgId(1)));
-	auto last = first;
-	auto links = size_type(0);
-	while (last != _cacheOwnership.end()
-		&& last->first.peer == peerId
-		&& IsServerMsgId(last->first.msg)) {
-		links += last->second.size();
-		++last;
-	}
-	if (first == last || !markCacheOwnershipDirty()) {
-		return;
-	}
-	_cacheOwnershipLinks -= links;
-	_cacheOwnership.erase(first, last);
-}
-
-void Account::moveCacheOwnership(FullMsgId from, FullMsgId to) {
-	if (from == to || !ValidCacheOwnershipMessage(to)) {
-		return;
-	}
-	const auto i = _cacheOwnership.find(from);
-	if (i == _cacheOwnership.end()) {
-		return;
-	}
-	auto keys = i->second;
-	const auto existing = _cacheOwnership.find(to);
-	if (existing != _cacheOwnership.end()) {
-		keys.insert(keys.end(), existing->second.begin(), existing->second.end());
-	}
-	std::sort(keys.begin(), keys.end());
-	keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-	const auto j = _cacheOwnership.find(to);
-	const auto links = _cacheOwnershipLinks
-		- i->second.size()
-		- (j == _cacheOwnership.end() ? 0 : j->second.size())
-		+ keys.size();
-	const auto messages = _cacheOwnership.size()
-		- (j != _cacheOwnership.end());
-	if (keys.size() > kCacheOwnershipMaxKeysPerMessage
-		|| links > kCacheOwnershipMaxLinks
-		|| CacheOwnershipBytes(messages, links)
-			> kCacheOwnershipMaxBytes) {
-		if (!_cacheOwnershipUncertain && markCacheOwnershipDirty()) {
-			_cacheOwnershipUncertain = true;
-		}
-		return;
-	}
-	if (!markCacheOwnershipDirty()) {
-		return;
-	}
-	_cacheOwnership.erase(i);
-	_cacheOwnershipLinks = links;
-	_cacheOwnership[to] = std::move(keys);
 }
 
 QString Account::tempDirectory() const {
@@ -619,7 +231,6 @@ void Account::startAdded(MTP::AuthKeyPtr localKey) {
 	Expects(localKey != nullptr);
 
 	_localKey = std::move(localKey);
-	readCacheOwnership();
 	clearLegacyFiles();
 }
 
@@ -667,14 +278,6 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"maps",
 		"configs",
 	};
-	for (const auto &name : {
-		kCacheOwnershipName,
-		kCacheOwnershipStateName,
-	}) {
-		result.emplace(name + '0');
-		result.emplace(name + '1');
-		result.emplace(name + 's');
-	}
 	const auto push = [&](FileKey key) {
 		if (!key) {
 			return;
@@ -966,7 +569,6 @@ Account::ReadMapResult Account::readMapWith(
 			_legacyBackgroundKeyNight);
 	}
 
-	readCacheOwnership();
 	auto stored = readSessionSettings();
 	readMtpData();
 
@@ -1163,13 +765,6 @@ void Account::writeMap() {
 
 void Account::reset() {
 	_writeSearchSuggestionsTimer.cancel();
-	_writeCacheOwnershipTimer.cancel();
-	if (markCacheOwnershipDirty()) {
-		_cacheOwnership.clear();
-		_cacheOwnershipLinks = 0;
-		_cacheOwnershipUncertain = true;
-		writeCacheOwnership();
-	}
 
 	auto names = collectGoodNames();
 	_draftsMap.clear();
@@ -2274,23 +1869,6 @@ void Account::updateCacheSettings(
 	_cacheBigFileTotalSizeLimit = updateBig.totalSizeLimit;
 	_cacheBigFileTotalTimeLimit = updateBig.totalTimeLimit;
 	writeSessionSettings();
-}
-
-std::optional<size_type> Account::keepMediaLimit(PeerId peerId) const {
-	const auto settings = _owner->getSessionSettings();
-	return settings
-		? settings->keepMediaLimit(peerId)
-		: std::nullopt;
-}
-
-void Account::setKeepMediaLimit(
-		PeerId peerId,
-		std::optional<size_type> limit) {
-	const auto settings = _owner->getSessionSettings();
-	Expects(settings != nullptr);
-	if (settings->setKeepMediaLimit(peerId, limit)) {
-		writeSessionSettings();
-	}
 }
 
 QString Account::cacheBigFilePath() const {
