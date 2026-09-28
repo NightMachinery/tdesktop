@@ -22,7 +22,8 @@ with whole-album inclusion checked. A run in a large test channel showed 115
 pinned messages and hundreds of cache files, but 143 transfers ended with
 `RETRY_LIMIT`; the old toast reported only how many songs were queued. Source
 work now limits concurrency, backs off and retries these failures, and adds
-visible completion and failure counts. No APK with that change has been built
-or tested yet, so the transfer fix is unverified. The desktop implementation is
-installed in the daily-use app and has passed an app launch smoke test; its
-menu and cache behavior have not yet been runtime verified.
+visible completion and failure counts in Android source `0196012c`. No APK with
+that change has been built or tested yet, so the transfer fix is unverified.
+The desktop implementation is installed in the daily-use app and has passed
+an app launch smoke test; its menu and cache behavior have not yet been
+runtime verified.

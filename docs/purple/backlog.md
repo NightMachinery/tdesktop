@@ -15,16 +15,17 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   before and after, with whole-album inclusion checked. A large-channel Android
   run reached the pinned songs but exposed 143 failed cache transfers reported
   as `RETRY_LIMIT` while the UI only said they were queued. Bounded transfers,
-  retries, and a progress bar are under source review; no updated APK has been
-  built. The desktop change is installed in the daily-use app and passed an app
-  launch smoke test, but its menu and cache behavior still need runtime
-  verification. See [pinned_music.md](pinned_music.md).
+  retries, and a progress bar are committed in Android source `0196012c`; an
+  updated APK and runtime retest are pending. The desktop change is installed
+  in the daily-use app and passed an app launch smoke test, but its menu and
+  cache behavior still need runtime verification. See
+  [pinned_music.md](pinned_music.md).
 - **Per-chat Keep Media:** the user clarified that the chat-menu setting means
   cache retention, not automatic download. Android already has per-chat
-  retention exceptions; its chat-menu display and editor are under source
-  review. Desktop currently exposes global cache retention and a separate
-  per-peer automatic-download override, but no matching per-chat retention
-  setting.
+  retention exceptions; its chat-menu display and editor are committed in
+  Android source `1593b8d1` and await an updated APK. Desktop currently exposes
+  global cache retention and a separate per-peer automatic-download override,
+  but no matching per-chat retention setting.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.
