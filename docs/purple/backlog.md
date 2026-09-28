@@ -29,6 +29,7 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   category tag, and access time without a chat identifier. A desktop per-chat
   retention rule therefore needs ownership tracking, including a policy for
   media shared across chats, before the menu can show an enforceable value.
+  See [keep_media.md](keep_media.md) for the implementation contract.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.
