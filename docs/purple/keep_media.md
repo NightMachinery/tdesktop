@@ -8,6 +8,8 @@ editor is committed in Android source `1593b8d1`. The signed `bce320af`
 candidate showed the effective **1 week (default)** menu label, changed it to
 **Forever (this chat)** after choosing Never, and restored the default label
 after Delete Exception. Cache expiry over time has not been runtime verified.
+The final signed APK from source `3559ef67` installed with the test account
+intact and still showed the Keep Media chat-menu action.
 
 Desktop continues to use the global cache retention limit in Local Storage
 settings. It has no per-chat Keep Media setting or policy enforcement. Desktop
