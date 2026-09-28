@@ -115,6 +115,8 @@ public:
 	void updateCacheSettings(
 		Cache::Database::SettingsUpdate &update,
 		Cache::Database::SettingsUpdate &updateBig);
+	[[nodiscard]] std::optional<size_type> keepMediaLimit(PeerId peerId) const;
+	void setKeepMediaLimit(PeerId peerId, std::optional<size_type> limit);
 
 	[[nodiscard]] EncryptionKey cacheBigFileKey() const;
 	[[nodiscard]] QString cacheBigFilePath() const;

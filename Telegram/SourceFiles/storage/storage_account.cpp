@@ -1871,6 +1871,23 @@ void Account::updateCacheSettings(
 	writeSessionSettings();
 }
 
+std::optional<size_type> Account::keepMediaLimit(PeerId peerId) const {
+	const auto settings = _owner->getSessionSettings();
+	return settings
+		? settings->keepMediaLimit(peerId)
+		: std::nullopt;
+}
+
+void Account::setKeepMediaLimit(
+		PeerId peerId,
+		std::optional<size_type> limit) {
+	const auto settings = _owner->getSessionSettings();
+	Expects(settings != nullptr);
+	if (settings->setKeepMediaLimit(peerId, limit)) {
+		writeSessionSettings();
+	}
+}
+
 QString Account::cacheBigFilePath() const {
 	Expects(!_databasePath.isEmpty());
 

@@ -17,6 +17,10 @@ same per-chat editor from either location. The global Storage setting remains
 the fallback. A global-only shortcut labeled as a chat setting would imply
 retention that the cache cannot enforce.
 
+Per-chat overrides are appended to the existing encrypted session-settings
+payload. Older clients can read the preceding fields, but an older client that
+rewrites the payload will omit the unknown tail and discard the overrides.
+
 For enforcement, associate each cached key with every chat that references it
 and both cache database kinds. A shared key should expire according to the
 longest applicable time limit among its owners; an unknown owner uses the

@@ -204,6 +204,10 @@ public:
 	void setPurpleSettingsOfferMessageId(MsgId id) {
 		_purpleSettingsOfferMessageId = id;
 	}
+	[[nodiscard]] std::optional<size_type> keepMediaLimit(PeerId peerId) const;
+	bool setKeepMediaLimit(
+		PeerId peerId,
+		std::optional<size_type> limit);
 	[[nodiscard]] bool takePurpleSettingsOfferStart() {
 		return !_purpleSettingsOfferStarted
 			&& !std::exchange(_purpleSettingsOfferStarted, true);
@@ -268,6 +272,7 @@ private:
 	std::vector<Data::ReactionId> _extraFavoriteReactions;
 
 	MsgId _purpleSettingsOfferMessageId = 0;
+	base::flat_map<PeerId, size_type> _keepMediaLimits;
 	bool _purpleSettingsOfferStarted = false;
 
 };
