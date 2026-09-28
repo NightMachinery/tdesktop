@@ -12,9 +12,11 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `9b908110` with core `e7bf8544`. The dialog was observed
   with one song before and after, and whole-album inclusion checked by default;
-  full pin enumeration, neighbor/album resolution, and cache download behavior
-  still need runtime verification. Desktop source is built and staged, but the
-  installed daily-use app remains older. See [pinned_music.md](pinned_music.md).
+  Android pin enumeration, neighbor/album resolution, and cache download
+  behavior still need runtime verification. The desktop change is installed in
+  the daily-use app and passed an app launch smoke test, but the pinned music
+  menu and cache behavior still need runtime verification. See
+  [pinned_music.md](pinned_music.md).
 - **Per-chat download cache setting:** expose it from the chat menu. Semantics
   need clarification. Desktop has an automatic media download override; Android
   has no per-chat override.
