@@ -36,6 +36,14 @@ Streaming, large-file cache, webpage media, and stories are also outside this
 first slice. An older client may remove the sidecar during its file cleanup;
 the next version then treats ownership as unknown without changing pruning.
 
+The local message store holds only loaded history and sparse shared-media
+message IDs, so it cannot prove every chat that references one cached key. A
+safe incremental rule could only lengthen the global time limit for observed
+owners. It could not enforce a shorter per-chat limit or guarantee that an
+unobserved `Never` owner survives global expiry. Strict shared-key retention
+needs a complete provenance source or a cache layout that keeps chat ownership
+separate. The existing size cap may still evict cached media under either rule.
+
 For enforcement, associate each cached key with every chat that references it
 and both cache database kinds. A shared key should expire according to the
 longest applicable time limit among its owners; an unknown owner uses the
