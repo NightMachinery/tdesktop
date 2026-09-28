@@ -29,7 +29,11 @@ directory while the pinned-music job checked only its cache directory, so a
 completed song was reported as failed and retried. Android source `6fdb061a`
 accepts complete files in the cache, the normal media directory, or an
 account-recorded custom path. The transfer behavior remains unverified until
-the new APK is tested on the large channel.
+the new APK is tested on the large channel. Source `bce320af` also makes the
+Retry control name both actions when it retries a failed search and failed
+songs together; an invalid song remains counted as failed without an inert
+Retry control.
+
 The desktop implementation is installed in the daily-use app and has passed
 an app launch smoke test; its menu and cache behavior have not yet been
 runtime verified.
