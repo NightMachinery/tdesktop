@@ -209,6 +209,8 @@ positive bare peer IDs, matched together with their chat type, so an ID in one
 type cannot match a chat of another type. `user` is accepted as an alias for
 `private`. The file is reloaded live, so the next notification uses the new
 list. Secret chats are not eligible for this desktop exception.
+On Android, self-destructing-media captions remain hidden even for chats in
+`preview_always`; their notifications use media placeholders.
 
 This changes only the payload of notifications that already qualify for
 delivery. Work Mode and ordinary chat mutes still decide whether one is sent.
