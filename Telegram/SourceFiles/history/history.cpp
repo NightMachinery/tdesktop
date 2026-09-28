@@ -744,6 +744,7 @@ void History::destroyMessagesByDates(TimeId minDate, TimeId maxDate) {
 		owner().notifyItemsAboutToBeDestroyed(toDestroy);
 	}
 	for (const auto &item : toDestroy) {
+		session().local().removeCacheOwnership(item->fullId());
 		item->destroy();
 	}
 }
@@ -760,6 +761,7 @@ void History::destroyMessagesByTopic(MsgId topicRootId) {
 		owner().notifyItemsAboutToBeDestroyed(toDestroy);
 	}
 	for (const auto &item : toDestroy) {
+		session().local().removeCacheOwnership(item->fullId());
 		item->destroy();
 	}
 }
@@ -777,6 +779,7 @@ void History::destroyMessagesBySublist(not_null<PeerData*> sublistPeer) {
 		owner().notifyItemsAboutToBeDestroyed(toDestroy);
 	}
 	for (const auto &item : toDestroy) {
+		session().local().removeCacheOwnership(item->fullId());
 		item->destroy();
 	}
 }
@@ -4873,6 +4876,7 @@ void History::clear(ClearType type, bool markEmpty) {
 	if (type == ClearType::Unload) {
 		_loadedAtTop = _loadedAtBottom = markEmpty;
 	} else {
+		session().local().removePeerServerCacheOwnership(peer->id);
 		// Leave the 'sending' messages in local messages.
 		auto local = std::vector<not_null<HistoryItem*>>();
 		local.reserve(_clientSideMessages.size());

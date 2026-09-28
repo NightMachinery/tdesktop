@@ -26,6 +26,16 @@ both stale selection and the next prune timer. It still has no chat ownership
 data, so the per-chat overrides are not yet passed to that library and cannot
 affect cached files. The storage-library change awaits a desktop compile check.
 
+An encrypted account sidecar now records observed normal-cache keys for direct
+message photos and documents. It is bounded, loads before the caches open, and
+marks an unfinished write as uncertain after a crash. Message edits and some
+deletion paths update the observations. The sidecar does not change cache
+retention yet: loaded history cannot prove that a shared key has no other chat
+owner, and unloaded date, topic, and sublist deletions are not fully covered.
+Streaming, large-file cache, webpage media, and stories are also outside this
+first slice. An older client may remove the sidecar during its file cleanup;
+the next version then treats ownership as unknown without changing pruning.
+
 For enforcement, associate each cached key with every chat that references it
 and both cache database kinds. A shared key should expire according to the
 longest applicable time limit among its owners; an unknown owner uses the
