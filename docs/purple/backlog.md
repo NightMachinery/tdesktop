@@ -23,9 +23,11 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   A source audit also found that a download already in progress could be
   reported as failed when FileLoader finished it outside the cache directory.
   Android source `6fdb061a` checks the actual completed file in FileLoader's
-  managed locations. An updated APK and runtime retest are pending. The
-  desktop change is installed in the daily-use app and passed an app launch
-  smoke test, but its menu and cache behavior still need runtime verification.
+  managed locations. Source `bce320af` clarifies the Retry label when a failed
+  search and failed songs are retried together. An updated APK and runtime
+  retest are pending. The desktop change is installed in the daily-use app and
+  passed an app launch smoke test, but its menu and cache behavior still need
+  runtime verification.
   See [pinned_music.md](pinned_music.md).
 - **Per-chat Keep Media:** the user clarified that the chat-menu setting means
   cache retention, not automatic download. Android already has per-chat
