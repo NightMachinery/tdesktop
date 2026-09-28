@@ -18,8 +18,11 @@ message ID. If the search finds no pinned songs, no transfer starts.
 Android ships the menu action and dialog in the release from source
 `5e428532` with core `e7bf8544`. The dialog defaults were observed on source
 `9b908110` and carried unchanged into `5e428532`: one song before and after,
-with whole-album inclusion checked. Full pin enumeration, neighbor and album
-resolution, and cache transfers have not yet been runtime verified on Android.
-The desktop implementation is installed in the daily-use app and has passed an
-app launch smoke test; the pinned music menu and its cache behavior have not
-yet been runtime verified.
+with whole-album inclusion checked. A run in a large test channel showed 115
+pinned messages and hundreds of cache files, but 143 transfers ended with
+`RETRY_LIMIT`; the old toast reported only how many songs were queued. Source
+work now limits concurrency, backs off and retries these failures, and adds
+visible completion and failure counts. No APK with that change has been built
+or tested yet, so the transfer fix is unverified. The desktop implementation is
+installed in the daily-use app and has passed an app launch smoke test; its
+menu and cache behavior have not yet been runtime verified.
