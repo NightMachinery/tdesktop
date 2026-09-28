@@ -34,6 +34,11 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.
   Mute behavior already matches normal behavior.
+- **Android Contacts Last Seen filter:** the signed APK from source `5e428532`
+  shows “Visible or peekable last seen” in Contacts More. Turning it on showed
+  the active-filter empty state, and turning it off restored the same contact.
+  The test account had no eligible contact, so inclusion of a visible or
+  peekable person still needs runtime verification.
 
 ## Verified
 
