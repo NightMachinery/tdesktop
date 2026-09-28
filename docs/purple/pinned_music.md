@@ -19,5 +19,6 @@ Android ships the menu action and dialog in the release from source
 `9b908110` with core `e7bf8544`. The release emulator smoke test observed the
 dialog defaults: one song before and after, with whole-album inclusion checked.
 Full pin enumeration, neighbor and album resolution, and cache transfers have
-not yet been runtime verified. The desktop source is built and staged, while
-the installed daily-use client remains on an older build.
+not yet been runtime verified on Android. The desktop implementation is now
+installed in the daily-use app and has passed an app launch smoke test; the
+menu for pinned music and its cache behavior have not yet been runtime verified.
