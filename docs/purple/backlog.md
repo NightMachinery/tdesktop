@@ -19,11 +19,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   before and after, with whole-album inclusion checked. A large-channel Android
   run reached the pinned songs but exposed 143 failed cache transfers reported
   as `RETRY_LIMIT` while the UI only said they were queued. Bounded transfers,
-  retries, and a progress bar are committed in Android source `0196012c`; an
-  updated APK and runtime retest are pending. The desktop change is installed
-  in the daily-use app and passed an app launch smoke test, but its menu and
-  cache behavior still need runtime verification. See
-  [pinned_music.md](pinned_music.md).
+  retries, and a progress bar are committed in Android source `0196012c`.
+  A source audit also found that a download already in progress could be
+  reported as failed when FileLoader finished it outside the cache directory.
+  Android source `6fdb061a` checks the actual completed file in FileLoader's
+  managed locations. An updated APK and runtime retest are pending. The
+  desktop change is installed in the daily-use app and passed an app launch
+  smoke test, but its menu and cache behavior still need runtime verification.
+  See [pinned_music.md](pinned_music.md).
 - **Per-chat Keep Media:** the user clarified that the chat-menu setting means
   cache retention, not automatic download. Android already has per-chat
   retention exceptions; its chat-menu display and editor are committed in
