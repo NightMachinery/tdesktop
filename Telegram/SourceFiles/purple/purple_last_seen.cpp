@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "data/data_changes.h"
 #include "data/data_lastseen_status.h"
+#include "data/data_peer_id.h"
 #include "data/data_peer_values.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -34,7 +35,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QSaveFile>
+
+#include <map>
 
 namespace Purple {
 namespace {
@@ -46,6 +56,190 @@ namespace {
 const auto kSeparator = QString::fromUtf8(" \xC2\xB7 ");
 const auto kShortReason = QString::fromUtf8("\xF0\x9F\x91\x80");
 constexpr auto kSkipPeekConfirmationPref = "purple-skip-last-seen-peek-confirmation";
+constexpr auto kRestoreRetry = crl::time(5000);
+constexpr auto kRestoreWatchdog = crl::time(30000);
+
+[[nodiscard]] QString JournalPath(not_null<Main::Session*> session) {
+	const auto environment = int(session->mtp().environment());
+	return cWorkingDir() + u"tdata/purple-last-seen-peek-%1-%2.json"_q
+		.arg(environment).arg(session->userId().bare);
+}
+
+[[nodiscard]] QJsonArray WritePeers(
+		const Api::UserPrivacy::Exceptions &exceptions) {
+	auto result = QJsonArray();
+	for (const auto peer : exceptions.peers) {
+		auto value = QJsonObject{
+			{ u"id"_q, QString::number(peer->id.value) },
+		};
+		if (const auto user = peer->asUser()) {
+			value.insert(u"hash"_q, QString::number(user->accessHash()));
+		}
+		result.append(value);
+	}
+	return result;
+}
+
+[[nodiscard]] QJsonObject WriteRule(const Api::UserPrivacy::Rule &rule) {
+	return {
+		{ u"option"_q, int(rule.option) },
+		{ u"always"_q, WritePeers(rule.always) },
+		{ u"never"_q, WritePeers(rule.never) },
+		{ u"premiums"_q, rule.always.premiums },
+		{ u"allowBots"_q, rule.always.miniapps },
+		{ u"disallowBots"_q, rule.never.miniapps },
+		{ u"ignoreAlways"_q, rule.ignoreAlways },
+		{ u"ignoreNever"_q, rule.ignoreNever },
+	};
+}
+
+[[nodiscard]] bool ReadPeers(
+		const QJsonValue &value,
+		not_null<Main::Session*> session,
+		Api::UserPrivacy::Exceptions &exceptions) {
+	if (!value.isArray()) {
+		return false;
+	}
+	for (const auto &entry : value.toArray()) {
+		const auto object = entry.toObject();
+		auto ok = false;
+		const auto raw = object.value(u"id"_q).toString().toULongLong(&ok);
+		if (!ok || !raw) {
+			return false;
+		}
+		const auto id = PeerId(raw);
+		if (!peerIsUser(id) && !peerIsChat(id) && !peerIsChannel(id)) {
+			return false;
+		}
+		if (peerIsUser(id)) {
+			const auto hash = object.value(u"hash"_q).toString().toULongLong(&ok);
+			if (!ok || !hash) {
+				return false;
+			}
+			const auto user = session->data().user(peerToUser(id));
+			if (!user->accessHash()) {
+				user->setAccessHash(hash);
+			}
+		}
+		exceptions.peers.push_back(session->data().peer(id));
+	}
+	return true;
+}
+
+[[nodiscard]] std::optional<Api::UserPrivacy::Rule> ReadRule(
+		const QJsonValue &value,
+		not_null<Main::Session*> session) {
+	if (!value.isObject()) {
+		return std::nullopt;
+	}
+	const auto object = value.toObject();
+	const auto option = object.value(u"option"_q).toInt(-1);
+	if (option < int(Api::UserPrivacy::Option::Everyone)
+		|| option > int(Api::UserPrivacy::Option::Nobody)
+		|| !object.value(u"premiums"_q).isBool()
+		|| !object.value(u"allowBots"_q).isBool()
+		|| !object.value(u"disallowBots"_q).isBool()
+		|| !object.value(u"ignoreAlways"_q).isBool()
+		|| !object.value(u"ignoreNever"_q).isBool()) {
+		return std::nullopt;
+	}
+	auto rule = Api::UserPrivacy::Rule();
+	rule.option = Api::UserPrivacy::Option(option);
+	if (!ReadPeers(object.value(u"always"_q), session, rule.always)
+		|| !ReadPeers(object.value(u"never"_q), session, rule.never)) {
+		return std::nullopt;
+	}
+	rule.always.premiums = object.value(u"premiums"_q).toBool();
+	rule.always.miniapps = object.value(u"allowBots"_q).toBool();
+	rule.never.miniapps = object.value(u"disallowBots"_q).toBool();
+	rule.ignoreAlways = object.value(u"ignoreAlways"_q).toBool();
+	rule.ignoreNever = object.value(u"ignoreNever"_q).toBool();
+	return rule;
+}
+
+[[nodiscard]] bool SameRule(
+		const Api::UserPrivacy::Rule &a,
+		const Api::UserPrivacy::Rule &b) {
+	const auto samePeers = [](const auto &left, const auto &right) {
+		auto ids = std::vector<PeerId>();
+		for (const auto peer : left.peers) {
+			ids.push_back(peer->id);
+		}
+		for (const auto peer : right.peers) {
+			const auto i = ranges::find(ids, peer->id);
+			if (i == end(ids)) {
+				return false;
+			}
+			ids.erase(i);
+		}
+		return ids.empty();
+	};
+	return a.option == b.option
+		&& a.always.premiums == b.always.premiums
+		&& a.always.miniapps == b.always.miniapps
+		&& a.never.miniapps == b.never.miniapps
+		&& a.ignoreAlways == b.ignoreAlways
+		&& a.ignoreNever == b.ignoreNever
+		&& samePeers(a.always, b.always)
+		&& samePeers(a.never, b.never);
+}
+
+[[nodiscard]] bool WriteJournal(
+		not_null<Main::Session*> session,
+		const Api::UserPrivacy::Rule &rule) {
+	const auto validPeers = [](const auto &exceptions) {
+		return ranges::all_of(exceptions.peers, [](const auto peer) {
+			const auto id = peer->id;
+			return (peerIsUser(id) && peer->asUser()->accessHash())
+				|| peerIsChat(id)
+				|| peerIsChannel(id);
+		});
+	};
+	if (!validPeers(rule.always) || !validPeers(rule.never)) {
+		return false;
+	}
+	const auto path = JournalPath(session);
+	if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+		return false;
+	}
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return false;
+	}
+	if (!file.setPermissions(
+		QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+		file.cancelWriting();
+		return false;
+	}
+	const auto document = QJsonDocument(QJsonObject{
+		{ u"version"_q, 1 },
+		{ u"environment"_q, int(session->mtp().environment()) },
+		{ u"self"_q, QString::number(session->userId().bare) },
+		{ u"rule"_q, WriteRule(rule) },
+	});
+	const auto bytes = document.toJson(QJsonDocument::Compact);
+	if (file.write(bytes) != bytes.size() || !file.commit()) {
+		return false;
+	}
+	return true;
+}
+
+[[nodiscard]] std::optional<Api::UserPrivacy::Rule> ReadJournal(
+		not_null<Main::Session*> session) {
+	auto file = QFile(JournalPath(session));
+	if (!file.open(QIODevice::ReadOnly)) {
+		return std::nullopt;
+	}
+	const auto object = QJsonDocument::fromJson(file.readAll()).object();
+	if (object.value(u"version"_q).toInt() != 1
+		|| object.value(u"environment"_q).toInt(-1)
+			!= int(session->mtp().environment())
+		|| object.value(u"self"_q).toString()
+			!= QString::number(session->userId().bare)) {
+		return std::nullopt;
+	}
+	return ReadRule(object.value(u"rule"_q), session);
+}
 
 [[nodiscard]] const LastSeen &Config() {
 	return ActiveSettings().lastSeen;
@@ -177,6 +371,172 @@ constexpr auto kSkipPeekConfirmationPref = "purple-skip-last-seen-peek-confirmat
 		int64(now));
 }
 
+class PeekRestoration;
+std::map<QString, std::shared_ptr<PeekRestoration>> PendingRestores;
+
+class PeekRestoration final : public std::enable_shared_from_this<PeekRestoration> {
+public:
+	PeekRestoration(
+		not_null<Main::Session*> session,
+		Api::UserPrivacy::Rule original)
+	: _session(session)
+	, _path(JournalPath(session))
+	, _original(std::move(original))
+	, _retry([=] { onTimer(); })
+	, _verify([=] { verifyAgain(); }) {
+	}
+
+	void restore() {
+		const auto session = _session.get();
+		if (!session || _checking) {
+			return;
+		}
+		_checking = true;
+		_inFlight = true;
+		_verifiedOnce = false;
+		const auto serial = ++_serial;
+		_retry.callOnce(kRestoreWatchdog);
+		const auto weak = weak_from_this();
+		session->api().userPrivacy().save(
+			Api::UserPrivacy::Key::LastSeen,
+			_original,
+			[weak, serial](bool saved) {
+				if (const auto strong = weak.lock()) {
+					strong->saved(serial, saved);
+				}
+			},
+			_afterRequest);
+	}
+
+	void orderAfter(mtpRequestId requestId) {
+		_afterRequest = requestId;
+	}
+
+	[[nodiscard]] Main::Session *session() const {
+		return _session.get();
+	}
+
+private:
+	void onTimer() {
+		if (_inFlight) {
+			LOG(("Purple: Last Seen Peek restore still pending."));
+			_retry.callOnce(kRestoreWatchdog);
+			return;
+		}
+		_checking = false;
+		_verify.cancel();
+		restore();
+	}
+
+	void saved(int serial, bool saved) {
+		if (serial != _serial) {
+			return;
+		}
+		_inFlight = false;
+		_retry.cancel();
+		if (!saved) {
+			_retry.callOnce(kRestoreRetry);
+			return;
+		}
+		_retry.callOnce(kRestoreWatchdog);
+		const auto session = _session.get();
+		if (!session) {
+			return;
+		}
+		const auto weak = weak_from_this();
+		session->api().userPrivacy().reloadFresh(
+			Api::UserPrivacy::Key::LastSeen,
+			[weak, serial](std::optional<Api::UserPrivacy::Rule> rule) {
+				if (const auto strong = weak.lock()) {
+					strong->verified(serial, std::move(rule));
+				}
+			});
+	}
+
+	void verified(
+			int serial,
+			std::optional<Api::UserPrivacy::Rule> rule) {
+		if (serial != _serial) {
+			return;
+		}
+		if (!rule || !SameRule(*rule, _original)) {
+			LOG(("Purple Error: Last Seen Peek restore not yet verified."));
+			_retry.callOnce(kRestoreRetry);
+			return;
+		}
+		if (!_verifiedOnce) {
+			_verifiedOnce = true;
+			_verify.callOnce(crl::time(1000));
+			return;
+		}
+		_retry.cancel();
+		if (!QFile::remove(_path)) {
+			LOG(("Purple Error: Last Seen Peek journal not removed."));
+			_retry.callOnce(kRestoreRetry);
+			return;
+		}
+		LOG(("Purple: Last Seen Peek original rules verified and restored."));
+		crl::on_main([path = _path, weak = weak_from_this()] {
+			const auto i = PendingRestores.find(path);
+			if (i != end(PendingRestores)
+				&& i->second == weak.lock()) {
+				PendingRestores.erase(i);
+			}
+		});
+	}
+
+	void verifyAgain() {
+		const auto session = _session.get();
+		if (!session) {
+			return;
+		}
+		const auto serial = _serial;
+		const auto weak = weak_from_this();
+		session->api().userPrivacy().reloadFresh(
+			Api::UserPrivacy::Key::LastSeen,
+			[weak, serial](std::optional<Api::UserPrivacy::Rule> rule) {
+				if (const auto strong = weak.lock()) {
+					strong->verified(serial, std::move(rule));
+				}
+			});
+	}
+
+	const base::weak_ptr<Main::Session> _session;
+	const QString _path;
+	const Api::UserPrivacy::Rule _original;
+	base::Timer _retry;
+	base::Timer _verify;
+	int _serial = 0;
+	bool _checking = false;
+	bool _inFlight = false;
+	bool _verifiedOnce = false;
+	mtpRequestId _afterRequest = 0;
+
+};
+
+void RestoreJournal(not_null<Main::Session*> session) {
+	const auto path = JournalPath(session);
+	if (const auto i = PendingRestores.find(path); i != end(PendingRestores)) {
+		if (i->second->session() == session.get()) {
+			i->second->restore();
+			return;
+		}
+		PendingRestores.erase(i);
+	}
+	if (!QFileInfo::exists(path)) {
+		return;
+	}
+	const auto original = ReadJournal(session);
+	if (!original) {
+		LOG(("Purple Error: Last Seen Peek journal unreadable: %1."
+			).arg(path));
+		return;
+	}
+	auto restore = std::make_shared<PeekRestoration>(session, *original);
+	PendingRestores.emplace(path, restore);
+	restore->restore();
+}
+
 // One peek, from the click to the rules going back. At most one runs at a time
 // for the whole app, which is not a limitation worth working around: a peek is
 // a window in which somebody can see our last seen, and two of them open at
@@ -186,7 +546,7 @@ constexpr auto kSkipPeekConfirmationPref = "purple-skip-last-seen-peek-confirmat
 // session's lifetime, because "is one running" has to be answerable. Everything
 // it touches goes through a weak session pointer, so an account logged out
 // mid-peek leaves it with nothing to do rather than with a dangling one.
-class LastSeenPeek final {
+class LastSeenPeek final : public base::has_weak_ptr {
 public:
 	LastSeenPeek(
 		not_null<Main::Session*> session,
@@ -199,18 +559,15 @@ private:
 	void showOurs(const Api::UserPrivacy::Rule &rule);
 	void requestStatus();
 	void finish(const QString &reason, bool read);
-	void restore();
 
 	const base::weak_ptr<Main::Session> _session;
 	const PeerIdValue _peer = 0;
 	const UserId _userId = 0;
 	const std::shared_ptr<Ui::Show> _show;
 
-	std::optional<Api::UserPrivacy::Rule> _previous;
 	base::Timer _hold;
-	rpl::lifetime _lifetime;
-	bool _ignoreCached = false;
-	bool _restored = false;
+	bool _journaled = false;
+	bool _opened = false;
 	bool _done = false;
 
 };
@@ -236,28 +593,19 @@ void LastSeenPeek::start() {
 	LOG(("Purple: Last Seen Peek with %1 - reading our rules."
 		).arg(QString::number(_peer)));
 
-	// The cached rules fire the moment we subscribe, and they are whatever was
-	// fetched last, which is not good enough to put back afterwards. So the
-	// synchronous first emission is dropped and the reload's answer taken
-	// instead; a reload already in flight answers the same way.
-	_ignoreCached = true;
-	session->api().userPrivacy().value(
-		Api::UserPrivacy::Key::LastSeen
-	) | rpl::on_next([=, this](Api::UserPrivacy::Rule rule) {
-		if (_ignoreCached || _previous) {
-			return;
-		}
-		_previous = rule;
-		showOurs(rule);
-	}, _lifetime);
-	_ignoreCached = false;
-
-	session->api().userPrivacy().reload(Api::UserPrivacy::Key::LastSeen);
-
-	// Covers the fetch as well as the read: a peek that cannot even learn our
-	// own rules must not sit there forever, and the hold is the one number the
-	// file gives for how long any of this may take.
 	_hold.callOnce(crl::time(1000) * std::max(Config().tradeHoldSeconds, 1));
+	const auto weak = base::make_weak(this);
+	session->api().userPrivacy().reloadFresh(
+		Api::UserPrivacy::Key::LastSeen,
+		[weak](std::optional<Api::UserPrivacy::Rule> rule) {
+			if (const auto strong = weak.get(); strong && !strong->_done) {
+				if (rule) {
+					strong->showOurs(*rule);
+				} else {
+					strong->finish(u"privacy fetch failed"_q, false);
+				}
+			}
+		});
 }
 
 void LastSeenPeek::showOurs(const Api::UserPrivacy::Rule &rule) {
@@ -265,6 +613,15 @@ void LastSeenPeek::showOurs(const Api::UserPrivacy::Rule &rule) {
 	if (!session) {
 		return;
 	}
+	if (QFileInfo::exists(JournalPath(session))
+		|| !WriteJournal(session, rule)) {
+		LOG(("Purple Error: Last Seen Peek journal could not be written."));
+		finish(u"journal unavailable"_q, false);
+		return;
+	}
+	_journaled = true;
+	auto restoration = std::make_shared<PeekRestoration>(session, rule);
+	PendingRestores.emplace(JournalPath(session), restoration);
 	const auto peer = not_null<PeerData*>(session->data().user(_userId));
 	auto modified = rule;
 	auto &always = modified.always.peers;
@@ -275,10 +632,21 @@ void LastSeenPeek::showOurs(const Api::UserPrivacy::Rule &rule) {
 	}
 	LOG(("Purple: Last Seen Peek with %1 - showing ours."
 		).arg(QString::number(_peer)));
-	session->api().userPrivacy().save(
+	const auto weak = base::make_weak(this);
+	const auto requestId = session->api().userPrivacy().save(
 		Api::UserPrivacy::Key::LastSeen,
-		modified);
-	requestStatus();
+		modified,
+		[weak](bool opened) {
+			if (const auto strong = weak.get(); strong && !strong->_done) {
+				if (opened) {
+					strong->_opened = true;
+					strong->requestStatus();
+				} else {
+					strong->finish(u"temporary rule failed"_q, false);
+				}
+			}
+		});
+	restoration->orderAfter(requestId);
 }
 
 void LastSeenPeek::requestStatus() {
@@ -287,38 +655,57 @@ void LastSeenPeek::requestStatus() {
 		return;
 	}
 	const auto user = session->data().user(_userId);
-	session->changes().peerUpdates(
-		user,
-		Data::PeerUpdate::Flag::OnlineStatus
-	) | rpl::on_next([=, this] {
-		// Only a status carrying a real moment ends the wait. A coarse one is
-		// the server still saying no, and the local "online till" the client
-		// keeps beside a coarse status is our own old knowledge rather than
-		// anything this peek found.
-		const auto status = user->lastseen();
-		const auto till = status.onlineTill();
-		if (status.isHidden() || !till) {
-			return;
-		}
-		const auto now = base::unixtime::now();
-		const auto moment = status.isOnline(now) ? now : till;
-		UpdateState([&](State &state) {
-			RememberTrade(state, _peer, int64(now), int64(moment));
-		});
-		LOG(("Purple: Last Seen Peek with %1 - read %2."
-			).arg(QString::number(_peer), QString::number(moment)));
-		finish(u"read"_q, true);
-	}, _lifetime);
-
+	const auto weak = base::make_weak(this);
 	session->api().request(MTPusers_GetUsers(
 		MTP_vector<MTPInputUser>(1, user->inputUser())
-	)).done([=](const MTPVector<MTPUser> &result) {
-		if (const auto strong = _session.get()) {
-			strong->data().processUsers(result);
+	)).done([weak](const MTPVector<MTPUser> &result) {
+		if (const auto strong = weak.get(); strong && !strong->_done) {
+			if (const auto session = strong->_session.get()) {
+				auto moment = TimeId(0);
+				auto online = false;
+				for (const auto &entry : result.v) {
+					if (entry.type() != mtpc_user) {
+						continue;
+					}
+					const auto &data = entry.c_user();
+					if (data.vid().v != strong->_userId.bare) {
+						continue;
+					}
+					if (const auto status = data.vstatus()) {
+						if (status->type() == mtpc_userStatusOnline) {
+							online = true;
+						} else if (status->type() == mtpc_userStatusOffline) {
+							moment = status->c_userStatusOffline()
+								.vwas_online().v;
+						}
+					}
+				}
+				session->data().processUsers(result);
+				if (online || moment > 0) {
+					const auto now = base::unixtime::now();
+					if (online) {
+						moment = now;
+					}
+					UpdateState([&](State &state) {
+						RememberTrade(
+							state,
+							strong->_peer,
+							int64(now),
+							int64(moment));
+					});
+					LOG(("Purple: Last Seen Peek with %1 - read %2."
+						).arg(QString::number(strong->_peer),
+							QString::number(moment)));
+					strong->finish(u"read"_q, true);
+				}
+			}
 		}
-	}).fail([=](const MTP::Error &error) {
-		LOG(("Purple Error: Last Seen Peek could not ask about %1, %2."
-			).arg(QString::number(_peer), error.type()));
+	}).fail([weak](const MTP::Error &error) {
+		if (const auto strong = weak.get(); strong && !strong->_done) {
+			LOG(("Purple Error: Last Seen Peek could not ask about %1, %2."
+				).arg(QString::number(strong->_peer), error.type()));
+			strong->finish(u"status request failed"_q, false);
+		}
 	}).send();
 }
 
@@ -328,7 +715,7 @@ void LastSeenPeek::finish(const QString &reason, bool read) {
 	}
 	_done = true;
 	_hold.cancel();
-	if (!read) {
+	if (!read && _opened) {
 		// Written down even though nothing was read, because this is what the
 		// cooldown counts: a peek that answered nothing is still a window
 		// somebody could have looked through, and repeating it every time the
@@ -343,28 +730,17 @@ void LastSeenPeek::finish(const QString &reason, bool read) {
 			_show->showToast(tr::lng_lastseen_peek_empty_result(tr::now));
 		}
 	}
-	restore();
+	if (_journaled) {
+		if (const auto session = _session.get()) {
+			const auto path = JournalPath(session);
+			if (const auto i = PendingRestores.find(path);
+				i != end(PendingRestores)) {
+				i->second->restore();
+			}
+		}
+	}
 
-	// The subscriptions are dropped from inside one of their own handlers, so
-	// the object goes a turn later rather than under the stack still walking
-	// it.
 	crl::on_main([] { RunningPeek = nullptr; });
-}
-
-void LastSeenPeek::restore() {
-	if (_restored) {
-		return;
-	}
-	_restored = true;
-	const auto session = _session.get();
-	if (!session || !_previous) {
-		return;
-	}
-	LOG(("Purple: Last Seen Peek with %1 - rules back."
-		).arg(QString::number(_peer)));
-	session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::LastSeen,
-		*_previous);
 }
 
 // What the sheet will not open for at all. The cooldown is deliberately not
@@ -389,7 +765,8 @@ void StartPeek(
 		not_null<Main::Session*> session,
 		not_null<UserData*> user,
 		std::shared_ptr<Ui::Show> show) {
-	if (RunningPeek) {
+	if (RunningPeek || QFileInfo::exists(JournalPath(session))
+		|| PendingRestores.contains(JournalPath(session))) {
 		show->showToast(tr::lng_lastseen_peek_running(tr::now));
 		return;
 	}
@@ -398,6 +775,10 @@ void StartPeek(
 }
 
 } // namespace
+
+void RecoverLastSeenPeek(not_null<Main::Session*> session) {
+	RestoreJournal(session);
+}
 
 LastSeenReason ReasonForUser(not_null<UserData*> user) {
 	if (!Eligible(user)) {

@@ -195,6 +195,82 @@ UserPrivacy::Rule TLToRules(const TLRules &rules, Data::Session &owner) {
 	return result;
 }
 
+bool Representable(const TLRules &rules, const UserPrivacy::Rule &parsed) {
+	const auto containsUser = [](const auto &exceptions, MTPlong id) {
+		return ranges::any_of(exceptions.peers, [&](const auto peer) {
+			return peerIsUser(peer->id)
+				&& peerToUser(peer->id).bare == id.v;
+		});
+	};
+	const auto containsChat = [](const auto &exceptions, MTPlong id) {
+		return ranges::any_of(exceptions.peers, [&](const auto peer) {
+			return !peerIsUser(peer->id)
+				&& peerToBareMTPInt(peer->id).v == id.v;
+		});
+	};
+	auto options = 0;
+	auto valid = true;
+	auto stage = 0;
+	for (const auto &rule : rules.v) {
+		const auto nextStage = [&] {
+			switch (rule.type()) {
+			case mtpc_privacyValueAllowUsers:
+			case mtpc_privacyValueAllowChatParticipants:
+			case mtpc_privacyValueAllowPremium:
+			case mtpc_privacyValueAllowBots: return 0;
+			case mtpc_privacyValueDisallowUsers:
+			case mtpc_privacyValueDisallowChatParticipants:
+			case mtpc_privacyValueDisallowBots:
+			case mtpc_privacyValueDisallowContacts: return 1;
+			default: return 2;
+			}
+		}();
+		valid = valid && nextStage >= stage;
+		stage = nextStage;
+		rule.match([&](const MTPDprivacyValueAllowAll &) {
+			++options;
+			valid = valid && parsed.option == UserPrivacy::Option::Everyone;
+		}, [&](const MTPDprivacyValueAllowContacts &) {
+			++options;
+			valid = valid && parsed.option == UserPrivacy::Option::Contacts;
+		}, [&](const MTPDprivacyValueAllowCloseFriends &) {
+			++options;
+			valid = valid && parsed.option == UserPrivacy::Option::CloseFriends;
+		}, [&](const MTPDprivacyValueDisallowAll &) {
+			++options;
+			valid = valid && parsed.option == UserPrivacy::Option::Nobody;
+		}, [&](const MTPDprivacyValueDisallowContacts &) {
+			valid = false;
+		}, [&](const MTPDprivacyValueAllowPremium &) {
+			valid = valid && parsed.always.premiums
+				&& parsed.option != UserPrivacy::Option::Everyone;
+		}, [&](const MTPDprivacyValueAllowBots &) {
+			valid = valid && parsed.always.miniapps
+				&& parsed.option != UserPrivacy::Option::Everyone;
+		}, [&](const MTPDprivacyValueDisallowBots &) {
+			valid = valid && parsed.never.miniapps
+				&& parsed.option != UserPrivacy::Option::Nobody;
+		}, [&](const MTPDprivacyValueAllowUsers &data) {
+			for (const auto &id : data.vusers().v) {
+				valid = valid && containsUser(parsed.always, id);
+			}
+		}, [&](const MTPDprivacyValueDisallowUsers &data) {
+			for (const auto &id : data.vusers().v) {
+				valid = valid && containsUser(parsed.never, id);
+			}
+		}, [&](const MTPDprivacyValueAllowChatParticipants &data) {
+			for (const auto &id : data.vchats().v) {
+				valid = valid && containsChat(parsed.always, id);
+			}
+		}, [&](const MTPDprivacyValueDisallowChatParticipants &data) {
+			for (const auto &id : data.vchats().v) {
+				valid = valid && containsChat(parsed.never, id);
+			}
+		});
+	}
+	return valid && options == 1;
+}
+
 MTPInputPrivacyKey KeyToTL(UserPrivacy::Key key) {
 	using Key = UserPrivacy::Key;
 	switch (key) {
@@ -258,36 +334,81 @@ UserPrivacy::UserPrivacy(not_null<ApiWrap*> api)
 , _api(&api->instance()) {
 }
 
-void UserPrivacy::save(
+mtpRequestId UserPrivacy::save(
 		Key key,
-		const UserPrivacy::Rule &rule) {
+		const UserPrivacy::Rule &rule,
+		Fn<void(bool)> done,
+		mtpRequestId afterRequest) {
 	const auto tlKey = KeyToTL(key);
 	const auto keyTypeId = tlKey.type();
 	const auto it = _privacySaveRequests.find(keyTypeId);
-	if (it != _privacySaveRequests.cend()) {
+	if (it != _privacySaveRequests.cend()
+		&& it->second != afterRequest) {
 		_api.request(it->second).cancel();
 		_privacySaveRequests.erase(it);
 	}
 
-	const auto requestId = _api.request(MTPaccount_SetPrivacy(
+	auto completion = std::make_shared<Fn<void(bool)>>(std::move(done));
+	auto request = _api.request(MTPaccount_SetPrivacy(
 		tlKey,
 		RulesToTL(rule)
-	)).done([=](const MTPaccount_PrivacyRules &result) {
+	));
+	(void)request.done([=](const MTPaccount_PrivacyRules &result, mtpRequestId id) {
 		result.match([&](const MTPDaccount_privacyRules &data) {
 			_session->data().processUsers(data.vusers());
 			_session->data().processChats(data.vchats());
-			_privacySaveRequests.remove(keyTypeId);
+			if (_privacySaveRequests.contains(keyTypeId)
+				&& _privacySaveRequests[keyTypeId] == id) {
+				_privacySaveRequests.remove(keyTypeId);
+			}
 			apply(keyTypeId, data.vrules(), true);
 		});
-	}).fail([=](const MTP::Error &error) {
+		if (*completion) {
+			(*completion)(true);
+		}
+	}).fail([=](const MTP::Error &error, mtpRequestId id) {
 		const auto message = error.type();
 		if (message == u"PREMIUM_ACCOUNT_REQUIRED"_q) {
 			Settings::ShowPremium(_session, QString());
 		}
-		_privacySaveRequests.remove(keyTypeId);
-	}).send();
+		if (_privacySaveRequests.contains(keyTypeId)
+			&& _privacySaveRequests[keyTypeId] == id) {
+			_privacySaveRequests.remove(keyTypeId);
+		}
+		if (*completion) {
+			(*completion)(false);
+		}
+	});
+	if (afterRequest) {
+		(void)request.afterRequest(afterRequest);
+	}
+	const auto requestId = request.send();
 
-	_privacySaveRequests.emplace(keyTypeId, requestId);
+	_privacySaveRequests[keyTypeId] = requestId;
+	return requestId;
+}
+
+void UserPrivacy::reloadFresh(
+		Key key,
+		Fn<void(std::optional<Rule>)> done) {
+	auto completion = std::make_shared<Fn<void(std::optional<Rule>)>>(
+		std::move(done));
+	_api.request(MTPaccount_GetPrivacy(
+		KeyToTL(key)
+	)).done([=](
+			const MTPaccount_PrivacyRules &result) mutable {
+		result.match([&](const MTPDaccount_privacyRules &data) {
+			_session->data().processUsers(data.vusers());
+			_session->data().processChats(data.vchats());
+			pushPrivacy(key, data.vrules());
+			const auto parsed = TLToRules(data.vrules(), _session->data());
+			(*completion)(Representable(data.vrules(), parsed)
+				? std::optional(parsed)
+				: std::nullopt);
+		});
+	}).fail([=](const MTP::Error &) {
+		(*completion)(std::nullopt);
+	}).send();
 }
 
 void UserPrivacy::apply(

@@ -2035,16 +2035,28 @@ words (`as of 3 min ago`), and a minute is the resolution those words have.
 Last Seen Peek temporarily shares your Last Seen with this person only so the
 client can read theirs once:
 
-1. Your current last-seen privacy rules are fetched.
-2. That one person is added to the allowed exceptions - and taken out of the
-   disallowed ones, if that is where they were.
-3. Their status is asked for, and the answer waited on for `trade_hold`.
-4. Your rules are put back exactly as they were. Always: on a read, on a
-   timeout, and on an error.
+1. Your current last-seen privacy rules are fetched from the server, and a
+   profile-local recovery journal is written before the privacy change.
+2. That one person is added to the allowed exceptions and taken out of the
+   disallowed ones, if that is where they were. The client waits for the server
+   to accept this temporary rule before asking for their status.
+3. Their status is asked for, and an exact status in that server response is
+   remembered. The deadline starts before the temporary save and also covers
+   a stalled save or a response with no exact status.
+4. The original rules are sent back after a read, timeout, or error. The client
+   keeps the journal until a fresh server read confirms the original rules.
 
-They are not told. Nothing else about your privacy changes, and no other
-person's view of you moves for those few seconds - the rule that changed names
-them and nobody else.
+They are not told. The temporary exception names that person only. Other
+privacy settings are not changed by Peek.
+
+The journal is under this install's `tdata` and is keyed and checked by the
+account's user ID and server environment, rather than by its account slot. A
+pending journal blocks another Peek for that account. On startup, after the
+account session is ready, the client retries the restore. It also retries
+failed restores and reconnects while the client remains open. Recovery needs
+that account to connect: an offline client, force quit, or an account that is
+never opened again can leave the temporary server rule in place until recovery
+runs. Telegram does not provide a server-side expiry for this exception.
 
 It can come back with nothing, and that is a real answer rather than a failure:
 if they hide their last seen for their own reasons, showing them yours reveals
@@ -2153,20 +2165,19 @@ The core owns the reason, remembered reads, cooldown, and configuration keys.
 Both apps ask it the same questions.
 
 The privacy calls are per client, because the API layer is. On the desktop the
-fetch, the save and the restore all go through
-`Api::UserPrivacy` - `reload(Key::LastSeen)`, `value(Key::LastSeen)` and
-`save(Key::LastSeen, rules)`, the same three calls the Privacy and Security
-screen makes - and the status is asked for with `users.getUsers`. The `by_me`
+fresh fetch, the save and the restore go through `Api::UserPrivacy`, with save
+completion and an ordered restore tied to the opening request. The status is
+asked for with `users.getUsers` only after the temporary save succeeds. The `by_me`
 flag arrives as `Data::LastseenStatus::isHiddenByMe()`, which upstream already
 reads for its own "Show my Last Seen" button, so this is the same signal used
 for the same purpose rather than a second interpretation of it.
 
-One consequence of going through that layer: the rules are put back as the
-round trip understood them. `Api::UserPrivacy` reduces the server's rules to
-allowed and disallowed peers plus an option, and anything it cannot represent
-would not survive - the same reduction the Privacy screen's own save does. The
-chats a rule names come back in the same response that carries the rule, so
-they are loaded by the time it is read.
+`Api::UserPrivacy` reduces the server's rules to allowed and disallowed peers
+plus an option. Peek checks the raw response before opening and refuses to
+change privacy if that reduction would lose a rule or an exception peer. The
+Privacy screen still uses its existing save behavior. The chats a rule names
+come back in the same response that carries the rule, so they are loaded by
+the time it is read.
 
 Only one Last Seen Peek runs at a time, for the whole app. Two would be two
 windows of exposure that were agreed to once.

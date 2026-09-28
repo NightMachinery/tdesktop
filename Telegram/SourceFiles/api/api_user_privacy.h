@@ -56,15 +56,18 @@ public:
 
 	explicit UserPrivacy(not_null<ApiWrap*> api);
 
-	void save(
+	mtpRequestId save(
 		Key key,
-		const UserPrivacy::Rule &rule);
+		const UserPrivacy::Rule &rule,
+		Fn<void(bool)> done = nullptr,
+		mtpRequestId afterRequest = 0);
 	void apply(
 		mtpTypeId type,
 		const MTPVector<MTPPrivacyRule> &rules,
 		bool allLoaded);
 
 	void reload(Key key);
+	void reloadFresh(Key key, Fn<void(std::optional<Rule>)> done);
 	rpl::producer<Rule> value(Key key);
 
 private:
