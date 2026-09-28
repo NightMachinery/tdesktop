@@ -6,7 +6,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 ## Open
 
 - **Android notification preview exceptions:** shared core and desktop support
-  are done; Android notification formatting is pending.
+  are done. Android preview-safe integration is committed and pushed in
+  `9363b25f`; source-only JNI/Java syntax checks passed. Full app build, signing,
+  and device runtime verification are pending.
 - **Pinned music menu:** desktop prefetches pinned songs into Telegram's cache
   from the open-chat menu, with one music neighbor on each side and album
   expansion by default. The desktop source is committed and pushed, but the
