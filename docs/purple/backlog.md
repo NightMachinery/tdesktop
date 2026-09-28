@@ -25,7 +25,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   retention exceptions; its chat-menu display and editor are committed in
   Android source `1593b8d1` and await an updated APK. Desktop currently exposes
   global cache retention and a separate per-peer automatic-download override,
-  but no matching per-chat retention setting.
+  but no matching per-chat retention setting. Its cache records a media key,
+  category tag, and access time without a chat identifier. A desktop per-chat
+  retention rule therefore needs ownership tracking, including a policy for
+  media shared across chats, before the menu can show an enforceable value.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.
