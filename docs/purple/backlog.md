@@ -6,29 +6,27 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 ## Open
 
 - **Android notification preview exceptions:** shared core and desktop support
-  are done. Android preview-safe integration shipped in release-signed APK
-  `9363b25f62cd5ce26e204ec7f47f5de6f5ea37f7`; device runtime behavior remains
-  unverified.
-- **Pinned music menu:** desktop prefetches pinned songs into Telegram's cache
-  from the open-chat menu, with one music neighbor on each side and album
-  expansion by default. The desktop source is committed and pushed, but the
-  installed daily-use app is still older. The Android action remains pending. See
-  [pinned_music.md](pinned_music.md).
+  are done. Android preview-safe integration is included in the release from
+  source `9b908110` and passed the release emulator smoke test. Preview
+  suppression behavior still needs focused runtime QA.
+- **Pinned music menu:** Android ships the chat-menu action and dialog in the
+  release from source `9b908110` with core `e7bf8544`. The dialog was observed
+  with one song before and after, and whole-album inclusion checked by default;
+  full pin enumeration, neighbor/album resolution, and cache download behavior
+  still need runtime verification. Desktop source is built and staged, but the
+  installed daily-use app remains older. See [pinned_music.md](pinned_music.md).
 - **Per-chat download cache setting:** expose it from the chat menu. Semantics
   need clarification. Desktop has an automatic media download override; Android
   has no per-chat override.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
-  default in both clients. The current Android APK
-  `9363b25f62cd5ce26e204ec7f47f5de6f5ea37f7` includes the checkbox, badge
-  refresh source, and Persian-layout passcode mapping. An account-backed test
-  of the eligible Peek UI is still needed. The badge refresh runtime behavior
-  has not been independently verified; mute behavior already matches normal
-  behavior.
-- **Contacts filter:** the empty state is misleading and needs correction.
+  default in both clients. The release from Android source `9b908110` passed
+  the emulator smoke test, but account-backed verification of an eligible Peek
+  and focused badge-refresh runtime QA are still needed. Mute behavior already
+  matches normal behavior.
 - **Android passcode verification:** Persian-layout passcode input is
-  implemented in both clients and included in the delivered release-signed APK
-  above, built with core `e7bf8544`. Device unlock runtime behavior has not been
-  independently verified.
+  implemented in both clients and included in the release from Android source
+  `9b908110`, built with core `e7bf8544`. Device unlock runtime behavior still
+  needs focused verification.
 
 ## Retired
 

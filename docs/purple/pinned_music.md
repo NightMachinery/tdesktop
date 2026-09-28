@@ -14,3 +14,10 @@ absent from the loaded timeline can be included. Telegram Desktop's group
 model caps an album at 10 items, so the 100-message request comfortably covers
 ordinary contiguous albums. Each audio message is queued once by peer and
 message ID. If the search finds no pinned songs, no transfer starts.
+
+Android ships the menu action and dialog in the release from source
+`9b908110` with core `e7bf8544`. The release emulator smoke test observed the
+dialog defaults: one song before and after, with whole-album inclusion checked.
+Full pin enumeration, neighbor and album resolution, and cache transfers have
+not yet been runtime verified. The desktop source is built and staged, while
+the installed daily-use client remains on an older build.
