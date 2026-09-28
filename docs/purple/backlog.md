@@ -12,15 +12,19 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
-  before and after, with whole-album inclusion checked. Android pin enumeration,
-  neighbor/album resolution, and cache download behavior still need runtime
-  verification. The desktop change is installed in the daily-use app and passed
-  an app launch smoke test, but the pinned music menu and cache behavior still
-  need runtime verification. See [pinned_music.md](pinned_music.md).
-- **Per-chat download cache setting:** expose it from the chat menu. Semantics
-  need clarification. Desktop has a per-peer automatic media-download override.
-  Android has per-chat Keep Media retention exceptions, but no per-chat
-  automatic-download override; decide which behavior belongs in the menu.
+  before and after, with whole-album inclusion checked. A large-channel Android
+  run reached the pinned songs but exposed 143 failed cache transfers reported
+  as `RETRY_LIMIT` while the UI only said they were queued. Bounded transfers,
+  retries, and a progress bar are under source review; no updated APK has been
+  built. The desktop change is installed in the daily-use app and passed an app
+  launch smoke test, but its menu and cache behavior still need runtime
+  verification. See [pinned_music.md](pinned_music.md).
+- **Per-chat Keep Media:** the user clarified that the chat-menu setting means
+  cache retention, not automatic download. Android already has per-chat
+  retention exceptions; its chat-menu display and editor are under source
+  review. Desktop currently exposes global cache retention and a separate
+  per-peer automatic-download override, but no matching per-chat retention
+  setting.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
   launches, but eligible Peek and badge-refresh behavior remain unverified.
