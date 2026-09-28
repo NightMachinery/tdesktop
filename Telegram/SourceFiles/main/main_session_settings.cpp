@@ -18,58 +18,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "data/components/promo_suggestions.h"
 
-#include <limits>
-
 namespace Main {
 namespace {
 
 constexpr auto kLegacyCallsPeerToPeerNobody = 4;
 constexpr auto kVersionTag = -1;
 constexpr auto kVersion = 2;
-constexpr auto kKeepMediaLimitsVersion = 1;
-constexpr auto kMaxKeepMediaLimits = size_type(100000);
-
-std::optional<base::flat_map<PeerId, size_type>> ReadKeepMediaLimits(
-		const QByteArray &serialized) {
-	constexpr auto kHeaderSize = qsizetype(2 * sizeof(qint32));
-	constexpr auto kEntrySize = qsizetype(sizeof(quint64) + sizeof(qint32));
-	if (serialized.size() < kHeaderSize) {
-		return std::nullopt;
-	}
-	QDataStream stream(serialized);
-	stream.setVersion(QDataStream::Qt_5_1);
-	auto version = qint32(0);
-	auto count = qint32(0);
-	stream >> version >> count;
-	if (stream.status() != QDataStream::Ok
-		|| version != kKeepMediaLimitsVersion
-		|| count < 0
-		|| count > kMaxKeepMediaLimits
-		|| count > (serialized.size() - kHeaderSize) / kEntrySize) {
-		return std::nullopt;
-	}
-	auto result = base::flat_map<PeerId, size_type>();
-	for (auto i = 0; i != count; ++i) {
-		auto serializedPeerId = quint64(0);
-		auto limit = qint32(0);
-		stream >> serializedPeerId >> limit;
-		const auto peerId = DeserializePeerId(serializedPeerId);
-		if (stream.status() != QDataStream::Ok
-			|| !peerId
-			|| !(peerIsUser(peerId)
-				|| peerIsChat(peerId)
-				|| peerIsChannel(peerId))
-			|| SerializePeerId(peerId) != serializedPeerId
-			|| limit < 0
-			|| result.contains(peerId)) {
-			return std::nullopt;
-		}
-		result.emplace(peerId, limit);
-	}
-	return (stream.status() == QDataStream::Ok && stream.atEnd())
-		? std::make_optional(std::move(result))
-		: std::nullopt;
-}
 
 } // namespace
 
@@ -142,8 +96,6 @@ QByteArray SessionSettings::serialize() const {
 		size += sizeof(quint64) + Serialize::stringSize(id.emoji());
 	}
 	size += sizeof(qint32);
-	size += 2 * sizeof(qint32)
-		+ _keepMediaLimits.size() * (sizeof(quint64) + sizeof(qint32));
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -237,12 +189,6 @@ QByteArray SessionSettings::serialize() const {
 			stream << quint64(id.custom()) << id.emoji();
 		}
 		stream << qint32(_purpleSettingsOfferMessageId.bare);
-		stream
-			<< qint32(kKeepMediaLimitsVersion)
-			<< qint32(_keepMediaLimits.size());
-		for (const auto &[peerId, limit] : _keepMediaLimits) {
-			stream << SerializePeerId(peerId) << qint32(limit);
-		}
 	}
 
 	Ensures(result.size() == size);
@@ -805,11 +751,6 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> purpleSettingsOfferMessageId;
 	}
-	auto keepMediaLimits = std::optional<base::flat_map<PeerId, size_type>>();
-	if (!stream.atEnd() && stream.status() == QDataStream::Ok) {
-		keepMediaLimits = ReadKeepMediaLimits(
-			serialized.mid(qsizetype(stream.device()->pos())));
-	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for SessionSettings::addFromSerialized()"));
@@ -877,9 +818,6 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	_phoneNumberHidden = (phoneNumberHidden == 1);
 	_extraFavoriteReactions = std::move(extraFavoriteReactions);
 	_purpleSettingsOfferMessageId = MsgId(purpleSettingsOfferMessageId);
-	_keepMediaLimits = keepMediaLimits
-		? std::move(*keepMediaLimits)
-		: base::flat_map<PeerId, size_type>();
 
 	if (version < 2) {
 		app.setLastSeenWarningSeen(appLastSeenWarningSeen == 1);
@@ -1127,37 +1065,6 @@ void SessionSettings::setExtraFavoriteReactions(
 auto SessionSettings::extraFavoriteReactions() const
 -> const std::vector<Data::ReactionId> & {
 	return _extraFavoriteReactions;
-}
-
-std::optional<size_type> SessionSettings::keepMediaLimit(
-		PeerId peerId) const {
-	const auto i = _keepMediaLimits.find(peerId);
-	return (i != _keepMediaLimits.end())
-		? std::make_optional(i->second)
-		: std::nullopt;
-}
-
-bool SessionSettings::setKeepMediaLimit(
-		PeerId peerId,
-		std::optional<size_type> limit) {
-	Expects(peerId && (peerIsUser(peerId)
-		|| peerIsChat(peerId)
-		|| peerIsChannel(peerId)));
-	Expects(!limit || (*limit >= 0
-		&& *limit <= std::numeric_limits<qint32>::max()));
-	if (keepMediaLimit(peerId) == limit) {
-		return false;
-	}
-	if (limit) {
-		if (!_keepMediaLimits.contains(peerId)
-			&& _keepMediaLimits.size() >= kMaxKeepMediaLimits) {
-			return false;
-		}
-		_keepMediaLimits[peerId] = *limit;
-	} else {
-		_keepMediaLimits.remove(peerId);
-	}
-	return true;
 }
 
 } // namespace Main
