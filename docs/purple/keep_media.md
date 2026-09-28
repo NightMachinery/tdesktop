@@ -21,6 +21,11 @@ Per-chat overrides are appended to the existing encrypted session-settings
 payload. Older clients can read the preceding fields, but an older client that
 rewrites the payload will omit the unknown tail and discard the overrides.
 
+The storage library can now accept key-specific time limits and apply them to
+both stale selection and the next prune timer. It still has no chat ownership
+data, so the per-chat overrides are not yet passed to that library and cannot
+affect cached files. The storage-library change awaits a desktop compile check.
+
 For enforcement, associate each cached key with every chat that references it
 and both cache database kinds. A shared key should expire according to the
 longest applicable time limit among its owners; an unknown owner uses the
