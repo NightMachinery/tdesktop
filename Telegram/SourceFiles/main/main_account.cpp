@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_domain.h"
 #include "main/main_session_settings.h"
+#include "purple/purple_last_seen.h"
 
 namespace Main {
 namespace {
@@ -196,6 +197,7 @@ void Account::createSession(
 		local().readSelf(_session.get(), serialized, streamVersion);
 	}
 	_sessionValue = _session.get();
+	Purple::RecoverLastSeenPeek(_session.get());
 
 	Ensures(_session != nullptr);
 }

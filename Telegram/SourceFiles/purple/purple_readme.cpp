@@ -580,9 +580,11 @@ added either, because that is what an abandoned account and a block both look
 like and there is no field saying which.
 
 Last Seen Peek temporarily shares your Last Seen with that person only for
-`trade_hold`, reads theirs once, and puts your privacy back exactly as it was -
-always, whether anything was read or not. Nobody is told, and no other person's
-view of you changes. `trade_p` defaults to true. Explicit `trade_p = false`
+`trade_hold`, reads theirs once, and restores your previous privacy rules.
+The client keeps a local recovery record until the server confirms the restore,
+and retries it when the account next connects if a run was interrupted. A force
+quit or a long offline period can leave the temporary exception in place until
+that recovery succeeds. Nobody is told. `trade_p` defaults to true. Explicit `trade_p = false`
 removes the `Peek Last Seen` suffix and every peek link and action. A
 still-valid remembered exact read remains visible, but inert. The sheet's
 checkbox skips future confirmations on this device without changing `trade_p`.

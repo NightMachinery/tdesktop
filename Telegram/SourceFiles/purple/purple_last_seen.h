@@ -76,4 +76,6 @@ void LastSeenPeeksBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Main::Session*> session);
 
+void RecoverLastSeenPeek(not_null<Main::Session*> session);
+
 } // namespace Purple
