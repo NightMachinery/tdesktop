@@ -16,9 +16,10 @@ ordinary contiguous albums. Each audio message is queued once by peer and
 message ID. If the search finds no pinned songs, no transfer starts.
 
 Android ships the menu action and dialog in the release from source
-`9b908110` with core `e7bf8544`. The release emulator smoke test observed the
-dialog defaults: one song before and after, with whole-album inclusion checked.
-Full pin enumeration, neighbor and album resolution, and cache transfers have
-not yet been runtime verified on Android. The desktop implementation is now
-installed in the daily-use app and has passed an app launch smoke test; the
-menu for pinned music and its cache behavior have not yet been runtime verified.
+`5e428532` with core `e7bf8544`. The dialog defaults were observed on source
+`9b908110` and carried unchanged into `5e428532`: one song before and after,
+with whole-album inclusion checked. Full pin enumeration, neighbor and album
+resolution, and cache transfers have not yet been runtime verified on Android.
+The desktop implementation is installed in the daily-use app and has passed an
+app launch smoke test; the pinned music menu and its cache behavior have not
+yet been runtime verified.

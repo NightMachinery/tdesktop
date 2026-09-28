@@ -26,6 +26,9 @@ From the Android repository root, build the standalone flavor with:
 ./gradlew :TMessagesProj_AppStandalone:assembleAfatStandalone
 ```
 
+The JNI CMake root declares `project(TMessagesProj)` so a fresh CMake configure
+does not emit the missing-project warning.
+
 The output is an unsigned arm64-v8a APK. Sign artifacts for personal installs
 on the Mac with the release key kept outside the checkout. A disposable
 emulator may instead use a throwaway signing key, provided subsequent upgrades
