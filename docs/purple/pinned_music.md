@@ -40,10 +40,48 @@ reopening the chat. Pause and resume changed the row state correctly. The
 app-managed external cache contained 134 recently modified MP3 files and no
 recent temporary files; the standard Telegram Audio folder was empty. This
 supports real cache completion, though a per-song channel-to-file inventory
-was not collected. Retry remains untested because the run had no failures. A
+was not collected in that run. A
 final signed APK from source `3559ef67`, which includes a separate notification
 privacy fix, installed and showed the chat-menu action with the account intact.
 
 The desktop implementation is installed in the daily-use app and has passed
 an app launch smoke test; its menu and cache behavior have not yet been
 runtime verified.
+
+On 2026-09-28 the disposable Android test app repeated the default action in
+a test channel. The row reached 339 of 339 selected songs. An extension count
+of its managed cache found 328 MP3, seven M4A, one FLAC, and three MP3 files with
+additional filename suffixes, matching 339 audio-looking files in total. The
+older observation of 134 *recently modified* MP3 files was not a complete
+inventory. Equal totals did not prove that every selected document had a
+matching file; a document-to-path comparison was needed. The old job had
+disappeared after the app process ended, as its state is memory-only.
+
+The follow-up audit found a storage mismatch: the prior Android job used
+FileLoader's general cache mode, while normal chat music playback checks the
+managed document media path. Individual messages could therefore still show a
+download arrow even while the pinned-song row said all were downloaded. The
+user-linked example had a complete file of the expected size in the general
+cache on the disposable Android account. The Android fix downloads new songs
+to the path chat playback checks and promotes valid legacy cache-only files to
+that path. Cache-only files count as incomplete until promotion succeeds.
+
+The signed Android build with this fix and the per-file progress list was
+tested on the same disposable account on 2026-09-29. The default action
+completed at **339 of 339**. A private inventory matched 339 distinct selected
+message IDs to 339 distinct document keys in Telegram's normal Documents
+directory; every file existed and had positive size. The previously affected
+song lost its chat download arrow, and its row showed Downloaded. Scrolling
+the file list remained responsive. For a controlled retry, one small completed
+file was moved to a safe backup. Reopening the list reduced the count to
+338 of 339, showed a clear missing-file reason and a per-file Retry action.
+Retry restored a byte-identical normal-path file and the row returned to
+339 of 339. The extra backup was then removed. No account data was cleared.
+
+The Android selection follows Telegram's `isMusic` classification. It includes
+documents with non-voice audio attributes and MIME fallbacks for FLAC, OGG and
+Opus. Generic audio documents without those attributes may be omitted even if
+named MP3 or M4A. The pinned-message search pages until an empty response and
+signals a scan failure if page IDs stop decreasing; album expansion requests
+100 nearby messages. These boundaries should be checked if a user reports a
+song absent from the selected count.
