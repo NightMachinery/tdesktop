@@ -10,9 +10,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
   show message text despite preview suppression. Android source `d3844efb`
   fixes that bypass. Source `cbd5f02b` also hides self-destructing-media
-  captions in pinned, short, and full notification previews. These fixes await
-  a new signed APK and runtime check. Other preview-suppression behavior
-  remains unverified.
+  captions in pinned, short, and full notification previews. Source `d5774ea9`
+  keeps a forwarded sender name hidden in a non-exempt verification
+  notification while passcode-locked. The latter fix awaits a new signed APK;
+  notification privacy behavior still needs runtime checks.
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
@@ -24,15 +25,22 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   reported as failed when FileLoader finished it outside the cache directory.
   Android source `6fdb061a` checks the actual completed file in FileLoader's
   managed locations. Source `bce320af` clarifies the Retry label when a failed
-  search and failed songs are retried together. An updated APK and runtime
-  retest are pending. The desktop change is installed in the daily-use app and
-  passed an app launch smoke test, but its menu and cache behavior still need
-  runtime verification.
+  search and failed songs are retried together. On a disposable Android account,
+  the signed `bce320af` candidate showed the requested menu/dialog and completed
+  a large-channel run at 339/339 with no failed tracks, at most two active
+  transfers, and recent complete MP3 files in the app cache. Pause/resume and
+  leaving/reopening the chat worked. Retry could not be tested because nothing
+  failed; the corrected final APK is still being built. The desktop change is
+  installed in the daily-use app and passed an app launch smoke test, but its
+  menu and cache behavior still need runtime verification.
   See [pinned_music.md](pinned_music.md).
 - **Per-chat Keep Media:** the chat-menu request means local cache retention,
   not automatic download. Android's per-chat retention editor is committed in
-  source `1593b8d1` and awaits an updated APK and runtime check. Desktop remains
-  global-only for cache retention; per-chat desktop retention is deferred.
+  source `1593b8d1`. The signed `bce320af` candidate showed the effective
+  default duration in the chat menu, changed to a per-chat Forever exception,
+  and returned to the default after deleting the exception. Long-term cache
+  expiry still needs runtime verification. Desktop remains global-only for
+  cache retention; per-chat desktop retention is deferred.
   See [keep_media.md](keep_media.md) for the current scope.
 - **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
   default in both clients. The APK from Android source `5e428532` installs and
