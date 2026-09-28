@@ -12,8 +12,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   fixes that bypass. Source `cbd5f02b` also hides self-destructing-media
   captions in pinned, short, and full notification previews. Source `d5774ea9`
   keeps a forwarded sender name hidden in a non-exempt verification
-  notification while passcode-locked. The latter fix awaits a new signed APK;
-  notification privacy behavior still needs runtime checks.
+  notification while passcode-locked. The signed Android APK from source
+  `3559ef67` installed and launched with the test account intact, but the
+  notification privacy paths still need runtime checks.
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
@@ -30,9 +31,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   a large-channel run at 339/339 with no failed tracks, at most two active
   transfers, and recent complete MP3 files in the app cache. Pause/resume and
   leaving/reopening the chat worked. Retry could not be tested because nothing
-  failed; the corrected final APK is still being built. The desktop change is
-  installed in the daily-use app and passed an app launch smoke test, but its
-  menu and cache behavior still need runtime verification.
+  failed. The signed `3559ef67` APK installed and showed both chat-menu actions
+  with the account intact. The desktop change is installed in the daily-use
+  app and passed an app launch smoke test, but its menu and cache behavior
+  still need runtime verification.
   See [pinned_music.md](pinned_music.md).
 - **Per-chat Keep Media:** the chat-menu request means local cache retention,
   not automatic download. Android's per-chat retention editor is committed in

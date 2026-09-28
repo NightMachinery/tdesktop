@@ -41,7 +41,8 @@ app-managed external cache contained 134 recently modified MP3 files and no
 recent temporary files; the standard Telegram Audio folder was empty. This
 supports real cache completion, though a per-song channel-to-file inventory
 was not collected. Retry remains untested because the run had no failures. A
-final APK with a separate notification privacy fix is being built.
+final signed APK from source `3559ef67`, which includes a separate notification
+privacy fix, installed and showed the chat-menu action with the account intact.
 
 The desktop implementation is installed in the daily-use app and has passed
 an app launch smoke test; its menu and cache behavior have not yet been
