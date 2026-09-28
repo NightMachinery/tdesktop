@@ -16,3 +16,8 @@ rewritten just because its keyboard-layout counterpart was accepted.
 The mapper is `purple/purple_passcode.cpp` in the `purple-core` submodule. Its
 test covers the complete 85-character map, mixed text, and characters that
 must remain unchanged. The desktop application compiles that source directly.
+
+On Android, the signed APK from source `5e428532` with core `e7bf8544` was
+tested on a disposable emulator account. A text passcode set as `qwer` unlocked
+with Persian keyboard input `ضصثق`, and the exact ASCII `qwer` unlocked too.
+Passcode Lock was then turned off and the account remained logged in.
