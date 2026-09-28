@@ -22,17 +22,26 @@ with whole-album inclusion checked. A run in a large test channel showed 115
 pinned messages and hundreds of cache files, but 143 transfers ended with
 `RETRY_LIMIT`; the old toast reported only how many songs were queued. Source
 work now limits concurrency, backs off and retries these failures, and adds
-visible completion and failure counts in Android source `0196012c`. No APK with
-that change has been built or tested yet. A source audit found one additional
-case: an already-running ordinary download could finish in FileLoader's media
-directory while the pinned-music job checked only its cache directory, so a
-completed song was reported as failed and retried. Android source `6fdb061a`
-accepts complete files in the cache, the normal media directory, or an
-account-recorded custom path. The transfer behavior remains unverified until
-the new APK is tested on the large channel. Source `bce320af` also makes the
-Retry control name both actions when it retries a failed search and failed
-songs together; an invalid song remains counted as failed without an inert
-Retry control.
+visible completion and failure counts in Android source `0196012c`. A source
+audit found one additional case: an already-running ordinary download could
+finish in FileLoader's media directory while the pinned-music job checked only
+its cache directory. That completed song was reported as failed and retried.
+Android source `6fdb061a` accepts complete files in the cache, the normal
+media directory, or an account-recorded custom path. Source `bce320af` also
+makes the Retry control name both actions when it retries a failed search and
+failed songs together; an invalid song remains counted as failed without an
+inert Retry control.
+
+The signed `bce320af` Android candidate was tested in a large channel on a
+disposable account. Its chat menu and dialog showed the intended action and
+defaults. The progress row reached **339 of 339 downloaded** with no failed
+tracks, at most two active transfers, and remained attached after leaving and
+reopening the chat. Pause and resume changed the row state correctly. The
+app-managed external cache contained 134 recently modified MP3 files and no
+recent temporary files; the standard Telegram Audio folder was empty. This
+supports real cache completion, though a per-song channel-to-file inventory
+was not collected. Retry remains untested because the run had no failures. A
+final APK with a separate notification privacy fix is being built.
 
 The desktop implementation is installed in the daily-use app and has passed
 an app launch smoke test; its menu and cache behavior have not yet been
