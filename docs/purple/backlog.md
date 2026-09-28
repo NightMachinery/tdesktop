@@ -8,9 +8,11 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
-  show message text despite preview suppression. The bypass is fixed in
-  Android source `d3844efb`, which awaits a new signed APK and runtime check.
-  Other preview-suppression behavior remains unverified.
+  show message text despite preview suppression. Android source `d3844efb`
+  fixes that bypass. Source `cbd5f02b` also hides self-destructing-media
+  captions in pinned, short, and full notification previews. These fixes await
+  a new signed APK and runtime check. Other preview-suppression behavior
+  remains unverified.
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
