@@ -247,6 +247,7 @@ public:
 	}
 
 	[[nodiscard]] Storage::Cache::Key goodThumbnailCacheKey() const;
+	[[nodiscard]] Storage::Cache::Key cacheKey() const;
 	[[nodiscard]] bool goodThumbnailChecked() const;
 	[[nodiscard]] bool goodThumbnailGenerating() const;
 	[[nodiscard]] bool goodThumbnailNoData() const;
@@ -293,7 +294,6 @@ public:
 	[[nodiscard]] bool hasAttachedStickers() const;
 
 	[[nodiscard]] MediaKey mediaKey() const;
-	[[nodiscard]] Storage::Cache::Key cacheKey() const;
 	[[nodiscard]] uint8 cacheTag() const;
 
 	[[nodiscard]] bool canBeStreamed() const;

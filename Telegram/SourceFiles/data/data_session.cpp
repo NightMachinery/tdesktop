@@ -102,6 +102,32 @@ constexpr auto kMaxServiceNotificationMessageSize = 4096;
 
 using ViewElement = HistoryView::Element;
 
+[[nodiscard]] std::vector<Storage::Cache::Key> PhotoCacheKeys(
+		not_null<const PhotoData*> photo) {
+	auto result = std::vector<Storage::Cache::Key>();
+	for (const auto size : {
+		PhotoSize::Small,
+		PhotoSize::Thumbnail,
+		PhotoSize::Large,
+	}) {
+		result.push_back(photo->location(size).file().cacheKey());
+	}
+	for (const auto size : { PhotoSize::Small, PhotoSize::Large }) {
+		result.push_back(photo->videoLocation(size).file().cacheKey());
+	}
+	return result;
+}
+
+[[nodiscard]] std::vector<Storage::Cache::Key> DocumentCacheKeys(
+		not_null<const DocumentData*> document) {
+	return {
+		document->cacheKey(),
+		document->thumbnailLocation().file().cacheKey(),
+		document->videoThumbnailLocation().file().cacheKey(),
+		document->goodThumbnailCacheKey(),
+	};
+}
+
 // s: box 100x100
 // m: box 320x320
 // x: box 800x800
@@ -3546,6 +3572,9 @@ void Session::checkFormattedDateUpdates() {
 void Session::processMessagesDeleted(
 		PeerId peerId,
 		const QVector<MTPint> &data) {
+	for (const auto &messageId : data) {
+		_session->local().removeCacheOwnership({ peerId, messageId.v });
+	}
 	const auto list = messagesList(peerId);
 	const auto affected = historyLoaded(peerId);
 	if (!list && !affected) {
@@ -3578,6 +3607,9 @@ void Session::processMessagesDeleted(
 }
 
 void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
+	for (const auto &messageId : data) {
+		_session->local().removeNonChannelCacheOwnership(messageId.v);
+	}
 	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	auto historiesToCheck = base::flat_set<not_null<History*>>();
 	for (const auto &messageId : data) {
@@ -4254,6 +4286,16 @@ void Session::photoApplyFields(
 		videoSmall,
 		videoLarge,
 		videoStartTime);
+	const auto photoItems = _photoItems.find(photo);
+	if (photoItems != _photoItems.end()) {
+		const auto keys = PhotoCacheKeys(photo);
+		for (const auto &item : photoItems->second) {
+			const auto media = item->media();
+			if (media && media->photo() == photo && !media->webpage()) {
+				_session->local().observeCacheOwnership(item->fullId(), keys);
+			}
+		}
+	}
 }
 
 not_null<DocumentData*> Session::document(DocumentId id) {
@@ -4500,6 +4542,17 @@ void Session::documentApplyFields(
 	document->recountIsImage();
 	if (dc != 0 && access != 0) {
 		document->setRemoteLocation(dc, access, fileReference);
+	}
+	const auto documentItems = _documentItems.find(document);
+	if (documentItems != _documentItems.end()) {
+		const auto keys = DocumentCacheKeys(document);
+		for (const auto &item : documentItems->second) {
+			const auto media = item->media();
+			if (media && media->document() == document
+				&& !media->webpage()) {
+				_session->local().observeCacheOwnership(item->fullId(), keys);
+			}
+		}
 	}
 }
 
@@ -5329,6 +5382,14 @@ void Session::registerPhotoItem(
 	_photoItems[photo].insert(item);
 }
 
+void Session::observePhotoItemCache(
+		not_null<const PhotoData*> photo,
+		not_null<HistoryItem*> item) {
+	_session->local().observeCacheOwnership(
+		item->fullId(),
+		PhotoCacheKeys(photo));
+}
+
 void Session::unregisterPhotoItem(
 		not_null<const PhotoData*> photo,
 		not_null<HistoryItem*> item) {
@@ -5348,6 +5409,14 @@ void Session::registerDocumentItem(
 		document->owner().savedMusic().loadIds();
 	}
 	_documentItems[document].insert(item);
+}
+
+void Session::observeDocumentItemCache(
+		not_null<const DocumentData*> document,
+		not_null<HistoryItem*> item) {
+	_session->local().observeCacheOwnership(
+		item->fullId(),
+		DocumentCacheKeys(document));
 }
 
 void Session::unregisterDocumentItem(

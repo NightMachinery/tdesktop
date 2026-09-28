@@ -825,10 +825,16 @@ public:
 	void registerPhotoItem(
 		not_null<const PhotoData*> photo,
 		not_null<HistoryItem*> item);
+	void observePhotoItemCache(
+		not_null<const PhotoData*> photo,
+		not_null<HistoryItem*> item);
 	void unregisterPhotoItem(
 		not_null<const PhotoData*> photo,
 		not_null<HistoryItem*> item);
 	void registerDocumentItem(
+		not_null<const DocumentData*> document,
+		not_null<HistoryItem*> item);
+	void observeDocumentItemCache(
 		not_null<const DocumentData*> document,
 		not_null<HistoryItem*> item);
 	void unregisterDocumentItem(

@@ -117,6 +117,13 @@ public:
 		Cache::Database::SettingsUpdate &updateBig);
 	[[nodiscard]] std::optional<size_type> keepMediaLimit(PeerId peerId) const;
 	void setKeepMediaLimit(PeerId peerId, std::optional<size_type> limit);
+	void observeCacheOwnership(
+		FullMsgId message,
+		const std::vector<Cache::Key> &keys);
+	void removeCacheOwnership(FullMsgId message);
+	void removeNonChannelCacheOwnership(MsgId message);
+	void removePeerServerCacheOwnership(PeerId peerId);
+	void moveCacheOwnership(FullMsgId from, FullMsgId to);
 
 	[[nodiscard]] EncryptionKey cacheBigFileKey() const;
 	[[nodiscard]] QString cacheBigFilePath() const;
@@ -296,6 +303,10 @@ private:
 
 	void readMediaLastPlaybackPositions();
 	void writeMediaLastPlaybackPositions();
+	void readCacheOwnership();
+	void writeCacheOwnership();
+	bool writeCacheOwnershipState(bool dirty);
+	bool markCacheOwnershipDirty();
 
 	std::optional<RecentHashtagPack> saveRecentHashtags(
 		Fn<RecentHashtagPack()> getPack,
@@ -377,6 +388,11 @@ private:
 	bool _mediaLastPlaybackPositionsRead = false;
 
 	std::vector<std::pair<DocumentId, crl::time>> _mediaLastPlaybackPosition;
+	base::flat_map<FullMsgId, std::vector<Cache::Key>> _cacheOwnership;
+	size_type _cacheOwnershipLinks = 0;
+	quint64 _cacheOwnershipGeneration = 0;
+	bool _cacheOwnershipUncertain = true;
+	bool _cacheOwnershipDirty = false;
 
 	Webview::StorageId _webviewStorageIdBots;
 	Webview::StorageId _webviewStorageIdOther;
@@ -389,6 +405,7 @@ private:
 	base::Timer _writePrefsTimer;
 	base::Timer _writeLocationsTimer;
 	base::Timer _writeSearchSuggestionsTimer;
+	base::Timer _writeCacheOwnershipTimer;
 	bool _mapChanged = false;
 	bool _prefsChanged = false;
 	bool _locationsChanged = false;
