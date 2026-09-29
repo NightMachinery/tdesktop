@@ -25,6 +25,7 @@ enum class SyncAccountInventoryStatus {
 
 struct SyncAccountInventoryResult {
 	SyncAccountInventoryStatus status = SyncAccountInventoryStatus::Incomplete;
+	uint64_t accountUserId = 0;
 	SyncHistoryScanResult scan;
 	std::optional<SyncCandidateReadResult> read;
 	SyncDirectory directory;

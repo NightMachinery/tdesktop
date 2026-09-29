@@ -110,13 +110,21 @@ adapter does not reserve local state, retry, enable sync, or post on its own.
 
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
-state. With multiple accounts it requires an explicit choice. It does not yet
-bind an account, create a sync space, or enable transport. The future transport
-engine must reconcile the install's own remote record for clone or rewind
-signals before any publish. Android's uncalled bridge can initialize canonical
-local state bound to the active Telegram user in its account slot, reserve a
-canonical own config record with its pending version key, and confirm an exact
-staged server read-back. It can record and check own message IDs for cleanup.
+state. With multiple accounts it requires an explicit choice. Each inventory
+result now carries the account's numeric user ID, so a later setup call cannot
+use one account's scan to bind another. An uncalled local setup operation can
+create an install identity and account binding only after a complete,
+unambiguous scan. It reuses the selected existing space or creates a
+time-ordered space ID when the account has none; an existing local state is
+never silently rebound or moved to another space. A binding preference that
+has not persisted at a crash leaves the state unbound and unable to publish.
+The screen does not call this operation yet or enable transport. The future
+transport engine must reconcile the install's own remote record for clone or
+rewind signals before any publish. Android's uncalled bridge can initialize
+canonical local state bound to the active Telegram user in its account slot,
+reserve a canonical own config record with its pending version key, and
+confirm an exact staged server read-back. It can record and check own message
+IDs for cleanup.
 It validates the record's space, install and device identity. The binding token
 is saved synchronously in a per-user account preference; reservation refuses a
 missing or mismatched token. An uncalled Android store now persists canonical
