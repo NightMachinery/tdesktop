@@ -92,6 +92,26 @@ must explain that settings and playlist metadata become available to Telegram's
 cloud and to every session signed in to the account. Device-local `state.toml`
 stays local.
 
+One record layer should serve both streams: account binding, space discovery,
+record validation, publish and read-back confirmation, duplicate reconciliation,
+and safe retirement. Each install owns one current record per stream. The
+`config` payload remains a whole-file version that asks before applying;
+the future `library` payload should be a full mergeable playlist replica.
+Neither audio files nor download/cache choices belong in the library record.
+Before enabling transport, older clients must recognize valid records for
+unknown streams as evidence of an existing space, and account binding must
+survive a space move without silently changing accounts. Lost send responses
+also need reconciliation before retry, with a bounded issued-record history so
+late duplicate posts can be retired safely.
+
+A complete Saved Messages history scan remains required at initial setup.
+Incremental `messages.getHistory` above a lagged message-ID watermark may
+replace routine full rescans if disposable-account tests confirm its
+completeness; known record IDs still need explicit re-reads for edits and
+deletions. Until then, the daily complete recovery scan below remains the
+conservative plan. The scanner must wait through `FLOOD_WAIT` and resume
+without treating an incomplete scan as an empty account.
+
 ## Record transport
 
 Each install receives a random 128-bit identity and chooses one home account.
