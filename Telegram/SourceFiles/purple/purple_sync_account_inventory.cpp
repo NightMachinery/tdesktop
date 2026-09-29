@@ -7,9 +7,53 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_account_inventory.h"
 
+#include <QtCore/QCryptographicHash>
+
 #include <utility>
 
 namespace Purple {
+namespace {
+
+[[nodiscard]] SyncDirectoryCandidate DirectoryCandidate(
+		const SyncCandidateRecord &record) {
+	auto status = SyncEnvelopeStatus::Invalid;
+	auto payloadValidated = false;
+	switch (record.status) {
+	case SyncCandidateStatus::Valid:
+		status = SyncEnvelopeStatus::Valid;
+		payloadValidated = true;
+		break;
+	case SyncCandidateStatus::UnsupportedLibrary:
+		status = SyncEnvelopeStatus::Valid;
+		break;
+	case SyncCandidateStatus::UnsupportedStream:
+		status = SyncEnvelopeStatus::UnsupportedStream;
+		break;
+	case SyncCandidateStatus::UnsupportedEncoding:
+		status = SyncEnvelopeStatus::UnsupportedEncoding;
+		break;
+	case SyncCandidateStatus::NewerMajor:
+		status = SyncEnvelopeStatus::NewerMajor;
+		break;
+	default:
+		break;
+	}
+	return {
+		.messageId = record.id,
+		.documentId = record.documentId,
+		.editDate = record.editDate,
+		.original = true,
+		.status = status,
+		.header = record.header,
+		.recordHash = record.header && !record.bytes.isEmpty()
+			? QString::fromLatin1(QCryptographicHash::hash(
+				record.bytes, QCryptographicHash::Sha256).toHex())
+			: QString(),
+		.payloadValidated = payloadValidated,
+	};
+}
+
+} // namespace
 
 SyncAccountInventory::SyncAccountInventory(
 		not_null<Main::Session*> session,
@@ -93,13 +137,27 @@ void SyncAccountInventory::ScanFinished(SyncHistoryScanResult result) {
 
 void SyncAccountInventory::ReadFinished(SyncCandidateReadResult result) {
 	_result.read = std::move(result);
-	const auto status = !_result.scan.complete()
-		? SyncAccountInventoryStatus::Incomplete
-		: (_result.read->status == SyncCandidateReadStatus::Complete)
-		? SyncAccountInventoryStatus::Complete
-		: (_result.read->status == SyncCandidateReadStatus::NeedsReview)
-		? SyncAccountInventoryStatus::NeedsReview
-		: SyncAccountInventoryStatus::Incomplete;
+	auto candidates = std::vector<SyncDirectoryCandidate>();
+	candidates.reserve(_result.read->records.size());
+	for (const auto &record : _result.read->records) {
+		candidates.push_back(DirectoryCandidate(record));
+	}
+	_result.directory = ResolveSyncDirectory(
+		candidates,
+		_result.scan.complete()
+			&& _result.read->status != SyncCandidateReadStatus::Incomplete);
+	const auto directoryNeedsReview = _result.directory.unreadableCandidate
+		|| _result.directory.messageIdCollision
+		|| (_result.directory.selectedSpace
+			&& !_result.directory.publishableSpace);
+	auto status = SyncAccountInventoryStatus::Incomplete;
+	if (_result.scan.complete()
+		&& _result.read->status != SyncCandidateReadStatus::Incomplete) {
+		status = (_result.read->status == SyncCandidateReadStatus::Complete
+			&& !directoryNeedsReview)
+			? SyncAccountInventoryStatus::Complete
+			: SyncAccountInventoryStatus::NeedsReview;
+	}
 	Finish(status);
 }
 
