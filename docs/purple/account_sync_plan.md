@@ -87,7 +87,11 @@ it returns Complete only after both the full scan and every candidate read
 complete. An incomplete scan never starts candidate reading. The reader can
 populate Telegram's local download cache, but sends and deletes nothing.
 The reader preserves validated space and writer headers for records from future
-streams or encodings, while keeping their payload opaque and requiring review.
+streams or encodings while keeping their payload opaque. Such headers count as
+existing sync records rather than unreadable candidates; the setup box reports
+how many this version cannot read. Identity-encoded library envelopes are also
+header-only until a playlist payload validator exists. Newer-major and invalid
+candidates still require review before the client can make a group decision.
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. It does not yet
