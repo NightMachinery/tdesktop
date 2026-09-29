@@ -404,6 +404,12 @@ SyncStoreResult SyncLocalStore::StageConfig(
 	}
 	auto next = reserved.state;
 	next.configData = nextConfigData;
+	const auto issued = AppendIssuedConfigRecord(next, canonicalRecord);
+	if (!issued) {
+		return { issued.error == SyncIssueError::InvalidState
+			? SyncStoreStatus::InvalidState : SyncStoreStatus::InvalidRecord };
+	}
+	next = issued.state;
 	const auto serialized = SerializeSyncLocalState(next);
 	if (!serialized) {
 		return { SyncStoreStatus::InvalidState, serialized.error };

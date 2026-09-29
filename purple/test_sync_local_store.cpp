@@ -1,5 +1,6 @@
 #include "purple/purple_sync_local_store.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -129,6 +130,11 @@ void TestLifecycle() {
 		CHECK(store.state()->config.seq == 1);
 		CHECK(store.state()->config.pendingSeq == 1);
 		CHECK(store.state()->config.ownHash == record.payloadHash);
+		CHECK(store.state()->config.issuedRecords.size() == 1);
+		CHECK(store.state()->config.issuedRecords[0].seq == 1);
+		CHECK(store.state()->config.issuedRecords[0].recordHash
+			== QString::fromLatin1(QCryptographicHash::hash(
+				record.canonical, QCryptographicHash::Sha256).toHex()));
 		CHECK(Private(root + u"/pending/config-1.json"_q));
 		CHECK(Private(root + u"/state.json"_q));
 		CHECK(QFileInfo(root + u"/pending/config-1.json"_q).size()
@@ -140,6 +146,7 @@ void TestLifecycle() {
 		}());
 		CHECK(bool(saved));
 		CHECK(saved.state.preserved.value(u"future"_q).toBool());
+		CHECK(saved.state.config.issuedRecords.size() == 1);
 	}
 	{
 		auto restarted = Purple::SyncLocalStore(root);
@@ -149,6 +156,7 @@ void TestLifecycle() {
 		CHECK(pending.staged == record.canonical);
 		CHECK(pending.seq == 1);
 		CHECK(restarted.state()->configData.pending == record.version.key);
+		CHECK(restarted.state()->config.issuedRecords.size() == 1);
 	}
 }
 

@@ -32,6 +32,13 @@ confirming it. Shared core has an optional ledger of confirmed own message IDs,
 bounded to 256 entries, with a hash of each entire canonical record. It permits
 cleanup only for an older sequence after a fresh exact server read-back. A
 current confirmed record stays protected even when a duplicate was posted.
+Each stream also has a bounded log of the last 32 issued sequence and full
+record-hash pairs. Desktop staging writes the new pair with the reserved state
+before sending. A later discovered duplicate, including one from a previous
+sync space, can enter the ledger only when its complete record matches an
+issued pair and the install and creating device match. An unlogged old record
+cannot be retired. Android still needs this issued-log transition in its JNI
+bridge before its account-backed publisher can use it.
 Neither client enables account-backed sync yet. Desktop-local storage can
 acquire an exclusive `sync/lock`, reject malformed or newer state, and stage
 canonical config bytes
