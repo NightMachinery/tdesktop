@@ -133,7 +133,7 @@ void SyncHistoryScanner::RequestNext() {
 			self->_requestId = 0;
 			self->Finish(SyncHistoryScanStatus::RequestFailed, error.type());
 		}
-	}).handleAllErrors().send();
+	}).send();
 }
 
 void SyncHistoryScanner::Finish(
