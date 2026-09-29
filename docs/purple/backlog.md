@@ -37,7 +37,13 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   After a full run, 339 distinct selected songs mapped to 339 nonempty normal
   media files, and the reported song no longer showed a download arrow. Moving
   one test song aside changed progress to 338/339 with an explicit missing-file
-  reason; Retry restored it and progress returned to 339/339. The desktop
+  reason; Retry restored it and progress returned to 339/339. Android source
+  `8818448c` adds the searchable full-screen file list, separate play/pause and
+  row jump, plus a chat-menu shortcut to that chat's storage sheet. The signed
+  test build passed emulator checks including a filtered jump into older
+  history. The final signed APK was built from clean `8818448c`, installed
+  without losing the test account, and delivered privately. Migrated-group
+  and forum-topic jumps still need a suitable test account. The desktop
   change is installed in the daily-use app and passed a launch smoke test, but
   its menu and cache behavior still need runtime verification.
   See [pinned_music.md](pinned_music.md).
