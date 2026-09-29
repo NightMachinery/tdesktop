@@ -5,8 +5,13 @@ remain the current behavior.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
-envelopes, and config payload inspection. Neither client exposes account-backed
-sync yet; local sync state, transport, and user interface remain to be built.
+envelopes, config payload inspection, and a versioned device-local sync state.
+The state records each stream's issued, pending, and confirmed sequence, its
+last payload hash, and the config version ancestry. Its read-back checks only
+confirm an exact sequence and hash match; a higher own sequence or a matching
+sequence with a different hash signals a clone or rewind. Neither client
+exposes account-backed sync yet; durable state-file writes, transport, and user
+interface remain to be built.
 Compressed library records remain unsupported until the playlist phase.
 
 Purple can use each account's Saved Messages to carry configuration and future
