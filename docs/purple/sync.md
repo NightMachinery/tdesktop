@@ -4,10 +4,12 @@
 have two files, and nothing in the fork keeps them in step. This document is
 about the one mechanism that does, and about the ones deliberately not built.
 
-For a proposed account-backed sync flow for settings and future playlists, see
-[account_sync_plan.md](account_sync_plan.md). The plan has not been implemented.
+For the proposed account-backed sync flow for settings and future playlists,
+see [account_sync_plan.md](account_sync_plan.md). Desktop now has a read-only
+**Sync across devices** box that checks one selected account's Saved Messages;
+it does not turn on account-backed sync or send a document.
 
-Two actions, and that is the whole feature:
+The current manual transfer has two actions:
 
 - **Settings > Advanced > Purple > Send settings to Saved Messages** uploads
   the current `settings.toml` to your own Saved Messages as a document, named
