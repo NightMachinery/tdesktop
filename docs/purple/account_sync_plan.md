@@ -54,9 +54,12 @@ uncalled reader re-reads each candidate by ID, checks that it is still an
 original document in Saved Messages, caps its download at 4 MiB, and classifies
 the record envelope and config payload. Missing, changed, oversized, newer,
 invalid, or inaccessible candidates stay visible as unresolved results; they
-cannot establish that the account has no sync group. The reader can populate
-Telegram's local download cache, but sends and deletes nothing. The future
-transport engine must reconcile the install's
+cannot establish that the account has no sync group. An uncalled inventory
+coordinator now joins the two operations for one explicitly selected account:
+it returns Complete only after both the full scan and every candidate read
+complete. An incomplete scan never starts candidate reading. The reader can
+populate Telegram's local download cache, but sends and deletes nothing. The
+future transport engine must reconcile the install's
 own remote record for clone or rewind signals before any publish. Android's
 uncalled JNI bridge can initialize canonical local state, reserve a canonical
 own config record with its pending version key, and confirm an exact staged
