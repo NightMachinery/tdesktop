@@ -12,7 +12,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
   `a950e13c` aligns settings size and Saved Messages search limits with
-  desktop. Server-confirmed send bookkeeping, self-echo suppression, persistent
+  desktop. The signed `a950e13c` APK installed over the disposable account,
+  opened its existing Chats screen, and was delivered privately on 2026-09-29.
+  The import-backup and 4 MiB boundary behavior still need targeted runtime
+  checks. Server-confirmed send bookkeeping, self-echo suppression, persistent
   incoming offers, and the playlist feature remain open.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from

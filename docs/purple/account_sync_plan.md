@@ -48,6 +48,12 @@ between clients, and preserve Android's pre-import backup across editor saves.
 Update the existing documentation to describe Saved Messages' cloud privacy
 accurately.
 
+Android source `6df36b1d` now keeps a separate pre-import backup across editor
+saves, and `a950e13c` matches desktop's 4 MiB import and 100-document search
+limits. That signed build opened the retained test account on 2026-09-29; the
+backup and large-file boundaries have not yet been exercised in a live import.
+The send-confirmation and self-echo work below remains open.
+
 On desktop, the current `UploadTo` call returns after `sendFiles` queues file
 preparation. Neither that return nor `Uploader::documentReady` proves the
 message reached Telegram. A confirmed-send signal must follow the single file
