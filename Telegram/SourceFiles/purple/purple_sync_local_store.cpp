@@ -431,12 +431,16 @@ SyncStoreResult SyncLocalStore::StageConfig(
 
 SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 		const QByteArray &serverRecord,
-		const QString &currentDevice) {
+		const QString &currentDevice,
+		int32_t messageId) {
 	if (_status != SyncStoreStatus::Ready || !_state) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (_state->config.pendingSeq == 0) {
 		return { SyncStoreStatus::NoPending };
+	}
+	if (messageId <= 0) {
+		return { SyncStoreStatus::InvalidRecord };
 	}
 	const auto pending = ReadPendingConfigLocked();
 	if (!pending) {
@@ -476,7 +480,16 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 		|| inspected.version.lineage != stagedVersion.lineage) {
 		return { SyncStoreStatus::Unconfirmed };
 	}
-	const auto serialized = SerializeSyncLocalState(confirmation.state);
+	if (serverRecord != pending.staged) {
+		return { SyncStoreStatus::Unconfirmed };
+	}
+	const auto recorded = RecordConfirmedOwnConfigMessage(
+		confirmation.state, messageId, serverRecord);
+	if (!recorded) {
+		return { recorded.error == SyncOwnMessageError::InvalidState
+			? SyncStoreStatus::InvalidState : SyncStoreStatus::InvalidRecord };
+	}
+	const auto serialized = SerializeSyncLocalState(recorded.state);
 	if (!serialized) {
 		return { SyncStoreStatus::InvalidState, serialized.error };
 	}
@@ -484,7 +497,7 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 	if (stateStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stateStatus });
 	}
-	_state = confirmation.state;
+	_state = recorded.state;
 	if (!QFile::remove(PendingPath(observation.seq))) {
 		return SetFailure({ SyncStoreStatus::CleanupFailed });
 	}

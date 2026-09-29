@@ -1,7 +1,8 @@
 # Account-backed Purple sync proposal
 
-Status: design plus foundational core and Android JNI. The existing manual
-Send/Import actions remain the current behavior.
+Status: design plus shared-core and client-local foundations. Account-backed
+sync is not enabled in either client; the existing manual Send/Import actions
+remain the current behavior.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -18,17 +19,23 @@ invalid ancestry. This lets other installs classify the acknowledgement as
 the same config instead of mistaking it for a new edit.
 
 The state records each stream's issued, pending, and confirmed sequence, its
-last payload hash, and the config version ancestry. Its read-back checks only
-confirm an exact sequence and hash match; a higher own sequence or a matching
-sequence with a different hash signals a clone or rewind. Neither client
-exposes account-backed sync yet. Desktop-local storage can acquire an exclusive
+last payload hash, and the config version ancestry. Core's read-back check
+compares sequence and payload hash; a higher own sequence or a matching
+sequence with a different hash signals a clone or rewind. The client bridges
+also require the full server record to match the staged canonical bytes before
+confirming it. Shared core has an optional ledger of confirmed own message IDs,
+bounded to 256 entries, with a hash of each entire canonical record. It permits
+cleanup only for an older sequence after a fresh exact server read-back. A
+current confirmed record stays protected even when a duplicate was posted.
+Neither client exposes account-backed sync yet. Desktop-local storage can acquire an exclusive
 `sync/lock`, reject malformed or newer state, and stage canonical config bytes
 before committing a reserved `sync/state.json`. It creates no state while sync
 is off, keeps `sync/` and its pending files owner-only on Unix, and pauses when
 a pending file is absent or disagrees with the state. The desktop local store
-accepts a validated own config read-back, confirms only the exact
-pending sequence and payload hash, and records the staged version as base with
-its lineage. A changed content fingerprint clears old equivalent keys;
+accepts a validated own config read-back with its Telegram message ID, confirms
+only the exact staged record, and atomically records that message ID with the
+confirmed state and staged version as base with its lineage. A changed content
+fingerprint clears old equivalent keys;
 `seen_seq` survives. It writes confirmed state before deleting the staged
 envelope. After a crash in that gap, restart deletes only a validated stage
 matching the confirmed state. Older staged own records are also obsolete once
@@ -43,8 +50,9 @@ loss. The future transport engine must reconcile the install's
 own remote record for clone or rewind signals before any publish. Android's
 uncalled JNI bridge can initialize canonical local state, reserve a canonical
 own config record with its pending version key, and confirm an exact staged
-server read-back. It validates the record's space, install and device identity;
-it does not yet persist these results. Android local storage, network transport
+server read-back. It can record and check own message IDs for later cleanup.
+It validates the record's space, install and device identity; it does not yet
+persist these results. Android local storage, network transport
 and the account-sync interface remain to be built.
 
 Compressed library records remain unsupported until the playlist phase.
@@ -114,17 +122,18 @@ a problem that pauses sync. Pause, turn off, Sync now, History and device
 details live on the same screen. Turning sync off keeps the local settings and
 restores the legacy Send/Import behavior.
 
-Every install owns only its own sync messages. A device-local ledger will tie
-each of its message IDs to the exact sequence and hash it posted; replacing or
-deleting an old message requires a matching server read-back. If the user's
+Every install owns only its own sync messages. The device-local ledger ties
+each confirmed message ID to the exact sequence and full record it posted;
+replacing or deleting an old message requires a matching server read-back.
+The transport still needs to perform those reads and deletes. If the user's
 own sync message disappears or changes unexpectedly, the client pauses and
 asks instead of recreating or deleting it. Legacy manual posts and explicit
 **Save a copy** snapshots are never touched. A rare fork in which two devices
 start separate sync groups must use a stable, immutable ordering of group IDs.
 Moving a device to the selected group without changing its settings may happen
 silently; different settings require a choice and remain recoverable. The
-group-order encoding and fork cases need shared-core tests before transport
-integration.
+group-order encoding is tested in shared core; fork migration cases still need
+tests before transport integration.
 
 ## Settings first
 

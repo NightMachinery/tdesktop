@@ -89,7 +89,8 @@ public:
 		const SyncLocalConfigState &nextConfigData);
 	[[nodiscard]] SyncStoreResult ConfirmConfigReadBack(
 		const QByteArray &serverRecord,
-		const QString &currentDevice);
+		const QString &currentDevice,
+		int32_t messageId);
 	[[nodiscard]] const SyncLocalState *state() const;
 	[[nodiscard]] SyncStoreStatus status() const;
 
