@@ -534,6 +534,13 @@ there. `-workdir` isolates `tdata`; it does not necessarily isolate Purple's
 global settings unless `XDG_CONFIG_HOME` reaches the app as well. Do not infer
 the established account's state from a disposable workdir.
 
+After the 2026-09-29 optimized install, a separate launch with no `-workdir`
+reached the established profile's **Enter your local passcode** screen. This
+confirms that the installed bundle did not start with a fresh login. The
+passcode was neither read nor entered, so this check does not establish chat
+or Peek behavior beyond the locked screen. Quit only the process started for
+the check, using the bundle ID or its verified exact PID.
+
 `macdeployqt` comes from whichever Qt prefix `build_app.sh` used, by the same
 rule: `../tdesktop-libs/qt-patched` when that exists, the merged Homebrew
 prefix otherwise, and `QtPrefix` overrides both. The two scripts have to agree,
