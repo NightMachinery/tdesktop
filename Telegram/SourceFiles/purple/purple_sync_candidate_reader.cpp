@@ -28,10 +28,14 @@ constexpr auto kMaximumRecordBytes = 4 * 1024 * 1024;
 [[nodiscard]] SyncCandidateRecord Classify(int32_t id, QByteArray bytes) {
 	auto record = SyncCandidateRecord{ .id = id, .bytes = std::move(bytes) };
 	const auto parsed = ParseSyncEnvelope(record.bytes);
+	record.header = parsed.header;
 	record.envelopeError = parsed.error;
 	switch (parsed.status) {
 	case SyncEnvelopeStatus::NewerMajor:
 		record.status = SyncCandidateStatus::NewerMajor;
+		return record;
+	case SyncEnvelopeStatus::UnsupportedStream:
+		record.status = SyncCandidateStatus::UnsupportedStream;
 		return record;
 	case SyncEnvelopeStatus::UnsupportedEncoding:
 		record.status = SyncCandidateStatus::UnsupportedEncoding;
