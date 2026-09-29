@@ -6,8 +6,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 ## Open
 
 - **Account-backed settings and playlist sync:** the design in
-  [account_sync_plan.md](account_sync_plan.md) uses opt-in records in each
-  account's Saved Messages, with config first and playlist metadata later.
+  [account_sync_plan.md](account_sync_plan.md) uses opt-in records in one
+  selected account's Saved Messages per device, with config first and playlist
+  metadata later. The proposed UI has one Sync across devices entry, persistent
+  updates to review, local History and Undo, and explicit conflict choices.
   Shared core now constructs config version ancestry, classifies incoming
   heads, canonicalizes strict JSON, validates and builds config records, and
   checks versioned device-local sync state for exact read-back and clone/rewind
@@ -16,8 +18,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   simulation covers delayed discovery, edit and repost modes, failure retry,
   conflicts, and restart recovery. Desktop has an unused durable local store
   for staged config records and state, including exact read-back confirmation
-  and restart cleanup. Android local storage and version-aware confirmation,
-  transport, and UI are still unimplemented.
+  and restart cleanup. Android JNI can initialize local state, reserve a
+  canonical own config record with its pending key, and confirm an exact
+  staged read-back, but none of those calls has a runtime owner yet. Android
+  local storage, account binding, transport, and both clients' UI remain open.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
