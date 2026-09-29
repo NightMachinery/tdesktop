@@ -12,11 +12,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
   `a950e13c` aligns settings size and Saved Messages search limits with
-  desktop. The signed `a950e13c` APK installed over the disposable account,
-  opened its existing Chats screen, and was delivered privately on 2026-09-29.
-  The import-backup and 4 MiB boundary behavior still need targeted runtime
-  checks. Server-confirmed send bookkeeping, self-echo suppression, persistent
-  incoming offers, and the playlist feature remain open.
+  desktop. Android `8b07614c` and desktop `f7f536d165` now record a sent
+  fingerprint and suppress self-offers only after Telegram confirms a server
+  message id. The signed `8b07614c` APK upgraded the retained test account
+  and was delivered privately on 2026-09-29. The desktop change passed a full
+  optimized build and isolated launch but is not in the installed app yet.
+  Live receipt behavior, import-backup and 4 MiB boundaries, persistent
+  incoming offers, and playlists remain open. Android's generic Retry after a
+  failed send still bypasses Purple's receipt callback.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
@@ -81,9 +84,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   with a disposable workdir reached normal startup with Debug off. A separate
   launch with its normal profile reached the established local passcode screen,
   confirming it did not start a fresh login; chats and eligible Peek behavior
-  remain unverified behind the lock. A strict signing check still reports an
-  untrusted local certificate, although the installed app launches. Mute
-  behavior already matches normal behavior.
+  remain unverified behind the lock. Mute behavior already matches normal
+  behavior.
 - **Android Contacts Last Seen filter:** the signed APK from source `5e428532`
   shows “Visible or peekable last seen” in Contacts More. Turning it on showed
   the active-filter empty state, and turning it off restored the same contact.
