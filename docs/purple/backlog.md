@@ -54,8 +54,11 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   and was delivered privately on 2026-09-29. The desktop change passed a full
   optimized build and isolated launch but is not in the installed app yet.
   Live receipt behavior, import-backup and 4 MiB boundaries, persistent
-  incoming offers, and playlists remain open. Android's generic Retry after a
-  failed send still bypasses Purple's receipt callback.
+  incoming offers, and playlists remain open. Android source `4881e7c0`
+  restores Purple's receipt callback when Telegram retries a failed settings
+  document from its own staging cache in Saved Messages. The signed APK built
+  and launched with the disposable account intact; a forced-failure Retry
+  cycle has not yet been tested live.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
