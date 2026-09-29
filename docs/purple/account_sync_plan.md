@@ -55,9 +55,11 @@ backup and large-file boundaries have not yet been exercised in a live import.
 Both legacy sharing paths now wait for a confirmed server message id before
 recording the sent fingerprint and advancing the account's offer watermark.
 An older send that finishes after a newer edit cannot replace the current
-file's sent fingerprint. These are source changes only; the Android receipt
-patch still needs an application build, and neither client has had a live
-account-backed receipt test.
+file's sent fingerprint. The Android receipt patch built from exact source
+`8b07614c`, passed signature checks, and upgraded the preserved emulator
+without losing its login; its signed APK was delivered privately. Neither
+client has had a live receipt test; compile and startup checks do not prove
+server acceptance handling.
 
 On desktop, `UploadTo` returns after `sendFiles` queues file preparation. A
 single-file receipt follows the post through preparation and upload to the
