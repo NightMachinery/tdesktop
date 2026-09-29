@@ -1,13 +1,20 @@
 # Syncing settings between devices
 
 `settings.toml` is per-install. Two Purple Telegram clients on two machines
-have two files, and nothing in the fork keeps them in step. This document is
-about the one mechanism that does, and about the ones deliberately not built.
+have two files, and nothing in the fork keeps them in step automatically.
+This document describes the manual transfer mechanisms and the alternatives
+deliberately not built.
 
 For the proposed account-backed sync flow for settings and future playlists,
-see [account_sync_plan.md](account_sync_plan.md). Desktop now has a read-only
-**Sync across devices** box that checks one selected account's Saved Messages;
-it does not turn on account-backed sync or send a document.
+see [account_sync_plan.md](account_sync_plan.md). Desktop's **Sync across
+devices** box checks one selected account's Saved Messages. After a complete,
+unambiguous check finds no existing sync records, the publish action scans
+again and can initialize local sync state and send one settings record only if
+the new inventory is also complete and empty. A separate cloud disclosure and
+send confirmation follows that scan. It does not turn on continuous
+account-backed sync. Existing
+cloud records cannot be joined yet, and an existing local sync state disables
+the action because resuming a staged send is not available in this box.
 
 The current manual transfer has two actions:
 

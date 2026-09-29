@@ -1,10 +1,11 @@
 # Account-backed Purple sync proposal
 
-Status: design plus shared-core and client-local foundations. Desktop has a
-read-only **Sync across devices** setup box that can inspect one explicitly
-selected account's Saved Messages. Account-backed sync is not enabled in either
-client; the existing manual Send/Import actions remain the current transfer
-behavior.
+Status: design plus shared-core and client-local foundations. Desktop's
+**Sync across devices** box can inspect one explicitly selected account's Saved
+Messages and, after an empty complete inventory and explicit cloud disclosure
+and confirmation, publish one settings record. This is a manual one-time action.
+Continuous account-backed sync is not enabled in either client; the existing
+manual Send/Import actions remain available.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -38,7 +39,7 @@ before sending. A later discovered duplicate, including one from a previous
 sync space, can enter the ledger only when its complete record matches an
 issued pair and the install and creating device match. An unlogged old record
 cannot be retired. Android's JNI bridge returns the issued pair together with
-the reserved config state; neither app calls an account-backed publisher yet.
+the reserved config state; Android does not call an account-backed publisher.
 Shared core now also has an uncalled pure publish planner for one stream. Given
 binding, completed discovery, own-record observations, a staged record, and
 per-stream policy, it chooses wait, reconcile, stage, edit, post, or an older
@@ -116,7 +117,7 @@ Saved Messages. The future publisher must use that pending message for exact
 confirmation instead of posting again; an absent result alone does not cause
 a retry.
 
-An uncalled desktop one-shot config publisher now composes the local store,
+The desktop one-shot config publisher composes the local store,
 own-record matcher, pure publish planner, and exact post/read-back adapter.
 For an empty config space it can reserve and stage the current settings record
 before one post, then confirm only the returned exact server bytes. On restart
@@ -124,20 +125,34 @@ it can instead confirm a staged record already found in a fresh complete scan;
 when that scan finds no staged record, the planner still decides whether one
 retry is safe. Uncertain sends leave the stage in place. This first slice
 stops for review if another install already has a config record, and it does
-not yet publish later local changes or retire superseded messages. No UI calls
-the publisher, so account-backed sync remains disabled.
+not yet publish later local changes or retire superseded messages. The setup
+box calls it only after a completed empty inventory, a new full inventory on
+the publish click, local initialization, and separate user confirmation. This
+does not enable continuous account-backed sync.
 
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. Each inventory
-result now carries the account's numeric user ID, so a later setup call cannot
-use one account's scan to bind another. An uncalled local setup operation can
-create an install identity and account binding only after a complete,
-unambiguous scan. It reuses the selected existing space or creates a
-time-ordered space ID when the account has none; an existing local state is
-never silently rebound or moved to another space. A binding preference that
-has not persisted at a crash leaves the state unbound and unable to publish.
-The screen does not call this operation yet or enable transport. The future
+result carries the account's numeric user ID, so setup cannot use one account's
+scan to bind another. The box retains only its latest complete, empty inventory
+for the same live account and session. Clicking Publish starts a new full scan;
+only its complete empty result can open the final send confirmation. It discards
+the prior result on a new check,
+cancel, account switch, logout, or box close. Existing cloud sync records disable
+the publish action because joining an existing group is not supported. An
+existing local `sync/state.json` also disables the action: this box does not yet
+offer restart or retry of a staged send, even after another complete scan.
+The local setup operation creates an install identity and account binding only
+after a complete, unambiguous scan. It can reuse a selected existing space or
+create a time-ordered space ID when the account has none, though the current UI
+allows only the empty-space case. An existing local state is never silently
+rebound or moved. A binding preference that has not persisted at a crash leaves
+the state unbound and unable to publish. Confirmation explains that settings
+may include chat IDs and names and that Saved Messages is a Telegram cloud chat
+readable by other signed-in sessions. The box then initializes locally and
+starts one post, reporting confirmation, uncertainty, review, binding, and store
+failures without an automatic retry. An uncertain outcome requires a new scan
+before any future retry design can safely proceed. The future
 transport engine must reconcile the install's own remote record for clone or
 rewind signals before any publish. Android's uncalled bridge can initialize
 canonical local state bound to the active Telegram user in its account slot,
