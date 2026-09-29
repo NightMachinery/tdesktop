@@ -40,8 +40,8 @@ reopening the chat. Pause and resume changed the row state correctly. The
 app-managed external cache contained 134 recently modified MP3 files and no
 recent temporary files; the standard Telegram Audio folder was empty. This
 supports real cache completion, though a per-song channel-to-file inventory
-was not collected in that run. A
-final signed APK from source `3559ef67`, which includes a separate notification
+was not collected in that run. An earlier signed APK from source `3559ef67`,
+which includes a separate notification
 privacy fix, installed and showed the chat-menu action with the account intact.
 
 The desktop implementation is installed in the daily-use app and has passed
@@ -77,6 +77,36 @@ file was moved to a safe backup. Reopening the list reduced the count to
 338 of 339, showed a clear missing-file reason and a per-file Retry action.
 Retry restored a byte-identical normal-path file and the row returned to
 339 of 339. The extra backup was then removed. No account data was cleared.
+
+Android source `8818448c` replaces the fixed-height file dialog with a
+full-screen list opened by tapping the progress bar. It searches song titles,
+artists, and original filenames. Tapping a row jumps to that message in the
+chat; the separate play/pause control uses Telegram's player, and failed rows
+keep their Retry action. Playback started from the list follows chat message
+order among the currently shown downloaded songs. The chat More menu also has
+**Storage used by this chat**, which opens Telegram's per-chat cache sheet after
+its scan or explains that no files were attributed to the chat. It combines
+the old and new peers of a locally known migrated group.
+
+The signed test build of `8818448c` preserved the disposable account and
+completed the large-channel job at 339 of 339. Emulator checks covered search
+by title and artist, a Persian filename, no-match and clear states, play/pause
+and external media controls, and the storage sheet. The first build exposed a
+row-tap bug, which was fixed before the second build. In that build, row taps
+jumped to exact messages both unfiltered and after filtering; the filtered
+case loaded older history while the chat was showing recent messages. Tapping
+Play stayed in the list, and jumping during playback kept the song playing.
+No fatal exception appeared in logcat. Per-row Retry was not repeated for this
+UI change; the earlier controlled missing-file test covered the unchanged
+transfer engine. Migrated-group and forum-topic jumps still lack live QA.
+
+The final signed arm64 APK was rebuilt from clean Android commit `8818448c`,
+verified with the release signing certificate, and installed over the test
+account without clearing its data. It opened the Chats UI without a login
+prompt. The emulator's pixel capture was black during this last smoke test,
+so that check used Android's UI hierarchy; the interaction checks above were
+visually observed on the signed test build of the same source patch. The final
+APK was delivered privately on 2026-09-29.
 
 The Android selection follows Telegram's `isMusic` classification. It includes
 documents with non-voice audio attributes and MIME fallbacks for FLAC, OGG and
