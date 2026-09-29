@@ -394,8 +394,12 @@ that receipt only for a failed outgoing settings document staged under the
 account's Purple sync cache and sent to its own Saved Messages. A successful
 retry records the server message ID and the sent fingerprint only if the
 current settings still match the staged bytes; a failed
-retry changes neither. This path built and passed an emulator startup check,
-but a forced-failure Retry cycle has not been verified live. A lost server
+retry changes neither. Telegram's automatic resend at app start, after the
+app was closed during a send, now gets the same receipt (Android `5c687693`);
+a live emulator test on 2026-09-30 confirmed that the resent document recorded
+the fingerprint and offer watermark and was not offered back for import. A
+Retry of a message in Telegram's failed state has not been verified live,
+because offline sends stay pending rather than failing. A lost server
 response remains ambiguous. The new sync engine needs durable reconciliation
 rather than relying on this legacy callback indefinitely.
 
