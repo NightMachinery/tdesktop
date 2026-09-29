@@ -116,6 +116,17 @@ Saved Messages. The future publisher must use that pending message for exact
 confirmation instead of posting again; an absent result alone does not cause
 a retry.
 
+An uncalled desktop one-shot config publisher now composes the local store,
+own-record matcher, pure publish planner, and exact post/read-back adapter.
+For an empty config space it can reserve and stage the current settings record
+before one post, then confirm only the returned exact server bytes. On restart
+it can instead confirm a staged record already found in a fresh complete scan;
+when that scan finds no staged record, the planner still decides whether one
+retry is safe. Uncertain sends leave the stage in place. This first slice
+stops for review if another install already has a config record, and it does
+not yet publish later local changes or retire superseded messages. No UI calls
+the publisher, so account-backed sync remains disabled.
+
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. Each inventory

@@ -15,6 +15,7 @@ class Account;
 
 namespace Purple {
 
+[[nodiscard]] QByteArray AccountSyncBindingToken(Main::Account &account);
 [[nodiscard]] SyncAccountBindingVerdict CheckAccountSyncBinding(
 	const SyncLocalState &state,
 	Main::Account &account);
