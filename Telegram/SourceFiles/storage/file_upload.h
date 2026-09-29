@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class ApiWrap;
 struct FilePrepareResult;
+struct SendFileReceipt;
 
 namespace Api {
 enum class SendProgressType;
@@ -34,6 +35,7 @@ struct UploadedMedia {
 	Api::RemoteFileInfo info;
 	Api::SendOptions options;
 	bool edit = false;
+	std::shared_ptr<SendFileReceipt> receipt;
 };
 
 struct UploadSecureProgress {

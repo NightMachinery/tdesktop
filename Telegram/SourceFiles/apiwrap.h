@@ -19,6 +19,7 @@ struct MessageGroupId;
 struct SendingAlbum;
 enum class SendMediaType;
 struct FileLoadTo;
+struct SendFileReceipt;
 struct ChatRestrictionsInfo;
 
 namespace Main {
@@ -365,7 +366,8 @@ public:
 		Ui::PreparedList &&list,
 		SendMediaType type,
 		std::shared_ptr<SendingAlbum> album,
-		SendAction action);
+		SendAction action,
+		Fn<void(std::optional<MsgId>)> receipt = nullptr);
 	void sendFile(
 		const QByteArray &fileContent,
 		SendMediaType type,
@@ -384,7 +386,8 @@ public:
 	void sendUploadedDocument(
 		FullMsgId localId,
 		Api::RemoteFileInfo file,
-		Api::SendOptions options);
+		Api::SendOptions options,
+		std::shared_ptr<SendFileReceipt> receipt = nullptr);
 
 	void cancelLocalItem(not_null<HistoryItem*> item);
 
@@ -625,13 +628,15 @@ private:
 		not_null<HistoryItem*> item,
 		const MTPInputMedia &media,
 		Api::SendOptions options,
-		Fn<void(bool)> done = nullptr);
+		Fn<void(bool)> done = nullptr,
+		std::shared_ptr<SendFileReceipt> receipt = nullptr);
 	void sendMediaWithRandomId(
 		not_null<HistoryItem*> item,
 		const MTPInputMedia &media,
 		Api::SendOptions options,
 		uint64 randomId,
-		Fn<void(bool)> done = nullptr);
+		Fn<void(bool)> done = nullptr,
+		std::shared_ptr<SendFileReceipt> receipt = nullptr);
 	void sendMultiPaidMedia(
 		not_null<HistoryItem*> item,
 		not_null<SendingAlbum*> album,

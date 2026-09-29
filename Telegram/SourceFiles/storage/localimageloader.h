@@ -131,6 +131,22 @@ struct SendingAlbum {
 
 };
 
+struct SendFileReceipt {
+	~SendFileReceipt();
+
+	Fn<void(std::optional<MsgId>)> finished;
+	bool completed = false;
+
+	void complete(std::optional<MsgId> id) {
+		if (!completed) {
+			completed = true;
+			if (finished) {
+				finished(id);
+			}
+		}
+	}
+};
+
 struct FileLoadTo {
 	FileLoadTo(
 		PeerId peer,
@@ -146,6 +162,7 @@ struct FileLoadTo {
 	Api::SendOptions options;
 	FullReplyTo replyTo;
 	MsgId replaceMediaOf;
+	std::shared_ptr<SendFileReceipt> receipt;
 };
 
 using UploadFileParts = std::vector<QByteArray>;

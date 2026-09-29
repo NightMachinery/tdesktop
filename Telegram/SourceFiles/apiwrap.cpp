@@ -4209,7 +4209,15 @@ void ApiWrap::sendFiles(
 		Ui::PreparedList &&list,
 		SendMediaType type,
 		std::shared_ptr<SendingAlbum> album,
-		SendAction action) {
+		SendAction action,
+		Fn<void(std::optional<MsgId>)> receipt) {
+	Expects(!receipt || (!album && list.files.size() == 1));
+	const auto fileReceipt = receipt
+		? std::make_shared<SendFileReceipt>()
+		: nullptr;
+	if (fileReceipt) {
+		fileReceipt->finished = std::move(receipt);
+	}
 	auto &ephemeral = _session->ephemeralMessages();
 	if (album && !ephemeral.isEphemeralBotReply(action.replyTo.messageId)) {
 		const auto peer = action.history->peer;
@@ -4217,11 +4225,15 @@ void ApiWrap::sendFiles(
 			if (ephemeral.hasEphemeralCommand(peer, file.caption.text)) {
 				LOG(("API Error: "
 					"Dropped album send with ephemeral command caption."));
+				if (fileReceipt) {
+					fileReceipt->complete(std::nullopt);
+				}
 				return;
 			}
 		}
 	}
-	const auto to = FileLoadTaskOptions(action);
+	auto to = FileLoadTaskOptions(action);
+	to.receipt = fileReceipt;
 	if (album) {
 		album->options = to.options;
 	}
@@ -4319,9 +4331,11 @@ void ApiWrap::sendUploadedPhoto(
 void ApiWrap::sendUploadedDocument(
 		FullMsgId localId,
 		Api::RemoteFileInfo info,
-		Api::SendOptions options) {
+		Api::SendOptions options,
+		std::shared_ptr<SendFileReceipt> receipt) {
 	if (const auto item = _session->data().message(localId)) {
 		if (!item->media() || !item->media()->document()) {
+			if (receipt) receipt->complete(std::nullopt);
 			return;
 		}
 		const auto media = Api::PrepareUploadedDocument(
@@ -4331,8 +4345,10 @@ void ApiWrap::sendUploadedDocument(
 		if (groupId) {
 			uploadAlbumMedia(item, groupId, media);
 		} else {
-			sendMedia(item, media, options);
+			sendMedia(item, media, options, nullptr, std::move(receipt));
 		}
+	} else if (receipt) {
+		receipt->complete(std::nullopt);
 	}
 }
 
@@ -5163,11 +5179,13 @@ void ApiWrap::sendMedia(
 		not_null<HistoryItem*> item,
 		const MTPInputMedia &media,
 		Api::SendOptions options,
-		Fn<void(bool)> done) {
+		Fn<void(bool)> done,
+		std::shared_ptr<SendFileReceipt> receipt) {
 	const auto randomId = base::RandomValue<uint64>();
 	_session->data().registerMessageRandomId(randomId, item->fullId());
 
-	sendMediaWithRandomId(item, media, options, randomId, std::move(done));
+	sendMediaWithRandomId(
+		item, media, options, randomId, std::move(done), std::move(receipt));
 }
 
 void ApiWrap::sendMediaWithRandomId(
@@ -5175,12 +5193,14 @@ void ApiWrap::sendMediaWithRandomId(
 		const MTPInputMedia &media,
 		Api::SendOptions options,
 		uint64 randomId,
-		Fn<void(bool)> done) {
+		Fn<void(bool)> done,
+		std::shared_ptr<SendFileReceipt> receipt) {
 	const auto history = item->history();
 	const auto replyTo = item->replyTo();
 	const auto peer = history->peer;
 
 	if (_session->ephemeralMessages().sendMedia(item, media)) {
+		if (receipt) receipt->complete(std::nullopt);
 		if (done) {
 			done(true);
 		}
@@ -5249,11 +5269,35 @@ void ApiWrap::sendMediaWithRandomId(
 			MTP_long(starsPaid),
 			Api::SuggestToMTP(options.suggest)
 		), [=](const MTPUpdates &result, const MTP::Response &response) {
+		if (receipt) {
+			auto serverId = std::optional<MsgId>();
+			const auto inspect = [&](const auto &updates) {
+				for (const auto &update : updates.vupdates().v) {
+					update.match([&](const MTPDupdateMessageID &data) {
+						if (data.vrandom_id().v == randomId) {
+							serverId = MsgId(data.vid().v);
+						}
+					}, [](const auto &) {});
+				}
+			};
+			result.match(
+				[&](const MTPDupdates &data) { inspect(data); },
+				[&](const MTPDupdatesCombined &data) { inspect(data); },
+				[&](const MTPDupdateShortSentMessage &data) {
+					serverId = MsgId(data.vid().v);
+				},
+				[](const auto &) {});
+			if (serverId && !IsServerMsgId(*serverId)) {
+				serverId.reset();
+			}
+			receipt->complete(serverId);
+		}
 		if (done) done(true);
 		if (updateRecentStickers) {
 			requestRecentStickers(std::nullopt, true);
 		}
 	}, [=](const MTP::Error &error, const MTP::Response &response) {
+		if (receipt) receipt->complete(std::nullopt);
 		if (done) done(false);
 		sendMessageFail(error, peer, randomId, itemId);
 	});

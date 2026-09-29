@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/platform/base_platform_info.h"
 #include "base/unixtime.h"
+#include "base/weak_ptr.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
@@ -351,7 +352,8 @@ void SearchForSettingsOffer(
 void UploadTo(
 		not_null<Main::Session*> session,
 		const QByteArray &content,
-		int version) {
+		int version,
+		Fn<void(std::optional<MsgId>)> finished) {
 	// Built from the bytes rather than from the path, so the message carries
 	// exactly what was read and validated a moment ago, and the name on it is
 	// ours rather than whatever the file happens to be called on disk.
@@ -373,17 +375,43 @@ void UploadTo(
 		std::move(list),
 		SendMediaType::File,
 		nullptr,
-		action);
+		action,
+		std::move(finished));
+}
+
+void NoteConfirmedSend(
+		not_null<Main::Session*> session,
+		const QByteArray &content,
+		MsgId messageId) {
+	NoteSettingsSent(content);
+	auto &settings = session->settings();
+	if (messageId > settings.purpleSettingsOfferMessageId()) {
+		settings.setPurpleSettingsOfferMessageId(messageId);
+		session->saveSettings();
+	}
 }
 
 } // namespace
 
-bool Upload(const QByteArray &content, int version) {
+bool Upload(
+		const QByteArray &content,
+		int version,
+		Fn<void(std::optional<MsgId>)> finished) {
 	const auto session = SomeSession();
 	if (!session) {
 		return false;
 	}
-	UploadTo(session, content, version);
+	const auto weak = base::make_weak(session);
+	UploadTo(session, content, version, [=](std::optional<MsgId> messageId) {
+		if (messageId) {
+			if (const auto live = weak.get()) {
+				NoteConfirmedSend(live, content, *messageId);
+			}
+		}
+		if (finished) {
+			finished(messageId);
+		}
+	});
 	return true;
 }
 
@@ -412,18 +440,27 @@ void SendSettingsToSavedMessages(
 		return;
 	}
 	const auto version = parsed.settings.version;
+	const auto weak = base::make_weak(session);
 	show->showBox(Ui::MakeConfirmBox({
 		.text = u"This posts your settings.toml to your Saved Messages, "
 			"where any Purple Telegram can import it."_q,
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			UploadTo(session, content, version);
-
-			// The same bookkeeping the automatic send does, because this puts
-			// the same file in the same chat: without it, turning the switch on
-			// after sending by hand would send the identical file again.
-			NoteSettingsSent(content);
-			show->showToast(u"Sent to Saved Messages"_q);
+			const auto live = weak.get();
+			if (!live) {
+				return;
+			}
+			UploadTo(live, content, version, crl::guard(live, [=](
+					std::optional<MsgId> messageId) {
+				if (messageId) {
+					NoteConfirmedSend(live, content, *messageId);
+					if (show && *show) {
+						show->showToast(u"Sent to Saved Messages"_q);
+					}
+				} else if (show && *show) {
+					show->showToast(u"Could not confirm settings send"_q);
+				}
+			}));
 		},
 		.confirmText = u"Send"_q,
 	}));

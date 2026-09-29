@@ -52,21 +52,35 @@ Android source `6df36b1d` now keeps a separate pre-import backup across editor
 saves, and `a950e13c` matches desktop's 4 MiB import and 100-document search
 limits. That signed build opened the retained test account on 2026-09-29; the
 backup and large-file boundaries have not yet been exercised in a live import.
-The send-confirmation and self-echo work below remains open.
+Both legacy sharing paths now wait for a confirmed server message id before
+recording the sent fingerprint and advancing the account's offer watermark.
+An older send that finishes after a newer edit cannot replace the current
+file's sent fingerprint. These are source changes only; the Android receipt
+patch still needs an application build, and neither client has had a live
+account-backed receipt test.
 
-On desktop, the current `UploadTo` call returns after `sendFiles` queues file
-preparation. Neither that return nor `Uploader::documentReady` proves the
-message reached Telegram. A confirmed-send signal must follow the single file
-through preparation and upload to the `sendPreparedMessage` server response;
-preparation, upload, and request failures also need completion paths. Keep a
-fingerprint pending in memory so a second local write does not queue a duplicate
+On desktop, `UploadTo` returns after `sendFiles` queues file preparation. A
+single-file receipt follows the post through preparation and upload to the
+`sendPreparedMessage` server response. Only a response with this post's server
+message id records the fingerprint and advances the import-offer watermark.
+Preparation, upload, and request failures leave both unchanged. A fingerprint
+pending in memory prevents a second local write from queuing duplicate bytes
 while the first is in flight. Telegram's
 [update protocol](https://core.telegram.org/api/updates) says `random_id`
 deduplicates sends across an account's sessions and `updateMessageID` can later
-identify a message whose response was lost. An ambiguous send must therefore
-retain its original `random_id` for reconciliation or retry; generating a new
-one could create a second post. This pipeline was traced in source, not yet
-tested live.
+identify a message whose response was lost. The current legacy path does not
+reconcile a lost response after restart. A later explicit save or manual send
+may create a duplicate if the server accepted the first post; durable
+`random_id` reconciliation belongs in the account-backed design. This pipeline
+has not yet been tested live.
+
+On Android, a Purple-only document receipt follows the asynchronous send
+helper to the server result. Each attempt stages an immutable file with the
+required `settings.toml` name, and concurrent sends of identical bytes on one
+account share the pending attempt. Telegram's own Retry action after a failed
+send does not preserve this Purple receipt, so a successful manual retry can
+still cause a later duplicate or self-offer. The new sync engine needs durable
+reconciliation rather than extending this legacy callback indefinitely.
 
 ## Playlists later
 
