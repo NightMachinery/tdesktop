@@ -17,19 +17,21 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   cleanup, orders time-prefixed sync-space IDs, and acknowledges an applied
   remote config without creating a new version. A deterministic three-device
   core simulation covers delayed discovery, edit and repost modes, failure retry,
-  conflicts, and restart recovery. Desktop has an unused durable local store
+  conflicts, and restart recovery. Desktop has a durable local store
   for staged config records and state, including exact read-back confirmation,
-  atomic own-message ledger persistence, and restart cleanup. An uncalled
+  atomic own-message ledger persistence, and restart cleanup. A
   desktop scanner can page the account's full Saved Messages history without
   sending anything, and reports an incomplete result after failure or cancel.
-  An uncalled desktop reader re-fetches every candidate document, caps its
+  A desktop reader re-fetches every candidate document, caps its
   download at 4 MiB, and reports newer, changed, missing, or unreadable records
-  instead of treating them as an empty account. An uncalled coordinator ties
-  scan and read to one selected session, returning Complete only when both
-  finish. The desktop Advanced settings row now opens a read-only setup box
-  with explicit account choice on multi-account installs, scan progress, and
-  complete, needs-review, or incomplete results. It does not bind the account
-  or turn on syncing. Android JNI can
+  instead of treating them as an empty account. A coordinator ties scan and
+  read to one selected session, returning Complete only when both finish. The
+  desktop Advanced settings box requires an explicit account choice on
+  multi-account installs and shows scan progress and review states. After a
+  fresh complete scan and separate cloud disclosure, it can manually publish
+  the first settings record to an empty directory or resume a prior bound
+  post. It cannot join another install's existing records or keep settings
+  synchronized yet. Android JNI can
   initialize local state bound to the active Telegram user, reserve a canonical
   own config record with its pending key, confirm an exact staged read-back
   with its message ID, and format or compare time-ordered space IDs. These
