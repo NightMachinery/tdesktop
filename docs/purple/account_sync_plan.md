@@ -34,7 +34,9 @@ stays local.
 
 ## Record transport
 
-Each install receives a random 128-bit identity and chooses one home account. It
+Each install receives a random 128-bit identity and chooses one home account.
+Each platform supplies 16 secure random bytes; shared core formats the same
+lowercase base32 install and sync-space IDs on both platforms. An install
 publishes its own versioned JSON document for each stream: `config` for
 `settings.toml`, and later `library` for playlists. No other install edits that
 record. Readers discover records in Saved Messages, read known message IDs again
