@@ -376,9 +376,14 @@ SyncStoreResult SyncLocalStore::ReadPendingConfig() {
 
 SyncStoreResult SyncLocalStore::StageConfig(
 		const QByteArray &canonicalRecord,
-		const SyncLocalConfigState &nextConfigData) {
+		const SyncLocalConfigState &nextConfigData,
+		const QByteArray &accountBindingToken) {
 	if (_status != SyncStoreStatus::Ready || !_state) {
 		return { SyncStoreStatus::InvalidTransition };
+	}
+	if (CheckSyncAccountBinding(*_state, accountBindingToken)
+		!= SyncAccountBindingVerdict::Bound) {
+		return { SyncStoreStatus::AccountUnbound };
 	}
 	const auto parsed = ParseSyncEnvelope(canonicalRecord);
 	const auto inspected = InspectConfigPayload(parsed);

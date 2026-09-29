@@ -37,15 +37,19 @@ record-hash pairs. Desktop staging writes the new pair with the reserved state
 before sending. A later discovered duplicate, including one from a previous
 sync space, can enter the ledger only when its complete record matches an
 issued pair and the install and creating device match. An unlogged old record
-cannot be retired. Android still needs this issued-log transition in its JNI
-bridge before its account-backed publisher can use it.
+cannot be retired. Android's JNI bridge returns the issued pair together with
+the reserved config state; neither app calls an account-backed publisher yet.
 Neither client enables account-backed sync yet. Desktop-local storage can
 acquire an exclusive `sync/lock`, reject malformed or newer state, and stage
 canonical config bytes
 before committing a reserved `sync/state.json`. It creates no state while sync
 is off, keeps `sync/` and its pending files owner-only on Unix, and pauses when
 a pending file is absent or disagrees with the state. The desktop local store
-accepts a validated own config read-back with its Telegram message ID, confirms
+also refuses to stage a config record unless the selected account's binding
+token matches the token in that state. The per-account preference write is
+delayed by Telegram's local storage layer, so a crash between the state and
+preference writes leaves sync unbound and unable to publish.
+It accepts a validated own config read-back with its Telegram message ID, confirms
 only the exact staged record, and atomically records that message ID with the
 confirmed state and staged version as base with its lineage. A changed content
 fingerprint clears old equivalent keys;
@@ -129,6 +133,15 @@ without treating an incomplete scan as an empty account.
 ## Record transport
 
 Each install receives a random 128-bit identity and chooses one home account.
+Setup also generates a separate random 128-bit binding token. It stores one
+copy in the device-local sync state and one in that Telegram account's
+encrypted local preferences. A publish is allowed only when both copies are
+present and equal for the selected account. Neither a sync-space move nor an
+install-ID regeneration changes the binding token. Copying only the Purple
+config directory to another machine therefore leaves sync unbound instead of
+silently publishing through whichever Telegram account is signed in there.
+Missing or mismatched copies pause sync until the user explicitly binds an
+account again; the state file does not need to record a Telegram user ID.
 Each platform supplies 16 secure random bytes for an install ID. For a new
 sync-space ID it supplies a server-time estimate in milliseconds and 10 secure
 random bytes; shared core formats the same lowercase base32 IDs on both
