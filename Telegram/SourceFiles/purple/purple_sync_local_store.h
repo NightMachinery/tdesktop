@@ -37,6 +37,9 @@ enum class SyncStoreStatus {
 	OrphanStage,
 	InvalidRecord,
 	InvalidTransition,
+	Unconfirmed,
+	CloneDetected,
+	CleanupFailed,
 };
 
 struct SyncStoreResult {
@@ -46,13 +49,15 @@ struct SyncStoreResult {
 		SyncEnvelopeError envelopeError = SyncEnvelopeError::None,
 		ConfigPayloadError payloadError = ConfigPayloadError::None,
 		QByteArray staged = {},
-		uint64_t seq = 0)
+		uint64_t seq = 0,
+		SyncCloneVerdict cloneVerdict = SyncCloneVerdict::NoClone)
 	: status(status)
 	, stateError(stateError)
 	, envelopeError(envelopeError)
 	, payloadError(payloadError)
 	, staged(std::move(staged))
-	, seq(seq) {
+	, seq(seq)
+	, cloneVerdict(cloneVerdict) {
 	}
 
 	SyncStoreStatus status = SyncStoreStatus::InvalidTransition;
@@ -61,6 +66,7 @@ struct SyncStoreResult {
 	ConfigPayloadError payloadError = ConfigPayloadError::None;
 	QByteArray staged;
 	uint64_t seq = 0;
+	SyncCloneVerdict cloneVerdict = SyncCloneVerdict::NoClone;
 
 	[[nodiscard]] explicit operator bool() const {
 		return status == SyncStoreStatus::Ready;
@@ -81,6 +87,9 @@ public:
 	[[nodiscard]] SyncStoreResult StageConfig(
 		const QByteArray &canonicalRecord,
 		const SyncLocalConfigState &nextConfigData);
+	[[nodiscard]] SyncStoreResult ConfirmConfigReadBack(
+		const QByteArray &serverRecord,
+		const QString &currentDevice);
 	[[nodiscard]] const SyncLocalState *state() const;
 	[[nodiscard]] SyncStoreStatus status() const;
 

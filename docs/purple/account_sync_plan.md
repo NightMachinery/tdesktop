@@ -25,9 +25,21 @@ exposes account-backed sync yet. Desktop-local storage can acquire an exclusive
 `sync/lock`, reject malformed or newer state, and stage canonical config bytes
 before committing a reserved `sync/state.json`. It creates no state while sync
 is off, keeps `sync/` and its pending files owner-only on Unix, and pauses when
-a pending file is absent or disagrees with the state. `QSaveFile` protects final
-files from partial writes after a process crash; it does not promise persistence
-through power loss. The future transport engine must reconcile the install's
+a pending file is absent or disagrees with the state. The desktop local store
+accepts a validated own config read-back, confirms only the exact
+pending sequence and payload hash, and records the staged version as base with
+its lineage. A changed content fingerprint clears old equivalent keys;
+`seen_seq` survives. It writes confirmed state before deleting the staged
+envelope. After a crash in that gap, restart deletes only a validated stage
+matching the confirmed state. Older staged own records are also obsolete once
+a later sequence is persisted, even when a user chooses an unrelated remote
+version; restart validates their canonical contents, writer and sequence before
+removal. Ambiguous and future files pause cleanup. A clone or device mismatch,
+including a missing current device identity, has a distinct verdict.
+The desktop store latches that verdict and refuses further staging until a
+fresh open and reconciliation. `QSaveFile` protects final files from partial
+writes after a process crash; it does not promise persistence through power
+loss. The future transport engine must reconcile the install's
 own remote record for clone or rewind signals before any publish. Network
 transport and the account-sync interface remain to be built.
 

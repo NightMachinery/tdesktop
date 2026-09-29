@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFileInfo>
 #include <QtCore/QLockFile>
 #include <QtCore/QSaveFile>
+#include <QtCore/QStringList>
 
 #include <utility>
 
@@ -41,12 +42,24 @@ constexpr auto kConfigBytes = 256 * 1024;
 }
 
 [[nodiscard]] SyncStoreStatus EnsurePrivateDirectory(const QString &path) {
+	const auto usable = [&] {
+		if (!PrivatePermissions(path)) {
+			return false;
+		}
+#ifdef Q_OS_UNIX
+		constexpr auto required = QFileDevice::ReadOwner
+			| QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+		return (QFileInfo(path).permissions() & required) == required;
+#else
+		return true;
+#endif
+	};
 	const auto info = QFileInfo(path);
 	if (info.exists() || info.isSymLink()) {
 		if (!info.isDir()) {
 			return SyncStoreStatus::IoError;
 		}
-		return PrivatePermissions(path)
+		return usable()
 			? SyncStoreStatus::Ready
 			: SyncStoreStatus::InsecurePermissions;
 	}
@@ -62,7 +75,7 @@ constexpr auto kConfigBytes = 256 * 1024;
 		return SyncStoreStatus::IoError;
 	}
 #endif
-	return PrivatePermissions(path)
+	return usable()
 		? SyncStoreStatus::Ready
 		: SyncStoreStatus::InsecurePermissions;
 }
@@ -119,31 +132,71 @@ constexpr auto kConfigBytes = 256 * 1024;
 		: SyncStoreStatus::IoError;
 }
 
-[[nodiscard]] bool HasOrphanStage(
+[[nodiscard]] SyncStoreStatus CheckStages(
 		const QString &pendingPath,
-		std::optional<uint64_t> persistedSeq) {
+		const SyncLocalState *state) {
+	auto obsolete = QStringList();
 	auto files = QDirIterator(
 		pendingPath,
 		QDir::AllEntries | QDir::Hidden | QDir::System
 			| QDir::NoDotAndDotDot);
 	while (files.hasNext()) {
-		const auto name = QFileInfo(files.next()).fileName();
+		const auto path = files.next();
+		const auto name = QFileInfo(path).fileName();
 		if (!name.startsWith(u"config-"_q)
 			|| !name.endsWith(u".json"_q)) {
 			continue;
 		}
-		if (!persistedSeq) {
-			return true;
+		if (!state) {
+			return SyncStoreStatus::OrphanStage;
 		}
 		const auto middle = name.mid(7, name.size() - 12);
 		auto valid = false;
 		const auto seq = middle.toULongLong(&valid, 10);
 		if (!valid || seq == 0 || seq > 9007199254740991ULL
-			|| QString::number(seq) != middle || seq > *persistedSeq) {
-			return true;
+			|| QString::number(seq) != middle) {
+			return SyncStoreStatus::OrphanStage;
+		}
+		if (seq == state->config.pendingSeq) {
+			continue;
+		}
+		if (seq > state->config.seq) {
+			return SyncStoreStatus::OrphanStage;
+		}
+		auto bytes = QByteArray();
+		const auto readStatus = ReadExact(path, kConfigBytes, bytes);
+		if (readStatus != SyncStoreStatus::Ready) {
+			return readStatus;
+		}
+		const auto parsed = ParseSyncEnvelope(bytes);
+		const auto inspected = InspectConfigPayload(parsed);
+		const auto canonical = parsed
+			? SerializeSyncEnvelope(parsed.envelope)
+			: SyncEnvelopeWriteResult();
+		const auto document = parsed.envelope.document;
+		if (!canonical || canonical.canonical != bytes
+			|| inspected.status != ConfigPayloadStatus::Valid
+			|| document.value(u"space"_q).toString() != state->space
+			|| document.value(u"writer"_q).toObject()
+				.value(u"install"_q).toString() != state->install
+			|| uint64_t(document.value(u"seq"_q).toDouble()) != seq
+			|| (seq == state->config.seq
+				&& (state->config.pendingSeq != 0
+					|| document.value(u"payload_sha256"_q).toString()
+						!= state->config.ownHash
+					|| inspected.version.key != state->configData.base
+					|| inspected.version.lineage
+						!= state->configData.baseLineage))) {
+			return SyncStoreStatus::OrphanStage;
+		}
+		obsolete.push_back(path);
+	}
+	for (const auto &path : obsolete) {
+		if (!QFile::remove(path)) {
+			return SyncStoreStatus::CleanupFailed;
 		}
 	}
-	return false;
+	return SyncStoreStatus::Ready;
 }
 
 [[nodiscard]] SyncStoreResult RecordError(
@@ -210,9 +263,10 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 	}
 	const auto stateInfo = QFileInfo(StatePath());
 	if (!stateInfo.exists() && !stateInfo.isSymLink()) {
-		return HasOrphanStage(_root + u"/pending"_q, std::nullopt)
-			? SetFailure({ SyncStoreStatus::OrphanStage })
-			: SetFailure({ SyncStoreStatus::Uninitialized });
+		const auto stageStatus = CheckStages(
+			_root + u"/pending"_q, nullptr);
+		return SetFailure({ stageStatus == SyncStoreStatus::Ready
+			? SyncStoreStatus::Uninitialized : stageStatus });
 	}
 	auto bytes = QByteArray();
 	const auto readStatus = ReadExact(StatePath(), kStateBytes, bytes);
@@ -240,9 +294,10 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 			return SetFailure(pending);
 		}
 	}
-	if (HasOrphanStage(
-		_root + u"/pending"_q, _state->config.seq)) {
-		return SetFailure({ SyncStoreStatus::OrphanStage });
+	const auto stageStatus = CheckStages(
+		_root + u"/pending"_q, &*_state);
+	if (stageStatus != SyncStoreStatus::Ready) {
+		return SetFailure({ stageStatus });
 	}
 	return { SyncStoreStatus::Ready };
 }
@@ -372,6 +427,75 @@ SyncStoreResult SyncLocalStore::StageConfig(
 		return SetFailure(pending);
 	}
 	return pending;
+}
+
+SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
+		const QByteArray &serverRecord,
+		const QString &currentDevice) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
+		return { SyncStoreStatus::InvalidTransition };
+	}
+	if (_state->config.pendingSeq == 0) {
+		return { SyncStoreStatus::NoPending };
+	}
+	const auto pending = ReadPendingConfigLocked();
+	if (!pending) {
+		return SetFailure(pending);
+	}
+	const auto parsed = ParseSyncEnvelope(serverRecord);
+	const auto inspected = InspectConfigPayload(parsed);
+	if (!parsed || inspected.status != ConfigPayloadStatus::Valid) {
+		return RecordError(parsed, inspected);
+	}
+	const auto canonical = SerializeSyncEnvelope(parsed.envelope);
+	const auto document = parsed.envelope.document;
+	if (!canonical || canonical.canonical != serverRecord
+		|| document.value(u"space"_q).toString() != _state->space
+		|| document.value(u"writer"_q).toObject()
+			.value(u"install"_q).toString() != _state->install) {
+		return { SyncStoreStatus::InvalidRecord };
+	}
+	const auto stagedRecord = ParseSyncEnvelope(pending.staged);
+	const auto stagedVersion = InspectConfigPayload(stagedRecord).version;
+	const auto observation = OwnRecordObservation{
+		OwnRecordObservationKind::Present,
+		uint64_t(document.value(u"seq"_q).toDouble()),
+		document.value(u"payload_sha256"_q).toString(),
+	};
+	const auto confirmation = Purple::ConfirmConfigReadBack(
+		*_state, currentDevice, observation, stagedVersion);
+	if (confirmation.verdict != SyncCloneVerdict::NoClone) {
+		return SetFailure({ SyncStoreStatus::CloneDetected,
+			SyncLocalError::None, SyncEnvelopeError::None,
+			ConfigPayloadError::None, {}, 0, confirmation.verdict });
+	}
+	if (!confirmation.changed) {
+		return { SyncStoreStatus::Unconfirmed };
+	}
+	if (inspected.version.key != stagedVersion.key
+		|| inspected.version.lineage != stagedVersion.lineage) {
+		return { SyncStoreStatus::Unconfirmed };
+	}
+	const auto serialized = SerializeSyncLocalState(confirmation.state);
+	if (!serialized) {
+		return { SyncStoreStatus::InvalidState, serialized.error };
+	}
+	const auto stateStatus = WriteExact(StatePath(), serialized.canonical);
+	if (stateStatus != SyncStoreStatus::Ready) {
+		return SetFailure({ stateStatus });
+	}
+	_state = confirmation.state;
+	if (!QFile::remove(PendingPath(observation.seq))) {
+		return SetFailure({ SyncStoreStatus::CleanupFailed });
+	}
+	const auto cleanupStatus = CheckStages(
+		_root + u"/pending"_q, &*_state);
+	if (cleanupStatus != SyncStoreStatus::Ready) {
+		return SetFailure({ cleanupStatus });
+	}
+	return { SyncStoreStatus::Ready,
+		SyncLocalError::None, SyncEnvelopeError::None,
+		ConfigPayloadError::None, {}, observation.seq };
 }
 
 const SyncLocalState *SyncLocalStore::state() const {

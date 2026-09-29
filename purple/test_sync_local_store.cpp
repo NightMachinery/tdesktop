@@ -47,6 +47,40 @@ void Check(bool ok, int line) {
 	return Purple::BuildConfigRecord(input);
 }
 
+[[nodiscard]] Purple::ConfigRecordBuildResult RecordWithVersion(
+		const Purple::SyncLocalState &state,
+		uint64_t seq,
+		const QByteArray &text,
+		const Purple::ConfigVersion &version) {
+	auto input = Purple::ConfigRecordBuildInput();
+	input.text = text;
+	input.version = version;
+	input.space = state.space;
+	input.install = state.install;
+	input.device = state.createdDevice;
+	input.platform = u"macos"_q;
+	input.app = u"Purple"_q;
+	input.seq = seq;
+	return Purple::BuildConfigRecord(input);
+}
+
+[[nodiscard]] Purple::ConfigRecordBuildResult RecordAfter(
+		const Purple::SyncLocalState &state,
+		uint64_t seq,
+		const QByteArray &text,
+		const Purple::ConfigVersion &parent) {
+	auto input = Purple::ConfigRecordBuildInput();
+	input.text = text;
+	input.parents = { parent };
+	input.space = state.space;
+	input.install = state.install;
+	input.device = state.createdDevice;
+	input.platform = u"macos"_q;
+	input.app = u"Purple"_q;
+	input.seq = seq;
+	return Purple::BuildConfigRecord(input);
+}
+
 [[nodiscard]] bool Private(const QString &path) {
 #ifdef Q_OS_UNIX
 	const auto permissions = QFileInfo(path).permissions();
@@ -115,6 +149,249 @@ void TestLifecycle() {
 		CHECK(pending.seq == 1);
 		CHECK(restarted.state()->configData.pending == record.version.key);
 	}
+}
+
+void TestConfirmation() {
+	auto temp = QTemporaryDir();
+	const auto root = Root(temp);
+	const auto initial = InitialState();
+	const auto first = Record(initial, 1, "version = 1\nname = 'first'\n");
+	const auto changed = RecordAfter(initial, 2,
+		"version = 1\nname = 'changed'\n", first.version);
+	CHECK(bool(first));
+	CHECK(bool(changed));
+	{
+		auto store = Purple::SyncLocalStore(root);
+		CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+		auto metadata = initial.configData;
+		metadata.pending = first.version.key;
+		metadata.seenSeq[u"in-"_q + QString(25, u'b') + u'a'] = 7;
+		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(store.state()->config.pendingSeq == 1);
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+			== Purple::SyncStoreStatus::Ready);
+		CHECK(store.state()->config.pendingSeq == 0);
+		CHECK(store.state()->config.confirmedSeq == 1);
+		CHECK(store.state()->configData.base == first.version.key);
+		CHECK(store.state()->configData.baseLineage == first.version.lineage);
+		CHECK(store.state()->configData.pending.isEmpty());
+		CHECK(store.state()->configData.seenSeq == metadata.seenSeq);
+		CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+			== Purple::SyncStoreStatus::NoPending);
+		auto next = store.state()->configData;
+		next.pending = changed.version.key;
+		CHECK(bool(store.StageConfig(changed.canonical, next)));
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+			== Purple::SyncStoreStatus::Unconfirmed);
+		CHECK(store.state()->config.pendingSeq == 2);
+		CHECK(store.ConfirmConfigReadBack(changed.canonical, u"device-a"_q)
+			.status == Purple::SyncStoreStatus::Ready);
+		CHECK(store.state()->configData.base == changed.version.key);
+		CHECK(store.state()->configData.baseLineage == changed.version.lineage);
+		CHECK(store.state()->configData.seenSeq == metadata.seenSeq);
+		const auto acknowledgement = RecordWithVersion(initial, 3,
+			"version = 1\nname = 'changed'\n", changed.version);
+		CHECK(bool(acknowledgement));
+		auto sameMetadata = store.state()->configData;
+		sameMetadata.pending = acknowledgement.version.key;
+		CHECK(bool(store.StageConfig(acknowledgement.canonical, sameMetadata)));
+		CHECK(store.ConfirmConfigReadBack(
+			acknowledgement.canonical, u"device-a"_q).status
+			== Purple::SyncStoreStatus::Ready);
+		CHECK(store.state()->configData.base == changed.version.key);
+		CHECK(store.state()->configData.seenSeq == metadata.seenSeq);
+	}
+	{
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::Ready);
+		CHECK(restarted.state()->configData.base == changed.version.key);
+	}
+}
+
+void TestCloneRejection() {
+	for (auto mode = 0; mode != 4; ++mode) {
+		auto temp = QTemporaryDir();
+		const auto root = Root(temp);
+		const auto initial = InitialState();
+		const auto first = Record(initial, 1, "version = 1\nname = 'first'\n");
+		const auto wrong = Record(initial, 1, "version = 1\nname = 'wrong'\n");
+		const auto higher = Record(initial, 2, "version = 1\nname = 'higher'\n");
+		auto store = Purple::SyncLocalStore(root);
+		CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+		auto metadata = initial.configData;
+		metadata.pending = first.version.key;
+		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		const auto record = mode == 2 ? wrong.canonical
+			: mode == 3 ? higher.canonical : first.canonical;
+		const auto device = mode == 0 ? u"device-b"_q
+			: mode == 1 ? QString() : u"device-a"_q;
+		const auto result = store.ConfirmConfigReadBack(record, device);
+		CHECK(result.status == Purple::SyncStoreStatus::CloneDetected);
+		CHECK(result.cloneVerdict == (mode < 2
+			? Purple::SyncCloneVerdict::DeviceMismatch
+			: mode == 2 ? Purple::SyncCloneVerdict::HashMismatch
+			: Purple::SyncCloneVerdict::RemoteAhead));
+		CHECK(store.state() == nullptr);
+		CHECK(store.StageConfig(first.canonical, metadata).status
+			== Purple::SyncStoreStatus::InvalidTransition);
+		CHECK(QFileInfo::exists(root + u"/pending/config-1.json"_q));
+	}
+}
+
+void TestSupersededStages() {
+	for (auto mode = 0; mode != 2; ++mode) {
+		const auto restart = (mode != 0);
+		auto temp = QTemporaryDir();
+		const auto root = Root(temp);
+		const auto initial = InitialState();
+		const auto first = Record(initial, 1,
+			"version = 1\nname = 'abandoned'\n");
+		const auto second = Record(initial, 2,
+			"version = 1\nname = 'chosen remote'\n");
+		CHECK(bool(first));
+		CHECK(bool(second));
+		{
+			auto store = Purple::SyncLocalStore(root);
+			CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+			CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+			auto metadata = initial.configData;
+			metadata.pending = first.version.key;
+			CHECK(bool(store.StageConfig(first.canonical, metadata)));
+			metadata.pending = second.version.key;
+			CHECK(bool(store.StageConfig(second.canonical, metadata)));
+			CHECK(QFileInfo::exists(root + u"/pending/config-1.json"_q));
+			if (!restart) {
+				CHECK(store.ConfirmConfigReadBack(
+					second.canonical, u"device-a"_q).status
+					== Purple::SyncStoreStatus::Ready);
+				CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
+			}
+		}
+		if (restart) {
+			auto store = Purple::SyncLocalStore(root);
+			CHECK(store.Open(true).status == Purple::SyncStoreStatus::Ready);
+			CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
+			CHECK(bool(store.ReadPendingConfig()));
+			CHECK(store.ConfirmConfigReadBack(
+				second.canonical, u"device-a"_q).status
+				== Purple::SyncStoreStatus::Ready);
+		}
+	}
+}
+
+void TestNoPartialCleanup() {
+	auto temp = QTemporaryDir();
+	const auto root = Root(temp);
+	const auto initial = InitialState();
+	const auto first = Record(initial, 1, "version = 1\nname = 'first'\n");
+	const auto second = Record(initial, 2, "version = 1\nname = 'second'\n");
+	{
+		auto store = Purple::SyncLocalStore(root);
+		CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+		auto metadata = initial.configData;
+		metadata.pending = first.version.key;
+		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		metadata.pending = second.version.key;
+		CHECK(bool(store.StageConfig(second.canonical, metadata)));
+	}
+	const auto oldPath = root + u"/pending/config-1.json"_q;
+	const auto futurePath = root + u"/pending/config-3.json"_q;
+	{
+		auto file = QFile(futurePath);
+		CHECK(file.open(QIODevice::WriteOnly));
+		CHECK(file.write("future") == 6);
+	}
+	{
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::OrphanStage);
+		CHECK(QFileInfo::exists(oldPath));
+		CHECK(QFileInfo::exists(futurePath));
+	}
+}
+
+void TestPostCommitCleanup() {
+	auto temp = QTemporaryDir();
+	const auto root = Root(temp);
+	const auto initial = InitialState();
+	const auto first = Record(initial, 1, "version = 1\nname = 'first'\n");
+	{
+		auto store = Purple::SyncLocalStore(root);
+		CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+		auto metadata = initial.configData;
+		metadata.pending = first.version.key;
+		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+			== Purple::SyncStoreStatus::Ready);
+	}
+	const auto stagePath = root + u"/pending/config-1.json"_q;
+	{
+		auto file = QFile(stagePath);
+		CHECK(file.open(QIODevice::WriteOnly));
+		CHECK(file.write(first.canonical) == first.canonical.size());
+		CHECK(file.setPermissions(QFileDevice::ReadOwner
+			| QFileDevice::WriteOwner));
+	}
+	{
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::Ready);
+		CHECK(!QFileInfo::exists(stagePath));
+	}
+	{
+		auto file = QFile(stagePath);
+		CHECK(file.open(QIODevice::WriteOnly));
+		CHECK(file.write("corrupt") == 7);
+		CHECK(file.setPermissions(QFileDevice::ReadOwner
+			| QFileDevice::WriteOwner));
+	}
+	{
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::OrphanStage);
+		CHECK(QFileInfo::exists(stagePath));
+	}
+}
+
+void TestCleanupFailure() {
+#ifdef Q_OS_UNIX
+	auto temp = QTemporaryDir();
+	const auto root = Root(temp);
+	const auto initial = InitialState();
+	const auto first = Record(initial, 1, "version = 1\nname = 'first'\n");
+	const auto pendingDirectory = root + u"/pending"_q;
+	const auto stagePath = pendingDirectory + u"/config-1.json"_q;
+	{
+		auto store = Purple::SyncLocalStore(root);
+		CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+		auto metadata = initial.configData;
+		metadata.pending = first.version.key;
+		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(QFile(pendingDirectory).setPermissions(
+			QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q)
+			.status == Purple::SyncStoreStatus::CleanupFailed);
+		CHECK(QFileInfo::exists(stagePath));
+		const auto file = QFile(root + u"/state.json"_q);
+		auto saved = QFile(file.fileName());
+		CHECK(saved.open(QIODevice::ReadOnly));
+		const auto parsed = Purple::ParseSyncLocalState(saved.readAll());
+		CHECK(bool(parsed));
+		CHECK(parsed.state.config.pendingSeq == 0);
+		CHECK(parsed.state.configData.base == first.version.key);
+	}
+	CHECK(QFile(pendingDirectory).setPermissions(
+		QFileDevice::ReadOwner | QFileDevice::WriteOwner
+			| QFileDevice::ExeOwner));
+	{
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::Ready);
+		CHECK(!QFileInfo::exists(stagePath));
+	}
+#endif
 }
 
 void TestOrphanScan() {
@@ -298,6 +575,26 @@ void TestPermissionsAndCollision() {
 		CHECK(restarted.Open(true).status
 			== Purple::SyncStoreStatus::InsecurePermissions);
 	}
+	for (auto pathKind = 0; pathKind != 2; ++pathKind) {
+		auto temp = QTemporaryDir();
+		const auto root = Root(temp);
+		{
+			auto store = Purple::SyncLocalStore(root);
+			CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+			CHECK(store.Initialize(InitialState()).status
+				== Purple::SyncStoreStatus::Ready);
+		}
+		const auto path = pathKind == 0 ? root : root + u"/pending"_q;
+		CHECK(QFile(path).setPermissions(
+			QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+		{
+			auto restarted = Purple::SyncLocalStore(root);
+			CHECK(restarted.Open(true).status
+				== Purple::SyncStoreStatus::InsecurePermissions);
+		}
+		CHECK(QFile(path).setPermissions(QFileDevice::ReadOwner
+			| QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+	}
 #endif
 }
 
@@ -305,6 +602,12 @@ void TestPermissionsAndCollision() {
 
 int main() {
 	TestLifecycle();
+	TestConfirmation();
+	TestCloneRejection();
+	TestSupersededStages();
+	TestNoPartialCleanup();
+	TestPostCommitCleanup();
+	TestCleanupFailure();
 	TestRejectedStage();
 	TestCorruptPending();
 	TestInvalidStateAndOrphan();

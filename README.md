@@ -91,7 +91,9 @@ automatic text-replacement preferences are documented in
 English key sequence entered with a Persian keyboard layout, as described in
 [docs/purple/passcode.md][purple_passcode]. Desktop notification preview
 exceptions for selected chats are configured in
-[docs/purple/config.md][purple_config]. Current requests and follow-up work are
+[docs/purple/config.md][purple_config]. Account-backed settings sync and future
+playlist sync are designed but not yet exposed in the clients; see the
+[sync plan][purple_account_sync]. Current requests and follow-up work are
 tracked in [docs/purple/backlog.md][purple_backlog].
 
 [//]: # (LINKS)
@@ -109,6 +111,7 @@ tracked in [docs/purple/backlog.md][purple_backlog].
 [purple_defaults]: docs/purple/defaults.md
 [purple_passcode]: docs/purple/passcode.md
 [purple_work_mode]: docs/purple/work_mode.md
+[purple_account_sync]: docs/purple/account_sync_plan.md
 [purple_backlog]: docs/purple/backlog.md
 [preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
 [preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png
@@ -124,4 +127,3 @@ tracked in [docs/purple/backlog.md][purple_backlog].
 </a>
 
 CI infrastructure sponsored by [Depot](https://depot.dev) — fast GitHub Actions runners.
-
