@@ -13,6 +13,9 @@ sequence with a different hash signals a clone or rewind. Neither client
 exposes account-backed sync yet; durable state-file writes, transport, and user
 interface remain to be built.
 Compressed library records remain unsupported until the playlist phase.
+A deterministic shared-core simulation now exercises three devices against a
+fake Saved Messages store, including delayed search, failed upload, edit and
+repost modes, conflict classification, and restart from staged publish bytes.
 
 Purple can use each account's Saved Messages to carry configuration and future
 playlists between that account's devices. This needs no extra service or
