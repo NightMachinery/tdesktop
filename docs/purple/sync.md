@@ -24,7 +24,9 @@ choice, restore, and undo actions. It keeps up to 30 exact copies of
 `settings.toml`, each with its reason, time, and fingerprint, in the
 owner-only `sync/history/` directory under the Purple config directory.
 Nothing calls it yet, and the manual import below still keeps only
-`settings.toml.bak`.
+`settings.toml.bak`. The local sync store can also record another device's
+settings version as adopted without staging a post, which the planned join and
+update actions need; nothing calls that yet either.
 
 The current manual transfer has two actions:
 

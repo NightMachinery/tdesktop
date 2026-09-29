@@ -102,6 +102,9 @@ public:
 		const QByteArray &serverRecord,
 		const QString &currentDevice,
 		int32_t messageId);
+	[[nodiscard]] SyncStoreResult CommitConfigData(
+		const SyncLocalConfigState &next,
+		const QByteArray &accountBindingToken);
 	[[nodiscard]] const SyncLocalState *state() const;
 	[[nodiscard]] SyncStoreStatus status() const;
 
