@@ -39,6 +39,13 @@ sync space, can enter the ledger only when its complete record matches an
 issued pair and the install and creating device match. An unlogged old record
 cannot be retired. Android's JNI bridge returns the issued pair together with
 the reserved config state; neither app calls an account-backed publisher yet.
+Shared core now also has an uncalled pure publish planner for one stream. Given
+binding, completed discovery, own-record observations, a staged record, and
+per-stream policy, it chooses wait, reconcile, stage, edit, post, or an older
+ledger message to inspect for retirement. It never performs Telegram I/O or
+authorizes deletion by itself; the caller must re-read the exact server record
+and run the existing deletion check. A library publish remains gated on a
+separate validated library payload and future library ledger operations.
 Neither client enables account-backed sync yet. Desktop-local storage can
 acquire an exclusive `sync/lock`, reject malformed or newer state, and stage
 canonical config bytes
