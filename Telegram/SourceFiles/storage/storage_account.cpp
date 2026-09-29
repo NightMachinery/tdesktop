@@ -765,8 +765,11 @@ void Account::writeMap() {
 
 void Account::reset() {
 	_writeSearchSuggestionsTimer.cancel();
+	_writePrefsTimer.cancel();
 
 	auto names = collectGoodNames();
+	_prefs.clear();
+	_prefsChanged = false;
 	_draftsMap.clear();
 	_draftCursorsMap.clear();
 	_draftsNotReadMap.clear();

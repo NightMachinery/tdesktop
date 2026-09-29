@@ -49,9 +49,12 @@ also refuses to stage a config record unless the selected account's binding
 token matches the token in that state. The per-account preference write is
 delayed by Telegram's local storage layer, so a crash between the state and
 preference writes leaves sync unbound and unable to publish.
-It accepts a validated own config read-back with its Telegram message ID, confirms
-only the exact staged record, and atomically records that message ID with the
-confirmed state and staged version as base with its lineage. A changed content
+Desktop account logout clears the account's cached preferences and cancels
+their pending write, so a new login in that slot cannot inherit the old token.
+The store accepts a validated own config read-back with its Telegram message
+ID. It confirms only the exact staged record and atomically records that ID
+with the confirmed state and staged version as base with its lineage.
+A changed content
 fingerprint clears old equivalent keys;
 `seen_seq` survives. It writes confirmed state before deleting the staged
 envelope. After a crash in that gap, restart deletes only a validated stage
