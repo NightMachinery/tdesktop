@@ -144,6 +144,13 @@ deletions. Until then, the daily complete recovery scan below remains the
 conservative plan. The scanner must wait through `FLOOD_WAIT` and resume
 without treating an incomplete scan as an empty account.
 
+Telegram documents that `messages.getHistory` returns descending-date history
+and applies `min_id` after the offset-and-limit slice (see
+[getHistory](https://core.telegram.org/method/messages.getHistory) and
+[pagination](https://core.telegram.org/api/offsets)). The disposable-account
+watermark test must cover messages arriving during pagination and filtered
+short pages; a short page alone must never mean that a pass is complete.
+
 ## Record transport
 
 Each install receives a random 128-bit identity and chooses one home account.
