@@ -1,7 +1,11 @@
 # Account-backed Purple sync proposal
 
-Status: design only. The existing manual Send/Import actions remain the current
-behavior.
+Status: design plus foundational core. The existing manual Send/Import actions
+remain the current behavior.
+
+The shared core now has tested config version construction and remote-head
+classification. Neither client exposes account-backed sync yet; the record
+envelope, local sync state, transport, and user interface remain to be built.
 
 Purple can use each account's Saved Messages to carry configuration and future
 playlists between that account's devices. This needs no extra service or
