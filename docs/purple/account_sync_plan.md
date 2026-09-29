@@ -191,6 +191,16 @@ leftovers older than those 30, and never deletes anything outside that
 directory. Nothing calls it yet, and the manual import still keeps its single
 `settings.toml.bak`.
 
+The desktop local store can also commit new config data without staging a
+record. A later update or join step needs this to record an adopted remote
+version, equivalent keys, or newer `seen_seq` values without posting anything.
+It works only on an opened, ready store and only with the selected account's
+binding token. It refuses while a config record is staged, when the new data
+carries a pending key, and when any `seen_seq` entry would decrease or
+disappear. The whole next state must pass the shared serializer and parser,
+and it is saved with the same atomic state write that staging uses. Committing
+unchanged data writes nothing. Nothing calls this operation yet.
+
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
 inventory incomplete, but the setup box does not yet show a countdown or

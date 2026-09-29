@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QSaveFile>
 #include <QtCore/QStringList>
 
+#include <algorithm>
+#include <map>
 #include <utility>
 
 namespace Purple {
@@ -120,6 +122,25 @@ constexpr auto kConfigBytes = 256 * 1024;
 		parsed.error,
 		inspected.error,
 	};
+}
+
+[[nodiscard]] bool SameConfigData(
+		const SyncLocalConfigState &a,
+		const SyncLocalConfigState &b) {
+	return a.base == b.base
+		&& a.baseLineage == b.baseLineage
+		&& a.equiv == b.equiv
+		&& a.pending == b.pending
+		&& a.seenSeq == b.seenSeq;
+}
+
+[[nodiscard]] bool KeepsSeenSequences(
+		const std::map<QString, uint64_t> &current,
+		const std::map<QString, uint64_t> &next) {
+	return std::all_of(current.begin(), current.end(), [&](const auto &entry) {
+		const auto found = next.find(entry.first);
+		return (found != next.end()) && (found->second >= entry.second);
+	});
 }
 
 }
@@ -533,6 +554,45 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 	return { SyncStoreStatus::Ready,
 		SyncLocalError::None, SyncEnvelopeError::None,
 		ConfigPayloadError::None, {}, observation.seq };
+}
+
+SyncStoreResult SyncLocalStore::CommitConfigData(
+		const SyncLocalConfigState &next,
+		const QByteArray &accountBindingToken) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
+		return { SyncStoreStatus::InvalidTransition };
+	}
+	if (CheckSyncAccountBinding(*_state, accountBindingToken)
+		!= SyncAccountBindingVerdict::Bound) {
+		return { SyncStoreStatus::AccountUnbound };
+	}
+	if (_state->config.pendingSeq != 0
+		|| !_state->configData.pending.isEmpty()
+		|| !next.pending.isEmpty()
+		|| !KeepsSeenSequences(_state->configData.seenSeq, next.seenSeq)) {
+		return { SyncStoreStatus::InvalidTransition };
+	}
+	auto updated = *_state;
+	updated.configData = next;
+	const auto serialized = SerializeSyncLocalState(updated);
+	if (!serialized) {
+		return { SyncStoreStatus::InvalidState, serialized.error };
+	}
+	const auto parsed = ParseSyncLocalState(serialized.canonical);
+	if (!parsed || !SameConfigData(parsed.state.configData, next)) {
+		return { SyncStoreStatus::InvalidState, parsed.error };
+	}
+	if (SameConfigData(_state->configData, next)) {
+		return { SyncStoreStatus::Ready };
+	}
+	const auto stateStatus = WriteSyncPrivateFile(
+		StatePath(),
+		serialized.canonical);
+	if (stateStatus != SyncStoreStatus::Ready) {
+		return SetFailure({ stateStatus });
+	}
+	_state = std::move(updated);
+	return { SyncStoreStatus::Ready };
 }
 
 const SyncLocalState *SyncLocalStore::state() const {
