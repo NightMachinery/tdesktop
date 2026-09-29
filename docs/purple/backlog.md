@@ -38,8 +38,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   First setup needs a complete Saved Messages history scan before it can
   declare the account empty; search with a watermark alone can miss a delayed
   older entry.
-  Android durable local storage and transport remain open, as does the full
-  sync UI on both clients.
+  Android now has an uncalled durable local store for bound state and staged
+  config bytes. It locks the sync directory and pauses on ambiguous crash
+  recovery rather than sending uncertain data. Android transport and the full
+  sync UI on both clients remain open.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
