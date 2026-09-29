@@ -12,9 +12,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   fixes that bypass. Source `cbd5f02b` also hides self-destructing-media
   captions in pinned, short, and full notification previews. Source `d5774ea9`
   keeps a forwarded sender name hidden in a non-exempt verification
-  notification while passcode-locked. The signed Android APK from source
-  `3559ef67` installed and launched with the test account intact, but the
-  notification privacy paths still need runtime checks.
+  notification while passcode-locked. These fixes are included in the signed
+  Android APK from source `32c1ee0c`, which installed and launched with the
+  test account intact. The notification privacy paths still need runtime
+  checks.
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
@@ -26,30 +27,41 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   reported as failed when FileLoader finished it outside the cache directory.
   Android source `6fdb061a` checks the actual completed file in FileLoader's
   managed locations. Source `bce320af` clarifies the Retry label when a failed
-  search and failed songs are retried together. On a disposable Android account,
-  the signed `bce320af` candidate showed the requested menu/dialog and completed
-  a large-channel run at 339/339 with no failed tracks, at most two active
-  transfers, and recent complete MP3 files in the app cache. Pause/resume and
-  leaving/reopening the chat worked. Retry could not be tested because nothing
-  failed. The signed `3559ef67` APK installed and showed both chat-menu actions
-  with the account intact. The desktop change is installed in the daily-use
-  app and passed an app launch smoke test, but its menu and cache behavior
-  still need runtime verification.
+  search and failed songs are retried together. A large-channel run in the
+  earlier candidate reached 339/339, but a reported song still showed a
+  download arrow: the completed file existed only in the general app cache.
+  Android source `1f819cff` stores new songs in the chat-recognized media
+  location, promotes complete legacy cache files, and records their chat owner.
+  Source `32c1ee0c` adds a per-file status and Retry dialog when the progress
+  bar is tapped. Its signed APK installed without losing the test account.
+  After a full run, 339 distinct selected songs mapped to 339 nonempty normal
+  media files, and the reported song no longer showed a download arrow. Moving
+  one test song aside changed progress to 338/339 with an explicit missing-file
+  reason; Retry restored it and progress returned to 339/339. The desktop
+  change is installed in the daily-use app and passed a launch smoke test, but
+  its menu and cache behavior still need runtime verification.
   See [pinned_music.md](pinned_music.md).
 - **Per-chat Keep Media:** the chat-menu request means local cache retention,
   not automatic download. Android's per-chat retention editor is committed in
   source `1593b8d1`. The signed `bce320af` candidate showed the effective
   default duration in the chat menu, changed to a per-chat Forever exception,
-  and returned to the default after deleting the exception. Long-term cache
-  expiry still needs runtime verification. An audit found that cleanup needs a
-  file-to-chat record to apply the exception, and the size limit may evict
-  finite-retention files early. Desktop remains global-only for cache
-  retention; per-chat desktop retention is deferred.
+  and returned to the default after deleting the exception. That behavior is
+  included in the signed `32c1ee0c` APK. Long-term cache expiry still needs
+  runtime verification. File-to-chat records apply the exception to attributed
+  downloads; unknown or shared files use the general policy, and the size
+  limit may evict finite-retention files early. Desktop remains global-only
+  for cache retention; per-chat desktop retention is deferred.
   See [keep_media.md](keep_media.md) for the current scope.
-- **Last Seen Peek:** the checkbox now skips confirmation and Peek is enabled by
-  default in both clients. The APK from Android source `5e428532` installs and
-  launches, but eligible Peek and badge-refresh behavior remain unverified.
-  Mute behavior already matches normal behavior.
+- **Last Seen Peek:** the checkbox skips confirmation and Peek is enabled by
+  default in both clients. Android source `b2f416a5` refreshes status links
+  when the setting changes and journals the original privacy rules before a
+  Peek, then verifies their restoration after the deadline or reconnection.
+  The signed APK from source `32c1ee0c` installs and launches, but eligible
+  Peek and restoration behavior remain unverified on a live contact. Desktop
+  source `c894b72c07` similarly journals and verifies its privacy restoration.
+  Its optimized app built and installed successfully, but launch verification
+  remains open: LaunchServices returned error `-10822`, and macOS rejected the
+  local signing identity. Mute behavior already matches normal behavior.
 - **Android Contacts Last Seen filter:** the signed APK from source `5e428532`
   shows “Visible or peekable last seen” in Contacts More. Turning it on showed
   the active-filter empty state, and turning it off restored the same contact.
