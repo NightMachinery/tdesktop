@@ -19,7 +19,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   core simulation covers delayed discovery, edit and repost modes, failure retry,
   conflicts, and restart recovery. Desktop has an unused durable local store
   for staged config records and state, including exact read-back confirmation,
-  atomic own-message ledger persistence, and restart cleanup. Android JNI can
+  atomic own-message ledger persistence, and restart cleanup. An uncalled
+  desktop scanner can page the account's full Saved Messages history without
+  sending anything, and reports an incomplete result after failure or cancel.
+  Android JNI can
   initialize local state, reserve a canonical own config record with its
   pending key, confirm an exact staged read-back with its message ID, and
   format or compare time-ordered space IDs. None of those calls has a runtime
