@@ -1767,6 +1767,8 @@ PRIVATE
     purple/purple_sync_account_inventory.h
     purple/purple_sync_candidate_reader.cpp
     purple/purple_sync_candidate_reader.h
+    purple/purple_sync_config_post.cpp
+    purple/purple_sync_config_post.h
     purple/purple_sync_history_page.h
     purple/purple_sync_history_scanner.cpp
     purple/purple_sync_history_scanner.h
