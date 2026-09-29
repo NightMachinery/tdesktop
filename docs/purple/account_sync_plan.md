@@ -100,6 +100,14 @@ per-space, per-stream, per-install heads. Equal-sequence conflicting records
 block safe space selection; opaque future and library headers keep their space
 visible without becoming supported heads. It still never publishes.
 
+An uncalled desktop config post adapter can now take an explicitly selected
+account and a staged canonical record, send one JSON document to that account's
+Saved Messages, then re-read the returned message ID. It reports confirmation
+only when the server document matches the staged bytes exactly. A missing send
+receipt or failed read-back remains uncertain and must be reconciled against
+history before any retry. A changed or mismatched document needs review. The
+adapter does not reserve local state, retry, enable sync, or post on its own.
+
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. It does not yet

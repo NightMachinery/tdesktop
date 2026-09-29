@@ -609,6 +609,7 @@ across, through your own Saved Messages:
 **Settings > Advanced > Purple > Sync across devices** can check one signed-in
 account's Saved Messages for future sync records. With several accounts, you
 must choose one. This check reads only; account-backed sync is not enabled yet.
+The account-sync publisher is not connected to this screen yet.
 
 - **Settings > Advanced > Purple > Send settings to Saved Messages** posts a
   copy of `settings.toml` there, captioned with its schema version, the time
