@@ -92,9 +92,11 @@ canonical own config record with its pending version key, and confirm an exact
 staged server read-back. It can record and check own message IDs for cleanup.
 It validates the record's space, install and device identity. The binding token
 is saved synchronously in a per-user account preference; reservation refuses a
-missing or mismatched token. The bridge does not yet persist its returned state
-or staged record. Android local storage, network transport, and the account-sync
-interface remain to be built.
+missing or mismatched token. An uncalled Android store now persists canonical
+state and exact staged config bytes under app-private `purple/sync`, holding an
+exclusive lock and pausing on ambiguous or mismatched recovery files. It
+confirms only an exact server read-back before clearing a validated stage.
+Android network transport and the account-sync interface remain to be built.
 
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
