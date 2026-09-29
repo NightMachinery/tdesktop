@@ -15,8 +15,15 @@ The state records each stream's issued, pending, and confirmed sequence, its
 last payload hash, and the config version ancestry. Its read-back checks only
 confirm an exact sequence and hash match; a higher own sequence or a matching
 sequence with a different hash signals a clone or rewind. Neither client
-exposes account-backed sync yet; durable state-file writes, transport, and user
-interface remain to be built.
+exposes account-backed sync yet. Desktop-local storage can acquire an exclusive
+`sync/lock`, reject malformed or newer state, and stage canonical config bytes
+before committing a reserved `sync/state.json`. It creates no state while sync
+is off, keeps `sync/` and its pending files owner-only on Unix, and pauses when
+a pending file is absent or disagrees with the state. `QSaveFile` protects final
+files from partial writes after a process crash; it does not promise persistence
+through power loss. The future transport engine must reconcile the install's
+own remote record for clone or rewind signals before any publish. Network
+transport and the account-sync interface remain to be built.
 
 Compressed library records remain unsupported until the playlist phase.
 A deterministic shared-core simulation now exercises three devices against a
