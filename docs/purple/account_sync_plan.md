@@ -11,6 +11,12 @@ full parent versions, writer metadata, and a sequence, then emits a canonical
 record only after parsing and inspecting its own output. A newer settings
 schema remains read-only in an older client.
 
+When an install applies another install's config record, it can acknowledge
+that exact version under its own writer identity and sequence. The builder
+preserves the remote key, parents, and lineage, and rejects a text mismatch or
+invalid ancestry. This lets other installs classify the acknowledgement as
+the same config instead of mistaking it for a new edit.
+
 The state records each stream's issued, pending, and confirmed sequence, its
 last payload hash, and the config version ancestry. Its read-back checks only
 confirm an exact sequence and hash match; a higher own sequence or a matching
