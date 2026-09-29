@@ -19,6 +19,8 @@ class Session;
 
 namespace Purple {
 
+[[nodiscard]] bool IsSyncHistoryCandidate(const MTPMessage &message);
+
 enum class SyncHistoryScanStatus {
 	Complete,
 	Cancelled,

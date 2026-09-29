@@ -22,7 +22,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   atomic own-message ledger persistence, and restart cleanup. An uncalled
   desktop scanner can page the account's full Saved Messages history without
   sending anything, and reports an incomplete result after failure or cancel.
-  Android JNI can
+  An uncalled desktop reader re-fetches every candidate document, caps its
+  download at 4 MiB, and reports newer, changed, missing, or unreadable records
+  instead of treating them as an empty account. Android JNI can
   initialize local state, reserve a canonical own config record with its
   pending key, confirm an exact staged read-back with its message ID, and
   format or compare time-ordered space IDs. None of those calls has a runtime
