@@ -11,20 +11,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 
 namespace Purple {
-namespace {
 
 constexpr auto kBindingTokenPref = "purple.sync.binding_token";
 
-[[nodiscard]] QByteArray AccountBindingToken(Main::Account &account) {
+QByteArray AccountSyncBindingToken(Main::Account &account) {
 	return account.local().readPref<QByteArray>(kBindingTokenPref);
-}
-
 }
 
 SyncAccountBindingVerdict CheckAccountSyncBinding(
 		const SyncLocalState &state,
 		Main::Account &account) {
-	return CheckSyncAccountBinding(state, AccountBindingToken(account));
+	return CheckSyncAccountBinding(state, AccountSyncBindingToken(account));
 }
 
 bool StoreAccountSyncBinding(
@@ -35,7 +32,7 @@ bool StoreAccountSyncBinding(
 		!= SyncAccountBindingVerdict::Bound) {
 		return false;
 	}
-	const auto existing = AccountBindingToken(account);
+	const auto existing = AccountSyncBindingToken(account);
 	if (!existing.isEmpty()) {
 		return existing == token;
 	}
