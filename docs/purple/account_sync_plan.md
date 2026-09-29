@@ -86,12 +86,20 @@ coordinator now joins the two operations for one explicitly selected account:
 it returns Complete only after both the full scan and every candidate read
 complete. An incomplete scan never starts candidate reading. The reader can
 populate Telegram's local download cache, but sends and deletes nothing.
+It retains the document ID and edit date alongside each re-read candidate for
+later changed-media checks and opaque-header caching.
 The reader preserves validated space and writer headers for records from future
 streams or encodings while keeping their payload opaque. Such headers count as
 existing sync records rather than unreadable candidates; the setup box reports
 how many this version cannot read. Identity-encoded library envelopes are also
 header-only until a playlist payload validator exists. Newer-major and invalid
 candidates still require review before the client can make a group decision.
+
+The read-only desktop inventory now resolves completed candidate reads into
+per-space, per-stream, per-install heads. Equal-sequence conflicting records
+block safe space selection; opaque future and library headers keep their space
+visible without becoming supported heads. It still never publishes.
+
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. It does not yet

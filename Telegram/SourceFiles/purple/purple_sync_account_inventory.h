@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "purple/purple_sync_candidate_reader.h"
 #include "purple/purple_sync_history_scanner.h"
+#include "purple/purple_sync_directory.h"
 
 #include <memory>
 #include <optional>
@@ -26,6 +27,7 @@ struct SyncAccountInventoryResult {
 	SyncAccountInventoryStatus status = SyncAccountInventoryStatus::Incomplete;
 	SyncHistoryScanResult scan;
 	std::optional<SyncCandidateReadResult> read;
+	SyncDirectory directory;
 };
 
 class SyncAccountInventory final : public base::has_weak_ptr {

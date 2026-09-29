@@ -53,6 +53,8 @@ struct SyncCandidateRecord {
 	std::optional<SyncEnvelopeHeader> header;
 	SyncEnvelopeError envelopeError = SyncEnvelopeError::None;
 	ConfigPayloadError configError = ConfigPayloadError::None;
+	uint64_t documentId = 0;
+	uint64_t editDate = 0;
 };
 
 enum class SyncCandidateReadStatus {
@@ -101,6 +103,8 @@ private:
 	DocumentData *_document = nullptr;
 	mtpRequestId _requestId = 0;
 	size_t _next = 0;
+	uint64_t _documentId = 0;
+	uint64_t _editDate = 0;
 	bool _started = false;
 	bool _done = false;
 

@@ -166,6 +166,10 @@ void SyncCandidateReader::RequestNext() {
 		}
 		const auto media = message.c_message().vmedia();
 		const auto document = media->c_messageMediaDocument().vdocument();
+		self->_documentId = uint64_t(document->c_document().vid().v);
+		const auto editDate = message.c_message().vedit_date();
+		self->_editDate = (editDate && editDate->v > 0)
+			? uint64_t(editDate->v) : 0;
 		const auto size = document->c_document().vsize().v;
 		if (size <= 0 || size > kMaximumRecordBytes) {
 			self->CompleteCurrent({
@@ -247,6 +251,10 @@ void SyncCandidateReader::CheckDownload() {
 }
 
 void SyncCandidateReader::CompleteCurrent(SyncCandidateRecord record) {
+	record.documentId = _documentId;
+	record.editDate = _editDate;
+	_documentId = 0;
+	_editDate = 0;
 	_downloadLifetime.reset();
 	_media.reset();
 	_document = nullptr;

@@ -2153,6 +2153,8 @@ PRIVATE
     purple/purple_state.h
     purple/purple_sync_envelope.cpp
     purple/purple_sync_envelope.h
+    purple/purple_sync_directory.cpp
+    purple/purple_sync_directory.h
     purple/purple_sync_json.cpp
     purple/purple_sync_json.h
     purple/purple_sync_local_state.cpp
