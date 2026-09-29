@@ -64,8 +64,10 @@ cannot establish that the account has no sync group. An uncalled inventory
 coordinator now joins the two operations for one explicitly selected account:
 it returns Complete only after both the full scan and every candidate read
 complete. An incomplete scan never starts candidate reading. The reader can
-populate Telegram's local download cache, but sends and deletes nothing. The
-desktop setup box can run this inventory against one signed-in account and
+populate Telegram's local download cache, but sends and deletes nothing.
+The reader preserves validated space and writer headers for records from future
+streams or encodings, while keeping their payload opaque and requiring review.
+The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. It does not yet
 bind an account, create a sync space, or enable transport. The future transport

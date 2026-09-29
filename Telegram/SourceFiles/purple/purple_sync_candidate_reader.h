@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QByteArray>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace Data {
@@ -33,6 +34,7 @@ enum class SyncCandidateStatus {
 	Valid,
 	NewerSchema,
 	NewerMajor,
+	UnsupportedStream,
 	UnsupportedEncoding,
 	Invalid,
 	Vanished,
@@ -47,6 +49,7 @@ struct SyncCandidateRecord {
 	int32_t id = 0;
 	SyncCandidateStatus status = SyncCandidateStatus::Invalid;
 	QByteArray bytes;
+	std::optional<SyncEnvelopeHeader> header;
 	SyncEnvelopeError envelopeError = SyncEnvelopeError::None;
 	ConfigPayloadError configError = ConfigPayloadError::None;
 };
