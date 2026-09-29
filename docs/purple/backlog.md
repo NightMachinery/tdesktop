@@ -15,8 +15,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   a new version. A deterministic three-device core
   simulation covers delayed discovery, edit and repost modes, failure retry,
   conflicts, and restart recovery. Desktop has an unused durable local store
-  for staged config records and state; Android local storage, confirmation
-  cleanup, transport, and UI are still unimplemented.
+  for staged config records and state, including exact read-back confirmation
+  and restart cleanup. Android local storage and version-aware confirmation,
+  transport, and UI are still unimplemented.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
