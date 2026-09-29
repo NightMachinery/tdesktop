@@ -12,9 +12,12 @@ unambiguous check finds no existing sync records, the publish action scans
 again and can initialize local sync state and send one settings record only if
 the new inventory is also complete and empty. A separate cloud disclosure and
 send confirmation follows that scan. It does not turn on continuous
-account-backed sync. Existing
-cloud records cannot be joined yet, and an existing local sync state disables
-the action because resuming a staged send is not available in this box.
+account-backed sync. A separate **Resume prior settings post** action appears
+only when a complete inventory matches a safely opened local sync state bound
+to the selected account. Resume scans again, confirms cloud disclosure, and
+lets the publisher reconcile an exact prior record or post a staged record
+only when its planner allows it. Existing records from a different sync space
+cannot be joined. Neither action retries automatically.
 
 The current manual transfer has two actions:
 

@@ -3,7 +3,8 @@
 Status: design plus shared-core and client-local foundations. Desktop's
 **Sync across devices** box can inspect one explicitly selected account's Saved
 Messages and, after an empty complete inventory and explicit cloud disclosure
-and confirmation, publish one settings record. This is a manual one-time action.
+and confirmation, publish one settings record. It can also resume a prior
+settings post when local binding and cloud space match. Both are manual actions.
 Continuous account-backed sync is not enabled in either client; the existing
 manual Send/Import actions remain available.
 
@@ -128,20 +129,25 @@ stops for review if another install already has a config record, and it does
 not yet publish later local changes or retire superseded messages. The setup
 box calls it only after a completed empty inventory, a new full inventory on
 the publish click, local initialization, and separate user confirmation. This
-does not enable continuous account-backed sync.
+does not enable continuous account-backed sync. The distinct Resume action
+passes the existing local state and a fresh complete inventory directly to the
+publisher; its matcher and planner decide whether an exact cloud record can be
+confirmed, one staged record can be posted, or review is required.
 
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. Each inventory
 result carries the account's numeric user ID, so setup cannot use one account's
-scan to bind another. The box retains only its latest complete, empty inventory
-for the same live account and session. Clicking Publish starts a new full scan;
-only its complete empty result can open the final send confirmation. It discards
-the prior result on a new check,
-cancel, account switch, logout, or box close. Existing cloud sync records disable
-the publish action because joining an existing group is not supported. An
-existing local `sync/state.json` also disables the action: this box does not yet
-offer restart or retry of a staged send, even after another complete scan.
+scan to bind another. The box retains only its latest complete, unambiguous
+inventory for the same live account and session when it supports one action.
+Clicking Publish or Resume starts a new full scan; only its safe result can
+open that action's final confirmation. It discards the prior result on a new
+check, cancel, account switch, logout, or box close. First Publish requires an
+empty directory and no existing local sync state. Resume requires a safely
+opened local state with a binding token for the selected account, and either
+the same selected cloud space or an empty directory that can create one. A
+mismatched account or space, invalid local state, or unresolved candidate
+disables Resume. Existing records from another install cannot be joined.
 The local setup operation creates an install identity and account binding only
 after a complete, unambiguous scan. It can reuse a selected existing space or
 create a time-ordered space ID when the account has none, though the current UI
@@ -149,10 +155,11 @@ allows only the empty-space case. An existing local state is never silently
 rebound or moved. A binding preference that has not persisted at a crash leaves
 the state unbound and unable to publish. Confirmation explains that settings
 may include chat IDs and names and that Saved Messages is a Telegram cloud chat
-readable by other signed-in sessions. The box then initializes locally and
-starts one post, reporting confirmation, uncertainty, review, binding, and store
-failures without an automatic retry. An uncertain outcome requires a new scan
-before any future retry design can safely proceed. The future
+readable by other signed-in sessions. First Publish then initializes locally
+and starts one post. Resume may reconcile without sending or post one staged
+record if the publisher deems it safe. Both report confirmation, uncertainty,
+review, binding, and store failures without an automatic retry. An uncertain
+outcome requires a new scan before another manual resume. The future
 transport engine must reconcile the install's own remote record for clone or
 rewind signals before any publish. Android's uncalled bridge can initialize
 canonical local state bound to the active Telegram user in its account slot,
