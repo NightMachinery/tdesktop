@@ -16,7 +16,9 @@ namespace {
 
 constexpr auto kHistoryPageSize = 100;
 
-[[nodiscard]] bool IsCandidate(const MTPMessage &message) {
+} // namespace
+
+bool IsSyncHistoryCandidate(const MTPMessage &message) {
 	if (message.type() != mtpc_message) {
 		return false;
 	}
@@ -47,8 +49,6 @@ constexpr auto kHistoryPageSize = 100;
 	}
 	return false;
 }
-
-} // namespace
 
 SyncHistoryScanner::SyncHistoryScanner(
 		not_null<Main::Session*> session,
@@ -113,7 +113,7 @@ void SyncHistoryScanner::RequestNext() {
 		auto page = std::vector<SyncHistoryPageItem>();
 		page.reserve(messages->size());
 		for (const auto &message : *messages) {
-			page.push_back({ IdFromMessage(message).bare, IsCandidate(message) });
+			page.push_back({ IdFromMessage(message).bare, IsSyncHistoryCandidate(message) });
 		}
 		const auto status = self->_pages.Add(page);
 		if (status == SyncHistoryPageStatus::Stalled) {
