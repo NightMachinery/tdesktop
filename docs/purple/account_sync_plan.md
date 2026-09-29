@@ -26,6 +26,11 @@ after reconnect, validate their contents, and reconcile them locally. This
 one-writer rule avoids losing updates through Telegram's message-edit API, which
 offers no compare-and-swap.
 
+The payload hash uses [RFC 8785 JSON canonicalization](https://www.rfc-editor.org/rfc/rfc8785.html).
+Records reject duplicate object keys and invalid Unicode; known numeric fields
+use safe integers, while large Telegram identifiers are strings. This gives both
+clients the same hash even if their JSON writers order properties differently.
+
 The preferred transport replaces each install's document in place, keeping Saved
 Messages uncluttered. Telegram's
 [edit API](https://core.telegram.org/method/messages.editMessage) accepts
