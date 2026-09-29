@@ -4,9 +4,9 @@ Status: design plus foundational core. The existing manual Send/Import actions
 remain the current behavior.
 
 The shared core now has tested config version construction, remote-head
-classification, strict JSON canonicalization, and validated uncompressed record
-envelopes. Neither client exposes account-backed sync yet; config payload
-validation, local sync state, transport, and user interface remain to be built.
+classification, strict JSON canonicalization, validated uncompressed record
+envelopes, and config payload inspection. Neither client exposes account-backed
+sync yet; local sync state, transport, and user interface remain to be built.
 Compressed library records remain unsupported until the playlist phase.
 
 Purple can use each account's Saved Messages to carry configuration and future
