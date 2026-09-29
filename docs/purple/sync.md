@@ -45,11 +45,14 @@ file once at launch, but neither writes anything until you choose Import.
 
 ## What it does not do
 
-It does not merge. Import replaces the file wholesale; the previous one is kept
-as `settings.toml.bak` beside it, a single file that is overwritten each time.
-If that backup cannot be refreshed, the import aborts and leaves the current
-file unchanged. There is no three-way merge and no attempt at one, because a
-merge needs a common ancestor and there is nowhere here that would hold one.
+It does not merge. Import replaces the file wholesale. Desktop keeps the
+previous file as `settings.toml.bak` beside it. Android source `6df36b1d`
+keeps that rolling whole-file-write backup and also writes
+`settings.toml.import.bak` before an import, so a later editor save does not
+erase the pre-import copy. Each backup has one slot. If a required backup
+cannot be refreshed, the import aborts and leaves the current file unchanged.
+There is no three-way merge and no attempt at one, because a merge needs a
+common ancestor and there is nowhere here that would hold one.
 
 It does not import on its own. The *sending* half can now be automatic -
 `[sync] send_after_save_p`, off unless you turn it on, posts the file whenever
@@ -57,8 +60,11 @@ the app itself writes it, five seconds after the last write so a run of taps is
 one document - but nothing about the receiving half changed. On Android the fork
 notices that the other machine has a newer file and says so once, see phase 2
 below, and the write still waits for a press. Two fingerprints in `state.toml`,
-of the last file this machine sent and the last it wrote from an import, keep
-two machines from handing the same bytes back and forth; an import never sends.
+of the last file this machine queued to send and the last it wrote from an
+import, suppress repeated posts of those bytes; an import never sends. The
+queued fingerprint is currently written before Telegram confirms delivery, so
+an upload failure can suppress a retry. The account-backed sync plan includes
+a confirmed-send fix.
 The rule is `ShouldAutoSend()` in the core, and
 [work_mode.md](work_mode.md) has the reasoning.
 
@@ -76,6 +82,10 @@ is newer than the local file it offers “A newer Work Mode settings file is in
 Saved Messages” with an Import button. Nothing is written unless that button is
 pressed, and pressing it uses the same import, confirmation, and download flow
 as the message menu action.
+
+Desktop accepts a settings document up to 4 MiB and scans up to 100 recent
+documents. Android source `a950e13c` uses the same size and search limits;
+the earlier Android build accepted only 64 KiB and scanned 20 documents.
 
 The thing that was actually hard here was never the code. It was the worry that
 stated the hold: an offer that appears on every launch of a machine you never
