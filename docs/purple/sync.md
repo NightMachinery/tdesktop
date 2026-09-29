@@ -4,6 +4,9 @@
 have two files, and nothing in the fork keeps them in step. This document is
 about the one mechanism that does, and about the ones deliberately not built.
 
+For a proposed account-backed sync flow for settings and future playlists, see
+[account_sync_plan.md](account_sync_plan.md). The plan has not been implemented.
+
 Two actions, and that is the whole feature:
 
 - **Settings > Advanced > Purple > Send settings to Saved Messages** uploads
@@ -31,8 +34,10 @@ It is also the answer to trust. `settings.toml` holds chat ids and the display
 names cached beside them - who you have decided is worth interrupting you, and
 who is filed under a list called "noise". That is the kind of file you do not
 want on infrastructure you have to reason about. In Saved Messages it sits
-exactly where the messages it describes already sit, under the same account and
-the same encryption, and the fork has added no new place for it to leak from.
+under the same account as the messages it describes, using Telegram's cloud-chat
+encryption. Saved Messages is not end-to-end encrypted: Telegram stores cloud
+chats on its servers, and other sessions signed in to the account can read the
+file. The fork has added no separate storage service.
 
 The cost is that importing is manual. You press a button on one machine and
 confirm the import on the other. The desktop and Android clients notice a newer
