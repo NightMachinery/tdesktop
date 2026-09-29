@@ -1761,6 +1761,9 @@ PRIVATE
     purple/purple_screentime_recorder.h
     purple/purple_sync.cpp
     purple/purple_sync.h
+    purple/purple_sync_history_page.h
+    purple/purple_sync_history_scanner.cpp
+    purple/purple_sync_history_scanner.h
     purple/purple_sync_local_store.cpp
     purple/purple_sync_local_store.h
     settings/business/settings_away_message.cpp

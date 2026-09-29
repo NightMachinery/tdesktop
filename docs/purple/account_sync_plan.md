@@ -46,7 +46,12 @@ including a missing current device identity, has a distinct verdict.
 The desktop store latches that verdict and refuses further staging until a
 fresh open and reconciliation. `QSaveFile` protects final files from partial
 writes after a process crash; it does not promise persistence through power
-loss. The future transport engine must reconcile the install's
+loss. Desktop also has an uncalled, read-only Saved Messages history scanner.
+It pages `messages.getHistory` to an empty result, reports progress, and only
+returns candidate message IDs after a complete scan. Cancellation, request
+failure, invalid responses, and stalled pagination remain incomplete; the
+scanner does not download, validate, or send a document. The future transport
+engine must reconcile the install's
 own remote record for clone or rewind signals before any publish. Android's
 uncalled JNI bridge can initialize canonical local state, reserve a canonical
 own config record with its pending version key, and confirm an exact staged
