@@ -288,15 +288,31 @@ reconciliation rather than extending this legacy callback indefinitely.
 
 Playlists will use the same account binding, record envelope, discovery, and
 transport. Their data model should be revisited with the playlist feature.
-Unlike a whole settings file, individual playlist entries can be edited
-frequently on different devices, so the current proposal uses a mergeable
-library state with stable song references, per-field deterministic resolution,
-ordering, and deletion markers. Edits to different fields combine. Two unseen
-edits to the same field have a fixed winner; device clocks cannot prove which
-one happened later in real time, so the losing value is recoverable only from
-the originating device's local History. Deleting a playlist hides concurrent
-edits but retains them for Restore. This policy is deferred until the playlist
-feature is designed and tested. The library stores message and document
-identities, not audio files or account-specific access hashes. Unavailable
+Each install's library record should contain its full merged replica, not just
+that install's edits. A later device can then recover the library from any
+surviving replica. Before removing a stale device's record, another device
+must absorb its exact content and confirm that the merged state is present in
+its own record.
+
+Unlike a whole settings file, playlist entries can be edited concurrently on
+different devices. The proposed library uses stable song and entry identities,
+per-field deterministic resolution, ordering, and deletion markers. Edits to
+different fields combine; a delete wins over concurrent edits but remains
+restorable. A merge must be commutative, associative, and idempotent, and must
+never create a new edit stamp. A local overwrite log should retain values
+replaced by a merge, because a short ring of whole-library snapshots could
+discard them after a busy day of syncing. The exact stamp and tombstone format
+remains part of the playlist design and its convergence tests.
+
+Only a changed library payload hash warrants a new record. In edit-in-place
+mode, a merge-only republish can be rate-limited; in append-and-retire mode it
+should normally wait for a local edit or a daily flush, so another device's
+playlist edit does not repeatedly bump Saved Messages. Future library fields
+must survive an older client's merge, and a format with a newer minimum writer
+version must make that client read-only.
+
+The library stores message and document identities, not audio files,
+account-specific access hashes, or file references. A song in Saved Messages
+uses a `self` peer token instead of the account's numeric user ID. Unavailable
 songs remain visible with an explanation instead of disappearing. Download
-state and any **Keep downloaded** preference stay device-local.
+state, playback state, and any **Keep downloaded** preference stay device-local.
