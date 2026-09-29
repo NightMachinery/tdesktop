@@ -181,7 +181,7 @@ void SyncCandidateReader::RequestNext() {
 				.status = SyncCandidateStatus::RequestFailed,
 			});
 		}
-	}).handleAllErrors().send();
+	}).send();
 }
 
 void SyncCandidateReader::ResolveDocument(not_null<DocumentData*> document) {

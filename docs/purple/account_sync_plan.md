@@ -78,6 +78,11 @@ It validates the record's space, install and device identity; it does not yet
 persist these results. Android local storage, network transport
 and the account-sync interface remain to be built.
 
+The read-only scanner and candidate reader now leave Telegram's standard
+`FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
+inventory incomplete, but the setup box does not yet show a countdown or
+resume a scan after an app restart. Those are required before automatic sync.
+
 Compressed library records remain unsupported until the playlist phase.
 A deterministic shared-core simulation now exercises three devices against a
 fake Saved Messages store, including delayed search, failed upload, edit and
