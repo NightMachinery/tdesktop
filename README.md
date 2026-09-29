@@ -92,7 +92,8 @@ English key sequence entered with a Persian keyboard layout, as described in
 [docs/purple/passcode.md][purple_passcode]. Desktop notification preview
 exceptions for selected chats are configured in
 [docs/purple/config.md][purple_config]. Account-backed settings sync and future
-playlist sync are designed but not yet exposed in the clients; see the
+playlist sync have shared-core and local-state foundations but are not yet
+exposed in the clients; see the
 [sync plan][purple_account_sync]. Current requests and follow-up work are
 tracked in [docs/purple/backlog.md][purple_backlog].
 

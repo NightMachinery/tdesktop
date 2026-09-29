@@ -35,14 +35,15 @@ void Check(bool ok, int line) {
 [[nodiscard]] Purple::ConfigRecordBuildResult Record(
 		const Purple::SyncLocalState &state,
 		uint64_t seq,
-		const QByteArray &text) {
+		const QByteArray &text,
+		const QString &app = u"Purple"_q) {
 	auto input = Purple::ConfigRecordBuildInput();
 	input.text = text;
 	input.space = state.space;
 	input.install = state.install;
 	input.device = state.createdDevice;
 	input.platform = u"macos"_q;
-	input.app = u"Purple"_q;
+	input.app = app;
 	input.seq = seq;
 	return Purple::BuildConfigRecord(input);
 }
@@ -169,8 +170,12 @@ void TestConfirmation() {
 		metadata.seenSeq[u"in-"_q + QString(25, u'b') + u'a'] = 7;
 		CHECK(bool(store.StageConfig(first.canonical, metadata)));
 		CHECK(store.state()->config.pendingSeq == 1);
-		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 101).status
 			== Purple::SyncStoreStatus::Ready);
+		CHECK(store.state()->ownMessages.size() == 1);
+		CHECK(store.state()->ownMessages[0].messageId == 101);
+		CHECK(store.state()->ownMessages[0].seq == 1);
+		CHECK(store.state()->ownMessages[0].payloadHash == first.payloadHash);
 		CHECK(store.state()->config.pendingSeq == 0);
 		CHECK(store.state()->config.confirmedSeq == 1);
 		CHECK(store.state()->configData.base == first.version.key);
@@ -178,16 +183,18 @@ void TestConfirmation() {
 		CHECK(store.state()->configData.pending.isEmpty());
 		CHECK(store.state()->configData.seenSeq == metadata.seenSeq);
 		CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
-		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 102).status
 			== Purple::SyncStoreStatus::NoPending);
 		auto next = store.state()->configData;
 		next.pending = changed.version.key;
 		CHECK(bool(store.StageConfig(changed.canonical, next)));
-		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 103).status
 			== Purple::SyncStoreStatus::Unconfirmed);
 		CHECK(store.state()->config.pendingSeq == 2);
-		CHECK(store.ConfirmConfigReadBack(changed.canonical, u"device-a"_q)
+		CHECK(store.ConfirmConfigReadBack(changed.canonical, u"device-a"_q, 104)
 			.status == Purple::SyncStoreStatus::Ready);
+		CHECK(store.state()->ownMessages.size() == 2);
+		CHECK(store.state()->ownMessages[1].messageId == 104);
 		CHECK(store.state()->configData.base == changed.version.key);
 		CHECK(store.state()->configData.baseLineage == changed.version.lineage);
 		CHECK(store.state()->configData.seenSeq == metadata.seenSeq);
@@ -198,8 +205,10 @@ void TestConfirmation() {
 		sameMetadata.pending = acknowledgement.version.key;
 		CHECK(bool(store.StageConfig(acknowledgement.canonical, sameMetadata)));
 		CHECK(store.ConfirmConfigReadBack(
-			acknowledgement.canonical, u"device-a"_q).status
+			acknowledgement.canonical, u"device-a"_q, 105).status
 			== Purple::SyncStoreStatus::Ready);
+		CHECK(store.state()->ownMessages.size() == 3);
+		CHECK(store.state()->ownMessages[2].messageId == 105);
 		CHECK(store.state()->configData.base == changed.version.key);
 		CHECK(store.state()->configData.seenSeq == metadata.seenSeq);
 	}
@@ -207,6 +216,52 @@ void TestConfirmation() {
 		auto restarted = Purple::SyncLocalStore(root);
 		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::Ready);
 		CHECK(restarted.state()->configData.base == changed.version.key);
+		CHECK(restarted.state()->ownMessages.size() == 3);
+		CHECK(restarted.state()->ownMessages[0].messageId == 101);
+		CHECK(restarted.state()->ownMessages[1].messageId == 104);
+		CHECK(restarted.state()->ownMessages[2].messageId == 105);
+	}
+}
+
+void TestFullEnvelopeReadBack() {
+	auto temp = QTemporaryDir();
+	const auto root = Root(temp);
+	const auto initial = InitialState();
+	const auto first = Record(initial, 1, "version = 1\nname = 'first'\n");
+	const auto differentApp = Record(initial, 1,
+		"version = 1\nname = 'first'\n", u"Other"_q);
+	CHECK(bool(first));
+	CHECK(bool(differentApp));
+	CHECK(differentApp.canonical != first.canonical);
+	CHECK(differentApp.payloadHash == first.payloadHash);
+	CHECK(differentApp.version.key == first.version.key);
+	{
+		auto store = Purple::SyncLocalStore(root);
+		CHECK(store.Open(true).status == Purple::SyncStoreStatus::Uninitialized);
+		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
+		auto metadata = initial.configData;
+		metadata.pending = first.version.key;
+		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 0)
+			.status == Purple::SyncStoreStatus::InvalidRecord);
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, -1)
+			.status == Purple::SyncStoreStatus::InvalidRecord);
+		CHECK(store.ConfirmConfigReadBack(
+			differentApp.canonical, u"device-a"_q, 111).status
+			== Purple::SyncStoreStatus::Unconfirmed);
+		CHECK(store.state()->config.pendingSeq == 1);
+		CHECK(store.state()->ownMessages.empty());
+		CHECK(QFileInfo::exists(root + u"/pending/config-1.json"_q));
+	}
+	{
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status == Purple::SyncStoreStatus::Ready);
+		CHECK(restarted.state()->ownMessages.empty());
+		CHECK(restarted.ConfirmConfigReadBack(
+			first.canonical, u"device-a"_q, 112).status
+			== Purple::SyncStoreStatus::Ready);
+		CHECK(restarted.state()->ownMessages.size() == 1);
+		CHECK(restarted.state()->ownMessages[0].messageId == 112);
 	}
 }
 
@@ -228,7 +283,7 @@ void TestCloneRejection() {
 			: mode == 3 ? higher.canonical : first.canonical;
 		const auto device = mode == 0 ? u"device-b"_q
 			: mode == 1 ? QString() : u"device-a"_q;
-		const auto result = store.ConfirmConfigReadBack(record, device);
+		const auto result = store.ConfirmConfigReadBack(record, device, 106);
 		CHECK(result.status == Purple::SyncStoreStatus::CloneDetected);
 		CHECK(result.cloneVerdict == (mode < 2
 			? Purple::SyncCloneVerdict::DeviceMismatch
@@ -265,7 +320,7 @@ void TestSupersededStages() {
 			CHECK(QFileInfo::exists(root + u"/pending/config-1.json"_q));
 			if (!restart) {
 				CHECK(store.ConfirmConfigReadBack(
-					second.canonical, u"device-a"_q).status
+					second.canonical, u"device-a"_q, 107).status
 					== Purple::SyncStoreStatus::Ready);
 				CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
 			}
@@ -276,7 +331,7 @@ void TestSupersededStages() {
 			CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
 			CHECK(bool(store.ReadPendingConfig()));
 			CHECK(store.ConfirmConfigReadBack(
-				second.canonical, u"device-a"_q).status
+				second.canonical, u"device-a"_q, 108).status
 				== Purple::SyncStoreStatus::Ready);
 		}
 	}
@@ -325,7 +380,7 @@ void TestPostCommitCleanup() {
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
 		CHECK(bool(store.StageConfig(first.canonical, metadata)));
-		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q).status
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 109).status
 			== Purple::SyncStoreStatus::Ready);
 	}
 	const auto stagePath = root + u"/pending/config-1.json"_q;
@@ -372,7 +427,7 @@ void TestCleanupFailure() {
 		CHECK(bool(store.StageConfig(first.canonical, metadata)));
 		CHECK(QFile(pendingDirectory).setPermissions(
 			QFileDevice::ReadOwner | QFileDevice::ExeOwner));
-		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q)
+		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 110)
 			.status == Purple::SyncStoreStatus::CleanupFailed);
 		CHECK(QFileInfo::exists(stagePath));
 		const auto file = QFile(root + u"/state.json"_q);
@@ -603,6 +658,7 @@ void TestPermissionsAndCollision() {
 int main() {
 	TestLifecycle();
 	TestConfirmation();
+	TestFullEnvelopeReadBack();
 	TestCloneRejection();
 	TestSupersededStages();
 	TestNoPartialCleanup();
