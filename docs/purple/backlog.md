@@ -66,10 +66,12 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   Peek and restoration behavior remain unverified on a live contact. Desktop
   source `c894b72c07` similarly journals and verifies its privacy restoration.
   Its optimized app built and installed successfully. An unsandboxed launch
-  with a disposable workdir reached normal startup with Debug off; the
-  established account and eligible Peek behavior remain unverified. A strict
-  signing check still reports an untrusted local certificate, although the
-  installed app launches. Mute behavior already matches normal behavior.
+  with a disposable workdir reached normal startup with Debug off. A separate
+  launch with its normal profile reached the established local passcode screen,
+  confirming it did not start a fresh login; chats and eligible Peek behavior
+  remain unverified behind the lock. A strict signing check still reports an
+  untrusted local certificate, although the installed app launches. Mute
+  behavior already matches normal behavior.
 - **Android Contacts Last Seen filter:** the signed APK from source `5e428532`
   shows “Visible or peekable last seen” in Contacts More. Turning it on showed
   the active-filter empty state, and turning it off restored the same contact.
