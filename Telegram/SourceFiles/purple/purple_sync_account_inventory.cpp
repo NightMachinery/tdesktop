@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_account_inventory.h"
 
+#include "data/data_user.h"
+#include "main/main_session.h"
+
 #include <QtCore/QCryptographicHash>
 
 #include <utility>
@@ -62,6 +65,7 @@ SyncAccountInventory::SyncAccountInventory(
 : _session(session)
 , _progress(std::move(progress))
 , _finished(std::move(finished)) {
+	_result.accountUserId = peerToUser(session->user()->id).bare;
 }
 
 SyncAccountInventory::~SyncAccountInventory() = default;
