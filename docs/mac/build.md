@@ -517,11 +517,22 @@ BuildPath="$BuildPath" purple/install.sh
 If it does not match, stop. A Debug bundle belongs in a separate `BuildPath`,
 at a separate `Target`, with isolated account data.
 
-This copies the Qt frameworks into the bundle, re-signs it ad-hoc, and replaces
-`/Applications/Purple Telegram.app`. Ad-hoc signing is enough for a locally
-built app; it is not enough to distribute one. Set `Target=<path>` to deploy
-somewhere else — a scratch bundle to launch and check before it replaces the
-installed app.
+This copies the Qt frameworks into the bundle, signs with the local certificate
+when a valid identity is visible to the installer (ad-hoc otherwise), and
+replaces `/Applications/Purple Telegram.app`. Ad-hoc signing is enough for a
+locally built app; it is not enough to distribute one. Set `Target=<path>` to
+deploy somewhere else, such as a scratch bundle to launch and check before it
+replaces the installed app.
+
+When checking a launch from a sandboxed agent shell, `open -n` may return
+LaunchServices error `-10822`, and direct execution may abort inside
+`_RegisterApplication`, even for a previously working bundle. An agent shell
+that cannot run a simple `ps` query is not a reliable launch test. Run the
+smoke outside that command sandbox, with an explicit disposable `-workdir`,
+then verify the exact installed executable stays running and writes its log
+there. `-workdir` isolates `tdata`; it does not necessarily isolate Purple's
+global settings unless `XDG_CONFIG_HOME` reaches the app as well. Do not infer
+the established account's state from a disposable workdir.
 
 `macdeployqt` comes from whichever Qt prefix `build_app.sh` used, by the same
 rule: `../tdesktop-libs/qt-patched` when that exists, the merged Homebrew
