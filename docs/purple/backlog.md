@@ -5,6 +5,15 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 
 ## Open
 
+- **Account-backed settings and playlist sync:** the design in
+  [account_sync_plan.md](account_sync_plan.md) uses opt-in records in each
+  account's Saved Messages, with config first and playlist metadata later.
+  A disposable-account test must establish whether media can be replaced
+  in place between clients before choosing that transport over bounded
+  reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
+  `a950e13c` aligns settings size and Saved Messages search limits with
+  desktop. Server-confirmed send bookkeeping, self-echo suppression, persistent
+  incoming offers, and the playlist feature remain open.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could

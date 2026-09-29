@@ -48,6 +48,20 @@ between clients, and preserve Android's pre-import backup across editor saves.
 Update the existing documentation to describe Saved Messages' cloud privacy
 accurately.
 
+On desktop, the current `UploadTo` call returns after `sendFiles` queues file
+preparation. Neither that return nor `Uploader::documentReady` proves the
+message reached Telegram. A confirmed-send signal must follow the single file
+through preparation and upload to the `sendPreparedMessage` server response;
+preparation, upload, and request failures also need completion paths. Keep a
+fingerprint pending in memory so a second local write does not queue a duplicate
+while the first is in flight. Telegram's
+[update protocol](https://core.telegram.org/api/updates) says `random_id`
+deduplicates sends across an account's sessions and `updateMessageID` can later
+identify a message whose response was lost. An ambiguous send must therefore
+retain its original `random_id` for reconciliation or retry; generating a new
+one could create a second post. This pipeline was traced in source, not yet
+tested live.
+
 ## Playlists later
 
 Playlists will use the same account binding, record envelope, discovery, and
