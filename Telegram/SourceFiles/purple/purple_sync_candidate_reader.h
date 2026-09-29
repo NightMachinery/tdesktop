@@ -36,6 +36,7 @@ enum class SyncCandidateStatus {
 	NewerMajor,
 	UnsupportedStream,
 	UnsupportedEncoding,
+	UnsupportedLibrary,
 	Invalid,
 	Vanished,
 	Changed,

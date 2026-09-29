@@ -56,7 +56,7 @@ constexpr auto kMaximumRecordBytes = 4 * 1024 * 1024;
 			? SyncCandidateStatus::NewerSchema
 			: SyncCandidateStatus::Invalid;
 	} else {
-		record.status = SyncCandidateStatus::Valid;
+		record.status = SyncCandidateStatus::UnsupportedLibrary;
 	}
 	return record;
 }
@@ -254,6 +254,10 @@ void SyncCandidateReader::CompleteCurrent(SyncCandidateRecord record) {
 		|| record.status == SyncCandidateStatus::Inaccessible) {
 		_result.status = SyncCandidateReadStatus::Incomplete;
 	} else if (record.status != SyncCandidateStatus::Valid
+		&& !((record.status == SyncCandidateStatus::UnsupportedStream
+			|| record.status == SyncCandidateStatus::UnsupportedEncoding
+			|| record.status == SyncCandidateStatus::UnsupportedLibrary)
+			&& record.header)
 		&& _result.status != SyncCandidateReadStatus::Incomplete) {
 		_result.status = SyncCandidateReadStatus::NeedsReview;
 	}

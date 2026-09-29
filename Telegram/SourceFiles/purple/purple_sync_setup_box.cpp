@@ -89,16 +89,30 @@ void ShowResult(State &state, SyncAccountInventoryResult result) {
 	state.scanned = result.scan.scannedCount;
 	const auto scanned = QString::number(state.scanned);
 	const auto candidates = QString::number(result.scan.candidateIds.size());
-	const auto valid = result.read
-		? std::count_if(
-			result.read->records.begin(),
-			result.read->records.end(),
-			[](const SyncCandidateRecord &record) {
-				return record.status == SyncCandidateStatus::Valid;
-			})
-		: 0;
+	auto valid = 0;
+	auto future = 0;
+	if (result.read) {
+		for (const auto &record : result.read->records) {
+			if (record.status == SyncCandidateStatus::Valid) {
+				++valid;
+			} else if (record.header
+				&& (record.status == SyncCandidateStatus::UnsupportedStream
+					|| record.status
+						== SyncCandidateStatus::UnsupportedEncoding
+					|| record.status
+						== SyncCandidateStatus::UnsupportedLibrary)) {
+				++future;
+			}
+		}
+	}
 	if (result.status == SyncAccountInventoryStatus::Complete) {
-		state.status->setText(valid
+		state.status->setText(future
+			? u"Complete: found %1 sync record(s), including %2 this "
+				"version cannot read. Checked %3 messages."_q.arg(
+				QString::number(valid + future),
+				QString::number(future),
+				scanned)
+			: valid
 			? u"Complete: found %1 sync record(s). Checked %2 messages."_q.arg(
 				QString::number(valid), scanned)
 			: u"Complete: no sync records found after checking %1 messages."_q.arg(
