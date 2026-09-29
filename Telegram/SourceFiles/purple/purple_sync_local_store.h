@@ -74,6 +74,15 @@ struct SyncStoreResult {
 	}
 };
 
+[[nodiscard]] SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path);
+[[nodiscard]] SyncStoreStatus ReadSyncPrivateFile(
+	const QString &path,
+	qsizetype limit,
+	QByteArray &bytes);
+[[nodiscard]] SyncStoreStatus WriteSyncPrivateFile(
+	const QString &path,
+	const QByteArray &bytes);
+
 class SyncLocalStore final {
 public:
 	explicit SyncLocalStore(QString syncRoot);
