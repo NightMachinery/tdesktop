@@ -75,12 +75,17 @@ Each install receives a random 128-bit identity and chooses one home account.
 Each platform supplies 16 secure random bytes for an install ID. For a new
 sync-space ID it supplies a server-time estimate in milliseconds and 10 secure
 random bytes; shared core formats the same lowercase base32 IDs on both
-platforms and compares decoded space IDs in immutable creation order. No
-client calls the time-ordered constructor yet. An install
-publishes its own versioned JSON document for each stream: `config` for
+platforms and compares decoded space IDs in immutable creation order. Android
+exposes these helpers through JNI, but no runtime setup path calls them yet.
+An install publishes its own versioned JSON document for each stream: `config` for
 `settings.toml`, and later `library` for playlists. No other install edits that
-record. Readers discover records in Saved Messages, read known message IDs again
-after reconnect, validate their contents, and reconcile them locally. This
+record. First setup pages through the chosen account's complete Saved Messages
+history before deciding that no sync group exists. A hashtag search alone
+cannot prove absence: a delayed search entry may later appear below an
+advanced message-ID watermark. Later checks re-read known IDs, use a hashtag
+search for quick discovery, and repeat the full history scan on Sync now and
+daily for recovery. Incomplete scans never authorize a new group. Readers
+validate candidate documents and reconcile them locally. This
 one-writer rule avoids losing updates through Telegram's message-edit API, which
 offers no compare-and-swap.
 

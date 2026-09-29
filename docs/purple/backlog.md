@@ -13,15 +13,20 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   Shared core now constructs config version ancestry, classifies incoming
   heads, canonicalizes strict JSON, validates and builds config records, and
   checks versioned device-local sync state for exact read-back and clone/rewind
-  signals. It can also acknowledge an applied remote config without creating
-  a new version. A deterministic three-device core
-  simulation covers delayed discovery, edit and repost modes, failure retry,
+  signals. It also records confirmed own message IDs for exact-read-back
+  cleanup, orders time-prefixed sync-space IDs, and acknowledges an applied
+  remote config without creating a new version. A deterministic three-device
+  core simulation covers delayed discovery, edit and repost modes, failure retry,
   conflicts, and restart recovery. Desktop has an unused durable local store
-  for staged config records and state, including exact read-back confirmation
-  and restart cleanup. Android JNI can initialize local state, reserve a
-  canonical own config record with its pending key, and confirm an exact
-  staged read-back, but none of those calls has a runtime owner yet. Android
-  local storage, account binding, transport, and both clients' UI remain open.
+  for staged config records and state, including exact read-back confirmation,
+  atomic own-message ledger persistence, and restart cleanup. Android JNI can
+  initialize local state, reserve a canonical own config record with its
+  pending key, confirm an exact staged read-back with its message ID, and
+  format or compare time-ordered space IDs. None of those calls has a runtime
+  owner yet. First setup needs a complete Saved Messages history scan before
+  it can declare the account empty; search with a watermark alone can miss a
+  delayed older entry. Android local storage, account binding, transport, and
+  both clients' UI remain open.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
