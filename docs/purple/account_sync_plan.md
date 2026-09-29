@@ -9,10 +9,13 @@ behavior.
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
 envelopes, config payload inspection and construction, and a versioned
-device-local sync state. The shared builder accepts exact UTF-8 settings bytes,
-full parent versions, writer metadata, and a sequence, then emits a canonical
-record only after parsing and inspecting its own output. A newer settings
-schema remains read-only in an older client.
+device-local sync state. It also derives sync status, attention tier, and the
+primary recovery action from engine facts in one tested model. Clients still
+need to supply those facts, localize the labels, and deduplicate notices; the
+model does not activate account sync. The shared builder accepts exact UTF-8
+settings bytes, full parent versions, writer metadata, and a sequence. It
+emits a canonical record only after parsing and inspecting its own output. A
+newer settings schema remains read-only in an older client.
 
 When an install applies another install's config record, it can acknowledge
 that exact version under its own writer identity and sequence. The builder
