@@ -112,11 +112,9 @@ bool SetPresetPins(
 // list_order, and guessing which preset wanted it would be worse than saying so.
 bool CreateList(const QString &name, const QString &title);
 
-// Remembers that this device has just posted these exact bytes to Saved
-// Messages, so nothing posts them a second time. Called by the manual "Send
-// settings to Saved Messages" as well as by the automatic send, because the two
-// put the same file in the same chat and a fingerprint that only one of them
-// wrote would let the other repeat it.
+// Remembers bytes after Telegram confirms their post to Saved Messages.
+// Manual and automatic sends share this fingerprint so neither repeats bytes
+// that the other posted.
 void NoteSettingsSent(const QByteArray &bytes);
 
 // The same for a file that arrived from somewhere else and has just been

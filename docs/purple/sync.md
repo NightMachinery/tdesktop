@@ -60,11 +60,16 @@ the app itself writes it, five seconds after the last write so a run of taps is
 one document - but nothing about the receiving half changed. On Android the fork
 notices that the other machine has a newer file and says so once, see phase 2
 below, and the write still waits for a press. Two fingerprints in `state.toml`,
-of the last file this machine queued to send and the last it wrote from an
-import, suppress repeated posts of those bytes; an import never sends. The
-queued fingerprint is currently written before Telegram confirms delivery, so
-an upload failure can suppress a retry. The account-backed sync plan includes
-a confirmed-send fix.
+of the last file this machine sent and the last it wrote from an import,
+suppress repeated posts of those bytes; an import never sends. On both clients,
+the sent fingerprint is recorded only after Telegram confirms the post. While
+an automatic post is in flight, its fingerprint is held in memory to keep
+another local write from queuing the same bytes. Preparation, upload, and
+request failures leave the sent fingerprint unchanged. If the local file has
+changed while a post is in flight, confirmation of the older bytes does not
+replace the current file's sent fingerprint. A lost server response remains
+ambiguous: a later save or manual send can post the same bytes again if
+Telegram accepted the first post.
 The rule is `ShouldAutoSend()` in the core, and
 [work_mode.md](work_mode.md) has the reasoning.
 
@@ -97,7 +102,9 @@ id is written before the line is drawn, so dismissing it, letting it time out,
 and crashing halfway through all record the same thing. A machine you never sync
 therefore sees each file you post exactly once and then never again, which is
 the behaviour a notification should have: it tells you something happened, and
-it does not keep telling you.
+it does not keep telling you. On both clients, a confirmed post from this device
+advances the id to its server message id, so the launch search cannot offer
+the file this device just sent.
 
 Two smaller decisions fall out of that rule. A message *older* than the local
 file advances the remembered id too, without ever being shown - it is not worth

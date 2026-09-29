@@ -42,7 +42,10 @@ void SendSettingsToSavedMessages(
 // False when there is no signed-in session to post into. That is a reason to
 // try again after the next write rather than an error worth a message: the app
 // can be up, and the file editable, before anyone has signed in.
-[[nodiscard]] bool Upload(const QByteArray &content, int version);
+[[nodiscard]] bool Upload(
+	const QByteArray &content,
+	int version,
+	Fn<void(std::optional<MsgId>)> finished);
 
 // The "Import Purple settings" row on a message's context menu. Offered only
 // for a document called settings.toml sitting in Saved Messages: anywhere else

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 
 #include "base/timer.h"
+#include "base/weak_ptr.h"
 #include "purple/purple_readme.h"
 #include "purple/purple_sync.h"
 
@@ -17,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFileInfo>
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QSaveFile>
+#include <QtCore/QSet>
 
 namespace Purple {
 
@@ -294,7 +296,7 @@ hide_invisible_p = true
 
 // Everything here runs on the main thread, in response to startup, a click in
 // Settings or a file change notification, so no locking.
-class Config final {
+class Config final : public base::has_weak_ptr {
 public:
 	Config();
 
@@ -358,6 +360,7 @@ private:
 
 	State _state;
 	QString _stateText;
+	QSet<QString> _pendingSendFingerprints;
 
 	rpl::variable<bool> _localPremium = true;
 	rpl::event_stream<> _changes;
@@ -486,7 +489,9 @@ bool Config::writeSettings(const QString &text) {
 }
 
 void Config::autoSendLater() {
-	if (ShouldAutoSend(_settings, _state, _text.toUtf8(), false)) {
+	const auto bytes = _text.toUtf8();
+	if (ShouldAutoSend(_settings, _state, bytes, false)
+		&& !_pendingSendFingerprints.contains(SettingsFingerprint(bytes))) {
 		// Restarted rather than left to run, so the clock measures the quiet
 		// after the last write instead of the noise after the first.
 		_autoSend.callOnce(kAutoSendDelay);
@@ -499,19 +504,32 @@ void Config::autoSendNow() {
 	// it was, and an import can have landed the very bytes we were about to
 	// offer the machine that sent them.
 	const auto bytes = _text.toUtf8();
-	if (!ShouldAutoSend(_settings, _state, bytes, false)) {
+	const auto fingerprint = SettingsFingerprint(bytes);
+	if (!ShouldAutoSend(_settings, _state, bytes, false)
+		|| _pendingSendFingerprints.contains(fingerprint)) {
 		return;
-	} else if (!Upload(bytes, _settings.version)) {
+	}
+	_pendingSendFingerprints.insert(fingerprint);
+	const auto weak = base::make_weak(this);
+	if (!Upload(bytes, _settings.version, [weak, fingerprint](
+			std::optional<MsgId>) {
+		if (const auto self = weak.get()) {
+			self->_pendingSendFingerprints.remove(fingerprint);
+		}
+	})) {
+		_pendingSendFingerprints.remove(fingerprint);
 		// No session to post into - not signed in yet, or signed out since.
 		// Nothing is recorded, so the next write tries again, which is what
 		// somebody who turned this on would expect over a silent giving up.
 		LOG(("Purple: nothing to send settings.toml to, not sending."));
 		return;
 	}
-	noteSent(bytes);
 }
 
 void Config::noteSent(const QByteArray &bytes) {
+	if (bytes != _text.toUtf8()) {
+		return;
+	}
 	const auto fingerprint = SettingsFingerprint(bytes);
 	updateState([&](State &state) {
 		state.lastSentFingerprint = fingerprint;

@@ -202,6 +202,14 @@ struct PreparedFileThumbnail {
 
 } // namespace
 
+SendFileReceipt::~SendFileReceipt() {
+	if (!completed && finished) {
+		crl::on_main([callback = std::move(finished)] {
+			callback(std::nullopt);
+		});
+	}
+}
+
 int PhotoSideLimit(bool large) {
 	return large ? 2560 : 1280;
 }
@@ -489,7 +497,13 @@ FileLoadTask::FileLoadTask(VoiceArgs &&args)
 , _caption(std::move(args.caption)) {
 }
 
-FileLoadTask::~FileLoadTask() = default;
+FileLoadTask::~FileLoadTask() {
+	if (_to.receipt) {
+		crl::on_main([receipt = _to.receipt] {
+			receipt->complete(std::nullopt);
+		});
+	}
+}
 
 auto FileLoadTask::ReadMediaInformation(
 	const QString &filepath,
@@ -1046,10 +1060,12 @@ void FileLoadTask::process(ProcessArgs &&args) {
 void FileLoadTask::finish() {
 	const auto session = _session.get();
 	if (!session) {
+		if (_to.receipt) _to.receipt->complete(std::nullopt);
 		return;
 	}
 	const auto premium = session->user()->isPremium();
 	if (!_result || !_result->filesize || _result->filesize < 0) {
+		if (_to.receipt) _to.receipt->complete(std::nullopt);
 		Ui::show(
 			Ui::MakeInformBox(
 				tr::lng_send_image_empty(tr::now, lt_name, _filepath)),
@@ -1057,12 +1073,14 @@ void FileLoadTask::finish() {
 		removeFromAlbum();
 	} else if (_result->filesize > kFileSizePremiumLimit
 		|| (_result->filesize > kFileSizeLimit && !premium)) {
+		if (_to.receipt) _to.receipt->complete(std::nullopt);
 		Ui::show(
 			Box(FileSizeLimitBox, session, _result->filesize, nullptr),
 			Ui::LayerOption::KeepOther);
 		removeFromAlbum();
 	} else {
 		Api::SendConfirmedFile(session, _result);
+		_to.receipt.reset();
 	}
 }
 

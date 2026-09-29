@@ -186,7 +186,8 @@ Uploader::Uploader(not_null<ApiWrap*> api)
 			_api->sendUploadedDocument(
 				data.fullId,
 				std::move(data.info),
-				data.options);
+				data.options,
+				std::move(data.receipt));
 		}
 	}, _lifetime);
 
@@ -399,6 +400,9 @@ void Uploader::failed(FullMsgId itemId) {
 }
 
 void Uploader::notifyFailed(const Entry &entry) {
+	if (const auto receipt = entry.file->to.receipt) {
+		receipt->complete(std::nullopt);
+	}
 	const auto type = entry.file->type;
 	if (type == SendMediaType::Photo) {
 		_photoFailed.fire_copy(entry.itemId);
@@ -905,6 +909,7 @@ void Uploader::finishFront() {
 			},
 			.options = options,
 			.edit = edit,
+			.receipt = entry.file->to.receipt,
 		};
 		const auto i = _videoWaitingCover.find(entry.itemId);
 		if (i != end(_videoWaitingCover)) {
