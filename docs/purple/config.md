@@ -105,6 +105,11 @@ substituted from `cWorkingDir()` because it is the one line nobody can guess.
 them in step by itself. Two actions move one to the other, with Saved Messages
 as the transport:
 
+On desktop, **Settings > Advanced > Purple > Sync across devices** can inspect
+the selected account's Saved Messages for future sync records. It is read-only
+and does not enable automatic sync. When more than one account is signed in,
+you must choose which account to inspect.
+
 - **Settings > Advanced > Purple > Send settings to Saved Messages** posts the
   current file to your own Saved Messages as a document called `settings.toml`,
   captioned with its schema version, the local time and the platform. It asks

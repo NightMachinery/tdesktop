@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_schedule_box.h"
 #include "purple/purple_screentime_box.h"
 #include "purple/purple_sync.h"
+#include "purple/purple_sync_setup_box.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
@@ -1516,6 +1517,23 @@ void BuildPurpleSection(SectionBuilder &builder) {
 				u"settings"_q,
 				u"backup"_q,
 				u"saved"_q,
+			},
+		});
+	}
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_sync_setup"_q,
+			.title = rpl::single(u"Sync across devices"_q),
+			.icon = { &st::menuIconSavedMessages },
+			.label = rpl::single(u"Off"_q),
+			.onClick = [=] {
+				controller->show(Box(Purple::SyncSetupBox));
+			},
+			.keywords = {
+				u"purple"_q,
+				u"sync"_q,
+				u"saved"_q,
+				u"devices"_q,
 			},
 		});
 	}

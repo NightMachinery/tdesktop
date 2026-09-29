@@ -26,14 +26,17 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   download at 4 MiB, and reports newer, changed, missing, or unreadable records
   instead of treating them as an empty account. An uncalled coordinator ties
   scan and read to one selected session, returning Complete only when both
-  finish. Android JNI can
+  finish. The desktop Advanced settings row now opens a read-only setup box
+  with explicit account choice on multi-account installs, scan progress, and
+  complete, needs-review, or incomplete results. It does not bind the account
+  or turn on syncing. Android JNI can
   initialize local state, reserve a canonical own config record with its
   pending key, confirm an exact staged read-back with its message ID, and
   format or compare time-ordered space IDs. None of those calls has a runtime
   owner yet. First setup needs a complete Saved Messages history scan before
   it can declare the account empty; search with a watermark alone can miss a
   delayed older entry. Android local storage, account binding, transport, and
-  both clients' UI remain open.
+  the full sync UI on both clients remain open.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;

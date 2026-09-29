@@ -1,8 +1,10 @@
 # Account-backed Purple sync proposal
 
-Status: design plus shared-core and client-local foundations. Account-backed
-sync is not enabled in either client; the existing manual Send/Import actions
-remain the current behavior.
+Status: design plus shared-core and client-local foundations. Desktop has a
+read-only **Sync across devices** setup box that can inspect one explicitly
+selected account's Saved Messages. Account-backed sync is not enabled in either
+client; the existing manual Send/Import actions remain the current transfer
+behavior.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -27,8 +29,9 @@ confirming it. Shared core has an optional ledger of confirmed own message IDs,
 bounded to 256 entries, with a hash of each entire canonical record. It permits
 cleanup only for an older sequence after a fresh exact server read-back. A
 current confirmed record stays protected even when a duplicate was posted.
-Neither client exposes account-backed sync yet. Desktop-local storage can acquire an exclusive
-`sync/lock`, reject malformed or newer state, and stage canonical config bytes
+Neither client enables account-backed sync yet. Desktop-local storage can
+acquire an exclusive `sync/lock`, reject malformed or newer state, and stage
+canonical config bytes
 before committing a reserved `sync/state.json`. It creates no state while sync
 is off, keeps `sync/` and its pending files owner-only on Unix, and pauses when
 a pending file is absent or disagrees with the state. The desktop local store
@@ -59,8 +62,12 @@ coordinator now joins the two operations for one explicitly selected account:
 it returns Complete only after both the full scan and every candidate read
 complete. An incomplete scan never starts candidate reading. The reader can
 populate Telegram's local download cache, but sends and deletes nothing. The
-future transport engine must reconcile the install's
-own remote record for clone or rewind signals before any publish. Android's
+desktop setup box can run this inventory against one signed-in account and
+shows scan progress and the resulting complete, needs-review, or incomplete
+state. With multiple accounts it requires an explicit choice. It does not yet
+bind an account, create a sync space, or enable transport. The future transport
+engine must reconcile the install's own remote record for clone or rewind
+signals before any publish. Android's
 uncalled JNI bridge can initialize canonical local state, reserve a canonical
 own config record with its pending version key, and confirm an exact staged
 server read-back. It can record and check own message IDs for later cleanup.

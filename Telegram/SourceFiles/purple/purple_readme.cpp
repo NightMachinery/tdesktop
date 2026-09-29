@@ -606,6 +606,10 @@ This file belongs to this install. Another Purple Telegram on another machine
 has its own, and nothing keeps the two in step by itself. Two actions move one
 across, through your own Saved Messages:
 
+**Settings > Advanced > Purple > Sync across devices** can check one signed-in
+account's Saved Messages for future sync records. With several accounts, you
+must choose one. This check reads only; account-backed sync is not enabled yet.
+
 - **Settings > Advanced > Purple > Send settings to Saved Messages** posts a
   copy of `settings.toml` there, captioned with its schema version, the time
   and the platform. It asks first: the file names your chats.

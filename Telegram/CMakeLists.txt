@@ -1770,6 +1770,8 @@ PRIVATE
     purple/purple_sync_history_scanner.h
     purple/purple_sync_local_store.cpp
     purple/purple_sync_local_store.h
+    purple/purple_sync_setup_box.cpp
+    purple/purple_sync_setup_box.h
     settings/business/settings_away_message.cpp
     settings/business/settings_away_message.h
     settings/business/settings_shortcut_messages.cpp
