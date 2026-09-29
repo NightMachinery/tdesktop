@@ -185,6 +185,17 @@ directions, after reconnect, and after repeated edits. If it fails, publish a
 replacement message and retire the install's superseded record. The record
 format and sync UI can be the same in either mode.
 
+An Android-only disposable-account probe on 2026-09-29 sent an inert 20 KiB
+document to Saved Messages, then used the message's **Edit** and **Replace
+file** actions to substitute another inert document. The chat displayed one
+probe message with the new filename, an edited label, and a sent checkmark.
+After force-stopping and reopening the app, the same result remained visible.
+This verifies the Android UI path and app-restart display, but not the server
+message ID, a fresh API read-back, or visibility from another client. The probe
+message is retained in the disposable account for the old-message edit test.
+Edit-in-place therefore remains disabled as a sync transport until the
+cross-client, read-back, age-limit, and repeated-edit probes pass.
+
 ## Proposed user flow
 
 Each client will show one **Sync across devices** entry in Purple settings.
