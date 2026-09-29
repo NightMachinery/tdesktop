@@ -9,9 +9,12 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   [account_sync_plan.md](account_sync_plan.md) uses opt-in records in each
   account's Saved Messages, with config first and playlist metadata later.
   Shared core now constructs config version ancestry, classifies incoming
-  heads, canonicalizes strict JSON, validates uncompressed record envelopes,
-  and checks config payloads; local sync state, transport, and UI are still
-  unimplemented.
+  heads, canonicalizes strict JSON, validates uncompressed record envelopes
+  and config payloads, and checks versioned device-local sync state for exact
+  read-back and clone/rewind signals. A deterministic three-device core
+  simulation covers delayed discovery, edit and repost modes, failure retry,
+  conflicts, and restart recovery. Durable client state-file writes, transport,
+  and UI are still unimplemented.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
