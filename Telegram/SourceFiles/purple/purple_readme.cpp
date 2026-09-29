@@ -611,7 +611,11 @@ account's Saved Messages for future sync records. With several accounts, you
 must choose one. If a complete check finds no existing sync records, **Publish
 settings once** checks again and, after a separate confirmation, posts one
 record with exact read-back verification. This does not keep future edits in
-step. Existing cloud records cannot be joined from this screen yet.
+step. If this install has a bound local sync state and a complete check shows
+the same cloud space, **Resume prior settings post** checks again and asks
+before reconciling an existing record or posting one staged record. The sync
+engine decides whether another post is safe. A cloud space without this
+install's matching bound local state cannot be joined from this screen yet.
 
 - **Settings > Advanced > Purple > Send settings to Saved Messages** posts a
   copy of `settings.toml` there, captioned with its schema version, the time

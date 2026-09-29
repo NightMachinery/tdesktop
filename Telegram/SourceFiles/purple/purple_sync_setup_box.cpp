@@ -14,9 +14,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_account_inventory.h"
 #include "purple/purple_sync_account_setup.h"
 #include "purple/purple_sync_config_publish.h"
+#include "purple/purple_sync_local_store.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
@@ -44,6 +46,12 @@ struct AccountChoice {
 	base::weak_ptr<Main::Session> session;
 };
 
+enum class CheckFollowup {
+	None,
+	FirstPublish,
+	Resume,
+};
+
 struct SetupBoxState {
 	std::vector<AccountChoice> choices;
 	std::shared_ptr<Ui::RadiobuttonGroup> group;
@@ -56,10 +64,12 @@ struct SetupBoxState {
 	Ui::RoundButton *check = nullptr;
 	Ui::RoundButton *cancel = nullptr;
 	Ui::RoundButton *publish = nullptr;
+	Ui::RoundButton *resume = nullptr;
 	uint64_t scanned = 0;
 	int selectedIndex = -1;
 	bool running = false;
 	bool publishing = false;
+	bool resumeAvailable = false;
 };
 
 [[nodiscard]] QString AccountLabel(not_null<Main::Session*> session) {
@@ -68,6 +78,55 @@ struct SetupBoxState {
 	return username.isEmpty()
 		? user->name()
 		: u"%1 (@%2)"_q.arg(user->name(), username);
+}
+
+[[nodiscard]] bool CompleteInventory(
+		const SyncAccountInventoryResult &inventory,
+		Main::Session &session) {
+	return inventory.accountUserId == peerToUser(session.user()->id).bare
+		&& inventory.status == SyncAccountInventoryStatus::Complete
+		&& inventory.scan.complete()
+		&& inventory.read
+		&& inventory.read->complete()
+		&& inventory.directory.complete
+		&& !inventory.directory.unreadableCandidate
+		&& !inventory.directory.messageIdCollision;
+}
+
+[[nodiscard]] bool EmptyDirectory(
+		const SyncAccountInventoryResult &inventory) {
+	return inventory.directory.canCreateSpace
+		&& !inventory.directory.selectedSpace
+		&& inventory.directory.groups.empty();
+}
+
+[[nodiscard]] bool CanResume(
+		Main::Account &account,
+		Main::Session &session,
+		const SyncAccountInventoryResult &inventory) {
+	if (account.loggingOut() || account.maybeSession() != &session
+		|| !CompleteInventory(inventory, session)
+		|| (!EmptyDirectory(inventory)
+			&& (!inventory.directory.selectedSpace
+				|| !inventory.directory.publishableSpace
+				|| *inventory.directory.selectedSpace
+					!= *inventory.directory.publishableSpace))) {
+		return false;
+	}
+	if (!QFileInfo::exists(ConfigDirectory() + u"/sync/state.json"_q)) {
+		return false;
+	}
+	auto store = SyncLocalStore(ConfigDirectory() + u"/sync"_q);
+	const auto opened = store.Open(true);
+	if (opened.status != SyncStoreStatus::Ready || !store.state()
+		|| CheckAccountSyncBinding(*store.state(), account)
+			!= SyncAccountBindingVerdict::Bound) {
+		return false;
+	}
+	const auto &directory = inventory.directory;
+	return directory.selectedSpace
+		? *directory.selectedSpace == store.state()->space
+		: EmptyDirectory(inventory);
 }
 
 void RefreshButtons(SetupBoxState &state) {
@@ -84,24 +143,24 @@ void RefreshButtons(SetupBoxState &state) {
 			|| state.publishing
 			|| !available
 			|| !state.completed
-			|| state.completed->accountUserId
-				!= peerToUser(session->user()->id).bare
-			|| state.completed->status != SyncAccountInventoryStatus::Complete
-			|| !state.completed->scan.complete()
-			|| !state.completed->read
-			|| !state.completed->read->complete()
-			|| !state.completed->directory.complete
-			|| !state.completed->directory.canCreateSpace
-			|| state.completed->directory.selectedSpace
-			|| !state.completed->directory.groups.empty()
+			|| !CompleteInventory(*state.completed, *session)
+			|| !EmptyDirectory(*state.completed)
 			|| QFileInfo::exists(
 				ConfigDirectory() + u"/sync/state.json"_q));
+	}
+	if (state.resume) {
+		state.resume->setDisabled(state.running
+			|| state.publishing
+			|| !available
+			|| !state.completed
+			|| !state.resumeAvailable);
 	}
 }
 
 void StopForLostAccount(SetupBoxState &state) {
 	const auto wasRunning = state.running;
 	state.completed.reset();
+	state.resumeAvailable = false;
 	state.selectedIndex = -1;
 	state.selectedAccount = {};
 	state.selectedSession = {};
@@ -123,6 +182,7 @@ void StopForLostAccount(SetupBoxState &state) {
 void ShowResult(SetupBoxState &state, SyncAccountInventoryResult result) {
 	state.running = false;
 	state.completed.reset();
+	state.resumeAvailable = false;
 	state.scanned = result.scan.scannedCount;
 	const auto scanned = QString::number(state.scanned);
 	const auto candidates = QString::number(result.scan.candidateIds.size());
@@ -154,18 +214,27 @@ void ShowResult(SetupBoxState &state, SyncAccountInventoryResult result) {
 				QString::number(valid), scanned)
 			: u"Complete: no sync records found after checking %1 messages."_q.arg(
 				scanned));
-		if (result.directory.complete
-			&& result.directory.canCreateSpace
-			&& !result.directory.selectedSpace
-			&& result.directory.groups.empty()) {
+		const auto account = state.selectedAccount.get();
+		const auto session = state.selectedSession.get();
+		const auto empty = session
+			&& CompleteInventory(result, *session)
+			&& EmptyDirectory(result);
+		state.resumeAvailable = account
+			&& session
+			&& CanResume(*account, *session, result);
+		if (empty || state.resumeAvailable) {
 			state.completed = std::move(result);
-			if (QFileInfo::exists(
-					ConfigDirectory() + u"/sync/state.json"_q)) {
-				state.status->setText(
-					u"A local sync state already exists. Resuming or retrying "
-					"a prior publish is not available in this box."_q);
-			}
-		} else {
+		}
+		if (state.resumeAvailable) {
+			state.status->setText(
+				u"Complete: a bound local sync state can be resumed. "
+				"Resume will recheck Saved Messages before deciding."_q);
+		} else if (empty && QFileInfo::exists(
+				ConfigDirectory() + u"/sync/state.json"_q)) {
+			state.status->setText(
+				u"A local sync state exists but cannot be safely resumed "
+				"for this account and inventory. No post is available."_q);
+		} else if (!empty) {
 			state.status->setText(
 				u"Complete: existing sync data found. Joining existing "
 				"sync data is not available yet."_q);
@@ -204,8 +273,8 @@ void ShowResult(SetupBoxState &state, SyncAccountInventoryResult result) {
 		return u"Could not create a valid local sync identity. "
 			"No document was sent."_q;
 	case SyncAccountSetupStatus::AlreadyBound:
-		return u"Local sync state already exists. Resuming a prior "
-			"publish is not available in this box."_q;
+		return u"Local sync state already exists. Check Saved Messages "
+			"again to see whether it can be resumed."_q;
 	default:
 		return u"Local sync setup did not complete. No document was sent."_q;
 	}
@@ -214,8 +283,8 @@ void ShowResult(SetupBoxState &state, SyncAccountInventoryResult result) {
 [[nodiscard]] QString PublishResult(SyncConfigPublishResult result) {
 	switch (result.status) {
 	case SyncConfigPublishStatus::Confirmed:
-		return u"Confirmed: one settings record was posted to Saved "
-			"Messages and read back (message %1). Continuous sync is off."_q.arg(
+		return u"Confirmed: the settings record matches Saved Messages "
+			"(message %1). Continuous sync is off."_q.arg(
 				result.messageId);
 	case SyncConfigPublishStatus::AlreadySynced:
 		return u"The existing own settings record is already confirmed. "
@@ -250,15 +319,28 @@ void ShowResult(SetupBoxState &state, SyncAccountInventoryResult result) {
 	return u"Publishing stopped. Check Saved Messages before retrying."_q;
 }
 
-void ConfirmPublish(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
+void ConfirmPublish(
+		not_null<Ui::GenericBox*> box,
+		SetupBoxState *state,
+		bool resume) {
 	RefreshButtons(*state);
-	if (state->publish->isDisabled() || !state->completed) {
+	if (!state->completed
+		|| (resume ? state->resume->isDisabled()
+			: state->publish->isDisabled())) {
 		return;
 	}
 	const auto chosenAccount = state->selectedAccount;
 	const auto chosenSession = state->selectedSession;
 	box->uiShow()->showBox(Ui::MakeConfirmBox({
-		.text = u"Send one copy of the current settings to this "
+		.text = resume
+			? u"Resume the prior settings post? This may confirm an exact "
+				"record already in Saved Messages without sending, or it may "
+				"stage and post one settings document if reconciliation proves "
+				"that safe. The file may contain chat IDs and names. "
+				"Telegram stores Saved Messages in its cloud; it is not "
+				"end-to-end encrypted, and every signed-in session can read "
+				"it. This does not enable continuous sync."_q
+			: u"Send one copy of the current settings to this "
 			"account's Saved Messages? The file may contain chat IDs "
 			"and names. Telegram stores Saved Messages in its cloud; "
 			"it is not end-to-end encrypted, and every signed-in session "
@@ -266,8 +348,9 @@ void ConfirmPublish(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		.confirmed = crl::guard(box, [=](Fn<void()> close) {
 			close();
 			RefreshButtons(*state);
-			if (state->publish->isDisabled()
-				|| !state->completed
+			if (!state->completed
+				|| (resume ? state->resume->isDisabled()
+					: state->publish->isDisabled())
 				|| chosenAccount.get() != state->selectedAccount.get()
 				|| chosenSession.get() != state->selectedSession.get()) {
 				return;
@@ -279,20 +362,33 @@ void ConfirmPublish(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 				StopForLostAccount(*state);
 				return;
 			}
-			auto inventory = std::move(*state->completed);
-			state->completed.reset();
-			const auto setup = InitializeSyncAccountLocally(
-				*account,
-				*session,
-				inventory);
-			if (setup.status != SyncAccountSetupStatus::Ready) {
-				state->status->setText(SetupFailure(setup));
+			if (resume && !CanResume(*account, *session, *state->completed)) {
+				state->completed.reset();
+				state->resumeAvailable = false;
+				state->status->setText(
+					u"Local state or cloud space changed. Check Saved "
+					"Messages again before resuming."_q);
 				RefreshButtons(*state);
 				return;
 			}
+			auto inventory = std::move(*state->completed);
+			state->completed.reset();
+			state->resumeAvailable = false;
+			if (!resume) {
+				const auto setup = InitializeSyncAccountLocally(
+					*account,
+					*session,
+					inventory);
+				if (setup.status != SyncAccountSetupStatus::Ready) {
+					state->status->setText(SetupFailure(setup));
+					RefreshButtons(*state);
+					return;
+				}
+			}
 			state->publishing = true;
-			state->status->setText(
-				u"Publishing one settings record to Saved Messages."_q);
+			state->status->setText(resume
+				? u"Reconciling the prior settings post."_q
+				: u"Publishing one settings record to Saved Messages."_q);
 			RefreshButtons(*state);
 			state->publisher = std::make_unique<SyncConfigPublish>(
 				*account,
@@ -308,7 +404,9 @@ void ConfirmPublish(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 				}));
 			state->publisher->Start();
 		}),
-		.confirmText = u"Send one record"_q,
+		.confirmText = resume
+			? u"Resume post"_q
+			: u"Send one record"_q,
 	}));
 }
 
@@ -321,9 +419,10 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			u"This is a manual one-time settings publish, not continuous sync. "
-			"Checking reads the selected account's Saved Messages. After an "
-			"empty, complete check, you can choose to send one settings record. "
+			u"This is a manual settings post, not continuous sync. Checking "
+			"reads the selected account's Saved Messages. After an empty, "
+			"complete check, you can publish one settings record. A bound local "
+			"state may instead offer Resume prior settings post. "
 			"The settings file may contain chat IDs and names. Saved Messages "
 			"is a Telegram cloud chat, not end-to-end encrypted, and every "
 			"signed-in session can read the record. state.toml stays local. "
@@ -383,6 +482,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 			return;
 		}
 		state->completed.reset();
+		state->resumeAvailable = false;
 		const auto wasRunning = state->running;
 		const auto wasPublishing = state->publishing;
 		state->running = false;
@@ -406,7 +506,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		RefreshButtons(*state);
 	});
 
-	const auto startCheck = [=](bool publishAfterCheck) {
+	const auto startCheck = [=](CheckFollowup followup) {
 		const auto account = state->selectedAccount.get();
 		const auto session = state->selectedSession.get();
 		if (!account || !session || account->loggingOut()
@@ -415,11 +515,12 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 			return;
 		}
 		state->completed.reset();
+		state->resumeAvailable = false;
 		state->inventory.reset();
 		state->running = true;
 		state->scanned = 0;
-		state->status->setText(publishAfterCheck
-			? u"Rechecking Saved Messages before publishing: 0 scanned."_q
+		state->status->setText(followup != CheckFollowup::None
+			? u"Rechecking Saved Messages before posting: 0 scanned."_q
 			: u"Checking Saved Messages: 0 scanned."_q);
 		RefreshButtons(*state);
 		const auto chosenAccount = state->selectedAccount;
@@ -449,20 +550,26 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 					return;
 				}
 				ShowResult(*state, std::move(result));
-				if (publishAfterCheck && state->completed) {
-					ConfirmPublish(box, state);
+				if (state->completed
+					&& followup == CheckFollowup::FirstPublish) {
+					ConfirmPublish(box, state, false);
+				} else if (state->completed
+					&& followup == CheckFollowup::Resume
+					&& state->resumeAvailable) {
+					ConfirmPublish(box, state, true);
 				}
 			}));
 		state->inventory->Start();
 	};
 	state->check = box->addButton(
 		rpl::single(u"Check Saved Messages"_q),
-		[=] { startCheck(false); });
+		[=] { startCheck(CheckFollowup::None); });
 	state->cancel = box->addButton(
 		rpl::single(u"Cancel check"_q),
 		[=] {
 			if (state->running && state->inventory) {
 				state->completed.reset();
+				state->resumeAvailable = false;
 				state->running = false;
 				state->inventory->Cancel();
 				state->status->setText(
@@ -477,7 +584,16 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 			if (state->publish->isDisabled() || !state->completed) {
 				return;
 			}
-			startCheck(true);
+			startCheck(CheckFollowup::FirstPublish);
+		});
+	state->resume = box->addButton(
+		rpl::single(u"Resume prior settings post"_q),
+		[=] {
+			RefreshButtons(*state);
+			if (state->resume->isDisabled() || !state->completed) {
+				return;
+			}
+			startCheck(CheckFollowup::Resume);
 		});
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	RefreshButtons(*state);
@@ -505,6 +621,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 	box->boxClosing(
 	) | rpl::on_next([=] {
 		state->completed.reset();
+		state->resumeAvailable = false;
 		state->running = false;
 		state->publishing = false;
 		if (state->inventory) {
