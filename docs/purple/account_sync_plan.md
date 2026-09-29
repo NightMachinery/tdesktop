@@ -107,6 +107,14 @@ only when the server document matches the staged bytes exactly. A missing send
 receipt or failed read-back remains uncertain and must be reconciled against
 history before any retry. A changed or mismatched document needs review. The
 adapter does not reserve local state, retry, enable sync, or post on its own.
+An uncalled own-config inventory matcher now checks a completed scan against
+the install's local state. It rejects a different account, an unsafe space,
+wrong device identity, noncanonical own records, divergent records at one
+sequence, and a staged record whose full hash is absent from the issued log.
+It reports the highest own head and any exact pending record already found in
+Saved Messages. The future publisher must use that pending message for exact
+confirmation instead of posting again; an absent result alone does not cause
+a retry.
 
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
