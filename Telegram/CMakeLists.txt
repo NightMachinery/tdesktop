@@ -2122,6 +2122,8 @@ PRIVATE
 
 nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
+    purple/purple_config_payload.cpp
+    purple/purple_config_payload.h
     purple/purple_config_sync.cpp
     purple/purple_config_sync.h
     purple/purple_engine.cpp
