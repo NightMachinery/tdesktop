@@ -64,8 +64,11 @@ stays local.
 ## Record transport
 
 Each install receives a random 128-bit identity and chooses one home account.
-Each platform supplies 16 secure random bytes; shared core formats the same
-lowercase base32 install and sync-space IDs on both platforms. An install
+Each platform supplies 16 secure random bytes for an install ID. For a new
+sync-space ID it supplies a server-time estimate in milliseconds and 10 secure
+random bytes; shared core formats the same lowercase base32 IDs on both
+platforms and compares decoded space IDs in immutable creation order. No
+client calls the time-ordered constructor yet. An install
 publishes its own versioned JSON document for each stream: `config` for
 `settings.toml`, and later `library` for playlists. No other install edits that
 record. Readers discover records in Saved Messages, read known message IDs again
@@ -94,8 +97,10 @@ format and sync UI can be the same in either mode.
 Each client will show one **Sync across devices** entry in Purple settings.
 Turning it on binds that device to one signed-in Telegram account and checks
 that account's Saved Messages before sending anything. On a device with several
-accounts, the screen must say that the single installation-wide settings file
-may include chat names and identifiers from the other accounts. Setup waits
+accounts, setup should require an explicit account choice and explain that the
+single installation-wide settings file may include chat names and identifiers
+from the other accounts. This costs one extra tap but prevents an accidental
+cross-account upload to a preselected account. Setup waits
 for a successful check; offline setup must not silently create a separate
 sync group. Sync remains opt-in on every device.
 
