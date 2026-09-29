@@ -2136,6 +2136,8 @@ PRIVATE
     purple/purple_splice.h
     purple/purple_state.cpp
     purple/purple_state.h
+    purple/purple_sync_json.cpp
+    purple/purple_sync_json.h
     purple/purple_types.h
 )
 
