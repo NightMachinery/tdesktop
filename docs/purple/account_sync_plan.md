@@ -174,6 +174,23 @@ exclusive lock and pausing on ambiguous or mismatched recovery files. It
 confirms only an exact server read-back before clearing a validated stage.
 Android network transport and the account-sync interface remain to be built.
 
+Desktop now has an uncalled settings History store for the planned update,
+choice, restore, and undo actions. Each entry keeps the exact `settings.toml`
+bytes in `sync/history/` under the Purple config directory, next to a metadata
+file with the creation time, the reason, a short label, the config version key
+when known, and the settings fingerprint of those bytes. The metadata also
+records whether the settings file existed, so a later restore can recreate a
+missing file. Entries are capped at 256 KiB, the same limit a settings record
+has. Entry IDs begin with the creation time in milliseconds and end with a
+random suffix. The directories and files are owner-only on Unix, and an
+insecure directory refuses every operation, as in the local sync store. A
+reader accepts an entry only when both files exist, the metadata parses, and
+the bytes match the recorded fingerprint. After a new entry is fully written,
+the store keeps the newest 30 valid entries, deletes older ones and invalid
+leftovers older than those 30, and never deletes anything outside that
+directory. Nothing calls it yet, and the manual import still keeps its single
+`settings.toml.bak`.
+
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
 inventory incomplete, but the setup box does not yet show a countdown or

@@ -41,97 +41,6 @@ constexpr auto kConfigBytes = 256 * 1024;
 #endif
 }
 
-[[nodiscard]] SyncStoreStatus EnsurePrivateDirectory(const QString &path) {
-	const auto usable = [&] {
-		if (!PrivatePermissions(path)) {
-			return false;
-		}
-#ifdef Q_OS_UNIX
-		constexpr auto required = QFileDevice::ReadOwner
-			| QFileDevice::WriteOwner | QFileDevice::ExeOwner;
-		return (QFileInfo(path).permissions() & required) == required;
-#else
-		return true;
-#endif
-	};
-	const auto info = QFileInfo(path);
-	if (info.exists() || info.isSymLink()) {
-		if (!info.isDir()) {
-			return SyncStoreStatus::IoError;
-		}
-		return usable()
-			? SyncStoreStatus::Ready
-			: SyncStoreStatus::InsecurePermissions;
-	}
-#ifdef Q_OS_UNIX
-	constexpr auto permissions = QFileDevice::ReadOwner
-		| QFileDevice::WriteOwner
-		| QFileDevice::ExeOwner;
-	if (!QDir().mkdir(path, permissions)) {
-		return SyncStoreStatus::IoError;
-	}
-#else
-	if (!QDir().mkdir(path)) {
-		return SyncStoreStatus::IoError;
-	}
-#endif
-	return usable()
-		? SyncStoreStatus::Ready
-		: SyncStoreStatus::InsecurePermissions;
-}
-
-[[nodiscard]] SyncStoreStatus ReadExact(
-		const QString &path,
-		qsizetype limit,
-		QByteArray &bytes) {
-	const auto info = QFileInfo(path);
-	if (!info.exists()) {
-		return SyncStoreStatus::PendingMissing;
-	}
-	if (!info.isFile() || info.size() > limit) {
-		return SyncStoreStatus::PendingMismatch;
-	}
-	if (!PrivatePermissions(path)) {
-		return SyncStoreStatus::InsecurePermissions;
-	}
-	auto file = QFile(path);
-	if (!file.open(QIODevice::ReadOnly)) {
-		return SyncStoreStatus::IoError;
-	}
-	bytes = file.readAll();
-	return (file.error() == QFileDevice::NoError && bytes.size() == info.size())
-		? SyncStoreStatus::Ready
-		: SyncStoreStatus::IoError;
-}
-
-[[nodiscard]] SyncStoreStatus WriteExact(
-		const QString &path,
-		const QByteArray &bytes) {
-	auto file = QSaveFile(path);
-	file.setDirectWriteFallback(false);
-	if (!file.open(QIODevice::WriteOnly)) {
-		return SyncStoreStatus::IoError;
-	}
-#ifdef Q_OS_UNIX
-	constexpr auto permissions = QFileDevice::ReadOwner
-		| QFileDevice::WriteOwner;
-	if (!file.setPermissions(permissions)) {
-		return SyncStoreStatus::InsecurePermissions;
-	}
-#endif
-	if (file.write(bytes) != bytes.size() || !file.commit()) {
-		return SyncStoreStatus::IoError;
-	}
-	if (!PrivatePermissions(path)) {
-		return SyncStoreStatus::InsecurePermissions;
-	}
-	auto readBack = QByteArray();
-	const auto status = ReadExact(path, bytes.size(), readBack);
-	return (status == SyncStoreStatus::Ready && readBack == bytes)
-		? SyncStoreStatus::Ready
-		: SyncStoreStatus::IoError;
-}
-
 [[nodiscard]] SyncStoreStatus CheckStages(
 		const QString &pendingPath,
 		const SyncLocalState *state) {
@@ -164,7 +73,10 @@ constexpr auto kConfigBytes = 256 * 1024;
 			return SyncStoreStatus::OrphanStage;
 		}
 		auto bytes = QByteArray();
-		const auto readStatus = ReadExact(path, kConfigBytes, bytes);
+		const auto readStatus = ReadSyncPrivateFile(
+			path,
+			kConfigBytes,
+			bytes);
 		if (readStatus != SyncStoreStatus::Ready) {
 			return readStatus;
 		}
@@ -212,6 +124,97 @@ constexpr auto kConfigBytes = 256 * 1024;
 
 }
 
+SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path) {
+	const auto usable = [&] {
+		if (!PrivatePermissions(path)) {
+			return false;
+		}
+#ifdef Q_OS_UNIX
+		constexpr auto required = QFileDevice::ReadOwner
+			| QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+		return (QFileInfo(path).permissions() & required) == required;
+#else
+		return true;
+#endif
+	};
+	const auto info = QFileInfo(path);
+	if (info.exists() || info.isSymLink()) {
+		if (!info.isDir()) {
+			return SyncStoreStatus::IoError;
+		}
+		return usable()
+			? SyncStoreStatus::Ready
+			: SyncStoreStatus::InsecurePermissions;
+	}
+#ifdef Q_OS_UNIX
+	constexpr auto permissions = QFileDevice::ReadOwner
+		| QFileDevice::WriteOwner
+		| QFileDevice::ExeOwner;
+	if (!QDir().mkdir(path, permissions)) {
+		return SyncStoreStatus::IoError;
+	}
+#else
+	if (!QDir().mkdir(path)) {
+		return SyncStoreStatus::IoError;
+	}
+#endif
+	return usable()
+		? SyncStoreStatus::Ready
+		: SyncStoreStatus::InsecurePermissions;
+}
+
+SyncStoreStatus ReadSyncPrivateFile(
+		const QString &path,
+		qsizetype limit,
+		QByteArray &bytes) {
+	const auto info = QFileInfo(path);
+	if (!info.exists()) {
+		return SyncStoreStatus::PendingMissing;
+	}
+	if (!info.isFile() || info.size() > limit) {
+		return SyncStoreStatus::PendingMismatch;
+	}
+	if (!PrivatePermissions(path)) {
+		return SyncStoreStatus::InsecurePermissions;
+	}
+	auto file = QFile(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return SyncStoreStatus::IoError;
+	}
+	bytes = file.readAll();
+	return (file.error() == QFileDevice::NoError && bytes.size() == info.size())
+		? SyncStoreStatus::Ready
+		: SyncStoreStatus::IoError;
+}
+
+SyncStoreStatus WriteSyncPrivateFile(
+		const QString &path,
+		const QByteArray &bytes) {
+	auto file = QSaveFile(path);
+	file.setDirectWriteFallback(false);
+	if (!file.open(QIODevice::WriteOnly)) {
+		return SyncStoreStatus::IoError;
+	}
+#ifdef Q_OS_UNIX
+	constexpr auto permissions = QFileDevice::ReadOwner
+		| QFileDevice::WriteOwner;
+	if (!file.setPermissions(permissions)) {
+		return SyncStoreStatus::InsecurePermissions;
+	}
+#endif
+	if (file.write(bytes) != bytes.size() || !file.commit()) {
+		return SyncStoreStatus::IoError;
+	}
+	if (!PrivatePermissions(path)) {
+		return SyncStoreStatus::InsecurePermissions;
+	}
+	auto readBack = QByteArray();
+	const auto status = ReadSyncPrivateFile(path, bytes.size(), readBack);
+	return (status == SyncStoreStatus::Ready && readBack == bytes)
+		? SyncStoreStatus::Ready
+		: SyncStoreStatus::IoError;
+}
+
 SyncLocalStore::SyncLocalStore(QString syncRoot)
 : _root(std::move(syncRoot)) {
 }
@@ -244,7 +247,7 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 		|| !QDir().mkpath(QFileInfo(_root).absolutePath())) {
 		return SetFailure({ SyncStoreStatus::IoError });
 	}
-	const auto rootStatus = EnsurePrivateDirectory(_root);
+	const auto rootStatus = EnsureSyncPrivateDirectory(_root);
 	if (rootStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ rootStatus });
 	}
@@ -257,7 +260,8 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 				: SyncStoreStatus::LockError,
 		});
 	}
-	const auto pendingStatus = EnsurePrivateDirectory(_root + u"/pending"_q);
+	const auto pendingStatus = EnsureSyncPrivateDirectory(
+		_root + u"/pending"_q);
 	if (pendingStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ pendingStatus });
 	}
@@ -269,7 +273,10 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 			? SyncStoreStatus::Uninitialized : stageStatus });
 	}
 	auto bytes = QByteArray();
-	const auto readStatus = ReadExact(StatePath(), kStateBytes, bytes);
+	const auto readStatus = ReadSyncPrivateFile(
+		StatePath(),
+		kStateBytes,
+		bytes);
 	if (readStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ readStatus == SyncStoreStatus::PendingMismatch
 			? SyncStoreStatus::InvalidState
@@ -318,7 +325,9 @@ SyncStoreResult SyncLocalStore::Initialize(const SyncLocalState &initial) {
 			serialized.error,
 		};
 	}
-	const auto writeStatus = WriteExact(StatePath(), serialized.canonical);
+	const auto writeStatus = WriteSyncPrivateFile(
+		StatePath(),
+		serialized.canonical);
 	if (writeStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ writeStatus });
 	}
@@ -332,7 +341,7 @@ SyncStoreResult SyncLocalStore::ReadPendingConfigLocked() {
 		return { SyncStoreStatus::NoPending };
 	}
 	auto bytes = QByteArray();
-	const auto readStatus = ReadExact(
+	const auto readStatus = ReadSyncPrivateFile(
 		PendingPath(_state->config.pendingSeq), kConfigBytes, bytes);
 	if (readStatus != SyncStoreStatus::Ready) {
 		return { readStatus };
@@ -424,11 +433,13 @@ SyncStoreResult SyncLocalStore::StageConfig(
 	if (stageInfo.exists() || stageInfo.isSymLink()) {
 		return SetFailure({ SyncStoreStatus::OrphanStage });
 	}
-	const auto stageStatus = WriteExact(path, canonicalRecord);
+	const auto stageStatus = WriteSyncPrivateFile(path, canonicalRecord);
 	if (stageStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stageStatus });
 	}
-	const auto stateStatus = WriteExact(StatePath(), serialized.canonical);
+	const auto stateStatus = WriteSyncPrivateFile(
+		StatePath(),
+		serialized.canonical);
 	if (stateStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stateStatus });
 	}
@@ -504,7 +515,9 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 	if (!serialized) {
 		return { SyncStoreStatus::InvalidState, serialized.error };
 	}
-	const auto stateStatus = WriteExact(StatePath(), serialized.canonical);
+	const auto stateStatus = WriteSyncPrivateFile(
+		StatePath(),
+		serialized.canonical);
 	if (stateStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stateStatus });
 	}

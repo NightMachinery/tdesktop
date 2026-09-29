@@ -19,6 +19,13 @@ lets the publisher reconcile an exact prior record or post a staged record
 only when its planner allows it. Existing records from a different sync space
 cannot be joined. Neither action retries automatically.
 
+Desktop also has a settings History store for the planned account-sync update,
+choice, restore, and undo actions. It keeps up to 30 exact copies of
+`settings.toml`, each with its reason, time, and fingerprint, in the
+owner-only `sync/history/` directory under the Purple config directory.
+Nothing calls it yet, and the manual import below still keeps only
+`settings.toml.bak`.
+
 The current manual transfer has two actions:
 
 - **Settings > Advanced > Purple > Send settings to Saved Messages** uploads
