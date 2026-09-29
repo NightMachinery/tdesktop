@@ -11,10 +11,12 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   Shared core now constructs config version ancestry, classifies incoming
   heads, canonicalizes strict JSON, validates and builds config records, and
   checks versioned device-local sync state for exact read-back and clone/rewind
-  signals. A deterministic three-device core
+  signals. It can also acknowledge an applied remote config without creating
+  a new version. A deterministic three-device core
   simulation covers delayed discovery, edit and repost modes, failure retry,
-  conflicts, and restart recovery. Durable client state-file writes, transport,
-  and UI are still unimplemented.
+  conflicts, and restart recovery. Desktop has an unused durable local store
+  for staged config records and state; Android local storage, confirmation
+  cleanup, transport, and UI are still unimplemented.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
