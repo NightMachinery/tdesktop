@@ -362,10 +362,15 @@ has not yet been tested live.
 On Android, a Purple-only document receipt follows the asynchronous send
 helper to the server result. Each attempt stages an immutable file with the
 required `settings.toml` name, and concurrent sends of identical bytes on one
-account share the pending attempt. Telegram's own Retry action after a failed
-send does not preserve this Purple receipt, so a successful manual retry can
-still cause a later duplicate or self-offer. The new sync engine needs durable
-reconciliation rather than extending this legacy callback indefinitely.
+account share the pending attempt. Telegram's own Retry action now restores
+that receipt only for a failed outgoing settings document staged under the
+account's Purple sync cache and sent to its own Saved Messages. A successful
+retry records the server message ID and the sent fingerprint only if the
+current settings still match the staged bytes; a failed
+retry changes neither. This path built and passed an emulator startup check,
+but a forced-failure Retry cycle has not been verified live. A lost server
+response remains ambiguous. The new sync engine needs durable reconciliation
+rather than relying on this legacy callback indefinitely.
 
 ## Playlists later
 
