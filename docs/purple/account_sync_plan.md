@@ -86,13 +86,15 @@ shows scan progress and the resulting complete, needs-review, or incomplete
 state. With multiple accounts it requires an explicit choice. It does not yet
 bind an account, create a sync space, or enable transport. The future transport
 engine must reconcile the install's own remote record for clone or rewind
-signals before any publish. Android's
-uncalled JNI bridge can initialize canonical local state, reserve a canonical
-own config record with its pending version key, and confirm an exact staged
-server read-back. It can record and check own message IDs for later cleanup.
-It validates the record's space, install and device identity; it does not yet
-persist these results. Android local storage, network transport
-and the account-sync interface remain to be built.
+signals before any publish. Android's uncalled bridge can initialize canonical
+local state bound to the active Telegram user in its account slot, reserve a
+canonical own config record with its pending version key, and confirm an exact
+staged server read-back. It can record and check own message IDs for cleanup.
+It validates the record's space, install and device identity. The binding token
+is saved synchronously in a per-user account preference; reservation refuses a
+missing or mismatched token. The bridge does not yet persist its returned state
+or staged record. Android local storage, network transport, and the account-sync
+interface remain to be built.
 
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
@@ -138,11 +140,14 @@ without treating an incomplete scan as an empty account.
 Each install receives a random 128-bit identity and chooses one home account.
 Setup also generates a separate random 128-bit binding token. It stores one
 copy in the device-local sync state and one in that Telegram account's
-encrypted local preferences. A publish is allowed only when both copies are
-present and equal for the selected account. Neither a sync-space move nor an
-install-ID regeneration changes the binding token. Copying only the Purple
-config directory to another machine therefore leaves sync unbound instead of
-silently publishing through whichever Telegram account is signed in there.
+local preferences. Desktop encrypts its account preferences. Android uses a
+preference key scoped to the active Telegram user ID because its preference
+file is scoped to an account slot and can survive logout. A publish is allowed
+only when both copies are present and equal for the selected account. Neither
+a sync-space move nor an install-ID regeneration changes the binding token.
+Copying only the Purple config directory to another machine leaves sync
+unbound instead of silently publishing through whichever Telegram account is
+signed in there.
 Missing or mismatched copies pause sync until the user explicitly binds an
 account again; the state file does not need to record a Telegram user ID.
 Each platform supplies 16 secure random bytes for an install ID. For a new
