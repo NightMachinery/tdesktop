@@ -29,8 +29,18 @@ void Check(bool ok, int line) {
 	state.install = u"in-"_q + QString(26, u'a');
 	state.space = u"sp-"_q + QString(26, u'a');
 	state.createdDevice = u"device-a"_q;
+	state.bindingToken = QString(32, u'a');
 	state.preserved.insert(u"future"_q, true);
 	return state;
+}
+
+[[nodiscard]] Purple::SyncStoreResult StageForBoundAccount(
+		Purple::SyncLocalStore &store,
+		const QByteArray &record,
+		const Purple::SyncLocalConfigState &config) {
+	const auto state = store.state();
+	return store.StageConfig(record, config,
+		state ? state->bindingToken.toLatin1() : QByteArray());
 }
 
 [[nodiscard]] Purple::ConfigRecordBuildResult Record(
@@ -123,7 +133,14 @@ void TestLifecycle() {
 		CHECK(Private(root + u"/state.json"_q));
 		auto nextConfig = initial.configData;
 		nextConfig.pending = record.version.key;
-		const auto staged = store.StageConfig(record.canonical, nextConfig);
+		CHECK(store.StageConfig(record.canonical, nextConfig, {}).status
+			== Purple::SyncStoreStatus::AccountUnbound);
+		CHECK(store.StageConfig(record.canonical, nextConfig,
+			QByteArray(32, 'b')).status
+			== Purple::SyncStoreStatus::AccountUnbound);
+		CHECK(store.state()->config.seq == 0);
+		CHECK(!QFileInfo::exists(root + u"/pending/config-1.json"_q));
+		const auto staged = StageForBoundAccount(store, record.canonical, nextConfig);
 		CHECK(bool(staged));
 		CHECK(staged.staged == record.canonical);
 		CHECK(staged.seq == 1);
@@ -176,7 +193,7 @@ void TestConfirmation() {
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
 		metadata.seenSeq[u"in-"_q + QString(25, u'b') + u'a'] = 7;
-		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 		CHECK(store.state()->config.pendingSeq == 1);
 		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 101).status
 			== Purple::SyncStoreStatus::Ready);
@@ -195,7 +212,7 @@ void TestConfirmation() {
 			== Purple::SyncStoreStatus::NoPending);
 		auto next = store.state()->configData;
 		next.pending = changed.version.key;
-		CHECK(bool(store.StageConfig(changed.canonical, next)));
+		CHECK(bool(StageForBoundAccount(store, changed.canonical, next)));
 		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 103).status
 			== Purple::SyncStoreStatus::Unconfirmed);
 		CHECK(store.state()->config.pendingSeq == 2);
@@ -211,7 +228,7 @@ void TestConfirmation() {
 		CHECK(bool(acknowledgement));
 		auto sameMetadata = store.state()->configData;
 		sameMetadata.pending = acknowledgement.version.key;
-		CHECK(bool(store.StageConfig(acknowledgement.canonical, sameMetadata)));
+		CHECK(bool(StageForBoundAccount(store, acknowledgement.canonical, sameMetadata)));
 		CHECK(store.ConfirmConfigReadBack(
 			acknowledgement.canonical, u"device-a"_q, 105).status
 			== Purple::SyncStoreStatus::Ready);
@@ -249,7 +266,7 @@ void TestFullEnvelopeReadBack() {
 		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
-		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 0)
 			.status == Purple::SyncStoreStatus::InvalidRecord);
 		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, -1)
@@ -286,7 +303,7 @@ void TestCloneRejection() {
 		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
-		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 		const auto record = mode == 2 ? wrong.canonical
 			: mode == 3 ? higher.canonical : first.canonical;
 		const auto device = mode == 0 ? u"device-b"_q
@@ -298,7 +315,7 @@ void TestCloneRejection() {
 			: mode == 2 ? Purple::SyncCloneVerdict::HashMismatch
 			: Purple::SyncCloneVerdict::RemoteAhead));
 		CHECK(store.state() == nullptr);
-		CHECK(store.StageConfig(first.canonical, metadata).status
+		CHECK(StageForBoundAccount(store, first.canonical, metadata).status
 			== Purple::SyncStoreStatus::InvalidTransition);
 		CHECK(QFileInfo::exists(root + u"/pending/config-1.json"_q));
 	}
@@ -322,9 +339,9 @@ void TestSupersededStages() {
 			CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 			auto metadata = initial.configData;
 			metadata.pending = first.version.key;
-			CHECK(bool(store.StageConfig(first.canonical, metadata)));
+			CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 			metadata.pending = second.version.key;
-			CHECK(bool(store.StageConfig(second.canonical, metadata)));
+			CHECK(bool(StageForBoundAccount(store, second.canonical, metadata)));
 			CHECK(QFileInfo::exists(root + u"/pending/config-1.json"_q));
 			if (!restart) {
 				CHECK(store.ConfirmConfigReadBack(
@@ -357,9 +374,9 @@ void TestNoPartialCleanup() {
 		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
-		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 		metadata.pending = second.version.key;
-		CHECK(bool(store.StageConfig(second.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, second.canonical, metadata)));
 	}
 	const auto oldPath = root + u"/pending/config-1.json"_q;
 	const auto futurePath = root + u"/pending/config-3.json"_q;
@@ -387,7 +404,7 @@ void TestPostCommitCleanup() {
 		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
-		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 109).status
 			== Purple::SyncStoreStatus::Ready);
 	}
@@ -432,7 +449,7 @@ void TestCleanupFailure() {
 		CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 		auto metadata = initial.configData;
 		metadata.pending = first.version.key;
-		CHECK(bool(store.StageConfig(first.canonical, metadata)));
+		CHECK(bool(StageForBoundAccount(store, first.canonical, metadata)));
 		CHECK(QFile(pendingDirectory).setPermissions(
 			QFileDevice::ReadOwner | QFileDevice::ExeOwner));
 		CHECK(store.ConfirmConfigReadBack(first.canonical, u"device-a"_q, 110)
@@ -507,15 +524,15 @@ void TestRejectedStage() {
 	const auto two = Record(initial, 2, "version = 1\nname = 'two'\n");
 	auto metadata = initial.configData;
 	metadata.pending = one.version.key;
-	CHECK(store.StageConfig(two.canonical, metadata).status
+	CHECK(StageForBoundAccount(store, two.canonical, metadata).status
 		== Purple::SyncStoreStatus::InvalidRecord);
 	metadata.pending.clear();
-	CHECK(store.StageConfig(one.canonical, metadata).status
+	CHECK(StageForBoundAccount(store, one.canonical, metadata).status
 		== Purple::SyncStoreStatus::InvalidRecord);
 	metadata.pending = one.version.key;
 	auto changed = one.canonical;
 	changed.append(' ');
-	CHECK(store.StageConfig(changed, metadata).status
+	CHECK(StageForBoundAccount(store, changed, metadata).status
 		== Purple::SyncStoreStatus::InvalidRecord);
 	CHECK(store.state()->config.seq == 0);
 	CHECK(store.ReadPendingConfig().status == Purple::SyncStoreStatus::NoPending);
@@ -534,7 +551,7 @@ void TestCorruptPending() {
 			CHECK(store.Initialize(initial).status == Purple::SyncStoreStatus::Ready);
 			auto metadata = initial.configData;
 			metadata.pending = one.version.key;
-			CHECK(bool(store.StageConfig(one.canonical, metadata)));
+			CHECK(bool(StageForBoundAccount(store, one.canonical, metadata)));
 		}
 		const auto path = root + u"/pending/config-1.json"_q;
 		if (mode == 0) {
@@ -615,7 +632,7 @@ void TestPermissionsAndCollision() {
 		const auto record = Record(initial, 1, "version = 1\n");
 		auto metadata = initial.configData;
 		metadata.pending = record.version.key;
-		CHECK(store.StageConfig(record.canonical, metadata).status
+		CHECK(StageForBoundAccount(store, record.canonical, metadata).status
 			== Purple::SyncStoreStatus::OrphanStage);
 		CHECK(store.state() == nullptr);
 	}

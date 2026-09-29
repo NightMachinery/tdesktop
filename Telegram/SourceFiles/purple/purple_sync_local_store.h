@@ -39,6 +39,7 @@ enum class SyncStoreStatus {
 	InvalidTransition,
 	Unconfirmed,
 	CloneDetected,
+	AccountUnbound,
 	CleanupFailed,
 };
 
@@ -86,7 +87,8 @@ public:
 	[[nodiscard]] SyncStoreResult ReadPendingConfig();
 	[[nodiscard]] SyncStoreResult StageConfig(
 		const QByteArray &canonicalRecord,
-		const SyncLocalConfigState &nextConfigData);
+		const SyncLocalConfigState &nextConfigData,
+		const QByteArray &accountBindingToken);
 	[[nodiscard]] SyncStoreResult ConfirmConfigReadBack(
 		const QByteArray &serverRecord,
 		const QString &currentDevice,

@@ -1761,6 +1761,8 @@ PRIVATE
     purple/purple_screentime_recorder.h
     purple/purple_sync.cpp
     purple/purple_sync.h
+    purple/purple_sync_account_binding.cpp
+    purple/purple_sync_account_binding.h
     purple/purple_sync_account_inventory.cpp
     purple/purple_sync_account_inventory.h
     purple/purple_sync_candidate_reader.cpp
