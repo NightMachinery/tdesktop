@@ -56,9 +56,16 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   Live receipt behavior, import-backup and 4 MiB boundaries, persistent
   incoming offers, and playlists remain open. Android source `4881e7c0`
   restores Purple's receipt callback when Telegram retries a failed settings
-  document from its own staging cache in Saved Messages. The signed APK built
-  and launched with the disposable account intact; a forced-failure Retry
-  cycle has not yet been tested live.
+  document from its own staging cache in Saved Messages. A live emulator test
+  on 2026-09-30 found that Telegram's automatic resend at app start, after the
+  app was closed during a send, still recorded no receipt, so Purple later
+  offered the device its own file for import. Android `5c687693` also accepts
+  that resend, and `7fc91602` prunes empty staging directories. The signed
+  `7fc91602` APK recorded the sent fingerprint and offer watermark on the
+  emulator's startup resend, made no self-import offer afterwards, and was
+  delivered privately. The manual Retry of a message in Telegram's failed
+  state is still untested live: offline sends stay pending rather than
+  failing, and the only local trigger is making the staged copy unreadable.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
