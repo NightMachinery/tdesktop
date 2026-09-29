@@ -1,7 +1,7 @@
 # Account-backed Purple sync proposal
 
-Status: design plus foundational core. The existing manual Send/Import actions
-remain the current behavior.
+Status: design plus foundational core and Android JNI. The existing manual
+Send/Import actions remain the current behavior.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -40,8 +40,12 @@ The desktop store latches that verdict and refuses further staging until a
 fresh open and reconciliation. `QSaveFile` protects final files from partial
 writes after a process crash; it does not promise persistence through power
 loss. The future transport engine must reconcile the install's
-own remote record for clone or rewind signals before any publish. Network
-transport and the account-sync interface remain to be built.
+own remote record for clone or rewind signals before any publish. Android's
+uncalled JNI bridge can initialize canonical local state, reserve a canonical
+own config record with its pending version key, and confirm an exact staged
+server read-back. It validates the record's space, install and device identity;
+it does not yet persist these results. Android local storage, network transport
+and the account-sync interface remain to be built.
 
 Compressed library records remain unsupported until the playlist phase.
 A deterministic shared-core simulation now exercises three devices against a
@@ -85,10 +89,43 @@ directions, after reconnect, and after repeated edits. If it fails, publish a
 replacement message and retire the install's superseded record. The record
 format and sync UI can be the same in either mode.
 
+## Proposed user flow
+
+Each client will show one **Sync across devices** entry in Purple settings.
+Turning it on binds that device to one signed-in Telegram account and checks
+that account's Saved Messages before sending anything. On a device with several
+accounts, the screen must say that the single installation-wide settings file
+may include chat names and identifiers from the other accounts. Setup waits
+for a successful check; offline setup must not silently create a separate
+sync group. Sync remains opt-in on every device.
+
+Incoming settings stay in **Update ready** until reviewed. One notice per
+version opens a short change preview with Apply or Not now. Applying keeps the
+replaced file in local History and offers Undo. Different edits on two devices
+require an explicit whole-file choice; the rejected version stays in History.
+Routine checks and uploads are silent. The settings row always shows the
+current state, while a persistent chat-list card is reserved for a conflict or
+a problem that pauses sync. Pause, turn off, Sync now, History and device
+details live on the same screen. Turning sync off keeps the local settings and
+restores the legacy Send/Import behavior.
+
+Every install owns only its own sync messages. A device-local ledger will tie
+each of its message IDs to the exact sequence and hash it posted; replacing or
+deleting an old message requires a matching server read-back. If the user's
+own sync message disappears or changes unexpectedly, the client pauses and
+asks instead of recreating or deleting it. Legacy manual posts and explicit
+**Save a copy** snapshots are never touched. A rare fork in which two devices
+start separate sync groups must use a stable, immutable ordering of group IDs.
+Moving a device to the selected group without changing its settings may happen
+silently; different settings require a choice and remain recoverable. The
+group-order encoding and fork cases need shared-core tests before transport
+integration.
+
 ## Settings first
 
 Start with opt-in, per-device sync in Ask mode. App-made settings edits publish
-automatically; edits detected from an external editor show a Publish action. A
+automatically. The proposed UX also publishes valid desktop text-editor saves
+after a quiet period, with the receiving device still asking before Apply. A
 receiving device retains a visible pending update until the user resolves or
 snoozes it. Each whole-file version records its ancestry, so a device can
 distinguish a newer version from concurrent edits. Concurrent versions require
@@ -143,7 +180,13 @@ Playlists will use the same account binding, record envelope, discovery, and
 transport. Their data model should be revisited with the playlist feature.
 Unlike a whole settings file, individual playlist entries can be edited
 frequently on different devices, so the current proposal uses a mergeable
-library state with stable song references, per-field conflict detection,
-ordering, and deletion markers. It stores message and document identities, not
-audio files or account-specific access hashes. Unavailable songs remain visible
-with an explanation instead of disappearing.
+library state with stable song references, per-field deterministic resolution,
+ordering, and deletion markers. Edits to different fields combine. Two unseen
+edits to the same field have a fixed winner; device clocks cannot prove which
+one happened later in real time, so the losing value is recoverable only from
+the originating device's local History. Deleting a playlist hides concurrent
+edits but retains them for Restore. This policy is deferred until the playlist
+feature is designed and tested. The library stores message and document
+identities, not audio files or account-specific access hashes. Unavailable
+songs remain visible with an explanation instead of disappearing. Download
+state and any **Keep downloaded** preference stay device-local.
