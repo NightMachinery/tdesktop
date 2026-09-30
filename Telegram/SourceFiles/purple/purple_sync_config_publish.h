@@ -38,6 +38,7 @@ public:
 		Main::Session &session,
 		SyncAccountInventoryResult inventory,
 		SyncConfigSendQueue scanQueue,
+		uint64_t scanPosts,
 		Fn<void(SyncConfigPublishResult)> finished,
 		SyncConfigPublishRequest request);
 	~SyncConfigPublish();
@@ -63,6 +64,7 @@ private:
 	base::weak_ptr<Main::Session> _session;
 	SyncAccountInventoryResult _inventory;
 	SyncConfigSendQueue _scanQueue = SyncConfigSendQueue::Empty;
+	uint64_t _scanPosts = 0;
 	Fn<void(SyncConfigPublishResult)> _finished;
 	SyncConfigPublishRequest _request;
 	std::unique_ptr<SyncLocalStore> _store;

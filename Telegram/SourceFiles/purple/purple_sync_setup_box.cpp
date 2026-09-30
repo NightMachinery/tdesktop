@@ -79,6 +79,7 @@ struct SetupBoxState {
 	std::unique_ptr<SyncConfigPublish> publisher;
 	std::optional<SyncAccountInventoryResult> completed;
 	SyncConfigSendQueue scanQueue = SyncConfigSendQueue::Empty;
+	uint64_t scanPosts = 0;
 	std::optional<SyncConfigReview> review;
 	std::optional<ShareInfo> share;
 	std::optional<UndoInfo> undo;
@@ -367,6 +368,7 @@ void StartPublisher(
 		*session,
 		std::move(inventory),
 		state->scanQueue,
+		state->scanPosts,
 		crl::guard(box, [=](SyncConfigPublishResult result) {
 			if (!state->publishing) {
 				return;
@@ -562,6 +564,7 @@ void StartCheck(
 			OnInventory(box, state, std::move(result), followup);
 		}));
 	state->scanQueue = SyncConfigSendQueueOf(not_null{ session });
+	state->scanPosts = SyncConfigPostsStarted();
 	state->inventory->Start();
 }
 
