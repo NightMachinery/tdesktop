@@ -71,16 +71,25 @@ struct VerifiedWrite {
 	return parsed ? parsed->fingerprint : QString();
 }
 
-[[nodiscard]] QString SourceLabel(const SyncConfigHeadRecord &record) {
-	return u"%1 · %2"_q.arg(
-		record.platform,
-		record.device).left(kMaximumLabelLength);
+[[nodiscard]] QString SourceLabel(
+		const SyncConfigHeadRecord &record,
+		SyncConfigHistoryReason reason) {
+	const auto device = SyncDeviceName(record);
+	return ((reason == SyncConfigHistoryReason::BeforeUpdate)
+		? u"Before update from %1"_q.arg(device)
+		: u"Before using settings from %1"_q.arg(device)
+	).left(kMaximumLabelLength);
 }
 
-[[nodiscard]] QString HistoryLabel(const SyncConfigHistoryEntry &entry) {
-	const auto when = QDateTime::fromMSecsSinceEpoch(entry.createdMs);
-	return u"History · %1"_q.arg(
-		when.toString(u"yyyy-MM-dd HH:mm"_q)).left(kMaximumLabelLength);
+[[nodiscard]] QString HistoryLabel(
+		const SyncConfigHistoryEntry &entry,
+		SyncConfigHistoryReason reason) {
+	const auto when = SyncMomentText(
+		QDateTime::fromMSecsSinceEpoch(entry.createdMs));
+	return ((reason == SyncConfigHistoryReason::BeforeUndo)
+		? u"Before undo to the version from %1"_q.arg(when)
+		: u"Before restoring the version from %1"_q.arg(when)
+	).left(kMaximumLabelLength);
 }
 
 [[nodiscard]] VerifiedWrite WriteSettingsWithHistory(
@@ -268,14 +277,15 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		}
 		const auto baseKnown = !config.base.isEmpty()
 			&& KeyFingerprint(config.base) == local.fingerprint;
+		const auto reason = (plan.verdict == ConfigSyncVerdict::UpdateReady)
+			? SyncConfigHistoryReason::BeforeUpdate
+			: SyncConfigHistoryReason::BeforeChoice;
 		const auto write = WriteSettingsWithHistory(
 			local,
 			record->text,
 			KeyFingerprint(record->head.key),
-			(plan.verdict == ConfigSyncVerdict::UpdateReady
-				? SyncConfigHistoryReason::BeforeUpdate
-				: SyncConfigHistoryReason::BeforeChoice),
-			SourceLabel(*record),
+			reason,
+			SourceLabel(*record, reason),
 			baseKnown ? config.base : QString());
 		result.historyId = write.historyId;
 		result.wroteFile = write.wrote;
@@ -357,7 +367,7 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		*text,
 		entry->fingerprint,
 		reason,
-		HistoryLabel(*entry),
+		HistoryLabel(*entry, reason),
 		QString());
 	result.historyId = write.historyId;
 	switch (write.status) {

@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_own_inventory.h"
 
 #include <QtCore/QByteArray>
+#include <QtCore/QDateTime>
 #include <QtCore/QString>
 
 #include <cstdint>
@@ -100,6 +101,12 @@ struct SyncConfigPublishGate {
 	ConfigSyncPlan plan;
 	std::vector<ConfigVersion> parents;
 };
+
+[[nodiscard]] QString SyncDeviceName(
+	const QString &platform,
+	const QString &install);
+[[nodiscard]] QString SyncDeviceName(const SyncConfigHeadRecord &record);
+[[nodiscard]] QString SyncMomentText(const QDateTime &when);
 
 [[nodiscard]] SyncSettingsFile ReadSyncSettingsFile(const QString &path);
 [[nodiscard]] bool SameSyncSettingsFile(

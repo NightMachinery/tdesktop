@@ -22,6 +22,8 @@ namespace Purple {
 namespace {
 
 constexpr auto kMaximumSettingsBytes = 256 * 1024;
+constexpr auto kMaximumPlatformLength = 32;
+constexpr auto kShortInstallLength = 4;
 
 [[nodiscard]] SyncConfigReviewStatus InventoryStatus(
 		const SyncAccountInventoryResult &inventory) {
@@ -70,6 +72,22 @@ constexpr auto kMaximumSettingsBytes = 256 * 1024;
 }
 
 } // namespace
+
+QString SyncDeviceName(const QString &platform, const QString &install) {
+	const auto dash = install.indexOf(u'-');
+	const auto shortId = install.mid(dash + 1).left(kShortInstallLength);
+	const auto trimmed = platform.simplified().left(kMaximumPlatformLength);
+	const auto name = trimmed.isEmpty() ? u"Device"_q : trimmed;
+	return shortId.isEmpty() ? name : (name + u' ' + shortId);
+}
+
+QString SyncDeviceName(const SyncConfigHeadRecord &record) {
+	return SyncDeviceName(record.platform, record.head.install);
+}
+
+QString SyncMomentText(const QDateTime &when) {
+	return when.toLocalTime().toString(u"yyyy-MM-dd HH:mm"_q);
+}
 
 SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
 	auto result = SyncSettingsFile();

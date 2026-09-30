@@ -251,9 +251,10 @@ With the store open it plans again from the stored state, the review's heads
 and the review's own record, and continues only when the verdict, the offered
 and same-content heads, and the own-record staleness all match the review.
 Writing another device's version first saves the current file to History,
-with the reason before update or before choice, a label naming the source
-platform and device, and the local version key when the file still matches
-the base. If that save fails, nothing is written. Then it writes the text,
+with the reason before update or before choice, a label such as "Before
+update from Android 9c1d", and the local version key when the file still
+matches the base. A device is named by its record's platform and the first
+four characters of its install ID after the `in-` prefix. If that save fails, nothing is written. Then it writes the text,
 reads it back and requires the head's fingerprint, marks the bytes as imported
 so the legacy automatic send does not echo them, and only then commits the
 adopted config data. The file is never written with bytes that would not
@@ -270,8 +271,9 @@ is exactly the publish the choice promised. After keeping this device's
 version it can add the base as a parent, because the adoption of any
 same-content heads has already moved the base. The publisher must find the
 same parents on the click. The same file restores a History entry for Restore
-and Undo: it saves the current file to History, writes the entry, reads it
-back and checks the fingerprint. It changes no sync state, so the next check
+and Undo: it saves the current file to History, labelled "Before restoring
+the version from <time>" or "Before undo to the version from <time>", writes
+the entry, reads it back and checks the fingerprint. It changes no sync state, so the next check
 reports local changes. An entry recorded for a missing file is refused,
 because restoring it would mean deleting `settings.toml`.
 
