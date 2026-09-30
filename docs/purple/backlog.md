@@ -83,9 +83,12 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   device's storage root. Android `1c54ff47` reads such a file through the
   picker's grant and deletes the temporary copy afterwards (the old code also
   left every picked copy in the external cache). It still needs a signed
-  build and a live check. A minor finding stays open: an import that fails
-  on the import backup has already refreshed `settings.toml.bak` with the
-  current file. Persistent incoming offers and playlists remain open.
+  build and a live check. The run also found that an import that failed on
+  the import backup had already refreshed `settings.toml.bak` with the
+  current file. Android `dca9a039` writes the import backup first, so that
+  failure leaves `settings.toml.bak` alone; a host test covers the order,
+  and it shares the signed build and live check with `1c54ff47`. Persistent
+  incoming offers and playlists remain open.
   Android source `4881e7c0`
   restores Purple's receipt callback when Telegram retries a failed settings
   document from Purple's staging directory in Saved Messages. A live emulator test
