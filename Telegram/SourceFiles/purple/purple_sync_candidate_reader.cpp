@@ -7,38 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_candidate_reader.h"
 
-#include "data/data_document.h"
-#include "data/data_document_media.h"
 #include "data/data_file_origin.h"
-#include "data/data_session.h"
 #include "data/data_types.h"
 #include "data/data_user.h"
 #include "main/main_session.h"
 #include "purple/purple_sync_history_scanner.h"
-#include "rpl/lifetime.h"
-
-#include <QtCore/QFile>
-#include <QtCore/QFileInfo>
+#include "storage/file_download_mtproto.h"
 
 namespace Purple {
 namespace {
 
 constexpr auto kMaximumRecordBytes = kSyncRecordMaximumBytes;
-
-[[nodiscard]] QByteArray LocalContent(
-		const std::shared_ptr<Data::DocumentMedia> &media,
-		not_null<DocumentData*> document) {
-	if (const auto bytes = media->bytes(); !bytes.isEmpty()) {
-		return bytes;
-	}
-	const auto path = document->filepath(true);
-	if (path.isEmpty() || QFileInfo(path).size() > kMaximumRecordBytes) {
-		return {};
-	}
-	auto file = QFile(path);
-	return file.open(QIODevice::ReadOnly)
-		? file.read(kMaximumRecordBytes + 1) : QByteArray();
-}
 
 } // namespace
 
@@ -54,6 +33,8 @@ SyncCandidateReader::SyncCandidateReader(
 }
 
 SyncCandidateReader::~SyncCandidateReader() {
+	_done = true;
+	_loader = nullptr;
 	if (_requestId) {
 		_api.request(_requestId).cancel();
 	}
@@ -74,9 +55,7 @@ void SyncCandidateReader::Cancel() {
 	if (_requestId) {
 		_api.request(base::take(_requestId)).cancel();
 	}
-	_downloadLifetime.reset();
-	_media.reset();
-	_document = nullptr;
+	_loader = nullptr;
 	for (; _next < _candidateIds.size(); ++_next) {
 		_result.records.push_back({
 			.id = _candidateIds[_next],
@@ -142,7 +121,7 @@ void SyncCandidateReader::RequestNext() {
 			});
 			return;
 		}
-		self->ResolveDocument(self->_session->data().processDocument(*document));
+		self->StartDownload(document->c_document());
 	}).fail([weak, id](const MTP::Error &) {
 		if (const auto self = weak.get(); self && !self->_done) {
 			self->_requestId = 0;
@@ -154,56 +133,55 @@ void SyncCandidateReader::RequestNext() {
 	}).send();
 }
 
-void SyncCandidateReader::ResolveDocument(not_null<DocumentData*> document) {
-	_document = document;
-	_media = document->createMediaView();
-	if (!_media->bytes().isEmpty() || !document->filepath(true).isEmpty()) {
-		CheckDownload();
-		return;
-	}
-	document->save(
-		FullMsgId(_session->user()->id, _candidateIds[_next]),
-		QString());
-	if (!document->loading()) {
-		CheckDownload();
-		return;
-	}
+void SyncCandidateReader::StartDownload(const MTPDdocument &document) {
+	const auto size = int64(document.vsize().v);
+	_loader = std::make_unique<mtpFileLoader>(
+		_session,
+		StorageFileLocation(
+			document.vdc_id().v,
+			_session->userId(),
+			MTP_inputDocumentFileLocation(
+				document.vid(),
+				document.vaccess_hash(),
+				document.vfile_reference(),
+				MTP_string())),
+		Data::FileOrigin(FullMsgId(
+			_session->user()->id,
+			MsgId(_candidateIds[_next]))),
+		DocumentFileLocation,
+		QString(),
+		size,
+		size,
+		LoadToFileOnly,
+		LoadFromCloudOrLocal,
+		false,
+		0);
 	const auto weak = base::make_weak(this);
-	_downloadLifetime = std::make_unique<rpl::lifetime>();
-	_session->downloaderTaskFinished() | rpl::on_next([weak] {
+	const auto stopped = [weak] {
 		if (const auto self = weak.get(); self && !self->_done) {
-			self->CheckDownload();
+			self->OnDownload();
 		}
-	}, *_downloadLifetime);
+	};
+	_loader->updates(
+	) | rpl::on_error_done([=](FileLoader::Error) {
+		stopped();
+	}, stopped, _loader->lifetime());
+	_loader->start();
 }
 
-void SyncCandidateReader::CheckDownload() {
-	if (!_document || !_media) {
+void SyncCandidateReader::OnDownload() {
+	if (!_loader) {
 		return;
 	}
-	if (_media->bytes().size() > kMaximumRecordBytes) {
+	const auto loader = base::take(_loader);
+	const auto id = _candidateIds[_next];
+	if (loader->cancelled() || loader->bytes().isEmpty()) {
 		CompleteCurrent({
-			.id = _candidateIds[_next],
-			.status = SyncCandidateStatus::Oversized,
-		});
-		return;
-	}
-	const auto path = _document->filepath(true);
-	if (!path.isEmpty() && QFileInfo(path).size() > kMaximumRecordBytes) {
-		CompleteCurrent({
-			.id = _candidateIds[_next],
-			.status = SyncCandidateStatus::Oversized,
-		});
-		return;
-	}
-	const auto bytes = LocalContent(_media, _document);
-	if (!bytes.isEmpty()) {
-		CompleteCurrent(ClassifySyncCandidate(_candidateIds[_next], bytes));
-	} else if (!_document->loading()) {
-		CompleteCurrent({
-			.id = _candidateIds[_next],
+			.id = id,
 			.status = SyncCandidateStatus::Inaccessible,
 		});
+	} else {
+		CompleteCurrent(ClassifySyncCandidate(id, loader->bytes()));
 	}
 }
 
@@ -212,9 +190,6 @@ void SyncCandidateReader::CompleteCurrent(SyncCandidateRecord record) {
 	record.editDate = _editDate;
 	_documentId = 0;
 	_editDate = 0;
-	_downloadLifetime.reset();
-	_media.reset();
-	_document = nullptr;
 	_result.records.push_back(std::move(record));
 	++_next;
 	RequestNext();

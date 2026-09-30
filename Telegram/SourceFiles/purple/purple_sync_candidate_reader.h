@@ -15,13 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 #include <vector>
 
-namespace Data {
-class DocumentMedia;
-}
-class DocumentData;
-namespace rpl {
-class lifetime;
-}
+class FileLoader;
 namespace Main {
 class Session;
 }
@@ -44,8 +38,8 @@ public:
 
 private:
 	void RequestNext();
-	void ResolveDocument(not_null<DocumentData*> document);
-	void CheckDownload();
+	void StartDownload(const MTPDdocument &document);
+	void OnDownload();
 	void CompleteCurrent(SyncCandidateRecord record);
 	void Finish(SyncCandidateReadStatus status);
 
@@ -54,9 +48,7 @@ private:
 	std::vector<int32_t> _candidateIds;
 	Fn<void(SyncCandidateReadResult)> _finished;
 	SyncCandidateReadResult _result;
-	std::shared_ptr<Data::DocumentMedia> _media;
-	std::unique_ptr<rpl::lifetime> _downloadLifetime;
-	DocumentData *_document = nullptr;
+	std::unique_ptr<FileLoader> _loader;
 	mtpRequestId _requestId = 0;
 	size_t _next = 0;
 	uint64_t _documentId = 0;
