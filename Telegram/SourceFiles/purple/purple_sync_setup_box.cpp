@@ -344,7 +344,7 @@ void StartPublisher(
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
 		SyncAccountInventoryResult inventory,
-		std::optional<SyncConfigPublishRequest> request,
+		SyncConfigPublishRequest request,
 		const QString &prefix,
 		const QString &progress) {
 	const auto account = state->selectedAccount.get();
@@ -371,7 +371,7 @@ void StartPublisher(
 					base::take(state->publishPrefix),
 					PublishResult(result)));
 		}),
-		request.value_or(SyncConfigPublishRequest()));
+		std::move(request));
 	state->publisher->Start();
 }
 
@@ -398,7 +398,7 @@ void RunAction(
 			box,
 			state,
 			std::move(inventory),
-			std::nullopt,
+			SyncConfigPublishRequest{ .pendingOnly = true },
 			QString(),
 			u"Finishing the earlier settings post."_q);
 		return;

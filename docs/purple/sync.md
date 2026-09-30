@@ -32,9 +32,11 @@ most one next step:
   version** or **Join and share** and always the disclosure.
 - **Publish changes** when this device's file changed since it last matched,
   or its current version has not been posted. It checks again and confirms.
-- **Finish sending** when an earlier post may not have finished. It checks
-  again and lets the publisher either confirm the record already in Saved
-  Messages or send the staged record once.
+- **Finish sending** when an earlier post may not have finished and the
+  check is otherwise clean. It checks again and lets the publisher either
+  confirm the record already in Saved Messages or send the staged record
+  once. When Saved Messages also holds records this device cannot safely
+  use, the box only explains that the post is paused.
 
 **Up to date** reports how many other devices sync and when the check ran.
 Invalid records, clones, another account's state, store errors and incomplete
@@ -46,14 +48,19 @@ characters of the install ID after the `in-` prefix, for example `Android
 9c1d`. Desktop writes its platform as Windows, macOS or Linux, as the manual
 Send action does.
 
-No path reaches the publisher without either a staged post (Finish sending) or
-an explicit request carrying the fingerprint and parents that a fresh plan
-expects (every other action). There is no standing resume action any more.
-While a check or post runs, the action, Undo and History restore are disabled,
-because the publisher and the check hold the local sync store; a result from an
-account or session that is no longer selected is dropped. An apply that finds
-the file or Saved Messages changed since the check says so and asks for
-another check.
+The publisher enforces two modes. Finish sending starts it pending-only: it
+confirms or posts the record already staged and refuses when nothing is
+staged, so a second window that finished the post first cannot turn the
+confirmation into a post of later edits. Every other action passes a request
+with both the reviewed fingerprint and the parents that a fresh plan expects;
+the publisher refuses a request missing either, and refuses any request when a
+record is already staged. There is no standing resume action any more. While a
+check or post runs, the action, Undo and History restore are disabled, because
+the publisher and the check hold the local sync store; a result from an
+account or session that is no longer selected is dropped. Join, Apply and a
+choice act on the Saved Messages snapshot of the check they came from and
+re-check only the local file and sync state before writing, while every post
+scans Saved Messages again first.
 
 Applying, choosing, restoring and undoing only change the local file. Each one
 first saves the current file to a settings History, then writes the new

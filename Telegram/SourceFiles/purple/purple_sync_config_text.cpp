@@ -170,13 +170,11 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 		break;
 	case SyncConfigReviewStatus::NeedsReview:
 		if (review.bound && !review.state.pending.isEmpty()) {
-			return {
-				u"A settings post may not have finished, and Saved Messages "
-					"also has records this device cannot safely use. Finish "
-					"sending checks again and completes only this device's "
-					"post."_q,
-				Action::FinishSending,
-			};
+			return { u"A settings post from this device may not have "
+				"finished, but Saved Messages also has sync records this "
+				"device cannot safely use: they are ambiguous, unreadable, or "
+				"in another sync space. The earlier post stays paused while "
+				"they remain. Nothing was sent."_q };
 		}
 		return { u"Saved Messages has sync records this device cannot "
 			"safely use: they are ambiguous, unreadable, or in another sync "

@@ -89,6 +89,18 @@ struct SyncConfigReview {
 	ConfigSyncPlan plan;
 };
 
+struct SyncConfigPublishRequest {
+	bool pendingOnly = false;
+	std::optional<QString> expectedFingerprint;
+	std::optional<std::vector<QString>> expectedParents;
+};
+
+enum class SyncConfigPublishEntry {
+	Refuse,
+	FinishStaged,
+	NewContent,
+};
+
 enum class SyncConfigPublishGateStatus {
 	Proceed,
 	AlreadySynced,
@@ -148,11 +160,14 @@ void SelectSyncSpaceIfEmpty(
 	Main::Session &session,
 	const SyncAccountInventoryResult &inventory);
 
+[[nodiscard]] SyncConfigPublishEntry PlanSyncConfigPublishEntry(
+	const SyncConfigPublishRequest &request,
+	bool staged);
 [[nodiscard]] SyncConfigPublishGate PlanSyncConfigPublishGate(
 	const SyncLocalState &state,
 	const SyncAccountInventoryResult &inventory,
 	const SyncOwnInventoryResult &own,
 	const QString &localFingerprint,
-	const std::optional<std::vector<QString>> &expectedParents);
+	const SyncConfigPublishRequest &request);
 
 } // namespace Purple

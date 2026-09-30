@@ -140,18 +140,23 @@ reported, and the planned parents must match them as a set; a caller without
 them cannot publish over another device's version. Up to date reports already
 synced. An update, a silent adoption, a pending send, an invalid state, or a
 choice that would first adopt same-content heads stops for review, because the
-apply step must run first. A caller can also pass the settings fingerprint it
-reviewed, and the publisher stops when the file has changed since. The record
-carries those parents and the next sequence, is staged with its version key as
-pending, and is posted and confirmed as before. It does not yet retire
-superseded messages. The setup box starts it in exactly two ways. Finish
-sending passes no request and runs only when a fresh check reports a staged
-post; the matcher and planner then confirm an exact cloud record, post the
-staged record once, or stop for review. Every other post (Publish settings,
-Publish changes, and the share half of Use and share) passes a request with
-the fingerprint and, for a choice, the parents that the fresh plan or the
-apply step expects. There is no standing resume action. This does not enable
-continuous account-backed sync.
+apply step must run first. The record carries those parents and the next
+sequence and is written by the platform it runs on (Windows, macOS or Linux),
+is staged with its version key as pending, and is posted and confirmed as
+before. It does not yet retire superseded messages. Every start carries a
+request, and the publisher enforces its mode before anything else. A
+pending-only request confirms or posts the existing stage and refuses when
+nothing is staged, and it may not carry expectations. Any other request posts
+new content only when it carries both the reviewed settings fingerprint and
+the expected parent keys, the file still has that fingerprint, the planned
+parents match as a set, and no record is staged; a stage found by such a
+request stops for review. The setup box uses the first mode for Finish sending
+and the second for Publish settings, Publish changes and the share half of Use
+and share, with the fingerprint and parents from the apply step. A request
+without expectations, or a pending-only start that finds another window
+already finished the post, therefore cannot publish edits the user never
+reviewed. There is no standing resume action. This does not enable continuous
+account-backed sync.
 
 The desktop setup box runs this inventory against one signed-in account,
 shows scan progress, and passes a complete result to the review step described
@@ -164,21 +169,24 @@ review choice, or apply result that belongs to an older check. The review's
 verdict picks one action. Empty offers Publish settings. Adopt offers Join sync
 on an unlinked device; on a linked one the check adopts silently and reviews
 again. UpdateReady offers Review update, Choose and Conflict offer Choose
-settings, LocalChanges offers Publish changes, and Pending, or a review that
-stops while this device has a staged post, offers Finish sending. Up to date
-reports the number of other devices and the check time. Invalid verdicts and
-every failure are plain text with no action. Publish settings, Publish changes
+settings, LocalChanges offers Publish changes, and Pending offers Finish
+sending, but only from a ready review, so an Invalid verdict or unusable
+foreign records pause a staged post as the planner's precedence requires; the
+box then only explains the pause. Up to date reports the number of other
+devices and the check time. Invalid verdicts and every failure are plain text
+with no action. Publish settings, Publish changes
 and Finish sending start a new full scan on the click, review it again, and
 open the confirmation only when that review still shows the same action;
-otherwise the box reports that nothing was sent. Join sync confirms against
-the check it came from, because the apply step re-extracts the heads and
-re-reads the file. Review update and Choose settings open a review box with the
-source device and time, a summary of up to six changed settings, a newer-schema
-warning, and a Show lines diff. A choice that also publishes scans again
-before the post. While a scan or post runs, the action, Undo and History
-restore are disabled, since those hold the local sync store. Devices are named
-by the record's platform and the first four characters of the install ID after
-the `in-` prefix.
+otherwise the box reports that nothing was sent. Join sync, Apply and a
+choice act on the Saved Messages snapshot of the check they came from; the
+apply step re-reads the file and the local state but not Saved Messages, which
+is accepted because none of them posts, and every post scans again. Review
+update and Choose settings open a review box with the source device and time,
+a summary of up to six changed settings, a newer-schema warning, and a Show
+lines diff. A choice that also publishes scans again before the post. While
+a scan or post runs, the action, Undo and History restore are disabled, since
+those hold the local sync store. Devices are named by the record's platform
+and the first four characters of the install ID after the `in-` prefix.
 The local setup operation creates an install identity and account binding only
 after a complete, unambiguous scan. It reuses the selected existing space or
 creates a time-ordered space ID when the account has none. An existing local

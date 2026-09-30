@@ -458,13 +458,37 @@ SyncConfigReview ReviewSyncConfig(
 	return ReviewSyncConfigInventory(inventory, state, staged, local);
 }
 
+SyncConfigPublishEntry PlanSyncConfigPublishEntry(
+		const SyncConfigPublishRequest &request,
+		bool staged) {
+	const auto expects = request.expectedFingerprint.has_value()
+		|| request.expectedParents.has_value();
+	if (request.pendingOnly) {
+		return (staged && !expects)
+			? SyncConfigPublishEntry::FinishStaged
+			: SyncConfigPublishEntry::Refuse;
+	}
+	return (!staged
+			&& request.expectedFingerprint
+			&& request.expectedParents)
+		? SyncConfigPublishEntry::NewContent
+		: SyncConfigPublishEntry::Refuse;
+}
+
 SyncConfigPublishGate PlanSyncConfigPublishGate(
 		const SyncLocalState &state,
 		const SyncAccountInventoryResult &inventory,
 		const SyncOwnInventoryResult &own,
 		const QString &localFingerprint,
-		const std::optional<std::vector<QString>> &expectedParents) {
+		const SyncConfigPublishRequest &request) {
 	auto result = SyncConfigPublishGate();
+	const auto entry = PlanSyncConfigPublishEntry(
+		request,
+		state.config.pendingSeq != 0);
+	if (entry != SyncConfigPublishEntry::NewContent
+		|| *request.expectedFingerprint != localFingerprint) {
+		return result;
+	}
 	const auto heads = ExtractSyncConfigHeads(
 		inventory,
 		state.space,
@@ -489,12 +513,8 @@ SyncConfigPublishGate PlanSyncConfigPublishGate(
 		return result;
 	case ConfigSyncVerdict::Empty:
 	case ConfigSyncVerdict::LocalChanges:
-		break;
 	case ConfigSyncVerdict::Choose:
 	case ConfigSyncVerdict::Conflict:
-		if (!expectedParents) {
-			return result;
-		}
 		break;
 	default:
 		return result;
@@ -503,10 +523,9 @@ SyncConfigPublishGate PlanSyncConfigPublishGate(
 	if (!choice
 		|| !choice->publish
 		|| !choice->adopt.empty()
-		|| (expectedParents
-			&& !SameSyncConfigKeySet(
-				SyncConfigVersionKeys(choice->parents),
-				*expectedParents))) {
+		|| !SameSyncConfigKeySet(
+			SyncConfigVersionKeys(choice->parents),
+			*request.expectedParents)) {
 		return result;
 	}
 	result.status = SyncConfigPublishGateStatus::Proceed;
