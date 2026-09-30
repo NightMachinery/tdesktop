@@ -43,7 +43,8 @@ not valid TOML or too large to send. When this device is already linked and
 another device has exactly its file, the check adopts that silently and
 reviews again. Devices are named by the record's platform and the first four
 characters of the install ID after the `in-` prefix, for example `Android
-9c1d`.
+9c1d`. Desktop writes its platform as Windows, macOS or Linux, as the manual
+Send action does.
 
 No path reaches the publisher without either a staged post (Finish sending) or
 an explicit request carrying the fingerprint and parents that a fresh plan
