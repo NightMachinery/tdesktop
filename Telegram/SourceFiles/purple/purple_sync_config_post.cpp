@@ -9,11 +9,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_common.h"
 #include "apiwrap.h"
+#include "data/data_document.h"
+#include "data/data_media_types.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "history/history.h"
+#include "history/history_item.h"
 #include "main/main_session.h"
 #include "purple/purple_config_payload.h"
+#include "purple/purple_sync_inventory.h"
 #include "storage/localimageloader.h"
 #include "ui/chat/attach/attach_prepare.h"
 
@@ -40,6 +44,30 @@ constexpr auto kMaximumStagedBytes = 256 * 1024;
 	return serialized && serialized.canonical == staged;
 }
 
+[[nodiscard]] bool HoldsSyncSettingsRecord(not_null<HistoryItem*> item) {
+	if (!item->isSending() && !item->hasFailed()) {
+		return false;
+	}
+	const auto media = item->media();
+	const auto document = media ? media->document() : nullptr;
+	return document
+		&& (document->filename() == SyncSettingsRecordFileName());
+}
+
+}
+
+SyncConfigSendQueue SyncConfigSendQueueOf(
+		not_null<Main::Session*> session) {
+	const auto history = session->data().historyLoaded(session->userPeerId());
+	if (!history) {
+		return SyncConfigSendQueue::Empty;
+	}
+	for (const auto &item : history->clientSideMessages()) {
+		if (HoldsSyncSettingsRecord(item)) {
+			return SyncConfigSendQueue::HoldsSyncRecord;
+		}
+	}
+	return SyncConfigSendQueue::Empty;
 }
 
 SyncConfigPost::SyncConfigPost(
@@ -69,7 +97,7 @@ void SyncConfigPost::Start() {
 	}
 	auto file = Ui::PreparedFile(QString());
 	file.content = _staged;
-	file.displayName = u"Purple settings sync.json"_q;
+	file.displayName = SyncSettingsRecordFileName();
 	file.size = _staged.size();
 	file.caption = { u"#purplesync"_q };
 	file.information = std::make_unique<Ui::PreparedFileInformation>();

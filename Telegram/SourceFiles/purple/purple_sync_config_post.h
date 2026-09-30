@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "data/data_msg_id.h"
 #include "purple/purple_sync_candidate_reader.h"
+#include "purple/purple_sync_config_flow.h"
 
 #include <QtCore/QByteArray>
 
@@ -31,6 +32,9 @@ struct SyncConfigPostResult {
 	MsgId messageId;
 	QByteArray readback;
 };
+
+[[nodiscard]] SyncConfigSendQueue SyncConfigSendQueueOf(
+	not_null<Main::Session*> session);
 
 class SyncConfigPost final : public base::has_weak_ptr {
 public:
