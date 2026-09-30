@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_config_payload.h"
 #include "purple/purple_sync_account_binding.h"
-#include "purple/purple_sync_config_review.h"
 
 #include <QtCore/QCryptographicHash>
 
@@ -98,6 +97,13 @@ void SyncConfigPublish::Start() {
 		Finish({ SyncConfigPublishStatus::AccountUnbound });
 		return;
 	}
+	const auto entry = PlanSyncConfigPublishEntry(
+		_request,
+		state->config.pendingSeq != 0);
+	if (entry == SyncConfigPublishEntry::Refuse) {
+		Finish({ SyncConfigPublishStatus::NeedsReview });
+		return;
+	}
 	const auto token = AccountSyncBindingToken(*account);
 	auto staged = QByteArray();
 	if (state->config.pendingSeq) {
@@ -146,8 +152,12 @@ void SyncConfigPublish::Start() {
 		Finish({ OwnFailure(own.status) });
 		return;
 	}
-	if (!staged.isEmpty()) {
-		PlanPost(*state, own, staged, token);
+	if (entry == SyncConfigPublishEntry::FinishStaged) {
+		if (staged.isEmpty()) {
+			Finish({ SyncConfigPublishStatus::NeedsReview });
+		} else {
+			PlanPost(*state, own, staged, token);
+		}
 		return;
 	}
 	const auto local = ReadSyncSettingsFile(SettingsFilePath());
@@ -156,17 +166,12 @@ void SyncConfigPublish::Start() {
 		Finish({ SyncConfigPublishStatus::InvalidSettings });
 		return;
 	}
-	if (_request.expectedFingerprint
-		&& *_request.expectedFingerprint != local.fingerprint) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
 	const auto gate = PlanSyncConfigPublishGate(
 		*state,
 		inventory,
 		own,
 		local.fingerprint,
-		_request.expectedParents);
+		_request);
 	if (gate.status == SyncConfigPublishGateStatus::AlreadySynced) {
 		Finish({ SyncConfigPublishStatus::AlreadySynced });
 		return;

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "purple/purple_sync_account_inventory.h"
 #include "purple/purple_sync_config_post.h"
+#include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_local_store.h"
 #include "purple/purple_sync_own_inventory.h"
 
@@ -38,11 +39,6 @@ enum class SyncConfigPublishStatus {
 	Cancelled,
 };
 
-struct SyncConfigPublishRequest {
-	std::optional<QString> expectedFingerprint;
-	std::optional<std::vector<QString>> expectedParents;
-};
-
 struct SyncConfigPublishResult {
 	SyncConfigPublishStatus status = SyncConfigPublishStatus::Incomplete;
 	std::optional<SyncStoreStatus> storeStatus;
@@ -56,7 +52,7 @@ public:
 		Main::Session &session,
 		SyncAccountInventoryResult inventory,
 		Fn<void(SyncConfigPublishResult)> finished,
-		SyncConfigPublishRequest request = {});
+		SyncConfigPublishRequest request);
 	~SyncConfigPublish();
 
 	SyncConfigPublish(const SyncConfigPublish &) = delete;
