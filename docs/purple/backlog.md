@@ -48,11 +48,18 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   publish, History, Restore and Undo, decided by the same purple-core code,
   for the account the settings screen belongs to. Its durable local store
   locks the sync directory and pauses on ambiguous crash recovery rather than
-  sending uncertain data. The Android posting scenarios (publish, join, update,
-  choice, resend after a restart, History restore) still need an emulator
-  run. Still open on both clients: a live cross-client test between desktop
-  and Android, background checks, automatic publish, and retirement of
-  superseded records.
+  sending uncertain data. An emulator run on 2026-09-30 passed first publish,
+  private record downloads, a second install joining through Adopt, Publish
+  changes, Update with Apply and Undo, Conflict with each side picked, a post
+  interrupted by force-stop and resent without a duplicate, Cancel, and
+  History restore and pruning. It also found and fixed a check that could
+  miss a post Telegram resent mid-scan (Android `108c2c24`, desktop
+  `6f4c252ddb`). The signed APK from source `a12cbbaa` was delivered
+  privately. Not reachable there: an account switch mid-check (one account)
+  and a remote pick that leaves another head (host-tested). Still open on
+  both clients: a live cross-client test between desktop and Android,
+  desktop live verification, background checks, automatic publish, and
+  retirement of superseded records.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
@@ -62,8 +69,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   message id. The signed `8b07614c` APK upgraded the retained test account
   and was delivered privately on 2026-09-29. The desktop change passed a full
   optimized build and isolated launch but is not in the installed app yet.
-  Live receipt behavior, import-backup and 4 MiB boundaries, persistent
-  incoming offers, and playlists remain open. Android source `4881e7c0`
+  Import-backup and 4 MiB boundaries, persistent incoming offers, and
+  playlists remain open. Android source `4881e7c0`
   restores Purple's receipt callback when Telegram retries a failed settings
   document from Purple's staging directory in Saved Messages. A live emulator test
   on 2026-09-30 found that Telegram's automatic resend at app start, after the
@@ -72,15 +79,15 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   that resend, and `7fc91602` prunes empty staging directories. The signed
   `7fc91602` APK recorded the sent fingerprint and offer watermark on the
   emulator's startup resend, made no self-import offer afterwards, and was
-  delivered privately. The manual Retry of a message in Telegram's failed
-  state is still untested live: offline sends stay pending rather than
-  failing, and the only local trigger is making the staged copy unreadable.
-  Android `8d6bc3a8` moves that staging from Telegram's cache to the app's
-  external files directory (`Android/data/<package>/files/purple-sync/`),
-  because Telegram moves a sent cache attachment into Telegram Documents,
-  which is shared storage on Android 10 and lower. The receipt accepts copies
-  staged in either place. A send, a forced Retry and a restart resend from
-  the new directory are not yet tested live.
+  delivered privately. Android `8d6bc3a8` moves that staging from Telegram's
+  cache to the app's external files directory
+  (`Android/data/<package>/files/purple-sync/`), because Telegram moves a
+  sent cache attachment into Telegram Documents, which is shared storage on
+  Android 10 and lower. The receipt accepts copies staged in either place.
+  The 2026-09-30 emulator run verified a send, a restart resend and a manual
+  Retry of a failed send from the new directory (the failure was forced by
+  making the staged copy unreadable, then restoring it), and delivery of a
+  copy staged by the older build after an in-place upgrade.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
