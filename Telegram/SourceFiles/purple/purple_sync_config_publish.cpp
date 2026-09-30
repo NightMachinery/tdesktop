@@ -21,11 +21,13 @@ SyncConfigPublish::SyncConfigPublish(
 		Main::Account &account,
 		Main::Session &session,
 		SyncAccountInventoryResult inventory,
+		SyncConfigSendQueue scanQueue,
 		Fn<void(SyncConfigPublishResult)> finished,
 		SyncConfigPublishRequest request)
 : _account(base::make_weak(&account))
 , _session(base::make_weak(&session))
 , _inventory(std::move(inventory))
+, _scanQueue(scanQueue)
 , _finished(std::move(finished))
 , _request(std::move(request)) {
 }
@@ -90,6 +92,9 @@ void SyncConfigPublish::Start() {
 	const auto local = (entry == SyncConfigPublishEntry::NewContent)
 		? ReadSyncSettingsFile(SettingsFilePath())
 		: SyncSettingsFile();
+	const auto queue = (_scanQueue == SyncConfigSendQueue::HoldsSyncRecord)
+		? SyncConfigSendQueue::HoldsSyncRecord
+		: SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() });
 	const auto plan = PlanSyncConfigPost(
 		*state,
 		token,
@@ -99,7 +104,7 @@ void SyncConfigPublish::Start() {
 		_request,
 		int64_t(base::unixtime::now()),
 		SyncWriter(),
-		SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() }));
+		queue);
 	switch (plan.step) {
 	case SyncConfigPostStep::Finish:
 		Finish({ plan.status });
