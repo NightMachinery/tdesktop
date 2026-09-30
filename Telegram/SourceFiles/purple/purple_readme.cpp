@@ -603,19 +603,37 @@ Settings > Advanced > Purple > Last Seen Peeks lists them.
 ## Moving this file to another machine
 
 This file belongs to this install. Another Purple Telegram on another machine
-has its own, and nothing keeps the two in step by itself. Two actions move one
-across, through your own Saved Messages:
+has its own, and nothing keeps the two in step by itself. There are two ways to
+move it across, both through your own Saved Messages.
 
-**Settings > Advanced > Purple > Sync across devices** can check one signed-in
-account's Saved Messages for future sync records. With several accounts, you
-must choose one. If a complete check finds no existing sync records, **Publish
-settings once** checks again and, after a separate confirmation, posts one
-record with exact read-back verification. This does not keep future edits in
-step. If this install has a bound local sync state and a complete check shows
-the same cloud space, **Resume prior settings post** checks again and asks
-before reconciling an existing record or posting one staged record. The sync
-engine decides whether another post is safe. A cloud space without this
-install's matching bound local state cannot be joined from this screen yet.
+**Settings > Advanced > Purple > Sync across devices** keeps this file in step
+with your other devices through one signed-in account's Saved Messages, by
+hand: nothing happens until you press **Check Saved Messages**. With several
+accounts, you choose one. The check reads every sync record there and offers
+one next step:
+
+- **Publish settings** when there are no records yet: after a confirmation,
+  this device's file becomes the synced settings.
+- **Join sync** when another device already has exactly this file.
+- **Review update** when another device changed settings since this one last
+  matched. The preview lists what changes, **Show lines** shows the lines, and
+  **Apply** replaces this file.
+- **Choose settings** when devices disagree: use one device's version, or keep
+  this one's and share it.
+- **Publish changes** when this file changed here: after a confirmation it is
+  sent for your other devices.
+- **Finish sending** when an earlier post may not have finished.
+
+Nothing on this device changes without that review, and nothing is sent without
+a fresh check and a confirmation. Every file sync replaces is first kept in
+**History**, the newest 30 copies in `sync/history/` beside this file. History
+and **Undo last update** put one back; a restored file stays on this device
+until you publish it. Devices are named by platform and the start of their sync
+id, such as `Android 9c1d`. Saved Messages is a Telegram cloud chat, not
+end-to-end encrypted: every signed-in session can read the records, and they
+may name your chats. `state.toml` never leaves this device.
+
+The older, simpler way to move this file:
 
 - **Settings > Advanced > Purple > Send settings to Saved Messages** posts a
   copy of `settings.toml` there, captioned with its schema version, the time
