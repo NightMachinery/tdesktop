@@ -45,6 +45,8 @@ struct SyncConfigApplyResult {
 	std::vector<QString> expectedParents;
 	bool joined = false;
 	bool wroteFile = false;
+	bool undoAvailable = false;
+	bool otherVersionsRemain = false;
 	bool adopted = false;
 	bool publishNeeded = false;
 };

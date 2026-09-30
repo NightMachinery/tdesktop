@@ -74,6 +74,8 @@ inline constexpr auto kSyncConfigSummaryLimit = 6;
 	const SyncConfigHistoryEntry &entry);
 [[nodiscard]] QString SyncConfigApplyFailureText(
 	const SyncConfigApplyResult &result);
+[[nodiscard]] bool SyncConfigUndoFinished(
+	const SyncConfigRestoreResult &result);
 [[nodiscard]] QString SyncConfigRestoreText(
 	const SyncConfigRestoreResult &result,
 	const SyncConfigHistoryEntry &entry);

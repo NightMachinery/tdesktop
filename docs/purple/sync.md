@@ -69,12 +69,18 @@ History keeps up to 30 exact copies of `settings.toml`, each with its reason,
 time, fingerprint and a label such as "Before update from Android 9c1d", in the
 owner-only `sync/history/` directory under the Purple config directory. After
 an apply that wrote the file, a toast says "Settings updated from <device>."
-and **Undo last update** puts the previous file back. **History** lists
-entries as "<date time> · <label>"; each opens a preview with **Restore**.
-Entries that record a missing file, or hold bytes that are not valid UTF-8,
-cannot be restored. A restore never lets History pruning remove the entry it
-is restoring. A restored or undone file stays local until **Publish changes**
-sends it.
+and **Undo last update** puts the previous file back. Undo is offered even when
+the file was written but the sync state could not be saved, and is not offered
+when there was no file before or the old file is not valid UTF-8 text, since
+those copies cannot be written back. A failed Undo keeps the row for another
+try unless the copy is gone or cannot be restored. **History** lists entries as
+"<date time> · <label>"; each opens a preview with **Restore**. Entries that
+record a missing file, or hold bytes that are not valid UTF-8, cannot be
+restored. A restore never lets History pruning remove the entry it is
+restoring. A restored or undone file stays local until **Publish changes**
+sends it. If joining succeeds but a later step fails, the status says "Joined
+sync, but ..." and that nothing was written to `settings.toml`; the next check
+sees a linked device and offers the choice again.
 
 Still not built: background checks, automatic publish after edits, editing a
 setting in place from the review, retirement of superseded records, the

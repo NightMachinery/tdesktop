@@ -579,6 +579,18 @@ void ApplyChoice(
 		*state->completed,
 		review,
 		key);
+	const SyncConfigHeadRecord *record = nullptr;
+	for (const auto &head : review.plan.offered) {
+		if (key && head.key == *key) {
+			record = FindSyncConfigHeadRecord(review, head);
+		}
+	}
+	const auto device = record ? SyncDeviceName(*record) : u"another device"_q;
+	if (applied.wroteFile) {
+		state->undo = applied.undoAvailable
+			? std::make_optional(UndoInfo{ applied.historyId, device })
+			: std::nullopt;
+	}
 	if (applied.status != SyncConfigApplyStatus::Applied) {
 		ClearReview(*state);
 		SetStatus(*state, SyncConfigApplyFailureText(applied));
@@ -586,19 +598,16 @@ void ApplyChoice(
 	}
 	auto prefix = applied.joined ? u"Joined sync."_q : QString();
 	if (applied.wroteFile) {
-		const SyncConfigHeadRecord *record = nullptr;
-		for (const auto &head : review.plan.offered) {
-			if (key && head.key == *key) {
-				record = FindSyncConfigHeadRecord(review, head);
-			}
-		}
-		const auto device = record
-			? SyncDeviceName(*record)
-			: u"another device"_q;
-		state->undo = UndoInfo{ applied.historyId, device };
 		box->uiShow()->showToast(u"Settings updated from %1."_q.arg(device));
-		prefix = Joined(prefix, u"Settings updated from %1. The previous "
-			"file is in History, and Undo puts it back."_q.arg(device));
+		prefix = Joined(prefix, applied.undoAvailable
+			? u"Settings updated from %1. The previous file is in History, "
+				"and Undo puts it back."_q.arg(device)
+			: (review.local.status == SyncSettingsFileStatus::Absent)
+			? u"Settings updated from %1. This device had no settings.toml "
+				"before, so there is nothing to undo."_q.arg(device)
+			: u"Settings updated from %1. The previous file is in History, "
+				"but it is not valid UTF-8 text, so Undo cannot put it "
+				"back."_q.arg(device));
 	}
 	const auto choosing = (review.plan.verdict == ConfigSyncVerdict::Choose)
 		|| (review.plan.verdict == ConfigSyncVerdict::Conflict);
@@ -655,7 +664,9 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 			const auto result = RestoreSyncConfigHistory(
 				undo.historyId,
 				SyncConfigHistoryReason::BeforeUndo);
-			state->undo.reset();
+			if (SyncConfigUndoFinished(result)) {
+				state->undo.reset();
+			}
 			if (result.status == SyncConfigRestoreStatus::Restored) {
 				box->uiShow()->showToast(u"Previous settings are back."_q);
 				ReviewAgain(*state, u"Your previous settings are back on this "
