@@ -35,6 +35,7 @@ struct SyncConfigPostResult {
 
 [[nodiscard]] SyncConfigSendQueue SyncConfigSendQueueOf(
 	not_null<Main::Session*> session);
+[[nodiscard]] uint64_t SyncConfigPostsStarted();
 
 class SyncConfigPost final : public base::has_weak_ptr {
 public:

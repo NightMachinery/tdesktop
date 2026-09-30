@@ -203,15 +203,18 @@ publisher from listening: the upload and `messages.sendMedia` stay in the
 session's send queue and go out when the connection or upload queue allows,
 for as long as the app runs. A check in the meantime reads Saved Messages from
 the server, cannot see the queued message, still finds the stage and offers
-Finish sending. So desktop asks the session's data layer whether Saved
-Messages holds a local item the server has not confirmed yet, still sending or
-marked failed, whose document is named `Purple settings sync.json`
-(`SyncConfigSendQueueOf`, which walks `History::clientSideMessages()` of the
+Finish sending. So desktop asks whether a copy may still be on its way
+(`SyncConfigSendQueueOf`): whether a sync post this app started has not had
+its send receipt yet, and whether Saved Messages holds a local item the server
+has not confirmed yet, still sending or marked failed, whose document is named
+`Purple settings sync.json` (it walks `History::clientSideMessages()` of the
 self chat). It asks twice: when the click's check starts scanning Saved
 Messages, just before the first history page is requested, and again when the
-publisher plans the post. Core's `PlanSyncConfigPost` receives HoldsSyncRecord
-if either answer held a copy, and then returns StillSending instead of posting
-the staged bytes again.
+publisher plans the post. The check also records how many sync posts this app
+has started (`SyncConfigPostsStarted`), and the publisher compares that count
+when it plans. Core's `PlanSyncConfigPost` receives HoldsSyncRecord if either
+answer held a copy or the count moved, and then returns StillSending instead
+of posting the staged bytes again.
 
 The first read closes a race that Android acceptance hit live. A copy that
 Telegram delivers during the scan lands above history pages that were already
@@ -219,8 +222,12 @@ read, so the inventory lacks it, and it has left the queue by the time the post
 is planned. A single late read then sees neither the record nor the queued
 copy, and Finish sending posts a byte-equal duplicate. On desktop the window is
 wider than on Android, because the confirmation dialog sits between the check
-and the plan. The read at the scan start sees the copy while it is still
-queued; the read at planning catches anything queued after that.
+and the plan. The read at the scan start sees a copy that is on its way when
+the scan begins. A copy posted during the scan, by a second Sync box in another
+window, can arrive and leave the queue before the plan, so neither read sees
+it; the count catches it, because that post started after the scan began. The
+count covers every sync post in this app, on any account, so a post on another
+account during the scan only asks for one more check.
 
 The box says that an earlier copy is still being sent, or failed, in
 Saved Messages, and asks the person to wait until it arrives and check again,
@@ -237,20 +244,22 @@ until the person deletes it, which clears the refusal, or resends it from the
 chat, which ends like any other arrival. A file of that name sent by hand is
 refused the same way, which only delays the post.
 
-Two narrow gaps remain. `sendFiles` prepares the document on the file loader
-queue before `Api::SendConfirmedFile` creates the local item, so during that
-preparation, normally milliseconds for a record under 256 KiB but longer when
-large files wait ahead of it in the same queue, the post is in flight and not
-yet in the list. Quitting the app still closes the window: tdesktop does not
-keep unsent media sends across a restart, so a copy either reached the server
-before the quit, where the next check finds and confirms it, or is gone, and
-Finish sending then posts it once. Both points are read from the code, not
-observed live. If two copies arrive anyway, Saved Messages holds two
-byte-identical records at one sequence; the own-record reconcile lists the
+The posts still waiting for a receipt cover the step before a post reaches the
+list. `sendFiles` prepares the document on the file loader queue before
+`Api::SendConfirmedFile` creates the local item, normally within milliseconds
+for a record under 256 KiB but later when large files wait ahead of it in the
+same queue. A post counts as waiting from just before `sendFiles` until its
+receipt arrives, which happens once the server has the message, or without an
+id when the send fails or is dropped. Quitting the app also closes the window:
+tdesktop does not keep unsent media sends across a restart, so a copy either
+reached the server before the quit, where the next check finds and confirms it,
+or is gone, and Finish sending then posts it once. Both points are read from
+the code, not observed live. If two copies arrive anyway, Saved Messages holds
+two byte-identical records at one sequence; the own-record reconcile lists the
 later one as a duplicate and every decision stays the same, so the cost is a
 redundant message that every later check downloads. Android applies the same
-core rule; its queue query reads Telegram's local message table for unsent
-and failed copies of the record, which on Android survive a restart.
+core rule; its queue query reads Telegram's local message table for unsent and
+failed copies of the record, which on Android survive a restart.
 
 The desktop setup box runs this inventory against one signed-in account,
 shows scan progress, and passes a complete result to the review step described

@@ -31,6 +31,9 @@ namespace {
 
 constexpr auto kMaximumStagedBytes = 256 * 1024;
 
+uint64_t PostsStarted = 0;
+int PostsInFlight = 0;
+
 [[nodiscard]] bool ValidStagedRecord(const QByteArray &staged) {
 	if (staged.isEmpty() || staged.size() > kMaximumStagedBytes) {
 		return false;
@@ -58,6 +61,9 @@ constexpr auto kMaximumStagedBytes = 256 * 1024;
 
 SyncConfigSendQueue SyncConfigSendQueueOf(
 		not_null<Main::Session*> session) {
+	if (PostsInFlight > 0) {
+		return SyncConfigSendQueue::HoldsSyncRecord;
+	}
 	const auto history = session->data().historyLoaded(session->userPeerId());
 	if (!history) {
 		return SyncConfigSendQueue::Empty;
@@ -68,6 +74,10 @@ SyncConfigSendQueue SyncConfigSendQueueOf(
 		}
 	}
 	return SyncConfigSendQueue::Empty;
+}
+
+uint64_t SyncConfigPostsStarted() {
+	return PostsStarted;
 }
 
 SyncConfigPost::SyncConfigPost(
@@ -111,12 +121,15 @@ void SyncConfigPost::Start() {
 	action.clearDraft = false;
 	const auto weak = base::make_weak(this);
 	_posted = true;
+	++PostsStarted;
+	++PostsInFlight;
 	_session->api().sendFiles(
 		std::move(list),
 		SendMediaType::File,
 		nullptr,
 		action,
 		[weak](std::optional<MsgId> messageId) {
+			--PostsInFlight;
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->OnReceipt(messageId);
 			}
