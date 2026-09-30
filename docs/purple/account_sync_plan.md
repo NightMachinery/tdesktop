@@ -7,10 +7,12 @@ next step: publish the first record, join a device with the same file, review
 and apply an update, choose between diverged versions, publish local changes,
 or finish an earlier post. Every step runs only when clicked, and every post
 follows a fresh check and a confirmation with the cloud disclosure. Replaced
-files go to a local History with Restore and Undo. Background checks,
-automatic publish, edit in place, retirement of superseded records, the
-Android UI and live verification remain. The existing manual Send/Import
-actions remain available.
+files go to a local History with Restore and Undo. Android has the same
+manual flow under Settings → Purple → **Sync across devices**, decided by the
+same purple-core code. Background checks, automatic publish, edit in place,
+retirement of superseded records, and live verification, including a
+cross-client test between desktop and Android, remain. The existing manual
+Send/Import actions remain available.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -44,7 +46,7 @@ before sending. A later discovered duplicate, including one from a previous
 sync space, can enter the ledger only when its complete record matches an
 issued pair and the install and creating device match. An unlogged old record
 cannot be retired. Android's JNI bridge returns the issued pair together with
-the reserved config state; Android does not call an account-backed publisher.
+the reserved config state, and Android's manual publisher stages through it.
 Shared core now also has an uncalled pure publish planner for one stream. Given
 binding, completed discovery, own-record observations, a staged record, and
 per-stream policy, it chooses wait, reconcile, stage, edit, post, or an older
@@ -206,8 +208,9 @@ Finish sending then posts it once. Both points are read from the code, not
 observed live. If two copies arrive anyway, Saved Messages holds two
 byte-identical records at one sequence; the own-record reconcile lists the
 later one as a duplicate and every decision stays the same, so the cost is a
-redundant message that every later check downloads. The Android port is to
-adopt the same core rule with its own queue query.
+redundant message that every later check downloads. Android applies the same
+core rule; its queue query reads Telegram's local message table for unsent
+and failed copies of the record, which on Android survive a restart.
 
 The desktop setup box runs this inventory against one signed-in account,
 shows scan progress, and passes a complete result to the review step described
@@ -241,6 +244,12 @@ and the first four characters of the install ID after the `in-` prefix.
 Which sentence and action a review deserves, the choices the review box offers
 and how a failed apply is worded come from purple-core's
 `purple_sync_config_describe`; desktop keeps only the English text.
+Android's Sync across devices screen follows the same verdict-to-action rules
+and the same English, kept in `strings.xml`. It has no account list: it checks
+the account the Purple settings screen belongs to and names it at the top, so
+syncing another account means switching to it in Telegram first. Its update
+notice is a bulletin with an Undo button, beside the same Undo last update
+row, and closing the screen cancels a check as closing the box does.
 The local setup operation creates an install identity and account binding only
 after a complete, unambiguous scan. It reuses the selected existing space or
 creates a time-ordered space ID when the account has none. An existing local
@@ -259,18 +268,21 @@ wrote the file, including one whose state commit failed, unless the saved copy
 records a missing file or is not valid UTF-8 text. A failed Undo keeps the row
 unless the copy is gone or can never be restored. The future
 transport engine must reconcile the install's own remote record for clone or
-rewind signals before any publish. Android's uncalled bridge can initialize
+rewind signals before any publish. Android's bridge can initialize
 canonical local state bound to the active Telegram user in its account slot,
 reserve a canonical own config record with its pending version key, and
 confirm an exact staged server read-back. It can record and check own message
 IDs for cleanup.
 It validates the record's space, install and device identity. The binding token
 is saved synchronously in a per-user account preference; reservation refuses a
-missing or mismatched token. An uncalled Android store now persists canonical
-state and exact staged config bytes under app-private `purple/sync`, holding an
+missing or mismatched token. An Android store persists canonical state and
+exact staged config bytes under app-private `purple/sync`, holding an
 exclusive lock and pausing on ambiguous or mismatched recovery files. It
 confirms only an exact server read-back before clearing a validated stage.
-Android network transport and the account-sync interface remain to be built.
+Android's Telegram transport, its join, apply and publish executors and the
+Sync across devices screen drive these for one account at a time; the Android
+repository's `docs/account-sync-store.md` and `docs/account-sync-transport.md`
+describe them.
 
 Desktop has a settings History store for the update, choice, restore, and
 undo actions. Each entry keeps the exact `settings.toml`
@@ -447,7 +459,8 @@ Each platform supplies 16 secure random bytes for an install ID. For a new
 sync-space ID it supplies a server-time estimate in milliseconds and 10 secure
 random bytes; shared core formats the same lowercase base32 IDs on both
 platforms and compares decoded space IDs in immutable creation order. Android
-exposes these helpers through JNI, but no runtime setup path calls them yet.
+exposes these helpers through JNI; joining sync on Android calls the space ID
+formatter, and nothing calls the comparison yet.
 An install publishes its own versioned JSON document for each stream: `config` for
 `settings.toml`, and later `library` for playlists. No other install edits that
 record. First setup pages through the chosen account's complete Saved Messages
