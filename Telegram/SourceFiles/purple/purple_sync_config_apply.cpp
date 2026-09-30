@@ -62,10 +62,6 @@ struct VerifiedWrite {
 		&& HeadKeys(a.same) == HeadKeys(b.same);
 }
 
-[[nodiscard]] bool ExactUtf8(const QByteArray &bytes) {
-	return QString::fromUtf8(bytes).toUtf8() == bytes;
-}
-
 [[nodiscard]] QString KeyFingerprint(const QString &key) {
 	const auto parsed = ParseConfigVersionKey(key);
 	return parsed ? parsed->fingerprint : QString();
@@ -98,9 +94,11 @@ struct VerifiedWrite {
 		const QString &fingerprint,
 		SyncConfigHistoryReason reason,
 		const QString &label,
-		const QString &versionKey) {
+		const QString &versionKey,
+		const QString &keepId = QString()) {
 	auto result = VerifiedWrite();
-	if (SettingsFingerprint(text) != fingerprint || !ExactUtf8(text)) {
+	if (SettingsFingerprint(text) != fingerprint
+		|| !SyncSettingsTextWritable(text)) {
 		return result;
 	}
 	const auto saved = SaveSyncConfigHistory(
@@ -109,7 +107,8 @@ struct VerifiedWrite {
 			: std::nullopt),
 		reason,
 		label,
-		versionKey);
+		versionKey,
+		keepId);
 	if (!saved) {
 		result.status = SyncConfigApplyStatus::HistoryError;
 		return result;
@@ -164,6 +163,10 @@ void ProposeNextPublish(
 }
 
 } // namespace
+
+bool SyncSettingsTextWritable(const QByteArray &bytes) {
+	return QString::fromUtf8(bytes).toUtf8() == bytes;
+}
 
 SyncConfigApplyResult ApplySyncConfigChoice(
 		Main::Account &account,
@@ -351,6 +354,9 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 	const auto text = ReadSyncConfigHistory(id);
 	if (!text || SettingsFingerprint(*text) != entry->fingerprint) {
 		return result;
+	} else if (!SyncSettingsTextWritable(*text)) {
+		result.status = SyncConfigRestoreStatus::NotText;
+		return result;
 	}
 	const auto local = ReadSyncSettingsFile(SettingsFilePath());
 	if (local.status == SyncSettingsFileStatus::Invalid) {
@@ -368,7 +374,8 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		entry->fingerprint,
 		reason,
 		HistoryLabel(*entry, reason),
-		QString());
+		QString(),
+		id);
 	result.historyId = write.historyId;
 	switch (write.status) {
 	case SyncConfigApplyStatus::Applied:

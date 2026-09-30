@@ -278,7 +278,7 @@ void Discard(const QString &directory, const QString &id) {
 	}
 }
 
-void Prune(const QString &directory, const QString &keep) {
+void Prune(const QString &directory, const QSet<QString> &keep) {
 	const auto names = EntryNames(directory);
 	auto valid = std::vector<SyncConfigHistoryEntry>();
 	for (const auto &id : EntryIds(names)) {
@@ -287,10 +287,17 @@ void Prune(const QString &directory, const QString &keep) {
 		}
 	}
 	SortNewestFirst(valid);
-	auto kept = QSet<QString>{ keep };
 	auto validIds = QSet<QString>();
 	for (const auto &entry : valid) {
 		validIds.insert(entry.id);
+	}
+	auto kept = QSet<QString>();
+	for (const auto &id : keep) {
+		if (validIds.contains(id)) {
+			kept.insert(id);
+		}
+	}
+	for (const auto &entry : valid) {
 		if (kept.size() < kHistoryLimit) {
 			kept.insert(entry.id);
 		}
@@ -323,7 +330,8 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 		const std::optional<QByteArray> &text,
 		SyncConfigHistoryReason reason,
 		const QString &label,
-		const QString &versionKey) {
+		const QString &versionKey,
+		const QString &keepId) {
 	const auto bytes = text.value_or(QByteArray());
 	if (bytes.size() > kMaximumTextBytes
 		|| ReasonName(reason).isEmpty()
@@ -374,7 +382,11 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 		Discard(directory, id);
 		return std::nullopt;
 	}
-	Prune(directory, id);
+	auto keep = QSet<QString>{ id };
+	if (!keepId.isEmpty()) {
+		keep.insert(keepId);
+	}
+	Prune(directory, keep);
 	return saved->entry;
 }
 

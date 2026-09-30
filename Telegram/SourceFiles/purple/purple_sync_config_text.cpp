@@ -509,6 +509,9 @@ QString SyncConfigRestoreText(
 	case SyncConfigRestoreStatus::FileDidNotExist:
 		return u"That entry records that settings.toml did not exist, so "
 			"there is nothing to restore."_q;
+	case SyncConfigRestoreStatus::NotText:
+		return u"That copy is not valid UTF-8 text, so it cannot be restored "
+			"here. Nothing was changed."_q;
 	case SyncConfigRestoreStatus::InvalidReason:
 		return u"That restore is not allowed. Nothing was changed."_q;
 	case SyncConfigRestoreStatus::InvalidSettings:

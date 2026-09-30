@@ -226,7 +226,9 @@ reader accepts an entry only when both files exist, the metadata parses, and
 the bytes match the recorded fingerprint. After a new entry is fully written,
 the store keeps the newest 30 valid entries, deletes older ones and invalid
 leftovers older than those 30, and never deletes anything outside that
-directory. Only the apply and restore steps below write to it, and
+directory. A save can name one more entry to keep for that pruning pass;
+Restore and Undo name their target, so pruning never removes it before its
+bytes are written back. Only the apply and restore steps below write to it, and
 the manual import still keeps its single `settings.toml.bak`.
 
 The desktop local store can also commit new config data without staging a
@@ -299,7 +301,9 @@ the version from <time>" or "Before undo to the version from <time>", writes
 the entry, reads it back and checks the fingerprint. It changes no sync
 state, so the next check reports local changes. An entry recorded for a
 missing file is refused, because restoring it would mean deleting
-`settings.toml`.
+`settings.toml`. An entry whose bytes are not valid UTF-8 is refused before
+anything is saved or written, because the settings writer takes text and
+could not reproduce them exactly.
 
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
