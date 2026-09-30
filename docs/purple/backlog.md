@@ -69,8 +69,24 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   message id. The signed `8b07614c` APK upgraded the retained test account
   and was delivered privately on 2026-09-29. The desktop change passed a full
   optimized build and isolated launch but is not in the installed app yet.
-  Import-backup and 4 MiB boundaries, persistent incoming offers, and
-  playlists remain open. Android source `4881e7c0`
+  An emulator run on 2026-09-30, on the installed `b0bd74c7` build, verified
+  the Android import backup: an import keeps the exact previous bytes in
+  `settings.toml.import.bak`, a second import replaces them, an editor save
+  leaves them alone, and an import that cannot write that backup stops with
+  `settings.toml` unchanged. The same run verified the size limits. Exactly
+  4 MiB is accepted and 4 MiB + 1 refused by the editor's save and by import,
+  both from a file and from Saved Messages, where a larger `settings.toml`
+  gets no Import button and no launch offer. The Sync across devices check
+  calls a file over 256 KiB unusable and accepts one of exactly 256 KiB.
+  The run also found that Import from a file failed with a permission error
+  for a file another app had put in Download when it was picked through the
+  device's storage root. Android `1c54ff47` reads such a file through the
+  picker's grant and deletes the temporary copy afterwards (the old code also
+  left every picked copy in the external cache). It still needs a signed
+  build and a live check. A minor finding stays open: an import that fails
+  on the import backup has already refreshed `settings.toml.bak` with the
+  current file. Persistent incoming offers and playlists remain open.
+  Android source `4881e7c0`
   restores Purple's receipt callback when Telegram retries a failed settings
   document from Purple's staging directory in Saved Messages. A live emulator test
   on 2026-09-30 found that Telegram's automatic resend at app start, after the
@@ -98,7 +114,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   notification while passcode-locked. These fixes are included in the signed
   Android APK from source `32c1ee0c`, which installed and launched with the
   test account intact. The notification privacy paths still need runtime
-  checks.
+  checks, and those need an inbound message from another account or a bot.
+  The 2026-09-30 emulator run sent none, so they wait for an approved
+  message source. The check reads each posted notification's title, text and
+  messaging-style lines from `dumpsys notification --noredact`.
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
@@ -125,8 +144,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   row jump, plus a chat-menu shortcut to that chat's storage sheet. The signed
   test build passed emulator checks including a filtered jump into older
   history. The final signed APK was built from clean `8818448c`, installed
-  without losing the test account, and delivered privately. Migrated-group
-  and forum-topic jumps still need a suitable test account. The desktop
+  without losing the test account, and delivered privately. An emulator run
+  on 2026-09-30, on the installed `b0bd74c7` build and in groups whose only
+  member is the test account, verified the migrated-group and forum-topic
+  cases. In a basic group migrated to a supergroup, the action found the pins
+  in both the old and the new peer, and each file-list row jumped to its own
+  message in either peer. In a forum topic, the pinned search and the neighbor
+  search both stayed inside the topic, and row jumps landed in the topic.
+  The desktop
   change is installed in the daily-use app and passed a launch smoke test, but
   its menu and cache behavior still need runtime verification.
   See [pinned_music.md](pinned_music.md).
@@ -146,7 +171,12 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   when the setting changes and journals the original privacy rules before a
   Peek, then verifies their restoration after the deadline or reconnection.
   The signed APK from source `32c1ee0c` installs and launches, but eligible
-  Peek and restoration behavior remain unverified on a live contact. Desktop
+  Peek and restoration behavior remain unverified on a live contact. A check
+  on 2026-09-30 found the test account's only contact shows "last seen
+  recently" without the by-me mark. That status is coarse by the contact's
+  own rules, so the contact is not peekable. The test account's own Last Seen
+  rule is Nobody. Reaching Peek needs a second disposable account, added as a
+  contact, whose own Last Seen rule shows it to the test account. Desktop
   source `c894b72c07` similarly journals and verifies its privacy restoration.
   Its optimized app built and installed successfully. An unsandboxed launch
   with a disposable workdir reached normal startup with Debug off. A separate
@@ -158,7 +188,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   shows “Visible or peekable last seen” in Contacts More. Turning it on showed
   the active-filter empty state, and turning it off restored the same contact.
   The test account had no eligible contact, so inclusion of a visible or
-  peekable person still needs runtime verification.
+  peekable person still needs runtime verification. A repeat on the
+  `b0bd74c7` build on 2026-09-30 gave the same result. The second disposable
+  contact that would reach Peek (above) reaches this filter too.
 
 ## Verified
 

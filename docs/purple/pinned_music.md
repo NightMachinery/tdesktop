@@ -98,7 +98,8 @@ case loaded older history while the chat was showing recent messages. Tapping
 Play stayed in the list, and jumping during playback kept the song playing.
 No fatal exception appeared in logcat. Per-row Retry was not repeated for this
 UI change; the earlier controlled missing-file test covered the unchanged
-transfer engine. Migrated-group and forum-topic jumps still lack live QA.
+transfer engine. Migrated-group and forum-topic jumps were verified later;
+see the next section.
 
 The final signed arm64 APK was rebuilt from clean Android commit `8818448c`,
 verified with the release signing certificate, and installed over the test
@@ -107,6 +108,48 @@ prompt. The emulator's pixel capture was black during this last smoke test,
 so that check used Android's UI hierarchy; the interaction checks above were
 visually observed on the signed test build of the same source patch. The final
 APK was delivered privately on 2026-09-29.
+
+## Migrated groups and forum topics (Android, 2026-09-30)
+
+These checks ran on the laptop emulator with the installed build from Android
+source `b0bd74c7`. They used two new groups whose only member is the test
+account and short sine-tone MP3s generated locally, each tagged with a title
+and an artist so Telegram files it as music.
+
+**Migrated group.** Four songs were posted in a basic group and two of them
+pinned. The group was then upgraded to a supergroup through Edit, Chat
+History, Visible, which calls `messages.migrateChat`. Three more songs were
+posted in the new supergroup, and one of them was pinned.
+
+- With 0 songs before and 0 after, the action selected **3 of 3**: both pins
+  from the old peer and the one from the new peer. It searched the pinned
+  messages of the new peer and then of the old one, two pages each.
+- With the defaults (one before, one after), it selected **7 of 7**: every song
+  in both peers.
+- Filler text messages pushed the songs off screen. Tapping each file-list row
+  then scrolled the chat to that song and highlighted it. This held for both
+  old-peer pins and for the new-peer pin, so rows jump to the correct peer.
+
+**Forum topics.** A second basic group became a forum supergroup when Topics
+was enabled, which also migrates it. Two topics were created, and the General
+topic was kept.
+
+- Telegram's server pins the first message of a newly created topic
+  automatically. So in each topic, the first song counted as pinned even
+  though nobody pinned it by hand. This is Telegram behavior, not a Purple
+  one.
+- **Topic A** held that auto-pinned song plus one song pinned by hand. **Topic
+  B** held its own auto-pinned song, and **General** held one pinned song.
+- In topic A, the action selected **2 of 2** with 0 and 0, and **3 of 3** with
+  the defaults: only topic A's songs. Songs pinned or posted in topic B and in
+  General were left out, even though they sit next to topic A's songs in the
+  channel's message order.
+- In topic B, the action selected **1 of 1**.
+- Row jumps from topic A's list stayed in topic A. They scrolled past filler
+  messages and highlighted the song.
+
+The evidence is outside the repository, with the verification brief's result
+file.
 
 The Android selection follows Telegram's `isMusic` classification. It includes
 documents with non-voice audio attributes and MIME fallbacks for FLAC, OGG and
