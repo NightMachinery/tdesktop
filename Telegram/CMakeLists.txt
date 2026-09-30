@@ -1779,6 +1779,8 @@ PRIVATE
     purple/purple_sync_config_publish.h
     purple/purple_sync_config_review.cpp
     purple/purple_sync_config_review.h
+    purple/purple_sync_config_text.cpp
+    purple/purple_sync_config_text.h
     purple/purple_sync_history_page.h
     purple/purple_sync_history_scanner.cpp
     purple/purple_sync_history_scanner.h
@@ -1786,6 +1788,8 @@ PRIVATE
     purple/purple_sync_local_store.h
     purple/purple_sync_own_inventory.cpp
     purple/purple_sync_own_inventory.h
+    purple/purple_sync_review_box.cpp
+    purple/purple_sync_review_box.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
     settings/business/settings_away_message.cpp
