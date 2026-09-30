@@ -189,8 +189,8 @@ void SyncConfigPublish::Start() {
 		.space = state->space,
 		.install = state->install,
 		.device = state->createdDevice,
-		.platform = u"macOS"_q,
-		.app = u"Purple Telegram Desktop"_q,
+		.platform = SyncWriterPlatform(),
+		.app = SyncWriterApp(),
 		.seq = state->config.seq + 1,
 		.at = uint64_t(now),
 	});

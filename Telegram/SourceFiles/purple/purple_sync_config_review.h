@@ -107,6 +107,8 @@ struct SyncConfigPublishGate {
 	const QString &install);
 [[nodiscard]] QString SyncDeviceName(const SyncConfigHeadRecord &record);
 [[nodiscard]] QString SyncMomentText(const QDateTime &when);
+[[nodiscard]] QString SyncWriterPlatform();
+[[nodiscard]] QString SyncWriterApp();
 
 [[nodiscard]] SyncSettingsFile ReadSyncSettingsFile(const QString &path);
 [[nodiscard]] bool SameSyncSettingsFile(

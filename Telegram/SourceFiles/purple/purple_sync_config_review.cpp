@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_review.h"
 
+#include "base/platform/base_platform_info.h"
 #include "purple/purple_config.h"
 #include "purple/purple_config_payload.h"
 #include "purple/purple_state.h"
@@ -87,6 +88,18 @@ QString SyncDeviceName(const SyncConfigHeadRecord &record) {
 
 QString SyncMomentText(const QDateTime &when) {
 	return when.toLocalTime().toString(u"yyyy-MM-dd HH:mm"_q);
+}
+
+QString SyncWriterPlatform() {
+	return Platform::IsWindows()
+		? u"Windows"_q
+		: Platform::IsMac()
+		? u"macOS"_q
+		: u"Linux"_q;
+}
+
+QString SyncWriterApp() {
+	return u"Purple Telegram Desktop"_q;
 }
 
 SyncSettingsFile ReadSyncSettingsFile(const QString &path) {

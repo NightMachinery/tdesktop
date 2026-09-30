@@ -143,8 +143,8 @@ bool SyncSettingsPublishable(const SyncSettingsFile &file) {
 		.space = *space,
 		.install = *install,
 		.device = u"desktop:"_q + *install,
-		.platform = u"macOS"_q,
-		.app = u"Purple Telegram Desktop"_q,
+		.platform = SyncWriterPlatform(),
+		.app = SyncWriterApp(),
 		.seq = 1,
 		.at = 1,
 	});
