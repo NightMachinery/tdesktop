@@ -12,42 +12,36 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 
 namespace Purple {
-namespace {
 
-constexpr auto kHistoryPageSize = 100;
-
-} // namespace
-
-bool IsSyncHistoryCandidate(const MTPMessage &message) {
+SyncHistoryMessageMeta SyncHistoryMessageMetaOf(const MTPMessage &message) {
+	auto result = SyncHistoryMessageMeta();
 	if (message.type() != mtpc_message) {
-		return false;
+		return result;
 	}
+	result.isMessage = true;
 	const auto &data = message.c_message();
-	if (data.vfwd_from()) {
-		return false;
-	}
+	result.forwarded = static_cast<bool>(data.vfwd_from());
+	result.caption = qs(data.vmessage());
 	const auto media = data.vmedia();
 	if (!media || media->type() != mtpc_messageMediaDocument) {
-		return false;
+		return result;
 	}
 	const auto document = media->c_messageMediaDocument().vdocument();
 	if (!document || document->type() != mtpc_document) {
-		return false;
+		return result;
 	}
-	if (qs(data.vmessage()).contains(u"#purplesync"_q)) {
-		return true;
-	}
+	result.isDocument = true;
 	for (const auto &attribute : document->c_document().vattributes().v) {
-		if (attribute.type() != mtpc_documentAttributeFilename) {
-			continue;
-		}
-		const auto name = qs(attribute.c_documentAttributeFilename().vfile_name());
-		if (name == u"Purple settings sync.json"_q
-			|| name == u"Purple playlists sync.json"_q) {
-			return true;
+		if (attribute.type() == mtpc_documentAttributeFilename) {
+			result.fileNames.push_back(
+				qs(attribute.c_documentAttributeFilename().vfile_name()));
 		}
 	}
-	return false;
+	return result;
+}
+
+bool IsSyncHistoryCandidate(const MTPMessage &message) {
+	return IsSyncHistoryCandidate(SyncHistoryMessageMetaOf(message));
 }
 
 SyncHistoryScanner::SyncHistoryScanner(
@@ -91,7 +85,7 @@ void SyncHistoryScanner::RequestNext() {
 		MTP_int(_pages.offset()),
 		MTP_int(0),
 		MTP_int(0),
-		MTP_int(kHistoryPageSize),
+		MTP_int(kSyncHistoryPageSize),
 		MTP_int(0),
 		MTP_int(0),
 		MTP_long(0)

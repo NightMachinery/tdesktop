@@ -79,16 +79,16 @@ including a missing current device identity, has a distinct verdict.
 The desktop store latches that verdict and refuses further staging until a
 fresh open and reconciliation. `QSaveFile` protects final files from partial
 writes after a process crash; it does not promise persistence through power
-loss. Desktop also has an uncalled Saved Messages history scanner. It pages
+loss. Desktop also has a Saved Messages history scanner. It pages
 `messages.getHistory` to an empty result, reports progress, and only returns
 candidate message IDs after a complete scan. Cancellation, request failure,
 invalid responses, and stalled pagination remain incomplete. A separate
-uncalled reader re-reads each candidate by ID, checks that it is still an
+reader re-reads each candidate by ID, checks that it is still an
 original document in Saved Messages, caps its download at 4 MiB, and classifies
 the record envelope and config payload. Missing, changed, oversized, newer,
 invalid, or inaccessible candidates stay visible as unresolved results; they
-cannot establish that the account has no sync group. An uncalled inventory
-coordinator now joins the two operations for one explicitly selected account:
+cannot establish that the account has no sync group. An inventory
+coordinator joins the two operations for one explicitly selected account:
 it returns Complete only after both the full scan and every candidate read
 complete. An incomplete scan never starts candidate reading. The reader can
 populate Telegram's local download cache, but sends and deletes nothing.
@@ -101,6 +101,11 @@ holds only such records is never treated as empty; the settings review ignores
 streams other than `config`. Identity-encoded library envelopes are also
 header-only until a playlist payload validator exists. Newer-major and invalid
 candidates still require review before the client can make a group decision.
+The rules in this paragraph (the candidate test, the page rule, record
+classification, the read and inventory statuses, the directory candidates)
+live in purple-core's `purple_sync_inventory` so the Android client decides
+them identically; desktop keeps only the Telegram requests, the download and
+the progress and cancel handling.
 
 The read-only desktop inventory now resolves completed candidate reads into
 per-space, per-stream, per-install heads. Equal-sequence conflicting records
@@ -114,8 +119,9 @@ only when the server document matches the staged bytes exactly. A missing send
 receipt or failed read-back remains uncertain and must be reconciled against
 history before any retry. A changed or mismatched document needs review. The
 adapter does not reserve local state, retry, enable sync, or post on its own.
-An uncalled own-config inventory matcher now checks a completed scan against
-the install's local state. It rejects a different account, an unsafe space,
+An own-config inventory matcher (`ReconcileOwnConfigInventory`, also in
+purple-core's `purple_sync_inventory`) checks a completed scan against the
+install's local state. It rejects a different account, an unsafe space,
 wrong device identity, noncanonical own records, divergent records at one
 sequence, and a staged record whose full hash is absent from the issued log.
 It reports the highest own head and any exact pending record already found in

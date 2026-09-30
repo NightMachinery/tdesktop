@@ -7,11 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "purple/purple_sync_history_page.h"
 #include "base/weak_ptr.h"
 #include "mtproto/sender.h"
-
-#include <QtCore/QString>
+#include "purple/purple_sync_inventory.h"
 
 namespace Main {
 class Session;
@@ -19,26 +17,9 @@ class Session;
 
 namespace Purple {
 
+[[nodiscard]] SyncHistoryMessageMeta SyncHistoryMessageMetaOf(
+	const MTPMessage &message);
 [[nodiscard]] bool IsSyncHistoryCandidate(const MTPMessage &message);
-
-enum class SyncHistoryScanStatus {
-	Complete,
-	Cancelled,
-	RequestFailed,
-	InvalidResponse,
-	Stalled,
-};
-
-struct SyncHistoryScanResult {
-	SyncHistoryScanStatus status = SyncHistoryScanStatus::InvalidResponse;
-	std::vector<int32_t> candidateIds;
-	uint64_t scannedCount = 0;
-	QString error;
-
-	[[nodiscard]] bool complete() const {
-		return status == SyncHistoryScanStatus::Complete;
-	}
-};
 
 class SyncHistoryScanner final : public base::has_weak_ptr {
 public:

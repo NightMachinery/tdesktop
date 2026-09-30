@@ -9,9 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/weak_ptr.h"
 #include "mtproto/sender.h"
-#include "purple/purple_config_payload.h"
-
-#include <QtCore/QByteArray>
+#include "purple/purple_sync_inventory.h"
 
 #include <memory>
 #include <optional>
@@ -29,48 +27,6 @@ class Session;
 }
 
 namespace Purple {
-
-enum class SyncCandidateStatus {
-	Valid,
-	NewerSchema,
-	NewerMajor,
-	UnsupportedStream,
-	UnsupportedEncoding,
-	UnsupportedLibrary,
-	Invalid,
-	Vanished,
-	Changed,
-	Oversized,
-	Inaccessible,
-	RequestFailed,
-	Cancelled,
-};
-
-struct SyncCandidateRecord {
-	int32_t id = 0;
-	SyncCandidateStatus status = SyncCandidateStatus::Invalid;
-	QByteArray bytes;
-	std::optional<SyncEnvelopeHeader> header;
-	SyncEnvelopeError envelopeError = SyncEnvelopeError::None;
-	ConfigPayloadError configError = ConfigPayloadError::None;
-	uint64_t documentId = 0;
-	uint64_t editDate = 0;
-};
-
-enum class SyncCandidateReadStatus {
-	Complete,
-	NeedsReview,
-	Incomplete,
-};
-
-struct SyncCandidateReadResult {
-	SyncCandidateReadStatus status = SyncCandidateReadStatus::Incomplete;
-	std::vector<SyncCandidateRecord> records;
-
-	[[nodiscard]] bool complete() const {
-		return status == SyncCandidateReadStatus::Complete;
-	}
-};
 
 class SyncCandidateReader final : public base::has_weak_ptr {
 public:
@@ -91,7 +47,7 @@ private:
 	void ResolveDocument(not_null<DocumentData*> document);
 	void CheckDownload();
 	void CompleteCurrent(SyncCandidateRecord record);
-	void Finish();
+	void Finish(SyncCandidateReadStatus status);
 
 	not_null<Main::Session*> _session;
 	MTP::Sender _api;

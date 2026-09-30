@@ -1781,13 +1781,10 @@ PRIVATE
     purple/purple_sync_config_review.h
     purple/purple_sync_config_text.cpp
     purple/purple_sync_config_text.h
-    purple/purple_sync_history_page.h
     purple/purple_sync_history_scanner.cpp
     purple/purple_sync_history_scanner.h
     purple/purple_sync_local_store.cpp
     purple/purple_sync_local_store.h
-    purple/purple_sync_own_inventory.cpp
-    purple/purple_sync_own_inventory.h
     purple/purple_sync_review_box.cpp
     purple/purple_sync_review_box.h
     purple/purple_sync_setup_box.cpp
@@ -2175,6 +2172,8 @@ PRIVATE
     purple/purple_sync_envelope.h
     purple/purple_sync_directory.cpp
     purple/purple_sync_directory.h
+    purple/purple_sync_inventory.cpp
+    purple/purple_sync_inventory.h
     purple/purple_sync_json.cpp
     purple/purple_sync_json.h
     purple/purple_sync_local_state.cpp

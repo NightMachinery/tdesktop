@@ -11,8 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_account_inventory.h"
 #include "purple/purple_sync_config_post.h"
 #include "purple/purple_sync_config_review.h"
+#include "purple/purple_sync_inventory.h"
 #include "purple/purple_sync_local_store.h"
-#include "purple/purple_sync_own_inventory.h"
 
 #include <memory>
 #include <optional>
