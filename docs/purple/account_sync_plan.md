@@ -1,12 +1,16 @@
 # Account-backed Purple sync proposal
 
-Status: design plus shared-core and client-local foundations. Desktop's
-**Sync across devices** box can inspect one explicitly selected account's Saved
-Messages and, after an empty complete inventory and explicit cloud disclosure
-and confirmation, publish one settings record. It can also resume a prior
-settings post when local binding and cloud space match. Both are manual actions.
-Continuous account-backed sync is not enabled in either client; the existing
-manual Send/Import actions remain available.
+Status: design plus shared-core foundations and a manual desktop settings
+sync. Desktop's **Sync across devices** box checks one explicitly selected
+account's Saved Messages, reviews the settings records there, and offers one
+next step: publish the first record, join a device with the same file, review
+and apply an update, choose between diverged versions, publish local changes,
+or finish an earlier post. Every step runs only when clicked, and every post
+follows a fresh check and a confirmation with the cloud disclosure. Replaced
+files go to a local History with Restore and Undo. Background checks,
+automatic publish, edit in place, retirement of superseded records, the
+Android UI and live verification remain. The existing manual Send/Import
+actions remain available.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -92,8 +96,9 @@ It retains the document ID and edit date alongside each re-read candidate for
 later changed-media checks and opaque-header caching.
 The reader preserves validated space and writer headers for records from future
 streams or encodings while keeping their payload opaque. Such headers count as
-existing sync records rather than unreadable candidates; the setup box reports
-how many this version cannot read. Identity-encoded library envelopes are also
+existing sync records rather than unreadable candidates, so an account that
+holds only such records is never treated as empty; the settings review ignores
+streams other than `config`. Identity-encoded library envelopes are also
 header-only until a playlist payload validator exists. Newer-major and invalid
 candidates still require review before the client can make a group decision.
 
@@ -139,43 +144,52 @@ apply step must run first. A caller can also pass the settings fingerprint it
 reviewed, and the publisher stops when the file has changed since. The record
 carries those parents and the next sequence, is staged with its version key as
 pending, and is posted and confirmed as before. It does not yet retire
-superseded messages. The setup box calls it only after a completed empty
-inventory, a new full inventory on the publish click, local initialization,
-and separate user confirmation. This does not enable continuous
-account-backed sync. The distinct Resume action
-passes the existing local state and a fresh complete inventory directly to the
-publisher; its matcher and planner decide whether an exact cloud record can be
-confirmed, one staged record can be posted, or review is required. It passes
-no expected parents, so with nothing staged it can publish only a first record
-or this device's local changes.
+superseded messages. The setup box starts it in exactly two ways. Finish
+sending passes no request and runs only when a fresh check reports a staged
+post; the matcher and planner then confirm an exact cloud record, post the
+staged record once, or stop for review. Every other post (Publish settings,
+Publish changes, and the share half of Use and share) passes a request with
+the fingerprint and, for a choice, the parents that the fresh plan or the
+apply step expects. There is no standing resume action. This does not enable
+continuous account-backed sync.
 
-The desktop setup box can run this inventory against one signed-in account and
-shows scan progress and the resulting complete, needs-review, or incomplete
-state. With multiple accounts it requires an explicit choice. Each inventory
-result carries the account's numeric user ID, so setup cannot use one account's
-scan to bind another. The box retains only its latest complete, unambiguous
-inventory for the same live account and session when it supports one action.
-Clicking Publish or Resume starts a new full scan; only its safe result can
-open that action's final confirmation. It discards the prior result on a new
-check, cancel, account switch, logout, or box close. First Publish requires an
-empty directory and no existing local sync state. Resume requires a safely
-opened local state with a binding token for the selected account, and either
-the same selected cloud space or an empty directory that can create one. A
-mismatched account or space, invalid local state, or unresolved candidate
-disables Resume. The box cannot join existing records from another install
-yet; the review and apply steps described below can, but nothing calls them.
+The desktop setup box runs this inventory against one signed-in account,
+shows scan progress, and passes a complete result to the review step described
+below. With multiple accounts it requires an explicit choice. Each inventory
+result carries the account's numeric user ID, so setup cannot use one
+account's scan to bind another. The box keeps only its latest review for the
+same live account and session, and discards it on a new check, cancel, account
+switch, logout, or box close; a generation counter drops every confirmation,
+review choice, or apply result that belongs to an older check. The review's
+verdict picks one action. Empty offers Publish settings. Adopt offers Join sync
+on an unlinked device; on a linked one the check adopts silently and reviews
+again. UpdateReady offers Review update, Choose and Conflict offer Choose
+settings, LocalChanges offers Publish changes, and Pending, or a review that
+stops while this device has a staged post, offers Finish sending. Up to date
+reports the number of other devices and the check time. Invalid verdicts and
+every failure are plain text with no action. Publish settings, Publish changes
+and Finish sending start a new full scan on the click, review it again, and
+open the confirmation only when that review still shows the same action;
+otherwise the box reports that nothing was sent. Join sync confirms against
+the check it came from, because the apply step re-extracts the heads and
+re-reads the file. Review update and Choose settings open a review box with the
+source device and time, a summary of up to six changed settings, a newer-schema
+warning, and a Show lines diff. A choice that also publishes scans again
+before the post. While a scan or post runs, the action, Undo and History
+restore are disabled, since those hold the local sync store. Devices are named
+by the record's platform and the first four characters of the install ID after
+the `in-` prefix.
 The local setup operation creates an install identity and account binding only
-after a complete, unambiguous scan. It can reuse a selected existing space or
-create a time-ordered space ID when the account has none, though the current UI
-allows only the empty-space case. An existing local state is never silently
-rebound or moved. A binding preference that has not persisted at a crash leaves
-the state unbound and unable to publish. Confirmation explains that settings
-may include chat IDs and names and that Saved Messages is a Telegram cloud chat
-readable by other signed-in sessions. First Publish then initializes locally
-and starts one post. Resume may reconcile without sending or post one staged
-record if the publisher deems it safe. Both report confirmation, uncertainty,
-review, binding, and store failures without an automatic retry. An uncertain
-outcome requires a new scan before another manual resume. The future
+after a complete, unambiguous scan. It reuses the selected existing space or
+creates a time-ordered space ID when the account has none. An existing local
+state is never silently rebound or moved. A binding preference that has not
+persisted at a crash leaves the state unbound and unable to publish. Every
+confirmation that links or posts explains that settings may include chat IDs
+and names and that Saved Messages is a Telegram cloud chat readable by other
+signed-in sessions, including Join sync, which sends nothing. Results report
+confirmation, uncertainty, review, binding, and store failures without an
+automatic retry. An uncertain outcome requires a new check before anything
+else. The future
 transport engine must reconcile the install's own remote record for clone or
 rewind signals before any publish. Android's uncalled bridge can initialize
 canonical local state bound to the active Telegram user in its account slot,
@@ -190,8 +204,8 @@ exclusive lock and pausing on ambiguous or mismatched recovery files. It
 confirms only an exact server read-back before clearing a validated stage.
 Android network transport and the account-sync interface remain to be built.
 
-Desktop now has an uncalled settings History store for the planned update,
-choice, restore, and undo actions. Each entry keeps the exact `settings.toml`
+Desktop has a settings History store for the update, choice, restore, and
+undo actions. Each entry keeps the exact `settings.toml`
 bytes in `sync/history/` under the Purple config directory, next to a metadata
 file with the creation time, the reason, a short label, the config version key
 when known, and the settings fingerprint of those bytes. The metadata also
@@ -204,7 +218,7 @@ reader accepts an entry only when both files exist, the metadata parses, and
 the bytes match the recorded fingerprint. After a new entry is fully written,
 the store keeps the newest 30 valid entries, deletes older ones and invalid
 leftovers older than those 30, and never deletes anything outside that
-directory. Only the uncalled apply and restore steps below write to it, and
+directory. Only the apply and restore steps below write to it, and
 the manual import still keeps its single `settings.toml.bak`.
 
 The desktop local store can also commit new config data without staging a
@@ -215,9 +229,9 @@ binding token. It refuses while a config record is staged, when the new data
 carries a pending key, and when any `seen_seq` entry would decrease or
 disappear. The whole next state must pass the shared serializer and parser,
 and it is saved with the same atomic state write that staging uses. Committing
-unchanged data writes nothing. Only the uncalled apply step below uses it.
+unchanged data writes nothing. Only the apply step below uses it.
 
-Desktop now has an uncalled review step for an existing sync space. From a
+Desktop has a review step for an existing sync space. From a
 complete inventory it extracts, for every other install in the selected space,
 that install's newest supported config record: the version key and lineage,
 the exact settings text, the writer's device, platform and app, the send time,
@@ -241,7 +255,7 @@ runs and writes nothing. The same file holds a publish gate that plans on the
 click inventory in the same way; the publisher uses it for every post that
 is not already staged.
 
-An uncalled apply step performs the local half of a choice made in that
+An apply step performs the local half of a choice made in that
 review, and never posts. It repeats the account checks, extracts the heads
 again from the inventory it is given, and re-reads `settings.toml`; if the
 heads or the file's bytes changed since the review, it stops and asks for a
@@ -254,8 +268,9 @@ Writing another device's version first saves the current file to History,
 with the reason before update or before choice, a label such as "Before
 update from Android 9c1d", and the local version key when the file still
 matches the base. A device is named by its record's platform and the first
-four characters of its install ID after the `in-` prefix. If that save fails, nothing is written. Then it writes the text,
-reads it back and requires the head's fingerprint, marks the bytes as imported
+four characters of its install ID after the `in-` prefix. If that save fails,
+nothing is written. Then it writes the text, reads it back and requires the
+head's fingerprint, marks the bytes as imported
 so the legacy automatic send does not echo them, and only then commits the
 adopted config data. The file is never written with bytes that would not
 survive the text conversion exactly. If the state commit fails or the process
@@ -273,9 +288,10 @@ same-content heads has already moved the base. The publisher must find the
 same parents on the click. The same file restores a History entry for Restore
 and Undo: it saves the current file to History, labelled "Before restoring
 the version from <time>" or "Before undo to the version from <time>", writes
-the entry, reads it back and checks the fingerprint. It changes no sync state, so the next check
-reports local changes. An entry recorded for a missing file is refused,
-because restoring it would mean deleting `settings.toml`.
+the entry, reads it back and checks the fingerprint. It changes no sync
+state, so the next check reports local changes. An entry recorded for a
+missing file is refused, because restoring it would mean deleting
+`settings.toml`.
 
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the

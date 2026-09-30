@@ -27,11 +27,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   instead of treating them as an empty account. A coordinator ties scan and
   read to one selected session, returning Complete only when both finish. The
   desktop Advanced settings box requires an explicit account choice on
-  multi-account installs and shows scan progress and review states. After a
-  fresh complete scan and separate cloud disclosure, it can manually publish
-  the first settings record to an empty directory or resume a prior bound
-  post. It cannot join another install's existing records or keep settings
-  synchronized yet. Android JNI can
+  multi-account installs, shows scan progress, and reviews the settings
+  records it finds. It offers one manual action per check: Publish settings,
+  Join sync, Review update, Choose settings, Publish changes, or Finish
+  sending, with a change summary and line diff before any local write, a
+  fresh scan and cloud disclosure before any post, and History, Restore and
+  Undo for every replaced file. Still open on desktop: background checks,
+  automatic publish after edits, edit in place, retirement of superseded
+  records, and live verification with real accounts. Android JNI can
   initialize local state bound to the active Telegram user, reserve a canonical
   own config record with its pending key, confirm an exact staged read-back
   with its message ID, and format or compare time-ordered space IDs. These
@@ -42,8 +45,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   older entry.
   Android now has an uncalled durable local store for bound state and staged
   config bytes. It locks the sync directory and pauses on ambiguous crash
-  recovery rather than sending uncertain data. Android transport and the full
-  sync UI on both clients remain open.
+  recovery rather than sending uncertain data. Android transport and the
+  Android sync UI remain open.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;

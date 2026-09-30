@@ -5,33 +5,71 @@ have two files, and nothing in the fork keeps them in step automatically.
 This document describes the manual transfer mechanisms and the alternatives
 deliberately not built.
 
-For the proposed account-backed sync flow for settings and future playlists,
-see [account_sync_plan.md](account_sync_plan.md). Desktop's **Sync across
-devices** box checks one selected account's Saved Messages. After a complete,
-unambiguous check finds no existing sync records, the publish action scans
-again and can initialize local sync state and send one settings record only if
-the new inventory is also complete and empty. A separate cloud disclosure and
-send confirmation follows that scan. It does not turn on continuous
-account-backed sync. A separate **Resume prior settings post** action appears
-only when a complete inventory matches a safely opened local sync state bound
-to the selected account. Resume scans again, confirms cloud disclosure, and
-lets the publisher reconcile an exact prior record or post a staged record
-only when its planner allows it. With nothing staged, Resume can also publish
-this device's local edits when a fresh plan on that scan allows it; it never
-publishes over another device's version. Existing records from a different
-sync space cannot be joined. Neither action retries automatically.
+For the account-backed sync flow for settings and future playlists, see
+[account_sync_plan.md](account_sync_plan.md). Desktop's **Sync across devices**
+box runs that flow by hand for one selected account. **Check Saved Messages**
+reads every sync record in that account's Saved Messages, reviews them against
+the local file and this device's sync state, and shows one status line with at
+most one next step:
 
-Desktop also has the pieces of the planned review and apply actions, none of
-them shown in the setup box yet. A review step reads every other device's
-newest settings record in the selected space, together with the local file and
-this device's own record, and asks the shared planner what they mean. An apply
-step carries out a choice from that review locally: it saves the current file
-to a settings History, writes the chosen version, checks what landed, and then
-records it in the local sync store, in that order. It never posts. Restore and
-Undo write a History entry back the same way. History keeps up to 30 exact
-copies of `settings.toml`, each with its reason, time, and fingerprint, in the
-owner-only `sync/history/` directory under the Purple config directory. The
-manual import below still keeps only `settings.toml.bak`.
+- **Publish settings** when the sync space has no settings records yet. It
+  checks again, confirms with the cloud disclosure, and sends this device's
+  settings as the first record.
+- **Join sync** when this device is not linked yet and another device already
+  has exactly this file. The confirmation shows the cloud disclosure even
+  though nothing is sent; joining records the other devices' versions locally.
+- **Review update** when another device's newer version descends from the one
+  this device last matched. A review box names the source device and time,
+  lists up to six changed settings (then "and N more"; line counts when one
+  side is not valid TOML), warns when the record comes from a newer schema,
+  and has a **Show lines** monospace diff capped at 400 lines. **Apply**
+  writes the file; **Not now** leaves everything alone.
+- **Choose settings** when versions are unrelated or conflict. The same review
+  box offers each other device's newest version and, when it can be sent,
+  this device's own. **Use this version** only writes locally; **Use and
+  share** also posts, after a fresh check, with the exact fingerprint and
+  parents the choice produced. An unlinked device sees **Join with this
+  version** or **Join and share** and always the disclosure.
+- **Publish changes** when this device's file changed since it last matched,
+  or its current version has not been posted. It checks again and confirms.
+- **Finish sending** when an earlier post may not have finished. It checks
+  again and lets the publisher either confirm the record already in Saved
+  Messages or send the staged record once.
+
+**Up to date** reports how many other devices sync and when the check ran.
+Invalid records, clones, another account's state, store errors and incomplete
+scans are plain text with no action, and so is a local file that is missing,
+not valid TOML or too large to send. When this device is already linked and
+another device has exactly its file, the check adopts that silently and
+reviews again. Devices are named by the record's platform and the first four
+characters of the install ID after the `in-` prefix, for example `Android
+9c1d`.
+
+No path reaches the publisher without either a staged post (Finish sending) or
+an explicit request carrying the fingerprint and parents that a fresh plan
+expects (every other action). There is no standing resume action any more.
+While a check or post runs, the action, Undo and History restore are disabled,
+because the publisher and the check hold the local sync store; a result from an
+account or session that is no longer selected is dropped. An apply that finds
+the file or Saved Messages changed since the check says so and asks for
+another check.
+
+Applying, choosing, restoring and undoing only change the local file. Each one
+first saves the current file to a settings History, then writes the new
+version, reads it back, and records it in the local sync store, in that order.
+History keeps up to 30 exact copies of `settings.toml`, each with its reason,
+time, fingerprint and a label such as "Before update from Android 9c1d", in the
+owner-only `sync/history/` directory under the Purple config directory. After
+an apply that wrote the file, a toast says "Settings updated from <device>."
+and **Undo last update** puts the previous file back. **History** lists
+entries as "<date time> · <label>"; each opens a preview with **Restore**.
+Entries that record a missing file cannot be restored. A restored or undone
+file stays local until **Publish changes** sends it.
+
+Still not built: background checks, automatic publish after edits, editing a
+setting in place from the review, retirement of superseded records, the
+Android UI, and live verification on real accounts. The manual import below
+still keeps only `settings.toml.bak`.
 
 The current manual transfer has two actions:
 
