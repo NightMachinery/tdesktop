@@ -190,8 +190,9 @@ load that fails, because the key's own default is on, and a gate that defaulted
 the other way would withhold on a fresh install exactly the thing the settings
 it has not read yet would grant.
 
-There is no toggle in the Android UI. The file is the switch here, and the
-desktop already has the checkbox that writes it.
+Android's Settings > Purple has a "Local Premium features" switch that writes
+`premium.enabled_p`, the same key as the desktop's checkbox, so either client
+can turn it off without editing the file.
 
 ### What ported
 
