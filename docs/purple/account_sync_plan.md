@@ -92,8 +92,11 @@ invalid, or inaccessible candidates stay visible as unresolved results; they
 cannot establish that the account has no sync group. An inventory
 coordinator joins the two operations for one explicitly selected account:
 it returns Complete only after both the full scan and every candidate read
-complete. An incomplete scan never starts candidate reading. The reader can
-populate Telegram's local download cache, but sends and deletes nothing.
+complete. An incomplete scan never starts candidate reading. The reader loads
+each record from the server into memory with its own file loader, so it never
+reads a copy Telegram already holds in its media cache or in a folder, where
+another program could have changed it, and it writes, sends and deletes
+nothing.
 It retains the document ID and edit date alongside each re-read candidate for
 later changed-media checks and opaque-header caching.
 The reader preserves validated space and writer headers for records from future
@@ -140,19 +143,20 @@ there until deleted by hand.
 An uncalled desktop config post adapter can now take an explicitly selected
 account and a staged canonical record, send one JSON document to that account's
 Saved Messages, then re-read the returned message ID. It reports confirmation
-only when the server document matches the staged bytes exactly. A missing send
-receipt or failed read-back remains uncertain and must be reconciled against
-history before any retry. A changed or mismatched document needs review. The
-adapter does not reserve local state, retry, enable sync, or post on its own.
-An own-config inventory matcher (`ReconcileOwnConfigInventory`, also in
-purple-core's `purple_sync_inventory`) checks a completed scan against the
-install's local state. It rejects a different account, an unsafe space,
-wrong device identity, noncanonical own records, divergent records at one
-sequence, and a staged record whose full hash is absent from the issued log.
-It reports the highest own head and any exact pending record already found in
-Saved Messages. The future publisher must use that pending message for exact
-confirmation instead of posting again; an absent result alone does not cause
-a retry.
+only when the server document matches the staged bytes exactly; the read-back
+goes through the reader, so it compares the bytes the server returns, not the
+copy this device uploaded. A missing send receipt or failed read-back remains
+uncertain and must be reconciled against history before any retry. A changed or
+mismatched document needs review. The adapter does not reserve local state,
+retry, enable sync, or post on its own. An own-config inventory matcher
+(`ReconcileOwnConfigInventory`, also in purple-core's `purple_sync_inventory`)
+checks a completed scan against the install's local state. It rejects a
+different account, an unsafe space, wrong device identity, noncanonical own
+records, divergent records at one sequence, and a staged record whose full hash
+is absent from the issued log. It reports the highest own head and any exact
+pending record already found in Saved Messages. The future publisher must use
+that pending message for exact confirmation instead of posting again; an absent
+result alone does not cause a retry.
 
 The desktop one-shot config publisher composes the local store,
 own-record matcher, pure publish planner, and exact post/read-back adapter.
