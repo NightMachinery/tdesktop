@@ -49,6 +49,8 @@ struct SyncConfigApplyResult {
 	bool publishNeeded = false;
 };
 
+[[nodiscard]] bool SyncSettingsTextWritable(const QByteArray &bytes);
+
 [[nodiscard]] SyncConfigApplyResult ApplySyncConfigChoice(
 	Main::Account &account,
 	Main::Session &session,
@@ -61,6 +63,7 @@ enum class SyncConfigRestoreStatus {
 	Unchanged,
 	NotFound,
 	FileDidNotExist,
+	NotText,
 	InvalidReason,
 	InvalidSettings,
 	HistoryError,

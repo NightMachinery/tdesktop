@@ -71,8 +71,10 @@ owner-only `sync/history/` directory under the Purple config directory. After
 an apply that wrote the file, a toast says "Settings updated from <device>."
 and **Undo last update** puts the previous file back. **History** lists
 entries as "<date time> · <label>"; each opens a preview with **Restore**.
-Entries that record a missing file cannot be restored. A restored or undone
-file stays local until **Publish changes** sends it.
+Entries that record a missing file, or hold bytes that are not valid UTF-8,
+cannot be restored. A restore never lets History pruning remove the entry it
+is restoring. A restored or undone file stays local until **Publish changes**
+sends it.
 
 Still not built: background checks, automatic publish after edits, editing a
 setting in place from the review, retirement of superseded records, the

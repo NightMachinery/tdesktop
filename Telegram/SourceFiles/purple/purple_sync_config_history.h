@@ -38,7 +38,8 @@ struct SyncConfigHistoryEntry {
 	const std::optional<QByteArray> &text,
 	SyncConfigHistoryReason reason,
 	const QString &label,
-	const QString &versionKey = QString());
+	const QString &versionKey = QString(),
+	const QString &keepId = QString());
 [[nodiscard]] std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory();
 [[nodiscard]] std::optional<QByteArray> ReadSyncConfigHistory(
 	const QString &id);

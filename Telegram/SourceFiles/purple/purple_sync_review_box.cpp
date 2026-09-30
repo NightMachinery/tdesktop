@@ -179,6 +179,7 @@ void HistoryEntryBox(
 	const auto current = ReadSyncSettingsFile(SettingsFilePath());
 	const auto restorable = entry.existed
 		&& text.has_value()
+		&& SyncSettingsTextWritable(*text)
 		&& current.status != SyncSettingsFileStatus::Invalid;
 	if (!entry.existed) {
 		AddLabel(container, u"settings.toml did not exist when this entry "
@@ -186,6 +187,9 @@ void HistoryEntryBox(
 	} else if (!text) {
 		AddLabel(container, u"This copy could not be read. It may have been "
 			"removed or damaged."_q);
+	} else if (!SyncSettingsTextWritable(*text)) {
+		AddLabel(container, u"This copy is not valid UTF-8 text, so it "
+			"cannot be restored here."_q);
 	} else if (current.status == SyncSettingsFileStatus::Invalid) {
 		AddLabel(container, u"settings.toml cannot be read right now, so it "
 			"cannot be replaced."_q);
