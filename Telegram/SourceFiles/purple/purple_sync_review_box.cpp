@@ -252,7 +252,7 @@ void SyncConfigReviewBox(
 	auto labels = std::vector<QString>();
 	const auto choices = SyncConfigChoices(
 		review,
-		SyncSettingsPublishable(review.local));
+		SyncSettingsPublishable(review));
 	for (const auto &choice : choices) {
 		state->keys.push_back(choice.key);
 		if (choice.key) {

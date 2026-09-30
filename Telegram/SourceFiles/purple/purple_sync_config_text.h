@@ -36,7 +36,7 @@ inline constexpr auto kSyncConfigSummaryLimit = 6;
 
 [[nodiscard]] std::vector<QString> SyncOfferedDeviceNames(
 	const SyncConfigReview &review);
-[[nodiscard]] bool SyncSettingsPublishable(const SyncSettingsFile &file);
+[[nodiscard]] bool SyncSettingsPublishable(const SyncConfigReview &review);
 
 [[nodiscard]] SyncConfigBoxStatus DescribeSyncConfigReview(
 	const SyncConfigReview &review,

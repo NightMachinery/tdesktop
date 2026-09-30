@@ -140,11 +140,11 @@ std::vector<QString> SyncOfferedDeviceNames(const SyncConfigReview &review) {
 	return DeviceNames(SyncConfigDeviceNames(review, review.plan.offered));
 }
 
-bool SyncSettingsPublishable(const SyncSettingsFile &file) {
+bool SyncSettingsPublishable(const SyncConfigReview &review) {
 	const auto install = FormatSyncInstallId(QByteArray(16, '\0'));
 	return install
 		&& SyncSettingsPublishable(
-			file,
+			review,
 			u"desktop:"_q + *install,
 			SyncWriter());
 }
@@ -155,7 +155,7 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 	using Message = SyncConfigMessage;
 	const auto described = DescribeSyncConfigReview(
 		review,
-		SyncSettingsPublishable(review.local));
+		SyncSettingsPublishable(review));
 	const auto action = described.action;
 	switch (described.message) {
 	case Message::NeedsReviewWithPending:
