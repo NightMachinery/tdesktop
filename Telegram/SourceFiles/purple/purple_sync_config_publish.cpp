@@ -8,16 +8,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_config_publish.h"
 
 #include "base/unixtime.h"
-#include "data/data_user.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_config_payload.h"
 #include "purple/purple_sync_account_binding.h"
+#include "purple/purple_sync_config_review.h"
 
 #include <QtCore/QCryptographicHash>
-#include <QtCore/QFile>
-#include <QtCore/QFileInfo>
 
 #include <algorithm>
 #include <limits>
@@ -26,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 namespace {
 
-constexpr auto kMaximumSettingsBytes = 256 * 1024;
 constexpr auto kMaximumRecordBytes = 256 * 1024;
 
 [[nodiscard]] QString RecordHash(const QByteArray &bytes) {
@@ -52,11 +49,13 @@ SyncConfigPublish::SyncConfigPublish(
 		Main::Account &account,
 		Main::Session &session,
 		SyncAccountInventoryResult inventory,
-		Fn<void(SyncConfigPublishResult)> finished)
+		Fn<void(SyncConfigPublishResult)> finished,
+		SyncConfigPublishRequest request)
 : _account(base::make_weak(&account))
 , _session(base::make_weak(&session))
 , _inventory(std::move(inventory))
-, _finished(std::move(finished)) {
+, _finished(std::move(finished))
+, _request(std::move(request)) {
 }
 
 SyncConfigPublish::~SyncConfigPublish() {
@@ -71,10 +70,7 @@ bool SyncConfigPublish::AccountAvailable() const {
 	const auto session = _session.get();
 	return account
 		&& session
-		&& !account->loggingOut()
-		&& account->maybeSession() == session
-		&& _inventory.accountUserId
-		&& _inventory.accountUserId == peerToUser(session->user()->id).bare;
+		&& SyncAccountAvailable(*account, *session, _inventory.accountUserId);
 }
 
 void SyncConfigPublish::Start() {
@@ -113,12 +109,7 @@ void SyncConfigPublish::Start() {
 		staged = pending.staged;
 	}
 	auto inventory = _inventory;
-	if (!inventory.directory.selectedSpace
-		&& inventory.directory.canCreateSpace
-		&& inventory.directory.groups.empty()) {
-		inventory.directory.selectedSpace = state->space;
-		inventory.directory.publishableSpace = state->space;
-	}
+	SelectSyncSpaceIfEmpty(inventory, state->space);
 	const auto own = ReconcileOwnConfigInventory(
 		*state, inventory, inventory.accountUserId, staged);
 	if (own.status == SyncOwnInventoryStatus::PendingFound) {
@@ -159,49 +150,28 @@ void SyncConfigPublish::Start() {
 		PlanPost(*state, own, staged, token);
 		return;
 	}
-	if (state->config.confirmedSeq != 0 || state->config.seq != 0) {
-		const auto confirmedHead = own.status == SyncOwnInventoryStatus::Present
-			&& own.observation.seq == state->config.confirmedSeq
-			&& own.observation.payloadHash == state->config.ownHash
-			&& std::any_of(
-				state->ownMessages.begin(), state->ownMessages.end(),
-				[&](const auto &message) {
-					return message.space == state->space
-						&& message.stream == SyncLocalStream::Config
-						&& message.messageId == own.head.messageId
-						&& message.recordHash == own.head.recordHash;
-				});
-		Finish({ confirmedHead
-			? SyncConfigPublishStatus::AlreadySynced
-			: SyncConfigPublishStatus::NeedsReview });
+	const auto local = ReadSyncSettingsFile(SettingsFilePath());
+	if (local.status != SyncSettingsFileStatus::Present
+		|| local.text.isEmpty()) {
+		Finish({ SyncConfigPublishStatus::InvalidSettings });
 		return;
 	}
-	if (own.status != SyncOwnInventoryStatus::Absent) {
+	if (_request.expectedFingerprint
+		&& *_request.expectedFingerprint != local.fingerprint) {
 		Finish({ SyncConfigPublishStatus::NeedsReview });
 		return;
 	}
-	for (const auto &group : _inventory.directory.groups) {
-		if (group.space == state->space && group.stream == u"config"_q) {
-			Finish({ SyncConfigPublishStatus::NeedsReview });
-			return;
-		}
-	}
-	const auto path = SettingsFilePath();
-	const auto info = QFileInfo(path);
-	if (!info.isFile() || info.isSymLink()
-		|| info.size() <= 0 || info.size() > kMaximumSettingsBytes) {
-		Finish({ SyncConfigPublishStatus::InvalidSettings });
+	const auto gate = PlanSyncConfigPublishGate(
+		*state,
+		inventory,
+		own,
+		local.fingerprint,
+		_request.expectedParents);
+	if (gate.status == SyncConfigPublishGateStatus::AlreadySynced) {
+		Finish({ SyncConfigPublishStatus::AlreadySynced });
 		return;
-	}
-	auto file = QFile(path);
-	if (!file.open(QIODevice::ReadOnly)) {
-		Finish({ SyncConfigPublishStatus::InvalidSettings });
-		return;
-	}
-	const auto text = file.read(kMaximumSettingsBytes + 1);
-	if (text.isEmpty() || text.size() > kMaximumSettingsBytes
-		|| !file.atEnd()) {
-		Finish({ SyncConfigPublishStatus::InvalidSettings });
+	} else if (gate.status != SyncConfigPublishGateStatus::Proceed) {
+		Finish({ SyncConfigPublishStatus::NeedsReview });
 		return;
 	}
 	if (state->config.seq == std::numeric_limits<uint64_t>::max()) {
@@ -214,7 +184,8 @@ void SyncConfigPublish::Start() {
 		return;
 	}
 	const auto built = BuildConfigRecord({
-		.text = text,
+		.text = local.text,
+		.parents = gate.parents,
 		.space = state->space,
 		.install = state->install,
 		.device = state->createdDevice,

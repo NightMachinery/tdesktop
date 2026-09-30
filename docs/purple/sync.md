@@ -16,8 +16,10 @@ account-backed sync. A separate **Resume prior settings post** action appears
 only when a complete inventory matches a safely opened local sync state bound
 to the selected account. Resume scans again, confirms cloud disclosure, and
 lets the publisher reconcile an exact prior record or post a staged record
-only when its planner allows it. Existing records from a different sync space
-cannot be joined. Neither action retries automatically.
+only when its planner allows it. With nothing staged, Resume can also publish
+this device's local edits when a fresh plan on that scan allows it; it never
+publishes over another device's version. Existing records from a different
+sync space cannot be joined. Neither action retries automatically.
 
 Desktop also has the pieces of the planned review and apply actions, none of
 them shown in the setup box yet. A review step reads every other device's

@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace Main {
 class Account;
@@ -37,6 +38,11 @@ enum class SyncConfigPublishStatus {
 	Cancelled,
 };
 
+struct SyncConfigPublishRequest {
+	std::optional<QString> expectedFingerprint;
+	std::optional<std::vector<QString>> expectedParents;
+};
+
 struct SyncConfigPublishResult {
 	SyncConfigPublishStatus status = SyncConfigPublishStatus::Incomplete;
 	std::optional<SyncStoreStatus> storeStatus;
@@ -49,7 +55,8 @@ public:
 		Main::Account &account,
 		Main::Session &session,
 		SyncAccountInventoryResult inventory,
-		Fn<void(SyncConfigPublishResult)> finished);
+		Fn<void(SyncConfigPublishResult)> finished,
+		SyncConfigPublishRequest request = {});
 	~SyncConfigPublish();
 
 	SyncConfigPublish(const SyncConfigPublish &) = delete;
@@ -72,6 +79,7 @@ private:
 	base::weak_ptr<Main::Session> _session;
 	SyncAccountInventoryResult _inventory;
 	Fn<void(SyncConfigPublishResult)> _finished;
+	SyncConfigPublishRequest _request;
 	std::unique_ptr<SyncLocalStore> _store;
 	std::unique_ptr<SyncConfigPost> _post;
 	bool _started = false;
