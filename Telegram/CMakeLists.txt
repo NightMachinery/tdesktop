@@ -1775,6 +1775,8 @@ PRIVATE
     purple/purple_sync_config_post.h
     purple/purple_sync_config_publish.cpp
     purple/purple_sync_config_publish.h
+    purple/purple_sync_config_review.cpp
+    purple/purple_sync_config_review.h
     purple/purple_sync_history_page.h
     purple/purple_sync_history_scanner.cpp
     purple/purple_sync_history_scanner.h

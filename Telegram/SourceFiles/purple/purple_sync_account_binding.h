@@ -9,8 +9,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_sync_local_state.h"
 
+#include <cstdint>
+
 namespace Main {
 class Account;
+class Session;
 }
 
 namespace Purple {
@@ -22,5 +25,9 @@ namespace Purple {
 [[nodiscard]] bool StoreAccountSyncBinding(
 	const SyncLocalState &state,
 	Main::Account &account);
+[[nodiscard]] bool SyncAccountAvailable(
+	Main::Account &account,
+	Main::Session &session,
+	uint64_t accountUserId);
 
 }

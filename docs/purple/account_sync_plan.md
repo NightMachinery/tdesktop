@@ -201,6 +201,29 @@ disappear. The whole next state must pass the shared serializer and parser,
 and it is saved with the same atomic state write that staging uses. Committing
 unchanged data writes nothing. Nothing calls this operation yet.
 
+Desktop now has an uncalled review step for an existing sync space. From a
+complete inventory it extracts, for every other install in the selected space,
+that install's newest supported config record: the version key and lineage,
+the exact settings text, the writer's device, platform and app, the send time,
+and the Telegram message ID. A group without a supported head, or a head
+record that does not parse or does not match the record hash the directory
+saw, makes the review stop for review instead of being dropped. The review
+also finds this install's own newest config record through the own-record
+matcher and reads `settings.toml`. A missing file is allowed and fingerprints
+as empty bytes; a symlink, another non-regular file or a file over 256 KiB is
+refused, as in the publisher. Then it asks the shared planner for a verdict.
+A bound install plans with its stored config state and its own newest record,
+so the planner can tell when this device's cloud record no longer describes
+its settings; without that record two devices that picked each other's
+versions could both report up to date with different files. An unbound install
+previews the same planner with an empty install in the selected space, and an
+account with no sync records at all is Empty. A bound state whose space
+differs from the inventory's selected space stops for review, because moving
+spaces is not supported. A clone, an unresolved own record or an incomplete
+inventory stops the same way. The step holds the sync store lock only while it
+runs and writes nothing. The same file holds a publish gate that plans on the
+click inventory in the same way; the publisher does not use it yet.
+
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
 inventory incomplete, but the setup box does not yet show a countdown or

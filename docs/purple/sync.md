@@ -26,7 +26,10 @@ owner-only `sync/history/` directory under the Purple config directory.
 Nothing calls it yet, and the manual import below still keeps only
 `settings.toml.bak`. The local sync store can also record another device's
 settings version as adopted without staging a post, which the planned join and
-update actions need; nothing calls that yet either.
+update actions need; nothing calls that yet either. A review step can now
+read every other device's newest settings record in the selected space,
+together with the local file and this device's own record, and ask the shared
+planner what they mean. The setup box does not show that review yet.
 
 The current manual transfer has two actions:
 
