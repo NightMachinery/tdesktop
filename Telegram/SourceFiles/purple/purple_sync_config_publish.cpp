@@ -11,38 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
-#include "purple/purple_config_payload.h"
 #include "purple/purple_sync_account_binding.h"
 
-#include <QtCore/QCryptographicHash>
-
-#include <algorithm>
-#include <limits>
 #include <utility>
 
 namespace Purple {
-namespace {
-
-constexpr auto kMaximumRecordBytes = 256 * 1024;
-
-[[nodiscard]] QString RecordHash(const QByteArray &bytes) {
-	return QString::fromLatin1(QCryptographicHash::hash(
-		bytes, QCryptographicHash::Sha256).toHex());
-}
-
-[[nodiscard]] SyncConfigPublishStatus OwnFailure(
-		SyncOwnInventoryStatus status) {
-	switch (status) {
-	case SyncOwnInventoryStatus::Incomplete:
-		return SyncConfigPublishStatus::Incomplete;
-	case SyncOwnInventoryStatus::CloneDetected:
-		return SyncConfigPublishStatus::CloneDetected;
-	default:
-		return SyncConfigPublishStatus::NeedsReview;
-	}
-}
-
-} // namespace
 
 SyncConfigPublish::SyncConfigPublish(
 		Main::Account &account,
@@ -114,118 +87,54 @@ void SyncConfigPublish::Start() {
 		}
 		staged = pending.staged;
 	}
-	auto inventory = _inventory;
-	SelectSyncSpaceIfEmpty(inventory, state->space);
-	const auto own = ReconcileOwnConfigInventory(
-		*state, inventory, inventory.accountUserId, staged);
-	if (own.status == SyncOwnInventoryStatus::PendingFound) {
-		if (!own.pendingMessageId) {
-			Finish({ SyncConfigPublishStatus::NeedsReview });
-			return;
-		}
-		const auto found = std::find_if(
-			_inventory.read->records.begin(),
-			_inventory.read->records.end(),
-			[&](const SyncCandidateRecord &record) {
-				return record.id == *own.pendingMessageId
-					&& record.status == SyncCandidateStatus::Valid
-					&& record.bytes == staged;
-			});
-		if (found == _inventory.read->records.end()) {
-			Finish({ SyncConfigPublishStatus::NeedsReview });
-			return;
-		}
+	const auto local = (entry == SyncConfigPublishEntry::NewContent)
+		? ReadSyncSettingsFile(SettingsFilePath())
+		: SyncSettingsFile();
+	const auto plan = PlanSyncConfigPost(
+		*state,
+		token,
+		staged,
+		_inventory,
+		local,
+		_request,
+		int64_t(base::unixtime::now()),
+		SyncWriter());
+	switch (plan.step) {
+	case SyncConfigPostStep::Finish:
+		Finish({ plan.status });
+		return;
+	case SyncConfigPostStep::ConfirmFound: {
 		const auto confirmed = _store->ConfirmConfigReadBack(
-			found->bytes, state->createdDevice, found->id);
+			plan.record,
+			state->createdDevice,
+			plan.messageId);
 		Finish(confirmed
 			? SyncConfigPublishResult{
 				SyncConfigPublishStatus::Confirmed,
 				std::nullopt,
-				found->id }
+				plan.messageId }
 			: SyncConfigPublishResult{
 				SyncConfigPublishStatus::StoreError,
 				confirmed.status });
-		return;
-	}
-	if (own.status != SyncOwnInventoryStatus::Absent
-		&& own.status != SyncOwnInventoryStatus::Present) {
-		Finish({ OwnFailure(own.status) });
-		return;
-	}
-	if (entry == SyncConfigPublishEntry::FinishStaged) {
-		if (staged.isEmpty()) {
-			Finish({ SyncConfigPublishStatus::NeedsReview });
-		} else {
-			PlanPost(*state, own, staged, token);
+	} return;
+	case SyncConfigPostStep::Stage: {
+		const auto stagedResult = _store->StageConfig(
+			plan.record,
+			plan.nextConfigData,
+			token);
+		if (!stagedResult) {
+			Finish({
+				SyncConfigPublishStatus::StoreError,
+				stagedResult.status,
+			});
+			return;
 		}
+		PlanPost(*_store->state(), plan.own, stagedResult.staged, token);
+	} return;
+	case SyncConfigPostStep::Post:
+		StartPost(plan.record);
 		return;
 	}
-	const auto local = ReadSyncSettingsFile(SettingsFilePath());
-	if (local.status != SyncSettingsFileStatus::Present
-		|| local.text.isEmpty()) {
-		Finish({ SyncConfigPublishStatus::InvalidSettings });
-		return;
-	}
-	const auto gate = PlanSyncConfigPublishGate(
-		*state,
-		inventory,
-		own,
-		local.fingerprint,
-		_request);
-	if (gate.status == SyncConfigPublishGateStatus::AlreadySynced) {
-		Finish({ SyncConfigPublishStatus::AlreadySynced });
-		return;
-	} else if (gate.status != SyncConfigPublishGateStatus::Proceed) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	if (state->config.seq == std::numeric_limits<uint64_t>::max()) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	const auto now = base::unixtime::now();
-	if (now <= 0) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	const auto built = BuildConfigRecord({
-		.text = local.text,
-		.parents = gate.parents,
-		.space = state->space,
-		.install = state->install,
-		.device = state->createdDevice,
-		.platform = SyncWriterPlatform(),
-		.app = SyncWriterApp(),
-		.seq = state->config.seq + 1,
-		.at = uint64_t(now),
-	});
-	if (!built || built.canonical.size() > kMaximumRecordBytes) {
-		Finish({ SyncConfigPublishStatus::InvalidSettings });
-		return;
-	}
-	auto policy = SyncPublishPolicy();
-	policy.enabled = true;
-	auto observations = SyncPublishObservations();
-	observations.ready = true;
-	observations.discoveryComplete = true;
-	observations.ownRecord = own.observation;
-	observations.ownHead = own.head;
-	const auto plan = PlanSyncPublish(
-		*state, token, state->createdDevice, SyncLocalStream::Config,
-		built.payloadHash, policy, observations);
-	if (plan.action != SyncPublishAction::ReserveAndStage) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	auto nextConfig = state->configData;
-	nextConfig.pending = built.version.key;
-	const auto stagedResult = _store->StageConfig(
-		built.canonical, nextConfig, token);
-	if (!stagedResult) {
-		Finish({ SyncConfigPublishStatus::StoreError, stagedResult.status });
-		return;
-	}
-	PlanPost(*_store->state(), own, stagedResult.staged, token);
 }
 
 void SyncConfigPublish::PlanPost(
@@ -237,22 +146,17 @@ void SyncConfigPublish::PlanPost(
 		Finish({ SyncConfigPublishStatus::AccountUnavailable });
 		return;
 	}
-	auto policy = SyncPublishPolicy();
-	policy.enabled = true;
-	policy.editEnabled = false;
-	auto observations = SyncPublishObservations();
-	observations.discoveryComplete = true;
-	observations.ready = true;
-	observations.attempt = SyncPublishAttempt::ReconciledAbsent;
-	observations.stagedRecordMatches = true;
-	observations.stagedRecordHash = RecordHash(staged);
-	observations.ownRecord = own.observation;
-	observations.ownHead = own.head;
-	const auto plan = PlanSyncPublish(
-		state, token, state.createdDevice, SyncLocalStream::Config,
-		state.config.ownHash, policy, observations);
-	if (plan.action != SyncPublishAction::Post) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
+	const auto plan = PlanSyncConfigStagedPost(state, token, own, staged);
+	if (plan.step != SyncConfigPostStep::Post) {
+		Finish({ plan.status });
+		return;
+	}
+	StartPost(plan.record);
+}
+
+void SyncConfigPublish::StartPost(const QByteArray &staged) {
+	if (!AccountAvailable()) {
+		Finish({ SyncConfigPublishStatus::AccountUnavailable });
 		return;
 	}
 	const auto weak = base::make_weak(this);

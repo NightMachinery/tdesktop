@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_account_setup.h"
 #include "purple/purple_sync_config_history.h"
 #include "purple/purple_sync_config_review.h"
+#include "purple/purple_sync_local_store.h"
 
 #include <optional>
 #include <vector>
@@ -20,20 +21,6 @@ class Session;
 }
 
 namespace Purple {
-
-enum class SyncConfigApplyStatus {
-	Applied,
-	NeedsRecheck,
-	NeedsReview,
-	InvalidChoice,
-	AccountUnavailable,
-	AccountUnbound,
-	SetupFailed,
-	StoreError,
-	InvalidSettings,
-	HistoryError,
-	WriteError,
-};
 
 struct SyncConfigApplyResult {
 	SyncConfigApplyStatus status = SyncConfigApplyStatus::NeedsReview;
@@ -51,26 +38,12 @@ struct SyncConfigApplyResult {
 	bool publishNeeded = false;
 };
 
-[[nodiscard]] bool SyncSettingsTextWritable(const QByteArray &bytes);
-
 [[nodiscard]] SyncConfigApplyResult ApplySyncConfigChoice(
 	Main::Account &account,
 	Main::Session &session,
 	const SyncAccountInventoryResult &inventory,
 	const SyncConfigReview &review,
 	const std::optional<QString> &chosenRemoteKey);
-
-enum class SyncConfigRestoreStatus {
-	Restored,
-	Unchanged,
-	NotFound,
-	FileDidNotExist,
-	NotText,
-	InvalidReason,
-	InvalidSettings,
-	HistoryError,
-	WriteError,
-};
 
 struct SyncConfigRestoreResult {
 	SyncConfigRestoreStatus status = SyncConfigRestoreStatus::NotFound;

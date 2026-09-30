@@ -162,7 +162,25 @@ and share, with the fingerprint and parents from the apply step. A request
 without expectations, or a pending-only start that finds another window
 already finished the post, therefore cannot publish edits the user never
 reviewed. There is no standing resume action. This does not enable continuous
-account-backed sync.
+account-backed sync. The decisions in this paragraph (the request gate, the own
+record reconcile, the gate plan, building the record and both publish planner
+calls) live in purple-core's `purple_sync_config_flow` as `PlanSyncConfigPost`
+and `PlanSyncConfigStagedPost`, so Android makes the same ones; the desktop
+publisher keeps the store, the account checks and the post.
+
+Finish sending has a known duplicate-post window, left unfixed on desktop.
+Cancelling a publish, closing the box or losing the receipt only stops the
+publisher from listening: the upload and `messages.sendMedia` stay in the
+session's send queue and go out when the connection or upload queue allows,
+for as long as the app runs. A check in the meantime reads Saved Messages from
+the server, does not see the queued message, and still finds the stage, so it
+offers Finish sending, and that posts the same staged bytes a second time.
+When both arrive, Saved Messages holds two byte-identical records at one
+sequence. The own-record reconcile lists the later one as a duplicate and
+every decision stays the same, so the cost is a redundant message that every
+later check downloads. The Android port is to refuse Finish sending while
+Telegram's own queue still holds the earlier post; desktop could do the same
+by looking for an unsent local item carrying the sync file in Saved Messages.
 
 The desktop setup box runs this inventory against one signed-in account,
 shows scan progress, and passes a complete result to the review step described
@@ -193,6 +211,9 @@ lines diff. A choice that also publishes scans again before the post. While
 a scan or post runs, the action, Undo and History restore are disabled, since
 those hold the local sync store. Devices are named by the record's platform
 and the first four characters of the install ID after the `in-` prefix.
+Which sentence and action a review deserves, the choices the review box offers
+and how a failed apply is worded come from purple-core's
+`purple_sync_config_describe`; desktop keeps only the English text.
 The local setup operation creates an install identity and account binding only
 after a complete, unambiguous scan. It reuses the selected existing space or
 creates a time-ordered space ID when the account has none. An existing local
@@ -251,7 +272,9 @@ binding token. It refuses while a config record is staged, when the new data
 carries a pending key, and when any `seen_seq` entry would decrease or
 disappear. The whole next state must pass the shared serializer and parser,
 and it is saved with the same atomic state write that staging uses. Committing
-unchanged data writes nothing. Only the apply step below uses it.
+unchanged data writes nothing. Only the apply step below uses it. The checks
+are purple-core's `CheckSyncConfigDataCommit`; the store only writes the
+canonical bytes it returns.
 
 Desktop has a review step for an existing sync space. From a
 complete inventory it extracts, for every other install in the selected space,
@@ -275,17 +298,30 @@ spaces is not supported. A clone, an unresolved own record or an incomplete
 inventory stops the same way. The step holds the sync store lock only while it
 runs and writes nothing. The same file holds a publish gate that plans on the
 click inventory in the same way; the publisher uses it for every post that
-is not already staged.
+is not already staged. The review, head extraction and gate live in
+purple-core's `purple_sync_config_flow` (`ReviewSyncConfigInventory`,
+`ExtractSyncConfigHeads`, `PlanSyncConfigPublishGate`); desktop reads the file,
+opens the store and checks the account.
 
 An apply step performs the local half of a choice made in that
-review, and never posts. It repeats the account checks, extracts the heads
-again from the inventory it is given, and re-reads `settings.toml`; if the
-heads or the file's bytes changed since the review, it stops and asks for a
-new check. An unbound install joins first, creating its install identity and
-binding in the selected space, or in a new space when the account has none.
-With the store open it plans again from the stored state, the review's heads
-and the review's own record, and continues only when the verdict, the offered
-and same-content heads, and the own-record staleness all match the review.
+review, and never posts. It repeats the account checks, then reviews again and
+compares review stamps (purple-core's `SyncConfigReviewStamp`): a digest of the
+review status, the account, whether the device is linked, the space and
+install, the file's status and fingerprint, the verdict, the own-record
+staleness, the offered and same-content keys, every head's message ID, space,
+install, sequence, key, lineage and text hash, and the own record's message ID
+and identity. If the stamp of the fresh review differs from the reviewed one,
+it stops and asks for a new check. An unbound install compares an unlinked
+review of the inventory it is given and a fresh read of `settings.toml`, then
+joins, creating its install identity and binding in the selected space, or in
+a new space when the account has none. With the store open it reviews the
+inventory again with the stored state, the staged record and another fresh
+read of the file, and compares that stamp with the reviewed one (for a device
+that just joined, with the reviewed one as it looks once linked). What to
+write, the History reason and version key, the adoption and the next-publish
+proposal come from purple-core's `PlanSyncConfigApply` and
+`CompleteSyncConfigApply`; desktop does the History save, the write, the read
+back and the commit.
 Writing another device's version first saves the current file to History,
 with the reason before update or before choice, a label such as "Before
 update from Android 9c1d", and the local version key when the file still

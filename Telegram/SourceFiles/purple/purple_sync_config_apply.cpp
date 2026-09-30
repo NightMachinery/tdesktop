@@ -28,46 +28,6 @@ struct VerifiedWrite {
 	bool restorable = false;
 };
 
-[[nodiscard]] std::vector<QString> HeadKeys(
-		const std::vector<ConfigHead> &heads) {
-	auto result = std::vector<QString>();
-	result.reserve(heads.size());
-	for (const auto &head : heads) {
-		result.push_back(head.key);
-	}
-	return result;
-}
-
-[[nodiscard]] bool SameHeadRecords(
-		const std::vector<SyncConfigHeadRecord> &a,
-		const std::vector<SyncConfigHeadRecord> &b) {
-	return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](
-			const SyncConfigHeadRecord &first,
-			const SyncConfigHeadRecord &second) {
-		return first.messageId == second.messageId
-			&& first.head.space == second.head.space
-			&& first.head.install == second.head.install
-			&& first.head.seq == second.head.seq
-			&& first.head.key == second.head.key
-			&& first.head.lineage == second.head.lineage
-			&& first.text == second.text;
-	});
-}
-
-[[nodiscard]] bool SamePlan(
-		const ConfigSyncPlan &a,
-		const ConfigSyncPlan &b) {
-	return a.verdict == b.verdict
-		&& a.ownStale == b.ownStale
-		&& HeadKeys(a.offered) == HeadKeys(b.offered)
-		&& HeadKeys(a.same) == HeadKeys(b.same);
-}
-
-[[nodiscard]] QString KeyFingerprint(const QString &key) {
-	const auto parsed = ParseConfigVersionKey(key);
-	return parsed ? parsed->fingerprint : QString();
-}
-
 [[nodiscard]] QString SourceLabel(
 		const SyncConfigHeadRecord &record,
 		SyncConfigHistoryReason reason) {
@@ -141,35 +101,22 @@ struct VerifiedWrite {
 	return result;
 }
 
-void ProposeNextPublish(
-		SyncConfigApplyResult &result,
-		const ConfigSyncState &state,
-		const std::vector<ConfigHead> &heads,
-		const std::optional<ConfigHead> &ownHead) {
-	const auto fresh = PlanConfigSync(
-		result.fingerprint,
-		state,
-		heads,
-		ownHead);
-	result.nextVerdict = fresh.verdict;
-	if (fresh.verdict != ConfigSyncVerdict::Empty
-		&& fresh.verdict != ConfigSyncVerdict::LocalChanges
-		&& fresh.verdict != ConfigSyncVerdict::Choose
-		&& fresh.verdict != ConfigSyncVerdict::Conflict) {
-		return;
+[[nodiscard]] SyncConfigApplyStatus StatusOf(
+		SyncConfigApplyPlanStatus status) {
+	switch (status) {
+	case SyncConfigApplyPlanStatus::Ready:
+		return SyncConfigApplyStatus::Applied;
+	case SyncConfigApplyPlanStatus::NeedsRecheck:
+		return SyncConfigApplyStatus::NeedsRecheck;
+	case SyncConfigApplyPlanStatus::NeedsReview:
+		return SyncConfigApplyStatus::NeedsReview;
+	case SyncConfigApplyPlanStatus::InvalidChoice:
+		return SyncConfigApplyStatus::InvalidChoice;
 	}
-	const auto proposal = PlanConfigChoice(state, fresh, std::nullopt);
-	if (proposal && proposal->publish && proposal->adopt.empty()) {
-		result.publishNeeded = true;
-		result.expectedParents = SyncConfigVersionKeys(proposal->parents);
-	}
+	return SyncConfigApplyStatus::NeedsReview;
 }
 
 } // namespace
-
-bool SyncSettingsTextWritable(const QByteArray &bytes) {
-	return QString::fromUtf8(bytes).toUtf8() == bytes;
-}
 
 SyncConfigApplyResult ApplySyncConfigChoice(
 		Main::Account &account,
@@ -181,36 +128,24 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	if (!SyncAccountAvailable(account, session, inventory.accountUserId)
 		|| review.accountUserId != inventory.accountUserId) {
 		return Stop(result, SyncConfigApplyStatus::AccountUnavailable);
-	} else if (review.status != SyncConfigReviewStatus::Ready
-		|| review.local.status == SyncSettingsFileStatus::Invalid
-		|| (!review.bound && !review.state.install.isEmpty())) {
-		return Stop(result, SyncConfigApplyStatus::NeedsReview);
-	} else if (!PlanConfigChoice(review.state, review.plan, chosenRemoteKey)) {
-		return Stop(result, SyncConfigApplyStatus::InvalidChoice);
 	}
-	if (review.space.isEmpty()) {
-		if (review.bound
-			|| inventory.directory.selectedSpace
-			|| !inventory.directory.canCreateSpace) {
-			return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
-		}
-	} else {
-		const auto current = ExtractSyncConfigHeads(
-			inventory,
-			review.space,
-			review.state.install);
-		if (current.status != SyncConfigHeadsStatus::Complete
-			|| !SameHeadRecords(current.heads, review.heads)) {
-			return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
-		}
+	const auto checked = CheckSyncConfigApplyChoice(review, chosenRemoteKey);
+	if (checked != SyncConfigApplyPlanStatus::Ready) {
+		return Stop(result, StatusOf(checked));
 	}
-	if (!SameSyncSettingsFile(
-			ReadSyncSettingsFile(SettingsFilePath()),
-			review.local)) {
-		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
-	}
-
+	const auto stamp = SyncConfigReviewStamp(review);
 	if (!review.bound) {
+		const auto before = PlanSyncConfigApply(
+			ReviewSyncConfigInventory(
+				inventory,
+				nullptr,
+				{},
+				ReadSyncSettingsFile(SettingsFilePath())),
+			stamp,
+			chosenRemoteKey);
+		if (before.status != SyncConfigApplyPlanStatus::Ready) {
+			return Stop(result, StatusOf(before.status));
+		}
 		const auto setup = InitializeSyncAccountLocally(
 			account,
 			session,
@@ -240,66 +175,48 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	} else if (CheckAccountSyncBinding(*state, account)
 			!= SyncAccountBindingVerdict::Bound) {
 		return Stop(result, SyncConfigApplyStatus::AccountUnbound);
-	} else if ((review.bound && state->install != review.state.install)
-		|| (!review.space.isEmpty() && state->space != review.space)) {
-		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
+	}
+	auto staged = QByteArray();
+	if (state->config.pendingSeq) {
+		const auto pending = store.ReadPendingConfig();
+		if (!pending) {
+			return Stop(
+				result,
+				SyncConfigApplyStatus::StoreError,
+				pending.status);
+		}
+		staged = pending.staged;
 	}
 	const auto token = AccountSyncBindingToken(account);
 	const auto local = ReadSyncSettingsFile(SettingsFilePath());
-	if (!SameSyncSettingsFile(local, review.local)) {
-		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
-	}
-	const auto config = SyncConfigStateOf(*state);
-	const auto heads = SyncConfigHeadsOf(review.heads);
-	const auto ownHead = review.ownHead
-		? std::make_optional(review.ownHead->head)
-		: std::nullopt;
-	const auto plan = PlanConfigSync(
-		local.fingerprint,
-		config,
-		heads,
-		ownHead);
-	if (!SamePlan(plan, review.plan)) {
-		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
-	}
-	const auto choice = PlanConfigChoice(config, plan, chosenRemoteKey);
-	if (!choice) {
-		return Stop(result, SyncConfigApplyStatus::InvalidChoice);
+	const auto plan = PlanSyncConfigApply(
+		ReviewSyncConfigInventory(inventory, state, staged, local),
+		(review.bound
+			? stamp
+			: SyncConfigReviewStamp(SyncConfigJoinedReview(review, *state))),
+		chosenRemoteKey);
+	if (plan.status != SyncConfigApplyPlanStatus::Ready || plan.join) {
+		return Stop(
+			result,
+			(plan.join
+				? SyncConfigApplyStatus::NeedsRecheck
+				: StatusOf(plan.status)));
 	}
 
-	auto next = config;
+	auto current = local;
 	result.fingerprint = local.fingerprint;
-	if (choice->writeRemote) {
-		const auto record = std::find_if(
-			review.heads.begin(),
-			review.heads.end(),
-			[&](const SyncConfigHeadRecord &record) {
-				return record.head.key == choice->write.key
-					&& record.head.install == choice->write.install
-					&& record.head.seq == choice->write.seq;
-			});
-		if (record == review.heads.end()) {
-			return Stop(result, SyncConfigApplyStatus::NeedsReview);
-		}
-		const auto baseKnown = !config.base.isEmpty()
-			&& KeyFingerprint(config.base) == local.fingerprint;
-		const auto written = KeyFingerprint(record->head.key);
-		result.otherVersionsRemain = std::any_of(
-			plan.offered.begin(),
-			plan.offered.end(),
-			[&](const ConfigHead &head) {
-				return KeyFingerprint(head.key) != written;
-			});
-		const auto reason = (plan.verdict == ConfigSyncVerdict::UpdateReady)
+	if (plan.choice.writeRemote) {
+		result.otherVersionsRemain = plan.otherVersionsRemain;
+		const auto reason = plan.update
 			? SyncConfigHistoryReason::BeforeUpdate
 			: SyncConfigHistoryReason::BeforeChoice;
 		const auto write = WriteSettingsWithHistory(
 			local,
-			record->text,
-			written,
+			plan.source->text,
+			plan.writeFingerprint,
 			reason,
-			SourceLabel(*record, reason),
-			baseKnown ? config.base : QString());
+			SourceLabel(*plan.source, reason),
+			plan.versionKey);
 		result.historyId = write.historyId;
 		result.wroteFile = write.wrote;
 		result.undoAvailable = write.wrote && write.restorable;
@@ -308,17 +225,21 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		}
 		NoteSettingsImported(write.readBack.text);
 		result.fingerprint = write.readBack.fingerprint;
+		current = write.readBack;
 	}
-	if (!choice->adopt.empty()) {
-		const auto adopted = AdoptConfigHeads(
-			config,
-			result.fingerprint,
-			choice->adopt);
-		if (!adopted) {
-			return Stop(result, SyncConfigApplyStatus::NeedsReview);
-		}
+	const auto completion = CompleteSyncConfigApply(plan, current);
+	switch (completion.status) {
+	case SyncConfigApplyCompletionStatus::Ready:
+		break;
+	case SyncConfigApplyCompletionStatus::ReadBackMismatch:
+		return Stop(result, SyncConfigApplyStatus::WriteError);
+	case SyncConfigApplyCompletionStatus::InvalidPlan:
+	case SyncConfigApplyCompletionStatus::AdoptRefused:
+		return Stop(result, SyncConfigApplyStatus::NeedsReview);
+	}
+	if (completion.adopted) {
 		const auto committed = store.CommitConfigData(
-			SyncLocalConfigOf(*adopted),
+			SyncLocalConfigOf(*completion.adopted),
 			token);
 		if (!committed) {
 			return Stop(
@@ -326,15 +247,12 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 				SyncConfigApplyStatus::StoreError,
 				committed.status);
 		}
-		next = *adopted;
 		result.adopted = true;
 	}
-	ProposeNextPublish(result, next, heads, ownHead);
-	if (choice->writeRemote
-		&& (choice->publish != result.publishNeeded
-			|| !SameSyncConfigKeySet(
-				SyncConfigVersionKeys(choice->parents),
-				result.expectedParents))) {
+	result.nextVerdict = completion.nextVerdict;
+	result.publishNeeded = completion.publishNeeded;
+	result.expectedParents = completion.expectedParents;
+	if (!completion.promiseKept) {
 		LOG(("Purple Error: the settings choice promised a different "
 			"publish than a fresh check proposes."));
 	}

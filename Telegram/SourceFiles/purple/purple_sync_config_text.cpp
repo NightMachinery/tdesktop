@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_text.h"
 
-#include "purple/purple_config_payload.h"
 #include "purple/purple_sync_envelope.h"
 
 #include <QtCore/QStringList>
@@ -17,8 +16,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 namespace {
 
-constexpr auto kMaximumRecordBytes = 256 * 1024;
-
 [[nodiscard]] QString Plural(
 		int count,
 		const QString &one,
@@ -26,20 +23,11 @@ constexpr auto kMaximumRecordBytes = 256 * 1024;
 	return (count == 1) ? one : many.arg(count);
 }
 
-[[nodiscard]] QString KeyFingerprint(const QString &key) {
-	const auto parsed = ParseConfigVersionKey(key);
-	return parsed ? parsed->fingerprint : QString();
-}
-
 [[nodiscard]] std::vector<QString> DeviceNames(
-		const SyncConfigReview &review,
-		const std::vector<ConfigHead> &heads) {
+		const std::vector<SyncDeviceNameParts> &devices) {
 	auto result = std::vector<QString>();
-	for (const auto &head : heads) {
-		const auto record = FindSyncConfigHeadRecord(review, head);
-		const auto name = record
-			? SyncDeviceName(*record)
-			: SyncDeviceName(QString(), head.install);
+	for (const auto &device : devices) {
+		const auto name = SyncDeviceName(device);
 		if (std::find(result.begin(), result.end(), name) == result.end()) {
 			result.push_back(name);
 		}
@@ -47,40 +35,30 @@ constexpr auto kMaximumRecordBytes = 256 * 1024;
 	return result;
 }
 
-[[nodiscard]] bool HasConcurrent(const SyncConfigReview &review) {
-	const auto &heads = review.plan.classification.heads;
-	return std::any_of(heads.begin(), heads.end(), [](const auto &outcome) {
-		return outcome.kind == ConfigHeadKind::Concurrent;
-	});
-}
-
-[[nodiscard]] QString NotPublishableText(const SyncSettingsFile &local) {
-	return (local.status == SyncSettingsFileStatus::Absent)
-		? u"settings.toml does not exist, so there is nothing to send."_q
-		: u"settings.toml is empty, is not valid TOML, or is too large to "
-			"send. Fix it and check again."_q;
-}
-
 [[nodiscard]] QString ChooseText(const SyncConfigReview &review) {
 	const auto devices = SyncDeviceList(SyncOfferedDeviceNames(review));
-	if (review.plan.verdict == ConfigSyncVerdict::Choose) {
-		return review.bound
-			? u"Settings from %1 are not related to this device's."_q.arg(
-				devices)
-			: u"Settings from %1 are already in this account, and this "
-				"device's settings are different."_q.arg(devices);
-	} else if (HasConcurrent(review)) {
+	switch (SyncConfigChooseMessage(review)) {
+	case SyncConfigMessage::ChooseBound:
+		return u"Settings from %1 are not related to this device's."_q.arg(
+			devices);
+	case SyncConfigMessage::ChooseUnbound:
+		return u"Settings from %1 are already in this account, and this "
+			"device's settings are different."_q.arg(devices);
+	case SyncConfigMessage::ConflictConcurrent:
 		return u"This device and %1 both changed settings since they last "
 			"matched."_q.arg(devices);
+	case SyncConfigMessage::ConflictSplitBound:
+		return u"Settings from %1 differ from each other."_q.arg(devices);
+	default:
+		break;
 	}
-	return review.bound
-		? u"Settings from %1 differ from each other."_q.arg(devices)
-		: u"Settings from %1 differ from each other and from this "
-			"device's."_q.arg(devices);
+	return u"Settings from %1 differ from each other and from this "
+		"device's."_q.arg(devices);
 }
 
-[[nodiscard]] QString JoinedFailureReason(const SyncConfigApplyResult &result) {
-	switch (result.status) {
+[[nodiscard]] QString JoinedFailureReason(
+		const SyncConfigApplyFailure &failure) {
+	switch (failure.status) {
 	case SyncConfigApplyStatus::NeedsRecheck:
 		return u"settings or Saved Messages changed since the check"_q;
 	case SyncConfigApplyStatus::NeedsReview:
@@ -98,9 +76,9 @@ constexpr auto kMaximumRecordBytes = 256 * 1024;
 		return u"a copy of the current settings could not be kept in "
 			"History"_q;
 	case SyncConfigApplyStatus::WriteError:
-		return result.historyId.isEmpty()
-			? u"the chosen version could not be written exactly"_q
-			: u"writing the file failed"_q;
+		return failure.historyKept
+			? u"writing the file failed"_q
+			: u"the chosen version could not be written exactly"_q;
 	case SyncConfigApplyStatus::Applied:
 	case SyncConfigApplyStatus::SetupFailed:
 		break;
@@ -108,14 +86,15 @@ constexpr auto kMaximumRecordBytes = 256 * 1024;
 	return u"the choice could not be finished"_q;
 }
 
-[[nodiscard]] QString WrittenFailureText(const SyncConfigApplyResult &result) {
-	const auto undo = result.undoAvailable
+[[nodiscard]] QString WrittenFailureText(
+		const SyncConfigApplyFailure &failure) {
+	const auto undo = failure.undoAvailable
 		? u" Undo puts the previous file back."_q
 		: QString();
-	if (result.status == SyncConfigApplyStatus::StoreError) {
+	if (failure.kind == SyncConfigApplyFailureKind::WrittenStateNotSaved) {
 		return u"settings.toml was updated, but this device's sync state "
 			"could not be saved. "_q
-			+ (result.otherVersionsRemain
+			+ (failure.otherVersionsRemain
 				? u"The next check asks you to choose again, with this "
 					"version as this device's settings."_q
 				: u"The next check records the update without changing the "
@@ -157,171 +136,131 @@ QString SyncRecordTimeText(uint64_t seconds) {
 	return SyncMomentText(QDateTime::fromSecsSinceEpoch(qint64(seconds)));
 }
 
-const SyncConfigHeadRecord *FindSyncConfigHeadRecord(
-		const SyncConfigReview &review,
-		const ConfigHead &head) {
-	const auto found = std::find_if(
-		review.heads.begin(),
-		review.heads.end(),
-		[&](const SyncConfigHeadRecord &record) {
-			return record.head.install == head.install
-				&& record.head.seq == head.seq
-				&& record.head.key == head.key;
-		});
-	return (found != review.heads.end()) ? &*found : nullptr;
-}
-
 std::vector<QString> SyncOfferedDeviceNames(const SyncConfigReview &review) {
-	return DeviceNames(review, review.plan.offered);
+	return DeviceNames(SyncConfigDeviceNames(review, review.plan.offered));
 }
 
 bool SyncSettingsPublishable(const SyncSettingsFile &file) {
-	if (file.status != SyncSettingsFileStatus::Present
-		|| file.text.isEmpty()) {
-		return false;
-	}
-	const auto space = FormatSyncSpaceId(QByteArray(16, '\0'));
 	const auto install = FormatSyncInstallId(QByteArray(16, '\0'));
-	if (!space || !install) {
-		return false;
-	}
-	const auto built = BuildConfigRecord({
-		.text = file.text,
-		.space = *space,
-		.install = *install,
-		.device = u"desktop:"_q + *install,
-		.platform = SyncWriterPlatform(),
-		.app = SyncWriterApp(),
-		.seq = 1,
-		.at = 1,
-	});
-	return built && built.canonical.size() <= kMaximumRecordBytes;
-}
-
-bool SyncChoicePublishes(
-		const SyncConfigReview &review,
-		const std::optional<QString> &chosenRemoteKey) {
-	const auto choice = PlanConfigChoice(
-		review.state,
-		review.plan,
-		chosenRemoteKey);
-	return choice && choice->publish;
+	return install
+		&& SyncSettingsPublishable(
+			file,
+			u"desktop:"_q + *install,
+			SyncWriter());
 }
 
 SyncConfigBoxStatus DescribeSyncConfigReview(
 		const SyncConfigReview &review,
 		const QDateTime &checkedAt) {
-	using Action = SyncConfigBoxAction;
-	switch (review.status) {
-	case SyncConfigReviewStatus::Ready:
-		break;
-	case SyncConfigReviewStatus::NeedsReview:
-		if (review.bound && !review.state.pending.isEmpty()) {
-			return { u"A settings post from this device may not have "
-				"finished, but Saved Messages also has sync records this "
-				"device cannot safely use: they are ambiguous, unreadable, or "
-				"in another sync space. The earlier post stays paused while "
-				"they remain. Nothing was sent."_q };
-		}
+	using Message = SyncConfigMessage;
+	const auto described = DescribeSyncConfigReview(
+		review,
+		SyncSettingsPublishable(review.local));
+	const auto action = described.action;
+	switch (described.message) {
+	case Message::NeedsReviewWithPending:
+		return { u"A settings post from this device may not have finished, "
+			"but Saved Messages also has sync records this device cannot "
+			"safely use: they are ambiguous, unreadable, or in another sync "
+			"space. The earlier post stays paused while they remain. Nothing "
+			"was sent."_q };
+	case Message::NeedsReview:
 		return { u"Saved Messages has sync records this device cannot "
 			"safely use: they are ambiguous, unreadable, or in another sync "
 			"space. Nothing was changed."_q };
-	case SyncConfigReviewStatus::Incomplete:
+	case Message::Incomplete:
 		return { u"The check did not finish, so nothing can be decided yet. "
 			"Check again."_q };
-	case SyncConfigReviewStatus::CloneDetected:
+	case Message::CloneDetected:
 		return { u"Another device is using this device's sync identity, so "
 			"sync is paused here. Nothing was changed."_q };
-	case SyncConfigReviewStatus::AccountUnavailable:
+	case Message::AccountUnavailable:
 		return { u"The selected account is unavailable. Choose an account and "
 			"check again."_q };
-	case SyncConfigReviewStatus::AccountUnbound:
+	case Message::AccountUnbound:
 		return { u"This device's sync state belongs to another account, or "
 			"its link to this account was lost. Nothing was changed."_q };
-	case SyncConfigReviewStatus::StoreError:
+	case Message::StoreError:
 		return { u"This device's sync state could not be opened. Nothing was "
 			"changed."_q };
-	case SyncConfigReviewStatus::InvalidSettings:
+	case Message::InvalidSettings:
 		return { u"settings.toml is not a regular file or is larger than "
 			"256 KB, so sync cannot use it."_q };
-	}
-	const auto &plan = review.plan;
-	switch (plan.verdict) {
-	case ConfigSyncVerdict::Invalid:
+	case Message::InvalidRecords:
 		return { u"A sync record in Saved Messages or this device's sync "
 			"state is not valid, so nothing was changed. Check again later; "
 			"if this stays, the records need manual attention."_q };
-	case ConfigSyncVerdict::Pending:
+	case Message::Pending:
 		return {
 			u"A settings post may not have finished. Finish sending checks "
 				"Saved Messages again and completes it without sending "
 				"twice."_q,
-			Action::FinishSending,
+			action,
 		};
-	case ConfigSyncVerdict::Conflict:
-	case ConfigSyncVerdict::Choose:
+	case Message::ChooseBound:
+	case Message::ChooseUnbound:
+	case Message::ConflictConcurrent:
+	case Message::ConflictSplitBound:
+	case Message::ConflictSplitUnbound:
 		return {
 			ChooseText(review) + u" Choose which settings to use."_q,
-			Action::Choose,
+			action,
 		};
-	case ConfigSyncVerdict::UpdateReady: {
-		const auto record = plan.offered.empty()
-			? nullptr
-			: FindSyncConfigHeadRecord(review, plan.offered.front());
-		if (!record) {
-			return { u"An update is ready, but its record could not be "
-				"found. Check again."_q };
-		}
+	case Message::UpdateReady:
 		return {
 			u"Update ready from %1, %2."_q.arg(
-				SyncDeviceName(*record),
-				SyncRecordTimeText(record->at)),
-			Action::ReviewUpdate,
+				SyncDeviceName(described.devices.front()),
+				SyncRecordTimeText(described.at)),
+			action,
 		};
-	}
-	case ConfigSyncVerdict::Adopt: {
-		const auto devices = SyncDeviceList(DeviceNames(review, plan.same));
-		if (!review.bound) {
-			return {
-				u"%1 already has exactly these settings. Join sync to keep "
-					"this device in step with it."_q.arg(devices),
-				Action::Join,
-			};
-		}
-		return { u"%1 has exactly these settings."_q.arg(devices) };
-	}
-	case ConfigSyncVerdict::Empty:
-		if (!SyncSettingsPublishable(review.local)) {
-			return { NotPublishableText(review.local) };
-		}
+	case Message::UpdateMissing:
+		return { u"An update is ready, but its record could not be found. "
+			"Check again."_q };
+	case Message::AdoptUnbound:
 		return {
-			(review.bound
-				? u"No settings are in this sync space yet. Publish settings "
-					"sends this device's settings."_q
-				: u"No sync records yet. Publish settings starts sync with "
-					"this device's settings."_q),
-			Action::Publish,
+			u"%1 already has exactly these settings. Join sync to keep this "
+				"device in step with it."_q.arg(
+					SyncDeviceList(DeviceNames(described.devices))),
+			action,
 		};
-	case ConfigSyncVerdict::LocalChanges:
-		if (!SyncSettingsPublishable(review.local)) {
-			return { NotPublishableText(review.local) };
-		}
+	case Message::AdoptBound:
+		return { u"%1 has exactly these settings."_q.arg(
+			SyncDeviceList(DeviceNames(described.devices))) };
+	case Message::NotPublishableAbsent:
+		return { u"settings.toml does not exist, so there is nothing to "
+			"send."_q };
+	case Message::NotPublishableInvalid:
+		return { u"settings.toml is empty, is not valid TOML, or is too large "
+			"to send. Fix it and check again."_q };
+	case Message::EmptyBound:
 		return {
-			((KeyFingerprint(review.state.base) != review.local.fingerprint)
-				? u"This device has changes that are not synced."_q
-				: u"Your other devices have not seen this device's current "
-					"settings yet."_q),
-			Action::PublishChanges,
+			u"No settings are in this sync space yet. Publish settings sends "
+				"this device's settings."_q,
+			action,
 		};
-	case ConfigSyncVerdict::UpToDate: {
-		const auto others = int(review.heads.size());
+	case Message::EmptyUnbound:
+		return {
+			u"No sync records yet. Publish settings starts sync with this "
+				"device's settings."_q,
+			action,
+		};
+	case Message::LocalChangesEdited:
+		return { u"This device has changes that are not synced."_q, action };
+	case Message::LocalChangesOwnStale:
+		return {
+			u"Your other devices have not seen this device's current "
+				"settings yet."_q,
+			action,
+		};
+	case Message::UpToDateAlone:
+	case Message::UpToDateWith: {
 		const auto checked = checkedAt.toLocalTime().toString(u"HH:mm"_q);
-		return { !others
+		return { (described.message == Message::UpToDateAlone)
 			? u"Up to date. No other devices sync yet. Checked %1."_q.arg(
 				checked)
 			: u"Up to date with %1. Checked %2."_q.arg(
 				Plural(
-					others,
+					described.others,
 					u"1 other device"_q,
 					u"%1 other devices"_q),
 				checked) };
@@ -495,17 +434,28 @@ QString SyncConfigHistoryRowText(const SyncConfigHistoryEntry &entry) {
 }
 
 QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
-	if (result.status == SyncConfigApplyStatus::Applied) {
+	const auto failure = DescribeSyncConfigApplyFailure({
+		.status = result.status,
+		.joined = result.joined,
+		.wroteFile = result.wroteFile,
+		.historyKept = !result.historyId.isEmpty(),
+		.undoAvailable = result.undoAvailable,
+		.otherVersionsRemain = result.otherVersionsRemain,
+	});
+	switch (failure.kind) {
+	case SyncConfigApplyFailureKind::None:
 		return QString();
-	} else if (result.joined && !result.wroteFile) {
+	case SyncConfigApplyFailureKind::JoinedNotWritten:
 		return u"Joined sync, but %1, so nothing was written to "
-			"settings.toml. Check again."_q.arg(JoinedFailureReason(result));
+			"settings.toml. Check again."_q.arg(JoinedFailureReason(failure));
+	case SyncConfigApplyFailureKind::WrittenStateNotSaved:
+	case SyncConfigApplyFailureKind::WrittenNotReadBack:
+		return (failure.joined ? u"Joined sync. "_q : QString())
+			+ WrittenFailureText(failure);
+	case SyncConfigApplyFailureKind::NothingDone:
+		break;
 	}
-	const auto prefix = result.joined ? u"Joined sync. "_q : QString();
-	if (result.wroteFile) {
-		return prefix + WrittenFailureText(result);
-	}
-	switch (result.status) {
+	switch (failure.status) {
 	case SyncConfigApplyStatus::Applied:
 		return QString();
 	case SyncConfigApplyStatus::NeedsRecheck:
@@ -534,7 +484,7 @@ QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
 		return u"Could not keep a copy of the current settings in History, "
 			"so nothing was changed."_q;
 	case SyncConfigApplyStatus::WriteError:
-		return !result.historyId.isEmpty()
+		return failure.historyKept
 			? u"Could not write settings.toml, so it was not changed. A copy "
 				"of it was also kept in History."_q
 			: u"The chosen version could not be written exactly, so nothing "
@@ -544,20 +494,7 @@ QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
 }
 
 bool SyncConfigUndoFinished(const SyncConfigRestoreResult &result) {
-	switch (result.status) {
-	case SyncConfigRestoreStatus::Restored:
-	case SyncConfigRestoreStatus::Unchanged:
-	case SyncConfigRestoreStatus::NotFound:
-	case SyncConfigRestoreStatus::FileDidNotExist:
-	case SyncConfigRestoreStatus::NotText:
-	case SyncConfigRestoreStatus::InvalidReason:
-		return true;
-	case SyncConfigRestoreStatus::InvalidSettings:
-	case SyncConfigRestoreStatus::HistoryError:
-	case SyncConfigRestoreStatus::WriteError:
-		break;
-	}
-	return false;
+	return SyncConfigUndoFinished(result.status);
 }
 
 QString SyncConfigRestoreText(

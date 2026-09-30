@@ -2168,6 +2168,10 @@ PRIVATE
     purple/purple_splice.h
     purple/purple_state.cpp
     purple/purple_state.h
+    purple/purple_sync_config_describe.cpp
+    purple/purple_sync_config_describe.h
+    purple/purple_sync_config_flow.cpp
+    purple/purple_sync_config_flow.h
     purple/purple_sync_envelope.cpp
     purple/purple_sync_envelope.h
     purple/purple_sync_directory.cpp

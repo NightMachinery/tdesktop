@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_local_store.h"
 
+#include "purple/purple_sync_config_flow.h"
+
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
@@ -15,8 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QSaveFile>
 #include <QtCore/QStringList>
 
-#include <algorithm>
-#include <map>
 #include <utility>
 
 namespace Purple {
@@ -122,25 +122,6 @@ constexpr auto kConfigBytes = 256 * 1024;
 		parsed.error,
 		inspected.error,
 	};
-}
-
-[[nodiscard]] bool SameConfigData(
-		const SyncLocalConfigState &a,
-		const SyncLocalConfigState &b) {
-	return a.base == b.base
-		&& a.baseLineage == b.baseLineage
-		&& a.equiv == b.equiv
-		&& a.pending == b.pending
-		&& a.seenSeq == b.seenSeq;
-}
-
-[[nodiscard]] bool KeepsSeenSequences(
-		const std::map<QString, uint64_t> &current,
-		const std::map<QString, uint64_t> &next) {
-	return std::all_of(current.begin(), current.end(), [&](const auto &entry) {
-		const auto found = next.find(entry.first);
-		return (found != next.end()) && (found->second >= entry.second);
-	});
 }
 
 }
@@ -566,32 +547,24 @@ SyncStoreResult SyncLocalStore::CommitConfigData(
 		!= SyncAccountBindingVerdict::Bound) {
 		return { SyncStoreStatus::AccountUnbound };
 	}
-	if (_state->config.pendingSeq != 0
-		|| !_state->configData.pending.isEmpty()
-		|| !next.pending.isEmpty()
-		|| !KeepsSeenSequences(_state->configData.seenSeq, next.seenSeq)) {
-		return { SyncStoreStatus::InvalidTransition };
-	}
-	auto updated = *_state;
-	updated.configData = next;
-	const auto serialized = SerializeSyncLocalState(updated);
-	if (!serialized) {
-		return { SyncStoreStatus::InvalidState, serialized.error };
-	}
-	const auto parsed = ParseSyncLocalState(serialized.canonical);
-	if (!parsed || !SameConfigData(parsed.state.configData, next)) {
-		return { SyncStoreStatus::InvalidState, parsed.error };
-	}
-	if (SameConfigData(_state->configData, next)) {
+	const auto checked = CheckSyncConfigDataCommit(*_state, next);
+	switch (checked.status) {
+	case SyncConfigCommitStatus::Ready:
+		break;
+	case SyncConfigCommitStatus::Unchanged:
 		return { SyncStoreStatus::Ready };
+	case SyncConfigCommitStatus::InvalidTransition:
+		return { SyncStoreStatus::InvalidTransition };
+	case SyncConfigCommitStatus::InvalidState:
+		return { SyncStoreStatus::InvalidState, checked.error };
 	}
 	const auto stateStatus = WriteSyncPrivateFile(
 		StatePath(),
-		serialized.canonical);
+		checked.canonical);
 	if (stateStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stateStatus });
 	}
-	_state = std::move(updated);
+	_state = checked.state;
 	return { SyncStoreStatus::Ready };
 }
 
