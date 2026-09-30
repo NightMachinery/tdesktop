@@ -152,6 +152,28 @@ in about a second. Run it after touching the core or anything in
 `Telegram/SourceFiles/purple/`; a full app build to test a config change is
 never necessary.
 
+### Keeping upstream merges easy
+
+Upstream tdesktop is merged into this fork again and again, and every line
+Purple changes in an upstream file is a conflict waiting in some future merge.
+So Purple code lives in Purple's own files: `Telegram/SourceFiles/purple/`, or
+the purple-core submodule when the Android app needs the same logic.
+
+- Touch an upstream file only to add a hook: one include, one guarded call into
+  a `Purple::` function, or one early return. Put the decision and the work
+  behind that call, in a Purple file.
+- Do not copy, move or restructure upstream code to make room for Purple
+  logic, and do not reformat upstream lines you pass through. If there is no
+  place for a hook, add the smallest extension point that makes one.
+- When a feature seems to need a large edit inside an upstream file, look for
+  a smaller hook first. If the edit is still needed, say in the feature's doc
+  under `docs/purple/` which upstream files it touches and why.
+- Review your own diff of upstream files before committing; each hunk should
+  read as a hook, not as feature code.
+
+New work follows this from the start. Older Purple code that still sits inside
+upstream files is being moved out.
+
 ## Troubleshooting
 
 ### "Libraries not found"
