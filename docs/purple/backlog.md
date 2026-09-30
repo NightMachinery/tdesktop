@@ -113,11 +113,25 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   keeps a forwarded sender name hidden in a non-exempt verification
   notification while passcode-locked. These fixes are included in the signed
   Android APK from source `32c1ee0c`, which installed and launched with the
-  test account intact. The notification privacy paths still need runtime
-  checks, and those need an inbound message from another account or a bot.
-  The 2026-09-30 emulator run sent none, so they wait for an approved
-  message source. The check reads each posted notification's title, text and
-  messaging-style lines from `dumpsys notification --noredact`.
+  test account intact. An emulator run on 2026-09-30, on the installed
+  `b0bd74c7` build, sent inbound bot messages with `tsend` and read the
+  posted notifications with `dumpsys notification --noredact` and the
+  notification shade.
+  - With previews off for private chats and `preview_always = []`, a text
+    message showed only "<bot> sent you a message" in the full preview and
+    "Message" in the short one. A rich message was hidden the same way, which
+    confirms the `d3844efb` fix.
+  - With the default exemptions (`MAGIC_BOTS`), the same bot's plain and rich
+    messages showed their text with previews off.
+  - While passcode-locked, a non-exempt message showed only "You have a new
+    message". An exempt bot's message still showed its text.
+  - Not reachable with a bot: pinned-message previews, self-destructing
+    captions, and the forwarded sender in the Verification Codes chat. They
+    need a second account, or a bot pin through the Bot API, and a real
+    forwarded code message.
+  - Upstream behavior, not a leak: the full preview of an allowed rich
+    message is the generic "sent you a message" line, because only the short
+    builder handles rich messages.
 - **Pinned music menu:** Android ships the chat-menu action and dialog in the
   release from source `5e428532` with core `e7bf8544`. Its dialog defaults
   were observed on `9b908110` and carried unchanged into `5e428532`: one song
