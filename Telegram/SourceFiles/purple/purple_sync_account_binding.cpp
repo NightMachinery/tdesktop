@@ -7,7 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_account_binding.h"
 
+#include "data/data_user.h"
 #include "main/main_account.h"
+#include "main/main_session.h"
 #include "storage/storage_account.h"
 
 namespace Purple {
@@ -39,6 +41,16 @@ bool StoreAccountSyncBinding(
 	account.local().writePref<QByteArray>(kBindingTokenPref, token);
 	return CheckAccountSyncBinding(state, account)
 		== SyncAccountBindingVerdict::Bound;
+}
+
+bool SyncAccountAvailable(
+		Main::Account &account,
+		Main::Session &session,
+		uint64_t accountUserId) {
+	return !account.loggingOut()
+		&& account.maybeSession() == &session
+		&& accountUserId
+		&& accountUserId == peerToUser(session.user()->id).bare;
 }
 
 }
