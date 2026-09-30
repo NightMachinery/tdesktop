@@ -19,17 +19,17 @@ lets the publisher reconcile an exact prior record or post a staged record
 only when its planner allows it. Existing records from a different sync space
 cannot be joined. Neither action retries automatically.
 
-Desktop also has a settings History store for the planned account-sync update,
-choice, restore, and undo actions. It keeps up to 30 exact copies of
-`settings.toml`, each with its reason, time, and fingerprint, in the
-owner-only `sync/history/` directory under the Purple config directory.
-Nothing calls it yet, and the manual import below still keeps only
-`settings.toml.bak`. The local sync store can also record another device's
-settings version as adopted without staging a post, which the planned join and
-update actions need; nothing calls that yet either. A review step can now
-read every other device's newest settings record in the selected space,
-together with the local file and this device's own record, and ask the shared
-planner what they mean. The setup box does not show that review yet.
+Desktop also has the pieces of the planned review and apply actions, none of
+them shown in the setup box yet. A review step reads every other device's
+newest settings record in the selected space, together with the local file and
+this device's own record, and asks the shared planner what they mean. An apply
+step carries out a choice from that review locally: it saves the current file
+to a settings History, writes the chosen version, checks what landed, and then
+records it in the local sync store, in that order. It never posts. Restore and
+Undo write a History entry back the same way. History keeps up to 30 exact
+copies of `settings.toml`, each with its reason, time, and fingerprint, in the
+owner-only `sync/history/` directory under the Purple config directory. The
+manual import below still keeps only `settings.toml.bak`.
 
 The current manual transfer has two actions:
 

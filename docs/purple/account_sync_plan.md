@@ -188,8 +188,8 @@ reader accepts an entry only when both files exist, the metadata parses, and
 the bytes match the recorded fingerprint. After a new entry is fully written,
 the store keeps the newest 30 valid entries, deletes older ones and invalid
 leftovers older than those 30, and never deletes anything outside that
-directory. Nothing calls it yet, and the manual import still keeps its single
-`settings.toml.bak`.
+directory. Only the uncalled apply and restore steps below write to it, and
+the manual import still keeps its single `settings.toml.bak`.
 
 The desktop local store can also commit new config data without staging a
 record. A later update or join step needs this to record an adopted remote
@@ -199,7 +199,7 @@ binding token. It refuses while a config record is staged, when the new data
 carries a pending key, and when any `seen_seq` entry would decrease or
 disappear. The whole next state must pass the shared serializer and parser,
 and it is saved with the same atomic state write that staging uses. Committing
-unchanged data writes nothing. Nothing calls this operation yet.
+unchanged data writes nothing. Only the uncalled apply step below uses it.
 
 Desktop now has an uncalled review step for an existing sync space. From a
 complete inventory it extracts, for every other install in the selected space,
@@ -223,6 +223,40 @@ spaces is not supported. A clone, an unresolved own record or an incomplete
 inventory stops the same way. The step holds the sync store lock only while it
 runs and writes nothing. The same file holds a publish gate that plans on the
 click inventory in the same way; the publisher does not use it yet.
+
+An uncalled apply step performs the local half of a choice made in that
+review, and never posts. It repeats the account checks, extracts the heads
+again from the inventory it is given, and re-reads `settings.toml`; if the
+heads or the file's bytes changed since the review, it stops and asks for a
+new check. An unbound install joins first, creating its install identity and
+binding in the selected space, or in a new space when the account has none.
+With the store open it plans again from the stored state, the review's heads
+and the review's own record, and continues only when the verdict, the offered
+and same-content heads, and the own-record staleness all match the review.
+Writing another device's version first saves the current file to History,
+with the reason before update or before choice, a label naming the source
+platform and device, and the local version key when the file still matches
+the base. If that save fails, nothing is written. Then it writes the text,
+reads it back and requires the head's fingerprint, marks the bytes as imported
+so the legacy automatic send does not echo them, and only then commits the
+adopted config data. The file is never written with bytes that would not
+survive the text conversion exactly. If the state commit fails or the process
+dies after the file write, the next check finds the local file equal to that
+head. When that head was the only offered content, the check reports Adopt and
+records it without writing anything. When other contents remain, it offers the
+same choice again with the written version as this device's side; keeping it
+then publishes the same parents the original choice promised. Adopting without
+a write commits the new config data directly. Finally the step plans once more
+on the new state and reports the verdict a new check would show, whether that
+plan proposes a publish, and with which parent keys. After a remote pick this
+is exactly the publish the choice promised. After keeping this device's
+version it can add the base as a parent, because the adoption of any
+same-content heads has already moved the base. The publisher must find the
+same parents on the click. The same file restores a History entry for Restore
+and Undo: it saves the current file to History, writes the entry, reads it
+back and checks the fingerprint. It changes no sync state, so the next check
+reports local changes. An entry recorded for a missing file is refused,
+because restoring it would mean deleting `settings.toml`.
 
 The read-only scanner and candidate reader now leave Telegram's standard
 `FLOOD_WAIT` retry enabled. A rate-limit wait no longer immediately turns the
