@@ -79,6 +79,53 @@ constexpr auto kMaximumRecordBytes = 256 * 1024;
 			"device's."_q.arg(devices);
 }
 
+[[nodiscard]] QString JoinedFailureReason(const SyncConfigApplyResult &result) {
+	switch (result.status) {
+	case SyncConfigApplyStatus::NeedsRecheck:
+		return u"settings or Saved Messages changed since the check"_q;
+	case SyncConfigApplyStatus::NeedsReview:
+	case SyncConfigApplyStatus::InvalidChoice:
+		return u"that choice is no longer available"_q;
+	case SyncConfigApplyStatus::AccountUnavailable:
+		return u"the selected account became unavailable"_q;
+	case SyncConfigApplyStatus::AccountUnbound:
+		return u"the link to this account could not be confirmed"_q;
+	case SyncConfigApplyStatus::StoreError:
+		return u"this device's sync state could not be opened or saved"_q;
+	case SyncConfigApplyStatus::InvalidSettings:
+		return u"settings.toml could not be read"_q;
+	case SyncConfigApplyStatus::HistoryError:
+		return u"a copy of the current settings could not be kept in "
+			"History"_q;
+	case SyncConfigApplyStatus::WriteError:
+		return result.historyId.isEmpty()
+			? u"the chosen version could not be written exactly"_q
+			: u"writing the file failed"_q;
+	case SyncConfigApplyStatus::Applied:
+	case SyncConfigApplyStatus::SetupFailed:
+		break;
+	}
+	return u"the choice could not be finished"_q;
+}
+
+[[nodiscard]] QString WrittenFailureText(const SyncConfigApplyResult &result) {
+	const auto undo = result.undoAvailable
+		? u" Undo puts the previous file back."_q
+		: QString();
+	if (result.status == SyncConfigApplyStatus::StoreError) {
+		return u"settings.toml was updated, but this device's sync state "
+			"could not be saved. "_q
+			+ (result.otherVersionsRemain
+				? u"The next check asks you to choose again, with this "
+					"version as this device's settings."_q
+				: u"The next check records the update without changing the "
+					"file."_q)
+			+ undo;
+	}
+	return u"settings.toml was written but did not read back as expected. "
+		"The previous file is in History. Check again."_q + undo;
+}
+
 } // namespace
 
 QString SyncCloudDisclosureText() {
@@ -448,6 +495,16 @@ QString SyncConfigHistoryRowText(const SyncConfigHistoryEntry &entry) {
 }
 
 QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
+	if (result.status == SyncConfigApplyStatus::Applied) {
+		return QString();
+	} else if (result.joined && !result.wroteFile) {
+		return u"Joined sync, but %1, so nothing was written to "
+			"settings.toml. Check again."_q.arg(JoinedFailureReason(result));
+	}
+	const auto prefix = result.joined ? u"Joined sync. "_q : QString();
+	if (result.wroteFile) {
+		return prefix + WrittenFailureText(result);
+	}
 	switch (result.status) {
 	case SyncConfigApplyStatus::Applied:
 		return QString();
@@ -468,12 +525,8 @@ QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
 		return u"Could not set up sync on this device, so nothing was done. "
 			"Check again."_q;
 	case SyncConfigApplyStatus::StoreError:
-		return result.wroteFile
-			? u"settings.toml was updated, but this device's sync state "
-				"could not be saved. Check again: the next check records the "
-				"update without changing the file."_q
-			: u"This device's sync state could not be opened or saved, so "
-				"nothing was done."_q;
+		return u"This device's sync state could not be opened or saved, so "
+			"nothing was done."_q;
 	case SyncConfigApplyStatus::InvalidSettings:
 		return u"settings.toml is not a regular file or is too large, so "
 			"nothing was done."_q;
@@ -481,16 +534,30 @@ QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
 		return u"Could not keep a copy of the current settings in History, "
 			"so nothing was changed."_q;
 	case SyncConfigApplyStatus::WriteError:
-		return result.wroteFile
-			? u"settings.toml was written but did not read back as expected. "
-				"The previous file is in History. Check again."_q
-			: !result.historyId.isEmpty()
+		return !result.historyId.isEmpty()
 			? u"Could not write settings.toml, so it was not changed. A copy "
 				"of it was also kept in History."_q
 			: u"The chosen version could not be written exactly, so nothing "
 				"was changed."_q;
 	}
 	return QString();
+}
+
+bool SyncConfigUndoFinished(const SyncConfigRestoreResult &result) {
+	switch (result.status) {
+	case SyncConfigRestoreStatus::Restored:
+	case SyncConfigRestoreStatus::Unchanged:
+	case SyncConfigRestoreStatus::NotFound:
+	case SyncConfigRestoreStatus::FileDidNotExist:
+	case SyncConfigRestoreStatus::NotText:
+	case SyncConfigRestoreStatus::InvalidReason:
+		return true;
+	case SyncConfigRestoreStatus::InvalidSettings:
+	case SyncConfigRestoreStatus::HistoryError:
+	case SyncConfigRestoreStatus::WriteError:
+		break;
+	}
+	return false;
 }
 
 QString SyncConfigRestoreText(

@@ -197,7 +197,13 @@ and names and that Saved Messages is a Telegram cloud chat readable by other
 signed-in sessions, including Join sync, which sends nothing. Results report
 confirmation, uncertainty, review, binding, and store failures without an
 automatic retry. An uncertain outcome requires a new check before anything
-else. The future
+else. Joining is saved before History and the file, so a later failure in the
+same apply reports "Joined sync, but ..." and that nothing was written to
+`settings.toml`; the next check sees a linked device with an empty base and
+offers Choose or Adopt again. Undo last update is offered after any apply that
+wrote the file, including one whose state commit failed, unless the saved copy
+records a missing file or is not valid UTF-8 text. A failed Undo keeps the row
+unless the copy is gone or can never be restored. The future
 transport engine must reconcile the install's own remote record for clone or
 rewind signals before any publish. Android's uncalled bridge can initialize
 canonical local state bound to the active Telegram user in its account slot,
@@ -280,9 +286,11 @@ update from Android 9c1d", and the local version key when the file still
 matches the base. A device is named by its record's platform and the first
 four characters of its install ID after the `in-` prefix. If that save fails,
 nothing is written. Then it writes the text, reads it back and requires the
-head's fingerprint, marks the bytes as imported
-so the legacy automatic send does not echo them, and only then commits the
-adopted config data. The file is never written with bytes that would not
+head's fingerprint, marks the bytes as imported so the legacy automatic send
+does not echo them, and only then commits the adopted config data. The result
+says whether the History copy can be restored and whether other offered
+versions remain, so the box can offer Undo and say what the next check will
+do when the commit fails. The file is never written with bytes that would not
 survive the text conversion exactly. If the state commit fails or the process
 dies after the file write, the next check finds the local file equal to that
 head. When that head was the only offered content, the check reports Adopt and

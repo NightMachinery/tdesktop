@@ -25,6 +25,7 @@ struct VerifiedWrite {
 	QString historyId;
 	SyncSettingsFile readBack;
 	bool wrote = false;
+	bool restorable = false;
 };
 
 [[nodiscard]] std::vector<QString> HeadKeys(
@@ -114,6 +115,8 @@ struct VerifiedWrite {
 		return result;
 	}
 	result.historyId = saved->id;
+	result.restorable = saved->existed
+		&& SyncSettingsTextWritable(current.text);
 	if (!WriteConfigFile(SettingsFilePath(), QString::fromUtf8(text))) {
 		return result;
 	}
@@ -280,18 +283,26 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		}
 		const auto baseKnown = !config.base.isEmpty()
 			&& KeyFingerprint(config.base) == local.fingerprint;
+		const auto written = KeyFingerprint(record->head.key);
+		result.otherVersionsRemain = std::any_of(
+			plan.offered.begin(),
+			plan.offered.end(),
+			[&](const ConfigHead &head) {
+				return KeyFingerprint(head.key) != written;
+			});
 		const auto reason = (plan.verdict == ConfigSyncVerdict::UpdateReady)
 			? SyncConfigHistoryReason::BeforeUpdate
 			: SyncConfigHistoryReason::BeforeChoice;
 		const auto write = WriteSettingsWithHistory(
 			local,
 			record->text,
-			KeyFingerprint(record->head.key),
+			written,
 			reason,
 			SourceLabel(*record, reason),
 			baseKnown ? config.base : QString());
 		result.historyId = write.historyId;
 		result.wroteFile = write.wrote;
+		result.undoAvailable = write.wrote && write.restorable;
 		if (write.status != SyncConfigApplyStatus::Applied) {
 			return Stop(result, write.status);
 		}
