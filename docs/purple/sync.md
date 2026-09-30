@@ -44,12 +44,17 @@ most one next step:
 **Up to date** reports how many other devices sync and when the check ran.
 Invalid records, clones, another account's state, store errors and incomplete
 scans are plain text with no action, and so is a local file that is missing,
-not valid TOML or too large to send. When this device is already linked and
-another device has exactly its file, the check adopts that silently and
-reviews again. Devices are named by the record's platform and the first four
-characters of the install ID after the `in-` prefix, for example `Android
-9c1d`. Desktop writes its platform as Windows, macOS or Linux, as the manual
-Send action does.
+not valid TOML or too large to send. While `settings.toml` is missing or does
+not load and the app runs from its last working copy, `settings.toml.good`,
+the check says so and offers nothing until the file is fixed or restored,
+because writing a synced version then would replace the only copy of the
+settings the device is running. Restore and Undo stay available; once a
+restored file loads, it replaces `settings.toml.good` as usual. When this
+device is already linked and another device has exactly its file, the check
+adopts that silently and reviews again. Devices are named by the record's
+platform and the first four characters of the install ID after the `in-`
+prefix, for example `Android 9c1d`. Desktop writes its platform as Windows,
+macOS or Linux, as the manual Send action does.
 
 The publisher enforces two modes. Finish sending starts it pending-only: it
 confirms or posts the record already staged and refuses when nothing is

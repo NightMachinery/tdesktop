@@ -186,6 +186,10 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 	case Message::InvalidSettings:
 		return { u"settings.toml is not a regular file or is larger than "
 			"256 KB, so sync cannot use it."_q };
+	case Message::UsingLastGood:
+		return { u"settings.toml is missing or does not load, so this device "
+			"is running its last working copy of it. Sync changes nothing "
+			"until settings.toml is fixed or restored."_q };
 	case Message::InvalidRecords:
 		return { u"A sync record in Saved Messages or this device's sync "
 			"state is not valid, so nothing was changed. Check again later; "
