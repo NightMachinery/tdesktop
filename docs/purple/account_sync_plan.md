@@ -168,19 +168,46 @@ calls) live in purple-core's `purple_sync_config_flow` as `PlanSyncConfigPost`
 and `PlanSyncConfigStagedPost`, so Android makes the same ones; the desktop
 publisher keeps the store, the account checks and the post.
 
-Finish sending has a known duplicate-post window, left unfixed on desktop.
+Finish sending refuses to post while an earlier copy is still queued.
 Cancelling a publish, closing the box or losing the receipt only stops the
 publisher from listening: the upload and `messages.sendMedia` stay in the
 session's send queue and go out when the connection or upload queue allows,
 for as long as the app runs. A check in the meantime reads Saved Messages from
-the server, does not see the queued message, and still finds the stage, so it
-offers Finish sending, and that posts the same staged bytes a second time.
-When both arrive, Saved Messages holds two byte-identical records at one
-sequence. The own-record reconcile lists the later one as a duplicate and
-every decision stays the same, so the cost is a redundant message that every
-later check downloads. The Android port is to refuse Finish sending while
-Telegram's own queue still holds the earlier post; desktop could do the same
-by looking for an unsent local item carrying the sync file in Saved Messages.
+the server, cannot see the queued message, still finds the stage and offers
+Finish sending. Before planning, the publisher asks the session's data layer
+whether Saved Messages holds a local item the server has not confirmed yet,
+still sending or marked failed, whose document is named
+`Purple settings sync.json` (`SyncConfigSendQueueOf`, which walks
+`History::clientSideMessages()` of the self chat). Core's `PlanSyncConfigPost`
+takes that answer and returns StillSending instead of posting the staged bytes
+again. The box says that an earlier copy is still being sent, or failed, in
+Saved Messages, and asks the person to wait until it arrives and check again,
+or to delete the failed copy there first. Nothing retries on its own and no
+timer runs. When the earlier copy arrives, the next check finds it and Finish
+sending confirms it without posting; that confirmation wins even while the
+queue still lists a copy.
+
+The list is the session's `History` object for Saved Messages, not a widget, so
+it holds items queued by earlier setup boxes or from the chat itself for the
+whole session. An item leaves it only when the server assigns its real id or
+the item is destroyed. A failed copy therefore keeps Finish sending refused
+until the person deletes it, which clears the refusal, or resends it from the
+chat, which ends like any other arrival. A file of that name sent by hand is
+refused the same way, which only delays the post.
+
+Two narrow gaps remain. `sendFiles` prepares the document on the file loader
+queue before `Api::SendConfirmedFile` creates the local item, so during that
+preparation, normally milliseconds for a record under 256 KiB but longer when
+large files wait ahead of it in the same queue, the post is in flight and not
+yet in the list. Quitting the app still closes the window: tdesktop does not
+keep unsent media sends across a restart, so a copy either reached the server
+before the quit, where the next check finds and confirms it, or is gone, and
+Finish sending then posts it once. Both points are read from the code, not
+observed live. If two copies arrive anyway, Saved Messages holds two
+byte-identical records at one sequence; the own-record reconcile lists the
+later one as a duplicate and every decision stays the same, so the cost is a
+redundant message that every later check downloads. The Android port is to
+adopt the same core rule with its own queue query.
 
 The desktop setup box runs this inventory against one signed-in account,
 shows scan progress, and passes a complete result to the review step described

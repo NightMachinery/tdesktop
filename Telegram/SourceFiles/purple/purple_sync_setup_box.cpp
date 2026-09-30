@@ -185,6 +185,11 @@ struct SetupBoxState {
 	case SyncConfigPublishStatus::Cancelled:
 		return u"Sending cancelled before anything was sent. Check again "
 			"before trying again."_q;
+	case SyncConfigPublishStatus::StillSending:
+		return u"Not sent: an earlier copy of this settings post is still "
+			"being sent, or failed to send, in Saved Messages. Wait until it "
+			"arrives and check again, or delete the failed copy there "
+			"first."_q;
 	}
 	return u"Sending stopped. Check again before trying again."_q;
 }

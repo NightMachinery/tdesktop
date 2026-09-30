@@ -35,8 +35,11 @@ most one next step:
 - **Finish sending** when an earlier post may not have finished and the
   check is otherwise clean. It checks again and lets the publisher either
   confirm the record already in Saved Messages or send the staged record
-  once. When Saved Messages also holds records this device cannot safely
-  use, the box only explains that the post is paused.
+  once. While an earlier copy is still being sent, or failed, in Saved
+  Messages, it sends nothing and asks you to wait for that copy and check
+  again, or to delete the failed copy first. When Saved Messages also holds
+  records this device cannot safely use, the box only explains that the post
+  is paused.
 
 **Up to date** reports how many other devices sync and when the check ran.
 Invalid records, clones, another account's state, store errors and incomplete

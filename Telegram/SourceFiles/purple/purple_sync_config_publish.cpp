@@ -98,7 +98,8 @@ void SyncConfigPublish::Start() {
 		local,
 		_request,
 		int64_t(base::unixtime::now()),
-		SyncWriter());
+		SyncWriter(),
+		SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() }));
 	switch (plan.step) {
 	case SyncConfigPostStep::Finish:
 		Finish({ plan.status });
