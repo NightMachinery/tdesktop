@@ -124,15 +124,30 @@ For an empty config space it can reserve and stage the current settings record
 before one post, then confirm only the returned exact server bytes. On restart
 it can instead confirm a staged record already found in a fresh complete scan;
 when that scan finds no staged record, the planner still decides whether one
-retry is safe. Uncertain sends leave the stage in place. This first slice
-stops for review if another install already has a config record, and it does
-not yet publish later local changes or retire superseded messages. The setup
-box calls it only after a completed empty inventory, a new full inventory on
-the publish click, local initialization, and separate user confirmation. This
-does not enable continuous account-backed sync. The distinct Resume action
+retry is safe. Uncertain sends leave the stage in place. With nothing staged,
+the publisher now plans on the click inventory with the shared planner, using
+the stored config state, the other installs' newest records and this install's
+own newest record. An empty space publishes a first record with no parents,
+exactly as before. Local changes publish with the base as a parent, plus this
+install's own record when it no longer describes the settings. Choose and
+Conflict publish only when the caller passes the parent keys the apply step
+reported, and the planned parents must match them as a set; a caller without
+them cannot publish over another device's version. Up to date reports already
+synced. An update, a silent adoption, a pending send, an invalid state, or a
+choice that would first adopt same-content heads stops for review, because the
+apply step must run first. A caller can also pass the settings fingerprint it
+reviewed, and the publisher stops when the file has changed since. The record
+carries those parents and the next sequence, is staged with its version key as
+pending, and is posted and confirmed as before. It does not yet retire
+superseded messages. The setup box calls it only after a completed empty
+inventory, a new full inventory on the publish click, local initialization,
+and separate user confirmation. This does not enable continuous
+account-backed sync. The distinct Resume action
 passes the existing local state and a fresh complete inventory directly to the
 publisher; its matcher and planner decide whether an exact cloud record can be
-confirmed, one staged record can be posted, or review is required.
+confirmed, one staged record can be posted, or review is required. It passes
+no expected parents, so with nothing staged it can publish only a first record
+or this device's local changes.
 
 The desktop setup box can run this inventory against one signed-in account and
 shows scan progress and the resulting complete, needs-review, or incomplete
@@ -147,7 +162,8 @@ empty directory and no existing local sync state. Resume requires a safely
 opened local state with a binding token for the selected account, and either
 the same selected cloud space or an empty directory that can create one. A
 mismatched account or space, invalid local state, or unresolved candidate
-disables Resume. Existing records from another install cannot be joined.
+disables Resume. The box cannot join existing records from another install
+yet; the review and apply steps described below can, but nothing calls them.
 The local setup operation creates an install identity and account binding only
 after a complete, unambiguous scan. It can reuse a selected existing space or
 create a time-ordered space ID when the account has none, though the current UI
@@ -222,7 +238,8 @@ differs from the inventory's selected space stops for review, because moving
 spaces is not supported. A clone, an unresolved own record or an incomplete
 inventory stops the same way. The step holds the sync store lock only while it
 runs and writes nothing. The same file holds a publish gate that plans on the
-click inventory in the same way; the publisher does not use it yet.
+click inventory in the same way; the publisher uses it for every post that
+is not already staged.
 
 An uncalled apply step performs the local half of a choice made in that
 review, and never posts. It repeats the account checks, extracts the heads
