@@ -23,43 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 namespace {
 
-constexpr auto kMaximumRecordBytes = 4 * 1024 * 1024;
-
-[[nodiscard]] SyncCandidateRecord Classify(int32_t id, QByteArray bytes) {
-	auto record = SyncCandidateRecord{ .id = id, .bytes = std::move(bytes) };
-	const auto parsed = ParseSyncEnvelope(record.bytes);
-	record.header = parsed.header;
-	record.envelopeError = parsed.error;
-	switch (parsed.status) {
-	case SyncEnvelopeStatus::NewerMajor:
-		record.status = SyncCandidateStatus::NewerMajor;
-		return record;
-	case SyncEnvelopeStatus::UnsupportedStream:
-		record.status = SyncCandidateStatus::UnsupportedStream;
-		return record;
-	case SyncEnvelopeStatus::UnsupportedEncoding:
-		record.status = SyncCandidateStatus::UnsupportedEncoding;
-		return record;
-	case SyncEnvelopeStatus::Invalid:
-		record.status = SyncCandidateStatus::Invalid;
-		return record;
-	case SyncEnvelopeStatus::Valid:
-		break;
-	}
-	if (parsed.envelope.document.value(u"stream"_q).toString()
-			== u"config"_q) {
-		const auto inspected = InspectConfigPayload(parsed);
-		record.configError = inspected.error;
-		record.status = (inspected.status == ConfigPayloadStatus::Valid)
-			? SyncCandidateStatus::Valid
-			: (inspected.status == ConfigPayloadStatus::NewerSchema)
-			? SyncCandidateStatus::NewerSchema
-			: SyncCandidateStatus::Invalid;
-	} else {
-		record.status = SyncCandidateStatus::UnsupportedLibrary;
-	}
-	return record;
-}
+constexpr auto kMaximumRecordBytes = kSyncRecordMaximumBytes;
 
 [[nodiscard]] QByteArray LocalContent(
 		const std::shared_ptr<Data::DocumentMedia> &media,
@@ -86,7 +50,6 @@ SyncCandidateReader::SyncCandidateReader(
 , _api(&session->mtp())
 , _candidateIds(std::move(candidateIds))
 , _finished(std::move(finished)) {
-	_result.status = SyncCandidateReadStatus::Complete;
 	_result.records.reserve(_candidateIds.size());
 }
 
@@ -120,13 +83,12 @@ void SyncCandidateReader::Cancel() {
 			.status = SyncCandidateStatus::Cancelled,
 		});
 	}
-	_result.status = SyncCandidateReadStatus::Incomplete;
-	Finish();
+	Finish(SyncCandidateReadStatus::Incomplete);
 }
 
 void SyncCandidateReader::RequestNext() {
 	if (_next == _candidateIds.size()) {
-		Finish();
+		Finish(AggregateSyncCandidateRead(_result.records));
 		return;
 	}
 	const auto id = _candidateIds[_next];
@@ -236,12 +198,7 @@ void SyncCandidateReader::CheckDownload() {
 	}
 	const auto bytes = LocalContent(_media, _document);
 	if (!bytes.isEmpty()) {
-		CompleteCurrent(bytes.size() > kMaximumRecordBytes
-			? SyncCandidateRecord{
-				.id = _candidateIds[_next],
-				.status = SyncCandidateStatus::Oversized,
-			}
-			: Classify(_candidateIds[_next], bytes));
+		CompleteCurrent(ClassifySyncCandidate(_candidateIds[_next], bytes));
 	} else if (!_document->loading()) {
 		CompleteCurrent({
 			.id = _candidateIds[_next],
@@ -258,27 +215,17 @@ void SyncCandidateReader::CompleteCurrent(SyncCandidateRecord record) {
 	_downloadLifetime.reset();
 	_media.reset();
 	_document = nullptr;
-	if (record.status == SyncCandidateStatus::RequestFailed
-		|| record.status == SyncCandidateStatus::Inaccessible) {
-		_result.status = SyncCandidateReadStatus::Incomplete;
-	} else if (record.status != SyncCandidateStatus::Valid
-		&& !((record.status == SyncCandidateStatus::UnsupportedStream
-			|| record.status == SyncCandidateStatus::UnsupportedEncoding
-			|| record.status == SyncCandidateStatus::UnsupportedLibrary)
-			&& record.header)
-		&& _result.status != SyncCandidateReadStatus::Incomplete) {
-		_result.status = SyncCandidateReadStatus::NeedsReview;
-	}
 	_result.records.push_back(std::move(record));
 	++_next;
 	RequestNext();
 }
 
-void SyncCandidateReader::Finish() {
+void SyncCandidateReader::Finish(SyncCandidateReadStatus status) {
 	if (_done) {
 		return;
 	}
 	_done = true;
+	_result.status = status;
 	if (auto finished = std::move(_finished)) {
 		finished(std::move(_result));
 	}
