@@ -355,6 +355,23 @@ purple-core's `purple_sync_config_flow` (`ReviewSyncConfigInventory`,
 `ExtractSyncConfigHeads`, `PlanSyncConfigPublishGate`); desktop reads the file,
 opens the store and checks the account.
 
+While `settings.toml` is missing or does not load, the app runs from
+`settings.toml.good`, its last accepted copy (see [config.md](config.md)). A
+sync write in that state would lose the settings the device is running:
+History would keep only the broken or missing file, and the reload after the
+write would overwrite `settings.toml.good` with the synced version. So
+`ReadSyncSettingsFile`, which every sync read of the file goes through (the
+review, both fresh reviews of an apply, and the publisher), passes
+`UsingLastGoodSettings()` as core's `usingLastGood` flag, and core refuses the
+review with UsingLastGood. The box says that the file is missing or does not
+load, that this device runs its last working copy, and that sync changes
+nothing until the file is fixed or restored; it offers no action. An apply of
+a review shown before the fallback stops with NeedsRecheck, and a new-content
+post stops with InvalidSettings. Restore and Undo are not sync and stay
+available, since restoring a version is one way out; once the restored file
+loads, the reload replaces `settings.toml.good` with it, so the copy the device
+was running is not kept.
+
 An apply step performs the local half of a choice made in that
 review, and never posts. It repeats the account checks, then reviews again and
 compares review stamps (purple-core's `SyncConfigReviewStamp`): a digest of the

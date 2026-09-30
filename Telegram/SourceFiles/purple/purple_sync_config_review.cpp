@@ -51,25 +51,36 @@ SyncConfigWriter SyncWriter() {
 }
 
 SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
+	const auto lastGood = UsingLastGoodSettings();
+	const auto invalid = MakeSyncSettingsFile(
+		SyncSettingsFileStatus::Invalid,
+		QByteArray(),
+		lastGood);
 	const auto info = QFileInfo(path);
 	if (!info.exists() && !info.isSymLink()) {
-		return MakeSyncSettingsFile(SyncSettingsFileStatus::Absent);
+		return MakeSyncSettingsFile(
+			SyncSettingsFileStatus::Absent,
+			QByteArray(),
+			lastGood);
 	} else if (info.isSymLink()
 		|| !info.isFile()
 		|| info.size() > kSyncSettingsMaximumBytes) {
-		return SyncSettingsFile();
+		return invalid;
 	}
 	auto file = QFile(path);
 	if (!file.open(QIODevice::ReadOnly)) {
-		return SyncSettingsFile();
+		return invalid;
 	}
 	const auto text = file.read(kSyncSettingsMaximumBytes + 1);
 	if (file.error() != QFileDevice::NoError
 		|| text.size() > kSyncSettingsMaximumBytes
 		|| !file.atEnd()) {
-		return SyncSettingsFile();
+		return invalid;
 	}
-	return MakeSyncSettingsFile(SyncSettingsFileStatus::Present, text);
+	return MakeSyncSettingsFile(
+		SyncSettingsFileStatus::Present,
+		text,
+		lastGood);
 }
 
 SyncConfigReview ReviewSyncConfig(
