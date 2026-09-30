@@ -39,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "core/application.h"
 #include "lottie/lottie_animation.h"
+#include "purple/purple_sync.h"
 #include "boxes/abstract_box.h" // Ui::hideLayer().
 
 #include <QtCore/QBuffer>
@@ -1022,6 +1023,7 @@ bool DocumentData::saveToCache() const {
 	return (size < Storage::kMaxFileInMemory)
 		&& ((type == StickerDocument)
 			|| (_flags & Flag::ForceToCache)
+			|| Purple::IsSyncRecordFileName(_filename)
 			|| isAnimation()
 			|| isVoiceMessage()
 			|| isWallPaper()

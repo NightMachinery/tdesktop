@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "storage/storage_account.h"
 #include "apiwrap.h"
+#include "purple/purple_sync.h"
 
 namespace Storage {
 namespace {
@@ -339,6 +340,7 @@ void Uploader::upload(
 		} else if (!file->content.isEmpty()
 			&& !document->saveToCache()
 			&& !document->useStreamingLoader()
+			&& !Purple::IsPurplePost(*file)
 			&& Core::App().canSaveFileWithoutAskingForPath()) {
 			const auto path = DocumentFileNameForSave(document);
 			if (!path.isEmpty()) {

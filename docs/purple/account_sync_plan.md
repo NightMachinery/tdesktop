@@ -114,6 +114,29 @@ per-space, per-stream, per-install heads. Equal-sequence conflicting records
 block safe space selection; opaque future and library headers keep their space
 visible without becoming supported heads. It still never publishes.
 
+Sync records never land in a user folder on desktop. Telegram Desktop
+normally saves a copy of each file it sends from memory into the download
+folder (`Uploader::upload`), and its automatic download saves a file that
+comes into view in a chat or in Shared Files there too
+(`DocumentMedia::automaticLoad`). Two hooks in upstream files stop both for
+records. `DocumentData::saveToCache()` is true for a document named exactly
+`Purple settings sync.json` or `Purple playlists sync.json`
+(`Purple::IsSyncRecordFileName`, built from purple-core's
+`SyncSettingsRecordFileName` and `SyncPlaylistsRecordFileName`), as it is for
+stickers: the bytes go to the profile's encrypted media cache, automatic
+download fetches the record into that cache, and the upload writes no copy.
+`Uploader::upload` also skips the copy for every Purple post
+(`Purple::IsPurplePost`: a send carrying the receipt that only Purple's sends
+ask for), which covers the legacy `settings.toml` sender as well. Automatic
+download of legacy `settings.toml` documents stays as upstream, as on Android.
+Opening a record or saving it by hand still writes a file to the download
+folder, because the person asked for one. `purple/test_sync_record_names.sh`
+checks the name rule, with near misses, against core's candidate rule. Android
+differs in one way: it does not auto-download records at all
+(`PurpleSyncAutoDownload`), while desktop auto-downloads them into the
+encrypted cache. Copies that earlier builds wrote to the download folder stay
+there until deleted by hand.
+
 An uncalled desktop config post adapter can now take an explicitly selected
 account and a staged canonical record, send one JSON document to that account's
 Saved Messages, then re-read the returned message ID. It reports confirmation
