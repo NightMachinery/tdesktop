@@ -176,13 +176,26 @@ publisher from listening: the upload and `messages.sendMedia` stay in the
 session's send queue and go out when the connection or upload queue allows,
 for as long as the app runs. A check in the meantime reads Saved Messages from
 the server, cannot see the queued message, still finds the stage and offers
-Finish sending. Before planning, the publisher asks the session's data layer
-whether Saved Messages holds a local item the server has not confirmed yet,
-still sending or marked failed, whose document is named
-`Purple settings sync.json` (`SyncConfigSendQueueOf`, which walks
-`History::clientSideMessages()` of the self chat). Core's `PlanSyncConfigPost`
-takes that answer and returns StillSending instead of posting the staged bytes
-again. The box says that an earlier copy is still being sent, or failed, in
+Finish sending. So desktop asks the session's data layer whether Saved
+Messages holds a local item the server has not confirmed yet, still sending or
+marked failed, whose document is named `Purple settings sync.json`
+(`SyncConfigSendQueueOf`, which walks `History::clientSideMessages()` of the
+self chat). It asks twice: when the click's check starts scanning Saved
+Messages, just before the first history page is requested, and again when the
+publisher plans the post. Core's `PlanSyncConfigPost` receives HoldsSyncRecord
+if either answer held a copy, and then returns StillSending instead of posting
+the staged bytes again.
+
+The first read closes a race that Android acceptance hit live. A copy that
+Telegram delivers during the scan lands above history pages that were already
+read, so the inventory lacks it, and it has left the queue by the time the post
+is planned. A single late read then sees neither the record nor the queued
+copy, and Finish sending posts a byte-equal duplicate. On desktop the window is
+wider than on Android, because the confirmation dialog sits between the check
+and the plan. The read at the scan start sees the copy while it is still
+queued; the read at planning catches anything queued after that.
+
+The box says that an earlier copy is still being sent, or failed, in
 Saved Messages, and asks the person to wait until it arrives and check again,
 or to delete the failed copy there first. Nothing retries on its own and no
 timer runs. When the earlier copy arrives, the next check finds it and Finish
