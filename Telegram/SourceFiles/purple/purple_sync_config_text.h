@@ -20,15 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 
-enum class SyncConfigBoxAction {
-	None,
-	Publish,
-	Join,
-	ReviewUpdate,
-	Choose,
-	PublishChanges,
-	FinishSending,
-};
+using SyncConfigBoxAction = SyncConfigAction;
 
 struct SyncConfigBoxStatus {
 	QString text;
@@ -42,15 +34,9 @@ inline constexpr auto kSyncConfigSummaryLimit = 6;
 [[nodiscard]] QString SyncDeviceList(std::vector<QString> names);
 [[nodiscard]] QString SyncRecordTimeText(uint64_t seconds);
 
-[[nodiscard]] const SyncConfigHeadRecord *FindSyncConfigHeadRecord(
-	const SyncConfigReview &review,
-	const ConfigHead &head);
 [[nodiscard]] std::vector<QString> SyncOfferedDeviceNames(
 	const SyncConfigReview &review);
 [[nodiscard]] bool SyncSettingsPublishable(const SyncSettingsFile &file);
-[[nodiscard]] bool SyncChoicePublishes(
-	const SyncConfigReview &review,
-	const std::optional<QString> &chosenRemoteKey);
 
 [[nodiscard]] SyncConfigBoxStatus DescribeSyncConfigReview(
 	const SyncConfigReview &review,

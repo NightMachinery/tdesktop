@@ -250,22 +250,19 @@ void SyncConfigReviewBox(
 	Ui::AddSkip(container);
 
 	auto labels = std::vector<QString>();
-	for (const auto &head : review.plan.offered) {
-		if (const auto record = FindSyncConfigHeadRecord(review, head)) {
-			state->keys.push_back(head.key);
+	const auto choices = SyncConfigChoices(
+		review,
+		SyncSettingsPublishable(review.local));
+	for (const auto &choice : choices) {
+		state->keys.push_back(choice.key);
+		if (choice.key) {
+			const auto &record = review.heads[choice.head];
 			labels.push_back(u"%1 · changed %2"_q.arg(
-				SyncDeviceName(*record),
-				SyncRecordTimeText(record->at)));
+				SyncDeviceName(record),
+				SyncRecordTimeText(record.at)));
+		} else {
+			labels.push_back(u"This device's settings"_q);
 		}
-		if (update) {
-			break;
-		}
-	}
-	if (!update
-		&& SyncSettingsPublishable(review.local)
-		&& PlanConfigChoice(review.state, review.plan, std::nullopt)) {
-		state->keys.push_back(std::nullopt);
-		labels.push_back(u"This device's settings"_q);
 	}
 	if (state->keys.empty()) {
 		AddLabel(container, u"Nothing can be chosen from this check. Check "

@@ -25,20 +25,6 @@ class Session;
 
 namespace Purple {
 
-enum class SyncConfigPublishStatus {
-	Confirmed,
-	AlreadySynced,
-	NeedsReview,
-	CloneDetected,
-	Incomplete,
-	AccountUnavailable,
-	AccountUnbound,
-	StoreError,
-	InvalidSettings,
-	OutcomeUnknown,
-	Cancelled,
-};
-
 struct SyncConfigPublishResult {
 	SyncConfigPublishStatus status = SyncConfigPublishStatus::Incomplete;
 	std::optional<SyncStoreStatus> storeStatus;
@@ -68,6 +54,7 @@ private:
 		const SyncOwnInventoryResult &own,
 		const QByteArray &staged,
 		const QByteArray &token);
+	void StartPost(const QByteArray &staged);
 	void OnPost(SyncConfigPostResult result);
 	void Finish(SyncConfigPublishResult result);
 
