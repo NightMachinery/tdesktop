@@ -37,16 +37,22 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   records, and live verification with real accounts. Android JNI can
   initialize local state bound to the active Telegram user, reserve a canonical
   own config record with its pending key, confirm an exact staged read-back
-  with its message ID, and format or compare time-ordered space IDs. These
-  calls have no runtime owner yet. Its account preference token is keyed by the
-  active user ID; both reservation paths refuse a missing or mismatched token.
+  with its message ID, and format or compare time-ordered space IDs. Its
+  account preference token is keyed by the active user ID; both reservation
+  paths refuse a missing or mismatched token.
   First setup needs a complete Saved Messages history scan before it can
   declare the account empty; search with a watermark alone can miss a delayed
   older entry.
-  Android now has an uncalled durable local store for bound state and staged
-  config bytes. It locks the sync directory and pauses on ambiguous crash
-  recovery rather than sending uncertain data. Android transport and the
-  Android sync UI remain open.
+  Android now has the same manual flow in Settings → Purple → Sync across
+  devices (source `2af13dd5`): a Saved Messages transport, join, apply,
+  publish, History, Restore and Undo, decided by the same purple-core code,
+  for the account the settings screen belongs to. Its durable local store
+  locks the sync directory and pauses on ambiguous crash recovery rather than
+  sending uncertain data. The Android posting scenarios (publish, join, update,
+  choice, resend after a restart, History restore) still need an emulator
+  run. Still open on both clients: a live cross-client test between desktop
+  and Android, background checks, automatic publish, and retirement of
+  superseded records.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
