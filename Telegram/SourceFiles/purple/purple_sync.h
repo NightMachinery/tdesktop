@@ -7,8 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "purple/purple_sync_inventory.h"
+
 class DocumentData;
 class HistoryItem;
+struct FilePrepareResult;
 
 namespace Main {
 class Session;
@@ -62,5 +65,12 @@ void AddImportSettingsAction(
 void OfferNewerSettingsFromSavedMessages(
 	not_null<Main::Session*> session,
 	std::shared_ptr<Ui::Show> show);
+
+[[nodiscard]] inline bool IsSyncRecordFileName(const QString &name) {
+	return (name == SyncSettingsRecordFileName())
+		|| (name == SyncPlaylistsRecordFileName());
+}
+
+[[nodiscard]] bool IsPurplePost(const FilePrepareResult &file);
 
 } // namespace Purple

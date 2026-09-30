@@ -415,6 +415,10 @@ bool Upload(
 	return true;
 }
 
+bool IsPurplePost(const FilePrepareResult &file) {
+	return file.to.receipt != nullptr;
+}
+
 void SendSettingsToSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {

@@ -56,6 +56,11 @@ platform and the first four characters of the install ID after the `in-`
 prefix, for example `Android 9c1d`. Desktop writes its platform as Windows,
 macOS or Linux, as the manual Send action does.
 
+Sync records stay out of the download folder. Telegram keeps them in its
+encrypted media cache, as it does stickers, and writes a file only when you
+open or save one yourself. Records that earlier builds saved there stay until
+you delete them.
+
 The publisher enforces two modes. Finish sending starts it pending-only: it
 confirms or posts the record already staged and refuses when nothing is
 staged, so a second window that finished the post first cannot turn the
@@ -259,7 +264,10 @@ as a `Ui::PreparedFile` from the bytes rather than from the path, with
 `displayName` forced to `settings.toml` and the type forced to
 `SendMediaType::File`, and handed to `session->api().sendFiles()` with an
 `Api::SendAction` on the self history. That is the same call the send-files box
-makes, so nothing about uploading is new code.
+makes, so nothing about uploading is new code. Unlike the send-files box, it
+leaves no copy of the bytes in the download folder: `Uploader::upload` skips
+that copy for Purple's own posts (see
+[account_sync_plan.md](account_sync_plan.md)).
 
 Import takes the bytes from the document's media view when they are already
 there, falling back to the local file when the document has one. When it has
@@ -271,7 +279,12 @@ stopped without them: the loader hands what it fetched to whichever media view
 is active at the moment it finishes, so a view nobody is holding means bytes
 nobody gets. The menu entry is left off entirely for a document larger than
 four megabytes, since that is not a settings file and the in-memory path could
-not hold it anyway.
+not hold it anyway. The exception is Telegram's own automatic download: with Saved
+Messages on screen and file auto-download on, it saves a visible
+`settings.toml` to the download folder like any other file, and when it starts
+while the import is loading the same document, it takes that load over and the
+import reads the saved file. Sync records are kept out of the download folder;
+see [account_sync_plan.md](account_sync_plan.md).
 
 It parses with `Purple::ParseSettings` before it writes anything, so a file
 that is not valid TOML never reaches the disk. The write goes through the same
