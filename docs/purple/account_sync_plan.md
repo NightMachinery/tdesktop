@@ -11,8 +11,9 @@ files go to a local History with Restore and Undo. Android has the same
 manual flow under Settings → Purple → **Sync across devices**, decided by the
 same purple-core code. A live cross-client run between desktop and Android on
 2026-10-01 passed join, updates each way, conflicts, Finish sending and
-History. It also found that a desktop post reports an unknown outcome even
-though it arrived (see the [backlog](backlog.md)). Background checks,
+History. It also found that a desktop post reported an unknown outcome even
+though it arrived, because the uploader dropped the post's receipt; that is
+fixed and awaits a live pass (see the [backlog](backlog.md)). Background checks,
 automatic publish, edit in place, and retirement of superseded records
 remain. The existing manual Send/Import actions remain available.
 
@@ -709,6 +710,16 @@ reconcile a lost response after restart. A later explicit save or manual send
 may create a duplicate if the server accepted the first post; durable
 `random_id` reconciliation belongs in the account-backed design. This pipeline
 has not yet been tested live.
+
+Until 2026-10-01 the uploader passed the receipt on only for photos. A
+document's upload ended without it, so the receipt was destroyed and reported
+no message id as soon as the upload finished, before the server answered.
+Every Purple post is a document. The manual legacy send said "Could not
+confirm settings send", neither legacy send recorded the sent fingerprint or
+advanced the import-offer watermark, so a device could later be offered its
+own post, and every sync post reported an unknown outcome although it
+arrived, which is what the live run that day saw. `Uploader::finishFront` now passes the receipt on for documents
+as for photos.
 
 On Android, a Purple-only document receipt follows the asynchronous send
 helper to the server result. Each attempt stages an immutable file with the

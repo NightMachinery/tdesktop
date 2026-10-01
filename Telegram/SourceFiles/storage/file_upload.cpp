@@ -959,6 +959,7 @@ void Uploader::finishFront() {
 			},
 			.options = options,
 			.edit = edit,
+			.receipt = entry.file->to.receipt,
 		};
 		if (entry.file->videoCover) {
 			uploadVideoCover(std::move(ready), entry.file->videoCover);
