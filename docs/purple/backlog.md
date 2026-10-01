@@ -34,7 +34,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   fresh scan and cloud disclosure before any post, and History, Restore and
   Undo for every replaced file. Still open on desktop: background checks,
   automatic publish after edits, edit in place, retirement of superseded
-  records, and the unknown-outcome bug the 2026-10-01 live run found (below).
+  records, and a live pass of the fix for the unknown-outcome bug the
+  2026-10-01 live run found (below).
   Android JNI can
   initialize local state bound to the active Telegram user, reserve a canonical
   own config record with its pending key, confirm an exact staged read-back
@@ -68,7 +69,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   fingerprint and suppress self-offers only after Telegram confirms a server
   message id. The signed `8b07614c` APK upgraded the retained test account
   and was delivered privately on 2026-09-29. The desktop change passed a full
-  optimized build and isolated launch but is not in the installed app yet.
+  optimized build and isolated launch but is not in the installed app yet. It
+  also never worked: the uploader dropped the receipt of every document, so
+  desktop recorded no legacy send until the 2026-10-01 fix below.
   An emulator run on 2026-09-30, on the installed `b0bd74c7` build, verified
   the Android import backup: an import keeps the exact previous bytes in
   `settings.toml.import.bak`, a second import replaces them, an editor save
@@ -142,12 +145,16 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
     the box open reported "Outcome unknown" within about four seconds,
     although the post had arrived. This happened 4 of 4 times, on a working
     network. The stage stays pending, and the next check's Finish sending
-    confirms it without a second post. During one of these read-backs the
-    proxy log showed no new connection, so the read-back of the
-    just-sent message fails before any download starts. The suspects are
-    `SyncConfigPost::OnReceipt` and the `SyncCandidateReader` read-back in
-    `purple_sync_config_post.cpp` and `purple_sync_candidate_reader.cpp`.
-    Android's read-back of its own posts confirmed at once.
+    confirms it without a second post. During one of these posts the proxy
+    log showed no new connection, because no read-back ever started.
+    The cause was in the upload hand-off: `Uploader::finishFront` passed the
+    send receipt on for photos only. A record is a document, so its receipt
+    was destroyed as the upload finished and reported no message id before
+    the server answered, and `SyncConfigPost::OnReceipt` correctly called
+    that an unknown outcome. The same loss made the manual legacy send say
+    "Could not confirm settings send" and kept both legacy sends from
+    recording what they sent. The document branch now passes the receipt
+    on; a live pass has to confirm it.
   - Smaller findings. Desktop drops the Undo last update row when the box
     closes, because Undo lives in the box; History Restore still works, and
     Android keeps its row. The box's Close button is clipped to "lose", and
