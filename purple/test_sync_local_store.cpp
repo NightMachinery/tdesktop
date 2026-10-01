@@ -638,6 +638,61 @@ void TestUnexplainedStage() {
 	}
 }
 
+void TestFailedStateWrite() {
+#ifdef Q_OS_UNIX
+	const auto all = QFileDevice::ReadOwner | QFileDevice::WriteOwner
+		| QFileDevice::ExeOwner;
+	for (auto mode = 0; mode != 3; ++mode) {
+		auto temp = QTemporaryDir();
+		const auto root = Root(temp);
+		const auto statePath = root + u"/state.json"_q;
+		const auto stagePath = root + u"/pending/config-1.json"_q;
+		const auto initial = InitialState();
+		const auto one = Record(initial, 1, "version = 1\nname = 'one'\n");
+		auto metadata = initial.configData;
+		metadata.pending = one.version.key;
+		auto stateBefore = QByteArray();
+		{
+			auto store = Purple::SyncLocalStore(root);
+			CHECK(store.Open(true).status
+				== Purple::SyncStoreStatus::Uninitialized);
+			CHECK(store.Initialize(initial).status
+				== Purple::SyncStoreStatus::Ready);
+			if (mode == 1) {
+				auto changed = initial;
+				changed.preserved.insert(u"changed"_q, true);
+				WritePrivate(statePath,
+					Purple::SerializeSyncLocalState(changed).canonical);
+			} else if (mode == 2) {
+				CHECK(QFile::remove(statePath));
+				CHECK(QDir().mkdir(statePath));
+			}
+			stateBefore = ReadFile(statePath);
+			if (mode != 2) {
+				CHECK(QFile(root).setPermissions(
+					QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+			}
+			const auto staged = StageForBoundAccount(
+				store, one.canonical, metadata);
+			CHECK(QFile(root).setPermissions(all));
+			CHECK(staged.status == Purple::SyncStoreStatus::IoError);
+			CHECK(store.state() == nullptr);
+			CHECK(QFileInfo::exists(stagePath) == (mode != 0));
+			CHECK(ReadFile(statePath) == stateBefore);
+		}
+		if (mode == 0) {
+			auto restarted = Purple::SyncLocalStore(root);
+			CHECK(restarted.Open(true).status
+				== Purple::SyncStoreStatus::Ready);
+			CHECK(restarted.ReadPendingConfig().status
+				== Purple::SyncStoreStatus::NoPending);
+			CHECK(bool(StageForBoundAccount(
+				restarted, one.canonical, metadata)));
+		}
+	}
+#endif
+}
+
 void TestRejectedStage() {
 	auto temp = QTemporaryDir();
 	const auto initial = InitialState();
@@ -819,6 +874,7 @@ int main() {
 	TestOrphanScan();
 	TestUnreservedStage();
 	TestUnexplainedStage();
+	TestFailedStateWrite();
 	TestPermissionsAndCollision();
 	std::printf("%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;

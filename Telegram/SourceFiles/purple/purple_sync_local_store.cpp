@@ -476,6 +476,14 @@ SyncStoreResult SyncLocalStore::StageConfig(
 		StatePath(),
 		serialized.canonical);
 	if (stateStatus != SyncStoreStatus::Ready) {
+		const auto old = SerializeSyncLocalState(*_state);
+		auto current = QByteArray();
+		if (old
+			&& ReadSyncPrivateFile(StatePath(), kStateBytes, current)
+				== SyncStoreStatus::Ready
+			&& current == old.canonical) {
+			QFile::remove(path);
+		}
 		return SetFailure({ stateStatus });
 	}
 	_state = std::move(next);

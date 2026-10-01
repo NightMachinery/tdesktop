@@ -82,7 +82,10 @@ the publisher posts only a record whose reservation is on disk. Restart
 removes such a stage when it is exactly the record staging would accept next
 for that state, by the same checks staging makes (canonical bytes, space,
 install, device, sequence and the issued-record ledger), including one written
-beside an older pending stage. Any other stage past the state, and ambiguous
+beside an older pending stage. When staging itself sees the reserved state
+write fail and `state.json` still holds the old bytes, it removes its stage
+before it reports the error; when the state file changed or cannot be read, it
+leaves both for the next open. Any other stage past the state, and ambiguous
 files, pause cleanup as `OrphanStage`. A clone or device mismatch,
 including a missing current device identity, has a distinct verdict.
 The desktop store latches that verdict and refuses further staging until a
