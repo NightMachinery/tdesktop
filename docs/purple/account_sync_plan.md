@@ -426,9 +426,20 @@ sync write in that state would lose the settings the device is running:
 History would keep only the broken or missing file, and the reload after the
 write would overwrite `settings.toml.good` with the synced version. So
 `ReadSyncSettingsFile`, which every sync read of the file goes through (the
-review, both fresh reviews of an apply, and a new-content post), passes
-`UsingLastGoodSettings()` as core's `usingLastGood` flag, and core refuses the
-review with UsingLastGood. The box says that the file is missing or does not
+review, both fresh reviews of an apply, and a new-content post), sets core's
+`usingLastGood` flag, and core refuses the review with UsingLastGood. The flag
+is set when `UsingLastGoodSettings()` says the app runs from the copy, and also
+when the bytes this same read returned would make the app fall back to it: the
+file is absent, or present but not parsed by `ParseSettings`, while
+`settings.toml.good` reads and parses. The second rule covers the gap between a
+bad save and the reload, which the watcher starts 250 ms after the last change
+it sees. Without it, a check in that gap saw the broken or missing file with
+the flag clear and offered the usual choices, and applying one wrote the synced
+version over the file; the reload then parsed it and replaced
+`settings.toml.good`, the original loss. An unreadable, oversized or symlinked
+file is Invalid and keeps only the app's flag: core refuses an Invalid file
+anyway, and a symlinked file loads normally, so calling it a fallback would be
+wrong. The box says that the file is missing or does not
 load, that this device runs its last working copy, and that sync changes
 nothing until the file is fixed or restored; it offers no action. The one
 exception is a post staged before the fallback, because sending it writes

@@ -48,10 +48,13 @@ not valid TOML or too large to send. While `settings.toml` is missing or does
 not load and the app runs from its last working copy, `settings.toml.good`,
 the check says so and offers no choice, join, update or new post until the
 file is fixed or restored, because writing a synced version then would replace
-the only copy of the settings the device is running. A post this device staged
-before the fallback is the one exception: sending it writes nothing to
-`settings.toml`, so the check still offers Finish sending for it, exactly when
-a working file would, and says that the rest of sync waits for the file.
+the only copy of the settings the device is running. The check judges this
+from the file it has just read as well as from the app's state, so a check in
+the moment between a bad save and the app's reload refuses too. A post this
+device staged before the fallback is the one exception: sending it writes
+nothing to `settings.toml`, so the check still offers Finish sending for it,
+exactly when a working file would, and says that the rest of sync waits for
+the file.
 Restore and Undo stay available; once a restored file loads, it replaces
 `settings.toml.good` as usual. When this device is already linked and another
 device has exactly its file, the check adopts that silently and reviews again.

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/platform/base_platform_info.h"
 #include "purple/purple_config.h"
+#include "purple/purple_settings.h"
 #include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_local_store.h"
 
@@ -16,6 +17,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFileInfo>
 
 namespace Purple {
+namespace {
+
+[[nodiscard]] bool SettingsTextLoads(
+		const QByteArray &text,
+		const QString &path) {
+	return ParseSettings(QString::fromUtf8(text), path).ok();
+}
+
+[[nodiscard]] bool LastGoodSettingsLoad() {
+	const auto path = LastGoodSettingsFilePath();
+	auto file = QFile(path);
+	return file.open(QIODevice::ReadOnly)
+		&& SettingsTextLoads(file.readAll(), path);
+}
+
+} // namespace
 
 QString SyncDeviceName(const SyncDeviceNameParts &parts) {
 	const auto name = parts.platform.isEmpty() ? u"Device"_q : parts.platform;
@@ -61,7 +78,7 @@ SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
 		return MakeSyncSettingsFile(
 			SyncSettingsFileStatus::Absent,
 			QByteArray(),
-			lastGood);
+			lastGood || LastGoodSettingsLoad());
 	} else if (info.isSymLink()
 		|| !info.isFile()
 		|| info.size() > kSyncSettingsMaximumBytes) {
@@ -80,7 +97,8 @@ SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
 	return MakeSyncSettingsFile(
 		SyncSettingsFileStatus::Present,
 		text,
-		lastGood);
+		lastGood
+			|| (!SettingsTextLoads(text, path) && LastGoodSettingsLoad()));
 }
 
 SyncConfigReview ReviewSyncConfig(
