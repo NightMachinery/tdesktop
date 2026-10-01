@@ -157,8 +157,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
     on; a live pass has to confirm it.
   - Smaller findings. Desktop drops the Undo last update row when the box
     closes, because Undo lives in the box; History Restore still works, and
-    Android keeps its row. The box's Close button is clipped to "lose", and
-    Cancel check shows while no check runs. After a Restore, "stays on this
+    Android keeps its row. The box's Close button was clipped to "lose", and
+    Cancel check showed while no check ran; the Check Saved Messages button
+    now turns into Cancel check while a check runs, which leaves two buttons
+    that fit. After a Restore, "stays on this
     device until you publish it" sat next to "Up to date"; desktop now says it
     only when the restored file differs from the synced version (Android's
     status uses the same sentence and is unchanged).

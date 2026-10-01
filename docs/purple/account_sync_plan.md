@@ -295,7 +295,8 @@ failed copies of the record, which on Android survive a restart.
 
 The desktop setup box runs this inventory against one signed-in account,
 shows scan progress, and passes a complete result to the review step described
-below. With multiple accounts it requires an explicit choice. Each inventory
+below. While a check runs, its **Check Saved Messages** button reads **Cancel
+check** and cancels it, so the box needs only that button and Close. With multiple accounts it requires an explicit choice. Each inventory
 result carries the account's numeric user ID, so setup cannot use one
 account's scan to bind another. The box keeps only its latest review for the
 same live account and session, and discards it on a new check, cancel, account
