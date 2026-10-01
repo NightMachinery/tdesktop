@@ -639,8 +639,15 @@ The older, simpler way to move this file:
   copy of `settings.toml` there, captioned with its schema version, the time
   and the platform. It asks first: the file names your chats.
 - **Right-click that message > Import Purple settings**, in Saved Messages, on
-  the machine you want it. It tells you the date, the schema version and how
-  many warnings the file produces, and asks before replacing anything.
+  the machine you want it. It tells you the date, the account whose Saved
+  Messages hold the file, the schema version and how many warnings the file
+  produces, and asks before replacing anything.
+
+The first time an account's chat list appears after the app starts, while that
+account is the active one, the app also offers a newer `settings.toml` from its
+Saved Messages, once, naming the account and the date. A file in another
+signed-in account is never offered, and nothing is imported once its account
+is no longer the active one.
 
 `[sync] send_after_save_p = true`, or the switch beside the send button, does
 the first of those for you whenever the app writes this file - five seconds

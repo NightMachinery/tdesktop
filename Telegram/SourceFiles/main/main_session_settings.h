@@ -208,6 +208,9 @@ public:
 		return !_purpleSettingsOfferStarted
 			&& !std::exchange(_purpleSettingsOfferStarted, true);
 	}
+	void releasePurpleSettingsOfferStart() {
+		_purpleSettingsOfferStarted = false;
+	}
 
 private:
 	static constexpr auto kDefaultSupportChatsLimitSlice = 7 * 24 * 60 * 60;

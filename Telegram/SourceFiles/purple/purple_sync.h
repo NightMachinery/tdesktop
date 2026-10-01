@@ -73,4 +73,39 @@ void OfferNewerSettingsFromSavedMessages(
 
 [[nodiscard]] bool IsPurplePost(const FilePrepareResult &file);
 
+enum class ImportOfferVerdict {
+	Offer,
+	InactiveAccount,
+	AlreadyOffered,
+	NotNewer,
+};
+
+[[nodiscard]] inline ImportOfferVerdict JudgeImportOffer(
+		bool accountActive,
+		int64 messageId,
+		int64 lastOfferedId,
+		int64 messageDate,
+		int64 localStamp) {
+	if (!accountActive) {
+		return ImportOfferVerdict::InactiveAccount;
+	} else if (messageId <= lastOfferedId) {
+		return ImportOfferVerdict::AlreadyOffered;
+	} else if (messageDate <= localStamp) {
+		return ImportOfferVerdict::NotNewer;
+	}
+	return ImportOfferVerdict::Offer;
+}
+
+[[nodiscard]] inline QString ImportAccountLabel(
+		const QString &name,
+		const QString &username) {
+	const auto trimmed = name.trimmed();
+	if (username.isEmpty()) {
+		return trimmed;
+	} else if (trimmed.isEmpty()) {
+		return u"@"_q + username;
+	}
+	return u"%1 (@%2)"_q.arg(trimmed, username);
+}
+
 } // namespace Purple

@@ -130,7 +130,8 @@ The current manual transfer has two actions:
   `settings.toml`, captioned with the schema version, the local time and the
   platform it came from.
 - **Right-click that message > Import Purple settings** parses it, shows what
-  it is about to do, and replaces the local file.
+  it is about to do, including the account whose Saved Messages hold it, and
+  replaces the local file.
 
 See [config.md](config.md) for the user-facing half.
 
@@ -205,6 +206,24 @@ Saved Messages” with an Import button. Nothing is written unless that button i
 pressed, and pressing it uses the same import, confirmation, and download flow
 as the message menu action.
 
+The offer only ever looks at the active account, the one whose chats are in
+front. On desktop that is the account the account switcher has selected; a
+search starts only for it, and an answer that arrives after a switch to
+another account is dropped without being remembered as offered, so that
+account is searched again the next time its chat list is shown while it is
+active. A file in the Saved Messages of another signed-in account, a test
+account for example, is never offered. The offer names the account by its
+name and public username, never its phone number, as “Account Name
+(@username), sent 2026-09-30 21:14”, and the import question names it too:
+“Import the settings sent ... to Saved Messages of ...?”. If the account is
+no longer the active one when Import is pressed, when the question would
+appear after the download, or when the question is confirmed, nothing is
+imported and the app says why. This applies to the message menu's import as
+well. This rule came from a desktop install that had a disposable test
+account signed in as a second account: the test account's Saved Messages held
+a 4 MiB test `settings.toml`, the offer did not say whose file it was, and
+Import replaced the real settings.
+
 Desktop accepts a settings document up to 4 MiB and scans up to 100 recent
 documents. Android source `a950e13c` uses the same size and search limits;
 the earlier Android build accepted only 64 KiB and scanned 20 documents.
@@ -232,10 +251,11 @@ because an import writes the bytes and nothing else; since the write necessarily
 happens after the message was sent, the mtime is always the later of the two and
 the comparison stays honest.
 
-The Android and desktop implementations share the same suppression rule and
-wording. Desktop verification remains account-backed: exercising the search,
-watermark, and confirmation flow requires a signed-in account with Saved
-Messages, so local checks cannot verify the end-to-end offer alone.
+The Android and desktop implementations share the same suppression rule,
+account rule and wording. Desktop verification remains account-backed:
+exercising the search, watermark, account and confirmation flow requires
+signed-in accounts with Saved Messages, so local checks cannot verify the
+end-to-end offer alone.
 
 ## Rejected: git, driven from Termux
 
@@ -321,9 +341,12 @@ On Android the launch-time offer lives in
 `TMessagesProj/src/main/java/org/telegram/messenger/purple/PurpleSyncOffer.java`
 and starts from `DialogsActivity.onFragmentCreate`. On desktop it lives in
 `Telegram/SourceFiles/purple/purple_sync.cpp` and starts only when the primary
-chat list has a usable UI host. Both search the self peer with a document
-filter, choose the newest result actually named `settings.toml` and small enough
-to be one, and compare its date with the local file mtime. The remembered id is
+chat list has a usable UI host and its session belongs to
+`Core::App().domain().active()`. The rules themselves, `JudgeImportOffer`
+and `ImportAccountLabel`, are inline in `purple_sync.h`, so `purple/test_sync_import.sh` can test them without the
+app. Both search the self peer with a document filter, choose the newest
+result actually named `settings.toml` and small enough to be one, and compare
+its date with the local file mtime. The remembered id is
 per account: Android uses `purple_sync_offered_id`; desktop appends it to
 `Main::SessionSettings`. A message that has already been considered cannot
 offer again, and an older local file advances the remembered id silently.
