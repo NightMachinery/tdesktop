@@ -122,9 +122,18 @@ to check. Nothing runs in the background. See [sync.md](sync.md) for details.
   first, because the file names chats.
 - **Right-click that message > Import Purple settings**, in Saved Messages,
   reads it back. It parses before it writes, so a file that is not valid TOML
-  is reported and nothing is touched; otherwise it shows the date, the schema
-  version and the number of parser warnings, and replaces the file on confirm.
-  The watcher then reloads it like any other edit.
+  is reported and nothing is touched; otherwise it shows the date, the account
+  whose Saved Messages hold the file (name and public username, never the
+  phone number), the schema version and the number of parser warnings, and
+  replaces the file on confirm. The watcher then reloads it like any other
+  edit. The account has to be the active one, the one the account switcher
+  has selected, both when the question appears and when you confirm it.
+
+The first time an account's chat list appears after the app starts, while
+that account is the active one, the app also looks for a newer `settings.toml`
+in its Saved Messages and offers it once, naming the account and the date it
+was sent. It never offers a file from another signed-in account. See
+[sync.md](sync.md).
 
 Saved Messages is the version history. Every send is a message with a date on
 it, they stack up in one chat, and picking an older one is picking an older

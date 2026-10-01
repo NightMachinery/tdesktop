@@ -170,6 +170,18 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
     "Use and share" with this device's own settings writes no file. A failed
     (red) send also could not be produced through a proxy outage, because
     Telegram keeps retrying.
+- **Saved Messages import offer, account scope:** on 2026-10-01 a desktop
+  install that had the disposable test account signed in as a second account
+  offered a 4 MiB test `settings.toml` from that account's Saved Messages
+  (the Android test app had posted it there after a save), and Import replaced
+  the real settings. The offer did not say whose file it was. Desktop, like
+  Android `346ed04a9`, now offers a file only from the active account, drops
+  an answer that arrives after a switch without remembering it as offered,
+  names the account (name and public username, never the phone number) and
+  the message date in the offer and in the import question, and refuses an
+  import whose account is no longer the active one. `purple/test_sync_import.sh` tests the desktop offer rule
+  and the account label. A live pass has to confirm the desktop offer with
+  two signed-in accounts.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could

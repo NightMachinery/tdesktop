@@ -98,9 +98,31 @@ constexpr auto kSearchLimit = 100;
 	return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
+[[nodiscard]] bool IsActiveSession(not_null<Main::Session*> session) {
+	auto &domain = Core::App().domain();
+	return domain.started() && (domain.active().maybeSession() == session);
+}
+
+[[nodiscard]] QString AccountLabel(not_null<Main::Session*> session) {
+	const auto user = session->user();
+	return ImportAccountLabel(user->name(), user->username());
+}
+
+[[nodiscard]] QString AccountChangedText() {
+	return u"That settings file is in the Saved Messages of an account that "
+		"is no longer the active one, so nothing was imported. Switch back to "
+		"that account to import it."_q;
+}
+
 void WriteImported(
+		base::weak_ptr<Main::Session> weak,
 		const QString &text,
 		const std::shared_ptr<Ui::Show> &show) {
+	const auto session = weak.get();
+	if (!session || !IsActiveSession(session)) {
+		show->showBox(Ui::MakeInformBox(AccountChangedText()));
+		return;
+	}
 	const auto path = SettingsFilePath();
 	if (QFile::exists(path)) {
 		const auto backup = BackupFilePath();
@@ -129,9 +151,14 @@ void WriteImported(
 }
 
 void ConfirmAndImport(
+		not_null<Main::Session*> session,
 		const QByteArray &content,
 		TimeId date,
 		const std::shared_ptr<Ui::Show> &show) {
+	if (!IsActiveSession(session)) {
+		show->showBox(Ui::MakeInformBox(AccountChangedText()));
+		return;
+	}
 	const auto text = QString::fromUtf8(content);
 	const auto parsed = ParseSettings(text, SettingsFilePath());
 	if (!parsed.ok()) {
@@ -144,8 +171,10 @@ void ConfirmAndImport(
 	const auto version = parsed.settings.version;
 	const auto warnings = int(parsed.warnings.size());
 	auto lines = QStringList();
-	lines.push_back(u"Import the settings sent %1?"_q.arg(
-		FormatMoment(base::unixtime::parse(date))));
+	lines.push_back(
+		u"Import the settings sent %1 to Saved Messages of %2?"_q.arg(
+			FormatMoment(base::unixtime::parse(date)),
+			AccountLabel(session)));
 	lines.push_back(QString());
 	lines.push_back(u"Schema v%1."_q.arg(version));
 	if (version > kSettingsVersion) {
@@ -163,11 +192,12 @@ void ConfirmAndImport(
 		"kept as %1."_q.arg(SettingsFileName() + u".bak"_q));
 
 	const auto keep = show;
+	const auto weak = base::make_weak(session);
 	show->showBox(Ui::MakeConfirmBox({
 		.text = lines.join('\n'),
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			WriteImported(text, keep);
+			WriteImported(weak, text, keep);
 		},
 		.confirmText = u"Import"_q,
 	}));
@@ -186,7 +216,7 @@ void ResolveAndImport(
 	const auto media = document->createMediaView();
 	if (const auto content = LocalContent(media, document);
 		!content.isEmpty()) {
-		ConfirmAndImport(content, date, show);
+		ConfirmAndImport(&document->session(), content, date, show);
 		return;
 	}
 	document->save(itemId, QString());
@@ -209,7 +239,7 @@ void ResolveAndImport(
 			}
 			return;
 		}
-		ConfirmAndImport(content, date, show);
+		ConfirmAndImport(&document->session(), content, date, show);
 		base::take(lifetime)->destroy();
 	}, *lifetime);
 }
@@ -261,23 +291,43 @@ void OfferImportCandidate(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show,
 		const ImportCandidate &candidate) {
+	auto &settings = session->settings();
 	if (!show || !(*show)) {
+		settings.releasePurpleSettingsOfferStart();
 		return;
 	}
-	auto &settings = session->settings();
-	if (candidate.itemId.msg <= settings.purpleSettingsOfferMessageId()) {
+	const auto verdict = JudgeImportOffer(
+		IsActiveSession(session),
+		candidate.itemId.msg.bare,
+		settings.purpleSettingsOfferMessageId().bare,
+		candidate.date,
+		QFileInfo(SettingsFilePath()).lastModified().toSecsSinceEpoch());
+	if (verdict == ImportOfferVerdict::InactiveAccount) {
+		LOG(("Purple: Saved Messages settings offer dropped: "
+			"the account is no longer the active one."));
+		settings.releasePurpleSettingsOfferStart();
+		return;
+	} else if (verdict == ImportOfferVerdict::AlreadyOffered) {
 		return;
 	}
 	settings.setPurpleSettingsOfferMessageId(candidate.itemId.msg);
 	session->saveSettings();
-	if (candidate.date <= QFileInfo(SettingsFilePath()).lastModified()
-			.toSecsSinceEpoch()) {
+	if (verdict == ImportOfferVerdict::NotNewer) {
 		return;
 	}
+	const auto weak = base::make_weak(session);
 	show->showBox(Ui::MakeConfirmBox({
-		.text = u"A newer Work Mode settings file is in Saved Messages"_q,
+		.text = u"A newer Work Mode settings file is in Saved Messages"
+			"\n\nAccount %1, sent %2"_q.arg(
+				AccountLabel(session),
+				FormatMoment(base::unixtime::parse(candidate.date))),
 		.confirmed = [=](Fn<void()> close) {
 			close();
+			const auto live = weak.get();
+			if (!live || !IsActiveSession(live)) {
+				show->showBox(Ui::MakeInformBox(AccountChangedText()));
+				return;
+			}
 			ResolveAndImport(
 				candidate.document,
 				candidate.itemId,
@@ -495,6 +545,7 @@ void OfferNewerSettingsFromSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {
 	if (!show || !(*show)
+		|| !IsActiveSession(session)
 		|| !session->settings().takePurpleSettingsOfferStart()) {
 		return;
 	}
