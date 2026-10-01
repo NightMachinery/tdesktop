@@ -34,7 +34,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   fresh scan and cloud disclosure before any post, and History, Restore and
   Undo for every replaced file. Still open on desktop: background checks,
   automatic publish after edits, edit in place, retirement of superseded
-  records, and live verification with real accounts. Android JNI can
+  records, and the unknown-outcome bug the 2026-10-01 live run found (below).
+  Android JNI can
   initialize local state bound to the active Telegram user, reserve a canonical
   own config record with its pending key, confirm an exact staged read-back
   with its message ID, and format or compare time-ordered space IDs. Its
@@ -57,9 +58,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   `6f4c252ddb`). The signed APK from source `a12cbbaa` was delivered
   privately. Not reachable there: an account switch mid-check (one account)
   and a remote pick that leaves another head (host-tested). Still open on
-  both clients: a live cross-client test between desktop and Android,
-  desktop live verification, background checks, automatic publish, and
-  retirement of superseded records.
+  both clients: background checks, automatic publish, and retirement of
+  superseded records.
   A disposable-account test must establish whether media can be replaced
   in place between clients before choosing that transport over bounded
   reposts. Android source `6df36b1d` preserves a dedicated pre-import backup;
@@ -112,6 +112,52 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   Retry of a failed send from the new directory (the failure was forced by
   making the staged copy unreadable, then restoring it), and delivery of a
   copy staged by the older build after an in-place upgrade.
+  A live cross-client run on 2026-10-01 drove an isolated desktop profile
+  (built from `ef16c54e3b`) against the emulator's installed Android build
+  `95171e565`, on the same disposable account. Both clients' settings files
+  were restored afterwards.
+  - Passed: the desktop's first check named the Android device and showed a
+    summary and line diff. Joining wrote the chosen record's exact bytes after
+    a History entry, and Undo and Restore put back exact bytes.
+  - Passed: an update each way. The receiving device's review named the
+    sender, Apply kept History first and wrote the sender's bytes, and Undo
+    restored the previous bytes.
+  - Passed: a conflict picked once per side. Picking the other device's
+    version wrote it and posted nothing. Picking this device's own settings
+    showed the disclosure, posted once and left the file unchanged.
+  - Passed: the still-sending refusal. With the record's upload held at a
+    local test proxy, Publish changes stayed queued. After the box was closed
+    and reopened, Check offered Finish sending, and Finish sending refused
+    with the still-sending text. Once the copy arrived, the next check
+    confirmed it.
+  - Passed: two copies that arrived while a check was stalled or mid-scan were
+    each confirmed by Finish sending without a second post.
+  - Passed: an Android check counted exactly one record per publish across
+    the run, 22 in all.
+  - Passed: the desktop log holds only counts and paths, no settings text.
+    The emulator log holds the account's numeric user ID, which the design
+    already logs.
+  - Passed: no sync record appeared in the desktop download folder.
+  - Bug: every desktop Publish settings or Publish changes that finished with
+    the box open reported "Outcome unknown" within about four seconds,
+    although the post had arrived. This happened 4 of 4 times, on a working
+    network. The stage stays pending, and the next check's Finish sending
+    confirms it without a second post. During one of these read-backs the
+    proxy log showed no new connection, so the read-back of the
+    just-sent message fails before any download starts. The suspects are
+    `SyncConfigPost::OnReceipt` and the `SyncCandidateReader` read-back in
+    `purple_sync_config_post.cpp` and `purple_sync_candidate_reader.cpp`.
+    Android's read-back of its own posts confirmed at once.
+  - Smaller findings. Desktop drops the Undo last update row when the box
+    closes, because Undo lives in the box; History Restore still works, and
+    Android keeps its row. The box's Close button is clipped to "lose", and
+    Cancel check shows while no check runs. After a Restore, "stays on this
+    device until you publish it" sits next to "Up to date".
+  - Not reachable with two devices: Android's apply-then-share bulletin.
+    Picking another device's version shares only when other heads remain, and
+    "Use and share" with this device's own settings writes no file. A failed
+    (red) send also could not be produced through a proxy outage, because
+    Telegram keeps retrying.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could
