@@ -155,9 +155,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
     "Could not confirm settings send" and kept both legacy sends from
     recording what they sent. The document branch now passes the receipt
     on; a live pass has to confirm it.
-  - Smaller findings. Desktop drops the Undo last update row when the box
-    closes, because Undo lives in the box; History Restore still works, and
-    Android keeps its row. The box's Close button was clipped to "lose", and
+  - Smaller findings. Desktop dropped the Undo last update row when the box
+    closed, because Undo lived in the box, while Android kept its row with
+    its screen; desktop now keeps the row until the app quits or the next
+    Undo, restore or update. The box's Close button was clipped to "lose", and
     Cancel check showed while no check ran; the Check Saved Messages button
     now turns into Cancel check while a check runs, which leaves two buttons
     that fit. After a Restore, "stays on this
