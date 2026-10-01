@@ -9,10 +9,12 @@ or finish an earlier post. Every step runs only when clicked, and every post
 follows a fresh check and a confirmation with the cloud disclosure. Replaced
 files go to a local History with Restore and Undo. Android has the same
 manual flow under Settings → Purple → **Sync across devices**, decided by the
-same purple-core code. Background checks, automatic publish, edit in place,
-retirement of superseded records, and live verification, including a
-cross-client test between desktop and Android, remain. The existing manual
-Send/Import actions remain available.
+same purple-core code. A live cross-client run between desktop and Android on
+2026-10-01 passed join, updates each way, conflicts, Finish sending and
+History. It also found that a desktop post reports an unknown outcome even
+though it arrived (see the [backlog](backlog.md)). Background checks,
+automatic publish, edit in place, and retirement of superseded records
+remain. The existing manual Send/Import actions remain available.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record
@@ -252,6 +254,18 @@ or to delete the failed copy there first. Nothing retries on its own and no
 timer runs. When the earlier copy arrives, the next check finds it and Finish
 sending confirms it without posting; that confirmation wins even while the
 queue still lists a copy.
+
+The 2026-10-01 live desktop run observed this with a local test proxy that
+could hold the record's upload connection while the rest of the session kept
+working.
+- With the upload held, the post stayed queued. After the box was closed and
+  reopened, a check offered Finish sending, which refused with the
+  still-sending text. When the copy arrived, the next check confirmed it.
+- A copy that arrived as a stalled check resumed, and one released while a
+  check was mid-scan, were each confirmed by Finish sending without a second
+  post, because the check's result already held the arrived message.
+- The case where a copy lands above a history page the scan has already read
+  was not produced live.
 
 The list is the session's `History` object for Saved Messages, not a widget, so
 it holds items queued by earlier setup boxes or from the chat itself for the
