@@ -426,16 +426,26 @@ sync write in that state would lose the settings the device is running:
 History would keep only the broken or missing file, and the reload after the
 write would overwrite `settings.toml.good` with the synced version. So
 `ReadSyncSettingsFile`, which every sync read of the file goes through (the
-review, both fresh reviews of an apply, and the publisher), passes
+review, both fresh reviews of an apply, and a new-content post), passes
 `UsingLastGoodSettings()` as core's `usingLastGood` flag, and core refuses the
 review with UsingLastGood. The box says that the file is missing or does not
 load, that this device runs its last working copy, and that sync changes
-nothing until the file is fixed or restored; it offers no action. An apply of
-a review shown before the fallback stops with NeedsRecheck, and a new-content
-post stops with InvalidSettings. Restore and Undo are not sync and stay
-available, since restoring a version is one way out; once the restored file
-loads, the reload replaces `settings.toml.good` with it, so the copy the device
-was running is not kept.
+nothing until the file is fixed or restored; it offers no action. The one
+exception is a post staged before the fallback, because sending it writes
+nothing to the file. Core also reviews the inventory as if the file had loaded,
+and when that review is Ready with the Pending verdict, the refused review keeps
+the Pending verdict and core describes it as UsingLastGoodWithPending with
+Finish sending. The box adds that the post this device started earlier can
+still be sent. Finish sending then runs as usual: a fresh check that describes
+the same action, then the pending-only publisher, which never reads the file.
+Records that need review, an incomplete scan or an invalid file still give
+plain UsingLastGood, since a working file would get no action there either. An
+apply of a review shown before the fallback stops with NeedsRecheck, an apply
+of the refused review stops with NeedsReview, and a new-content post stops with
+NeedsReview while a record is staged and with InvalidSettings otherwise.
+Restore and Undo are not sync and stay available, since restoring a version is
+one way out; once the restored file loads, the reload replaces
+`settings.toml.good` with it, so the copy the device was running is not kept.
 
 An apply step performs the local half of a choice made in that
 review, and never posts. It repeats the account checks, then reviews again and

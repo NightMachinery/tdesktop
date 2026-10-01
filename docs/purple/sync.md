@@ -46,15 +46,19 @@ Invalid records, clones, another account's state, store errors and incomplete
 scans are plain text with no action, and so is a local file that is missing,
 not valid TOML or too large to send. While `settings.toml` is missing or does
 not load and the app runs from its last working copy, `settings.toml.good`,
-the check says so and offers nothing until the file is fixed or restored,
-because writing a synced version then would replace the only copy of the
-settings the device is running. Restore and Undo stay available; once a
-restored file loads, it replaces `settings.toml.good` as usual. When this
-device is already linked and another device has exactly its file, the check
-adopts that silently and reviews again. Devices are named by the record's
-platform and the first four characters of the install ID after the `in-`
-prefix, for example `Android 9c1d`. Desktop writes its platform as Windows,
-macOS or Linux, as the manual Send action does.
+the check says so and offers no choice, join, update or new post until the
+file is fixed or restored, because writing a synced version then would replace
+the only copy of the settings the device is running. A post this device staged
+before the fallback is the one exception: sending it writes nothing to
+`settings.toml`, so the check still offers Finish sending for it, exactly when
+a working file would, and says that the rest of sync waits for the file.
+Restore and Undo stay available; once a restored file loads, it replaces
+`settings.toml.good` as usual. When this device is already linked and another
+device has exactly its file, the check adopts that silently and reviews again.
+Devices are named by the record's platform and the first four characters of
+the install ID after the `in-` prefix, for example `Android 9c1d`. Desktop
+writes its platform as Windows, macOS or Linux, as the manual Send action
+does.
 
 Sync records stay out of the download folder unless you put them there.
 Telegram never downloads them automatically and writes no copy of the ones this
