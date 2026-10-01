@@ -159,7 +159,9 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
     closes, because Undo lives in the box; History Restore still works, and
     Android keeps its row. The box's Close button is clipped to "lose", and
     Cancel check shows while no check runs. After a Restore, "stays on this
-    device until you publish it" sits next to "Up to date".
+    device until you publish it" sat next to "Up to date"; desktop now says it
+    only when the restored file differs from the synced version (Android's
+    status uses the same sentence and is unchanged).
   - Not reachable with two devices: Android's apply-then-share bulletin.
     Picking another device's version shares only when other heads remain, and
     "Use and share" with this device's own settings writes no file. A failed

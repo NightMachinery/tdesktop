@@ -107,7 +107,9 @@ out of order. Entries that
 record a missing file, or hold bytes that are not valid UTF-8, cannot be
 restored. A restore never lets History pruning remove the entry it is
 restoring. A restored or undone file stays local until **Publish changes**
-sends it. If joining succeeds but a later step fails, the status says "Joined
+sends it. The status says so only when the file now differs from the synced
+version, so a restore back to the synced version just says it was restored
+beside "Up to date". If joining succeeds but a later step fails, the status says "Joined
 sync, but ..." and that nothing was written to `settings.toml`; the next check
 sees a linked device and offers the choice again.
 

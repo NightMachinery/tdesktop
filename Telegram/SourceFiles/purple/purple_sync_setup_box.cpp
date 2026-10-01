@@ -327,24 +327,31 @@ void StopForLostAccount(SetupBoxState &state) {
 			"account or reopen this box, then check again."_q);
 }
 
-void ReviewAgain(SetupBoxState &state, const QString &prefix) {
+void ReviewAgain(
+		SetupBoxState &state,
+		Fn<QString(bool staysLocal)> prefix) {
 	const auto account = state.selectedAccount.get();
 	const auto session = state.selectedSession.get();
 	if (!state.completed || !SelectedAvailable(state)) {
 		ClearReview(state);
 		SetStatus(state, Joined(
-			prefix,
+			prefix(true),
 			u"Check Saved Messages to see what to do next."_q));
 		return;
 	}
 	auto inventory = *state.completed;
 	auto failure = QString();
 	auto review = BuildReview(*account, *session, inventory, failure);
+	const auto staysLocal = !SyncSettingsMatchBase(review);
 	ShowReview(
 		state,
 		std::move(inventory),
 		std::move(review),
-		Joined(prefix, failure));
+		Joined(prefix(staysLocal), failure));
+}
+
+void ReviewAgain(SetupBoxState &state, const QString &prefix) {
+	ReviewAgain(state, [&](bool) { return prefix; });
 }
 
 void StartPublisher(
@@ -680,8 +687,7 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 			}
 			if (result.status == SyncConfigRestoreStatus::Restored) {
 				box->uiShow()->showToast(u"Previous settings are back."_q);
-				ReviewAgain(*state, u"Your previous settings are back on this "
-					"device. They stay local until you publish them."_q);
+				ReviewAgain(*state, SyncConfigUndoneText);
 			} else {
 				SetStatus(*state, (entry != entries.end())
 					? SyncConfigRestoreText(result, *entry)
@@ -704,13 +710,14 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 	const auto result = RestoreSyncConfigHistory(
 		entry.id,
 		SyncConfigHistoryReason::BeforeRestore);
-	const auto text = SyncConfigRestoreText(result, entry);
 	if (result.status == SyncConfigRestoreStatus::Restored) {
 		state->undo.reset();
 		box->uiShow()->showToast(u"Settings restored."_q);
-		ReviewAgain(*state, text);
+		ReviewAgain(*state, [&](bool staysLocal) {
+			return SyncConfigRestoreText(result, entry, staysLocal);
+		});
 	} else {
-		SetStatus(*state, text);
+		SetStatus(*state, SyncConfigRestoreText(result, entry));
 	}
 	return true;
 }

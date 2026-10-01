@@ -149,6 +149,13 @@ bool SyncSettingsPublishable(const SyncConfigReview &review) {
 			SyncWriter());
 }
 
+bool SyncSettingsMatchBase(const SyncConfigReview &review) {
+	const auto base = SyncConfigKeyFingerprint(review.state.base);
+	return (review.status == SyncConfigReviewStatus::Ready)
+		&& !base.isEmpty()
+		&& (base == review.local.fingerprint);
+}
+
 SyncConfigBoxStatus DescribeSyncConfigReview(
 		const SyncConfigReview &review,
 		const QDateTime &checkedAt) {
@@ -511,12 +518,15 @@ bool SyncConfigUndoFinished(const SyncConfigRestoreResult &result) {
 
 QString SyncConfigRestoreText(
 		const SyncConfigRestoreResult &result,
-		const SyncConfigHistoryEntry &entry) {
+		const SyncConfigHistoryEntry &entry,
+		bool staysLocal) {
 	const auto when = SyncConfigHistoryMomentText(entry);
 	switch (result.status) {
 	case SyncConfigRestoreStatus::Restored:
-		return u"Restored the version from %1. The change stays on this "
-			"device until you publish it."_q.arg(when);
+		return staysLocal
+			? u"Restored the version from %1. The change stays on this "
+				"device until you publish it."_q.arg(when)
+			: u"Restored the version from %1."_q.arg(when);
 	case SyncConfigRestoreStatus::Unchanged:
 		return u"settings.toml already has the version from %1."_q.arg(when);
 	case SyncConfigRestoreStatus::NotFound:
@@ -541,6 +551,13 @@ QString SyncConfigRestoreText(
 			"History."_q;
 	}
 	return QString();
+}
+
+QString SyncConfigUndoneText(bool staysLocal) {
+	return staysLocal
+		? u"Your previous settings are back on this device. They stay local "
+			"until you publish them."_q
+		: u"Your previous settings are back on this device."_q;
 }
 
 } // namespace Purple
