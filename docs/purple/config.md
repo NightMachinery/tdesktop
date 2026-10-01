@@ -884,7 +884,9 @@ rather than something an upgrade started doing on your behalf.
 
 Only the app's own writes. Editing the file in a text editor does not post it -
 that write arrives through the file watcher, and the fork does not treat a file
-it did not write as a thing it was asked to send.
+it did not write as a thing it was asked to send. A restore or Undo in Sync
+across devices is not posted either: it stays on this machine until you publish
+it there.
 
 A run of writes is one document. The send waits five seconds after the last one,
 so six checkbox taps in a row post what you settled on rather than six copies of
