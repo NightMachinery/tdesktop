@@ -299,7 +299,9 @@ and the same English, kept in `strings.xml`. It has no account list: it checks
 the account the Purple settings screen belongs to and names it at the top, so
 syncing another account means switching to it in Telegram first. Its update
 notice is a bulletin with an Undo button, beside the same Undo last update
-row, and closing the screen cancels a check as closing the box does.
+row; when a share or publish follows the update, the bulletin has no button
+and the row appears once the post ends, as desktop hides its row while busy.
+Closing the screen cancels a check as closing the box does.
 The local setup operation creates an install identity and account binding only
 after a complete, unambiguous scan. It reuses the selected existing space or
 creates a time-ordered space ID when the account has none. An existing local
