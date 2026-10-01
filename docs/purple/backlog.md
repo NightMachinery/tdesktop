@@ -179,9 +179,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   an answer that arrives after a switch without remembering it as offered,
   names the account (name and public username, never the phone number) and
   the message date in the offer and in the import question, and refuses an
-  import whose account is no longer the active one. `purple/test_sync_import.sh` tests the desktop offer rule
-  and the account label. A live pass has to confirm the desktop offer with
-  two signed-in accounts.
+  import whose account is no longer the active one. Desktop now keeps the
+  exact previous bytes as `settings.toml.import.bak` before
+  `settings.toml.bak`, with Android's rules, and `purple/test_sync_import.sh`
+  tests the offer rule, the account label and the backup order. The old
+  desktop import wrote `settings.toml.bak` with `QFile::copy`, which on macOS
+  keeps the source file's modification time, so a backup it made looks older
+  than the import that made it. A live pass has to confirm the desktop offer
+  with two signed-in accounts.
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could

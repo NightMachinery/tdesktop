@@ -121,7 +121,8 @@ sees a linked device and offers the choice again.
 Still not built: background checks, automatic publish after edits, editing a
 setting in place from the review, retirement of superseded records, the
 Android UI, and live verification on real accounts. The manual import below
-still keeps only `settings.toml.bak`.
+keeps no History entry; it keeps `settings.toml.import.bak` and
+`settings.toml.bak` instead.
 
 The current manual transfer has two actions:
 
@@ -162,12 +163,20 @@ file once at launch, but neither writes anything until you choose Import.
 
 ## What it does not do
 
-It does not merge. Import replaces the file wholesale. Desktop keeps the
-previous file as `settings.toml.bak` beside it. Android source `6df36b1d`
-keeps that rolling whole-file-write backup and also writes
-`settings.toml.import.bak` before an import, so a later editor save does not
-erase the pre-import copy. Each backup has one slot. If a required backup
-cannot be refreshed, the import aborts and leaves the current file unchanged.
+It does not merge. Import replaces the file wholesale. Before it does, both
+clients keep the exact bytes of the current file as `settings.toml.import.bak`,
+then as `settings.toml.bak`, and only then write the new file. If either
+backup cannot be written, the import stops and `settings.toml` is unchanged;
+when the import backup is the one that failed, `settings.toml.bak` is
+unchanged too. Each backup has one slot, and the next import replaces both.
+On Android `settings.toml.bak` is also refreshed by every other whole-file
+write, including an editor save, which leaves the import backup alone, so the
+pre-import copy survives later edits. Desktop has no in-app editor, so its two
+backups hold the same bytes until the next import. Desktop writes both through
+a temporary file and a rename, so their modification time is the time of the
+import. Before 2026-10-01 desktop kept only `settings.toml.bak`, copied with
+`QFile::copy`, which on macOS keeps the source file's modification time, so
+that backup showed the date of the last edit rather than of the import.
 There is no three-way merge and no attempt at one, because a merge needs a
 common ancestor and there is nowhere here that would hold one.
 
@@ -342,8 +351,9 @@ On Android the launch-time offer lives in
 and starts from `DialogsActivity.onFragmentCreate`. On desktop it lives in
 `Telegram/SourceFiles/purple/purple_sync.cpp` and starts only when the primary
 chat list has a usable UI host and its session belongs to
-`Core::App().domain().active()`. The rules themselves, `JudgeImportOffer`
-and `ImportAccountLabel`, are inline in `purple_sync.h`, so `purple/test_sync_import.sh` can test them without the
+`Core::App().domain().active()`. The rules themselves, `JudgeImportOffer`,
+`ImportAccountLabel` and `WriteImportedSettings`, are inline in
+`purple_sync.h`, so `purple/test_sync_import.sh` can test them without the
 app. Both search the self peer with a document filter, choose the newest
 result actually named `settings.toml` and small enough to be one, and compare
 its date with the local file mtime. The remembered id is

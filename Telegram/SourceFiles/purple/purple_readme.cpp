@@ -40,7 +40,7 @@ save it - there is no restart and no Apply button.
 below, each of which edits the lines it needs and leaves your comments, blank
 lines, alignment and key order exactly where they were. The one exception is an
 import from Saved Messages, which replaces the whole file - and asks first, and
-keeps what was there as `settings.toml.bak`.
+keeps what was there as `settings.toml.import.bak` and `settings.toml.bak`.
 
 `settings.toml.good` is the last `settings.toml` the app accepted. It is
 rewritten atomically after every successful read of the real file. If the real
@@ -660,8 +660,10 @@ for.
 The chat is the history. Every send is one message with a date on it, so going
 back to last week's settings is finding last week's message and importing it.
 
-Your previous file is kept beside this one as `settings.toml.bak`. There is
-only ever one, overwritten each time you import.
+Before an import replaces this file, its exact bytes are kept beside it as
+`settings.toml.import.bak` and `settings.toml.bak`; if either cannot be
+written, nothing is imported. There is only ever one of each, overwritten each
+time you import.
 
 A file that is not valid TOML is refused at both ends, with the line and column
 - nothing is sent and nothing is replaced.
