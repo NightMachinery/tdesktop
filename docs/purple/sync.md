@@ -56,9 +56,11 @@ platform and the first four characters of the install ID after the `in-`
 prefix, for example `Android 9c1d`. Desktop writes its platform as Windows,
 macOS or Linux, as the manual Send action does.
 
-Sync records stay out of the download folder. Telegram keeps them in its
-encrypted media cache, as it does stickers, and writes a file only when you
-open or save one yourself. Records that earlier builds saved there stay until
+Sync records stay out of the download folder unless you put them there.
+Telegram never downloads them automatically and writes no copy of the ones this
+device sends. Clicking or saving a record works as for any other file: it goes
+to the download folder, or Telegram asks where to save it when "Ask download
+path for each file" is on. Records that earlier builds saved there stay until
 you delete them.
 
 The publisher enforces two modes. Finish sending starts it pending-only: it
@@ -283,7 +285,7 @@ not hold it anyway. The exception is Telegram's own automatic download: with Sav
 Messages on screen and file auto-download on, it saves a visible
 `settings.toml` to the download folder like any other file, and when it starts
 while the import is loading the same document, it takes that load over and the
-import reads the saved file. Sync records are kept out of the download folder;
+import reads the saved file. Sync records are never downloaded automatically;
 see [account_sync_plan.md](account_sync_plan.md).
 
 It parses with `Purple::ParseSettings` before it writes anything, so a file
