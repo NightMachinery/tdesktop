@@ -37,6 +37,7 @@ inline constexpr auto kSyncConfigSummaryLimit = 6;
 [[nodiscard]] std::vector<QString> SyncOfferedDeviceNames(
 	const SyncConfigReview &review);
 [[nodiscard]] bool SyncSettingsPublishable(const SyncConfigReview &review);
+[[nodiscard]] bool SyncSettingsMatchBase(const SyncConfigReview &review);
 
 [[nodiscard]] SyncConfigBoxStatus DescribeSyncConfigReview(
 	const SyncConfigReview &review,
@@ -64,6 +65,8 @@ inline constexpr auto kSyncConfigSummaryLimit = 6;
 	const SyncConfigRestoreResult &result);
 [[nodiscard]] QString SyncConfigRestoreText(
 	const SyncConfigRestoreResult &result,
-	const SyncConfigHistoryEntry &entry);
+	const SyncConfigHistoryEntry &entry,
+	bool staysLocal = true);
+[[nodiscard]] QString SyncConfigUndoneText(bool staysLocal);
 
 } // namespace Purple
