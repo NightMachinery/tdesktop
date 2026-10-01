@@ -65,6 +65,8 @@ struct UndoInfo {
 	QString device;
 };
 
+std::optional<UndoInfo> LastUndo;
+
 struct ShareInfo {
 	SyncConfigPublishRequest request;
 	QString prefix;
@@ -82,7 +84,6 @@ struct SetupBoxState {
 	uint64_t scanPosts = 0;
 	std::optional<SyncConfigReview> review;
 	std::optional<ShareInfo> share;
-	std::optional<UndoInfo> undo;
 	rpl::variable<QString> actionText;
 	rpl::variable<QString> checkText;
 	QDateTime checkedAt;
@@ -253,7 +254,7 @@ void RefreshButtons(SetupBoxState &state) {
 			&& state.currentAction != Action::None,
 		anim::type::instant);
 	state.undoButton->toggle(
-		!busy && state.undo.has_value(),
+		!busy && LastUndo.has_value(),
 		anim::type::instant);
 }
 
@@ -607,7 +608,7 @@ void ApplyChoice(
 	}
 	const auto device = record ? SyncDeviceName(*record) : u"another device"_q;
 	if (applied.wroteFile) {
-		state->undo = applied.undoAvailable
+		LastUndo = applied.undoAvailable
 			? std::make_optional(UndoInfo{ applied.historyId, device })
 			: std::nullopt;
 	}
@@ -659,10 +660,10 @@ void OpenReview(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 }
 
 void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
-	if (!state->undo || Busy(*state)) {
+	if (!LastUndo || Busy(*state)) {
 		return;
 	}
-	const auto undo = *state->undo;
+	const auto undo = *LastUndo;
 	box->uiShow()->showBox(Ui::MakeConfirmBox({
 		.text = u"Put back the settings this device had before the update "
 			"from %1? The current file is kept in History. The change stays "
@@ -670,8 +671,8 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		.confirmed = crl::guard(box, [=](Fn<void()> close) {
 			close();
 			if (Busy(*state)
-				|| !state->undo
-				|| state->undo->historyId != undo.historyId) {
+				|| !LastUndo
+				|| LastUndo->historyId != undo.historyId) {
 				return;
 			}
 			const auto entries = ListSyncConfigHistory();
@@ -685,7 +686,7 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 				undo.historyId,
 				SyncConfigHistoryReason::BeforeUndo);
 			if (SyncConfigUndoFinished(result)) {
-				state->undo.reset();
+				LastUndo.reset();
 			}
 			if (result.status == SyncConfigRestoreStatus::Restored) {
 				box->uiShow()->showToast(u"Previous settings are back."_q);
@@ -713,7 +714,7 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		entry.id,
 		SyncConfigHistoryReason::BeforeRestore);
 	if (result.status == SyncConfigRestoreStatus::Restored) {
-		state->undo.reset();
+		LastUndo.reset();
 		box->uiShow()->showToast(u"Settings restored."_q);
 		ReviewAgain(*state, [&](bool staysLocal) {
 			return SyncConfigRestoreText(result, entry, staysLocal);

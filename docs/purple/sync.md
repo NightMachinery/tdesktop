@@ -98,9 +98,14 @@ and **Undo last update** puts the previous file back. Undo is offered even when
 the file was written but the sync state could not be saved, and is not offered
 when there was no file before or the old file is not valid UTF-8 text, since
 those copies cannot be written back. A failed Undo keeps the row for another
-try unless the copy is gone or cannot be restored. **History** lists entries as
-"<date time> · <label>"; each opens a preview with **Restore**. The list is in
-the order the copies were saved, newest first, and the 30 kept are the ones
+try unless the copy is gone or cannot be restored. The row belongs to the
+running app, not to one box: closing and reopening Sync across devices keeps
+it. The next apply that writes the file replaces it, and an Undo, a History
+restore or a restart removes it (History still has the copy then). Android's
+row lasts while its Sync across devices screen stays open. **History** lists
+entries as "<date time> · <label>"; each opens a preview with **Restore**.
+The list is in the order the copies were saved, newest first, and the 30 kept
+are the ones
 saved last, even when the computer's clock was changed in between; each shows
 the clock's time when it was saved, so after a clock change the times can look
 out of order. Entries that
