@@ -190,6 +190,14 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 		return { u"settings.toml is missing or does not load, so this device "
 			"is running its last working copy of it. Sync changes nothing "
 			"until settings.toml is fixed or restored."_q };
+	case Message::UsingLastGoodWithPending:
+		return {
+			u"settings.toml is missing or does not load, so this device is "
+				"running its last working copy of it. Sync changes nothing "
+				"until settings.toml is fixed or restored, but the settings "
+				"post this device started earlier can still be sent."_q,
+			action,
+		};
 	case Message::InvalidRecords:
 		return { u"A sync record in Saved Messages or this device's sync "
 			"state is not valid, so nothing was changed. Check again later; "
