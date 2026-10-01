@@ -646,8 +646,9 @@ The older, simpler way to move this file:
 the first of those for you whenever the app writes this file - five seconds
 after the last write, so a run of taps is one message. It never posts a file it
 has just imported, and never one whose bytes it has already sent, so two
-machines cannot hand the same settings back and forth. The importing is still
-yours to ask for.
+machines cannot hand the same settings back and forth. A restore or Undo from
+Sync across devices is not posted either. The importing is still yours to ask
+for.
 
 The chat is the history. Every send is one message with a date on it, so going
 back to last week's settings is finding last week's message and importing it.

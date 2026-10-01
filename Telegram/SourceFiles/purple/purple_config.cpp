@@ -482,8 +482,9 @@ bool Config::writeSettings(const QString &text) {
 	// whole reason there is one of these rather than a QSaveFile in each
 	// writer: the automatic send has exactly one place to hook, and a switch
 	// added next year gets it for free. Writes from outside - an editor, an
-	// import - come in through the watcher instead and are deliberately not
-	// this. See ShouldAutoSend() in purple_state.h.
+	// import - and settings sync's own writes come in through the watcher
+	// instead and are deliberately not this. See ShouldAutoSend() in
+	// purple_state.h.
 	autoSendLater();
 	return true;
 }
