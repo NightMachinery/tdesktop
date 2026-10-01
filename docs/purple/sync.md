@@ -89,7 +89,11 @@ the file was written but the sync state could not be saved, and is not offered
 when there was no file before or the old file is not valid UTF-8 text, since
 those copies cannot be written back. A failed Undo keeps the row for another
 try unless the copy is gone or cannot be restored. **History** lists entries as
-"<date time> · <label>"; each opens a preview with **Restore**. Entries that
+"<date time> · <label>"; each opens a preview with **Restore**. The list is in
+the order the copies were saved, newest first, and the 30 kept are the ones
+saved last, even when the computer's clock was changed in between; each shows
+the clock's time when it was saved, so after a clock change the times can look
+out of order. Entries that
 record a missing file, or hold bytes that are not valid UTF-8, cannot be
 restored. A restore never lets History pruning remove the entry it is
 restoring. A restored or undone file stays local until **Publish changes**
