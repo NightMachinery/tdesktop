@@ -395,7 +395,8 @@ sequenced entry; a present sequence must be a whole number from 1 to
 A save can name one more entry to keep for that pruning pass;
 Restore and Undo name their target, so pruning never removes it before its
 bytes are written back. Only the apply and restore steps below write to it, and
-the manual import still keeps its single `settings.toml.bak`.
+the manual import keeps `settings.toml.import.bak` and `settings.toml.bak`
+instead.
 
 The desktop local store can also commit new config data without staging a
 record. A later update or join step needs this to record an adopted remote

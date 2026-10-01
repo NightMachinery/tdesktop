@@ -56,10 +56,6 @@ constexpr auto kSearchLimit = 100;
 	return QString::fromLatin1(kFileName);
 }
 
-[[nodiscard]] QString BackupFilePath() {
-	return SettingsFilePath() + u".bak"_q;
-}
-
 [[nodiscard]] QString PlatformName() {
 	return Platform::IsWindows()
 		? u"Windows"_q
@@ -124,20 +120,19 @@ void WriteImported(
 		return;
 	}
 	const auto path = SettingsFilePath();
-	if (QFile::exists(path)) {
-		const auto backup = BackupFilePath();
-		if ((QFile::exists(backup) && !QFile::remove(backup))
-			|| !QFile::copy(path, backup)) {
-			LOG(("Purple Error: Could not back up %1.").arg(path));
-			show->showBox(Ui::MakeInformBox(
-				u"Could not back up %1, so nothing was imported. See the log."_q
-					.arg(path)));
-			return;
-		}
-	}
-	if (!WriteConfigFile(path, text)) {
+	const auto failed = WriteImportedSettings(path, [&] {
+		return WriteConfigFile(path, text);
+	});
+	if (failed == path) {
 		show->showBox(Ui::MakeInformBox(
 			u"Could not write %1. See the log."_q.arg(path)));
+		return;
+	} else if (!failed.isEmpty()) {
+		LOG(("Purple Error: Could not write %1, so nothing was imported."
+			).arg(failed));
+		show->showBox(Ui::MakeInformBox(
+			u"Could not write %1, so nothing was imported. See the log."_q
+				.arg(failed)));
 		return;
 	}
 	// The bytes as they landed on disk, which is what the automatic send will
@@ -189,7 +184,7 @@ void ConfirmAndImport(
 		: u"%1 parser warnings."_q.arg(warnings));
 	lines.push_back(QString());
 	lines.push_back(u"Replaces your current settings; the previous file is "
-		"kept as %1."_q.arg(SettingsFileName() + u".bak"_q));
+		"kept as %1."_q.arg(SettingsFileName() + u".import.bak"_q));
 
 	const auto keep = show;
 	const auto weak = base::make_weak(session);

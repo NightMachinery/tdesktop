@@ -74,8 +74,8 @@ successful parse of the real file replaces it atomically. If the real file is
 missing or has a syntax error, the app parses this copy for its active settings
 while retaining the real file's text and parse problem for any later surgical
 write. The Work Mode box says when it is using the copy. It is not an import
-backup: `settings.toml.bak` remains the pre-import file and `.good` must not be
-edited by hand.
+backup: `settings.toml.import.bak` and `settings.toml.bak` hold the pre-import
+file and `.good` must not be edited by hand.
 
 ## The third file, which is nobody's
 
@@ -140,10 +140,14 @@ it, they stack up in one chat, and picking an older one is picking an older
 config - so there is nothing here that keeps revisions, because the chat
 already does.
 
-The previous file is kept as `settings.toml.bak` beside it. There is exactly
-one, overwritten on every import: it is there for the "that was the wrong
-file" moment, and a numbered series would silt up a directory people read by
-hand when Saved Messages is already holding every version worth going back to.
+The previous file is kept, byte for byte, as `settings.toml.import.bak` and
+`settings.toml.bak` beside it, both written before the import replaces
+anything; if either cannot be written, nothing is imported. There is exactly
+one of each, overwritten on every import: they are there for the "that was
+the wrong file" moment, and a numbered series would silt up a directory people
+read by hand when Saved Messages is already holding every version worth going
+back to. The import backup is the one with the same meaning on Android, where
+an editor save refreshes `settings.toml.bak` but leaves it alone.
 
 `state.toml` is not sent and not touched. The active preset and the running
 timers are what *this* machine is doing, not what your settings are.

@@ -9,6 +9,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_sync_inventory.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QSaveFile>
+
 class DocumentData;
 class HistoryItem;
 struct FilePrepareResult;
@@ -106,6 +109,50 @@ enum class ImportOfferVerdict {
 		return u"@"_q + username;
 	}
 	return u"%1 (@%2)"_q.arg(trimmed, username);
+}
+
+[[nodiscard]] inline QString SettingsImportBackupPath(const QString &path) {
+	return path + u".import.bak"_q;
+}
+
+[[nodiscard]] inline QString SettingsBackupPath(const QString &path) {
+	return path + u".bak"_q;
+}
+
+[[nodiscard]] inline bool WriteSettingsCopy(
+		const QString &path,
+		const QByteArray &bytes) {
+	auto file = QSaveFile(path);
+	return file.open(QIODevice::WriteOnly)
+		&& (file.write(bytes) == bytes.size())
+		&& file.commit();
+}
+
+[[nodiscard]] inline QString WriteImportedSettings(
+		const QString &path,
+		Fn<bool()> write) {
+	auto current = QFile(path);
+	if (current.exists()) {
+		const auto importBackup = SettingsImportBackupPath(path);
+		if (!current.open(QIODevice::ReadOnly)) {
+			return importBackup;
+		}
+		const auto bytes = current.readAll();
+		if (current.error() != QFileDevice::NoError) {
+			return importBackup;
+		}
+		current.close();
+		const auto backups = {
+			importBackup,
+			SettingsBackupPath(path),
+		};
+		for (const auto &backup : backups) {
+			if (!WriteSettingsCopy(backup, bytes)) {
+				return backup;
+			}
+		}
+	}
+	return write() ? QString() : path;
 }
 
 } // namespace Purple
