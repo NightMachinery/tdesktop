@@ -69,7 +69,10 @@ staged, so a second window that finished the post first cannot turn the
 confirmation into a post of later edits. Every other action passes a request
 with both the reviewed fingerprint and the parents that a fresh plan expects;
 the publisher refuses a request missing either, and refuses any request when a
-record is already staged. There is no standing resume action any more. While a
+record is already staged. A record staged but never recorded as staged,
+because Telegram quit or could not save its sync state in between, was never
+sent; the next check drops it and carries on instead of reporting a store
+error. There is no standing resume action any more. While a
 check or post runs, the action, Undo and History restore are disabled, because
 the publisher and the check hold the local sync store; a result from an
 account or session that is no longer selected is dropped. Join, Apply and a

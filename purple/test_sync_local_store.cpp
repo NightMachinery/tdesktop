@@ -514,6 +514,130 @@ void TestOrphanScan() {
 	}
 }
 
+void WritePrivate(const QString &path, const QByteArray &bytes) {
+	auto file = QFile(path);
+	CHECK(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+	CHECK(file.write(bytes) == bytes.size());
+	CHECK(file.setPermissions(QFileDevice::ReadOwner
+		| QFileDevice::WriteOwner));
+}
+
+[[nodiscard]] QByteArray ReadFile(const QString &path) {
+	auto file = QFile(path);
+	return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+void TestUnreservedStage() {
+	for (auto mode = 0; mode != 3; ++mode) {
+		auto temp = QTemporaryDir();
+		const auto root = Root(temp);
+		const auto initial = InitialState();
+		const auto one = Record(initial, 1, "version = 1\nname = 'one'\n");
+		auto unsent = QByteArray();
+		auto unsentKey = QString();
+		auto pendingSeq = uint64_t(0);
+		{
+			auto store = Purple::SyncLocalStore(root);
+			CHECK(store.Open(true).status
+				== Purple::SyncStoreStatus::Uninitialized);
+			CHECK(store.Initialize(initial).status
+				== Purple::SyncStoreStatus::Ready);
+			if (mode == 0) {
+				unsent = one.canonical;
+				unsentKey = one.version.key;
+			} else {
+				auto metadata = initial.configData;
+				metadata.pending = one.version.key;
+				CHECK(bool(StageForBoundAccount(
+					store, one.canonical, metadata)));
+				if (mode == 1) {
+					CHECK(store.ConfirmConfigReadBack(
+						one.canonical, u"device-a"_q, 111).status
+						== Purple::SyncStoreStatus::Ready);
+				} else {
+					pendingSeq = 1;
+				}
+				const auto two = Record(*store.state(), 2,
+					"version = 1\nname = 'two'\n");
+				unsent = two.canonical;
+				unsentKey = two.version.key;
+			}
+		}
+		const auto seq = (mode == 0) ? 1 : 2;
+		const auto stagePath = root + u"/pending/config-%1.json"_q.arg(seq);
+		const auto statePath = root + u"/state.json"_q;
+		const auto stateBefore = ReadFile(statePath);
+		WritePrivate(stagePath, unsent);
+		{
+			auto restarted = Purple::SyncLocalStore(root);
+			CHECK(restarted.Open(true).status
+				== Purple::SyncStoreStatus::Ready);
+			CHECK(!QFileInfo::exists(stagePath));
+			CHECK(ReadFile(statePath) == stateBefore);
+			if (!restarted.state()) {
+				CHECK(false);
+				continue;
+			}
+			CHECK(restarted.state()->config.seq == uint64_t(seq - 1));
+			CHECK(restarted.state()->config.pendingSeq == pendingSeq);
+			if (pendingSeq) {
+				const auto pending = restarted.ReadPendingConfig();
+				CHECK(bool(pending) && pending.staged == one.canonical);
+			} else {
+				CHECK(restarted.ReadPendingConfig().status
+					== Purple::SyncStoreStatus::NoPending);
+				auto metadata = restarted.state()->configData;
+				metadata.pending = unsentKey;
+				const auto staged = StageForBoundAccount(
+					restarted, unsent, metadata);
+				CHECK(bool(staged) && staged.seq == uint64_t(seq));
+			}
+		}
+	}
+}
+
+void TestUnexplainedStage() {
+	for (auto mode = 0; mode != 7; ++mode) {
+		auto temp = QTemporaryDir();
+		const auto root = Root(temp);
+		const auto initial = InitialState();
+		{
+			auto store = Purple::SyncLocalStore(root);
+			CHECK(store.Open(true).status
+				== Purple::SyncStoreStatus::Uninitialized);
+			CHECK(store.Initialize(initial).status
+				== Purple::SyncStoreStatus::Ready);
+		}
+		auto other = initial;
+		if (mode == 0) {
+			other.install = u"in-"_q + QString(25, u'b') + u"a"_q;
+		} else if (mode == 1) {
+			other.createdDevice = u"device-b"_q;
+		} else if (mode == 2) {
+			other.space = u"sp-"_q + QString(25, u'b') + u"a"_q;
+		}
+		const auto record = Record(other, (mode == 3) ? 2 : 1,
+			"version = 1\nname = 'unexplained'\n");
+		CHECK(bool(record));
+		const auto stagePath = root + ((mode == 6)
+			? u"/pending/config-2.json"_q
+			: u"/pending/config-1.json"_q);
+		const auto bytes = (mode == 4)
+			? record.canonical + ' '
+			: record.canonical;
+		WritePrivate(stagePath, bytes);
+		if (mode == 5) {
+			CHECK(QFile(stagePath).setPermissions(QFileDevice::ReadOwner
+				| QFileDevice::WriteOwner | QFileDevice::ReadGroup));
+		}
+		auto restarted = Purple::SyncLocalStore(root);
+		CHECK(restarted.Open(true).status
+			== Purple::SyncStoreStatus::OrphanStage);
+		CHECK(restarted.state() == nullptr);
+		CHECK(ReadFile(stagePath) == bytes);
+	}
+}
+
 void TestRejectedStage() {
 	auto temp = QTemporaryDir();
 	const auto initial = InitialState();
@@ -693,6 +817,8 @@ int main() {
 	TestCorruptPending();
 	TestInvalidStateAndOrphan();
 	TestOrphanScan();
+	TestUnreservedStage();
+	TestUnexplainedStage();
 	TestPermissionsAndCollision();
 	std::printf("%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;

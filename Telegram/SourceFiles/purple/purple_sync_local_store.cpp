@@ -43,6 +43,63 @@ constexpr auto kConfigBytes = 256 * 1024;
 #endif
 }
 
+[[nodiscard]] SyncStoreResult RecordError(
+		const SyncEnvelopeParseResult &parsed,
+		const ConfigPayloadInspection &inspected) {
+	return {
+		SyncStoreStatus::InvalidRecord,
+		SyncLocalError::None,
+		parsed.error,
+		inspected.error,
+	};
+}
+
+struct ConfigReservation {
+	SyncStoreResult result;
+	SyncLocalState state;
+	QString key;
+};
+
+[[nodiscard]] ConfigReservation ReserveConfigRecord(
+		const SyncLocalState &state,
+		const QByteArray &record) {
+	const auto parsed = ParseSyncEnvelope(record);
+	const auto inspected = InspectConfigPayload(parsed);
+	if (!parsed || inspected.status != ConfigPayloadStatus::Valid) {
+		return { RecordError(parsed, inspected) };
+	}
+	const auto canonical = SerializeSyncEnvelope(parsed.envelope);
+	const auto document = parsed.envelope.document;
+	if (!canonical || canonical.canonical != record
+		|| document.value(u"space"_q).toString() != state.space
+		|| document.value(u"writer"_q).toObject()
+			.value(u"install"_q).toString() != state.install
+		|| uint64_t(document.value(u"seq"_q).toDouble())
+			!= state.config.seq + 1) {
+		return { { SyncStoreStatus::InvalidRecord } };
+	}
+	const auto reserved = ReserveSyncSeq(
+		state,
+		SyncLocalStream::Config,
+		document.value(u"payload_sha256"_q).toString());
+	if (!reserved) {
+		return { { SyncStoreStatus::InvalidTransition } };
+	}
+	auto next = reserved.state;
+	next.configData.pending = inspected.version.key;
+	const auto issued = AppendIssuedConfigRecord(next, record);
+	if (!issued) {
+		return { { (issued.error == SyncIssueError::InvalidState)
+			? SyncStoreStatus::InvalidState
+			: SyncStoreStatus::InvalidRecord } };
+	}
+	return {
+		{ SyncStoreStatus::Ready },
+		issued.state,
+		inspected.version.key,
+	};
+}
+
 [[nodiscard]] SyncStoreStatus CheckStages(
 		const QString &pendingPath,
 		const SyncLocalState *state) {
@@ -71,7 +128,8 @@ constexpr auto kConfigBytes = 256 * 1024;
 		if (seq == state->config.pendingSeq) {
 			continue;
 		}
-		if (seq > state->config.seq) {
+		const auto unreserved = (seq > state->config.seq);
+		if (unreserved && seq != state->config.seq + 1) {
 			return SyncStoreStatus::OrphanStage;
 		}
 		auto bytes = QByteArray();
@@ -80,7 +138,14 @@ constexpr auto kConfigBytes = 256 * 1024;
 			kConfigBytes,
 			bytes);
 		if (readStatus != SyncStoreStatus::Ready) {
-			return readStatus;
+			return unreserved ? SyncStoreStatus::OrphanStage : readStatus;
+		}
+		if (unreserved) {
+			if (!ReserveConfigRecord(*state, bytes).result) {
+				return SyncStoreStatus::OrphanStage;
+			}
+			obsolete.push_back(path);
+			continue;
 		}
 		const auto parsed = ParseSyncEnvelope(bytes);
 		const auto inspected = InspectConfigPayload(parsed);
@@ -111,17 +176,6 @@ constexpr auto kConfigBytes = 256 * 1024;
 		}
 	}
 	return SyncStoreStatus::Ready;
-}
-
-[[nodiscard]] SyncStoreResult RecordError(
-		const SyncEnvelopeParseResult &parsed,
-		const ConfigPayloadInspection &inspected) {
-	return {
-		SyncStoreStatus::InvalidRecord,
-		SyncLocalError::None,
-		parsed.error,
-		inspected.error,
-	};
 }
 
 }
@@ -396,41 +450,20 @@ SyncStoreResult SyncLocalStore::StageConfig(
 		!= SyncAccountBindingVerdict::Bound) {
 		return { SyncStoreStatus::AccountUnbound };
 	}
-	const auto parsed = ParseSyncEnvelope(canonicalRecord);
-	const auto inspected = InspectConfigPayload(parsed);
-	if (!parsed || inspected.status != ConfigPayloadStatus::Valid) {
-		return RecordError(parsed, inspected);
+	auto reserved = ReserveConfigRecord(*_state, canonicalRecord);
+	if (!reserved.result) {
+		return reserved.result;
 	}
-	const auto canonical = SerializeSyncEnvelope(parsed.envelope);
-	const auto document = parsed.envelope.document;
-	if (!canonical || canonical.canonical != canonicalRecord
-		|| document.value(u"space"_q).toString() != _state->space
-		|| document.value(u"writer"_q).toObject()
-			.value(u"install"_q).toString() != _state->install
-		|| uint64_t(document.value(u"seq"_q).toDouble())
-			!= _state->config.seq + 1
-		|| nextConfigData.pending != inspected.version.key) {
+	if (nextConfigData.pending != reserved.key) {
 		return { SyncStoreStatus::InvalidRecord };
 	}
-	const auto hash = document.value(u"payload_sha256"_q).toString();
-	const auto reserved = ReserveSyncSeq(
-		*_state, SyncLocalStream::Config, hash);
-	if (!reserved) {
-		return { SyncStoreStatus::InvalidTransition };
-	}
-	auto next = reserved.state;
+	auto next = std::move(reserved.state);
 	next.configData = nextConfigData;
-	const auto issued = AppendIssuedConfigRecord(next, canonicalRecord);
-	if (!issued) {
-		return { issued.error == SyncIssueError::InvalidState
-			? SyncStoreStatus::InvalidState : SyncStoreStatus::InvalidRecord };
-	}
-	next = issued.state;
 	const auto serialized = SerializeSyncLocalState(next);
 	if (!serialized) {
 		return { SyncStoreStatus::InvalidState, serialized.error };
 	}
-	const auto path = PendingPath(reserved.seq);
+	const auto path = PendingPath(next.config.pendingSeq);
 	const auto stageInfo = QFileInfo(path);
 	if (stageInfo.exists() || stageInfo.isSymLink()) {
 		return SetFailure({ SyncStoreStatus::OrphanStage });

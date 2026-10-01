@@ -76,12 +76,25 @@ envelope. After a crash in that gap, restart deletes only a validated stage
 matching the confirmed state. Older staged own records are also obsolete once
 a later sequence is persisted, even when a user chooses an unrelated remote
 version; restart validates their canonical contents, writer and sequence before
-removal. Ambiguous and future files pause cleanup. A clone or device mismatch,
+removal. A stage one sequence past the state, which a process death between
+the stage write and the reserved state write leaves behind, was never sent:
+the publisher posts only a record whose reservation is on disk. Restart
+removes such a stage when it is exactly the record staging would accept next
+for that state, by the same checks staging makes (canonical bytes, space,
+install, device, sequence and the issued-record ledger), including one written
+beside an older pending stage. Any other stage past the state, and ambiguous
+files, pause cleanup as `OrphanStage`. A clone or device mismatch,
 including a missing current device identity, has a distinct verdict.
 The desktop store latches that verdict and refuses further staging until a
-fresh open and reconciliation. `QSaveFile` protects final files from partial
-writes after a process crash; it does not promise persistence through power
-loss. Desktop also has a Saved Messages history scanner. It pages
+fresh open and reconciliation. `QSaveFile` writes a temporary file beside the
+target and renames it over the target, with no fallback to writing in place,
+so a process death mid-write leaves the previous `state.json` or stage whole
+and never a truncated or empty one. The only leftover can be Qt's temporary,
+named after the target plus a dot and six random characters (on Linux, where
+the filesystem allows, Qt uses an unnamed file and leaves nothing); the store
+never reads such a name as state or stage and leaves it alone. This does not
+promise persistence through power loss. Desktop also has a Saved Messages
+history scanner. It pages
 `messages.getHistory` to an empty result, reports progress, and only returns
 candidate message IDs after a complete scan. Cancellation, request failure,
 invalid responses, and stalled pagination remain incomplete. A separate
