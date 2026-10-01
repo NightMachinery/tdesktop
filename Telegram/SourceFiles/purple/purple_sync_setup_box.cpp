@@ -84,12 +84,12 @@ struct SetupBoxState {
 	std::optional<ShareInfo> share;
 	std::optional<UndoInfo> undo;
 	rpl::variable<QString> actionText;
+	rpl::variable<QString> checkText;
 	QDateTime checkedAt;
 	QString progressPrefix;
 	QString publishPrefix;
 	Ui::FlatLabel *status = nullptr;
 	Ui::RoundButton *check = nullptr;
-	Ui::RoundButton *cancel = nullptr;
 	Ui::SlideWrap<Ui::SettingsButton> *action = nullptr;
 	Ui::SlideWrap<Ui::SettingsButton> *undoButton = nullptr;
 	Action currentAction = Action::None;
@@ -241,8 +241,10 @@ struct SetupBoxState {
 void RefreshButtons(SetupBoxState &state) {
 	const auto available = SelectedAvailable(state);
 	const auto busy = Busy(state);
-	state.check->setDisabled(busy || !available);
-	state.cancel->setDisabled(!state.running);
+	state.checkText = state.running
+		? u"Cancel check"_q
+		: u"Check Saved Messages"_q;
+	state.check->setDisabled(!state.running && (busy || !available));
 	state.actionText = SyncConfigBoxActionText(state.currentAction);
 	state.action->toggle(
 		!busy
@@ -881,15 +883,9 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		SetStatus(*state, u"Ready to check Saved Messages."_q);
 	});
 
+	state->checkText = u"Check Saved Messages"_q;
 	state->check = box->addButton(
-		rpl::single(u"Check Saved Messages"_q),
-		[=] {
-			if (!Busy(*state)) {
-				StartCheck(box, state, CheckFollowup::None);
-			}
-		});
-	state->cancel = box->addButton(
-		rpl::single(u"Cancel check"_q),
+		state->checkText.value(),
 		[=] {
 			if (state->running && state->inventory) {
 				const auto sharing = state->share.has_value();
@@ -902,6 +898,8 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 						"device but were not sent. Check again to share "
 						"them."_q
 					: u"Check cancelled. Check Saved Messages again."_q);
+			} else if (!Busy(*state)) {
+				StartCheck(box, state, CheckFollowup::None);
 			}
 		});
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
