@@ -37,8 +37,14 @@ constexpr auto kIdLength = kTimeDigits + 1 + kSuffixDigits;
 constexpr auto kIdAttempts = 4;
 constexpr auto kMaximumSafeInteger = int64(9007199254740991LL);
 
+struct SequencedEntry {
+	SyncConfigHistoryEntry entry;
+	int64 sequence = 0;
+};
+
 struct LoadedEntry {
 	SyncConfigHistoryEntry entry;
+	int64 sequence = 0;
 	QByteArray text;
 };
 
@@ -125,9 +131,11 @@ struct LoadedEntry {
 	return result;
 }
 
-void SortNewestFirst(std::vector<SyncConfigHistoryEntry> &entries) {
+void SortNewestFirst(std::vector<SequencedEntry> &entries) {
 	std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) {
-		return a.id > b.id;
+		return (a.sequence != b.sequence)
+			? (a.sequence > b.sequence)
+			: (a.entry.id > b.entry.id);
 	});
 }
 
@@ -161,11 +169,13 @@ void SortNewestFirst(std::vector<SyncConfigHistoryEntry> &entries) {
 }
 
 [[nodiscard]] QByteArray SerializeMetadata(
-		const SyncConfigHistoryEntry &entry) {
+		const SyncConfigHistoryEntry &entry,
+		int64 sequence) {
 	auto object = QJsonObject();
 	object.insert(u"version"_q, kMetadataVersion);
 	object.insert(u"id"_q, entry.id);
 	object.insert(u"created_ms"_q, QJsonValue(qint64(entry.createdMs)));
+	object.insert(u"sequence"_q, QJsonValue(qint64(sequence)));
 	object.insert(u"reason"_q, ReasonName(entry.reason));
 	object.insert(u"label"_q, entry.label);
 	object.insert(u"version_key"_q, entry.versionKey);
@@ -198,6 +208,10 @@ void SortNewestFirst(std::vector<SyncConfigHistoryEntry> &entries) {
 	const auto version = object.value(u"version"_q);
 	const auto storedId = object.value(u"id"_q);
 	const auto created = object.value(u"created_ms"_q);
+	const auto sequenced = object.contains(u"sequence"_q);
+	const auto sequence = sequenced
+		? object.value(u"sequence"_q).toInteger(-1)
+		: int64(0);
 	const auto reason = ParseReason(object.value(u"reason"_q).toString());
 	const auto label = object.value(u"label"_q);
 	const auto versionKey = object.value(u"version_key"_q);
@@ -211,6 +225,8 @@ void SortNewestFirst(std::vector<SyncConfigHistoryEntry> &entries) {
 		|| created.toInteger(-1) != IdTime(id)
 		|| IdTime(id) <= 0
 		|| IdTime(id) > kMaximumSafeInteger
+		|| (sequenced
+			&& (sequence < 1 || sequence > kMaximumSafeInteger))
 		|| !reason
 		|| !label.isString()
 		|| label.toString().size() > kMaximumLabelLength
@@ -246,6 +262,7 @@ void SortNewestFirst(std::vector<SyncConfigHistoryEntry> &entries) {
 			.size = text.size(),
 			.existed = existed.toBool(),
 		},
+		.sequence = sequence,
 		.text = text,
 	};
 }
@@ -278,18 +295,28 @@ void Discard(const QString &directory, const QString &id) {
 	}
 }
 
-void Prune(const QString &directory, const QSet<QString> &keep) {
-	const auto names = EntryNames(directory);
-	auto valid = std::vector<SyncConfigHistoryEntry>();
+[[nodiscard]] std::vector<SequencedEntry> LoadValid(
+		const QString &directory,
+		const QStringList &names,
+		int *invalid = nullptr) {
+	auto result = std::vector<SequencedEntry>();
 	for (const auto &id : EntryIds(names)) {
 		if (const auto loaded = LoadEntry(directory, id)) {
-			valid.push_back(loaded->entry);
+			result.push_back({ loaded->entry, loaded->sequence });
+		} else if (invalid) {
+			++*invalid;
 		}
 	}
-	SortNewestFirst(valid);
+	SortNewestFirst(result);
+	return result;
+}
+
+void Prune(const QString &directory, const QSet<QString> &keep) {
+	const auto names = EntryNames(directory);
+	const auto valid = LoadValid(directory, names);
 	auto validIds = QSet<QString>();
-	for (const auto &entry : valid) {
-		validIds.insert(entry.id);
+	for (const auto &sequenced : valid) {
+		validIds.insert(sequenced.entry.id);
 	}
 	auto kept = QSet<QString>();
 	for (const auto &id : keep) {
@@ -297,9 +324,9 @@ void Prune(const QString &directory, const QSet<QString> &keep) {
 			kept.insert(id);
 		}
 	}
-	for (const auto &entry : valid) {
+	for (const auto &sequenced : valid) {
 		if (kept.size() < kHistoryLimit) {
-			kept.insert(entry.id);
+			kept.insert(sequenced.entry.id);
 		}
 	}
 	const auto full = (kept.size() >= kHistoryLimit);
@@ -349,6 +376,12 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 		return std::nullopt;
 	}
 	const auto directory = SyncConfigHistoryDirectory();
+	const auto valid = LoadValid(directory, EntryNames(directory));
+	const auto sequence = (valid.empty() ? 0 : valid.front().sequence) + 1;
+	if (sequence > kMaximumSafeInteger) {
+		LOG(("Purple Error: Settings history has no usable sequence."));
+		return std::nullopt;
+	}
 	const auto id = UnusedId(directory, createdMs);
 	if (id.isEmpty()) {
 		LOG(("Purple Error: Could not choose a settings history id."));
@@ -370,7 +403,7 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 	const auto metadataStatus = (textStatus == SyncStoreStatus::Ready)
 		? WriteSyncPrivateFile(
 			MetadataPath(directory, id),
-			SerializeMetadata(entry))
+			SerializeMetadata(entry, sequence))
 		: textStatus;
 	const auto saved = (metadataStatus == SyncStoreStatus::Ready)
 		? LoadEntry(directory, id)
@@ -395,20 +428,17 @@ std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory() {
 		return {};
 	}
 	const auto directory = SyncConfigHistoryDirectory();
-	auto result = std::vector<SyncConfigHistoryEntry>();
 	auto invalid = 0;
-	for (const auto &id : EntryIds(EntryNames(directory))) {
-		if (const auto loaded = LoadEntry(directory, id)) {
-			result.push_back(loaded->entry);
-		} else {
-			++invalid;
-		}
-	}
+	const auto valid = LoadValid(directory, EntryNames(directory), &invalid);
 	if (invalid) {
 		LOG(("Purple Error: Skipped %1 invalid settings history entries."
 			).arg(invalid));
 	}
-	SortNewestFirst(result);
+	auto result = std::vector<SyncConfigHistoryEntry>();
+	result.reserve(valid.size());
+	for (const auto &sequenced : valid) {
+		result.push_back(sequenced.entry);
+	}
 	return result;
 }
 

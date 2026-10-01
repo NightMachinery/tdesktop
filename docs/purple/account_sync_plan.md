@@ -348,9 +348,19 @@ random suffix. The directories and files are owner-only on Unix, and an
 insecure directory refuses every operation, as in the local sync store. A
 reader accepts an entry only when both files exist, the metadata parses, and
 the bytes match the recorded fingerprint. After a new entry is fully written,
-the store keeps the newest 30 valid entries, deletes older ones and invalid
+the store keeps the 30 valid entries saved last, deletes older ones and invalid
 leftovers older than those 30, and never deletes anything outside that
-directory. A save can name one more entry to keep for that pruning pass;
+directory. "Saved last" is save order, not clock time: the metadata also
+records a save sequence number, one more than the highest of the valid
+entries, and the list (newest first) and the prune order by it, then by ID.
+The creation time and the ID keep the clock at save time, which is what
+History shows. Ordering by the clock alone broke after a clock correction:
+once entries saved while the clock ran ahead filled the store, every later
+save sorted as the oldest, and the next save pruned it. An entry written
+before the sequence existed has none, counts as 0 and sorts below every
+sequenced entry; a present sequence must be a whole number from 1 to
+2^53 - 1, or the entry is invalid. Android follows the same rule.
+A save can name one more entry to keep for that pruning pass;
 Restore and Undo name their target, so pruning never removes it before its
 bytes are written back. Only the apply and restore steps below write to it, and
 the manual import still keeps its single `settings.toml.bak`.
