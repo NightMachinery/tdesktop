@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/application.h"
 #include "core/mime_type.h"
+#include "purple/purple_sync.h"
 #include "storage/file_download.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/image/svg_preview.h"
@@ -310,6 +311,8 @@ void DocumentMedia::automaticLoad(
 		|| _owner->cancelled()) {
 		return;
 	} else if (!item && !_owner->sticker() && !_owner->isAnimation()) {
+		return;
+	} else if (Purple::IsSyncRecordFileName(_owner->filename())) {
 		return;
 	}
 	const auto toCache = _owner->saveToCache();
