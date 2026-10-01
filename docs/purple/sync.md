@@ -156,7 +156,8 @@ one document - but nothing about the receiving half changed. On Android the fork
 notices that the other machine has a newer file and says so once, see phase 2
 below, and the write still waits for a press. Two fingerprints in `state.toml`,
 of the last file this machine sent and the last it wrote from an import,
-suppress repeated posts of those bytes; an import never sends. On both clients,
+suppress repeated posts of those bytes; an import never sends, and neither
+does a settings sync restore or Undo. On both clients,
 the sent fingerprint is recorded only after Telegram confirms the post. While
 an automatic post is in flight, its fingerprint is held in memory to keep
 another local write from queuing the same bytes. Preparation, upload, and
