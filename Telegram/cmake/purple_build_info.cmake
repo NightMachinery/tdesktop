@@ -30,6 +30,19 @@ if (NOT "${desktop_commit}" STREQUAL "unknown")
     endif()
 endif()
 
+set(core_dirty "false")
+if (NOT "${core_commit}" STREQUAL "unknown")
+    execute_process(
+        COMMAND "${PURPLE_GIT}" --no-optional-locks -C "${PURPLE_CORE}"
+            status --porcelain --untracked-files=no
+        RESULT_VARIABLE code
+        OUTPUT_VARIABLE changes
+        ERROR_QUIET)
+    if ("${code}" STREQUAL "0" AND NOT "${changes}" STREQUAL "")
+        set(core_dirty "true")
+    endif()
+endif()
+
 set(content "#pragma once
 
 namespace Purple::BuildInfo {
@@ -37,6 +50,7 @@ namespace Purple::BuildInfo {
 inline constexpr auto kDesktopCommit = \"${desktop_commit}\";
 inline constexpr auto kDesktopDirty = ${desktop_dirty};
 inline constexpr auto kCoreCommit = \"${core_commit}\";
+inline constexpr auto kCoreDirty = ${core_dirty};
 
 } // namespace Purple::BuildInfo
 ")

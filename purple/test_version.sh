@@ -63,12 +63,13 @@ run() {
 }
 
 expect() {
-    local what="$1" desktop="$2" dirty="$3" core="$4"
+    local what="$1" desktop="$2" dirty="$3" core="$4" coreDirty="$5"
     local line
     for line in \
         "inline constexpr auto kDesktopCommit = \"$desktop\";" \
         "inline constexpr auto kDesktopDirty = $dirty;" \
-        "inline constexpr auto kCoreCommit = \"$core\";"; do
+        "inline constexpr auto kCoreCommit = \"$core\";" \
+        "inline constexpr auto kCoreDirty = $coreDirty;"; do
         Checks=$((Checks + 1))
         if ! command grep -qxF -- "$line" "$Output"; then
             fail "$what: no line '$line'"
@@ -103,7 +104,8 @@ head_of() {
 }
 
 run
-expect "clean checkout" "$(head_of "$Repo")" false "$(head_of "$Repo/core")"
+expect "clean checkout" \
+    "$(head_of "$Repo")" false "$(head_of "$Repo/core")" false
 
 age
 old="$(mtime)"
@@ -112,36 +114,49 @@ expect_untouched "$old" "second run"
 
 echo u > "$Repo/untracked.txt"
 run
-expect "untracked file" "$(head_of "$Repo")" false "$(head_of "$Repo/core")"
+expect "untracked file" \
+    "$(head_of "$Repo")" false "$(head_of "$Repo/core")" false
 expect_untouched "$old" "untracked file"
+
+echo u > "$Repo/core/untracked.txt"
+run
+expect "untracked file in the submodule" \
+    "$(head_of "$Repo")" false "$(head_of "$Repo/core")" false
+expect_untouched "$old" "untracked file in the submodule"
 
 echo b >> "$Repo/core/a.txt"
 run
-expect "dirty submodule" "$(head_of "$Repo")" false "$(head_of "$Repo/core")"
-expect_untouched "$old" "dirty submodule"
+expect "dirty submodule" \
+    "$(head_of "$Repo")" false "$(head_of "$Repo/core")" true
+expect_rewritten "$old" "dirty submodule"
 
+age
+old="$(mtime)"
 git_ -C "$Repo/core" commit -qam more
 run
-expect "moved submodule" "$(head_of "$Repo")" false "$(head_of "$Repo/core")"
+expect "moved submodule" \
+    "$(head_of "$Repo")" false "$(head_of "$Repo/core")" false
 expect_rewritten "$old" "moved submodule"
 
 age
 old="$(mtime)"
 echo y >> "$Repo/tracked.txt"
 run
-expect "tracked change" "$(head_of "$Repo")" true "$(head_of "$Repo/core")"
+expect "tracked change" \
+    "$(head_of "$Repo")" true "$(head_of "$Repo/core")" false
 expect_rewritten "$old" "tracked change"
 
 git_ -C "$Repo" commit -qam two
 run
-expect "new commit" "$(head_of "$Repo")" false "$(head_of "$Repo/core")"
+expect "new commit" \
+    "$(head_of "$Repo")" false "$(head_of "$Repo/core")" false
 
 command mkdir "$Repo/plain"
 run "$Git" "$Repo/plain"
-expect "core without a checkout" "$(head_of "$Repo")" false unknown
+expect "core without a checkout" "$(head_of "$Repo")" false unknown false
 
 run ""
-expect "no git" unknown false unknown
+expect "no git" unknown false unknown false
 
 echo "$Checks checks, $Failures failures"
 [ "$Failures" = 0 ]

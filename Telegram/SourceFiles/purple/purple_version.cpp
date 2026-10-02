@@ -52,7 +52,8 @@ QString VersionText() {
 		QString::fromLatin1(kVersion),
 		QString::fromLatin1(BuildInfo::kDesktopCommit),
 		BuildInfo::kDesktopDirty,
-		QString::fromLatin1(BuildInfo::kCoreCommit));
+		QString::fromLatin1(BuildInfo::kCoreCommit),
+		BuildInfo::kCoreDirty);
 }
 
 void AddVersionRow(::Settings::Builder::SectionBuilder &builder) {
