@@ -137,6 +137,9 @@ with `git grep Purple::`. Read the docs before changing any of it:
   Saved Messages, and the alternatives that were not built
 - **`docs/purple/version.md`** - the Purple version line in Settings and the
   rule for bumping its number
+- **`docs/purple/upstream_hooks.md`** - the hook registry: every Purple edit
+  in an upstream file, the refactor batch that moves it, and how often
+  upstream edits next to it
 - **`docs/remote-build-and-test/readme.md`** - building and testing the Android
   fork on the Apple-silicon laptop, with the shared build box available as an
   optional compile worker and its emulator retained only for legacy diagnostics
@@ -172,6 +175,10 @@ the purple-core submodule when the Android app needs the same logic.
   under `docs/purple/` which upstream files it touches and why.
 - Review your own diff of upstream files before committing; each hunk should
   read as a hook, not as feature code.
+- A commit that changes Purple lines in an upstream file also updates that
+  file's entry in `docs/purple/upstream_hooks.md`.
+  `purple/upstream_report.sh` measures the lines (`--worktree` for uncommitted
+  changes, `--near` for how often upstream edited next to each hunk).
 
 New work follows this from the start. Older Purple code that still sits inside
 upstream files is being moved out.
