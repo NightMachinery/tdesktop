@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
+#include "purple/purple_version.h"
 #include "settings/settings_builder.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
 #include "settings/sections/settings_advanced.h"
@@ -795,6 +796,7 @@ const auto kMeta = BuildHelper({
 	BuildInterfaceScale(builder);
 	BuildPremiumSection(builder);
 	BuildHelpSection(builder);
+	Purple::AddVersionFooter(builder);
 });
 
 } // namespace
