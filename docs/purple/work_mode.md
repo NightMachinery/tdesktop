@@ -1871,7 +1871,7 @@ debounced five seconds so a run of taps is one document. It is the same upload
 the manual **Send settings to Saved Messages** performs, with the confirmation
 box left out: the confirmation was given once, in words, when the switch was
 turned on. The post goes only to the first account's Saved Messages, and only
-while a window showing that account is in front; see
+if a window showing that account is in front when the five seconds end; see
 [config.md](config.md#sending-the-file-on-every-save).
 
 Only the app's own writes go through it. There is exactly one function in
