@@ -186,7 +186,10 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   desktop import wrote `settings.toml.bak` with `QFile::copy`, which on macOS
   keeps the source file's modification time, so a backup it made looks older
   than the import that made it. A live pass has to confirm the desktop offer
-  with two signed-in accounts.
+  with two signed-in accounts. On 2026-10-02 Evar allowed desktop's separate
+  account windows to import from their own Saved Messages: desktop now
+  refuses only when the window that asked has switched to another account,
+  see [sync.md](sync.md).
 - **Android notification preview exceptions:** shared core and desktop support
   are done. Android preview-safe integration is included in the release from
   source `5e428532` with core `e7bf8544`. A rich-message path in that APK could

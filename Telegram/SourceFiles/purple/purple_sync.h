@@ -111,6 +111,12 @@ enum class ImportOfferVerdict {
 	return u"%1 (@%2)"_q.arg(trimmed, username);
 }
 
+[[nodiscard]] inline QString ImportWindowSwitchedText(const QString &account) {
+	return u"Nothing was imported, because the window that asked now shows "
+		"another account. The settings file is in the Saved Messages of %1: "
+		"import it from a window that shows that account."_q.arg(account);
+}
+
 [[nodiscard]] inline QString SettingsImportBackupPath(const QString &path) {
 	return path + u".import.bak"_q;
 }
