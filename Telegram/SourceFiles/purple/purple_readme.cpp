@@ -646,8 +646,10 @@ The older, simpler way to move this file:
 The first time an account's chat list appears after the app starts, while that
 account is the active one, the app also offers a newer `settings.toml` from its
 Saved Messages, once, naming the account and the date. A file in another
-signed-in account is never offered, and nothing is imported once its account
-is no longer the active one.
+signed-in account is never offered. The message menu's import works in any
+window for the account that window shows, including a separate account window
+opened with Ctrl-click (Cmd-click on macOS) in the account switcher; nothing is
+imported if the window that asked switches to another account first.
 
 `[sync] send_after_save_p = true`, or the switch beside the send button, does
 the first of those for you whenever the app writes this file - five seconds

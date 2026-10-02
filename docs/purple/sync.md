@@ -224,14 +224,33 @@ active. A file in the Saved Messages of another signed-in account, a test
 account for example, is never offered. The offer names the account by its
 name and public username, never its phone number, as “Account Name
 (@username), sent 2026-09-30 21:14”, and the import question names it too:
-“Import the settings sent ... to Saved Messages of ...?”. If the account is
+“Import the settings sent ... to Saved Messages of ...?”. This rule came
+from a desktop install that had a disposable test account signed in as a
+second account: the test account's Saved Messages held a 4 MiB test
+`settings.toml`, the offer did not say whose file it was, and Import replaced
+the real settings.
+
+What happens after Import is pressed differs. On Android, if the account is
 no longer the active one when Import is pressed, when the question would
 appear after the download, or when the question is confirmed, nothing is
-imported and the app says why. This applies to the message menu's import as
-well. This rule came from a desktop install that had a disposable test
-account signed in as a second account: the test account's Saved Messages held
-a 4 MiB test `settings.toml`, the offer did not say whose file it was, and
-Import replaced the real settings.
+imported and the app says why, and this applies to the message menu's import
+as well. Desktop ties the import to the window that asked instead of to the
+active account. Every desktop account window shows one account, and a
+separate account window, opened with Ctrl-click (Cmd-click on macOS) in the
+account switcher, stays on its account while another account is the active
+one (the one last selected in a switcher). Since 2026-10-02 such a window
+may import from its own account's Saved Messages through the message menu,
+and Import on an offer already shown works the same way. The question names
+that window's account, and the import keeps `settings.toml.import.bak` and
+`settings.toml.bak` exactly as any other import does. The refusal is kept
+for the one case where it is still right: the window that asked switched to
+another account before the question appeared (for example while the file was
+downloading) or before it was confirmed. Then nothing is imported, a log line
+says the asking window shows another account now, and the active window says
+which account's Saved Messages hold the file and to import it from a window
+showing that account. The rule is "the asking window's session controller
+still exists": tdesktop replaces a window's session controller when the
+window changes account, and closes its open boxes.
 
 Desktop accepts a settings document up to 4 MiB and scans up to 100 recent
 documents. Android source `a950e13c` uses the same size and search limits;

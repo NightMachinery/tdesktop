@@ -126,8 +126,11 @@ to check. Nothing runs in the background. See [sync.md](sync.md) for details.
   whose Saved Messages hold the file (name and public username, never the
   phone number), the schema version and the number of parser warnings, and
   replaces the file on confirm. The watcher then reloads it like any other
-  edit. The account has to be the active one, the one the account switcher
-  has selected, both when the question appears and when you confirm it.
+  edit. It works in any window for the account that window shows, including
+  a separate account window opened with Ctrl-click (Cmd-click on macOS) in the
+  account switcher while another account is the active one. If the window
+  that asked switches to another account before the question appears or is
+  confirmed, nothing is imported and the app says so.
 
 The first time an account's chat list appears after the app starts, while
 that account is the active one, the app also looks for a newer `settings.toml`

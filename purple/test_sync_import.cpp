@@ -98,6 +98,15 @@ void CheckAccountLabels() {
 	CHECK(ImportAccountLabel(u"  "_q, QString()).isEmpty());
 }
 
+void CheckSwitchedWindowText() {
+	const auto text = Purple::ImportWindowSwitchedText(
+		Purple::ImportAccountLabel(u"Ada Test"_q, u"tester"_q));
+	CHECK(text.contains(u"Saved Messages of Ada Test (@tester)"_q));
+	CHECK(text.contains(u"window"_q));
+	CHECK(text.startsWith(u"Nothing was imported"_q));
+	CHECK(!text.contains(u"active"_q));
+}
+
 void CheckImportBackups() {
 	auto root = QTemporaryDir();
 	CHECK(root.isValid());
@@ -199,6 +208,7 @@ void CheckImportBackups() {
 int main() {
 	CheckOfferVerdicts();
 	CheckAccountLabels();
+	CheckSwitchedWindowText();
 	CheckImportBackups();
 
 	std::printf("%d checks, %d failures\n", checks, failures);

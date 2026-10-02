@@ -104,19 +104,26 @@ constexpr auto kSearchLimit = 100;
 	return ImportAccountLabel(user->name(), user->username());
 }
 
-[[nodiscard]] QString AccountChangedText() {
-	return u"That settings file is in the Saved Messages of an account that "
-		"is no longer the active one, so nothing was imported. Switch back to "
-		"that account to import it."_q;
+[[nodiscard]] bool AskingWindowSwitched(
+		const std::shared_ptr<Ui::Show> &show) {
+	return !show || !(*show);
+}
+
+void RefuseSwitchedImport(const QString &account) {
+	LOG(("Purple: settings import dropped: "
+		"the window that asked shows another account now."));
+	if (const auto window = Core::App().activeWindow()) {
+		window->uiShow()->showBox(Ui::MakeInformBox(
+			ImportWindowSwitchedText(account)));
+	}
 }
 
 void WriteImported(
-		base::weak_ptr<Main::Session> weak,
+		const QString &account,
 		const QString &text,
 		const std::shared_ptr<Ui::Show> &show) {
-	const auto session = weak.get();
-	if (!session || !IsActiveSession(session)) {
-		show->showBox(Ui::MakeInformBox(AccountChangedText()));
+	if (AskingWindowSwitched(show)) {
+		RefuseSwitchedImport(account);
 		return;
 	}
 	const auto path = SettingsFilePath();
@@ -150,8 +157,9 @@ void ConfirmAndImport(
 		const QByteArray &content,
 		TimeId date,
 		const std::shared_ptr<Ui::Show> &show) {
-	if (!IsActiveSession(session)) {
-		show->showBox(Ui::MakeInformBox(AccountChangedText()));
+	const auto account = AccountLabel(session);
+	if (AskingWindowSwitched(show)) {
+		RefuseSwitchedImport(account);
 		return;
 	}
 	const auto text = QString::fromUtf8(content);
@@ -169,7 +177,7 @@ void ConfirmAndImport(
 	lines.push_back(
 		u"Import the settings sent %1 to Saved Messages of %2?"_q.arg(
 			FormatMoment(base::unixtime::parse(date)),
-			AccountLabel(session)));
+			account));
 	lines.push_back(QString());
 	lines.push_back(u"Schema v%1."_q.arg(version));
 	if (version > kSettingsVersion) {
@@ -187,12 +195,11 @@ void ConfirmAndImport(
 		"kept as %1."_q.arg(SettingsFileName() + u".import.bak"_q));
 
 	const auto keep = show;
-	const auto weak = base::make_weak(session);
 	show->showBox(Ui::MakeConfirmBox({
 		.text = lines.join('\n'),
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			WriteImported(weak, text, keep);
+			WriteImported(account, text, keep);
 		},
 		.confirmText = u"Import"_q,
 	}));
@@ -310,17 +317,16 @@ void OfferImportCandidate(
 	if (verdict == ImportOfferVerdict::NotNewer) {
 		return;
 	}
-	const auto weak = base::make_weak(session);
+	const auto account = AccountLabel(session);
 	show->showBox(Ui::MakeConfirmBox({
 		.text = u"A newer Work Mode settings file is in Saved Messages"
 			"\n\nAccount %1, sent %2"_q.arg(
-				AccountLabel(session),
+				account,
 				FormatMoment(base::unixtime::parse(candidate.date))),
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			const auto live = weak.get();
-			if (!live || !IsActiveSession(live)) {
-				show->showBox(Ui::MakeInformBox(AccountChangedText()));
+			if (AskingWindowSwitched(show)) {
+				RefuseSwitchedImport(account);
 				return;
 			}
 			ResolveAndImport(
