@@ -680,10 +680,12 @@ upstream:
   `~/Library/Application Support/<AppName>/`, so changing it is what gives the
   app storage of its own. It also drives the tray tooltip, notification
   titles and the media-controls name.
-- `Telegram/CMakeLists.txt` — `output_name`, which becomes the bundle name and
-  the executable inside it, and `bundle_identifier`
+- `Telegram/cmake/purple.cmake` — `output_name`, which becomes the bundle name
+  and the executable inside it, and `bundle_identifier`
   (`com.tdesktop.PurpleTelegram`), which is what Launch Services, the
-  notification centre and the `tg://` handler key off.
+  notification centre and the `tg://` handler key off. They override
+  upstream's values: `Telegram/CMakeLists.txt` includes this file right after
+  it sets its own, and reads them only afterwards.
 - `Telegram/SourceFiles/core/file_utilities.cpp` —
   `DefaultDownloadPathFolder()`, which upstream derives from `AppName` and the
   fork pins to `"Telegram Desktop"` instead. This is the one place the rebrand
@@ -959,11 +961,13 @@ Ninja rebuilds only what the change touched, which for a few files is seconds
 to a couple of minutes. Re-run `install.sh` to push the result to
 `/Applications`.
 
-Editing `CMakeLists.txt` costs more, but less than it first appears. Adding
-source files triggers a reconfigure that rebuilds `lib_fido2` in full — around
-sixty objects it could not possibly have affected — plus the automatic MOC pass,
-and then only the files you actually added. That is a couple of minutes, not a
-rebuild.
+Editing `CMakeLists.txt`, or `Telegram/cmake/purple.cmake` where Purple's
+sources are listed, costs more, but less than it first appears. Adding source
+files triggers a reconfigure that rebuilds `lib_fido2` in full — around sixty
+objects it could not possibly have affected, because `lib_fido2.cmake`
+rewrites two generated headers with `file(WRITE)` on every configure — plus
+the automatic MOC pass, and then only the files you actually added. That is a
+couple of minutes, not a rebuild.
 
 Changing a compiler flag is the expensive case. `CMAKE_CXX_FLAGS` and its
 siblings are part of every object's compile command, so touching them correctly

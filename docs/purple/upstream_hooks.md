@@ -102,6 +102,12 @@ hit up to three times each in the year. So the Purple header must compile on
 its own. In an upstream header, the include goes at the end of the include
 block. Apply this whenever a batch rewrites an include.
 
+**Build lists (B1).** New Purple sources, and every other Purple build
+setting, go in `Telegram/cmake/purple.cmake`. Telegram/CMakeLists.txt keeps
+only the one include that pulls that file in. A purple-core source goes in
+the purple-core block there, and also in the toml++ property list if it
+includes toml++.
+
 **Facade headers (D5).** A Purple header that exists to be included by
 upstream files goes in `Telegram/SourceFiles/purple/hooks/`, and may gather
 the declarations of several Purple files. With rule 5, every Purple include in
@@ -191,15 +197,25 @@ short:
 - Leaves: the lib_ui URL line, and the purple_core block moved to the top.
   Git ignores entry order.
 
-**`Telegram/CMakeLists.txt`**: +123 -4, 8 hunks, near 2. Owner: B1.
-- Today: `purple_core_loc`, `include(cmake/purple_version.cmake)`, the 62
-  `purple/` source lines, the purple-core source block, the bundle id and
-  output name, the include directory and the toml++ source properties.
-- Leaves: one `include(cmake/purple.cmake)` after the `build_macstore` endif,
-  which has to stay there for the `-I` order, directory-scoped properties and
-  object link order. B1 should also fold the `purple_version.cmake` include
-  (added after the plan was written) into purple.cmake, so only one line
-  remains.
+**`Telegram/CMakeLists.txt`**: +1 -0, 1 hunk, near 0 after B1 (+123 -4, 8
+hunks, near 2 before). Done in B1.
+- The one line is `include(cmake/purple.cmake)`, right after the
+  `build_macstore` endif. Everything Purple used to add here is in
+  `Telegram/cmake/purple.cmake`: `purple_core_loc`, the 62 `purple/` source
+  lines, the purple-core source block, the include directory, the toml++
+  source properties, the bundle id and output name, and the
+  `purple_version.cmake` include.
+- The line has to stay between that endif and the `bundle_identifier_plist`
+  lines below it: the branding overrides upstream's `bundle_identifier` and
+  `output_name` after the endif sets them and before the target properties
+  and `Telegram.plist` read them. It has to stay an `include()`, not an
+  `add_subdirectory()`, because the toml++ source properties are scoped to a
+  directory and only `include()` keeps the caller's.
+- What B1 changed in the build: every compile command is identical, `-I`
+  order included (SourceFiles, then purple_core). The only difference is the
+  link line, where the 49 Purple objects now come after all of upstream's
+  instead of among them. No upstream initializer calls into Purple, so
+  static initialization order does not matter here.
 
 **`Telegram/Resources/langs/lang.strings`**: +42 -0, 3 hunks, near 1.
 Owner: B2.
@@ -922,7 +938,8 @@ All of them exist at HEAD, and each now has an owner:
 Added since the plan, with no batch needed: settings_main.cpp (version
 footer), data_document_media.cpp (download guard) and
 history_view_context_menu.cpp (import action) are already hooks. The
-`purple_version.cmake` include in CMakeLists.txt goes to B1.
+`purple_version.cmake` include moved from CMakeLists.txt into purple.cmake in
+B1.
 
 Not named by any batch, with a proposed owner: dialogs_entry.{h,cpp} (B4 for
 the comments, B14 for the virtuals) and main_window.cpp (B15).

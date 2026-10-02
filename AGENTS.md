@@ -173,6 +173,8 @@ the purple-core submodule when the Android app needs the same logic.
 - When a feature seems to need a large edit inside an upstream file, look for
   a smaller hook first. If the edit is still needed, say in the feature's doc
   under `docs/purple/` which upstream files it touches and why.
+- New Purple sources and build settings go in `Telegram/cmake/purple.cmake`,
+  never in `Telegram/CMakeLists.txt`, which only includes that file.
 - Review your own diff of upstream files before committing; each hunk should
   read as a hook, not as feature code.
 - A commit that changes Purple lines in an upstream file also updates that

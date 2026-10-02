@@ -1114,5 +1114,7 @@ or conflict with another - `docs/mac/build.md` covers what that cost us with Qt
 and with FFmpeg.
 It is compiled with `TOML_EXCEPTIONS 0`, so a malformed file returns an error to
 check instead of throwing through a Qt event handler. It is on the include path
-of only the three files that need it; putting a 486KB header-only parser in front
-of every translation unit would change their compile commands for no reason.
+of only the four files that need it (`purple_config_diff.cpp`,
+`purple_settings.cpp`, `purple_splice.cpp` and `purple_state.cpp`, listed in
+`Telegram/cmake/purple.cmake`); putting a 486KB header-only parser in front of
+every translation unit would change their compile commands for no reason.
