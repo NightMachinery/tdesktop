@@ -72,9 +72,11 @@ commit, a core directory that is not a checkout, and no git at all.
 
 ## Upstream files touched
 
-- `Telegram/CMakeLists.txt`: one `include(cmake/purple_version.cmake)` line.
-  The module, `Telegram/cmake/purple_version.cmake`, adds the custom target
-  and the two Purple sources.
+- `Telegram/CMakeLists.txt`: nothing of its own. The module,
+  `Telegram/cmake/purple_version.cmake`, adds the custom target and the two
+  Purple sources, and `Telegram/cmake/purple.cmake` includes it; that file
+  reaches CMakeLists.txt through the fork's one build include (see
+  `docs/purple/upstream_hooks.md`).
 - `Telegram/SourceFiles/settings/sections/settings_main.cpp`: an include and
   `Purple::AddVersionFooter(builder)` after the help rows, twice: once in
   `Main::setupContent`, which draws the page, and once in the search index.
