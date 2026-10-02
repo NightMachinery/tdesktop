@@ -72,6 +72,10 @@ commit, a core directory that is not a checkout, and no git at all.
   The module, `Telegram/cmake/purple_version.cmake`, adds the custom target
   and the two Purple sources.
 - `Telegram/SourceFiles/settings/sections/settings_main.cpp`: an include and
-  `Purple::AddVersionFooter(builder)` at the end of the page.
+  `Purple::AddVersionFooter(builder)` after the help rows, twice: once in
+  `Main::setupContent`, which draws the page, and once in the search index.
+  Each path builds the page on its own, so a row added to only one of them is
+  either drawn but not searchable or, as happened until 2026-10-03, found by
+  search but never drawn.
 - `Telegram/SourceFiles/settings/sections/settings_advanced.cpp`: an include
   and `Purple::AddVersionRow(builder)` in the existing Purple section.
