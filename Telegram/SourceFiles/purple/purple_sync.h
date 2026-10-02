@@ -134,9 +134,10 @@ template <typename Account>
 }
 
 [[nodiscard]] inline QString ImportWindowSwitchedText(const QString &account) {
-	return u"Nothing was imported, because the window that asked now shows "
-		"another account. The settings file is in the Saved Messages of %1: "
-		"import it from a window that shows that account."_q.arg(account);
+	return u"Nothing was imported, because the window that asked was closed "
+		"or now shows another account. The settings file is in the Saved "
+		"Messages of %1: import it from a window that shows that account."_q
+		.arg(account);
 }
 
 [[nodiscard]] inline QString SettingsImportBackupPath(const QString &path) {

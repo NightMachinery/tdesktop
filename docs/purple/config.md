@@ -129,8 +129,8 @@ to check. Nothing runs in the background. See [sync.md](sync.md) for details.
   edit. It works in any window for the account that window shows, including
   a separate account window opened with Ctrl-click (Cmd-click on macOS) in the
   account switcher while another account is the active one. If the window
-  that asked switches to another account before the question appears or is
-  confirmed, nothing is imported and the app says so.
+  that asked is closed or switches to another account before the question
+  appears or is confirmed, nothing is imported and the app says so.
 
 The first time an account's chat list appears after the app starts, while
 that account is the active one, the app also looks for a newer `settings.toml`

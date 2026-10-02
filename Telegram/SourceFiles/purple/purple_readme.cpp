@@ -649,7 +649,8 @@ Saved Messages, once, naming the account and the date. A file in another
 signed-in account is never offered. The message menu's import works in any
 window for the account that window shows, including a separate account window
 opened with Ctrl-click (Cmd-click on macOS) in the account switcher; nothing is
-imported if the window that asked switches to another account first.
+imported if the window that asked is closed or switches to another account
+first.
 
 `[sync] send_after_save_p = true`, or the switch beside the send button, does
 the first of those for you whenever the app writes this file - five seconds
