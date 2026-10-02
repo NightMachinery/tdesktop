@@ -135,6 +135,8 @@ with `git grep Purple::`. Read the docs before changing any of it:
 - **`docs/purple/work_mode.md`** - presets, lists, visibility and notify gating
 - **`docs/purple/sync.md`** - moving `settings.toml` between installs through
   Saved Messages, and the alternatives that were not built
+- **`docs/purple/version.md`** - the Purple version line in Settings and the
+  rule for bumping its number
 - **`docs/remote-build-and-test/readme.md`** - building and testing the Android
   fork on the Apple-silicon laptop, with the shared build box available as an
   optional compile worker and its emulator retained only for legacy diagnostics

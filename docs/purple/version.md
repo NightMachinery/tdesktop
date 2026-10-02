@@ -3,7 +3,7 @@
 Purple Telegram has a version of its own, separate from the Telegram Desktop
 version it is built on. Desktop shows it as one line:
 
-    Purple 1.0.0 (864b1934d3+dirty, core 337829e)
+    Purple 1.0.0 (864b1934d3+dirty, core 337829e+dirty)
 
 Clicking the line copies it to the clipboard and shows "Text copied to
 clipboard." It appears in two places:
@@ -30,14 +30,19 @@ meant to match.
 worktree, the same abbreviation `git log --oneline` shows. `+dirty` follows it
 when `git status --porcelain --untracked-files=no --ignore-submodules=all`
 lists anything at build time: staged or unstaged changes to tracked files.
-Untracked files and changes inside submodules do not count, and neither does
-a submodule checked out at another commit than the one recorded, because the
-core commit already shows that.
+Untracked files do not count. Changes inside submodules do not count either,
+and neither does a submodule checked out at another commit than the one
+recorded, because the core commit already shows that.
 
 **The core commit** is the commit checked out in
 `Telegram/ThirdParty/purple_core`, the purple-core submodule that was
 compiled. It can differ from the commit the desktop commit records for the
-submodule; the line shows what was built.
+submodule; the line shows what was built. `+dirty` follows it when
+`git status --porcelain --untracked-files=no`, run inside the submodule, lists
+anything at build time: purple-core's own tracked changes, which are compiled
+into the app. So of all the submodules' dirt only purple-core's counts, and it
+marks the core commit, not the desktop one; dirt in the third-party
+submodules never shows. Untracked files in purple-core do not count.
 
 Either commit is `unknown` when git is not found or the directory is not a git
 checkout (it has no `.git` of its own), so a copy of the sources outside git
@@ -57,9 +62,9 @@ where none of that changed recompiles nothing for it.
 
 `purple/test_version.sh` checks the line format and runs the script against a
 throwaway repository with a submodule: a clean tree, a second run that must
-not rewrite the header, an untracked file, a dirty and then a moved
-submodule, a tracked change, a new commit, a core directory that is not a
-checkout, and no git at all.
+not rewrite the header, an untracked file in the top-level worktree and then
+in the submodule, a dirty and then a moved submodule, a tracked change, a new
+commit, a core directory that is not a checkout, and no git at all.
 
 ## Upstream files touched
 

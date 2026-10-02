@@ -21,12 +21,17 @@ namespace Purple {
 		const QString &version,
 		const QString &desktopCommit,
 		bool desktopDirty,
-		const QString &coreCommit) {
-	return u"Purple %1 (%2%3, core %4)"_q.arg(
+		const QString &coreCommit,
+		bool coreDirty) {
+	const auto dirty = [](bool value) {
+		return value ? u"+dirty"_q : QString();
+	};
+	return u"Purple %1 (%2%3, core %4%5)"_q.arg(
 		version,
 		desktopCommit,
-		desktopDirty ? u"+dirty"_q : QString(),
-		coreCommit);
+		dirty(desktopDirty),
+		coreCommit,
+		dirty(coreDirty));
 }
 
 [[nodiscard]] QString VersionText();

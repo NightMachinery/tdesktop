@@ -29,11 +29,20 @@ void Check(bool ok, int line) {
 int main() {
 	using Purple::FormatVersion;
 
-	CHECK(FormatVersion(u"1.0.0"_q, u"864b1934d3"_q, false, u"337829e"_q)
+	CHECK(FormatVersion(
+		u"1.0.0"_q, u"864b1934d3"_q, false, u"337829e"_q, false)
 		== u"Purple 1.0.0 (864b1934d3, core 337829e)"_q);
-	CHECK(FormatVersion(u"1.2.3"_q, u"864b1934d3"_q, true, u"337829e"_q)
+	CHECK(FormatVersion(
+		u"1.2.3"_q, u"864b1934d3"_q, true, u"337829e"_q, false)
 		== u"Purple 1.2.3 (864b1934d3+dirty, core 337829e)"_q);
-	CHECK(FormatVersion(u"1.0.0"_q, u"unknown"_q, false, u"unknown"_q)
+	CHECK(FormatVersion(
+		u"1.0.0"_q, u"864b1934d3"_q, false, u"337829e"_q, true)
+		== u"Purple 1.0.0 (864b1934d3, core 337829e+dirty)"_q);
+	CHECK(FormatVersion(
+		u"1.0.0"_q, u"864b1934d3"_q, true, u"337829e"_q, true)
+		== u"Purple 1.0.0 (864b1934d3+dirty, core 337829e+dirty)"_q);
+	CHECK(FormatVersion(
+		u"1.0.0"_q, u"unknown"_q, false, u"unknown"_q, false)
 		== u"Purple 1.0.0 (unknown, core unknown)"_q);
 
 	std::printf("%d checks, %d failures\n", checks, failures);
