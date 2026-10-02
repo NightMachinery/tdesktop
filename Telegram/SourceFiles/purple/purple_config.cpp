@@ -519,11 +519,6 @@ void Config::autoSendNow() {
 		}
 	})) {
 		_pendingSendFingerprints.remove(fingerprint);
-		// No session to post into - not signed in yet, or signed out since.
-		// Nothing is recorded, so the next write tries again, which is what
-		// somebody who turned this on would expect over a silent giving up.
-		LOG(("Purple: nothing to send settings.toml to, not sending."));
-		return;
 	}
 }
 

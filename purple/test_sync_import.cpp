@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 template <typename Signature>
 using Fn = std::function<Signature>;
@@ -105,6 +106,27 @@ void CheckSwitchedWindowText() {
 	CHECK(text.contains(u"window"_q));
 	CHECK(text.startsWith(u"Nothing was imported"_q));
 	CHECK(!text.contains(u"active"_q));
+}
+
+void CheckAutoSendTarget() {
+	using Purple::AutoSendTarget;
+	using Purple::JudgeAutoSendTarget;
+
+	CHECK(JudgeAutoSendTarget(std::vector<int>(), 1)
+		== AutoSendTarget::NoAccount);
+
+	const auto order = std::vector<int>{ 7, 3, 5 };
+	CHECK(JudgeAutoSendTarget(order, 7) == AutoSendTarget::Post);
+	CHECK(JudgeAutoSendTarget(order, 3) == AutoSendTarget::NotFirstAccount);
+	CHECK(JudgeAutoSendTarget(order, 5) == AutoSendTarget::NotFirstAccount);
+	CHECK(JudgeAutoSendTarget(order, 9) == AutoSendTarget::NotFirstAccount);
+
+	const auto dragged = std::vector<int>{ 3, 7, 5 };
+	CHECK(JudgeAutoSendTarget(dragged, 3) == AutoSendTarget::Post);
+	CHECK(JudgeAutoSendTarget(dragged, 7) == AutoSendTarget::NotFirstAccount);
+
+	CHECK(JudgeAutoSendTarget(std::vector<int>{ 4 }, 4)
+		== AutoSendTarget::Post);
 }
 
 void CheckImportBackups() {
@@ -209,6 +231,7 @@ int main() {
 	CheckOfferVerdicts();
 	CheckAccountLabels();
 	CheckSwitchedWindowText();
+	CheckAutoSendTarget();
 	CheckImportBackups();
 
 	std::printf("%d checks, %d failures\n", checks, failures);
