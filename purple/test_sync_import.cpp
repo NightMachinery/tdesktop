@@ -128,6 +128,17 @@ void CheckAutoSendTarget() {
 
 	CHECK(JudgeAutoSendTarget(std::vector<int>{ 4 }, 4)
 		== AutoSendTarget::Post);
+
+	auto first = 1;
+	auto second = 2;
+	const auto accounts = std::vector<int*>{ &first, &second };
+	const auto noWindow = (int*)nullptr;
+	CHECK(JudgeAutoSendTarget(accounts, noWindow)
+		== AutoSendTarget::NotFirstAccount);
+	CHECK(JudgeAutoSendTarget(std::vector<int*>(), noWindow)
+		== AutoSendTarget::NoAccount);
+	CHECK(JudgeAutoSendTarget(accounts, accounts.front())
+		== AutoSendTarget::Post);
 }
 
 void CheckImportBackups() {

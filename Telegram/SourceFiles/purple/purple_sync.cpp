@@ -387,24 +387,27 @@ void SearchForSettingsOffer(
 		LOG(("Purple: nothing to send settings.toml to, not sending."));
 		return nullptr;
 	}
-	auto signedIn = domain.orderedAccounts();
-	signedIn.erase(ranges::remove_if(signedIn, [](
-			not_null<Main::Account*> account) {
-		return !account->sessionExists();
-	}), end(signedIn));
-	const auto active = not_null(&domain.active());
-	switch (JudgeAutoSendTarget(signedIn, active)) {
+	auto signedIn = std::vector<Main::Account*>();
+	for (const auto &account : domain.orderedAccounts()) {
+		if (account->sessionExists()) {
+			signedIn.push_back(account);
+		}
+	}
+	const auto window = Core::App().activeWindow();
+	const auto front = window ? window->maybeSession() : nullptr;
+	Main::Account *frontAccount = front ? &front->account() : nullptr;
+	switch (JudgeAutoSendTarget(signedIn, frontAccount)) {
 	case AutoSendTarget::NoAccount:
 		LOG(("Purple: nothing to send settings.toml to, not sending."));
 		return nullptr;
 	case AutoSendTarget::NotFirstAccount:
 		LOG(("Purple: settings.toml not sent after this save: "
-			"the active account is not the first account."));
+			"the account in front is not the first account."));
 		return nullptr;
 	case AutoSendTarget::Post:
 		break;
 	}
-	return &active->session();
+	return front;
 }
 
 void UploadTo(
