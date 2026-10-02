@@ -660,12 +660,12 @@ that account is in front when those five seconds end. The window in front is
 judged then, not when you saved: a save made in another account's window
 still posts to the first account if the first account's window is in front
 when the wait ends, and a save made in the first account's window is not
-posted if another account's window has come to the front by then. A save that
-is not posted says so in the log. It never posts a file it
-has just imported, and never one whose bytes it has already sent, so two
-machines cannot hand the same settings back and forth. A restore or Undo from
-Sync across devices is not posted either. The importing is still yours to ask
-for.
+posted if another account's window has come to the front by then. A save
+skipped because another account's window is in front says so in the log. It
+never posts a file it has just imported, and never one whose bytes it has
+already sent, so two machines cannot hand the same settings back and forth. A
+restore or Undo from Sync across devices is not posted either. The importing
+is still yours to ask for.
 
 The chat is the history. Every send is one message with a date on it, so going
 back to last week's settings is finding last week's message and importing it.
