@@ -184,10 +184,11 @@ It does not import on its own. The *sending* half can now be automatic -
 `[sync] send_after_save_p`, off unless you turn it on, posts the file whenever
 the app itself writes it, five seconds after the last write so a run of taps is
 one document - but nothing about the receiving half changed. Since 2026-10-02
-desktop posts only while a window showing the first account in the account
-switcher's list is in front (the app's last active window), into that
-account's Saved Messages; otherwise it skips that save and logs that the
-account in front is not the first account, with no ids or names. Before, it
+desktop posts only if a window showing the first account in the account
+switcher's list is in front (the app's last active window) when the
+five-second wait ends, into that account's Saved Messages; otherwise it skips
+that save and logs that the account in front is not the first account, with
+no ids or names. The window the save was made in does not matter. Before, it
 posted into whichever account the focused window showed, so a test account in
 front would have received the real settings, the mirror of the import
 incident below. The pure part of the rule is

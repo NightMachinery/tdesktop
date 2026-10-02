@@ -655,9 +655,13 @@ first.
 `[sync] send_after_save_p = true`, or the switch beside the send button, does
 the first of those for you whenever the app writes this file - five seconds
 after the last write, so a run of taps is one message. It posts only into the
-first account in the account switcher's list, and only while a window showing
-that account is in front; a save made while another account's window is in
-front is not posted, and the log says so. It never posts a file it
+first account in the account switcher's list, and only if a window showing
+that account is in front when those five seconds end. The window in front is
+judged then, not when you saved: a save made in another account's window
+still posts to the first account if the first account's window is in front
+when the wait ends, and a save made in the first account's window is not
+posted if another account's window has come to the front by then. A save that
+is not posted says so in the log. It never posts a file it
 has just imported, and never one whose bytes it has already sent, so two
 machines cannot hand the same settings back and forth. A restore or Undo from
 Sync across devices is not posted either. The importing is still yours to ask
