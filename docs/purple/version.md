@@ -56,9 +56,13 @@ on every build. The script computes the header
 `out/Telegram/gen/purple/purple_build_info.h` and writes it only when its
 content differs from the file already there. `Telegram` depends on the target,
 so the header is current before anything compiles, and only
-`purple_version.cpp` includes it. A build after a commit, a checkout or an
-edit to a tracked file therefore recompiles that one file and relinks; a build
-where none of that changed recompiles nothing for it.
+`purple_version.cpp` includes it. The header holds the two commits and the two
+`+dirty` flags, not the changes themselves. So a build after a commit or a
+checkout recompiles that one file and relinks, and so does a build after an
+edit that flips a `+dirty` flag: the first change to a tracked file in a clean
+tree, or a revert that leaves the tree clean again. Further edits to a tree
+that is already dirty leave the header as it was, and so does a build where
+nothing changed; neither recompiles anything for it.
 
 `purple/test_version.sh` checks the line format and runs the script against a
 throwaway repository with a submodule: a clean tree, a second run that must
