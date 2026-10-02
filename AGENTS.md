@@ -175,6 +175,8 @@ the purple-core submodule when the Android app needs the same logic.
   under `docs/purple/` which upstream files it touches and why.
 - New Purple sources and build settings go in `Telegram/cmake/purple.cmake`,
   never in `Telegram/CMakeLists.txt`, which only includes that file.
+- New Purple strings go in `Telegram/Resources/langs/purple.strings`, never in
+  `lang.strings`; the build appends one to the other, so `tr::` works as usual.
 - Review your own diff of upstream files before committing; each hunk should
   read as a hook, not as feature code.
 - A commit that changes Purple lines in an upstream file also updates that

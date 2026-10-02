@@ -108,6 +108,15 @@ only the one include that pulls that file in. A purple-core source goes in
 the purple-core block there, and also in the toml++ property list if it
 includes toml++.
 
+**Strings (B2).** New Purple strings go in
+`Telegram/Resources/langs/purple.strings`, in lang.strings' format, never in
+lang.strings itself. A build step appends purple.strings to upstream's
+lang.strings, and codegen_lang reads the result, so `tr::` keys, plurals and
+tags work exactly as for upstream's strings. A Purple key may not repeat an
+upstream one: codegen_lang stops with "duplicate found for key", which is
+also what happens if upstream later adds a key of the same name. Editing
+either file needs no CMake reconfigure.
+
 **Facade headers (D5).** A Purple header that exists to be included by
 upstream files goes in `Telegram/SourceFiles/purple/hooks/`, and may gather
 the declarations of several Purple files. With rule 5, every Purple include in
@@ -169,8 +178,8 @@ short:
 
 - B1 build lists into `Telegram/cmake/purple.cmake`, purple_core first in
   .gitmodules (done 2026-10-03);
-- B2 Purple strings in a Purple-owned `purple.strings` merged at configure
-  time (D1 B);
+- B2 Purple strings in a Purple-owned `purple.strings`, appended to
+  lang.strings by a build step (D1 B; done 2026-10-03);
 - B5 the settings-offer id out of SessionSettings, kept as a per-account pref
   (D4: keep the offer until the sync chat ships), plus one forced
   SessionSettings rewrite per session start;
@@ -217,12 +226,43 @@ hunks, near 2 before). Done in B1.
   instead of among them. No upstream initializer calls into Purple, so
   static initialization order does not matter here.
 
-**`Telegram/Resources/langs/lang.strings`**: +42 -0, 3 hunks, near 1.
-Owner: B2.
-- Today: 32 Last Seen Peek strings near the top, 9 pinned-music strings, and
-  `lng_settings_replace_dashes`.
-- Leaves: nothing in lang.strings; one line in td_lang.cmake merges
-  `purple.strings`.
+**`Telegram/Resources/langs/lang.strings`**: unchanged from the merge-base
+after B2 (+42 -0, 3 hunks, near 1 before). Done in B2.
+- Its 41 Purple lines (38 keys: 31 Last Seen Peek lines, 9 pinned-music
+  lines and `lng_settings_replace_dashes`) moved, text unchanged, to
+  `Telegram/Resources/langs/purple.strings`. See "Strings (B2)" above.
+
+**`Telegram/cmake/td_lang.cmake`**: +1 -1, 1 hunk, near 1. Done in B2.
+- The one line is `include(cmake/purple_lang.cmake)`, in place of upstream's
+  `generate_lang(td_lang ${res_loc}/langs/lang.strings ${src_loc})`.
+  `Telegram/cmake/purple_lang.cmake` adds a build step, which runs
+  `purple_lang_merge.cmake` to write lang.strings followed by purple.strings
+  to `out/Telegram/purple_lang/lang.strings`. It then makes upstream's call
+  with that file.
+- It replaces the call instead of adding a line because codegen_lang reads
+  exactly one input file, and this call is what names it. The only way to
+  redirect it from another line would be to redefine upstream's
+  `generate_lang()` function, which hides what the build does.
+- The near-hunk edit is upstream's b880396d60 (2026-07-13), which added the
+  `${src_loc}` argument to this very line. A change like that conflicts
+  here. To resolve it, keep the include and carry the new arguments into the
+  `generate_lang()` call at the end of purple_lang.cmake. Both wrong
+  resolutions fail loudly: taking upstream's line drops the Purple keys, so
+  every Purple `tr::` use stops compiling; and keeping the include without
+  carrying over a new required argument stops configure. The exposure is
+  the same as lang.strings' was (near 1). The gain is that no new string
+  touches an upstream file.
+- The merged file is also named lang.strings, because codegen_lang writes
+  its input's file name into every generated header. codegen_lang also keeps
+  each key's index in `out/Telegram/gen/lang_auto.indices`, so moving the
+  Purple keys after upstream's renumbered nothing. After B2, lang_auto.h,
+  lang_auto_keys.h, lang_auto_counts.h, the indices and all 1,369 subset
+  headers were byte-identical. lang_auto.cpp differed only in the order of
+  the cases in `IsTagReplaced()`'s switch, which follows file order.
+- codegen_lang's errors name the merged file. Line N after its
+  "purple.strings starts here" comment is line N of purple.strings.
+- Editing purple.strings or lang.strings reruns the merge and codegen_lang
+  without a CMake reconfigure.
 
 **`Telegram/cmake/lib_fido2.cmake`**: +8 -1, 1 hunk, near 2. Stays.
 - The `TDESKTOP_VENDORED_FIDO2` option and its condition: a system libfido2
@@ -251,9 +291,11 @@ Owner: B15.
 `Telegram/Telegram/Images.xcassets/`): stay. `purple/recolour_icons.py`
 regenerates them.
 
-**`AGENTS.md`** (+140 -3, 6 hunks, near 6) and **`README.md`** (+32 -1, 4
-hunks, near 1): owner B18. The Purple sections move to
-`docs/purple/agents.md`, leaving a pointer and the hook rule (D6).
+**`AGENTS.md`** (+144 -3, 6 hunks, near 6, after B2's strings bullet) and
+**`README.md`** (+32 -1, 4 hunks, near 1): owner B18. The Purple sections
+move to `docs/purple/agents.md`, leaving a pointer and the hook rule (D6).
+The B1 and B2 bullets (new sources in purple.cmake, new strings in
+purple.strings) belong with the hook rule.
 
 ## Work Mode core
 
