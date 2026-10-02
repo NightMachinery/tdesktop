@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFile>
 #include <QtCore/QSaveFile>
 
+#include <vector>
+
 class DocumentData;
 class HistoryItem;
 struct FilePrepareResult;
@@ -45,9 +47,11 @@ void SendSettingsToSavedMessages(
 // confirmation for that was given once, in words, when the switch was turned
 // on. The manual action above still asks.
 //
-// False when there is no signed-in session to post into. That is a reason to
-// try again after the next write rather than an error worth a message: the app
-// can be up, and the file editable, before anyone has signed in.
+// Posts only into the first account of the account switcher's list, and only
+// while that account is the active one; see JudgeAutoSendTarget() below.
+// False, with a log line saying why, when nothing was posted: no account is
+// signed in, or the active account is not the first one. That is a reason to
+// try again after the next write rather than an error worth a message.
 [[nodiscard]] bool Upload(
 	const QByteArray &content,
 	int version,
@@ -97,6 +101,24 @@ enum class ImportOfferVerdict {
 		return ImportOfferVerdict::NotNewer;
 	}
 	return ImportOfferVerdict::Offer;
+}
+
+enum class AutoSendTarget {
+	Post,
+	NoAccount,
+	NotFirstAccount,
+};
+
+template <typename Account>
+[[nodiscard]] AutoSendTarget JudgeAutoSendTarget(
+		const std::vector<Account> &signedInInSwitcherOrder,
+		const Account &active) {
+	if (signedInInSwitcherOrder.empty()) {
+		return AutoSendTarget::NoAccount;
+	} else if (signedInInSwitcherOrder.front() != active) {
+		return AutoSendTarget::NotFirstAccount;
+	}
+	return AutoSendTarget::Post;
 }
 
 [[nodiscard]] inline QString ImportAccountLabel(

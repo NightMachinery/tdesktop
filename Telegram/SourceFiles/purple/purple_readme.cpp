@@ -653,7 +653,10 @@ imported if the window that asked switches to another account first.
 
 `[sync] send_after_save_p = true`, or the switch beside the send button, does
 the first of those for you whenever the app writes this file - five seconds
-after the last write, so a run of taps is one message. It never posts a file it
+after the last write, so a run of taps is one message. It posts only into the
+first account in the account switcher's list, and only while that account is
+the active one; a save made while another account is active is not posted, and
+the log says so. It never posts a file it
 has just imported, and never one whose bytes it has already sent, so two
 machines cannot hand the same settings back and forth. A restore or Undo from
 Sync across devices is not posted either. The importing is still yours to ask

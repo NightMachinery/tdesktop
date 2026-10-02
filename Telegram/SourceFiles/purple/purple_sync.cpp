@@ -381,23 +381,30 @@ void SearchForSettingsOffer(
 	).send();
 }
 
-// Any session that could post the file. The active window's first, because
-// that is the account the person is looking at, and whichever one is signed in
-// otherwise - Saved Messages exists on all of them and the file is not about
-// any particular account.
-[[nodiscard]] Main::Session *SomeSession() {
-	if (const auto window = Core::App().activeWindow()) {
-		if (const auto controller = window->sessionController()) {
-			return &controller->session();
-		}
-	}
+[[nodiscard]] Main::Session *AutoSendSession() {
 	auto &domain = Core::App().domain();
 	if (!domain.started()) {
+		LOG(("Purple: nothing to send settings.toml to, not sending."));
 		return nullptr;
-	} else if (const auto account = domain.maybeLastOrSomeAuthedAccount()) {
-		return account->maybeSession();
 	}
-	return nullptr;
+	auto signedIn = domain.orderedAccounts();
+	signedIn.erase(ranges::remove_if(signedIn, [](
+			not_null<Main::Account*> account) {
+		return !account->sessionExists();
+	}), end(signedIn));
+	const auto active = not_null(&domain.active());
+	switch (JudgeAutoSendTarget(signedIn, active)) {
+	case AutoSendTarget::NoAccount:
+		LOG(("Purple: nothing to send settings.toml to, not sending."));
+		return nullptr;
+	case AutoSendTarget::NotFirstAccount:
+		LOG(("Purple: settings.toml not sent after this save: "
+			"the active account is not the first account."));
+		return nullptr;
+	case AutoSendTarget::Post:
+		break;
+	}
+	return &active->session();
 }
 
 void UploadTo(
@@ -448,7 +455,7 @@ bool Upload(
 		const QByteArray &content,
 		int version,
 		Fn<void(std::optional<MsgId>)> finished) {
-	const auto session = SomeSession();
+	const auto session = AutoSendSession();
 	if (!session) {
 		return false;
 	}

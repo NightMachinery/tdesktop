@@ -908,6 +908,16 @@ A run of writes is one document. The send waits five seconds after the last one,
 so six checkbox taps in a row post what you settled on rather than six copies of
 what you passed through.
 
+Only into the first account. On desktop the post goes to the Saved Messages of
+the first account in the account switcher's list, in the order the switcher
+shows (drag to reorder), and only while that account is the active one. While
+another account is active, that save is not posted, and the log says
+`settings.toml not sent after this save: the active account is not the first
+account`; the next save tries again. With a test account in front, a save
+therefore never lands in the test account's Saved Messages. **Send settings to
+Saved Messages** is unaffected: it posts to the account whose Settings you
+pressed it in, after asking.
+
 Two keys in `state.toml` keep two machines from handing the same file back and
 forth: `last_sent_fingerprint` and `last_imported_fingerprint`, each the length
 and SHA-256 of a `settings.toml` written as `"<length>:<hex>"`. Nothing is sent
