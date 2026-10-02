@@ -243,22 +243,29 @@ no longer the active one when Import is pressed, when the question would
 appear after the download, or when the question is confirmed, nothing is
 imported and the app says why, and this applies to the message menu's import
 as well. Desktop ties the import to the window that asked instead of to the
-active account. Every desktop account window shows one account, and a
-separate account window, opened with Ctrl-click (Cmd-click on macOS) in the
-account switcher, stays on its account while another account is the active
-one (the one last selected in a switcher). Since 2026-10-02 such a window
-may import from its own account's Saved Messages through the message menu,
-and Import on an offer already shown works the same way. The question names
-that window's account, and the import keeps `settings.toml.import.bak` and
+active account. Every desktop account window shows one account. Picking an
+account in a switcher brings its window forward if it already has one,
+without changing the active account. The active account changes when you
+pick an account that has no window (the window you picked in switches to
+it), when Ctrl-click (Cmd-click on macOS) opens a new account window, when
+you pick an account in the menu-bar icon's account list, or when the active
+account's window is closed. So a separate account window can show an account
+that is not the active one. Since 2026-10-02 such a window may import from
+its own account's Saved Messages through the message menu, and Import on an
+offer already shown works the same way. The question names that window's
+account, and the import keeps `settings.toml.import.bak` and
 `settings.toml.bak` exactly as any other import does. The refusal is kept
-for the one case where it is still right: the window that asked switched to
-another account before the question appeared (for example while the file was
-downloading) or before it was confirmed. Then nothing is imported, a log line
-says the asking window shows another account now, and the active window says
-which account's Saved Messages hold the file and to import it from a window
-showing that account. The rule is "the asking window's session controller
-still exists": tdesktop replaces a window's session controller when the
-window changes account, and closes its open boxes.
+for the one case where it is still right: the window that asked was closed
+or switched to another account before the question appeared (for example
+while the file was downloading) or before it was confirmed. Then nothing is
+imported, the log says “settings import dropped: the window that asked was
+closed or shows another account now”, and the active window says “Nothing
+was imported, because the window that asked was closed or now shows another
+account. The settings file is in the Saved Messages of Account Name
+(@username): import it from a window that shows that account.” The rule is
+"the asking window's session controller still exists": tdesktop destroys a
+window's session controller when the window closes or changes account, and
+closes its open boxes.
 
 Desktop accepts a settings document up to 4 MiB and scans up to 100 recent
 documents. Android source `a950e13c` uses the same size and search limits;

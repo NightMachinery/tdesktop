@@ -104,6 +104,7 @@ void CheckSwitchedWindowText() {
 		Purple::ImportAccountLabel(u"Ada Test"_q, u"tester"_q));
 	CHECK(text.contains(u"Saved Messages of Ada Test (@tester)"_q));
 	CHECK(text.contains(u"window"_q));
+	CHECK(text.contains(u"closed"_q));
 	CHECK(text.startsWith(u"Nothing was imported"_q));
 	CHECK(!text.contains(u"active"_q));
 }

@@ -111,7 +111,7 @@ constexpr auto kSearchLimit = 100;
 
 void RefuseSwitchedImport(const QString &account) {
 	LOG(("Purple: settings import dropped: "
-		"the window that asked shows another account now."));
+		"the window that asked was closed or shows another account now."));
 	if (const auto window = Core::App().activeWindow()) {
 		window->uiShow()->showBox(Ui::MakeInformBox(
 			ImportWindowSwitchedText(account)));
