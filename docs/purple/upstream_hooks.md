@@ -703,11 +703,14 @@ hunks, near 2. Owner: B9.
 - Today: the dash toggle's search entry and its checkbox.
 - Leaves: two calls.
 
-**`Telegram/SourceFiles/settings/sections/settings_main.cpp`**: +2 -0, 2
-hunks, near 3. Final.
-- One include and `Purple::AddVersionFooter(builder)` at the end of the page.
-  See version.md. The include sits in the alphabetical block; move it per
-  rule 5 the next time the file is touched.
+**`Telegram/SourceFiles/settings/sections/settings_main.cpp`**: +3 -0, 3
+hunks, near 4. Final.
+- One include, placed per rule 5 (near 1; it scored 2 in the alphabetical
+  block), and `Purple::AddVersionFooter(builder)` after
+  `BuildHelpSection(builder)` twice: in `Main::setupContent`, which draws the
+  page (near 2), and in `kMeta`, which builds the search index (near 1). The
+  page call was missing until 2026-10-03, so the row was searchable but never
+  drawn (bug V1). See version.md.
 
 **`Telegram/SourceFiles/core/core_settings.cpp`**: +10 -2, 4 hunks, near 4.
 Owner: B9 (dashes); the defaults stay.
