@@ -1870,7 +1870,9 @@ Messages whenever the app itself writes it - a switch, a list edit, a rule -
 debounced five seconds so a run of taps is one document. It is the same upload
 the manual **Send settings to Saved Messages** performs, with the confirmation
 box left out: the confirmation was given once, in words, when the switch was
-turned on.
+turned on. The post goes only to the first account's Saved Messages, and only
+while a window showing that account is in front; see
+[config.md](config.md#sending-the-file-on-every-save).
 
 Only the app's own writes go through it. There is exactly one function in
 `Purple::Config` that writes `settings.toml`, and the hook is on it, which is

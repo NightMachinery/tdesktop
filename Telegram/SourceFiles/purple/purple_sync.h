@@ -48,10 +48,11 @@ void SendSettingsToSavedMessages(
 // on. The manual action above still asks.
 //
 // Posts only into the first account of the account switcher's list, and only
-// while that account is the active one; see JudgeAutoSendTarget() below.
-// False, with a log line saying why, when nothing was posted: no account is
-// signed in, or the active account is not the first one. That is a reason to
-// try again after the next write rather than an error worth a message.
+// while a window showing that account is in front (the app's last active
+// window); see JudgeAutoSendTarget() below. False, with a log line saying
+// why, when nothing was posted: no account is signed in, or the window in
+// front shows another account or none. That is a reason to try again after
+// the next write rather than an error worth a message.
 [[nodiscard]] bool Upload(
 	const QByteArray &content,
 	int version,

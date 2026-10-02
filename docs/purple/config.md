@@ -910,11 +910,13 @@ what you passed through.
 
 Only into the first account. On desktop the post goes to the Saved Messages of
 the first account in the account switcher's list, in the order the switcher
-shows (drag to reorder), and only while that account is the active one. While
-another account is active, that save is not posted, and the log says
-`settings.toml not sent after this save: the active account is not the first
-account`; the next save tries again. With a test account in front, a save
-therefore never lands in the test account's Saved Messages. **Send settings to
+shows (drag to reorder), and only while a window showing that account is in
+front: the app's last active window, which stays the one in front while the
+app is in the background. While the window in front shows another account,
+that save is not posted, and the log says `settings.toml not sent after this
+save: the account in front is not the first account`; the next save tries
+again. With a test account's window in front, a save therefore never lands in
+the test account's Saved Messages. **Send settings to
 Saved Messages** is unaffected: it posts to the account whose Settings you
 pressed it in, after asking.
 
