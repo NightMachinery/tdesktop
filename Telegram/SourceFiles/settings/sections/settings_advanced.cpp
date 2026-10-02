@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_screentime_box.h"
 #include "purple/purple_sync.h"
 #include "purple/purple_sync_setup_box.h"
+#include "purple/purple_version.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
@@ -1436,6 +1437,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		.title = rpl::single(u"Purple"_q),
 		.keywords = { u"purple"_q, u"premium"_q, u"work"_q },
 	});
+	Purple::AddVersionRow(builder);
 
 	// The main menu carries it too, and that is where it belongs for something
 	// switched several times a day. But Settings is where people look for a
