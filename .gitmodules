@@ -1,3 +1,6 @@
+[submodule "Telegram/ThirdParty/purple_core"]
+	path = Telegram/ThirdParty/purple_core
+	url = https://github.com/NightMachinery/purple-core.git
 [submodule "Telegram/ThirdParty/GSL"]
 	path = Telegram/ThirdParty/GSL
 	url = https://github.com/Microsoft/GSL.git
@@ -106,6 +109,3 @@
 [submodule "Telegram/ThirdParty/libfido2"]
 	path = Telegram/ThirdParty/libfido2
 	url = https://github.com/Yubico/libfido2.git
-[submodule "Telegram/ThirdParty/purple_core"]
-	path = Telegram/ThirdParty/purple_core
-	url = https://github.com/NightMachinery/purple-core.git
