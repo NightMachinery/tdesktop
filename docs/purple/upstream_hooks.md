@@ -168,7 +168,7 @@ The order Evar chose (D9 A) runs every batch before any playlist code. In
 short:
 
 - B1 build lists into `Telegram/cmake/purple.cmake`, purple_core first in
-  .gitmodules;
+  .gitmodules (done 2026-10-03);
 - B2 Purple strings in a Purple-owned `purple.strings` merged at configure
   time (D1 B);
 - B5 the settings-offer id out of SessionSettings, kept as a per-account pref
@@ -190,12 +190,12 @@ short:
 
 ## Build, resources and branding
 
-**`.gitmodules`**: +4 -1, 2 hunks, near 1. Owner: B1.
-- Today: the lib_ui URL points at the fork; the purple_core block is appended
-  at the end, where all four upstream .gitmodules commits of the year also
-  appended.
-- Leaves: the lib_ui URL line, and the purple_core block moved to the top.
-  Git ignores entry order.
+**`.gitmodules`**: +4 -1, 2 hunks, near 0 after B1 (near 1 before). Done in
+B1.
+- The lib_ui URL points at the fork.
+- The purple_core block is first in the file. It used to be appended at the
+  end, where all four upstream .gitmodules commits of the year also appended.
+  Git ignores entry order, so `git submodule status` is unchanged.
 
 **`Telegram/CMakeLists.txt`**: +1 -0, 1 hunk, near 0 after B1 (+123 -4, 8
 hunks, near 2 before). Done in B1.
