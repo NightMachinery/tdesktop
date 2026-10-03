@@ -52,3 +52,5 @@ docs/purple/upstream_hooks.md.
 "lng_pinned_music_failed" = "Could not finish loading pinned songs. Some downloads may have started.";
 
 "lng_settings_replace_dashes" = "Replace double hyphens with an em dash";
+
+"lng_purple_preset_snapshot_lists" = "Warning: '{name}' runs from the last working copy of these lists: {names}. settings.toml no longer defines them. Choose Normal or another preset, or restore a file that defines them.";

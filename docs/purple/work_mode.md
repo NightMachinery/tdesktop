@@ -762,7 +762,8 @@ while a preset is running, even though the resolution came out identical.
 That second case is not a belt-and-braces addition; without it the feature was
 half broken. A `Resolved` holds the list **names** a preset ordered, as
 `EffectiveList { list, show, notify }`, and membership is looked up live by
-`MatchList()` against `ActiveSettings()`. So adding a chat to a list - the
+`MatchList()` against `ActiveSettings()`, with the saved list snapshot used
+only for a name the live file lacks. So adding a chat to a list - the
 `Work Mode` submenu, the main way lists are meant to be edited - produces a
 byte-different file and a bit-identical resolution. The equality check returned
 early, nobody was told, and the chat sat exactly where it was until some later
@@ -1109,9 +1110,9 @@ re-walking every peer whenever any message arrives.
 
 ## When the active preset stops resolving
 
-A preset can be deleted or renamed while it is active, or the file can stop
-parsing mid-edit. The engine then runs on `resolved_cache` in `state.toml` - the
-last resolution that worked - rather than falling back to defaults.
+A preset can be deleted or renamed while it is active. If the active preset
+no longer resolves, the engine runs on `resolved_cache` in `state.toml`, the
+last resolution that worked, rather than falling back to defaults.
 
 This is deliberate and worth stating plainly: defaulting would unhide every chat
 you had hidden, which is the one outcome a work mode must never produce by
@@ -1119,28 +1120,43 @@ accident. If there is no cache either, the resolution already in effect stays in
 effect and the reason is logged.
 
 The cache carries the resolved entries in order, each with its `show`, `notify`
-and mention gate; the folder selection, marker included; the tab's name; and any
-extra views, their pins among them. In short, everything a reload would
-otherwise take away - the point being that a `settings.toml` broken halfway
-through an edit changes nothing you can see.
+and mention gate; the folder selection, marker included; the tab's name; any
+extra views, their pins among them; and a **list snapshot**, the name, title,
+members and kinds of every list the main order or an extra view names.
 
-List *membership* is not cached, and this is the assumption to watch: it comes
-from `settings.toml`, and the argument that it need not be cached is that a file
-which did not parse leaves the previous settings standing in memory.
+Two mechanisms cover the ways those definitions can disappear:
 
-That argument holds only while the process is still running. It does not survive
-a cold start, and it does not survive the file going *missing* rather than going
-bad - and with no settings at all, no list claims anything, so a preset that
-names what gets through hides the entire account. The cache faithfully restores
-an order that now refers to lists nobody can look up.
+- **The file is missing or does not parse.** Both clients keep
+  `settings.toml.good`, a copy of the last file the core accepted, and parse
+  that instead. Presets and lists both come from that copy, including after
+  a restart, and the picker says it is running from it.
+- **The file parses but no longer defines the active preset.** An import,
+  sync Apply, History restore or hand edit can do this. The valid file
+  replaces `.good` as well as the settings in memory, so `.good` cannot
+  preserve the old lists. The cached resolution uses its list snapshot,
+  stored as `[[resolved_cache.list_defs]]`, for each name the live file
+  lacks. Every lookup asks the live file first: a list it defines, still or
+  again, always answers with its current members and kinds. The picker
+  names the lists served from the snapshot in an attention-coloured warning,
+  and the chat menu's verdict uses their saved titles.
 
-Both clients keep `settings.toml.good`, a copy of the last file the core
-accepted, and parse that when the real one is missing or unusable. Keeping the
-file rather than extending the cache is deliberate: it needs no second schema,
-it cannot disagree with the real file about what a list means, and it covers
-both failures with one mechanism. The picker says when it is running from the
-copy, because a preset resolved from a file the user cannot see should not be a
-silent state.
+The snapshot is refreshed on settings changes even when the resolution stays
+equal, so adding a chat through the list menu reaches the cache before a later
+file drops that list. An unchanged snapshot skips the state write. Normal
+never clears the cache.
+
+A `state.toml` written before list snapshots existed restores names only, as
+before. It cannot recover definitions that have already disappeared, and gains
+a snapshot at the next reload that can still see the lists. A valid file that
+keeps the active preset but drops a list it names still resolves from that
+file; the missing list claims nothing and the parser warns about it.
+
+The earlier decision to keep `.good` without extending the cache covered a
+missing or broken file, but could not cover a valid file that removed the
+active preset and its lists. Live-file precedence keeps the snapshot from
+overriding current definitions. Choosing Normal or a preset the new file
+defines ends the fallback. Normal remains available even when the file defines
+no presets, and choosing it clears the saved-list warning.
 
 ## Choosing a preset
 
@@ -1212,11 +1228,15 @@ now they only reached the log, which meant a preset that silently did nothing
 because of a mistyped list name looked exactly like a preset that was working.
 
 Errors are drawn in the colour the rest of the app uses for something that needs
-attention; warnings stay in the muted text of a note. The difference is the
-whole point of having two words for them - an error means the file did not load,
+attention; parser warnings stay in the muted text of a note. The difference is
+the whole point of having two words for them - an error means the file did not load,
 a warning means it loaded with something ignored - and in one column of body
 text they read identically. The `Error:` and `Warning:` prefixes stay, so this
 does not rest on colour alone.
+
+The saved-list snapshot warning also uses the attention colour, because it
+means the running preset relies on definitions absent from the file. It names
+those lists and offers Normal, another preset, or restoring their definitions.
 
 If the active preset is not in the file at all - deleted, renamed, or lost to a
 half-finished edit - no row is checked, and the box says so. Checking Normal
@@ -1225,11 +1245,16 @@ fire and switch the account to Normal, unhiding every chat the missing preset
 was hiding, over a typo. This is the same rule as the `resolved_cache` fallback,
 enforced in the UI rather than in the engine.
 
+If state moves to a missing preset while the box is open, the old selection is
+cleared too. This keeps Normal clickable even when it was the previous choice;
+clearing a selection never changes the active preset.
+
 The rows are rebuilt when `settings.toml` changes, but deliberately *not* when
 `state.toml` does. Choosing a preset is itself a state write, so rebuilding
 there would destroy the radio button whose click was still on the stack. The
-selection alone follows the state, which is what lets a schedule move it under
-an open box.
+selection and problem text follow the state, which lets a schedule move the
+selection under an open box and clears the snapshot warning when Normal is
+chosen without destroying the row being clicked.
 
 ## Putting a chat in a list
 
@@ -1252,8 +1277,10 @@ Three things the submenu deliberately does:
 - **It offers every list**, including one that matches by `kinds`. Adding a chat
   to a rule-based list writes an explicit member id, which is how you pull one
   chat out of a rule that would otherwise have swept it up somewhere else.
-- **It does not appear at all** unless you have written a list, so an
-  unconfigured fork's menus are exactly upstream's.
+- **It appears when there are live lists or filtering is active.** Normal with
+  no lists leaves an unconfigured fork's menus untouched. A cached preset
+  keeps its verdict reachable even when the replacement file defines no lists
+  or presets, including the no-list explanation for older names-only caches.
 - **It names what is deciding the chat**, while a preset is running: a first
   line reading `In 'Essentials': shown` or `In 'bots': hidden`, which opens the
   preset box. That is the question that brings anyone to this menu.

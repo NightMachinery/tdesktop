@@ -543,6 +543,77 @@ void PeekDial::keyPressEvent(QKeyEvent *e) {
 	return result;
 }
 
+void RefreshPresetProblems(
+		not_null<Ui::VerticalLayout*> problems,
+		const style::margins &padding) {
+	const auto &settings = ActiveSettings();
+	const auto active = CurrentState().activePreset;
+	problems->clear();
+	const auto &found = SettingsProblems();
+	auto errors = QStringList();
+	if (UsingLastGoodSettings()) {
+		errors.push_back(u"Running from the last good copy of settings.toml."_q);
+	}
+	if (active != NormalPreset() && !settings.preset(active)) {
+		// Nothing is checked, which is the honest picture. Selecting Normal
+		// instead would look tidier and would be a disaster: the callback
+		// would fire and switch the user to Normal, unhiding every chat the
+		// missing preset was hiding, over a typo mid-edit.
+		errors.push_back(u"Error: the active preset '%1' is not in this "
+			"file. The last resolution that worked is still in "
+			"effect."_q.arg(active));
+	}
+	const auto snapshotLists = SnapshotListsInUse(settings, ActiveResolved());
+	const auto snapshotPosition = errors.size();
+	if (!found.error.isEmpty()) {
+		errors.push_back(u"Error: "_q + found.error);
+	}
+	if (!errors.isEmpty() || !snapshotLists.empty()) {
+		auto errorText = rpl::producer<QString>(
+			rpl::single(errors.join('\n')));
+		if (!snapshotLists.empty()) {
+			auto listNames = QStringList();
+			for (const auto &name : snapshotLists) {
+				listNames.push_back(name);
+			}
+			errorText = tr::lng_purple_preset_snapshot_lists(
+				lt_name,
+				rpl::single(ActiveResolved().preset),
+				lt_names,
+				rpl::single(listNames.join(u", "_q))
+			) | rpl::map([errors, snapshotPosition](const QString &warning) {
+				auto lines = errors;
+				lines.insert(snapshotPosition, warning);
+				return lines.join('\n');
+			});
+		}
+		const auto label = problems->add(
+			object_ptr<Ui::FlatLabel>(
+				problems,
+				std::move(errorText),
+				st::boxLabel),
+			padding);
+
+		// An error and a warning read identically in body text, and the
+		// difference is the whole point: one means the file did not load,
+		// the other means it loaded with something ignored. The "Error:"
+		// prefix stays, so this does not rest on colour alone.
+		label->setTextColorOverride(st::attentionButtonFg->c);
+	}
+	if (!found.warnings.empty()) {
+		auto lines = QStringList();
+		for (const auto &warning : found.warnings) {
+			lines.push_back(u"Warning: "_q + warning);
+		}
+		problems->add(
+			object_ptr<Ui::FlatLabel>(
+				problems,
+				lines.join('\n'),
+				st::boxDividerLabel),
+			padding);
+	}
+}
+
 } // namespace
 
 void PresetBox(
@@ -934,54 +1005,9 @@ void PresetBox(
 			// summary, because it looks like the whole answer.
 			row->setAllowTextLines(0);
 		}
-		if (selected >= 0) {
-			group->setValue(selected);
-		}
+		group->setValue(selected);
 
-		problems->clear();
-		const auto &found = SettingsProblems();
-		auto errors = QStringList();
-		if (UsingLastGoodSettings()) {
-			errors.push_back(u"Running from the last good copy of settings.toml."_q);
-		}
-		if (selected < 0) {
-			// Nothing is checked, which is the honest picture. Selecting Normal
-			// instead would look tidier and would be a disaster: the callback
-			// would fire and switch the user to Normal, unhiding every chat the
-			// missing preset was hiding, over a typo mid-edit.
-			errors.push_back(u"Error: the active preset '%1' is not in this "
-				"file. The last resolution that worked is still in "
-				"effect."_q.arg(active));
-		}
-		if (!found.error.isEmpty()) {
-			errors.push_back(u"Error: "_q + found.error);
-		}
-		if (!errors.isEmpty()) {
-			const auto label = problems->add(
-				object_ptr<Ui::FlatLabel>(
-					problems,
-					errors.join('\n'),
-					st::boxLabel),
-				padding);
-
-			// An error and a warning read identically in body text, and the
-			// difference is the whole point: one means the file did not load,
-			// the other means it loaded with something ignored. The "Error:"
-			// prefix stays, so this does not rest on colour alone.
-			label->setTextColorOverride(st::attentionButtonFg->c);
-		}
-		if (!found.warnings.empty()) {
-			auto lines = QStringList();
-			for (const auto &warning : found.warnings) {
-				lines.push_back(u"Warning: "_q + warning);
-			}
-			problems->add(
-				object_ptr<Ui::FlatLabel>(
-					problems,
-					lines.join('\n'),
-					st::boxDividerLabel),
-				padding);
-		}
+		RefreshPresetProblems(problems, padding);
 	};
 
 	// Only settings.toml can change what the choices are. Rebuilding on a state
@@ -994,6 +1020,7 @@ void PresetBox(
 	// open box, so the selection follows the state even though the rows do not.
 	StateChanges(
 	) | rpl::on_next([=] {
+		RefreshPresetProblems(problems, padding);
 		const auto &active = CurrentState().activePreset;
 		for (auto i = 0; i != int(names->size()); ++i) {
 			if ((*names)[i] == active) {
@@ -1001,6 +1028,7 @@ void PresetBox(
 				return;
 			}
 		}
+		group->setValue(-1);
 	}, box->lifetime());
 
 	rebuild();
