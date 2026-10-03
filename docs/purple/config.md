@@ -55,8 +55,8 @@ key order all survive. `enabled   =    true   # keep ads away` comes back as
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
 focus-sync memory, the schedule's pause flag, the moment that pause runs out and
-its last target, the peek timer, and the last seens read by trading. It is
-rewritten
+its last target, the peek timer, the last seens read by trading, and the cached
+resolution with its named lists' definitions. It is rewritten
 whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
 never touch the mtime of the file you are editing by hand.
@@ -76,6 +76,20 @@ while retaining the real file's text and parse problem for any later surgical
 write. The Work Mode box says when it is using the copy. It is not an import
 backup: `settings.toml.import.bak` and `settings.toml.bak` hold the pre-import
 file and `.good` must not be edited by hand.
+
+A valid file that deletes the active preset replaces `.good` too. The running
+preset then uses `resolved_cache` in `state.toml`, including the saved name,
+title, members and kinds of its lists in `[[resolved_cache.list_defs]]`.
+Live-file definitions always win; the snapshot supplies only missing names.
+Membership-only settings edits refresh the snapshot even when the preset's
+resolution is unchanged. Normal leaves it intact, and remains a way out when
+the file defines no presets. Older names-only caches cannot recover lists that
+have already disappeared. See
+[work_mode.md](work_mode.md#when-the-active-preset-stops-resolving).
+
+The snapshot grows with the referenced lists' memberships, so `state.toml` can
+be much larger than it was before. Desktop reads the whole state with
+`QFile::readAll()` on startup and reload; it has no small state-file cap.
 
 ## The third file, which is nobody's
 
@@ -152,8 +166,9 @@ read by hand when Saved Messages is already holding every version worth going
 back to. The import backup is the one with the same meaning on Android, where
 an editor save refreshes `settings.toml.bak` but leaves it alone.
 
-`state.toml` is not sent and not touched. The active preset and the running
-timers are what *this* machine is doing, not what your settings are.
+`state.toml` is not sent or replaced by an import. The active preset and the
+running timers are what *this* machine is doing, not what your settings are.
+The settings reload can refresh its cached resolution and list snapshot.
 
 See [sync.md](sync.md) for why it is Saved Messages and not git or a server.
 

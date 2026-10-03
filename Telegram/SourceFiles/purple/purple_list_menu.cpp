@@ -129,7 +129,7 @@ void FillListsMenu(
 			: QString();
 		const auto effective = ListFor(peer);
 		const auto list = effective
-			? ActiveSettings().list(effective->list)
+			? LookupList(ActiveSettings(), ActiveResolved(), effective->list)
 			: nullptr;
 		const auto where = list
 			? u"In '%1'"_q.arg(DisplayTitle(*list))
@@ -254,7 +254,7 @@ void AddListsSubmenu(
 		const Ui::Menu::MenuCallback &add,
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer) {
-	if (!HasCustomLists() || !IdOf(peer)) {
+	if ((!HasCustomLists() && !Filtering()) || !IdOf(peer)) {
 		// Left out entirely rather than opening on an empty submenu, so an
 		// unconfigured fork's menus are untouched.
 		return;

@@ -148,8 +148,9 @@ void Gate::refresh(bool settingsChanged) {
 		// Membership is not part of a resolution. Resolved holds the list
 		// *names* a preset ordered, and MatchList() looks the members up live
 		// against ActiveSettings() - so adding a chat to a list produces a
-		// byte-different file and a bit-identical resolution. Without this
-		// nobody would be told, and the chat would sit exactly where it was
+		// byte-different file and a bit-identical resolution. A restored
+		// resolution also holds the list snapshot for names the file lacks.
+		// Without this nobody would be told, and the chat would sit where it was
 		// until some later change moved the resolution: switching presets and
 		// back, which is what made the context menu look broken.
 		//
@@ -162,6 +163,14 @@ void Gate::refresh(bool settingsChanged) {
 		// *starts* a preset moves the resolution and never reaches here.
 		if ((settingsChanged || overridesChanged) && !_resolved.normal) {
 			_changes.fire({});
+		}
+		if (settingsChanged && !_resolved.normal) {
+			auto cache = ToCache(_resolved, settings);
+			if (cache != state.resolvedCache) {
+				UpdateState([&](State &state) {
+					state.resolvedCache = std::move(cache);
+				});
+			}
 		}
 		return;
 	}
@@ -176,7 +185,7 @@ void Gate::refresh(bool settingsChanged) {
 	// Only ever widened, never cleared: a resolution we could not compute is
 	// exactly when the cache has to still be there.
 	if (!_resolved.normal) {
-		auto cache = ToCache(_resolved);
+		auto cache = ToCache(_resolved, settings);
 		UpdateState([&](State &state) {
 			state.resolvedCache = cache;
 		});
@@ -338,6 +347,7 @@ bool ExtraViewHolds(int index, not_null<const PeerData*> peer) {
 	}
 	return ViewHolds(
 		ActiveSettings(),
+		Instance().resolved(),
 		views[index],
 		IdOf(peer),
 		KindOf(peer));
