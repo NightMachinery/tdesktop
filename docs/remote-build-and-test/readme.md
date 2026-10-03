@@ -120,8 +120,22 @@ ssh pi 'nohup /tmp/purple-android/bin/build-patch.sh > /tmp/purple-android/fork-
 ```
 
 Poll the log for `BUILD_EXIT=`; a compile error shows up as `error:` lines
-above it. Because the checkout is reset every time, nothing from a previous
-patch survives, and a patch that applies on the Mac applies there too.
+above it. The checkout is reset to `origin/master` every time, and untracked
+files are cleaned under `purple/`, `docs/`, `TMessagesProj/src/main/res/` and
+the Purple Java, JNI and `org/telegram/ui/` directories, so a file a previous
+patch added there does not survive. An untracked file anywhere else does, and
+a later patch that adds the same path fails with "already exists in working
+directory"; delete it on the box by hand. Ignored files (build outputs) are
+kept on purpose.
+
+The box's `/tmp` cleaner deletes files nobody has read for a while, and that
+includes files in the submodule checkouts and, in some submodules, their git
+objects. A build that has to recompile a module then fails on a missing
+source. Before a build that may recompile native or library code, look for
+deletions with
+`git submodule foreach "git status --short"`, and restore a submodule with
+`git -C <submodule> checkout -- .`, or, when its objects are gone too, with
+`git -C <submodule> fetch --refetch --depth 1` followed by the checkout.
 
 This is an optional remote compile loop, not the default verification path. Do
 not copy a checkout, credentials, release key, or Telegram session to the box;
