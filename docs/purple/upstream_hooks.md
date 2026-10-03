@@ -254,11 +254,18 @@ after B2 (+42 -0, 3 hunks, near 1 before). Done in B2.
   touches an upstream file.
 - The merged file is also named lang.strings, because codegen_lang writes
   its input's file name into every generated header. codegen_lang also keeps
-  each key's index in `out/Telegram/gen/lang_auto.indices`, so moving the
-  Purple keys after upstream's renumbered nothing. After B2, lang_auto.h,
-  lang_auto_keys.h, lang_auto_counts.h, the indices and all 1,369 subset
-  headers were byte-identical. lang_auto.cpp differed only in the order of
-  the cases in `IsTagReplaced()`'s switch, which follows file order.
+  each key's index in `out/Telegram/gen/lang_auto.indices` and each tag's
+  number in `lang_auto.tags`, so moving the Purple keys after upstream's
+  renumbered nothing in out/. After B2, lang_auto.h, lang_auto_keys.h,
+  lang_auto_counts.h, the indices, the tags and all 1,363 subset headers
+  were byte-identical. lang_auto.cpp differed only in the order of the cases
+  in `IsTagReplaced()`'s switch, which follows file order; each key still
+  maps to the same tags.
+- A new build directory has neither file, so there codegen_lang numbers keys
+  and tags in file order: the Purple keys come after upstream's, the
+  Purple-only tags `last_seen` and `age` come last, and `duration` is
+  numbered where upstream first uses it. Only generated code sees these
+  numbers: the cached language pack stores keys by name.
 - codegen_lang's errors name the merged file. Line N after its
   "purple.strings starts here" comment is line N of purple.strings.
 - Editing purple.strings or lang.strings reruns the merge and codegen_lang
