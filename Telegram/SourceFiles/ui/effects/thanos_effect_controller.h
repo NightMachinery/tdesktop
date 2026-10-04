@@ -65,6 +65,7 @@ public:
 
 	void captureOnRemoval(not_null<const HistoryItem*> item);
 	void clearPreCaptured();
+	[[nodiscard]] bool geometryBusy() const;
 	void pinScroll();
 	void shiftGaps(int delta);
 	void notePrependBaseline(int contentHeight);

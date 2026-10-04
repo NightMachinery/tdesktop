@@ -154,6 +154,10 @@ void ThanosEffect::showSurface() {
 	}
 }
 
+bool ThanosEffect::shown() const {
+	return _shown;
+}
+
 void ThanosEffect::hideSurface() {
 	_shown = false;
 	_animation.stop();

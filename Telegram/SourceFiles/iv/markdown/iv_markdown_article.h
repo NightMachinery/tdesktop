@@ -233,6 +233,7 @@ struct MarkdownArticleHitTestResult {
 	int forcedOffset = -1;
 	bool direct = false;
 	bool codeHeaderCopy = false;
+	bool bodyGlyph = false;
 
 	[[nodiscard]] bool valid() const {
 		return (segmentIndex >= 0);

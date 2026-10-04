@@ -3992,10 +3992,12 @@ TextState Message::textState(
 					if (request.onlyMessageText) {
 						SetTextStatePosition(&result, minSymbol, false);
 						result.cursor = CursorState::None;
+						result.clearContentOrigin();
 					}
 				} else if (request.onlyMessageText) {
 					SetTextStatePosition(&result, visibleTextLen, false);
 					result.cursor = CursorState::None;
+					result.clearContentOrigin();
 				} else {
 					AddTextStateOffset(&result, visibleTextLen);
 				}
@@ -4028,11 +4030,13 @@ TextState Message::textState(
 				size->width(),
 				size->height()
 			).contains(point)) {
+				result.clearContentOrigin();
 				result.link = rightActionLink(point
 					- QPoint(fastShareLeft, fastShareTop));
 			}
 		}
 		if (_summarize && _summarize->contains(point)) {
+			result.clearContentOrigin();
 			result.link = _summarize->link();
 		}
 	} else if (media && media->isDisplayed()) {
@@ -4040,6 +4044,7 @@ TextState Message::textState(
 		if (request.onlyMessageText) {
 			SetTextStatePosition(&result, 0, false);
 			result.cursor = CursorState::None;
+			result.clearContentOrigin();
 		}
 		AddTextStateOffset(&result, visibleTextLength());
 	}
@@ -4615,16 +4620,30 @@ bool Message::getStateText(
 		outResult->cursor = (!outResult->link && hit.direct)
 			? CursorState::Text
 			: CursorState::None;
+		if (hit.bodyGlyph
+			&& !hit.codeHeaderCopy
+			&& hit.mediaActivation.kind == MediaActivationKind::None
+			&& outResult->cursor == CursorState::Text) {
+			outResult->setContentOrigin(
+				ContentOrigin::MessageBody,
+				item->fullId());
+		}
 		return true;
 	}
 	if (const auto botTop = Get<FakeBotAboutTop>()) {
 		trect.setY(trect.y() + botTop->height);
 	}
 	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
-		*outResult = TextState(item, text().getState(
+		const auto state = text().getState(
 			point - trect.topLeft(),
 			std::max(textRealWidth(), trect.width()),
-			request.forText()));
+			request.forText());
+		*outResult = TextState(item, state);
+		if (state.uponSymbol && outResult->cursor == CursorState::Text) {
+			outResult->setContentOrigin(
+				ContentOrigin::MessageBody,
+				item->fullId());
+		}
 		if (outResult->link
 			&& IsRippleLink(outResult->link)
 			&& !text().linkRangeFor(outResult->link).empty()) {

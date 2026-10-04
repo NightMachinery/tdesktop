@@ -442,6 +442,11 @@ TextState ThemeDocument::textState(QPoint point, StateRequest request) const {
 		} else {
 			result.link = _openl;
 		}
+		if (_data && result.link && result.link == _openl) {
+			result.setContentOrigin(
+				ContentOrigin::DocumentCard,
+				_parent->data()->fullId());
+		}
 	}
 	return result;
 }

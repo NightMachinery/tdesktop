@@ -336,6 +336,15 @@ void ThanosEffectController::collapseAnimationCallback() {
 	}
 }
 
+bool ThanosEffectController::geometryBusy() const {
+	return (_thanosEffect
+			&& (_thanosEffect->animating() || _thanosEffect->shown()))
+		|| _collapseAnimation.animating()
+		|| !_collapseGaps.empty()
+		|| !_renderGaps.empty()
+		|| _removalHeight != 0;
+}
+
 void ThanosEffectController::pinScroll() {
 	if (_collapseGaps.empty() || _inPinScroll) {
 		return;

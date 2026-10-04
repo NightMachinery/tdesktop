@@ -146,6 +146,33 @@ to check. Nothing runs in the background. See [sync.md](sync.md) for details.
   that asked is closed or switches to another account before the question
   appears or is confirmed, nothing is imported and the app says so.
 
+On desktop the menu action belongs to the file you point at in the current
+window. Right-click its document card, including the open, save or open-with
+area, or an actual glyph in its message body or document caption. Plain body
+text and document captions keep their inline links; rich body text qualifies
+only where its native result has the text cursor. Dates, headers, empty text
+space, reactions, reply buttons, spoilers and other controls do not offer
+import. A file inside a web preview, fact-check or log-original preview does
+not qualify. The attachment must be a file in that account's own Saved
+Messages, named `settings.toml` (case-insensitive), with a positive size no
+larger than 4 MiB. A message still sending, an upload or a current download
+omits the action.
+
+The same action is available in Saved Messages' **Files** section on the
+file's filename, icon, thumbnail or document download control. The date link
+and whitespace do not qualify. Files supports mouse context menus only; a
+keyboard menu there has no focused file authority and omits import.
+
+All three menus omit import while actual text or messages are selected, a
+drag or reorder is being prepared or is active, selection mode is animating,
+or an editor overlay is active. They also wait for settled, visible layout
+in the active receiving window. An empty finished text anchor or completed
+touch bookkeeping alone does not hide the action. In history, a keyboard
+menu imports only the actual visible accessibility-focused message's own
+file. For a group this normally means the visible leader's attachment; it
+never substitutes another member or the file under an old mouse hover. A
+pointer menu can import the exact group member whose content was hit.
+
 The first time an account's chat list appears after the app starts, while
 that account is the active one, the app also looks for a newer `settings.toml`
 in its Saved Messages and offers it once, naming the account and the date it

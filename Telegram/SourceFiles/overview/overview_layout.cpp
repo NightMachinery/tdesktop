@@ -1734,6 +1734,11 @@ TextState Document::cornerDownloadTextState(
 	const auto inner = style::rtlrect(_st.songPadding.left() + shift, _st.songPadding.top() + shift, size, size, _width);
 	if (inner.contains(point)) {
 		result.link = _data->loading() ? _cancell : _savel;
+		if (result.link && result.link == _savel) {
+			result.setContentOrigin(
+				HistoryView::ContentOrigin::DocumentCard,
+				parent()->fullId());
+		}
 	}
 	return result;
 
@@ -1744,6 +1749,15 @@ TextState Document::getState(
 		StateRequest request) const {
 	ensureDataMediaCreated();
 	const auto loaded = dataLoaded();
+	const auto documentState = [&](const ClickHandlerPtr &link) {
+		auto result = TextState(parent(), link);
+		if (link && (link == _openl || link == _savel || link == _namel)) {
+			result.setContentOrigin(
+				HistoryView::ContentOrigin::DocumentCard,
+				parent()->fullId());
+		}
+		return result;
+	};
 
 	if (songLayout()) {
 		const auto nameleft = _st.songPadding.left() + _st.songThumbSize + _st.songPadding.right();
@@ -1770,7 +1784,7 @@ TextState Document::getState(
 				: (loaded || _dataMedia->canBePlayed())
 				? _openl
 				: _savel;
-			return { parent(), link };
+			return documentState(link);
 		}
 		const auto namerect = style::rtlrect(
 			nameleft,
@@ -1779,7 +1793,7 @@ TextState Document::getState(
 			st::semiboldFont->height,
 			_width);
 		if (namerect.contains(point) && !_data->loading()) {
-			return { parent(), _namel };
+			return documentState(_namel);
 		}
 	} else {
 		const auto nameleft = _st.fileThumbSize + _st.filePadding.right();
@@ -1803,7 +1817,7 @@ TextState Document::getState(
 				: loaded
 				? _openl
 				: _savel;
-			return { parent(), link };
+			return documentState(link);
 		}
 
 		if (_data->status != FileUploadFailed) {
@@ -1825,7 +1839,7 @@ TextState Document::getState(
 				_height - st::linksBorder,
 				_width);
 			if (loaded && leftofnamerect.contains(point)) {
-				return { parent(), _namel };
+				return documentState(_namel);
 			}
 			const auto namerect = style::rtlrect(
 				nameleft,
@@ -1834,7 +1848,7 @@ TextState Document::getState(
 				st::semiboldFont->height,
 				_width);
 			if (namerect.contains(point)) {
-				return { parent(), _namel };
+				return documentState(_namel);
 			}
 		}
 	}

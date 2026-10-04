@@ -30,6 +30,7 @@ public:
 	void addItem(QImage snapshot, QRect rect);
 
 	[[nodiscard]] bool animating() const;
+	[[nodiscard]] bool shown() const;
 
 	[[nodiscard]] rpl::producer<> allDone() const;
 

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
+#include "purple/purple_sync.h"
 
 #include "base/unixtime.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -3406,17 +3407,28 @@ void ListWidget::contextMenuEvent(QContextMenuEvent *e) {
 }
 
 void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+	auto importHit = Purple::ImportSettingsHit();
 	if (e->reason() == QContextMenuEvent::Mouse) {
-		mouseActionUpdate(e->globalPos());
-	} else if (e->reason() == QContextMenuEvent::Keyboard
-		&& _accessibilityFocusedItem) {
-		_overItemExact = _accessibilityFocusedItem;
-		if (const auto view = viewForItem(_accessibilityFocusedItem)) {
-			_overElement = view;
+		mouseActionUpdate(e->globalPos(), &importHit);
+	} else if (e->reason() == QContextMenuEvent::Keyboard) {
+		const auto view = viewForItem(_accessibilityFocusedItem);
+		Purple::PrepareImportSettingsKeyboardHit(
+			&importHit,
+			controller(),
+			view,
+			_accessibilityFocusedItem,
+			importSettingsViewState(view));
+		if (_accessibilityFocusedItem) {
+			_overItemExact = _accessibilityFocusedItem;
+			if (view) {
+				_overElement = view;
+			}
 		}
 	}
 
-	const auto link = ClickHandler::getActive();
+	const auto link = importHit.keyboard()
+		? ClickHandlerPtr()
+		: ClickHandler::getActive();
 	if (controller()->showFrozenError()) {
 		return;
 	} else if (link
@@ -3528,6 +3540,14 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				_overState));
 
 	_menu = FillContextMenu(this, request);
+	const auto importView = viewForItem(importHit.containerId());
+	Purple::AddImportSettingsAction(
+		_menu.get(),
+		&importHit,
+		controller(),
+		importView,
+		_accessibilityFocusedItem,
+		importSettingsViewState(importView));
 	if (_menu->empty()) {
 		_menu = nullptr;
 		return;
@@ -4252,9 +4272,14 @@ ReplyButton::ButtonParameters ListWidget::replyButtonParameters(
 	return result;
 }
 
-void ListWidget::mouseActionUpdate(const QPoint &globalPosition) {
+void ListWidget::mouseActionUpdate(
+		const QPoint &globalPosition,
+		Purple::ImportSettingsHit *importHit) {
+	if (importHit) {
+		*importHit = {};
+	}
 	_mousePosition = globalPosition;
-	mouseActionUpdate();
+	mouseActionUpdate(importHit);
 }
 
 void ListWidget::mouseActionCancel() {
@@ -4398,7 +4423,38 @@ int ListWidget::SelectionViewOffset(
 }
 
 
-void ListWidget::mouseActionUpdate() {
+auto ListWidget::importSettingsViewState(Element *view) const
+-> Purple::ImportSettingsViewState {
+	const auto top = view ? itemTop(view) : -1;
+	return {
+		.receiver = const_cast<ListWidget*>(this),
+		.viewport = QRect(0, _visibleTop, width(), _visibleBottom - _visibleTop),
+		.geometry = view ? QRect(0, top, width(), view->height()) : QRect(),
+		.ready = top >= 0
+			&& _mouseAction == MouseAction::None
+			&& _selected.empty()
+			&& _selectedTextSelection.empty()
+			&& _selectedText.empty()
+			&& _dragSelected.empty()
+			&& _dragSelectAction == DragSelectAction::None
+			&& !_inSelectionModeAnimation.animating()
+			&& !_touchInProgress
+			&& !_touchScroll
+			&& !(_overlayHost && _overlayHost->active())
+			&& !_resizePending
+			&& _showFinished
+			&& !_refreshingViewer
+			&& !_itemsRevealHeight
+			&& _itemRevealPending.empty()
+			&& _itemRevealAnimations.empty()
+			&& !(_thanosController && _thanosController->geometryBusy()),
+	};
+}
+
+void ListWidget::mouseActionUpdate(Purple::ImportSettingsHit *importHit) {
+	if (importHit) {
+		*importHit = {};
+	}
 	if (!_mouseActive && !window()->isActiveWindow()) {
 		return;
 	}
@@ -4425,11 +4481,14 @@ void ListWidget::mouseActionUpdate() {
 		: strictFindItemByY(point.y());
 	const auto item = view ? view->data().get() : nullptr;
 	const auto itemPoint = mapPointToItem(point, view);
+	const auto contentPointState = view
+		? view->pointState(itemPoint)
+		: PointState::Outside;
 	_overState = MouseState(
 		item ? item->fullId() : FullMsgId(),
 		view ? view->height() : 0,
 		itemPoint,
-		view ? view->pointState(itemPoint) : PointState::Outside);
+		contentPointState);
 	_overItemExact = nullptr;
 	const auto viewChanged = (_overElement != view);
 	if (viewChanged) {
@@ -4572,6 +4631,20 @@ void ListWidget::mouseActionUpdate() {
 				}
 			}
 		}
+	}
+	if (importHit) {
+		Purple::CaptureImportSettingsHit(
+			importHit,
+			controller(),
+			view,
+			dragState,
+			contentPointState,
+			mousePosition,
+			importSettingsViewState(view),
+			point == mousePosition
+				&& !reactionState.itemId
+				&& !replyBtnState.itemId
+				&& !dragStateUserpic);
 	}
 	const auto lnkChanged = ClickHandler::setActive(dragState.link, lnkhost);
 	_overSenderUserpic = dragStateUserpic;

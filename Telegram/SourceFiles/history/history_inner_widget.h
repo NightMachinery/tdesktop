@@ -29,6 +29,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 struct ClickContext;
 struct ClickHandlerContext;
 
+namespace Purple {
+struct ImportSettingsHit;
+struct ImportSettingsViewState;
+} // namespace Purple
+
 namespace Data {
 struct Group;
 } // namespace Data
@@ -416,8 +421,12 @@ private:
 	void scrollDateCheckDownward();
 	bool canHaveFromUserpics() const;
 	void mouseActionStart(const QPoint &screenPos, Qt::MouseButton button);
-	void mouseActionUpdate();
-	void mouseActionUpdate(const QPoint &screenPos);
+	void mouseActionUpdate(Purple::ImportSettingsHit *importHit = nullptr);
+	void mouseActionUpdate(
+		const QPoint &screenPos,
+		Purple::ImportSettingsHit *importHit = nullptr);
+	[[nodiscard]] Purple::ImportSettingsViewState importSettingsViewState(
+		Element *view) const;
 	void mouseActionFinish(const QPoint &screenPos, Qt::MouseButton button);
 	void mouseActionCancel();
 	std::unique_ptr<QMimeData> prepareDrag();

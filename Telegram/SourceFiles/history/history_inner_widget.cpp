@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
+#include "purple/purple_sync.h"
 
 #include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
@@ -2164,9 +2165,14 @@ void HistoryInner::mouseMoveEvent(QMouseEvent *e) {
 	mouseActionUpdate(e->globalPos());
 }
 
-void HistoryInner::mouseActionUpdate(const QPoint &screenPos) {
+void HistoryInner::mouseActionUpdate(
+		const QPoint &screenPos,
+		Purple::ImportSettingsHit *importHit) {
+	if (importHit) {
+		*importHit = {};
+	}
 	_mousePosition = screenPos;
-	mouseActionUpdate();
+	mouseActionUpdate(importHit);
 }
 
 void HistoryInner::touchScrollUpdated(const QPoint &screenPos) {
@@ -2769,15 +2775,25 @@ void HistoryInner::contextMenuEvent(QContextMenuEvent *e) {
 }
 
 void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+	auto importHit = Purple::ImportSettingsHit();
 	if (e->reason() == QContextMenuEvent::Mouse) {
-		mouseActionUpdate(e->globalPos());
+		mouseActionUpdate(e->globalPos(), &importHit);
 	} else if (e->reason() == QContextMenuEvent::Keyboard) {
+		const auto view = viewByItem(_accessibilityFocusedItem);
+		Purple::PrepareImportSettingsKeyboardHit(
+			&importHit,
+			_controller,
+			view,
+			_accessibilityFocusedItem,
+			importSettingsViewState(view));
 		if (_accessibilityFocusedItem) {
 			_dragStateItem = _accessibilityFocusedItem;
 		}
 	}
 
-	const auto link = ClickHandler::getActive();
+	const auto link = importHit.keyboard()
+		? ClickHandlerPtr()
+		: ClickHandler::getActive();
 	if (_controller->showFrozenError()) {
 		return;
 	} else if (link
@@ -2944,6 +2960,15 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 		return;
 	}
+	const auto importView = viewByItem(
+		session->data().message(importHit.containerId()));
+	Purple::AddImportSettingsAction(
+		_menu.get(),
+		&importHit,
+		_controller,
+		importView,
+		_accessibilityFocusedItem,
+		importSettingsViewState(importView));
 	const auto controller = _controller;
 	const auto canViewMessageStats = [&](HistoryItem *item) {
 		if (!item
@@ -5331,7 +5356,40 @@ auto HistoryInner::replyButtonParameters(
 	return result;
 }
 
-void HistoryInner::mouseActionUpdate() {
+auto HistoryInner::importSettingsViewState(Element *view) const
+-> Purple::ImportSettingsViewState {
+	const auto top = view ? itemTop(view) : -1;
+	return {
+		.receiver = const_cast<HistoryInner*>(this),
+		.viewport = QRect(
+			0,
+			_visibleAreaTop,
+			width(),
+			_visibleAreaBottom - _visibleAreaTop),
+		.geometry = view ? QRect(0, top, width(), view->height()) : QRect(),
+		.ready = top >= 0
+			&& _mouseAction == MouseAction::None
+			&& _selected.empty()
+			&& _selectedTextSelection.empty()
+			&& _selectedText.empty()
+			&& !_dragSelFrom
+			&& !_dragSelTo
+			&& !_dragSelecting
+			&& !_chooseForReportReason.has_value()
+			&& !_inSelectionModeAnimation.animating()
+			&& !_touchInProgress
+			&& !_touchScroll
+			&& !(_overlayHost && _overlayHost->active())
+			&& !hasPendingResizedItems()
+			&& !_revealHeight
+			&& !(_thanosController && _thanosController->geometryBusy()),
+	};
+}
+
+void HistoryInner::mouseActionUpdate(Purple::ImportSettingsHit *importHit) {
+	if (importHit) {
+		*importHit = {};
+	}
 	if (hasPendingResizedItems()
 		|| (!_mouseActive && !window()->isActiveWindow())) {
 		return;
@@ -5341,6 +5399,7 @@ void HistoryInner::mouseActionUpdate() {
 	auto point = _widget->clampMousePosition(mousePos);
 
 	auto m = QPoint();
+	auto contentPointState = PointState::Outside;
 
 	adjustCurrent(point.y());
 	const auto reactionState = _reactionsManager->buttonTextState(point);
@@ -5383,7 +5442,8 @@ void HistoryInner::mouseActionUpdate() {
 		if (changed) {
 			_reactionsItem = item;
 		}
-		if (view->pointState(m) != PointState::Outside) {
+		contentPointState = view->pointState(m);
+		if (contentPointState != PointState::Outside) {
 			if (Element::Hovered() != view) {
 				repaintItem(Element::Hovered());
 				Element::Hovered(view);
@@ -5566,6 +5626,21 @@ void HistoryInner::mouseActionUpdate() {
 				}
 			}
 		}
+	}
+	if (importHit) {
+		Purple::CaptureImportSettingsHit(
+			importHit,
+			_controller,
+			view,
+			dragState,
+			contentPointState,
+			mousePos,
+			importSettingsViewState(view),
+			point == mousePos
+				&& !reactionState.itemId
+				&& !replyBtnState.itemId
+				&& !dragStateUserpic
+				&& (!_aboutView || view != _aboutView->view()));
 	}
 	auto lnkChanged = ClickHandler::setActive(dragState.link, lnkhost);
 	_dragStateUserpic = dragStateUserpic;
