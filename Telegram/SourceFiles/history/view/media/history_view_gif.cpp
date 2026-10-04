@@ -1394,6 +1394,11 @@ TextState Gif::cornerStatusTextState(
 	const auto inner = QRect(statusX + padding.y() - padding.x(), statusY, st::historyVideoDownloadSize, st::historyVideoDownloadSize);
 	if (inner.contains(point)) {
 		result.link = _data->loading() ? _cancell : _savel;
+		if (result.link && result.link == _savel) {
+			result.setContentOrigin(
+				ContentOrigin::DocumentCard,
+				_realParent->fullId());
+		}
 	}
 	return result;
 }
@@ -1558,6 +1563,12 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 			result.link = _seekl;
 		} else {
 			result.link = currentVideoLink();
+			if (result.link
+				&& (result.link == _openl || result.link == _savel)) {
+				result.setContentOrigin(
+					ContentOrigin::DocumentCard,
+					_realParent->fullId());
+			}
 		}
 	}
 	const auto checkBottomInfo = !inWebPage
@@ -1611,11 +1622,13 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 					+ st::msgDateImgPadding.y();
 			}
 			if (QRect(QPoint(fastShareLeft, fastShareTop), *size).contains(point)) {
+				result.clearContentOrigin();
 				result.link = _parent->rightActionLink(point
 					- QPoint(fastShareLeft, fastShareTop));
 			}
 		}
 		if (_transcribe && _transcribe->contains(point)) {
+			result.clearContentOrigin();
 			result.link = _transcribe->link();
 		}
 	}
@@ -1975,7 +1988,15 @@ TextState Gif::getStateGrouped(
 	auto link = (_spoiler && !_spoiler->revealed)
 		? (_sensitiveSpoiler ? spoilerTagLink() : _spoiler->link)
 		: currentVideoLink();
-	return TextState(_parent, std::move(link));
+	auto result = TextState(_parent, std::move(link));
+	if ((!_spoiler || _spoiler->revealed)
+		&& result.link
+		&& (result.link == _openl || result.link == _savel)) {
+		result.setContentOrigin(
+			ContentOrigin::DocumentCard,
+			_realParent->fullId());
+	}
+	return result;
 }
 
 ClickHandlerPtr Gif::currentVideoLink() const {

@@ -924,10 +924,12 @@ near 0. Final.
   sits in the alphabetical block; move it per rule 5 when the file is next
   touched.
 
-**`Telegram/SourceFiles/history/view/history_view_context_menu.cpp`**: +6 -0,
-2 hunks, near 1. Final.
-- One include and `Purple::AddImportSettingsAction(menu, item, document,
-  controller->uiShow())` in `AddDocumentActions`.
+**`Telegram/SourceFiles/history/view/history_view_context_menu.cpp`**: the
+former import include and raw `AddDocumentActions` import call are removed.
+Import now consumes the current invocation's qualified record in the list
+builder after `FillContextMenu`; document saving and ordinary grouped menu
+behavior remain upstream. See "Import content provenance and menu routes"
+below for the replacement extension sites.
 
 **`Telegram/SourceFiles/storage/file_upload.cpp`**: +9 -1, 6 hunks, near 2.
 Owner: B16.
@@ -985,8 +987,9 @@ All of them exist at HEAD, and each now has an owner:
 - B16: file_upload.{h,cpp}.
 
 Added since the plan, with no batch needed: settings_main.cpp (version
-footer), data_document_media.cpp (download guard) and
-history_view_context_menu.cpp (import action) are already hooks. The
+footer) and data_document_media.cpp (download guard) are already hooks. The
+former history_view_context_menu.cpp import hook is removed in favor of the
+qualified builder hooks described below. The
 `purple_version.cmake` include moved from CMakeLists.txt into purple.cmake in
 B1.
 
@@ -1016,3 +1019,115 @@ the comments, B14 for the virtuals) and main_window.cpp (B15).
 The 11 upstream lines that must carry the account after the refactor are B4
 1, B8 1, B10u 4, B10d 1, B12 2 and B13 2. All are lines their batches rewrite
 anyway, so they add no hunks.
+
+## Import content provenance and menu routes
+
+Qualification, canonical session/message/document checks and action lifetime
+are owned by `purple_sync`. Native files expose the existing final hit and
+read-only state; no native hit-test, grouping or accessibility implementation
+is copied or moved. The following entries describe the added extension
+surface, not a new measurement of the older merge-base figures above.
+
+**`Telegram/SourceFiles/history/history_inner_widget.cpp`**:
+- One Purple include, an optional output propagated/reset through both mouse
+  update overloads, one capture before `setActive`, one keyboard preparation
+  and one consumer after specialized/userpic exits. Capture rejects nonempty
+  reaction/reply snapshot owner ids even when their links or current views
+  are absent. A read-only observer
+  exports visible item geometry and existing selection, touch, report,
+  overlay, resize, reveal and removal readiness. Purple exclusions invalidate
+  only the optional result; stock refresh and menus continue.
+
+**`Telegram/SourceFiles/history/history_inner_widget.h`**:
+- Forward declarations and private optional-output/read-only signatures.
+
+**`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**:
+- One Purple include and the same optional capture/keyboard protocol. Its
+  single consumer follows `FillContextMenu` and precedes the empty-menu check.
+  Specialized dispatch and `ContextMenuRequest` share the local effective
+  link. Capture rejects each nonempty invocation-local reaction/reply owner
+  id independently of resolved views and links. The observer adds existing
+  refresh/reveal/resize readiness to native
+  selection, overlay, touch and removal state.
+
+**`Telegram/SourceFiles/history/view/history_view_list_widget.h`**:
+- Forward declarations and private optional-output/read-only signatures.
+
+**`Telegram/SourceFiles/history/view/history_view_context_menu.cpp`**:
+- The old include and direct item/document import call are removed; the
+  qualified builder consumer above is the sole secondary import insertion.
+
+**`Telegram/SourceFiles/info/media/info_media_list_widget.cpp`**:
+- One Purple include, optional output/reset on both existing mouse overloads,
+  one final row capture before `setActive` and one document-menu consumer.
+  A read-only observer exposes the viewport below the top overlay, row
+  geometry and existing selection/reorder/return/shift state. Purple checks
+  the exact row/global id, self Media/File section and parent session; Files
+  keyboard/other sources have no record. Stock save and Finder actions stay.
+
+**`Telegram/SourceFiles/info/media/info_media_list_widget.h`**:
+- Forward declarations and private optional-output/read-only signatures.
+
+**`Telegram/SourceFiles/history/view/history_view_cursor_state.h`**:
+- Generic default-None content origin plus an independent producer message id,
+  with paired set/clear accessors. Selection offsets and final grouped member
+  ids preserve producer ownership. This is evidence about native content,
+  rather than a settings-import policy.
+
+**`Telegram/SourceFiles/history/view/history_view_message.cpp`**:
+- Plain/rich winning body glyphs mark the actual `textItem()` owner. Rich
+  results also require the final native text cursor. Right-action, summarize
+  and all three `onlyMessageText` media-suppression replacements clear origin
+  and owner together. Native cursor/handler precedence stays unchanged.
+
+**`Telegram/SourceFiles/iv/markdown/iv_markdown_article.h`**:
+- One default-false `bodyGlyph` observation on the hit result.
+
+**`Telegram/SourceFiles/iv/markdown/iv_markdown_article.cpp`**:
+- Only `HitTextSegment` sets that observation, from `insideText` and the
+  underlying `uponSymbol`; wrappers propagate it without synthesizing it.
+
+**`Telegram/SourceFiles/history/view/media/history_view_document.cpp`**:
+- Winning open/save/open-with document-card handlers and actual caption
+  glyphs mark `realParent` ownership. Caption links and offsets stay intact;
+  cancellation, seeking and transcription controls remain unmarked.
+
+**`Telegram/SourceFiles/history/view/media/history_view_gif.cpp`**:
+- Winning open/save card handlers, including grouped results, mark
+  `realParent`. Spoiler/seek controls stay unmarked; later right-action and
+  transcription replacements clear origin and owner. Purple still requires
+  positive File classification, so ordinary animation/video hits do not
+  become settings-file imports.
+
+**`Telegram/SourceFiles/history/view/media/history_view_theme_document.cpp`**:
+- The actual constructed parent-data owner marks the open-document winner.
+  No invented `realParent` parameter or cancellation producer is added.
+
+**`Telegram/SourceFiles/history/view/media/history_view_media_grouped.cpp`**:
+- Whole-media spoiler/right-action replacements clear provenance. Existing
+  member-id rewriting and selection offsets remain unchanged, allowing
+  Purple to reject an owner/member mismatch without a group fallback.
+
+**`Telegram/SourceFiles/history/view/media/history_view_web_page.cpp`**:
+- Nested attachment provenance is cleared immediately after its returned hit,
+  before sponsored, hint or handler replacements. The same native WebPage
+  type is used by log-original and fact-check previews.
+
+**`Telegram/SourceFiles/overview/overview_layout.cpp`**:
+- Document-handler filename/icon/thumbnail/corner regions mark the actual
+  row owner. Date jump handlers and whitespace stay unmarked. These native
+  observations do not turn a non-File attachment into an import target.
+
+**`Telegram/SourceFiles/ui/effects/thanos_effect.h`** and
+**`Telegram/SourceFiles/ui/effects/thanos_effect.cpp`**:
+- Declaration and implementation of a read-only accessor for existing shown
+  state, covering the interval between animation completion and queued hide.
+
+**`Telegram/SourceFiles/ui/effects/thanos_effect_controller.h`** and
+**`Telegram/SourceFiles/ui/effects/thanos_effect_controller.cpp`**:
+- Declaration and implementation of the read-only `geometryBusy()` observer.
+  It reads existing effect animation/shown state, collapse animation,
+  internal/published collapse gaps and unconsumed removal height. No
+  capability probe, forced layout, pointer-existence gate or independent
+  precapture/prepend/restore/saved-scroll gate is introduced. Native hide,
+  collapse completion and geometry/paint consumption release those fields.

@@ -30,6 +30,13 @@ enum class CursorState : char {
 	LogAdminService,
 };
 
+enum class ContentOrigin : char {
+	None,
+	MessageBody,
+	DocumentCard,
+	DocumentCaption,
+};
+
 struct TextState {
 	TextState() = default;
 	TextState(not_null<const HistoryItem*> item);
@@ -51,7 +58,17 @@ struct TextState {
 		const Ui::Text::StateResult &state);
 	TextState(std::nullptr_t, ClickHandlerPtr link);
 
+	void setContentOrigin(ContentOrigin origin, FullMsgId owner) {
+		contentOrigin = origin;
+		contentOwner = owner;
+	}
+	void clearContentOrigin() {
+		setContentOrigin(ContentOrigin::None, {});
+	}
+
 	FullMsgId itemId;
+	FullMsgId contentOwner;
+	ContentOrigin contentOrigin = ContentOrigin::None;
 	CursorState cursor = CursorState::None;
 	ClickHandlerPtr link;
 	uint16 symbol = 0;

@@ -12,14 +12,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
+#include "data/data_file_click_handler.h"
+#include "data/data_groups.h"
+#include "data/data_media_types.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/view/history_view_cursor_state.h"
+#include "history/view/history_view_element.h"
+#include "info/info_controller.h"
 #include "core/application.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -27,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "storage/localimageloader.h"
+#include "storage/storage_shared_media.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/layers/show.h"
@@ -37,10 +45,42 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtGui/QRegion>
+#include <QtWidgets/QWidget>
 
 #include "styles/style_menu_icons.h"
 
 namespace Purple {
+
+struct ImportSettingsContext {
+	base::weak_ptr<Main::Session> session;
+	base::weak_ptr<Window::SessionController> asking;
+	std::shared_ptr<Ui::Show> show;
+	FullMsgId itemId;
+	const HistoryItem *itemIdentity = nullptr;
+	DocumentData *document = nullptr;
+	TimeId date = 0;
+	QString account;
+};
+
+struct ImportSettingsTarget {
+	enum class Input : char {
+		Mouse,
+		Keyboard,
+		Files,
+	};
+
+	ImportSettingsContext context;
+	ImportSettingsViewState native;
+	HistoryView::Element *view = nullptr;
+	Overview::Layout::ItemBase *layout = nullptr;
+	FullMsgId containerId;
+	const HistoryItem *containerIdentity = nullptr;
+	GlobalMsgId globalId;
+	QPoint rawPoint;
+	Input input = Input::Mouse;
+};
+
 namespace {
 
 constexpr auto kFileName = "settings.toml";
@@ -109,6 +149,180 @@ constexpr auto kSearchLimit = 100;
 	return !show || !(*show);
 }
 
+[[nodiscard]] DocumentData *QualifyingImportDocument(
+		not_null<Main::Session*> session,
+		HistoryItem *item,
+		bool allowLoading = false) {
+	if (!item
+		|| !item->isRegular()
+		|| !item->isHistoryEntry()
+		|| &item->history()->session() != session
+		|| session->data().message(item->fullId()) != item
+		|| item->history()->peer != session->user()
+		|| !item->history()->peer->isSelf()
+		|| item->isSending()
+		|| item->isUploading()) {
+		return nullptr;
+	}
+	const auto media = item->media();
+	if (!media || !media->sharedMediaTypes().test(Storage::SharedMediaType::File)) {
+		return nullptr;
+	}
+	const auto document = media->document();
+	if (!document
+		|| &document->session() != session
+		|| document->size <= 0
+		|| document->size > kMaxSize
+		|| document->uploading()
+		|| (!allowLoading && document->loading())
+		|| document->filename().compare(
+			SettingsFileName(),
+			Qt::CaseInsensitive) != 0) {
+		return nullptr;
+	}
+	return document;
+}
+
+[[nodiscard]] bool DocumentHandlerAgrees(
+		const HistoryView::TextState &state,
+		not_null<DocumentData*> document) {
+	const auto handler = dynamic_cast<DocumentClickHandler*>(state.link.get());
+	return handler
+		&& handler->document() == document
+		&& handler->context() == state.itemId;
+}
+
+[[nodiscard]] bool ContentHitAgrees(
+		const HistoryView::TextState &state,
+		not_null<DocumentData*> document) {
+	using Origin = HistoryView::ContentOrigin;
+	if (!state.itemId || state.contentOwner != state.itemId) {
+		return false;
+	}
+	switch (state.contentOrigin) {
+	case Origin::MessageBody:
+	case Origin::DocumentCaption:
+		return state.cursor == HistoryView::CursorState::Text;
+	case Origin::DocumentCard:
+		return DocumentHandlerAgrees(state, document);
+	case Origin::None:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool ContainerOwnsItem(
+		not_null<Main::Session*> session,
+		not_null<HistoryItem*> container,
+		not_null<HistoryItem*> item) {
+	if (&container->history()->session() != session
+		|| session->data().message(container->fullId()) != container) {
+		return false;
+	} else if (container == item) {
+		return true;
+	}
+	const auto group = session->data().groups().find(container);
+	return group
+		&& !group->items.empty()
+		&& group->items.front() == container
+		&& session->data().groups().find(item) == group
+		&& ranges::contains(group->items, item);
+}
+
+[[nodiscard]] bool ReceivingContentReady(
+		const ImportSettingsViewState &native) {
+	return native.ready
+		&& native.receiver
+		&& native.receiver->isVisible()
+		&& native.receiver->window()->isActiveWindow()
+		&& !native.viewport.isEmpty()
+		&& !native.geometry.isEmpty()
+		&& native.receiver->rect().intersects(native.viewport)
+		&& native.viewport.intersects(native.geometry);
+}
+
+[[nodiscard]] bool ReceivingPointReady(
+		const ImportSettingsViewState &native,
+		QPoint rawPoint) {
+	return ReceivingContentReady(native)
+		&& native.receiver->rect().contains(rawPoint)
+		&& native.viewport.contains(rawPoint)
+		&& native.geometry.contains(rawPoint)
+		&& native.receiver->visibleRegion().contains(rawPoint);
+}
+
+[[nodiscard]] ImportSettingsContext ImportContextFor(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item,
+		not_null<DocumentData*> document) {
+	return {
+		.session = base::make_weak(&controller->session()),
+		.asking = base::make_weak(controller.get()),
+		.show = controller->uiShow(),
+		.itemId = item->fullId(),
+		.itemIdentity = item.get(),
+		.document = document.get(),
+		.date = item->date(),
+		.account = AccountLabel(&controller->session()),
+	};
+}
+
+[[nodiscard]] DocumentData *ImportContextDocument(
+		const ImportSettingsContext &context,
+		bool allowLoading) {
+	if (AskingWindowSwitched(context.show)) {
+		return nullptr;
+	}
+	const auto asking = context.asking.get();
+	const auto session = context.session.get();
+	if (!asking || !session || &asking->session() != session) {
+		return nullptr;
+	}
+	const auto item = session->data().message(context.itemId);
+	if (!item || item != context.itemIdentity || item->date() != context.date) {
+		return nullptr;
+	}
+	const auto document = QualifyingImportDocument(session, item, allowLoading);
+	return (document == context.document) ? document : nullptr;
+}
+
+[[nodiscard]] bool HistoryContainerReady(
+		not_null<Window::SessionController*> controller,
+		HistoryView::Element *view,
+		const ImportSettingsViewState &native) {
+	return ReceivingContentReady(native)
+		&& view
+		&& !view->isHidden()
+		&& !view->pendingResize()
+		&& &view->data()->history()->session() == &controller->session();
+}
+
+[[nodiscard]] bool FilesControllerAgrees(
+		not_null<Info::AbstractController*> controller,
+		HistoryItem *row,
+		GlobalMsgId globalId) {
+	const auto parent = controller->parentController();
+	const auto section = controller->section();
+	const auto peer = controller->key().peer();
+	const auto session = &controller->session();
+	return &parent->session() == session
+		&& section.type() == Info::Section::Type::Media
+		&& section.mediaType() == Storage::SharedMediaType::File
+		&& !controller->isDownloads()
+		&& !controller->isGlobalMedia()
+		&& !controller->storiesPeer()
+		&& !controller->musicPeer()
+		&& peer
+		&& peer->isSelf()
+		&& &peer->session() == session
+		&& row
+		&& row->history()->peer == peer
+		&& &row->history()->session() == session
+		&& globalId == row->globalId()
+		&& globalId.sessionUniqueId == session->uniqueId()
+		&& session->data().message(globalId.itemId) == row;
+}
+
 void RefuseSwitchedImport(const QString &account) {
 	LOG(("Purple: settings import dropped: "
 		"the window that asked was closed or shows another account now."));
@@ -156,8 +370,15 @@ void ConfirmAndImport(
 		not_null<Main::Session*> session,
 		const QByteArray &content,
 		TimeId date,
-		const std::shared_ptr<Ui::Show> &show) {
+		const std::shared_ptr<Ui::Show> &show,
+		Fn<bool()> stillValid) {
 	const auto account = AccountLabel(session);
+	if (stillValid && !stillValid()) {
+		if (AskingWindowSwitched(show)) {
+			RefuseSwitchedImport(account);
+		}
+		return;
+	}
 	if (AskingWindowSwitched(show)) {
 		RefuseSwitchedImport(account);
 		return;
@@ -195,10 +416,17 @@ void ConfirmAndImport(
 		"kept as %1."_q.arg(SettingsFileName() + u".import.bak"_q));
 
 	const auto keep = show;
+	const auto weakSession = base::make_weak(session.get());
 	show->showBox(Ui::MakeConfirmBox({
 		.text = lines.join('\n'),
 		.confirmed = [=](Fn<void()> close) {
 			close();
+			if (!weakSession.get() || (stillValid && !stillValid())) {
+				if (AskingWindowSwitched(keep)) {
+					RefuseSwitchedImport(account);
+				}
+				return;
+			}
 			WriteImported(account, text, keep);
 		},
 		.confirmText = u"Import"_q,
@@ -214,11 +442,17 @@ void ResolveAndImport(
 		not_null<DocumentData*> document,
 		FullMsgId itemId,
 		TimeId date,
-		std::shared_ptr<Ui::Show> show) {
+		std::shared_ptr<Ui::Show> show,
+		Fn<bool()> stillValid) {
+	if (AskingWindowSwitched(show) || (stillValid && !stillValid())) {
+		return;
+	}
+	const auto weakSession = base::make_weak(&document->session());
+	const auto account = AccountLabel(&document->session());
 	const auto media = document->createMediaView();
 	if (const auto content = LocalContent(media, document);
 		!content.isEmpty()) {
-		ConfirmAndImport(&document->session(), content, date, show);
+		ConfirmAndImport(&document->session(), content, date, show, stillValid);
 		return;
 	}
 	document->save(itemId, QString());
@@ -230,8 +464,24 @@ void ResolveAndImport(
 	show->showToast(u"Downloading %1..."_q.arg(SettingsFileName()));
 
 	auto lifetime = std::make_shared<rpl::lifetime>();
+	document->session().data().sessionDataAboutToBeCleared(
+	) | rpl::on_next([weak = std::weak_ptr<rpl::lifetime>(lifetime)] {
+		if (const auto live = weak.lock()) {
+			live->destroy();
+		}
+	}, *lifetime);
 	document->session().downloaderTaskFinished(
 	) | rpl::on_next([=]() mutable {
+		const auto session = weakSession.get();
+		if (!session
+			|| AskingWindowSwitched(show)
+			|| (stillValid && !stillValid())) {
+			if (AskingWindowSwitched(show)) {
+				RefuseSwitchedImport(account);
+			}
+			base::take(lifetime)->destroy();
+			return;
+		}
 		const auto content = LocalContent(media, document);
 		if (content.isEmpty()) {
 			if (!document->loading()) {
@@ -241,9 +491,29 @@ void ResolveAndImport(
 			}
 			return;
 		}
-		ConfirmAndImport(&document->session(), content, date, show);
+		ConfirmAndImport(&document->session(), content, date, show, stillValid);
 		base::take(lifetime)->destroy();
 	}, *lifetime);
+}
+
+void AddQualifiedImportAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ImportSettingsContext &context) {
+	menu->addAction(u"Import Purple settings"_q, [=] {
+		const auto document = ImportContextDocument(context, false);
+		if (!document) {
+			if (AskingWindowSwitched(context.show)) {
+				RefuseSwitchedImport(context.account);
+			}
+			return;
+		}
+		ResolveAndImport(
+			document,
+			context.itemId,
+			context.date,
+			context.show,
+			[=] { return ImportContextDocument(context, true) != nullptr; });
+	}, &st::menuIconDownload);
 }
 
 struct ImportCandidate {
@@ -318,6 +588,20 @@ void OfferImportCandidate(
 		return;
 	}
 	const auto account = AccountLabel(session);
+	const auto weakSession = base::make_weak(session.get());
+	const auto expectedItem = session->data().message(candidate.itemId);
+	const auto stillValid = [=] {
+		const auto live = weakSession.get();
+		if (!live || AskingWindowSwitched(show)) {
+			return false;
+		}
+		const auto item = live->data().message(candidate.itemId);
+		return item
+			&& item == expectedItem
+			&& item->date() == candidate.date
+			&& item->media()
+			&& item->media()->document() == candidate.document;
+	};
 	show->showBox(Ui::MakeConfirmBox({
 		.text = u"A newer Work Mode settings file is in Saved Messages"
 			"\n\nAccount %1, sent %2"_q.arg(
@@ -329,11 +613,15 @@ void OfferImportCandidate(
 				RefuseSwitchedImport(account);
 				return;
 			}
+			if (!stillValid()) {
+				return;
+			}
 			ResolveAndImport(
 				candidate.document,
 				candidate.itemId,
 				candidate.date,
-				show);
+				show,
+				stillValid);
 		},
 		.confirmText = u"Import"_q,
 	}));
@@ -531,25 +819,176 @@ void SendSettingsToSavedMessages(
 	}));
 }
 
-void AddImportSettingsAction(
-		not_null<Ui::PopupMenu*> menu,
-		HistoryItem *item,
-		not_null<DocumentData*> document,
-		std::shared_ptr<Ui::Show> show) {
-	if (!item || !item->history()->peer->isSelf()) {
-		return;
-	} else if (document->size > kMaxSize) {
-		return;
-	} else if (document->filename().compare(
-			SettingsFileName(),
-			Qt::CaseInsensitive) != 0) {
+bool ImportSettingsHit::keyboard() const {
+	return target && target->input == ImportSettingsTarget::Input::Keyboard;
+}
+
+FullMsgId ImportSettingsHit::containerId() const {
+	return target ? target->containerId : FullMsgId();
+}
+
+void CaptureImportSettingsHit(
+		ImportSettingsHit *hit,
+		not_null<Window::SessionController*> controller,
+		HistoryView::Element *view,
+		const HistoryView::TextState &state,
+		HistoryView::PointState pointState,
+		QPoint rawPoint,
+		const ImportSettingsViewState &native,
+		bool contentOwned) {
+	if (!hit) {
 		return;
 	}
-	const auto itemId = item->fullId();
-	const auto date = item->date();
-	menu->addAction(u"Import Purple settings"_q, [=] {
-		ResolveAndImport(document, itemId, date, show);
-	}, &st::menuIconDownload);
+	*hit = {};
+	if (!contentOwned
+		|| pointState == HistoryView::PointState::Outside
+		|| !HistoryContainerReady(controller, view, native)
+		|| !ReceivingPointReady(native, rawPoint)) {
+		return;
+	}
+	const auto session = &controller->session();
+	const auto item = session->data().message(state.itemId);
+	const auto document = QualifyingImportDocument(session, item);
+	if (!document
+		|| !ContentHitAgrees(state, document)
+		|| !ContainerOwnsItem(session, view->data(), item)) {
+		return;
+	}
+	auto target = std::make_shared<ImportSettingsTarget>();
+	target->context = ImportContextFor(controller, item, document);
+	target->native = native;
+	target->view = view;
+	target->containerId = view->data()->fullId();
+	target->containerIdentity = view->data();
+	target->rawPoint = rawPoint;
+	target->input = ImportSettingsTarget::Input::Mouse;
+	hit->target = std::move(target);
+}
+
+void PrepareImportSettingsKeyboardHit(
+		not_null<ImportSettingsHit*> hit,
+		not_null<Window::SessionController*> controller,
+		HistoryView::Element *view,
+		HistoryItem *focused,
+		const ImportSettingsViewState &native) {
+	*hit = {};
+	if (!HistoryContainerReady(controller, view, native)
+		|| view->data() != focused) {
+		return;
+	}
+	const auto document = QualifyingImportDocument(&controller->session(), focused);
+	if (!document) {
+		return;
+	}
+	auto target = std::make_shared<ImportSettingsTarget>();
+	target->context = ImportContextFor(controller, focused, document);
+	target->native = native;
+	target->view = view;
+	target->containerId = focused->fullId();
+	target->containerIdentity = focused;
+	target->input = ImportSettingsTarget::Input::Keyboard;
+	hit->target = std::move(target);
+}
+
+void CaptureImportSettingsFileHit(
+		ImportSettingsHit *hit,
+		not_null<Info::AbstractController*> controller,
+		Overview::Layout::ItemBase *layout,
+		HistoryItem *row,
+		GlobalMsgId globalId,
+		const HistoryView::TextState &state,
+		QPoint rawPoint,
+		const ImportSettingsViewState &native,
+		bool exact) {
+	if (!hit) {
+		return;
+	}
+	*hit = {};
+	if (!exact
+		|| !layout
+		|| !ReceivingPointReady(native, rawPoint)
+		|| !FilesControllerAgrees(controller, row, globalId)
+		|| state.itemId != globalId.itemId
+		|| state.contentOrigin != HistoryView::ContentOrigin::DocumentCard) {
+		return;
+	}
+	const auto document = QualifyingImportDocument(&controller->session(), row);
+	if (!document || !ContentHitAgrees(state, document)) {
+		return;
+	}
+	auto target = std::make_shared<ImportSettingsTarget>();
+	target->context = ImportContextFor(controller->parentController(), row, document);
+	target->native = native;
+	target->layout = layout;
+	target->containerId = row->fullId();
+	target->containerIdentity = row;
+	target->globalId = globalId;
+	target->rawPoint = rawPoint;
+	target->input = ImportSettingsTarget::Input::Files;
+	hit->target = std::move(target);
+}
+
+void AddImportSettingsAction(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<ImportSettingsHit*> hit,
+		not_null<Window::SessionController*> controller,
+		HistoryView::Element *container,
+		HistoryItem *focused,
+		const ImportSettingsViewState &native) {
+	const auto target = hit->target;
+	if (!target) {
+		return;
+	}
+	const auto keyboard = target->input == ImportSettingsTarget::Input::Keyboard;
+	const auto document = ImportContextDocument(target->context, false);
+	const auto item = document
+		? controller->session().data().message(target->context.itemId)
+		: nullptr;
+	if (target->input == ImportSettingsTarget::Input::Files
+		|| target->context.asking.get() != controller
+		|| !document
+		|| !HistoryContainerReady(controller, container, native)
+		|| target->view != container
+		|| target->containerIdentity != container->data()
+		|| !ContainerOwnsItem(&controller->session(), container->data(), item)
+		|| native.receiver != target->native.receiver
+		|| native.viewport != target->native.viewport
+		|| native.geometry != target->native.geometry
+		|| (keyboard && (focused != item || container->data() != focused))
+		|| (!keyboard && !ReceivingPointReady(native, target->rawPoint))) {
+		hit->target = nullptr;
+		return;
+	}
+	AddQualifiedImportAction(menu, target->context);
+}
+
+void AddImportSettingsFileAction(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<ImportSettingsHit*> hit,
+		not_null<Info::AbstractController*> controller,
+		Overview::Layout::ItemBase *layout,
+		HistoryItem *row,
+		GlobalMsgId globalId,
+		const ImportSettingsViewState &native) {
+	const auto target = hit->target;
+	if (!target) {
+		return;
+	}
+	if (target->input != ImportSettingsTarget::Input::Files
+		|| target->context.asking.get() != controller->parentController()
+		|| !ImportContextDocument(target->context, false)
+		|| !FilesControllerAgrees(controller, row, globalId)
+		|| target->layout != layout
+		|| target->containerIdentity != row
+		|| target->globalId != globalId
+		|| native.receiver != target->native.receiver
+		|| native.viewport != target->native.viewport
+		|| native.geometry != target->native.geometry
+		|| !ReceivingPointReady(native, target->rawPoint)) {
+		hit->target = nullptr;
+		return;
+	}
+	AddQualifiedImportAction(menu, target->context);
 }
 
 void OfferNewerSettingsFromSavedMessages(

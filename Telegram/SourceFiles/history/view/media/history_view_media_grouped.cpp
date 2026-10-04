@@ -560,6 +560,7 @@ TextState GroupedMedia::textState(QPoint point, StateRequest request) const {
 	if (const auto tagged = lookupSpoilerTagMedia()) {
 		if (QRect(0, 0, width(), height()).contains(point)) {
 			if (auto link = tagged->spoilerTagLink()) {
+				result.clearContentOrigin();
 				result.link = std::move(link);
 			}
 		}
@@ -583,6 +584,7 @@ TextState GroupedMedia::textState(QPoint point, StateRequest request) const {
 				: (fullRight + st::historyFastShareLeft);
 			auto fastShareTop = (fullBottom - st::historyFastShareBottom - size->height());
 			if (QRect(fastShareLeft, fastShareTop, size->width(), size->height()).contains(point)) {
+				result.clearContentOrigin();
 				result.link = _parent->rightActionLink(point
 					- QPoint(fastShareLeft, fastShareTop));
 			}

@@ -16,6 +16,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class DeleteMessagesBox;
 
+namespace Purple {
+struct ImportSettingsHit;
+struct ImportSettingsViewState;
+} // namespace Purple
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -298,8 +303,12 @@ private:
 	void mouseActionStart(
 		const QPoint &globalPosition,
 		Qt::MouseButton button);
-	void mouseActionUpdate(const QPoint &globalPosition);
-	void mouseActionUpdate();
+	void mouseActionUpdate(
+		const QPoint &globalPosition,
+		Purple::ImportSettingsHit *importHit = nullptr);
+	void mouseActionUpdate(Purple::ImportSettingsHit *importHit = nullptr);
+	[[nodiscard]] Purple::ImportSettingsViewState importSettingsViewState(
+		QRect geometry) const;
 	void mouseActionFinish(
 		const QPoint &globalPosition,
 		Qt::MouseButton button);

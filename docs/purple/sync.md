@@ -134,6 +134,30 @@ The current manual transfer has two actions:
   it is about to do, including the account whose Saved Messages hold it, and
   replaces the local file.
 
+Desktop offers the action from main Saved Messages history, secondary
+history lists and the self **Files** section. A mouse menu requires the
+current document card handler or a real message-body or document-caption
+glyph. Plain body and caption inline links preserve their normal behavior;
+rich body text also needs the final native text cursor. A grouped hit belongs
+to that exact member's attachment. Metadata, dates, whitespace, spoilers,
+right actions, transcription controls, reactions, reply controls, and nested
+web/log-original/fact-check previews never supply a target. Files accepts
+only its own filename, icon, thumbnail and document download regions, never
+the date link.
+
+The file must be the message's own file-classified attachment in the asking
+account's Saved Messages, named `settings.toml` case-insensitively and sized
+from one byte through 4 MiB. Sending, uploading and currently downloading
+files omit import. All routes omit it for nonempty text or message selection,
+drag/select/reorder work, selection animation, active editor overlays or
+unsettled or covered receiving geometry. Empty finished selection anchors
+and completed touch bookkeeping do not independently exclude it. History
+keyboard menus use the actual visible accessibility-focused message and
+its own attachment, normally the group leader's. They never borrow a hovered
+file or fall back to another member. Files keyboard and other non-mouse
+menus omit import; Downloads, global media, Stories, saved music and other
+peers do too.
+
 See [config.md](config.md) for the user-facing half.
 
 ## Why Saved Messages
@@ -358,6 +382,41 @@ leaves no copy of the bytes in the download folder: `Uploader::upload` skips
 that copy for Purple's own posts (see
 [account_sync_plan.md](account_sync_plan.md)).
 
+Desktop captures a Purple-owned `ImportSettingsHit` on the menu invocation's
+stack. The existing mouse update overloads optionally return it, reset it
+before native guards, and capture once immediately before `setActive` from
+the final native result and raw receiving geometry. Ordinary hover updates
+request no record. There is no second hit-test traversal or acquisition from
+cached drag state, hovered items, global click handlers or group fallbacks.
+A keyboard record is prepared once before specialized dispatch; only a
+qualified focused record clears that invocation's local dispatch link.
+Later consumption can invalidate this record, never acquire a replacement.
+
+The native result carries generic `None`, `MessageBody`, `DocumentCard` or
+`DocumentCaption` provenance and an independent producer message id. Glyph
+evidence comes from the underlying text result; rich text exposes one
+default-false observation set only at its text-segment hit. A group rewrites
+the result's member id without changing its producer id or selection offsets.
+Purple requires both ids to agree, verifies current container membership,
+and resolves the exact canonical message and its own document in the asking
+session. Replacement controls clear provenance even if their handler is
+unchanged. Native view observers expose only existing selection, interaction
+and geometry state. The removal observer reads animation/shown state,
+collapse gaps and unconsumed removal height; it probes no capability and
+forces no layout. These small native extensions keep qualification and
+actions in `purple_sync` without copying native hit testing. See
+[upstream_hooks.md](upstream_hooks.md) for every extension site.
+
+Menu actions retain weak asking-window and session context, message id,
+message/document identity and date, with the window-bound Show. They retain
+no view, layout or transient Info controller. Canonical identity is checked
+before document access when the action runs, after download completion and
+before confirmation writes. An in-progress import may finish its own
+download, but cannot become an import of a different message or attachment.
+The waiting subscription is destroyed when native session data is about to
+be cleared, before documents are destroyed. This uses the existing download
+and confirmation pipeline.
+
 Import takes the bytes from the document's media view when they are already
 there, falling back to the local file when the document has one. When it has
 neither, it calls `document->save()` with an empty target - which loads a small
@@ -366,14 +425,14 @@ file into memory rather than onto disk - and waits on
 and the media view, and drops both once it has the bytes or the load has
 stopped without them: the loader hands what it fetched to whichever media view
 is active at the moment it finishes, so a view nobody is holding means bytes
-nobody gets. The menu entry is left off entirely for a document larger than
-four megabytes, since that is not a settings file and the in-memory path could
-not hold it anyway. The exception is Telegram's own automatic download: with Saved
-Messages on screen and file auto-download on, it saves a visible
-`settings.toml` to the download folder like any other file, and when it starts
-while the import is loading the same document, it takes that load over and the
-import reads the saved file. Sync records are never downloaded automatically;
-see [account_sync_plan.md](account_sync_plan.md).
+nobody gets. It also drops the subscription and media view before session
+data is cleared. The action is omitted for empty files and files larger than
+four megabytes, because the in-memory path is capped there. Telegram's own
+automatic download can still save an ordinary `settings.toml` to the download
+folder when Saved Messages is on screen and file auto-download is enabled.
+If it takes over the same document's import load, the import reads that saved
+file through the existing local-file fallback. Sync records are never
+downloaded automatically; see [account_sync_plan.md](account_sync_plan.md).
 
 It parses with `Purple::ParseSettings` before it writes anything, so a file
 that is not valid TOML never reaches the disk. The write goes through the same

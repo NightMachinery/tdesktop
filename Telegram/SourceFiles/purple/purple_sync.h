@@ -10,13 +10,36 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_inventory.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QRect>
 #include <QtCore/QSaveFile>
 
+#include <memory>
 #include <vector>
 
 class DocumentData;
 class HistoryItem;
 struct FilePrepareResult;
+struct FullMsgId;
+struct GlobalMsgId;
+class QWidget;
+
+namespace HistoryView {
+class Element;
+struct TextState;
+enum class PointState : char;
+} // namespace HistoryView
+
+namespace Info {
+class AbstractController;
+} // namespace Info
+
+namespace Overview::Layout {
+class ItemBase;
+} // namespace Overview::Layout
+
+namespace Window {
+class SessionController;
+} // namespace Window
 
 namespace Main {
 class Session;
@@ -58,17 +81,65 @@ void SendSettingsToSavedMessages(
 	int version,
 	Fn<void(std::optional<MsgId>)> finished);
 
-// The "Import Purple settings" row on a message's context menu. Offered only
-// for a document called settings.toml sitting in Saved Messages: anywhere else
-// it would be someone else's file, and the point of the feature is that the
-// only person who can post into that chat is you.
-//
-// Does nothing when the item is not that, so a caller does not have to ask.
+struct ImportSettingsTarget;
+
+struct ImportSettingsHit {
+	std::shared_ptr<const ImportSettingsTarget> target;
+
+	[[nodiscard]] bool valid() const {
+		return target != nullptr;
+	}
+	[[nodiscard]] bool keyboard() const;
+	[[nodiscard]] FullMsgId containerId() const;
+};
+
+struct ImportSettingsViewState {
+	QWidget *receiver = nullptr;
+	QRect viewport;
+	QRect geometry;
+	bool ready = false;
+};
+
+void CaptureImportSettingsHit(
+	ImportSettingsHit *hit,
+	not_null<Window::SessionController*> controller,
+	HistoryView::Element *view,
+	const HistoryView::TextState &state,
+	HistoryView::PointState pointState,
+	QPoint rawPoint,
+	const ImportSettingsViewState &native,
+	bool contentOwned);
+void PrepareImportSettingsKeyboardHit(
+	not_null<ImportSettingsHit*> hit,
+	not_null<Window::SessionController*> controller,
+	HistoryView::Element *view,
+	HistoryItem *focused,
+	const ImportSettingsViewState &native);
+void CaptureImportSettingsFileHit(
+	ImportSettingsHit *hit,
+	not_null<Info::AbstractController*> controller,
+	Overview::Layout::ItemBase *layout,
+	HistoryItem *row,
+	GlobalMsgId globalId,
+	const HistoryView::TextState &state,
+	QPoint rawPoint,
+	const ImportSettingsViewState &native,
+	bool exact);
 void AddImportSettingsAction(
 	not_null<Ui::PopupMenu*> menu,
-	HistoryItem *item,
-	not_null<DocumentData*> document,
-	std::shared_ptr<Ui::Show> show);
+	not_null<ImportSettingsHit*> hit,
+	not_null<Window::SessionController*> controller,
+	HistoryView::Element *container,
+	HistoryItem *focused,
+	const ImportSettingsViewState &native);
+void AddImportSettingsFileAction(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<ImportSettingsHit*> hit,
+	not_null<Info::AbstractController*> controller,
+	Overview::Layout::ItemBase *layout,
+	HistoryItem *row,
+	GlobalMsgId globalId,
+	const ImportSettingsViewState &native);
 
 void OfferNewerSettingsFromSavedMessages(
 	not_null<Main::Session*> session,

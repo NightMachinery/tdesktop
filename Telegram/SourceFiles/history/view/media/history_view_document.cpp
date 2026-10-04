@@ -1295,6 +1295,11 @@ TextState Document::cornerDownloadTextState(
 	const auto inner = style::rtlrect(st.padding.left() + shift, st.padding.top() - topMinus + shift, size, size, width());
 	if (inner.contains(point)) {
 		result.link = _data->loading() ? _cancell : _savel;
+		if (result.link && result.link == _savel) {
+			result.setContentOrigin(
+				ContentOrigin::DocumentCard,
+				_realParent->fullId());
+		}
 	}
 	return result;
 }
@@ -1351,6 +1356,11 @@ TextState Document::textState(
 					: dataLoaded()
 					? thumbed->linkopenwithl
 					: thumbed->linksavel;
+				if (!_data->loading() && !_data->uploading() && result.link) {
+					result.setContentOrigin(
+						ContentOrigin::DocumentCard,
+						_realParent->fullId());
+				}
 				return result;
 			}
 		}
@@ -1428,10 +1438,16 @@ TextState Document::textState(
 			bottom += st::mediaCaptionSkip;
 		}
 		if (point.y() >= bottom) {
-			result = TextState(_parent, captioned->caption.getState(
+			const auto state = captioned->caption.getState(
 				point - QPoint(st::msgPadding.left(), bottom),
 				width - st::msgPadding.left() - st::msgPadding.right(),
-				request.forText()));
+				request.forText());
+			result = TextState(_parent, state);
+			if (state.uponSymbol && result.cursor == CursorState::Text) {
+				result.setContentOrigin(
+					ContentOrigin::DocumentCaption,
+					_realParent->fullId());
+			}
 			result.symbol += transcribeLength;
 			return result;
 		}
@@ -1452,6 +1468,11 @@ TextState Document::textState(
 			result.link = _openl;
 		} else {
 			result.link = _savel;
+		}
+		if (result.link) {
+			result.setContentOrigin(
+				ContentOrigin::DocumentCard,
+				_realParent->fullId());
 		}
 		_tooltipFilename.updateTooltipForLink(result.link.get());
 		return result;

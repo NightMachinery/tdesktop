@@ -1595,6 +1595,7 @@ TextState WebPage::textState(QPoint point, StateRequest request) const {
 			result = _attach->textState(
 				point - QPoint(attachLeft, attachTop),
 				request);
+			result.clearContentOrigin();
 			if (hasSponsoredMedia) {
 				isWithinSponsoredMedia = true;
 			} else if (result.cursor == CursorState::Enlarge) {

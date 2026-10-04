@@ -1341,6 +1341,7 @@ void RebuildVisibleSegmentLookup(
 	if (!insideText) {
 		result.state.link = nullptr;
 	}
+	result.bodyGlyph = insideText && result.state.uponSymbol;
 	result.preparedLink = ExtractPreparedLink(result.state.link);
 	if (!result.preparedLink
 		&& (flags & Ui::Text::StateRequest::Flag::LookupLink)) {

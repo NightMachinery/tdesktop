@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/media/info_media_list_widget.h"
+#include "purple/purple_sync.h"
 
 #include "info/global_media/info_global_media_provider.h"
 #include "info/media/info_media_common.h"
@@ -1169,6 +1170,7 @@ void ListWidget::mouseDoubleClickEvent(QMouseEvent *e) {
 void ListWidget::showContextMenu(
 		QContextMenuEvent *e,
 		ContextMenuSource source) {
+	auto importHit = Purple::ImportSettingsHit();
 	if (_storiesAddToAlbumId) {
 		return;
 	}
@@ -1177,7 +1179,7 @@ void ListWidget::showContextMenu(
 		repaintItem(_contextItem);
 	}
 	if (e->reason() == QContextMenuEvent::Mouse) {
-		mouseActionUpdate(e->globalPos());
+		mouseActionUpdate(e->globalPos(), &importHit);
 	}
 
 	const auto item = _overState.item;
@@ -1278,6 +1280,15 @@ void ListWidget::showContextMenu(
 	} else if (lnkPhoto || lnkDocument) {
 		if (lnkPhoto) {
 		} else {
+			const auto importRow = findItemByItem(item);
+			Purple::AddImportSettingsFileAction(
+				_contextMenu.get(),
+				&importHit,
+				_controller,
+				importRow ? importRow->layout : nullptr,
+				item,
+				globalId,
+				importSettingsViewState(importRow ? importRow->geometry : QRect()));
 			if (lnkDocument->loading()) {
 				_contextMenu->addAction(
 					tr::lng_context_cancel_download(tr::now),
@@ -1892,7 +1903,33 @@ QPoint ListWidget::clampMousePosition(QPoint position) const {
 	};
 }
 
-void ListWidget::mouseActionUpdate(const QPoint &globalPosition) {
+auto ListWidget::importSettingsViewState(QRect geometry) const
+-> Purple::ImportSettingsViewState {
+	const auto top = _visibleTop + _topOverlayHeight;
+	return {
+		.receiver = const_cast<ListWidget*>(this),
+		.viewport = QRect(0, top, width(), _visibleBottom - top),
+		.geometry = geometry,
+		.ready = !_sections.empty()
+			&& _visibleBottom > top
+			&& _mouseAction == MouseAction::None
+			&& _selected.empty()
+			&& _dragSelected.empty()
+			&& _dragSelectAction == DragSelectAction::None
+			&& !_reorderState.enabled
+			&& !_reorderState.item
+			&& !_returnAnimation.animating()
+			&& !_activeShiftAnimations
+			&& _shiftAnimations.empty(),
+	};
+}
+
+void ListWidget::mouseActionUpdate(
+		const QPoint &globalPosition,
+		Purple::ImportSettingsHit *importHit) {
+	if (importHit) {
+		*importHit = {};
+	}
 	if (_sections.empty()
 		|| _visibleBottom <= _visibleTop
 		|| _returnAnimation.animating()) {
@@ -1969,6 +2006,18 @@ void ListWidget::mouseActionUpdate(const QPoint &globalPosition) {
 		}
 		dragState = _overLayout->getState(_overState.cursor, request);
 		lnkhost = _overLayout;
+	}
+	if (importHit) {
+		Purple::CaptureImportSettingsFileHit(
+			importHit,
+			_controller,
+			layout,
+			state.item,
+			state.item ? state.item->globalId() : GlobalMsgId(),
+			dragState,
+			local,
+			importSettingsViewState(geometry),
+			inside && point == local);
 	}
 	const auto lnkChanged = ClickHandler::setActive(dragState.link, lnkhost);
 	if (lnkChanged || dragState.cursor != _mouseCursorState) {
@@ -2389,8 +2438,11 @@ int ListWidget::recountHeight() {
 	return result + cachedPadding.bottom();
 }
 
-void ListWidget::mouseActionUpdate() {
-	mouseActionUpdate(_mousePosition);
+void ListWidget::mouseActionUpdate(Purple::ImportSettingsHit *importHit) {
+	if (importHit) {
+		*importHit = {};
+	}
+	mouseActionUpdate(_mousePosition, importHit);
 }
 
 std::vector<ListSection>::iterator ListWidget::findSectionByItem(
