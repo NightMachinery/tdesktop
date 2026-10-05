@@ -91,6 +91,7 @@ struct SetupBoxState {
 	QString publishPrefix;
 	Ui::FlatLabel *status = nullptr;
 	Ui::RoundButton *check = nullptr;
+	Ui::RoundButton *close = nullptr;
 	Ui::SlideWrap<Ui::SettingsButton> *action = nullptr;
 	Ui::SlideWrap<Ui::SettingsButton> *undoButton = nullptr;
 	Action currentAction = Action::None;
@@ -246,6 +247,7 @@ void RefreshButtons(SetupBoxState &state) {
 		? u"Cancel check"_q
 		: u"Check Saved Messages"_q;
 	state.check->setDisabled(!state.running && (busy || !available));
+	state.close->setDisabled(state.publishing);
 	state.actionText = SyncConfigBoxActionText(state.currentAction);
 	state.action->toggle(
 		!busy
@@ -903,7 +905,11 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 				StartCheck(box, state, CheckFollowup::None);
 			}
 		});
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	state->close = box->addButton(tr::lng_close(), [=] {
+		if (!state->publishing) {
+			box->closeBox();
+		}
+	});
 	RefreshButtons(*state);
 
 	for (const auto &choice : state->choices) {

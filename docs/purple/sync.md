@@ -86,6 +86,9 @@ account or session that is no longer selected is dropped. Join, Apply and a
 choice act on the Saved Messages snapshot of the check they came from and
 re-check only the local file and sync state before writing, while every post
 scans Saved Messages again first.
+During a post, Close is disabled along with Check. During an inventory check,
+Cancel check and Close remain available. Dismissing the layer through another
+route still cancels its outstanding work.
 
 Applying, choosing, restoring and undoing only change the local file. Each one
 first saves the current file to a settings History, then writes the new
