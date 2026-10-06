@@ -93,7 +93,17 @@ PRIVATE
     purple/purple_sync_review_box.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
+    purple/purple_ui_witness.cpp
+    purple/purple_ui_witness.h
+    purple/purple_ui_witness_geometry.cpp
+    purple/purple_ui_witness_geometry.h
+    purple/purple_ui_witness_protocol.cpp
+    purple/purple_ui_witness_protocol.h
 )
+
+if (APPLE)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_ui_witness_mac.mm)
+endif()
 
 nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE

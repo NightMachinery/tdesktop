@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync.h"
+#include "purple/purple_ui_witness.h"
 
 #include "api/api_common.h"
 #include "apiwrap.h"
@@ -499,7 +500,7 @@ void ResolveAndImport(
 void AddQualifiedImportAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ImportSettingsContext &context) {
-	menu->addAction(u"Import Purple settings"_q, [=] {
+	const auto action = menu->addAction(u"Import Purple settings"_q, [=] {
 		const auto document = ImportContextDocument(context, false);
 		if (!document) {
 			if (AskingWindowSwitched(context.show)) {
@@ -514,6 +515,12 @@ void AddQualifiedImportAction(
 			context.show,
 			[=] { return ImportContextDocument(context, true) != nullptr; });
 	}, &st::menuIconDownload);
+	if (UiWitnessEnabled()) {
+		if (const auto session = context.session.get()) {
+			RecordUiWitnessImportAction(menu, context.asking.get(),
+				session->data().message(context.itemId), context.document, action);
+		}
+	}
 }
 
 struct ImportCandidate {
@@ -741,6 +748,10 @@ void NoteConfirmedSend(
 }
 
 } // namespace
+
+DocumentData *UiWitnessQualifyingDocument(Main::Session *session, HistoryItem *item) {
+	return session && item ? QualifyingImportDocument(session, item) : nullptr;
+}
 
 bool Upload(
 		const QByteArray &content,

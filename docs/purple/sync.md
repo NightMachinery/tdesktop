@@ -470,3 +470,13 @@ shared-files search box does, and if that comes back with nothing at all it asks
 once more with no query and sorts the newest hundred documents out itself. The
 second request costs one small round trip on a machine that has never used the
 feature, which is the price of the feature never silently failing to exist.
+
+## Optional inert paint observation
+
+The [inert attachment witness](ui_witness.md) can observe the actual normal
+body draw and a qualified ordinary Import menu without invoking import. Its
+whole-text markers still require the actual own Saved Messages attachment.
+It is disabled by default, refuses grouped and unsupported sources, and does
+not authorize file publication, input or runtime capture. Normal ungrouped
+settings text uses the Message body path; ungrouped Document caption coverage
+is not established.

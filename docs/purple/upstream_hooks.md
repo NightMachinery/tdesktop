@@ -851,6 +851,7 @@ comment B15 removes. The rest of apiwrap.cpp belongs to B16.
 ## App-level hooks, passcode and notifications
 
 **`Telegram/SourceFiles/core/application.cpp`**: +37 -0, 5 hunks, near 0.
+- The optional inert paint witness adds one include and a default-disabled startup call. Its descriptor validation and work remain in Purple.
 Owner: B15.
 - Today: five includes; `StartSchedule`, `StartFocusSync` and
   `StartScreenTime` in `run()`; lock reports and peek notices in
@@ -1029,6 +1030,7 @@ is copied or moved. The following entries describe the added extension
 surface, not a new measurement of the older merge-base figures above.
 
 **`Telegram/SourceFiles/history/history_inner_widget.cpp`**:
+- The inert witness adds a guarded paint scope, final ordinary-menu provenance call, and dirty notifications at existing focused-item mutations. The captured lookup is weak and resolves the current view without accessibility-map mutation.
 - One Purple include, an optional output propagated/reset through both mouse
   update overloads, one capture before `setActive`, one keyboard preparation
   and one consumer after specialized/userpic exits. Capture rejects nonempty
@@ -1042,6 +1044,7 @@ surface, not a new measurement of the older merge-base figures above.
 - Forward declarations and private optional-output/read-only signatures.
 
 **`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**:
+- The inert witness adds the same weak paint scope, exact secondary asking-menu provenance and focused-item dirty hooks. It does not change menu construction or focus.
 - One Purple include and the same optional capture/keyboard protocol. Its
   single consumer follows `FillContextMenu` and precedes the empty-menu check.
   Specialized dispatch and `ContextMenuRequest` share the local effective
@@ -1075,6 +1078,7 @@ surface, not a new measurement of the older merge-base figures above.
   rather than a settings-import policy.
 
 **`Telegram/SourceFiles/history/view/history_view_message.cpp`**:
+- The normal body draw borrows its existing empty HighlightInfoRequest slot through one Purple call. A neutral const bodyText accessor exposes the exact leaf for current-state comparison. Selection/ripple/reveal/highlight paths retain precedence.
 - Plain/rich winning body glyphs mark the actual `textItem()` owner. Rich
   results also require the final native text cursor. Right-action, summarize
   and all three `onlyMessageText` media-suppression replacements clear origin
@@ -1088,6 +1092,7 @@ surface, not a new measurement of the older merge-base figures above.
   underlying `uponSymbol`; wrappers propagate it without synthesizing it.
 
 **`Telegram/SourceFiles/history/view/media/history_view_document.cpp`**:
+- The normal caption draw has the same empty-highlight hook and a neutral nullable const captionText accessor. Grouped owners remain outside the witness catalog. Nongroup caption reachability is not established.
 - Winning open/save/open-with document-card handlers and actual caption
   glyphs mark `realParent` ownership. Caption links and offsets stay intact;
   cancellation, seeking and transcription controls remain unmarked.
@@ -1131,3 +1136,11 @@ surface, not a new measurement of the older merge-base figures above.
   capability probe, forced layout, pointer-existence gate or independent
   precapture/prepend/restore/saved-scroll gate is introduced. Native hide,
   collapse completion and geometry/paint consumption release those fields.
+
+## Inert attachment witness extension
+
+The extension above leaves lib_ui, core and Qt unchanged. The Message and
+Document headers add only their respective neutral const leaf accessor
+declarations. All transport, admission and native association decisions live
+in Purple-owned files registered by purple.cmake. See [ui_witness.md](ui_witness.md)
+for the closed grammar, strict wire and explicit remaining qualification gates.

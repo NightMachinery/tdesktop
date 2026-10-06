@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_document.h"
+#include "purple/purple_ui_witness.h"
 
 #include "base/random.h"
 #include "lang/lang_keys.h"
@@ -713,6 +714,11 @@ QSize Document::countCurrentSize(int newWidth) {
 	return { newWidth, newHeight };
 }
 
+const Ui::Text::String *Document::captionText() const {
+	const auto captioned = Get<HistoryDocumentCaptioned>();
+	return captioned ? &captioned->caption : nullptr;
+}
+
 void Document::draw(Painter &p, const PaintContext &context) const {
 	draw(p, context, width(), LayoutMode::Full, adjustedBubbleRounding());
 }
@@ -1087,6 +1093,12 @@ void Document::draw(
 		_parent->prepareCustomEmojiPaint(p, context, captioned->caption);
 
 		auto highlightRequest = context.computeHighlightCache();
+		auto witness = Purple::ObserveUiWitnessText(
+			p, _parent->data(), _realParent, captioned->caption, true,
+			QRect(st::msgPadding.left(), captiontop, captionw,
+				height() - captiontop),
+			highlightRequest || voice || mode != LayoutMode::Full
+				|| selection != TextSelection());
 		captioned->caption.draw(p, {
 			.position = { st::msgPadding.left(), captiontop },
 			.availableWidth = captionw,
@@ -1101,7 +1113,7 @@ void Document::draw(
 			.pausedEmoji = context.paused || On(PowerSaving::kEmojiChat),
 			.pausedSpoiler = context.paused || On(PowerSaving::kChatSpoiler),
 			.selection = selection,
-			.highlight = highlightRequest ? &*highlightRequest : nullptr,
+			.highlight = highlightRequest ? &*highlightRequest : witness.highlight(),
 			.useFullWidth = true,
 		});
 	}

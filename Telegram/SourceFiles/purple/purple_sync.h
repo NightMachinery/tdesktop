@@ -81,6 +81,10 @@ void SendSettingsToSavedMessages(
 	int version,
 	Fn<void(std::optional<MsgId>)> finished);
 
+[[nodiscard]] DocumentData *UiWitnessQualifyingDocument(
+	Main::Session *session,
+	HistoryItem *item);
+
 struct ImportSettingsTarget;
 
 struct ImportSettingsHit {
