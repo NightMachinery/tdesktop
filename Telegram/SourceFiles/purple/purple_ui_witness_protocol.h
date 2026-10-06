@@ -15,9 +15,11 @@ inline constexpr auto kCellLimit = 8;
 inline constexpr auto kOperationMs = 8000;
 inline constexpr auto kValidationMs = 150;
 inline constexpr auto kSessionMs = 2700000;
+inline constexpr auto kProxyModeRequestMs = 1000;
+inline constexpr auto kProxyModeMaxRequests = 32;
 inline constexpr auto kSchema = 1;
 
-enum class Operation { Observe = 1, Validate = 2, Close = 3 };
+enum class Operation { Observe = 1, Validate = 2, Close = 3, LoadedProxyMode = 4 };
 enum class Facet { Text = 1, Menu = 2 };
 enum class ReceiverKind { Main = 1, Secondary = 2 };
 
@@ -33,6 +35,9 @@ struct Request {
 	QByteArray nonce;
 	QByteArray receiver;
 	QByteArray receipt;
+	QByteArray peer;
+	int requestSequence = 0;
+	qint64 requestedAt = 0;
 };
 
 [[nodiscard]] bool IsToken(QByteArrayView value);

@@ -131,6 +131,34 @@ partial-read timeout or session lifetime of 45 minutes closes the observer.
 A continuously draining supervisor must observe notices and terminal state;
 a disposable metadata worker cannot own or conceal this channel.
 
+A separate read-only LoadedProxyMode request uses operation four and exactly
+`schema`, `op`, `run`, `nonce`, `peer`, `requestSequence` and `requestedAt`.
+The request sequence begins at one and increases by one for the same peer token;
+no more than 32 requests are accepted in an observer run. `requestedAt` is a
+canonical 13-digit Unix millisecond string. The observer checks the run and
+fresh nonce against the active session, checks the echoed peer and ordered
+sequence, and limits the request and queued reply to one second from that
+original time. At admission it fixes a monotonic deadline to the earlier of the
+remaining one-second window and the 45-minute session end. The synchronous
+getter must finish before that deadline. A later wall-time check can refuse the
+reply or shorten its queued deadline, never extend the admission deadline. It
+reads `Core::App().settings().proxy().settings()` on the
+normal UI thread when handling the request. Application startup calls
+`StartUiWitness()` after `Local::start()` has loaded app settings, and each
+query reads the current loaded getter rather than a startup cache.
+
+The reply is type four and contains only schema/type/frame sequence, run,
+nonce, peer, request sequence, the requested and observed times, and a mode
+integer: System=0, Disabled=1, Enabled=2. It has no authority, receipt, lease,
+receiver, geometry, host, port, proxy-list or credential fields. The peer token
+is correlation only. A consumer must bind the event to the actual observed
+process birth and source, then enforce the original request-time and observer
+lifetime from its own monotonic clock. Type four cannot renew a stopped source
+or establish input or geometry authority. Its private scalar decoder accepts a
+bounded flat object and refuses nested values before general JSON decoding. The
+channel owner must still revoke and close on terminal protocol or source failure.
+Hello and the type-two and type-three wire objects remain unchanged.
+
 ## Qualification limits
 
 The mac adapter is limited to one screen, exact two-times device scale and
