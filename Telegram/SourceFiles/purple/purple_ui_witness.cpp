@@ -1,5 +1,7 @@
 #include "purple/purple_ui_witness.h"
 
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
 #include "data/data_session.h"
@@ -18,6 +20,7 @@
 
 #include <QAction>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QEvent>
@@ -130,6 +133,7 @@ public:
 	void read();
 	void write();
 	void dispatch(const Request &request);
+	void replyLoadedProxyMode(const Request &request);
 	[[nodiscard]] QByteArray token();
 	[[nodiscard]] qint64 now() const;
 	[[nodiscard]] bool active() const { return !_stopped; }
@@ -157,6 +161,8 @@ private:
 	std::array<QByteArray, 32> _nonces;
 	int _nonceCount = 0;
 	quint64 _counter = 0;
+	QByteArray _proxyModePeer;
+	int _proxyModeSequence = 0;
 	qint64 _partialStart = -1;
 	bool _stopped = false;
 
@@ -177,6 +183,15 @@ bool LeafAgrees(const Ui::Text::String &leaf, QStringView literal) {
 	}
 	const auto content = leaf.toTextWithEntities();
 	return content.text == literal && content.entities.empty();
+}
+
+std::optional<int> ProxyModeScalar(MTP::ProxyData::Settings settings) {
+	switch (settings) {
+	case MTP::ProxyData::Settings::System: return 0;
+	case MTP::ProxyData::Settings::Disabled: return 1;
+	case MTP::ProxyData::Settings::Enabled: return 2;
+	}
+	return std::nullopt;
 }
 
 bool AllowedContext(HistoryView::Element *view, ReceiverKind kind) {
@@ -563,6 +578,57 @@ void Observer::reply(const Request &r, QJsonObject authority,
 	write();
 }
 
+void Observer::replyLoadedProxyMode(const Request &r) {
+	if (_stopped || r.requestSequence != _proxyModeSequence + 1
+		|| r.requestSequence > kProxyModeMaxRequests || !IsToken(r.peer)) {
+		stop();
+		return;
+	}
+	if (_proxyModePeer.isEmpty()) {
+		if (r.requestSequence != 1) { stop(); return; }
+	} else if (r.peer != _proxyModePeer) {
+		stop();
+		return;
+	}
+	const auto receivedAt = now();
+	const auto receivedEpoch = QDateTime::currentMSecsSinceEpoch();
+	const auto receivedAge = receivedEpoch - r.requestedAt;
+	if (receivedAt < 0 || receivedAt >= kSessionMs
+		|| receivedAge < 0 || receivedAge >= kProxyModeRequestMs) {
+		stop();
+		return;
+	}
+	const auto admissionDeadline = std::min(
+		qint64(kSessionMs),
+		receivedAt + (kProxyModeRequestMs - receivedAge));
+	const auto settings = Core::App().settings().proxy().settings();
+	const auto observedAt = QDateTime::currentMSecsSinceEpoch();
+	const auto finishedAt = now();
+	const auto age = observedAt - r.requestedAt;
+	const auto mode = ProxyModeScalar(settings);
+	if (_stopped || finishedAt < receivedAt
+		|| finishedAt >= admissionDeadline || finishedAt >= kSessionMs
+		|| age < 0 || age >= kProxyModeRequestMs || !mode) {
+		stop();
+		return;
+	}
+	if (_proxyModePeer.isEmpty()) { _proxyModePeer = r.peer; }
+	_proxyModeSequence = r.requestSequence;
+	const auto remaining = kProxyModeRequestMs - age;
+	const auto deadline = std::min(admissionDeadline, finishedAt + remaining);
+	if (finishedAt >= deadline) { stop(); return; }
+	const auto value = QJsonObject{
+		{u"schema"_q, kSchema}, {u"type"_q, 4},
+		{u"run"_q, Token(r.run)}, {u"nonce"_q, Token(r.nonce)},
+		{u"peer"_q, Token(r.peer)},
+		{u"requestSequence"_q, r.requestSequence},
+		{u"requestedAt"_q, QString::number(r.requestedAt)},
+		{u"observedAt"_q, QString::number(observedAt)}, {u"mode"_q, *mode},
+	};
+	if (!_outbox.queue(value, deadline)) { stop(); return; }
+	write();
+}
+
 void Observer::dispatch(const Request &r) {
 	if (_stopped || r.run != _run || now() >= kSessionMs || !_outbox.empty()
 		|| _nonceCount == _nonces.size()
@@ -570,6 +636,10 @@ void Observer::dispatch(const Request &r) {
 			!= _nonces.begin() + _nonceCount) { stop(); return; }
 	_nonces[_nonceCount++] = r.nonce;
 	if (r.operation == Operation::Close) { stop(); return; }
+	if (r.operation == Operation::LoadedProxyMode) {
+		replyLoadedProxyMode(r);
+		return;
+	}
 	auto index = -1;
 	for (auto i = 0; i != receiverCount; ++i) {
 		const auto &v = receivers[i];

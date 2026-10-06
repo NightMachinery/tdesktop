@@ -169,6 +169,22 @@ std::optional<int> Integer(const QJsonObject &o, const QString &key, int low, in
 	return int(n);
 }
 
+std::optional<qint64> EpochMilliseconds(const QString &value) {
+	if (value.size() != 13 || value.front() < u'1' || value.front() > u'9') {
+		return std::nullopt;
+	}
+	for (const auto ch : value) {
+		if (ch < u'0' || ch > u'9') {
+			return std::nullopt;
+		}
+	}
+	auto ok = false;
+	const auto result = value.toLongLong(&ok, 10);
+	return ok && QString::number(result) == value
+		? std::optional<qint64>(result)
+		: std::nullopt;
+}
+
 }
 
 bool IsToken(QByteArrayView value) {
@@ -193,6 +209,47 @@ std::optional<Request> DecodeRequest(QByteArrayView data) {
 		return std::nullopt;
 	}
 	const auto o = doc.object();
+	const auto schema = Integer(o, u"schema"_q, kSchema, kSchema);
+	const auto op = Integer(o, u"op"_q, 1, 4);
+	if (!schema || !op) {
+		return std::nullopt;
+	}
+	if (*op == int(Operation::LoadedProxyMode)) {
+		const auto keys = QStringList{
+			u"schema"_q, u"op"_q, u"run"_q, u"nonce"_q, u"peer"_q,
+			u"requestSequence"_q, u"requestedAt"_q,
+		};
+		if (o.size() != keys.size()) {
+			return std::nullopt;
+		}
+		for (const auto &key : keys) {
+			if (!o.contains(key)) {
+				return std::nullopt;
+			}
+		}
+		const auto sequence = Integer(
+			o, u"requestSequence"_q, 1, kProxyModeMaxRequests);
+		const auto requestedAtValue = o.value(u"requestedAt"_q);
+		const auto requestedAt = requestedAtValue.isString()
+			? EpochMilliseconds(requestedAtValue.toString())
+			: std::nullopt;
+		if (!sequence || !requestedAt) {
+			return std::nullopt;
+		}
+		for (const auto &key : { u"run"_q, u"nonce"_q, u"peer"_q }) {
+			if (!o.value(key).isString()
+				|| !IsToken(o.value(key).toString().toLatin1())) {
+				return std::nullopt;
+			}
+		}
+		auto result = Request{ .operation = Operation::LoadedProxyMode };
+		result.run = o.value(u"run"_q).toString().toLatin1();
+		result.nonce = o.value(u"nonce"_q).toString().toLatin1();
+		result.peer = o.value(u"peer"_q).toString().toLatin1();
+		result.requestSequence = *sequence;
+		result.requestedAt = *requestedAt;
+		return result;
+	}
 	const auto keys = QStringList{
 		u"schema"_q, u"op"_q, u"facet"_q, u"kind"_q, u"slot"_q, u"duration"_q,
 		u"run"_q, u"acquisition"_q, u"burst"_q, u"nonce"_q, u"receiver"_q, u"receipt"_q,
@@ -205,17 +262,16 @@ std::optional<Request> DecodeRequest(QByteArrayView data) {
 			return std::nullopt;
 		}
 	}
-	const auto schema = Integer(o, u"schema"_q, kSchema, kSchema);
-	const auto op = Integer(o, u"op"_q, 1, 3);
 	const auto facet = Integer(o, u"facet"_q, 1, 2);
 	const auto kind = Integer(o, u"kind"_q, 1, 2);
 	const auto slot = Integer(o, u"slot"_q, 0, 1);
 	const auto duration = Integer(o, u"duration"_q, 1, kOperationMs);
-	if (!schema || !op || !facet || !kind || !slot || !duration) {
+	const auto legacyOperation = Integer(o, u"op"_q, 1, 3);
+	if (!legacyOperation || !facet || !kind || !slot || !duration) {
 		return std::nullopt;
 	}
 	auto result = Request{
-		.operation = Operation(*op), .facet = Facet(*facet),
+		.operation = Operation(*legacyOperation), .facet = Facet(*facet),
 		.kind = ReceiverKind(*kind), .slot = *slot, .duration = *duration,
 	};
 	for (const auto &key : keys.mid(6)) {
