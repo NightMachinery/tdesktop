@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
 #include "purple/purple_focus.h"
+#include "purple/purple_ui_witness.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_peek.h"
 #include "purple/purple_schedule.h"
@@ -320,6 +321,7 @@ void Application::run() {
 	// foreground, background, the preset, the no-input watchdog - so it starts
 	// here too. It does nothing at all until [screen_time] enabled_p is on.
 	Purple::StartScreenTime();
+	Purple::StartUiWitness();
 
 	startEmojiImageLoader();
 	startSystemDarkModeViewer();

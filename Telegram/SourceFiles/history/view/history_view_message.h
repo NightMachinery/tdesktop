@@ -168,6 +168,7 @@ public:
 		not_null<HistoryItem*> data,
 		Element *replacing);
 	~Message();
+	[[nodiscard]] const Ui::Text::String &bodyText() const;
 
 	void clickHandlerPressedChanged(
 		const ClickHandlerPtr &handler,

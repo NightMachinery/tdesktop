@@ -34,6 +34,7 @@ public:
 		not_null<HistoryItem*> realParent,
 		not_null<DocumentData*> document);
 	~Document();
+	[[nodiscard]] const Ui::Text::String *captionText() const;
 
 	bool hideMessageText() const override {
 		return false;

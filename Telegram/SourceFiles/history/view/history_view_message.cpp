@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_message.h"
+#include "purple/purple_ui_witness.h"
 
 #include "api/api_suggest_post.h"
 #include "api/api_transcribes.h"
@@ -1682,6 +1683,10 @@ int Message::marginBottom() const {
 	return result;
 }
 
+const Ui::Text::String &Message::bodyText() const {
+	return text();
+}
+
 void Message::draw(Painter &p, const PaintContext &context) const {
 	auto g = countGeometry();
 	if (g.width() < 1) {
@@ -3024,6 +3029,10 @@ void Message::paintText(
 	}
 
 	auto highlightRequest = context.computeHighlightCache();
+	auto witness = Purple::ObserveUiWitnessText(
+		p, data(), textItem(), text(), false, trect,
+		needRippleMask || highlightRequest || appearingClip
+			|| linePostprocess || context.selection != TextSelection());
 	text().draw(p, {
 		.position = trect.topLeft(),
 		.availableWidth = std::max(textRealWidth(), trect.width()),
@@ -3040,7 +3049,7 @@ void Message::paintText(
 		.selection = context.selection,
 		.highlight = needRippleMask
 			? &rippleRequest
-			: (highlightRequest ? &*highlightRequest : nullptr),
+			: (highlightRequest ? &*highlightRequest : witness.highlight()),
 		.useFullWidth = true,
 		.linePostprocess = linePostprocess ? &*linePostprocess : nullptr,
 	});

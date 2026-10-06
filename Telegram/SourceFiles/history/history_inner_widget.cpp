@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 #include "purple/purple_sync.h"
+#include "purple/purple_ui_witness.h"
 
 #include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
@@ -1425,6 +1426,20 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	}
 
 	Painter p(this);
+	const auto witness = Purple::UiWitnessEnabled()
+		? Purple::ObserveUiWitnessPaint(
+		this, _controller, Purple::UiWitness::ReceiverKind::Main, e->region(),
+		[weak = QPointer<HistoryInner>(this)](HistoryItem *item) {
+			if (!weak) {
+				return Purple::UiWitnessView();
+			}
+			const auto view = weak->viewByItem(item);
+			return Purple::UiWitnessView{
+				weak->importSettingsViewState(view),
+				view, weak->_accessibilityFocusedItem,
+			};
+		})
+		: Purple::UiWitnessPaint();
 	auto clip = e->rect();
 
 	if (_thanosController) {
@@ -2499,6 +2514,7 @@ void HistoryInner::itemRemoved(not_null<const HistoryItem*> item) {
 	}
 	if (_accessibilityFocusedItem == item) {
 		_accessibilityFocusedItem = nullptr;
+		Purple::InvalidateUiWitness(this);
 		_accessibilityFocusedIndex = -1;
 	}
 	if (_accessibilitySelectionAnchor == item) {
@@ -3901,6 +3917,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		return;
 	}
 	HistoryView::AttachPollOptionTabs(_menu.get(), desiredPosition);
+	Purple::RegisterUiWitnessMenu(this, _menu.get(), int(e->reason()),
+		attached != AttachSelectorResult::Skipped);
 	if (attached == AttachSelectorResult::Attached) {
 		_menu->popupPrepared();
 	} else {
@@ -6087,6 +6105,7 @@ void HistoryInner::setAccessibilityFocusedItem(
 	}
 	_accessibilityFocusedIndex = index;
 	_accessibilityFocusedItem = item;
+	Purple::InvalidateUiWitness(this);
 	announceAccessibilityFocus(index);
 }
 
@@ -6837,6 +6856,7 @@ void HistoryInner::announceAccessibilityFocusedChild() {
 		// heard about once the list shifts again. The auto-select
 		// branch below establishes a fresh focus instead.
 		_accessibilityFocusedItem = nullptr;
+		Purple::InvalidateUiWitness(this);
 		_accessibilityFocusedIndex = -1;
 	} else if (_accessibilityFocusedIndex >= 0) {
 		// A nonnegative index with no cached item means the unread
@@ -6946,6 +6966,7 @@ void HistoryInner::applyAccessibilityFocus(
 	_accessibilitySelectionAnchor = nullptr;
 	_accessibilityFocusedIndex = index;
 	_accessibilityFocusedItem = item;
+	Purple::InvalidateUiWitness(this);
 	// Exactly one announcement: directly when the widget already has
 	// focus, via focusInEvent when keyboard focus is being taken.
 	if (hasFocus()) {
