@@ -2,6 +2,15 @@
 
 This guide defines repository-wide instructions for coding agents working with the Telegram Desktop codebase.
 
+## Private test infrastructure
+
+Reusable capture/controller tooling and synthetic tests live in the private
+[Purple test infrastructure repository](https://github.com/NightMachinery/purple-test-infrastructure).
+Read its README and component status before reuse; source review and native
+qualification are separate. Keep app-side hooks and product tests in this fork,
+and commit reusable external harness changes in the private repository. Keep
+live profiles and run artifacts outside both source repositories.
+
 ## Working from Codex on Windows + WSL
 
 This checkout may be opened in Codex Desktop through the Windows UNC path `\\wsl.localhost\{distro}\home\{user}\Telegram\tdesktop`, while the real Linux path is `/home/{user}/Telegram/tdesktop`. Treat it as a WSL/Linux checkout first, not as a native Windows checkout.
