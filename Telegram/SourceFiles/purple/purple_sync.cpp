@@ -25,8 +25,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_element.h"
+#include "history/view/history_view_list_widget.h"
 #include "info/info_controller.h"
 #include "core/application.h"
 #include "main/main_account.h"
@@ -43,10 +45,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QPointer>
+#include <QtGui/QContextMenuEvent>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QRegion>
+#include <QtGui/QWindow>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
 
 #include "styles/style_menu_icons.h"
@@ -83,6 +91,100 @@ struct ImportSettingsTarget {
 };
 
 namespace {
+
+#ifdef Q_OS_MAC
+
+class HistoryContextMenuShortcutFilter final : public QObject {
+public:
+	HistoryContextMenuShortcutFilter(
+		not_null<QWidget*> receiver,
+		Qt::KeyboardModifiers modifiers);
+
+	void bindTo(not_null<Ui::PopupMenu*> popup);
+
+protected:
+	bool eventFilter(QObject *watched, QEvent *event) override;
+
+private:
+	QPointer<Ui::PopupMenu> _popup;
+	Qt::KeyboardModifiers _modifiers;
+	bool _bound = false;
+
+};
+
+[[nodiscard]] bool IsHistoryContextMenuShortcut(
+		not_null<QKeyEvent*> event) {
+	const auto control = QCoreApplication::testAttribute(
+		Qt::AA_MacDontSwapCtrlAndMeta)
+		? Qt::ControlModifier
+		: Qt::MetaModifier;
+	return event->type() == QEvent::KeyPress
+		&& event->key() == Qt::Key_Return
+		&& event->modifiers() == control;
+}
+
+HistoryContextMenuShortcutFilter::HistoryContextMenuShortcutFilter(
+		not_null<QWidget*> receiver,
+		Qt::KeyboardModifiers modifiers)
+: QObject(receiver)
+, _modifiers(modifiers) {
+	qApp->installEventFilter(this);
+}
+
+void HistoryContextMenuShortcutFilter::bindTo(
+		not_null<Ui::PopupMenu*> popup) {
+	_popup = popup;
+	_bound = true;
+	setParent(popup);
+}
+
+bool HistoryContextMenuShortcutFilter::eventFilter(
+		QObject *watched,
+		QEvent *event) {
+	if (event->type() != QEvent::KeyPress) {
+		return false;
+	}
+	const auto key = static_cast<QKeyEvent*>(event);
+	if (!key->isAutoRepeat()
+		|| key->key() != Qt::Key_Return
+		|| key->modifiers() != _modifiers) {
+		return false;
+	}
+	auto receiver = qobject_cast<QWidget*>(parent());
+	if (_bound) {
+		if (!_popup || QApplication::activePopupWidget() != _popup) {
+			return false;
+		}
+		receiver = _popup.data();
+	} else {
+		if (!receiver) {
+			return false;
+		}
+		if (const auto active = QApplication::activePopupWidget()) {
+			const auto popup = dynamic_cast<Ui::PopupMenu*>(active);
+			if (!popup || popup->parentWidget() != receiver) {
+				return false;
+			}
+			receiver = popup;
+		} else if (QApplication::focusWidget() != receiver) {
+			return false;
+		}
+	}
+	const auto widget = qobject_cast<QWidget*>(watched);
+	const auto window = qobject_cast<QWindow*>(watched);
+	const auto widgetMatches = widget
+		&& (receiver->isWindow()
+			? widget->window() == receiver
+			: widget == receiver);
+	if (!widgetMatches
+		&& (!window || window != receiver->window()->windowHandle())) {
+		return false;
+	}
+	key->accept();
+	return true;
+}
+
+#endif
 
 constexpr auto kFileName = "settings.toml";
 
@@ -874,6 +976,153 @@ void CaptureImportSettingsHit(
 	target->rawPoint = rawPoint;
 	target->input = ImportSettingsTarget::Input::Mouse;
 	hit->target = std::move(target);
+}
+
+bool IsHistoryContextMenuKeyboard(
+		not_null<QContextMenuEvent*> event) {
+	return event->reason() == QContextMenuEvent::Keyboard;
+}
+
+std::optional<HistoryContextSelection> HistoryContextMenuSelection(
+		not_null<QContextMenuEvent*> event,
+		HistoryItem *focused,
+		bool hasSelectedItems,
+		bool focusedSelected,
+		HistoryItem *selectedTextItem,
+		bool hasSelectedText) {
+	if (!IsHistoryContextMenuKeyboard(event)) {
+		return std::nullopt;
+	}
+	auto result = HistoryContextSelection();
+	if (hasSelectedItems) {
+		result.has = 2;
+		result.upon = (focused && focusedSelected) ? 2 : -2;
+	} else if (focused && focused == selectedTextItem && hasSelectedText) {
+		result.has = 1;
+		result.upon = 1;
+	}
+	return result;
+}
+
+HistoryItem *HistoryContextMenuItem(
+		not_null<QContextMenuEvent*> event,
+		HistoryItem *focused,
+		Fn<HistoryItem*()> mouse) {
+	return IsHistoryContextMenuKeyboard(event) ? focused : mouse();
+}
+
+HistoryItem *HistoryContextMenuSponsored(
+		not_null<QContextMenuEvent*> event,
+		HistoryItem *focused,
+		Fn<HistoryItem*()> mouse) {
+	if (IsHistoryContextMenuKeyboard(event)) {
+		return (focused && focused->isSponsored()) ? focused : nullptr;
+	}
+	return mouse();
+}
+
+bool PrepareHistoryContextMenuKeyboard(
+		not_null<QContextMenuEvent*> event,
+		not_null<HistoryView::ContextMenuRequest*> request,
+		HistoryItem *focused,
+		HistoryItem *selectedTextItem) {
+	if (!IsHistoryContextMenuKeyboard(event)) {
+		return false;
+	}
+	const auto item = focused;
+	const auto current = item
+		&& request->item == item
+		&& request->view
+		&& request->view->data() == item;
+	request->item = current ? item : nullptr;
+	request->view = current ? request->view : nullptr;
+	request->pointState = current
+		? HistoryView::PointState::Inside
+		: HistoryView::PointState::Outside;
+	const auto selectedText = current
+		&& selectedTextItem == item
+		&& !request->selectedText.empty();
+	if (!selectedText) {
+		request->selectedText = {};
+		request->quote = {};
+	}
+	request->overSelection = false;
+	if (current && !request->selectedItems.empty()) {
+		for (const auto &selected : request->selectedItems) {
+			if (selected.msgId == item->fullId()) {
+				request->overSelection = true;
+				break;
+			}
+		}
+	} else {
+		request->overSelection = selectedText;
+	}
+	return true;
+}
+
+bool HandleHistoryContextMenuShortcut(
+		not_null<QKeyEvent*> event,
+		Fn<HistoryContextMenuTarget()> current) {
+#ifdef Q_OS_MAC
+	if (!IsHistoryContextMenuShortcut(event)) {
+		return false;
+	}
+	const auto target = current();
+	const auto &native = target.native;
+	if (!target.controller
+		|| !target.focused
+		|| !target.view
+		|| target.view->data() != target.focused
+		|| target.view->isHidden()
+		|| target.view->pendingResize()
+		|| &target.focused->history()->session() != &target.controller->session()
+		|| target.controller->session().data().message(
+			target.focused->fullId()) != target.focused
+		|| !native.receiver
+		|| QApplication::focusWidget() != native.receiver
+		|| !native.receiver->isVisible()
+		|| !native.receiver->window()->isActiveWindow()
+		|| QApplication::activePopupWidget()
+		|| native.geometry.top() < 0) {
+		return false;
+	}
+	const auto visible = native.receiver->rect()
+		.intersected(native.viewport)
+		.intersected(native.geometry);
+	if (visible.isEmpty()
+		|| !native.receiver->visibleRegion().contains(visible.center())) {
+		return false;
+	}
+	event->accept();
+	if (event->isAutoRepeat()) {
+		return true;
+	}
+	const auto receiver = QPointer<QWidget>(native.receiver);
+	const auto filter = QPointer<HistoryContextMenuShortcutFilter>(
+		new HistoryContextMenuShortcutFilter(
+			receiver.data(),
+			event->modifiers()));
+	auto context = QContextMenuEvent(
+		QContextMenuEvent::Keyboard,
+		visible.center(),
+		receiver->mapToGlobal(visible.center()),
+		event->modifiers());
+	QCoreApplication::sendEvent(receiver, &context);
+	const auto popup = dynamic_cast<Ui::PopupMenu*>(
+		QApplication::activePopupWidget());
+	if (filter) {
+		if (receiver && popup && popup->parentWidget() == receiver) {
+			filter->bindTo(popup);
+		} else {
+			delete filter.data();
+		}
+	}
+	return true;
+#else
+	Q_UNUSED(event);
+	Q_UNUSED(current);
+	return false;
+#endif
 }
 
 void PrepareImportSettingsKeyboardHit(

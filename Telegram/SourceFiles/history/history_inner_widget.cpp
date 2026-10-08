@@ -2802,12 +2802,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			view,
 			_accessibilityFocusedItem,
 			importSettingsViewState(view));
-		if (_accessibilityFocusedItem) {
-			_dragStateItem = _accessibilityFocusedItem;
-		}
+		_dragStateItem = _accessibilityFocusedItem;
 	}
 
-	const auto link = importHit.keyboard()
+	const auto link = Purple::IsHistoryContextMenuKeyboard(e)
 		? ClickHandlerPtr()
 		: ClickHandler::getActive();
 	if (_controller->showFrozenError()) {
@@ -2850,7 +2848,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	// -2 - has full selected items, but not over, -1 - has selection, but no over, 0 - no selection, 1 - over text, 2 - over full selected items
 	auto isUponSelected = 0;
 	auto hasSelected = 0;
-	if (hasSelectedItems()) {
+	if (const auto keyboard = Purple::HistoryContextMenuSelection(
+			e,
+			_accessibilityFocusedItem,
+			hasSelectedItems(),
+			_accessibilityFocusedItem && _selected.contains(_accessibilityFocusedItem),
+			_selectedTextItem,
+			hasSelectedText() && !_selectedTextSelection.empty())) {
+		isUponSelected = keyboard->upon;
+		hasSelected = keyboard->has;
+	} else if (hasSelectedItems()) {
 		hasSelected = 2;
 		if (_dragStateItem && _selected.contains(_dragStateItem)) {
 			isUponSelected = 2;
@@ -2874,7 +2881,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 		}
 	}
-	if (showFromTouch && hasSelected && isUponSelected < hasSelected) {
+	if (!Purple::IsHistoryContextMenuKeyboard(e)
+		&& showFromTouch && hasSelected && isUponSelected < hasSelected) {
 		isUponSelected = hasSelected;
 	}
 
@@ -3203,7 +3211,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	}
 #endif
 
-	const auto asGroup = !Element::Moused()
+	const auto asGroup = Purple::IsHistoryContextMenuKeyboard(e)
+		|| !Element::Moused()
 		|| (Element::Moused() != Element::Hovered())
 		|| (Element::Moused()->pointState(
 			mapPointToItem(
@@ -3516,8 +3525,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	} else { // maybe cursor on some text history item?
 		const auto albumPartItem = _dragStateItem;
 		const auto item = [&]() -> HistoryItem* {
-			if (e->reason() == QContextMenuEvent::Keyboard
-				&& _dragStateItem) {
+			if (Purple::IsHistoryContextMenuKeyboard(e)) {
 				return groupLeaderOrSelf(_dragStateItem);
 			}
 			const auto result = Element::Hovered()
@@ -3542,11 +3550,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			? link->copyToClipboardContextItemText()
 			: QString();
 
-		const auto sponsored = (item && item->isSponsored())
-			? item
-			: (Element::Moused() && Element::Moused()->data()->isSponsored())
-			? Element::Moused()->data().get()
-			: nullptr;
+		const auto sponsored = Purple::HistoryContextMenuSponsored(
+			e,
+			_accessibilityFocusedItem,
+			[&] {
+				return (item && item->isSponsored())
+					? item
+					: (Element::Moused() && Element::Moused()->data()->isSponsored())
+					? Element::Moused()->data().get()
+					: nullptr;
+			});
 		if (sponsored) {
 			Menu::FillSponsored(
 				Ui::Menu::CreateAddActionCallback(_menu),
@@ -3822,7 +3835,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					blockSenderAsGroup(itemId);
 				}, &st::menuIconBlock);
 			}
-		} else if (Element::Moused()) {
+		} else if (!Purple::IsHistoryContextMenuKeyboard(e)
+			&& Element::Moused()) {
 			addSelectMessageAction(Element::Moused()->data());
 		}
 	}
@@ -3900,9 +3914,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	}
 	using namespace HistoryView::Reactions;
 	const auto desiredPosition = e->globalPos();
-	const auto reactItem = Element::Hovered()
-		? Element::Hovered()->data().get()
-		: nullptr;
+	const auto reactItem = Purple::HistoryContextMenuItem(
+		e,
+		_accessibilityFocusedItem,
+		[] {
+			return Element::Hovered()
+				? Element::Hovered()->data().get()
+				: nullptr;
+		});
 	const auto attached = reactItem
 		? AttachSelectorToMenu(
 			_menu.get(),
@@ -4172,6 +4191,19 @@ TextForMimeData HistoryInner::getSelectedText() const {
 }
 
 void HistoryInner::keyPressEvent(QKeyEvent *e) {
+	if (Purple::HandleHistoryContextMenuShortcut(e, [&] {
+		const auto focused = _accessibilityFocusedItem;
+		const auto view = viewByItem(focused);
+		return Purple::HistoryContextMenuTarget{
+			.controller = _controller.get(),
+			.view = view,
+			.focused = focused,
+			.native = importSettingsViewState(view),
+		};
+	})) {
+		return;
+	}
+
 	if (_middleClickAutoscroll.active() && e->key() == Qt::Key_Escape) {
 		_middleClickAutoscroll.stop();
 		return;
