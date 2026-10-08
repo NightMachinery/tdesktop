@@ -161,6 +161,25 @@ file or fall back to another member. Files keyboard and other non-mouse
 menus omit import; Downloads, global media, Stories, saved music and other
 peers do too.
 
+On macOS, **Control+Return** opens the context menu for the currently
+accessibility-focused message in main or secondary history. This uses the
+physical Control key, not Command, and works without the macOS 15 context-menu
+shortcut. The history receiver must have keyboard focus and the message must
+still have a current visible view. Held-key repeats do not reopen the menu or
+activate an item through this shortcut. Ordinary Return activation inside the
+menu stays unchanged. The composer keeps its normal Return and Command+Return
+behavior. This shortcut does not add keyboard import to Files.
+Keyboard-origin menus use the focused message independently of Import
+eligibility, including when selection omits Import. Hovered phone, reaction
+or share handlers do not replace that keyboard target.
+
+For keyboard menus, selected-text actions belong only to the focused message's
+text. Selected-item actions use the existing selected set when the focused
+message belongs to that set. Ordinary album actions keep whole-album behavior,
+anchored to the focused message; the pointer does not choose an album part.
+Sponsored and reaction targets also come from the focused message. Mouse and
+touch menus retain their pointer-based selection and album-part behavior.
+
 See [config.md](config.md) for the user-facing half.
 
 ## Why Saved Messages

@@ -1030,6 +1030,17 @@ is copied or moved. The following entries describe the added extension
 surface, not a new measurement of the older merge-base figures above.
 
 **`Telegram/SourceFiles/history/history_inner_widget.cpp`**:
+- One guarded Purple call in the key handler supplies the current focused
+  item/view only for macOS Control+Return. Purple owns exact physical modifier
+  matching, current receiver checks, keyboard context-event dispatch and the
+  short-lived filter for repeats of that initiating shortcut.
+- A guarded Purple provenance check suppresses the hovered click handler for
+  every keyboard context event, independently of Import eligibility. Mouse
+  dispatch and Import qualification remain unchanged.
+- Purple computes keyboard selection from focused-item membership, restricts
+  sponsored/reaction identities to that focused item and makes album-group
+  behavior independent of pointer hit testing. Non-keyboard fallback callbacks
+  keep the existing mouse decisions; Import qualification is unchanged.
 - The inert witness adds a guarded paint scope, final ordinary-menu provenance call, and dirty notifications at existing focused-item mutations. The captured lookup is weak and resolves the current view without accessibility-map mutation.
 - One Purple include, an optional output propagated/reset through both mouse
   update overloads, one capture before `setActive`, one keyboard preparation
@@ -1044,6 +1055,16 @@ surface, not a new measurement of the older merge-base figures above.
 - Forward declarations and private optional-output/read-only signatures.
 
 **`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**:
+- One guarded Purple call supplies the secondary receiver's current focused
+  item/view for the same macOS shortcut. Existing keyboard menu construction
+  and import qualification remain the consumer; Files is unchanged.
+- The same Purple provenance check keeps secondary keyboard context events
+  independent of hovered click handlers and Import eligibility.
+- A Purple keyboard request hook binds the current focused item/view, uses
+  deliberate whole-album point state, limits text/selected-set operations to
+  focused membership and skips pointer selection hit testing. Mouse/touch use
+  their original request branch. Reaction attachment reads the resulting
+  request state instead of a stale mouse point.
 - The inert witness adds the same weak paint scope, exact secondary asking-menu provenance and focused-item dirty hooks. It does not change menu construction or focus.
 - One Purple include and the same optional capture/keyboard protocol. Its
   single consumer follows `FillContextMenu` and precedes the empty-menu check.

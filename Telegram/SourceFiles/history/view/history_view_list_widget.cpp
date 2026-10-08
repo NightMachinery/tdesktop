@@ -3091,6 +3091,19 @@ auto ListWidget::countScrollState() const -> ScrollTopState {
 }
 
 void ListWidget::keyPressEvent(QKeyEvent *e) {
+	if (Purple::HandleHistoryContextMenuShortcut(e, [&] {
+		const auto focused = _accessibilityFocusedItem;
+		const auto view = viewForItem(focused);
+		return Purple::HistoryContextMenuTarget{
+			.controller = controller().get(),
+			.view = view,
+			.focused = focused,
+			.native = importSettingsViewState(view),
+		};
+	})) {
+		return;
+	}
+
 	const auto key = e->key();
 	const auto modifiers = e->modifiers()
 		& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier);
@@ -3441,7 +3454,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 	}
 
-	const auto link = importHit.keyboard()
+	const auto link = Purple::IsHistoryContextMenuKeyboard(e)
 		? ClickHandlerPtr()
 		: ClickHandler::getActive();
 	if (controller()->showFrozenError()) {
@@ -3538,21 +3551,27 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	request.link = link;
 	request.view = _overElement;
 	request.item = overItem;
-	request.pointState = _overState.pointState;
 	request.quote = (_overElement
 		&& _selectedTextItem == _overElement->data())
 		? _overElement->selectedQuote(_selectedTextSelection)
 		: SelectedQuote();
 	request.selectedText = _selectedText;
 	request.selectedItems = collectSelectedItems();
-	const auto hasSelection = !request.selectedItems.empty()
-		|| !request.selectedText.empty();
-	request.overSelection = (showFromTouch && hasSelection)
-		|| (_overElement
-			&& isInsideSelection(
-				_overElement,
-				_overItemExact ? _overItemExact : _overElement->data().get(),
-				_overState));
+	if (!Purple::PrepareHistoryContextMenuKeyboard(
+			e,
+			&request,
+			_accessibilityFocusedItem,
+			_selectedTextItem)) {
+		request.pointState = _overState.pointState;
+		const auto hasSelection = !request.selectedItems.empty()
+			|| !request.selectedText.empty();
+		request.overSelection = (showFromTouch && hasSelection)
+			|| (_overElement
+				&& isInsideSelection(
+					_overElement,
+					_overItemExact ? _overItemExact : _overElement->data().get(),
+					_overState));
+	}
 
 	_menu = FillContextMenu(this, request);
 	const auto importView = viewForItem(importHit.containerId());
@@ -3571,7 +3590,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	using namespace HistoryView::Reactions;
 	const auto desiredPosition = e->globalPos();
 	const auto reactItem = (_overElement
-		&& _overState.pointState != PointState::Outside)
+		&& request.pointState != PointState::Outside)
 		? _overElement->data().get()
 		: nullptr;
 	const auto attached = reactItem

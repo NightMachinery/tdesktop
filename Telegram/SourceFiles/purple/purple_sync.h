@@ -21,9 +21,12 @@ class HistoryItem;
 struct FilePrepareResult;
 struct FullMsgId;
 struct GlobalMsgId;
+class QContextMenuEvent;
+class QKeyEvent;
 class QWidget;
 
 namespace HistoryView {
+struct ContextMenuRequest;
 class Element;
 struct TextState;
 enum class PointState : char;
@@ -103,6 +106,50 @@ struct ImportSettingsViewState {
 	QRect geometry;
 	bool ready = false;
 };
+
+struct HistoryContextMenuTarget {
+	Window::SessionController *controller = nullptr;
+	HistoryView::Element *view = nullptr;
+	HistoryItem *focused = nullptr;
+	ImportSettingsViewState native;
+};
+
+[[nodiscard]] bool IsHistoryContextMenuKeyboard(
+	not_null<QContextMenuEvent*> event);
+
+struct HistoryContextSelection {
+	int upon = 0;
+	int has = 0;
+};
+
+[[nodiscard]] auto HistoryContextMenuSelection(
+	not_null<QContextMenuEvent*> event,
+	HistoryItem *focused,
+	bool hasSelectedItems,
+	bool focusedSelected,
+	HistoryItem *selectedTextItem,
+	bool hasSelectedText)
+-> std::optional<HistoryContextSelection>;
+
+[[nodiscard]] HistoryItem *HistoryContextMenuItem(
+	not_null<QContextMenuEvent*> event,
+	HistoryItem *focused,
+	Fn<HistoryItem*()> mouse);
+
+[[nodiscard]] HistoryItem *HistoryContextMenuSponsored(
+	not_null<QContextMenuEvent*> event,
+	HistoryItem *focused,
+	Fn<HistoryItem*()> mouse);
+
+[[nodiscard]] bool PrepareHistoryContextMenuKeyboard(
+	not_null<QContextMenuEvent*> event,
+	not_null<HistoryView::ContextMenuRequest*> request,
+	HistoryItem *focused,
+	HistoryItem *selectedTextItem);
+
+[[nodiscard]] bool HandleHistoryContextMenuShortcut(
+	not_null<QKeyEvent*> event,
+	Fn<HistoryContextMenuTarget()> current);
 
 void CaptureImportSettingsHit(
 	ImportSettingsHit *hit,
