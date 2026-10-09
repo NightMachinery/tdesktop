@@ -95,7 +95,6 @@ QByteArray SessionSettings::serialize() const {
 	for (const auto &id : _extraFavoriteReactions) {
 		size += sizeof(quint64) + Serialize::stringSize(id.emoji());
 	}
-	size += sizeof(qint32);
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -188,7 +187,6 @@ QByteArray SessionSettings::serialize() const {
 		for (const auto &id : _extraFavoriteReactions) {
 			stream << quint64(id.custom()) << id.emoji();
 		}
-		stream << qint32(_purpleSettingsOfferMessageId.bare);
 	}
 
 	Ensures(result.size() == size);
@@ -265,7 +263,6 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	qint32 disableSharingBoxShowsCount = 0;
 	qint32 phoneNumberHidden = 0;
 	std::vector<Data::ReactionId> extraFavoriteReactions;
-	qint32 purpleSettingsOfferMessageId = 0;
 
 	stream >> versionTag;
 	if (versionTag == kVersionTag) {
@@ -748,9 +745,6 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 			}
 		}
 	}
-	if (!stream.atEnd()) {
-		stream >> purpleSettingsOfferMessageId;
-	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for SessionSettings::addFromSerialized()"));
@@ -817,7 +811,6 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	_disableSharingBoxShowsCount = disableSharingBoxShowsCount;
 	_phoneNumberHidden = (phoneNumberHidden == 1);
 	_extraFavoriteReactions = std::move(extraFavoriteReactions);
-	_purpleSettingsOfferMessageId = MsgId(purpleSettingsOfferMessageId);
 
 	if (version < 2) {
 		app.setLastSeenWarningSeen(appLastSeenWarningSeen == 1);

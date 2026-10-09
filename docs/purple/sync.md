@@ -263,6 +263,24 @@ larger claim than "these are my settings".
 
 ## Phase 2: offering an import on launch
 
+Desktop's B5 refactor keeps this offer until the sync chat ships. The remembered
+message id is an account-local QByteArray pref, outside upstream SessionSettings.
+The once-per-session search latch is Purple-owned and released with that session's
+lifetime. Inactive-account and unavailable-UI results allow the existing retry;
+completed searches keep the latch. A confirmed send advances only its own account's
+watermark when the server id is higher. Import and sync algorithms are unchanged.
+
+B5 deliberately does not migrate the old serialized offer id. An upgraded account
+may consider its newest document once again; afterward the pref remembers it.
+Each session queues one guarded write of its real SessionSettings after account
+ownership is established, removing the old trailing Purple integer. The log line
+`Purple: rewrote SessionSettings, N bytes` reports the serialized payload passed
+to the existing storage writer, after the save path has returned and submitted
+the existing storage write. It does not report a native verification or a
+successful disk flush. Every account profile must run a B5 build once before an
+upstream upgrade adds a field to this stream. Such a future build cannot safely
+interpret a profile that still ends with the old offer id.
+
 Implemented on Android and desktop. Once a primary chat list has a usable UI
 host, the client searches Saved Messages for `settings.toml` documents by name,
 then once with an empty document search if needed. If the newest qualifying file
@@ -325,8 +343,10 @@ sync is worse than no offer. The rule that answers it is **one offer per
 message, ever**. Each account remembers the id of the newest `settings.toml`
 message it has already had an opinion about, and a message only earns an offer
 if its id is higher than that *and* its date is later than the local file's. The
-id is written before the line is drawn, so dismissing it, letting it time out,
-and crashing halfway through all record the same thing. A machine you never sync
+id is stored before the line is drawn, so dismissing it or letting it time out
+keeps the same watermark. Desktop uses the account pref writer's existing delayed
+disk write; an abrupt exit before that write can lose the newest watermark.
+A machine you never sync
 therefore sees each file you post exactly once and then never again, which is
 the behaviour a notification should have: it tells you something happened, and
 it does not keep telling you. On both clients, a confirmed post from this device

@@ -34,8 +34,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
-#include "main/main_session_settings.h"
 #include "purple/purple_config.h"
+#include "purple/purple_session_settings.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_shared_media.h"
 #include "ui/boxes/confirm_box.h"
@@ -672,27 +672,25 @@ void OfferImportCandidate(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show,
 		const ImportCandidate &candidate) {
-	auto &settings = session->settings();
 	if (!show || !(*show)) {
-		settings.releasePurpleSettingsOfferStart();
+		ReleaseSettingsOfferStart(session);
 		return;
 	}
 	const auto verdict = JudgeImportOffer(
 		IsActiveSession(session),
 		candidate.itemId.msg.bare,
-		settings.purpleSettingsOfferMessageId().bare,
+		SettingsOfferMessageId(session).bare,
 		candidate.date,
 		QFileInfo(SettingsFilePath()).lastModified().toSecsSinceEpoch());
 	if (verdict == ImportOfferVerdict::InactiveAccount) {
 		LOG(("Purple: Saved Messages settings offer dropped: "
 			"the account is no longer the active one."));
-		settings.releasePurpleSettingsOfferStart();
+		ReleaseSettingsOfferStart(session);
 		return;
 	} else if (verdict == ImportOfferVerdict::AlreadyOffered) {
 		return;
 	}
-	settings.setPurpleSettingsOfferMessageId(candidate.itemId.msg);
-	session->saveSettings();
+	SetSettingsOfferMessageId(session, candidate.itemId.msg);
 	if (verdict == ImportOfferVerdict::NotNewer) {
 		return;
 	}
@@ -842,10 +840,8 @@ void NoteConfirmedSend(
 		const QByteArray &content,
 		MsgId messageId) {
 	NoteSettingsSent(content);
-	auto &settings = session->settings();
-	if (messageId > settings.purpleSettingsOfferMessageId()) {
-		settings.setPurpleSettingsOfferMessageId(messageId);
-		session->saveSettings();
+	if (messageId > SettingsOfferMessageId(session)) {
+		SetSettingsOfferMessageId(session, messageId);
 	}
 }
 
@@ -1256,7 +1252,7 @@ void OfferNewerSettingsFromSavedMessages(
 		std::shared_ptr<Ui::Show> show) {
 	if (!show || !(*show)
 		|| !IsActiveSession(session)
-		|| !session->settings().takePurpleSettingsOfferStart()) {
+		|| !TakeSettingsOfferStart(session)) {
 		return;
 	}
 	SearchForSettingsOffer(session, std::move(show), false);

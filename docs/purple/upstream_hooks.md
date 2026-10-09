@@ -897,26 +897,38 @@ Stays, with B15 shrinking the comment to one line after the Downloads guard.
 
 ## Sync
 
-**`Telegram/SourceFiles/main/main_session_settings.cpp`** (+7 -0, 5 hunks,
-near 6) and **`Telegram/SourceFiles/main/main_session_settings.h`** (+23 -1, 3
-hunks, near 3): owner B5.
-- Today: `_purpleSettingsOfferMessageId` serialized at the end of the
-  SessionSettings stream, plus the changed `_archiveInMainMenu` default.
-- Hazard: if upstream's next field is a count followed by items, the Purple
-  integer is read as that count, the stream fails, and that account loses all
-  its session settings.
-- Leaves: only the `_archiveInMainMenu` default. The offer id moves to a
-  per-account pref, and Purple forces one SessionSettings rewrite per session
-  start, logging `Purple: rewrote SessionSettings, N bytes`. Every profile
-  must run a B5-or-later build once before a build with a merged upstream
-  field.
+**`Telegram/SourceFiles/main/main_session_settings.cpp`** and
+**`Telegram/SourceFiles/main/main_session_settings.h`**: owner B5.
+- B5 restores upstream serialization/deserialization, including the reserved
+  size, and removes the offer-id and offer-start members. Only the existing
+  `_archiveInMainMenu` default remains a Purple difference in SessionSettings.
+- `purple_session_settings` stores the offer id in the account's QByteArray
+  pref `purple.sync.settings_offer_message_id`. It does not migrate the old
+  serialized id. Its offer-start latch belongs to the original session lifetime;
+  inactive/no-show answers release it, while completed searches keep it set.
+- Old trailing bytes are ignored without changing preceding settings. One
+  guarded queued rewrite per session start strips the old tail. Every account
+  profile must run a B5 build once before a build with a new upstream field.
+  Skipping that build can make an old Purple id look like an upstream count.
 
-**`Telegram/SourceFiles/storage/storage_account.cpp`**: +16 -0, 3 hunks,
-near 1. Stays.
-- `reset()` clears the prefs and cancels their write timer: an upstream bug
-  fix (prefs leaked across a logout), a D7 candidate. The `QByteArray`
-  pref specializations are an extension point: the sync account binding
-  stores its token through them.
+**`Telegram/SourceFiles/main/main_account.cpp`**: B5 leaves one include and
+`Purple::StartSessionSettings(_session.get())` after `_session` is constructed,
+self data restored and `_sessionValue` published. The Purple function queues the
+write behind the original session guard and rechecks actual account ownership
+and logout state before calling the existing save path. It does not
+send, import, change focus or modify sync state.
+
+**`Telegram/SourceFiles/storage/storage_account.cpp`**: existing prefs reset
+and QByteArray extension stay. B5 adds one include and
+`Purple::SessionSettingsWritten(_owner, userDataInstance, userData.size())`
+after the existing encrypted-payload preparation. Purple records that actual
+payload count during the forced write, then logs after the save path returns
+and the descriptor has submitted the existing storage write:
+`Purple: rewrote SessionSettings, N bytes` only for the forced write of that
+session's actual settings object; N is the serialized payload used by storage,
+not a second serialization or encrypted-file size. Other writes do not log this
+line. Storage's existing write/error handling remains responsible for disk I/O.
+The rewrite and offer state disappear when the session lifetime ends.
 
 **`Telegram/SourceFiles/data/data_document_media.cpp`**: +3 -0, 2 hunks,
 near 0. Final.

@@ -198,20 +198,6 @@ public:
 	[[nodiscard]] auto extraFavoriteReactions() const
 	-> const std::vector<Data::ReactionId> &;
 
-	[[nodiscard]] MsgId purpleSettingsOfferMessageId() const {
-		return _purpleSettingsOfferMessageId;
-	}
-	void setPurpleSettingsOfferMessageId(MsgId id) {
-		_purpleSettingsOfferMessageId = id;
-	}
-	[[nodiscard]] bool takePurpleSettingsOfferStart() {
-		return !_purpleSettingsOfferStarted
-			&& !std::exchange(_purpleSettingsOfferStarted, true);
-	}
-	void releasePurpleSettingsOfferStart() {
-		_purpleSettingsOfferStarted = false;
-	}
-
 private:
 	static constexpr auto kDefaultSupportChatsLimitSlice = 7 * 24 * 60 * 60;
 	static constexpr auto kPhotoEditorHintMaxShowsCount = 5;
@@ -269,9 +255,6 @@ private:
 	rpl::variable<bool> _phoneNumberHidden = false;
 
 	std::vector<Data::ReactionId> _extraFavoriteReactions;
-
-	MsgId _purpleSettingsOfferMessageId = 0;
-	bool _purpleSettingsOfferStarted = false;
 
 };
 
