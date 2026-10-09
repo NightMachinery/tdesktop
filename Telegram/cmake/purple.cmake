@@ -57,6 +57,8 @@ PRIVATE
     purple/purple_schedule.h
     purple/purple_schedule_box.cpp
     purple/purple_schedule_box.h
+    purple/purple_session_settings.cpp
+    purple/purple_session_settings.h
     purple/purple_screentime_box.cpp
     purple/purple_screentime_box.h
     purple/purple_screentime_cover.cpp

@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/mtp_instance.h"
+#include "purple/purple_session_settings.h"
 #include "lang/lang_keys.h"
 #include "history/history.h"
 #include "core/application.h"
@@ -1064,6 +1065,7 @@ void Account::writeSessionSettings(Main::SessionSettings *stored) {
 
 	FileWriteDescriptor file(_settingsKey, _basePath);
 	file.writeEncrypted(data, _localKey);
+	Purple::SessionSettingsWritten(_owner, userDataInstance, userData.size());
 }
 
 ReadSettingsContext Account::prepareReadSettingsContext() const {
