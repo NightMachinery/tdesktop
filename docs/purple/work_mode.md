@@ -2121,6 +2121,21 @@ and the full clickable Last Seen line on the profile. Bots, service users, self,
 inaccessible users, exact statuses, and statuses hidden for the other person's
 own reasons never get the action.
 
+#### Desktop upstream hooks
+
+The B6 desktop surface hooks live in `purple_last_seen_ui`, separate from the
+unchanged peek/privacy engine. The history top bar owns `LastSeenTail` and calls
+Purple for status text, scaled tail geometry and tail clicks. The profile status
+label calls Purple for subscriptions, full status text and link index 3; the
+label's click resolves its own window and original account session. Profile
+TopBar keeps two synchronous user refresh hooks before custom-status binding,
+because a deferred first refresh could overwrite that custom text. Its existing
+premium early return and guarded Purple button setup keep the current behavior.
+Peer-list rows and the short-info timer share the tail's 60-second refresh cap;
+the short-info producer samples the clock again on every emission. Participant
+and chat-preview text swaps remain per-site. The exact LastSeen privacy refetch,
+opacity and radius drift obligations are recorded in `upstream_hooks.md`.
+
 ### The memory, and the cooldown
 
 A read is remembered for `trade_remember` (a day, by default) and shown in

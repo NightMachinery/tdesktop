@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/prepare_short_info_box.h"
+#include "purple/purple_last_seen_ui.h"
 
 #include "base/unixtime.h"
 #include "boxes/peers/peer_short_info_box.h"
@@ -16,7 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_peer.h"
 #include "data/data_peer_values.h"
-#include "purple/purple_last_seen.h"
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
@@ -250,14 +250,14 @@ void ProcessFullPhoto(
 
 [[nodiscard]] rpl::producer<QString> StatusValue(not_null<PeerData*> peer) {
 	if (const auto user = peer->asUser()) {
-		const auto now = base::unixtime::now();
 		return [=](auto consumer) {
 			auto lifetime = rpl::lifetime();
 			const auto timer = lifetime.make_state<base::Timer>();
 			const auto push = [=] {
+				const auto now = base::unixtime::now();
 				consumer.put_next(
 					Purple::LastSeenNoteFor(user, now, false, true).text);
-				timer->callOnce(Data::OnlineChangeTimeout(user, now));
+				timer->callOnce(Purple::RowOnlineChangeTimeout(user, now));
 			};
 			timer->setCallback(push);
 			push();

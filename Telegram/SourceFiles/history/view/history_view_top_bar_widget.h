@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/object_ptr.h"
 #include "data/data_report.h"
 #include "dialogs/dialogs_key.h"
+#include "purple/purple_last_seen_ui.h"
 
 namespace style {
 struct UserpicButton;
@@ -193,7 +194,6 @@ private:
 		int availableWidth,
 		int outerWidth);
 	bool paintConnectingState(Painter &p, int left, int top, int outerWidth);
-	[[nodiscard]] QRect purpleLastSeenGeometry() const;
 	[[nodiscard]] QRect getMembersShowAreaGeometry() const;
 	[[nodiscard]] bool trackOnlineOf(not_null<PeerData*> user) const;
 	void updateMembersShowArea();
@@ -265,8 +265,7 @@ private:
 
 	Ui::Text::String _titlePeerText;
 	bool _titlePeerTextOnline = false;
-	bool _purpleReasonShown = false;
-	int _purpleReasonFrom = 0;
+	Purple::LastSeenTail _lastSeenTail;
 	int _leftTaken = 0;
 	int _rightTaken = 0;
 	float64 _titleShownRatio = 1.;
