@@ -2295,34 +2295,12 @@ void ComposeControls::init() {
 
 	initLikeButton();
 
-	// Purple: the screen time recorder wants the actions rather than the
-	// keystrokes, and these are the streams that already mean exactly one
-	// action each. `_history' is read at the moment it fires, because these
-	// controls outlive the chat they were last shown for. See
-	// purple/purple_screentime_recorder.h.
-	const auto noteAction = [=](const QString &action) {
-		Purple::NoteScreenTimeAction(
-			_history ? _history->peer.get() : nullptr,
-			action);
-	};
-	sendRequests(
-	) | rpl::on_next([=] {
-		noteAction(u"send"_q);
-	}, _wrap->lifetime());
-	// The attach request rather than the file that comes back: these controls
-	// hand the choosing to whoever owns them, so this is the last moment they
-	// see. A picker cancelled therefore counts here, unlike in HistoryWidget,
-	// and the difference is one action_span.
-	_attachRequests.events(
-	) | rpl::on_next([=] {
-		noteAction(u"attach"_q);
-	}, _wrap->lifetime());
-	_voiceRecordBar->recordingStateChanges(
-	) | rpl::filter([](bool active) {
-		return active;
-	}) | rpl::on_next([=] {
-		noteAction(u"voice"_q);
-	}, _wrap->lifetime());
+	Purple::RecordComposeActions(
+		[=] { return _history ? _history->peer.get() : nullptr; },
+		sendContentRequests(SendRequestType::Text) | rpl::to_empty,
+		_attachRequests.events(),
+		_voiceRecordBar->recordingStateChanges(),
+		_wrap->lifetime());
 
 	_wrap->sizeValue(
 	) | rpl::on_next([=](QSize size) {
