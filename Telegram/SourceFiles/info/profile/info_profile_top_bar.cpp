@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_top_bar.h"
+#include "purple/purple_last_seen_ui.h"
 
 #include "api/api_peer_colors.h"
 #include "api/api_peer_photo.h"
@@ -63,11 +64,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_multi_player.h"
 #include "main/main_session.h"
 #include "menu/menu_mute.h"
-#include "purple/purple_config.h"
-#include "purple/purple_last_seen.h"
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_information.h"
 #include "settings/sections/settings_premium.h"
+#include "ui/boxes/show_or_premium_box.h"
 #include "ui/color_contrast.h"
 #include "ui/controls/stars_rating.h"
 #include "ui/controls/swipe_handler.h"
@@ -332,7 +332,7 @@ TopBar::TopBar(
 	this,
 	object_ptr<Ui::RoundButton>(
 		this,
-		tr::lng_lastseen_peek_now(),
+		tr::lng_lastseen_show_button(),
 		st::infoProfileTopBarShowLastSeen))
 , _forumButton([&, controller = descriptor.controller] {
 	const auto topic = _key.topic();
@@ -403,17 +403,9 @@ TopBar::TopBar(
 		setupShowLastSeen(controller);
 	}
 
-	// Purple: after setupStatusWithRating(), which makes the status label
-	// transparent to the mouse for a user - installing this earlier would have
-	// the label's own refresh undone by that call. The tail on a coarse "last
-	// seen" opens the peek sheet, and the sheet decides whether there is
-	// anything to peek, so this is a click handler and not a second copy
-	// of the rules.
-	if (const auto user = _peer->asUser()) {
-		_statusLabel->setLastSeenLinkCallback([=] {
-			Purple::ShowLastSeenPeekBox(controller, user);
-		});
-	}
+	Purple::RefreshProfileStatus(_peer, [=] {
+		_statusLabel->refresh();
+	});
 
 	bindStatus();
 
@@ -593,8 +585,6 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 	{
 		const auto membersLinkCallback = _statusLabel->membersLinkCallback();
 		const auto hiddenLinkCallback = _statusLabel->hiddenLinkCallback();
-		const auto lastSeenLinkCallback
-			= _statusLabel->lastSeenLinkCallback();
 		{
 			_statusLabel = nullptr;
 			delete _status.release();
@@ -621,7 +611,9 @@ void TopBar::adjustColors(const std::optional<QColor> &edgeColor) {
 		_statusLabel = std::make_unique<StatusLabel>(_status.data(), _peer);
 		_statusLabel->setMembersLinkCallback(membersLinkCallback);
 		_statusLabel->setHiddenLinkCallback(hiddenLinkCallback);
-		_statusLabel->setLastSeenLinkCallback(lastSeenLinkCallback);
+		Purple::RefreshProfileStatus(_peer, [=] {
+			_statusLabel->refresh();
+		});
 		if (_customStatus) {
 			rpl::duplicate(
 				_customStatus
@@ -3077,10 +3069,6 @@ void TopBar::setupShowLastSeen(
 		return;
 	}
 
-	// Reciprocity is applied locally in ApiWrap::updatePrivacyLastSeens(), which
-	// overwrites the exact time it was given. Recovering it takes a refetch -
-	// that is what upstream does for Premium here, and local premium needs the
-	// same, or times coarsened before the switch was flipped stay coarse.
 	if (user->session().premium() || Purple::LocalPremium()) {
 		if (user->lastseen().isHiddenByMe()) {
 			user->updateFullForced();
@@ -3089,63 +3077,9 @@ void TopBar::setupShowLastSeen(
 		return;
 	}
 
-	// Purple: the button is there exactly when the status line beside it is
-	// tappable, which is the core's answer and not a second chain of tests
-	// here - so it stands for a remembered read too, where it opens the sheet
-	// that counts the cooldown down, and it goes when `[last_seen] trade_p'
-	// disables peeking. With peeking off the fork has nothing to put
-	// here: it will not fall back to upstream's one tap, and last-seen privacy
-	// is then changed in Settings > Privacy, deliberately, where it can be
-	// changed back. The switch is read from SettingsChanges() so a change in
-	// Purple settings updates this profile while it is still on screen.
-	//
-	// Premium is not part of it. Upstream's button was a promo - buy Premium
-	// or open your last seen to everybody - and this one is neither, so a
-	// premium account (local premium included) hiding it would only hide the
-	// peek from the people most likely to have turned their own last seen
-	// off.
-	rpl::combine(
-		user->session().changes().peerFlagsValue(
-			user,
-			Data::PeerUpdate::Flag::OnlineStatus),
-		Data::AmPremiumValue(&user->session()),
-		Purple::LocalPremiumValue(),
-		rpl::single(rpl::empty) | rpl::then(Purple::SettingsChanges())
-	) | rpl::on_next([=](auto, bool amPremium, bool localPremium, auto) {
-		const auto premium = amPremium || localPremium;
-		const auto wasShown = _showLastSeen->toggled();
-		const auto hiddenByMe = user->lastseen().isHiddenByMe();
-		const auto now = base::unixtime::now();
-		const auto shown = !user->lastseen().isOnline(now)
-			&& Purple::CanPeekLastSeen(user);
-		_showLastSeen->toggle(shown, anim::type::instant);
-		if (wasShown && premium && hiddenByMe) {
-			user->updateFullForced();
-		}
-	}, _showLastSeen->lifetime());
-
-	controller->session().api().userPrivacy().value(
-		Api::UserPrivacy::Key::LastSeen
-	) | rpl::filter([=](Api::UserPrivacy::Rule rule) {
-		return (rule.option == Api::UserPrivacy::Option::Everyone);
-	}) | rpl::on_next([=] {
-		if (user->lastseen().isHiddenByMe()) {
-			user->updateFullForced();
-		}
-	}, _showLastSeen->lifetime());
-
-	_showLastSeen->setOpacity(0.);
-
-	_showLastSeen->entity()->setFullRadius(true);
-
-	// Purple: upstream provided two ways out here - buy Premium, or save an
-	// empty LastSeen rule set, which means everybody, forever, with nothing in
-	// the app to put it back. The peek gets the same answer by naming one
-	// person for a few seconds and restoring the rules afterwards, so it is the
-	// whole of what this button does now.
-	_showLastSeen->entity()->setClickedCallback([=] {
-		Purple::ShowLastSeenPeekBox(controller, user);
-	});
+	if (Purple::SetupShowLastSeen(controller, user, _showLastSeen.data())) {
+		return;
+	}
 }
 
 void TopBar::setupAnimatedPattern(const QRect &userpicGeometry) {

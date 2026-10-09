@@ -43,6 +43,8 @@ PRIVATE
     purple/purple_instant_replaces.h
     purple/purple_last_seen.cpp
     purple/purple_last_seen.h
+    purple/purple_last_seen_ui.cpp
+    purple/purple_last_seen_ui.h
     purple/purple_list_menu.cpp
     purple/purple_list_menu.h
     purple/purple_peek.cpp

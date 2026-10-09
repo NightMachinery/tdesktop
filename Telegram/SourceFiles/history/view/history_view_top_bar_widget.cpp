@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
+#include "purple/purple_last_seen_ui.h"
 
 #include "history/history.h"
 #include "history/view/history_view_send_action.h"
@@ -58,8 +59,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_send_action.h"
 #include "dialogs/dialogs_main_list.h"
-#include "purple/purple_config.h"
-#include "purple/purple_last_seen.h"
 #include "chat_helpers/emoji_interactions.h"
 #include "base/call_delayed.h"
 #include "base/unixtime.h"
@@ -143,13 +142,7 @@ TopBarWidget::TopBarWidget(
 		refreshLang();
 	}, lifetime());
 
-	// Purple: a Last Seen Peek that has just landed, and the two [last_seen]
-	// switches,
-	// rewrite this line without the peer's status moving at all.
-	rpl::merge(
-		Purple::StateChanges(),
-		Purple::SettingsChanges()
-	) | rpl::on_next([=] {
+	Purple::OnLastSeenInputsChanged([=] {
 		updateOnlineDisplay();
 	}, lifetime());
 
@@ -805,33 +798,6 @@ void TopBarWidget::paintStatus(
 	}
 }
 
-// Purple: where the Last Seen Peek suffix sits, so a click on it can open
-// the peek instead of the profile the rest of the bar opens. Empty while there
-// is no tail, and empty when the line is elided - a mark the user cannot see in
-// full is not a target they meant to hit.
-QRect TopBarWidget::purpleLastSeenGeometry() const {
-	if (!_purpleReasonShown || _narrowRatio == 1.) {
-		return QRect();
-	}
-	const auto left = _leftTaken;
-	const auto top = st::topBarHeight
-		- st::topBarArrowPadding.bottom()
-		- st::dialogsTextFont->height;
-	const auto available = width()
-		- _rightTaken
-		- left
-		- st::topBarNameRightPadding;
-	const auto full = _titlePeerText.maxWidth();
-	if ((full > available) || (full <= _purpleReasonFrom)) {
-		return QRect();
-	}
-	return myrtlrect(
-		left + _purpleReasonFrom,
-		top,
-		full - _purpleReasonFrom,
-		st::topBarHeight - top);
-}
-
 QRect TopBarWidget::getMembersShowAreaGeometry() const {
 	int membersTextLeft = _leftTaken;
 	int membersTextTop = st::topBarHeight - st::topBarArrowPadding.bottom() - st::dialogsTextFont->height;
@@ -848,9 +814,17 @@ void TopBarWidget::mousePressEvent(QMouseEvent *e) {
 		&& !_chooseForReportReason;
 	if (handleClick) {
 		const auto peer = _activeChat.key.peer();
-		const auto user = peer ? peer->asUser() : nullptr;
-		if (user && purpleLastSeenGeometry().contains(e->pos())) {
-			Purple::ShowLastSeenPeekBox(_controller, user);
+		if (Purple::HandleLastSeenTailClick(
+				_controller,
+				peer,
+				e->pos(),
+				Purple::LastSeenTailRect(
+					_lastSeenTail,
+					_narrowRatio,
+					_leftTaken,
+					_rightTaken,
+					width(),
+					_titlePeerText.maxWidth()))) {
 			return;
 		}
 		const auto archiveTop = (_activeChat.section == Section::ChatsList)
@@ -920,8 +894,7 @@ void TopBarWidget::setActiveChat(
 
 	_activeChat = activeChat;
 	_titlePeerText.clear();
-	_purpleReasonShown = false;
-	_purpleReasonFrom = 0;
+	_lastSeenTail = {};
 	_back->clearState();
 	update();
 
@@ -1315,10 +1288,7 @@ void TopBarWidget::updateControlsGeometry() {
 
 	updateMembersShowArea();
 
-	// Purple: the long-or-mark choice is made against the room this line has,
-	// so a window narrow enough to lose the sentence has to be told. Only when
-	// something is showing, which keeps it out of every other resize.
-	if (_purpleReasonShown) {
+	if (_lastSeenTail.shown) {
 		updateOnlineDisplay();
 	}
 }
@@ -1933,34 +1903,19 @@ void TopBarWidget::updateOnlineDisplay() {
 	QString text;
 	const auto now = base::unixtime::now();
 	bool titlePeerTextOnline = false;
-	_purpleReasonShown = false;
-	_purpleReasonFrom = 0;
+	_lastSeenTail = {};
 	if (const auto user = peer->asUser()) {
 		if (session().supportMode()
 			&& !session().supportHelper().infoCurrent(user).text.empty()) {
 			text = QString::fromUtf8("\xe2\x9a\xa0\xef\xb8\x8f check info");
 			titlePeerTextOnline = false;
 		} else {
-			// Purple: the long form when it fits and the mark when it does
-			// not, measured against the room this line actually has - a
-			// sentence the header would only elide away is worse than the
-			// mark it would have had room for.
-			const auto available = width()
-				- _rightTaken
-				- _leftTaken
-				- st::topBarNameRightPadding;
-			auto note = Purple::LastSeenNoteFor(user, now, false, false);
-			if (!note.tail.isEmpty()
-				&& (st::dialogsTextStyle.font->width(note.text)
-					> available)) {
-				note = Purple::LastSeenNoteFor(user, now, false, true);
-			}
-			text = note.text;
-			if (!note.link.isEmpty()) {
-				_purpleReasonShown = true;
-				_purpleReasonFrom = st::dialogsTextStyle.font->width(
-					note.base);
-			}
+			text = Purple::TopBarOnlineText(
+				user,
+				now,
+				width() - _rightTaken - _leftTaken
+					- st::topBarNameRightPadding,
+				_lastSeenTail);
 			titlePeerTextOnline = Data::OnlineTextActive(user, now);
 		}
 	} else if (const auto chat = peer->asChat()) {

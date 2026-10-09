@@ -182,7 +182,7 @@ short:
   lang.strings by a build step (D1 B; done 2026-10-03);
 - B5 the settings-offer id out of SessionSettings, kept as a per-account pref
   (D4: keep the offer until the sync chat ships), plus one forced
-  SessionSettings rewrite per session start;
+  SessionSettings rewrite per session start (done in B5);
 - B6 Last Seen surfaces; B11 mute; B7 screen time and the composer, keeping
   the call sites (D13); B8 chat menus;
 - B9 settings UI and instant replaces (D14: the dash toggle moves into the
@@ -639,65 +639,68 @@ near 1. Owner: B8.
 
 ## Last Seen
 
-**`Telegram/SourceFiles/history/view/history_view_top_bar_widget.cpp`**: +76
--1, 8 hunks, near 0. Owner: B6.
-- Leaves: `OnLastSeenInputsChanged`, one `Purple::LastSeenTail` member,
-  `TopBarOnlineText` replacing only the `Data::OnlineText` line, clicks
-  through `HandleLastSeenTailClick` and `LastSeenTailRect`.
+B6 extracts the desktop surfaces into `purple_last_seen_ui`. The existing
+`purple_last_seen` engine, privacy requests, journal and cooldown are unchanged.
 
-**`Telegram/SourceFiles/history/view/history_view_top_bar_widget.h`**: +3 -0,
-2 hunks, near 0. Owner: B6.
-- Leaves: the member.
+**`Telegram/SourceFiles/history/view/history_view_top_bar_widget.cpp`** and
+**`Telegram/SourceFiles/history/view/history_view_top_bar_widget.h`**: B6.
+- One UI facade include, `LastSeenTail` state and its resets, and
+  `OnLastSeenInputsChanged`. `TopBarOnlineText` chooses the same long or narrow
+  note using the available status width. The online-color decision, support
+  warning, group status, general layout and mouse-button gate stay upstream.
+- `LastSeenTailRect` repeats the existing scaled top-bar geometry and RTL
+  transform; elided, absent and fully narrow tails remain non-clickable.
+  `HandleLastSeenTailClick` consumes only a user tail hit. Resizes refresh only
+  while the tail is shown, as before.
 
-**`Telegram/SourceFiles/info/profile/info_profile_status_label.cpp`**: +58
--6, 7 hunks, near 11. Owner: B6.
-- Today: the constructor's subscriptions, the status body with the
-  last-seen note and its link, and the link callback setter.
-- Leaves: `Purple::AttachProfileStatus(_label, _peer, [=] { refresh(); },
-  _lifetime)` in the constructor (it schedules the first refresh with
-  `crl::on_main`, after TopBar has set up the label); `Purple::
-  ProfileStatusBody(...)` in `refresh()`, keeping link index 3; and
-  `Purple::ApplyLastSeenLink(_label, user, hasLink)` after upstream's link
-  block. The label installs its own link, so the setter goes.
-- Fallback: if the deferred first refresh misbehaves, B6 keeps the owner
-  callback (about 15 lines more).
+**`Telegram/SourceFiles/info/profile/info_profile_status_label.cpp`** and
+**`Telegram/SourceFiles/info/profile/info_profile_status_label.h`**: B6.
+- `AttachProfileStatus` subscribes the user label to StateChanges and
+  SettingsChanges under the StatusLabel lifetime and a label guard.
+  `ProfileStatusBody` preserves full/plain text, online color and link index 3.
+  `ApplyLastSeenLink` follows the upstream member/hidden link block, which keeps
+  indices 1 and 2. The Last Seen setter, getter and callback member are removed.
+- The label owns its guarded click handler. It resolves its actual window at
+  click time, requires the original live session and loads that session's user
+  by typed ID. It never borrows another account's active controller.
 
-**`Telegram/SourceFiles/info/profile/info_profile_status_label.h`**: +8 -0,
-2 hunks, near 4. Owner: B6.
-- Leaves: nothing (setter, getter and member go).
+**`Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp`**: B6 and D16.
+- The `show_or_premium_box.h` include and upstream button text are restored,
+  with one Purple UI include. `SetupShowLastSeen` handles the existing fork
+  branch after the original eligibility and premium early returns. The latter
+  retains `|| Purple::LocalPremium()`. Purple sets the live Peek text and owns
+  the button subscriptions and guarded click; there is no fallback to the
+  permanent Everyone privacy action. The clang-15 aggregate fix stays unchanged.
+- The planned deferred first label refresh is unsafe for custom statuses:
+  construction and `adjustColors` bind the custom producer after setup. A queued
+  refresh would then overwrite its text. The allowed fallback keeps two
+  synchronous `RefreshProfileStatus` owner hooks before those custom bindings.
+  They retain no callback. Link construction and callback-copy plumbing are gone.
+- Drift obligation: the Purple helper repeats the LastSeen privacy value/filter/
+  refetch block (9 nonblank lines excluding the separating blank),
+  `setOpacity(0.)` and `setFullRadius(true)`. Compare all 11 against upstream on
+  every merge. The current moved block is retained without changing its
+  Everyone condition, hidden-by-me refetch or button lifetime. The surrounding
+  premium-transition/online/CanPeek predicates also remain the established fork
+  behavior; this batch does not change the contradictory older premium comment.
 
-**`Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp`**: +53 -23, 13
-hunks, near 40, the fork's hottest file. Owners: B6, and D16 for one line.
-- Today: two includes replacing `show_or_premium_box.h`, the peek-now
-  string, the status link callback at construction and in `adjustColors`
-  (three lines), and `setupShowLastSeen` rewritten.
-- Leaves: the `show_or_premium_box.h` include restored and one Purple include
-  after the file's own header; the premium early return keeping its
-  `|| Purple::LocalPremium()` term, followed by `if
-  (Purple::SetupShowLastSeen(controller, user, _showLastSeen.data())) {
-  return; }`. The construction call and the three `adjustColors` lines go.
-- Drift risk: the Purple side repeats 11 upstream lines (the 9-line LastSeen
-  privacy refetch, `setOpacity(0.)` and `setFullRadius(true)`). Check them
-  against upstream after every merge.
-- The clang-15 aggregate-init fix at line 349 (6 near-hunk edits) stays
-  under D16.
+**`Telegram/SourceFiles/boxes/peer_list_box.cpp`**: B6.
+- One facade include, `RowOnlineText` and `RowOnlineChangeTimeout`. Row
+  activation, online color, Saved Messages and non-user paths stay unchanged.
+  The 60-second cap applies only when the note has a tail, preserving the
+  existing row scheduling policy.
 
-**`Telegram/SourceFiles/boxes/peer_list_box.cpp`**: +23 -2, 5 hunks, near 1.
-Owner: B6.
-- Leaves: `Purple::RowOnlineText` and `Purple::RowOnlineChangeTimeout`, one
-  include.
+**`Telegram/SourceFiles/boxes/peers/prepare_short_info_box.cpp`**: B6b.
+- The existing `LastSeenNoteFor(user, now, false, true).text` stays. Its timer
+  uses `RowOnlineChangeTimeout`, and each emission reads the current clock so
+  remembered ages and expiration advance, rather than capturing the opening
+  time for the producer lifetime.
 
-**`Telegram/SourceFiles/boxes/peers/prepare_short_info_box.cpp`** (+3 -1, 2
-hunks, near 0), **`Telegram/SourceFiles/boxes/peers/edit_participant_box.cpp`**
-(+5 -2, 3 hunks, near 1) and
-**`Telegram/SourceFiles/history/view/history_view_chat_preview.cpp`** (+2 -1,
-2 hunks, near 0): owner B6.
-- Each swaps `Data::OnlineText` for `Purple::LastSeenNoteFor(...).text`; one
-  call each after B6. B6b makes the short info box's refresh timer follow
-  `RowOnlineChangeTimeout`.
-- Rejected: one early return in `Data::OnlineText` instead of these swaps.
-  The sites pass different arguments, it would change all 9 upstream callers,
-  and it would need a bypass guard.
+**`Telegram/SourceFiles/boxes/peers/edit_participant_box.cpp`** and
+**`Telegram/SourceFiles/history/view/history_view_chat_preview.cpp`**: unchanged
+by B6. Their existing per-site `LastSeenNoteFor(..., false, true).text` swaps
+remain. There is no global interception in `Data::OnlineText`, which would
+change unrelated callers and discard the distinct full/narrow arguments.
 
 **`Telegram/SourceFiles/api/api_user_privacy.cpp`**: +131 -10, 10 hunks, near
 0. Owner: B17.
