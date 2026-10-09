@@ -47,6 +47,9 @@ PRIVATE
     purple/purple_last_seen_ui.h
     purple/purple_list_menu.cpp
     purple/purple_list_menu.h
+    purple/purple_mute.cpp
+    purple/purple_mute.h
+    purple/hooks/mute.h
     purple/purple_peek.cpp
     purple/purple_peek.h
     purple/purple_pinned_music.cpp

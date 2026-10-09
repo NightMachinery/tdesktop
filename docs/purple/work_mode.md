@@ -1087,7 +1087,7 @@ un-silences it, which puts it back, forever.
 
 The rule that settles it: **membership is decided as though this preset
 silenced nothing.** `ChatFilter::contains()` takes `ignorePresetMute`, which
-swaps the cached effective mute for `purpleMutedWithoutPreset()`, so the input
+swaps the cached effective mute for `Purple::MutedWithoutPreset()`, so the input
 to the decision cannot depend on its output. An exclude-muted folder therefore
 holds exactly the chats it would hold with the preset switched off, and the
 preset silences those.
@@ -1318,16 +1318,20 @@ back to muted.
 
 It now says `Silenced by 'work'` and opens the preset box, which is the only
 control that actually moves it. Below that, the ordinary mute item is chosen
-from `purpleMutedWithoutPreset()` rather than from the effective answer, so
+from `Purple::MutedWithoutPreset()` rather than from the effective answer, so
 muting a chat yourself stays reachable while a preset silences it - and stays in
 force once the preset stops.
 
 That is the real accessor with the preset gate removed, not a peek at the
 chat's `muteUntil`. The peek was the first attempt and it was wrong: a channel
 can be muted by the account-wide default for its type with nothing set on the
-chat at all, and it read those as unmuted. The split is one function boundary -
-`isMuted()` is the gate plus the original body, and the body is what the UI
-asks for separately.
+chat at all, and it read those as unmuted. The upstream `isMuted()` body stays in place after the
+`Purple::PresetMutes()` hook. `Purple::MutedWithoutPreset()` calls its public
+thread or peer overload with only the preset hook bypassed. The scoped guard
+is tied to that account's notification settings, restores the previous scope
+on every exit, and leaves another account's query effective. Topic settings,
+community fallback, account-wide defaults and unknown settings therefore keep
+upstream precedence and timing.
 
 The mute bell drawn on the chat list row is left alone. It is not a lie: the
 chat really is silenced.
@@ -1338,7 +1342,7 @@ Controls answer for the setting they move; indicators answer for the truth.
 
 The bell is an indicator, so it shows silence. Everything you can click to
 change the mute is a control, and each of them now reads
-`purpleMutedWithoutPreset()` - which is `isMuted()` with only the preset gate
+`Purple::MutedWithoutPreset()` - which is `isMuted()` with only the preset gate
 removed, and therefore identical whenever no preset is silencing anything:
 
 - the Mute/Unmute button on the profile top bar, through
@@ -2543,8 +2547,8 @@ A rule-based folder computes membership from the chat's own properties, so a
 chat can cross into one with nothing announcing it - and `History::muted()` is a
 cache, so it would go on ringing.
 
-`NotifySettings::purpleRefreshFolderMute()` keeps the set of peers
-`purpleSilencedByFolder()` last said yes to, and re-evaluates the mute when the
+`Purple::RefreshFolderMute()` keeps a session-owned set of peers that the
+folder predicate in `purple_mute.cpp` last said yes to, and re-evaluates the mute when the
 answer flips. It is called from `Session::refreshChatListEntry()`, next to the
 quiet-list block and for the same reason: that is where membership is already
 being recomputed. A preset that silences no folder pays one empty-vector test.
@@ -2819,7 +2823,7 @@ The rule is the desktop's, unchanged: **a preset only ever adds a mute.** A chat
 you muted by hand stays muted whichever entry claims it, and switching presets
 never un-silences anything. That makes the split the desktop needs necessary
 here too. `MessagesController.mutedWithoutPreset` is Android's
-`purpleMutedWithoutPreset`, and everything that labels or drives a Mute/Unmute
+`Purple::MutedWithoutPreset`, and everything that labels or drives a Mute/Unmute
 toggle reads it: the chat list's long-press menu and swipe label, the action
 mode's mute icon, the notification popup, the chat header, the profile row, the
 topic menus, and the notification-exceptions list, which is a list of your own
@@ -3348,7 +3352,7 @@ on a clock - landed on 2026-09-06, each described in its own section above. The
 
 A folder's `notify_p` is ported. A folder silences its chats here the way it
 does on the desktop and by the same shape: `PurpleGate.silencedByFolder()` is
-`NotifySettings::purpleSilencedByFolder()`, matching the preset's silenced
+the folder predicate in `purple_mute.cpp`, matching the preset's silenced
 folder names against the account's real folder titles and asking each match
 whether it holds the chat. Answered live on every query rather than from a
 snapshot - folder membership moves with every message that arrives, so there is
@@ -3523,3 +3527,26 @@ a policy:
     Telegram/SourceFiles/history/history.cpp          purpleHiddenFromView
 
 The fork's whole diff is findable with `git grep Purple::`.
+
+## Mute upstream hooks
+
+`purple/hooks/mute.h` exposes the B11 facade. The upstream notification
+settings retain the guarded preset hook and the thin `purpleRefreshMute()`
+entry into private `updateLocal()`. Refreshing that cache sends no request.
+The folder transition set belongs to the actual `Main::Session` lifetime;
+queued refreshes use its guard and resolve the peer again in its own data.
+Empty folder policy creates no state. Missing histories, folder id zero,
+case-insensitive title matching and `ignorePresetMute` keep their existing
+behavior.
+
+Work Mode settings, active preset, peek and overrides remain shared app-wide.
+Account ownership here selects the real notification defaults, folders,
+histories, cache and callback lifetime. It does not add an independent preset
+selector or use sync account binding as Work Mode opt-in.
+
+The B11 callers are `data/data_session.cpp`, `data/data_chat_filters.cpp`,
+`menu/menu_mute.cpp`, `info/profile/info_profile_values.cpp`,
+`settings/sections/settings_notifications_type.cpp`,
+`history/history_widget.cpp` and `window/window_peer_menu.cpp`. Controls query
+`Purple::MutedWithoutPreset()`; effective indicators still use upstream mute
+state. Menu composition and `Descriptor::purplePreset` remain separate.

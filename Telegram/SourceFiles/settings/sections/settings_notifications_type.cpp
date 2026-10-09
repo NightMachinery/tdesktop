@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_notifications_type.h"
+#include "purple/hooks/mute.h"
 
 #include "api/api_ringtones.h"
 #include "apiwrap.h"
@@ -341,8 +342,7 @@ void ExceptionsController::refreshStatus(not_null<PeerListRow*> row) const {
 	// be silent right now - a preset can make that true for a chat with no
 	// exception at all, and reading "muted" here would send them looking for
 	// one that is not there.
-	const auto status = peer->owner().notifySettings()
-		.purpleMutedWithoutPreset(peer)
+	const auto status = Purple::MutedWithoutPreset(peer)
 		? tr::lng_notification_exceptions_muted(tr::now)
 		: tr::lng_notification_exceptions_unmuted(tr::now);
 	row->setCustomStatus(status);

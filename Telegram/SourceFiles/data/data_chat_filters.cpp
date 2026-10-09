@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_chat_filters.h"
+#include "purple/hooks/mute.h"
 
 #include "api/api_text_entities.h"
 #include "history/history.h"
@@ -375,8 +376,7 @@ bool ChatFilter::contains(
 		? history->chatListBadgesState()
 		: Dialogs::BadgesState();
 	const auto muted = ignorePresetMute
-		? history->owner().notifySettings().purpleMutedWithoutPreset(
-			history->peer)
+		? Purple::MutedWithoutPreset(history->peer)
 		: history->muted();
 	return false
 		|| ((_flags & flag)

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_values.h"
+#include "purple/hooks/mute.h"
 
 #include "api/api_chat_participants.h"
 #include "apiwrap.h"
@@ -342,8 +343,7 @@ rpl::producer<bool> NotificationsEnabledValue(
 		topic->owner().notifySettings().defaultUpdates(topic->peer())
 	) | rpl::map([=] {
 		// Purple: see the peer overload below.
-		return !topic->owner().notifySettings().purpleMutedWithoutPreset(
-			topic);
+		return !Purple::MutedWithoutPreset(topic);
 	}) | rpl::distinct_until_changed();
 }
 
@@ -361,7 +361,7 @@ rpl::producer<bool> NotificationsEnabledValue(not_null<PeerData*> peer) {
 		// effective answer would leave the button saying Unmute over a preset
 		// it cannot lift, which is where this started. Identical to isMuted()
 		// whenever no preset is silencing the chat.
-		return !peer->owner().notifySettings().purpleMutedWithoutPreset(peer);
+		return !Purple::MutedWithoutPreset(peer);
 	}) | rpl::distinct_until_changed();
 }
 

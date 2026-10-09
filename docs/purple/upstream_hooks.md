@@ -158,7 +158,7 @@ upstream files, by pointing at this registry:
 - apart from those totals: AGENTS.md +140 / -3 (6 near-hunk edits), README.md
   +32 / -1 (1), the lib_ui gitlink (upstream moved it 214 times in the year,
   so each lib_ui bump conflicts with the fork pointer), and 37 binary files;
-- 48 account-less Work Mode calls in 11 upstream files. The count must reach
+- 45 account-less Work Mode calls in 10 upstream files after B11. The count must reach
   0 once B3, B4, B8, B10u, B10d, B11, B12 and B13 have run;
 - 3 callers of `TopPeers::list()`: star_gift_box.cpp, dialogs_suggestions.cpp
   and history_view_top_peers_selector.cpp.
@@ -498,52 +498,50 @@ hunks, near 3. Owners: B10u, B7, B5.
 
 ## Mute
 
-**`Telegram/SourceFiles/data/notify/data_notify_settings.cpp`**: +127 -0, 5
-hunks, near 0. Owner: B11.
-- Today: `purpleRefreshMute`, `purpleSilenced`, `purpleMutedWithoutPreset`
-  and the preset branch inside `isMuted`.
-- Leaves: upstream's `isMuted(peer, changesIn)` body with the first line
-  `if (Purple::PresetMutes(peer, changesIn, kMaxNotifyCheckDelay)) { return
-  true; }`, and `purpleRefreshMute`. The members become free functions in
-  `purple/purple_mute.cpp`; `MutedWithoutPreset` runs the public `isMuted`
-  under the bypass guard; the folder set becomes per session.
-- Account: `PresetMutes(peer, ...)` is *in hand*. The 3 account-less calls
-  (377, 642, 661) move into the Purple side. This batch is what makes
-  background accounts' notifications follow their own account.
+**`Telegram/SourceFiles/data/notify/data_notify_settings.cpp`** and
+**`Telegram/SourceFiles/data/notify/data_notify_settings.h`**: B11 leaves
+`purpleRefreshMute()` and its declaration as the thin entry into private
+`updateLocal()`. The original upstream peer `isMuted(peer, changesIn)` body
+follows `Purple::PresetMutes(peer, changesIn, kMaxNotifyCheckDelay)`.
+`MutedWithoutPreset` calls public `isMuted()` under an owner-scoped bypass;
+it does not duplicate topic, community or default mute logic. Folder policy
+and session-lifetime transition state live in `purple/purple_mute.cpp`.
 
-**`Telegram/SourceFiles/data/notify/data_notify_settings.h`**: +47 -0, 3
-hunks, near 0. Owner: B11.
-- Leaves: `purpleRefreshMute`'s declaration. The rest goes with the free
-  functions.
+**`Telegram/SourceFiles/menu/menu_mute.cpp`**: B11 calls `Purple::Silenced`
+and `Purple::MutedWithoutPreset`. B8's menu composition and preset name
+presentation remain unchanged. `menu/menu_mute.h` and `Descriptor::purplePreset`
+are unchanged.
 
-**`Telegram/SourceFiles/menu/menu_mute.cpp`**: +26 -1, 4 hunks, near 2.
-Owners: B11 (callers), B8.
-- Today: the preset name in the thread descriptor, `ToggleMuteForever`
-  reading the mute without the preset, and the "Silenced by" row.
-- Leaves: `SilencingPresetName` and `AddSilencedByRow`, and the B11 caller
-  names at lines 258 and 311.
-- Account: *none needed*: they label a preset mute, which a stock account
-  never has.
-
-**`Telegram/SourceFiles/menu/menu_mute.h`**: +6 -0, 1 hunk, near 1. Stays.
-- `Descriptor::purplePreset`, an extension point.
-
-**`Telegram/SourceFiles/info/profile/info_profile_values.cpp`**: +10 -2, 2
-hunks, near 0. Owner: B11.
-- Today and after: the profile's notifications switch reads the mute without
-  the preset, at two sites; B11 gives them their final names.
-- Account: *in hand* (topic, peer).
+**`Telegram/SourceFiles/info/profile/info_profile_values.cpp`**: both topic
+and peer notification controls call `Purple::MutedWithoutPreset` for the
+actual owner.
 
 **`Telegram/SourceFiles/settings/sections/settings_notifications_type.cpp`**:
-+7 -1, 1 hunk, near 0. Owner: B11.
-- The exceptions list status reads the mute without the preset; one call
-  after B11.
-- Account: *in hand* (peer).
+the exception row calls `Purple::MutedWithoutPreset(peer)`.
 
-**`Telegram/SourceFiles/history/history_widget.cpp`** (mute part): the mute
-button text and `toggleMuteUnmute` read the mute without the preset (lines
-3662 and 5884). B11 gives them their final names; B7 then edits the rest of
-the file. See "Screen time and the composer".
+**`Telegram/SourceFiles/history/history_widget.cpp`**: the notification button
+label and toggle call `Purple::MutedWithoutPreset(_history)`. B7's composer
+and screen-time code remain unchanged.
+
+**`Telegram/SourceFiles/data/data_chat_filters.cpp`**: the existing
+`ignorePresetMute` extension calls `Purple::MutedWithoutPreset(history->peer)`.
+
+**`Telegram/SourceFiles/data/data_session.cpp`**: the preset refresh walk calls
+`Purple::RefreshMute(peer)` and the existing chat-entry transition site calls
+`Purple::RefreshFolderMute(history->peer)`. Both retain their ordering.
+
+**`Telegram/SourceFiles/window/window_peer_menu.cpp`**: the existing preset
+row and ordinary mute choice use `Purple::Silenced` and
+`Purple::MutedWithoutPreset`. B8 composition is unchanged.
+
+Each B11 upstream implementation adds the `purple/hooks/mute.h` facade
+include. The peer, topic, history or thread carries its actual session;
+notification defaults, folder membership and deferred refresh use that owner.
+The settings, active preset, peek and overrides retain the existing shared
+app-wide policy. This batch adds no independent per-account preset selection
+or sync-token opt-in.
+`Telegram/cmake/purple.cmake` registers only the new Purple mute implementation,
+header and facade. See [work_mode.md](work_mode.md#mute-upstream-hooks).
 
 ## Temporary-row marks
 
@@ -1014,7 +1012,7 @@ the comments, B14 for the virtuals) and main_window.cpp (B15).
 
 ## Account-less Work Mode calls
 
-48 lines today, by owner:
+45 lines after B11, by remaining owner:
 
 - B3: 13 in data/data_session.cpp (they move into a Purple TU);
 - B4: 13 in history/history.cpp (they move), and 1 in
@@ -1022,7 +1020,7 @@ the comments, B14 for the virtuals) and main_window.cpp (B15).
 - B10d: 9 in data/data_chat_filters.cpp (8 move,
   `RefuseFolderOrderSave(session)` replaces 1), and 1 in
   data/data_unread_value.cpp (moves);
-- B11: 3 in data/notify/data_notify_settings.cpp (they move);
+- B11: none in upstream notification settings after the mute extraction;
 - B10u: 2 in ui/widgets/chat_filters_tabs_strip.cpp and 2 in
   window/window_filters_menu.cpp (`PinWholeStripIfRestricted(session)`);
 - B13: 2 in dialogs/ui/dialogs_layout.cpp (the style comes from
