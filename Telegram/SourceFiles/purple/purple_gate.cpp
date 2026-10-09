@@ -383,6 +383,10 @@ bool PresetOwnsPins() {
 	return !PresetPins().empty();
 }
 
+bool PresetOwnsPins(not_null<Main::Session*>) {
+	return PresetOwnsPins();
+}
+
 bool SavePresetPins(
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {

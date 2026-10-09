@@ -77,6 +77,7 @@ bool SaveExtraViewPins(
 // settings.toml, never travels to the server, and is bounded by nothing, while
 // a mirrored one is the account's and carries the server's five-pin limit.
 [[nodiscard]] bool PresetOwnsPins();
+[[nodiscard]] bool PresetOwnsPins(not_null<Main::Session*> session);
 
 // Writes the main view's order back. The counterpart of SaveExtraViewPins, and
 // only ever called for a preset that already owns its pins - dragging a row in
