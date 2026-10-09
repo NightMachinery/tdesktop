@@ -611,29 +611,28 @@ session).
 
 ## Chat menus
 
-**`Telegram/SourceFiles/window/window_peer_menu.cpp`**: +114 -3, 17 hunks,
-near 4. Owners: B11 (callers), B8.
-- Today: five includes, the mute submenu's preset row, three Filler members
-  (lists, Last Seen Peek, pinned music) and their calls, the `addTranslate`
-  local-premium term, and the view branch in `TogglePinnedThread`.
-- Leaves: one facade include; `MuteMenuState` with B11's names (lines 265 and
-  275); the three Filler members as free functions, one
-  call each; the `addTranslate` term (moved here from B15 so the file is
-  edited once); `if (Purple::TogglePinnedInView(controller, entry, filterId,
-  onToggled)) { return; }` with upstream's `if (!filterId)` back. The
-  mirroring main view re-enters the public 4-argument `TogglePinnedThread`
-  with `FilterId(0)`. About 26 lines.
-- Account: `TogglePinnedInView` is *in hand* through the controller; its
-  Purple body must read `PresetOwnsPins` for `&controller->session()`,
-  replacing the account-less call at line 4464. `MuteMenuState` (peer) is *in
-  hand*.
+**`Telegram/SourceFiles/window/window_peer_menu.cpp`**: B8 extraction, after
+B11.
+- One `purple_chat_menus.h` include replaces the direct Purple helper includes.
+  The mute row moves behind `AddPresetMuteRow`; the thread's notification
+  settings, `MutedWithoutPreset`, submenu ordering and actual peer/session
+  remain tied to the B11 caller. The three Purple-only Filler members become
+  free functions called at their existing menu positions. The local-premium
+  translation term moves behind the facade.
+- `TogglePinnedInView` owns only Purple views. It receives the actual
+  controller, entry, filter id and callback. Extra views and an owned main
+  view keep the existing settings-list behavior; the mirroring main view
+  re-enters the public four-argument `TogglePinnedThread` with `FilterId(0)`.
+  Ordinary server-filter behavior remains upstream, including `if (!filterId)`.
+- The pin-ownership query receives `&controller->session()`. The active preset
+  and its pin order remain shared app-wide in this version of Work Mode; this
+  call does not add an account selector or synchronization binding.
 
-**`Telegram/SourceFiles/window/window_main_menu.cpp`**: +12 -0, 3 hunks,
-near 1. Owner: B8.
-- Today: the preset menu entry with a comment, and an extra
-  `ui/layers/generic_box.h` include.
-- Leaves: `Purple::ShowPresetBox(controller)` as one guarded row, one include.
-- Account: *in hand* (the controller).
+**`Telegram/SourceFiles/window/window_main_menu.cpp`**: B8 extraction.
+- One `purple_chat_menus.h` include replaces the direct preset-box include.
+  The preset label and row position stay the same; opening it goes through
+  `Purple::ShowPresetBox(controller)`. The existing generic-box include stays
+  for unrelated menu boxes.
 
 ## Last Seen
 

@@ -6,7 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
-#include "purple/hooks/mute.h"
+#include "purple/purple_chat_menus.h"
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
@@ -64,12 +64,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
-#include "purple/purple_config.h"
-#include "purple/purple_gate.h"
-#include "purple/purple_last_seen.h"
-#include "purple/purple_list_menu.h"
-#include "purple/purple_pinned_music.h"
-#include "purple/purple_preset_box.h"
 #include "menu/menu_mute.h"
 #include "menu/menu_ttl_validator.h"
 #include "apiwrap.h"
@@ -258,20 +252,10 @@ void PeerMenuAddMuteSubmenuAction(
 			}
 		};
 	};
-	// Purple: isMuted() is the effective answer, and a work preset can be what
-	// makes it true. Offering Unmute then would be a lie - the next call goes
-	// straight back to muted. Say what is actually holding it, offer the one
-	// control that moves it, and pick the item below from the user's own
-	// setting rather than the effective one, so their own mute stays reachable.
-	const auto byPreset = Purple::Silenced(thread->peer());
-	if (byPreset) {
-		const auto show = controller->uiShow();
-		const auto session = &controller->session();
-		addAction(
-			u"Silenced by '%1'"_q.arg(Purple::ViewName()),
-			[=] { show->showBox(Box(Purple::PresetBox, session)); },
-			&st::menuIconMute);
-	}
+	const auto byPreset = Purple::AddPresetMuteRow(
+		controller,
+		thread,
+		addAction);
 	const auto isMuted = byPreset
 		? Purple::MutedWithoutPreset(thread)
 		: notifySettings->isMuted(thread);
@@ -324,13 +308,11 @@ private:
 	void addTogglePin();
 	void addToggleMuteSubmenu(bool addSeparator);
 	void addSupportInfo();
-	void addDownloadPinnedMusic();
 	void addInfo();
 	void addStoryArchive();
 	void addNewWindow(bool addSeparator = true);
 	void addUngroup();
 	void addToggleFolder();
-	void addPurpleLists();
 	void addToggleUnreadMark();
 	void addToggleArchive();
 	void addClearHistory();
@@ -343,7 +325,6 @@ private:
 	void addCreatePoll();
 	void addCreateTodoList();
 	void addThemeEdit();
-	void addLastSeenPeek();
 	void addToggleNoForwards();
 	void addBlockUser();
 	void addViewDiscussion();
@@ -723,22 +704,6 @@ void Filler::addToggleFolder() {
 	});
 }
 
-// Purple: the same shape as addToggleFolder() above, for the lists Work Mode
-// reads out of settings.toml. The row itself is built in purple_list_menu.cpp,
-// because the recent-contacts list builds its menu through a different path and
-// has to be able to offer the same thing.
-void Filler::addPurpleLists() {
-	if (!_peer || _topic || _sublist) {
-		// A topic or a sublist is not a chat the lists can name - its peer is,
-		// and offering the parent's membership from inside it would be a quiet
-		// lie. Saved Messages used to be excluded here too, which made it the
-		// one chat a preset governed but nobody could assign; it is an ordinary
-		// chat to the lists now.
-		return;
-	}
-	Purple::AddListsSubmenu(_addAction, _controller->uiShow(), _peer);
-}
-
 void Filler::addToggleUnreadMark() {
 	const auto peer = _peer;
 	const auto unread = IsUnreadThread(_thread);
@@ -1070,7 +1035,7 @@ void Filler::addExportChat() {
 
 void Filler::addTranslate() {
 	if (_peer->translationFlag() != PeerData::TranslationFlag::Disabled
-		|| !(_peer->session().premium() || Purple::LocalPremium())
+		|| !Purple::TranslationPremiumAvailable(_peer)
 		|| !Core::App().settings().translateChatEnabled()) {
 		return;
 	}
@@ -1473,18 +1438,6 @@ void Filler::addThemeEdit() {
 		tr::lng_chat_theme_wallpaper(tr::now),
 		[=] { controller->toggleChooseChatTheme(user); },
 		&st::menuIconChangeColors);
-}
-
-void Filler::addLastSeenPeek() {
-	const auto user = _peer ? _peer->asUser() : nullptr;
-	if (!user || !Purple::CanPeekLastSeen(user)) {
-		return;
-	}
-	const auto controller = _controller;
-	_addAction(
-		tr::lng_lastseen_peek_action(tr::now),
-		[=] { Purple::ShowLastSeenPeekBox(controller, user); },
-		&st::menuIconStealth);
 }
 
 void ShowDisableSharingBox(
@@ -1909,7 +1862,7 @@ void Filler::fillContextMenuActions() {
 	addToggleUnreadMark();
 	addToggleTopicClosed();
 	addToggleFolder();
-	addPurpleLists();
+	Purple::AddPeerListsSubmenu(_controller, _peer, _topic, _sublist, _addAction);
 	if (const auto user = _peer->asUser()) {
 		if (!user->isContact()) {
 			addBlockUser();
@@ -1921,25 +1874,12 @@ void Filler::fillContextMenuActions() {
 	addDeleteTopic();
 }
 
-void Filler::addDownloadPinnedMusic() {
-	if (!_thread || _sublist) {
-		return;
-	}
-	const auto controller = _controller;
-	const auto weak = base::make_weak(_thread);
-	_addAction(tr::lng_pinned_music_menu(tr::now), [=] {
-		if (const auto strong = weak.get()) {
-			Purple::ShowPinnedMusicBox(controller, strong);
-		}
-	}, &st::menuIconDownload);
-}
-
 void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
-	addDownloadPinnedMusic();
+	Purple::AddPinnedMusicAction(_controller, _thread, _sublist, _addAction);
 	addCreateTopic();
 	addInfo();
-	addLastSeenPeek();
+	Purple::AddLastSeenPeekAction(_controller, _peer, _addAction);
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();
@@ -1961,7 +1901,7 @@ void Filler::fillHistoryActions() {
 
 void Filler::fillProfileActions() {
 	addTTLSubmenu(true);
-	addLastSeenPeek();
+	Purple::AddLastSeenPeekAction(_controller, _peer, _addAction);
 	addSupportInfo();
 	addNewContact();
 	addShareContact();
@@ -1981,7 +1921,7 @@ void Filler::fillProfileActions() {
 	addExportChat();
 	addToggleNoForwards();
 	addToggleFolder();
-	addPurpleLists();
+	Purple::AddPeerListsSubmenu(_controller, _peer, _topic, _sublist, _addAction);
 	addBlockUser();
 	addReport();
 	addLeaveChat();
@@ -1991,7 +1931,7 @@ void Filler::fillProfileActions() {
 
 void Filler::fillRepliesActions() {
 	if (_topic) {
-		addDownloadPinnedMusic();
+		Purple::AddPinnedMusicAction(_controller, _thread, _sublist, _addAction);
 		addInfo();
 		addManageTopic();
 	}
@@ -4452,45 +4392,10 @@ void TogglePinnedThread(
 		not_null<Dialogs::Entry*> entry,
 		FilterId filterId,
 		Fn<void()> onToggled) {
-	// Purple: a view that owns its pinned order keeps it in settings.toml, so
-	// this toggles the tab's own list and the account never hears about it.
-	// Data::Session::setChatPinned() writes the file.
-	//
-	// Always true of an extra view, and true of the main view exactly when the
-	// preset states a `pinned' order of its own - otherwise that view mirrors
-	// the account's and falls through to the ordinary path below, which pins in
-	// the chat list as it always did.
-	const auto purple = Data::IsPurpleView(filterId);
-	const auto view = purple ? Data::PurpleViewIndex(filterId) : 0;
-	if (view > 0 || (purple && Purple::PresetOwnsPins())) {
-		const auto history = entry->asHistory();
-		if (!history) {
-			return;
-		}
-		const auto owner = &history->owner();
-		const auto isPinned = !history->isPinnedDialog(filterId);
-		if (isPinned && !owner->pinnedCanPin(filterId, history)) {
-			// Not FilterPinsLimitBox: the allowance being spent is the ordinary
-			// chat one, and this is not a folder to offer more of.
-			controller->show(Box(PinsLimitBox, &history->session()));
-			return;
-		}
-		owner->setChatPinned(history, filterId, isPinned);
-		if (isPinned) {
-			controller->content()->dialogsToUp();
-			if (onToggled) {
-				onToggled();
-			}
-		}
+	if (Purple::TogglePinnedInView(controller, entry, filterId, onToggled)) {
 		return;
 	}
-
-	// Pinning inside a MIRRORING main view is pinning in the chat list: that
-	// view's order is a copy of the main one, so there is nothing of its own to
-	// toggle and nothing to save to a server that has never heard of it. A
-	// preset that owns its order took the branch above instead. See
-	// Data::kPurpleViewFilterId.
-	if (!filterId || Data::IsPurpleView(filterId)) {
+	if (!filterId) {
 		return TogglePinnedThread(controller, entry, onToggled);
 	}
 	const auto history = entry->asHistory();

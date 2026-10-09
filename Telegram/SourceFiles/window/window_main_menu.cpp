@@ -37,7 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
-#include "purple/purple_preset_box.h"
+#include "purple/purple_chat_menus.h"
 #include "settings/sections/settings_advanced.h"
 #include "settings/sections/settings_calls.h"
 #include "settings/sections/settings_information.h"
@@ -738,14 +738,11 @@ void MainMenu::setupMenu() {
 			_controller->session().supportTemplates().reload();
 		});
 	}
-	// Purple: above Settings rather than inside it, because a work preset is
-	// switched several times a day and settings are not. The label carries the
-	// active preset, so the current mode is readable without opening anything.
 	addAction(
 		Purple::PresetMenuLabel(),
 		{ &st::menuIconTagFilter }
 	)->setClickedCallback([=] {
-		controller->show(Box(Purple::PresetBox, &controller->session()));
+		Purple::ShowPresetBox(controller);
 	});
 
 	addAction(
