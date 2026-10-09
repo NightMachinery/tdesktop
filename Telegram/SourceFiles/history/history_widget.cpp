@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
+#include "purple/hooks/mute.h"
 
 #include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
@@ -3658,8 +3659,7 @@ void HistoryWidget::updateNotifyControls() {
 
 	// Purple: the label has to name what the button will do, and the button
 	// moves the user's own setting - see toggleMuteUnmute().
-	_muteUnmute->setText((session().data().notifySettings()
-		.purpleMutedWithoutPreset(_history)
+	_muteUnmute->setText((Purple::MutedWithoutPreset(_history)
 		? tr::lng_channel_unmute(tr::now)
 		: tr::lng_channel_mute(tr::now)).toUpper());
 	if (!session().data().notifySettings().silentPostsUnknown(_peer)) {
@@ -5880,8 +5880,7 @@ void HistoryWidget::toggleMuteUnmute() {
 	// and a preset can be what makes it true. Toggling from it sent an unmute
 	// for a chat the user may never have muted, and the bar did not change
 	// because the preset was still holding it. Ask for their own setting.
-	const auto wasMuted = session().data().notifySettings()
-		.purpleMutedWithoutPreset(_history);
+	const auto wasMuted = Purple::MutedWithoutPreset(_history);
 	const auto muteForSeconds = Data::MuteValue{
 		.unmute = wasMuted,
 		.forever = !wasMuted,

@@ -104,41 +104,7 @@ public:
 		not_null<const PeerData*> peer) const;
 	[[nodiscard]] bool soundUnknown(not_null<const PeerData*> peer) const;
 
-	// Purple: re-evaluates the cached mute after a work preset moved this chat
-	// between lists. Nothing about the peer itself changed, so none of the
-	// upstream update paths reach it. See docs/purple/work_mode.md.
 	void purpleRefreshMute(not_null<PeerData*> peer);
-
-	// Purple: what isMuted() would say if no work preset were imposing one.
-	// The UI needs both answers - one to know the chat is silent, the other to
-	// know whether offering Unmute would lift anything - and this has to be
-	// the real accessor rather than a peek at muteUntil, because a chat can be
-	// muted by the account-wide default for its type with nothing set on it.
-	[[nodiscard]] bool purpleMutedWithoutPreset(
-		not_null<const Thread*> thread) const;
-	[[nodiscard]] bool purpleMutedWithoutPreset(
-		not_null<const PeerData*> peer) const;
-
-	// Purple: whether the active preset is what is silencing this chat, by
-	// either of the two ways it can - no list it names lets the chat notify, or
-	// a folder it names silences it. Both halves, because a menu built from
-	// half of it disagrees with the mute it is describing: a chat silenced only
-	// by a folder used to get no "Silenced by 'Work'" row and an Unmute item
-	// that lifted nothing, since the preset put the mute straight back.
-	[[nodiscard]] bool purpleSilenced(not_null<const PeerData*> peer) const;
-
-	// Purple: the folder half on its own, for the places that have already
-	// established the list half. False the moment no preset asks, which is what
-	// keeps a folder walk out of every other mute query.
-	[[nodiscard]] bool purpleSilencedByFolder(
-		not_null<const PeerData*> peer) const;
-
-	// Purple: notice when the answer above flips and re-evaluate the mute.
-	// A rule-based folder decides membership from the chat's own properties, so
-	// a chat can drift into one with nobody sending a notification about it -
-	// and History::muted() is a cache, so it would go on ringing. Cheap for
-	// every preset that silences no folder: one empty-vector test.
-	void purpleRefreshFolderMute(not_null<PeerData*> peer);
 
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;
@@ -165,12 +131,6 @@ private:
 		not_null<const PeerData*> peer,
 		crl::time *changesIn) const;
 
-	// The body of isMuted() below the Purple gate, split out so both can be
-	// asked separately. See purpleMutedWithoutPreset above.
-	[[nodiscard]] bool purpleMutedWithoutPreset(
-		not_null<const PeerData*> peer,
-		crl::time *changesIn) const;
-
 	[[nodiscard]] DefaultValue &defaultValue(DefaultNotify type);
 	[[nodiscard]] const DefaultValue &defaultValue(DefaultNotify type) const;
 	[[nodiscard]] const PeerNotifySettings &defaultSettings(
@@ -193,10 +153,6 @@ private:
 	DefaultValue _defaultValues[3];
 	std::unordered_set<not_null<const PeerData*>> _mutedPeers;
 
-	// Purple: who purpleSilencedByFolder() said yes to last time we looked, so
-	// a flip is detectable. Keyed by PeerId rather than by pointer because it
-	// outlives nothing and must not keep anything alive.
-	base::flat_set<PeerId> _purpleSilencedByFolder;
 	std::unordered_map<not_null<ForumTopic*>, rpl::lifetime> _mutedTopics;
 	base::Timer _unmuteByFinishedTimer;
 

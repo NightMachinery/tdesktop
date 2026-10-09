@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
+#include "purple/hooks/mute.h"
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
@@ -262,7 +263,7 @@ void PeerMenuAddMuteSubmenuAction(
 	// straight back to muted. Say what is actually holding it, offer the one
 	// control that moves it, and pick the item below from the user's own
 	// setting rather than the effective one, so their own mute stays reachable.
-	const auto byPreset = notifySettings->purpleSilenced(thread->peer());
+	const auto byPreset = Purple::Silenced(thread->peer());
 	if (byPreset) {
 		const auto show = controller->uiShow();
 		const auto session = &controller->session();
@@ -272,7 +273,7 @@ void PeerMenuAddMuteSubmenuAction(
 			&st::menuIconMute);
 	}
 	const auto isMuted = byPreset
-		? notifySettings->purpleMutedWithoutPreset(thread)
+		? Purple::MutedWithoutPreset(thread)
 		: notifySettings->isMuted(thread);
 	if (isMuted) {
 		const auto text = tr::lng_context_unmute(tr::now)

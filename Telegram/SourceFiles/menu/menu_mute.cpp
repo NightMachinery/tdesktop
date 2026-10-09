@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "menu/menu_mute.h"
+#include "purple/hooks/mute.h"
 
 #include "boxes/ringtones_box.h"
 #include "data/data_session.h"
@@ -255,8 +256,7 @@ Descriptor ThreadDescriptor(not_null<Data::Thread*> thread) {
 		.updateSound = updateSound,
 		.updateMutePeriod = updateMutePeriod,
 		.volumeController = Data::ThreadRingtonesVolumeController(thread),
-		.purplePreset = thread->owner().notifySettings().purpleSilenced(
-			thread->peer())
+		.purplePreset = Purple::Silenced(thread->peer())
 			? Purple::ViewName()
 			: QString(),
 	};
@@ -308,7 +308,7 @@ bool ToggleMuteForever(not_null<Data::Thread*> thread) {
 	// chat this always computed "already muted" and sent an unmute - clearing
 	// a mute the user had set, or writing one for a chat they had never muted,
 	// and either way changing nothing on screen because the preset held.
-	const auto muted = !settings->purpleMutedWithoutPreset(thread);
+	const auto muted = !Purple::MutedWithoutPreset(thread);
 	settings->update(thread, muted
 		? Data::MuteValue{ .forever = true }
 		: Data::MuteValue{ .unmute = true });

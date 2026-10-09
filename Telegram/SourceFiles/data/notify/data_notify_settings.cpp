@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/notify/data_notify_settings.h"
+#include "purple/hooks/mute.h"
 
 #include "apiwrap.h"
 #include "api/api_ringtones.h"
@@ -24,10 +25,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "main/main_session.h"
 #include "history/history.h"
-#include "main/main_session.h"
-#include "data/data_chat_filters.h"
-#include "history/history.h"
-#include "purple/purple_gate.h"
 #include "window/notifications_manager.h"
 
 namespace Data {
@@ -373,37 +370,6 @@ void NotifySettings::purpleRefreshMute(not_null<PeerData*> peer) {
 	updateLocal(peer);
 }
 
-void NotifySettings::purpleRefreshFolderMute(not_null<PeerData*> peer) {
-	if (Purple::SilencedFolders().empty()) {
-		// Nothing to drift into. Clearing the set here rather than leaving it
-		// is what stops a stale yes surviving a change of preset: the next
-		// preset that does silence a folder starts from nobody.
-		if (!_purpleSilencedByFolder.empty()) {
-			_purpleSilencedByFolder.clear();
-		}
-		return;
-	}
-	const auto id = peer->id;
-	const auto now = purpleSilencedByFolder(peer);
-	if (now == _purpleSilencedByFolder.contains(id)) {
-		return;
-	} else if (now) {
-		_purpleSilencedByFolder.emplace(id);
-	} else {
-		_purpleSilencedByFolder.remove(id);
-	}
-	// Deferred, because the caller is Session::refreshChatListEntry() and this
-	// notifies: re-evaluating a mute moves the chat's unread through every list
-	// holding it, and doing that inside the walk that is currently placing the
-	// chat in those lists is how the totals drift.
-	const auto session = &peer->session();
-	crl::on_main(session, [=] {
-		if (const auto found = session->data().peerLoaded(id)) {
-			updateLocal(found);
-		}
-	});
-}
-
 void NotifySettings::updateLocal(not_null<PeerData*> peer) {
 	const auto history = _owner->historyLoaded(peer->id);
 	auto changesIn = crl::time(0);
@@ -562,17 +528,6 @@ bool NotifySettings::isMuted(not_null<const Thread*> thread) const {
 	return isMuted(thread, nullptr);
 }
 
-bool NotifySettings::purpleMutedWithoutPreset(
-		not_null<const Thread*> thread) const {
-	// Same shape as isMuted(thread) above: a topic's own setting wins, and
-	// everything else falls through to the peer.
-	const auto topic = thread->asTopic();
-	const auto until = topic ? topic->notify().muteUntil() : std::nullopt;
-	return until
-		? MutedFromUntil(*until, nullptr)
-		: purpleMutedWithoutPreset(thread->peer(), nullptr);
-}
-
 NotifySound NotifySettings::sound(not_null<const Thread*> thread) const {
 	const auto topic = thread->asTopic();
 	const auto sound = topic ? topic->notify().sound() : std::nullopt;
@@ -596,26 +551,9 @@ bool NotifySettings::soundUnknown(not_null<const Thread*> thread) const {
 bool NotifySettings::isMuted(
 		not_null<const PeerData*> peer,
 		crl::time *changesIn) const {
-	// Purple: a work preset can silence a list, never unsilence one - a chat
-	// the user muted stays muted whichever list it falls into - so this is
-	// only ever an extra mute, and belongs first. Going through the same
-	// accessor the rest of the app uses is deliberate: History::muted() is
-	// cached from here, and the unread badges split muted from unmuted by that
-	// flag, so the badges follow without a second gate anywhere.
-	if (purpleSilenced(peer)) {
-		if (changesIn) {
-			// Nothing here expires on a clock. The preset changing is what
-			// lifts it, and that path re-evaluates every peer explicitly.
-			*changesIn = kMaxNotifyCheckDelay;
-		}
+	if (Purple::PresetMutes(peer, changesIn, kMaxNotifyCheckDelay)) {
 		return true;
 	}
-	return purpleMutedWithoutPreset(peer, changesIn);
-}
-
-bool NotifySettings::purpleMutedWithoutPreset(
-		not_null<const PeerData*> peer,
-		crl::time *changesIn) const {
 	if (const auto until = peer->notify().muteUntil()) {
 		return MutedFromUntil(*until, changesIn);
 	} else if (const auto community = CommunityFallback(peer)) {
@@ -631,64 +569,6 @@ bool NotifySettings::purpleMutedWithoutPreset(
 
 bool NotifySettings::isMuted(not_null<const PeerData*> peer) const {
 	return isMuted(peer, nullptr);
-}
-
-bool NotifySettings::purpleMutedWithoutPreset(
-		not_null<const PeerData*> peer) const {
-	return purpleMutedWithoutPreset(peer, nullptr);
-}
-
-bool NotifySettings::purpleSilenced(not_null<const PeerData*> peer) const {
-	if (!Purple::Filtering() || Purple::Peeking()) {
-		return false;
-	}
-	// An "until" decision outranks the preset here too. Notify lifts the
-	// preset's mute and only the preset's - purpleMutedWithoutPreset() below
-	// still has the last word, so a chat you muted yourself stays muted, which
-	// is the rule this whole path is built on.
-	if (const auto override = Purple::OverrideFor(peer)) {
-		switch (*override) {
-		case Purple::OverrideKind::Notify: return false;
-		case Purple::OverrideKind::Hide: return true;
-		case Purple::OverrideKind::Show: break;
-		}
-	}
-	return !Purple::VisibleFor(peer).notify || purpleSilencedByFolder(peer);
-}
-
-bool NotifySettings::purpleSilencedByFolder(
-		not_null<const PeerData*> peer) const {
-	const auto &silenced = Purple::SilencedFolders();
-	if (silenced.empty()) {
-		return false;
-	}
-	const auto history = _owner->historyLoaded(peer->id);
-	if (!history) {
-		// Reached from the History constructor, among other places, before
-		// there is a history to ask a folder about. The answer corrects itself
-		// on the next refresh, and guessing here would mean asking a filter
-		// about a half-built object.
-		return false;
-	}
-	for (const auto &filter : _owner->chatsFilters().list()) {
-		if (!filter.id()) {
-			continue;
-		}
-		for (const auto &name : silenced) {
-			if (name.compare(
-					filter.title().text.text,
-					Qt::CaseInsensitive)) {
-				continue;
-			}
-			// ignorePresetMute: the membership question must be answered as
-			// if this preset silenced nothing, or an exclude-muted folder
-			// would drop the chat the moment we silenced it and oscillate.
-			if (filter.contains(history, false, true)) {
-				return true;
-			}
-		}
-	}
-	return false;
 }
 
 bool NotifySettings::silentPosts(not_null<const PeerData*> peer) const {

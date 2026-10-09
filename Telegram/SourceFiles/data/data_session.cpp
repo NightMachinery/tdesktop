@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
+#include "purple/hooks/mute.h"
 
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -1878,7 +1879,7 @@ void Session::refreshPurpleWorkMode() {
 		// Mute first: hiding the chat takes its unread out of every running
 		// total, and it has to already be counted as muted or not when it
 		// goes, or the totals drift by whatever that chat was carrying.
-		_notifySettings->purpleRefreshMute(peer);
+		Purple::RefreshMute(peer);
 		const auto history = historyLoaded(peer->id);
 		if (!history) {
 			continue;
@@ -5966,7 +5967,7 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 	// cache that would go on ringing. Same place and same shape as the quiet
 	// list above, and free for a preset that silences no folder.
 	if (history) {
-		_notifySettings->purpleRefreshFolderMute(history->peer);
+		Purple::RefreshFolderMute(history->peer);
 	}
 
 	if (!history) {
