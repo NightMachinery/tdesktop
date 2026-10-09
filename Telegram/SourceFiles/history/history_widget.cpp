@@ -160,8 +160,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_timecode_action.h"
 #include "mtproto/mtproto_config.h"
 #include "lang/lang_keys.h"
-#include "purple/purple_screentime_cover.h"
-#include "purple/purple_screentime_recorder.h"
+#include "purple/purple_screentime_history_widget.h"
 #include "settings/business/settings_quick_replies.h"
 #include "settings/settings_credits_graphics.h"
 #include "storage/localimageloader.h"
@@ -379,8 +378,8 @@ HistoryWidget::HistoryWidget(
 	// rest of the constructor has finished. Created unconditionally rather than
 	// on demand: it is three widgets and no work while [screen_time] is off,
 	// and the alternative is a settings reload reaching into every open chat
-	// pane to build one. See purple/purple_screentime_cover.h.
-	_purpleScreenTimeCover = std::make_unique<Purple::ScreenTimeCover>(this);
+	// pane to build one. See purple/purple_screentime_history_widget.h.
+	_purpleScreenTimeCover = Purple::MakeHistoryScreenTimeCover(this);
 
 	setAcceptDrops(true);
 
@@ -3885,7 +3884,9 @@ bool HistoryWidget::canWriteMessage() const {
 void HistoryWidget::updateControlsVisibility() {
 	// Purple: the one place that runs on every change of what this pane is
 	// showing, which is exactly when the cover has to ask again.
-	_purpleScreenTimeCover->setPeer(_peer);
+	Purple::SetHistoryWidgetScreenTimeCoverPeer(
+		_purpleScreenTimeCover.get(),
+		_peer);
 
 	auto fieldDisabledRemoved = (_fieldDisabled != nullptr);
 	auto fieldVisibilityChanged = false;
@@ -5503,15 +5504,12 @@ void HistoryWidget::sendVoice(const VoiceToSend &data) {
 }
 
 void HistoryWidget::send(Api::SendOptions options) {
+	Purple::NoteScreenTimeAction(
+		_history ? _history->peer.get() : nullptr,
+		u"send"_q);
 	if (!_history) {
 		return;
-	}
-
-	// Purple: before the branches, so an edit saved from here and a scheduled
-	// message count the same as a plain send. See purple_screentime_recorder.h.
-	Purple::NoteScreenTimeAction(_peer, u"send"_q);
-
-	if (_editMsgId) {
+	} else if (_editMsgId) {
 		saveEditMessage({});
 		return;
 	} else if (const auto page = shownRichMessage()) {
@@ -7995,12 +7993,12 @@ void HistoryWidget::updateControlsGeometry() {
 		st::lineWidth);
 
 	// Purple: everything under the top bar - the history and the composer with
-	// it. See purple/purple_screentime_cover.h.
-	_purpleScreenTimeCover->setGeometry(QRect(
-		0,
+	// it. See purple/purple_screentime_history_widget.h.
+	Purple::SetHistoryWidgetScreenTimeCoverGeometry(
+		_purpleScreenTimeCover.get(),
 		_topBar->bottomNoMargins(),
 		width,
-		std::max(height() - _topBar->bottomNoMargins(), 0)));
+		height());
 }
 
 void HistoryWidget::itemRemoved(not_null<const HistoryItem*> item) {

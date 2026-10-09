@@ -725,11 +725,13 @@ for time, so they are recorded when the user acts, not when a message is sent.
 
 **`Telegram/SourceFiles/history/history_widget.cpp`**: +62 -3, 12 hunks,
 near 2. Owners: B11 (two mute lines), then B7.
-- Today: two includes, the screen time cover (construction, peer, geometry),
+- Today: two includes, direct cover construction, peer and geometry calls,
   `NoteScreenTimeAction` for voice, typing, send, attach, reply and edit, and
-  `send()` split around the send note.
-- Leaves: one facade include, the cover's three one-line hooks, one call per
-  action, and upstream's `else if (_editMsgId)` back in `send()`.
+  a send activity hook before upstream's `if` / `else if` chain.
+- Leaves: one `purple_screentime_history_widget.h` facade include and one
+  facade call each for cover construction, peer and geometry, one null-safe
+  `NoteScreenTimeAction` before the null-history / `else if (_editMsgId)`
+  draft branch chain in `send()`, and one call per other activity.
 
 **`Telegram/SourceFiles/history/history_widget.h`**: +11 -0, 2 hunks, near
 1. Stays: the cover member and its forward declaration.
@@ -742,11 +744,12 @@ near 2. Owners: B11 (two mute lines), then B7.
   _history->peer.get() : nullptr; }, sendContentRequests(SendRequestType::Text)
   | rpl::to_empty, _attachRequests.events(),
   _voiceRecordBar->recordingStateChanges(), _wrap->lifetime())` from `init()`,
-  and one call each for typing, edit and reply. The getter reads `_history`
-  when the event fires, because the controls outlive the chat.
-- B7b: send comes from the unfiltered internal stream, which removes the
-  doubled `editStarsFrom` stars box. A send refused for too few stars still
-  counts once.
+  and one call each for typing, edit and reply. The helper reads `_history`
+  for each event and binds subscriptions to the passed lifetime, because the
+  controls outlive the chat.
+- B7b: the recorder observes the unfiltered internal stream before
+  `sendRequests()` applies the stars check, avoiding a second `editStarsFrom`
+  dialog while counting an insufficient-stars send request once.
 
 `Telegram/SourceFiles/core/application.cpp` starts the recorder; see
 "App-level hooks".
@@ -995,7 +998,7 @@ All of them exist at HEAD, and each now has an owner:
 - B15: main_domain.cpp, apiwrap.cpp's `LocalPremium` term and the three
   sponsored early returns;
 - B8: `addTranslate`'s local-premium term;
-- B7: `WatchScreenTime`'s comment;
+- B7: `WatchScreenTime(this)` without its explanatory comment;
 - B5 and D4: the settings-offer hook in window_session_controller.cpp;
 - B9: the twelve instant-replace sites;
 - B16: file_upload.{h,cpp}.

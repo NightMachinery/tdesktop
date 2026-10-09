@@ -68,6 +68,8 @@ PRIVATE
     purple/purple_screentime_box.h
     purple/purple_screentime_cover.cpp
     purple/purple_screentime_cover.h
+    purple/purple_screentime_history_widget.cpp
+    purple/purple_screentime_history_widget.h
     purple/purple_screentime_recorder.cpp
     purple/purple_screentime_recorder.h
     purple/purple_sync.cpp

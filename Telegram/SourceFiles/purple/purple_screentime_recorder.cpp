@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 #include "window/window_session_controller.h"
 
+#include <utility>
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -654,6 +656,28 @@ void WatchScreenTime(not_null<Window::SessionController*> controller) {
 
 void NoteScreenTimeAction(PeerData *peer, const QString &action) {
 	Instance().noteAction(peer, action);
+}
+
+void RecordComposeActions(
+		Fn<PeerData*()> currentPeer,
+		rpl::producer<> send,
+		rpl::producer<std::optional<bool>> attach,
+		rpl::producer<bool> voice,
+		rpl::lifetime &lifetime) {
+	const auto noteAction = [=](const QString &action) {
+		NoteScreenTimeAction(currentPeer(), action);
+	};
+	std::move(send) | rpl::on_next([=] {
+		noteAction(u"send"_q);
+	}, lifetime);
+	std::move(attach) | rpl::on_next([=] {
+		noteAction(u"attach"_q);
+	}, lifetime);
+	std::move(voice) | rpl::filter([](bool active) {
+		return active;
+	}) | rpl::on_next([=] {
+		noteAction(u"voice"_q);
+	}, lifetime);
 }
 
 std::vector<Event> ScreenTimeEvents() {

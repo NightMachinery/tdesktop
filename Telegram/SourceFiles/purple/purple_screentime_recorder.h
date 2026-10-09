@@ -7,7 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/basic_types.h"
 #include "purple/purple_screentime.h"
+
+#include <rpl/lifetime.h>
+#include <rpl/producer.h>
+
+#include <optional>
 
 class PeerData;
 
@@ -49,6 +55,12 @@ void WatchScreenTime(not_null<Window::SessionController*> controller);
 // as a span of activity, so a burst would otherwise write a hundred lines to
 // describe the three seconds they already describe.
 void NoteScreenTimeAction(PeerData *peer, const QString &action);
+void RecordComposeActions(
+	Fn<PeerData*()> currentPeer,
+	rpl::producer<> send,
+	rpl::producer<std::optional<bool>> attach,
+	rpl::producer<bool> voice,
+	rpl::lifetime &lifetime);
 
 // Everything the log holds, oldest first, with whatever has not reached disk
 // yet already in it - a screen opened a second after a send must show that
