@@ -545,17 +545,20 @@ header and facade. See [work_mode.md](work_mode.md#mute-upstream-hooks).
 
 ## Temporary-row marks
 
-**`Telegram/SourceFiles/dialogs/ui/dialogs_layout.cpp`**: +83 -0, 4 hunks,
-near 1. Owner: B13.
-- Today: the stripe and ring painters and two style reads.
-- Leaves: two calls; the painters move to `purple_row_mark.cpp`.
-- Account: *must pass*. The two `RecentMarkStyle()` reads at lines 318 and
-  568 become reads of the style carried in `context.purpleMark`, which
-  `RowMarkFor` leaves empty for a stock account.
+**`Telegram/SourceFiles/dialogs/ui/dialogs_layout.cpp`**: owner B13.
+- B13 moves the stripe and ring painters into `purple_row_mark.cpp`, leaving
+  two calls. The style comes from `context.purpleMark`, not a global read in
+  the painter.
+- `RowMarkFor(not_null<Dialogs::Entry*>)` receives the actual row entry. A
+  history row gets its temporary span from its own `History`; the style still
+  follows the existing shared app-wide settings. No per-account preset
+  selection is introduced.
+- The `cacheAllowed` term in `dialogs_inner_widget.cpp` checks the carried
+  deadline so a row with a timed mark is not frozen in the scroll cache.
 
-**`Telegram/SourceFiles/dialogs/ui/dialogs_layout.h`**: +11 -0, 1 hunk, near
-1. Owner: B13.
-- Leaves: one include and one `Purple::RowMark purpleMark` member.
+**`Telegram/SourceFiles/dialogs/ui/dialogs_layout.h`**: owner B13.
+- Leaves one Purple header include and one `Purple::RowMark purpleMark`
+  member in `PaintContext`.
 
 ## Suggestions, stories and top peers
 

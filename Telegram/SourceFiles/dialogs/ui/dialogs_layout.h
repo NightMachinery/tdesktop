@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "dialogs/ui/dialogs_quick_action_context.h"
+#include "purple/purple_row_mark.h"
 #include "ui/cached_round_corners.h"
 
 namespace style {
@@ -68,15 +69,7 @@ struct PaintContext {
 	float64 topicsExpanded = 0.;
 	crl::time now = 0;
 
-	// Purple: when this row stops being temporary, or 0 when it is not one.
-	// Set per row beside rightButton and quickActionContext below, and read
-	// only when `recentStyle' asks for something.
-	crl::time purpleTemporaryUntil = 0;
-	crl::time purpleTemporaryFrom = 0;
-
-	// Purple: whether a "show until" is holding this row, rather than the close
-	// buffer. Only the mark's colour depends on it.
-	bool purpleTemporaryHeld = false;
+	Purple::RowMark purpleMark;
 
 	QStringView searchLowerText;
 	int width = 0;
