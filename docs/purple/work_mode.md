@@ -3541,6 +3541,12 @@ and restriction remain shared app-wide; the session identifies the folder data
 and the future account-policy seam. The file-level call sites are recorded in
 [upstream_hooks.md](upstream_hooks.md).
 
+Direct macOS checks covered mouse folder switching, Control-Shift-Up/Down
+navigation and Escape returning to All chats under Normal. Work Mode retained
+its original Normal selection, and the Advanced page exposed the Purple and
+Work Mode controls after scrolling. These checks do not establish preset-view
+icons, a reordered home folder, server pin ordering or multiple-account behavior.
+
 ## Mute upstream hooks
 
 `purple/hooks/mute.h` exposes the B11 facade. The upstream notification
