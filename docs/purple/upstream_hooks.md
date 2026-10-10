@@ -433,38 +433,35 @@ Owner: B10d stage 2 (with B14).
 
 **`Telegram/SourceFiles/ui/widgets/chat_filters_tabs_strip.cpp`**: +62 -19,
 16 hunks, near 7. Owner: B10u.
-- Today: `purpleShownList()` swaps, the view tab menu, a whole-strip pin
-  under a restricted preset in place of upstream's pinned intervals, and the
-  icon condition.
-- Leaves: `ShowViewTabMenu`, upstream's pinned intervals plus one whole-strip
-  line, and the `purpleShownList()` swaps (B10d decides whether they become
-  free functions). The icon condition goes back to upstream.
-- Account: `PinWholeStripIfRestricted(session)` *must pass* the session,
-  replacing `FoldersRestricted()` at lines 288 and 456.
-
-B10a home routing in `window_filters_menu.cpp` now passes the owning session
-to `HomeFilterId`; Normal selects id0 independently of folder ordering.
+- B10u leaves `ShowViewTabMenu`, `ShownList(session)` token swaps, upstream
+  pinned intervals plus the `PinWholeStripIfRestricted(session)` hook, and the
+  upstream icon condition with `UseAllFilterIcon` preserving the views' All icon.
+  B10d later decides whether the shown-list wrapper
+  becomes a free function.
+- Account: the strip's session is passed at both pin sites, lines 288 and 456.
+  Current preset settings remain shared app-wide.
 
 **`Telegram/SourceFiles/window/window_filters_menu.cpp`**: +54 -13, 13
 hunks, near 5. Owner: B10u.
-- Today: the strip's change merge, `purpleShownList()` swaps, the whole-strip
-  pin, the icon ternary, the view menu branch and the reorder refusal.
-- Leaves: `FilterStripChanges`, upstream's pinned-interval block followed by
-  `PinWholeStripIfRestricted`, and the `IsPurpleView` / `FillViewMenu`
-  branch. The icon ternary goes.
-- Account: `PinWholeStripIfRestricted(session)` *must pass* the session,
-  replacing `FoldersRestricted()` at lines 364 and 843. The `ActiveChanges()`
-  producer inside `FilterStripChanges` needs none.
+- B10u leaves the `FilterStripChanges` and `ShownList(session)` facade calls,
+  upstream pinned intervals plus `PinWholeStripIfRestricted(session)`, and the
+  `FillViewMenu` hook. `UseAllFilterIcon` preserves the views' All icon; nonview
+  filter icons keep upstream computation.
+- Account: `PinWholeStripIfRestricted(session)` carries the owning session at
+  lines 364 and 843. Current preset settings remain shared app-wide; the
+  session is passed at the seam for its folder data and future account policy.
+  The `ActiveChanges()` signal itself is global.
 
 **`Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp`**: +47 -7, 12
 hunks, near 3. Owners: B10u, B3c, B13.
 - Today: `refreshWithCollapsedRows`' view term, the temporary-row paint
   block, the `cacheAllowed` term, `savePinnedOrder`'s view branch,
   `refreshShownList`, `refreshEmpty`, `switchToFilter` and `setupShortcuts`.
-- B10u leaves: one condition in `refreshShownList` and `(_filterId > 0)` back
-  in `refreshEmpty`; one guard in `switchToFilter`; one
-  `|| Data::IsPurpleView(_filterId)` term in `refreshWithCollapsedRows`; one
-  token swap in `setupShortcuts`.
+- B10u leaves: one condition in `refreshShownList`, the original nonzero-id
+  predicate in `refreshEmpty`, one guard in `switchToFilter`, one
+  `|| Data::IsPurpleView(_filterId)` term in `refreshWithCollapsedRows`, and
+  the `ShownList(session)` token swap in `setupShortcuts`. `savePinnedOrder`
+  stays with B3c.
 - B3c leaves: upstream's `else if (_filterId)` in `savePinnedOrder`, preceded
   by `} else if (Purple::SavePinnedViewOrder(&session(), _filterId,
   _openedFolder)) {` with an empty body. This is the only `savePinnedOrder`
@@ -477,12 +474,9 @@ hunks, near 3. Owners: B10u, B3c, B13.
 
 **`Telegram/SourceFiles/dialogs/dialogs_widget.cpp`**: +5 -1, 2 hunks, near
 0. Owners: B10u, B12.
-- Today: `escape()` swapped to the shown list, with a comment.
-- Leaves: one line in `escape()` (B10u). B12 adds the top-peers restart at
-  line 2151 (see "Suggestions, stories and top peers").
-
-B10a constructor and home routing in `window_session_controller.cpp` now pass
-the owning session to `HomeFilterId`; preset routing retains its default id.
+- B10u leaves one `Purple::EscapeToHome(controller())` call in `escape()`.
+  B12 adds the top-peers restart at line 2151 (see "Suggestions, stories and
+  top peers").
 
 **`Telegram/SourceFiles/window/window_session_controller.cpp`**: +44 -14, 8
 hunks, near 3. Owners: B10u, B7, B5.
@@ -490,11 +484,12 @@ hunks, near 3. Owners: B10u, B7, B5.
   `ActiveChanges()` producer in the filters-menu merge, `WatchScreenTime`,
   `checkOpenedFilter` rewritten, home-filter literals in `openFolder` and
   `openCommunity`, and the `CheckAndJumpToNearChatsFilter` swap.
-- B10u leaves: `if (Purple::CheckOpenedView(this)) { return; }` before
-  upstream's restored `checkOpenedFilter` body; `Purple::HomeFilterId(
-  &session())` at the four literals; `Purple::ActiveChanges()` as one
-  producer in the merge, comment gone; the `CheckAndJumpToNearChatsFilter`
-  swap.
+- B10u leaves `Purple::CheckOpenedView(this)` before the restored upstream
+  `checkOpenedFilter` body, `Purple::HomeFilterId(&session())` at four
+  home-selection sites, one `Purple::ActiveChanges()` merge term, and the
+  `CheckAndJumpToNearChatsFilter` forwarding hook. B10a first makes Normal's
+  home id zero; callers use `defaultId()` for home only while a preset is
+  active.
 - B7 leaves: `Purple::WatchScreenTime(this)` without its 3-line comment.
 - B5 and D4: `Purple::OfferNewerSettingsFromSavedMessages(session, uiShow())`
   stays (a 3-line hook) until the sync chat ships and the offer retires.

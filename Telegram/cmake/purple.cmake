@@ -41,6 +41,7 @@ PRIVATE
     purple/purple_focus.h
     purple/purple_folder_strip.cpp
     purple/purple_folder_strip.h
+    purple/purple_window_session_controller.h
     purple/purple_gate.cpp
     purple/purple_gate.h
     purple/purple_instant_replaces.cpp

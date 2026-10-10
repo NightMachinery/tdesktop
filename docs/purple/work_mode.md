@@ -3529,6 +3529,18 @@ a policy:
 
 The fork's whole diff is findable with `git grep Purple::`.
 
+## Folder strip upstream hooks
+
+B10u moves view-menu construction, shown-list access, strip-change subscriptions,
+active-view navigation and home routing behind `purple_folder_strip`. Upstream
+files keep their nonview filter icons and premium pinned intervals. The
+`UseAllFilterIcon` hook preserves the All icon for Purple views; the original
+nonzero-id test preserves the loaded empty-folder state. The whole-strip
+restriction queried through a session-taking hook. The current preset resolver
+and restriction remain shared app-wide; the session identifies the folder data
+and the future account-policy seam. The file-level call sites are recorded in
+[upstream_hooks.md](upstream_hooks.md).
+
 ## Mute upstream hooks
 
 `purple/hooks/mute.h` exposes the B11 facade. The upstream notification

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
+#include "purple/purple_folder_strip.h"
+
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
 #include "dialogs/ui/chat_search_in.h"
@@ -676,10 +678,6 @@ void InnerWidget::refreshWithCollapsedRows(bool toTop) {
 			clearPressed();
 		}
 		_skipTopDialog = true;
-		// Purple: the preset view holds the Archive row exactly as All chats
-		// does, so it gets the collapsed row too. Without this the row is
-		// skipped above and never drawn anywhere - and needCollapsedRowsRefresh()
-		// then never settles, which the Assert after it would catch.
 		if (!inMainMenu && (!_filterId || Data::IsPurpleView(_filterId))) {
 			_collapsedRows.push_back(
 				std::make_unique<CollapsedRow>(archive));
@@ -3783,11 +3781,7 @@ void InnerWidget::refreshShownList() {
 		? _openedForum->topicsList()->indexed()
 		: _openedCommunity
 		? _openedCommunity->chatsList()->indexed()
-		// Purple: an open folder wins over the filter. Upstream forces the
-		// filter back to All chats before opening one, so this changes nothing
-		// there; the preset view is not All chats, and the archive has to keep
-		// showing the archive.
-		: _openedFolder
+		: (_openedFolder && (!_filterId || Data::IsPurpleView(_filterId)))
 		? session().data().chatsList(_openedFolder)->indexed()
 		: _filterId
 		? session().data().chatsFilters().chatsList(_filterId)->indexed()
@@ -5573,15 +5567,11 @@ void InnerWidget::switchToFilter(FilterId filterId) {
 		return;
 	}
 	const auto &list = session().data().chatsFilters().list();
-	// Purple: the preset view is a filter the server never sent, so it is not
-	// in the list to be found - and falling back to All chats for it would put
-	// the very chats the preset hides back on screen.
-	const auto view = Data::IsPurpleView(filterId);
-	const auto filterIt = (filterId && !view)
+	const auto filterIt = filterId
 		? ranges::find(list, filterId, &Data::ChatFilter::id)
 		: end(list);
 	const auto found = (filterIt != end(list));
-	if (!found && !view) {
+	if (!found && !Data::IsPurpleView(filterId)) {
 		filterId = 0;
 	}
 	if (_filterId == filterId) {
@@ -6211,10 +6201,7 @@ void InnerWidget::setupShortcuts() {
 
 		if (session().data().chatsFilters().has()) {
 			const auto filters = &session().data().chatsFilters();
-			// Purple: the shown list, because the shortcuts mean "the Nth tab I
-			// can see" - and with a preset's extra views on the strip that can
-			// now be more tabs than the account has folders, not only fewer.
-			const auto filtersCount = int(filters->purpleShownList().size());
+			const auto filtersCount = int(Purple::ShownList(&session()).size());
 			auto &&folders = ranges::views::zip(
 				Shortcuts::kShowFolder,
 				ranges::views::ints(0, ranges::unreachable));

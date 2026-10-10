@@ -44,8 +44,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_folders.h"
 #include "storage/storage_media_prepare.h"
 #include "api/api_chat_filters.h"
-#include "purple/purple_gate.h"
-#include "purple/purple_preset_box.h"
 #include "apiwrap.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
@@ -152,12 +150,8 @@ void FiltersMenu::setup() {
 
 	const auto filters = &_session->session().data().chatsFilters();
 	rpl::combine(
-		rpl::single(rpl::empty) | rpl::then(rpl::merge(
-			filters->changed(),
-			// Purple: a preset changes what the side bar shows - which folders
-			// are in it, and the name on the view standing in for All chats -
-			// without the account's own folders moving at all.
-			Purple::ActiveChanges())),
+		rpl::single(rpl::empty) | rpl::then(
+			Purple::FilterStripChanges(&_session->session())),
 		std::move(premium)
 	) | rpl::on_next([=] {
 		refresh();
@@ -271,7 +265,7 @@ void FiltersMenu::scrollToButton(not_null<Ui::RpWidget*> widget) {
 }
 
 void FiltersMenu::applyFilterAt(int start, int delta) {
-	const auto &list = _session->session().data().chatsFilters().purpleShownList();
+	const auto &list = Purple::ShownList(&_session->session());
 	const auto count = int(list.size());
 	// Move focus to the folder at `start`, then in the `delta` direction,
 	// stopping at the bounds (no wrap). Arrow keys only move focus; activation
@@ -293,7 +287,7 @@ void FiltersMenu::applyFilterAt(int start, int delta) {
 }
 
 void FiltersMenu::moveToFilter(int delta) {
-	const auto &list = _session->session().data().chatsFilters().purpleShownList();
+	const auto &list = Purple::ShownList(&_session->session());
 	const auto count = int(list.size());
 	// Move relative to the currently focused folder, so navigation continues
 	// from a locked one (which only takes focus, without becoming active); fall
@@ -313,7 +307,7 @@ void FiltersMenu::moveToFilter(int delta) {
 
 void FiltersMenu::moveToFilterEdge(int delta) {
 	const auto count = int(
-		_session->session().data().chatsFilters().purpleShownList().size());
+		Purple::ShownList(&_session->session()).size());
 	applyFilterAt((delta > 0) ? 0 : (count - 1), delta);
 }
 
@@ -359,15 +353,11 @@ void FiltersMenu::refresh() {
 	_reorder->cancel();
 
 	_reorder->clearPinnedIntervals();
-	const auto shown = int(filters->purpleShownList().size());
+	const auto shown = int(Purple::ShownList(&_session->session()).size());
 	const auto maxLimit = (reorderAll ? 1 : 0)
 		+ Data::PremiumLimits(&_session->session()).dialogFiltersCurrent();
 	const auto premiumFrom = (reorderAll ? 0 : 1) + maxLimit;
-	if (Purple::FoldersRestricted()) {
-		// Purple: applyReorder() below refuses a strip a preset has reshaped,
-		// because a position in it is not a position in the account's own list.
-		// Say so by not offering the drag rather than by letting it lift,
-		// animate and snap back with nothing to explain what happened.
+	if (Purple::PinWholeStripIfRestricted(&_session->session())) {
 		_reorder->addPinnedInterval(0, std::max(shown, 1));
 	} else {
 		if (!reorderAll) {
@@ -390,7 +380,7 @@ void FiltersMenu::refresh() {
 
 	auto now = base::flat_map<int, base::unique_qptr<Ui::SideBarButton>>();
 	const auto &currentFilter = _session->activeChatsFilterCurrent();
-	for (const auto &filter : filters->purpleShownList()) {
+	for (const auto &filter : Purple::ShownList(&_session->session())) {
 		const auto nextIsLocked = (now.size() >= premiumFrom);
 		if (nextIsLocked && (currentFilter == filter.id())) {
 			// Purple: home, not All chats - see ChatFilters::lookupId().
@@ -400,9 +390,7 @@ void FiltersMenu::refresh() {
 			_list,
 			filter.id(),
 			filter.title(),
-			// Purple: the view wears the All chats icon, as the tab it stands
-			// in for. It has no rules for ComputeFilterIcon to read anyway.
-			Data::IsPurpleView(filter.id())
+			Purple::UseAllFilterIcon(filter.id())
 				? Ui::FilterIcon::All
 				: Ui::ComputeFilterIcon(filter),
 			nextIsLocked);
@@ -768,61 +756,52 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 	_popupMenu = base::make_unique_q<Ui::PopupMenu>(
 		i->second.get(),
 		st::popupMenuWithIcons);
-	const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
-	// Purple: a preset view is not a folder - nothing to edit, nothing to
-	// delete. Marking it read means what it means for All chats.
-	if (Data::IsPurpleView(id)) {
-		const auto index = Data::PurpleViewIndex(id);
-		Window::MenuAddMarkAsReadChatListAction(
+	if (!Purple::FillViewMenu(
 			_session,
-			[=] { return _session->session().data().purpleViewList(index); },
-			addAction);
-		addAction(
-			u"Work Mode"_q,
-			crl::guard(&_outer, [=] {
-				_session->show(
-					Box(Purple::PresetBox, &_session->session()));
-			}),
-			&st::menuIconEdit);
-	} else if (id) {
-		addAction(
-			tr::lng_filters_context_edit(tr::now),
-			crl::guard(&_outer, [=] { EditExistingFilter(_session, id); }),
-			&st::menuIconEdit);
+			id,
+			_popupMenu.get(),
+			&_outer)) {
+		const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
+		if (id) {
+			addAction(
+				tr::lng_filters_context_edit(tr::now),
+				crl::guard(&_outer, [=] { EditExistingFilter(_session, id); }),
+				&st::menuIconEdit);
 
-		auto filteredChats = [=] {
-			return _session->session().data().chatsFilters().chatsList(id);
-		};
-		Window::MenuAddMarkAsReadChatListAction(
-			_session,
-			std::move(filteredChats),
-			addAction);
+			auto filteredChats = [=] {
+				return _session->session().data().chatsFilters().chatsList(id);
+			};
+			Window::MenuAddMarkAsReadChatListAction(
+				_session,
+				std::move(filteredChats),
+				addAction);
 
-		addAction({
-			.text = tr::lng_filters_context_remove(tr::now),
-			.handler = crl::guard(&_outer, [=, this] {
-				_removeApi.request(base::make_weak(&_outer), _session, id);
-			}),
-			.icon = &st::menuIconDeleteAttention,
-			.isAttention = true,
-		});
-	} else {
-		auto customUnreadState = [=] {
-			const auto session = &_session->session();
-			return Data::MainListMapUnreadState(
-				session,
-				session->data().chatsList()->unreadState());
-		};
-		Window::MenuAddMarkAsReadChatListAction(
-			_session,
-			[=] { return _session->session().data().chatsList(); },
-			addAction,
-			std::move(customUnreadState));
+			addAction({
+				.text = tr::lng_filters_context_remove(tr::now),
+				.handler = crl::guard(&_outer, [=, this] {
+					_removeApi.request(base::make_weak(&_outer), _session, id);
+				}),
+				.icon = &st::menuIconDeleteAttention,
+				.isAttention = true,
+			});
+		} else {
+			auto customUnreadState = [=] {
+				const auto session = &_session->session();
+				return Data::MainListMapUnreadState(
+					session,
+					session->data().chatsList()->unreadState());
+			};
+			Window::MenuAddMarkAsReadChatListAction(
+				_session,
+				[=] { return _session->session().data().chatsList(); },
+				addAction,
+				std::move(customUnreadState));
 
-		addAction(
-			tr::lng_filters_setup_menu(tr::now),
-			crl::guard(&_outer, [=] { openFiltersSettings(); }),
-			&st::menuIconEdit);
+			addAction(
+				tr::lng_filters_setup_menu(tr::now),
+				crl::guard(&_outer, [=] { openFiltersSettings(); }),
+				&st::menuIconEdit);
+		}
 	}
 	if (_popupMenu->empty()) {
 		_popupMenu = nullptr;
@@ -839,10 +818,7 @@ void FiltersMenu::applyReorder(
 		return;
 	}
 
-	// Purple: same as the tabs strip - these positions index the side bar,
-	// which a work preset may have reduced to a subset, so reordering the real
-	// list by them would move the wrong folders.
-	if (Purple::FoldersRestricted()) {
+	if (Purple::PinWholeStripIfRestricted(&_session->session())) {
 		return;
 	}
 
