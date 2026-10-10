@@ -562,55 +562,40 @@ header and facade. See [work_mode.md](work_mode.md#mute-upstream-hooks).
 
 ## Suggestions, stories and top peers
 
-**`Telegram/SourceFiles/dialogs/ui/dialogs_suggestions.cpp`**: +205 -78, 21
-hunks, near 3. Owner: B12.
-- Today: the chat menu's lists submenu, `ShownInSuggestions`, rebuildable
-  recents, my-channels refresh, the recommendations predicate and refill,
-  `TopPeersContent` rewritten with a preset subscription.
-- Leaves: `AddListsSubmenu` in `FillEntryMenu`; `ShownInSuggestions` in
-  `RecentPeersContent`; `RecentsController::prepare` back to upstream with
-  the `RebuildRows` block appended; `prepare()` and `fill()` back to upstream,
-  with one guard in `fill()` and a block appended to `prepare()` that hides
-  the section by count; `TopPeersContent` back to upstream byte for byte. My
-  channels follow D8, which is still open: a live refresh copies about 15
-  upstream lines, a refresh on reopen copies none. About 45 lines with the
-  other B12 files.
-- Account: the recommendations predicate *must pass* `&session()`. Today it
-  is the file-local `ShowRecommendedChannels()` (line 462, called from three
-  places); the design proposes `ShowRecommendedChannels(session)`.
-  `ShownInSuggestions` (peers) and `AddListsSubmenu(menu, peer)` are *in
-  hand*.
-
-**`Telegram/SourceFiles/dialogs/ui/dialogs_stories_content.cpp`**: +23 -4, 5
-hunks, near 2. Owner: B12.
-- Today: the `StoryShown` guard, the total recomputed after the loop, and
-  `ActiveChanges()` merged into the refresh chain.
-- Leaves: upstream's `.total` initializer back; the `continue` guard and the
-  post-loop `result.total = int(result.elements.size());` as hooks, comments
-  gone; the chain through `Purple::WithPresetChanges(...)`.
-- Why the guard sits here: `State::next()` is the one place that only feeds
-  the strip. `Data::Stories` also feeds the counters, the archive strip and
-  upstream's hidden-stories handling, which a preset must not change. The
-  total is recounted after the loop, or the strip's count would include the
-  sources it hides.
-- Account: `StoryShown(peer, ...)` is *in hand*; `WithPresetChanges` needs
-  none.
-
-**`Telegram/SourceFiles/history/view/history_view_top_peers_selector.cpp`**:
-+8 -0, 2 hunks, near 3. Owner: B12.
-- Leaves: nothing. `TopPeers::list()` filters at its source.
-
-**`Telegram/SourceFiles/boxes/star_gift_box.cpp`**: +8 -0, 2 hunks, near 2.
 Owner: B12.
-- Leaves: nothing, for the same reason. This hook was missed by the first
-  plan.
 
-**`Telegram/SourceFiles/data/components/top_peers.cpp`**: not changed today.
-B12 wraps `TopPeers::list()`'s return expression in
-`Purple::WithoutHiddenSuggestions(...)`, a two-line wrap, and
-dialogs_widget.cpp:2151 wraps the producer in
-`Purple::RestartOnPresetChange(...)`. Account: *in hand* (the peers name their
-session).
+**Telegram/SourceFiles/dialogs/ui/dialogs_suggestions.cpp** leaves small hooks
+around controller-owned lists.
+- FillEntryMenu still calls Purple::AddListsSubmenu.
+- RecentPeersContent filters the owning session's copied recent-peer list
+  with Purple::WithoutHiddenSuggestions; RecentsController rebuilds rows
+  from that same session on Purple::ActiveChanges(), bound to its controller
+  lifetime.
+- MyChannelsController::refresh passes its owning Main::Session to
+  Purple::MyChannels. That helper owns the one list walk retained for live
+  refresh, and its controller rebuild stays tied to that session and lifetime.
+  Newly loaded lists use Purple::ChannelShownInSuggestions.
+- Recommendations keeps the active-chat row subscription in fill(). Its load
+  and fill entries pass &session() to Purple::ShowRecommendedChannels. The open
+  controller hides by count while retaining rows, then restores the count or
+  loads/fills only when it has no rows.
+  Purple::RecommendedChannelsSelectable gates retained-row navigation,
+  submission, drag/touch selection and direct row activation on positive
+  count and current policy. Hiding clears selection without deleting rows.
+- TopPeersContent returns to its upstream body.
+
+**Telegram/SourceFiles/dialogs/ui/dialogs_stories_content.cpp** keeps the
+Purple::StoryShown(peer, ...) guard only in State::next(), recounts the
+filtered total after the loop, and merges story-source changes with
+Purple::WithPresetChanges(...). The upstream initializer remains intact, and
+Data::Stories itself stays unfiltered.
+
+**Telegram/SourceFiles/data/components/top_peers.cpp** filters the copied
+TopPeers::list() result once with Purple::WithoutHiddenSuggestions. Peer
+ownership supplies each history used by that predicate.
+dialogs_widget.cpp wraps the panel's TopPeersContent(&session()) factory in
+Purple::RestartOnPresetChange(...). The gift and share-selector consumers
+return to upstream and inherit the filtered source list.
 
 ## Chat menus
 

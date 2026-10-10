@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "main/main_session.h"
+#include "purple/purple_suggestions.h"
 #include "mtproto/mtproto_config.h"
 #include "storage/serialize_common.h"
 #include "storage/serialize_peer.h"
@@ -121,9 +122,10 @@ TopPeers::~TopPeers() = default;
 std::vector<not_null<PeerData*>> TopPeers::list() const {
 	_session->local().readSearchSuggestions();
 
-	return _list
-		| ranges::view::transform(&TopPeer::peer)
-		| ranges::to_vector;
+	return Purple::WithoutHiddenSuggestions(
+		_list
+			| ranges::view::transform(&TopPeer::peer)
+			| ranges::to_vector);
 }
 
 bool TopPeers::disabled() const {

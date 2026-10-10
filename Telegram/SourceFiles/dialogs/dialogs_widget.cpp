@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_widget.h"
 
 #include "purple/purple_folder_strip.h"
+#include "purple/purple_suggestions.h"
 
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -2150,7 +2151,9 @@ void Widget::updateSuggestions(anim::type animated) {
 		_suggestions = std::make_unique<Suggestions>(
 			this,
 			controller(),
-			TopPeersContent(&session()),
+			Purple::RestartOnPresetChange([=] {
+				return TopPeersContent(&session());
+			}),
 			RecentPeersContent(&session()));
 		_suggestions->clearSearchQueryRequests() | rpl::on_next([=] {
 			setSearchQuery(QString());

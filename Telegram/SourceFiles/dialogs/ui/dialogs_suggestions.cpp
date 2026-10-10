@@ -41,9 +41,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "purple/purple_config.h"
-#include "purple/purple_gate.h"
 #include "purple/purple_list_menu.h"
+#include "purple/purple_suggestions.h"
 #include "settings/settings_common.h"
 #include "settings/settings_credits_graphics.h"
 #include "settings/sections/settings_premium.h"
@@ -84,7 +83,6 @@ namespace Dialogs {
 namespace {
 
 constexpr auto kCollapsedChannelsCount = 5;
-constexpr auto kProbablyMaxChannels = 1000;
 constexpr auto kCollapsedAppsCount = 5;
 constexpr auto kProbablyMaxApps = 100;
 constexpr auto kSearchQueryDelay = crl::time(900);
@@ -441,28 +439,6 @@ const style::PeerListItem &ChannelRow::computeSt(
 	return _active ? st::recentPeersItemActive : st::recentPeersItem;
 }
 
-// Purple: which of the chats the app would suggest may still be suggested.
-// A copy rather than an erase in place: the list belongs to the session and
-// every other reader of it - typed search among them - must still see all of
-// it. See Purple::HiddenFromSuggestions().
-[[nodiscard]] std::vector<not_null<PeerData*>> ShownInSuggestions(
-		std::vector<not_null<PeerData*>> peers) {
-	peers.erase(ranges::remove_if(peers, [](not_null<PeerData*> peer) {
-		return Purple::HiddenFromSuggestions(peer->owner().history(peer));
-	}), end(peers));
-	return peers;
-}
-
-// Purple: whether the "similar channels" strip is offered at all. The one
-// suggestion that is not assembled out of your own chats - the server picks it -
-// so a preset that is deciding who reaches you gets to switch it off wholesale
-// rather than filtering it chat by chat. Asked under Normal too, where the key
-// defaults to true and nothing changes.
-[[nodiscard]] bool ShowRecommendedChannels() {
-	return !Purple::Filtering()
-		|| Purple::ActiveSettings().suggestions.recommendedChannels;
-}
-
 } // namespace
 
 
@@ -569,12 +545,7 @@ private:
 	void appendRow(not_null<ChannelData*> channel);
 	void fill(bool force = false);
 
-	// Purple: reads the account's channels back and drops the ones the running
-	// preset hides. Its own function because a preset change has to be able to
-	// ask the question again from scratch - a filtered copy could only ever
-	// lose channels, and switching to a preset that shows more has to get them
-	// back. See Purple::HiddenFromSuggestions().
-	void refresh();
+	void refresh(not_null<Main::Session*> session);
 
 	std::vector<not_null<History*>> _channels;
 	rpl::lifetime _lifetime;
@@ -590,6 +561,10 @@ public:
 	void prepare() override;
 
 	void load();
+
+	void rowClicked(not_null<PeerListRow*> row) override;
+	void rowMiddleClicked(not_null<PeerListRow*> row) override;
+	bool rowTrackPress(not_null<PeerListRow*> row) override;
 
 private:
 	void fill();
@@ -872,8 +847,21 @@ RecentsController::RecentsController(
 
 void RecentsController::prepare() {
 	setupDivider();
-	refreshRows();
+
+	for (const auto &peer : _recent.list) {
+		delegate()->peerListAppendRow(std::make_unique<RecentRow>(peer));
+	}
+	delegate()->peerListRefreshRows();
+	setCount(_recent.list.size());
+
 	subscribeToEvents();
+
+	const auto session = &this->session();
+	Purple::ActiveChanges() | rpl::on_next([=] {
+		_recent.list = Purple::WithoutHiddenSuggestions(
+			session->recentPeers().list());
+		refreshRows();
+	}, _lifetime);
 }
 
 void RecentsController::refreshRows() {
@@ -1022,16 +1010,6 @@ void RecentsController::subscribeToEvents() {
 			}
 		}
 	}, _lifetime);
-
-	// Purple: the strip is a snapshot taken when the panel opened, and nothing
-	// about the peers themselves changes when a preset does - so without this
-	// a chat the new preset hides would sit here until the panel closed. Read
-	// back from the session rather than filtered down, because a preset change
-	// can put a chat back as easily as take one away.
-	Purple::ActiveChanges() | rpl::on_next([=] {
-		_recent.list = ShownInSuggestions(session().recentPeers().list());
-		refreshRows();
-	}, _lifetime);
 }
 
 MyChannelsController::MyChannelsController(
@@ -1041,8 +1019,9 @@ MyChannelsController::MyChannelsController(
 
 void MyChannelsController::prepare() {
 	setupExpandDivider(tr::lng_channels_your_title());
+	const auto session = &this->session();
 
-	session().changes().peerUpdates(
+	session->changes().peerUpdates(
 		Data::PeerUpdate::Flag::ChannelAmIn
 	) | rpl::on_next([=](const Data::PeerUpdate &update) {
 		const auto channel = update.peer->asBroadcast();
@@ -1063,25 +1042,21 @@ void MyChannelsController::prepare() {
 		fill(true);
 	}, _lifetime);
 
-	refresh();
+	refresh(session);
 
 	expanded() | rpl::on_next([=] {
 		fill();
 	}, _lifetime);
 
-	// Purple: "My channels" is a strip like the recent and frequent rows, and
-	// it follows the preset for the same reason they do. Rebuilt rather than
-	// filtered in place, the way RecentsController does it, because a preset
-	// change can put a channel back as easily as take one away.
 	Purple::ActiveChanges() | rpl::on_next([=] {
 		while (delegate()->peerListFullRowsCount() > 0) {
 			delegate()->peerListRemoveRow(delegate()->peerListRowAt(0));
 		}
-		refresh();
+		refresh(session);
 		fill(true);
 	}, _lifetime);
 
-	const auto owner = &session().data();
+	const auto owner = &session->data();
 	auto loading = owner->chatsListChanges(
 	) | rpl::take_while([=](Data::Folder *folder) {
 		return !owner->chatsListLoaded(folder);
@@ -1093,8 +1068,7 @@ void MyChannelsController::prepare() {
 		const auto list = owner->chatsList(folder);
 		for (const auto &row : list->indexed()->all()) {
 			if (const auto history = row->history()) {
-				if (history->peer->isBroadcast()
-					&& !Purple::HiddenFromSuggestions(history)) {
+				if (Purple::ChannelShownInSuggestions(history)) {
 					if (ranges::contains(_channels, not_null(history))) {
 						_channels.push_back(history);
 					}
@@ -1110,26 +1084,8 @@ void MyChannelsController::prepare() {
 	}, _lifetime);
 }
 
-void MyChannelsController::refresh() {
-	_channels.clear();
-	_channels.reserve(kProbablyMaxChannels);
-	const auto owner = &session().data();
-	const auto add = [&](not_null<Dialogs::MainList*> list) {
-		for (const auto &row : list->indexed()->all()) {
-			if (const auto history = row->history()) {
-				if (history->peer->isBroadcast()
-					&& !Purple::HiddenFromSuggestions(history)) {
-					_channels.push_back(history);
-				}
-			}
-		}
-	};
-	add(owner->chatsList());
-	if (const auto folder = owner->folderLoaded(Data::Folder::kId)) {
-		add(owner->chatsList(folder));
-	}
-
-	ranges::sort(_channels, ranges::greater(), &History::chatListTimeId);
+void MyChannelsController::refresh(not_null<Main::Session*> session) {
+	_channels = Purple::MyChannels(session);
 	setCount(_channels.size());
 }
 
@@ -1194,9 +1150,67 @@ void RecommendationsController::prepare() {
 	setupPlainDivider(tr::lng_channels_recommended());
 	fill();
 
-	// Purple: moved out of fill() so it is subscribed once. fill() is called
-	// again when a preset stops filtering, and a second copy of this would
-	// mean two handlers fighting over which row is the active one.
+	Purple::ActiveChanges() | rpl::on_next([=] {
+		if (!Purple::ShowRecommendedChannels(&session())) {
+			setCount(0);
+		} else if (const auto rows = delegate()->peerListFullRowsCount()) {
+			setCount(rows);
+		} else {
+			_requested ? fill() : load();
+		}
+	}, _lifetime);
+}
+
+void RecommendationsController::rowClicked(not_null<PeerListRow*> row) {
+	if (Purple::RecommendedChannelsSelectable(&session(), countCurrent())) {
+		ObjectListController::rowClicked(row);
+	}
+}
+
+void RecommendationsController::rowMiddleClicked(
+		not_null<PeerListRow*> row) {
+	if (Purple::RecommendedChannelsSelectable(&session(), countCurrent())) {
+		ObjectListController::rowMiddleClicked(row);
+	}
+}
+
+bool RecommendationsController::rowTrackPress(not_null<PeerListRow*> row) {
+	return Purple::RecommendedChannelsSelectable(&session(), countCurrent())
+		&& ObjectListController::rowTrackPress(row);
+}
+
+void RecommendationsController::load() {
+	if (!Purple::ShowRecommendedChannels(&session())
+		|| _requested
+		|| countCurrent()) {
+		return;
+	}
+	_requested = true;
+	const auto participants = &session().api().chatParticipants();
+	participants->loadRecommendations();
+	participants->recommendationsLoaded(
+	) | rpl::take(1) | rpl::on_next([=] {
+		fill();
+	}, _lifetime);
+}
+
+void RecommendationsController::fill() {
+	if (!Purple::ShowRecommendedChannels(&session())) {
+		return;
+	}
+	const auto participants = &session().api().chatParticipants();
+	const auto &list = participants->recommendations().list;
+	if (list.empty()) {
+		return;
+	}
+	for (const auto &peer : list) {
+		if (const auto channel = peer->asBroadcast()) {
+			appendRow(channel);
+		}
+	}
+	delegate()->peerListRefreshRows();
+	setCount(delegate()->peerListFullRowsCount());
+
 	window()->activeChatValue() | rpl::on_next([=](const Key &key) {
 		const auto history = key.history();
 		if (_activeHistory == history) {
@@ -1217,59 +1231,6 @@ void RecommendationsController::prepare() {
 			}
 		}
 	}, _lifetime);
-
-	// Purple: the whole section, not one row at a time. A preset turning on
-	// takes it away; a preset turning off puts back whatever was already
-	// loaded, without asking the server a second time - the request is a
-	// one-shot and its "loaded" signal has already fired by then.
-	Purple::ActiveChanges() | rpl::on_next([=] {
-		if (!ShowRecommendedChannels()) {
-			while (delegate()->peerListFullRowsCount() > 0) {
-				delegate()->peerListRemoveRow(delegate()->peerListRowAt(0));
-			}
-			delegate()->peerListRefreshRows();
-			setCount(0);
-		} else if (!countCurrent()) {
-			_requested ? fill() : load();
-		}
-	}, _lifetime);
-}
-
-void RecommendationsController::load() {
-	// Purple: not even requested while a preset is filtering and the key says
-	// no. The strip is hidden either way, and asking the server which channels
-	// are like the ones you read is not a question a work preset should be
-	// making on your behalf.
-	if (!ShowRecommendedChannels()) {
-		return;
-	} else if (_requested || countCurrent()) {
-		return;
-	}
-	_requested = true;
-	const auto participants = &session().api().chatParticipants();
-	participants->loadRecommendations();
-	participants->recommendationsLoaded(
-	) | rpl::take(1) | rpl::on_next([=] {
-		fill();
-	}, _lifetime);
-}
-
-void RecommendationsController::fill() {
-	if (!ShowRecommendedChannels()) {
-		return;
-	}
-	const auto participants = &session().api().chatParticipants();
-	const auto &list = participants->recommendations().list;
-	if (list.empty()) {
-		return;
-	}
-	for (const auto &peer : list) {
-		if (const auto channel = peer->asBroadcast()) {
-			appendRow(channel);
-		}
-	}
-	delegate()->peerListRefreshRows();
-	setCount(delegate()->peerListFullRowsCount());
 }
 
 void RecommendationsController::appendRow(not_null<ChannelData*> channel) {
@@ -2628,7 +2589,34 @@ auto Suggestions::setupRecommendations() -> std::unique_ptr<ObjectList> {
 	const auto raw = result.get();
 	const auto list = raw->wrap->entity();
 
-	raw->selectJump = [list](Qt::Key direction, int pageSize) {
+	const auto selectable = [=] {
+		return Purple::RecommendedChannelsSelectable(
+			&controller->session(),
+			raw->count.current());
+	};
+	raw->count.value() | rpl::on_next([=](int count) {
+		if (!count) {
+			list->clearSelection();
+		}
+	}, list->lifetime());
+	raw->choose = [=] {
+		return selectable() && list->submitted();
+	};
+	raw->updateFromParentDrag = [=](QPoint globalPosition) {
+		return selectable() ? list->updateFromParentDrag(globalPosition) : 0;
+	};
+	raw->processTouch = [=](not_null<QTouchEvent*> e) {
+		return (selectable()
+			|| e->type() == QEvent::TouchEnd
+			|| e->type() == QEvent::TouchCancel)
+			&& controller->processTouchEvent(e);
+	};
+
+	raw->selectJump = [=](Qt::Key direction, int pageSize) {
+		if (!selectable()) {
+			list->clearSelection();
+			return JumpResult::NotApplied;
+		}
 		const auto had = list->hasSelection();
 		if (direction == Qt::Key()) {
 			return had ? JumpResult::Applied : JumpResult::NotApplied;
@@ -2898,9 +2886,6 @@ rpl::producer<TopPeersList> TopPeersContent(
 		};
 		auto state = lifetime.make_state<State>();
 
-		// Purple: rebuilt rather than filtered once, because a preset change
-		// can bring a chat back as well as take one away, and the entries hold
-		// indices into each other that a removal would have to fix up.
 		const auto fill = [=] {
 			auto &entries = state->data.entries;
 			auto &indices = state->indices;
@@ -2918,13 +2903,6 @@ rpl::producer<TopPeersList> TopPeersContent(
 				const auto self = user && user->isSelf();
 				const auto history = peer->owner().history(peer);
 
-				// Purple: this strip is something the app offers
-				// unasked, so a chat the running preset hides has no
-				// business in it. HiddenFromSuggestions() is where
-				// the whole rule lives.
-				if (Purple::HiddenFromSuggestions(history)) {
-					continue;
-				}
 				const auto badges = history->chatListBadgesState();
 				entries.push_back({
 					.id = peer->id.value,
@@ -2964,15 +2942,6 @@ rpl::producer<TopPeersList> TopPeersContent(
 			state->scheduled = true;
 			crl::on_main(&state->guard, push);
 		};
-
-		// Purple: nothing about the top peers themselves changes when a preset
-		// does, so without this the strip would keep showing whatever the last
-		// preset let through until the account sent a message. Same shape as
-		// the stories strip - see dialogs_stories_content.cpp.
-		Purple::ActiveChanges() | rpl::on_next([=] {
-			fill();
-			schedule();
-		}, lifetime);
 
 		using Flag = Data::PeerUpdate::Flag;
 		session->changes().peerUpdates(
@@ -3053,7 +3022,7 @@ rpl::producer<TopPeersList> TopPeersContent(
 }
 
 RecentPeersList RecentPeersContent(not_null<Main::Session*> session) {
-	return RecentPeersList{ ShownInSuggestions(session->recentPeers().list()) };
+	return RecentPeersList{ Purple::WithoutHiddenSuggestions(session->recentPeers().list()) };
 }
 
 object_ptr<Ui::BoxContent> StarsExamplesBox(
