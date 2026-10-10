@@ -614,3 +614,23 @@ void Session::purpleRemoveChatListEntry(Dialogs::Key key) {
 }
 
 } // namespace Data
+
+namespace Purple {
+
+bool SavePinnedViewOrder(
+		not_null<Main::Session*> session,
+		FilterId filterId,
+		Data::Folder *folder) {
+	if (!Data::IsPurpleView(filterId)) {
+		return false;
+	}
+	const auto view = Data::PurpleViewIndex(filterId);
+	if (view || PresetOwnsPins(session)) {
+		session->data().savePurpleViewPins(view);
+	} else {
+		session->api().savePinnedOrder(folder);
+	}
+	return true;
+}
+
+} // namespace Purple

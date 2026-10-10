@@ -55,6 +55,7 @@ PRIVATE
     purple/purple_list_menu.h
     purple/purple_mute.cpp
     purple/purple_mute.h
+    purple/hooks/dialogs_inner_widget.h
     purple/hooks/mute.h
     purple/purple_peek.cpp
     purple/purple_peek.h
