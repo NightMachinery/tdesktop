@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
-#include "purple/purple_folder_strip.h"
+#include "purple/hooks/dialogs_inner_widget.h"
 
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
@@ -2732,18 +2732,11 @@ void InnerWidget::savePinnedOrder() {
 		session().api().savePinnedOrder(&session().data().savedMessages());
 	} else if (_openedForum) {
 		session().api().savePinnedOrder(_openedForum);
-	} else if (_filterId && !Data::IsPurpleView(_filterId)) {
+	} else if (Purple::SavePinnedViewOrder(
+				&session(), _filterId, _openedFolder)) {
+	} else if (_filterId) {
 		Api::SaveNewFilterPinned(&session(), _filterId);
-	} else if (Data::IsPurpleView(_filterId)
-		&& Data::PurpleViewIndex(_filterId) > 0) {
-		// Purple: an extra view's order is the preset's own and lives in
-		// settings.toml. Nothing about it is the server's business.
-		session().data().savePurpleViewPins(Data::PurpleViewIndex(_filterId));
 	} else {
-		// Purple: dragging pins about inside the preset's main view moved the
-		// main list, because that is where its pins live, so this is the
-		// ordinary save. Sending the view to the server as a folder would be a
-		// way to lose the real order.
 		session().api().savePinnedOrder(_openedFolder);
 	}
 }

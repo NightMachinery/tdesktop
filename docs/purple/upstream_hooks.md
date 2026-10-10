@@ -310,11 +310,13 @@ purple.strings) belong with the hook rule.
 Owners: B3 (stage 1), B11 (two lines), B14 (stage 2).
 - Today: the 15 `Session::purple*` definitions have moved to
   `purple/purple_work_view.cpp`; the member definitions retain their account.
-- Leaves after B3b: the `purple/hooks/mute.h` include, constructor timers and
+- Leaves after B3c: the `purple/hooks/mute.h` include, constructor timers and
   setup call, five `Session` helpers that claim every Purple view id, one
   Purple refresh call in each chat-list entry method, and nine badge swaps.
-  The badge swaps cannot move because `Dialogs::MainList::unreadState()` also
-  feeds folder badges; all five near-hunk edits are on those lines.
+  A preset-owned main view saves pins locally; a mirroring main view re-enters
+  upstream with `FilterId(0)` and saves the ordinary server order. The badge
+  swaps cannot move because folder badges also read the main-list totals; all
+  five near-hunk edits stay on those lines.
 - B11 gives the two mute calls inside the Purple block (lines 1881 and 5969)
   their final names, and B3 then moves them verbatim.
 - Account: pin hooks and two list calls are in hand (`this`, a `Data::Session`);
@@ -453,10 +455,11 @@ hunks, near 3. Owners: B10u, B3c, B13.
   `|| Data::IsPurpleView(_filterId)` term in `refreshWithCollapsedRows`, and
   the `ShownList(session)` token swap in `setupShortcuts`. `savePinnedOrder`
   stays with B3c.
-- B3c leaves: upstream's `else if (_filterId)` in `savePinnedOrder`, preceded
+- B3c leaves upstream's `else if (_filterId)` in `savePinnedOrder`, preceded
   by `} else if (Purple::SavePinnedViewOrder(&session(), _filterId,
-  _openedFolder)) {` with an empty body. This is the only `savePinnedOrder`
-  edit.
+  _openedFolder)) {` with an empty body. The owner-session hook saves an extra
+  view or preset-owned view 0 to settings, and re-enters the ordinary API save
+  for a mirroring main view. This is the only `savePinnedOrder` edit.
 - B13 leaves: `context.purpleMark = Purple::RowMarkFor(row->entry());` in
   place of the 13-line paint block, and the `cacheAllowed` term testing that
   field.

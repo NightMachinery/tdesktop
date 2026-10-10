@@ -258,23 +258,29 @@ They are the same object under `normal`, so nothing is paid there.
 
 ### Pins in the main view
 
-The main view's pinned list is a **copy** of the main list's, minus the chats the
-preset hides, retaken by `Session::refreshPurpleViewPinned()` whenever either
-moves. Pinning is a fact about the account, not about the main view, so it is
-never allowed to own pins of its own:
+When the preset does not provide its own `pinned` ids for the main view, the
+view's pinned list is a **copy** of the main list's, minus chats the preset hides,
+retaken by `Session::refreshPurpleViewPinned()` whenever either moves. Pinning is
+a fact about the account in this mode:
 
 - Pinning or unpinning inside the view acts on the main list and sends the
   ordinary `messages.toggleDialogPin`.
-- Dragging pins about inside the view reorders the main list. Two chats
-  adjacent in the view may have a hidden chat between them in the main list;
+- Dragging pins about inside the view reorders the main list. Two chats adjacent
+  in the view may have a hidden chat between them in the main list;
   `PinnedList::reorder()` works on keys rather than indices, so the hidden one
   rides along instead of being swapped by mistake.
-- The order saved to the server is the main list's, complete. The view is never
-  sent anywhere - it is not a folder and no server has heard of it.
+- The complete main-list order is saved to the server; the view itself is never
+  sent as a folder.
 
-`Entry::removeFromChatList()` leaves the view's pinned list alone for the same
-reason: the copy owns it, and the next copy would undo anything done here. That
-holds for an extra view too, where the seed below owns it instead.
+A preset with a non-empty `pinned` array for its main view owns that view's
+order. Pin toggles and drags update the array in `settings.toml`, and a drag does
+not send `messages.reorderPinnedDialogs`. `Session::refreshPurpleViewPinned()`
+seeds this list from the preset. Extra views use their own arrays in the same
+way.
+
+`Entry::removeFromChatList()` leaves a view's pinned list alone. A mirroring
+main view rebuilds from the main list; a preset-owned main view and each extra
+view rebuild from their arrays in `settings.toml`.
 
 ### Extra views
 
