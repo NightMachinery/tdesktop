@@ -2,6 +2,8 @@
 
 #include "data/data_premium_limits.h"
 #include "data/data_session.h"
+#include "data/data_unread_value.h"
+#include "dialogs/dialogs_main_list.h"
 #include "main/main_session.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_preset_box.h"
@@ -13,9 +15,16 @@
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
 
+#include <QtCore/QStringList>
+
+#include <algorithm>
 #include <crl/common/crl_common_on_main_guarded.h>
 #include <crl/qt/crl_qt_guards.h>
+#include <range/v3/algorithm/any_of.hpp>
+#include <range/v3/algorithm/contains.hpp>
 #include <range/v3/algorithm/find.hpp>
+#include <range/v3/algorithm/find_if.hpp>
+#include <rpl/map.h>
 #include <rpl/merge.h>
 
 namespace Purple {
@@ -39,6 +48,10 @@ bool PinWholeStripIfRestricted(not_null<Main::Session*>) {
 	return FoldersRestricted();
 }
 
+bool RefuseFolderOrderSave(not_null<Main::Session*>) {
+	return FoldersRestricted();
+}
+
 rpl::producer<> FilterStripChanges(not_null<Main::Session*> session) {
 	return rpl::merge(
 		session->data().chatsFilters().changed(),
@@ -46,6 +59,15 @@ rpl::producer<> FilterStripChanges(not_null<Main::Session*> session) {
 }
 
 namespace {
+
+rpl::producer<Dialogs::UnreadState> MainListUnreadState(
+		not_null<Dialogs::MainList*> list) {
+	return rpl::single(rpl::empty) | rpl::then(
+		list->unreadStateChanges() | rpl::to_empty
+	) | rpl::map([=] {
+		return list->unreadState();
+	});
+}
 
 bool AddViewMenu(
 		not_null<Window::SessionController*> controller,
@@ -87,6 +109,40 @@ bool FillViewMenu(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<Ui::RpWidget*> parent) {
 	return AddViewMenu(controller, id, menu, parent);
+}
+
+bool QuietFolderUnread(
+		not_null<Main::Session*> session,
+		FilterId filterId) {
+	const auto &quiet = QuietFolders();
+	if (quiet.empty()) {
+		return false;
+	}
+	const auto &list = session->data().chatsFilters().list();
+	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
+	if (i == end(list)) {
+		return false;
+	}
+	return ranges::any_of(quiet, [&](const QString &name) {
+		return !i->title().text.text.compare(name, Qt::CaseInsensitive);
+	});
+}
+
+rpl::producer<Dialogs::UnreadState> ViewUnreadStateValue(
+		not_null<Main::Session*> session,
+		FilterId filterId) {
+	const auto index = Data::IsPurpleView(filterId)
+		? Data::PurpleViewIndex(filterId)
+		: 0;
+	if (index > 0) {
+		return MainListUnreadState(session->data().purpleViewList(index));
+	}
+	return MainListUnreadState(Data::IsPurpleView(filterId)
+		? session->data().purpleViewList()
+		: session->data().chatsList()
+	) | rpl::map([=](const Dialogs::UnreadState &state) {
+		return Data::MainListMapUnreadState(session, state);
+	});
 }
 
 bool CheckOpenedView(

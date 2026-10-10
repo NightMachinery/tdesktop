@@ -6,6 +6,10 @@
 
 #include <vector>
 
+namespace Dialogs {
+struct UnreadState;
+} // namespace Dialogs
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -27,6 +31,14 @@ namespace Purple {
 	not_null<Main::Session*> session);
 [[nodiscard]] bool PinWholeStripIfRestricted(
 	not_null<Main::Session*> session);
+[[nodiscard]] bool RefuseFolderOrderSave(
+	not_null<Main::Session*> session);
+[[nodiscard]] bool QuietFolderUnread(
+	not_null<Main::Session*> session,
+	FilterId filterId);
+[[nodiscard]] rpl::producer<Dialogs::UnreadState> ViewUnreadStateValue(
+	not_null<Main::Session*> session,
+	FilterId filterId);
 [[nodiscard]] rpl::producer<> FilterStripChanges(
 	not_null<Main::Session*> session);
 [[nodiscard]] bool ShowViewTabMenu(

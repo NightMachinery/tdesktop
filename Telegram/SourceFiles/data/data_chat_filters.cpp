@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_folder_strip.h"
 #include "apiwrap.h"
 
 namespace Data {
@@ -430,14 +431,6 @@ not_null<Dialogs::MainList*> ChatFilters::chatsList(FilterId filterId) {
 		pointer = std::make_unique<Dialogs::MainList>(
 			&_owner->session(),
 			filterId,
-			// Purple: a purple view's pins live in settings.toml, where nothing
-			// bounds them, so the container is sized to the client-side folder
-			// allowance rather than to the account's five. A main view that is
-			// still mirroring the account's order is capped at pin time by
-			// Session::pinnedCanPin() instead, which is where the account's
-			// limit actually belongs - PinnedList::applyList() ignores this
-			// number entirely, so sizing down here would only truncate an order
-			// the file legitimately holds.
 			_owner->maxPinnedChatsLimitValue(filterId));
 	}
 	return pointer.get();
@@ -911,7 +904,7 @@ void ChatFilters::saveOrder(
 	// from the account, not just from the view. Refuse rather than reorder
 	// blind; this is the one choke point, so a display surface that was missed
 	// still cannot do damage here.
-	if (Purple::FoldersRestricted()) {
+	if (Purple::RefuseFolderOrderSave(&_owner->session())) {
 		LOG(("Purple: not saving folder order while a preset restricts "
 			"folders. Switch to the normal preset to reorder them."));
 		return;
@@ -953,14 +946,6 @@ FilterId ChatFilters::defaultId() const {
 }
 
 FilterId ChatFilters::lookupId(int index) const {
-	// Purple: bounded against whichever list the answer comes from. A preset's
-	// extra views make the shown list longer than the real one, so asserting on
-	// _list alone would fire on a tab that is genuinely on screen.
-	Expects(index >= 0
-		&& index < int(Purple::Filtering() && !_purpleShown.empty()
-			? _purpleShown.size()
-			: _list.size()));
-
 	// Purple: everyone who asks this means "the Nth tab I can see" - the
 	// window that is opening, the folder shortcuts, closing a folder, Escape
 	// going home. Under a preset that is the shown list, which carries the
@@ -971,9 +956,12 @@ FilterId ChatFilters::lookupId(int index) const {
 	// than the real one, and the callers bound their index against the real
 	// one.
 	if (Purple::Filtering() && !_purpleShown.empty()) {
+		Expects(index >= 0);
 		const auto last = int(_purpleShown.size()) - 1;
 		return _purpleShown[std::min(index, last)].id();
 	}
+	Expects(index >= 0 && index < int(_list.size()));
+
 	if (_owner->session().user()->isPremium() || !_list.front().id()) {
 		return _list[index].id();
 	}
