@@ -278,6 +278,13 @@ not send `messages.reorderPinnedDialogs`. `Session::refreshPurpleViewPinned()`
 seeds this list from the preset. Extra views use their own arrays in the same
 way.
 
+A synthetic view's `Dialogs::MainList` is sized for the client-side folder
+allowance, because its config-backed pin order has no server-side bound. When
+the main view mirrors the account's order, pin actions still use
+`Session::pinnedCanPin()` at the point of change. Shrinking the list container
+would truncate the file-backed order because `PinnedList::applyList()` does not
+enforce that limit.
+
 `Entry::removeFromChatList()` leaves a view's pinned list alone. A mirroring
 main view rebuilds from the main list; a preset-owned main view and each extra
 view rebuild from their arrays in `settings.toml`.
@@ -3545,14 +3552,15 @@ The fork's whole diff is findable with `git grep Purple::`.
 ## Folder strip upstream hooks
 
 B10u moves view-menu construction, shown-list access, strip-change subscriptions,
-active-view navigation and home routing behind `purple_folder_strip`. Upstream
-files keep their nonview filter icons and premium pinned intervals. The
-`UseAllFilterIcon` hook preserves the All icon for Purple views; the original
-nonzero-id test preserves the loaded empty-folder state. The whole-strip
-restriction queried through a session-taking hook. The current preset resolver
-and restriction remain shared app-wide; the session identifies the folder data
-and the future account-policy seam. The file-level call sites are recorded in
-[upstream_hooks.md](upstream_hooks.md).
+active-view navigation and home routing behind `purple_folder_strip`. B10d
+stage 1 moves the shown-folder builder and quiet-folder/view unread decisions
+into that Purple facade. Upstream files keep their nonview filter icons and
+premium pinned intervals. The `UseAllFilterIcon` hook preserves the All icon
+for Purple views; the original nonzero-id test preserves the loaded empty-folder
+state. The whole-strip and folder-order restrictions use session-taking hooks.
+The current preset resolver and restriction remain shared app-wide; the session
+identifies the folder data and the future account-policy seam. The file-level
+call sites are recorded in [upstream_hooks.md](upstream_hooks.md).
 
 Direct macOS checks covered mouse folder switching, Control-Shift-Up/Down
 navigation and Escape returning to All chats under Normal. Work Mode retained

@@ -384,15 +384,19 @@ Owner: B14.
 
 **`Telegram/SourceFiles/data/data_chat_filters.cpp`**: +190 -4, 10 hunks,
 near 0. Owners: B11 (one line), B10d stage 1, B14 with B10d stage 2.
-- Today: `ChatFilter::contains`' `ignorePresetMute` parameter, the
-  shown-list builder (`purpleRefreshShown`, `purpleViewFilter`), the
+- Before B10d stage 1: `ChatFilter::contains`' `ignorePresetMute` parameter,
+  the shown-list builder (`purpleRefreshShown`, `purpleViewFilter`), the
   `chatsList` comment, `chatsListLoaded`, the `saveOrder` refusal and the
   `lookupId` rewrite.
+- B10d stage 1 moves the `purpleViewFilter`, `purpleViewCount`,
+  `purpleRefreshShown` and `purpleShownList` member definitions into
+  `purple/purple_folder_strip.cpp` with unchanged bodies. The header and strip
+  state stay for B14 stage 2. The `chatsList` pin-container note moves to
+  work_mode.md.
 - Leaves after B10d stage 1: `if (Purple::RefuseFolderOrderSave(...))` in
-  `saveOrder`, the early id return in `lookupId` before upstream's restored
+  `saveOrder`, the early view return in `lookupId` before upstream's restored
   `Expects`, the constructor call, the views' All-chats icon, the
-  `ignorePresetMute` term and `chatsListLoaded`. The 8-line `chatsList`
-  comment goes to work_mode.md.
+  `ignorePresetMute` term and `chatsListLoaded`.
 - Why the two extension points stay: deciding which chats a preset silences
   by folder must ask what "Exclude muted" says without the preset's own mute,
   or the answer feeds itself (silencing a chat takes it out of an
@@ -400,13 +404,14 @@ near 0. Owners: B11 (one line), B10d stage 1, B14 with B10d stage 2.
   member, so a parameter is the smallest way in. `chatsListLoaded` looks a
   list up without creating it; `chatsList()` would build the very lists a
   sweep of the view ids checks are empty.
-- B11 switches the mute call at line 378 to its final name.
-- Account: `RefuseFolderOrderSave` *must pass* `&_owner->session()`,
-  replacing `FoldersRestricted()` at line 1034. The constructor call and the
-  `lookupId` id test are *in hand* or need none. The other 8 account-less
-  calls (427, 445, 462, 468, 476, 537, 1080, 1093) move into
-  `purple/purple_folder_strip.cpp`; stage 2 makes `Purple::FolderStrip`
-  belong to one ChatFilters, so to one session.
+- B11's `MutedWithoutPreset(history->peer)` hook remains at the member call.
+- Account: `saveOrder` passes `&_owner->session()` to
+  `RefuseFolderOrderSave`. Restriction still comes from shared app-wide
+  settings; the session argument identifies the owner at this folder seam.
+  The constructor call and the `lookupId` id test already carry the correct
+  context. The other eight account-less strip calls move into
+  `purple/purple_folder_strip.cpp`; stage 2 makes `Purple::FolderStrip` belong
+  to one ChatFilters, so to one session.
 
 **`Telegram/SourceFiles/data/data_chat_filters.h`**: +88 -1, 7 hunks, near 0.
 Owner: B10d stage 2 (with B14).
@@ -420,12 +425,14 @@ Owner: B10d stage 2 (with B14).
 
 **`Telegram/SourceFiles/data/data_unread_value.cpp`**: +48 -4, 5 hunks, near
 0. Owner: B10d stage 1.
-- Today: the quiet-folder test and the view unread state inside
+- Before B10d stage 1: the quiet-folder test and the view unread state inside
   `UnreadStateValue`.
-- Leaves: `Purple::ViewUnreadStateValue(session, filterId)` and
-  `Purple::QuietFolderUnread(session, filterId)`.
-- Account: *in hand*: the session is already a parameter. The account-less
-  `QuietFolders()` call at line 37 moves into the Purple side.
+- Leaves: calls to `Purple::ViewUnreadStateValue(session, filterId)` and
+  `Purple::QuietFolderUnread(session, filterId)`; generic list updates and
+  archive subtraction stay in the data layer.
+- Account: *in hand*: each call passes the owning session. Quiet-folder names
+  remain under the shared preset policy, while the lookup uses that session's
+  real folder list and unread lists.
 
 **`Telegram/SourceFiles/ui/widgets/chat_filters_tabs_strip.cpp`**: +62 -19,
 16 hunks, near 7. Owner: B10u.
@@ -974,14 +981,14 @@ the comments, B14 for the virtuals) and main_window.cpp (B15).
 
 ## Account-less Work Mode calls
 
-45 lines after B11, by remaining owner:
+45 lines in the recorded post-B11 measurement, by batch owner:
 
 - B3: 13 in data/data_session.cpp (they move into a Purple TU);
 - B4: 13 in history/history.cpp (they move), and 1 in
   history/history_unread_things.cpp (`UnreadThingEdge` takes the thread);
-- B10d: 9 in data/data_chat_filters.cpp (8 move,
+- B10d: at that snapshot, 9 in data/data_chat_filters.cpp (8 move,
   `RefuseFolderOrderSave(session)` replaces 1), and 1 in
-  data/data_unread_value.cpp (moves);
+  data/data_unread_value.cpp (moves to `QuietFolderUnread(session, filterId)`);
 - B11: none in upstream notification settings after the mute extraction;
 - B10u: 2 in ui/widgets/chat_filters_tabs_strip.cpp and 2 in
   window/window_filters_menu.cpp (`PinWholeStripIfRestricted(session)`);
