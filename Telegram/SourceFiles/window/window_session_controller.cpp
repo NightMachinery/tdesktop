@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_session_controller.h"
 
-#include "purple/purple_folder_strip.h"
+#include "purple/purple_window_session_controller.h"
 
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
@@ -104,9 +104,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
-#include "purple/purple_gate.h"
-#include "purple/purple_screentime_recorder.h"
-#include "purple/purple_sync.h"
 #include "main/main_session_settings.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
@@ -1669,9 +1666,6 @@ SessionController::SessionController(
 		enoughSpaceForFiltersValue() | rpl::skip(1) | rpl::to_empty,
 		Core::App().settings().chatFiltersHorizontalChanges() | rpl::to_empty,
 		session->data().chatsFilters().changed(),
-		// Purple: a preset can withdraw the folder that is currently open
-		// without the folder list itself changing at all. checkOpenedFilter()
-		// is what puts you back on "All chats" when that happens.
 		Purple::ActiveChanges()
 	) | rpl::on_next([=] {
 		if (!_filtersActivated) {
@@ -2028,22 +2022,15 @@ rpl::producer<> SessionController::filtersMenuChanged() const {
 
 void SessionController::checkOpenedFilter() {
 	activateFirstChatsFilter();
-
-	// Purple: no `if (filterId)' guard, because All chats is exactly what
-	// stops being offered when a preset starts - the shown list holds the
-	// preset's view in its place, so sitting on id 0 means sitting on the
-	// complete chat list the preset is there to replace. Falling back to
-	// defaultId() rather than to 0 closes the same gap in reverse: when the
-	// preset stops, the view is what is no longer in the list.
-	//
-	// Under Normal both ends are 0 and this is what it always was.
-	const auto filters = &session().data().chatsFilters();
-	const auto &list = filters->purpleShownList();
+	if (Purple::CheckOpenedView(this)) {
+		return;
+	}
+	const auto &list = session().data().chatsFilters().list();
 	const auto filterId = activeChatsFilterCurrent();
 	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
 	if (i == end(list)) {
 		setActiveChatsFilter(
-			Purple::HomeFilterId(&session()),
+			0,
 			{ anim::type::normal, anim::activation::background });
 	}
 }
@@ -4144,30 +4131,7 @@ bool CheckAndJumpToNearChatsFilter(
 		not_null<SessionController*> controller,
 		bool isNext,
 		bool jump) {
-	const auto id = controller->activeChatsFilterCurrent();
-	const auto session = &controller->session();
-	const auto list = &session->data().chatsFilters().purpleShownList();
-	const auto index = int(ranges::find(
-		*list,
-		id,
-		&Data::ChatFilter::id
-	) - begin(*list));
-	if (index == list->size() && id != 0) {
-		return false;
-	}
-	const auto changed = index + (isNext ? 1 : -1);
-	if (changed >= int(list->size()) || changed < 0) {
-		return false;
-	}
-	if (changed > Data::PremiumLimits(session).dialogFiltersCurrent()) {
-		return false;
-	}
-	if (jump) {
-		controller->setActiveChatsFilter((changed >= 0)
-			? (*list)[changed].id()
-			: 0);
-	}
-	return true;
+	return Purple::CheckAndJumpToNearChatsFilter(controller, isNext, jump);
 }
 
 } // namespace Window
