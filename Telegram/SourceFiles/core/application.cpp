@@ -20,12 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
-#include "purple/purple_focus.h"
-#include "purple/purple_ui_witness.h"
-#include "purple/purple_gate.h"
-#include "purple/purple_peek.h"
-#include "purple/purple_schedule.h"
-#include "purple/purple_screentime_recorder.h"
+#include "purple/purple_app_services.h"
 #include "base/unixtime.h"
 #include "core/core_settings.h"
 #include "core/update_checker.h"
@@ -311,17 +306,7 @@ void Application::run() {
 	Ui::PreloadTextSpoilerMask();
 	startShortcuts();
 
-	// Purple: both of these move the active preset with no window and no
-	// account involved, so they start with the other app-level services rather
-	// than being hung off one of them.
-	Purple::StartSchedule();
-	Purple::StartFocusSync();
-
-	// Purple: the screen time recorder watches the app rather than a window -
-	// foreground, background, the preset, the no-input watchdog - so it starts
-	// here too. It does nothing at all until [screen_time] enabled_p is on.
-	Purple::StartScreenTime();
-	Purple::StartUiWitness();
+	Purple::StartAppServices();
 
 	startEmojiImageLoader();
 	startSystemDarkModeViewer();
@@ -939,16 +924,7 @@ void Application::startEmojiImageLoader() {
 void Application::setScreenIsLocked(bool locked) {
 	_screenIsLocked = locked;
 
-	// Purple: a machine nobody is sitting at should not be left showing what
-	// the preset hides, so the session lock ends a running peek - if
-	// `[peek] end_on_screen_lock_p' says it does, which is the core's answer
-	// and not this call site's. Coming back is where the peek gets to say what
-	// ended it, since it ended with nobody there to be told.
-	if (locked) {
-		Purple::ReportLock(Purple::LockKind::Screen);
-	} else {
-		Purple::PeekEndedNotice();
-	}
+	Purple::OnScreenLockChanged(locked);
 }
 
 bool Application::screenIsLocked() const {
@@ -1295,11 +1271,7 @@ void Application::updateWindowTitles() {
 void Application::lockByPasscode() {
 	_passcodeLock = true;
 
-	// Purple: the same rule as the screen lock above, through the same core
-	// call, and gated by `[peek] end_on_app_lock_p'. Both ways in are reported
-	// alike, and nothing here tries to tell a lock somebody performed from one
-	// the auto-lock timer fired: a key says which way it goes, out loud.
-	Purple::ReportLock(Purple::LockKind::App);
+	Purple::OnAppPasscodeLock();
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->setupPasscodeLock();
 	});
@@ -1315,9 +1287,7 @@ void Application::maybeLockByPasscode() {
 }
 
 void Application::unlockPasscode() {
-	// Purple: the first moment there is anybody to tell that a lock ended the
-	// peek they left running.
-	Purple::PeekEndedNotice();
+	Purple::OnAppPasscodeUnlock();
 	clearPasscodeLock();
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->clearPasscodeLock();

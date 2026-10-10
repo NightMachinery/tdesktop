@@ -320,7 +320,6 @@ public:
 		bool hideMarkAsRead : 1 = false;
 		bool hideReplyButton : 1 = false;
 		bool spoilerLoginCode : 1 = false;
-		bool previewAlways : 1 = false;
 	};
 	[[nodiscard]] DisplayOptions getNotificationOptions(
 		not_null<PeerData*> peer,

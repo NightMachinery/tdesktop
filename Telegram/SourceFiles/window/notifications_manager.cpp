@@ -11,8 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "platform/platform_notifications_manager.h"
-#include "purple/purple_config.h"
-#include "purple/purple_gate.h"
+#include "purple/purple_notification_privacy.h"
 #include "window/notifications_manager_default.h"
 #include "media/audio/media_audio_track.h"
 #include "media/audio/media_audio.h"
@@ -1110,14 +1109,6 @@ Manager::DisplayOptions Manager::getNotificationOptions(
 		&& !item->out()
 		&& (peer->isNotificationsUser()
 			|| peer->isVerifyCodes());
-	result.previewAlways = Purple::PreviewAlways(
-		Purple::ActiveSettings(),
-		Purple::IdOf(peer),
-		Purple::KindOf(peer));
-	if (result.previewAlways) {
-		result.hideNameAndPhoto = false;
-		result.hideMessageText = false;
-	}
 	return result;
 }
 
@@ -1564,7 +1555,12 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		: Data::ItemNotificationType::Message;
 	const auto item = fields.item;
 	const auto peer = item->history()->peer;
-	const auto options = getNotificationOptions(peer, item, type);
+	auto options = getNotificationOptions(peer, item, type);
+	const auto previewAlways = Purple::WithPreviewAlways(peer);
+	if (previewAlways) {
+		options.hideNameAndPhoto = false;
+		options.hideMessageText = false;
+	}
 	const auto reactionFrom = fields.reactionFrom;
 	if (reactionFrom && options.hideNameAndPhoto) {
 		return;
@@ -1590,7 +1586,7 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		: subWithChat();
 	const auto fullTitle = addTargetAccountName(title, &peer->session());
 	const auto hideReactionSender = reactionFrom
-		&& !options.previewAlways
+		&& !previewAlways
 		&& !peer->session().api().reactionsNotifySettings()
 			.showPreviewsCurrent();
 	const auto subtitle = reactionFrom

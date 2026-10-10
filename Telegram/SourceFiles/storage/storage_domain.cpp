@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "mtproto/mtproto_config.h"
-#include "purple/purple_passcode.h"
+#include "purple/purple_storage_passcode.h"
 #include "storage/details/storage_file_utilities.h"
 #include "storage/serialize_common.h"
 
@@ -29,10 +29,6 @@ using namespace details;
 	// We dropped old test authorizations when migrated to multi auth.
 	//return "key_" + dataName + (cTestMode() ? "[test]" : "");
 	return "key_" + dataName;
-}
-
-[[nodiscard]] QByteArray PersianKeyboardPasscode(const QByteArray &passcode) {
-	return Purple::PersianKeyboardToEnglish(QString::fromUtf8(passcode)).toUtf8();
 }
 
 } // namespace
@@ -61,13 +57,15 @@ StartResult Domain::start(const QByteArray &passcode) {
 	auto effectivePasscode = passcode;
 	auto result = legacy->legacyStart(effectivePasscode);
 	if (result == StartResult::IncorrectPasscodeLegacy) {
-		const auto mapped = PersianKeyboardPasscode(passcode);
-		if (mapped != passcode) {
+		(void)Purple::TryPersianKeyboardPasscode(passcode, [&](
+				const QByteArray &mapped) {
 			result = legacy->legacyStart(mapped);
 			if (result == StartResult::Success) {
 				effectivePasscode = mapped;
+				return true;
 			}
-		}
+			return false;
+		});
 	}
 	if (result == StartResult::Success) {
 		_oldVersion = legacy->local().oldMapVersion();
@@ -153,14 +151,11 @@ Domain::StartModernResult Domain::startModern(
 
 	EncryptedDescriptor keyInnerData, info;
 	if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
-		const auto mapped = PersianKeyboardPasscode(passcode);
-		if (mapped == passcode) {
-			LOG(("App Info: could not decrypt pass-protected key from info file, "
-				"maybe bad password..."));
-			return StartModernResult::IncorrectPasscode;
-		}
-		_passcodeKey = CreateLocalKey(mapped, salt);
-		if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
+		if (!Purple::TryPersianKeyboardPasscode(passcode, [&](
+				const QByteArray &mapped) {
+			_passcodeKey = CreateLocalKey(mapped, salt);
+			return DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey);
+		})) {
 			LOG(("App Info: could not decrypt pass-protected key from info file, "
 				"maybe bad password..."));
 			return StartModernResult::IncorrectPasscode;
@@ -275,9 +270,10 @@ bool Domain::checkPasscode(const QByteArray &passcode) const {
 	if (checkKey->equals(_passcodeKey)) {
 		return true;
 	}
-	const auto mapped = PersianKeyboardPasscode(passcode);
-	return (mapped != passcode)
-		&& CreateLocalKey(mapped, _passcodeKeySalt)->equals(_passcodeKey);
+	return Purple::TryPersianKeyboardPasscode(passcode, [&](
+			const QByteArray &mapped) {
+		return CreateLocalKey(mapped, _passcodeKeySalt)->equals(_passcodeKey);
+	});
 }
 
 void Domain::setPasscode(const QByteArray &passcode) {

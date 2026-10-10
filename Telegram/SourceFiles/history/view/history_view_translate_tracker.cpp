@@ -15,7 +15,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_flags.h"
 #include "data/data_peer.h"
-#include "data/data_peer_values.h" // Data::AmPremiumValue.
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -25,13 +24,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/translate_provider.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_translation_policy.h"
 #include "spellcheck/platform/platform_language.h"
 
 namespace HistoryView {
 namespace {
 
-constexpr auto kEnoughForRecognition = 10;
-constexpr auto kEnoughForTranslation = 6;
 constexpr auto kMaxCheckInBunch = 100;
 constexpr auto kRequestLengthLimit = 24 * 1024;
 constexpr auto kRequestCountLimit = 20;
@@ -42,7 +40,7 @@ TranslateTracker::TranslateTracker(not_null<History*> history)
 : _history(history)
 , _provider(Ui::CreateTranslateProvider(&_history->session()))
 , _api(&_history->session().mtp())
-, _limit(kEnoughForRecognition) {
+, _limit(Purple::kTranslationRecognitionThreshold) {
 	setup();
 }
 
@@ -70,10 +68,9 @@ void TranslateTracker::setup() {
 	using namespace rpl::mappers;
 	_trackingLanguage = rpl::combine(
 		Core::App().settings().translateChatEnabledValue(),
-		Data::AmPremiumValue(&_history->session()),
+		Purple::TranslationPremiumValue(&_history->session()),
 		std::move(autoTranslationValue),
-		Purple::LocalPremiumValue(),
-		_1 && (_2 || _3 || _4));
+		_1 && (_2 || _3));
 	_trackingLanguage.value() | rpl::on_next([=](bool tracking) {
 		_trackingLifetime.destroy();
 
@@ -103,7 +100,7 @@ void TranslateTracker::setup() {
 }
 
 bool TranslateTracker::enoughForRecognition() const {
-	return _itemsForRecognize.size() >= kEnoughForRecognition;
+	return _itemsForRecognize.size() >= Purple::kTranslationRecognitionThreshold;
 }
 
 void TranslateTracker::startBunch() {
@@ -190,7 +187,9 @@ void TranslateTracker::switchTranslation(
 
 void TranslateTracker::finishBunch() {
 	if (_addedInBunch > 0) {
-		accumulate_max(_limit, _addedInBunch + kEnoughForRecognition);
+		accumulate_max(
+			_limit,
+			_addedInBunch + Purple::kTranslationRecognitionThreshold);
 		_addedInBunch = -1;
 		applyLimit();
 		if (_trackingLanguage.current()) {
@@ -518,67 +517,19 @@ void TranslateTracker::checkRecognized(const std::vector<LanguageId> &skip) {
 		_history->translateOfferFrom({});
 		return;
 	}
-	auto languages = base::flat_map<LanguageId, int>();
+	auto recognized = std::vector<LanguageId>();
 	for (const auto &[id, entry] : _itemsForRecognize) {
-		if (const auto id = std::get_if<LanguageId>(&entry.id)) {
-			if (*id && !ranges::contains(skip, *id)) {
-				++languages[*id];
+		if (const auto language = std::get_if<LanguageId>(&entry.id)) {
+			if (*language && !ranges::contains(skip, *language)) {
+				recognized.push_back(*language);
 			}
 		}
 	}
-	using namespace base;
-	const auto count = int(_itemsForRecognize.size());
-	constexpr auto p = &flat_multi_map_pair_type<LanguageId, int>::second;
-	const auto threshold = (count > kEnoughForRecognition)
-		? (count * kEnoughForTranslation / kEnoughForRecognition)
-		: _allLoaded
-		? std::min(count, kEnoughForTranslation)
-		: kEnoughForTranslation;
-	const auto translatable = ranges::accumulate(
-		languages,
-		0,
-		ranges::plus(),
-		p);
-	const auto was = _history->translateOfferedFrom();
-	if (count < kEnoughForTranslation) {
-		// Don't change offer by small amount of messages.
-	} else if (translatable >= threshold) {
-		_history->translateOfferFrom(
-			ranges::max_element(languages, ranges::less(), p)->first);
-	} else if (was && translatable >= kEnoughForTranslation) {
-		// Purple: keep an offer we have already made. The threshold scales
-		// with how many messages have loaded, so in a chat that mixes
-		// languages it climbs past a foreign-message count that is not itself
-		// falling - six of ten offers, and six of twelve withdraws it a moment
-		// later. The bar then appears and vanishes within a second while
-		// history loads, which is unusable however much you wanted to
-		// translate. Withdraw only once the foreign messages really are gone.
-	} else {
-		_history->translateOfferFrom({});
-	}
-
-	// Purple: the translate bar only appears once a chat has enough messages
-	// in a language that is not on the "do not translate" list, so "nothing
-	// happened" has several innocent explanations. Log the decision - it
-	// changes rarely, so this is one line per chat that starts or stops
-	// offering, not per scroll.
-	const auto now = _history->translateOfferedFrom();
-	if (now != was) {
-		LOG(("Purple: %1 translation of %2 - %3 of %4 messages recognised, "
-			"threshold %5."
-			).arg(now ? u"offering"_q : u"withdrawing"_q
-			).arg(_history->peer->name()
-			).arg(translatable
-			).arg(count
-			).arg(threshold));
-	} else if (!now && count >= kEnoughForTranslation && !languages.empty()) {
-		LOG(("Purple: not offering translation of %1 - %2 of %3 messages "
-			"recognised, need %4."
-			).arg(_history->peer->name()
-			).arg(translatable
-			).arg(count
-			).arg(threshold));
-	}
+	Purple::UpdateTranslationOffer(
+		_history,
+		recognized,
+		int(_itemsForRecognize.size()),
+		_allLoaded);
 }
 
 } // namespace HistoryView
