@@ -308,11 +308,13 @@ purple.strings) belong with the hook rule.
 
 **`Telegram/SourceFiles/data/data_session.cpp`**: +607 -11, 23 hunks, near 5.
 Owners: B3 (stage 1), B11 (two lines), B14 (stage 2).
-- Today: the 15 `Session::purple*` definitions that walk Work Mode state,
-  maintain pins and views, and compute badge helpers have moved to
-  `purple/purple_work_view.cpp`.
-- Leaves after B3a: the constructor timers and setup call, full pin branches,
-  view and quiet-list blocks, and nine badge token swaps remain.
+- Today: the 15 `Session::purple*` definitions have moved to
+  `purple/purple_work_view.cpp`; the member definitions retain their account.
+- Leaves after B3b: the `purple/hooks/mute.h` include, constructor timers and
+  setup call, five `Session` helpers that claim every Purple view id, one
+  Purple refresh call in each chat-list entry method, and nine badge swaps.
+  The badge swaps cannot move because `Dialogs::MainList::unreadState()` also
+  feeds folder badges; all five near-hunk edits are on those lines.
 - B11 gives the two mute calls inside the Purple block (lines 1881 and 5969)
   their final names, and B3 then moves them verbatim.
 - Account: pin hooks and two list calls are in hand (`this`, a `Data::Session`);
