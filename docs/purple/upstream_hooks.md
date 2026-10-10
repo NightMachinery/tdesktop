@@ -442,6 +442,9 @@ Owner: B10d stage 2 (with B14).
 - Account: `PinWholeStripIfRestricted(session)` *must pass* the session,
   replacing `FoldersRestricted()` at lines 288 and 456.
 
+B10a home routing in `window_filters_menu.cpp` now passes the owning session
+to `HomeFilterId`; Normal selects id0 independently of folder ordering.
+
 **`Telegram/SourceFiles/window/window_filters_menu.cpp`**: +54 -13, 13
 hunks, near 5. Owner: B10u.
 - Today: the strip's change merge, `purpleShownList()` swaps, the whole-strip
@@ -477,6 +480,9 @@ hunks, near 3. Owners: B10u, B3c, B13.
 - Today: `escape()` swapped to the shown list, with a comment.
 - Leaves: one line in `escape()` (B10u). B12 adds the top-peers restart at
   line 2151 (see "Suggestions, stories and top peers").
+
+B10a constructor and home routing in `window_session_controller.cpp` now pass
+the owning session to `HomeFilterId`; preset routing retains its default id.
 
 **`Telegram/SourceFiles/window/window_session_controller.cpp`**: +44 -14, 8
 hunks, near 3. Owners: B10u, B7, B5.

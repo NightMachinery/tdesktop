@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_session_controller.h"
 
+#include "purple/purple_folder_strip.h"
+
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
@@ -1564,7 +1566,7 @@ SessionController::SessionController(
 		uiShow(),
 		GifPauseReason::TabbedPanel))
 , _invitePeekTimer([=] { checkInvitePeek(); })
-, _activeChatsFilter(session->data().chatsFilters().defaultId())
+, _activeChatsFilter(Purple::HomeFilterId(session))
 , _openedFolder(window->id().folder())
 , _openedCommunity(window->id().community())
 , _defaultChatTheme(std::make_shared<Ui::ChatTheme>())
@@ -2041,7 +2043,7 @@ void SessionController::checkOpenedFilter() {
 	const auto i = ranges::find(list, filterId, &Data::ChatFilter::id);
 	if (i == end(list)) {
 		setActiveChatsFilter(
-			filters->defaultId(),
+			Purple::HomeFilterId(&session()),
 			{ anim::type::normal, anim::activation::background });
 	}
 }
@@ -2053,7 +2055,7 @@ void SessionController::activateFirstChatsFilter() {
 		return;
 	}
 	_filtersActivated = true;
-	setActiveChatsFilter(session().data().chatsFilters().defaultId());
+	setActiveChatsFilter(Purple::HomeFilterId(&session()));
 }
 
 bool SessionController::uniqueChatsInSearchResults(
@@ -2090,7 +2092,7 @@ void SessionController::openFolder(not_null<Data::Folder*> folder) {
 	// Purple: back to whatever stands for All chats, which under a preset is
 	// its own view - going to the real All chats would show what the preset
 	// hides as soon as the archive was closed again.
-	const auto home = session().data().chatsFilters().defaultId();
+	const auto home = Purple::HomeFilterId(&session());
 	if (activeChatsFilterCurrent() != home) {
 		setActiveChatsFilter(home);
 	} else if (adaptive().isOneColumn()) {
@@ -2131,7 +2133,7 @@ void SessionController::openCommunity(not_null<Data::CommunityInfo*> info) {
 		resetFakeUnreadWhileOpened();
 	}
 	// Purple: same as openFolder above.
-	const auto home = session().data().chatsFilters().defaultId();
+	const auto home = Purple::HomeFilterId(&session());
 	if (activeChatsFilterCurrent() != home) {
 		setActiveChatsFilter(home);
 	} else if (adaptive().isOneColumn()) {

@@ -863,7 +863,8 @@ tests `Data::IsPurpleView()` and refuses.
 
 `ChatFilters::defaultId()` returns the view while a preset runs, so a new
 window opens on it and closing the archive falls back to it rather than to the
-complete list.
+complete list. Under Normal, home remains filter id 0 regardless of the visible
+folder order.
 
 ### Why a second accessor rather than filtering the real list
 
