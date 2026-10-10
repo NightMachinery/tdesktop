@@ -331,21 +331,15 @@ Owners: B3, B14.
 
 **`Telegram/SourceFiles/history/history.cpp`**: +515 -8, 10 hunks, near 0.
 Owners: B4 (stage 1), B14.
-- Today: the 365-line block of `History::purple*` definitions, the
-  constructor's uncounted test, `setFakeUnreadWhileOpened` calls,
-  `adjustedChatListTimeId`'s kept-for-view time, `chatListUnreadState`
-  wrapped around upstream's body, `shouldBeInChatList`'s early return and
-  extra term, and a stray `QtCore/QDateTime` include.
-- Leaves after B4: `_purpleUncounted = Purple::StartsUncounted(peer)`;
-  upstream's `chatListUnreadState` body with one bypass-guarded first line;
-  the `purpleHiddenFromChatList` early return and
-  `if (purpleKeptForView()) { return true; }`;
-  `if (!result && purpleKeptForView()) { return TimeId(1); }`; the
-  `purpleSetOpened` and `purpleRefreshShowMode` calls. About 18 lines.
-- Account: the member hooks are *in hand* (`this`, a History) and so is
-  `StartsUncounted(peer)`. The 13 account-less calls (lines 3431, 3514, 3535,
-  3567, 3583, 3649, 3683, 3704, 3713, 3766, 3776, 3791, 3848) move into
-  `purple/purple_history.cpp` with B4.
+- Today: the 365-line block of `History::purple*` definitions has moved to
+  `purple/purple_history.cpp`; constructor, unread, membership, time and
+  opened-state hooks remain in the upstream files.
+- Leaves after B4a: the inline constructor check, `setFakeUnreadWhileOpened`
+  calls, kept-for-view time, unread-state override and `shouldBeInChatList`
+  hooks remain, together with the explicit Purple include.
+- Account: the member definitions retain their owning History. The 13
+  account-less calls move into `purple/purple_history.cpp` with B4.
+
 
 **`Telegram/SourceFiles/history/history.h`**: +125 -0, 4 hunks, near 0.
 Owners: B4, B14.
@@ -355,12 +349,12 @@ Owners: B4, B14.
 
 **`Telegram/SourceFiles/history/history_unread_things.cpp`**: +25 -1, 3
 hunks, near 0. Owner: B4.
-- Today: `setCount` split so a mention or reaction edge refreshes the show
-  mode outside the `inChatList()` branch, gated by `Purple::Filtering()`.
-- Leaves: upstream's line back, followed by `Purple::UnreadThingEdge(...)`.
-  About 3 lines.
-- Account: *must pass*. `UnreadThingEdge` takes `_thread` or its owning
-  history, replacing the account-less `Purple::Filtering()` at line 126.
+- Today: `setCount` has a Purple mention/reaction edge block outside its
+  `inChatList()` branch.
+- Leaves after B4a: unchanged; the Purple edge block and gate include remain.
+- Account: the later `UnreadThingEdge` hook takes `_thread` or its owning
+  history, replacing the account-less `Purple::Filtering()` check.
+
 
 **`Telegram/SourceFiles/dialogs/dialogs_entry.cpp`**: +32 -1, 2 hunks, near
 1. Owner: not named in the plan; proposed B4, beside the History hooks.

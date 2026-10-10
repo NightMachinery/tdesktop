@@ -45,6 +45,7 @@ PRIVATE
     purple/purple_work_view.cpp
     purple/purple_gate.cpp
     purple/purple_gate.h
+    purple/purple_history.cpp
     purple/purple_instant_replaces.cpp
     purple/purple_instant_replaces.h
     purple/purple_last_seen.cpp
