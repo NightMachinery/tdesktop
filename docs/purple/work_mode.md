@@ -3584,3 +3584,9 @@ The B11 callers are `data/data_session.cpp`, `data/data_chat_filters.cpp`,
 `history/history_widget.cpp` and `window/window_peer_menu.cpp`. Controls query
 `Purple::MutedWithoutPreset()`; effective indicators still use upstream mute
 state. Menu composition and `Descriptor::purplePreset` remain separate.
+
+A finite native check sampled Saved Messages and an empty composer, opened its
+history command menu, selected a local Work Mode preset with an extra view, and
+visibly restored the checked Normal radio. Profile-panel attribution and physical
+gestures are operator accounts. List-row Pin/unread, temporary stripe/timer
+rendering, badge precedence, expiry and reordered-home remain open.
