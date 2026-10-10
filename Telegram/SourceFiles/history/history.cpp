@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
+#include "purple/hooks/history.h"
 
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
@@ -61,7 +62,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "main/main_session.h"
-#include "purple/purple_gate.h"
 
 #include <QtCore/QDateTime>
 #include "window/notifications_manager.h"
@@ -171,19 +171,7 @@ History::History(not_null<Data::Session*> owner, PeerId peerId)
 , _sendActionPainter(this) {
 	Thread::setMuted(owner->notifySettings().isMuted(peer));
 
-	// Purple: right from the start, because a chat that loads while a "hide
-	// until" is running on it would otherwise count towards its folders' badges
-	// until the next preset change. Nothing is notified and nothing needs to be
-	// - the chat is in no list yet, so the first list it joins simply reads the
-	// right answer. The peek test purpleRefreshUncounted() makes is skipped
-	// deliberately: a half-built History has no business walking folders, and
-	// the worst it costs is one peek during which this one chat stays
-	// uncounted.
-	const auto hide = Purple::OverrideFor(peer);
-	_purpleUncounted = hide
-		&& (*hide == Purple::OverrideKind::Hide)
-		&& (Purple::HideUntilScope()
-			== Purple::HideScope::KeepInFolderUncounted);
+	_purpleUncounted = Purple::StartsUncounted(peer);
 
 	if (const auto user = peer->asUser()) {
 		if (user->isBot()) {
@@ -2341,10 +2329,6 @@ void History::setUnreadMark(bool unread) {
 }
 
 void History::setFakeUnreadWhileOpened(bool enabled) {
-	// Purple: above every guard below, because this setter is already exactly
-	// "this chat became, or stopped being, the one you are looking at" - it
-	// simply declines to raise its flag for a chat that arrived with nothing
-	// unread, and that chat is open just the same.
 	purpleSetOpened(enabled);
 
 	if (fakeUnreadWhileOpened() == enabled) {
@@ -2365,11 +2349,6 @@ void History::setFakeUnreadWhileOpened(bool enabled) {
 	}
 	owner().chatsFilters().refreshHistory(this);
 
-	// Purple: this flag is half the answer for an unread-gated chat - it is
-	// what stops one vanishing from under you while you read it - so the moment
-	// it changes is a moment membership can change. Nothing else says so: no
-	// unread event fires when a chat is merely closed, and refreshHistory()
-	// above is guarded on the account having real folders at all.
 	purpleRefreshShowMode();
 }
 
@@ -2614,12 +2593,6 @@ TimeId History::adjustedChatListTimeId() const {
 			return std::max(result, draft->date);
 		}
 	}
-	// Purple: the second gate. A chat with no messages has no date, and
-	// DialogPosFromDate(0) is 0 - which Entry::setChatListExistence() reads as
-	// "has no place in the list" and refuses, however loudly
-	// shouldBeInChatList() said yes. One second past the epoch is a real
-	// position, and sorts below every real chat, which is where a conversation
-	// that has not happened yet belongs.
 	if (!result && purpleKeptForView()) {
 		return TimeId(1);
 	}
@@ -2778,19 +2751,9 @@ Dialogs::UnreadState History::chatListUnreadState() const {
 		}
 		return computeUnreadState();
 	}();
-	if (!_purpleUncounted) {
+	if (!_purpleUncounted || Purple::IsBypassed()) {
 		return real;
 	}
-	// Purple: nothing to add to any total, for a chat a "hide until" has put
-	// away under `keep_in_folder_but_exclude_from_badge_count'. The row keeps
-	// its own badge on the folder tabs that still hold it - that is a fact
-	// about the chat and is drawn from computeUnreadState() below - but the
-	// tabs stop counting it, which is what stops a chat you have deliberately
-	// hidden from lighting up a folder.
-	//
-	// `known' is carried across rather than reset: Dialogs::MainList asserts
-	// that a total which was known stays known, and it is still known. It is
-	// zero.
 	auto result = Dialogs::UnreadState();
 	result.known = real.known;
 	return result;
@@ -3428,9 +3391,6 @@ bool History::trackUnreadMessages() const {
 }
 
 bool History::shouldBeInChatList() const {
-	// Purple: a preset asking to hide everywhere really does drop the entry.
-	// This has to come before the pinned shortcut below, or pinning a chat
-	// would exempt it from every preset.
 	if (purpleHiddenFromChatList()) {
 		return false;
 	}
@@ -3456,15 +3416,11 @@ bool History::shouldBeInChatList() const {
 			return true;
 		}
 	}
-	// Purple: last, so every structural check above still applies - a channel
-	// you have left stays out, and so does a chat whose folder is unknown,
-	// which refreshChatListEntry() asserts on. The only verdict being overruled
-	// is "this conversation is empty", and only for a chat the preset names by
-	// hand: an empty chat has no row, and without a row it cannot be on one of
-	// the preset's tabs either.
+	if (purpleKeptForView()) {
+		return true;
+	}
 	return !lastMessageKnown()
-		|| (lastMessage() != nullptr)
-		|| purpleKeptForView();
+		|| (lastMessage() != nullptr);
 }
 
 void History::unknownMessageDeleted(MsgId messageId) {
