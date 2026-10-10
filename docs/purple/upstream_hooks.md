@@ -685,18 +685,17 @@ by B6. Their existing per-site `LastSeenNoteFor(..., false, true).text` swaps
 remain. There is no global interception in `Data::OnlineText`, which would
 change unrelated callers and discard the distinct full/narrow arguments.
 
-**`Telegram/SourceFiles/api/api_user_privacy.cpp`**: +131 -10, 10 hunks, near
-0. Owner: B17.
-- Today: `Representable`, the extended `save` (completion callback and
-  `afterRequest`), and `reloadFresh`.
-- Leaves: the extended `save` and `reloadFresh` (about 21 lines) calling
-  `Purple::Representable`. `reloadFresh` is the only route to the private
-  `pushPrivacy` that skips `apply()`'s side effects: for LastSeen, `apply()`
-  runs `updatePrivacyLastSeens()`, which cancels and resends
-  `contacts.getStatuses`. About 70 lines stay.
+**`Telegram/SourceFiles/api/api_user_privacy.cpp`**: B17 moves
+`Representable` to `purple/purple_user_privacy.cpp` and keeps one typed
+`Purple::Representable` call in `reloadFresh`. The extended `save` completion
+callback and `afterRequest` ordering stay unchanged. `reloadFresh` continues to
+fetch, parse, update peers and call private `pushPrivacy`; it remains distinct
+from `apply()`. For LastSeen, `apply()` runs `updatePrivacyLastSeens()`, which
+cancels and resends `contacts.getStatuses`, while `reloadFresh` skips that side
+effect as before. The request, error and parsed-value paths stay upstream.
 
-**`Telegram/SourceFiles/api/api_user_privacy.h`**: +5 -2, 3 hunks, near 0.
-Stays: the extended `save` signature and `reloadFresh`.
+**`Telegram/SourceFiles/api/api_user_privacy.h`**: B17 leaves the header
+unchanged; the extended `save` signature and `reloadFresh` stay upstream.
 
 **`Telegram/SourceFiles/main/main_account.cpp`**: +2 -0, 2 hunks, near 0.
 Owner: B15 (optional).
