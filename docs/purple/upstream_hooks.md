@@ -907,29 +907,29 @@ builder after `FillContextMenu`; document saving and ordinary grouped menu
 behavior remain upstream. See "Import content provenance and menu routes"
 below for the replacement extension sites.
 
-**`Telegram/SourceFiles/storage/file_upload.cpp`**: +9 -1, 6 hunks, near 2.
-Owner: B16.
-- Today: the receipt passed through `finishFront` and `notifyFailed`, and
-  `!Purple::IsPurplePost(*file)` keeping a sync post out of the downloads
-  folder copy.
-- Leaves under D3 a (Purple-owned upload with `messages.sendMedia`): no
-  receipt hunks. A record the Purple upload sends never enters
-  `Uploader::upload`, so the `IsPurplePost` condition should have nothing
-  left to guard; B16 confirms that before removing it.
+**`Telegram/SourceFiles/storage/file_upload.cpp`**: B16 review, retained
+unchanged.
+- `SyncConfigPost` now bypasses `Uploader` with a Purple-owned upload, but
+  `purple_sync::UploadTo` still serves automatic offer/fingerprint sends and
+  the manual "Send settings to Saved Messages" action through `sendFiles`.
+- Those two legacy callers need the receipt passed through `finishFront` and
+  `notifyFailed` so `NoteConfirmedSend` runs only after a server message id.
+  They also need `!Purple::IsPurplePost(*file)` to avoid copying their bytes
+  into the downloads folder. Keep both hooks.
 
-**`Telegram/SourceFiles/storage/file_upload.h`** (+2 -0, 2 hunks, near 0),
-**`Telegram/SourceFiles/storage/localimageloader.cpp`** (+19 -1, 6 hunks,
-near 1), **`Telegram/SourceFiles/storage/localimageloader.h`** (+17 -0, 2
-hunks, near 0), **`Telegram/SourceFiles/apiwrap.cpp`** (receipt part: 13 of
-its 15 hunks) and **`Telegram/SourceFiles/apiwrap.h`** (+9 -4, 5 hunks, near
-1): owner B16.
-- Today: `SendFileReceipt`, `FileLoadTo::receipt`, and the receipt threaded
-  through `sendFiles`, `sendUploadedDocument`, `sendMedia` and
-  `sendMediaWithRandomId`, which completes with the server message id.
-- Leaves under D3 a: nothing. Records are capped at 10 MB compressed, so the
-  Purple upload needs no big-file part method. Manual "Send to Saved
-  Messages" keeps upstream's path. apiwrap.cpp as a whole: +56 -8, 15 hunks,
-  near 5; B15 and B16 both edit it, so they run one after the other.
+**`Telegram/SourceFiles/storage/file_upload.h`**,
+**`Telegram/SourceFiles/storage/localimageloader.cpp`**,
+**`Telegram/SourceFiles/storage/localimageloader.h`**,
+**`Telegram/SourceFiles/apiwrap.cpp`** and **`Telegram/SourceFiles/apiwrap.h`**:
+B16 review, receipt path retained unchanged.
+- `SendFileReceipt`, `FileLoadTo::receipt`, and its path through `sendFiles`,
+  `sendUploadedDocument`, `sendMedia` and `sendMediaWithRandomId` still serve
+  the two legacy `purple_sync::UploadTo` callers above. B16 does not remove or
+  alter them.
+- Account-bound config records use the Purple-owned `upload.saveFilePart` and
+  `messages.sendMedia` path. Records are capped at 10 MB compressed, so it
+  needs no big-file part method. `apiwrap.cpp` remains an intersection with
+  B15's premium term and must be rebound after B15 lands.
 
 ## Compiler fixes (D16)
 

@@ -112,6 +112,8 @@ PRIVATE
     purple/purple_sync_config_history.h
     purple/purple_sync_config_post.cpp
     purple/purple_sync_config_post.h
+    purple/purple_sync_config_upload.cpp
+    purple/purple_sync_config_upload.h
     purple/purple_sync_config_publish.cpp
     purple/purple_sync_config_publish.h
     purple/purple_sync_config_review.cpp

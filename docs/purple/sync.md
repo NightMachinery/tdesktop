@@ -424,6 +424,34 @@ leaves no copy of the bytes in the download folder: `Uploader::upload` skips
 that copy for Purple's own posts (see
 [account_sync_plan.md](account_sync_plan.md)).
 
+The account-bound config-record path in `purple_sync_config_post` has a separate
+Purple-owned uploader. It sends the validated staged bytes as sequential
+`upload.saveFilePart` parts, then calls `messages.sendMedia` with the fixed
+record filename, JSON mime type and `#purplesync` caption. The clear-draft flag
+stays unset. It applies the returned Updates through the asking session's
+`ApiWrap`, accepts only the matching random id and a server message id, and
+keeps the existing exact-byte self-history readback before advancing local sync
+state. A missing receipt or incomplete readback returns an unknown outcome
+without retrying in that publish operation. The in-flight count remains active
+when the setup box closes while the owning session is still available. The
+uploader observes that account's session changes independently of the box. If
+the original session becomes unavailable, it clears its weak session pointer
+and defers a terminal null receipt to the main loop. An unconsumed completion
+also has the predecessor receipt's main-loop null fallback on destruction.
+Both routes use the same once-only completion guard, release the in-flight
+count even when a cancelled post is retained, and avoid session or partially
+destroyed post access. They supply no server id or retry. A later
+user-initiated publish starts with the normal
+own-history inventory before it can post again; this candidate has not been
+runtime-tested.
+
+The receipt and no-download-copy hooks in the generic upload path remain needed
+by `purple_sync::UploadTo`, which serves both automatic offer/fingerprint sends
+and the manual “Send settings to Saved Messages” action. Those legacy sends
+record their fingerprint and offer watermark only after the server returns a
+message id. B16 moves only account-bound config records off `sendFiles`, so it
+does not remove that legacy confirmation path or its local-copy guard.
+
 Desktop captures a Purple-owned `ImportSettingsHit` on the menu invocation's
 stack. The existing mouse update overloads optionally return it, reset it
 before native guards, and capture once immediately before `setActive` from
