@@ -704,6 +704,12 @@ minutes must not burn the grace before you have finished with it; while the
 chat is open it stays regardless, and the period begins when it stops being the
 active chat.
 
+On desktop, the optional row mark is only a visual cue for a chat that
+is temporarily present. A history row's span and held state come from its own
+`History` in the owning `Data::Session`; the mark style remains part of the
+shared app-wide settings. It does not change membership or imply a per-account
+preset selector.
+
 `applies_to` decides what it covers. `"already_in_view"` is the narrow repair -
 only a chat that was in the view when it was opened, so nothing you open can
 pull in a chat the preset was hiding. `"any_open_chat"` is the single rule -

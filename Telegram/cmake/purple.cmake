@@ -68,6 +68,8 @@ PRIVATE
     purple/purple_preset_box.h
     purple/purple_readme.cpp
     purple/purple_readme.h
+    purple/purple_row_mark.cpp
+    purple/purple_row_mark.h
     purple/purple_schedule.cpp
     purple/purple_schedule.h
     purple/purple_schedule_box.cpp
