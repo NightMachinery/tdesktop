@@ -421,7 +421,8 @@ chat you can still search for by name, still forward to and still reach with
 Ctrl+Tab, but that the app stops putting in front of you while a preset runs.
 It is global rather than per preset, beside `[peek]` and `[recent]`, because it
 is a decision about those strips and not about what any one preset lets
-through.
+through. Preset selection remains shared across the app, while each open strip
+reads and refreshes data from the session that owns it.
 
 The test is "visible anywhere in the profile", and it is deliberately not the
 test the chat list uses. `Purple::HiddenFromSuggestions()` asks the preset alone
