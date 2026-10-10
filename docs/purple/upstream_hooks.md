@@ -808,8 +808,11 @@ later:
   `support/support_helper.cpp`, `boxes/edit_todo_list_box.cpp` and
   `boxes/peers/edit_tag_control.cpp`: one site each.
 
-**Verify**: as in the first plan. Under D14, also check the dash toggle in a
-field no site covers today, such as the search box.
+**Verify**: as in the first plan. Under D14, use an existing replacement-enabled
+field, such as an originally empty Saved Messages composer, for the live dash
+OFF/ON comparison without restarting. Restore the draft and both preferences
+afterward, without sending. Main Search has no replacement map and is a negative
+control, so it cannot establish the positive toggle behavior.
 
 ## Premium and translation
 
