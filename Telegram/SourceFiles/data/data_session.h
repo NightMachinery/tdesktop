@@ -1078,6 +1078,19 @@ private:
 	// Purple: retakes the view's copy of the main list's pinned order.
 	void refreshPurpleViewPinned();
 	void refreshPurpleViewPins(int index);
+	[[nodiscard]] bool purpleSetChatPinned(
+		Dialogs::Key key,
+		FilterId filterId,
+		bool pinned);
+	[[nodiscard]] std::optional<bool> purpleCanPin(
+		FilterId filterId,
+		not_null<History*> history) const;
+	void purpleReorderPinned(
+		FilterId filterId,
+		Dialogs::Key key1,
+		Dialogs::Key key2);
+	void purpleRefreshChatListEntry(Dialogs::Key key);
+	void purpleRemoveChatListEntry(Dialogs::Key key);
 
 	// Purple: the grace-period timer. Keyed by PeerId rather than by History*
 	// so an entry left behind by a chat that went away cannot dangle.
