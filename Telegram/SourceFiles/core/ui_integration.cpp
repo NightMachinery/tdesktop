@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/ui_integration.h"
 
+#include "purple/purple_instant_replaces.h"
+
 #include "api/api_text_entities.h"
 #include "core/local_url_handlers.h"
 #include "core/file_utilities.h"
@@ -476,6 +478,12 @@ const Ui::Emoji::One *UiIntegration::defaultEmojiVariant(
 
 rpl::producer<bool> UiIntegration::systemTextReplacesEnabled() {
 	return Core::App().settings().systemTextReplaceValue();
+}
+
+bool UiIntegration::instantReplaceAllowed(
+		const QString &what,
+		const QString &) {
+	return Purple::InstantReplaceAllowed(what);
 }
 
 QString UiIntegration::phraseContextCopyText() {

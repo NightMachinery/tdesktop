@@ -376,12 +376,7 @@ EditTagControl::EditTagControl(
 		: tr::lng_rights_edit_admin_rank_name()),
 	TextUtilities::RemoveEmoji(currentRank))) {
 	_field->setMaxLength(kRankLimit);
-	Purple::InstallInstantReplaces(
-		_field,
-		Purple::InstantReplacesType::TextOnly);
-	_field->setInstantReplacesEnabled(
-		Core::App().settings().replaceEmojiValue(),
-		Core::App().settings().systemTextReplaceValue());
+	Purple::TextOnlyFollowToggles(_field);
 
 	_field->changes(
 	) | rpl::on_next([=] {

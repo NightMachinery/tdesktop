@@ -74,6 +74,9 @@ PRIVATE
     purple/purple_screentime_history_widget.h
     purple/purple_screentime_recorder.cpp
     purple/purple_screentime_recorder.h
+    purple/purple_settings_chat.h
+    purple/purple_settings_section.cpp
+    purple/purple_settings_section.h
     purple/purple_sync.cpp
     purple/purple_sync.h
     purple/purple_sync_account_binding.cpp

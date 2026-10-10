@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "purple/purple_settings_chat.h"
 #include "data/data_session.h"
 #include "data/data_cloud_themes.h"
 #include "data/data_file_origin.h"
@@ -978,16 +979,7 @@ void BuildStickersEmojiSection(SectionBuilder &builder) {
 		};
 	});
 
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"chat/replace-dashes"_q,
-			.title = tr::lng_settings_replace_dashes(tr::now),
-			.keywords = { u"replace"_q, u"hyphens"_q, u"dash"_q },
-			.checkIcon = Core::App().settings().replaceDashes()
-				? SearchEntryCheckIcon::Checked
-				: SearchEntryCheckIcon::Unchecked,
-		};
-	});
+	Purple::AddReplaceDashesSearchEntry(builder);
 
 	builder.add(nullptr, [] {
 		return SearchEntry{
@@ -1487,23 +1479,7 @@ void SetupStickersEmoji(
 			{ .radius = st::boxRadius },
 		} });
 	}
-	const auto replaceDashes = addWithReturn(
-		tr::lng_settings_replace_dashes(tr::now),
-		Core::App().settings().replaceDashes(),
-		[=](bool checked) {
-			Core::App().settings().setReplaceDashes(checked);
-			Core::App().saveSettingsDelayed();
-		});
-	Core::App().settings().replaceEmojiValue(
-	) | rpl::on_next([=](bool enabled) {
-		replaceDashes->setDisabled(!enabled);
-	}, replaceDashes->lifetime());
-	if (highlights) {
-		highlights->push_back({ u"chat/replace-dashes"_q, {
-			replaceDashes,
-			{ .radius = st::boxRadius },
-		} });
-	}
+	Purple::AddReplaceDashesCheckbox(inner, highlights);
 
 	const auto suggestEmoji = inner->lifetime().make_state<
 		rpl::variable<bool>
