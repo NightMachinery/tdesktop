@@ -308,26 +308,15 @@ purple.strings) belong with the hook rule.
 
 **`Telegram/SourceFiles/data/data_session.cpp`**: +607 -11, 23 hunks, near 5.
 Owners: B3 (stage 1), B11 (two lines), B14 (stage 2).
-- Today: the Work Mode walk (`setupPurpleWorkMode`, `refreshPurpleWorkMode`),
-  the grace and tick timers, the view pinned lists, the view and quiet lists
-  in `refreshChatListEntry` and `removeChatListEntry`, pin hooks in
-  `setChatPinned`, `pinnedCanPin` and `reorderTwoPinnedChats`, and nine badge
-  token swaps (`purpleBadgeUnread()`), plus a stray `QtCore/QDateTime`
-  include.
-- Leaves after B3: one include (rule 5), the constructor timers and setup
-  call, the pin hooks reshaped to claim every view id
-  (`purpleSetChatPinned`, `purpleCanPin`, the `reorderTwoPinnedChats` hook
-  after the two `Expects`), one call each in `refreshChatListEntry` and
-  `removeChatListEntry`, and the nine badge swaps, about 24 lines. The badge
-  swaps cannot move: there is no single lower point, because
-  `Dialogs::MainList::unreadState()` also feeds the folder badges. All 5
-  near-hunk edits of the file are in those badge lines.
-- B11 gives the two mute calls inside the Purple block (lines 1881 and
-  5969) their final names, and B3 then moves them verbatim.
-- Account: the pin hooks and the two list calls are *in hand* (`this`, a
-  `Data::Session`). The 13 account-less calls (lines 1966, 2049, 2663, 2666,
-  2707, 2708, 2752, 2753, 2992, 3164, 5849, 5853, 5930) move into
-  `purple/purple_work_view.cpp` with B3.
+- Today: the 15 `Session::purple*` definitions that walk Work Mode state,
+  maintain pins and views, and compute badge helpers have moved to
+  `purple/purple_work_view.cpp`.
+- Leaves after B3a: the constructor timers and setup call, full pin branches,
+  view and quiet-list blocks, and nine badge token swaps remain.
+- B11 gives the two mute calls inside the Purple block (lines 1881 and 5969)
+  their final names, and B3 then moves them verbatim.
+- Account: pin hooks and two list calls are in hand (`this`, a `Data::Session`);
+  the moved definitions retain their owning `Data::Session`.
 
 **`Telegram/SourceFiles/data/data_session.h`**: +70 -0, 4 hunks, near 0.
 Owners: B3, B14.
