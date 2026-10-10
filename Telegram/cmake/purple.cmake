@@ -31,6 +31,9 @@ endif()
 
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
+    purple/purple_app_services.cpp
+    purple/purple_app_services.h
+    purple/purple_build_checks.cpp
     purple/purple_bypass.h
     purple/purple_chat_menus.cpp
     purple/purple_chat_menus.h
@@ -57,6 +60,8 @@ PRIVATE
     purple/purple_list_menu.h
     purple/purple_mute.cpp
     purple/purple_mute.h
+    purple/purple_notification_privacy.cpp
+    purple/purple_notification_privacy.h
     purple/hooks/dialogs_inner_widget.h
     purple/hooks/history.h
     purple/hooks/mute.h
@@ -86,6 +91,8 @@ PRIVATE
     purple/purple_screentime_history_widget.h
     purple/purple_screentime_recorder.cpp
     purple/purple_screentime_recorder.h
+    purple/purple_storage_passcode.cpp
+    purple/purple_storage_passcode.h
     purple/purple_settings_chat.h
     purple/purple_settings_section.cpp
     purple/purple_settings_section.h
@@ -119,6 +126,8 @@ PRIVATE
     purple/purple_sync_review_box.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
+    purple/purple_translation_policy.cpp
+    purple/purple_translation_policy.h
     purple/purple_ui_witness.cpp
     purple/purple_ui_witness.h
     purple/purple_ui_witness_geometry.cpp
@@ -126,6 +135,8 @@ PRIVATE
     purple/purple_ui_witness_protocol.cpp
     purple/purple_ui_witness_protocol.h
 )
+
+nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_ui_witness_mac.mm)

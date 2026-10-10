@@ -2128,8 +2128,6 @@ void ApiWrap::saveDraftToCloudDelayed(not_null<Data::Thread*> thread) {
 void ApiWrap::updatePrivacyLastSeens() {
 	const auto now = base::unixtime::now();
 
-	// The server sends the real online_till either way; without Premium the
-	// client is the one throwing the precision away.
 	if (!_session->premium() && !Purple::LocalPremium()) {
 		_session->data().enumerateUsers([&](not_null<UserData*> user) {
 			if (user->isSelf()

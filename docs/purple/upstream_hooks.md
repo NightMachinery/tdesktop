@@ -280,12 +280,10 @@ after B2 (+42 -0, 3 hunks, near 1 before). Done in B2.
 - `AppName = "Purple Telegram"`. A version bump does not conflict with it:
   `AppFile` sits unchanged between it and `AppVersion`.
 
-**`Telegram/SourceFiles/ffmpeg/ffmpeg_utility.h`**: +12 -0, 1 hunk, near 1.
-Owner: B15.
-- Today: a `static_assert` that the FFmpeg headers are major version 60, with
-  its explanation.
-- Leaves: nothing. The check moves to `purple/purple_build_checks.cpp`,
-  which purple.cmake compiles into both `Telegram` and `lib_ffmpeg`.
+**`Telegram/SourceFiles/ffmpeg/ffmpeg_utility.h`**: B15 moves the Purple
+major-60 ABI assertion and its explanation to `purple/purple_build_checks.cpp`.
+`purple.cmake` compiles that source into both `Telegram` and `lib_ffmpeg`; the
+FFmpeg dependency selection stays unchanged.
 
 **The lib_ui gitlink** (`Telegram/lib_ui`): stays.
 - It points at the fork's lib_ui commit, which adds
@@ -803,78 +801,63 @@ control, so it cannot establish the positive toggle behavior.
 
 ## Premium and translation
 
-**`Telegram/SourceFiles/data/components/sponsored_messages.cpp`**: +21 -0, 5
-hunks, near 1. Owner: B15.
-- Leaves: the local-premium subscription and the three early returns in
-  `canHaveFor` (twice) and `isTopBarFor`, as uncommented one-liners.
+**`Telegram/SourceFiles/data/components/sponsored_messages.cpp`**: B15 keeps
+the local-premium subscription and the three early returns in `canHaveFor`
+(twice) and `isTopBarFor`, with no Purple commentary.
 
-**`Telegram/SourceFiles/main/main_domain.cpp`**: +6 -0, 2 hunks, near 0.
-Owner: B15.
-- Leaves: the `LocalPremium` early return in `maxAccounts`, comment gone.
+**`Telegram/SourceFiles/main/main_domain.cpp`**: B15 keeps the `LocalPremium`
+early return in `maxAccounts`; the upstream account-limit assertion rationale
+stays.
 
-**`Telegram/SourceFiles/api/api_peer_search.cpp`**: +7 -2, 3 hunks, near 0.
-Stays, with B15 trimming its comment.
-- The sponsored request condition gains `|| Purple::LocalPremium()`, and the
-  `_type` test moves into it so that every path that skips
-  `requestSponsored()` marks the sponsored half ready. That part is an
-  upstream bug fix, a D7 candidate.
+**`Telegram/SourceFiles/api/api_peer_search.cpp`**: B15 keeps the
+`LocalPremium`/`_type` skip condition and its `sponsoredReady` update together.
+The short comment states that skipped requests must mark the sponsored half
+ready. The skip and completion behavior are an upstream bug fix, a D7
+candidate, and no D7 pull request is proposed.
 
-**`Telegram/SourceFiles/boxes/language_box.cpp`** (+7 -2, 3 hunks, near 2)
-and **`Telegram/SourceFiles/history/view/history_view_translate_tracker.cpp`**
-(+50 -1, 6 hunks, near 1): owner B15.
-- The translate switch and the translate bar honour local premium; the
-  tracker's offer logic moves behind one call.
+**`Telegram/SourceFiles/boxes/language_box.cpp`** and
+**`Telegram/SourceFiles/history/view/history_view_translate_tracker.cpp`**:
+B15 uses the owning session's Premium value together with the shared Local
+Premium setting. The tracker keeps its recognition timing and lifetime; its
+threshold, offer, retention and withdrawal policy moves behind
+`Purple::UpdateTranslationOffer(history, recognized, count, allLoaded)`.
 
-**`Telegram/SourceFiles/apiwrap.cpp`** (premium part): the include and the
-`updatePrivacyLastSeens` term `&& !Purple::LocalPremium()` (line 2130), whose
-comment B15 removes. The rest of apiwrap.cpp belongs to B16.
+**`Telegram/SourceFiles/apiwrap.cpp`** (premium part): B15 keeps the
+`updatePrivacyLastSeens` term `&& !Purple::LocalPremium()` and removes its
+explanation. The rest of apiwrap.cpp belongs to B16.
 
 ## App-level hooks, passcode and notifications
 
-**`Telegram/SourceFiles/core/application.cpp`**: +37 -0, 5 hunks, near 0.
-- The optional inert paint witness adds one include and a default-disabled startup call. Its descriptor validation and work remain in Purple.
-Owner: B15.
-- Today: five includes; `StartSchedule`, `StartFocusSync` and
-  `StartScreenTime` in `run()`; lock reports and peek notices in
-  `setScreenIsLocked`, `lockByPasscode` and `unlockPasscode`.
-- Leaves: one include, `Purple::StartAppServices()` and
-  `Purple::OnScreenLockChanged(locked)`, plus the passcode lock and unlock
-  calls. Optional: `passcodeLockChanges()` (application.h:307) could replace
-  those two.
-- Account: *none needed*: schedules, focus sync, screen time and peeks are
-  device-wide.
+**`Telegram/SourceFiles/core/application.cpp`**: B15 leaves one Purple include,
+`Purple::StartAppServices()` at the former service-start site,
+`Purple::OnScreenLockChanged(locked)` after the screen-lock field update, and
+passcode lock/unlock calls at their original points. The helper preserves the
+schedule, focus-sync, screen-time and optional default-disabled UI-witness start
+order, plus the existing lock and peek notifications. These services are
+device-wide; no passcode-lock signal redesign is needed.
 
-**`Telegram/SourceFiles/window/main_window.cpp`**: +6 -0, 2 hunks, near 1.
-Owner: not named in the plan; proposed B15.
-- `Purple::ListenHotkeys(this)` for the peek key, already one call. Its
-  3-line comment goes.
+**`Telegram/SourceFiles/window/main_window.cpp`**: B15 keeps the single
+`Purple::ListenHotkeys(this)` hook for the peek key and removes its explanation.
 
-**`Telegram/SourceFiles/storage/storage_domain.cpp`**: +39 -10, 8 hunks,
-near 2. Owner: B15, with D15.
-- Today: includes reordered, the Persian-layout passcode mapping, and the
-  retries in `start`, `startModern` and `checkPasscode`.
-- Leaves: upstream's include order with one include; `DecryptWithMappedPasscode`
-  as one clause in `startModern`; `checkPasscode` as one line; and, because
-  D15 keeps the legacy retry until Evar says otherwise, the 3-line legacy
-  hook (the `legacyStart` line and the `startWithSingleAccount` argument).
+**`Telegram/SourceFiles/storage/storage_domain.cpp`**: B15 keeps upstream
+include order with one Purple include and delegates Persian-layout mapping and
+the byte-difference check to `Purple::TryPersianKeyboardPasscode`. The modern
+retry remains one clause around the mapped decryption attempt. D15 keeps the
+legacy retry, including `legacyStart` and the effective passcode passed to
+`startWithSingleAccount`; no storage format or failure behavior changes.
 
-**`Telegram/SourceFiles/window/notifications_manager.cpp`** (+13 -2, 7
-hunks, near 3), **`Telegram/SourceFiles/window/notifications_manager.h`** (+3
--0, 3 hunks, near 0) and
-**`Telegram/SourceFiles/window/notifications_manager_default.cpp`** (+1 -0, 1
-hunk, near 0): owner B15.
-- Today: `getNotificationOptions` takes the peer, sets `previewAlways` from
-  `Purple::PreviewAlways(Purple::ActiveSettings(), ...)` and unhides name and
-  text; the native manager skips its own hiding for it.
-- Leaves: `WithPreviewAlways` at both call sites; the header goes back to
-  upstream. Amendment: `WithPreviewAlways` takes the peer (or account and
-  peer), not a settings object, so per-account settings resolve
-  `preview_always` through it with no new upstream hook.
+**`Telegram/SourceFiles/window/notifications_manager.cpp`**,
+**`notifications_manager.h`** and
+**`notifications_manager_default.cpp`**: B15 restores the upstream display
+options structure. Both native and default rendering call
+`Purple::WithPreviewAlways(peer)` with the actual owning peer, then apply the
+same name/text visibility override. The helper reads peer identity and kind
+through that peer while `ActiveSettings()` remains the shared app-wide policy;
+it adds no per-account selector or new upstream hook.
 
-**`Telegram/SourceFiles/core/file_utilities.cpp`**: +4 -1, 1 hunk, near 0.
-Stays, with B15 shrinking the comment to one line after the Downloads guard.
-- The downloads folder keeps upstream's "Telegram Desktop" name, not
-  `AppName`.
+**`Telegram/SourceFiles/core/file_utilities.cpp`**: the Downloads folder keeps
+upstream's "Telegram Desktop" name, not `AppName`; B15 leaves one concise
+comment after the guard.
 
 ## Sync
 

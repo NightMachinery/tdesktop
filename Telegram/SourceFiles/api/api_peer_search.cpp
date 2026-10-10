@@ -54,8 +54,7 @@ void PeerSearch::request(
 	}
 	cache.requested = true;
 	cache.result.query = _query;
-	// Every path that skips requestSponsored() has to mark the sponsored half
-	// ready, or finishPeers() never calls finish() and the search hangs.
+	// Every skipped sponsored request must mark its half ready.
 	if (_query.size() < kMinSponsoredQueryLength
 		|| _type != Type::WithSponsored
 		|| Purple::LocalPremium()) {

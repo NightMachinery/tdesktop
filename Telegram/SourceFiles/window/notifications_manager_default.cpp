@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
+#include "purple/purple_notification_privacy.h"
 #include "core/application.h"
 #include "core/ui_integration.h"
 #include "chat_helpers/message_field.h"
@@ -869,12 +870,16 @@ void Notification::updateNotifyDisplay() {
 		return;
 	}
 
-	const auto options = manager()->getNotificationOptions(
+	auto options = manager()->getNotificationOptions(
 		_history->peer,
 		_item,
 		(_reaction.empty()
 			? Data::ItemNotificationType::Message
 			: Data::ItemNotificationType::Reaction));
+	if (Purple::WithPreviewAlways(_history->peer)) {
+		options.hideNameAndPhoto = false;
+		options.hideMessageText = false;
+	}
 	_hideReplyButton = options.hideReplyButton;
 
 	int32 w = width(), h = height();

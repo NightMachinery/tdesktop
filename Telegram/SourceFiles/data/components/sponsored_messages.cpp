@@ -65,10 +65,6 @@ SponsoredMessages::SponsoredMessages(not_null<Main::Session*> session)
 		}
 	}, _lifetime);
 
-	// Only reacts to the switch being turned on later; canHaveFor() is what
-	// keeps ads away when it is already on. Skipping the current value matters:
-	// clear() destroys _lifetime, and the default is on, so without the skip
-	// every session would tear this subscription down inside its constructor.
 	Purple::LocalPremiumValue(
 	) | rpl::skip(1) | rpl::on_next([=](bool noAds) {
 		if (noAds) {

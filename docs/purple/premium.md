@@ -111,6 +111,10 @@ Three separate gates, which is why the feature looks server-side at first glance
   (`history/view/history_view_translate_tracker.cpp`);
 - the "Translate" item in the chat context menu (`window/window_peer_menu.cpp`).
 
+The Settings > Language switch reads Premium from its settings session, and a
+chat's translate bar reads Premium from that chat's session. Both also honor the
+shared Local Premium setting, which has no per-account toggle.
+
 What makes this credible rather than hopeful: the `messages.translateText` call
 underneath is already used with no Premium check at all when you translate a
 single message from the message context menu. The API is open; only the
