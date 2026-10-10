@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_filters_menu.h"
 
+#include "purple/purple_folder_strip.h"
+
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -392,7 +394,7 @@ void FiltersMenu::refresh() {
 		const auto nextIsLocked = (now.size() >= premiumFrom);
 		if (nextIsLocked && (currentFilter == filter.id())) {
 			// Purple: home, not All chats - see ChatFilters::lookupId().
-			_session->setActiveChatsFilter(filters->defaultId());
+			_session->setActiveChatsFilter(Purple::HomeFilterId(&_session->session()));
 		}
 		auto button = prepareButton(
 			_list,

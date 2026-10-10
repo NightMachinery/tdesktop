@@ -39,6 +39,8 @@ PRIVATE
     purple/purple_device.h
     purple/purple_focus.cpp
     purple/purple_focus.h
+    purple/purple_folder_strip.cpp
+    purple/purple_folder_strip.h
     purple/purple_gate.cpp
     purple/purple_gate.h
     purple/purple_instant_replaces.cpp
