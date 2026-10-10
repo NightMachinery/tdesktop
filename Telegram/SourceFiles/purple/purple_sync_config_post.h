@@ -19,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 
+class SyncConfigUpload;
+
 enum class SyncConfigPostStatus {
 	Confirmed,
 	InvalidRecord,
@@ -61,6 +63,7 @@ private:
 	QByteArray _staged;
 	Fn<void(SyncConfigPostResult)> _finished;
 	std::unique_ptr<SyncCandidateReader> _reader;
+	std::shared_ptr<SyncConfigUpload> _upload;
 	MsgId _messageId;
 	bool _started = false;
 	bool _posted = false;

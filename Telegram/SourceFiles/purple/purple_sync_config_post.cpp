@@ -7,19 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_post.h"
 
-#include "api/api_common.h"
-#include "apiwrap.h"
 #include "data/data_document.h"
-#include "data/data_media_types.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
 #include "purple/purple_config_payload.h"
+#include "purple/purple_sync_config_upload.h"
 #include "purple/purple_sync_inventory.h"
-#include "storage/localimageloader.h"
-#include "ui/chat/attach/attach_prepare.h"
 
 #include <cstdint>
 #include <limits>
@@ -105,35 +101,20 @@ void SyncConfigPost::Start() {
 		Finish({ .status = SyncConfigPostStatus::InvalidRecord });
 		return;
 	}
-	auto file = Ui::PreparedFile(QString());
-	file.content = _staged;
-	file.displayName = SyncSettingsRecordFileName();
-	file.size = _staged.size();
-	file.caption = { u"#purplesync"_q };
-	file.information = std::make_unique<Ui::PreparedFileInformation>();
-	file.information->filemime = u"application/json"_q;
-
-	auto list = Ui::PreparedList();
-	list.files.push_back(std::move(file));
-
-	const auto history = _session->data().history(_session->user());
-	auto action = Api::SendAction(history);
-	action.clearDraft = false;
 	const auto weak = base::make_weak(this);
 	_posted = true;
 	++PostsStarted;
 	++PostsInFlight;
-	_session->api().sendFiles(
-		std::move(list),
-		SendMediaType::File,
-		nullptr,
-		action,
+	_upload = std::make_shared<SyncConfigUpload>(
+		*_sessionGuard.get(),
+		_staged,
 		[weak](std::optional<MsgId> messageId) {
 			--PostsInFlight;
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->OnReceipt(messageId);
 			}
 		});
+	_upload->Start();
 }
 
 void SyncConfigPost::Cancel() {
