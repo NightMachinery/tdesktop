@@ -134,6 +134,8 @@ PRIVATE
     purple/purple_ui_witness_geometry.h
     purple/purple_ui_witness_protocol.cpp
     purple/purple_ui_witness_protocol.h
+    purple/purple_user_privacy.cpp
+    purple/purple_user_privacy.h
 )
 
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
