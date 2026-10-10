@@ -755,21 +755,19 @@ near 2. Owners: B11 (two mute lines), then B7.
 
 ## Settings UI and instant replaces
 
-**`Telegram/SourceFiles/settings/sections/settings_advanced.cpp`**: +353 -0,
-3 hunks, near 11. Owner: B9.
-- Today: ten includes, the three `BuildPurple*` sections (342 lines, now
-  including the version row), and `BuildPurpleSection(builder)` in `kMeta`.
-- Leaves: `Purple::BuildAdvancedSection(builder)` and one include. That
-  `kMeta` line had 7 near-hunk edits: upstream added the screen-reader section
-  right after it in March 2026. Moving the Purple block elsewhere on the page
-  changes the page, so that is a question for Evar, not part of B9.
-- Account: the Work Mode choice row later reads `builder.session()`: *in
-  hand*.
+**`Telegram/SourceFiles/settings/sections/settings_advanced.cpp`**, owner B9:
+- The three `BuildPurple*` bodies move to `purple/purple_settings_section.cpp`.
+  The `kMeta` callback keeps one `Purple::BuildAdvancedSection(builder)` call
+  in its existing position, before the screen-reader section. The order on the
+  Advanced page, search metadata, version row and actual `builder.session()`
+  stay the same.
 
-**`Telegram/SourceFiles/settings/sections/settings_chat.cpp`**: +28 -0, 2
-hunks, near 2. Owner: B9.
-- Today: the dash toggle's search entry and its checkbox.
-- Leaves: two calls.
+**`Telegram/SourceFiles/settings/sections/settings_chat.cpp`**, owner B9:
+- The dash search entry and checkbox move behind two Purple facade calls.
+  Their label, id, keywords, checked state, checkbox highlight and disabled
+  state tied to Replace emoji stay the same.
+- The read and write live in `purple_instant_replaces.cpp`, using the existing
+  generic preference key `purple-replace-dashes`.
 
 **`Telegram/SourceFiles/settings/sections/settings_main.cpp`**: +3 -0, 3
 hunks, near 4. Final.
@@ -780,48 +778,37 @@ hunks, near 4. Final.
   page call was missing until 2026-10-03, so the row was searchable but never
   drawn (bug V1). See version.md.
 
-**`Telegram/SourceFiles/core/core_settings.cpp`**: +10 -2, 4 hunks, near 4.
-Owner: B9 (dashes); the defaults stay.
-- Today: the `purple-replace-dashes` pref (key, read, setter) and the changed
-  `resetOnLastLogout` defaults.
-- Leaves: the changed defaults (`_replaceEmoji` and `_systemTextReplace`
-  false). The dash setting moves to `purple_instant_replaces.cpp` with the
-  same pref key; `resetOnLastLogout` still clears it, because `_prefs.clear()`
-  removes the key.
+**`Telegram/SourceFiles/core/core_settings.cpp` and `core_settings.h`**, owner
+B9:
+- The dash preference key, accessor, setter and member leave `Core::Settings`.
+  The changed `_replaceEmoji` and `_systemTextReplace` defaults remain false.
+- `resetOnLastLogout` still clears `_prefs`; after that, the Purple getter sees
+  the missing key and returns false. No live input field has to outlast the
+  logout that clears the preference.
 
-**`Telegram/SourceFiles/core/core_settings.h`**: +10 -2, 2 hunks, near 2.
-Owner: B9.
-- Leaves: the two changed defaults; the dash accessors and member go.
+**`Telegram/SourceFiles/core/ui_integration.cpp` and `ui_integration.h`**, owner
+B9:
+- `UiIntegration::instantReplaceAllowed` delegates to Purple's dash policy.
+  The generic `Ui::Integration` hook in the lib_ui fork defaults to allowing a
+  replacement. `InputField` asks it only after a trie match, at event time, so
+  every field honors the current dash setting without replacing its map or
+  suppressing other replacements.
 
-**`Telegram/SourceFiles/core/ui_integration.cpp`** (+4 -0, 1 hunk, near 0)
-and **`Telegram/SourceFiles/core/ui_integration.h`** (+1 -0, 1 hunk, near 0):
-stay.
-- `UiIntegration::systemTextReplacesEnabled`, the override of the lib_ui fork
-  hook. D14 adds the instant-replace filter override here.
+**The 12 instant-replace sites**, owner B9 under D14: the default-map calls in
+11 sites return to upstream form and keep their existing per-field
+`replaceEmoji` and system-text-replace toggles. `edit_tag_control.cpp` uses
+`Purple::TextOnlyFollowToggles` to keep its text-only map and both toggles.
+The lib_ui filter handles the dash choice for all of them and for fields added
+later:
+- `chat_helpers/message_field.cpp`: three sites;
+- `boxes/peers/edit_peer_info_box.cpp`: two sites;
+- `boxes/add_contact_box.cpp`: two sites;
+- `boxes/peers/add_to_community_box.cpp`, `settings/sections/settings_information.cpp`,
+  `support/support_helper.cpp`, `boxes/edit_todo_list_box.cpp` and
+  `boxes/peers/edit_tag_control.cpp`: one site each.
 
-**The instant-replace sites**, owner B9 under D14: 12 call sites in 8 files
-swap `setInstantReplaces(Ui::InstantReplaces::Default())` for
-`Purple::InstallInstantReplaces(...)`, each with one include. Under D14 the
-toggle is applied in the lib_ui fork, and all 12 swaps and 8 includes go back
-to upstream:
-- `Telegram/SourceFiles/chat_helpers/message_field.cpp`: +4 -3, 4 hunks,
-  near 0 (lines 173, 543, 644);
-- `Telegram/SourceFiles/boxes/peers/edit_peer_info_box.cpp`: +3 -2, 3 hunks,
-  near 0 (730, 839);
-- `Telegram/SourceFiles/boxes/add_contact_box.cpp`: +3 -2, 3 hunks, near 1
-  (576, 593);
-- `Telegram/SourceFiles/boxes/peers/add_to_community_box.cpp`: +2 -1, 2
-  hunks, near 7 (174; 6 of the 7 are at that line);
-- `Telegram/SourceFiles/settings/sections/settings_information.cpp`: +2 -1,
-  2 hunks, near 1 (795);
-- `Telegram/SourceFiles/support/support_helper.cpp`: +2 -1, 2 hunks, near 0
-  (96);
-- `Telegram/SourceFiles/boxes/edit_todo_list_box.cpp`: +2 -1, 2 hunks, near 0
-  (186);
-- `Telegram/SourceFiles/boxes/peers/edit_tag_control.cpp`: +9 -1, 3 hunks,
-  near 3 (379). This site also turns the replaces on with the app settings,
-  and adds two includes for it; B9 folds that into
-  `Purple::TextOnlyFollowToggles`.
+**Verify**: as in the first plan. Under D14, also check the dash toggle in a
+field no site covers today, such as the search box.
 
 ## Premium and translation
 
@@ -999,7 +986,7 @@ All of them exist at HEAD, and each now has an owner:
 - B8: `addTranslate`'s local-premium term;
 - B7: `WatchScreenTime(this)` without its explanatory comment;
 - B5 and D4: the settings-offer hook in window_session_controller.cpp;
-- B9: the twelve instant-replace sites;
+- B9: the twelve instant-replace sites, including the text-only tag field;
 - B16: file_upload.{h,cpp}.
 
 Added since the plan, with no batch needed: settings_main.cpp (version

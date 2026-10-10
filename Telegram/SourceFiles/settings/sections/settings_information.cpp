@@ -52,7 +52,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/main_domain.h"
-#include "purple/purple_instant_replaces.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -792,7 +791,7 @@ void SetupBio(
 	bio->setTextCursor(cursor);
 	bio->submits() | rpl::on_next([=] { save(); }, bio->lifetime());
 	bio->changes() | rpl::on_next(updated, bio->lifetime());
-	Purple::InstallInstantReplaces(bio);
+	bio->setInstantReplaces(Ui::InstantReplaces::Default());
 	bio->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());

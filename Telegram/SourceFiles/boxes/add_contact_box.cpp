@@ -42,7 +42,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_peer_photo.h"
 #include "api/api_self_destruct.h"
 #include "main/main_session.h"
-#include "purple/purple_instant_replaces.h"
 #include "styles/style_add_contact_box.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
@@ -573,7 +572,7 @@ void GroupInfoBox::prepare() {
 			: tr::lng_dlg_new_group_name)(),
 		_initialTitle);
 	_title->setMaxLength(Ui::EditPeer::kMaxGroupChannelTitle);
-	Purple::InstallInstantReplaces(_title);
+	_title->setInstantReplaces(Ui::InstantReplaces::Default());
 	_title->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue(),
 		Core::App().settings().systemTextReplaceValue());
@@ -590,7 +589,7 @@ void GroupInfoBox::prepare() {
 			tr::lng_create_group_description());
 		_description->show();
 		_description->setMaxLength(Ui::EditPeer::kMaxChannelDescription);
-		Purple::InstallInstantReplaces(_description);
+		_description->setInstantReplaces(Ui::InstantReplaces::Default());
 		_description->setInstantReplacesEnabled(
 			Core::App().settings().replaceEmojiValue(),
 			Core::App().settings().systemTextReplaceValue());

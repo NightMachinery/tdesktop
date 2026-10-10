@@ -7,19 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "base/basic_types.h"
-
-class QString;
-
-namespace Ui {
-class InputField;
-} // namespace Ui
+namespace Settings::Builder {
+class SectionBuilder;
+} // namespace Settings::Builder
 
 namespace Purple {
 
-[[nodiscard]] bool ReplaceDashes();
-void SetReplaceDashes(bool value);
-[[nodiscard]] bool InstantReplaceAllowed(const QString &what);
-void TextOnlyFollowToggles(not_null<Ui::InputField*> field);
+void BuildAdvancedSection(::Settings::Builder::SectionBuilder &builder);
 
 } // namespace Purple

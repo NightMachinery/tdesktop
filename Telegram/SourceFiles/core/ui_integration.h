@@ -66,6 +66,9 @@ public:
 	const Ui::Emoji::One *defaultEmojiVariant(
 		const Ui::Emoji::One *emoji) override;
 	rpl::producer<bool> systemTextReplacesEnabled() override;
+	bool instantReplaceAllowed(
+		const QString &what,
+		const QString &with) override;
 
 	QString phraseContextCopyText() override;
 	QString phraseContextCopyEmail() override;
