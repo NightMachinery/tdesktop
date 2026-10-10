@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_unread_things.h"
+#include "purple/hooks/history.h"
 
 #include "data/data_saved_sublist.h"
 #include "data/data_session.h"
@@ -16,7 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
-#include "purple/purple_gate.h"
 #include "apiwrap.h"
 
 namespace HistoryUnreadThings {
@@ -108,25 +108,7 @@ void Proxy::setCount(int count) {
 		}
 	}
 
-	// Purple: a show_mode can make a chat appear only while it holds an unread
-	// mention or reaction, so this edge decides chat list membership and not
-	// just the badge drawn on it. It has to sit outside the inChatList() branch
-	// above, because the chat that needs bringing back is precisely the one
-	// that is not in the preset's view. It also has to come after that branch:
-	// for a forum the parent's mention count is the sum over its topics, and
-	// the call above is what updates the sum.
-	//
-	// Messages are not handled here. Their edge arrives through
-	// Data::Changes as HistoryUpdate::Flag::UnreadView, which is batched onto
-	// the main loop and so cannot re-enter the unread bookkeeping mid-update -
-	// see Session::setupPurpleWorkMode(). Mentions and reactions come through
-	// here as well as there, and the extra pass is harmless: refreshing
-	// membership twice settles on the same answer.
-	if ((_type == Type::Mentions || _type == Type::Reactions)
-		&& Purple::Filtering()) {
-		const auto history = _thread->owningHistory();
-		history->purpleRefreshShowMode();
-	}
+	Purple::UnreadThingEdge(_thread, _type);
 }
 
 bool Proxy::add(MsgId msgId, AddType type) {

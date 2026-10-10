@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_row.h"
 #include "history/history_item.h"
 #include "history/history_unread_things.h"
+#include "purple/hooks/history.h"
 #include "purple/purple_gate.h"
 
 #include <QtCore/QDateTime>
@@ -88,7 +89,10 @@ bool History::purpleShowModeSatisfied(Purple::ShowMode mode) const {
 	if (fakeUnreadWhileOpened()) {
 		return true;
 	}
-	const auto state = chatListUnreadState();
+	const auto state = [&] {
+		const auto bypass = Purple::Bypass();
+		return chatListUnreadState();
+	}();
 
 	// A manual unread mark counts as a message: it is the user saying "I still
 	// have to deal with this", which is the question being asked.

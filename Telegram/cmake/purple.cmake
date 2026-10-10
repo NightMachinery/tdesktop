@@ -31,6 +31,7 @@ endif()
 
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
+    purple/purple_bypass.h
     purple/purple_chat_menus.cpp
     purple/purple_chat_menus.h
     purple/purple_config.cpp
@@ -57,6 +58,7 @@ PRIVATE
     purple/purple_mute.cpp
     purple/purple_mute.h
     purple/hooks/dialogs_inner_widget.h
+    purple/hooks/history.h
     purple/hooks/mute.h
     purple/purple_peek.cpp
     purple/purple_peek.h
