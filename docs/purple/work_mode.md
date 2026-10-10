@@ -3553,6 +3553,8 @@ its original Normal selection, and the Advanced page exposed the Purple and
 Work Mode controls after scrolling. These checks do not establish preset-view
 icons, a reordered home folder, server pin ordering or multiple-account behavior.
 
+Further direct checks used an own preset with an empty named-list extra view. Both view icons showed All, next-view keyboard navigation selected the extra view, Escape returned to the preset main view, and its Work Mode menu opened the real dialog. Normal was restored. Reordered server-folder home, server pin ordering and multiple-account behavior remain unmeasured.
+
 ## Mute upstream hooks
 
 `purple/hooks/mute.h` exposes the B11 facade. The upstream notification
