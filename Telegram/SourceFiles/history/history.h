@@ -465,10 +465,6 @@ public:
 	// whenever [recent] is off, which is the default.
 	[[nodiscard]] bool purpleShownAsRecent() const;
 
-	// Purple: the moment the grace period runs out, for Data::Session's single
-	// timer to come back and re-decide. Zero when none is running.
-	[[nodiscard]] crl::time purpleGraceUntil() const;
-
 	// Purple: the span this row is temporary for, on the monotonic clock, or
 	// zeroes when it is not. Covers both reasons a row can be here on a timer -
 	// the close buffer and a "show until" - because the chat list draws one
@@ -760,18 +756,6 @@ private:
 	HistoryItem *_newPeerPhotoChange = nullptr;
 	bool _loadedAtTop = false;
 	bool _loadedAtBottom = true;
-
-	// Purple: the recently-looked-at grace period. In memory only and never
-	// persisted - a grace period that survived a restart would mean the app
-	// remembering that you glanced at somebody yesterday, which is not what
-	// anyone means by "recently".
-	//
-	// `_purpleGraceEligible' is decided when the chat is opened rather than
-	// when it is closed, because two of the three scopes ask where the chat was
-	// at that moment, and by the time you close it the answer has moved.
-	bool _purpleOpened = false;
-	bool _purpleGraceEligible = false;
-	crl::time _purpleGraceUntil = 0;
 
 	// Purple: whether chatListUnreadState() is currently reporting nothing, for
 	// a chat a "hide until" has put away under

@@ -181,7 +181,9 @@ History::History(not_null<Data::Session*> owner, PeerId peerId)
 	updateCommunityRegistration();
 }
 
-History::~History() = default;
+History::~History() {
+	Purple::ForgetHistory(this);
+}
 
 void History::clearLastKeyboard() {
 	if (lastKeyboardId) {

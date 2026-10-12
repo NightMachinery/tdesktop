@@ -1,4 +1,5 @@
 #include "purple/purple_folder_strip.h"
+#include "purple/purple_work_view.h"
 
 #include "data/data_premium_limits.h"
 #include "data/data_session.h"
@@ -41,7 +42,16 @@ FilterId HomeFilterId(not_null<Main::Session*> session) {
 
 const std::vector<Data::ChatFilter> &ShownList(
 		not_null<Main::Session*> session) {
-	return session->data().chatsFilters().purpleShownList();
+	return FolderStrip::ShownList(&session->data().chatsFilters());
+}
+
+const std::vector<Data::ChatFilter> &ShownList(
+		not_null<const Data::ChatFilters*> filters) {
+	return FolderStrip::ShownList(filters);
+}
+
+int ViewCount(not_null<const Data::ChatFilters*> filters) {
+	return FolderStrip::ViewCount(filters);
 }
 
 bool PinWholeStripIfRestricted(not_null<Main::Session*>) {
@@ -82,7 +92,7 @@ bool AddViewMenu(
 	const auto index = Data::PurpleViewIndex(id);
 	Window::MenuAddMarkAsReadChatListAction(
 		controller,
-		[=] { return session->data().purpleViewList(index); },
+		[=] { return Purple::ViewList(&session->data(), index); },
 		addAction);
 	addAction(
 		u"Work Mode"_q,
@@ -135,10 +145,10 @@ rpl::producer<Dialogs::UnreadState> ViewUnreadStateValue(
 		? Data::PurpleViewIndex(filterId)
 		: 0;
 	if (index > 0) {
-		return MainListUnreadState(session->data().purpleViewList(index));
+		return MainListUnreadState(Purple::ViewList(&session->data(), index));
 	}
 	return MainListUnreadState(Data::IsPurpleView(filterId)
-		? session->data().purpleViewList()
+		? Purple::ViewList(&session->data())
 		: session->data().chatsList()
 	) | rpl::map([=](const Dialogs::UnreadState &state) {
 		return Data::MainListMapUnreadState(session, state);
@@ -202,9 +212,37 @@ void EscapeToHome(not_null<Window::SessionController*> controller) {
 
 } // namespace Purple
 
-namespace Data {
+namespace Purple {
 
-ChatFilter ChatFilters::purpleViewFilter(int index) const {
+using namespace Data;
+
+FolderStrip::FolderStrip(not_null<Data::ChatFilters*> filters)
+: _filters(filters) {
+}
+
+void FolderStrip::subscribe() {
+	rpl::merge(
+		_filters->changed(),
+		ActiveChanges()
+	) | rpl::on_next([=] {
+		refreshShown();
+	}, _lifetime);
+	refreshShown();
+}
+
+const std::vector<Data::ChatFilter> &FolderStrip::ShownList(
+		const Data::ChatFilters *filters) {
+	Expects(filters->_purpleFolderStrip != nullptr);
+	return Filtering() ? filters->_purpleFolderStrip->_shown : filters->_list;
+}
+
+int FolderStrip::ViewCount(const Data::ChatFilters *filters) {
+	return filters->_purpleFolderStrip
+		? filters->_purpleFolderStrip->_viewCount
+		: 0;
+}
+
+Data::ChatFilter FolderStrip::viewFilter(int index) const {
 	// Named after the preset, or after the view, because that is the honest
 	// label: the tab is what this preset shows, and the user picked the name.
 	// Nothing else about it is a folder - no rules, no members - which is why
@@ -214,7 +252,7 @@ ChatFilter ChatFilters::purpleViewFilter(int index) const {
 		? Purple::ExtraViews()[index - 1].name
 		: Purple::ViewName();
 	return ChatFilter(
-		PurpleViewFilterId(index),
+		Data::PurpleViewFilterId(index),
 		{ TextWithEntities{ title } },
 		QString(),
 		std::nullopt,
@@ -224,14 +262,10 @@ ChatFilter ChatFilters::purpleViewFilter(int index) const {
 		{});
 }
 
-int ChatFilters::purpleViewCount() const {
-	return _purpleViewCount;
-}
-
-void ChatFilters::purpleRefreshShown() {
+void FolderStrip::refreshShown() {
 	if (!Purple::Filtering()) {
-		_purpleShown.clear();
-		_purpleViewCount = 0;
+		_shown.clear();
+		_viewCount = 0;
 		return;
 	}
 	auto result = std::vector<ChatFilter>();
@@ -247,7 +281,7 @@ void ChatFilters::purpleRefreshShown() {
 	// preset's own tabs, and a preset's tabs belong next to each other rather
 	// than scattered through the account's folders.
 	const auto extra = int(Purple::ExtraViews().size());
-	_purpleViewCount = std::min(extra + 1, kPurpleViewLimit);
+	_viewCount = std::min(extra + 1, kPurpleViewLimit);
 	if (extra + 1 > kPurpleViewLimit) {
 		// Silently drawing the first fifteen would read as "the rest are empty",
 		// which is the one thing it does not mean.
@@ -256,8 +290,8 @@ void ChatFilters::purpleRefreshShown() {
 			).arg(extra
 			).arg(kPurpleViewLimit - 1));
 	}
-	for (auto i = 0; i != _purpleViewCount; ++i) {
-		result.push_back(purpleViewFilter(i));
+	for (auto i = 0; i != _viewCount; ++i) {
+		result.push_back(viewFilter(i));
 	}
 
 	const auto &shown = Purple::ShownFolders();
@@ -269,7 +303,7 @@ void ChatFilters::purpleRefreshShown() {
 			// it - it has never heard of a Telegram folder - so it arrives here
 			// as a marker and is expanded in place, which is what keeps its
 			// position in the strip meaningful.
-			for (const auto &filter : _list) {
+			for (const auto &filter : _filters->_list) {
 				if (!filter.id()) {
 					continue;
 				}
@@ -297,13 +331,13 @@ void ChatFilters::purpleRefreshShown() {
 			// into the main view without its tab being there.
 			continue;
 		}
-		const auto i = ranges::find_if(_list, [&](const ChatFilter &filter) {
+		const auto i = ranges::find_if(_filters->_list, [&](const ChatFilter &filter) {
 			return filter.id()
 				&& !filter.title().text.text.compare(
 					wanted.name,
 					Qt::CaseInsensitive);
 		});
-		if (i == end(_list)) {
+		if (i == end(_filters->_list)) {
 			missing.push_back(wanted.name);
 		} else if (!ranges::contains(result, i->id(), &ChatFilter::id)) {
 			result.push_back(*i);
@@ -316,12 +350,8 @@ void ChatFilters::purpleRefreshShown() {
 			).arg(missing.join(u", "_q)));
 	}
 	LOG(("Purple: folder strip showing %1 of %2, including %3 preset view(s)."
-		).arg(result.size()).arg(_list.size()).arg(_purpleViewCount));
-	_purpleShown = std::move(result);
+		).arg(result.size()).arg(_filters->_list.size()).arg(_viewCount));
+	_shown = std::move(result);
 }
 
-const std::vector<ChatFilter> &ChatFilters::purpleShownList() const {
-	return Purple::Filtering() ? _purpleShown : _list;
-}
-
-} // namespace Data
+} // namespace Purple

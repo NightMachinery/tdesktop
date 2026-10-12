@@ -25,10 +25,31 @@ class SessionController;
 
 namespace Purple {
 
+class FolderStrip final {
+public:
+	explicit FolderStrip(not_null<Data::ChatFilters*> filters);
+	void subscribe();
+	[[nodiscard]] static const std::vector<Data::ChatFilter> &ShownList(
+		const Data::ChatFilters *filters);
+	[[nodiscard]] static int ViewCount(const Data::ChatFilters *filters);
+
+private:
+	[[nodiscard]] Data::ChatFilter viewFilter(int index) const;
+	void refreshShown();
+
+	not_null<Data::ChatFilters*> _filters;
+	std::vector<Data::ChatFilter> _shown;
+	int _viewCount = 0;
+	rpl::lifetime _lifetime;
+};
+
 [[nodiscard]] bool UseAllFilterIcon(FilterId id);
 [[nodiscard]] FilterId HomeFilterId(not_null<Main::Session*> session);
 [[nodiscard]] const std::vector<Data::ChatFilter> &ShownList(
 	not_null<Main::Session*> session);
+[[nodiscard]] const std::vector<Data::ChatFilter> &ShownList(
+	not_null<const Data::ChatFilters*> filters);
+[[nodiscard]] int ViewCount(not_null<const Data::ChatFilters*> filters);
 [[nodiscard]] bool PinWholeStripIfRestricted(
 	not_null<Main::Session*> session);
 [[nodiscard]] bool RefuseFolderOrderSave(

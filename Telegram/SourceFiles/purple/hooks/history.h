@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_bypass.h"
 
 class PeerData;
+class History;
 
 namespace Data {
 class Thread;
@@ -26,5 +27,6 @@ namespace Purple {
 void UnreadThingEdge(
 	not_null<Data::Thread*> thread,
 	HistoryUnreadThings::Type type);
+void ForgetHistory(const History *history);
 
 } // namespace Purple

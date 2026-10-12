@@ -6,7 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
-#include "purple/hooks/mute.h"
+#include "purple/hooks/work_view.h"
 
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -248,8 +248,6 @@ Session::Session(not_null<Main::Session*> session)
 , _formattedDateTimer([=] { checkFormattedDateUpdates(); })
 , _selfDestructTimer([=] { checkSelfDestructItems(); })
 , _pollsClosingTimer([=] { checkPollsClosings(); })
-, _purpleGraceTimer([=] { purpleGraceExpired(); })
-, _purpleTickTimer([=] { purpleTickTemporary(); })
 , _watchForOfflineTimer([=] { checkLocalUsersWentOffline(); })
 , _groups(this)
 , _aiComposeTones(std::make_unique<AiComposeTones>(session))
@@ -286,7 +284,7 @@ Session::Session(not_null<Main::Session*> session)
 	setupChannelLeavingViewer();
 	setupPeerNameViewer();
 	setupUserIsContactViewer();
-	setupPurpleWorkMode();
+	Purple::SetupWorkView(this);
 
 	_chatsList.unreadStateChanges(
 	) | rpl::on_next([=] {
@@ -2385,7 +2383,7 @@ void Session::sendHistoryChangeNotifications() {
 }
 
 void Session::notifyPinnedDialogsOrderUpdated() {
-	refreshPurpleViewPinned();
+	Purple::RefreshViewPinned(this);
 	_pinnedDialogsOrderUpdated.fire({});
 }
 
@@ -2598,7 +2596,7 @@ void Session::setChatPinned(
 		bool pinned) {
 	Expects(key.entry()->folderKnown());
 
-	if (purpleSetChatPinned(key, filterId, pinned)) {
+	if (Purple::SetChatPinned(this, key, filterId, pinned)) {
 		return;
 	}
 	const auto list = ((filterId && !IsPurpleView(filterId))
@@ -2750,7 +2748,7 @@ bool Session::pinnedCanPin(
 		not_null<History*> history) const {
 	Expects(filterId != 0);
 
-	if (const auto can = purpleCanPin(filterId, history)) {
+	if (const auto can = Purple::CanPin(this, filterId, history)) {
 		return *can;
 	}
 	const auto &list = chatsFilters().list();
@@ -2873,7 +2871,7 @@ void Session::reorderTwoPinnedChats(
 	Expects(filterId || (key1.entry()->folder() == key2.entry()->folder()));
 
 	if (!key1.topic() && IsPurpleView(filterId)) {
-		purpleReorderPinned(filterId, key1, key2);
+		Purple::ReorderPinned(this, filterId, key1, key2);
 		return;
 	}
 	const auto topic = key1.topic();
@@ -3393,11 +3391,11 @@ HistoryItem *Session::addNewMessage(
 }
 
 int Session::unreadBadge() const {
-	return computeUnreadBadge(purpleBadgeUnread());
+	return computeUnreadBadge(Purple::BadgeUnread(const_cast<Session*>(this)));
 }
 
 int Session::unreadWithMentionsBadge() const {
-	auto state = purpleBadgeUnread();
+	auto state = Purple::BadgeUnread(const_cast<Session*>(this));
 	if (state.mentions) {
 		state.messages -= state.mentions;
 	}
@@ -3405,35 +3403,35 @@ int Session::unreadWithMentionsBadge() const {
 }
 
 bool Session::unreadBadgeMuted() const {
-	return computeUnreadBadgeMuted(purpleBadgeUnread());
+	return computeUnreadBadgeMuted(Purple::BadgeUnread(const_cast<Session*>(this)));
 }
 
 bool Session::unreadWithMentionsBadgeMuted() const {
-	const auto state = purpleBadgeUnread();
+	const auto state = Purple::BadgeUnread(const_cast<Session*>(this));
 	return !state.mentions && computeUnreadBadgeMuted(state);
 }
 
 int Session::unreadBadgeIgnoreOne(Dialogs::Key key) const {
 	// Purple: ask about the list being counted. Subtracting a chat the badge
 	// list never held would take the total below what is on screen.
-	const auto remove = (key && key.entry()->inChatList(purpleBadgeFilterId()))
+	const auto remove = (key && key.entry()->inChatList(Purple::BadgeFilterId(const_cast<Session*>(this))))
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadge(purpleBadgeUnread() - remove);
+	return computeUnreadBadge(Purple::BadgeUnread(const_cast<Session*>(this)) - remove);
 }
 
 bool Session::unreadBadgeMutedIgnoreOne(Dialogs::Key key) const {
 	if (!Core::App().settings().includeMutedCounter()) {
 		return false;
 	}
-	const auto remove = (key && key.entry()->inChatList(purpleBadgeFilterId()))
+	const auto remove = (key && key.entry()->inChatList(Purple::BadgeFilterId(const_cast<Session*>(this))))
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadgeMuted(purpleBadgeUnread() - remove);
+	return computeUnreadBadgeMuted(Purple::BadgeUnread(const_cast<Session*>(this)) - remove);
 }
 
 int Session::unreadOnlyMutedBadge() const {
-	const auto state = purpleBadgeUnread();
+	const auto state = Purple::BadgeUnread(const_cast<Session*>(this));
 	return Core::App().settings().countUnreadMessages()
 		? state.messagesMuted
 		: state.chatsMuted;
@@ -5412,7 +5410,7 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		_chatListEntryRefreshes.fire(std::move(event));
 	}
 
-	purpleRefreshChatListEntry(key);
+	Purple::RefreshChatListEntry(this, key);
 
 	if (!history) {
 		return;
@@ -5495,7 +5493,7 @@ void Session::removeChatListEntry(Dialogs::Key key) {
 			});
 		}
 	}
-	purpleRemoveChatListEntry(key);
+	Purple::RemoveChatListEntry(this, key);
 
 	const auto mainList = chatsListFor(entry);
 	entry->removeFromChatList(0, mainList);

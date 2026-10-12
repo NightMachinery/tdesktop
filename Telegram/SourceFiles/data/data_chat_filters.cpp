@@ -6,7 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_chat_filters.h"
-#include "purple/hooks/mute.h"
+#include "purple/hooks/chat_filters.h"
 
 #include "api/api_text_entities.h"
 #include "history/history.h"
@@ -26,7 +26,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "purple/purple_gate.h"
-#include "purple/purple_folder_strip.h"
 #include "apiwrap.h"
 
 namespace Data {
@@ -401,24 +400,15 @@ ChatFilters::ChatFilters(not_null<Session*> owner)
 	_list.emplace_back();
 	crl::on_main(&owner->session(), [=] { load(); });
 
-	// Purple: the shown view depends on both halves - which folders exist and
-	// which the preset names - so it is rebuilt when either moves. This runs
-	// before Session's own peer walk, because ChatFilters is constructed in
-	// Session's member list and therefore subscribes first.
-	rpl::merge(
-		changed(),
-		Purple::ActiveChanges()
-	) | rpl::on_next([=] {
-		purpleRefreshShown();
-	}, _purpleLifetime);
-
-	// Once up front as well: a preset that was already active when the app
-	// started never fires a change, and defaultId() has to know about the view
-	// before the first window asks it what to open on.
-	purpleRefreshShown();
+	setupPurpleFolderStrip();
 }
 
 ChatFilters::~ChatFilters() = default;
+
+void ChatFilters::setupPurpleFolderStrip() {
+	_purpleFolderStrip = std::make_unique<Purple::FolderStrip>(this);
+	_purpleFolderStrip->subscribe();
+}
 
 not_null<Dialogs::MainList*> ChatFilters::chatsList(FilterId filterId) {
 	auto &pointer = _chatsLists[filterId];
@@ -955,10 +945,11 @@ FilterId ChatFilters::lookupId(int index) const {
 	// Clamped because a preset naming folders can make the shown list shorter
 	// than the real one, and the callers bound their index against the real
 	// one.
-	if (Purple::Filtering() && !_purpleShown.empty()) {
+	const auto &shown = Purple::ShownList(this);
+	if (Purple::Filtering() && !shown.empty()) {
 		Expects(index >= 0);
-		const auto last = int(_purpleShown.size()) - 1;
-		return _purpleShown[std::min(index, last)].id();
+		const auto last = int(shown.size()) - 1;
+		return shown[std::min(index, last)].id();
 	}
 	Expects(index >= 0 && index < int(_list.size()));
 
