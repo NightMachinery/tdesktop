@@ -306,11 +306,14 @@ purple.strings) belong with the hook rule.
 
 **`Telegram/SourceFiles/data/data_session.cpp`**: +607 -11, 23 hunks, near 5.
 Owners: B3 (stage 1), B11 (two lines), B14 (stage 2).
-- Today: the 15 `Session::purple*` definitions have moved to
-  `purple/purple_work_view.cpp`; the member definitions retain their account.
-- Leaves after B3c: the `purple/hooks/mute.h` include, constructor timers and
-  setup call, five `Session` helpers that claim every Purple view id, one
-  Purple refresh call in each chat-list entry method, and nine badge swaps.
+- Today: Purple view behavior and timers live on the per-session
+  `Purple::WorkView`; the upstream `Session` keeps the generic list operations
+  and calls the free functions in `purple/hooks/work_view.h` at the existing
+  pin, badge, constructor and chat-list seams.
+- Leaves after B14: the `WorkView` setup call in `Session`'s constructor, the
+  pin and badge dispatch calls, and one refresh or removal dispatch in each
+  chat-list entry method. The moved implementation uses the same owning
+  `Data::Session` for histories, lists, settings callbacks and folders.
   A preset-owned main view saves pins locally; a mirroring main view re-enters
   upstream with `FilterId(0)` and saves the ordinary server order. The badge
   swaps cannot move because folder badges also read the main-list totals; all
@@ -322,16 +325,20 @@ Owners: B3 (stage 1), B11 (two lines), B14 (stage 2).
 
 **`Telegram/SourceFiles/data/data_session.h`**: +70 -0, 4 hunks, near 0.
 Owners: B3, B14.
-- Today: the public view-list accessors, the private Purple members and the
-  timers.
-- Leaves: about 75 declaration lines until B14 (B3 adds five private
-  declarations); B14 moves the state into a per-session `Purple::WorkView`.
+- Today: the public Purple member accessors and the private Work Mode fields
+  have moved out. `Session` owns one `std::unique_ptr<Purple::WorkView>` before
+  `_peers`, so peer histories are destroyed before their WorkView.
+- Leaves: the incomplete-type forward declaration, friend declaration and
+  owner pointer. WorkView keeps actual session ownership; the active preset and
+  settings policy remain shared app-wide.
 
 **`Telegram/SourceFiles/history/history.cpp`**: +515 -8, 10 hunks, near 0.
 Owners: B4 (stage 1), B14.
 - Today: the 365-line block of `History::purple*` definitions has moved to
   `purple/purple_history.cpp`; constructor, unread, membership, time and
-  opened-state hooks remain in the upstream files.
+  opened-state hooks remain in the upstream files. The destructor calls
+  `Purple::ForgetHistory(this)` through the existing history facade, removing
+  the peer-keyed opened/grace entry while its owner session still exists.
 - Leaves after B4: `_purpleUncounted = Purple::StartsUncounted(peer)`;
   `purpleShowModeSatisfied()` reads real unread under `Purple::Bypass`, and the
   upstream unread computation returns before Purple's zero-count override while
@@ -351,9 +358,11 @@ Owners: B4 (stage 1), B14.
 
 **`Telegram/SourceFiles/history/history.h`**: +125 -0, 4 hunks, near 0.
 Owners: B4, B14.
-- Today: the `purple*` member declarations and the opened and grace state.
-- Leaves: the declarations until B14; then `_purpleUncounted` and its setter,
-  with the opened and grace state in a WorkView map.
+- Today: the `purple*` member declarations and `_purpleUncounted`; the opened,
+  eligibility and grace deadline fields have moved to a `PeerId`-keyed map in
+  the owning `Purple::WorkView`.
+- Leaves: `_purpleUncounted` and its existing update path. History destruction
+  erases the WorkView entry; the map stores no `History*`.
 
 **`Telegram/SourceFiles/history/history_unread_things.cpp`**: +25 -1, 3
 hunks, near 0. Owner: B4.
@@ -390,10 +399,12 @@ near 0. Owners: B11 (one line), B10d stage 1, B14 with B10d stage 2.
   `lookupId` rewrite.
 - B10d stage 1 moves the `purpleViewFilter`, `purpleViewCount`,
   `purpleRefreshShown` and `purpleShownList` member definitions into
-  `purple/purple_folder_strip.cpp` with unchanged bodies. The header and strip
-  state stay for B14 stage 2. The `chatsList` pin-container note moves to
-  work_mode.md.
-- Leaves after B10d stage 1: `if (Purple::RefuseFolderOrderSave(...))` in
+  `purple/purple_folder_strip.cpp` with unchanged bodies. B10d stage 2 makes
+  `Purple::FolderStrip` the owned state and subscription object; the constructor
+  installs it at the existing point. `Purple::ShownList(filters)` and
+  `Purple::ViewCount(filters)` are the public free accessors. The `chatsList`
+  pin-container note moves to work_mode.md.
+- Leaves after B10d stage 2: `if (Purple::RefuseFolderOrderSave(...))` in
   `saveOrder`, the early view return in `lookupId` before upstream's restored
   `Expects`, the constructor call, the views' All-chats icon, the
   `ignorePresetMute` term and `chatsListLoaded`.
@@ -409,19 +420,22 @@ near 0. Owners: B11 (one line), B10d stage 1, B14 with B10d stage 2.
   `RefuseFolderOrderSave`. Restriction still comes from shared app-wide
   settings; the session argument identifies the owner at this folder seam.
   The constructor call and the `lookupId` id test already carry the correct
-  context. The other eight account-less strip calls move into
-  `purple/purple_folder_strip.cpp`; stage 2 makes `Purple::FolderStrip` belong
-  to one ChatFilters, so to one session.
+  context. The moved `Purple::FolderStrip` belongs to one ChatFilters, so to
+  one session; its subscription remains at the same point in construction.
 
 **`Telegram/SourceFiles/data/data_chat_filters.h`**: +88 -1, 7 hunks, near 0.
 Owner: B10d stage 2 (with B14).
-- Today: the view id constants and `IsPurpleView`, the `ignorePresetMute`
-  declaration, `purpleShownList`, `purpleViewCount`, `chatsListLoaded` and the
-  strip state.
+- Today: the view id constants and `IsPurpleView` are in
+  `purple/purple_view_ids.h`; `Purple::FolderStrip` is held by one
+  `std::unique_ptr`, declared last so its subscription ends before its sources.
+  The free accessors are `Purple::ShownList(filters)` and
+  `Purple::ViewCount(filters)`.
 - Leaves: `ignorePresetMute`, `chatsListLoaded` and one
-  `std::unique_ptr<Purple::FolderStrip>`. View ids move to
-  `purple/purple_view_ids.h`; the forwarders become `Purple::ShownList` and
-  `Purple::ViewCount`.
+  `std::unique_ptr<Purple::FolderStrip>`.
+- The fixed base has 18 relevant call lines outside data/history: 15 existing
+  `Purple::ShownList(session)` uses and three WorkView count calls. The owner-
+  session overload remains for the 15 callers; the three count calls use
+  `Purple::ViewCount(filters)`.
 
 **`Telegram/SourceFiles/data/data_unread_value.cpp`**: +48 -4, 5 hunks, near
 0. Owner: B10d stage 1.
