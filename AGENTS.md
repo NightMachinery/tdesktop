@@ -2,14 +2,8 @@
 
 This guide defines repository-wide instructions for coding agents working with the Telegram Desktop codebase.
 
-## Private test infrastructure
-
-Reusable capture/controller tooling and synthetic tests live in the private
-[Purple test infrastructure repository](https://github.com/NightMachinery/purple-test-infrastructure).
-Read its README and component status before reuse; source review and native
-qualification are separate. Keep app-side hooks and product tests in this fork,
-and commit reusable external harness changes in the private repository. Keep
-live profiles and run artifacts outside both source repositories.
+Before doing any Purple work, read [docs/purple/agents.md](docs/purple/agents.md).
+It contains the Purple-specific build, safety, architecture, and feature docs.
 
 ## Working from Codex on Windows + WSL
 
@@ -48,15 +42,6 @@ Dependencies are located relative to the repository: `../Libraries`, `../win64/L
 
 ## Build Configuration
 
-### Build scheduling
-
-Full Purple Telegram desktop and Android application builds may run whenever
-the user explicitly authorizes the build and grants access to the machine.
-Night scheduling is an option when the user requests it, not a standing time
-restriction. Do not leave an active agent waiting for a requested window to
-open. The short `purple/test_config.sh` core harness and non-building static
-checks may run at any time.
-
 ### Build Commands
 
 **From repository root, run:**
@@ -78,14 +63,8 @@ Telegram/build/docker/centos_env/build_debug.sh
 cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 ```
 
-Use these Debug commands for development and verification builds. They are not
-the macOS installation workflow for the Purple fork. See the macOS rules below
-before replacing `/Applications/Purple Telegram.app`.
-
-Never build the Purple Telegram application in the literal CMake `Release`
-configuration. It is extremely heavy and is not the packaged configuration
-used by this fork. This does not apply to dependency builds whose documented
-workflow explicitly requires `Release`, such as the patched Qt build.
+Use these Debug commands for development and verification builds. For Purple build
+and install rules, read docs/purple/agents.md.
 
 ## Platform-Specific Requirements
 
@@ -102,24 +81,7 @@ workflow explicitly requires `Release`, such as the patched Qt build.
 - Dependencies: `../Libraries/local/Qt-*`
 - Set `QT` environment variable: `export QT=6.8`
 
-For the Purple fork, distinguish a test build from the installed daily-use
-client:
-
-- Development and disposable test bundles use `Debug`.
-- `/Applications/Purple Telegram.app` must be built with the default
-  `RelWithDebInfo` configuration from `purple/build_app.sh`, then installed
-  with `purple/install.sh`. Do not pass `BuildType=Debug` for this target.
-- Do not use literal CMake `Release` for the Purple Telegram application;
-  `RelWithDebInfo` is the optimized, symbolicated configuration intended for
-  an installed Purple client.
-- A non-Windows `_DEBUG` build first tries `cExeDir()` as its working directory.
-  If an installed app bundle is writable, that can create a fresh `tdata`
-  beside the executable and make the app appear logged out even though the
-  established account remains under
-  `~/Library/Application Support/Purple Telegram/tdata`. Never install a Debug
-  bundle over the daily-use Purple app. Give Debug builds a separate
-  `BuildPath`, install them to a separate `Target`, pass that same `BuildPath`
-  to `purple/install.sh`, and launch them with an explicit isolated `-workdir`.
+For Purple macOS build and install rules, read docs/purple/agents.md.
 
 ### Linux
 - Build dependencies in `../Libraries`
@@ -132,39 +94,7 @@ client:
 
 ## The Purple fork
 
-Everything this fork adds beyond upstream lives under `Purple::` and is findable
-with `git grep Purple::`. Read the docs before changing any of it:
-
-- **`docs/purple/roadmap.md`** - what the Android port has and what is left
-- **`docs/mac/build.md`** - the packaged macOS build, install and symbolication
-- **`docs/purple/premium.md`** - the client-side-only Premium unlocks
-- **`docs/purple/defaults.md`** - the values this fork decides differently from
-  upstream before anybody configures anything
-- **`docs/purple/config.md`** - `settings.toml`, `state.toml`, live reload
-- **`docs/purple/work_mode.md`** - presets, lists, visibility and notify gating
-- **`docs/purple/sync.md`** - moving `settings.toml` between installs through
-  Saved Messages, and the alternatives that were not built
-- **`docs/purple/version.md`** - the Purple version line in Settings and the
-  rule for bumping its number
-- **`docs/purple/upstream_hooks.md`** - the hook registry: every Purple edit
-  in an upstream file, the refactor batch that moves it, and how often
-  upstream edits next to it
-- **`docs/remote-build-and-test/readme.md`** - building and testing the Android
-  fork on the Apple-silicon laptop, with the shared build box available as an
-  optional compile worker and its emulator retained only for legacy diagnostics
-
-The parser, the splice engine, the state store and the resolution engine are the
-Work Mode core, and they live in the `purple-core` submodule at
-`Telegram/ThirdParty/purple_core` so the Android app compiles the very same
-sources. Only the platform layer around them is in
-`Telegram/SourceFiles/purple/`. Schema and core changes are made in the
-purple-core repository, committed and pushed there, and the submodule pointer
-bumped here.
-
-`purple/test_config.sh` compiles that core into a standalone harness and runs it
-in about a second. Run it after touching the core or anything in
-`Telegram/SourceFiles/purple/`; a full app build to test a config change is
-never necessary.
+Read docs/purple/agents.md before doing any Purple work.
 
 ### Keeping upstream merges easy
 
@@ -268,48 +198,7 @@ user to close that checkout's Telegram/debugger before rebuilding.
 
 ### Quitting the fork on macOS: never by name
 
-Several Telegram clients are usually installed side by side, and their names
-collide:
-
-    /Applications/Purple Telegram.app   com.tdesktop.PurpleTelegram
-    /Applications/Telegram.app          com.tdesktop.Telegram
-    /Applications/Telegram_macOS.app    ru.keepcoder.Telegram
-
-`osascript -e 'quit app "Purple Telegram"'` resolves the name through
-LaunchServices rather than targeting one bundle, and has quit the user's real
-Telegram instead of the fork. Losing someone's messaging client mid-conversation
-to a build step is not an acceptable side effect of installing.
-
-Target the bundle identifier, which is unambiguous:
-
-```bash
-osascript -e 'tell application id "com.tdesktop.PurpleTelegram" to quit'
-```
-
-Or signal explicit pids, matched against the full executable path rather than a
-process name:
-
-```bash
-Binary="/Applications/Purple Telegram.app/Contents/MacOS/Purple Telegram"
-ps -Ao pid=,comm= | awk -v b="$Binary" '$0 ~ b { print $1 }'
-```
-
-Do not use `killall Telegram`, `pkill Telegram`, or any `-f` pattern containing
-"Telegram": the first two match by short name across every client, and `-f`
-additionally matches the shell running the command itself.
-
-Only quit what the current task started. `install.sh` replaces the bundle at
-`/Applications`, so it does need the fork closed - ask the user to quit it, or
-quit it by bundle id if they have said you may. Never quit a client you did not
-launch on the assumption that it is "probably the fork".
-
-## Best Practices
-
-1. Use Debug for ordinary development and verification.
-2. Use `RelWithDebInfo` for the installed macOS Purple client.
-3. Never build the Purple Telegram application in the literal CMake `Release`
-   configuration; follow documented configuration requirements for dependency
-   builds.
+Follow the bundle-identifier and exact-owned-process rules in docs/purple/agents.md.
 
 ## Text File Format
 

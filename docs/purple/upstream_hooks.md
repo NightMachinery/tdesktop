@@ -61,7 +61,8 @@ upstream branch) and prints:
 
 - added and removed lines per upstream file, and their totals;
 - apart from the totals: AGENTS.md and README.md (B18 moves their Purple
-  content), every changed submodule pointer (today only the lib_ui gitlink,
+  content to docs/purple/agents.md, leaving the AGENTS hook rule and guide
+  pointers), every changed submodule pointer (today only the lib_ui gitlink,
   with the number of times upstream moved it in the window), and the count of
   binary files (the recoloured icons);
 - the account-less Work Mode calls in upstream files, per file. Comment lines
@@ -297,10 +298,12 @@ FFmpeg dependency selection stays unchanged.
 regenerates them.
 
 **`AGENTS.md`** (+144 -3, 6 hunks, near 6, after B2's strings bullet) and
-**`README.md`** (+32 -1, 4 hunks, near 1): owner B18. The Purple sections
-move to `docs/purple/agents.md`, leaving a pointer and the hook rule (D6).
-The B1 and B2 bullets (new sources in purple.cmake, new strings in
-purple.strings) belong with the hook rule.
+**`README.md`** (+32 -1, 4 hunks, near 1): owner B18. Move Purple-specific
+build, safety, architecture, and feature-overview content to
+`docs/purple/agents.md`; require that guide before Purple work. Keep the full
+upstream hook rule in `AGENTS.md`, including the B1 and B2 source and string
+registration bullets. Replace the README feature paragraphs with a concise
+guide pointer.
 
 ## Work Mode core
 
