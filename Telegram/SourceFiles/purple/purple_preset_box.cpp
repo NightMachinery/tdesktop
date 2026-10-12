@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_preset_box.h"
+#include "purple/purple_work_view.h"
 
 #include "base/timer.h"
 #include "base/timer_rpl.h"
@@ -525,7 +526,7 @@ void PeekDial::keyPressEvent(QKeyEvent *e) {
 	}
 	const auto owner = &session->data();
 	const auto total = owner->chatsList()->indexed()->size();
-	const auto shown = owner->purpleViewList()->indexed()->size();
+	const auto shown = Purple::ViewList(owner)->indexed()->size();
 	auto result = u"Showing %1 of %2 loaded chats."_q.arg(shown).arg(total);
 
 	// Named rather than numbered, because a count against a tab nobody can
@@ -535,7 +536,7 @@ void PeekDial::keyPressEvent(QKeyEvent *e) {
 	for (auto i = 0; i != int(views.size()); ++i) {
 		extras.push_back(u"%1 %2"_q
 			.arg(views[i].name)
-			.arg(owner->purpleViewList(i + 1)->indexed()->size()));
+			.arg(Purple::ViewList(owner, i + 1)->indexed()->size()));
 	}
 	if (!extras.isEmpty()) {
 		result += '\n' + extras.join(u", "_q) + '.';

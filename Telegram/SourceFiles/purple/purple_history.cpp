@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_unread_things.h"
 #include "purple/hooks/history.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_folder_strip.h"
+#include "purple/purple_work_view.h"
 
 #include <QtCore/QDateTime>
 
@@ -238,7 +240,7 @@ bool History::purpleReachableElsewhere() const {
 	// The preset's own extra tabs first: cheap, and the common case for a chat
 	// somebody keeps deliberately to hand. View 0 is the main view and is the
 	// thing being decided, so it is not "elsewhere".
-	for (auto i = 1, count = filters->purpleViewCount(); i != count; ++i) {
+	for (auto i = 1, count = Purple::ViewCount(filters); i != count; ++i) {
 		if (inChatList(Data::PurpleViewFilterId(i))) {
 			return true;
 		}
@@ -273,17 +275,18 @@ bool History::purpleReachableElsewhere() const {
 }
 
 void History::purpleSetOpened(bool opened) {
-	if (_purpleOpened == opened) {
+	auto state = Purple::OpenedGrace(this);
+	if (state.opened == opened) {
 		return;
 	}
-	_purpleOpened = opened;
+	state.opened = opened;
 	const auto seconds = Purple::RecentStaySeconds();
 	if (opened) {
 		// Decided now rather than on close, because two of the three scopes ask
 		// where the chat was when you opened it - and reading it is exactly what
 		// moves that answer.
-		_purpleGraceUntil = 0;
-		_purpleGraceEligible = (seconds > 0) && [&] {
+		state.until = 0;
+		state.eligible = (seconds > 0) && [&] {
 			switch (Purple::RecentAppliesTo()) {
 			case Purple::RecentScope::AlreadyInView:
 				return inChatList(Data::kPurpleViewFilterId);
@@ -294,9 +297,12 @@ void History::purpleSetOpened(bool opened) {
 			}
 			return false;
 		}();
-	} else if (_purpleGraceEligible && seconds > 0) {
-		_purpleGraceUntil = crl::now() + seconds * crl::time(1000);
-		owner().purpleWatchGrace(this);
+	} else if (state.eligible && seconds > 0) {
+		state.until = crl::now() + seconds * crl::time(1000);
+	}
+	Purple::SetOpenedGrace(this, state);
+	if (!opened && state.eligible && seconds > 0) {
+		Purple::WatchGrace(&owner(), this);
 	}
 	if (seconds > 0 && Purple::Filtering()) {
 		// Both directions. Opening can reveal a chat the preset hides, under the
@@ -307,22 +313,20 @@ void History::purpleSetOpened(bool opened) {
 }
 
 bool History::purpleShownAsRecent() const {
-	if (!_purpleGraceEligible || !Purple::RecentStaySeconds()) {
+	const auto state = Purple::OpenedGrace(this);
+	if (!state.eligible || !Purple::RecentStaySeconds()) {
 		// The second test is what makes turning [recent] off take effect at
 		// once rather than at the end of whatever was already running.
 		return false;
-	} else if (_purpleOpened) {
+	} else if (state.opened) {
 		return true;
 	}
-	return _purpleGraceUntil && (crl::now() < _purpleGraceUntil);
-}
-
-crl::time History::purpleGraceUntil() const {
-	return _purpleGraceUntil;
+	return state.until && (crl::now() < state.until);
 }
 
 History::PurpleTemporary History::purpleTemporary() const {
 	const auto span = Purple::OverrideDeadline(peer);
+	const auto recent = Purple::OpenedGrace(this);
 
 	// A "show until" and nothing else. The mark means "this row is here on a
 	// clock", and that is only true of a row the override put there: a chat a
@@ -353,15 +357,15 @@ History::PurpleTemporary History::purpleTemporary() const {
 			crl::now() + left * crl::time(1000),
 			true, // Held open by the override, not lingering from the buffer.
 		};
-	} else if (_purpleOpened) {
+	} else if (recent.opened) {
 		// Open, so it is not counting down yet - the clock starts when you
 		// stop looking at it.
 		return {};
 	} else if (purpleShownAsRecent()
-		&& _purpleGraceUntil
+		&& recent.until
 		&& purpleWouldLeaveTheView()) {
 		const auto span = Purple::RecentStaySeconds() * crl::time(1000);
-		return { _purpleGraceUntil - span, _purpleGraceUntil };
+		return { recent.until - span, recent.until };
 	}
 	return {};
 }

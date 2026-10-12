@@ -5,6 +5,8 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "purple/purple_work_view.h"
+
 #include "data/data_session.h"
 
 #include "apiwrap.h"
@@ -15,18 +17,48 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_indexed_list.h"
 #include "dialogs/dialogs_row.h"
 #include "history/history.h"
+#include "purple/purple_folder_strip.h"
 #include "main/main_session.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_mute.h"
 
 #include <QtCore/QDateTime>
 
-namespace Data {
+namespace Purple {
 
-void Session::setupPurpleWorkMode() {
+using namespace Data;
+
+WorkView &WorkView::ForSession(not_null<Data::Session*> owner) {
+	if (!owner->_purpleWorkView) {
+		owner->_purpleWorkView = std::make_unique<WorkView>(owner);
+	}
+	return *owner->_purpleWorkView;
+}
+
+WorkView::WorkView(not_null<Data::Session*> owner)
+: _owner(owner)
+, _purpleGraceTimer([=] { graceExpired(); })
+, _purpleTickTimer([=] { tickTemporary(); }) {
+}
+
+WorkView::~WorkView() = default;
+
+Main::Session &WorkView::session() const {
+	return _owner->session();
+}
+
+Data::ChatFilters &WorkView::chatsFilters() const {
+	return _owner->chatsFilters();
+}
+
+History *WorkView::historyLoaded(PeerId peerId) const {
+	return _owner->historyLoaded(peerId);
+}
+
+void WorkView::setup() {
 	Purple::ActiveChanges(
 	) | rpl::on_next([=] {
-		refreshPurpleWorkMode();
+		refreshWorkMode();
 	}, _lifetime);
 
 	// A show_mode that watches unread makes membership depend on something the
@@ -42,8 +74,8 @@ void Session::setupPurpleWorkMode() {
 	}, _lifetime);
 }
 
-void Session::refreshPurpleWorkMode() {
-	purpleStartTicking();
+void WorkView::refreshWorkMode() {
+	startTicking();
 
 	// Every "until" arrives here - one being made, one being cancelled, a
 	// preset switch putting a different set of them in force - and this is the
@@ -51,12 +83,12 @@ void Session::refreshPurpleWorkMode() {
 	// only by the [recent] close buffer, so an override made while nothing was
 	// in that buffer would sit there past its time until some unrelated event
 	// happened to rearm it.
-	purpleRearmGraceTimer();
+	rearmGraceTimer();
 	// Snapshot first: re-evaluating a mute notifies, and a handler that reacts
-	// by resolving a peer would insert into _peers while we walked it.
+	// by resolving a peer would insert into _owner->_peers while we walked it.
 	auto peers = std::vector<not_null<PeerData*>>();
-	peers.reserve(_peers.size());
-	for (const auto &[peerId, peer] : _peers) {
+	peers.reserve(_owner->_peers.size());
+	for (const auto &[peerId, peer] : _owner->_peers) {
 		peers.push_back(peer.get());
 	}
 	auto chats = 0;
@@ -92,7 +124,7 @@ void Session::refreshPurpleWorkMode() {
 		}
 		history->purpleRefreshChatListMembership();
 	}
-	refreshPurpleView();
+	refreshViews();
 	for (const auto &history : gated) {
 		if (history->inChatList(kPurpleViewFilterId)) {
 			++mentioned;
@@ -109,21 +141,20 @@ void Session::refreshPurpleWorkMode() {
 	LOG(("Purple: %1 of %2 loaded chats never shown, %3 unread-gated "
 		"(%4 showing), %5 silenced, view holds %6."
 		).arg(hidden).arg(chats).arg(gated.size()).arg(mentioned).arg(silenced
-		).arg(purpleViewList()->indexed()->size()));
+		).arg(viewList()->indexed()->size()));
 
 }
 
-void Session::purpleWatchGrace(not_null<History*> history) {
-	const auto until = history->purpleGraceUntil();
+void WorkView::watchGrace(not_null<History*> history) {
+	const auto until = openedGrace(history).until;
 	if (!until) {
 		return;
 	}
-	_purpleGrace[history->peer->id] = until;
-	purpleRearmGraceTimer();
-	purpleStartTicking();
+	rearmGraceTimer();
+	startTicking();
 }
 
-void Session::purpleRearmGraceTimer() {
+void WorkView::rearmGraceTimer() {
 	auto earliest = crl::time(0);
 
 	// The "until" decisions share this timer. Their deadlines are unix seconds
@@ -135,14 +166,14 @@ void Session::purpleRearmGraceTimer() {
 		const auto left = deadline - QDateTime::currentSecsSinceEpoch();
 		earliest = crl::now() + std::max(left, int64(0)) * crl::time(1000);
 	}
-	if (_purpleGrace.empty() && !earliest) {
+	for (const auto &[peerId, state] : _openedGrace) {
+		if (state.until && (!earliest || state.until < earliest)) {
+			earliest = state.until;
+		}
+	}
+	if (!earliest) {
 		_purpleGraceTimer.cancel();
 		return;
-	}
-	for (const auto &[peerId, until] : _purpleGrace) {
-		if (!earliest || until < earliest) {
-			earliest = until;
-		}
 	}
 	// At least a tick, so a deadline that has already gone by still comes back
 	// through the timer rather than re-entering the walk that armed it.
@@ -150,7 +181,7 @@ void Session::purpleRearmGraceTimer() {
 		std::max(earliest - crl::now(), crl::time(1)));
 }
 
-void Session::purpleStartTicking() {
+void WorkView::startTicking() {
 	// Cheap to ask and cheap to be wrong about: the tick stops itself the
 	// first time it finds nothing to redraw.
 	if (Purple::RecentMarkStyle() == Purple::RecentStyle::Timer
@@ -159,13 +190,13 @@ void Session::purpleStartTicking() {
 	}
 }
 
-void Session::purpleTickTemporary() {
+void WorkView::tickTemporary() {
 	// Only the rows that actually carry a ring, so a preset with none pays one
-	// walk of the loaded peers and then stops the timer. Walks _peers and asks
-	// for the history, the way refreshPurpleWorkMode() does - Session owns no
+	// walk of the loaded peers and then stops the timer. Walks _owner->_peers and asks
+	// for the history, the way refreshWorkMode() does - WorkView owns no
 	// map of History objects to iterate.
 	auto any = false;
-	for (const auto &[peerId, peer] : _peers) {
+	for (const auto &[peerId, peer] : _owner->_peers) {
 		const auto history = historyLoaded(peerId);
 		if (history && history->purpleTemporary().until) {
 			any = true;
@@ -177,18 +208,24 @@ void Session::purpleTickTemporary() {
 	}
 }
 
-void Session::purpleGraceExpired() {
+void WorkView::graceExpired() {
 	const auto now = crl::now();
 	auto due = std::vector<PeerId>();
-	for (const auto &[peerId, until] : _purpleGrace) {
-		if (until <= now) {
+	for (const auto &[peerId, state] : _openedGrace) {
+		if (state.until && state.until <= now) {
 			due.push_back(peerId);
 		}
 	}
 	// Collected first: the refresh below moves chat lists, and a handler that
 	// reacted by opening a chat would edit the map we were walking.
 	for (const auto &peerId : due) {
-		_purpleGrace.remove(peerId);
+		const auto i = _openedGrace.find(peerId);
+		if (i == end(_openedGrace)
+			|| !i->second.until
+			|| i->second.until > now) {
+			continue;
+		}
+		_openedGrace.remove(peerId);
 		if (const auto history = historyLoaded(peerId)) {
 			history->purpleRefreshChatListMembership();
 		}
@@ -197,12 +234,12 @@ void Session::purpleGraceExpired() {
 	// mute, which is more than membership - so it goes through the same full
 	// refresh a preset change does rather than the narrow one above.
 	if (Purple::PruneOverrides()) {
-		refreshPurpleWorkMode();
+		refreshWorkMode();
 	}
-	purpleRearmGraceTimer();
+	rearmGraceTimer();
 }
 
-void Session::refreshPurpleView() {
+void WorkView::refreshViews() {
 	// Every view above the live count, emptied. That covers both leaving a
 	// preset altogether and switching to one with fewer tabs, which is the case
 	// that used not to exist: a view nothing refreshes again keeps its rows, and
@@ -211,23 +248,23 @@ void Session::refreshPurpleView() {
 	// Walk each view rather than the main list: an entry can outlive its place
 	// in the main list, and leaving it linked to a list nothing will ever
 	// refresh again is how a stale row survives into the next preset.
-	for (auto i = chatsFilters().purpleViewCount(); i != kPurpleViewLimit; ++i) {
+	for (auto i = ViewCount(&chatsFilters()); i != kPurpleViewLimit; ++i) {
 		const auto id = PurpleViewFilterId(i);
-		const auto viewList = chatsFilters().chatsListLoaded(id);
-		if (!viewList || viewList->indexed()->empty()) {
+		const auto list = chatsFilters().chatsListLoaded(id);
+		if (!list || list->indexed()->empty()) {
 			continue;
 		}
 		// Before the rows go, while the pins still have entries to point at. A
 		// pinned index nothing clears would outlive its view and reappear the
 		// moment some later preset reused the id.
-		viewList->pinned()->clear();
+		list->pinned()->clear();
 		auto stale = std::vector<not_null<Dialogs::Entry*>>();
-		for (const auto &row : viewList->indexed()->all()) {
+		for (const auto &row : list->indexed()->all()) {
 			stale.push_back(row->entry());
 		}
 		for (const auto &entry : stale) {
-			entry->removeFromChatList(id, viewList);
-			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
+			entry->removeFromChatList(id, list);
+			_owner->_chatListEntryRefreshes.fire(Data::Session::ChatListEntryRefresh{
 				.key = Dialogs::Key(entry),
 				.filterId = id,
 				.existenceChanged = true
@@ -254,33 +291,33 @@ void Session::refreshPurpleView() {
 	// set of candidates - and unlike a walk over the peers it includes the
 	// Archive row, which is not a peer at all.
 	auto entries = std::vector<not_null<Dialogs::Entry*>>();
-	for (const auto &row : _chatsList.indexed()->all()) {
+	for (const auto &row : _owner->_chatsList.indexed()->all()) {
 		entries.push_back(row->entry());
 	}
 	// And the Archive's own list, because a folder can pull an archived chat
 	// into the view and nothing walking the main list would ever reach it.
 	// Cheap when the preset asks for nothing: the entries are visited, decide
 	// they do not belong, and leave.
-	if (const auto archive = folderLoaded(Data::Folder::kId)) {
+	if (const auto archive = _owner->folderLoaded(Data::Folder::kId)) {
 		for (const auto &row : archive->chatsList()->indexed()->all()) {
 			entries.push_back(row->entry());
 		}
 	}
 	for (const auto &entry : entries) {
-		refreshChatListEntry(entry);
+		_owner->refreshChatListEntry(entry);
 	}
-	refreshPurpleViewPinned();
+	refreshViewPinned();
 
 	// After the membership pass above, not during it: a view's pinned order is
 	// stated over the chats the view holds, and until every row has arrived
 	// there is no way to tell "the file pins a chat this tab does not show"
 	// from "it has not been added yet".
-	for (auto i = 1, count = chatsFilters().purpleViewCount(); i != count; ++i) {
-		refreshPurpleViewPins(i);
+	for (auto i = 1, count = ViewCount(&chatsFilters()); i != count; ++i) {
+		refreshViewPins(i);
 	}
 }
 
-void Session::refreshPurpleViewPinned() {
+void WorkView::refreshViewPinned() {
 	// Purple: the main view's pinned list is a copy of the main list's, minus
 	// the chats the preset hides. Pinning is an account-level fact, so the view
 	// must not own pins of its own - it only reflects them, and the one place
@@ -298,13 +335,13 @@ void Session::refreshPurpleViewPinned() {
 	if (Purple::PresetOwnsPins()) {
 		// The preset states its own order, so there is nothing to mirror. Seeded
 		// from settings.toml exactly as an extra view's is - see
-		// refreshPurpleViewPins(), which this then shares.
-		refreshPurpleViewPins(0);
+		// refreshViewPins(), which this then shares.
+		refreshViewPins(0);
 		return;
 	}
 	_purpleViewPinning = true;
 	auto pinned = std::vector<not_null<History*>>();
-	for (const auto &key : _chatsList.pinned()->order()) {
+	for (const auto &key : _owner->_chatsList.pinned()->order()) {
 		// Folders are sorted fixed-on-top rather than by pinned index, so the
 		// archive never needs a place here even when the server sends one.
 		if (const auto history = key.history()) {
@@ -313,17 +350,17 @@ void Session::refreshPurpleViewPinned() {
 			}
 		}
 	}
-	purpleViewList()->pinned()->applyList(pinned);
+	viewList()->pinned()->applyList(pinned);
 	_purpleViewPinning = false;
 }
 
-void Session::refreshPurpleViewPins(int index) {
+void WorkView::refreshViewPins(int index) {
 	Expects(index >= 0);
 
 	// Purple: an extra view's order is the preset's own statement, so it is
 	// seeded from settings.toml rather than mirrored from the chat list. An id
 	// the file names that this tab does not hold is not an error and is not
-	// dropped - the chat may not have loaded yet, and savePurpleViewPins()
+	// dropped - the chat may not have loaded yet, and saveViewPins()
 	// writes it back where it was.
 	//
 	// Same re-entrancy guard as the mirror above, and for the same reason:
@@ -338,11 +375,11 @@ void Session::refreshPurpleViewPins(int index) {
 	const auto &wanted = index
 		? Purple::ExtraViewPins(index - 1)
 		: Purple::PresetPins();
-	const auto viewList = purpleViewList(index);
+	const auto list = viewList(index);
 	auto pinned = std::vector<not_null<History*>>();
 	if (!wanted.empty()) {
 		auto byId = base::flat_map<Purple::PeerIdValue, not_null<History*>>();
-		for (const auto &row : viewList->indexed()->all()) {
+		for (const auto &row : list->indexed()->all()) {
 			if (const auto history = row->key().history()) {
 				byId.emplace(Purple::IdOf(history->peer), history);
 			}
@@ -355,15 +392,15 @@ void Session::refreshPurpleViewPins(int index) {
 			}
 		}
 	}
-	viewList->pinned()->applyList(pinned);
+	list->pinned()->applyList(pinned);
 }
 
-void Session::savePurpleViewPins(int index) {
+void WorkView::saveViewPins(int index) {
 	Expects(index >= 0);
 
-	const auto viewList = purpleViewList(index);
+	const auto list = viewList(index);
 	auto ids = std::vector<Purple::PeerIdValue>();
-	for (const auto &key : viewList->pinned()->order()) {
+	for (const auto &key : list->pinned()->order()) {
 		if (const auto history = key.history()) {
 			if (const auto id = Purple::IdOf(history->peer)) {
 				ids.push_back(id);
@@ -371,7 +408,7 @@ void Session::savePurpleViewPins(int index) {
 		}
 	}
 	auto present = base::flat_set<Purple::PeerIdValue>();
-	for (const auto &row : viewList->indexed()->all()) {
+	for (const auto &row : list->indexed()->all()) {
 		if (const auto history = row->key().history()) {
 			present.emplace(Purple::IdOf(history->peer));
 		}
@@ -401,46 +438,46 @@ void Session::savePurpleViewPins(int index) {
 			// Refused: the file does not parse, or the view is written inline.
 			// Put the tab back to what the file says rather than leave it
 			// showing an order nothing is going to remember.
-			refreshPurpleViewPins(index);
+			refreshViewPins(index);
 		}
 	});
 }
 
-not_null<Dialogs::MainList*> Session::purpleViewList(int index) {
+not_null<Dialogs::MainList*> WorkView::viewList(int index) {
 	return chatsFilters().chatsList(PurpleViewFilterId(index));
 }
 
-Dialogs::UnreadState Session::purpleBadgeUnread() const {
-	auto result = purpleBadgeList()->unreadState();
+Dialogs::UnreadState WorkView::badgeUnread() const {
+	auto result = badgeList()->unreadState();
 
 	// The quiet list holds exactly the view members that sit in a folder which
 	// asked not to be counted, so this is a subset by construction and cannot
 	// drive the badge negative. That is the whole reason it is a real MainList
 	// rather than a walk: the total is accumulated through the same
 	// addEntry/removeEntry path as the list it is being taken out of.
-	const auto filters = &const_cast<Session*>(this)->chatsFilters();
+	const auto filters = &chatsFilters();
 	if (const auto quiet = filters->chatsListLoaded(kPurpleQuietFilterId)) {
 		result = result - quiet->unreadState();
 	}
 	return result;
 }
 
-FilterId Session::purpleBadgeFilterId() const {
+FilterId WorkView::badgeFilterId() const {
 	return Purple::Filtering() ? kPurpleViewFilterId : FilterId();
 }
 
-not_null<const Dialogs::MainList*> Session::purpleBadgeList() const {
+not_null<const Dialogs::MainList*> WorkView::badgeList() const {
 	if (!Purple::Filtering()) {
-		return &_chatsList;
+		return &_owner->_chatsList;
 	}
 	// The view is created on demand like every other filter list, and asking
 	// for the badge is as good a demand as any - it is asked for constantly
 	// and always outlives the first call.
-	return const_cast<Session*>(this)->purpleViewList();
+	return const_cast<WorkView*>(this)->viewList();
 }
 
 
-bool Session::purpleSetChatPinned(
+bool WorkView::setChatPinned(
 		Dialogs::Key key,
 		FilterId filterId,
 		bool pinned) {
@@ -449,16 +486,16 @@ bool Session::purpleSetChatPinned(
 	}
 	const auto view = PurpleViewIndex(filterId);
 	if (!view && !Purple::PresetOwnsPins(&session())) {
-		setChatPinned(key, FilterId(0), pinned);
+		_owner->setChatPinned(key, FilterId(0), pinned);
 	} else {
-		purpleViewList(view)->pinned()->setPinned(key, pinned);
-		savePurpleViewPins(view);
-		notifyPinnedDialogsOrderUpdated();
+		viewList(view)->pinned()->setPinned(key, pinned);
+		saveViewPins(view);
+		_owner->notifyPinnedDialogsOrderUpdated();
 	}
 	return true;
 }
 
-std::optional<bool> Session::purpleCanPin(
+std::optional<bool> WorkView::canPin(
 		FilterId filterId,
 		not_null<History*> history) const {
 	if (!IsPurpleView(filterId)) {
@@ -466,12 +503,12 @@ std::optional<bool> Session::purpleCanPin(
 	}
 	const auto view = PurpleViewIndex(filterId);
 	if (!view && !Purple::PresetOwnsPins(&session())) {
-		return pinnedCanPin(history);
+		return _owner->pinnedCanPin(history);
 	}
-	const auto pinned = const_cast<Session*>(this)
-		->purpleViewList(view)
+	const auto pinned = const_cast<WorkView*>(this)
+		->viewList(view)
 		->pinned();
-	const auto limit = pinnedChatsLimit(filterId);
+	const auto limit = _owner->pinnedChatsLimit(filterId);
 	return (int(pinned->order().size()) < limit)
 		|| ranges::contains(
 			pinned->order(),
@@ -479,20 +516,20 @@ std::optional<bool> Session::purpleCanPin(
 			&Dialogs::Key::history);
 }
 
-void Session::purpleReorderPinned(
+void WorkView::reorderPinned(
 		FilterId filterId,
 		Dialogs::Key key1,
 		Dialogs::Key key2) {
 	const auto view = PurpleViewIndex(filterId);
 	if (!view && !Purple::PresetOwnsPins(&session())) {
-		reorderTwoPinnedChats(FilterId(0), key1, key2);
+		_owner->reorderTwoPinnedChats(FilterId(0), key1, key2);
 		return;
 	}
-	purpleViewList(view)->pinned()->reorder(key1, key2);
-	notifyPinnedDialogsOrderUpdated();
+	viewList(view)->pinned()->reorder(key1, key2);
+	_owner->notifyPinnedDialogsOrderUpdated();
 }
 
-void Session::purpleRefreshChatListEntry(Dialogs::Key key) {
+void WorkView::refreshChatListEntry(Dialogs::Key key) {
 	using namespace Dialogs;
 
 	const auto entry = key.entry();
@@ -507,9 +544,9 @@ void Session::purpleRefreshChatListEntry(Dialogs::Key key) {
 	// otherwise disappear the moment a preset started. An extra view holds only
 	// chats: its membership comes from lists of peers, and there is nothing a
 	// list could say that would put the archive on one.
-	for (auto i = 0, count = chatsFilters().purpleViewCount(); i != count; ++i) {
+	for (auto i = 0, count = ViewCount(&chatsFilters()); i != count; ++i) {
 		const auto id = PurpleViewFilterId(i);
-		const auto viewList = purpleViewList(i);
+		const auto list = viewList(i);
 		const auto belongs = i
 			? (history && Purple::ExtraViewHolds(i - 1, history->peer))
 			: ((history || entry->asFolder())
@@ -519,28 +556,28 @@ void Session::purpleRefreshChatListEntry(Dialogs::Key key) {
 				// Topics and sublists live in lists of their own.
 				&& (!entry->folder() || entry->purpleShownFromArchive())
 				&& !entry->purpleHiddenFromView());
-		auto event = ChatListEntryRefresh{ .key = key, .filterId = id };
+		auto event = Data::Session::ChatListEntryRefresh{ .key = key, .filterId = id };
 		if (belongs) {
 			event.existenceChanged = !entry->inChatList(id);
 			if (event.existenceChanged) {
-				entry->addToChatList(id, viewList);
+				entry->addToChatList(id, list);
 			} else {
-				event.moved = entry->adjustByPosInChatList(id, viewList);
+				event.moved = entry->adjustByPosInChatList(id, list);
 			}
 		} else if (entry->inChatList(id)) {
-			entry->removeFromChatList(id, viewList);
+			entry->removeFromChatList(id, list);
 			event.existenceChanged = true;
 		}
 		const auto joinedOrLeft = event.existenceChanged;
 		if (event) {
-			_chatListEntryRefreshes.fire(std::move(event));
+			_owner->_chatListEntryRefreshes.fire(std::move(event));
 		}
 		if (!joinedOrLeft) {
 			continue;
 		} else if (!i) {
 			// A pinned chat that has just entered the main view needs its place
 			// in the order, and one that has just left needs to stop holding it.
-			refreshPurpleViewPinned();
+			refreshViewPinned();
 		} else if (history && ranges::contains(
 				Purple::ExtraViewPins(i - 1),
 				Purple::IdOf(history->peer))) {
@@ -548,13 +585,13 @@ void Session::purpleRefreshChatListEntry(Dialogs::Key key) {
 			// place in is the file's. Tested against what the file pins rather
 			// than what the tab currently shows, so a chat that loads late still
 			// lands where the preset put it.
-			refreshPurpleViewPins(i);
+			refreshViewPins(i);
 		}
 	}
 
 	// Purple: the quiet list - the main view's members that sit in a folder
 	// which asked not to be counted. Maintained here, right after the views, so
-	// it is always a subset of view 0: purpleBadgeUnread() subtracts it, and a
+	// it is always a subset of view 0: badgeUnread() subtracts it, and a
 	// subtraction that is not a subset is how a badge goes negative.
 	{
 		const auto id = kPurpleQuietFilterId;
@@ -571,7 +608,7 @@ void Session::purpleRefreshChatListEntry(Dialogs::Key key) {
 		} else if (entry->inChatList(id)) {
 			entry->removeFromChatList(id, quiet);
 		}
-		// Deliberately no _chatListEntryRefreshes here. Nothing draws this
+		// Deliberately no _owner->_chatListEntryRefreshes here. Nothing draws this
 		// list, so telling the UI a row moved in it is pure noise.
 	}
 
@@ -586,7 +623,7 @@ void Session::purpleRefreshChatListEntry(Dialogs::Key key) {
 
 }
 
-void Session::purpleRemoveChatListEntry(Dialogs::Key key) {
+void WorkView::removeChatListEntry(Dialogs::Key key) {
 	using namespace Dialogs;
 
 	const auto entry = key.entry();
@@ -603,8 +640,8 @@ void Session::purpleRemoveChatListEntry(Dialogs::Key key) {
 	for (auto i = 0; i != kPurpleViewLimit; ++i) {
 		const auto id = PurpleViewFilterId(i);
 		if (entry->inChatList(id)) {
-			entry->removeFromChatList(id, purpleViewList(i));
-			_chatListEntryRefreshes.fire(ChatListEntryRefresh{
+			entry->removeFromChatList(id, viewList(i));
+			_owner->_chatListEntryRefreshes.fire(Data::Session::ChatListEntryRefresh{
 				.key = key,
 				.filterId = id,
 				.existenceChanged = true
@@ -613,7 +650,117 @@ void Session::purpleRemoveChatListEntry(Dialogs::Key key) {
 	}
 }
 
-} // namespace Data
+OpenedGraceState WorkView::openedGrace(const History *history) const {
+	const auto i = _openedGrace.find(history->peer->id);
+	return (i == end(_openedGrace)) ? OpenedGraceState() : i->second;
+}
+
+void WorkView::setOpenedGrace(History *history, OpenedGraceState state) {
+	const auto id = history->peer->id;
+	if (!state.opened && !state.until) {
+		_openedGrace.remove(id);
+	} else {
+		_openedGrace[id] = state;
+	}
+	rearmGraceTimer();
+}
+
+void WorkView::forgetHistory(const History *history) {
+	const auto id = history->peer->id;
+	_openedGrace.remove(id);
+	rearmGraceTimer();
+}
+
+} // namespace Purple
+
+namespace Purple {
+
+void SetupWorkView(not_null<Data::Session*> owner) {
+	WorkView::ForSession(owner).setup();
+}
+
+not_null<Dialogs::MainList*> ViewList(
+		not_null<Data::Session*> owner,
+		int index) {
+	return WorkView::ForSession(owner).viewList(index);
+}
+
+void SaveViewPins(not_null<Data::Session*> owner, int index) {
+	WorkView::ForSession(owner).saveViewPins(index);
+}
+
+not_null<const Dialogs::MainList*> BadgeList(
+		not_null<Data::Session*> owner) {
+	return WorkView::ForSession(owner).badgeList();
+}
+
+Dialogs::UnreadState BadgeUnread(not_null<Data::Session*> owner) {
+	return WorkView::ForSession(owner).badgeUnread();
+}
+
+FilterId BadgeFilterId(not_null<Data::Session*> owner) {
+	return WorkView::ForSession(owner).badgeFilterId();
+}
+
+void WatchGrace(
+		not_null<Data::Session*> owner,
+		not_null<History*> history) {
+	WorkView::ForSession(owner).watchGrace(history);
+}
+
+void RefreshViewPinned(not_null<Data::Session*> owner) {
+	WorkView::ForSession(owner).refreshViewPinned();
+}
+
+bool SetChatPinned(
+		not_null<Data::Session*> owner,
+		Dialogs::Key key,
+		FilterId id,
+		bool pinned) {
+	return WorkView::ForSession(owner).setChatPinned(key, id, pinned);
+}
+
+std::optional<bool> CanPin(
+		not_null<const Data::Session*> owner,
+		FilterId id,
+		not_null<History*> history) {
+	return WorkView::ForSession(const_cast<Data::Session*>(owner.get()))
+		.canPin(id, history);
+}
+
+void ReorderPinned(
+		not_null<Data::Session*> owner,
+		FilterId id,
+		Dialogs::Key key1,
+		Dialogs::Key key2) {
+	WorkView::ForSession(owner).reorderPinned(id, key1, key2);
+}
+
+void RefreshChatListEntry(
+		not_null<Data::Session*> owner,
+		Dialogs::Key key) {
+	WorkView::ForSession(owner).refreshChatListEntry(key);
+}
+
+void RemoveChatListEntry(
+		not_null<Data::Session*> owner,
+		Dialogs::Key key) {
+	WorkView::ForSession(owner).removeChatListEntry(key);
+}
+
+OpenedGraceState OpenedGrace(const History *history) {
+	return WorkView::ForSession(&history->owner()).openedGrace(history);
+}
+
+void SetOpenedGrace(History *history, OpenedGraceState state) {
+	WorkView::ForSession(&history->owner()).setOpenedGrace(history, state);
+}
+
+void ForgetHistory(const History *history) {
+	WorkView::ForSession(&history->owner()).forgetHistory(history);
+}
+
+} // namespace Purple
 
 namespace Purple {
 
@@ -626,7 +773,7 @@ bool SavePinnedViewOrder(
 	}
 	const auto view = Data::PurpleViewIndex(filterId);
 	if (view || PresetOwnsPins(session)) {
-		session->data().savePurpleViewPins(view);
+		SaveViewPins(&session->data(), view);
 	} else {
 		session->api().savePinnedOrder(folder);
 	}

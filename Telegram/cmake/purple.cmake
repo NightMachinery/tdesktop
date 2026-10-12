@@ -45,8 +45,10 @@ PRIVATE
     purple/purple_focus.h
     purple/purple_folder_strip.cpp
     purple/purple_folder_strip.h
+    purple/purple_view_ids.h
     purple/purple_window_session_controller.h
     purple/purple_work_view.cpp
+    purple/purple_work_view.h
     purple/purple_gate.cpp
     purple/purple_gate.h
     purple/purple_history.cpp
@@ -63,8 +65,10 @@ PRIVATE
     purple/purple_notification_privacy.cpp
     purple/purple_notification_privacy.h
     purple/hooks/dialogs_inner_widget.h
+    purple/hooks/chat_filters.h
     purple/hooks/history.h
     purple/hooks/mute.h
+    purple/hooks/work_view.h
     purple/purple_peek.cpp
     purple/purple_peek.h
     purple/purple_pinned_music.cpp

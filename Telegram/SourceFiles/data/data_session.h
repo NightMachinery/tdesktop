@@ -37,6 +37,10 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace Purple {
+class WorkView;
+} // namespace Purple
+
 namespace Ui {
 class BoxContent;
 } // namespace Ui
@@ -922,40 +926,6 @@ public:
 	[[nodiscard]] not_null<Dialogs::IndexedList*> contactsList();
 	[[nodiscard]] not_null<Dialogs::IndexedList*> contactsNoChatsList();
 
-	// Purple: one of the chat lists a work preset shows. View 0 is its main one,
-	// standing in place of All chats and holding whatever the main list holds
-	// minus the chats the preset hides; view n > 0 is its nth extra tab, holding
-	// only what that tab's own order names. All of them are empty whenever no
-	// preset is running. See kPurpleViewFilterId.
-	[[nodiscard]] not_null<Dialogs::MainList*> purpleViewList(int index = 0);
-
-	// Purple: writes extra view `index''s pinned order back to settings.toml,
-	// where a view's pins live. Called once a drag has settled rather than per
-	// step, because every write comes back as a config reload.
-	void savePurpleViewPins(int index);
-
-	// Purple: the list the app-wide unread badge should count. The main list
-	// is complete now - it keeps the chats a preset hides - so counting it
-	// would put the badge at odds with everything on screen.
-	[[nodiscard]] not_null<const Dialogs::MainList*> purpleBadgeList() const;
-
-	// Purple: that list's unread, minus the chats in a folder which asked not
-	// to be counted. Every app-badge accessor goes through this rather than
-	// reading purpleBadgeList() directly, so there is one place the
-	// subtraction happens and one place to be wrong.
-	[[nodiscard]] Dialogs::UnreadState purpleBadgeUnread() const;
-
-	// Purple: which chat list purpleBadgeList() is, for callers that have to
-	// ask an entry whether it is in it.
-	[[nodiscard]] FilterId purpleBadgeFilterId() const;
-
-	// Purple: come back when this chat's recently-looked-at grace period runs
-	// out, because nothing else will - no message arrives and no unread moves
-	// when a clock expires. One timer for the whole session, armed for the
-	// earliest deadline outstanding: a timer per History would be thousands of
-	// them, and only a handful of chats are ever in grace at once.
-	void purpleWatchGrace(not_null<History*> history);
-
 	struct ChatListEntryRefresh {
 		Dialogs::Key key;
 		Dialogs::PositionChange moved;
@@ -1048,6 +1018,8 @@ public:
 	[[nodiscard]] HistoryItem *messageWithPeer(PeerId id) const;
 
 private:
+	friend class Purple::WorkView;
+
 	using Messages = std::unordered_map<MsgId, not_null<HistoryItem*>>;
 
 	struct NextToUpgradeGift {
@@ -1063,41 +1035,6 @@ private:
 	void setupChannelLeavingViewer();
 	void setupPeerNameViewer();
 	void setupUserIsContactViewer();
-
-	// Purple: a work preset moves whole lists of chats in and out of view at
-	// once. Nothing about any individual peer changed, so no upstream signal
-	// fires and we re-evaluate them ourselves. See docs/purple/work_mode.md.
-	void setupPurpleWorkMode();
-	void refreshPurpleWorkMode();
-
-	// Purple: rebuilds the preset view from scratch, and empties it when no
-	// preset is running. Membership is maintained entry by entry the rest of
-	// the time; this is for the moment the rules themselves change.
-	void refreshPurpleView();
-
-	// Purple: retakes the view's copy of the main list's pinned order.
-	void refreshPurpleViewPinned();
-	void refreshPurpleViewPins(int index);
-	[[nodiscard]] bool purpleSetChatPinned(
-		Dialogs::Key key,
-		FilterId filterId,
-		bool pinned);
-	[[nodiscard]] std::optional<bool> purpleCanPin(
-		FilterId filterId,
-		not_null<History*> history) const;
-	void purpleReorderPinned(
-		FilterId filterId,
-		Dialogs::Key key1,
-		Dialogs::Key key2);
-	void purpleRefreshChatListEntry(Dialogs::Key key);
-	void purpleRemoveChatListEntry(Dialogs::Key key);
-
-	// Purple: the grace-period timer. Keyed by PeerId rather than by History*
-	// so an entry left behind by a chat that went away cannot dangle.
-	void purpleRearmGraceTimer();
-	void purpleGraceExpired();
-	void purpleTickTemporary();
-	void purpleStartTicking();
 
 	void checkSelfDestructItems();
 	void checkLocalUsersWentOffline();
@@ -1405,9 +1342,6 @@ private:
 
 	rpl::event_stream<> _pinnedDialogsOrderUpdated;
 
-	// Purple: re-entrancy guard for refreshPurpleViewPinned().
-	bool _purpleViewPinning = false;
-
 	base::flat_set<not_null<ViewElement*>> _heavyViewParts;
 
 	base::flat_map<CallId, not_null<GroupCall*>> _groupCalls;
@@ -1421,6 +1355,8 @@ private:
 	base::flat_map<
 		ReactionId,
 		base::flat_set<not_null<ViewElement*>>> _viewsByTag;
+
+	std::unique_ptr<Purple::WorkView> _purpleWorkView;
 
 	std::unordered_map<PeerId, std::unique_ptr<PeerData>> _peers;
 
@@ -1444,17 +1380,6 @@ private:
 
 	std::vector<WallPaper> _wallpapers;
 	uint64 _wallpapersHash = 0;
-
-	// Purple: chats whose recently-looked-at grace period has not run out yet,
-	// and the one timer that comes back for the earliest of them.
-	base::flat_map<PeerId, crl::time> _purpleGrace;
-	base::Timer _purpleGraceTimer;
-
-	// Purple: repaints the rows a countdown ring is drawn on, once a second
-	// and only while there is one. Nothing else redraws a row for the passage
-	// of time, and the ring is the one thing here that changes without any
-	// event to hang a repaint on.
-	base::Timer _purpleTickTimer;
 
 	base::flat_map<not_null<UserData*>, TimeId> _watchingForOffline;
 	base::Timer _watchForOfflineTimer;
