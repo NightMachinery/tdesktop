@@ -197,13 +197,20 @@ time. The main list is complete, so the invariant holds by construction, the
 pin logic never fires, and a hidden chat is still reachable everywhere the
 preset is not looking.
 
-The view is a filter, with the reserved id `Data::kPurpleViewFilterId`. Being a
-filter rather than a special case is what makes the chat list machinery accept
-it: `Dialogs::MainList` accumulates unread totals through `addEntry`/
-`removeEntry` and sorts by `Row::sortKey(filterId)`, so the view's badge and
-order are right for the same reason every folder's are. Membership is
-maintained in `Session::refreshChatListEntry()`, next to the loop that does the
-same for real folders.
+The view is a filter, with the reserved id `Data::kPurpleViewFilterId` from
+`purple/purple_view_ids.h`. Being a filter rather than a special case is what
+makes the chat list machinery accept it: `Dialogs::MainList` accumulates unread
+totals through `addEntry()`/`removeEntry()` and sorts by
+`Row::sortKey(filterId)`, so the view's badge and order are right for the same
+reason every folder's are. `Purple::WorkView::refreshChatListEntry()` maintains
+the synthetic views, called from `Session::refreshChatListEntry()` beside the
+existing folder-list work.
+
+Each desktop `Data::Session` owns one `Purple::WorkView`. It reads that
+session's histories, folders and lists, and keeps its pinning state and
+PeerId-keyed opened/grace map for that session's lifetime. Active preset
+selection and `settings.toml` remain shared app-wide; the owner object keeps
+session data and callbacks local without changing the shared policy.
 
 That id is the first of a run of `Data::kPurpleViewLimit` reserved ids - the
 preset's main view, then one per extra view it declares. `Data::IsPurpleView()`
@@ -248,8 +255,8 @@ already.
 
 ### What the badge counts
 
-`Session::purpleBadgeList()` returns the view while a preset runs and the main
-list otherwise, and the seven badge accessors read it. This is the one place
+`Purple::BadgeList(&session.data())` returns the view while a preset runs and
+the main list otherwise, and the seven badge accessors read it. This is the one place
 the design costs something the removal-based one got free: the main list is now
 complete, so counting it would leave the dock badge claiming unread messages
 that nothing on screen accounts for.
@@ -260,7 +267,7 @@ They are the same object under `normal`, so nothing is paid there.
 
 When the preset does not provide its own `pinned` ids for the main view, the
 view's pinned list is a **copy** of the main list's, minus chats the preset hides,
-retaken by `Session::refreshPurpleViewPinned()` whenever either moves. Pinning is
+retaken by `Purple::WorkView::refreshViewPinned()` whenever either moves. Pinning is
 a fact about the account in this mode:
 
 - Pinning or unpinning inside the view acts on the main list and sends the
@@ -274,7 +281,7 @@ a fact about the account in this mode:
 
 A preset with a non-empty `pinned` array for its main view owns that view's
 order. Pin toggles and drags update the array in `settings.toml`, and a drag does
-not send `messages.reorderPinnedDialogs`. `Session::refreshPurpleViewPinned()`
+not send `messages.reorderPinnedDialogs`. `Purple::WorkView::refreshViewPinned()`
 seeds this list from the preset. Extra views use their own arrays in the same
 way.
 
@@ -371,7 +378,7 @@ tab. The order lives in the file:
     ]
     list_order = [ { list = "essentials" } ]
 
-`Session::refreshPurpleViewPins()` seeds the tab's `Dialogs::PinnedList` from
+`Purple::WorkView::refreshViewPins()` seeds the tab's `Dialogs::PinnedList` from
 that array whenever the config or the membership changes, and pinning or
 dragging inside the tab writes it back through `Purple::SetViewPinned()` - the
 same splice that maintains `[lists.x] members`, so the rest of the file keeps
@@ -387,7 +394,7 @@ the other way:
 - **An id the tab does not currently hold keeps its place.** The usual reason a
   pinned chat is missing from a tab is that it has not finished loading, and
   dropping it would silently unpin it the first time anything else moved.
-  `Session::savePurpleViewPins()` splices such ids back at the index the file
+  `Purple::WorkView::saveViewPins()` splices such ids back at the index the file
   gave them, so an unchanged order rewrites the file to the same bytes and the
   splice reports nothing changed.
 - **The write is deferred to the next main-loop turn.** It comes back as a
@@ -526,7 +533,7 @@ that subtraction at the same instant - the preset moves, and now the "before"
 value is also the "after" value - and leave every total wrong until a restart,
 silently. So `History::_purpleUncounted` is a flag, flipped only inside
 `unreadStateChangeNotifier()`, which is the thing that pays the difference
-across. `Session::refreshPurpleWorkMode()` flips it for every loaded chat
+across. `Purple::WorkView::refreshWorkMode()` flips it for every loaded chat
 whenever the preset, the overrides or the peek move, in that order: mute first,
 then the count, then the membership, each one settled before the next can move
 the chat between lists.
@@ -667,7 +674,8 @@ already fires `HistoryUpdate::Flag::UnreadView` on every unread move, and
 `Changes` batches those onto the main loop through `crl::on_main`. That batching
 is the point: a hook placed inside `notifyUnreadStateChange()` itself would
 re-enter the unread bookkeeping that triggered it, halfway through a walk of
-`_chatListLinks`. `Session::setupPurpleWorkMode()` subscribes once.
+`_chatListLinks`. `Purple::WorkView::setup()` subscribes once through the
+constructor's `Purple::SetupWorkView()` call.
 
 **Mentions and reactions** also come through
 `HistoryUnreadThings::Proxy::setCount()`, which is their own funnel. That hook
@@ -741,12 +749,13 @@ Three implementation notes, each of which was the obvious approach's undoing:
   It simply declines to raise its flag for a chat that arrived with nothing
   unread, and that chat is open just the same. Hooking the flag itself would
   have missed exactly the chats the wider scopes exist for.
-- **One timer, on `Data::Session`**, armed for the earliest deadline
+- **One timer, on `Purple::WorkView`**, armed for the earliest deadline
   outstanding. Nothing else would ever come back: no message arrives and no
   unread moves when a clock runs out. A `base::Timer` per `History` would be
-  thousands of them, and only a handful of chats are in grace at once. The map
-  is keyed by `PeerId` rather than by `History*` so an entry left behind by a
-  chat that went away cannot dangle.
+  thousands of them, and only a handful of chats are in grace at once. The
+  `WorkView` map is keyed by `PeerId` rather than by `History*`; History's
+  destructor calls `Purple::ForgetHistory()` to remove the entry before the
+  owning session releases its WorkView.
 - **None of it is persisted.** Not `state.toml`, which would then be rewritten
   on every chat switch and would touch the mtime of the file you are
   hand-editing; and not anywhere else either, because a grace period that
@@ -762,8 +771,9 @@ already running.
 ## Applying a preset change
 
 Nothing about any peer changes when a preset does, so no upstream signal fires.
-`Data::Session::refreshPurpleWorkMode()` walks every peer itself and for each
-one re-evaluates the cached mute and then the chat list membership, in that
+`Purple::WorkView::refreshWorkMode()` walks every peer in its actual owner
+session and for each one re-evaluates the cached mute and then the chat list
+membership, in that
 order. The order is load-bearing: hiding a chat takes its unread out of the
 running totals, and it has to already be counted as muted or not when it goes,
 or the totals drift by whatever that chat was carrying.
@@ -840,8 +850,8 @@ To get the whole strip back, ask for it:
 elsewhere, at that position, with default flags. It is the only spread the
 parser cannot expand, because the parser has never heard of a Telegram folder -
 it survives as a folder entry holding that exact name and
-`ChatFilters::purpleRefreshShown()` expands it in place, which is what keeps its
-position in the strip meaningful. So `[ { name = "B", ... }, "*ALL" ]` reads as
+`Purple::FolderStrip::refreshShown()` expands it in place, which is what keeps
+its position in the strip meaningful. So `[ { name = "B", ... }, "*ALL" ]` reads as
 "B on my terms, then everything else on default terms".
 
 Each named folder carries five flags. `show_p` puts its **tab** in the strip and
@@ -894,9 +904,9 @@ Premium folder-count limit, the per-row folder tags, and the code that computes
 which filters a chat belongs to. Restricting that one accessor would quietly
 corrupt all of them.
 
-So display surfaces read `purpleShownList()` and everything that edits or counts
-keeps reading `list()`. When nothing is restricted the two are the same object,
-not a copy, so Normal costs nothing.
+So display surfaces read `Purple::ShownList(filters)` and everything that edits
+or counts keeps reading `list()`. When nothing is restricted the two are the
+same object, not a copy, so Normal costs nothing.
 
 The rule inside a display surface is all-or-nothing: those files convert between
 a strip index and a filter constantly, and mixing the two lists would make
@@ -1011,8 +1021,8 @@ and were taught:
 
 - `Session::refreshChatListEntry()` excluded `entry->folder()` from the view
   outright, mirroring All chats. It now asks `purpleShownFromArchive()` first.
-- `Session::refreshPurpleView()` walked only `_chatsList`, so nothing would ever
-  visit an archived chat on a preset change. It walks the Archive's list too.
+- `Purple::WorkView::refreshViews()` now walks the Archive's list too, so an
+  archived chat pulled into a preset is revisited when that preset changes.
 
 The unread arithmetic works out without a change, which is worth stating because
 it looks like it should not. The Archive *row* is in the view and carries the
@@ -1064,17 +1074,18 @@ the last subtraction in this file drove a badge to `-334`. The rule that keeps
 it honest: **subtract a subset, never an estimate.** There is a second reserved
 filter id, `Data::kPurpleQuietFilterId`, just past the view run, holding exactly
 the main view's members that sit in an uncounted folder. It is never a tab and
-never in `purpleShownList()`; it exists so that
+never in `Purple::ShownList(filters)`; it exists so that
 
     app badge = view unread - quiet unread
 
 cannot go negative, because the quiet list is a real `Dialogs::MainList` whose
 total is accumulated through the same `addEntry`/`removeEntry` path as the list
-it is taken out of. Its membership is maintained in
-`Session::refreshChatListEntry()` immediately after the views, so it is a subset
+it is taken out of. Its membership is maintained by
+`Purple::WorkView::refreshChatListEntry()` when `Session` reaches the Purple
+dispatch after its main-list update, so it is a subset
 by construction rather than by argument.
 
-`Session::purpleBadgeUnread()` is the one place the subtraction happens, and all
+`Purple::BadgeUnread(owner)` is the one place the subtraction happens, and all
 seven app-badge accessors go through it - one place to be wrong rather than
 seven.
 
@@ -1528,7 +1539,7 @@ back revealed, with nothing left running to put it back.
 
 Everything else follows for free. `peeking` is a field of `Resolved`, so
 toggling it fires `Purple::ActiveChanges()` and the peer walk in
-`Data::Session::refreshPurpleWorkMode()` rebuilds every chat list exactly as it
+`Purple::WorkView::refreshWorkMode()` rebuilds every chat list exactly as it
 does for a preset change.
 
 ### The flag and the clock
@@ -2479,7 +2490,7 @@ The three things this section used to list as unverified were measured on
 
 - **The app badge with `badge_p = false`: measured.** The window title carries
   the badge, through `Session::unreadBadge()` and so through
-  `purpleBadgeUnread()`. With the Music folder pulled into the view, the title
+  `Purple::BadgeUnread(owner)`. With the Music folder pulled into the view, the title
   read **2,005,908** with `badge_p = false` and **2,244,361** with it true. The
   quiet-list subtraction is real, not an argument.
 
@@ -2760,7 +2771,7 @@ string in `folders` is a `"*set"` reference and nothing else, so
 is the one bare string that means something there.
 
 `"*ALL"` is expanded on the Java side, in place, exactly as
-`ChatFilters::purpleRefreshShown()` expands it: the core has never heard of a
+`Purple::FolderStrip::refreshShown()` expands it: the core has never heard of a
 Telegram folder, so the marker arrives as a marker. A named folder that matches
 nothing is skipped and logged, because a folder named slightly wrong looks
 exactly like one the preset meant to leave out. And a preset that says nothing
