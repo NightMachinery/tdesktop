@@ -1446,37 +1446,15 @@ that did not say what it is gets the desktop answer, because the reason a phone
 is special is that it cannot edit the file, and a device we cannot name is not
 one.
 
-### The second press extends
+### The shortcut toggles
 
-Pressing the key while a peek is running adds another `hotkey_length` to it,
-measured from the deadline it already has rather than from now - so two quick
-presses buy two lengths and not one and a bit - and the toast says where that
-landed: `Peeking - extended to 7:00 left`.
+Pressing the key starts a peek for `hotkey_length`. Pressing it while a peek is
+running ends that peek immediately and shows `Peek over.` This also stops a
+peek started with a chip or the dial, including `until I stop`. The next press
+starts a new peek for `hotkey_length`.
 
-The old second press ended the peek, which made the key useless for the thing
-the second press nearly always means. A peek is running because something is
-still being looked at, and the only way to buy two more minutes was to end it
-and start it again: nothing new revealed, every chat list rebuilt twice for it.
-
-It stops at an hour. Past that it is not a peek any more, it is the preset off,
-and there is a plainer way to say that than pressing a key twelve times. The
-press that finds the cap already spent ends the peek instead, and says so -
-`Peek over - it was already as long as a peek gets` - and so does the press that
-finds a peek with no clock on it, which has no deadline for an extension to move.
-A key that can start something it cannot stop would be worse than a key that
-means two things.
-
-"Already spent" means **within half a minute of the cap**, and it has to mean
-something like that rather than "exactly at it". A peek started AT the cap never
-reads as exactly an hour again: the deadline stands still while the clock walks
-towards it, so an hour-long peek has an hour less a second or two left for as
-long as it runs. The rule used to ask whether the deadline had reached `now +
-cap`, which that peek never answers yes to - so the refusal never fired, every
-press reported `Peeking - extended to 60:00 left` after moving the deadline two
-seconds, and the peek ran on for ever. Half a minute is wide enough for the hand
-that moved from the `1 h` chip to the keyboard, and narrower than the shortest
-length the control offers, so no press that still had a whole minute to buy is
-turned into an ending.
+Holding the shortcut does not repeat the toggle. Under Normal, where nothing
+is hidden, the shortcut leaves Peek off and explains that Work Mode is off.
 
 ### Chips, not a checkbox alone
 
@@ -1485,10 +1463,8 @@ minute to an hour, and `until I stop` one position past the end of them. The
 checkbox is still the on/off - tapping it starts a peek of `tap` - and the chips
 are the same switch with a number on it.
 
-Tapping a chip while a peek is running **restarts** it at that length rather
-than adding to it. A chip that says `5 min` and leaves you with eleven is a chip
-lying about what it did; adding is the key's job, where there is no number on
-screen to contradict.
+Tapping a chip while a peek is running **restarts** it at that length. Each chip
+selects its labeled duration; the shortcut remains the quick on/off toggle.
 
 The lit chip follows what is *left*, not what was asked for, so a five-minute
 peek with ninety seconds on it lights `2 min`. Nothing anywhere remembers the

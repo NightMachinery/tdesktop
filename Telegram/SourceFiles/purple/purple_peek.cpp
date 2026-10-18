@@ -151,16 +151,6 @@ void ShowToast(not_null<Window::Controller*> window, const QString &text) {
 	}
 }
 
-// The second press extends rather than ends. A press that arrives while the
-// chats are back is nearly always "not yet" and not "done" - the peek is
-// running because something is still being looked at - and the old behaviour
-// made the key useless for exactly that: the only way to buy another two
-// minutes was to end the peek and start it again, revealing nothing new and
-// costing a rebuild of every chat list.
-//
-// It still ends the peek when there is nothing left to extend: the cap
-// reached, or no clock on it to move. A key that can start something it cannot
-// stop is worse than a key that means two things.
 void Hotkeys::triggerPeek() {
 	const auto seconds = PeekHotkeySeconds(ActiveSettings());
 	const auto text = [&]() -> QString {
@@ -173,18 +163,8 @@ void Hotkeys::triggerPeek() {
 					"showing."_q.arg(Length(change.seconds))
 				: u"Peeking until you press it again."_q;
 		}
-		const auto change = ExtendPeekBy(seconds);
-		if (change.refused) {
-			return u"Work Mode is off - nothing is hidden to peek at."_q;
-		} else if (change.extended) {
-			return u"Peeking - extended to %1 left."_q.arg(
-				PeekRemainingText(change.leftSeconds));
-		}
-		const auto capped = !PeekUntilStopped(CurrentState());
 		EndPeek();
-		return capped
-			? u"Peek over - it was already as long as a peek gets."_q
-			: u"Peek over."_q;
+		return u"Peek over."_q;
 	}();
 	if (const auto window = Core::App().activeWindow()) {
 		ShowToast(window, text);
