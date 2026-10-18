@@ -753,8 +753,7 @@ void PresetBox(
 	//
 	// A chip pressed while a peek is running RESTARTS it at that length rather
 	// than adding to it. The chip names a length and the peek then has it,
-	// which is the only thing a row of lengths can be read as; adding belongs
-	// to the hotkey, where there is no number on screen to contradict.
+	// which is the only thing a row of lengths can be read as.
 	const auto chips = container->add(
 		object_ptr<Ui::RpWidget>(container),
 		padding);
