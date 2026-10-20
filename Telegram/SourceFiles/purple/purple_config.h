@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_settings.h"
 #include "purple/purple_splice.h"
 #include "purple/purple_state.h"
+#include "purple/purple_config_file.h"
 
 namespace Purple {
 
@@ -38,6 +39,8 @@ void SetLocalPremium(bool value);
 // defaults, so a typo mid-edit does not reshuffle the user's chat list.
 [[nodiscard]] const Settings &ActiveSettings();
 [[nodiscard]] bool UsingLastGoodSettings();
+[[nodiscard]] std::optional<SettingsFileInput> SettingsInputForOperation();
+[[nodiscard]] bool ValidateSettingsInput(const SettingsFileInput &expected);
 
 struct Problems {
 	QString error;
@@ -67,16 +70,12 @@ struct WriteResult {
 	QString error;
 };
 
-// The one path every write the app makes to settings.toml goes through. The
-// callback is handed the file as the app last read it and hands back the splice
-// op's result; nothing is written when the op changed nothing, and the reload
-// that follows a write is what updates everything reading these settings.
-//
-// A callback rather than a finished SpliceResult because the text to splice is
-// Config's and giving it out would be handing callers a copy to go stale in
-// their hands. `what' names the edit in the log, in the same words the writers
-// below use.
 WriteResult WriteSettings(
+	Fn<SpliceResult(const QString &text)> splice,
+	const QString &what);
+
+WriteResult WriteSettingsGuarded(
+	const SettingsFileInput &expected,
 	Fn<SpliceResult(const QString &text)> splice,
 	const QString &what);
 

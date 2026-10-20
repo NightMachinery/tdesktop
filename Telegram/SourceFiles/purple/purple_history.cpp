@@ -23,7 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDateTime>
 
-std::optional<Purple::ShowMode> History::purpleExemptFolderMode() const {
+std::optional<Purple::ShowMode> History::purpleExemptFolderMode(bool includeOpened) const {
 	const auto &exempt = Purple::ExemptFolders();
 	if (exempt.empty()) {
 		return std::nullopt;
@@ -48,7 +48,7 @@ std::optional<Purple::ShowMode> History::purpleExemptFolderMode() const {
 			if (filter.title().text.text.compare(
 					folder.name,
 					Qt::CaseInsensitive)
-				|| !filter.contains(self)) {
+				|| !filter.contains(self, !includeOpened)) {
 				continue;
 			}
 			// A folder that asked for its pinned chats only lets through
@@ -76,7 +76,9 @@ std::optional<Purple::ShowMode> History::purpleExemptFolderMode() const {
 	return result;
 }
 
-bool History::purpleShowModeSatisfied(Purple::ShowMode mode) const {
+bool History::purpleShowModeSatisfied(
+		Purple::ShowMode mode,
+		bool includeOpened) const {
 	switch (mode) {
 	case Purple::ShowMode::Always: return true;
 	case Purple::ShowMode::Never: return false;
@@ -88,7 +90,7 @@ bool History::purpleShowModeSatisfied(Purple::ShowMode mode) const {
 	// what stops a badge blinking off the moment you open something - and the
 	// same flag is the honest answer here: the messages are only read in the
 	// sense that you are looking at them right now.
-	if (fakeUnreadWhileOpened()) {
+	if (includeOpened && fakeUnreadWhileOpened()) {
 		return true;
 	}
 	const auto state = [&] {
@@ -146,20 +148,20 @@ bool History::purpleHiddenFromView() const {
 	return purpleHiddenByPreset();
 }
 
-bool History::purpleHiddenByPreset() const {
+bool History::purpleHiddenByPreset(bool includeOpened) const {
 	// A folder the preset pulls in decides first, because it is the more
 	// specific statement: it named this folder, where a list entry named a kind
 	// or a set of ids. What it does not decide is WHEN - a folder saying nothing
 	// about a mode leaves its chats to the default for what they are.
-	if (const auto folder = purpleExemptFolderMode()) {
-		return !purpleShowModeSatisfied(*folder);
+	if (const auto folder = purpleExemptFolderMode(includeOpened)) {
+		return !purpleShowModeSatisfied(*folder, includeOpened);
 	}
 	// Otherwise the entry that claimed this chat, or the default for whatever
 	// the chat is. A mode that watches unread means the chat comes and goes on
 	// its own as messages arrive and are read - a group appears exactly while
 	// its mention badge would be lit, which is the rule being legible from the
 	// chat list itself rather than only from the file.
-	return !purpleShowModeSatisfied(Purple::VisibleFor(peer).show);
+	return !purpleShowModeSatisfied(Purple::VisibleFor(peer).show, includeOpened);
 }
 
 bool History::purpleWouldLeaveTheView() const {
@@ -234,14 +236,16 @@ void History::purpleRefreshUncounted() {
 	_purpleUncounted = uncounted;
 }
 
-bool History::purpleReachableElsewhere() const {
+bool History::purpleReachableElsewhere(bool includeOpened) const {
 	const auto filters = &owner().chatsFilters();
 
 	// The preset's own extra tabs first: cheap, and the common case for a chat
 	// somebody keeps deliberately to hand. View 0 is the main view and is the
 	// thing being decided, so it is not "elsewhere".
 	for (auto i = 1, count = Purple::ViewCount(filters); i != count; ++i) {
-		if (inChatList(Data::PurpleViewFilterId(i))) {
+		if (includeOpened
+			? inChatList(Data::PurpleViewFilterId(i))
+			: Purple::ExtraViewHolds(i - 1, peer)) {
 			return true;
 		}
 	}
@@ -252,7 +256,7 @@ bool History::purpleReachableElsewhere() const {
 	const auto self = const_cast<History*>(this);
 	const auto all = ranges::any_of(shown, Purple::IsAllFolders);
 	for (const auto &filter : filters->list()) {
-		if (!filter.id() || !filter.contains(self)) {
+		if (!filter.id() || !filter.contains(self, !includeOpened)) {
 			continue;
 		} else if (all) {
 			return true;

@@ -1,0 +1,20 @@
+using "ui/layers/layers.style";
+
+purplePeekPadding: 24px;
+purplePeekGap: 24px;
+purplePeekHeading: FlatLabel(boxTitle) {
+	align: align(center);
+	maxHeight: 64px;
+}
+purplePeekCountdown: FlatLabel(boxTitle) {
+	align: align(center);
+	maxHeight: 96px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(64px semibold);
+	}
+}
+purplePeekAbort: RoundButton(defaultActiveButton) {
+	width: 240px;
+	height: 56px;
+	textTop: 17px;
+}

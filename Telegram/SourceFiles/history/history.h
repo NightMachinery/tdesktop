@@ -420,14 +420,16 @@ public:
 	bool purpleShownFromArchive() const override;
 	// Purple: the mode an exempt folder gives this chat, or nothing when no
 	// folder the preset pulls in holds it. See purpleHiddenFromView().
-	[[nodiscard]] auto purpleExemptFolderMode() const
+	[[nodiscard]] auto purpleExemptFolderMode(bool includeOpened = true) const
 		-> std::optional<Purple::ShowMode>;
-	[[nodiscard]] bool purpleShowModeSatisfied(Purple::ShowMode mode) const;
+	[[nodiscard]] bool purpleShowModeSatisfied(
+		Purple::ShowMode mode,
+		bool includeOpened = true) const;
 
 	// Purple: what the preset alone says about this chat - the folder it pulls
 	// in, or the entry that claimed it - with the close buffer, the "until"
 	// decisions and the peek all taken out. The tail of purpleHiddenFromView().
-	[[nodiscard]] bool purpleHiddenByPreset() const;
+	[[nodiscard]] bool purpleHiddenByPreset(bool includeOpened = true) const;
 
 	// Purple: whether this row goes when whatever clock is holding it runs out.
 	// The preset's verdict plus a "hide until", which is a reason the row would
@@ -492,7 +494,7 @@ public:
 	// Purple: whether this chat is already one click away somewhere else in the
 	// running preset - on one of its extra views, or in a folder whose tab is
 	// showing. What "any_open_chat_except_in_folder" excepts.
-	[[nodiscard]] bool purpleReachableElsewhere() const;
+	[[nodiscard]] bool purpleReachableElsewhere(bool includeOpened = true) const;
 	Dialogs::UnreadState chatListUnreadState() const override;
 	Dialogs::BadgesState chatListBadgesState() const override;
 	HistoryItem *chatListMessage() const override;

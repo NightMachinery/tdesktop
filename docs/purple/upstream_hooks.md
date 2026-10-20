@@ -1175,7 +1175,19 @@ flags remain upstream-owned. See [copy_markdown.md](copy_markdown.md).
 `media/view/media_view_overlay_widget.cpp` uses the same Purple copy policy for
 media-view clipboard actions. No stored message or peer flag is changed.
 
-## Complete article copy
+## Peek countdown styles
+
+`Telegram/cmake/td_ui.cmake` has one include of `cmake/purple_styles.cmake`
+before its existing style generation call. The Purple file appends only
+`purple/purple_peek_controls.style`. Runtime countdown and exit logic stay in
+Purple sources and reuse the existing window hotkey hook.
+
+## Focused Peek exit and complete article copy
+
+`history/history.h` extends the existing Purple visibility declarations with an
+optional opened-grace argument. Regular callers keep the default; deliberate Peek
+exit passes false through the mode, exempt-folder and reachability queries. All
+implementation stays in `purple/purple_history.cpp`.
 
 `history/view/history_view_list_widget.h` adds the read-only
 `purpleSelectedIdsInOrder()` declaration. Its Purple-owned implementation uses

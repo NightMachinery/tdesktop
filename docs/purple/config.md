@@ -1160,3 +1160,13 @@ of only the four files that need it (`purple_config_diff.cpp`,
 `purple_settings.cpp`, `purple_splice.cpp` and `purple_state.cpp`, listed in
 `Telegram/cmake/purple.cmake`); putting a 486KB header-only parser in front of
 every translation unit would change their compile commands for no reason.
+
+## Global Peek activation controls
+
+`[peek] exit_hidden_chats_p` defaults to true and closes an open conversation
+only if it becomes hidden when Peek ends. `start_delay_seconds` is an optional
+non-negative integer: absence means desktop 0 / mobile 10; explicit zero wins on
+both devices. Both keys are global. The app edits preserve unrelated TOML.
+The delay setting itself changes only after a countdown of max(old,new), with
+Abort retaining the previous value and no implicit Peek start. See
+[Peek controls](peek_controls.md) for lifecycle and qualification details.

@@ -56,3 +56,12 @@ docs/purple/upstream_hooks.md.
 "lng_purple_preset_snapshot_lists" = "Warning: '{name}' runs from the last working copy of these lists: {names}. settings.toml no longer defines them. Choose Normal or another preset, or restore a file that defines them.";
 
 "lng_purple_copy_as_markdown" = "Copy as Markdown";
+
+"lng_purple_peek_exit_hidden" = "Exit hidden chats when peek ends";
+"lng_purple_peek_starting" = "Peek starts in";
+"lng_purple_peek_delay_changing" = "Peek start delay changes in";
+"lng_purple_peek_abort" = "Abort Peek";
+"lng_purple_peek_aborted" = "Peek aborted.";
+"lng_purple_peek_delay" = "Peek start delay (seconds)";
+"lng_purple_peek_delay_apply" = "Apply start delay";
+"lng_purple_peek_delay_about" = "This global setting applies to every preset. Changing it waits for the longer of the current and new delays. Abort keeps the current setting and does not start Peek.";

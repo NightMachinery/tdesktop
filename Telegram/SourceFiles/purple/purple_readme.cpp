@@ -541,8 +541,8 @@ on `auto_off`: `"90s"`, `"2m"`, `"1h"`, or `"off"` to run until you turn it off.
 `tap` and `hotkey_length` give the two ways of starting one their own lengths -
 `tap` for the checkbox and the chips in the Work Mode box, `hotkey_length` for
 the key - and each falls back to `auto_off` when it is not written. Pressing the
-key again while a peek is running **extends** it by another `hotkey_length`, up
-to an hour; past that, or on a peek with no clock, the same press ends it.
+key again while a peek is running ends it. While a start is counting down, the
+same key aborts it; the next press starts a fresh countdown and duration.
 
 `tap_mobile` is what a tap is worth on the phone, which reads this file but has
 no way to edit it. It is the one length here that does **not** fall back: a

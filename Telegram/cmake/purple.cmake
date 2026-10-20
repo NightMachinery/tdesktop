@@ -44,6 +44,8 @@ PRIVATE
     purple/purple_article_markdown.h
     purple/purple_config.cpp
     purple/purple_config.h
+    purple/purple_config_file.cpp
+    purple/purple_config_file.h
     purple/purple_device.cpp
     purple/purple_device.h
     purple/purple_focus.cpp
@@ -76,6 +78,8 @@ PRIVATE
     purple/hooks/work_view.h
     purple/purple_peek.cpp
     purple/purple_peek.h
+    purple/purple_peek_controls.cpp
+    purple/purple_peek_controls.h
     purple/purple_pinned_music.cpp
     purple/purple_pinned_music.h
     purple/purple_preset_box.cpp

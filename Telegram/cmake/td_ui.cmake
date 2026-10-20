@@ -89,6 +89,8 @@ set(dependent_style_files
     ${submodules_loc}/lib_ui/ui/widgets/widgets.style
 )
 
+include(cmake/purple_styles.cmake)
+
 generate_styles(td_ui ${src_loc} "${style_files}" "${dependent_style_files}")
 
 target_precompile_headers(td_ui PRIVATE ${src_loc}/ui/ui_pch.h)

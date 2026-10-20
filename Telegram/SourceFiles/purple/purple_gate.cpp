@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 
 #include "base/timer.h"
+#include "core/application.h"
 #include "data/data_chat_filters.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
@@ -16,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
+#include "purple/purple_peek_controls.h"
+#include "window/window_controller.h"
 
 #include <QtCore/QDateTime>
 
@@ -174,6 +177,7 @@ void Gate::refresh(bool settingsChanged) {
 		}
 		return;
 	}
+	const auto peekEnded = _resolved.peeking && !next->peeking;
 	_resolved = std::move(*next);
 	LOG(("Purple: preset '%1'%2%3, %4 lists."
 		).arg(_resolved.preset
@@ -189,6 +193,9 @@ void Gate::refresh(bool settingsChanged) {
 		UpdateState([&](State &state) {
 			state.resolvedCache = cache;
 		});
+	}
+	if (peekEnded) {
+		CloseHiddenPeekChats();
 	}
 }
 
@@ -552,8 +559,11 @@ bool HiddenFromSuggestions(not_null<History*> history) {
 		&& !history->purpleReachableElsewhere();
 }
 
-PeekChange StartPeekFor(int seconds) {
-	if (Instance().resolved().normal) {
+PeekChange details::ActivatePeekFor(int seconds) {
+	const auto window = Core::App().activeWindow();
+	if (!window || window->locked() || !window->maybeSession()
+		|| Core::App().passcodeLocked() || Core::App().screenIsLocked()
+		|| Instance().resolved().normal) {
 		// Nothing to reveal, and starting one anyway would leave a peek
 		// running that no chat list could show the end of.
 		return { .refused = true };
@@ -587,6 +597,7 @@ PeekChange ExtendPeekBy(int seconds) {
 }
 
 PeekChange EndPeek() {
+	CancelPendingPeek();
 	UpdateState([](State &state) {
 		StopPeek(state);
 	});
@@ -594,6 +605,7 @@ PeekChange EndPeek() {
 }
 
 bool ReportLock(LockKind kind) {
+	CancelPendingPeek();
 	if (!Instance().resolved().peeking) {
 		// Nothing to end, and the ordinary case: every lock of either kind
 		// arrives here, and almost none of them find a peek running.

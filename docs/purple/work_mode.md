@@ -3585,3 +3585,12 @@ history command menu, selected a local Work Mode preset with an extra view, and
 visibly restored the checked Normal radio. Profile-panel attribution and physical
 gestures are operator accounts. List-row Pin/unread, temporary stripe/timer
 rendering, badge precedence, expiry and reordered-home remain open.
+
+## Peek exit and activation controls
+
+The global Work Mode Peek controls now include the default-on Exit hidden chats
+when peek ends option and a start delay in seconds. The desktop default is 0;
+mobile absence is 10; explicit shared values win. Starts and delay-setting changes
+share one app-content countdown with Abort Peek. See
+[Peek controls](peek_controls.md) for the visibility rule, cancellation,
+max(old,new) setting-change rule and mobile adapter contract.

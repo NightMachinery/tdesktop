@@ -205,6 +205,7 @@ struct OverrideSpan {
 // What a peek gesture did, for the toast or the label that reports it.
 struct PeekChange {
 	bool peeking = false;
+	bool pending = false;
 
 	// Normal hides nothing, so there was nothing to reveal and nothing was
 	// written. Worth reporting rather than leaving a keypress look broken.
@@ -224,9 +225,10 @@ struct PeekChange {
 	int leftSeconds = 0;
 };
 
-// Starts a peek of `seconds', or one with no clock when `seconds' is zero.
-// Restarts the one already running rather than adding to it: a control that
-// names a length is asking for that length, not for more.
+// All starts enter the same transient activation controller. A positive
+// global delay conceals the app behind an abortable countdown before any
+// reveal or duration clock starts. Restarting replaces the old duration;
+// a second request during the countdown cancels rather than queuing another.
 PeekChange StartPeekFor(int seconds);
 
 // Adds to the running one, capped at `kPeekExtendCapSeconds' from now.

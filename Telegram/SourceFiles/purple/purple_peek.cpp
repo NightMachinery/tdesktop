@@ -9,8 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/unique_qptr.h"
 #include "core/application.h"
+#include "lang/lang_keys.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_peek_controls.h"
 #include "purple/purple_state.h"
 #include "ui/layers/show.h"
 #include "ui/rp_widget.h"
@@ -154,8 +156,15 @@ void ShowToast(not_null<Window::Controller*> window, const QString &text) {
 void Hotkeys::triggerPeek() {
 	const auto seconds = PeekHotkeySeconds(ActiveSettings());
 	const auto text = [&]() -> QString {
+		if (PeekCountdownPending()) {
+			EndPeek();
+			return tr::lng_purple_peek_aborted(tr::now);
+		}
 		if (!Peeking()) {
 			const auto change = StartPeekFor(seconds);
+			if (change.pending) {
+				return tr::lng_purple_peek_starting(tr::now);
+			}
 			return change.refused
 				? u"Work Mode is off - nothing is hidden to peek at."_q
 				: change.seconds
@@ -221,6 +230,7 @@ void Hotkeys::listen(not_null<Ui::RpWidget*> widget) {
 
 void ListenHotkeys(not_null<Ui::RpWidget*> widget) {
 	Instance().listen(widget);
+	RegisterPeekWindow(widget);
 }
 
 void PeekEndedNotice() {

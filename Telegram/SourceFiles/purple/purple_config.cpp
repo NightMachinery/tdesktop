@@ -237,6 +237,11 @@ preset    = "work"
 send_after_save_p = false
 
 [peek]
+# Close a conversation only when the restored preset hides it.
+exit_hidden_chats_p = true
+# Optional global activation delay in whole seconds. Absence means zero on
+# desktop and ten on mobile. An explicit value, including zero, travels to both.
+# start_delay_seconds = 0
 # Temporarily reveal what the active preset is hiding.
 hotkey   = "Ctrl+Shift+E"
 auto_off = "2m"
@@ -244,8 +249,8 @@ auto_off = "2m"
 # How long each way of starting one lasts, when they want to differ: tap is
 # what the checkbox and the chips in the Work Mode box start, hotkey_length
 # what the key starts. Unset means "whatever auto_off says"; "off" is a peek
-# with no clock on it. Pressing the key again while one is running adds another
-# hotkey_length, up to an hour.
+# with no clock on it. Pressing the key again stops a running Peek, or aborts
+# a pending start. The next press begins a fresh activation.
 # tap           = "5m"
 # hotkey_length = "2m"
 #
@@ -329,7 +334,9 @@ public:
 	bool createList(const QString &name, const QString &title);
 	WriteResult write(
 		const Fn<SpliceResult(const QString&)> &op,
-		const QString &what);
+		const QString &what,
+		const std::optional<SettingsFileInput> &expected = std::nullopt);
+	[[nodiscard]] std::optional<SettingsFileInput> checkedInput();
 	void noteSent(const QByteArray &bytes);
 	void noteImported(const QByteArray &bytes);
 
@@ -340,9 +347,9 @@ public:
 private:
 	void loadSettings();
 	void loadState();
-	void applyText(const std::optional<QString> &text);
+	void applyInput(const SettingsFileInput &input);
 	void applySettings(Settings settings, const QString &path);
-	[[nodiscard]] bool writeSettings(const QString &text);
+	[[nodiscard]] bool writeSettings(const QString &text, const SettingsFileInput &expected);
 	void startWatching();
 	void reloadFromDisk();
 	void reloadStateFromDisk();
@@ -352,10 +359,10 @@ private:
 	void autoSendLater();
 	void autoSendNow();
 
+	SettingsFileInput _diskInput;
 	QString _text;
 	Settings _settings;
 	Problems _problems;
-	bool _primaryExists = false;
 	bool _usingLastGoodSettings = false;
 
 	State _state;
@@ -387,29 +394,29 @@ Config::Config()
 
 void Config::loadSettings() {
 	const auto path = SettingsFilePath();
-	if (auto text = ReadFile(path)) {
-		applyText(text);
-		return;
-	} else if (QFileInfo::exists(path)
+	const auto input = ReadSettingsFileInput(path);
+	if (input.state != SettingsFileState::Missing
 		|| QFileInfo::exists(LastGoodSettingsFilePath())) {
-		applyText(std::nullopt);
+		applyInput(input);
 		return;
 	} else if (!QDir().mkpath(ConfigDirectory())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
-		applyText(std::nullopt);
+		applyInput(input);
 		return;
 	}
 	const auto starter = QString::fromUtf8(kStarterSettings);
 	if (WriteConfigFile(path, starter)) {
-		applyText(starter);
+		applyInput({ SettingsFileState::Readable, starter.toUtf8() });
 	} else {
-		applyText(std::nullopt);
+		applyInput(ReadSettingsFileInput(path));
 	}
 }
 
-void Config::applyText(const std::optional<QString> &text) {
+void Config::applyInput(const SettingsFileInput &input) {
+	_diskInput = input;
+	const auto text = (input.state == SettingsFileState::Readable)
+		? std::optional<QString>(QString::fromUtf8(input.bytes))
+		: std::nullopt;
 	_text = text.value_or(QString());
-	_primaryExists = bool(text);
 	_usingLastGoodSettings = false;
 	if (!text) {
 		_problems.warnings.clear();
@@ -469,14 +476,19 @@ bool Config::usingLastGoodSettings() const {
 	return _usingLastGoodSettings;
 }
 
-bool Config::writeSettings(const QString &text) {
+bool Config::writeSettings(
+		const QString &text,
+		const SettingsFileInput &expected) {
 	if (!QDir().mkpath(ConfigDirectory())) {
 		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
 		return false;
-	} else if (!WriteConfigFile(SettingsFilePath(), text)) {
+	} else if (WriteGuardedSettingsFile(
+			SettingsFilePath(), expected, text.toUtf8())
+		!= GuardedFileWrite::Written) {
+		reloadFromDisk();
 		return false;
 	}
-	applyText(text);
+	applyInput({ SettingsFileState::Readable, text.toUtf8() });
 
 	// Every write the app makes to the file passes through here, which is the
 	// whole reason there is one of these rather than a QSaveFile in each
@@ -574,12 +586,12 @@ void Config::reloadFromDisk() {
 	}
 	reloadStateFromDisk();
 
-	auto text = ReadFile(SettingsFilePath());
-	if (bool(text) == _primaryExists && text.value_or(QString()) == _text) {
+	const auto input = ReadSettingsFileInput(SettingsFilePath());
+	if (input == _diskInput) {
 		// Our own writes come back through the watcher too.
 		return;
 	}
-	applyText(text);
+	applyInput(input);
 }
 
 void Config::reloadStateFromDisk() {
@@ -639,10 +651,15 @@ rpl::producer<> Config::changes() const {
 
 WriteResult Config::write(
 		const Fn<SpliceResult(const QString&)> &op,
-		const QString &what) {
+		const QString &what,
+		const std::optional<SettingsFileInput> &expected) {
 	Expects(op != nullptr);
 
-	const auto result = op(_text);
+	const auto input = checkedInput();
+	if (!input || (expected && *input != *expected)) {
+		return { .error = u"Settings changed on disk. Try again."_q };
+	}
+	const auto result = op(QString::fromUtf8(input->bytes));
 	if (!result.ok()) {
 		LOG(("Purple Error: Could not write %1 to %2: %3."
 			).arg(what, SettingsFilePath(), result.error));
@@ -652,11 +669,24 @@ WriteResult Config::write(
 		// the screen that asked is now showing what the file holds, which is
 		// what it wanted.
 		return { .ok = true };
-	} else if (!writeSettings(result.text)) {
+	} else if (!writeSettings(result.text, *input)) {
 		return { .error = u"Could not write %1. See the log."_q.arg(
 			SettingsFilePath()) };
 	}
 	return { .ok = true };
+}
+
+std::optional<SettingsFileInput> Config::checkedInput() {
+	reloadStateFromDisk();
+	const auto input = ReadSettingsFileInput(SettingsFilePath());
+	if (input != _diskInput) {
+		applyInput(input);
+		return std::nullopt;
+	} else if (input.state != SettingsFileState::Readable
+		|| !_problems.error.isEmpty() || _usingLastGoodSettings) {
+		return std::nullopt;
+	}
+	return input;
 }
 
 bool Config::splice(
@@ -798,6 +828,22 @@ const Problems &SettingsProblems() {
 
 rpl::producer<> SettingsChanges() {
 	return Instance().changes();
+}
+
+std::optional<SettingsFileInput> SettingsInputForOperation() {
+	return Instance().checkedInput();
+}
+
+bool ValidateSettingsInput(const SettingsFileInput &expected) {
+	const auto current = SettingsInputForOperation();
+	return current && *current == expected;
+}
+
+WriteResult WriteSettingsGuarded(
+		const SettingsFileInput &expected,
+		Fn<SpliceResult(const QString &text)> splice,
+		const QString &what) {
+	return Instance().write(splice, what, expected);
 }
 
 bool AddToList(

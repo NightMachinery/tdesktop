@@ -5,6 +5,18 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 
 ## Open
 
+- **Peek controls (desktop and Android):** add a default-on “Exit hidden chats
+  when Peek ends” checkbox; when enabled, expiry/manual stop leaves an open chat
+  that the effective preset hides. Add a mobile End Peek button beside the lock
+  controls, visible only while active. Add a global start-delay setting in seconds,
+  default 10 on mobile and 0 on desktop. The countdown covers the whole Telegram
+  app screen/window with large remaining seconds and a prominent Abort Peek
+  button. Countdown keeps chats hidden, a second toggle cancels it, stopping is
+  immediate, and duration starts when Peek actually activates. Put the global
+  control in Work Mode settings under Peek. Applying a value change requires a
+  cancellable countdown using the longer of the old/new delays; cancellation
+  keeps the old value and editing never starts Peek by itself. These additions
+  belong with the pending Peek native checks.
 - **User control over received content:** unrestricted local copy, selection,
   save/export and retained view-once/expiring content; Copy as Markdown on both
   clients, including complete article structure. Incoming native articles contain

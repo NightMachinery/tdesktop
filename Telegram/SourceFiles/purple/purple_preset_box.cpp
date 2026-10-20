@@ -21,22 +21,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_engine.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_peek.h"
+#include "purple/purple_peek_controls.h"
 #include "purple/purple_schedule.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/qt_object_factory.h"
 #include "ui/rp_widget.h"
 #include "ui/text/text_utilities.h"
+#include "ui/widgets/fields/masked_input_field.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "styles/style_basic.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
 
+#include <limits>
+
 #include <QtCore/QDateTime>
+#include <QtGui/QIntValidator>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QKeySequence>
 #include <QtGui/QMouseEvent>
@@ -668,6 +675,8 @@ void PresetBox(
 		const auto &resolved = ActiveResolved();
 		if (resolved.normal) {
 			return u"Peek - nothing is hidden under Normal"_q;
+		} else if (PeekStartPending()) {
+			return tr::lng_purple_peek_starting(tr::now);
 		} else if (!resolved.peeking) {
 			return u"Peek - show what the preset hides (%1)"_q.arg(HotkeyText());
 		}
@@ -692,7 +701,7 @@ void PresetBox(
 	peek->setDisabled(ActiveResolved().normal);
 	peek->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
-		if (checked == Peeking()) {
+		if (checked == (Peeking() || PeekStartPending())) {
 			return;
 		} else if (checked) {
 			StartPeekFor(PeekTapSeconds(ActiveSettings()));
@@ -700,6 +709,87 @@ void PresetBox(
 			EndPeek();
 		}
 	}, peek->lifetime());
+
+	const auto exitHidden = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			tr::lng_purple_peek_exit_hidden(tr::now),
+			PeekExitHiddenChats(ActiveSettings()),
+			st::defaultCheckbox),
+		padding);
+	exitHidden->checkedChanges() | rpl::on_next([=](bool checked) {
+		if (checked == PeekExitHiddenChats(ActiveSettings())) {
+			return;
+		}
+		const auto result = WriteSettings([=](const QString &text) {
+			return SetTableBool(
+				text,
+				SettingsFilePath(),
+				u"peek"_q,
+				u"exit_hidden_chats_p"_q,
+				checked);
+		}, u"Exit hidden chats when peek ends"_q);
+		if (!result.ok) {
+			exitHidden->setChecked(
+				PeekExitHiddenChats(ActiveSettings()),
+				Ui::Checkbox::NotifyAboutChange::DontNotify);
+			box->uiShow()->showBox(Ui::MakeInformBox(result.error));
+		}
+	}, exitHidden->lifetime());
+	SettingsChanges() | rpl::on_next([=] {
+		exitHidden->setChecked(
+			PeekExitHiddenChats(ActiveSettings()),
+			Ui::Checkbox::NotifyAboutChange::DontNotify);
+	}, exitHidden->lifetime());
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			tr::lng_purple_peek_delay(),
+			st::boxLabel),
+		padding);
+	const auto delayWrap = container->add(
+		object_ptr<Ui::FixedHeightWidget>(
+			container,
+			st::defaultInputField.heightMin),
+		padding);
+	const auto delay = Ui::CreateChild<Ui::MaskedInputField>(
+		delayWrap,
+		st::defaultInputField,
+		tr::lng_purple_peek_delay(),
+		QString::number(PeekStartDelaySeconds(ActiveSettings(), ThisDevice())));
+	delay->setValidator(new QIntValidator(
+		0,
+		std::numeric_limits<int>::max(),
+		delay));
+	delayWrap->widthValue() | rpl::on_next([=](int width) {
+		delay->resize(width, delay->height());
+		delayWrap->resize(width, delay->height());
+	}, delayWrap->lifetime());
+	const auto applyDelay = container->add(
+		object_ptr<Ui::RoundButton>(
+			container,
+			tr::lng_purple_peek_delay_apply(),
+			st::defaultActiveButton),
+		padding);
+	applyDelay->setClickedCallback([=] {
+		auto valid = false;
+		const auto seconds = delay->getLastText().toInt(&valid);
+		if (!valid || seconds < 0) {
+			delay->showError();
+			return;
+		}
+		RequestPeekDelayChange(seconds);
+	});
+	SettingsChanges() | rpl::on_next([=] {
+		delay->setText(QString::number(
+			PeekStartDelaySeconds(ActiveSettings(), ThisDevice())));
+	}, delay->lifetime());
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			tr::lng_purple_peek_delay_about(),
+			st::boxDividerLabel),
+		padding);
 
 	// Which stop the peek is at: the chip that lights and the place the dial
 	// rests are the same number, read once here so the two pictures of one
@@ -818,7 +908,7 @@ void PresetBox(
 	// under Normal, which hides nothing there is anything to peek at.
 	const auto refreshPeek = [=] {
 		peek->setChecked(
-			Peeking(),
+			Peeking() || PeekStartPending(),
 			Ui::Checkbox::NotifyAboutChange::DontNotify);
 		peek->setDisabled(ActiveResolved().normal);
 		peek->setText(peekText());
@@ -831,6 +921,13 @@ void PresetBox(
 		}
 	};
 	refreshPeek();
+	PeekCountdownChanges() | rpl::on_next([=] {
+		refreshPeek();
+		if (!PeekCountdownPending()) {
+			delay->setText(QString::number(
+				PeekStartDelaySeconds(ActiveSettings(), ThisDevice())));
+		}
+	}, peek->lifetime());
 
 	ActiveChanges(
 	) | rpl::on_next([=] {
