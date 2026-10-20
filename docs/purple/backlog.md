@@ -5,6 +5,17 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
 
 ## Open
 
+- **User control over received content:** unrestricted local copy, selection,
+  save/export and retained view-once/expiring content; Copy as Markdown on both
+  clients, including complete article structure. Incoming native articles contain
+  structured blocks rather than a guaranteed original Markdown source string.
+  Retain locally observed edit versions and deletions, expose View Edit History
+  and Show Deleted Messages with clear deleted styling, and offer confirmed Empty
+  Trashbin and Empty Edit History actions per chat and globally in Settings.
+  Capturing, account isolation, retention and archive-owned media purging form one
+  backend. Content already unavailable cannot be reconstructed. The copy changes
+  are currently source drafts; archive/view-once retention remains to implement.
+
 - **Account-backed settings and playlist sync:** the design in
   [account_sync_plan.md](account_sync_plan.md) uses opt-in records in one
   selected account's Saved Messages per device, with config first and playlist

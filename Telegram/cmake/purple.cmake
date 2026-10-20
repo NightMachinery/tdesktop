@@ -37,6 +37,11 @@ PRIVATE
     purple/purple_bypass.h
     purple/purple_chat_menus.cpp
     purple/purple_chat_menus.h
+    purple/purple_copy.cpp
+    purple/purple_copy.h
+    purple/purple_copy_messages.cpp
+    purple/purple_article_markdown.cpp
+    purple/purple_article_markdown.h
     purple/purple_config.cpp
     purple/purple_config.h
     purple/purple_device.cpp

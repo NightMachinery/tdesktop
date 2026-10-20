@@ -350,6 +350,7 @@ public:
 
 	[[nodiscard]] TextForMimeData getSelectedText() const;
 	[[nodiscard]] MessageIdsList getSelectedIds() const;
+	[[nodiscard]] MessageIdsList purpleSelectedIdsInOrder() const;
 	[[nodiscard]] SelectedItems getSelectedItems() const;
 	[[nodiscard]] TextSelection getSelectedTextRange(
 		not_null<HistoryItem*> item) const;

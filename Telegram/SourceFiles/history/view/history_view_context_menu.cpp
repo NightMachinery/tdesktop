@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_context_menu.h"
 
+#include "purple/purple_copy.h"
+
 #include "api/api_attached_stickers.h"
 #include "api/api_editing.h"
 #include "api/api_global_privacy.h"
@@ -1534,6 +1536,8 @@ void FillContextMenuItems(
 			}
 		}, &st::menuIconCopy);
 	}
+	Purple::AddSelectionCopyAsMarkdownAction(
+		result, list, !request.selectedItems.empty(), request.overSelection);
 	if (request.overSelection
 		&& !Ui::SkipTranslate(list->getSelectedText().rich)) {
 		const auto owner = &view->history()->owner();
@@ -1586,6 +1590,7 @@ void FillContextMenuItems(
 						}
 					}
 				}, &st::menuIconCopy);
+				Purple::AddMessageCopyAsMarkdownAction(result, list, itemId, asGroup);
 			}
 
 			const auto translate = mediaHasTextForCopy

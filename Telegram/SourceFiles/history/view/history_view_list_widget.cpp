@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
+
+#include "purple/purple_copy.h"
 #include "purple/purple_sync.h"
 #include "purple/purple_ui_witness.h"
 
@@ -1775,16 +1777,25 @@ bool ListWidget::isEmpty() const {
 }
 
 bool ListWidget::hasCopyRestriction(HistoryItem *item) const {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return false;
+	}
 	return _delegate->listCopyRestrictionType(item)
 		!= CopyRestrictionType::None;
 }
 
 bool ListWidget::hasCopyMediaRestriction(not_null<HistoryItem*> item) const {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return false;
+	}
 	return _delegate->listCopyMediaRestrictionType(item)
 		!= CopyRestrictionType::None;
 }
 
 bool ListWidget::showCopyRestriction(HistoryItem *item) {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return false;
+	}
 	const auto type = _delegate->listCopyRestrictionType(item);
 	if (type == CopyRestrictionType::None) {
 		return false;
@@ -1798,6 +1809,9 @@ bool ListWidget::showCopyRestriction(HistoryItem *item) {
 }
 
 bool ListWidget::showCopyMediaRestriction(not_null<HistoryItem*> item) {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return false;
+	}
 	const auto type = _delegate->listCopyMediaRestrictionType(item);
 	if (type == CopyRestrictionType::None) {
 		return false;
@@ -1811,6 +1825,9 @@ bool ListWidget::showCopyMediaRestriction(not_null<HistoryItem*> item) {
 }
 
 bool ListWidget::hasCopyRestrictionForSelected() const {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return false;
+	}
 	if (hasCopyRestriction()) {
 		return true;
 	}
@@ -1830,6 +1847,9 @@ bool ListWidget::hasCopyRestrictionForSelected() const {
 }
 
 bool ListWidget::showCopyRestrictionForSelected() {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return false;
+	}
 	if (_selected.empty()) {
 		if (_selectedTextItem && showCopyRestriction(_selectedTextItem)) {
 			return true;
@@ -1845,7 +1865,8 @@ bool ListWidget::showCopyRestrictionForSelected() {
 
 bool ListWidget::hasSelectRestriction() const {
 	return session().frozen()
-		|| (_delegate->listSelectRestrictionType()
+		|| (!Purple::CopyRestrictionsDisabled()
+			&& _delegate->listSelectRestrictionType()
 			!= CopyRestrictionType::None);
 }
 
@@ -6059,6 +6080,9 @@ void ConfirmSendNowSelectedItems(not_null<ListWidget*> widget) {
 CopyRestrictionType CopyRestrictionTypeFor(
 		not_null<PeerData*> peer,
 		HistoryItem *item) {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return CopyRestrictionType::None;
+	}
 	return (peer->allowsForwarding() && (!item || !item->forbidsForward()))
 		? CopyRestrictionType::None
 		: peer->isUser()
@@ -6071,6 +6095,9 @@ CopyRestrictionType CopyRestrictionTypeFor(
 CopyRestrictionType CopyMediaRestrictionTypeFor(
 		not_null<PeerData*> peer,
 		not_null<HistoryItem*> item) {
+	if (Purple::CopyRestrictionsDisabled()) {
+		return CopyRestrictionType::None;
+	}
 	if (const auto all = CopyRestrictionTypeFor(peer, item)
 		; all != CopyRestrictionType::None) {
 		return all;

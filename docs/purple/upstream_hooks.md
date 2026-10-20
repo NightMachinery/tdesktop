@@ -1164,3 +1164,23 @@ Document headers add only their respective neutral const leaf accessor
 declarations. All transport, admission and native association decisions live
 in Purple-owned files registered by purple.cmake. See [ui_witness.md](ui_witness.md)
 for the closed grammar, strict wire and explicit remaining qualification gates.
+
+## Unrestricted copying and Markdown export
+
+`history/view/history_view_context_menu.cpp` adds two Purple menu calls beside
+existing Copy actions. `history/view/history_view_list_widget.cpp` delegates
+copy/media/selection restrictions to Purple policy with early returns; forwarding
+flags remain upstream-owned. See [copy_markdown.md](copy_markdown.md).
+
+`media/view/media_view_overlay_widget.cpp` uses the same Purple copy policy for
+media-view clipboard actions. No stored message or peer flag is changed.
+
+## Complete article copy
+
+`history/view/history_view_list_widget.h` adds the read-only
+`purpleSelectedIdsInOrder()` declaration. Its Purple-owned implementation uses
+the same production list-order delegate as ordinary selected-text copy.
+`history/view/history_view_context_menu.cpp` delegates the Markdown selection
+entry to one Purple action that distinguishes whole messages from fragments.
+Full-page resolution, lifetime validation and structural export stay in
+`purple_copy_messages.cpp` and `purple_article_markdown.cpp`.

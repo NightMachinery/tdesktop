@@ -167,3 +167,5 @@ tracked in [docs/purple/backlog.md](backlog.md).
 The upstream hook rule remains in
 [AGENTS.md](../../AGENTS.md#keeping-upstream-merges-easy), including its
 source-registration, string-registration, and hook-registry requirements.
+
+Message copying and Markdown export are documented in [copy_markdown.md](copy_markdown.md).
