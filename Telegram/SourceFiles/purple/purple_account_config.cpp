@@ -15,6 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/qt_windows.h>
 #else
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
 #endif
 #define TOML_EXCEPTIONS 0
 #include <tomlplusplus/toml.hpp>
@@ -23,6 +26,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSaveFile>
+#include <QtCore/QFile>
+#include <QtCore/QUuid>
+#include <QtCore/qscopeguard.h>
 
 #include <algorithm>
 
@@ -52,6 +58,129 @@ QByteArray DirectoryIdentity(const QString &path) {
 	return ::stat(QFile::encodeName(path).constData(), &identity) == 0
 		? QByteArray::number(qulonglong(identity.st_dev)) + ':'
 			+ QByteArray::number(qulonglong(identity.st_ino)) : QByteArray();
+#endif
+}
+
+// Creation pins the existing owner/accounts directory before creating one child.
+// POSIX writes through directory descriptors and publishes a complete temporary
+// inode with linkat, which cannot replace an existing destination. Windows holds
+// directory handles without delete sharing and moves without replace permission.
+// Final path/session checks detect stale routing but are not a cross-process CAS.
+bool CreateAccountSettingsFile(
+		const QString &root,
+		const QString &name,
+		const QByteArray &bytes,
+		const QByteArray &expectedAccounts,
+		const QByteArray &expectedDirectory,
+		const std::function<bool()> &current) {
+	if (expectedAccounts.isEmpty() || name.isEmpty() || name.contains('/') || name.contains('\\')
+		|| name == u"."_q || name == u".."_q || !current()) {
+		return false;
+	}
+	const auto physicalRoot = QFileInfo(root).canonicalFilePath();
+	if (physicalRoot.isEmpty() || DirectoryIdentity(physicalRoot) != DirectoryIdentity(root)) {
+		return false;
+	}
+	const auto accountsPath = physicalRoot + u"/accounts"_q;
+	const auto directory = accountsPath + u"/"_q + name;
+#ifdef Q_OS_WIN
+	const auto openDirectory = [](const QString &path) {
+		return CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+			FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+			OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+	};
+	const auto validDirectory = [](HANDLE handle) {
+		auto info = BY_HANDLE_FILE_INFORMATION();
+		return handle != INVALID_HANDLE_VALUE && GetFileInformationByHandle(handle, &info)
+			&& (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			&& !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT);
+	};
+	const auto rootHandle = openDirectory(physicalRoot);
+	const auto closeRoot = qScopeGuard([&] { if (rootHandle != INVALID_HANDLE_VALUE) { CloseHandle(rootHandle); } });
+	if (!validDirectory(rootHandle) || !current()) { return false; }
+	const auto accountsHandle = openDirectory(accountsPath);
+	const auto closeAccounts = qScopeGuard([&] { if (accountsHandle != INVALID_HANDLE_VALUE) { CloseHandle(accountsHandle); } });
+	if (!validDirectory(accountsHandle) || DirectoryIdentity(accountsPath) != expectedAccounts
+		|| !current()) { return false; }
+	if (expectedDirectory.isEmpty()) {
+		if (!CreateDirectoryW(reinterpret_cast<LPCWSTR>(directory.utf16()), nullptr)) { return false; }
+	} else if (DirectoryIdentity(directory) != expectedDirectory) {
+		return false;
+	}
+	const auto directoryHandle = openDirectory(directory);
+	const auto closeDirectory = qScopeGuard([&] { if (directoryHandle != INVALID_HANDLE_VALUE) { CloseHandle(directoryHandle); } });
+	if (!validDirectory(directoryHandle) || !current()
+		|| DirectoryIdentity(accountsPath) != expectedAccounts
+		|| (!expectedDirectory.isEmpty() && DirectoryIdentity(directory) != expectedDirectory)) { return false; }
+	const auto temporary = directory + u"/.settings-"_q
+		+ QUuid::createUuid().toString(QUuid::WithoutBraces);
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(temporary.utf16()),
+		GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return false; }
+	const auto cleanTemporary = qScopeGuard([&] { DeleteFileW(reinterpret_cast<LPCWSTR>(temporary.utf16())); });
+	auto written = DWORD();
+	const auto complete = WriteFile(handle, bytes.constData(), DWORD(bytes.size()), &written, nullptr)
+		&& written == DWORD(bytes.size()) && FlushFileBuffers(handle);
+	CloseHandle(handle);
+	const auto destination = directory + u"/settings.toml"_q;
+	return complete && current() && MoveFileExW(
+		reinterpret_cast<LPCWSTR>(temporary.utf16()),
+		reinterpret_cast<LPCWSTR>(destination.utf16()), MOVEFILE_WRITE_THROUGH);
+#else
+	const auto rootFd = ::open(QFile::encodeName(physicalRoot).constData(),
+		O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (rootFd < 0) { return false; }
+	const auto closeRoot = qScopeGuard([&] { ::close(rootFd); });
+	const auto identity = [](int fd) {
+		struct stat info = {};
+		return ::fstat(fd, &info) == 0 && S_ISDIR(info.st_mode)
+			? QByteArray::number(qulonglong(info.st_dev)) + ':'
+				+ QByteArray::number(qulonglong(info.st_ino)) : QByteArray();
+	};
+	if (identity(rootFd) != DirectoryIdentity(root) || !current()) { return false; }
+	const auto accountsFd = ::openat(rootFd, "accounts", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (accountsFd < 0) { return false; }
+	const auto closeAccounts = qScopeGuard([&] { ::close(accountsFd); });
+	const auto nameBytes = QFile::encodeName(name);
+	const auto parentsCurrent = [&] {
+		return current() && identity(rootFd) == DirectoryIdentity(root)
+			&& identity(accountsFd) == expectedAccounts
+			&& identity(accountsFd) == DirectoryIdentity(accountsPath);
+	};
+	if (!parentsCurrent()) { return false; }
+	if (expectedDirectory.isEmpty()) {
+		if (::mkdirat(accountsFd, nameBytes.constData(), 0700) != 0) { return false; }
+	} else if (DirectoryIdentity(directory) != expectedDirectory) {
+		return false;
+	}
+	const auto directoryFd = ::openat(accountsFd, nameBytes.constData(),
+		O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directoryFd < 0) { return false; }
+	const auto closeDirectory = qScopeGuard([&] { ::close(directoryFd); });
+	const auto destinationCurrent = [&] {
+		return parentsCurrent() && identity(directoryFd) == DirectoryIdentity(directory)
+			&& (expectedDirectory.isEmpty() || identity(directoryFd) == expectedDirectory);
+	};
+	if (!destinationCurrent()) { return false; }
+	const auto temporary = QByteArray(".settings-")
+		+ QUuid::createUuid().toByteArray(QUuid::WithoutBraces);
+	const auto fd = ::openat(directoryFd, temporary.constData(),
+		O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0) { return false; }
+	const auto closeFile = qScopeGuard([&] { ::close(fd); });
+	const auto cleanTemporary = qScopeGuard([&] { ::unlinkat(directoryFd, temporary.constData(), 0); });
+	auto offset = qsizetype(0);
+	while (offset != bytes.size()) {
+		const auto written = ::write(fd, bytes.constData() + offset, bytes.size() - offset);
+		if (written < 0 && errno == EINTR) { continue; }
+		if (written <= 0) { return false; }
+		offset += written;
+	}
+	if (::fsync(fd) != 0 || !destinationCurrent()
+		|| ::linkat(directoryFd, temporary.constData(), directoryFd, "settings.toml", 0) != 0) {
+		return false;
+	}
+	return ::fsync(directoryFd) == 0;
 #endif
 }
 
@@ -122,6 +251,36 @@ bool CanReplaceLegacyRootSettings(const QByteArray &before, const QByteArray &af
 		}
 	}
 	return true;
+}
+
+QByteArray NewAccountSettingsText() {
+	return QByteArray(
+		"# Purple Telegram settings for one account.\n"
+		"# This file holds only what differs for this account. Anything it leaves out\n"
+		"# comes from the account that supplies app-wide settings on each device.\n"
+		"# Work Mode, Local Premium and the other app-wide settings written here take\n"
+		"# effect only on devices where this account supplies the app-wide settings.\n"
+		"# See config.md, \"Settings per account\".\n"
+		"version = 2\n");
+}
+
+QString SettingsDocumentFileName(int version) {
+	return version >= 2 ? u"account-settings.toml"_q : u"settings.toml"_q;
+}
+
+LegacySettingsDocumentKind ClassifySettingsDocumentName(const QString &name) {
+	if (name.compare(SettingsDocumentFileName(1), Qt::CaseInsensitive) == 0) {
+		return LegacySettingsDocumentKind::Whole;
+	} else if (name.compare(SettingsDocumentFileName(2), Qt::CaseInsensitive) == 0) {
+		return LegacySettingsDocumentKind::Layered;
+	}
+	return LegacySettingsDocumentKind::Unrelated;
+}
+
+bool CanApplyWholeSettingsDocument(const QString &name, const QByteArray &bytes) {
+	const auto parsed = ParseSettings(QString::fromUtf8(bytes), name);
+	return ClassifySettingsDocumentName(name) == LegacySettingsDocumentKind::Whole
+		&& parsed.ok() && parsed.settings.version <= kSettingsVersion;
 }
 
 bool AccountFilteringEnabled(bool active, AccountWorkMode mode) {
@@ -443,6 +602,103 @@ bool DesktopAccountConfig::validate(const AccountFileTarget &target) {
 	return current && current->generation == target.generation
 		&& current->path == target.path && current->input == target.input
 		&& current->directoryIdentity == target.directoryIdentity;
+}
+
+std::optional<AccountSettingsOpenTarget> DesktopAccountConfig::openTarget(
+		const AccountKey &requester,
+		SettingsOpenRole role) {
+	refreshLocalChoice();
+	const auto global = globalAccount();
+	if (!permissionsReady() || !_owner || !global
+		|| (role != SettingsOpenRole::Own && role != SettingsOpenRole::AppWide)
+		|| !AccountKeyText(requester.environment, requester.userId)
+		|| OwnerInput(absolute(u"accounts/root.toml"_q)).state != SettingsFileState::Readable) {
+		return std::nullopt;
+	}
+	const auto local = OwnerInput(absolute(u"local.toml"_q));
+	const auto record = OwnerInput(absolute(u"accounts/root.toml"_q));
+	const auto parsedLocal = ParseLocalChoice(QString::fromUtf8(local.bytes), absolute(u"local.toml"_q));
+	const auto parsedRecord = ParseOwnerRecord(QString::fromUtf8(record.bytes), absolute(u"accounts/root.toml"_q));
+	if (local.state != SettingsFileState::Readable || local != _localInput || !parsedLocal.ok()
+		|| !parsedRecord.ok() || parsedLocal.choice.rootFileAccount != _owner
+		|| parsedRecord.account != _owner) {
+		return std::nullopt;
+	}
+	const auto selected = target(role == SettingsOpenRole::AppWide ? *global : requester);
+	const auto rootIdentity = DirectoryIdentity(_root);
+	const auto selectedFiles = selected ? files(selected->account) : std::nullopt;
+	const auto accountsIdentity = DirectoryIdentity(absolute(u"accounts"_q));
+	return selected && selectedFiles && !rootIdentity.isEmpty() && !accountsIdentity.isEmpty()
+		&& globalAccount() == global && OwnerInput(absolute(u"local.toml"_q)) == local
+		&& OwnerInput(absolute(u"accounts/root.toml"_q)) == record
+		? std::make_optional(AccountSettingsOpenTarget{
+			requester, role, *selected, *_owner, *global, _root, rootIdentity,
+			accountsIdentity, DirectoryIdentity(selectedFiles->directory), local, record })
+		: std::nullopt;
+}
+
+bool DesktopAccountConfig::validateOpen(const AccountSettingsOpenTarget &target) {
+	const auto current = openTarget(target.requester, target.role);
+	return current && current->owner == target.owner && current->global == target.global
+		&& current->root == target.root && current->rootIdentity == target.rootIdentity
+		&& current->accountsIdentity == target.accountsIdentity
+		&& current->accountDirectoryIdentity == target.accountDirectoryIdentity
+		&& current->localInput == target.localInput && current->ownerInput == target.ownerInput
+		&& current->file.account == target.file.account
+		&& validate(target.file);
+}
+
+SettingsOpenResult DesktopAccountConfig::prepareOpen(
+		const AccountSettingsOpenTarget &target,
+		const std::function<bool()> &originCurrent) {
+	if (!originCurrent || !originCurrent() || !validateOpen(target)) {
+		return {};
+	}
+	if (target.file.input.state == SettingsFileState::ReadError) {
+		return { SettingsOpenStatus::ReadError };
+	} else if (target.file.input.state == SettingsFileState::Readable) {
+		return { SettingsOpenStatus::Ready, target };
+	}
+	const auto key = AccountKeyText(target.file.account.environment, target.file.account.userId);
+	if (!key || target.file.account == target.owner
+		|| target.file.path != absolute(u"accounts/%1/settings.toml"_q.arg(*key))) {
+		return { SettingsOpenStatus::CreateError };
+	}
+	const auto logicalCurrent = [&] {
+		if (!originCurrent()) { return false; }
+		const auto current = openTarget(target.requester, target.role);
+		return current && current->owner == target.owner && current->global == target.global
+			&& current->root == target.root && current->rootIdentity == target.rootIdentity
+			&& current->accountsIdentity == target.accountsIdentity
+			&& current->localInput == target.localInput && current->ownerInput == target.ownerInput
+			&& current->file.account == target.file.account
+			&& current->file.path == target.file.path
+			&& current->file.generation == target.file.generation
+			&& current->file.input == target.file.input;
+	};
+	const auto bytes = NewAccountSettingsText();
+	if (!CreateAccountSettingsFile(_root, *key, bytes,
+			target.accountsIdentity, target.accountDirectoryIdentity, logicalCurrent)) {
+		return { logicalCurrent() ? SettingsOpenStatus::CreateError : SettingsOpenStatus::Changed };
+	}
+	forgetAccountSave(target.file.account);
+	(void)observeAccountSave(target.file.account);
+	invalidate();
+	watch();
+	if (_changed) { _changed(); }
+	if (!originCurrent()) { return {}; }
+	const auto current = openTarget(target.requester, target.role);
+	if (!current || current->owner != target.owner || current->global != target.global
+		|| current->root != target.root || current->rootIdentity != target.rootIdentity
+		|| current->accountsIdentity != target.accountsIdentity
+		|| current->localInput != target.localInput || current->ownerInput != target.ownerInput
+		|| current->file.account != target.file.account || current->file.path != target.file.path
+		|| current->file.generation != target.file.generation
+		|| current->file.input != SettingsFileInput{ SettingsFileState::Readable, bytes }
+		|| !validateOpen(*current)) {
+		return {};
+	}
+	return { SettingsOpenStatus::Created, current };
 }
 
 std::optional<ManualSettingsExportTarget> DesktopAccountConfig::manualExportTarget(

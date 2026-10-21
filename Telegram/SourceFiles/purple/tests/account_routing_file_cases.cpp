@@ -961,6 +961,273 @@ void OwnerPolicyRecoveryCases() {
 }
 
 
+void AccountSettingsCreationAndDocumentCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto t = AccountKey{ 1, 202 };
+	const auto expectedHeader = QByteArray(
+		"# Purple Telegram settings for one account.\n"
+		"# This file holds only what differs for this account. Anything it leaves out\n"
+		"# comes from the account that supplies app-wide settings on each device.\n"
+		"# Work Mode, Local Premium and the other app-wide settings written here take\n"
+		"# effect only on devices where this account supplies the app-wide settings.\n"
+		"# See config.md, \"Settings per account\".\n"
+		"version = 2\n");
+	CHECK(NewAccountSettingsText() == expectedHeader);
+	CHECK(!expectedHeader.contains("101"));
+	CHECK(!expectedHeader.contains("202"));
+	CHECK(!expectedHeader.contains('['));
+	CHECK(ParseSettings(QString::fromUtf8(expectedHeader), u"created"_q).settings.version == 2);
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto rootBytes = QByteArray("# unchanged root\nversion=1\n[premium]\nenabled_p=false\n");
+		Put(root, rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		CHECK(config.owner() == a);
+		const auto localBefore = Get(temp.filePath(u"local.toml"_q));
+		const auto recordBefore = Get(temp.filePath(u"accounts/root.toml"_q));
+		const auto directory = temp.filePath(u"accounts/0-202"_q);
+		const auto path = directory + u"/settings.toml"_q;
+		(void)config.settings(b);
+		CHECK(!QFileInfo::exists(directory));
+		CHECK(!config.operationTarget(b));
+		const auto target = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(target);
+		if (!target) { return; }
+		CHECK(target->requester == b);
+		CHECK(target->file.account == b);
+		CHECK(target->file.path == path);
+		CHECK(target->file.input.state == SettingsFileState::Missing);
+		CHECK(!QFileInfo::exists(directory));
+		auto wrong = *target;
+		wrong.requester = t;
+		CHECK(!config.validateOpen(wrong));
+		wrong = *target;
+		wrong.file.path = root;
+		CHECK(!config.validateOpen(wrong));
+		CHECK(config.prepareOpen(wrong, [] { return true; }).status == SettingsOpenStatus::Changed);
+		CHECK(config.prepareOpen(*target, [] { return false; }).status == SettingsOpenStatus::Changed);
+		CHECK(!QFileInfo::exists(directory));
+		const auto rootOpen = config.openTarget(b, SettingsOpenRole::AppWide);
+		CHECK(rootOpen && rootOpen->file.account == a && rootOpen->file.path == root);
+		CHECK(rootOpen && config.prepareOpen(*rootOpen, [] { return true; }).status == SettingsOpenStatus::Ready);
+		auto queue = AccountSendQueue<int>();
+		queue.observe(config, b, 1, [](int owner) { return owner == 1; });
+		CHECK(queue.empty());
+		const auto result = config.prepareOpen(*target, [] { return true; });
+		CHECK(result.status == SettingsOpenStatus::Created);
+		CHECK(result.target && config.validateOpen(*result.target));
+		CHECK(Get(path) == expectedHeader);
+		CHECK(Get(root) == rootBytes);
+		CHECK(Get(temp.filePath(u"local.toml"_q)) == localBefore);
+		CHECK(Get(temp.filePath(u"accounts/root.toml"_q)) == recordBefore);
+		CHECK(!config.operationTarget(b));
+		CHECK(!config.editTarget(b));
+		queue.observe(config, b, 1, [](int owner) { return owner == 1; });
+		CHECK(queue.empty());
+		CHECK(queue.takeReady(config).empty());
+		CHECK(!QFileInfo::exists(directory + u"/sync"_q));
+		CHECK(!QFileInfo::exists(directory + u"/send-state.toml"_q));
+		CHECK(!config.validateOpen(*target));
+		const auto existing = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(existing);
+		if (!existing) { return; }
+		CHECK(config.prepareOpen(*existing, [] { return true; }).status == SettingsOpenStatus::Ready);
+		CHECK(Get(path) == expectedHeader);
+		const auto v1 = QByteArray("# preserve this byte for byte\nversion=1\n[last_seen]\ntrade_p=false\n");
+		Put(path, v1);
+		const auto oldFile = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(oldFile);
+		if (!oldFile) { return; }
+		CHECK(config.prepareOpen(*oldFile, [] { return true; }).status == SettingsOpenStatus::Ready);
+		CHECK(Get(path) == v1);
+		Put(temp.filePath(u"local.toml"_q), QByteArray("root_file_account='0-101'\nglobal_account='0-202'\n"));
+		const auto ownA = config.openTarget(a, SettingsOpenRole::Own);
+		const auto wideB = config.openTarget(a, SettingsOpenRole::AppWide);
+		CHECK(ownA && ownA->owner == a && ownA->global == b && ownA->file.account == a);
+		CHECK(wideB && wideB->owner == a && wideB->global == b && wideB->file.account == b);
+		CHECK(wideB && wideB->file.path == path);
+		CHECK(!config.validateOpen(*oldFile));
+		CHECK(wideB && config.prepareOpen(*wideB, [] { return true; }).status == SettingsOpenStatus::Ready);
+		CHECK(Get(root) == rootBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto missingRoot = config.openTarget(a, SettingsOpenRole::Own);
+		CHECK(missingRoot);
+		CHECK(missingRoot && config.prepareOpen(*missingRoot, [] { return true; }).status == SettingsOpenStatus::CreateError);
+		CHECK(!QFileInfo::exists(temp.filePath(u"settings.toml"_q)));
+		const auto target = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(target);
+		if (!target) { return; }
+		const auto concurrent = QByteArray("# another creator\nversion=1\n");
+		Put(target->file.path, concurrent);
+		CHECK(config.prepareOpen(*target, [] { return true; }).status == SettingsOpenStatus::Changed);
+		CHECK(Get(target->file.path) == concurrent);
+		CHECK(QFile::remove(target->file.path));
+		const auto during = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(during);
+		if (!during) { return; }
+		auto guards = 0;
+		const auto outcome = config.prepareOpen(*during, [&] {
+			if (++guards == 4) { Put(during->file.path, concurrent); }
+			return true;
+		});
+		CHECK(guards >= 4);
+		CHECK(!outcome.target);
+		CHECK(Get(during->file.path) == concurrent);
+		CHECK(QFile::remove(during->file.path));
+		const auto staleOwner = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(staleOwner);
+		Put(temp.filePath(u"accounts/root.toml"_q), QByteArray("root_file_account='1-202'\n"));
+		CHECK(!config.openTarget(b, SettingsOpenRole::Own));
+		CHECK(staleOwner && !config.validateOpen(*staleOwner));
+		CHECK(staleOwner && config.prepareOpen(*staleOwner, [] { return true; }).status == SettingsOpenStatus::Changed);
+		CHECK(!QFileInfo::exists(during->file.path));
+	}
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto target = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(target);
+		if (!target) { return; }
+		CHECK(QDir().mkpath(target->file.path));
+		CHECK(!config.openTarget(b, SettingsOpenRole::Own));
+		CHECK(config.prepareOpen(*target, [] { return true; }).status == SettingsOpenStatus::Changed);
+		CHECK(QFileInfo(target->file.path).isDir());
+	}
+#ifndef Q_OS_WIN
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		CHECK(QDir().mkpath(QFileInfo(path).absolutePath()));
+		const auto target = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(target);
+		if (!target) { return; }
+		CHECK(::symlink("absent.toml", QFile::encodeName(path).constData()) == 0);
+		CHECK(QFileInfo(path).isSymLink());
+		CHECK(!config.openTarget(b, SettingsOpenRole::Own));
+		CHECK(config.prepareOpen(*target, [] { return true; }).status == SettingsOpenStatus::Changed);
+		CHECK(QFileInfo(path).isSymLink());
+		CHECK(QFile::remove(path));
+		const auto bytes = QByteArray("version=1\n");
+		Put(path, bytes);
+		CHECK(QFile::setPermissions(path, QFileDevice::Permissions()));
+		const auto unreadable = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(unreadable);
+		CHECK(unreadable && unreadable->file.input.state == SettingsFileState::ReadError);
+		CHECK(unreadable && config.prepareOpen(*unreadable, [] { return true; }).status == SettingsOpenStatus::ReadError);
+		CHECK(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+		CHECK(Get(path) == bytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		auto outside = QTemporaryDir();
+		CHECK(temp.isValid() && outside.isValid());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto target = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(target);
+		if (!target) { return; }
+		const auto directory = QFileInfo(target->file.path).absolutePath();
+		CHECK(::symlink(QFile::encodeName(outside.path()).constData(), QFile::encodeName(directory).constData()) == 0);
+		CHECK(!config.openTarget(b, SettingsOpenRole::Own));
+		CHECK(!config.prepareOpen(*target, [] { return true; }).target);
+		CHECK(!QFileInfo::exists(outside.filePath(u"settings.toml"_q)));
+	}
+#endif
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto rootBytes = QByteArray("# root owner A\nversion=1\n");
+		Put(root, rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		Put(temp.filePath(u"local.toml"_q), QByteArray("root_file_account='0-101'\nglobal_account='0-202'\n"));
+		const auto selected = config.openTarget(a, SettingsOpenRole::AppWide);
+		CHECK(selected && selected->owner == a && selected->global == b);
+		CHECK(selected && selected->file.account == b);
+		if (!selected) { return; }
+		CHECK(!QFileInfo::exists(selected->file.path));
+		const auto opened = config.prepareOpen(*selected, [] { return true; });
+		CHECK(opened.status == SettingsOpenStatus::Created);
+		CHECK(opened.target && opened.target->file.account == b);
+		CHECK(Get(selected->file.path) == expectedHeader);
+		CHECK(Get(root) == rootBytes);
+		const auto testAccount = config.openTarget(t, SettingsOpenRole::Own);
+		CHECK(testAccount && testAccount->file.path == temp.filePath(u"accounts/1-202/settings.toml"_q));
+		CHECK(testAccount && config.prepareOpen(*testAccount, [] { return true; }).status == SettingsOpenStatus::Created);
+		CHECK(testAccount && Get(testAccount->file.path) == expectedHeader);
+		CHECK(Get(selected->file.path) == expectedHeader);
+	}
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto target = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(target);
+		if (!target) { return; }
+		auto origin = std::make_unique<QObject>();
+		const auto guard = QPointer<QObject>(origin.get());
+		config.setChanged([&] { origin.reset(); });
+		const auto result = config.prepareOpen(*target, [=] { return !guard.isNull(); });
+		CHECK(!guard);
+		CHECK(result.status == SettingsOpenStatus::Changed);
+		CHECK(!result.target);
+		CHECK(Get(target->file.path) == expectedHeader);
+		CHECK(!config.observeAccountSave(b));
+	}
+	{
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		const auto bytes = QByteArray("version=1\n");
+		Put(path, bytes);
+		const auto oldDirectory = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(oldDirectory);
+		if (!oldDirectory) { return; }
+		const auto directory = QFileInfo(path).absolutePath();
+		CHECK(QDir().rename(directory, directory + u".retained"_q));
+		Put(path, bytes);
+		CHECK(!config.validateOpen(*oldDirectory));
+		CHECK(!config.prepareOpen(*oldDirectory, [] { return true; }).target);
+		CHECK(Get(path) == bytes);
+		CHECK(Get(directory + u".retained/settings.toml"_q) == bytes);
+	}
+	CHECK(SettingsDocumentFileName(1) == u"settings.toml"_q);
+	CHECK(SettingsDocumentFileName(2) == u"account-settings.toml"_q);
+	CHECK(SettingsDocumentFileName(3) == u"account-settings.toml"_q);
+	CHECK(ClassifySettingsDocumentName(u"SETTINGS.TOML"_q) == LegacySettingsDocumentKind::Whole);
+	CHECK(ClassifySettingsDocumentName(u"ACCOUNT-SETTINGS.TOML"_q) == LegacySettingsDocumentKind::Layered);
+	CHECK(ClassifySettingsDocumentName(u"../settings.toml"_q) == LegacySettingsDocumentKind::Unrelated);
+	CHECK(ClassifySettingsDocumentName(u"settings.toml.bak"_q) == LegacySettingsDocumentKind::Unrelated);
+	CHECK(CanApplyWholeSettingsDocument(u"settings.toml"_q, QByteArray("version=1\n")));
+	CHECK(!CanApplyWholeSettingsDocument(u"settings.toml"_q, expectedHeader));
+	CHECK(!CanApplyWholeSettingsDocument(u"account-settings.toml"_q, QByteArray("version=1\n")));
+	CHECK(!CanApplyWholeSettingsDocument(u"account-settings.toml"_q, expectedHeader));
+	CHECK(!CanApplyWholeSettingsDocument(u"other.toml"_q, QByteArray("version=1\n")));
+	CHECK(!CanApplyWholeSettingsDocument(u"settings.toml"_q, QByteArray("broken [")));
+	CHECK(!CanReplaceLegacyRootSettings(QByteArray("[premium]\nenabled_p=true\n"), expectedHeader));
+	CHECK(!CanReplaceLegacyRootSettings(QByteArray("[premium]\nenabled_p=true\n"), QByteArray("version=1\n")));
+}
+
+
 }
 
 int main(int argc, char *argv[]) {
@@ -985,6 +1252,10 @@ int main(int argc, char *argv[]) {
 	const auto beforeOwnerPolicy = Checks;
 	OwnerPolicyRecoveryCases();
 	std::printf("ownerPolicyRecovery %d checks\n", Checks - beforeOwnerPolicy);
+	std::printf("priorBatch789 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeCreation = Checks;
+	AccountSettingsCreationAndDocumentCases();
+	std::printf("accountCreationDocument %d checks\n", Checks - beforeCreation);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

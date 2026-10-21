@@ -31,6 +31,39 @@ struct AccountFileTarget {
 	QByteArray directoryIdentity;
 };
 
+enum class SettingsOpenRole { Own, AppWide };
+
+struct AccountSettingsOpenTarget {
+	AccountKey requester;
+	SettingsOpenRole role = SettingsOpenRole::Own;
+	AccountFileTarget file;
+	AccountKey owner;
+	AccountKey global;
+	QString root;
+	QByteArray rootIdentity;
+	QByteArray accountsIdentity;
+	QByteArray accountDirectoryIdentity;
+	SettingsFileInput localInput;
+	SettingsFileInput ownerInput;
+};
+
+enum class SettingsOpenStatus { Ready, Created, Changed, ReadError, CreateError };
+
+struct SettingsOpenResult {
+	SettingsOpenStatus status = SettingsOpenStatus::Changed;
+	std::optional<AccountSettingsOpenTarget> target;
+};
+
+enum class LegacySettingsDocumentKind { Unrelated, Whole, Layered };
+
+[[nodiscard]] QByteArray NewAccountSettingsText();
+[[nodiscard]] QString SettingsDocumentFileName(int version);
+[[nodiscard]] LegacySettingsDocumentKind ClassifySettingsDocumentName(
+	const QString &name);
+[[nodiscard]] bool CanApplyWholeSettingsDocument(
+	const QString &name,
+	const QByteArray &bytes);
+
 struct AccountOperationTarget {
 	AccountFileTarget file;
 	AccountFiles files;
@@ -78,6 +111,13 @@ public:
 	[[nodiscard]] const LayerSettingsResult *report(const AccountKey &key) const;
 	[[nodiscard]] std::optional<AccountFileTarget> target(const AccountKey &key);
 	[[nodiscard]] bool validate(const AccountFileTarget &target);
+	[[nodiscard]] std::optional<AccountSettingsOpenTarget> openTarget(
+		const AccountKey &requester,
+		SettingsOpenRole role);
+	[[nodiscard]] bool validateOpen(const AccountSettingsOpenTarget &target);
+	[[nodiscard]] SettingsOpenResult prepareOpen(
+		const AccountSettingsOpenTarget &target,
+		const std::function<bool()> &originCurrent);
 	[[nodiscard]] std::optional<ManualSettingsExportTarget> manualExportTarget(const AccountKey &key);
 	[[nodiscard]] bool validateManualExport(const ManualSettingsExportTarget &target);
 	[[nodiscard]] std::optional<AccountFileTarget> editTarget(const AccountKey &key);

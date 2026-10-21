@@ -1096,6 +1096,53 @@ std::optional<AccountFileTarget> AccountSettingsEditTarget(
 	return AccountRouting().editTarget(SessionAccountKey(session));
 }
 
+std::optional<AccountKey> AppWideSettingsAccount(not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	AccountRouting().refreshLocalChoice();
+	return AccountRouting().globalAccount();
+}
+
+std::optional<AccountSettingsOpenTarget> AccountSettingsOpenTargetFor(
+		not_null<Main::Session*> session,
+		SettingsOpenRole role) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	const auto target = AccountRouting().openTarget(SessionAccountKey(session), role);
+	return target && target->root == ConfigDirectory() ? target : std::nullopt;
+}
+
+bool ValidateAccountSettingsOpenTarget(
+		not_null<Main::Session*> session,
+		const AccountSettingsOpenTarget &target) {
+	return !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& SessionAccountKey(session) == target.requester
+		&& ConfigDirectory() == target.root && AccountRouting().validateOpen(target);
+}
+
+SettingsOpenResult PrepareAccountSettingsOpen(
+		not_null<Main::Session*> session,
+		const AccountSettingsOpenTarget &target,
+		const std::function<bool()> &windowCurrent) {
+	const auto weak = base::make_weak(session.get());
+	const auto originCurrent = [=] {
+		const auto live = weak.get();
+		return live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == target.requester && ConfigDirectory() == target.root
+			&& windowCurrent && windowCurrent();
+	};
+	if (!originCurrent() || !ValidateAccountSettingsOpenTarget(session, target)) { return {}; }
+	const auto result = AccountRouting().prepareOpen(target, originCurrent);
+	if (!originCurrent() || !result.target
+		|| !ValidateAccountSettingsOpenTarget(weak.get(), *result.target)) {
+		return { result.target ? SettingsOpenStatus::Changed : result.status };
+	}
+	return result;
+}
+
 std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*> session) {
 	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
 		return std::nullopt;

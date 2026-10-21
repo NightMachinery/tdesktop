@@ -10,6 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "platform/platform_file_utilities.h"
+#include "ui/delayed_activation.h"
+#include <crl/crl_on_main.h>
+#include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -25,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_version.h"
 #include "settings/settings_builder.h"
 #include "ui/layers/generic_box.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -35,6 +40,89 @@ namespace Purple {
 namespace {
 
 using namespace Settings::Builder;
+
+void BuildPurpleSettingsFiles(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	if (!controller) { return; }
+	const auto weakController = base::make_weak(controller);
+	const auto weakSession = base::make_weak(builder.session().get());
+	const auto windowCurrent = [=] {
+		const auto window = weakController.get();
+		const auto session = weakSession.get();
+		return window && session && &window->session() == session;
+	};
+	builder.addSubsectionTitle({
+		.id = u"advanced/purple_settings_files"_q,
+		.title = tr::lng_purple_settings_files(),
+		.keywords = { u"purple"_q, u"settings"_q, u"file"_q, u"account"_q },
+	});
+	for (const auto role : { SettingsOpenRole::Own, SettingsOpenRole::AppWide }) {
+		const auto target = [=] {
+			const auto live = weakSession.get();
+			return windowCurrent() ? AccountSettingsOpenTargetFor(live, role) : std::nullopt;
+		};
+		const auto label = [=] {
+			const auto selected = target();
+			return selected ? selected->file.path : tr::lng_purple_settings_open_unavailable(tr::now);
+		};
+		const auto title = [=] {
+			const auto selected = target();
+			const auto live = weakSession.get();
+			if (role == SettingsOpenRole::Own) {
+				const auto name = live ? live->user()->name() : QString();
+				return selected && selected->requester == selected->global
+					? tr::lng_purple_settings_open_appwide(tr::now, lt_account, name)
+					: tr::lng_purple_settings_open_own(tr::now, lt_account, name);
+			}
+			const auto global = windowCurrent() ? AppWideSettingsAccount(live) : std::nullopt;
+			const auto account = global
+				? AccountKeyText(global->environment, global->userId) : std::nullopt;
+			return tr::lng_purple_settings_open_appwide(tr::now, lt_account,
+				account.value_or(QString()));
+		};
+		builder.addButton({
+			.id = role == SettingsOpenRole::Own
+				? u"advanced/purple_open_account_settings"_q : u"advanced/purple_open_appwide_settings"_q,
+			.title = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(title),
+			.label = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(label),
+			.onClick = [=] {
+				const auto selected = target();
+				if (!selected) {
+					if (const auto window = weakController.get()) {
+						window->show(Ui::MakeInformBox(tr::lng_purple_settings_open_unavailable(tr::now)));
+					}
+					return;
+				}
+				const auto result = PrepareAccountSettingsOpen(weakSession.get(), *selected, windowCurrent);
+				if (!windowCurrent()) { return; }
+				if (!result.target || !ValidateAccountSettingsOpenTarget(weakSession.get(), *result.target)) {
+					weakController.get()->show(Ui::MakeInformBox(
+						result.status == SettingsOpenStatus::ReadError
+							? tr::lng_purple_settings_open_read_error(tr::now)
+							: result.status == SettingsOpenStatus::CreateError
+							? tr::lng_purple_settings_open_create_error(tr::now)
+							: tr::lng_purple_settings_open_changed(tr::now)));
+					return;
+				}
+				const auto ready = *result.target;
+				crl::on_main([=] {
+					if (!windowCurrent() || !ValidateAccountSettingsOpenTarget(weakSession.get(), ready)) {
+						return;
+					}
+					Ui::PreventDelayedActivation();
+					Platform::File::UnsafeLaunch(ready.file.path);
+				});
+			},
+			.keywords = { u"purple"_q, u"settings"_q, u"file"_q, u"open"_q, u"account"_q },
+			.shown = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([=] {
+				const auto live = weakSession.get();
+				const auto global = windowCurrent() ? AppWideSettingsAccount(live) : std::nullopt;
+				return role == SettingsOpenRole::Own
+					|| !global || (live && SessionAccountKey(live) != *global);
+			}),
+		});
+	}
+}
 
 // Purple Telegram, not upstream. Why a coarse "last seen" is coarse, and the
 // one-off peek that reads an exact one. See docs/purple/work_mode.md.
@@ -206,10 +294,11 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"premium"_q, u"work"_q },
 	});
 	Purple::AddVersionRow(builder);
+	BuildPurpleSettingsFiles(builder);
 	if (controller) {
 		builder.addButton({
 			.id = u"advanced/purple_settings_owner"_q,
-			.title = rpl::single(u"settings.toml"_q),
+			.title = tr::lng_purple_settings_file_owner(),
 			.label = rpl::single(SettingsOwnerStatus()),
 			.onClick = [=] { controller->show(Box(ChooseSettingsOwnerBox)); },
 		});

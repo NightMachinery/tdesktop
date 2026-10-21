@@ -547,3 +547,21 @@ It is disabled by default, refuses grouped and unsupported sources, and does
 not authorize file publication, input or runtime capture. Normal ungrouped
 settings text uses the Message body path; ungrouped Document caption coverage
 is not established.
+
+## Layered legacy documents
+
+Whole legacy documents remain named `settings.toml`. Layered schema2 documents
+use `account-settings.toml`; current Saved Messages offers and context-menu
+qualification recognize both names using the same originating-session and exact
+message/document hit guards. A layered filename refuses import before download.
+The final whole-file import check also requires the whole filename and supported
+schema1 content. Renaming schema2 bytes to `settings.toml` cannot enable replacement,
+and a schema1 payload under the layered filename is still held.
+
+The document name is captured and revalidated through download and confirmation.
+Existing missing-file, account binding, exact input, warning and app-wide-loss
+checks remain in force. Automatic/manual schema2 legacy sends and layered apply
+are not enabled by filename recognition. Creation/Open sends nothing. Full layered
+review, warning presentation, non-default destructive actions and explicit
+per-account/app-wide application choices remain required before enabling those
+transfers. Existing root-owner and valid schema1 account transfers are unchanged.

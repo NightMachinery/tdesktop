@@ -43,6 +43,18 @@ void RefreshDesktopAccounts();
 [[nodiscard]] std::optional<ManualSettingsExportTarget> AccountManualExportTarget(not_null<Main::Session*> session);
 [[nodiscard]] bool ValidateAccountManualExportTarget(not_null<Main::Session*> session, const ManualSettingsExportTarget &target);
 [[nodiscard]] std::optional<AccountFileTarget> AccountSettingsEditTarget(not_null<Main::Session*> session);
+[[nodiscard]] std::optional<AccountKey> AppWideSettingsAccount(
+	not_null<Main::Session*> session);
+[[nodiscard]] std::optional<AccountSettingsOpenTarget> AccountSettingsOpenTargetFor(
+	not_null<Main::Session*> session,
+	SettingsOpenRole role);
+[[nodiscard]] bool ValidateAccountSettingsOpenTarget(
+	not_null<Main::Session*> session,
+	const AccountSettingsOpenTarget &target);
+[[nodiscard]] SettingsOpenResult PrepareAccountSettingsOpen(
+	not_null<Main::Session*> session,
+	const AccountSettingsOpenTarget &target,
+	const std::function<bool()> &windowCurrent);
 [[nodiscard]] QString SettingsOwnerStatus();
 void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box);
 

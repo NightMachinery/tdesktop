@@ -67,3 +67,13 @@ docs/purple/upstream_hooks.md.
 "lng_purple_peek_delay_about" = "This global setting applies to every preset. Changing it waits for the longer of the current and new delays. Abort keeps the current setting and does not start Peek.";
 
 "lng_purple_account_sync_file_held" = "Sync is not available for this account's settings file yet. This screen cannot create a missing account file or sync layered settings.";
+
+"lng_purple_settings_files" = "Settings files";
+"lng_purple_settings_file_owner" = "Original settings file owner";
+"lng_purple_settings_open_own" = "Open settings file: {account}";
+"lng_purple_settings_open_appwide" = "Open app-wide settings: {account}";
+"lng_purple_settings_open_unavailable" = "The settings file destination could not be verified. Nothing was opened.";
+"lng_purple_settings_open_read_error" = "The settings file cannot be read. It was not replaced or opened.";
+"lng_purple_settings_open_create_error" = "The account settings file could not be created safely. Nothing was replaced or opened.";
+"lng_purple_settings_open_changed" = "The account, settings destination or file changed. Open it again from this account's settings.";
+"lng_purple_settings_layered_import_held" = "This is a layered account settings document. Applying it requires an account and app-wide settings review, which is not available yet. Nothing was imported.";

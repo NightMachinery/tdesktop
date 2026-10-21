@@ -15,7 +15,7 @@ in the same process. Existing root settings, sync state and History never move.
 The check-to-rename interval remains a race against a noncooperating external
 writer; this is not a cross-file transaction or an observed disk-isolation claim.
 
-Settings > Advanced > Purple has a settings.toml ownership row and an eligible
+Settings > Advanced > Purple has an original-file ownership row and an eligible
 signed-in account choice. Accounts that already have a directory are excluded.
 The restored-owner notice is acknowledged when that box is opened. A confirmed
 owner survives sign-out. The initial no-account state waits for the first sign-in.
@@ -52,7 +52,7 @@ Sync setup, store, publish, apply, History/Undo and fingerprint persistence now 
 explicit validated originating-account files. Root-owner paths remain legacy;
 nonroot accounts never fall back to them. Manual single-file export remains a
 separate owner-unknown role. Account list-member writes, nonroot global editing,
-layered-file creation/forks and the full account settings chooser remain held.
+list forks and the full account settings chooser remain held.
 No migration-by-copy or automatic binding restoration is introduced.
 
 Synthetic Qt/file cases qualify the actual adapter and guarded writer in owned
@@ -112,10 +112,10 @@ supply another account's transport. The existing QFileSystemWatcher may coalesce
 external events; an unobserved delete/recreate gap cannot be distinguished from a
 replacement save.
 
-Absent settings are read without creation and cannot initialize/publish through
-this UI. File creation UI remains held. Version2 legacy imports/exports and layered
-sync application remain refused; account editing/list forks/global-file edits stay
-held. The final precondition-to-rename window against a noncooperating writer remains
+Absent settings are read without creation and cannot initialize or publish through
+sync setup. The explicit Open action can create a missing non-root account file.
+Version2 legacy imports/exports and layered sync application remain refused;
+account editing/list forks/global-file edits stay held. The final precondition-to-rename window against a noncooperating writer remains
 finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
 and a coherent current application need separate qualification.
 
@@ -130,3 +130,39 @@ callback is wrapped by a setup QObject lifetime guard before any setup-owned sta
 is read; it then reacquires the selected session and validates the captured target.
 Synthetic cases invoke the directly used production queue and QObject guard. They
 do not claim a real widget stack or live network reproduction.
+
+## Explicit account file Open
+
+The settings file block belongs to the Settings window's session. Its own-file
+row identifies that account and its exact path. A second Open row points at the
+selected app-wide account, including when that account is offline. When the window
+already belongs to that account there is only one Open row. The immutable original
+file owner remains a separate role and is never a fallback destination.
+
+Reading settings, signing in and configuring sync do not create an account file.
+Explicit Open creates only a missing non-root account file, with the approved
+comment header and `version = 2`. It writes no starter overrides, account ids or
+names. A missing root file is not replaced with an account template. Existing
+files are opened without changing their version or bytes. Per-account in-app
+editing stays unavailable until its destination-safe write route is qualified.
+
+Creation captures the owner/local choice inputs, destination account, root and
+account directory identities, file input and originating session/window. It writes
+a complete temporary file before publishing without replacing an existing file.
+On POSIX, directory descriptors and `linkat` prevent symlink traversal at the
+created child and destination replacement. Windows uses directory handles without
+delete sharing and a move without replacement. Existing links, non-files and read
+errors refuse Open. Changed identities or inputs refuse the editor launch, including
+a change during notification/reload. A concurrent creator's bytes are preserved.
+These finite checks are not a universal cross-process compare-and-swap, and the
+external editor has its own later filesystem access after launch.
+
+Creation seeds the file observation without sending or publishing it. Existing
+qualified save observations and queued operations keep their established rules.
+The account template is schema2, so current schema1 transport guards keep its
+automatic and manual legacy sends held. Reset, account editor/list fork and
+app-wide-loss review controls remain separate work.
+
+The account-file batch passes all 58 affected production compiles and 967 genuine
+Qt/file checks, including 178 added checks. Native editor dispatch, Windows
+execution and the matching full application remain separate validation steps.

@@ -1194,3 +1194,28 @@ Stock folder lookup uses the ChatFilters originating session when selecting the
 Purple branch. The native nonpremium All-first mapping is unchanged. Synthetic
 policy cases exercise the real shared stock decision; actual shortcut/index behavior
 and GUI rows remain native-unmeasured until a separately admitted application run.
+
+## Settings per account
+
+Settings > Advanced > Purple shows the current account's settings path and an
+Open action. A window for another account also offers Open app-wide settings,
+using the selected app-wide account rather than the original root-file owner.
+This works without changing the global account or annotating the root file.
+
+An absent non-root file is created only by explicit Open. The new file is:
+
+```toml
+# Purple Telegram settings for one account.
+# This file holds only what differs for this account. Anything it leaves out
+# comes from the account that supplies app-wide settings on each device.
+# Work Mode, Local Premium and the other app-wide settings written here take
+# effect only on devices where this account supplies the app-wide settings.
+# See config.md, "Settings per account".
+version = 2
+```
+
+Opening preserves existing file bytes and versions. Unreadable files, links,
+non-files, changed account ownership or a concurrent creator refuse replacement.
+Creating this file does not send settings. Missing files still cannot publish via
+sync setup. Other per-account in-app edits remain unavailable; Work Mode, preset,
+schedule and global settings retain their existing app-wide destination.

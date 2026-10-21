@@ -187,8 +187,6 @@ bool HistoryContextMenuShortcutFilter::eventFilter(
 
 #endif
 
-constexpr auto kFileName = "settings.toml";
-
 // A settings.toml is a few kilobytes of TOML, and this fetches one into memory
 // rather than onto disk. Anything of a size that could not be the file is not
 // the file, and offering to import it would be offering to import something
@@ -197,7 +195,7 @@ constexpr auto kMaxSize = 4 * 1024 * 1024;
 constexpr auto kSearchLimit = 100;
 
 [[nodiscard]] QString SettingsFileName() {
-	return QString::fromLatin1(kFileName);
+	return SettingsDocumentFileName(kSettingsVersion);
 }
 
 [[nodiscard]] QString PlatformName() {
@@ -279,9 +277,7 @@ constexpr auto kSearchLimit = 100;
 		|| document->size > kMaxSize
 		|| document->uploading()
 		|| (!allowLoading && document->loading())
-		|| document->filename().compare(
-			SettingsFileName(),
-			Qt::CaseInsensitive) != 0) {
+		|| ClassifySettingsDocumentName(document->filename()) == LegacySettingsDocumentKind::Unrelated) {
 		return nullptr;
 	}
 	return document;
@@ -484,6 +480,7 @@ void WriteImported(
 
 void ConfirmAndImport(
 		not_null<Main::Session*> session,
+		const QString &documentName,
 		const QByteArray &content,
 		TimeId date,
 		const std::shared_ptr<Ui::Show> &show,
@@ -521,6 +518,10 @@ void ConfirmAndImport(
 		return;
 	}
 	const auto version = parsed.settings.version;
+	if (!CanApplyWholeSettingsDocument(documentName, content)) {
+		show->showBox(Ui::MakeInformBox(tr::lng_purple_settings_layered_import_held(tr::now)));
+		return;
+	}
 	if (!CanReplaceLegacyRootSettings(target->input.bytes, content)) {
 		show->showBox(Ui::MakeInformBox(u"This import would remove app-wide settings or cannot be checked safely."_q));
 		return;
@@ -581,11 +582,20 @@ void ResolveAndImport(
 		return;
 	}
 	const auto weakSession = base::make_weak(&document->session());
+	const auto documentName = document->filename();
+	if (ClassifySettingsDocumentName(documentName) != LegacySettingsDocumentKind::Whole) {
+		show->showBox(Ui::MakeInformBox(tr::lng_purple_settings_layered_import_held(tr::now)));
+		return;
+	}
+	const auto sameDocument = [=] {
+		return weakSession.get() && (!stillValid || stillValid())
+			&& document->filename() == documentName;
+	};
 	const auto account = AccountLabel(&document->session());
 	const auto media = document->createMediaView();
 	if (const auto content = LocalContent(media, document);
 		!content.isEmpty()) {
-		ConfirmAndImport(&document->session(), content, date, show, stillValid);
+		ConfirmAndImport(&document->session(), documentName, content, date, show, sameDocument);
 		return;
 	}
 	document->save(itemId, QString());
@@ -608,7 +618,7 @@ void ResolveAndImport(
 		const auto session = weakSession.get();
 		if (!session
 			|| AskingWindowSwitched(show)
-			|| (stillValid && !stillValid())) {
+			|| !sameDocument()) {
 			if (AskingWindowSwitched(show)) {
 				RefuseSwitchedImport(account);
 			}
@@ -624,7 +634,7 @@ void ResolveAndImport(
 			}
 			return;
 		}
-		ConfirmAndImport(&document->session(), content, date, show, stillValid);
+		ConfirmAndImport(&document->session(), documentName, content, date, show, sameDocument);
 		base::take(lifetime)->destroy();
 	}, *lifetime);
 }
@@ -686,9 +696,7 @@ struct ImportCandidate {
 		const auto document = media ? media->document() : nullptr;
 		if (!document
 			|| (document->size > kMaxSize)
-			|| (document->filename().compare(
-				SettingsFileName(),
-				Qt::CaseInsensitive) != 0)) {
+			|| ClassifySettingsDocumentName(document->filename()) == LegacySettingsDocumentKind::Unrelated) {
 			continue;
 		}
 		if (!candidate || (itemId.msg > candidate->itemId.msg)) {
