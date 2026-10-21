@@ -32,7 +32,8 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 		Main::Account &account,
 		Main::Session &session,
 		const SyncAccountInventoryResult &inventory) {
-	if (account.loggingOut() || account.maybeSession() != &session) {
+	if (!AccountAutomaticOperationsAllowed(&session)
+		|| account.loggingOut() || account.maybeSession() != &session) {
 		return { SyncAccountSetupStatus::AccountUnavailable };
 	}
 	if (!inventory.accountUserId

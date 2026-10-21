@@ -24,7 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 
 std::optional<Purple::ShowMode> History::purpleExemptFolderMode(bool includeOpened) const {
-	const auto &exempt = Purple::ExemptFolders();
+	const auto &exempt = Purple::ExemptFolders(&session());
 	if (exempt.empty()) {
 		return std::nullopt;
 	}
@@ -112,7 +112,7 @@ bool History::purpleShowModeSatisfied(
 }
 
 bool History::purpleHiddenFromView() const {
-	if (!Purple::Filtering()) {
+	if (!Purple::Filtering(&session())) {
 		return false;
 	}
 	// Before every rule below it, because it is not a statement about what the
@@ -133,7 +133,7 @@ bool History::purpleHiddenFromView() const {
 	// as well as one the preset hides. That is what makes a hide-until
 	// cancellable: the row has to come back for you to be able to right-click
 	// it, and a peek is the one gesture that means "show me everything".
-	if (Purple::Peeking()) {
+	if (Purple::Peeking(&session())) {
 		return false;
 	}
 	// A decision you made about this one chat, which outranks the preset for as
@@ -165,7 +165,7 @@ bool History::purpleHiddenByPreset(bool includeOpened) const {
 }
 
 bool History::purpleWouldLeaveTheView() const {
-	if (!Purple::Filtering() || Purple::Peeking()) {
+	if (!Purple::Filtering(&session()) || Purple::Peeking(&session())) {
 		// A peek shows everything, so nothing on screen during one is on screen
 		// because of a clock.
 		return false;
@@ -181,7 +181,7 @@ bool History::purpleWouldLeaveTheView() const {
 }
 
 bool History::purpleInQuietFolder() const {
-	const auto &quiet = Purple::QuietFolders();
+	const auto &quiet = Purple::QuietFolders(&session());
 	if (quiet.empty()) {
 		return false;
 	}
@@ -249,7 +249,7 @@ bool History::purpleReachableElsewhere(bool includeOpened) const {
 			return true;
 		}
 	}
-	const auto &shown = Purple::ShownFolders();
+	const auto &shown = Purple::ShownFolders(&session());
 	if (shown.empty()) {
 		return false;
 	}
@@ -284,7 +284,7 @@ void History::purpleSetOpened(bool opened) {
 		return;
 	}
 	state.opened = opened;
-	const auto seconds = Purple::RecentStaySeconds();
+	const auto seconds = Purple::RecentStaySeconds(&session());
 	if (opened) {
 		// Decided now rather than on close, because two of the three scopes ask
 		// where the chat was when you opened it - and reading it is exactly what
@@ -308,7 +308,7 @@ void History::purpleSetOpened(bool opened) {
 	if (!opened && state.eligible && seconds > 0) {
 		Purple::WatchGrace(&owner(), this);
 	}
-	if (seconds > 0 && Purple::Filtering()) {
+	if (seconds > 0 && Purple::Filtering(&session())) {
 		// Both directions. Opening can reveal a chat the preset hides, under the
 		// wider scopes, and closing one the grace does not cover has to take it
 		// away again - the flag below only speaks for chats that had unread.
@@ -318,7 +318,7 @@ void History::purpleSetOpened(bool opened) {
 
 bool History::purpleShownAsRecent() const {
 	const auto state = Purple::OpenedGrace(this);
-	if (!state.eligible || !Purple::RecentStaySeconds()) {
+	if (!state.eligible || !Purple::RecentStaySeconds(&session())) {
 		// The second test is what makes turning [recent] off take effect at
 		// once rather than at the end of whatever was already running.
 		return false;
@@ -368,7 +368,7 @@ History::PurpleTemporary History::purpleTemporary() const {
 	} else if (purpleShownAsRecent()
 		&& recent.until
 		&& purpleWouldLeaveTheView()) {
-		const auto span = Purple::RecentStaySeconds() * crl::time(1000);
+		const auto span = Purple::RecentStaySeconds(&session()) * crl::time(1000);
 		return { recent.until - span, recent.until };
 	}
 	return {};
@@ -378,7 +378,7 @@ bool History::purpleShownFromArchive() const {
 	// Only asked of an archived chat, and only then does the folder walk run.
 	// A preset that pulls in no folders never pays for this at all.
 	return folder()
-		&& Purple::Filtering()
+		&& Purple::Filtering(&session())
 		&& purpleExemptFolderMode().has_value();
 }
 
@@ -393,7 +393,7 @@ bool History::purpleHiddenFromChatList() const {
 	// `hide_scope = "hide_everywhere"'. A preset-wide switch and a decision
 	// about a single chat, doing the same thing for the same reason - the
 	// second one simply expires by itself.
-	return (Purple::HideEverywhere() && purpleHiddenFromView())
+	return (Purple::HideEverywhere(&session()) && purpleHiddenFromView())
 		|| purpleHideUntilReaches(Purple::HideScope::Everywhere);
 }
 
@@ -410,7 +410,7 @@ bool History::purpleKeptForView() const {
 }
 
 void History::purpleRefreshShowMode() {
-	if (!Purple::Filtering()) {
+	if (!Purple::Filtering(&session())) {
 		return;
 	}
 	// The guard that keeps this off the hot path: a preset made of Always and
@@ -484,7 +484,7 @@ void UnreadThingEdge(
 	if ((type != HistoryUnreadThings::Type::Mentions)
 		&& (type != HistoryUnreadThings::Type::Reactions)) {
 		return;
-	} else if (!Filtering()) {
+	} else if (!Filtering(&thread->owningHistory()->session())) {
 		return;
 	}
 	thread->owningHistory()->purpleRefreshShowMode();

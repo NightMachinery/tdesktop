@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_settings_section.h"
 
+#include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "lang/lang_keys.h"
@@ -48,58 +49,56 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"last"_q, u"seen"_q, u"online"_q },
 	});
 
+	const auto weakSession = base::make_weak(session.get());
+	const auto editable = [=] {
+		const auto live = weakSession.get();
+		return live && AccountSettingsEditTarget(live).has_value();
+	};
 	const auto flag = [&](
 			const QString &id,
 			const QString &title,
-			bool (*read)(),
+			bool LastSeen::*field,
 			const QString &key,
 			const QString &what) {
+		const auto read = [=] {
+			const auto live = weakSession.get();
+			return live && (AccountSettings(live).lastSeen.*field);
+		};
 		const auto toggle = builder.addButton({
 			.id = id,
 			.title = rpl::single(title),
+			.label = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([=] {
+				return editable() ? QString() : tr::lng_proxy_box_table_unavailable(tr::now);
+			}),
 			.st = &st::settingsButtonNoIcon,
-			.toggled = rpl::single(
-				rpl::empty
-			) | rpl::then(
-				Purple::SettingsChanges()
-			) | rpl::map(read),
-			.keywords = {
-				u"purple"_q,
-				u"last"_q,
-				u"seen"_q,
-				u"privacy"_q,
-			},
+			.toggled = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(read),
+			.keywords = { u"purple"_q, u"last"_q, u"seen"_q, u"privacy"_q },
 		});
 		if (!toggle) {
 			return;
 		}
-		toggle->toggledValue(
-		) | rpl::filter([=](bool value) {
-			return (value != read());
+		rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::on_next([=] {
+			toggle->setEnabled(editable());
+		}, toggle->lifetime());
+		toggle->toggledValue() | rpl::filter([=](bool value) {
+			return value != read();
 		}) | rpl::on_next([=](bool value) {
-			Purple::WriteSettings([=](const QString &text) {
-				return Purple::SetTableBool(
-					text,
-					Purple::SettingsFilePath(),
-					u"last_seen"_q,
-					key,
-					value);
+			const auto live = weakSession.get();
+			const auto target = live ? AccountSettingsEditTarget(live) : std::nullopt;
+			if (!target || !ValidateAccountSettingsTarget(live, *target)) {
+				return;
+			}
+			WriteSettingsGuarded(target->input, [=](const QString &text) {
+				return SetTableBool(text, target->path, u"last_seen"_q, key, value);
 			}, what);
 		}, toggle->lifetime());
 	};
-
-	flag(
-		u"advanced/purple_last_seen_reasons"_q,
-		u"Say why a last seen is hidden"_q,
-		[] { return Purple::ActiveSettings().lastSeen.reasons; },
-		u"reasons_p"_q,
-		u"the last seen reasons"_q);
-	flag(
-		u"advanced/purple_last_seen_peek"_q,
-		tr::lng_lastseen_peek_setting(tr::now),
-		[] { return Purple::ActiveSettings().lastSeen.trade; },
-		u"trade_p"_q,
-		u"Last Seen Peek"_q);
+	flag(u"advanced/purple_last_seen_reasons"_q,
+		u"Say why a last seen is hidden"_q, &LastSeen::reasons,
+		u"reasons_p"_q, u"the last seen reasons"_q);
+	flag(u"advanced/purple_last_seen_peek"_q,
+		tr::lng_lastseen_peek_setting(tr::now), &LastSeen::trade,
+		u"trade_p"_q, u"Last Seen Peek"_q);
 
 	const auto confirm = builder.addButton({
 		.id = u"advanced/purple_last_seen_peek_confirm"_q,
@@ -207,6 +206,15 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"premium"_q, u"work"_q },
 	});
 	Purple::AddVersionRow(builder);
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_settings_owner"_q,
+			.title = rpl::single(u"settings.toml"_q),
+			.label = rpl::single(SettingsOwnerStatus()),
+			.onClick = [=] { controller->show(Box(ChooseSettingsOwnerBox)); },
+		});
+	}
+
 
 	// The main menu carries it too, and that is where it belongs for something
 	// switched several times a day. But Settings is where people look for a
@@ -313,38 +321,39 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	// an upgrade that started doing that on somebody's behalf would be doing
 	// it behind their back. See ShouldAutoSend() for what stops two machines
 	// from handing the same file back and forth.
+	const auto weakSession = base::make_weak(session.get());
+	const auto readAutoSend = [=] {
+		const auto live = weakSession.get();
+		return live && AccountSettings(live).sync.sendAfterSave;
+	};
+	const auto editAutoSend = [=] {
+		const auto live = weakSession.get();
+		return live && AccountSettingsEditTarget(live).has_value();
+	};
 	const auto autoSend = builder.addButton({
 		.id = u"advanced/purple_send_after_save"_q,
 		.title = rpl::single(u"Send to Saved Messages after every save"_q),
-		.st = &st::settingsButtonNoIcon,
-		.toggled = rpl::single(
-			rpl::empty
-		) | rpl::then(
-			Purple::SettingsChanges()
-		) | rpl::map([] {
-			return Purple::ActiveSettings().sync.sendAfterSave;
+		.label = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([=] {
+			return editAutoSend() ? QString() : tr::lng_proxy_box_table_unavailable(tr::now);
 		}),
-		.keywords = {
-			u"purple"_q,
-			u"sync"_q,
-			u"saved"_q,
-			u"send"_q,
-			u"backup"_q,
-		},
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(readAutoSend),
+		.keywords = { u"purple"_q, u"sync"_q, u"saved"_q, u"send"_q, u"backup"_q },
 	});
-
 	if (autoSend) {
-		autoSend->toggledValue(
-		) | rpl::filter([=](bool value) {
-			return (value != Purple::ActiveSettings().sync.sendAfterSave);
+		rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::on_next([=] {
+			autoSend->setEnabled(editAutoSend());
+		}, autoSend->lifetime());
+		autoSend->toggledValue() | rpl::filter([=](bool value) {
+			return value != readAutoSend();
 		}) | rpl::on_next([=](bool value) {
-			Purple::WriteSettings([=](const QString &text) {
-				return Purple::SetTableBool(
-					text,
-					Purple::SettingsFilePath(),
-					u"sync"_q,
-					u"send_after_save_p"_q,
-					value);
+			const auto live = weakSession.get();
+			const auto target = live ? AccountSettingsEditTarget(live) : std::nullopt;
+			if (!target || !ValidateAccountSettingsTarget(live, *target)) {
+				return;
+			}
+			WriteSettingsGuarded(target->input, [=](const QString &text) {
+				return SetTableBool(text, target->path, u"sync"_q, u"send_after_save_p"_q, value);
 			}, u"the automatic send"_q);
 		}, autoSend->lifetime());
 	}

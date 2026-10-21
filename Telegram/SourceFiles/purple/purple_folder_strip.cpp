@@ -35,7 +35,7 @@ bool UseAllFilterIcon(FilterId id) {
 }
 
 FilterId HomeFilterId(not_null<Main::Session*> session) {
-	return ActiveResolved().normal
+	return ActiveResolved(session).normal
 		? FilterId()
 		: session->data().chatsFilters().defaultId();
 }
@@ -54,12 +54,12 @@ int ViewCount(not_null<const Data::ChatFilters*> filters) {
 	return FolderStrip::ViewCount(filters);
 }
 
-bool PinWholeStripIfRestricted(not_null<Main::Session*>) {
-	return FoldersRestricted();
+bool PinWholeStripIfRestricted(not_null<Main::Session*> session) {
+	return FoldersRestricted(session);
 }
 
-bool RefuseFolderOrderSave(not_null<Main::Session*>) {
-	return FoldersRestricted();
+bool RefuseFolderOrderSave(not_null<Main::Session*> session) {
+	return FoldersRestricted(session);
 }
 
 rpl::producer<> FilterStripChanges(not_null<Main::Session*> session) {
@@ -124,7 +124,7 @@ bool FillViewMenu(
 bool QuietFolderUnread(
 		not_null<Main::Session*> session,
 		FilterId filterId) {
-	const auto &quiet = QuietFolders();
+	const auto &quiet = QuietFolders(session);
 	if (quiet.empty()) {
 		return false;
 	}
@@ -157,7 +157,7 @@ rpl::producer<Dialogs::UnreadState> ViewUnreadStateValue(
 
 bool CheckOpenedView(
 		not_null<Window::SessionController*> controller) {
-	if (ActiveResolved().normal) {
+	if (ActiveResolved(&controller->session()).normal) {
 		return false;
 	}
 	const auto session = &controller->session();
@@ -233,7 +233,7 @@ void FolderStrip::subscribe() {
 const std::vector<Data::ChatFilter> &FolderStrip::ShownList(
 		const Data::ChatFilters *filters) {
 	Expects(filters->_purpleFolderStrip != nullptr);
-	return Filtering() ? filters->_purpleFolderStrip->_shown : filters->_list;
+	return Filtering(&filters->_owner->session()) ? filters->_purpleFolderStrip->_shown : filters->_list;
 }
 
 int FolderStrip::ViewCount(const Data::ChatFilters *filters) {
@@ -249,7 +249,7 @@ Data::ChatFilter FolderStrip::viewFilter(int index) const {
 	// every icon lookup falls through to the All chats one and every edit path
 	// refuses it.
 	const auto title = index
-		? Purple::ExtraViews()[index - 1].name
+		? Purple::ExtraViews(&_filters->_owner->session())[index - 1].name
 		: Purple::ViewName();
 	return ChatFilter(
 		Data::PurpleViewFilterId(index),
@@ -263,7 +263,7 @@ Data::ChatFilter FolderStrip::viewFilter(int index) const {
 }
 
 void FolderStrip::refreshShown() {
-	if (!Purple::Filtering()) {
+	if (!Purple::Filtering(&_filters->_owner->session())) {
 		_shown.clear();
 		_viewCount = 0;
 		return;
@@ -280,13 +280,13 @@ void FolderStrip::refreshShown() {
 	// Then the extra views, in file order, before any folder: they are the
 	// preset's own tabs, and a preset's tabs belong next to each other rather
 	// than scattered through the account's folders.
-	const auto extra = int(Purple::ExtraViews().size());
+	const auto extra = int(Purple::ExtraViews(&_filters->_owner->session()).size());
 	_viewCount = std::min(extra + 1, kPurpleViewLimit);
 	if (extra + 1 > kPurpleViewLimit) {
 		// Silently drawing the first fifteen would read as "the rest are empty",
 		// which is the one thing it does not mean.
 		LOG(("Purple: preset '%1' defines %2 extra views; showing %3."
-			).arg(Purple::ActiveResolved().preset
+			).arg(Purple::ActiveResolved(&_filters->_owner->session()).preset
 			).arg(extra
 			).arg(kPurpleViewLimit - 1));
 	}
@@ -294,7 +294,7 @@ void FolderStrip::refreshShown() {
 		result.push_back(viewFilter(i));
 	}
 
-	const auto &shown = Purple::ShownFolders();
+	const auto &shown = Purple::ShownFolders(&_filters->_owner->session());
 	auto missing = QStringList();
 	for (const auto &wanted : shown) {
 		if (Purple::IsAllFolders(wanted)) {

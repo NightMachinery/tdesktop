@@ -25,8 +25,11 @@ SettingsFileInput ReadSettingsFileInput(const QString &path) {
 GuardedFileWrite WriteGuardedSettingsFile(
 		const QString &path,
 		const SettingsFileInput &expected,
-		const QByteArray &bytes) {
-	if (expected.state != SettingsFileState::Readable) {
+		const QByteArray &bytes,
+		const std::function<bool()> &stillCurrent,
+		bool allowMissing) {
+	if (expected.state != SettingsFileState::Readable
+		&& !(allowMissing && expected.state == SettingsFileState::Missing)) {
 		return GuardedFileWrite::ReadError;
 	}
 	const auto current = ReadSettingsFileInput(path);
@@ -41,7 +44,7 @@ GuardedFileWrite WriteGuardedSettingsFile(
 		return GuardedFileWrite::WriteError;
 	}
 	const auto finalInput = ReadSettingsFileInput(path);
-	if (finalInput != expected) {
+	if (finalInput != expected || (stillCurrent && !stillCurrent())) {
 		file.cancelWriting();
 		return finalInput.state == SettingsFileState::ReadError
 			? GuardedFileWrite::ReadError

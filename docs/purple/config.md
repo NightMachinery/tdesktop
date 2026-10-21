@@ -1170,3 +1170,27 @@ both devices. Both keys are global. The app edits preserve unrelated TOML.
 The delay setting itself changes only after a countdown of max(old,new), with
 Abort retaining the previous value and no implicit Peek start. See
 [Peek controls](peek_controls.md) for lifecycle and qualification details.
+
+Desktop account ownership and the current routing boundary are described in
+[Account routing](account_routing.md).
+
+## Reviewed account-row and manual-export boundaries
+
+Manual root export is an explicit owner-unknown single-file role. A confirmed
+owner with an unavailable account path refuses export instead of substituting
+another account's bytes. Confirmation rechecks role, originating session, routing
+generation and the exact file snapshot; completion rechecks before bookkeeping.
+Valid account-file manual export remains supported within the existing schema1
+legacy document boundary. Layered schema2 imports/legacy sends remain refused.
+
+Last Seen and automatic-send settings rows read the originating account's effective
+settings. The sync flag remains file-local and defaults false when absent from that
+account file. Per-account writes are available only for the confirmed root owner
+while that root is global. Other account rows show the existing localized Not
+Available label and are disabled; queued callbacks recheck session and destination
+before a guarded write. Global Premium/Work Mode rows retain their app-wide role.
+
+Stock folder lookup uses the ChatFilters originating session when selecting the
+Purple branch. The native nonpremium All-first mapping is unchanged. Synthetic
+policy cases exercise the real shared stock decision; actual shortcut/index behavior
+and GUI rows remain native-unmeasured until a separately admitted application run.

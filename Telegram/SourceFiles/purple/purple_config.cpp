@@ -9,6 +9,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "base/weak_ptr.h"
+#include "core/application.h"
+#include "data/data_user.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
+#include "purple/purple_sync_account_binding.h"
+#include "purple/purple_sync_local_state.h"
+#include "purple/purple_sync_local_store.h"
+#include "ui/layers/generic_box.h"
+#include "ui/widgets/labels.h"
+#include <utility>
+#include "lang/lang_keys.h"
 #include "purple/purple_readme.h"
 #include "purple/purple_sync.h"
 
@@ -28,7 +40,11 @@ bool WriteConfigFile(const QString &path, const QString &text) {
 		LOG(("Purple Error: Could not write %1.").arg(path));
 		return false;
 	}
-	file.write(text.toUtf8());
+	const auto bytes = text.toUtf8();
+	if (file.write(bytes) != bytes.size()) {
+		file.cancelWriting();
+		return false;
+	}
 	if (!file.commit()) {
 		LOG(("Purple Error: Could not commit %1.").arg(path));
 		return false;
@@ -37,6 +53,11 @@ bool WriteConfigFile(const QString &path, const QString &text) {
 }
 
 namespace {
+
+DesktopAccountConfig &AccountRouting() {
+	static const auto result = new DesktopAccountConfig(ConfigDirectory());
+	return *result;
+}
 
 // Editors write a file in several steps, and some replace it wholesale. Wait
 // for the flurry to settle rather than reloading a half-written file - which
@@ -64,7 +85,6 @@ version = 1
 # custom emoji, emoji status, message effects and the rest - are unaffected by
 # this and stay locked. See docs/purple/premium.md.
 enabled_p = true
-
 
 # Everything below configures Work Mode: named presets that decide which chats
 # are visible and which may interrupt you. Nothing is active until you pick a
@@ -360,6 +380,8 @@ private:
 	void autoSendNow();
 
 	SettingsFileInput _diskInput;
+	QString _settingsPath;
+	bool _accountRefreshPending = false;
 	QString _text;
 	Settings _settings;
 	Problems _problems;
@@ -390,6 +412,11 @@ Config::Config()
 	RefreshReadme();
 
 	startWatching();
+	AccountRouting().setChanged([=] {
+		_accountRefreshPending = true;
+		_reload.callOnce(kReloadDelay);
+	});
+	AccountRouting().watch();
 }
 
 void Config::loadSettings() {
@@ -399,7 +426,8 @@ void Config::loadSettings() {
 		|| QFileInfo::exists(LastGoodSettingsFilePath())) {
 		applyInput(input);
 		return;
-	} else if (!QDir().mkpath(ConfigDirectory())) {
+	} else if (path != ConfigDirectory() + u"/settings.toml"_q
+		|| !QDir().mkpath(ConfigDirectory())) {
 		applyInput(input);
 		return;
 	}
@@ -412,45 +440,20 @@ void Config::loadSettings() {
 }
 
 void Config::applyInput(const SettingsFileInput &input) {
+	_accountRefreshPending = false;
 	_diskInput = input;
-	const auto text = (input.state == SettingsFileState::Readable)
-		? std::optional<QString>(QString::fromUtf8(input.bytes))
-		: std::nullopt;
-	_text = text.value_or(QString());
-	_usingLastGoodSettings = false;
-	if (!text) {
-		_problems.warnings.clear();
-		_problems.error = QFileInfo::exists(SettingsFilePath())
-			? u"Could not read settings.toml."_q
-			: u"settings.toml is missing."_q;
-	} else {
-		auto parsed = ParseSettings(*text, SettingsFilePath());
-		_problems.warnings = std::move(parsed.warnings);
-		_problems.error = parsed.error;
-		for (const auto &warning : _problems.warnings) {
-			LOG(("Purple Warning: %1").arg(warning));
-		}
-		if (parsed.ok()) {
-			if (!WriteConfigFile(LastGoodSettingsFilePath(), *text)) {
-				LOG(("Purple Error: Could not save %1.").arg(
-					LastGoodSettingsFilePath()));
-			}
-			applySettings(std::move(parsed.settings), SettingsFilePath());
-			_changes.fire({});
-			return;
-		}
-		LOG(("Purple Error: %1: %2.").arg(SettingsFilePath(), parsed.error));
-	}
-	const auto lastGood = ReadFile(LastGoodSettingsFilePath());
-	if (lastGood) {
-		auto parsed = ParseSettings(*lastGood, LastGoodSettingsFilePath());
-		if (parsed.ok()) {
-			_usingLastGoodSettings = true;
-			applySettings(std::move(parsed.settings), LastGoodSettingsFilePath());
-		} else {
-			LOG(("Purple Error: %1: %2.").arg(
-				LastGoodSettingsFilePath(), parsed.error));
-		}
+	_settingsPath = SettingsFilePath();
+	_text = input.state == SettingsFileState::Readable
+		? QString::fromUtf8(input.bytes) : QString();
+	AccountRouting().refreshSettings();
+	applySettings(AccountRouting().globalSettings(), SettingsFilePath());
+	const auto global = AccountRouting().globalAccount().value_or(AccountKey{});
+	const auto report = AccountRouting().report(global);
+	_usingLastGoodSettings = report && report->global.usedGood;
+	_problems = {};
+	if (report) {
+		_problems.error = report->global.current.parsed.error;
+		_problems.warnings = report->global.current.parsed.warnings;
 	}
 	_changes.fire({});
 }
@@ -479,7 +482,7 @@ bool Config::usingLastGoodSettings() const {
 bool Config::writeSettings(
 		const QString &text,
 		const SettingsFileInput &expected) {
-	if (!QDir().mkpath(ConfigDirectory())) {
+	if (!QDir().mkpath(QFileInfo(SettingsFilePath()).absolutePath())) {
 		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
 		return false;
 	} else if (WriteGuardedSettingsFile(
@@ -502,6 +505,9 @@ bool Config::writeSettings(
 }
 
 void Config::autoSendLater() {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return;
+	}
 	const auto bytes = _text.toUtf8();
 	if (ShouldAutoSend(_settings, _state, bytes, false)
 		&& !_pendingSendFingerprints.contains(SettingsFingerprint(bytes))) {
@@ -512,6 +518,9 @@ void Config::autoSendLater() {
 }
 
 void Config::autoSendNow() {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return;
+	}
 	// Asked again rather than trusted from five seconds ago. In between, the
 	// switch can have been turned off, the file can have been put back to what
 	// it was, and an import can have landed the very bytes we were about to
@@ -523,8 +532,20 @@ void Config::autoSendNow() {
 		return;
 	}
 	_pendingSendFingerprints.insert(fingerprint);
+	Main::Session *origin = nullptr;
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto candidate = entry.account->maybeSession();
+		if (candidate && AccountAutomaticOperationsAllowed(candidate)) {
+			origin = candidate;
+			break;
+		}
+	}
+	if (!origin) {
+		_pendingSendFingerprints.remove(fingerprint);
+		return;
+	}
 	const auto weak = base::make_weak(this);
-	if (!Upload(bytes, _settings.version, [weak, fingerprint](
+	if (!Upload(origin, bytes, _settings.version, [weak, fingerprint](
 			std::optional<MsgId>) {
 		if (const auto self = weak.get()) {
 			self->_pendingSendFingerprints.remove(fingerprint);
@@ -535,6 +556,13 @@ void Config::autoSendNow() {
 }
 
 void Config::noteSent(const QByteArray &bytes) {
+	const auto current = ReadSettingsFileInput(SettingsFilePath());
+	if (current.state != SettingsFileState::Readable || current.bytes != bytes) {
+		return;
+	}
+	if (current != _diskInput) {
+		applyInput(current);
+	}
 	if (bytes != _text.toUtf8()) {
 		return;
 	}
@@ -584,10 +612,14 @@ void Config::reloadFromDisk() {
 		// Re-arm after a rename-on-save replaced the file we were watching.
 		_watcher->addPath(SettingsFilePath());
 	}
+	AccountRouting().refreshLocalChoice();
 	reloadStateFromDisk();
 
 	const auto input = ReadSettingsFileInput(SettingsFilePath());
-	if (input == _diskInput) {
+	if (input == _diskInput && _settingsPath == SettingsFilePath()) {
+		if (std::exchange(_accountRefreshPending, false)) {
+			_changes.fire({});
+		}
 		// Our own writes come back through the watcher too.
 		return;
 	}
@@ -654,6 +686,9 @@ WriteResult Config::write(
 		const QString &what,
 		const std::optional<SettingsFileInput> &expected) {
 	Expects(op != nullptr);
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return { .error = u"Account settings writes are held until explicit destination routing is complete."_q };
+	}
 
 	const auto input = checkedInput();
 	if (!input || (expected && *input != *expected)) {
@@ -679,7 +714,7 @@ WriteResult Config::write(
 std::optional<SettingsFileInput> Config::checkedInput() {
 	reloadStateFromDisk();
 	const auto input = ReadSettingsFileInput(SettingsFilePath());
-	if (input != _diskInput) {
+	if (input != _diskInput || _settingsPath != SettingsFilePath()) {
 		applyInput(input);
 		return std::nullopt;
 	} else if (input.state != SettingsFileState::Readable
@@ -699,6 +734,10 @@ bool Config::addToList(
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
+
 	return splice([&](const QString &text) {
 		return AddListMember(text, SettingsFilePath(), list, id, title);
 	}, u"list '%1'"_q.arg(list));
@@ -708,6 +747,10 @@ bool Config::removeFromList(
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
+
 	return splice([&](const QString &text) {
 		return RemoveListMember(text, SettingsFilePath(), list, id, title);
 	}, u"list '%1'"_q.arg(list));
@@ -718,6 +761,10 @@ bool Config::setViewPins(
 		const QString &view,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
+
 	return splice([&](const QString &text) {
 		return SetViewPinned(text, SettingsFilePath(), preset, view, ids, title);
 	}, u"the pins of view '%1'"_q.arg(view));
@@ -727,12 +774,20 @@ bool Config::setPresetPins(
 		const QString &preset,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
+
 	return splice([&](const QString &text) {
 		return SetPresetPinned(text, SettingsFilePath(), preset, ids, title);
 	}, u"the pins of preset '%1'"_q.arg(preset));
 }
 
 bool Config::createList(const QString &name, const QString &title) {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
+
 	return splice([&](const QString &text) {
 		return AddList(text, SettingsFilePath(), name, title);
 	}, u"the list '%1'"_q.arg(name));
@@ -791,11 +846,11 @@ QString ConfigDirectory() {
 }
 
 QString SettingsFilePath() {
-	return ConfigDirectory() + u"/settings.toml"_q;
+	return AccountRouting().globalSettingsPath();
 }
 
 QString LastGoodSettingsFilePath() {
-	return ConfigDirectory() + u"/settings.toml.good"_q;
+	return SettingsFilePath() + u".good"_q;
 }
 
 QString StateFilePath() {
@@ -847,17 +902,21 @@ WriteResult WriteSettingsGuarded(
 }
 
 bool AddToList(
+		not_null<Main::Session*> session,
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
-	return Instance().addToList(list, id, title);
+	return AccountAutomaticOperationsAllowed(session)
+		&& Instance().addToList(list, id, title);
 }
 
 bool RemoveFromList(
+		not_null<Main::Session*> session,
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
-	return Instance().removeFromList(list, id, title);
+	return AccountAutomaticOperationsAllowed(session)
+		&& Instance().removeFromList(list, id, title);
 }
 
 bool SetViewPins(
@@ -885,12 +944,16 @@ WriteResult WriteSettings(
 	return Instance().write(splice, what);
 }
 
-void NoteSettingsSent(const QByteArray &bytes) {
-	Instance().noteSent(bytes);
+void NoteSettingsSent(not_null<Main::Session*> session, const QByteArray &bytes) {
+	if (AccountAutomaticOperationsAllowed(session)) {
+		Instance().noteSent(bytes);
+	}
 }
 
-void NoteSettingsImported(const QByteArray &bytes) {
-	Instance().noteImported(bytes);
+void NoteSettingsImported(not_null<Main::Session*> session, const QByteArray &bytes) {
+	if (AccountAutomaticOperationsAllowed(session)) {
+		Instance().noteImported(bytes);
+	}
 }
 
 const State &CurrentState() {
@@ -903,6 +966,180 @@ rpl::producer<> StateChanges() {
 
 void UpdateState(Fn<void(State&)> apply) {
 	Instance().updateState(std::move(apply));
+}
+
+AccountKey SessionAccountKey(not_null<Main::Session*> session) {
+	return { session->isTestMode() ? 1 : 0, int64(session->userId().bare) };
+}
+
+void RefreshDesktopAccounts() {
+	auto &domain = Core::App().domain();
+	if (!domain.started()) {
+		return;
+	}
+	auto accounts = std::vector<StartupAccountCandidate>();
+	auto storeBytes = QByteArray();
+	const auto storeRead = ReadSyncPrivateFile(ConfigDirectory() + u"/sync/state.json"_q,
+		1024 * 1024, storeBytes);
+	const auto store = storeRead == SyncStoreStatus::Ready
+		? ParseSyncLocalState(storeBytes) : SyncLocalParseResult();
+	for (const auto &entry : domain.accounts()) {
+		const auto session = entry.account->maybeSession();
+		if (!session || entry.account->loggingOut()) {
+			continue;
+		}
+		const auto key = SessionAccountKey(session);
+		const auto text = AccountKeyText(key.environment, key.userId);
+		if (!text) {
+			continue;
+		}
+		accounts.push_back({ key,
+			QFileInfo::exists(ConfigDirectory() + u"/accounts/"_q + *text),
+			store && CheckAccountSyncBinding(store.state, *entry.account)
+				== SyncAccountBindingVerdict::Bound });
+	}
+	AccountRouting().start(std::move(accounts));
+}
+
+void StartDesktopAccountRouting() {
+	static auto started = false;
+	if (std::exchange(started, true)) {
+		return;
+	}
+	static auto lifetime = rpl::lifetime();
+	static auto sessions = rpl::lifetime();
+	auto &domain = Core::App().domain();
+	const auto refresh = [&domain] {
+		sessions.destroy();
+		for (const auto &entry : domain.accounts()) {
+			entry.account->sessionChanges() | rpl::on_next([] {
+				RefreshDesktopAccounts();
+			}, sessions);
+		}
+		RefreshDesktopAccounts();
+	};
+	domain.accountsChanges() | rpl::on_next(refresh, lifetime);
+	domain.activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);
+	refresh();
+}
+
+const Settings &AccountSettings(not_null<Main::Session*> session) {
+	return AccountRouting().settings(SessionAccountKey(session));
+}
+
+AccountWorkMode AccountWorkModeForSession(not_null<Main::Session*> session) {
+	return AccountRouting().workMode(SessionAccountKey(session));
+}
+
+std::optional<AccountFileTarget> AccountSettingsTarget(not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().target(SessionAccountKey(session));
+}
+
+bool ValidateAccountSettingsTarget(not_null<Main::Session*> session,
+		const AccountFileTarget &target) {
+	return !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& SessionAccountKey(session) == target.account
+		&& AccountRouting().validate(target);
+}
+
+std::optional<ManualSettingsExportTarget> AccountManualExportTarget(
+		not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().manualExportTarget(SessionAccountKey(session));
+}
+
+bool ValidateAccountManualExportTarget(not_null<Main::Session*> session,
+		const ManualSettingsExportTarget &target) {
+	return !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& SessionAccountKey(session) == target.file.account
+		&& AccountRouting().validateManualExport(target);
+}
+
+std::optional<AccountFileTarget> AccountSettingsEditTarget(
+		not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().editTarget(SessionAccountKey(session));
+}
+
+bool LegacyRootSettingsOperationsAllowed() {
+	return AccountRouting().permissionsReady()
+		&& AccountRouting().globalAccount() == AccountRouting().owner();
+}
+
+bool AccountAutomaticOperationsAllowed(not_null<Main::Session*> session) {
+	return LegacyRootSettingsOperationsAllowed()
+		&& !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& AccountRouting().accountTrafficReady(SessionAccountKey(session));
+}
+
+QString SettingsOwnerStatus() {
+	const auto &plan = AccountRouting().ownerPlan();
+	if (!plan.error.isEmpty()) {
+		return plan.error;
+	} else if (plan.restoredHandEditedOwnerNotice) {
+		const auto owner = AccountRouting().owner();
+		return owner ? u"root_file_account in local.toml was changed by hand and has been put back to %1"_q
+			.arg(*AccountKeyText(owner->environment, owner->userId)) : QString();
+	}
+	const auto owner = AccountRouting().owner();
+	return owner ? *AccountKeyText(owner->environment, owner->userId)
+		: u"settings.toml has no owner on this device · Choose"_q;
+}
+
+void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box) {
+	RefreshDesktopAccounts();
+	box->setTitle(rpl::single(u"settings.toml"_q));
+	box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(SettingsOwnerStatus())));
+	AccountRouting().acknowledgeOwnerNotice();
+	if (!AccountRouting().owner()) {
+		auto &domain = Core::App().domain();
+		for (const auto &entry : domain.accounts()) {
+			const auto session = entry.account->maybeSession();
+			if (!session || entry.account->loggingOut()) {
+				continue;
+			}
+			const auto key = SessionAccountKey(session);
+			const auto text = AccountKeyText(key.environment, key.userId);
+			if (!text || QFileInfo::exists(ConfigDirectory() + u"/accounts/"_q + *text)) {
+				continue;
+			}
+			const auto weak = base::make_weak(session);
+			box->addButton(rpl::single(session->user()->name() + u" ("_q + *text + u")"_q), [=] {
+				const auto live = weak.get();
+				if (!live || live->account().loggingOut()
+					|| live->account().maybeSession() != live
+					|| SessionAccountKey(live) != key) {
+					box->closeBox();
+					return;
+				}
+				RefreshDesktopAccounts();
+				auto accounts = std::vector<StartupAccountCandidate>();
+				for (const auto &candidate : Core::App().domain().accounts()) {
+					if (const auto current = candidate.account->maybeSession()) {
+						const auto id = SessionAccountKey(current);
+						const auto canonical = AccountKeyText(id.environment, id.userId);
+						if (canonical && !candidate.account->loggingOut()) {
+							accounts.push_back({ id, QFileInfo::exists(ConfigDirectory()
+								+ u"/accounts/"_q + *canonical), false });
+						}
+					}
+				}
+				AccountRouting().start(std::move(accounts), key);
+				box->closeBox();
+			});
+		}
+	}
+	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 }
 
 } // namespace Purple

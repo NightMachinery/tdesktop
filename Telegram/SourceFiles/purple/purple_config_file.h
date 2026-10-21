@@ -3,6 +3,8 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
+#include <functional>
+
 namespace Purple {
 
 enum class SettingsFileState { Missing, Readable, ReadError };
@@ -22,6 +24,8 @@ enum class GuardedFileWrite { Written, InputChanged, ReadError, WriteError };
 [[nodiscard]] GuardedFileWrite WriteGuardedSettingsFile(
 	const QString &path,
 	const SettingsFileInput &expected,
-	const QByteArray &bytes);
+	const QByteArray &bytes,
+	const std::function<bool()> &stillCurrent = {},
+	bool allowMissing = false);
 
 } // namespace Purple

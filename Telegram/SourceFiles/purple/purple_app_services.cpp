@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_app_services.h"
 
 #include "purple/purple_focus.h"
+#include "purple/purple_config.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_peek.h"
 #include "purple/purple_schedule.h"
@@ -17,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 
 void StartAppServices() {
+	StartDesktopAccountRouting();
 	StartSchedule();
 	StartFocusSync();
 	StartScreenTime();

@@ -35,6 +35,7 @@ namespace Purple {
 // or state.toml changes. Normal until a preset is chosen, and Normal is a
 // bypass rather than a permissive preset.
 [[nodiscard]] const Resolved &ActiveResolved();
+[[nodiscard]] const Resolved &ActiveResolved(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<> ActiveChanges();
 
 // What to write on the preset's main tab: its `default_view_name', or its name
@@ -45,6 +46,7 @@ namespace Purple {
 // after its main view. Empty for every preset that does not ask, which is what
 // keeps the whole feature out of the way of a preset that only hides chats.
 [[nodiscard]] const std::vector<ResolvedView> &ExtraViews();
+[[nodiscard]] const std::vector<ResolvedView> &ExtraViews(not_null<Main::Session*> session);
 
 // Whether extra view `index' shows this chat. Membership only: an extra view
 // never changes what a chat may do, so there is no notify half to ask about.
@@ -57,6 +59,7 @@ namespace Purple {
 // The ids extra view `index' pins, in the order settings.toml gave them. Empty
 // for a view that has never had anything dragged in it, which is most of them.
 [[nodiscard]] const std::vector<PeerIdValue> &ExtraViewPins(int index);
+[[nodiscard]] const std::vector<PeerIdValue> &ExtraViewPins(not_null<Main::Session*> session, int index);
 
 // Writes that order back. Unlike everything else about a view this is a fact
 // the app discovers rather than reads - the user drags a row - so it is the one
@@ -71,6 +74,7 @@ bool SaveExtraViewPins(
 // nothing about pins and the main view mirrors the account's own order, which
 // is what it has always done.
 [[nodiscard]] const std::vector<PeerIdValue> &PresetPins();
+[[nodiscard]] const std::vector<PeerIdValue> &PresetPins(not_null<Main::Session*> session);
 
 // Whether the main view owns its order rather than mirroring. The whole
 // difference in behaviour hangs off this: an owned order is kept in
@@ -91,6 +95,7 @@ bool SavePresetPins(
 // like upstream. Call sites must not skip it - the engine answers "show
 // everything" under Normal too, but only this is cheap enough for hot paths.
 [[nodiscard]] bool Filtering();
+[[nodiscard]] bool Filtering(not_null<Main::Session*> session);
 
 // Both assume Filtering(). Under Normal they still answer correctly, but the
 // caller has already paid for a peer classification it did not need.
@@ -141,6 +146,7 @@ bool PruneOverrides();
 // are suspended, while normal Telegram mute settings remain in force. See
 // docs/purple/work_mode.md.
 [[nodiscard]] bool Peeking();
+[[nodiscard]] bool Peeking(not_null<Main::Session*> session);
 
 // Whether the active preset takes the chats it hides out of the whole app
 // rather than out of its own view of the chat list. False for every preset
@@ -151,6 +157,7 @@ bool PruneOverrides();
 // else, so forwarding to it, searching for it and the recent-chats row all
 // still work. See docs/purple/work_mode.md.
 [[nodiscard]] bool HideEverywhere();
+[[nodiscard]] bool HideEverywhere(not_null<Main::Session*> session);
 
 // Whether the strips of chats the app offers unasked - the people and recent
 // rows in the search panel, the quick-share popup, the contacts offered when
@@ -182,11 +189,13 @@ bool PruneOverrides();
 // use the app rather than about what one preset lets through, so it lives
 // beside [peek] and is the same whichever preset is running.
 [[nodiscard]] int RecentStaySeconds();
+[[nodiscard]] int RecentStaySeconds(not_null<Main::Session*> session);
 [[nodiscard]] RecentScope RecentAppliesTo();
 
 // How the chat list should mark a row that is only there for the moment. None
 // unless the file asks, so nothing is drawn and nothing is measured by default.
 [[nodiscard]] RecentStyle RecentMarkStyle();
+[[nodiscard]] RecentStyle RecentMarkStyle(not_null<Main::Session*> session);
 
 // Both ends of this chat's "until", in unix seconds, or zeroes if none is
 // running. Separate from OverrideFor() because the row painter needs the span
@@ -264,6 +273,7 @@ bool ReportLock(LockKind kind);
 // did not name. Empty means no folder tabs at all, which is what a preset that
 // says nothing about folders asks for.
 [[nodiscard]] const std::vector<PresetFolder> &ShownFolders();
+[[nodiscard]] const std::vector<PresetFolder> &ShownFolders(not_null<Main::Session*> session);
 
 // Whether anything is restricting the folder list at all. Guards both the
 // display of the folder strip and, more importantly, saving its order.
@@ -272,6 +282,7 @@ bool ReportLock(LockKind kind);
 // folder, in the account's own order, with default flags - because that is the
 // one shape where a strip index still means the folder it meant before.
 [[nodiscard]] bool FoldersRestricted();
+[[nodiscard]] bool FoldersRestricted(not_null<Main::Session*> session);
 
 // Folders the preset marked `include_in_main_view_p = true': their chats join
 // the main view whatever the lists decided. Empty for every preset that does
@@ -279,16 +290,19 @@ bool ReportLock(LockKind kind);
 // History::purpleHiddenFromView() free - it is only reached for a chat that
 // would otherwise be hidden, and only when this is non-empty.
 [[nodiscard]] const std::vector<ExemptFolder> &ExemptFolders();
+[[nodiscard]] const std::vector<ExemptFolder> &ExemptFolders(not_null<Main::Session*> session);
 
 // Folders the preset marked `notify = false': their chats are silenced. Empty
 // unless a preset asks, which is what keeps the folder walk out of every mute
 // query that does not need it. Unaffected by peek, which reveals but does not
 // un-silence.
 [[nodiscard]] const std::vector<QString> &SilencedFolders();
+[[nodiscard]] const std::vector<QString> &SilencedFolders(not_null<Main::Session*> session);
 
 // Folders that said `badge_p = false': no count on their own tab, and their
 // chats left out of the app badge. Empty unless a preset asks, which is what
 // keeps the folder walk out of every badge query that does not need it.
 [[nodiscard]] const std::vector<QString> &QuietFolders();
+[[nodiscard]] const std::vector<QString> &QuietFolders(not_null<Main::Session*> session);
 
 } // namespace Purple

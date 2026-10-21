@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_list_menu.h"
 
+#include "base/weak_ptr.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
@@ -91,13 +92,15 @@ void FillListsMenu(
 	if (!id) {
 		return;
 	}
-	const auto title = TitleResolver(&peer->session());
+	const auto session = &peer->session();
+	const auto weakSession = base::make_weak(session);
+	const auto peerId = peer->id;
 
 	// Which entry is deciding this chat right now. It is the answer to the
 	// question that brings anyone here - "why is this hidden?" - and no entry
 	// at all is as real an answer as any, because a preset names what gets
 	// through and silence about a chat is a decision too.
-	if (Filtering()) {
+	if (Filtering(session)) {
 		// What the entry wanted, and what actually happened - which are not the
 		// same thing for a chat a folder pulled back in. The state has to be
 		// the second: a line reading "hidden" over a chat sitting in the list
@@ -134,7 +137,6 @@ void FillListsMenu(
 		const auto where = list
 			? u"In '%1'"_q.arg(DisplayTitle(*list))
 			: u"In no list '%1' names"_q.arg(ViewName());
-		const auto session = &peer->session();
 
 		// A wrapping label rather than an ordinary row. An ordinary one elides
 		// at the menu's widthMax, which cut this off after about thirty-five
@@ -156,12 +158,14 @@ void FillListsMenu(
 			&st::menuIconInfo);
 		const auto action = menu->addAction(std::move(label));
 		QObject::connect(action, &QAction::triggered, action, [=] {
-			show->showBox(Box(PresetBox, session));
+			if (const auto live = weakSession.get()) {
+				show->showBox(Box(PresetBox, not_null{ live }));
+			}
 		});
 		menu->addSeparator();
 	}
 
-	for (const auto &list : ActiveSettings().lists) {
+	for (const auto &list : AccountSettings(session).lists) {
 		const auto name = list.name;
 		const auto member = std::find(
 			list.members.begin(),
@@ -178,9 +182,14 @@ void FillListsMenu(
 				// callback - with the menu that owns it still open.
 				menu->hideMenu();
 
+				const auto live = weakSession.get();
+				if (!live) {
+					return;
+				}
+				const auto title = TitleResolver(not_null{ live });
 				const auto ok = member
-					? RemoveFromList(name, id, title)
-					: AddToList(name, id, title);
+					? RemoveFromList(not_null{ live }, name, id, title)
+					: AddToList(not_null{ live }, name, id, title);
 				if (!ok) {
 					show->showToast(u"Could not edit %1. See the log."_q.arg(
 						SettingsFilePath()));
@@ -192,7 +201,7 @@ void FillListsMenu(
 	// The "until" decisions, one submenu each. Set apart from the lists above,
 	// because a list is a standing rule and these are a thing you are doing
 	// this afternoon.
-	if (Filtering()) {
+	if (Filtering(session)) {
 		const auto current = OverrideFor(peer);
 		const auto fill = [&](
 				const QString &text,
@@ -208,7 +217,11 @@ void FillListsMenu(
 					// state.toml and rebuilds the chat lists from inside this
 					// callback, with the menu that owns it still open.
 					menu->hideMenu();
-					SetOverride(peer, kind, seconds);
+					if (const auto live = weakSession.get()) {
+						if (const auto currentPeer = live->data().peerLoaded(peerId)) {
+							SetOverride(currentPeer, kind, seconds);
+						}
+					}
 				});
 			}
 			menu->addAction(text, std::move(submenu), icon);
@@ -223,7 +236,11 @@ void FillListsMenu(
 			menu->addAction(u"Cancel '%1 until'"_q.arg(
 				OverrideKindName(*current)), [=] {
 				menu->hideMenu();
-				ClearOverride(peer);
+				if (const auto live = weakSession.get()) {
+					if (const auto currentPeer = live->data().peerLoaded(peerId)) {
+						ClearOverride(currentPeer);
+					}
+				}
 			}, &st::menuIconCancel);
 		}
 	}
@@ -233,7 +250,13 @@ void FillListsMenu(
 		// Same reason the rows above hide first: a successful write reloads
 		// settings.toml and rebuilds every chat list from inside this callback.
 		menu->hideMenu();
+		if (!weakSession) {
+			return;
+		}
 		show->showBox(Box(NewListBox, [=](QString name) {
+			if (!weakSession) {
+				return;
+			}
 			if (!CreateList(name, name)) {
 				show->showToast(u"Could not edit %1. See the log."_q.arg(
 					SettingsFilePath()));

@@ -14,7 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 
 bool WithPreviewAlways(not_null<PeerData*> peer) {
-	return PreviewAlways(ActiveSettings(), IdOf(peer), KindOf(peer));
+	return PreviewAlways(AccountSettings(&peer->session()), IdOf(peer), KindOf(peer));
 }
 
 } // namespace Purple

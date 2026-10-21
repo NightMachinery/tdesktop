@@ -72,7 +72,7 @@ template <typename PeerOrThread>
 }
 
 [[nodiscard]] bool SilencedByFolder(not_null<const PeerData*> peer) {
-	const auto &silenced = SilencedFolders();
+	const auto &silenced = SilencedFolders(&peer->session());
 	if (silenced.empty()) {
 		return false;
 	}
@@ -119,7 +119,7 @@ bool MutedWithoutPreset(not_null<const PeerData*> peer) {
 }
 
 bool Silenced(not_null<const PeerData*> peer) {
-	if (!Filtering() || Peeking()) {
+	if (!Filtering(&peer->session()) || Peeking(&peer->session())) {
 		return false;
 	}
 	if (const auto override = OverrideFor(peer)) {
@@ -138,7 +138,7 @@ void RefreshMute(not_null<PeerData*> peer) {
 
 void RefreshFolderMute(not_null<PeerData*> peer) {
 	const auto session = &peer->session();
-	if (SilencedFolders().empty()) {
+	if (SilencedFolders(&peer->session()).empty()) {
 		const auto existing = States.find(session);
 		if (existing != States.end()) {
 			existing->second->silencedByFolder.clear();

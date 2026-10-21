@@ -332,6 +332,17 @@ const Resolved &ActiveResolved() {
 	return Instance().resolved();
 }
 
+const Resolved &ActiveResolved(not_null<Main::Session*> session) {
+	static const auto normal = NormalResolution();
+	return AccountWorkModeForSession(session) == AccountWorkMode::Stock
+		? normal : Instance().resolved();
+}
+
+bool Filtering(not_null<Main::Session*> session) {
+	return AccountFilteringEnabled(!Instance().resolved().normal,
+		AccountWorkModeForSession(session));
+}
+
 rpl::producer<> ActiveChanges() {
 	return Instance().changes();
 }
@@ -348,13 +359,17 @@ const std::vector<ResolvedView> &ExtraViews() {
 }
 
 bool ExtraViewHolds(int index, not_null<const PeerData*> peer) {
+	if (!Filtering(&peer->session())) {
+		return false;
+	}
+
 	const auto &views = ExtraViews();
 	if (index < 0 || index >= int(views.size())) {
 		return false;
 	}
 	return ViewHolds(
-		ActiveSettings(),
-		Instance().resolved(),
+		AccountSettings(&peer->session()),
+		ActiveResolved(&peer->session()),
 		views[index],
 		IdOf(peer),
 		KindOf(peer));
@@ -390,8 +405,8 @@ bool PresetOwnsPins() {
 	return !PresetPins().empty();
 }
 
-bool PresetOwnsPins(not_null<Main::Session*>) {
-	return PresetOwnsPins();
+bool PresetOwnsPins(not_null<Main::Session*> session) {
+	return Filtering(session) && PresetOwnsPins();
 }
 
 bool SavePresetPins(
@@ -405,7 +420,7 @@ bool SavePresetPins(
 }
 
 std::optional<OverrideKind> OverrideFor(not_null<const PeerData*> peer) {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved(&peer->session());
 	if (resolved.normal) {
 		// Normal is a bypass, and an override is a statement about a preset.
 		return std::nullopt;
@@ -423,7 +438,7 @@ void SetOverride(
 		OverrideKind kind,
 		int seconds) {
 	const auto id = IdOf(peer);
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved(&peer->session());
 	if (!id || resolved.normal) {
 		return;
 	}
@@ -477,10 +492,10 @@ bool Filtering() {
 }
 
 bool NamedExplicitly(not_null<const PeerData*> peer) {
-	return Filtering()
+	return Filtering(&peer->session())
 		&& NamedExplicitly(
-			ActiveSettings(),
-			Instance().resolved(),
+			AccountSettings(&peer->session()),
+			ActiveResolved(&peer->session()),
 			IdOf(peer));
 }
 
@@ -498,7 +513,7 @@ RecentStyle RecentMarkStyle() {
 }
 
 OverrideSpan OverrideDeadline(not_null<const PeerData*> peer) {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved(&peer->session());
 	if (resolved.normal) {
 		return OverrideSpan();
 	}
@@ -519,8 +534,8 @@ Visibility VisibleFor(not_null<const PeerData*> peer) {
 	// that is a chat you cannot reason about from the file. Naming the self id
 	// in a list is how you keep it; see docs/purple/config.md.
 	return Visible(
-		ActiveSettings(),
-		Instance().resolved(),
+		AccountSettings(&peer->session()),
+		ActiveResolved(&peer->session()),
 		IdOf(peer),
 		KindOf(peer));
 }
@@ -548,6 +563,9 @@ bool HideEverywhere() {
 }
 
 bool HiddenFromSuggestions(not_null<History*> history) {
+	if (!Filtering(&history->session())) {
+		return false;
+	}
 	// Ordered so that a chat under Normal costs one bool: the two History
 	// questions below both walk the preset's lists, and this runs once per
 	// row of every strip the app draws.
@@ -681,17 +699,17 @@ bool FoldersRestricted() {
 
 const EffectiveList *ListFor(not_null<const PeerData*> peer) {
 	return MatchList(
-		ActiveSettings(),
-		Instance().resolved(),
+		AccountSettings(&peer->session()),
+		ActiveResolved(&peer->session()),
 		IdOf(peer),
 		KindOf(peer));
 }
 
 bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen) {
-	if (!Filtering()) {
+	if (!Filtering(&peer->session())) {
 		return true;
 	}
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved(&peer->session());
 
 	// Your own row at the head of the strip is the "add a story" button, and it
 	// answers to `hide_add_story_p' alone - not to `stories', not to a list and
@@ -745,6 +763,56 @@ bool StoryShown(not_null<const PeerData*> peer, bool hasUnseen) {
 	case StoryPolicy::None: return false;
 	}
 	return true;
+}
+
+bool Peeking(not_null<Main::Session*> session) {
+	return ActiveResolved(session).peeking;
+}
+
+bool HideEverywhere(not_null<Main::Session*> session) {
+	return Filtering(session) && HideEverywhere();
+}
+
+bool FoldersRestricted(not_null<Main::Session*> session) {
+	return Filtering(session) && FoldersRestricted();
+}
+
+int RecentStaySeconds(not_null<Main::Session*> session) {
+	return Filtering(session) ? RecentStaySeconds() : 0;
+}
+
+RecentStyle RecentMarkStyle(not_null<Main::Session*> session) {
+	return Filtering(session) ? RecentMarkStyle() : RecentStyle::None;
+}
+
+const std::vector<ResolvedView> &ExtraViews(not_null<Main::Session*> session) {
+	return ActiveResolved(session).views;
+}
+
+const std::vector<PeerIdValue> &PresetPins(not_null<Main::Session*> session) {
+	return ActiveResolved(session).pinned;
+}
+
+const std::vector<PeerIdValue> &ExtraViewPins(not_null<Main::Session*> session, int index) {
+	static const auto none = std::vector<PeerIdValue>();
+	const auto &views = ExtraViews(session);
+	return index >= 0 && index < int(views.size()) ? views[index].pinned : none;
+}
+
+const std::vector<PresetFolder> &ShownFolders(not_null<Main::Session*> session) {
+	return Filtering(session) ? ShownFolders() : ActiveResolved(session).folders;
+}
+
+const std::vector<ExemptFolder> &ExemptFolders(not_null<Main::Session*> session) {
+	return ActiveResolved(session).exemptFolders;
+}
+
+const std::vector<QString> &SilencedFolders(not_null<Main::Session*> session) {
+	return ActiveResolved(session).normal ? ActiveResolved(session).silencedFolders : SilencedFolders();
+}
+
+const std::vector<QString> &QuietFolders(not_null<Main::Session*> session) {
+	return ActiveResolved(session).normal ? ActiveResolved(session).quietFolders : QuietFolders();
 }
 
 } // namespace Purple

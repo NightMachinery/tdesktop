@@ -394,6 +394,10 @@ Owner: B14.
 
 ## Folder strip and views
 
+**`Telegram/SourceFiles/data/data_chat_filters.cpp`**: the `lookupId` Purple
+branch now calls `Purple::Filtering(&_owner->session())`, so stock accounts reach
+the existing native nonpremium All-first algorithm. That native tail is unchanged.
+
 **`Telegram/SourceFiles/data/data_chat_filters.cpp`**: +190 -4, 10 hunks,
 near 0. Owners: B11 (one line), B10d stage 1, B14 with B10d stage 2.
 - Before B10d stage 1: `ChatFilter::contains`' `ignorePresetMute` parameter,

@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
+#include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_session_settings.h"
@@ -436,16 +437,24 @@ void RefuseSwitchedImport(const QString &account) {
 }
 
 void WriteImported(
+		not_null<Main::Session*> session,
+		const AccountFileTarget &target,
 		const QString &account,
 		const QString &text,
 		const std::shared_ptr<Ui::Show> &show) {
-	if (AskingWindowSwitched(show)) {
+	if (AskingWindowSwitched(show)
+		|| !AccountAutomaticOperationsAllowed(session)
+		|| !ValidateAccountSettingsTarget(session, target)
+		|| !CanReplaceLegacyRootSettings(target.input.bytes, text.toUtf8())) {
 		RefuseSwitchedImport(account);
 		return;
 	}
-	const auto path = SettingsFilePath();
+	const auto path = target.path;
 	const auto failed = WriteImportedSettings(path, [&] {
-		return WriteConfigFile(path, text);
+		return WriteGuardedSettingsFile(path, target.input, text.toUtf8(), [&] {
+			return AccountAutomaticOperationsAllowed(session)
+				&& ValidateAccountSettingsTarget(session, target);
+		}, true) == GuardedFileWrite::Written;
 	});
 	if (failed == path) {
 		show->showBox(Ui::MakeInformBox(
@@ -463,7 +472,7 @@ void WriteImported(
 	// fingerprint the next time anything writes this file. Recording them here
 	// is what stops this machine from offering back to the other one exactly
 	// what it just received. See ShouldAutoSend().
-	NoteSettingsImported(text.toUtf8());
+	NoteSettingsImported(session, text.toUtf8());
 	// Nothing else to do: the directory watcher sees the write and reloads,
 	// exactly as it would for an edit made in a text editor.
 	show->showToast(u"Settings imported"_q);
@@ -475,6 +484,18 @@ void ConfirmAndImport(
 		TimeId date,
 		const std::shared_ptr<Ui::Show> &show,
 		Fn<bool()> stillValid) {
+	if (AskingWindowSwitched(show)) {
+		return;
+	}
+
+	if (!AccountAutomaticOperationsAllowed(session)) {
+		show->showBox(Ui::MakeInformBox(SettingsOwnerStatus()));
+		return;
+	}
+	const auto target = AccountSettingsTarget(session);
+	if (!target) {
+		return;
+	}
 	const auto account = AccountLabel(session);
 	if (stillValid && !stillValid()) {
 		if (AskingWindowSwitched(show)) {
@@ -496,6 +517,14 @@ void ConfirmAndImport(
 		return;
 	}
 	const auto version = parsed.settings.version;
+	if (!CanReplaceLegacyRootSettings(target->input.bytes, content)) {
+		show->showBox(Ui::MakeInformBox(u"This import would remove app-wide settings or cannot be checked safely."_q));
+		return;
+	}
+	if (version > kSettingsVersion) {
+		show->showBox(Ui::MakeInformBox(u"Layered settings imports are not enabled in this build."_q));
+		return;
+	}
 	const auto warnings = int(parsed.warnings.size());
 	auto lines = QStringList();
 	lines.push_back(
@@ -504,11 +533,6 @@ void ConfirmAndImport(
 			account));
 	lines.push_back(QString());
 	lines.push_back(u"Schema v%1."_q.arg(version));
-	if (version > kSettingsVersion) {
-		lines.push_back(u"That is newer than this build understands (v%1), "
-			"so keys it has never heard of will be ignored."_q.arg(
-				kSettingsVersion));
-	}
 	lines.push_back(!warnings
 		? u"No parser warnings."_q
 		: (warnings == 1)
@@ -524,13 +548,15 @@ void ConfirmAndImport(
 		.text = lines.join('\n'),
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			if (!weakSession.get() || (stillValid && !stillValid())) {
+			if (!weakSession.get() || !AccountAutomaticOperationsAllowed(weakSession.get())
+				|| !ValidateAccountSettingsTarget(weakSession.get(), *target)
+				|| (stillValid && !stillValid())) {
 				if (AskingWindowSwitched(keep)) {
 					RefuseSwitchedImport(account);
 				}
 				return;
 			}
-			WriteImported(account, text, keep);
+			WriteImported(weakSession.get(), *target, account, text, keep);
 		},
 		.confirmText = u"Import"_q,
 	}));
@@ -672,7 +698,7 @@ void OfferImportCandidate(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show,
 		const ImportCandidate &candidate) {
-	if (!show || !(*show)) {
+	if (!AccountAutomaticOperationsAllowed(session) || !show || !(*show)) {
 		ReleaseSettingsOfferStart(session);
 		return;
 	}
@@ -776,34 +802,6 @@ void SearchForSettingsOffer(
 	).send();
 }
 
-[[nodiscard]] Main::Session *AutoSendSession() {
-	auto &domain = Core::App().domain();
-	if (!domain.started()) {
-		LOG(("Purple: nothing to send settings.toml to, not sending."));
-		return nullptr;
-	}
-	auto signedIn = std::vector<Main::Account*>();
-	for (const auto &account : domain.orderedAccounts()) {
-		if (account->sessionExists()) {
-			signedIn.push_back(account);
-		}
-	}
-	const auto window = Core::App().activeWindow();
-	const auto front = window ? window->maybeSession() : nullptr;
-	Main::Account *frontAccount = front ? &front->account() : nullptr;
-	switch (JudgeAutoSendTarget(signedIn, frontAccount)) {
-	case AutoSendTarget::NoAccount:
-		LOG(("Purple: nothing to send settings.toml to, not sending."));
-		return nullptr;
-	case AutoSendTarget::NotFirstAccount:
-		LOG(("Purple: settings.toml not sent after this save: "
-			"the account in front is not the first account."));
-		return nullptr;
-	case AutoSendTarget::Post:
-		break;
-	}
-	return front;
-}
 
 void UploadTo(
 		not_null<Main::Session*> session,
@@ -839,7 +837,9 @@ void NoteConfirmedSend(
 		not_null<Main::Session*> session,
 		const QByteArray &content,
 		MsgId messageId) {
-	NoteSettingsSent(content);
+	if (AccountAutomaticOperationsAllowed(session)) {
+		NoteSettingsSent(session, content);
+	}
 	if (messageId > SettingsOfferMessageId(session)) {
 		SetSettingsOfferMessageId(session, messageId);
 	}
@@ -852,17 +852,24 @@ DocumentData *UiWitnessQualifyingDocument(Main::Session *session, HistoryItem *i
 }
 
 bool Upload(
+		not_null<Main::Session*> session,
 		const QByteArray &content,
 		int version,
 		Fn<void(std::optional<MsgId>)> finished) {
-	const auto session = AutoSendSession();
-	if (!session) {
+	if (!AccountAutomaticOperationsAllowed(session)) {
+		return false;
+	}
+	const auto target = AccountSettingsTarget(session);
+	if (!target || target->input.state != SettingsFileState::Readable
+		|| target->input.bytes != content || version > kSettingsVersion) {
 		return false;
 	}
 	const auto weak = base::make_weak(session);
 	UploadTo(session, content, version, [=](std::optional<MsgId> messageId) {
 		if (messageId) {
-			if (const auto live = weak.get()) {
+			if (const auto live = weak.get(); live
+				&& AccountAutomaticOperationsAllowed(live)
+				&& ValidateAccountSettingsTarget(live, *target)) {
 				NoteConfirmedSend(live, content, *messageId);
 			}
 		}
@@ -880,17 +887,20 @@ bool IsPurplePost(const FilePrepareResult &file) {
 void SendSettingsToSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {
-	const auto path = SettingsFilePath();
-	auto file = QFile(path);
-	if (!file.exists()) {
-		show->showBox(Ui::MakeInformBox(u"No settings.toml yet"_q));
-		return;
-	} else if (!file.open(QIODevice::ReadOnly)) {
-		show->showBox(Ui::MakeInformBox(
-			u"Could not read %1. See the log."_q.arg(path)));
+	const auto target = AccountManualExportTarget(session);
+	if (!target) {
+		show->showBox(Ui::MakeInformBox(tr::lng_proxy_box_table_unavailable(tr::now)));
 		return;
 	}
-	const auto content = file.readAll();
+	const auto path = target->file.path;
+	const auto expected = target->file.input;
+	if (expected.state != SettingsFileState::Readable) {
+		show->showBox(Ui::MakeInformBox(expected.state == SettingsFileState::Missing
+			? u"No settings.toml yet"_q
+			: u"Could not read %1. See the log."_q.arg(path)));
+		return;
+	}
+	const auto content = expected.bytes;
 	const auto parsed = ParseSettings(QString::fromUtf8(content), path);
 	if (!parsed.ok()) {
 		// Refused rather than sent, because the caption would have to claim a
@@ -902,6 +912,10 @@ void SendSettingsToSavedMessages(
 		return;
 	}
 	const auto version = parsed.settings.version;
+	if (version > kSettingsVersion) {
+		show->showBox(Ui::MakeInformBox(u"Layered account settings require the account-settings.toml document route."_q));
+		return;
+	}
 	const auto weak = base::make_weak(session);
 	show->showBox(Ui::MakeConfirmBox({
 		.text = u"This posts your settings.toml to your Saved Messages, "
@@ -909,11 +923,17 @@ void SendSettingsToSavedMessages(
 		.confirmed = [=](Fn<void()> close) {
 			close();
 			const auto live = weak.get();
-			if (!live) {
+			if (!live || live->account().loggingOut()
+				|| live->account().maybeSession() != live
+				|| ReadSettingsFileInput(path) != expected
+				|| !ValidateAccountManualExportTarget(live, *target)) {
 				return;
 			}
 			UploadTo(live, content, version, crl::guard(live, [=](
 					std::optional<MsgId> messageId) {
+				if (!ValidateAccountManualExportTarget(live, *target)) {
+					return;
+				}
 				if (messageId) {
 					NoteConfirmedSend(live, content, *messageId);
 					if (show && *show) {
@@ -1250,6 +1270,10 @@ void AddImportSettingsFileAction(
 void OfferNewerSettingsFromSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {
+	if (!AccountAutomaticOperationsAllowed(session)) {
+		return;
+	}
+
 	if (!show || !(*show)
 		|| !IsActiveSession(session)
 		|| !TakeSettingsOfferStart(session)) {

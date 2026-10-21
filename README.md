@@ -98,3 +98,6 @@ Version **1.8.15** was the last that supports older systems
 </a>
 
 CI infrastructure sponsored by [Depot](https://depot.dev) — fast GitHub Actions runners.
+
+See [Desktop account routing](docs/purple/account_routing.md) for startup ownership,
+layered loading and the remaining conservative client gates.

@@ -31,6 +31,8 @@ endif()
 
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
+    purple/purple_account_config.cpp
+    purple/purple_account_config.h
     purple/purple_app_services.cpp
     purple/purple_app_services.h
     purple/purple_build_checks.cpp
@@ -161,6 +163,10 @@ endif()
 
 nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
+    purple/purple_account_files.cpp
+    purple/purple_account_files.h
+    purple/purple_local_choice.cpp
+    purple/purple_local_choice.h
     purple/purple_config_diff.cpp
     purple/purple_config_diff.h
     purple/purple_config_payload.cpp
@@ -206,6 +212,7 @@ target_include_directories(Telegram PRIVATE ${src_loc} ${purple_core_loc})
 # header-only parser on the include path of every translation unit would change
 # their compile commands and force a full rebuild for no reason.
 set_source_files_properties(
+    ${purple_core_loc}/purple/purple_local_choice.cpp
     ${purple_core_loc}/purple/purple_config_diff.cpp
     ${purple_core_loc}/purple/purple_settings.cpp
     ${purple_core_loc}/purple/purple_splice.cpp

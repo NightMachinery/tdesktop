@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_sync_account_inventory.h"
+#include "purple/purple_config.h"
 #include "purple/purple_sync_config_apply.h"
 #include "purple/purple_sync_config_publish.h"
 #include "purple/purple_sync_config_review.h"
@@ -121,7 +122,8 @@ struct SetupBoxState {
 [[nodiscard]] bool SelectedAvailable(const SetupBoxState &state) {
 	const auto account = state.selectedAccount.get();
 	const auto session = state.selectedSession.get();
-	return account
+	return session && AccountAutomaticOperationsAllowed(session)
+		&& account
 		&& session
 		&& !account->loggingOut()
 		&& account->maybeSession() == session;
@@ -662,7 +664,7 @@ void OpenReview(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 }
 
 void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
-	if (!LastUndo || Busy(*state)) {
+	if (!LastUndo || Busy(*state) || !SelectedAvailable(*state)) {
 		return;
 	}
 	const auto undo = *LastUndo;
@@ -673,6 +675,7 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		.confirmed = crl::guard(box, [=](Fn<void()> close) {
 			close();
 			if (Busy(*state)
+				|| !SelectedAvailable(*state)
 				|| !LastUndo
 				|| LastUndo->historyId != undo.historyId) {
 				return;
@@ -707,7 +710,7 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
 		const SyncConfigHistoryEntry &entry) {
-	if (Busy(*state)) {
+	if (Busy(*state) || !SelectedAvailable(*state)) {
 		box->uiShow()->showToast(
 			u"Wait for the check or post to finish, then try again."_q);
 		return false;
@@ -850,6 +853,9 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		ConfirmUndo(box, state);
 	});
 	history->setClickedCallback([=] {
+		if (!SelectedAvailable(*state)) {
+			return;
+		}
 		const auto weak = QPointer<Ui::GenericBox>(box.get());
 		box->uiShow()->showBox(Box(
 			SyncConfigHistoryBox,

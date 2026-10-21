@@ -58,7 +58,10 @@ struct VerifiedWrite {
 		const QString &versionKey,
 		const QString &keepId = QString()) {
 	auto result = VerifiedWrite();
-	if (SettingsFingerprint(text) != fingerprint
+	if (!LegacyRootSettingsOperationsAllowed()
+		|| ParseSettings(QString::fromUtf8(text), SettingsFilePath()).settings.version > kSettingsVersion
+		|| !CanReplaceLegacyRootSettings(current.text, text)
+		|| SettingsFingerprint(text) != fingerprint
 		|| !SyncSettingsTextWritable(text)) {
 		return result;
 	}
@@ -77,7 +80,12 @@ struct VerifiedWrite {
 	result.historyId = saved->id;
 	result.restorable = saved->existed
 		&& SyncSettingsTextWritable(current.text);
-	if (!WriteConfigFile(SettingsFilePath(), QString::fromUtf8(text))) {
+	const auto expected = SettingsFileInput{
+		current.status == SyncSettingsFileStatus::Present
+			? SettingsFileState::Readable : SettingsFileState::Missing, current.text };
+	if (WriteGuardedSettingsFile(SettingsFilePath(), expected, text,
+		[] { return LegacyRootSettingsOperationsAllowed(); }, true)
+		!= GuardedFileWrite::Written) {
 		return result;
 	}
 	result.wrote = true;
@@ -223,7 +231,7 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		if (write.status != SyncConfigApplyStatus::Applied) {
 			return Stop(result, write.status);
 		}
-		NoteSettingsImported(write.readBack.text);
+		NoteSettingsImported(&session, write.readBack.text);
 		result.fingerprint = write.readBack.fingerprint;
 		current = write.readBack;
 	}
@@ -263,6 +271,10 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 SyncConfigRestoreResult RestoreSyncConfigHistory(
 		const QString &id,
 		SyncConfigHistoryReason reason) {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return { .status = SyncConfigRestoreStatus::InvalidSettings };
+	}
+
 	auto result = SyncConfigRestoreResult();
 	if (reason != SyncConfigHistoryReason::BeforeRestore
 		&& reason != SyncConfigHistoryReason::BeforeUndo) {

@@ -73,13 +73,11 @@ void SendSettingsToSavedMessages(
 // confirmation for that was given once, in words, when the switch was turned
 // on. The manual action above still asks.
 //
-// Posts only into the first account of the account switcher's list, and only
-// while a window showing that account is in front (the app's last active
-// window); see JudgeAutoSendTarget() below. False, with a log line saying
-// why, when nothing was posted: no account is signed in, or the window in
-// front shows another account or none. That is a reason to try again after
-// the next write rather than an error worth a message.
+// The originating session and exact account-file input are revalidated before
+// posting and before recording confirmation. Incomplete per-account routes
+// remain held; the active window and switcher order never choose a target.
 [[nodiscard]] bool Upload(
+	not_null<Main::Session*> originatingSession,
 	const QByteArray &content,
 	int version,
 	Fn<void(std::optional<MsgId>)> finished);

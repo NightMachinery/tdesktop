@@ -8,9 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_settings.h"
+#include "purple/purple_account_config.h"
 #include "purple/purple_splice.h"
 #include "purple/purple_state.h"
 #include "purple/purple_config_file.h"
+
+namespace Main { class Session; }
+namespace Ui { class GenericBox; }
 
 namespace Purple {
 
@@ -20,6 +24,21 @@ namespace Purple {
 [[nodiscard]] QString SettingsFilePath();
 [[nodiscard]] QString LastGoodSettingsFilePath();
 [[nodiscard]] QString StateFilePath();
+[[nodiscard]] AccountKey SessionAccountKey(not_null<Main::Session*> session);
+void StartDesktopAccountRouting();
+void RefreshDesktopAccounts();
+[[nodiscard]] const Settings &AccountSettings(not_null<Main::Session*> session);
+[[nodiscard]] AccountWorkMode AccountWorkModeForSession(not_null<Main::Session*> session);
+[[nodiscard]] std::optional<AccountFileTarget> AccountSettingsTarget(not_null<Main::Session*> session);
+[[nodiscard]] bool ValidateAccountSettingsTarget(not_null<Main::Session*> session, const AccountFileTarget &target);
+[[nodiscard]] bool AccountAutomaticOperationsAllowed(not_null<Main::Session*> session);
+[[nodiscard]] bool LegacyRootSettingsOperationsAllowed();
+[[nodiscard]] std::optional<ManualSettingsExportTarget> AccountManualExportTarget(not_null<Main::Session*> session);
+[[nodiscard]] bool ValidateAccountManualExportTarget(not_null<Main::Session*> session, const ManualSettingsExportTarget &target);
+[[nodiscard]] std::optional<AccountFileTarget> AccountSettingsEditTarget(not_null<Main::Session*> session);
+[[nodiscard]] QString SettingsOwnerStatus();
+void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box);
+
 
 // The write every file in that directory goes through: QSaveFile puts a
 // temporary alongside the target and renames over it, so a crash mid-write
@@ -82,10 +101,12 @@ WriteResult WriteSettingsGuarded(
 // The only writes to settings.toml besides the Premium toggle. Both return
 // false if the file could not be edited, having changed nothing.
 bool AddToList(
+	not_null<Main::Session*> session,
 	const QString &list,
 	PeerIdValue id,
 	const MemberTitle &title);
 bool RemoveFromList(
+	not_null<Main::Session*> session,
 	const QString &list,
 	PeerIdValue id,
 	const MemberTitle &title);
@@ -114,13 +135,13 @@ bool CreateList(const QString &name, const QString &title);
 // Remembers bytes after Telegram confirms their post to Saved Messages.
 // Manual and automatic sends share this fingerprint so neither repeats bytes
 // that the other posted.
-void NoteSettingsSent(const QByteArray &bytes);
+void NoteSettingsSent(not_null<Main::Session*> session, const QByteArray &bytes);
 
 // The same for a file that arrived from somewhere else and has just been
 // written over the local one. This is the half of the rule that stops a
 // ping-pong: without it the machine that imported a file would offer it
 // straight back to the machine that sent it. See ShouldAutoSend().
-void NoteSettingsImported(const QByteArray &bytes);
+void NoteSettingsImported(not_null<Main::Session*> session, const QByteArray &bytes);
 
 [[nodiscard]] const State &CurrentState();
 [[nodiscard]] rpl::producer<> StateChanges();

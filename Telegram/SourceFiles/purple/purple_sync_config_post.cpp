@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "main/main_session.h"
 #include "purple/purple_config_payload.h"
+#include "purple/purple_config.h"
 #include "purple/purple_sync_config_upload.h"
 #include "purple/purple_sync_inventory.h"
 
@@ -93,7 +94,7 @@ void SyncConfigPost::Start() {
 		return;
 	}
 	_started = true;
-	if (!_sessionGuard) {
+	if (!_sessionGuard || !AccountAutomaticOperationsAllowed(_session)) {
 		Finish({ .status = SyncConfigPostStatus::Cancelled });
 		return;
 	}
@@ -137,7 +138,7 @@ void SyncConfigPost::Cancel() {
 }
 
 void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
-	if (!_sessionGuard) {
+	if (!_sessionGuard || !AccountAutomaticOperationsAllowed(_session)) {
 		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
 		return;
 	}
@@ -160,6 +161,10 @@ void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
 }
 
 void SyncConfigPost::OnReadback(SyncCandidateReadResult result) {
+	if (!_sessionGuard || !AccountAutomaticOperationsAllowed(_session)) {
+		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
+		return;
+	}
 	if (result.status == SyncCandidateReadStatus::Complete
 			&& result.records.size() == 1
 			&& result.records.front().id == _messageId.bare

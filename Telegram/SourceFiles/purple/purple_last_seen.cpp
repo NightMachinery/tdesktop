@@ -241,8 +241,8 @@ constexpr auto kRestoreWatchdog = crl::time(30000);
 	return ReadRule(object.value(u"rule"_q), session);
 }
 
-[[nodiscard]] const LastSeen &Config() {
-	return ActiveSettings().lastSeen;
+[[nodiscard]] const LastSeen &Config(not_null<Main::Session*> session) {
+	return AccountSettings(session).lastSeen;
 }
 
 // Everybody the question is meaningless for. A bot has no last seen, a service
@@ -363,7 +363,7 @@ constexpr auto kRestoreWatchdog = crl::time(30000);
 		return LastSeenNote();
 	}
 	return LastSeenNoteNow(
-		ActiveSettings(),
+		AccountSettings(&user->session()),
 		CurrentState(),
 		IdOf(user),
 		ReasonForUser(user),
@@ -593,7 +593,7 @@ void LastSeenPeek::start() {
 	LOG(("Purple: Last Seen Peek with %1 - reading our rules."
 		).arg(QString::number(_peer)));
 
-	_hold.callOnce(crl::time(1000) * std::max(Config().tradeHoldSeconds, 1));
+	_hold.callOnce(crl::time(1000) * std::max(Config(session).tradeHoldSeconds, 1));
 	const auto weak = base::make_weak(this);
 	session->api().userPrivacy().reloadFresh(
 		Api::UserPrivacy::Key::LastSeen,
@@ -748,7 +748,7 @@ void LastSeenPeek::finish(const QString &reason, bool read) {
 // remembered line a dead end - the sheet opens, counts the wait down and
 // enables another peek when it is spent.
 [[nodiscard]] QString Refusal(not_null<UserData*> user) {
-	if (!Config().trade) {
+	if (!Config(&user->session()).trade) {
 		return tr::lng_lastseen_peek_disabled(tr::now);
 	} else if (ReasonForUser(user) != LastSeenReason::ByMe) {
 		return tr::lng_lastseen_peek_unavailable(
@@ -789,7 +789,7 @@ LastSeenReason ReasonForUser(not_null<UserData*> user) {
 }
 
 bool CanPeekLastSeen(not_null<UserData*> user) {
-	return Config().trade
+	return Config(&user->session()).trade
 		&& (ReasonForUser(user) == LastSeenReason::ByMe);
 }
 
@@ -863,8 +863,8 @@ void ShowLastSeenPeekBox(
 	const auto session = &controller->session();
 	const auto show = controller->uiShow();
 	const auto peer = IdOf(user);
-	const auto seconds = Config().tradeHoldSeconds;
-	const auto cooldown = Config().tradeCooldownSeconds;
+	const auto seconds = Config(session).tradeHoldSeconds;
+	const auto cooldown = Config(session).tradeCooldownSeconds;
 	const auto left = TradeCooldownLeft(
 		CurrentState(),
 		peer,
@@ -875,7 +875,7 @@ void ShowLastSeenPeekBox(
 			CurrentState(),
 			peer,
 			int64(now),
-			Config().tradeRememberSeconds).has_value();
+			Config(session).tradeRememberSeconds).has_value();
 	if ((left <= 0) && SkipLastSeenPeekConfirmation()) {
 		StartPeek(session, user, show);
 		return;

@@ -184,7 +184,7 @@ void WorkView::rearmGraceTimer() {
 void WorkView::startTicking() {
 	// Cheap to ask and cheap to be wrong about: the tick stops itself the
 	// first time it finds nothing to redraw.
-	if (Purple::RecentMarkStyle() == Purple::RecentStyle::Timer
+	if (Purple::RecentMarkStyle(&session()) == Purple::RecentStyle::Timer
 		&& !_purpleTickTimer.isActive()) {
 		_purpleTickTimer.callOnce(crl::time(1000));
 	}
@@ -273,7 +273,7 @@ void WorkView::refreshViews() {
 	}
 	// The quiet list goes with them. It is not a view, so it is not in the run
 	// above, but it is just as empty once no preset is running.
-	if (!Purple::Filtering()) {
+	if (!Purple::Filtering(&session())) {
 		if (const auto quiet = chatsFilters().chatsListLoaded(
 				kPurpleQuietFilterId)) {
 			auto stale = std::vector<not_null<Dialogs::Entry*>>();
@@ -329,10 +329,10 @@ void WorkView::refreshViewPinned() {
 	//
 	// The guard is what stops that copy reporting itself: applying a pinned
 	// index re-sorts the entry, which comes back through here.
-	if (!Purple::Filtering() || _purpleViewPinning) {
+	if (!Purple::Filtering(&session()) || _purpleViewPinning) {
 		return;
 	}
-	if (Purple::PresetOwnsPins()) {
+	if (Purple::PresetOwnsPins(&session())) {
 		// The preset states its own order, so there is nothing to mirror. Seeded
 		// from settings.toml exactly as an extra view's is - see
 		// refreshViewPins(), which this then shares.
@@ -373,8 +373,8 @@ void WorkView::refreshViewPins(int index) {
 	const auto guard = gsl::finally([&] { _purpleViewPinning = false; });
 
 	const auto &wanted = index
-		? Purple::ExtraViewPins(index - 1)
-		: Purple::PresetPins();
+		? Purple::ExtraViewPins(&session(), index - 1)
+		: Purple::PresetPins(&session());
 	const auto list = viewList(index);
 	auto pinned = std::vector<not_null<History*>>();
 	if (!wanted.empty()) {
@@ -418,8 +418,8 @@ void WorkView::saveViewPins(int index) {
 	// first time anything else in the tab moved, and the usual reason a pinned
 	// chat is missing is that it has not finished loading.
 	const auto &before = index
-		? Purple::ExtraViewPins(index - 1)
-		: Purple::PresetPins();
+		? Purple::ExtraViewPins(&session(), index - 1)
+		: Purple::PresetPins(&session());
 	for (auto i = 0, count = int(before.size()); i != count; ++i) {
 		if (!present.contains(before[i])) {
 			ids.insert(ids.begin() + std::min(i, int(ids.size())), before[i]);
@@ -463,11 +463,11 @@ Dialogs::UnreadState WorkView::badgeUnread() const {
 }
 
 FilterId WorkView::badgeFilterId() const {
-	return Purple::Filtering() ? kPurpleViewFilterId : FilterId();
+	return Purple::Filtering(&session()) ? kPurpleViewFilterId : FilterId();
 }
 
 not_null<const Dialogs::MainList*> WorkView::badgeList() const {
-	if (!Purple::Filtering()) {
+	if (!Purple::Filtering(&session())) {
 		return &_owner->_chatsList;
 	}
 	// The view is created on demand like every other filter list, and asking
@@ -579,7 +579,7 @@ void WorkView::refreshChatListEntry(Dialogs::Key key) {
 			// in the order, and one that has just left needs to stop holding it.
 			refreshViewPinned();
 		} else if (history && ranges::contains(
-				Purple::ExtraViewPins(i - 1),
+				Purple::ExtraViewPins(&session(), i - 1),
 				Purple::IdOf(history->peer))) {
 			// The same for an extra view, except that the order it is taking a
 			// place in is the file's. Tested against what the file pins rather

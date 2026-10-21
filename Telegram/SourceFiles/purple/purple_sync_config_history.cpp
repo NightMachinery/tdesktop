@@ -140,6 +140,9 @@ void SortNewestFirst(std::vector<SequencedEntry> &entries) {
 }
 
 [[nodiscard]] bool CheckDirectories() {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
 	for (const auto &path : {
 		ConfigDirectory() + u"/sync"_q,
 		SyncConfigHistoryDirectory(),
@@ -156,6 +159,9 @@ void SortNewestFirst(std::vector<SequencedEntry> &entries) {
 }
 
 [[nodiscard]] bool PrepareDirectories() {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
 	if (!QDir().mkpath(ConfigDirectory())) {
 		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
 		return false;
@@ -164,6 +170,9 @@ void SortNewestFirst(std::vector<SequencedEntry> &entries) {
 }
 
 [[nodiscard]] bool ExistingDirectories() {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return false;
+	}
 	const auto info = QFileInfo(SyncConfigHistoryDirectory());
 	return (info.exists() || info.isSymLink()) && CheckDirectories();
 }
@@ -350,6 +359,10 @@ void Prune(const QString &directory, const QSet<QString> &keep) {
 } // namespace
 
 QString SyncConfigHistoryDirectory() {
+	if (!LegacyRootSettingsOperationsAllowed()) {
+		return QString();
+	}
+
 	return ConfigDirectory() + u"/sync/history"_q;
 }
 

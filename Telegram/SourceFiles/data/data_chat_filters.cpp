@@ -946,7 +946,7 @@ FilterId ChatFilters::lookupId(int index) const {
 	// than the real one, and the callers bound their index against the real
 	// one.
 	const auto &shown = Purple::ShownList(this);
-	if (Purple::Filtering() && !shown.empty()) {
+	if (Purple::Filtering(&_owner->session()) && !shown.empty()) {
 		Expects(index >= 0);
 		const auto last = int(shown.size()) - 1;
 		return shown[std::min(index, last)].id();
