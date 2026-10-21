@@ -65,3 +65,5 @@ docs/purple/upstream_hooks.md.
 "lng_purple_peek_delay" = "Peek start delay (seconds)";
 "lng_purple_peek_delay_apply" = "Apply start delay";
 "lng_purple_peek_delay_about" = "This global setting applies to every preset. Changing it waits for the longer of the current and new delays. Abort keeps the current setting and does not start Peek.";
+
+"lng_purple_account_sync_file_held" = "Sync is not available for this account's settings file yet. This screen cannot create a missing account file or sync layered settings.";

@@ -28,7 +28,8 @@ public:
 	SyncConfigUpload(
 		Main::Session &session,
 		QByteArray content,
-		Fn<void(std::optional<MsgId>)> finished);
+		Fn<void(std::optional<MsgId>)> finished,
+		Fn<bool()> stillCurrent);
 	~SyncConfigUpload();
 
 	SyncConfigUpload(const SyncConfigUpload &) = delete;
@@ -45,6 +46,7 @@ private:
 	base::weak_ptr<Main::Session> _session;
 	QByteArray _content;
 	Fn<void(std::optional<MsgId>)> _finished;
+	Fn<bool()> _stillCurrent;
 	uint64 _fileId = 0;
 	uint64 _randomId = 0;
 	qsizetype _offset = 0;

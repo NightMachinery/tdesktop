@@ -33,6 +33,7 @@ nice_target_sources(Telegram ${src_loc}
 PRIVATE
     purple/purple_account_config.cpp
     purple/purple_account_config.h
+    purple/purple_account_send_queue.h
     purple/purple_app_services.cpp
     purple/purple_app_services.h
     purple/purple_build_checks.cpp
@@ -125,6 +126,7 @@ PRIVATE
     purple/purple_sync_config_apply.h
     purple/purple_sync_config_history.cpp
     purple/purple_sync_config_history.h
+    purple/purple_sync_history_guard.h
     purple/purple_sync_config_post.cpp
     purple/purple_sync_config_post.h
     purple/purple_sync_config_upload.cpp

@@ -6,6 +6,11 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_account_config.h"
+#include "purple/purple_account_send_queue.h"
+#include "purple/purple_sync_history_guard.h"
+#include "purple/purple_sync_config_history.h"
+#include "purple/purple_sync_local_store.h"
+#include "purple/purple_state.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -17,6 +22,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QThread>
 
 #include <cstdio>
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -420,9 +428,543 @@ void ReviewedRoutingRegressionCases() {
 	}
 }
 
+void AccountSyncIsolationCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto t = AccountKey{ 1, 202 };
+	auto temp = QTemporaryDir();
+	CHECK(temp.isValid());
+	const auto root = temp.filePath(u"settings.toml"_q);
+	const auto bPath = temp.filePath(u"accounts/0-202/settings.toml"_q);
+	const auto tPath = temp.filePath(u"accounts/1-202/settings.toml"_q);
+	const auto aBytes = QByteArray("version=1\n[last_seen]\ntrade_p=true\n[sync]\nsend_after_save_p=true\n");
+	const auto bBytes = QByteArray("version=1\n[last_seen]\ntrade_p=false\n[sync]\nsend_after_save_p=true\n");
+	const auto bNext = QByteArray("version=1\n[last_seen]\ntrade_p=true\n[sync]\nsend_after_save_p=true\n");
+	Put(root, aBytes);
+	auto config = DesktopAccountConfig(temp.path());
+	CHECK(!config.operationTarget(a));
+	config.start({ { a, false, false } });
+	CHECK(config.operationTarget(a));
+	CHECK(!config.operationTarget(b));
+	CHECK(!QFileInfo::exists(bPath));
+	CHECK(!QFileInfo::exists(temp.filePath(u"accounts/0-202/sync"_q)));
+	CHECK(!config.observeAccountSave(a));
+	CHECK(!config.observeAccountSave(b));
+	Put(bPath, bBytes);
+	CHECK(!config.observeAccountSave(b));
+	Put(tPath, bBytes);
+	CHECK(!config.observeAccountSave(t));
+	const auto af = *config.operationTarget(a);
+	const auto bf = *config.operationTarget(b);
+	const auto tf = *config.operationTarget(t);
+	CHECK(af.files.syncDirectory == temp.filePath(u"sync"_q));
+	CHECK(af.files.history == temp.filePath(u"sync/history"_q));
+	CHECK(af.files.fingerprintFile == temp.filePath(u"state.toml"_q));
+	CHECK(bf.files.syncDirectory == temp.filePath(u"accounts/0-202/sync"_q));
+	CHECK(bf.files.history == temp.filePath(u"accounts/0-202/sync/history"_q));
+	CHECK(bf.files.fingerprintFile == temp.filePath(u"accounts/0-202/send-state.toml"_q));
+	auto wrongBackup = bf;
+	wrongBackup.files.backup = af.files.backup;
+	CHECK(!config.validateOperation(wrongBackup));
+	CHECK(config.replace(wrongBackup, bNext) == GuardedFileWrite::InputChanged);
+	auto wrongStore = bf;
+	wrongStore.files.syncStore = af.files.syncStore;
+	CHECK(!config.validateOperation(wrongStore));
+	auto wrongFingerprint = bf;
+	wrongFingerprint.files.fingerprintFile = af.files.fingerprintFile;
+	CHECK(!config.validateOperation(wrongFingerprint));
+	CHECK(tf.files.syncDirectory != bf.files.syncDirectory);
+	CHECK(tf.files.fingerprintFile != bf.files.fingerprintFile);
+	CHECK(config.fingerprints(bf));
+	CHECK(config.fingerprints(bf)->sent.isEmpty());
+	CHECK(!QFileInfo::exists(bf.files.fingerprintFile));
+	CHECK(config.shouldAutoSend(bf));
+	CHECK(config.noteFingerprint(bf, false));
+	CHECK(config.fingerprints(bf)->sent == SettingsFingerprint(bBytes));
+	CHECK(!config.shouldAutoSend(bf));
+	CHECK(!QFileInfo::exists(af.files.fingerprintFile));
+	CHECK(!QFileInfo::exists(tf.files.fingerprintFile));
+	const auto bMarker = Get(bf.files.fingerprintFile);
+	Put(bf.files.fingerprintFile, QByteArray("future_field='keep me'\n"));
+	CHECK(!config.fingerprints(bf));
+	CHECK(!config.shouldAutoSend(bf));
+	CHECK(!config.noteFingerprint(bf, false));
+	CHECK(Get(bf.files.fingerprintFile) == QByteArray("future_field='keep me'\n"));
+	Put(bf.files.fingerprintFile, bMarker);
+	CHECK(bMarker.contains("last_sent_fingerprint"));
+	CHECK(!bMarker.contains("preset"));
+	CHECK(!bMarker.contains("override"));
+	CHECK(!bMarker.contains("recent"));
+	Put(bPath, bNext);
+	CHECK(!config.validateOperation(bf));
+	CHECK(!config.noteFingerprint(bf, false));
+	CHECK(Get(bf.files.fingerprintFile) == bMarker);
+	const auto queuedB = config.observeAccountSave(b);
+	CHECK(queuedB && queuedB->file.account == b);
+	CHECK(queuedB && queuedB->file.input.bytes == bNext);
+	CHECK(!config.observeAccountSave(a));
+	CHECK(!config.observeAccountSave(t));
+	CHECK(config.noteFingerprint(*queuedB, true));
+	CHECK(!config.shouldAutoSend(*queuedB));
+	CHECK(config.fingerprints(*queuedB)->imported == SettingsFingerprint(bNext));
+	CHECK(config.fingerprints(*queuedB)->sent == SettingsFingerprint(bBytes));
+	CHECK(Get(root) == aBytes);
+	CHECK(!QFileInfo::exists(af.files.fingerprintFile));
+	CHECK(!QFileInfo::exists(tf.files.fingerprintFile));
+	const auto importedMarker = Get(bf.files.fingerprintFile);
+	Put(bPath, bBytes);
+	config.forgetAccountSave(b);
+	CHECK(!config.observeAccountSave(b));
+	CHECK(Get(bf.files.fingerprintFile) == importedMarker);
+	CHECK(QFile::remove(bPath));
+	CHECK(!config.observeAccountSave(b));
+	CHECK(!config.operationTarget(b));
+	Put(bPath, bNext);
+	CHECK(!config.observeAccountSave(b));
+	CHECK(Get(root) == aBytes);
+	const auto currentB = *config.operationTarget(b);
+	const auto currentT = *config.operationTarget(t);
+	const auto aHistory = SyncHistoryAccess{ af.files, [&] { return config.validateOperation(af); } };
+	const auto bHistory = SyncHistoryAccess{ currentB.files, [&] { return config.validateOperation(currentB); } };
+	const auto tHistory = SyncHistoryAccess{ currentT.files, [&] { return config.validateOperation(currentT); } };
+	CHECK(ListSyncConfigHistory(aHistory).empty());
+	CHECK(ListSyncConfigHistory(bHistory).empty());
+	CHECK(!QFileInfo::exists(af.files.syncDirectory));
+	CHECK(!QFileInfo::exists(currentB.files.syncDirectory));
+	const auto savedB = SaveSyncConfigHistory(bHistory, bNext,
+		SyncConfigHistoryReason::BeforeUpdate, u"B synthetic update"_q);
+	CHECK(savedB);
+	CHECK(savedB && ReadSyncConfigHistory(bHistory, savedB->id) == bNext);
+	CHECK(savedB && !ReadSyncConfigHistory(aHistory, savedB->id));
+	CHECK(savedB && !ReadSyncConfigHistory(tHistory, savedB->id));
+	CHECK(ListSyncConfigHistory(aHistory).empty());
+	CHECK(ListSyncConfigHistory(bHistory).size() == 1);
+	const auto savedT = SaveSyncConfigHistory(tHistory, bBytes,
+		SyncConfigHistoryReason::BeforeUndo, u"Test environment synthetic undo"_q);
+	CHECK(savedT);
+	CHECK(ListSyncConfigHistory(bHistory).size() == 1);
+	CHECK(ListSyncConfigHistory(tHistory).size() == 1);
+	CHECK(savedT && !ReadSyncConfigHistory(bHistory, savedT->id));
+	const auto beforeRestore = *config.operationTarget(b);
+	CHECK(config.replace(beforeRestore, bBytes) == GuardedFileWrite::Written);
+	CHECK(Get(bPath) == bBytes);
+	CHECK(Get(beforeRestore.files.backup) == bNext);
+	CHECK(Get(root) == aBytes);
+	CHECK(!QFileInfo::exists(af.files.backup));
+	CHECK(!config.validateOperation(beforeRestore));
+	CHECK(!SaveSyncConfigHistory(bHistory, bBytes,
+		SyncConfigHistoryReason::BeforeUndo, u"stale entry must refuse"_q));
+	CHECK(config.replace(beforeRestore, bNext) == GuardedFileWrite::InputChanged);
+	const auto afterRestore = *config.operationTarget(b);
+	const auto undoText = ReadSyncConfigHistory({ afterRestore.files,
+		[&] { return config.validateOperation(afterRestore); } }, savedB->id);
+	CHECK(undoText && *undoText == bNext);
+	CHECK(undoText && config.replace(afterRestore, *undoText) == GuardedFileWrite::Written);
+	CHECK(Get(bPath) == bNext);
+	CHECK(Get(afterRestore.files.backup) == bBytes);
+	CHECK(Get(root) == aBytes);
+	CHECK(Get(tPath) == bBytes);
+	CHECK(Get(currentB.files.fingerprintFile) == importedMarker);
+	const auto beforeGlobalChange = *config.operationTarget(b);
+	Put(temp.filePath(u"local.toml"_q), QByteArray("root_file_account='0-101'\nglobal_account='0-202'\n"));
+	config.refreshLocalChoice();
+	CHECK(!config.validateOperation(beforeGlobalChange));
+	CHECK(config.owner() == a);
+	CHECK(config.operationTarget(a)->file.path == root);
+	CHECK(Get(root) == aBytes);
+	Put(temp.filePath(u"local.toml"_q), QByteArray("root_file_account='0-101'\nglobal_account='0-101'\n"));
+	config.refreshLocalChoice();
+	auto initialA = SyncLocalState();
+	initialA.install = u"in-"_q + QString(26, u'a');
+	initialA.space = u"sp-"_q + QString(26, u'a');
+	initialA.createdDevice = u"device-a"_q;
+	initialA.bindingToken = QString(32, u'a');
+	auto initialB = initialA;
+	initialB.install = u"in-"_q + QString(25, u'b') + u"a"_q;
+	initialB.space = u"sp-"_q + QString(25, u'b') + u"a"_q;
+	initialB.createdDevice = u"device-b"_q;
+	initialB.bindingToken = QString(32, u'b');
+	{
+		auto storeA = SyncLocalStore(af.files.syncDirectory);
+		auto storeB = SyncLocalStore(currentB.files.syncDirectory);
+		CHECK(storeA.Open(true).status == SyncStoreStatus::Uninitialized);
+		CHECK(storeB.Open(true).status == SyncStoreStatus::Uninitialized);
+		CHECK(storeA.Initialize(initialA));
+		CHECK(storeB.Initialize(initialB));
+		const auto aStoreBytes = Get(af.files.syncStore);
+		const auto bStoreBytes = Get(currentB.files.syncStore);
+		CHECK(aStoreBytes != bStoreBytes);
+		CHECK(CheckSyncAccountBinding(*storeB.state(), initialA.bindingToken.toLatin1())
+			!= SyncAccountBindingVerdict::Bound);
+		CHECK(CheckSyncAccountBinding(*storeB.state(), initialB.bindingToken.toLatin1())
+			== SyncAccountBindingVerdict::Bound);
+		auto input = ConfigRecordBuildInput();
+		input.text = bNext;
+		input.space = initialB.space;
+		input.install = initialB.install;
+		input.device = initialB.createdDevice;
+		input.platform = u"macos"_q;
+		input.app = u"Purple"_q;
+		input.seq = 1;
+		const auto record = BuildConfigRecord(input);
+		CHECK(record);
+		CHECK(AccountSyncRecordSupported(record.canonical));
+		auto layeredInput = input;
+		layeredInput.text = QByteArray("version=2\n[last_seen]\ntrade_p=true\n");
+		const auto layeredRecord = BuildConfigRecord(layeredInput);
+		CHECK(layeredRecord);
+		CHECK(!AccountSyncRecordSupported(layeredRecord.canonical));
+		auto next = initialB.configData;
+		next.pending = record.version.key;
+		CHECK(storeB.StageConfig(record.canonical, next, initialA.bindingToken.toLatin1()).status
+			== SyncStoreStatus::AccountUnbound);
+		CHECK(Get(currentB.files.syncStore) == bStoreBytes);
+		CHECK(storeB.StageConfig(record.canonical, next, initialB.bindingToken.toLatin1()));
+		CHECK(storeB.ConfirmConfigReadBack(record.canonical, initialB.createdDevice, 0).status
+			== SyncStoreStatus::InvalidRecord);
+		CHECK(storeB.state()->config.pendingSeq == 1);
+		CHECK(Get(af.files.syncStore) == aStoreBytes);
+		CHECK(Get(currentB.files.fingerprintFile) == importedMarker);
+		CHECK(storeB.ConfirmConfigReadBack(record.canonical, initialB.createdDevice, 17));
+		CHECK(storeB.state()->config.pendingSeq == 0);
+		CHECK(Get(af.files.syncStore) == aStoreBytes);
+	}
+	const auto storeTarget = *config.operationTarget(b);
+	const auto storeSnapshot = ReadSettingsFileInput(storeTarget.files.syncStore);
+	CHECK(config.validateStore(storeTarget, storeSnapshot));
+	Put(storeTarget.files.syncStore, QByteArray("changed external head"));
+	CHECK(!config.validateStore(storeTarget, storeSnapshot));
+	CHECK(Get(root) == aBytes);
+	const auto directoryTarget = *config.operationTarget(b);
+	const auto directory = directoryTarget.files.directory;
+	CHECK(QDir().rename(directory, directory + u".retained"_q));
+	Put(bPath, bNext);
+	CHECK(!config.validateOperation(directoryTarget));
+	CHECK(config.replace(directoryTarget, bBytes) == GuardedFileWrite::InputChanged);
+	CHECK(Get(root) == aBytes);
+#ifndef Q_OS_WIN
+	CHECK(QFile::remove(bPath));
+	CHECK(::link(QFile::encodeName(root).constData(), QFile::encodeName(bPath).constData()) == 0);
+	CHECK(!QFileInfo(bPath).isSymLink());
+	CHECK(!AccountFilePathSafe(bPath));
+	CHECK(!config.operationTarget(b));
+	CHECK(!config.manualExportTarget(b));
+	CHECK(Get(root) == aBytes);
+#endif
+	Put(bPath, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
+	CHECK(!config.operationTarget(b));
+	CHECK(!config.observeAccountSave(b));
+	CHECK(Get(root) == aBytes);
+}
+
+void QueueAndHistoryLifetimeRepairCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	auto temp = QTemporaryDir();
+	CHECK(temp.isValid());
+	const auto root = temp.filePath(u"settings.toml"_q);
+	const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+	const auto first = QByteArray("version=1\n[last_seen]\ntrade_p=false\n[sync]\nsend_after_save_p=true\n");
+	const auto second = QByteArray("version=1\n[last_seen]\ntrade_p=true\n[sync]\nsend_after_save_p=true\n");
+	const auto latest = second + QByteArray("\n# latest ordinary save\n");
+	const auto fresh = first + QByteArray("\n# fresh ordinary save\n");
+	Put(root, first);
+	auto config = DesktopAccountConfig(temp.path());
+	config.start({ { a, false, false } });
+	Put(path, first);
+	auto queue = AccountSendQueue<QPointer<QObject>>();
+	auto sessionA = std::make_unique<QObject>();
+	auto sessionB = std::make_unique<QObject>();
+	auto currentA = QPointer<QObject>(sessionA.get());
+	auto currentB = QPointer<QObject>(sessionB.get());
+	const auto ownerA = [&](const QPointer<QObject> &owner) { return owner && owner == currentA; };
+	const auto ownerB = [&](const QPointer<QObject> &owner) { return owner && owner == currentB; };
+	const auto observeA = [&] { queue.observe(config, a, currentA, ownerA); };
+	const auto observeB = [&] { queue.observe(config, b, currentB, ownerB); };
+	observeA();
+	observeB();
+	CHECK(queue.empty());
+	Put(path, second);
+	observeB();
+	CHECK(!queue.empty());
+	CHECK(QFile::remove(path));
+	observeB();
+	CHECK(queue.empty());
+	Put(path, latest);
+	observeB();
+	CHECK(queue.empty());
+	CHECK(queue.takeReady(config).empty());
+	CHECK(Get(root) == first);
+	Put(path, first);
+	observeB();
+	CHECK(!queue.empty());
+	Put(path, latest);
+	observeB();
+	auto pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	CHECK(pending[0].target.file.account == b);
+	CHECK(pending[0].target.file.input.bytes == latest);
+	CHECK(pending[0].target.file.path == path);
+	CHECK(pending[0].owner == currentB);
+	CHECK(queue.empty());
+	const auto receipt = queue.beginSend(config, pending[0]);
+	CHECK(receipt);
+	if (!receipt) { return; }
+	CHECK(!queue.beginSend(config, pending[0]));
+	queue.finishSend(*receipt);
+	const auto nextReceipt = queue.beginSend(config, pending[0]);
+	CHECK(nextReceipt);
+	if (!nextReceipt) { return; }
+	queue.finishSend(*receipt);
+	CHECK(!queue.beginSend(config, pending[0]));
+	queue.finishSend(*nextReceipt);
+	Put(root, second);
+	observeA();
+	observeB();
+	pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	CHECK(pending[0].target.file.account == a);
+	CHECK(pending[0].target.file.path == root);
+	CHECK(pending[0].target.file.input.bytes == second);
+	Put(path, second);
+	observeB();
+	CHECK(!queue.empty());
+	Put(path, first);
+	CHECK(queue.takeReady(config).empty());
+	observeB();
+	CHECK(!queue.empty());
+	Put(path, QByteArray("version=["));
+	observeB();
+	CHECK(queue.empty());
+	CHECK(queue.takeReady(config).empty());
+	Put(path, first);
+	observeB();
+	CHECK(!queue.empty());
+	Put(path, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
+	observeB();
+	CHECK(queue.empty());
+	CHECK(queue.takeReady(config).empty());
+	Put(path, second);
+	observeB();
+	CHECK(!queue.empty());
+	Put(path, QByteArray("version=1\n[sync]\nsend_after_save_p=false\n"));
+	observeB();
+	CHECK(queue.empty());
+	Put(path, first);
+	observeB();
+	CHECK(!queue.empty());
+	sessionB.reset();
+	CHECK(!currentB);
+	CHECK(queue.takeReady(config).empty());
+	sessionB = std::make_unique<QObject>();
+	currentB = sessionB.get();
+	Put(path, second);
+	observeB();
+	CHECK(queue.empty());
+	Put(path, latest);
+	observeB();
+	pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	const auto oldSessionReceipt = queue.beginSend(config, pending[0]);
+	CHECK(oldSessionReceipt);
+	if (!oldSessionReceipt) { return; }
+	sessionB.reset();
+	sessionB = std::make_unique<QObject>();
+	currentB = sessionB.get();
+	observeB();
+	CHECK(queue.empty());
+	Put(path, second);
+	observeB();
+	Put(path, latest);
+	observeB();
+	pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	const auto freshSessionReceipt = queue.beginSend(config, pending[0]);
+	CHECK(freshSessionReceipt);
+	if (!freshSessionReceipt) { return; }
+	queue.finishSend(*oldSessionReceipt);
+	CHECK(!queue.beginSend(config, pending[0]));
+	queue.finishSend(*freshSessionReceipt);
+	CHECK(config.noteFingerprint(pending[0].target, false));
+	Put(path, second);
+	observeB();
+	CHECK(!queue.empty());
+	Put(path, latest);
+	observeB();
+	CHECK(queue.empty());
+	Put(path, second);
+	observeB();
+	CHECK(!queue.empty());
+	const auto imported = *config.operationTarget(b);
+	CHECK(config.noteFingerprint(imported, true));
+	observeB();
+	CHECK(queue.empty());
+	CHECK(queue.takeReady(config).empty());
+	Put(path, first);
+	observeB();
+	CHECK(!queue.empty());
+	Put(temp.filePath(u"local.toml"_q), QByteArray("root_file_account='0-101'\nglobal_account='0-202'\n"));
+	config.refreshLocalChoice();
+	CHECK(queue.takeReady(config).empty());
+	CHECK(config.operationTarget(a)->file.path == root);
+	Put(path, fresh);
+	observeB();
+	CHECK(!queue.empty());
+	const auto directory = QFileInfo(path).absolutePath();
+	CHECK(QDir().rename(directory, directory + u".retained"_q));
+	Put(path, first);
+	CHECK(queue.takeReady(config).empty());
+	observeB();
+	Put(path, fresh);
+	observeB();
+	CHECK(!queue.empty());
+	queue.forget(config, b);
+	CHECK(queue.empty());
+	observeB();
+	CHECK(queue.empty());
+	Put(path, first);
+	observeB();
+	CHECK(!queue.empty());
+	CHECK(QFile::remove(path));
+	CHECK(QFile::link(root, path));
+	observeB();
+	CHECK(queue.empty());
+	CHECK(queue.takeReady(config).empty());
+	CHECK(Get(root) == second);
+
+	auto setup = std::make_unique<QObject>();
+	auto retainedEntry = std::make_unique<QObject>();
+	auto logicalSession = std::make_unique<QObject>();
+	const auto sessionGuard = QPointer<QObject>(logicalSession.get());
+	auto stateReads = 0;
+	const auto restore = GuardSyncHistoryRestore(setup.get(),
+		[&](const SyncConfigHistoryEntry &) {
+			++stateReads;
+			return bool(sessionGuard);
+		});
+	const auto entry = SyncConfigHistoryEntry();
+	CHECK(restore(entry));
+	CHECK(stateReads == 1);
+	setup.reset();
+	CHECK(bool(sessionGuard));
+	CHECK(bool(retainedEntry));
+	CHECK(!restore(entry));
+	CHECK(stateReads == 1);
+	setup = std::make_unique<QObject>();
+	CHECK(!restore(entry));
+	CHECK(stateReads == 1);
+	const auto liveRestore = GuardSyncHistoryRestore(setup.get(),
+		[&](const SyncConfigHistoryEntry &) { ++stateReads; return bool(sessionGuard); });
+	CHECK(liveRestore(entry));
+	logicalSession.reset();
+	CHECK(!liveRestore(entry));
+	CHECK(stateReads == 3);
+	CHECK(!GuardSyncHistoryRestore(nullptr, [](const SyncConfigHistoryEntry &) { return true; })(entry));
+	CHECK(!GuardSyncHistoryRestore(setup.get(), {})(entry));
+}
+
+
+void OwnerPolicyRecoveryCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	auto temp = QTemporaryDir();
+	CHECK(temp.isValid());
+	const auto root = temp.filePath(u"settings.toml"_q);
+	const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+	const auto first = QByteArray("version=1\n[last_seen]\ntrade_p=false\n[sync]\nsend_after_save_p=true\n");
+	const auto corrected = QByteArray("version=1\n[last_seen]\ntrade_p=true\n[sync]\nsend_after_save_p=true\n");
+	Put(root, first);
+	auto config = DesktopAccountConfig(temp.path());
+	config.start({ { a, false, false } });
+	CHECK(config.owner() == a);
+	Put(path, first);
+	auto origin = std::make_unique<QObject>();
+	auto currentOwner = QPointer<QObject>(origin.get());
+	const auto ownerPolicy = [&](const QPointer<QObject> &owner) {
+		return owner && owner == currentOwner;
+	};
+	auto queue = AccountSendQueue<QPointer<QObject>>();
+	const auto observe = [&] { queue.observe(config, b, currentOwner, ownerPolicy); };
+	observe();
+	CHECK(queue.empty());
+	Put(path, QByteArray("version=[\n"));
+	CHECK(ownerPolicy(currentOwner));
+	CHECK(config.target(b));
+	CHECK(config.target(b)->input.state == SettingsFileState::Readable);
+	CHECK(!config.operationTarget(b));
+	observe();
+	CHECK(queue.empty());
+	CHECK(queue.takeReady(config).empty());
+	Put(path, corrected);
+	CHECK(ownerPolicy(currentOwner));
+	CHECK(config.operationTarget(b));
+	observe();
+	auto pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	CHECK(pending[0].target.file.account == b);
+	CHECK(pending[0].target.file.input.bytes == corrected);
+	Put(path, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
+	CHECK(ownerPolicy(currentOwner));
+	CHECK(!config.operationTarget(b));
+	observe();
+	CHECK(queue.takeReady(config).empty());
+	Put(path, first);
+	observe();
+	pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	CHECK(pending[0].target.file.input.bytes == first);
+	Put(path, QByteArray("version=1\n[sync]\nsend_after_save_p=false\n"));
+	CHECK(ownerPolicy(currentOwner));
+	const auto disabled = config.operationTarget(b);
+	CHECK(disabled);
+	if (!disabled) { return; }
+	CHECK(!config.shouldAutoSend(*disabled));
+	observe();
+	CHECK(queue.takeReady(config).empty());
+	Put(path, corrected);
+	observe();
+	pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	CHECK(pending[0].target.file.input.bytes == corrected);
+	CHECK(QFile::remove(path));
+	CHECK(ownerPolicy(currentOwner));
+	observe();
+	CHECK(queue.empty());
+	Put(path, first);
+	observe();
+	CHECK(queue.takeReady(config).empty());
+	Put(path, corrected);
+	observe();
+	CHECK(!queue.empty());
+	origin.reset();
+	CHECK(!ownerPolicy(currentOwner));
+	CHECK(queue.takeReady(config).empty());
+	origin = std::make_unique<QObject>();
+	currentOwner = origin.get();
+	Put(path, first);
+	observe();
+	CHECK(queue.takeReady(config).empty());
+	Put(path, corrected);
+	observe();
+	pending = queue.takeReady(config);
+	CHECK(pending.size() == 1);
+	if (pending.size() != 1) { return; }
+	CHECK(pending[0].target.file.input.bytes == corrected);
+	CHECK(Get(root) == first);
+}
+
+
 }
 
 int main(int argc, char *argv[]) {
+	std::setvbuf(stdout, nullptr, _IONBF, 0);
 	auto application = QCoreApplication(argc, argv);
 	OwnerPersistenceCases();
 	PreconditionsAndInterruptedWriteCases();
@@ -431,6 +973,18 @@ int main(int argc, char *argv[]) {
 	const auto beforeFocused = Checks;
 	ReviewedRoutingRegressionCases();
 	std::printf("focused %d checks\n", Checks - beforeFocused);
+	std::printf("priorBatch %d checks, %d failures\n", Checks, Failures);
+	const auto beforeAccountSync = Checks;
+	AccountSyncIsolationCases();
+	std::printf("accountSync %d checks\n", Checks - beforeAccountSync);
+	std::printf("priorBatch515 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeQueueRepair = Checks;
+	QueueAndHistoryLifetimeRepairCases();
+	std::printf("queueHistoryRepair %d checks\n", Checks - beforeQueueRepair);
+	std::printf("priorBatch705 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeOwnerPolicy = Checks;
+	OwnerPolicyRecoveryCases();
+	std::printf("ownerPolicyRecovery %d checks\n", Checks - beforeOwnerPolicy);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

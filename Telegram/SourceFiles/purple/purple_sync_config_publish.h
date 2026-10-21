@@ -67,6 +67,9 @@ private:
 	uint64_t _scanPosts = 0;
 	Fn<void(SyncConfigPublishResult)> _finished;
 	SyncConfigPublishRequest _request;
+	std::optional<AccountOperationTarget> _target;
+	QByteArray _bindingToken;
+	SettingsFileInput _storeInput;
 	std::unique_ptr<SyncLocalStore> _store;
 	std::unique_ptr<SyncConfigPost> _post;
 	bool _started = false;

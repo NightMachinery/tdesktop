@@ -165,6 +165,7 @@ void SelectReviewOption(not_null<ReviewBoxState*> state, int index) {
 
 void HistoryEntryBox(
 		not_null<Ui::GenericBox*> box,
+		SyncHistoryAccess access,
 		SyncConfigHistoryEntry entry,
 		Fn<bool(const SyncConfigHistoryEntry&)> restore,
 		Fn<void()> closeList) {
@@ -174,9 +175,11 @@ void HistoryEntryBox(
 	AddLabel(container, SyncConfigHistoryRowText(entry));
 	Ui::AddSkip(container);
 	const auto text = entry.existed
-		? ReadSyncConfigHistory(entry.id)
+		? ReadSyncConfigHistory(access, entry.id)
 		: std::optional<QByteArray>();
-	const auto current = ReadSyncSettingsFile(SettingsFilePath());
+	const auto current = access.valid && access.valid()
+		? ReadSyncSettingsFile(access.files)
+		: MakeSyncSettingsFile(SyncSettingsFileStatus::Invalid, {}, false);
 	const auto restorable = entry.existed
 		&& text.has_value()
 		&& SyncSettingsTextWritable(*text)
@@ -210,7 +213,7 @@ void HistoryEntryBox(
 						SyncConfigHistoryMomentText(entry)),
 				.confirmed = crl::guard(box, [=](Fn<void()> close) {
 					close();
-					if (restore && restore(entry)) {
+					if (access.valid && access.valid() && restore && restore(entry)) {
 						box->closeBox();
 						if (closeList) {
 							closeList();
@@ -323,6 +326,7 @@ void SyncConfigReviewBox(
 
 void SyncConfigHistoryBox(
 		not_null<Ui::GenericBox*> box,
+		SyncHistoryAccess access,
 		Fn<bool(const SyncConfigHistoryEntry&)> restore) {
 	box->setTitle(rpl::single(u"Settings History"_q));
 	box->setWidth(st::boxWideWidth);
@@ -331,7 +335,7 @@ void SyncConfigHistoryBox(
 		"restore or an undo replaced it, newest first. Up to 30 are "
 		"kept."_q);
 	Ui::AddSkip(container);
-	const auto entries = ListSyncConfigHistory();
+	const auto entries = ListSyncConfigHistory(access);
 	if (entries.empty()) {
 		AddLabel(container, u"No copies yet."_q, st::boxDividerLabel);
 	}
@@ -344,6 +348,7 @@ void SyncConfigHistoryBox(
 		row->setClickedCallback([=] {
 			box->uiShow()->showBox(Box(
 				HistoryEntryBox,
+				access,
 				entry,
 				restore,
 				closeList));

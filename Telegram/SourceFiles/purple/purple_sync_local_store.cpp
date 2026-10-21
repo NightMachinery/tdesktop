@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_local_store.h"
 
 #include "purple/purple_sync_config_flow.h"
+#include "purple/purple_account_config.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
@@ -27,7 +28,7 @@ constexpr auto kConfigBytes = 256 * 1024;
 
 [[nodiscard]] bool PrivatePermissions(const QString &path) {
 	const auto info = QFileInfo(path);
-	if (info.isSymLink()) {
+	if (info.isSymLink() || (info.isFile() && !AccountFilePathSafe(path))) {
 		return false;
 	}
 #ifdef Q_OS_UNIX

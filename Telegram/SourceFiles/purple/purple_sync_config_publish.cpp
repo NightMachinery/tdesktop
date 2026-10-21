@@ -31,7 +31,8 @@ SyncConfigPublish::SyncConfigPublish(
 , _scanQueue(scanQueue)
 , _scanPosts(scanPosts)
 , _finished(std::move(finished))
-, _request(std::move(request)) {
+, _request(std::move(request))
+, _target(AccountSyncTarget(&session)) {
 }
 
 SyncConfigPublish::~SyncConfigPublish() {
@@ -46,6 +47,10 @@ bool SyncConfigPublish::AccountAvailable() const {
 	const auto session = _session.get();
 	return account
 		&& session
+		&& _target && ValidateAccountSyncTarget(session, *_target)
+		&& (_bindingToken.isEmpty() || AccountSyncBindingToken(*account) == _bindingToken)
+		&& (_storeInput.state != SettingsFileState::Readable
+			|| ValidateAccountSyncStoreTarget(session, *_target, _storeInput))
 		&& SyncAccountAvailable(*account, *session, _inventory.accountUserId);
 }
 
@@ -59,7 +64,7 @@ void SyncConfigPublish::Start() {
 		return;
 	}
 	_store = std::make_unique<SyncLocalStore>(
-		ConfigDirectory() + u"/sync"_q);
+		_target->files.syncDirectory);
 	const auto opened = _store->Open(true);
 	if (opened.status != SyncStoreStatus::Ready || !_store->state()) {
 		Finish({ SyncConfigPublishStatus::StoreError,
@@ -82,6 +87,10 @@ void SyncConfigPublish::Start() {
 		return;
 	}
 	const auto token = AccountSyncBindingToken(*account);
+	_target = AccountSyncTarget(_session.get());
+	if (!_target) { Finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }
+	_bindingToken = token;
+	_storeInput = ReadSettingsFileInput(_target->files.syncStore);
 	auto staged = QByteArray();
 	if (state->config.pendingSeq) {
 		const auto pending = _store->ReadPendingConfig();
@@ -90,12 +99,16 @@ void SyncConfigPublish::Start() {
 			return;
 		}
 		staged = pending.staged;
+		if (!AccountSyncRecordSupported(staged)) {
+			Finish({ SyncConfigPublishStatus::NeedsReview });
+			return;
+		}
 	}
 	const auto local = (entry == SyncConfigPublishEntry::NewContent)
-		? ReadSyncSettingsFile(SettingsFilePath())
+		? ReadSyncSettingsFile(_target->files)
 		: SyncSettingsFile();
 	const auto queue = (_scanQueue == SyncConfigSendQueue::HoldsSyncRecord
-			|| SyncConfigPostsStarted() != _scanPosts)
+			|| SyncConfigPostsStarted(not_null<Main::Session*>{ _session.get() }) != _scanPosts)
 		? SyncConfigSendQueue::HoldsSyncRecord
 		: SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() });
 	const auto plan = PlanSyncConfigPost(
@@ -138,6 +151,7 @@ void SyncConfigPublish::Start() {
 			});
 			return;
 		}
+		_storeInput = ReadSettingsFileInput(_target->files.syncStore);
 		PlanPost(*_store->state(), plan.own, stagedResult.staged, token);
 	} return;
 	case SyncConfigPostStep::Post:
@@ -176,6 +190,10 @@ void SyncConfigPublish::StartPost(const QByteArray &staged) {
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->OnPost(std::move(result));
 			}
+		},
+		[weak] {
+			const auto self = weak.get();
+			return self && !self->_done && self->AccountAvailable();
 		});
 	_posted = true;
 	_post->Start();

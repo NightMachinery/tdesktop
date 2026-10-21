@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "purple/purple_account_files.h"
+#include <functional>
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
@@ -33,15 +35,22 @@ struct SyncConfigHistoryEntry {
 	bool existed = true;
 };
 
-[[nodiscard]] QString SyncConfigHistoryDirectory();
+struct SyncHistoryAccess {
+	AccountFiles files;
+	std::function<bool()> valid;
+};
+
+[[nodiscard]] QString SyncConfigHistoryDirectory(const SyncHistoryAccess &access);
 [[nodiscard]] std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
+	const SyncHistoryAccess &access,
 	const std::optional<QByteArray> &text,
 	SyncConfigHistoryReason reason,
 	const QString &label,
 	const QString &versionKey = QString(),
 	const QString &keepId = QString());
-[[nodiscard]] std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory();
+[[nodiscard]] std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory(const SyncHistoryAccess &access);
 [[nodiscard]] std::optional<QByteArray> ReadSyncConfigHistory(
+	const SyncHistoryAccess &access,
 	const QString &id);
 
 } // namespace Purple

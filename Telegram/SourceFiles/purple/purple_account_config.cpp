@@ -7,6 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_account_config.h"
 #include "purple/purple_config_diff.h"
+#include "purple/purple_state.h"
+#include "purple/purple_config_payload.h"
+#include <QtCore/QDateTime>
+#include <QtCore/QRegularExpression>
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#else
+#include <sys/stat.h>
+#endif
+#define TOML_EXCEPTIONS 0
+#include <tomlplusplus/toml.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -17,6 +28,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 namespace {
+
+QByteArray DirectoryIdentity(const QString &path) {
+	const auto info = QFileInfo(path);
+	if (info.isSymLink() || !info.isDir()) {
+		return {};
+	}
+#ifdef Q_OS_WIN
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+		0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) {
+		return {};
+	}
+	auto identity = BY_HANDLE_FILE_INFORMATION();
+	const auto ok = GetFileInformationByHandle(handle, &identity);
+	CloseHandle(handle);
+	return ok ? QByteArray::number(identity.dwVolumeSerialNumber) + ':'
+		+ QByteArray::number(identity.nFileIndexHigh) + ':'
+		+ QByteArray::number(identity.nFileIndexLow) : QByteArray();
+#else
+	struct stat identity = {};
+	return ::stat(QFile::encodeName(path).constData(), &identity) == 0
+		? QByteArray::number(qulonglong(identity.st_dev)) + ':'
+			+ QByteArray::number(qulonglong(identity.st_ino)) : QByteArray();
+#endif
+}
 
 SettingsFileInput OwnerInput(const QString &path) {
 	const auto info = QFileInfo(path);
@@ -31,6 +68,40 @@ OwnerFileSnapshot Snapshot(const SettingsFileInput &input) {
 		QString::fromUtf8(input.bytes) };
 }
 
+}
+
+bool AccountSyncRecordSupported(const QByteArray &record) {
+	const auto parsed = ParseSyncEnvelope(record);
+	const auto inspected = InspectConfigPayload(parsed);
+	if (!parsed || inspected.status != ConfigPayloadStatus::Valid || inspected.schema > kSettingsVersion) {
+		return false;
+	}
+	const auto canonical = SerializeSyncEnvelope(parsed.envelope);
+	return canonical && canonical.canonical == record;
+}
+
+bool AccountFilePathSafe(const QString &path) {
+	const auto info = QFileInfo(path);
+	if (info.isSymLink() || (info.exists() && !info.isFile())) {
+		return false;
+	}
+	if (!info.exists()) {
+		return true;
+	}
+#ifdef Q_OS_WIN
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+		0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return false; }
+	auto identity = BY_HANDLE_FILE_INFORMATION();
+	const auto ok = GetFileInformationByHandle(handle, &identity);
+	CloseHandle(handle);
+	return ok && identity.nNumberOfLinks == 1;
+#else
+	struct stat identity = {};
+	return ::lstat(QFile::encodeName(path).constData(), &identity) == 0
+		&& S_ISREG(identity.st_mode) && identity.st_nlink == 1;
+#endif
 }
 
 bool CanReplaceLegacyRootSettings(const QByteArray &before, const QByteArray &after) {
@@ -358,17 +429,20 @@ const LayerSettingsResult *DesktopAccountConfig::report(const AccountKey &key) c
 std::optional<AccountFileTarget> DesktopAccountConfig::target(const AccountKey &key) {
 	refreshLocalChoice();
 	const auto selected = files(key);
-	if (!permissionsReady() || !selected) {
+	if (!permissionsReady() || !selected || !AccountFilePathSafe(selected->settings)) {
 		return std::nullopt;
 	}
 	return AccountFileTarget{ key, selected->settings,
-		ReadSettingsFileInput(selected->settings), _routingGeneration };
+		ReadSettingsFileInput(selected->settings), _routingGeneration,
+		DirectoryIdentity(_root) + '/' + DirectoryIdentity(QFileInfo(selected->directory).absolutePath())
+			+ '/' + DirectoryIdentity(selected->directory) };
 }
 
 bool DesktopAccountConfig::validate(const AccountFileTarget &target) {
 	const auto current = this->target(target.account);
 	return current && current->generation == target.generation
-		&& current->path == target.path && current->input == target.input;
+		&& current->path == target.path && current->input == target.input
+		&& current->directoryIdentity == target.directoryIdentity;
 }
 
 std::optional<ManualSettingsExportTarget> DesktopAccountConfig::manualExportTarget(
@@ -385,7 +459,7 @@ std::optional<ManualSettingsExportTarget> DesktopAccountConfig::manualExportTarg
 	}
 	const auto path = absolute(u"settings.toml"_q);
 	return ManualSettingsExportTarget{ ManualSettingsExportRole::SingleFile,
-		{ key, path, ReadSettingsFileInput(path), _routingGeneration } };
+		{ key, path, ReadSettingsFileInput(path), _routingGeneration, DirectoryIdentity(_root) } };
 }
 
 bool DesktopAccountConfig::validateManualExport(
@@ -394,7 +468,8 @@ bool DesktopAccountConfig::validateManualExport(
 	return current && current->role == target.role
 		&& current->file.generation == target.file.generation
 		&& current->file.path == target.file.path
-		&& current->file.input == target.file.input;
+		&& current->file.input == target.file.input
+		&& current->file.directoryIdentity == target.file.directoryIdentity;
 }
 
 std::optional<AccountFileTarget> DesktopAccountConfig::editTarget(
@@ -402,6 +477,177 @@ std::optional<AccountFileTarget> DesktopAccountConfig::editTarget(
 	const auto selected = target(key);
 	return selected && accountTrafficReady(key) && globalAccount() == _owner
 		? selected : std::nullopt;
+}
+
+std::optional<AccountOperationTarget> DesktopAccountConfig::operationTarget(
+		const AccountKey &key) {
+	const auto selected = target(key);
+	const auto paths = files(key);
+	if (!selected || !paths || DirectoryIdentity(_root).isEmpty()
+		|| DirectoryIdentity(paths->directory).isEmpty()
+		|| selected->input.state != SettingsFileState::Readable) {
+		return std::nullopt;
+	}
+	for (const auto &path : { paths->settings, paths->good, paths->backup,
+		paths->importBackup, paths->fingerprintFile, paths->syncStore }) {
+		if (!AccountFilePathSafe(path)) {
+			return std::nullopt;
+		}
+	}
+	for (const auto &path : { paths->syncDirectory, paths->history }) {
+		const auto info = QFileInfo(path);
+		if (info.isSymLink() || (info.exists() && !info.isDir())) {
+			return std::nullopt;
+		}
+	}
+	const auto parsed = ParseSettings(QString::fromUtf8(selected->input.bytes), selected->path);
+	if (!parsed.ok() || parsed.settings.version > kSettingsVersion) {
+		return std::nullopt;
+	}
+	return AccountOperationTarget{ *selected, *paths, DirectoryIdentity(paths->syncDirectory),
+		DirectoryIdentity(paths->history) };
+}
+
+bool DesktopAccountConfig::validateOperation(
+		const AccountOperationTarget &target, bool sameInput) {
+	const auto current = operationTarget(target.file.account);
+	return current && current->file.generation == target.file.generation
+		&& current->file.path == target.file.path
+		&& current->file.directoryIdentity == target.file.directoryIdentity
+		&& current->files.directory == target.files.directory
+		&& current->files.settings == target.files.settings
+		&& current->files.good == target.files.good
+		&& current->files.backup == target.files.backup
+		&& current->files.importBackup == target.files.importBackup
+		&& current->files.syncStore == target.files.syncStore
+		&& current->files.fingerprintStorage == target.files.fingerprintStorage
+		&& current->files.syncDirectory == target.files.syncDirectory
+		&& current->files.history == target.files.history
+		&& current->files.fingerprintFile == target.files.fingerprintFile
+		&& (target.syncDirectoryIdentity.isEmpty() || current->syncDirectoryIdentity == target.syncDirectoryIdentity)
+		&& (target.historyDirectoryIdentity.isEmpty() || current->historyDirectoryIdentity == target.historyDirectoryIdentity)
+		&& (!sameInput || current->file.input == target.file.input);
+}
+
+bool DesktopAccountConfig::validateStore(const AccountOperationTarget &target,
+		const SettingsFileInput &expected, bool sameInput) {
+	return validateOperation(target, sameInput)
+		&& expected.state == SettingsFileState::Readable
+		&& ReadSettingsFileInput(target.files.syncStore) == expected;
+}
+
+std::optional<AccountSendFingerprints> DesktopAccountConfig::fingerprints(
+		const AccountOperationTarget &target) {
+	if (!validateOperation(target)) {
+		return std::nullopt;
+	}
+	const auto input = ReadSettingsFileInput(target.files.fingerprintFile);
+	if (input.state == SettingsFileState::ReadError) {
+		return std::nullopt;
+	}
+	const auto parsed = toml::parse(input.bytes.toStdString());
+	if (!parsed) {
+		return std::nullopt;
+	}
+	if (target.files.fingerprintStorage == AccountFingerprintStorage::AccountSendState) {
+		for (const auto &[key, node] : parsed.table()) {
+			if ((key.str() != "last_sent_fingerprint" && key.str() != "last_imported_fingerprint")
+				|| !node.is_string()) {
+				return std::nullopt;
+			}
+		}
+	}
+	const auto read = [&](const char *key) {
+		const auto value = parsed.table()[key].value<std::string>();
+		return value ? QString::fromStdString(*value) : QString();
+	};
+	const auto sent = read("last_sent_fingerprint");
+	const auto imported = read("last_imported_fingerprint");
+	static const auto syntax = QRegularExpression(u"^(?:[0-9]+:[0-9a-f]{64})?$"_q);
+	if (!syntax.match(sent).hasMatch() || !syntax.match(imported).hasMatch()) {
+		return std::nullopt;
+	}
+	return AccountSendFingerprints{ sent, imported, input };
+}
+
+void DesktopAccountConfig::suppressImportedEcho(const AccountOperationTarget &target) {
+	if (validateOperation(target)) {
+		_importedEcho[target.file.path] = SettingsFingerprint(target.file.input.bytes);
+	}
+}
+
+bool DesktopAccountConfig::noteFingerprint(
+		const AccountOperationTarget &target, bool imported) {
+	if (imported) { suppressImportedEcho(target); }
+	const auto current = fingerprints(target);
+	if (!current || target.files.fingerprintStorage != AccountFingerprintStorage::AccountSendState) {
+		return false;
+	}
+	const auto input = current->input;
+	const auto hash = SettingsFingerprint(target.file.input.bytes);
+	const auto sent = imported ? current->sent : hash;
+	const auto received = imported ? hash : current->imported;
+	const auto bytes = u"last_sent_fingerprint = \"%1\"\nlast_imported_fingerprint = \"%2\"\n"_q
+		.arg(sent, received).toUtf8();
+	return WriteGuardedSettingsFile(target.files.fingerprintFile, input, bytes,
+		[&] { return validateOperation(target); }, true) == GuardedFileWrite::Written;
+}
+
+std::optional<AccountOperationTarget> DesktopAccountConfig::observeAccountSave(
+		const AccountKey &key) {
+	const auto name = AccountKeyText(key.environment, key.userId);
+	const auto file = target(key);
+	if (!name || !file) {
+		if (name) { _saveObservations.erase(*name); }
+		return std::nullopt;
+	}
+	const auto previous = _saveObservations.find(*name);
+	const auto changed = previous != _saveObservations.end()
+		&& previous->second.state == SettingsFileState::Readable
+		&& file->input.state == SettingsFileState::Readable
+		&& previous->second != file->input;
+	_saveObservations[*name] = file->input;
+	const auto operation = changed ? operationTarget(key) : std::nullopt;
+	return operation && shouldAutoSend(*operation) ? operation : std::nullopt;
+}
+
+void DesktopAccountConfig::forgetAccountSave(const AccountKey &key) {
+	if (const auto name = AccountKeyText(key.environment, key.userId)) {
+		_saveObservations.erase(*name);
+	}
+}
+
+bool DesktopAccountConfig::shouldAutoSend(const AccountOperationTarget &target) {
+	const auto imported = _importedEcho.find(target.file.path);
+	if (imported != _importedEcho.end() && imported->second == SettingsFingerprint(target.file.input.bytes)) {
+		return false;
+	}
+	const auto state = fingerprints(target);
+	const auto parsed = ParseSettings(QString::fromUtf8(target.file.input.bytes), target.file.path);
+	return state && parsed.ok() && ShouldAutoSend(parsed.settings, state->sent,
+		state->imported, target.file.input.bytes, false);
+}
+
+GuardedFileWrite DesktopAccountConfig::replace(
+		const AccountOperationTarget &target, const QByteArray &bytes) {
+	const auto parsed = ParseSettings(QString::fromUtf8(bytes), target.file.path);
+	if (!validateOperation(target) || !parsed.ok() || parsed.settings.version > kSettingsVersion
+		|| !CanReplaceLegacyRootSettings(target.file.input.bytes, bytes)) {
+		return GuardedFileWrite::InputChanged;
+	}
+	if (bytes != target.file.input.bytes) {
+		const auto backup = ReadSettingsFileInput(target.files.backup);
+		if (WriteGuardedSettingsFile(target.files.backup, backup, target.file.input.bytes,
+			[&] { return validateOperation(target); }, true) != GuardedFileWrite::Written) {
+			return GuardedFileWrite::WriteError;
+		}
+	}
+	const auto result = WriteGuardedSettingsFile(target.file.path, target.file.input, bytes,
+		[&] { return validateOperation(target); });
+	if (result == GuardedFileWrite::Written) {
+		invalidate();
+	}
+	return result;
 }
 
 bool DesktopAccountConfig::permissionsReady() const {

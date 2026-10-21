@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/weak_ptr.h"
+#include "purple/purple_account_config.h"
 #include "data/data_msg_id.h"
 #include "purple/purple_sync_candidate_reader.h"
 #include "purple/purple_sync_config_flow.h"
@@ -37,14 +38,15 @@ struct SyncConfigPostResult {
 
 [[nodiscard]] SyncConfigSendQueue SyncConfigSendQueueOf(
 	not_null<Main::Session*> session);
-[[nodiscard]] uint64_t SyncConfigPostsStarted();
+[[nodiscard]] uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session);
 
 class SyncConfigPost final : public base::has_weak_ptr {
 public:
 	SyncConfigPost(
 		not_null<Main::Session*> session,
 		QByteArray staged,
-		Fn<void(SyncConfigPostResult)> finished);
+		Fn<void(SyncConfigPostResult)> finished,
+		Fn<bool()> stillCurrent);
 	~SyncConfigPost();
 
 	SyncConfigPost(const SyncConfigPost &) = delete;
@@ -54,6 +56,7 @@ public:
 	void Cancel();
 
 private:
+	[[nodiscard]] bool ContextCurrent() const;
 	void OnReceipt(std::optional<MsgId> messageId);
 	void OnReadback(SyncCandidateReadResult result);
 	void Finish(SyncConfigPostResult result);
@@ -61,7 +64,9 @@ private:
 	not_null<Main::Session*> _session;
 	base::weak_ptr<Main::Session> _sessionGuard;
 	QByteArray _staged;
+	std::optional<AccountOperationTarget> _target;
 	Fn<void(SyncConfigPostResult)> _finished;
+	Fn<bool()> _stillCurrent;
 	std::unique_ptr<SyncCandidateReader> _reader;
 	std::shared_ptr<SyncConfigUpload> _upload;
 	MsgId _messageId;

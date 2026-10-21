@@ -29,6 +29,7 @@ void SyncConfigReviewBox(
 
 void SyncConfigHistoryBox(
 	not_null<Ui::GenericBox*> box,
+	SyncHistoryAccess access,
 	Fn<bool(const SyncConfigHistoryEntry&)> restore);
 
 } // namespace Purple

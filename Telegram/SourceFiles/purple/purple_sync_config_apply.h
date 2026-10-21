@@ -52,6 +52,7 @@ struct SyncConfigRestoreResult {
 };
 
 [[nodiscard]] SyncConfigRestoreResult RestoreSyncConfigHistory(
+	Main::Session &session,
 	const QString &id,
 	SyncConfigHistoryReason reason);
 

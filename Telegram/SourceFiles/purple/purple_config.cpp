@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_account_send_queue.h"
 
 #include "base/timer.h"
 #include "base/weak_ptr.h"
@@ -357,6 +358,7 @@ public:
 		const QString &what,
 		const std::optional<SettingsFileInput> &expected = std::nullopt);
 	[[nodiscard]] std::optional<SettingsFileInput> checkedInput();
+	void observeAccountFiles() { autoSendLater(); }
 	void noteSent(const QByteArray &bytes);
 	void noteImported(const QByteArray &bytes);
 
@@ -389,7 +391,8 @@ private:
 
 	State _state;
 	QString _stateText;
-	QSet<QString> _pendingSendFingerprints;
+	std::map<QString, AccountKey> _observedAccountKeys;
+	AccountSendQueue<base::weak_ptr<Main::Session>> _accountsPendingSend;
 
 	rpl::variable<bool> _localPremium = true;
 	rpl::event_stream<> _changes;
@@ -505,78 +508,85 @@ bool Config::writeSettings(
 }
 
 void Config::autoSendLater() {
-	if (!LegacyRootSettingsOperationsAllowed()) {
+	if (!Core::App().domain().started()) {
 		return;
 	}
-	const auto bytes = _text.toUtf8();
-	if (ShouldAutoSend(_settings, _state, bytes, false)
-		&& !_pendingSendFingerprints.contains(SettingsFingerprint(bytes))) {
-		// Restarted rather than left to run, so the clock measures the quiet
-		// after the last write instead of the noise after the first.
+	auto liveKeys = QSet<QString>();
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto session = entry.account->maybeSession();
+		const auto target = session ? AccountSettingsTarget(session) : std::nullopt;
+		if (!target) {
+			continue;
+		}
+		const auto key = AccountKeyText(target->account.environment, target->account.userId);
+		if (!key) {
+			continue;
+		}
+		liveKeys.insert(*key);
+		_observedAccountKeys[*key] = target->account;
+		const auto account = base::make_weak(entry.account.get());
+		const auto origin = base::make_weak(session);
+		const auto identity = target->account;
+		_accountsPendingSend.observe(AccountRouting(), identity, origin,
+			[account, identity](const base::weak_ptr<Main::Session> &owner) {
+				const auto live = owner.get();
+				const auto liveAccount = account.get();
+				const auto current = live ? AccountSettingsTarget(live) : std::nullopt;
+				return live && liveAccount && liveAccount->maybeSession() == live
+					&& current && current->account == identity;
+			});
+	}
+	for (auto i = _observedAccountKeys.begin(); i != _observedAccountKeys.end();) {
+		if (!liveKeys.contains(i->first)) {
+			_accountsPendingSend.forget(AccountRouting(), i->second);
+			i = _observedAccountKeys.erase(i);
+		} else {
+			++i;
+		}
+	}
+	if (!_accountsPendingSend.empty()) {
 		_autoSend.callOnce(kAutoSendDelay);
 	}
 }
 
 void Config::autoSendNow() {
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return;
-	}
-	// Asked again rather than trusted from five seconds ago. In between, the
-	// switch can have been turned off, the file can have been put back to what
-	// it was, and an import can have landed the very bytes we were about to
-	// offer the machine that sent them.
-	const auto bytes = _text.toUtf8();
-	const auto fingerprint = SettingsFingerprint(bytes);
-	if (!ShouldAutoSend(_settings, _state, bytes, false)
-		|| _pendingSendFingerprints.contains(fingerprint)) {
-		return;
-	}
-	_pendingSendFingerprints.insert(fingerprint);
-	Main::Session *origin = nullptr;
-	for (const auto &entry : Core::App().domain().accounts()) {
-		const auto candidate = entry.account->maybeSession();
-		if (candidate && AccountAutomaticOperationsAllowed(candidate)) {
-			origin = candidate;
-			break;
+	for (const auto &operation : _accountsPendingSend.takeReady(AccountRouting())) {
+		const auto session = operation.owner.get();
+		const auto &target = operation.target;
+		if (!session || !ValidateAccountSyncTarget(session, target)) {
+			continue;
 		}
-	}
-	if (!origin) {
-		_pendingSendFingerprints.remove(fingerprint);
-		return;
-	}
-	const auto weak = base::make_weak(this);
-	if (!Upload(origin, bytes, _settings.version, [weak, fingerprint](
-			std::optional<MsgId>) {
-		if (const auto self = weak.get()) {
-			self->_pendingSendFingerprints.remove(fingerprint);
+		const auto receipt = _accountsPendingSend.beginSend(AccountRouting(), operation);
+		if (!receipt) {
+			continue;
 		}
-	})) {
-		_pendingSendFingerprints.remove(fingerprint);
+		const auto weak = base::make_weak(this);
+		const auto parsed = ParseSettings(QString::fromUtf8(target.file.input.bytes), target.file.path);
+		if (!Upload(session, target.file.input.bytes, parsed.settings.version,
+				[weak, receipt = *receipt](std::optional<MsgId>) {
+			if (const auto self = weak.get()) {
+				self->_accountsPendingSend.finishSend(receipt);
+			}
+		})) {
+			_accountsPendingSend.finishSend(*receipt);
+		}
 	}
 }
 
 void Config::noteSent(const QByteArray &bytes) {
-	const auto current = ReadSettingsFileInput(SettingsFilePath());
-	if (current.state != SettingsFileState::Readable || current.bytes != bytes) {
+	const auto input = ReadSettingsFileInput(ConfigDirectory() + u"/settings.toml"_q);
+	if (input.state != SettingsFileState::Readable || input.bytes != bytes) {
 		return;
 	}
-	if (current != _diskInput) {
-		applyInput(current);
-	}
-	if (bytes != _text.toUtf8()) {
-		return;
-	}
-	const auto fingerprint = SettingsFingerprint(bytes);
-	updateState([&](State &state) {
-		state.lastSentFingerprint = fingerprint;
-	});
+	updateState([&](State &state) { state.lastSentFingerprint = SettingsFingerprint(bytes); });
 }
 
 void Config::noteImported(const QByteArray &bytes) {
-	const auto fingerprint = SettingsFingerprint(bytes);
-	updateState([&](State &state) {
-		state.lastImportedFingerprint = fingerprint;
-	});
+	const auto input = ReadSettingsFileInput(ConfigDirectory() + u"/settings.toml"_q);
+	if (input.state != SettingsFileState::Readable || input.bytes != bytes) {
+		return;
+	}
+	updateState([&](State &state) { state.lastImportedFingerprint = SettingsFingerprint(bytes); });
 }
 
 void Config::startWatching() {
@@ -620,10 +630,12 @@ void Config::reloadFromDisk() {
 		if (std::exchange(_accountRefreshPending, false)) {
 			_changes.fire({});
 		}
+		autoSendLater();
 		// Our own writes come back through the watcher too.
 		return;
 	}
 	applyInput(input);
+	autoSendLater();
 }
 
 void Config::reloadStateFromDisk() {
@@ -945,14 +957,27 @@ WriteResult WriteSettings(
 }
 
 void NoteSettingsSent(not_null<Main::Session*> session, const QByteArray &bytes) {
-	if (AccountAutomaticOperationsAllowed(session)) {
+	const auto target = AccountSyncTarget(session);
+	if (!target || target->file.input.bytes != bytes) {
+		return;
+	}
+	if (target->files.fingerprintStorage == AccountFingerprintStorage::DeviceState) {
 		Instance().noteSent(bytes);
+	} else {
+		(void)AccountRouting().noteFingerprint(*target, false);
 	}
 }
 
 void NoteSettingsImported(not_null<Main::Session*> session, const QByteArray &bytes) {
-	if (AccountAutomaticOperationsAllowed(session)) {
+	const auto target = AccountSyncTarget(session);
+	if (!target || target->file.input.bytes != bytes) {
+		return;
+	}
+	AccountRouting().suppressImportedEcho(*target);
+	if (target->files.fingerprintStorage == AccountFingerprintStorage::DeviceState) {
 		Instance().noteImported(bytes);
+	} else {
+		(void)AccountRouting().noteFingerprint(*target, true);
 	}
 }
 
@@ -999,6 +1024,7 @@ void RefreshDesktopAccounts() {
 				== SyncAccountBindingVerdict::Bound });
 	}
 	AccountRouting().start(std::move(accounts));
+	Instance().observeAccountFiles();
 }
 
 void StartDesktopAccountRouting() {
@@ -1068,6 +1094,46 @@ std::optional<AccountFileTarget> AccountSettingsEditTarget(
 		return std::nullopt;
 	}
 	return AccountRouting().editTarget(SessionAccountKey(session));
+}
+
+std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().operationTarget(SessionAccountKey(session));
+}
+
+bool ValidateAccountSyncTarget(not_null<Main::Session*> session,
+		const AccountOperationTarget &target, bool sameInput) {
+	return !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& SessionAccountKey(session) == target.file.account
+		&& AccountRouting().validateOperation(target, sameInput);
+}
+
+SyncHistoryAccess AccountSyncHistoryAccess(not_null<Main::Session*> session,
+		const AccountOperationTarget &target) {
+	const auto weak = base::make_weak(session.get());
+	return { target.files, [weak, target] {
+		const auto live = weak.get();
+		return live && ValidateAccountSyncTarget(live, target);
+	} };
+}
+
+bool ValidateAccountSyncStoreTarget(not_null<Main::Session*> session,
+		const AccountOperationTarget &target, const SettingsFileInput &expected, bool sameInput) {
+	return ValidateAccountSyncTarget(session, target, sameInput)
+		&& AccountRouting().validateStore(target, expected, sameInput);
+}
+
+bool AccountSyncOperationsAllowed(not_null<Main::Session*> session) {
+	return AccountSyncTarget(session).has_value();
+}
+
+GuardedFileWrite ReplaceAccountSyncSettings(not_null<Main::Session*> session,
+		const AccountOperationTarget &target, const QByteArray &bytes) {
+	return ValidateAccountSyncTarget(session, target)
+		? AccountRouting().replace(target, bytes) : GuardedFileWrite::InputChanged;
 }
 
 bool LegacyRootSettingsOperationsAllowed() {

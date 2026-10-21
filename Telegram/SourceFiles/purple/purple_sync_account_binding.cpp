@@ -48,7 +48,7 @@ bool SyncAccountAvailable(
 		Main::Account &account,
 		Main::Session &session,
 		uint64_t accountUserId) {
-	return AccountAutomaticOperationsAllowed(&session)
+	return AccountSyncOperationsAllowed(&session)
 		&& !account.loggingOut()
 		&& account.maybeSession() == &session
 		&& accountUserId

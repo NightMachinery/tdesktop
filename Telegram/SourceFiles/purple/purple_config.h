@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_settings.h"
 #include "purple/purple_account_config.h"
+#include "purple/purple_sync_config_history.h"
 #include "purple/purple_splice.h"
 #include "purple/purple_state.h"
 #include "purple/purple_config_file.h"
@@ -33,6 +34,12 @@ void RefreshDesktopAccounts();
 [[nodiscard]] bool ValidateAccountSettingsTarget(not_null<Main::Session*> session, const AccountFileTarget &target);
 [[nodiscard]] bool AccountAutomaticOperationsAllowed(not_null<Main::Session*> session);
 [[nodiscard]] bool LegacyRootSettingsOperationsAllowed();
+[[nodiscard]] std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*> session);
+[[nodiscard]] bool ValidateAccountSyncTarget(not_null<Main::Session*> session, const AccountOperationTarget &target, bool sameInput = true);
+[[nodiscard]] SyncHistoryAccess AccountSyncHistoryAccess(not_null<Main::Session*> session, const AccountOperationTarget &target);
+[[nodiscard]] bool ValidateAccountSyncStoreTarget(not_null<Main::Session*> session, const AccountOperationTarget &target, const SettingsFileInput &expected, bool sameInput = true);
+[[nodiscard]] bool AccountSyncOperationsAllowed(not_null<Main::Session*> session);
+[[nodiscard]] GuardedFileWrite ReplaceAccountSyncSettings(not_null<Main::Session*> session, const AccountOperationTarget &target, const QByteArray &bytes);
 [[nodiscard]] std::optional<ManualSettingsExportTarget> AccountManualExportTarget(not_null<Main::Session*> session);
 [[nodiscard]] bool ValidateAccountManualExportTarget(not_null<Main::Session*> session, const ManualSettingsExportTarget &target);
 [[nodiscard]] std::optional<AccountFileTarget> AccountSettingsEditTarget(not_null<Main::Session*> session);

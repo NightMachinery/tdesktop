@@ -48,26 +48,17 @@ Root imports and restores also refuse unparseable successors and removals of
 app-wide or unknown keys, using the shared registry-derived change summary.
 An explicit destination-aware destructive-change review remains later work.
 
-The existing sync/store/History implementation still uses legacy root-only
-interfaces. It is explicitly held unless ownership is confirmed, the global file
-is the root owner's file and the originating session is that owner. Upload no
-longer selects a first or active account. Setup, publish, apply, post, launch
-search and message import enforce the hold. Legacy History/Undo also refuse when
-the root destination is not selected. Manual user-initiated Send remains available
-in single-file mode, and otherwise reads only its originating account's path.
-
-Non-root automatic sync, its send-state fingerprint persistence and account-
-scoped History/Undo are not implemented by this batch. Account list-member writes
-and editing a non-root global file are held rather than sent through unqualified
-root writers. The new layered-file creation/fork operation and the full account
-settings/Work Mode chooser remain later work. Existing manual Send does not claim
-to update non-root per-file fingerprints. No transport, migration-by-copy or
-binding restoration is introduced.
+Sync setup, store, publish, apply, History/Undo and fingerprint persistence now use
+explicit validated originating-account files. Root-owner paths remain legacy;
+nonroot accounts never fall back to them. Manual single-file export remains a
+separate owner-unknown role. Account list-member writes, nonroot global editing,
+layered-file creation/forks and the full account settings chooser remain held.
+No migration-by-copy or automatic binding restoration is introduced.
 
 Synthetic Qt/file cases qualify the actual adapter and guarded writer in owned
 temporary directories. Production-TU compilation is separate from application
 linking, native UI observation, disk crash behavior and multi-process isolation.
-The complete M2 client feature is not finished until the held routes above are
+The complete M2 client feature is not finished until the remaining held routes are
 implemented, reviewed and qualified on a coherent current app.
 
 ## Reviewed account-row and manual-export boundaries
@@ -90,3 +81,52 @@ Stock folder lookup uses the ChatFilters originating session when selecting the
 Purple branch. The native nonpremium All-first mapping is unchanged. Synthetic
 policy cases exercise the real shared stock decision; actual shortcut/index behavior
 and GUI rows remain native-unmeasured until a separately admitted application run.
+
+## Account-specific sync, History and send state
+
+Modern sync setup/check/publish/apply uses the selected originating session's own
+settings and validated AccountFiles. Root-owned stores retain sync/state.json and
+sync/history; other accounts use accounts/<key>/sync and sync/history. Binding
+proof is still required and a lost binding is never silently adopted. There is no
+Relink control in the current UI, so unbound stores remain refused rather than
+restored without library-stream ownership proof.
+
+Operations capture their account, file bytes, routing generation and real directory
+identity. Async post/readback and deferred UI actions recheck that context, binding
+and relevant store-head snapshot. History lists/previews/restore and Undo retain
+the originating account. Finish-sending counters retain weak session lifetime and a separate captured counter,
+so a recreated session slot cannot inherit an older in-flight count.
+History retains its existing metadata, 30-entry pruning and verification algorithm;
+its explicit access object supplies paths and a live precondition. The file module
+uses Qt diagnostics and Qt's system random generator, so real file cases run without
+an application or fake session/logger implementation.
+
+Root send fingerprints remain the existing device State fields. Nonroot files use
+only last_sent_fingerprint and last_imported_fingerprint in send-state.toml. Invalid,
+unreadable, aliased or unknown-format send state holds automatic send. Imported
+bytes are also suppressed in memory before marker persistence, preventing an echo
+when that write fails. Each observer compares only its own file; initial observation
+and an observed missing-to-present transition never queue a send. A later external
+replacement/save is debounced for that account, and a signed-out session cannot
+supply another account's transport. The existing QFileSystemWatcher may coalesce
+external events; an unobserved delete/recreate gap cannot be distinguished from a
+replacement save.
+
+Absent settings are read without creation and cannot initialize/publish through
+this UI. File creation UI remains held. Version2 legacy imports/exports and layered
+sync application remain refused; account editing/list forks/global-file edits stay
+held. The final precondition-to-rename window against a noncooperating writer remains
+finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
+and a coherent current application need separate qualification.
+
+Automatic send retains the qualifying operation's exact file snapshot and weak
+originating-session ownership. Each observation cancels stale/invalid queued work;
+only another qualifying save replaces it. Timer dispatch validates that capture
+instead of reading newly created bytes. Session-specific receipt tokens prevent
+an older completion from clearing a newer session's in-flight operation.
+
+A retained History entry can outlive its originating setup box. The actual restore
+callback is wrapped by a setup QObject lifetime guard before any setup-owned state
+is read; it then reacquires the selected session and validates the captured target.
+Synthetic cases invoke the directly used production queue and QObject guard. They
+do not claim a real widget stack or live network reproduction.

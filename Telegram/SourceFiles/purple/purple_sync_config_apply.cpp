@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_config_apply.h"
 
 #include "purple/purple_config.h"
+#include "main/main_session.h"
 #include "purple/purple_state.h"
 #include "purple/purple_sync_account_binding.h"
 
@@ -50,6 +51,8 @@ struct VerifiedWrite {
 }
 
 [[nodiscard]] VerifiedWrite WriteSettingsWithHistory(
+		Main::Session &session,
+		const AccountOperationTarget &target,
 		const SyncSettingsFile &current,
 		const QByteArray &text,
 		const QString &fingerprint,
@@ -58,14 +61,15 @@ struct VerifiedWrite {
 		const QString &versionKey,
 		const QString &keepId = QString()) {
 	auto result = VerifiedWrite();
-	if (!LegacyRootSettingsOperationsAllowed()
-		|| ParseSettings(QString::fromUtf8(text), SettingsFilePath()).settings.version > kSettingsVersion
+	if (!ValidateAccountSyncTarget(&session, target)
+		|| ParseSettings(QString::fromUtf8(text), target.file.path).settings.version > kSettingsVersion
 		|| !CanReplaceLegacyRootSettings(current.text, text)
 		|| SettingsFingerprint(text) != fingerprint
 		|| !SyncSettingsTextWritable(text)) {
 		return result;
 	}
 	const auto saved = SaveSyncConfigHistory(
+		AccountSyncHistoryAccess(&session, target),
 		(current.status == SyncSettingsFileStatus::Present
 			? std::make_optional(current.text)
 			: std::nullopt),
@@ -80,16 +84,11 @@ struct VerifiedWrite {
 	result.historyId = saved->id;
 	result.restorable = saved->existed
 		&& SyncSettingsTextWritable(current.text);
-	const auto expected = SettingsFileInput{
-		current.status == SyncSettingsFileStatus::Present
-			? SettingsFileState::Readable : SettingsFileState::Missing, current.text };
-	if (WriteGuardedSettingsFile(SettingsFilePath(), expected, text,
-		[] { return LegacyRootSettingsOperationsAllowed(); }, true)
-		!= GuardedFileWrite::Written) {
+	if (ReplaceAccountSyncSettings(&session, target, text) != GuardedFileWrite::Written) {
 		return result;
 	}
 	result.wrote = true;
-	result.readBack = ReadSyncSettingsFile(SettingsFilePath());
+	result.readBack = ReadSyncSettingsFile(target.files);
 	if (result.readBack.status != SyncSettingsFileStatus::Present
 		|| result.readBack.text != text
 		|| result.readBack.fingerprint != fingerprint) {
@@ -133,6 +132,8 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		const SyncConfigReview &review,
 		const std::optional<QString> &chosenRemoteKey) {
 	auto result = SyncConfigApplyResult();
+	const auto target = AccountSyncTarget(&session);
+	if (!target) { return Stop(result, SyncConfigApplyStatus::AccountUnavailable); }
 	if (!SyncAccountAvailable(account, session, inventory.accountUserId)
 		|| review.accountUserId != inventory.accountUserId) {
 		return Stop(result, SyncConfigApplyStatus::AccountUnavailable);
@@ -148,7 +149,7 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 				inventory,
 				nullptr,
 				{},
-				ReadSyncSettingsFile(SettingsFilePath())),
+				ReadSyncSettingsFile(target->files)),
 			stamp,
 			chosenRemoteKey);
 		if (before.status != SyncConfigApplyPlanStatus::Ready) {
@@ -170,7 +171,7 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		result.joined = true;
 	}
 
-	auto store = SyncLocalStore(ConfigDirectory() + u"/sync"_q);
+	auto store = SyncLocalStore(target->files.syncDirectory);
 	const auto opened = store.Open(true);
 	const auto state = store.state();
 	if (opened.status != SyncStoreStatus::Ready || !state) {
@@ -196,7 +197,8 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		staged = pending.staged;
 	}
 	const auto token = AccountSyncBindingToken(account);
-	const auto local = ReadSyncSettingsFile(SettingsFilePath());
+	const auto expectedStore = ReadSettingsFileInput(target->files.syncStore);
+	const auto local = ReadSyncSettingsFile(target->files);
 	const auto plan = PlanSyncConfigApply(
 		ReviewSyncConfigInventory(inventory, state, staged, local),
 		(review.bound
@@ -219,6 +221,7 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 			? SyncConfigHistoryReason::BeforeUpdate
 			: SyncConfigHistoryReason::BeforeChoice;
 		const auto write = WriteSettingsWithHistory(
+			session, *target,
 			local,
 			plan.source->text,
 			plan.writeFingerprint,
@@ -245,6 +248,13 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	case SyncConfigApplyCompletionStatus::AdoptRefused:
 		return Stop(result, SyncConfigApplyStatus::NeedsReview);
 	}
+	auto completedTarget = *target;
+	completedTarget.file.input = { SettingsFileState::Readable, current.text };
+	if (!ValidateAccountSyncTarget(&session, completedTarget)
+		|| AccountSyncBindingToken(account) != token
+		|| !ValidateAccountSyncStoreTarget(&session, completedTarget, expectedStore)) {
+		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
+	}
 	if (completion.adopted) {
 		const auto committed = store.CommitConfigData(
 			SyncLocalConfigOf(*completion.adopted),
@@ -269,9 +279,11 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 }
 
 SyncConfigRestoreResult RestoreSyncConfigHistory(
+		Main::Session &session,
 		const QString &id,
 		SyncConfigHistoryReason reason) {
-	if (!LegacyRootSettingsOperationsAllowed()) {
+	const auto target = AccountSyncTarget(&session);
+	if (!target) {
 		return { .status = SyncConfigRestoreStatus::InvalidSettings };
 	}
 
@@ -281,7 +293,7 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		result.status = SyncConfigRestoreStatus::InvalidReason;
 		return result;
 	}
-	const auto entries = ListSyncConfigHistory();
+	const auto entries = ListSyncConfigHistory(AccountSyncHistoryAccess(&session, *target));
 	const auto entry = std::find_if(
 		entries.begin(),
 		entries.end(),
@@ -292,14 +304,14 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		result.status = SyncConfigRestoreStatus::FileDidNotExist;
 		return result;
 	}
-	const auto text = ReadSyncConfigHistory(id);
+	const auto text = ReadSyncConfigHistory(AccountSyncHistoryAccess(&session, *target), id);
 	if (!text || SettingsFingerprint(*text) != entry->fingerprint) {
 		return result;
 	} else if (!SyncSettingsTextWritable(*text)) {
 		result.status = SyncConfigRestoreStatus::NotText;
 		return result;
 	}
-	const auto local = ReadSyncSettingsFile(SettingsFilePath());
+	const auto local = ReadSyncSettingsFile(target->files);
 	if (local.status == SyncSettingsFileStatus::Invalid) {
 		result.status = SyncConfigRestoreStatus::InvalidSettings;
 		return result;
@@ -310,6 +322,7 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		return result;
 	}
 	const auto write = WriteSettingsWithHistory(
+		session, *target,
 		local,
 		*text,
 		entry->fingerprint,
@@ -322,6 +335,7 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 	case SyncConfigApplyStatus::Applied:
 		result.status = SyncConfigRestoreStatus::Restored;
 		result.fingerprint = write.readBack.fingerprint;
+		NoteSettingsImported(&session, write.readBack.text);
 		break;
 	case SyncConfigApplyStatus::HistoryError:
 		result.status = SyncConfigRestoreStatus::HistoryError;

@@ -7,13 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_history.h"
 
-#include "base/random.h"
-#include "purple/purple_config.h"
 #include "purple/purple_config_sync.h"
 #include "purple/purple_state.h"
 #include "purple/purple_sync_local_store.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QDebug>
+#include <QtCore/QRandomGenerator>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -139,42 +139,38 @@ void SortNewestFirst(std::vector<SequencedEntry> &entries) {
 	});
 }
 
-[[nodiscard]] bool CheckDirectories() {
-	if (!LegacyRootSettingsOperationsAllowed()) {
+[[nodiscard]] bool CheckDirectories(const SyncHistoryAccess &access) {
+	if (!access.valid || !access.valid()) {
 		return false;
 	}
 	for (const auto &path : {
-		ConfigDirectory() + u"/sync"_q,
-		SyncConfigHistoryDirectory(),
+		access.files.syncDirectory,
+		SyncConfigHistoryDirectory(access),
 	}) {
 		const auto status = EnsureSyncPrivateDirectory(path);
 		if (status != SyncStoreStatus::Ready) {
-			LOG(("Purple Error: Settings history refused %1, status %2."
-				).arg(path
-				).arg(int(status)));
+			qWarning().noquote() << u"Purple Error: Settings history refused %1, status %2."_q.arg(path
+				).arg(int(status));
 			return false;
 		}
 	}
 	return true;
 }
 
-[[nodiscard]] bool PrepareDirectories() {
-	if (!LegacyRootSettingsOperationsAllowed()) {
+[[nodiscard]] bool PrepareDirectories(const SyncHistoryAccess &access) {
+	if (!access.valid || !access.valid()) {
 		return false;
 	}
-	if (!QDir().mkpath(ConfigDirectory())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
-		return false;
-	}
-	return CheckDirectories();
+
+	return CheckDirectories(access);
 }
 
-[[nodiscard]] bool ExistingDirectories() {
-	if (!LegacyRootSettingsOperationsAllowed()) {
+[[nodiscard]] bool ExistingDirectories(const SyncHistoryAccess &access) {
+	if (!access.valid || !access.valid()) {
 		return false;
 	}
-	const auto info = QFileInfo(SyncConfigHistoryDirectory());
-	return (info.exists() || info.isSymLink()) && CheckDirectories();
+	const auto info = QFileInfo(SyncConfigHistoryDirectory(access));
+	return (info.exists() || info.isSymLink()) && CheckDirectories(access);
 }
 
 [[nodiscard]] QByteArray SerializeMetadata(
@@ -278,7 +274,7 @@ void SortNewestFirst(std::vector<SequencedEntry> &entries) {
 
 [[nodiscard]] QString UnusedId(const QString &directory, int64 createdMs) {
 	for (auto attempt = 0; attempt != kIdAttempts; ++attempt) {
-		const auto suffix = base::RandomValue<uint64_t>();
+		const auto suffix = QRandomGenerator::system()->generate64();
 		const auto id = u"%1-%2"_q
 			.arg(createdMs, kTimeDigits, 10, QChar(u'0'))
 			.arg(suffix, kSuffixDigits, 16, QChar(u'0'));
@@ -299,7 +295,7 @@ void Discard(const QString &directory, const QString &id) {
 	}) {
 		const auto info = QFileInfo(path);
 		if ((info.exists() || info.isSymLink()) && !QFile::remove(path)) {
-			LOG(("Purple Error: Could not remove %1.").arg(path));
+			qWarning().noquote() << u"Purple Error: Could not remove %1."_q.arg(path);
 		}
 	}
 }
@@ -320,7 +316,7 @@ void Discard(const QString &directory, const QString &id) {
 	return result;
 }
 
-void Prune(const QString &directory, const QSet<QString> &keep) {
+void Prune(const SyncHistoryAccess &access, const QString &directory, const QSet<QString> &keep) {
 	const auto names = EntryNames(directory);
 	const auto valid = LoadValid(directory, names);
 	auto validIds = QSet<QString>();
@@ -350,23 +346,24 @@ void Prune(const QString &directory, const QSet<QString> &keep) {
 		const auto obsolete = validIds.contains(id)
 			|| (full && id < oldestKept);
 		const auto path = directory + u"/"_q + name;
-		if (obsolete && !QFile::remove(path)) {
-			LOG(("Purple Error: Could not remove %1.").arg(path));
+		if (obsolete && access.valid && access.valid() && !QFile::remove(path)) {
+			qWarning().noquote() << u"Purple Error: Could not remove %1."_q.arg(path);
 		}
 	}
 }
 
 } // namespace
 
-QString SyncConfigHistoryDirectory() {
-	if (!LegacyRootSettingsOperationsAllowed()) {
+QString SyncConfigHistoryDirectory(const SyncHistoryAccess &access) {
+	if (!access.valid || !access.valid()) {
 		return QString();
 	}
 
-	return ConfigDirectory() + u"/sync/history"_q;
+	return access.files.history;
 }
 
 std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
+		const SyncHistoryAccess &access,
 		const std::optional<QByteArray> &text,
 		SyncConfigHistoryReason reason,
 		const QString &label,
@@ -377,27 +374,27 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 		|| ReasonName(reason).isEmpty()
 		|| label.size() > kMaximumLabelLength
 		|| (!versionKey.isEmpty() && !IsConfigVersionKey(versionKey))) {
-		LOG(("Purple Error: Refused an invalid settings history entry."));
+		qWarning().noquote() << u"Purple Error: Refused an invalid settings history entry."_q;
 		return std::nullopt;
 	}
 	const auto createdMs = int64(QDateTime::currentMSecsSinceEpoch());
 	if (createdMs <= 0 || createdMs > kMaximumSafeInteger) {
-		LOG(("Purple Error: Settings history has no usable clock."));
+		qWarning().noquote() << u"Purple Error: Settings history has no usable clock."_q;
 		return std::nullopt;
 	}
-	if (!PrepareDirectories()) {
+	if (!PrepareDirectories(access)) {
 		return std::nullopt;
 	}
-	const auto directory = SyncConfigHistoryDirectory();
+	const auto directory = SyncConfigHistoryDirectory(access);
 	const auto valid = LoadValid(directory, EntryNames(directory));
 	const auto sequence = (valid.empty() ? 0 : valid.front().sequence) + 1;
 	if (sequence > kMaximumSafeInteger) {
-		LOG(("Purple Error: Settings history has no usable sequence."));
+		qWarning().noquote() << u"Purple Error: Settings history has no usable sequence."_q;
 		return std::nullopt;
 	}
 	const auto id = UnusedId(directory, createdMs);
 	if (id.isEmpty()) {
-		LOG(("Purple Error: Could not choose a settings history id."));
+		qWarning().noquote() << u"Purple Error: Could not choose a settings history id."_q;
 		return std::nullopt;
 	}
 	const auto entry = SyncConfigHistoryEntry{
@@ -413,7 +410,7 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 	const auto textStatus = WriteSyncPrivateFile(
 		TextPath(directory, id),
 		bytes);
-	const auto metadataStatus = (textStatus == SyncStoreStatus::Ready)
+	const auto metadataStatus = (textStatus == SyncStoreStatus::Ready && access.valid && access.valid())
 		? WriteSyncPrivateFile(
 			MetadataPath(directory, id),
 			SerializeMetadata(entry, sequence))
@@ -421,10 +418,9 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 	const auto saved = (metadataStatus == SyncStoreStatus::Ready)
 		? LoadEntry(directory, id)
 		: std::nullopt;
-	if (!saved || saved->text != bytes) {
-		LOG(("Purple Error: Could not save settings history %1, status %2."
-			).arg(id
-			).arg(int(metadataStatus)));
+	if (!access.valid || !access.valid() || !saved || saved->text != bytes) {
+		qWarning().noquote() << u"Purple Error: Could not save settings history %1, status %2."_q.arg(id
+			).arg(int(metadataStatus));
 		Discard(directory, id);
 		return std::nullopt;
 	}
@@ -432,20 +428,19 @@ std::optional<SyncConfigHistoryEntry> SaveSyncConfigHistory(
 	if (!keepId.isEmpty()) {
 		keep.insert(keepId);
 	}
-	Prune(directory, keep);
+	if (access.valid && access.valid()) { Prune(access, directory, keep); }
 	return saved->entry;
 }
 
-std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory() {
-	if (!ExistingDirectories()) {
+std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory(const SyncHistoryAccess &access) {
+	if (!ExistingDirectories(access)) {
 		return {};
 	}
-	const auto directory = SyncConfigHistoryDirectory();
+	const auto directory = SyncConfigHistoryDirectory(access);
 	auto invalid = 0;
 	const auto valid = LoadValid(directory, EntryNames(directory), &invalid);
 	if (invalid) {
-		LOG(("Purple Error: Skipped %1 invalid settings history entries."
-			).arg(invalid));
+		qWarning().noquote() << u"Purple Error: Skipped %1 invalid settings history entries."_q.arg(invalid);
 	}
 	auto result = std::vector<SyncConfigHistoryEntry>();
 	result.reserve(valid.size());
@@ -455,14 +450,14 @@ std::vector<SyncConfigHistoryEntry> ListSyncConfigHistory() {
 	return result;
 }
 
-std::optional<QByteArray> ReadSyncConfigHistory(const QString &id) {
-	if (!IsHistoryId(id) || !ExistingDirectories()) {
-		LOG(("Purple Error: No settings history entry %1.").arg(id));
+std::optional<QByteArray> ReadSyncConfigHistory(const SyncHistoryAccess &access, const QString &id) {
+	if (!IsHistoryId(id) || !ExistingDirectories(access)) {
+		qWarning().noquote() << u"Purple Error: No settings history entry %1."_q.arg(id);
 		return std::nullopt;
 	}
-	const auto loaded = LoadEntry(SyncConfigHistoryDirectory(), id);
+	const auto loaded = LoadEntry(SyncConfigHistoryDirectory(access), id);
 	if (!loaded) {
-		LOG(("Purple Error: Settings history entry %1 is invalid.").arg(id));
+		qWarning().noquote() << u"Purple Error: Settings history entry %1 is invalid."_q.arg(id);
 		return std::nullopt;
 	}
 	return loaded->text;

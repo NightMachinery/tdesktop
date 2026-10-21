@@ -19,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 
+[[nodiscard]] bool AccountSyncRecordSupported(const QByteArray &record);
+[[nodiscard]] bool AccountFilePathSafe(const QString &path);
 [[nodiscard]] bool CanReplaceLegacyRootSettings(const QByteArray &before, const QByteArray &after);
 
 struct AccountFileTarget {
@@ -26,6 +28,20 @@ struct AccountFileTarget {
 	QString path;
 	SettingsFileInput input;
 	uint64_t generation = 0;
+	QByteArray directoryIdentity;
+};
+
+struct AccountOperationTarget {
+	AccountFileTarget file;
+	AccountFiles files;
+	QByteArray syncDirectoryIdentity;
+	QByteArray historyDirectoryIdentity;
+};
+
+struct AccountSendFingerprints {
+	QString sent;
+	QString imported;
+	SettingsFileInput input;
 };
 
 enum class ManualSettingsExportRole {
@@ -65,6 +81,16 @@ public:
 	[[nodiscard]] std::optional<ManualSettingsExportTarget> manualExportTarget(const AccountKey &key);
 	[[nodiscard]] bool validateManualExport(const ManualSettingsExportTarget &target);
 	[[nodiscard]] std::optional<AccountFileTarget> editTarget(const AccountKey &key);
+	[[nodiscard]] std::optional<AccountOperationTarget> operationTarget(const AccountKey &key);
+	[[nodiscard]] bool validateOperation(const AccountOperationTarget &target, bool sameInput = true);
+	[[nodiscard]] bool validateStore(const AccountOperationTarget &target, const SettingsFileInput &expected, bool sameInput = true);
+	[[nodiscard]] std::optional<AccountSendFingerprints> fingerprints(const AccountOperationTarget &target);
+	void suppressImportedEcho(const AccountOperationTarget &target);
+	[[nodiscard]] bool noteFingerprint(const AccountOperationTarget &target, bool imported);
+	[[nodiscard]] std::optional<AccountOperationTarget> observeAccountSave(const AccountKey &key);
+	void forgetAccountSave(const AccountKey &key);
+	[[nodiscard]] bool shouldAutoSend(const AccountOperationTarget &target);
+	[[nodiscard]] GuardedFileWrite replace(const AccountOperationTarget &target, const QByteArray &bytes);
 	[[nodiscard]] bool permissionsReady() const;
 	[[nodiscard]] bool accountTrafficReady(const AccountKey &key) const;
 	[[nodiscard]] uint64_t generation() const;
@@ -92,6 +118,8 @@ private:
 	std::function<void()> _changed;
 	uint64_t _generation = 1;
 	uint64_t _routingGeneration = 1;
+	std::map<QString, QString> _importedEcho;
+	std::map<QString, SettingsFileInput> _saveObservations;
 	bool _persistFailed = false;
 	bool _watching = false;
 

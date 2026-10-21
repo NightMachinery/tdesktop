@@ -25,11 +25,21 @@ namespace {
 	return ParseSettings(QString::fromUtf8(text), path).ok();
 }
 
-[[nodiscard]] bool LastGoodSettingsLoad() {
-	const auto path = LastGoodSettingsFilePath();
+[[nodiscard]] bool LastGoodSettingsLoad(const QString &path) {
 	auto file = QFile(path);
 	return file.open(QIODevice::ReadOnly)
 		&& SettingsTextLoads(file.readAll(), path);
+}
+
+SyncConfigReview ClientSupportedReview(SyncConfigReview result) {
+	for (const auto &head : result.heads) {
+		const auto parsed = ParseSettings(QString::fromUtf8(head.text), u"sync record"_q);
+		if (!parsed.ok() || parsed.settings.version > kSettingsVersion) {
+			result.status = SyncConfigReviewStatus::NeedsReview;
+			break;
+		}
+	}
+	return result;
 }
 
 } // namespace
@@ -67,8 +77,9 @@ SyncConfigWriter SyncWriter() {
 	return { .platform = SyncWriterPlatform(), .app = SyncWriterApp() };
 }
 
-SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
-	const auto lastGood = UsingLastGoodSettings();
+SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files) {
+	const auto &path = files.settings;
+	const auto lastGood = false;
 	const auto invalid = MakeSyncSettingsFile(
 		SyncSettingsFileStatus::Invalid,
 		QByteArray(),
@@ -78,7 +89,7 @@ SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
 		return MakeSyncSettingsFile(
 			SyncSettingsFileStatus::Absent,
 			QByteArray(),
-			lastGood || LastGoodSettingsLoad());
+			lastGood || LastGoodSettingsLoad(files.good));
 	} else if (info.isSymLink()
 		|| !info.isFile()
 		|| info.size() > kSyncSettingsMaximumBytes) {
@@ -98,7 +109,7 @@ SyncSettingsFile ReadSyncSettingsFile(const QString &path) {
 		SyncSettingsFileStatus::Present,
 		text,
 		lastGood
-			|| (!SettingsTextLoads(text, path) && LastGoodSettingsLoad()));
+			|| (!SettingsTextLoads(text, path) && LastGoodSettingsLoad(files.good)));
 }
 
 SyncConfigReview ReviewSyncConfig(
@@ -111,16 +122,18 @@ SyncConfigReview ReviewSyncConfig(
 		result.status = SyncConfigReviewStatus::AccountUnavailable;
 		return result;
 	}
-	const auto local = ReadSyncSettingsFile(SettingsFilePath());
-	const auto root = ConfigDirectory() + u"/sync"_q;
+	const auto target = AccountSyncTarget(&session);
+	if (!target) { result.status = SyncConfigReviewStatus::AccountUnavailable; return result; }
+	const auto local = ReadSyncSettingsFile(target->files);
+	const auto root = target->files.syncDirectory;
 	const auto stateInfo = QFileInfo(root + u"/state.json"_q);
 	if (!stateInfo.exists() && !stateInfo.isSymLink()) {
-		return ReviewSyncConfigInventory(inventory, nullptr, {}, local);
+		return ClientSupportedReview(ReviewSyncConfigInventory(inventory, nullptr, {}, local));
 	}
 	auto store = SyncLocalStore(root);
 	const auto opened = store.Open(true);
 	if (opened.status == SyncStoreStatus::Uninitialized) {
-		return ReviewSyncConfigInventory(inventory, nullptr, {}, local);
+		return ClientSupportedReview(ReviewSyncConfigInventory(inventory, nullptr, {}, local));
 	}
 	const auto state = store.state();
 	if (opened.status != SyncStoreStatus::Ready || !state) {
@@ -141,7 +154,7 @@ SyncConfigReview ReviewSyncConfig(
 		}
 		staged = pending.staged;
 	}
-	return ReviewSyncConfigInventory(inventory, state, staged, local);
+	return ClientSupportedReview(ReviewSyncConfigInventory(inventory, state, staged, local));
 }
 
 } // namespace Purple

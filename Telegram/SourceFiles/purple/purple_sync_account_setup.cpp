@@ -32,7 +32,7 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 		Main::Account &account,
 		Main::Session &session,
 		const SyncAccountInventoryResult &inventory) {
-	if (!AccountAutomaticOperationsAllowed(&session)
+	if (!AccountSyncOperationsAllowed(&session)
 		|| account.loggingOut() || account.maybeSession() != &session) {
 		return { SyncAccountSetupStatus::AccountUnavailable };
 	}
@@ -65,7 +65,9 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 		return { SyncAccountSetupStatus::NeedsReview };
 	}
 
-	auto store = SyncLocalStore(ConfigDirectory() + u"/sync"_q);
+	const auto target = AccountSyncTarget(&session);
+	if (!target) { return { SyncAccountSetupStatus::AccountUnavailable }; }
+	auto store = SyncLocalStore(target->files.syncDirectory);
 	const auto opened = store.Open(true);
 	if (opened.status != SyncStoreStatus::Ready
 		&& opened.status != SyncStoreStatus::Uninitialized) {
@@ -114,11 +116,15 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 		!= SyncAccountBindingVerdict::MissingAccountToken) {
 		return { SyncAccountSetupStatus::AccountUnbound };
 	}
+	if (!ValidateAccountSyncTarget(&session, *target)) {
+		return { SyncAccountSetupStatus::AccountUnavailable };
+	}
 	const auto initialized = store.Initialize(initial);
 	if (!initialized) {
 		return { SyncAccountSetupStatus::StoreError, initialized.status };
 	}
-	if (!StoreAccountSyncBinding(initial, account)
+	if (!ValidateAccountSyncTarget(&session, *target)
+		|| !StoreAccountSyncBinding(initial, account)
 		|| CheckAccountSyncBinding(initial, account)
 			!= SyncAccountBindingVerdict::Bound) {
 		return { SyncAccountSetupStatus::AccountUnbound };

@@ -443,19 +443,23 @@ void WriteImported(
 		const QString &text,
 		const std::shared_ptr<Ui::Show> &show) {
 	if (AskingWindowSwitched(show)
-		|| !AccountAutomaticOperationsAllowed(session)
+		|| !AccountSyncOperationsAllowed(session)
 		|| !ValidateAccountSettingsTarget(session, target)
 		|| !CanReplaceLegacyRootSettings(target.input.bytes, text.toUtf8())) {
 		RefuseSwitchedImport(account);
 		return;
 	}
+	const auto weakSession = base::make_weak(session.get());
+	const auto current = [=] {
+		const auto live = weakSession.get();
+		return live && AccountSyncOperationsAllowed(live)
+			&& ValidateAccountSettingsTarget(live, target);
+	};
 	const auto path = target.path;
 	const auto failed = WriteImportedSettings(path, [&] {
-		return WriteGuardedSettingsFile(path, target.input, text.toUtf8(), [&] {
-			return AccountAutomaticOperationsAllowed(session)
-				&& ValidateAccountSettingsTarget(session, target);
-		}, true) == GuardedFileWrite::Written;
-	});
+		return WriteGuardedSettingsFile(path, target.input, text.toUtf8(), current, true)
+			== GuardedFileWrite::Written;
+	}, current);
 	if (failed == path) {
 		show->showBox(Ui::MakeInformBox(
 			u"Could not write %1. See the log."_q.arg(path)));
@@ -488,7 +492,7 @@ void ConfirmAndImport(
 		return;
 	}
 
-	if (!AccountAutomaticOperationsAllowed(session)) {
+	if (!AccountSyncOperationsAllowed(session)) {
 		show->showBox(Ui::MakeInformBox(SettingsOwnerStatus()));
 		return;
 	}
@@ -508,7 +512,7 @@ void ConfirmAndImport(
 		return;
 	}
 	const auto text = QString::fromUtf8(content);
-	const auto parsed = ParseSettings(text, SettingsFilePath());
+	const auto parsed = ParseSettings(text, target->path);
 	if (!parsed.ok()) {
 		show->showBox(Ui::MakeInformBox(
 			u"That %1 is not valid TOML, so nothing was changed:\n\n%2"_q.arg(
@@ -548,7 +552,7 @@ void ConfirmAndImport(
 		.text = lines.join('\n'),
 		.confirmed = [=](Fn<void()> close) {
 			close();
-			if (!weakSession.get() || !AccountAutomaticOperationsAllowed(weakSession.get())
+			if (!weakSession.get() || !AccountSyncOperationsAllowed(weakSession.get())
 				|| !ValidateAccountSettingsTarget(weakSession.get(), *target)
 				|| (stillValid && !stillValid())) {
 				if (AskingWindowSwitched(keep)) {
@@ -698,7 +702,7 @@ void OfferImportCandidate(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show,
 		const ImportCandidate &candidate) {
-	if (!AccountAutomaticOperationsAllowed(session) || !show || !(*show)) {
+	if (!AccountSyncOperationsAllowed(session) || !show || !(*show)) {
 		ReleaseSettingsOfferStart(session);
 		return;
 	}
@@ -707,7 +711,7 @@ void OfferImportCandidate(
 		candidate.itemId.msg.bare,
 		SettingsOfferMessageId(session).bare,
 		candidate.date,
-		QFileInfo(SettingsFilePath()).lastModified().toSecsSinceEpoch());
+		QFileInfo(AccountSettingsTarget(session)->path).lastModified().toSecsSinceEpoch());
 	if (verdict == ImportOfferVerdict::InactiveAccount) {
 		LOG(("Purple: Saved Messages settings offer dropped: "
 			"the account is no longer the active one."));
@@ -837,7 +841,7 @@ void NoteConfirmedSend(
 		not_null<Main::Session*> session,
 		const QByteArray &content,
 		MsgId messageId) {
-	if (AccountAutomaticOperationsAllowed(session)) {
+	if (AccountSyncOperationsAllowed(session)) {
 		NoteSettingsSent(session, content);
 	}
 	if (messageId > SettingsOfferMessageId(session)) {
@@ -856,7 +860,7 @@ bool Upload(
 		const QByteArray &content,
 		int version,
 		Fn<void(std::optional<MsgId>)> finished) {
-	if (!AccountAutomaticOperationsAllowed(session)) {
+	if (!AccountSyncOperationsAllowed(session)) {
 		return false;
 	}
 	const auto target = AccountSettingsTarget(session);
@@ -868,7 +872,7 @@ bool Upload(
 	UploadTo(session, content, version, [=](std::optional<MsgId> messageId) {
 		if (messageId) {
 			if (const auto live = weak.get(); live
-				&& AccountAutomaticOperationsAllowed(live)
+				&& AccountSyncOperationsAllowed(live)
 				&& ValidateAccountSettingsTarget(live, *target)) {
 				NoteConfirmedSend(live, content, *messageId);
 			}
@@ -1270,7 +1274,7 @@ void AddImportSettingsFileAction(
 void OfferNewerSettingsFromSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {
-	if (!AccountAutomaticOperationsAllowed(session)) {
+	if (!AccountSyncOperationsAllowed(session)) {
 		return;
 	}
 

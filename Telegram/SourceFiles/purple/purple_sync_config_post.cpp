@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_inventory.h"
 
 #include <cstdint>
+#include <map>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -28,20 +29,27 @@ namespace {
 
 constexpr auto kMaximumStagedBytes = 256 * 1024;
 
-uint64_t PostsStarted = 0;
-int PostsInFlight = 0;
+struct PostCounters {
+	base::weak_ptr<Main::Session> session;
+	uint64_t started = 0;
+	int inFlight = 0;
+};
+std::map<Main::Session*, std::shared_ptr<PostCounters>> Posts;
+
+std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session) {
+	auto &entry = Posts[session.get()];
+	if (!entry || entry->session.get() != session.get()) {
+		entry = std::make_shared<PostCounters>();
+		entry->session = base::make_weak(session.get());
+	}
+	return entry;
+}
 
 [[nodiscard]] bool ValidStagedRecord(const QByteArray &staged) {
 	if (staged.isEmpty() || staged.size() > kMaximumStagedBytes) {
 		return false;
 	}
-	const auto parsed = ParseSyncEnvelope(staged);
-	if (!parsed || InspectConfigPayload(parsed).status
-			!= ConfigPayloadStatus::Valid) {
-		return false;
-	}
-	const auto serialized = SerializeSyncEnvelope(parsed.envelope);
-	return serialized && serialized.canonical == staged;
+	return AccountSyncRecordSupported(staged);
 }
 
 [[nodiscard]] bool HoldsSyncSettingsRecord(not_null<HistoryItem*> item) {
@@ -58,7 +66,7 @@ int PostsInFlight = 0;
 
 SyncConfigSendQueue SyncConfigSendQueueOf(
 		not_null<Main::Session*> session) {
-	if (PostsInFlight > 0) {
+	if (PostsFor(session)->inFlight > 0) {
 		return SyncConfigSendQueue::HoldsSyncRecord;
 	}
 	const auto history = session->data().historyLoaded(session->userPeerId());
@@ -73,28 +81,36 @@ SyncConfigSendQueue SyncConfigSendQueueOf(
 	return SyncConfigSendQueue::Empty;
 }
 
-uint64_t SyncConfigPostsStarted() {
-	return PostsStarted;
+uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session) {
+	return PostsFor(session)->started;
 }
 
 SyncConfigPost::SyncConfigPost(
 		not_null<Main::Session*> session,
 		QByteArray staged,
-		Fn<void(SyncConfigPostResult)> finished)
+		Fn<void(SyncConfigPostResult)> finished,
+		Fn<bool()> stillCurrent)
 : _session(session)
 , _sessionGuard(base::make_weak(session))
 , _staged(std::move(staged))
-, _finished(std::move(finished)) {
+, _target(AccountSyncTarget(session))
+, _finished(std::move(finished))
+, _stillCurrent(std::move(stillCurrent)) {
 }
 
 SyncConfigPost::~SyncConfigPost() = default;
+
+bool SyncConfigPost::ContextCurrent() const {
+	return _sessionGuard && _target && ValidateAccountSyncTarget(_session, *_target)
+		&& _stillCurrent && _stillCurrent();
+}
 
 void SyncConfigPost::Start() {
 	if (_started || _done) {
 		return;
 	}
 	_started = true;
-	if (!_sessionGuard || !AccountAutomaticOperationsAllowed(_session)) {
+	if (!ContextCurrent()) {
 		Finish({ .status = SyncConfigPostStatus::Cancelled });
 		return;
 	}
@@ -104,16 +120,21 @@ void SyncConfigPost::Start() {
 	}
 	const auto weak = base::make_weak(this);
 	_posted = true;
-	++PostsStarted;
-	++PostsInFlight;
+	const auto counter = PostsFor(_session);
+	++counter->started;
+	++counter->inFlight;
 	_upload = std::make_shared<SyncConfigUpload>(
 		*_sessionGuard.get(),
 		_staged,
-		[weak](std::optional<MsgId> messageId) {
-			--PostsInFlight;
+		[weak, counter](std::optional<MsgId> messageId) {
+			--counter->inFlight;
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->OnReceipt(messageId);
 			}
+		},
+		[weak] {
+			const auto self = weak.get();
+			return self && !self->_done && self->ContextCurrent();
 		});
 	_upload->Start();
 }
@@ -138,7 +159,7 @@ void SyncConfigPost::Cancel() {
 }
 
 void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
-	if (!_sessionGuard || !AccountAutomaticOperationsAllowed(_session)) {
+	if (!ContextCurrent()) {
 		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
 		return;
 	}
@@ -161,7 +182,7 @@ void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
 }
 
 void SyncConfigPost::OnReadback(SyncCandidateReadResult result) {
-	if (!_sessionGuard || !AccountAutomaticOperationsAllowed(_session)) {
+	if (!ContextCurrent()) {
 		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
 		return;
 	}

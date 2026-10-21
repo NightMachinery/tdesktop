@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "purple/purple_account_config.h"
 #include "purple/purple_sync_config_describe.h"
 #include "purple/purple_sync_config_flow.h"
 #include "purple/purple_sync_inventory.h"
@@ -31,7 +32,7 @@ namespace Purple {
 [[nodiscard]] QString SyncWriterApp();
 [[nodiscard]] SyncConfigWriter SyncWriter();
 
-[[nodiscard]] SyncSettingsFile ReadSyncSettingsFile(const QString &path);
+[[nodiscard]] SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files);
 [[nodiscard]] SyncConfigReview ReviewSyncConfig(
 	Main::Account &account,
 	Main::Session &session,

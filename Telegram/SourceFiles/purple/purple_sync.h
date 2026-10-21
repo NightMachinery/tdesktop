@@ -280,7 +280,9 @@ template <typename Account>
 
 [[nodiscard]] inline QString WriteImportedSettings(
 		const QString &path,
-		Fn<bool()> write) {
+		Fn<bool()> write,
+		Fn<bool()> stillCurrent = {}) {
+	if (stillCurrent && !stillCurrent()) { return path; }
 	auto current = QFile(path);
 	if (current.exists()) {
 		const auto importBackup = SettingsImportBackupPath(path);
@@ -297,12 +299,12 @@ template <typename Account>
 			SettingsBackupPath(path),
 		};
 		for (const auto &backup : backups) {
-			if (!WriteSettingsCopy(backup, bytes)) {
+			if ((stillCurrent && !stillCurrent()) || !WriteSettingsCopy(backup, bytes)) {
 				return backup;
 			}
 		}
 	}
-	return write() ? QString() : path;
+	return (!stillCurrent || stillCurrent()) && write() ? QString() : path;
 }
 
 } // namespace Purple

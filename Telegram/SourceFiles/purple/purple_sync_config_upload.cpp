@@ -36,10 +36,12 @@ constexpr auto kUploadPartBytes = 32 * 1024;
 SyncConfigUpload::SyncConfigUpload(
 		Main::Session &session,
 		QByteArray content,
-		Fn<void(std::optional<MsgId>)> finished)
+		Fn<void(std::optional<MsgId>)> finished,
+		Fn<bool()> stillCurrent)
 : _session(base::make_weak(&session))
 , _content(std::move(content))
-, _finished(std::move(finished)) {
+, _finished(std::move(finished))
+, _stillCurrent(std::move(stillCurrent)) {
 }
 
 SyncConfigUpload::~SyncConfigUpload() {
@@ -59,7 +61,7 @@ void SyncConfigUpload::Start() {
 	}
 	_started = true;
 	const auto session = _session.get();
-	if (!session || _content.isEmpty()
+	if (!session || !_stillCurrent || !_stillCurrent() || _content.isEmpty()
 			|| _content.size() > kMaximumUploadBytes) {
 		Finish(std::nullopt);
 		return;
@@ -85,7 +87,7 @@ void SyncConfigUpload::SendNextPart() {
 		return;
 	}
 	const auto session = _session.get();
-	if (!session) {
+	if (!session || !_stillCurrent || !_stillCurrent()) {
 		Finish(std::nullopt);
 		return;
 	} else if (_offset == _content.size()) {
@@ -119,7 +121,7 @@ void SyncConfigUpload::SendMedia() {
 		return;
 	}
 	const auto session = _session.get();
-	if (!session) {
+	if (!session || !_stillCurrent || !_stillCurrent()) {
 		Finish(std::nullopt);
 		return;
 	}
@@ -196,7 +198,7 @@ void SyncConfigUpload::OnMedia(const MTPUpdates &result) {
 	if (const auto session = _session.get()) {
 		session->api().applyUpdates(result, _randomId);
 	}
-	Finish(messageId);
+	Finish(_stillCurrent && _stillCurrent() ? messageId : std::nullopt);
 }
 
 void SyncConfigUpload::Finish(std::optional<MsgId> messageId) {
