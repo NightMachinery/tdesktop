@@ -1183,12 +1183,20 @@ generation and the exact file snapshot; completion rechecks before bookkeeping.
 Valid account-file manual export remains supported within the existing schema1
 legacy document boundary. Layered schema2 imports/legacy sends remain refused.
 
-Last Seen and automatic-send settings rows read the originating account's effective
-settings. The sync flag remains file-local and defaults false when absent from that
-account file. Per-account writes are available only for the confirmed root owner
-while that root is global. Other account rows show the existing localized Not
-Available label and are disabled; queued callbacks recheck session and destination
-before a guarded write. Global Premium/Work Mode rows retain their app-wide role.
+Last Seen reasons and Last Seen Peek read the Settings window's account's effective
+values and write only that account's own file. Send after every save is file-local:
+turning it on in the global file does not opt another account in. These three rows
+use purpose-specific destinations; legacy global writes and unrelated editors do
+not gain permission from them. Missing, invalid or stale routing disables the row.
+Queued actions retain the originating session, window, account and file snapshot.
+
+With two or more loaded accounts, row captions distinguish the global default,
+inherited values and explicit own values. A pinned non-global Last Seen row offers
+Use the global account's value, removing exactly that own key through the shared
+Reset operation. Reset is absent on global and file-local rows. Names update with
+the signed-in accounts; a signed-out global account is identified honestly.
+App-wide Premium, Work Mode and Screen time remain app-wide and describe the
+global file on other account screens. Device confirmation preferences stay local.
 
 Stock folder lookup uses the ChatFilters originating session when selecting the
 Purple branch. The native nonpremium All-first mapping is unchanged. Synthetic
@@ -1217,5 +1225,9 @@ version = 2
 Opening preserves existing file bytes and versions. Unreadable files, links,
 non-files, changed account ownership or a concurrent creator refuse replacement.
 Creating this file does not send settings. Missing files still cannot publish via
-sync setup. Other per-account in-app edits remain unavailable; Work Mode, preset,
-schedule and global settings retain their existing app-wide destination.
+sync setup. An explicit first edit of one of the three supported own-file rows can
+also create this file, with only the requested override after the header. Creation
+is not a save and does not publish or send. Reset and ordinary reads never create
+an absent file. Existing files keep their version, unrelated text and comments.
+Other per-account editors remain unavailable; Work Mode, preset, schedule and
+global settings retain their existing app-wide destination.

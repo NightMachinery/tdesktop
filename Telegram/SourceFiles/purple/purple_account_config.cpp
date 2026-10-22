@@ -184,6 +184,42 @@ bool CreateAccountSettingsFile(
 #endif
 }
 
+bool RowDirectorySafe(const QString &path) {
+	const auto info = QFileInfo(path);
+	return !info.isSymLink() && (!info.exists() || info.isDir());
+}
+
+QString RowTable(AccountSettingsRow row) {
+	return row == AccountSettingsRow::SendAfterSave ? u"sync"_q : u"last_seen"_q;
+}
+
+QString RowKey(AccountSettingsRow row) {
+	switch (row) {
+	case AccountSettingsRow::LastSeenReasons: return u"reasons_p"_q;
+	case AccountSettingsRow::LastSeenPeek: return u"trade_p"_q;
+	case AccountSettingsRow::SendAfterSave: return u"send_after_save_p"_q;
+	}
+	return {};
+}
+
+bool RowInputUsable(const SettingsFileInput &input, const QString &path) {
+	if (input.state == SettingsFileState::Missing) { return true; }
+	const auto text = QString::fromUtf8(input.bytes);
+	const auto parsed = ParseSettings(text, path);
+	return input.state == SettingsFileState::Readable && text.toUtf8() == input.bytes
+		&& parsed.ok() && parsed.settings.version <= kHighestSettingsVersion;
+}
+
+bool HasOwnRowKey(const SettingsFileInput &input, AccountSettingsRow row) {
+	if (input.state != SettingsFileState::Readable) { return false; }
+	const auto parsed = toml::parse(std::string_view(input.bytes.constData(), input.bytes.size()));
+	if (!parsed) { return false; }
+	const auto table = RowTable(row).toStdString();
+	const auto key = RowKey(row).toStdString();
+	const auto values = parsed.table()[table].as_table();
+	return values && values->contains(key);
+}
+
 SettingsFileInput OwnerInput(const QString &path) {
 	const auto info = QFileInfo(path);
 	if (info.isSymLink() || (info.exists() && !info.isFile())) {
@@ -651,6 +687,14 @@ bool DesktopAccountConfig::validateOpen(const AccountSettingsOpenTarget &target)
 SettingsOpenResult DesktopAccountConfig::prepareOpen(
 		const AccountSettingsOpenTarget &target,
 		const std::function<bool()> &originCurrent) {
+	return prepareInput(target, NewAccountSettingsText(), originCurrent);
+}
+
+SettingsOpenResult DesktopAccountConfig::prepareInput(
+		const AccountSettingsOpenTarget &target,
+		const QByteArray &bytes,
+		const std::function<bool()> &originCurrent,
+		bool *published) {
 	if (!originCurrent || !originCurrent() || !validateOpen(target)) {
 		return {};
 	}
@@ -676,11 +720,11 @@ SettingsOpenResult DesktopAccountConfig::prepareOpen(
 			&& current->file.generation == target.file.generation
 			&& current->file.input == target.file.input;
 	};
-	const auto bytes = NewAccountSettingsText();
 	if (!CreateAccountSettingsFile(_root, *key, bytes,
 			target.accountsIdentity, target.accountDirectoryIdentity, logicalCurrent)) {
 		return { logicalCurrent() ? SettingsOpenStatus::CreateError : SettingsOpenStatus::Changed };
 	}
+	if (published) { *published = true; }
 	forgetAccountSave(target.file.account);
 	(void)observeAccountSave(target.file.account);
 	invalidate();
@@ -699,6 +743,206 @@ SettingsOpenResult DesktopAccountConfig::prepareOpen(
 		return {};
 	}
 	return { SettingsOpenStatus::Created, current };
+}
+
+AccountSettingsRowState DesktopAccountConfig::rowState(
+		const AccountKey &key, AccountSettingsRow row) {
+	auto result = AccountSettingsRowState();
+	result.target = rowTarget(key, row);
+	const auto read = [&](const Settings &effective) {
+		switch (row) {
+		case AccountSettingsRow::LastSeenReasons: result.value = effective.lastSeen.reasons; break;
+		case AccountSettingsRow::LastSeenPeek: result.value = effective.lastSeen.trade; break;
+		case AccountSettingsRow::SendAfterSave: result.value = effective.sync.sendAfterSave; break;
+		}
+	};
+	const auto pinned = [&](const std::vector<SettingsLayerKey> &applied) {
+		return row != AccountSettingsRow::SendAfterSave && globalAccount() != key
+			&& std::any_of(applied.begin(), applied.end(), [&](const SettingsLayerKey &entry) {
+				return entry.table == std::vector<QString>{ RowTable(row) } && entry.key == RowKey(row);
+			});
+	};
+	if (result.target) {
+		const auto &target = *result.target;
+		const auto &own = target.destination.file;
+		if (key == target.destination.global) {
+			read(ParseSettings(QString::fromUtf8(own.input.bytes), own.path).settings);
+		} else {
+			auto global = SettingsLayerText{ QString(), target.globalPath };
+			auto usable = false;
+			if (!target.globalFallback) {
+				global.text = QString::fromUtf8(target.globalInput.bytes);
+				usable = true;
+			} else if (target.globalGoodInput.state == SettingsFileState::Readable) {
+				const auto text = QString::fromUtf8(target.globalGoodInput.bytes);
+				const auto path = target.globalPath + u".good"_q;
+				if (ParseSettings(text, path).ok()) {
+					global = { text, path };
+					usable = true;
+				}
+			}
+			auto options = SettingsLayerOptions();
+			options.globalPresent = usable;
+			options.accountPresent = own.input.state == SettingsFileState::Readable;
+			options.followListMembers = workMode(key) == AccountWorkMode::Follow;
+			const auto layered = LayerSettings(global.text,
+				global.path, QString::fromUtf8(own.input.bytes), own.path, options);
+			read(layered.effective.settings);
+			result.pinned = pinned(layered.applied);
+		}
+	} else {
+		const auto own = files(key);
+		const auto globalPath = globalSettingsPath();
+		if ((own && (!RowDirectorySafe(own->directory) || !AccountFilePathSafe(own->settings)))
+			|| !RowDirectorySafe(QFileInfo(globalPath).absolutePath())
+			|| !AccountFilePathSafe(globalPath)) {
+			return result;
+		}
+		refreshSettings();
+		read(settings(key));
+		const auto source = report(key);
+		result.pinned = source && pinned(source->applied);
+	}
+	return result;
+}
+
+std::optional<AccountSettingsRowTarget> DesktopAccountConfig::rowTarget(
+		const AccountKey &key, AccountSettingsRow row) {
+	const auto table = RowTable(row);
+	const auto name = RowKey(row);
+	const auto scope = SettingsScope(table, name);
+	if (name.isEmpty() || (scope != SettingScope::PerAccount
+		&& !(row == AccountSettingsRow::SendAfterSave && scope == SettingScope::FileLocal))) {
+		return std::nullopt;
+	}
+	refreshLocalChoice();
+	const auto paths = files(key);
+	const auto globalPath = globalSettingsPath();
+	if (!paths || !RowDirectorySafe(paths->directory)
+		|| !RowDirectorySafe(QFileInfo(globalPath).absolutePath())
+		|| !AccountFilePathSafe(paths->settings) || !AccountFilePathSafe(globalPath)) {
+		return std::nullopt;
+	}
+	const auto destination = openTarget(key, SettingsOpenRole::Own);
+	const auto global = OwnerInput(globalPath);
+	if (!destination || !RowInputUsable(destination->file.input, destination->file.path)
+		|| (destination->file.input.state == SettingsFileState::Missing
+			&& (destination->file.account == destination->owner
+				|| OwnerInput(destination->file.path + u".good"_q).state != SettingsFileState::Missing))
+		|| !AccountFilePathSafe(globalPath)) { return std::nullopt; }
+	const auto fallback = global.state != SettingsFileState::Readable
+		|| !ParseSettings(QString::fromUtf8(global.bytes), globalPath).ok();
+	return AccountSettingsRowTarget{ *destination, row, globalPath, global,
+		DirectoryIdentity(QFileInfo(globalPath).absolutePath()), fallback,
+		fallback ? OwnerInput(globalPath + u".good"_q) : SettingsFileInput() };
+}
+
+bool DesktopAccountConfig::validateRow(const AccountSettingsRowTarget &target) {
+	const auto current = rowTarget(target.destination.requester, target.row);
+	return current && target.destination.role == SettingsOpenRole::Own
+		&& target.destination.file.account == target.destination.requester
+		&& current->globalPath == target.globalPath
+		&& current->globalInput == target.globalInput
+		&& current->globalDirectoryIdentity == target.globalDirectoryIdentity
+		&& current->globalFallback == target.globalFallback
+		&& current->globalGoodInput == target.globalGoodInput
+		&& validateOpen(target.destination);
+}
+
+AccountSettingsRowWriteResult DesktopAccountConfig::writeRow(
+		const AccountSettingsRowTarget &target,
+		std::optional<bool> value,
+		const std::function<bool()> &originCurrent) {
+	const auto current = [&] { return originCurrent && originCurrent() && validateRow(target); };
+	if (!current()) { return { .error = u"Settings changed. Try again."_q }; }
+	const auto &destination = target.destination;
+	const auto &file = destination.file;
+	const auto reset = !value.has_value();
+	if (reset && (target.row == AccountSettingsRow::SendAfterSave
+		|| file.account == destination.global)) {
+		return { .error = u"This row cannot inherit from another file."_q };
+	}
+	if (reset && (file.input.state == SettingsFileState::Missing
+		|| !HasOwnRowKey(file.input, target.row))) {
+		return { .ok = true, .target = target };
+	}
+	const auto text = file.input.state == SettingsFileState::Missing
+		? QString::fromUtf8(NewAccountSettingsText()) : QString::fromUtf8(file.input.bytes);
+	const auto splice = reset
+		? RemoveTableKey(text, file.path, RowTable(target.row), RowKey(target.row))
+		: SetTableBool(text, file.path, RowTable(target.row), RowKey(target.row), *value);
+	if (!splice.ok()) { return { .error = splice.error }; }
+	if (!splice.changed) { return { .ok = true, .target = target }; }
+	const auto bytes = splice.text.toUtf8();
+	const auto paths = files(file.account);
+	if (!paths || !current() || !AccountFilePathSafe(paths->backup)
+		|| !AccountFilePathSafe(paths->good)) {
+		return { .error = u"The settings destination is unavailable."_q };
+	}
+	auto expected = target;
+	const auto created = file.input.state == SettingsFileState::Missing;
+	if (created) {
+		if (target.globalPath == file.path
+			&& target.globalGoodInput.state != SettingsFileState::Missing) {
+			return { .error = u"Repair the app-wide settings file before changing this row."_q };
+		}
+		const auto creationOrigin = [&] {
+			return originCurrent && originCurrent()
+				&& (!target.globalFallback
+					|| OwnerInput(target.globalPath + u".good"_q) == target.globalGoodInput)
+				&& (target.globalPath == file.path
+					|| (OwnerInput(target.globalPath) == target.globalInput
+						&& DirectoryIdentity(QFileInfo(target.globalPath).absolutePath())
+							== target.globalDirectoryIdentity));
+		};
+		auto published = false;
+		const auto ready = prepareInput(destination, bytes, creationOrigin, &published);
+		if (!ready.target || ready.status != SettingsOpenStatus::Created) {
+			return { .changed = published, .created = published,
+				.error = u"The account settings file could not be created safely."_q };
+		}
+		expected.destination = *ready.target;
+	} else {
+		const auto backup = OwnerInput(paths->backup);
+		const auto good = OwnerInput(paths->good);
+		if (backup.state == SettingsFileState::ReadError || good.state == SettingsFileState::ReadError
+			|| WriteGuardedSettingsFile(paths->backup, backup, file.input.bytes, [&] {
+				return current() && AccountFilePathSafe(paths->backup);
+			}, true) != GuardedFileWrite::Written) {
+			return { .error = u"The account settings backup could not be written."_q };
+		}
+		if (WriteGuardedSettingsFile(file.path, file.input, bytes, [&] {
+			return current() && AccountFilePathSafe(paths->backup) && AccountFilePathSafe(paths->good);
+		}) != GuardedFileWrite::Written) {
+			return { .error = u"Settings changed or could not be written."_q };
+		}
+		expected.destination.file.input = { SettingsFileState::Readable, bytes };
+		invalidate();
+		watch();
+	}
+	if (expected.globalPath == file.path) {
+		expected.globalInput = { SettingsFileState::Readable, bytes };
+		expected.globalFallback = false;
+		expected.globalGoodInput = {};
+		expected.globalDirectoryIdentity = DirectoryIdentity(QFileInfo(file.path).absolutePath());
+	}
+	const auto committedCurrent = [&] {
+		return originCurrent && originCurrent() && validateRow(expected);
+	};
+	if (!committedCurrent()) {
+		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
+	}
+	const auto good = OwnerInput(paths->good);
+	if (!AccountFilePathSafe(paths->good)
+		|| WriteGuardedSettingsFile(paths->good, good, bytes, committedCurrent, true)
+			!= GuardedFileWrite::Written) {
+		return { .changed = true, .created = created, .error = u"Settings saved, but the last-good copy could not be updated."_q };
+	}
+	if (_changed) { _changed(); }
+	if (!committedCurrent()) {
+		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
+	}
+	return { .ok = true, .changed = true, .created = created, .target = expected };
 }
 
 std::optional<ManualSettingsExportTarget> DesktopAccountConfig::manualExportTarget(

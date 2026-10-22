@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/labels.h"
 #include <utility>
+#include <algorithm>
 #include "lang/lang_keys.h"
 #include "purple/purple_readme.h"
 #include "purple/purple_sync.h"
@@ -359,6 +360,7 @@ public:
 		const std::optional<SettingsFileInput> &expected = std::nullopt);
 	[[nodiscard]] std::optional<SettingsFileInput> checkedInput();
 	void observeAccountFiles() { autoSendLater(); }
+	void refreshAccountRows() { _accountRefreshPending = true; reloadFromDisk(); }
 	void noteSent(const QByteArray &bytes);
 	void noteImported(const QByteArray &bytes);
 
@@ -1193,6 +1195,134 @@ bool AccountAutomaticOperationsAllowed(not_null<Main::Session*> session) {
 		&& !session->account().loggingOut()
 		&& session->account().maybeSession() == session.get()
 		&& AccountRouting().accountTrafficReady(SessionAccountKey(session));
+}
+
+AccountSettingsRowState AccountSettingsRowFor(
+		not_null<Main::Session*> session, AccountSettingsRow row) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return {};
+	}
+	return AccountRouting().rowState(SessionAccountKey(session), row);
+}
+
+AccountSettingsRowWriteResult WriteAccountSettingsRow(
+		not_null<Main::Session*> session,
+		const AccountSettingsRowTarget &target,
+		std::optional<bool> value,
+		const std::function<bool()> &windowCurrent) {
+	const auto weak = base::make_weak(session.get());
+	const auto originCurrent = [=] {
+		const auto live = weak.get();
+		return live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == target.destination.requester
+			&& ConfigDirectory() == target.destination.root && windowCurrent && windowCurrent();
+	};
+	if (!originCurrent() || !AccountRouting().validateRow(target)) {
+		return { .error = u"Settings changed. Try again."_q };
+	}
+	Instance().observeAccountFiles();
+	if (!originCurrent() || !AccountRouting().validateRow(target)) {
+		return { .error = u"Settings changed. Try again."_q };
+	}
+	auto result = AccountRouting().writeRow(target, value, originCurrent);
+	if (!result.ok || !result.target) { return result; }
+	if (!originCurrent()) {
+		result.ok = false;
+		result.target.reset();
+		result.error = u"Settings context changed after writing."_q;
+		return result;
+	}
+	Instance().refreshAccountRows();
+	if (!originCurrent() || !AccountRouting().validateRow(*result.target)) {
+		result.ok = false;
+		result.target.reset();
+		result.error = u"Settings context changed after writing."_q;
+		return result;
+	}
+	Instance().observeAccountFiles();
+	if (!originCurrent() || !AccountRouting().validateRow(*result.target)) {
+		result.ok = false;
+		result.target.reset();
+		result.error = u"Settings context changed after writing."_q;
+	}
+	return result;
+}
+
+namespace {
+
+struct SettingsAccountLabels {
+	QString own;
+	QString global;
+	bool globalSignedIn = false;
+	bool multiple = false;
+	QStringList overrides;
+};
+
+SettingsAccountLabels SettingsRowLabels(
+		not_null<Main::Session*> session, std::optional<AccountSettingsRow> row) {
+	auto result = SettingsAccountLabels();
+	result.own = session->user()->name();
+	const auto global = AppWideSettingsAccount(session);
+	if (!global) { return result; }
+	auto keys = std::vector<AccountKey>{ *global };
+	result.global = tr::lng_purple_settings_signed_out_global(tr::now, lt_account,
+		AccountKeyText(global->environment, global->userId).value_or(QString()));
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto live = entry.account->maybeSession();
+		if (!live || entry.account->loggingOut()) { continue; }
+		const auto key = SessionAccountKey(live);
+		if (std::find(keys.begin(), keys.end(), key) == keys.end()) { keys.push_back(key); }
+		if (key == *global) {
+			result.global = live->user()->name();
+			result.globalSignedIn = true;
+		} else if (row && AccountRouting().rowState(key, *row).pinned) {
+			result.overrides.push_back(live->user()->name());
+		}
+	}
+	result.multiple = keys.size() >= 2;
+	return result;
+}
+
+}
+
+QString AccountSettingsScopeCaption(
+		not_null<Main::Session*> session, std::optional<AccountSettingsRow> row) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return {};
+	}
+	const auto labels = SettingsRowLabels(session, row);
+	const auto global = AppWideSettingsAccount(session);
+	if (!labels.multiple || !global) { return {}; }
+	if (!row) {
+		return SessionAccountKey(session) == *global ? QString()
+			: labels.globalSignedIn
+			? tr::lng_purple_settings_scope_appwide(tr::now, lt_account, labels.global)
+			: tr::lng_purple_settings_scope_appwide_offline(tr::now, lt_account, labels.global);
+	}
+	if (*row == AccountSettingsRow::SendAfterSave) {
+		return tr::lng_purple_settings_scope_file(tr::now, lt_account, labels.own);
+	}
+	if (SessionAccountKey(session) != *global) {
+		return AccountRouting().rowState(SessionAccountKey(session), *row).pinned
+			? tr::lng_purple_settings_scope_pinned(tr::now, lt_account, labels.own)
+			: tr::lng_purple_settings_scope_inherited(tr::now, lt_account, labels.global);
+	}
+	auto result = tr::lng_purple_settings_scope_default(tr::now, lt_account, labels.global);
+	for (const auto &name : labels.overrides) {
+		result += ' ' + tr::lng_purple_settings_scope_override(tr::now, lt_account, name);
+	}
+	return result;
+}
+
+QString AccountSettingsResetCaption(not_null<Main::Session*> session) {
+	return tr::lng_purple_settings_scope_reset(tr::now, lt_account,
+		SettingsRowLabels(session, std::nullopt).global);
+}
+
+bool AccountSettingsResetVisible(not_null<Main::Session*> session, AccountSettingsRow row) {
+	return row != AccountSettingsRow::SendAfterSave
+		&& SettingsRowLabels(session, row).multiple
+		&& AccountSettingsRowFor(session, row).pinned;
 }
 
 QString SettingsOwnerStatus() {

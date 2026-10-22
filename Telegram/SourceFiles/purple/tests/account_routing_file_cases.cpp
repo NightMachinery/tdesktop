@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_state.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QPointer>
+#include <QtCore/QObject>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
@@ -22,6 +24,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QThread>
 
 #include <cstdio>
+#include <memory>
+#include <utility>
 #ifndef Q_OS_WIN
 #include <unistd.h>
 #endif
@@ -1228,6 +1232,401 @@ void AccountSettingsCreationAndDocumentCases() {
 }
 
 
+void AccountSettingsRowsAndResetCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto c = AccountKey{ 1, 303 };
+	const auto rootBytes = QByteArray("# root stays whole\nversion=1\n[premium]\nenabled_p=false\n[last_seen]\nreasons_p=true\ntrade_p=true\n[sync]\nsend_after_save_p=true\n");
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } });
+		CHECK(!config.owner());
+		const auto state = config.rowState(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(state.value && !state.pinned && !state.target);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		const auto beforeLocal = Get(temp.filePath(u"local.toml"_q));
+		const auto beforeOwner = Get(temp.filePath(u"accounts/root.toml"_q));
+		CHECK(!QFileInfo::exists(own->directory));
+		CHECK(config.rowState(b, AccountSettingsRow::LastSeenReasons).value);
+		CHECK(!config.rowState(b, AccountSettingsRow::LastSeenReasons).pinned);
+		CHECK(!config.rowState(b, AccountSettingsRow::SendAfterSave).value);
+		const auto absent = config.rowTarget(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(absent.has_value());
+		if (!absent) { return; }
+		CHECK(config.writeRow(*absent, std::nullopt, [] { return true; }).ok);
+		CHECK(!QFileInfo::exists(own->directory));
+		(void)config.observeAccountSave(b);
+		const auto created = config.writeRow(*absent, false, [] { return true; });
+		CHECK(created.ok && created.changed && created.created && created.target.has_value());
+		CHECK(!config.observeAccountSave(b));
+		const auto first = Get(own->settings);
+		CHECK(first.startsWith("# Purple Telegram settings for one account.\n"));
+		CHECK(first.contains("version = 2\n"));
+		CHECK(!first.contains("0-202"));
+		CHECK(!first.contains("trade_p"));
+		CHECK(!first.contains("send_after_save_p"));
+		CHECK(!first.contains("enabled_p"));
+		CHECK(Get(own->good) == first);
+		CHECK(!QFileInfo::exists(own->fingerprintFile));
+		CHECK(!QFileInfo::exists(own->syncStore));
+		CHECK(config.rowState(b, AccountSettingsRow::LastSeenReasons).pinned);
+		CHECK(!config.rowState(b, AccountSettingsRow::LastSeenReasons).value);
+		CHECK(config.rowState(a, AccountSettingsRow::LastSeenReasons).value);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+		CHECK(Get(temp.filePath(u"local.toml"_q)) == beforeLocal);
+		CHECK(Get(temp.filePath(u"accounts/root.toml"_q)) == beforeOwner);
+		const auto pinned = config.rowTarget(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(pinned.has_value());
+		if (!pinned) { return; }
+		const auto reset = config.writeRow(*pinned, std::nullopt, [] { return true; });
+		CHECK(reset.ok && reset.changed && !reset.created);
+		CHECK(!Get(own->settings).contains("reasons_p"));
+		CHECK(Get(own->settings).contains("version = 2\n"));
+		CHECK(Get(own->backup) == first);
+		CHECK(Get(own->good) == Get(own->settings));
+		CHECK(config.rowState(b, AccountSettingsRow::LastSeenReasons).value);
+		CHECK(!config.rowState(b, AccountSettingsRow::LastSeenReasons).pinned);
+		const auto global = config.rowTarget(a, AccountSettingsRow::LastSeenReasons);
+		CHECK(global.has_value());
+		if (!global) { return; }
+		CHECK(!config.writeRow(*global, std::nullopt, [] { return true; }).ok);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		const auto other = config.files(c);
+		CHECK(own && other);
+		if (!own || !other) { return; }
+		const auto ownBytes = QByteArray("# unknown prefix\nversion=1\nfuture_key='untouched'\n[last_seen]\n# keep table note\nreasons_p=false # own scalar\ntrade_p=false\ntrade_hold=0\n[last_seen.extra]\nreasons_p=false\n[other.last_seen]\nreasons_p=true\n[premium]\nenabled_p=true\n[sync]\nsend_after_save_p=true\n");
+		Put(own->settings, ownBytes);
+		Put(other->settings, QByteArray("version=2\n[last_seen]\ntrade_p=false\n"));
+		const auto otherBytes = Get(other->settings);
+		config.start({ { a, false, false }, { b, true, false }, { c, true, false } });
+		(void)config.observeAccountSave(b);
+		const auto peek = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(peek.has_value());
+		if (!peek) { return; }
+		const auto saved = config.writeRow(*peek, true, [] { return true; });
+		CHECK(saved.ok && saved.changed && !saved.created);
+		CHECK(Get(own->backup) == ownBytes);
+		CHECK(Get(own->settings).contains("trade_hold=0\n"));
+		CHECK(Get(own->settings).contains("future_key='untouched'\n"));
+		CHECK(Get(own->settings).contains("[premium]\nenabled_p=true\n"));
+		CHECK(Get(own->settings).contains("version=1\n"));
+		const auto operation = config.observeAccountSave(b);
+		CHECK(operation.has_value());
+		CHECK(!operation || operation->file.account == b);
+		const auto reasons = config.rowTarget(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(reasons.has_value());
+		if (!reasons) { return; }
+		CHECK(config.writeRow(*reasons, std::nullopt, [] { return true; }).ok);
+		const auto afterReset = Get(own->settings);
+		CHECK(!afterReset.contains("reasons_p=false # own scalar"));
+		CHECK(afterReset.contains("# keep table note\n"));
+		CHECK(afterReset.contains("[last_seen.extra]\nreasons_p=false\n"));
+		CHECK(afterReset.contains("[other.last_seen]\nreasons_p=true\n"));
+		CHECK(afterReset.contains("trade_hold=0\n"));
+		CHECK(config.rowState(b, AccountSettingsRow::LastSeenReasons).value);
+		const auto local = config.rowTarget(b, AccountSettingsRow::SendAfterSave);
+		CHECK(local.has_value());
+		if (!local) { return; }
+		CHECK(!config.writeRow(*local, std::nullopt, [] { return true; }).ok);
+		CHECK(config.writeRow(*local, false, [] { return true; }).ok);
+		CHECK(!config.rowState(b, AccountSettingsRow::SendAfterSave).value);
+		CHECK(config.rowState(a, AccountSettingsRow::SendAfterSave).value);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+		CHECK(Get(other->settings) == otherBytes);
+		CHECK(!QFileInfo::exists(other->backup));
+		const auto capturedOwn = config.rowTarget(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(capturedOwn.has_value());
+		if (!capturedOwn) { return; }
+		auto forged = *capturedOwn;
+		const auto appWide = config.openTarget(b, SettingsOpenRole::AppWide);
+		CHECK(appWide.has_value());
+		if (!appWide) { return; }
+		forged.destination = *appWide;
+		CHECK(!config.validateRow(forged));
+		CHECK(!config.writeRow(forged, false, [] { return true; }).ok);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+	for (auto failure = 0; failure != 4; ++failure) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		const auto ownBytes = QByteArray("version=2\n[last_seen]\ntrade_p=false\n");
+		Put(own->settings, ownBytes);
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(capture.has_value());
+		if (!capture) { return; }
+		const auto localPath = temp.filePath(u"local.toml"_q);
+		const auto localBefore = Get(localPath);
+		if (failure == 0) {
+			Put(temp.filePath(u"settings.toml"_q), rootBytes + QByteArray("# new global bytes\n"));
+		} else if (failure == 1) {
+			auto choice = ParseLocalChoice(QString::fromUtf8(localBefore), localPath).choice;
+			choice.globalAccount = b;
+			const auto serialized = SerializeLocalChoice(choice);
+			CHECK(serialized.has_value());
+			if (!serialized) { return; }
+			Put(localPath, serialized->toUtf8());
+		} else if (failure == 2) {
+			CHECK(QDir().rename(own->directory, own->directory + u".retained"_q));
+			Put(own->settings, ownBytes);
+		} else {
+			auto choice = ParseLocalChoice(QString::fromUtf8(localBefore), localPath).choice;
+			choice.globalAccount = b;
+			const auto serialized = SerializeLocalChoice(choice);
+			CHECK(serialized.has_value());
+			if (!serialized) { return; }
+			Put(localPath, serialized->toUtf8());
+			config.refreshLocalChoice();
+			Put(localPath, localBefore);
+			config.refreshLocalChoice();
+			CHECK(Get(localPath) == localBefore);
+			CHECK(config.globalAccount() == std::optional<AccountKey>(a));
+			const auto current = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+			CHECK(current.has_value());
+			if (!current) { return; }
+			CHECK(config.validateRow(*current));
+		}
+		CHECK(!config.validateRow(*capture));
+		CHECK(!config.writeRow(*capture, true, [] { return true; }).ok);
+		CHECK(Get(own->settings) == ownBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		const auto ownBytes = QByteArray("version=2\n[last_seen]\ntrade_p=false\n");
+		Put(own->settings, ownBytes);
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(capture.has_value());
+		if (!capture) { return; }
+		auto context = std::make_unique<QObject>();
+		const auto weak = QPointer<QObject>(context.get());
+		auto checks = 0;
+		CHECK(!config.writeRow(*capture, true, [&] {
+			if (++checks == 2) { context.reset(); }
+			return !weak.isNull();
+		}).ok);
+		CHECK(Get(own->settings) == ownBytes);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(capture.has_value());
+		if (!capture) { return; }
+		const auto foreign = QByteArray("version=2\n# foreign creator\n");
+		auto once = false;
+		CHECK(!config.writeRow(*capture, true, [&] {
+			if (std::exchange(once, true)) { Put(own->settings, foreign); }
+			return true;
+		}).ok);
+		CHECK(Get(own->settings) == foreign);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("broken ["));
+		Put(temp.filePath(u"settings.toml.good"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		const auto ownBytes = QByteArray("version=2\n[last_seen]\ntrade_p=false\n");
+		Put(own->settings, ownBytes);
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(capture.has_value());
+		if (!capture) { return; }
+		CHECK(capture->globalFallback);
+		Put(temp.filePath(u"settings.toml.good"_q), rootBytes + QByteArray("# new fallback source\n"));
+		CHECK(!config.validateRow(*capture));
+		CHECK(!config.writeRow(*capture, true, [] { return true; }).ok);
+		CHECK(Get(own->settings) == ownBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		Put(own->good, rootBytes);
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto localPath = temp.filePath(u"local.toml"_q);
+		auto choice = ParseLocalChoice(QString::fromUtf8(Get(localPath)), localPath).choice;
+		choice.globalAccount = b;
+		const auto serialized = SerializeLocalChoice(choice);
+		CHECK(serialized.has_value());
+		if (!serialized) { return; }
+		Put(localPath, serialized->toUtf8());
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(!capture);
+		CHECK(!QFileInfo::exists(own->settings));
+		CHECK(Get(own->good) == rootBytes);
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		Put(own->settings, QByteArray("broken ["));
+		Put(own->good, QByteArray("version=2\n[last_seen]\nreasons_p=false\n"));
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto state = config.rowState(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(!state.value);
+		CHECK(state.pinned);
+		CHECK(!state.target);
+		CHECK(Get(own->settings) == QByteArray("broken ["));
+	}
+
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml.good"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		Put(own->settings, QByteArray("version=2\n"));
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto inherited = config.rowState(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(inherited.value && !inherited.pinned && inherited.target.has_value());
+		if (!inherited.target) { return; }
+		CHECK(config.writeRow(*inherited.target, false, [] { return true; }).ok);
+		CHECK(!config.rowState(b, AccountSettingsRow::LastSeenReasons).value);
+		CHECK(!QFileInfo::exists(temp.filePath(u"settings.toml"_q)));
+		CHECK(Get(temp.filePath(u"settings.toml.good"_q)) == rootBytes);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto own = config.files(b);
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenReasons);
+		CHECK(own && capture);
+		if (!own || !capture) { return; }
+		auto context = std::make_unique<QObject>();
+		const auto weak = QPointer<QObject>(context.get());
+		config.setChanged([&] { context.reset(); });
+		const auto result = config.writeRow(*capture, false, [&] { return !weak.isNull(); });
+		CHECK(!result.ok && result.changed && result.created);
+		CHECK(Get(own->settings).contains("version = 2\n"));
+		CHECK(Get(own->settings).contains("reasons_p"));
+		CHECK(!config.observeAccountSave(b));
+		CHECK(!QFileInfo::exists(own->fingerprintFile));
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+	}
+
+#ifndef Q_OS_WIN
+	for (auto kind = 0; kind != 4; ++kind) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		const auto ownBytes = QByteArray("version=2\n[last_seen]\ntrade_p=false\n");
+		Put(own->settings, ownBytes);
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(capture.has_value());
+		if (!capture) { return; }
+		const auto outside = temp.filePath(u"outside"_q);
+		Put(outside, QByteArray("outside untouched"));
+		if (kind == 0) {
+			CHECK(QFile::remove(own->settings));
+			CHECK(QFile::link(outside, own->settings));
+		} else if (kind == 1) {
+			CHECK(QFile::remove(own->settings));
+			CHECK(QDir().mkpath(own->settings));
+		} else if (kind == 2) {
+			CHECK(QFile::setPermissions(own->settings, QFile::Permissions()));
+		} else {
+			CHECK(QFile::link(outside, own->good));
+		}
+		CHECK(!config.writeRow(*capture, true, [] { return true; }).ok);
+		CHECK(Get(outside) == QByteArray("outside untouched"));
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == rootBytes);
+		if (kind == 2) {
+			CHECK(QFile::setPermissions(own->settings, QFile::ReadOwner | QFile::WriteOwner));
+			CHECK(Get(own->settings) == ownBytes);
+		}
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootBytes);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto own = config.files(b);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		const auto ownBytes = QByteArray("version=2\n[last_seen]\ntrade_p=false\n");
+		Put(own->settings, ownBytes);
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto capture = config.rowTarget(b, AccountSettingsRow::LastSeenPeek);
+		CHECK(capture.has_value());
+		if (!capture) { return; }
+		const auto outside = temp.filePath(u"outside-directory"_q);
+		const auto foreign = QByteArray("version=2\n# outside unchanged\n");
+		Put(outside + u"/settings.toml"_q, foreign);
+		CHECK(QDir().rename(own->directory, own->directory + u".retained"_q));
+		CHECK(QFile::link(outside, own->directory));
+		CHECK(!config.rowTarget(b, AccountSettingsRow::LastSeenPeek));
+		CHECK(!config.writeRow(*capture, true, [] { return true; }).ok);
+		CHECK(Get(outside + u"/settings.toml"_q) == foreign);
+		CHECK(Get(own->directory + u".retained/settings.toml"_q) == ownBytes);
+	}
+
+#endif
+}
+
 }
 
 int main(int argc, char *argv[]) {
@@ -1256,6 +1655,10 @@ int main(int argc, char *argv[]) {
 	const auto beforeCreation = Checks;
 	AccountSettingsCreationAndDocumentCases();
 	std::printf("accountCreationDocument %d checks\n", Checks - beforeCreation);
+	std::printf("priorBatch967 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeRows = Checks;
+	AccountSettingsRowsAndResetCases();
+	std::printf("accountRowsReset %d checks\n", Checks - beforeRows);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

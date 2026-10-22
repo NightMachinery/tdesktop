@@ -55,6 +55,19 @@ void RefreshDesktopAccounts();
 	not_null<Main::Session*> session,
 	const AccountSettingsOpenTarget &target,
 	const std::function<bool()> &windowCurrent);
+[[nodiscard]] AccountSettingsRowState AccountSettingsRowFor(
+	not_null<Main::Session*> session, AccountSettingsRow row);
+[[nodiscard]] AccountSettingsRowWriteResult WriteAccountSettingsRow(
+	not_null<Main::Session*> session,
+	const AccountSettingsRowTarget &target,
+	std::optional<bool> value,
+	const std::function<bool()> &windowCurrent);
+[[nodiscard]] QString AccountSettingsScopeCaption(
+	not_null<Main::Session*> session,
+	std::optional<AccountSettingsRow> row = std::nullopt);
+[[nodiscard]] QString AccountSettingsResetCaption(not_null<Main::Session*> session);
+[[nodiscard]] bool AccountSettingsResetVisible(
+	not_null<Main::Session*> session, AccountSettingsRow row);
 [[nodiscard]] QString SettingsOwnerStatus();
 void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box);
 

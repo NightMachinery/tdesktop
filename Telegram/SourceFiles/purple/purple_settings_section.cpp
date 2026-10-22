@@ -14,6 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/delayed_activation.h"
 #include <crl/crl_on_main.h>
 #include "data/data_user.h"
+#include "data/data_changes.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -31,6 +34,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
+#include "ui/wrap/vertical_layout.h"
+#include <QtCore/QPointer>
+#include <memory>
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
@@ -40,6 +46,139 @@ namespace Purple {
 namespace {
 
 using namespace Settings::Builder;
+
+rpl::producer<> AccountRowChanges() {
+	auto sessions = rpl::single(rpl::empty)
+		| rpl::then(Core::App().domain().accountsChanges())
+		| rpl::map([] {
+			rpl::producer<> events = rpl::single(rpl::empty);
+			for (const auto &entry : Core::App().domain().accounts()) {
+				events = rpl::merge(std::move(events), entry.account->sessionChanges() | rpl::to_empty);
+			}
+			return events;
+		}) | rpl::flatten_latest();
+	auto names = std::move(sessions) | rpl::map([] {
+		rpl::producer<> events = rpl::single(rpl::empty);
+		for (const auto &entry : Core::App().domain().accounts()) {
+			if (const auto session = entry.account->maybeSession()) {
+				events = rpl::merge(std::move(events), session->changes().realtimeNameUpdates() | rpl::to_empty);
+			}
+		}
+		return events;
+	}) | rpl::flatten_latest();
+	return rpl::merge(SettingsChanges(), std::move(names));
+}
+
+void AddAccountScopeCaption(
+		SectionBuilder &builder, std::optional<AccountSettingsRow> row = std::nullopt) {
+	const auto weak = base::make_weak(builder.session().get());
+	const auto caption = [=] {
+		const auto live = weak.get();
+		return live ? AccountSettingsScopeCaption(live, row) : QString();
+	};
+	builder.scope([&] {
+		builder.addDividerText(AccountRowChanges() | rpl::map(caption));
+	}, AccountRowChanges() | rpl::map([=] { return !caption().isEmpty(); }));
+}
+
+void BuildAccountSettingsRow(
+		SectionBuilder &builder,
+		const QString &id,
+		rpl::producer<QString> title,
+		AccountSettingsRow row) {
+	const auto refresh = std::make_shared<rpl::event_stream<>>();
+	const auto weakSession = base::make_weak(builder.session().get());
+	const auto controller = builder.controller();
+	const auto weakController = controller ? base::make_weak(controller)
+		: base::weak_ptr<Window::SessionController>();
+	const auto state = [=] {
+		const auto live = weakSession.get();
+		return live ? AccountSettingsRowFor(live, row) : AccountSettingsRowState();
+	};
+	const auto toggle = builder.addButton({
+		.id = id,
+		.title = std::move(title),
+		.label = AccountRowChanges() | rpl::map([=] {
+			return state().target ? QString() : tr::lng_proxy_box_table_unavailable(tr::now);
+		}),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::merge(AccountRowChanges(), refresh->events())
+			| rpl::map([=] { return state().value; }),
+		.keywords = row == AccountSettingsRow::SendAfterSave
+			? QStringList{ u"purple"_q, u"sync"_q, u"saved"_q, u"send"_q, u"backup"_q }
+			: QStringList{ u"purple"_q, u"last"_q, u"seen"_q, u"privacy"_q },
+	});
+	if (toggle) {
+		const auto button = QPointer<Ui::SettingsButton>(toggle);
+		const auto windowCurrent = [=] {
+			const auto live = weakSession.get();
+			const auto window = weakController.get();
+			return button && live && window && &window->session() == live;
+		};
+		AccountRowChanges() | rpl::on_next([=] {
+			toggle->setEnabled(windowCurrent() && state().target.has_value());
+		}, toggle->lifetime());
+		toggle->toggledValue() | rpl::filter([=](bool value) {
+			return value != state().value;
+		}) | rpl::on_next([=](bool value) {
+			const auto target = windowCurrent() ? state().target : std::nullopt;
+			if (!target) { refresh->fire({}); return; }
+			crl::on_main([=] {
+				if (!windowCurrent()) { return; }
+				const auto result = WriteAccountSettingsRow(weakSession.get(), *target, value, windowCurrent);
+				if (windowCurrent() && !result.ok) {
+					refresh->fire({});
+					if (!windowCurrent()) { return; }
+					weakController.get()->show(Ui::MakeInformBox(tr::lng_purple_settings_row_changed(tr::now)));
+				}
+			});
+		}, toggle->lifetime());
+	}
+	AddAccountScopeCaption(builder, row);
+	if (row == AccountSettingsRow::SendAfterSave) { return; }
+	builder.addControl({
+		.factory = [=](not_null<Ui::VerticalLayout*> parent) -> object_ptr<Ui::RpWidget> {
+			auto link = object_ptr<Ui::LinkButton>(parent, QString());
+			const auto button = QPointer<Ui::LinkButton>(link.data());
+			const auto windowCurrent = [=] {
+				const auto live = weakSession.get();
+				const auto window = weakController.get();
+				return button && live && window && &window->session() == live;
+			};
+			AccountRowChanges() | rpl::on_next([=] {
+				if (!button) { return; }
+				const auto live = weakSession.get();
+				button->setText(live ? AccountSettingsResetCaption(live) : QString());
+				button->setEnabled(windowCurrent() && state().target.has_value());
+			}, link->lifetime());
+			link->setClickedCallback([=] {
+				const auto live = weakSession.get();
+				const auto target = windowCurrent() && AccountSettingsResetVisible(live, row)
+					? state().target : std::nullopt;
+				if (!target) { return; }
+				crl::on_main([=] {
+					if (!windowCurrent()) { return; }
+					const auto result = WriteAccountSettingsRow(
+						weakSession.get(), *target, std::nullopt, windowCurrent);
+					if (windowCurrent() && !result.ok) {
+						weakController.get()->show(Ui::MakeInformBox(tr::lng_purple_settings_row_changed(tr::now)));
+					}
+				});
+			});
+			return std::move(link);
+		},
+		.id = id + u"_reset"_q,
+		.title = AccountRowChanges() | rpl::map([=] {
+			const auto live = weakSession.get();
+			return live ? AccountSettingsResetCaption(live) : QString();
+		}),
+		.margin = st::settingsButtonNoIcon.padding,
+		.shown = AccountRowChanges() | rpl::map([=] {
+			const auto live = weakSession.get();
+			return live && AccountSettingsResetVisible(live, row);
+		}),
+	});
+}
 
 void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 	const auto controller = builder.controller();
@@ -137,56 +276,10 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"last"_q, u"seen"_q, u"online"_q },
 	});
 
-	const auto weakSession = base::make_weak(session.get());
-	const auto editable = [=] {
-		const auto live = weakSession.get();
-		return live && AccountSettingsEditTarget(live).has_value();
-	};
-	const auto flag = [&](
-			const QString &id,
-			const QString &title,
-			bool LastSeen::*field,
-			const QString &key,
-			const QString &what) {
-		const auto read = [=] {
-			const auto live = weakSession.get();
-			return live && (AccountSettings(live).lastSeen.*field);
-		};
-		const auto toggle = builder.addButton({
-			.id = id,
-			.title = rpl::single(title),
-			.label = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([=] {
-				return editable() ? QString() : tr::lng_proxy_box_table_unavailable(tr::now);
-			}),
-			.st = &st::settingsButtonNoIcon,
-			.toggled = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(read),
-			.keywords = { u"purple"_q, u"last"_q, u"seen"_q, u"privacy"_q },
-		});
-		if (!toggle) {
-			return;
-		}
-		rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::on_next([=] {
-			toggle->setEnabled(editable());
-		}, toggle->lifetime());
-		toggle->toggledValue() | rpl::filter([=](bool value) {
-			return value != read();
-		}) | rpl::on_next([=](bool value) {
-			const auto live = weakSession.get();
-			const auto target = live ? AccountSettingsEditTarget(live) : std::nullopt;
-			if (!target || !ValidateAccountSettingsTarget(live, *target)) {
-				return;
-			}
-			WriteSettingsGuarded(target->input, [=](const QString &text) {
-				return SetTableBool(text, target->path, u"last_seen"_q, key, value);
-			}, what);
-		}, toggle->lifetime());
-	};
-	flag(u"advanced/purple_last_seen_reasons"_q,
-		u"Say why a last seen is hidden"_q, &LastSeen::reasons,
-		u"reasons_p"_q, u"the last seen reasons"_q);
-	flag(u"advanced/purple_last_seen_peek"_q,
-		tr::lng_lastseen_peek_setting(tr::now), &LastSeen::trade,
-		u"trade_p"_q, u"Last Seen Peek"_q);
+	BuildAccountSettingsRow(builder, u"advanced/purple_last_seen_reasons"_q,
+		rpl::single(u"Say why a last seen is hidden"_q), AccountSettingsRow::LastSeenReasons);
+	BuildAccountSettingsRow(builder, u"advanced/purple_last_seen_peek"_q,
+		tr::lng_lastseen_peek_setting(), AccountSettingsRow::LastSeenPeek);
 
 	const auto confirm = builder.addButton({
 		.id = u"advanced/purple_last_seen_peek_confirm"_q,
@@ -269,6 +362,7 @@ void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
 		},
 	});
 
+	AddAccountScopeCaption(builder);
 	builder.addDividerText(rpl::single(u"Off until you switch it on. Once on, "
 		"one line per event - a chat opening, an action in the composer, the "
 		"app leaving the front - is appended to screentime.log beside "
@@ -327,6 +421,8 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			},
 		});
 	}
+
+	AddAccountScopeCaption(builder);
 
 	// The schedule was file-only until now, which meant the one feature that
 	// changes the app without being asked was also the one with nothing on
@@ -410,42 +506,8 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	// an upgrade that started doing that on somebody's behalf would be doing
 	// it behind their back. See ShouldAutoSend() for what stops two machines
 	// from handing the same file back and forth.
-	const auto weakSession = base::make_weak(session.get());
-	const auto readAutoSend = [=] {
-		const auto live = weakSession.get();
-		return live && AccountSettings(live).sync.sendAfterSave;
-	};
-	const auto editAutoSend = [=] {
-		const auto live = weakSession.get();
-		return live && AccountSettingsEditTarget(live).has_value();
-	};
-	const auto autoSend = builder.addButton({
-		.id = u"advanced/purple_send_after_save"_q,
-		.title = rpl::single(u"Send to Saved Messages after every save"_q),
-		.label = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([=] {
-			return editAutoSend() ? QString() : tr::lng_proxy_box_table_unavailable(tr::now);
-		}),
-		.st = &st::settingsButtonNoIcon,
-		.toggled = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(readAutoSend),
-		.keywords = { u"purple"_q, u"sync"_q, u"saved"_q, u"send"_q, u"backup"_q },
-	});
-	if (autoSend) {
-		rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::on_next([=] {
-			autoSend->setEnabled(editAutoSend());
-		}, autoSend->lifetime());
-		autoSend->toggledValue() | rpl::filter([=](bool value) {
-			return value != readAutoSend();
-		}) | rpl::on_next([=](bool value) {
-			const auto live = weakSession.get();
-			const auto target = live ? AccountSettingsEditTarget(live) : std::nullopt;
-			if (!target || !ValidateAccountSettingsTarget(live, *target)) {
-				return;
-			}
-			WriteSettingsGuarded(target->input, [=](const QString &text) {
-				return SetTableBool(text, target->path, u"sync"_q, u"send_after_save_p"_q, value);
-			}, u"the automatic send"_q);
-		}, autoSend->lifetime());
-	}
+	BuildAccountSettingsRow(builder, u"advanced/purple_send_after_save"_q,
+		rpl::single(u"Send to Saved Messages after every save"_q), AccountSettingsRow::SendAfterSave);
 
 	const auto toggle = builder.addButton({
 		.id = u"advanced/purple_premium_toggle"_q,
@@ -464,6 +526,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		}, toggle->lifetime());
 	}
 
+	AddAccountScopeCaption(builder);
 	builder.addDividerText(rpl::single(u"Unlocks the Premium features that "
 		"Telegram Desktop gates on the client alone: no sponsored messages, "
 		"exact \"last seen\" times, real-time chat translation, and up to six "

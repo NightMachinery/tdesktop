@@ -70,12 +70,20 @@ generation and the exact file snapshot; completion rechecks before bookkeeping.
 Valid account-file manual export remains supported within the existing schema1
 legacy document boundary. Layered schema2 imports/legacy sends remain refused.
 
-Last Seen and automatic-send settings rows read the originating account's effective
-settings. The sync flag remains file-local and defaults false when absent from that
-account file. Per-account writes are available only for the confirmed root owner
-while that root is global. Other account rows show the existing localized Not
-Available label and are disabled; queued callbacks recheck session and destination
-before a guarded write. Global Premium/Work Mode rows retain their app-wide role.
+Last Seen reasons and Last Seen Peek read the Settings window's account's effective
+values and write only that account's own file. Send after every save is file-local:
+turning it on in the global file does not opt another account in. These three rows
+use purpose-specific destinations; legacy global writes and unrelated editors do
+not gain permission from them. Missing, invalid or stale routing disables the row.
+Queued actions retain the originating session, window, account and file snapshot.
+
+With two or more loaded accounts, row captions distinguish the global default,
+inherited values and explicit own values. A pinned non-global Last Seen row offers
+Use the global account's value, removing exactly that own key through the shared
+Reset operation. Reset is absent on global and file-local rows. Names update with
+the signed-in accounts; a signed-out global account is identified honestly.
+App-wide Premium, Work Mode and Screen time remain app-wide and describe the
+global file on other account screens. Device confirmation preferences stay local.
 
 Stock folder lookup uses the ChatFilters originating session when selecting the
 Purple branch. The native nonpremium All-first mapping is unchanged. Synthetic
@@ -115,7 +123,7 @@ replacement save.
 Absent settings are read without creation and cannot initialize or publish through
 sync setup. The explicit Open action can create a missing non-root account file.
 Version2 legacy imports/exports and layered sync application remain refused;
-account editing/list forks/global-file edits stay held. The final precondition-to-rename window against a noncooperating writer remains
+general account editing/list forks/global-file edits stay held. The final precondition-to-rename window against a noncooperating writer remains
 finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
 and a coherent current application need separate qualification.
 
@@ -143,8 +151,8 @@ Reading settings, signing in and configuring sync do not create an account file.
 Explicit Open creates only a missing non-root account file, with the approved
 comment header and `version = 2`. It writes no starter overrides, account ids or
 names. A missing root file is not replaced with an account template. Existing
-files are opened without changing their version or bytes. Per-account in-app
-editing stays unavailable until its destination-safe write route is qualified.
+files are opened without changing their version or bytes. The purpose-specific Last Seen and automatic-send rows use the own-file route
+described below. Other per-account in-app editing remains held.
 
 Creation captures the owner/local choice inputs, destination account, root and
 account directory identities, file input and originating session/window. It writes
@@ -160,9 +168,38 @@ external editor has its own later filesystem access after launch.
 Creation seeds the file observation without sending or publishing it. Existing
 qualified save observations and queued operations keep their established rules.
 The account template is schema2, so current schema1 transport guards keep its
-automatic and manual legacy sends held. Reset, account editor/list fork and
-app-wide-loss review controls remain separate work.
+automatic and manual legacy sends held. The own-key Last Seen Reset described
+above is separate from a general account editor/list fork or app-wide-loss review,
+which remain held.
 
 The account-file batch passes all 58 affected production compiles and 967 genuine
 Qt/file checks, including 178 added checks. Native editor dispatch, Windows
 execution and the matching full application remain separate validation steps.
+
+
+## Own-row writes and remaining limits
+
+A normal own-file write keeps its preimage in that file's `.bak` and updates its
+`.good` only after the guarded settings publication. Reset leaves unknown,
+app-wide, nested same-named keys and the file version in place. The writer binds
+owner/local choice, global source, directory identities and exact own bytes. It
+checks the originating lifetime after notifications and again around publication.
+When a global recovery copy supplies an inherited value, the captured `.good`
+bytes are part of that check. A missing own file with an existing recovery copy
+stays held for repair; a toggle does not silently replace recovered settings.
+Creating a missing file uses the existing exclusive directory-relative creation
+route, publishes the header and requested override together, and seeds its save
+observation without sending. Later supported saves use the established per-file
+fingerprint and originating-session queue policy. Schema2 transport remains held.
+
+These source changes still require affected production compilation, genuine
+file-case execution and independent review. Existing 58-production/967-file-case
+qualification describes the preceding account-file Open batch. Native UI and
+Windows execution, a coherent matching application and release are separate.
+The finite final check-to-rename interval and nontransactional settings/backup/good
+updates are not a universal multi-process filesystem transaction.
+
+The account rows and Reset batch passes all 58 affected production compiles and
+1,340 genuine Qt/file checks, including 373 added checks. The matching full
+application, native settings interactions and Windows behavior still require
+separate validation.

@@ -77,3 +77,14 @@ docs/purple/upstream_hooks.md.
 "lng_purple_settings_open_create_error" = "The account settings file could not be created safely. Nothing was replaced or opened.";
 "lng_purple_settings_open_changed" = "The account, settings destination or file changed. Open it again from this account's settings.";
 "lng_purple_settings_layered_import_held" = "This is a layered account settings document. Applying it requires an account and app-wide settings review, which is not available yet. Nothing was imported.";
+
+"lng_purple_settings_signed_out_global" = "signed-out account {account}";
+"lng_purple_settings_scope_appwide" = "For every account on this device, in {account}'s settings";
+"lng_purple_settings_scope_appwide_offline" = "In {account}'s settings, which do not sync while that account is signed out";
+"lng_purple_settings_scope_file" = "Only for {account}'s settings file; this does not inherit another file's automatic send choice";
+"lng_purple_settings_scope_pinned" = "Only for {account}";
+"lng_purple_settings_scope_inherited" = "Same as {account} on this device";
+"lng_purple_settings_scope_default" = "For {account} and every account that does not set its own, on this device";
+"lng_purple_settings_scope_override" = "{account} sets their own value.";
+"lng_purple_settings_scope_reset" = "Use {account}'s value";
+"lng_purple_settings_row_changed" = "Settings changed or could not be saved. Reopen this setting and try again.";

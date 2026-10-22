@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_account_files.h"
 #include "purple/purple_config_file.h"
 #include "purple/purple_settings.h"
+#include "purple/purple_splice.h"
 
 #include <QtCore/QFileSystemWatcher>
 
@@ -63,6 +64,32 @@ enum class LegacySettingsDocumentKind { Unrelated, Whole, Layered };
 [[nodiscard]] bool CanApplyWholeSettingsDocument(
 	const QString &name,
 	const QByteArray &bytes);
+
+enum class AccountSettingsRow { LastSeenReasons, LastSeenPeek, SendAfterSave };
+
+struct AccountSettingsRowTarget {
+	AccountSettingsOpenTarget destination;
+	AccountSettingsRow row;
+	QString globalPath;
+	SettingsFileInput globalInput;
+	QByteArray globalDirectoryIdentity;
+	bool globalFallback = false;
+	SettingsFileInput globalGoodInput;
+};
+
+struct AccountSettingsRowState {
+	bool value = false;
+	bool pinned = false;
+	std::optional<AccountSettingsRowTarget> target;
+};
+
+struct AccountSettingsRowWriteResult {
+	bool ok = false;
+	bool changed = false;
+	bool created = false;
+	QString error;
+	std::optional<AccountSettingsRowTarget> target;
+};
 
 struct AccountOperationTarget {
 	AccountFileTarget file;
@@ -118,6 +145,15 @@ public:
 	[[nodiscard]] SettingsOpenResult prepareOpen(
 		const AccountSettingsOpenTarget &target,
 		const std::function<bool()> &originCurrent);
+	[[nodiscard]] AccountSettingsRowState rowState(
+		const AccountKey &key, AccountSettingsRow row);
+	[[nodiscard]] std::optional<AccountSettingsRowTarget> rowTarget(
+		const AccountKey &key, AccountSettingsRow row);
+	[[nodiscard]] bool validateRow(const AccountSettingsRowTarget &target);
+	[[nodiscard]] AccountSettingsRowWriteResult writeRow(
+		const AccountSettingsRowTarget &target,
+		std::optional<bool> value,
+		const std::function<bool()> &originCurrent);
 	[[nodiscard]] std::optional<ManualSettingsExportTarget> manualExportTarget(const AccountKey &key);
 	[[nodiscard]] bool validateManualExport(const ManualSettingsExportTarget &target);
 	[[nodiscard]] std::optional<AccountFileTarget> editTarget(const AccountKey &key);
@@ -143,6 +179,11 @@ private:
 		LayerSettingsResult report;
 	};
 	void invalidate();
+	[[nodiscard]] SettingsOpenResult prepareInput(
+		const AccountSettingsOpenTarget &target,
+		const QByteArray &bytes,
+		const std::function<bool()> &originCurrent,
+		bool *published = nullptr);
 	[[nodiscard]] bool persistPlan(const AccountOwnerStartupPlan &plan,
 		SettingsFileInput local, SettingsFileInput record, bool accountsPresent);
 	[[nodiscard]] QString absolute(const QString &relative) const;
