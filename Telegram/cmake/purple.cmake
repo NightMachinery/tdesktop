@@ -150,6 +150,8 @@ PRIVATE
     purple/purple_translation_policy.h
     purple/purple_ui_witness.cpp
     purple/purple_ui_witness.h
+    purple/purple_user_control.cpp
+    purple/purple_user_control.h
     purple/purple_ui_witness_geometry.cpp
     purple/purple_ui_witness_geometry.h
     purple/purple_ui_witness_protocol.cpp

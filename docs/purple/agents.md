@@ -169,3 +169,4 @@ The upstream hook rule remains in
 source-registration, string-registration, and hook-registry requirements.
 
 Message copying and Markdown export are documented in [copy_markdown.md](copy_markdown.md).
+Local saving and screenshot behavior are documented in [user_control.md](user_control.md).

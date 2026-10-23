@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
+#include "purple/purple_user_control.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
@@ -38,6 +39,9 @@ void AddSaveDocumentAction(
 		not_null<HistoryItem*> item,
 		not_null<DocumentData*> document,
 		not_null<Window::SessionController*> controller) {
+	if (Purple::AddSelfDestructDocumentSaveAction(addAction, item, document)) {
+		return;
+	}
 	const auto contextId = item->fullId();
 	const auto fromSaved = item->history()->peer->isSelf();
 	const auto savedMusic = &document->owner().savedMusic();
@@ -119,7 +123,9 @@ void AddSaveDocumentAction(
 		HistoryItem *item,
 		not_null<DocumentData*> document,
 		not_null<ListWidget*> list) {
-	if (!item || list->hasCopyMediaRestriction(item) || ItemHasTtl(item)) {
+	if (!item
+		|| list->hasCopyMediaRestriction(item)
+		|| (ItemHasTtl(item) && !Purple::SaveRestrictionsDisabled())) {
 		return;
 	}
 	AddSaveDocumentAction(

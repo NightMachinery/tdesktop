@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/media/info_media_provider.h"
+#include "purple/purple_user_control.h"
 
 #include "apiwrap.h"
 #include "info/media/info_media_widget.h"
@@ -81,6 +82,8 @@ Type Provider::type() {
 bool Provider::hasSelectRestriction() {
 	if (_peer->session().frozen()) {
 		return true;
+	} else if (Purple::SaveRestrictionsDisabled()) {
+		return false;
 	} else if (_peer->allowsForwarding()) {
 		return false;
 	} else if (const auto chat = _peer->asChat()) {

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item.h"
+#include "purple/purple_user_control.h"
 
 #include "api/api_premium.h"
 #include "api/api_sensitive_content.h"
@@ -282,6 +283,9 @@ void HistoryItem::FillForwardedInfo(
 std::unique_ptr<Data::Media> HistoryItem::CreateMedia(
 		not_null<HistoryItem*> item,
 		const MTPMessageMedia &media) {
+	if (auto result = Purple::SelfDestructMediaForSaving(item, media)) {
+		return result;
+	}
 	using Result = std::unique_ptr<Data::Media>;
 	return media.match([&](const MTPDmessageMediaContact &media) -> Result {
 		return std::make_unique<Data::MediaContact>(
@@ -1792,6 +1796,7 @@ void HistoryItem::markMediaAndMentionRead() {
 			}
 		}
 	}
+	Purple::ExpireSelfDestructMedia(this);
 }
 
 void HistoryItem::markReactionsRead() {
@@ -2267,6 +2272,7 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 				_flags &= ~MessageFlag::Legacy;
 			}
 		}
+		Purple::ExpireSelfDestructMedia(this, !edition.isMediaUnread);
 	}
 	const auto &checkedMedia = updatingSavedLocalEdit
 		? Get<HistoryMessageSavedMediaData>()->media
@@ -2285,7 +2291,8 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 		? edition.textWithEntities
 		: EnsureNonEmpty(edition.textWithEntities);
 	auto serviceText = (!edition.richPage
-		&& !checkedMedia
+		&& (!checkedMedia
+			|| Purple::SelfDestructHasServicePlaceholder(edition.mtpMedia))
 		&& edition.textWithEntities.empty()
 		&& edition.mtpMedia)
 		? prepareServiceTextForMessage(
@@ -5277,6 +5284,9 @@ void HistoryItem::createServiceFromMtp(const MTPDmessage &message) {
 	}, [](const auto &) {});
 
 	setServiceText(prepareServiceTextForMessage(*media, unread));
+	if (Purple::CanSaveSelfDestructMedia(*media, unread)) {
+		setMedia(*media);
+	}
 }
 
 void HistoryItem::createServiceFromMtp(const MTPDmessageService &message) {
@@ -8368,6 +8378,7 @@ crl::time HistoryItem::getSelfDestructIn(crl::time now) {
 					Unexpected("Type in HistoryServiceSelfDestruct::Type");
 				};
 				setServiceText({ TextWithEntities{ .text = text() } });
+				Purple::ExpireSelfDestructMedia(this);
 				return 0;
 			}
 			return destruct - now;

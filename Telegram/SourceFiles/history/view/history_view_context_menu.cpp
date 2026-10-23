@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_context_menu.h"
 
 #include "purple/purple_copy.h"
+#include "purple/purple_user_control.h"
 
 #include "api/api_attached_stickers.h"
 #include "api/api_editing.h"
@@ -1126,6 +1127,7 @@ void AddMessageActions(
 	AddSendNowAction(menu, request, list);
 	AddDeleteAction(menu, request, list);
 	AddDownloadFilesAction(menu, request, list);
+	Purple::AddSelfDestructSaveAction(menu, request);
 	AddSaveRichHtmlAction(menu, request, list);
 	AddReportAction(menu, request, list);
 	if (request.item && request.selectedItems.empty()) {

@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "mainwindow.h"
+#include "purple/purple_user_control.h"
 #include "storage/storage_account.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
@@ -44,7 +45,7 @@ using Photos = std::vector<std::pair<not_null<PhotoData*>, FullMsgId>>;
 		HistoryItem *item,
 		Documents &documents,
 		Photos &photos) {
-	if (item && !item->forbidsForward()) {
+	if (item && (Purple::SaveRestrictionsDisabled() || !item->forbidsForward())) {
 		if (const auto media = item->media()) {
 			if (const auto photo = media->photo()) {
 				photos.emplace_back(photo, item->fullId());

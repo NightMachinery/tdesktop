@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_updates.h"
+#include "purple/purple_user_control.h"
 
 #include "api/api_authorizations.h"
 #include "api/api_user_names.h"
@@ -1328,6 +1329,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 		auto unknownReadIds = base::flat_set<MsgId>();
 		for (const auto &msgId : d.vmessages().v) {
 			if (const auto item = _session->data().nonChannelMessage(msgId.v)) {
+				Purple::ExpireSelfDestructMedia(item, true);
 				if (item->isUnreadMedia() || item->isUnreadMention()) {
 					item->markMediaAndMentionRead();
 					_session->data().requestItemRepaint(item);

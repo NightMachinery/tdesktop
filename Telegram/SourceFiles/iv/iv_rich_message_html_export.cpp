@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/iv_rich_message_html_export.h"
+#include "purple/purple_user_control.h"
 
 #include "base/base_file_utilities.h"
 #include "base/random.h"
@@ -1752,7 +1753,8 @@ void AddSaveRichMessageHtmlActionForItem(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
 		Fn<void()> done) {
-	if (!item->richPage() || item->forbidsForward()) {
+	if (!item->richPage()
+		|| (item->forbidsForward() && !Purple::SaveRestrictionsDisabled())) {
 		return;
 	}
 	const auto itemId = item->fullId();

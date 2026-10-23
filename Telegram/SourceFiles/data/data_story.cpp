@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "media/streaming/media_streaming_reader.h"
+#include "purple/purple_user_control.h"
 #include "storage/download_manager_mtproto.h"
 #include "storage/file_download.h" // kMaxFileInMemory
 #include "ui/text/text_utilities.h"
@@ -420,10 +421,16 @@ bool Story::out() const {
 }
 
 bool Story::canDownloadIfPremium() const {
+	if (Purple::SaveRestrictionsDisabled()) {
+		return true;
+	}
 	return !forbidsForward() || _peer->isSelf();
 }
 
 bool Story::canDownloadChecked() const {
+	if (Purple::SaveRestrictionsDisabled()) {
+		return true;
+	}
 	return _peer->isSelf()
 		|| (canDownloadIfPremium() && _peer->session().premium());
 }

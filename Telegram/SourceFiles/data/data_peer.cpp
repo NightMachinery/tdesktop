@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_peer.h"
+#include "purple/purple_user_control.h"
 
 #include "api/api_sensitive_content.h"
 #include "data/data_user.h"
@@ -787,7 +788,9 @@ bool PeerData::canEditMessagesIndefinitely() const {
 }
 
 bool PeerData::canExportChatHistory() const {
-	if (isRepliesChat() || isVerifyCodes() || !allowsForwarding()) {
+	if (isRepliesChat()
+		|| isVerifyCodes()
+		|| (!allowsForwarding() && !Purple::SaveRestrictionsDisabled())) {
 		return false;
 	} else if (const auto channel = asChannel()) {
 		if (!channel->amIn() && channel->invitePeekExpires()) {

@@ -1179,6 +1179,48 @@ flags remain upstream-owned. See [copy_markdown.md](copy_markdown.md).
 `media/view/media_view_overlay_widget.cpp` uses the same Purple copy policy for
 media-view clipboard actions. No stored message or peer flag is changed.
 
+## Unrestricted local saving
+
+`history/history_inner_widget.cpp` adds early Purple policy checks for local media
+saving and selection, keeps the frozen-session guard, and uses the existing copy
+policy for copy/selected-copy checks that also gate batch downloads. Its TTL menu
+condition calls the save policy without changing the media's TTL value.
+
+`history/view/media/history_view_save_document_action.cpp` calls the same policy
+at the secondary-list TTL save-menu gate and adds an early Purple action hook for
+TTL documents in the common menu builder. Purple owns the source token, item
+lookup and expiry checks before the dialog and after its callback.
+
+`menu/menu_item_download_files.cpp` calls Purple policy when admitting a protected
+message to a local file/photo download batch. Forwarding flags stay intact.
+
+`info/media/info_media_provider.cpp` adds an early policy return for shared-media
+selection after its frozen-session check.
+
+`data/data_story.cpp` adds early policy returns in both download eligibility
+checks. Existing media-viewer consumers then expose Save and Show in Folder without
+a locked save control. See [user_control.md](user_control.md).
+
+`history/history_item.cpp` adds an early Purple media-factory return, a guarded
+`setMedia` call for available TTL service payloads, and Purple cleanup calls after
+contents consumption, consumed server editions and the existing self-destruct
+deadline. Save-only metadata, invisible rendering, weak action ownership and
+expiry checks live in Purple. Its service-text condition also consults Purple's
+TTL-placeholder predicate so a full save payload does not suppress service text.
+The existing Purple media-factory hook invalidates TTL document save tokens when
+the source is replaced.
+
+`api/api_updates.cpp` adds a Purple expiry call at contents-read dispatch, before
+the upstream unread-media/mention filter that excludes save-only photo/video.
+
+`history/view/history_view_context_menu.cpp` and
+`history/history_inner_widget.cpp` each call Purple to add Save As for an available
+save-only service payload. No normal viewer is substituted for a TTL placeholder.
+
+`data/data_peer.cpp` and `iv/iv_rich_message_html_export.cpp` consult the save
+policy only at their protected-content export gates. Special-chat, membership,
+payload and server-side checks stay in place.
+
 ## Peek countdown styles
 
 `Telegram/cmake/td_ui.cmake` has one include of `cmake/purple_styles.cmake`
