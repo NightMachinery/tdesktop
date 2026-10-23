@@ -25,8 +25,10 @@ Replacing the media invalidates that token even if an allocator reuses its addre
 Contents-read updates from another client clear save-only photo/video sources
 before the ordinary voice/mention eligibility filter. Full-payload editions retain
 the unread or expired service text independently of their save-only media.
-A download already explicitly
-started by the user follows the existing document download behavior.
+Unnamed voice saves retain the original MIME-aware default: `.mp3` for
+`audio/mp3`, `.ogg` otherwise. Unnamed round videos use `.mp4`; existing
+filenames are preserved. A download already explicitly started by the user
+follows the existing document download behavior.
 
 The Desktop app and its window helpers have no content-dependent screenshot or
 screen-capture exclusion API in this checkout. Protected chats, stories and the

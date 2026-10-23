@@ -42,6 +42,8 @@ private:
 	bool unread);
 [[nodiscard]] bool SelfDestructHasServicePlaceholder(
 	const MTPMessageMedia *media);
+[[nodiscard]] QString SelfDestructDocumentSaveExtension(
+	bool voice, const QString &mime);
 [[nodiscard]] bool AddSelfDestructDocumentSaveAction(
 	const Ui::Menu::MenuCallback &addAction,
 	not_null<HistoryItem*> item,

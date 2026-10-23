@@ -250,6 +250,10 @@ bool SelfDestructHasServicePlaceholder(const MTPMessageMedia *media) {
 	});
 }
 
+QString SelfDestructDocumentSaveExtension(bool voice, const QString &mime) {
+	return voice ? (mime == u"audio/mp3"_q ? u".mp3"_q : u".ogg"_q) : u".mp4"_q;
+}
+
 bool AddSelfDestructDocumentSaveAction(
 		const Ui::Menu::MenuCallback &addAction,
 		not_null<HistoryItem*> item,
@@ -296,7 +300,8 @@ bool AddSelfDestructDocumentSaveAction(
 					filename.isEmpty()
 						? filedialogDefaultName(
 							u"file"_q,
-							document->isVoiceMessage() ? u".ogg"_q : u".mp4"_q)
+							SelfDestructDocumentSaveExtension(
+								document->isVoiceMessage(), document->mimeString()))
 						: filename,
 					crl::guard(session, [=](QString &&path) {
 						if (!path.isEmpty() && active()) {
