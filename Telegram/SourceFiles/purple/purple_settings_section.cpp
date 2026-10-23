@@ -543,7 +543,10 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			.onClick = [=] {
 				Purple::SendSettingsToSavedMessages(
 					session,
-					controller->uiShow());
+					controller->uiShow(),
+					[weak = base::make_weak(controller), session] {
+						return weak && &weak->session() == session;
+					});
 			},
 			.keywords = {
 				u"purple"_q,
@@ -552,6 +555,20 @@ void BuildPurpleSection(SectionBuilder &builder) {
 				u"backup"_q,
 				u"saved"_q,
 			},
+		});
+	}
+	if (controller) {
+		builder.addButton({
+			.id = u"advanced/purple_share_settings"_q,
+			.title = tr::lng_purple_transfer_share(),
+			.icon = { &st::menuIconDownload },
+			.onClick = [=] {
+				Purple::ShareAccountSettingsFile(session, controller->uiShow(),
+					[weak = base::make_weak(controller), session] {
+						return weak && &weak->session() == session;
+					});
+			},
+			.keywords = { u"purple"_q, u"share"_q, u"settings"_q },
 		});
 	}
 	if (controller) {

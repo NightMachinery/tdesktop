@@ -37,6 +37,17 @@ void RefreshDesktopAccounts();
 [[nodiscard]] bool LegacyRootSettingsOperationsAllowed();
 [[nodiscard]] std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*> session);
 [[nodiscard]] bool ValidateAccountSyncTarget(not_null<Main::Session*> session, const AccountOperationTarget &target, bool sameInput = true);
+[[nodiscard]] std::optional<AccountOperationTarget> AccountLegacySendTarget(
+	not_null<Main::Session*> session);
+[[nodiscard]] bool ValidateAccountLegacySendTarget(
+	not_null<Main::Session*> session, const AccountOperationTarget &target);
+[[nodiscard]] QString ConfigImpactDisplayText(const ConfigChangeImpact &impact);
+[[nodiscard]] std::optional<AccountTransferReview> ReviewAccountTransfer(
+	not_null<Main::Session*> session, const QByteArray &bytes);
+[[nodiscard]] AccountTransferResult ImportReviewedAccountTransfer(
+	not_null<Main::Session*> session,
+	const AccountTransferReview &review,
+	const std::function<bool()> &originCurrent);
 [[nodiscard]] SyncHistoryAccess AccountSyncHistoryAccess(not_null<Main::Session*> session, const AccountOperationTarget &target);
 [[nodiscard]] bool ValidateAccountSyncStoreTarget(not_null<Main::Session*> session, const AccountOperationTarget &target, const SettingsFileInput &expected, bool sameInput = true);
 [[nodiscard]] bool AccountSyncOperationsAllowed(not_null<Main::Session*> session);

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_account_files.h"
+#include "purple/purple_config_diff.h"
 #include "purple/purple_config_file.h"
 #include "purple/purple_settings.h"
 #include "purple/purple_splice.h"
@@ -22,6 +23,8 @@ namespace Purple {
 
 [[nodiscard]] bool AccountSyncRecordSupported(const QByteArray &record);
 [[nodiscard]] bool AccountFilePathSafe(const QString &path);
+[[nodiscard]] bool SettingsExportPathAllowed(const QString &root, const QString &path);
+[[nodiscard]] bool ConfigImpactFindingUsedHere(const ConfigImpactFinding &finding);
 [[nodiscard]] bool CanReplaceLegacyRootSettings(const QByteArray &before, const QByteArray &after);
 
 struct AccountFileTarget {
@@ -64,6 +67,25 @@ enum class LegacySettingsDocumentKind { Unrelated, Whole, Layered };
 [[nodiscard]] bool CanApplyWholeSettingsDocument(
 	const QString &name,
 	const QByteArray &bytes);
+
+[[nodiscard]] bool CanApplyAccountSettingsDocument(
+	const QString &name, const QByteArray &bytes);
+
+struct AccountTransferReview {
+	AccountSettingsOpenTarget destination;
+	ConfigImpactInput context;
+	ConfigChangeImpact impact;
+	std::map<QString, QByteArray> directories;
+	std::map<QString, SettingsFileInput> inputs;
+	std::map<QString, QByteArray> identities;
+	bool usingGood = false;
+};
+
+struct AccountTransferResult {
+	bool ok = false;
+	bool changed = false;
+	QString error;
+};
 
 enum class AccountSettingsRow { LastSeenReasons, LastSeenPeek, SendAfterSave };
 
@@ -146,6 +168,7 @@ struct AccountWorkModeResult {
 struct AccountListReloadChange {
 	AccountKey account;
 	int inactiveChanges = 0;
+	std::optional<ConfigChangeImpact> impact;
 	std::map<QString, int> unusedMembers;
 	std::map<QString, int> emptiedLists;
 };
@@ -196,6 +219,7 @@ struct AccountOperationTarget {
 	AccountFiles files;
 	QByteArray syncDirectoryIdentity;
 	QByteArray historyDirectoryIdentity;
+	bool legacySend = false;
 };
 
 struct AccountSendFingerprints {
@@ -301,7 +325,12 @@ public:
 	[[nodiscard]] std::optional<ManualSettingsExportTarget> manualExportTarget(const AccountKey &key);
 	[[nodiscard]] bool validateManualExport(const ManualSettingsExportTarget &target);
 	[[nodiscard]] std::optional<AccountFileTarget> editTarget(const AccountKey &key);
-	[[nodiscard]] std::optional<AccountOperationTarget> operationTarget(const AccountKey &key);
+	[[nodiscard]] std::optional<AccountOperationTarget> operationTarget(const AccountKey &key, bool legacySend = false);
+	[[nodiscard]] std::optional<AccountTransferReview> reviewTransfer(
+		const AccountKey &key, const QByteArray &bytes);
+	[[nodiscard]] bool validateTransfer(const AccountTransferReview &review);
+	[[nodiscard]] AccountTransferResult importReviewed(
+		const AccountTransferReview &review, const std::function<bool()> &originCurrent);
 	[[nodiscard]] bool validateOperation(const AccountOperationTarget &target, bool sameInput = true);
 	[[nodiscard]] bool validateStore(const AccountOperationTarget &target, const SettingsFileInput &expected, bool sameInput = true);
 	[[nodiscard]] std::optional<AccountSendFingerprints> fingerprints(const AccountOperationTarget &target);

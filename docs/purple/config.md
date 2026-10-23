@@ -1180,8 +1180,8 @@ Manual root export is an explicit owner-unknown single-file role. A confirmed
 owner with an unavailable account path refuses export instead of substituting
 another account's bytes. Confirmation rechecks role, originating session, routing
 generation and the exact file snapshot; completion rechecks before bookkeeping.
-Valid account-file manual export remains supported within the existing schema1
-legacy document boundary. Layered schema2 imports/legacy sends remain refused.
+Valid account-file manual Send and Share support schema 1 and 2. Reviewed legacy
+imports accept both document names; modern schema-2 sync apply remains held.
 
 Last Seen reasons and Last Seen Peek read the Settings window's account's effective
 values and write only that account's own file. Send after every save is file-local:
@@ -1285,3 +1285,14 @@ edits for other devices. Follow is ignored for the app-wide account itself.
 Malformed entries warn and fall back to Own. See
 [the list controls](account_routing.md#local-list-mode-and-reversible-forks)
 for fork deletion, destination checks and file warnings.
+
+## Reviewed legacy account transfers
+
+Send, Share and imports now support schema 1 and 2 for the originating account's
+own file. Imports use a shared impact review with Cancel focused and recheck the
+captured account, source choice, bytes and identities before writing. Schema-2
+exports use `account-settings.toml`; old clients refuse that format. Modern
+schema-2 sync apply remains held. See
+[the transfer boundary](account_routing.md#reviewed-legacy-account-transfers)
+for fallback, backup, launch-offer and queue rules. External editor save notices
+use the same impact model after the edit lands.

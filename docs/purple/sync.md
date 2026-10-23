@@ -1,7 +1,7 @@
 # Syncing settings between devices
 
-`settings.toml` is per-install. Two Purple Telegram clients on two machines
-have two files, and nothing in the fork keeps them in step automatically.
+Each account has its own settings file on each installation. Two Purple Telegram
+clients on two machines have separate files, and neither imports changes automatically.
 This document describes the manual transfer mechanisms and the alternatives
 deliberately not built.
 
@@ -504,12 +504,12 @@ If it takes over the same document's import load, the import reads that saved
 file through the existing local-file fallback. Sync records are never
 downloaded automatically; see [account_sync_plan.md](account_sync_plan.md).
 
-It parses with `Purple::ParseSettings` before it writes anything, so a file
-that is not valid TOML never reaches the disk. The write goes through the same
-`QSaveFile` helper `purple_config.cpp` uses for its own writes, exposed as
-`Purple::WriteConfigFile`, and the directory watcher picks the change up and
-hot-reloads it - the import path deliberately knows nothing about applying
-settings, only about producing a valid file.
+Desktop analyzes the exact document with `AnalyzeConfigChange` before review.
+`DesktopAccountConfig::importReviewed` rechecks the captured account/context and
+writes guarded backups and settings through `WriteGuardedSettingsFile`, or uses
+exclusive creation for a missing non-root file. The watcher reloads the result.
+Non-Ready reviews cannot apply; malformed primary files require an explicitly
+disclosed valid last-good baseline.
 
 On Android the launch-time offer lives in
 `TMessagesProj/src/main/java/org/telegram/messenger/purple/PurpleSyncOffer.java`
@@ -517,11 +517,11 @@ and starts from `DialogsActivity.onFragmentCreate`. On desktop it lives in
 `Telegram/SourceFiles/purple/purple_sync.cpp` and starts only when the primary
 chat list has a usable UI host and its session belongs to
 `Core::App().domain().active()`. The rules themselves, `JudgeImportOffer`,
-`ImportAccountLabel` and `WriteImportedSettings`, are inline in
-`purple_sync.h`, so `purple/test_sync_import.sh` can test them without the
-app. Both search the self peer with a document filter, choose the newest
-result actually named `settings.toml` and small enough to be one, and compare
-its date with the local file mtime. The remembered id is
+`ImportAccountLabel` and the legacy backup helper are inline in
+`purple_sync.h`; freshness and historical backup cases run without the
+app. Desktop searches the self peer for both supported document names and checks
+the newest qualifying result against the own file mtime, using the captured global
+file mtime when the own file is missing. The remembered id is
 per account: Android uses `purple_sync_offered_id`; desktop appends it to
 `Main::SessionSettings`. A message that has already been considered cannot
 offer again, and an older local file advances the remembered id silently.
@@ -550,18 +550,22 @@ is not established.
 
 ## Layered legacy documents
 
-Whole legacy documents remain named `settings.toml`. Layered schema2 documents
-use `account-settings.toml`; current Saved Messages offers and context-menu
-qualification recognize both names using the same originating-session and exact
-message/document hit guards. A layered filename refuses import before download.
-The final whole-file import check also requires the whole filename and supported
-schema1 content. Renaming schema2 bytes to `settings.toml` cannot enable replacement,
-and a schema1 payload under the layered filename is still held.
+Legacy Send and Share support both schemas: version 1 exports `settings.toml`,
+version 2 exports `account-settings.toml`. Imports accept either name and require
+the account-aware replacement review described in
+[Account routing](account_routing.md#reviewed-legacy-account-transfers).
+Old whole-file reader predicates still refuse layered documents. Modern schema-2
+sync Apply and History expansion remain held for the recovery batch.
 
-The document name is captured and revalidated through download and confirmation.
-Existing missing-file, account binding, exact input, warning and app-wide-loss
-checks remain in force. Automatic/manual schema2 legacy sends and layered apply
-are not enabled by filename recognition. Creation/Open sends nothing. Full layered
-review, warning presentation, non-default destructive actions and explicit
-per-account/app-wide application choices remain required before enabling those
-transfers. Existing root-owner and valid schema1 account transfers are unchanged.
+Manual imports retain the exact message/window account through download and Apply,
+including separate windows. Launch offers remain active-account-only and download
+and analyze before displaying the actual import decision. A missing own file uses
+the captured global file mtime for freshness. Apply backs up actual old bytes,
+rechecks the complete review context and writes the exact proposed bytes. Cancel
+has initial focus and Enter does not select Import implicitly.
+
+Per-account send-after-save accepts schema 2 and reads opt-in from that own file.
+Creation and imports seed/suppress their observations before callbacks. Captured
+queue entries carry their own account, bytes and session; logout/slot reuse and
+stale completion tokens cannot retarget a post or erase a later retry. The modern
+sync operation capability remains schema-1-only.

@@ -663,7 +663,7 @@ void AccountSyncIsolationCases() {
 #endif
 	Put(bPath, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
 	CHECK(!config.operationTarget(b));
-	CHECK(!config.observeAccountSave(b));
+	CHECK(config.observeAccountSave(b));
 	CHECK(Get(root) == aBytes);
 }
 
@@ -754,8 +754,8 @@ void QueueAndHistoryLifetimeRepairCases() {
 	CHECK(!queue.empty());
 	Put(path, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
 	observeB();
-	CHECK(queue.empty());
-	CHECK(queue.takeReady(config).empty());
+	CHECK(!queue.empty());
+	CHECK(queue.takeReady(config).size() == 1);
 	Put(path, second);
 	observeB();
 	CHECK(!queue.empty());
@@ -922,7 +922,7 @@ void OwnerPolicyRecoveryCases() {
 	CHECK(ownerPolicy(currentOwner));
 	CHECK(!config.operationTarget(b));
 	observe();
-	CHECK(queue.takeReady(config).empty());
+	CHECK(queue.takeReady(config).size() == 1);
 	Put(path, first);
 	observe();
 	pending = queue.takeReady(config);
@@ -2640,7 +2640,9 @@ void AccountListControlsCases() {
 		CHECK(config.observeListReloads({ a,b }).empty());
 		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=1\n"));
 		const auto orphaned = config.observeListReloads({ a,b });
-		CHECK(orphaned.size() == 1 && orphaned.front().unusedMembers.at(u"work.one"_q) == 1);
+		CHECK(orphaned.size() == 2 && std::any_of(orphaned.begin(), orphaned.end(), [&](const auto &notice) {
+			return notice.account == b && notice.unusedMembers.at(u"work.one"_q) == 1;
+		}));
 		CHECK(config.observeListReloads({ a,b }).empty());
 		switchTo(config, b);
 		CHECK(config.observeListReloads({ a,b }).empty());
@@ -2774,6 +2776,376 @@ void AccountListControlsCases() {
 	FailureContext.clear();
 }
 
+
+void NewerTransferSourceCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto valid = QByteArray("version=1\n[last_seen]\ntrade_p=false\n");
+	const auto proposed = QByteArray("version=2\n[last_seen]\ntrade_p=true\n");
+	for (const auto &version : { QByteArray("3"), QByteArray("2147483648"),
+		QByteArray("9223372036854775807"), QByteArray("0x80000000") }) {
+		const auto future = QByteArray("version=") + version
+			+ "\n[future_policy]\nimportant='retain'\n[lists.focus]\nmembers=[123]\n";
+		for (const auto preexisting : { false, true }) {
+			for (auto scenario = 0; scenario != 4; ++scenario) {
+				FailureContext = "newerTransfer:" + version + ':' + QByteArray::number(scenario) + ':' + QByteArray::number(preexisting);
+				auto temp = QTemporaryDir();
+				const auto root = temp.filePath(u"settings.toml"_q);
+				const auto own = temp.filePath(u"accounts/0-202/settings.toml"_q);
+				const auto source = scenario == 0 || scenario == 3 ? own : root;
+				const auto key = scenario == 1 || scenario == 3 ? a : b;
+				Put(root, valid);
+				Put(own, valid);
+				Put(source + u".good"_q, valid);
+				if (preexisting) { Put(source, future); }
+				auto config = DesktopAccountConfig(temp.path());
+				config.start({ { a, false, false }, { b, true, false } }, a);
+				CHECK(config.permissionsReady());
+				const auto opening = config.reviewTransfer(key, proposed);
+				CHECK(bool(opening) == !preexisting);
+				if (!preexisting) { Put(source, future); }
+				auto input = ConfigImpactInput();
+				input.current = { key == a ? Get(root) : Get(own), true };
+				input.proposed = { proposed, true };
+				input.role = key == a ? ConfigImpactFileRole::Global : ConfigImpactFileRole::Layered;
+				if (key == a) {
+					input.accounts.push_back({ u"0-202"_q, { Get(own), true }, AccountWorkMode::Own });
+				} else {
+					input.global = { Get(root), true };
+				}
+				CHECK(AnalyzeConfigChange(input).status == ConfigImpactStatus::NewerSchema);
+				CHECK(!config.reviewTransfer(key, proposed));
+				if (opening) {
+					CHECK(!config.validateTransfer(*opening));
+					CHECK(!config.importReviewed(*opening, [] { return true; }).ok);
+				}
+				CHECK(Get(source) == future);
+				CHECK(Get(source + u".good"_q) == valid);
+				CHECK(Get(source == root ? own : root) == valid);
+				CHECK(!QFileInfo::exists(root + u".bak"_q));
+				CHECK(!QFileInfo::exists(root + u".import.bak"_q));
+				CHECK(!QFileInfo::exists(own + u".bak"_q));
+				CHECK(!QFileInfo::exists(own + u".import.bak"_q));
+			}
+		}
+	}
+	FailureContext.clear();
+}
+
+void ReviewedTransferCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto whole = QByteArray("version=1\n[lists.focus]\ntitle='Focus'\nmembers=[101]\n[presets.work]\nlist_order=[{list='focus'}]\n[sync]\nsend_after_save_p=true\n");
+	const auto own = QByteArray("version=2\n[lists.focus]\nmembers=[202]\n[last_seen]\ntrade_p=false\n[sync]\nsend_after_save_p=true\n");
+	const auto next = QByteArray("# exact bytes\r\nversion=2\r\n[lists.focus]\r\nmembers=[303]\r\n[last_seen]\r\ntrade_p=true\r\n[sync]\r\nsend_after_save_p=true\r\n[unknown]\r\nkeep='literal'\r\n");
+	CHECK(CanApplyAccountSettingsDocument(u"settings.toml"_q, next));
+	CHECK(CanApplyAccountSettingsDocument(u"ACCOUNT-SETTINGS.TOML"_q, next));
+	CHECK(!CanApplyWholeSettingsDocument(u"settings.toml"_q, next));
+	CHECK(!CanApplyWholeSettingsDocument(u"account-settings.toml"_q, whole));
+	CHECK(!CanApplyAccountSettingsDocument(u"other.toml"_q, whole));
+	CHECK(!CanApplyAccountSettingsDocument(u"settings.toml"_q, QByteArray("version=3\n")));
+	CHECK(!CanApplyAccountSettingsDocument(u"settings.toml"_q, QByteArray("version=9223372036854775807\n")));
+	CHECK(!CanApplyAccountSettingsDocument(u"settings.toml"_q, QByteArray("x='\xff'\n")));
+	CHECK(CanApplyAccountSettingsDocument(u"settings.toml"_q, QByteArray("[last_seen]\ntrade_p=true\n")));
+	CHECK(SettingsDocumentFileName(ParseSettings(u"[last_seen]\ntrade_p=true\n"_q, QString()).settings.version) == u"settings.toml"_q);
+	{
+		auto profile = QTemporaryDir();
+		auto exports = QTemporaryDir();
+		CHECK(!SettingsExportPathAllowed(profile.path(), profile.filePath(u"settings.toml"_q)));
+		CHECK(QDir().mkpath(profile.filePath(u"accounts/0-202"_q)));
+		CHECK(!SettingsExportPathAllowed(profile.path(), profile.filePath(u"accounts/0-202/settings.toml"_q)));
+		CHECK(SettingsExportPathAllowed(profile.path(), exports.filePath(u"account-settings.toml"_q)));
+		CHECK(!SettingsExportPathAllowed(profile.path(), u"relative.toml"_q));
+	}
+
+	for (const auto mode : { AccountWorkMode::Own, AccountWorkMode::Follow, AccountWorkMode::Stock }) {
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		if (mode != AccountWorkMode::Own) {
+			const auto target = config.workModeTarget(b);
+			CHECK(target);
+			CHECK(config.writeWorkMode(*target, mode, [] { return true; }).ok);
+		}
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		if (!review) { continue; }
+		CHECK(review->context.role == ConfigImpactFileRole::Layered);
+		CHECK(review->context.workMode == mode);
+		CHECK(review->impact.proposedText == next);
+		CHECK(config.validateTransfer(*review));
+		auto membership = false;
+		for (const auto &finding : review->impact.findings) {
+			if (finding.kind == ConfigImpactKind::ValueChanged && finding.change.key == u"members"_q) {
+				membership = true;
+				CHECK(ConfigImpactFindingUsedHere(finding) == (mode == AccountWorkMode::Own));
+				CHECK(finding.afterUse == (mode == AccountWorkMode::Follow ? ConfigImpactUse::Follow
+					: mode == AccountWorkMode::Stock ? ConfigImpactUse::Stock : ConfigImpactUse::Used));
+			}
+		}
+		CHECK(membership);
+		CHECK(!config.importReviewed(*review, [] { return false; }).ok);
+		CHECK(Get(path) == own);
+		CHECK(config.importReviewed(*review, [] { return true; }).ok);
+		CHECK(Get(path) == next);
+		CHECK(Get(root) == whole);
+		CHECK(Get(path + u".bak"_q) == own);
+		CHECK(Get(path + u".import.bak"_q) == own);
+		CHECK(!config.validateTransfer(*review));
+		CHECK(!config.observeAccountSave(b));
+		CHECK(!config.operationTarget(b));
+		const auto send = config.operationTarget(b, true);
+		CHECK(send);
+		CHECK(send->legacySend);
+		CHECK(!config.shouldAutoSend(*send));
+		CHECK(config.replace(*send, whole) == GuardedFileWrite::InputChanged);
+		CHECK(config.noteFingerprint(*send, true));
+		CHECK(Get(temp.filePath(u"accounts/0-202/send-state.toml"_q)).contains("last_imported_fingerprint"));
+		CHECK(!QFileInfo::exists(temp.filePath(u"state.toml"_q)));
+	}
+	for (auto scenario = 0; scenario != 10; ++scenario) {
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		if (scenario != 0 && scenario != 1) { Put(path, own); }
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, scenario > 1, false } }, a);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		if (!review) { continue; }
+		if (scenario == 1) { Put(path, own); }
+		if (scenario == 2) { Put(root, whole + "# global changed\n"); }
+		if (scenario == 3) { Put(path + u".good"_q, own); }
+		if (scenario == 4) { Put(path + u".bak"_q, "changed\n"); }
+		if (scenario == 5) { Put(path + u".import.bak"_q, "changed\n"); }
+		if (scenario == 6) {
+			const auto mode = config.workModeTarget(b);
+			CHECK(mode && config.writeWorkMode(*mode, AccountWorkMode::Follow, [] { return true; }).ok);
+		}
+		if (scenario == 7) {
+			Put(temp.filePath(u"local.toml"_q), Get(temp.filePath(u"local.toml"_q)) + "\n# changed\n");
+		}
+		if (scenario == 8) {
+			CHECK(QFile::rename(path, path + u".old"_q));
+			Put(path, own);
+		}
+		if (scenario == 9) {
+			const auto mode = config.workModeTarget(b);
+			CHECK(mode && config.writeWorkMode(*mode, AccountWorkMode::Stock, [] { return true; }).ok);
+		}
+		const auto before = ReadSettingsFileInput(path);
+		const auto result = config.importReviewed(*review, [] { return true; });
+		CHECK(result.ok == (scenario == 0));
+		CHECK(scenario == 0 ? Get(path) == next : ReadSettingsFileInput(path) == before);
+	}
+	for (auto scenario = 0; scenario != 5; ++scenario) {
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		if (scenario != 3 && scenario != 4) { Put(path, "broken=[\n"); }
+		if (scenario == 1 || scenario == 3) { Put(path + u".good"_q, own); }
+		if (scenario == 2 || scenario == 4) { Put(path + u".good"_q, "broken=[\n"); }
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(bool(review) == (scenario == 1 || scenario == 3));
+		if (!review) { continue; }
+		CHECK(review->usingGood);
+		CHECK(review->context.current.text == own);
+		CHECK(config.importReviewed(*review, [] { return true; }).ok);
+		CHECK(Get(path) == next);
+		CHECK(Get(path + u".good"_q) == own);
+		if (scenario == 1) { CHECK(Get(path + u".bak"_q) == "broken=[\n"); }
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		const auto review = config.reviewTransfer(a, QByteArray("version=2\n"));
+		CHECK(review);
+		CHECK(review->impact.dangerous);
+		auto stranded = false;
+		for (const auto &finding : review->impact.findings) {
+			if (finding.kind == ConfigImpactKind::StrandedMembers) { stranded = true; CHECK(finding.account == u"0-202"_q); }
+		}
+		CHECK(stranded);
+		CHECK(config.importReviewed(*review, [] { return true; }).ok);
+		CHECK(Get(path) == own);
+		CHECK(Get(root) == "version=2\n");
+		CHECK(!config.operationTarget(a));
+		CHECK(config.operationTarget(a, true)->files.fingerprintStorage == AccountFingerprintStorage::DeviceState);
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		auto first = std::make_unique<QObject>();
+		auto second = std::make_unique<QObject>();
+		auto owner = QPointer<QObject>(first.get());
+		const auto current = [&](const QPointer<QObject> &value) { return value && value == owner; };
+		auto queue = AccountSendQueue<QPointer<QObject>>();
+		const auto observe = [&] { queue.observe(config, b, owner, current); };
+		observe();
+		CHECK(queue.empty());
+		Put(path, next);
+		observe();
+		Put(path, next + "# newest\n");
+		observe();
+		auto pending = queue.takeReady(config);
+		CHECK(pending.size() == 1);
+		CHECK(pending.front().target.file.account == b);
+		CHECK(pending.front().target.file.input.bytes == next + "# newest\n");
+		const auto receipt = queue.beginSend(config, pending.front());
+		CHECK(receipt);
+		owner = second.get();
+		first.reset();
+		observe();
+		CHECK(queue.empty());
+		Put(path, next + "# after slot reuse\n");
+		observe();
+		pending = queue.takeReady(config);
+		CHECK(pending.size() == 1);
+		CHECK(queue.beginSend(config, pending.front()));
+		queue.finishSend(*receipt);
+		CHECK(!queue.beginSend(config, pending.front()));
+		queue.forget(config, b);
+		Put(path, own);
+		observe();
+		CHECK(queue.empty());
+		Put(path, "version=2\n[last_seen]\ntrade_p=true\n");
+		observe();
+		CHECK(queue.empty());
+		CHECK(Get(root) == whole);
+	}
+	for (const auto missing : { false, true }) {
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		if (!missing) { Put(path, own); }
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, !missing, false } }, a);
+		auto owner = std::make_unique<QObject>();
+		auto queue = AccountSendQueue<QPointer<QObject>>();
+		const auto observe = [&] {
+			queue.observe(config, b, QPointer<QObject>(owner.get()), [](const QPointer<QObject> &value) { return bool(value); });
+		};
+		observe();
+		config.setChanged(observe);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		CHECK(config.importReviewed(*review, [] { return true; }).ok);
+		CHECK(queue.empty());
+		CHECK(Get(path) == next);
+		CHECK(Get(root) == whole);
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		auto injected = false;
+		const auto result = config.importReviewed(*review, [&] {
+			if (!injected && Get(path + u".import.bak"_q) == own) {
+				injected = true;
+				Put(path + u".bak"_q, "foreign backup\n");
+			}
+			return true;
+		});
+		CHECK(injected);
+		CHECK(!result.ok);
+		CHECK(Get(path) == own);
+		CHECK(Get(path + u".bak"_q) == "foreign backup\n");
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		const auto local = temp.filePath(u"local.toml"_q);
+		Put(root, whole);
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		config.setChanged([&] { Put(local, Get(local) + "\n# context changed after import\n"); });
+		const auto result = config.importReviewed(*review, [] { return true; });
+		CHECK(!result.ok && result.changed);
+		CHECK(Get(path) == next);
+		CHECK(!config.observeAccountSave(b));
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, "broken=[\n");
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		CHECK(!config.reviewTransfer(b, next));
+		Put(root + u".good"_q, whole);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review && review->usingGood);
+		CHECK(config.importReviewed(*review, [] { return true; }).ok);
+		CHECK(Get(root) == "broken=[\n");
+		CHECK(Get(path) == next);
+	}
+
+	{
+		auto temp = QTemporaryDir();
+		const auto root = temp.filePath(u"settings.toml"_q);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(root, whole);
+		Put(path, own);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, true, false } }, a);
+		const auto mixed = config.reviewTransfer(b, QByteArray("version=2\n[lists.focus]\ntitle='Different title'\nmembers=[404]\n"));
+		CHECK(mixed);
+		auto used = false;
+		auto elsewhere = false;
+		for (const auto &finding : mixed->impact.findings) {
+			if (finding.kind != ConfigImpactKind::ValueChanged || finding.change.table != u"lists.focus"_q) { continue; }
+			if (finding.change.key == u"members"_q) {
+				used = finding.afterUse == ConfigImpactUse::Used && ConfigImpactFindingUsedHere(finding);
+			}
+			if (finding.change.key == u"title"_q) {
+				elsewhere = finding.afterUse == ConfigImpactUse::AppWideElsewhere && !ConfigImpactFindingUsedHere(finding);
+			}
+		}
+		CHECK(used && elsewhere);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		const auto choice = config.previewGlobalChoice(b, b, QString());
+		CHECK(choice);
+		auto commit = config.commitGlobalChoice(*choice, [] { return true; });
+		CHECK(commit.ok && config.activateGlobalChoice(*choice, commit));
+		CHECK(!config.validateTransfer(*review));
+		CHECK(!config.importReviewed(*review, [] { return true; }).ok);
+		CHECK(Get(root) == whole);
+		CHECK(Get(path) == own);
+	}
+
+}
+
 }
 
 int main(int argc, char *argv[]) {
@@ -2827,6 +3199,12 @@ int main(int argc, char *argv[]) {
 	const auto beforeListControls = Checks;
 	AccountListControlsCases();
 	std::printf("accountListControls %d checks\n", Checks - beforeListControls);
+	const auto beforeTransfers = Checks;
+	ReviewedTransferCases();
+	std::printf("reviewedTransfers %d checks\n", Checks - beforeTransfers);
+	const auto beforeNewerSources = Checks;
+	NewerTransferSourceCases();
+	std::printf("newerTransferSources %d checks\n", Checks - beforeNewerSources);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

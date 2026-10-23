@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_list_widget.h"
 #include "info/info_controller.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "lang/lang_keys.h"
@@ -42,6 +43,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/layers/show.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -432,50 +435,20 @@ void RefuseSwitchedImport(const QString &account) {
 	}
 }
 
-void WriteImported(
-		not_null<Main::Session*> session,
-		const AccountFileTarget &target,
-		const QString &account,
-		const QString &text,
-		const std::shared_ptr<Ui::Show> &show) {
-	if (AskingWindowSwitched(show)
-		|| !AccountSyncOperationsAllowed(session)
-		|| !ValidateAccountSettingsTarget(session, target)
-		|| !CanReplaceLegacyRootSettings(target.input.bytes, text.toUtf8())) {
-		RefuseSwitchedImport(account);
-		return;
-	}
-	const auto weakSession = base::make_weak(session.get());
-	const auto current = [=] {
-		const auto live = weakSession.get();
-		return live && AccountSyncOperationsAllowed(live)
-			&& ValidateAccountSettingsTarget(live, target);
-	};
-	const auto path = target.path;
-	const auto failed = WriteImportedSettings(path, [&] {
-		return WriteGuardedSettingsFile(path, target.input, text.toUtf8(), current, true)
-			== GuardedFileWrite::Written;
-	}, current);
-	if (failed == path) {
-		show->showBox(Ui::MakeInformBox(
-			u"Could not write %1. See the log."_q.arg(path)));
-		return;
-	} else if (!failed.isEmpty()) {
-		LOG(("Purple Error: Could not write %1, so nothing was imported."
-			).arg(failed));
-		show->showBox(Ui::MakeInformBox(
-			u"Could not write %1, so nothing was imported. See the log."_q
-				.arg(failed)));
-		return;
-	}
-	// The bytes as they landed on disk, which is what the automatic send will
-	// fingerprint the next time anything writes this file. Recording them here
-	// is what stops this machine from offering back to the other one exactly
-	// what it just received. See ShouldAutoSend().
-	NoteSettingsImported(session, text.toUtf8());
-	// Nothing else to do: the directory watcher sees the write and reloads,
-	// exactly as it would for an edit made in a text editor.
-	show->showToast(u"Settings imported"_q);
+void TransferConfirmBox(
+		not_null<Ui::GenericBox*> box,
+		QString title,
+		QString text,
+		QString confirm,
+		Fn<void()> apply) {
+	box->setTitle(rpl::single(std::move(title)));
+	box->addRow(object_ptr<Ui::FlatLabel>(box, std::move(text)));
+	box->addButton(rpl::single(std::move(confirm)), [=] {
+		box->closeBox();
+		apply();
+	});
+	const auto cancel = box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	box->setFocusCallback([=] { cancel->setFocus(); });
 }
 
 void ConfirmAndImport(
@@ -485,86 +458,50 @@ void ConfirmAndImport(
 		TimeId date,
 		const std::shared_ptr<Ui::Show> &show,
 		Fn<bool()> stillValid) {
-	if (AskingWindowSwitched(show)) {
-		return;
-	}
-
-	if (!AccountSyncOperationsAllowed(session)) {
-		show->showBox(Ui::MakeInformBox(SettingsOwnerStatus()));
-		return;
-	}
-	const auto target = AccountSettingsTarget(session);
-	if (!target) {
+	if (AskingWindowSwitched(show) || (stillValid && !stillValid())) { return; }
+	const auto review = CanApplyAccountSettingsDocument(documentName, content)
+		? ReviewAccountTransfer(session, content) : std::nullopt;
+	if (!review) {
+		show->showBox(Ui::MakeInformBox(tr::lng_purple_transfer_unavailable(tr::now)));
 		return;
 	}
 	const auto account = AccountLabel(session);
-	if (stillValid && !stillValid()) {
-		if (AskingWindowSwitched(show)) {
-			RefuseSwitchedImport(account);
-		}
-		return;
+	auto details = QStringList();
+	const auto parsed = ParseSettings(QString::fromUtf8(content), documentName);
+	details.push_back(tr::lng_purple_transfer_schema(tr::now).arg(parsed.settings.version).arg(int(parsed.warnings.size())));
+	const auto global = review->context.role == ConfigImpactFileRole::Global;
+	details.push_back(global ? tr::lng_purple_transfer_global_role(tr::now)
+		: tr::lng_purple_transfer_own_role(tr::now));
+	details.push_back(review->destination.file.path);
+	if (global && review->impact.dangerous) {
+		details.prepend(tr::lng_purple_transfer_global_warning(tr::now));
 	}
-	if (AskingWindowSwitched(show)) {
-		RefuseSwitchedImport(account);
-		return;
-	}
-	const auto text = QString::fromUtf8(content);
-	const auto parsed = ParseSettings(text, target->path);
-	if (!parsed.ok()) {
-		show->showBox(Ui::MakeInformBox(
-			u"That %1 is not valid TOML, so nothing was changed:\n\n%2"_q.arg(
-				SettingsFileName(),
-				parsed.error)));
-		return;
-	}
-	const auto version = parsed.settings.version;
-	if (!CanApplyWholeSettingsDocument(documentName, content)) {
-		show->showBox(Ui::MakeInformBox(tr::lng_purple_settings_layered_import_held(tr::now)));
-		return;
-	}
-	if (!CanReplaceLegacyRootSettings(target->input.bytes, content)) {
-		show->showBox(Ui::MakeInformBox(u"This import would remove app-wide settings or cannot be checked safely."_q));
-		return;
-	}
-	if (version > kSettingsVersion) {
-		show->showBox(Ui::MakeInformBox(u"Layered settings imports are not enabled in this build."_q));
-		return;
-	}
-	const auto warnings = int(parsed.warnings.size());
-	auto lines = QStringList();
-	lines.push_back(
-		u"Import the settings sent %1 to Saved Messages of %2?"_q.arg(
-			FormatMoment(base::unixtime::parse(date)),
-			account));
-	lines.push_back(QString());
-	lines.push_back(u"Schema v%1."_q.arg(version));
-	lines.push_back(!warnings
-		? u"No parser warnings."_q
-		: (warnings == 1)
-		? u"1 parser warning."_q
-		: u"%1 parser warnings."_q.arg(warnings));
-	lines.push_back(QString());
-	lines.push_back(u"Replaces your current settings; the previous file is "
-		"kept as %1."_q.arg(SettingsFileName() + u".import.bak"_q));
-
-	const auto keep = show;
-	const auto weakSession = base::make_weak(session.get());
-	show->showBox(Ui::MakeConfirmBox({
-		.text = lines.join('\n'),
-		.confirmed = [=](Fn<void()> close) {
-			close();
-			if (!weakSession.get() || !AccountSyncOperationsAllowed(weakSession.get())
-				|| !ValidateAccountSettingsTarget(weakSession.get(), *target)
-				|| (stillValid && !stillValid())) {
-				if (AskingWindowSwitched(keep)) {
-					RefuseSwitchedImport(account);
-				}
-				return;
+	if (review->usingGood) { details.push_back(tr::lng_purple_transfer_good(tr::now)); }
+	details.push_back(ConfigImpactDisplayText(review->impact));
+	const auto text = tr::lng_purple_transfer_review(
+		tr::now,
+		lt_account,
+		account,
+		lt_date,
+		FormatMoment(base::unixtime::parse(date)),
+		lt_details,
+		details.join(u"\n\n"_q));
+	const auto weak = base::make_weak(session.get());
+	show->showBox(Box(TransferConfirmBox,
+		account,
+		text,
+		tr::lng_purple_transfer_import(tr::now),
+		[=] {
+			const auto current = [=] {
+				return weak.get() && !AskingWindowSwitched(show) && (!stillValid || stillValid());
+			};
+			if (!current()) { return; }
+			const auto result = ImportReviewedAccountTransfer(weak.get(), *review, current);
+			if (show && *show) {
+				if (!result.ok) { show->showBox(Ui::MakeInformBox(result.error)); }
+				else { show->showToast(u"Settings imported"_q); }
 			}
-			WriteImported(weakSession.get(), *target, account, text, keep);
-		},
-		.confirmText = u"Import"_q,
-	}));
+		}));
 }
 
 // The bytes are the whole problem here. A document that is only in the cloud
@@ -583,10 +520,8 @@ void ResolveAndImport(
 	}
 	const auto weakSession = base::make_weak(&document->session());
 	const auto documentName = document->filename();
-	if (ClassifySettingsDocumentName(documentName) != LegacySettingsDocumentKind::Whole) {
-		show->showBox(Ui::MakeInformBox(tr::lng_purple_settings_layered_import_held(tr::now)));
-		return;
-	}
+	const auto opening = AccountSettingsOpenTargetFor(&document->session(), SettingsOpenRole::Own);
+	if (!opening || ClassifySettingsDocumentName(documentName) == LegacySettingsDocumentKind::Unrelated) { return; }
 	const auto sameDocument = [=] {
 		return weakSession.get() && (!stillValid || stillValid())
 			&& document->filename() == documentName;
@@ -595,7 +530,9 @@ void ResolveAndImport(
 	const auto media = document->createMediaView();
 	if (const auto content = LocalContent(media, document);
 		!content.isEmpty()) {
-		ConfirmAndImport(&document->session(), documentName, content, date, show, sameDocument);
+		if (sameDocument() && ValidateAccountSettingsOpenTarget(&document->session(), *opening)) {
+			ConfirmAndImport(&document->session(), documentName, content, date, show, sameDocument);
+		}
 		return;
 	}
 	document->save(itemId, QString());
@@ -634,7 +571,9 @@ void ResolveAndImport(
 			}
 			return;
 		}
-		ConfirmAndImport(&document->session(), documentName, content, date, show, sameDocument);
+		if (sameDocument() && ValidateAccountSettingsOpenTarget(session, *opening)) {
+			ConfirmAndImport(session, documentName, content, date, show, sameDocument);
+		}
 		base::take(lifetime)->destroy();
 	}, *lifetime);
 }
@@ -710,16 +649,22 @@ void OfferImportCandidate(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show,
 		const ImportCandidate &candidate) {
-	if (!AccountSyncOperationsAllowed(session) || !show || !(*show)) {
+	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
+	if (!opening || !show || !(*show)) {
 		ReleaseSettingsOfferStart(session);
 		return;
 	}
+	const auto global = AccountSettingsOpenTargetFor(session, SettingsOpenRole::AppWide);
+	if (!global) { return; }
+	const auto missingOwn = opening->file.input.state == SettingsFileState::Missing;
 	const auto verdict = JudgeImportOffer(
 		IsActiveSession(session),
 		candidate.itemId.msg.bare,
 		SettingsOfferMessageId(session).bare,
 		candidate.date,
-		QFileInfo(AccountSettingsTarget(session)->path).lastModified().toSecsSinceEpoch());
+		SettingsImportBaselineTime(!missingOwn,
+			QFileInfo(opening->file.path).lastModified().toSecsSinceEpoch(),
+			QFileInfo(global->file.path).lastModified().toSecsSinceEpoch()));
 	if (verdict == ImportOfferVerdict::InactiveAccount) {
 		LOG(("Purple: Saved Messages settings offer dropped: "
 			"the account is no longer the active one."));
@@ -737,9 +682,11 @@ void OfferImportCandidate(
 	const auto expectedItem = session->data().message(candidate.itemId);
 	const auto stillValid = [=] {
 		const auto live = weakSession.get();
-		if (!live || AskingWindowSwitched(show)) {
+		if (!live || !IsActiveSession(live) || AskingWindowSwitched(show)) {
 			return false;
 		}
+		if (missingOwn && global->file.path != opening->file.path
+			&& !ValidateAccountSettingsOpenTarget(live, *global)) { return false; }
 		const auto item = live->data().message(candidate.itemId);
 		return item
 			&& item == expectedItem
@@ -747,29 +694,9 @@ void OfferImportCandidate(
 			&& item->media()
 			&& item->media()->document() == candidate.document;
 	};
-	show->showBox(Ui::MakeConfirmBox({
-		.text = u"A newer Work Mode settings file is in Saved Messages"
-			"\n\nAccount %1, sent %2"_q.arg(
-				account,
-				FormatMoment(base::unixtime::parse(candidate.date))),
-		.confirmed = [=](Fn<void()> close) {
-			close();
-			if (AskingWindowSwitched(show)) {
-				RefuseSwitchedImport(account);
-				return;
-			}
-			if (!stillValid()) {
-				return;
-			}
-			ResolveAndImport(
-				candidate.document,
-				candidate.itemId,
-				candidate.date,
-				show,
-				stillValid);
-		},
-		.confirmText = u"Import"_q,
-	}));
+	if (stillValid() && ValidateAccountSettingsOpenTarget(session, *opening)) {
+		ResolveAndImport(candidate.document, candidate.itemId, candidate.date, show, stillValid);
+	}
 }
 
 [[nodiscard]] auto SettingsSearchRequest(
@@ -825,7 +752,7 @@ void UploadTo(
 	// ours rather than whatever the file happens to be called on disk.
 	auto file = Ui::PreparedFile(QString());
 	file.content = content;
-	file.displayName = SettingsFileName();
+	file.displayName = SettingsDocumentFileName(version);
 	file.size = content.size();
 	file.caption = { Caption(version) };
 	file.information = std::make_unique<Ui::PreparedFileInformation>();
@@ -849,7 +776,7 @@ void NoteConfirmedSend(
 		not_null<Main::Session*> session,
 		const QByteArray &content,
 		MsgId messageId) {
-	if (AccountSyncOperationsAllowed(session)) {
+	if (AccountLegacySendTarget(session)) {
 		NoteSettingsSent(session, content);
 	}
 	if (messageId > SettingsOfferMessageId(session)) {
@@ -868,20 +795,17 @@ bool Upload(
 		const QByteArray &content,
 		int version,
 		Fn<void(std::optional<MsgId>)> finished) {
-	if (!AccountSyncOperationsAllowed(session)) {
-		return false;
-	}
-	const auto target = AccountSettingsTarget(session);
-	if (!target || target->input.state != SettingsFileState::Readable
-		|| target->input.bytes != content || version > kSettingsVersion) {
+	const auto target = AccountLegacySendTarget(session);
+	if (!target || target->file.input.bytes != content
+		|| !CanApplyAccountSettingsDocument(SettingsDocumentFileName(version), content)
+		|| ParseSettings(QString::fromUtf8(content), target->file.path).settings.version != version) {
 		return false;
 	}
 	const auto weak = base::make_weak(session);
 	UploadTo(session, content, version, [=](std::optional<MsgId> messageId) {
 		if (messageId) {
 			if (const auto live = weak.get(); live
-				&& AccountSyncOperationsAllowed(live)
-				&& ValidateAccountSettingsTarget(live, *target)) {
+				&& ValidateAccountLegacySendTarget(live, *target)) {
 				NoteConfirmedSend(live, content, *messageId);
 			}
 		}
@@ -898,7 +822,9 @@ bool IsPurplePost(const FilePrepareResult &file) {
 
 void SendSettingsToSavedMessages(
 		not_null<Main::Session*> session,
-		std::shared_ptr<Ui::Show> show) {
+		std::shared_ptr<Ui::Show> show,
+		Fn<bool()> originCurrent) {
+	if (!originCurrent || !originCurrent()) { return; }
 	const auto target = AccountManualExportTarget(session);
 	if (!target) {
 		show->showBox(Ui::MakeInformBox(tr::lng_proxy_box_table_unavailable(tr::now)));
@@ -924,18 +850,23 @@ void SendSettingsToSavedMessages(
 		return;
 	}
 	const auto version = parsed.settings.version;
-	if (version > kSettingsVersion) {
-		show->showBox(Ui::MakeInformBox(u"Layered account settings require the account-settings.toml document route."_q));
+	if (!CanApplyAccountSettingsDocument(SettingsDocumentFileName(version), content)) {
+		show->showBox(Ui::MakeInformBox(tr::lng_purple_transfer_unavailable(tr::now)));
 		return;
 	}
 	const auto weak = base::make_weak(session);
 	show->showBox(Ui::MakeConfirmBox({
-		.text = u"This posts your settings.toml to your Saved Messages, "
-			"where any Purple Telegram can import it."_q,
+		.text = tr::lng_purple_transfer_send(
+			tr::now,
+			lt_name,
+			SettingsDocumentFileName(version),
+			lt_account,
+			AccountLabel(session))
+			+ (version >= 2 ? u"\n\n"_q + tr::lng_purple_transfer_layered(tr::now) : QString()),
 		.confirmed = [=](Fn<void()> close) {
 			close();
 			const auto live = weak.get();
-			if (!live || live->account().loggingOut()
+			if (!live || !originCurrent() || live->account().loggingOut()
 				|| live->account().maybeSession() != live
 				|| ReadSettingsFileInput(path) != expected
 				|| !ValidateAccountManualExportTarget(live, *target)) {
@@ -958,6 +889,64 @@ void SendSettingsToSavedMessages(
 		},
 		.confirmText = u"Send"_q,
 	}));
+}
+
+void ShareAccountSettingsFile(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
+		Fn<bool()> originCurrent) {
+	if (!show || !*show || !originCurrent || !originCurrent()) { return; }
+	const auto target = AccountManualExportTarget(session);
+	if (!target || target->file.input.state != SettingsFileState::Readable) {
+		show->showBox(Ui::MakeInformBox(tr::lng_purple_transfer_unavailable(tr::now)));
+		return;
+	}
+	const auto bytes = target->file.input.bytes;
+	const auto parsed = ParseSettings(QString::fromUtf8(bytes), target->file.path);
+	const auto name = SettingsDocumentFileName(parsed.settings.version);
+	if (!CanApplyAccountSettingsDocument(name, bytes)) {
+		show->showBox(Ui::MakeInformBox(tr::lng_purple_transfer_unavailable(tr::now)));
+		return;
+	}
+	const auto weak = base::make_weak(session.get());
+	const auto current = [=] {
+		const auto live = weak.get();
+		return live && originCurrent() && ValidateAccountManualExportTarget(live, *target);
+	};
+	auto text = tr::lng_purple_transfer_share_for(
+		tr::now,
+		lt_name,
+		name,
+		lt_account,
+		AccountLabel(session));
+	if (parsed.settings.version >= 2) { text += u"\n\n"_q + tr::lng_purple_transfer_layered(tr::now); }
+	show->showBox(Box(TransferConfirmBox,
+		AccountLabel(session),
+		text,
+		tr::lng_purple_transfer_share(tr::now),
+		[=] {
+			if (!current()) { return; }
+			FileDialog::GetWritePath(
+				Core::App().getFileDialogParent(),
+				tr::lng_purple_transfer_share(tr::now),
+				FileDialog::AllFilesFilter(),
+				name,
+				[=](QString &&path) {
+					if (path.isEmpty() || !current()) { return; }
+					if (!SettingsExportPathAllowed(ConfigDirectory(), path)) {
+						if (show && *show) { show->showToast(tr::lng_purple_transfer_unavailable(tr::now)); }
+						return;
+					}
+					const auto expected = ReadSettingsFileInput(path);
+					const auto result = WriteGuardedSettingsFile(path, expected, bytes, [=] {
+						return current() && SettingsExportPathAllowed(ConfigDirectory(), path);
+					}, true);
+					if (show && *show) {
+						show->showToast(result == GuardedFileWrite::Written
+							? tr::lng_purple_transfer_shared(tr::now) : tr::lng_purple_transfer_unavailable(tr::now));
+					}
+				});
+		}));
 }
 
 bool ImportSettingsHit::keyboard() const {
@@ -1282,7 +1271,7 @@ void AddImportSettingsFileAction(
 void OfferNewerSettingsFromSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {
-	if (!AccountSyncOperationsAllowed(session)) {
+	if (!AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own)) {
 		return;
 	}
 

@@ -40,13 +40,10 @@ unrelated device-state writes do not invent an account transfer.
 
 ## Conservative limits of this batch
 
-Version 2 is understood by the shared parser and the read-side layer, but legacy
-message imports and legacy settings document export keep the version-1 boundary.
-Layered imports require the later account-settings.toml document route. No highest-
-version gate is advanced here merely because the core understands version 2.
-Root imports and restores also refuse unparseable successors and removals of
-app-wide or unknown keys, using the shared registry-derived change summary.
-An explicit destination-aware destructive-change review remains later work.
+Legacy schema-2 Send, Share and imports now use the destination-aware review
+below. Modern sync setup/apply/History keep their schema-1 guards. Their unreviewed
+replacement path still refuses removed app-wide or unknown keys. No parser default
+or highest-version constant changes, migration-by-copy or recovery UI is introduced.
 
 Sync setup, store, publish, apply, History/Undo and fingerprint persistence now use
 explicit validated originating-account files. Root-owner paths remain legacy;
@@ -67,8 +64,8 @@ Manual root export is an explicit owner-unknown single-file role. A confirmed
 owner with an unavailable account path refuses export instead of substituting
 another account's bytes. Confirmation rechecks role, originating session, routing
 generation and the exact file snapshot; completion rechecks before bookkeeping.
-Valid account-file manual export remains supported within the existing schema1
-legacy document boundary. Layered schema2 imports/legacy sends remain refused.
+Valid account-file manual Send and Share support schema 1 and 2. Reviewed legacy
+imports accept both document names; modern schema-2 sync apply remains held.
 
 Last Seen reasons and Last Seen Peek read the Settings window's account's effective
 values and write only that account's own file. Send after every save is file-local:
@@ -122,7 +119,7 @@ replacement save.
 
 Absent settings are read without creation and cannot initialize or publish through
 sync setup. The explicit Open action can create a missing non-root account file.
-Version2 legacy imports/exports and layered sync application remain refused;
+Modern layered sync application remains refused;
 the full account editor remains separate work. The final precondition-to-rename window against a noncooperating writer remains
 finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
 and a coherent current application need separate qualification.
@@ -167,10 +164,10 @@ external editor has its own later filesystem access after launch.
 
 Creation seeds the file observation without sending or publishing it. Existing
 qualified save observations and queued operations keep their established rules.
-The account template is schema2, so current schema1 transport guards keep its
-automatic and manual legacy sends held. The own-key Last Seen Reset described
+The account template is schema2. Its later edits can use legacy Send or file-local
+send-after-save; initial creation itself never sends. The own-key Last Seen Reset described
 above is separate from the routed list-member writes below and from a general
-account editor or destination-aware app-wide-loss review.
+account editor or the reviewed legacy transfer path below.
 
 The account-file batch passes all 58 affected production compiles and 967 genuine
 Qt/file checks, including 178 added checks. Native editor dispatch, Windows
@@ -190,7 +187,7 @@ stays held for repair; a toggle does not silently replace recovered settings.
 Creating a missing file uses the existing exclusive directory-relative creation
 route, publishes the header and requested override together, and seeds its save
 observation without sending. Later supported saves use the established per-file
-fingerprint and originating-session queue policy. Schema2 transport remains held.
+fingerprint and originating-session queue policy. Schema2 legacy transport uses the reviewed transfer boundary below.
 
 These source changes still require affected production compilation, genuine
 file-case execution and independent review. Existing 58-production/967-file-case
@@ -370,3 +367,38 @@ and deletion captures, forks, whole-file exclusions, reload notices, control
 characters in literal list names, and opening Follow-mode preview notes. Debug
 compilation/linking and the headless checks qualify code and filesystem behavior;
 widget interaction, Windows execution and live sync still need separate testing.
+
+## Reviewed legacy account transfers
+
+Send and Share export the originating account's exact existing file. Version 1
+(including an omitted version) uses `settings.toml`; version 2 uses
+`account-settings.toml` and warns that older clients cannot import it. An absent
+own file never borrows global bytes. Share saves a captured file through the normal
+save dialog and rechecks its originating account/window before writing the export.
+Exports cannot overwrite files inside the managed config directory.
+
+Imports accept either filename and bind the message/window account, including
+separate account windows. The review uses shared `AnalyzeConfigChange` facts:
+per-key Used/Not used groups, pins, app-wide/list/preset/schedule losses, defined
+list emptying and other loaded accounts' stranded members. Follow and Stock own
+member edits remain inactive here. Global danger leads with the Work Mode/list
+consequences. Cancel has initial focus; Return does not implicitly import.
+
+The review captures exact primary/good bytes, filesystem identities, backup inputs,
+local owner/source choice and loaded-account Work Mode context. A selected valid
+good fallback is disclosed; unusable sources refuse. Any readable source that core
+classifies as a newer schema refuses before fallback, including the destination,
+global source and loaded-account context. An older good copy never downgrades it. Apply rechecks that context,
+writes `.import.bak` and `.bak` from actual destination bytes, and then publishes the
+exact proposed document. Missing non-root destinations use exclusive creation.
+These writes are separate operations, not a cross-file crash transaction. Source or
+session changes refuse the old review; a post-publication context failure reports
+that the file was already written. Modern schema-2 apply remains held.
+
+Launch offers alone require the active account through download and Apply. Their
+freshness baseline is the global file's mtime when the own file is absent. External
+editor reload notices use the same impact facts after saving, since Desktop cannot
+intercept an external editor's Save command. Automatic send uses only the written
+file's opt-in and exact bytes. Creation, imports, History restore and signed-out
+writes do not invent a send. Root markers remain in `state.toml`; non-root markers
+remain in that account's `send-state.toml`, with weak-session and retry-token guards.

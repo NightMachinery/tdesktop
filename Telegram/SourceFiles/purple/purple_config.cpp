@@ -550,7 +550,7 @@ void Config::autoSendNow() {
 	for (const auto &operation : _accountsPendingSend.takeReady(AccountRouting())) {
 		const auto session = operation.owner.get();
 		const auto &target = operation.target;
-		if (!session || !ValidateAccountSyncTarget(session, target)) {
+		if (!session || !ValidateAccountLegacySendTarget(session, target)) {
 			continue;
 		}
 		const auto receipt = _accountsPendingSend.beginSend(AccountRouting(), operation);
@@ -1057,7 +1057,7 @@ WriteResult WriteSettings(
 }
 
 void NoteSettingsSent(not_null<Main::Session*> session, const QByteArray &bytes) {
-	const auto target = AccountSyncTarget(session);
+	const auto target = AccountLegacySendTarget(session);
 	if (!target || target->file.input.bytes != bytes) {
 		return;
 	}
@@ -1069,7 +1069,7 @@ void NoteSettingsSent(not_null<Main::Session*> session, const QByteArray &bytes)
 }
 
 void NoteSettingsImported(not_null<Main::Session*> session, const QByteArray &bytes) {
-	const auto target = AccountSyncTarget(session);
+	const auto target = AccountLegacySendTarget(session);
 	if (!target || target->file.input.bytes != bytes) {
 		return;
 	}
@@ -1253,10 +1253,124 @@ std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*>
 
 bool ValidateAccountSyncTarget(not_null<Main::Session*> session,
 		const AccountOperationTarget &target, bool sameInput) {
-	return !session->account().loggingOut()
+	return !target.legacySend && !session->account().loggingOut()
 		&& session->account().maybeSession() == session.get()
 		&& SessionAccountKey(session) == target.file.account
 		&& AccountRouting().validateOperation(target, sameInput);
+}
+
+std::optional<AccountOperationTarget> AccountLegacySendTarget(
+		not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().operationTarget(SessionAccountKey(session), true);
+}
+
+bool ValidateAccountLegacySendTarget(
+		not_null<Main::Session*> session, const AccountOperationTarget &target) {
+	return target.legacySend && !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& SessionAccountKey(session) == target.file.account
+		&& AccountRouting().validateOperation(target);
+}
+
+QString ConfigImpactDisplayText(const ConfigChangeImpact &impact) {
+	if (impact.status != ConfigImpactStatus::Ready) {
+		return tr::lng_purple_transfer_unavailable(tr::now);
+	}
+	auto used = QStringList();
+	auto inactive = QStringList();
+	auto warnings = QStringList();
+	for (const auto &finding : impact.findings) {
+		const auto &key = finding.change;
+		const auto address = key.table + (key.key.isEmpty() ? QString() : u"."_q + key.key);
+		const auto name = finding.label.isEmpty() || finding.label == address
+			? address : finding.label + u" ("_q + address + u")"_q;
+		if (finding.kind == ConfigImpactKind::ValueChanged) {
+			const auto before = key.beforeValue.value_or(tr::lng_purple_transfer_absent(tr::now));
+			const auto after = key.afterValue.value_or(tr::lng_purple_transfer_absent(tr::now));
+			auto line = name + u": "_q + before + u" → "_q + after;
+			if (!ConfigImpactFindingUsedHere(finding)) {
+				if (finding.afterUse == ConfigImpactUse::Follow || finding.beforeUse == ConfigImpactUse::Follow) {
+					line += tr::lng_purple_transfer_follow(tr::now);
+				} else if (finding.afterUse == ConfigImpactUse::Stock || finding.beforeUse == ConfigImpactUse::Stock) {
+					line += tr::lng_purple_transfer_stock(tr::now);
+				} else if (finding.afterUse == ConfigImpactUse::UndefinedList || finding.beforeUse == ConfigImpactUse::UndefinedList) {
+					line += tr::lng_purple_transfer_undefined(tr::now);
+				} else if (finding.afterUse == ConfigImpactUse::Unknown || finding.beforeUse == ConfigImpactUse::Unknown) {
+					line += tr::lng_purple_transfer_unknown_use(tr::now);
+				} else if (finding.afterUse == ConfigImpactUse::AppWideElsewhere || finding.beforeUse == ConfigImpactUse::AppWideElsewhere) {
+					line += tr::lng_purple_transfer_elsewhere(tr::now);
+				}
+				inactive.push_back(line);
+			} else {
+				used.push_back(line);
+			}
+			continue;
+		}
+		auto detail = QString();
+		switch (finding.kind) {
+		case ConfigImpactKind::Pinned: detail = tr::lng_purple_transfer_pin(tr::now); break;
+		case ConfigImpactKind::Unpinned: detail = tr::lng_purple_transfer_unpin(tr::now); break;
+		case ConfigImpactKind::AppWideLoss: detail = tr::lng_purple_transfer_appwide_loss(tr::now); break;
+		case ConfigImpactKind::ListLoss: detail = tr::lng_purple_transfer_list_loss(tr::now); break;
+		case ConfigImpactKind::PresetLoss: detail = tr::lng_purple_transfer_preset_loss(tr::now); break;
+		case ConfigImpactKind::ScheduleLoss: detail = tr::lng_purple_transfer_schedule_loss(tr::now); break;
+		case ConfigImpactKind::DefinedListEmptied: detail = tr::lng_purple_transfer_empty(tr::now); break;
+		case ConfigImpactKind::StrandedMembers: detail = tr::lng_purple_transfer_stranded(tr::now); break;
+		case ConfigImpactKind::UnknownRemoval: detail = tr::lng_purple_transfer_unknown(tr::now); break;
+		case ConfigImpactKind::ValueChanged: break;
+		}
+		auto affected = finding.account;
+		if (!affected.isEmpty() && Core::App().domain().started()) {
+			for (const auto &entry : Core::App().domain().accounts()) {
+				const auto live = entry.account->maybeSession();
+				if (live && AccountKeyText(SessionAccountKey(live).environment, SessionAccountKey(live).userId) == affected) {
+					affected = ImportAccountLabel(live->user()->name(), live->user()->username());
+					break;
+				}
+			}
+		}
+		warnings.push_back(detail + u": "_q + name
+			+ (affected.isEmpty() ? QString() : u" ("_q + affected + u")"_q)
+			+ (finding.beforeCount >= 0 ? u" [%1 → %2]"_q.arg(finding.beforeCount).arg(finding.afterCount) : QString()));
+	}
+	auto lines = QStringList();
+	if (!warnings.empty()) { lines.push_back(warnings.join('\n')); }
+	if (!used.empty()) {
+		lines.push_back(tr::lng_purple_transfer_used(tr::now) + u"\n"_q + used.join('\n'));
+	}
+	if (!inactive.empty()) {
+		lines.push_back(tr::lng_purple_transfer_inactive(tr::now) + u"\n"_q + inactive.join('\n'));
+	}
+	if (used.empty() && !inactive.empty()) { lines.prepend(tr::lng_purple_transfer_inactive_only(tr::now)); }
+	if (lines.empty()) { lines.push_back(tr::lng_purple_transfer_no_changes(tr::now)); }
+	return lines.join(u"\n\n"_q);
+}
+
+std::optional<AccountTransferReview> ReviewAccountTransfer(
+		not_null<Main::Session*> session, const QByteArray &bytes) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().reviewTransfer(SessionAccountKey(session), bytes);
+}
+
+AccountTransferResult ImportReviewedAccountTransfer(
+		not_null<Main::Session*> session,
+		const AccountTransferReview &review,
+		const std::function<bool()> &originCurrent) {
+	const auto weak = base::make_weak(session.get());
+	const auto current = [=] {
+		const auto live = weak.get();
+		return live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == review.destination.requester
+			&& originCurrent && originCurrent();
+	};
+	const auto result = AccountRouting().importReviewed(review, current);
+	if (result.ok && current()) { NoteSettingsImported(session, review.impact.proposedText); }
+	return result;
 }
 
 SyncHistoryAccess AccountSyncHistoryAccess(not_null<Main::Session*> session,
@@ -1431,6 +1545,7 @@ void ShowAccountListReloadNotices() {
 		if (!session) { continue; }
 		const auto labels = SettingsRowLabels(session, std::nullopt);
 		auto lines = QStringList();
+		if (change.impact) { lines.push_back(labels.own + u":\n"_q + ConfigImpactDisplayText(*change.impact)); }
 		if (change.inactiveChanges) {
 			lines.push_back(tr::lng_purple_lists_reload_inactive(tr::now, lt_account, labels.own).arg(change.inactiveChanges));
 		}

@@ -455,6 +455,19 @@ bool AccountFilePathSafe(const QString &path) {
 #endif
 }
 
+bool SettingsExportPathAllowed(const QString &root, const QString &path) {
+	const auto directory = QFileInfo(root).canonicalFilePath();
+	const auto parent = QFileInfo(QFileInfo(path).absolutePath()).canonicalFilePath();
+	if (directory.isEmpty() || parent.isEmpty() || !QDir::isAbsolutePath(path)
+		|| !AccountFilePathSafe(path)) { return false; }
+	const auto relative = QDir(directory).relativeFilePath(parent);
+	return relative == u".."_q || relative.startsWith(u"../"_q) || QDir::isAbsolutePath(relative);
+}
+
+bool ConfigImpactFindingUsedHere(const ConfigImpactFinding &finding) {
+	return finding.beforeUse == ConfigImpactUse::Used || finding.afterUse == ConfigImpactUse::Used;
+}
+
 bool CanReplaceLegacyRootSettings(const QByteArray &before, const QByteArray &after) {
 	const auto parsed = ParseSettings(QString::fromUtf8(after), u"settings.toml"_q);
 	if (!parsed.ok() || parsed.settings.version > kSettingsVersion) {
@@ -503,6 +516,17 @@ bool CanApplyWholeSettingsDocument(const QString &name, const QByteArray &bytes)
 	const auto parsed = ParseSettings(QString::fromUtf8(bytes), name);
 	return ClassifySettingsDocumentName(name) == LegacySettingsDocumentKind::Whole
 		&& parsed.ok() && parsed.settings.version <= kSettingsVersion;
+}
+
+bool CanApplyAccountSettingsDocument(const QString &name, const QByteArray &bytes) {
+	if (QString::fromUtf8(bytes).toUtf8() != bytes
+		|| ClassifySettingsDocumentName(name) == LegacySettingsDocumentKind::Unrelated) {
+		return false;
+	}
+	auto input = ConfigImpactInput();
+	input.current.present = false;
+	input.proposed = { bytes, true };
+	return AnalyzeConfigChange(input).status == ConfigImpactStatus::Ready;
 }
 
 bool AccountFilteringEnabled(bool active, AccountWorkMode mode) {
@@ -1521,7 +1545,9 @@ AccountListReloadChange DescribeAccountListReload(
 			&& (previous.settings.list(name) || was == before.end() || was->second.members != own.members)) {
 			result.unusedMembers[name] = int(own.members.size());
 		}
-		if (own.defined && own.members.empty() && was != before.end()
+		const auto ownSettings = ParseSettings(QString::fromUtf8(afterOwn), QString());
+		const auto defined = ownSettings.settings.list(name);
+		if (own.defined && own.members.empty() && defined && defined->kinds.empty() && was != before.end()
 			&& was->second.defined && !was->second.members.empty()) {
 			result.emptiedLists[name] = int(was->second.members.size());
 		}
@@ -1549,8 +1575,24 @@ std::vector<AccountListReloadChange> DesktopAccountConfig::observeListReloads(
 		if (before != _listObservations.end()) {
 			auto change = DescribeAccountListReload(_listObservationGlobalBytes, *globalBytes, before->second, *bytes);
 			change.account = key;
+			auto input = ConfigImpactInput();
+			input.current = { before->second, true };
+			input.proposed = { *bytes, true };
+			input.global = { *globalBytes, true };
+			input.workMode = workMode(key);
+			input.role = key == *global ? ConfigImpactFileRole::Global : ConfigImpactFileRole::Layered;
+			if (key == *global) {
+				for (const auto &other : accounts) {
+					if (other == key) { continue; }
+					const auto path = files(other);
+					const auto text = path ? ObservedSettingsBytes(path->settings) : std::nullopt;
+					const auto identity = AccountKeyText(other.environment, other.userId);
+					if (identity) { input.accounts.push_back({ *identity, { text.value_or(QByteArray()), text.has_value() }, workMode(other) }); }
+				}
+			}
+			if (before->second != *bytes) { change.impact = AnalyzeConfigChange(input); }
 			if (key == *global) { change.inactiveChanges = 0; change.unusedMembers.clear(); }
-			if (change.inactiveChanges || !change.unusedMembers.empty() || !change.emptiedLists.empty()) {
+			if (change.impact || change.inactiveChanges || !change.unusedMembers.empty() || !change.emptiedLists.empty()) {
 				result.push_back(std::move(change));
 			}
 		}
@@ -1748,7 +1790,7 @@ std::optional<AccountFileTarget> DesktopAccountConfig::editTarget(
 }
 
 std::optional<AccountOperationTarget> DesktopAccountConfig::operationTarget(
-		const AccountKey &key) {
+		const AccountKey &key, bool legacySend) {
 	const auto selected = target(key);
 	const auto paths = files(key);
 	if (!selected || !paths || DirectoryIdentity(_root).isEmpty()
@@ -1769,16 +1811,181 @@ std::optional<AccountOperationTarget> DesktopAccountConfig::operationTarget(
 		}
 	}
 	const auto parsed = ParseSettings(QString::fromUtf8(selected->input.bytes), selected->path);
-	if (!parsed.ok() || parsed.settings.version > kSettingsVersion) {
+	if (!parsed.ok() || QString::fromUtf8(selected->input.bytes).toUtf8() != selected->input.bytes
+		|| !CanApplyAccountSettingsDocument(SettingsDocumentFileName(parsed.settings.version), selected->input.bytes)
+		|| (!legacySend && parsed.settings.version > kSettingsVersion)) {
 		return std::nullopt;
 	}
 	return AccountOperationTarget{ *selected, *paths, DirectoryIdentity(paths->syncDirectory),
-		DirectoryIdentity(paths->history) };
+		DirectoryIdentity(paths->history), legacySend };
+}
+
+std::optional<AccountTransferReview> DesktopAccountConfig::reviewTransfer(
+		const AccountKey &key, const QByteArray &bytes) {
+	const auto destination = openTarget(key, SettingsOpenRole::Own);
+	if (!destination || !CanApplyAccountSettingsDocument(u"settings.toml"_q, bytes)) { return std::nullopt; }
+	auto result = AccountTransferReview();
+	result.destination = *destination;
+	if (QString::fromUtf8(destination->localInput.bytes).toUtf8() != destination->localInput.bytes
+		|| QString::fromUtf8(destination->ownerInput.bytes).toUtf8() != destination->ownerInput.bytes) { return std::nullopt; }
+	const auto capture = [&](const QString &path) {
+		const auto identity = ChoiceFileIdentity(path);
+		const auto input = OwnerInput(path);
+		if (identity.isEmpty() || input.state == SettingsFileState::ReadError) { return false; }
+		result.inputs[path] = input;
+		result.identities[path] = identity;
+		return true;
+	};
+	if (!capture(absolute(u"local.toml"_q)) || !capture(absolute(u"accounts/root.toml"_q))) { return std::nullopt; }
+	const auto source = [&](const QString &path) -> std::optional<ConfigImpactText> {
+		const auto directory = QFileInfo(path).absolutePath();
+		if (!RowDirectorySafe(directory)) { return std::nullopt; }
+		result.directories[directory] = QFileInfo::exists(directory) ? DirectoryIdentity(directory) : QByteArray("missing");
+		if (result.directories[directory].isEmpty()) { return std::nullopt; }
+		if (!capture(path) || !capture(path + u".good"_q)) { return std::nullopt; }
+		const auto &primary = result.inputs[path];
+		const auto &good = result.inputs[path + u".good"_q];
+		if (primary.state == SettingsFileState::Readable) {
+			auto input = ConfigImpactInput();
+			input.current = { primary.bytes, true };
+			input.proposed.present = false;
+			const auto status = AnalyzeConfigChange(input).status;
+			if (status == ConfigImpactStatus::NewerSchema) { return std::nullopt; }
+			if (status == ConfigImpactStatus::Ready && RowInputUsable(primary, path)) {
+				return ConfigImpactText{ primary.bytes, true };
+			}
+		}
+		if (good.state == SettingsFileState::Readable && RowInputUsable(good, path)
+			&& CanApplyAccountSettingsDocument(u"settings.toml"_q, good.bytes)) {
+			result.usingGood = true;
+			return ConfigImpactText{ good.bytes, true };
+		}
+		if (primary.state == SettingsFileState::Missing && good.state == SettingsFileState::Missing) {
+			return ConfigImpactText{ {}, false };
+		}
+		return std::nullopt;
+	};
+	const auto &file = destination->file;
+	const auto current = source(file.path);
+	if (!current) { return std::nullopt; }
+	result.context.current = *current;
+	result.context.proposed = { bytes, true };
+	result.context.workMode = workMode(key);
+	result.context.role = key == destination->global
+		? ConfigImpactFileRole::Global : ConfigImpactFileRole::Layered;
+	if (result.context.role == ConfigImpactFileRole::Layered) {
+		const auto global = source(globalSettingsPath());
+		if (!global) { return std::nullopt; }
+		result.context.global = *global;
+	} else {
+		for (const auto &account : _accounts) {
+			if (account.account == key) { continue; }
+			const auto paths = files(account.account);
+			const auto name = AccountKeyText(account.account.environment, account.account.userId);
+			const auto own = paths ? source(paths->settings) : std::nullopt;
+			if (!name || !own) { return std::nullopt; }
+			result.context.accounts.push_back({ *name, *own, workMode(account.account) });
+		}
+	}
+	for (const auto &path : { file.path + u".bak"_q, file.path + u".import.bak"_q }) {
+		if (!capture(path)) { return std::nullopt; }
+	}
+	result.impact = AnalyzeConfigChange(result.context);
+	return result.impact.status == ConfigImpactStatus::Ready
+		? std::make_optional(std::move(result)) : std::nullopt;
+}
+
+bool DesktopAccountConfig::validateTransfer(const AccountTransferReview &review) {
+	if (review.impact.status != ConfigImpactStatus::Ready
+		|| review.context.proposed.text != review.impact.proposedText
+		|| !review.context.proposed.present || !review.impact.proposedPresent
+		|| !validateOpen(review.destination)) { return false; }
+	const auto current = reviewTransfer(review.destination.requester, review.impact.proposedText);
+	if (!current || current->inputs != review.inputs || current->identities != review.identities
+		|| current->directories != review.directories
+		|| current->usingGood != review.usingGood || current->context.role != review.context.role
+		|| current->context.workMode != review.context.workMode
+		|| current->context.accounts.size() != review.context.accounts.size()) { return false; }
+	for (auto i = size_t(0); i != review.context.accounts.size(); ++i) {
+		if (current->context.accounts[i].account != review.context.accounts[i].account
+			|| current->context.accounts[i].workMode != review.context.accounts[i].workMode) { return false; }
+	}
+	return true;
+}
+
+AccountTransferResult DesktopAccountConfig::importReviewed(
+		const AccountTransferReview &review,
+		const std::function<bool()> &originCurrent) {
+	auto expected = review;
+	const auto current = [&] {
+		return originCurrent && originCurrent() && validateTransfer(expected);
+	};
+	if (!current()) { return { .error = u"Settings changed. Review the import again."_q }; }
+	const auto &file = review.destination.file;
+	const auto &bytes = review.impact.proposedText;
+	if (file.input.state == SettingsFileState::Readable) {
+		for (const auto &path : { file.path + u".import.bak"_q, file.path + u".bak"_q }) {
+			if (WriteGuardedSettingsFile(path, expected.inputs[path], file.input.bytes, current, true)
+				!= GuardedFileWrite::Written) {
+				return { .error = u"The import backup could not be written safely."_q };
+			}
+			expected.inputs[path] = { SettingsFileState::Readable, file.input.bytes };
+			expected.identities[path] = ChoiceFileIdentity(path);
+		}
+		if (WriteGuardedSettingsFile(file.path, file.input, bytes, current)
+			!= GuardedFileWrite::Written) {
+			return { .error = u"Settings changed or could not be imported."_q };
+		}
+	} else {
+		auto published = false;
+		const auto ready = prepareInput(review.destination, bytes, [&] {
+			if (!originCurrent || !originCurrent()) { return false; }
+			const auto opening = openTarget(review.destination.requester, SettingsOpenRole::Own);
+			if (!opening) { return false; }
+			const auto published = opening->file.input == SettingsFileInput{ SettingsFileState::Readable, bytes };
+			if (!published && opening->file.input != file.input) { return false; }
+			auto creating = review.destination;
+			creating.accountDirectoryIdentity = opening->accountDirectoryIdentity;
+			creating.file.directoryIdentity = opening->file.directoryIdentity;
+			creating.file.input = opening->file.input;
+			return validateOpen(creating)
+				&& std::all_of(expected.directories.begin(), expected.directories.end(), [&](const auto &entry) {
+					if (entry.first == QFileInfo(file.path).absolutePath()) { return true; }
+					return RowDirectorySafe(entry.first)
+						&& (QFileInfo::exists(entry.first) ? DirectoryIdentity(entry.first) : QByteArray("missing")) == entry.second;
+				})
+				&& std::all_of(expected.inputs.begin(), expected.inputs.end(), [&](const auto &entry) {
+					if (published && entry.first == file.path) { return true; }
+					return OwnerInput(entry.first) == entry.second
+						&& ChoiceFileIdentity(entry.first) == expected.identities[entry.first];
+				});
+		}, &published);
+		if (ready.status != SettingsOpenStatus::Created) {
+			return { .changed = published, .error = u"The account file could not be created safely."_q };
+		}
+	}
+	_importedEcho[file.path] = SettingsFingerprint(bytes);
+	_saveObservations[AccountKeyText(file.account.environment, file.account.userId).value_or(QString())]
+		= { SettingsFileState::Readable, bytes };
+	const auto committed = openTarget(review.destination.requester, SettingsOpenRole::Own);
+	if (!committed || committed->file.input != SettingsFileInput{ SettingsFileState::Readable, bytes }
+		|| committed->global != review.destination.global || committed->owner != review.destination.owner
+		|| committed->localInput != review.destination.localInput || committed->ownerInput != review.destination.ownerInput
+		|| committed->file.path != file.path || committed->file.generation != file.generation) {
+		return { .changed = true, .error = u"Settings imported, but the account context changed afterward."_q };
+	}
+	invalidate();
+	watch();
+	if (_changed) { _changed(); }
+	if (!originCurrent || !originCurrent() || !validateOpen(*committed)) {
+		return { .changed = true, .error = u"Settings imported, but the account context changed afterward."_q };
+	}
+	return { .ok = true, .changed = file.input.bytes != bytes };
 }
 
 bool DesktopAccountConfig::validateOperation(
 		const AccountOperationTarget &target, bool sameInput) {
-	const auto current = operationTarget(target.file.account);
+	const auto current = operationTarget(target.file.account, target.legacySend);
 	return current && current->file.generation == target.file.generation
 		&& current->file.path == target.file.path
 		&& current->file.directoryIdentity == target.file.directoryIdentity
@@ -1875,7 +2082,7 @@ std::optional<AccountOperationTarget> DesktopAccountConfig::observeAccountSave(
 		&& file->input.state == SettingsFileState::Readable
 		&& previous->second != file->input;
 	_saveObservations[*name] = file->input;
-	const auto operation = changed ? operationTarget(key) : std::nullopt;
+	const auto operation = changed ? operationTarget(key, true) : std::nullopt;
 	return operation && shouldAutoSend(*operation) ? operation : std::nullopt;
 }
 
@@ -1899,7 +2106,7 @@ bool DesktopAccountConfig::shouldAutoSend(const AccountOperationTarget &target) 
 GuardedFileWrite DesktopAccountConfig::replace(
 		const AccountOperationTarget &target, const QByteArray &bytes) {
 	const auto parsed = ParseSettings(QString::fromUtf8(bytes), target.file.path);
-	if (!validateOperation(target) || !parsed.ok() || parsed.settings.version > kSettingsVersion
+	if (target.legacySend || !validateOperation(target) || !parsed.ok() || parsed.settings.version > kSettingsVersion
 		|| !CanReplaceLegacyRootSettings(target.file.input.bytes, bytes)) {
 		return GuardedFileWrite::InputChanged;
 	}

@@ -60,13 +60,14 @@ class Show;
 // to become one. See docs/purple/sync.md.
 namespace Purple {
 
-// Uploads the current settings.toml to the account's own Saved Messages, named
-// settings.toml and captioned with the schema version, the local time and the
-// platform. Confirms first, because it puts the ids and names of every chat the
-// file mentions into a message.
 void SendSettingsToSavedMessages(
 	not_null<Main::Session*> session,
-	std::shared_ptr<Ui::Show> show);
+	std::shared_ptr<Ui::Show> show,
+	Fn<bool()> originCurrent);
+void ShareAccountSettingsFile(
+	not_null<Main::Session*> session,
+	std::shared_ptr<Ui::Show> show,
+	Fn<bool()> originCurrent);
 
 // Posts these bytes to the account's own Saved Messages as settings.toml, with
 // no confirmation box - this is what the automatic send calls, and the
@@ -207,6 +208,11 @@ enum class ImportOfferVerdict {
 	AlreadyOffered,
 	NotNewer,
 };
+
+[[nodiscard]] inline int64 SettingsImportBaselineTime(
+		bool ownPresent, int64 ownStamp, int64 globalStamp) {
+	return ownPresent ? ownStamp : globalStamp;
+}
 
 [[nodiscard]] inline ImportOfferVerdict JudgeImportOffer(
 		bool accountActive,

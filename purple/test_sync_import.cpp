@@ -64,6 +64,13 @@ void Check(bool ok, int line) {
 void CheckOfferVerdicts() {
 	using Purple::ImportOfferVerdict;
 	using Purple::JudgeImportOffer;
+	using Purple::SettingsImportBaselineTime;
+	CHECK(SettingsImportBaselineTime(true, 100, 200) == 100);
+	CHECK(SettingsImportBaselineTime(false, 0, 200) == 200);
+	CHECK(JudgeImportOffer(true, 10, 5, 150,
+		SettingsImportBaselineTime(false, 0, 200)) == ImportOfferVerdict::NotNewer);
+	CHECK(JudgeImportOffer(true, 10, 5, 250,
+		SettingsImportBaselineTime(false, 0, 200)) == ImportOfferVerdict::Offer);
 
 	CHECK(JudgeImportOffer(false, 10, 5, 200, 100)
 		== ImportOfferVerdict::InactiveAccount);
