@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_account_config.h"
+#include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_config_diff.h"
 #include "purple/purple_state.h"
 #include "purple/purple_config_payload.h"
@@ -298,6 +299,126 @@ OwnerFileSnapshot Snapshot(const SettingsFileInput &input) {
 		QString::fromUtf8(input.bytes) };
 }
 
+}
+
+std::optional<AccountAppWideRemovalTarget> PreviewAccountAppWideRemoval(
+		DesktopAccountConfig &config, const AccountKey &account) {
+	const auto destination = config.openTarget(account, SettingsOpenRole::Own);
+	if (!destination || destination->requester != account
+		|| destination->file.account != account || destination->global == account
+		|| destination->file.input.state != SettingsFileState::Readable) { return std::nullopt; }
+	const auto &input = destination->file.input;
+	const auto text = QString::fromUtf8(input.bytes);
+	if (text.toUtf8() != input.bytes || !RowInputUsable(input, destination->file.path)) { return std::nullopt; }
+	const auto splice = RemoveAppWideSettings(text, destination->file.path);
+	if (!splice.ok()) { return std::nullopt; }
+	const auto summary = SummarizeConfigChange(input.bytes, splice.text.toUtf8());
+	if (!summary.parsed) { return std::nullopt; }
+	auto result = AccountAppWideRemovalTarget();
+	result.destination = *destination;
+	result.successor = splice.text.toUtf8();
+	for (const auto &entry : summary.entries) {
+		for (const auto &key : entry.keys) {
+			if (key.scope == SettingScope::AppWide && key.kind == ConfigChangeKind::Removed) {
+				result.removed.push_back(key);
+			}
+		}
+	}
+	const auto paths = config.files(account);
+	if (!paths || !RowDirectorySafe(paths->directory)
+		|| destination->accountDirectoryIdentity.isEmpty()) { return std::nullopt; }
+	result.backup = OwnerInput(paths->backup);
+	result.writable = AccountFilePathSafe(paths->backup)
+		&& result.backup.state != SettingsFileState::ReadError
+		&& QFileInfo(destination->file.path).isWritable()
+		&& QFileInfo(paths->directory).isWritable()
+		&& (!QFileInfo::exists(paths->backup) || QFileInfo(paths->backup).isWritable());
+	for (const auto &path : { QDir(destination->root).filePath(u"local.toml"_q),
+			QDir(destination->root).filePath(u"accounts/root.toml"_q), destination->file.path, paths->backup }) {
+		const auto identity = ChoiceFileIdentity(path);
+		result.writable = result.writable && !identity.isEmpty();
+		result.identities.emplace(path, identity);
+	}
+	result.revision = config.generation();
+	return result;
+}
+
+bool ValidateAccountAppWideRemoval(
+		DesktopAccountConfig &config, const AccountAppWideRemovalTarget &target) {
+	if (!target.writable || config.generation() != target.revision
+		|| !config.validateOpen(target.destination)) { return false; }
+	const auto current = PreviewAccountAppWideRemoval(config, target.destination.requester);
+	return current && current->writable && current->revision == target.revision
+		&& current->destination.file.input == target.destination.file.input
+		&& current->successor == target.successor && current->backup == target.backup
+		&& current->identities == target.identities;
+}
+
+AccountAppWideRemovalResult CommitAccountAppWideRemoval(
+		DesktopAccountConfig &config,
+		const AccountAppWideRemovalTarget &target,
+		const std::function<bool()> &originCurrent) {
+	auto expected = target;
+	const auto current = [&] {
+		return originCurrent && originCurrent() && ValidateAccountAppWideRemoval(config, expected);
+	};
+	if (!current()) { return { .error = u"The account settings context changed or is unavailable."_q }; }
+	if (target.removed.empty()) { return { .ok = true }; }
+	const auto paths = config.files(target.destination.requester);
+	if (!paths) { return { .error = u"The account settings destination is unavailable."_q }; }
+	auto result = AccountAppWideRemovalResult();
+	const auto before = target.destination.file.input.bytes;
+	if (target.backup.state != SettingsFileState::Readable || target.backup.bytes != before) {
+		if (WriteGuardedSettingsFile(paths->backup, target.backup, before, current, true)
+			!= GuardedFileWrite::Written) {
+			return { .error = u"The account settings backup could not be written safely."_q };
+		}
+		result.backupChanged = true;
+	}
+	expected.backup = { SettingsFileState::Readable, before };
+	expected.identities[paths->backup] = ChoiceFileIdentity(paths->backup);
+	if (!current() || WriteGuardedSettingsFile(target.destination.file.path,
+			target.destination.file.input, target.successor, current) != GuardedFileWrite::Written) {
+		result.error = u"No main-file replacement was confirmed; the backup may have been updated."_q;
+		return result;
+	}
+	result.changed = true;
+	result.committedIdentity = ChoiceFileIdentity(target.destination.file.path);
+	result.backupIdentity = expected.identities[paths->backup];
+	const auto committedCurrent = [&] {
+		return originCurrent && originCurrent() && ValidateCommittedAppWideRemoval(config, target, result);
+	};
+	if (!committedCurrent()) {
+		result.error = u"Settings were saved, but their context changed after publication."_q;
+		return result;
+	}
+	config.forgetAccountSave(target.destination.requester);
+	config.refreshSettings();
+	if (!committedCurrent()) {
+		result.error = u"Settings were saved, but their context changed while reloading."_q;
+		return result;
+	}
+	result.ok = true;
+	return result;
+}
+
+bool ValidateCommittedAppWideRemoval(
+		DesktopAccountConfig &config,
+		const AccountAppWideRemovalTarget &target,
+		const AccountAppWideRemovalResult &result) {
+	if (!result.changed || result.committedIdentity.isEmpty() || result.backupIdentity.isEmpty()) { return false; }
+	auto committed = target.destination;
+	committed.file.input = { SettingsFileState::Readable, target.successor };
+	const auto paths = config.files(committed.requester);
+	if (!paths || !config.validateOpen(committed)
+		|| ChoiceFileIdentity(committed.file.path) != result.committedIdentity
+		|| OwnerInput(paths->backup) != SettingsFileInput{ SettingsFileState::Readable, target.destination.file.input.bytes }
+		|| ChoiceFileIdentity(paths->backup) != result.backupIdentity) { return false; }
+	for (const auto &[path, identity] : target.identities) {
+		if (path != paths->backup && path != committed.file.path
+			&& ChoiceFileIdentity(path) != identity) { return false; }
+	}
+	return true;
 }
 
 bool AccountSyncRecordSupported(const QByteArray &record) {

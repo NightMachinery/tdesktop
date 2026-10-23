@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_account_config.h"
+#include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_account_send_queue.h"
 #include "purple/purple_sync_history_guard.h"
 #include "purple/purple_sync_config_history.h"
@@ -38,12 +39,13 @@ namespace {
 using namespace Purple;
 auto Checks = 0;
 auto Failures = 0;
+auto FailureContext = QByteArray();
 
 void Check(bool value, const char *expression, int line) {
 	++Checks;
 	if (!value) {
 		++Failures;
-		std::printf("FAIL account_routing_file_cases:%d %s\n", line, expression);
+		std::printf("FAIL account_routing_file_cases:%d %s context=%s\n", line, expression, FailureContext.constData());
 	}
 }
 
@@ -1962,6 +1964,213 @@ void GlobalChoiceActivationOrderingCases() {
 }
 
 
+void RemoveAppWideSettingsCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto original = QByteArray("# retained heading\nversion=1\n[premium]\nenabled_p=true\n[presets.work]\n[lists.friends]\ntitle='Friends'\nmembers=[101]\n[last_seen]\nreasons_p=false\ntrade_p=true\n[sync]\nsend_after_save_p=true\n[foreign]\nnote='untouched' # retained unknown\n");
+	for (const auto rootFile : { false, true }) {
+		FailureContext = QByteArray("removeAppWide:rootFile=") + QByteArray::number(rootFile);
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), rootFile ? original : QByteArray("version=1\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto account = rootFile ? a : b;
+		if (rootFile) {
+			Put(temp.filePath(u"accounts/0-202/settings.toml"_q), QByteArray("version=1\n"));
+			const auto choice = config.previewGlobalChoice(a, b, NormalPreset());
+			CHECK(choice.has_value());
+			if (!choice) { return; }
+			CHECK(config.commitGlobalChoice(*choice, [] { return true; }).ok);
+		} else {
+			Put(config.files(account)->settings, original);
+		}
+		const auto paths = *config.files(account);
+		const auto other = *config.files(rootFile ? b : a);
+		const auto local = Get(temp.filePath(u"local.toml"_q));
+		const auto owner = Get(temp.filePath(u"accounts/root.toml"_q));
+		const auto otherBytes = Get(other.settings);
+		Put(paths.good, QByteArray("preserved recovery sentinel"));
+		Put(paths.fingerprintFile, QByteArray("preserved fingerprint sentinel"));
+		const auto target = PreviewAccountAppWideRemoval(config, account);
+		CHECK(target && target->writable && !target->removed.empty());
+		if (!target) { return; }
+		CHECK(ValidateAccountAppWideRemoval(config, *target));
+		CHECK(!PreviewAccountAppWideRemoval(config, rootFile ? b : a));
+		const auto result = CommitAccountAppWideRemoval(config, *target, [] { return true; });
+		CHECK(result.ok && result.changed && result.backupChanged);
+		CHECK(Get(paths.backup) == original);
+		const auto after = Get(paths.settings);
+		CHECK(after.startsWith("# retained heading\nversion=2\n"));
+		CHECK(!after.contains("[premium]") && !after.contains("[presets.work]"));
+		CHECK(!after.contains("title='Friends'"));
+		CHECK(after.contains("members=[101]"));
+		CHECK(after.contains("reasons_p=false") && after.contains("trade_p=true"));
+		CHECK(after.contains("send_after_save_p=true"));
+		CHECK(after.contains("note='untouched' # retained unknown"));
+		CHECK(Get(paths.good) == QByteArray("preserved recovery sentinel"));
+		CHECK(Get(paths.fingerprintFile) == QByteArray("preserved fingerprint sentinel"));
+		CHECK(Get(other.settings) == otherBytes);
+		CHECK(Get(temp.filePath(u"local.toml"_q)) == local);
+		CHECK(Get(temp.filePath(u"accounts/root.toml"_q)) == owner && config.owner() == a);
+		CHECK(ParseSettings(QString::fromUtf8(after), paths.settings).settings.version == 2);
+		CHECK(!config.operationTarget(account));
+		CHECK(!config.observeAccountSave(account));
+		CHECK(!CanApplyWholeSettingsDocument(u"settings.toml"_q, after));
+		const auto second = PreviewAccountAppWideRemoval(config, account);
+		CHECK(second && second->removed.empty());
+		if (!second) { return; }
+		const auto noop = CommitAccountAppWideRemoval(config, *second, [] { return true; });
+		CHECK(noop.ok && !noop.changed && !noop.backupChanged);
+		CHECK(Get(paths.backup) == original && Get(paths.settings) == after);
+	}
+	for (auto scenario = 0; scenario != 18; ++scenario) {
+		FailureContext = QByteArray("removeAppWide:scenario=") + QByteArray::number(scenario);
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=1\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto paths = *config.files(b);
+		Put(paths.settings, original);
+		Put(paths.backup, QByteArray("old backup sentinel"));
+		const auto target = PreviewAccountAppWideRemoval(config, b);
+		CHECK(target && target->writable);
+		if (!target) { return; }
+		auto origin = std::make_unique<QObject>();
+		const auto lifetime = QPointer<QObject>(origin.get());
+		auto expected = original;
+		if (scenario == 0) { origin.reset(); }
+		if (scenario == 1) { expected += "# external edit\n"; Put(paths.settings, expected); }
+		if (scenario == 2) { Put(paths.settings, original); }
+		if (scenario == 3) { config.refreshSettings(); }
+		if (scenario == 4) { Put(temp.filePath(u"local.toml"_q), Get(temp.filePath(u"local.toml"_q))); }
+		if (scenario == 5) { Put(temp.filePath(u"accounts/root.toml"_q), Get(temp.filePath(u"accounts/root.toml"_q))); }
+		if (scenario == 6) { Put(paths.backup, QByteArray("foreign backup")); }
+		if (scenario == 7) {
+			CHECK(QDir().rename(paths.directory, paths.directory + u".retained"_q));
+			Put(paths.settings, original);
+			Put(paths.backup, QByteArray("old backup sentinel"));
+		}
+		if (scenario == 8) { CHECK(QFile::remove(paths.settings)); expected.clear(); }
+		if (scenario == 9) { CHECK(QFile::remove(paths.backup)); CHECK(QDir().mkdir(paths.backup)); }
+		if (scenario == 10) {
+			CHECK(QFile::setPermissions(paths.settings, QFileDevice::ReadOwner));
+			const auto readonly = PreviewAccountAppWideRemoval(config, b);
+			CHECK(readonly && !readonly->writable && !readonly->removed.empty());
+		}
+		if (scenario == 11) {
+			const auto choice = config.previewGlobalChoice(a, b, NormalPreset());
+			CHECK(choice.has_value());
+			if (!choice) { return; }
+			CHECK(config.commitGlobalChoice(*choice, [] { return true; }).ok);
+		}
+#ifndef Q_OS_WIN
+		if (scenario == 12) {
+			const auto foreign = temp.filePath(u"foreign.toml"_q);
+			Put(foreign, original);
+			CHECK(QFile::remove(paths.settings));
+			CHECK(QFile::link(foreign, paths.settings));
+		}
+		if (scenario == 13) {
+			const auto foreign = temp.filePath(u"foreign-backup.toml"_q);
+			Put(foreign, QByteArray("old backup sentinel"));
+			CHECK(QFile::remove(paths.backup));
+			CHECK(QFile::link(foreign, paths.backup));
+		}
+#endif
+		if (scenario == 14) { config.start({ { a, false, false } }); origin.reset(); }
+		if (scenario == 15) { CHECK(QFile::setPermissions(paths.backup, QFileDevice::ReadOwner)); }
+#ifndef Q_OS_WIN
+		if (scenario == 16) {
+			CHECK(::link(QFile::encodeName(paths.settings).constData(), QFile::encodeName(temp.filePath(u"hard-linked.toml"_q)).constData()) == 0);
+		}
+#endif
+		if (scenario == 17) { expected = QByteArray("version=1\n# ") + QByteArray(1, char(0xff)); Put(paths.settings, expected); }
+		const auto backup = ReadSettingsFileInput(paths.backup);
+		const auto result = CommitAccountAppWideRemoval(config, *target, [=] { return bool(lifetime); });
+#ifndef Q_OS_WIN
+		CHECK(!result.ok && !result.changed && !result.backupChanged);
+#else
+		if (scenario != 12 && scenario != 13 && scenario != 16) { CHECK(!result.ok && !result.changed && !result.backupChanged); }
+#endif
+		if (scenario != 9) { CHECK(ReadSettingsFileInput(paths.backup) == backup); }
+		if (scenario != 8) { CHECK(Get(paths.settings) == expected); }
+		if (scenario == 10) { CHECK(QFile::setPermissions(paths.settings, QFileDevice::ReadOwner | QFileDevice::WriteOwner)); }
+		if (scenario == 15) { CHECK(QFile::setPermissions(paths.backup, QFileDevice::ReadOwner | QFileDevice::WriteOwner)); }
+	}
+	auto inputIndex = 0;
+	for (const auto input : { QByteArray("version=1\n[last_seen]\nreasons_p=false\n"),
+		QByteArray("version=3\n[premium]\nenabled_p=true\n"), QByteArray("version=1\n[premium\n"),
+		QByteArray("version=1\n[last_seen]\ntrade_remember={bad=true}\n") }) {
+		FailureContext = QByteArray("removeAppWide:invalidInput=") + QByteArray::number(inputIndex++);
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=1\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto paths = *config.files(b);
+		Put(paths.settings, input);
+		Put(paths.good, original);
+		const auto preview = PreviewAccountAppWideRemoval(config, b);
+		if (input.startsWith("version=1\n[last_seen]\nreasons_p=false")) {
+			CHECK(preview && preview->removed.empty());
+			if (!preview) { return; }
+			const auto result = CommitAccountAppWideRemoval(config, *preview, [] { return true; });
+			CHECK(result.ok && !result.changed && !result.backupChanged);
+		} else { CHECK(!preview); }
+		CHECK(Get(paths.settings) == input && Get(paths.good) == original);
+		CHECK(!QFileInfo::exists(paths.backup));
+	}
+	for (const auto afterMain : { false, true }) {
+		FailureContext = QByteArray("removeAppWide:foreignAfterMain=") + QByteArray::number(afterMain);
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=1\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto paths = *config.files(b);
+		Put(paths.settings, original);
+		Put(paths.backup, QByteArray("old backup sentinel"));
+		const auto target = PreviewAccountAppWideRemoval(config, b);
+		CHECK(target.has_value());
+		if (!target) { return; }
+		auto foreignWritten = false;
+		const auto foreign = QByteArray("version=1\n# foreign writer wins\n");
+		const auto result = CommitAccountAppWideRemoval(config, *target, [&] {
+			if (!foreignWritten && Get(paths.backup) == original
+				&& (Get(paths.settings) != original) == afterMain) {
+				Put(paths.settings, foreign);
+				foreignWritten = true;
+			}
+			return true;
+		});
+		CHECK(foreignWritten && !result.ok && result.backupChanged);
+		CHECK(result.changed == afterMain);
+		CHECK(Get(paths.settings) == foreign && Get(paths.backup) == original);
+	}
+	{
+		FailureContext = "removeAppWide:ordinaryStructuredPerAccount";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=1\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto paths = *config.files(b);
+		const auto originalStructured = QByteArray("version=1\n[premium]\nenabled_p=true\n[last_seen]\nreasons_p={bad=true}\n[unknown]\nnote='preserved' # comment\n");
+		Put(paths.settings, originalStructured);
+		const auto preview = PreviewAccountAppWideRemoval(config, b);
+		CHECK(preview && preview->writable && !preview->removed.empty());
+		if (!preview) { return; }
+		const auto result = CommitAccountAppWideRemoval(config, *preview, [] { return true; });
+		CHECK(result.ok && result.changed && result.backupChanged);
+		CHECK(Get(paths.backup) == originalStructured);
+		const auto after = Get(paths.settings);
+		CHECK(after.startsWith("version=2\n"));
+		CHECK(!after.contains("[premium]") && !after.contains("enabled_p=true"));
+		CHECK(after.contains("reasons_p={bad=true}"));
+		CHECK(after.contains("note='preserved' # comment"));
+		CHECK(!config.operationTarget(b));
+	}
+	FailureContext.clear();
+}
+
+
 }
 
 int main(int argc, char *argv[]) {
@@ -2002,6 +2211,10 @@ int main(int argc, char *argv[]) {
 	const auto beforeActivationRepair = Checks;
 	GlobalChoiceActivationOrderingCases();
 	std::printf("activationOrdering %d checks\n", Checks - beforeActivationRepair);
+	std::printf("priorBatch1660 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeRemoval = Checks;
+	RemoveAppWideSettingsCases();
+	std::printf("removeAppWide %d checks\n", Checks - beforeRemoval);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

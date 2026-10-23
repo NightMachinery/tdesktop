@@ -254,8 +254,8 @@ repair uses one production-called ordering seam, with actual-model post-publicat
 conflict and synchronous lifetime cases in the genuine fixture. Its affected qualification passed both production units and 1,660 genuine
 configured-Qt/file checks, including 80 new causal checks. Focused source review
 closed the activation-ordering finding. Full Config/Gate/window native behavior
-remains unmeasured; helper callback checks do not establish native coverage. General account editing, list forks, destructive
-app-wide removal and unsupported version-two transport remain held.
+remains unmeasured; helper callback checks do not establish native coverage. General account editing, list forks and unsupported version-two transport remain
+held.
 
 
 A saved but rejected commit never invokes the Normal transition or new-settings
@@ -264,3 +264,15 @@ origin/committed snapshot first, then rechecks after synchronous Normal and mode
 activation. The facade retains its final notification/context guard. Confirmation
 reports a saved choice whose activation did not finish safely, rather than saying
 nothing changed. There is no rollback over a newer writer.
+
+### Removing inactive app-wide settings
+
+A non-global account with app-wide keys in its existing file has an explicit removal action in Settings Files. The summary lists registry-derived inactive keys and the account currently supplying app-wide settings. The confirmation names the destination account, explains the effect on devices where that account supplies app-wide settings, and defaults focus to Cancel.
+
+The purpose-specific operation calls the shared lossless removal splice and produces version 2. It retains owned and file-local values, unknown text and unrelated files. It first saves the exact original bytes to that account's `settings.toml.bak`, then publishes the successor. Preview and publication bind the live originating session/window, owner/global role, observed revision, directory identities, exact bytes and native file identities, including an existing backup. A stale or unavailable destination refuses the write. A backup-only or post-publication failure is reported separately and never rolls back over a foreign writer. The final check and rename have a finite race window; backup and main publication are not one cross-file crash transaction.
+
+This action does not enable version 2 sync, imports, general editing or list
+forks. Its four changed production units and 2,201 genuine configured-Qt/file
+checks pass, including 541 added checks. Complete independent source review found
+no material defect. The matching full application, native button behavior and
+actual-profile operation still require separate validation.

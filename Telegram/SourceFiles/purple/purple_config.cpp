@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_account_appwide_removal.h"
+#include "ui/widgets/buttons.h"
 #include "purple/purple_account_send_queue.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_global_choice_activation.h"
@@ -1396,6 +1398,86 @@ QString AccountSettingsScopeCaption(
 		result += ' ' + tr::lng_purple_settings_scope_override(tr::now, lt_account, name);
 	}
 	return result;
+}
+
+std::optional<AccountAppWideRemovalTarget> AccountAppWideRemovalFor(Main::Session *session) {
+	if (!session || session->account().loggingOut() || session->account().maybeSession() != session) {
+		return std::nullopt;
+	}
+	return PreviewAccountAppWideRemoval(AccountRouting(), SessionAccountKey(session));
+}
+
+namespace {
+
+QString AppWideRemovalKeys(const AccountAppWideRemovalTarget &target) {
+	auto keys = QStringList();
+	for (const auto &key : target.removed) {
+		const auto address = key.addressKind == ConfigChangeAddressKind::Key
+			? key.table + '.' + (key.key.isEmpty() ? u"\"\""_q : key.key)
+			: key.table + (key.addressKind == ConfigChangeAddressKind::ListDefinition
+				? u" (definition)"_q : QString());
+		keys.push_back(address);
+	}
+	return keys.join(u", "_q);
+}
+
+}
+
+QString InactiveAppWideSettingsSummary(Main::Session *session) {
+	const auto target = AccountAppWideRemovalFor(session);
+	if (!target || target->removed.empty()) { return {}; }
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	return tr::lng_purple_remove_appwide_summary(tr::now,
+		lt_count, int(target->removed.size()), lt_account, labels.own,
+		lt_name, labels.global, lt_text, AppWideRemovalKeys(*target));
+}
+
+QString RemoveAccountAppWideSettingsTitle(Main::Session *session) {
+	return session ? tr::lng_purple_remove_appwide_title(tr::now,
+		lt_account, session->user()->name()) : QString();
+}
+
+void RemoveAccountAppWideSettingsBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller,
+		AccountAppWideRemovalTarget target) {
+	const auto origin = base::make_weak(&controller->session());
+	const auto key = SessionAccountKey(&controller->session());
+	const auto window = base::make_weak(controller.get());
+	const auto confirmation = QPointer<Ui::GenericBox>(box.get());
+	const auto current = [=] {
+		const auto live = origin.get();
+		const auto ownWindow = window.get();
+		return confirmation && live && ownWindow && &ownWindow->session() == live
+			&& !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == key && target.destination.requester == key;
+	};
+	box->setTitle(tr::lng_purple_remove_appwide_action());
+	const auto name = controller->session().user()->name();
+	box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(
+		tr::lng_purple_remove_appwide_confirm(tr::now, lt_account, name)
+			+ u"\n\n"_q + AppWideRemovalKeys(target))));
+	const auto cancel = box->addButton(tr::lng_cancel(), [=] {
+		if (confirmation) { confirmation->closeBox(); }
+	});
+	box->setFocusCallback([=] { if (cancel) { cancel->setFocus(); } });
+	box->addButton(tr::lng_purple_remove_appwide_action(), [=] {
+		if (!current()) { return; }
+		auto result = CommitAccountAppWideRemoval(AccountRouting(), target, current);
+		if (result.changed) {
+			Instance().refreshAccountRows();
+			if (!current() || !ValidateCommittedAppWideRemoval(AccountRouting(), target, result)) { result.ok = false; }
+		}
+		if (!current()) { return; }
+		if (result.ok) { confirmation->closeBox(); }
+		else {
+			window.get()->show(Ui::MakeInformBox(result.changed
+				? tr::lng_purple_remove_appwide_saved_incomplete(tr::now)
+				: result.backupChanged
+				? tr::lng_purple_remove_appwide_backup_only(tr::now)
+				: tr::lng_purple_remove_appwide_unavailable(tr::now)));
+		}
+	});
 }
 
 QString AccountSettingsResetCaption(not_null<Main::Session*> session) {

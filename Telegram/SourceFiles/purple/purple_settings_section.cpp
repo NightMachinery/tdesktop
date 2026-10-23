@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
+#include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
 #include "purple/purple_last_seen.h"
 #include "purple/purple_preset_box.h"
@@ -278,6 +279,27 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 			}),
 		});
 	}
+	builder.scope([&] {
+		builder.addDividerText(AccountRowChanges() | rpl::map([=] {
+			return windowCurrent() ? InactiveAppWideSettingsSummary(weakSession.get()) : QString();
+		}));
+		builder.addButton({
+			.id = u"advanced/purple_remove_appwide_settings"_q,
+			.title = AccountRowChanges() | rpl::map([=] {
+				return RemoveAccountAppWideSettingsTitle(weakSession.get());
+			}),
+			.onClick = [=] {
+				if (!windowCurrent()) { return; }
+				const auto target = AccountAppWideRemovalFor(weakSession.get());
+				if (!target || target->removed.empty()) { return; }
+				weakController.get()->show(Box(RemoveAccountAppWideSettingsBox, weakController.get(), *target));
+			},
+			.keywords = { u"purple"_q, u"remove"_q, u"app-wide"_q, u"account"_q },
+		});
+	}, AccountRowChanges() | rpl::map([=] {
+		const auto target = windowCurrent() ? AccountAppWideRemovalFor(weakSession.get()) : std::nullopt;
+		return target && !target->removed.empty();
+	}));
 }
 
 // Purple Telegram, not upstream. Why a coarse "last seen" is coarse, and the

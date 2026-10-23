@@ -32,6 +32,7 @@ endif()
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
     purple/purple_account_config.cpp
+    purple/purple_account_appwide_removal.h
     purple/purple_account_config.h
     purple/purple_account_send_queue.h
     purple/purple_app_services.cpp

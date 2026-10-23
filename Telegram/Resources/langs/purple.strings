@@ -108,3 +108,12 @@ docs/purple/upstream_hooks.md.
 "lng_purple_global_off" = "off";
 
 "lng_purple_global_saved_activation_incomplete" = "The app-wide account choice was saved, but activation did not finish safely. Reopen this choice and preview it again.";
+
+"lng_purple_remove_appwide_action" = "Remove app-wide settings";
+"lng_purple_remove_appwide_title" = "Remove app-wide settings from {account}'s file";
+"lng_purple_remove_appwide_summary#one" = "{account}'s file contains {count} inactive app-wide setting. App-wide settings currently come from {name}. Inactive keys: {text}";
+"lng_purple_remove_appwide_summary#other" = "{account}'s file contains {count} inactive app-wide settings. App-wide settings currently come from {name}. Inactive keys: {text}";
+"lng_purple_remove_appwide_confirm" = "This removes Work Mode, Local Premium and the other app-wide settings from {account}'s file. Once synced, devices where this account supplies the app-wide settings run without them. The current file is kept as settings.toml.bak.";
+"lng_purple_remove_appwide_unavailable" = "The account, app-wide role or settings file changed, or the file or backup is unavailable. Nothing was removed. Review the file again.";
+"lng_purple_remove_appwide_backup_only" = "No main-file replacement was confirmed. The backup was updated with the original file, but the settings file changed or could not be written. Review the current file.";
+"lng_purple_remove_appwide_saved_incomplete" = "The settings file was saved, but its context changed afterward. Review the current file; no rollback was attempted.";
