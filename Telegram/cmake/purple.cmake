@@ -170,6 +170,24 @@ endif()
 
 nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
+    purple/purple_archive_codec.cpp
+    purple/purple_archive_codec.h
+    purple/purple_archive_internal.h
+    purple/purple_archive_model.cpp
+    purple/purple_archive_model.h
+    purple/purple_archive_source.cpp
+    purple/purple_archive_source.h
+    purple/purple_archive_store.cpp
+    purple/purple_archive_store.h
+    purple/purple_peer_token.cpp
+    purple/purple_peer_token.h
+    purple/purple_sync_chat.cpp
+    purple/purple_sync_chat.h
+    purple/purple_sync_chat_carry.cpp
+    purple/purple_sync_chat_carry.h
+    purple/purple_sync_chat_carry_codec.cpp
+    purple/purple_sync_chat_journal.cpp
+    purple/purple_sync_chat_journal.h
     purple/purple_account_files.cpp
     purple/purple_account_files.h
     purple/purple_local_choice.cpp

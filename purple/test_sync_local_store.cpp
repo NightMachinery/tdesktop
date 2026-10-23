@@ -771,7 +771,7 @@ void TestInvalidStateAndOrphan() {
 				CHECK(file.write("{") == 1);
 			} else {
 				auto state = Purple::SerializeSyncLocalState(InitialState()).canonical;
-				state.replace("\"version\":1", "\"version\":2");
+				state.replace("\"version\":1", "\"version\":3");
 				CHECK(file.write(state) == state.size());
 			}
 		}

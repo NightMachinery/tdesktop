@@ -22,6 +22,7 @@ clang++ -std=c++20 -g -O0 -o "$BuildPath/test_sync_record_names" \
     "$CorePath/purple/purple_sync_directory.cpp" \
     "$CorePath/purple/purple_sync_inventory.cpp" \
     "$CorePath/purple/purple_sync_config_flow.cpp" \
+    "$CorePath/purple/purple_peer_token.cpp" \
     "$CorePath/purple/purple_sync_local_state.cpp" \
     -I"$RepoPath/Telegram/SourceFiles" \
     -I"$CorePath" \

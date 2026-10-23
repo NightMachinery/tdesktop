@@ -617,3 +617,7 @@ beyond the 256 KiB sync-reader limit refuses replacement instead of recording a
 false absent History entry. Corrupt readable primaries with an explicitly reviewed
 valid `.good` baseline retain their actual bytes in History; missing-file adoption
 remains available.
+
+The Desktop build registers the shared peer-token, sync-chat carry/journal and
+received-content archive core modules. Registration alone does not expose sync-chat
+moves, automatic sync or an archive UI; these still require client adapters.
