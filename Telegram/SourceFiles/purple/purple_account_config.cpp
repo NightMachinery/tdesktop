@@ -1331,6 +1331,235 @@ AccountSettingsEditResult DesktopAccountConfig::writeListMember(
 	}, originCurrent);
 }
 
+std::map<QString, OwnListMembers> ReadOwnListMembers(
+		const QByteArray &bytes,
+		const QString &path) {
+	auto result = std::map<QString, OwnListMembers>();
+	const auto parsed = ParseSettings(QString::fromUtf8(bytes), path);
+	const auto raw = toml::parse(std::string_view(bytes.constData(), bytes.size()));
+	if (!parsed.ok() || !raw) { return result; }
+	const auto lists = raw.table()["lists"].as_table();
+	if (!lists) { return result; }
+	for (const auto &list : parsed.settings.lists) {
+		const auto table = lists->get_as<toml::table>(list.name.toStdString());
+		if (!table) { continue; }
+		const auto members = table->get_as<toml::array>("members");
+		const auto integers = members && std::all_of(members->begin(), members->end(), [](const auto &value) {
+			return value.is_integer();
+		});
+		result[list.name] = { list.members,
+			parsed.settings.version != 2 || table->contains("title") || table->contains("kinds"),
+			parsed.settings.version == 2 && table->size() == 1 && integers, table->contains("members") };
+	}
+	return result;
+}
+
+namespace {
+
+QString ListTableAddress(const QString &name) {
+	auto result = u"lists.\""_q;
+	for (const auto ch : name) {
+		if (ch == '"' || ch == '\\') { result += '\\'; result += ch; }
+		else if (ch.unicode() < 0x20 || ch.unicode() == 0x7f) {
+			result += u"\\u%1"_q.arg(uint(ch.unicode()), 4, 16, QChar('0'));
+		} else { result += ch; }
+	}
+	return result + '"';
+}
+
+std::optional<QByteArray> ObservedSettingsBytes(const QString &path) {
+	for (const auto &candidate : { path, path + u".good"_q }) {
+		const auto input = OwnerInput(candidate);
+		if (input.state == SettingsFileState::Readable && RowInputUsable(input, candidate)) {
+			return input.bytes;
+		}
+	}
+	return OwnerInput(path).state == SettingsFileState::Missing
+		&& OwnerInput(path + u".good"_q).state == SettingsFileState::Missing
+		? std::make_optional(QByteArray()) : std::nullopt;
+}
+
+}
+
+auto DesktopAccountConfig::workModeTarget(const AccountKey &key)
+-> std::optional<AccountWorkModeTarget> {
+	const auto own = openTarget(key, SettingsOpenRole::Own);
+	const auto global = openTarget(key, SettingsOpenRole::AppWide);
+	if (!own || !global
+		|| QString::fromUtf8(own->localInput.bytes).toUtf8() != own->localInput.bytes) {
+		return std::nullopt;
+	}
+	auto result = AccountWorkModeTarget{ *own, *global };
+	for (const auto &path : { absolute(u"local.toml"_q), absolute(u"accounts/root.toml"_q),
+		own->file.path, global->file.path }) {
+		const auto identity = ChoiceFileIdentity(path);
+		if (identity.isEmpty()) { return std::nullopt; }
+		result.identities[path] = identity;
+	}
+	return result;
+}
+
+bool DesktopAccountConfig::validateWorkModeTarget(
+		const AccountWorkModeTarget &target) {
+	const auto current = workModeTarget(target.own.requester);
+	return current && target.own.role == SettingsOpenRole::Own
+		&& target.global.role == SettingsOpenRole::AppWide
+		&& target.global.requester == target.own.requester
+		&& validateOpen(target.own) && validateOpen(target.global)
+		&& current->identities == target.identities;
+}
+
+AccountWorkModeResult DesktopAccountConfig::writeWorkMode(
+		const AccountWorkModeTarget &target,
+		AccountWorkMode mode,
+		const std::function<bool()> &originCurrent) {
+	const auto current = [&] {
+		return originCurrent && originCurrent() && validateWorkModeTarget(target);
+	};
+	if (!current() || (mode == AccountWorkMode::Follow && target.own.requester == target.own.global)) {
+		return { .error = u"The account settings context changed. Reopen the chooser."_q };
+	}
+	const auto path = absolute(u"local.toml"_q);
+	const auto splice = SetAccountWorkMode(QString::fromUtf8(target.own.localInput.bytes), path,
+		target.own.requester, mode);
+	if (!splice.ok()) { return { .error = splice.error }; }
+	if (!splice.changed) { return { .ok = current(), .target = target }; }
+	const auto bytes = splice.text.toUtf8();
+	if (WriteGuardedSettingsFile(path, target.own.localInput, bytes, current) != GuardedFileWrite::Written) {
+		return { .error = u"Local settings changed or could not be saved."_q };
+	}
+	const auto identity = ChoiceFileIdentity(path);
+	refreshLocalChoice();
+	const auto expected = workModeTarget(target.own.requester);
+	const auto committed = [&] {
+		return expected && originCurrent && originCurrent() && validateWorkModeTarget(*expected)
+			&& expected->own.global == target.own.global && expected->own.owner == target.own.owner
+			&& expected->own.file.input == target.own.file.input
+			&& expected->global.file.input == target.global.file.input
+			&& expected->own.localInput == SettingsFileInput{ SettingsFileState::Readable, bytes }
+			&& expected->own.rootIdentity == target.own.rootIdentity
+			&& expected->own.accountsIdentity == target.own.accountsIdentity
+			&& expected->own.accountDirectoryIdentity == target.own.accountDirectoryIdentity
+			&& expected->global.accountDirectoryIdentity == target.global.accountDirectoryIdentity
+			&& ChoiceFileIdentity(path) == identity
+			&& std::all_of(target.identities.begin(), target.identities.end(), [&](const auto &entry) {
+				return entry.first == path || ChoiceFileIdentity(entry.first) == entry.second;
+			});
+	};
+	if (_changed) { _changed(); }
+	return committed() ? AccountWorkModeResult{ .ok = true, .changed = true, .target = expected }
+		: AccountWorkModeResult{ .changed = true, .error = u"Local settings saved, but the context changed."_q };
+}
+
+auto DesktopAccountConfig::listDeleteTarget(
+		const AccountKey &key,
+		const QString &list)
+-> std::optional<AccountListDeleteTarget> {
+	const auto edit = settingsEditTarget(key, SettingsOpenRole::Own);
+	if (!edit || key == edit->destination.global) { return std::nullopt; }
+	const auto lists = ReadOwnListMembers(edit->destination.file.input.bytes, edit->destination.file.path);
+	const auto found = lists.find(list);
+	if (found == lists.end() || !found->second.deletable) { return std::nullopt; }
+	const auto splice = RemoveTableKey(QString::fromUtf8(edit->destination.file.input.bytes),
+		edit->destination.file.path, ListTableAddress(list), u"members"_q);
+	return splice.ok() && splice.changed
+		? std::make_optional(AccountListDeleteTarget{ *edit, list, int(found->second.members.size()) })
+		: std::nullopt;
+}
+
+AccountSettingsEditResult DesktopAccountConfig::deleteListMembers(
+		const AccountListDeleteTarget &target,
+		const std::function<bool()> &originCurrent) {
+	const auto current = listDeleteTarget(target.edit.destination.requester, target.list);
+	if (!current || current->members != target.members || !validateSettingsEdit(target.edit)) {
+		return { .error = u"The list settings changed. Reopen the menu."_q };
+	}
+	return writeSettingsEdit(target.edit, [&](const QString &text) {
+		return RemoveTableKey(text, target.edit.destination.file.path, ListTableAddress(target.list), u"members"_q);
+	}, originCurrent);
+}
+
+int InactiveFollowListMemberChanges(
+		const QByteArray &before,
+		const QByteArray &after,
+		AccountWorkMode openingMode,
+		bool appWideAccount) {
+	if (openingMode != AccountWorkMode::Follow || appWideAccount) { return 0; }
+	const auto summary = SummarizeConfigChange(before, after);
+	auto result = 0;
+	for (const auto &entry : summary.entries) {
+		for (const auto &key : entry.keys) {
+			if (key.scope == SettingScope::PerAccount && key.key == u"members"_q
+				&& key.table.startsWith(u"lists."_q)) { ++result; }
+		}
+	}
+	return result;
+}
+
+AccountListReloadChange DescribeAccountListReload(
+		const QByteArray &beforeGlobal,
+		const QByteArray &afterGlobal,
+		const QByteArray &beforeOwn,
+		const QByteArray &afterOwn) {
+	auto result = AccountListReloadChange();
+	const auto summary = SummarizeConfigChange(beforeOwn, afterOwn);
+	if (summary.parsed) {
+		for (const auto &entry : summary.entries) {
+			for (const auto &key : entry.keys) {
+				if (key.scope == SettingScope::AppWide) { ++result.inactiveChanges; }
+			}
+		}
+	}
+	const auto previous = ParseSettings(QString::fromUtf8(beforeGlobal), QString());
+	const auto global = ParseSettings(QString::fromUtf8(afterGlobal), QString());
+	const auto before = ReadOwnListMembers(beforeOwn, QString());
+	const auto after = ReadOwnListMembers(afterOwn, QString());
+	if (!previous.ok() || !global.ok()) { return result; }
+	for (const auto &[name, own] : after) {
+		const auto was = before.find(name);
+		if (!own.members.empty() && !global.settings.list(name)
+			&& (previous.settings.list(name) || was == before.end() || was->second.members != own.members)) {
+			result.unusedMembers[name] = int(own.members.size());
+		}
+		if (own.defined && own.members.empty() && was != before.end()
+			&& was->second.defined && !was->second.members.empty()) {
+			result.emptiedLists[name] = int(was->second.members.size());
+		}
+	}
+	return result;
+}
+
+std::vector<AccountListReloadChange> DesktopAccountConfig::observeListReloads(
+		const std::vector<AccountKey> &accounts) {
+	auto result = std::vector<AccountListReloadChange>();
+	const auto global = globalAccount();
+	const auto globalBytes = ObservedSettingsBytes(globalSettingsPath());
+	if (!global || !globalBytes) { return result; }
+	if (_listObservationGlobal != global) {
+		_listObservationGlobal = global;
+		_listObservations.clear();
+	}
+	for (const auto &key : accounts) {
+		const auto name = AccountKeyText(key.environment, key.userId);
+		const auto paths = files(key);
+		if (!name || !paths) { continue; }
+		const auto bytes = ObservedSettingsBytes(paths->settings);
+		if (!bytes) { continue; }
+		const auto before = _listObservations.find(*name);
+		if (before != _listObservations.end()) {
+			auto change = DescribeAccountListReload(_listObservationGlobalBytes, *globalBytes, before->second, *bytes);
+			change.account = key;
+			if (key == *global) { change.inactiveChanges = 0; change.unusedMembers.clear(); }
+			if (change.inactiveChanges || !change.unusedMembers.empty() || !change.emptiedLists.empty()) {
+				result.push_back(std::move(change));
+			}
+		}
+		_listObservations[*name] = *bytes;
+	}
+	_listObservationGlobalBytes = *globalBytes;
+	return result;
+}
+
 bool ShouldShowGlobalAccountChoice(int signedIn, bool globalSignedIn) {
 	return signedIn >= 2 || !globalSignedIn;
 }

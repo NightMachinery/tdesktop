@@ -530,9 +530,13 @@ void PeekDial::keyPressEvent(QKeyEvent *e) {
 // list name were misspelled; this is read off the chat list, and it is the line
 // that answers the question everyone actually has - is it working.
 [[nodiscard]] QString EffectText(not_null<Main::Session*> session) {
-	if (!Filtering()) {
-		return QString();
+	if (AllAccountsWorkModeStock()) {
+		return tr::lng_purple_lists_all_stock(tr::now);
 	}
+	if (AccountWorkModeForSession(session) == AccountWorkMode::Stock) {
+		return AccountListsSummary(session);
+	}
+	if (!Filtering(session)) { return QString(); }
 	const auto owner = &session->data();
 	const auto total = owner->chatsList()->indexed()->size();
 	const auto shown = Purple::ViewList(owner)->indexed()->size();
@@ -662,7 +666,7 @@ void PresetBox(
 				EffectText(session),
 				st::boxDividerLabel),
 			padding));
-	effect->toggle(Filtering(), anim::type::instant);
+	effect->toggle(!EffectText(session).isEmpty(), anim::type::instant);
 
 	const auto problems = container->add(
 		object_ptr<Ui::VerticalLayout>(container));

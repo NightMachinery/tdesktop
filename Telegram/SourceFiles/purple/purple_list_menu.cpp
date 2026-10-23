@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "history/history.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_gate.h"
 #include "purple/purple_preset_box.h"
 #include "ui/layers/generic_box.h"
+#include "lang/lang_keys.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/layers/show.h"
 #include "ui/text/text_utilities.h"
@@ -114,6 +116,14 @@ void FillListsMenu(
 	// question that brings anyone here - "why is this hidden?" - and no entry
 	// at all is as real an answer as any, because a preset names what gets
 	// through and silence about a chat is a decision too.
+	const auto summary = AccountListsSummary(session);
+	if (!Filtering(session) && !summary.isEmpty()) {
+		auto label = base::make_unique_q<Ui::Menu::MultilineAction>(menu->menu(), menu->st().menu,
+			st::defaultFlatLabel, QPoint(menu->st().menu.itemPadding.left(), menu->st().menu.itemPadding.top()),
+			tr::marked(summary), &st::menuIconInfo);
+		menu->addAction(std::move(label));
+		menu->addSeparator();
+	}
 	if (Filtering(session)) {
 		// What the entry wanted, and what actually happened - which are not the
 		// same thing for a chat a folder pulled back in. The state has to be
@@ -146,7 +156,7 @@ void FillListsMenu(
 			: QString();
 		const auto effective = ListFor(peer);
 		const auto list = effective
-			? LookupList(ActiveSettings(), ActiveResolved(), effective->list)
+			? LookupList(AccountSettings(session), ActiveResolved(), effective->list)
 			: nullptr;
 		const auto where = list
 			? u"In '%1'"_q.arg(DisplayTitle(*list))
@@ -168,7 +178,8 @@ void FillListsMenu(
 			// Where an ordinary row puts its text, so this lines up with the
 			// list rows under it and clears the icon on its left.
 			QPoint(st.itemPadding.left(), st.itemPadding.top()),
-			TextWithEntities{ u"%1: %2%3"_q.arg(where, state, folder) },
+			tr::marked(u"%1: %2%3"_q.arg(where, state, folder)
+				+ (summary.isEmpty() ? QString() : '\n' + summary)),
 			&st::menuIconInfo);
 		const auto action = menu->addAction(std::move(label));
 		QObject::connect(action, &QAction::triggered, action, [=] {
@@ -200,13 +211,26 @@ void FillListsMenu(
 					return;
 				}
 				const auto title = TitleResolver(not_null{ live });
+				const auto notice = edit ? AccountListEditNotice(not_null{ live }, *edit, !member) : QString();
 				const auto ok = edit && SetAccountListMember(not_null{ live }, *edit, id, !member, title);
 				if (!ok) {
 					show->showToast(u"Could not edit %1. Reopen the menu and try again."_q.arg(
 						edit ? edit->edit.destination.file.path : SettingsFilePath()));
+				} else if (!notice.isEmpty()) {
+					show->showToast(notice);
 				}
 			},
 			(member ? &st::mediaPlayerMenuCheck : nullptr));
+	}
+
+	for (const auto &target : AccountListDeletes(session)) {
+		menu->addAction(tr::lng_purple_lists_delete_named(tr::now, lt_account, session->user()->name(),
+			lt_list, target.list), [=] {
+			menu->hideMenu();
+			if (const auto live = weakSession.get()) {
+				show->showBox(Box(DeleteAccountListMembersBox, not_null{ live }, target));
+			}
+		});
 	}
 
 	// The "until" decisions, one submenu each. Set apart from the lists above,
@@ -264,6 +288,7 @@ void FillListsMenu(
 		if (!weakSession) {
 			return;
 		}
+		const auto scope = AccountSettingsScopeCaption(session, std::nullopt);
 		show->showBox(Box(NewListBox, [=](QString name) {
 			if (!weakSession) {
 				return;
@@ -274,7 +299,7 @@ void FillListsMenu(
 			show->showToast(u"List '%1' created. Add it to a preset's "
 				"list_order in %2 to make it do anything."_q.arg(
 					name,
-					SettingsFilePath()));
+					SettingsFilePath()) + (scope.isEmpty() ? QString() : '\n' + scope));
 		}, Fn<bool()>([=] {
 			const auto live = weakSession.get();
 			return live && !live->account().loggingOut() && live->account().maybeSession() == live;

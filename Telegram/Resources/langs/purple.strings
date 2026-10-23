@@ -119,3 +119,26 @@ docs/purple/upstream_hooks.md.
 "lng_purple_remove_appwide_saved_incomplete" = "The settings file was saved, but its context changed afterward. Review the current file; no rollback was attempted.";
 
 "lng_purple_global_offline_edit" = "Work Mode and the other app-wide settings are in {account}’s file, which cannot sync while {name} is signed out.";
+
+"lng_purple_lists_global_title" = "Work Mode for {account} on this device";
+"lng_purple_lists_mode_title" = "Work Mode lists for {account} on this device";
+"lng_purple_lists_stock" = "Work Mode is off for {account} on this device.";
+"lng_purple_lists_all_stock" = "Work Mode is off for every account on this device.";
+"lng_purple_lists_follow_summary" = "{account} uses {name}’s lists on this device.";
+"lng_purple_lists_own_summary" = "%1 lists are {account}’s own; the rest follow {name} on this device.";
+"lng_purple_lists_undefined" = "{account}’s own members for ‘{list}’ (%1 chats) are unused: {name}’s settings do not define this list.";
+"lng_purple_lists_follow_inactive" = "{account}’s own members for %1 lists are unused here while following {name}.";
+"lng_purple_lists_follow_added" = "Added to {name}’s ‘{list}’, which {account} uses on this device.";
+"lng_purple_lists_follow_removed" = "Removed from {name}’s ‘{list}’, which {account} uses on this device.";
+"lng_purple_lists_forked" = "‘{list}’ is now {account}’s own list on every device syncing this account’s settings. The app-wide list in {name}’s file is unchanged.";
+"lng_purple_lists_stock_edit" = "Work Mode stays off for {account} here. These edits apply on devices that use this account’s lists.";
+"lng_purple_lists_delete" = "Delete own members";
+"lng_purple_lists_delete_named" = "Delete {account}’s own members for ‘{list}’";
+"lng_purple_lists_delete_confirm" = "{account} then uses each device’s app-wide ‘{list}’, which on this device is {name}’s. This changes this account’s settings on every device that syncs them.";
+"lng_purple_lists_mode_stock" = "Off: stock Telegram";
+"lng_purple_lists_mode_follow" = "{name}’s lists";
+"lng_purple_lists_mode_own" = "{account}’s own, else {name}’s";
+"lng_purple_lists_mode_on" = "On";
+"lng_purple_lists_reload_inactive" = "%1 app-wide changes in {account}’s file are not used on this device.";
+"lng_purple_lists_emptied" = "{account}’s file no longer gives ‘{list}’ any members. On devices where this account supplies the app-wide settings, this list is now empty.";
+"lng_purple_lists_open_own" = "Open {account}’s settings";

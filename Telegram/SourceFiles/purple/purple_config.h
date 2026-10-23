@@ -154,6 +154,28 @@ WriteResult WriteSettingsGuarded(
 	const QString &what,
 	const std::function<bool()> &originCurrent = {});
 
+using AccountListPreviewNotes = Fn<QString(const QByteArray&, const QByteArray&)>;
+[[nodiscard]] AccountListPreviewNotes CaptureOwnListPreviewNotes(
+	not_null<Main::Session*> session);
+[[nodiscard]] bool AllAccountsWorkModeStock();
+[[nodiscard]] QString AccountListsSummary(not_null<Main::Session*> session);
+[[nodiscard]] QString AccountWorkModeTitle(not_null<Main::Session*> session);
+[[nodiscard]] bool AccountWorkModeChoiceVisible(not_null<Main::Session*> session);
+void ChooseAccountWorkModeBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller);
+[[nodiscard]] std::vector<AccountListDeleteTarget> AccountListDeletes(
+	not_null<Main::Session*> session);
+void DeleteAccountListMembersBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Main::Session*> session,
+	AccountListDeleteTarget target);
+[[nodiscard]] QString AccountListEditNotice(
+	not_null<Main::Session*> session,
+	const AccountListEditTarget &target,
+	bool member);
+[[nodiscard]] QString AccountListFileWarnings(not_null<Main::Session*> session);
+
 [[nodiscard]] std::optional<AccountListEditTarget> AccountListEditFor(
 	not_null<Main::Session*> session,
 	const QString &list);

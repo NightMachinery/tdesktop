@@ -52,7 +52,7 @@ Sync setup, store, publish, apply, History/Undo and fingerprint persistence now 
 explicit validated originating-account files. Root-owner paths remain legacy;
 nonroot accounts never fall back to them. Manual single-file export remains a
 separate owner-unknown role. The routed local writers and list ticks are described
-below. The full account settings chooser remains separate work.
+below. The list-mode controls are described below; the full account editor remains separate work.
 No migration-by-copy or automatic binding restoration is introduced.
 
 Synthetic Qt/file cases qualify the actual adapter and guarded writer in owned
@@ -123,7 +123,7 @@ replacement save.
 Absent settings are read without creation and cannot initialize or publish through
 sync setup. The explicit Open action can create a missing non-root account file.
 Version2 legacy imports/exports and layered sync application remain refused;
-the full account editor and list-mode chooser remain separate work. The final precondition-to-rename window against a noncooperating writer remains
+the full account editor remains separate work. The final precondition-to-rename window against a noncooperating writer remains
 finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
 and a coherent current application need separate qualification.
 
@@ -254,7 +254,7 @@ repair uses one production-called ordering seam, with actual-model post-publicat
 conflict and synchronous lifetime cases in the genuine fixture. Its affected qualification passed both production units and 1,660 genuine
 configured-Qt/file checks, including 80 new causal checks. Focused source review
 closed the activation-ordering finding. Full Config/Gate/window native behavior
-remains unmeasured; helper callback checks do not establish native coverage. The full account editor/list-mode chooser and unsupported version-two transport
+remains unmeasured; helper callback checks do not establish native coverage. The full account editor and unsupported version-two transport
 remain separate work.
 
 
@@ -297,8 +297,7 @@ only the effective member order and member comments through SetListMembers.
 Only the changed chat is resolved in its own session. Titles, kinds, other lists,
 presets and other inherited settings are not copied. Removing the final member
 writes an explicit empty array. Ticks never use Reset, including in a whole file
-that defines the list. Mode chooser UI, explicit delete-own-members actions and
-fork/follow/stock notices are outside this slice.
+that defines the list. The chooser and explicit deletion rules follow below.
 
 These writes retain owner/local-choice and directory guards, exact input bytes,
 primary/recovery file identities and originating lifetimes. Existing files keep
@@ -321,3 +320,53 @@ config checks and 1,102 sync-flow checks. Native
 dialog/editor behavior, Windows execution and live sync remain separate checks;
 no GUI or application launch was used. The final rename window and settings,
 backup and good updates remain finite checks, not a filesystem transaction.
+
+## Local list mode and reversible forks
+
+Settings > Purple offers Own, Follow and Stock for the window's account when
+multiple accounts are loaded, including an offline app-wide source. A Stock
+account keeps the control when it becomes the only account, so it can turn Work
+Mode back on. The app-wide account offers On and Stock. The choice uses the shared
+`SetAccountWorkMode` splice in `local.toml`; settings files and sync state stay
+untouched. Apply binds the opening session, app-wide source, owner, exact inputs
+and file/directory identities. A source switch, replaced input or closed origin
+refuses the captured operation.
+
+The menu verdict uses that account's effective lists and says which account owns
+its members. A first Own edit names the fork and its effect on other devices;
+Follow ticks name the app-wide file they edit. Stock keeps list editing and states
+that Work Mode remains off here. It hides Until rows. The preset box reports Stock
+for its account, or that every signed-in account is Stock. New lists and pinned
+orders remain app-wide.
+
+Delete own members is offered only for a version-2 table containing exactly one
+valid integer `members` array and supported by the shared removal splice. It
+removes that key and its empty header, preserves unrelated text, and restores
+inheritance. The confirmation defaults to Cancel and keeps its opening destination
+through Apply. Lists defined by a whole file, a title or kinds never offer this
+action; Follow is the local remedy without emptying another device's list.
+
+The file block names orphan members and members inactive under Follow, including
+when the selected settings come from a last-good copy. Reload notices count
+registry-scoped inactive app-wide changes, name members left unused by a removed
+app-wide list, and warn when a retained definition loses all members. Open in the
+notice retains the account and source snapshot. Observers seed on account/source
+changes, suppress repeated notices and never rename or delete account members.
+
+Sync choice and History previews capture the opening account's mode and name
+changed own members as unused here under Follow. Sync choice Apply also retains
+that opening own-file target and weak session, so changing mode or app-wide source
+refuses the old preview. This adds a scope note to the existing preview, without
+enabling version-two transport or a general account editor.
+
+Desktop settings reloads retain the published Settings object while building its
+successor, and the gate resolves before replacing its active resolution. The
+watcher regression checks excluded chats stay hidden and muted before and after
+invalidation and replacement under Own and Follow. These are single-threaded
+production adapter checks, not a claim of native concurrent notification coverage.
+
+The genuine file fixture covers transitions, lossless local writes, stale chooser
+and deletion captures, forks, whole-file exclusions, reload notices, control
+characters in literal list names, and opening Follow-mode preview notes. Debug
+compilation/linking and the headless checks qualify code and filesystem behavior;
+widget interaction, Windows execution and live sync still need separate testing.

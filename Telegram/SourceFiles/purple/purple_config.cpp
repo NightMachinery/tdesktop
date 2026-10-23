@@ -6,6 +6,10 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "platform/platform_file_utilities.h"
+#include "ui/toast/toast.h"
+#include "ui/delayed_activation.h"
+#include "ui/layers/show.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "ui/widgets/buttons.h"
 #include "purple/purple_account_send_queue.h"
@@ -48,6 +52,7 @@ namespace Purple {
 namespace {
 
 void ShowOfflineGlobalEditBulletin();
+void ShowAccountListReloadNotices();
 
 }
 
@@ -436,6 +441,7 @@ Config::Config()
 		_reload.callOnce(kReloadDelay);
 	});
 	AccountRouting().watch();
+	ShowAccountListReloadNotices();
 }
 
 void Config::loadSettings() {
@@ -616,6 +622,7 @@ void Config::reloadFromDisk() {
 	}
 	AccountRouting().refreshLocalChoice();
 	reloadStateFromDisk();
+	ShowAccountListReloadNotices();
 
 	const auto input = ReadSettingsFileInput(SettingsFilePath());
 	if (input == _diskInput && _settingsPath == SettingsFilePath()) {
@@ -1118,6 +1125,7 @@ void RefreshDesktopAccounts() {
 	}
 	AccountRouting().start(std::move(accounts));
 	Instance().observeAccountFiles();
+	ShowAccountListReloadNotices();
 }
 
 void StartDesktopAccountRouting() {
@@ -1402,6 +1410,70 @@ void ShowOfflineGlobalEditBulletin() {
 	}));
 }
 
+constexpr auto kAccountListNoticeDuration = crl::time(10000);
+
+void ShowAccountListReloadNotices() {
+	if (!Core::App().domain().started()) { return; }
+	auto keys = std::vector<AccountKey>();
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto live = entry.account->maybeSession();
+		if (live && !live->account().loggingOut()) { keys.push_back(SessionAccountKey(live)); }
+	}
+	const auto changes = AccountRouting().observeListReloads(keys);
+	const auto window = Core::App().activeWindow();
+	if (!window) { return; }
+	for (const auto &change : changes) {
+		auto session = static_cast<Main::Session*>(nullptr);
+		for (const auto &entry : Core::App().domain().accounts()) {
+			const auto live = entry.account->maybeSession();
+			if (live && !live->account().loggingOut() && SessionAccountKey(live) == change.account) { session = live; break; }
+		}
+		if (!session) { continue; }
+		const auto labels = SettingsRowLabels(session, std::nullopt);
+		auto lines = QStringList();
+		if (change.inactiveChanges) {
+			lines.push_back(tr::lng_purple_lists_reload_inactive(tr::now, lt_account, labels.own).arg(change.inactiveChanges));
+		}
+		for (const auto &[name, count] : change.unusedMembers) {
+			lines.push_back(tr::lng_purple_lists_undefined(tr::now, lt_account, labels.own,
+				lt_list, name, lt_name, labels.global).arg(count));
+		}
+		for (const auto &[name, count] : change.emptiedLists) {
+			lines.push_back(tr::lng_purple_lists_emptied(tr::now, lt_account, labels.own, lt_list, name));
+		}
+		const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
+		const auto weakSession = base::make_weak(session);
+		const auto weakWindow = base::make_weak(window);
+		const auto current = [=] {
+			const auto live = weakSession.get();
+			return live && weakWindow && Core::App().activeWindow() == weakWindow.get()
+				&& !live->account().loggingOut() && live->account().maybeSession() == live
+				&& SessionAccountKey(live) == change.account;
+		};
+		auto text = tr::marked(lines.join('\n'));
+		if (opening) {
+			text.append(u" "_q).append(tr::lng_purple_lists_open_own(tr::now, lt_account, tr::marked(labels.own), tr::link));
+		}
+		window->showToast(Ui::Toast::Config{
+			.text = std::move(text),
+			.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
+				if (!opening || !current()) { return false; }
+				const auto ready = PrepareAccountSettingsOpen(weakSession.get(), *opening, current);
+				if (!ready.target || !current()) { return false; }
+				const auto target = *ready.target;
+				crl::on_main([=] {
+					if (current() && ValidateAccountSettingsOpenTarget(weakSession.get(), target)) {
+						Ui::PreventDelayedActivation();
+						Platform::File::UnsafeLaunch(target.file.path);
+					}
+				});
+				return false;
+			},
+			.duration = kAccountListNoticeDuration,
+		});
+	}
+}
+
 }
 
 QString AccountSettingsScopeCaption(
@@ -1454,6 +1526,217 @@ QString AppWideRemovalKeys(const AccountAppWideRemovalTarget &target) {
 	return keys.join(u", "_q);
 }
 
+}
+
+QString AccountWorkModeTitle(not_null<Main::Session*> session) {
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	return SessionAccountKey(session) == AppWideSettingsAccount(session)
+		? tr::lng_purple_lists_global_title(tr::now, lt_account, labels.own)
+		: tr::lng_purple_lists_mode_title(tr::now, lt_account, labels.own);
+}
+
+bool AccountWorkModeChoiceVisible(not_null<Main::Session*> session) {
+	return SettingsRowLabels(session, std::nullopt).multiple;
+}
+
+namespace {
+
+std::map<QString, OwnListMembers> AccountOwnLists(not_null<Main::Session*> session) {
+	const auto key = SessionAccountKey(session);
+	(void)AccountSettings(session);
+	const auto report = AccountRouting().report(key);
+	const auto paths = AccountRouting().files(key);
+	if (!paths || !report || !report->account.usable) { return {}; }
+	const auto path = paths->settings + (report->account.usedGood ? u".good"_q : QString());
+	return ReadOwnListMembers(ReadSettingsFileInput(path).bytes, path);
+}
+
+}
+
+AccountListPreviewNotes CaptureOwnListPreviewNotes(
+		not_null<Main::Session*> session) {
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	const auto mode = AccountWorkModeForSession(session);
+	const auto global = SessionAccountKey(session) == AppWideSettingsAccount(session);
+	return [=](const QByteArray &before, const QByteArray &after) {
+		const auto count = InactiveFollowListMemberChanges(before, after, mode, global);
+		return count ? tr::lng_purple_lists_follow_inactive(tr::now,
+			lt_account, labels.own, lt_name, labels.global).arg(count) : QString();
+	};
+}
+
+bool AllAccountsWorkModeStock() {
+	auto count = 0;
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto live = entry.account->maybeSession();
+		if (!live || live->account().loggingOut()) { continue; }
+		if (AccountWorkModeForSession(live) != AccountWorkMode::Stock) { return false; }
+		++count;
+	}
+	return count > 0;
+}
+
+QString AccountListsSummary(not_null<Main::Session*> session) {
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	const auto key = SessionAccountKey(session);
+	const auto mode = AccountWorkModeForSession(session);
+	if (mode == AccountWorkMode::Stock) {
+		return tr::lng_purple_lists_stock(tr::now, lt_account, labels.own);
+	}
+	if (AppWideSettingsAccount(session) == key) { return {}; }
+	if (mode == AccountWorkMode::Follow) {
+		return tr::lng_purple_lists_follow_summary(tr::now, lt_account, labels.own, lt_name, labels.global);
+	}
+	const auto own = AccountOwnLists(session);
+	auto count = 0;
+	for (const auto &[name, list] : own) {
+		if (list.hasMembers && ActiveSettings().list(name)) { ++count; }
+	}
+	return tr::lng_purple_lists_own_summary(tr::now, lt_account, labels.own, lt_name, labels.global).arg(count);
+}
+
+QString AccountListFileWarnings(not_null<Main::Session*> session) {
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	const auto key = SessionAccountKey(session);
+	const auto paths = AccountRouting().files(key);
+	if (!paths || AppWideSettingsAccount(session) == key) { return {}; }
+	const auto own = AccountOwnLists(session);
+	auto lines = QStringList();
+	auto followed = 0;
+	for (const auto &[name, list] : own) {
+		if (!list.hasMembers) { continue; }
+		if (!ActiveSettings().list(name)) {
+			lines.push_back(tr::lng_purple_lists_undefined(tr::now, lt_account, labels.own,
+				lt_list, name, lt_name, labels.global).arg(list.members.size()));
+		} else { ++followed; }
+	}
+	if (AccountWorkModeForSession(session) == AccountWorkMode::Follow && followed) {
+		lines.push_back(tr::lng_purple_lists_follow_inactive(tr::now,
+			lt_account, labels.own, lt_name, labels.global).arg(followed));
+	}
+	return lines.join('\n');
+}
+
+QString AccountListEditNotice(
+		not_null<Main::Session*> session,
+		const AccountListEditTarget &target,
+		bool member) {
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	const auto key = SessionAccountKey(session);
+	const auto mode = AccountWorkModeForSession(session);
+	auto result = QString();
+	if (key != target.edit.destination.global && mode == AccountWorkMode::Follow) {
+		result = member
+			? tr::lng_purple_lists_follow_added(tr::now, lt_name, labels.global,
+				lt_list, target.list, lt_account, labels.own)
+			: tr::lng_purple_lists_follow_removed(tr::now, lt_name, labels.global,
+				lt_list, target.list, lt_account, labels.own);
+	} else if (key != target.edit.destination.global) {
+		const auto own = ReadOwnListMembers(target.edit.destination.file.input.bytes, target.edit.destination.file.path);
+		const auto found = own.find(target.list);
+		if (found == own.end() || !found->second.hasMembers) {
+			result = tr::lng_purple_lists_forked(tr::now, lt_list, target.list,
+				lt_account, labels.own, lt_name, labels.global);
+		}
+	}
+	if (mode == AccountWorkMode::Stock) {
+		if (!result.isEmpty()) { result += '\n'; }
+		result += tr::lng_purple_lists_stock_edit(tr::now, lt_account, labels.own);
+	}
+	return result;
+}
+
+std::vector<AccountListDeleteTarget> AccountListDeletes(not_null<Main::Session*> session) {
+	auto result = std::vector<AccountListDeleteTarget>();
+	for (const auto &list : AccountSettings(session).lists) {
+		const auto target = AccountRouting().listDeleteTarget(SessionAccountKey(session), list.name);
+		if (target) { result.push_back(*target); }
+	}
+	return result;
+}
+
+void DeleteAccountListMembersBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session,
+		AccountListDeleteTarget target) {
+	const auto origin = base::make_weak(session.get());
+	const auto weakBox = QPointer<Ui::GenericBox>(box.get());
+	const auto labels = SettingsRowLabels(session, std::nullopt);
+	const auto stock = AccountWorkModeForSession(session) == AccountWorkMode::Stock;
+	const auto current = [=] {
+		const auto live = origin.get();
+		const auto window = Core::App().activeWindow();
+		return weakBox && live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == target.edit.destination.requester
+			&& ConfigDirectory() == target.edit.destination.root
+			&& window && window->maybeSession() == live;
+	};
+	box->setTitle(tr::lng_purple_lists_delete());
+	box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_purple_lists_delete_confirm(tr::now,
+		lt_account, labels.own, lt_list, target.list, lt_name, labels.global)));
+	box->addButton(tr::lng_purple_lists_delete(), [=] {
+		if (!current()) { return; }
+		Instance().observeAccountFiles();
+		const auto result = AccountRouting().deleteListMembers(target, current);
+		if (!current()) { return; }
+		if (!result.ok) { box->uiShow()->showToast(result.error); return; }
+		Instance().refreshAccountRows();
+		Instance().observeAccountFiles();
+		if (!current()) { return; }
+		if (!result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
+			box->uiShow()->showToast(tr::lng_purple_settings_row_changed(tr::now));
+			return;
+		}
+		if (stock) {
+			box->uiShow()->showToast(tr::lng_purple_lists_stock_edit(tr::now, lt_account, labels.own));
+		}
+		if (current()) { box->closeBox(); }
+	});
+	const auto cancel = box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	box->setFocusCallback([=] { cancel->setFocus(); });
+}
+
+void ChooseAccountWorkModeBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller) {
+	const auto origin = base::make_weak(&controller->session());
+	const auto window = base::make_weak(controller.get());
+	const auto weakBox = QPointer<Ui::GenericBox>(box.get());
+	const auto key = SessionAccountKey(&controller->session());
+	const auto target = AccountRouting().workModeTarget(key);
+	const auto labels = SettingsRowLabels(&controller->session(), std::nullopt);
+	const auto current = [=] {
+		const auto live = origin.get();
+		const auto ownWindow = window.get();
+		return target && weakBox && live && ownWindow && &ownWindow->session() == live
+			&& !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == key && ConfigDirectory() == target->own.root;
+	};
+	box->setTitle(rpl::single(AccountWorkModeTitle(&controller->session())));
+	const auto group = std::make_shared<Ui::RadiobuttonGroup>();
+	const auto modes = key == AppWideSettingsAccount(&controller->session())
+		? std::vector{ AccountWorkMode::Own, AccountWorkMode::Stock }
+		: std::vector{ AccountWorkMode::Own, AccountWorkMode::Follow, AccountWorkMode::Stock };
+	for (const auto mode : modes) {
+		const auto title = mode == AccountWorkMode::Stock ? tr::lng_purple_lists_mode_stock(tr::now)
+			: mode == AccountWorkMode::Follow ? tr::lng_purple_lists_mode_follow(tr::now, lt_name, labels.global)
+			: key == AppWideSettingsAccount(&controller->session()) ? tr::lng_purple_lists_mode_on(tr::now)
+			: tr::lng_purple_lists_mode_own(tr::now, lt_account, labels.own, lt_name, labels.global);
+		box->addRow(object_ptr<Ui::Radiobutton>(box, group, int(mode), title));
+	}
+	group->setValue(int(AccountWorkModeForSession(&controller->session())));
+	box->addButton(tr::lng_box_ok(), [=] {
+		if (!current()) { return; }
+		const auto result = AccountRouting().writeWorkMode(*target, AccountWorkMode(group->current()), current);
+		if (!current()) { return; }
+		if (!result.ok) { box->uiShow()->showToast(result.error); return; }
+		Instance().refreshAccountRows();
+		if (!current() || !result.target || !AccountRouting().validateWorkModeTarget(*result.target)) { return; }
+		const auto summary = AccountListsSummary(origin.get());
+		if (!summary.isEmpty()) { window.get()->showToast(summary); }
+		box->closeBox();
+	});
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
 
 QString InactiveAppWideSettingsSummary(Main::Session *session) {

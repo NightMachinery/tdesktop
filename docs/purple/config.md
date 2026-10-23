@@ -1264,3 +1264,24 @@ Qt/file checks. A subsequent ordering repair has separate affected qualification
 and focused review. Native picker/confirmation, Windows and a matching full
 application remain separate; deferred account editor and version-two transport
 are not enabled. A saved choice with incomplete activation is reported explicitly.
+
+## Local account list choices
+
+`local.toml` is device-only and never synced. Settings > Purple writes the
+window's account mode through the shared lossless splice, retaining unrelated
+local settings:
+
+```toml
+[account_work_mode]
+"0-123" = "own"
+"0-456" = "follow"
+"1-789" = "stock"
+```
+
+The key is the environment and stable account id. An absent entry means Own.
+Follow uses the selected app-wide account's list members here and leaves the
+account's own file intact. Stock bypasses Work Mode here while allowing list
+edits for other devices. Follow is ignored for the app-wide account itself.
+Malformed entries warn and fall back to Own. See
+[the list controls](account_routing.md#local-list-mode-and-reversible-forks)
+for fork deletion, destination checks and file warnings.

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "purple/purple_config.h"
 #include "purple/purple_sync_config_history.h"
 #include "purple/purple_sync_config_review.h"
 
@@ -20,6 +21,7 @@ namespace Purple {
 
 struct SyncConfigReviewBoxArgs {
 	SyncConfigReview review;
+	AccountListPreviewNotes listNotes;
 	Fn<void(std::optional<QString>)> choose;
 };
 
@@ -30,6 +32,7 @@ void SyncConfigReviewBox(
 void SyncConfigHistoryBox(
 	not_null<Ui::GenericBox*> box,
 	SyncHistoryAccess access,
-	Fn<bool(const SyncConfigHistoryEntry&)> restore);
+	Fn<bool(const SyncConfigHistoryEntry&)> restore,
+	AccountListPreviewNotes listNotes);
 
 } // namespace Purple

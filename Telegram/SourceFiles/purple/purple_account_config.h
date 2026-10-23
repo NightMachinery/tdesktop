@@ -113,6 +113,55 @@ struct AccountListEditTarget {
 	std::map<PeerIdValue, QString> comments;
 };
 
+struct OwnListMembers {
+	std::vector<PeerIdValue> members;
+	bool defined = false;
+	bool deletable = false;
+	bool hasMembers = false;
+};
+
+[[nodiscard]] std::map<QString, OwnListMembers> ReadOwnListMembers(
+	const QByteArray &bytes,
+	const QString &path);
+
+struct AccountListDeleteTarget {
+	AccountSettingsWriteTarget edit;
+	QString list;
+	int members = 0;
+};
+
+struct AccountWorkModeTarget {
+	AccountSettingsOpenTarget own;
+	AccountSettingsOpenTarget global;
+	std::map<QString, QByteArray> identities;
+};
+
+struct AccountWorkModeResult {
+	bool ok = false;
+	bool changed = false;
+	QString error;
+	std::optional<AccountWorkModeTarget> target;
+};
+
+struct AccountListReloadChange {
+	AccountKey account;
+	int inactiveChanges = 0;
+	std::map<QString, int> unusedMembers;
+	std::map<QString, int> emptiedLists;
+};
+
+[[nodiscard]] int InactiveFollowListMemberChanges(
+	const QByteArray &before,
+	const QByteArray &after,
+	AccountWorkMode openingMode,
+	bool appWideAccount);
+
+[[nodiscard]] AccountListReloadChange DescribeAccountListReload(
+	const QByteArray &beforeGlobal,
+	const QByteArray &afterGlobal,
+	const QByteArray &beforeOwn,
+	const QByteArray &afterOwn);
+
 [[nodiscard]] bool ShouldShowGlobalAccountChoice(int signedIn, bool globalSignedIn);
 
 struct GlobalAccountChoicePreview {
@@ -220,6 +269,21 @@ public:
 		bool member,
 		const MemberTitle &title,
 		const std::function<bool()> &originCurrent);
+	[[nodiscard]] std::optional<AccountWorkModeTarget> workModeTarget(
+		const AccountKey &key);
+	[[nodiscard]] bool validateWorkModeTarget(
+		const AccountWorkModeTarget &target);
+	[[nodiscard]] AccountWorkModeResult writeWorkMode(
+		const AccountWorkModeTarget &target,
+		AccountWorkMode mode,
+		const std::function<bool()> &originCurrent);
+	[[nodiscard]] std::optional<AccountListDeleteTarget> listDeleteTarget(
+		const AccountKey &key, const QString &list);
+	[[nodiscard]] AccountSettingsEditResult deleteListMembers(
+		const AccountListDeleteTarget &target,
+		const std::function<bool()> &originCurrent);
+	[[nodiscard]] std::vector<AccountListReloadChange> observeListReloads(
+		const std::vector<AccountKey> &accounts);
 	[[nodiscard]] std::optional<GlobalAccountChoicePreview> previewGlobalChoice(
 		const AccountKey &requester,
 		const AccountKey &selected,
@@ -281,6 +345,9 @@ private:
 	uint64_t _routingGeneration = 1;
 	std::map<QString, QString> _importedEcho;
 	std::map<QString, SettingsFileInput> _saveObservations;
+	std::optional<AccountKey> _listObservationGlobal;
+	QByteArray _listObservationGlobalBytes;
+	std::map<QString, QByteArray> _listObservations;
 	bool _persistFailed = false;
 	bool _watching = false;
 

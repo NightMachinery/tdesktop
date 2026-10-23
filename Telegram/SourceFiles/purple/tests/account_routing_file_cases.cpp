@@ -2479,6 +2479,301 @@ void PeekOpeningEditorCases() {
 }
 
 
+void AccountListControlsCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto root = QByteArray("version=1\n[lists.\"work.one\"]\ntitle='Work'\nmembers=[11,22]\n");
+	const auto own = QByteArray("version=2\n# retain this file\n[lists.\"work.one\"]\nmembers=[33] # own members\n[last_seen]\nreasons_p=false\n");
+	const auto switchTo = [&](DesktopAccountConfig &config, const AccountKey &key) {
+		const auto preview = config.previewGlobalChoice(a, key, NormalPreset());
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		auto result = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(result.ok && config.activateGlobalChoice(*preview, result));
+	};
+	{
+		FailureContext = "listControls:transitions";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto path = config.files(b)->settings;
+		Put(path, own);
+		const auto local = temp.filePath(u"local.toml"_q);
+		Put(local, Get(local) + QByteArray("\n# unrelated local choice\n[unknown]\nkeep='yes'\n"));
+		config.refreshLocalChoice();
+		const auto originalLocal = Get(local);
+		for (const auto mode : { AccountWorkMode::Follow, AccountWorkMode::Stock, AccountWorkMode::Own }) {
+			const auto target = config.workModeTarget(b);
+			CHECK(target.has_value());
+			if (!target) { return; }
+			const auto result = config.writeWorkMode(*target, mode, [] { return true; });
+			CHECK(result.ok && result.changed && result.target);
+			CHECK(config.workMode(b) == mode);
+			CHECK(Get(path) == own && Get(temp.filePath(u"settings.toml"_q)) == root);
+			CHECK(Get(local).contains("# unrelated local choice\n[unknown]\nkeep='yes'"));
+			CHECK(!QFileInfo::exists(local + u".bak"_q));
+			CHECK(result.target && config.validateWorkModeTarget(*result.target));
+			CHECK(!config.validateWorkModeTarget(*target));
+			CHECK(config.settings(b).list(u"work.one"_q)->members == (mode == AccountWorkMode::Follow
+				? std::vector<PeerIdValue>{ 11,22 } : std::vector<PeerIdValue>{ 33 }));
+		}
+		CHECK(Get(local).startsWith(originalLocal.left(originalLocal.indexOf("[unknown]"))));
+		const auto target = config.workModeTarget(a);
+		CHECK(target.has_value());
+		if (!target) { return; }
+		CHECK(!config.writeWorkMode(*target, AccountWorkMode::Follow, [] { return true; }).ok);
+		CHECK(config.writeWorkMode(*target, AccountWorkMode::Stock, [] { return true; }).ok);
+		CHECK(config.workMode(a) == AccountWorkMode::Stock);
+		const auto unchanged = config.workModeTarget(a);
+		CHECK(unchanged.has_value());
+		if (!unchanged) { return; }
+		const auto noOp = config.writeWorkMode(*unchanged, AccountWorkMode::Stock, [] { return true; });
+		CHECK(noOp.ok && !noOp.changed);
+	}
+	for (auto scenario = 0; scenario != 6; ++scenario) {
+		FailureContext = QByteArray("listControls:stale=") + QByteArray::number(scenario);
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto path = config.files(b)->settings;
+		Put(path, own);
+		const auto target = config.workModeTarget(b);
+		CHECK(target.has_value());
+		if (!target) { return; }
+		if (scenario == 0) { switchTo(config, b); }
+		if (scenario == 1) { Put(temp.filePath(u"local.toml"_q), Get(temp.filePath(u"local.toml"_q))); }
+		if (scenario == 2) { Put(path, own); }
+		if (scenario == 3) { Put(temp.filePath(u"accounts/root.toml"_q), Get(temp.filePath(u"accounts/root.toml"_q))); }
+		if (scenario == 4) { switchTo(config, b); switchTo(config, a); }
+		const auto before = ChoiceOtherFiles(temp.path());
+		const auto result = config.writeWorkMode(*target, AccountWorkMode::Follow, [&] { return scenario != 5; });
+		CHECK(!result.ok && !result.changed);
+		CHECK(ChoiceOtherFiles(temp.path()) == before);
+	}
+	{
+		FailureContext = "listControls:originAfterSave";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		auto live = true;
+		config.setChanged([&] { live = false; });
+		const auto target = config.workModeTarget(b);
+		CHECK(target.has_value());
+		if (!target) { return; }
+		const auto result = config.writeWorkMode(*target, AccountWorkMode::Stock, [&] { return live; });
+		CHECK(!result.ok && result.changed && !result.target);
+		CHECK(config.workMode(b) == AccountWorkMode::Stock);
+	}
+	{
+		FailureContext = "listControls:forkDelete";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto path = config.files(b)->settings;
+		Put(path, QByteArray("version=2\n# preserve\n[last_seen]\nreasons_p=false\n"));
+		const auto inherited = config.listEditTarget(b, u"work.one"_q);
+		CHECK(inherited.has_value());
+		if (!inherited) { return; }
+		CHECK(config.writeListMember(*inherited, 33, true, {}, [] { return true; }).ok);
+		CHECK(config.settings(b).list(u"work.one"_q)->members == (std::vector<PeerIdValue>{ 11,22,33 }));
+		const auto target = config.listDeleteTarget(b, u"work.one"_q);
+		CHECK(target && target->members == 3);
+		if (!target) { return; }
+		CHECK(!config.deleteListMembers(*target, [] { return false; }).ok);
+		const auto forked = Get(path);
+		const auto deleted = config.deleteListMembers(*target, [] { return true; });
+		CHECK(deleted.ok && deleted.changed);
+		CHECK(Get(path).contains("# preserve") && Get(path).contains("reasons_p=false"));
+		CHECK(Get(path + u".bak"_q) == forked);
+		CHECK(config.settings(b).list(u"work.one"_q)->members == (std::vector<PeerIdValue>{ 11,22 }));
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == root);
+		CHECK(!config.listDeleteTarget(b, u"work.one"_q));
+		Put(path, own);
+		const auto stale = config.listDeleteTarget(b, u"work.one"_q);
+		CHECK(stale.has_value());
+		if (!stale) { return; }
+		switchTo(config, b);
+		const auto before = ChoiceOtherFiles(temp.path());
+		CHECK(!config.deleteListMembers(*stale, [] { return true; }).ok);
+		CHECK(ChoiceOtherFiles(temp.path()) == before);
+	}
+	for (const auto &bytes : { QByteArray("version=1\n[lists.\"work.one\"]\nmembers=[33]\n"),
+		QByteArray("[lists.\"work.one\"]\nmembers=[33]\n"),
+		QByteArray("version=2\n[lists.\"work.one\"]\ntitle='Own'\nmembers=[33]\n"),
+		QByteArray("version=2\n[lists.\"work.one\"]\nkinds=['private']\nmembers=[33]\n"),
+		QByteArray("version=2\n[lists.\"work.one\"]\nfuture=true\nmembers=[33]\n") }) {
+		FailureContext = "listControls:definitionSafe";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		Put(config.files(b)->settings, bytes);
+		CHECK(!config.listDeleteTarget(b, u"work.one"_q));
+		CHECK(!config.listDeleteTarget(a, u"work.one"_q));
+		CHECK(Get(config.files(b)->settings) == bytes);
+	}
+	{
+		FailureContext = "listControls:reload";
+		const auto emptyDefinition = QByteArray("version=2\n[lists.\"work.one\"]\ntitle='Own'\nmembers=[]\n");
+		const auto before = QByteArray("version=2\n[lists.\"work.one\"]\ntitle='Own'\nmembers=[33]\n");
+		const auto ownChanged = before + QByteArray("[premium]\nenabled_p=true\n[last_seen]\nreasons_p=false\n");
+		const auto changed = DescribeAccountListReload(root, root, before, ownChanged);
+		CHECK(changed.inactiveChanges == 1 && changed.unusedMembers.empty() && changed.emptiedLists.empty());
+		const auto removed = DescribeAccountListReload(root, QByteArray("version=1\n"), before, before);
+		CHECK(removed.unusedMembers == (std::map<QString,int>{ { u"work.one"_q, 1 } }));
+		const auto emptied = DescribeAccountListReload(root, root, before, emptyDefinition);
+		CHECK(emptied.emptiedLists == (std::map<QString,int>{ { u"work.one"_q, 1 } }));
+		CHECK(DescribeAccountListReload(root, root, own, QByteArray("version=2\n")).emptiedLists.empty());
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		Put(config.files(b)->settings, before);
+		CHECK(config.observeListReloads({ a,b }).empty());
+		Put(config.files(b)->settings, ownChanged);
+		const auto notices = config.observeListReloads({ a,b });
+		CHECK(notices.size() == 1 && notices.front().account == b && notices.front().inactiveChanges == 1);
+		CHECK(config.observeListReloads({ a,b }).empty());
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=1\n"));
+		const auto orphaned = config.observeListReloads({ a,b });
+		CHECK(orphaned.size() == 1 && orphaned.front().unusedMembers.at(u"work.one"_q) == 1);
+		CHECK(config.observeListReloads({ a,b }).empty());
+		switchTo(config, b);
+		CHECK(config.observeListReloads({ a,b }).empty());
+	}
+	for (const auto &name : { u"work.one"_q, u"quoted\"name"_q, u"slash\\name"_q, u"نام"_q, u"work\nline"_q, u"tab\tkey"_q,
+		u"cr\rkey"_q, u"control"_q + QChar(1) + u"key"_q, u"del"_q + QChar(127) + u"key"_q }) {
+		FailureContext = "listControls:quotedEmptyDelete";
+		auto temp = QTemporaryDir();
+		const auto global = AddList(u"version=1\n"_q, QString(), name, name);
+		const auto layered = SetListMembers(u"version=2\n# untouched\n"_q, QString(), name, {}, {});
+		CHECK(global.ok() && layered.ok());
+		Put(temp.filePath(u"settings.toml"_q), global.text.toUtf8());
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		Put(config.files(b)->settings, layered.text.toUtf8());
+		const auto target = config.listDeleteTarget(b, name);
+		CHECK(target && target->members == 0);
+		if (!target) { continue; }
+		CHECK(config.deleteListMembers(*target, [] { return true; }).ok);
+		CHECK(Get(config.files(b)->settings).contains("# untouched"));
+		CHECK(!ReadOwnListMembers(Get(config.files(b)->settings), QString()).contains(name));
+	}
+	{
+		FailureContext = "listControls:reloadKeysAndGlobalEmpty";
+		const auto before = QByteArray("version=2\n[lists.\"work.one\"]\ntitle='Own'\nmembers=[33]\n");
+		const auto changed = QByteArray("version=2\n[lists.\"work.one\"]\ntitle='New title'\nkinds=['private']\nmembers=[44]\n");
+		const auto diff = DescribeAccountListReload(root, root, before, changed);
+		CHECK(diff.inactiveChanges == 2 && diff.unusedMembers.empty() && diff.emptiedLists.empty());
+		const auto malformed = ReadOwnListMembers(QByteArray("version=2\n[lists.\"work.one\"]\nmembers='invalid'\n"), QString());
+		CHECK(malformed.at(u"work.one"_q).hasMembers && !malformed.at(u"work.one"_q).deletable);
+		const auto noMembers = QByteArray("version=2\n[lists.\"work.one\"]\ntitle='Own'\n");
+		CHECK(DescribeAccountListReload(root, root, before, noMembers).emptiedLists.at(u"work.one"_q) == 1);
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), before);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		CHECK(config.observeListReloads({ a,b }).empty());
+		Put(temp.filePath(u"settings.toml"_q), noMembers);
+		const auto notices = config.observeListReloads({ a,b });
+		CHECK(notices.size() == 1 && notices.front().account == a
+			&& notices.front().inactiveChanges == 0 && notices.front().emptiedLists.at(u"work.one"_q) == 1);
+	}
+	{
+		FailureContext = "listControls:openingFollowPreview";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		Put(config.files(b)->settings, own);
+		const auto chooser = config.workModeTarget(b);
+		CHECK(chooser.has_value());
+		if (!chooser) { return; }
+		CHECK(config.writeWorkMode(*chooser, AccountWorkMode::Follow, [] { return true; }).ok);
+		const auto openingMode = config.workMode(b);
+		const auto opening = config.openTarget(b, SettingsOpenRole::Own);
+		CHECK(config.settings(b).list(u"work.one"_q)->members == (std::vector<PeerIdValue>{ 11,22 }));
+		const auto report = config.report(b);
+		CHECK(report && std::any_of(report->inactive.begin(), report->inactive.end(), [](const SettingsInactiveKey &key) {
+			return key.reason == SettingsInactiveReason::FollowListMembers && key.source.key == u"members"_q;
+		}));
+		const auto edited = SetListMembers(QString::fromUtf8(own), QString(), u"work.one"_q, {44}, {});
+		CHECK(edited.ok());
+		CHECK(InactiveFollowListMemberChanges(own, edited.text.toUtf8(), openingMode, false) == 1);
+		CHECK(InactiveFollowListMemberChanges(own, edited.text.toUtf8(), AccountWorkMode::Own, false) == 0);
+		CHECK(InactiveFollowListMemberChanges(own, edited.text.toUtf8(), openingMode, true) == 0);
+		CHECK(InactiveFollowListMemberChanges(own, own, openingMode, false) == 0);
+		const auto next = config.workModeTarget(b);
+		CHECK(next.has_value());
+		if (!next) { return; }
+		CHECK(config.writeWorkMode(*next, AccountWorkMode::Own, [] { return true; }).ok);
+		CHECK(InactiveFollowListMemberChanges(own, edited.text.toUtf8(), openingMode, false) == 1);
+		CHECK(opening && !config.validateOpen(*opening));
+	}
+	for (const auto mode : { AccountWorkMode::Own, AccountWorkMode::Follow }) {
+		FailureContext = "listControls:publishedSnapshotNoGap";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root
+			+ QByteArray("[presets.work]\nlist_order=[{list='work.one'}]\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		Put(config.files(b)->settings, own);
+		const auto target = config.workModeTarget(b);
+		CHECK(target.has_value());
+		if (!target) { return; }
+		CHECK(config.writeWorkMode(*target, mode, [] { return true; }).ok);
+		const auto &published = config.settings(b);
+		const auto resolution = Resolve(config.globalSettings(), u"work"_q);
+		CHECK(resolution && !resolution->normal);
+		if (!resolution) { return; }
+		const auto hidden = [&](const Settings &settings) {
+			const auto verdict = Visible(settings, *resolution, 99, ChatKind::Private);
+			return verdict.show == ShowMode::Never && !verdict.notify;
+		};
+		const auto checkHidden = [&](const Settings &settings) { CHECK(hidden(settings)); };
+		checkHidden(published);
+		config.refreshSettings();
+		checkHidden(published);
+		CHECK(&config.settings(b) == &published);
+		checkHidden(published);
+		auto observed = false;
+		auto continuous = true;
+		config.setChanged([&] {
+			continuous = hidden(published) && continuous;
+			const auto &next = config.settings(b);
+			continuous = &next == &published && hidden(next) && continuous;
+			observed = true;
+		});
+		config.watch();
+		Put(config.files(b)->settings, own + QByteArray("# next generation\n"));
+		PumpUntil([&] { return observed; });
+		CHECK(continuous);
+		checkHidden(published);
+	}
+	{
+		FailureContext = "listControls:localInvalidUtf8";
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto target = config.workModeTarget(b);
+		CHECK(target.has_value());
+		if (!target) { return; }
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto invalid = Get(local) + QByteArray("\n# retain invalid byte ") + QByteArray(1, char(0xff));
+		Put(local, invalid);
+		config.refreshLocalChoice();
+		CHECK(!config.workModeTarget(b));
+		CHECK(!config.writeWorkMode(*target, AccountWorkMode::Follow, [] { return true; }).ok);
+		CHECK(Get(local) == invalid);
+	}
+	FailureContext.clear();
+}
+
 }
 
 int main(int argc, char *argv[]) {
@@ -2529,6 +2824,9 @@ int main(int argc, char *argv[]) {
 	const auto beforePeekEditor = Checks;
 	PeekOpeningEditorCases();
 	std::printf("peekOpeningEditor %d checks\n", Checks - beforePeekEditor);
+	const auto beforeListControls = Checks;
+	AccountListControlsCases();
+	std::printf("accountListControls %d checks\n", Checks - beforeListControls);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

@@ -673,9 +673,15 @@ void OpenReview(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		return;
 	}
 	const auto generation = state->generation;
+	const auto origin = state->selectedSession;
+	const auto target = origin ? AccountSettingsOpenTargetFor(origin.get(), SettingsOpenRole::Own) : std::nullopt;
+	if (!target) { return; }
 	box->uiShow()->showBox(Box(SyncConfigReviewBox, SyncConfigReviewBoxArgs{
 		.review = *state->review,
+		.listNotes = CaptureOwnListPreviewNotes(origin.get()),
 		.choose = crl::guard(box, [=](std::optional<QString> key) {
+			if (!origin || state->selectedSession.get() != origin.get()
+				|| !ValidateAccountSettingsOpenTarget(origin.get(), *target)) { return; }
 			ApplyChoice(box, state, generation, std::move(key));
 		}),
 	}));
@@ -886,7 +892,8 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 				const auto live = state->selectedSession.get();
 				return live && ValidateAccountSyncTarget(live, *target)
 					&& RestoreFromHistory(box, state, entry);
-			})));
+			}),
+			CaptureOwnListPreviewNotes(state->selectedSession.get())));
 	});
 
 	group->setChangedCallback([=](int value) {

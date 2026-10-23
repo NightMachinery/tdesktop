@@ -77,7 +77,8 @@ Ui::FlatLabel *AddLabel(
 }
 
 [[nodiscard]] ChangePreview AddChangePreview(
-		not_null<Ui::VerticalLayout*> container) {
+		not_null<Ui::VerticalLayout*> container,
+		AccountListPreviewNotes listNotes) {
 	const auto summary = AddLabel(container, QString());
 	const auto toggle = container->add(
 		object_ptr<Ui::LinkButton>(container, u"Show lines"_q),
@@ -101,9 +102,13 @@ Ui::FlatLabel *AddLabel(
 	});
 	return [=](const QByteArray &before, const QByteArray &after) {
 		state->diff = DiffConfigText(before, after);
-		const auto changes = SyncConfigChangeLines(
+		auto changes = SyncConfigChangeLines(
 			SummarizeConfigChange(before, after),
 			state->diff);
+		if (listNotes) {
+			const auto notes = listNotes(before, after);
+			if (!notes.isEmpty()) { changes.push_back(notes); }
+		}
 		summary->setText(
 			QStringList(changes.begin(), changes.end()).join(u'\n'));
 		refreshLines();
@@ -168,7 +173,8 @@ void HistoryEntryBox(
 		SyncHistoryAccess access,
 		SyncConfigHistoryEntry entry,
 		Fn<bool(const SyncConfigHistoryEntry&)> restore,
-		Fn<void()> closeList) {
+		Fn<void()> closeList,
+		AccountListPreviewNotes listNotes) {
 	box->setTitle(rpl::single(u"Saved settings"_q));
 	box->setWidth(st::boxWideWidth);
 	const auto container = box->verticalLayout();
@@ -201,7 +207,7 @@ void HistoryEntryBox(
 			? u"settings.toml is missing now. Restoring creates it with this "
 				"version:"_q
 			: u"Restoring changes this device's settings like this:"_q);
-		const auto preview = AddChangePreview(container);
+		const auto preview = AddChangePreview(container, listNotes);
 		preview(current.text, *text);
 	}
 	if (restorable) {
@@ -295,7 +301,7 @@ void SyncConfigReviewBox(
 	}
 	Ui::AddSkip(container);
 	state->compare = AddLabel(container, QString());
-	state->preview = AddChangePreview(container);
+	state->preview = AddChangePreview(container, std::move(args.listNotes));
 	state->newer = AddHiddenLabel(
 		container,
 		u"Made with a newer Purple. Settings this version does not know "
@@ -327,7 +333,8 @@ void SyncConfigReviewBox(
 void SyncConfigHistoryBox(
 		not_null<Ui::GenericBox*> box,
 		SyncHistoryAccess access,
-		Fn<bool(const SyncConfigHistoryEntry&)> restore) {
+		Fn<bool(const SyncConfigHistoryEntry&)> restore,
+		AccountListPreviewNotes listNotes) {
 	box->setTitle(rpl::single(u"Settings History"_q));
 	box->setWidth(st::boxWideWidth);
 	const auto container = box->verticalLayout();
@@ -351,7 +358,8 @@ void SyncConfigHistoryBox(
 				access,
 				entry,
 				restore,
-				closeList));
+				closeList,
+				listNotes));
 		});
 	}
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });

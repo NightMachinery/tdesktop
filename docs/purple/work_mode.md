@@ -14,6 +14,22 @@ Nothing here is active until a preset is chosen. The default is a preset named
 engine is skipped entirely. That matters as features accumulate - a bypass
 cannot drift away from stock behaviour, a permissive preset can.
 
+## Lists for each account
+
+One preset runs on the device. Settings > Purple chooses how each account uses
+its lists here: Own uses that account's explicit members and inherits the rest
+from the app-wide account; Follow uses the app-wide members; Stock bypasses Work
+Mode for that account. The choice stays in `local.toml`, so it does not switch
+other devices to Stock or Follow.
+
+A first Own chat-menu tick copies the inherited members into that account's
+file. Later app-wide member changes no longer reach that list. Delete own members
+restores inheritance for a layered members-only table. A whole file or a list with
+its own title or kinds has no delete action, because removing its members could
+empty it on another device. Use Follow instead. Titles, kinds, presets, new lists
+and pinned order stay app-wide. See [account routing](account_routing.md#local-list-mode-and-reversible-forks)
+for guarded writes and reload warnings.
+
 ## The model
 
 Two ideas, and that is all of it.

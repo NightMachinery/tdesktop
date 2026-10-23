@@ -213,6 +213,9 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 			return live && GlobalAccountChoiceVisible(live);
 		}),
 	});
+	builder.addDividerText(AccountRowChanges() | rpl::map([=] {
+		return windowCurrent() ? AccountListFileWarnings(weakSession.get()) : QString();
+	}));
 	for (const auto role : { SettingsOpenRole::Own, SettingsOpenRole::AppWide }) {
 		const auto target = [=] {
 			const auto live = weakSession.get();
@@ -428,6 +431,34 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	});
 	Purple::AddVersionRow(builder);
 	BuildPurpleSettingsFiles(builder);
+	if (controller) {
+		const auto window = base::make_weak(controller);
+		const auto origin = base::make_weak(session.get());
+		builder.addButton({
+			.id = u"advanced/purple_account_work_mode"_q,
+			.title = AccountRowChanges() | rpl::map([=] {
+				const auto live = origin.get();
+				return live ? AccountWorkModeTitle(live) : QString();
+			}),
+			.label = AccountRowChanges() | rpl::map([=] {
+				const auto live = origin.get();
+				return live ? AccountListsSummary(live) : QString();
+			}),
+			.onClick = [=] {
+				const auto live = origin.get();
+				const auto ownWindow = window.get();
+				if (live && ownWindow && &ownWindow->session() == live) {
+					ownWindow->show(Box(ChooseAccountWorkModeBox, not_null{ ownWindow }));
+				}
+			},
+			.keywords = { u"purple"_q, u"lists"_q, u"stock"_q, u"follow"_q },
+			.shown = AccountRowChanges() | rpl::map([=] {
+				const auto live = origin.get();
+				return live && (AccountWorkModeChoiceVisible(live)
+					|| AccountWorkModeForSession(live) == AccountWorkMode::Stock);
+			}),
+		});
+	}
 	if (controller) {
 		builder.addButton({
 			.id = u"advanced/purple_settings_owner"_q,
