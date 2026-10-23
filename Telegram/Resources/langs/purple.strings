@@ -117,3 +117,5 @@ docs/purple/upstream_hooks.md.
 "lng_purple_remove_appwide_unavailable" = "The account, app-wide role or settings file changed, or the file or backup is unavailable. Nothing was removed. Review the file again.";
 "lng_purple_remove_appwide_backup_only" = "No main-file replacement was confirmed. The backup was updated with the original file, but the settings file changed or could not be written. Review the current file.";
 "lng_purple_remove_appwide_saved_incomplete" = "The settings file was saved, but its context changed afterward. Review the current file; no rollback was attempted.";
+
+"lng_purple_global_offline_edit" = "Work Mode and the other app-wide settings are in {account}’s file, which cannot sync while {name} is signed out.";

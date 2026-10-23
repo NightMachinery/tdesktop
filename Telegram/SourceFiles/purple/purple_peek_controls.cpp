@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
+#include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
 #include "purple/purple_gate.h"
@@ -75,7 +76,11 @@ public:
 	[[nodiscard]] bool starting() const;
 	[[nodiscard]] rpl::producer<> changes() const;
 	PeekChange start(int seconds);
-	void changeDelay(int seconds);
+	void changeDelay(
+		int seconds,
+		AccountSettingsWriteTarget input,
+		Fn<bool()> originCurrent,
+		AppWideSettingsEditor editor);
 	void cancel();
 	void closeHiddenChats();
 
@@ -84,13 +89,16 @@ private:
 		int delay,
 		std::optional<int> setting,
 		int duration,
-		SettingsFileInput input);
+		AccountSettingsWriteTarget input,
+		Fn<bool()> originCurrent = nullptr,
+		AppWideSettingsEditor editor = {});
 	[[nodiscard]] bool valid() const;
 	void tick();
 	void applyDelay(
 		int seconds,
-		const SettingsFileInput &input,
-		Fn<bool()> contextValid);
+		const AccountSettingsWriteTarget &input,
+		Fn<bool()> contextValid,
+		const AppWideSettingsEditor &editor);
 
 	std::vector<not_null<Ui::RpWidget*>> _widgets;
 	base::weak_ptr<Window::Controller> _window;
@@ -101,7 +109,9 @@ private:
 	QString _resolvedPreset;
 	std::optional<int> _setting;
 	std::optional<int> _originalDelay;
-	SettingsFileInput _input;
+	AccountSettingsWriteTarget _input;
+	Fn<bool()> _originCurrent;
+	AppWideSettingsEditor _editor;
 	uint64 _generation = 0;
 	int _duration = 0;
 	crl::time _until = 0;
@@ -223,6 +233,8 @@ void PendingPeek::cancel() {
 	_account = nullptr;
 	_domainAccount = nullptr;
 	_setting.reset();
+	_originCurrent = nullptr;
+	_editor.reset();
 	if (wasPending) {
 		_changes.fire({});
 	}
@@ -244,6 +256,7 @@ bool PendingPeek::valid() const {
 		&& CurrentState().activePreset == _preset
 		&& ActiveResolved().preset == _resolvedPreset
 		&& ActiveSettings().peek.startDelaySeconds == _originalDelay
+		&& (!_originCurrent || _originCurrent())
 		&& (_setting.has_value() || Filtering());
 }
 
@@ -251,13 +264,18 @@ bool PendingPeek::begin(
 		int delay,
 		std::optional<int> setting,
 		int duration,
-		SettingsFileInput input) {
+		AccountSettingsWriteTarget input,
+		Fn<bool()> originCurrent,
+		AppWideSettingsEditor editor) {
 	const auto window = Core::App().activeWindow();
 	if (!window || !window->maybeSession() || window->locked()
-		|| Core::App().screenIsLocked() || Core::App().passcodeLocked()) {
+		|| Core::App().screenIsLocked() || Core::App().passcodeLocked()
+		|| (originCurrent && !originCurrent())) {
 		return false;
 	}
 	_input = std::move(input);
+	_originCurrent = std::move(originCurrent);
+	_editor = std::move(editor);
 	_window = base::make_weak(window);
 	_session = window->maybeSession();
 	_account = &window->account();
@@ -298,14 +316,18 @@ bool PendingPeek::begin(
 
 void PendingPeek::applyDelay(
 		int seconds,
-		const SettingsFileInput &input,
-		Fn<bool()> contextValid) {
+		const AccountSettingsWriteTarget &input,
+		Fn<bool()> contextValid,
+		const AppWideSettingsEditor &editor) {
 	const auto result = WriteSettingsGuarded(input, [=](const QString &text) {
 		if (!contextValid()) {
 			return SpliceResult{ .error = u"The Peek context changed. Try again."_q };
 		}
 		return SetPeekStartDelay(text, SettingsFilePath(), seconds);
-	}, u"Peek start delay"_q);
+	}, u"Peek start delay"_q, [=] { return contextValid(); });
+	if (result.ok && editor) {
+		editor->target = result.target;
+	}
 	if (!result.ok) {
 		if (const auto window = Core::App().activeWindow()) {
 			window->showToast(result.error);
@@ -338,10 +360,13 @@ void PendingPeek::tick() {
 	const auto preset = _preset;
 	const auto resolved = _resolvedPreset;
 	const auto completionGeneration = generation + 1;
+	const auto originCurrent = _originCurrent;
+	const auto editor = _editor;
 	cancel();
 	const auto contextValid = [=] {
 		const auto window = origin.get();
 		return _generation == completionGeneration && window
+			&& (!originCurrent || originCurrent())
 			&& window->widget()->isActive()
 			&& Core::App().activeWindow() == window
 			&& window->maybeSession() == session && &window->account() == account
@@ -355,7 +380,7 @@ void PendingPeek::tick() {
 		return;
 	}
 	if (setting) {
-		applyDelay(*setting, input, contextValid);
+		applyDelay(*setting, input, contextValid, editor);
 	} else {
 		details::ActivatePeekFor(seconds);
 	}
@@ -388,17 +413,26 @@ PeekChange PendingPeek::start(int seconds) {
 		: PeekChange{ .refused = true };
 }
 
-void PendingPeek::changeDelay(int seconds) {
+void PendingPeek::changeDelay(
+		int seconds,
+		AccountSettingsWriteTarget input,
+		Fn<bool()> originCurrent,
+		AppWideSettingsEditor editor) {
 	cancel();
-	const auto input = SettingsInputForOperation();
-	if (!input || seconds < 0
+	if (!originCurrent || !originCurrent() || !ValidateSettingsInput(input) || seconds < 0
 		|| ActiveSettings().peek.startDelaySeconds == seconds) {
 		return;
 	}
 	const auto delay = std::max(
 		PeekStartDelaySeconds(ActiveSettings(), ThisDevice()),
 		seconds);
-	begin(delay, seconds, 0, *input);
+	begin(
+		delay,
+		seconds,
+		0,
+		std::move(input),
+		std::move(originCurrent),
+		std::move(editor));
 }
 
 bool ShouldExit(not_null<History*> history) {
@@ -464,8 +498,29 @@ void CancelPendingPeek() {
 	Pending().cancel();
 }
 
-void RequestPeekDelayChange(int seconds) {
-	Pending().changeDelay(seconds);
+void RequestPeekDelayChange(
+		int seconds,
+		const std::shared_ptr<AppWideSettingsEditorState> &editor,
+		not_null<Main::Session*> session) {
+	const auto weak = base::make_weak(session.get());
+	const auto originCurrent = [=] {
+		const auto live = weak.get();
+		const auto window = Core::App().activeWindow();
+		return editor && editor->originCurrent && editor->originCurrent()
+			&& live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& window && window->maybeSession() == live;
+	};
+	const auto input = PreparePeekDelayChange(
+		editor ? editor->target : std::nullopt,
+		originCurrent,
+		ValidateSettingsInput);
+	if (!input) {
+		if (const auto window = Core::App().activeWindow()) {
+			window->showToast(u"The Peek context changed. Try again."_q);
+		}
+		return;
+	}
+	Pending().changeDelay(seconds, *input, originCurrent, editor);
 }
 
 void CloseHiddenPeekChats() {

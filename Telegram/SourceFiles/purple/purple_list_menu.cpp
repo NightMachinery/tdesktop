@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "history/history.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
@@ -25,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 
 #include <array>
+
+#include <QtCore/QPointer>
 #include "styles/style_media_player.h" // mediaPlayerMenuCheck
 #include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h" // defaultFlatLabel
@@ -51,7 +54,10 @@ constexpr auto kOverrideSpans = std::array{
 // a preset does with a list is written in settings.toml beside the preset.
 void NewListBox(
 		not_null<Ui::GenericBox*> box,
-		Fn<void(QString)> create) {
+		Fn<void(QString)> create,
+		Fn<bool()> originCurrent) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
 	box->setTitle(rpl::single(u"New list"_q));
 
 	const auto field = box->addRow(object_ptr<Ui::InputField>(
@@ -69,8 +75,16 @@ void NewListBox(
 			field->showError();
 			return;
 		}
+		const auto result = WriteSettingsFromEditor(editor, [=](const QString &text) {
+			return AddList(text, SettingsFilePath(), name, name);
+		}, u"a new list"_q, [=] { return weak && originCurrent(); });
+		if (!weak) { return; }
+		if (!result.ok) {
+			box->uiShow()->showToast(result.error);
+			return;
+		}
 		create(name);
-		box->closeBox();
+		if (weak) { box->closeBox(); }
 	};
 	field->submits() | rpl::on_next(submit, field->lifetime());
 
@@ -167,10 +181,9 @@ void FillListsMenu(
 
 	for (const auto &list : AccountSettings(session).lists) {
 		const auto name = list.name;
-		const auto member = std::find(
-			list.members.begin(),
-			list.members.end(),
-			id) != list.members.end();
+		const auto edit = AccountListEditFor(session, name);
+		const auto &members = edit ? edit->members : list.members;
+		const auto member = std::find(members.begin(), members.end(), id) != members.end();
 		// Every list, including one that matches by kind: adding a chat there
 		// writes an explicit member id, which is how you pull one chat out of
 		// a rule that would otherwise have swept it up somewhere else.
@@ -187,12 +200,10 @@ void FillListsMenu(
 					return;
 				}
 				const auto title = TitleResolver(not_null{ live });
-				const auto ok = member
-					? RemoveFromList(not_null{ live }, name, id, title)
-					: AddToList(not_null{ live }, name, id, title);
+				const auto ok = edit && SetAccountListMember(not_null{ live }, *edit, id, !member, title);
 				if (!ok) {
-					show->showToast(u"Could not edit %1. See the log."_q.arg(
-						SettingsFilePath()));
+					show->showToast(u"Could not edit %1. Reopen the menu and try again."_q.arg(
+						edit ? edit->edit.destination.file.path : SettingsFilePath()));
 				}
 			},
 			(member ? &st::mediaPlayerMenuCheck : nullptr));
@@ -257,11 +268,6 @@ void FillListsMenu(
 			if (!weakSession) {
 				return;
 			}
-			if (!CreateList(name, name)) {
-				show->showToast(u"Could not edit %1. See the log."_q.arg(
-					SettingsFilePath()));
-				return;
-			}
 			// Said out loud, because the list is real and does nothing: no
 			// preset names it yet, and there is no way to guess which one
 			// should. Ticking chats into it works from this menu immediately.
@@ -269,7 +275,10 @@ void FillListsMenu(
 				"list_order in %2 to make it do anything."_q.arg(
 					name,
 					SettingsFilePath()));
-		}));
+		}, Fn<bool()>([=] {
+			const auto live = weakSession.get();
+			return live && !live->account().loggingOut() && live->account().maybeSession() == live;
+		})));
 	}, &st::menuIconAdd);
 }
 

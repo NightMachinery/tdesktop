@@ -1131,6 +1131,206 @@ AccountSettingsRowWriteResult DesktopAccountConfig::writeRow(
 	return { .ok = true, .changed = true, .created = created, .target = expected };
 }
 
+std::optional<AccountSettingsWriteTarget> DesktopAccountConfig::settingsEditTarget(
+		const AccountKey &requester,
+		SettingsOpenRole role) {
+	const auto destination = openTarget(requester, role);
+	const auto global = openTarget(requester, SettingsOpenRole::AppWide);
+	if (!destination || !global
+		|| !RowDirectorySafe(QFileInfo(destination->file.path).absolutePath())
+		|| !RowDirectorySafe(QFileInfo(global->file.path).absolutePath())
+		|| !RowInputUsable(destination->file.input, destination->file.path)
+		|| (destination->file.input.state == SettingsFileState::Missing
+			&& (destination->file.account == destination->owner
+				|| OwnerInput(destination->file.path + u".good"_q).state != SettingsFileState::Missing))) {
+		return std::nullopt;
+	}
+	auto result = AccountSettingsWriteTarget{ *destination, *global };
+	result.globalGoodInput = OwnerInput(global->file.path + u".good"_q);
+	const auto &source = global->file;
+	if (source.input.state != SettingsFileState::Readable || !RowInputUsable(source.input, source.path)) {
+		if (result.globalGoodInput.state != SettingsFileState::Missing
+			&& !RowInputUsable(result.globalGoodInput, source.path + u".good"_q)) {
+			return std::nullopt;
+		}
+		if (source.input.state != SettingsFileState::Missing
+			&& result.globalGoodInput.state != SettingsFileState::Readable) {
+			return std::nullopt;
+		}
+	}
+	for (const auto &path : { destination->file.path, source.path,
+		destination->file.path + u".good"_q, source.path + u".good"_q }) {
+		const auto identity = ChoiceFileIdentity(path);
+		if (identity.isEmpty()) { return std::nullopt; }
+		result.identities[path] = identity;
+	}
+	return result;
+}
+
+bool DesktopAccountConfig::validateSettingsEdit(const AccountSettingsWriteTarget &target) {
+	const auto current = settingsEditTarget(target.destination.requester, target.destination.role);
+	return current && target.globalSource.role == SettingsOpenRole::AppWide
+		&& target.globalSource.requester == target.destination.requester
+		&& validateOpen(target.destination) && validateOpen(target.globalSource)
+		&& current->globalGoodInput == target.globalGoodInput
+		&& current->identities == target.identities;
+}
+
+AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
+		const AccountSettingsWriteTarget &target,
+		const std::function<SpliceResult(const QString&)> &splice,
+		const std::function<bool()> &originCurrent) {
+	const auto current = [&] {
+		return originCurrent && originCurrent() && validateSettingsEdit(target);
+	};
+	if (!splice || !current()) { return { .error = u"Settings changed. Try again."_q }; }
+	const auto &destination = target.destination;
+	const auto &file = destination.file;
+	const auto text = file.input.state == SettingsFileState::Missing
+		? QString::fromUtf8(NewAccountSettingsText()) : QString::fromUtf8(file.input.bytes);
+	const auto result = splice(text);
+	if (!result.ok()) { return { .error = result.error }; }
+	if (!current()) { return { .error = u"Settings changed. Try again."_q }; }
+	if (!result.changed) { return { .ok = true, .target = target }; }
+	const auto bytes = result.text.toUtf8();
+	if (!ParseSettings(result.text, file.path).ok()) {
+		return { .error = u"The edited settings do not parse."_q };
+	}
+	const auto paths = files(file.account);
+	if (!paths || !AccountFilePathSafe(paths->backup) || !AccountFilePathSafe(paths->good)) {
+		return { .error = u"The settings destination is unavailable."_q };
+	}
+	const auto unchangedDependencies = [&] {
+		return std::all_of(target.identities.begin(), target.identities.end(), [&](const auto &entry) {
+			return entry.first == file.path || ChoiceFileIdentity(entry.first) == entry.second;
+		});
+	};
+	const auto created = file.input.state == SettingsFileState::Missing;
+	if (created) {
+		auto published = false;
+		const auto ready = prepareInput(destination, bytes, [&] {
+			return originCurrent && originCurrent() && unchangedDependencies()
+				&& (target.globalSource.file.path == file.path || validateOpen(target.globalSource))
+				&& OwnerInput(target.globalSource.file.path + u".good"_q) == target.globalGoodInput;
+		}, &published);
+		if (!ready.target || ready.status != SettingsOpenStatus::Created) {
+			return { .changed = published, .created = published,
+				.error = u"The account settings file could not be created safely."_q };
+		}
+	} else {
+		const auto backup = OwnerInput(paths->backup);
+		const auto good = OwnerInput(paths->good);
+		if (backup.state == SettingsFileState::ReadError || good.state == SettingsFileState::ReadError
+			|| WriteGuardedSettingsFile(paths->backup, backup, file.input.bytes, [&] {
+				return current() && AccountFilePathSafe(paths->backup);
+			}, true) != GuardedFileWrite::Written) {
+			return { .error = u"The account settings backup could not be written."_q };
+		}
+		if (WriteGuardedSettingsFile(file.path, file.input, bytes, [&] {
+			return current() && AccountFilePathSafe(paths->backup) && AccountFilePathSafe(paths->good);
+		}) != GuardedFileWrite::Written) {
+			return { .error = u"Settings changed or could not be written."_q };
+		}
+		invalidate();
+		watch();
+	}
+	const auto expected = settingsEditTarget(destination.requester, destination.role);
+	if (!expected || !originCurrent() || !unchangedDependencies()
+		|| expected->destination.file.path != file.path
+		|| expected->destination.file.account != file.account
+		|| expected->destination.file.input != SettingsFileInput{ SettingsFileState::Readable, bytes }
+		|| expected->destination.localInput != destination.localInput
+		|| expected->destination.ownerInput != destination.ownerInput
+		|| expected->destination.file.generation != destination.file.generation
+		|| (target.globalSource.file.path != file.path && !validateOpen(target.globalSource))) {
+		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
+	}
+	const auto committedCurrent = [&] {
+		return originCurrent && originCurrent() && validateSettingsEdit(*expected);
+	};
+	const auto good = OwnerInput(paths->good);
+	if (!AccountFilePathSafe(paths->good)
+		|| WriteGuardedSettingsFile(paths->good, good, bytes, committedCurrent, true)
+			!= GuardedFileWrite::Written) {
+		return { .changed = true, .created = created,
+			.error = u"Settings saved, but the last-good copy could not be updated."_q };
+	}
+	auto committed = *expected;
+	committed.identities[paths->good] = ChoiceFileIdentity(paths->good);
+	if (committed.globalSource.file.path == file.path) {
+		committed.globalGoodInput = { SettingsFileState::Readable, bytes };
+	}
+	if (_changed) { _changed(); }
+	if (!originCurrent() || !validateSettingsEdit(committed)) {
+		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
+	}
+	return { .ok = true, .changed = true, .created = created, .target = committed };
+}
+
+std::optional<AccountListEditTarget> DesktopAccountConfig::listEditTarget(
+		const AccountKey &requester,
+		const QString &name) {
+	refreshLocalChoice();
+	const auto role = workMode(requester) == AccountWorkMode::Follow
+		? SettingsOpenRole::AppWide : SettingsOpenRole::Own;
+	const auto edit = settingsEditTarget(requester, role);
+	if (!edit) { return std::nullopt; }
+	const auto &global = edit->globalSource.file;
+	const auto source = (global.input.state != SettingsFileState::Readable
+		|| !RowInputUsable(global.input, global.path))
+		&& edit->globalGoodInput.state == SettingsFileState::Readable
+		? QString::fromUtf8(edit->globalGoodInput.bytes) : QString::fromUtf8(global.input.bytes);
+	const auto &file = edit->destination.file;
+	auto options = SettingsLayerOptions();
+	options.globalPresent = global.input.state == SettingsFileState::Readable
+		|| edit->globalGoodInput.state == SettingsFileState::Readable;
+	options.accountPresent = file.input.state == SettingsFileState::Readable;
+	const auto effective = file.account == global.account
+		? ParseSettings(source, global.path)
+		: LayerSettings(source, global.path, QString::fromUtf8(file.input.bytes), file.path, options).effective;
+	if (!effective.ok()) { return std::nullopt; }
+	const auto found = std::find_if(effective.settings.lists.begin(), effective.settings.lists.end(), [&](const List &list) {
+		return list.name == name;
+	});
+	if (found == effective.settings.lists.end()) { return std::nullopt; }
+	auto comments = ListMemberComments(source, global.path, name);
+	const auto own = ListMemberComments(QString::fromUtf8(edit->destination.file.input.bytes),
+		edit->destination.file.path, name);
+	for (const auto &[id, comment] : own) { comments[id] = comment; }
+	return AccountListEditTarget{ *edit, name, found->members, std::move(comments) };
+}
+
+AccountSettingsEditResult DesktopAccountConfig::writeListMember(
+		const AccountListEditTarget &target,
+		PeerIdValue id,
+		bool member,
+		const MemberTitle &title,
+		const std::function<bool()> &originCurrent) {
+	const auto current = listEditTarget(target.edit.destination.requester, target.list);
+	if (!originCurrent || !originCurrent() || !current
+		|| current->edit.destination.role != target.edit.destination.role
+		|| current->members != target.members || current->comments != target.comments
+		|| !validateSettingsEdit(target.edit)) {
+		return { .error = u"Settings changed. Try again."_q };
+	}
+	auto members = target.members;
+	const auto found = std::find(members.begin(), members.end(), id);
+	if ((found != members.end()) == member) { return { .ok = true, .target = target.edit }; }
+	if (member && found == members.end()) {
+		members.push_back(id);
+	} else if (!member) {
+		members.erase(std::remove(members.begin(), members.end(), id), members.end());
+	}
+	return writeSettingsEdit(target.edit, [&](const QString &text) {
+		return SetListMembers(text, target.edit.destination.file.path, target.list, members,
+			[&](PeerIdValue peer) {
+				if (peer == id) { return title ? title(peer) : QString(); }
+				const auto comment = target.comments.find(peer);
+				return comment != target.comments.end() ? comment->second : QString();
+			});
+	}, originCurrent);
+}
+
 bool ShouldShowGlobalAccountChoice(int signedIn, bool globalSignedIn) {
 	return signedIn >= 2 || !globalSignedIn;
 }

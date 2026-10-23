@@ -1229,8 +1229,15 @@ sync setup. An explicit first edit of one of the three supported own-file rows c
 also create this file, with only the requested override after the header. Creation
 is not a save and does not publish or send. Reset and ordinary reads never create
 an absent file. Existing files keep their version, unrelated text and comments.
-Other per-account editors remain unavailable; Work Mode, preset, schedule and
-global settings retain their existing app-wide destination.
+Chat-list ticks write only member arrays: Own and Stock edit this account’s file,
+and Follow edits the app-wide file. The first edit of inherited members copies
+only those members and their comments. An empty list keeps an explicit empty
+array. Work Mode, preset, schedule, screen-time and Local Premium edits use the
+selected app-wide account’s file, including while it is signed out. A once-per-
+launch notice explains that these offline edits cannot sync, with Change to
+choose another source. General per-account editors and the list-mode chooser
+remain separate work. See [account routing](account_routing.md#routed-app-wide-writers-and-list-ticks)
+for guarded creation, stale-dialog refusal and recovery-file behavior.
 
 
 ### Choose the account that supplies app-wide settings

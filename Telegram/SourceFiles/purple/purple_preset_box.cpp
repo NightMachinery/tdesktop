@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "base/timer_rpl.h"
+#include "base/weak_ptr.h"
 #include "core/file_utilities.h"
 #include "data/data_session.h"
 #include "dialogs/dialogs_indexed_list.h"
@@ -43,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <limits>
 
 #include <QtCore/QDateTime>
+#include <QtCore/QPointer>
 #include <QtGui/QIntValidator>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QKeySequence>
@@ -627,6 +629,9 @@ void RefreshPresetProblems(
 void PresetBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Main::Session*> session) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
+	const auto originSession = base::make_weak(session.get());
+	const auto editContext = QPointer<Ui::GenericBox>(box.get());
 	box->setTitle(rpl::single(u"Work Mode"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -721,15 +726,15 @@ void PresetBox(
 		if (checked == PeekExitHiddenChats(ActiveSettings())) {
 			return;
 		}
-		const auto result = WriteSettings([=](const QString &text) {
+		const auto result = WriteSettingsFromEditor(editor, [=](const QString &text) {
 			return SetTableBool(
 				text,
 				SettingsFilePath(),
 				u"peek"_q,
 				u"exit_hidden_chats_p"_q,
 				checked);
-		}, u"Exit hidden chats when peek ends"_q);
-		if (!result.ok) {
+		}, u"Exit hidden chats when peek ends"_q, [=] { return !editContext.isNull(); });
+		if (editContext && !result.ok) {
 			exitHidden->setChecked(
 				PeekExitHiddenChats(ActiveSettings()),
 				Ui::Checkbox::NotifyAboutChange::DontNotify);
@@ -778,7 +783,9 @@ void PresetBox(
 			delay->showError();
 			return;
 		}
-		RequestPeekDelayChange(seconds);
+		if (const auto live = originSession.get()) {
+			RequestPeekDelayChange(seconds, editor, not_null{ live });
+		}
 	});
 	SettingsChanges() | rpl::on_next([=] {
 		delay->setText(QString::number(

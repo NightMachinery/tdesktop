@@ -97,8 +97,8 @@ void SetLocalPremium(bool value);
 // defaults, so a typo mid-edit does not reshuffle the user's chat list.
 [[nodiscard]] const Settings &ActiveSettings();
 [[nodiscard]] bool UsingLastGoodSettings();
-[[nodiscard]] std::optional<SettingsFileInput> SettingsInputForOperation();
-[[nodiscard]] bool ValidateSettingsInput(const SettingsFileInput &expected);
+[[nodiscard]] std::optional<AccountSettingsWriteTarget> SettingsInputForOperation();
+[[nodiscard]] bool ValidateSettingsInput(const AccountSettingsWriteTarget &expected);
 
 struct Problems {
 	QString error;
@@ -126,16 +126,43 @@ struct Problems {
 struct WriteResult {
 	bool ok = false;
 	QString error;
+	std::optional<AccountSettingsWriteTarget> target;
 };
+
+struct AppWideSettingsEditorState {
+	std::optional<AccountSettingsWriteTarget> target;
+	std::function<bool()> originCurrent;
+};
+
+using AppWideSettingsEditor = std::shared_ptr<AppWideSettingsEditorState>;
+
+[[nodiscard]] AppWideSettingsEditor CaptureAppWideSettingsEditor(
+	not_null<QObject*> context);
+WriteResult WriteSettingsFromEditor(
+	const AppWideSettingsEditor &editor,
+	Fn<SpliceResult(const QString &text)> splice,
+	const QString &what,
+	const std::function<bool()> &originCurrent);
 
 WriteResult WriteSettings(
 	Fn<SpliceResult(const QString &text)> splice,
 	const QString &what);
 
 WriteResult WriteSettingsGuarded(
-	const SettingsFileInput &expected,
+	const AccountSettingsWriteTarget &expected,
 	Fn<SpliceResult(const QString &text)> splice,
-	const QString &what);
+	const QString &what,
+	const std::function<bool()> &originCurrent = {});
+
+[[nodiscard]] std::optional<AccountListEditTarget> AccountListEditFor(
+	not_null<Main::Session*> session,
+	const QString &list);
+[[nodiscard]] bool SetAccountListMember(
+	not_null<Main::Session*> session,
+	const AccountListEditTarget &target,
+	PeerIdValue id,
+	bool member,
+	const MemberTitle &title);
 
 // The only writes to settings.toml besides the Premium toggle. Both return
 // false if the file could not be edited, having changed nothing.

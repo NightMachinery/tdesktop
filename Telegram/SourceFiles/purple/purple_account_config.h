@@ -91,6 +91,28 @@ struct AccountSettingsRowWriteResult {
 	std::optional<AccountSettingsRowTarget> target;
 };
 
+struct AccountSettingsWriteTarget {
+	AccountSettingsOpenTarget destination;
+	AccountSettingsOpenTarget globalSource;
+	SettingsFileInput globalGoodInput;
+	std::map<QString, QByteArray> identities;
+};
+
+struct AccountSettingsEditResult {
+	bool ok = false;
+	bool changed = false;
+	bool created = false;
+	QString error;
+	std::optional<AccountSettingsWriteTarget> target;
+};
+
+struct AccountListEditTarget {
+	AccountSettingsWriteTarget edit;
+	QString list;
+	std::vector<PeerIdValue> members;
+	std::map<PeerIdValue, QString> comments;
+};
+
 [[nodiscard]] bool ShouldShowGlobalAccountChoice(int signedIn, bool globalSignedIn);
 
 struct GlobalAccountChoicePreview {
@@ -182,6 +204,21 @@ public:
 	[[nodiscard]] AccountSettingsRowWriteResult writeRow(
 		const AccountSettingsRowTarget &target,
 		std::optional<bool> value,
+		const std::function<bool()> &originCurrent);
+	[[nodiscard]] std::optional<AccountSettingsWriteTarget> settingsEditTarget(
+		const AccountKey &requester, SettingsOpenRole role);
+	[[nodiscard]] bool validateSettingsEdit(const AccountSettingsWriteTarget &target);
+	[[nodiscard]] AccountSettingsEditResult writeSettingsEdit(
+		const AccountSettingsWriteTarget &target,
+		const std::function<SpliceResult(const QString&)> &splice,
+		const std::function<bool()> &originCurrent);
+	[[nodiscard]] std::optional<AccountListEditTarget> listEditTarget(
+		const AccountKey &requester, const QString &list);
+	[[nodiscard]] AccountSettingsEditResult writeListMember(
+		const AccountListEditTarget &target,
+		PeerIdValue id,
+		bool member,
+		const MemberTitle &title,
 		const std::function<bool()> &originCurrent);
 	[[nodiscard]] std::optional<GlobalAccountChoicePreview> previewGlobalChoice(
 		const AccountKey &requester,

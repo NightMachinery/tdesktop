@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_global_choice_activation.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/boxes/confirm_box.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include <QtCore/QPointer>
 #include <QtCore/qscopeguard.h>
@@ -44,6 +45,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QSet>
 
 namespace Purple {
+namespace {
+
+void ShowOfflineGlobalEditBulletin();
+
+}
 
 bool WriteConfigFile(const QString &path, const QString &text) {
 	auto file = QSaveFile(path);
@@ -345,14 +351,6 @@ public:
 	[[nodiscard]] const Problems &problems() const;
 	[[nodiscard]] rpl::producer<> changes() const;
 
-	bool addToList(
-		const QString &list,
-		PeerIdValue id,
-		const MemberTitle &title);
-	bool removeFromList(
-		const QString &list,
-		PeerIdValue id,
-		const MemberTitle &title);
 	bool setViewPins(
 		const QString &preset,
 		const QString &view,
@@ -366,8 +364,9 @@ public:
 	WriteResult write(
 		const Fn<SpliceResult(const QString&)> &op,
 		const QString &what,
-		const std::optional<SettingsFileInput> &expected = std::nullopt);
-	[[nodiscard]] std::optional<SettingsFileInput> checkedInput();
+		const std::optional<AccountSettingsWriteTarget> &expected = std::nullopt,
+		const std::function<bool()> &originCurrent = {});
+	[[nodiscard]] std::optional<AccountSettingsWriteTarget> checkedInput();
 	void observeAccountFiles() { autoSendLater(); }
 	void refreshAccountRows() { _accountRefreshPending = true; reloadFromDisk(); }
 	GlobalAccountChoiceResult switchGlobalAccount(
@@ -387,7 +386,6 @@ private:
 	void loadState();
 	void applyInput(const SettingsFileInput &input);
 	void applySettings(Settings settings, const QString &path);
-	[[nodiscard]] bool writeSettings(const QString &text, const SettingsFileInput &expected);
 	void startWatching();
 	void reloadFromDisk();
 	void reloadStateFromDisk();
@@ -498,31 +496,6 @@ void Config::applySettings(Settings settings, const QString &path) {
 
 bool Config::usingLastGoodSettings() const {
 	return _usingLastGoodSettings;
-}
-
-bool Config::writeSettings(
-		const QString &text,
-		const SettingsFileInput &expected) {
-	if (!QDir().mkpath(QFileInfo(SettingsFilePath()).absolutePath())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
-		return false;
-	} else if (WriteGuardedSettingsFile(
-			SettingsFilePath(), expected, text.toUtf8())
-		!= GuardedFileWrite::Written) {
-		reloadFromDisk();
-		return false;
-	}
-	applyInput({ SettingsFileState::Readable, text.toUtf8() });
-
-	// Every write the app makes to the file passes through here, which is the
-	// whole reason there is one of these rather than a QSaveFile in each
-	// writer: the automatic send has exactly one place to hook, and a switch
-	// added next year gets it for free. Writes from outside - an editor, an
-	// import - and settings sync's own writes come in through the watcher
-	// instead and are deliberately not this. See ShouldAutoSend() in
-	// purple_state.h.
-	autoSendLater();
-	return true;
 }
 
 void Config::autoSendLater() {
@@ -654,9 +627,19 @@ void Config::reloadFromDisk() {
 		// Our own writes come back through the watcher too.
 		return;
 	}
+	const auto editedPath = SettingsFilePath();
+	const auto editedAccount = AccountRouting().globalAccount();
+	const auto edited = _settingsPath == editedPath
+		&& _diskInput.state == SettingsFileState::Readable
+		&& input.state == SettingsFileState::Readable;
 	applyInput(input);
 	autoSendLater();
 	flushGlobalChoiceState();
+	if (edited && editedPath == SettingsFilePath()
+		&& editedAccount == AccountRouting().globalAccount()
+		&& _problems.error.isEmpty() && !_usingLastGoodSettings) {
+		ShowOfflineGlobalEditBulletin();
+	}
 }
 
 void Config::reloadStateFromDisk() {
@@ -717,44 +700,47 @@ rpl::producer<> Config::changes() const {
 WriteResult Config::write(
 		const Fn<SpliceResult(const QString&)> &op,
 		const QString &what,
-		const std::optional<SettingsFileInput> &expected) {
+		const std::optional<AccountSettingsWriteTarget> &expected,
+		const std::function<bool()> &originCurrent) {
 	Expects(op != nullptr);
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return { .error = u"Account settings writes are held until explicit destination routing is complete."_q };
-	}
-
-	const auto input = checkedInput();
-	if (!input || (expected && *input != *expected)) {
+	const auto input = expected ? expected : checkedInput();
+	if (!input || input->destination.role != SettingsOpenRole::AppWide
+		|| !AccountRouting().validateSettingsEdit(*input)) {
 		return { .error = u"Settings changed on disk. Try again."_q };
 	}
-	const auto result = op(QString::fromUtf8(input->bytes));
-	if (!result.ok()) {
+	observeAccountFiles();
+	const auto current = [&] {
+		return ConfigDirectory() == input->destination.root && (!originCurrent || originCurrent());
+	};
+	const auto result = AccountRouting().writeSettingsEdit(*input,
+		[&](const QString &text) { return op(text); }, current);
+	if (!result.ok) {
 		LOG(("Purple Error: Could not write %1 to %2: %3."
-			).arg(what, SettingsFilePath(), result.error));
+			).arg(what, input->destination.file.path, result.error));
 		return { .error = result.error };
-	} else if (!result.changed) {
-		// The file already said that. Not an error and not worth a message:
-		// the screen that asked is now showing what the file holds, which is
-		// what it wanted.
-		return { .ok = true };
-	} else if (!writeSettings(result.text, *input)) {
-		return { .error = u"Could not write %1. See the log."_q.arg(
-			SettingsFilePath()) };
 	}
-	return { .ok = true };
+	if (result.changed) {
+		refreshAccountRows();
+		observeAccountFiles();
+		ShowOfflineGlobalEditBulletin();
+	}
+	if (!current() || !result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
+		return { .error = u"Settings context changed after writing."_q };
+	}
+	return { .ok = true, .target = result.target };
 }
 
-std::optional<SettingsFileInput> Config::checkedInput() {
+std::optional<AccountSettingsWriteTarget> Config::checkedInput() {
 	reloadStateFromDisk();
-	const auto input = ReadSettingsFileInput(SettingsFilePath());
-	if (input != _diskInput || _settingsPath != SettingsFilePath()) {
-		applyInput(input);
-		return std::nullopt;
-	} else if (input.state != SettingsFileState::Readable
-		|| !_problems.error.isEmpty() || _usingLastGoodSettings) {
+	const auto global = AccountRouting().globalAccount();
+	const auto target = global
+		? AccountRouting().settingsEditTarget(*global, SettingsOpenRole::AppWide) : std::nullopt;
+	if (!target) { return std::nullopt; }
+	if (target->destination.file.input != _diskInput || _settingsPath != target->destination.file.path) {
+		applyInput(target->destination.file.input);
 		return std::nullopt;
 	}
-	return input;
+	return target;
 }
 
 bool Config::splice(
@@ -763,41 +749,11 @@ bool Config::splice(
 	return write(op, what).ok;
 }
 
-bool Config::addToList(
-		const QString &list,
-		PeerIdValue id,
-		const MemberTitle &title) {
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return false;
-	}
-
-	return splice([&](const QString &text) {
-		return AddListMember(text, SettingsFilePath(), list, id, title);
-	}, u"list '%1'"_q.arg(list));
-}
-
-bool Config::removeFromList(
-		const QString &list,
-		PeerIdValue id,
-		const MemberTitle &title) {
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return false;
-	}
-
-	return splice([&](const QString &text) {
-		return RemoveListMember(text, SettingsFilePath(), list, id, title);
-	}, u"list '%1'"_q.arg(list));
-}
-
 bool Config::setViewPins(
 		const QString &preset,
 		const QString &view,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return false;
-	}
-
 	return splice([&](const QString &text) {
 		return SetViewPinned(text, SettingsFilePath(), preset, view, ids, title);
 	}, u"the pins of view '%1'"_q.arg(view));
@@ -807,20 +763,12 @@ bool Config::setPresetPins(
 		const QString &preset,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return false;
-	}
-
 	return splice([&](const QString &text) {
 		return SetPresetPinned(text, SettingsFilePath(), preset, ids, title);
 	}, u"the pins of preset '%1'"_q.arg(preset));
 }
 
 bool Config::createList(const QString &name, const QString &title) {
-	if (!LegacyRootSettingsOperationsAllowed()) {
-		return false;
-	}
-
 	return splice([&](const QString &text) {
 		return AddList(text, SettingsFilePath(), name, title);
 	}, u"the list '%1'"_q.arg(name));
@@ -985,20 +933,77 @@ rpl::producer<> SettingsChanges() {
 	return Instance().changes();
 }
 
-std::optional<SettingsFileInput> SettingsInputForOperation() {
+std::optional<AccountSettingsWriteTarget> SettingsInputForOperation() {
 	return Instance().checkedInput();
 }
 
-bool ValidateSettingsInput(const SettingsFileInput &expected) {
+bool ValidateSettingsInput(const AccountSettingsWriteTarget &expected) {
 	const auto current = SettingsInputForOperation();
-	return current && *current == expected;
+	return current && expected.destination.role == SettingsOpenRole::AppWide
+		&& ConfigDirectory() == expected.destination.root
+		&& AccountRouting().validateSettingsEdit(expected);
 }
 
 WriteResult WriteSettingsGuarded(
-		const SettingsFileInput &expected,
+		const AccountSettingsWriteTarget &expected,
 		Fn<SpliceResult(const QString &text)> splice,
-		const QString &what) {
-	return Instance().write(splice, what, expected);
+		const QString &what,
+		const std::function<bool()> &originCurrent) {
+	return Instance().write(splice, what, expected, originCurrent);
+}
+
+AppWideSettingsEditor CaptureAppWideSettingsEditor(not_null<QObject*> context) {
+	const auto weak = QPointer<QObject>(context.get());
+	return std::make_shared<AppWideSettingsEditorState>(AppWideSettingsEditorState{
+		SettingsInputForOperation(), [=] { return !weak.isNull(); } });
+}
+
+WriteResult WriteSettingsFromEditor(
+		const AppWideSettingsEditor &editor,
+		Fn<SpliceResult(const QString &text)> splice,
+		const QString &what,
+		const std::function<bool()> &originCurrent) {
+	if (!editor || !editor->target || !editor->originCurrent()) {
+		return { .error = u"Reopen the settings editor and try again."_q };
+	}
+	const auto current = [=] {
+		return editor->originCurrent() && originCurrent && originCurrent();
+	};
+	const auto result = WriteSettingsGuarded(*editor->target, std::move(splice), what, current);
+	if (result.ok) { editor->target = result.target; }
+	return result;
+}
+
+std::optional<AccountListEditTarget> AccountListEditFor(
+		not_null<Main::Session*> session,
+		const QString &list) {
+	return !session->account().loggingOut() && session->account().maybeSession() == session.get()
+		? AccountRouting().listEditTarget(SessionAccountKey(session), list) : std::nullopt;
+}
+
+bool SetAccountListMember(
+		not_null<Main::Session*> session,
+		const AccountListEditTarget &target,
+		PeerIdValue id,
+		bool member,
+		const MemberTitle &title) {
+	const auto weak = base::make_weak(session.get());
+	const auto originCurrent = [=] {
+		const auto live = weak.get();
+		return live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == target.edit.destination.requester
+			&& ConfigDirectory() == target.edit.destination.root;
+	};
+	if (!originCurrent() || !AccountRouting().validateSettingsEdit(target.edit)) { return false; }
+	Instance().observeAccountFiles();
+	const auto result = AccountRouting().writeListMember(target, id, member, title, originCurrent);
+	if (!result.ok) { return false; }
+	Instance().refreshAccountRows();
+	Instance().observeAccountFiles();
+	if (result.changed && target.edit.destination.file.account == target.edit.destination.global) {
+		ShowOfflineGlobalEditBulletin();
+	}
+	return originCurrent() && result.target && AccountRouting().validateSettingsEdit(*result.target);
 }
 
 bool AddToList(
@@ -1006,8 +1011,8 @@ bool AddToList(
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
-	return AccountAutomaticOperationsAllowed(session)
-		&& Instance().addToList(list, id, title);
+	const auto target = AccountListEditFor(session, list);
+	return target && SetAccountListMember(session, *target, id, true, title);
 }
 
 bool RemoveFromList(
@@ -1015,8 +1020,8 @@ bool RemoveFromList(
 		const QString &list,
 		PeerIdValue id,
 		const MemberTitle &title) {
-	return AccountAutomaticOperationsAllowed(session)
-		&& Instance().removeFromList(list, id, title);
+	const auto target = AccountListEditFor(session, list);
+	return target && SetAccountListMember(session, *target, id, false, title);
 }
 
 bool SetViewPins(
@@ -1367,6 +1372,34 @@ SettingsAccountLabels SettingsRowLabels(
 	}
 	result.multiple = keys.size() >= 2;
 	return result;
+}
+
+void ShowOfflineGlobalEditBulletin() {
+	static auto shown = false;
+	const auto window = Core::App().activeWindow();
+	const auto controller = window ? window->sessionController() : nullptr;
+	const auto global = AccountRouting().globalAccount();
+	if (shown || !controller || !global) { return; }
+	const auto labels = SettingsRowLabels(&controller->session(), std::nullopt);
+	if (labels.globalSignedIn) { return; }
+	shown = true;
+	const auto weak = base::make_weak(controller);
+	controller->show(Ui::MakeConfirmBox({
+		.text = tr::lng_purple_global_offline_edit(
+			tr::now,
+			lt_account,
+			labels.global,
+			lt_name,
+			labels.global),
+		.confirmed = [=] {
+			const auto live = weak.get();
+			if (live && AccountRouting().globalAccount() == global) {
+				live->show(Box(ChooseGlobalAccountBox, not_null{ live }));
+			}
+		},
+		.confirmText = tr::lng_purple_global_change(tr::now),
+		.cancelText = tr::lng_box_ok(tr::now),
+	}));
 }
 
 }

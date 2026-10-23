@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDateTime>
 #include <QtCore/QLocale>
+#include <QtCore/QPointer>
 
 namespace Purple {
 namespace {
@@ -226,10 +227,13 @@ void ShowWarnings(
 // on screen rather than only in the log.
 bool Write(
 		not_null<Ui::GenericBox*> box,
+		const AppWideSettingsEditor &editor,
 		Fn<SpliceResult(const QString&)> op,
 		const QString &what) {
-	const auto result = WriteSettings(std::move(op), what);
-	if (!result.ok) {
+	if (!editor || !editor->originCurrent()) { return false; }
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	const auto result = WriteSettingsFromEditor(editor, std::move(op), what, [=] { return !weak.isNull(); });
+	if (weak && !result.ok) {
 		box->uiShow()->showBox(Ui::MakeInformBox(result.error));
 	}
 	return result.ok;
@@ -389,6 +393,7 @@ void RuleBox(
 		not_null<Ui::GenericBox*> box,
 		const QString &ruleset,
 		std::optional<ScheduleRule> existing) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	box->setTitle(rpl::single(existing ? u"Rule"_q : u"New rule"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -503,7 +508,7 @@ void RuleBox(
 			.preset = start.preset,
 		};
 		const auto written = existing
-			? Write(box, [=](const QString &text) {
+			? Write(box, editor, [=](const QString &text) {
 				return SetScheduleRule(
 					text,
 					path,
@@ -512,7 +517,7 @@ void RuleBox(
 					expected,
 					rule);
 			}, u"a schedule rule"_q)
-			: Write(box, [=](const QString &text) {
+			: Write(box, editor, [=](const QString &text) {
 				return AppendScheduleRule(text, path, ruleset, rule);
 			}, u"a new schedule rule"_q);
 
@@ -533,7 +538,7 @@ void RuleBox(
 			.preset = start.preset,
 		};
 		box->addLeftButton(rpl::single(u"Delete"_q), [=] {
-			Write(box, [=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return RemoveScheduleRule(text, path, ruleset, index, expected);
 			}, u"deleting a schedule rule"_q);
 			box->closeBox();
@@ -543,6 +548,7 @@ void RuleBox(
 }
 
 void AddRulesetBox(not_null<Ui::GenericBox*> box) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	box->setTitle(rpl::single(u"New ruleset"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -623,7 +629,7 @@ void AddRulesetBox(not_null<Ui::GenericBox*> box) {
 		const auto path = SettingsFilePath();
 		const auto device = *scope;
 		const auto chosen = RulesetMode(mode->current());
-		if (!Write(box, [=](const QString &text) {
+		if (!Write(box, editor, [=](const QString &text) {
 			return AddRuleset(text, path, name, device, chosen);
 		}, u"a new ruleset"_q)) {
 			return;
@@ -634,7 +640,7 @@ void AddRulesetBox(not_null<Ui::GenericBox*> box) {
 			// apart, which is exactly what the automatic send's five seconds
 			// are for.
 			const auto wanted = *outside;
-			Write(box, [=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return SetRulesetString(
 					text,
 					path,
@@ -657,6 +663,7 @@ void AddRulesetBox(not_null<Ui::GenericBox*> box) {
 // preset into, and offering those rows would be offering an edit that cannot
 // land anywhere.
 void RulesetBox(not_null<Ui::GenericBox*> box, QString name) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	box->setTitle(rpl::single(name.isEmpty() ? u"Rules"_q : name));
 	box->setWidth(st::boxWideWidth);
 
@@ -710,7 +717,7 @@ void RulesetBox(not_null<Ui::GenericBox*> box, QString name) {
 				if (value == was) {
 					return;
 				}
-				Write(box, [=](const QString &text) {
+				Write(box, editor, [=](const QString &text) {
 					return SetRulesetString(
 						text,
 						path,
@@ -732,7 +739,7 @@ void RulesetBox(not_null<Ui::GenericBox*> box, QString name) {
 					ChooseScopeBox,
 					scope,
 					Fn<void(QString)>([=](QString value) {
-						Write(box, [=](const QString &text) {
+						Write(box, editor, [=](const QString &text) {
 							return SetRulesetString(
 								text,
 								path,
@@ -762,7 +769,7 @@ void RulesetBox(not_null<Ui::GenericBox*> box, QString name) {
 						// An empty value takes the key back out of the file,
 						// which is how a ruleset says "leave it to [schedule]"
 						// instead of writing that answer down a second time.
-						Write(box, [=](const QString &text) {
+						Write(box, editor, [=](const QString &text) {
 							return SetRulesetString(
 								text,
 								path,
@@ -825,7 +832,7 @@ void RulesetBox(not_null<Ui::GenericBox*> box, QString name) {
 					name),
 				.confirmed = [=](Fn<void()> close) {
 					close();
-					Write(box, [=](const QString &text) {
+					Write(box, editor, [=](const QString &text) {
 						return RemoveRuleset(text, path, name);
 					}, u"deleting a ruleset"_q);
 					box->closeBox();
@@ -841,6 +848,7 @@ void RulesetBox(not_null<Ui::GenericBox*> box, QString name) {
 } // namespace
 
 void ScheduleBox(not_null<Ui::GenericBox*> box) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	box->setTitle(rpl::single(u"Schedule"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -880,7 +888,7 @@ void ScheduleBox(not_null<Ui::GenericBox*> box) {
 			if (checked == wasEnabled) {
 				return;
 			}
-			Write(box, [=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return SetTableBool(
 					text,
 					path,
@@ -963,7 +971,7 @@ void ScheduleBox(not_null<Ui::GenericBox*> box) {
 				outside,
 				QString(),
 				Fn<void(QString)>([=](QString name) {
-					Write(box, [=](const QString &text) {
+					Write(box, editor, [=](const QString &text) {
 						return SetTableString(
 							text,
 							path,
@@ -1059,6 +1067,7 @@ void ScheduleBox(not_null<Ui::GenericBox*> box) {
 }
 
 void DeviceLabelBox(not_null<Ui::GenericBox*> box) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	const auto id = ThisDevice().id;
 	box->setTitle(rpl::single(u"This device"_q));
 
@@ -1088,7 +1097,7 @@ void DeviceLabelBox(not_null<Ui::GenericBox*> box) {
 	const auto save = [=] {
 		const auto label = field->getLastText().trimmed();
 		const auto path = SettingsFilePath();
-		Write(box, [=](const QString &text) {
+		Write(box, editor, [=](const QString &text) {
 			return SetTableString(text, path, u"devices"_q, id, label);
 		}, u"this device's name"_q);
 		box->closeBox();

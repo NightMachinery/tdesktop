@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QLocale>
+#include <QtCore/QPointer>
 #include <QtCore/QTimeZone>
 
 namespace Purple {
@@ -675,10 +676,13 @@ void ExportCsv(
 // on screen rather than only in the log.
 bool Write(
 		not_null<Ui::GenericBox*> box,
+		const AppWideSettingsEditor &editor,
 		Fn<SpliceResult(const QString&)> op,
 		const QString &what) {
-	const auto result = WriteSettings(std::move(op), what);
-	if (!result.ok) {
+	if (!editor || !editor->originCurrent()) { return false; }
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	const auto result = WriteSettingsFromEditor(editor, std::move(op), what, [=] { return !weak.isNull(); });
+	if (weak && !result.ok) {
 		box->uiShow()->showBox(Ui::MakeInformBox(result.error));
 	}
 	return result.ok;
@@ -742,6 +746,7 @@ void BudgetBox(
 		not_null<Main::Session*> session,
 		std::optional<ScreenTimeBudget> existing,
 		PeerIdValue chat) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	box->setTitle(rpl::single(existing ? u"Budget"_q : u"New budget"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -1014,11 +1019,11 @@ void BudgetBox(
 		const auto index = start.sourceIndex;
 		const auto expected = start.target;
 		if (existing) {
-			Write(box, [=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return SetBudget(text, path, index, expected, budget);
 			}, u"a screen time budget"_q);
 		} else {
-			Write(box, [=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return AppendBudget(text, path, budget);
 			}, u"a new screen time budget"_q);
 		}
@@ -1036,7 +1041,7 @@ void BudgetBox(
 		const auto index = start.sourceIndex;
 		const auto expected = start.target;
 		box->addLeftButton(rpl::single(u"Delete"_q), [=] {
-			Write(box, [=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return RemoveBudget(text, path, index, expected);
 			}, u"deleting a screen time budget"_q);
 			box->closeBox();
@@ -1115,6 +1120,7 @@ void ChatScreenTimeBox(
 void ScreenTimeBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Main::Session*> session) {
+	const auto editor = CaptureAppWideSettingsEditor(box);
 	box->setTitle(rpl::single(u"Screen time"_q));
 	box->setWidth(st::boxWideWidth);
 
@@ -1144,7 +1150,7 @@ void ScreenTimeBox(
 			if (checked == wasEnabled) {
 				return;
 			}
-			WriteSettings([=](const QString &text) {
+			Write(box, editor, [=](const QString &text) {
 				return SetTableBool(
 					text,
 					SettingsFilePath(),

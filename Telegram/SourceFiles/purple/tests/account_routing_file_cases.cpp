@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_account_config.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_account_send_queue.h"
+#include "purple/purple_peek_controls.h"
 #include "purple/purple_sync_history_guard.h"
 #include "purple/purple_sync_config_history.h"
 #include "purple/purple_sync_local_store.h"
@@ -2170,6 +2171,313 @@ void RemoveAppWideSettingsCases() {
 	FailureContext.clear();
 }
 
+void RoutedWritersAndListCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto root = QByteArray(
+		"# whole source\nversion=1\n[premium]\nenabled_p=false\n"
+		"[lists.\"work.one\"]\ntitle='Work'\nkind='users'\nmembers=[\n"
+		"  11, # inherited eleven\n  22, # inherited  twenty-two\n]\n"
+		"[lists.other]\nmembers=[44]\n[unknown]\nkeep='root'\n");
+	const auto switchGlobal = [&](DesktopAccountConfig &config, const AccountKey &key) {
+		const auto preview = config.previewGlobalChoice(a, key, NormalPreset());
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		auto commit = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(commit.ok);
+		CHECK(config.activateGlobalChoice(*preview, commit));
+	};
+	{
+		auto temp = QTemporaryDir();
+		const auto rootPath = temp.filePath(u"settings.toml"_q);
+		Put(rootPath, root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto ownPath = config.files(b)->settings;
+		const auto target = config.listEditTarget(b, u"work.one"_q);
+		CHECK(target && target->edit.destination.file.account == b);
+		if (!target) { return; }
+		CHECK(target->members == (std::vector<PeerIdValue>{ 11, 22 }));
+		CHECK(target->comments.contains(11) && target->comments.at(11) == u"inherited eleven"_q);
+		CHECK(!QFileInfo::exists(QFileInfo(ownPath).absolutePath()));
+		auto resolved = std::vector<PeerIdValue>();
+		const auto created = config.writeListMember(*target, 33, true, [&](PeerIdValue id) {
+			resolved.push_back(id);
+			return u"changed chat"_q;
+		}, [] { return true; });
+		CHECK(created.ok && created.changed && created.created && created.target);
+		CHECK(resolved == (std::vector<PeerIdValue>{ 33 }));
+		CHECK(Get(rootPath) == root);
+		CHECK(Get(ownPath).startsWith(NewAccountSettingsText()));
+		CHECK(!Get(ownPath).contains("title=") && !Get(ownPath).contains("kind="));
+		CHECK(!Get(ownPath).contains("[premium]") && !Get(ownPath).contains("[lists.other]"));
+		CHECK(Get(ownPath + u".good"_q) == Get(ownPath));
+		CHECK(!QFileInfo::exists(ownPath + u".bak"_q));
+		const auto comments = ListMemberComments(QString::fromUtf8(Get(ownPath)), ownPath, u"work.one"_q);
+		CHECK(comments.contains(11) && comments.at(11) == u"inherited eleven"_q);
+		CHECK(comments.contains(22) && comments.at(22) == u"inherited  twenty-two"_q);
+		CHECK(comments.contains(33) && comments.at(33) == u"changed chat"_q);
+		CHECK(!config.writeListMember(*target, 55, true, {}, [] { return true; }).ok);
+		for (const auto id : { 11, 22, 33 }) {
+			const auto next = config.listEditTarget(b, u"work.one"_q);
+			CHECK(next.has_value());
+			if (!next) { return; }
+			CHECK(config.writeListMember(*next, id, false, {}, [] { return true; }).ok);
+		}
+		CHECK(config.settings(b).lists.front().members.empty());
+		CHECK(Get(ownPath).contains("members"));
+		CHECK(Get(rootPath) == root);
+		const auto ownBefore = Get(ownPath);
+		const auto localPath = temp.filePath(u"local.toml"_q);
+		const auto follow = SetAccountWorkMode(QString::fromUtf8(Get(localPath)), localPath, b, AccountWorkMode::Follow);
+		CHECK(follow.ok() && follow.changed);
+		Put(localPath, follow.text.toUtf8());
+		config.refreshLocalChoice();
+		const auto followed = config.listEditTarget(b, u"work.one"_q);
+		CHECK(followed && followed->edit.destination.file.account == a);
+		if (!followed) { return; }
+		CHECK(followed->members == (std::vector<PeerIdValue>{ 11, 22 }));
+		CHECK(config.writeListMember(*followed, 22, false, {}, [] { return true; }).ok);
+		CHECK(Get(ownPath) == ownBefore);
+		CHECK(Get(rootPath + u".bak"_q) == root);
+		CHECK(ListMemberComments(QString::fromUtf8(Get(rootPath)), rootPath, u"work.one"_q)
+			== (std::map<PeerIdValue, QString>{ { 11, u"inherited eleven"_q } }));
+		const auto stock = SetAccountWorkMode(QString::fromUtf8(Get(localPath)), localPath, b, AccountWorkMode::Stock);
+		CHECK(stock.ok());
+		Put(localPath, stock.text.toUtf8());
+		CHECK(!config.writeListMember(*followed, 66, true, {}, [] { return true; }).ok);
+		const auto stocked = config.listEditTarget(b, u"work.one"_q);
+		CHECK(stocked && stocked->edit.destination.file.account == b && stocked->members.empty());
+		if (!stocked) { return; }
+		CHECK(config.writeListMember(*stocked, 77, true, {}, [] { return true; }).ok);
+		CHECK(config.settings(b).lists.front().members == (std::vector<PeerIdValue>{ 77 }));
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto rootPath = temp.filePath(u"settings.toml"_q);
+		Put(rootPath, root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto ownPath = config.files(b)->settings;
+		Put(ownPath, QByteArray("version=1\n[lists.\"work.one\"]\ntitle='Own whole list'\nmembers=[11] # retain array\n"));
+		const auto own = config.listEditTarget(b, u"work.one"_q);
+		CHECK(own.has_value());
+		if (!own) { return; }
+		CHECK(config.writeListMember(*own, 11, false, {}, [] { return true; }).ok);
+		const auto bytes = Get(ownPath);
+		CHECK(bytes.contains("title='Own whole list'"));
+		CHECK(bytes.contains("# retain array"));
+		const auto parsed = ParseSettings(QString::fromUtf8(bytes), ownPath);
+		CHECK(parsed.ok() && parsed.settings.list(u"work.one"_q)
+			&& parsed.settings.list(u"work.one"_q)->members.empty());
+		CHECK(bytes.startsWith("version=1\n"));
+		CHECK(Get(rootPath) == root);
+		switchGlobal(config, b);
+		config.start({ { a, false, false } });
+		const auto offline = config.settingsEditTarget(a, SettingsOpenRole::AppWide);
+		CHECK(offline && offline->destination.file.account == b && offline->destination.requester == a);
+		if (!offline) { return; }
+		const auto before = Get(ownPath);
+		const auto changed = config.writeSettingsEdit(*offline, [&](const QString &text) {
+			return SetTableBool(text, ownPath, u"premium"_q, u"enabled_p"_q, true);
+		}, [] { return true; });
+		CHECK(changed.ok && changed.changed && !changed.created && changed.target);
+		CHECK(Get(rootPath) == root && Get(ownPath + u".bak"_q) == before);
+		CHECK(Get(ownPath + u".good"_q) == Get(ownPath));
+		CHECK(config.globalSettings().premium.enabled);
+		CHECK(!config.writeSettingsEdit(*offline, [](const QString &text) {
+			return SpliceResult{ text, false };
+		}, [] { return true; }).ok);
+		const auto current = config.settingsEditTarget(a, SettingsOpenRole::AppWide);
+		CHECK(current.has_value());
+		if (!current) { return; }
+		const auto noOp = config.writeSettingsEdit(*current, [&](const QString &text) {
+			return SetTableBool(text, ownPath, u"premium"_q, u"enabled_p"_q, true);
+		}, [] { return true; });
+		CHECK(noOp.ok && !noOp.changed);
+		Put(ownPath, Get(ownPath));
+		CHECK(!config.validateSettingsEdit(*current));
+		const auto fresh = config.settingsEditTarget(a, SettingsOpenRole::AppWide);
+		CHECK(fresh.has_value());
+		if (!fresh) { return; }
+		const auto unchanged = Get(ownPath);
+		CHECK(!config.writeSettingsEdit(*fresh, [&](const QString &text) {
+			return SetTableBool(text, ownPath, u"premium"_q, u"enabled_p"_q, false);
+		}, [] { return false; }).ok);
+		CHECK(Get(ownPath) == unchanged);
+		switchGlobal(config, a);
+		CHECK(!config.validateSettingsEdit(*fresh));
+		CHECK(Get(ownPath) == unchanged && Get(rootPath) == root);
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto rootPath = temp.filePath(u"settings.toml"_q);
+		Put(rootPath, root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		switchGlobal(config, b);
+		config.start({ { a, false, false } });
+		const auto missing = config.settingsEditTarget(a, SettingsOpenRole::AppWide);
+		CHECK(missing.has_value());
+		if (!missing) { return; }
+		const auto path = missing->destination.file.path;
+		const auto created = config.writeSettingsEdit(*missing, [&](const QString &text) {
+			return AddList(text, path, u"offline"_q, u"Offline list"_q);
+		}, [] { return true; });
+		CHECK(created.ok && created.created && Get(path).startsWith(NewAccountSettingsText()));
+		CHECK(Get(rootPath) == root && !config.observeAccountSave(b));
+		Put(path, QByteArray("broken ["));
+		CHECK(!config.settingsEditTarget(a, SettingsOpenRole::AppWide));
+		const auto inherited = config.listEditTarget(a, u"offline"_q);
+		CHECK(inherited.has_value());
+		if (!inherited) { return; }
+		const auto capturedGood = Get(path + u".good"_q);
+		Put(path + u".good"_q, capturedGood + "\n# external recovery edit\n");
+		CHECK(!config.writeListMember(*inherited, 11, true, {}, [] { return true; }).ok);
+		CHECK(Get(rootPath) == root);
+		const auto repairedSource = config.listEditTarget(a, u"offline"_q);
+		CHECK(repairedSource.has_value());
+		if (!repairedSource) { return; }
+		CHECK(config.writeListMember(*repairedSource, 11, true, {}, [] { return true; }).ok);
+		CHECK(Get(path) == QByteArray("broken ["));
+		CHECK(Get(rootPath).contains("[lists.offline]"));
+		CHECK(!CanReplaceLegacyRootSettings(root, NewAccountSettingsText()));
+		CHECK(!AccountSyncRecordSupported(NewAccountSettingsText()));
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto path = temp.filePath(u"settings.toml"_q);
+		Put(path, root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto ownPath = config.files(b)->settings;
+		const auto inherited = config.listEditTarget(b, u"work.one"_q);
+		CHECK(inherited.has_value());
+		if (!inherited) { return; }
+		const auto unchanged = config.writeListMember(*inherited, 11, true, {}, [] { return true; });
+		CHECK(unchanged.ok && !unchanged.changed && !QFileInfo::exists(ownPath));
+		const auto stale = config.writeListMember(*inherited, 33, true, [&](PeerIdValue id) {
+			CHECK(id == 33);
+			Put(path, root + "\n# concurrent external edit\n");
+			return u"new chat"_q;
+		}, [] { return true; });
+		CHECK(!stale.ok && !stale.changed && !QFileInfo::exists(ownPath));
+		CHECK(Get(path) == root + "\n# concurrent external edit\n");
+		const auto fresh = config.listEditTarget(b, u"work.one"_q);
+		CHECK(fresh.has_value());
+		if (!fresh) { return; }
+		auto alive = true;
+		config.setChanged([&] { alive = false; });
+		const auto interrupted = config.writeListMember(*fresh, 33, true, {}, [&] { return alive; });
+		CHECK(!interrupted.ok && interrupted.changed && interrupted.created && !interrupted.target);
+		CHECK(Get(path) == root + "\n# concurrent external edit\n");
+		CHECK(ParseSettings(QString::fromUtf8(Get(ownPath)), ownPath).ok());
+	}
+	{
+		auto temp = QTemporaryDir();
+		const auto path = temp.filePath(u"settings.toml"_q);
+		Put(path, root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto inherited = config.listEditTarget(b, u"work.one"_q);
+		CHECK(inherited.has_value());
+		if (!inherited) { return; }
+		const auto before = ChoiceOtherFiles(temp.path());
+		auto forged = *inherited;
+		forged.members = { 99 };
+		CHECK(!config.writeListMember(forged, 33, true, {}, [] { return true; }).ok);
+		CHECK(ChoiceOtherFiles(temp.path()) == before);
+		Put(path + u".good"_q, root);
+		CHECK(QFile::remove(path));
+		const auto recovery = config.listEditTarget(b, u"work.one"_q);
+		CHECK(recovery && recovery->members == (std::vector<PeerIdValue>{ 11, 22 }));
+		CHECK(!config.settingsEditTarget(b, SettingsOpenRole::AppWide));
+		if (!recovery) { return; }
+		CHECK(config.writeListMember(*recovery, 33, true, {}, [] { return true; }).ok);
+		CHECK(!QFileInfo::exists(path));
+		CHECK(Get(path + u".good"_q) == root);
+		const auto ownPath = config.files(b)->settings;
+		CHECK(Get(ownPath).startsWith(NewAccountSettingsText()));
+	}
+
+}
+
+void PeekOpeningEditorCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto bytes = QByteArray("version=1\n[peek]\nstart_delay_seconds=3\n");
+	auto temp = QTemporaryDir();
+	const auto aPath = temp.filePath(u"settings.toml"_q);
+	Put(aPath, bytes);
+	auto config = DesktopAccountConfig(temp.path());
+	config.start({ { a, false, false } });
+	config.start({ { a, false, false }, { b, false, false } });
+	const auto bPath = config.files(b)->settings;
+	Put(bPath, bytes);
+	const auto opening = config.settingsEditTarget(a, SettingsOpenRole::AppWide);
+	CHECK(opening.has_value());
+	if (!opening) { return; }
+	auto sessionCurrent = true;
+	const auto originCurrent = [&] { return sessionCurrent; };
+	const auto validate = [&](const AccountSettingsWriteTarget &target) {
+		return config.validateSettingsEdit(target);
+	};
+	const auto countdown = PreparePeekDelayChange(opening, originCurrent, validate);
+	CHECK(countdown && countdown->destination.file.account == a);
+	const auto switchTo = [&](const AccountKey &key) {
+		const auto preview = config.previewGlobalChoice(a, key, NormalPreset());
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		auto commit = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(commit.ok && config.activateGlobalChoice(*preview, commit));
+	};
+	switchTo(b);
+	CHECK(!PreparePeekDelayChange(opening, originCurrent, validate));
+	const auto before = ChoiceOtherFiles(temp.path());
+	if (countdown) {
+		const auto completed = config.writeSettingsEdit(*countdown, [&](const QString &text) {
+			return SetPeekStartDelay(text, countdown->destination.file.path, 9);
+		}, originCurrent);
+		CHECK(!completed.ok && !completed.changed);
+	}
+	CHECK(ChoiceOtherFiles(temp.path()) == before);
+	CHECK(Get(aPath) == bytes && Get(bPath) == bytes);
+	const auto fresh = config.settingsEditTarget(a, SettingsOpenRole::AppWide);
+	const auto accepted = PreparePeekDelayChange(fresh, originCurrent, validate);
+	CHECK(accepted && accepted->destination.file.account == b);
+	if (!accepted) { return; }
+	sessionCurrent = false;
+	CHECK(!PreparePeekDelayChange(fresh, originCurrent, validate));
+	CHECK(!config.writeSettingsEdit(*accepted, [&](const QString &text) {
+		return SetPeekStartDelay(text, bPath, 9);
+	}, originCurrent).ok);
+	CHECK(Get(aPath) == bytes && Get(bPath) == bytes);
+	sessionCurrent = true;
+	CHECK(!PreparePeekDelayChange(fresh, originCurrent, [&](const AccountSettingsWriteTarget &target) {
+		const auto valid = config.validateSettingsEdit(target);
+		sessionCurrent = false;
+		return valid;
+	}));
+	sessionCurrent = true;
+	const auto written = config.writeSettingsEdit(*accepted, [&](const QString &text) {
+		return SetPeekStartDelay(text, bPath, 9);
+	}, originCurrent);
+	CHECK(written.ok && written.changed && written.target);
+	CHECK(Get(aPath) == bytes);
+	CHECK(ParseSettings(QString::fromUtf8(Get(bPath)), bPath).settings.peek.startDelaySeconds == 9);
+	CHECK(PreparePeekDelayChange(written.target, originCurrent, validate).has_value());
+	CHECK(!PreparePeekDelayChange(fresh, originCurrent, validate));
+	switchTo(a);
+	CHECK(!PreparePeekDelayChange(opening, originCurrent, validate));
+	CHECK(!PreparePeekDelayChange(written.target, originCurrent, validate));
+	CHECK(Get(aPath) == bytes);
+}
+
 
 }
 
@@ -2215,6 +2523,12 @@ int main(int argc, char *argv[]) {
 	const auto beforeRemoval = Checks;
 	RemoveAppWideSettingsCases();
 	std::printf("removeAppWide %d checks\n", Checks - beforeRemoval);
+	const auto beforeRoutedWriters = Checks;
+	RoutedWritersAndListCases();
+	std::printf("routedWritersLists %d checks\n", Checks - beforeRoutedWriters);
+	const auto beforePeekEditor = Checks;
+	PeekOpeningEditorCases();
+	std::printf("peekOpeningEditor %d checks\n", Checks - beforePeekEditor);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

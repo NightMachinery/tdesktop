@@ -51,8 +51,8 @@ An explicit destination-aware destructive-change review remains later work.
 Sync setup, store, publish, apply, History/Undo and fingerprint persistence now use
 explicit validated originating-account files. Root-owner paths remain legacy;
 nonroot accounts never fall back to them. Manual single-file export remains a
-separate owner-unknown role. Account list-member writes, nonroot global editing,
-list forks and the full account settings chooser remain held.
+separate owner-unknown role. The routed local writers and list ticks are described
+below. The full account settings chooser remains separate work.
 No migration-by-copy or automatic binding restoration is introduced.
 
 Synthetic Qt/file cases qualify the actual adapter and guarded writer in owned
@@ -123,7 +123,7 @@ replacement save.
 Absent settings are read without creation and cannot initialize or publish through
 sync setup. The explicit Open action can create a missing non-root account file.
 Version2 legacy imports/exports and layered sync application remain refused;
-general account editing/list forks/global-file edits stay held. The final precondition-to-rename window against a noncooperating writer remains
+the full account editor and list-mode chooser remain separate work. The final precondition-to-rename window against a noncooperating writer remains
 finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
 and a coherent current application need separate qualification.
 
@@ -169,8 +169,8 @@ Creation seeds the file observation without sending or publishing it. Existing
 qualified save observations and queued operations keep their established rules.
 The account template is schema2, so current schema1 transport guards keep its
 automatic and manual legacy sends held. The own-key Last Seen Reset described
-above is separate from a general account editor/list fork or app-wide-loss review,
-which remain held.
+above is separate from the routed list-member writes below and from a general
+account editor or destination-aware app-wide-loss review.
 
 The account-file batch passes all 58 affected production compiles and 967 genuine
 Qt/file checks, including 178 added checks. Native editor dispatch, Windows
@@ -254,8 +254,8 @@ repair uses one production-called ordering seam, with actual-model post-publicat
 conflict and synchronous lifetime cases in the genuine fixture. Its affected qualification passed both production units and 1,660 genuine
 configured-Qt/file checks, including 80 new causal checks. Focused source review
 closed the activation-ordering finding. Full Config/Gate/window native behavior
-remains unmeasured; helper callback checks do not establish native coverage. General account editing, list forks and unsupported version-two transport remain
-held.
+remains unmeasured; helper callback checks do not establish native coverage. The full account editor/list-mode chooser and unsupported version-two transport
+remain separate work.
 
 
 A saved but rejected commit never invokes the Normal transition or new-settings
@@ -276,3 +276,48 @@ forks. Its four changed production units and 2,201 genuine configured-Qt/file
 checks pass, including 541 added checks. Complete independent source review found
 no material defect. The matching full application, native button behavior and
 actual-profile operation still require separate validation.
+
+## Routed app-wide writers and list ticks
+
+Local Premium, preset pins, new lists, schedule, screen-time and Peek edits use a
+captured app-wide account file, including when that account is signed out. The
+original root-file owner is never a fallback write destination. Dialog writers
+retain their capture across callbacks and refuse stale files or routing. A
+successful dialog edit advances only that dialog's capture to its committed
+snapshot. Peek Apply takes the opening Work Mode editor and its weak session;
+changing the app-wide source refuses that dialog before a countdown can start.
+The countdown retains the captured destination, editor lifetime and originating
+session through completion. A successful Apply advances that same editor's
+snapshot for later edits.
+
+Chat-list ticks capture the chat's session, the local list mode and both source
+and destination inputs when the menu opens. Follow writes the app-wide file;
+Own and Stock write the chat account's file. A first inherited-list edit copies
+only the effective member order and member comments through SetListMembers.
+Only the changed chat is resolved in its own session. Titles, kinds, other lists,
+presets and other inherited settings are not copied. Removing the final member
+writes an explicit empty array. Ticks never use Reset, including in a whole file
+that defines the list. Mode chooser UI, explicit delete-own-members actions and
+fork/follow/stock notices are outside this slice.
+
+These writes retain owner/local-choice and directory guards, exact input bytes,
+primary/recovery file identities and originating lifetimes. Existing files keep
+their preimage in `.bak`; `.good` advances after settings publication. A missing
+non-root destination uses exclusive creation with the version-two header and the
+requested edit together. A missing primary with recovery bytes stays held for
+repair when it is the destination. An own-list fork can read a captured valid
+global recovery copy without replacing the broken global primary.
+
+The first successful app-wide edit while its account is signed out shows one
+notice per launch, with Change opening the existing account chooser. Offline
+writes cannot borrow another account's send transport. Creation seeds observation
+without sending, and the existing schema-two transfer and sync guards remain in
+place. The two external Open actions retain their existing roles.
+
+Headless verification passed 2,383 genuine configured-Qt/file checks, including
+151 new routed-writer/list checks and 31 Peek opening-editor regression checks.
+The full Debug build and link also passed. The shared core harness passed 10,403
+config checks and 1,102 sync-flow checks. Native
+dialog/editor behavior, Windows execution and live sync remain separate checks;
+no GUI or application launch was used. The final rename window and settings,
+backup and good updates remain finite checks, not a filesystem transaction.
