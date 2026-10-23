@@ -11,6 +11,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_config_history.h"
 #include "purple/purple_sync_local_store.h"
 #include "purple/purple_state.h"
+#include "purple/purple_engine.h"
+#include "purple/purple_global_choice_activation.h"
+#include <QtCore/QDirIterator>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
@@ -1627,6 +1630,338 @@ void AccountSettingsRowsAndResetCases() {
 #endif
 }
 
+std::map<QString, QByteArray> ChoiceOtherFiles(const QString &root) {
+	auto result = std::map<QString, QByteArray>();
+	auto iterator = QDirIterator(root, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+	while (iterator.hasNext()) {
+		const auto path = iterator.next();
+		if (QDir(root).relativeFilePath(path) != u"local.toml"_q) { result[path] = Get(path); }
+	}
+	return result;
+}
+
+void GlobalAccountChoiceCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto t = AccountKey{ 1, 101 };
+	const auto root = QByteArray("version=1\n[presets.work]\n[premium]\nenabled_p=false\n");
+	CHECK(!ShouldShowGlobalAccountChoice(1, true));
+	CHECK(ShouldShowGlobalAccountChoice(2, true));
+	CHECK(ShouldShowGlobalAccountChoice(1, false));
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto localPath = temp.filePath(u"local.toml"_q);
+		const auto before = Get(localPath);
+		const auto others = ChoiceOtherFiles(temp.path());
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		CHECK(preview->enterNormal && preview->noAppWideSettings && !preview->selectedUsesGood);
+		CHECK(preview->before.presets.size() == 1 && preview->after.presets.empty());
+		CHECK(Get(localPath) == before && ChoiceOtherFiles(temp.path()) == others);
+		CHECK(!QFileInfo::exists(preview->selected.file.path));
+		auto commit = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(commit.ok && commit.changed && !commit.activated);
+		CHECK(config.globalAccount() == a);
+		CHECK(ParseLocalChoice(QString::fromUtf8(Get(localPath)), localPath).choice.globalAccount == b);
+		CHECK(config.owner() == a && config.validateGlobalChoiceCommit(*preview, commit));
+		auto deviceState = State();
+		deviceState.activePreset = preview->runningPreset;
+		CHECK(!Resolve(preview->after, deviceState.activePreset));
+		deviceState.activePreset = NormalPreset();
+		deviceState.activeSource = PresetSource::Manual;
+		const auto normal = Resolve(preview->after, deviceState.activePreset);
+		CHECK(normal && normal->normal);
+		CHECK(config.activateGlobalChoice(*preview, commit));
+		CHECK(commit.activated && config.globalAccount() == b && config.owner() == a);
+		CHECK(config.validateGlobalChoiceCommit(*preview, commit));
+		CHECK(ChoiceOtherFiles(temp.path()) == others);
+		CHECK(!QFileInfo::exists(preview->selected.file.path));
+		CHECK(Get(localPath).contains("accounts/0-202/settings.toml"));
+		CHECK(!config.observeAccountSave(b));
+		config.start({ { a, false, false } });
+		const auto offline = config.previewGlobalChoice(a, b, NormalPreset());
+		CHECK(offline && offline->selected.file.account == b && !offline->enterNormal);
+		CHECK(!config.previewGlobalChoice(a, t, NormalPreset()));
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto files = config.files(b);
+		CHECK(files);
+		if (!files) { return; }
+		const auto selected = QByteArray("version=2\n[presets.work]\n[premium]\nenabled_p=true\n[schedule]\nenabled_p=false\n");
+		Put(files->settings, selected);
+		Put(files->syncStore, QByteArray("opaque synthetic store unchanged"));
+		Put(files->fingerprintFile, QByteArray("opaque synthetic fingerprints unchanged"));
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto original = Get(local) + QByteArray("\nunknown_local_key='retain' # untouched\n[account_work_mode]\n\"0-101\"='follow'\n\"0-202\"='stock'\n[future]\nname='non-ascii \xF0\x9F\x8C\xB1'\n");
+		Put(local, original);
+		config.refreshLocalChoice();
+		const auto others = ChoiceOtherFiles(temp.path());
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview);
+		if (!preview) { return; }
+		CHECK(!preview->enterNormal && !preview->noAppWideSettings);
+		CHECK(preview->after.premium.enabled && !preview->before.premium.enabled);
+		const auto oldChoice = ParseLocalChoice(QString::fromUtf8(original), local);
+		auto committed = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(committed.ok && config.activateGlobalChoice(*preview, committed));
+		const auto after = Get(local);
+		const auto choice = ParseLocalChoice(QString::fromUtf8(after), local);
+		CHECK(choice.ok() && choice.choice.globalAccount == b && choice.choice.rootFileAccount == a);
+		CHECK(choice.choice.accountWorkMode == oldChoice.choice.accountWorkMode);
+		CHECK(after.contains("unknown_local_key='retain' # untouched\n"));
+		CHECK(after.contains("[future]\nname='non-ascii \xF0\x9F\x8C\xB1'\n"));
+		CHECK(ChoiceOtherFiles(temp.path()) == others);
+		CHECK(Get(files->settings) == selected);
+	}
+	for (auto stale = 0; stale != 6; ++stale) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto files = config.files(b);
+		CHECK(files);
+		if (!files) { return; }
+		Put(files->settings, QByteArray("version=2\n"));
+		config.start({ { a, false, false }, { b, true, false } });
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview);
+		if (!preview) { return; }
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto before = Get(local);
+		if (stale == 0) { Put(local, before + QByteArray("# foreign writer\n")); }
+		else if (stale == 1) { Put(files->settings, QByteArray("version=2\n[premium]\nenabled_p=true\n")); }
+		else if (stale == 2) { Put(temp.filePath(u"accounts/root.toml"_q), Get(temp.filePath(u"accounts/root.toml"_q))); }
+		else if (stale == 3) { config.start({ { a, false, false } }); }
+		else if (stale == 4) { Put(local, before); }
+		else {
+			auto choice = ParseLocalChoice(QString::fromUtf8(before), local).choice;
+			choice.globalAccount = b;
+			const auto changed = SerializeLocalChoice(choice);
+			CHECK(changed);
+			if (!changed) { return; }
+			Put(local, changed->toUtf8()); config.refreshLocalChoice();
+			Put(local, before); config.refreshLocalChoice();
+		}
+		const auto expectedLocal = Get(local);
+		const auto expectedOther = ChoiceOtherFiles(temp.path());
+		CHECK(!config.validateGlobalChoice(*preview));
+		CHECK(!config.commitGlobalChoice(*preview, [] { return true; }).ok);
+		CHECK(Get(local) == expectedLocal && ChoiceOtherFiles(temp.path()) == expectedOther);
+		CHECK(config.owner() == a);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		const auto files = config.files(t);
+		CHECK(files);
+		if (!files) { return; }
+		Put(files->settings, QByteArray("invalid ["));
+		config.start({ { a, false, false }, { t, true, false } });
+		CHECK(!config.previewGlobalChoice(a, t, u"work"_q));
+		Put(files->good, QByteArray("version=2\n[premium]\nenabled_p=true\n"));
+		const auto preview = config.previewGlobalChoice(a, t, u"work"_q);
+		CHECK(preview && preview->selectedUsesGood && preview->after.premium.enabled);
+		if (!preview) { return; }
+		CHECK(preview->selected.file.path.contains(u"accounts/1-101/"_q));
+		Put(files->good, QByteArray("version=2\n[premium]\nenabled_p=false\n"));
+		CHECK(!config.validateGlobalChoice(*preview));
+		CHECK(config.owner() == a);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		config.start({ { a, false, false }, { b, false, false } });
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview);
+		if (!preview) { return; }
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto before = Get(local);
+		auto context = std::make_unique<QObject>();
+		const auto guard = QPointer<QObject>(context.get());
+		auto checks = 0;
+		const auto result = config.commitGlobalChoice(*preview, [&] {
+			if (++checks == 2) { context.reset(); }
+			return !guard.isNull();
+		});
+		CHECK(!result.ok && !result.changed && Get(local) == before);
+		const auto foreign = before + QByteArray("# newer local writer\n");
+		checks = 0;
+		const auto conflict = config.commitGlobalChoice(*preview, [&] {
+			if (++checks == 2) { Put(local, foreign); }
+			return true;
+		});
+		CHECK(!conflict.ok && !conflict.changed && Get(local) == foreign);
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(path, QByteArray("version=2\n"));
+		auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		auto forged = *preview;
+		forged.enterNormal = false;
+		CHECK(!config.validateGlobalChoice(forged));
+		Put(path + u".good"_q, QByteArray("version=2\n# unrelated recovery maintenance\n"));
+		CHECK(config.validateGlobalChoice(*preview));
+		auto committed = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(committed.ok && committed.changed && !committed.activated);
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto foreign = Get(local) + QByteArray("# foreign write after publication\n");
+		Put(local, foreign);
+		CHECK(!config.activateGlobalChoice(*preview, committed));
+		CHECK(Get(local) == foreign && config.owner() == a);
+	}
+#ifndef Q_OS_WIN
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto path = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(path, QByteArray("version=2\n"));
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		const auto replacement = temp.filePath(u"replacement.toml"_q);
+		Put(replacement, Get(path));
+		CHECK(QFile::remove(path));
+		CHECK(QFile::link(replacement, path));
+		const auto local = Get(temp.filePath(u"local.toml"_q));
+		CHECK(!config.previewGlobalChoice(a, b, u"work"_q));
+		CHECK(!config.commitGlobalChoice(*preview, [] { return true; }).changed);
+		CHECK(Get(temp.filePath(u"local.toml"_q)) == local);
+	}
+#endif
+
+}
+
+
+void GlobalChoiceActivationOrderingCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto oldSettings = QByteArray("version=1\n[presets.work]\n");
+	for (const auto conflict : { false, true }) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), oldSettings);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto target = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(target, QByteArray("version=2\n"));
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		CHECK(preview->enterNormal);
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto foreign = QByteArray("version=2\n# foreign selected-file writer\n");
+		auto injected = false;
+		auto committed = config.commitGlobalChoice(*preview, [&] {
+			if (conflict && !injected && Get(local) != preview->current.localInput.bytes) {
+				Put(target, foreign);
+				injected = true;
+			}
+			return true;
+		});
+		CHECK(committed.changed && committed.ok == !conflict);
+		CHECK(injected == conflict);
+		CHECK(ParseLocalChoice(QString::fromUtf8(Get(local)), local).choice.globalAccount == b);
+		const auto saved = Get(local);
+		auto state = State();
+		state.activePreset = u"work"_q;
+		state.activeSource = PresetSource::Manual;
+		const auto before = SerializeState(state);
+		auto transitions = QStringList();
+		auto activationCalls = 0;
+		const auto activated = RunGlobalAccountChoiceActivation(committed, preview->enterNormal,
+			[&] { return config.validateGlobalChoiceCommit(*preview, committed); },
+			[&] {
+				state.activePreset = NormalPreset();
+				state.activeSource = PresetSource::Manual;
+				transitions.push_back(state.activePreset);
+				const auto resolved = Resolve(preview->before, state.activePreset);
+				return resolved && resolved->normal;
+			}, [&] {
+				++activationCalls;
+				CHECK(state.activePreset == NormalPreset());
+				CHECK(transitions == QStringList{ NormalPreset() });
+				return config.activateGlobalChoice(*preview, committed);
+			});
+		CHECK(activated == !conflict);
+		CHECK(committed.activated == !conflict);
+		CHECK(activationCalls == (conflict ? 0 : 1));
+		CHECK(Get(local) == saved && config.owner() == a);
+		if (conflict) {
+			CHECK(SerializeState(state) == before);
+			CHECK(state.activePreset == u"work"_q);
+			CHECK(transitions.empty());
+			CHECK(Get(target) == foreign);
+			CHECK(config.globalAccount() == a);
+		} else {
+			CHECK(state.activePreset == NormalPreset());
+			CHECK(transitions == QStringList{ NormalPreset() });
+			CHECK(config.globalAccount() == b);
+		}
+	}
+	for (const auto retireBeforeNormal : { false, true }) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), oldSettings);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto target = temp.filePath(u"accounts/0-202/settings.toml"_q);
+		Put(target, QByteArray("version=2\n"));
+		const auto preview = config.previewGlobalChoice(a, b, u"work"_q);
+		CHECK(preview.has_value());
+		if (!preview) { return; }
+		auto committed = config.commitGlobalChoice(*preview, [] { return true; });
+		CHECK(committed.ok && committed.changed);
+		const auto local = temp.filePath(u"local.toml"_q);
+		const auto saved = Get(local);
+		auto state = State();
+		state.activePreset = u"work"_q;
+		const auto before = SerializeState(state);
+		auto context = std::make_unique<QObject>();
+		const auto guard = QPointer<QObject>(context.get());
+		if (retireBeforeNormal) { context.reset(); }
+		auto gateCalls = 0;
+		auto activationCalls = 0;
+		CHECK(!RunGlobalAccountChoiceActivation(committed, preview->enterNormal,
+			[&] { return guard && config.validateGlobalChoiceCommit(*preview, committed); },
+			[&] {
+				++gateCalls;
+				state.activePreset = NormalPreset();
+				context.reset();
+				return true;
+			}, [&] {
+				++activationCalls;
+				return config.activateGlobalChoice(*preview, committed);
+			}));
+		CHECK(!committed.ok && !committed.activated);
+		CHECK(activationCalls == 0);
+		CHECK(gateCalls == (retireBeforeNormal ? 0 : 1));
+		CHECK(Get(local) == saved && config.owner() == a && config.globalAccount() == a);
+		if (retireBeforeNormal) { CHECK(SerializeState(state) == before); }
+		else { CHECK(state.activePreset == NormalPreset()); }
+	}
+}
+
+
 }
 
 int main(int argc, char *argv[]) {
@@ -1659,6 +1994,14 @@ int main(int argc, char *argv[]) {
 	const auto beforeRows = Checks;
 	AccountSettingsRowsAndResetCases();
 	std::printf("accountRowsReset %d checks\n", Checks - beforeRows);
+	std::printf("priorBatch1340 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeGlobalChoice = Checks;
+	GlobalAccountChoiceCases();
+	std::printf("globalAccountChoice %d checks\n", Checks - beforeGlobalChoice);
+	std::printf("priorBatch1580 %d checks, %d failures\n", Checks, Failures);
+	const auto beforeActivationRepair = Checks;
+	GlobalChoiceActivationOrderingCases();
+	std::printf("activationOrdering %d checks\n", Checks - beforeActivationRepair);
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

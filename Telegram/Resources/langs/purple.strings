@@ -88,3 +88,23 @@ docs/purple/upstream_hooks.md.
 "lng_purple_settings_scope_override" = "{account} sets their own value.";
 "lng_purple_settings_scope_reset" = "Use {account}'s value";
 "lng_purple_settings_row_changed" = "Settings changed or could not be saved. Reopen this setting and try again.";
+
+"lng_purple_global_source" = "App-wide settings from {account}";
+"lng_purple_global_change" = "Change";
+"lng_purple_global_choose" = "App-wide settings account";
+"lng_purple_global_preview_action" = "Preview changes";
+"lng_purple_global_confirm" = "Use these app-wide settings";
+"lng_purple_global_preview" = "Use app-wide settings from {account} on this device?";
+"lng_purple_global_lists" = "Work Mode lists: %1 → %2";
+"lng_purple_global_presets" = "Presets: %1 → %2";
+"lng_purple_global_schedule" = "Schedule: %1 → %2";
+"lng_purple_global_premium" = "Local Premium: %1 → %2";
+"lng_purple_global_no_settings" = "{account}'s file has no app-wide settings of its own. This device will use Telegram's defaults for them.";
+"lng_purple_global_normal" = "The running preset '%1' is not in {account}'s settings. This device will switch to Normal before activating them.";
+"lng_purple_global_good" = "The preview uses this account's last-good settings copy.";
+"lng_purple_global_unavailable" = "App-wide settings are unavailable. Repair the file or account ownership, then preview again.";
+"lng_purple_global_test_servers" = " (test servers)";
+"lng_purple_global_on" = "on";
+"lng_purple_global_off" = "off";
+
+"lng_purple_global_saved_activation_incomplete" = "The app-wide account choice was saved, but activation did not finish safely. Reopen this choice and preview it again.";

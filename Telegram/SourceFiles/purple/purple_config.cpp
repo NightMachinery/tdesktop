@@ -7,6 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
 #include "purple/purple_account_send_queue.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_global_choice_activation.h"
+#include "ui/widgets/checkbox.h"
+#include "ui/boxes/confirm_box.h"
+#include "window/window_session_controller.h"
+#include <QtCore/QPointer>
+#include <QtCore/qscopeguard.h>
 
 #include "base/timer.h"
 #include "base/weak_ptr.h"
@@ -361,6 +368,11 @@ public:
 	[[nodiscard]] std::optional<SettingsFileInput> checkedInput();
 	void observeAccountFiles() { autoSendLater(); }
 	void refreshAccountRows() { _accountRefreshPending = true; reloadFromDisk(); }
+	GlobalAccountChoiceResult switchGlobalAccount(
+		const GlobalAccountChoicePreview &preview,
+		const std::function<bool()> &originCurrent);
+	void flushGlobalChoiceState();
+
 	void noteSent(const QByteArray &bytes);
 	void noteImported(const QByteArray &bytes);
 
@@ -386,6 +398,8 @@ private:
 	SettingsFileInput _diskInput;
 	QString _settingsPath;
 	bool _accountRefreshPending = false;
+	bool _globalChoiceApplying = false;
+	bool _globalChoiceStatePending = false;
 	QString _text;
 	Settings _settings;
 	Problems _problems;
@@ -618,6 +632,7 @@ void Config::startWatching() {
 }
 
 void Config::reloadFromDisk() {
+	if (_globalChoiceApplying) { _accountRefreshPending = true; return; }
 	if (_watcher
 		&& !_watcher->files().contains(SettingsFilePath())
 		&& QFileInfo::exists(SettingsFilePath())) {
@@ -633,11 +648,13 @@ void Config::reloadFromDisk() {
 			_changes.fire({});
 		}
 		autoSendLater();
+		flushGlobalChoiceState();
 		// Our own writes come back through the watcher too.
 		return;
 	}
 	applyInput(input);
 	autoSendLater();
+	flushGlobalChoiceState();
 }
 
 void Config::reloadStateFromDisk() {
@@ -839,7 +856,74 @@ void Config::updateState(Fn<void(State&)> apply) {
 		|| !WriteConfigFile(StateFilePath(), _stateText)) {
 		LOG(("Purple Error: Could not save %1.").arg(StateFilePath()));
 	}
-	_stateChanges.fire({});
+	if (_globalChoiceApplying) { _globalChoiceStatePending = true; }
+	else { _stateChanges.fire({}); }
+}
+
+void Config::flushGlobalChoiceState() {
+	if (!_globalChoiceApplying && std::exchange(_globalChoiceStatePending, false)) {
+		_stateChanges.fire({});
+	}
+}
+
+GlobalAccountChoiceResult Config::switchGlobalAccount(
+		const GlobalAccountChoicePreview &preview,
+		const std::function<bool()> &originCurrent) {
+	if (ConfigDirectory() != preview.current.root || _globalChoiceApplying || !GlobalAccountChoiceActivationReady()
+		|| SerializeState(_state) != preview.activationState) {
+		return { .error = u"The device state changed. Preview the choice again."_q };
+	}
+	const auto verified = AccountRouting().previewGlobalChoice(preview.current.requester,
+		preview.selected.file.account, preview.runningPreset);
+	if (!verified || !AccountRouting().validateGlobalChoice(preview)) {
+		return { .error = u"The preview changed. Preview the choice again."_q };
+	}
+	_globalChoiceApplying = true;
+	auto barrier = qScopeGuard([&] { _globalChoiceApplying = false; });
+	const auto beforeCommit = [&] {
+		return originCurrent && originCurrent() && ConfigDirectory() == preview.current.root
+			&& SerializeState(_state) == preview.activationState;
+	};
+	auto result = AccountRouting().commitGlobalChoice(preview, beforeCommit);
+	if (!result.changed) { return result; }
+	_accountRefreshPending = true;
+	_reload.callOnce(kReloadDelay);
+	const auto committedCurrent = [&] {
+		return originCurrent && originCurrent() && ConfigDirectory() == preview.current.root
+			&& AccountRouting().validateGlobalChoiceCommit(preview, result);
+	};
+	const auto normal = [&] {
+		updateState([](State &state) {
+			state.activePreset = NormalPreset();
+			state.activeSource = PresetSource::Manual;
+		});
+		return RefreshGlobalAccountChoiceNormal();
+	};
+	if (!RunGlobalAccountChoiceActivation(result, preview.enterNormal, committedCurrent, normal,
+			[&] { return AccountRouting().activateGlobalChoice(preview, result); })) {
+		result.error = u"The app-wide choice was saved, but activation did not finish safely. Preview it again."_q;
+		return result;
+	}
+	_diskInput = preview.selected.file.input;
+	_settingsPath = preview.selected.file.path;
+	_text = QString::fromUtf8(_diskInput.bytes);
+	AccountRouting().refreshSettings();
+	applySettings(verified->after, _settingsPath);
+	_usingLastGoodSettings = preview.selectedUsesGood;
+	_problems = {};
+	const auto current = ParseSettings(_text, _settingsPath);
+	_problems.error = current.error;
+	_problems.warnings = current.warnings;
+	_accountRefreshPending = false;
+	_changes.fire({});
+	_globalChoiceApplying = false;
+	barrier.dismiss();
+	flushGlobalChoiceState();
+	if (!originCurrent() || !AccountRouting().validateGlobalChoiceCommit(preview, result)) {
+		result.ok = false;
+		result.error = u"The app-wide choice changed during activation."_q;
+	}
+	return result;
 }
 
 // Deliberately never destroyed. It owns QObjects - a watcher and a timer - and
@@ -1323,6 +1407,148 @@ bool AccountSettingsResetVisible(not_null<Main::Session*> session, AccountSettin
 	return row != AccountSettingsRow::SendAfterSave
 		&& SettingsRowLabels(session, row).multiple
 		&& AccountSettingsRowFor(session, row).pinned;
+}
+
+namespace {
+
+struct GlobalChoiceOption {
+	AccountKey key;
+	QString name;
+	base::weak_ptr<Main::Session> session;
+	bool signedIn = false;
+};
+
+std::vector<GlobalChoiceOption> GlobalChoiceOptions() {
+	auto result = std::vector<GlobalChoiceOption>();
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto live = entry.account->maybeSession();
+		if (!live || entry.account->loggingOut()) { continue; }
+		const auto key = SessionAccountKey(live);
+		auto name = live->user()->name();
+		if (key.environment == 1) { name += tr::lng_purple_global_test_servers(tr::now); }
+		result.push_back({ key, name, base::make_weak(live), true });
+	}
+	if (const auto global = AccountRouting().globalAccount()) {
+		if (std::none_of(result.begin(), result.end(), [&](const GlobalChoiceOption &entry) { return entry.key == *global; })) {
+			auto name = tr::lng_purple_settings_signed_out_global(tr::now, lt_account,
+				AccountKeyText(global->environment, global->userId).value_or(QString()));
+			if (global->environment == 1) { name += tr::lng_purple_global_test_servers(tr::now); }
+			result.push_back({ *global, name, {}, false });
+		}
+	}
+	return result;
+}
+
+bool GlobalChoiceRosterCurrent(const std::vector<GlobalChoiceOption> &options) {
+	const auto current = GlobalChoiceOptions();
+	auto before = std::vector<const GlobalChoiceOption*>();
+	auto after = std::vector<const GlobalChoiceOption*>();
+	for (const auto &entry : options) { if (entry.signedIn) { before.push_back(&entry); } }
+	for (const auto &entry : current) { if (entry.signedIn) { after.push_back(&entry); } }
+	if (before.size() != after.size()) { return false; }
+	for (auto i = size_t(0); i != before.size(); ++i) {
+		if (before[i]->key != after[i]->key || before[i]->session.get() != after[i]->session.get()) { return false; }
+	}
+	return true;
+}
+
+QString GlobalChoiceSummary(const GlobalAccountChoicePreview &preview, const QString &name) {
+	const auto schedule = [](const Settings &settings) {
+		return settings.schedule.enabled && (!settings.schedule.rules.empty() || !settings.schedule.rulesets.empty());
+	};
+	const auto onOff = [](bool on) { return on ? tr::lng_purple_global_on(tr::now) : tr::lng_purple_global_off(tr::now); };
+	auto result = tr::lng_purple_global_preview(tr::now, lt_account, name)
+		+ '\n' + tr::lng_purple_global_lists(tr::now).arg(preview.before.lists.size()).arg(preview.after.lists.size())
+		+ '\n' + tr::lng_purple_global_presets(tr::now).arg(preview.before.presets.size()).arg(preview.after.presets.size())
+		+ '\n' + tr::lng_purple_global_schedule(tr::now).arg(onOff(schedule(preview.before)), onOff(schedule(preview.after)))
+		+ '\n' + tr::lng_purple_global_premium(tr::now).arg(onOff(preview.before.premium.enabled), onOff(preview.after.premium.enabled));
+	if (preview.noAppWideSettings) { result += '\n' + tr::lng_purple_global_no_settings(tr::now, lt_account, name); }
+	if (preview.selectedUsesGood) { result += '\n' + tr::lng_purple_global_good(tr::now); }
+	if (preview.enterNormal) { result += '\n' + tr::lng_purple_global_normal(tr::now, lt_account, name).arg(preview.runningPreset); }
+	return result;
+}
+
+}
+
+QString GlobalAccountChoiceTitle(not_null<Main::Session*> session) {
+	const auto global = AppWideSettingsAccount(session);
+	if (!global) { return tr::lng_purple_global_unavailable(tr::now); }
+	const auto options = GlobalChoiceOptions();
+	const auto found = std::find_if(options.begin(), options.end(), [&](const GlobalChoiceOption &entry) { return entry.key == *global; });
+	return found != options.end() ? tr::lng_purple_global_source(tr::now, lt_account, found->name)
+		: tr::lng_purple_global_unavailable(tr::now);
+}
+
+bool GlobalAccountChoiceVisible(not_null<Main::Session*> session) {
+	const auto global = AppWideSettingsAccount(session);
+	if (!global) { return false; }
+	const auto options = GlobalChoiceOptions();
+	const auto count = std::count_if(options.begin(), options.end(), [](const GlobalChoiceOption &entry) { return entry.signedIn; });
+	const auto current = std::find_if(options.begin(), options.end(), [&](const GlobalChoiceOption &entry) { return entry.key == *global; });
+	return ShouldShowGlobalAccountChoice(int(count), current != options.end() && current->signedIn);
+}
+
+void ChooseGlobalAccountBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller) {
+	const auto origin = base::make_weak(&controller->session());
+	const auto originKey = SessionAccountKey(&controller->session());
+	const auto window = base::make_weak(controller.get());
+	const auto picker = QPointer<Ui::GenericBox>(box.get());
+	const auto options = GlobalChoiceOptions();
+	const auto current = [=] {
+		const auto live = origin.get();
+		const auto ownWindow = window.get();
+		return picker && live && ownWindow && &ownWindow->session() == live
+			&& !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == originKey && GlobalChoiceRosterCurrent(options);
+	};
+	box->setTitle(tr::lng_purple_global_choose());
+	const auto group = std::make_shared<Ui::RadiobuttonGroup>();
+	const auto global = AccountRouting().globalAccount();
+	for (auto i = size_t(0); i != options.size(); ++i) {
+		box->addRow(object_ptr<Ui::Radiobutton>(box, group, int(i), options[i].name));
+		if (global == options[i].key) { group->setValue(int(i)); }
+	}
+	box->addButton(tr::lng_purple_global_preview_action(), [=] {
+		if (!current()) { return; }
+		if (!group->hasValue()) { return; }
+		const auto index = group->current();
+		if (index < 0 || index >= int(options.size())) { return; }
+		const auto live = origin.get();
+		const auto state = SerializeState(CurrentState());
+		auto preview = AccountRouting().previewGlobalChoice(SessionAccountKey(live), options[index].key, CurrentState().activePreset);
+		if (!current()) { return; }
+		if (!preview || SerializeState(CurrentState()) != state) {
+			window.get()->show(Ui::MakeInformBox(tr::lng_purple_global_unavailable(tr::now)));
+			return;
+		}
+		preview->activationState = state;
+		const auto labels = GlobalChoiceOptions();
+		const auto selected = std::find_if(labels.begin(), labels.end(), [&](const GlobalChoiceOption &entry) {
+			return entry.key == preview->selected.file.account;
+		});
+		if (selected == labels.end() || !current() || !AccountRouting().validateGlobalChoice(*preview)) { return; }
+		const auto label = selected->name;
+		window.get()->show(Box([=](not_null<Ui::GenericBox*> confirm) {
+			const auto confirmation = QPointer<Ui::GenericBox>(confirm.get());
+			confirm->setTitle(tr::lng_purple_global_confirm());
+			confirm->addRow(object_ptr<Ui::FlatLabel>(confirm, rpl::single(GlobalChoiceSummary(*preview, label))));
+			confirm->addButton(tr::lng_purple_global_confirm(), [=] {
+				if (!confirmation || !current()) { return; }
+				const auto result = Instance().switchGlobalAccount(*preview, [=] { return confirmation && current(); });
+				if (!confirmation || !current()) { return; }
+				if (result.ok) { confirmation->closeBox(); if (picker) { picker->closeBox(); } }
+				else {
+					window.get()->show(Ui::MakeInformBox(result.changed
+						? tr::lng_purple_global_saved_activation_incomplete(tr::now)
+						: tr::lng_purple_settings_row_changed(tr::now)));
+				}
+			});
+			confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
+		}), Ui::LayerOption::KeepOther);
+	});
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
 
 QString SettingsOwnerStatus() {

@@ -37,6 +37,8 @@ namespace Purple {
 [[nodiscard]] const Resolved &ActiveResolved();
 [[nodiscard]] const Resolved &ActiveResolved(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<> ActiveChanges();
+[[nodiscard]] bool GlobalAccountChoiceActivationReady();
+[[nodiscard]] bool RefreshGlobalAccountChoiceNormal();
 
 // What to write on the preset's main tab: its `default_view_name', or its name
 // with the first letter capitalised. Never empty while a preset is running.

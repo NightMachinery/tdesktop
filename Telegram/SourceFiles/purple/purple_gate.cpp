@@ -45,6 +45,8 @@ namespace {
 class Gate final {
 public:
 	Gate();
+	[[nodiscard]] bool globalChoiceReady() const;
+	[[nodiscard]] bool refreshGlobalChoiceNormal();
 
 	[[nodiscard]] const Resolved &resolved() const {
 		return _resolved;
@@ -79,6 +81,16 @@ private:
 	rpl::lifetime _lifetime;
 
 };
+
+bool Gate::globalChoiceReady() const {
+	return !_refreshing;
+}
+
+bool Gate::refreshGlobalChoiceNormal() {
+	if (_refreshing) { return false; }
+	refresh(false);
+	return _resolved.normal;
+}
 
 Gate::Gate() {
 	_peekTimer.setCallback([] {
@@ -326,6 +338,14 @@ MemberTitle TitleResolver(not_null<Main::Session*> session) {
 		}();
 		return peer ? peer->name() : QString();
 	};
+}
+
+bool GlobalAccountChoiceActivationReady() {
+	return Instance().globalChoiceReady();
+}
+
+bool RefreshGlobalAccountChoiceNormal() {
+	return Instance().refreshGlobalChoiceNormal();
 }
 
 const Resolved &ActiveResolved() {

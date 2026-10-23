@@ -1231,3 +1231,29 @@ is not a save and does not publish or send. Reset and ordinary reads never creat
 an absent file. Existing files keep their version, unrelated text and comments.
 Other per-account editors remain unavailable; Work Mode, preset, schedule and
 global settings retain their existing app-wide destination.
+
+
+### Choose the account that supplies app-wide settings
+
+In Settings > Advanced > Purple, **App-wide settings from … · Change** selects
+which account supplies Work Mode lists and presets, schedule settings and Local
+Premium. The row appears with multiple signed-in accounts or a signed-out current
+source. Test-server accounts are labeled separately. The original root-file owner
+remains unchanged, including when another account supplies app-wide settings.
+
+Preview shows the selected file's actual app-wide settings and identifies a valid
+last-good fallback or the absence of app-wide settings. A missing account file is
+not created by this action. A broken file without a valid same-account fallback
+cannot be chosen silently. Confirm explicitly to save the device-local choice.
+If the running preset does not exist or cannot resolve in the new settings, the
+confirmation warns that Work Mode will enter Normal before the new settings take
+effect. Editing local choices by hand keeps the existing reload/cache behavior.
+
+Only the supported local global-account choice changes. Settings files, stores,
+History and fingerprints are not moved or created, and nothing is sent. If an
+account signs out or a captured file/context changes, preview again. State and
+local choice persistence are not one crash-atomic transaction. The chooser baseline passed 69 affected production compiles and 1,580 genuine
+Qt/file checks. A subsequent ordering repair has separate affected qualification
+and focused review. Native picker/confirmation, Windows and a matching full
+application remain separate; deferred account editor and version-two transport
+are not enabled. A saved choice with incomplete activation is reported explicitly.

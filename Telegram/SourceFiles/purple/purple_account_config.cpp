@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config_diff.h"
 #include "purple/purple_state.h"
 #include "purple/purple_config_payload.h"
+#include "purple/purple_engine.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QRegularExpression>
 #ifdef Q_OS_WIN
@@ -218,6 +219,70 @@ bool HasOwnRowKey(const SettingsFileInput &input, AccountSettingsRow row) {
 	const auto key = RowKey(row).toStdString();
 	const auto values = parsed.table()[table].as_table();
 	return values && values->contains(key);
+}
+
+QByteArray ChoiceFileIdentity(const QString &path) {
+	const auto info = QFileInfo(path);
+	if (!info.exists() && !info.isSymLink()) { return QByteArray("missing"); }
+	if (!AccountFilePathSafe(path)) { return {}; }
+#ifdef Q_OS_WIN
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+		0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return {}; }
+	auto value = BY_HANDLE_FILE_INFORMATION();
+	const auto ok = GetFileInformationByHandle(handle, &value);
+	CloseHandle(handle);
+	return ok ? QByteArray::number(value.dwVolumeSerialNumber) + ':'
+		+ QByteArray::number(value.nFileIndexHigh) + ':' + QByteArray::number(value.nFileIndexLow)
+		+ ':' + QByteArray::number(value.ftLastWriteTime.dwHighDateTime)
+		+ ':' + QByteArray::number(value.ftLastWriteTime.dwLowDateTime) : QByteArray();
+#else
+	struct stat value = {};
+	if (::lstat(QFile::encodeName(path).constData(), &value) != 0) { return {}; }
+#ifdef Q_OS_MAC
+	const auto modified = value.st_mtimespec;
+	const auto changed = value.st_ctimespec;
+#else
+	const auto modified = value.st_mtim;
+	const auto changed = value.st_ctim;
+#endif
+	return QByteArray::number(qulonglong(value.st_dev)) + ':'
+		+ QByteArray::number(qulonglong(value.st_ino)) + ':' + QByteArray::number(qlonglong(value.st_size))
+		+ ':' + QByteArray::number(qlonglong(modified.tv_sec)) + ':' + QByteArray::number(qlonglong(modified.tv_nsec))
+		+ ':' + QByteArray::number(qlonglong(changed.tv_sec)) + ':' + QByteArray::number(qlonglong(changed.tv_nsec));
+#endif
+}
+
+std::optional<QString> ChoiceText(
+		const QString &text, const QString &path, const AccountKey &account) {
+	const auto key = AccountKeyText(account.environment, account.userId);
+	const auto bytes = text.toUtf8();
+	const auto parsed = toml::parse(std::string_view(bytes.constData(), bytes.size()), path.toStdString());
+	if (!key || !parsed) { return std::nullopt; }
+	const auto value = u"\"%1\""_q.arg(*key);
+	const auto node = parsed.table().get("global_account");
+	const auto owner = ParseLocalChoice(text, path).choice.rootFileAccount;
+	if (!owner) { return std::nullopt; }
+	const auto selectedPath = account == *owner
+		? u"settings.toml"_q : u"accounts/%1/settings.toml"_q.arg(*key);
+	const auto pathComment = u"# That account's file on this device: "_q + selectedPath;
+	if (!node) { return u"global_account = %1\n%2\n"_q.arg(value, pathComment) + text; }
+	const auto begin = node->source().begin;
+	const auto end = node->source().end;
+	if (node->is_table() || node->is_array() || begin.line != end.line) { return std::nullopt; }
+	auto lines = text.split('\n');
+	if (begin.line < 1 || begin.line > lines.size()) { return std::nullopt; }
+	const auto points = lines[begin.line - 1].toUcs4();
+	const auto from = int(begin.column) - 1;
+	const auto till = int(end.column) - 1;
+	if (from < 0 || till < from || till > points.size()) { return std::nullopt; }
+	lines[begin.line - 1] = QString::fromUcs4(points.constData(), from) + value
+		+ QString::fromUcs4(points.constData() + till, points.size() - till);
+	if (begin.line < lines.size() && lines[begin.line].startsWith(u"# That account's file on this device: "_q)) {
+		lines[begin.line] = pathComment;
+	}
+	return lines.join('\n');
 }
 
 SettingsFileInput OwnerInput(const QString &path) {
@@ -943,6 +1008,159 @@ AccountSettingsRowWriteResult DesktopAccountConfig::writeRow(
 		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
 	}
 	return { .ok = true, .changed = true, .created = created, .target = expected };
+}
+
+bool ShouldShowGlobalAccountChoice(int signedIn, bool globalSignedIn) {
+	return signedIn >= 2 || !globalSignedIn;
+}
+
+std::optional<GlobalAccountChoicePreview> DesktopAccountConfig::previewGlobalChoice(
+		const AccountKey &requester,
+		const AccountKey &selected,
+		const QString &runningPreset) {
+	refreshLocalChoice();
+	const auto eligible = [&](const AccountKey &key) {
+		return std::any_of(_accounts.begin(), _accounts.end(), [&](const StartupAccountCandidate &entry) {
+			return entry.account == key;
+		});
+	};
+	if (!eligible(requester) || (!eligible(selected) && globalAccount() != selected)) { return std::nullopt; }
+	const auto paths = files(selected);
+	const auto globalPath = globalSettingsPath();
+	if (!paths || !RowDirectorySafe(paths->directory)
+		|| !RowDirectorySafe(QFileInfo(globalPath).absolutePath())) { return std::nullopt; }
+	const auto current = openTarget(requester, SettingsOpenRole::AppWide);
+	const auto destination = openTarget(selected, SettingsOpenRole::Own);
+	if (!current || !destination) { return std::nullopt; }
+	auto result = GlobalAccountChoicePreview();
+	result.current = *current;
+	result.selected = *destination;
+	result.currentGood = OwnerInput(current->file.path + u".good"_q);
+	result.selectedGood = OwnerInput(destination->file.path + u".good"_q);
+	result.currentGoodRelevant = current->file.input.state != SettingsFileState::Readable
+		|| !RowInputUsable(current->file.input, current->file.path);
+	result.selectedGoodRelevant = destination->file.input.state != SettingsFileState::Readable
+		|| !RowInputUsable(destination->file.input, destination->file.path);
+	const auto load = [&](const AccountFileTarget &file, const SettingsFileInput &good,
+			Settings &settings, bool *usesGood = nullptr) -> std::optional<QByteArray> {
+		const auto usable = [&](const SettingsFileInput &input, const QString &path) {
+			return input.state == SettingsFileState::Readable && RowInputUsable(input, path);
+		};
+		if (usable(file.input, file.path)) {
+			settings = ParseSettings(QString::fromUtf8(file.input.bytes), file.path).settings;
+			return file.input.bytes;
+		} else if (usable(good, file.path + u".good"_q)) {
+			settings = ParseSettings(QString::fromUtf8(good.bytes), file.path + u".good"_q).settings;
+			if (usesGood) { *usesGood = true; }
+			return good.bytes;
+		} else if (file.input.state == SettingsFileState::Missing && good.state == SettingsFileState::Missing) {
+			settings = ParseSettings(QString(), file.path).settings;
+			return QByteArray();
+		}
+		return std::nullopt;
+	};
+	const auto previousText = load(current->file, result.currentGood, result.before);
+	const auto selectedText = load(destination->file, result.selectedGood, result.after, &result.selectedUsesGood);
+	if (!previousText || !selectedText) { return std::nullopt; }
+	auto identityPaths = std::vector<QString>{ absolute(u"local.toml"_q),
+		absolute(u"accounts/root.toml"_q), current->file.path, destination->file.path };
+	if (result.currentGoodRelevant) { identityPaths.push_back(current->file.path + u".good"_q); }
+	if (result.selectedGoodRelevant) { identityPaths.push_back(destination->file.path + u".good"_q); }
+	for (const auto &path : identityPaths) {
+		const auto identity = ChoiceFileIdentity(path);
+		if (identity.isEmpty()) { return std::nullopt; }
+		result.fileIdentities[path] = identity;
+	}
+	result.runningPreset = runningPreset.isEmpty() ? NormalPreset() : runningPreset;
+	result.enterNormal = !Resolve(result.after, result.runningPreset).has_value();
+	const auto summary = SummarizeConfigChange(QByteArray("version=2\n"), *selectedText);
+	if (!summary.parsed) { return std::nullopt; }
+	result.noAppWideSettings = true;
+	for (const auto &entry : summary.entries) {
+		for (const auto &key : entry.keys) {
+			if (key.scope == SettingScope::AppWide) { result.noAppWideSettings = false; }
+		}
+	}
+	return result;
+}
+
+bool DesktopAccountConfig::validateGlobalChoice(const GlobalAccountChoicePreview &preview) {
+	const auto current = previewGlobalChoice(preview.current.requester,
+		preview.selected.file.account, preview.runningPreset);
+	return current && preview.current.role == SettingsOpenRole::AppWide
+		&& preview.selected.role == SettingsOpenRole::Own
+		&& preview.selected.requester == preview.selected.file.account
+		&& validateOpen(preview.current) && validateOpen(preview.selected)
+		&& current->enterNormal == preview.enterNormal
+		&& current->noAppWideSettings == preview.noAppWideSettings
+		&& current->selectedUsesGood == preview.selectedUsesGood
+		&& current->currentGoodRelevant == preview.currentGoodRelevant
+		&& current->selectedGoodRelevant == preview.selectedGoodRelevant
+		&& current->fileIdentities == preview.fileIdentities
+		&& (!preview.currentGoodRelevant || current->currentGood == preview.currentGood)
+		&& (!preview.selectedGoodRelevant || current->selectedGood == preview.selectedGood);
+}
+
+bool DesktopAccountConfig::validateGlobalChoiceCommit(
+		const GlobalAccountChoicePreview &preview,
+		const GlobalAccountChoiceResult &commit) const {
+	if (!commit.changed || !_owner || *_owner != preview.current.owner
+		|| _routingGeneration != commit.generation || _persistFailed
+		|| globalAccount() != (commit.activated ? preview.selected.file.account : preview.current.global)
+		|| DirectoryIdentity(_root) != preview.current.rootIdentity
+		|| DirectoryIdentity(absolute(u"accounts"_q)) != preview.current.accountsIdentity
+		|| DirectoryIdentity(QFileInfo(preview.current.file.path).absolutePath()) != preview.current.accountDirectoryIdentity
+		|| DirectoryIdentity(QFileInfo(preview.selected.file.path).absolutePath()) != preview.selected.accountDirectoryIdentity
+		|| OwnerInput(absolute(u"local.toml"_q)) != commit.local
+		|| ChoiceFileIdentity(absolute(u"local.toml"_q)) != commit.localIdentity
+		|| OwnerInput(absolute(u"accounts/root.toml"_q)) != preview.current.ownerInput
+		|| OwnerInput(preview.current.file.path) != preview.current.file.input
+		|| OwnerInput(preview.selected.file.path) != preview.selected.file.input
+		|| (preview.currentGoodRelevant && OwnerInput(preview.current.file.path + u".good"_q) != preview.currentGood)
+		|| (preview.selectedGoodRelevant && OwnerInput(preview.selected.file.path + u".good"_q) != preview.selectedGood)) { return false; }
+	for (const auto &[path, identity] : preview.fileIdentities) {
+		if (path != absolute(u"local.toml"_q) && ChoiceFileIdentity(path) != identity) { return false; }
+	}
+	return true;
+}
+
+GlobalAccountChoiceResult DesktopAccountConfig::commitGlobalChoice(
+		const GlobalAccountChoicePreview &preview,
+		const std::function<bool()> &originCurrent) {
+	const auto current = [&] { return originCurrent && originCurrent() && validateGlobalChoice(preview); };
+	if (!current()) { return { .error = u"The app-wide settings choice changed. Preview it again."_q }; }
+	const auto path = absolute(u"local.toml"_q);
+	const auto text = QString::fromUtf8(preview.current.localInput.bytes);
+	if (text.toUtf8() != preview.current.localInput.bytes) { return { .error = u"Local choices are not valid UTF-8."_q }; }
+	const auto next = ChoiceText(text, path, preview.selected.file.account);
+	if (!next) { return { .error = u"The local global-account key cannot be changed safely."_q }; }
+	const auto parsed = ParseLocalChoice(*next, path);
+	const auto previous = ParseLocalChoice(text, path);
+	if (!parsed.ok() || parsed.choice.rootFileAccount != _owner
+		|| parsed.choice.globalAccount != preview.selected.file.account
+		|| parsed.choice.accountWorkMode != previous.choice.accountWorkMode) {
+		return { .error = u"Local choices could not be preserved."_q };
+	}
+	const auto bytes = next->toUtf8();
+	if (bytes == preview.current.localInput.bytes) { return { .ok = true }; }
+	if (WriteGuardedSettingsFile(path, preview.current.localInput, bytes, current)
+		!= GuardedFileWrite::Written) { return { .error = u"Local choices changed or could not be saved."_q }; }
+	auto result = GlobalAccountChoiceResult{ .changed = true,
+		.local = { SettingsFileState::Readable, bytes }, .localIdentity = ChoiceFileIdentity(path),
+		.generation = _routingGeneration };
+	result.ok = originCurrent() && validateGlobalChoiceCommit(preview, result);
+	if (!result.ok) { result.error = u"The choice was saved, but its context changed."_q; }
+	return result;
+}
+
+bool DesktopAccountConfig::activateGlobalChoice(
+		const GlobalAccountChoicePreview &preview,
+		GlobalAccountChoiceResult &commit) {
+	if (!commit.ok || !validateGlobalChoiceCommit(preview, commit)) { return false; }
+	refreshLocalChoice();
+	commit.activated = true;
+	commit.generation = _routingGeneration;
+	return validateGlobalChoiceCommit(preview, commit);
 }
 
 std::optional<ManualSettingsExportTarget> DesktopAccountConfig::manualExportTarget(

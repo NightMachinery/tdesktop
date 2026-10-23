@@ -195,6 +195,23 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 		.title = tr::lng_purple_settings_files(),
 		.keywords = { u"purple"_q, u"settings"_q, u"file"_q, u"account"_q },
 	});
+	builder.addButton({
+		.id = u"advanced/purple_global_account"_q,
+		.title = AccountRowChanges() | rpl::map([=] {
+			const auto live = weakSession.get();
+			return live ? GlobalAccountChoiceTitle(live) : QString();
+		}),
+		.label = tr::lng_purple_global_change(),
+		.onClick = [=] {
+			if (!windowCurrent()) { return; }
+			weakController.get()->show(Box(ChooseGlobalAccountBox, weakController.get()));
+		},
+		.keywords = { u"purple"_q, u"account"_q, u"global"_q, u"app-wide"_q },
+		.shown = AccountRowChanges() | rpl::map([=] {
+			const auto live = weakSession.get();
+			return live && GlobalAccountChoiceVisible(live);
+		}),
+	});
 	for (const auto role : { SettingsOpenRole::Own, SettingsOpenRole::AppWide }) {
 		const auto target = [=] {
 			const auto live = weakSession.get();

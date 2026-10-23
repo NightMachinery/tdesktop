@@ -203,3 +203,64 @@ The account rows and Reset batch passes all 58 affected production compiles and
 1,340 genuine Qt/file checks, including 373 added checks. The matching full
 application, native settings interactions and Windows behavior still require
 separate validation.
+
+
+## Choosing the app-wide settings account
+
+The Advanced Purple section shows **App-wide settings from … · Change** when
+there are at least two signed-in accounts, or when the current source is signed
+out. The picker uses signed-in account names and marks test-server identities.
+The current signed-out source remains a labeled choice. Choosing a different
+source never changes the original root-file owner or relocates that owner's file.
+
+Preview reads the selected account's actual file, its parser result and, when
+needed, that same account's valid recovery copy. It compares list and preset
+counts, schedule activity and Local Premium. It says when the selected file has
+no app-wide settings, and when a recovery copy supplies the preview. A missing
+file with no recovery copy previews defaults; it is not created. An invalid file
+without a valid recovery copy is refused instead of borrowing another account.
+
+Confirmation captures the originating window and session, signed-in roster,
+current global role, owner record, local choices, selected and previous files,
+relevant recovery inputs, directory identities, file identities and routing
+generation. Changed or dead contexts require another preview. Observed role ABA
+and same-byte atomic replacements invalidate the snapshot. Filesystem identity
+checks include POSIX modification/change timestamps; Windows records volume/file
+index and last-write identity. They do not
+provide an unbounded multi-process compare-and-swap guarantee.
+
+The confirmed writer changes only the root local global-account value and its
+managed path comment. It preserves the immutable owner, own/follow overrides,
+unknown local fields and unrelated text. Existing inline comments are retained;
+live account names and test-server labels come from the UI, not new disk fields.
+It does not create settings files, move stores, edit History or fingerprints, or
+send settings. Existing ordinary reader recovery-cache maintenance is unchanged.
+
+If the running preset cannot resolve in the selected settings, confirmation
+warns that Work Mode will enter Normal. The explicit UI route defers state
+notifications, establishes the actual Normal gate while old settings are still
+active, and then installs the captured new settings before releasing deferred
+notifications. It rechecks lifetime and committed context around activation and
+notifications. External edits to local choices keep their existing cached-preset
+reload behavior. Local-choice publication and best-effort state persistence are
+separate files, so this is not a crash-atomic cross-file transaction. A saved
+choice whose context changes is reported as saved but not safely activated; it
+is not rolled back over another writer.
+
+The chooser baseline passed 69 affected production compiles and 1,580 genuine
+configured-Qt/file checks. Complete source review found one activation-ordering
+defect: a detected failed commit must leave the old State/Gate untouched. The
+repair uses one production-called ordering seam, with actual-model post-publication
+conflict and synchronous lifetime cases in the genuine fixture. Its affected qualification passed both production units and 1,660 genuine
+configured-Qt/file checks, including 80 new causal checks. Focused source review
+closed the activation-ordering finding. Full Config/Gate/window native behavior
+remains unmeasured; helper callback checks do not establish native coverage. General account editing, list forks, destructive
+app-wide removal and unsupported version-two transport remain held.
+
+
+A saved but rejected commit never invokes the Normal transition or new-settings
+activation. The production coordinator requires a successful commit and a current
+origin/committed snapshot first, then rechecks after synchronous Normal and model
+activation. The facade retains its final notification/context guard. Confirmation
+reports a saved choice whose activation did not finish safely, rather than saying
+nothing changed. There is no rollback over a newer writer.

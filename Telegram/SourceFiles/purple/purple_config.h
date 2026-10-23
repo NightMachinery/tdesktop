@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main { class Session; }
 namespace Ui { class GenericBox; }
+namespace Window { class SessionController; }
 
 namespace Purple {
 
@@ -68,6 +69,12 @@ void RefreshDesktopAccounts();
 [[nodiscard]] QString AccountSettingsResetCaption(not_null<Main::Session*> session);
 [[nodiscard]] bool AccountSettingsResetVisible(
 	not_null<Main::Session*> session, AccountSettingsRow row);
+[[nodiscard]] QString GlobalAccountChoiceTitle(not_null<Main::Session*> session);
+[[nodiscard]] bool GlobalAccountChoiceVisible(not_null<Main::Session*> session);
+void ChooseGlobalAccountBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Window::SessionController*> controller);
+
 [[nodiscard]] QString SettingsOwnerStatus();
 void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box);
 

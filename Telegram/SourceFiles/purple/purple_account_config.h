@@ -91,6 +91,35 @@ struct AccountSettingsRowWriteResult {
 	std::optional<AccountSettingsRowTarget> target;
 };
 
+[[nodiscard]] bool ShouldShowGlobalAccountChoice(int signedIn, bool globalSignedIn);
+
+struct GlobalAccountChoicePreview {
+	AccountSettingsOpenTarget current;
+	AccountSettingsOpenTarget selected;
+	SettingsFileInput currentGood;
+	SettingsFileInput selectedGood;
+	std::map<QString, QByteArray> fileIdentities;
+	Settings before;
+	Settings after;
+	QString runningPreset;
+	QString activationState;
+	bool enterNormal = false;
+	bool noAppWideSettings = false;
+	bool selectedUsesGood = false;
+	bool currentGoodRelevant = false;
+	bool selectedGoodRelevant = false;
+};
+
+struct GlobalAccountChoiceResult {
+	bool ok = false;
+	bool changed = false;
+	bool activated = false;
+	SettingsFileInput local;
+	QByteArray localIdentity;
+	uint64_t generation = 0;
+	QString error;
+};
+
 struct AccountOperationTarget {
 	AccountFileTarget file;
 	AccountFiles files;
@@ -154,6 +183,20 @@ public:
 		const AccountSettingsRowTarget &target,
 		std::optional<bool> value,
 		const std::function<bool()> &originCurrent);
+	[[nodiscard]] std::optional<GlobalAccountChoicePreview> previewGlobalChoice(
+		const AccountKey &requester,
+		const AccountKey &selected,
+		const QString &runningPreset);
+	[[nodiscard]] bool validateGlobalChoice(const GlobalAccountChoicePreview &preview);
+	[[nodiscard]] GlobalAccountChoiceResult commitGlobalChoice(
+		const GlobalAccountChoicePreview &preview,
+		const std::function<bool()> &originCurrent);
+	[[nodiscard]] bool validateGlobalChoiceCommit(
+		const GlobalAccountChoicePreview &preview,
+		const GlobalAccountChoiceResult &commit) const;
+	[[nodiscard]] bool activateGlobalChoice(
+		const GlobalAccountChoicePreview &preview,
+		GlobalAccountChoiceResult &commit);
 	[[nodiscard]] std::optional<ManualSettingsExportTarget> manualExportTarget(const AccountKey &key);
 	[[nodiscard]] bool validateManualExport(const ManualSettingsExportTarget &target);
 	[[nodiscard]] std::optional<AccountFileTarget> editTarget(const AccountKey &key);
