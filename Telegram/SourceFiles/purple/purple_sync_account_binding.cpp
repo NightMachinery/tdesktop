@@ -27,6 +27,16 @@ SyncAccountBindingVerdict CheckAccountSyncBinding(
 	return CheckSyncAccountBinding(state, AccountSyncBindingToken(account));
 }
 
+bool RestoreAccountSyncBinding(
+		const SyncLocalState &state, Main::Account &account, const QByteArray &expected) {
+	const auto token = state.bindingToken.toLatin1();
+	if (account.loggingOut() || !account.maybeSession()
+		|| AccountSyncBindingToken(account) != expected
+		|| CheckSyncAccountBinding(state, token) != SyncAccountBindingVerdict::Bound) { return false; }
+	account.local().writePref<QByteArray>(kBindingTokenPref, token);
+	return AccountSyncBindingToken(account) == token;
+}
+
 bool StoreAccountSyncBinding(
 		const SyncLocalState &state,
 		Main::Account &account) {

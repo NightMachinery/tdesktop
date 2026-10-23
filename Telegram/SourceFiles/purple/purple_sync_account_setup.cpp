@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_account_binding.h"
+#include "purple/purple_sync_account_recovery.h"
 
 #include <QtCore/QDateTime>
 
@@ -65,8 +66,18 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 		return { SyncAccountSetupStatus::NeedsReview };
 	}
 
-	const auto target = AccountSyncTarget(&session);
+	const auto recovery = InspectSyncAccountRecovery(session, &inventory);
+	if (!recovery || recovery->journalPresent
+		|| (recovery->plan.status != SyncAccountRecoveryStatus::Setup
+			&& recovery->plan.status != SyncAccountRecoveryStatus::Bound)) {
+		return { SyncAccountSetupStatus::NeedsReview };
+	}
+	auto target = AccountSyncTarget(&session);
 	if (!target) { return { SyncAccountSetupStatus::AccountUnavailable }; }
+	const auto before = ReadSyncRecoveryStore(target->files, std::nullopt);
+	if (before.status != SyncStoreStatus::Ready || (!before.store.statePresent && before.store.pendingPresent)) {
+		return { SyncAccountSetupStatus::StoreError, SyncStoreStatus::OrphanStage };
+	}
 	auto store = SyncLocalStore(target->files.syncDirectory);
 	const auto opened = store.Open(true);
 	if (opened.status != SyncStoreStatus::Ready
@@ -92,7 +103,13 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 
 	auto initial = SyncLocalState();
 	const auto install = FormatSyncInstallId(RandomBytes(16));
-	const auto bindingToken = FormatSyncBindingToken(RandomBytes(16));
+	auto binding = PlanSyncSetupBindingToken(AccountSyncBindingToken(account));
+	if (binding.status == SyncSetupBindingStatus::EntropyRequired) {
+		binding = PlanSyncSetupBindingToken({}, RandomBytes(16));
+	}
+	const auto bindingToken = binding.status == SyncSetupBindingStatus::ReuseExisting
+		|| binding.status == SyncSetupBindingStatus::CreateNew
+		? std::make_optional(binding.token) : std::nullopt;
 	const auto seconds = base::unixtime::now();
 	const auto millis = QDateTime::currentMSecsSinceEpoch();
 	const auto newSpace = directory.selectedSpace
@@ -112,13 +129,22 @@ SyncAccountSetupResult InitializeSyncAccountLocally(
 	if (initial.createdDevice.toUtf8().size() > 256) {
 		return { SyncAccountSetupStatus::InvalidGeneratedState };
 	}
-	if (CheckAccountSyncBinding(initial, account)
-		!= SyncAccountBindingVerdict::MissingAccountToken) {
+	const auto expectedBinding = AccountSyncBindingToken(account).isEmpty()
+		? SyncAccountBindingVerdict::MissingAccountToken : SyncAccountBindingVerdict::Bound;
+	if (CheckAccountSyncBinding(initial, account) != expectedBinding) {
 		return { SyncAccountSetupStatus::AccountUnbound };
 	}
-	if (!ValidateAccountSyncTarget(&session, *target)) {
+	const auto refreshed = AccountSyncTarget(&session);
+	if (!refreshed || refreshed->file.account != target->file.account
+		|| refreshed->file.path != target->file.path || refreshed->file.input != target->file.input
+		|| refreshed->file.generation != target->file.generation
+		|| (!target->file.directoryIdentity.endsWith('/')
+			&& refreshed->file.directoryIdentity != target->file.directoryIdentity)
+		|| (target->file.directoryIdentity.endsWith('/')
+			&& !refreshed->file.directoryIdentity.startsWith(target->file.directoryIdentity))) {
 		return { SyncAccountSetupStatus::AccountUnavailable };
 	}
+	target = refreshed;
 	const auto initialized = store.Initialize(initial);
 	if (!initialized) {
 		return { SyncAccountSetupStatus::StoreError, initialized.status };

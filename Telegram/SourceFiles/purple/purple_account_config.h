@@ -220,6 +220,7 @@ struct AccountOperationTarget {
 	QByteArray syncDirectoryIdentity;
 	QByteArray historyDirectoryIdentity;
 	bool legacySend = false;
+	bool inspection = false;
 };
 
 struct AccountSendFingerprints {
@@ -325,10 +326,13 @@ public:
 	[[nodiscard]] std::optional<ManualSettingsExportTarget> manualExportTarget(const AccountKey &key);
 	[[nodiscard]] bool validateManualExport(const ManualSettingsExportTarget &target);
 	[[nodiscard]] std::optional<AccountFileTarget> editTarget(const AccountKey &key);
-	[[nodiscard]] std::optional<AccountOperationTarget> operationTarget(const AccountKey &key, bool legacySend = false);
+	[[nodiscard]] std::optional<AccountOperationTarget> operationTarget(const AccountKey &key, bool legacySend = false, bool inspection = false);
 	[[nodiscard]] std::optional<AccountTransferReview> reviewTransfer(
 		const AccountKey &key, const QByteArray &bytes);
 	[[nodiscard]] bool validateTransfer(const AccountTransferReview &review);
+	[[nodiscard]] std::optional<AccountTransferReview> rebaseTransferAfterSetup(const AccountTransferReview &review);
+	[[nodiscard]] AccountTransferResult replaceReviewed(
+		const AccountTransferReview &review, const std::function<bool()> &originCurrent);
 	[[nodiscard]] AccountTransferResult importReviewed(
 		const AccountTransferReview &review, const std::function<bool()> &originCurrent);
 	[[nodiscard]] bool validateOperation(const AccountOperationTarget &target, bool sameInput = true);
@@ -352,11 +356,14 @@ private:
 		LayerSettingsResult report;
 	};
 	void invalidate();
+	[[nodiscard]] AccountTransferResult writeReviewed(
+		const AccountTransferReview &review, const std::function<bool()> &originCurrent, bool importBackups);
 	[[nodiscard]] SettingsOpenResult prepareInput(
 		const AccountSettingsOpenTarget &target,
 		const QByteArray &bytes,
 		const std::function<bool()> &originCurrent,
-		bool *published = nullptr);
+		bool *published = nullptr,
+		bool allowRoot = false);
 	[[nodiscard]] bool persistPlan(const AccountOwnerStartupPlan &plan,
 		SettingsFileInput local, SettingsFileInput record, bool accountsPresent);
 	[[nodiscard]] QString absolute(const QString &relative) const;

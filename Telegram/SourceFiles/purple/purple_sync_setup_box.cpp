@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_sync_account_inventory.h"
+#include "purple/purple_sync_account_recovery.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_config_apply.h"
 #include "purple/purple_sync_config_publish.h"
@@ -61,6 +62,7 @@ enum class CheckFollowup {
 	PublishChanges,
 	FinishSending,
 	Share,
+	Recovery,
 };
 
 struct UndoInfo {
@@ -89,6 +91,8 @@ struct SetupBoxState {
 	std::optional<SyncConfigReview> review;
 	std::optional<AccountOperationTarget> scanTarget;
 	std::optional<ShareInfo> share;
+	std::optional<DesktopSyncRecovery> recovery;
+	Ui::SlideWrap<Ui::SettingsButton> *recoveryButton = nullptr;
 	rpl::variable<QString> actionText;
 	rpl::variable<QString> checkText;
 	QDateTime checkedAt;
@@ -161,6 +165,7 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 	case CheckFollowup::FinishSending: return Action::FinishSending;
 	case CheckFollowup::None:
 	case CheckFollowup::Share:
+	case CheckFollowup::Recovery:
 		break;
 	}
 	return Action::None;
@@ -233,6 +238,9 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 			"staged record once if a fresh check shows that is safe. "_q
 			+ SyncCloudDisclosureText();
 	case Action::Join: {
+		if (review.local.status == SyncSettingsFileStatus::Absent && review.plan.offered.empty()) {
+			return tr::lng_purple_sync_empty_join_confirm(tr::now) + u" "_q + SyncCloudDisclosureText();
+		}
 		auto names = std::vector<QString>();
 		for (const auto &head : review.plan.same) {
 			if (const auto record = FindSyncConfigHeadRecord(review, head)) {
@@ -264,6 +272,12 @@ void RefreshButtons(SetupBoxState &state) {
 		: u"Check Saved Messages"_q;
 	state.check->setDisabled(!state.running && (busy || !available));
 	state.close->setDisabled(state.publishing);
+	if (state.recoveryButton) {
+		const auto recovery = state.recovery ? &*state.recovery : nullptr;
+		state.recoveryButton->toggle(!busy && available && recovery
+			&& (recovery->journalPresent || recovery->plan.offerStartAgain
+				|| recovery->plan.status == SyncAccountRecoveryStatus::RootRelink), anim::type::instant);
+	}
 	state.actionText = SyncConfigBoxActionText(state.currentAction);
 	state.action->toggle(
 		!busy
@@ -278,6 +292,7 @@ void RefreshButtons(SetupBoxState &state) {
 
 void ClearReview(SetupBoxState &state) {
 	state.completed.reset();
+	state.recovery.reset();
 	state.review.reset();
 	state.currentAction = Action::None;
 	++state.generation;
@@ -321,6 +336,12 @@ void ShowReview(
 	state.completed = std::move(inventory);
 	state.review = std::move(review);
 	state.currentAction = described.action;
+	if (state.review->status == SyncConfigReviewStatus::Ready && !state.review->bound
+		&& state.review->local.status == SyncSettingsFileStatus::Absent
+		&& !state.review->local.usingLastGood && state.review->plan.offered.empty()
+		&& state.review->plan.verdict != ConfigSyncVerdict::Invalid) {
+		state.currentAction = Action::Join;
+	}
 	++state.generation;
 	SetStatus(state, Joined(prefix, described.text));
 }
@@ -418,6 +439,34 @@ void StartCheck(
 		CheckFollowup followup,
 		const QString &prefix = QString());
 
+void ConfirmRecovery(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
+	if (!state->recovery || Busy(*state) || !SelectedAvailable(*state)) { return; }
+	const auto review = *state->recovery;
+	const auto origin = state->selectedSession;
+	const auto relink = review.plan.status == SyncAccountRecoveryStatus::RootRelink && !review.journalPresent;
+	const auto name = AccountLabel(origin.get());
+	box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> confirm) {
+		confirm->setTitle(rpl::single(relink ? tr::lng_purple_sync_relink(tr::now) : tr::lng_purple_sync_start_again(tr::now)));
+		confirm->addRow(object_ptr<Ui::FlatLabel>(confirm,
+			(relink ? tr::lng_purple_sync_relink_confirm(tr::now) : tr::lng_purple_sync_reset_confirm(tr::now)).arg(name), st::boxLabel));
+		confirm->addButton(rpl::single(relink ? tr::lng_purple_sync_relink(tr::now) : tr::lng_purple_sync_start_again(tr::now)), crl::guard(box, [=] {
+			if (!origin || state->selectedSession.get() != origin.get() || Busy(*state)
+				|| !SelectedAvailable(*state) || !ValidateAccountSettingsOpenTarget(origin.get(), review.opening)) { return; }
+			const auto result = relink ? SyncArchiveResult{ .ready = RelinkSyncAccount(*origin.get(), review, true) }
+				: StartAgainSyncAccount(*origin.get(), review, true, Busy(*state));
+			confirm->closeBox();
+			if (result.ready) {
+				if (!relink) { LastUndoFor(*state).reset(); }
+				ReviewAgain(*state, relink ? tr::lng_purple_sync_relinked(tr::now) : tr::lng_purple_sync_reset_done(tr::now));
+			} else {
+				SetStatus(*state, result.partial ? tr::lng_purple_sync_reset_partial(tr::now) : tr::lng_purple_transfer_unavailable(tr::now));
+			}
+		}));
+		const auto cancel = confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
+		confirm->setFocusCallback([=] { cancel->setFocus(); });
+	}));
+}
+
 void RunAction(
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
@@ -438,6 +487,15 @@ void RunAction(
 			SyncConfigPublishRequest{ .pendingOnly = true },
 			QString(),
 			u"Finishing the earlier settings post."_q);
+		return;
+	}
+	if (action == Action::Join && !state->review->bound
+		&& state->review->local.status == SyncSettingsFileStatus::Absent
+		&& !state->review->local.usingLastGood && state->review->plan.offered.empty()) {
+		const auto result = InitializeSyncAccountLocally(*account, *session, *state->completed);
+		ReviewAgain(*state, result.status == SyncAccountSetupStatus::Ready
+			? tr::lng_purple_sync_empty_join_done(tr::now)
+			: tr::lng_purple_transfer_unavailable(tr::now));
 		return;
 	}
 	const auto applied = ApplySyncConfigChoice(
@@ -479,11 +537,15 @@ void ConfirmAction(
 		return;
 	}
 	const auto generation = state->generation;
+	const auto origin = state->selectedSession;
+	const auto target = origin ? AccountSyncInspectionTarget(origin.get()) : std::nullopt;
+	if (!target) { return; }
 	box->uiShow()->showBox(Ui::MakeConfirmBox({
 		.text = ConfirmText(action, *state->review),
 		.confirmed = crl::guard(box, [=](Fn<void()> close) {
 			close();
-			if (!SelectedAvailable(*state)) {
+			if (!origin || origin.get() != state->selectedSession.get()
+				|| !ValidateAccountSyncTarget(origin.get(), *target) || !SelectedAvailable(*state)) {
 				StopForLostAccount(*state);
 			} else if (!StillCurrent(*state, generation)) {
 				SetStatus(*state, u"The check result changed, so nothing "
@@ -522,6 +584,11 @@ void OnInventory(
 			u"Sharing the chosen settings to Saved Messages."_q);
 		return;
 	}
+	auto recovery = InspectSyncAccountRecovery(*session, &result);
+	if (recovery && recovery->plan.status == SyncAccountRecoveryStatus::AutoRelink
+		&& !recovery->journalPresent && RelinkSyncAccount(*session, *recovery, false)) {
+		recovery = InspectSyncAccountRecovery(*session, &result);
+	}
 	auto failure = QString();
 	auto review = BuildReview(*account, *session, result, failure);
 	const auto described = DescribeSyncConfigReview(review, state->checkedAt);
@@ -536,7 +603,9 @@ void OnInventory(
 					"check, so nothing was sent."_q
 				: u"Nothing was sent."_q,
 			failure);
+	state->recovery = std::move(recovery);
 	ShowReview(*state, std::move(result), std::move(review), prefix);
+	if (followup == CheckFollowup::Recovery && state->recovery) { ConfirmRecovery(box, state); }
 	if (matches) {
 		ConfirmAction(box, state, expected);
 	}
@@ -567,7 +636,7 @@ void StartCheck(
 	SetStatus(*state, progressText(0));
 	const auto chosenAccount = state->selectedAccount;
 	const auto chosenSession = state->selectedSession;
-	state->scanTarget = AccountSyncTarget(session);
+	state->scanTarget = AccountSyncInspectionTarget(session);
 	if (!state->scanTarget) { StopForLostAccount(*state); return; }
 	const auto scanTarget = *state->scanTarget;
 	state->inventory = std::make_unique<SyncAccountInventory>(
@@ -604,7 +673,8 @@ void ApplyChoice(
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
 		uint64_t generation,
-		std::optional<QString> key) {
+		std::optional<QString> key,
+		const AccountTransferReview &replacement) {
 	if (!SelectedAvailable(*state)) {
 		StopForLostAccount(*state);
 		return;
@@ -621,7 +691,8 @@ void ApplyChoice(
 		*session,
 		*state->completed,
 		review,
-		key);
+		key,
+		&replacement);
 	const SyncConfigHeadRecord *record = nullptr;
 	for (const auto &head : review.plan.offered) {
 		if (key && head.key == *key) {
@@ -676,67 +747,74 @@ void OpenReview(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 	const auto origin = state->selectedSession;
 	const auto target = origin ? AccountSettingsOpenTargetFor(origin.get(), SettingsOpenRole::Own) : std::nullopt;
 	if (!target) { return; }
+	const auto proposed = state->review->local.status == SyncSettingsFileStatus::Present
+		? state->review->local.text : QByteArray("version = 2\n");
+	const auto replacement = ReviewAccountTransfer(origin.get(), proposed);
+	if (!replacement) {
+		SetStatus(*state, tr::lng_purple_transfer_unavailable(tr::now));
+		return;
+	}
 	box->uiShow()->showBox(Box(SyncConfigReviewBox, SyncConfigReviewBoxArgs{
 		.review = *state->review,
+		.accountCaption = AccountLabel(origin.get()),
 		.listNotes = CaptureOwnListPreviewNotes(origin.get()),
-		.choose = crl::guard(box, [=](std::optional<QString> key) {
+		.replacement = *replacement,
+		.choose = crl::guard(box, [=](std::optional<QString> key, AccountTransferReview chosen) {
 			if (!origin || state->selectedSession.get() != origin.get()
 				|| !ValidateAccountSettingsOpenTarget(origin.get(), *target)) { return; }
-			ApplyChoice(box, state, generation, std::move(key));
+			ApplyChoice(box, state, generation, std::move(key), chosen);
 		}),
 	}));
 }
 
+[[nodiscard]] SyncHistoryReview HistoryReviewFor(
+		not_null<Ui::GenericBox*> box,
+		SetupBoxState *state) {
+	const auto origin = state->selectedSession;
+	const auto opening = origin ? AccountSettingsOpenTargetFor(origin.get(), SettingsOpenRole::Own) : std::nullopt;
+	return crl::guard(box, [=](const QByteArray &bytes) -> std::optional<AccountTransferReview> {
+		if (!opening || !origin || origin.get() != state->selectedSession.get()
+			|| !ValidateAccountSettingsOpenTarget(origin.get(), *opening)) { return std::nullopt; }
+		return ReviewAccountTransfer(origin.get(), bytes);
+	});
+}
+
 void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
-	if (!LastUndoFor(*state) || Busy(*state) || !SelectedAvailable(*state)) {
-		return;
-	}
+	if (!LastUndoFor(*state) || Busy(*state) || !SelectedAvailable(*state)) { return; }
 	const auto undo = *LastUndoFor(*state);
-	if (!undo.target || !ValidateAccountSyncTarget(state->selectedSession.get(), *undo.target)) { return; }
-	box->uiShow()->showBox(Ui::MakeConfirmBox({
-		.text = u"Put back the settings this device had before the update "
-			"from %1? The current file is kept in History. The change stays "
-			"on this device until you publish it."_q.arg(undo.device),
-		.confirmed = crl::guard(box, [=](Fn<void()> close) {
-			close();
-			if (Busy(*state)
-				|| !SelectedAvailable(*state)
-				|| !LastUndoFor(*state)
+	const auto origin = state->selectedSession;
+	if (!undo.target || !ValidateAccountSyncTarget(origin.get(), *undo.target)) { return; }
+	const auto access = AccountSyncHistoryAccess(origin.get(), *undo.target);
+	const auto entries = ListSyncConfigHistory(access);
+	const auto entry = std::find_if(entries.begin(), entries.end(), [&](const auto &value) {
+		return value.id == undo.historyId;
+	});
+	if (entry == entries.end()) { return; }
+	box->uiShow()->showBox(Box(SyncConfigHistoryEntryBox, access, *entry,
+		HistoryReviewFor(box, state),
+		crl::guard(box, [=](const SyncConfigHistoryEntry &entry, const AccountTransferReview &replacement) {
+			if (!origin || origin.get() != state->selectedSession.get() || Busy(*state)
+				|| !SelectedAvailable(*state) || !LastUndoFor(*state)
 				|| LastUndoFor(*state)->historyId != undo.historyId
-				|| !undo.target || !ValidateAccountSyncTarget(state->selectedSession.get(), *undo.target)) {
-				return;
-			}
-			const auto entries = ListSyncConfigHistory(AccountSyncHistoryAccess(
-				state->selectedSession.get(), *undo.target));
-			const auto entry = std::find_if(
-				entries.begin(),
-				entries.end(),
-				[&](const SyncConfigHistoryEntry &entry) {
-					return entry.id == undo.historyId;
-				});
-			const auto result = RestoreSyncConfigHistory(
-				*state->selectedSession.get(), undo.historyId,
-				SyncConfigHistoryReason::BeforeUndo);
-			if (SyncConfigUndoFinished(result)) {
-				LastUndoFor(*state).reset();
-			}
+				|| !ValidateAccountSyncTarget(origin.get(), *undo.target)) { return false; }
+			const auto result = RestoreSyncConfigHistory(*origin.get(), entry.id,
+				SyncConfigHistoryReason::BeforeUndo, replacement);
+			if (SyncConfigUndoFinished(result)) { LastUndoFor(*state).reset(); }
 			if (result.status == SyncConfigRestoreStatus::Restored) {
 				box->uiShow()->showToast(u"Previous settings are back."_q);
 				ReviewAgain(*state, SyncConfigUndoneText);
 			} else {
-				SetStatus(*state, (entry != entries.end())
-					? SyncConfigRestoreText(result, *entry)
-					: SyncConfigRestoreText(result, {}));
+				SetStatus(*state, SyncConfigRestoreText(result, entry));
 			}
-		}),
-		.confirmText = u"Undo"_q,
-	}));
+			return true;
+		}), Fn<void()>(), CaptureOwnListPreviewNotes(origin.get()), u"Undo"_q));
 }
 
 [[nodiscard]] bool RestoreFromHistory(
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
-		const SyncConfigHistoryEntry &entry) {
+		const SyncConfigHistoryEntry &entry,
+		const AccountTransferReview &replacement) {
 	if (Busy(*state) || !SelectedAvailable(*state)) {
 		box->uiShow()->showToast(
 			u"Wait for the check or post to finish, then try again."_q);
@@ -744,7 +822,7 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 	}
 	const auto result = RestoreSyncConfigHistory(
 		*state->selectedSession.get(), entry.id,
-		SyncConfigHistoryReason::BeforeRestore);
+		SyncConfigHistoryReason::BeforeRestore, replacement);
 	if (result.status == SyncConfigRestoreStatus::Restored) {
 		LastUndoFor(*state).reset();
 		box->uiShow()->showToast(u"Settings restored."_q);
@@ -867,6 +945,12 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 				container,
 				rpl::single(u"Undo last update"_q),
 				st::settingsButtonNoIcon)));
+	state->recoveryButton = container->add(object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+		container, ::Settings::CreateButtonWithIcon(container, tr::lng_purple_sync_recovery(), st::settingsButtonNoIcon)));
+	state->recoveryButton->hide(anim::type::instant);
+	state->recoveryButton->entity()->setClickedCallback([=] {
+		StartCheck(box, state, CheckFollowup::Recovery);
+	});
 	const auto history = ::Settings::AddButtonWithIcon(
 		container,
 		rpl::single(u"History"_q),
@@ -883,15 +967,17 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		if (!SelectedAvailable(*state)) {
 			return;
 		}
-		const auto target = AccountSyncTarget(state->selectedSession.get());
+		const auto origin = state->selectedSession;
+		const auto target = AccountSyncInspectionTarget(origin.get());
 		if (!target) { return; }
 		box->uiShow()->showBox(Box(
 			SyncConfigHistoryBox,
 			AccountSyncHistoryAccess(state->selectedSession.get(), *target),
-			GuardSyncHistoryRestore(box.get(), [=](const SyncConfigHistoryEntry &entry) {
+			HistoryReviewFor(box, state),
+			crl::guard(box, [=](const SyncConfigHistoryEntry &entry, const AccountTransferReview &replacement) {
 				const auto live = state->selectedSession.get();
-				return live && ValidateAccountSyncTarget(live, *target)
-					&& RestoreFromHistory(box, state, entry);
+				return origin && live == origin.get() && ValidateAccountSyncTarget(live, *target)
+					&& RestoreFromHistory(box, state, entry, replacement);
 			}),
 			CaptureOwnListPreviewNotes(state->selectedSession.get())));
 	});

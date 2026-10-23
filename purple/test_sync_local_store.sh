@@ -10,6 +10,9 @@ trap 'command rm -rf "$BuildPath"' EXIT
 clang++ -std=c++20 -g -O0 -o "$BuildPath/test_sync_local_store" \
     "$RepoPath/purple/test_sync_local_store.cpp" \
     "$RepoPath/Telegram/SourceFiles/purple/purple_sync_local_store.cpp" \
+    "$CorePath/purple/purple_account_files.cpp" \
+    "$CorePath/purple/purple_local_choice.cpp" \
+    "$CorePath/purple/purple_config_diff.cpp" \
     "$CorePath/purple/purple_settings.cpp" \
     "$CorePath/purple/purple_splice.cpp" \
     "$CorePath/purple/purple_state.cpp" \

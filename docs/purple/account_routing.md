@@ -38,19 +38,21 @@ path, exact input bytes and routing generation; asynchronous session and account
 checks refuse stale destinations. Local choice changes invalidate routing, while
 unrelated device-state writes do not invent an account transfer.
 
-## Conservative limits of this batch
+## Account boundaries
 
 Legacy schema-2 Send, Share and imports now use the destination-aware review
-below. Modern sync setup/apply/History keep their schema-1 guards. Their unreviewed
-replacement path still refuses removed app-wide or unknown keys. No parser default
-or highest-version constant changes, migration-by-copy or recovery UI is introduced.
+below. Modern sync setup/apply/History accept supported schemas through captured
+impact reviews. The unreviewed replacement path still refuses removed app-wide
+or unknown keys. Parser defaults and version constants remain unchanged;
+recovery does not migrate settings by copying another account's file.
 
 Sync setup, store, publish, apply, History/Undo and fingerprint persistence now use
 explicit validated originating-account files. Root-owner paths remain legacy;
 nonroot accounts never fall back to them. Manual single-file export remains a
 separate owner-unknown role. The routed local writers and list ticks are described
 below. The list-mode controls are described below; the full account editor remains separate work.
-No migration-by-copy or automatic binding restoration is introduced.
+Only a unique verified keyed non-root store permits automatic binding restoration.
+Root Relink requires complete cloud proof and an explicit action.
 
 Synthetic Qt/file cases qualify the actual adapter and guarded writer in owned
 temporary directories. Production-TU compilation is separate from application
@@ -65,7 +67,8 @@ owner with an unavailable account path refuses export instead of substituting
 another account's bytes. Confirmation rechecks role, originating session, routing
 generation and the exact file snapshot; completion rechecks before bookkeeping.
 Valid account-file manual Send and Share support schema 1 and 2. Reviewed legacy
-imports accept both document names; modern schema-2 sync apply remains held.
+imports accept both document names. Modern schema-2 sync uses the same account
+context.
 
 Last Seen reasons and Last Seen Peek read the Settings window's account's effective
 values and write only that account's own file. Send after every save is file-local:
@@ -390,10 +393,11 @@ good fallback is disclosed; unusable sources refuse. Any readable source that co
 classifies as a newer schema refuses before fallback, including the destination,
 global source and loaded-account context. An older good copy never downgrades it. Apply rechecks that context,
 writes `.import.bak` and `.bak` from actual destination bytes, and then publishes the
-exact proposed document. Missing non-root destinations use exclusive creation.
+exact proposed document. Missing destinations use exclusive creation.
 These writes are separate operations, not a cross-file crash transaction. Source or
 session changes refuse the old review; a post-publication context failure reports
-that the file was already written. Modern schema-2 apply remains held.
+that the file was already written. Modern sync reuses this authority with only a
+.bak backup, after preserving the previous bytes in History.
 
 Launch offers alone require the active account through download and Apply. Their
 freshness baseline is the global file's mtime when the own file is absent. External
@@ -402,3 +406,18 @@ intercept an external editor's Save command. Automatic send uses only the writte
 file's opt-in and exact bytes. Creation, imports, History restore and signed-out
 writes do not invent a send. Root markers remain in `state.toml`; non-root markers
 remain in that account's `send-state.toml`, with weak-session and retry-token guards.
+
+## Modern sync recovery boundary
+
+Sync inspections and History listing have a separate read capability, including
+missing/corrupt primaries. They create no settings or directories. A reviewed
+remote adoption captures absence and exclusively creates only the selected
+account's file. Its review can accept the one account directory created
+by explicit setup while retaining all other bytes, identities and source choices.
+
+History restore and Undo use captured replacement reviews with the opening
+account's Work Mode choice. Modern choices also review the other device versions
+that a publish would supersede. Recovery checks complete keyed/root discovery;
+root Relink requires cloud proof, while Start again journals a pending-first
+archive and blocks setup until exact completion. See
+[modern sync and recovery](sync.md#account-specific-modern-sync-and-recovery).

@@ -1244,6 +1244,29 @@ SettingsOpenResult PrepareAccountSettingsOpen(
 	return result;
 }
 
+std::optional<AccountOperationTarget> AccountSyncInspectionTarget(
+		not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) { return std::nullopt; }
+	return AccountRouting().operationTarget(SessionAccountKey(session), false, true);
+}
+
+std::optional<AccountTransferReview> RebaseAccountTransferAfterSetup(
+		not_null<Main::Session*> session, const AccountTransferReview &review) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()
+		|| SessionAccountKey(session) != review.destination.requester) { return std::nullopt; }
+	return AccountRouting().rebaseTransferAfterSetup(review);
+}
+
+AccountTransferResult ReplaceReviewedAccountSettings(
+		not_null<Main::Session*> session, const AccountTransferReview &review) {
+	const auto weak = base::make_weak(session.get());
+	return AccountRouting().replaceReviewed(review, [=] {
+		const auto live = weak.get();
+		return live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == review.destination.requester;
+	});
+}
+
 std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*> session) {
 	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
 		return std::nullopt;
@@ -1389,7 +1412,7 @@ bool ValidateAccountSyncStoreTarget(not_null<Main::Session*> session,
 }
 
 bool AccountSyncOperationsAllowed(not_null<Main::Session*> session) {
-	return AccountSyncTarget(session).has_value();
+	return AccountSyncInspectionTarget(session).has_value();
 }
 
 GuardedFileWrite ReplaceAccountSyncSettings(not_null<Main::Session*> session,
@@ -2062,6 +2085,10 @@ void ChooseGlobalAccountBox(
 		}), Ui::LayerOption::KeepOther);
 	});
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+}
+
+std::optional<AccountKey> SettingsStartupOwner() {
+	return AccountRouting().owner();
 }
 
 QString SettingsOwnerStatus() {

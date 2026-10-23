@@ -35,6 +35,12 @@ void RefreshDesktopAccounts();
 [[nodiscard]] bool ValidateAccountSettingsTarget(not_null<Main::Session*> session, const AccountFileTarget &target);
 [[nodiscard]] bool AccountAutomaticOperationsAllowed(not_null<Main::Session*> session);
 [[nodiscard]] bool LegacyRootSettingsOperationsAllowed();
+[[nodiscard]] std::optional<AccountOperationTarget> AccountSyncInspectionTarget(
+	not_null<Main::Session*> session);
+[[nodiscard]] std::optional<AccountTransferReview> RebaseAccountTransferAfterSetup(
+	not_null<Main::Session*> session, const AccountTransferReview &review);
+[[nodiscard]] AccountTransferResult ReplaceReviewedAccountSettings(
+	not_null<Main::Session*> session, const AccountTransferReview &review);
 [[nodiscard]] std::optional<AccountOperationTarget> AccountSyncTarget(not_null<Main::Session*> session);
 [[nodiscard]] bool ValidateAccountSyncTarget(not_null<Main::Session*> session, const AccountOperationTarget &target, bool sameInput = true);
 [[nodiscard]] std::optional<AccountOperationTarget> AccountLegacySendTarget(
@@ -86,6 +92,7 @@ void ChooseGlobalAccountBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Window::SessionController*> controller);
 
+[[nodiscard]] std::optional<AccountKey> SettingsStartupOwner();
 [[nodiscard]] QString SettingsOwnerStatus();
 void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box);
 

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_config_payload.h"
 #include "purple/purple_sync_local_state.h"
+#include "purple/purple_sync_config_flow.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
@@ -82,6 +83,17 @@ struct SyncStoreResult {
 [[nodiscard]] SyncStoreStatus WriteSyncPrivateFile(
 	const QString &path,
 	const QByteArray &bytes);
+
+[[nodiscard]] QByteArray SyncPathIdentity(const QString &path);
+
+struct SyncRecoveryRead {
+	SyncStoreStatus status = SyncStoreStatus::IoError;
+	SyncRecoveryStore store;
+	std::map<QString, QByteArray> identities;
+};
+
+[[nodiscard]] SyncRecoveryRead ReadSyncRecoveryStore(
+	const AccountFiles &files, std::optional<AccountKey> directoryAccount);
 
 class SyncLocalStore final {
 public:

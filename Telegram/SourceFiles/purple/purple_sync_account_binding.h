@@ -22,6 +22,8 @@ namespace Purple {
 [[nodiscard]] SyncAccountBindingVerdict CheckAccountSyncBinding(
 	const SyncLocalState &state,
 	Main::Account &account);
+[[nodiscard]] bool RestoreAccountSyncBinding(
+	const SyncLocalState &state, Main::Account &account, const QByteArray &expected);
 [[nodiscard]] bool StoreAccountSyncBinding(
 	const SyncLocalState &state,
 	Main::Account &account);

@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_settings.h"
 #include "purple/purple_sync_account_binding.h"
+#include "purple/purple_sync_account_recovery.h"
 #include "purple/purple_sync_local_store.h"
 
 #include <QtCore/QFile>
@@ -22,19 +23,35 @@ namespace {
 [[nodiscard]] bool SettingsTextLoads(
 		const QByteArray &text,
 		const QString &path) {
-	return ParseSettings(QString::fromUtf8(text), path).ok();
+	return CanApplyAccountSettingsDocument(u"settings.toml"_q, text);
+}
+
+[[nodiscard]] bool SettingsTextNewer(const QByteArray &text) {
+	auto input = ConfigImpactInput();
+	input.current = { text, true };
+	input.proposed.present = false;
+	return AnalyzeConfigChange(input).status == ConfigImpactStatus::NewerSchema;
 }
 
 [[nodiscard]] bool LastGoodSettingsLoad(const QString &path) {
+	const auto info = QFileInfo(path);
+	if (info.isSymLink() || !info.isFile() || !AccountFilePathSafe(path)
+		|| info.size() > kSyncSettingsMaximumBytes) { return false; }
 	auto file = QFile(path);
-	return file.open(QIODevice::ReadOnly)
-		&& SettingsTextLoads(file.readAll(), path);
+	if (!file.open(QIODevice::ReadOnly)) { return false; }
+	const auto bytes = file.read(kSyncSettingsMaximumBytes + 1);
+	return file.error() == QFileDevice::NoError && file.atEnd()
+		&& bytes.size() <= kSyncSettingsMaximumBytes && SettingsTextLoads(bytes, path);
 }
 
 SyncConfigReview ClientSupportedReview(SyncConfigReview result) {
+	if (result.local.status == SyncSettingsFileStatus::Present && SettingsTextNewer(result.local.text)) {
+		result.status = SyncConfigReviewStatus::NeedsReview;
+		return result;
+	}
 	for (const auto &head : result.heads) {
 		const auto parsed = ParseSettings(QString::fromUtf8(head.text), u"sync record"_q);
-		if (!parsed.ok() || parsed.settings.version > kSettingsVersion) {
+		if (!parsed.ok() || !CanApplyAccountSettingsDocument(u"settings.toml"_q, head.text)) {
 			result.status = SyncConfigReviewStatus::NeedsReview;
 			break;
 		}
@@ -109,7 +126,7 @@ SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files) {
 		SyncSettingsFileStatus::Present,
 		text,
 		lastGood
-			|| (!SettingsTextLoads(text, path) && LastGoodSettingsLoad(files.good)));
+			|| (!SettingsTextNewer(text) && !SettingsTextLoads(text, path) && LastGoodSettingsLoad(files.good)));
 }
 
 SyncConfigReview ReviewSyncConfig(
@@ -122,37 +139,43 @@ SyncConfigReview ReviewSyncConfig(
 		result.status = SyncConfigReviewStatus::AccountUnavailable;
 		return result;
 	}
-	const auto target = AccountSyncTarget(&session);
+	const auto recovery = InspectSyncAccountRecovery(session, &inventory);
+	if (!recovery || (recovery->plan.status != SyncAccountRecoveryStatus::Setup
+		&& recovery->plan.status != SyncAccountRecoveryStatus::Bound)) {
+		result.status = !recovery ? SyncConfigReviewStatus::NeedsReview
+			: recovery->plan.status == SyncAccountRecoveryStatus::StartAgain ? SyncConfigReviewStatus::StoreError
+			: recovery->plan.status == SyncAccountRecoveryStatus::RootRelink
+				|| recovery->plan.status == SyncAccountRecoveryStatus::AutoRelink ? SyncConfigReviewStatus::AccountUnbound
+			: SyncConfigReviewStatus::NeedsReview;
+		return result;
+	}
+	const auto target = AccountSyncInspectionTarget(&session);
 	if (!target) { result.status = SyncConfigReviewStatus::AccountUnavailable; return result; }
-	const auto local = ReadSyncSettingsFile(target->files);
-	const auto root = target->files.syncDirectory;
-	const auto stateInfo = QFileInfo(root + u"/state.json"_q);
-	if (!stateInfo.exists() && !stateInfo.isSymLink()) {
-		return ClientSupportedReview(ReviewSyncConfigInventory(inventory, nullptr, {}, local));
-	}
-	auto store = SyncLocalStore(root);
-	const auto opened = store.Open(true);
-	if (opened.status == SyncStoreStatus::Uninitialized) {
-		return ClientSupportedReview(ReviewSyncConfigInventory(inventory, nullptr, {}, local));
-	}
-	const auto state = store.state();
-	if (opened.status != SyncStoreStatus::Ready || !state) {
+	if (QFileInfo::exists(target->files.syncDirectory + u"/recovery.json"_q)
+		|| QFileInfo(target->files.syncDirectory + u"/recovery.json"_q).isSymLink()) {
 		result.status = SyncConfigReviewStatus::StoreError;
 		return result;
 	}
-	if (CheckAccountSyncBinding(*state, account)
-			!= SyncAccountBindingVerdict::Bound) {
+	const auto local = ReadSyncSettingsFile(target->files);
+	const auto snapshot = ReadSyncRecoveryStore(target->files, std::nullopt);
+	if (snapshot.status != SyncStoreStatus::Ready) { result.status = SyncConfigReviewStatus::StoreError; return result; }
+	if (!snapshot.store.statePresent) {
+		if (snapshot.store.pendingPresent) { result.status = SyncConfigReviewStatus::StoreError; return result; }
+		return ClientSupportedReview(ReviewSyncConfigInventory(inventory, nullptr, {}, local));
+	}
+	const auto parsed = ParseSyncLocalState(snapshot.store.state);
+	if (!parsed) { result.status = SyncConfigReviewStatus::StoreError; return result; }
+	const auto state = &parsed.state;
+	if (CheckAccountSyncBinding(*state, account) != SyncAccountBindingVerdict::Bound) {
 		result.status = SyncConfigReviewStatus::AccountUnbound;
 		return result;
 	}
 	auto staged = QByteArray();
 	if (state->config.pendingSeq) {
-		const auto pending = store.ReadPendingConfig();
-		if (!pending) {
-			result.status = SyncConfigReviewStatus::StoreError;
-			return result;
-		}
-		staged = pending.staged;
+		const auto name = u"config-%1.json"_q.arg(state->config.pendingSeq);
+		const auto found = snapshot.store.pendingFiles.find(name);
+		if (found == snapshot.store.pendingFiles.end()) { result.status = SyncConfigReviewStatus::StoreError; return result; }
+		staged = found->second;
 	}
 	return ClientSupportedReview(ReviewSyncConfigInventory(inventory, state, staged, local));
 }

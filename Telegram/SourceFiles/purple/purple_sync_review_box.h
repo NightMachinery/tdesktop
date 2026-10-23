@@ -21,18 +21,34 @@ namespace Purple {
 
 struct SyncConfigReviewBoxArgs {
 	SyncConfigReview review;
+	QString accountCaption;
 	AccountListPreviewNotes listNotes;
-	Fn<void(std::optional<QString>)> choose;
+	AccountTransferReview replacement;
+	Fn<void(std::optional<QString>, AccountTransferReview)> choose;
 };
 
 void SyncConfigReviewBox(
 	not_null<Ui::GenericBox*> box,
 	SyncConfigReviewBoxArgs args);
 
+using SyncHistoryReview = Fn<std::optional<AccountTransferReview>(const QByteArray&)>;
+using SyncHistoryRestore = Fn<bool(const SyncConfigHistoryEntry&, const AccountTransferReview&)>;
+
+void SyncConfigHistoryEntryBox(
+	not_null<Ui::GenericBox*> box,
+	SyncHistoryAccess access,
+	SyncConfigHistoryEntry entry,
+	SyncHistoryReview review,
+	SyncHistoryRestore restore,
+	Fn<void()> closeList,
+	AccountListPreviewNotes listNotes,
+	QString confirmText);
+
 void SyncConfigHistoryBox(
 	not_null<Ui::GenericBox*> box,
 	SyncHistoryAccess access,
-	Fn<bool(const SyncConfigHistoryEntry&)> restore,
+	SyncHistoryReview review,
+	SyncHistoryRestore restore,
 	AccountListPreviewNotes listNotes);
 
 } // namespace Purple

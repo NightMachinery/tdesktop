@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_account_binding.h"
+#include "purple/purple_sync_account_recovery.h"
 
 #include <utility>
 
@@ -32,7 +33,8 @@ SyncConfigPublish::SyncConfigPublish(
 , _scanPosts(scanPosts)
 , _finished(std::move(finished))
 , _request(std::move(request))
-, _target(AccountSyncTarget(&session)) {
+, _target(_request.pendingOnly
+	? AccountSyncInspectionTarget(&session) : AccountSyncTarget(&session)) {
 }
 
 SyncConfigPublish::~SyncConfigPublish() {
@@ -63,6 +65,11 @@ void SyncConfigPublish::Start() {
 		Finish({ SyncConfigPublishStatus::AccountUnavailable });
 		return;
 	}
+	const auto recovery = InspectSyncAccountRecovery(*_session.get(), &_inventory);
+	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Bound) {
+		Finish({ SyncConfigPublishStatus::NeedsReview });
+		return;
+	}
 	_store = std::make_unique<SyncLocalStore>(
 		_target->files.syncDirectory);
 	const auto opened = _store->Open(true);
@@ -87,7 +94,9 @@ void SyncConfigPublish::Start() {
 		return;
 	}
 	const auto token = AccountSyncBindingToken(*account);
-	_target = AccountSyncTarget(_session.get());
+	if (!AccountAvailable()) { Finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }
+	_target = _request.pendingOnly
+		? AccountSyncInspectionTarget(_session.get()) : AccountSyncTarget(_session.get());
 	if (!_target) { Finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }
 	_bindingToken = token;
 	_storeInput = ReadSettingsFileInput(_target->files.syncStore);

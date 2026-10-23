@@ -119,6 +119,8 @@ PRIVATE
     purple/purple_sync_account_binding.h
     purple/purple_sync_account_inventory.cpp
     purple/purple_sync_account_inventory.h
+    purple/purple_sync_account_recovery.cpp
+    purple/purple_sync_account_recovery.h
     purple/purple_sync_account_setup.cpp
     purple/purple_sync_account_setup.h
     purple/purple_sync_candidate_reader.cpp

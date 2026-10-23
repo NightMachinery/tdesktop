@@ -21,7 +21,7 @@ most one next step:
 - **Review update** when another device's newer version descends from the one
   this device last matched. A review box names the source device and time,
   lists up to six changed settings (then "and N more"; line counts when one
-  side is not valid TOML), warns when the record comes from a newer schema,
+  side is not valid TOML), refuses records from a newer schema,
   and has a **Show lines** monospace diff capped at 400 lines. **Apply**
   writes the file; **Not now** leaves everything alone.
 - **Choose settings** when versions are unrelated or conflict. The same review
@@ -43,14 +43,16 @@ most one next step:
 
 **Up to date** reports how many other devices sync and when the check ran.
 Invalid records, clones, another account's state, store errors and incomplete
-scans are plain text with no action, and so is a local file that is missing,
-not valid TOML or too large to send. While `settings.toml` is missing or does
+scans are plain text with no normal sync action. A missing primary without a good
+fallback can adopt a reviewed remote version. An empty stream offers explicit
+Join without creating settings.toml or posting. An absent local version is never
+a publishable choice. Invalid TOML and oversized files remain held. While
+`settings.toml` is missing or does
 not load and the app runs from its last working copy, `settings.toml.good`,
 the check says so and offers no choice, join, update or new post until the
 file is fixed or restored, because writing a synced version then would replace
 the only copy of the settings the device is running. The check judges this
-from the file it has just read as well as from the app's state, so a check in
-the moment between a bad save and the app's reload refuses too. A post this
+from that account's primary and good files, so a check in the moment between a bad save and the app's reload refuses too. A post this
 device staged before the fallback is the one exception: sending it writes
 nothing to `settings.toml`, so the check still offers Finish sending for it,
 exactly when a working file would, and says that the rest of sync waits for
@@ -80,8 +82,8 @@ record is already staged. A record staged but never recorded as staged,
 because Telegram quit or could not save its sync state in between, was never
 sent; the next check drops it and carries on instead of reporting a store
 error. There is no standing resume action any more. While a
-check or post runs, the action, Undo and History restore are disabled, because
-the publisher and the check hold the local sync store; a result from an
+check or post runs, the action, Undo and History restore are disabled, while
+a check reviews its snapshot and the publisher holds the local sync store; a result from an
 account or session that is no longer selected is dropped. Join, Apply and a
 choice act on the Saved Messages snapshot of the check they came from and
 re-check only the local file and sync state before writing, while every post
@@ -555,7 +557,7 @@ version 2 exports `account-settings.toml`. Imports accept either name and requir
 the account-aware replacement review described in
 [Account routing](account_routing.md#reviewed-legacy-account-transfers).
 Old whole-file reader predicates still refuse layered documents. Modern schema-2
-sync Apply and History expansion remain held for the recovery batch.
+sync uses the reviewed account-specific replacement path below.
 
 Manual imports retain the exact message/window account through download and Apply,
 including separate windows. Launch offers remain active-account-only and download
@@ -567,5 +569,51 @@ has initial focus and Enter does not select Import implicitly.
 Per-account send-after-save accepts schema 2 and reads opt-in from that own file.
 Creation and imports seed/suppress their observations before callbacks. Captured
 queue entries carry their own account, bytes and session; logout/slot reuse and
-stale completion tokens cannot retarget a post or erase a later retry. The modern
-sync operation capability remains schema-1-only.
+stale completion tokens cannot retarget a post or erase a later retry.
+
+## Account-specific modern sync and recovery
+
+Modern sync accepts supported schema 1 and 2. Each choice reviews both the actual
+local replacement and every offered version it will supersede. This includes
+keeping layered local text over a remote whole file. The review carries the
+opening account, app-wide source, Work Mode choice, loaded-account context,
+exact primary/good bytes and native filesystem identities through Apply. Follow
+and Stock membership changes are shown as inactive here. No choice starts
+selected; Cancel has initial focus. App-wide losses lead with their consequences.
+
+Check and History listing only inspect existing files. They do not create an
+account directory, sync directory or pending directory. History remains readable
+with a missing or corrupt primary; Restore and Undo require a safe impact review,
+using a disclosed valid good baseline when necessary. A readable newer-schema
+source always refuses before good fallback. Writes retain History before the
+replacement, exact readback, the existing 30-entry retention and account-keyed
+Undo. Missing-file adoption publishes a complete file exclusively, including the
+startup owner's root file; inspection alone creates neither.
+
+Recovery discovers the root and every strictly named keyed store, reads complete
+state/pending snapshots and checks other signed-in preferences. An unidentified
+signed-out preference, duplicate token, unsafe path or incomplete discovery holds
+recovery. A unique keyed non-root store can restore its binding automatically.
+Normal Join, Apply and Publish also refuse ambiguous or incomplete ownership
+snapshots. Root Relink is explicit and needs a fresh complete Saved Messages inventory for
+the exact account and complete store-space evidence. Relink restores only the
+binding; ordinary clone, pending, fallback and inventory guards still apply.
+
+Start again requires confirmation, an idle account and an empty relevant send
+queue. Under its store lock it durably writes private recovery.json before moving
+pending, then state.json, without overwriting an archive. The destination is that
+account's orphaned-<UTC date> directory. Settings, good copies, backups, History,
+preferences and other accounts' state/counters are preserved. A partial failure
+blocks setup and resumes the same exact-byte journal. Changed originals,
+archives, journal or preference refuse. Only exact completion clears that
+account's Undo. Fresh setup reuses a valid existing preference token; logout
+alone changes no identity. Native exclusive archive moves are supported on
+macOS, Windows and Linux; other platforms refuse the archive instead of using an
+overwriting rename. Headless qualification covers the macOS file executor.
+
+History Restore and Undo require an exact readable snapshot of the current
+primary, or a genuinely absent file, before saving the previous state. A primary
+beyond the 256 KiB sync-reader limit refuses replacement instead of recording a
+false absent History entry. Corrupt readable primaries with an explicitly reviewed
+valid `.good` baseline retain their actual bytes in History; missing-file adoption
+remains available.

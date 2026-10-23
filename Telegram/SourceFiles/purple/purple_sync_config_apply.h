@@ -43,7 +43,8 @@ struct SyncConfigApplyResult {
 	Main::Session &session,
 	const SyncAccountInventoryResult &inventory,
 	const SyncConfigReview &review,
-	const std::optional<QString> &chosenRemoteKey);
+	const std::optional<QString> &chosenRemoteKey,
+	const AccountTransferReview *replacement = nullptr);
 
 struct SyncConfigRestoreResult {
 	SyncConfigRestoreStatus status = SyncConfigRestoreStatus::NotFound;
@@ -54,6 +55,7 @@ struct SyncConfigRestoreResult {
 [[nodiscard]] SyncConfigRestoreResult RestoreSyncConfigHistory(
 	Main::Session &session,
 	const QString &id,
-	SyncConfigHistoryReason reason);
+	SyncConfigHistoryReason reason,
+	const AccountTransferReview &replacement);
 
 } // namespace Purple

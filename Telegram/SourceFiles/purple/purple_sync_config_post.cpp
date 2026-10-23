@@ -93,7 +93,7 @@ SyncConfigPost::SyncConfigPost(
 : _session(session)
 , _sessionGuard(base::make_weak(session))
 , _staged(std::move(staged))
-, _target(AccountSyncTarget(session))
+, _target(AccountSyncInspectionTarget(session))
 , _finished(std::move(finished))
 , _stillCurrent(std::move(stillCurrent)) {
 }

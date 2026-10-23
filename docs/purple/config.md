@@ -1292,7 +1292,7 @@ Send, Share and imports now support schema 1 and 2 for the originating account's
 own file. Imports use a shared impact review with Cancel focused and recheck the
 captured account, source choice, bytes and identities before writing. Schema-2
 exports use `account-settings.toml`; old clients refuse that format. Modern
-schema-2 sync apply remains held. See
+schema-2 sync, History restore and Undo use captured account-aware impact reviews. See
 [the transfer boundary](account_routing.md#reviewed-legacy-account-transfers)
 for fallback, backup, launch-offer and queue rules. External editor save notices
 use the same impact model after the edit lands.

@@ -43,14 +43,18 @@ struct PreviewState {
 
 struct ReviewBoxState {
 	SyncConfigReview review;
-	Fn<void(std::optional<QString>)> choose;
+	Fn<void(std::optional<QString>, AccountTransferReview)> choose;
+	AccountTransferReview replacement;
+	std::vector<SyncConfigChoice> choices;
+	Ui::FlatLabel *impact = nullptr;
+	Ui::RoundButton *apply = nullptr;
 	std::vector<std::optional<QString>> keys;
 	rpl::variable<QString> confirmText;
 	ChangePreview preview;
 	Ui::FlatLabel *compare = nullptr;
 	Ui::SlideWrap<Ui::FlatLabel> *newer = nullptr;
 	Ui::SlideWrap<Ui::FlatLabel> *disclosure = nullptr;
-	int selected = 0;
+	int selected = -1;
 	bool done = false;
 };
 
@@ -165,75 +169,67 @@ void SelectReviewOption(not_null<ReviewBoxState*> state, int index) {
 	state->disclosure->toggle(
 		publishes || !review.bound,
 		anim::type::instant);
+	auto impacts = QStringList();
+	const auto &choice = state->choices[index];
+	for (const auto &change : choice.impacts) {
+		const auto source = change.replacedKey ? OfferedRecord(review, *change.replacedKey) : nullptr;
+		impacts.push_back((source ? SyncDeviceName(*source) + u":\n"_q : QString())
+			+ ConfigImpactDisplayText(change.impact));
+	}
+	if (state->replacement.usingGood) {
+		impacts.push_back(tr::lng_purple_transfer_good(tr::now));
+	}
+	if (choice.dangerous && state->replacement.context.role == ConfigImpactFileRole::Global) {
+		impacts.prepend(tr::lng_purple_transfer_global_warning(tr::now));
+	}
+	state->impact->setText(impacts.join(u"\n\n"_q));
+	state->apply->setDisabled(!choice.impactReady);
 	state->confirmText = SyncConfigChoiceButtonText(review, key);
 }
 
-void HistoryEntryBox(
+} // namespace
+
+void SyncConfigHistoryEntryBox(
 		not_null<Ui::GenericBox*> box,
 		SyncHistoryAccess access,
 		SyncConfigHistoryEntry entry,
-		Fn<bool(const SyncConfigHistoryEntry&)> restore,
+		SyncHistoryReview review,
+		SyncHistoryRestore restore,
 		Fn<void()> closeList,
-		AccountListPreviewNotes listNotes) {
+		AccountListPreviewNotes listNotes,
+		QString confirmText) {
 	box->setTitle(rpl::single(u"Saved settings"_q));
 	box->setWidth(st::boxWideWidth);
 	const auto container = box->verticalLayout();
 	AddLabel(container, SyncConfigHistoryRowText(entry));
-	Ui::AddSkip(container);
-	const auto text = entry.existed
-		? ReadSyncConfigHistory(access, entry.id)
-		: std::optional<QByteArray>();
-	const auto current = access.valid && access.valid()
-		? ReadSyncSettingsFile(access.files)
-		: MakeSyncSettingsFile(SyncSettingsFileStatus::Invalid, {}, false);
-	const auto restorable = entry.existed
-		&& text.has_value()
-		&& SyncSettingsTextWritable(*text)
-		&& current.status != SyncSettingsFileStatus::Invalid;
+	const auto text = entry.existed ? ReadSyncConfigHistory(access, entry.id) : std::nullopt;
+	const auto replacement = text && review ? review(*text) : std::nullopt;
+	const auto restorable = replacement && replacement->impact.status == ConfigImpactStatus::Ready;
 	if (!entry.existed) {
-		AddLabel(container, u"settings.toml did not exist when this entry "
-			"was saved, so there is nothing to restore."_q);
-	} else if (!text) {
-		AddLabel(container, u"This copy could not be read. It may have been "
-			"removed or damaged."_q);
-	} else if (!SyncSettingsTextWritable(*text)) {
-		AddLabel(container, u"This copy is not valid UTF-8 text, so it "
-			"cannot be restored here."_q);
-	} else if (current.status == SyncSettingsFileStatus::Invalid) {
-		AddLabel(container, u"settings.toml cannot be read right now, so it "
-			"cannot be replaced."_q);
+		AddLabel(container, u"settings.toml did not exist when this entry was saved, so there is nothing to restore."_q);
+	} else if (!restorable) {
+		AddLabel(container, tr::lng_purple_transfer_unavailable(tr::now));
 	} else {
-		AddLabel(container, (current.status == SyncSettingsFileStatus::Absent)
-			? u"settings.toml is missing now. Restoring creates it with this "
-				"version:"_q
-			: u"Restoring changes this device's settings like this:"_q);
+		if (replacement->impact.dangerous && replacement->context.role == ConfigImpactFileRole::Global) {
+			AddLabel(container, tr::lng_purple_transfer_global_warning(tr::now));
+		}
+		AddLabel(container, replacement->destination.file.path);
+		AddLabel(container, ConfigImpactDisplayText(replacement->impact));
+		if (replacement->usingGood) {
+			AddLabel(container, tr::lng_purple_transfer_good(tr::now));
+		}
 		const auto preview = AddChangePreview(container, listNotes);
-		preview(current.text, *text);
-	}
-	if (restorable) {
-		box->addButton(rpl::single(u"Restore"_q), [=] {
-			box->uiShow()->showBox(Ui::MakeConfirmBox({
-				.text = u"Replace settings.toml with the version from %1? "
-					"The current file is kept in History. The change stays "
-					"on this device until you publish it."_q.arg(
-						SyncConfigHistoryMomentText(entry)),
-				.confirmed = crl::guard(box, [=](Fn<void()> close) {
-					close();
-					if (access.valid && access.valid() && restore && restore(entry)) {
-						box->closeBox();
-						if (closeList) {
-							closeList();
-						}
-					}
-				}),
-				.confirmText = u"Restore"_q,
-			}));
+		preview(replacement->context.current.text, *text);
+		box->addButton(rpl::single(confirmText), [=] {
+			if (access.valid && access.valid() && restore && restore(entry, *replacement)) {
+				box->closeBox();
+				if (closeList) { closeList(); }
+			}
 		});
 	}
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	const auto cancel = box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	box->setFocusCallback([=] { cancel->setFocus(); });
 }
-
-} // namespace
 
 void SyncConfigReviewBox(
 		not_null<Ui::GenericBox*> box,
@@ -241,6 +237,7 @@ void SyncConfigReviewBox(
 	const auto state = box->lifetime().make_state<ReviewBoxState>();
 	state->review = std::move(args.review);
 	state->choose = std::move(args.choose);
+	state->replacement = std::move(args.replacement);
 	const auto &review = state->review;
 	const auto update = (review.plan.verdict == ConfigSyncVerdict::UpdateReady);
 	const auto first = review.plan.offered.empty()
@@ -255,13 +252,19 @@ void SyncConfigReviewBox(
 		: u"Join sync"_q));
 	box->setWidth(st::boxWideWidth);
 	const auto container = box->verticalLayout();
+	AddLabel(container, args.accountCaption);
+	AddLabel(container, state->replacement.context.role == ConfigImpactFileRole::Global
+		? tr::lng_purple_transfer_global_role(tr::now) : tr::lng_purple_transfer_own_role(tr::now));
+	AddLabel(container, state->replacement.destination.file.path);
 	AddLabel(container, SyncConfigChoiceIntro(review));
 	Ui::AddSkip(container);
 
 	auto labels = std::vector<QString>();
-	const auto choices = SyncConfigChoices(
+	state->choices = SyncConfigChoices(
 		review,
-		SyncSettingsPublishable(review));
+		SyncSettingsPublishable(review),
+		state->replacement.context);
+	const auto &choices = state->choices;
 	for (const auto &choice : choices) {
 		state->keys.push_back(choice.key);
 		if (choice.key) {
@@ -279,26 +282,14 @@ void SyncConfigReviewBox(
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 		return;
 	}
-	if (update) {
-		AddLabel(container, labels.front());
-	} else {
-		const auto group = std::make_shared<Ui::RadiobuttonGroup>(0);
-		for (auto i = 0; i != int(labels.size()); ++i) {
-			container->add(
-				object_ptr<Ui::Radiobutton>(
-					container,
-					group,
-					i,
-					labels[i],
-					st::defaultCheckbox),
-				st::boxRowPadding);
-		}
-		group->setChangedCallback([=](int value) {
-			if (value >= 0 && value < int(state->keys.size())) {
-				SelectReviewOption(state, value);
-			}
-		});
+	const auto group = std::make_shared<Ui::RadiobuttonGroup>(-1);
+	for (auto i = 0; i != int(labels.size()); ++i) {
+		container->add(object_ptr<Ui::Radiobutton>(container, group, i,
+			labels[i], st::defaultCheckbox), st::boxRowPadding);
 	}
+	group->setChangedCallback([=](int value) {
+		if (value >= 0 && value < int(state->keys.size())) { SelectReviewOption(state, value); }
+	});
 	Ui::AddSkip(container);
 	state->compare = AddLabel(container, QString());
 	state->preview = AddChangePreview(container, std::move(args.listNotes));
@@ -311,29 +302,37 @@ void SyncConfigReviewBox(
 		container,
 		QString(),
 		st::boxDividerLabel);
-	SelectReviewOption(state, 0);
+	state->impact = AddLabel(container, QString());
 
-	box->addButton(state->confirmText.value(), [=] {
-		if (state->done) {
+	state->confirmText = u"Apply"_q;
+	state->apply = box->addButton(state->confirmText.value(), [=] {
+		if (state->done || state->selected < 0 || !state->choices[state->selected].impactReady) {
 			return;
 		}
 		state->done = true;
 		const auto choose = state->choose;
 		const auto key = state->keys[state->selected];
-		box->closeBox();
 		if (choose) {
-			choose(key);
+			auto replacement = state->replacement;
+			const auto record = key ? OfferedRecord(state->review, *key) : nullptr;
+			replacement.context.proposed = { record ? record->text : state->review.local.text, true };
+			replacement.impact = AnalyzeConfigChange(replacement.context);
+			box->closeBox();
+			choose(key, std::move(replacement));
 		}
 	});
-	box->addButton(
+	state->apply->setDisabled(true);
+	const auto cancel = box->addButton(
 		rpl::single(update ? u"Not now"_q : u"Cancel"_q),
 		[=] { box->closeBox(); });
+	box->setFocusCallback([=] { cancel->setFocus(); });
 }
 
 void SyncConfigHistoryBox(
 		not_null<Ui::GenericBox*> box,
 		SyncHistoryAccess access,
-		Fn<bool(const SyncConfigHistoryEntry&)> restore,
+		SyncHistoryReview review,
+		SyncHistoryRestore restore,
 		AccountListPreviewNotes listNotes) {
 	box->setTitle(rpl::single(u"Settings History"_q));
 	box->setWidth(st::boxWideWidth);
@@ -354,12 +353,14 @@ void SyncConfigHistoryBox(
 			st::settingsButtonNoIcon);
 		row->setClickedCallback([=] {
 			box->uiShow()->showBox(Box(
-				HistoryEntryBox,
+				SyncConfigHistoryEntryBox,
 				access,
 				entry,
+				review,
 				restore,
 				closeList,
-				listNotes));
+				listNotes,
+				u"Restore"_q));
 		});
 	}
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });

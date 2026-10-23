@@ -175,3 +175,15 @@ docs/purple/upstream_hooks.md.
 "lng_purple_transfer_undefined" = " (inactive here: list is undefined)";
 "lng_purple_transfer_elsewhere" = " (used only when this file is app-wide)";
 "lng_purple_transfer_schema" = "Schema v%1. Parser warnings: %2.";
+
+"lng_purple_sync_empty_join_confirm" = "Join sync for this account without a settings file? This links the device without creating settings.toml or sending a settings record.";
+"lng_purple_sync_empty_join_done" = "Joined sync. No settings file was created and nothing was sent.";
+
+"lng_purple_sync_recovery" = "Review sync recovery";
+"lng_purple_sync_relink" = "Relink sync";
+"lng_purple_sync_start_again" = "Start again";
+"lng_purple_sync_relink_confirm" = "Restore the verified sync binding for %1? The settings and sync identity are preserved. Normal sync checks still apply.";
+"lng_purple_sync_reset_confirm" = "Start sync again for %1? Only this account's sync state and pending records are archived, pending first. Settings, last-good copies, backups, History and the account's preference token are preserved. Nothing is sent. A partial archive must finish before setup can continue.";
+"lng_purple_sync_relinked" = "Sync binding restored. Check Saved Messages again before continuing.";
+"lng_purple_sync_reset_done" = "Sync state archived. History and settings were preserved. Check Saved Messages to set up sync again.";
+"lng_purple_sync_reset_partial" = "The archive is incomplete. Setup is blocked. Review sync recovery again to resume the same archive.";

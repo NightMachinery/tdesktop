@@ -12,6 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_history_guard.h"
 #include "purple/purple_sync_config_history.h"
 #include "purple/purple_sync_local_store.h"
+#include "purple/purple_sync_account_recovery.h"
+#include "purple/purple_sync_config_describe.h"
+#include "purple/purple_sync_config_review.h"
 #include "purple/purple_state.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_global_choice_activation.h"
@@ -455,7 +458,7 @@ void AccountSyncIsolationCases() {
 	CHECK(!config.operationTarget(a));
 	config.start({ { a, false, false } });
 	CHECK(config.operationTarget(a));
-	CHECK(!config.operationTarget(b));
+	CHECK(config.operationTarget(b));
 	CHECK(!QFileInfo::exists(bPath));
 	CHECK(!QFileInfo::exists(temp.filePath(u"accounts/0-202/sync"_q)));
 	CHECK(!config.observeAccountSave(a));
@@ -528,7 +531,7 @@ void AccountSyncIsolationCases() {
 	CHECK(Get(bf.files.fingerprintFile) == importedMarker);
 	CHECK(QFile::remove(bPath));
 	CHECK(!config.observeAccountSave(b));
-	CHECK(!config.operationTarget(b));
+	CHECK(config.operationTarget(b));
 	Put(bPath, bNext);
 	CHECK(!config.observeAccountSave(b));
 	CHECK(Get(root) == aBytes);
@@ -623,7 +626,7 @@ void AccountSyncIsolationCases() {
 		layeredInput.text = QByteArray("version=2\n[last_seen]\ntrade_p=true\n");
 		const auto layeredRecord = BuildConfigRecord(layeredInput);
 		CHECK(layeredRecord);
-		CHECK(!AccountSyncRecordSupported(layeredRecord.canonical));
+		CHECK(AccountSyncRecordSupported(layeredRecord.canonical));
 		auto next = initialB.configData;
 		next.pending = record.version.key;
 		CHECK(storeB.StageConfig(record.canonical, next, initialA.bindingToken.toLatin1()).status
@@ -662,7 +665,7 @@ void AccountSyncIsolationCases() {
 	CHECK(Get(root) == aBytes);
 #endif
 	Put(bPath, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
-	CHECK(!config.operationTarget(b));
+	CHECK(config.operationTarget(b));
 	CHECK(config.observeAccountSave(b));
 	CHECK(Get(root) == aBytes);
 }
@@ -920,7 +923,7 @@ void OwnerPolicyRecoveryCases() {
 	CHECK(pending[0].target.file.input.bytes == corrected);
 	Put(path, QByteArray("version=2\n[sync]\nsend_after_save_p=true\n"));
 	CHECK(ownerPolicy(currentOwner));
-	CHECK(!config.operationTarget(b));
+	CHECK(config.operationTarget(b));
 	observe();
 	CHECK(queue.takeReady(config).size() == 1);
 	Put(path, first);
@@ -1004,7 +1007,7 @@ void AccountSettingsCreationAndDocumentCases() {
 		const auto path = directory + u"/settings.toml"_q;
 		(void)config.settings(b);
 		CHECK(!QFileInfo::exists(directory));
-		CHECK(!config.operationTarget(b));
+		CHECK(config.operationTarget(b));
 		const auto target = config.openTarget(b, SettingsOpenRole::Own);
 		CHECK(target);
 		if (!target) { return; }
@@ -1035,7 +1038,7 @@ void AccountSettingsCreationAndDocumentCases() {
 		CHECK(Get(root) == rootBytes);
 		CHECK(Get(temp.filePath(u"local.toml"_q)) == localBefore);
 		CHECK(Get(temp.filePath(u"accounts/root.toml"_q)) == recordBefore);
-		CHECK(!config.operationTarget(b));
+		CHECK(config.operationTarget(b));
 		CHECK(!config.editTarget(b));
 		queue.observe(config, b, 1, [](int owner) { return owner == 1; });
 		CHECK(queue.empty());
@@ -2014,7 +2017,7 @@ void RemoveAppWideSettingsCases() {
 		CHECK(Get(temp.filePath(u"local.toml"_q)) == local);
 		CHECK(Get(temp.filePath(u"accounts/root.toml"_q)) == owner && config.owner() == a);
 		CHECK(ParseSettings(QString::fromUtf8(after), paths.settings).settings.version == 2);
-		CHECK(!config.operationTarget(account));
+		CHECK(config.operationTarget(account));
 		CHECK(!config.observeAccountSave(account));
 		CHECK(!CanApplyWholeSettingsDocument(u"settings.toml"_q, after));
 		const auto second = PreviewAccountAppWideRemoval(config, account);
@@ -2166,7 +2169,7 @@ void RemoveAppWideSettingsCases() {
 		CHECK(!after.contains("[premium]") && !after.contains("enabled_p=true"));
 		CHECK(after.contains("reasons_p={bad=true}"));
 		CHECK(after.contains("note='preserved' # comment"));
-		CHECK(!config.operationTarget(b));
+		CHECK(config.operationTarget(b));
 	}
 	FailureContext.clear();
 }
@@ -2897,7 +2900,7 @@ void ReviewedTransferCases() {
 		CHECK(Get(path + u".import.bak"_q) == own);
 		CHECK(!config.validateTransfer(*review));
 		CHECK(!config.observeAccountSave(b));
-		CHECK(!config.operationTarget(b));
+		CHECK(config.operationTarget(b));
 		const auto send = config.operationTarget(b, true);
 		CHECK(send);
 		CHECK(send->legacySend);
@@ -2982,7 +2985,7 @@ void ReviewedTransferCases() {
 		CHECK(config.importReviewed(*review, [] { return true; }).ok);
 		CHECK(Get(path) == own);
 		CHECK(Get(root) == "version=2\n");
-		CHECK(!config.operationTarget(a));
+		CHECK(config.operationTarget(a));
 		CHECK(config.operationTarget(a, true)->files.fingerprintStorage == AccountFingerprintStorage::DeviceState);
 	}
 	{
@@ -3148,6 +3151,490 @@ void ReviewedTransferCases() {
 
 }
 
+void ModernSyncReviewFileCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto whole = QByteArray("version=2\n[lists.focus]\ntitle='Focus'\nkind='users'\nmembers=[101,202]\n");
+	const auto own = QByteArray("version=2\n[lists.focus]\nmembers=[202]\n");
+	const auto next = QByteArray("version=2\n[lists.focus]\nmembers=[303]\n");
+	for (const auto mode : { AccountWorkMode::Own, AccountWorkMode::Follow, AccountWorkMode::Stock }) {
+		for (auto baseline = 0; baseline != 3; ++baseline) {
+			auto temp = QTemporaryDir();
+			Put(temp.filePath(u"settings.toml"_q), whole);
+			auto config = DesktopAccountConfig(temp.path());
+			config.start({ { a, false, false }, { b, false, false } }, a);
+			if (mode != AccountWorkMode::Own) {
+				CHECK(config.writeWorkMode(*config.workModeTarget(b), mode, [] { return true; }).ok);
+			}
+			const auto files = *config.files(b);
+			if (baseline == 0) { Put(files.settings, own); }
+			if (baseline == 2) { Put(files.settings, QByteArray("broken [")); Put(files.good, own); }
+			const auto input = ReadSettingsFileInput(files.settings);
+			const auto inspection = config.operationTarget(b, false, true);
+			CHECK(inspection && config.validateOperation(*inspection));
+			CHECK(inspection && !config.noteFingerprint(*inspection, true) && !config.shouldAutoSend(*inspection));
+			const auto review = config.reviewTransfer(b, next);
+			CHECK(review && review->context.workMode == mode);
+			if (!review || !inspection) { continue; }
+			CHECK(review->usingGood == (baseline == 2));
+			const auto beforeA = Get(temp.filePath(u"settings.toml"_q));
+			auto access = SyncHistoryAccess{ files, [&] { return config.validateOperation(*inspection); } };
+			CHECK(ListSyncConfigHistory(access).empty());
+			if (baseline == 1) { CHECK(!QFileInfo::exists(files.directory)); }
+			const auto store = ReadSyncRecoveryStore(files, b);
+			CHECK(store.status == SyncStoreStatus::Ready && !store.store.statePresent && !store.store.pendingPresent);
+			if (baseline == 1) { CHECK(!QFileInfo::exists(files.directory)); }
+			if (baseline == 1) {
+				auto setup = SyncLocalStore(files.syncDirectory);
+				CHECK(setup.Open(true).status == SyncStoreStatus::Uninitialized);
+			}
+			const auto historyTarget = config.operationTarget(b, false, true);
+			CHECK(historyTarget);
+			access.valid = [&] { return historyTarget && config.validateOperation(*historyTarget); };
+			const auto saved = SaveSyncConfigHistory(access,
+				input.state == SettingsFileState::Readable ? std::make_optional(input.bytes) : std::nullopt,
+				SyncConfigHistoryReason::BeforeUpdate, u"fixture"_q);
+			CHECK(saved && saved->existed == (baseline != 1));
+			const auto ready = config.rebaseTransferAfterSetup(*review);
+			CHECK(ready);
+			if (!ready) { continue; }
+			CHECK(config.replaceReviewed(*ready, [] { return true; }).ok);
+			CHECK(Get(files.settings) == next);
+			CHECK(Get(temp.filePath(u"settings.toml"_q)) == beforeA);
+			CHECK(!QFileInfo::exists(files.importBackup));
+			CHECK(!QFileInfo::exists(temp.filePath(u"sync"_q)));
+			CHECK(!config.observeAccountSave(b));
+			CHECK(!config.validateTransfer(*review));
+			if (baseline != 1) {
+				CHECK(Get(files.backup) == input.bytes);
+				const auto target = *config.operationTarget(b, false, true);
+				const auto history = SyncHistoryAccess{ files, [&] { return config.validateOperation(target); } };
+				CHECK(ReadSyncConfigHistory(history, saved->id) == input.bytes);
+				const auto undo = config.reviewTransfer(b, own);
+				CHECK(undo && config.replaceReviewed(*undo, [] { return true; }).ok);
+				CHECK(Get(files.settings) == own && Get(temp.filePath(u"settings.toml"_q)) == beforeA);
+			}
+		}
+	}
+	for (auto changed = 0; changed != 5; ++changed) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), whole);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto files = *config.files(b);
+		Put(files.settings, own);
+		const auto review = config.reviewTransfer(b, next);
+		CHECK(review);
+		if (!review) { continue; }
+		if (changed == 0) { Put(files.settings, own + "# changed\n"); }
+		if (changed == 1) { Put(temp.filePath(u"settings.toml"_q), whole + "# changed\n"); }
+		if (changed == 2) { Put(files.good, own); }
+		if (changed == 3) { CHECK(config.writeWorkMode(*config.workModeTarget(b), AccountWorkMode::Follow, [] { return true; }).ok); }
+		if (changed == 4) {
+			CHECK(QDir().rename(files.directory, files.directory + u".old"_q));
+			Put(files.settings, own);
+		}
+		const auto before = Get(files.settings);
+		CHECK(!config.rebaseTransferAfterSetup(*review));
+		CHECK(!config.replaceReviewed(*review, [] { return true; }).ok);
+		CHECK(Get(files.settings) == before);
+	}
+}
+
+void SyncArchiveFileCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	for (auto stop = 0; stop != 26; ++stop) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=2\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto files = *config.files(b);
+		CHECK(QDir().mkpath(files.directory));
+		CHECK(EnsureSyncPrivateDirectory(files.syncDirectory) == SyncStoreStatus::Ready);
+		CHECK(EnsureSyncPrivateDirectory(files.syncDirectory + u"/pending"_q) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.syncStore, QByteArray("invalid state exact bytes\0\xff", 27)) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.syncDirectory + u"/pending/config-unknown.json"_q, QByteArray("stage")) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.syncDirectory + u"/pending/another-stream"_q, QByteArray("retained")) == SyncStoreStatus::Ready);
+		CHECK(EnsureSyncPrivateDirectory(files.history) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.history + u"/sentinel"_q, QByteArray("keep History")) == SyncStoreStatus::Ready);
+		const auto snapshot = ReadSyncRecoveryStore(files, b);
+		CHECK(snapshot.status == SyncStoreStatus::Ready);
+		auto input = SyncStartAgainInput();
+		input.recovery.account = b;
+		input.recovery.startupOwner = a;
+		input.recovery.signedIn = true;
+		input.recovery.discoveryComplete = true;
+		input.recovery.preferenceToken = QByteArray(32, 'a');
+		input.recovery.stores.push_back(snapshot.store);
+		input.archiveDate = u"20261024-010203"_q;
+		input.archiveAvailable = true;
+		input.confirmed = true;
+		const auto plan = PlanSyncStartAgain(input);
+		CHECK(plan.status == SyncStartAgainStatus::Ready && plan.moves.size() == 2);
+		CHECK(plan.moves[0].kind == SyncOrphanMoveKind::PendingDirectory);
+		auto calls = 0;
+		const auto interrupted = ArchiveSyncAccountState(temp.path(), files, plan, [&] { return calls++ < stop; });
+		CHECK(Get(files.history + u"/sentinel"_q) == "keep History");
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == "version=2\n");
+		CHECK(!QFileInfo::exists(temp.filePath(u"sync"_q)));
+		if (!interrupted.ready) {
+			const auto journal = ReadSyncArchiveJournal(temp.path(), files, b);
+			const auto resumed = ArchiveSyncAccountState(temp.path(), files, journal.value_or(plan), [] { return true; });
+			CHECK(resumed.ready && !resumed.partial);
+		}
+		CHECK(!QFileInfo::exists(files.syncStore));
+		CHECK(!QFileInfo::exists(files.syncDirectory + u"/pending"_q));
+		CHECK(!QFileInfo::exists(files.syncDirectory + u"/recovery.json"_q));
+		const auto archived = temp.filePath(plan.archiveDirectory);
+		const auto archiveFiles = [&] { auto result = files; result.syncDirectory = archived; result.syncStore = archived + u"/state.json"_q; return result; }();
+		const auto result = ReadSyncRecoveryStore(archiveFiles, b);
+		CHECK(result.status == SyncStoreStatus::Ready && result.store.state == snapshot.store.state);
+		CHECK(result.store.pendingFiles == snapshot.store.pendingFiles);
+		CHECK(Get(files.history + u"/sentinel"_q) == "keep History");
+		CHECK(!ReadSyncArchiveJournal(temp.path(), files, a));
+	}
+}
+
+void SyncRecoveryDiscoveryAndRefusalCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	for (auto scenario = 0; scenario != 9; ++scenario) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=2\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto files = *config.files(b);
+		CHECK(QDir().mkpath(files.directory));
+		CHECK(EnsureSyncPrivateDirectory(files.syncDirectory) == SyncStoreStatus::Ready);
+		CHECK(EnsureSyncPrivateDirectory(files.syncDirectory + u"/pending"_q) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.syncStore, QByteArray("corrupt state")) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.syncDirectory + u"/pending/retained"_q, QByteArray("retained")) == SyncStoreStatus::Ready);
+		CHECK(EnsureSyncPrivateDirectory(files.history) == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.history + u"/sentinel"_q, QByteArray("keep")) == SyncStoreStatus::Ready);
+#ifdef Q_OS_UNIX
+		CHECK(QFile::setPermissions(files.syncDirectory + u"/pending"_q, QFileDevice::ReadOwner));
+		CHECK(ReadSyncRecoveryStore(files, b).status != SyncStoreStatus::Ready);
+		CHECK(!DiscoverDesktopSyncStores(temp.path()));
+		CHECK(QFile::setPermissions(files.syncDirectory + u"/pending"_q,
+			QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+#endif
+		const auto discovery = DiscoverDesktopSyncStores(temp.path());
+		CHECK(discovery && discovery->stores.size() == 2);
+		if (!discovery) { continue; }
+		auto input = SyncStartAgainInput();
+		input.recovery.account = b;
+		input.recovery.startupOwner = a;
+		input.recovery.signedIn = true;
+		input.recovery.discoveryComplete = true;
+		input.recovery.stores = discovery->stores;
+		input.recovery.preferenceToken = QByteArray(32, 'a');
+		input.archiveDate = u"20261024-020304"_q;
+		input.archiveAvailable = true;
+		input.confirmed = true;
+		CHECK(PlanSyncAccountRecovery(input.recovery).status == SyncAccountRecoveryStatus::StartAgain);
+		auto busy = input;
+		busy.operationInFlight = true;
+		CHECK(PlanSyncStartAgain(busy).status == SyncStartAgainStatus::Busy);
+		busy.operationInFlight = false;
+		busy.queue = SyncConfigSendQueue::HoldsSyncRecord;
+		CHECK(PlanSyncStartAgain(busy).status == SyncStartAgainStatus::Busy);
+		const auto plan = PlanSyncStartAgain(input);
+		CHECK(plan.status == SyncStartAgainStatus::Ready);
+		const auto archive = temp.filePath(plan.archiveDirectory);
+		if (scenario == 0) {
+			CHECK(QDir().mkpath(archive));
+			Put(archive + u"/sentinel"_q, QByteArray("do not overwrite"));
+			CHECK(!ArchiveSyncAccountState(temp.path(), files, plan, [] { return true; }).ready);
+			CHECK(Get(files.syncStore) == "corrupt state" && Get(archive + u"/sentinel"_q) == "do not overwrite");
+			CHECK(!QFileInfo::exists(files.syncDirectory + u"/recovery.json"_q));
+			continue;
+		}
+		auto calls = 0;
+		CHECK(!ArchiveSyncAccountState(temp.path(), files, plan, [&] { return calls++ < 4; }).ready);
+		CHECK(QFileInfo::exists(files.syncDirectory + u"/recovery.json"_q));
+		const auto journal = ReadSyncArchiveJournal(temp.path(), files, b);
+		CHECK(journal);
+		if (!journal) { continue; }
+		if (scenario == 1) { CHECK(WriteSyncPrivateFile(files.syncStore, QByteArray("changed")) == SyncStoreStatus::Ready); }
+		if (scenario == 2) { CHECK(WriteSyncPrivateFile(archive + u"/pending/retained"_q, QByteArray("changed")) == SyncStoreStatus::Ready); }
+		if (scenario == 3) { CHECK(WriteSyncPrivateFile(archive + u"/pending/extra"_q, QByteArray("extra")) == SyncStoreStatus::Ready); }
+		if (scenario == 4) { CHECK(WriteSyncPrivateFile(files.syncDirectory + u"/recovery.json"_q, QByteArray("{}")) == SyncStoreStatus::Ready); }
+		if (scenario == 5) { CHECK(WriteSyncPrivateFile(archive + u"/unexpected"_q, QByteArray("extra")) == SyncStoreStatus::Ready); }
+		if (scenario == 6) {
+			CHECK(EnsureSyncPrivateDirectory(files.syncDirectory + u"/pending"_q) == SyncStoreStatus::Ready);
+			CHECK(WriteSyncPrivateFile(files.syncDirectory + u"/pending/new"_q, QByteArray("new")) == SyncStoreStatus::Ready);
+		}
+		if (scenario == 7) {
+			auto store = SyncLocalStore(files.syncDirectory);
+			CHECK(store.Open(true).status == SyncStoreStatus::InvalidTransition);
+			CHECK(!QFileInfo::exists(files.syncDirectory + u"/pending"_q));
+		}
+		const auto result = ArchiveSyncAccountState(temp.path(), files, *journal, [=] { return scenario != 8; });
+		CHECK(result.ready == (scenario == 7));
+		CHECK(QFileInfo::exists(files.syncDirectory + u"/recovery.json"_q) == (scenario != 7));
+		CHECK(Get(files.history + u"/sentinel"_q) == "keep");
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == "version=2\n");
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version=2\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto files = *config.files(b);
+		auto initial = SyncLocalState();
+		initial.install = u"in-"_q + QString(26, 'a');
+		initial.space = u"sp-"_q + QString(26, 'a');
+		initial.createdDevice = u"desktop:a"_q;
+		initial.bindingToken = QString(32, 'a');
+		{
+			auto store = SyncLocalStore(files.syncDirectory);
+			CHECK(store.Open(true).status == SyncStoreStatus::Uninitialized);
+			CHECK(store.Initialize(initial));
+		}
+		const auto discovery = DiscoverDesktopSyncStores(temp.path());
+		CHECK(discovery);
+		if (!discovery) { return; }
+		auto input = SyncAccountRecoveryInput();
+		input.account = b;
+		input.startupOwner = a;
+		input.signedIn = true;
+		input.discoveryComplete = true;
+		input.stores = discovery->stores;
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::AutoRelink);
+		input.preferenceToken = QByteArray(32, 'a');
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::Bound);
+		input.otherPreferences.push_back({ a, QByteArray(32, 'a') });
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::Ambiguous);
+		input.otherPreferences.clear();
+		input.signedIn = false;
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::WaitingForSignIn);
+		input.signedIn = true;
+		input.account = a;
+		input.preferenceToken.clear();
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::Setup);
+		CHECK(QFile::remove(files.syncStore));
+		const auto emptyPending = DiscoverDesktopSyncStores(temp.path());
+		CHECK(emptyPending);
+		input.account = b;
+		input.preferenceToken = QByteArray(32, 'a');
+		input.stores = emptyPending->stores;
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::StartAgain);
+		const auto token = PlanSyncSetupBindingToken(input.preferenceToken, QByteArray(16, 'b'));
+		CHECK(token.status == SyncSetupBindingStatus::ReuseExisting && token.token.toLatin1() == input.preferenceToken);
+		Put(temp.filePath(u"accounts/not-an-account"_q), QByteArray("unknown"));
+		CHECK(!DiscoverDesktopSyncStores(temp.path()));
+	}
+}
+
+void ReviewedRootCreationCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	for (auto race = 0; race != 3; ++race) {
+		auto temp = QTemporaryDir();
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto path = config.files(a)->settings;
+		const auto bytes = QByteArray("version=2\n[last_seen]\ntrade_p=true\n");
+		const auto review = config.reviewTransfer(a, bytes);
+		CHECK(review && review->destination.file.input.state == SettingsFileState::Missing);
+		CHECK(!QFileInfo::exists(path));
+		if (!review) { continue; }
+		auto injected = false;
+		const auto result = config.replaceReviewed(*review, [&] {
+			if (race && !injected) {
+				injected = true;
+				if (race == 1) { Put(path, QByteArray("version=2\n# foreign\n")); }
+				else { Put(temp.filePath(u"local.toml"_q), QByteArray("root_file_account='0-101'\nglobal_account='0-202'\n")); }
+			}
+			return true;
+		});
+		CHECK(result.ok == (race == 0));
+		if (race == 0) { CHECK(Get(path) == bytes); CHECK(!config.observeAccountSave(a)); }
+		if (race == 1) { CHECK(Get(path) == "version=2\n# foreign\n"); }
+		if (race == 2) { CHECK(!QFileInfo::exists(path)); }
+		CHECK(!QFileInfo::exists(config.files(b)->settings));
+	}
+}
+
+void ModernSyncChoiceAndRootProofCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto own = QByteArray("version=2\n[lists.focus]\nmembers=[2]\n");
+	const auto whole = QByteArray("version=1\n[lists.focus]\nmembers=[1]\n[presets.work]\nlist_order=[]\n");
+	for (const auto mode : { AccountWorkMode::Own, AccountWorkMode::Follow, AccountWorkMode::Stock }) {
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), whole);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		Put(config.files(b)->settings, own);
+		if (mode != AccountWorkMode::Own) { CHECK(config.writeWorkMode(*config.workModeTarget(b), mode, [] { return true; }).ok); }
+		const auto context = config.reviewTransfer(b, own);
+		CHECK(context);
+		if (!context) { continue; }
+		auto build = ConfigRecordBuildInput();
+		build.text = whole;
+		build.space = u"sp-"_q + QString(26, 'a');
+		build.install = u"in-"_q + QString(25, 'b') + u"a"_q;
+		build.device = u"desktop:b"_q;
+		build.platform = u"macos"_q;
+		build.app = u"Purple"_q;
+		build.seq = 1;
+		const auto record = BuildConfigRecord(build);
+		CHECK(record && AccountSyncRecordSupported(record.canonical));
+		auto scan = SyncHistoryScanResult();
+		scan.status = SyncHistoryScanStatus::Complete;
+		scan.candidateIds = { 1 };
+		auto read = SyncCandidateReadResult();
+		read.status = SyncCandidateReadStatus::Complete;
+		read.records = { ClassifySyncCandidate(1, record.canonical) };
+		read.records[0].documentId = 5001;
+		read.records[0].editDate = 1700000000;
+		const auto inventory = FinishSyncAccountInventory(202, scan, read);
+		const auto review = ReviewSyncConfigInventory(inventory, nullptr, {}, MakeSyncSettingsFile(SyncSettingsFileStatus::Present, own, false));
+		CHECK(review.status == SyncConfigReviewStatus::Ready && review.plan.verdict == ConfigSyncVerdict::Choose);
+		const auto choices = SyncConfigChoices(review, true, context->context);
+		CHECK(choices.size() == 2);
+		if (choices.size() != 2) { continue; }
+		CHECK(choices[0].impactReady && choices[1].impactReady);
+		CHECK(!choices[1].key && choices[1].publishes && choices[1].dangerous && choices[1].impacts.size() == 2);
+		CHECK(choices[1].impacts[1].replacedKey == record.version.key);
+		auto member = false;
+		for (const auto &finding : choices[0].impacts[0].impact.findings) {
+			if (finding.kind == ConfigImpactKind::ValueChanged && finding.change.key == u"members"_q) {
+				member = true;
+				CHECK(ConfigImpactFindingUsedHere(finding) == (mode == AccountWorkMode::Own));
+			}
+		}
+		CHECK(member);
+		const auto absent = ReviewSyncConfigInventory(inventory, nullptr, {}, MakeSyncSettingsFile(SyncSettingsFileStatus::Absent, {}, false));
+		const auto absentChoices = SyncConfigChoices(absent, false, context->context);
+		CHECK(!absentChoices.empty());
+		CHECK(std::all_of(absentChoices.begin(), absentChoices.end(), [](const auto &choice) { return choice.key.has_value(); }));
+	}
+	{
+		auto temp = QTemporaryDir();
+		Put(temp.filePath(u"settings.toml"_q), whole);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		const auto files = *config.files(a);
+		auto initial = SyncLocalState();
+		initial.install = u"in-"_q + QString(26, 'a');
+		initial.space = u"sp-"_q + QString(26, 'a');
+		initial.createdDevice = u"desktop:a"_q;
+		initial.bindingToken = QString(32, 'a');
+		{ auto store = SyncLocalStore(files.syncDirectory); CHECK(store.Open(true).status == SyncStoreStatus::Uninitialized); CHECK(store.Initialize(initial)); }
+		const auto discovery = DiscoverDesktopSyncStores(temp.path());
+		CHECK(discovery);
+		if (!discovery) { return; }
+		auto input = SyncAccountRecoveryInput();
+		input.account = a;
+		input.startupOwner = a;
+		input.signedIn = true;
+		input.discoveryComplete = true;
+		input.stores = discovery->stores;
+		input.local = MakeSyncSettingsFile(SyncSettingsFileStatus::Present, whole, false);
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::Incomplete);
+		auto scan = SyncHistoryScanResult(); scan.status = SyncHistoryScanStatus::Complete;
+		auto read = SyncCandidateReadResult(); read.status = SyncCandidateReadStatus::Complete;
+		const auto inventory = FinishSyncAccountInventory(101, scan, read);
+		input.cloud = SyncRecoveryCloud{ a, true, inventory };
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::RootRelink);
+		input.cloud->storeSpaceComplete = false;
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::Incomplete);
+		input.cloud->storeSpaceComplete = true;
+		input.cloud->account = b;
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::Ambiguous);
+		input.cloud->account = a;
+		input.local.usingLastGood = true;
+		CHECK(PlanSyncAccountRecovery(input).status == SyncAccountRecoveryStatus::NeedsReview);
+	}
+}
+
+void ModernSyncPerFileFallbackCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	auto temp = QTemporaryDir();
+	const auto valid = QByteArray("version=2\n[last_seen]\ntrade_p=true\n");
+	Put(temp.filePath(u"settings.toml"_q), valid);
+	Put(temp.filePath(u"settings.toml.good"_q), valid);
+	auto config = DesktopAccountConfig(temp.path());
+	config.start({ { a, false, false }, { b, false, false } }, a);
+	const auto files = *config.files(b);
+	const auto absent = ReadSyncSettingsFile(files);
+	CHECK(absent.status == SyncSettingsFileStatus::Absent && !absent.usingLastGood);
+	CHECK(!QFileInfo::exists(files.directory));
+	Put(files.good, valid);
+	const auto recovered = ReadSyncSettingsFile(files);
+	CHECK(recovered.status == SyncSettingsFileStatus::Absent && recovered.usingLastGood);
+	Put(files.settings, QByteArray("broken ["));
+	CHECK(ReadSyncSettingsFile(files).usingLastGood);
+	for (const auto &version : { QByteArray("3"), QByteArray("2147483648"), QByteArray("9223372036854775807") }) {
+		const auto newer = QByteArray("version=") + version + "\n[lists.focus]\nmembers=[123]\n[future]\npolicy='keep'\n";
+		Put(files.settings, newer);
+		const auto read = ReadSyncSettingsFile(files);
+		CHECK(read.status == SyncSettingsFileStatus::Present && read.text == newer && !read.usingLastGood);
+		CHECK(!config.reviewTransfer(b, valid));
+	}
+	Put(files.settings, valid);
+	CHECK(!ReadSyncSettingsFile(files).usingLastGood);
+	CHECK(QFile::remove(files.settings));
+	Put(files.good, QByteArray(kSyncSettingsMaximumBytes + 1, 'a'));
+	CHECK(!ReadSyncSettingsFile(files).usingLastGood);
+}
+
+void ModernSyncSnapshotBoundaryCases() {
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto desired = QByteArray("version=2\n[last_seen]\ntrade_p=true\n");
+	const auto prefix = QByteArray("version=2\n[last_seen]\ntrade_p=false\n# ");
+	for (const auto size : { 44, kSyncSettingsMaximumBytes,
+			kSyncSettingsMaximumBytes + 1, 262183, 0, -1 }) {
+		for (const auto importing : { false, true }) {
+			auto temp = QTemporaryDir();
+			Put(temp.filePath(u"settings.toml"_q), desired);
+			auto config = DesktopAccountConfig(temp.path());
+			config.start({ { a, false, false }, { b, false, false } }, a);
+			const auto files = *config.files(b);
+			const auto before = (size < 0) ? QByteArray("broken=[\n")
+				: (size == 0) ? QByteArray()
+				: prefix + QByteArray(size - prefix.size() - 1, 'x') + "\n";
+			if (size != 0) { Put(files.settings, before); }
+			if (size < 0) { Put(files.good, desired); }
+			const auto snapshot = ReadSettingsFileInput(files.settings);
+			const auto local = ReadSyncSettingsFile(files);
+			CHECK(snapshot.state == (size == 0 ? SettingsFileState::Missing : SettingsFileState::Readable));
+			CHECK(snapshot.bytes == before);
+			CHECK(local.status == (size > kSyncSettingsMaximumBytes ? SyncSettingsFileStatus::Invalid
+				: size == 0 ? SyncSettingsFileStatus::Absent : SyncSettingsFileStatus::Present));
+			CHECK(local.usingLastGood == (size < 0));
+			if (size > kSyncSettingsMaximumBytes) {
+				const auto review = ReviewSyncConfigInventory({}, nullptr, {}, local);
+				CHECK(review.status == SyncConfigReviewStatus::InvalidSettings);
+				CHECK(PlanSyncConfigApply(review, SyncConfigReviewStamp(review), std::nullopt).status
+					!= SyncConfigApplyPlanStatus::Ready);
+			} else {
+				CHECK(local.text == before);
+			}
+			const auto transfer = config.reviewTransfer(b, desired);
+			CHECK(transfer);
+			if (!transfer) { continue; }
+			CHECK(transfer->destination.file.input == snapshot);
+			CHECK(transfer->usingGood == (size < 0));
+			const auto written = importing
+				? config.importReviewed(*transfer, [] { return true; })
+				: config.replaceReviewed(*transfer, [] { return true; });
+			CHECK(written.ok);
+			CHECK(Get(files.settings) == desired);
+			CHECK(Get(temp.filePath(u"settings.toml"_q)) == desired);
+			CHECK(QFileInfo::exists(files.backup) == (size != 0));
+			CHECK(QFileInfo::exists(files.importBackup) == (importing && size != 0));
+			if (size != 0) { CHECK(Get(files.backup) == before); }
+			if (importing && size != 0) { CHECK(Get(files.importBackup) == before); }
+		}
+	}
+}
+
 int main(int argc, char *argv[]) {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 	auto application = QCoreApplication(argc, argv);
@@ -3199,6 +3686,13 @@ int main(int argc, char *argv[]) {
 	const auto beforeListControls = Checks;
 	AccountListControlsCases();
 	std::printf("accountListControls %d checks\n", Checks - beforeListControls);
+	ModernSyncReviewFileCases();
+	SyncArchiveFileCases();
+	SyncRecoveryDiscoveryAndRefusalCases();
+	ModernSyncChoiceAndRootProofCases();
+	ReviewedRootCreationCases();
+	ModernSyncPerFileFallbackCases();
+	ModernSyncSnapshotBoundaryCases();
 	const auto beforeTransfers = Checks;
 	ReviewedTransferCases();
 	std::printf("reviewedTransfers %d checks\n", Checks - beforeTransfers);

@@ -8,7 +8,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_local_store.h"
 
 #include "purple/purple_sync_config_flow.h"
-#include "purple/purple_account_config.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
@@ -19,6 +18,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QStringList>
 
 #include <utility>
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#else
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#endif
 
 namespace Purple {
 namespace {
@@ -28,7 +35,7 @@ constexpr auto kConfigBytes = 256 * 1024;
 
 [[nodiscard]] bool PrivatePermissions(const QString &path) {
 	const auto info = QFileInfo(path);
-	if (info.isSymLink() || (info.isFile() && !AccountFilePathSafe(path))) {
+	if (info.isSymLink() || (info.isFile() && SyncPathIdentity(path).isEmpty())) {
 		return false;
 	}
 #ifdef Q_OS_UNIX
@@ -39,6 +46,16 @@ constexpr auto kConfigBytes = 256 * 1024;
 		| QFileDevice::WriteOther
 		| QFileDevice::ExeOther;
 	return !(info.permissions() & broader);
+#else
+	return true;
+#endif
+}
+
+[[nodiscard]] bool ReadablePrivateDirectory(const QFileInfo &info) {
+	if (!info.isDir() || !info.isReadable() || !PrivatePermissions(info.filePath())) { return false; }
+#ifdef Q_OS_UNIX
+	constexpr auto required = QFileDevice::ReadOwner | QFileDevice::ExeOwner;
+	return (info.permissions() & required) == required;
 #else
 	return true;
 #endif
@@ -220,28 +237,88 @@ SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path) {
 		: SyncStoreStatus::InsecurePermissions;
 }
 
+QByteArray SyncPathIdentity(const QString &path) {
+	const auto info = QFileInfo(path);
+	if (info.isSymLink()) { return {}; }
+#ifdef Q_OS_WIN
+	if (!info.exists()) {
+		const auto attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(path.utf16()));
+		const auto error = GetLastError();
+		return attributes == INVALID_FILE_ATTRIBUTES && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+			? QByteArray("missing") : QByteArray();
+	}
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), 0,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return {}; }
+	auto value = BY_HANDLE_FILE_INFORMATION();
+	const auto ok = GetFileInformationByHandle(handle, &value);
+	CloseHandle(handle);
+	if (!ok || (value.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+		|| (!(value.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && value.nNumberOfLinks != 1)) { return {}; }
+	return QByteArray::number(value.dwVolumeSerialNumber) + ':'
+		+ QByteArray::number(value.nFileIndexHigh) + ':' + QByteArray::number(value.nFileIndexLow);
+#else
+	struct stat value = {};
+	if (::lstat(QFile::encodeName(path).constData(), &value) != 0) {
+		return errno == ENOENT ? QByteArray("missing") : QByteArray();
+	}
+	if ((!S_ISDIR(value.st_mode) && !S_ISREG(value.st_mode))
+		|| (S_ISREG(value.st_mode) && value.st_nlink != 1)) { return {}; }
+	return QByteArray::number(qulonglong(value.st_dev)) + ':' + QByteArray::number(qulonglong(value.st_ino));
+#endif
+}
+
 SyncStoreStatus ReadSyncPrivateFile(
 		const QString &path,
 		qsizetype limit,
 		QByteArray &bytes) {
 	const auto info = QFileInfo(path);
-	if (!info.exists()) {
-		return SyncStoreStatus::PendingMissing;
-	}
-	if (!info.isFile() || info.size() > limit) {
-		return SyncStoreStatus::PendingMismatch;
-	}
-	if (!PrivatePermissions(path)) {
-		return SyncStoreStatus::InsecurePermissions;
-	}
+	if (!info.exists()) { return SyncStoreStatus::PendingMissing; }
+	if (!info.isFile() || info.size() > limit) { return SyncStoreStatus::PendingMismatch; }
+	if (!PrivatePermissions(path)) { return SyncStoreStatus::InsecurePermissions; }
+	const auto identity = SyncPathIdentity(path);
+	if (identity.isEmpty() || identity == "missing") { return SyncStoreStatus::IoError; }
 	auto file = QFile(path);
-	if (!file.open(QIODevice::ReadOnly)) {
+#ifdef Q_OS_UNIX
+	const auto descriptor = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (descriptor < 0) { return SyncStoreStatus::IoError; }
+	struct stat opened = {};
+	const auto same = ::fstat(descriptor, &opened) == 0 && S_ISREG(opened.st_mode)
+		&& opened.st_nlink == 1 && opened.st_size <= limit
+		&& QByteArray::number(qulonglong(opened.st_dev)) + ':' + QByteArray::number(qulonglong(opened.st_ino)) == identity;
+	if (!same || !file.open(descriptor, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+		::close(descriptor);
 		return SyncStoreStatus::IoError;
 	}
-	bytes = file.readAll();
-	return (file.error() == QFileDevice::NoError && bytes.size() == info.size())
-		? SyncStoreStatus::Ready
-		: SyncStoreStatus::IoError;
+#else
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), GENERIC_READ,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+		FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return SyncStoreStatus::IoError; }
+	auto opened = BY_HANDLE_FILE_INFORMATION();
+	const auto inspected = GetFileInformationByHandle(handle, &opened);
+	const auto size = (quint64(opened.nFileSizeHigh) << 32) | opened.nFileSizeLow;
+	const auto openedIdentity = QByteArray::number(opened.dwVolumeSerialNumber) + ':'
+		+ QByteArray::number(opened.nFileIndexHigh) + ':' + QByteArray::number(opened.nFileIndexLow);
+	auto count = DWORD();
+	auto extra = char();
+	auto extraCount = DWORD();
+	auto ok = inspected && !(opened.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))
+		&& opened.nNumberOfLinks == 1 && openedIdentity == identity && size <= quint64(limit) && size == quint64(info.size());
+	if (ok) {
+		bytes.resize(qsizetype(size));
+		ok = ReadFile(handle, bytes.data(), DWORD(size), &count, nullptr) && count == size
+			&& ReadFile(handle, &extra, 1, &extraCount, nullptr) && extraCount == 0;
+	}
+	CloseHandle(handle);
+	return ok && SyncPathIdentity(path) == identity && PrivatePermissions(path)
+		? SyncStoreStatus::Ready : SyncStoreStatus::IoError;
+#endif
+	bytes = file.read(limit + 1);
+	return file.error() == QFileDevice::NoError && file.atEnd() && bytes.size() == info.size()
+		&& bytes.size() <= limit && SyncPathIdentity(path) == identity && PrivatePermissions(path)
+		? SyncStoreStatus::Ready : SyncStoreStatus::IoError;
 }
 
 SyncStoreStatus WriteSyncPrivateFile(
@@ -292,6 +369,62 @@ QString SyncLocalStore::PendingPath(uint64_t seq) const {
 		+ QString::number(seq) + u".json"_q;
 }
 
+SyncRecoveryRead ReadSyncRecoveryStore(
+		const AccountFiles &files, std::optional<AccountKey> directoryAccount) {
+	const auto read = [&] {
+		auto result = SyncRecoveryRead();
+		result.store.directoryAccount = directoryAccount;
+		const auto capture = [&](const QString &path) {
+			const auto identity = SyncPathIdentity(path);
+			result.identities[path] = identity;
+			return !identity.isEmpty();
+		};
+		const auto root = QFileInfo(files.syncDirectory);
+		if (!capture(files.syncDirectory) || (root.exists() && !ReadablePrivateDirectory(root))) { return result; }
+		const auto state = QFileInfo(files.syncStore);
+		result.store.statePresent = state.exists() || state.isSymLink();
+		if (!capture(files.syncStore)) { return result; }
+		if (result.store.statePresent) {
+			const auto status = ReadSyncPrivateFile(files.syncStore, kStateBytes, result.store.state);
+			if (status != SyncStoreStatus::Ready) { result.status = status; return result; }
+		}
+		const auto pendingPath = files.syncDirectory + u"/pending"_q;
+		const auto pending = QFileInfo(pendingPath);
+		result.store.pendingPresent = pending.exists() || pending.isSymLink();
+		if (!capture(pendingPath) || (pending.exists() && !ReadablePrivateDirectory(pending))) { return result; }
+		if (pending.exists()) {
+			auto entries = QDirIterator(pendingPath,
+				QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+			auto total = qsizetype(0);
+			while (entries.hasNext()) {
+				const auto path = entries.next();
+				auto bytes = QByteArray();
+				const auto status = ReadSyncPrivateFile(path, kStateBytes, bytes);
+				if (status != SyncStoreStatus::Ready || !capture(path)
+					|| result.store.pendingFiles.size() >= 1024) { return result; }
+				total += bytes.size();
+				if (total > 16 * 1024 * 1024) { return result; }
+				result.store.pendingFiles[entries.fileName()] = bytes;
+			}
+		}
+		for (const auto &[path, identity] : result.identities) {
+			if (SyncPathIdentity(path) != identity) { return SyncRecoveryRead(); }
+		}
+		result.store.pendingComplete = true;
+		result.status = SyncStoreStatus::Ready;
+		return result;
+	};
+	const auto first = read();
+	if (first.status != SyncStoreStatus::Ready) { return first; }
+	const auto second = read();
+	if (second.status != SyncStoreStatus::Ready || first.identities != second.identities
+		|| first.store.statePresent != second.store.statePresent || first.store.state != second.store.state
+		|| first.store.pendingPresent != second.store.pendingPresent || first.store.pendingFiles != second.store.pendingFiles) {
+		return {};
+	}
+	return second;
+}
+
 SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 	if (_opened) {
 		return { SyncStoreStatus::InvalidTransition };
@@ -316,6 +449,9 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 				? SyncStoreStatus::LockBusy
 				: SyncStoreStatus::LockError,
 		});
+	}
+	if (QFileInfo::exists(_root + u"/recovery.json"_q) || QFileInfo(_root + u"/recovery.json"_q).isSymLink()) {
+		return SetFailure({ SyncStoreStatus::InvalidTransition });
 	}
 	const auto pendingStatus = EnsureSyncPrivateDirectory(
 		_root + u"/pending"_q);

@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_state.h"
 #include "purple/purple_sync_account_binding.h"
+#include "purple/purple_sync_account_recovery.h"
+#include "purple/purple_sync_config_text.h"
 
 #include <QtCore/QDateTime>
 
@@ -59,11 +61,17 @@ struct VerifiedWrite {
 		SyncConfigHistoryReason reason,
 		const QString &label,
 		const QString &versionKey,
-		const QString &keepId = QString()) {
+		const QString &keepId = QString(),
+		const AccountTransferReview *replacement = nullptr) {
 	auto result = VerifiedWrite();
-	if (!ValidateAccountSyncTarget(&session, target)
-		|| ParseSettings(QString::fromUtf8(text), target.file.path).settings.version > kSettingsVersion
-		|| !CanReplaceLegacyRootSettings(current.text, text)
+	const auto snapshot = (current.status == SyncSettingsFileStatus::Present)
+		? SettingsFileInput{ SettingsFileState::Readable, current.text }
+		: SettingsFileInput{ SettingsFileState::Missing };
+	if (current.status == SyncSettingsFileStatus::Invalid
+		|| snapshot != target.file.input
+		|| !ValidateAccountSyncTarget(&session, target)
+		|| !replacement || replacement->impact.proposedText != text
+		|| !RebaseAccountTransferAfterSetup(&session, *replacement)
 		|| SettingsFingerprint(text) != fingerprint
 		|| !SyncSettingsTextWritable(text)) {
 		return result;
@@ -84,9 +92,11 @@ struct VerifiedWrite {
 	result.historyId = saved->id;
 	result.restorable = saved->existed
 		&& SyncSettingsTextWritable(current.text);
-	if (ReplaceAccountSyncSettings(&session, target, text) != GuardedFileWrite::Written) {
-		return result;
-	}
+	const auto ready = RebaseAccountTransferAfterSetup(&session, *replacement);
+	if (!ready) { return result; }
+	const auto written = ReplaceReviewedAccountSettings(&session, *ready);
+	result.wrote = written.changed;
+	if (!written.ok) { return result; }
 	result.wrote = true;
 	result.readBack = ReadSyncSettingsFile(target.files);
 	if (result.readBack.status != SyncSettingsFileStatus::Present
@@ -130,13 +140,34 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		Main::Session &session,
 		const SyncAccountInventoryResult &inventory,
 		const SyncConfigReview &review,
-		const std::optional<QString> &chosenRemoteKey) {
+		const std::optional<QString> &chosenRemoteKey,
+		const AccountTransferReview *replacement) {
 	auto result = SyncConfigApplyResult();
-	const auto target = AccountSyncTarget(&session);
+	const auto recovery = InspectSyncAccountRecovery(session, &inventory);
+	if (!recovery || recovery->journalPresent || recovery->plan.status != (review.bound
+		? SyncAccountRecoveryStatus::Bound : SyncAccountRecoveryStatus::Setup)) {
+		return Stop(result, SyncConfigApplyStatus::NeedsReview);
+	}
+	auto target = AccountSyncTarget(&session);
 	if (!target) { return Stop(result, SyncConfigApplyStatus::AccountUnavailable); }
 	if (!SyncAccountAvailable(account, session, inventory.accountUserId)
 		|| review.accountUserId != inventory.accountUserId) {
 		return Stop(result, SyncConfigApplyStatus::AccountUnavailable);
+	}
+	if (!replacement && (review.plan.verdict == ConfigSyncVerdict::Choose
+		|| review.plan.verdict == ConfigSyncVerdict::Conflict
+		|| review.plan.verdict == ConfigSyncVerdict::UpdateReady)) {
+		return Stop(result, SyncConfigApplyStatus::NeedsReview);
+	}
+	if (replacement) {
+		const auto choices = SyncConfigChoices(review, SyncSettingsPublishable(review), replacement->context);
+		const auto choice = std::find_if(choices.begin(), choices.end(), [&](const auto &value) {
+			return value.key == chosenRemoteKey;
+		});
+		if (choice == choices.end() || !choice->impactReady
+			|| !RebaseAccountTransferAfterSetup(&session, *replacement)) {
+			return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
+		}
 	}
 	const auto checked = CheckSyncConfigApplyChoice(review, chosenRemoteKey);
 	if (checked != SyncConfigApplyPlanStatus::Ready) {
@@ -169,6 +200,8 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 				setup.storeStatus);
 		}
 		result.joined = true;
+		target = AccountSyncTarget(&session);
+		if (!target) { return Stop(result, SyncConfigApplyStatus::AccountUnavailable); }
 	}
 
 	auto store = SyncLocalStore(target->files.syncDirectory);
@@ -227,7 +260,9 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 			plan.writeFingerprint,
 			reason,
 			SourceLabel(*plan.source, reason),
-			plan.versionKey);
+			plan.versionKey,
+			QString(),
+			replacement);
 		result.historyId = write.historyId;
 		result.wroteFile = write.wrote;
 		result.undoAvailable = write.wrote && write.restorable;
@@ -248,7 +283,12 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	case SyncConfigApplyCompletionStatus::AdoptRefused:
 		return Stop(result, SyncConfigApplyStatus::NeedsReview);
 	}
-	auto completedTarget = *target;
+	auto completedTarget = AccountSyncTarget(&session).value_or(*target);
+	if (completedTarget.file.account != target->file.account
+		|| completedTarget.file.path != target->file.path
+		|| completedTarget.file.generation != target->file.generation) {
+		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
+	}
 	completedTarget.file.input = { SettingsFileState::Readable, current.text };
 	if (!ValidateAccountSyncTarget(&session, completedTarget)
 		|| AccountSyncBindingToken(account) != token
@@ -281,8 +321,9 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 SyncConfigRestoreResult RestoreSyncConfigHistory(
 		Main::Session &session,
 		const QString &id,
-		SyncConfigHistoryReason reason) {
-	const auto target = AccountSyncTarget(&session);
+		SyncConfigHistoryReason reason,
+		const AccountTransferReview &replacement) {
+	const auto target = AccountSyncInspectionTarget(&session);
 	if (!target) {
 		return { .status = SyncConfigRestoreStatus::InvalidSettings };
 	}
@@ -312,7 +353,8 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		return result;
 	}
 	const auto local = ReadSyncSettingsFile(target->files);
-	if (local.status == SyncSettingsFileStatus::Invalid) {
+	if (local.status == SyncSettingsFileStatus::Invalid
+		|| !RebaseAccountTransferAfterSetup(&session, replacement)) {
 		result.status = SyncConfigRestoreStatus::InvalidSettings;
 		return result;
 	} else if (local.status == SyncSettingsFileStatus::Present
@@ -329,7 +371,8 @@ SyncConfigRestoreResult RestoreSyncConfigHistory(
 		reason,
 		HistoryLabel(*entry, reason),
 		QString(),
-		id);
+		id,
+		&replacement);
 	result.historyId = write.historyId;
 	switch (write.status) {
 	case SyncConfigApplyStatus::Applied:
