@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_focus.h"
 #include "purple/purple_config.h"
+#include "purple/purple_sync_auto_service.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_peek.h"
 #include "purple/purple_schedule.h"
@@ -19,6 +20,7 @@ namespace Purple {
 
 void StartAppServices() {
 	StartDesktopAccountRouting();
+	StartAutomaticSettingsSync();
 	StartSchedule();
 	StartFocusSync();
 	StartScreenTime();
@@ -30,6 +32,7 @@ void OnScreenLockChanged(bool locked) {
 		ReportLock(LockKind::Screen);
 	} else {
 		PeekEndedNotice();
+		TriggerAutomaticSettingsSync(SyncAutoEvent::Unlock);
 	}
 }
 
@@ -39,6 +42,7 @@ void OnAppPasscodeLock() {
 
 void OnAppPasscodeUnlock() {
 	PeekEndedNotice();
+	TriggerAutomaticSettingsSync(SyncAutoEvent::Unlock);
 }
 
 } // namespace Purple

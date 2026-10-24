@@ -81,6 +81,16 @@ SyncConfigSendQueue SyncConfigSendQueueOf(
 	return SyncConfigSendQueue::Empty;
 }
 
+std::function<void()> BeginSyncConfigNetworkOperation(not_null<Main::Session*> session) {
+	const auto counter = PostsFor(session);
+	const auto done = std::make_shared<bool>(false);
+	++counter->started;
+	++counter->inFlight;
+	return [counter, done] {
+		if (!std::exchange(*done, true)) { --counter->inFlight; }
+	};
+}
+
 uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session) {
 	return PostsFor(session)->started;
 }

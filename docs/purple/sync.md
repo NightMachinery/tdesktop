@@ -1,13 +1,14 @@
 # Syncing settings between devices
 
 Each account has its own settings file on each installation. Two Purple Telegram
-clients on two machines have separate files, and neither imports changes automatically.
-This document describes the manual transfer mechanisms and the alternatives
-deliberately not built.
+clients on two machines have separate files. Desktop can automatically check and
+sync an already linked account when its automatic switch is enabled. The switch
+starts off; conflicts and unsafe changes still need manual review. This document
+also describes the separate legacy transfer mechanisms.
 
 For the account-backed sync flow for settings and future playlists, see
 [account_sync_plan.md](account_sync_plan.md). Desktop's **Sync across devices**
-box runs that flow by hand for one selected account. **Check Saved Messages**
+box offers manual review and a separate automatic switch for each account. **Check Saved Messages**
 reads every sync record in that account's Saved Messages, reviews them against
 the local file and this device's sync state, and shows one status line with at
 most one next step:
@@ -66,8 +67,8 @@ writes its platform as Windows, macOS or Linux, as the manual Send action
 does.
 
 Sync records stay out of the download folder unless you put them there.
-Telegram never downloads them automatically and writes no copy of the ones this
-device sends. Clicking or saving a record works as for any other file: it goes
+Ordinary media auto-download excludes them. Sync checks fetch bounded record bytes
+in memory, including background checks, without saving them to Downloads. Clicking or saving a record works as for any other file: it goes
 to the download folder, or Telegram asks where to save it when "Ask download
 path for each file" is on. Records that earlier builds saved there stay until
 you delete them.
@@ -123,9 +124,9 @@ beside "Up to date". If joining succeeds but a later step fails, the status says
 sync, but ..." and that nothing was written to `settings.toml`; the next check
 sees a linked device and offers the choice again.
 
-Still not built: background checks, automatic publish after edits, editing a
-setting in place from the review, retirement of superseded records, the
-Android UI, and live verification on real accounts. The manual import below
+Desktop's automatic runner is described below. Chat moves, editing a setting
+inside the review, the Android UI and live verification on real accounts remain
+separate work. The manual import below
 keeps no History entry; it keeps `settings.toml.import.bak` and
 `settings.toml.bak` instead.
 
@@ -620,4 +621,72 @@ remains available.
 
 The Desktop build registers the shared peer-token, sync-chat carry/journal and
 received-content archive core modules. Registration alone does not expose sync-chat
-moves, automatic sync or an archive UI; these still require client adapters.
+moves or an archive UI. Desktop's automatic adapter is limited to implicit
+Saved Messages as described below.
+
+## Automatic settings sync on Desktop
+
+After an account has joined or published through manual sync, enable
+**Automatically sync this account's settings** in Sync across devices. The choice
+belongs to that account on this installation and starts off. It neither enables
+legacy `send_after_save_p` nor creates a settings file or joins a stream.
+
+Session readiness, foreground/unlock and that account's settled saves trigger
+checks. Lifecycle checks run at most once in 15 minutes per account. A save uses
+the existing five-second delay; initial observation, creating a file, imports,
+History restore and automatic apply do not count as saves. An intentional later
+edit back to imported bytes does count. There is no periodic polling timer.
+
+Only a strict successor of the matched base can apply automatically, with an
+unchanged local base, complete captured account/global/Work Mode context and a
+Ready impact without losses, danger, conflict or schema/scope change. Replacement
+uses the same exact-primary snapshot, History, guarded write, readback and state
+commit as manual Apply. Its per-account Undo entry follows real writes, including
+writes whose later state commit fails. Missing, corrupt, oversized or future
+primaries and fallback contexts wait for manual attention.
+
+Publishing uses exact saved bytes and fresh complete inventory, never an absent
+file or unseen remote branch. A staged record is immutable across later edits.
+An authorized exact owned head can be edited in place; a definitive edit refusal
+requires a fresh reconciliation before post fallback. A timeout or lost receipt
+reconciles instead of reserving or posting blindly. Retirement deletes at most
+four of this installation's issued obsolete records per run, after a fresh owned
+exact read. An ambiguous deletion needs an affirmative exact-id absent response;
+omission from inventory or an empty response cannot remove its ledger entry.
+
+The account store lock spans each active operation and excludes competing manual
+writers. The separate private `sync/auto.json` record is atomically compared and
+replaced before effects, including coalesced NoOp transitions. It retains run,
+ticket, executor owner, pending bytes, retry deadline/budget and per-reason notice
+history. Client provenance also retains the settled fingerprint and native file
+identity, so a later import, History replacement or file creation cannot borrow
+an older save's permission to publish the same bytes. Unknown/future or malformed
+records are held without resetting them. Native directory identities, captured routing choices, account keys, binding and
+exact state are rechecked after asynchronous boundaries. An abandoned executor
+gets a new owner identifier so its old checkpoint can reconcile safely.
+
+Completion checks ticket, executor owner and lifetime before touching local state.
+A failed stage/state write or confirmation cleanup never supplies facts from an
+invalid local store. The executor keeps its pending/expected recovery checkpoint,
+records a local-data hold when its original private auto-record CAS still matches,
+and releases the account lock. A matching completion whose settings source or
+Work Mode changed similarly records a context hold and releases the lock. An
+obsolete ticket/owner cannot stop a newer executor. If the hold itself cannot be
+saved, the original durable checkpoint remains untouched and the current session
+shows the failure from memory.
+
+Retries wait 30 seconds, two minutes, then ten minutes. Triggers during backoff
+merge into that run without moving its deadline or resetting its budget. Holds,
+Disable and restarts preserve terminal `runStopped` state; the next eligible
+ordinary trigger after RetryStopped starts a new run. Holds do not install an
+immediate retry loop. Status/attention stays inside the sync screen with one
+persisted notice fact per account/distinct reason, without background dialogs.
+
+Q1-unanswered, signed-out, unbound, ambiguous recovery and recovery-journal states
+perform no automatic work. Moved/state-v2 streams are held as sync chat not
+resolved until Desktop has its resolution/carry adapters. Library/playlist
+publishing remains disabled. Tests exercise real file/record/state adapters and
+an unchanged production Apply body through opaque session-boundary shims; run
+`python3 purple/test_sync_auto.py --build-dir <configured-Debug-tree>` after the
+Debug build. This does not qualify native dialogs, encrypted session storage or
+real server mutations.

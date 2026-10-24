@@ -44,7 +44,8 @@ struct SyncConfigApplyResult {
 	const SyncAccountInventoryResult &inventory,
 	const SyncConfigReview &review,
 	const std::optional<QString> &chosenRemoteKey,
-	const AccountTransferReview *replacement = nullptr);
+	const AccountTransferReview *replacement = nullptr,
+	SyncLocalStore *lockedStore = nullptr);
 
 struct SyncConfigRestoreResult {
 	SyncConfigRestoreStatus status = SyncConfigRestoreStatus::NotFound;

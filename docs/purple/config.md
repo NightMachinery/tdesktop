@@ -1296,3 +1296,13 @@ schema-2 sync, History restore and Undo use captured account-aware impact review
 [the transfer boundary](account_routing.md#reviewed-legacy-account-transfers)
 for fallback, backup, launch-offer and queue rules. External editor save notices
 use the same impact model after the edit lands.
+
+## Modern automatic settings sync
+
+The per-account automatic switch is local, default off, and stored in that
+account's private `sync/auto.json`, not in the synced TOML. It is independent of
+`[sync] send_after_save_p`. Only real settled saves supply publish provenance;
+file creation, import, History restore and automatic replacement do not.
+Checks use lifecycle events with a fifteen-minute gate and no polling timer.
+See [automatic sync](sync.md#automatic-settings-sync-on-desktop) for safe apply,
+immutable stages, retry/notice persistence and the current Saved Messages limit.

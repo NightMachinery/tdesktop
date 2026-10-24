@@ -37,11 +37,13 @@ SyncConfigUpload::SyncConfigUpload(
 		Main::Session &session,
 		QByteArray content,
 		Fn<void(std::optional<MsgId>)> finished,
-		Fn<bool()> stillCurrent)
+		Fn<bool()> stillCurrent, MsgId editId, Fn<void()> editRefused)
 : _session(base::make_weak(&session))
 , _content(std::move(content))
 , _finished(std::move(finished))
-, _stillCurrent(std::move(stillCurrent)) {
+, _stillCurrent(std::move(stillCurrent))
+, _editId(editId)
+, _editRefused(std::move(editRefused)) {
 }
 
 SyncConfigUpload::~SyncConfigUpload() {
@@ -151,6 +153,29 @@ void SyncConfigUpload::SendMedia() {
 		MTP_int(0));
 	const auto history = session->data().history(session->user());
 	const auto self = shared_from_this();
+	if (_editId) {
+		session->api().request(MTPmessages_EditMessage(
+			MTP_flags(MTPmessages_EditMessage::Flag::f_media | MTPmessages_EditMessage::Flag::f_message),
+			history->peer->input(), MTP_int(_editId.bare), MTP_string(u"#purplesync"_q),
+			media, MTPReplyMarkup(), MTP_vector<MTPMessageEntity>(),
+			MTP_int(0), MTP_int(0), MTP_int(0), MTPInputRichMessage()
+		)).done([self](const MTPUpdates &result) {
+			if (const auto session = self->_session.get()) { session->api().applyUpdates(result); }
+			self->Finish(self->_stillCurrent && self->_stillCurrent() ? std::make_optional(self->_editId) : std::nullopt);
+		}).fail([self](const MTP::Error &error) {
+			if (error.type() == u"MESSAGE_NOT_MODIFIED"_q) { self->Finish(self->_editId); return; }
+			if (error.type() == u"MESSAGE_EDIT_TIME_EXPIRED"_q || error.type() == u"MESSAGE_AUTHOR_REQUIRED"_q
+				|| error.type() == u"MESSAGE_ID_INVALID"_q || error.type() == u"MEDIA_NEW_INVALID"_q) {
+				if (auto refused = std::move(self->_editRefused)) {
+					self->_done = true;
+					self->_finished = nullptr;
+					self->_lifetime.destroy();
+					refused();
+				} else { self->Finish(std::nullopt); }
+			} else { self->Finish(std::nullopt); }
+		}).handleAllErrors().send();
+		return;
+	}
 	session->api().request(MTPmessages_SendMedia(
 		MTP_flags(0),
 		history->peer->input(),

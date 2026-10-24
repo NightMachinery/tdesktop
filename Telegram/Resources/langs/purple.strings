@@ -187,3 +187,20 @@ docs/purple/upstream_hooks.md.
 "lng_purple_sync_relinked" = "Sync binding restored. Check Saved Messages again before continuing.";
 "lng_purple_sync_reset_done" = "Sync state archived. History and settings were preserved. Check Saved Messages to set up sync again.";
 "lng_purple_sync_reset_partial" = "The archive is incomplete. Setup is blocked. Review sync recovery again to resume the same archive.";
+
+"lng_purple_auto_description" = "Check Saved Messages reviews the selected account. Automatic sync is off by default. When enabled, safe updates apply with History and saved changes publish after a fresh check. Conflicts, losses and account-link problems wait for your review. Settings can contain chat IDs and names; Saved Messages is a Telegram cloud chat readable by your signed-in sessions. state.toml stays local.";
+"lng_purple_auto_enable" = "Automatically sync this account's settings";
+"lng_purple_auto_select" = "Select an account to see automatic sync.";
+"lng_purple_auto_owner" = "Choose which account owns settings.toml first.";
+"lng_purple_auto_invalid" = "Automatic sync cannot read this account's local state. Check it manually.";
+"lng_purple_auto_off" = "Automatic sync is off.";
+"lng_purple_auto_stopped" = "Automatic sync stopped after repeated failures. The next activation or save can try again.";
+"lng_purple_auto_retry" = "Automatic sync is waiting to retry. New changes join the existing retry.";
+"lng_purple_auto_chat" = "Sync chat not resolved. Check this account manually.";
+"lng_purple_auto_review" = "Automatic sync needs attention. Check Saved Messages to review the account, file or conflicting versions.";
+"lng_purple_auto_running" = "Automatic sync is checking this account.";
+"lng_purple_auto_ready" = "Automatic sync is on. Safe updates and saved changes sync on activation or save.";
+"lng_purple_auto_remote" = "another device";
+
+"lng_purple_auto_local_failure" = "Automatic sync stopped because local sync data could not be read or saved. Its recovery checkpoint is kept. Check this account manually.";
+"lng_purple_auto_context_changed" = "Automatic sync stopped because this account's settings source, Work Mode or account context changed. Check the account again.";

@@ -425,7 +425,7 @@ SyncRecoveryRead ReadSyncRecoveryStore(
 	return second;
 }
 
-SyncStoreResult SyncLocalStore::Open(bool optedIn) {
+SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToken) {
 	if (_opened) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
@@ -453,13 +453,13 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 	if (QFileInfo::exists(_root + u"/recovery.json"_q) || QFileInfo(_root + u"/recovery.json"_q).isSymLink()) {
 		return SetFailure({ SyncStoreStatus::InvalidTransition });
 	}
-	const auto pendingStatus = EnsureSyncPrivateDirectory(
-		_root + u"/pending"_q);
-	if (pendingStatus != SyncStoreStatus::Ready) {
-		return SetFailure({ pendingStatus });
+	if (bindingToken.isEmpty()) {
+		const auto pendingStatus = EnsureSyncPrivateDirectory(_root + u"/pending"_q);
+		if (pendingStatus != SyncStoreStatus::Ready) { return SetFailure({ pendingStatus }); }
 	}
 	const auto stateInfo = QFileInfo(StatePath());
 	if (!stateInfo.exists() && !stateInfo.isSymLink()) {
+		if (!bindingToken.isEmpty()) { return SetFailure({ SyncStoreStatus::AccountUnbound }); }
 		const auto stageStatus = CheckStages(
 			_root + u"/pending"_q, nullptr);
 		return SetFailure({ stageStatus == SyncStoreStatus::Ready
@@ -485,6 +485,13 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn) {
 				: SyncStoreStatus::InvalidState,
 			parsed.error,
 		});
+	}
+	if (!bindingToken.isEmpty()) {
+		if (CheckSyncAccountBinding(parsed.state, bindingToken) != SyncAccountBindingVerdict::Bound) {
+			return SetFailure({ SyncStoreStatus::AccountUnbound });
+		}
+		const auto pendingStatus = EnsureSyncPrivateDirectory(_root + u"/pending"_q);
+		if (pendingStatus != SyncStoreStatus::Ready) { return SetFailure({ pendingStatus }); }
 	}
 	_state = parsed.state;
 	_status = SyncStoreStatus::Ready;
@@ -746,10 +753,31 @@ SyncStoreResult SyncLocalStore::CommitConfigData(
 	return { SyncStoreStatus::Ready };
 }
 
+SyncStoreResult SyncLocalStore::RemoveAbsentConfigMessage(
+		int32_t messageId,
+		const QByteArray &record,
+		const QByteArray &accountBindingToken) {
+	if (_status != SyncStoreStatus::Ready || !_state
+		|| CheckSyncAccountBinding(*_state, accountBindingToken) != SyncAccountBindingVerdict::Bound
+		|| !CheckOwnConfigMessageDeletion(*_state, messageId, record)) {
+		return { SyncStoreStatus::InvalidTransition };
+	}
+	const auto removed = RemoveAbsentOwnConfigMessage(*_state, messageId, SyncOwnMessagePresence::Absent);
+	if (!removed) { return { SyncStoreStatus::InvalidTransition }; }
+	const auto next = SerializeSyncLocalState(removed.state);
+	if (!next) { return { SyncStoreStatus::InvalidState }; }
+	const auto status = WriteSyncPrivateFile(StatePath(), next.canonical);
+	if (status != SyncStoreStatus::Ready) { return SetFailure({ status }); }
+	_state = removed.state;
+	return { SyncStoreStatus::Ready };
+}
+
 const SyncLocalState *SyncLocalStore::state() const {
 	return _status == SyncStoreStatus::Ready && _state
 		? &*_state : nullptr;
 }
+
+const QString &SyncLocalStore::directory() const { return _root; }
 
 SyncStoreStatus SyncLocalStore::status() const {
 	return _status;

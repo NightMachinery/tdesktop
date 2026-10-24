@@ -142,6 +142,12 @@ PRIVATE
     purple/purple_sync_config_text.h
     purple/purple_sync_history_scanner.cpp
     purple/purple_sync_history_scanner.h
+    purple/purple_sync_auto_store.cpp
+    purple/purple_sync_auto_store.h
+    purple/purple_sync_auto_transport.cpp
+    purple/purple_sync_auto_transport.h
+    purple/purple_sync_auto_service.cpp
+    purple/purple_sync_auto_service.h
     purple/purple_sync_local_store.cpp
     purple/purple_sync_local_store.h
     purple/purple_sync_review_box.cpp
@@ -210,6 +216,9 @@ PRIVATE
     purple/purple_splice.h
     purple/purple_state.cpp
     purple/purple_state.h
+    purple/purple_sync_auto.cpp
+    purple/purple_sync_auto.h
+    purple/purple_sync_auto_state.cpp
     purple/purple_sync_config_describe.cpp
     purple/purple_sync_config_describe.h
     purple/purple_sync_config_flow.cpp

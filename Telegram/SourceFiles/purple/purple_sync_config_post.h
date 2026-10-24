@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QByteArray>
 
 #include <memory>
+#include <functional>
 #include <optional>
 
 namespace Purple {
@@ -39,6 +40,8 @@ struct SyncConfigPostResult {
 [[nodiscard]] SyncConfigSendQueue SyncConfigSendQueueOf(
 	not_null<Main::Session*> session);
 [[nodiscard]] uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session);
+
+[[nodiscard]] std::function<void()> BeginSyncConfigNetworkOperation(not_null<Main::Session*> session);
 
 class SyncConfigPost final : public base::has_weak_ptr {
 public:

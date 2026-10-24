@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_sync_account_inventory.h"
+#include "purple/purple_sync_auto_service.h"
 #include "purple/purple_sync_account_recovery.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_config_apply.h"
@@ -866,6 +867,15 @@ void RunCurrentAction(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 
 } // namespace
 
+void NoteAutomaticSyncApply(not_null<Main::Session*> session, const SyncConfigApplyResult &result) {
+	const auto key = AccountKeyText(SessionAccountKey(session).environment, SessionAccountKey(session).userId);
+	if (key && result.wroteFile) {
+		UndoByAccount[*key] = result.undoAvailable
+			? std::make_optional(UndoInfo{ result.historyId, tr::lng_purple_auto_remote(tr::now), AccountSyncTarget(session) })
+			: std::nullopt;
+	}
+}
+
 void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 	box->setTitle(rpl::single(u"Sync across devices"_q));
 	box->setWidth(st::boxWideWidth);
@@ -873,14 +883,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 	container->add(
 		object_ptr<Ui::FlatLabel>(
 			container,
-			u"Sync is manual in this version. Check Saved Messages reads "
-			"the selected account's Saved Messages and shows what to do "
-			"next. Nothing changes on this device without your review, and "
-			"nothing is sent without a fresh check and your confirmation. "
-			"Settings that sync replaces are kept in History. The settings "
-			"file may contain chat IDs and names. Saved Messages is a "
-			"Telegram cloud chat, not end-to-end encrypted, and every "
-			"signed-in session can read it. state.toml stays local."_q,
+			tr::lng_purple_auto_description(tr::now),
 			st::boxLabel),
 		st::boxRowPadding);
 
@@ -919,6 +922,25 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 				st::boxDividerLabel),
 			st::boxRowPadding);
 	}
+
+	const auto automatic = container->add(object_ptr<Ui::Checkbox>(container,
+		tr::lng_purple_auto_enable(tr::now), false), st::boxRowPadding);
+	const auto automaticStatus = container->add(object_ptr<Ui::FlatLabel>(container,
+		tr::lng_purple_auto_select(tr::now), st::boxLabel), st::boxRowPadding);
+	const auto updateAutomatic = [=] {
+		const auto session = state->selectedSession.get();
+		automatic->setEnabled(session && !state->running && !state->publishing);
+		automatic->setChecked(session && AutomaticSettingsSyncEnabled(session), Ui::Checkbox::NotifyAboutChange::DontNotify);
+		automaticStatus->setText(session ? AutomaticSettingsSyncStatus(session) : tr::lng_purple_auto_select(tr::now));
+	};
+	AutomaticSettingsSyncChanges() | rpl::on_next(updateAutomatic, box->lifetime());
+	automatic->checkedChanges() | rpl::on_next([=](bool enabled) {
+		const auto session = state->selectedSession.get();
+		const auto changed = session && !state->running && !state->publishing && SetAutomaticSettingsSync(session, enabled);
+		updateAutomatic();
+		if (!changed && session) { automaticStatus->setText(tr::lng_purple_auto_invalid(tr::now)); }
+	}, box->lifetime());
+	updateAutomatic();
 
 	state->status = container->add(
 		object_ptr<Ui::FlatLabel>(
@@ -1008,6 +1030,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		state->selectedAccount = state->choices[value].account;
 		state->selectedSession = state->choices[value].session;
 		SetStatus(*state, u"Ready to check Saved Messages."_q);
+		updateAutomatic();
 	});
 
 	state->checkText = u"Check Saved Messages"_q;

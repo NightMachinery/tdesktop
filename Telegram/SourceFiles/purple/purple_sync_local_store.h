@@ -103,7 +103,7 @@ public:
 	SyncLocalStore(const SyncLocalStore &) = delete;
 	SyncLocalStore &operator=(const SyncLocalStore &) = delete;
 
-	[[nodiscard]] SyncStoreResult Open(bool optedIn);
+	[[nodiscard]] SyncStoreResult Open(bool optedIn, const QByteArray &bindingToken = {});
 	[[nodiscard]] SyncStoreResult Initialize(const SyncLocalState &initial);
 	[[nodiscard]] SyncStoreResult ReadPendingConfig();
 	[[nodiscard]] SyncStoreResult StageConfig(
@@ -117,8 +117,13 @@ public:
 	[[nodiscard]] SyncStoreResult CommitConfigData(
 		const SyncLocalConfigState &next,
 		const QByteArray &accountBindingToken);
+	[[nodiscard]] SyncStoreResult RemoveAbsentConfigMessage(
+		int32_t messageId,
+		const QByteArray &record,
+		const QByteArray &accountBindingToken);
 	[[nodiscard]] const SyncLocalState *state() const;
 	[[nodiscard]] SyncStoreStatus status() const;
+	[[nodiscard]] const QString &directory() const;
 
 private:
 	[[nodiscard]] QString StatePath() const;

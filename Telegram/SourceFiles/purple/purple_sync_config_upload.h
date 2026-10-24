@@ -29,7 +29,8 @@ public:
 		Main::Session &session,
 		QByteArray content,
 		Fn<void(std::optional<MsgId>)> finished,
-		Fn<bool()> stillCurrent);
+		Fn<bool()> stillCurrent,
+		MsgId editId = 0, Fn<void()> editRefused = nullptr);
 	~SyncConfigUpload();
 
 	SyncConfigUpload(const SyncConfigUpload &) = delete;
@@ -47,6 +48,8 @@ private:
 	QByteArray _content;
 	Fn<void(std::optional<MsgId>)> _finished;
 	Fn<bool()> _stillCurrent;
+	MsgId _editId;
+	Fn<void()> _editRefused;
 	uint64 _fileId = 0;
 	uint64 _randomId = 0;
 	qsizetype _offset = 0;

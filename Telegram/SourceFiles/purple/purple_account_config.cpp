@@ -2019,6 +2019,8 @@ AccountTransferResult DesktopAccountConfig::writeReviewed(
 	_importedEcho[file.path] = SettingsFingerprint(bytes);
 	_saveObservations[AccountKeyText(file.account.environment, file.account.userId).value_or(QString())]
 		= { SettingsFileState::Readable, bytes };
+	_modernSaveObservations[AccountKeyText(file.account.environment, file.account.userId).value_or(QString())]
+		= { SettingsFileState::Readable, bytes };
 	const auto committed = openTarget(review.destination.requester, SettingsOpenRole::Own);
 	if (!committed || committed->file.input != SettingsFileInput{ SettingsFileState::Readable, bytes }
 		|| committed->global != review.destination.global || committed->owner != review.destination.owner
@@ -2100,6 +2102,8 @@ std::optional<AccountSendFingerprints> DesktopAccountConfig::fingerprints(
 void DesktopAccountConfig::suppressImportedEcho(const AccountOperationTarget &target) {
 	if (!target.inspection && target.file.input.state == SettingsFileState::Readable && validateOperation(target)) {
 		_importedEcho[target.file.path] = SettingsFingerprint(target.file.input.bytes);
+		const auto key = AccountKeyText(target.file.account.environment, target.file.account.userId);
+		if (key) { _modernSaveObservations[*key] = target.file.input; }
 	}
 }
 
@@ -2122,26 +2126,30 @@ bool DesktopAccountConfig::noteFingerprint(
 }
 
 std::optional<AccountOperationTarget> DesktopAccountConfig::observeAccountSave(
-		const AccountKey &key) {
+		const AccountKey &key, bool legacy) {
+	auto &observations = legacy ? _saveObservations : _modernSaveObservations;
 	const auto name = AccountKeyText(key.environment, key.userId);
 	const auto file = target(key);
 	if (!name || !file) {
-		if (name) { _saveObservations.erase(*name); }
+		if (name) { observations.erase(*name); }
 		return std::nullopt;
 	}
-	const auto previous = _saveObservations.find(*name);
-	const auto changed = previous != _saveObservations.end()
+	const auto previous = observations.find(*name);
+	const auto changed = previous != observations.end()
 		&& previous->second.state == SettingsFileState::Readable
 		&& file->input.state == SettingsFileState::Readable
 		&& previous->second != file->input;
-	_saveObservations[*name] = file->input;
-	const auto operation = changed ? operationTarget(key, true) : std::nullopt;
-	return operation && shouldAutoSend(*operation) ? operation : std::nullopt;
+	observations[*name] = file->input;
+	const auto operation = changed ? operationTarget(key, legacy) : std::nullopt;
+	if (!operation) { return std::nullopt; }
+	if (legacy) { return shouldAutoSend(*operation) ? operation : std::nullopt; }
+	return operation;
 }
 
 void DesktopAccountConfig::forgetAccountSave(const AccountKey &key) {
 	if (const auto name = AccountKeyText(key.environment, key.userId)) {
 		_saveObservations.erase(*name);
+		_modernSaveObservations.erase(*name);
 	}
 }
 

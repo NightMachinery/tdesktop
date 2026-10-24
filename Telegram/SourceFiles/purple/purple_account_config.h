@@ -340,7 +340,7 @@ public:
 	[[nodiscard]] std::optional<AccountSendFingerprints> fingerprints(const AccountOperationTarget &target);
 	void suppressImportedEcho(const AccountOperationTarget &target);
 	[[nodiscard]] bool noteFingerprint(const AccountOperationTarget &target, bool imported);
-	[[nodiscard]] std::optional<AccountOperationTarget> observeAccountSave(const AccountKey &key);
+	[[nodiscard]] std::optional<AccountOperationTarget> observeAccountSave(const AccountKey &key, bool legacy = true);
 	void forgetAccountSave(const AccountKey &key);
 	[[nodiscard]] bool shouldAutoSend(const AccountOperationTarget &target);
 	[[nodiscard]] GuardedFileWrite replace(const AccountOperationTarget &target, const QByteArray &bytes);
@@ -381,6 +381,7 @@ private:
 	uint64_t _routingGeneration = 1;
 	std::map<QString, QString> _importedEcho;
 	std::map<QString, SettingsFileInput> _saveObservations;
+	std::map<QString, SettingsFileInput> _modernSaveObservations;
 	std::optional<AccountKey> _listObservationGlobal;
 	QByteArray _listObservationGlobalBytes;
 	std::map<QString, QByteArray> _listObservations;

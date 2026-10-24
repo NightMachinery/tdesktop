@@ -141,7 +141,8 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		const SyncAccountInventoryResult &inventory,
 		const SyncConfigReview &review,
 		const std::optional<QString> &chosenRemoteKey,
-		const AccountTransferReview *replacement) {
+		const AccountTransferReview *replacement,
+		SyncLocalStore *lockedStore) {
 	auto result = SyncConfigApplyResult();
 	const auto recovery = InspectSyncAccountRecovery(session, &inventory);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != (review.bound
@@ -204,8 +205,13 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		if (!target) { return Stop(result, SyncConfigApplyStatus::AccountUnavailable); }
 	}
 
-	auto store = SyncLocalStore(target->files.syncDirectory);
-	const auto opened = store.Open(true);
+	if (lockedStore && lockedStore->directory() != target->files.syncDirectory) {
+		return Stop(result, SyncConfigApplyStatus::NeedsRecheck);
+	}
+	auto ownedStore = lockedStore ? std::unique_ptr<SyncLocalStore>()
+		: std::make_unique<SyncLocalStore>(target->files.syncDirectory);
+	auto &store = lockedStore ? *lockedStore : *ownedStore;
+	const auto opened = lockedStore ? SyncStoreResult{ store.status() } : store.Open(true);
 	const auto state = store.state();
 	if (opened.status != SyncStoreStatus::Ready || !state) {
 		return Stop(

@@ -122,8 +122,8 @@ replacement save.
 
 Absent settings are read without creation and cannot initialize or publish through
 sync setup. The explicit Open action can create a missing non-root account file.
-Modern layered sync application remains refused;
-the full account editor remains separate work. The final precondition-to-rename window against a noncooperating writer remains
+Modern schema-2 sync uses captured account-aware replacement reviews and exact
+primary snapshots; automatic application adds the stricter safe-successor gate. The final precondition-to-rename window against a noncooperating writer remains
 finite, not a universal filesystem compare-and-swap. GUI, live network/account flows
 and a coherent current application need separate qualification.
 
@@ -421,3 +421,16 @@ that a publish would supersede. Recovery checks complete keyed/root discovery;
 root Relink requires cloud proof, while Start again journals a pending-first
 archive and blocks setup until exact completion. See
 [modern sync and recovery](sync.md#account-specific-modern-sync-and-recovery).
+
+## Automatic settings runner
+
+The default-off modern automatic switch and `sync/auto.json` belong to the full
+account key and its existing sync store. Root and keyed account records never
+share a retry budget, ticket, saved fingerprint, in-flight owner or attention
+notice. The physical account store lock is reused for the whole asynchronous
+step. A caller-owned locked store passed to Apply must match the selected path.
+Modern save observation is independent of legacy send-after-save preferences;
+imports seed it before reload notifications without permanently suppressing a
+later intentional save of the same bytes. Global/source and device Work Mode
+choices remain part of the captured authority through every await. See
+[sync.md](sync.md#automatic-settings-sync-on-desktop) for triggers and refusals.

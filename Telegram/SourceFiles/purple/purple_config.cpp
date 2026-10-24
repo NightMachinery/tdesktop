@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_sync_auto_service.h"
 #include "platform/platform_file_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/delayed_activation.h"
@@ -518,6 +519,9 @@ void Config::autoSendLater() {
 		const auto key = AccountKeyText(target->account.environment, target->account.userId);
 		if (!key) {
 			continue;
+		}
+		if (AccountRouting().observeAccountSave(target->account, false)) {
+			ObserveAutomaticSettingsSave(session);
 		}
 		liveKeys.insert(*key);
 		_observedAccountKeys[*key] = target->account;
@@ -1069,6 +1073,7 @@ void NoteSettingsSent(not_null<Main::Session*> session, const QByteArray &bytes)
 }
 
 void NoteSettingsImported(not_null<Main::Session*> session, const QByteArray &bytes) {
+	SuppressAutomaticSettingsSave(session);
 	const auto target = AccountLegacySendTarget(session);
 	if (!target || target->file.input.bytes != bytes) {
 		return;
@@ -1259,6 +1264,7 @@ std::optional<AccountTransferReview> RebaseAccountTransferAfterSetup(
 
 AccountTransferResult ReplaceReviewedAccountSettings(
 		not_null<Main::Session*> session, const AccountTransferReview &review) {
+	SuppressAutomaticSettingsSave(session);
 	const auto weak = base::make_weak(session.get());
 	return AccountRouting().replaceReviewed(review, [=] {
 		const auto live = weak.get();
@@ -1384,6 +1390,7 @@ AccountTransferResult ImportReviewedAccountTransfer(
 		not_null<Main::Session*> session,
 		const AccountTransferReview &review,
 		const std::function<bool()> &originCurrent) {
+	SuppressAutomaticSettingsSave(session);
 	const auto weak = base::make_weak(session.get());
 	const auto current = [=] {
 		const auto live = weak.get();
