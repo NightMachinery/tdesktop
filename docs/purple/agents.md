@@ -3,14 +3,9 @@
 Read this guide before doing any Purple work. It collects the Purple-specific
 project requirements and feature documentation referenced by AGENTS.md and README.md.
 
-## Private test infrastructure
+## External test tooling
 
-Reusable capture/controller tooling and synthetic tests live in the private
-[Purple test infrastructure repository](https://github.com/NightMachinery/external-test-tooling).
-Read its README and component status before reuse; source review and native
-qualification are separate. Keep app-side hooks and product tests in this fork,
-and commit reusable external harness changes in the private repository. Keep
-live profiles and run artifacts outside both source repositories.
+Private build-machine notes live in the private purple-build repo; when it is cloned at ~/.purple-build, see ~/.purple-build/readme.md.
 
 ## Build and test
 
@@ -119,9 +114,7 @@ with `git grep Purple::`. Read the docs before changing any of it:
 - **`upstream_hooks.md`** - the hook registry: every Purple edit
   in an upstream file, the refactor batch that moves it, and how often
   upstream edits next to it
-- **`../remote-build-and-test/readme.md`** - building and testing the Android
-  fork on the Apple-silicon laptop, with the shared build box available as an
-  optional compile worker and its emulator retained only for legacy diagnostics
+- **`../remote-build-and-test/readme.md`** - the private build-notes entry point
 
 The parser, the splice engine, the state store and the resolution engine are the
 Work Mode core, and they live in the `purple-core` submodule at

@@ -7,11 +7,10 @@ A cell identifies a character's layout area; it is not an ink-pixel assertion.
 
 ## External harness source
 
-Reusable capture, metadata-worker and controller source and synthetic tests are
-versioned in the private [Purple test infrastructure repository](https://github.com/NightMachinery/external-test-tooling).
+Private build-machine notes live in the private purple-build repo; when it is cloned at ~/.purple-build, see ~/.purple-build/readme.md.
+
 The app-side witness implementation and its product tests remain in this fork.
-Read the private repository's component status before use; its source snapshots
-and passing inert tests do not imply native qualification.
+Source review and passing inert tests do not imply native qualification.
 
 ## Activation and scope
 
