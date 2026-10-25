@@ -15,6 +15,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class History;
 
+namespace Purple {
+class RecipientPickerBridge;
+}
+
 namespace style {
 struct PeerListItem;
 } // namespace style
@@ -95,6 +99,8 @@ public:
 	}
 
 private:
+	friend class Purple::RecipientPickerBridge;
+
 	bool searchInCache();
 	void searchOnServer();
 	void searchDone(const MTPcontacts_Found &result, mtpRequestId requestId);
@@ -203,6 +209,8 @@ protected:
 	virtual QString emptyBoxText() const;
 
 private:
+	friend class Purple::RecipientPickerBridge;
+
 	void rebuildRows();
 	void checkForEmptyRows();
 	bool appendRow(not_null<History*> history);

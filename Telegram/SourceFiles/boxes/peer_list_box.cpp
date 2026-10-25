@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peer_list_box.h"
+#include "purple/purple_picker.h"
 #include "purple/purple_last_seen_ui.h"
 
 #include "boxes/peer_list_section_headers.h"
@@ -1447,6 +1448,7 @@ std::optional<QPoint> PeerListContent::lastRowMousePosition() const {
 }
 
 void PeerListContent::removeRow(not_null<PeerListRow*> row) {
+	Purple::RecipientPickerBridge::BeforeRemove(this);
 	auto index = row->absoluteIndex();
 	auto isSearchResult = row->isSearchResult();
 	auto &eraseFrom = isSearchResult ? _searchRows : _rows;

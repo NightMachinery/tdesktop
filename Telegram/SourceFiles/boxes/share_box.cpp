@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/share_box.h"
+#include "purple/purple_picker.h"
 
 #include "api/api_premium.h"
 #include "base/call_delayed.h"
@@ -111,6 +112,8 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
+	template <typename> friend class Purple::SharePickerBridge;
+
 	struct Chat {
 		Chat(
 			not_null<History*> history,
@@ -848,12 +851,15 @@ ShareBox::Inner::Inner(
 
 	const auto self = _descriptor.session->user();
 	const auto selfHistory = self->owner().history(self);
-	if (_descriptor.filterCallback(selfHistory)) {
+	if (Purple::PickerVisible(selfHistory) && _descriptor.filterCallback(selfHistory)) {
 		_defaultChatsIndexed->addToEnd(selfHistory);
 	}
 	const auto addList = [&](not_null<Dialogs::IndexedList*> list) {
 		for (const auto &row : list->all()) {
 			if (const auto history = row->history()) {
+				if (!Purple::PickerVisible(history)) {
+					continue;
+				}
 				if (!history->peer->isSelf()
 					&& (history->asForum()
 						|| JoinedCommunityChats(history->peer)
@@ -872,6 +878,7 @@ ShareBox::Inner::Inner(
 
 	_filter = u"a"_q;
 	updateFilter();
+	Purple::SharePickerBridge<Inner>::Watch(this);
 
 	_descriptor.session->changes().peerUpdates(
 		Data::PeerUpdate::Flag::Photo
@@ -1433,7 +1440,7 @@ void ShareBox::Inner::chooseForumTopic(not_null<Data::Forum*> forum) {
 		}, box->lifetime());
 	};
 	auto filter = [=](not_null<Data::Thread*> thread) {
-		return guard && _descriptor.filterCallback(thread);
+		return guard && Purple::PickerVisible(thread->peer()) && _descriptor.filterCallback(thread);
 	};
 	auto box = Box<PeerListBox>(
 		std::make_unique<ChooseTopicBoxController>(
@@ -1442,6 +1449,7 @@ void ShareBox::Inner::chooseForumTopic(not_null<Data::Forum*> forum) {
 			std::move(filter)),
 		std::move(initBox));
 	*weak = box.data();
+	Purple::WatchPickerChild(box.data(), forum->peer());
 	_show->showBox(std::move(box));
 }
 
@@ -1481,7 +1489,7 @@ void ShareBox::Inner::chooseMonoforumSublist(
 		}, box->lifetime());
 	};
 	auto filter = [=](not_null<Data::SavedSublist*> sublist) {
-		return guard && _descriptor.filterCallback(sublist);
+		return guard && Purple::PickerVisible(sublist->peer()) && _descriptor.filterCallback(sublist);
 	};
 	auto box = Box<PeerListBox>(
 		std::make_unique<ChooseSublistBoxController>(
@@ -1490,6 +1498,7 @@ void ShareBox::Inner::chooseMonoforumSublist(
 			std::move(filter)),
 		std::move(initBox));
 	*weak = box.data();
+	Purple::WatchPickerChild(box.data(), monoforum->owningHistory()->peer);
 	_show->showBox(std::move(box));
 }
 
@@ -1540,7 +1549,7 @@ void ShareBox::Inner::chooseCommunityChat(
 		}, box->lifetime());
 	};
 	auto filter = [=](not_null<Data::Thread*> thread) {
-		return guard
+		return guard && Purple::PickerVisible(thread->peer())
 			&& (thread->asForum() || _descriptor.filterCallback(thread));
 	};
 	auto box = Box<PeerListBox>(
@@ -1550,6 +1559,7 @@ void ShareBox::Inner::chooseCommunityChat(
 			std::move(filter)),
 		std::move(initBox));
 	*weak = box.data();
+	Purple::WatchPickerChild(box.data(), community->channel());
 	_show->showBox(std::move(box));
 }
 
@@ -1638,6 +1648,7 @@ rpl::producer<> ShareBox::Inner::searchRequests() const {
 }
 
 void ShareBox::Inner::applyChatFilter(FilterId id) {
+	Purple::SharePickerBridge<Inner>::Filter(this, id);
 	if (!id) {
 		_chatsIndexed = _defaultChatsIndexed.get();
 	} else {
@@ -1648,6 +1659,9 @@ void ShareBox::Inner::applyChatFilter(FilterId id) {
 		const auto addList = [&](not_null<Dialogs::IndexedList*> list) {
 			for (const auto &row : list->all()) {
 				if (const auto history = row->history()) {
+					if (!Purple::PickerVisible(history)) {
+						continue;
+					}
 					if (history->asForum()
 							|| JoinedCommunityChats(history->peer)
 							|| _descriptor.filterCallback(history)) {
@@ -1679,6 +1693,9 @@ void ShareBox::Inner::peopleReceived(
 					peerFromMTP(data))) {
 				const auto history = _descriptor.session->data().history(
 					peer);
+				if (!Purple::PickerVisible(history)) {
+					continue;
+				}
 				if (!history->asForum()
 					&& !JoinedCommunityChats(peer)
 					&& !_descriptor.filterCallback(history)) {

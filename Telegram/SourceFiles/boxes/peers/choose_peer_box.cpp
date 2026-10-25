@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/choose_peer_box.h"
+#include "purple/purple_picker.h"
 
 #include "apiwrap.h" // ApiWrap::botCommonGroups / requestBotCommonGroups.
 #include "boxes/add_contact_box.h"
@@ -46,6 +47,7 @@ public:
 
 	Main::Session &session() const override;
 	void rowClicked(not_null<PeerListRow*> row) override;
+	void itemDeselectedHook(not_null<PeerData*> peer) override;
 
 	[[nodiscard]] rpl::producer<int> selectedCountValue() const;
 	void submit();
@@ -414,6 +416,7 @@ void ChoosePeerBoxController::prepareRestrictions() {
 }
 
 void ChoosePeerBoxController::prepareViewHook() {
+	Purple::RecipientPickerBridge::Watch(this);
 	delegate()->peerListSetTitle([&] {
 		using Type = RequestPeerQuery::Type;
 		using Restriction = RequestPeerQuery::Restriction;
@@ -429,6 +432,10 @@ void ChoosePeerBoxController::prepareViewHook() {
 		Unexpected("Type in RequestPeerQuery.");
 	}());
 	prepareRestrictions();
+}
+
+void ChoosePeerBoxController::itemDeselectedHook(not_null<PeerData*> peer) {
+	Purple::PickerDeselected(_selected, _selectedCount, peer);
 }
 
 void ChoosePeerBoxController::rowClicked(not_null<PeerListRow*> row) {
@@ -470,6 +477,9 @@ void ChoosePeerBoxController::submit() {
 
 auto ChoosePeerBoxController::createRow(not_null<History*> history)
 -> std::unique_ptr<Row> {
+	if (!Purple::PickerVisible(history)) {
+		return nullptr;
+	}
 	return FilterPeerByQuery(history->peer, _query, _commonGroups)
 		? std::make_unique<Row>(history)
 		: nullptr;

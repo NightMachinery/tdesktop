@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/add_bot_to_chat_box.h"
+#include "purple/purple_picker.h"
 
 #include "lang/lang_keys.h"
 #include "data/data_user.h"
@@ -271,6 +272,9 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 
 auto AddBotToGroupBoxController::createRow(not_null<History*> history)
 -> std::unique_ptr<ChatsListBoxController::Row> {
+	if (!Purple::PickerVisible(history)) {
+		return nullptr;
+	}
 	if (!needToCreateRow(history->peer)) {
 		return nullptr;
 	}
@@ -390,6 +394,7 @@ bool AddBotToGroupBoxController::onlyAdminToChannel() const {
 }
 
 void AddBotToGroupBoxController::prepareViewHook() {
+	Purple::RecipientPickerBridge::Watch(this);
 	delegate()->peerListSetTitle(_adminToChannel
 		? tr::lng_bot_choose_chat()
 		: tr::lng_bot_choose_group());

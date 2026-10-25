@@ -439,6 +439,18 @@ the original behaviour: `History::shouldBeInChatList()` answers no, the chat
 leaves the main list, and with it the forward picker, search suggestions and
 recent chats.
 
+Recipient pickers apply that same global visibility rule to main chats, Archive,
+contacts without a visible chat, folder-filtered rows and server search results.
+A globally hidden contact cannot return at the tail through the contacts fallback.
+View-only hiding leaves these pickers unchanged, and Peek reveals hidden peers.
+
+An open share or recipient picker refreshes when the active Work Mode changes.
+It keeps checked rows that remain visible, unchecks rows that become globally
+hidden, and restores the current upstream order: Saved Messages, main chats,
+Archive, then contacts. A peer returning to the main list takes its current date
+and pin position, rather than remaining in the contacts tail. This is a display
+projection; it never edits ratings, account pins or contact records.
+
 Under it the folder rule below tightens back up, and for the original reason: a
 chat out of the main list cannot be in a folder either. For the same reason a
 preset that sets it may not also declare extra views - see below - because a

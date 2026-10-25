@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
+#include "purple/purple_picker.h"
 #include "purple/purple_chat_menus.h"
 
 #include "base/call_delayed.h"
@@ -2799,6 +2800,9 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 		using PeerListController::setSearchNoResultsText;
 
 		void rowClicked(not_null<PeerListRow*> row) override final {
+			if (!Purple::PickerVisible(row->peer())) {
+				return;
+			}
 			if (!_selectable) {
 				return ChooseRecipientBoxController::rowClicked(row);
 			}
@@ -2842,7 +2846,8 @@ object_ptr<Ui::BoxContent> PrepareChooseRecipientBox(
 		}
 
 		[[nodiscard]] rpl::producer<> selectionChanges() const {
-			return _selectionChanges.events_starting_with({});
+			return Purple::RecipientPickerBridge::SelectionChanges(
+				this, _selectionChanges.events_starting_with({}));
 		}
 		[[nodiscard]] bool hasSelected() const {
 			return delegate()->peerListSelectedRowsCount() > 0;
@@ -3122,6 +3127,9 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		using PeerListController::setSearchNoResultsText;
 
 		void rowClicked(not_null<PeerListRow*> row) override final {
+			if (!Purple::PickerVisible(row->peer())) {
+				return;
+			}
 			const auto count = delegate()->peerListSelectedRowsCount();
 			const auto forum = row->peer()->isForum();
 			const auto monoforum = row->peer()->isMonoforum();
@@ -3157,7 +3165,8 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		}
 
 		[[nodiscard]] rpl::producer<> selectionChanges() const {
-			return _selectionChanges.events_starting_with({});
+			return Purple::RecipientPickerBridge::SelectionChanges(
+				this, _selectionChanges.events_starting_with({}));
 		}
 		[[nodiscard]] bool hasSelected() const {
 			return delegate()->peerListSelectedRowsCount() > 0;
@@ -3194,6 +3203,7 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			return;
 		}
 		box->setFilterId(id);
+		Purple::RecipientPickerBridge::Filter(box, id);
 
 		using SavedState = PeerListController::SavedStateBase;
 		auto state = std::make_unique<PeerListState>();

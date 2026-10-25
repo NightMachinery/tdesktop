@@ -13,6 +13,31 @@ an upstream file updates its entry here in the same commit, together with the
 feature doc's "Upstream hooks" section. `purple/upstream_report.sh` produces
 the numbers.
 
+## Recipient picker visibility
+
+- `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
+  search sources, plus two calls and a friend declaration for the owned share
+  refresh bridge. The bridge preserves visible selection while rebuilding indexes.
+- `boxes/peer_list_controllers.cpp` and `.h`: recipient-only registration, shared
+  rebuild/append/search guards and narrow friend access for the owned bridge.
+  Other chat-list controllers, including privacy/filter editors, retain their
+  existing behavior. Cached recipient search is replayed after visibility changes.
+- `window/window_peer_menu.cpp`: both real forward/recipient controller click
+  routes recheck picker visibility, including their multi-select overrides.
+  Filter and selection-event hooks keep the current folder and Send controls
+  consistent when a visibility refresh removes checked rows.
+- `boxes/peer_list_box.cpp` and `.h`: a narrow friend/call lets the owned bridge
+  dismiss a recipient row's context menu before removal, so no menu action keeps
+  a dangling row pointer. Other list controllers are unaffected.
+- `boxes/peers/choose_peer_box.cpp` and `add_bot_to_chat_box.cpp`: register the
+  bot-requested destination and Add Bot to Chat pickers and guard row eligibility.
+  The bot-requested picker's deselection hook also clears its submitted selection
+  and updates the selected count when a hidden row is unchecked.
+- Decisions, source projection and ActiveChanges reconciliation live in
+  `purple/purple_picker.*`; no rating, pin, contact or raw source list is changed.
+  Topic, Saved Messages sublist and community child pickers use that predicate
+  too, and close when their addressed parent becomes globally hidden.
+
 ## Terms
 
 - **Upstream file**: a path that exists at the merge-base of the fork and

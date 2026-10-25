@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peer_list_controllers.h"
+#include "purple/purple_picker.h"
 
 #include "api/api_chat_participants.h"
 #include "api/api_premium.h" // MessageMoneyRestriction.
@@ -290,7 +291,7 @@ void PeerListGlobalSearchController::searchDone(
 		for (const auto &mtpPeer : list.v) {
 			const auto peer = _session->data().peerLoaded(
 				peerFromMTP(mtpPeer));
-			if (peer) {
+			if (peer && Purple::RecipientPickerBridge::SearchAllows(delegate(), peer)) {
 				delegate()->peerListSearchAddRow(peer);
 			}
 		}
@@ -468,6 +469,9 @@ void ChatsListBoxController::prepare() {
 }
 
 void ChatsListBoxController::rebuildRows() {
+	if (Purple::RecipientPickerBridge::Rebuild(this)) {
+		return;
+	}
 	auto wasEmpty = !delegate()->peerListFullRowsCount();
 	auto appendList = [this](auto chats) {
 		auto count = 0;
@@ -528,6 +532,9 @@ std::unique_ptr<PeerListRow> ChatsListBoxController::createSearchRow(
 }
 
 bool ChatsListBoxController::appendRow(not_null<History*> history) {
+	if (!Purple::RecipientPickerBridge::Allows(this, history)) {
+		return false;
+	}
 	if (auto row = delegate()->peerListFindRow(history->peer->id.value)) {
 		updateRowHook(static_cast<Row*>(row));
 		return false;
@@ -867,6 +874,7 @@ Main::Session &ChooseRecipientBoxController::session() const {
 }
 
 void ChooseRecipientBoxController::prepareViewHook() {
+	Purple::RecipientPickerBridge::Watch(this);
 	delegate()->peerListSetTitle(tr::lng_forward_choose());
 
 	if (_moneyRestrictionError) {
@@ -907,7 +915,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 			}
 		};
 		const auto filter = [=](not_null<Data::Thread*> thread) {
-			return guard && (!_filter || _filter(thread));
+			return guard && Purple::PickerVisible(thread->peer()) && (!_filter || _filter(thread));
 		};
 		auto owned = Box<PeerListBox>(
 			std::make_unique<ChooseTopicBoxController>(
@@ -925,6 +933,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 				}, box->lifetime());
 			});
 		*weak = owned.data();
+		Purple::WatchPickerChild(owned.data(), peer);
 		delegate()->peerListUiShow()->showBox(std::move(owned));
 		return;
 	} else if (const auto monoforum = peer->monoforum()) {
@@ -946,7 +955,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 			}
 		};
 		const auto filter = [=](not_null<Data::SavedSublist*> sublist) {
-			return guard && (!_filter || _filter(sublist));
+			return guard && Purple::PickerVisible(sublist->peer()) && (!_filter || _filter(sublist));
 		};
 		auto owned = Box<PeerListBox>(
 			std::make_unique<ChooseSublistBoxController>(
@@ -964,6 +973,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 				}, box->lifetime());
 			});
 		*weak = owned.data();
+		Purple::WatchPickerChild(owned.data(), peer);
 		delegate()->peerListUiShow()->showBox(std::move(owned));
 		return;
 	} else if (const auto community = JoinedCommunityChats(peer)) {
@@ -985,7 +995,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 			}
 		};
 		const auto filter = [=](not_null<Data::Thread*> thread) {
-			return guard && (!_filter || _filter(thread));
+			return guard && Purple::PickerVisible(thread->peer()) && (!_filter || _filter(thread));
 		};
 		const auto channel = community->channel();
 		auto owned = Box<PeerListBox>(
@@ -1008,6 +1018,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 				}, box->lifetime());
 			});
 		*weak = owned.data();
+		Purple::WatchPickerChild(owned.data(), peer);
 		delegate()->peerListUiShow()->showBox(std::move(owned));
 		return;
 	}
@@ -1041,6 +1052,9 @@ QString ChooseRecipientBoxController::savedMessagesChatStatus() const {
 
 auto ChooseRecipientBoxController::createRow(
 		not_null<History*> history) -> std::unique_ptr<Row> {
+	if (!Purple::PickerVisible(history)) {
+		return nullptr;
+	}
 	const auto peer = history->peer;
 	const auto skip = _filter
 		? !_filter(history)

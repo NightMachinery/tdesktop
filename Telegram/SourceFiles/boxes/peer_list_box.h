@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+namespace Purple {
+class RecipientPickerBridge;
+}
+
 #include "ui/rp_widget.h"
 #include "ui/empty_userpic.h"
 #include "ui/unread_badge.h"
@@ -815,6 +819,8 @@ protected:
 	void contextMenuEvent(QContextMenuEvent *e) override;
 
 private:
+	friend class Purple::RecipientPickerBridge;
+
 	void refreshIndices();
 	void removeRowAtIndex(std::vector<std::unique_ptr<PeerListRow>> &from, int index);
 	void handleNameChanged(not_null<PeerData*> peer);
