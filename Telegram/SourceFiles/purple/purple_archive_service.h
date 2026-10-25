@@ -28,5 +28,8 @@ void RemoveArchiveAtLogout(Main::Account &account);
 void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key,
 	QString before, std::optional<uint64_t> revision,
 	Fn<void(DesktopArchiveHistoryPage)> done);
+void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest request,
+	std::function<bool()> current,
+	Fn<void(std::shared_ptr<ArchiveMediaAccess>)> done);
 
 }

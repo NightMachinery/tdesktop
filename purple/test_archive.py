@@ -14,6 +14,7 @@ parser.add_argument('--output-dir', type=Path)
 parser.add_argument('--use-build-objects', action='store_true')
 parser.add_argument('--capture-only', action='store_true')
 parser.add_argument('--lifecycle', action='store_true')
+parser.add_argument('--access', action='store_true')
 parser.add_argument('--handoff', action='store_true')
 parser.add_argument('--passive', action='store_true')
 parser.add_argument('--build-only', action='store_true')
@@ -28,6 +29,22 @@ service = (repo / 'Telegram/SourceFiles/purple/purple_archive_service.cpp').read
 start = service.index('if (!weak || Retired.contains(weak.get()))')
 end = start + re.search(r'\n\s*\}\);', service[start:]).start()
 (work / 'archive-page-callback.inc').write_text(service[start:end] + '\n')
+if args.access:
+    begin = service.index('void OpenArchiveMedia(')
+    position = service.index('{', begin) + 1
+    depth = 1
+    while depth:
+        depth += (service[position] == '{') - (service[position] == '}')
+        position += 1
+    callback = service[begin:position]
+    assert callback.count('not_null<Main::Session*>') == 1
+    (work / 'archive-media-callback.inc').write_text(callback.replace(
+        'not_null<Main::Session*>', 'not_null<CallbackSession*>').replace(
+        'crl::on_main', 'CallbackOnMain') + '\n')
+    reader = (repo / 'Telegram/SourceFiles/media/streaming/media_streaming_reader.cpp').read_text()
+    (work / 'archive-reader-slices.inc').write_text(reader[
+        reader.index('namespace Media {'):reader.index('Reader::Reader(')]
+        + reader[reader.index('QByteArray SerializeComplexPartsMap('):])
 def extract(text, signature):
     begin = text.index(signature)
     pos = text.index('{', begin) + 1
@@ -91,8 +108,8 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    objects += [compile(repo / ('purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
-    for name in ['purple_desktop_archive_store', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream']:
+    objects += [compile(repo / ('purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
+    for name in ['purple_desktop_archive_store', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader']:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
     objects += [build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o') for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp'))]
@@ -112,6 +129,8 @@ with (work / 'build.log').open('w') as log:
     'compile': commands, 'link': link,
     'objects_sha256': {str(path): hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in objects},
     'page_callback_boundary': 'unchanged production delivery lambda body with real weak lifetime and controlled retirement, ticket and UI endpoints',
+    'media_callback_boundary': 'Exact production OpenArchiveMedia body; only session type and main-queue dispatcher are substituted. Controlled weak-session lifetime, Work Mode/source authority, worker/journal scheduling; real encrypted store, reader endpoint and loader.' if args.access else None,
+    'media_callback_sha256': hashlib.sha256(callback.encode()).hexdigest() if args.access else None,
 }, indent=2) + '\n')
 if args.build_only:
     raise SystemExit(0)

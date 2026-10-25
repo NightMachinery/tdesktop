@@ -1358,3 +1358,13 @@ are excluded from the received-message creation hook.
   bridge access to the existing loader for passive registration only.
 - Existing api_updates/data_session archive entry points route expired placeholders
   inside Purple. Purple's own user_control consumption hook captures before consume.
+
+Owned attachment Open/Save extends only Purple's existing archive history viewer.
+It never injects live messages or starts network acquisition.
+`media/streaming/media_streaming_reader.h` and `.cpp` add a default-off constructor
+option and two private slice hooks implemented in `purple_archive_media_loader.cpp`.
+Only the archive viewer opts in: requested uncached ranges obey the existing
+two-slice memory budget before bytes arrive, and late parts for retired slices
+are rejected. No plaintext enters the shared cache. Ordinary native readers keep
+their default policy. The constructor and private hooks provide the small extension
+needed to carry this policy through native fill and part delivery.

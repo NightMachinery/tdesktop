@@ -63,6 +63,8 @@ void RefreshDesktopAccounts();
 [[nodiscard]] std::optional<AccountFileTarget> AccountSettingsEditTarget(not_null<Main::Session*> session);
 [[nodiscard]] std::optional<AccountKey> AppWideSettingsAccount(
 	not_null<Main::Session*> session);
+[[nodiscard]] std::optional<AccountKey> CachedAppWideSettingsAccount(
+	not_null<Main::Session*> session);
 [[nodiscard]] std::optional<AccountSettingsOpenTarget> AccountSettingsOpenTargetFor(
 	not_null<Main::Session*> session,
 	SettingsOpenRole role);

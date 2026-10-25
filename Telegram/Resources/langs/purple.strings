@@ -228,6 +228,17 @@ docs/purple/upstream_hooks.md.
 "lng_purple_archive_history_changed" = "History is unavailable or changed while loading. Reopen it to refresh.";
 "lng_purple_archive_history_empty" = "No retained version was found. Older observations may be missing.";
 "lng_purple_archive_older" = "Older versions";
+"lng_purple_archive_attachment_open" = "Open saved attachment {index} from {date}";
+"lng_purple_archive_attachment" = "Saved attachment";
+"lng_purple_archive_attachment_notice" = "This is an owned archive copy. Opening it does not fetch anything from Telegram.";
+"lng_purple_archive_attachment_unsupported" = "Preview is unavailable for this format or size. Save the owned copy to an explicit destination instead.";
+"lng_purple_archive_attachment_failed" = "The attachment is unavailable, damaged, or its archive context changed. Reopen its history.";
+"lng_purple_archive_attachment_saved" = "The owned attachment was saved.";
+"lng_purple_archive_attachment_save_failed" = "The attachment could not be saved or its completion could not be confirmed. Check the chosen destination before retrying.";
+"lng_purple_archive_attachment_saving" = "Saving owned attachment...";
+"lng_purple_archive_attachment_save" = "Save owned attachment";
+"lng_purple_archive_attachment_pause" = "Pause / Resume";
+"lng_purple_archive_attachment_restart" = "Play from start";
 
 "lng_purple_archive_discard" = "Discard this account's archive and start fresh";
 "lng_purple_archive_discard_confirm" = "Permanently delete all retained messages, edit history and owned media for this account, and start a new empty archive? This cannot be undone. Other accounts are not affected.";

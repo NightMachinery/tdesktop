@@ -45,7 +45,8 @@ public:
 	// Main thread.
 	explicit Reader(
 		std::unique_ptr<Loader> loader,
-		Storage::Cache::Database *cache = nullptr);
+		Storage::Cache::Database *cache = nullptr,
+		bool boundedNoCache = false);
 
 	void setLoaderPriority(int priority);
 
@@ -152,7 +153,11 @@ private:
 
 	class Slices {
 	public:
-		Slices(uint32 size, bool useCache);
+		Slices(uint32 size, bool useCache, bool boundedNoCache = false);
+
+		void prepareBoundedFill(uint32 offset, uint32 length,
+			uint32 sliceSize, int maximum);
+		[[nodiscard]] bool acceptBoundedPart(uint32 offset, uint32 sliceSize) const;
 
 		void headerDone(bool fromCache);
 		[[nodiscard]] int headerSize() const;
@@ -207,6 +212,7 @@ private:
 		uint32 _size = 0;
 		HeaderMode _headerMode = HeaderMode::Unknown;
 		bool _fullInCache = false;
+		bool _boundedNoCache = false;
 
 	};
 

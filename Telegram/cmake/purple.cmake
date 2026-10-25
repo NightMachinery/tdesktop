@@ -56,6 +56,12 @@ PRIVATE
     purple/purple_archive_stream.h
     purple/purple_archive_media.cpp
     purple/purple_archive_media.h
+    purple/purple_archive_media_access.cpp
+    purple/purple_archive_media_access.h
+    purple/purple_archive_media_loader.cpp
+    purple/purple_archive_media_loader.h
+    purple/purple_archive_media_box.cpp
+    purple/purple_archive_media_box.h
     purple/purple_archive_files.cpp
     purple/purple_archive_files.h
     purple/purple_account_config.cpp

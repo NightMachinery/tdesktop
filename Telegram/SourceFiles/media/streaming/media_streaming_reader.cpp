@@ -340,8 +340,9 @@ auto Reader::Slice::offsetsFromLoader(uint32 from, uint32 till) const
 	return result;
 }
 
-Reader::Slices::Slices(uint32 size, bool useCache)
-: _size(size) {
+Reader::Slices::Slices(uint32 size, bool useCache, bool boundedNoCache)
+: _size(size)
+, _boundedNoCache(boundedNoCache) {
 	Expects(size > 0);
 
 	if (useCache) {
@@ -531,6 +532,9 @@ void Reader::Slices::processPart(
 		uint32 offset,
 		QByteArray &&bytes) {
 	Expects(isFullInHeader() || (offset / kInSlice < _data.size()));
+	if (!acceptBoundedPart(offset, kInSlice)) {
+		return;
+	}
 
 	if (isFullInHeader()) {
 		_header.addPart(offset, bytes);
@@ -553,6 +557,7 @@ auto Reader::Slices::fill(uint32 offset, bytes::span buffer) -> FillResult {
 	Expects(offset < _size);
 	Expects(offset + buffer.size() <= _size);
 	Expects(buffer.size() <= kInSlice);
+	prepareBoundedFill(offset, buffer.size(), kInSlice, kSlicesInMemory);
 
 	using Flag = Slice::Flag;
 
@@ -851,11 +856,12 @@ Reader::SerializedSlice Reader::Slices::unloadToCache() {
 
 Reader::Reader(
 	std::unique_ptr<Loader> loader,
-	Storage::Cache::Database *cache)
+	Storage::Cache::Database *cache,
+	bool boundedNoCache)
 : _loader(std::move(loader))
 , _cache(cache)
 , _cacheHelper(cache ? InitCacheHelper(_loader->baseCacheKey()) : nullptr)
-, _slices(_loader->size(), _cacheHelper != nullptr) {
+, _slices(_loader->size(), _cacheHelper != nullptr, boundedNoCache) {
 	_loader->parts(
 	) | rpl::on_next([=](LoadedPart &&part) {
 		if (_attachedDownloader) {

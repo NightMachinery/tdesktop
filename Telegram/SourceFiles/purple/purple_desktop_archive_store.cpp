@@ -531,6 +531,8 @@ class DesktopArchiveStore::Impl {
 	ArchiveUsage usage;
 	bool usageComplete = false;
 	uint64_t readers = 0;
+	std::map<QString, DesktopArchiveMediaHandle> mediaHandles;
+	bool refreshingMediaReaders = false;
 	std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>>(false);
 	bool Current() const {
 		const auto fence = Fence(layout);
@@ -581,6 +583,34 @@ class DesktopArchiveStore::Impl {
 			row = *full;
 		}
 		return ArchiveStoredRow{id, position, row};
+	}
+	std::optional<ArchiveStoredRow> ChatEpoch(const ArchiveMessageKey &key, bool &valid) {
+		valid = false;
+		if (key.account != options.account) {
+			return {};
+		}
+		const auto read = database.Read(ArchiveSqlReadChatEpoch(key.account, key.chat, security));
+		if (!read.ok || read.rows.size() > 1) {
+			return {};
+		}
+		if (read.rows.empty()) {
+			valid = true;
+			return {};
+		}
+		const auto &values = read.rows.front();
+		const auto projection = Value<QString>(values, 0);
+		const auto frame = Value<QByteArray>(values, 1);
+		if (values.size() != 2 || !frame || !projection) {
+			return {};
+		}
+		const auto row = Decode(ArchiveRecordKind::Generation,
+			ArchiveSqlChatId(key.chat, key.account, security), *frame);
+		if (!row) {
+			return {};
+		}
+		const auto &generation = std::get<ArchiveChatGeneration>(row->row.value);
+		valid = generation.chat == key.chat && QString::number(generation.generation) == *projection;
+		return valid ? row : std::nullopt;
 	}
 	ArchiveSqlStatus Admit() {
 		if (!database.BeginRead()) {
@@ -1131,6 +1161,10 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 bool DesktopArchiveStore::Close() {
 	*_impl->alive = false;
 	_impl->crypto.Revoke();
+	for (const auto &[id, handle] : _impl->mediaHandles) {
+		handle.active->store(false);
+	}
+	_impl->mediaHandles.clear();
 	if (_impl->readers || !_impl->database.Close()) {
 		_impl->Fail(DesktopArchiveStatus::IoError, u"database-close"_q);
 		return false;
@@ -1157,8 +1191,12 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program) {
 		return false;
 	}
 	const auto result = _impl->database.Execute(program);
-	return result.ok && (program.statements.empty() || result.committed)
-		   && PrivateDatabaseFiles(_impl->layout) && Current();
+	const auto ok = result.ok && (program.statements.empty() || result.committed)
+		&& PrivateDatabaseFiles(_impl->layout) && Current();
+	if (!_impl->mediaHandles.empty()) {
+		RefreshMediaReaders();
+	}
+	return ok;
 }
 
 bool DesktopArchiveStore::Gap(
@@ -1628,28 +1666,13 @@ std::optional<ArchiveSqlSlice> DesktopArchiveStore::ReadSlice(
 			rows.push_back(*row);
 		}
 		phase = u"epoch"_q;
-		const auto epoch = self.database.Read(
-			ArchiveSqlReadChatEpoch(key.account, key.chat, self.security));
-		if (!epoch.ok) {
+		auto validEpoch = false;
+		const auto chatEpoch = self.ChatEpoch(key, validEpoch);
+		if (!validEpoch) {
 			return {};
 		}
-		if (!epoch.rows.empty()) {
-			const auto frame = Value<QByteArray>(epoch.rows.front(), 1);
-			const auto projection = Value<QString>(epoch.rows.front(), 0);
-			if (!frame || !projection) {
-				return {};
-			}
-			const auto row = self.Decode(ArchiveRecordKind::Generation,
-				ArchiveSqlChatId(key.chat, key.account, self.security), *frame);
-			if (!row) {
-				return {};
-			}
-			const auto &generation = std::get<ArchiveChatGeneration>(row->row.value);
-			if (generation.chat != key.chat
-				|| QString::number(generation.generation) != *projection) {
-				return {};
-			}
-			rows.push_back(*row);
+		if (chatEpoch) {
+			rows.push_back(*chatEpoch);
 		}
 		if (!blob.isEmpty()) {
 			blobs.insert(blob);
@@ -1744,7 +1767,21 @@ DesktopArchiveHistoryPage DesktopArchiveStore::Versions(const ArchiveMessageKey 
 		if (!header) {
 			return false;
 		}
-		result.revision = std::get<ArchiveState>(header->row.value).revision;
+		const auto admission = self.database.Read({
+			u"SELECT 1 FROM archive_meta WHERE singleton=1 AND maintenance_id=''"_q,
+			{}, ArchiveSqlExpectation::OneRow});
+		if (!admission.ok) {
+			return false;
+		}
+		auto validEpoch = false;
+		const auto chatEpoch = self.ChatEpoch(key, validEpoch);
+		if (!validEpoch) {
+			return false;
+		}
+		const auto &state = std::get<ArchiveState>(header->row.value);
+		result.generation = {state.accountGeneration,
+			chatEpoch ? std::get<ArchiveChatGeneration>(chatEpoch->row.value).generation : 0};
+		result.revision = state.revision;
 		if (revision && *revision != result.revision) {
 			result.status = DesktopArchiveStatus::Stale;
 			return false;
@@ -2190,7 +2227,7 @@ bool DesktopArchiveStore::CopyMedia(const ArchiveMessageKey &key, const QString 
 bool DesktopArchiveStore::ReadMedia(const ArchiveMessageKey &key, const QString &version,
 	const QString &identity, const std::function<bool(const QByteArray &)> &sink) {
 	auto slice = ReadSlice(key, {}, version);
-	if (!slice || !sink || _impl->readers >= 16) {
+	if (!slice || !sink || _impl->readers + _impl->mediaHandles.size() >= 16) {
 		return false;
 	}
 	const auto selected = FindArchiveVersion(slice->state, key, version);
@@ -2235,6 +2272,163 @@ bool DesktopArchiveStore::ReadMedia(const ArchiveMessageKey &key, const QString 
 	}
 	const auto release = PlanArchiveReaderRelease(slice->state, lease.id);
 	return release && Execute(TranslateArchiveSql(release, *slice, security())) && result;
+}
+
+std::optional<DesktopArchiveMediaHandle> DesktopArchiveStore::OpenMedia(
+	const ArchiveMediaRequest &request) {
+	const auto &source = request.source;
+	const auto &key = source.key;
+	const auto &version = source.version;
+	const auto &identity = source.mediaIdentity;
+	if (!CanRunArchiveWork(source.epoch, epoch()) || _impl->readers + _impl->mediaHandles.size() >= 16) {
+		return {};
+	}
+	const auto slice = ReadSlice(key, {}, version);
+	const auto selected = slice ? FindArchiveVersion(slice->state, key, version) : nullptr;
+	if (!selected || selected->revision != source.revision
+		|| ArchiveContentHash(selected->content) != source.contentHash
+		|| ArchiveGenerationFor(slice->state, key.chat) != source.generation) {
+		return {};
+	}
+	const auto ref = std::find_if(selected->media.begin(), selected->media.end(),
+		[&](const auto &value) { return value.identity == identity; });
+	if (ref == selected->media.end() || ref->state != ArchiveMediaState::Complete || ref->blobId != request.blob) {
+		return {};
+	}
+	const auto blob = std::find_if(slice->state.blobs.begin(), slice->state.blobs.end(),
+		[&](const auto &value) { return value.id == ref->blobId; });
+	if (blob == slice->state.blobs.end() || blob->state != ArchiveBlobState::Complete) {
+		return {};
+	}
+	const auto generation = ArchiveGenerationFor(slice->state, key.chat);
+	const auto lease = ArchiveReaderLease{NewToken(), key, version, blob->id, generation};
+	const auto acquire = PlanArchiveReaderAcquire(slice->state, lease);
+	if (!acquire || !Execute(TranslateArchiveSql(acquire, *slice, security()))) {
+		return {};
+	}
+	auto handle = DesktopArchiveMediaHandle{source, lease.id, blob->id,
+		blob->size, std::make_shared<std::atomic<bool>>(true)};
+	_impl->mediaHandles.emplace(handle.lease, handle);
+	if (!MediaCurrent(handle)) {
+		static_cast<void>(ReleaseMedia(handle));
+		return {};
+	}
+	return handle;
+}
+
+bool DesktopArchiveStore::MediaCurrent(const DesktopArchiveMediaHandle &handle) {
+	const auto found = _impl->mediaHandles.find(handle.lease);
+	if (found == _impl->mediaHandles.end()) {
+		return false;
+	}
+	const auto &bound = found->second;
+	const auto &a = handle.source;
+	const auto &b = bound.source;
+	if (handle.active != bound.active || handle.blob != bound.blob || handle.size != bound.size
+		|| a.epoch != b.epoch || a.key != b.key || a.version != b.version || a.revision != b.revision
+		|| a.contentHash != b.contentHash || a.mediaIdentity != b.mediaIdentity || a.generation != b.generation) {
+		return false;
+	}
+	if (!handle.active->load() || !Current() || !CanRunArchiveWork(a.epoch, epoch())) {
+		handle.active->store(false);
+		return false;
+	}
+	const auto slice = ReadSlice(a.key, {}, a.version, handle.lease);
+	const auto version = slice ? FindArchiveVersion(slice->state, a.key, a.version) : nullptr;
+	const auto lease = slice ? std::find_if(slice->state.leases.begin(), slice->state.leases.end(),
+		[&](const auto &value) { return value.id == handle.lease; }) : std::vector<ArchiveReaderLease>::const_iterator();
+	const auto valid = version && version->revision == a.revision
+		&& ArchiveContentHash(version->content) == a.contentHash
+		&& ArchiveGenerationFor(slice->state, a.key.chat) == a.generation
+		&& lease != slice->state.leases.end() && !lease->revoked
+		&& lease->key == a.key && lease->version == a.version && lease->blobId == handle.blob
+		&& lease->generation == a.generation
+		&& std::any_of(version->media.begin(), version->media.end(), [&](const auto &ref) {
+			return ref.identity == a.mediaIdentity && ref.state == ArchiveMediaState::Complete
+				&& ref.blobId == handle.blob;
+		});
+	if (!valid) {
+		handle.active->store(false);
+	}
+	return valid;
+}
+
+void DesktopArchiveStore::RefreshMediaReaders() {
+	if (_impl->refreshingMediaReaders) {
+		return;
+	}
+	_impl->refreshingMediaReaders = true;
+	const auto done = gsl::finally([&] { _impl->refreshingMediaReaders = false; });
+	auto handles = std::vector<DesktopArchiveMediaHandle>();
+	for (const auto &[id, handle] : _impl->mediaHandles) {
+		handles.push_back(handle);
+	}
+	for (const auto &handle : handles) {
+		if (handle.active->load()) {
+			static_cast<void>(MediaCurrent(handle));
+		} else {
+			static_cast<void>(ReleaseMedia(handle));
+		}
+	}
+}
+
+std::optional<QByteArray> DesktopArchiveStore::MediaRange(const DesktopArchiveMediaHandle &handle,
+	uint64_t offset, uint32_t length) {
+	return MediaCurrent(handle) ? DesktopArchiveReadMediaRange(directory(), handle.source.key.account,
+		security(), {handle.blob, handle.size}, offset, length, [&] { return MediaCurrent(handle); }) : std::nullopt;
+}
+
+bool DesktopArchiveStore::ExportMedia(const DesktopArchiveMediaHandle &handle, const QString &path) {
+	const auto root = QFileInfo(_impl->options.archiveRoot).canonicalFilePath();
+	const auto outside = [&] {
+		const auto info = QFileInfo(path);
+		const auto parent = QFileInfo(info.absolutePath()).canonicalFilePath();
+		const auto destination = info.exists() ? info.canonicalFilePath() : parent + '/' + info.fileName();
+		return !root.isEmpty() && !parent.isEmpty() && !destination.isEmpty()
+			&& destination != root && !destination.startsWith(root + '/')
+			&& parent != root && !parent.startsWith(root + '/');
+	};
+	return outside() && MediaCurrent(handle) && DesktopArchiveExportMedia(directory(), handle.source.key.account,
+		security(), {handle.blob, handle.size}, path, [&] { return outside() && MediaCurrent(handle); });
+}
+
+bool DesktopArchiveStore::ReleaseMedia(const DesktopArchiveMediaHandle &handle) {
+	const auto found = _impl->mediaHandles.find(handle.lease);
+	if (found == _impl->mediaHandles.end() || found->second.active != handle.active) {
+		return false;
+	}
+	const auto bound = found->second;
+	bound.active->store(false);
+	if (!Current()) {
+		_impl->failure = u"media-reader-release-held"_q;
+		return false;
+	}
+	const auto token = ArchiveSqlToken(bound.source.key.account, ArchiveIndexKind::Lease,
+		bound.lease.toUtf8(), security());
+	const auto absent = token.isEmpty() ? DesktopArchiveSqlResult() : _impl->database.Read({
+		u"SELECT 1 FROM archive_meta WHERE singleton=1 AND maintenance_id='' "
+		"AND NOT EXISTS(SELECT 1 FROM leases WHERE lease_id=?)"_q,
+		{token}, ArchiveSqlExpectation::Rows});
+	const auto proof = absent.ok && absent.rows.size() == 1 && absent.rows[0].size() == 1
+		? Value<int64>(absent.rows[0], 0) : nullptr;
+	if (proof && *proof == 1) {
+		_impl->mediaHandles.erase(found);
+		return true;
+	}
+	const auto slice = ReadSlice(bound.source.key, {}, {}, bound.lease);
+	const auto release = slice ? PlanArchiveReaderRelease(slice->state, bound.lease) : ArchiveTransaction();
+	if (!slice || !release) {
+		_impl->failure = u"media-reader-release-held"_q;
+		return false;
+	}
+	const auto program = TranslateArchiveSql(release, *slice, security());
+	_impl->mediaHandles.erase(found);
+	if (Execute(program)) {
+		return true;
+	}
+	_impl->mediaHandles.emplace(bound.lease, bound);
+	_impl->failure = u"media-reader-release-held"_q;
+	return false;
 }
 
 std::optional<DesktopArchiveJournalAccess> DesktopArchiveStore::JournalAccess() {

@@ -364,3 +364,57 @@ Missing/tampered pieces and progress headers refuse completion. A repeated part
 after completion verifies the owned historical bytes instead of creating a false
 gap. Destruction with media that is not owned records a visible durable gap;
 the original body and lifecycle state remain available.
+
+## Owned attachment Open and Save (Desktop M3B3)
+
+View Edit History offers attachment actions for each retained version's Complete
+references. They address the archived account/message/version/media identity,
+not a live HistoryItem or the latest message head. Opening acquires a core reader
+lease and binds its revision, content hash, blob, store epoch and purge generations.
+The action carries that tuple from its displayed page into the executor; it never
+adopts a fresh store or revision at click time. Maintenance is unavailable rather
+than an empty history. Page refusal removes the stale attachment actions.
+There are at most sixteen native readers. Every range and delivery rechecks that
+capability. A new head does not invalidate an exact historical version; a changed
+revision, purge, source/Work Mode choice, session, logout or discard does.
+
+The viewer uses an archive-only streaming loader with no cache key or shared cache.
+It requests at most eight 128 KiB parts concurrently, never more than 1 MiB per
+range. File-thread requests are marshalled onto the loader's Qt thread before
+checking UI authority. Overlapping seeks queue offsets and prioritize fresh demand;
+queued metadata is limited by the native 32-bit offset domain (at most 32,768 parts).
+Cancellation tickets discard old seek completions without cancelling newer
+requests. Playback uses Telegram's existing decoder with widget-sized frame
+conversion. Pause/Resume and Play from start are available for supported audio/video.
+Native Reader uses 32-bit offsets, so previews above its approximately 4 GiB bound
+refuse; Save remains available without an archive attachment-size cap. Photo previews
+are limited to 16 MiB encoded and eight million pixels, decoded off the main thread.
+Unsupported formats and sizes are labelled explicitly and retain Save.
+Archive readers opt into uncached slice eviction. The existing two-slice memory
+budget applies as soon as a range is requested, including before its bytes arrive.
+Late delivery to a retired slice is dropped and a later seek can request it again.
+No plaintext is serialized into the shared cache. The preview size check leaves
+a 16 MiB arithmetic margin below UINT32_MAX
+for native slice rounding and preload offsets. Other reader callers retain their
+existing default behavior.
+
+Save requires a user-chosen destination. The account worker authenticates the blob
+manifest/chunks and complete size/hash while streaming an atomic QSaveFile export.
+Cancellation, corruption or authority loss before publication drops the partial
+write. A stale completion is not reported as confirmed success. The viewer closes
+on origin changes and revokes access before accepting another result. Canonical
+parent checks reject destinations inside the archive, including directory aliases.
+Plaintext is bounded playback memory or the explicitly requested export, never a
+hidden temporary export for another application. No network acquisition is started.
+
+Close, error and stale callbacks revoke their own capability and queue lease
+release. Failed release keeps its checkpoint and GC pin, with a visible held reason;
+subsequent store progress retries it. Active maintenance is not mistaken for an
+absent lease: retirement requires a positive exact-id absence proof with normal
+admission. A purge can hold release until its lease phase has advanced. Logout and
+account discard revoke all handles and delete the owned store, including staging.
+The dedicated Deleted messages view and purge executor remain the next batch.
+
+Headless fixtures exercise the actual native encrypted store, range/export IO,
+endpoint, loader and service callback bodies with controlled executor scheduling.
+They do not qualify native dialog layout, accessibility or real audio/video playback.

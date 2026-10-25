@@ -269,6 +269,15 @@ class ArchiveWorker final {
 	std::shared_ptr<std::atomic<uint64_t>> DeliveryFence() const {
 		return _state->delivery;
 	}
+	void RevokeOnStop(const std::shared_ptr<std::atomic<bool>> &active) {
+		const auto lock = std::lock_guard(_state->mutex);
+		if (_state->cancelled) {
+			active->store(false);
+			return;
+		}
+		std::erase_if(_state->mediaReaders, [](const auto &value) { return value.expired(); });
+		_state->mediaReaders.push_back(active);
+	}
 	bool Removed() const { return _state->removed; }
 	bool WaitForStopped(std::chrono::milliseconds timeout) {
 		auto lock = std::unique_lock(_state->mutex);
@@ -284,6 +293,12 @@ class ArchiveWorker final {
 		_state->secrets->Revoke();
 		{
 			const auto lock = std::lock_guard(_state->mutex);
+			for (const auto &reader : _state->mediaReaders) {
+				if (const auto live = reader.lock()) {
+					live->store(false);
+				}
+			}
+			_state->mediaReaders.clear();
 			_state->tasks.clear();
 		}
 		_state->condition.notify_all();
@@ -298,6 +313,7 @@ class ArchiveWorker final {
 		std::mutex mutex;
 		std::condition_variable condition;
 		std::deque<Task> tasks;
+		std::vector<std::weak_ptr<std::atomic<bool>>> mediaReaders;
 		std::atomic<bool> cancelled = false;
 		std::atomic<bool> remove = false;
 		std::atomic<bool> removed = false;
@@ -1019,6 +1035,91 @@ void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key
 		  });
 	if (!accepted) {
 		done({});
+	}
+}
+
+void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest request,
+	std::function<bool()> current,
+	Fn<void(std::shared_ptr<ArchiveMediaAccess>)> done) {
+	if (Retired.contains(session.get()) || request.source.key.account != SessionAccountKey(session)
+		|| !current || !current()) {
+		done(nullptr);
+		return;
+	}
+	const auto weak = base::make_weak(session.get());
+	auto &value = For(session);
+	const auto worker = value.worker;
+	const auto journal = value.journal;
+	const auto route = [weak, current] {
+		return weak && !Retired.contains(weak.get()) && current();
+	};
+	const auto accepted = worker->Post([worker, journal, request = std::move(request), route, done](DesktopArchiveStore &store) {
+		auto handle = journal && journal->access().current() && journal->Drain(store)
+			? store.OpenMedia(request) : std::nullopt;
+		if (handle) {
+			worker->RevokeOnStop(handle->active);
+		}
+		crl::on_main([worker, journal, handle = std::move(handle), route, done]() mutable {
+			if (!handle) {
+				done(nullptr);
+				return;
+			}
+			const auto bound = *handle;
+			const auto release = [worker, bound] {
+				bound.active->store(false);
+				static_cast<void>(worker->Post([bound](DesktopArchiveStore &store) {
+					if (!store.ReleaseMedia(bound) && store.Current()) {
+						static_cast<void>(store.Gap(bound.lease + u":release"_q,
+							u"media-reader-release-held"_q, base::unixtime::now()));
+					}
+				}, true));
+			};
+			if (!route() || !bound.active->load()) {
+				release();
+				done(nullptr);
+				return;
+			}
+			auto read = [worker, journal, bound, route](uint64_t offset, uint32_t length,
+				ArchiveMediaAccess::ReadDone complete) {
+				if (!route() || !bound.active->load()) {
+					bound.active->store(false);
+					complete({});
+					return;
+				}
+				const auto accepted = worker->Post([journal, bound, offset, length, route, complete](DesktopArchiveStore &store) {
+					auto bytes = journal && journal->access().current()
+						? store.MediaRange(bound, offset, length) : std::nullopt;
+					crl::on_main([bound, route, complete, bytes = std::move(bytes)]() mutable {
+						if (!bound.active->load() || !route()) {
+							bound.active->store(false);
+							bytes.reset();
+						}
+						complete(std::move(bytes));
+					});
+				});
+				if (!accepted) {
+					complete({});
+				}
+			};
+			auto save = [worker, journal, bound, route](QString path, ArchiveMediaAccess::SaveDone complete) {
+				if (!route() || !bound.active->load()) {
+					bound.active->store(false);
+					complete(false);
+					return;
+				}
+				const auto accepted = worker->Post([journal, bound, path = std::move(path), route, complete](DesktopArchiveStore &store) {
+					const auto ok = journal && journal->access().current() && store.ExportMedia(bound, path);
+					crl::on_main([bound, route, complete, ok] { complete(ok && bound.active->load() && route()); });
+				});
+				if (!accepted) {
+					complete(false);
+				}
+			};
+			done(std::make_shared<ArchiveMediaAccess>(bound, std::move(read), std::move(save), release, route));
+		});
+	});
+	if (!accepted) {
+		done(nullptr);
 	}
 }
 

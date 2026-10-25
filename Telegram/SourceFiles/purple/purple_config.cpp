@@ -1268,6 +1268,13 @@ std::optional<AccountKey> AppWideSettingsAccount(not_null<Main::Session*> sessio
 	return AccountRouting().globalAccount();
 }
 
+std::optional<AccountKey> CachedAppWideSettingsAccount(not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		return std::nullopt;
+	}
+	return AccountRouting().globalAccount();
+}
+
 std::optional<AccountSettingsOpenTarget> AccountSettingsOpenTargetFor(
 		not_null<Main::Session*> session,
 		SettingsOpenRole role) {

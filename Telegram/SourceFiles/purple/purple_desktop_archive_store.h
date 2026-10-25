@@ -3,6 +3,7 @@
 #include "purple/purple_archive_crypto.h"
 #include "purple/purple_archive_lifecycle.h"
 #include "purple/purple_archive_media.h"
+#include "purple/purple_archive_media_access.h"
 #include "purple/purple_archive_staging.h"
 #include "purple/purple_archive_sqlite.h"
 #include <memory>
@@ -84,6 +85,7 @@ struct DesktopArchiveHistoryPage {
 	uint64_t revision = 0;
 	bool more = false;
 	bool hasGap = false;
+	ArchiveGeneration generation;
 };
 
 class DesktopArchiveStore final {
@@ -123,6 +125,14 @@ class DesktopArchiveStore final {
 		const QString &identity, QIODevice &source, const DesktopArchiveMediaCopy &copy);
 	[[nodiscard]] bool ReadMedia(const ArchiveMessageKey &key, const QString &version,
 		const QString &identity, const std::function<bool(const QByteArray &)> &sink);
+	[[nodiscard]] std::optional<DesktopArchiveMediaHandle> OpenMedia(
+		const ArchiveMediaRequest &request);
+	[[nodiscard]] bool MediaCurrent(const DesktopArchiveMediaHandle &handle);
+	[[nodiscard]] std::optional<QByteArray> MediaRange(const DesktopArchiveMediaHandle &handle,
+		uint64_t offset, uint32_t length);
+	[[nodiscard]] bool ExportMedia(const DesktopArchiveMediaHandle &handle, const QString &path);
+	[[nodiscard]] bool ReleaseMedia(const DesktopArchiveMediaHandle &handle);
+	void RefreshMediaReaders();
 	[[nodiscard]] std::optional<DesktopArchiveJournalAccess> JournalAccess();
 	[[nodiscard]] bool UsageComplete() const;
 	[[nodiscard]] bool Gap(const QString &id, const QString &reason, int64 observedAt);

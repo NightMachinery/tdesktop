@@ -9,13 +9,17 @@
 #include "main/main_session.h"
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_archive_service.h"
+#include "purple/purple_archive_media_box.h"
 #include "purple/purple_config.h"
+#include "purple/purple_gate.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/vertical_list.h"
+#include "main/main_account.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include <QtCore/QDateTime>
@@ -70,6 +74,8 @@ QString Preview(const ArchiveVersionSnapshot &snapshot) {
 void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessageKey key) {
 	const auto session = base::make_weak(&controller->session());
 	const auto window = base::make_weak(controller.get());
+	const auto source = CachedAppWideSettingsAccount(&controller->session());
+	const auto mode = AccountWorkModeForSession(&controller->session());
 	controller->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(tr::lng_purple_archive_history());
 		box->setWidth(st::boxWideWidth);
@@ -78,12 +84,15 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 		const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
 			box, tr::lng_purple_archive_opening(tr::now), st::boxLabel));
 		label->setSelectable(true);
+		const auto attachments = box->addRow(object_ptr<Ui::VerticalLayout>(box));
 		struct State {
 			QString before;
 			std::optional<uint64_t> revision;
 			std::optional<ArchiveStoreEpoch> epoch;
 			bool loading = false;
 			bool refresh = false;
+			bool closed = false;
+			std::vector<QPointer<Ui::RoundButton>> attachments;
 			QPointer<Ui::RoundButton> next;
 			Fn<void()> load;
 		};
@@ -92,10 +101,18 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 		const auto current = [=] {
 			const auto live = session.get();
 			const auto own = window.get();
-			return guard && live && own && &own->session() == live
+			return guard && !state->closed && live && own && &own->session() == live
 				   && own->window().sessionController() == own
-				   && SessionAccountKey(live) == key.account;
+				   && !live->account().loggingOut() && live->account().maybeSession() == live
+				   && SessionAccountKey(live) == key.account
+				   && CachedAppWideSettingsAccount(live) == source && AccountWorkModeForSession(live) == mode;
 		};
+		box->boxClosing() | rpl::on_next([=] { state->closed = true; }, box->lifetime());
+		rpl::merge(SettingsChanges(), ActiveChanges()) | rpl::on_next([=] {
+			if (!current()) {
+				box->closeBox();
+			}
+		}, box->lifetime());
 		session.get()->lifetime().add([guard] {
 			if (guard) {
 				guard->closeBox();
@@ -136,6 +153,10 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 					state->loading = false;
 					if (page.status != DesktopArchiveStatus::Ready
 						|| (state->epoch && *state->epoch != page.epoch)) {
+						for (const auto &button : state->attachments) {
+							delete button.data();
+						}
+						state->attachments.clear();
 						label->setText(tr::lng_purple_archive_history_changed(tr::now));
 						state->refresh = true;
 						return;
@@ -143,9 +164,42 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 					state->epoch = page.epoch;
 					state->before = page.beforeOrder;
 					state->revision = page.revision;
+					for (const auto &button : state->attachments) {
+						delete button.data();
+					}
+					state->attachments.clear();
 					auto previews = QStringList();
 					for (const auto &version : page.versions) {
 						previews.push_back(Preview(version));
+						auto index = 0;
+						for (const auto &ref : version.version.media) {
+							++index;
+							if (ref.state != ArchiveMediaState::Complete) {
+								continue;
+							}
+							const auto found = std::find_if(version.version.content.media.begin(),
+								version.version.content.media.end(), [&](const auto &media) {
+									return media.identity == ref.identity;
+								});
+							const auto photo = found != version.version.content.media.end() && found->kind == u"photo"_q;
+							const auto mime = found != version.version.content.media.end()
+								? found->attributes.value(u"mime"_q).toString() : QString();
+							const auto id = version.version.id;
+							const auto identity = ref.identity;
+							const auto request = ArchiveMediaRequest{{page.epoch, key, id,
+								version.version.revision, ArchiveContentHash(version.version.content),
+								identity, page.generation}, ref.blobId};
+							const auto button = attachments->add(object_ptr<Ui::RoundButton>(attachments,
+								tr::lng_purple_archive_attachment_open(lt_index, rpl::single(QString::number(index)),
+									lt_date, rpl::single(QDateTime::fromSecsSinceEpoch(version.version.firstObservedAt).toString(Qt::ISODate))),
+								st::defaultBoxButton));
+							state->attachments.push_back(button);
+							button->setClickedCallback([=] {
+								if (current()) {
+									ShowArchiveMedia(window.get(), request, mime, photo, current);
+								}
+							});
+						}
 					}
 					const auto body = previews.empty()
 										  ? tr::lng_purple_archive_history_empty(tr::now)
