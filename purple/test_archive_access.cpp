@@ -176,6 +176,219 @@ std::optional<DesktopArchiveMediaHandle> OpenOwned(DesktopArchiveStore &store,
 	return request ? store.OpenMedia(*request) : std::nullopt;
 }
 
+struct HistoryLeaseState {
+	std::optional<uint64_t> revision;
+	std::optional<ArchiveStoreEpoch> epoch;
+	uint64_t ticket = 1;
+	bool loading = false;
+};
+
+std::function<void(ArchiveLeaseRevisionChange)> HistoryLeaseObserver(
+		HistoryLeaseState *state, ArchiveStoreEpoch epoch, uint64_t ticket,
+		std::function<bool()> current) {
+#include "archive-history-lease.inc"
+}
+
+void SeedHistory(DesktopArchiveStore &store) {
+	for (auto order = uint64_t(1); order != 41; ++order) {
+		const auto id = u"history-"_q + QString::number(order);
+		CHECK(store.Capture(Event(Empty(), id, order, id,
+			order == 1 ? ArchiveOrigin::Baseline : ArchiveOrigin::AuthoritativeEdit)).retained);
+	}
+	Owned(store, "history media", u"history-41"_q, 41);
+}
+
+void PaginationCallbacks() {
+	Section = "own committed lease pagination through production service and history callbacks";
+	using namespace Purple::ServiceProbe;
+	for (const auto mode : {u"control"_q, u"open-close"_q, u"payload"_q,
+		u"purge"_q, u"interleaved"_q, u"pre-acquire"_q, u"other-view"_q, u"stopped-release"_q}) {
+		auto temporary = QTemporaryDir();
+		auto store = DesktopArchiveStore();
+		CHECK(store.Open(Options(temporary.path())) == DesktopArchiveStatus::Ready);
+		SeedHistory(store);
+		const auto page = store.Versions(Key(), 32);
+		CHECK(page.status == DesktopArchiveStatus::Ready && page.versions.size() == 32 && page.more);
+		if (page.versions.empty()) {
+			continue;
+		}
+		auto state = HistoryLeaseState{page.revision, page.epoch};
+		auto valid = true;
+		const auto observer = HistoryLeaseObserver(&state, page.epoch, state.ticket, [&] { return valid; });
+		Value = {std::make_shared<CallbackWorker>(), std::make_shared<CallbackJournal>()};
+		Value.worker->store = &store;
+		auto session = CallbackSession();
+		auto request = *MediaRequest(store, Key(), u"history-41"_q, Identity(u"history-41"_q));
+		auto notifications = 0;
+		request.leaseCommitted = [&](ArchiveLeaseRevisionChange change) {
+			++notifications;
+			observer(change);
+		};
+		auto access = std::shared_ptr<ArchiveMediaAccess>();
+		if (mode != u"control"_q) {
+			if (mode == u"other-view"_q) {
+				request.leaseCommitted = {};
+			}
+			OpenArchiveMedia(&session, request, [] { return true; },
+				[&](auto opened) { access = std::move(opened); });
+			if (mode == u"pre-acquire"_q) {
+				CHECK(store.Capture(Event(Empty(), u"interleaved"_q, 42, u"new"_q,
+					ArchiveOrigin::AuthoritativeEdit)).retained);
+			}
+			if (mode == u"interleaved"_q) {
+				Value.worker->Run();
+				CHECK(store.Capture(Event(Empty(), u"between-acquire-release"_q, 42, u"interleaved"_q,
+					ArchiveOrigin::AuthoritativeEdit)).retained);
+			}
+			Flush();
+			CHECK(access && access->current());
+			if (mode == u"open-close"_q || mode == u"payload"_q || mode == u"purge"_q) {
+				CHECK(state.revision == std::optional(page.revision + 1));
+			}
+			if (mode == u"payload"_q) {
+				CHECK(store.Capture(Event(Empty(), u"payload"_q, 42, u"changed"_q,
+					ArchiveOrigin::AuthoritativeEdit)).retained);
+			}
+			if (mode == u"purge"_q) {
+				const auto slice = store.ReadSlice(Key());
+				CHECK(slice);
+				auto header = slice->state;
+				header.messages.clear(); header.blobs.clear(); header.jobs.clear();
+				header.leases.clear(); header.chatGenerations.clear();
+				const auto start = BeginArchiveSqlPurge(header,
+					Purge(header, ArchivePurgeKind::EditHistory), {}, u"pagination-purge"_q, store.security());
+				CHECK(start.program && store.Execute(start.program));
+			}
+			if (access) {
+				access->close();
+			}
+			if (mode == u"stopped-release"_q) {
+				Value.worker->Run();
+				Value.worker->Stop();
+			}
+			Flush();
+			if (mode == u"stopped-release"_q) {
+				CHECK(notifications == 1 && state.revision == std::optional(page.revision + 1));
+			}
+		}
+		const auto older = store.Versions(Key(), 32, page.beforeOrder, state.revision);
+		if (mode == u"control"_q || mode == u"open-close"_q) {
+			CHECK(older.status == DesktopArchiveStatus::Ready && older.versions.size() == 9 && !older.more);
+			CHECK(notifications == (mode == u"control"_q ? 0 : 2));
+		} else {
+			CHECK(older.status != DesktopArchiveStatus::Ready && older.versions.empty());
+		}
+		if (mode == u"pre-acquire"_q || mode == u"other-view"_q) {
+			CHECK(state.revision == std::optional(page.revision));
+		}
+		access.reset();
+		Flush();
+		Value = {};
+		CHECK(store.Remove());
+	}
+}
+
+void PaginationReleaseRetry() {
+	Section = "failed release cannot advance; only a committed retry advances";
+	auto temporary = QTemporaryDir();
+	auto store = DesktopArchiveStore();
+	CHECK(store.Open(Options(temporary.path())) == DesktopArchiveStatus::Ready);
+	SeedHistory(store);
+	const auto page = store.Versions(Key(), 32);
+	auto state = HistoryLeaseState{page.revision, page.epoch};
+	const auto observer = HistoryLeaseObserver(&state, page.epoch, state.ticket, [] { return true; });
+	const auto request = MediaRequest(store, Key(), u"history-41"_q, Identity(u"history-41"_q));
+	CHECK(request);
+	auto committed = ArchiveLeaseRevisionChange();
+	const auto handle = store.OpenMedia(*request, &committed);
+	CHECK(handle && committed.leaseOnly);
+	observer(committed);
+	const auto acquired = state.revision;
+	CHECK(acquired == std::optional(page.revision + 1));
+	CHECK(store.database().BeginRead());
+	CHECK(!store.ReleaseMedia(*handle, &committed));
+	CHECK(!committed.leaseOnly);
+	observer(committed);
+	CHECK(state.revision == acquired);
+	CHECK(store.database().EndRead());
+	CHECK(store.ReleaseMedia(*handle, &committed) && committed.leaseOnly);
+	observer(committed);
+	CHECK(state.revision == std::optional(page.revision + 2));
+	const auto older = store.Versions(Key(), 32, page.beforeOrder, state.revision);
+	CHECK(older.status == DesktopArchiveStatus::Ready && older.versions.size() == 9);
+	CHECK(!store.ReleaseMedia(*handle, &committed) && !committed.leaseOnly);
+	observer(committed);
+	CHECK(state.revision == std::optional(page.revision + 2));
+	CHECK(store.Remove());
+}
+
+void PaginationProofsAndRoutes() {
+	Section = "lease-only compares every actual state field and requires exact revision route";
+	auto transaction = ArchiveTransaction();
+	transaction.status = ArchivePlanStatus::Ready;
+	transaction.expected = Empty();
+	transaction.next = transaction.expected;
+	transaction.expected.revision = 7;
+	transaction.next.revision = 8;
+	transaction.next.leases.push_back({});
+	const auto committed = DescribeArchiveLeaseCommit(transaction);
+	CHECK(committed.leaseOnly && committed.from == 7 && committed.to == 8);
+	for (auto field = 0; field != 9; ++field) {
+		auto altered = transaction;
+		switch (field) {
+		case 0: ++altered.next.version; break;
+		case 1: ++altered.next.account.userId; break;
+		case 2: ++altered.next.accountGeneration; break;
+		case 3: altered.next.chatGenerations.push_back({}); break;
+		case 4: altered.next.messages.push_back({}); break;
+		case 5: altered.next.blobs.push_back({}); break;
+		case 6: altered.next.jobs.push_back({}); break;
+		case 7: altered.next.preserved.insert(u"extra"_q, true); break;
+		case 8: ++altered.next.revision; break;
+		}
+		CHECK(!DescribeArchiveLeaseCommit(altered).leaseOnly);
+	}
+	auto unknown = transaction;
+	unknown.status = ArchivePlanStatus::Invalid;
+	CHECK(!DescribeArchiveLeaseCommit(unknown).leaseOnly);
+	auto overflow = transaction;
+	overflow.expected.revision = std::numeric_limits<uint64_t>::max();
+	overflow.next.revision = 0;
+	CHECK(!DescribeArchiveLeaseCommit(overflow).leaseOnly);
+	auto state = HistoryLeaseState();
+	state.epoch = ArchiveStoreEpoch{{0, 123}, u"store"_q, 1, false};
+	state.revision = 7;
+	auto valid = true;
+	const auto observer = HistoryLeaseObserver(&state, *state.epoch, state.ticket, [&] { return valid; });
+	valid = false;
+	observer(committed);
+	CHECK(state.revision == std::optional<uint64_t>(7));
+	valid = true;
+	state.loading = true;
+	observer(committed);
+	CHECK(state.revision == std::optional<uint64_t>(7));
+	state.loading = false;
+	++state.ticket;
+	observer(committed);
+	CHECK(state.revision == std::optional<uint64_t>(7));
+	--state.ticket;
+	++state.epoch->generation;
+	observer(committed);
+	CHECK(state.revision == std::optional<uint64_t>(7));
+	--state.epoch->generation;
+	AdvanceArchiveLeaseRevision(state.revision, {6, 7, true});
+	AdvanceArchiveLeaseRevision(state.revision, {7, 9, true});
+	AdvanceArchiveLeaseRevision(state.revision, {7, 8, false});
+	CHECK(state.revision == std::optional<uint64_t>(7));
+	observer(committed);
+	CHECK(state.revision == std::optional<uint64_t>(8));
+	observer(committed);
+	CHECK(state.revision == std::optional<uint64_t>(8));
+	state.revision.reset();
+	observer(committed);
+	CHECK(!state.revision);
+}
+
 void NativeAccess() {
 	Section = "native owned historical range, export and capability fences";
 	auto temporary = QTemporaryDir();
@@ -730,6 +943,12 @@ void NativeDemandAndThread() {
 
 int main(int argc, char **argv) {
 	const auto app = QCoreApplication(argc, argv);
+	PaginationProofsAndRoutes();
+	PaginationCallbacks();
+	PaginationReleaseRetry();
+	if (argc > 1 && QByteArray(argv[1]) == "pagination-only") {
+		return Finish();
+	}
 	NativeAccess();
 	NativeFailures();
 	RevisionRevocation();

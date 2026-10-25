@@ -2275,7 +2275,10 @@ bool DesktopArchiveStore::ReadMedia(const ArchiveMessageKey &key, const QString 
 }
 
 std::optional<DesktopArchiveMediaHandle> DesktopArchiveStore::OpenMedia(
-	const ArchiveMediaRequest &request) {
+	const ArchiveMediaRequest &request, ArchiveLeaseRevisionChange *committed) {
+	if (committed) {
+		*committed = {};
+	}
 	const auto &source = request.source;
 	const auto &key = source.key;
 	const auto &version = source.version;
@@ -2312,6 +2315,9 @@ std::optional<DesktopArchiveMediaHandle> DesktopArchiveStore::OpenMedia(
 	if (!MediaCurrent(handle)) {
 		static_cast<void>(ReleaseMedia(handle));
 		return {};
+	}
+	if (committed) {
+		*committed = DescribeArchiveLeaseCommit(acquire);
 	}
 	return handle;
 }
@@ -2392,7 +2398,11 @@ bool DesktopArchiveStore::ExportMedia(const DesktopArchiveMediaHandle &handle, c
 		security(), {handle.blob, handle.size}, path, [&] { return outside() && MediaCurrent(handle); });
 }
 
-bool DesktopArchiveStore::ReleaseMedia(const DesktopArchiveMediaHandle &handle) {
+bool DesktopArchiveStore::ReleaseMedia(const DesktopArchiveMediaHandle &handle,
+		ArchiveLeaseRevisionChange *committed) {
+	if (committed) {
+		*committed = {};
+	}
 	const auto found = _impl->mediaHandles.find(handle.lease);
 	if (found == _impl->mediaHandles.end() || found->second.active != handle.active) {
 		return false;
@@ -2424,6 +2434,9 @@ bool DesktopArchiveStore::ReleaseMedia(const DesktopArchiveMediaHandle &handle) 
 	const auto program = TranslateArchiveSql(release, *slice, security());
 	_impl->mediaHandles.erase(found);
 	if (Execute(program)) {
+		if (committed) {
+			*committed = DescribeArchiveLeaseCommit(release);
+		}
 		return true;
 	}
 	_impl->mediaHandles.emplace(bound.lease, bound);

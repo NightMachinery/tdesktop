@@ -4,8 +4,31 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QSaveFile>
 #include <algorithm>
+#include <limits>
 
 namespace Purple {
+
+ArchiveLeaseRevisionChange DescribeArchiveLeaseCommit(
+		const ArchiveTransaction &transaction) {
+	auto expected = transaction.expected;
+	auto next = transaction.next;
+	const auto from = expected.revision;
+	const auto to = next.revision;
+	expected.leases.clear();
+	next.leases.clear();
+	expected.revision = next.revision = 0;
+	return {from, to, transaction && from != std::numeric_limits<uint64_t>::max()
+		&& to == from + 1 && expected == next};
+}
+
+void AdvanceArchiveLeaseRevision(std::optional<uint64_t> &revision,
+		const ArchiveLeaseRevisionChange &change) {
+	if (revision && *revision == change.from && change.leaseOnly
+		&& change.from != std::numeric_limits<uint64_t>::max()
+		&& change.to == change.from + 1) {
+		revision = change.to;
+	}
+}
 
 std::optional<QByteArray> DesktopArchiveReadMediaRange(const QString &root,
 	const AccountKey &account, const ArchiveSqlSecurity &security,

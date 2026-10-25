@@ -89,6 +89,7 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 			QString before;
 			std::optional<uint64_t> revision;
 			std::optional<ArchiveStoreEpoch> epoch;
+			uint64_t ticket = 0;
 			bool loading = false;
 			bool refresh = false;
 			bool closed = false;
@@ -141,6 +142,7 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 				state->revision.reset();
 				state->refresh = false;
 			}
+			const auto ticket = ++state->ticket;
 			state->loading = true;
 			ReadArchiveVersions(session.get(), key, state->before, state->revision,
 				[=](DesktopArchiveHistoryPage page) {
@@ -168,6 +170,7 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 						delete button.data();
 					}
 					state->attachments.clear();
+					const auto epoch = page.epoch;
 					auto previews = QStringList();
 					for (const auto &version : page.versions) {
 						previews.push_back(Preview(version));
@@ -188,7 +191,13 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 							const auto identity = ref.identity;
 							const auto request = ArchiveMediaRequest{{page.epoch, key, id,
 								version.version.revision, ArchiveContentHash(version.version.content),
-								identity, page.generation}, ref.blobId};
+								identity, page.generation}, ref.blobId,
+								[=](ArchiveLeaseRevisionChange change) {
+									if (current() && !state->loading && state->ticket == ticket
+										&& state->epoch && *state->epoch == epoch) {
+										AdvanceArchiveLeaseRevision(state->revision, change);
+									}
+								}};
 							const auto button = attachments->add(object_ptr<Ui::RoundButton>(attachments,
 								tr::lng_purple_archive_attachment_open(lt_index, rpl::single(QString::number(index)),
 									lt_date, rpl::single(QDateTime::fromSecsSinceEpoch(version.version.firstObservedAt).toString(Qt::ISODate))),

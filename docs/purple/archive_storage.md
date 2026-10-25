@@ -418,3 +418,20 @@ The dedicated Deleted messages view and purge executor remain the next batch.
 Headless fixtures exercise the actual native encrypted store, range/export IO,
 endpoint, loader and service callback bodies with controlled executor scheduling.
 They do not qualify native dialog layout, accessibility or real audio/video playback.
+
+## History pagination and attachment leases
+
+Opening and closing an attachment advances only its owning History box's
+revision fence, only after a confirmed lease commit. The adapter compares the
+actual expected and next states with leases and revision cleared, and requires
+an exact single revision step from that box's current revision. Other writes,
+interleaved capture or purge, another box, a failed or unknown commit, and a
+changed account, login, store or page keep the old fence. Older then refuses a
+stale snapshot. Closing the attachment still reports its release to a live
+owning History box; closing or refreshing that History box drops the delivery.
+
+The access fixture covers 41 versions with a 32-row first page, nine older
+versions after an own Open/close, and unchanged, payload, purge, interleaved
+capture and release-failure controls. These cases exercise the native encrypted
+adapter and the production media completion callback with a controlled main
+queue. They do not launch a GUI or qualify native window activation events.

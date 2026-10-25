@@ -7,9 +7,21 @@
 
 namespace Purple {
 
+struct ArchiveLeaseRevisionChange {
+	uint64_t from = 0;
+	uint64_t to = 0;
+	bool leaseOnly = false;
+};
+
+[[nodiscard]] ArchiveLeaseRevisionChange DescribeArchiveLeaseCommit(
+	const ArchiveTransaction &transaction);
+void AdvanceArchiveLeaseRevision(std::optional<uint64_t> &revision,
+	const ArchiveLeaseRevisionChange &change);
+
 struct ArchiveMediaRequest {
 	ArchiveMediaSource source;
 	QString blob;
+	std::function<void(ArchiveLeaseRevisionChange)> leaseCommitted;
 };
 
 struct DesktopArchiveMediaHandle {

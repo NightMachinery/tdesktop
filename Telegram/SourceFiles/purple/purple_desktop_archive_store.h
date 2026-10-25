@@ -126,12 +126,14 @@ class DesktopArchiveStore final {
 	[[nodiscard]] bool ReadMedia(const ArchiveMessageKey &key, const QString &version,
 		const QString &identity, const std::function<bool(const QByteArray &)> &sink);
 	[[nodiscard]] std::optional<DesktopArchiveMediaHandle> OpenMedia(
-		const ArchiveMediaRequest &request);
+		const ArchiveMediaRequest &request,
+		ArchiveLeaseRevisionChange *committed = nullptr);
 	[[nodiscard]] bool MediaCurrent(const DesktopArchiveMediaHandle &handle);
 	[[nodiscard]] std::optional<QByteArray> MediaRange(const DesktopArchiveMediaHandle &handle,
 		uint64_t offset, uint32_t length);
 	[[nodiscard]] bool ExportMedia(const DesktopArchiveMediaHandle &handle, const QString &path);
-	[[nodiscard]] bool ReleaseMedia(const DesktopArchiveMediaHandle &handle);
+	[[nodiscard]] bool ReleaseMedia(const DesktopArchiveMediaHandle &handle,
+		ArchiveLeaseRevisionChange *committed = nullptr);
 	void RefreshMediaReaders();
 	[[nodiscard]] std::optional<DesktopArchiveJournalAccess> JournalAccess();
 	[[nodiscard]] bool UsageComplete() const;

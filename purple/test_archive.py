@@ -15,11 +15,13 @@ parser.add_argument('--use-build-objects', action='store_true')
 parser.add_argument('--capture-only', action='store_true')
 parser.add_argument('--lifecycle', action='store_true')
 parser.add_argument('--access', action='store_true')
+parser.add_argument('--pagination-only', action='store_true')
 parser.add_argument('--handoff', action='store_true')
 parser.add_argument('--passive', action='store_true')
 parser.add_argument('--build-only', action='store_true')
 parser.add_argument('--reuse-from', type=Path)
 args = parser.parse_args()
+args.access = args.access or args.pagination_only
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
 owned = tempfile.TemporaryDirectory(prefix='purple-archive-test.') if not args.output_dir else None
@@ -41,6 +43,15 @@ if args.access:
     (work / 'archive-media-callback.inc').write_text(callback.replace(
         'not_null<Main::Session*>', 'not_null<CallbackSession*>').replace(
         'crl::on_main', 'CallbackOnMain') + '\n')
+    history = (repo / 'Telegram/SourceFiles/purple/purple_archive_history_box.cpp').read_text()
+    begin = history.index('[=](ArchiveLeaseRevisionChange change)')
+    position = history.index('{', begin) + 1
+    depth = 1
+    while depth:
+        depth += (history[position] == '{') - (history[position] == '}')
+        position += 1
+    history_callback = history[begin:position]
+    (work / 'archive-history-lease.inc').write_text('return ' + history_callback + ';\n')
     reader = (repo / 'Telegram/SourceFiles/media/streaming/media_streaming_reader.cpp').read_text()
     (work / 'archive-reader-slices.inc').write_text(reader[
         reader.index('namespace Media {'):reader.index('Reader::Reader(')]
@@ -130,12 +141,13 @@ with (work / 'build.log').open('w') as log:
     'objects_sha256': {str(path): hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in objects},
     'page_callback_boundary': 'unchanged production delivery lambda body with real weak lifetime and controlled retirement, ticket and UI endpoints',
     'media_callback_boundary': 'Exact production OpenArchiveMedia body; only session type and main-queue dispatcher are substituted. Controlled weak-session lifetime, Work Mode/source authority, worker/journal scheduling; real encrypted store, reader endpoint and loader.' if args.access else None,
+    'history_lease_callback_sha256': hashlib.sha256(history_callback.encode()).hexdigest() if args.access else None,
     'media_callback_sha256': hashlib.sha256(callback.encode()).hexdigest() if args.access else None,
 }, indent=2) + '\n')
 if args.build_only:
     raise SystemExit(0)
 with (work / 'run.log').open('w') as log:
-    result = subprocess.run([str(work / 'test_archive')] + (['capture-only'] if args.capture_only else []), stdout=log, stderr=subprocess.STDOUT)
+    result = subprocess.run([str(work / 'test_archive')] + (['pagination-only'] if args.pagination_only else ['capture-only'] if args.capture_only else []), stdout=log, stderr=subprocess.STDOUT)
 (work / 'run.exit').write_text(str(result.returncode) + '\n')
 print((work / 'run.log').read_text())
 raise SystemExit(result.returncode)

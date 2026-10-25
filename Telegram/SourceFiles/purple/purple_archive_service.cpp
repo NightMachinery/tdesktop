@@ -1053,24 +1053,38 @@ void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest requ
 	const auto route = [weak, current] {
 		return weak && !Retired.contains(weak.get()) && current();
 	};
-	const auto accepted = worker->Post([worker, journal, request = std::move(request), route, done](DesktopArchiveStore &store) {
+	const auto accepted = worker->Post([worker, journal, request = std::move(request), weak, route, done](DesktopArchiveStore &store) {
+		auto committed = ArchiveLeaseRevisionChange();
+		const auto leaseCommitted = request.leaseCommitted;
 		auto handle = journal && journal->access().current() && journal->Drain(store)
-			? store.OpenMedia(request) : std::nullopt;
+			? store.OpenMedia(request, &committed) : std::nullopt;
+		const auto leaseDelivery = std::make_shared<std::atomic<bool>>(true);
 		if (handle) {
 			worker->RevokeOnStop(handle->active);
+			worker->RevokeOnStop(leaseDelivery);
 		}
-		crl::on_main([worker, journal, handle = std::move(handle), route, done]() mutable {
+		crl::on_main([worker, journal, handle = std::move(handle), weak, route, done,
+			committed, leaseCommitted, leaseDelivery]() mutable {
 			if (!handle) {
 				done(nullptr);
 				return;
 			}
 			const auto bound = *handle;
-			const auto release = [worker, bound] {
+			const auto release = [worker, bound, weak, leaseCommitted, leaseDelivery] {
 				bound.active->store(false);
-				static_cast<void>(worker->Post([bound](DesktopArchiveStore &store) {
-					if (!store.ReleaseMedia(bound) && store.Current()) {
+				static_cast<void>(worker->Post([bound, weak, leaseCommitted, leaseDelivery](DesktopArchiveStore &store) {
+					auto committed = ArchiveLeaseRevisionChange();
+					const auto sameEpoch = CanRunArchiveWork(bound.source.epoch, store.epoch());
+					if (!store.ReleaseMedia(bound, &committed) && store.Current()) {
 						static_cast<void>(store.Gap(bound.lease + u":release"_q,
 							u"media-reader-release-held"_q, base::unixtime::now()));
+					}
+					if (sameEpoch && committed.leaseOnly && leaseCommitted) {
+						crl::on_main([weak, leaseCommitted, committed, leaseDelivery] {
+							if (weak && !Retired.contains(weak.get()) && leaseDelivery->load()) {
+								leaseCommitted(committed);
+							}
+						});
 					}
 				}, true));
 			};
@@ -1078,6 +1092,9 @@ void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest requ
 				release();
 				done(nullptr);
 				return;
+			}
+			if (committed.leaseOnly && leaseCommitted) {
+				leaseCommitted(committed);
 			}
 			auto read = [worker, journal, bound, route](uint64_t offset, uint32_t length,
 				ArchiveMediaAccess::ReadDone complete) {
