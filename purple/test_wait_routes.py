@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 import unittest
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 from check_wait_routes import inventory, WRITERS
 
 
@@ -29,6 +35,61 @@ class WaitRoutes(unittest.TestCase):
         baseline = inventory('writer.writeWorkMode(target);')
         for extra in ('writeWorkMode(other);', 'Alias::writeWorkMode(other);', 'renamed.writeWorkMode(other);'):
             self.assertNotEqual(inventory('writer.writeWorkMode(target);' + extra), baseline)
+
+    def test_focus_preference_alias_and_literal(self):
+        for key in ('"purple-peek-end-on-focus-loss"', 'kKey', '(kAlias)'):
+            code = '''
+                constexpr auto kKey = "purple-peek-end-on-focus-loss";
+                const auto kAlias = kKey;
+                void RequestPeekFocusLossChange(bool enabled) {
+                    RequestWait({.apply = [=] { settings().writePref<bool>(KEY, enabled); }});
+                }
+            '''.replace('KEY', key)
+            self.assertEqual(inventory(code), {'writePref<peek-focus-loss>': 1})
+        self.assertEqual(inventory('''
+            // settings().writePref<bool>("purple-peek-end-on-focus-loss", false);
+            auto other = "writePref<bool>(key, false)";
+            settings().readPref<bool>("purple-peek-end-on-focus-loss", false);
+            settings().writePref<bool>("another-preference", false);
+        '''), {})
+
+    def test_focus_preference_moved_outside_gate(self):
+        code = '''
+            constexpr auto kKey = "purple-peek-end-on-focus-loss";
+            void DirectDisable() { settings().writePref<bool>(kKey, false); }
+        '''
+        self.assertEqual(inventory(code), {
+            'ungatedPeekFocusWrite': 1, 'writePref<peek-focus-loss>': 1})
+
+    def test_direct_focus_disable_rejected_by_guard(self):
+        with tempfile.TemporaryDirectory(prefix='purple-focus-route.') as temporary:
+            repo = Path(temporary)
+            source = repo / 'Telegram/SourceFiles/purple/prefs.cpp'
+            source.parent.mkdir(parents=True)
+            purple = repo / 'purple'
+            purple.mkdir()
+            baseline = '''
+                constexpr auto kKey = "purple-peek-end-on-focus-loss";
+                void RequestPeekFocusLossChange(bool enabled) {
+                    RequestWait({.apply = [=] { settings().writePref<bool>(kKey, enabled); }});
+                }
+            '''
+            source.write_text(baseline)
+            (purple / 'wait_routes.json').write_text(json.dumps({
+                str(source.relative_to(repo)): inventory(baseline)}))
+            guard = purple / 'check_wait_routes.py'
+            shutil.copyfile(Path(__file__).with_name('check_wait_routes.py'), guard)
+            def run():
+                return subprocess.run([sys.executable, str(guard)], capture_output=True, text=True)
+            self.assertEqual(run().returncode, 0)
+            source.write_text(baseline + '''
+                void DirectDisable() {
+                    Core::App().settings().writePref<bool>("purple-peek-end-on-focus-loss", false);
+                }
+            ''')
+            rejected = run()
+            self.assertEqual(rejected.returncode, 1, rejected.stdout)
+            self.assertIn('ungatedPeekFocusWrite', rejected.stdout)
 
 
 if __name__ == '__main__':

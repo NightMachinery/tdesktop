@@ -14,12 +14,46 @@ WRITERS = (
 TOKENS = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|R"(?P<tag>[^ ()\\\t\r\n]{0,16})\([\s\S]*?\)(?P=tag)"|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 CALL = re.compile(r'\b(' + '|'.join(WRITERS) + r')\s*\(')
 PRESET = re.compile(r'\bactivePreset\s*=(?!=)')
+FOCUS_KEY = '__PEEK_FOCUS_PREFERENCE_KEY__'
+PREFERENCE_WRITE = re.compile(r'\bwritePref\s*(?:<[^;{}]+?>)?\s*\(([^,;]+),')
+PREFERENCE_ALIAS = re.compile(r'\b(\w+)\s*=\s*(?:(?:u8?|U|L)\s*)?(\w+)\b')
+
+
+def focus_write_inventory(text):
+    def token(match):
+        if match.group() == '"purple-peek-end-on-focus-loss"':
+            return ' ' + FOCUS_KEY + ' '
+        return '\n' * match.group().count('\n') + ' '
+
+    code = TOKENS.sub(token, text)
+    aliases = {FOCUS_KEY}
+    declarations = PREFERENCE_ALIAS.findall(code)
+    while True:
+        expanded = aliases | {name for name, value in declarations if value in aliases}
+        if expanded == aliases:
+            break
+        aliases = expanded
+    guarded = re.search(r'\bvoid\s+RequestPeekFocusLossChange\s*\([^;{]*\)\s*\{', code)
+    begin = guarded.end() if guarded else -1
+    end = begin
+    depth = 1
+    while begin >= 0 and end < len(code) and depth:
+        depth += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    found = Counter()
+    for call in PREFERENCE_WRITE.finditer(code):
+        if aliases.intersection(re.findall(r'\b\w+\b', call.group(1))):
+            found['writePref<peek-focus-loss>'] += 1
+            if not (begin <= call.start() < end):
+                found['ungatedPeekFocusWrite'] += 1
+    return found
 
 
 def inventory(text):
     code = TOKENS.sub(lambda match: '\n' * match.group().count('\n') + ' ', text)
     found = Counter(match.group(1) for match in CALL.finditer(code))
     found['activePreset='] += len(PRESET.findall(code))
+    found.update(focus_write_inventory(text))
     return dict(sorted((key, value) for key, value in found.items() if value))
 
 

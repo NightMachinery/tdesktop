@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_auto_service.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_peek.h"
+#include "purple/purple_peek_controls.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_screentime_recorder.h"
 #include "purple/purple_ui_witness.h"
@@ -32,6 +33,7 @@ void StartAppServices() {
 void OnScreenLockChanged(bool locked) {
 	if (locked) {
 		ReportLock(LockKind::Screen);
+		EndPeekOnApplicationLock();
 	} else {
 		PeekEndedNotice();
 		TriggerAutomaticSettingsSync(SyncAutoEvent::Unlock);
@@ -40,6 +42,7 @@ void OnScreenLockChanged(bool locked) {
 
 void OnAppPasscodeLock() {
 	ReportLock(LockKind::App);
+	EndPeekOnApplicationLock();
 }
 
 void OnAppPasscodeUnlock() {

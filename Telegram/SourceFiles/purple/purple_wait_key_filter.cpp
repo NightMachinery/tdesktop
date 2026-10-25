@@ -18,9 +18,19 @@ void WaitKeyFilter::arm(
 	_cover = cover;
 	_abort = std::move(abort);
 	qApp->installEventFilter(this);
+	_applicationState = QObject::connect(qGuiApp, &QGuiApplication::applicationStateChanged,
+		this, [=](Qt::ApplicationState state) {
+			if (state != Qt::ApplicationActive && _abort) {
+				const auto abort = _abort;
+				disarm();
+				abort();
+			}
+		});
 }
 
 void WaitKeyFilter::disarm() {
+	QObject::disconnect(_applicationState);
+	_applicationState = {};
 	qApp->removeEventFilter(this);
 	_host = nullptr;
 	_cover = nullptr;
@@ -38,9 +48,17 @@ bool WaitKeyFilter::eventFilter(QObject *watched, QEvent *event) {
 		return false;
 	}
 	const auto type = event->type();
+	const auto hostWindow = _host->window();
+	const auto ownActivation = watched == _host || watched == hostWindow
+		|| watched == hostWindow->windowHandle();
+	const auto widget = qobject_cast<QWidget*>(watched);
+	const auto window = qobject_cast<QWindow*>(watched);
+	const auto anotherWindow = (widget && widget->isWindow() && widget != hostWindow)
+		|| (window && window != hostWindow->windowHandle());
 	if (type == QEvent::ApplicationDeactivate
-		|| (watched == _host && (type == QEvent::WindowDeactivate
-			|| type == QEvent::Close || type == QEvent::Hide))) {
+		|| (ownActivation && (type == QEvent::WindowDeactivate
+			|| type == QEvent::Close || type == QEvent::Hide))
+		|| (type == QEvent::WindowActivate && anotherWindow)) {
 		disarm();
 		abort();
 		return false;
@@ -49,7 +67,6 @@ bool WaitKeyFilter::eventFilter(QObject *watched, QEvent *event) {
 		return false;
 	}
 	const auto receiver = qobject_cast<QWidget*>(watched);
-	const auto hostWindow = _host->window();
 	const auto owningWindow = watched == hostWindow->windowHandle();
 	if (!owningWindow && (!receiver || receiver->window() != hostWindow)) {
 		disarm();

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
@@ -44,6 +45,8 @@ namespace Purple {
 namespace {
 
 constexpr auto kCountdownTick = crl::time(250);
+constexpr auto kPeekFocusLossPref = "purple-peek-end-on-focus-loss";
+rpl::event_stream<bool> FocusLossChanges;
 
 class WaitCover final : public Ui::RpWidget {
 public:
@@ -80,20 +83,27 @@ public:
 	[[nodiscard]] rpl::producer<> changes() const;
 	WaitResult request(WaitRequest request);
 	void cancel();
+	void quietCancel();
 	void closeHiddenChats();
+	void locked();
 
 private:
 	void tick();
+	void focusChanged();
 	void closeCover();
 	void report(const WaitResult &result, base::weak_ptr<Window::Controller> window);
 
 	std::vector<not_null<Ui::RpWidget*>> _widgets;
 	base::weak_ptr<Window::Controller> _window;
 	WaitGate _gate;
+	PeekFocusGate _focusGate;
+	uint64_t _quietFocusGeneration = 0;
 	WaitKeyFilter _keys;
 	QPointer<WaitCover> _cover;
 	QPointer<QWidget> _previousFocus;
 	base::Timer _timer;
+	base::Timer _focusTimer;
+	rpl::lifetime _focusLifetime;
 	rpl::event_stream<> _changes;
 	rpl::lifetime _pendingLifetime;
 
@@ -167,12 +177,61 @@ void WaitCover::mousePressEvent(QMouseEvent *e) {
 }
 
 PendingWait::PendingWait()
-: _timer([=] { tick(); }) {
+: _timer([=] { tick(); })
+, _focusTimer([=] { focusChanged(); }) {
 	QObject::connect(
 		QCoreApplication::instance(),
 		&QCoreApplication::aboutToQuit,
 		QCoreApplication::instance(),
-		[=] { cancel(); });
+		[=] {
+			cancel();
+			_focusTimer.cancel();
+			_focusLifetime.destroy();
+		});
+	const auto focusConnection = QObject::connect(
+		qGuiApp,
+		&QGuiApplication::applicationStateChanged,
+		qGuiApp,
+		[=] { focusChanged(); });
+	_focusLifetime.add([focusConnection] { QObject::disconnect(focusConnection); });
+	StateChanges() | rpl::on_next([=] { focusChanged(); }, _focusLifetime);
+	FocusLossChanges.events() | rpl::on_next([=] { focusChanged(); }, _focusLifetime);
+	_focusTimer.callOnce(1);
+}
+
+void PendingWait::focusChanged() {
+	const auto applicationActive = QGuiApplication::applicationState() == Qt::ApplicationActive;
+	const auto locked = Core::App().passcodeLocked() || Core::App().screenIsLocked();
+	if (!applicationActive || locked) {
+		quietCancel();
+	}
+	const auto now = crl::now();
+	_focusTimer.cancel();
+	if (_focusGate.update(
+			PeekEndsOnFocusLoss(),
+			CurrentState(),
+			applicationActive,
+			locked,
+			now)) {
+		details::DeactivatePeek();
+		return;
+	}
+	if (const auto remaining = _focusGate.remaining(now)) {
+		_focusTimer.callOnce(std::max(crl::time(1), crl::time(*remaining)));
+	}
+}
+
+void PendingWait::locked() {
+	quietCancel();
+	_focusTimer.cancel();
+	if (_focusGate.update(
+			PeekEndsOnFocusLoss(),
+			CurrentState(),
+			false,
+			true,
+			crl::now())) {
+		details::DeactivatePeek();
+	}
 }
 
 void PendingWait::watch(not_null<Ui::RpWidget*> widget) {
@@ -219,6 +278,11 @@ void PendingWait::closeCover() {
 	if (cover) {
 		_changes.fire({});
 	}
+}
+
+void PendingWait::quietCancel() {
+	++_quietFocusGeneration;
+	cancel();
 }
 
 void PendingWait::cancel() {
@@ -272,12 +336,14 @@ WaitResult PendingWait::request(WaitRequest request) {
 	const auto action = request.action;
 	const auto seconds = request.seconds;
 	auto inputError = QString();
-	const auto input = action == WaitAction::ChangeAccountMode || action == WaitAction::ChangeGlobalAccount
+	const auto needsInput = action != WaitAction::ChangeAccountMode
+		&& action != WaitAction::ChangeGlobalAccount
+		&& action != WaitAction::ChangePeekFocus;
+	const auto input = !needsInput
 		? std::optional<AccountSettingsWriteTarget>()
 		: action == WaitAction::ChangeDelay
 		? request.editor ? request.editor->target : std::nullopt
 		: SettingsInputForOperation(&inputError);
-	const auto needsInput = action != WaitAction::ChangeAccountMode && action != WaitAction::ChangeGlobalAccount;
 	const auto external = request.validate;
 	const auto editor = request.editor;
 	const auto originCurrent = [=]() -> QString {
@@ -291,7 +357,8 @@ WaitResult PendingWait::request(WaitRequest request) {
 		const auto current = WaitOriginValid(action, {
 			.accountValid = accountValid,
 			.displayedAccountSame = host->maybeSession() == live && &Core::App().activeAccount() == domain,
-			.foregroundUnlocked = host->widget()->isActive() && Core::App().activeWindow() == host
+			.foregroundUnlocked = QGuiApplication::applicationState() == Qt::ApplicationActive
+				&& host->widget()->isActive() && Core::App().activeWindow() == host
 				&& !host->locked() && !Core::App().passcodeLocked() && !Core::App().screenIsLocked(),
 		});
 		return current ? QString() : tr::lng_purple_wait_context_changed(tr::now);
@@ -425,8 +492,8 @@ WaitResult PendingWait::request(WaitRequest request) {
 	if (result.outcome == WaitOutcome::Pending) {
 		_window = origin;
 		_previousFocus = QApplication::focusWidget();
-		_cover = new WaitCover(window->widget()->body(), action, [=] { cancel(); });
-		_keys.arm(window->widget(), _cover, [=] { cancel(); });
+		_cover = new WaitCover(window->widget()->body(), action, [=] { quietCancel(); });
+		_keys.arm(window->widget(), _cover, [=] { quietCancel(); });
 		if (!workMode) {
 			window->sessionControllerChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
 			Core::App().domain().activeChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
@@ -443,13 +510,23 @@ WaitResult PendingWait::request(WaitRequest request) {
 
 void PendingWait::tick() {
 	const auto origin = _window;
-	const auto result = _gate.tick(crl::now());
+	const auto window = origin.get();
+	const auto foregroundUnlocked = QGuiApplication::applicationState() == Qt::ApplicationActive
+		&& window && window->widget()->isActive()
+		&& Core::App().activeWindow() == window && !window->locked()
+		&& !Core::App().passcodeLocked() && !Core::App().screenIsLocked();
+	const auto quietGeneration = _quietFocusGeneration;
+	const auto result = _gate.tick(crl::now(), foregroundUnlocked);
 	if (pending() && _cover) {
 		_cover->setRemaining(_gate.remaining(crl::now()));
 	} else {
 		closeCover();
 	}
-	report(result, origin);
+	if (quietGeneration == _quietFocusGeneration
+		&& QGuiApplication::applicationState() == Qt::ApplicationActive
+		&& !Core::App().passcodeLocked() && !Core::App().screenIsLocked()) {
+		report(result, origin);
+	}
 }
 
 bool ShouldExit(not_null<History*> history) {
@@ -513,6 +590,42 @@ rpl::producer<> PeekCountdownChanges() {
 
 void CancelPendingPeek() {
 	Pending().cancel();
+}
+
+void EndPeekOnApplicationLock() {
+	Pending().locked();
+}
+
+bool PeekEndsOnFocusLoss() {
+	return Core::App().settings().readPref<bool>(kPeekFocusLossPref, kPeekFocusLossDefault);
+}
+
+rpl::producer<bool> PeekFocusLossValue() {
+	return rpl::single(PeekEndsOnFocusLoss()) | rpl::then(FocusLossChanges.events());
+}
+
+void RequestPeekFocusLossChange(bool enabled, not_null<Main::Session*> session,
+	std::function<bool()> editorCurrent) {
+	const auto opening = PeekEndsOnFocusLoss();
+	RequestWait({
+		.action = WaitAction::ChangePeekFocus,
+		.session = session,
+		.same = enabled == opening,
+		.toBypass = !enabled,
+		.validate = [opening, editorCurrent] {
+			return PeekEndsOnFocusLoss() == opening && (!editorCurrent || editorCurrent())
+				? QString() : tr::lng_purple_wait_context_changed(tr::now);
+		},
+		.apply = [enabled, opening](const std::function<bool()> &current) {
+			if (!current() || PeekEndsOnFocusLoss() != opening) {
+				return tr::lng_purple_wait_context_changed(tr::now);
+			}
+			Core::App().settings().writePref<bool>(kPeekFocusLossPref, enabled);
+			Core::App().saveSettingsDelayed();
+			FocusLossChanges.fire_copy(enabled);
+			return QString();
+		},
+	});
 }
 
 WaitResult RequestWait(WaitRequest request) {

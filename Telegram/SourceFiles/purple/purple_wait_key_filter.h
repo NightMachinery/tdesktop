@@ -20,6 +20,7 @@ private:
 	QPointer<QWidget> _host;
 	QPointer<QWidget> _cover;
 	std::function<void()> _abort;
+	QMetaObject::Connection _applicationState;
 
 };
 

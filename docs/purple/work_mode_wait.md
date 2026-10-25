@@ -75,3 +75,24 @@ platform, including Qt platform delivery through the host QWindow via
 `qt_handleKeyEvent`. They do not qualify native account switching or the visible cover's
 layout. File tests in `account_routing_file_cases.cpp` retain the original
 guarded-writer cases and exercise diagnostic captures without file changes.
+
+## Peek after application focus loss
+
+Countdowns always abort immediately and quietly on host activation loss, application
+inactivity or lock, including focus moving to Telegram's own media viewer/dialog.
+Application-state and activation signals cancel first; the 250 ms tick is a quiet
+backstop. No pending write can run after the abort. Other stale account/settings
+errors remain explicit.
+
+"End Peek when Telegram loses focus" is an off-by-default Desktop-local generic
+Core::Settings preference. Enabling it is restrictive and instant. Disabling it is
+loosening and goes through the same Work Mode wait; an aborted change keeps it on.
+It is not in settings.toml, account state or sync and requires no core schema change.
+The Peek settings section contains the toggle and explanation.
+
+When enabled, an already active Peek ends after 2 seconds of application inactivity;
+returning sooner keeps it. Telegram's other windows and file dialogs do not end an
+active Peek while the application stays active. Passcode, screen and OS session
+lock end it immediately. When disabled, focus loss leaves active Peek untouched,
+and existing lock policy applies. The ordinary End Peek path still applies the
+hidden-chat exit option. Android does not have this option yet.

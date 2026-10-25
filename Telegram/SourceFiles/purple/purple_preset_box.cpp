@@ -719,6 +719,26 @@ void PresetBox(
 		}
 	}, peek->lifetime());
 
+	const auto endOnFocus = container->add(
+		object_ptr<Ui::Checkbox>(container, tr::lng_purple_peek_end_on_focus(tr::now),
+			PeekEndsOnFocusLoss(), st::defaultCheckbox), padding);
+	endOnFocus->checkedChanges() | rpl::on_next([=](bool enabled) {
+		if (enabled == PeekEndsOnFocusLoss()) {
+			return;
+		}
+		if (const auto live = originSession.get()) {
+			RequestPeekFocusLossChange(enabled, not_null{live}, [=] {
+				return !editContext.isNull();
+			});
+		}
+		endOnFocus->setChecked(PeekEndsOnFocusLoss(), Ui::Checkbox::NotifyAboutChange::DontNotify);
+	}, endOnFocus->lifetime());
+	PeekFocusLossValue() | rpl::on_next([=](bool enabled) {
+		endOnFocus->setChecked(enabled, Ui::Checkbox::NotifyAboutChange::DontNotify);
+	}, endOnFocus->lifetime());
+	container->add(object_ptr<Ui::FlatLabel>(container,
+		tr::lng_purple_peek_end_on_focus_about(), st::boxDividerLabel), padding);
+
 	const auto exitHidden = container->add(
 		object_ptr<Ui::Checkbox>(
 			container,

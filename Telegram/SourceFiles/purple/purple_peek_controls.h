@@ -58,6 +58,11 @@ void RegisterPeekWindow(not_null<Ui::RpWidget*> widget);
 [[nodiscard]] bool PeekCountdownPending();
 [[nodiscard]] rpl::producer<> PeekCountdownChanges();
 void CancelPendingPeek();
+void EndPeekOnApplicationLock();
+[[nodiscard]] bool PeekEndsOnFocusLoss();
+[[nodiscard]] rpl::producer<bool> PeekFocusLossValue();
+void RequestPeekFocusLossChange(bool enabled, not_null<Main::Session*> session,
+	std::function<bool()> editorCurrent = {});
 void RequestPeekDelayChange(
 	int seconds,
 	const std::shared_ptr<AppWideSettingsEditorState> &editor,

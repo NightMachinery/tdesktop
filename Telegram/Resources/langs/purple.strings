@@ -57,6 +57,8 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_copy_as_markdown" = "Copy as Markdown";
 
+"lng_purple_peek_end_on_focus" = "End Peek when Telegram loses focus";
+"lng_purple_peek_end_on_focus_about" = "Only on this device. Ends active Peek after 2 seconds in another app, or immediately on lock. Turning this off waits.";
 "lng_purple_peek_exit_hidden" = "Exit hidden chats when peek ends";
 "lng_purple_peek_starting" = "Peek starts in";
 "lng_purple_peek_delay_changing" = "Peek start delay changes in";

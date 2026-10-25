@@ -43,10 +43,11 @@
   "Telegram/SourceFiles/purple/purple_peek_controls.cpp": {
     "ActivatePeekExtension": 1,
     "ActivatePeekFor": 1,
-    "DeactivatePeek": 1,
+    "DeactivatePeek": 3,
     "ExtendPeek": 1,
     "UpdateState": 1,
-    "activePreset=": 1
+    "activePreset=": 1,
+    "writePref<peek-focus-loss>": 1
   },
   "Telegram/SourceFiles/purple/purple_peek_controls.h": {
     "ActivatePeekExtension": 1,

@@ -9,6 +9,7 @@ import tempfile
 parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path)
+parser.add_argument('--build-only', action='store_true')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -26,6 +27,19 @@ for option in recipe:
     if option.startswith(('-F', '-mmacosx-version-min=')):
         flags.append(option)
 frameworks = next(Path(option[2:]) for option in flags if option.startswith('-F') and (Path(option[2:]) / 'QtCore.framework').exists())
+gui_headers = frameworks / 'QtGui.framework/Headers'
+private_versions = sorted(path for path in gui_headers.iterdir() if path.is_dir() and (path / 'QtGui/qpa/qwindowsysteminterface.h').exists())
+if not private_versions:
+    raise RuntimeError('Qt application-state test needs the matching installed QtGui private headers')
+flags += ['-I', str(private_versions[-1])]
+source = (repo / 'Telegram/SourceFiles/purple/purple_peek_controls.cpp').read_text()
+read_start = source.index('bool PeekEndsOnFocusLoss()')
+read_end = source.index('\nrpl::producer<bool> PeekFocusLossValue()', read_start)
+write_start = source.index('void RequestPeekFocusLossChange(')
+write_end = source.index('\nWaitResult RequestWait(', write_start)
+pref_key = next(line for line in source.splitlines() if line.startswith('constexpr auto kPeekFocusLossPref ='))
+(work / 'peek-focus-preference.inc').write_text(pref_key + '\n' + source[read_start:read_end] + '\n' + source[write_start:write_end])
+flags += ['-I', str(work)]
 objects = []
 with (work / 'build.log').open('w') as log:
     for relative in ('purple/test_wait.cpp', 'Telegram/SourceFiles/purple/purple_wait_gate.cpp', 'Telegram/SourceFiles/purple/purple_wait_key_filter.cpp'):
@@ -35,6 +49,8 @@ with (work / 'build.log').open('w') as log:
         objects.append(str(target))
     objects += [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o'))]
     subprocess.run([recipe[0], *flags, '-Wl,-dead_strip', *objects, '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-Wl,-rpath,' + str(frameworks), '-o', str(work / 'test_wait')], check=True, stdout=log, stderr=subprocess.STDOUT)
+if args.build_only:
+    raise SystemExit(0)
 env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QT_PLUGIN_PATH=str(frameworks.parent / 'plugins'))
 with (work / 'run.log').open('w') as log:
     result = subprocess.run([str(work / 'test_wait')], env=env, stdout=log, stderr=subprocess.STDOUT)

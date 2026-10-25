@@ -6,6 +6,11 @@
 #include <utility>
 
 namespace Purple {
+namespace {
+
+constexpr auto kInactiveGrace = int64_t(2000);
+
+}
 
 int PeekWaitDelaySeconds(const Settings &settings) {
 	return settings.peek.startDelaySeconds.value_or(kPeekStartDelayMobileDefaultSeconds);
@@ -45,10 +50,41 @@ bool WaitRequired(
 	case WaitAction::ChangeAccountMode:
 		return !fromBypass || toBypass;
 	case WaitAction::ChangeGlobalAccount:
+	case WaitAction::ChangePeekFocus:
 		return toBypass;
 	default:
 		return true;
 	}
+}
+
+bool PeekFocusGate::update(
+		bool enabled,
+		const State &state,
+		bool applicationActive,
+		bool locked,
+		int64_t now) {
+	if (!enabled || !state.peekActive || applicationActive || locked) {
+		_inactiveSince.reset();
+		_peekDeadline.reset();
+		return enabled && state.peekActive && locked;
+	}
+	if (!_inactiveSince || _peekDeadline != state.peekDeadlineUnix) {
+		_inactiveSince = now;
+		_peekDeadline = state.peekDeadlineUnix;
+	}
+	if (now - *_inactiveSince >= kInactiveGrace) {
+		_inactiveSince.reset();
+		_peekDeadline.reset();
+		return true;
+	}
+	return false;
+}
+
+std::optional<int64_t> PeekFocusGate::remaining(int64_t now) const {
+	if (!_inactiveSince) {
+		return std::nullopt;
+	}
+	return std::max(int64_t(0), kInactiveGrace - (now - *_inactiveSince));
 }
 
 WaitResult WaitGate::request(WaitOperation operation, int64_t now) {
@@ -72,7 +108,11 @@ WaitResult WaitGate::request(WaitOperation operation, int64_t now) {
 	return tick(now);
 }
 
-WaitResult WaitGate::tick(int64_t now) {
+WaitResult WaitGate::tick(int64_t now, bool foregroundUnlocked) {
+	if (_operation && !foregroundUnlocked) {
+		cancel();
+		return {};
+	}
 	if (!_operation) {
 		return {};
 	}

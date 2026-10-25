@@ -9,6 +9,7 @@
 namespace Purple {
 
 struct Settings;
+struct State;
 
 [[nodiscard]] int PeekWaitDelaySeconds(const Settings &settings);
 
@@ -20,6 +21,7 @@ enum class WaitAction {
 	ChangePreset,
 	ChangeAccountMode,
 	ChangeGlobalAccount,
+	ChangePeekFocus,
 };
 
 struct WaitOrigin {
@@ -57,10 +59,28 @@ struct WaitOperation {
 	std::function<QString(const std::function<bool()>&)> apply;
 };
 
+inline constexpr auto kPeekFocusLossDefault = false;
+
+class PeekFocusGate final {
+public:
+	[[nodiscard]] bool update(
+		bool enabled,
+		const State &state,
+		bool applicationActive,
+		bool locked,
+		int64_t now);
+	[[nodiscard]] std::optional<int64_t> remaining(int64_t now) const;
+
+private:
+	std::optional<int64_t> _inactiveSince;
+	std::optional<int64_t> _peekDeadline;
+
+};
+
 class WaitGate final {
 public:
 	WaitResult request(WaitOperation operation, int64_t now);
-	WaitResult tick(int64_t now);
+	WaitResult tick(int64_t now, bool foregroundUnlocked = true);
 	void cancel();
 	[[nodiscard]] bool pending() const;
 	[[nodiscard]] int remaining(int64_t now) const;

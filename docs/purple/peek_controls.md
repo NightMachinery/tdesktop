@@ -119,3 +119,39 @@ mentions and reactions retain their meaning. Folder predicates explicitly ignore
 the opened-only flag, and genuine extra-view membership remains reachable. The
 normal navigation predicates keep their original default behavior. Option-off,
 Normal, explicit Show overrides and genuinely visible chats stay open.
+
+## Application focus and locks
+
+A pending countdown always aborts immediately and quietly when its host window
+loses activation, another Telegram window or dialog takes focus, the application
+becomes inactive, or the screen/app locks. Application-state and activation events
+cancel it directly; the 250 ms tick is a backstop. Abort leaves the requested write
+unapplied and shows no context-changed toast, including reentrant focus cancellation.
+
+Desktop's Peek section has "End Peek when Telegram loses focus", off by default.
+It is stored only in this device's Core::Settings generic preference map, not in
+settings.toml or account sync. Turning it on is restrictive and instant. Turning it
+off is loosening and uses the ordinary Work Mode countdown; Abort keeps it on.
+
+With the option on, active Peek ends after 2 seconds of sustained application
+inactivity, and immediately on passcode, screen or OS session lock. Returning
+within the grace keeps it. The active-Peek monitor follows Qt application state,
+so Telegram's media viewer, another Telegram window and its native file dialogs
+do not end it while Telegram remains the active application. Ending uses the
+ordinary End Peek path and honors Exit hidden chats when peek ends.
+With the option off, focus loss does not end active Peek, and existing per-device
+lock settings keep their current behavior. Android does not have this option yet.
+
+The grace belongs to the active Peek's existing active/deadline identity, the same
+tuple the core uses to distinguish a new start from a no-op. A live state reload
+that replaces its deadline drops the old grace and starts a fresh two seconds if
+Telegram is still inactive. Unrelated state reloads do not extend that grace.
+The writer inventory covers both literal and locally aliased writes of the local
+preference. Every write stays inside RequestPeekFocusLossChange, including instant
+enabling; a direct disable outside it fails the route guard.
+
+The headless wait fixture covers Qt application-state delivery, a second in-app
+window, both grace boundaries, ten seconds inactive with the option off, immediate
+locks with it on, quiet countdown cancellation and restrictive/loosening setting
+changes. Native focus/file-dialog and lock delivery remain platform qualification;
+the tests do not launch Telegram.
