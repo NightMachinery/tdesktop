@@ -1296,7 +1296,9 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 		}, &published);
 		if (!ready.target || ready.status != SettingsOpenStatus::Created) {
 			return { .changed = published, .created = published,
-				.error = u"The account settings file could not be created safely."_q };
+				.error = published
+					? u"The account settings file was saved, but the edit did not finish safely. Review it before trying again."_q
+					: u"The account settings file could not be created safely."_q };
 		}
 	} else {
 		const auto backup = OwnerInput(paths->backup);
@@ -1350,11 +1352,12 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 
 std::optional<AccountListEditTarget> DesktopAccountConfig::listEditTarget(
 		const AccountKey &requester,
-		const QString &name) {
+		const QString &name,
+		QString *error) {
 	refreshLocalChoice();
 	const auto role = workMode(requester) == AccountWorkMode::Follow
 		? SettingsOpenRole::AppWide : SettingsOpenRole::Own;
-	const auto edit = settingsEditTarget(requester, role);
+	const auto edit = settingsEditTarget(requester, role, error);
 	if (!edit) { return std::nullopt; }
 	const auto &global = edit->globalSource.file;
 	const auto source = (global.input.state != SettingsFileState::Readable
@@ -1369,11 +1372,17 @@ std::optional<AccountListEditTarget> DesktopAccountConfig::listEditTarget(
 	const auto effective = file.account == global.account
 		? ParseSettings(source, global.path)
 		: LayerSettings(source, global.path, QString::fromUtf8(file.input.bytes), file.path, options).effective;
-	if (!effective.ok()) { return std::nullopt; }
+	if (!effective.ok()) {
+		if (error) { *error = u"The account and app-wide list settings cannot be combined. Repair the settings before editing."_q; }
+		return std::nullopt;
+	}
 	const auto found = std::find_if(effective.settings.lists.begin(), effective.settings.lists.end(), [&](const List &list) {
 		return list.name == name;
 	});
-	if (found == effective.settings.lists.end()) { return std::nullopt; }
+	if (found == effective.settings.lists.end()) {
+		if (error) { *error = u"This list no longer exists in the account settings. Reopen the menu."_q; }
+		return std::nullopt;
+	}
 	auto comments = ListMemberComments(source, global.path, name);
 	const auto own = ListMemberComments(QString::fromUtf8(edit->destination.file.input.bytes),
 		edit->destination.file.path, name);

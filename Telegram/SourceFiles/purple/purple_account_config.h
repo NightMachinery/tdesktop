@@ -289,7 +289,7 @@ public:
 		const std::function<SpliceResult(const QString&)> &splice,
 		const std::function<bool()> &originCurrent);
 	[[nodiscard]] std::optional<AccountListEditTarget> listEditTarget(
-		const AccountKey &requester, const QString &list);
+		const AccountKey &requester, const QString &list, QString *error = nullptr);
 	[[nodiscard]] AccountSettingsEditResult writeListMember(
 		const AccountListEditTarget &target,
 		PeerIdValue id,

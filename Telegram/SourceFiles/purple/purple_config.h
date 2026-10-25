@@ -197,8 +197,9 @@ void DeleteAccountListMembersBox(
 
 [[nodiscard]] std::optional<AccountListEditTarget> AccountListEditFor(
 	not_null<Main::Session*> session,
-	const QString &list);
-[[nodiscard]] bool SetAccountListMember(
+	const QString &list,
+	QString *error = nullptr);
+[[nodiscard]] AccountSettingsEditResult SetAccountListMember(
 	not_null<Main::Session*> session,
 	const AccountListEditTarget &target,
 	PeerIdValue id,

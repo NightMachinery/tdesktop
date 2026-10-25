@@ -2369,6 +2369,7 @@ void RoutedWritersAndListCases() {
 			return u"new chat"_q;
 		}, [] { return true; });
 		CHECK(!stale.ok && !stale.changed && !QFileInfo::exists(ownPath));
+		CHECK(stale.error == u"Settings changed. Try again."_q);
 		CHECK(Get(path) == root + "\n# concurrent external edit\n");
 		const auto fresh = config.listEditTarget(b, u"work.one"_q);
 		CHECK(fresh.has_value());
@@ -2377,6 +2378,7 @@ void RoutedWritersAndListCases() {
 		config.setChanged([&] { alive = false; });
 		const auto interrupted = config.writeListMember(*fresh, 33, true, {}, [&] { return alive; });
 		CHECK(!interrupted.ok && interrupted.changed && interrupted.created && !interrupted.target);
+		CHECK(interrupted.error == u"The account settings file was saved, but the edit did not finish safely. Review it before trying again."_q);
 		CHECK(Get(path) == root + "\n# concurrent external edit\n");
 		CHECK(ParseSettings(QString::fromUtf8(Get(ownPath)), ownPath).ok());
 	}
@@ -2494,6 +2496,12 @@ void WaitCaptureDiagnosticCases() {
 		auto error = u"stale error"_q;
 		CHECK(config.settingsEditTarget(account, SettingsOpenRole::AppWide, &error));
 		CHECK(error.isEmpty());
+		CHECK(config.listEditTarget(account, u"focus"_q, &error));
+		CHECK(error.isEmpty());
+		const auto initialFiles = ChoiceOtherFiles(temp.path());
+		CHECK(!config.listEditTarget(account, u"removed"_q, &error));
+		CHECK(error.contains(u"no longer exists"_q));
+		CHECK(ChoiceOtherFiles(temp.path()) == initialFiles);
 		if (scenario == 0) { Put(path, QByteArray("broken [")); }
 		if (scenario == 1) { Put(path, QByteArray("version=3\n")); }
 		if (scenario == 2) { Put(path, QByteArray(1, char(0xff))); }
@@ -2505,12 +2513,18 @@ void WaitCaptureDiagnosticCases() {
 			const auto before = ChoiceOtherFiles(temp.path());
 			CHECK(!config.settingsEditTarget(other, SettingsOpenRole::Own, &error));
 			CHECK(error.contains(u"recovery"_q));
+			const auto capturedError = error;
+			CHECK(!config.listEditTarget(other, u"focus"_q, &error));
+			CHECK(error == capturedError);
 			CHECK(ChoiceOtherFiles(temp.path()) == before);
 			continue;
 		}
 		const auto before = ChoiceOtherFiles(temp.path());
 		CHECK(!config.settingsEditTarget(account, SettingsOpenRole::AppWide, &error));
 		CHECK(!error.isEmpty());
+		const auto capturedError = error;
+		CHECK(!config.listEditTarget(account, u"focus"_q, &error));
+		CHECK(error == capturedError);
 		CHECK(ChoiceOtherFiles(temp.path()) == before);
 		if (scenario == 0) { CHECK(error.contains(u"malformed"_q)); }
 		if (scenario == 1) { CHECK(error.contains(u"newer schema"_q)); }

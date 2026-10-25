@@ -192,7 +192,8 @@ void FillListsMenu(
 
 	for (const auto &list : AccountSettings(session).lists) {
 		const auto name = list.name;
-		const auto edit = AccountListEditFor(session, name);
+		auto captureError = QString();
+		const auto edit = AccountListEditFor(session, name, &captureError);
 		const auto &members = edit ? edit->members : list.members;
 		const auto member = std::find(members.begin(), members.end(), id) != members.end();
 		// Every list, including one that matches by kind: adding a chat there
@@ -208,15 +209,17 @@ void FillListsMenu(
 
 				const auto live = weakSession.get();
 				if (!live) {
+					if (show && *show) { show->showToast(tr::lng_purple_wait_account_changed(tr::now)); }
 					return;
 				}
 				const auto title = TitleResolver(not_null{ live });
 				const auto notice = edit ? AccountListEditNotice(not_null{ live }, *edit, !member) : QString();
-				const auto ok = edit && SetAccountListMember(not_null{ live }, *edit, id, !member, title);
-				if (!ok) {
-					show->showToast(u"Could not edit %1. Reopen the menu and try again."_q.arg(
-						edit ? edit->edit.destination.file.path : SettingsFilePath()));
-				} else if (!notice.isEmpty()) {
+				const auto result = edit ? SetAccountListMember(not_null{ live }, *edit, id, !member, title)
+					: AccountSettingsEditResult{ .error = !captureError.isEmpty() ? captureError
+						: u"List editing is unavailable for the opening account. Reopen the menu."_q };
+				if (!result.ok) {
+					if (show && *show) { show->showToast(result.error); }
+				} else if (!notice.isEmpty() && show && *show) {
 					show->showToast(notice);
 				}
 			},

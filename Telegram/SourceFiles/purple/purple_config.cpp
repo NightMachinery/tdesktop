@@ -716,10 +716,20 @@ WriteResult Config::write(
 		const std::optional<AccountSettingsWriteTarget> &expected,
 		const std::function<bool()> &originCurrent) {
 	Expects(op != nullptr);
-	const auto input = expected ? expected : checkedInput();
-	if (!input || input->destination.role != SettingsOpenRole::AppWide
-		|| !AccountRouting().validateSettingsEdit(*input)) {
-		return { .error = u"Settings changed on disk. Try again."_q };
+	auto error = QString();
+	const auto input = expected ? expected : checkedInput(&error);
+	if (!input) {
+		return { .error = !error.isEmpty() ? error
+			: u"A writable app-wide settings file is unavailable."_q };
+	}
+	if (input->destination.role != SettingsOpenRole::AppWide) {
+		return { .error = u"This editor did not capture the app-wide settings destination."_q };
+	}
+	if (!AccountRouting().validateSettingsEdit(*input)) {
+		const auto currentTarget = AccountRouting().settingsEditTarget(
+			input->destination.requester, input->destination.role, &error);
+		return { .error = !currentTarget && !error.isEmpty() ? error
+			: u"The account source or settings files changed since this editor opened. Open it again."_q };
 	}
 	observeAccountFiles();
 	const auto current = [&] {
@@ -987,8 +997,18 @@ WriteResult WriteSettingsFromEditor(
 		Fn<SpliceResult(const QString &text)> splice,
 		const QString &what,
 		const std::function<bool()> &originCurrent) {
-	if (!editor || !editor->target || !editor->originCurrent()) {
-		return { .error = u"Reopen the settings editor and try again."_q };
+	if (!editor) {
+		return { .error = u"The settings editor is no longer available. Open it again."_q };
+	}
+	if (!editor->target) {
+		return { .error = !editor->error.isEmpty() ? editor->error
+			: u"This editor could not capture a writable settings file. Check the account settings route."_q };
+	}
+	if (!editor->originCurrent || !editor->originCurrent()) {
+		return { .error = u"The settings editor closed. Open it again."_q };
+	}
+	if (!originCurrent || !originCurrent()) {
+		return { .error = u"The opening settings context changed. Open the editor again."_q };
 	}
 	const auto current = [=] {
 		return editor->originCurrent() && originCurrent && originCurrent();
@@ -1000,12 +1020,16 @@ WriteResult WriteSettingsFromEditor(
 
 std::optional<AccountListEditTarget> AccountListEditFor(
 		not_null<Main::Session*> session,
-		const QString &list) {
-	return !session->account().loggingOut() && session->account().maybeSession() == session.get()
-		? AccountRouting().listEditTarget(SessionAccountKey(session), list) : std::nullopt;
+		const QString &list,
+		QString *error) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
+		if (error) { *error = u"The opening account is no longer available. Reopen the menu."_q; }
+		return std::nullopt;
+	}
+	return AccountRouting().listEditTarget(SessionAccountKey(session), list, error);
 }
 
-bool SetAccountListMember(
+AccountSettingsEditResult SetAccountListMember(
 		not_null<Main::Session*> session,
 		const AccountListEditTarget &target,
 		PeerIdValue id,
@@ -1018,16 +1042,32 @@ bool SetAccountListMember(
 			&& SessionAccountKey(live) == target.edit.destination.requester
 			&& ConfigDirectory() == target.edit.destination.root;
 	};
-	if (!originCurrent() || !AccountRouting().validateSettingsEdit(target.edit)) { return false; }
+	if (!originCurrent()) {
+		return { .error = u"The opening account or settings location changed. Reopen the menu."_q };
+	}
+	if (!AccountRouting().validateSettingsEdit(target.edit)) {
+		auto error = QString();
+		const auto currentTarget = AccountRouting().settingsEditTarget(
+			target.edit.destination.requester, target.edit.destination.role, &error);
+		return { .error = !currentTarget && !error.isEmpty() ? error
+			: u"The account source or settings files changed since this menu opened. Reopen it."_q };
+	}
 	Instance().observeAccountFiles();
 	const auto result = AccountRouting().writeListMember(target, id, member, title, originCurrent);
-	if (!result.ok) { return false; }
-	Instance().refreshAccountRows();
-	Instance().observeAccountFiles();
+	if (result.changed) {
+		Instance().refreshAccountRows();
+		Instance().observeAccountFiles();
+	}
+	if (!result.ok) { return result; }
+	if (!originCurrent() || !result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
+		return { .changed = result.changed, .created = result.created,
+			.error = result.changed ? u"List members were saved, but the settings context changed afterward. Reopen the menu."_q
+				: u"The settings context changed. Reopen the menu."_q };
+	}
 	if (result.changed && target.edit.destination.file.account == target.edit.destination.global) {
 		ShowOfflineGlobalEditBulletin();
 	}
-	return originCurrent() && result.target && AccountRouting().validateSettingsEdit(*result.target);
+	return result;
 }
 
 bool AddToList(
@@ -1036,7 +1076,7 @@ bool AddToList(
 		PeerIdValue id,
 		const MemberTitle &title) {
 	const auto target = AccountListEditFor(session, list);
-	return target && SetAccountListMember(session, *target, id, true, title);
+	return target && SetAccountListMember(session, *target, id, true, title).ok;
 }
 
 bool RemoveFromList(
@@ -1045,7 +1085,7 @@ bool RemoveFromList(
 		PeerIdValue id,
 		const MemberTitle &title) {
 	const auto target = AccountListEditFor(session, list);
-	return target && SetAccountListMember(session, *target, id, false, title);
+	return target && SetAccountListMember(session, *target, id, false, title).ok;
 }
 
 bool SetViewPins(
@@ -1819,6 +1859,7 @@ void DeleteAccountListMembersBox(
 		AccountListDeleteTarget target) {
 	const auto origin = base::make_weak(session.get());
 	const auto weakBox = QPointer<Ui::GenericBox>(box.get());
+	const auto show = box->uiShow();
 	const auto labels = SettingsRowLabels(session, std::nullopt);
 	const auto stock = AccountWorkModeForSession(session) == AccountWorkMode::Stock;
 	const auto current = [=] {
@@ -1833,14 +1874,28 @@ void DeleteAccountListMembersBox(
 	box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_purple_lists_delete_confirm(tr::now,
 		lt_account, labels.own, lt_list, target.list, lt_name, labels.global)));
 	box->addButton(tr::lng_purple_lists_delete(), [=] {
-		if (!current()) { return; }
+		if (!current()) {
+			if (show && *show) { show->showToast(tr::lng_purple_wait_context_changed(tr::now)); }
+			return;
+		}
 		Instance().observeAccountFiles();
 		const auto result = AccountRouting().deleteListMembers(target, current);
-		if (!current()) { return; }
-		if (!result.ok) { box->uiShow()->showToast(result.error); return; }
-		Instance().refreshAccountRows();
-		Instance().observeAccountFiles();
-		if (!current()) { return; }
+		if (result.changed) {
+			Instance().refreshAccountRows();
+			Instance().observeAccountFiles();
+		}
+		if (!result.ok) {
+			if (show && *show) { show->showToast(result.error); }
+			return;
+		}
+		if (!current()) {
+			if (show && *show) {
+				show->showToast(result.changed
+					? tr::lng_purple_remove_appwide_saved_incomplete(tr::now)
+					: tr::lng_purple_settings_row_changed(tr::now));
+			}
+			return;
+		}
 		if (!result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
 			box->uiShow()->showToast(tr::lng_purple_settings_row_changed(tr::now));
 			return;

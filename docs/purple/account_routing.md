@@ -439,3 +439,12 @@ imports seed it before reload notifications without permanently suppressing a
 later intentional save of the same bytes. Global/source and device Work Mode
 choices remain part of the captured authority through every await. See
 [sync.md](sync.md#automatic-settings-sync-on-desktop) for triggers and refusals.
+
+List menu captures retain a refusal reason even when no writable destination was
+opened. A refused tick reports that reason; it does not replace it with a file
+path. Membership writes return their structured result through the UI, including
+backup/publication failures and the case where settings were saved before the
+context changed. Delete-members dialogs preserve the writer's error before
+checking whether their original UI still survives. Stale-origin notices use only
+the captured UI; they never move to another account's window. Editor writes also
+distinguish an unavailable opening capture from a closed editor or changed route.
