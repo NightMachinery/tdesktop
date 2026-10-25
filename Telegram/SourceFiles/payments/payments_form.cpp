@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "payments/payments_form.h"
+#include "purple/purple_picker.h"
 
 #include "main/main_session.h"
 #include "data/data_channel.h"
@@ -919,6 +920,7 @@ void Form::fillSmartGlocalNativeMethod(QJsonObject object) {
 }
 
 void Form::submit() {
+	if (!Purple::PickerPaymentAllowed(_id)) return;
 	Expects(_paymentMethod.newCredentials
 		|| (_paymentMethod.savedCredentialsIndex
 			< _paymentMethod.savedCredentials.size()));
@@ -942,6 +944,7 @@ void Form::submit() {
 
 	using Flag = MTPpayments_SendPaymentForm::Flag;
 	showProgress();
+	if (!Purple::PickerPaymentAllowed(_id)) return;
 	_api.request(MTPpayments_SendPaymentForm(
 		MTP_flags((_requestedInformationId.isEmpty()
 			? Flag(0)
@@ -979,6 +982,7 @@ void Form::submit() {
 }
 
 void Form::submit(const Core::CloudPasswordResult &result) {
+	if (!Purple::PickerPaymentAllowed(_id)) return;
 	if (_passwordRequestId) {
 		return;
 	}

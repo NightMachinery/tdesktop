@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/settings_credits_graphics.h"
+#include "purple/purple_picker.h"
 
 #include "api/api_chat_invite.h"
 #include "api/api_credits.h"
@@ -697,6 +698,7 @@ void FillCreditOptions(
 					.extended = option.extended,
 					.giftPeerId = PeerId(option.giftBarePeerId),
 					.spendPurposePeerId = spendPurposePeerId,
+					.pickerCurrent = Purple::PickerGiftCurrent(show),
 				};
 
 				const auto weak = base::make_weak(button);
@@ -2680,7 +2682,7 @@ void UniqueGiftValueBox(
 					window->session().user(),
 					unique->initialGiftId,
 					unique->title,
-					crl::guard(box, [=] { state->buyLifetime.destroy(); }));
+					crl::guard(box, [=] { state->buyLifetime.destroy(); }), show);
 			}
 			return false;
 		});

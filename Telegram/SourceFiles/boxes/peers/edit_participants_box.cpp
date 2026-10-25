@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/edit_participants_box.h"
+#include "purple/purple_picker.h"
 
 #include "api/api_chat_participants.h"
 #include "boxes/peers/edit_participant_box.h"
@@ -126,7 +127,11 @@ void SaveChatAdmin(
 		bool isAdmin,
 		Fn<void()> onDone,
 		Fn<void()> onFail,
-		bool retryOnNotParticipant = true) {
+		bool retryOnNotParticipant = true,
+		std::function<bool()> current = {}) {
+	if (!Purple::PickerActionCurrent(current, chat)) {
+		return;
+	}
 	chat->session().api().request(MTPmessages_EditChatAdmin(
 		chat->inputChat(),
 		user->inputUser(),
@@ -137,6 +142,9 @@ void SaveChatAdmin(
 			onDone();
 		}
 	}).fail([=](const MTP::Error &error) {
+		if (!Purple::PickerActionCurrent(current, chat)) {
+			return;
+		}
 		const auto &type = error.type();
 		if (retryOnNotParticipant
 			&& isAdmin
@@ -149,7 +157,8 @@ void SaveChatAdmin(
 					isAdmin,
 					onDone,
 					onFail,
-					false);
+					false,
+					current);
 			}, onFail);
 		} else {
 			if (show) {
@@ -360,11 +369,15 @@ Fn<void(
 		Fn<void(
 			ChatAdminRightsInfo newRights,
 			const std::optional<QString> &rank)> onDone,
-		Fn<void()> onFail) {
+		Fn<void()> onFail,
+		std::function<bool()> current) {
 	const auto save = [=](
 			ChatAdminRightsInfo oldRights,
 			ChatAdminRightsInfo newRights,
 			const std::optional<QString> &rank) {
+		if (!Purple::PickerActionCurrent(current, peer)) {
+			return;
+		}
 		const auto processJoinRequests = ((newRights.flags
 			& ChatAdminRight::ProcessJoinRequests) != 0);
 		const auto manageGuardBot = peer->isMegagroup()
@@ -377,6 +390,9 @@ Fn<void(
 			}
 		};
 		const auto saveForChannel = [=](not_null<ChannelData*> channel) {
+			if (!Purple::PickerActionCurrent(current, channel)) {
+				return;
+			}
 			SaveChannelAdmin(
 				show,
 				channel,
@@ -385,6 +401,9 @@ Fn<void(
 				strippedNewRights,
 				rank,
 				[=] {
+					if (!Purple::PickerActionCurrent(current, channel)) {
+						return;
+					}
 					if (manageGuardBot) {
 						SaveGuardBot(
 							show,
@@ -401,7 +420,7 @@ Fn<void(
 		};
 		if (const auto chat = peer->asChatNotMigrated()) {
 			const auto saveChatAdmin = [&](bool isAdmin) {
-				SaveChatAdmin(show, chat, user, isAdmin, done, onFail);
+				SaveChatAdmin(show, chat, user, isAdmin, done, onFail, true, current);
 				if (rank) {
 					SaveMemberRank(show, chat, user, *rank, [] {}, [] {});
 				}
@@ -424,6 +443,9 @@ Fn<void(
 			ChatAdminRightsInfo oldRights,
 			ChatAdminRightsInfo newRights,
 			const std::optional<QString> &rank) {
+		if (!Purple::PickerActionCurrent(current, peer)) {
+			return;
+		}
 		const auto channel = peer->asChannel();
 		const auto promoting = channel
 			&& channel->isCommunity()
@@ -441,7 +463,7 @@ Fn<void(
 			close();
 			save(oldRights, newRights, rank);
 		};
-		show->showBox(Ui::MakeConfirmBox({
+		show->showBox(Purple::WatchPickerBox(Ui::MakeConfirmBox({
 			.text = tr::lng_community_admin_promote_sure(
 				tr::now,
 				lt_user,
@@ -450,7 +472,7 @@ Fn<void(
 			.confirmed = sure,
 			.confirmText = tr::lng_community_admin_promote(),
 			.title = tr::lng_community_admin_promote_title(),
-		}));
+		}), peer, bool(current)));
 	};
 }
 

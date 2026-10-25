@@ -39,7 +39,8 @@ Fn<void(
 		Fn<void(
 			ChatAdminRightsInfo newRights,
 			const std::optional<QString> &rank)> onDone,
-		Fn<void()> onFail);
+		Fn<void()> onFail,
+		std::function<bool()> current = {});
 
 Fn<void(
 	ChatRestrictionsInfo oldRights,

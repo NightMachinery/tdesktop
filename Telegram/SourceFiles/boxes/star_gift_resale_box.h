@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+namespace ChatHelpers { class Show; }
+
 namespace Data {
 struct UniqueGift;
 struct ResaleGiftsDescriptor;
@@ -39,7 +41,8 @@ void ShowResaleGiftBoughtToast(
 	not_null<PeerData*> peer,
 	uint64 giftId,
 	QString title,
-	Fn<void()> finishRequesting);
+	Fn<void()> finishRequesting,
+	std::shared_ptr<ChatHelpers::Show> recipientShow = nullptr);
 
 void AddResaleGiftsList(
 	not_null<Window::SessionController*> window,
@@ -49,6 +52,7 @@ void AddResaleGiftsList(
 	rpl::variable<bool> *starsOnly = nullptr,
 	Fn<void(std::shared_ptr<Data::UniqueGift>)> bought = nullptr,
 	bool forCraft = false,
-	Fn<void(int)> countChanged = nullptr);
+	Fn<void(int)> countChanged = nullptr,
+	std::shared_ptr<ChatHelpers::Show> recipientShow = nullptr);
 
 } // namespace Ui

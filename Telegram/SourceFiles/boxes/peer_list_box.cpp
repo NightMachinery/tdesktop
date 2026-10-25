@@ -1249,6 +1249,10 @@ void PeerListContent::setMode(Mode mode) {
 }
 
 void PeerListContent::appendRow(std::unique_ptr<PeerListRow> row) {
+	if (!Purple::RecipientPickerBridge::RowAllows(this, row.get())) {
+		return;
+	}
+
 	Expects(row != nullptr);
 
 	if (_rowsById.find(row->id()) == _rowsById.cend()) {
@@ -1263,6 +1267,10 @@ void PeerListContent::appendRow(std::unique_ptr<PeerListRow> row) {
 }
 
 void PeerListContent::appendSearchRow(std::unique_ptr<PeerListRow> row) {
+	if (!Purple::RecipientPickerBridge::RowAllows(this, row.get())) {
+		return;
+	}
+
 	Expects(row != nullptr);
 	Expects(showingSearch());
 
@@ -1370,6 +1378,10 @@ void PeerListContent::removeFromSearchIndex(not_null<PeerListRow*> row) {
 }
 
 void PeerListContent::prependRow(std::unique_ptr<PeerListRow> row) {
+	if (!Purple::RecipientPickerBridge::RowAllows(this, row.get())) {
+		return;
+	}
+
 	Expects(row != nullptr);
 
 	if (_rowsById.find(row->id()) == _rowsById.cend()) {

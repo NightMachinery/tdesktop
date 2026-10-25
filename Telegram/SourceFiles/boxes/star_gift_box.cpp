@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/star_gift_box.h"
+#include "purple/purple_picker.h"
 
 #include "boxes/star_gift_cover_box.h"
 
@@ -1231,9 +1232,11 @@ void SendGift(
 		not_null<PeerData*> peer,
 		std::shared_ptr<Api::PremiumGiftCodeOptions> api,
 		const GiftSendDetails &details,
-		Fn<void(Payments::CheckoutResult)> done) {
+		Fn<void(Payments::CheckoutResult)> done,
+		std::shared_ptr<ChatHelpers::Show> show) {
+	if (!show->valid()) return;
 	const auto processNonPanelPaymentFormFactory
-		= Payments::ProcessNonPanelPaymentFormFactory(window, done);
+		= Payments::ProcessNonPanelPaymentFormFactory(window, done, show);
 	v::match(details.descriptor, [&](const GiftTypePremium &gift) {
 		if (details.byStars && gift.stars) {
 			auto invoice = Payments::InvoicePremiumGiftCode{
@@ -1247,6 +1250,7 @@ void SendGift(
 				.storeQuantity = 1,
 				.users = 1,
 				.months = gift.months,
+				.pickerCurrent = Purple::PickerGiftCurrent(show),
 			};
 			Payments::CheckoutProcess::Start(
 				std::move(invoice),
@@ -1254,6 +1258,7 @@ void SendGift(
 				processNonPanelPaymentFormFactory);
 		} else {
 			auto invoice = api->invoice(1, gift.months);
+			invoice.pickerCurrent = Purple::PickerGiftCurrent(show);
 			invoice.purpose = Payments::InvoicePremiumGiftCodeUsers{
 				.users = { peer->asUser() },
 				.message = details.text,
@@ -1270,6 +1275,7 @@ void SendGift(
 			.perUserLimit = gift.info.perUserTotal,
 			.anonymous = details.anonymous,
 			.upgraded = details.upgraded,
+			.pickerCurrent = Purple::PickerGiftCurrent(show),
 		}, done, processNonPanelPaymentFormFactory);
 	});
 }
@@ -1314,6 +1320,10 @@ void SendStarsFormRequest(
 		uint64 formId,
 		MTPInputInvoice invoice,
 		Fn<void(Payments::CheckoutResult, const MTPUpdates *)> done) {
+	if (!show->valid()) {
+		done(Payments::CheckoutResult::Cancelled, nullptr);
+		return;
+	}
 	using BalanceResult = Settings::SmallBalanceResult;
 	const auto session = &show->session();
 	if (result == BalanceResult::Success
@@ -1348,7 +1358,9 @@ void UpgradeGift(
 		Data::SavedStarGiftId savedId,
 		bool keepDetails,
 		int stars,
-		Fn<void(bool, std::shared_ptr<Data::GiftUpgradeResult>)> done) {
+		Fn<void(bool, std::shared_ptr<Data::GiftUpgradeResult>)> done,
+		std::shared_ptr<ChatHelpers::Show> show) {
+	if (!show->valid()) return;
 	//AssertIsDebug(); return;
 	const auto session = &window->session();
 	const auto weak = base::make_weak(window);
@@ -1390,7 +1402,7 @@ void UpgradeGift(
 	}
 	using Flag = MTPDinputInvoiceStarGiftUpgrade::Flag;
 	RequestStarsFormAndSubmit(
-		window->uiShow(),
+		show,
 		MTP_inputInvoiceStarGiftUpgrade(
 			MTP_flags(keepDetails ? Flag::f_keep_original_details : Flag()),
 			Api::InputSavedStarGiftId(savedId)),
@@ -1402,7 +1414,9 @@ void GiftUpgrade(
 		not_null<PeerData*> peer,
 		QString giftPrepayUpgradeHash,
 		int stars,
-		Fn<void(bool)> done) {
+		Fn<void(bool)> done,
+		std::shared_ptr<ChatHelpers::Show> show) {
+	if (!show->valid()) return;
 	const auto weak = base::make_weak(window);
 	auto formDone = [=](
 			Payments::CheckoutResult result,
@@ -1414,7 +1428,7 @@ void GiftUpgrade(
 		done(success);
 	};
 	RequestStarsFormAndSubmit(
-		window->uiShow(),
+		show,
 		MTP_inputInvoiceStarGiftPrepaidUpgrade(
 			peer->input(),
 			MTP_string(giftPrepayUpgradeHash)),
@@ -1643,7 +1657,8 @@ void AddBlock(
 
 [[nodiscard]] object_ptr<RpWidget> MakePremiumGifts(
 		not_null<Window::SessionController*> window,
-		not_null<PeerData*> peer) {
+		not_null<PeerData*> peer,
+		std::shared_ptr<ChatHelpers::Show> show) {
 	struct State {
 		rpl::variable<PremiumGiftsDescriptor> gifts;
 	};
@@ -1662,6 +1677,7 @@ void AddBlock(
 		.window = window,
 		.peer = peer,
 		.gifts = std::move(gifts),
+		.recipientShow = show,
 	});
 	result->lifetime().add([state = std::move(state)] {});
 	return result;
@@ -1671,7 +1687,8 @@ void AddBlock(
 		not_null<Window::SessionController*> window,
 		not_null<PeerData*> peer,
 		MyGiftsDescriptor my,
-		Fn<void(int)> tabSelected) {
+		Fn<void(int)> tabSelected,
+		std::shared_ptr<ChatHelpers::Show> show) {
 	auto result = object_ptr<VerticalLayout>((QWidget*)nullptr);
 
 	struct State {
@@ -1769,6 +1786,7 @@ void AddBlock(
 		.peer = peer,
 		.gifts = std::move(gifts),
 		.loadMore = loadMore,
+		.recipientShow = show,
 	}));
 
 	return result;
@@ -1778,7 +1796,11 @@ void GiftBox(
 		not_null<GenericBox*> box,
 		not_null<Window::SessionController*> window,
 		not_null<PeerData*> peer,
-		MyGiftsDescriptor my) {
+		MyGiftsDescriptor my,
+		bool recipientPicker) {
+	const auto show = recipientPicker
+		? Purple::PickerGiftShow(window->uiShow(), peer)
+		: window->uiShow();
 	box->setWidth(st::boxWideWidth);
 	box->setStyle(st::creditsGiftBox);
 	box->setNoContentMargin(true);
@@ -1847,7 +1869,7 @@ void GiftBox(
 				tr::lng_gift_premium_features(tr::link),
 				tr::marked),
 			.aboutFilter = premiumClickHandlerFilter,
-			.content = MakePremiumGifts(window, peer),
+			.content = MakePremiumGifts(window, peer, show),
 		});
 	}
 
@@ -1889,7 +1911,7 @@ void GiftBox(
 				window,
 				peer,
 				std::move(my),
-				std::move(tabSelected)),
+				std::move(tabSelected), show),
 		});
 	}
 }
@@ -1975,6 +1997,7 @@ private:
 		}
 
 		void prepare() override {
+			Purple::RecipientPickerBridge::WatchRows(this, [=] { if (_fill) { _fill(this); } });
 			if (_fill) {
 				_fill(this);
 			}
@@ -2087,7 +2110,7 @@ private:
 
 Controller::Controller(not_null<Main::Session*> session, PickCallback pick)
 : ContactsBoxController(session)
-, _pick(std::move(pick))
+, _pick(Purple::PickerCallback(std::move(pick)))
 , _contactBirthdays(
 	session->promoSuggestions().knownContactBirthdays().value_or(
 		std::vector<UserId>{}))
@@ -2295,6 +2318,7 @@ std::unique_ptr<PeerListRow> Controller::createRow(
 }
 
 void Controller::prepareViewHook() {
+	Purple::RecipientPickerBridge::WatchContacts(this);
 	auto list = object_ptr<Ui::VerticalLayout>((QWidget*)nullptr);
 	list->add(std::move(_selfOption.content));
 	list->add(std::move(_birthdayOptions.content));
@@ -2342,7 +2366,7 @@ void ChooseStarGiftRecipient(
 			session,
 			[=](not_null<PeerData*> peer, PickType type) {
 				if (type == PickType::Activate) {
-					ShowStarGiftBox(window, peer);
+					ShowStarGiftBox(window, peer, true);
 				} else if (type == PickType::SendMessage) {
 					using Way = Window::SectionShow::Way;
 					window->showPeerHistory(peer, Way::Forward);
@@ -2367,7 +2391,8 @@ void ChooseStarGiftRecipient(
 
 void ShowStarGiftBox(
 		not_null<Window::SessionController*> controller,
-		not_null<PeerData*> peer) {
+		not_null<PeerData*> peer,
+	bool recipientPicker) {
 	if (controller->showFrozenError()) {
 		return;
 	}
@@ -2406,8 +2431,16 @@ void ShowStarGiftBox(
 	}
 	i->second = Session{ .peer = peer };
 
+	const auto current = recipientPicker ? Purple::PickerAction(peer, i->second.lifetime, [=] {
+		if (Map[session].peer == peer) {
+			Map[session] = Session();
+		}
+	}) : std::function<bool()>();
 	const auto weak = base::make_weak(controller);
 	const auto checkReady = [=] {
+		if (!Purple::PickerActionCurrent(current, peer)) {
+			return;
+		}
 		auto &entry = Map[session];
 		if (!entry.ready()) {
 			return;
@@ -2432,7 +2465,7 @@ void ShowStarGiftBox(
 					return;
 				}
 			}
-			strong->show(Box(GiftBox, strong, peer, std::move(was.my)));
+			strong->show(Purple::WatchPickerBox(Box(GiftBox, strong, peer, std::move(was.my), recipientPicker), peer, recipientPicker));
 		}
 	};
 
@@ -4003,7 +4036,7 @@ void UpgradeBox(
 				args.peer,
 				args.giftPrepayUpgradeHash,
 				cost,
-				done);
+				done, args.recipientShow ? args.recipientShow : controller->uiShow());
 		} else {
 			const auto done = [=](
 					bool success,
@@ -4066,7 +4099,7 @@ void UpgradeBox(
 				}
 			};
 			state->upgrading = true;
-			UpgradeGift(controller, args.savedId, keepDetails, cost, done);
+			UpgradeGift(controller, args.savedId, keepDetails, cost, done, args.recipientShow ? args.recipientShow : controller->uiShow());
 
 			//AssertIsDebug();
 			//const auto modelIndex = base::RandomIndex(args.models.size());
@@ -4190,7 +4223,8 @@ void GetVariantsAndShowUpgradeBox(UpgradeArgs &&args) {
 	const auto done = crl::guard(args.controller, [](UpgradeArgs &&args) {
 		const auto onstack = args.ready;
 		const auto window = args.controller;
-		window->show(Box(UpgradeBox, window, std::move(args)));
+		const auto show = args.recipientShow ? args.recipientShow : window->uiShow();
+		show->show(Box(UpgradeBox, window, std::move(args)));
 		if (onstack) {
 			onstack(true);
 		}
@@ -4452,6 +4486,7 @@ CreditsAmount TonFromStars(
 }
 
 struct DefaultGiftHandlerState {
+	std::shared_ptr<ChatHelpers::Show> show;
 	not_null<Window::SessionController*> window;
 	not_null<PeerData*> peer;
 	std::shared_ptr<Api::PremiumGiftCodeOptions> api;
@@ -4466,23 +4501,25 @@ void DefaultGiftHandler(
 		not_null<Window::SessionController*> window,
 		not_null<DefaultGiftHandlerState*> state,
 		Info::PeerGifts::GiftDescriptor descriptor) {
+	const auto show = state->show;
+	if (!show->valid()) return;
 	const auto star = std::get_if<GiftTypeStars>(&descriptor);
 	const auto send = crl::guard(&state->guard, [=] {
-		window->show(Box(
-			SendGiftBox,
+		show->show(Box(
+			SendGiftBoxWithShow,
 			window,
 			state->peer,
 			state->api,
 			descriptor,
-			nullptr));
+			nullptr, show));
 	});
 	const auto peer = state->peer;
 	const auto unique = star ? star->info.unique : nullptr;
 	const auto premiumNeeded = star && star->info.requirePremium;
 	if (unique && star->resale) {
-		window->show(Box(
+		show->show(Box(
 			Settings::GlobalStarGiftBox,
-			window->uiShow(),
+			show,
 			star->info,
 			Settings::StarGiftResaleInfo{
 				.recipientId = peer->id,
@@ -4490,7 +4527,7 @@ void DefaultGiftHandler(
 			},
 			Settings::CreditsEntryBoxStyleOverrides()));
 	} else if (unique && star->mine && !peer->isSelf()) {
-		if (ShowTransferGiftLater(window->uiShow(), unique)) {
+		if (ShowTransferGiftLater(show, unique)) {
 			return;
 		}
 		const auto done = [=] {
@@ -4503,7 +4540,7 @@ void DefaultGiftHandler(
 		state->transferRequested = unique;
 		const auto savedId = star->transferId;
 		using Payments::CheckoutResult;
-		const auto formReady = [=](
+		const auto formReady = crl::guard(&state->guard, [=](
 				uint64 formId,
 				CreditsAmount price,
 				std::optional<CheckoutResult> failure) {
@@ -4520,13 +4557,13 @@ void DefaultGiftHandler(
 					peer,
 					unique,
 					savedId,
-					done);
+					done, show);
 			} else if (*failure == CheckoutResult::Cancelled) {
 				done();
 			}
-		};
+		});
 		RequestOurForm(
-			window->uiShow(),
+			show,
 			MTP_inputInvoiceStarGiftTransfer(
 				Api::InputSavedStarGiftId(savedId, unique),
 				peer->input()),
@@ -4542,7 +4579,7 @@ void DefaultGiftHandler(
 			peer,
 			id,
 			star->info.resellTitle,
-			[=] { state->resaleRequestingId = 0; });
+			[=] { state->resaleRequestingId = 0; }, show);
 	} else if (star && star->info.auction()) {
 		if (!IsSoldOut(star->info)
 			&& premiumNeeded
@@ -4561,10 +4598,10 @@ void DefaultGiftHandler(
 				[=] { state->resaleRequestingId = 0; },
 				crl::guard(&state->guard, [=] {
 					state->resaleLifetime.destroy();
-				}));
+				}), show);
 		}
 	} else if (star && IsSoldOut(star->info)) {
-		window->show(Box(SoldOutBox, window, *star));
+		show->show(Box(SoldOutBox, window, *star));
 	} else if (premiumNeeded && !peer->session().premium()) {
 		Settings::ShowPremiumGiftPremium(window, star->info);
 	} else if (star
@@ -4629,6 +4666,7 @@ object_ptr<RpWidget> MakeGiftsList(GiftsListArgs &&args) {
 	const auto state = raw->lifetime().make_state<State>(State{
 		.delegate = Delegate(session, buttonMode),
 		.handlerState = {
+			.show = args.recipientShow ? args.recipientShow : window->uiShow(),
 			.window = window,
 			.peer = peer,
 		},
@@ -4810,6 +4848,17 @@ void SendGiftBox(
 		std::shared_ptr<Api::PremiumGiftCodeOptions> api,
 		const GiftDescriptor &descriptor,
 		rpl::producer<Data::GiftAuctionState> auctionState) {
+	SendGiftBoxWithShow(box, window, peer, std::move(api), descriptor, std::move(auctionState), window->uiShow());
+}
+
+void SendGiftBoxWithShow(
+		not_null<GenericBox*> box,
+		not_null<Window::SessionController*> window,
+		not_null<PeerData*> peer,
+		std::shared_ptr<Api::PremiumGiftCodeOptions> api,
+		const GiftDescriptor &descriptor,
+		rpl::producer<Data::GiftAuctionState> auctionState,
+		std::shared_ptr<ChatHelpers::Show> show) {
 	const auto stars = std::get_if<GiftTypeStars>(&descriptor);
 	const auto auction = !!auctionState;
 	const auto limited = stars
@@ -4925,7 +4974,7 @@ void SendGiftBox(
 	};
 	InitMessageFieldHandlers({
 		.session = session,
-		.show = window->uiShow(),
+		.show = show,
 		.field = text,
 		.customEmojiPaused = [=] {
 			using namespace Window;
@@ -4966,6 +5015,7 @@ void SendGiftBox(
 					.ready = [=](bool) { *showing = false; },
 					.peer = peer,
 					.cost = int(costToUpgrade),
+					.recipientShow = show,
 				});
 			});
 		} else {
@@ -5064,18 +5114,21 @@ void SendGiftBox(
 		}
 		const auto stars = std::get_if<GiftTypeStars>(&details.descriptor);
 		if (stars && stars->info.auction()) {
-			const auto bidBox = window->show(MakeAuctionBidBox({
+			if (!show->valid()) return;
+			const auto bidBox = show->show(MakeAuctionBidBox({
 				.peer = peer,
-				.show = window->uiShow(),
+				.show = show,
 				.state = state->auction.value(),
 				.details = std::make_unique<GiftSendDetails>(details),
 			}));
+			if (!bidBox) return;
 			bidBox->boxClosing(
 			) | rpl::on_next([=] {
 				box->closeBox();
 			}, box->lifetime());
 			return;
 		}
+		if (!show->valid()) return;
 		const auto copy = state->media; // Let media outlive the box.
 		const auto weak = base::make_weak(box);
 		const auto done = [=](Payments::CheckoutResult result) {
@@ -5092,7 +5145,7 @@ void SendGiftBox(
 				strong->closeBox();
 			}
 		};
-		SendGift(window, peer, api, details, done);
+		SendGift(window, peer, api, details, done, show);
 	});
 	if (limited) {
 		if (auction) {

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/send_credits_box.h"
+#include "purple/purple_picker.h"
 
 #include "api/api_credits.h"
 #include "apiwrap.h"
@@ -574,6 +575,10 @@ void SendStarsForm(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Payments::CreditsFormData> data,
 		Fn<void(std::optional<QString>)> done) {
+	if (!Purple::PickerPaymentAllowed(data->id)) {
+		done(u"RECIPIENT_UNAVAILABLE"_q);
+		return;
+	}
 	session->api().request(MTPpayments_SendStarsForm(
 		MTP_long(data->formId),
 		data->inputInvoice

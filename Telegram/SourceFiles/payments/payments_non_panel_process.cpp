@@ -161,13 +161,14 @@ void ProcessCreditsReceipt(
 
 Fn<void(NonPanelPaymentForm)> ProcessNonPanelPaymentFormFactory(
 		not_null<Window::SessionController*> controller,
-		Fn<void(CheckoutResult)> maybeReturnToBot) {
+		Fn<void(CheckoutResult)> maybeReturnToBot,
+		std::shared_ptr<Main::SessionShow> recipientShow) {
 	return [=](NonPanelPaymentForm form) {
 		using CreditsFormDataPtr = std::shared_ptr<CreditsFormData>;
 		using CreditsReceiptPtr = std::shared_ptr<CreditsReceiptData>;
 		v::match(form, [&](const CreditsFormDataPtr &form) {
 			ProcessCreditsPayment(
-				controller->uiShow(),
+				recipientShow ? recipientShow : controller->uiShow(),
 				controller->content().get(),
 				form,
 				maybeReturnToBot);

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/gift_credits_box.h"
+#include "purple/purple_picker.h"
 
 #include "api/api_credits.h"
 #include "boxes/filters/edit_filter_chats_list.h"
@@ -53,6 +54,7 @@ namespace {
 		}
 
 		void prepare() override {
+			Purple::RecipientPickerBridge::WatchRows(this, [=] { prepare(); });
 			for (const auto &user : _users) {
 				delegate()->peerListAppendRow(
 					std::make_unique<PeerListRow>(user));
@@ -110,7 +112,8 @@ namespace {
 void GiftCreditsBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<PeerData*> peer,
-		Fn<void()> gifted) {
+		Fn<void()> gifted,
+		std::shared_ptr<ChatHelpers::Show> recipientShow) {
 	box->setWidth(st::boxWideWidth);
 	box->setStyle(st::creditsGiftBox);
 	box->setNoContentMargin(true);
@@ -164,7 +167,7 @@ void GiftCreditsBox(
 	Ui::AddSkip(box->verticalLayout());
 
 	Settings::FillCreditOptions(
-		Main::MakeSessionShow(box->uiShow(), &peer->session()),
+		recipientShow,
 		box->verticalLayout(),
 		peer,
 		CreditsAmount(),
@@ -187,7 +190,7 @@ void ShowGiftCreditsBox(
 			not_null<Main::Session*> session,
 			Fn<void(not_null<PeerData*>)> choose)
 		: ContactsBoxController(session)
-		, _choose(std::move(choose))
+		, _choose(Purple::PickerCallback(std::move(choose)))
 		, _frequentUsers(CollectGiftFrequentUsers(session)) {
 		}
 
@@ -207,6 +210,7 @@ void ShowGiftCreditsBox(
 		}
 
 		void prepareViewHook() override {
+			Purple::RecipientPickerBridge::WatchContacts(this);
 			if (_frequentUsers.empty()) {
 				return;
 			}
@@ -234,7 +238,7 @@ void ShowGiftCreditsBox(
 	auto listController = std::make_unique<Controller>(
 		&controller->session(),
 		[=](not_null<PeerData*> peer) {
-			show->showBox(Box(GiftCreditsBox, peer, gifted));
+			show->showBox(Purple::WatchPickerBox(Box(GiftCreditsBox, peer, gifted, Purple::PickerGiftShow(show, peer)), peer));
 		});
 	show->showBox(
 		Box<PeerListBox>(std::move(listController), std::move(initBox)),

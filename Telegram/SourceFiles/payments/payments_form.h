@@ -159,6 +159,7 @@ struct InvoicePremiumGiftCode {
 	int storeQuantity = 0;
 	int users = 0;
 	int months = 0;
+	std::function<bool()> pickerCurrent;
 };
 
 struct InvoiceCredits {
@@ -172,6 +173,7 @@ struct InvoiceCredits {
 	PeerId giftPeerId = PeerId(0);
 	int subscriptionPeriod = 0;
 	PeerId spendPurposePeerId = PeerId(0);
+	std::function<bool()> pickerCurrent;
 };
 
 struct InvoiceStarGift {
@@ -183,6 +185,7 @@ struct InvoiceStarGift {
 	int perUserLimit = 0;
 	bool anonymous = false;
 	bool upgraded = false;
+	std::function<bool()> pickerCurrent;
 };
 
 struct InvoiceId {

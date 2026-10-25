@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "payments/payments_checkout_process.h"
+#include "purple/purple_picker.h"
 
 #include "payments/payments_form.h"
 #include "payments/ui/payments_panel.h"
@@ -334,6 +335,8 @@ CheckoutProcess::CheckoutProcess(
 	) | rpl::on_next([=](const FormUpdate &update) {
 		handleFormUpdate(update);
 	}, _lifetime);
+
+	Purple::WatchPickerPayment(id, [=] { panelCloseSure(); }, _lifetime);
 
 	_panel->savedMethodChosen(
 	) | rpl::on_next([=](QString id) {

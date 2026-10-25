@@ -36,7 +36,8 @@ class GenericBox;
 	PeerData *peer,
 	uint64 giftId,
 	Fn<void()> finishRequesting,
-	Fn<void()> boxClosed);
+	Fn<void()> boxClosed,
+	std::shared_ptr<ChatHelpers::Show> recipientShow = nullptr);
 
 struct AuctionBidBoxArgs {
 	not_null<PeerData*> peer;

@@ -439,7 +439,10 @@ void TransferGift(
 		std::shared_ptr<Data::UniqueGift> gift,
 		Data::SavedStarGiftId savedId,
 		Fn<void(Payments::CheckoutResult)> done,
-		bool skipPaymentForm = false) {
+		bool skipPaymentForm = false,
+		std::shared_ptr<ChatHelpers::Show> recipientShow = nullptr) {
+	const auto show = recipientShow ? recipientShow : window->uiShow();
+	if (!show->valid()) return;
 	const auto session = &window->session();
 	const auto weak = base::make_weak(window);
 	auto formDone = [=](
@@ -447,7 +450,7 @@ void TransferGift(
 			const MTPUpdates *updates) {
 		if (result == Payments::CheckoutResult::Free) {
 			Assert(!skipPaymentForm);
-			TransferGift(window, to, gift, savedId, done, true);
+			TransferGift(window, to, gift, savedId, done, true, show);
 			return;
 		}
 		done(result);
@@ -491,7 +494,7 @@ void TransferGift(
 		}).send();
 	} else {
 		Ui::RequestStarsFormAndSubmit(
-			window->uiShow(),
+			show,
 			MTP_inputInvoiceStarGiftTransfer(
 				Api::InputSavedStarGiftId(savedId, gift),
 				to->input()),
@@ -612,9 +615,11 @@ void ShowTransferToBox(
 		not_null<PeerData*> peer,
 		std::shared_ptr<Data::UniqueGift> gift,
 		Data::SavedStarGiftId savedId,
-		Fn<void()> closeParentBox) {
+		Fn<void()> closeParentBox,
+		std::shared_ptr<ChatHelpers::Show> recipientShow) {
+	const auto show = recipientShow ? recipientShow : controller->uiShow();
 	const auto stars = gift->starsForTransfer;
-	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+	show->show(Box([=](not_null<Ui::GenericBox*> box) {
 		auto transfer = (stars > 0)
 			? tr::lng_gift_transfer_button_for(
 				lt_price,
@@ -654,7 +659,7 @@ void ShowTransferToBox(
 					}
 				}
 			};
-			TransferGift(controller, peer, gift, savedId, done);
+			TransferGift(controller, peer, gift, savedId, done, false, show);
 		};
 
 		box->addRow(

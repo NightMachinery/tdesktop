@@ -38,6 +38,56 @@ the numbers.
   Topic, Saved Messages sublist and community child pickers use that predicate
   too, and close when their addressed parent becomes globally hidden.
 
+### Remaining recipient routes
+
+- `boxes/peers/choose_peer_box.cpp`: use the owned confirmation wrapper and
+  revalidate the single-peer and newly created peer callbacks.
+- `boxes/peers/add_bot_to_chat_box.cpp` and `.h`: register management sections,
+  fence rights lookups to the exact request target, and pass the owned action
+  guard through confirmations and admin editors. One friend grants the bridge
+  narrow cancellation access. The final Add Bot entry also checks visibility.
+- `boxes/peers/edit_participants_box.cpp` and `.h`: an optional action guard
+  follows recipient admin saves, migration, fallback participant addition and
+  retry. Guarded community promotion confirmations close on visibility changes.
+  Other callers omit the guard and retain their existing policy.
+- `boxes/peer_list_controllers.cpp` and `.h`: opt community members and recipient
+  contacts into the owned refresh bridge, grant it contact rebuild access, and
+  revalidate community/topic/sublist clicks against their supplied child policy.
+  The community-to-topic construction also installs the owned child watcher.
+- `boxes/peer_list_box.cpp`: three admission hooks cover append, prepend and
+  search rows only for registered recipient controllers. Existing context-menu
+  teardown now includes those controllers before their row is removed.
+- `window/window_peer_menu.cpp`: direct media-drop topic and sublist children
+  receive the owned filter, watcher and final-dispatch visibility check.
+- `boxes/star_gift_box.cpp` and `.h`, and `boxes/gift_credits_box.cpp`: opt only
+  recipient uses into contact/custom-list refresh and guarded callbacks. The
+  optional star-gift recipient flag fences asynchronous preparation and the
+  owned gift box; direct gift entry points retain their default behavior.
+
+- `boxes/star_gift_auction_box.cpp` and `.h`, `boxes/star_gift_resale_box.cpp`
+  and `.h`, and `boxes/transfer_gift_box.cpp` and `.h`: optional scoped-show
+  arguments carry the recipient action through auction, resale and transfer
+  children and their asynchronous continuations. The free transfer retry uses
+  the same show. Direct callers retain the default show.
+- `boxes/star_gift_box.cpp` and `.h`: gift list and upgrade arguments carry the
+  show; a scoped Send Gift entry preserves existing direct call signatures.
+  Final gift/form operations check admission and gift invoices retain it.
+- `payments/payments_form.h` and `.cpp`: optional gift invoice guards are
+  checked by both password and ordinary submit entry points.
+- `payments/payments_checkout_process.cpp`: the owned watcher closes a guarded
+  checkout when its recipient action is revoked.
+- `payments/payments_non_panel_process.cpp` and `.h`: the optional show follows
+  non-panel gift payments into balance prompts.
+- `boxes/send_credits_box.cpp`: the final stars-form request checks the invoice
+  guard, including callbacks resumed after a balance prompt.
+- `settings/settings_credits_graphics.cpp`: credit-option invoices retain their
+  show admission and resale children preserve the supplied show.
+
+All policy, request ownership and row reconciliation remain in
+`purple/purple_picker.*`. The route fixture extracts actual callback bodies and
+inventories every listed construction route, beyond the original three children
+per parent. See [Work Mode](work_mode.md#recipient-callback-and-child-guards).
+
 ## Terms
 
 - **Upstream file**: a path that exists at the merge-base of the fork and

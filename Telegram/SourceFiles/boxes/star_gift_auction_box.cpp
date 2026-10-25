@@ -1305,7 +1305,8 @@ void AuctionInfoBox(
 		not_null<GenericBox*> box,
 		not_null<Window::SessionController*> window,
 		not_null<PeerData*> peer,
-		rpl::producer<Data::GiftAuctionState> value) {
+		rpl::producer<Data::GiftAuctionState> value,
+		std::shared_ptr<ChatHelpers::Show> show) {
 	using namespace Info::PeerGifts;
 
 	struct State {
@@ -1327,7 +1328,6 @@ void AuctionInfoBox(
 		rpl::lifetime previewLifetime;
 		bool previewRequested = false;
 	};
-	const auto show = window->uiShow();
 	const auto state = box->lifetime().make_state<State>(&show->session());
 	state->value = std::move(value);
 	const auto &now = state->value.current();
@@ -1467,12 +1467,13 @@ void AuctionInfoBox(
 			return;
 		}
 		const auto sendBox = show->show(Box(
-			SendGiftBox,
+			SendGiftBoxWithShow,
 			window,
 			peer,
 			nullptr,
 			GiftTypeStars{ .info = *state->value.current().gift },
-			state->value.value()));
+			state->value.value(), show));
+		if (!sendBox) return;
 		sendBox->boxClosing(
 		) | rpl::on_next([=] {
 			box->closeBox();
@@ -1489,7 +1490,8 @@ base::weak_qptr<BoxContent> ChooseAndShowAuctionBox(
 		not_null<Window::SessionController*> window,
 		not_null<PeerData*> peer,
 		std::shared_ptr<rpl::variable<Data::GiftAuctionState>> state,
-		Fn<void()> boxClosed) {
+		Fn<void()> boxClosed,
+		std::shared_ptr<ChatHelpers::Show> show) {
 	const auto local = &peer->session().local();
 	const auto &current = state->current();
 	const auto now = base::unixtime::now();
@@ -1508,23 +1510,24 @@ base::weak_qptr<BoxContent> ChooseAndShowAuctionBox(
 			|| local->readPref<bool>(kAuctionAboutShownPref));
 	auto box = base::weak_qptr<BoxContent>();
 	if (showBidBox) {
-		box = window->show(MakeAuctionBidBox({
+		box = show->show(MakeAuctionBidBox({
 			.peer = peer,
-			.show = window->uiShow(),
+			.show = show,
 			.state = state->value(),
 		}));
 	} else if (showChangeRecipient) {
 		const auto change = [=](Fn<void()> close) {
-			const auto sendBox = window->show(Box(
-				SendGiftBox,
+			const auto sendBox = show->show(Box(
+				SendGiftBoxWithShow,
 				window,
 				peer,
 				nullptr,
 				Info::PeerGifts::GiftTypeStars{
 					.info = *current.gift,
 				},
-				state->value()));
-			sendBox->boxClosing(
+				state->value(), show));
+			if (!sendBox) return;
+		sendBox->boxClosing(
 			) | rpl::on_next(close, sendBox->lifetime());
 		};
 		const auto from = current.my.to;
@@ -1541,7 +1544,7 @@ base::weak_qptr<BoxContent> ChooseAndShowAuctionBox(
 						lt_name,
 						tr::bold(peer->name()),
 						tr::rich));
-		box = window->show(Box([=](not_null<GenericBox*> box) {
+		box = show->show(Box([=](not_null<GenericBox*> box) {
 			box->addRow(
 				CreateUserpicsTransfer(
 					box,
@@ -1559,17 +1562,17 @@ base::weak_qptr<BoxContent> ChooseAndShowAuctionBox(
 			});
 		}));
 	} else if (showInfoBox) {
-		box = window->show(Box(
+		box = show->show(Box(
 			AuctionInfoBox,
 			window,
 			peer,
-			state->value()));
+			state->value(), show));
 	} else {
 		local->writePref<bool>(kAuctionAboutShownPref, true);
 		const auto understood = [=](Fn<void()> close) {
-			ChooseAndShowAuctionBox(window, peer, state, close);
+			ChooseAndShowAuctionBox(window, peer, state, close, show);
 		};
-		box = window->show(Box(
+		box = show->show(Box(
 			AuctionAboutBox,
 			current.totalRounds,
 			current.gift->auctionGiftsPerRound,
@@ -1591,7 +1594,9 @@ rpl::lifetime ShowStarGiftAuction(
 		PeerData *peer,
 		uint64 giftId,
 		Fn<void()> finishRequesting,
-		Fn<void()> boxClosed) {
+		Fn<void()> boxClosed,
+		std::shared_ptr<ChatHelpers::Show> recipientShow) {
+	const auto show = recipientShow ? recipientShow : controller->uiShow();
 	const auto weak = base::make_weak(controller);
 	const auto session = &controller->session();
 	struct State {
@@ -1621,7 +1626,7 @@ rpl::lifetime ShowStarGiftAuction(
 					std::shared_ptr<rpl::variable<Data::GiftAuctionState>>(
 						state,
 						&state->value),
-					boxClosed);
+					boxClosed, show);
 			} else {
 				boxClosed();
 			}

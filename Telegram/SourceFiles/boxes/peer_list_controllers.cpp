@@ -891,6 +891,9 @@ bool ChooseRecipientBoxController::showLockedError(
 }
 
 void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
+	if (!Purple::PickerVisible(row->peer())) {
+		return;
+	}
 	if (showLockedError(row)) {
 		return;
 	}
@@ -1279,6 +1282,11 @@ Main::Session &ChooseTopicBoxController::session() const {
 }
 
 void ChooseTopicBoxController::rowClicked(not_null<PeerListRow*> row) {
+	if (!Purple::PickerChildAllowed(_filter, row->id() == PeerListRowId(0)
+		? not_null<Data::Thread*>(_forum->history())
+		: not_null<Data::Thread*>(static_cast<Row*>(row.get())->topic()))) {
+		return;
+	}
 	const auto weak = base::make_weak(this);
 	auto onstack = base::take(_callback);
 	if (row->id() == PeerListRowId(0)) {
@@ -1394,6 +1402,9 @@ Main::Session &ChooseSublistBoxController::session() const {
 }
 
 void ChooseSublistBoxController::rowClicked(not_null<PeerListRow*> row) {
+	if (!Purple::PickerChildAllowed(_filter, _monoforum->sublist(row->peer()))) {
+		return;
+	}
 	const auto weak = base::make_weak(this);
 	auto onstack = base::take(_callback);
 	onstack(_monoforum->sublist(row->peer()));
@@ -1488,13 +1499,16 @@ Main::Session &ChooseCommunityChatBoxController::session() const {
 }
 
 void ChooseCommunityChatBoxController::rowClicked(not_null<PeerListRow*> row) {
+	if (!Purple::PickerVisible(row->peer())) {
+		return;
+	}
 	auto guard = base::make_weak(this);
 	const auto peer = row->peer();
 	if (const auto forum = peer->forum()) {
 		const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 		auto callback = [=](not_null<Data::Thread*> thread) {
 			const auto exists = guard.get();
-			if (!exists) {
+			if (!exists || !Purple::PickerVisible(thread->peer()) || (_filter && !_filter(thread))) {
 				if (*weak) {
 					(*weak)->closeBox();
 				}
@@ -1509,7 +1523,7 @@ void ChooseCommunityChatBoxController::rowClicked(not_null<PeerListRow*> row) {
 			}
 		};
 		const auto filter = [=](not_null<Data::Thread*> thread) {
-			return guard && (!_filter || _filter(thread));
+			return guard && Purple::PickerVisible(thread->peer()) && (!_filter || _filter(thread));
 		};
 		auto owned = Box<PeerListBox>(
 			std::make_unique<ChooseTopicBoxController>(
@@ -1527,7 +1541,11 @@ void ChooseCommunityChatBoxController::rowClicked(not_null<PeerListRow*> row) {
 				}, box->lifetime());
 			});
 		*weak = owned.data();
+		Purple::WatchPickerChild(owned.data(), peer);
 		delegate()->peerListUiShow()->showBox(std::move(owned));
+		return;
+	}
+	if (!Purple::PickerChildAllowed(_filter, not_null<Data::Thread*>(peer->owner().history(peer)))) {
 		return;
 	}
 	auto onstack = base::take(_callback);
@@ -1538,6 +1556,7 @@ void ChooseCommunityChatBoxController::rowClicked(not_null<PeerListRow*> row) {
 }
 
 void ChooseCommunityChatBoxController::prepare() {
+	Purple::RecipientPickerBridge::WatchRows(this, [=] { refreshRows(true); });
 	delegate()->peerListSetTitle(tr::lng_forward_choose());
 	setSearchNoResultsText(tr::lng_blocked_list_not_found(tr::now));
 	delegate()->peerListSetSearchMode(PeerListSearchMode::Enabled);

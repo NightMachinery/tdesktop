@@ -79,6 +79,7 @@ Main::Session &Controller::session() const {
 }
 
 void Controller::prepare() {
+	Purple::RecipientPickerBridge::WatchRows(this);
 	_prepared = true;
 	for (const auto &peer : _list) {
 		addRow(peer);
@@ -86,6 +87,9 @@ void Controller::prepare() {
 }
 
 void Controller::rowClicked(not_null<PeerListRow*> row) {
+	if (!Purple::PickerVisible(row->peer())) {
+		return;
+	}
 	_callback(row->peer());
 }
 
@@ -161,11 +165,15 @@ void AddBotToGroupBoxController::requestExistingRights(
 	}
 	_existingRightsChannel = channel;
 	_bot->session().api().request(_existingRightsRequestId).cancel();
+	const auto current = Purple::RecipientPickerBridge::BotRights(this, channel);
 	_existingRightsRequestId = _bot->session().api().request(
 		MTPchannels_GetParticipant(
 			_existingRightsChannel->inputChannel(),
 			_bot->input())
-	).done([=](const MTPchannels_ChannelParticipant &result) {
+	).done(crl::guard(this, [=](const MTPchannels_ChannelParticipant &result) {
+		if (!current()) {
+			return;
+		}
 		result.match([&](const MTPDchannels_channelParticipant &data) {
 			channel->owner().processUsers(data.vusers());
 			const auto participant = Api::ChatParticipant(
@@ -177,16 +185,22 @@ void AddBotToGroupBoxController::requestExistingRights(
 			_promotedBy = participant.by();
 			addBotToGroup(_existingRightsChannel);
 		});
-	}).fail([=] {
+	})).fail(crl::guard(this, [=] {
+		if (!current()) {
+			return;
+		}
 		_existingRights = ChatAdminRights();
 		_existingRank = QString();
 		_promotedSince = 0;
 		_promotedBy = 0;
 		addBotToGroup(_existingRightsChannel);
-	}).send();
+	})).send();
 }
 
 void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
+	if (!Purple::PickerVisible(chat)) {
+		return;
+	}
 	if (const auto megagroup = chat->asMegagroup()) {
 		if (!megagroup->canAddMembers()) {
 			_controller->show(
@@ -210,9 +224,13 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 		requestExistingRights(chat->asChannel());
 		return;
 	}
+	const auto current = Purple::PickerAction(chat, lifetime());
 	const auto bot = _bot;
 	const auto controller = _controller;
 	const auto close = [=](auto&&...) {
+		if (!current()) {
+			return;
+		}
 		using Way = Window::SectionShow::Way;
 		controller->hideLayer();
 		controller->showPeerHistory(chat, Way::ClearStack, ShowAtUnreadMsgId);
@@ -234,6 +252,9 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 		const auto done = [=](
 				ChatAdminRightsInfo newRights,
 				const std::optional<QString> &rank) {
+			if (!current()) {
+				return;
+			}
 			if (scope == Scope::GroupAdmin && !token.isEmpty()) {
 				chat->session().api().sendBotStart(show, bot, chat, token);
 			}
@@ -244,7 +265,8 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 			chat,
 			bot,
 			done,
-			close);
+			close,
+			current);
 		auto box = Box<EditAdminBox>(
 			chat,
 			bot,
@@ -256,14 +278,18 @@ void AddBotToGroupBoxController::addBotToGroup(not_null<PeerData*> chat) {
 				_token,
 				_existingRights.value_or(ChatAdminRights()),
 			});
+		Purple::WatchPickerChild(box.data(), chat);
 		box->setSaveCallback(saveCallback);
 		controller->show(std::move(box));
 	} else {
 		auto callback = crl::guard(this, [=] {
+			if (!current()) {
+				return;
+			}
 			AddBotToGroup(show, bot, chat, _token);
 			controller->hideLayer();
 		});
-		controller->show(Ui::MakeConfirmBox({
+		controller->show(Purple::PickerConfirmBox(chat, {
 			tr::lng_bot_sure_invite(tr::now, lt_group, chat->name()),
 			std::move(callback),
 		}));
@@ -417,6 +443,9 @@ void AddBotToGroup(
 		not_null<UserData*> bot,
 		not_null<PeerData*> chat,
 		const QString &startToken) {
+	if (!Purple::PickerVisible(chat)) {
+		return;
+	}
 	if (!startToken.isEmpty()) {
 		chat->session().api().sendBotStart(show, bot, chat, startToken);
 	} else {

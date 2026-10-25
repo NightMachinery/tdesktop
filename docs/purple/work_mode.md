@@ -3619,6 +3619,53 @@ visibly restored the checked Normal radio. Profile-panel attribution and physica
 gestures are operator accounts. List-row Pin/unread, temporary stripe/timer
 rendering, badge precedence, expiry and reordered-home remain open.
 
+## Recipient callback and child guards
+
+Bot single-peer requests recheck the addressed peer when their confirmation
+runs. Add Bot management sections use the same visibility predicate as the main
+recipient list, including rows delivered later. A hidden target closes pending
+confirmations and admin editors, cancels its outstanding rights lookup and
+revokes its pending action. Revealing the peer again requires a fresh action.
+An older lookup cannot cancel a newer target's request. Admin promotion retries
+and chat migration continuations revalidate before another operation is sent.
+
+Community members refresh and re-sort when Work Mode changes, even when the
+community itself stays visible. Every recipient topic or Saved Messages sublist
+child receives the parent's visibility policy, closes when its addressed peer
+becomes hidden, and rechecks before dispatch. This includes direct media-drop
+choosers. Non-recipient topic controllers keep their supplied policy.
+
+Gift recipient lists opt in at their ordinary contacts, birthday, frequent and
+search sources. Their callbacks and recipient-owned gift boxes are guarded too.
+Recipient-owned gift descendants share one sticky action through a scoped show
+adapter. Send Gift, premium-gift checkout, auction bids, upgrade previews,
+resale, transfer and credits dialogs close when the recipient becomes hidden.
+The action survives catalogue replacement and is revoked permanently for that
+flow after a hide, even if the recipient becomes visible again. Payment
+invoices carry the action through balance and password prompts and check it at
+the final stars or fiat dispatch. Profile and chat gift entry points use the
+ordinary show adapter. Own-account premium upsells and credits settings links
+do not address the chosen recipient.
+
+Contact management and privacy editors keep their existing behavior. Rows are
+projected into the picker; ratings, pins, contacts and source lists are never
+rewritten. The generic bridge retains management candidates for later reveal;
+contacts and community lists refill from their original sources to preserve
+current eligibility and native ordering.
+
+The headless `purple/test_picker.py` fixture covers the original share and
+recipient projections. `purple/test_picker_routes.py` extracts the production
+callback and reconciliation bodies for the bot, management, child and gift
+routes. It uses real RPL, weak ownership and Qt queued delivery with inert UI
+and transport ports. It also rejects missing route hooks with negative inventory
+fixtures. These checks do not qualify rendered UI or real Telegram requests.
+The route fixture also ports the review's Send Gift submit tail and executes
+the production scoped-show and invoice guard bodies with inert UI and payment
+ports. It covers child closure, hidden submit, hide/reveal revocation, session
+loss and direct-entry controls. It does not exercise a payment provider.
+Both scripts take `--build-dir` for an existing Debug tree and `--output-dir`
+for disposable outputs.
+
 ## Peek exit and activation controls
 
 The global Work Mode Peek controls now include the default-on Exit hidden chats

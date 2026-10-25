@@ -31,7 +31,8 @@ void ShowTransferToBox(
 	not_null<PeerData*> peer,
 	std::shared_ptr<Data::UniqueGift> gift,
 	Data::SavedStarGiftId savedId,
-	Fn<void()> closeParentBox);
+	Fn<void()> closeParentBox,
+	std::shared_ptr<ChatHelpers::Show> recipientShow = nullptr);
 
 void ShowTransferGiftBox(
 	not_null<Window::SessionController*> window,

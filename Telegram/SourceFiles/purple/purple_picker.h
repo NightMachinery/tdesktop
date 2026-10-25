@@ -18,6 +18,10 @@
 #include <set>
 
 class ChatsListBoxController;
+class ContactsBoxController;
+class AddBotToGroupBoxController;
+class PeerListController;
+class ChannelData;
 class ChooseRecipientBoxController;
 class PeerListSearchDelegate;
 class PeerListDelegate;
@@ -25,14 +29,70 @@ class PeerListContent;
 class PeerListRow;
 namespace Ui {
 class BoxContent;
+class GenericBox;
+struct ConfirmBoxArgs;
 }
+
+namespace ChatHelpers { class Show; }
+namespace Main { class SessionShow; }
+namespace Payments { struct InvoiceId; }
 
 namespace Purple {
 
+[[nodiscard]] std::shared_ptr<ChatHelpers::Show> PickerGiftShow(
+	std::shared_ptr<ChatHelpers::Show> show, not_null<PeerData*> peer);
+[[nodiscard]] std::function<bool()> PickerGiftCurrent(
+	std::shared_ptr<Main::SessionShow> show);
+[[nodiscard]] bool PickerPaymentAllowed(const Payments::InvoiceId &id);
+void WatchPickerPayment(const Payments::InvoiceId &id, Fn<void()> close, rpl::lifetime &lifetime);
 [[nodiscard]] bool PickerVisible(not_null<History*> history);
 [[nodiscard]] bool PickerVisible(not_null<PeerData*> peer);
 [[nodiscard]] std::vector<not_null<History*>> PickerHistories(not_null<Main::Session*> session, FilterId filter = 0);
 void WatchPickerChild(not_null<Ui::BoxContent*> box, not_null<PeerData*> peer);
+[[nodiscard]] std::function<bool()> PickerAction(
+	not_null<PeerData*> peer,
+	rpl::lifetime &lifetime,
+	Fn<void()> revoked = nullptr);
+[[nodiscard]] object_ptr<Ui::GenericBox> PickerConfirmBox(
+	not_null<PeerData*> peer,
+	Ui::ConfirmBoxArgs &&args);
+[[nodiscard]] bool PickerActionCurrent(
+	const std::function<bool()> &current,
+	not_null<PeerData*> peer);
+
+template <typename Box>
+[[nodiscard]] object_ptr<Box> WatchPickerBox(
+		object_ptr<Box> box,
+		not_null<PeerData*> peer,
+		bool enabled = true) {
+	if (enabled) {
+		WatchPickerChild(box.data(), peer);
+	}
+	return box;
+}
+
+template <typename... Args>
+[[nodiscard]] Fn<void(not_null<PeerData*>, Args...)> PickerCallback(Fn<void(not_null<PeerData*>, Args...)> callback) {
+	return [callback = std::move(callback)](not_null<PeerData*> peer, Args... args) {
+		if (PickerVisible(peer)) {
+			callback(peer, std::forward<Args>(args)...);
+		}
+	};
+}
+
+template <typename Thread>
+[[nodiscard]] Fn<bool(not_null<Thread*>)> PickerFilter(Fn<bool(not_null<Thread*>)> filter = nullptr) {
+	return [filter = std::move(filter)](not_null<Thread*> thread) {
+		return PickerVisible(thread->peer()) && (!filter || filter(thread));
+	};
+}
+
+template <typename Thread>
+[[nodiscard]] bool PickerChildAllowed(
+		const Fn<bool(not_null<Thread*>)> &filter,
+		not_null<Thread*> thread) {
+	return !filter || filter(thread);
+}
 
 template <typename T, typename Visible>
 [[nodiscard]] std::vector<T> PickerProjection(
@@ -64,6 +124,16 @@ public:
 			return static_cast<ChatsListBoxController*>(weak.get());
 		});
 	}
+	static void WatchRows(
+		not_null<PeerListController*> controller,
+		Fn<void()> refill = nullptr);
+	static void WatchContacts(not_null<ContactsBoxController*> controller);
+	[[nodiscard]] static bool RowAllows(
+		not_null<PeerListContent*> content,
+		not_null<PeerListRow*> row);
+	[[nodiscard]] static std::function<bool()> BotRights(
+		not_null<AddBotToGroupBoxController*> controller,
+		not_null<ChannelData*> channel);
 	[[nodiscard]] static bool Rebuild(not_null<ChatsListBoxController*> controller);
 	[[nodiscard]] static bool Allows(not_null<ChatsListBoxController*> controller,
 		not_null<History*> history);

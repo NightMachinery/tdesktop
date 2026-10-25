@@ -3672,6 +3672,9 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		weak,
 		navigation
 	](not_null<Data::Thread*> thread) mutable {
+		if (!Purple::PickerVisible(thread->peer())) {
+			return;
+		}
 		const auto content = navigation->parentController()->content();
 		if (!content->filesOrForwardDrop(thread, data.get(), true)) {
 			return;
@@ -3683,6 +3686,7 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		}
 	};
 	auto initBox = [=](not_null<PeerListBox*> box) {
+		Purple::WatchPickerChild(box, forum->history()->peer);
 		box->addButton(tr::lng_cancel(), [=] {
 			box->closeBox();
 		});
@@ -3695,7 +3699,8 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 	*weak = navigation->parentController()->show(Box<PeerListBox>(
 		std::make_unique<ChooseTopicBoxController>(
 			forum,
-			std::move(chosen)),
+			std::move(chosen),
+			Purple::PickerFilter<Data::Thread>()),
 		std::move(initBox)));
 	return weak->get();
 }
@@ -3712,6 +3717,9 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		weak,
 		navigation
 	](not_null<Data::SavedSublist*> sublist) mutable {
+		if (!Purple::PickerVisible(sublist->peer())) {
+			return;
+		}
 		const auto content = navigation->parentController()->content();
 		if (!content->filesOrForwardDrop(sublist, data.get(), true)) {
 			return;
@@ -3723,6 +3731,7 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 		}
 	};
 	auto initBox = [=](not_null<PeerListBox*> box) {
+		Purple::WatchPickerChild(box, monoforum->owningHistory()->peer);
 		box->addButton(tr::lng_cancel(), [=] {
 			box->closeBox();
 		});
@@ -3735,7 +3744,8 @@ base::weak_qptr<Ui::BoxContent> ShowDropMediaBox(
 	*weak = navigation->parentController()->show(Box<PeerListBox>(
 		std::make_unique<ChooseSublistBoxController>(
 			monoforum,
-			std::move(chosen)),
+			std::move(chosen),
+			Purple::PickerFilter<Data::SavedSublist>()),
 		std::move(initBox)));
 	return weak->get();
 }

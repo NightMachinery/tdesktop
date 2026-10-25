@@ -507,7 +507,8 @@ void GiftResaleBox(
 		not_null<GenericBox*> box,
 		not_null<Window::SessionController*> window,
 		not_null<PeerData*> peer,
-		ResaleGiftsDescriptor descriptor) {
+		ResaleGiftsDescriptor descriptor,
+		std::shared_ptr<ChatHelpers::Show> show) {
 	box->setWidth(st::boxWideWidth);
 
 	const auto titleWrap = box->setPinnedToTopContent(
@@ -584,7 +585,7 @@ void GiftResaleBox(
 					lt_count,
 					count)
 				: tr::lng_gift_resale_count_none(tr::now));
-		});
+		}, show);
 }
 
 } // namespace
@@ -597,7 +598,8 @@ void AddResaleGiftsList(
 		rpl::variable<bool> *starsOnly,
 		Fn<void(std::shared_ptr<Data::UniqueGift>)> bought,
 		bool forCraft,
-		Fn<void(int)> countChanged) {
+		Fn<void(int)> countChanged,
+		std::shared_ptr<ChatHelpers::Show> recipientShow) {
 	struct State {
 		rpl::event_stream<> updated;
 		ResaleGiftsDescriptor data;
@@ -763,6 +765,7 @@ void AddResaleGiftsList(
 		.gifts = std::move(gifts),
 		.loadMore = loadMore,
 		.handler = customHandler,
+		.recipientShow = recipientShow,
 	}));
 
 	const auto skip = st::defaultSubsectionTitlePadding.top();
@@ -818,7 +821,9 @@ rpl::lifetime ShowStarGiftResale(
 		not_null<PeerData*> peer,
 		uint64 giftId,
 		QString title,
-		Fn<void()> finishRequesting) {
+		Fn<void()> finishRequesting,
+		std::shared_ptr<ChatHelpers::Show> recipientShow) {
+	const auto show = recipientShow ? recipientShow : controller->uiShow();
 	const auto weak = base::make_weak(controller);
 	const auto session = &controller->session();
 	return Data::ResaleGiftsSlice(
@@ -833,7 +838,7 @@ rpl::lifetime ShowStarGiftResale(
 		}
 		info.title = title;
 		if (const auto strong = weak.get()) {
-			strong->show(Box(GiftResaleBox, strong, peer, std::move(info)));
+			show->show(Box(GiftResaleBox, strong, peer, std::move(info), show));
 		}
 	});
 }

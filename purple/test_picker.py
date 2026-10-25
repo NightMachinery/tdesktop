@@ -25,13 +25,15 @@ hooks = {
     'boxes/peer_list_controllers.cpp': {'RecipientPickerBridge::Rebuild(this)': 1,
         'RecipientPickerBridge::Allows(this, history)': 1, 'RecipientPickerBridge::SearchAllows(delegate(), peer)': 1,
         'RecipientPickerBridge::Watch(this)': 1, 'Purple::PickerVisible(history)': 1,
-        'Purple::WatchPickerChild(owned.data(), peer)': 3},
+        'Purple::WatchPickerChild(owned.data(), peer)': 4},
     'window/window_peer_menu.cpp': {'Purple::PickerVisible(row->peer())': 2,
-        'RecipientPickerBridge::Filter(box, id)': 1, 'RecipientPickerBridge::SelectionChanges(': 2},
-    'boxes/peer_list_box.cpp': {'RecipientPickerBridge::BeforeRemove(this)': 1},
+        'RecipientPickerBridge::Filter(box, id)': 1, 'RecipientPickerBridge::SelectionChanges(': 2, 'Purple::WatchPickerChild(box, forum->history()->peer)': 1, 'Purple::WatchPickerChild(box, monoforum->owningHistory()->peer)': 1, 'Purple::PickerFilter<Data::Thread>()': 1, 'Purple::PickerFilter<Data::SavedSublist>()': 1},
+    'boxes/peer_list_box.cpp': {'RecipientPickerBridge::BeforeRemove(this)': 1, 'RecipientPickerBridge::RowAllows(this, row.get())': 3},
     'boxes/peers/choose_peer_box.cpp': {'RecipientPickerBridge::Watch(this)': 1, 'Purple::PickerVisible(history)': 1,
         'Purple::PickerDeselected(_selected, _selectedCount, peer)': 1},
-    'boxes/peers/add_bot_to_chat_box.cpp': {'RecipientPickerBridge::Watch(this)': 1, 'Purple::PickerVisible(history)': 1},
+    'boxes/peers/add_bot_to_chat_box.cpp': {'RecipientPickerBridge::Watch(this)': 1, 'Purple::PickerVisible(history)': 1, 'RecipientPickerBridge::WatchRows(this)': 1, 'RecipientPickerBridge::BotRights(this, channel)': 1, 'Purple::PickerConfirmBox(chat,': 1, 'Purple::WatchPickerChild(box.data(), chat)': 1},
+    'boxes/star_gift_box.cpp': {'RecipientPickerBridge::WatchRows(this,': 1, 'RecipientPickerBridge::WatchContacts(this)': 1, 'Purple::PickerCallback(std::move(pick))': 1},
+    'boxes/gift_credits_box.cpp': {'RecipientPickerBridge::WatchRows(this,': 1, 'RecipientPickerBridge::WatchContacts(this)': 1, 'Purple::PickerCallback(std::move(choose))': 1},
 }
 for name, calls in hooks.items():
     text = (repo / 'Telegram/SourceFiles' / name).read_text()

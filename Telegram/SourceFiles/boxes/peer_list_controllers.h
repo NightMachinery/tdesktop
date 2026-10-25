@@ -280,6 +280,8 @@ protected:
 	}
 
 private:
+	friend class Purple::RecipientPickerBridge;
+
 	void sort();
 	void sortByOnline();
 	void applySectionHeaders();

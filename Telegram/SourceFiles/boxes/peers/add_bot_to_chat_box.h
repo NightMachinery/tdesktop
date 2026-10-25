@@ -43,6 +43,7 @@ protected:
 	QString emptyBoxText() const override;
 
 private:
+	friend class Purple::RecipientPickerBridge;
 	[[nodiscard]] object_ptr<Ui::RpWidget> prepareAdminnedChats();
 
 	[[nodiscard]] bool onlyAdminToGroup() const;

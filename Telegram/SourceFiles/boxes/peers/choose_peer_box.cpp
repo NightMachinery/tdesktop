@@ -239,7 +239,7 @@ object_ptr<Ui::BoxContent> MakeConfirmBox(
 			}
 		}
 	}
-	return Ui::MakeConfirmBox({
+	return Purple::PickerConfirmBox(peer, {
 		.text = std::move(text),
 		.confirmed = [=](Fn<void()> close) { confirmed(); close(); },
 		.confirmText = tr::lng_request_peer_confirm_send(tr::now),
@@ -253,6 +253,9 @@ object_ptr<Ui::BoxContent> CreatePeerByQueryBox(
 		Fn<void(std::vector<not_null<PeerData*>>)> done) {
 	const auto weak = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
 	auto callback = [=](not_null<PeerData*> peer) {
+		if (!Purple::PickerVisible(peer)) {
+			return;
+		}
 		done({ peer });
 		if (const auto strong = weak->get()) {
 			strong->closeBox();
@@ -439,6 +442,9 @@ void ChoosePeerBoxController::itemDeselectedHook(not_null<PeerData*> peer) {
 }
 
 void ChoosePeerBoxController::rowClicked(not_null<PeerListRow*> row) {
+	if (!Purple::PickerVisible(row->peer())) {
+		return;
+	}
 	const auto limit = _query.maxQuantity;
 	const auto multiselect = (limit > 1);
 	const auto peer = row->peer();
@@ -455,6 +461,9 @@ void ChoosePeerBoxController::rowClicked(not_null<PeerListRow*> row) {
 		return;
 	}
 	const auto done = [callback = _callback, peer] {
+		if (!Purple::PickerVisible(peer)) {
+			return;
+		}
 		const auto onstack = callback;
 		onstack({ peer });
 	};

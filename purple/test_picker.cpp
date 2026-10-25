@@ -179,6 +179,7 @@ struct RecipientState {
 	rpl::event_stream<> selection;
 };
 std::map<ChatsListBoxController*, std::shared_ptr<RecipientState>> Recipients;
+std::map<PeerListController*, int> RowPickers;
 
 #include "picker-projection.inc"
 #include "picker-visible.inc"

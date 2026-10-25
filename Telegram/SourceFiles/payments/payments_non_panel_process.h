@@ -39,7 +39,8 @@ void ProcessCreditsReceipt(
 
 Fn<void(NonPanelPaymentForm)> ProcessNonPanelPaymentFormFactory(
 	not_null<Window::SessionController*> controller,
-	Fn<void(Payments::CheckoutResult)> maybeReturnToBot = nullptr);
+	Fn<void(Payments::CheckoutResult)> maybeReturnToBot = nullptr,
+	std::shared_ptr<Main::SessionShow> recipientShow = nullptr);
 
 Fn<void(NonPanelPaymentForm)> ProcessNonPanelPaymentFormFactory(
 	not_null<Window::SessionController*> controller,

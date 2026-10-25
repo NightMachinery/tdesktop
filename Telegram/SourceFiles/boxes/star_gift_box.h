@@ -76,7 +76,8 @@ void ChooseStarGiftRecipient(
 
 void ShowStarGiftBox(
 	not_null<Window::SessionController*> controller,
-	not_null<PeerData*> peer);
+	not_null<PeerData*> peer,
+	bool recipientPicker = false);
 
 void AddWearGiftCover(
 	not_null<VerticalLayout*> container,
@@ -126,6 +127,7 @@ struct StarGiftUpgradeArgs {
 	bool canAddComment = false;
 	bool canAddMyComment = false;
 	bool addDetailsDefault = false;
+	std::shared_ptr<ChatHelpers::Show> recipientShow;
 };
 void ShowStarGiftUpgradeBox(StarGiftUpgradeArgs &&args);
 
@@ -186,8 +188,18 @@ struct GiftsListArgs {
 	std::vector<std::shared_ptr<Data::UniqueGift>> selected;
 	Fn<void()> loadMore;
 	Fn<void(Info::PeerGifts::GiftDescriptor)> handler;
+	std::shared_ptr<ChatHelpers::Show> recipientShow;
 };
 [[nodiscard]] object_ptr<RpWidget> MakeGiftsList(GiftsListArgs &&args);
+
+void SendGiftBoxWithShow(
+	not_null<GenericBox*> box,
+	not_null<Window::SessionController*> window,
+	not_null<PeerData*> peer,
+	std::shared_ptr<Api::PremiumGiftCodeOptions> api,
+	const Info::PeerGifts::GiftDescriptor &descriptor,
+	rpl::producer<Data::GiftAuctionState> auctionState,
+	std::shared_ptr<ChatHelpers::Show> show);
 
 void SendGiftBox(
 	not_null<GenericBox*> box,
