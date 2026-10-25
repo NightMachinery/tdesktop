@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
+#include "purple/purple_archive_capture.h"
 #include "purple/hooks/work_view.h"
 
 #include "main/main_session.h"
@@ -2890,6 +2891,7 @@ bool Session::updateExistingMessage(const MTPDmessage &data) {
 	if (!existing) {
 		return false;
 	}
+	Purple::ObserveArchiveSentMetadata(&session(), data);
 	existing->applySentMessage(data);
 	const auto result = (existing->mainView() != nullptr);
 	if (result) {
@@ -3372,6 +3374,7 @@ HistoryItem *Session::addNewMessage(
 			if (const auto streamed = h->streamedDraftsIfExists()) {
 				if (const auto adopted = streamed->adoptIncoming(
 						data.c_message())) {
+					Purple::ObserveArchiveMessage(&session(), data, id, localFlags);
 					CheckForSwitchInlineButton(adopted);
 					return adopted;
 				}

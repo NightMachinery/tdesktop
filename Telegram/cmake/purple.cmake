@@ -39,6 +39,15 @@ PRIVATE
     purple/purple_archive_sqlite.h
     purple/purple_archive_crypto.cpp
     purple/purple_archive_crypto.h
+    purple/purple_archive_history_box.cpp
+    purple/purple_archive_history_box.h
+    purple/purple_archive_capture_snapshot.cpp
+    purple/purple_archive_capture.cpp
+    purple/purple_archive_capture.h
+    purple/purple_archive_journal.cpp
+    purple/purple_archive_journal.h
+    purple/purple_archive_service.cpp
+    purple/purple_archive_service.h
     purple/purple_archive_media.cpp
     purple/purple_archive_media.h
     purple/purple_archive_files.cpp

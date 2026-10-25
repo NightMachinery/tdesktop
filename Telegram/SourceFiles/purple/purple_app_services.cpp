@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_app_services.h"
 
 #include "purple/purple_focus.h"
+#include "purple/purple_archive_service.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_auto_service.h"
 #include "purple/purple_gate.h"
@@ -21,6 +22,7 @@ namespace Purple {
 void StartAppServices() {
 	StartDesktopAccountRouting();
 	StartAutomaticSettingsSync();
+	StartArchiveServices();
 	StartSchedule();
 	StartFocusSync();
 	StartScreenTime();

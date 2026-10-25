@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
+#include "purple/purple_archive_service.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
 #include "purple/purple_last_seen.h"
@@ -430,6 +431,38 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"premium"_q, u"work"_q },
 	});
 	Purple::AddVersionRow(builder);
+	const auto archiveSession = base::make_weak(session.get());
+	builder.addDividerText(rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges()) | rpl::map([archiveSession] {
+		const auto live = archiveSession.get();
+		return live ? tr::lng_purple_archive_storage(tr::now) + u"\n"_q + ArchiveStorageSummary(live) : QString();
+	}));
+	if (controller) {
+		const auto window = base::make_weak(controller);
+		builder.addButton({
+			.id = u"advanced/purple_archive_discard"_q,
+			.title = tr::lng_purple_archive_discard(),
+			.onClick = [archiveSession, window] {
+				const auto live = archiveSession.get();
+				const auto ownWindow = window.get();
+				if (!live || !ownWindow || &ownWindow->session() != live) {
+					return;
+				}
+				const auto discard = ArchiveDiscardAction(live);
+				ownWindow->show(Ui::MakeConfirmBox({
+					.text = tr::lng_purple_archive_discard_confirm(tr::now),
+					.confirmed = [archiveSession, window, discard](Fn<void()> close) {
+						close();
+						const auto live = archiveSession.get();
+						const auto ownWindow = window.get();
+						if (live && ownWindow && &ownWindow->session() == live) {
+							discard();
+						}
+					},
+					.confirmText = tr::lng_purple_archive_discard_button(tr::now),
+				}));
+			},
+		});
+	}
 	BuildPurpleSettingsFiles(builder);
 	if (controller) {
 		const auto window = base::make_weak(controller);

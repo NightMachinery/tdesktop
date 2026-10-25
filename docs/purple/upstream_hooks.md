@@ -1242,3 +1242,29 @@ the same production list-order delegate as ordinary selected-text copy.
 entry to one Purple action that distinguishes whole messages from fragments.
 Full-page resolution, lifetime validation and structural export stay in
 `purple_copy_messages.cpp` and `purple_article_markdown.cpp`.
+
+## M3B2 encrypted archive storage
+
+main/main_account.cpp makes one unconditional Purple call in each of normal
+and forced logout. The calls revoke archive keys and deliveries immediately and
+never veto or wait for archive IO. Shared worker state owns eventual handle
+closure and bounded deletion. The per-login authority lives in upstream-reset
+account KV storage, with authenticated admission and wrapping in Purple files.
+No storage/upstream implementation was changed. Quit and session replacement
+preserve the authority. See [archive_storage.md](archive_storage.md).
+
+## M3B2 durable observations and edit history
+
+`history/history.cpp` observes incoming creation and refresh facts before item
+replacement. `data/data_session.cpp` has the equivalent hook for an adopted
+streamed draft. `api/api_updates.cpp` tags accepted edit/delete dispatch before
+upstream mutation. Only those explicit delete calls mark archive deletion;
+unload, generic destruction and send acknowledgements do not.
+`history/view/history_view_context_menu.cpp` delegates one menu action to a
+read-only Purple viewer. Archive snapshots never register as live messages.
+The `data/data_session.cpp` full-message send-ack hook supplies metadata rather
+than an additional authored version. The one-call `api/api_updates.cpp` short
+send-ack hook runs after real message-ID adoption and acknowledged-field
+application, capturing a partial observed baseline plus the genuine short-ack
+TL evidence. Later acknowledgements add metadata to the existing version. Effective non-server, scheduled and admin-log IDs
+are excluded from the received-message creation hook.

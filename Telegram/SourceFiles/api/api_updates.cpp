@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_updates.h"
+#include "purple/purple_archive_capture.h"
 #include "purple/purple_user_control.h"
 
 #include "api/api_authorizations.h"
@@ -1399,6 +1400,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 
 	case mtpc_updateDeleteMessages: {
 		auto &d = update.c_updateDeleteMessages();
+		Purple::ObserveArchiveDelete(_session, PeerId(), d.vmessages().v, d.vpts().v);
 		_session->data().processNonChannelMessagesDeleted(d.vmessages().v);
 	} break;
 
@@ -1423,6 +1425,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 
 	case mtpc_updateEditChannelMessage: {
 		auto &d = update.c_updateEditChannelMessage();
+		Purple::ObserveArchiveEdit(_session, d.vmessage(), d.vpts().v, true);
 		_session->data().updateEditedMessage(d.vmessage());
 	} break;
 
@@ -1439,6 +1442,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 
 	case mtpc_updateEditMessage: {
 		auto &d = update.c_updateEditMessage();
+		Purple::ObserveArchiveEdit(_session, d.vmessage(), d.vpts().v, false);
 		_session->data().updateEditedMessage(d.vmessage());
 	} break;
 
@@ -1449,6 +1453,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 
 	case mtpc_updateDeleteChannelMessages: {
 		auto &d = update.c_updateDeleteChannelMessages();
+		Purple::ObserveArchiveDelete(_session, peerFromChannel(d.vchannel_id().v), d.vmessages().v, d.vpts().v);
 		_session->data().processMessagesDeleted(
 			peerFromChannel(d.vchannel_id().v),
 			d.vmessages().v);
@@ -1577,6 +1582,7 @@ void Updates::applyUpdates(
 			if (const auto item = lookupMessage()) {
 				_session->data().fillMessagePeers(item->fullId(), d);
 				item->applySentMessage(sent.text, d, wasAlready);
+				Purple::ObserveArchiveShortSent(_session, item, d);
 			}
 		}
 

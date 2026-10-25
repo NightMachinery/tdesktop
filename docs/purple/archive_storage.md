@@ -112,6 +112,32 @@ destroyStaleAuthorizationKeys at intro/intro_start.cpp:33 and
 main/main_account.cpp:603-613 before fresh sign-in. Failed native reset can
 reload stale upstream authorization; its next server rejection repeats revocation.
 
+## Explicit per-account recovery
+
+Purple settings always shows "Discard this account's archive and start fresh",
+including for refused records, with a strong confirmation that all retained
+messages, edit history and owned media for this account will be permanently
+deleted. Refusal notices name the action. It does not modify Telegram chat data.
+
+Confirmation captures the opening session, account, worker instance, nonce and
+live key set. A switched window, newer login/worker, changed context or repeated
+callback refuses. On confirmation the old worker is stopped, its keys and
+pending deliveries are revoked immediately, and a background wait has a 500 ms
+limit. The main thread never waits. Under the account lock, a discard token
+captures the profile and account-directory identities, exact account record and
+fence digest. Cleanup checks every fence again, and targets only the derived
+account directory. It cannot follow a malformed record's store path into another
+account or discard a newer incarnation. The existing removal state machine and
+bounded pages perform deletion, with a 500 ms cooperative cleanup budget.
+Cancellation on logout/session loss/key-set change stops further actions. Kernel
+IO is not preemptible; it remains off the main thread.
+
+Only completed cleanup permits a new random nonce and empty store. Failure stays
+visibly held; invoking the action again obtains a fresh fenced continuation.
+A missing or corrupt record can therefore recover without weakening automatic
+admission. Unreadable profile/catalogue metadata that cannot be snapshotted
+safely still refuses. Other accounts and unbound profile roots are never swept.
+
 ## Logout cleanup
 
 A worker attempts keyless removal at logout, including when no capture worker
@@ -160,3 +186,101 @@ leaves a visible held state. The client does not request elevation or silently
 claim a directory flush succeeded. Native Windows runtime qualification remains
 pending. References: [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)
 and [volume handles](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+
+## Capture and edit history
+
+Accepted edit/delete dispatch writes an encrypted, bounded outbox before
+upstream mutation. File publication, file sync and parent-directory sync form
+the write-ahead barrier. This is synchronous local IO of a bounded record, so a
+slow disk can delay that barrier. Updates continue after a failed barrier with
+a visible gap; they never wait for a database lock or queue retry. A generic
+encrypted attention marker preserves queue/append failures when its small write
+can succeed. Failure to retain even that marker remains visible for the session.
+
+One dedicated writer thread per session drains at most 64 queued observations.
+Its stable sequence is persisted before each entry and is replayed unchanged.
+Accepted pts, message identity and semantic content distinguish edit identities,
+including same-second A-to-B-to-A. Replay checks committed receipts before
+retiring entries. A new retry does not recapture account or purge generations.
+Matching invalid/stale observations hold or record a gap; cancelled sessions
+cannot recreate a removed archive. Work and deliveries are revoked immediately at logout; queued work is
+discarded and a self-owned worker attempts bounded account removal.
+
+Baseline creation, current preimages and explicit accepted edits are distinct.
+A live preimage supplies a partial baseline when there is no retained head.
+A retained head avoids synthesizing another preimage from a less complete UI
+representation. Changed unbound history responses and quality refreshes cannot
+become authored edits or replace a newer head; they can leave an explicit gap.
+Message views, reactions, file references, access hashes and alternative document
+qualities remain in observation payloads, outside ordinary document/photo body
+comparison. Rich page blocks retain semantic structure separately from their
+transport catalogues. Unsupported structures are labelled opaque or partial.
+Original source Markdown is never invented from rendered or received text.
+Sender and reply parents retain typed identities and full-width string ids;
+forum topic projection uses the actual parent, and album ids remain full-width.
+
+Explicit channel deletes retain their full addressed identity. Non-channel
+server IDs are resolved only through authenticated rows for this account's
+original received messages, including evicted live messages. Missing or ambiguous
+identity records a gap instead of deleting an arbitrary archive message.
+
+Available document files/bytes and photo bytes can be copied by the existing
+writer after observation. It issues no network or auto-download calls. Size,
+whole hash, generation, owning descriptor and every encrypted chunk must agree
+before a Complete reference commits. A cache source that disappears or changes
+stays incomplete. Later lifecycle/download-completion hooks belong to M3B3.
+
+View Edit History captures the opening session, account, chat and message. It
+reads 32 versions at a time without reconstructing live HistoryItems. Cursor,
+revision and store checks refuse mixed snapshots. Account-window replacement,
+logout and view disposal cancel delivery. The current viewer is a selectable text
+preview, limited to 8 KiB per version; it labels partial/opaque bodies and owned
+attachment counts. Full structured bodies remain encrypted in storage. Native
+rich rendering, attachment opening and accessibility/layout checks are not
+qualified by the headless fixture.
+
+Cached-file capture carries the registered file's native identity, size and
+modification time. Opening verifies the descriptor itself, not just a pathname,
+and hashing checks that descriptor again. A replaced path or changed file is not
+accepted as the document's downloaded bytes. Immutable available memory bytes
+are retained by value. UI page delivery also carries the worker operation ticket;
+a newer operation or stop revokes an already queued response before rendering.
+
+Media work retains the observation id and canonical content hash. It resolves an
+authenticated historical version, never the app's newer head merely because a
+media identity matches. Persisted jobs bind exact version, revision, content hash
+and purge generation; completion also checks the captured external store epoch.
+A valid historical copy can finish after a newer version arrives without filling
+the newer reference or cancelling its independent job. Revision/hydration changes
+cancel obsolete staging; old job ids cannot be rebound. Lifecycle events retain
+the captured epoch/media binding through the encrypted outbox, and SQL capture
+checks a fresh executor epoch. Dedicated expiry/download/view/purge UX remains
+in the later batches; their new core APIs and format-2 projections are registered.
+
+## Review failure boundaries
+
+Runtime journal replay failure preserves its encrypted outbox evidence and
+writes a durable attention marker where storage allows. The service reports a
+visible RetentionGap with the replay reason instead of an empty Ready notice.
+History pages expose the gap after restart as well.
+
+Delayed already-available media lookup matches the authenticated historical
+version ID or observation revision. It scans bounded authenticated version
+pages under one revision fence, then checks exact content hash, media identity,
+account and current epoch again. Plaintext index hints alone never select it.
+
+Short send acknowledgements are captured only after local message-ID adoption
+and acknowledged fields are applied. Their observed baseline remains Partial;
+the short TL evidence is retained. Repeated acknowledgements enrich metadata
+without inventing an authored edit.
+
+The existing synchronous outbox fsync cost remains a disclosed follow-up.
+
+## Windows non-admin follow-up
+
+The checked writable-volume metadata barrier is a temporary capability refusal
+for ordinary non-admin Windows users. It never delays or vetoes logout.
+A separately reviewed non-admin atomic publication and recovery design remains
+a follow-up. It must state and qualify the power-loss guarantees for rename and
+deletion metadata; silently skipping the directory barrier is not equivalent.
+No such design or Windows runtime qualification is included here.

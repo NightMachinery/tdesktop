@@ -204,3 +204,30 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_auto_local_failure" = "Automatic sync stopped because local sync data could not be read or saved. Its recovery checkpoint is kept. Check this account manually.";
 "lng_purple_auto_context_changed" = "Automatic sync stopped because this account's settings source, Work Mode or account context changed. Check the account again.";
+
+"lng_purple_archive_storage" = "Message archive for this account";
+"lng_purple_archive_usage" = "At least {size} bytes in encrypted archive files. Removed on logout. No expiry.";
+"lng_purple_archive_gap" = "Some observations could not be retained. History may be incomplete.";
+"lng_purple_archive_opening" = "Opening local encrypted archive…";
+"lng_purple_archive_unavailable" = "Archive unavailable: local data or its key could not be safely opened. New observations are not retained. To recover, use Discard this account's archive and start fresh in Purple settings.";
+"lng_purple_archive_removal_pending" = "The local archive could not be fully removed. Recovery will finish removal before this archive can open again.";
+
+"lng_purple_archive_history" = "View Edit History";
+"lng_purple_archive_history_notice" = "History starts when this client observes a message. It may be incomplete. This view does not change chat history or unread state.";
+"lng_purple_archive_baseline" = "Observed baseline";
+"lng_purple_archive_edit" = "Observed edit";
+"lng_purple_archive_complete" = "Body retained";
+"lng_purple_archive_partial" = "Partial observation";
+"lng_purple_archive_opaque" = "Unsupported structure retained";
+"lng_purple_archive_missing_preimage" = "The earlier body was not observed.";
+"lng_purple_archive_structure" = "Structured content is retained. This preview shows text only.";
+"lng_purple_archive_preview_limit" = "Preview shortened. The retained version contains the full body.";
+"lng_purple_archive_media" = "Owned attachments: {owned} of {total}.";
+"lng_purple_archive_history_changed" = "History is unavailable or changed while loading. Reopen it to refresh.";
+"lng_purple_archive_history_empty" = "No retained version was found. Older observations may be missing.";
+"lng_purple_archive_older" = "Older versions";
+
+"lng_purple_archive_discard" = "Discard this account's archive and start fresh";
+"lng_purple_archive_discard_confirm" = "Permanently delete all retained messages, edit history and owned media for this account, and start a new empty archive? This cannot be undone. Other accounts are not affected.";
+"lng_purple_archive_discard_failed" = "Archive discard could not safely finish. The archive remains held. Try Discard this account's archive and start fresh again in Purple settings.";
+"lng_purple_archive_discard_button" = "Discard archive";

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
+#include "purple/purple_archive_capture.h"
 #include "purple/hooks/history.h"
 
 #include "history/view/history_view_element.h"
@@ -576,6 +577,7 @@ not_null<HistoryItem*> History::createItem(
 		MessageFlags localFlags,
 		bool detachExistingItem,
 		bool newMessage) {
+	Purple::ObserveArchiveMessage(&session(), message, id, localFlags);
 	owner().fillMessagePeers(peer->id, message);
 	if (const auto result = owner().message(peer, id)) {
 		if (detachExistingItem) {

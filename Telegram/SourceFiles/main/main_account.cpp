@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
+#include "purple/purple_archive_service.h"
 
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
@@ -525,6 +526,7 @@ void Account::logOut() {
 	if (_loggingOut) {
 		return;
 	}
+	Purple::RemoveArchiveAtLogout(*this);
 	_loggingOut = true;
 	if (_mtp) {
 		_mtp->logout([=] { loggedOut(); });
@@ -540,6 +542,7 @@ bool Account::loggingOut() const {
 
 void Account::forcedLogOut() {
 	if (sessionExists()) {
+		Purple::RemoveArchiveAtLogout(*this);
 		resetAuthorizationKeys();
 		loggedOut();
 	}
