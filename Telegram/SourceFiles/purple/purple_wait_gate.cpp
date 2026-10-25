@@ -39,11 +39,14 @@ bool WaitRequired(
 		WaitAction action,
 		bool same,
 		bool fromBypass,
-		bool toBypass) {
+		bool toBypass,
+		bool onlyTightening) {
 	if (same) {
 		return false;
 	}
 	switch (action) {
+	case WaitAction::ChangePeekOption:
+		return !onlyTightening;
 	case WaitAction::EndPeek:
 		return false;
 	case WaitAction::ChangePreset:
@@ -101,7 +104,8 @@ WaitResult WaitGate::request(WaitOperation operation, int64_t now) {
 		operation.action,
 		false,
 		operation.fromBypass,
-		operation.toBypass)
+		operation.toBypass,
+		operation.onlyTightening)
 		? std::max(operation.delaySeconds, 0) : 0;
 	_until = now + int64_t(delay) * 1000;
 	_operation = std::move(operation);

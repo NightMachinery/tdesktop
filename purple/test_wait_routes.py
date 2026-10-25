@@ -16,6 +16,21 @@ class WaitRoutes(unittest.TestCase):
                 with self.subTest(name=name, prefix=prefix):
                     self.assertEqual(inventory(f'{prefix}{name} \n (input);'), {name: 1})
 
+    def test_generic_table_splices_with_any_receiver(self):
+        for name in ('SetTable', 'SetTable2', 'SetTableBool', 'SetTableString', 'SetTableInt', 'SetTableFutureKey'):
+            for prefix in ('', 'Purple::', 'Renamed::', 'any.', 'something->', 'factory().'):
+                with self.subTest(name=name, prefix=prefix):
+                    self.assertEqual(inventory(f'{prefix}{name}(text, path, table, key, value);'), {name: 1})
+
+    def test_option_writes_cannot_hide_behind_receivers_or_table_aliases(self):
+        baseline = inventory('SetPeekStartDelay(text, path, 10); SetTableBool(text, path, "other", "key", true);')
+        for extra in (
+                'Alias::SetPeekStartDelay(text, path, 0);',
+                'renamed.SetPeekStartDelay(text, path, 0);',
+                'SetTableBool(text, path, "peek", "exit_hidden_chats_p", false);',
+                'renamed.SetTableString(text, path, tableAlias, keyAlias, value);'):
+            self.assertNotEqual(inventory('SetPeekStartDelay(text, path, 10); SetTableBool(text, path, "other", "key", true);' + extra), baseline)
+
     def test_preset_assignment(self):
         for prefix in ('', 'fresh.', 'pointer->', 'someNamespace::'):
             self.assertEqual(inventory(prefix + 'activePreset = value;'), {'activePreset=': 1})
@@ -41,7 +56,7 @@ class WaitRoutes(unittest.TestCase):
             code = '''
                 constexpr auto kKey = "purple-peek-end-on-focus-loss";
                 const auto kAlias = kKey;
-                void RequestPeekFocusLossChange(bool enabled) {
+                void RequestPeekOptionChange(bool enabled) {
                     RequestWait({.apply = [=] { settings().writePref<bool>(KEY, enabled); }});
                 }
             '''.replace('KEY', key)
@@ -70,7 +85,7 @@ class WaitRoutes(unittest.TestCase):
             purple.mkdir()
             baseline = '''
                 constexpr auto kKey = "purple-peek-end-on-focus-loss";
-                void RequestPeekFocusLossChange(bool enabled) {
+                void RequestPeekOptionChange(bool enabled) {
                     RequestWait({.apply = [=] { settings().writePref<bool>(kKey, enabled); }});
                 }
             '''
@@ -90,6 +105,14 @@ class WaitRoutes(unittest.TestCase):
             rejected = run()
             self.assertEqual(rejected.returncode, 1, rejected.stdout)
             self.assertIn('ungatedPeekFocusWrite', rejected.stdout)
+            for call in (
+                    'SetPeekStartDelay(text, path, 0);',
+                    'Renamed::SetPeekStartDelay(text, path, 0);',
+                    'writer.SetTableBool(text, path, "peek", "exit_hidden_chats_p", false);',
+                    'pointer->SetTableString(text, path, alias, key, value);'):
+                source.write_text(baseline + 'void DirectOption() {' + call + '}')
+                rejected = run()
+                self.assertEqual(rejected.returncode, 1, rejected.stdout)
 
 
 if __name__ == '__main__':

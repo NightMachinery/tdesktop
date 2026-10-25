@@ -37,6 +37,18 @@ struct AppWideSettingsEditorState;
 	return captured;
 }
 
+struct PeekOptionChange {
+	std::optional<int> startDelaySeconds;
+	std::optional<bool> exitHiddenChats;
+	std::optional<bool> endOnFocusLoss;
+};
+
+void RequestPeekOptionChange(
+	PeekOptionChange change,
+	const std::shared_ptr<AppWideSettingsEditorState> &editor,
+	not_null<Main::Session*> session,
+	std::function<bool()> editorCurrent = {});
+
 struct WaitRequest {
 	WaitAction action = WaitAction::StartPeek;
 	Main::Session *session = nullptr;
@@ -44,6 +56,8 @@ struct WaitRequest {
 	QString preset;
 	std::shared_ptr<AppWideSettingsEditorState> editor;
 	bool same = false;
+	bool onlyTightening = false;
+	bool writesSettings = false;
 	bool fromBypass = false;
 	bool toBypass = false;
 	std::function<QString()> validate;

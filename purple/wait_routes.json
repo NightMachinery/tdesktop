@@ -1,6 +1,7 @@
 {
   "Telegram/SourceFiles/purple/purple_account_config.cpp": {
     "SetAccountWorkMode": 1,
+    "SetTableBool": 1,
     "activateGlobalChoice": 1,
     "commitGlobalChoice": 1,
     "writeWorkMode": 1
@@ -11,6 +12,7 @@
     "writeWorkMode": 1
   },
   "Telegram/SourceFiles/purple/purple_config.cpp": {
+    "SetTableBool": 1,
     "UpdateState": 1,
     "activateGlobalChoice": 1,
     "activePreset=": 1,
@@ -45,6 +47,8 @@
     "ActivatePeekFor": 1,
     "DeactivatePeek": 3,
     "ExtendPeek": 1,
+    "SetPeekStartDelay": 1,
+    "SetTableBool": 1,
     "UpdateState": 1,
     "activePreset=": 1,
     "writePref<peek-focus-loss>": 1
@@ -57,15 +61,31 @@
   "Telegram/SourceFiles/purple/purple_schedule.cpp": {
     "UpdateState": 2
   },
+  "Telegram/SourceFiles/purple/purple_schedule_box.cpp": {
+    "SetTableBool": 1,
+    "SetTableString": 2
+  },
+  "Telegram/SourceFiles/purple/purple_screentime_box.cpp": {
+    "SetTableBool": 1
+  },
   "Telegram/ThirdParty/purple_core/purple/purple_engine.cpp": {
     "StopPeek": 1,
     "activePreset=": 4
   },
+  "Telegram/ThirdParty/purple_core/purple/purple_settings.cpp": {
+    "SetTables": 1
+  },
   "Telegram/ThirdParty/purple_core/purple/purple_splice.cpp": {
-    "SetAccountWorkMode": 1
+    "SetAccountWorkMode": 1,
+    "SetPeekStartDelay": 1,
+    "SetTableBool": 1,
+    "SetTableString": 1
   },
   "Telegram/ThirdParty/purple_core/purple/purple_splice.h": {
-    "SetAccountWorkMode": 1
+    "SetAccountWorkMode": 1,
+    "SetPeekStartDelay": 1,
+    "SetTableBool": 1,
+    "SetTableString": 1
   },
   "Telegram/ThirdParty/purple_core/purple/purple_state.cpp": {
     "ExtendPeek": 1,

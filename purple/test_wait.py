@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import shlex
@@ -35,11 +37,28 @@ flags += ['-I', str(private_versions[-1])]
 source = (repo / 'Telegram/SourceFiles/purple/purple_peek_controls.cpp').read_text()
 read_start = source.index('bool PeekEndsOnFocusLoss()')
 read_end = source.index('\nrpl::producer<bool> PeekFocusLossValue()', read_start)
-write_start = source.index('void RequestPeekFocusLossChange(')
-write_end = source.index('\nWaitResult RequestWait(', write_start)
+def function(signature):
+    begin = source.index(signature)
+    position = source.index('{', begin) + 1
+    depth = 1
+    while depth:
+        depth += (source[position] == '{') - (source[position] == '}')
+        position += 1
+    return source[begin:position]
 pref_key = next(line for line in source.splitlines() if line.startswith('constexpr auto kPeekFocusLossPref ='))
-(work / 'peek-focus-preference.inc').write_text(pref_key + '\n' + source[read_start:read_end] + '\n' + source[write_start:write_end])
+(work / 'peek-focus-preference.inc').write_text(pref_key + '\n' + source[read_start:read_end] + '\n' + '\n'.join(function(signature) for signature in (
+    'void RequestPeekOptionChange(', 'void RequestPeekFocusLossChange(', 'void RequestPeekDelayChange(')))
+config_source = (repo / 'Telegram/SourceFiles/purple/purple_config.cpp').read_text()
+begin = config_source.index('WriteResult Config::write(')
+end = config_source.index('std::optional<AccountSettingsWriteTarget> Config::checkedInput', begin)
+(work / 'peek-config-write.inc').write_text(config_source[begin:end].replace('WriteResult Config::write(', 'WriteResult PortConfig::write(', 1))
 flags += ['-I', str(work)]
+inputs = ('purple/test_wait.cpp', 'purple/test_wait.py',
+    'Telegram/SourceFiles/purple/purple_wait_gate.h', 'Telegram/SourceFiles/purple/purple_wait_gate.cpp',
+    'Telegram/SourceFiles/purple/purple_wait_key_filter.h', 'Telegram/SourceFiles/purple/purple_wait_key_filter.cpp',
+    'Telegram/SourceFiles/purple/purple_config.cpp', 'Telegram/SourceFiles/purple/purple_config.h',
+    'Telegram/SourceFiles/purple/purple_peek_controls.h', 'Telegram/SourceFiles/purple/purple_peek_controls.cpp')
+source_hashes = {path: hashlib.sha256((repo / path).read_bytes()).hexdigest() for path in inputs}
 objects = []
 with (work / 'build.log').open('w') as log:
     for relative in ('purple/test_wait.cpp', 'Telegram/SourceFiles/purple/purple_wait_gate.cpp', 'Telegram/SourceFiles/purple/purple_wait_key_filter.cpp'):
@@ -49,6 +68,12 @@ with (work / 'build.log').open('w') as log:
         objects.append(str(target))
     objects += [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o'))]
     subprocess.run([recipe[0], *flags, '-Wl,-dead_strip', *objects, '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-Wl,-rpath,' + str(frameworks), '-o', str(work / 'test_wait')], check=True, stdout=log, stderr=subprocess.STDOUT)
+if any(hashlib.sha256((repo / path).read_bytes()).hexdigest() != digest for path, digest in source_hashes.items()):
+    raise RuntimeError('Wait fixture source changed while compiling; retry from the stable snapshot')
+(work / 'inputs.json').write_text(json.dumps({
+    'source_sha256': source_hashes,
+    'binary_sha256': hashlib.sha256((work / 'test_wait').read_bytes()).hexdigest(),
+    'boundary': 'Exact production option request and wrappers, native WaitGate/PeekFocusGate/key filter and real Qt/RPL/core splices. Controlled account/editor/file and preference ports; no real settings files, visible GUI, live account or network.'}, indent=2) + '\n')
 if args.build_only:
     raise SystemExit(0)
 env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QT_PLUGIN_PATH=str(frameworks.parent / 'plugins'))

@@ -171,7 +171,8 @@ WriteResult WriteSettingsGuarded(
 	const AccountSettingsWriteTarget &expected,
 	Fn<SpliceResult(const QString &text)> splice,
 	const QString &what,
-	const std::function<bool()> &originCurrent = {});
+	const std::function<bool()> &originCurrent = {},
+	const std::function<bool()> &committedCurrent = {});
 
 using AccountListPreviewNotes = Fn<QString(const QByteArray&, const QByteArray&)>;
 [[nodiscard]] AccountListPreviewNotes CaptureOwnListPreviewNotes(

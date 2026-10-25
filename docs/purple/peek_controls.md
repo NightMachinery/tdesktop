@@ -40,11 +40,26 @@ recovery immediately because its effective preset is already Normal.
 The deliberately coarse rule and the sync
 and automation exemptions are described in [Work Mode waits](work_mode_wait.md).
 
-Changing start delay uses that same cover and waits for the greater of the old
-and new effective delays. Abort keeps the previous setting. Completing a delay
-change writes only that setting, without starting Peek. A zero-to-zero explicit
-configuration commits immediately. Unsupported TOML edits refuse rather than
+All three dedicated option editors use `RequestPeekOptionChange` on that same
+cover engine. Increasing start delay, enabling exit-hidden and enabling the local
+focus option are restrictive and instant. Decreases, disabling either option
+and mixed changes wait; delay edits use the greater of old and new effective delays. Abort keeps the previous setting. Completing a delay
+change writes only that setting, without starting Peek. Effective no-ops, including an absent delay resolving to the same ten seconds,
+are validated immediately and write nothing. Unsupported TOML edits refuse rather than
 rewriting unrelated content.
+
+## Whole-file boundary
+
+The option request gates only the dedicated in-app exit-hidden, start-delay and
+local focus editors. Manual Import, Sync Apply/version/adoption, History
+Undo/Restore, incoming sync and external editor saves remain exempt when they
+replace the app-wide file. An external save is applied by the disk watcher
+without staging a countdown. Source choices retain the existing Work Mode
+bypass rule, not a comparison of individual Peek values. Own files cannot
+override `[peek]`; the remaining duration/hotkey/lock keys have no dedicated
+Desktop editor. None of these file routes contains the local focus preference.
+A changed source or input invalidates a pending option request. See
+[Work Mode waits](work_mode_wait.md#dedicated-peek-option-editors).
 
 ## Shared schema and mobile integration
 
@@ -66,7 +81,8 @@ layouts. `SetTableBool` edits the exit option. No binary fields were inserted.
 Android must bind these same accessors and schema, keep one lifecycle-owned
 pending activation for all routes, and validate the current account, host,
 preset and locks at completion. Start the real duration only at completion.
-Apply delay changes after max(old,new), with abort retaining the old value.
+Apply only-tightening and no-op edits instantly through the request; other edits
+wait, with delay decreases using max(old,new) and Abort retaining the old value.
 The required mobile End Peek strip button appears only during active Peek and
 ends it immediately. The desktop change does not implement that Android UI.
 
@@ -103,8 +119,8 @@ At countdown completion, exact disk-input validation can synchronously notify
 subscribers and cancel pending state. The operation generation is checked after
 that validation, then local copies of the originating context and requested action
 are rechecked after cancellation. No cleared pending fields are used to activate
-Peek or change its delay. Changing a delay still waits max(old, new); Abort keeps
-the old file value.
+Peek or change its delay. A loosening option change waits, with delay decreases using max(old,new); Abort
+keeps the old shared and local values.
 
 Supported settings splice writes compare their expected input before splicing and again
 after writing the QSaveFile temporary, immediately before commit. A stale input
@@ -147,7 +163,7 @@ tuple the core uses to distinguish a new start from a no-op. A live state reload
 that replaces its deadline drops the old grace and starts a fresh two seconds if
 Telegram is still inactive. Unrelated state reloads do not extend that grace.
 The writer inventory covers both literal and locally aliased writes of the local
-preference. Every write stays inside RequestPeekFocusLossChange, including instant
+preference. Every write stays inside RequestPeekOptionChange, including instant
 enabling; a direct disable outside it fails the route guard.
 
 The headless wait fixture covers Qt application-state delivery, a second in-app
@@ -155,3 +171,12 @@ window, both grace boundaries, ten seconds inactive with the option off, immedia
 locks with it on, quiet countdown cancellation and restrictive/loosening setting
 changes. Native focus/file-dialog and lock delivery remain platform qualification;
 the tests do not launch Telegram.
+
+Dedicated Peek option writes keep separate precommit and completion checks.
+Precommit compares the opening values and exact input. After the synchronous
+reload, completion checks the intended new shared values, the opening editor
+and account authority, and the fresh exact write target. A successful write
+refreshes that editor target before any mixed device-local preference write.
+Later edits from the same open editor use the refreshed target. Other settings
+writers retain their existing completion checks unless they supply a separate
+committed-value check.

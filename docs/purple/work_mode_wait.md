@@ -14,8 +14,11 @@ There is no comparison of list, folder, story or notification policies.
 An app-wide source choice waits when its existing review says it enters Normal.
 
 Desktop and Android default to ten seconds when the value is absent. An explicit
-value, including zero, applies to both. Changing the delay itself waits for the
-longer of old and new. There is no separate Work Mode delay setting. Desktop reuses the shared
+value, including zero, applies to both. Increasing the delay is restrictive and
+instant through the option request.
+Decreasing it waits for the longer of old and new. Effective no-ops are instant
+without writing, including an absent value resolving to the same ten seconds.
+There is no separate Work Mode delay setting. Desktop reuses the shared
 `kPeekStartDelayMobileDefaultSeconds = 10` constant. Android declares it in
 `TMessagesProj/jni/purple/purple/purple_engine.h:714` and exports its resolved
 value as `peekStartDelay` in `TMessagesProj/jni/purple_jni/jni_bridge.cpp:1320`.
@@ -46,7 +49,7 @@ Work Mode waits retain the opening account when the displayed account changes.
 Logout, session replacement, source/role changes, changed file identities or
 inputs and changed device state invalidate the capture. Preset selection is
 still device-wide; Own/Follow/Stock selection is still account-specific.
-Peek and delay-edit waits retain their stricter selected-account guard.
+Peek and option-edit waits retain their stricter selected-account guard.
 
 Incoming settings sync is exempt: it applies without a countdown or arrival
 hold. The initiating device gates its own Work Mode UI. Per-account mode and
@@ -57,10 +60,42 @@ in advance. Editing their configuration remains a settings operation. An exempt
 apply cancels a pending request whose captured context changes. No automation
 opens a countdown.
 
+## Dedicated Peek option editors
+
+`RequestPeekOptionChange` is the common entry for the in-app start-delay,
+exit-hidden and local focus-end editors. It uses `RequestWait`, the same cover
+and cancellation engine as Work Mode changes. Increasing a delay and enabling
+exit-hidden or focus-end only tighten behavior, so they apply instantly. Any
+loosening or mixed change waits; a changed delay uses `max(old,new)` so shortening
+cannot buy a cheaper countdown. No-ops pass through validation and write nothing.
+Abort writes neither the shared file nor the local preference. These edits do
+not start, restart or extend Peek.
+
+Shared edits carry the opening app-wide editor and exact file target. Both
+instant and delayed paths revalidate the editor, selected account/session,
+source and input. The local focus preference uses the same engine and opening
+account/editor guards, with no writable settings-file requirement. A later
+capture never redirects an older pending edit.
+
+The scope is the dedicated editors only. Manual downloaded-settings Import,
+manual Sync Apply and version/adoption choices, History Undo/Restore, incoming
+sync and external editor saves remain exempt whole-file routes. They can change
+app-wide `[peek]` values without an option countdown. The disk watcher does not
+stage external saves for review. Own files cannot override global `[peek]`.
+Source selection keeps its existing Work Mode bypass classification rather than
+comparing individual Peek options. Duration, hotkey and lock values have no
+other dedicated Desktop editor and remain configurable through those file routes.
+No exemption writes the device-local focus preference. An exempt apply still
+invalidates a pending request when its captured input changes.
+
 `purple/check_wait_routes.py` checks a reviewed inventory of called writer
 spellings and active-preset assignments across production Desktop/core sources.
 It matches unqualified calls, namespace-qualified calls and every receiver
-spelling, including declarations. `purple/wait_routes.json` records the
+spelling, including declarations. `SetPeekStartDelay` and every `SetTable*` call
+are inventoried conservatively even when their table/key is aliased. Non-Peek
+schedule/device labels, screen-time, Premium, per-account row edits and core
+declarations are reviewed inventory entries, not newly gated operations. The
+core parser's `SetTables` type construction is a deliberate conservative match. `purple/wait_routes.json` records the
 inventory. Request completion, guarded writer implementations, core resolution,
 schedule/Focus, Last Seen Peek and automatic Peek termination are the reviewed
 non-UI writers. Comments and string literals are excluded. This is a syntactic
@@ -88,7 +123,8 @@ errors remain explicit.
 Core::Settings preference. Enabling it is restrictive and instant. Disabling it is
 loosening and goes through the same Work Mode wait; an aborted change keeps it on.
 It is not in settings.toml, account state or sync and requires no core schema change.
-The Peek settings section contains the toggle and explanation.
+The Peek settings section contains the toggle and explanation. Both directions
+and no-ops delegate to `RequestPeekOptionChange`.
 
 When enabled, an already active Peek ends after 2 seconds of application inactivity;
 returning sooner keeps it. Telegram's other windows and file dialogs do not end an
@@ -96,3 +132,12 @@ active Peek while the application stays active. Passcode, screen and OS session
 lock end it immediately. When disabled, focus loss leaves active Peek untouched,
 and existing lock policy applies. The ordinary End Peek path still applies the
 hidden-chat exit option. Android does not have this option yet.
+
+Dedicated Peek option writes keep separate precommit and completion checks.
+Precommit compares the opening values and exact input. After the synchronous
+reload, completion checks the intended new shared values, the opening editor
+and account authority, and the fresh exact write target. A successful write
+refreshes that editor target before any mixed device-local preference write.
+Later edits from the same open editor use the refreshed target. Other settings
+writers retain their existing completion checks unless they supply a separate
+committed-value check.

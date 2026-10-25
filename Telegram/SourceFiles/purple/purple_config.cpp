@@ -372,7 +372,8 @@ public:
 		const Fn<SpliceResult(const QString&)> &op,
 		const QString &what,
 		const std::optional<AccountSettingsWriteTarget> &expected = std::nullopt,
-		const std::function<bool()> &originCurrent = {});
+		const std::function<bool()> &originCurrent = {},
+		const std::function<bool()> &committedCurrent = {});
 	[[nodiscard]] std::optional<AccountSettingsWriteTarget> checkedInput(QString *error = nullptr);
 	void observeAccountFiles() { autoSendLater(); }
 	void refreshAccountRows() { _accountRefreshPending = true; reloadFromDisk(); }
@@ -714,7 +715,8 @@ WriteResult Config::write(
 		const Fn<SpliceResult(const QString&)> &op,
 		const QString &what,
 		const std::optional<AccountSettingsWriteTarget> &expected,
-		const std::function<bool()> &originCurrent) {
+		const std::function<bool()> &originCurrent,
+		const std::function<bool()> &committedCurrent) {
 	Expects(op != nullptr);
 	auto error = QString();
 	const auto input = expected ? expected : checkedInput(&error);
@@ -747,7 +749,9 @@ WriteResult Config::write(
 		observeAccountFiles();
 		ShowOfflineGlobalEditBulletin();
 	}
-	if (!current() || !result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
+	const auto completionCurrent = ConfigDirectory() == input->destination.root
+		&& (committedCurrent ? committedCurrent() : !originCurrent || originCurrent());
+	if (!completionCurrent || !result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
 		return { .error = u"Settings context changed after writing."_q };
 	}
 	return { .ok = true, .target = result.target };
@@ -980,8 +984,9 @@ WriteResult WriteSettingsGuarded(
 		const AccountSettingsWriteTarget &expected,
 		Fn<SpliceResult(const QString &text)> splice,
 		const QString &what,
-		const std::function<bool()> &originCurrent) {
-	return Instance().write(splice, what, expected, originCurrent);
+		const std::function<bool()> &originCurrent,
+		const std::function<bool()> &committedCurrent) {
+	return Instance().write(splice, what, expected, originCurrent, committedCurrent);
 }
 
 AppWideSettingsEditor CaptureAppWideSettingsEditor(not_null<QObject*> context) {

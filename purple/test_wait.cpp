@@ -1,6 +1,7 @@
 #include "purple/purple_wait_gate.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_state.h"
+#include "purple/purple_splice.h"
 #include "purple/purple_wait_key_filter.h"
 
 #include <QtCore/QCoreApplication>
@@ -36,11 +37,31 @@ void Check(bool ok, int line) {
 
 #define CHECK(expression) Check(bool(expression), __LINE__)
 
+QString operator""_q(const char16_t *text, size_t size) { return QString::fromUtf16(text, int(size)); }
+
 namespace FocusPreferenceProbe {
 
 namespace Main { struct Session {}; }
 template <typename T> using not_null = T;
-
+enum class SettingsOpenRole { AppWide, Own };
+struct AccountSettingsWriteTarget {
+	struct {
+		struct { QString path = QString::fromLatin1("settings.toml"); } file;
+		QString root = QString::fromLatin1("fixture");
+		SettingsOpenRole role = SettingsOpenRole::AppWide;
+		int requester = 1;
+	} destination;
+	int identity = 0;
+};
+struct AppWideSettingsEditorState {
+	std::optional<AccountSettingsWriteTarget> target;
+	std::function<bool()> originCurrent;
+};
+struct PeekOptionChange {
+	std::optional<int> startDelaySeconds;
+	std::optional<bool> exitHiddenChats;
+	std::optional<bool> endOnFocusLoss;
+};
 struct LocalSettings {
 	bool present = false;
 	bool value = false;
@@ -51,9 +72,7 @@ struct LocalSettings {
 	}
 	template <typename T> void writePref(const char *key, bool next) {
 		CHECK(QByteArray(key) == "purple-peek-end-on-focus-loss");
-		present = true;
-		value = next;
-		++writes;
+		present = true; value = next; ++writes;
 	}
 };
 namespace Core {
@@ -68,58 +87,288 @@ Application &App() { static auto app = Application(); return app; }
 namespace tr {
 inline constexpr auto now = 0;
 QString lng_purple_wait_context_changed(int) { return QString::fromLatin1("context changed"); }
+QString lng_purple_wait_editor_closed(int) { return QString::fromLatin1("editor closed"); }
+QString lng_purple_wait_delay_invalid(int) { return QString::fromLatin1("invalid delay"); }
 }
-struct Changes {
-	int delivered = 0;
-	void fire_copy(bool) { ++delivered; }
-} FocusLossChanges;
+struct Changes { int delivered = 0; void fire_copy(bool) { ++delivered; } } FocusLossChanges;
 struct WaitRequest {
 	WaitAction action = WaitAction::StartPeek;
 	Main::Session *session = nullptr;
+	int seconds = 0;
+	std::shared_ptr<AppWideSettingsEditorState> editor;
 	bool same = false;
-	bool toBypass = false;
+	bool onlyTightening = false;
+	bool writesSettings = false;
 	std::function<QString()> validate;
 	std::function<QString(const std::function<bool()>&)> apply;
 };
 auto Gate = WaitGate();
 auto Last = WaitResult();
+auto Loaded = Settings();
+auto Text = QString();
+auto FileIdentity = 1;
+auto AccountIdentity = 1;
+auto FileWrites = 0;
+auto UsedTarget = 0;
+auto FileFails = false;
+std::function<void()> BeforeCommit;
+const Settings &ActiveSettings() { return Loaded; }
+struct WriteResult {
+	bool ok = false;
+	QString error;
+	std::optional<AccountSettingsWriteTarget> target;
+};
+template <typename Signature> using Fn = std::function<Signature>;
+std::function<void()> AfterReload;
+auto CompletionChecks = 0;
+QString ConfigDirectory() { return QString::fromLatin1("fixture"); }
+void ShowOfflineGlobalEditBulletin() { if (AfterReload) AfterReload(); }
+struct RoutingPort {
+	bool validateSettingsEdit(const AccountSettingsWriteTarget &target) { return target.identity == FileIdentity; }
+	std::optional<AccountSettingsWriteTarget> settingsEditTarget(int, SettingsOpenRole, QString*) {
+		return AccountSettingsWriteTarget{.identity = FileIdentity};
+	}
+	struct Result : WriteResult { bool changed = false; };
+	template <typename F> Result writeSettingsEdit(const AccountSettingsWriteTarget &target, F splice, const std::function<bool()> &current) {
+		UsedTarget = target.identity;
+		if (!current() || target.identity != FileIdentity || FileFails) return {{.error = QString::fromLatin1("stale or held")}};
+		const auto result = splice(Text);
+		if (!result.ok()) return {{.error = result.error}};
+		if (BeforeCommit) BeforeCommit();
+		if (!current() || target.identity != FileIdentity) return {{.error = QString::fromLatin1("stale")}};
+		const auto changed = result.text != Text;
+		if (changed) { Text = result.text; ++FileWrites; ++FileIdentity; }
+		return {{true, {}, AccountSettingsWriteTarget{ .identity = FileIdentity }}, changed};
+	}
+};
+RoutingPort &AccountRouting() { static auto port = RoutingPort(); return port; }
+struct PortConfig {
+	WriteResult write(const Fn<SpliceResult(const QString&)> &op, const QString &what,
+		const std::optional<AccountSettingsWriteTarget> &expected,
+		const std::function<bool()> &originCurrent,
+		const std::function<bool()> &committedCurrent);
+	std::optional<AccountSettingsWriteTarget> checkedInput(QString*) { return std::nullopt; }
+	void observeAccountFiles() {}
+	void refreshAccountRows() {
+		const auto parsed = ParseSettings(Text, QString()); CHECK(parsed.ok()); Loaded = parsed.settings;
+	}
+};
+#ifndef Expects
+#define Expects(value) CHECK(value)
+#define PURPLE_TEST_EXPECTS
+#endif
+#define LOG(...) (void)0
+#include "peek-config-write.inc"
+#undef LOG
+#ifdef PURPLE_TEST_EXPECTS
+#undef Expects
+#undef PURPLE_TEST_EXPECTS
+#endif
+
+template <typename F>
+WriteResult WriteSettingsGuarded(const AccountSettingsWriteTarget &target, F splice, const QString &what,
+		const std::function<bool()> &current, const std::function<bool()> &committed) {
+	return PortConfig().write(splice, what, target, current, [=] { ++CompletionChecks; return committed(); });
+}
 WaitResult RequestWait(WaitRequest request) {
-	CHECK(request.action == WaitAction::ChangePeekFocus);
-	Last = Gate.request({.action = request.action, .delaySeconds = 10,
-		.same = request.same, .toBypass = request.toBypass,
-		.validate = request.validate, .apply = request.apply}, 0);
+	CHECK(request.action == WaitAction::ChangePeekOption);
+	const auto openingAccount = AccountIdentity;
+	const auto target = request.editor ? request.editor->target : std::nullopt;
+	const auto origin = [=] {
+		return openingAccount == AccountIdentity
+			&& (!request.writesSettings || (request.editor && request.editor->originCurrent
+				&& request.editor->originCurrent() && target && target->identity == FileIdentity));
+	};
+	Last = Gate.request({
+		.action = request.action,
+		.delaySeconds = std::max(PeekWaitDelaySeconds(Loaded), request.seconds),
+		.same = request.same,
+		.onlyTightening = request.onlyTightening,
+		.validate = [=] { return !origin() ? tr::lng_purple_wait_context_changed(0) : request.validate(); },
+		.originCurrent = [=] { return openingAccount == AccountIdentity; },
+		.apply = request.apply,
+	}, 0);
 	return Last;
 }
 
+void RequestPeekOptionChange(PeekOptionChange, const std::shared_ptr<AppWideSettingsEditorState>&, not_null<Main::Session*>, std::function<bool()> = {});
+
 #include "peek-focus-preference.inc"
+
+auto Reset(int delay = 10, bool exit = true, bool focus = false) {
+	Gate.cancel(); BeforeCommit = AfterReload = nullptr; CompletionChecks = 0; FileIdentity = AccountIdentity = 1; FileWrites = UsedTarget = 0; FileFails = false;
+	Core::App() = Core::Application(); Core::App().local.present = true; Core::App().local.value = focus;
+	FocusLossChanges.delivered = 0;
+	Text = QString::fromLatin1("version=1\n[peek]\nstart_delay_seconds=%1\nexit_hidden_chats_p=%2\n")
+		.arg(delay).arg(exit ? QString::fromLatin1("true") : QString::fromLatin1("false"));
+	Loaded = ParseSettings(Text, QString()).settings;
+	auto editor = std::make_shared<AppWideSettingsEditorState>();
+	editor->target = AccountSettingsWriteTarget{.identity = FileIdentity};
+	editor->originCurrent = [] { return true; };
+	return editor;
+}
 
 void Cases() {
 	auto session = Main::Session();
-	auto editor = true;
-	CHECK(!PeekEndsOnFocusLoss());
-	RequestPeekFocusLossChange(true, &session, [&] { return editor; });
-	CHECK(Last.outcome == WaitOutcome::Applied);
-	CHECK(PeekEndsOnFocusLoss() && Core::App().local.writes == 1);
-	CHECK(Core::App().saves == 1 && FocusLossChanges.delivered == 1);
-	RequestPeekFocusLossChange(false, &session, [&] { return editor; });
-	CHECK(Last.outcome == WaitOutcome::Pending);
-	CHECK(PeekEndsOnFocusLoss() && Core::App().local.writes == 1);
-	CHECK(Gate.tick(0, false).error.isEmpty());
-	CHECK(Gate.tick(10000).outcome == WaitOutcome::NoOp);
-	CHECK(PeekEndsOnFocusLoss() && Core::App().local.writes == 1);
-	RequestPeekFocusLossChange(false, &session, [&] { return editor; });
-	CHECK(Last.outcome == WaitOutcome::Pending);
-	editor = false;
-	CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused);
-	CHECK(PeekEndsOnFocusLoss() && Core::App().local.writes == 1);
-	editor = true;
-	RequestPeekFocusLossChange(false, &session, [&] { return editor; });
-	CHECK(Last.outcome == WaitOutcome::Pending);
-	CHECK(Gate.tick(9999).outcome == WaitOutcome::Pending);
-	CHECK(PeekEndsOnFocusLoss());
-	CHECK(Gate.tick(10000).outcome == WaitOutcome::Applied);
-	CHECK(!PeekEndsOnFocusLoss() && Core::App().local.writes == 2);
-	CHECK(Core::App().saves == 2 && FocusLossChanges.delivered == 2);
+	{
+		auto editor = Reset();
+		RequestPeekDelayChange(20, editor, &session);
+		std::printf("POSTWRITE: outcome=%d writes=%d delay=%d editorTarget=%d liveTarget=%d\n",
+			int(Last.outcome), FileWrites, PeekWaitDelaySeconds(Loaded), editor->target->identity, FileIdentity);
+		CHECK(Last.outcome == WaitOutcome::Applied && FileWrites == 1);
+		CHECK(CompletionChecks == 1 && editor->target->identity == FileIdentity);
+		RequestPeekOptionChange({.exitHiddenChats = false, .endOnFocusLoss = true}, editor, &session, {});
+		CHECK(Last.outcome == WaitOutcome::Pending);
+		CHECK(Gate.tick(20000).outcome == WaitOutcome::Applied);
+		CHECK(CompletionChecks == 2 && editor->target->identity == FileIdentity);
+		CHECK(!PeekExitHiddenChats(Loaded) && PeekEndsOnFocusLoss());
+		RequestPeekDelayChange(10, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::Pending);
+		CHECK(Gate.tick(20000).outcome == WaitOutcome::Applied);
+		CHECK(CompletionChecks == 3 && editor->target->identity == FileIdentity);
+	}
+	{
+		auto editor = Reset(); auto reenter = false;
+		editor->originCurrent = [&] { if (reenter) Gate.cancel(); return true; };
+		AfterReload = [&] { reenter = true; };
+		RequestPeekDelayChange(20, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 1);
+		CHECK(editor->target->identity == 1);
+	}
+	for (const auto changed : {0, 1, 2}) {
+		auto editor = Reset();
+		BeforeCommit = [&] {
+			if (changed == 0) Loaded.peek.startDelaySeconds = 20;
+			else if (changed == 1) Loaded.peek.exitHiddenChats = false;
+			else Core::App().local.value = true;
+		};
+		RequestPeekOptionChange({.startDelaySeconds = 20, .exitHiddenChats = false, .endOnFocusLoss = true}, editor, &session, {});
+		CHECK(Last.outcome == WaitOutcome::Pending);
+		CHECK(Gate.tick(20000).outcome == WaitOutcome::Refused);
+		CHECK(FileWrites == 0 && Core::App().local.writes == 0 && CompletionChecks == 0);
+	}
+	for (const auto stale : {0, 1, 2, 3, 4, 5}) {
+		auto editor = Reset(); auto open = true; editor->originCurrent = [&] { return open; };
+		AfterReload = [&] {
+			if (stale == 0) ++AccountIdentity;
+			else if (stale == 1) open = false;
+			else if (stale == 2) Loaded.peek.startDelaySeconds = 30;
+			else if (stale == 3) Core::App().local.value = true;
+			else if (stale == 4) ++FileIdentity;
+			else Gate.cancel();
+		};
+		RequestPeekOptionChange({.startDelaySeconds = 20, .endOnFocusLoss = true}, editor, &session, {});
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 1);
+		CHECK(Core::App().local.writes == 0);
+		CHECK(editor->target->identity == 1);
+	}
+
+	for (const auto oldDelay : {0, 10, 20}) for (const auto nextDelay : {0, 10, 20}) {
+		for (const auto oldExit : {false, true}) for (const auto nextExit : {false, true}) {
+			for (const auto oldFocus : {false, true}) for (const auto nextFocus : {false, true}) {
+				auto editor = Reset(oldDelay, oldExit, oldFocus);
+				const auto original = Text;
+				const auto same = oldDelay == nextDelay && oldExit == nextExit && oldFocus == nextFocus;
+				const auto tightening = nextDelay >= oldDelay && (!oldExit || nextExit) && (!oldFocus || nextFocus);
+				const auto delay = std::max(oldDelay, nextDelay);
+				const auto request = [&] {
+					RequestPeekOptionChange({nextDelay, nextExit, nextFocus}, editor, &session, {});
+				};
+				request();
+				if (same) {
+					CHECK(Last.outcome == WaitOutcome::NoOp);
+				} else if (tightening || !delay) {
+					CHECK(Last.outcome == WaitOutcome::Applied);
+				} else {
+					CHECK(Last.outcome == WaitOutcome::Pending);
+					CHECK(Text == original && FileWrites == 0 && Core::App().local.writes == 0);
+					Gate.cancel(); CHECK(Gate.tick(int64_t(delay) * 1000).outcome == WaitOutcome::NoOp);
+					CHECK(Text == original && FileWrites == 0 && Core::App().local.writes == 0);
+					request(); CHECK(Gate.tick(int64_t(delay) * 1000 - 1).outcome == WaitOutcome::Pending);
+					CHECK(Gate.tick(int64_t(delay) * 1000).outcome == WaitOutcome::Applied);
+				}
+				CHECK(PeekWaitDelaySeconds(Loaded) == nextDelay);
+				CHECK(PeekExitHiddenChats(Loaded) == nextExit);
+				CHECK(PeekEndsOnFocusLoss() == nextFocus);
+				CHECK(FileWrites == int(oldDelay != nextDelay || oldExit != nextExit));
+				CHECK(Core::App().local.writes == int(oldFocus != nextFocus));
+				CHECK(editor->target->identity == FileIdentity);
+				CHECK(CompletionChecks == FileWrites);
+			}
+		}
+	}
+	{
+		Reset(); Core::App().local.present = false;
+		CHECK(!PeekEndsOnFocusLoss());
+		RequestPeekFocusLossChange(true, &session, {});
+		CHECK(Last.outcome == WaitOutcome::Applied && Core::App().local.writes == 1);
+	}
+	{
+		auto editor = Reset(); auto open = true;
+		editor->originCurrent = [&] { return open; };
+		BeforeCommit = [&] { open = false; };
+		RequestPeekDelayChange(20, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 0);
+		CHECK(PeekWaitDelaySeconds(Loaded) == 10);
+	}
+	{
+		auto editor = Reset(); auto reenter = false;
+		editor->originCurrent = [&] { if (reenter) Gate.cancel(); return true; };
+		BeforeCommit = [&] { reenter = true; };
+		RequestPeekDelayChange(20, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 0);
+		CHECK(PeekWaitDelaySeconds(Loaded) == 10);
+	}
+	for (const auto stale : {0, 1, 2, 3}) {
+		auto editor = Reset(); auto open = true; editor->originCurrent = [&] { return open; };
+		RequestPeekOptionChange({.exitHiddenChats = false}, editor, &session, {});
+		CHECK(Last.outcome == WaitOutcome::Pending);
+		if (stale == 0) open = false;
+		else if (stale == 1) ++AccountIdentity;
+		else if (stale == 2) ++FileIdentity;
+		else Loaded.peek.exitHiddenChats = false;
+		CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused); CHECK(FileWrites == 0);
+	}
+	{
+		auto editor = Reset();
+		RequestPeekOptionChange({.exitHiddenChats = false}, editor, &session, {});
+		editor->target->identity = 77;
+		CHECK(Gate.tick(10000).outcome == WaitOutcome::Applied);
+		CHECK(UsedTarget == 1 && FileWrites == 1);
+	}
+	{
+		auto editor = Reset(); editor->target.reset();
+		RequestPeekOptionChange({.exitHiddenChats = false}, editor, &session, {});
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 0);
+		RequestPeekDelayChange(-1, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 0);
+	}
+	{
+		auto editor = Reset(); Text = QString::fromLatin1("version=1\n"); Loaded = ParseSettings(Text, QString()).settings;
+		RequestPeekDelayChange(10, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::NoOp && FileWrites == 0);
+		CHECK(Text == QString::fromLatin1("version=1\n"));
+	}
+	{
+		auto editor = Reset(); FileFails = true;
+		RequestPeekOptionChange({.exitHiddenChats = false, .endOnFocusLoss = true}, editor, &session, {});
+		CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused);
+		CHECK(FileWrites == 0 && Core::App().local.writes == 0);
+	}
+	{
+		Reset(); auto open = true;
+		RequestPeekFocusLossChange(true, &session, [&] { return open; });
+		CHECK(Last.outcome == WaitOutcome::Applied && PeekEndsOnFocusLoss());
+		RequestPeekFocusLossChange(true, &session, [&] { return open; });
+		CHECK(Last.outcome == WaitOutcome::NoOp && Core::App().local.writes == 1);
+		RequestPeekFocusLossChange(false, &session, [&] { return open; });
+		CHECK(Last.outcome == WaitOutcome::Pending); Gate.cancel();
+		CHECK(Gate.tick(10000).outcome == WaitOutcome::NoOp && PeekEndsOnFocusLoss());
+		RequestPeekFocusLossChange(false, &session, [&] { return open; }); open = false;
+		CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused && PeekEndsOnFocusLoss());
+		open = true; RequestPeekFocusLossChange(false, &session, [&] { return open; });
+		CHECK(Gate.tick(10000).outcome == WaitOutcome::Applied && !PeekEndsOnFocusLoss());
+	}
 }
 
 }
@@ -302,7 +551,7 @@ void GateCases() {
 		CHECK(WaitRequired(action, false, false, false));
 	}
 	for (const auto action : { WaitAction::StartPeek, WaitAction::ExtendPeek,
-		WaitAction::ChangeDelay, WaitAction::ChangePreset,
+		WaitAction::ChangePeekOption, WaitAction::ChangePreset,
 		WaitAction::ChangeAccountMode, WaitAction::ChangeGlobalAccount, WaitAction::ChangePeekFocus }) {
 		CHECK(WaitOriginValid(action, { true, true, true }));
 		CHECK(!WaitOriginValid(action, { false, true, true }));
@@ -311,7 +560,7 @@ void GateCases() {
 	}
 	CHECK(WaitRequired(WaitAction::ChangeGlobalAccount, false, false, true));
 	CHECK(!WaitRequired(WaitAction::ChangeGlobalAccount, false, false, false));
-	for (const auto action : { WaitAction::StartPeek, WaitAction::ExtendPeek, WaitAction::ChangeDelay }) {
+	for (const auto action : { WaitAction::StartPeek, WaitAction::ExtendPeek, WaitAction::ChangePeekOption }) {
 		CHECK(WaitRequired(action, false, true, false));
 	}
 	auto gate = WaitGate();
@@ -472,7 +721,7 @@ void PeekCases() {
 		for (const auto newDelay : { 0, 10, 20 }) {
 			auto writes = 0;
 			auto delay = WaitOperation{
-				.action = WaitAction::ChangeDelay,
+				.action = WaitAction::ChangePeekOption,
 				.delaySeconds = std::max(oldDelay, newDelay),
 				.validate = [] { return QString(); },
 				.apply = [&](const std::function<bool()> &current) {

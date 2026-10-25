@@ -17,7 +17,7 @@ enum class WaitAction {
 	StartPeek,
 	ExtendPeek,
 	EndPeek,
-	ChangeDelay,
+	ChangePeekOption,
 	ChangePreset,
 	ChangeAccountMode,
 	ChangeGlobalAccount,
@@ -44,7 +44,8 @@ struct WaitResult {
 	WaitAction action,
 	bool same,
 	bool fromBypass,
-	bool toBypass);
+	bool toBypass,
+	bool onlyTightening = false);
 
 void FinishNoOpWait(const WaitResult &result, const std::function<void()> &finished);
 
@@ -52,6 +53,7 @@ struct WaitOperation {
 	WaitAction action = WaitAction::StartPeek;
 	int delaySeconds = 0;
 	bool same = false;
+	bool onlyTightening = false;
 	bool fromBypass = false;
 	bool toBypass = false;
 	std::function<QString()> validate;

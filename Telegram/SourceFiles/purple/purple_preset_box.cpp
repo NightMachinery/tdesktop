@@ -723,9 +723,6 @@ void PresetBox(
 		object_ptr<Ui::Checkbox>(container, tr::lng_purple_peek_end_on_focus(tr::now),
 			PeekEndsOnFocusLoss(), st::defaultCheckbox), padding);
 	endOnFocus->checkedChanges() | rpl::on_next([=](bool enabled) {
-		if (enabled == PeekEndsOnFocusLoss()) {
-			return;
-		}
 		if (const auto live = originSession.get()) {
 			RequestPeekFocusLossChange(enabled, not_null{live}, [=] {
 				return !editContext.isNull();
@@ -747,23 +744,12 @@ void PresetBox(
 			st::defaultCheckbox),
 		padding);
 	exitHidden->checkedChanges() | rpl::on_next([=](bool checked) {
-		if (checked == PeekExitHiddenChats(ActiveSettings())) {
-			return;
+		if (const auto live = originSession.get()) {
+			RequestPeekOptionChange({ .exitHiddenChats = checked }, editor, not_null{ live });
 		}
-		const auto result = WriteSettingsFromEditor(editor, [=](const QString &text) {
-			return SetTableBool(
-				text,
-				SettingsFilePath(),
-				u"peek"_q,
-				u"exit_hidden_chats_p"_q,
-				checked);
-		}, u"Exit hidden chats when peek ends"_q, [=] { return !editContext.isNull(); });
-		if (editContext && !result.ok) {
-			exitHidden->setChecked(
-				PeekExitHiddenChats(ActiveSettings()),
-				Ui::Checkbox::NotifyAboutChange::DontNotify);
-			box->uiShow()->showBox(Ui::MakeInformBox(result.error));
-		}
+		exitHidden->setChecked(
+			PeekExitHiddenChats(ActiveSettings()),
+			Ui::Checkbox::NotifyAboutChange::DontNotify);
 	}, exitHidden->lifetime());
 	SettingsChanges() | rpl::on_next([=] {
 		exitHidden->setChecked(

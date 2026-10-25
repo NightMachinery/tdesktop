@@ -9,10 +9,10 @@ WRITERS = (
     'StartPeek', 'ExtendPeek', 'StopPeek', 'ActivatePeekFor',
     'ActivatePeekExtension', 'DeactivatePeek', 'writeWorkMode', 'SetAccountWorkMode',
     'switchGlobalAccount', 'commitGlobalChoice', 'activateGlobalChoice',
-    'UpdateState',
+    'UpdateState', 'SetPeekStartDelay',
 )
 TOKENS = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|R"(?P<tag>[^ ()\\\t\r\n]{0,16})\([\s\S]*?\)(?P=tag)"|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
-CALL = re.compile(r'\b(' + '|'.join(WRITERS) + r')\s*\(')
+CALL = re.compile(r'\b(' + '|'.join(WRITERS) + r'|SetTable\w*)\s*\(')
 PRESET = re.compile(r'\bactivePreset\s*=(?!=)')
 FOCUS_KEY = '__PEEK_FOCUS_PREFERENCE_KEY__'
 PREFERENCE_WRITE = re.compile(r'\bwritePref\s*(?:<[^;{}]+?>)?\s*\(([^,;]+),')
@@ -33,7 +33,7 @@ def focus_write_inventory(text):
         if expanded == aliases:
             break
         aliases = expanded
-    guarded = re.search(r'\bvoid\s+RequestPeekFocusLossChange\s*\([^;{]*\)\s*\{', code)
+    guarded = re.search(r'\bvoid\s+RequestPeekOptionChange\s*\([^;{]*\)\s*\{', code)
     begin = guarded.end() if guarded else -1
     end = begin
     depth = 1

@@ -117,7 +117,7 @@ WaitCover::WaitCover(
 , _abortCallback(std::move(abort))
 , _title(
 	this,
-	action == WaitAction::ChangeDelay
+	action == WaitAction::ChangePeekOption
 		? tr::lng_purple_peek_delay_changing()
 		: action == WaitAction::StartPeek
 		? tr::lng_purple_peek_starting()
@@ -338,10 +338,11 @@ WaitResult PendingWait::request(WaitRequest request) {
 	auto inputError = QString();
 	const auto needsInput = action != WaitAction::ChangeAccountMode
 		&& action != WaitAction::ChangeGlobalAccount
-		&& action != WaitAction::ChangePeekFocus;
+		&& action != WaitAction::ChangePeekFocus
+		&& (action != WaitAction::ChangePeekOption || request.writesSettings);
 	const auto input = !needsInput
 		? std::optional<AccountSettingsWriteTarget>()
-		: action == WaitAction::ChangeDelay
+		: action == WaitAction::ChangePeekOption
 		? request.editor ? request.editor->target : std::nullopt
 		: SettingsInputForOperation(&inputError);
 	const auto external = request.validate;
@@ -372,7 +373,8 @@ WaitResult PendingWait::request(WaitRequest request) {
 		if (SerializeState(CurrentState()) != state || AccountWorkModeForSession(live) != mode) {
 			return tr::lng_purple_wait_context_changed(tr::now);
 		}
-		if (action == WaitAction::ChangeDelay && (!editor || !editor->originCurrent || !editor->originCurrent())) {
+		if (action == WaitAction::ChangePeekOption && needsInput
+			&& (!editor || !editor->originCurrent || !editor->originCurrent())) {
 			return tr::lng_purple_wait_editor_closed(tr::now);
 		}
 		if (needsInput && (!input || !ValidateSettingsInput(*input))) {
@@ -399,7 +401,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 		return result;
 	}
 	auto delay = PeekWaitDelaySeconds(ActiveSettings());
-	if (action == WaitAction::ChangeDelay) {
+	if (action == WaitAction::ChangePeekOption) {
 		if (seconds < 0) {
 			const auto result = WaitResult{ WaitOutcome::Refused,
 				tr::lng_purple_wait_delay_invalid(tr::now) };
@@ -407,7 +409,6 @@ WaitResult PendingWait::request(WaitRequest request) {
 			return result;
 		}
 		delay = std::max(delay, seconds);
-		request.same = ActiveSettings().peek.startDelaySeconds == seconds;
 	} else if (action == WaitAction::ChangePreset) {
 		request.same = CurrentState().activePreset == request.preset;
 		request.fromBypass = ActiveResolved().normal;
@@ -449,18 +450,6 @@ WaitResult PendingWait::request(WaitRequest request) {
 			if (!details::ActivatePeekExtension(seconds).extended) {
 				return tr::lng_purple_wait_peek_unavailable(tr::now);
 			}
-		} else if (action == WaitAction::ChangeDelay) {
-			const auto result = WriteSettingsGuarded(
-				*input,
-				[=](const QString &text) {
-					return SetPeekStartDelay(text, input->destination.file.path, seconds);
-				},
-				u"Peek start delay"_q,
-				current);
-			if (!result.ok) {
-				return result.error;
-			}
-			editor->target = result.target;
 		} else if (action == WaitAction::ChangePreset) {
 			UpdateState([&](State &updated) {
 				updated.activePreset = request.preset;
@@ -483,6 +472,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 		.action = action,
 		.delaySeconds = delay,
 		.same = request.same,
+		.onlyTightening = request.onlyTightening,
 		.fromBypass = request.fromBypass,
 		.toBypass = request.toBypass,
 		.validate = validate,
@@ -604,28 +594,103 @@ rpl::producer<bool> PeekFocusLossValue() {
 	return rpl::single(PeekEndsOnFocusLoss()) | rpl::then(FocusLossChanges.events());
 }
 
-void RequestPeekFocusLossChange(bool enabled, not_null<Main::Session*> session,
-	std::function<bool()> editorCurrent) {
-	const auto opening = PeekEndsOnFocusLoss();
+void RequestPeekOptionChange(
+		PeekOptionChange change,
+		const std::shared_ptr<AppWideSettingsEditorState> &editor,
+		not_null<Main::Session*> session,
+		std::function<bool()> editorCurrent) {
+	const auto target = editor ? editor->target : std::nullopt;
+	const auto openingDelay = PeekWaitDelaySeconds(ActiveSettings());
+	const auto openingExit = PeekExitHiddenChats(ActiveSettings());
+	const auto openingFocus = PeekEndsOnFocusLoss();
+	const auto nextDelay = change.startDelaySeconds.value_or(openingDelay);
+	const auto nextExit = change.exitHiddenChats.value_or(openingExit);
+	const auto nextFocus = change.endOnFocusLoss.value_or(openingFocus);
+	const auto writesSettings = change.startDelaySeconds.has_value()
+		|| change.exitHiddenChats.has_value();
+	const auto validateValues = [=](bool committed) -> QString {
+		const auto expectedDelay = committed ? nextDelay : openingDelay;
+		const auto expectedExit = committed ? nextExit : openingExit;
+		if (writesSettings && (!target || !editor || !editor->originCurrent || !editor->originCurrent())) {
+			return tr::lng_purple_wait_editor_closed(tr::now);
+		}
+		if (nextDelay < 0) {
+			return tr::lng_purple_wait_delay_invalid(tr::now);
+		}
+		if ((editorCurrent && !editorCurrent())
+			|| (change.startDelaySeconds && PeekWaitDelaySeconds(ActiveSettings()) != expectedDelay)
+			|| (change.exitHiddenChats && PeekExitHiddenChats(ActiveSettings()) != expectedExit)
+			|| (change.endOnFocusLoss && PeekEndsOnFocusLoss() != openingFocus)) {
+			return tr::lng_purple_wait_context_changed(tr::now);
+		}
+		return {};
+	};
+	const auto validate = [=] { return validateValues(false); };
 	RequestWait({
-		.action = WaitAction::ChangePeekFocus,
+		.action = WaitAction::ChangePeekOption,
 		.session = session,
-		.same = enabled == opening,
-		.toBypass = !enabled,
-		.validate = [opening, editorCurrent] {
-			return PeekEndsOnFocusLoss() == opening && (!editorCurrent || editorCurrent())
-				? QString() : tr::lng_purple_wait_context_changed(tr::now);
-		},
-		.apply = [enabled, opening](const std::function<bool()> &current) {
-			if (!current() || PeekEndsOnFocusLoss() != opening) {
+		.seconds = nextDelay,
+		.editor = editor,
+		.same = nextDelay == openingDelay
+			&& nextExit == openingExit && nextFocus == openingFocus,
+		.onlyTightening = nextDelay >= openingDelay
+			&& (!openingExit || nextExit) && (!openingFocus || nextFocus),
+		.writesSettings = writesSettings,
+		.validate = validate,
+		.apply = [=](const std::function<bool()> &current) -> QString {
+			const auto valid = [=] { return current() && validate().isEmpty() && current(); };
+			const auto committed = [=] {
+				return current() && validateValues(true).isEmpty() && current();
+			};
+			if (!valid()) {
 				return tr::lng_purple_wait_context_changed(tr::now);
 			}
-			Core::App().settings().writePref<bool>(kPeekFocusLossPref, enabled);
-			Core::App().saveSettingsDelayed();
-			FocusLossChanges.fire_copy(enabled);
-			return QString();
+			if (nextDelay != openingDelay || nextExit != openingExit) {
+				const auto result = WriteSettingsGuarded(
+					*target,
+					[=](const QString &text) {
+						auto result = SpliceResult{ .text = text };
+						if (nextDelay != openingDelay) {
+							result = SetPeekStartDelay(
+								result.text,
+								target->destination.file.path,
+								nextDelay);
+						}
+						if (result.ok() && nextExit != openingExit) {
+							const auto changed = result.changed;
+							result = SetTableBool(result.text, target->destination.file.path,
+								u"peek"_q, u"exit_hidden_chats_p"_q, nextExit);
+							result.changed = result.changed || changed;
+						}
+						return result;
+					},
+					u"Peek options"_q,
+					valid,
+					committed);
+				if (!result.ok) {
+					return result.error;
+				}
+				editor->target = result.target;
+			}
+			if (nextFocus != openingFocus) {
+				Core::App().settings().writePref<bool>(kPeekFocusLossPref, nextFocus);
+				Core::App().saveSettingsDelayed();
+				FocusLossChanges.fire_copy(nextFocus);
+			}
+			return {};
 		},
 	});
+}
+
+void RequestPeekFocusLossChange(
+		bool enabled,
+		not_null<Main::Session*> session,
+		std::function<bool()> editorCurrent) {
+	RequestPeekOptionChange(
+		{ .endOnFocusLoss = enabled },
+		nullptr,
+		session,
+		std::move(editorCurrent));
 }
 
 WaitResult RequestWait(WaitRequest request) {
@@ -636,12 +701,7 @@ void RequestPeekDelayChange(
 		int seconds,
 		const std::shared_ptr<AppWideSettingsEditorState> &editor,
 		not_null<Main::Session*> session) {
-	RequestWait({
-		.action = WaitAction::ChangeDelay,
-		.session = session,
-		.seconds = seconds,
-		.editor = editor,
-	});
+	RequestPeekOptionChange({ .startDelaySeconds = seconds }, editor, session);
 }
 
 void CloseHiddenPeekChats() {
