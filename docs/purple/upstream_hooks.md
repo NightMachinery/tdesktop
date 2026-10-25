@@ -1368,3 +1368,12 @@ two-slice memory budget before bytes arrive, and late parts for retired slices
 are rejected. No plaintext enters the shared cache. Ordinary native readers keep
 their default policy. The constructor and private hooks provide the small extension
 needed to carry this policy through native fill and part delivery.
+
+
+### Dedicated deleted-messages menu
+
+`window/window_peer_menu.cpp` adds one include and one call to
+`Purple::AddArchiveChatActions` after the existing dialog menu filler. The owned
+menu adapter selects supported parent/topic contexts and captures trusted
+migration links; all read-only archive queries, rendering and authority checks
+live in Purple files. No upstream menu logic is moved or restructured.

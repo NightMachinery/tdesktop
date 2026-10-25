@@ -413,7 +413,7 @@ subsequent store progress retries it. Active maintenance is not mistaken for an
 absent lease: retirement requires a positive exact-id absence proof with normal
 admission. A purge can hold release until its lease phase has advanced. Logout and
 account discard revoke all handles and delete the owned store, including staging.
-The dedicated Deleted messages view and purge executor remain the next batch.
+The dedicated Deleted messages view is described below. Purge remains a separate batch.
 
 Headless fixtures exercise the actual native encrypted store, range/export IO,
 endpoint, loader and service callback bodies with controlled executor scheduling.
@@ -466,3 +466,72 @@ crash, torn-source, logout/discard and stale-generation cases remain in place.
 
 Follow-up: every arrival still reseals its full 256 KiB window. Changing that
 requires its own durable publication and crash-consistency design and review.
+
+## Deleted messages view
+
+The chat menu opens a dedicated read-only Deleted messages box. It never inserts
+snapshots into Telegram history, dialogs, notifications, search or forwarding.
+The ordinary scope is Received/original for the addressed parent and explicit
+migration links published by that account. A topic menu filters that actual
+parent topic; the same numeric topic in a migration alias is a different scope.
+Account, typed parent, aliases, topic, representation, opening login/controller,
+Work Mode and app-wide source remain fenced across every asynchronous boundary.
+
+The account worker owns a separate read-only SQLite connection for each view.
+It admits format and actual DDL in the same read transaction used for all pages,
+authenticates shell/head frames against returned row identities, and restores
+body chunks through that connection. A missing authenticated head or body is a
+visible refusal, never an empty tombstone fallback. Chronological/reverse pages
+use all three cursor fields, with limits of 1 through 128. The UI retains one
+32-row page. Later writes can offer Refresh without changing its snapshot.
+
+Views share the existing 16-reader budget with media access. A 30-second idle
+expiry closes them on the worker's five-second idle sweep; the UI independently
+clears expired content and actions. Refresh/disposal posts bounded cleanup and
+revokes delivery immediately. Logout revokes every published view flag at once,
+and the worker closes all read connections before writer close or removal.
+No GUI thread waits for a journal, database, media operation or fsync.
+
+Counts use the seven checked int64 projections; admission/query failure displays
+Unavailable rather than zero. Logical retained size scans at most 128 unique
+referenced blobs per request, authenticates Complete frames and canonical uint64
+sizes, and checks summation overflow. Continue advances an incomplete scan.
+Logical bytes include the scoped retained archive, not only deleted bodies.
+Physical database/WAL/SHM/staging usage remains separate; neither value predicts
+space freed by a purge. Bodyless tombstones say no body was captured. Badges and
+times describe observed deletion/expiry/consumption, without inventing an actor,
+exact server deletion time or Markdown source. History and owned Open/Save carry
+the full authenticated row key and media generations from the displayed page.
+
+`purple/test_archive.py --views --use-build-objects` qualifies the real private
+SQLite/crypto/body/query adapters and the literal scope comparator on temporary
+stores. Native menus, layout, accessibility and playback need separate native
+qualification; no live profile is required for these fixtures.
+
+The deleted-view worker also prepares bounded text excerpts and computes each
+head content hash once off-main. Full authenticated heads and row-wrapper
+metadata remain in the query result for exact history/media capabilities;
+attachment buttons retain only the small request and revocation flag.
+
+Committed writes validate each deleted view's live generation and maintenance
+admission inside Execute, before returning to the worker dispatcher. An affected
+view's shared active flag is cleared at that boundary, so queued pages and
+already displayed actions refuse immediately. Ordinary writes retain the
+independent snapshot and can offer Refresh. Validation continues through all
+views even if one connection fails to close. Expiry sweeps run between busy
+tasks as well as during idle periods and remain a backstop. The signed-id
+fixture uses an explicitly synthetic core Secret namespace only to qualify
+storage tuples; Desktop still captures no secret-chat transport evidence.
+
+### Independent History revocation
+
+A History box owns a separate account/store/chat-generation capability, even
+when opened from Deleted messages. Closing its parent does not close History.
+Execute checks registered History capabilities in the same worker step as
+deleted snapshots and media. A purge/admission or generation change revokes
+queued results and shown actions, and posts a main-queue notification to clear
+and close the History box without another read. Ordinary writes retain the
+capability; pagination still checks its own revision. Up to 64 independent
+History capabilities are admitted, with inactive entries removed before reuse.
+Logout/discard/close revoke them before database closure. No UI database read
+is introduced.

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
+#include "purple/purple_archive_menu.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_chat_menus.h"
 
@@ -4152,6 +4153,7 @@ void FillDialogsEntryMenu(
 		Dialogs::EntryState request,
 		const PeerMenuCallback &callback) {
 	Filler(controller, request, callback).fill();
+	Purple::AddArchiveChatActions(controller, request, callback);
 }
 
 bool FillVideoChatMenu(

@@ -254,3 +254,34 @@ docs/purple/upstream_hooks.md.
 "lng_purple_wait_editor_closed" = "The settings editor closed. Open it again.";
 "lng_purple_wait_peek_unavailable" = "Peek is unavailable: Work Mode is off, or this Peek has ended, has no timer, or is at its limit.";
 "lng_purple_wait_delay_invalid" = "The start delay must be a non-negative whole number of seconds.";
+
+"lng_purple_archive_deleted" = "Deleted messages";
+"lng_purple_archive_deleted_scope" = "Account: {account}\nChat: {chat}";
+"lng_purple_archive_deleted_notice" = "Local archive only. This is a fixed snapshot of messages observed as deleted, expired or consumed. Observation times do not identify who deleted a message or its exact server deletion time. Refresh after 30 seconds of inactivity. No messages are restored to Telegram.";
+"lng_purple_archive_topic_filter" = "Showing only topic {topic} of this parent chat.";
+"lng_purple_archive_deleted_badge" = "Deleted";
+"lng_purple_archive_expired" = "Expired";
+"lng_purple_archive_consumed" = "Consumed";
+"lng_purple_archive_deleted_observed" = "{status}, observed {date}";
+"lng_purple_archive_no_body" = "No body was captured for this message.";
+"lng_purple_archive_not_captured" = "Not captured";
+"lng_purple_archive_deleted_context" = "Sender: {sender} · Reply: {reply} · Topic: {topic}";
+"lng_purple_archive_query_busy" = "The archive is busy or its reader limit is reached. Refresh to try again.";
+"lng_purple_archive_refresh_required" = "This snapshot expired or was revoked. Refresh is required.";
+"lng_purple_archive_query_future" = "This archive requires a newer version of Purple Telegram.";
+"lng_purple_archive_query_schema" = "This archive has an unsupported schema. It has not been changed.";
+"lng_purple_archive_query_failed" = "The archive could not be authenticated or read. This is a retention gap, not an empty archive. Refresh to try again.";
+"lng_purple_archive_deleted_counts" = "Tracked messages: {messages}; deleted: {deleted}; versions: {versions}; prior versions: {prior}; complete attachments: {owned}/{total}; distinct blobs: {blobs}.";
+"lng_purple_archive_logical_usage" = "Verified logical retained bytes: {size}. This excludes physical database, WAL and staging overhead and is not a promise of freed space.";
+"lng_purple_archive_usage_pending" = "The retained-size scan is incomplete. Continue to scan the next bounded page.";
+"lng_purple_archive_refresh_available" = "Newer observations are available. Refresh to include them.";
+"lng_purple_archive_deleted_history" = "View edit history for message {id}";
+"lng_purple_archive_deleted_attachment" = "Message {id}, attachment {index}: Open / Save";
+"lng_purple_archive_deleted_empty" = "No deleted messages on this page.";
+"lng_purple_archive_deleted_next" = "Continue";
+"lng_purple_archive_refresh" = "Refresh";
+
+"lng_purple_archive_peer_user" = "User {id}";
+"lng_purple_archive_peer_group" = "Group {id}";
+"lng_purple_archive_peer_channel" = "Channel {id}";
+"lng_purple_archive_peer_secret" = "Secret chat {id}";

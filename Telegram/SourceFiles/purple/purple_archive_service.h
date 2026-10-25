@@ -27,7 +27,14 @@ void RemoveArchiveAtLogout(Main::Account &account);
 [[nodiscard]] rpl::producer<> ArchiveStorageChanges();
 void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key,
 	QString before, std::optional<uint64_t> revision,
-	Fn<void(DesktopArchiveHistoryPage)> done);
+	Fn<void(DesktopArchiveHistoryPage)> done, QString history = {});
+void CloseArchiveHistory(not_null<Main::Session*> session, QString id, ArchiveStoreEpoch epoch);
+void OpenArchiveDeletedView(not_null<Main::Session*> session, ArchiveViewScope scope,
+	ArchiveTranscriptOrder order, Fn<void(ArchiveDeletedPage)> done);
+void ReadArchiveDeletedView(not_null<Main::Session*> session, QString id,
+	ArchiveStoreEpoch epoch, Fn<void(ArchiveDeletedPage)> done);
+void CloseArchiveDeletedView(not_null<Main::Session*> session, QString id,
+	ArchiveStoreEpoch epoch);
 void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest request,
 	std::function<bool()> current,
 	Fn<void(std::shared_ptr<ArchiveMediaAccess>)> done);

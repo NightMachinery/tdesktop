@@ -414,11 +414,13 @@ class ArchiveWorker final {
 		report();
 		auto streamCursor = QString();
 		auto streamMore = store.Current();
+		auto nextViewsExpiry = std::chrono::steady_clock::time_point();
 		for (;;) {
 			auto task = Task();
+			auto idle = false;
 			{
 				auto lock = std::unique_lock(state->mutex);
-				state->condition.wait(lock, [&] {
+				state->condition.wait_for(lock, std::chrono::seconds(5), [&] {
 					return state->cancelled.load() || !state->tasks.empty() || streamMore
 						|| state->streamCleanup.load();
 				});
@@ -427,6 +429,8 @@ class ArchiveWorker final {
 				}
 				if (state->streamCleanup.exchange(false)) {
 					task = [](DesktopArchiveStore &store) { store.PruneStreams(); };
+				} else if (state->tasks.empty() && !streamMore) {
+					idle = true;
 				} else if (state->tasks.empty()) {
 					task = [&](DesktopArchiveStore &store) {
 						if (!store.ResumeStreams(streamCursor, streamMore)) {
@@ -438,6 +442,14 @@ class ArchiveWorker final {
 					task = std::move(state->tasks.front());
 					state->tasks.pop_front();
 				}
+			}
+			const auto now = std::chrono::steady_clock::now();
+			if (now >= nextViewsExpiry) {
+				static_cast<void>(store.ExpireDeletedViews());
+				nextViewsExpiry = now + std::chrono::seconds(5);
+			}
+			if (idle) {
+				continue;
 			}
 			state->delivery->fetch_add(1);
 			task(store);
@@ -1020,8 +1032,8 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 rpl::producer<> ArchiveStorageChanges() { return Changes.events(); }
 
 void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key,
-	QString before, std::optional<uint64_t> revision,
-	Fn<void(DesktopArchiveHistoryPage)> done) {
+		QString before, std::optional<uint64_t> revision,
+		Fn<void(DesktopArchiveHistoryPage)> done, QString history) {
 	if (Retired.contains(session.get())) {
 		done({});
 		return;
@@ -1029,27 +1041,46 @@ void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key
 	const auto weak = base::make_weak(session.get());
 	auto &value = For(session);
 	const auto journal = value.journal;
-	const auto fence = value.worker->DeliveryFence();
-	const auto accepted
-		= value.worker->Post([key = std::move(key), before = std::move(before), revision,
-								 weak, done, journal, fence](DesktopArchiveStore &store) {
-			  const auto ticket = fence->load();
-			  auto page = journal && !journal->Drain(store)
-							  ? DesktopArchiveHistoryPage()
-							  : store.Versions(key, 32, before, revision);
-			  crl::on_main([weak, page = std::move(page), done, fence, ticket]() mutable {
-				  if (!weak || Retired.contains(weak.get())) {
-					  return;
-				  }
-				  if (fence->load() != ticket) {
-					  page.versions.clear();
-					  page.status = DesktopArchiveStatus::Stale;
-				  }
-				  done(std::move(page));
-			  });
-		  });
+	const auto worker = value.worker;
+	const auto fence = worker->DeliveryFence();
+	const auto accepted = worker->Post([key = std::move(key), before = std::move(before),
+		revision, weak, done, journal, fence, worker, history = std::move(history)](DesktopArchiveStore &store) {
+		const auto ticket = fence->load();
+		const auto revoked = [weak] {
+			crl::on_main([weak] {
+				if (weak && !Retired.contains(weak.get())) {
+					Changes.fire({});
+				}
+			});
+		};
+		auto page = journal && !journal->Drain(store) ? DesktopArchiveHistoryPage()
+			: store.History(key, 32, before, revision, history, revoked);
+		if (page.active) {
+			worker->RevokeOnStop(page.active);
+		}
+		crl::on_main([weak, page = std::move(page), done, fence, ticket]() mutable {
+			if (!weak || Retired.contains(weak.get())) {
+				if (page.active) page.active->store(false);
+				return;
+			}
+			if (fence->load() != ticket || (page.active && !page.active->load())) {
+				page.versions.clear();
+				page.status = DesktopArchiveStatus::Stale;
+			}
+			done(std::move(page));
+		});
+	});
 	if (!accepted) {
 		done({});
+	}
+}
+
+void CloseArchiveHistory(not_null<Main::Session*> session, QString id, ArchiveStoreEpoch epoch) {
+	const auto i = Sessions.find(session.get());
+	if (i != Sessions.end() && epoch.account == SessionAccountKey(session)) {
+		static_cast<void>(i->second.worker->Post([id = std::move(id), epoch](DesktopArchiveStore &store) {
+			store.CloseHistory(id, epoch);
+		}, true));
 	}
 }
 
@@ -1153,6 +1184,81 @@ void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest requ
 	if (!accepted) {
 		done(nullptr);
 	}
+}
+
+}
+
+namespace Purple {
+namespace {
+
+void DeliverDeletedPage(not_null<Main::Session*> session,
+		std::function<ArchiveDeletedPage(DesktopArchiveStore &)> read,
+		Fn<void(ArchiveDeletedPage)> done, bool opening = false) {
+	if (Retired.contains(session.get())) {
+		done({});
+		return;
+	}
+	const auto weak = base::make_weak(session.get());
+	const auto worker = For(session).worker;
+	const auto accepted = worker->Post([weak, worker, read = std::move(read), done, opening](DesktopArchiveStore &store) {
+		auto page = read(store);
+		if (opening && page.active) {
+			worker->RevokeOnStop(page.active);
+		}
+		crl::on_main([weak, worker, page = std::move(page), done]() mutable {
+			if (!weak || Retired.contains(weak.get())) {
+				if (page.active) {
+					page.active->store(false);
+				}
+				return;
+			}
+			if (page.active && !page.active->load()) {
+				page.entries.clear();
+				page.status = ArchiveQueryStatus::Stale;
+			}
+			done(std::move(page));
+		});
+	});
+	if (!accepted) {
+		auto page = ArchiveDeletedPage();
+		page.status = ArchiveQueryStatus::Busy;
+		done(std::move(page));
+	}
+}
+
+}
+
+void OpenArchiveDeletedView(not_null<Main::Session*> session, ArchiveViewScope scope,
+		ArchiveTranscriptOrder order, Fn<void(ArchiveDeletedPage)> done) {
+	if (Retired.contains(session.get()) || scope.messages.account != SessionAccountKey(session)) {
+		done({});
+		return;
+	}
+	const auto journal = For(session).journal;
+	DeliverDeletedPage(session, [scope = std::move(scope), order, journal](DesktopArchiveStore &store) {
+		return journal && !journal->Drain(store) ? ArchiveDeletedPage() : store.OpenDeletedView(scope, order);
+	}, std::move(done), true);
+}
+
+void ReadArchiveDeletedView(not_null<Main::Session*> session, QString id,
+		ArchiveStoreEpoch epoch, Fn<void(ArchiveDeletedPage)> done) {
+	if (epoch.account != SessionAccountKey(session)) {
+		done({});
+		return;
+	}
+	DeliverDeletedPage(session, [id = std::move(id), epoch](DesktopArchiveStore &store) {
+		return store.ReadDeletedView(id, epoch);
+	}, std::move(done));
+}
+
+void CloseArchiveDeletedView(not_null<Main::Session*> session, QString id, ArchiveStoreEpoch epoch) {
+	const auto i = Sessions.find(session.get());
+	if (i == Sessions.end() || epoch.account != SessionAccountKey(session)) {
+		return;
+	}
+	static_cast<void>(i->second.worker->Post([id = std::move(id), epoch](DesktopArchiveStore &store) {
+		static_cast<void>(store.CloseDeletedView(id, epoch));
+	}, true));
 }
 
 }

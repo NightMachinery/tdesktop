@@ -87,6 +87,8 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 		const auto attachments = box->addRow(object_ptr<Ui::VerticalLayout>(box));
 		struct State {
 			QString before;
+			QString history;
+			std::shared_ptr<std::atomic<bool>> active;
 			std::optional<uint64_t> revision;
 			std::optional<ArchiveStoreEpoch> epoch;
 			uint64_t ticket = 0;
@@ -102,18 +104,30 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 		const auto current = [=] {
 			const auto live = session.get();
 			const auto own = window.get();
-			return guard && !state->closed && live && own && &own->session() == live
+			return guard && !state->closed && (!state->active || state->active->load())
+				   && live && own && &own->session() == live
 				   && own->window().sessionController() == own
 				   && !live->account().loggingOut() && live->account().maybeSession() == live
 				   && SessionAccountKey(live) == key.account
 				   && CachedAppWideSettingsAccount(live) == source && AccountWorkModeForSession(live) == mode;
 		};
-		box->boxClosing() | rpl::on_next([=] { state->closed = true; }, box->lifetime());
-		rpl::merge(SettingsChanges(), ActiveChanges()) | rpl::on_next([=] {
+		const auto release = [=] {
+			if (state->active) state->active->store(false);
+			if (session && state->epoch && !state->history.isEmpty()) {
+				CloseArchiveHistory(session.get(), state->history, *state->epoch);
+			}
+			state->history.clear();
+		};
+		box->boxClosing() | rpl::on_next([=] { state->closed = true; release(); }, box->lifetime());
+		box->lifetime().add(release);
+		const auto check = [=] {
 			if (!current()) {
+				label->setText(QString());
 				box->closeBox();
 			}
-		}, box->lifetime());
+		};
+		rpl::merge(SettingsChanges(), ActiveChanges(), ArchiveStorageChanges())
+			| rpl::on_next(check, box->lifetime());
 		session.get()->lifetime().add([guard] {
 			if (guard) {
 				guard->closeBox();
@@ -147,12 +161,27 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 			ReadArchiveVersions(session.get(), key, state->before, state->revision,
 				[=](DesktopArchiveHistoryPage page) {
 					if (!current()) {
+						if (page.active) page.active->store(false);
+						if (session && !page.history.isEmpty()) {
+							CloseArchiveHistory(session.get(), page.history, page.epoch);
+						}
 						if (guard) {
 							box->closeBox();
 						}
 						return;
 					}
 					state->loading = false;
+					if (page.active && !page.active->load()) {
+						label->setText(QString());
+						box->closeBox();
+						return;
+					}
+					if (page.active && !page.history.isEmpty()
+						&& (!state->epoch || *state->epoch == page.epoch)) {
+						state->history = page.history;
+						state->active = page.active;
+						state->epoch = page.epoch;
+					}
 					if (page.status != DesktopArchiveStatus::Ready
 						|| (state->epoch && *state->epoch != page.epoch)) {
 						for (const auto &button : state->attachments) {
@@ -164,6 +193,8 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 						return;
 					}
 					state->epoch = page.epoch;
+					state->history = page.history;
+					state->active = page.active;
 					state->before = page.beforeOrder;
 					state->revision = page.revision;
 					for (const auto &button : state->attachments) {
@@ -220,7 +251,7 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 					if (state->next) {
 						state->next->setDisabled(!page.more);
 					}
-				});
+				}, state->history);
 		};
 		state->next
 			= box->addButton(tr::lng_purple_archive_older(), [=] { state->load(); });
@@ -229,6 +260,16 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 	}));
 }
 
+}
+
+QString ArchiveVersionPreview(const ArchiveVersionSnapshot &snapshot) {
+	return Preview(snapshot);
+}
+
+void ShowArchiveHistory(not_null<Window::SessionController*> controller, ArchiveMessageKey key) {
+	if (key.account == SessionAccountKey(&controller->session())) {
+		ShowHistory(controller, std::move(key));
+	}
 }
 
 void AddArchiveHistoryAction(not_null<Ui::PopupMenu*> menu,

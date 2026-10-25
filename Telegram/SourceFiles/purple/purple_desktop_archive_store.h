@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_archive_crypto.h"
+#include "purple/purple_archive_queries.h"
 #include "purple/purple_archive_lifecycle.h"
 #include "purple/purple_archive_media.h"
 #include "purple/purple_archive_media_access.h"
@@ -87,6 +88,8 @@ struct DesktopArchiveHistoryPage {
 	bool more = false;
 	bool hasGap = false;
 	ArchiveGeneration generation;
+	QString history;
+	std::shared_ptr<std::atomic<bool>> active;
 };
 
 struct DesktopArchiveStagingCounters {
@@ -121,6 +124,17 @@ class DesktopArchiveStore final {
 	[[nodiscard]] DesktopArchiveHistoryPage Versions(const ArchiveMessageKey &key,
 		int limit = 64, const QString &beforeOrder = {},
 		std::optional<uint64_t> revision = std::nullopt);
+	[[nodiscard]] DesktopArchiveHistoryPage History(const ArchiveMessageKey &key,
+		int limit, const QString &beforeOrder, std::optional<uint64_t> revision,
+		const QString &id, std::function<void()> revoked);
+	void CloseHistory(const QString &id, const ArchiveStoreEpoch &epoch);
+	void ExpireHistory(bool all = false);
+	[[nodiscard]] ArchiveDeletedPage OpenDeletedView(const ArchiveViewScope &scope,
+		ArchiveTranscriptOrder order = ArchiveTranscriptOrder::Chronological, int limit = 32);
+	[[nodiscard]] ArchiveDeletedPage ReadDeletedView(const QString &id,
+		const ArchiveStoreEpoch &epoch, int limit = 32);
+	[[nodiscard]] bool CloseDeletedView(const QString &id, const ArchiveStoreEpoch &epoch);
+	[[nodiscard]] bool ExpireDeletedViews(bool all = false);
 	[[nodiscard]] std::optional<std::vector<ArchiveMessageKey>> NonChannelMessages(
 		int64 messageId);
 	[[nodiscard]] std::optional<QString> ObservedMediaVersion(

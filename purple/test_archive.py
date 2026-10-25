@@ -13,6 +13,7 @@ parser.add_argument('--build-dir', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path)
 parser.add_argument('--use-build-objects', action='store_true')
 parser.add_argument('--capture-only', action='store_true')
+parser.add_argument('--views', action='store_true')
 parser.add_argument('--lifecycle', action='store_true')
 parser.add_argument('--access', action='store_true')
 parser.add_argument('--pagination-only', action='store_true')
@@ -64,6 +65,22 @@ def extract(text, signature):
         depth += (text[pos] == '{') - (text[pos] == '}')
         pos += 1
     return text[begin:pos] + '\n'
+if args.views:
+    menu = (repo / 'Telegram/SourceFiles/purple/purple_archive_menu.cpp').read_text()
+    deleted = (repo / 'Telegram/SourceFiles/purple/purple_archive_deleted_box.cpp').read_text()
+    (work / 'archive-view-route.inc').write_text(extract(deleted, 'const auto current = [=]') + ';\n')
+    (work / 'archive-scope-match.inc').write_text(extract(menu, 'bool SameArchiveViewScope('))
+    worker = extract(service, 'class ArchiveWorker final') + ';\n'
+    (work / 'archive-view-worker.inc').write_text(worker.replace('ArchiveWorker', 'ProbeViewWorker'))
+    delivery = extract(service, 'void DeliverDeletedPage(')
+    assert delivery.count('not_null<Main::Session*>') == 1
+    (work / 'archive-deleted-delivery.inc').write_text(delivery.replace(
+        'not_null<Main::Session*>', 'not_null<Session*>').replace('crl::on_main', 'OnMain'))
+    history_action = extract(deleted, '[=] {\n\t\t\t\t\t\tif (current() && active->load())')
+    (work / 'archive-deleted-history-action.inc').write_text('return ' + history_action + ';\n')
+    history = (repo / 'Telegram/SourceFiles/purple/purple_archive_history_box.cpp').read_text()
+    (work / 'archive-history-current.inc').write_text(extract(history, 'const auto current = [=]') + ';\n')
+    (work / 'archive-history-notice.inc').write_text(extract(history, 'const auto check = [=]') + ';\n')
 if args.handoff:
     bodies = ''.join(extract(service, sign) for sign in ('void QueueArchiveRetentionGap(', 'void QueueArchiveJournalWrite(', 'void QueueArchiveLifecycleFact(', 'void QueueArchiveObservation('))
     (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession'))
@@ -119,8 +136,8 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    objects += [compile(repo / ('purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
-    for name in ['purple_desktop_archive_store', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader']:
+    objects += [compile(repo / ('purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
+    for name in ['purple_desktop_archive_store', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader']:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
     objects += [build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o') for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp'))]

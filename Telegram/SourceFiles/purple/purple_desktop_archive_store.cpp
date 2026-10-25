@@ -532,6 +532,15 @@ class DesktopArchiveStore::Impl {
 	bool usageComplete = false;
 	uint64_t readers = 0;
 	std::map<QString, DesktopArchiveMediaHandle> mediaHandles;
+	struct HistoryCapability {
+		ArchiveMessageKey key;
+		ArchiveStoreEpoch epoch;
+		ArchiveGeneration generation;
+		std::shared_ptr<std::atomic<bool>> active;
+		std::function<void()> revoked;
+	};
+	std::map<QString, HistoryCapability> histories;
+	std::map<QString, std::unique_ptr<DesktopArchiveDeletedQuery>> deletedViews;
 	bool refreshingMediaReaders = false;
 	struct StreamEntry {
 		std::shared_ptr<DesktopArchiveStream> stream;
@@ -568,38 +577,7 @@ class DesktopArchiveStore::Impl {
 	}
 	std::optional<ArchiveStoredRow> Decode(ArchiveRecordKind kind, const QString &id,
 		const QByteArray &frame, int64 position = 0) {
-		const auto opened
-			= OpenArchiveEnvelope({options.account, layout.store, kind, id.toUtf8()},
-				layout.key, frame, security.crypto);
-		if (!opened) {
-			return {};
-		}
-		const auto decoded = DecodeArchiveRow(opened.bytes);
-		if (!decoded.row || decoded.status != ArchiveCodecStatus::Valid
-			|| ArchiveRowKind(*decoded.row) != kind) {
-			return {};
-		}
-		auto row = *decoded.row;
-		if (row.body) {
-			const auto result = database.Read(ArchiveSqlReadBodyChunks(row, security));
-			if (!result.ok) {
-				return {};
-			}
-			auto chunks = std::vector<QByteArray>();
-			for (const auto &values : result.rows) {
-				const auto bytes = Value<QByteArray>(values, 0);
-				if (!bytes || values.size() != 1) {
-					return {};
-				}
-				chunks.push_back(*bytes);
-			}
-			const auto full = RestoreArchiveSqlVersionBody(row, chunks, security);
-			if (!full) {
-				return {};
-			}
-			row = *full;
-		}
-		return ArchiveStoredRow{id, position, row};
+		return DesktopArchiveDecodeRow(database, options.account, security, kind, id, frame, position);
 	}
 	std::optional<ArchiveStoredRow> ChatEpoch(const ArchiveMessageKey &key, bool &valid) {
 		valid = false;
@@ -633,43 +611,8 @@ class DesktopArchiveStore::Impl {
 		if (!database.BeginRead()) {
 			return ArchiveSqlStatus::Invalid;
 		}
-		const auto admission = [&] {
-			const auto schema = database.Read(
-				{u"SELECT schema_version FROM archive_meta WHERE singleton=1"_q, {},
-					ArchiveSqlExpectation::OneRow});
-			const auto version
-				= schema.ok && schema.rows.size() == 1 && schema.rows.front().size() == 1
-					  ? Value<int64>(schema.rows.front(), 0)
-					  : nullptr;
-			if (!version) {
-				return ArchiveSqlStatus::Invalid;
-			}
-			const auto status = CheckArchiveSqlVersion(*version);
-			if (status != ArchiveSqlStatus::Ready) {
-				return status;
-			}
-			const auto metadata = database.Read(
-				{u"SELECT schema_fingerprint FROM archive_meta WHERE singleton=1"_q, {},
-					ArchiveSqlExpectation::OneRow});
-			const auto fingerprint = metadata.ok && metadata.rows.size() == 1
-											 && metadata.rows.front().size() == 1
-										 ? Value<QString>(metadata.rows.front(), 0)
-										 : nullptr;
-			const auto actual = database.Read(ArchiveSqlReadSchema());
-			if (!fingerprint || !actual.ok) {
-				return ArchiveSqlStatus::SchemaMismatch;
-			}
-			auto definitions = std::vector<QString>();
-			for (const auto &row : actual.rows) {
-				const auto sql = row.size() == 1 ? Value<QString>(row, 0) : nullptr;
-				if (!sql) {
-					return ArchiveSqlStatus::SchemaMismatch;
-				}
-				definitions.push_back(*sql);
-			}
-			return CheckArchiveSqlSchema(*version, *fingerprint, definitions);
-		}();
-		return database.EndRead() ? admission : ArchiveSqlStatus::Invalid;
+		const auto status = DesktopArchiveAdmitSnapshot(database);
+		return database.EndRead() ? status : ArchiveSqlStatus::Invalid;
 	}
 	std::optional<QString> AdmissionMac(QJsonObject record) const {
 		record.remove(u"loginAdmissionMac"_q);
@@ -702,40 +645,7 @@ class DesktopArchiveStore::Impl {
 															: u"schema-unreadable"_q);
 	}
 	std::optional<ArchiveStoredRow> Header() {
-		const auto result = database.Read(
-			{u"SELECT schema_version,account_token,store_id,revision,generation,maintenance_id,envelope,schema_fingerprint FROM archive_meta WHERE singleton=1"_q,
-				{}, ArchiveSqlExpectation::OneRow});
-		if (!result.ok || result.rows.size() != 1 || result.rows.front().size() != 8) {
-			return {};
-		}
-		const auto &values = result.rows.front();
-		const auto schema = Value<int64>(values, 0);
-		const auto account = Value<QString>(values, 1);
-		const auto store = Value<QString>(values, 2);
-		const auto revision = Value<QString>(values, 3);
-		const auto generation = Value<QString>(values, 4);
-		const auto maintenance = Value<QString>(values, 5);
-		const auto bytes = Value<QByteArray>(values, 6);
-		const auto fingerprint = Value<QString>(values, 7);
-		if (!schema || *schema != kArchiveSqlSchemaVersion || !fingerprint
-			|| *fingerprint != ArchiveSqlExpectedSchemaFingerprint() || !account
-			|| *account
-				   != ArchiveSqlToken(
-					   options.account, ArchiveIndexKind::Account, "account", security)
-			|| !store || *store != layout.store || !revision || !generation
-			|| !maintenance || !maintenance->isEmpty() || !bytes) {
-			return {};
-		}
-		const auto row = Decode(ArchiveRecordKind::Account, u"account"_q, *bytes);
-		if (!row) {
-			return {};
-		}
-		const auto &header = std::get<ArchiveState>(row->row.value);
-		return header.account == options.account
-					   && QString::number(header.revision) == *revision
-					   && QString::number(header.accountGeneration) == *generation
-				   ? row
-				   : std::nullopt;
+		return DesktopArchiveReadHeader(database, options.account, security);
 	}
 
 };
@@ -743,8 +653,10 @@ class DesktopArchiveStore::Impl {
 DesktopArchiveStore::DesktopArchiveStore() : _impl(std::make_unique<Impl>()) {}
 DesktopArchiveStore::~DesktopArchiveStore() {
 	_impl->streams.clear();
+	ExpireHistory(true);
+	const auto readersClosed = ExpireDeletedViews(true);
 	_impl->crypto.Revoke();
-	if (_impl->database.CloseFinal()) {
+	if (_impl->database.CloseFinal() && readersClosed) {
 		ReleaseAccountLock(_impl->lock, _impl->layout.lock);
 	}
 }
@@ -1178,6 +1090,10 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 
 bool DesktopArchiveStore::Close() {
 	_impl->streams.clear();
+	ExpireHistory(true);
+	if (!ExpireDeletedViews(true)) {
+		return false;
+	}
 	*_impl->alive = false;
 	_impl->crypto.Revoke();
 	for (const auto &[id, handle] : _impl->mediaHandles) {
@@ -1223,10 +1139,12 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program) {
 	}
 	const auto ok = result.ok && (program.statements.empty() || result.committed)
 		&& PrivateDatabaseFiles(_impl->layout) && Current();
+	const auto viewsCurrent = _impl->deletedViews.empty() || ExpireDeletedViews();
+	ExpireHistory();
 	if (!_impl->mediaHandles.empty()) {
 		RefreshMediaReaders();
 	}
-	return ok;
+	return ok && viewsCurrent;
 }
 
 bool DesktopArchiveStore::Gap(
@@ -1241,6 +1159,10 @@ bool DesktopArchiveStore::Gap(
 }
 
 bool DesktopArchiveStore::Remove(int maximumActions) {
+	ExpireHistory(true);
+	if (!ExpireDeletedViews(true)) {
+		return false;
+	}
 	auto &self = *_impl;
 	self.streams.clear();
 	if (!self.lock || !self.lock->isLocked() || self.layout.store.isEmpty()) {
@@ -2292,7 +2214,7 @@ bool DesktopArchiveStore::CopyMedia(const ArchiveMessageKey &key, const QString 
 bool DesktopArchiveStore::ReadMedia(const ArchiveMessageKey &key, const QString &version,
 	const QString &identity, const std::function<bool(const QByteArray &)> &sink) {
 	auto slice = ReadSlice(key, {}, version);
-	if (!slice || !sink || _impl->readers + _impl->mediaHandles.size() >= 16) {
+	if (!slice || !sink || _impl->readers + _impl->mediaHandles.size() + _impl->deletedViews.size() >= 16) {
 		return false;
 	}
 	const auto selected = FindArchiveVersion(slice->state, key, version);
@@ -2348,7 +2270,7 @@ std::optional<DesktopArchiveMediaHandle> DesktopArchiveStore::OpenMedia(
 	const auto &key = source.key;
 	const auto &version = source.version;
 	const auto &identity = source.mediaIdentity;
-	if (!CanRunArchiveWork(source.epoch, epoch()) || _impl->readers + _impl->mediaHandles.size() >= 16) {
+	if (!CanRunArchiveWork(source.epoch, epoch()) || _impl->readers + _impl->mediaHandles.size() + _impl->deletedViews.size() >= 16) {
 		return {};
 	}
 	const auto slice = ReadSlice(key, {}, version);
@@ -2596,6 +2518,188 @@ std::optional<ArchiveUsage> DesktopArchiveStore::Usage() {
 	}
 	return TotalArchiveUsage(self.usage) && Current() ? std::optional(self.usage)
 													  : std::nullopt;
+}
+
+}
+
+namespace Purple {
+
+ArchiveDeletedPage DesktopArchiveStore::OpenDeletedView(const ArchiveViewScope &scope,
+		ArchiveTranscriptOrder order, int limit) {
+	auto &self = *_impl;
+	auto result = ArchiveDeletedPage();
+	result.epoch = self.epoch;
+	if (!Current()) {
+		result.status = self.status == DesktopArchiveStatus::ReadOnly ? ArchiveQueryStatus::ReadOnly
+			: self.status == DesktopArchiveStatus::SchemaMismatch ? ArchiveQueryStatus::SchemaMismatch
+			: self.status == DesktopArchiveStatus::Busy ? ArchiveQueryStatus::Busy
+			: ArchiveQueryStatus::Unavailable;
+		result.reason = self.failure;
+		return result;
+	}
+	if (scope.messages.account != self.options.account || !ExpireDeletedViews()) {
+		return result;
+	}
+	if (self.readers + self.mediaHandles.size() + self.deletedViews.size() >= 16) {
+		result.status = ArchiveQueryStatus::Busy;
+		return result;
+	}
+	const auto id = NewToken();
+	if (!Token(id) || self.deletedViews.contains(id)) {
+		return result;
+	}
+	auto query = std::make_unique<DesktopArchiveDeletedQuery>(id, self.epoch, self.security, scope, order);
+	const auto active = self.alive;
+	const auto external = self.options.active;
+	result.status = query->Open(self.layout.root + u"/archive.sqlite"_q,
+		[active, external] { return active->load() && (!external || external()); });
+	if (result.status != ArchiveQueryStatus::Ready) {
+		static_cast<void>(query->Close());
+		return result;
+	}
+	self.deletedViews.emplace(id, std::move(query));
+	return ReadDeletedView(id, self.epoch, limit);
+}
+
+ArchiveDeletedPage DesktopArchiveStore::ReadDeletedView(const QString &id,
+		const ArchiveStoreEpoch &epoch, int limit) {
+	auto &self = *_impl;
+	auto result = ArchiveDeletedPage();
+	result.status = ArchiveQueryStatus::Stale;
+	result.epoch = self.epoch;
+	const auto i = self.deletedViews.find(id);
+	if (i == self.deletedViews.end() || i->second->epoch() != epoch) {
+		return result;
+	}
+	if (!Current() || !CanRunArchiveWork(epoch, self.epoch)) {
+		static_cast<void>(CloseDeletedView(id, epoch));
+		return result;
+	}
+	if (i->second->Current(self.database)) {
+		result = i->second->Read(limit);
+		result.hasGap = !self.failure.isEmpty();
+		if (result.status == ArchiveQueryStatus::Ready && (!Current() || !i->second->Current(self.database))) {
+			result.entries.clear();
+			result.status = ArchiveQueryStatus::Stale;
+		}
+	}
+	if (result.status != ArchiveQueryStatus::Ready) {
+		static_cast<void>(CloseDeletedView(id, epoch));
+	}
+	return result;
+}
+
+bool DesktopArchiveStore::CloseDeletedView(const QString &id, const ArchiveStoreEpoch &epoch) {
+	auto &self = *_impl;
+	const auto i = self.deletedViews.find(id);
+	if (i == self.deletedViews.end()) {
+		return true;
+	}
+	if (i->second->epoch() != epoch || !i->second->Close()) {
+		return false;
+	}
+	self.deletedViews.erase(i);
+	return true;
+}
+
+bool DesktopArchiveStore::ExpireDeletedViews(bool all) {
+	auto &self = *_impl;
+	auto closed = true;
+	for (auto i = self.deletedViews.begin(); i != self.deletedViews.end();) {
+		if (!all && self.Current() && !i->second->Expired() && i->second->Current(self.database)) {
+			++i;
+		} else if (i->second->Close()) {
+			i = self.deletedViews.erase(i);
+		} else {
+			closed = false;
+			++i;
+		}
+	}
+	if (!closed) {
+		for (const auto &[id, query] : self.deletedViews) {
+			static_cast<void>(query->Close());
+		}
+		return self.Fail(DesktopArchiveStatus::IoError, u"deleted-reader-close"_q);
+	}
+	return true;
+}
+
+}
+
+namespace Purple {
+
+DesktopArchiveHistoryPage DesktopArchiveStore::History(const ArchiveMessageKey &key,
+		int limit, const QString &beforeOrder, std::optional<uint64_t> revision,
+		const QString &id, std::function<void()> revoked) {
+	auto &self = *_impl;
+	ExpireHistory();
+	auto found = self.histories.find(id);
+	if (!id.isEmpty() && (found == self.histories.end() || found->second.key != key
+		|| !CanRunArchiveWork(found->second.epoch, epoch()))) {
+		auto result = DesktopArchiveHistoryPage();
+		result.status = DesktopArchiveStatus::Stale;
+		return result;
+	}
+	auto page = Versions(key, limit, beforeOrder, revision);
+	if (id.isEmpty() && page.status == DesktopArchiveStatus::Ready) {
+		if (self.histories.size() >= 64) {
+			page.versions.clear();
+			page.status = DesktopArchiveStatus::Busy;
+			return page;
+		}
+		const auto token = NewToken();
+		if (!Token(token) || self.histories.contains(token)) {
+			page.versions.clear();
+			page.status = DesktopArchiveStatus::Invalid;
+			return page;
+		}
+		found = self.histories.emplace(token, Impl::HistoryCapability{key, page.epoch,
+			page.generation, std::make_shared<std::atomic<bool>>(true), std::move(revoked)}).first;
+		page.history = token;
+	} else {
+		page.history = id;
+	}
+	if (found != self.histories.end()) {
+		page.active = found->second.active;
+		ExpireHistory();
+		if (!page.active->load()) {
+			page.versions.clear();
+			page.status = DesktopArchiveStatus::Stale;
+		}
+	}
+	return page;
+}
+
+void DesktopArchiveStore::CloseHistory(const QString &id, const ArchiveStoreEpoch &epoch) {
+	const auto i = _impl->histories.find(id);
+	if (i != _impl->histories.end() && i->second.epoch == epoch) {
+		i->second.active->store(false);
+		_impl->histories.erase(i);
+	}
+}
+
+void DesktopArchiveStore::ExpireHistory(bool all) {
+	auto &self = *_impl;
+	const auto reading = !all && !self.histories.empty() && Current() && self.database.BeginRead();
+	const auto header = reading ? self.Header() : std::nullopt;
+	const auto account = header ? std::get<ArchiveState>(header->row.value).accountGeneration : 0;
+	for (auto i = self.histories.begin(); i != self.histories.end();) {
+		auto &capability = i->second;
+		const auto chat = header && capability.active->load()
+			? DesktopArchiveReadChatGeneration(self.database, epoch().account,
+				capability.key.chat, security()) : std::nullopt;
+		if (chat && account == capability.generation.account && *chat == capability.generation.chat
+			&& CanRunArchiveWork(capability.epoch, epoch())) {
+			++i;
+		} else {
+			capability.active->store(false);
+			if (capability.revoked) capability.revoked();
+			i = self.histories.erase(i);
+		}
+	}
+	if (reading && !self.database.EndRead()) {
+		ExpireHistory(true);
+	}
 }
 
 }
