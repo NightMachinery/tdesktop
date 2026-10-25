@@ -7,7 +7,8 @@ namespace Purple {
 
 class DesktopArchiveStream final {
 public:
-	DesktopArchiveStream(DesktopArchiveStore &store, ArchiveStagingBinding binding);
+	DesktopArchiveStream(DesktopArchiveStore &store, ArchiveStagingBinding binding,
+		std::shared_ptr<std::atomic<bool>> active = {});
 	~DesktopArchiveStream();
 	[[nodiscard]] bool Open();
 	[[nodiscard]] ArchiveStagingStatus Write(uint64_t offset, const QByteArray &bytes);

@@ -87,6 +87,129 @@ void Streams() {
 	CHECK(!QFileInfo::exists(root));
 }
 
+void StagingCost() {
+	Section = "bounded native streaming fence/proof counts and catalogue reuse";
+	for (const auto partSize : {64 * 1024, 128 * 1024}) {
+		auto temporary = QTemporaryDir();
+		auto store = DesktopArchiveStore();
+		CHECK(store.Open(Options(temporary.path())) == DesktopArchiveStatus::Ready);
+		CHECK(store.Capture(MediaEvent()).retained);
+		const auto bytes = QByteArray(2 * 1024 * 1024, 'q');
+		const auto binding = store.StageStream(Key(), u"v1"_q, u"document:555"_q, bytes.size());
+		CHECK(binding);
+		if (!binding) {
+			continue;
+		}
+		const auto first = store.StagingCountersForTest();
+		for (auto offset = 0; offset < bytes.size(); offset += partSize) {
+			const auto before = store.StagingCountersForTest();
+			CHECK(store.StreamPart(*binding, offset, bytes.mid(offset, partSize)));
+			const auto after = store.StagingCountersForTest();
+			CHECK(after.catalogueOpens - first.catalogueOpens == 1);
+			if (offset + partSize < bytes.size()) {
+				CHECK(after.proofQueries - before.proofQueries == 1);
+				CHECK(after.fenceReads - before.fenceReads <= 30);
+				CHECK(after.cachedStreams == 1);
+			} else {
+				CHECK(after.cachedStreams == 0);
+			}
+		}
+		const auto after = store.StagingCountersForTest();
+		const auto parts = bytes.size() / partSize;
+		CHECK(after.proofQueries - first.proofQueries == uint64_t(parts + 16));
+		CHECK((after.proofQueries - first.proofQueries) * 10 <= uint64_t((parts + 16) * 46));
+		CHECK((after.fenceReads - first.fenceReads) * 10 <= uint64_t(parts == 32 ? 12328 : 7376));
+		std::printf("staging size=%d parts=%lld fences=%llu proofQueries=%llu opens=%llu\n",
+			partSize, static_cast<long long>(parts),
+			static_cast<unsigned long long>(after.fenceReads - first.fenceReads),
+			static_cast<unsigned long long>(after.proofQueries - first.proofQueries),
+			static_cast<unsigned long long>(after.catalogueOpens - first.catalogueOpens));
+		auto actual = QByteArray();
+		CHECK(store.ReadMedia(Key(), u"v1"_q, u"document:555"_q,
+			[&](const QByteArray &part) { actual += part; return true; }));
+		CHECK(actual == bytes);
+		CHECK(store.Remove());
+	}
+}
+
+void CachedStreamRevocation() {
+	Section = "cached catalogue retirement, epoch/generation fences and native identity";
+	for (const auto mode : {0, 1, 2, 3}) {
+		auto temporary = QTemporaryDir();
+		const auto options = Options(temporary.path());
+		auto store = DesktopArchiveStore();
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		CHECK(store.Capture(MediaEvent()).retained);
+		const auto binding = store.StageStream(Key(), u"v1"_q, u"document:555"_q, 262145);
+		CHECK(binding);
+		if (!binding) {
+			continue;
+		}
+		const auto active = std::make_shared<std::atomic<bool>>(true);
+		CHECK(store.StreamPart(*binding, 0, QByteArray(128 * 1024, 's'), active));
+		CHECK(store.StagingCountersForTest().cachedStreams == 1);
+		if (mode == 0) {
+			active->store(false);
+			store.PruneStreams();
+			CHECK(!store.StreamPart(*binding, 128 * 1024, QByteArray(1, 's'), active));
+		} else if (mode == 1) {
+			const auto catalogue = store.directory() + u"/staging/stream-"_q
+				+ ArchiveStagingBindingId(*binding, store.security()) + u"/catalogue.sqlite"_q;
+			CHECK(QFile::rename(catalogue, catalogue + u".replaced"_q));
+			CHECK(DesktopArchiveWrite(catalogue, {}));
+			CHECK(!store.StreamPart(*binding, 128 * 1024, QByteArray(1, 's'), active));
+		} else if (mode == 2) {
+			CHECK(store.Close());
+			CHECK(store.StagingCountersForTest().cachedStreams == 0);
+			CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+			auto stale = *binding;
+			++stale.source.epoch.generation;
+			CHECK(!store.StreamPart(stale, 128 * 1024, QByteArray(1, 's'), active));
+		} else {
+			const auto slice = store.ReadSlice(Key(), {}, u"v1"_q);
+			CHECK(slice);
+			if (slice) {
+				auto header = slice->state;
+				header.messages.clear();
+				header.blobs.clear();
+				header.jobs.clear();
+				header.leases.clear();
+				header.chatGenerations.clear();
+				const auto purge = BeginArchiveSqlPurge(header,
+					{ArchivePurgeKind::EditHistory, {slice->state.account, std::nullopt, {}}, slice->state.revision},
+					{}, u"staging-cost-purge"_q, store.security());
+				CHECK(store.Execute(purge.program));
+				CHECK(!store.StreamPart(*binding, 128 * 1024, QByteArray(1, 's'), active));
+			}
+		}
+		CHECK(store.StagingCountersForTest().cachedStreams == 0);
+		CHECK(store.Remove());
+	}
+}
+
+void CatalogueCommitAuthority() {
+	Section = "catalogue COMMIT rechecks authority and rolls back staged effects";
+	auto temporary = QTemporaryDir();
+	const auto path = QFileInfo(temporary.path()).canonicalFilePath() + u"/catalogue.sqlite"_q;
+	CHECK(DesktopArchiveWrite(path, {}));
+	auto db = DesktopArchiveSqlite();
+	CHECK(db.Open(path, false).ok);
+	CHECK(db.Configure().ok);
+	CHECK(db.Execute({ArchiveSqlStatus::Ready, {{u"BEGIN IMMEDIATE"_q},
+		{u"CREATE TABLE probe(value INTEGER)"_q}, {u"COMMIT"_q}}}).committed);
+	auto checks = 0;
+	const auto program = ArchiveSqlProgram{ArchiveSqlStatus::Ready, {{u"BEGIN IMMEDIATE"_q},
+		{u"INSERT INTO probe VALUES(7)"_q, {}, ArchiveSqlExpectation::OneChange}, {u"COMMIT"_q}}};
+	const auto refused = db.Execute(program, [&] { ++checks; return false; });
+	CHECK(!refused.ok && !refused.committed && refused.failure == u"commit-authority"_q && checks == 1);
+	const auto absent = db.Read({u"SELECT value FROM probe"_q, {}, ArchiveSqlExpectation::Rows});
+	CHECK(absent.ok && absent.rows.empty());
+	CHECK(db.Execute(program, [&] { ++checks; return true; }).committed);
+	CHECK(checks == 2);
+	CHECK(db.Read({u"SELECT value FROM probe"_q, {}, ArchiveSqlExpectation::OneRow}).ok);
+	CHECK(db.Close());
+}
+
 void EmptyAndFence() {
 	Section = "zero stream, truncated input, wrong fences and revocation";
 	for (const auto size : {0, 1, 262144, 262145}) {
@@ -340,6 +463,9 @@ int main(int argc, char **argv) {
 	const auto application = QCoreApplication(argc, argv);
 	std::setvbuf(stdout, nullptr, _IOLBF, 0);
 	Streams();
+	StagingCost();
+	CachedStreamRevocation();
+	CatalogueCommitAuthority();
 	EmptyAndFence();
 	DamagedStaging();
 	StreamFailureRecovery();

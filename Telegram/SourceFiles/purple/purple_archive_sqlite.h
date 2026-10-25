@@ -24,7 +24,8 @@ class DesktopArchiveSqlite final {
 		const QString &path, bool create, bool readOnly = false);
 	[[nodiscard]] DesktopArchiveSqlResult Configure();
 	[[nodiscard]] DesktopArchiveSqlResult Read(const ArchiveSqlStatement &statement);
-	[[nodiscard]] DesktopArchiveSqlResult Execute(const ArchiveSqlProgram &program);
+	[[nodiscard]] DesktopArchiveSqlResult Execute(const ArchiveSqlProgram &program,
+		std::function<bool()> beforeCommit = {});
 	[[nodiscard]] bool BeginRead();
 	[[nodiscard]] bool EndRead();
 	[[nodiscard]] bool Close();

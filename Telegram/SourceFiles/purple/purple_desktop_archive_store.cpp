@@ -533,8 +533,25 @@ class DesktopArchiveStore::Impl {
 	uint64_t readers = 0;
 	std::map<QString, DesktopArchiveMediaHandle> mediaHandles;
 	bool refreshingMediaReaders = false;
+	struct StreamEntry {
+		std::shared_ptr<DesktopArchiveStream> stream;
+		std::shared_ptr<std::atomic<bool>> active;
+	};
+	std::map<QString, StreamEntry> streams;
+	struct StagingCounters {
+		std::atomic<uint64_t> fenceReads = 0;
+		std::atomic<uint64_t> proofQueries = 0;
+		std::atomic<uint64_t> catalogueOpens = 0;
+	};
+	std::shared_ptr<StagingCounters> stagingCounters = std::make_shared<StagingCounters>();
+	bool MemoryCurrent() const {
+		return alive->load() && (!options.active || options.active())
+			&& status == DesktopArchiveStatus::Ready && lock && lock->isLocked()
+			&& database.usable();
+	}
 	std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>>(false);
 	bool Current() const {
+		++stagingCounters->fenceReads;
 		const auto fence = Fence(layout);
 		return alive->load() && (!options.active || options.active())
 			   && status == DesktopArchiveStatus::Ready && lock && lock->isLocked()
@@ -725,6 +742,7 @@ class DesktopArchiveStore::Impl {
 
 DesktopArchiveStore::DesktopArchiveStore() : _impl(std::make_unique<Impl>()) {}
 DesktopArchiveStore::~DesktopArchiveStore() {
+	_impl->streams.clear();
 	_impl->crypto.Revoke();
 	if (_impl->database.CloseFinal()) {
 		ReleaseAccountLock(_impl->lock, _impl->layout.lock);
@@ -1159,6 +1177,7 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 }
 
 bool DesktopArchiveStore::Close() {
+	_impl->streams.clear();
 	*_impl->alive = false;
 	_impl->crypto.Revoke();
 	for (const auto &[id, handle] : _impl->mediaHandles) {
@@ -1177,6 +1196,14 @@ bool DesktopArchiveStore::Close() {
 }
 
 bool DesktopArchiveStore::Current() const { return _impl->Current(); }
+bool DesktopArchiveStore::MemoryCurrent() const { return _impl->MemoryCurrent(); }
+DesktopArchiveStagingCounters DesktopArchiveStore::StagingCountersForTest() const {
+	return {_impl->stagingCounters->fenceReads.load(),
+		_impl->stagingCounters->proofQueries.load(),
+		_impl->stagingCounters->catalogueOpens.load(), _impl->streams.size()};
+}
+void DesktopArchiveStore::CountStagingProof() { ++_impl->stagingCounters->proofQueries; }
+void DesktopArchiveStore::CountStagingOpen() { ++_impl->stagingCounters->catalogueOpens; }
 DesktopArchiveStatus DesktopArchiveStore::status() const { return _impl->status; }
 QString DesktopArchiveStore::failure() const { return _impl->failure; }
 const ArchiveStoreEpoch &DesktopArchiveStore::epoch() const { return _impl->epoch; }
@@ -1190,7 +1217,10 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program) {
 	if (!Current()) {
 		return false;
 	}
-	const auto result = _impl->database.Execute(program);
+	const auto result = _impl->database.Execute(program, [this] { return Current(); });
+	if (result.committed) {
+		_impl->streams.clear();
+	}
 	const auto ok = result.ok && (program.statements.empty() || result.committed)
 		&& PrivateDatabaseFiles(_impl->layout) && Current();
 	if (!_impl->mediaHandles.empty()) {
@@ -1212,6 +1242,7 @@ bool DesktopArchiveStore::Gap(
 
 bool DesktopArchiveStore::Remove(int maximumActions) {
 	auto &self = *_impl;
+	self.streams.clear();
 	if (!self.lock || !self.lock->isLocked() || self.layout.store.isEmpty()) {
 		return false;
 	}
@@ -2091,9 +2122,20 @@ bool DesktopArchiveStore::ResumeStreams(QString &cursor, bool &more) {
 	return true;
 }
 
+void DesktopArchiveStore::PruneStreams() {
+	if (!MemoryCurrent()) {
+		_impl->streams.clear();
+	} else {
+		std::erase_if(_impl->streams, [](const auto &entry) {
+			return entry.second.active && !entry.second.active->load();
+		});
+	}
+}
+
 bool DesktopArchiveStore::StreamPart(const ArchiveStagingBinding &binding, uint64_t offset,
-	const QByteArray &bytes) {
-	if (!Current() || !CanRunArchiveWork(binding.source.epoch, epoch())
+	const QByteArray &bytes, std::shared_ptr<std::atomic<bool>> active) {
+	PruneStreams();
+	if ((active && !active->load()) || !Current() || !CanRunArchiveWork(binding.source.epoch, epoch())
 		|| bytes.size() > kArchiveMediaChunkBytes || offset > binding.totalBytes
 		|| uint64_t(bytes.size()) > binding.totalBytes - offset) {
 		return false;
@@ -2133,16 +2175,39 @@ bool DesktopArchiveStore::StreamPart(const ArchiveStagingBinding &binding, uint6
 			return same;
 		}) && matched == uint64_t(bytes.size());
 	}
-	auto stream = DesktopArchiveStream(*this, binding);
-	if (!stream.Open()) {
+	const auto id = ArchiveStagingBindingId(binding, security());
+	if (id.isEmpty()) {
 		return false;
 	}
+	auto &streams = _impl->streams;
+	auto found = streams.find(id);
+	if (found != streams.end() && found->second.active != active) {
+		streams.erase(found);
+		found = streams.end();
+	}
+	if (found == streams.end()) {
+		if (streams.size() >= 8) {
+			streams.erase(streams.begin());
+		}
+		auto stream = std::make_shared<DesktopArchiveStream>(*this, binding, active);
+		if (!stream->Open()) {
+			return false;
+		}
+		found = streams.emplace(id, Impl::StreamEntry{std::move(stream), active}).first;
+	}
+	const auto stream = found->second.stream;
 	const auto written = bytes.isEmpty() && !binding.totalBytes ? ArchiveStagingStatus::NoChange
-		: stream.Write(offset, bytes);
+		: stream->Write(offset, bytes);
 	if (written != ArchiveStagingStatus::Ready && written != ArchiveStagingStatus::NoChange) {
+		streams.erase(id);
 		return false;
 	}
-	return stream.header().coveredBytes != binding.totalBytes || stream.Complete();
+	if (stream->header().coveredBytes != binding.totalBytes) {
+		return true;
+	}
+	const auto completed = stream->Complete();
+	streams.erase(id);
+	return completed;
 }
 
 bool DesktopArchiveStore::CopyMedia(const ArchiveMessageKey &key, const QString &version,
@@ -2471,15 +2536,17 @@ std::optional<DesktopArchiveJournalAccess> DesktopArchiveStore::JournalAccess() 
 	const auto profileNative = self.profileNative;
 	const auto active = self.options.active;
 	const auto alive = self.alive;
+	const auto counters = self.stagingCounters;
 	return DesktopArchiveJournalAccess{layout.root, epoch, self.security,
 		{std::get<ArchiveState>(header->row.value).accountGeneration, 0}, minimum,
-		[layout, epoch, native, profile, profileNative, active, alive] {
+		[layout, epoch, native, profile, profileNative, active, alive, counters] {
+			++counters->fenceReads;
 			const auto fence = Fence(layout);
 			return alive->load() && (!active || active()) && fence
 				   && CanRunArchiveWork(epoch, *fence) && !Exists(layout.intent)
 				   && DesktopArchiveIdentity(layout.root) == native
 				   && DesktopArchiveIdentity(profile) == profileNative;
-		}};
+		}, [active, alive] { return alive->load() && (!active || active()); }};
 }
 
 bool DesktopArchiveStore::UsageComplete() const { return _impl->usageComplete; }

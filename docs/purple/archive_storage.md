@@ -435,3 +435,34 @@ versions after an own Open/close, and unchanged, payload, purge, interleaved
 capture and release-failure controls. These cases exercise the native encrypted
 adapter and the production media completion callback with a controlled main
 queue. They do not launch a GUI or qualify native window activation events.
+
+
+### Streaming staging cost and connection lifetime
+
+The passive loader's GUI callback admits parts using only a memory flag. The
+worker checks the durable login/store fence before resolving or writing a part.
+Catalogue SQL checks memory liveness per statement and row. Each bounded staging
+step authenticates its addressed generation, and fresh durable authority is
+checked immediately before publishing bytes and before catalogue COMMIT. These
+checks are not cached across steps. A refused COMMIT rolls back its transaction.
+
+The 46 Merkle siblings are read in one bounded query. Missing siblings remain
+empty hints; the core authenticates their proof against the sealed header.
+Returned levels, positions, hashes, uniqueness and counts are checked.
+
+At most eight catalogues remain open between callbacks. Reuse binds to the full
+authenticated staging id and that sink's lifetime. Each step checks the directory
+and catalogue identities. A primary mutation, purge, logout, discard, completion
+or failed stream closes cached catalogues. Reader destruction revokes a memory
+flag and sets a coalesced worker wakeup flag. This requires neither a queue slot
+nor a GUI-thread mutex; each queued task also prunes retired streams. No GUI destructor waits for disk or worker completion. Eviction
+does not remove durable staging bytes; normal authenticated recovery still runs.
+
+The lifecycle fixture counts actual fence reads, catalogue opens and proof queries
+for 2 MiB inputs in 64/128 KiB arrivals, including finalization. It requires at
+least tenfold reductions in fence/proof counts and one open. The passive fixture
+runs the literal production callback and requires zero GUI fence reads. Existing
+crash, torn-source, logout/discard and stale-generation cases remain in place.
+
+Follow-up: every arrival still reseals its full 256 KiB window. Changing that
+requires its own durable publication and crash-consistency design and review.

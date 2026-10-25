@@ -17,6 +17,7 @@ struct DesktopArchiveJournalAccess {
 	ArchiveGeneration generation;
 	uint64_t minimumOrder = 0;
 	std::function<bool()> current;
+	std::function<bool()> active;
 };
 
 enum class DesktopArchiveStatus {
@@ -88,6 +89,13 @@ struct DesktopArchiveHistoryPage {
 	ArchiveGeneration generation;
 };
 
+struct DesktopArchiveStagingCounters {
+	uint64_t fenceReads = 0;
+	uint64_t proofQueries = 0;
+	uint64_t catalogueOpens = 0;
+	size_t cachedStreams = 0;
+};
+
 class DesktopArchiveStore final {
   public:
 	DesktopArchiveStore();
@@ -99,6 +107,8 @@ class DesktopArchiveStore final {
 	[[nodiscard]] static bool DiscardAccount(DesktopArchiveOptions options,
 		const DesktopArchiveDiscardToken &token, int maximumActions = 64);
 	[[nodiscard]] bool Current() const;
+	[[nodiscard]] bool MemoryCurrent() const;
+	[[nodiscard]] DesktopArchiveStagingCounters StagingCountersForTest() const;
 	[[nodiscard]] DesktopArchiveStatus status() const;
 	[[nodiscard]] QString failure() const;
 	[[nodiscard]] const ArchiveStoreEpoch &epoch() const;
@@ -120,7 +130,9 @@ class DesktopArchiveStore final {
 	[[nodiscard]] std::optional<ArchiveStagingBinding> StageStream(const ArchiveMessageKey &key,
 		const QString &version, const QString &identity, uint64_t size);
 	[[nodiscard]] bool ResumeStreams(QString &cursor, bool &more);
-	[[nodiscard]] bool StreamPart(const ArchiveStagingBinding &binding, uint64_t offset, const QByteArray &bytes);
+	[[nodiscard]] bool StreamPart(const ArchiveStagingBinding &binding, uint64_t offset, const QByteArray &bytes,
+		std::shared_ptr<std::atomic<bool>> active = {});
+	void PruneStreams();
 	[[nodiscard]] bool CopyMedia(const ArchiveMessageKey &key, const QString &version,
 		const QString &identity, QIODevice &source, const DesktopArchiveMediaCopy &copy);
 	[[nodiscard]] bool ReadMedia(const ArchiveMessageKey &key, const QString &version,
@@ -149,6 +161,9 @@ class DesktopArchiveStore final {
 	DesktopArchiveSqlite &database();
 
   private:
+	friend class DesktopArchiveStream;
+	void CountStagingProof();
+	void CountStagingOpen();
 	class Impl;
 	std::unique_ptr<Impl> _impl;
 

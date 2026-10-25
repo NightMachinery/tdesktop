@@ -42,7 +42,8 @@ struct ProbeDocument {
 struct ProbeWorker {
 	std::deque<std::function<void(DesktopArchiveStore&)>> tasks;
 	bool Post(std::function<void(DesktopArchiveStore&)> task) { tasks.push_back(std::move(task)); return true; }
-	void Run(DesktopArchiveStore &store) { while (!tasks.empty()) { auto task = std::move(tasks.front()); tasks.pop_front(); task(store); } }
+	void PruneStreamsSoon() { Post([](DesktopArchiveStore &store) { store.PruneStreams(); }); }
+	void Run(DesktopArchiveStore &store) { while (!tasks.empty()) { auto task = std::move(tasks.front()); tasks.pop_front(); task(store); store.PruneStreams(); } }
 };
 struct ProbeValue { std::shared_ptr<ProbeWorker> worker; std::shared_ptr<DesktopArchiveJournal> journal; } Value;
 std::set<ProbeSession*> Retired;
@@ -120,7 +121,11 @@ int main(int argc, char **argv) {
 	CHECK(StreamRegistry.streams.at(one.get()).observations.size()==3);
 	auto edited=Event(Empty(),u"new303"_q,1000,u"later edit"_q,ArchiveOrigin::AuthoritativeEdit,Key({0,123},45,303));
 	edited.content->media.push_back({u"document:555"_q,u"document"_q}); CHECK(store.Capture(edited).retained);
-	one->_loader->event.fire({0,QByteArray("abc")}); Value.worker->Run(store);
+	const auto guiBefore = store.StagingCountersForTest().fenceReads;
+	one->_loader->event.fire({0,QByteArray("abc")});
+	CHECK(store.StagingCountersForTest().fenceReads == guiBefore);
+	CHECK(!Value.worker->tasks.empty());
+	Value.worker->Run(store);
 	CHECK(Owned(store,101)); CHECK(Owned(store,202)); CHECK(Owned(store,303)); CHECK(Gaps==0);
 	CHECK(!store.ReadMedia(Key({0,123},45,303),u"new303"_q,u"document:555"_q,[](const auto&) { return true; }));
 	std::printf("shared reader/document: origins101/202/303 owned, loaders=%d gaps=%d\n",data.created,Gaps);
@@ -135,6 +140,25 @@ int main(int argc, char **argv) {
 	const auto before = Gaps;
 	fresh->_loader->event.fire({Media::Streaming::LoadedPart::kFailedOffset,{}}); CHECK(Gaps==before+1);
 	std::printf("late binding explicit gap, unobserved refused; fresh-reader control owned with loaders=%d\n",data.created);
+	Observe(store,606);
+	const auto observation = StreamRegistry.observations.back();
+	{
+		const auto sink = ArchiveStreamSink(&streaming.owner.value, observation, 262145);
+		const auto before = store.StagingCountersForTest().fenceReads;
+		sink(0, QByteArray(128 * 1024, 'z'));
+		CHECK(store.StagingCountersForTest().fenceReads == before);
+		Value.worker->Run(store);
+		CHECK(store.StagingCountersForTest().cachedStreams == 1);
+	}
+	Value.worker->Run(store);
+	CHECK(store.StagingCountersForTest().cachedStreams == 0);
+	CHECK(store.Close());
+	const auto pending = Value.worker->tasks.size();
+	const auto beforeClose = store.StagingCountersForTest().fenceReads;
+	fresh->_loader->event.fire({0,QByteArray("abc")});
+	CHECK(store.StagingCountersForTest().fenceReads == beforeClose);
+	CHECK(Value.worker->tasks.size() == pending);
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
 	CHECK(store.Remove());
 	return Finish();
 }

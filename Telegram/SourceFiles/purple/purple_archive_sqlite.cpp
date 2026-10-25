@@ -255,7 +255,8 @@ DesktopArchiveSqlResult DesktopArchiveSqlite::Read(const ArchiveSqlStatement &st
 	return _impl->Run(statement, true);
 }
 
-DesktopArchiveSqlResult DesktopArchiveSqlite::Execute(const ArchiveSqlProgram &program) {
+DesktopArchiveSqlResult DesktopArchiveSqlite::Execute(const ArchiveSqlProgram &program,
+	std::function<bool()> beforeCommit) {
 	if (!_impl->Current() || !_impl->configured || !program
 		|| !IsBoundedArchiveSqlProgram(program)) {
 		return Failure(SQLITE_MISUSE, u"invalid-program"_q);
@@ -271,9 +272,11 @@ DesktopArchiveSqlResult DesktopArchiveSqlite::Execute(const ArchiveSqlProgram &p
 		return Failure(SQLITE_MISUSE, u"transaction-shape"_q);
 	}
 	for (const auto &statement : program.statements) {
-		auto result = statement.sql == u"COMMIT"_q && _impl->Fail(u"commit"_q)
-						  ? Failure(SQLITE_IOERR, u"commit"_q)
-						  : _impl->Run(statement, false);
+		auto result = statement.sql == u"COMMIT"_q && beforeCommit && !beforeCommit()
+			? Failure(SQLITE_INTERRUPT, u"commit-authority"_q)
+			: (statement.sql == u"COMMIT"_q && _impl->Fail(u"commit"_q)
+				? Failure(SQLITE_IOERR, u"commit"_q)
+				: _impl->Run(statement, false));
 		if (!result.ok) {
 			if (!sqlite3_get_autocommit(_impl->db)
 				&& !_impl->Run({u"ROLLBACK"_q}, false).ok) {

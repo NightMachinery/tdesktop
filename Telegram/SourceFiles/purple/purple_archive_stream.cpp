@@ -6,6 +6,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <algorithm>
+#include <set>
 
 namespace Purple {
 namespace {
@@ -37,8 +38,12 @@ public:
 	DesktopArchiveSqlite index;
 	QString root;
 	QString token;
+	QByteArray catalogueIdentity;
+	QByteArray rootIdentity;
 	bool ready = false;
+	std::shared_ptr<std::atomic<bool>> active;
 	Impl(DesktopArchiveStore &store, ArchiveStagingBinding binding);
+	[[nodiscard]] bool Authority();
 	[[nodiscard]] std::optional<ArchiveSqlSlice> State();
 	[[nodiscard]] std::optional<ArchiveStagingProof> Proof(uint64_t page);
 	[[nodiscard]] std::optional<ArchiveStagingCoveragePage> Page(uint64_t page, QByteArray *frame = nullptr);
@@ -53,27 +58,51 @@ DesktopArchiveStream::Impl::Impl(DesktopArchiveStore &store, ArchiveStagingBindi
 , binding(std::move(binding)) {
 }
 
+bool DesktopArchiveStream::Impl::Authority() {
+	return (!active || active->load()) && store.Current() && (catalogueIdentity.isEmpty()
+		|| (DesktopArchiveIdentity(root) == rootIdentity
+			&& DesktopArchiveIdentity(root + u"/catalogue.sqlite"_q) == catalogueIdentity));
+}
+
 std::optional<ArchiveSqlSlice> DesktopArchiveStream::Impl::State() {
+	if ((active && !active->load()) || (!catalogueIdentity.isEmpty()
+		&& (DesktopArchiveIdentity(root) != rootIdentity
+			|| DesktopArchiveIdentity(root + u"/catalogue.sqlite"_q) != catalogueIdentity))) {
+		return {};
+	}
 	auto slice = store.ReadSlice(binding.source.key, {}, binding.source.version);
 	return slice && CheckArchiveStagingBinding(binding, slice->state, store.epoch()) == ArchiveStagingStatus::Ready
 		? std::move(slice) : std::nullopt;
 }
 
 std::optional<ArchiveStagingProof> DesktopArchiveStream::Impl::Proof(uint64_t page) {
-	auto proof = ArchiveStagingEmptyProof();
+	auto sql = u"WITH wanted(level,position) AS (VALUES "_q;
+	auto binds = std::vector<ArchiveSqlValue>();
 	for (auto level = 0; level != kArchiveStagingProofDepth; ++level) {
-		const auto result = index.Read({u"SELECT hash FROM nodes WHERE level=? AND position=?"_q,
-			{int64(level), QString::number((page >> level) ^ 1)}, ArchiveSqlExpectation::Rows});
-		if (!result.ok || result.rows.size() > 1) {
+		sql += level ? u",(?,?)"_q : u"(?,?)"_q;
+		binds.emplace_back(int64(level));
+		binds.emplace_back(QString::number((page >> level) ^ 1));
+	}
+	sql += u") SELECT nodes.level,nodes.position,nodes.hash FROM nodes JOIN wanted USING(level,position)"_q;
+	store.CountStagingProof();
+	auto statement = ArchiveSqlStatement{sql, std::move(binds), ArchiveSqlExpectation::Rows};
+	statement.rows.maximum = kArchiveStagingProofDepth;
+	const auto result = index.Read(statement);
+	if (!result.ok) {
+		return {};
+	}
+	auto proof = ArchiveStagingEmptyProof();
+	auto seen = std::set<int64>();
+	for (const auto &row : result.rows) {
+		const auto level = row.size() == 3 ? std::get_if<int64>(&row[0]) : nullptr;
+		const auto position = row.size() == 3 ? std::get_if<QString>(&row[1]) : nullptr;
+		const auto hash = row.size() == 3 ? std::get_if<QString>(&row[2]) : nullptr;
+		if (!level || *level < 0 || *level >= kArchiveStagingProofDepth
+			|| !position || *position != QString::number((page >> *level) ^ 1)
+			|| !hash || !IsArchiveHash(*hash) || !seen.emplace(*level).second) {
 			return {};
 		}
-		if (!result.rows.empty()) {
-			const auto hash = Cell<QString>(result, 0);
-			if (!hash || !IsArchiveHash(*hash)) {
-				return {};
-			}
-			proof.siblings[level] = *hash;
-		}
+		proof.siblings[*level] = *hash;
 	}
 	return proof;
 }
@@ -117,7 +146,7 @@ bool DesktopArchiveStream::Impl::Reload() {
 		return false;
 	}
 	header = std::get<ArchiveStagingHeader>(*decoded.record);
-	return State().has_value();
+	return true;
 }
 
 bool DesktopArchiveStream::Impl::Piece(const ArchiveStagingRange &range, QByteArray &frame) {
@@ -155,11 +184,14 @@ bool DesktopArchiveStream::Impl::Commit(const ArchiveStagingUpdate &update) {
 		statements.push_back({u"INSERT INTO nodes VALUES(?,?,?) ON CONFLICT(level,position) DO UPDATE SET hash=excluded.hash"_q,
 			{int64(node.level), QString::number(node.index), node.hash}, ArchiveSqlExpectation::OneChange});
 	}
-	return index.Execute(Program(std::move(statements))).committed && store.Current();
+	return index.Execute(Program(std::move(statements)), [&] { return Authority(); }).committed
+		&& Authority();
 }
 
-DesktopArchiveStream::DesktopArchiveStream(DesktopArchiveStore &store, ArchiveStagingBinding binding)
+DesktopArchiveStream::DesktopArchiveStream(DesktopArchiveStore &store, ArchiveStagingBinding binding,
+	std::shared_ptr<std::atomic<bool>> active)
 : _impl(std::make_unique<Impl>(store, std::move(binding))) {
+	_impl->active = std::move(active);
 }
 
 DesktopArchiveStream::~DesktopArchiveStream() = default;
@@ -174,15 +206,21 @@ bool DesktopArchiveStream::Open() {
 	}
 	s.root = s.store.directory() + u"/staging/stream-"_q + s.token;
 	const auto existed = QFileInfo::exists(s.root);
-	if ((!existed && !DesktopArchiveDirectory(s.root))
+	if (!s.Authority() || (!existed && !DesktopArchiveDirectory(s.root))
 		|| !DesktopArchivePrivate(s.root, true)) {
 		return false;
 	}
 	const auto path = s.root + u"/catalogue.sqlite"_q;
-	s.index.SetActive([&s] { return s.store.Current(); });
-	if ((!QFileInfo::exists(path) && !DesktopArchiveWrite(path, {}))
+	s.index.SetActive([&s] { return (!s.active || s.active->load()) && s.store.MemoryCurrent(); });
+	s.store.CountStagingOpen();
+	if (!s.Authority() || (!QFileInfo::exists(path) && !DesktopArchiveWrite(path, {}))
 		|| !s.index.Open(path, false).ok || !DesktopArchivePrivate(path, false)
 		|| !s.index.Configure().ok) {
+		return false;
+	}
+	s.rootIdentity = DesktopArchiveIdentity(s.root);
+	s.catalogueIdentity = DesktopArchiveIdentity(path);
+	if (s.rootIdentity.isEmpty() || s.catalogueIdentity.isEmpty() || !s.Authority()) {
 		return false;
 	}
 	const auto schema = std::vector<QString>{
@@ -207,7 +245,7 @@ bool DesktopArchiveStream::Open() {
 		}
 		statements.push_back({u"INSERT INTO progress VALUES(1,'0',?,?)"_q,
 			{*sealed, ArchiveStagingHeaderHash(*initial)}, ArchiveSqlExpectation::OneChange});
-		if (!s.index.Execute(Program(std::move(statements))).committed
+		if (!s.index.Execute(Program(std::move(statements)), [&] { return s.Authority(); }).committed
 			|| !DesktopArchiveSyncDirectory(s.root)) {
 			return false;
 		}
@@ -231,7 +269,7 @@ bool DesktopArchiveStream::Open() {
 ArchiveStagingStatus DesktopArchiveStream::Write(uint64_t offset, const QByteArray &bytes) {
 	auto &s = *_impl;
 	if (!s.ready || bytes.isEmpty() || bytes.size() > kArchiveMediaChunkBytes
-		|| offset > s.binding.totalBytes || uint64_t(bytes.size()) > s.binding.totalBytes - offset || !s.Reload()) {
+		|| offset > s.binding.totalBytes || uint64_t(bytes.size()) > s.binding.totalBytes - offset || !s.State() || !s.Reload()) {
 		return ArchiveStagingStatus::Invalid;
 	}
 	auto consumed = uint64_t(0);
@@ -263,7 +301,8 @@ ArchiveStagingStatus DesktopArchiveStream::Write(uint64_t offset, const QByteArr
 			return update.status;
 		}
 		const auto path = s.root + '/' + update.pieceId;
-		if (!QFileInfo::exists(path) && !DesktopArchiveWrite(path, update.pieceFrame)) {
+		if (!s.Authority()
+			|| (!QFileInfo::exists(path) && !DesktopArchiveWrite(path, update.pieceFrame))) {
 			return ArchiveStagingStatus::NotCommitted;
 		}
 		const auto frame = DesktopArchiveRead(path, kArchiveStagingWindowBytes + 4096);
@@ -295,7 +334,8 @@ bool DesktopArchiveStream::Complete() {
 	const auto frame = frozen ? SealArchiveStagingRecord(s.binding, *frozen, s.store.security()) : std::nullopt;
 	if (!s.ready || !frozen || !frame || !s.index.Execute(Program({
 		{u"INSERT INTO frozen VALUES(?,?) ON CONFLICT(checkpoint) DO NOTHING"_q,
-			{QString::number(s.header.checkpoint), *frame}, ArchiveSqlExpectation::AtMostOneChange}})).committed) {
+			{QString::number(s.header.checkpoint), *frame}, ArchiveSqlExpectation::AtMostOneChange}}),
+		[&] { return s.Authority(); }).committed) {
 		return false;
 	}
 	const auto saved = s.index.Read({u"SELECT CASE WHEN length(frame)<=69632 THEN frame END FROM frozen WHERE checkpoint=?"_q,
@@ -312,7 +352,7 @@ bool DesktopArchiveStream::Complete() {
 		return false;
 	}
 	auto step = std::move(start.step);
-	while (s.store.Current()) {
+	while (s.store.MemoryCurrent()) {
 		const auto fresh = s.State();
 		if (!fresh) {
 			return false;
@@ -339,12 +379,12 @@ bool DesktopArchiveStream::Complete() {
 			}
 			const auto &pub = *step.publication;
 			const auto root = s.store.directory() + u"/blobs/"_q + pub.blobToken;
-			if (!DesktopArchiveDirectory(root)) {
+			if (!s.Authority() || !DesktopArchiveDirectory(root)) {
 				return false;
 			}
 			const auto path = root + '/' + QString::number(pub.chunkIndex).rightJustified(20, '0') + u".chunk"_q;
 			auto ack = ArchiveStagingPublicationAck(pub, false);
-			if (!QFileInfo::exists(path) && !DesktopArchiveWrite(path, pub.frame)) {
+			if (!s.Authority() || (!QFileInfo::exists(path) && !DesktopArchiveWrite(path, pub.frame))) {
 				return false;
 			}
 			const auto actual = DesktopArchiveRead(path, kArchiveMediaChunkBytes + 4096);
@@ -383,7 +423,7 @@ bool DesktopArchiveStream::Complete() {
 				ArchiveIndexKind::Blob, owned->id.toUtf8(), s.store.security()) : QString();
 			const auto manifest = owned != transaction.next.blobs.end() ? SealArchiveSqlRow(s.binding.source.key.account,
 				token, *owned, s.store.security()) : std::nullopt;
-			if (!manifest || !DesktopArchiveWrite(s.store.directory() + u"/blobs/"_q + token + u"/manifest"_q, *manifest)
+			if (!manifest || !s.Authority() || !DesktopArchiveWrite(s.store.directory() + u"/blobs/"_q + token + u"/manifest"_q, *manifest)
 				|| !s.store.Execute(TranslateArchiveSql(transaction, *fresh, s.store.security()))) {
 				return false;
 			}
