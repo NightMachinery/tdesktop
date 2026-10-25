@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_account_config.h"
+#include "purple/purple_wait_gate.h"
 
 #include <rpl/producer.h>
 
@@ -36,6 +37,22 @@ struct AppWideSettingsEditorState;
 	return captured;
 }
 
+struct WaitRequest {
+	WaitAction action = WaitAction::StartPeek;
+	Main::Session *session = nullptr;
+	int seconds = 0;
+	QString preset;
+	std::shared_ptr<AppWideSettingsEditorState> editor;
+	bool same = false;
+	bool fromBypass = false;
+	bool toBypass = false;
+	std::function<QString()> validate;
+	std::function<QString(const std::function<bool()>&)> apply;
+	std::function<void()> finished;
+};
+
+WaitResult RequestWait(WaitRequest request);
+
 void RegisterPeekWindow(not_null<Ui::RpWidget*> widget);
 [[nodiscard]] bool PeekStartPending();
 [[nodiscard]] bool PeekCountdownPending();
@@ -48,7 +65,10 @@ void RequestPeekDelayChange(
 void CloseHiddenPeekChats();
 
 namespace details {
+void RefreshWaitSettings();
 PeekChange ActivatePeekFor(int seconds);
+PeekChange ActivatePeekExtension(int seconds);
+PeekChange DeactivatePeek();
 } // namespace details
 
 } // namespace Purple

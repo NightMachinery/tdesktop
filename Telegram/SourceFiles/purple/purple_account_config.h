@@ -280,7 +280,9 @@ public:
 		std::optional<bool> value,
 		const std::function<bool()> &originCurrent);
 	[[nodiscard]] std::optional<AccountSettingsWriteTarget> settingsEditTarget(
-		const AccountKey &requester, SettingsOpenRole role);
+		const AccountKey &requester,
+		SettingsOpenRole role,
+		QString *error = nullptr);
 	[[nodiscard]] bool validateSettingsEdit(const AccountSettingsWriteTarget &target);
 	[[nodiscard]] AccountSettingsEditResult writeSettingsEdit(
 		const AccountSettingsWriteTarget &target,
@@ -295,7 +297,8 @@ public:
 		const MemberTitle &title,
 		const std::function<bool()> &originCurrent);
 	[[nodiscard]] std::optional<AccountWorkModeTarget> workModeTarget(
-		const AccountKey &key);
+		const AccountKey &key,
+		QString *error = nullptr);
 	[[nodiscard]] bool validateWorkModeTarget(
 		const AccountWorkModeTarget &target);
 	[[nodiscard]] AccountWorkModeResult writeWorkMode(

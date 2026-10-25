@@ -13,23 +13,32 @@ The transition hook covers manual stop, timed expiry, lock, preset changes and
 state/config reloads which end an effective Peek.
 
 Start delay is a non-negative whole number of seconds. With no configured value,
-desktop uses zero and mobile uses ten. An explicit value, including zero, is
+desktop and mobile use ten. An explicit value, including zero, is
 shared by all devices. Existing duration, hotkey and lock defaults are unchanged.
 The desktop starter file documents the delay without writing a value, preserving
-the mobile fallback when that file is shared.
+the common ten-second fallback when that file is shared.
 
 All desktop start routes enter one transient controller: shortcut, checkbox,
 chips and dial. A positive delay shows a full app-content cover with a large
-countdown and Abort Peek. It covers the Telegram window, not the OS desktop.
-Abort, Escape or the shortcut again cancels. End Peek cancels pending work and
-ends active Peek immediately. No pending activation is persisted. A restart
-with positive delay ends the old Peek first. The requested duration starts only
-when the countdown commits the actual activation.
+countdown and Abort. It covers the Telegram window, not the OS desktop.
+Abort or any key cancels quietly, including when the Abort button has focus.
+The temporary application key filter is removed before the cover is deleted.
+End Peek cancels pending work and ends active Peek immediately. No pending
+activation is persisted. A restart or extension with positive delay leaves the
+old Peek untouched until completion. The requested duration starts only when
+the countdown commits the actual activation.
 
 A stale window, account, session, preset, lock, settings reload or app termination
-cancels pending work. The cover also refuses completion if its originating
+cancels pending Peek work. The cover also refuses completion if its originating
 window is no longer active. There is one countdown timer, independent of the
 existing active-Peek expiry timer and dial's input debounce.
+
+The same cover now handles Work Mode changes, including preset hotkeys and
+per-account list modes. Work Mode waits stay bound to their opening account
+when the displayed account changes. Desktop waits for missing-preset to Normal recovery; Android applies that
+recovery immediately because its effective preset is already Normal.
+The deliberately coarse rule and the sync
+and automation exemptions are described in [Work Mode waits](work_mode_wait.md).
 
 Changing start delay uses that same cover and waits for the greater of the old
 and new effective delays. Abort keeps the previous setting. Completing a delay
@@ -42,7 +51,13 @@ rewriting unrelated content.
 The shared core reads `[peek] exit_hidden_chats_p` through
 `PeekExitHiddenChats(settings)`, default true. It reads the optional integer
 `start_delay_seconds` through `PeekStartDelaySeconds(settings, device)`. The
-client supplies DeviceIdentity with class mobile or desktop. Invalid/negative,
+core still distinguishes device classes for this accessor. Desktop's UI uses
+`PeekWaitDelaySeconds(settings)`, retaining explicit values and applying the same
+`kPeekStartDelayMobileDefaultSeconds = 10` fallback as Android. Android declares
+that constant in `TMessagesProj/jni/purple/purple/purple_engine.h:714`, resolves it
+in `purple_engine.cpp` and exports it as `peekStartDelay` through
+`TMessagesProj/jni/purple_jni/jni_bridge.cpp:1320`; Java's
+`PurpleCore.Clock` also defaults that field to 10. Invalid/negative,
 fractional, string, boolean and overflowing delays warn and retain absence.
 `SetPeekStartDelay(text, path, seconds)` edits the scalar while preserving
 comments, unknown keys and unrelated tables, refusing unparseable/unsupported
@@ -57,14 +72,15 @@ ends it immediately. The desktop change does not implement that Android UI.
 
 ## Qualification
 
-Focused core cases are prepared in TestPeekControls. They cover device defaults,
+Core TestPeekControls cases cover the shared schema accessor's device defaults,
 explicit zero, shared values, invalid input, comment/unknown-key preservation,
-idempotence and refused edits. They have not been run in this source-only task.
-Real compilation, core execution, independent review, optimized app build and
-native cases remain required. Native cases must cover manual/expiry/lock/preset
-termination, visible/hidden/override/folder/off behavior, every start route,
-abort/second/third press, duration timing, stale context and both directions of
-the delay-setting change. Existing copy/Markdown drafts remain separate.
+idempotence and refused edits. Desktop's `purple/test_wait.py` separately covers
+its ten-second fallback, no-op source confirmation, wait state machine and real
+Qt platform-key delivery, including shortcuts and an already-running Peek.
+These headless tests do not qualify native account switching or cover layout.
+Native cases must still cover manual/expiry/lock/preset termination,
+visible/hidden/override/folder/off behavior, every start route, abort/second/third
+press, duration timing, stale context and both directions of delay editing.
 
 ## Upstream hooks
 

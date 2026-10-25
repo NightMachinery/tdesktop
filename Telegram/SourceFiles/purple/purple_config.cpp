@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_peek_controls.h"
 #include "purple/purple_sync_auto_service.h"
 #include "platform/platform_file_utilities.h"
 #include "ui/toast/toast.h"
@@ -282,8 +283,8 @@ send_after_save_p = false
 [peek]
 # Close a conversation only when the restored preset hides it.
 exit_hidden_chats_p = true
-# Optional global activation delay in whole seconds. Absence means zero on
-# desktop and ten on mobile. An explicit value, including zero, travels to both.
+# Optional global activation delay in whole seconds. Absence means ten on
+# desktop and mobile. An explicit value, including zero, travels to both.
 # start_delay_seconds = 0
 # Temporarily reveal what the active preset is hiding.
 hotkey   = "Ctrl+Shift+E"
@@ -372,9 +373,10 @@ public:
 		const QString &what,
 		const std::optional<AccountSettingsWriteTarget> &expected = std::nullopt,
 		const std::function<bool()> &originCurrent = {});
-	[[nodiscard]] std::optional<AccountSettingsWriteTarget> checkedInput();
+	[[nodiscard]] std::optional<AccountSettingsWriteTarget> checkedInput(QString *error = nullptr);
 	void observeAccountFiles() { autoSendLater(); }
 	void refreshAccountRows() { _accountRefreshPending = true; reloadFromDisk(); }
+	void refreshForWait() { reloadFromDisk(); }
 	GlobalAccountChoiceResult switchGlobalAccount(
 		const GlobalAccountChoicePreview &preview,
 		const std::function<bool()> &originCurrent);
@@ -741,14 +743,19 @@ WriteResult Config::write(
 	return { .ok = true, .target = result.target };
 }
 
-std::optional<AccountSettingsWriteTarget> Config::checkedInput() {
+std::optional<AccountSettingsWriteTarget> Config::checkedInput(QString *error) {
+	if (error) { error->clear(); }
 	reloadStateFromDisk();
 	const auto global = AccountRouting().globalAccount();
 	const auto target = global
-		? AccountRouting().settingsEditTarget(*global, SettingsOpenRole::AppWide) : std::nullopt;
-	if (!target) { return std::nullopt; }
+		? AccountRouting().settingsEditTarget(*global, SettingsOpenRole::AppWide, error) : std::nullopt;
+	if (!target) {
+		if (error && error->isEmpty()) { *error = u"No app-wide settings account is available. Choose one in Purple settings."_q; }
+		return std::nullopt;
+	}
 	if (target->destination.file.input != _diskInput || _settingsPath != target->destination.file.path) {
 		applyInput(target->destination.file.input);
+		if (error) { *error = u"Settings changed on disk and were reloaded. Try again."_q; }
 		return std::nullopt;
 	}
 	return target;
@@ -944,8 +951,12 @@ rpl::producer<> SettingsChanges() {
 	return Instance().changes();
 }
 
-std::optional<AccountSettingsWriteTarget> SettingsInputForOperation() {
-	return Instance().checkedInput();
+void details::RefreshWaitSettings() {
+	Instance().refreshForWait();
+}
+
+std::optional<AccountSettingsWriteTarget> SettingsInputForOperation(QString *error) {
+	return Instance().checkedInput(error);
 }
 
 bool ValidateSettingsInput(const AccountSettingsWriteTarget &expected) {
@@ -965,8 +976,10 @@ WriteResult WriteSettingsGuarded(
 
 AppWideSettingsEditor CaptureAppWideSettingsEditor(not_null<QObject*> context) {
 	const auto weak = QPointer<QObject>(context.get());
+	auto error = QString();
+	const auto target = SettingsInputForOperation(&error);
 	return std::make_shared<AppWideSettingsEditorState>(AppWideSettingsEditorState{
-		SettingsInputForOperation(), [=] { return !weak.isNull(); } });
+		target, [=] { return !weak.isNull(); }, error });
 }
 
 WriteResult WriteSettingsFromEditor(
@@ -1845,18 +1858,11 @@ void ChooseAccountWorkModeBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller) {
 	const auto origin = base::make_weak(&controller->session());
-	const auto window = base::make_weak(controller.get());
 	const auto weakBox = QPointer<Ui::GenericBox>(box.get());
 	const auto key = SessionAccountKey(&controller->session());
-	const auto target = AccountRouting().workModeTarget(key);
+	auto captureError = QString();
+	const auto target = AccountRouting().workModeTarget(key, &captureError);
 	const auto labels = SettingsRowLabels(&controller->session(), std::nullopt);
-	const auto current = [=] {
-		const auto live = origin.get();
-		const auto ownWindow = window.get();
-		return target && weakBox && live && ownWindow && &ownWindow->session() == live
-			&& !live->account().loggingOut() && live->account().maybeSession() == live
-			&& SessionAccountKey(live) == key && ConfigDirectory() == target->own.root;
-	};
 	box->setTitle(rpl::single(AccountWorkModeTitle(&controller->session())));
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>();
 	const auto modes = key == AppWideSettingsAccount(&controller->session())
@@ -1871,15 +1877,33 @@ void ChooseAccountWorkModeBox(
 	}
 	group->setValue(int(AccountWorkModeForSession(&controller->session())));
 	box->addButton(tr::lng_box_ok(), [=] {
-		if (!current()) { return; }
-		const auto result = AccountRouting().writeWorkMode(*target, AccountWorkMode(group->current()), current);
-		if (!current()) { return; }
-		if (!result.ok) { box->uiShow()->showToast(result.error); return; }
-		Instance().refreshAccountRows();
-		if (!current() || !result.target || !AccountRouting().validateWorkModeTarget(*result.target)) { return; }
-		const auto summary = AccountListsSummary(origin.get());
-		if (!summary.isEmpty()) { window.get()->showToast(summary); }
-		box->closeBox();
+		const auto live = origin.get();
+		if (!live) {
+			if (weakBox) { weakBox->uiShow()->showToast(tr::lng_purple_wait_account_changed(tr::now)); }
+			return;
+		}
+		const auto selected = AccountWorkMode(group->current());
+		const auto opening = AccountWorkModeForSession(live);
+		const auto validate = [=]() -> QString {
+			if (!target) { return captureError; }
+			return AccountRouting().validateWorkModeTarget(*target)
+				? QString() : tr::lng_purple_wait_settings_changed(tr::now);
+		};
+		const auto result = RequestWait({
+			.action = WaitAction::ChangeAccountMode,
+			.session = live,
+			.same = opening == selected,
+			.fromBypass = opening == AccountWorkMode::Stock,
+			.toBypass = selected == AccountWorkMode::Stock,
+			.validate = validate,
+			.apply = [=](const std::function<bool()> &current) -> QString {
+				const auto written = AccountRouting().writeWorkMode(*target, selected, current);
+				if (written.changed) { Instance().refreshAccountRows(); }
+				return written.ok ? QString() : written.error;
+			},
+			.finished = [=] { if (weakBox) { weakBox->closeBox(); } },
+		});
+		if (result.outcome == WaitOutcome::NoOp && weakBox) { weakBox->closeBox(); }
 	});
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
@@ -2079,14 +2103,30 @@ void ChooseGlobalAccountBox(
 			confirm->addRow(object_ptr<Ui::FlatLabel>(confirm, rpl::single(GlobalChoiceSummary(*preview, label))));
 			confirm->addButton(tr::lng_purple_global_confirm(), [=] {
 				if (!confirmation || !current()) { return; }
-				const auto result = Instance().switchGlobalAccount(*preview, [=] { return confirmation && current(); });
-				if (!confirmation || !current()) { return; }
-				if (result.ok) { confirmation->closeBox(); if (picker) { picker->closeBox(); } }
-				else {
-					window.get()->show(Ui::MakeInformBox(result.changed
-						? tr::lng_purple_global_saved_activation_incomplete(tr::now)
-						: tr::lng_purple_settings_row_changed(tr::now)));
-				}
+				const auto finished = [=] {
+					if (confirmation) { confirmation->closeBox(); }
+					if (picker) { picker->closeBox(); }
+				};
+				const auto result = RequestWait({
+					.action = WaitAction::ChangeGlobalAccount,
+					.session = origin.get(),
+					.same = preview->current.global == preview->selected.file.account,
+					.toBypass = preview->enterNormal,
+					.validate = [=] {
+						return ConfigDirectory() == preview->current.root
+							&& SerializeState(CurrentState()) == preview->activationState
+							&& AccountRouting().validateGlobalChoice(*preview)
+							&& GlobalChoiceRosterCurrent(options)
+							? QString() : tr::lng_purple_wait_settings_changed(tr::now);
+					},
+					.apply = [=](const std::function<bool()> &alive) -> QString {
+						const auto result = Instance().switchGlobalAccount(*preview, alive);
+						return result.ok ? QString() : result.changed
+							? tr::lng_purple_global_saved_activation_incomplete(tr::now) : result.error;
+					},
+					.finished = finished,
+				});
+				FinishNoOpWait(result, finished);
 			});
 			confirm->addButton(tr::lng_cancel(), [=] { confirm->closeBox(); });
 		}), Ui::LayerOption::KeepOther);

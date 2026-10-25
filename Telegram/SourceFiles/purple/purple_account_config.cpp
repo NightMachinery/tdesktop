@@ -210,6 +210,22 @@ QString RowKey(AccountSettingsRow row) {
 	return {};
 }
 
+QString SettingsInputProblem(const SettingsFileInput &input, const QString &path) {
+	if (input.state == SettingsFileState::ReadError) {
+		return u"The settings file cannot be read. Check its access permissions."_q;
+	}
+	if (input.state == SettingsFileState::Missing) { return {}; }
+	const auto text = QString::fromUtf8(input.bytes);
+	if (text.toUtf8() != input.bytes) {
+		return u"The settings file is not valid UTF-8. Repair it before editing."_q;
+	}
+	const auto parsed = ParseSettings(text, path);
+	if (parsed.settings.version > kHighestSettingsVersion) {
+		return u"The settings file uses a newer schema. Update Purple before editing it."_q;
+	}
+	return parsed.ok() ? QString() : u"The settings file is malformed. Repair it before editing."_q;
+}
+
 bool RowInputUsable(const SettingsFileInput &input, const QString &path) {
 	if (input.state == SettingsFileState::Missing) { return true; }
 	const auto text = QString::fromUtf8(input.bytes);
@@ -1170,17 +1186,43 @@ AccountSettingsRowWriteResult DesktopAccountConfig::writeRow(
 
 std::optional<AccountSettingsWriteTarget> DesktopAccountConfig::settingsEditTarget(
 		const AccountKey &requester,
-		SettingsOpenRole role) {
+		SettingsOpenRole role,
+		QString *error) {
+	const auto refuse = [&](const QString &reason) {
+		if (error) { *error = reason; }
+		return std::nullopt;
+	};
+	if (error) { error->clear(); }
 	const auto destination = openTarget(requester, role);
 	const auto global = openTarget(requester, SettingsOpenRole::AppWide);
-	if (!destination || !global
-		|| !RowDirectorySafe(QFileInfo(destination->file.path).absolutePath())
-		|| !RowDirectorySafe(QFileInfo(global->file.path).absolutePath())
-		|| !RowInputUsable(destination->file.input, destination->file.path)
-		|| (destination->file.input.state == SettingsFileState::Missing
-			&& (destination->file.account == destination->owner
-				|| OwnerInput(destination->file.path + u".good"_q).state != SettingsFileState::Missing))) {
-		return std::nullopt;
+	if (!destination || !global) {
+		const auto appWide = globalAccount();
+		const auto selected = role == SettingsOpenRole::AppWide ? appWide : std::make_optional(requester);
+		for (const auto &key : { selected, appWide }) {
+			const auto paths = key ? files(*key) : std::nullopt;
+			if (paths && !AccountFilePathSafe(paths->settings)) {
+				return refuse(u"A settings path is not a safe regular file."_q);
+			}
+		}
+		return refuse(!_plan.error.isEmpty() ? _plan.error
+			: u"The account settings route is unavailable. Check the app-wide account and local settings."_q);
+	}
+	if (!AccountFilePathSafe(destination->file.path) || !AccountFilePathSafe(global->file.path)) {
+		return refuse(u"A settings path is not a safe regular file."_q);
+	}
+	if (!RowDirectorySafe(QFileInfo(destination->file.path).absolutePath())
+		|| !RowDirectorySafe(QFileInfo(global->file.path).absolutePath())) {
+		return refuse(u"The settings directory is not a safe regular directory."_q);
+	}
+	const auto problem = SettingsInputProblem(destination->file.input, destination->file.path);
+	if (!problem.isEmpty()) { return refuse(problem); }
+	if (destination->file.input.state == SettingsFileState::Missing) {
+		if (destination->file.account == destination->owner) {
+			return refuse(u"The original app-wide settings file is missing. Restore it before editing."_q);
+		}
+		if (OwnerInput(destination->file.path + u".good"_q).state != SettingsFileState::Missing) {
+			return refuse(u"The settings file is missing but a recovery copy exists. Restore it before editing."_q);
+		}
 	}
 	auto result = AccountSettingsWriteTarget{ *destination, *global };
 	result.globalGoodInput = OwnerInput(global->file.path + u".good"_q);
@@ -1188,17 +1230,19 @@ std::optional<AccountSettingsWriteTarget> DesktopAccountConfig::settingsEditTarg
 	if (source.input.state != SettingsFileState::Readable || !RowInputUsable(source.input, source.path)) {
 		if (result.globalGoodInput.state != SettingsFileState::Missing
 			&& !RowInputUsable(result.globalGoodInput, source.path + u".good"_q)) {
-			return std::nullopt;
+			return refuse(u"The app-wide settings recovery copy cannot be used. Repair it before editing."_q);
 		}
 		if (source.input.state != SettingsFileState::Missing
 			&& result.globalGoodInput.state != SettingsFileState::Readable) {
-			return std::nullopt;
+			return refuse(u"The app-wide settings file is invalid and has no usable recovery copy."_q);
 		}
 	}
 	for (const auto &path : { destination->file.path, source.path,
 		destination->file.path + u".good"_q, source.path + u".good"_q }) {
 		const auto identity = ChoiceFileIdentity(path);
-		if (identity.isEmpty()) { return std::nullopt; }
+		if (identity.isEmpty()) {
+			return refuse(u"A settings file or recovery path is unsafe or unavailable."_q);
+		}
 		result.identities[path] = identity;
 	}
 	return result;
@@ -1418,12 +1462,17 @@ std::optional<QByteArray> ObservedSettingsBytes(const QString &path) {
 
 }
 
-auto DesktopAccountConfig::workModeTarget(const AccountKey &key)
+auto DesktopAccountConfig::workModeTarget(const AccountKey &key, QString *error)
 -> std::optional<AccountWorkModeTarget> {
+	if (error) { *error = u"The account settings route is unavailable. Check the app-wide account and local settings."_q; }
 	const auto own = openTarget(key, SettingsOpenRole::Own);
 	const auto global = openTarget(key, SettingsOpenRole::AppWide);
-	if (!own || !global
-		|| QString::fromUtf8(own->localInput.bytes).toUtf8() != own->localInput.bytes) {
+	if (!own || !global) {
+		if (error && !_plan.error.isEmpty()) { *error = _plan.error; }
+		return std::nullopt;
+	}
+	if (QString::fromUtf8(own->localInput.bytes).toUtf8() != own->localInput.bytes) {
+		if (error) { *error = u"Local settings are not valid UTF-8. Repair local.toml before changing Work Mode."_q; }
 		return std::nullopt;
 	}
 	auto result = AccountWorkModeTarget{ *own, *global };
@@ -1433,6 +1482,7 @@ auto DesktopAccountConfig::workModeTarget(const AccountKey &key)
 		if (identity.isEmpty()) { return std::nullopt; }
 		result.identities[path] = identity;
 	}
+	if (error) { error->clear(); }
 	return result;
 }
 

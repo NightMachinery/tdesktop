@@ -231,3 +231,13 @@ docs/purple/upstream_hooks.md.
 "lng_purple_archive_discard_confirm" = "Permanently delete all retained messages, edit history and owned media for this account, and start a new empty archive? This cannot be undone. Other accounts are not affected.";
 "lng_purple_archive_discard_failed" = "Archive discard could not safely finish. The archive remains held. Try Discard this account's archive and start fresh again in Purple settings.";
 "lng_purple_archive_discard_button" = "Discard archive";
+
+"lng_purple_peek_extending" = "Peek extends in";
+"lng_purple_work_mode_changing" = "Work Mode changes in";
+"lng_purple_wait_abort" = "Abort";
+"lng_purple_wait_account_changed" = "The opening account is unavailable or changed. Open the control again.";
+"lng_purple_wait_context_changed" = "The Work Mode context changed. Try again.";
+"lng_purple_wait_settings_changed" = "Settings changed since this control opened. Open it again.";
+"lng_purple_wait_editor_closed" = "The settings editor closed. Open it again.";
+"lng_purple_wait_peek_unavailable" = "Peek is unavailable: Work Mode is off, or this Peek has ended, has no timer, or is at its limit.";
+"lng_purple_wait_delay_invalid" = "The start delay must be a non-negative whole number of seconds.";

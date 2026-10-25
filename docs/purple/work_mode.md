@@ -22,6 +22,11 @@ from the app-wide account; Follow uses the app-wide members; Stock bypasses Work
 Mode for that account. The choice stays in `local.toml`, so it does not switch
 other devices to Stock or Follow.
 
+Manual preset and account-mode changes reuse the Peek countdown when they may
+loosen access. The rule is coarse: switching between restrictive presets also
+waits, even when the new one is stricter. See [Work Mode waits](work_mode_wait.md)
+for instant changes, account binding and sync/automation exemptions.
+
 A first Own chat-menu tick copies the inherited members into that account's
 file. Later app-wide member changes no longer reach that list. Delete own members
 restores inheritance for a layered members-only table. A whole file or a list with
@@ -3605,8 +3610,9 @@ rendering, badge precedence, expiry and reordered-home remain open.
 ## Peek exit and activation controls
 
 The global Work Mode Peek controls now include the default-on Exit hidden chats
-when peek ends option and a start delay in seconds. The desktop default is 0;
-mobile absence is 10; explicit shared values win. Starts and delay-setting changes
+when peek ends option and a start delay in seconds. When the value is absent,
+both desktop and mobile use 10; explicit shared values win, including an
+explicit 0. Starts and delay-setting changes
 share one app-content countdown with Abort Peek. See
 [Peek controls](peek_controls.md) for the visibility rule, cancellation,
 max(old,new) setting-change rule and mobile adapter contract.

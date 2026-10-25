@@ -1,0 +1,80 @@
+{
+  "Telegram/SourceFiles/purple/purple_account_config.cpp": {
+    "SetAccountWorkMode": 1,
+    "activateGlobalChoice": 1,
+    "commitGlobalChoice": 1,
+    "writeWorkMode": 1
+  },
+  "Telegram/SourceFiles/purple/purple_account_config.h": {
+    "activateGlobalChoice": 1,
+    "commitGlobalChoice": 1,
+    "writeWorkMode": 1
+  },
+  "Telegram/SourceFiles/purple/purple_config.cpp": {
+    "UpdateState": 1,
+    "activateGlobalChoice": 1,
+    "activePreset=": 1,
+    "commitGlobalChoice": 1,
+    "switchGlobalAccount": 3,
+    "writeWorkMode": 1
+  },
+  "Telegram/SourceFiles/purple/purple_config.h": {
+    "UpdateState": 1
+  },
+  "Telegram/SourceFiles/purple/purple_focus.cpp": {
+    "UpdateState": 2
+  },
+  "Telegram/SourceFiles/purple/purple_gate.cpp": {
+    "ActivatePeekExtension": 1,
+    "ActivatePeekFor": 1,
+    "DeactivatePeek": 1,
+    "ExtendPeek": 1,
+    "StartPeek": 1,
+    "StopPeek": 1,
+    "UpdateState": 10
+  },
+  "Telegram/SourceFiles/purple/purple_last_seen.cpp": {
+    "StartPeek": 3,
+    "UpdateState": 2
+  },
+  "Telegram/SourceFiles/purple/purple_peek.cpp": {
+    "UpdateState": 1
+  },
+  "Telegram/SourceFiles/purple/purple_peek_controls.cpp": {
+    "ActivatePeekExtension": 1,
+    "ActivatePeekFor": 1,
+    "DeactivatePeek": 1,
+    "ExtendPeek": 1,
+    "UpdateState": 1,
+    "activePreset=": 1
+  },
+  "Telegram/SourceFiles/purple/purple_peek_controls.h": {
+    "ActivatePeekExtension": 1,
+    "ActivatePeekFor": 1,
+    "DeactivatePeek": 1
+  },
+  "Telegram/SourceFiles/purple/purple_schedule.cpp": {
+    "UpdateState": 2
+  },
+  "Telegram/ThirdParty/purple_core/purple/purple_engine.cpp": {
+    "StopPeek": 1,
+    "activePreset=": 4
+  },
+  "Telegram/ThirdParty/purple_core/purple/purple_splice.cpp": {
+    "SetAccountWorkMode": 1
+  },
+  "Telegram/ThirdParty/purple_core/purple/purple_splice.h": {
+    "SetAccountWorkMode": 1
+  },
+  "Telegram/ThirdParty/purple_core/purple/purple_state.cpp": {
+    "ExtendPeek": 1,
+    "StartPeek": 1,
+    "StopPeek": 1,
+    "activePreset=": 3
+  },
+  "Telegram/ThirdParty/purple_core/purple/purple_state.h": {
+    "ExtendPeek": 1,
+    "StartPeek": 1,
+    "StopPeek": 1
+  }
+}

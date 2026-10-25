@@ -105,6 +105,10 @@ PRIVATE
     purple/purple_peek.h
     purple/purple_peek_controls.cpp
     purple/purple_peek_controls.h
+    purple/purple_wait_gate.cpp
+    purple/purple_wait_gate.h
+    purple/purple_wait_key_filter.cpp
+    purple/purple_wait_key_filter.h
     purple/purple_pinned_music.cpp
     purple/purple_pinned_music.h
     purple/purple_preset_box.cpp

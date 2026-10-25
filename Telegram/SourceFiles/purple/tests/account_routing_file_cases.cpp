@@ -2482,6 +2482,44 @@ void PeekOpeningEditorCases() {
 }
 
 
+void WaitCaptureDiagnosticCases() {
+	const auto account = AccountKey{ 0, 101 };
+	const auto other = AccountKey{ 0, 202 };
+	for (const auto scenario : { 0, 1, 2, 3, 4, 5 }) {
+		auto temp = QTemporaryDir();
+		const auto path = temp.filePath(u"settings.toml"_q);
+		Put(path, QByteArray("version=1\n[lists.focus]\nmembers=[11]\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { account, false, false }, { other, false, false } }, account);
+		auto error = u"stale error"_q;
+		CHECK(config.settingsEditTarget(account, SettingsOpenRole::AppWide, &error));
+		CHECK(error.isEmpty());
+		if (scenario == 0) { Put(path, QByteArray("broken [")); }
+		if (scenario == 1) { Put(path, QByteArray("version=3\n")); }
+		if (scenario == 2) { Put(path, QByteArray(1, char(0xff))); }
+		if (scenario == 3) { CHECK(QFile::remove(path)); }
+		if (scenario == 4) { CHECK(QFile::remove(path)); CHECK(QDir().mkdir(path)); }
+		if (scenario == 5) {
+			const auto own = *config.files(other);
+			Put(own.good, QByteArray("version=2\n"));
+			const auto before = ChoiceOtherFiles(temp.path());
+			CHECK(!config.settingsEditTarget(other, SettingsOpenRole::Own, &error));
+			CHECK(error.contains(u"recovery"_q));
+			CHECK(ChoiceOtherFiles(temp.path()) == before);
+			continue;
+		}
+		const auto before = ChoiceOtherFiles(temp.path());
+		CHECK(!config.settingsEditTarget(account, SettingsOpenRole::AppWide, &error));
+		CHECK(!error.isEmpty());
+		CHECK(ChoiceOtherFiles(temp.path()) == before);
+		if (scenario == 0) { CHECK(error.contains(u"malformed"_q)); }
+		if (scenario == 1) { CHECK(error.contains(u"newer schema"_q)); }
+		if (scenario == 2) { CHECK(error.contains(u"UTF-8"_q)); }
+		if (scenario == 3) { CHECK(error.contains(u"missing"_q)); }
+		if (scenario == 4) { CHECK(error.contains(u"safe regular file"_q)); }
+	}
+}
+
 void AccountListControlsCases() {
 	const auto a = AccountKey{ 0, 101 };
 	const auto b = AccountKey{ 0, 202 };
@@ -3684,6 +3722,7 @@ int main(int argc, char *argv[]) {
 	PeekOpeningEditorCases();
 	std::printf("peekOpeningEditor %d checks\n", Checks - beforePeekEditor);
 	const auto beforeListControls = Checks;
+	WaitCaptureDiagnosticCases();
 	AccountListControlsCases();
 	std::printf("accountListControls %d checks\n", Checks - beforeListControls);
 	ModernSyncReviewFileCases();

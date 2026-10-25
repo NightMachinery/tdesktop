@@ -115,7 +115,7 @@ void SetLocalPremium(bool value);
 // defaults, so a typo mid-edit does not reshuffle the user's chat list.
 [[nodiscard]] const Settings &ActiveSettings();
 [[nodiscard]] bool UsingLastGoodSettings();
-[[nodiscard]] std::optional<AccountSettingsWriteTarget> SettingsInputForOperation();
+[[nodiscard]] std::optional<AccountSettingsWriteTarget> SettingsInputForOperation(QString *error = nullptr);
 [[nodiscard]] bool ValidateSettingsInput(const AccountSettingsWriteTarget &expected);
 
 struct Problems {
@@ -150,6 +150,7 @@ struct WriteResult {
 struct AppWideSettingsEditorState {
 	std::optional<AccountSettingsWriteTarget> target;
 	std::function<bool()> originCurrent;
+	QString error;
 };
 
 using AppWideSettingsEditor = std::shared_ptr<AppWideSettingsEditorState>;

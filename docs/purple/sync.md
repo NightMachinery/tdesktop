@@ -6,6 +6,11 @@ sync an already linked account when its automatic switch is enabled. The switch
 starts off; conflicts and unsafe changes still need manual review. This document
 also describes the separate legacy transfer mechanisms.
 
+Incoming sync and manual Apply, Import and History Undo/Restore are exempt from
+the Work Mode countdown. They keep their existing reviews and apply behavior;
+the wait belongs to Work Mode UI actions on the initiating device. A changed
+capture cancels pending local work. See [Work Mode waits](work_mode_wait.md).
+
 For the account-backed sync flow for settings and future playlists, see
 [account_sync_plan.md](account_sync_plan.md). Desktop's **Sync across devices**
 box offers manual review and a separate automatic switch for each account. **Check Saved Messages**

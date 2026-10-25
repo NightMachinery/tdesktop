@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_wait_key_filter.h"
 #include "ui/painter.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
@@ -30,9 +31,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
 #include <QtCore/QPointer>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
+#include <QtWidgets/QApplication>
 
 #include "styles/style_layers.h"
 #include "styles/style_purple_peek_controls.h"
@@ -42,11 +45,11 @@ namespace {
 
 constexpr auto kCountdownTick = crl::time(250);
 
-class PeekCover final : public Ui::RpWidget {
+class WaitCover final : public Ui::RpWidget {
 public:
-	PeekCover(
+	WaitCover(
 		not_null<Ui::RpWidget*> parent,
-		bool setting,
+		WaitAction action,
 		Fn<void()> abort);
 
 	void setRemaining(int seconds);
@@ -67,74 +70,53 @@ private:
 
 };
 
-class PendingPeek final {
+class PendingWait final {
 public:
-	PendingPeek();
+	PendingWait();
 
 	void watch(not_null<Ui::RpWidget*> widget);
 	[[nodiscard]] bool pending() const;
 	[[nodiscard]] bool starting() const;
 	[[nodiscard]] rpl::producer<> changes() const;
-	PeekChange start(int seconds);
-	void changeDelay(
-		int seconds,
-		AccountSettingsWriteTarget input,
-		Fn<bool()> originCurrent,
-		AppWideSettingsEditor editor);
+	WaitResult request(WaitRequest request);
 	void cancel();
 	void closeHiddenChats();
 
 private:
-	bool begin(
-		int delay,
-		std::optional<int> setting,
-		int duration,
-		AccountSettingsWriteTarget input,
-		Fn<bool()> originCurrent = nullptr,
-		AppWideSettingsEditor editor = {});
-	[[nodiscard]] bool valid() const;
 	void tick();
-	void applyDelay(
-		int seconds,
-		const AccountSettingsWriteTarget &input,
-		Fn<bool()> contextValid,
-		const AppWideSettingsEditor &editor);
+	void closeCover();
+	void report(const WaitResult &result, base::weak_ptr<Window::Controller> window);
 
 	std::vector<not_null<Ui::RpWidget*>> _widgets;
 	base::weak_ptr<Window::Controller> _window;
-	Main::Session *_session = nullptr;
-	Main::Account *_account = nullptr;
-	Main::Account *_domainAccount = nullptr;
-	QString _preset;
-	QString _resolvedPreset;
-	std::optional<int> _setting;
-	std::optional<int> _originalDelay;
-	AccountSettingsWriteTarget _input;
-	Fn<bool()> _originCurrent;
-	AppWideSettingsEditor _editor;
-	uint64 _generation = 0;
-	int _duration = 0;
-	crl::time _until = 0;
-	bool _pending = false;
-	QPointer<PeekCover> _cover;
+	WaitGate _gate;
+	WaitKeyFilter _keys;
+	QPointer<WaitCover> _cover;
+	QPointer<QWidget> _previousFocus;
 	base::Timer _timer;
 	rpl::event_stream<> _changes;
 	rpl::lifetime _pendingLifetime;
 
 };
 
-PeekCover::PeekCover(
+WaitCover::WaitCover(
 		not_null<Ui::RpWidget*> parent,
-		bool setting,
+		WaitAction action,
 		Fn<void()> abort)
 : RpWidget(parent)
 , _abortCallback(std::move(abort))
 , _title(
 	this,
-	setting ? tr::lng_purple_peek_delay_changing() : tr::lng_purple_peek_starting(),
+	action == WaitAction::ChangeDelay
+		? tr::lng_purple_peek_delay_changing()
+		: action == WaitAction::StartPeek
+		? tr::lng_purple_peek_starting()
+		: action == WaitAction::ExtendPeek
+		? tr::lng_purple_peek_extending()
+		: tr::lng_purple_work_mode_changing(),
 	st::purplePeekHeading)
 , _number(this, QString(), st::purplePeekCountdown)
-, _abort(this, tr::lng_purple_peek_abort(), st::purplePeekAbort) {
+, _abort(this, tr::lng_purple_wait_abort(), st::purplePeekAbort) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	setFocusPolicy(Qt::StrongFocus);
 	_abort->setClickedCallback([=] { _abortCallback(); });
@@ -146,22 +128,22 @@ PeekCover::PeekCover(
 	setFocus();
 }
 
-void PeekCover::setRemaining(int seconds) {
+void WaitCover::setRemaining(int seconds) {
 	_number->setText(QString::number(seconds));
 	layout();
 	raise();
 }
 
-void PeekCover::paintEvent(QPaintEvent *e) {
+void WaitCover::paintEvent(QPaintEvent *e) {
 	QPainter(this).fillRect(e->rect(), st::boxBg);
 }
 
-void PeekCover::resizeEvent(QResizeEvent *e) {
+void WaitCover::resizeEvent(QResizeEvent *e) {
 	RpWidget::resizeEvent(e);
 	layout();
 }
 
-void PeekCover::layout() {
+void WaitCover::layout() {
 	const auto available = std::max(width() - 2 * st::purplePeekPadding, 0);
 	_title->resizeToWidth(available);
 	_number->resizeToWidth(available);
@@ -175,18 +157,16 @@ void PeekCover::layout() {
 	_abort->move((width() - _abort->width()) / 2, top);
 }
 
-void PeekCover::keyPressEvent(QKeyEvent *e) {
-	if (e->key() == Qt::Key_Escape) {
-		_abortCallback();
-	}
+void WaitCover::keyPressEvent(QKeyEvent *e) {
+	e->accept();
+	_abortCallback();
+}
+
+void WaitCover::mousePressEvent(QMouseEvent *e) {
 	e->accept();
 }
 
-void PeekCover::mousePressEvent(QMouseEvent *e) {
-	e->accept();
-}
-
-PendingPeek::PendingPeek()
+PendingWait::PendingWait()
 : _timer([=] { tick(); }) {
 	QObject::connect(
 		QCoreApplication::instance(),
@@ -195,244 +175,281 @@ PendingPeek::PendingPeek()
 		[=] { cancel(); });
 }
 
-void PendingPeek::watch(not_null<Ui::RpWidget*> widget) {
+void PendingWait::watch(not_null<Ui::RpWidget*> widget) {
 	if (ranges::contains(_widgets, widget)) {
 		return;
 	}
 	_widgets.push_back(widget);
 	widget->lifetime().add([=] {
-		cancel();
+		if (const auto window = _window.get()) {
+			if (window->widget() == widget) {
+				cancel();
+			}
+		}
 		_widgets.erase(ranges::remove(_widgets, widget), _widgets.end());
 	});
 }
 
-bool PendingPeek::pending() const {
-	return _pending;
+bool PendingWait::pending() const {
+	return _gate.pending();
 }
 
-bool PendingPeek::starting() const {
-	return _pending && !_setting.has_value();
+bool PendingWait::starting() const {
+	return _gate.action() == WaitAction::StartPeek;
 }
 
-rpl::producer<> PendingPeek::changes() const {
+rpl::producer<> PendingWait::changes() const {
 	return _changes.events();
 }
 
-void PendingPeek::cancel() {
-	++_generation;
-	const auto wasPending = std::exchange(_pending, false);
+void PendingWait::closeCover() {
 	_timer.cancel();
+	_keys.disarm();
 	_pendingLifetime.destroy();
-	if (_cover) {
-		_cover->hide();
-		_cover->deleteLater();
-		_cover = nullptr;
+	const auto cover = std::exchange(_cover, nullptr);
+	if (cover) {
+		cover->hide();
+		cover->deleteLater();
+	}
+	const auto focus = std::exchange(_previousFocus, nullptr);
+	if (focus && focus->isVisible() && focus->window()->isActiveWindow()) {
+		focus->setFocus();
 	}
 	_window = nullptr;
-	_session = nullptr;
-	_account = nullptr;
-	_domainAccount = nullptr;
-	_setting.reset();
-	_originCurrent = nullptr;
-	_editor.reset();
-	if (wasPending) {
+	if (cover) {
 		_changes.fire({});
 	}
 }
 
-bool PendingPeek::valid() const {
-	const auto window = _window.get();
-	return _pending
-		&& window
-		&& _cover
-		&& window->widget()->isActive()
-		&& Core::App().activeWindow() == window
-		&& &window->account() == _account
-		&& &Core::App().activeAccount() == _domainAccount
-		&& window->maybeSession() == _session
-		&& !window->locked()
-		&& !Core::App().passcodeLocked()
-		&& !Core::App().screenIsLocked()
-		&& CurrentState().activePreset == _preset
-		&& ActiveResolved().preset == _resolvedPreset
-		&& ActiveSettings().peek.startDelaySeconds == _originalDelay
-		&& (!_originCurrent || _originCurrent())
-		&& (_setting.has_value() || Filtering());
+void PendingWait::cancel() {
+	_gate.cancel();
+	closeCover();
 }
 
-bool PendingPeek::begin(
-		int delay,
-		std::optional<int> setting,
-		int duration,
-		AccountSettingsWriteTarget input,
-		Fn<bool()> originCurrent,
-		AppWideSettingsEditor editor) {
-	const auto window = Core::App().activeWindow();
-	if (!window || !window->maybeSession() || window->locked()
-		|| Core::App().screenIsLocked() || Core::App().passcodeLocked()
-		|| (originCurrent && !originCurrent())) {
-		return false;
-	}
-	_input = std::move(input);
-	_originCurrent = std::move(originCurrent);
-	_editor = std::move(editor);
-	_window = base::make_weak(window);
-	_session = window->maybeSession();
-	_account = &window->account();
-	_domainAccount = &Core::App().activeAccount();
-	_preset = CurrentState().activePreset;
-	_resolvedPreset = ActiveResolved().preset;
-	_setting = setting;
-	_originalDelay = ActiveSettings().peek.startDelaySeconds;
-	_duration = duration;
-	_until = crl::now() + delay * crl::time(1000);
-	_pending = true;
-	_cover = new PeekCover(window->widget()->body(), setting.has_value(), [=] {
-		cancel();
-	});
-	window->sessionControllerChanges() | rpl::on_next([=] {
-		cancel();
-	}, _pendingLifetime);
-	Core::App().domain().activeChanges() | rpl::on_next([=] {
-		cancel();
-	}, _pendingLifetime);
-	SettingsChanges() | rpl::on_next([=] {
-		cancel();
-	}, _pendingLifetime);
-	StateChanges() | rpl::on_next([=] {
-		if (!valid()) {
-			cancel();
-		}
-	}, _pendingLifetime);
-	if (!valid()) {
-		cancel();
-		return false;
-	}
-	_timer.callEach(kCountdownTick);
-	_changes.fire({});
-	tick();
-	return true;
-}
-
-void PendingPeek::applyDelay(
-		int seconds,
-		const AccountSettingsWriteTarget &input,
-		Fn<bool()> contextValid,
-		const AppWideSettingsEditor &editor) {
-	const auto result = WriteSettingsGuarded(input, [=](const QString &text) {
-		if (!contextValid()) {
-			return SpliceResult{ .error = u"The Peek context changed. Try again."_q };
-		}
-		return SetPeekStartDelay(text, SettingsFilePath(), seconds);
-	}, u"Peek start delay"_q, [=] { return contextValid(); });
-	if (result.ok && editor) {
-		editor->target = result.target;
-	}
-	if (!result.ok) {
-		if (const auto window = Core::App().activeWindow()) {
-			window->showToast(result.error);
+void PendingWait::report(
+		const WaitResult &result,
+		base::weak_ptr<Window::Controller> window) {
+	if (!result.error.isEmpty()) {
+		if (const auto live = window.get()) {
+			live->showToast(result.error);
 		}
 	}
 }
 
-void PendingPeek::tick() {
-	if (!valid()) {
+WaitResult PendingWait::request(WaitRequest request) {
+	if (request.action == WaitAction::EndPeek) {
 		cancel();
-		return;
+		if (!CurrentState().peekActive) {
+			return {};
+		}
+		details::DeactivatePeek();
+		return { WaitOutcome::Applied };
 	}
-	const auto left = std::max(_until - crl::now(), crl::time(0));
-	_cover->setRemaining(int((left + 999) / 1000));
-	if (left) {
-		return;
-	}
-	const auto generation = _generation;
-	const auto input = _input;
-	if (!ValidateSettingsInput(input) || generation != _generation || !valid()) {
-		cancel();
-		return;
-	}
-	const auto setting = _setting;
-	const auto seconds = _duration;
-	const auto origin = _window;
-	const auto session = _session;
-	const auto account = _account;
-	const auto domain = _domainAccount;
-	const auto preset = _preset;
-	const auto resolved = _resolvedPreset;
-	const auto completionGeneration = generation + 1;
-	const auto originCurrent = _originCurrent;
-	const auto editor = _editor;
-	cancel();
-	const auto contextValid = [=] {
-		const auto window = origin.get();
-		return _generation == completionGeneration && window
-			&& (!originCurrent || originCurrent())
-			&& window->widget()->isActive()
-			&& Core::App().activeWindow() == window
-			&& window->maybeSession() == session && &window->account() == account
-			&& &Core::App().activeAccount() == domain
-			&& !window->locked() && !Core::App().passcodeLocked()
-			&& !Core::App().screenIsLocked()
-			&& CurrentState().activePreset == preset
-			&& ActiveResolved().preset == resolved;
-	};
-	if (!ValidateSettingsInput(input) || !contextValid()) {
-		return;
-	}
-	if (setting) {
-		applyDelay(*setting, input, contextValid, editor);
-	} else {
-		details::ActivatePeekFor(seconds);
-	}
-}
-
-PeekChange PendingPeek::start(int seconds) {
 	if (pending()) {
 		cancel();
 		return {};
 	}
-	const auto input = SettingsInputForOperation();
-	if (!input || !Filtering()) {
-		return { .refused = true };
+	const auto window = Core::App().activeWindow();
+	const auto origin = base::make_weak(window);
+	const auto session = request.session ? request.session : window ? window->maybeSession() : nullptr;
+	if (!window || !session || window->maybeSession() != session) {
+		const auto result = WaitResult{ WaitOutcome::Refused,
+			tr::lng_purple_wait_account_changed(tr::now) };
+		report(result, origin);
+		return result;
 	}
-	const auto delay = PeekStartDelaySeconds(ActiveSettings(), ThisDevice());
-	if (!delay) {
-		return ValidateSettingsInput(*input)
-			? details::ActivatePeekFor(seconds)
-			: PeekChange{ .refused = true };
+	const auto workMode = WorkModeWait(request.action);
+	const auto weak = base::make_weak(session);
+	details::RefreshWaitSettings();
+	if (!weak || !origin) {
+		return { WaitOutcome::Refused, tr::lng_purple_wait_account_changed(tr::now) };
 	}
-	const auto origin = base::make_weak(Core::App().activeWindow());
-	if (Peeking()) {
-		EndPeek();
+	const auto account = SessionAccountKey(session);
+	const auto domain = &Core::App().activeAccount();
+	const auto mode = AccountWorkModeForSession(session);
+	const auto state = SerializeState(CurrentState());
+	const auto ownInput = workMode ? AccountSettingsTarget(session) : std::nullopt;
+	const auto action = request.action;
+	const auto seconds = request.seconds;
+	auto inputError = QString();
+	const auto input = action == WaitAction::ChangeAccountMode || action == WaitAction::ChangeGlobalAccount
+		? std::optional<AccountSettingsWriteTarget>()
+		: action == WaitAction::ChangeDelay
+		? request.editor ? request.editor->target : std::nullopt
+		: SettingsInputForOperation(&inputError);
+	const auto needsInput = action != WaitAction::ChangeAccountMode && action != WaitAction::ChangeGlobalAccount;
+	const auto external = request.validate;
+	const auto editor = request.editor;
+	const auto originCurrent = [=]() -> QString {
+		const auto live = weak.get();
+		const auto host = origin.get();
+		const auto accountValid = host && live && !live->account().loggingOut()
+			&& live->account().maybeSession() == live && SessionAccountKey(live) == account;
+		if (!accountValid) {
+			return tr::lng_purple_wait_account_changed(tr::now);
+		}
+		const auto current = WaitOriginValid(action, {
+			.accountValid = accountValid,
+			.displayedAccountSame = host->maybeSession() == live && &Core::App().activeAccount() == domain,
+			.foregroundUnlocked = host->widget()->isActive() && Core::App().activeWindow() == host
+				&& !host->locked() && !Core::App().passcodeLocked() && !Core::App().screenIsLocked(),
+		});
+		return current ? QString() : tr::lng_purple_wait_context_changed(tr::now);
+	};
+	const auto validate = [=]() -> QString {
+		const auto live = weak.get();
+		const auto originError = originCurrent();
+		if (!originError.isEmpty()) {
+			return originError;
+		}
+		if (SerializeState(CurrentState()) != state || AccountWorkModeForSession(live) != mode) {
+			return tr::lng_purple_wait_context_changed(tr::now);
+		}
+		if (action == WaitAction::ChangeDelay && (!editor || !editor->originCurrent || !editor->originCurrent())) {
+			return tr::lng_purple_wait_editor_closed(tr::now);
+		}
+		if (needsInput && (!input || !ValidateSettingsInput(*input))) {
+			return input ? tr::lng_purple_wait_settings_changed(tr::now)
+				: editor && !editor->error.isEmpty() ? editor->error
+				: !inputError.isEmpty() ? inputError
+				: tr::lng_purple_wait_settings_changed(tr::now);
+		}
+		if (external) {
+			const auto error = external();
+			if (!error.isEmpty()) {
+				return error;
+			}
+		}
+		if (workMode && (!ownInput || !ValidateAccountSettingsTarget(live, *ownInput))) {
+			return tr::lng_purple_wait_settings_changed(tr::now);
+		}
+		return {};
+	};
+	const auto before = validate();
+	if (!before.isEmpty()) {
+		const auto result = WaitResult{ WaitOutcome::Refused, before };
+		report(result, origin);
+		return result;
 	}
-	if (!origin || Core::App().activeWindow() != origin.get()) {
-		return { .refused = true };
+	auto delay = PeekWaitDelaySeconds(ActiveSettings());
+	if (action == WaitAction::ChangeDelay) {
+		if (seconds < 0) {
+			const auto result = WaitResult{ WaitOutcome::Refused,
+				tr::lng_purple_wait_delay_invalid(tr::now) };
+			report(result, origin);
+			return result;
+		}
+		delay = std::max(delay, seconds);
+		request.same = ActiveSettings().peek.startDelaySeconds == seconds;
+	} else if (action == WaitAction::ChangePreset) {
+		request.same = CurrentState().activePreset == request.preset;
+		request.fromBypass = ActiveResolved().normal;
+		request.toBypass = request.preset == NormalPreset();
+		if (!request.toBypass && !ActiveSettings().preset(request.preset)) {
+			const auto result = WaitResult{ WaitOutcome::Refused,
+				tr::lng_purple_wait_settings_changed(tr::now) };
+			report(result, origin);
+			return result;
+		}
+	} else if (action == WaitAction::StartPeek || action == WaitAction::ExtendPeek) {
+		auto preview = CurrentState();
+		if (!Filtering() || (action == WaitAction::ExtendPeek
+			&& !ExtendPeek(
+				preview,
+				QDateTime::currentSecsSinceEpoch(),
+				seconds,
+				kPeekExtendCapSeconds))) {
+			const auto result = WaitResult{ WaitOutcome::Refused,
+				tr::lng_purple_wait_peek_unavailable(tr::now) };
+			report(result, origin);
+			return result;
+		}
 	}
-	return begin(delay, std::nullopt, seconds, *input)
-		? PeekChange{ .pending = true, .seconds = seconds }
-		: PeekChange{ .refused = true };
+	const auto apply = [=](const std::function<bool()> &current) -> QString {
+		closeCover();
+		const auto error = validate();
+		if (!error.isEmpty()) {
+			return error;
+		}
+		if (!current()) {
+			return tr::lng_purple_wait_context_changed(tr::now);
+		}
+		if (action == WaitAction::StartPeek) {
+			if (details::ActivatePeekFor(seconds).refused) {
+				return tr::lng_purple_wait_peek_unavailable(tr::now);
+			}
+		} else if (action == WaitAction::ExtendPeek) {
+			if (!details::ActivatePeekExtension(seconds).extended) {
+				return tr::lng_purple_wait_peek_unavailable(tr::now);
+			}
+		} else if (action == WaitAction::ChangeDelay) {
+			const auto result = WriteSettingsGuarded(
+				*input,
+				[=](const QString &text) {
+					return SetPeekStartDelay(text, input->destination.file.path, seconds);
+				},
+				u"Peek start delay"_q,
+				current);
+			if (!result.ok) {
+				return result.error;
+			}
+			editor->target = result.target;
+		} else if (action == WaitAction::ChangePreset) {
+			UpdateState([&](State &updated) {
+				updated.activePreset = request.preset;
+				updated.activeSource = PresetSource::Manual;
+			});
+		} else if (request.apply) {
+			const auto error = request.apply(current);
+			if (!error.isEmpty()) {
+				return error;
+			}
+		} else {
+			return tr::lng_purple_wait_context_changed(tr::now);
+		}
+		if (request.finished) {
+			request.finished();
+		}
+		return {};
+	};
+	const auto result = _gate.request({
+		.action = action,
+		.delaySeconds = delay,
+		.same = request.same,
+		.fromBypass = request.fromBypass,
+		.toBypass = request.toBypass,
+		.validate = validate,
+		.originCurrent = [=] { return originCurrent().isEmpty(); },
+		.apply = apply,
+	}, crl::now());
+	if (result.outcome == WaitOutcome::Pending) {
+		_window = origin;
+		_previousFocus = QApplication::focusWidget();
+		_cover = new WaitCover(window->widget()->body(), action, [=] { cancel(); });
+		_keys.arm(window->widget(), _cover, [=] { cancel(); });
+		if (!workMode) {
+			window->sessionControllerChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
+			Core::App().domain().activeChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
+		}
+		SettingsChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
+		StateChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
+		_timer.callEach(kCountdownTick);
+		_changes.fire({});
+		tick();
+	}
+	report(result, origin);
+	return result;
 }
 
-void PendingPeek::changeDelay(
-		int seconds,
-		AccountSettingsWriteTarget input,
-		Fn<bool()> originCurrent,
-		AppWideSettingsEditor editor) {
-	cancel();
-	if (!originCurrent || !originCurrent() || !ValidateSettingsInput(input) || seconds < 0
-		|| ActiveSettings().peek.startDelaySeconds == seconds) {
-		return;
+void PendingWait::tick() {
+	const auto origin = _window;
+	const auto result = _gate.tick(crl::now());
+	if (pending() && _cover) {
+		_cover->setRemaining(_gate.remaining(crl::now()));
+	} else {
+		closeCover();
 	}
-	const auto delay = std::max(
-		PeekStartDelaySeconds(ActiveSettings(), ThisDevice()),
-		seconds);
-	begin(
-		delay,
-		seconds,
-		0,
-		std::move(input),
-		std::move(originCurrent),
-		std::move(editor));
+	report(result, origin);
 }
 
 bool ShouldExit(not_null<History*> history) {
@@ -450,7 +467,7 @@ bool ShouldExit(not_null<History*> history) {
 	return hidden && (HideEverywhere() || !history->purpleReachableElsewhere(false));
 }
 
-void PendingPeek::closeHiddenChats() {
+void PendingWait::closeHiddenChats() {
 	if (!Filtering() || Peeking() || !PeekExitHiddenChats(ActiveSettings())) {
 		return;
 	}
@@ -471,8 +488,8 @@ void PendingPeek::closeHiddenChats() {
 	}
 }
 
-PendingPeek &Pending() {
-	static const auto result = new PendingPeek();
+PendingWait &Pending() {
+	static const auto result = new PendingWait();
 	return *result;
 }
 
@@ -498,29 +515,20 @@ void CancelPendingPeek() {
 	Pending().cancel();
 }
 
+WaitResult RequestWait(WaitRequest request) {
+	return Pending().request(std::move(request));
+}
+
 void RequestPeekDelayChange(
 		int seconds,
 		const std::shared_ptr<AppWideSettingsEditorState> &editor,
 		not_null<Main::Session*> session) {
-	const auto weak = base::make_weak(session.get());
-	const auto originCurrent = [=] {
-		const auto live = weak.get();
-		const auto window = Core::App().activeWindow();
-		return editor && editor->originCurrent && editor->originCurrent()
-			&& live && !live->account().loggingOut() && live->account().maybeSession() == live
-			&& window && window->maybeSession() == live;
-	};
-	const auto input = PreparePeekDelayChange(
-		editor ? editor->target : std::nullopt,
-		originCurrent,
-		ValidateSettingsInput);
-	if (!input) {
-		if (const auto window = Core::App().activeWindow()) {
-			window->showToast(u"The Peek context changed. Try again."_q);
-		}
-		return;
-	}
-	Pending().changeDelay(seconds, *input, originCurrent, editor);
+	RequestWait({
+		.action = WaitAction::ChangeDelay,
+		.session = session,
+		.seconds = seconds,
+		.editor = editor,
+	});
 }
 
 void CloseHiddenPeekChats() {
@@ -528,7 +536,14 @@ void CloseHiddenPeekChats() {
 }
 
 PeekChange StartPeekFor(int seconds) {
-	return Pending().start(seconds);
+	const auto result = RequestWait({ .seconds = seconds });
+	return {
+		.peeking = Peeking(),
+		.pending = result.outcome == WaitOutcome::Pending,
+		.refused = result.outcome == WaitOutcome::Refused,
+		.seconds = seconds,
+		.leftSeconds = PeekLeftSeconds(CurrentState(), QDateTime::currentSecsSinceEpoch()),
+	};
 }
 
 } // namespace Purple

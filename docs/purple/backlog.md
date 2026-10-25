@@ -9,7 +9,8 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   when Peek ends” checkbox; when enabled, expiry/manual stop leaves an open chat
   that the effective preset hides. Add a mobile End Peek button beside the lock
   controls, visible only while active. Add a global start-delay setting in seconds,
-  default 10 on mobile and 0 on desktop. The countdown covers the whole Telegram
+  default 10 on mobile and on desktop (desktop used 0 before F-WAIT; an
+  explicit 0 still disables the wait). The countdown covers the whole Telegram
   app screen/window with large remaining seconds and a prominent Abort Peek
   button. Countdown keeps chats hidden, a second toggle cancels it, stopping is
   immediate, and duration starts when Peek actually activates. Put the global

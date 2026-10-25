@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_peek.h"
 
 #include "base/unique_qptr.h"
+#include "base/weak_ptr.h"
 #include "core/application.h"
 #include "lang/lang_keys.h"
 #include "purple/purple_config.h"
@@ -154,20 +155,18 @@ void ShowToast(not_null<Window::Controller*> window, const QString &text) {
 }
 
 void Hotkeys::triggerPeek() {
+	if (PeekCountdownPending()) {
+		CancelPendingPeek();
+		return;
+	}
 	const auto seconds = PeekHotkeySeconds(ActiveSettings());
 	const auto text = [&]() -> QString {
-		if (PeekCountdownPending()) {
-			EndPeek();
-			return tr::lng_purple_peek_aborted(tr::now);
-		}
 		if (!Peeking()) {
 			const auto change = StartPeekFor(seconds);
-			if (change.pending) {
-				return tr::lng_purple_peek_starting(tr::now);
+			if (change.pending || change.refused) {
+				return {};
 			}
-			return change.refused
-				? u"Work Mode is off - nothing is hidden to peek at."_q
-				: change.seconds
+			return change.seconds
 				? u"Peeking for %1 - everything the preset hides is "
 					"showing."_q.arg(Length(change.seconds))
 				: u"Peeking until you press it again."_q;
@@ -175,8 +174,10 @@ void Hotkeys::triggerPeek() {
 		EndPeek();
 		return u"Peek over."_q;
 	}();
-	if (const auto window = Core::App().activeWindow()) {
-		ShowToast(window, text);
+	if (!text.isEmpty()) {
+		if (const auto window = Core::App().activeWindow()) {
+			ShowToast(window, text);
+		}
 	}
 }
 
@@ -189,17 +190,24 @@ void Hotkeys::triggerPreset(const QString &preset) {
 	const auto wanted = active.compare(preset, Qt::CaseInsensitive)
 		? preset
 		: NormalPreset();
-	UpdateState([&](State &state) {
-		state.activePreset = wanted;
-		state.activeSource = PresetSource::Manual;
-	});
-	if (const auto window = Core::App().activeWindow()) {
-		const auto settings = &ActiveSettings();
-		const auto found = settings->preset(wanted);
-		ShowToast(window, found
-			? u"Work Mode: %1."_q.arg(PresetTitle(*found))
-			: u"Work Mode off - stock Telegram Desktop."_q);
+	const auto window = Core::App().activeWindow();
+	if (!window || !window->maybeSession()) {
+		return;
 	}
+	const auto origin = base::make_weak(window);
+	RequestWait({
+		.action = WaitAction::ChangePreset,
+		.session = window->maybeSession(),
+		.preset = wanted,
+		.finished = [=] {
+			if (const auto live = origin.get()) {
+				const auto found = ActiveSettings().preset(wanted);
+				ShowToast(live, found
+					? u"Work Mode: %1."_q.arg(PresetTitle(*found))
+					: u"Work Mode off - stock Telegram Desktop."_q);
+			}
+		},
+	});
 }
 
 void Hotkeys::listen(not_null<Ui::RpWidget*> widget) {

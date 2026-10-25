@@ -332,6 +332,11 @@ untouched. Apply binds the opening session, app-wide source, owner, exact inputs
 and file/directory identities. A source switch, replaced input or closed origin
 refuses the captured operation.
 
+The chooser reuses the Peek countdown before entering Stock or switching between
+Own and Follow; leaving Stock is immediate. App-wide source changes that enter
+Normal also wait before saving. A pending Work Mode change keeps its opening
+account across a displayed-account switch. See [Work Mode waits](work_mode_wait.md).
+
 The menu verdict uses that account's effective lists and says which account owns
 its members. A first Own edit names the fork and its effect on other devices;
 Follow ticks name the app-wide file they edit. Stock keeps list editing and states

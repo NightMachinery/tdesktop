@@ -1165,7 +1165,7 @@ every translation unit would change their compile commands for no reason.
 
 `[peek] exit_hidden_chats_p` defaults to true and closes an open conversation
 only if it becomes hidden when Peek ends. `start_delay_seconds` is an optional
-non-negative integer: absence means desktop 0 / mobile 10; explicit zero wins on
+non-negative integer: absence means ten seconds on desktop and mobile; explicit zero wins on
 both devices. Both keys are global. The app edits preserve unrelated TOML.
 The delay setting itself changes only after a countdown of max(old,new), with
 Abort retaining the previous value and no implicit Peek start. See

@@ -765,7 +765,7 @@ void PresetBox(
 		delayWrap,
 		st::defaultInputField,
 		tr::lng_purple_peek_delay(),
-		QString::number(PeekStartDelaySeconds(ActiveSettings(), ThisDevice())));
+		QString::number(PeekWaitDelaySeconds(ActiveSettings())));
 	delay->setValidator(new QIntValidator(
 		0,
 		std::numeric_limits<int>::max(),
@@ -793,7 +793,7 @@ void PresetBox(
 	});
 	SettingsChanges() | rpl::on_next([=] {
 		delay->setText(QString::number(
-			PeekStartDelaySeconds(ActiveSettings(), ThisDevice())));
+			PeekWaitDelaySeconds(ActiveSettings())));
 	}, delay->lifetime());
 	container->add(
 		object_ptr<Ui::FlatLabel>(
@@ -936,7 +936,7 @@ void PresetBox(
 		refreshPeek();
 		if (!PeekCountdownPending()) {
 			delay->setText(QString::number(
-				PeekStartDelaySeconds(ActiveSettings(), ThisDevice())));
+				PeekWaitDelaySeconds(ActiveSettings())));
 		}
 	}, peek->lifetime());
 
@@ -1062,6 +1062,7 @@ void PresetBox(
 	// Indices into the radio group, so the callback can name what was picked.
 	const auto names = box->lifetime().make_state<std::vector<QString>>();
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>();
+	const auto weakGroup = std::weak_ptr<Ui::RadiobuttonGroup>(group);
 
 	group->setChangedCallback([=](int value) {
 		if (value < 0 || value >= int(names->size())) {
@@ -1074,10 +1075,20 @@ void PresetBox(
 			// this is where that stops.
 			return;
 		}
-		UpdateState([&](State &state) {
-			state.activePreset = name;
-			state.activeSource = PresetSource::Manual;
-		});
+		const auto live = originSession.get();
+		if (live) {
+			RequestWait({
+				.action = WaitAction::ChangePreset,
+				.session = live,
+				.preset = name,
+			});
+		}
+		const auto active = std::find(names->begin(), names->end(), CurrentState().activePreset);
+		if (active != names->end()) {
+			if (const auto liveGroup = weakGroup.lock()) {
+				liveGroup->setValue(int(active - names->begin()));
+			}
+		}
 	});
 
 	const auto rebuild = [=] {

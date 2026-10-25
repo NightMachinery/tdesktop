@@ -617,7 +617,7 @@ PeekChange details::ActivatePeekFor(int seconds) {
 	};
 }
 
-PeekChange ExtendPeekBy(int seconds) {
+PeekChange details::ActivatePeekExtension(int seconds) {
 	if (Instance().resolved().normal) {
 		return { .refused = true };
 	}
@@ -634,11 +634,27 @@ PeekChange ExtendPeekBy(int seconds) {
 	};
 }
 
-PeekChange EndPeek() {
-	CancelPendingPeek();
+PeekChange ExtendPeekBy(int seconds) {
+	const auto result = RequestWait({ .action = WaitAction::ExtendPeek, .seconds = seconds });
+	return {
+		.peeking = Peeking(),
+		.pending = result.outcome == WaitOutcome::Pending,
+		.refused = result.outcome == WaitOutcome::Refused,
+		.extended = result.outcome == WaitOutcome::Applied,
+		.seconds = seconds,
+		.leftSeconds = PeekLeftSeconds(CurrentState(), NowUnix()),
+	};
+}
+
+PeekChange details::DeactivatePeek() {
 	UpdateState([](State &state) {
 		StopPeek(state);
 	});
+	return {};
+}
+
+PeekChange EndPeek() {
+	RequestWait({ .action = WaitAction::EndPeek });
 	return {};
 }
 
