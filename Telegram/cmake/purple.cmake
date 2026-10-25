@@ -31,6 +31,18 @@ endif()
 
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
+    purple/purple_desktop_archive_store.cpp
+    purple/purple_desktop_archive_store.h
+    purple/purple_archive_attention.cpp
+    purple/purple_archive_attention.h
+    purple/purple_archive_sqlite.cpp
+    purple/purple_archive_sqlite.h
+    purple/purple_archive_crypto.cpp
+    purple/purple_archive_crypto.h
+    purple/purple_archive_media.cpp
+    purple/purple_archive_media.h
+    purple/purple_archive_files.cpp
+    purple/purple_archive_files.h
     purple/purple_account_config.cpp
     purple/purple_account_appwide_removal.h
     purple/purple_account_config.h
@@ -171,11 +183,26 @@ PRIVATE
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
-    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_ui_witness_mac.mm)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_ui_witness_mac.mm purple/purple_archive_backup_mac.mm)
 endif()
 
 nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
+    purple/purple_archive_envelope.cpp
+    purple/purple_archive_envelope.h
+    purple/purple_archive_lifecycle.cpp
+    purple/purple_archive_lifecycle.h
+    purple/purple_archive_media_lifecycle.cpp
+    purple/purple_archive_media_lifecycle.h
+    purple/purple_archive_views.cpp
+    purple/purple_archive_views.h
+    purple/purple_archive_rows.h
+    purple/purple_archive_sql.cpp
+    purple/purple_archive_sql.h
+    purple/purple_archive_sql_body.cpp
+    purple/purple_archive_sql_internal.h
+    purple/purple_archive_sql_maintenance.cpp
+    purple/purple_archive_sql_maintenance.h
     purple/purple_archive_codec.cpp
     purple/purple_archive_codec.h
     purple/purple_archive_internal.h
@@ -254,3 +281,19 @@ set_source_files_properties(
     PROPERTIES INCLUDE_DIRECTORIES ${purple_core_loc}/tomlplusplus)
 
 include(${CMAKE_CURRENT_LIST_DIR}/purple_version.cmake)
+
+set(purple_sqlite_loc ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/purple_sqlite)
+add_library(purple_sqlite STATIC ${purple_sqlite_loc}/purple_sqlite.c)
+set_target_properties(purple_sqlite PROPERTIES C_VISIBILITY_PRESET hidden)
+target_compile_definitions(purple_sqlite PRIVATE
+    SQLITE_THREADSAFE=1 SQLITE_TEMP_STORE=3 SQLITE_DQS=0
+    SQLITE_OMIT_LOAD_EXTENSION SQLITE_OMIT_SHARED_CACHE
+    SQLITE_DEFAULT_FOREIGN_KEYS=1 SQLITE_DEFAULT_MEMSTATUS=0 SQLITE_ENABLE_API_ARMOR)
+find_package(Threads REQUIRED)
+target_link_libraries(purple_sqlite PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(Telegram PRIVATE purple_sqlite desktop-app::external_openssl_crypto)
+if (WIN32)
+    target_link_libraries(Telegram PRIVATE Advapi32)
+endif()
+set_source_files_properties(${src_loc}/purple/purple_archive_sqlite.cpp
+    PROPERTIES INCLUDE_DIRECTORIES ${purple_sqlite_loc})
