@@ -3,6 +3,7 @@
 #include "purple/purple_archive_crypto.h"
 #include "purple/purple_archive_lifecycle.h"
 #include "purple/purple_archive_media.h"
+#include "purple/purple_archive_staging.h"
 #include "purple/purple_archive_sqlite.h"
 #include <memory>
 
@@ -113,6 +114,11 @@ class DesktopArchiveStore final {
 	[[nodiscard]] std::optional<QString> ObservedMediaVersion(
 		const ArchiveMessageKey &key, const QString &observationId,
 		const QString &contentHash, const QString &identity);
+	[[nodiscard]] bool CaptureLifecycle(const ArchiveEvent &preimage, const ArchiveStoreEpoch &captured);
+	[[nodiscard]] std::optional<ArchiveStagingBinding> StageStream(const ArchiveMessageKey &key,
+		const QString &version, const QString &identity, uint64_t size);
+	[[nodiscard]] bool ResumeStreams(QString &cursor, bool &more);
+	[[nodiscard]] bool StreamPart(const ArchiveStagingBinding &binding, uint64_t offset, const QByteArray &bytes);
 	[[nodiscard]] bool CopyMedia(const ArchiveMessageKey &key, const QString &version,
 		const QString &identity, QIODevice &source, const DesktopArchiveMediaCopy &copy);
 	[[nodiscard]] bool ReadMedia(const ArchiveMessageKey &key, const QString &version,

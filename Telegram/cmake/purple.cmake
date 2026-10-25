@@ -48,6 +48,12 @@ PRIVATE
     purple/purple_archive_journal.h
     purple/purple_archive_service.cpp
     purple/purple_archive_service.h
+    purple/purple_archive_acquired_source.cpp
+    purple/purple_archive_acquired_source.h
+    purple/purple_archive_lifecycle_capture.cpp
+    purple/purple_archive_lifecycle_capture.h
+    purple/purple_archive_stream.cpp
+    purple/purple_archive_stream.h
     purple/purple_archive_media.cpp
     purple/purple_archive_media.h
     purple/purple_archive_files.cpp
@@ -207,6 +213,8 @@ PRIVATE
     purple/purple_archive_envelope.h
     purple/purple_archive_lifecycle.cpp
     purple/purple_archive_lifecycle.h
+    purple/purple_archive_staging.cpp
+    purple/purple_archive_staging.h
     purple/purple_archive_media_lifecycle.cpp
     purple/purple_archive_media_lifecycle.h
     purple/purple_archive_views.cpp

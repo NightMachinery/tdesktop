@@ -203,7 +203,7 @@ bool DesktopArchiveJournal::Open() {
 	return true;
 }
 
-bool DesktopArchiveJournal::Append(ArchiveEvent event) {
+bool DesktopArchiveJournal::Append(ArchiveEvent event, int byteLimit) {
 	const auto lock = std::lock_guard(_mutex);
 	if (!_ready || !_access.current || !_access.current()
 		|| event.key.account != _access.epoch.account || !IsArchiveToken(event.id)
@@ -239,22 +239,23 @@ bool DesktopArchiveJournal::Append(ArchiveEvent event) {
 			return false;
 		}
 	}
-	if (_sequence == std::numeric_limits<uint64_t>::max()) {
+	const auto reserved = event.observation.context.contains(u"desktopLifecycle"_q) ? uint64_t(2) : uint64_t(1);
+	if (_sequence > std::numeric_limits<uint64_t>::max() - reserved) {
 		_failure = u"outbox-exhausted"_q;
 		return false;
 	}
 	event.order = _sequence + 1;
 	const auto bytes = Encode(event);
-	if (!bytes) {
+	if (!bytes || (byteLimit > 0 && bytes->size() > byteLimit)) {
 		_failure = u"outbox-version-too-large"_q;
 		return false;
 	}
 	if (!Write(_access, Token(_access, u"sequence"_q),
-			QByteArray::number(qulonglong(event.order)))) {
+			QByteArray::number(qulonglong(_sequence + reserved)))) {
 		_failure = u"outbox-sequence-write"_q;
 		return false;
 	}
-	_sequence = event.order;
+	_sequence += reserved;
 	if (!Write(_access, token, *bytes)) {
 		_failure = u"outbox-append"_q;
 		return false;
@@ -375,7 +376,8 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 			  && event.origin == ArchiveOrigin::Baseline
 			  && event.observation.context.value(u"desktopLivePreimage"_q).toBool();
 		const auto committed
-			= preimageRetained
+			= (event.observation.context.value(u"desktopLifecycleFallback"_q).toBool() && !message)
+			  || preimageRetained
 			  || (message
 				  && std::any_of(message->receipts.begin(), message->receipts.end(),
 					  [&](const auto &receipt) { return receipt.id == event.id; }));
@@ -391,6 +393,11 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 					event.id, u"stale-capture"_q, event.observation.observedAt)) {
 				return false;
 			}
+		}
+		if (event.observation.context.contains(u"desktopLifecycle"_q)
+			&& !store.CaptureLifecycle(event, _access.epoch)
+			&& !store.Gap(event.id + u":lifecycle-gap"_q, u"lifecycle-preimage-stale"_q, event.observation.observedAt)) {
+			return false;
 		}
 		const auto lock = std::lock_guard(_mutex);
 		if (!_access.current()

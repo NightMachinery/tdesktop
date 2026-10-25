@@ -16,6 +16,9 @@
 #include "purple/purple_archive_crypto.h"
 #include "purple/purple_archive_files.h"
 #include "purple/purple_archive_service.h"
+#include "purple/purple_archive_acquired_source.h"
+#include "purple/purple_archive_lifecycle_capture.h"
+#include "history/history_item_components.h"
 #include "purple/purple_article_markdown.h"
 #include "purple/purple_config.h"
 #include <QtCore/QCryptographicHash>
@@ -44,53 +47,12 @@ QJsonArray Entities(const EntitiesInText &entities) {
 }
 
 void Available(not_null<Main::Session*> session, const ArchiveEvent &event) {
-	if (!event.content) {
-		return;
-	}
-	for (const auto &descriptor : event.content->media) {
-		auto ok = false;
-		const auto id = descriptor.identity.mid(descriptor.identity.indexOf(':') + 1)
-							.toULongLong(&ok);
-		if (!ok || !id) {
-			continue;
-		}
-		if (descriptor.kind == u"document"_q
-			&& descriptor.identity.startsWith(u"document:"_q)) {
-			const auto document = session->data().document(id);
-			if (document->size < 0) {
-				continue;
-			}
-			const auto media = document->activeMediaView();
-			const auto bytes = media ? media->bytes() : QByteArray();
-			const auto path = document->filepath(false);
-			if ((!bytes.isEmpty() || (media && media->loaded() && !document->size))
-				|| !path.isEmpty()) {
-				const auto proof
-					= !path.isEmpty() && document->location(false).check()
-						  ? DesktopArchiveInspectSource(path, uint64_t(document->size))
-						  : std::nullopt;
-				QueueArchiveAvailableMedia(session, event.key, event.id,
-					ArchiveContentHash(*event.content), descriptor.identity, bytes, path,
-					uint64_t(document->size), proof);
-			}
-		} else if (descriptor.kind == u"photo"_q
-				   && descriptor.identity.startsWith(u"photo:"_q)) {
-			const auto photo = session->data().photo(id);
-			const auto media = photo->activeMediaView();
-			const auto bytes
-				= media ? media->imageBytes(Data::PhotoSize::Large) : QByteArray();
-			if (!bytes.isEmpty()) {
-				QueueArchiveAvailableMedia(session, event.key, event.id,
-					ArchiveContentHash(*event.content), descriptor.identity, bytes, {},
-					uint64_t(bytes.size()));
-			}
-		}
-	}
+	TrackArchiveAcquisition(session, event);
 }
 
 std::optional<ArchiveEvent> LiveSnapshot(
 	not_null<Main::Session*> session, not_null<HistoryItem*> item) {
-	if (!IsServerMsgId(item->id) || !item->isRegular() || item->isScheduled()
+	if (!IsServerMsgId(item->id) || (!item->isRegular() && !item->Has<HistoryServiceSelfDestruct>()) || item->isScheduled()
 		|| item->shortcutId()) {
 		return {};
 	}
@@ -143,6 +105,11 @@ std::optional<ArchiveEvent> Preimage(
 
 }
 
+std::optional<ArchiveEvent> DesktopArchiveLiveSnapshot(
+	not_null<Main::Session*> session, not_null<HistoryItem*> item) {
+	return LiveSnapshot(session, item);
+}
+
 void ObserveArchiveShortSent(not_null<Main::Session*> session,
 	not_null<HistoryItem*> item, const MTPDupdateShortSentMessage &acknowledgement) {
 	auto observed = LiveSnapshot(session, item);
@@ -181,6 +148,9 @@ void ObserveArchiveMessage(not_null<Main::Session*> session, const MTPMessage &m
 
 void ObserveArchiveEdit(
 	not_null<Main::Session*> session, const MTPMessage &message, int pts, bool channel) {
+	if (ObserveArchiveExpiredReplacement(session, message, pts)) {
+		return;
+	}
 	if (const auto preimage = Preimage(session, message)) {
 		QueueArchiveObservation(session, *preimage);
 		Available(session, *preimage);

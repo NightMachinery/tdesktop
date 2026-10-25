@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "base/thread_safe_wrap.h"
 
+namespace Purple { class ArchiveStreamBridge; }
+
 namespace Storage {
 class StreamedFileDownloader;
 } // namespace Storage
@@ -84,6 +86,8 @@ public:
 	~Reader();
 
 private:
+	friend class Purple::ArchiveStreamBridge;
+
 	static constexpr auto kLoadFromRemoteMax = 8;
 
 	struct CacheHelper;

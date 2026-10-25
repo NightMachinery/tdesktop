@@ -9,7 +9,7 @@ class DesktopArchiveJournal final {
   public:
 	explicit DesktopArchiveJournal(DesktopArchiveJournalAccess access);
 	[[nodiscard]] bool Open();
-	[[nodiscard]] bool Append(ArchiveEvent event);
+	[[nodiscard]] bool Append(ArchiveEvent event, int byteLimit = 0);
 	[[nodiscard]] bool Attention(const QString &reason, int64 observedAt);
 	[[nodiscard]] bool Drain(DesktopArchiveStore &store, int limit = 64);
 	[[nodiscard]] QString failure() const;

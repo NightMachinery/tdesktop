@@ -274,7 +274,7 @@ and acknowledged fields are applied. Their observed baseline remains Partial;
 the short TL evidence is retained. Repeated acknowledgements enrich metadata
 without inventing an authored edit.
 
-The existing synchronous outbox fsync cost remains a disclosed follow-up.
+Capture journal IO now uses the bounded handoff described under expiring-media retention.
 
 ## Windows non-admin follow-up
 
@@ -284,3 +284,83 @@ A separately reviewed non-admin atomic publication and recovery design remains
 a follow-up. It must state and qualify the power-loss guarantees for rename and
 deletion metadata; silently skipping the directory barrier is not equivalent.
 No such design or Windows runtime qualification is included here.
+
+## Expiring-media retention (Desktop M3B3)
+
+The native TTL timer, destructive view-once consumption, expired-media replacement
+and whole-message TTL queue a preimage and an explicit lifecycle fact before
+Telegram destroys the item. Ordinary reads, cache eviction, unload and item removal
+do not imply expiry. Desktop has no secret-chat transport and emits no Secret facts.
+The retained original body stays distinguishable from Expired or Consumed state.
+An expired protocol placeholder is intercepted before normal edit capture, so it
+cannot replace an original with a fabricated empty edit.
+
+A destructive seam waits at most 10 ms for a small encrypted journal write on a
+separate writer thread (at most eight outstanding writers, bounded preimage).
+The encoded lifecycle fact is checked against a 60 KiB limit before any journal
+write. The 10 ms bound applies to waiting for the durable acknowledgement;
+snapshot preparation and ordinary thread scheduling are additional work.
+The main thread performs no new fsync or media-byte I/O and never waits for a
+network request, media copying or archive-worker completion. If acknowledgement
+misses the deadline, Telegram proceeds and the archive visibly records a retention
+gap. This is a scheduling deadline rather than a real-time kernel guarantee.
+Ordinary captures use the same bounded handoff. All journal Append, failure
+inspection and Attention IO stay on background writers; no foreground capture
+or error path takes the journal IO mutex. Admission is a nonblocking worker
+queue plus at most eight capture writers. Busy/full admission or a missed
+acknowledgement records a visible gap; admitted encrypted outbox records remain
+replayable even when a drain notification cannot be queued. Gap tasks have a
+small reserved queue allowance. Logout still revokes immediately without joining
+these writers.
+A file descriptor or buffered stream fragment is not claimed as crash-durable.
+Only durably authenticated owned chunks and committed completion count as retained.
+
+Acquisition observes existing document/photo completion notifications and passive
+stream loader parts. It never calls wanted(), save(), load(), fill(), changes a
+priority or creates a loader. A bounded observation registry binds completion to
+its original account, message, observation, body hash and media identity. Alternative
+video documents are distinct captured identities. A missing binding reports a gap.
+Every separately validated origin is registered when a Reader or cached streaming
+Document is reused. Cached Documents keep a weak association with their actual
+Reader, so another reader-map entry cannot redirect that binding. Bindings are
+idempotent for one observation and limited to 64 origins per Reader, 64 live
+Readers and 64 cached Document associations per session. Expired weak references
+are pruned. New passive parts feed each exact immutable observation/version;
+no additional loader or request is created. If a new binding arrives after parts
+already passed, the adapter explicitly records a retention gap instead of claiming
+those bytes were retained or reading playback cache. Unbound origins, overflow,
+missing Document association and loader failure also report gaps.
+
+A completion notification alone is not proof: memory/file snapshots require exact
+size and native descriptor identity and are hashed/copied on the account worker.
+
+Passive fragments use core purple_archive_staging format 1. Each job has one
+account-owned staging directory named by its keyed binding token. The directory
+owns all provisional images, superseded images, progress and SQLite sidecars,
+including unpublished orphans. A private native SQLite catalogue atomically CASes
+the encrypted core header, encrypted page/delta and untrusted Merkle node hints.
+This catalogue is separate from the format-2 archive database and changes none
+of its schema. Every statement uses the checked private SQLite runner and exact
+row/change counts. Native indexes never authorize content; core authenticates
+membership/absence proofs against the header. Frames are bounded before reading.
+No message body, attachment bytes or unkeyed attachment hash is stored in plaintext.
+
+Fragments are split at 256 KiB windows; progress and proofs stay bounded regardless
+of attachment size. Out-of-order delivery and duplicate bytes preserve coverage;
+conflicting overlap refuses. Only a durable piece plus atomic catalogue commit
+credits bytes. Complete coverage freezes an encrypted checkpoint, then core's
+two-pass finalizer authenticates coverage and whole hash before resealing canonical
+1 MiB chunks. Publication is checked against the exact job/version/revision/hash,
+purge generations and external epoch. It can complete a retained historical version
+without filling a newer head. Physical usage includes all staging and publication
+orphans. Startup scans jobs in bounded pages and resumes complete frozen staging;
+partial staging remains explicitly incomplete until more already-acquired bytes
+arrive. Logout and confirmed per-account discard revoke the same workers, secrets,
+queued parts and readers and remove the complete owned directory tree.
+
+New and reused staging pieces are reopened and authenticated before coverage
+credit. Canonical publication acknowledgements use the actual reopened frame.
+Missing/tampered pieces and progress headers refuse completion. A repeated part
+after completion verifies the owned historical bytes instead of creating a false
+gap. Destruction with media that is not owned records a visible durable gap;
+the original body and lifecycle state remain available.

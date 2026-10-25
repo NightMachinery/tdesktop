@@ -205,12 +205,19 @@ void Media(ArchiveEvent &event, const MTPMessageMedia &media) {
 		if (const auto document = data.vdocument()) {
 			Document(content, *document);
 		}
+		if (const auto alternatives = data.valt_documents()) {
+			for (const auto &document : alternatives->v) {
+				Document(content, document);
+			}
+		}
+		content.preserved.insert(u"ttlSeconds"_q, data.vttl_seconds() ? data.vttl_seconds()->v : 0);
 		content.preserved.insert(u"spoiler"_q, data.is_spoiler());
 	} else if (media.type() == mtpc_messageMediaPhoto) {
 		const auto &data = media.c_messageMediaPhoto();
 		if (const auto photo = data.vphoto()) {
 			Photo(content, *photo);
 		}
+		content.preserved.insert(u"ttlSeconds"_q, data.vttl_seconds() ? data.vttl_seconds()->v : 0);
 		if (const auto video = data.vvideo()) {
 			Document(content, *video);
 		}

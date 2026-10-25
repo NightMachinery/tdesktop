@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_streaming.h"
+#include "purple/purple_archive_acquired_source.h"
 
 #include "data/data_photo.h"
 #include "data/data_document.h"
@@ -97,6 +98,7 @@ template <typename Data>
 	if (i != end(readers)) {
 		if (auto result = i->second.lock()) {
 			if (!forceRemoteLoader || result->isRemoteLoader()) {
+				Purple::ObserveArchiveStream(&_owner->session(), data, origin, result.get());
 				return result;
 			}
 		}
@@ -108,6 +110,7 @@ template <typename Data>
 	auto result = std::make_shared<Reader>(
 		std::move(loader),
 		&_owner->cacheBigFile());
+	Purple::ObserveArchiveStream(&_owner->session(), data, origin, result.get());
 	if (!PruneDestroyedAndSet(readers, data, result)) {
 		readers.emplace_or_assign(data, result);
 	}
@@ -127,6 +130,7 @@ template <typename Data>
 	const auto i = documents.find(data);
 	if (i != end(documents)) {
 		if (auto result = i->second.lock()) {
+			Purple::ObserveArchiveStream(&_owner->session(), data, origin, result.get());
 			if (!otherQualities.empty()) {
 				result->setOtherQualities(std::move(otherQualities));
 			}
@@ -139,8 +143,9 @@ template <typename Data>
 	}
 	auto result = std::make_shared<Document>(
 		data,
-		std::move(reader),
+		reader,
 		std::move(otherQualities));
+	Purple::BindArchiveStreamDocument(&_owner->session(), result, reader);
 	if (!PruneDestroyedAndSet(documents, data, result)) {
 		documents.emplace_or_assign(data, result);
 	}

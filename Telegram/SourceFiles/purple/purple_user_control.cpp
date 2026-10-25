@@ -1,4 +1,5 @@
 #include "purple/purple_user_control.h"
+#include "purple/purple_archive_lifecycle_capture.h"
 
 #include "base/base_file_utilities.h"
 #include "base/weak_ptr.h"
@@ -369,6 +370,9 @@ std::unique_ptr<Data::Media> SelfDestructMediaForSaving(
 }
 
 void ExpireSelfDestructMedia(not_null<HistoryItem*> item, bool consumed) {
+	if (consumed) {
+		ObserveArchiveLifecycle(item, ArchiveMediaTransition::Consumption);
+	}
 	if (consumed) {
 		SelfDestructSaveInvalidations().fire_copy(item);
 	}

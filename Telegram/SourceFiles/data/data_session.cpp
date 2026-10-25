@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
 #include "purple/purple_archive_capture.h"
+#include "purple/purple_archive_lifecycle_capture.h"
 #include "purple/hooks/work_view.h"
 
 #include "main/main_session.h"
@@ -3060,6 +3061,7 @@ void Session::checkTTLs() {
 		expired.insert(expired.end(), items.begin(), items.end());
 	}
 	if (!expired.empty()) {
+		Purple::ObserveArchiveTtlExpiry(expired);
 		notifyItemsAboutToBeDestroyed(expired);
 		for (const auto &item : expired) {
 			item->destroy();

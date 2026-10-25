@@ -1,4 +1,5 @@
 #include "purple/purple_desktop_archive_store.h"
+#include "purple/purple_archive_stream.h"
 #include "purple/purple_archive_attention.h"
 #include "purple/purple_archive_files.h"
 #include "purple/purple_archive_media_lifecycle.h"
@@ -1900,6 +1901,211 @@ std::optional<QString> DesktopArchiveStore::ObservedMediaVersion(
 				   && Current()
 			   ? std::optional(selected.id)
 			   : std::nullopt;
+}
+
+bool DesktopArchiveStore::CaptureLifecycle(const ArchiveEvent &preimage, const ArchiveStoreEpoch &captured) {
+	const auto context = preimage.observation.context;
+	const auto transition = context.value(u"desktopLifecycle"_q).toInt(-1);
+	if (!preimage.content || transition < 0 || transition > int(ArchiveMediaTransition::CacheEviction)
+		|| !CanRunArchiveWork(captured, epoch())) {
+		return false;
+	}
+	auto slice = ReadSlice(preimage.key);
+	const auto message = slice ? FindArchiveMessage(slice->state, preimage.key) : nullptr;
+	if (!message || message->versions.empty()) {
+		return false;
+	}
+	if (std::any_of(message->receipts.begin(), message->receipts.end(),
+		[&](const auto &receipt) { return receipt.id == preimage.id + u":lifecycle"_q; })) {
+		const auto missing = std::any_of(message->versions.back().media.begin(), message->versions.back().media.end(),
+			[](const auto &ref) { return ref.state != ArchiveMediaState::Complete; });
+		return !missing || Gap(preimage.id + u":media-unavailable"_q,
+			u"lifecycle-media-not-owned"_q, preimage.observation.observedAt);
+	}
+	const auto &head = message->versions.back();
+	const auto original = context.value(u"desktopLifecycleObservation"_q).toString();
+	const auto hash = context.value(u"desktopLifecycleHash"_q).toString();
+	if ((!original.isEmpty() && head.id != original && head.revision != original)
+		|| (!hash.isEmpty() && ArchiveContentHash(head.content) != hash)
+		|| (!context.value(u"desktopLifecycleFallback"_q).toBool() && original.isEmpty() && (head.content.text != preimage.content->text
+			|| head.content.media.size() != preimage.content->media.size()))) {
+		return false;
+	}
+	auto event = ArchiveEvent();
+	auto mediaUnavailable = false;
+	const auto fallback = context.value(u"desktopLifecycleFallback"_q).toBool();
+	if (preimage.content->media.empty() && !fallback) {
+		event.key = preimage.key;
+		event.id = preimage.id + u":lifecycle"_q;
+		event.order = preimage.order + 1;
+		event.origin = ArchiveOrigin::MediaExpiry;
+		event.generation = preimage.generation;
+		event.targetVersion = head.id;
+		event.targetRevision = head.revision;
+		event.expectedContentHash = ArchiveContentHash(head.content);
+		event.observation = preimage.observation;
+		if (!context.value(u"desktopWholeMessageTtl"_q).toBool()
+			|| preimage.generation != ArchiveGenerationFor(slice->state, preimage.key.chat)) {
+			return false;
+		}
+	} else {
+		if (fallback && head.media.empty()) {
+			return false;
+		}
+		const auto identity = fallback ? head.media.front().identity : preimage.content->media.front().identity;
+		const auto plan = PlanArchiveMediaLifecycle(slice->state, epoch(), {
+			{captured, preimage.key, head.id, head.revision, ArchiveContentHash(head.content), identity,
+				preimage.generation},
+			context.value(u"desktopViewOnce"_q).toBool() ? ArchiveMediaLifetime::ViewOnce : ArchiveMediaLifetime::Ttl,
+			ArchiveMediaTransition(transition), ArchiveAvailableBytes::Unavailable, true,
+			preimage.id + u":lifecycle"_q, preimage.order + 1, preimage.observation.observedAt});
+		if (plan.transaction.status == ArchivePlanStatus::NoChange) {
+			return true;
+		}
+		if (!plan.event) {
+			return false;
+		}
+		mediaUnavailable = plan.retention != ArchiveMediaRetention::Owned;
+		event = *plan.event;
+	}
+	const auto result = Capture(std::move(event));
+	return (result.retained || result.model == ArchivePlanStatus::NoChange)
+		&& (!mediaUnavailable || Gap(preimage.id + u":media-unavailable"_q,
+			u"lifecycle-media-not-owned"_q, preimage.observation.observedAt));
+}
+
+std::optional<ArchiveStagingBinding> DesktopArchiveStore::StageStream(const ArchiveMessageKey &key,
+	const QString &version, const QString &identity, uint64_t size) {
+	auto slice = ReadSlice(key, {}, version);
+	const auto selected = slice ? FindArchiveVersion(slice->state, key, version) : nullptr;
+	if (!selected) {
+		return {};
+	}
+	const auto reference = std::find_if(selected->media.begin(), selected->media.end(),
+		[&](const auto &ref) { return ref.identity == identity; });
+	if (reference == selected->media.end() || reference->state == ArchiveMediaState::Complete) {
+		return {};
+	}
+	auto job = ArchiveMediaJob{NewToken(), key, version, identity,
+		ArchiveGenerationFor(slice->state, key.chat), size, {}};
+	job.revision = selected->revision;
+	job.contentHash = ArchiveContentHash(selected->content);
+	const auto pending = std::find_if(slice->state.jobs.begin(), slice->state.jobs.end(),
+		[&](const auto &old) { return old.key == key && old.version == version
+			&& old.mediaIdentity == identity && old.state == ArchiveJobState::Staged; });
+	if (pending != slice->state.jobs.end()) {
+		job = *pending;
+		if (job.expectedSize != std::optional<uint64_t>(size)) {
+			return {};
+		}
+	} else {
+		const auto plan = PlanArchiveMediaStage(slice->state, job);
+		if (!plan || !Execute(TranslateArchiveSql(plan, *slice, security()))) {
+			return {};
+		}
+	}
+	return ArchiveStagingBinding{{epoch(), key, version, job.revision, job.contentHash,
+		identity, job.generation}, job.id, size, job.expectedHash.isEmpty() ? std::nullopt : std::optional(job.expectedHash)};
+}
+
+bool DesktopArchiveStore::ResumeStreams(QString &cursor, bool &more) {
+	more = false;
+	if (!Current()) {
+		return false;
+	}
+	const auto page = database().Read(ArchiveSqlReadPage(ArchiveRecordKind::Job, 16, cursor));
+	if (!page.ok) {
+		return false;
+	}
+	for (const auto &values : page.rows) {
+		const auto token = Value<QString>(values, 0);
+		const auto frame = Value<QByteArray>(values, 2);
+		if (values.size() != 3 || !token || !frame || *token <= cursor) {
+			return false;
+		}
+		const auto row = _impl->Decode(ArchiveRecordKind::Job, *token, *frame);
+		if (!row) {
+			return false;
+		}
+		const auto &job = std::get<ArchiveMediaJob>(row->row.value);
+		if (job.key.account != epoch().account || ArchiveSqlToken(job.key.account,
+			ArchiveIndexKind::Job, job.id.toUtf8(), security()) != *token) {
+			return false;
+		}
+		cursor = *token;
+		if (job.state != ArchiveJobState::Staged || !job.expectedSize) {
+			continue;
+		}
+		const auto binding = ArchiveStagingBinding{{epoch(), job.key, job.version, job.revision,
+			job.contentHash, job.mediaIdentity, job.generation}, job.id, *job.expectedSize,
+			job.expectedHash.isEmpty() ? std::nullopt : std::optional(job.expectedHash)};
+		const auto path = directory() + u"/staging/stream-"_q + ArchiveStagingBindingId(binding, security());
+		if (!QFileInfo::exists(path)) {
+			continue;
+		}
+		auto stream = DesktopArchiveStream(*this, binding);
+		if (!stream.Open() || (stream.header().coveredBytes == binding.totalBytes && !stream.Complete())) {
+			if (!Gap(job.id + u":resume"_q, u"stream-recovery-held"_q, QDateTime::currentSecsSinceEpoch())) {
+				return false;
+			}
+		}
+	}
+	more = page.rows.size() == 16;
+	return true;
+}
+
+bool DesktopArchiveStore::StreamPart(const ArchiveStagingBinding &binding, uint64_t offset,
+	const QByteArray &bytes) {
+	if (!Current() || !CanRunArchiveWork(binding.source.epoch, epoch())
+		|| bytes.size() > kArchiveMediaChunkBytes || offset > binding.totalBytes
+		|| uint64_t(bytes.size()) > binding.totalBytes - offset) {
+		return false;
+	}
+	const auto slice = ReadSlice(binding.source.key, {}, binding.source.version);
+	const auto saved = slice ? database().Read(ArchiveSqlReadRecord(binding.source.key.account,
+		ArchiveRecordKind::Job, binding.jobId, security())) : DesktopArchiveSqlResult();
+	const auto token = saved.ok && saved.rows.size() == 1 ? Value<QString>(saved.rows.front(), 0) : nullptr;
+	const auto frame = saved.ok && saved.rows.size() == 1 ? Value<QByteArray>(saved.rows.front(), 1) : nullptr;
+	const auto row = token && frame ? _impl->Decode(ArchiveRecordKind::Job, *token, *frame) : std::nullopt;
+	const auto job = row ? std::get_if<ArchiveMediaJob>(&row->row.value) : nullptr;
+	if (!slice || !saved.ok || !job || job->id != binding.jobId
+		|| *token != ArchiveSqlToken(binding.source.key.account, ArchiveIndexKind::Job,
+			binding.jobId.toUtf8(), security())) {
+		return false;
+	}
+	if (job->state == ArchiveJobState::Complete) {
+		const auto &source = binding.source;
+		const auto version = FindArchiveVersion(slice->state, source.key, source.version);
+		if (!version || job->key != source.key || job->version != source.version
+			|| job->revision != source.revision || job->contentHash != source.contentHash
+			|| job->mediaIdentity != source.mediaIdentity || job->generation != source.generation
+			|| version->revision != source.revision || ArchiveContentHash(version->content) != source.contentHash
+			|| ArchiveGenerationFor(slice->state, source.key.chat) != source.generation
+			|| job->expectedSize != std::optional<uint64_t>(binding.totalBytes)
+			|| (!job->expectedHash.isEmpty() && job->expectedHash != binding.expectedBlobHash.value_or(QString()))) {
+			return false;
+		}
+		auto position = uint64_t(0);
+		auto matched = uint64_t(0);
+		return ReadMedia(source.key, source.version, source.mediaIdentity, [&](const QByteArray &part) {
+			const auto from = std::max(position, offset);
+			const auto till = std::min(position + uint64_t(part.size()), offset + uint64_t(bytes.size()));
+			const auto same = from >= till || part.mid(from - position, till - from) == bytes.mid(from - offset, till - from);
+			matched += from < till ? till - from : 0;
+			position += part.size();
+			return same;
+		}) && matched == uint64_t(bytes.size());
+	}
+	auto stream = DesktopArchiveStream(*this, binding);
+	if (!stream.Open()) {
+		return false;
+	}
+	const auto written = bytes.isEmpty() && !binding.totalBytes ? ArchiveStagingStatus::NoChange
+		: stream.Write(offset, bytes);
+	if (written != ArchiveStagingStatus::Ready && written != ArchiveStagingStatus::NoChange) {
+		return false;
+	}
+	return stream.header().coveredBytes != binding.totalBytes || stream.Complete();
 }
 
 bool DesktopArchiveStore::CopyMedia(const ArchiveMessageKey &key, const QString &version,

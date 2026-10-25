@@ -1343,3 +1343,18 @@ send-ack hook runs after real message-ID adoption and acknowledged-field
 application, capturing a partial observed baseline plus the genuine short-ack
 TL evidence. Later acknowledgements add metadata to the existing version. Effective non-server, scheduled and admin-log IDs
 are excluded from the received-message creation hook.
+
+## M3B3 expiring-media and passive acquisition hooks
+
+- history/history_item.cpp: Purple lifecycle calls before clearMediaAsExpired,
+  actual expired refreshMedia replacement and timer service-text destruction.
+- data/data_session.cpp: Purple lifecycle call for each explicitly expired TTL item
+  before about-to-destroy notification and destroy. No generic removal observer.
+- data/data_streaming.cpp: Purple registration after Reader construction and on
+  Reader reuse. A weak owned Document-to-Reader association also covers cached
+  Document reuse, without redirecting to another reader-map entry. No download
+  requests or priority changes.
+- media/streaming/media_streaming_reader.h: one friend grants the owned stream
+  bridge access to the existing loader for passive registration only.
+- Existing api_updates/data_session archive entry points route expired placeholders
+  inside Purple. Purple's own user_control consumption hook captures before consume.

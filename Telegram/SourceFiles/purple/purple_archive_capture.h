@@ -10,6 +10,8 @@ class Session;
 
 namespace Purple {
 
+[[nodiscard]] std::optional<ArchiveEvent> DesktopArchiveLiveSnapshot(
+	not_null<Main::Session*> session, not_null<HistoryItem*> item);
 [[nodiscard]] ArchiveChatKey DesktopArchiveChat(PeerId peer);
 [[nodiscard]] std::optional<ArchiveEvent> DesktopArchiveSnapshot(
 	const AccountKey &account, const MTPMessage &message, ArchiveOrigin origin,

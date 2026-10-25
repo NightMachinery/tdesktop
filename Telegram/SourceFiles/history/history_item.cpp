@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_item.h"
 #include "purple/purple_user_control.h"
+#include "purple/purple_archive_lifecycle_capture.h"
 
 #include "api/api_premium.h"
 #include "api/api_sensitive_content.h"
@@ -2691,6 +2692,7 @@ void HistoryItem::contributeToSlowmode(TimeId realDate) {
 }
 
 void HistoryItem::clearMediaAsExpired() {
+	Purple::ObserveArchiveLifecycle(this);
 	const auto media = this->media();
 	if (!media || !media->ttlSeconds()) {
 		return;
@@ -5152,6 +5154,7 @@ void HistoryItem::createComponents(const MTPDmessage &data) {
 }
 
 void HistoryItem::refreshMedia(const MTPMessageMedia *media) {
+	Purple::ObserveArchiveMediaReplacement(this, media);
 	const auto was = (_media != nullptr);
 	if (const auto invoice = was ? _media->invoice() : nullptr) {
 		if (HasExtendedMedia(*invoice)) {
@@ -8377,6 +8380,7 @@ crl::time HistoryItem::getSelfDestructIn(crl::time now) {
 					}
 					Unexpected("Type in HistoryServiceSelfDestruct::Type");
 				};
+				Purple::ObserveArchiveLifecycle(this);
 				setServiceText({ TextWithEntities{ .text = text() } });
 				Purple::ExpireSelfDestructMedia(this);
 				return 0;

@@ -24,6 +24,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QThread>
 #include <algorithm>
 #include <atomic>
@@ -31,6 +32,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <future>
 #include <map>
 #include <mutex>
 #include <set>
@@ -255,9 +257,9 @@ class ArchiveWorker final {
 		return result;
 	}
 	~ArchiveWorker() { Stop(false); }
-	bool Post(Task task) {
-		const auto lock = std::lock_guard(_state->mutex);
-		if (_state->cancelled || _state->tasks.size() >= 64) {
+	bool Post(Task task, bool cleanup = false) {
+		const auto lock = std::unique_lock(_state->mutex, std::try_to_lock);
+		if (!lock.owns_lock() || _state->cancelled || _state->tasks.size() >= (cleanup ? 80 : 64)) {
 			return false;
 		}
 		_state->tasks.push_back(std::move(task));
@@ -389,21 +391,35 @@ class ArchiveWorker final {
 				journalFailure.isEmpty() ? store.failure() : journalFailure, usageBytes);
 		};
 		report();
+		auto streamCursor = QString();
+		auto streamMore = store.Current();
 		for (;;) {
 			auto task = Task();
 			{
 				auto lock = std::unique_lock(state->mutex);
 				state->condition.wait(lock, [&] {
-					return state->cancelled.load() || !state->tasks.empty();
+					return state->cancelled.load() || !state->tasks.empty() || streamMore;
 				});
 				if (state->cancelled) {
 					break;
 				}
-				task = std::move(state->tasks.front());
-				state->tasks.pop_front();
+				if (state->tasks.empty()) {
+					task = [&](DesktopArchiveStore &store) {
+						if (!store.ResumeStreams(streamCursor, streamMore)) {
+							streamMore = false;
+							static_cast<void>(store.Gap(u"stream-recovery"_q, u"stream-recovery-held"_q, base::unixtime::now()));
+						}
+					};
+				} else {
+					task = std::move(state->tasks.front());
+					state->tasks.pop_front();
+				}
 			}
 			state->delivery->fetch_add(1);
 			task(store);
+			if (journal && journal->access().current()) {
+				static_cast<void>(journal->Drain(store));
+			}
 			report();
 		}
 		state->secrets->Revoke();
@@ -728,47 +744,160 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 	};
 }
 
-void QueueArchiveObservation(not_null<Main::Session*> session, ArchiveEvent event) {
-	if (Retired.contains(session.get())
-		|| event.key.account != SessionAccountKey(session)) {
+void QueueArchiveRetentionGap(not_null<Main::Session*> session, QString reason) {
+	if (Retired.contains(session.get())) {
 		return;
 	}
 	auto &value = For(session);
-	const auto journal = value.journal;
-	if (journal && !event.lifecycleEpoch) {
-		event.generation = journal->access().generation;
+	const auto firstFailure = value.failure.isEmpty();
+	value.failure = reason;
+	static_cast<void>(value.worker->Post([reason](DesktopArchiveStore &store) {
+		static_cast<void>(store.Gap(reason, reason, base::unixtime::now()));
+	}, true));
+	Changes.fire({});
+	if (firstFailure && Core::App().domain().started()
+		&& Core::App().domain().active().maybeSession() == session.get()) {
+		Ui::Toast::Show(tr::lng_purple_archive_gap(tr::now));
 	}
-	const auto captured = journal && journal->Append(event);
-	const auto reason = captured  ? QString()
-						: journal ? journal->failure()
-								  : u"capture-not-ready"_q;
-	const auto accepted = value.worker->Post(
-		[journal, captured, reason, id = event.id, time = event.observation.observedAt,
-			limited
-			= event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()](
-			DesktopArchiveStore &store) {
-			if (captured) {
-				static_cast<void>(journal->Drain(store));
-				if (limited) {
-					static_cast<void>(store.Gap(id, u"snapshot-limited"_q, time));
+}
+
+namespace {
+
+void QueueArchiveJournalWrite(not_null<Main::Session*> session, ArchiveEvent event, int byteLimit) {
+	auto &value = For(session);
+	const auto journal = value.journal;
+	const auto worker = value.worker;
+	static auto writers = std::make_shared<std::atomic<int>>(0);
+	const auto slots = writers;
+	if (!journal || slots->fetch_add(1) >= 8) {
+		if (journal) {
+			slots->fetch_sub(1);
+		}
+		QueueArchiveRetentionGap(session, u"capture-write-unavailable"_q);
+		return;
+	}
+	event.generation = journal->access().generation;
+	const auto ack = std::make_shared<std::promise<bool>>();
+	auto future = ack->get_future();
+	const auto timedOut = std::make_shared<std::atomic<bool>>(false);
+	try {
+		std::thread([journal, worker, slots, ack, timedOut, byteLimit, event = std::move(event)]() mutable {
+			const auto release = gsl::finally([&] { slots->fetch_sub(1); });
+			const auto captured = journal->Append(event, byteLimit);
+			ack->set_value(captured);
+			const auto reason = captured ? QString() : journal->failure();
+			if (!captured) {
+				static_cast<void>(journal->Attention(reason, event.observation.observedAt));
+			}
+			static_cast<void>(worker->Post([journal, captured, reason, timedOut, id = event.id,
+				time = event.observation.observedAt,
+				limited = event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()](DesktopArchiveStore &store) {
+				if (captured) {
+					static_cast<void>(journal->Drain(store));
+					if (limited) {
+						static_cast<void>(store.Gap(id, u"snapshot-limited"_q, time));
+					}
 				}
+				if (!captured || timedOut->load()) {
+					static_cast<void>(store.Gap(id + u":deadline"_q,
+						captured ? u"capture-durability-deadline"_q : reason, time));
+				}
+			}, true));
+		}).detach();
+	} catch (const std::system_error &) {
+		slots->fetch_sub(1);
+		QueueArchiveRetentionGap(session, u"capture-writer-unavailable"_q);
+		return;
+	}
+	if (future.wait_for(std::chrono::milliseconds(10)) != std::future_status::ready || !future.get()) {
+		timedOut->store(true);
+		QueueArchiveRetentionGap(session, u"capture-durability-deadline"_q);
+	}
+}
+
+}
+
+void QueueArchiveLifecycleFact(not_null<Main::Session*> session, ArchiveEvent event) {
+	if (Retired.contains(session.get()) || event.key.account != SessionAccountKey(session)) {
+		return;
+	}
+	const auto bytes = event.content ? event.content->text.size() * 4
+		+ event.content->caption.size() * 4 + QJsonDocument(event.content->rich.toObject()).toJson().size()
+		+ QJsonDocument(event.content->entities).toJson().size() : 0;
+	if (bytes > 48 * 1024 || !event.content || event.content->media.size() > 16) {
+		QueueArchiveRetentionGap(session, u"lifecycle-small-write-limit"_q);
+		return;
+	}
+	event.observation.payload.clear();
+	event.observation.payloadFormat.clear();
+	QueueArchiveJournalWrite(session, std::move(event), 60 * 1024);
+}
+
+Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> session,
+	DesktopArchiveObservation observation, uint64_t size) {
+	if (Retired.contains(session.get())) {
+		return [](uint64_t, QByteArray) {};
+	}
+	auto &value = For(session);
+	const auto worker = value.worker;
+	const auto journal = value.journal;
+	const auto pending = std::make_shared<std::atomic<uint64_t>>(0);
+	const auto binding = std::make_shared<std::optional<ArchiveStagingBinding>>();
+	const auto owned = std::make_shared<bool>(false);
+	const auto weak = base::make_weak(session.get());
+	return [weak, worker, journal, pending, binding, owned, observation = std::move(observation), size](uint64_t offset, QByteArray bytes) {
+		if (!weak || Retired.contains(weak.get()) || !journal || !journal->access().current()
+			|| bytes.size() > kArchiveMediaChunkBytes || offset > size || uint64_t(bytes.size()) > size - offset) {
+			return;
+		}
+		const auto count = uint64_t(bytes.size());
+		if (pending->fetch_add(count) + count > 8 * 1024 * 1024) {
+			pending->fetch_sub(count);
+			QueueArchiveRetentionGap(weak.get(), u"stream-queue-full"_q);
+			return;
+		}
+		const auto accepted = worker->Post([journal, pending, binding, owned, observation, size, offset,
+			bytes = std::move(bytes), count](DesktopArchiveStore &store) {
+			const auto release = gsl::finally([&] { pending->fetch_sub(count); });
+			if (*owned || !journal->access().current() || !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
+				return;
+			}
+			if (!*binding) {
+				const auto version = store.ObservedMediaVersion(observation.key, observation.observation,
+					observation.contentHash, observation.identity);
+				if (version) {
+					*binding = store.StageStream(observation.key, *version, observation.identity, size);
+					if (!*binding && store.ReadMedia(observation.key, *version, observation.identity,
+						[](const QByteArray &) { return true; })) {
+						*owned = true;
+						return;
+					}
+				}
+			}
+			if (!*binding || !store.StreamPart(**binding, offset, bytes)) {
+				static_cast<void>(store.Gap(observation.observation + u":stream"_q,
+					u"stream-incomplete"_q, base::unixtime::now()));
 			} else {
-				static_cast<void>(store.Gap(id, reason, time));
+				const auto slice = store.ReadSlice(observation.key, {}, (**binding).source.version);
+				const auto version = slice ? FindArchiveVersion(slice->state, observation.key,
+					(**binding).source.version) : nullptr;
+				*owned = version && std::any_of(version->media.begin(), version->media.end(),
+					[&](const auto &ref) { return ref.identity == observation.identity
+						&& ref.state == ArchiveMediaState::Complete; });
 			}
 		});
-	if (!captured || !accepted) {
-		const auto firstFailure = value.failure.isEmpty();
-		value.failure = accepted ? reason : u"capture-queue-full"_q;
-		if (journal) {
-			static_cast<void>(
-				journal->Attention(value.failure, event.observation.observedAt));
+		if (!accepted) {
+			pending->fetch_sub(count);
+			QueueArchiveRetentionGap(weak.get(), u"stream-queue-full"_q);
 		}
-		Changes.fire({});
-		if (firstFailure && Core::App().domain().started()
-			&& Core::App().domain().active().maybeSession() == session.get()) {
-			Ui::Toast::Show(tr::lng_purple_archive_gap(tr::now));
-		}
+	};
+}
+
+void QueueArchiveObservation(not_null<Main::Session*> session, ArchiveEvent event) {
+	if (Retired.contains(session.get()) || event.key.account != SessionAccountKey(session)) {
+		return;
 	}
+	QueueArchiveJournalWrite(session, std::move(event), 0);
 }
 
 void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessageKey key,
