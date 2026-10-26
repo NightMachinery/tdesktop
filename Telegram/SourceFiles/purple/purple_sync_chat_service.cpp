@@ -648,7 +648,8 @@ void SyncChatSession::Exact(const DesktopSyncChatCommand &command) {
 	}
 	auto channel = std::optional<MTPInputChannel>();
 	if (peer->input().type() == mtpc_inputPeerChannel) {
-		const auto &input = peer->input().c_inputPeerChannel();
+		const auto inputPeer = peer->input();
+		const auto &input = inputPeer.c_inputPeerChannel();
 		channel = MTP_inputChannel(input.vchannel_id(), input.vaccess_hash());
 	}
 	const auto request = DesktopSyncChatExactReadRequest(

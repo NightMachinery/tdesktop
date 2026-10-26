@@ -195,7 +195,8 @@ void DesktopSyncChatPeerRequest::Impl::Start(
 				.handleAllErrors()
 				.send();
 		} else if (peer->input().type() == mtpc_inputPeerChannel) {
-			const auto &input = peer->input().c_inputPeerChannel();
+			const auto inputPeer = peer->input();
+			const auto &input = inputPeer.c_inputPeerChannel();
 			_api.request(MTPchannels_GetFullChannel(MTP_inputChannel(
 							  input.vchannel_id(), input.vaccess_hash())))
 				.done(std::move(completed))

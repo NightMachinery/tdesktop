@@ -154,3 +154,14 @@ load or resume it before creating a new operation.
 
 The exact setup mark uses the shared canonical settings/playlists and deletion
 explanation, followed by #purplechatsync v1. Discovery's grammar is unchanged.
+
+## Input lifetime
+
+PeerData::input(), ChannelData::inputChannel() and UserData::inputUser() return
+owning TL values. Retain that value in a named local before keeping a reference
+to c_*() or data(). A reference returned by an accessor on a temporary does not
+extend the temporary's lifetime. Both full-info and cached-mark channel reads
+retain the input while copying the channel id and access hash into their request.
+The existing purple/test_sync_chat_setup_routes.py source gate scans all Purple
+C++ sources and tests unsafe and safe controls. Reaching these exact session-owned
+request paths in a standalone unit would require the native account/data stack.

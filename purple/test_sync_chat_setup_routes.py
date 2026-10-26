@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 repo = Path(__file__).resolve().parent.parent
 rules = [
  ('Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp', 'DesktopSyncChatSetupEligibility(', 'chooser uses shared eligibility'),
@@ -35,3 +36,41 @@ strings = (repo / 'Telegram/Resources/langs/purple.strings').read_text()
 for text in ['your settings file, which lists chats and people by id and name, including chats from your other accounts that you added to Work Mode lists', 'every signed-in session of this account can read it. state.toml stays on this device.']:
     assert text in strings
 assert 'For the settings home account' not in strings
+
+
+def temporary_input_accessors(source):
+    factory = r"\b(?:input|inputChannel|inputUser|inputChat|inputPeer|inputDocument|mtpInput)"
+    return list(re.finditer(factory + r"\s*\([^;{}]*?\)\s*\.\s*(?:c_[A-Za-z_]\w*|data)\s*\(", source))
+
+
+sources = sorted((repo / 'Telegram/SourceFiles/purple').rglob('*'))
+checked = 0
+for path in sources:
+    if path.suffix not in {'.cpp', '.h', '.mm'}:
+        continue
+    checked += 1
+    source = path.read_text()
+    for match in temporary_input_accessors(source):
+        line = source.count('\n', 0, match.start()) + 1
+        raise AssertionError(f'{path.relative_to(repo)}:{line}: retain the input value before accessing its data')
+
+negative = [
+    'const auto &data = peer->input().c_inputPeerChannel();',
+    'const auto &data = peer->inputChannel().c_inputChannel();',
+    'const auto &data = peer->mtpInput().data();',
+    'const auto &data = peer->inputUser().c_inputUser();',
+    'const auto &data = peer->inputDocument().c_inputDocument();',
+    'const auto &data = peer->input(\n).\n c_inputPeerChannel();',
+    'const auto &data = (peer->input()).c_inputPeerChannel();',
+]
+positive = [
+    'const auto input = peer->input(); const auto &data = input.c_inputPeerChannel();',
+    'const auto &input = peer->input(); const auto &data = input.c_inputPeerChannel();',
+    'const auto &data = full.vparticipants().c_chatParticipants();',
+    'const auto &data = data.vchats().v.front().c_channel();',
+]
+for source in negative:
+    assert temporary_input_accessors(source), 'temporary-input negative guard missed a regression'
+for source in positive:
+    assert not temporary_input_accessors(source), 'named input or borrowed TL accessor rejected'
+print(f'Temporary input lifetimes: {checked} Purple sources, {len(negative)} negative and {len(positive)} safe controls PASS')
