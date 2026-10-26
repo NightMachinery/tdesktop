@@ -47,11 +47,14 @@ bool IsSyncHistoryCandidate(const MTPMessage &message) {
 SyncHistoryScanner::SyncHistoryScanner(
 		not_null<Main::Session*> session,
 		Fn<void(uint64_t)> progress,
-		Fn<void(SyncHistoryScanResult)> finished)
+		Fn<void(SyncHistoryScanResult)> finished,
+		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
 : _session(session)
 , _api(&session->mtp())
+, _modernHistory(peerToUser(session->user()->id).bare)
 , _progress(std::move(progress))
-, _finished(std::move(finished)) {
+, _finished(std::move(finished))
+, _owned(std::move(owned)) {
 }
 
 SyncHistoryScanner::~SyncHistoryScanner() {
@@ -95,6 +98,15 @@ void SyncHistoryScanner::RequestNext() {
 			return;
 		}
 		self->_requestId = 0;
+		auto modern = DesktopSyncChatPageStatus::Next;
+		if (self->_owned) {
+			modern = self->_modernHistory.Add(result, self->_pages.count());
+			if (modern == DesktopSyncChatPageStatus::Incomplete
+				|| modern == DesktopSyncChatPageStatus::Capped) {
+				self->Finish(SyncHistoryScanStatus::InvalidResponse);
+				return;
+			}
+		}
 		auto messages = (const QVector<MTPMessage>*)nullptr;
 		result.match([&](const MTPDmessages_messagesNotModified &) {
 		}, [&](const auto &data) {
@@ -107,12 +119,22 @@ void SyncHistoryScanner::RequestNext() {
 		auto page = std::vector<SyncHistoryPageItem>();
 		page.reserve(messages->size());
 		for (const auto &message : *messages) {
-			page.push_back({ IdFromMessage(message).bare, IsSyncHistoryCandidate(message) });
+			auto candidate = IsSyncHistoryCandidate(message);
+			if (candidate && self->_owned) {
+				const auto ownership = self->_owned(message);
+				if (ownership == SyncChatMessageOwnership::Unknown) {
+					self->Finish(SyncHistoryScanStatus::InvalidResponse);
+					return;
+				}
+				candidate = ownership == SyncChatMessageOwnership::Own;
+			}
+			page.push_back({ IdFromMessage(message).bare, candidate });
 		}
 		const auto status = self->_pages.Add(page);
 		if (status == SyncHistoryPageStatus::Stalled) {
 			self->Finish(SyncHistoryScanStatus::Stalled);
-		} else if (status == SyncHistoryPageStatus::Complete) {
+		} else if (status == SyncHistoryPageStatus::Complete
+			|| (self->_owned && modern == DesktopSyncChatPageStatus::Complete)) {
 			self->Finish(SyncHistoryScanStatus::Complete);
 		} else {
 			if (self->_progress) {

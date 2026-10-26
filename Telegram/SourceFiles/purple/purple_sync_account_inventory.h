@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "purple/purple_sync_chat.h"
+
 #include "base/weak_ptr.h"
 #include "purple/purple_sync_candidate_reader.h"
 #include "purple/purple_sync_history_scanner.h"
@@ -21,7 +23,8 @@ public:
 	SyncAccountInventory(
 			not_null<Main::Session*> session,
 			Fn<void(uint64_t)> progress,
-			Fn<void(SyncAccountInventoryResult)> finished);
+			Fn<void(SyncAccountInventoryResult)> finished,
+			Fn<SyncChatMessageOwnership(const MTPMessage &)> owned = {});
 	~SyncAccountInventory();
 
 	SyncAccountInventory(const SyncAccountInventory &) = delete;
@@ -41,6 +44,7 @@ private:
 	SyncAccountInventoryResult _result;
 	std::unique_ptr<SyncHistoryScanner> _scanner;
 	std::unique_ptr<SyncCandidateReader> _reader;
+	Fn<SyncChatMessageOwnership(const MTPMessage &)> _owned;
 	bool _started = false;
 	bool _scanFinished = false;
 	bool _done = false;

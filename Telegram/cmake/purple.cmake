@@ -189,6 +189,16 @@ PRIVATE
     purple/purple_sync_config_review.h
     purple/purple_sync_config_text.cpp
     purple/purple_sync_config_text.h
+    purple/purple_sync_chat_service.cpp
+    purple/purple_sync_chat_service.h
+    purple/purple_sync_chat_store.cpp
+    purple/purple_sync_chat_store.h
+    purple/purple_sync_chat_discovery.cpp
+    purple/purple_sync_chat_discovery.h
+    purple/purple_sync_chat_cache.cpp
+    purple/purple_sync_chat_cache.h
+    purple/purple_sync_chat_requests.cpp
+    purple/purple_sync_chat_requests.h
     purple/purple_sync_chat_facts.cpp
     purple/purple_sync_chat_facts.h
     purple/purple_sync_history_scanner.cpp

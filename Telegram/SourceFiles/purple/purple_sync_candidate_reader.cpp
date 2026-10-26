@@ -24,11 +24,13 @@ constexpr auto kMaximumRecordBytes = kSyncRecordMaximumBytes;
 SyncCandidateReader::SyncCandidateReader(
 		not_null<Main::Session*> session,
 		std::vector<int32_t> candidateIds,
-		Fn<void(SyncCandidateReadResult)> finished)
+		Fn<void(SyncCandidateReadResult)> finished,
+		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
 : _session(session)
 , _api(&session->mtp())
 , _candidateIds(std::move(candidateIds))
-, _finished(std::move(finished)) {
+, _finished(std::move(finished))
+, _owned(std::move(owned)) {
 	_result.records.reserve(_candidateIds.size());
 }
 
@@ -104,6 +106,17 @@ void SyncCandidateReader::RequestNext() {
 				.status = SyncCandidateStatus::Changed,
 			});
 			return;
+		}
+		if (self->_owned) {
+			const auto ownership = self->_owned(message);
+			if (ownership != SyncChatMessageOwnership::Own) {
+				self->CompleteCurrent({
+					.id = id,
+					.status = (ownership == SyncChatMessageOwnership::Unknown)
+						? SyncCandidateStatus::Inaccessible : SyncCandidateStatus::Changed,
+				});
+				return;
+			}
 		}
 		const auto media = message.c_message().vmedia();
 		const auto document = media->c_messageMediaDocument().vdocument();

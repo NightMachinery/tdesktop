@@ -698,3 +698,7 @@ real server mutations.
 
 The source-only [sync-chat adapter](sync_chat.md) documents native ownership and
 full-info facts for the separately gated M2B4 discovery work.
+
+The per-account [sync-chat service](sync_chat_service.md) adds read-only discovery,
+login-bound local cache, held status and bounded retries. Its typed non-Self
+inventory and writer integration remain the next slice; automatic sync stays Self-only.

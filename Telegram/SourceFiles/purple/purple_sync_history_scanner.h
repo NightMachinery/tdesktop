@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "purple/purple_sync_chat.h"
+#include "purple/purple_sync_chat_requests.h"
+
 #include "base/weak_ptr.h"
 #include "mtproto/sender.h"
 #include "purple/purple_sync_inventory.h"
@@ -26,7 +29,8 @@ public:
 	SyncHistoryScanner(
 			not_null<Main::Session*> session,
 			Fn<void(uint64_t)> progress,
-			Fn<void(SyncHistoryScanResult)> finished);
+			Fn<void(SyncHistoryScanResult)> finished,
+			Fn<SyncChatMessageOwnership(const MTPMessage &)> owned = {});
 	~SyncHistoryScanner();
 
 	SyncHistoryScanner(const SyncHistoryScanner &) = delete;
@@ -42,9 +46,11 @@ private:
 	not_null<Main::Session*> _session;
 	MTP::Sender _api;
 	SyncHistoryPages _pages;
+	DesktopSyncChatHistoryGuard _modernHistory;
 	Fn<void(uint64_t)> _progress;
 	Fn<void(SyncHistoryScanResult)> _finished;
 	mtpRequestId _requestId = 0;
+	Fn<SyncChatMessageOwnership(const MTPMessage &)> _owned;
 	bool _started = false;
 	bool _done = false;
 

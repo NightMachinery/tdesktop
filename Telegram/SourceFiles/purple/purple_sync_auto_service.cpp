@@ -1,5 +1,7 @@
 #include "purple/purple_sync_auto_service.h"
 
+#include "purple/purple_sync_chat_service.h"
+
 #include "apiwrap.h"
 #include "base/timer.h"
 #include "base/unixtime.h"
@@ -175,7 +177,8 @@ std::optional<SyncAutoFacts> AutoSession::Facts() {
 	facts.state = *_store->local().state();
 	facts.currentDevice = facts.state->createdDevice;
 	facts.chat = facts.state->chat;
-	facts.chatResolved = facts.state->version == 1 && facts.chat.kind == PeerTokenKind::Self;
+	facts.chatResolved = facts.state->version == 1
+		&& facts.chat.kind == PeerTokenKind::Self && SyncChatSelfResolved(_session.get());
 	facts.chatWritable = true;
 	facts.local = ReadSyncSettingsFile(_store->files());
 	facts.savedFingerprint = SyncPathIdentity(_store->files().settings) == _savedIdentity
@@ -231,6 +234,11 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	const auto read = ReadDesktopSyncAuto(target->files, _account);
 	if (!read.record) { Stop(); return false; }
 	if (!read.record->enabled && event != SyncAutoEvent::Enable && event != SyncAutoEvent::Disable) { return true; }
+	if (event != SyncAutoEvent::Disable && !SyncChatSelfResolved(session)) {
+		Stop();
+		EnsureSyncChatResolved(session);
+		return false;
+	}
 	if (!Open()) { Stop(); return false; }
 	const auto facts = Facts();
 	if (!facts) { Hold(SyncAutoReason::StateChanged); return false; }
@@ -257,6 +265,10 @@ bool AutoSession::Accept(const SyncAutoPlan &plan) {
 	if (!_inFlight || !_store || _plan.ticket != plan.ticket || _sessionId != plan.record.session) { return false; }
 	const auto completion = _store->CheckCompletion(plan, _sessionId);
 	if (completion == DesktopSyncAutoCompletion::Obsolete) { return false; }
+	if (!SyncChatSelfResolved(_session.get())) {
+		Hold(SyncAutoReason::SyncChatNotResolved);
+		return false;
+	}
 	if (completion != DesktopSyncAutoCompletion::Ready) {
 		Hold(completion == DesktopSyncAutoCompletion::ContextChanged
 			? SyncAutoReason::OwnershipChanged : SyncAutoReason::StateChanged);
@@ -447,7 +459,7 @@ void AutoSession::ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServer
 	_exact = std::make_unique<DesktopSyncExactRead>(not_null{ _session.get() }, plan.messageId,
 		[weak, plan] { const auto self = weak.get(); return self && self->_store
 			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
-			&& self->_store->Authorized(plan); },
+			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); },
 		[weak, plan, done = std::move(done)](SyncAutoServerRead read) mutable {
 			const auto self = weak.get();
 			if (!self || !self->Accept(plan)) { return; }
@@ -467,7 +479,7 @@ void AutoSession::Send(const SyncAutoPlan &plan) {
 					result.status == SyncConfigPostStatus::Confirmed ? SyncAutoOutcome::Sent : SyncAutoOutcome::OutcomeUnknown); }
 			}, [weak, plan] { const auto self = weak.get(); return self && self->_store
 			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
-			&& self->_store->Authorized(plan); });
+			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); });
 		_post->Start();
 		return;
 	}
@@ -483,7 +495,7 @@ void AutoSession::Send(const SyncAutoPlan &plan) {
 				if (const auto self = weak.get()) { self->Complete(plan, id ? SyncAutoOutcome::Sent : SyncAutoOutcome::OutcomeUnknown); }
 			}, [weak, plan] { const auto self = weak.get(); return self && self->_store
 			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
-			&& self->_store->Authorized(plan); },
+			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); },
 			MsgId(plan.messageId), [weak, plan, finish] {
 				finish();
 				if (const auto self = weak.get()) { self->Complete(plan, SyncAutoOutcome::EditRefused); }
@@ -537,6 +549,12 @@ void StartAutomaticSettingsSync() {
 			ready(entry.account->maybeSession());
 		}
 	};
+	SyncChatStatusChanges() | rpl::on_next([](Main::Session *session) {
+		Changes.fire({});
+		if (session && SyncChatSelfResolved(session)) {
+			For(session).Event(SyncAutoEvent::SessionReady);
+		}
+	}, lifetime);
 	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);
 	Core::App().appDeactivatedValue() | rpl::on_next([](bool deactivated) {
 		if (!deactivated) { TriggerAutomaticSettingsSync(SyncAutoEvent::Foreground); }
@@ -575,6 +593,7 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 	if (!read.record) { return tr::lng_purple_auto_invalid(tr::now); }
 	const auto &record = *read.record;
 	if (!record.enabled) { return tr::lng_purple_auto_off(tr::now); }
+	if (!SyncChatSelfResolved(session)) { return tr::lng_purple_auto_chat(tr::now); }
 	const auto executor = Sessions.find(session.get());
 	const auto failure = executor != Sessions.end() && executor->second->FailureReason() != SyncAutoReason::None
 		? executor->second->FailureReason() : record.held;

@@ -17,10 +17,12 @@ namespace Purple {
 SyncAccountInventory::SyncAccountInventory(
 		not_null<Main::Session*> session,
 		Fn<void(uint64_t)> progress,
-		Fn<void(SyncAccountInventoryResult)> finished)
+		Fn<void(SyncAccountInventoryResult)> finished,
+		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
 : _session(session)
 , _progress(std::move(progress))
-, _finished(std::move(finished)) {
+, _finished(std::move(finished))
+, _owned(std::move(owned)) {
 	_result.accountUserId = peerToUser(session->user()->id).bare;
 }
 
@@ -46,7 +48,7 @@ void SyncAccountInventory::Start() {
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->ScanFinished(std::move(result));
 			}
-		});
+		}, _owned);
 	_scanner->Start();
 }
 
@@ -91,7 +93,7 @@ void SyncAccountInventory::ScanFinished(SyncHistoryScanResult result) {
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->ReadFinished(std::move(result));
 			}
-		});
+		}, _owned);
 	_reader->Start();
 }
 

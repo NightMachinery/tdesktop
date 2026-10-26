@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync.h"
+
+#include "purple/purple_sync_chat_service.h"
 #include "purple/purple_ui_witness.h"
 
 #include "api/api_common.h"
@@ -1271,6 +1273,7 @@ void AddImportSettingsFileAction(
 void OfferNewerSettingsFromSavedMessages(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {
+	EnsureSyncChatResolved(session);
 	if (!AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own)) {
 		return;
 	}

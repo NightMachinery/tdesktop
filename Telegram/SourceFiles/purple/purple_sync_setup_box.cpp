@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_setup_box.h"
+
+#include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_history_guard.h"
 
 #include "core/application.h"
@@ -893,6 +895,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 	const auto &domain = Core::App().domain();
 	for (const auto &[index, account] : domain.accounts()) {
 		if (const auto session = account->maybeSession()) {
+			EnsureSyncChatResolved(session, true);
 			const auto choice = int(state->choices.size());
 			state->choices.push_back({
 				base::make_weak(account.get()),
