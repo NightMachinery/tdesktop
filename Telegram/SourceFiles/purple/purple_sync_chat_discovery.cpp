@@ -432,7 +432,8 @@ void DesktopSyncChatDiscovery::Exact(
 			outcome = expected.markId == 0 && expected.chat == PeerToken{}
 				? SyncChatDirectRead::Valid
 				: SyncChatDirectRead::MarkGone;
-			if (reply.messages.size() > 1) {
+			if (reply.messages.size() > 1
+				|| (expected.markId > 0 && reply.messages.empty())) {
 				outcome = SyncChatDirectRead::Unknown;
 			}
 			for (const auto &message : reply.messages) {

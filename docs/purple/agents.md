@@ -165,3 +165,5 @@ Message copying and Markdown export are documented in [copy_markdown.md](copy_ma
 Local saving and screenshot behavior are documented in [user_control.md](user_control.md).
 
 The encrypted account archive adapter is described in [archive_storage.md](archive_storage.md).
+
+Sync-chat setup and its current qualification hold are described in [sync_chat_setup.md](sync_chat_setup.md).

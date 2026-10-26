@@ -110,9 +110,7 @@ std::optional<MTPMessage> DesktopSyncChatRecordMessage(
 			return DesktopSyncChatToken(*peer, route.peer.origin.account.userId)
 				== route.peer.chat;
 		}
-		return route.peer.chat == PeerToken{}
-			|| (route.peer.chat.kind == PeerTokenKind::Channel
-				&& response.type() == mtpc_messages_channelMessages);
+		return false;
 	});
 	return valid ? std::optional(message) : std::nullopt;
 }

@@ -249,9 +249,12 @@ void InventoryPageLimits() {
 
 }
 
+#ifndef PURPLE_SYNC_CHAT_SETUP_EMBEDDED
 int main() {
 	AuthorMain();RoutesAndWire();FullReadPath();ExactReadback();CandidateSeal();LedgerScope();
 	ReceiptMatrix();UploadSchedules();PostReadbackSchedules();BorrowedRunProof();CounterScopes();
 	ServiceReceiptTransitions();RecentScopes();RealStoreScope();FreshBeforePost();ReaderWarnings();InventoryPageLimits();
 	std::printf("ALIGNMENT %d checks, %d failures\n",Checks,Failures);return Failures?1:0;
 }
+
+#endif

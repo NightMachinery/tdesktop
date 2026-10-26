@@ -27,6 +27,7 @@
 #include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_account_inventory.h"
 #include "purple/purple_sync_chat_store.h"
+#include "purple/purple_sync_chat_peer_request.h"
 #include "storage/storage_account.h"
 #include <QtCore/QCryptographicHash>
 
@@ -174,6 +175,7 @@ public:
 		bool beforePost = false);
 	void Cancel(QString reason);
 	DesktopSyncChatStatus status() const;
+	std::optional<DesktopSyncChatSetupSnapshot> Setup() const;
 	bool Owns(Main::Session* session) const;
 	std::optional<DesktopSyncChatLease> Lease(PeerToken chat);
 	bool HasOrigin(const DesktopSyncChatIo &route) const;
@@ -203,6 +205,8 @@ private:
 	DesktopSyncChatOperation _operation;
 	std::unique_ptr<DesktopSyncChatDiscovery> _model;
 	std::unique_ptr<MTP::Sender> _api;
+	std::unique_ptr<DesktopSyncChatPeerRequest> _peerRequest;
+	std::optional<DesktopSyncChatDiscoveryScope> _setupScope;
 	std::unique_ptr<SyncAccountInventory> _inventory;
 	std::shared_ptr<DesktopSyncChatDisk> _disk;
 	std::shared_ptr<std::atomic<bool>> _current;
@@ -263,6 +267,7 @@ SyncChatSession::~SyncChatSession() {
 	}
 	_timer.cancel();
 	_requestTimeout.cancel();
+	_peerRequest.reset();
 	_api.reset();
 	_inventory.reset();
 	RetireDisk(std::move(_disk));
@@ -384,6 +389,7 @@ void SyncChatSession::Cancel(QString reason) {
 	++_run;
 	_timer.cancel();
 	_requestTimeout.cancel();
+	_peerRequest.reset();
 	_api.reset();
 	_inventory.reset();
 	if (_model) {
@@ -425,6 +431,7 @@ void SyncChatSession::Begin(bool retry) {
 	}
 	_timer.cancel();
 	_requestTimeout.cancel();
+	_peerRequest.reset();
 	_api.reset();
 	_inventory.reset();
 	RetireDisk(std::move(_disk));
@@ -558,118 +565,14 @@ std::vector<MTPMessage> SyncChatSession::Messages(
 }
 
 void SyncChatSession::Peer(
-	const DesktopSyncChatCommand &command,
-	Fn<void(std::optional<DesktopSyncChatPeer>)> done) {
+		const DesktopSyncChatCommand &command,
+		Fn<void(std::optional<DesktopSyncChatPeer>)> done) {
 	const auto weak = base::make_weak(this);
-	const auto peer = Loaded(*_session, command.chat);
-	auto prepare = [=](DesktopSyncChatPeerInput input) mutable {
-		if (const auto self = weak.get(); self && self->Accept(command)) {
-			const auto native = Loaded(*self->_session, command.chat);
-			if (!native) {
-				done({});
-				return;
-			}
-			input.origin = self->_origin;
-			input.chat = command.chat;
-			input.canSendFiles =
-				Data::CanSend(native, ChatRestriction::SendFiles);
-			input.chosenSendAs = Token(
-				self->_session->sendAsPeers().resolveChosen(native)->id,
-				self->_origin.account.userId);
-			done(MapDesktopSyncChatPeer(self->_origin, input));
-		}
-	};
-	if (!peer) {
-		done({});
-		return;
-	}
-	if (command.chat.kind == PeerTokenKind::Self
-		|| command.chat.kind == PeerTokenKind::User) {
-		const auto user = peer->asUser();
-		if (!user) {
-			done({});
-			return;
-		}
-		_api->request(MTPusers_GetFullUser(user->inputUser()))
-			.done([=](const MTPusers_UserFull &response) mutable {
-				const auto self = weak.get();
-				if (!self || !self->Accept(command)) {
-					return;
-				}
-				const auto &data = response.data();
-				self->_session->data().processUsers(data.vusers());
-				auto input = DesktopSyncChatPeerInput();
-				input.userFull = data.vfull_user();
-				const auto id = command.chat == PeerToken{}
-					? self->_origin.account.userId
-					: int64_t(command.chat.id);
-				for (const auto &value : data.vusers().v) {
-					if (value.type() == mtpc_user
-						&& value.c_user().vid().v == id) {
-						input.user = value;
-					}
-				}
-				prepare(std::move(input));
-			})
-			.fail([=](const MTP::Error &) {
-				if (const auto self = weak.get();
-					self && self->Accept(command)) {
-					done({});
-				}
-			})
-			.handleAllErrors()
-			.send();
-	} else {
-		auto completed = [=](const MTPmessages_ChatFull &response) mutable {
+	_peerRequest = std::make_unique<DesktopSyncChatPeerRequest>(
+		_session.get(), _origin, command.chat, [weak, command] {
 			const auto self = weak.get();
-			if (!self || !self->Accept(command)) {
-				return;
-			}
-			const auto &data = response.data();
-			auto input = DesktopSyncChatPeerInput();
-			input.groupFull = data.vfull_chat();
-			for (const auto &value : data.vchats().v) {
-				if (value.type() == mtpc_channel
-					&& command.chat.kind == PeerTokenKind::Channel
-					&& value.c_channel().vid().v == int64_t(command.chat.id)) {
-					input.group = value;
-				} else if (
-					value.type() == mtpc_chat
-					&& command.chat.kind == PeerTokenKind::Chat
-					&& value.c_chat().vid().v == int64_t(command.chat.id)) {
-					input.group = value;
-				}
-			}
-			if (!input.group) {
-				done({});
-				return;
-			}
-			self->_session->api().processFullPeer(peer, response);
-			prepare(std::move(input));
-		};
-		const auto failed = [=](const MTP::Error &) {
-			if (const auto self = weak.get(); self && self->Accept(command)) {
-				done({});
-			}
-		};
-		if (command.chat.kind == PeerTokenKind::Chat) {
-			_api->request(MTPmessages_GetFullChat(MTP_long(command.chat.id)))
-				.done(std::move(completed))
-				.fail(failed)
-				.handleAllErrors()
-				.send();
-		} else if (peer->input().type() == mtpc_inputPeerChannel) {
-			const auto &input = peer->input().c_inputPeerChannel();
-			_api->request(MTPchannels_GetFullChannel(MTP_inputChannel(
-							  input.vchannel_id(), input.vaccess_hash())))
-				.done(std::move(completed))
-				.fail(failed)
-				.handleAllErrors()
-				.send();
-		} else {
-			done({});
-		}
-	}
+			return self && self->Accept(command);
+		}, std::move(done));
 }
 
 void SyncChatSession::Exact(const DesktopSyncChatCommand &command) {
@@ -985,6 +888,9 @@ void SyncChatSession::Finish() {
 	const auto weak = base::make_weak(this);
 	if (cache) {
 		cache->loginBinding = _loginBinding;
+		if (const auto peer = Loaded(*_session.get(), cache->mark.chat)) {
+			cache->title = peer->name();
+		}
 	}
 	crl::async([=] {
 		const auto saved = SaveDesktopSyncChatDisk(disk, cache, current);
@@ -1005,6 +911,7 @@ void SyncChatSession::Finish() {
 			self->_requestTimeout.cancel();
 			self->_api.reset();
 			self->_inventory.reset();
+			self->_setupScope = self->ScopeFor(*disk, cache ? cache : disk->cache);
 			self->_expectedCacheBytes = bytes;
 			self->_expectedStateIdentity = disk->stateIdentity;
 			self->_expectedStateBytes = disk->stateBytes;
@@ -1082,6 +989,14 @@ DesktopSyncChatStatus SyncChatSession::status() const {
 	return _status;
 }
 
+std::optional<DesktopSyncChatSetupSnapshot> SyncChatSession::Setup() const {
+	if (_busy || !Current() || !_model || !_setupScope) {
+		return {};
+	}
+	return DesktopSyncChatSetupSnapshot{
+		*_setupScope, status(), _model->input(), _model->cache(), _run };
+}
+
 std::map<Main::Session*, std::unique_ptr<SyncChatSession>> Sessions;
 SyncChatSession &For(not_null<Main::Session*> session) {
 	auto &entry = Sessions[session];
@@ -1103,6 +1018,11 @@ std::optional<DesktopSyncChatLease> SyncChatIoForPost(
 		not_null<Main::Session*> session,
 		PeerToken chat) {
 	return For(session).Lease(chat);
+}
+
+std::optional<DesktopSyncChatSetupSnapshot> SyncChatSetupSnapshotOf(
+		not_null<Main::Session*> session) {
+	return For(session).Setup();
 }
 
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {

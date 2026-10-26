@@ -305,6 +305,7 @@ struct ProbeChanges {
 } Changes;
 
 struct ProbeSession : base::has_weak_ptr {
+	std::unique_ptr<int> _peerRequest;
 	struct Model {
 		DesktopSyncChatCommand value;
 		DesktopSyncChatCommand command() const { return value; }

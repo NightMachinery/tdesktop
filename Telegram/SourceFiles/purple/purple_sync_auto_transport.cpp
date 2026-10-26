@@ -19,7 +19,7 @@ DesktopSyncExactMetadata InspectDesktopSyncExactMessage(
 	if (IdFromMessage(message).bare != id) { return output; }
 	if (message.type() == mtpc_messageEmpty) {
 		const auto peer = message.c_messageEmpty().vpeer_id();
-		if (peer && peerFromMTP(*peer) != peerFromUser(UserId(accountUserId))) { return output; }
+		if (!peer || peerFromMTP(*peer) != peerFromUser(UserId(accountUserId))) { return output; }
 		output.presence = SyncAutoMessagePresence::Absent;
 		return output;
 	}

@@ -255,8 +255,7 @@ void ExactReadback() {
 		const auto missing = MTP_messageEmpty(MTP_flags(MTPDmessageEmpty::Flag::f_peer_id),MTP_int(10),Target(chat));
 		CHECK(InspectDesktopSyncExactMessage(Response(route,{missing}),10,route).presence == SyncAutoMessagePresence::Absent);
 		const auto ambiguous = MTP_messageEmpty(MTP_flags(MTPDmessageEmpty::Flags()),MTP_int(10),MTPPeer());
-		CHECK((InspectDesktopSyncExactMessage(Response(route,{ambiguous}),10,route).presence == SyncAutoMessagePresence::Absent)
-			== (chat == PeerToken{} || chat.kind == PeerTokenKind::Channel));
+		CHECK(InspectDesktopSyncExactMessage(Response(route,{ambiguous}),10,route).presence == SyncAutoMessagePresence::Unknown);
 	}
 }
 

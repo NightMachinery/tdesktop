@@ -292,7 +292,20 @@ SyncChatMessageFacts MapDesktopSyncChatMessage(
 
 std::optional<SyncChatEligibilityResult> DesktopSyncChatEligibility(
 		const DesktopSyncChatPeer &peer) {
-	return peer.facts ? std::optional(SyncChatEligibility(*peer.facts, BroadcastPolicy)) : std::nullopt;
+	const auto token = PeerTokenText(peer.chat, peer.origin.account.userId);
+	if (!ValidDesktopSyncChatOrigin(peer.origin) || !peer.facts
+		|| peer.facts->kind != peer.kind || !token
+		|| ParsePeerToken(*token, peer.origin.account.userId) != peer.chat) {
+		return {};
+	}
+	const auto typed = peer.chat.kind == PeerTokenKind::Self
+		? peer.kind == SyncChatKind::Self
+		: peer.chat.kind == PeerTokenKind::User
+		? peer.kind == SyncChatKind::Private || peer.kind == SyncChatKind::Bot
+		: peer.chat.kind == PeerTokenKind::Chat
+		? peer.kind == SyncChatKind::BasicGroup
+		: peer.kind == SyncChatKind::Broadcast || peer.kind == SyncChatKind::Supergroup;
+	return typed ? std::optional(SyncChatEligibility(*peer.facts, BroadcastPolicy)) : std::nullopt;
 }
 
 }

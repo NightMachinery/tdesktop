@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_setup_box.h"
 
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_chat_setup_box.h"
 #include "purple/purple_sync_history_guard.h"
 
 #include "core/application.h"
@@ -926,6 +927,44 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 			st::boxRowPadding);
 	}
 
+	const auto chatStatus = container->add(object_ptr<Ui::FlatLabel>(container,
+		QString(), st::boxLabel), st::boxRowPadding);
+	const auto chatButton = ::Settings::AddButtonWithIcon(container,
+		tr::lng_purple_chat_title(), st::settingsButtonNoIcon);
+	const auto updateChat = [=] {
+		const auto session = state->selectedSession.get();
+		chatButton->setDisabled(!session || Busy(*state) || !SelectedAvailable(*state));
+		if (!session) {
+			chatStatus->setText(tr::lng_purple_chat_select_account(tr::now));
+			return;
+		}
+		const auto status = SyncChatStatusOf(session);
+		chatStatus->setText(status.newReaders
+			? tr::lng_purple_chat_new_readers(tr::now)
+			: status.phase == DesktopSyncChatPhase::Use
+			? tr::lng_purple_chat_status_open(tr::now)
+			: status.phase == DesktopSyncChatPhase::Searching
+			? tr::lng_purple_chat_searching(tr::now)
+			: status.phase == DesktopSyncChatPhase::Unset
+			? tr::lng_purple_chat_unset(tr::now)
+			: tr::lng_purple_chat_posting_held(tr::now));
+	};
+	SyncChatStatusChanges() | rpl::on_next([=](Main::Session*) {
+		updateChat();
+	}, box->lifetime());
+	chatButton->setClickedCallback([=] {
+		if (Busy(*state) || !SelectedAvailable(*state)) {
+			return;
+		}
+		const auto origin = state->selectedSession;
+		const auto weak = QPointer<Ui::GenericBox>(box.get());
+		box->uiShow()->showBox(Box(SyncChatSetupBox, origin.get(), [=] {
+			return weak && origin && state->selectedSession.get() == origin.get()
+				&& SelectedAvailable(*state) && !Busy(*state);
+		}));
+	});
+	updateChat();
+
 	const auto automatic = container->add(object_ptr<Ui::Checkbox>(container,
 		tr::lng_purple_auto_enable(tr::now), false), st::boxRowPadding);
 	const auto automaticStatus = container->add(object_ptr<Ui::FlatLabel>(container,
@@ -1034,6 +1073,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		state->selectedSession = state->choices[value].session;
 		SetStatus(*state, u"Ready to check Saved Messages."_q);
 		updateAutomatic();
+		updateChat();
 	});
 
 	state->checkText = u"Check Saved Messages"_q;

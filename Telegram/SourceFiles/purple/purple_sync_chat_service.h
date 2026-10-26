@@ -1,6 +1,6 @@
 #pragma once
 
-#include "purple/purple_sync_chat_discovery.h"
+#include "purple/purple_sync_chat_setup.h"
 #include <rpl/producer.h>
 
 namespace Main {
@@ -24,6 +24,9 @@ struct DesktopSyncChatLease {
 	not_null<Main::Session*> session, const DesktopSyncChatIo &route);
 [[nodiscard]] std::optional<DesktopSyncChatLease> SyncChatIoForPost(
 	not_null<Main::Session*> session, PeerToken chat);
+
+[[nodiscard]] std::optional<DesktopSyncChatSetupSnapshot> SyncChatSetupSnapshotOf(
+	not_null<Main::Session*> session);
 
 void StartSyncChatDiscovery();
 void EnsureSyncChatResolved(
