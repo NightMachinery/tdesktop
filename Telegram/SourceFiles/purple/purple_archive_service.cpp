@@ -267,6 +267,7 @@ class ArchiveWorker final {
 		return true;
 	}
 	void PruneStreamsSoon() {
+		const auto lock = std::lock_guard(_state->mutex);
 		_state->streamCleanup = true;
 		_state->condition.notify_one();
 	}

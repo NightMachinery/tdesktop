@@ -1,5 +1,15 @@
 # Local message archive
 
+## Stream retirement wakeups
+
+Retirement sets the cleanup predicate and notifies under the worker wait mutex.
+A notification cannot fall between a false predicate check and registration of
+an idle waiter. The mutex protects only bounded scheduling and lifetime state;
+archive reads, writes, pruning and fsync run after unlocking. The controlled
+retirement fixture uses the literal production method and wait predicate,
+including the former lost-notification schedule and a broken-method control.
+
+
 The archive keeps observations separately for each signed-in account and local
 profile. Payloads, body chunks, media chunks and keys are authenticated and
 encrypted. SQLite indexes contain keyed identity tokens and structural counters.
