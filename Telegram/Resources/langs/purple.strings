@@ -352,3 +352,6 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_unknown_count" = "unknown";
 "lng_purple_chat_check_again" = "Check sync chat again";
 "lng_purple_chat_update_required" = "A newer Purple chose a sync chat. Update Purple before posting.";
+
+"lng_purple_sync_telegram_wait" = "Telegram asked to wait. Retrying at %1.";
+"lng_purple_sync_transient_wait" = "Telegram is temporarily unavailable. Retrying at %1.";

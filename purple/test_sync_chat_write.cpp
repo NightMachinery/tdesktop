@@ -27,6 +27,7 @@ struct PendingApi {
 	Fn<void(const MTPBool &)> boolean;
 	Fn<void(const MTPUpdates &)> updates;
 	Fn<void(const MTP::Error &)> failure;
+	Fn<void(Fn<void(bool)>)> resume;
 	bool handled = false;
 	bool uploadDc = false;
 };
@@ -50,6 +51,7 @@ struct ControlledApi {
 			return *this;
 		}
 		template <typename Callback> Builder &fail(Callback callback) { call.failure = std::move(callback); return *this; }
+		Builder &resumeEffect(Fn<void(Fn<void(bool)>)> gate) { call.resume = std::move(gate); return *this; }
 		Builder &handleAllErrors() { call.handled = true; return *this; }
 		Builder &toDC(int) { call.uploadDc = true; return *this; }
 		void send() { api->sent.push_back(call.wire); api->pending.push_back(std::move(call)); }
@@ -59,6 +61,12 @@ struct ControlledApi {
 	}
 	PendingApi Take() { CHECK(!pending.empty()); auto result = std::move(pending.front()); pending.pop_front(); return result; }
 	void applyUpdates(const MTPUpdates &, uint64_t random) { ++applied; appliedRandom = random; if (onApply) onApply(); }
+};
+
+struct ControlledSender {
+	ControlledApi *api;
+	template <typename Request> auto request(Request value) { return api->request(std::move(value)); }
+	void cancelAll() { api->pending.clear(); }
 };
 
 struct UploadSession;
@@ -132,6 +140,8 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	QByteArray _content;
 	Fn<void(std::optional<MsgId>)> _finished;
 	Fn<void()> _editRefused;
+	Fn<void(Fn<void(bool)>)> _authorizeEdit;
+	std::unique_ptr<ControlledSender> _api;
 	Fn<bool()> _stillCurrent;
 	MsgId _editId;
 	uint64_t _fileId = 900;
@@ -149,6 +159,8 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	explicit UploadProbe(UploadSession &session, DesktopSyncChatIo route,
 		QByteArray content = RecordBytes(), int edit = 0)
 	: _session(base::make_weak(&session)), _route(std::move(route)), _content(std::move(content)), _editId(edit) {
+		_api = std::make_unique<ControlledSender>(ControlledSender{ &session.endpoint });
+		_authorizeEdit = [](Fn<void(bool)> ready) { ready(true); };
 		_stillCurrent = [this]{ return current; };
 		_parts = int((_content.size() + kUploadPartBytes - 1) / kUploadPartBytes);
 		_operation = { u"synthetic"_q, Origin.account, [this] { return current && !_done; } };
@@ -163,6 +175,10 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 #include "upload-SendNextPart.inc"
 	void SendMedia()
 #include "upload-SendMedia.inc"
+	void RenewBeforePost(Fn<void(bool)> ready)
+#include "upload-RenewBeforePost.inc"
+	void ResumeEffect(Fn<void(bool)> ready)
+#include "upload-ResumeEffect.inc"
 	void DispatchMedia()
 #include "upload-DispatchMedia.inc"
 	void OnMedia(const MTPUpdates &result)

@@ -23,6 +23,8 @@ class Session;
 
 namespace Purple {
 
+class SyncRequestSender;
+
 class SyncConfigUpload final
 	: public std::enable_shared_from_this<SyncConfigUpload> {
 public:
@@ -32,7 +34,8 @@ public:
 		Fn<void(std::optional<MsgId>)> finished,
 		Fn<bool()> stillCurrent,
 		MsgId editId = 0, Fn<void()> editRefused = nullptr,
-		DesktopSyncChatOperation operation = {});
+		DesktopSyncChatOperation operation = {},
+		Fn<void(Fn<void(bool)>)> authorizeEdit = {});
 	SyncConfigUpload(
 		Main::Session &session,
 		DesktopSyncChatIo route,
@@ -40,7 +43,8 @@ public:
 		Fn<void(std::optional<MsgId>)> finished,
 		Fn<bool()> stillCurrent,
 		DesktopSyncChatOperation operation = {},
-		MsgId editId = 0, Fn<void()> editRefused = nullptr);
+		MsgId editId = 0, Fn<void()> editRefused = nullptr,
+		Fn<void(Fn<void(bool)>)> authorizeEdit = {});
 	~SyncConfigUpload();
 
 	SyncConfigUpload(const SyncConfigUpload &) = delete;
@@ -55,10 +59,13 @@ private:
 	[[nodiscard]] bool Current() const;
 	void SendNextPart();
 	void SendMedia();
+	void RenewBeforePost(Fn<void(bool)> ready);
+	void ResumeEffect(Fn<void(bool)> ready);
 	void DispatchMedia();
 	void OnMedia(const MTPUpdates &result);
 	void Finish(std::optional<MsgId> messageId);
 
+	std::unique_ptr<SyncRequestSender> _api;
 	base::weak_ptr<Main::Session> _session;
 	AccountKey _account;
 	std::optional<DesktopSyncChatIo> _route;
@@ -69,6 +76,7 @@ private:
 	Fn<bool()> _stillCurrent;
 	MsgId _editId;
 	Fn<void()> _editRefused;
+	Fn<void(Fn<void(bool)>)> _authorizeEdit;
 	uint64 _fileId = 0;
 	uint64 _randomId = 0;
 	qsizetype _offset = 0;

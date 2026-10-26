@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/facade.h"
 #include "mtproto/mtproto_response.h"
 #include "purple/purple_sync_inventory.h"
+#include "purple/purple_sync_request_sender.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_chat_write.h"
 
@@ -41,15 +42,17 @@ SyncConfigUpload::SyncConfigUpload(
 		QByteArray content,
 		Fn<void(std::optional<MsgId>)> finished,
 		Fn<bool()> stillCurrent, MsgId editId, Fn<void()> editRefused,
-		DesktopSyncChatOperation operation)
-: _session(base::make_weak(&session))
+		DesktopSyncChatOperation operation, Fn<void(Fn<void(bool)>)> authorizeEdit)
+: _api(std::make_unique<SyncRequestSender>(&session.mtp(), [this] { return Current(); }))
+, _session(base::make_weak(&session))
 , _account(SessionAccountKey(&session))
 , _operation(std::move(operation))
 , _content(std::move(content))
 , _finished(std::move(finished))
 , _stillCurrent(std::move(stillCurrent))
 , _editId(editId)
-, _editRefused(std::move(editRefused)) {
+, _editRefused(std::move(editRefused))
+, _authorizeEdit(std::move(authorizeEdit)) {
 }
 
 SyncConfigUpload::SyncConfigUpload(
@@ -60,9 +63,10 @@ SyncConfigUpload::SyncConfigUpload(
 		Fn<bool()> stillCurrent,
 		DesktopSyncChatOperation operation,
 		MsgId editId,
-		Fn<void()> editRefused)
+		Fn<void()> editRefused, Fn<void(Fn<void(bool)>)> authorizeEdit)
 : SyncConfigUpload(session, std::move(content), std::move(finished),
-	std::move(stillCurrent), editId, std::move(editRefused), std::move(operation)) {
+	std::move(stillCurrent), editId, std::move(editRefused), std::move(operation),
+	std::move(authorizeEdit)) {
 	_route = std::move(route);
 }
 
@@ -131,7 +135,6 @@ void SyncConfigUpload::SendNextPart() {
 	if (_done) {
 		return;
 	}
-	const auto session = _session.get();
 	if (!Current()) {
 		Finish(std::nullopt);
 		return;
@@ -144,7 +147,7 @@ void SyncConfigUpload::SendNextPart() {
 		_content.size() - _offset);
 	const auto bytes = _content.mid(int(_offset), int(size));
 	const auto self = shared_from_this();
-	session->api().request(MTPupload_SaveFilePart(
+	_api->request(MTPupload_SaveFilePart(
 		MTP_long(_fileId),
 		MTP_int(_part),
 		MTP_bytes(bytes)
@@ -162,25 +165,29 @@ void SyncConfigUpload::SendNextPart() {
 }
 
 void SyncConfigUpload::SendMedia() {
-	if (_done || _checking) {
-		return;
-	}
-	if (!Current()) {
-		Finish(std::nullopt);
+	const auto self = shared_from_this();
+	ResumeEffect([self](bool ready) {
+		if (ready) { self->DispatchMedia(); }
+		else { self->Finish(std::nullopt); }
+	});
+}
+
+void SyncConfigUpload::RenewBeforePost(Fn<void(bool)> ready) {
+	if (_done || _checking || !Current()) {
+		ready(false);
 		return;
 	}
 	_checking = true;
+	_lease.reset();
 	const auto self = shared_from_this();
 	const auto chat = _route ? _route->peer.chat : PeerToken{};
-	CheckSyncChatBeforePost(_session.get(), [self, chat](DesktopSyncChatStatus status) {
-		if (self->_done) {
-			return;
-		}
+	CheckSyncChatBeforePost(_session.get(), [self, chat, ready = std::move(ready)](DesktopSyncChatStatus status) {
+		if (self->_done) { return; }
 		self->_checking = false;
 		if (!self->Current() || !status.complete || status.postingHeld
 			|| status.phase != DesktopSyncChatPhase::Use
 			|| status.resolution.readChat != chat) {
-			self->Finish(std::nullopt);
+			ready(false);
 			return;
 		}
 		const auto lease = SyncChatIoForPost(self->_session.get(), chat);
@@ -188,12 +195,24 @@ void SyncConfigUpload::SendMedia() {
 			|| lease->route.peer.origin.account != self->_account
 			|| lease->route.peer.chat != chat || !lease->current || !lease->current()
 			|| (self->_route && !CompatibleDesktopSyncChatIo(*self->_route, lease->route))) {
-			self->Finish(std::nullopt);
+			ready(false);
 			return;
 		}
 		self->_lease = *lease;
-		self->DispatchMedia();
+		ready(true);
 	}, _operation);
+}
+
+void SyncConfigUpload::ResumeEffect(Fn<void(bool)> ready) {
+	const auto self = shared_from_this();
+	RenewBeforePost([self, ready = std::move(ready)](bool allowed) mutable {
+		if (!allowed || !self->Current()) { ready(false); return; }
+		if (!self->_editId) { ready(true); return; }
+		if (!self->_authorizeEdit) { ready(false); return; }
+		self->_authorizeEdit([self, ready = std::move(ready)](bool authorized) {
+			ready(authorized && self->Current());
+		});
+	});
 }
 
 void SyncConfigUpload::DispatchMedia() {
@@ -202,7 +221,6 @@ void SyncConfigUpload::DispatchMedia() {
 		Finish(std::nullopt);
 		return;
 	}
-	const auto session = _session.get();
 	_randomId = base::RandomValue<uint64>();
 	const auto filename = SyncSettingsRecordFileName();
 	const auto checksum = QCryptographicHash::hash(
@@ -234,8 +252,10 @@ void SyncConfigUpload::DispatchMedia() {
 			Finish(std::nullopt);
 			return;
 		}
-		session->api().request(std::move(*request)).done([self](const MTPUpdates &result) {
+		_api->request(std::move(*request)).done([self](const MTPUpdates &result) {
 			self->OnMedia(result);
+		}).resumeEffect([self](Fn<void(bool)> ready) {
+			self->ResumeEffect(std::move(ready));
 		}).fail([self](const MTP::Error &error) {
 			if (!self->Current()) {
 				self->Finish(std::nullopt);
@@ -262,8 +282,10 @@ void SyncConfigUpload::DispatchMedia() {
 		Finish(std::nullopt);
 		return;
 	}
-	session->api().request(std::move(*request)).done([self](const MTPUpdates &result) {
+	_api->request(std::move(*request)).done([self](const MTPUpdates &result) {
 		self->OnMedia(result);
+	}).resumeEffect([self](Fn<void(bool)> ready) {
+		self->ResumeEffect(std::move(ready));
 	}).fail([self](const MTP::Error &) {
 		self->Finish(std::nullopt);
 	}).handleAllErrors().send();
@@ -284,6 +306,7 @@ void SyncConfigUpload::Finish(std::optional<MsgId> messageId) {
 		return;
 	}
 	_done = true;
+	_api->cancelAll();
 	_lifetime.destroy();
 	if (auto finished = std::move(_finished)) {
 		finished(messageId);

@@ -21,7 +21,7 @@
 #include "main/main_session.h"
 #include "main/session/send_as_peers.h"
 #include "mtproto/mtproto_auth_key.h"
-#include "mtproto/sender.h"
+#include "purple/purple_sync_request_sender.h"
 #include "purple/purple_config.h"
 #include "purple/purple_desktop_archive_store.h"
 #include "purple/purple_sync_account_binding.h"
@@ -185,6 +185,7 @@ public:
 
 private:
 	bool Current() const;
+	bool ContextMatches() const;
 	bool Accept(const DesktopSyncChatCommand &command);
 	void Begin(bool retry);
 	void Run();
@@ -194,7 +195,8 @@ private:
 		Fn<void(std::optional<DesktopSyncChatPeer>)> done);
 	void Exact(const DesktopSyncChatCommand &command);
 	void Finish();
-	void Publish();
+	void Publish(bool final = true);
+	void RetryLocalOpen();
 	void Peers(const MTPmessages_Messages &response);
 	std::vector<MTPMessage> Messages(
 		const MTPmessages_Messages &response) const;
@@ -204,7 +206,7 @@ private:
 	DesktopSyncChatStatus _status;
 	DesktopSyncChatOperation _operation;
 	std::unique_ptr<DesktopSyncChatDiscovery> _model;
-	std::unique_ptr<MTP::Sender> _api;
+	std::unique_ptr<SyncRequestSender> _api;
 	std::unique_ptr<DesktopSyncChatPeerRequest> _peerRequest;
 	std::optional<DesktopSyncChatDiscoveryScope> _setupScope;
 	std::unique_ptr<SyncAccountInventory> _inventory;
@@ -227,6 +229,8 @@ private:
 	bool _beforePost = false;
 	bool _directBeforePost = false;
 	bool _busy = false;
+	bool _retryLocalOpen = false;
+	bool _openContinuation = false;
 	base::Timer _timer;
 	base::Timer _requestTimeout;
 	rpl::lifetime _lifetime;
@@ -237,17 +241,13 @@ SyncChatSession::SyncChatSession(not_null<Main::Session*> session)
 : _session(session)
 , _origin{SessionAccountKey(session), QUuid::createUuid().toString(QUuid::WithoutBraces)}
 , _timer([=] {
-	if (!_busy && _model && _status.phase == DesktopSyncChatPhase::Searching) {
-		Begin(true);
+	if (!_busy && _status.phase == DesktopSyncChatPhase::Searching) {
+		Begin(_model && _status.reason != u"telegram-transient"_q);
 	}
 })
-, _requestTimeout([=] {
-	if (_busy) {
-		Cancel(u"request-timeout"_q);
-	}
-}) {
+, _requestTimeout([=] { RetryLocalOpen(); }) {
 	const auto changed = [=] {
-		if (_current && !Current()) {
+		if ((_current && !Current()) || (_retryLocalOpen && !ContextMatches())) {
 			Cancel(u"account-context-changed"_q);
 		}
 	};
@@ -330,8 +330,12 @@ DesktopSyncChatDiscoveryScope SyncChatSession::ScopeFor(
 }
 
 bool SyncChatSession::Current() const {
+	return _current && _current->load() && ContextMatches();
+}
+
+bool SyncChatSession::ContextMatches() const {
 	const auto session = _session.get();
-	return session && _current && _current->load()
+	return session
 		&& !session->account().loggingOut()
 		&& session->account().maybeSession() == session
 		&& SessionAccountKey(session) == _origin.account
@@ -349,6 +353,11 @@ void SyncChatSession::Ensure(
 	Fn<void(DesktopSyncChatStatus)> done,
 	DesktopSyncChatOperation operation,
 	bool beforePost) {
+	if (_retryLocalOpen) {
+		if (done) { _callbacks.push_back(std::move(done)); }
+		return;
+	}
+
 	if (_busy) {
 		if (operation.current || beforePost) {
 			auto held = status();
@@ -364,10 +373,11 @@ void SyncChatSession::Ensure(
 		return;
 	}
 	const auto now = base::unixtime::now();
-	if (Current()
+	if ((_status.reason == u"telegram-transient"_q && now < _status.retryAt)
+		|| (Current()
 		&& ((_status.phase == DesktopSyncChatPhase::Searching
 			 && now < _status.retryAt)
-			|| (!force && _status.complete && now - _lastStarted < 900))) {
+			|| (!force && _status.complete && now - _lastStarted < 900)))) {
 		if (done) {
 			done(_status);
 		}
@@ -382,6 +392,8 @@ void SyncChatSession::Ensure(
 }
 
 void SyncChatSession::Cancel(QString reason) {
+	_retryLocalOpen = false;
+	_openContinuation = false;
 	_recent.reset();
 	if (_current) {
 		_current->store(false);
@@ -419,7 +431,31 @@ bool SyncChatSession::Accept(const DesktopSyncChatCommand &command) {
 	return true;
 }
 
+void SyncChatSession::RetryLocalOpen() {
+	if (!_busy) { return; }
+	_requestTimeout.cancel();
+	if (_current) { _current->store(false); }
+	_current.reset();
+	++_run;
+	RetireDisk(std::move(_disk));
+	_busy = false;
+	_status.phase = DesktopSyncChatPhase::Searching;
+	_status.complete = false;
+	_status.postingHeld = true;
+	_status.retryAt = base::unixtime::now() + 5;
+	_status.reason = u"telegram-transient"_q;
+	_retryLocalOpen = true;
+	_openContinuation = true;
+	_timer.callOnce(5000);
+	Publish(false);
+}
+
 void SyncChatSession::Begin(bool retry) {
+	if (_retryLocalOpen && !ContextMatches()) {
+		Cancel(u"account-context-changed"_q);
+		return;
+	}
+	_retryLocalOpen = false;
 	const auto session = _session.get();
 	if (!session || session->account().loggingOut()
 		|| !AccountSyncOperationsAllowed(session)) {
@@ -501,7 +537,9 @@ void SyncChatSession::Begin(bool retry) {
 			if (!disk->error.isEmpty()) {
 				const auto error = disk->error;
 				RetireDisk(disk);
-				self->Cancel(error);
+				if (self->_openContinuation && error == u"account-lock-busy"_q) {
+					self->RetryLocalOpen();
+				} else { self->Cancel(error); }
 				return;
 			}
 			if (retry
@@ -512,8 +550,12 @@ void SyncChatSession::Begin(bool retry) {
 				self->Cancel(u"cache-changed-during-search"_q);
 				return;
 			}
+			self->_openContinuation = false;
 			self->_disk = disk;
-			self->_api = std::make_unique<MTP::Sender>(&self->_session->mtp());
+			self->_api = std::make_unique<SyncRequestSender>(&self->_session->mtp(), [weak] {
+				const auto live = weak.get();
+				return live && live->Current();
+			});
 			if (!retry || !self->_model) {
 				self->_model = std::make_unique<DesktopSyncChatDiscovery>(
 					self->_origin,
@@ -698,7 +740,7 @@ void SyncChatSession::Run() {
 		Finish();
 		return;
 	}
-	_requestTimeout.callOnce(30 * 1000);
+	_requestTimeout.cancel();
 	const auto weak = base::make_weak(this);
 	if (command.step == DesktopSyncChatStep::PeerInfo) {
 		Peer(command, [=](std::optional<DesktopSyncChatPeer> peer) {
@@ -951,8 +993,9 @@ void SyncChatSession::Finish() {
 	});
 }
 
-void SyncChatSession::Publish() {
-	const auto callbacks = base::take(_callbacks);
+void SyncChatSession::Publish(bool final) {
+	const auto callbacks = final ? base::take(_callbacks)
+		: std::vector<Fn<void(DesktopSyncChatStatus)>>();
 	const auto current = _current;
 	const auto run = _run;
 	const auto status = _status;
@@ -978,9 +1021,15 @@ DesktopSyncChatStatus SyncChatSession::status() const {
 		auto status = _status;
 		status.postingHeld = true;
 		status.reason = u"resolving"_q;
+		if (const auto pending = PendingSyncRequest(&_session->mtp())) {
+			status.phase = DesktopSyncChatPhase::Searching;
+			status.complete = false;
+			status.retryAt = pending->retryAt;
+			status.reason = u"telegram-transient"_q;
+		}
 		return status;
 	}
-	if (_current && !Current()) {
+	if ((_current && !Current()) || (_retryLocalOpen && !ContextMatches())) {
 		auto status = _status;
 		status.phase = DesktopSyncChatPhase::Paused;
 		status.postingHeld = true;

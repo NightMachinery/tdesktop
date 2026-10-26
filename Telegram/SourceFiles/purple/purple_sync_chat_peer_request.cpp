@@ -1,7 +1,6 @@
 #include "purple/purple_sync_chat_peer_request.h"
 
 #include "apiwrap.h"
-#include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "crl/crl_on_main.h"
 #include "data/data_channel.h"
@@ -11,7 +10,7 @@
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/session/send_as_peers.h"
-#include "mtproto/sender.h"
+#include "purple/purple_sync_request_sender.h"
 #include "purple/purple_config.h"
 
 namespace Purple {
@@ -46,8 +45,7 @@ private:
 	DesktopSyncChatOrigin _origin;
 	PeerToken _chat;
 	Fn<bool()> _current;
-	MTP::Sender _api;
-	base::Timer _timeout;
+	SyncRequestSender _api;
 	bool _finished = false;
 
 };
@@ -60,7 +58,7 @@ DesktopSyncChatPeerRequest::Impl::Impl(
 , _origin(std::move(origin))
 , _chat(chat)
 , _current(std::move(current))
-, _api(&session->mtp()) {
+, _api(&session->mtp(), [this] { return Current(); }) {
 	const auto weak = base::make_weak(this);
 	const auto complete = [weak, done = std::move(done)](
 			std::optional<DesktopSyncChatPeer> peer) {
@@ -71,12 +69,9 @@ DesktopSyncChatPeerRequest::Impl::Impl(
 			}
 			const auto current = self->Current();
 			self->_finished = true;
-			self->_timeout.cancel();
 			done(current ? std::move(peer) : std::nullopt);
 		});
 	};
-	_timeout.setCallback([complete] { complete({}); });
-	_timeout.callOnce(30000);
 	Start(complete);
 }
 

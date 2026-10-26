@@ -136,6 +136,11 @@ struct DownloadProbe {
 struct StubUser { PeerId id = peerFromUser(UserId(123)); };
 struct StubSession { StubUser self; StubUser *user() { return &self; } UserId userId() const { return UserId(123); } };
 
+struct DownloadCancellation {
+	struct Request { void cancel() {} };
+	Request request(mtpRequestId) { return {}; }
+};
+
 struct ReaderProbe : base::has_weak_ptr {
 	explicit ReaderProbe(DesktopSyncChatIo route)
 	: _route(std::move(route))
@@ -149,6 +154,9 @@ struct ReaderProbe : base::has_weak_ptr {
 	std::vector<int32_t> _candidateIds = {10};
 	size_t _next = 0;
 	mtpRequestId _requestId = 1;
+	mtpRequestId _downloadWatch = 0;
+	uint64_t _downloadGeneration = 0;
+	DownloadCancellation _api;
 	bool _done = false;
 	bool current = true;
 	bool downloading = false;

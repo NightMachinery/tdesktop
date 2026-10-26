@@ -74,7 +74,7 @@ meta = 'namespace Purple { SyncHistoryMessageMeta SyncHistoryMessageMetaOf(const
 (work / 'sync-chat-production-ports.inc').write_text(
     'bool ProbeSession::Accept(const DesktopSyncChatCommand &command) ' + accept + '\n'
     + 'void ProbeSession::ProductionCancel(QString reason) ' + cancel + '\n'
-    + 'void ProbeSession::Publish() ' + publish + '\n'
+    + 'void ProbeSession::Publish(bool final) ' + publish + '\n'
     + 'void ProbeScan(ProbeOwnership *self, const QVector<MTPMessage> *messages, std::vector<SyncHistoryPageItem> &page) { for (const auto &message : *messages) ' + scan + ' }\n'
     + 'void ProbeReadOwnership(ProbeOwnership *self, const MTPMessage &message, int id) { if (self->_owned) ' + owned + ' self->accepted = true; }\n')
 (work / 'typed-scan-failure.inc').write_text(block(scanner, ').fail([weak](const MTP::Error &error)'))
@@ -100,7 +100,7 @@ automatic = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_service.cpp').
 (work / 'upload-Current.inc').write_text(block(upload, 'bool SyncConfigUpload::Current('))
 (work / 'post-counters.inc').write_text(block(post, 'std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session, PeerToken chat = {})'))
 (work / 'post-network.inc').write_text(block(post, 'std::function<void()> BeginSyncConfigNetworkOperation(\n\t\tnot_null<Main::Session*> session,\n\t\tPeerToken chat)'))
-for method in ['SendNextPart', 'SendMedia', 'DispatchMedia', 'OnMedia', 'Finish', 'Cancel']:
+for method in ['SendNextPart', 'SendMedia', 'RenewBeforePost', 'ResumeEffect', 'DispatchMedia', 'OnMedia', 'Finish', 'Cancel']:
     (work / ('upload-' + method + '.inc')).write_text(block(upload, 'void SyncConfigUpload::' + method + '('))
 for method in ['OnReceipt', 'OnReadback', 'Finish', 'Cancel']:
     (work / ('post-' + method + '.inc')).write_text(block(post, 'void SyncConfigPost::' + method + '('))

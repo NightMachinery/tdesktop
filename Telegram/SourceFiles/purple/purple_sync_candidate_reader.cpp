@@ -30,7 +30,7 @@ SyncCandidateReader::SyncCandidateReader(
 : _session(session)
 , _sessionGuard(base::make_weak(session))
 , _opening(AccountSyncInspectionTarget(session))
-, _api(&session->mtp())
+, _api(&session->mtp(), [this] { return Current(); })
 , _candidateIds(std::move(candidateIds))
 , _finished(std::move(finished))
 , _owned(std::move(owned)) {
@@ -62,7 +62,7 @@ bool SyncCandidateReader::Current() const {
 
 SyncCandidateReader::~SyncCandidateReader() {
 	_done = true;
-	_loader = nullptr;
+	RetireDownload();
 	if (_requestId) {
 		_api.request(_requestId).cancel();
 	}
@@ -92,7 +92,7 @@ void SyncCandidateReader::Cancel() {
 	if (_requestId) {
 		_api.request(base::take(_requestId)).cancel();
 	}
-	_loader = nullptr;
+	RetireDownload();
 	for (; _next < _candidateIds.size(); ++_next) {
 		_result.records.push_back({
 			.id = _candidateIds[_next],
@@ -257,19 +257,44 @@ void SyncCandidateReader::StartDownload(const MTPDdocument &document) {
 		false,
 		0);
 	const auto weak = base::make_weak(this);
-	const auto stopped = [weak] {
-		if (const auto self = weak.get(); self && !self->_done) {
+	const auto generation = ++_downloadGeneration;
+	_downloadWatch = _api.watch([weak, generation] {
+		if (const auto self = weak.get(); self && self->_downloadGeneration == generation) {
+			self->RetireDownload();
+		}
+	}, [weak] {
+		if (const auto self = weak.get(); self && !self->_done) { self->RetryDownload(); }
+	}, [weak] {
+		if (const auto self = weak.get(); self && !self->_done) { self->Cancel(); }
+	});
+	const auto stopped = [weak, generation] {
+		if (const auto self = weak.get(); self && !self->_done
+			&& self->_downloadGeneration == generation) {
 			self->OnDownload();
 		}
 	};
 	_loader->updates(
 	) | rpl::on_error_done([=](FileLoader::Error) {
-		if (const auto self = weak.get()) {
+		if (const auto self = weak.get(); self && self->_downloadGeneration == generation) {
 			self->_downloadFailed = true;
 		}
 		stopped();
 	}, stopped, _loader->lifetime());
 	_loader->start();
+}
+
+void SyncCandidateReader::RetireDownload() {
+	++_downloadGeneration;
+	_loader = nullptr;
+}
+
+void SyncCandidateReader::RetryDownload() {
+	if (_downloadWatch) { _api.request(base::take(_downloadWatch)).cancel(); }
+	RetireDownload();
+	_downloaded.reset();
+	if (_done) { return; }
+	if (!Current()) { Cancel(); return; }
+	RequestNext();
 }
 
 void SyncCandidateReader::OnDownload() {
@@ -280,6 +305,8 @@ void SyncCandidateReader::OnDownload() {
 	if (!_loader) {
 		return;
 	}
+	++_downloadGeneration;
+	if (_downloadWatch) { _api.request(base::take(_downloadWatch)).cancel(); }
 	const auto loader = base::take(_loader);
 	const auto id = _candidateIds[_next];
 	if (_downloadFailed || loader->cancelled() || loader->bytes().isEmpty()
@@ -317,6 +344,8 @@ void SyncCandidateReader::Finish(SyncCandidateReadStatus status) {
 		return;
 	}
 	_done = true;
+	if (_downloadWatch) { _api.request(base::take(_downloadWatch)).cancel(); }
+	RetireDownload();
 	_result.status = status;
 	if (auto finished = std::move(_finished)) {
 		finished(std::move(_result));

@@ -22,6 +22,7 @@
 #include "purple/purple_sync_config_post.h"
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_config_upload.h"
+#include "purple/purple_sync_request_sender.h"
 #include "purple/purple_sync_setup_box.h"
 
 #include <QtCore/QFileInfo>
@@ -65,6 +66,7 @@ private:
 	[[nodiscard]] DesktopSyncChatOperation OperationFor(const SyncAutoPlan &plan);
 	void Delete(const SyncAutoPlan &plan);
 	void ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServerRead)> done);
+	void RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready);
 	void Stop();
 	void RetryLater();
 
@@ -78,7 +80,7 @@ private:
 	std::unique_ptr<DesktopSyncExactRead> _exact;
 	std::unique_ptr<SyncConfigPost> _post;
 	std::shared_ptr<SyncConfigUpload> _upload;
-	std::unique_ptr<MTP::Sender> _api;
+	std::unique_ptr<SyncRequestSender> _api;
 	SyncAutoPlan _plan;
 	std::optional<AccountTransferReview> _factsReview;
 	std::optional<AccountTransferReview> _applyReview;
@@ -521,6 +523,20 @@ DesktopSyncChatOperation AutoSession::OperationFor(const SyncAutoPlan &plan) {
 	} };
 }
 
+void AutoSession::RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready) {
+	const auto weak = base::make_weak(this);
+	CheckSyncChatBeforePost(_session.get(), [weak, plan, ready = std::move(ready)](DesktopSyncChatStatus status) {
+		const auto self = weak.get();
+		if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
+		if (!status.complete || status.postingHeld || status.phase != DesktopSyncChatPhase::Use
+			|| status.resolution.readChat != PeerToken{}) { ready(false); return; }
+		self->ReadForEffect(plan, [weak, plan, ready](SyncAutoServerRead read) {
+			const auto self = weak.get();
+			ready(self && self->EffectCurrent(plan) && self->_store->AuthorizeEffect(plan, &read));
+		});
+	}, OperationFor(plan));
+}
+
 void AutoSession::Send(const SyncAutoPlan &plan) {
 	const auto weak = base::make_weak(this);
 	if (plan.action == SyncAutoAction::Post) {
@@ -553,7 +569,14 @@ void AutoSession::Send(const SyncAutoPlan &plan) {
 			MsgId(plan.messageId), [weak, plan, finish] {
 				finish();
 				if (const auto self = weak.get()) { self->Complete(plan, SyncAutoOutcome::EditRefused); }
-			}, self->OperationFor(plan));
+			}, self->OperationFor(plan), [weak, plan](Fn<void(bool)> ready) {
+			const auto self = weak.get();
+			if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
+			self->ReadForEffect(plan, [weak, plan, ready](SyncAutoServerRead read) {
+				const auto self = weak.get();
+				ready(self && self->EffectCurrent(plan) && self->_store->AuthorizeEffect(plan, &read));
+			});
+		});
 		self->_upload->Start();
 	});
 }
@@ -566,7 +589,10 @@ void AutoSession::Delete(const SyncAutoPlan &plan) {
 		if (!self->_store->AuthorizeEffect(plan, &read)) {
 			self->Complete(plan, SyncAutoOutcome::OutcomeUnknown); return;
 		}
-		self->_api = std::make_unique<MTP::Sender>(&self->_session.get()->mtp());
+		self->_api = std::make_unique<SyncRequestSender>(&self->_session.get()->mtp(), [weak, plan] {
+			const auto live = weak.get();
+			return live && live->EffectCurrent(plan);
+		});
 		self->_api->request(MTPmessages_DeleteMessages(MTP_flags(0), MTP_vector<MTPint>(1, MTP_int(plan.messageId))))
 		.done([weak, plan](const MTPmessages_AffectedMessages &result) {
 			const auto self = weak.get();
@@ -579,6 +605,10 @@ void AutoSession::Delete(const SyncAutoPlan &plan) {
 				const auto committed = self->_store->CommitRetirement(plan, absence);
 				self->Complete(plan, committed ? SyncAutoOutcome::Deleted : SyncAutoOutcome::OutcomeUnknown);
 			});
+		}).resumeEffect([weak, plan](Fn<void(bool)> ready) {
+			const auto self = weak.get();
+			if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
+			self->RenewEffect(plan, std::move(ready));
 		}).fail([weak, plan](const MTP::Error &error) {
 			if (const auto self = weak.get()) { self->Complete(plan,
 				error.type() == u"MESSAGE_DELETE_FORBIDDEN"_q ? SyncAutoOutcome::DeletionRefused : SyncAutoOutcome::OutcomeUnknown); }
@@ -603,6 +633,9 @@ void StartAutomaticSettingsSync() {
 			ready(entry.account->maybeSession());
 		}
 	};
+	SyncRequestChanges() | rpl::on_next([](MTP::Instance *) {
+		Changes.fire({});
+	}, lifetime);
 	SyncChatStatusChanges() | rpl::on_next([](Main::Session *session) {
 		Changes.fire({});
 		if (session && SyncChatSelfResolved(session)) {
@@ -647,6 +680,9 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 	if (!read.record) { return tr::lng_purple_auto_invalid(tr::now); }
 	const auto &record = *read.record;
 	if (!record.enabled) { return tr::lng_purple_auto_off(tr::now); }
+	if (const auto pending = PendingSyncRequest(&session->mtp())) {
+		return SyncRequestWaitText(*pending);
+	}
 	if (!SyncChatSelfResolved(session)) { return tr::lng_purple_auto_chat(tr::now); }
 	const auto executor = Sessions.find(session.get());
 	const auto failure = executor != Sessions.end() && executor->second->FailureReason() != SyncAutoReason::None

@@ -13,7 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_chat_requests.h"
 
 #include "base/weak_ptr.h"
-#include "mtproto/sender.h"
+#include "purple/purple_sync_request_sender.h"
 #include "purple/purple_sync_inventory.h"
 
 namespace Main {
@@ -57,7 +57,7 @@ private:
 	std::optional<AccountOperationTarget> _opening;
 	std::optional<DesktopSyncChatIo> _route;
 	Fn<bool()> _current;
-	MTP::Sender _api;
+	SyncRequestSender _api;
 	SyncHistoryPages _pages;
 	DesktopSyncChatHistoryGuard _modernHistory;
 	Fn<void(uint64_t)> _progress;

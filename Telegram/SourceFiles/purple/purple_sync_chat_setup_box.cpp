@@ -15,6 +15,7 @@
 #include "purple/purple_config.h"
 #include "purple/purple_sync_chat_peer_request.h"
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_request_sender.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
@@ -104,7 +105,12 @@ QString StatusText(Main::Session &session,
 	case DesktopSyncChatPhase::Lost:
 		text = tr::lng_purple_chat_lost(tr::now); break;
 	}
-	if (!status.reason.isEmpty()) {
+	if (const auto pending = PendingSyncRequest(&session.mtp())) {
+		text += u"\n"_q + SyncRequestWaitText(*pending);
+	} else if (status.reason == u"telegram-transient"_q && status.retryAt > 0) {
+		text += u"\n"_q + SyncRequestWaitText(
+			{ SyncTransientKind::Timeout, status.retryAt });
+	} else if (!status.reason.isEmpty()) {
 		text += u"\n"_q + (status.reason == u"resolving"_q
 			? tr::lng_purple_chat_searching(tr::now)
 			: status.reason == u"newer-mark"_q
@@ -305,6 +311,11 @@ void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
 				|| state->busy);
 		}
 	};
+	SyncRequestChanges() | rpl::on_next([=](MTP::Instance *instance) {
+		if (state->session && &state->session->mtp() == instance) {
+			refresh();
+		}
+	}, box->lifetime());
 	SyncChatStatusChanges() | rpl::on_next([=](Main::Session *changed) {
 		if (changed == state->session.get()) {
 			refresh();

@@ -313,6 +313,8 @@ struct ProbeSession : base::has_weak_ptr {
 		DesktopSyncChatStatus status() const { return {}; }
 	};
 	bool _busy = true;
+	bool _retryLocalOpen = false;
+	bool _openContinuation = false;
 	std::optional<DesktopSyncChatDiscoveryReceipt> _recent;
 	Model model;
 	Model *_model = &model;
@@ -332,7 +334,7 @@ struct ProbeSession : base::has_weak_ptr {
 	bool Current() const { return current; }
 	void Cancel(QString value) { ++cancelled; reason = value; ProductionCancel(value); }
 	void ProductionCancel(QString reason);
-	void Publish();
+	void Publish(bool final = true);
 	bool Accept(const DesktopSyncChatCommand &command);
 };
 

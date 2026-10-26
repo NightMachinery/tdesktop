@@ -211,6 +211,9 @@ PRIVATE
     purple/purple_sync_chat_create_requests.h
     purple/purple_sync_chat_setup.cpp
     purple/purple_sync_chat_setup.h
+    purple/purple_sync_retry.h
+    purple/purple_sync_request_sender.cpp
+    purple/purple_sync_request_sender.h
     purple/purple_sync_chat_peer_request.cpp
     purple/purple_sync_chat_peer_request.h
     purple/purple_sync_chat_setup_box.cpp

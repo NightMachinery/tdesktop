@@ -60,7 +60,7 @@ def inspect(values):
     require('receipt-random-map', 'uint64_t(data.vrandom_id().v) == randomId' in write)
     require('receipt-peer', 'DesktopSyncChatToken(data.vpeer_id(), route.peer.origin.account.userId)' in write)
     require('receipt-c0', 'GetSyncChatMessageOwnership(MapDesktopSyncChatMessage(' in write)
-    require('parts-before-gate', '_offset == _content.size()' in upload and upload.index('void SyncConfigUpload::SendMedia()') < upload.index('CheckSyncChatBeforePost(') < upload.index('self->DispatchMedia();'))
+    require('parts-before-gate', '_offset == _content.size()' in upload and all(value in upload for value in ['ResumeEffect([self](bool ready)', 'if (ready) { self->DispatchMedia(); }', 'RenewBeforePost([self, ready = std::move(ready)]', 'CheckSyncChatBeforePost(']))
     require('final-route-compatibility', 'CompatibleDesktopSyncChatIo(*self->_route, lease->route)' in upload)
     require('final-lease-current', '!lease->current || !lease->current()' in upload)
     require('updates-before-completion', upload.index('session->api().applyUpdates(result,') < upload.index('Finish(Current() && receipt'))
@@ -104,6 +104,8 @@ negative = [
     ('purple_sync_chat_write.cpp', 'DesktopSyncChatToken(data.vpeer_id(), route.peer.origin.account.userId)', 'PeerToken{}', 'receipt-peer'),
     ('purple_sync_chat_write.cpp', 'GetSyncChatMessageOwnership(MapDesktopSyncChatMessage(', 'Other(MapDesktopSyncChatMessage(', 'receipt-c0'),
     ('purple_sync_config_upload.cpp', '_offset == _content.size()', 'true', 'parts-before-gate'),
+    ('purple_sync_config_upload.cpp', 'ResumeEffect([self](bool ready)', 'DispatchMediaWithoutGate([self](bool ready)', 'parts-before-gate'),
+    ('purple_sync_config_upload.cpp', 'RenewBeforePost([self, ready = std::move(ready)]', 'SkipFacts([self, ready = std::move(ready)]', 'parts-before-gate'),
     ('purple_sync_config_upload.cpp', 'CompatibleDesktopSyncChatIo(*self->_route, lease->route)', 'true', 'final-route-compatibility'),
     ('purple_sync_config_upload.cpp', '!lease->current || !lease->current()', 'false', 'final-lease-current'),
     ('purple_sync_config_upload.cpp', 'session->api().applyUpdates(result,', 'Other(result,', 'updates-before-completion'),

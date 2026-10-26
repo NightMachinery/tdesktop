@@ -84,7 +84,7 @@ DesktopSyncExactRead::DesktopSyncExactRead(
 , _id(id)
 , _current(std::move(current))
 , _finished(std::move(finished))
-, _api(&session->mtp()) {
+, _api(&session->mtp(), [this] { return Current(); }) {
 }
 
 DesktopSyncExactRead::DesktopSyncExactRead(

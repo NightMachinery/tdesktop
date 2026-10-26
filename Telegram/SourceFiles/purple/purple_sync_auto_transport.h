@@ -1,7 +1,7 @@
 #pragma once
 
 #include "base/weak_ptr.h"
-#include "mtproto/sender.h"
+#include "purple/purple_sync_request_sender.h"
 #include "purple/purple_sync_auto.h"
 #include "purple/purple_sync_candidate_reader.h"
 
@@ -42,7 +42,7 @@ private:
 	int32_t _id = 0;
 	Fn<bool()> _current;
 	Fn<void(SyncAutoServerRead)> _finished;
-	MTP::Sender _api;
+	SyncRequestSender _api;
 	DesktopSyncExactMetadata _metadata;
 	SyncCandidateRecord _record;
 	std::unique_ptr<SyncCandidateReader> _reader;

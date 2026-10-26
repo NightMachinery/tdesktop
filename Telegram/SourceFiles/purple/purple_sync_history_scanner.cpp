@@ -53,7 +53,7 @@ SyncHistoryScanner::SyncHistoryScanner(
 : _session(session)
 , _sessionGuard(base::make_weak(session))
 , _opening(AccountSyncInspectionTarget(session))
-, _api(&session->mtp())
+, _api(&session->mtp(), [this] { return Current(); })
 , _modernHistory(peerToUser(session->user()->id).bare)
 , _progress(std::move(progress))
 , _finished(std::move(finished))

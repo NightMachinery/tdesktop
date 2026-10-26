@@ -165,3 +165,10 @@ retain the input while copying the channel id and access hash into their request
 The existing purple/test_sync_chat_setup_routes.py source gate scans all Purple
 C++ sources and tests unsafe and safe controls. Reaching these exact session-owned
 request paths in a standalone unit would require the native account/data stack.
+
+## Temporary Telegram failures
+
+Full-info, discovery, inventory and shared sync write requests keep temporary
+Telegram failures pending with a visible retry time. See
+[sync request retries](sync_request_retries.md) for deadlines, cancellation,
+the host-only verification boundary and the in-memory state limitation.
