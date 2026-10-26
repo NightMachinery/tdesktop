@@ -27,6 +27,20 @@ namespace Purple {
 [[nodiscard]] bool ConfigImpactFindingUsedHere(const ConfigImpactFinding &finding);
 [[nodiscard]] bool CanReplaceLegacyRootSettings(const QByteArray &before, const QByteArray &after);
 
+enum class AcceptedSettingsSource { None, Primary, Recovery };
+
+struct AcceptedSettingsRead {
+	AcceptedSettingsSource source = AcceptedSettingsSource::None;
+	QString primaryPath;
+	QString selectedPath;
+	SettingsFileInput acceptedInput;
+	std::optional<SettingsReadTarget> primaryTarget;
+	std::optional<AccountKey> owner;
+	std::optional<AccountKey> global;
+	uint64_t routingGeneration = 0;
+	bool effectiveAccepted = false;
+};
+
 struct AccountFileTarget {
 	AccountKey account;
 	QString path;
@@ -252,6 +266,8 @@ public:
 	void refreshSettings();
 	void acknowledgeOwnerNotice();
 	[[nodiscard]] const Settings &globalSettings();
+	[[nodiscard]] AcceptedSettingsRead globalSettingsRead() const;
+	[[nodiscard]] bool validateSettingsRead(const AcceptedSettingsRead &read) const;
 	void setChanged(std::function<void()> changed);
 	void watch();
 	[[nodiscard]] const AccountOwnerStartupPlan &ownerPlan() const;
@@ -357,6 +373,7 @@ private:
 		Settings settings;
 		uint64_t generation = 0;
 		LayerSettingsResult report;
+		AcceptedSettingsRead read;
 	};
 	void invalidate();
 	[[nodiscard]] AccountTransferResult writeReviewed(

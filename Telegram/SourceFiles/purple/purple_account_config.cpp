@@ -772,6 +772,30 @@ const Settings &DesktopAccountConfig::globalSettings() {
 	return settings(globalAccount().value_or(AccountKey{}));
 }
 
+AcceptedSettingsRead DesktopAccountConfig::globalSettingsRead() const {
+	const auto key = globalAccount().value_or(AccountKey{});
+	const auto name = AccountKeyText(key.environment, key.userId);
+	const auto i = _cache.find(name.value_or(u"single-file"_q));
+	return i != _cache.end() && i->second->generation == _generation
+		? i->second->read : AcceptedSettingsRead();
+}
+
+bool DesktopAccountConfig::validateSettingsRead(const AcceptedSettingsRead &read) const {
+	return !_persistFailed && read.effectiveAccepted
+		&& read.source == AcceptedSettingsSource::Primary
+		&& read.primaryTarget && read.owner == _owner
+		&& read.global == globalAccount() && read.routingGeneration == _routingGeneration
+		&& read.primaryTarget->routingGeneration == _routingGeneration
+		&& read.primaryTarget->root == _root
+		&& read.primaryPath == globalSettingsPath()
+		&& read.selectedPath == read.primaryPath
+		&& read.primaryTarget->path == read.primaryPath
+		&& read.acceptedInput.state == SettingsFileState::Readable
+		&& read.primaryTarget->inputs.contains(read.primaryPath)
+		&& read.primaryTarget->inputs.at(read.primaryPath) == read.acceptedInput
+		&& ValidateSettingsReadTarget(*read.primaryTarget);
+}
+
 const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 	const auto name = AccountKeyText(key.environment, key.userId);
 	const auto cacheKey = name.value_or(u"single-file"_q);
@@ -783,14 +807,27 @@ const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 		return slot->settings;
 	}
 	slot->generation = _generation;
+	slot->read = {
+		.owner = _owner,
+		.global = globalAccount(),
+		.routingGeneration = _routingGeneration,
+	};
 	const auto globalPath = globalSettingsPath();
 	const auto own = files(key);
 	const auto ownPath = own ? own->settings : globalPath;
 	auto globalReport = SettingsLayerFileReport();
 	auto accountReport = SettingsLayerFileReport();
-	const auto load = [&](const QString &path, SettingsLayerFileReport &report) {
+	const auto load = [&](const QString &path, SettingsLayerFileReport &report,
+			AcceptedSettingsRead *read = nullptr) {
 		const auto current = path.isEmpty() || QFileInfo(path).isSymLink()
 			? SettingsFileInput{ SettingsFileState::ReadError } : ReadSettingsFileInput(path);
+		if (read) {
+			read->primaryPath = path;
+			read->primaryTarget = CaptureSettingsReadTarget(_root, path, current);
+			if (read->primaryTarget) {
+				read->primaryTarget->routingGeneration = _routingGeneration;
+			}
+		}
 		report.current.path = path;
 		report.current.present = current.state != SettingsFileState::Missing;
 		report.current.parsed = ParseSettings(QString::fromUtf8(current.bytes), path);
@@ -802,6 +839,11 @@ const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 		const auto good = path.isEmpty() || QFileInfo(goodPath).isSymLink()
 			? SettingsFileInput{ SettingsFileState::ReadError } : ReadSettingsFileInput(goodPath);
 		if (report.current.parsed.ok()) {
+			if (read) {
+				read->source = AcceptedSettingsSource::Primary;
+				read->selectedPath = path;
+				read->acceptedInput = current;
+			}
 			report.usable = true;
 			if (good.state != SettingsFileState::ReadError && good.bytes != current.bytes) {
 				const auto saved = WriteGuardedSettingsFile(goodPath, good, current.bytes, [&] {
@@ -817,6 +859,12 @@ const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 			report.good = SettingsLayerFileParse{ goodPath,
 				ParseSettings(QString::fromUtf8(good.bytes), goodPath), true };
 			if (report.good->parsed.ok()) {
+				if (read) {
+					read->source = AcceptedSettingsSource::Recovery;
+					read->selectedPath = goodPath;
+					read->acceptedInput = good;
+					read->primaryTarget.reset();
+				}
 				report.usable = true;
 				report.usedGood = true;
 				return std::make_optional(SettingsLayerText{ QString::fromUtf8(good.bytes), goodPath });
@@ -824,7 +872,7 @@ const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 		}
 		return std::optional<SettingsLayerText>();
 	};
-	const auto global = load(globalPath, globalReport);
+	const auto global = load(globalPath, globalReport, &slot->read);
 	const auto account = own && ownPath != globalPath
 		? load(ownPath, accountReport) : std::optional<SettingsLayerText>();
 	auto options = SettingsLayerOptions();
@@ -843,6 +891,7 @@ const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 	}
 	slot->report.global = std::move(globalReport);
 	slot->report.account = std::move(accountReport);
+	slot->read.effectiveAccepted = slot->report.effective.ok();
 	if (slot->report.effective.ok()) {
 		slot->settings = slot->report.effective.settings;
 	}

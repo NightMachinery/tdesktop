@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
 #include "purple/purple_peek_controls.h"
+#include "purple/purple_wait_gate.h"
 #include "purple/purple_sync_auto_service.h"
 #include "platform/platform_file_utilities.h"
 #include "ui/toast/toast.h"
@@ -374,6 +375,7 @@ public:
 		const std::optional<AccountSettingsWriteTarget> &expected = std::nullopt,
 		const std::function<bool()> &originCurrent = {},
 		const std::function<bool()> &committedCurrent = {});
+	[[nodiscard]] std::optional<SettingsReadTarget> checkedReadInput();
 	[[nodiscard]] std::optional<AccountSettingsWriteTarget> checkedInput(QString *error = nullptr);
 	void observeAccountFiles() { autoSendLater(); }
 	void refreshAccountRows() { _accountRefreshPending = true; reloadFromDisk(); }
@@ -405,6 +407,7 @@ private:
 	void autoSendNow();
 
 	SettingsFileInput _diskInput;
+	AcceptedSettingsRead _settingsRead;
 	QString _settingsPath;
 	bool _accountRefreshPending = false;
 	bool _globalChoiceApplying = false;
@@ -476,9 +479,10 @@ void Config::applyInput(const SettingsFileInput &input) {
 		? QString::fromUtf8(input.bytes) : QString();
 	AccountRouting().refreshSettings();
 	applySettings(AccountRouting().globalSettings(), SettingsFilePath());
+	_settingsRead = AccountRouting().globalSettingsRead();
 	const auto global = AccountRouting().globalAccount().value_or(AccountKey{});
 	const auto report = AccountRouting().report(global);
-	_usingLastGoodSettings = report && report->global.usedGood;
+	_usingLastGoodSettings = _settingsRead.source == AcceptedSettingsSource::Recovery;
 	_problems = {};
 	if (report) {
 		_problems.error = report->global.current.parsed.error;
@@ -711,6 +715,16 @@ rpl::producer<> Config::changes() const {
 	return _changes.events();
 }
 
+std::optional<SettingsReadTarget> Config::checkedReadInput() {
+	reloadStateFromDisk();
+	AccountRouting().refreshLocalChoice();
+	const auto path = SettingsFilePath();
+	return _settingsPath == path && _settingsRead.primaryTarget
+		&& _settingsRead.primaryTarget->root == ConfigDirectory()
+		&& AccountRouting().validateSettingsRead(_settingsRead)
+		? _settingsRead.primaryTarget : std::nullopt;
+}
+
 WriteResult Config::write(
 		const Fn<SpliceResult(const QString&)> &op,
 		const QString &what,
@@ -890,8 +904,9 @@ GlobalAccountChoiceResult Config::switchGlobalAccount(
 	_settingsPath = preview.selected.file.path;
 	_text = QString::fromUtf8(_diskInput.bytes);
 	AccountRouting().refreshSettings();
-	applySettings(verified->after, _settingsPath);
-	_usingLastGoodSettings = preview.selectedUsesGood;
+	applySettings(AccountRouting().globalSettings(), _settingsPath);
+	_settingsRead = AccountRouting().globalSettingsRead();
+	_usingLastGoodSettings = _settingsRead.source == AcceptedSettingsSource::Recovery;
 	_problems = {};
 	const auto current = ParseSettings(_text, _settingsPath);
 	_problems.error = current.error;
@@ -967,6 +982,15 @@ rpl::producer<> SettingsChanges() {
 
 void details::RefreshWaitSettings() {
 	Instance().refreshForWait();
+}
+
+std::optional<SettingsReadTarget> SettingsReadInputForOperation() {
+	return Instance().checkedReadInput();
+}
+
+bool ValidateSettingsReadInput(const SettingsReadTarget &expected) {
+	const auto current = SettingsReadInputForOperation();
+	return current && *current == expected;
 }
 
 std::optional<AccountSettingsWriteTarget> SettingsInputForOperation(QString *error) {

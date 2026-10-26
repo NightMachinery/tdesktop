@@ -88,6 +88,11 @@ ends it immediately. The desktop change does not implement that Android UI.
 
 ## Qualification
 
+`Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp` covers ownerless
+settings loading with both immediate and delayed starts, changed input and
+routing metadata, account/window/lock guards, and every Peek refusal reason.
+The file fixture in `peek_file_cases.cpp` retains the exact-write controls.
+
 Core TestPeekControls cases cover the shared schema accessor's device defaults,
 explicit zero, shared values, invalid input, comment/unknown-key preservation,
 idempotence and refused edits. Desktop's `purple/test_wait.py` separately covers
@@ -107,13 +112,27 @@ reused; no new application/controller implementation was placed upstream.
 
 ## Settings freshness and deliberate exit
 
-A Peek request captures the actual readable settings-file bytes. Entry checks
-also synchronously refresh the active state input. If disk and the loaded settings
-input differ, the existing parser/reload route runs and the request refuses; a
-second explicit request uses the refreshed delay. This includes the zero-delay
-path, so a stale cached zero cannot bypass a larger saved delay. Missing files,
-read errors and readable-empty inputs are distinct. Invalid primary settings do
-not authorize a countdown using the last-good fallback.
+Starting and extending Peek read settings and change device state. They do not
+require an app-wide settings edit route or a root-file owner. A readable,
+accepted primary file can therefore run Peek while account ownership is unset.
+The routing loader retains its selected primary or recovery source, the exact
+bytes accepted for that load, its effective-settings verdict and routing context,
+including ownerless mode. Peek uses the receipt associated with the settings
+actually applied to the running filter. It requires an accepted primary whose
+current bytes and routing metadata still match that receipt, and rejects a
+symlinked primary just as the loader does. Recovery settings cannot authorize it.
+Preset and file-option edits keep their existing edit guards. Work Mode off, an
+ended Peek, an untimed Peek, the extension limit and an invalid extension each
+have a separate refusal message.
+
+Entry checks synchronously refresh the active state input and validate the
+loader receipt before starting even a zero-delay request. Countdown completion
+checks it again. A save between the outer watcher read and the loader's read
+cannot substitute the outer bytes for the actual accepted input, including an
+A-B-A save sequence. A mismatch refuses until the running loader has accepted
+matching current input. This compares accepted content and routing context; it
+does not claim to detect every transient edit restored before either check.
+Missing files, read errors and readable-empty inputs are distinct.
 
 At countdown completion, exact disk-input validation can synchronously notify
 subscribers and cancel pending state. The operation generation is checked after

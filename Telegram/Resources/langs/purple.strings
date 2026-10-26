@@ -252,7 +252,11 @@ docs/purple/upstream_hooks.md.
 "lng_purple_wait_context_changed" = "The Work Mode context changed. Try again.";
 "lng_purple_wait_settings_changed" = "Settings changed since this control opened. Open it again.";
 "lng_purple_wait_editor_closed" = "The settings editor closed. Open it again.";
-"lng_purple_wait_peek_unavailable" = "Peek is unavailable: Work Mode is off, or this Peek has ended, has no timer, or is at its limit.";
+"lng_purple_wait_peek_unavailable" = "Work Mode is off: nothing is hidden to peek at.";
+"lng_purple_wait_peek_ended" = "This Peek has ended. Start a new Peek before extending it.";
+"lng_purple_wait_peek_untimed" = "This Peek has no timer to extend. End it when you are ready.";
+"lng_purple_wait_peek_limit" = "This Peek is already at its time limit.";
+"lng_purple_wait_peek_invalid_extension" = "The Peek extension must be longer than zero seconds.";
 "lng_purple_wait_delay_invalid" = "The start delay must be a non-negative whole number of seconds.";
 
 "lng_purple_archive_deleted" = "Deleted messages";

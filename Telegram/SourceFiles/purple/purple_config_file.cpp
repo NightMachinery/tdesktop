@@ -1,5 +1,8 @@
 #include "purple/purple_config_file.h"
 
+#include "purple/purple_types.h"
+
+#include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSaveFile>
@@ -20,6 +23,41 @@ SettingsFileInput ReadSettingsFileInput(const QString &path) {
 		return { SettingsFileState::ReadError };
 	}
 	return { SettingsFileState::Readable, std::move(bytes) };
+}
+
+std::optional<SettingsReadTarget> CaptureSettingsReadTarget(
+		const QString &root,
+		const QString &path,
+		const SettingsFileInput &loadedInput) {
+	if (!QDir::isAbsolutePath(root) || !QDir::isAbsolutePath(path)
+		|| loadedInput.state != SettingsFileState::Readable
+		|| QFileInfo(path).isSymLink()) {
+		return std::nullopt;
+	}
+	auto result = SettingsReadTarget{ root, path };
+	for (const auto &file : {
+		path, root + u"/local.toml"_q, root + u"/accounts/root.toml"_q,
+	}) {
+		const auto input = ReadSettingsFileInput(file);
+		if (input.state == SettingsFileState::ReadError
+			|| (file == path && input != loadedInput)) {
+			return std::nullopt;
+		}
+		result.inputs.emplace(file, input);
+	}
+	return result;
+}
+
+bool ValidateSettingsReadTarget(const SettingsReadTarget &target) {
+	const auto primary = target.inputs.find(target.path);
+	if (primary == target.inputs.end()) {
+		return false;
+	}
+	auto current = CaptureSettingsReadTarget(target.root, target.path, primary->second);
+	if (current) {
+		current->routingGeneration = target.routingGeneration;
+	}
+	return current && *current == target;
 }
 
 GuardedFileWrite WriteGuardedSettingsFile(

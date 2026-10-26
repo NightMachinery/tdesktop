@@ -117,6 +117,8 @@ void SetLocalPremium(bool value);
 // defaults, so a typo mid-edit does not reshuffle the user's chat list.
 [[nodiscard]] const Settings &ActiveSettings();
 [[nodiscard]] bool UsingLastGoodSettings();
+[[nodiscard]] std::optional<SettingsReadTarget> SettingsReadInputForOperation();
+[[nodiscard]] bool ValidateSettingsReadInput(const SettingsReadTarget &expected);
 [[nodiscard]] std::optional<AccountSettingsWriteTarget> SettingsInputForOperation(QString *error = nullptr);
 [[nodiscard]] bool ValidateSettingsInput(const AccountSettingsWriteTarget &expected);
 

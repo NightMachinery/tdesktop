@@ -10,6 +10,7 @@ namespace Purple {
 
 struct Settings;
 struct State;
+struct SettingsFileInput;
 
 [[nodiscard]] int PeekWaitDelaySeconds(const Settings &settings);
 
@@ -31,6 +32,17 @@ struct WaitOrigin {
 };
 
 [[nodiscard]] bool WorkModeWait(WaitAction action);
+[[nodiscard]] bool PeekSettingsInputUsable(const SettingsFileInput &input);
+[[nodiscard]] bool WaitNeedsSettingsEdit(WaitAction action, bool writesSettings);
+
+enum class PeekRequestRefusal { None, WorkModeOff, Ended, Untimed, Limit, InvalidExtension };
+
+[[nodiscard]] PeekRequestRefusal CheckPeekRequest(
+	WaitAction action,
+	bool filtering,
+	const State &state,
+	int64_t now,
+	int seconds);
 [[nodiscard]] bool WaitOriginValid(WaitAction action, WaitOrigin origin);
 
 enum class WaitOutcome { NoOp, Pending, Applied, Refused };

@@ -48,6 +48,18 @@ constexpr auto kCountdownTick = crl::time(250);
 constexpr auto kPeekFocusLossPref = "purple-peek-end-on-focus-loss";
 rpl::event_stream<bool> FocusLossChanges;
 
+QString PeekRefusalText(PeekRequestRefusal reason) {
+	switch (reason) {
+	case PeekRequestRefusal::WorkModeOff: return tr::lng_purple_wait_peek_unavailable(tr::now);
+	case PeekRequestRefusal::Ended: return tr::lng_purple_wait_peek_ended(tr::now);
+	case PeekRequestRefusal::Untimed: return tr::lng_purple_wait_peek_untimed(tr::now);
+	case PeekRequestRefusal::Limit: return tr::lng_purple_wait_peek_limit(tr::now);
+	case PeekRequestRefusal::InvalidExtension: return tr::lng_purple_wait_peek_invalid_extension(tr::now);
+	case PeekRequestRefusal::None: return {};
+	}
+	return {};
+}
+
 class WaitCover final : public Ui::RpWidget {
 public:
 	WaitCover(
@@ -336,10 +348,9 @@ WaitResult PendingWait::request(WaitRequest request) {
 	const auto action = request.action;
 	const auto seconds = request.seconds;
 	auto inputError = QString();
-	const auto needsInput = action != WaitAction::ChangeAccountMode
-		&& action != WaitAction::ChangeGlobalAccount
-		&& action != WaitAction::ChangePeekFocus
-		&& (action != WaitAction::ChangePeekOption || request.writesSettings);
+	const auto peekAction = action == WaitAction::StartPeek || action == WaitAction::ExtendPeek;
+	const auto readInput = peekAction ? SettingsReadInputForOperation() : std::nullopt;
+	const auto needsInput = WaitNeedsSettingsEdit(action, request.writesSettings);
 	const auto input = !needsInput
 		? std::optional<AccountSettingsWriteTarget>()
 		: action == WaitAction::ChangePeekOption
@@ -376,6 +387,9 @@ WaitResult PendingWait::request(WaitRequest request) {
 		if (action == WaitAction::ChangePeekOption && needsInput
 			&& (!editor || !editor->originCurrent || !editor->originCurrent())) {
 			return tr::lng_purple_wait_editor_closed(tr::now);
+		}
+		if (peekAction && (!readInput || !ValidateSettingsReadInput(*readInput))) {
+			return tr::lng_purple_wait_settings_changed(tr::now);
 		}
 		if (needsInput && (!input || !ValidateSettingsInput(*input))) {
 			return input ? tr::lng_purple_wait_settings_changed(tr::now)
@@ -420,15 +434,10 @@ WaitResult PendingWait::request(WaitRequest request) {
 			return result;
 		}
 	} else if (action == WaitAction::StartPeek || action == WaitAction::ExtendPeek) {
-		auto preview = CurrentState();
-		if (!Filtering() || (action == WaitAction::ExtendPeek
-			&& !ExtendPeek(
-				preview,
-				QDateTime::currentSecsSinceEpoch(),
-				seconds,
-				kPeekExtendCapSeconds))) {
-			const auto result = WaitResult{ WaitOutcome::Refused,
-				tr::lng_purple_wait_peek_unavailable(tr::now) };
+		const auto refusal = CheckPeekRequest(action, Filtering(), CurrentState(),
+			QDateTime::currentSecsSinceEpoch(), seconds);
+		if (refusal != PeekRequestRefusal::None) {
+			const auto result = WaitResult{ WaitOutcome::Refused, PeekRefusalText(refusal) };
 			report(result, origin);
 			return result;
 		}
@@ -444,11 +453,15 @@ WaitResult PendingWait::request(WaitRequest request) {
 		}
 		if (action == WaitAction::StartPeek) {
 			if (details::ActivatePeekFor(seconds).refused) {
-				return tr::lng_purple_wait_peek_unavailable(tr::now);
+				return Filtering() ? tr::lng_purple_wait_context_changed(tr::now)
+					: PeekRefusalText(PeekRequestRefusal::WorkModeOff);
 			}
 		} else if (action == WaitAction::ExtendPeek) {
 			if (!details::ActivatePeekExtension(seconds).extended) {
-				return tr::lng_purple_wait_peek_unavailable(tr::now);
+				const auto refusal = CheckPeekRequest(action, Filtering(), CurrentState(),
+					QDateTime::currentSecsSinceEpoch(), seconds);
+				return refusal == PeekRequestRefusal::None
+					? tr::lng_purple_wait_context_changed(tr::now) : PeekRefusalText(refusal);
 			}
 		} else if (action == WaitAction::ChangePreset) {
 			UpdateState([&](State &updated) {

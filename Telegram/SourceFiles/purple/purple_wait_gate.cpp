@@ -1,6 +1,7 @@
 #include "purple/purple_wait_gate.h"
 
 #include "purple/purple_engine.h"
+#include "purple/purple_config_file.h"
 
 #include <algorithm>
 #include <utility>
@@ -28,6 +29,37 @@ bool WorkModeWait(WaitAction action) {
 	return action == WaitAction::ChangePreset
 		|| action == WaitAction::ChangeAccountMode
 		|| action == WaitAction::ChangeGlobalAccount;
+}
+
+bool PeekSettingsInputUsable(const SettingsFileInput &input) {
+	if (input.state != SettingsFileState::Readable) return false;
+	const auto text = QString::fromUtf8(input.bytes);
+	const auto parsed = ParseSettings(text, QString());
+	return text.toUtf8() == input.bytes && parsed.ok()
+		&& parsed.settings.version <= kHighestSettingsVersion;
+}
+
+bool WaitNeedsSettingsEdit(WaitAction action, bool writesSettings) {
+	return action != WaitAction::StartPeek && action != WaitAction::ExtendPeek
+		&& action != WaitAction::EndPeek && action != WaitAction::ChangeAccountMode
+		&& action != WaitAction::ChangeGlobalAccount && action != WaitAction::ChangePeekFocus
+		&& (action != WaitAction::ChangePeekOption || writesSettings);
+}
+
+PeekRequestRefusal CheckPeekRequest(
+		WaitAction action,
+		bool filtering,
+		const State &state,
+		int64_t now,
+		int seconds) {
+	if (!filtering) return PeekRequestRefusal::WorkModeOff;
+	if (action != WaitAction::ExtendPeek) return PeekRequestRefusal::None;
+	if (!PeekLive(state, now)) return PeekRequestRefusal::Ended;
+	if (!state.peekDeadlineUnix) return PeekRequestRefusal::Untimed;
+	if (seconds <= 0) return PeekRequestRefusal::InvalidExtension;
+	auto preview = state;
+	return ExtendPeek(preview, now, seconds, kPeekExtendCapSeconds)
+		? PeekRequestRefusal::None : PeekRequestRefusal::Limit;
 }
 
 bool WaitOriginValid(WaitAction action, WaitOrigin origin) {
