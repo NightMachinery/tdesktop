@@ -101,3 +101,19 @@ private test profile and shared fixtures, and pace the full-info sequence. A
 server wait is handled by the product; the test harness must not blindly restart
 the scenario or request a fresh login. Native calls and fixture lifecycle remain
 separately authorized.
+
+## Read queues with their own cooldown
+
+SyncRequestSender can hand a non-short transient to an optional owner callback.
+The controller retires the logical request, timer and wire generation before
+calling that owner with the same request id and transient retryAt. Short floods
+stay inside the controller for their single inline retry. Owners without this
+callback keep the existing pending/reschedule behavior. Ambiguous write effects
+still take the outcome-unknown path before any handoff.
+
+The emoji exporter uses this read-only handoff to feed its existing automatic
+cooldown scheduler. Transients hold metadata resolution globally, while cached
+artwork may continue; permanent document failures keep their own cooldown. Its
+outer request timeout is removed so it cannot turn an extended short wait into
+a document failure. Media loading retains its separate timeout. The complete
+Purple inventory now covers sixteen managed request sites.

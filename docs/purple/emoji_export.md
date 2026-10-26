@@ -27,10 +27,21 @@ access and no sends. Both recent and installed candidates share a 100,000-entry
 cap, plus one extra document ID. That extra ID gets reserved resolution admission
 without changing catalog order. Each slice permits 100 document resolutions. A
 250 ms internal continuation keeps the cursor and finishes remaining candidates
-without another refresh event. Failed resolutions, media loads and decodes have
+without another refresh event. Permanent resolution failures, media loads and decodes have
 a one-minute cooldown, retained across refreshes, followed by an automatic retry.
 Failures advance the cursor so a failing prefix cannot starve later candidates.
-Each request or media load has a 30-second wait. Unsupported or oversized images
+Document metadata requests use the shared request controller. One short flood
+wait retries the same request once at X+1 seconds, extending its 30-second
+response deadline only by that wait. A long or repeated flood, server/transport
+failure or response timeout is handed back as a transient with retryAt. It does
+not mark that document as failed. The queue projects retryAt from Unix time to
+its elapsed clock without shortening the original monotonic wait at a wall-clock
+second boundary, and pauses all metadata resolution until that deadline,
+retaining the hold across refreshes. Cached artwork can still finish. The
+existing automatic retry scheduler observes this deadline; cancellation retires
+the controller before the handoff, so two retry timers cannot compete. Permanent
+document errors retain the one-minute per-document cooldown. Media loads keep
+their independent 30-second wait. Unsupported or oversized images
 are omitted. Existing shared UI downloads are allowed to settle before another
 export download starts; the exporter does not cancel a download the UI may use.
 While a timed-out shared transfer settles, the pass can still render cached
@@ -71,3 +82,18 @@ notifies and joins, so it cannot lose that wakeup.
 `main/main_account.cpp` calls a Purple logout hook before both ordinary and
 forced logout, immediately revoking output and any publication authority for
 that login. Startup and settings registration use existing Purple-owned hooks.
+
+The transient regression is `purple/test_sync_retry_emoji.cpp`, run by
+`python3 purple/test_sync_retry.py --output-dir <private-host-directory>`.
+It executes the production controller and exporter handoff with injected network
+and clock endpoints, plus literal queue code with Qt integer-type aliases. It
+checks short and premium floods, long waits, 5xx, transport errors, own timeout,
+unchanged permanent errors, global metadata holds, clock conversion and revoked
+or superseded callbacks. The full global inventory admits this request only as
+a managed SyncRequestSender site; raw MTP::Sender remains forbidden there.
+
+An expired per-document cooldown does not outrank an active global metadata
+wait. The queue's next deadline is the global deadline unless cached or media
+work has an earlier future retry. The publication scheduler retains its bounded
+one-minute refresh tick during long waits; expired metadata cooldowns cannot
+turn it into repeated one-second catalog publications.

@@ -1,6 +1,7 @@
 #include "purple/purple_emoji_export_queue.h"
 
 #include <algorithm>
+#include <limits>
 #include <set>
 
 namespace Purple {
@@ -33,6 +34,7 @@ void EmojiExportQueue::begin(
 void EmojiExportQueue::clear() {
 	_order.clear();
 	_retry.clear();
+	_resolveRetryAt = 0;
 	_cursor = 0;
 	_used = 0;
 }
@@ -55,7 +57,7 @@ bool EmojiExportQueue::cooling(quint64 id, qint64 now) const {
 }
 
 EmojiResolveAdmission EmojiExportQueue::resolve(quint64 id, qint64 now) {
-	if (cooling(id, now)) return EmojiResolveAdmission::Cooldown;
+	if (now < _resolveRetryAt || cooling(id, now)) return EmojiResolveAdmission::Cooldown;
 	if (_used == _budget) return EmojiResolveAdmission::Continue;
 	++_used;
 	return EmojiResolveAdmission::Ready;
@@ -69,9 +71,22 @@ void EmojiExportQueue::succeeded(quint64 id) {
 	_retry.erase(id);
 }
 
-std::optional<qint64> EmojiExportQueue::retryAt() const {
-	auto result = std::optional<qint64>();
+void EmojiExportQueue::transient(
+		qint64 retryAtUnix, qint64 unixNow, qint64 elapsedNow, qint64 minimumDelayMs) {
+	const auto start = std::max(qint64(0), elapsedNow);
+	const auto now = std::max(qint64(0), unixNow);
+	const auto at = std::max(qint64(0), retryAtUnix);
+	const auto seconds = at > now ? at - now : qint64(1);
+	const auto available = std::numeric_limits<qint64>::max() - start;
+	const auto projected = seconds > available / 1000 ? available : seconds * 1000;
+	const auto delay = std::max(projected, std::clamp(minimumDelayMs, qint64(0), available));
+	_resolveRetryAt = std::max(_resolveRetryAt, start + delay);
+}
+
+std::optional<qint64> EmojiExportQueue::retryAt(qint64 now) const {
+	auto result = now < _resolveRetryAt ? std::optional(_resolveRetryAt) : std::nullopt;
 	for (const auto &[id, at] : _retry) {
+		if (now < _resolveRetryAt && at <= now) continue;
 		if (!result || at < *result) result = at;
 	}
 	return result;

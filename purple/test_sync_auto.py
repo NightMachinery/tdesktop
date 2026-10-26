@@ -30,8 +30,15 @@ methods = service[service.index('std::optional<SyncAutoFacts> AutoSession::Facts
 methods += service[service.index('bool AutoSession::Accept('):service.index('void AutoSession::RetryLater(')]
 methods += service[service.index('void AutoSession::Complete('):service.index('void AutoSession::Check(')]
 check = service[service.index('void AutoSession::Check('):service.index('void AutoSession::ReadNext(')]
-callback = check.split('[weak, plan](SyncAccountInventoryResult inventory) {', 1)[1].rsplit('\n\t\t});', 1)[0]
-methods += 'void AutoSession::InvokeInventory(const SyncAutoPlan &plan, SyncAccountInventoryResult inventory) {\n auto weak = Weak{ this, alive };\n' + callback + '\n}\n'
+marker = '[weak, plan, origin = lease->route.peer.origin](DesktopSyncChatInventory inventory)'
+start = check.index('{', check.index(marker)) + 1
+end = start
+depth = 1
+while depth:
+    depth += (check[end] == '{') - (check[end] == '}')
+    end += 1
+callback = check[start:end - 1]
+methods += 'void AutoSession::InvokeInventory(const SyncAutoPlan &plan, SyncAccountInventoryResult reply) {\n auto weak = Weak{ this, alive };\n const auto route = ProbeSelfRoute(_account);\n const auto origin = route.peer.origin;\n auto inventory = DesktopSyncChatInventory{route, std::move(reply)};\n' + callback + '\n}\n'
 (work / 'auto-service-boundary.inc').write_text(methods)
 
 objects = []
@@ -48,9 +55,9 @@ with (work / 'build.log').open('w') as log:
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
     objects += [compile(repo / 'purple/test_sync_auto.cpp', 'test', True), compile(work / 'apply-body.cpp', 'apply')]
-    adapters = ['purple_account_config', 'purple_config_file', 'purple_sync_local_store', 'purple_sync_config_history', 'purple_sync_config_review', 'purple_sync_config_text', 'purple_sync_auto_store', 'purple_sync_auto_transport']
+    adapters = ['purple_account_config', 'purple_config_file', 'purple_sync_local_store', 'purple_sync_config_history', 'purple_sync_config_review', 'purple_sync_config_text', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']
     for name in adapters:
-        if not args.use_build_objects and name in ['purple_account_config', 'purple_sync_local_store', 'purple_sync_auto_store', 'purple_sync_auto_transport']:
+        if not args.use_build_objects and name in ['purple_account_config', 'purple_sync_local_store', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']:
             objects.append(compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
         else:
             objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o'))

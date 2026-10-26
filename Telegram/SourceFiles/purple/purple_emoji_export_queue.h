@@ -21,11 +21,14 @@ public:
 	[[nodiscard]] EmojiResolveAdmission resolve(quint64 id, qint64 now);
 	void failed(quint64 id, qint64 now);
 	void succeeded(quint64 id);
-	[[nodiscard]] std::optional<qint64> retryAt() const;
+	void transient(qint64 retryAtUnix, qint64 unixNow, qint64 elapsedNow,
+		qint64 minimumDelayMs = 0);
+	[[nodiscard]] std::optional<qint64> retryAt(qint64 now = 0) const;
 
 private:
 	int _budget = 0;
 	qint64 _cooldownMs = 0;
+	qint64 _resolveRetryAt = 0;
 	int _used = 0;
 	size_t _cursor = 0;
 	std::vector<size_t> _order;

@@ -47,10 +47,12 @@ QString SyncRequestWaitText(const SyncRequestTransient &pending) {
 }
 
 SyncRequestSender::SyncRequestSender(
-		not_null<MTP::Instance*> instance, Fn<bool()> current)
+		not_null<MTP::Instance*> instance, Fn<bool()> current,
+		Fn<void(mtpRequestId, SyncRequestTransient)> deferred)
 : _instance(instance)
 , _api(instance)
-, _current(std::move(current)) {
+, _current(std::move(current))
+, _deferred(std::move(deferred)) {
 	Notices.emplace(this, Notice{ instance });
 }
 
@@ -151,6 +153,13 @@ void SyncRequestSender::failed(const std::shared_ptr<Pending> &pending,
 		const auto callback = pending->fail;
 		cancel(pending->id);
 		if (callback) { callback(MTP::Error::Local(u"PURPLE_EFFECT_OUTCOME_UNKNOWN"_q, {})); }
+		return;
+	}
+	if (_deferred && !transient->shortRetry) {
+		const auto callback = _deferred;
+		const auto id = pending->id;
+		cancel(id);
+		callback(id, *transient);
 		return;
 	}
 	++pending->generation;

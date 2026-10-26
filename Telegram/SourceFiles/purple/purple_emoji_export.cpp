@@ -3,6 +3,8 @@
 #include "purple/purple_emoji_export_store.h"
 #include "purple/purple_emoji_export_queue.h"
 #include "purple/purple_emoji_export_worker.h"
+#include "purple/purple_sync_request_sender.h"
+#include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -19,7 +21,6 @@
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
-#include "mtproto/sender.h"
 #include "platform/platform_specific.h"
 #include "settings.h"
 #include "settings/settings_builder.h"
@@ -97,6 +98,7 @@ private:
 	void outputFailed();
 	void checkMedia();
 	void resolve();
+	void deferred(mtpRequestId request, const SyncRequestTransient &transient);
 	void fillMetadata(DocumentData *document);
 	[[nodiscard]] bool admitted() const;
 	[[nodiscard]] bool transferBusy();
@@ -115,7 +117,7 @@ private:
 	base::weak_ptr<Main::Session> _transferSession;
 	base::weak_ptr<Main::Session> _retiredSession;
 	DocumentId _transferId = 0;
-	std::unique_ptr<MTP::Sender> _api;
+	std::unique_ptr<SyncRequestSender> _api;
 	mtpRequestId _request = 0;
 	std::shared_ptr<Data::DocumentMedia> _media;
 	std::vector<EmojiExportEntry> _entries;
@@ -154,12 +156,7 @@ EmojiExporter::EmojiExporter()
 		if (_transferId && !transferBusy()) {
 			dirty();
 		}
-		if (_request && _taskTime.elapsed() >= kTaskTimeoutMs) {
-			_api->request(_request).cancel();
-			_request = 0;
-			_queue.failed(_entries[_index].id, _clock.elapsed());
-			next();
-		} else if (_media) {
+		if (_media) {
 			checkMedia();
 		} else if (_running) {
 			pump();
@@ -218,7 +215,11 @@ void EmojiExporter::reconcile() {
 	if (desired && !_bound && _clean && !_outputFailed) {
 		_session = base::make_weak(desired);
 		_bound = true;
-		_api = std::make_unique<MTP::Sender>(&desired->mtp());
+		_api = std::make_unique<SyncRequestSender>(&desired->mtp(),
+			[=] { return admitted(); },
+			[=](mtpRequestId request, SyncRequestTransient transient) {
+				deferred(request, transient);
+			});
 		desired->data().stickers().updated(Data::StickersType::Emoji)
 			| rpl::on_next([=] { dirty(); }, _sessionLifetime);
 		desired->account().sessionChanges() | rpl::on_next([=](Main::Session *live) {
@@ -399,7 +400,6 @@ void EmojiExporter::resolve() {
 	}
 	const auto token = _token;
 	const auto id = _entries[_index].id;
-	_taskTime.start();
 	_request = _api->request(MTPmessages_GetCustomEmojiDocuments(
 		MTP_vector<MTPlong>(QVector<MTPlong>{ MTP_long(id) })
 	)).done([=](const MTPVector<MTPDocument> &result) {
@@ -420,7 +420,7 @@ void EmojiExporter::resolve() {
 			_queue.succeeded(id);
 			pump();
 		}
-	}).fail([=] {
+	}).fail([=](const MTP::Error &) {
 		if (!_epoch.accepts(token) || !_queue.current() || _entries[_index].id != id) return;
 		_request = 0;
 		if (admitted()) {
@@ -430,6 +430,19 @@ void EmojiExporter::resolve() {
 			reconcile();
 		}
 	}).handleAllErrors().send();
+}
+
+void EmojiExporter::deferred(mtpRequestId request, const SyncRequestTransient &transient) {
+	if (request != _request || !_queue.current()) {
+		return;
+	}
+	_request = 0;
+	if (!admitted()) {
+		reconcile();
+		return;
+	}
+	_queue.transient(transient.retryAt, base::unixtime::now(), _clock.elapsed(), transient.delayMs);
+	next();
 }
 
 void EmojiExporter::outputFailed() {
@@ -533,7 +546,7 @@ void EmojiExporter::publish() {
 			_running = false;
 			if (_pending) {
 				_debounce.start(kDebounceMs);
-			} else if (const auto retry = _queue.retryAt()) {
+			} else if (const auto retry = _queue.retryAt(_clock.elapsed())) {
 				_pending = true;
 				_debounce.start(int(std::clamp(*retry - _clock.elapsed(), qint64(1000), qint64(60000))));
 			}

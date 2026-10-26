@@ -550,12 +550,27 @@ void ConflictCloneFutureAndV2() {
 	}
 }
 
+DesktopSyncChatIo ProbeSelfRoute(AccountKey account) {
+	auto facts = SyncChatFacts();
+	facts.kind = SyncChatKind::Self;
+	facts.canSendFiles = true;
+	auto peer = DesktopSyncChatPeer{{account, u"auto-host-login"_q}, {}, SyncChatKind::Self};
+	peer.facts = facts;
+	return {std::move(peer), MTP_inputPeerSelf()};
+}
+
+bool SelfResolved = true;
+bool SyncChatSelfResolved(Main::Session *) { return SelfResolved; }
+
 void ExactAbsenceBoundaries() {
 	const auto make = [](QVector<MTPMessage> messages) {
 		return MTPmessages_Messages(MTP_messages_messages(MTP_vector<MTPMessage>(messages),
 			MTP_vector<MTPForumTopic>(), MTP_vector<MTPChat>(), MTP_vector<MTPUser>()));
 	};
-	const auto empty = MTPMessage(MTP_messageEmpty(MTP_flags(0), MTP_int(123), MTPPeer()));
+	const auto empty = MTPMessage(MTP_messageEmpty(MTP_flags(MTPDmessageEmpty::Flag::f_peer_id),
+		MTP_int(123), MTP_peerUser(MTP_long(202))));
+	const auto peerless = MTPMessage(MTP_messageEmpty(MTP_flags(0), MTP_int(123), MTPPeer()));
+	CHECK(InspectDesktopSyncExactMessage(make({ peerless }), 123, 202).presence == SyncAutoMessagePresence::Unknown);
 	CHECK(InspectDesktopSyncExactMessage(make({}), 123, 202).presence == SyncAutoMessagePresence::Unknown);
 	CHECK(InspectDesktopSyncExactMessage(make({ empty }), 124, 202).presence == SyncAutoMessagePresence::Unknown);
 	CHECK(InspectDesktopSyncExactMessage(make({ empty, empty }), 123, 202).presence == SyncAutoMessagePresence::Unknown);
@@ -565,6 +580,10 @@ void ExactAbsenceBoundaries() {
 }
 
 struct ProbeEndpoint {
+	int cancellations = 0;
+	explicit operator bool() const { return true; }
+	ProbeEndpoint *operator->() { return this; }
+	void Cancel() { ++cancellations; }
 	bool isActive() const { return false; }
 	void cancel() {}
 	void reset() {}
@@ -658,6 +677,7 @@ void FailedLocalCompletionCheckpoints() {
 		session.Complete(plan, SyncAutoOutcome::NetworkFailure);
 		CHECK(session.factsBuilt == 0 && session.runs == 0);
 		CHECK(!session._inFlight && !session._store);
+		CHECK(session._upload.cancellations == 1);
 		CHECK(session._failureReason == SyncAutoReason::StateChanged && Changes.count > notices);
 		const auto held = ReadDesktopSyncAuto(f.files, f.key);
 		CHECK(held.record && !held.record->active && held.record->held == SyncAutoReason::StateChanged);

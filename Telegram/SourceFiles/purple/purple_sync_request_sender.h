@@ -18,7 +18,8 @@ namespace Purple {
 
 class SyncRequestSender final : public base::has_weak_ptr {
 public:
-	SyncRequestSender(not_null<MTP::Instance*> instance, Fn<bool()> current);
+	SyncRequestSender(not_null<MTP::Instance*> instance, Fn<bool()> current,
+		Fn<void(mtpRequestId, SyncRequestTransient)> deferred = {});
 	~SyncRequestSender();
 	void cancelAll();
 	mtpRequestId watch(Fn<void()> expired, Fn<void()> retry, Fn<void()> cancelled);
@@ -156,6 +157,7 @@ private:
 	not_null<MTP::Instance*> _instance;
 	MTP::Sender _api;
 	Fn<bool()> _current;
+	Fn<void(mtpRequestId, SyncRequestTransient)> _deferred;
 	std::map<mtpRequestId, std::shared_ptr<Pending>> _pending;
 
 };

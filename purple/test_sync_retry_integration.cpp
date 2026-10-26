@@ -95,6 +95,7 @@ public:
 		bool active = true;
 	};
 	Fn<bool()> _current;
+	Fn<void(mtpRequestId, SyncRequestTransient)> _deferred;
 	Api _api;
 	std::shared_ptr<int> lifetime = std::make_shared<int>(0);
 	std::map<mtpRequestId, std::shared_ptr<Pending>> _pending;

@@ -5,6 +5,7 @@
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_archive_journal.h"
 #include "purple/purple_archive_files.h"
+#include "purple/purple_markdown_source.h"
 #include "purple/purple_archive_sql_maintenance.h"
 #include "media/streaming/media_streaming_loader.h"
 #include "tests/archive_test_support.h"

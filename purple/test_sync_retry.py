@@ -75,7 +75,36 @@ subprocess.run(['xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
     str(repo / 'purple/test_sync_retry_integration.cpp'), '-o', str(integration)], check=True)
 subprocess.run([str(integration)], check=True)
 
+queue_header = (root / 'purple_emoji_export_queue.h').read_text().replace('#include <QtCore/QtGlobal>', 'using qint64 = int64_t; using quint64 = uint64_t;')
+(work / 'emoji-queue-header.inc').write_text(queue_header)
+(work / 'emoji-queue.inc').write_text((root / 'purple_emoji_export_queue.cpp').read_text().replace('#include "purple/purple_emoji_export_queue.h"', ''))
+emoji = (root / 'purple_emoji_export.cpp').read_text()
+(work / 'emoji-deferred.inc').write_text(member(emoji, 'void EmojiExporter::deferred(').replace('EmojiExporter::', 'EmojiExporterProbe::'))
+resolve = member(emoji, 'void EmojiExporter::resolve()')
+marker = '}).fail([=](const MTP::Error &) '
+start = resolve.index(marker) + len(marker)
+end = resolve.index(').handleAllErrors().send();', start)
+(work / 'emoji-permanent-fail.inc').write_text(resolve[start:end])
+publish = member(emoji, 'void EmojiExporter::publish()')
+marker = '}, [=](quint64 generation, bool ok) '
+start = publish.index(marker) + len(marker)
+end = start + 1
+depth = 1
+while depth:
+    depth += (publish[end] == '{') - (publish[end] == '}')
+    end += 1
+(work / 'emoji-publication-completion.inc').write_text(publish[start:end])
+constant = next(line for line in emoji.splitlines() if line.startswith('constexpr auto kDebounceMs = '))
+(work / 'emoji-publication-constant.inc').write_text(constant + '\n')
+
+emoji_binary = work / 'test-sync-retry-emoji'
+subprocess.run(['xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+    '-I' + str(root), '-I' + str(work),
+    str(repo / 'purple/test_sync_retry_emoji.cpp'), '-o', str(emoji_binary)], check=True)
+subprocess.run([str(emoji_binary)], check=True)
+
 expected = {
+    'purple_emoji_export.cpp': 1,
     'purple_sync_chat_peer_request.cpp': 3,
     'purple_sync_chat_service.cpp': 5,
     'purple_sync_history_scanner.cpp': 1,
@@ -111,6 +140,8 @@ for path in root.glob('*.cpp'):
     if '.handleAllErrors()' in path.read_text():
         assert path.name in expected, 'Uninventoried bypass: ' + path.name
 guards = {
+    'purple_emoji_export.cpp': ['std::make_unique<SyncRequestSender>', '_queue.transient(transient.retryAt,', '_queue.retryAt(_clock.elapsed())'],
+    'purple_sync_request_sender.cpp': ['if (_deferred && !transient->shortRetry)', 'callback(id, *transient);'],
     'purple_sync_config_upload.cpp': ['}).resumeEffect([self]', 'self->ResumeEffect(std::move(ready));',
         'CheckSyncChatBeforePost(', '_authorizeEdit([self, ready = std::move(ready)]', '_lease.reset();'],
     'purple_sync_auto_service.cpp': ['}).resumeEffect([weak, plan]', 'self->RenewEffect(plan, std::move(ready));',
@@ -132,13 +163,18 @@ for name, sentinels in guards.items():
         negative_count += 1
 assert upload.count('}).resumeEffect([self]') == 2, 'both sends and edits require renewed effect authority'
 assert 'pending->resume && transient->kind != SyncTransientKind::Flood' in source
+assert '_request && _taskTime.elapsed()' not in emoji, 'controller owns resolution timeout across short floods'
+assert 'std::unique_ptr<MTP::Sender>' not in emoji
+handoff = member(source, 'void SyncRequestSender::failed(')
+assert handoff.index('cancel(id);') < handoff.index('callback(id, *transient);')
 print(f'{negative_count} effect/local-open/download source guards and negative mutations PASS')
-print('15 request sites inventoried, controller/current/timeout/immutable-wire gates PASS')
+print('16 request sites inventoried, controller/current/timeout/immutable-wire gates PASS')
 (work / 'receipt.json').write_text(json.dumps({'siteCounts': expected,
     'productionMethods': ['dispatch', 'failed', 'tick', 'resume', 'cancel'],
     'literalIntegration': ['send-template', 'watch', 'upload-Current', 'upload-SendMedia', 'upload-RenewBeforePost', 'upload-ResumeEffect', 'service-RetryLocalOpen', 'service-Publish', 'service-Ensure', 'download-watch', 'download-retire', 'download-retry', 'delete-RenewEffect'],
     'negativeGuards': negative_count,
-    'sourcesSha256': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [root / 'purple_sync_request_sender.h', root / 'purple_sync_request_sender.cpp', root / 'purple_sync_retry.h', root / 'purple_sync_config_upload.cpp', root / 'purple_sync_auto_service.cpp', root / 'purple_sync_chat_service.cpp', root / 'purple_sync_candidate_reader.cpp', repo / 'purple/test_sync_retry.cpp', repo / 'purple/test_sync_retry_integration.cpp', Path(__file__)]},
+    'emojiDeferredGuards': True,
+    'sourcesSha256': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [root / 'purple_sync_request_sender.h', root / 'purple_sync_request_sender.cpp', root / 'purple_sync_retry.h', root / 'purple_emoji_export.cpp', root / 'purple_emoji_export_queue.cpp', root / 'purple_emoji_export_queue.h', repo / 'purple/test_sync_retry_emoji.cpp', root / 'purple_sync_config_upload.cpp', root / 'purple_sync_auto_service.cpp', root / 'purple_sync_chat_service.cpp', root / 'purple_sync_candidate_reader.cpp', repo / 'purple/test_sync_retry.cpp', repo / 'purple/test_sync_retry_integration.cpp', Path(__file__)]},
     'literalPortsSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in work.glob('*.inc')},
-    'binariesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in [binary, integration]},
+    'binariesSha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in [binary, integration, emoji_binary]},
     'transport': 'injected host only', 'nativeCalls': 0}, indent=2) + '\n')
