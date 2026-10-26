@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
 #include "purple/purple_archive_service.h"
+#include "purple/purple_archive_purge_box.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
 #include "purple/purple_last_seen.h"
@@ -438,6 +439,20 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	}));
 	if (controller) {
 		const auto window = base::make_weak(controller);
+		for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
+			builder.addButton({
+				.id = kind == ArchivePurgeKind::Trashbin ? u"advanced/purple_archive_trash"_q : u"advanced/purple_archive_edits"_q,
+				.title = kind == ArchivePurgeKind::Trashbin ? tr::lng_purple_archive_empty_trash() : tr::lng_purple_archive_clear_edits(),
+				.onClick = [archiveSession, window, kind] {
+					const auto live = archiveSession.get();
+					const auto own = window.get();
+					if (live && own && &own->session() == live) {
+						ShowArchivePurgeBox(own, kind, {SessionAccountKey(live)},
+							tr::lng_purple_archive_all_chats(tr::now), [] { return true; });
+					}
+				},
+			});
+		}
 		builder.addButton({
 			.id = u"advanced/purple_archive_discard"_q,
 			.title = tr::lng_purple_archive_discard(),
@@ -500,7 +515,6 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			.onClick = [=] { controller->show(Box(ChooseSettingsOwnerBox)); },
 		});
 	}
-
 
 	// The main menu carries it too, and that is where it belongs for something
 	// switched several times a day. But Settings is where people look for a

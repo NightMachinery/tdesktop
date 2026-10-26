@@ -5,6 +5,7 @@
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_archive_journal.h"
 #include "purple/purple_archive_files.h"
+#include "purple/purple_archive_sql_maintenance.h"
 #include "media/streaming/media_streaming_loader.h"
 #include "tests/archive_test_support.h"
 #include <QtCore/QCoreApplication>
@@ -99,8 +100,91 @@ bool Owned(DesktopArchiveStore &store, int message) {
 	auto bytes = QByteArray();
 	return store.ReadMedia(Key({0,123},45,message),u"v"_q+QString::number(message),u"document:555"_q,[&](const auto &part) { bytes += part; return true; }) && bytes == "abc";
 }
+void HeaderIoAdmissionControls() {
+	Section = "header IO commit disclosure and bounded exact-scope admission renewal";
+	for (const auto mode : {u"healthy"_q, u"transient"_q, u"purge-io"_q,
+		u"chat-changed"_q, u"exhausted"_q, u"close"_q, u"discard"_q}) {
+		auto temporary = QTemporaryDir();
+		CHECK(DesktopArchiveDirectory(temporary.path() + u"/profile"_q));
+		auto options = DesktopArchiveOptions{temporary.path() + u"/archives"_q,
+			temporary.path() + u"/profile"_q, {0,123}, u"0"_q, QByteArray(256,'k'), true};
+		options.loginAuthority = QByteArray(32,'a');
+		options.loginAuthKeyId = options.loginAuthKeyIds = QByteArray(16,'1');
+		auto store = DesktopArchiveStore();
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		const auto opening = store.JournalAccess(); CHECK(opening && opening->active());
+		if (!opening) continue;
+		auto journal = DesktopArchiveJournal(*opening); CHECK(journal.Open());
+		auto program = ArchiveSqlProgram{ArchiveSqlStatus::Ready, {
+			{u"BEGIN IMMEDIATE"_q},
+			{u"UPDATE archive_meta SET revision=revision WHERE singleton=1"_q, {}, ArchiveSqlExpectation::OneChange},
+			{u"COMMIT"_q}}};
+		if (mode == u"purge-io"_q) {
+			const auto row = DesktopArchiveReadHeader(store.database(), {0,123}, store.security());
+			CHECK(row);
+			if (!row) continue;
+			const auto state = std::get<ArchiveState>(row->row.value);
+			program = BeginArchiveSqlPurge(state,
+				{ArchivePurgeKind::EditHistory, {{0,123}, std::nullopt, {}}, state.revision},
+				{}, u"header-io-purge"_q, store.security()).program;
+		}
+		if (mode != u"healthy"_q) store.database().FailForTest(u"prepare"_q, int(program.statements.size()));
+		const auto executed = store.Execute(program);
+		std::printf("HEADER_IO mode=%s executed=%d current=%d admission=%d captureAllowed=%d failure='%s'\n",
+			mode.toUtf8().constData(), int(executed), int(store.Current()), int(opening->active()),
+			int(journal.CaptureAllowed()), store.failure().toUtf8().constData());
+		CHECK(executed && store.Current());
+		if (mode == u"healthy"_q) {
+			CHECK(opening->active() && store.failure().isEmpty() && !store.JournalRenewalPending());
+		} else {
+			CHECK(!opening->active() && store.JournalRenewalPending());
+			CHECK(store.failure() == u"capture-admission-header-unreadable"_q);
+			CHECK(!store.JournalAccess());
+			if (mode == u"close"_q || mode == u"discard"_q) {
+				CHECK(mode == u"close"_q ? store.Close() : store.Remove());
+				CHECK(!store.RenewJournalAccess() && !store.JournalRenewalPending());
+				CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+				const auto fresh = store.JournalAccess(); CHECK(fresh && fresh->active());
+				CHECK(!opening->active());
+			} else if (mode == u"exhausted"_q) {
+				for (auto attempt = 0; attempt != 3; ++attempt) {
+					store.database().FailForTest(u"prepare"_q, 2);
+					CHECK(!store.RenewJournalAccess());
+					CHECK(!store.CompleteJournalRenewal(false));
+				}
+				CHECK(store.JournalRenewalHeld() && !store.JournalRenewalPending());
+				CHECK(store.failure() == u"capture-admission-renewal-exhausted"_q);
+				CHECK(!store.RenewJournalAccess() && !opening->active());
+			} else {
+				if (mode == u"chat-changed"_q) {
+					const auto preview = store.PreparePurge(ArchivePurgeKind::EditHistory,
+						{{0,123}, ArchiveChatKey{ArchiveChatKind::Channel,45}, {}});
+					CHECK(preview.confirmation && store.BeginPurge(*preview.confirmation));
+					for (auto page = 0; page != 32 && store.MaintenancePending(); ++page) CHECK(store.ContinuePurge().valid);
+					CHECK(!store.MaintenancePending());
+				}
+				CHECK(journal.RetireWriter());
+				const auto renewed = store.RenewJournalAccess();
+				if (mode == u"transient"_q) {
+					CHECK(renewed && renewed->active());
+					auto fresh = renewed ? std::make_unique<DesktopArchiveJournal>(*renewed) : nullptr;
+					const auto opened = fresh && fresh->Open() && fresh->Drain(store);
+					CHECK(opened && store.CompleteJournalRenewal(opened));
+					CHECK(!store.JournalRenewalPending() && !opening->active());
+					CHECK(store.failure() == u"capture-admission-renewed"_q);
+				} else {
+					CHECK(!renewed && !store.CompleteJournalRenewal(false));
+					CHECK(store.JournalRenewalHeld() && !opening->active());
+					CHECK(store.failure() == u"capture-admission-scope-changed"_q);
+				}
+			}
+		}
+		CHECK(store.Remove());
+	}
+}
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
+	HeaderIoAdmissionControls();
 	Section = "literal passive reader and document reuse with authenticated historical bindings";
 	auto temp = QTemporaryDir(); CHECK(DesktopArchiveDirectory(temp.path()+u"/profile"_q));
 	auto options = DesktopArchiveOptions{temp.path()+u"/archives"_q,temp.path()+u"/profile"_q,{0,123},u"0"_q,QByteArray(256,'k'),true};
@@ -121,6 +205,7 @@ int main(int argc, char **argv) {
 	CHECK(StreamRegistry.streams.at(one.get()).observations.size()==3);
 	auto edited=Event(Empty(),u"new303"_q,1000,u"later edit"_q,ArchiveOrigin::AuthoritativeEdit,Key({0,123},45,303));
 	edited.content->media.push_back({u"document:555"_q,u"document"_q}); CHECK(store.Capture(edited).retained);
+	CHECK(Value.journal->access().active());
 	const auto guiBefore = store.StagingCountersForTest().fenceReads;
 	one->_loader->event.fire({0,QByteArray("abc")});
 	CHECK(store.StagingCountersForTest().fenceReads == guiBefore);
@@ -160,5 +245,94 @@ int main(int argc, char **argv) {
 	CHECK(Value.worker->tasks.size() == pending);
 	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
 	CHECK(store.Remove());
+
+	Section = "purge commit revokes GUI admission without fence reads";
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	Observe(store,707);
+	const auto purgeObservation = StreamRegistry.observations.back();
+	const auto purgeAccess = store.JournalAccess(); CHECK(purgeAccess);
+	if (!purgeAccess) return Finish();
+	Value.journal = std::make_shared<DesktopArchiveJournal>(*purgeAccess);
+	CHECK(Value.journal->Open());
+	const auto oldJournal = Value.journal;
+	const auto purgeSink = ArchiveStreamSink(&streaming.owner.value, purgeObservation, 262145);
+	purgeSink(0, QByteArray(128 * 1024, 'p'));
+	Value.worker->Run(store);
+	CHECK(store.StagingCountersForTest().cachedStreams == 1);
+	const auto purgeSlice = store.ReadSlice(purgeObservation.key, {}, purgeObservation.observation);
+	CHECK(purgeSlice);
+	if (purgeSlice) {
+		auto header = purgeSlice->state;
+		header.messages.clear(); header.blobs.clear(); header.jobs.clear();
+		header.leases.clear(); header.chatGenerations.clear();
+		const auto purge = BeginArchiveSqlPurge(header,
+			{ArchivePurgeKind::EditHistory, {header.account, std::nullopt, {}}, header.revision},
+			{}, u"review-gui-purge"_q, store.security());
+		CHECK(purge.program && store.Execute(purge.program));
+		CHECK(store.StagingCountersForTest().cachedStreams == 0);
+		const auto queued = Value.worker->tasks.size();
+		const auto beforeGui = store.StagingCountersForTest().fenceReads;
+		purgeSink(128 * 1024, QByteArray(1, 'p'));
+		std::printf("REVIEW purge: memoryAdmission=%d queuedBefore=%zu queuedAfter=%zu guiFences=%llu\n",
+			int(oldJournal->access().active()), queued, Value.worker->tasks.size(),
+			static_cast<unsigned long long>(store.StagingCountersForTest().fenceReads - beforeGui));
+		CHECK(!oldJournal->access().active());
+		CHECK(Value.worker->tasks.size() == queued);
+		CHECK(store.StagingCountersForTest().fenceReads == beforeGui);
+		CHECK(!store.JournalAccess());
+		CHECK(store.RetryMaintenance());
+		auto finished = false;
+		for (auto step = 0; step != 128 && !finished; ++step) {
+			const auto result = store.ContinuePurge();
+			CHECK(result.valid);
+			if (!result.valid) break;
+			finished = result.finished;
+		}
+		CHECK(finished);
+		const auto renewed = store.JournalAccess(); CHECK(renewed);
+		if (renewed) {
+			Value.journal = std::make_shared<DesktopArchiveJournal>(*renewed);
+			CHECK(Value.journal->Open());
+			CHECK(Value.journal->access().active());
+			const auto beforeRenewed = store.StagingCountersForTest().fenceReads;
+			purgeSink(128 * 1024, QByteArray(1, 'p'));
+			CHECK(!oldJournal->access().active());
+			CHECK(Value.worker->tasks.size() == queued);
+			CHECK(store.StagingCountersForTest().fenceReads == beforeRenewed);
+		}
+	}
+
+	Section = "logout and discard revoke retained GUI producers";
+	const auto closedJournal = Value.journal;
+	const auto closeSink = ArchiveStreamSink(&streaming.owner.value, purgeObservation, 262145);
+	CHECK(store.Close());
+	CHECK(!closedJournal->access().active());
+	const auto closeQueue = Value.worker->tasks.size();
+	const auto closeFences = store.StagingCountersForTest().fenceReads;
+	closeSink(0, QByteArray(1, 'p'));
+	CHECK(Value.worker->tasks.size() == closeQueue);
+	CHECK(store.StagingCountersForTest().fenceReads == closeFences);
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	const auto discardAccess = store.JournalAccess(); CHECK(discardAccess);
+	if (discardAccess) {
+		Value.journal = std::make_shared<DesktopArchiveJournal>(*discardAccess);
+		CHECK(Value.journal->Open());
+		const auto discardJournal = Value.journal;
+		const auto discardSink = ArchiveStreamSink(&streaming.owner.value, purgeObservation, 262145);
+		CHECK(store.Remove());
+		CHECK(!discardJournal->access().active());
+		const auto discardQueue = Value.worker->tasks.size();
+		const auto discardFences = store.StagingCountersForTest().fenceReads;
+		discardSink(0, QByteArray(1, 'p'));
+		CHECK(Value.worker->tasks.size() == discardQueue);
+		CHECK(store.StagingCountersForTest().fenceReads == discardFences);
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		const auto freshAccess = store.JournalAccess(); CHECK(freshAccess && freshAccess->active());
+		discardSink(0, QByteArray(1, 'p'));
+		CHECK(!discardJournal->access().active());
+		CHECK(Value.worker->tasks.size() == discardQueue);
+		CHECK(store.StagingCountersForTest().fenceReads >= discardFences);
+		CHECK(store.Remove());
+	}
 	return Finish();
 }

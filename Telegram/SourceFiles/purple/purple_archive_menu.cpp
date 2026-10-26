@@ -11,10 +11,13 @@
 #include "main/main_session.h"
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_archive_deleted_box.h"
+#include "purple/purple_archive_purge_box.h"
 #include "purple/purple_config.h"
 #include "purple/purple_picker.h"
 #include "styles/style_menu_icons.h"
 #include "window/window_session_controller.h"
+
+#include <QtCore/QStringList>
 
 #include <algorithm>
 
@@ -70,11 +73,27 @@ void AddArchiveChatActions(not_null<Window::SessionController*> controller,
 		return window && session && &window->session() == session.get() && PickerVisible(peer)
 			&& SameArchiveViewScope(scope, ArchiveDeletedScope(peer, topicId));
 	};
+	auto names = QStringList{peer->name()};
+	if (const auto from = peer->migrateFrom()) {
+		names.push_back(from->name());
+	}
+	if (const auto to = peer->migrateTo()) {
+		names.push_back(to->name());
+	}
+	const auto scopeName = names.join(u", "_q);
 	callback(tr::lng_purple_archive_deleted(tr::now), [=] {
 		if (current()) {
-			ShowArchiveDeleted(window.get(), scope, peer->name(), current);
+			ShowArchiveDeleted(window.get(), scope, scopeName, current);
 		}
 	}, &st::menuIconDelete);
+	for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
+		callback(kind == ArchivePurgeKind::Trashbin ? tr::lng_purple_archive_empty_trash(tr::now)
+			: tr::lng_purple_archive_clear_edits(tr::now), [=] {
+			if (current()) {
+				ShowArchivePurgeBox(window.get(), kind, scope.messages, scopeName, current);
+			}
+		}, &st::menuIconDelete);
+	}
 }
 
 }

@@ -35,6 +35,12 @@ void ReadArchiveDeletedView(not_null<Main::Session*> session, QString id,
 	ArchiveStoreEpoch epoch, Fn<void(ArchiveDeletedPage)> done);
 void CloseArchiveDeletedView(not_null<Main::Session*> session, QString id,
 	ArchiveStoreEpoch epoch);
+void PrepareArchivePurge(not_null<Main::Session*> session, ArchivePurgeKind kind,
+	ArchivePurgeScope scope, Fn<void(DesktopArchivePurgePreview)> done);
+void ExecuteArchivePurge(not_null<Main::Session*> session, ArchivePurgeConfirmation confirmation,
+	std::shared_ptr<std::atomic<bool>> permitted, Fn<void(DesktopArchiveStatus)> done);
+void RetryArchiveMaintenance(not_null<Main::Session*> session, ArchiveStoreEpoch epoch,
+	std::shared_ptr<std::atomic<bool>> permitted, Fn<void(DesktopArchiveStatus)> done);
 void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest request,
 	std::function<bool()> current,
 	Fn<void(std::shared_ptr<ArchiveMediaAccess>)> done);

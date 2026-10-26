@@ -413,7 +413,7 @@ subsequent store progress retries it. Active maintenance is not mistaken for an
 absent lease: retirement requires a positive exact-id absence proof with normal
 admission. A purge can hold release until its lease phase has advanced. Logout and
 account discard revoke all handles and delete the owned store, including staging.
-The dedicated Deleted messages view is described below. Purge remains a separate batch.
+The dedicated Deleted messages view and local purge actions are described below.
 
 Headless fixtures exercise the actual native encrypted store, range/export IO,
 endpoint, loader and service callback bodies with controlled executor scheduling.
@@ -523,6 +523,101 @@ tasks as well as during idle periods and remain a backstop. The signed-id
 fixture uses an explicitly synthetic core Secret namespace only to qualify
 storage tuples; Desktop still captures no secret-chat transport evidence.
 
+## Account and chat archive removal
+
+Empty Trashbin and Clear Edit History are available from the chat archive menu,
+Deleted messages view and the opening account's Purple Settings archive section.
+The settings scope is explicitly that named account, across all its chats.
+A chat action names its parent and trusted migration aliases. It covers all
+of their topics, collections and representations, even when opened from a
+filtered topic view. This never removes Telegram messages, ordinary cache files,
+ratings, pins, live history, unread state or notifications.
+
+Empty Trashbin removes every retained version of deleted, expired or consumed
+messages, keeping non-content tombstones and receipts. Clear Edit History keeps
+the exact latest captured body, including a deleted message's latest body.
+Counts and the core confirmation come from one authenticated header/epoch read
+snapshot. Confirmation retains the opening controller, login, account, Work Mode,
+app-wide source, exact typed scope, kind and revision. A changed context or write
+requires a new review; neither the destination nor its authority is recaptured
+from a newly selected account. Retry continues an already committed operation's
+original scope and is fenced to the account's reviewed store epoch.
+
+The worker pauses new capture admission before draining pre-existing durable
+observations. The core Begin transaction checks feasibility before writing its
+sealed operation journal, generation changes or access gate. A failed Begin
+needs an affirmative authenticated absence read before releasing its capture
+claim; an ambiguous result holds visibly. No main-thread IO wait is added.
+After commit, closing the dialog stops its deliveries, while maintenance keeps
+running. Logout still revokes and proceeds immediately.
+
+Startup admits an active journal before any ordinary content query, capture,
+stream recovery or abandoned-reader release. It authenticates the operation and
+checks its kind, scope token, phase, cursor, revision and account generation
+against SQL metadata. Continuation reads at most 128 compact rows. Body references
+remain intact for the core's exact original-frame checks. Each incomplete target
+supplies all five columns of authenticated owned-copy evidence. The adapter
+bounds gathered evidence, and the core may commit a smaller leading prefix.
+Only that prefix's persisted cancellations and revocations can drive cleanup.
+Surviving media is reconciled before message/version removal. Every phase and
+cursor advances durably, including SQL exhaustion proof for an empty page.
+Failure keeps the journal and a visible held status; Retry resumes it, without
+an automatic infinite retry loop.
+
+Begin revokes view/media delivery at once; revoked leases keep their pins until
+release. Finish renews capture authority with an authenticated per-account/chat
+generation snapshot. Old queued facts keep their captured generations. An
+unresolved non-channel delete carries its immutable captured generation evidence
+in the encrypted outbox, so later key resolution never borrows newer authority.
+Publication admits at most 4096 chat-generation facts, read in pages of 128;
+missing, malformed or excessive evidence holds capture with a visible gap rather
+than assuming generation zero. The main thread reads only the published memory
+snapshot. Old stream callbacks stay paused after a committed purge; acquisition
+observations are retired before new journal authority is published. Fresh server
+observations after Finish can capture and stage new media. A capability/access
+gap is disclosed and, when possible, retained as an encrypted attention record.
+
+Garbage collection is serialized with owned publication on the same worker.
+The core commits GarbagePending after checking references and leases. The
+adapter then authenticates that exact pending blob and absence of pins before
+removing only its addressed owned directory, at most 64 traversal actions per
+step. Missing owned files are idempotent cleanup. Complete removes metadata only
+after acknowledged file removal, with pins checked again. Pending copies cannot
+be overwritten or revived; new streaming bytes stay staged until reconciliation
+allows publication. Cancelled stream directories are derived from authenticated
+job bindings and removed in bounded pages; ordinary cache paths are never used.
+Logical retained size, physical owned usage and bytes actually freed differ.
+
+`purple/test_archive.py --purge --use-build-objects` drives the real native store,
+maintenance engine, worker and literal execution callback with controlled UI
+routing and a controlled main-queue dispatcher. It includes stale confirmations,
+131-row scopes, typed aliases and message forms, shared owned media, body chunks,
+restart cuts, failed commits, malformed cursors, generation renewal, lease pins,
+bounded interrupted GC and lost-authority cleanup. Native presentation and live
+account events require separate qualification.
+
+### Purge commit boundary
+
+All maintenance SQL commits, including Begin, bounded continuation, marking
+GarbagePending and acknowledging physical deletion, use the store's Execute
+boundary. Maintenance helpers require a commit delegate and have no direct
+SQLite execution fallback. Only continuation receives the private admission for
+an authenticated pending maintenance run; ordinary writes remain refused.
+The shared boundary validates deleted snapshots and media capabilities before
+returning to the worker dispatcher. The continuation preserves revoked media
+pins until Finish, rather than attempting ordinary lease releases while the
+authenticated maintenance gate is closed. A close failure holds visibly and
+revokes the remaining capabilities.
+
+The purge fixture includes refused delegates and a failed real COMMIT followed
+by a successful Begin. It checks that a failed attempt preserves shown/queued
+views and media, while successful Begin revokes them before any expiry sweep.
+Continuation refusal keeps the exact journal/header cursor. Garbage cleanup
+refusal keeps both the Complete blob row and owned bytes; the accepted path
+checks both native Execute commits surrounding owned-file deletion. The views
+fixture separately holds the production service delivery across a purge.
+These are written headless cases until their recorded build/run qualification.
+
 ### Independent History revocation
 
 A History box owns a separate account/store/chat-generation capability, even
@@ -535,3 +630,55 @@ capability; pagination still checks its own revision. Up to 64 independent
 History capabilities are admitted, with inactive entries removed before reuse.
 Logout/discard/close revoke them before database closure. No UI database read
 is introduced.
+
+### Confirmation scope and expected reader retirement
+
+Queued confirmation permission listens to native realtime migration updates.
+An alias change latches permission off on the main thread before the worker can
+Begin; the worker never calls the peer-reading UI closure. A fresh confirmation
+is required even if the archive revision did not change.
+
+Finish bulk lease recovery suppresses reentrant media-map refresh until its
+cached lease page has been drained, then retires native handles through positive
+absence proofs. Healthy Finish clears the worker claim and renews capture without
+Retry. A real IO or unconfirmed retirement remains visibly held.
+
+Owned handles revoked by a confirmed maintenance operation may acknowledge a
+release as deferred while its pins are kept. After confirmed release or exact
+absence, bounded weak retirement records accept only the same full capability
+for a late callback. Purposeful retirement produces no retention-gap warning;
+unknown handles, forged bindings and actual release failures still refuse. At
+most 64 active-plus-live-retired capabilities are retained, and expired weak
+records are pruned before another Open. Close/logout drops this memory state.
+
+D4b passive streaming admission is an owned, memory-only capability for the
+opening journal and store/login lifetime. Execute inspects the authenticated
+post-statement header before COMMIT and revokes the captured capability when
+the committed transaction closes normal admission or changes the account
+generation. This happens before Execute returns or publishes purge effects.
+Ordinary compatible writes retain admission. A later journal gets a new
+capability; it cannot reactivate a retained old sink. Logout, discard and close
+revoke the capability even if subsequent cleanup fails. GUI callbacks perform
+no fence reads and refuse revoked producers before posting any work.
+
+D4b distinguishes an authenticated maintenance gate from an unreadable or
+unauthenticated admission header. A committed write with an unreadable header
+revokes the old GUI capability and reports capture-admission-header-unreadable.
+The worker makes at most three renewal attempts, five seconds apart after the
+first immediate attempt, including journal open/drain failures in that budget.
+Each attempt validates the same store/login epoch, account generation and all
+bounded authenticated chat generations. Only unchanged scope may publish a new
+journal capability; old producers stay revoked. Changed scope and exhausted
+retries remain visibly held. A successful replacement reports
+capture-admission-renewed. Close, discard and logout cancel recovery and revoke
+all candidates. Healthy purges still revoke at the Execute committed boundary.
+
+Journal replacement retires the previous writer on the account worker before
+opening a new sequence allocator. Retirement permanently refuses new Appends
+and waits at most 50 ms for an already-entered Append to finish or fail. The
+fresh journal then loads the sequence actually saved by the old writer. A
+retirement timeout consumes one of the same three recovery attempts and leaves
+a visible held reason; no second allocator opens. Queued old-writer callbacks
+leave replay to the replacement instead of draining with a stale sequence.
+The GUI only pauses admission and never waits for retirement. Stop/logout and
+discard cancel replacement immediately, including during the bounded wait.

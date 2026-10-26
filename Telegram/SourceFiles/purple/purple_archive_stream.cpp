@@ -373,7 +373,8 @@ bool DesktopArchiveStream::Complete() {
 			}
 			input = ArchiveStagingPieceInput{step.request.id, bytes};
 		} else if (step.request.kind == ArchiveStagingRequestKind::Publish) {
-			if (!step.publication || CheckArchiveStagingPublication(*step.publication, s.header,
+			if (!step.publication || !s.store.MediaPublicationAllowed(step.publication->blobHash)
+				|| CheckArchiveStagingPublication(*step.publication, s.header,
 				s.store.security(), fresh->state, s.store.epoch()) != ArchiveStagingStatus::Ready) {
 				return false;
 			}
@@ -423,7 +424,8 @@ bool DesktopArchiveStream::Complete() {
 				ArchiveIndexKind::Blob, owned->id.toUtf8(), s.store.security()) : QString();
 			const auto manifest = owned != transaction.next.blobs.end() ? SealArchiveSqlRow(s.binding.source.key.account,
 				token, *owned, s.store.security()) : std::nullopt;
-			if (!manifest || !s.Authority() || !DesktopArchiveWrite(s.store.directory() + u"/blobs/"_q + token + u"/manifest"_q, *manifest)
+			if (!manifest || !s.Authority() || !s.store.MediaPublicationAllowed(owned->id)
+				|| !DesktopArchiveWrite(s.store.directory() + u"/blobs/"_q + token + u"/manifest"_q, *manifest)
 				|| !s.store.Execute(TranslateArchiveSql(transaction, *fresh, s.store.security()))) {
 				return false;
 			}

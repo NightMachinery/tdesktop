@@ -8,6 +8,7 @@
 #include "main/main_session.h"
 #include "purple/purple_archive_history_box.h"
 #include "purple/purple_archive_media_box.h"
+#include "purple/purple_archive_purge_box.h"
 #include "purple/purple_archive_service.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
@@ -272,6 +273,14 @@ void ShowArchiveDeleted(not_null<Window::SessionController*> controller,
 		};
 		state->next = box->addButton(tr::lng_purple_archive_deleted_next(), [=] { state->load(false); });
 		box->addButton(tr::lng_purple_archive_refresh(), [=] { state->load(true); });
+		for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
+			box->addButton(kind == ArchivePurgeKind::Trashbin ? tr::lng_purple_archive_empty_trash()
+				: tr::lng_purple_archive_clear_edits(), [=] {
+				if (current()) {
+					ShowArchivePurgeBox(window.get(), kind, scope.messages, name, scopeCurrent);
+				}
+			});
+		}
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 		state->timer.setCallback([=] {
 			if (!current()) {

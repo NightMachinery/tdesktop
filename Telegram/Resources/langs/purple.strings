@@ -285,3 +285,19 @@ docs/purple/upstream_hooks.md.
 "lng_purple_archive_peer_group" = "Group {id}";
 "lng_purple_archive_peer_channel" = "Channel {id}";
 "lng_purple_archive_peer_secret" = "Secret chat {id}";
+
+"lng_purple_archive_empty_trash" = "Empty Trashbin";
+"lng_purple_archive_clear_edits" = "Clear Edit History";
+"lng_purple_archive_all_chats" = "All chats in this account";
+"lng_purple_archive_empty_trash_notice" = "Remove all locally retained versions and attachments of deleted, expired or consumed messages. This does not delete messages from Telegram.";
+"lng_purple_archive_clear_edits_notice" = "Remove earlier local versions. Keep each exact latest captured body, including the latest body of deleted messages. This does not change messages in Telegram.";
+"lng_purple_archive_purge_scope_notice" = "Includes all topics and message forms of these chats. The view's topic filter does not narrow this action. Files can remain while another retained message or reader needs them. Counts are a snapshot and do not predict disk space freed.";
+"lng_purple_archive_purge_counts" = "Snapshot: {messages} messages, {deleted} deleted, {versions} captured versions, {prior} earlier versions. Confirm this scope to continue.";
+"lng_purple_archive_purge_confirm" = "Confirm local removal";
+"lng_purple_archive_purge_review" = "Review again";
+"lng_purple_archive_purge_retry" = "Retry this account's pending cleanup";
+"lng_purple_archive_purge_refused" = "The local archive refused this review. No new removal was started. Check the account's archive status and try again.";
+"lng_purple_archive_purge_stale" = "The archive or opening context changed. Review a fresh snapshot before confirming.";
+"lng_purple_archive_purge_running" = "Local archive cleanup is running. You can close this view; cleanup continues for this account.";
+"lng_purple_archive_purge_held" = "Local archive cleanup is held. Its recovery checkpoint is kept. Retry this account's pending cleanup to continue.";
+"lng_purple_archive_purge_resume_notice" = "An earlier cleanup for this account is unfinished. Retry continues that operation's original scope, rather than the proposed scope shown above.";

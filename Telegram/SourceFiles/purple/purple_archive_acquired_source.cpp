@@ -158,6 +158,17 @@ void Stream(not_null<Main::Session*> session, const QString &identity,
 
 }
 
+void InvalidateArchiveAcquisitions(not_null<Main::Session*> session) {
+	const auto i = Registries.find(session.get());
+	if (i == Registries.end()) {
+		return;
+	}
+	i->second.observations.clear();
+	for (auto &[reader, binding] : i->second.streams) {
+		binding.observations.clear();
+	}
+}
+
 void TrackArchiveAcquisition(not_null<Main::Session*> session, const ArchiveEvent &event) {
 	if (!event.content || event.key.account != SessionAccountKey(session)) {
 		return;

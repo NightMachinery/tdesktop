@@ -282,6 +282,8 @@ class ArchiveWorker final {
 		std::erase_if(_state->mediaReaders, [](const auto &value) { return value.expired(); });
 		_state->mediaReaders.push_back(active);
 	}
+	bool ClaimPurge() { return !_state->purgeRequested.exchange(true); }
+	void ReleasePurgeClaim() { _state->purgeRequested = false; }
 	bool Removed() const { return _state->removed; }
 	bool WaitForStopped(std::chrono::milliseconds timeout) {
 		auto lock = std::unique_lock(_state->mutex);
@@ -324,6 +326,7 @@ class ArchiveWorker final {
 		std::atomic<bool> finished = false;
 		std::atomic<bool> streamCleanup = false;
 		bool resolveSlot = false;
+		std::atomic<bool> purgeRequested = false;
 		std::shared_ptr<DesktopArchiveCrypto> secrets
 			= std::make_shared<DesktopArchiveCrypto>();
 		std::shared_ptr<std::atomic<uint64_t>> delivery
@@ -389,21 +392,73 @@ class ArchiveWorker final {
 		}
 		DesktopArchiveCrypto::Clear(options.localKey);
 		DesktopArchiveCrypto::Clear(options.loginAuthority);
+		auto nextJournalRenewal = std::chrono::steady_clock::time_point();
+		auto writerRetirementHeld = false;
+		const auto renewJournal = [&] {
+			const auto recovery = store.JournalRenewalPending();
+			if (state->cancelled || state->purgeRequested || !store.Current()
+				|| store.JournalRenewalHeld() || writerRetirementHeld
+				|| (!recovery && journal && journal->CaptureAllowed())) {
+				return;
+			}
+			if (recovery) {
+				const auto now = std::chrono::steady_clock::now();
+				if (now < nextJournalRenewal) return;
+				nextJournalRenewal = now + std::chrono::seconds(5);
+				if (journal) journal->PauseCapture();
+			}
+			if (journal && !journal->RetireWriter()) {
+				journalFailure = u"capture-admission-writer-retirement-held"_q;
+				if (recovery) {
+					store.RefuseJournalRenewal(journalFailure);
+				} else {
+					writerRetirementHeld = true;
+					journalFailure = u"purge-writer-retirement-held"_q;
+				}
+				return;
+			}
+			if (state->cancelled) return;
+			const auto access = recovery ? store.RenewJournalAccess() : store.JournalAccess();
+			const auto fresh = access ? std::make_shared<DesktopArchiveJournal>(*access) : nullptr;
+			const auto opened = fresh && fresh->Open() && fresh->Drain(store);
+			const auto accepted = recovery ? store.CompleteJournalRenewal(opened) : opened;
+			if (!accepted) {
+				journalFailure = recovery ? store.failure() : u"purge-journal-renewal-held"_q;
+				return;
+			}
+			journal = fresh;
+			if (journalFailure.startsWith(u"purge-"_q)
+				|| journalFailure.startsWith(u"capture-admission-"_q)) {
+				journalFailure.clear();
+			}
+			state->ready(fresh);
+		};
+
 		auto usageBytes = uint64_t(0);
 		auto usageComplete = false;
 		auto nextUsage = std::chrono::steady_clock::time_point();
+		auto nextReport = std::chrono::steady_clock::time_point();
+		auto reportedStatus = DesktopArchiveStatus::Disabled;
+		auto reportedFailure = QString();
 		const auto report = [&] {
 			if (state->cancelled || startupHeld) {
 				return;
 			}
 			const auto now = std::chrono::steady_clock::now();
+			const auto failure = journalFailure.isEmpty() ? store.failure() : journalFailure;
+			if (now < nextReport && reportedStatus == store.status() && reportedFailure == failure) {
+				return;
+			}
+			nextReport = now + std::chrono::seconds(1);
+			reportedStatus = store.status();
+			reportedFailure = failure;
 			if (store.Current() && (!usageComplete || now >= nextUsage)) {
 				const auto usage = store.Usage();
 				usageBytes = usage ? TotalArchiveUsage(*usage).value_or(0) : usageBytes;
 				usageComplete = usage && store.UsageComplete();
 				nextUsage = now + std::chrono::seconds(60);
 			}
-			if (journal && !journal->failure().isEmpty()) {
+			if (journal && !journal->WriterRetired() && !journal->failure().isEmpty()) {
 				journalFailure = journal->failure();
 			}
 			const auto gap = !journalFailure.isEmpty()
@@ -415,13 +470,16 @@ class ArchiveWorker final {
 		auto streamCursor = QString();
 		auto streamMore = store.Current();
 		auto nextViewsExpiry = std::chrono::steady_clock::time_point();
+		auto garbageMore = store.Current();
+		auto maintenanceMore = store.MaintenancePending() && !store.MaintenanceHeld();
 		for (;;) {
 			auto task = Task();
 			auto idle = false;
+			auto background = false;
 			{
 				auto lock = std::unique_lock(state->mutex);
 				state->condition.wait_for(lock, std::chrono::seconds(5), [&] {
-					return state->cancelled.load() || !state->tasks.empty() || streamMore
+					return state->cancelled.load() || !state->tasks.empty() || streamMore || maintenanceMore || garbageMore
 						|| state->streamCleanup.load();
 				});
 				if (state->cancelled) {
@@ -429,6 +487,27 @@ class ArchiveWorker final {
 				}
 				if (state->streamCleanup.exchange(false)) {
 					task = [](DesktopArchiveStore &store) { store.PruneStreams(); };
+				} else if (state->tasks.empty() && maintenanceMore) {
+					background = true;
+					task = [&](DesktopArchiveStore &store) {
+						const auto step = store.ContinuePurge();
+						if (!store.MaintenancePending()) state->purgeRequested = false;
+						if (step.valid && step.finished) {
+							garbageMore = true;
+							streamCursor.clear();
+							streamMore = true;
+						}
+					};
+				} else if (state->tasks.empty() && !streamMore && garbageMore) {
+					background = true;
+					task = [&](DesktopArchiveStore &store) {
+						if (!store.ContinueGarbage(garbageMore)) {
+							garbageMore = false;
+						} else if (!garbageMore) {
+							streamCursor.clear();
+							streamMore = true;
+						}
+					};
 				} else if (state->tasks.empty() && !streamMore) {
 					idle = true;
 				} else if (state->tasks.empty()) {
@@ -449,12 +528,23 @@ class ArchiveWorker final {
 				nextViewsExpiry = now + std::chrono::seconds(5);
 			}
 			if (idle) {
+				renewJournal();
+				report();
 				continue;
 			}
-			state->delivery->fetch_add(1);
+			if (!background) {
+				state->delivery->fetch_add(1);
+			}
 			task(store);
 			store.PruneStreams();
-			if (journal && journal->access().current()) {
+			maintenanceMore = store.MaintenancePending() && !store.MaintenanceHeld();
+			garbageMore = store.Current() && store.GarbagePending();
+			if (store.MaintenancePending()) {
+				streamMore = false;
+				garbageMore = false;
+			}
+			renewJournal();
+			if (journal && !journal->WriterRetired() && store.Current() && journal->access().current()) {
 				static_cast<void>(journal->Drain(store));
 			}
 			report();
@@ -588,7 +678,8 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 						  || (status != DesktopArchiveStatus::Ready
 							  && status != DesktopArchiveStatus::Disabled));
 				i->second.status = status;
-				if (!failure.isEmpty()) {
+				if (!failure.isEmpty() || (status == DesktopArchiveStatus::Ready
+					&& i->second.failure.startsWith(u"purge-"_q))) {
 					i->second.failure = failure;
 				}
 				i->second.bytes = bytes;
@@ -613,6 +704,9 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 					return;
 				}
 				live->local().writePref<QByteArray>(kLoginStorePref, journal->access().epoch.storeId.toLatin1());
+				if (i->second.journal && i->second.journal != journal) {
+					InvalidateArchiveAcquisitions(live);
+				}
 				i->second.journal = journal;
 				Changes.fire({});
 			});
@@ -813,7 +907,7 @@ void QueueArchiveJournalWrite(not_null<Main::Session*> session, ArchiveEvent eve
 		QueueArchiveRetentionGap(session, u"capture-write-unavailable"_q);
 		return;
 	}
-	event.generation = journal->access().generation;
+	journal->BindCaptureGeneration(event);
 	const auto ack = std::make_shared<std::promise<bool>>();
 	auto future = ack->get_future();
 	const auto timedOut = std::make_shared<std::atomic<bool>>(false);
@@ -830,7 +924,7 @@ void QueueArchiveJournalWrite(not_null<Main::Session*> session, ArchiveEvent eve
 				time = event.observation.observedAt,
 				limited = event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()](DesktopArchiveStore &store) {
 				if (captured) {
-					static_cast<void>(journal->Drain(store));
+					if (!journal->WriterRetired()) static_cast<void>(journal->Drain(store));
 					if (limited) {
 						static_cast<void>(store.Gap(id, u"snapshot-limited"_q, time));
 					}
@@ -888,7 +982,7 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 	});
 	const auto weak = base::make_weak(session.get());
 	return [weak, worker, journal, pending, binding, owned, streamActive, retirement, observation = std::move(observation), size](uint64_t offset, QByteArray bytes) {
-		if (!weak || Retired.contains(weak.get()) || !journal || !journal->access().active
+		if (!weak || Retired.contains(weak.get()) || !journal || !journal->CaptureAllowed() || !journal->access().active
 			|| !journal->access().active()
 			|| bytes.size() > kArchiveMediaChunkBytes || offset > size || uint64_t(bytes.size()) > size - offset) {
 			return;
@@ -902,7 +996,7 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 		const auto accepted = worker->Post([journal, pending, binding, owned, streamActive, observation, size, offset,
 			bytes = std::move(bytes), count](DesktopArchiveStore &store) {
 			const auto release = gsl::finally([&] { pending->fetch_sub(count); });
-			if (*owned || !streamActive->load() || !journal->access().current() || !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
+			if (*owned || !streamActive->load() || !journal->CaptureAllowed() || !journal->access().current() || !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
 				return;
 			}
 			if (!*binding) {
@@ -956,7 +1050,7 @@ void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessage
 			observationId = std::move(observationId),
 			contentHash = std::move(contentHash), bytes = std::move(bytes),
 			path = std::move(path), size, journal, proof](DesktopArchiveStore &store) {
-			if (!journal || !journal->access().current()) {
+			if (!journal || !journal->CaptureAllowed() || !journal->access().current()) {
 				return;
 			}
 			const auto version
@@ -1015,6 +1109,12 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 		return tr::lng_purple_archive_removal_pending(tr::now);
 	}
 	const auto &value = For(session);
+	if (value.status == DesktopArchiveStatus::Maintenance) {
+		return tr::lng_purple_archive_purge_running(tr::now);
+	}
+	if (value.status == DesktopArchiveStatus::MaintenanceHeld || value.failure.startsWith(u"purge-"_q)) {
+		return tr::lng_purple_archive_purge_held(tr::now);
+	}
 	if (value.status == DesktopArchiveStatus::RetentionGap) {
 		return tr::lng_purple_archive_gap(tr::now);
 	}
@@ -1259,6 +1359,102 @@ void CloseArchiveDeletedView(not_null<Main::Session*> session, QString id, Archi
 	static_cast<void>(i->second.worker->Post([id = std::move(id), epoch](DesktopArchiveStore &store) {
 		static_cast<void>(store.CloseDeletedView(id, epoch));
 	}, true));
+}
+
+}
+
+namespace Purple {
+
+void PrepareArchivePurge(not_null<Main::Session*> session, ArchivePurgeKind kind,
+		ArchivePurgeScope scope, Fn<void(DesktopArchivePurgePreview)> done) {
+	if (Retired.contains(session.get()) || scope.account != SessionAccountKey(session)) {
+		done({});
+		return;
+	}
+	const auto weak = base::make_weak(session.get());
+	const auto &value = For(session);
+	const auto worker = value.worker;
+	const auto journal = value.journal;
+	if (!worker->Post([weak, worker, journal, kind, scope = std::move(scope), done](DesktopArchiveStore &store) {
+		const auto preview = store.MaintenancePending() || store.MaintenanceHeld()
+			? store.PreparePurge(kind, scope)
+			: journal && journal->CaptureAllowed() && journal->Drain(store)
+			? store.PreparePurge(kind, scope) : DesktopArchivePurgePreview();
+		crl::on_main([weak, preview, done] {
+			if (weak && !Retired.contains(weak.get())) {
+				done(preview);
+			}
+		});
+	})) {
+		auto preview = DesktopArchivePurgePreview();
+		preview.status = ArchiveQueryStatus::Busy;
+		done(preview);
+	}
+}
+
+void ExecuteArchivePurge(not_null<Main::Session*> session, ArchivePurgeConfirmation confirmation,
+		std::shared_ptr<std::atomic<bool>> permitted, Fn<void(DesktopArchiveStatus)> done) {
+	if (Retired.contains(session.get()) || !permitted || !permitted->load()
+		|| confirmation.epoch.account != SessionAccountKey(session)) {
+		done(DesktopArchiveStatus::Stale);
+		return;
+	}
+	auto &value = For(session);
+	const auto worker = value.worker;
+	const auto journal = value.journal;
+	if (!journal || !worker->ClaimPurge()) {
+		done(DesktopArchiveStatus::Busy);
+		return;
+	}
+	journal->PauseCapture();
+	const auto weak = base::make_weak(session.get());
+	const auto accepted = worker->Post([weak, worker, journal, confirmation, permitted, done](DesktopArchiveStore &store) {
+		const auto started = permitted->load() && journal->Drain(store) && permitted->load()
+			&& store.BeginPurge(confirmation);
+		if (!store.MaintenancePending()) {
+			journal->ResumeCapture();
+			worker->ReleasePurgeClaim();
+		}
+		const auto status = started ? DesktopArchiveStatus::Maintenance
+			: store.MaintenancePending() ? DesktopArchiveStatus::MaintenanceHeld
+			: DesktopArchiveStatus::Stale;
+		crl::on_main([weak, permitted, status, done] {
+			if (weak && !Retired.contains(weak.get()) && permitted->load()) {
+				done(status);
+			}
+		});
+	});
+	if (!accepted) {
+		journal->ResumeCapture();
+		worker->ReleasePurgeClaim();
+		done(DesktopArchiveStatus::Busy);
+	}
+}
+
+void RetryArchiveMaintenance(not_null<Main::Session*> session, ArchiveStoreEpoch epoch,
+		std::shared_ptr<std::atomic<bool>> permitted, Fn<void(DesktopArchiveStatus)> done) {
+	if (Retired.contains(session.get()) || !permitted || !permitted->load()
+		|| epoch.account != SessionAccountKey(session)) {
+		done(DesktopArchiveStatus::Stale);
+		return;
+	}
+	const auto worker = For(session).worker;
+	const auto weak = base::make_weak(session.get());
+	if (!worker->Post([worker, weak, epoch, permitted, done](DesktopArchiveStore &store) {
+		const auto retried = permitted->load() && CanRunArchiveWork(epoch, store.epoch())
+			&& store.RetryMaintenance();
+		if (retried && !store.MaintenancePending()) {
+			worker->ReleasePurgeClaim();
+		}
+		const auto status = retried ? store.status() : DesktopArchiveStatus::Stale;
+		crl::on_main([weak, permitted, status, done] {
+			if (weak && !Retired.contains(weak.get()) && permitted->load()) {
+				done(status);
+			}
+		});
+	})) {
+		done(DesktopArchiveStatus::Busy);
+	}
 }
 
 }

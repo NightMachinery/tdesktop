@@ -104,7 +104,9 @@ ArchiveSqlStatus DesktopArchiveAdmitSnapshot(DesktopArchiveSqlite &database) {
 
 std::optional<ArchiveStoredRow> DesktopArchiveReadHeader(
 		DesktopArchiveSqlite &database, const AccountKey &account,
-		const ArchiveSqlSecurity &security) {
+		const ArchiveSqlSecurity &security, const QString &requiredMaintenance,
+		bool *readFailure) {
+	if (readFailure) *readFailure = true;
 	const auto result = database.Read(
 		{u"SELECT schema_version,account_token,store_id,revision,generation,maintenance_id,envelope,schema_fingerprint FROM archive_meta WHERE singleton=1"_q,
 			{}, ArchiveSqlExpectation::OneRow});
@@ -126,7 +128,7 @@ std::optional<ArchiveStoredRow> DesktopArchiveReadHeader(
 			   != ArchiveSqlToken(
 				   account, ArchiveIndexKind::Account, "account", security)
 		|| !store || *store != security.storeId || !revision || !generation
-		|| !maintenance || !maintenance->isEmpty() || !bytes) {
+		|| !maintenance || !bytes) {
 		return {};
 	}
 	const auto row = DesktopArchiveDecodeRow(database, account, security, ArchiveRecordKind::Account, u"account"_q, *bytes);
@@ -134,11 +136,12 @@ std::optional<ArchiveStoredRow> DesktopArchiveReadHeader(
 		return {};
 	}
 	const auto &header = std::get<ArchiveState>(row->row.value);
-	return header.account == account
-				   && QString::number(header.revision) == *revision
-				   && QString::number(header.accountGeneration) == *generation
-			   ? row
-			   : std::nullopt;
+	if (header.account != account || QString::number(header.revision) != *revision
+		|| QString::number(header.accountGeneration) != *generation) {
+		return {};
+	}
+	if (readFailure) *readFailure = false;
+	return *maintenance == requiredMaintenance ? row : std::nullopt;
 }
 
 std::optional<uint64_t> DesktopArchiveReadChatGeneration(

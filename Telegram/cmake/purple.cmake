@@ -41,6 +41,10 @@ PRIVATE
     purple/purple_archive_deleted_box.h
     purple/purple_archive_menu.cpp
     purple/purple_archive_menu.h
+    purple/purple_archive_maintenance.cpp
+    purple/purple_archive_maintenance.h
+    purple/purple_archive_purge_box.cpp
+    purple/purple_archive_purge_box.h
     purple/purple_archive_queries.cpp
     purple/purple_archive_queries.h
     purple/purple_archive_crypto.cpp

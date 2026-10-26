@@ -1,7 +1,7 @@
 #pragma once
 
 #include "purple/purple_archive_crypto.h"
-#include "purple/purple_archive_queries.h"
+#include "purple/purple_archive_maintenance.h"
 #include "purple/purple_archive_lifecycle.h"
 #include "purple/purple_archive_media.h"
 #include "purple/purple_archive_media_access.h"
@@ -19,6 +19,8 @@ struct DesktopArchiveJournalAccess {
 	uint64_t minimumOrder = 0;
 	std::function<bool()> current;
 	std::function<bool()> active;
+	std::vector<ArchiveChatGeneration> chatGenerations;
+	QJsonObject deleteGenerations;
 };
 
 enum class DesktopArchiveStatus {
@@ -32,7 +34,9 @@ enum class DesktopArchiveStatus {
 	RemovalPending,
 	RetentionGap,
 	Stale,
-	SchemaMismatch
+	SchemaMismatch,
+	Maintenance,
+	MaintenanceHeld
 };
 struct DesktopArchiveLoginAuthority {
 	QByteArray nonce;
@@ -135,6 +139,17 @@ class DesktopArchiveStore final {
 		const ArchiveStoreEpoch &epoch, int limit = 32);
 	[[nodiscard]] bool CloseDeletedView(const QString &id, const ArchiveStoreEpoch &epoch);
 	[[nodiscard]] bool ExpireDeletedViews(bool all = false);
+	[[nodiscard]] DesktopArchivePurgePreview PreparePurge(ArchivePurgeKind kind,
+		const ArchivePurgeScope &scope);
+	[[nodiscard]] bool BeginPurge(const ArchivePurgeConfirmation &confirmation);
+	[[nodiscard]] DesktopArchiveMaintenanceStep ContinuePurge();
+	[[nodiscard]] bool MaintenancePending() const;
+	[[nodiscard]] bool MaintenanceHeld() const;
+	[[nodiscard]] bool GarbagePending() const;
+	[[nodiscard]] bool ContinueGarbage(bool &more);
+	[[nodiscard]] bool RetryMaintenance();
+	[[nodiscard]] bool RecoverMediaLeases();
+	[[nodiscard]] bool RecoverCaptureAttention();
 	[[nodiscard]] std::optional<std::vector<ArchiveMessageKey>> NonChannelMessages(
 		int64 messageId);
 	[[nodiscard]] std::optional<QString> ObservedMediaVersion(
@@ -147,6 +162,7 @@ class DesktopArchiveStore final {
 	[[nodiscard]] bool StreamPart(const ArchiveStagingBinding &binding, uint64_t offset, const QByteArray &bytes,
 		std::shared_ptr<std::atomic<bool>> active = {});
 	void PruneStreams();
+	[[nodiscard]] bool MediaPublicationAllowed(const QString &hash);
 	[[nodiscard]] bool CopyMedia(const ArchiveMessageKey &key, const QString &version,
 		const QString &identity, QIODevice &source, const DesktopArchiveMediaCopy &copy);
 	[[nodiscard]] bool ReadMedia(const ArchiveMessageKey &key, const QString &version,
@@ -162,6 +178,11 @@ class DesktopArchiveStore final {
 		ArchiveLeaseRevisionChange *committed = nullptr);
 	void RefreshMediaReaders();
 	[[nodiscard]] std::optional<DesktopArchiveJournalAccess> JournalAccess();
+	[[nodiscard]] bool JournalRenewalPending() const;
+	[[nodiscard]] bool JournalRenewalHeld() const;
+	[[nodiscard]] std::optional<DesktopArchiveJournalAccess> RenewJournalAccess();
+	[[nodiscard]] bool CompleteJournalRenewal(bool success);
+	void RefuseJournalRenewal(const QString &reason);
 	[[nodiscard]] bool UsageComplete() const;
 	[[nodiscard]] bool Gap(const QString &id, const QString &reason, int64 observedAt);
 	[[nodiscard]] std::optional<ArchiveUsage> Usage();
@@ -178,6 +199,8 @@ class DesktopArchiveStore final {
 	friend class DesktopArchiveStream;
 	void CountStagingProof();
 	void CountStagingOpen();
+	[[nodiscard]] bool Execute(const ArchiveSqlProgram &program, bool maintenance);
+	[[nodiscard]] std::optional<DesktopArchiveJournalAccess> JournalAccess(bool renewing);
 	class Impl;
 	std::unique_ptr<Impl> _impl;
 

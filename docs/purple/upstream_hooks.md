@@ -1377,3 +1377,8 @@ needed to carry this policy through native fill and part delivery.
 menu adapter selects supported parent/topic contexts and captures trusted
 migration links; all read-only archive queries, rendering and authority checks
 live in Purple files. No upstream menu logic is moved or restructured.
+
+The D4b purge layer extends the owned archive menu and Purple settings code.
+It adds no further upstream hunk beyond D4a's include and owned menu hook in
+`window/window_peer_menu.cpp`. Purge policy, dialogs, worker execution and IO
+remain under `purple/`.

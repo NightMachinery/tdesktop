@@ -2,6 +2,8 @@
 
 #include "purple/purple_desktop_archive_store.h"
 #include <mutex>
+#include <atomic>
+#include <chrono>
 
 namespace Purple {
 
@@ -12,16 +14,25 @@ class DesktopArchiveJournal final {
 	[[nodiscard]] bool Append(ArchiveEvent event, int byteLimit = 0);
 	[[nodiscard]] bool Attention(const QString &reason, int64 observedAt);
 	[[nodiscard]] bool Drain(DesktopArchiveStore &store, int limit = 64);
+	[[nodiscard]] bool RetireWriter();
+	[[nodiscard]] bool WriterRetired() const;
+	void PauseCapture();
+	void ResumeCapture();
+	[[nodiscard]] bool CaptureAllowed() const;
+	void BindCaptureGeneration(ArchiveEvent &event) const;
+	[[nodiscard]] ArchiveGeneration CaptureGeneration(const ArchiveChatKey &chat) const;
 	[[nodiscard]] QString failure() const;
 	[[nodiscard]] const DesktopArchiveJournalAccess &access() const;
 
   private:
 	[[nodiscard]] bool DrainPending(DesktopArchiveStore &store, int limit);
 	DesktopArchiveJournalAccess _access;
-	mutable std::mutex _mutex;
+	mutable std::timed_mutex _mutex;
 	QString _failure;
 	uint64_t _sequence = 0;
 	bool _ready = false;
+	std::atomic<bool> _captureAllowed = true;
+	std::atomic<bool> _writerRetired = false;
 
 };
 

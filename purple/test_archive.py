@@ -14,6 +14,7 @@ parser.add_argument('--output-dir', type=Path)
 parser.add_argument('--use-build-objects', action='store_true')
 parser.add_argument('--capture-only', action='store_true')
 parser.add_argument('--views', action='store_true')
+parser.add_argument('--purge', action='store_true')
 parser.add_argument('--lifecycle', action='store_true')
 parser.add_argument('--access', action='store_true')
 parser.add_argument('--pagination-only', action='store_true')
@@ -81,6 +82,22 @@ if args.views:
     history = (repo / 'Telegram/SourceFiles/purple/purple_archive_history_box.cpp').read_text()
     (work / 'archive-history-current.inc').write_text(extract(history, 'const auto current = [=]') + ';\n')
     (work / 'archive-history-notice.inc').write_text(extract(history, 'const auto check = [=]') + ';\n')
+if args.purge:
+    worker = extract(service, 'class ArchiveWorker final') + ';\n'
+    (work / 'archive-purge-worker.inc').write_text(worker.replace('ArchiveWorker', 'ProbePurgeWorker'))
+    execute = extract(service, 'void ExecuteArchivePurge(')
+    execute = execute.replace('ExecuteArchivePurge(', 'ExecuteProbePurge(', 1).replace('Main::Session', 'ProbePurgeSession').replace('Retired', 'PurgeRetired').replace('For(session)', 'PurgeFor(session)').replace('crl::on_main', 'HarnessOnMain')
+    (work / 'archive-purge-execute.inc').write_text(execute)
+    bind = extract((repo / 'Telegram/SourceFiles/purple/purple_archive_purge_box.cpp').read_text(), 'void BindArchivePurgeScopeChanges(')
+    (work / 'archive-purge-migration-bind.inc').write_text(bind.replace('Main::Session', 'ProbeMigrationSession'))
+    native_changes = (repo / 'Telegram/SourceFiles/data/data_changes.cpp').read_text()
+    (work / 'archive-native-peer-manager.inc').write_text(native_changes[native_changes.index('namespace Data {'):native_changes.index('Changes::Changes(')] + '}\n')
+    media = extract(service, 'void OpenArchiveMedia(').replace('Main::Session', 'RetirementSession').replace('crl::on_main', 'RetirementOnMain')
+    (work / 'archive-retirement-open.inc').write_text(media)
+    deleted = (repo / 'Telegram/SourceFiles/purple/purple_archive_purge_box.cpp').read_text()
+    menu = (repo / 'Telegram/SourceFiles/purple/purple_archive_menu.cpp').read_text()
+    (work / 'archive-purge-route.inc').write_text(extract(deleted, 'const auto current = [=]') + ';\n')
+    (work / 'archive-purge-scope.inc').write_text(extract(menu, 'bool SameArchiveViewScope('))
 if args.handoff:
     bodies = ''.join(extract(service, sign) for sign in ('void QueueArchiveRetentionGap(', 'void QueueArchiveJournalWrite(', 'void QueueArchiveLifecycleFact(', 'void QueueArchiveObservation('))
     (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession'))
@@ -136,8 +153,8 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    objects += [compile(repo / ('purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
-    for name in ['purple_desktop_archive_store', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader']:
+    objects += [compile(repo / ('purple/test_archive_purge.cpp' if args.purge else 'purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
+    for name in ['purple_desktop_archive_store', 'purple_archive_maintenance', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader']:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
     objects += [build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o') for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp'))]

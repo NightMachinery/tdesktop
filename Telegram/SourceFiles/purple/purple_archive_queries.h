@@ -44,7 +44,8 @@ struct ArchiveDeletedPage {
 [[nodiscard]] ArchiveSqlStatus DesktopArchiveAdmitSnapshot(DesktopArchiveSqlite &database);
 [[nodiscard]] std::optional<ArchiveStoredRow> DesktopArchiveReadHeader(
 	DesktopArchiveSqlite &database, const AccountKey &account,
-	const ArchiveSqlSecurity &security);
+	const ArchiveSqlSecurity &security, const QString &maintenance = {},
+	bool *readFailure = nullptr);
 [[nodiscard]] std::optional<uint64_t> DesktopArchiveReadChatGeneration(
 	DesktopArchiveSqlite &database, const AccountKey &account,
 	const ArchiveChatKey &chat, const ArchiveSqlSecurity &security);

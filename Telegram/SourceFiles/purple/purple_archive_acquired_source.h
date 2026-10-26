@@ -18,6 +18,7 @@ struct DesktopArchiveObservation {
 	QString kind;
 };
 
+void InvalidateArchiveAcquisitions(not_null<Main::Session*> session);
 void TrackArchiveAcquisition(not_null<Main::Session*> session, const ArchiveEvent &event);
 [[nodiscard]] std::optional<DesktopArchiveObservation> ArchiveAcquisitionObservation(
 	not_null<Main::Session*> session, const ArchiveMessageKey &key, const QString &identity);

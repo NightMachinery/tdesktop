@@ -25,6 +25,35 @@ std::optional<uint64_t> Number(const QJsonValue &value) {
 			   : std::nullopt;
 }
 
+std::optional<uint64_t> CapturedDeleteGeneration(const ArchiveEvent &event, const ArchiveChatKey &chat) {
+	const auto evidence = event.observation.context.value(u"desktopDeleteGenerations"_q);
+	if (evidence.isUndefined()) {
+		return event.generation.chat;
+	}
+	if (!evidence.isObject() || evidence.toObject().size() > 4096) {
+		return {};
+	}
+	const auto object = evidence.toObject();
+	auto result = uint64_t(0);
+	for (auto i = object.begin(); i != object.end(); ++i) {
+		const auto parts = i.key().split('/');
+		auto kindValid = false;
+		auto idValid = false;
+		const auto kind = parts.size() == 2 ? parts[0].toInt(&kindValid) : -1;
+		const auto id = parts.size() == 2 ? parts[1].toLongLong(&idValid) : 0;
+		const auto generation = Number(i.value());
+		if (!kindValid || kind < 0 || kind > 3 || !idValid || !generation
+			|| QString::number(kind) != parts[0] || QString::number(id) != parts[1]
+			|| !IsArchiveChatKey({ArchiveChatKind(kind), id})) {
+			return {};
+		}
+		if (ArchiveChatKey{ArchiveChatKind(kind), id} == chat) {
+			result = *generation;
+		}
+	}
+	return result;
+}
+
 QString Token(const DesktopArchiveJournalAccess &access, const QString &id) {
 	return ArchiveSqlToken(access.epoch.account, ArchiveIndexKind::Event,
 		(u"outbox/"_q + id).toUtf8(), access.security);
@@ -169,7 +198,9 @@ DesktopArchiveJournal::DesktopArchiveJournal(DesktopArchiveJournalAccess access)
 	: _access(std::move(access)) {}
 
 bool DesktopArchiveJournal::Open() {
+	if (WriterRetired()) return false;
 	const auto lock = std::lock_guard(_mutex);
+	if (WriterRetired()) return false;
 	if (!_access.current || !_access.current()) {
 		_failure = u"outbox-stale"_q;
 		return false;
@@ -204,8 +235,9 @@ bool DesktopArchiveJournal::Open() {
 }
 
 bool DesktopArchiveJournal::Append(ArchiveEvent event, int byteLimit) {
+	if (!CaptureAllowed()) return false;
 	const auto lock = std::lock_guard(_mutex);
-	if (!_ready || !_access.current || !_access.current()
+	if (!CaptureAllowed() || !_ready || !_access.current || !_access.current()
 		|| event.key.account != _access.epoch.account || !IsArchiveToken(event.id)
 		|| (event.lifecycleEpoch && *event.lifecycleEpoch != _access.epoch)) {
 		_failure = u"outbox-not-ready"_q;
@@ -264,6 +296,7 @@ bool DesktopArchiveJournal::Append(ArchiveEvent event, int byteLimit) {
 }
 
 bool DesktopArchiveJournal::Drain(DesktopArchiveStore &store, int limit) {
+	if (WriterRetired()) return false;
 	if (DrainPending(store, limit)) {
 		return true;
 	}
@@ -355,6 +388,11 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 				continue;
 			}
 			event.key = matches->front();
+			const auto generation = CapturedDeleteGeneration(event, event.key.chat);
+			if (!generation) {
+				return false;
+			}
+			event.generation.chat = *generation;
 		}
 		const auto slice = store.ReadSlice(event.key, event.id);
 		if (!slice) {
@@ -410,7 +448,9 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 }
 
 bool DesktopArchiveJournal::Attention(const QString &reason, int64 observedAt) {
+	if (WriterRetired()) return false;
 	const auto lock = std::lock_guard(_mutex);
+	if (WriterRetired()) return false;
 	return _ready && _access.current && _access.current()
 		   && WriteDesktopArchiveAttention(
 			   _access.root, _access.epoch, _access.security, reason, observedAt)
@@ -418,11 +458,67 @@ bool DesktopArchiveJournal::Attention(const QString &reason, int64 observedAt) {
 }
 
 QString DesktopArchiveJournal::failure() const {
+	if (WriterRetired()) {
+		const auto lock = std::unique_lock(_mutex, std::try_to_lock);
+		return lock.owns_lock() && !_failure.isEmpty() ? _failure : u"outbox-writer-retired"_q;
+	}
 	const auto lock = std::lock_guard(_mutex);
 	return _failure;
 }
 const DesktopArchiveJournalAccess &DesktopArchiveJournal::access() const {
 	return _access;
+}
+
+}
+
+namespace Purple {
+
+bool DesktopArchiveJournal::RetireWriter() {
+	_writerRetired.store(true);
+	_captureAllowed.store(false);
+	auto lock = std::unique_lock(_mutex, std::defer_lock);
+	if (!lock.try_lock_for(std::chrono::milliseconds(50))) return false;
+	_ready = false;
+	return true;
+}
+
+bool DesktopArchiveJournal::WriterRetired() const {
+	return _writerRetired.load();
+}
+
+void DesktopArchiveJournal::PauseCapture() {
+	_captureAllowed.store(false);
+}
+
+void DesktopArchiveJournal::ResumeCapture() {
+	if (!WriterRetired()) _captureAllowed.store(true);
+}
+
+bool DesktopArchiveJournal::CaptureAllowed() const {
+	return _captureAllowed.load() && !WriterRetired();
+}
+
+ArchiveGeneration DesktopArchiveJournal::CaptureGeneration(const ArchiveChatKey &chat) const {
+	auto result = _access.generation;
+	const auto found = std::find_if(_access.chatGenerations.begin(), _access.chatGenerations.end(),
+		[&](const auto &generation) { return generation.chat == chat; });
+	if (found != _access.chatGenerations.end()) {
+		result.chat = found->generation;
+	}
+	return result;
+}
+
+}
+
+namespace Purple {
+
+void DesktopArchiveJournal::BindCaptureGeneration(ArchiveEvent &event) const {
+	if (event.observation.context.value(u"desktopNonChannelDelete"_q).toBool()) {
+		event.generation = _access.generation;
+		event.observation.context.insert(u"desktopDeleteGenerations"_q, _access.deleteGenerations);
+	} else {
+		event.generation = CaptureGeneration(event.key.chat);
+	}
 }
 
 }
