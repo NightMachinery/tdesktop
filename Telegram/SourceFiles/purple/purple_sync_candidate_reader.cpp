@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_types.h"
 #include "data/data_user.h"
 #include "main/main_session.h"
+#include "purple/purple_config.h"
 #include "purple/purple_sync_history_scanner.h"
 #include "storage/file_download_mtproto.h"
 
@@ -27,11 +28,36 @@ SyncCandidateReader::SyncCandidateReader(
 		Fn<void(SyncCandidateReadResult)> finished,
 		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
 : _session(session)
+, _sessionGuard(base::make_weak(session))
+, _opening(AccountSyncInspectionTarget(session))
 , _api(&session->mtp())
 , _candidateIds(std::move(candidateIds))
 , _finished(std::move(finished))
 , _owned(std::move(owned)) {
 	_result.records.reserve(_candidateIds.size());
+}
+
+SyncCandidateReader::SyncCandidateReader(
+		not_null<Main::Session*> session,
+		DesktopSyncChatIo route,
+		std::vector<int32_t> candidateIds,
+		Fn<void(SyncCandidateReadResult)> finished,
+		Fn<bool()> current)
+: SyncCandidateReader(session, std::move(candidateIds), std::move(finished)) {
+	_route = std::move(route);
+	_current = std::move(current);
+	_owned = [peer = _route->peer](const MTPMessage &message) {
+		return GetSyncChatMessageOwnership(
+			MapDesktopSyncChatMessage(peer.origin, peer, message));
+	};
+}
+
+bool SyncCandidateReader::Current() const {
+	return _sessionGuard && _opening
+		&& ValidateAccountSyncTarget(_session, *_opening)
+		&& (!_route || (ValidDesktopSyncChatIo(*_route)
+			&& _route->peer.origin.account == SessionAccountKey(_session)
+			&& _current && _current()));
 }
 
 SyncCandidateReader::~SyncCandidateReader() {
@@ -47,6 +73,15 @@ void SyncCandidateReader::Start() {
 		return;
 	}
 	_started = true;
+	if (_route) {
+		auto ids = std::set<int32_t>();
+		for (const auto id : _candidateIds) {
+			if (id <= 0 || !ids.emplace(id).second) {
+				Finish(SyncCandidateReadStatus::Incomplete);
+				return;
+			}
+		}
+	}
 	RequestNext();
 }
 
@@ -68,38 +103,54 @@ void SyncCandidateReader::Cancel() {
 }
 
 void SyncCandidateReader::RequestNext() {
+	if (!Current()) {
+		Cancel();
+		return;
+	}
 	if (_next == _candidateIds.size()) {
 		Finish(AggregateSyncCandidateRead(_result.records));
 		return;
 	}
 	const auto id = _candidateIds[_next];
+	const auto request = _route
+		? DesktopSyncChatRecordRequest(*_route, id)
+		: std::optional<DesktopSyncChatExactRequest>(MTPmessages_GetMessages(
+			MTP_vector<MTPInputMessage>({ MTP_inputMessageID(MTP_int(id)) })));
+	if (!request || id <= 0) {
+		CompleteCurrent({ .id = id, .status = SyncCandidateStatus::Inaccessible });
+		return;
+	}
 	const auto weak = base::make_weak(this);
-	_requestId = _api.request(MTPmessages_GetMessages(
-		MTP_vector<MTPInputMessage>(
-			1,
-			MTP_inputMessageID(MTP_int(id)))
-	)).done([weak, id](const MTPmessages_Messages &result) {
+	const auto completed = [weak, id](const MTPmessages_Messages &result) {
 		const auto self = weak.get();
 		if (!self || self->_done) {
 			return;
 		}
-		self->_requestId = 0;
-		auto messages = (const QVector<MTPMessage>*)nullptr;
-		result.match([&](const MTPDmessages_messagesNotModified &) {
-		}, [&](const auto &data) {
-			messages = &data.vmessages().v;
-		});
-		if (!messages || messages->size() != 1) {
-			self->CompleteCurrent({
-				.id = id,
-				.status = SyncCandidateStatus::Vanished,
-			});
+		if (!self->Current()) {
+			self->Cancel();
 			return;
 		}
-		const auto &message = messages->front();
+		self->_requestId = 0;
+		auto selected = std::optional<MTPMessage>();
+		if (self->_route) {
+			selected = DesktopSyncChatRecordMessage(*self->_route, result, id);
+		} else if (RecognizedDesktopSyncChatRead(result, PeerToken{})) {
+			result.match([](const MTPDmessages_messagesNotModified &) {
+			}, [&](const auto &data) {
+				if (data.vmessages().v.size() == 1) {
+					selected = data.vmessages().v.front();
+				}
+			});
+		}
+		if (!selected) {
+			self->CompleteCurrent({ .id = id,
+				.status = SyncCandidateStatus::Inaccessible });
+			return;
+		}
+		const auto &message = *selected;
 		if (IdFromMessage(message).bare != id
 			|| message.type() != mtpc_message
-			|| PeerFromMessage(message) != self->_session->user()->id
+			|| (!self->_route && PeerFromMessage(message) != self->_session->user()->id)
 			|| !IsSyncHistoryCandidate(message)) {
 			self->CompleteCurrent({
 				.id = id,
@@ -120,6 +171,12 @@ void SyncCandidateReader::RequestNext() {
 		}
 		const auto media = message.c_message().vmedia();
 		const auto document = media->c_messageMediaDocument().vdocument();
+		if (document->c_document().vid().v <= 0
+			|| document->c_document().vdc_id().v <= 0) {
+			self->CompleteCurrent({ .id = id,
+				.status = SyncCandidateStatus::Inaccessible });
+			return;
+		}
 		self->_documentId = uint64_t(document->c_document().vid().v);
 		const auto editDate = message.c_message().vedit_date();
 		self->_editDate = (editDate && editDate->v > 0)
@@ -135,7 +192,8 @@ void SyncCandidateReader::RequestNext() {
 			return;
 		}
 		self->StartDownload(document->c_document());
-	}).fail([weak, id](const MTP::Error &) {
+	};
+	const auto failed = [weak, id](const MTP::Error &) {
 		if (const auto self = weak.get(); self && !self->_done) {
 			self->_requestId = 0;
 			self->CompleteCurrent({
@@ -143,11 +201,31 @@ void SyncCandidateReader::RequestNext() {
 				.status = SyncCandidateStatus::RequestFailed,
 			});
 		}
-	}).send();
+	};
+	std::visit([&](const auto &value) {
+		auto copy = value;
+		_requestId = _api.request(std::move(copy)).done(completed).fail(failed)
+			.handleAllErrors().send();
+	}, *request);
 }
 
 void SyncCandidateReader::StartDownload(const MTPDdocument &document) {
+	if (!Current()) {
+		Cancel();
+		return;
+	}
 	const auto size = int64(document.vsize().v);
+	_expectedBytes = size;
+	_downloadFailed = false;
+	const auto origin = _route
+		? DesktopSyncChatFileOrigin(*_route, _candidateIds[_next])
+		: std::optional(FullMsgId(_session->user()->id,
+			MsgId(_candidateIds[_next])));
+	if (!origin) {
+		CompleteCurrent({ .id = _candidateIds[_next],
+			.status = SyncCandidateStatus::Inaccessible });
+		return;
+	}
 	_loader = std::make_unique<mtpFileLoader>(
 		_session,
 		StorageFileLocation(
@@ -158,9 +236,7 @@ void SyncCandidateReader::StartDownload(const MTPDdocument &document) {
 				document.vaccess_hash(),
 				document.vfile_reference(),
 				MTP_string())),
-		Data::FileOrigin(FullMsgId(
-			_session->user()->id,
-			MsgId(_candidateIds[_next]))),
+		Data::FileOrigin(*origin),
 		DocumentFileLocation,
 		QString(),
 		size,
@@ -177,18 +253,27 @@ void SyncCandidateReader::StartDownload(const MTPDdocument &document) {
 	};
 	_loader->updates(
 	) | rpl::on_error_done([=](FileLoader::Error) {
+		if (const auto self = weak.get()) {
+			self->_downloadFailed = true;
+		}
 		stopped();
 	}, stopped, _loader->lifetime());
 	_loader->start();
 }
 
 void SyncCandidateReader::OnDownload() {
+	if (!Current()) {
+		Cancel();
+		return;
+	}
 	if (!_loader) {
 		return;
 	}
 	const auto loader = base::take(_loader);
 	const auto id = _candidateIds[_next];
-	if (loader->cancelled() || loader->bytes().isEmpty()) {
+	if (_downloadFailed || loader->cancelled() || loader->bytes().isEmpty()
+		|| loader->bytes().size() != _expectedBytes
+		|| loader->bytes().size() > kMaximumRecordBytes) {
 		CompleteCurrent({
 			.id = id,
 			.status = SyncCandidateStatus::Inaccessible,
@@ -203,6 +288,7 @@ void SyncCandidateReader::CompleteCurrent(SyncCandidateRecord record) {
 	record.editDate = _editDate;
 	_documentId = 0;
 	_editDate = 0;
+	_expectedBytes = 0;
 	_result.records.push_back(std::move(record));
 	++_next;
 	RequestNext();

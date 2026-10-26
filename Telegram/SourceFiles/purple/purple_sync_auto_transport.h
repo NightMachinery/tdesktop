@@ -17,17 +17,28 @@ struct DesktopSyncExactMetadata {
 [[nodiscard]] DesktopSyncExactMetadata InspectDesktopSyncExactMessage(
 	const MTPmessages_Messages &result, int32_t id, uint64_t accountUserId);
 
+[[nodiscard]] DesktopSyncExactMetadata InspectDesktopSyncExactMessage(
+	const MTPmessages_Messages &result, int32_t id,
+	const DesktopSyncChatIo &route);
+
 class DesktopSyncExactRead final : public base::has_weak_ptr {
 public:
 	DesktopSyncExactRead(not_null<Main::Session*> session, int32_t id,
 		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished);
+	DesktopSyncExactRead(not_null<Main::Session*> session,
+		DesktopSyncChatIo route, int32_t id,
+		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished);
 	void Start();
 
 private:
+	[[nodiscard]] bool Current() const;
 	void Metadata(bool readback);
 	void Finish(SyncAutoServerRead read);
 
 	not_null<Main::Session*> _session;
+	base::weak_ptr<Main::Session> _sessionGuard;
+	std::optional<AccountOperationTarget> _opening;
+	std::optional<DesktopSyncChatIo> _route;
 	int32_t _id = 0;
 	Fn<bool()> _current;
 	Fn<void(SyncAutoServerRead)> _finished;
@@ -35,6 +46,7 @@ private:
 	DesktopSyncExactMetadata _metadata;
 	SyncCandidateRecord _record;
 	std::unique_ptr<SyncCandidateReader> _reader;
+	bool _done = false;
 
 };
 

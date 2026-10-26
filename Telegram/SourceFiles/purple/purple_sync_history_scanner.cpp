@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_types.h"
 #include "data/data_user.h"
 #include "main/main_session.h"
+#include "purple/purple_config.h"
 
 namespace Purple {
 
@@ -50,11 +51,38 @@ SyncHistoryScanner::SyncHistoryScanner(
 		Fn<void(SyncHistoryScanResult)> finished,
 		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
 : _session(session)
+, _sessionGuard(base::make_weak(session))
+, _opening(AccountSyncInspectionTarget(session))
 , _api(&session->mtp())
 , _modernHistory(peerToUser(session->user()->id).bare)
 , _progress(std::move(progress))
 , _finished(std::move(finished))
 , _owned(std::move(owned)) {
+}
+
+SyncHistoryScanner::SyncHistoryScanner(
+		not_null<Main::Session*> session,
+		DesktopSyncChatIo route,
+		Fn<void(uint64_t)> progress,
+		Fn<void(SyncHistoryScanResult)> finished,
+		Fn<bool()> current)
+: SyncHistoryScanner(session, std::move(progress), std::move(finished)) {
+	_route = std::move(route);
+	_current = std::move(current);
+	_modernHistory = DesktopSyncChatHistoryGuard(
+		_route->peer.origin.account.userId, _route->peer.chat);
+	_owned = [peer = _route->peer](const MTPMessage &message) {
+		return GetSyncChatMessageOwnership(
+			MapDesktopSyncChatMessage(peer.origin, peer, message));
+	};
+}
+
+bool SyncHistoryScanner::Current() const {
+	return _sessionGuard && _opening
+		&& ValidateAccountSyncTarget(_session, *_opening)
+		&& (!_route || (ValidDesktopSyncChatIo(*_route)
+			&& _route->peer.origin.account == SessionAccountKey(_session)
+			&& _current && _current()));
 }
 
 SyncHistoryScanner::~SyncHistoryScanner() {
@@ -82,22 +110,31 @@ void SyncHistoryScanner::Cancel() {
 }
 
 void SyncHistoryScanner::RequestNext() {
+	if (!Current()) {
+		Finish(SyncHistoryScanStatus::Cancelled);
+		return;
+	}
 	const auto weak = base::make_weak(this);
-	_requestId = _api.request(MTPmessages_GetHistory(
-		_session->user()->input(),
-		MTP_int(_pages.offset()),
-		MTP_int(0),
-		MTP_int(0),
-		MTP_int(kSyncHistoryPageSize),
-		MTP_int(0),
-		MTP_int(0),
-		MTP_long(0)
-	)).done([weak](const MTPmessages_Messages &result) {
+	auto request = _route
+		? DesktopSyncChatHistoryRequest(*_route, _pages.offset())
+		: std::optional(MTPmessages_GetHistory(
+			_session->user()->input(), MTP_int(_pages.offset()), MTP_int(0),
+			MTP_int(0), MTP_int(kSyncHistoryPageSize), MTP_int(0), MTP_int(0),
+			MTP_long(0)));
+	if (!request) {
+		Finish(SyncHistoryScanStatus::InvalidResponse);
+		return;
+	}
+	_requestId = _api.request(std::move(*request)).done([weak](const MTPmessages_Messages &result) {
 		const auto self = weak.get();
 		if (!self || self->_done) {
 			return;
 		}
 		self->_requestId = 0;
+		if (!self->Current()) {
+			self->Finish(SyncHistoryScanStatus::Cancelled);
+			return;
+		}
 		auto modern = DesktopSyncChatPageStatus::Next;
 		if (self->_owned) {
 			modern = self->_modernHistory.Add(result, self->_pages.count());
@@ -149,7 +186,7 @@ void SyncHistoryScanner::RequestNext() {
 			self->_requestId = 0;
 			self->Finish(SyncHistoryScanStatus::RequestFailed, error.type());
 		}
-	}).send();
+	}).handleAllErrors().send();
 }
 
 void SyncHistoryScanner::Finish(

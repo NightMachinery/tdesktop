@@ -113,14 +113,16 @@ public:
 	[[nodiscard]] SyncStoreResult ConfirmConfigReadBack(
 		const QByteArray &serverRecord,
 		const QString &currentDevice,
-		int32_t messageId);
+		int32_t messageId,
+		PeerToken chat = {});
 	[[nodiscard]] SyncStoreResult CommitConfigData(
 		const SyncLocalConfigState &next,
 		const QByteArray &accountBindingToken);
 	[[nodiscard]] SyncStoreResult RemoveAbsentConfigMessage(
 		int32_t messageId,
 		const QByteArray &record,
-		const QByteArray &accountBindingToken);
+		const QByteArray &accountBindingToken,
+		PeerToken chat = {});
 	[[nodiscard]] const SyncLocalState *state() const;
 	[[nodiscard]] SyncStoreStatus status() const;
 	[[nodiscard]] const QString &directory() const;

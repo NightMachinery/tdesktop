@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_sync_chat.h"
+#include "purple/purple_sync_chat_io.h"
+#include "purple/purple_account_config.h"
 
 #include "base/weak_ptr.h"
 #include "mtproto/sender.h"
@@ -31,6 +33,12 @@ public:
 		std::vector<int32_t> candidateIds,
 		Fn<void(SyncCandidateReadResult)> finished,
 		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned = {});
+	SyncCandidateReader(
+		not_null<Main::Session*> session,
+		DesktopSyncChatIo route,
+		std::vector<int32_t> candidateIds,
+		Fn<void(SyncCandidateReadResult)> finished,
+		Fn<bool()> current);
 	~SyncCandidateReader();
 
 	SyncCandidateReader(const SyncCandidateReader &) = delete;
@@ -40,6 +48,7 @@ public:
 	void Cancel();
 
 private:
+	[[nodiscard]] bool Current() const;
 	void RequestNext();
 	void StartDownload(const MTPDdocument &document);
 	void OnDownload();
@@ -47,6 +56,10 @@ private:
 	void Finish(SyncCandidateReadStatus status);
 
 	not_null<Main::Session*> _session;
+	base::weak_ptr<Main::Session> _sessionGuard;
+	std::optional<AccountOperationTarget> _opening;
+	std::optional<DesktopSyncChatIo> _route;
+	Fn<bool()> _current;
 	MTP::Sender _api;
 	std::vector<int32_t> _candidateIds;
 	Fn<void(SyncCandidateReadResult)> _finished;
@@ -54,9 +67,11 @@ private:
 	std::unique_ptr<FileLoader> _loader;
 	mtpRequestId _requestId = 0;
 	size_t _next = 0;
+	int64_t _expectedBytes = 0;
 	uint64_t _documentId = 0;
 	uint64_t _editDate = 0;
 	Fn<SyncChatMessageOwnership(const MTPMessage &)> _owned;
+	bool _downloadFailed = false;
 	bool _started = false;
 	bool _done = false;
 

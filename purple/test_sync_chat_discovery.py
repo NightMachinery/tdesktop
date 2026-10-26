@@ -78,6 +78,8 @@ with (work / 'build.log').open('w') as log:
     for source in [repo / 'purple/test_sync_chat_discovery.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_facts.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_requests.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_io.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_local_store.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cache.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_discovery.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_store.cpp',
@@ -95,7 +97,6 @@ with (work / 'build.log').open('w') as log:
         objects.append(target)
     objects += [build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_sync_directory.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_types.cpp.o',
-                build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/purple/purple_sync_local_store.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_sync_envelope.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_config_sync.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_sync_json.cpp.o',

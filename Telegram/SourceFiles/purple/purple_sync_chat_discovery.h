@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_sync_chat_cache.h"
+#include "purple/purple_sync_chat_io.h"
 #include "purple/purple_sync_chat_requests.h"
 #include "purple/purple_sync_inventory.h"
 
@@ -56,6 +57,12 @@ struct DesktopSyncChatReply {
 	const DesktopSyncChatOrigin &origin,
 	uint64_t ticket,
 	const SyncAccountInventoryResult &inventory);
+
+[[nodiscard]] DesktopSyncChatReply MapDesktopSyncChatInventoryReply(
+	const DesktopSyncChatOrigin &origin,
+	uint64_t ticket,
+	PeerToken chat,
+	const DesktopSyncChatInventory &inventory);
 
 class DesktopSyncChatDiscovery final {
 public:

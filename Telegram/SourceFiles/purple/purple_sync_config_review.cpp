@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_review.h"
 
+#include "purple/purple_sync_chat_scope.h"
+
 #include "base/platform/base_platform_info.h"
 #include "purple/purple_config.h"
 #include "purple/purple_settings.h"
@@ -166,6 +168,10 @@ SyncConfigReview ReviewSyncConfig(
 	const auto parsed = ParseSyncLocalState(snapshot.store.state);
 	if (!parsed) { result.status = SyncConfigReviewStatus::StoreError; return result; }
 	const auto state = &parsed.state;
+	if (!DesktopSyncChatLedgerMatches(*state, {})) {
+		result.status = SyncConfigReviewStatus::NeedsReview;
+		return result;
+	}
 	if (CheckAccountSyncBinding(*state, account) != SyncAccountBindingVerdict::Bound) {
 		result.status = SyncConfigReviewStatus::AccountUnbound;
 		return result;

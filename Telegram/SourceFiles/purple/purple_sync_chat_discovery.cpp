@@ -62,6 +62,16 @@ DesktopSyncChatReply MapDesktopSyncChatInventoryReply(
 	return reply;
 }
 
+DesktopSyncChatReply MapDesktopSyncChatInventoryReply(
+		const DesktopSyncChatOrigin &origin,
+		uint64_t ticket,
+		PeerToken chat,
+		const DesktopSyncChatInventory &inventory) {
+	return DesktopSyncChatInventoryMatches(inventory, origin, chat)
+		? MapDesktopSyncChatInventoryReply(origin, ticket, inventory.inventory)
+		: DesktopSyncChatReply{ origin, ticket };
+}
+
 DesktopSyncChatDiscovery::DesktopSyncChatDiscovery(
 	DesktopSyncChatOrigin origin,
 	std::optional<DesktopSyncChatCacheRecord> cache,

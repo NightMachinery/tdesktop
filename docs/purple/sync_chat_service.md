@@ -45,10 +45,12 @@ absence or presence. Unknown Q evidence holds resolution. The C0 tri-state
 ownership filter is applied to both scanning and fresh candidate metadata:
 Unknown makes inventory incomplete, Other cannot become a candidate, and only
 Own proceeds. Existing legacy inventory callers keep their prior behavior;
-typed modern readers and their remaining call sites are the T2 boundary.
+the explicit typed constructors carry the same scope through both stages.
+See [typed I/O](sync_chat_io.md) for endpoint and ledger rules.
 
-Modern Self history validates the full response before extracting messages.
-Only exact ordinary messages or exact slices are admitted; inexact, search-flood,
+Modern history validates the full response before extracting messages.
+Exact channelMessages is also admitted for a typed Channel route. Otherwise
+only exact ordinary messages or exact slices are admitted; inexact, search-flood,
 negative or changing counts, wrong typed targets, stalled cursors, unfinished
 pages, transport failures and the 20-page cap remain Unknown. An empty page with
 an unsatisfied declared count cannot prove completion. The service inventory
@@ -100,11 +102,12 @@ status is Lost. Unknown failures have no periodic polling loop.
 
 `ReadWinnerInventory` is the typed result seam. Complete, validated Present or
 Empty results update the resolver's evidence and resolve again with the
-original cache. Production non-Self inventory currently returns Unknown/held,
-without falling back to Self. T2 supplies typed readers, downloaders, receipts
-and posting gates. Complete non-Self inventories in deterministic model tests
-are injected evidence, not native server coverage. `CheckSyncChatBeforePost`
-is the fresh-resolution interface for that writer integration.
+original cache. Production inventory now uses explicit typed readers and
+downloaders, with fresh matching facts and the captured run's current proof.
+It refuses an unavailable typed endpoint instead of falling back to Self.
+Complete non-Self unit inventories are controlled evidence, not native server
+coverage. `CheckSyncChatBeforePost` remains the fresh-resolution interface for
+writer integration; typed I/O does not bypass the publish gates.
 
 Automatic settings sync additionally requires a resolved, unheld Self result.
 Its existing core Self-only guard remains intact. This slice does not activate

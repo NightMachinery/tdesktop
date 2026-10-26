@@ -702,3 +702,6 @@ full-info facts for the separately gated M2B4 discovery work.
 The per-account [sync-chat service](sync_chat_service.md) adds read-only discovery,
 login-bound local cache, held status and bounded retries. Its typed non-Self
 inventory and writer integration remain the next slice; automatic sync stays Self-only.
+
+Typed read/download routes and chat-scoped ledger guards are documented in
+[typed sync-chat I/O](sync_chat_io.md). Automatic sync remains Self-only.

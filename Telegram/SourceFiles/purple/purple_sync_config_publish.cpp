@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_publish.h"
 
+#include "purple/purple_sync_chat_scope.h"
+
 #include "base/unixtime.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
@@ -80,6 +82,10 @@ void SyncConfigPublish::Start() {
 		return;
 	}
 	const auto state = _store->state();
+	if (!DesktopSyncChatLedgerMatches(*state, {})) {
+		Finish({ SyncConfigPublishStatus::NeedsReview });
+		return;
+	}
 	const auto account = _account.get();
 	if (CheckAccountSyncBinding(*state, *account)
 			!= SyncAccountBindingVerdict::Bound) {

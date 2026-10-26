@@ -733,10 +733,6 @@ void SyncChatSession::Run() {
 	} else if (command.step == DesktopSyncChatStep::ExactMark) {
 		Exact(command);
 	} else if (command.step == DesktopSyncChatStep::Inventory) {
-		if (command.chat != PeerToken{}) {
-			Complete({command.origin, command.ticket});
-			return;
-		}
 		Peer(command, [=](std::optional<DesktopSyncChatPeer> peer) {
 			const auto live = weak.get();
 			if (!live || !live->Accept(command)) {
@@ -747,22 +743,33 @@ void SyncChatSession::Run() {
 				live->Complete({command.origin, command.ticket});
 				return;
 			}
-			const auto owned = [origin = command.origin,
-								facts = *peer](const MTPMessage &message) {
-				return GetSyncChatMessageOwnership(
-					MapDesktopSyncChatMessage(origin, facts, message));
-			};
+			const auto loaded = Loaded(*live->_session.get(), command.chat);
+			if (!loaded) {
+				live->Complete({command.origin, command.ticket});
+				return;
+			}
+			const auto route = DesktopSyncChatIo{ *peer, command.chat == PeerToken{}
+				? MTPInputPeer(MTP_inputPeerSelf()) : loaded->input() };
+			if (!ValidDesktopSyncChatIo(route)) {
+				live->Complete({command.origin, command.ticket});
+				return;
+			}
 			live->_inventory = std::make_unique<SyncAccountInventory>(
-				live->_session.get(),
+				live->_session.get(), route,
 				Fn<void(uint64_t)>(),
-				[=](SyncAccountInventoryResult result) {
+				[=](DesktopSyncChatInventory result) {
 					if (const auto self = weak.get();
 						self && self->Accept(command)) {
 						self->Complete(MapDesktopSyncChatInventoryReply(
-							command.origin, command.ticket, result));
+							command.origin, command.ticket, command.chat, result));
 					}
 				},
-				owned);
+				[=] {
+					const auto self = weak.get();
+					return self && self->Current() && self->_model
+						&& self->_origin == command.origin && self->_run == command.run
+						&& self->_model->command().ticket == command.ticket;
+				});
 			live->_inventory->Start();
 		});
 	} else {

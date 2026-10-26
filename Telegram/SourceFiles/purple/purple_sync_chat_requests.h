@@ -56,11 +56,13 @@ using DesktopSyncChatExactRequest =
 
 class DesktopSyncChatHistoryGuard final {
 public:
-	explicit DesktopSyncChatHistoryGuard(uint64_t selfUserId);
+	explicit DesktopSyncChatHistoryGuard(
+		uint64_t selfUserId, PeerToken chat = {});
 	[[nodiscard]] DesktopSyncChatPageStatus Add(
 		const MTPmessages_Messages &response, uint64_t seen);
 
 private:
+	PeerToken _chat;
 	uint64_t _selfUserId = 0;
 	uint64_t _seen = 0;
 	int _pages = 0;

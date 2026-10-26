@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_local_store.h"
+#include "purple/purple_sync_chat_scope.h"
 
 #include "purple/purple_sync_config_flow.h"
 
@@ -641,8 +642,12 @@ SyncStoreResult SyncLocalStore::StageConfig(
 SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 		const QByteArray &serverRecord,
 		const QString &currentDevice,
-		int32_t messageId) {
+		int32_t messageId,
+		PeerToken chat) {
 	if (_status != SyncStoreStatus::Ready || !_state) {
+		return { SyncStoreStatus::InvalidTransition };
+	}
+	if (!DesktopSyncChatLedgerMatches(*_state, chat)) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (_state->config.pendingSeq == 0) {
@@ -756,8 +761,10 @@ SyncStoreResult SyncLocalStore::CommitConfigData(
 SyncStoreResult SyncLocalStore::RemoveAbsentConfigMessage(
 		int32_t messageId,
 		const QByteArray &record,
-		const QByteArray &accountBindingToken) {
+		const QByteArray &accountBindingToken,
+		PeerToken chat) {
 	if (_status != SyncStoreStatus::Ready || !_state
+		|| !DesktopSyncChatLedgerMatches(*_state, chat)
 		|| CheckSyncAccountBinding(*_state, accountBindingToken) != SyncAccountBindingVerdict::Bound
 		|| !CheckOwnConfigMessageDeletion(*_state, messageId, record)) {
 		return { SyncStoreStatus::InvalidTransition };

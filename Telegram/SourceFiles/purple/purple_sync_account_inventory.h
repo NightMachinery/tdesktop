@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_sync_chat.h"
+#include "purple/purple_sync_chat_io.h"
+#include "purple/purple_account_config.h"
 
 #include "base/weak_ptr.h"
 #include "purple/purple_sync_candidate_reader.h"
@@ -25,6 +27,12 @@ public:
 			Fn<void(uint64_t)> progress,
 			Fn<void(SyncAccountInventoryResult)> finished,
 			Fn<SyncChatMessageOwnership(const MTPMessage &)> owned = {});
+	SyncAccountInventory(
+		not_null<Main::Session*> session,
+		DesktopSyncChatIo route,
+		Fn<void(uint64_t)> progress,
+		Fn<void(DesktopSyncChatInventory)> finished,
+		Fn<bool()> current);
 	~SyncAccountInventory();
 
 	SyncAccountInventory(const SyncAccountInventory &) = delete;
@@ -34,11 +42,16 @@ public:
 	void Cancel();
 
 private:
+	[[nodiscard]] bool Current() const;
 	void ScanFinished(SyncHistoryScanResult result);
 	void ReadFinished(SyncCandidateReadResult result);
 	void Finish(SyncAccountInventoryStatus status);
 
 	not_null<Main::Session*> _session;
+	base::weak_ptr<Main::Session> _sessionGuard;
+	std::optional<AccountOperationTarget> _opening;
+	std::optional<DesktopSyncChatIo> _route;
+	Fn<bool()> _current;
 	Fn<void(uint64_t)> _progress;
 	Fn<void(SyncAccountInventoryResult)> _finished;
 	SyncAccountInventoryResult _result;

@@ -142,8 +142,10 @@ DesktopSyncChatSearchPage MapDesktopSyncChatSearchPage(
 	return result;
 }
 
-DesktopSyncChatHistoryGuard::DesktopSyncChatHistoryGuard(uint64_t selfUserId)
-: _selfUserId(selfUserId) {
+DesktopSyncChatHistoryGuard::DesktopSyncChatHistoryGuard(
+		uint64_t selfUserId, PeerToken chat)
+: _chat(chat)
+, _selfUserId(selfUserId) {
 }
 
 DesktopSyncChatPageStatus DesktopSyncChatHistoryGuard::Add(
@@ -153,7 +155,8 @@ DesktopSyncChatPageStatus DesktopSyncChatHistoryGuard::Add(
 		_finished = true;
 		return DesktopSyncChatPageStatus::Incomplete;
 	};
-	if (_finished || !_selfUserId || seen != _seen) {
+	if (_finished || !_selfUserId || !PeerTokenText(_chat, _selfUserId)
+		|| seen != _seen) {
 		return refuse();
 	}
 	auto messages = static_cast<const QVector<MTPMessage>*>(nullptr);
@@ -162,6 +165,12 @@ DesktopSyncChatPageStatus DesktopSyncChatHistoryGuard::Add(
 		messages = &data.vmessages().v;
 	}, [&](const MTPDmessages_messagesSlice &data) {
 		if (!data.is_inexact() && !data.vsearch_flood() && data.vcount().v >= 0) {
+			messages = &data.vmessages().v;
+			count = data.vcount().v;
+		}
+	}, [&](const MTPDmessages_channelMessages &data) {
+		if (_chat.kind == PeerTokenKind::Channel && !data.is_inexact()
+			&& data.vcount().v >= 0) {
 			messages = &data.vmessages().v;
 			count = data.vcount().v;
 		}
@@ -174,13 +183,13 @@ DesktopSyncChatPageStatus DesktopSyncChatHistoryGuard::Add(
 		auto valid = false;
 		message.match([&](const MTPDmessage &data) {
 			valid = data.vid().v > 0 && data.vdate().v > 0
-				&& DesktopSyncChatToken(data.vpeer_id(), _selfUserId) == PeerToken{};
+				&& DesktopSyncChatToken(data.vpeer_id(), _selfUserId) == _chat;
 		}, [&](const MTPDmessageService &data) {
 			valid = data.vid().v > 0 && data.vdate().v > 0
-				&& DesktopSyncChatToken(data.vpeer_id(), _selfUserId) == PeerToken{};
+				&& DesktopSyncChatToken(data.vpeer_id(), _selfUserId) == _chat;
 		}, [&](const MTPDmessageEmpty &data) {
 			valid = data.vid().v > 0 && data.vpeer_id()
-				&& DesktopSyncChatToken(*data.vpeer_id(), _selfUserId) == PeerToken{};
+				&& DesktopSyncChatToken(*data.vpeer_id(), _selfUserId) == _chat;
 		});
 		if (!valid) {
 			return refuse();

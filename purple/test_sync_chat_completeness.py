@@ -35,7 +35,7 @@ scanner = (repo / 'Telegram/SourceFiles/purple/purple_sync_history_scanner.cpp')
 source = repo / 'purple/test_sync_chat_review_t1.cpp'
 reviewer = source.read_text()
 layout = 'SyncHistoryPages _pages;'
-extra = layout + '\n DesktopSyncChatHistoryGuard _modernHistory{123};'
+extra = layout + '\n DesktopSyncChatHistoryGuard _modernHistory{123};\n bool Current() const { return true; }'
 assert reviewer.count(layout) == 1
 adapted = reviewer.replace(layout, extra)
 (work / 'reviewer-layout-adapted.cpp').write_text(adapted)
@@ -67,5 +67,5 @@ with (work / 'build.log').open('w') as log:
     'linked_inputs_sha256': {value: hashlib.sha256(Path(value).read_bytes()).hexdigest() for item in commands for value in item['link'] if Path(value).is_file() and value != str(work / item['label'])},
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     'fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_completeness.cpp').read_bytes()).hexdigest(),
-    'boundary': 'Unchanged reviewer source and assertions. Derived translation unit adds only new production guard state to the transport stub; full callbacks extracted from current production. Reviewer expected two dropped-status failures, independently explained. Corrected complete fixture forwards real service reply mapping.'}, indent=2) + '\n')
+    'boundary': 'Unchanged reviewer source and assertions. Derived translation unit adds production guard state and a current-authority endpoint to the transport stub; full callbacks extracted from current production. Reviewer expected two dropped-status failures, independently explained. Corrected complete fixture forwards real service reply mapping.'}, indent=2) + '\n')
 print('compiled completeness and preserved-reviewer fixtures')
