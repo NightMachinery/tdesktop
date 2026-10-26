@@ -695,3 +695,6 @@ an unchanged production Apply body through opaque session-boundary shims; run
 `python3 purple/test_sync_auto.py --build-dir <configured-Debug-tree>` after the
 Debug build. This does not qualify native dialogs, encrypted session storage or
 real server mutations.
+
+The source-only [sync-chat adapter](sync_chat.md) documents native ownership and
+full-info facts for the separately gated M2B4 discovery work.
