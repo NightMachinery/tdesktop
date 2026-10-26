@@ -203,6 +203,12 @@ PRIVATE
     purple/purple_sync_config_review.h
     purple/purple_sync_config_text.cpp
     purple/purple_sync_config_text.h
+    purple/purple_sync_chat_create.cpp
+    purple/purple_sync_chat_create.h
+    purple/purple_sync_chat_create_store.cpp
+    purple/purple_sync_chat_create_store.h
+    purple/purple_sync_chat_create_requests.cpp
+    purple/purple_sync_chat_create_requests.h
     purple/purple_sync_chat_setup.cpp
     purple/purple_sync_chat_setup.h
     purple/purple_sync_chat_peer_request.cpp
