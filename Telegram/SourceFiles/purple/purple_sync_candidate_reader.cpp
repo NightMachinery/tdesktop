@@ -26,10 +26,12 @@ SyncCandidateReader::SyncCandidateReader(
 		not_null<Main::Session*> session,
 		std::vector<int32_t> candidateIds,
 		Fn<void(SyncCandidateReadResult)> finished,
-		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
+		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned,
+		std::optional<AccountRoutingSnapshot> routing)
 : _session(session)
 , _sessionGuard(base::make_weak(session))
-, _opening(AccountSyncInspectionTarget(session))
+, _opening(routing ? std::nullopt : AccountSyncInspectionTarget(session))
+, _routing(std::move(routing))
 , _api(&session->mtp(), [this] { return Current(); })
 , _candidateIds(std::move(candidateIds))
 , _finished(std::move(finished))
@@ -42,8 +44,9 @@ SyncCandidateReader::SyncCandidateReader(
 		DesktopSyncChatIo route,
 		std::vector<int32_t> candidateIds,
 		Fn<void(SyncCandidateReadResult)> finished,
-		Fn<bool()> current)
-: SyncCandidateReader(session, std::move(candidateIds), std::move(finished)) {
+		Fn<bool()> current,
+		std::optional<AccountRoutingSnapshot> routing)
+: SyncCandidateReader(session, std::move(candidateIds), std::move(finished), {}, std::move(routing)) {
 	_route = std::move(route);
 	_current = std::move(current);
 	_owned = [peer = _route->peer](const MTPMessage &message) {
@@ -53,8 +56,9 @@ SyncCandidateReader::SyncCandidateReader(
 }
 
 bool SyncCandidateReader::Current() const {
-	return _sessionGuard && _opening
-		&& ValidateAccountSyncTarget(_session, *_opening)
+	return _sessionGuard
+		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
+			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)
 			&& _current && _current()));

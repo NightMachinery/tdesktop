@@ -60,7 +60,7 @@ namespace {
 		const SyncConfigApplyFailure &failure) {
 	switch (failure.status) {
 	case SyncConfigApplyStatus::NeedsRecheck:
-		return u"settings or Saved Messages changed since the check"_q;
+		return u"settings or the selected sync chat changed since the check"_q;
 	case SyncConfigApplyStatus::NeedsReview:
 	case SyncConfigApplyStatus::InvalidChoice:
 		return u"that choice is no longer available"_q;
@@ -108,10 +108,10 @@ namespace {
 } // namespace
 
 QString SyncCloudDisclosureText() {
-	return u"The settings file may contain chat IDs and names. Saved "
-		"Messages is a Telegram cloud chat: it is not end-to-end encrypted, "
-		"and every signed-in session can read it. state.toml stays on this "
-		"device."_q;
+	return u"The settings file may contain chat IDs and names. The selected "
+		"sync chat is a Telegram cloud chat: it is not end-to-end encrypted. "
+		"Its readers and their signed-in sessions can read it. state.toml "
+		"stays on this device."_q;
 }
 
 QString SyncDeviceList(std::vector<QString> names) {
@@ -167,12 +167,12 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 	switch (described.message) {
 	case Message::NeedsReviewWithPending:
 		return { u"A settings post from this device may not have finished, "
-			"but Saved Messages also has sync records this device cannot "
+			"but the selected sync chat also has sync records this device cannot "
 			"safely use: they are ambiguous, unreadable, or in another sync "
 			"space. The earlier post stays paused while they remain. Nothing "
 			"was sent."_q };
 	case Message::NeedsReview:
-		return { u"Saved Messages has sync records this device cannot "
+		return { u"The selected sync chat has sync records this device cannot "
 			"safely use: they are ambiguous, unreadable, or in another sync "
 			"space. Nothing was changed."_q };
 	case Message::Incomplete:
@@ -206,13 +206,13 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 			action,
 		};
 	case Message::InvalidRecords:
-		return { u"A sync record in Saved Messages or this device's sync "
+		return { u"A sync record in the selected sync chat or this device's sync "
 			"state is not valid, so nothing was changed. Check again later; "
 			"if this stays, the records need manual attention."_q };
 	case Message::Pending:
 		return {
 			u"A settings post may not have finished. Finish sending checks "
-				"Saved Messages again and completes it without sending "
+				"the selected sync chat again and completes it without sending "
 				"twice."_q,
 			action,
 		};
@@ -478,7 +478,7 @@ QString SyncConfigApplyFailureText(const SyncConfigApplyResult &result) {
 	case SyncConfigApplyStatus::Applied:
 		return QString();
 	case SyncConfigApplyStatus::NeedsRecheck:
-		return u"Settings or Saved Messages changed since the check, so "
+		return u"Settings or the selected sync chat changed since the check, so "
 			"nothing was done. Check again."_q;
 	case SyncConfigApplyStatus::NeedsReview:
 	case SyncConfigApplyStatus::InvalidChoice:

@@ -687,8 +687,34 @@ bool DesktopAccountConfig::persistPlan(const AccountOwnerStartupPlan &plan,
 	return current();
 }
 
+bool SameAccountRoutingSnapshot(
+		const AccountRoutingSnapshot &a, const AccountRoutingSnapshot &b) {
+	return a.root == b.root && a.owner == b.owner && a.local == b.local
+		&& a.generation == b.generation && a.ready == b.ready
+		&& a.sourceGeneration == b.sourceGeneration
+		&& a.choice.globalAccount == b.choice.globalAccount
+		&& a.choice.rootFileAccount == b.choice.rootFileAccount
+		&& a.choice.accountWorkMode == b.choice.accountWorkMode;
+}
+
+DesktopAccountConfig::DesktopAccountConfig(AccountRoutingSnapshot snapshot)
+: _root(std::move(snapshot.root))
+, _owner(snapshot.owner)
+, _choice(std::move(snapshot.choice))
+, _localInput(std::move(snapshot.local))
+, _generation(snapshot.sourceGeneration)
+, _routingGeneration(snapshot.generation)
+, _persistFailed(!snapshot.ready)
+, _detached(true) {
+}
+
+AccountRoutingSnapshot DesktopAccountConfig::snapshot() const {
+	return { _root, _owner, _choice, _localInput,
+		_routingGeneration, permissionsReady(), _generation };
+}
+
 void DesktopAccountConfig::refreshLocalChoice() {
-	if (!_owner) {
+	if (_detached || !_owner) {
 		return;
 	}
 	const auto input = OwnerInput(absolute(u"local.toml"_q));
@@ -2312,7 +2338,7 @@ void DesktopAccountConfig::setChanged(std::function<void()> changed) {
 }
 
 void DesktopAccountConfig::watch() {
-	if (!QCoreApplication::instance() || !QDir::isAbsolutePath(_root)) {
+	if (_detached || !QCoreApplication::instance() || !QDir::isAbsolutePath(_root)) {
 		return;
 	}
 	if (!_watching) {

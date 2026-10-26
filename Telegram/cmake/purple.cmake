@@ -206,6 +206,8 @@ PRIVATE
     purple/purple_sync_config_upload.cpp
     purple/purple_sync_config_upload.h
     purple/purple_sync_config_publish.cpp
+    purple/purple_sync_config_publish_flow.cpp
+    purple/purple_sync_config_publish_flow.h
     purple/purple_sync_config_publish.h
     purple/purple_sync_config_review.cpp
     purple/purple_sync_config_review.h

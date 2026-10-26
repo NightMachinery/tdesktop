@@ -2,7 +2,7 @@
 
 Status: design plus shared-core foundations and a manual desktop settings
 sync. Desktop's **Sync across devices** box checks one explicitly selected
-account's Saved Messages, reviews the settings records there, and offers one
+account's resolved typed sync chat, reviews its settings records, and offers one
 next step: publish the first record, join a device with the same file, review
 and apply an update, choose between diverged versions, publish local changes,
 or finish an earlier post. Every step runs only when clicked, and every post
@@ -16,6 +16,17 @@ though it arrived, because the uploader dropped the post's receipt; that is
 fixed and awaits a live pass (see the [backlog](backlog.md)). Background checks,
 automatic publish, edit in place, and retirement of superseded records
 remain. The existing manual Send/Import actions remain available.
+
+The manual settings publisher now uses a serial worker for store opening,
+initialization, staging, confirmation and lock release. Self retains a version-1
+ledger; a fresh non-Self destination requires an exact complete Empty inventory
+and initializes a version-2 typed ledger. Canonical record bytes and ancestry
+remain shared with Self. An existing ledger is never moved by setup or a first
+post. GUI admission includes a settings-source epoch, so changing and restoring
+a reviewed source cannot revive its upload or flood wait. See
+[sync-chat setup](sync_chat_setup.md#manual-settings-publication) for consent,
+reconciliation and the separate native qualification boundary. Automatic sync
+remains Self-only. Older milestone notes below describe their original slices.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record

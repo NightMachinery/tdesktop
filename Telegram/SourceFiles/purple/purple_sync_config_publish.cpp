@@ -1,23 +1,16 @@
-/*
-This file is part of Telegram Desktop,
-the official desktop application for the Telegram messaging service.
-
-For license and copyright information please follow this link:
-https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
-*/
 #include "purple/purple_sync_config_publish.h"
 
-#include "purple/purple_sync_chat_scope.h"
-#include "purple/purple_sync_chat_write.h"
-
 #include "base/unixtime.h"
+#include "core/application.h"
+#include "crl/crl_on_main.h"
 #include "main/main_account.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_account_binding.h"
-#include "purple/purple_sync_account_recovery.h"
+#include "purple/purple_sync_chat_write.h"
 
-#include <utility>
+#include <QtGui/QGuiApplication>
 
 namespace Purple {
 
@@ -36,8 +29,31 @@ SyncConfigPublish::SyncConfigPublish(
 , _scanPosts(scanPosts)
 , _finished(std::move(finished))
 , _request(std::move(request))
-, _target(_request.pendingOnly
-	? AccountSyncInspectionTarget(&session) : AccountSyncTarget(&session)) {
+, _routing(CaptureAccountSyncRouting(&session))
+, _bindingToken(AccountSyncBindingToken(account))
+, _admitted(std::make_shared<std::atomic<bool>>(true)) {
+	const auto weak = base::make_weak(this);
+	const auto changed = [weak] {
+		const auto self = weak.get();
+		if (self && !self->_done && !self->AccountAvailable()) { self->Cancel(); }
+	};
+	SettingsChanges() | rpl::on_next(changed, _lifetime);
+	Core::App().appDeactivatedValue() | rpl::on_next([weak](bool inactive) {
+		const auto self = weak.get();
+		if (inactive && self && self->_started && !self->_done) { self->Cancel(); }
+	}, _lifetime);
+	StateChanges() | rpl::on_next(changed, _lifetime);
+	Core::App().passcodeLockChanges() | rpl::on_next([weak](bool locked) {
+		if (locked) { if (const auto self = weak.get()) { self->Cancel(); } }
+	}, _lifetime);
+	account.sessionChanges() | rpl::on_next([weak, expected = &session](Main::Session *live) {
+		if (live != expected) {
+			if (const auto self = weak.get()) { self->Cancel(); }
+		}
+	}, _lifetime);
+	session.lifetime().add([weak] {
+		if (const auto self = weak.get()) { self->Cancel(); }
+	});
 }
 
 SyncConfigPublish::SyncConfigPublish(
@@ -47,253 +63,164 @@ SyncConfigPublish::SyncConfigPublish(
 		SyncConfigSendQueue scanQueue,
 		uint64_t scanPosts,
 		Fn<void(SyncConfigPublishResult)> finished,
-		SyncConfigPublishRequest request)
+		SyncConfigPublishRequest request,
+		std::optional<DesktopSyncChatSetupSnapshot> setup,
+		Fn<bool()> current, bool initializeOnly)
 : SyncConfigPublish(account, session, std::move(inventory.inventory),
 	scanQueue, scanPosts, std::move(finished), std::move(request)) {
 	_inventoryRoute = std::move(inventory.route);
+	_setup = std::move(setup);
+	_current = std::move(current);
+	_initializeOnly = initializeOnly;
 }
 
 SyncConfigPublish::~SyncConfigPublish() {
+	_admitted->store(false);
 	_done = true;
-	if (_post) {
-		_post->Cancel();
-	}
+	if (_post) { _post->Cancel(); }
+	_worker.reset();
 }
 
 bool SyncConfigPublish::AccountAvailable() const {
 	const auto account = _account.get();
 	const auto session = _session.get();
-	return account
-		&& session
-		&& _target && ValidateAccountSyncTarget(session, *_target)
-		&& (_bindingToken.isEmpty() || AccountSyncBindingToken(*account) == _bindingToken)
-		&& (_storeInput.state != SettingsFileState::Readable
-			|| ValidateAccountSyncStoreTarget(session, *_target, _storeInput))
-		&& SyncAccountAvailable(*account, *session, _inventory.accountUserId)
-		&& (!_inventoryRoute || (ValidDesktopSyncChatIo(*_inventoryRoute)
-			&& _inventoryRoute->peer.origin.account == SessionAccountKey(session)));
+	return !_done && _admitted->load() && account && session && _routing
+		&& QGuiApplication::applicationState() == Qt::ApplicationActive
+		&& !Core::App().passcodeLocked()
+		&& AccountSyncRoutingCurrent(session, *_routing)
+		&& !account->loggingOut() && account->maybeSession() == session
+		&& SessionAccountKey(session).userId == _inventory.accountUserId
+		&& AccountSyncBindingToken(*account) == _bindingToken
+		&& (!_current || _current())
+		&& (!_setup || CachedSyncChatSetupContextCurrent(session, _setup->scope))
+		&& (!_inventoryRoute || SyncChatIoBelongsToSession(session, *_inventoryRoute));
 }
 
 void SyncConfigPublish::Start() {
-	if (_started || _done) {
-		return;
-	}
+	if (_started || _done) { return; }
 	_started = true;
-	if (!AccountAvailable()) {
-		Finish({ SyncConfigPublishStatus::AccountUnavailable });
-		return;
-	}
-	if (_inventoryRoute && !SyncChatIoBelongsToSession(_session.get(), *_inventoryRoute)) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	const auto recovery = InspectSyncAccountRecovery(*_session.get(), &_inventory);
-	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Bound) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	_store = std::make_unique<SyncLocalStore>(
-		_target->files.syncDirectory);
-	const auto opened = _store->Open(true);
-	if (opened.status != SyncStoreStatus::Ready || !_store->state()) {
-		Finish({ SyncConfigPublishStatus::StoreError,
-			opened.status == SyncStoreStatus::Ready
-				? SyncStoreStatus::InvalidState : opened.status });
-		return;
-	}
-	const auto state = _store->state();
-	if (!DesktopSyncChatLedgerMatches(*state, _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{})) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	const auto account = _account.get();
-	if (CheckAccountSyncBinding(*state, *account)
-			!= SyncAccountBindingVerdict::Bound) {
-		Finish({ SyncConfigPublishStatus::AccountUnbound });
-		return;
-	}
-	const auto entry = PlanSyncConfigPublishEntry(
-		_request,
-		state->config.pendingSeq != 0);
-	if (entry == SyncConfigPublishEntry::Refuse) {
-		Finish({ SyncConfigPublishStatus::NeedsReview });
-		return;
-	}
-	const auto token = AccountSyncBindingToken(*account);
 	if (!AccountAvailable()) { Finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }
-	_target = _request.pendingOnly
-		? AccountSyncInspectionTarget(_session.get()) : AccountSyncTarget(_session.get());
-	if (!_target) { Finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }
-	_bindingToken = token;
-	_storeInput = ReadSettingsFileInput(_target->files.syncStore);
-	auto staged = QByteArray();
-	if (state->config.pendingSeq) {
-		const auto pending = _store->ReadPendingConfig();
-		if (!pending) {
-			Finish({ SyncConfigPublishStatus::StoreError, pending.status });
-			return;
-		}
-		staged = pending.staged;
-		if (!AccountSyncRecordSupported(staged)) {
-			Finish({ SyncConfigPublishStatus::NeedsReview });
-			return;
-		}
+	const auto session = _session.get();
+	const auto chat = _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{};
+	auto input = SyncConfigPublishDiskInput();
+	input.routing = *_routing;
+	input.account = SessionAccountKey(session);
+	input.chat = chat;
+	input.binding = _bindingToken;
+	input.setup = _setup;
+	input.inventory = _inventory;
+	input.request = _request;
+	input.writer = SyncWriter();
+	input.now = int64_t(base::unixtime::now());
+	input.initializeOnly = _initializeOnly;
+	input.queue = _scanQueue == SyncConfigSendQueue::HoldsSyncRecord
+		|| SyncConfigPostsStarted(session, chat) != _scanPosts
+		? SyncConfigSendQueue::HoldsSyncRecord : SyncConfigSendQueueOf(session, chat);
+	for (const auto &entry : Core::App().domain().accounts()) {
+		if (entry.account.get() == _account.get()) { continue; }
+		const auto live = entry.account->maybeSession();
+		const auto token = AccountSyncBindingToken(*entry.account);
+		if (!live && !token.isEmpty()) { Finish({ SyncConfigPublishStatus::NeedsReview }); return; }
+		if (live) { input.otherPreferences.push_back({ SessionAccountKey(live), token }); }
 	}
-	const auto local = (entry == SyncConfigPublishEntry::NewContent)
-		? ReadSyncSettingsFile(_target->files)
-		: SyncSettingsFile();
-	const auto queue = (_scanQueue == SyncConfigSendQueue::HoldsSyncRecord
-			|| SyncConfigPostsStarted(not_null<Main::Session*>{ _session.get() }, state->chat) != _scanPosts)
-		? SyncConfigSendQueue::HoldsSyncRecord
-		: SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() }, state->chat);
-	const auto plan = PlanSyncConfigPost(
-		*state,
-		token,
-		staged,
-		_inventory,
-		local,
-		_request,
-		int64_t(base::unixtime::now()),
-		SyncWriter(),
-		queue);
-	switch (plan.step) {
-	case SyncConfigPostStep::Finish:
-		Finish({ plan.status });
-		return;
-	case SyncConfigPostStep::ConfirmFound: {
-		const auto confirmed = _store->ConfirmConfigReadBack(
-			plan.record,
-			state->createdDevice,
-			plan.messageId, state->chat);
-		Finish(confirmed
-			? SyncConfigPublishResult{
-				SyncConfigPublishStatus::Confirmed,
-				std::nullopt,
-				plan.messageId }
-			: SyncConfigPublishResult{
-				SyncConfigPublishStatus::StoreError,
-				confirmed.status });
-	} return;
-	case SyncConfigPostStep::Stage: {
-		const auto stagedResult = _store->StageConfig(
-			plan.record,
-			plan.nextConfigData,
-			token);
-		if (!stagedResult) {
-			Finish({
-				SyncConfigPublishStatus::StoreError,
-				stagedResult.status,
+	const auto weak = base::make_weak(this);
+	_worker = std::make_unique<crl::object_on_queue<SyncConfigPublishFlow>>(
+		std::move(input), std::shared_ptr<std::atomic<bool>>(_admitted),
+		[weak](SyncConfigPublishDiskReply reply) {
+			crl::on_main([weak, reply = std::move(reply)]() mutable {
+				if (const auto self = weak.get(); self && !self->_done) { self->Receive(std::move(reply)); }
 			});
-			return;
-		}
-		_storeInput = ReadSettingsFileInput(_target->files.syncStore);
-		PlanPost(*_store->state(), plan.own, stagedResult.staged, token);
-	} return;
-	case SyncConfigPostStep::Post:
-		StartPost(plan.record);
-		return;
-	}
+		});
+	_worker->with([](SyncConfigPublishFlow &flow) { flow.start(); });
 }
 
-void SyncConfigPublish::PlanPost(
-		const SyncLocalState &state,
-		const SyncOwnInventoryResult &own,
-		const QByteArray &staged,
-		const QByteArray &token) {
-	if (!AccountAvailable()) {
-		Finish({ SyncConfigPublishStatus::AccountUnavailable });
+void SyncConfigPublish::Receive(SyncConfigPublishDiskReply reply) {
+	if (!AccountAvailable()) { Cancel(); return; }
+	if (reply.step == SyncConfigPublishDiskStep::Finished) { Finish(reply.result); return; }
+	if (reply.step == SyncConfigPublishDiskStep::Binding) {
+		if (!reply.initial || !StoreAccountSyncBinding(*reply.initial, *_account.get())) {
+			Finish({ SyncConfigPublishStatus::AccountUnbound }); return;
+		}
+		_bindingToken = AccountSyncBindingToken(*_account.get());
+		if (_setup) { _setup->scope.binding = _bindingToken; }
+		_worker->with([token = _bindingToken](SyncConfigPublishFlow &flow) { flow.bindingCommitted(token); });
 		return;
 	}
-	const auto plan = PlanSyncConfigStagedPost(state, token, own, staged);
-	if (plan.step != SyncConfigPostStep::Post) {
-		Finish({ plan.status });
-		return;
-	}
-	StartPost(plan.record);
+	_directory = std::move(reply.directory);
+	StartPost(reply.staged);
+}
+
+void SyncConfigPublish::Renew(Fn<void(bool)> ready) {
+	if (!AccountAvailable() || !_worker) { ready(false); return; }
+	const auto weak = base::make_weak(this);
+	_worker->with([weak, ready = std::move(ready)](SyncConfigPublishFlow &flow) {
+		const auto allowed = flow.authorize();
+		crl::on_main([weak, ready = std::move(ready), allowed] {
+			const auto self = weak.get();
+			ready(allowed && self && self->AccountAvailable());
+		});
+	});
 }
 
 void SyncConfigPublish::StartPost(const QByteArray &staged) {
-	if (!AccountAvailable()) {
-		Finish({ SyncConfigPublishStatus::AccountUnavailable });
-		return;
+	if (!AccountAvailable()) { Cancel(); return; }
+	const auto chat = _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{};
+	if (SyncConfigPostsStarted(_session.get(), chat) != _scanPosts
+		|| SyncConfigSendQueueOf(_session.get(), chat) != SyncConfigSendQueue::Empty) {
+		Finish({ SyncConfigPublishStatus::StillSending }); return;
 	}
 	const auto weak = base::make_weak(this);
-	const auto finished = [weak](SyncConfigPostResult result) {
-		if (const auto self = weak.get(); self && !self->_done) {
-			self->OnPost(std::move(result));
-		}
-	};
 	const auto current = [weak] {
-		const auto self = weak.get();
-		return self && !self->_done && self->_store
-			&& self->_store->state() && self->AccountAvailable();
+		const auto self = weak.get(); return self && self->AccountAvailable();
 	};
 	const auto operation = DesktopSyncChatOperation{
-		_store->directory(), SessionAccountKey(_session.get()), current };
+		.directory = _directory,
+		.account = SessionAccountKey(_session.get()),
+		.current = current,
+		.routing = _routing,
+		.authorize = [weak](Fn<void(bool)> ready) {
+			if (const auto self = weak.get()) { self->Renew(std::move(ready)); }
+			else { ready(false); }
+		},
+	};
+	const auto finished = [weak](SyncConfigPostResult result) {
+		if (const auto self = weak.get(); self && !self->_done) { self->OnPost(std::move(result)); }
+	};
 	if (_inventoryRoute) {
 		_post = std::make_unique<SyncConfigPost>(
-			not_null<Main::Session*>{ _session.get() }, *_inventoryRoute,
-			staged, finished, current, operation);
+			_session.get(), *_inventoryRoute, staged, finished, current, operation);
 	} else {
 		_post = std::make_unique<SyncConfigPost>(
-			not_null<Main::Session*>{ _session.get() }, staged,
-			finished, current, operation);
+			_session.get(), staged, finished, current, operation);
 	}
 	_posted = true;
 	_post->Start();
 }
 
 void SyncConfigPublish::OnPost(SyncConfigPostResult result) {
+	if (!AccountAvailable() || !_worker) { Finish({ SyncConfigPublishStatus::OutcomeUnknown }); return; }
 	if (result.status == SyncConfigPostStatus::Confirmed) {
-		if (!AccountAvailable()) {
-			Finish({ SyncConfigPublishStatus::OutcomeUnknown });
-			return;
-		}
-		const auto confirmed = _store->ConfirmConfigReadBack(
-			result.readback,
-			_store->state()->createdDevice,
-			int32_t(result.messageId.bare),
-			_store->state()->chat);
-		Finish(confirmed
-			? SyncConfigPublishResult{
-				SyncConfigPublishStatus::Confirmed,
-				std::nullopt,
-				int32_t(result.messageId.bare) }
-			: SyncConfigPublishResult{
-				SyncConfigPublishStatus::StoreError,
-				confirmed.status });
+		_worker->with([bytes = std::move(result.readback), id = int32_t(result.messageId.bare)](
+				SyncConfigPublishFlow &flow) { flow.confirm(bytes, id); });
 	} else {
-		Finish({
-			result.status == SyncConfigPostStatus::NeedsReview
-				|| result.status == SyncConfigPostStatus::InvalidRecord
-				? SyncConfigPublishStatus::NeedsReview
-				: SyncConfigPublishStatus::OutcomeUnknown,
-		});
+		Finish({ result.status == SyncConfigPostStatus::NeedsReview
+			|| result.status == SyncConfigPostStatus::InvalidRecord
+			? SyncConfigPublishStatus::NeedsReview : SyncConfigPublishStatus::OutcomeUnknown });
 	}
 }
 
 void SyncConfigPublish::Cancel() {
-	if (_done) {
-		return;
-	}
-	if (_post) {
-		_post->Cancel();
-	} else {
-		Finish({ _posted
-			? SyncConfigPublishStatus::OutcomeUnknown
-			: SyncConfigPublishStatus::Cancelled });
-	}
+	if (_done) { return; }
+	Finish({ _posted ? SyncConfigPublishStatus::OutcomeUnknown : SyncConfigPublishStatus::Cancelled });
 }
 
 void SyncConfigPublish::Finish(SyncConfigPublishResult result) {
-	if (_done) {
-		return;
-	}
+	if (_done) { return; }
 	_done = true;
-	_store.reset();
-	if (auto finished = std::move(_finished)) {
-		finished(std::move(result));
-	}
+	_admitted->store(false);
+	if (_post) { _post->Cancel(); }
+	_worker.reset();
+	if (auto finished = std::move(_finished)) { finished(std::move(result)); }
 }
 
-} // namespace Purple
+}

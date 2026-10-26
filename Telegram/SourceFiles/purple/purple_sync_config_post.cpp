@@ -129,7 +129,7 @@ SyncConfigPost::SyncConfigPost(
 : _session(session)
 , _sessionGuard(base::make_weak(session))
 , _staged(std::move(staged))
-, _target(AccountSyncInspectionTarget(session))
+, _target(operation.routing ? std::nullopt : AccountSyncInspectionTarget(session))
 , _finished(std::move(finished))
 , _stillCurrent(std::move(stillCurrent))
 , _operation(std::move(operation)) {
@@ -155,7 +155,10 @@ SyncConfigPost::~SyncConfigPost() {
 }
 
 bool SyncConfigPost::ContextCurrent() const {
-	return _sessionGuard && _target && ValidateAccountSyncTarget(_session, *_target)
+	return _sessionGuard
+		&& (_operation.routing
+			? (_operation.authorize && AccountSyncRoutingCurrent(_session, *_operation.routing))
+			: (_target && ValidateAccountSyncTarget(_session, *_target)))
 		&& _stillCurrent && _stillCurrent()
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)))
@@ -253,7 +256,7 @@ void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->OnReadback(std::move(result));
 			}
-		});
+		}, _operation.routing);
 	_reader->Start();
 }
 

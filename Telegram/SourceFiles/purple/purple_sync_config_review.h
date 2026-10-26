@@ -36,6 +36,7 @@ namespace Purple {
 [[nodiscard]] SyncConfigReview ReviewSyncConfig(
 	Main::Account &account,
 	Main::Session &session,
-	const SyncAccountInventoryResult &inventory);
+	const SyncAccountInventoryResult &inventory,
+	PeerToken chat = {});
 
 } // namespace Purple

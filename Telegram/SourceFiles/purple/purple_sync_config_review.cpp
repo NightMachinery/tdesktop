@@ -134,7 +134,7 @@ SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files) {
 SyncConfigReview ReviewSyncConfig(
 		Main::Account &account,
 		Main::Session &session,
-		const SyncAccountInventoryResult &inventory) {
+		const SyncAccountInventoryResult &inventory, PeerToken chat) {
 	auto result = SyncConfigReview();
 	result.accountUserId = inventory.accountUserId;
 	if (!SyncAccountAvailable(account, session, inventory.accountUserId)) {
@@ -168,7 +168,7 @@ SyncConfigReview ReviewSyncConfig(
 	const auto parsed = ParseSyncLocalState(snapshot.store.state);
 	if (!parsed) { result.status = SyncConfigReviewStatus::StoreError; return result; }
 	const auto state = &parsed.state;
-	if (!DesktopSyncChatLedgerMatches(*state, {})) {
+	if (!DesktopSyncChatLedgerMatches(*state, chat)) {
 		result.status = SyncConfigReviewStatus::NeedsReview;
 		return result;
 	}

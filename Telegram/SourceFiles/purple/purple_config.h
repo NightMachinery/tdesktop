@@ -23,6 +23,13 @@ namespace Purple {
 // Fork-local configuration, kept as hand-editable TOML outside Telegram's own
 // encrypted settings blob. See docs/purple/config.md.
 [[nodiscard]] QString ConfigDirectory();
+[[nodiscard]] std::optional<AccountRoutingSnapshot> CaptureAccountSyncRouting(
+	not_null<Main::Session*> session);
+[[nodiscard]] bool AccountSyncRoutingCurrent(
+	not_null<Main::Session*> session, const AccountRoutingSnapshot &snapshot);
+[[nodiscard]] bool CachedAccountSyncOperationsAllowed(
+	not_null<Main::Session*> session);
+
 [[nodiscard]] QString SettingsFilePath();
 [[nodiscard]] QString LastGoodSettingsFilePath();
 [[nodiscard]] QString StateFilePath();

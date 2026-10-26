@@ -117,3 +117,10 @@ artwork may continue; permanent document failures keep their own cooldown. Its
 outer request timeout is removed so it cannot turn an extended short wait into
 a document failure. Media loading retains its separate timeout. The complete
 Purple inventory now covers sixteen managed request sites.
+
+Manual settings publication keeps its worker-owned store and RAM capability
+through a transient request. Every resumed definite send first renews R3/full-info
+and then asks that worker to validate the unchanged source and pending store.
+No staged file or routing target is reread on the GUI thread. Edits retain their
+additional exact owned-target gate. Cancellation revokes the capability and
+releases the worker/store while preserving pending reconciliation evidence.

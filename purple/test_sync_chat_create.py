@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', default='test_sync_chat_create.cpp', choices=['test_sync_chat_create.cpp', 'test_sync_chat_d8_record_exact.cpp', 'test_sync_chat_c6_late_warning.cpp', 'test_sync_chat_setup_flow.cpp', 'test_sync_chat_setup_transport.cpp', 'test_sync_chat_setup_lifecycle.cpp'])
+parser.add_argument('--test-source', default='test_sync_chat_create.cpp', choices=['test_sync_chat_create.cpp', 'test_sync_chat_d8_record_exact.cpp', 'test_sync_chat_c6_late_warning.cpp', 'test_sync_chat_setup_flow.cpp', 'test_sync_chat_setup_transport.cpp', 'test_sync_chat_setup_lifecycle.cpp', 'test_sync_config_publish.cpp'])
 parser.add_argument('--external-test-source', type=Path)
 parser.add_argument('--reuse-unit-dir', required=True, type=Path)
 parser.add_argument('--reuse-support-dir', required=True, type=Path)
@@ -106,6 +106,16 @@ for method in ['SendNextPart', 'SendMedia', 'RenewBeforePost', 'ResumeEffect', '
 for method in ['OnReceipt', 'OnReadback', 'Finish', 'Cancel']:
     (work / ('post-' + method + '.inc')).write_text(block(post, 'void SyncConfigPost::' + method + '('))
 
+publisher = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_publish.cpp').read_text()
+for method in ['Cancel', 'Finish', 'OnPost']:
+    (work / ('publisher-' + method + '.inc')).write_text(block(publisher, 'void SyncConfigPublish::' + method + '('))
+(work / 'publisher-source-change.inc').write_text(block(publisher, 'const auto changed = [weak]'))
+config = (repo / 'Telegram/SourceFiles/purple/purple_config.cpp').read_text()
+(work / 'publisher-routing-current.inc').write_text(block(config, 'bool AccountSyncRoutingCurrent('))
+retry = (repo / 'Telegram/SourceFiles/purple/purple_sync_request_sender.cpp').read_text()
+for method in ['cancelAll', 'cancel', 'dispatch', 'failed', 'arm', 'tick', 'resume']:
+    (work / ('publisher-retry-' + method + '.inc')).write_text(block(retry, 'void SyncRequestSender::' + method + '(').replace('crl::now()', 'PublishMono').replace('base::unixtime::now()', 'PublishUnix'))
+
 setup_transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_transport.cpp').read_text()
 for method in ['current', 'cancel', 'renewEffect', 'renewPeer', 'renewMark', 'approveRenewal', 'finishRenewal']:
     prefix = 'bool' if method == 'current' else 'void'
@@ -136,6 +146,7 @@ recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=
 recipe[1:1] = ['-g0']
 objects = []
 compiled = []
+publish_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp') for name in ['purple_sync_config_publish_flow', 'purple_account_config', 'purple_config_file', 'purple_sync_config_review', 'purple_sync_account_recovery', 'purple_sync_auto_transport']] if test_name == 'test_sync_config_publish' else []
 with (work / 'build.log').open('w') as log:
     for source in [test_source,
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp',
@@ -143,7 +154,7 @@ with (work / 'build.log').open('w') as log:
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create_requests.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_flow.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_requests.cpp',
-                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_facts.cpp']:
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_facts.cpp', *publish_sources]:
         target = work / (source.stem + '.o')
         command = recipe[:]
         for flag, value in [('-c', str(source)), ('-o', str(target)),
@@ -160,7 +171,7 @@ with (work / 'build.log').open('w') as log:
         if '/Telegram/' not in source:
             continue
         original = Path(source)
-        if original.stem == 'purple_sync_chat_facts':
+        if original.stem == 'purple_sync_chat_facts' or original in publish_sources:
             continue
         current = repo / 'Telegram' / source.split('/Telegram/', 1)[1]
         assert hashlib.sha256(current.read_bytes()).hexdigest() == digest, current
@@ -218,7 +229,7 @@ with (work / 'build.log').open('w') as log:
     'included_create_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_create.cpp').read_bytes()).hexdigest(),
     'included_write_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_write.cpp').read_bytes()).hexdigest(),
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-    'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'service-scope.inc', work / 'service-selection.inc', work / 'service-completion.inc', work / 'auto-operation.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + list(work.glob('setup-transport-*.inc')) + [work / 'setup-finish-resume.inc', work / 'setup-restore-fresh.inc'] + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
+    'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'service-scope.inc', work / 'service-selection.inc', work / 'service-completion.inc', work / 'auto-operation.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + list(work.glob('publisher-*.inc')) + list(work.glob('setup-transport-*.inc')) + [work / 'setup-finish-resume.inc', work / 'setup-restore-fresh.inc'] + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
     'headers_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in (repo / 'Telegram/SourceFiles/purple').glob('purple_sync_chat_*.h')},
     'sources_sha256': {str(source): hashlib.sha256(Path(source).read_bytes()).hexdigest()
                        for source in [c[c.index('-c') + 1] for c in compiled]},

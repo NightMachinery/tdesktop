@@ -32,13 +32,15 @@ public:
 			not_null<Main::Session*> session,
 			Fn<void(uint64_t)> progress,
 			Fn<void(SyncHistoryScanResult)> finished,
-			Fn<SyncChatMessageOwnership(const MTPMessage &)> owned = {});
+			Fn<SyncChatMessageOwnership(const MTPMessage &)> owned = {},
+		std::optional<AccountRoutingSnapshot> routing = std::nullopt);
 	SyncHistoryScanner(
 		not_null<Main::Session*> session,
 		DesktopSyncChatIo route,
 		Fn<void(uint64_t)> progress,
 		Fn<void(SyncHistoryScanResult)> finished,
-		Fn<bool()> current);
+		Fn<bool()> current,
+		std::optional<AccountRoutingSnapshot> routing = std::nullopt);
 	~SyncHistoryScanner();
 
 	SyncHistoryScanner(const SyncHistoryScanner &) = delete;
@@ -55,6 +57,7 @@ private:
 	not_null<Main::Session*> _session;
 	base::weak_ptr<Main::Session> _sessionGuard;
 	std::optional<AccountOperationTarget> _opening;
+	std::optional<AccountRoutingSnapshot> _routing;
 	std::optional<DesktopSyncChatIo> _route;
 	Fn<bool()> _current;
 	SyncRequestSender _api;

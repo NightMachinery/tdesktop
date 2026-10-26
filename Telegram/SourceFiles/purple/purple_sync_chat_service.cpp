@@ -177,7 +177,7 @@ public:
 	DesktopSyncChatStatus status() const;
 	std::optional<DesktopSyncChatSetupSnapshot> Setup() const;
 	bool Owns(Main::Session* session) const;
-	bool SetupContextCurrent(const DesktopSyncChatDiscoveryScope &scope) const;
+	bool SetupContextCurrent(const DesktopSyncChatDiscoveryScope &scope, bool cached = false) const;
 	std::optional<DesktopSyncChatLease> Lease(PeerToken chat);
 	bool HasOrigin(const DesktopSyncChatIo &route) const;
 	DesktopSyncChatDiscoveryScope ScopeFor(
@@ -340,7 +340,10 @@ bool SyncChatSession::ContextMatches() const {
 		&& !session->account().loggingOut()
 		&& session->account().maybeSession() == session
 		&& SessionAccountKey(session) == _origin.account
-		&& AccountSyncOperationsAllowed(session) && ConfigDirectory() == _root
+		&& (_operation.routing && _operation.authorize
+			? AccountSyncRoutingCurrent(session, *_operation.routing)
+			: AccountSyncOperationsAllowed(session))
+		&& ConfigDirectory() == _root
 		&& SettingsStartupOwner() == _owner
 		&& AccountWorkModeForSession(session) == _mode
 		&& AccountSyncBindingToken(session->account()) == _binding
@@ -350,12 +353,13 @@ bool SyncChatSession::ContextMatches() const {
 }
 
 bool SyncChatSession::SetupContextCurrent(
-		const DesktopSyncChatDiscoveryScope &scope) const {
+		const DesktopSyncChatDiscoveryScope &scope, bool cached) const {
 	const auto session = _session.get();
 	if (!session || scope.origin != _origin
 		|| SessionAccountKey(session) != scope.origin.account
 		|| session->account().maybeSession() != session || session->account().loggingOut()
-		|| !AccountSyncOperationsAllowed(session) || ConfigDirectory() != scope.root
+		|| !(cached ? CachedAccountSyncOperationsAllowed(session)
+			: AccountSyncOperationsAllowed(session)) || ConfigDirectory() != scope.root
 		|| SettingsStartupOwner() != scope.owner || AccountWorkModeForSession(session) != scope.mode
 		|| AccountSyncBindingToken(session->account()) != scope.binding) {
 		return false;
@@ -477,7 +481,9 @@ void SyncChatSession::Begin(bool retry) {
 	_retryLocalOpen = false;
 	const auto session = _session.get();
 	if (!session || session->account().loggingOut()
-		|| !AccountSyncOperationsAllowed(session)) {
+		|| !(_operation.routing && _operation.authorize
+			? AccountSyncRoutingCurrent(session, *_operation.routing)
+			: AccountSyncOperationsAllowed(session))) {
 		Cancel(u"account-not-available"_q);
 		return;
 	}
@@ -809,7 +815,7 @@ void SyncChatSession::Run() {
 					return self && self->Current() && self->_model
 						&& self->_origin == command.origin && self->_run == command.run
 						&& self->_model->command().ticket == command.ticket;
-				});
+				}, live->_operation.routing);
 			live->_inventory->Start();
 		});
 	} else {
@@ -1097,6 +1103,11 @@ std::optional<DesktopSyncChatSetupSnapshot> SyncChatSetupSnapshotOf(
 bool SyncChatSetupContextCurrent(not_null<Main::Session*> session,
 		const DesktopSyncChatDiscoveryScope &scope) {
 	return For(session).SetupContextCurrent(scope);
+}
+
+bool CachedSyncChatSetupContextCurrent(not_null<Main::Session*> session,
+		const DesktopSyncChatDiscoveryScope &scope) {
+	return For(session).SetupContextCurrent(scope, true);
 }
 
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {

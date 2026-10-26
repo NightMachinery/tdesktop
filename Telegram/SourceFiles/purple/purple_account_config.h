@@ -255,9 +255,24 @@ struct ManualSettingsExportTarget {
 
 [[nodiscard]] bool AccountFilteringEnabled(bool active, AccountWorkMode mode);
 
+struct AccountRoutingSnapshot {
+	QString root;
+	std::optional<AccountKey> owner;
+	LocalChoice choice;
+	SettingsFileInput local;
+	uint64_t generation = 0;
+	bool ready = false;
+	uint64_t sourceGeneration = 1;
+};
+
+[[nodiscard]] bool SameAccountRoutingSnapshot(
+	const AccountRoutingSnapshot &a, const AccountRoutingSnapshot &b);
+
 class DesktopAccountConfig final {
 public:
 	explicit DesktopAccountConfig(QString root);
+	explicit DesktopAccountConfig(AccountRoutingSnapshot snapshot);
+	[[nodiscard]] AccountRoutingSnapshot snapshot() const;
 	~DesktopAccountConfig();
 
 	void start(std::vector<StartupAccountCandidate> accounts,
@@ -407,6 +422,7 @@ private:
 	std::map<QString, QByteArray> _listObservations;
 	bool _persistFailed = false;
 	bool _watching = false;
+	bool _detached = false;
 
 };
 

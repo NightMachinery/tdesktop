@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/weak_ptr.h"
+#include "crl/crl_object_on_queue.h"
+#include "purple/purple_sync_config_publish_flow.h"
 #include "purple/purple_sync_account_inventory.h"
 #include "purple/purple_sync_config_post.h"
 #include "purple/purple_sync_config_review.h"
@@ -24,12 +26,6 @@ class Session;
 }
 
 namespace Purple {
-
-struct SyncConfigPublishResult {
-	SyncConfigPublishStatus status = SyncConfigPublishStatus::Incomplete;
-	std::optional<SyncStoreStatus> storeStatus;
-	int32_t messageId = 0;
-};
 
 class SyncConfigPublish final : public base::has_weak_ptr {
 public:
@@ -48,7 +44,10 @@ public:
 		SyncConfigSendQueue scanQueue,
 		uint64_t scanPosts,
 		Fn<void(SyncConfigPublishResult)> finished,
-		SyncConfigPublishRequest request);
+		SyncConfigPublishRequest request,
+		std::optional<DesktopSyncChatSetupSnapshot> setup = std::nullopt,
+		Fn<bool()> current = {},
+		bool initializeOnly = false);
 	~SyncConfigPublish();
 
 	SyncConfigPublish(const SyncConfigPublish &) = delete;
@@ -59,11 +58,8 @@ public:
 
 private:
 	[[nodiscard]] bool AccountAvailable() const;
-	void PlanPost(
-		const SyncLocalState &state,
-		const SyncOwnInventoryResult &own,
-		const QByteArray &staged,
-		const QByteArray &token);
+	void Receive(SyncConfigPublishDiskReply reply);
+	void Renew(Fn<void(bool)> ready);
 	void StartPost(const QByteArray &staged);
 	void OnPost(SyncConfigPostResult result);
 	void Finish(SyncConfigPublishResult result);
@@ -76,14 +72,19 @@ private:
 	uint64_t _scanPosts = 0;
 	Fn<void(SyncConfigPublishResult)> _finished;
 	SyncConfigPublishRequest _request;
-	std::optional<AccountOperationTarget> _target;
+	std::optional<AccountRoutingSnapshot> _routing;
+	std::optional<DesktopSyncChatSetupSnapshot> _setup;
+	Fn<bool()> _current;
 	QByteArray _bindingToken;
-	SettingsFileInput _storeInput;
-	std::unique_ptr<SyncLocalStore> _store;
+	QString _directory;
+	std::shared_ptr<std::atomic<bool>> _admitted;
+	std::unique_ptr<crl::object_on_queue<SyncConfigPublishFlow>> _worker;
+	rpl::lifetime _lifetime;
 	std::unique_ptr<SyncConfigPost> _post;
 	bool _started = false;
 	bool _done = false;
 	bool _posted = false;
+	bool _initializeOnly = false;
 };
 
 } // namespace Purple

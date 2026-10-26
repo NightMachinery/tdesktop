@@ -1338,6 +1338,26 @@ SettingsOpenResult PrepareAccountSettingsOpen(
 	return result;
 }
 
+std::optional<AccountRoutingSnapshot> CaptureAccountSyncRouting(
+		not_null<Main::Session*> session) {
+	if (!CachedAccountSyncOperationsAllowed(session)) { return std::nullopt; }
+	const auto snapshot = AccountRouting().snapshot();
+	return snapshot.root == ConfigDirectory() ? std::optional(snapshot) : std::nullopt;
+}
+
+bool CachedAccountSyncOperationsAllowed(not_null<Main::Session*> session) {
+	return !session->account().loggingOut()
+		&& session->account().maybeSession() == session.get()
+		&& AccountRouting().permissionsReady();
+}
+
+bool AccountSyncRoutingCurrent(not_null<Main::Session*> session,
+		const AccountRoutingSnapshot &snapshot) {
+	return CachedAccountSyncOperationsAllowed(session)
+		&& snapshot.root == ConfigDirectory()
+		&& SameAccountRoutingSnapshot(snapshot, AccountRouting().snapshot());
+}
+
 std::optional<AccountOperationTarget> AccountSyncInspectionTarget(
 		not_null<Main::Session*> session) {
 	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) { return std::nullopt; }

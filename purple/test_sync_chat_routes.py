@@ -10,7 +10,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp',
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
-    'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp']}
+    'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp']}
 
 RouteNames = set()
 
@@ -68,7 +68,21 @@ def inspect(values):
     require('post-typed-readback', '_session, *_route, int32_t(_messageId.bare)' in post)
     require('post-exact-confirm', 'result.messageId == _messageId.bare && result.record == _staged' in post and 'result.fresh && result.owned' in post)
     require('post-cancel-stops-upload', 'void SyncConfigPost::Cancel()' in post and post.count('_upload->Cancel();') == 2)
-    require('publisher-typed-ledger', 'DesktopSyncChatLedgerMatches(*state, _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{})' in publisher)
+    require('publisher-typed-ledger', 'DesktopSyncChatLedgerMatches(*state, _input.chat)' in values['purple_sync_config_publish_flow.cpp'])
+    require('publisher-gui-no-files', all(marker not in publisher for marker in ['AccountSyncInspectionTarget(', 'AccountSyncTarget(', 'ValidateAccountSyncTarget(', 'ReadSettingsFileInput(', 'ReadSyncSettingsFile(', 'InspectSyncAccountRecovery(', 'SyncLocalStore(', '->StageConfig(', '->ConfirmConfigReadBack(']))
+    confirmation = values['purple_sync_setup_box.cpp'].split('QString ConfirmText(', 1)[1].split('void RefreshButtons(', 1)[0]
+    require('typed-settings-confirmation', 'Saved' not in confirmation and 'selected' in confirmation)
+    finish = publisher.split('void SyncConfigPublish::Finish(', 1)[1]
+    cancel = publisher.split('void SyncConfigPublish::Cancel()', 1)[1].split('void SyncConfigPublish::Finish(', 1)[0]
+    require('publisher-terminal-before-child', '_post->Cancel()' not in cancel
+        and finish.index('_done = true;') < finish.index('_post->Cancel();')
+        < finish.index('_worker.reset();') < finish.index('std::move(_finished)'))
+    router = values['purple_account_config.cpp']
+    require('publisher-source-epoch', 'a.sourceGeneration == b.sourceGeneration' in router
+        and '_routingGeneration, permissionsReady(), _generation' in router
+        and 'SettingsChanges() | rpl::on_next(changed, _lifetime)' in publisher
+        and 'AccountSyncRoutingCurrent(session, *_routing)' in publisher)
+    require('publisher-worker-renewal', '_operation.authorize([self, ready = std::move(ready)]' in upload and 'self->Renew(std::move(ready));' in publisher)
     require('download-metadata-seal', 'if (self->_downloaded)' in read and 'documentId != self->_documentId || editDate != self->_editDate' in read and 'size != self->_expectedBytes' in read)
     require('auto-effect-self', '&& _store->local().state()->version == 1' in auto and '&& _store->local().state()->chat.kind == PeerTokenKind::Self' in auto)
     operation = auto.split('DesktopSyncChatOperation AutoSession::OperationFor(', 1)[1].split('void AutoSession::Send(', 1)[0]
@@ -79,6 +93,8 @@ def inspect(values):
 
 assert not inspect(files), inspect(files)
 negative = [
+    ('purple_sync_config_publish.cpp', '_done = true;\n\t_admitted->store(false);\n\tif (_post) { _post->Cancel(); }', '_admitted->store(false);\n\tif (_post) { _post->Cancel(); }\n\t_done = true;', 'publisher-terminal-before-child'),
+    ('purple_account_config.cpp', 'a.sourceGeneration == b.sourceGeneration', 'true', 'publisher-source-epoch'),
     ('purple_sync_chat_service.cpp', 'disk->stateBytes != self->_expectedStateBytes', 'false', 'retry-snapshot'),
     ('purple_app_services.cpp', 'StartSyncChatDiscovery();', 'StartSyncChatDiscoveryLater();', 'startup-order'),
     ('purple_sync.cpp', 'EnsureSyncChatResolved(session);', 'Other(session);', 'startup-origin'),
@@ -113,7 +129,10 @@ negative = [
     ('purple_sync_config_post.cpp', '_session, *_route, int32_t(_messageId.bare)', '_session, int32_t(_messageId.bare)', 'post-typed-readback'),
     ('purple_sync_config_post.cpp', 'result.messageId == _messageId.bare && result.record == _staged', 'true', 'post-exact-confirm'),
     ('purple_sync_config_post.cpp', '_upload->Cancel();', 'Other();', 'post-cancel-stops-upload'),
-    ('purple_sync_config_publish.cpp', 'DesktopSyncChatLedgerMatches(*state, _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{})', 'true', 'publisher-typed-ledger'),
+    ('purple_sync_config_publish_flow.cpp', 'DesktopSyncChatLedgerMatches(*state, _input.chat)', 'true', 'publisher-typed-ledger'),
+    ('purple_sync_setup_box.cpp', "this account's selected ", "this account's Saved ", 'typed-settings-confirmation'),
+    ('purple_sync_config_publish.cpp', 'void SyncConfigPublish::Start()', 'void SyncConfigPublish::Start() /* ReadSettingsFileInput( */', 'publisher-gui-no-files'),
+    ('purple_sync_config_upload.cpp', '_operation.authorize([self, ready = std::move(ready)]', 'SkipDisk([self, ready = std::move(ready)]', 'publisher-worker-renewal'),
     ('purple_sync_candidate_reader.cpp', 'documentId != self->_documentId || editDate != self->_editDate', 'false', 'download-metadata-seal'),
     ('purple_sync_auto_service.cpp', '&& _store->local().state()->version == 1', '&& true', 'auto-effect-self'),
     ('purple_sync_auto_service.cpp', 'self->_store.get() == store && self->_sessionId == owner', 'true', 'borrowed-proof-run'),

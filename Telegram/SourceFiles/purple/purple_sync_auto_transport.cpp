@@ -77,10 +77,12 @@ DesktopSyncExactMetadata InspectDesktopSyncExactMessage(
 
 DesktopSyncExactRead::DesktopSyncExactRead(
 		not_null<Main::Session*> session, int32_t id,
-		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished)
+		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished,
+		std::optional<AccountRoutingSnapshot> routing)
 : _session(session)
 , _sessionGuard(base::make_weak(session))
-, _opening(AccountSyncInspectionTarget(session))
+, _opening(routing ? std::nullopt : AccountSyncInspectionTarget(session))
+, _routing(std::move(routing))
 , _id(id)
 , _current(std::move(current))
 , _finished(std::move(finished))
@@ -92,14 +94,16 @@ DesktopSyncExactRead::DesktopSyncExactRead(
 		DesktopSyncChatIo route,
 		int32_t id,
 		Fn<bool()> current,
-		Fn<void(SyncAutoServerRead)> finished)
-: DesktopSyncExactRead(session, id, std::move(current), std::move(finished)) {
+		Fn<void(SyncAutoServerRead)> finished,
+		std::optional<AccountRoutingSnapshot> routing)
+: DesktopSyncExactRead(session, id, std::move(current), std::move(finished), std::move(routing)) {
 	_route = std::move(route);
 }
 
 bool DesktopSyncExactRead::Current() const {
-	return !_done && _sessionGuard && _opening
-		&& ValidateAccountSyncTarget(_session, *_opening)
+	return !_done && _sessionGuard
+		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
+			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)))
 		&& _current && _current();
@@ -157,7 +161,7 @@ void DesktopSyncExactRead::Metadata(bool readback) {
 			if (self->_route) {
 				self->_reader = std::make_unique<SyncCandidateReader>(
 					self->_session, *self->_route, std::vector<int32_t>{ self->_id },
-					finished, self->_current);
+					finished, self->_current, self->_routing);
 			} else {
 				self->_reader = std::make_unique<SyncCandidateReader>(
 					self->_session, std::vector<int32_t>{ self->_id }, finished);

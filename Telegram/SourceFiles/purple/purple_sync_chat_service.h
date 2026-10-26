@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_sync_chat_setup.h"
+#include "purple/purple_account_config.h"
 #include <rpl/producer.h>
 
 namespace Main {
@@ -13,6 +14,8 @@ struct DesktopSyncChatOperation {
 	QString directory;
 	AccountKey account;
 	Fn<bool()> current;
+	std::optional<AccountRoutingSnapshot> routing;
+	Fn<void(Fn<void(bool)>)> authorize;
 };
 
 struct DesktopSyncChatLease {
@@ -29,6 +32,8 @@ struct DesktopSyncChatLease {
 	not_null<Main::Session*> session);
 
 [[nodiscard]] bool SyncChatSetupContextCurrent(
+	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
+[[nodiscard]] bool CachedSyncChatSetupContextCurrent(
 	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
 
 void StartSyncChatDiscovery();

@@ -19,10 +19,12 @@ SyncAccountInventory::SyncAccountInventory(
 		not_null<Main::Session*> session,
 		Fn<void(uint64_t)> progress,
 		Fn<void(SyncAccountInventoryResult)> finished,
-		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
+		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned,
+		std::optional<AccountRoutingSnapshot> routing)
 : _session(session)
 , _sessionGuard(base::make_weak(session))
-, _opening(AccountSyncInspectionTarget(session))
+, _opening(routing ? std::nullopt : AccountSyncInspectionTarget(session))
+, _routing(std::move(routing))
 , _progress(std::move(progress))
 , _finished(std::move(finished))
 , _owned(std::move(owned)) {
@@ -34,20 +36,22 @@ SyncAccountInventory::SyncAccountInventory(
 		DesktopSyncChatIo route,
 		Fn<void(uint64_t)> progress,
 		Fn<void(DesktopSyncChatInventory)> finished,
-		Fn<bool()> current)
+		Fn<bool()> current,
+		std::optional<AccountRoutingSnapshot> routing)
 : SyncAccountInventory(session, std::move(progress),
 		[route, finished = std::move(finished)](SyncAccountInventoryResult result) {
 			if (finished) {
 				finished({ route, std::move(result) });
 			}
-		}) {
+		}, {}, std::move(routing)) {
 	_route = std::move(route);
 	_current = std::move(current);
 }
 
 bool SyncAccountInventory::Current() const {
-	return _sessionGuard && _opening
-		&& ValidateAccountSyncTarget(_session, *_opening)
+	return _sessionGuard
+		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
+			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)
 			&& _current && _current()));
@@ -80,7 +84,7 @@ void SyncAccountInventory::Start() {
 	};
 	if (_route) {
 		_scanner = std::make_unique<SyncHistoryScanner>(
-			_session, *_route, progress, finished, _current);
+			_session, *_route, progress, finished, _current, _routing);
 	} else {
 		_scanner = std::make_unique<SyncHistoryScanner>(
 			_session, progress, finished, _owned);
@@ -129,7 +133,7 @@ void SyncAccountInventory::ScanFinished(SyncHistoryScanResult result) {
 	};
 	if (_route) {
 		_reader = std::make_unique<SyncCandidateReader>(
-			_session, *_route, _result.scan.candidateIds, finished, _current);
+			_session, *_route, _result.scan.candidateIds, finished, _current, _routing);
 	} else {
 		_reader = std::make_unique<SyncCandidateReader>(
 			_session, _result.scan.candidateIds, finished, _owned);

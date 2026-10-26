@@ -184,13 +184,14 @@ bool CompatibleDesktopSyncChatIo(const Io&,const Io&){return true;}
 struct Lease {Io route;Fn<bool()>current;};
 enum class DesktopSyncChatPhase {Use,Paused,Searching};
 struct DesktopSyncChatStatus {bool complete=true,postingHeld=false;DesktopSyncChatPhase phase=DesktopSyncChatPhase::Use;struct Resolution {PeerToken readChat;} resolution;int64_t retryAt=0;std::string reason;};
+struct DesktopSyncChatOperation { Fn<bool()> current; int marker=0; Fn<void(Fn<void(bool)>)> authorize = {}; };
 bool MarkValid=true,HoldGate=false;int Gates=0;Fn<void(DesktopSyncChatStatus)> DeferredGate;
-void CheckSyncChatBeforePost(Main::Session*,Fn<void(DesktopSyncChatStatus)>done,int){++Gates;if(HoldGate){DeferredGate=std::move(done);return;}auto s=DesktopSyncChatStatus();s.complete=MarkValid;s.postingHeld=!MarkValid;done(s);}
+void CheckSyncChatBeforePost(Main::Session*,Fn<void(DesktopSyncChatStatus)>done,DesktopSyncChatOperation){++Gates;if(HoldGate){DeferredGate=std::move(done);return;}auto s=DesktopSyncChatStatus();s.complete=MarkValid;s.postingHeld=!MarkValid;done(s);}
 std::optional<Lease> SyncChatIoForPost(Main::Session*,PeerToken){return Lease{Io{},[]{return true;}};}
 class SyncConfigUpload:public std::enable_shared_from_this<SyncConfigUpload> {
  public:
   struct WeakSession {Main::Session *value;Main::Session*get()const{return value;}}_session;
-  bool _done=false,_checking=false;int _editId=0;Fn<void(Fn<void(bool)>)> _authorizeEdit;int _account=1,_operation=1,finals=0;std::optional<Io>_route;std::optional<Lease>_lease;
+  bool _done=false,_checking=false;int _editId=0;Fn<void(Fn<void(bool)>)> _authorizeEdit;int _account=1,finals=0;DesktopSyncChatOperation _operation;std::optional<Io>_route;std::optional<Lease>_lease;
   Fn<bool()>_stillCurrent=[]{return true;};std::unique_ptr<SyncRequestSender>_api;
   SyncConfigUpload(Main::Session *s):_session{s},_api(std::make_unique<SyncRequestSender>()){_api->_current=[this]{return Current();};}
   bool Current()const;void SendMedia();void RenewBeforePost(Fn<void(bool)> ready);void ResumeEffect(Fn<void(bool)> ready);
@@ -200,7 +201,7 @@ class SyncConfigUpload:public std::enable_shared_from_this<SyncConfigUpload> {
 
 #include "retry-upload.inc"
 
-struct DesktopSyncChatOperation { Fn<bool()> current; int marker=0; };
+
 struct ChangesMock {int count=0;void fire_copy(Main::Session*){++count;}} Changes;
 void RetireDisk(int){}
 struct LocalOpenProbe {
@@ -256,7 +257,7 @@ public:
  std::unique_ptr<EffectStore> _store=std::make_unique<EffectStore>();
  bool current=true,fresh=true,owned=true;int reads=0;
  bool EffectCurrent(const SyncAutoPlan &)const{return current;}
- int OperationFor(const SyncAutoPlan &){return 1;}
+ DesktopSyncChatOperation OperationFor(const SyncAutoPlan &){return {};}
  void ReadForEffect(const SyncAutoPlan &,Fn<void(SyncAutoServerRead)> done){++reads;done({fresh,owned});}
  void RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready);
 };

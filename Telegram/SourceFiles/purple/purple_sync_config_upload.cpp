@@ -207,6 +207,17 @@ void SyncConfigUpload::ResumeEffect(Fn<void(bool)> ready) {
 	const auto self = shared_from_this();
 	RenewBeforePost([self, ready = std::move(ready)](bool allowed) mutable {
 		if (!allowed || !self->Current()) { ready(false); return; }
+		if (self->_operation.authorize) {
+			self->_operation.authorize([self, ready = std::move(ready)](bool authorized) mutable {
+				if (!authorized || !self->Current()) { ready(false); return; }
+				if (!self->_editId) { ready(true); return; }
+				if (!self->_authorizeEdit) { ready(false); return; }
+				self->_authorizeEdit([self, ready = std::move(ready)](bool allowed) {
+					ready(allowed && self->Current());
+				});
+			});
+			return;
+		}
 		if (!self->_editId) { ready(true); return; }
 		if (!self->_authorizeEdit) { ready(false); return; }
 		self->_authorizeEdit([self, ready = std::move(ready)](bool authorized) {

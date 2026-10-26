@@ -369,18 +369,54 @@ void UploadSchedules() {
 	}
 }
 
+void WorkerEffectSchedules() {
+	for (const auto &route : {Route({}), Route({PeerTokenKind::User,456}),
+		Route({PeerTokenKind::Chat,456}), Route({PeerTokenKind::Channel,456})}) {
+		for (const auto edit : {false, true}) {
+			for (auto mode = 0; mode != 5; ++mode) {
+				auto session = UploadSession();
+				auto upload = std::make_shared<UploadProbe>(session, route, RecordBytes(), edit ? 10 : 0);
+				auto disk = Fn<void(bool)>();
+				upload->_operation.authorize = [&](Fn<void(bool)> ready) { disk = std::move(ready); };
+				upload->SendMedia(); Gate(route);
+				CHECK(disk && session.endpoint.pending.empty());
+				const auto file = upload->_fileId;
+				if (mode == 2) upload->Cancel();
+				if (mode == 3) session.owner.leaving = true;
+				if (mode == 4) upload->current = false;
+				auto reply = std::move(disk); reply(mode != 1);
+				if (mode == 0) {
+					CHECK(session.endpoint.pending.size() == 1 && upload->completions == 0);
+					auto request = session.endpoint.Take(); const auto random = upload->_randomId;
+					auto resumed = false; auto allowed = true;
+					request.resume([&](bool value) { resumed = true; allowed = value; });
+					Gate(route); CHECK(disk && !resumed);
+					auto renew = std::move(disk); renew(false);
+					CHECK(resumed && !allowed && session.endpoint.pending.empty());
+					CHECK(upload->_fileId == file && upload->_randomId == random);
+					upload->Cancel();
+				} else {
+					CHECK(session.endpoint.pending.empty() && upload->completions == 1 && !upload->receipt);
+				}
+			}
+		}
+	}
+}
+
 struct PostExactEndpoint {
 	DesktopSyncChatIo route;
 	int id;
 	Fn<bool()> current;
 	Fn<void(SyncAutoServerRead)> done;
 	PostExactEndpoint(UploadSession *, DesktopSyncChatIo value, int target,
-		Fn<bool()> proof, Fn<void(SyncAutoServerRead)> callback)
+		Fn<bool()> proof, Fn<void(SyncAutoServerRead)> callback,
+		std::optional<AccountRoutingSnapshot> routing = std::nullopt)
 	: route(std::move(value)), id(target), current(std::move(proof)), done(std::move(callback)) {}
 	void Start() {}
 };
 
 struct PostProbe : base::has_weak_ptr {
+	DesktopSyncChatOperation _operation;
 	UploadSession *_session;
 	std::optional<DesktopSyncChatIo> _route;
 	Fn<bool()> _readbackCurrent;
@@ -495,7 +531,7 @@ void PostReadbackSchedules() {
 #ifndef PURPLE_SYNC_CHAT_WRITE_EMBEDDED
 int main() {
 	AuthorMain(); RoutesAndWire(); FullReadPath(); ExactReadback(); CandidateSeal(); LedgerScope();
-	ReceiptMatrix(); UploadSchedules(); PostReadbackSchedules(); BorrowedRunProof(); CounterScopes();
+	ReceiptMatrix(); UploadSchedules(); WorkerEffectSchedules(); PostReadbackSchedules(); BorrowedRunProof(); CounterScopes();
 	std::printf("TYPED WRITE %d checks, %d failures\n",Checks,Failures);
 	return Failures?1:0;
 }

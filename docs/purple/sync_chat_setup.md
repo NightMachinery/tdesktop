@@ -25,9 +25,9 @@ are stated. Refused marks name the chat and the core refusal reason.
 Setup confirmation starts the per-account, journaled setup service. It supports
 private Purple channel creation, Saved Messages and eligible existing chats, with
 explicit retry, Saved Messages after a definite channel limit, same-target reader
-reconsent and cancellation. Existing/bound streams are not moved. First non-Self
-settings posting is still off; the separate first-post delivery must also move
-SyncConfigPublish disk work off the GUI thread. Automatic sync remains Self-only.
+reconsent and cancellation. Existing/bound streams are not moved. Explicit manual settings publication uses the selected typed chat and a
+worker-owned publisher, described in [Manual settings publication](#manual-settings-publication).
+Automatic sync remains Self-only.
 Source and host tests do not authorize native writes. Native qualification still
 requires the user's explicit GO.
 
@@ -181,7 +181,7 @@ A second fixture includes literal production renewal callback bodies, with only
 session, before-post, metadata, inventory, API queue and worker delivery endpoints
 substituted. It checks cancellation and superseded callbacks as well as all five
 write kinds. These host fixtures never contact Telegram. The source route gates
-also enforce worker ownership and keep first settings posting disabled.
+also enforce worker ownership and explicit manual settings authorization.
 
 The exact setup mark uses the shared canonical settings/playlists and deletion
 explanation, followed by #purplechatsync v1. Discovery's grammar is unchanged.
@@ -203,3 +203,75 @@ Full-info, discovery, inventory and shared sync write requests keep temporary
 Telegram failures pending with a visible retry time. See
 [sync request retries](sync_request_retries.md) for deadlines, cancellation,
 the host-only verification boundary and the in-memory state limitation.
+
+## Manual settings publication
+
+The settings screen checks the resolved typed destination for the selected
+account. Its inventory, settings review, destination caption and explicit send
+confirmation remain tied to that account and login. Reader consent still comes
+from the setup disclosure. The settings confirmation repeats the account-settings
+disclosure, including IDs and names added from other accounts. Known new readers
+keep the persistent warning and prior consent; unknown readers or lost posting
+rights hold. Setup completion alone never sends settings. Automatic sync remains
+Self-only.
+
+A fresh non-Self destination initializes a version-2 ledger only after its exact,
+complete inventory is empty. Self retains the version-1 initializer and document
+format. An existing ledger must match its typed chat and stream. Choosing another
+mark does not move or overwrite it. Carry and migration remain separate work.
+Joining without a local settings file initializes on the worker and sends nothing.
+
+The first settings record uses the shared canonical config builder, filename,
+MIME and #purplesync caption. The durable pending record precedes upload. There
+are no pin, mute or archive effects for this document. Confirmation requires the
+same exact owned typed message and bytes after fresh metadata and download checks.
+An uncertain result keeps pending evidence for Finish sending; an exact matching
+record found after restart confirms locally instead of posting another copy.
+
+SyncConfigPublish owns a serial disk worker. The GUI captures only cached routing
+and account-local preference values. A detached routing snapshot validates the
+owner, local choice, directories, settings bytes and store on the worker; it never
+refreshes the live router. Open, recovery discovery, initialization, staging,
+confirmation and lock release stay on that queue. The publisher’s typed inventory and readback callbacks use the captured RAM routing
+fence rather than rereading files. A fresh
+before-post R3 and full-info check is followed by worker authorization before each
+effect, including definite flood retries. Immutable staged bytes, file identity
+and random identity remain in the upload operation.
+
+Only an exact matching Complete setup journal is admitted. Other, unfinished or
+malformed journals hold without deletion. When this same verified initialization
+creates a binding token, the worker rebinds the already verified journal under the
+account lock, after an exact-byte comparison. No fallback accepts an unbound or
+mismatched journal. A crash or write failure across that boundary holds for review.
+The account preference write uses the existing cached preference API and its
+scheduled persistence; a missing token on restart follows binding recovery.
+
+Close, account or source changes, logout, passcode lock and application inactivity
+revoke RAM admission immediately, cancel transports and retire the worker/store
+without a GUI wait. Staged pending bytes survive. A superseded completion cannot
+finish a newer publisher. Temporary Telegram waits remain one logical operation
+with their retry time visible; cancellation converts them to durable pending
+reconciliation on the next explicit operation.
+
+The production worker and literal upload-gate host fixture is
+purple/test_sync_config_publish.cpp. It uses real private files, the real ledger,
+recovery and config planners, with injected transport endpoints. It never calls
+Telegram. Existing review/import/History adapters retain their earlier UI-side
+inspection work; this change removes disk work from the publisher and its activated
+transport callback path, rather than refactoring those independent operations.
+
+### Cancellation and settings-source changes
+
+The RAM routing snapshot includes both routing and settings-source generations.
+Every settings invalidation advances the source generation, including a reload
+whose bytes are later restored. The GUI settings-change subscription cancels the
+publisher immediately; every activated transport callback also checks the same
+snapshot. Disk authorization remains a second check on the worker. A long wait
+cannot revive an operation after its reviewed source changed.
+
+A terminal publisher marks itself done and revokes admission before cancelling
+its child post. It queues worker retirement before delivering the single terminal
+callback, which may destroy the publisher. Pending stage bytes remain available
+for an explicitly reviewed retry. The real-file worker and literal coordinator
+fixtures cover source changes during a long wait, change then restore, account
+lock release on queued retirement, and destruction from the completion callback.

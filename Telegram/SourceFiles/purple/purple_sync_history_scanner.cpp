@@ -49,10 +49,12 @@ SyncHistoryScanner::SyncHistoryScanner(
 		not_null<Main::Session*> session,
 		Fn<void(uint64_t)> progress,
 		Fn<void(SyncHistoryScanResult)> finished,
-		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned)
+		Fn<SyncChatMessageOwnership(const MTPMessage &)> owned,
+		std::optional<AccountRoutingSnapshot> routing)
 : _session(session)
 , _sessionGuard(base::make_weak(session))
-, _opening(AccountSyncInspectionTarget(session))
+, _opening(routing ? std::nullopt : AccountSyncInspectionTarget(session))
+, _routing(std::move(routing))
 , _api(&session->mtp(), [this] { return Current(); })
 , _modernHistory(peerToUser(session->user()->id).bare)
 , _progress(std::move(progress))
@@ -65,8 +67,9 @@ SyncHistoryScanner::SyncHistoryScanner(
 		DesktopSyncChatIo route,
 		Fn<void(uint64_t)> progress,
 		Fn<void(SyncHistoryScanResult)> finished,
-		Fn<bool()> current)
-: SyncHistoryScanner(session, std::move(progress), std::move(finished)) {
+		Fn<bool()> current,
+		std::optional<AccountRoutingSnapshot> routing)
+: SyncHistoryScanner(session, std::move(progress), std::move(finished), {}, std::move(routing)) {
 	_route = std::move(route);
 	_current = std::move(current);
 	_modernHistory = DesktopSyncChatHistoryGuard(
@@ -78,8 +81,9 @@ SyncHistoryScanner::SyncHistoryScanner(
 }
 
 bool SyncHistoryScanner::Current() const {
-	return _sessionGuard && _opening
-		&& ValidateAccountSyncTarget(_session, *_opening)
+	return _sessionGuard
+		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
+			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)
 			&& _current && _current()));

@@ -111,8 +111,11 @@ in-flight counter once; a late callback cannot resume or confirm the operation.
 Typed publishing carries its inventory route into the existing account binding,
 recovery, staging, queue and ledger checks. Legacy constructors explicitly use
 Self, and the automatic service explicitly rejects v2/non-Self before effects.
-This provides no manual non-Self setup action and does not activate automatic
-non-Self sync. Those remain separate authorization and native qualification work.
+The normal settings screen provides explicitly confirmed manual publication to
+the selected non-Self chat through its worker-owned publisher. See
+[sync-chat setup](sync_chat_setup.md#manual-settings-publication). Setup completion
+alone sends no settings. Automatic non-Self sync and stream moves remain disabled;
+native qualification requires a separate user GO.
 
 `purple/test_sync_chat_write.py` compiles the real generated TL requests,
 receipt mapper, store and metadata helpers. It ports complete production upload

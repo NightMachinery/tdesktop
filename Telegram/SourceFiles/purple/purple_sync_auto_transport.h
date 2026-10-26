@@ -24,10 +24,12 @@ struct DesktopSyncExactMetadata {
 class DesktopSyncExactRead final : public base::has_weak_ptr {
 public:
 	DesktopSyncExactRead(not_null<Main::Session*> session, int32_t id,
-		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished);
+		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished,
+		std::optional<AccountRoutingSnapshot> routing = std::nullopt);
 	DesktopSyncExactRead(not_null<Main::Session*> session,
 		DesktopSyncChatIo route, int32_t id,
-		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished);
+		Fn<bool()> current, Fn<void(SyncAutoServerRead)> finished,
+		std::optional<AccountRoutingSnapshot> routing = std::nullopt);
 	void Start();
 
 private:
@@ -38,6 +40,7 @@ private:
 	not_null<Main::Session*> _session;
 	base::weak_ptr<Main::Session> _sessionGuard;
 	std::optional<AccountOperationTarget> _opening;
+	std::optional<AccountRoutingSnapshot> _routing;
 	std::optional<DesktopSyncChatIo> _route;
 	int32_t _id = 0;
 	Fn<bool()> _current;

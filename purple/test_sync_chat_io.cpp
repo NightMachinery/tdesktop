@@ -205,11 +205,13 @@ struct ExactReaderEndpoint {
 		Fn<void(SyncCandidateReadResult)> done) : finished(std::move(done)) {}
 	ExactReaderEndpoint(StubSession *, DesktopSyncChatIo value,
 		std::vector<int32_t>, Fn<void(SyncCandidateReadResult)> done,
-		Fn<bool()>) : route(std::move(value)), finished(std::move(done)) {}
+		Fn<bool()>, std::optional<AccountRoutingSnapshot> routing = std::nullopt)
+	: route(std::move(value)), finished(std::move(done)) {}
 	void Start() {}
 };
 
 struct ExactProbe : base::has_weak_ptr {
+	std::optional<AccountRoutingSnapshot> _routing;
 	explicit ExactProbe(DesktopSyncChatIo route) : _route(std::move(route)) {}
 	std::optional<DesktopSyncChatIo> _route;
 	int32_t _id = 10;

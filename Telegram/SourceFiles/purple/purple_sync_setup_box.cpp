@@ -8,11 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_setup_box.h"
 
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_chat_write.h"
 #include "purple/purple_sync_chat_setup_box.h"
 #include "purple/purple_sync_history_guard.h"
 
 #include "core/application.h"
 #include "data/data_user.h"
+#include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -26,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_config_text.h"
 #include "purple/purple_sync_review_box.h"
+#include "purple/purple_sync_request_sender.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
@@ -90,6 +93,9 @@ struct SetupBoxState {
 	std::unique_ptr<SyncAccountInventory> inventory;
 	std::unique_ptr<SyncConfigPublish> publisher;
 	std::optional<SyncAccountInventoryResult> completed;
+	std::optional<DesktopSyncChatIo> route;
+	Fn<bool()> routeCurrent;
+	std::optional<DesktopSyncChatSetupSnapshot> setup;
 	SyncConfigSendQueue scanQueue = SyncConfigSendQueue::Empty;
 	uint64_t scanPosts = 0;
 	std::optional<SyncConfigReview> review;
@@ -141,7 +147,7 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 [[nodiscard]] bool SelectedAvailable(const SetupBoxState &state) {
 	const auto account = state.selectedAccount.get();
 	const auto session = state.selectedSession.get();
-	return session && AccountSyncOperationsAllowed(session)
+	return session && CachedAccountSyncOperationsAllowed(session)
 		&& account
 		&& session
 		&& !account->loggingOut()
@@ -175,13 +181,25 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 	return Action::None;
 }
 
+[[nodiscard]] QString PublishDestination(const SetupBoxState &state) {
+	const auto session = state.selectedSession.get();
+	if (!session || !state.route) { return {}; }
+	const auto chat = state.route->peer.chat;
+	if (chat == PeerToken{}) { return tr::lng_purple_chat_self(tr::now); }
+	const auto id = chat.kind == PeerTokenKind::User ? peerFromUser(UserId(chat.id))
+		: chat.kind == PeerTokenKind::Chat ? peerFromChat(ChatId(chat.id))
+		: peerFromChannel(ChannelId(chat.id));
+	const auto peer = session->data().peerLoaded(id);
+	return peer ? peer->name() : PeerTokenText(chat).value_or(QString());
+}
+
 [[nodiscard]] QString PublishResult(const SyncConfigPublishResult &result) {
 	switch (result.status) {
 	case SyncConfigPublishStatus::Confirmed:
-		return u"Sent and confirmed: the settings record matches Saved "
-			"Messages (message %1)."_q.arg(result.messageId);
+		return u"Sent and confirmed: the settings record matches the selected "
+			"sync chat (message %1)."_q.arg(result.messageId);
 	case SyncConfigPublishStatus::AlreadySynced:
-		return u"Nothing to send: Saved Messages already has this device's "
+		return u"Nothing to send: the selected sync chat already has this device's "
 			"current settings."_q;
 	case SyncConfigPublishStatus::OutcomeUnknown:
 		return u"Outcome unknown: Telegram may have accepted the document. "
@@ -213,7 +231,7 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 			"before trying again."_q;
 	case SyncConfigPublishStatus::StillSending:
 		return u"Not sent: an earlier copy of this settings post is still "
-			"being sent, or failed to send, in Saved Messages. Wait until it "
+			"being sent, or failed to send, in the selected sync chat. Wait until it "
 			"arrives and check again, or delete the failed copy there "
 			"first."_q;
 	}
@@ -226,19 +244,19 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 	switch (action) {
 	case Action::Publish:
 		return (review.bound
-			? u"Send this device's settings to this account's Saved "
-				"Messages? "_q
+			? u"Send this device's settings to this account's selected "
+				"sync chat? "_q
 			: u"Start sync with this device's settings? This sends one copy "
-				"of settings.toml to this account's Saved Messages, and this "
+				"of settings.toml to this account's selected sync chat, and this "
 				"device can publish later changes there. "_q)
 			+ SyncCloudDisclosureText();
 	case Action::PublishChanges:
-		return u"Send this device's current settings to this account's Saved "
-			"Messages so your other devices can use them? "_q
+		return u"Send this device's current settings to this account's selected "
+			"sync chat so your other devices can use them? "_q
 			+ SyncCloudDisclosureText();
 	case Action::FinishSending:
 		return u"Finish the earlier settings post? This may confirm a record "
-			"already in Saved Messages without sending anything, or send the "
+			"already in the selected sync chat without sending anything, or send the "
 			"staged record once if a fresh check shows that is safe. "_q
 			+ SyncCloudDisclosureText();
 	case Action::Join: {
@@ -253,7 +271,7 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 		}
 		return u"Join sync for this account? %1 already has exactly these "
 			"settings, so nothing is sent now. Settings you publish from this "
-			"device later are sent to Saved Messages. "_q.arg(
+			"device later are sent to the selected sync chat. "_q.arg(
 				SyncDeviceList(names))
 			+ SyncCloudDisclosureText();
 	}
@@ -273,7 +291,7 @@ void RefreshButtons(SetupBoxState &state) {
 	}
 	state.checkText = state.running
 		? u"Cancel check"_q
-		: u"Check Saved Messages"_q;
+		: u"Check the selected sync chat"_q;
 	state.check->setDisabled(!state.running && (busy || !available));
 	state.close->setDisabled(state.publishing);
 	if (state.recoveryButton) {
@@ -311,9 +329,9 @@ void SetStatus(SetupBoxState &state, const QString &text) {
 		Main::Account &account,
 		Main::Session &session,
 		const SyncAccountInventoryResult &inventory,
-		QString &failure) {
-	auto review = ReviewSyncConfig(account, session, inventory);
-	if (review.status != SyncConfigReviewStatus::Ready
+		QString &failure, PeerToken chat = {}) {
+	auto review = ReviewSyncConfig(account, session, inventory, chat);
+	if (chat != PeerToken{} || review.status != SyncConfigReviewStatus::Ready
 		|| !review.bound
 		|| review.plan.verdict != ConfigSyncVerdict::Adopt) {
 		return review;
@@ -382,12 +400,13 @@ void ReviewAgain(
 		ClearReview(state);
 		SetStatus(state, Joined(
 			prefix(true),
-			u"Check Saved Messages to see what to do next."_q));
+			u"Check the selected sync chat to see what to do next."_q));
 		return;
 	}
 	auto inventory = *state.completed;
 	auto failure = QString();
-	auto review = BuildReview(*account, *session, inventory, failure);
+	auto review = BuildReview(*account, *session, inventory, failure,
+		state.route ? state.route->peer.chat : PeerToken{});
 	const auto staysLocal = !SyncSettingsMatchBase(review);
 	ShowReview(
 		state,
@@ -406,20 +425,24 @@ void StartPublisher(
 		SyncAccountInventoryResult inventory,
 		SyncConfigPublishRequest request,
 		const QString &prefix,
-		const QString &progress) {
+		const QString &progress, bool initializeOnly = false) {
 	const auto account = state->selectedAccount.get();
 	const auto session = state->selectedSession.get();
-	if (!SelectedAvailable(*state)) {
-		StopForLostAccount(*state);
+	if (!SelectedAvailable(*state) || !state->route || !state->setup
+		|| !CachedSyncChatSetupContextCurrent(session, state->setup->scope)) {
+		SetStatus(*state, u"The sync destination changed. Check it again before sending."_q);
 		return;
 	}
-	state->publishPrefix = prefix;
+	const auto generation = state->generation;
+	const auto origin = state->selectedSession;
+	state->publishPrefix = Joined(prefix,
+		tr::lng_purple_chat_title(tr::now) + u": "_q + PublishDestination(*state));
 	state->publishing = true;
 	SetStatus(*state, Joined(state->publishPrefix, progress));
 	state->publisher = std::make_unique<SyncConfigPublish>(
 		*account,
 		*session,
-		std::move(inventory),
+		DesktopSyncChatInventory{ *state->route, std::move(inventory) },
 		state->scanQueue,
 		state->scanPosts,
 		crl::guard(box, [=](SyncConfigPublishResult result) {
@@ -431,9 +454,14 @@ void StartPublisher(
 				*state,
 				Joined(
 					base::take(state->publishPrefix),
-					PublishResult(result)));
+					initializeOnly && result.status == SyncConfigPublishStatus::AlreadySynced
+						? tr::lng_purple_sync_empty_join_done(tr::now) : PublishResult(result)));
 		}),
-		std::move(request));
+		std::move(request), state->setup,
+		crl::guard(box, [=] {
+			return origin && state->selectedSession.get() == origin.get()
+				&& state->generation == generation && state->publishing;
+		}), initializeOnly);
 	state->publisher->Start();
 }
 
@@ -496,10 +524,30 @@ void RunAction(
 	if (action == Action::Join && !state->review->bound
 		&& state->review->local.status == SyncSettingsFileStatus::Absent
 		&& !state->review->local.usingLastGood && state->review->plan.offered.empty()) {
-		const auto result = InitializeSyncAccountLocally(*account, *session, *state->completed);
-		ReviewAgain(*state, result.status == SyncAccountSetupStatus::Ready
-			? tr::lng_purple_sync_empty_join_done(tr::now)
-			: tr::lng_purple_transfer_unavailable(tr::now));
+		auto inventory = *state->completed;
+		ClearReview(*state);
+		StartPublisher(box, state, std::move(inventory), {}, {},
+			u"Joining sync without sending settings."_q, true);
+		return;
+	}
+	if (action == Action::Publish || action == Action::PublishChanges) {
+		const auto &review = *state->review;
+		auto parents = std::vector<QString>();
+		if (review.bound) {
+			const auto choice = PlanConfigChoice(review.state, review.plan, std::nullopt);
+			if (!choice || !choice->publish || !choice->adopt.empty()) {
+				SetStatus(*state, u"Review the settings choice again before sending."_q); return;
+			}
+			parents = SyncConfigVersionKeys(choice->parents);
+		} else if (review.plan.verdict != ConfigSyncVerdict::Empty) {
+			SetStatus(*state, u"The selected chat already contains settings. Review them first."_q); return;
+		}
+		const auto request = SyncConfigPublishRequest{
+			.expectedFingerprint = review.local.fingerprint, .expectedParents = parents };
+		auto inventory = *state->completed;
+		ClearReview(*state);
+		StartPublisher(box, state, std::move(inventory), request, {},
+			u"Publishing settings to the reviewed sync destination."_q);
 		return;
 	}
 	const auto applied = ApplySyncConfigChoice(
@@ -530,7 +578,7 @@ void RunAction(
 			.expectedParents = applied.expectedParents,
 		},
 		QString(),
-		u"Publishing this device's settings to Saved Messages."_q);
+		u"Publishing this device's settings to the selected sync chat."_q);
 }
 
 void ConfirmAction(
@@ -542,14 +590,16 @@ void ConfirmAction(
 	}
 	const auto generation = state->generation;
 	const auto origin = state->selectedSession;
-	const auto target = origin ? AccountSyncInspectionTarget(origin.get()) : std::nullopt;
-	if (!target) { return; }
+	const auto target = origin ? CaptureAccountSyncRouting(origin.get()) : std::nullopt;
+	if (!target || !state->route || !state->setup
+		|| !CachedSyncChatSetupContextCurrent(origin.get(), state->setup->scope)) { return; }
 	box->uiShow()->showBox(Ui::MakeConfirmBox({
-		.text = ConfirmText(action, *state->review),
+		.text = Joined(ConfirmText(action, *state->review),
+			tr::lng_purple_chat_settings_disclosure(tr::now).arg(PublishDestination(*state))),
 		.confirmed = crl::guard(box, [=](Fn<void()> close) {
 			close();
 			if (!origin || origin.get() != state->selectedSession.get()
-				|| !ValidateAccountSyncTarget(origin.get(), *target) || !SelectedAvailable(*state)) {
+				|| !AccountSyncRoutingCurrent(origin.get(), *target) || !SelectedAvailable(*state)) {
 				StopForLostAccount(*state);
 			} else if (!StillCurrent(*state, generation)) {
 				SetStatus(*state, u"The check result changed, so nothing "
@@ -585,7 +635,7 @@ void OnInventory(
 			std::move(result),
 			share->request,
 			share->prefix,
-			u"Sharing the chosen settings to Saved Messages."_q);
+			u"Sharing the chosen settings to the selected sync chat."_q);
 		return;
 	}
 	auto recovery = InspectSyncAccountRecovery(*session, &result);
@@ -594,7 +644,8 @@ void OnInventory(
 		recovery = InspectSyncAccountRecovery(*session, &result);
 	}
 	auto failure = QString();
-	auto review = BuildReview(*account, *session, result, failure);
+	auto review = BuildReview(*account, *session, result, failure,
+		state->route ? state->route->peer.chat : PeerToken{});
 	const auto described = DescribeSyncConfigReview(review, state->checkedAt);
 	const auto expected = FollowupAction(followup);
 	const auto matches = (expected != Action::None)
@@ -603,7 +654,7 @@ void OnInventory(
 		? failure
 		: Joined(
 			(review.status == SyncConfigReviewStatus::Ready)
-				? u"Saved Messages or this device changed since the last "
+				? u"The selected sync chat or this device changed since the last "
 					"check, so nothing was sent."_q
 				: u"Nothing was sent."_q,
 			failure);
@@ -625,6 +676,19 @@ void StartCheck(
 		StopForLostAccount(*state);
 		return;
 	}
+	const auto status = SyncChatStatusOf(session);
+	const auto lease = status.complete && status.phase == DesktopSyncChatPhase::Use
+		&& !status.postingHeld && status.resolution.readChat
+		? SyncChatIoForPost(session, *status.resolution.readChat) : std::nullopt;
+	const auto setup = SyncChatSetupSnapshotOf(session);
+	if (!lease || !lease->current || !lease->current() || !setup) {
+		EnsureSyncChatResolved(session);
+		SetStatus(*state, u"Resolve or choose this account's sync chat, then check again."_q);
+		return;
+	}
+	state->route = lease->route;
+	state->routeCurrent = lease->current;
+	state->setup = setup;
 	ClearReview(*state);
 	state->inventory.reset();
 	state->running = true;
@@ -632,26 +696,27 @@ void StartCheck(
 	state->progressPrefix = prefix;
 	const auto progressText = [=](uint64_t count) {
 		return Joined(state->progressPrefix, (followup != CheckFollowup::None)
-			? u"Checking Saved Messages again before sending: %1 "
+			? u"Checking the selected sync chat again before sending: %1 "
 				"scanned."_q.arg(QString::number(count))
-			: u"Checking Saved Messages: %1 scanned."_q.arg(
+			: u"Checking the selected sync chat: %1 scanned."_q.arg(
 				QString::number(count)));
 	};
 	SetStatus(*state, progressText(0));
 	const auto chosenAccount = state->selectedAccount;
 	const auto chosenSession = state->selectedSession;
-	state->scanTarget = AccountSyncInspectionTarget(session);
-	if (!state->scanTarget) { StopForLostAccount(*state); return; }
-	const auto scanTarget = *state->scanTarget;
+	const auto routing = CaptureAccountSyncRouting(session);
+	if (!routing) { StopForLostAccount(*state); return; }
+	const auto route = *state->route;
+	const auto routeCurrent = state->routeCurrent;
 	state->inventory = std::make_unique<SyncAccountInventory>(
-		session,
+		session, route,
 		crl::guard(box, [=](uint64_t count) {
 			if (state->running) {
 				state->scanned = count;
 				state->status->setText(progressText(count));
 			}
 		}),
-		crl::guard(box, [=](SyncAccountInventoryResult result) {
+		crl::guard(box, [=](DesktopSyncChatInventory result) {
 			if (!state->running) {
 				return;
 			}
@@ -662,14 +727,15 @@ void StartCheck(
 			if (!chosenAccount || !chosenSession
 				|| chosenAccount->loggingOut()
 				|| chosenAccount->maybeSession() != chosenSession.get()
-				|| !ValidateAccountSyncTarget(chosenSession.get(), scanTarget)) {
+				|| !AccountSyncRoutingCurrent(chosenSession.get(), *routing) || !routeCurrent()
+				|| !CompatibleDesktopSyncChatIo(route, result.route)) {
 				StopForLostAccount(*state);
 				return;
 			}
-			OnInventory(box, state, std::move(result), followup);
-		}));
-	state->scanQueue = SyncConfigSendQueueOf(not_null{ session });
-	state->scanPosts = SyncConfigPostsStarted(not_null{ session });
+			OnInventory(box, state, std::move(result.inventory), followup);
+		}), routeCurrent, routing);
+	state->scanQueue = SyncConfigSendQueueOf(not_null{ session }, route.peer.chat);
+	state->scanPosts = SyncConfigPostsStarted(not_null{ session }, route.peer.chat);
 	state->inventory->Start();
 }
 
@@ -891,6 +957,14 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		st::boxRowPadding);
 
 	const auto state = box->lifetime().make_state<SetupBoxState>();
+	SyncRequestChanges() | rpl::on_next([=](MTP::Instance *instance) {
+		const auto session = state->selectedSession.get();
+		if (session && &session->mtp() == instance && (state->publishing || state->running)) {
+			if (const auto pending = PendingSyncRequest(instance)) {
+				SetStatus(*state, Joined(state->progressPrefix, SyncRequestWaitText(*pending)));
+			}
+		}
+	}, box->lifetime());
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>();
 	state->group = group;
 	const auto &domain = Core::App().domain();
@@ -988,10 +1062,10 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		object_ptr<Ui::FlatLabel>(
 			container,
 			state->choices.empty()
-				? u"Sign in to an account to check Saved Messages."_q
+				? u"Sign in to an account to check the selected sync chat."_q
 				: state->choices.size() > 1
 				? u"Select an account before checking."_q
-				: u"Ready to check Saved Messages."_q,
+				: u"Ready to check the selected sync chat."_q,
 			st::boxLabel),
 		st::boxRowPadding);
 	Ui::AddSkip(container);
@@ -1071,12 +1145,12 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		state->selectedIndex = value;
 		state->selectedAccount = state->choices[value].account;
 		state->selectedSession = state->choices[value].session;
-		SetStatus(*state, u"Ready to check Saved Messages."_q);
+		SetStatus(*state, u"Ready to check the selected sync chat."_q);
 		updateAutomatic();
 		updateChat();
 	});
 
-	state->checkText = u"Check Saved Messages"_q;
+	state->checkText = u"Check the selected sync chat"_q;
 	state->check = box->addButton(
 		state->checkText.value(),
 		[=] {
@@ -1090,7 +1164,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 					? u"Sharing cancelled: the chosen settings are on this "
 						"device but were not sent. Check again to share "
 						"them."_q
-					: u"Check cancelled. Check Saved Messages again."_q);
+					: u"Check cancelled. Check the selected sync chat again."_q);
 			} else if (!Busy(*state)) {
 				StartCheck(box, state, CheckFollowup::None);
 			}
