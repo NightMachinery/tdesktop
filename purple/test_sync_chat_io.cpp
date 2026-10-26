@@ -159,6 +159,9 @@ struct ReaderProbe : base::has_weak_ptr {
 	std::unique_ptr<DownloadProbe> _loader;
 	std::optional<FullMsgId> origin;
 	std::optional<SyncCandidateRecord> record;
+	std::optional<SyncCandidateRecord> _downloaded;
+	bool rereading = false;
+	void RequestNext() { rereading = true; }
 	bool Current() const { return current; }
 	void Cancel() { _done = true; CompleteCurrent({ .id = 10, .status = SyncCandidateStatus::Cancelled }); }
 	void CompleteCurrent(SyncCandidateRecord value) {
@@ -318,6 +321,8 @@ void FullReadPath() {
 		auto reader = ReaderProbe(route); reader.Reply(Response(route,{message}));
 		CHECK(reader.downloading && reader.origin == DesktopSyncChatFileOrigin(route,10));
 		reader._loader = std::make_unique<DownloadProbe>(); reader._loader->data = RecordBytes(); reader.OnDownload();
+		CHECK(reader.rereading && !reader.record);
+		reader.Reply(Response(route,{message}));
 		CHECK(reader.record && reader.record->status == SyncCandidateStatus::Valid && reader.record->documentId == 99);
 		auto read = SyncCandidateReadResult(); read.records = {*reader.record}; read.status = AggregateSyncCandidateRead(read.records);
 		const auto raw = FinishSyncAccountInventory(123,{scan.status,scan._pages.candidates(),scan._pages.count()},read);
@@ -398,6 +403,27 @@ void FullReadPath() {
 	}
 }
 
+void CandidateSeal() {
+	for (const auto &route : {Route({}),Route({PeerTokenKind::User,456}),Route({PeerTokenKind::Chat,456}),Route({PeerTokenKind::Channel,456})}) {
+		for (auto mode = 0; mode < 9; ++mode) {
+			auto probe = ReaderProbe(route); const auto message = DocumentMessage(route);
+			probe.Reply(Response(route,{message}));
+			probe._loader = std::make_unique<DownloadProbe>(); probe._loader->data = RecordBytes(); probe.OnDownload();
+			CHECK(probe.rereading && !probe.record);
+			if (mode == 1) probe._documentId = 100;
+			if (mode == 2) probe._editDate = 1;
+			if (mode == 3) ++probe._expectedBytes;
+			if (mode == 4) probe.current = false;
+			if (mode == 5) probe._owned = [](const MTPMessage &){return SyncChatMessageOwnership::Unknown;};
+			if (mode == 6) probe.Fail(MTP::Error(MTP_rpc_error(MTP_int(420),MTP_string("FLOOD_WAIT_5"))));
+			else if (mode == 7) probe.Reply(Response(route,{DocumentMessage(Route({PeerTokenKind::Channel,789}))}));
+			else if (mode == 8) {auto value=NativeMessagesSlice();value.flags=MTP_flags(MTPDmessages_messagesSlice::Flag::f_inexact);value.count=MTP_int(1);value.messages=MTP_vector<MTPMessage>({message});probe.Reply(value.Build());}
+			else probe.Reply(Response(route,{message}));
+			CHECK(probe.record && (probe.record->status == SyncCandidateStatus::Valid) == (mode == 0));
+		}
+	}
+}
+
 void LedgerScope() {
 	auto state = SyncLocalState(); state.version = 1;
 	CHECK(DesktopSyncChatLedgerMatches(state,{}));
@@ -448,9 +474,12 @@ void LedgerScope() {
 
 }
 
+#ifndef PURPLE_SYNC_CHAT_IO_EMBEDDED
 int main() {
 	AuthorMain();
-	RoutesAndWire(); FullReadPath(); ExactReadback(); LedgerScope();
+	RoutesAndWire(); FullReadPath(); ExactReadback(); CandidateSeal(); LedgerScope();
 	std::printf("TYPED IO %d checks, %d failures\n",Checks,Failures);
 	return Failures ? 1 : 0;
 }
+
+#endif

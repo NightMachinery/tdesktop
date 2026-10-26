@@ -197,6 +197,8 @@ PRIVATE
     purple/purple_sync_chat_discovery.h
     purple/purple_sync_chat_cache.cpp
     purple/purple_sync_chat_cache.h
+    purple/purple_sync_chat_write.cpp
+    purple/purple_sync_chat_write.h
     purple/purple_sync_chat_io.cpp
     purple/purple_sync_chat_io.h
     purple/purple_sync_chat_scope.h

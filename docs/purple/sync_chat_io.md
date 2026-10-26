@@ -72,3 +72,51 @@ python3 purple/test_sync_chat_routes.py
 Native server calls, posting, setup execution and full Desktop builds require a
 later GO. Automatic sync remains Self-only in the core and service. Typed manual
 I/O support cannot enable automatic non-Self posting.
+
+## Upload and confirmation
+
+`SyncConfigUpload` accepts an explicit typed route. The existing 32 KiB parts,
+10 MiB upload bound, file id, checksum, random id and uncertain outcome handling
+remain in use. After all parts finish, it runs CheckSyncChatBeforePost, then
+captures a service lease for the same account, environment, login, typed chat,
+eligibility kind and reader snapshot. A changed or unknown route refuses before
+send/edit. A borrowed account-lock proof must be observer-free and remain valid
+while the resolver runs. Its lifetime follows the owner and store, while effect
+callbacks separately require their exact execution ticket.
+
+New sends set the generated sendMedia silent flag. The current Telegram schema
+has no silent flag on editMessage; edits use its ordinary media/message flags
+with the same typed peer. No extra flag is invented. Missing send-as evidence,
+lost rights, unresolved discovery and account retirement remain posting holds.
+The separate parity follow-up will apply the shared known-new-reader warning
+policy; this slice preserves the reviewed reader-snapshot gate.
+
+Send receipts match random id, server message id, typed target and C0 ownership.
+Ordinary and channel new/edit Updates, updatesCombined and the direct non-channel
+shortSent form are handled. A channel shortSent, contradictory mapping, foreign
+target or unsupported form is unknown. Updates are applied through the captured
+session even if local completion has lost authority. A receipt is only a hint.
+Before confirmation, the typed exact reader downloads the staged version and
+checks fresh metadata again; the result must be owned, Present, have the exact
+id, and equal the staged bytes. Candidate inventory downloads also seal their
+metadata after bytes, so reconciliation cannot confirm a changed document.
+Unknown outcomes retain the pending record for later reconciliation.
+
+Counters and loaded send-queue checks use the exact typed chat within the
+captured session. Cancellation stops further parts/dispatch and releases its
+in-flight counter once; a late callback cannot resume or confirm the operation.
+Typed publishing carries its inventory route into the existing account binding,
+recovery, staging, queue and ledger checks. Legacy constructors explicitly use
+Self, and the automatic service explicitly rejects v2/non-Self before effects.
+This provides no manual non-Self setup action and does not activate automatic
+non-Self sync. Those remain separate authorization and native qualification work.
+
+`purple/test_sync_chat_write.py` compiles the real generated TL requests,
+receipt mapper, store and metadata helpers. It ports complete production upload
+and post callback bodies into controlled session, API queue, policy and reader
+endpoints, including the post-write callbacks. The test supplies deterministic
+entropy and synthetic Updates, never sends a request, and retains its real-file
+fixtures. It exercises part order, final policy changes, silent wire flags,
+channel/random-id receipts, normal Updates processing, cancellation, exact
+readback and failed reconciliation evidence. This is source/unit qualification,
+not server, application or UI acceptance.

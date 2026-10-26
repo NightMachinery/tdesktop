@@ -61,6 +61,8 @@ private:
 	void Check(const SyncAutoPlan &plan);
 	void ReadNext();
 	void Send(const SyncAutoPlan &plan);
+	[[nodiscard]] bool EffectCurrent(const SyncAutoPlan &plan) const;
+	[[nodiscard]] DesktopSyncChatOperation OperationFor(const SyncAutoPlan &plan);
 	void Delete(const SyncAutoPlan &plan);
 	void ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServerRead)> done);
 	void Stop();
@@ -290,6 +292,9 @@ void AutoSession::Stop() {
 	_scan.reset();
 	_exact.reset();
 	_post.reset();
+	if (_upload) {
+		_upload->Cancel();
+	}
 	_upload.reset();
 	_api.reset();
 	_store.reset();
@@ -395,14 +400,23 @@ void AutoSession::Complete(const SyncAutoPlan &completed, SyncAutoOutcome outcom
 }
 
 void AutoSession::Check(const SyncAutoPlan &plan) {
+	const auto lease = SyncChatIoForPost(_session.get(), PeerToken{});
+	if (!lease || !lease->current || !lease->current()) {
+		Hold(SyncAutoReason::SyncChatNotResolved);
+		return;
+	}
 	const auto weak = base::make_weak(this);
 	_scanPosts = SyncConfigPostsStarted(not_null{ _session.get() });
 	_scanQueue = SyncConfigSendQueueOf(not_null{ _session.get() });
-	_scan = std::make_unique<SyncAccountInventory>(not_null{ _session.get() }, nullptr,
-		[weak, plan](SyncAccountInventoryResult inventory) {
+	_scan = std::make_unique<SyncAccountInventory>(not_null{ _session.get() }, lease->route, nullptr,
+		[weak, plan, origin = lease->route.peer.origin](DesktopSyncChatInventory inventory) {
 			const auto self = weak.get();
 			if (!self || !self->Accept(plan)) { return; }
-			self->_inventory = std::move(inventory);
+			if (!DesktopSyncChatInventoryMatches(inventory, origin, PeerToken{})) {
+				self->Hold(SyncAutoReason::StateChanged);
+				return;
+			}
+			self->_inventory = std::move(inventory.inventory);
 			if (self->_inventory.status == SyncAccountInventoryStatus::Incomplete) {
 				self->Complete(plan, SyncAutoOutcome::NetworkFailure); return;
 			}
@@ -424,6 +438,10 @@ void AutoSession::Check(const SyncAutoPlan &plan) {
 			self->_readIds.assign(ids.begin(), ids.end());
 			self->_readIndex = 0;
 			self->ReadNext();
+		}, [weak, plan, proof = lease->current] {
+			const auto self = weak.get();
+			return proof() && self && self->_store && self->Current()
+				&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready;
 		});
 	_scan->Start();
 }
@@ -436,10 +454,15 @@ void AutoSession::ReadNext() {
 		Complete(_plan, SyncAutoOutcome::Inventory, _snapshot);
 		return;
 	}
+	const auto lease = SyncChatIoForPost(_session.get(), PeerToken{});
+	if (!lease || !lease->current || !lease->current()) {
+		Hold(SyncAutoReason::SyncChatNotResolved);
+		return;
+	}
 	const auto weak = base::make_weak(this);
 	const auto plan = _plan;
-	_exact = std::make_unique<DesktopSyncExactRead>(not_null{ _session.get() }, _readIds[_readIndex],
-		[weak, plan] { const auto self = weak.get(); return self && self->_store
+	_exact = std::make_unique<DesktopSyncExactRead>(not_null{ _session.get() }, lease->route, _readIds[_readIndex],
+		[weak, plan, proof = lease->current] { const auto self = weak.get(); return proof() && self && self->_store
 			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready; },
 		[weak, plan](SyncAutoServerRead read) {
 			const auto self = weak.get();
@@ -455,9 +478,14 @@ void AutoSession::ReadNext() {
 }
 
 void AutoSession::ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServerRead)> done) {
+	const auto lease = SyncChatIoForPost(_session.get(), PeerToken{});
+	if (!lease || !lease->current || !lease->current()) {
+		Hold(SyncAutoReason::SyncChatNotResolved);
+		return;
+	}
 	const auto weak = base::make_weak(this);
-	_exact = std::make_unique<DesktopSyncExactRead>(not_null{ _session.get() }, plan.messageId,
-		[weak, plan] { const auto self = weak.get(); return self && self->_store
+	_exact = std::make_unique<DesktopSyncExactRead>(not_null{ _session.get() }, lease->route, plan.messageId,
+		[weak, plan, proof = lease->current] { const auto self = weak.get(); return proof() && self && self->_store
 			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
 			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); },
 		[weak, plan, done = std::move(done)](SyncAutoServerRead read) mutable {
@@ -469,6 +497,30 @@ void AutoSession::ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServer
 	_exact->Start();
 }
 
+bool AutoSession::EffectCurrent(const SyncAutoPlan &plan) const {
+	return _store && _session && Current() && _store->local().state()
+		&& _store->local().state()->version == 1
+		&& _store->local().state()->chat.kind == PeerTokenKind::Self
+		&& _store->CheckCompletion(plan, _sessionId) == DesktopSyncAutoCompletion::Ready
+		&& _store->Authorized(plan);
+}
+
+DesktopSyncChatOperation AutoSession::OperationFor(const SyncAutoPlan &plan) {
+	if (!_store || _plan.ticket != plan.ticket) {
+		return {};
+	}
+	const auto weak = base::make_weak(this);
+	const auto store = _store.get();
+	const auto owner = _sessionId;
+	return { _store->local().directory(), _account, [weak, store, owner] {
+		const auto self = weak.get();
+		return self && self->_store.get() == store && self->_sessionId == owner
+			&& self->Current() && store->Current() && store->local().state()
+			&& store->local().state()->version == 1
+			&& store->local().state()->chat.kind == PeerTokenKind::Self;
+	} };
+}
+
 void AutoSession::Send(const SyncAutoPlan &plan) {
 	const auto weak = base::make_weak(this);
 	if (plan.action == SyncAutoAction::Post) {
@@ -477,9 +529,10 @@ void AutoSession::Send(const SyncAutoPlan &plan) {
 			[weak, plan](SyncConfigPostResult result) {
 				if (const auto self = weak.get()) { self->Complete(plan,
 					result.status == SyncConfigPostStatus::Confirmed ? SyncAutoOutcome::Sent : SyncAutoOutcome::OutcomeUnknown); }
-			}, [weak, plan] { const auto self = weak.get(); return self && self->_store
-			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
-			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); });
+			}, [weak, plan] {
+				const auto self = weak.get();
+				return self && self->EffectCurrent(plan);
+			}, OperationFor(plan));
 		_post->Start();
 		return;
 	}
@@ -493,13 +546,14 @@ void AutoSession::Send(const SyncAutoPlan &plan) {
 			[weak, plan, finish](std::optional<MsgId> id) {
 				finish();
 				if (const auto self = weak.get()) { self->Complete(plan, id ? SyncAutoOutcome::Sent : SyncAutoOutcome::OutcomeUnknown); }
-			}, [weak, plan] { const auto self = weak.get(); return self && self->_store
-			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
-			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); },
+			}, [weak, plan] {
+				const auto self = weak.get();
+				return self && self->EffectCurrent(plan);
+			},
 			MsgId(plan.messageId), [weak, plan, finish] {
 				finish();
 				if (const auto self = weak.get()) { self->Complete(plan, SyncAutoOutcome::EditRefused); }
-			});
+			}, self->OperationFor(plan));
 		self->_upload->Start();
 	});
 }

@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_sync_config_upload.h"
 #include "purple/purple_sync_inventory.h"
+#include "purple/purple_sync_chat_write.h"
 
 #include <cstdint>
 #include <map>
@@ -34,10 +35,11 @@ struct PostCounters {
 	uint64_t started = 0;
 	int inFlight = 0;
 };
-std::map<Main::Session*, std::shared_ptr<PostCounters>> Posts;
+std::map<Main::Session*, std::map<QString, std::shared_ptr<PostCounters>>> Posts;
 
-std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session) {
-	auto &entry = Posts[session.get()];
+std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session, PeerToken chat = {}) {
+	const auto key = PeerTokenText(chat, session->userId().bare).value_or(QString());
+	auto &entry = Posts[session.get()][key];
 	if (!entry || entry->session.get() != session.get()) {
 		entry = std::make_shared<PostCounters>();
 		entry->session = base::make_weak(session.get());
@@ -64,12 +66,25 @@ std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session) {
 
 }
 
+SyncConfigSendQueue SyncConfigSendQueueOf(not_null<Main::Session*> session) {
+	return SyncConfigSendQueueOf(session, {});
+}
+
 SyncConfigSendQueue SyncConfigSendQueueOf(
-		not_null<Main::Session*> session) {
-	if (PostsFor(session)->inFlight > 0) {
+		not_null<Main::Session*> session,
+		PeerToken chat) {
+	const auto token = PeerTokenText(chat, session->userId().bare);
+	if (!token || ParsePeerToken(*token, session->userId().bare) != chat) {
 		return SyncConfigSendQueue::HoldsSyncRecord;
 	}
-	const auto history = session->data().historyLoaded(session->userPeerId());
+	if (PostsFor(session, chat)->inFlight > 0) {
+		return SyncConfigSendQueue::HoldsSyncRecord;
+	}
+	const auto peer = chat == PeerToken{} ? session->userPeerId()
+		: chat.kind == PeerTokenKind::User ? peerFromUser(UserId(chat.id))
+		: chat.kind == PeerTokenKind::Chat ? peerFromChat(ChatId(chat.id))
+		: peerFromChannel(ChannelId(chat.id));
+	const auto history = session->data().historyLoaded(peer);
 	if (!history) {
 		return SyncConfigSendQueue::Empty;
 	}
@@ -82,7 +97,13 @@ SyncConfigSendQueue SyncConfigSendQueueOf(
 }
 
 std::function<void()> BeginSyncConfigNetworkOperation(not_null<Main::Session*> session) {
-	const auto counter = PostsFor(session);
+	return BeginSyncConfigNetworkOperation(session, {});
+}
+
+std::function<void()> BeginSyncConfigNetworkOperation(
+		not_null<Main::Session*> session,
+		PeerToken chat) {
+	const auto counter = PostsFor(session, chat);
 	const auto done = std::make_shared<bool>(false);
 	++counter->started;
 	++counter->inFlight;
@@ -92,27 +113,53 @@ std::function<void()> BeginSyncConfigNetworkOperation(not_null<Main::Session*> s
 }
 
 uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session) {
-	return PostsFor(session)->started;
+	return SyncConfigPostsStarted(session, {});
+}
+
+uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session, PeerToken chat) {
+	return PostsFor(session, chat)->started;
 }
 
 SyncConfigPost::SyncConfigPost(
 		not_null<Main::Session*> session,
 		QByteArray staged,
 		Fn<void(SyncConfigPostResult)> finished,
-		Fn<bool()> stillCurrent)
+		Fn<bool()> stillCurrent,
+		DesktopSyncChatOperation operation)
 : _session(session)
 , _sessionGuard(base::make_weak(session))
 , _staged(std::move(staged))
 , _target(AccountSyncInspectionTarget(session))
 , _finished(std::move(finished))
-, _stillCurrent(std::move(stillCurrent)) {
+, _stillCurrent(std::move(stillCurrent))
+, _operation(std::move(operation)) {
 }
 
-SyncConfigPost::~SyncConfigPost() = default;
+SyncConfigPost::SyncConfigPost(
+		not_null<Main::Session*> session,
+		DesktopSyncChatIo route,
+		QByteArray staged,
+		Fn<void(SyncConfigPostResult)> finished,
+		Fn<bool()> stillCurrent,
+		DesktopSyncChatOperation operation)
+: SyncConfigPost(session, std::move(staged), std::move(finished),
+	std::move(stillCurrent), std::move(operation)) {
+	_route = std::move(route);
+}
+
+SyncConfigPost::~SyncConfigPost() {
+	_done = true;
+	if (_upload) {
+		_upload->Cancel();
+	}
+}
 
 bool SyncConfigPost::ContextCurrent() const {
 	return _sessionGuard && _target && ValidateAccountSyncTarget(_session, *_target)
-		&& _stillCurrent && _stillCurrent();
+		&& _stillCurrent && _stillCurrent()
+		&& (!_route || (ValidDesktopSyncChatIo(*_route)
+			&& _route->peer.origin.account == SessionAccountKey(_session)))
+		&& (!_readbackCurrent || _readbackCurrent());
 }
 
 void SyncConfigPost::Start() {
@@ -130,22 +177,26 @@ void SyncConfigPost::Start() {
 	}
 	const auto weak = base::make_weak(this);
 	_posted = true;
-	const auto counter = PostsFor(_session);
+	const auto counter = PostsFor(_session, _route ? _route->peer.chat : PeerToken{});
 	++counter->started;
 	++counter->inFlight;
-	_upload = std::make_shared<SyncConfigUpload>(
-		*_sessionGuard.get(),
-		_staged,
-		[weak, counter](std::optional<MsgId> messageId) {
-			--counter->inFlight;
-			if (const auto self = weak.get(); self && !self->_done) {
-				self->OnReceipt(messageId);
-			}
-		},
-		[weak] {
-			const auto self = weak.get();
-			return self && !self->_done && self->ContextCurrent();
-		});
+	const auto finished = [weak, counter](std::optional<MsgId> messageId) {
+		--counter->inFlight;
+		if (const auto self = weak.get(); self && !self->_done) {
+			self->OnReceipt(messageId);
+		}
+	};
+	const auto current = [weak] {
+		const auto self = weak.get();
+		return self && !self->_done && self->ContextCurrent();
+	};
+	if (_route) {
+		_upload = std::make_shared<SyncConfigUpload>(
+			*_sessionGuard.get(), *_route, _staged, finished, current, _operation);
+	} else {
+		_upload = std::make_shared<SyncConfigUpload>(
+			*_sessionGuard.get(), _staged, finished, current, MsgId(0), nullptr, _operation);
+	}
 	_upload->Start();
 }
 
@@ -160,8 +211,11 @@ void SyncConfigPost::Cancel() {
 		.messageId = _messageId,
 	};
 	_done = true;
+	if (_upload) {
+		_upload->Cancel();
+	}
 	if (_reader) {
-		_reader->Cancel();
+		_reader.reset();
 	}
 	if (auto finished = std::move(_finished)) {
 		finished(result);
@@ -178,12 +232,24 @@ void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
 		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
 		return;
 	}
+	const auto route = _upload ? _upload->route() : std::nullopt;
+	const auto proof = _upload ? _upload->readbackCurrent() : Fn<bool()>();
+	if (!route || !proof || !proof()
+		|| (_route && !CompatibleDesktopSyncChatIo(*_route, *route))) {
+		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
+		return;
+	}
+	_route = *route;
+	_readbackCurrent = proof;
 	_messageId = *messageId;
 	const auto weak = base::make_weak(this);
-	_reader = std::make_unique<SyncCandidateReader>(
-		_session,
-		std::vector<int32_t>{ int32_t(_messageId.bare) },
-		[weak](SyncCandidateReadResult result) {
+	_reader = std::make_unique<DesktopSyncExactRead>(
+		_session, *_route, int32_t(_messageId.bare),
+		[weak] {
+			const auto self = weak.get();
+			return self && !self->_done && self->ContextCurrent();
+		},
+		[weak](SyncAutoServerRead result) {
 			if (const auto self = weak.get(); self && !self->_done) {
 				self->OnReadback(std::move(result));
 			}
@@ -191,28 +257,22 @@ void SyncConfigPost::OnReceipt(std::optional<MsgId> messageId) {
 	_reader->Start();
 }
 
-void SyncConfigPost::OnReadback(SyncCandidateReadResult result) {
+void SyncConfigPost::OnReadback(SyncAutoServerRead result) {
 	if (!ContextCurrent()) {
 		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown });
 		return;
 	}
-	if (result.status == SyncCandidateReadStatus::Complete
-			&& result.records.size() == 1
-			&& result.records.front().id == _messageId.bare
-			&& result.records.front().status == SyncCandidateStatus::Valid
-			&& result.records.front().bytes == _staged) {
+	if (result.fresh && result.owned
+		&& result.presence == SyncAutoMessagePresence::Present
+		&& result.messageId == _messageId.bare && result.record == _staged) {
 		Finish({
 			.status = SyncConfigPostStatus::Confirmed,
 			.messageId = _messageId,
-			.readback = std::move(result.records.front().bytes),
+			.readback = std::move(result.record),
 		});
 	} else {
-		Finish({
-			.status = result.status == SyncCandidateReadStatus::Incomplete
-				? SyncConfigPostStatus::OutcomeUnknown
-				: SyncConfigPostStatus::NeedsReview,
-			.messageId = _messageId,
-		});
+		Finish({ .status = SyncConfigPostStatus::OutcomeUnknown,
+			.messageId = _messageId });
 	}
 }
 

@@ -174,6 +174,8 @@ public:
 	void Cancel(QString reason);
 	DesktopSyncChatStatus status() const;
 	bool Owns(Main::Session* session) const;
+	std::optional<DesktopSyncChatLease> Lease(PeerToken chat);
+	bool HasOrigin(const DesktopSyncChatIo &route) const;
 
 private:
 	bool Current() const;
@@ -261,6 +263,48 @@ SyncChatSession::~SyncChatSession() {
 
 bool SyncChatSession::Owns(Main::Session* session) const {
 	return _session.get() == session;
+}
+
+bool SyncChatSession::HasOrigin(const DesktopSyncChatIo &route) const {
+	return _session && ValidDesktopSyncChatIo(route)
+		&& route.peer.origin == _origin
+		&& SessionAccountKey(_session.get()) == _origin.account;
+}
+
+std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
+	if (_busy || !Current() || !_model || !_status.complete
+		|| _status.phase != DesktopSyncChatPhase::Use || _status.postingHeld
+		|| _status.resolution.readChat != chat) {
+		return {};
+	}
+	const auto peer = _model->peer(chat);
+	const auto native = Loaded(*_session.get(), chat);
+	if (!peer || !native) {
+		return {};
+	}
+	const auto route = DesktopSyncChatIo{ *peer, chat == PeerToken{}
+		? MTPInputPeer(MTP_inputPeerSelf()) : native->input() };
+	const auto eligible = DesktopSyncChatEligibility(*peer);
+	if (!ValidDesktopSyncChatIo(route) || !eligible
+		|| eligible->readers != _status.resolution.readers) {
+		return {};
+	}
+	const auto weak = base::make_weak(this);
+	return DesktopSyncChatLease{ route,
+		[weak, run = _run, origin = _origin, chat] {
+			const auto self = weak.get();
+			if (!self || self->_busy || self->_run != run
+				|| self->_origin != origin || !self->Current()
+				|| !self->_status.complete || self->_status.postingHeld
+				|| self->_status.phase != DesktopSyncChatPhase::Use
+				|| self->_status.resolution.readChat != chat) {
+				return false;
+			}
+			const auto native = Loaded(*self->_session.get(), chat);
+			return native && Data::CanSend(native, ChatRestriction::SendFiles)
+				&& Token(self->_session->sendAsPeers().resolveChosen(native)->id,
+					origin.account.userId) == PeerToken{};
+		} };
 }
 
 bool SyncChatSession::Current() const {
@@ -998,6 +1042,18 @@ SyncChatSession &For(not_null<Main::Session*> session) {
 	return *entry;
 }
 
+}
+
+bool SyncChatIoBelongsToSession(
+		not_null<Main::Session*> session,
+		const DesktopSyncChatIo &route) {
+	return For(session).HasOrigin(route);
+}
+
+std::optional<DesktopSyncChatLease> SyncChatIoForPost(
+		not_null<Main::Session*> session,
+		PeerToken chat) {
+	return For(session).Lease(chat);
 }
 
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {

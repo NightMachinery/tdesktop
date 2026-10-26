@@ -64,6 +64,7 @@ private:
 	std::vector<int32_t> _candidateIds;
 	Fn<void(SyncCandidateReadResult)> _finished;
 	SyncCandidateReadResult _result;
+	std::optional<SyncCandidateRecord> _downloaded;
 	std::unique_ptr<FileLoader> _loader;
 	mtpRequestId _requestId = 0;
 	size_t _next = 0;

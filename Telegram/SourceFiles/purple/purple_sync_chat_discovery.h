@@ -80,6 +80,7 @@ public:
 	[[nodiscard]] DesktopSyncChatCommand command() const;
 	[[nodiscard]] const DesktopSyncChatStatus &status() const;
 	[[nodiscard]] const SyncChatResolveInput &input() const;
+	[[nodiscard]] std::optional<DesktopSyncChatPeer> peer(PeerToken chat) const;
 	[[nodiscard]] auto cache() const
 	-> const std::optional<DesktopSyncChatCacheRecord> &;
 

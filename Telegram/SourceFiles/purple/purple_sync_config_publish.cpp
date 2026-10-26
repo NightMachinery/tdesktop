@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_config_publish.h"
 
 #include "purple/purple_sync_chat_scope.h"
+#include "purple/purple_sync_chat_write.h"
 
 #include "base/unixtime.h"
 #include "main/main_account.h"
@@ -39,6 +40,19 @@ SyncConfigPublish::SyncConfigPublish(
 	? AccountSyncInspectionTarget(&session) : AccountSyncTarget(&session)) {
 }
 
+SyncConfigPublish::SyncConfigPublish(
+		Main::Account &account,
+		Main::Session &session,
+		DesktopSyncChatInventory inventory,
+		SyncConfigSendQueue scanQueue,
+		uint64_t scanPosts,
+		Fn<void(SyncConfigPublishResult)> finished,
+		SyncConfigPublishRequest request)
+: SyncConfigPublish(account, session, std::move(inventory.inventory),
+	scanQueue, scanPosts, std::move(finished), std::move(request)) {
+	_inventoryRoute = std::move(inventory.route);
+}
+
 SyncConfigPublish::~SyncConfigPublish() {
 	_done = true;
 	if (_post) {
@@ -55,7 +69,9 @@ bool SyncConfigPublish::AccountAvailable() const {
 		&& (_bindingToken.isEmpty() || AccountSyncBindingToken(*account) == _bindingToken)
 		&& (_storeInput.state != SettingsFileState::Readable
 			|| ValidateAccountSyncStoreTarget(session, *_target, _storeInput))
-		&& SyncAccountAvailable(*account, *session, _inventory.accountUserId);
+		&& SyncAccountAvailable(*account, *session, _inventory.accountUserId)
+		&& (!_inventoryRoute || (ValidDesktopSyncChatIo(*_inventoryRoute)
+			&& _inventoryRoute->peer.origin.account == SessionAccountKey(session)));
 }
 
 void SyncConfigPublish::Start() {
@@ -65,6 +81,10 @@ void SyncConfigPublish::Start() {
 	_started = true;
 	if (!AccountAvailable()) {
 		Finish({ SyncConfigPublishStatus::AccountUnavailable });
+		return;
+	}
+	if (_inventoryRoute && !SyncChatIoBelongsToSession(_session.get(), *_inventoryRoute)) {
+		Finish({ SyncConfigPublishStatus::NeedsReview });
 		return;
 	}
 	const auto recovery = InspectSyncAccountRecovery(*_session.get(), &_inventory);
@@ -82,7 +102,7 @@ void SyncConfigPublish::Start() {
 		return;
 	}
 	const auto state = _store->state();
-	if (!DesktopSyncChatLedgerMatches(*state, {})) {
+	if (!DesktopSyncChatLedgerMatches(*state, _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{})) {
 		Finish({ SyncConfigPublishStatus::NeedsReview });
 		return;
 	}
@@ -123,9 +143,9 @@ void SyncConfigPublish::Start() {
 		? ReadSyncSettingsFile(_target->files)
 		: SyncSettingsFile();
 	const auto queue = (_scanQueue == SyncConfigSendQueue::HoldsSyncRecord
-			|| SyncConfigPostsStarted(not_null<Main::Session*>{ _session.get() }) != _scanPosts)
+			|| SyncConfigPostsStarted(not_null<Main::Session*>{ _session.get() }, state->chat) != _scanPosts)
 		? SyncConfigSendQueue::HoldsSyncRecord
-		: SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() });
+		: SyncConfigSendQueueOf(not_null<Main::Session*>{ _session.get() }, state->chat);
 	const auto plan = PlanSyncConfigPost(
 		*state,
 		token,
@@ -144,7 +164,7 @@ void SyncConfigPublish::Start() {
 		const auto confirmed = _store->ConfirmConfigReadBack(
 			plan.record,
 			state->createdDevice,
-			plan.messageId);
+			plan.messageId, state->chat);
 		Finish(confirmed
 			? SyncConfigPublishResult{
 				SyncConfigPublishStatus::Confirmed,
@@ -198,18 +218,27 @@ void SyncConfigPublish::StartPost(const QByteArray &staged) {
 		return;
 	}
 	const auto weak = base::make_weak(this);
-	_post = std::make_unique<SyncConfigPost>(
-		not_null<Main::Session*>{ _session.get() },
-		staged,
-		[weak](SyncConfigPostResult result) {
-			if (const auto self = weak.get(); self && !self->_done) {
-				self->OnPost(std::move(result));
-			}
-		},
-		[weak] {
-			const auto self = weak.get();
-			return self && !self->_done && self->AccountAvailable();
-		});
+	const auto finished = [weak](SyncConfigPostResult result) {
+		if (const auto self = weak.get(); self && !self->_done) {
+			self->OnPost(std::move(result));
+		}
+	};
+	const auto current = [weak] {
+		const auto self = weak.get();
+		return self && !self->_done && self->_store
+			&& self->_store->state() && self->AccountAvailable();
+	};
+	const auto operation = DesktopSyncChatOperation{
+		_store->directory(), SessionAccountKey(_session.get()), current };
+	if (_inventoryRoute) {
+		_post = std::make_unique<SyncConfigPost>(
+			not_null<Main::Session*>{ _session.get() }, *_inventoryRoute,
+			staged, finished, current, operation);
+	} else {
+		_post = std::make_unique<SyncConfigPost>(
+			not_null<Main::Session*>{ _session.get() }, staged,
+			finished, current, operation);
+	}
 	_posted = true;
 	_post->Start();
 }
@@ -223,7 +252,8 @@ void SyncConfigPublish::OnPost(SyncConfigPostResult result) {
 		const auto confirmed = _store->ConfirmConfigReadBack(
 			result.readback,
 			_store->state()->createdDevice,
-			int32_t(result.messageId.bare));
+			int32_t(result.messageId.bare),
+			_store->state()->chat);
 		Finish(confirmed
 			? SyncConfigPublishResult{
 				SyncConfigPublishStatus::Confirmed,

@@ -177,11 +177,22 @@ void SyncCandidateReader::RequestNext() {
 				.status = SyncCandidateStatus::Inaccessible });
 			return;
 		}
-		self->_documentId = uint64_t(document->c_document().vid().v);
-		const auto editDate = message.c_message().vedit_date();
-		self->_editDate = (editDate && editDate->v > 0)
-			? uint64_t(editDate->v) : 0;
+		const auto documentId = uint64_t(document->c_document().vid().v);
+		const auto edit = message.c_message().vedit_date();
+		const auto editDate = edit && edit->v > 0 ? uint64_t(edit->v) : 0;
 		const auto size = document->c_document().vsize().v;
+		if (self->_downloaded) {
+			if (documentId != self->_documentId || editDate != self->_editDate
+				|| size != self->_expectedBytes) {
+				self->CompleteCurrent({ .id = id,
+					.status = SyncCandidateStatus::Changed });
+			} else {
+				self->CompleteCurrent(*base::take(self->_downloaded));
+			}
+			return;
+		}
+		self->_documentId = documentId;
+		self->_editDate = editDate;
 		if (size <= 0 || size > kMaximumRecordBytes) {
 			self->CompleteCurrent({
 				.id = id,
@@ -279,7 +290,13 @@ void SyncCandidateReader::OnDownload() {
 			.status = SyncCandidateStatus::Inaccessible,
 		});
 	} else {
-		CompleteCurrent(ClassifySyncCandidate(id, loader->bytes()));
+		auto record = ClassifySyncCandidate(id, loader->bytes());
+		if (_route && record.status == SyncCandidateStatus::Valid) {
+			_downloaded = std::move(record);
+			RequestNext();
+		} else {
+			CompleteCurrent(std::move(record));
+		}
 	}
 }
 
@@ -289,6 +306,7 @@ void SyncCandidateReader::CompleteCurrent(SyncCandidateRecord record) {
 	_documentId = 0;
 	_editDate = 0;
 	_expectedBytes = 0;
+	_downloaded.reset();
 	_result.records.push_back(std::move(record));
 	++_next;
 	RequestNext();

@@ -41,6 +41,14 @@ public:
 		uint64_t scanPosts,
 		Fn<void(SyncConfigPublishResult)> finished,
 		SyncConfigPublishRequest request);
+	SyncConfigPublish(
+		Main::Account &account,
+		Main::Session &session,
+		DesktopSyncChatInventory inventory,
+		SyncConfigSendQueue scanQueue,
+		uint64_t scanPosts,
+		Fn<void(SyncConfigPublishResult)> finished,
+		SyncConfigPublishRequest request);
 	~SyncConfigPublish();
 
 	SyncConfigPublish(const SyncConfigPublish &) = delete;
@@ -63,6 +71,7 @@ private:
 	base::weak_ptr<Main::Account> _account;
 	base::weak_ptr<Main::Session> _session;
 	SyncAccountInventoryResult _inventory;
+	std::optional<DesktopSyncChatIo> _inventoryRoute;
 	SyncConfigSendQueue _scanQueue = SyncConfigSendQueue::Empty;
 	uint64_t _scanPosts = 0;
 	Fn<void(SyncConfigPublishResult)> _finished;

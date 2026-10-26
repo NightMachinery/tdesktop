@@ -15,6 +15,16 @@ struct DesktopSyncChatOperation {
 	Fn<bool()> current;
 };
 
+struct DesktopSyncChatLease {
+	DesktopSyncChatIo route;
+	Fn<bool()> current;
+};
+
+[[nodiscard]] bool SyncChatIoBelongsToSession(
+	not_null<Main::Session*> session, const DesktopSyncChatIo &route);
+[[nodiscard]] std::optional<DesktopSyncChatLease> SyncChatIoForPost(
+	not_null<Main::Session*> session, PeerToken chat);
+
 void StartSyncChatDiscovery();
 void EnsureSyncChatResolved(
 	not_null<Main::Session*> session, bool force = false);

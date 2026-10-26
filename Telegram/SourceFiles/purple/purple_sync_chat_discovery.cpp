@@ -633,6 +633,15 @@ const DesktopSyncChatStatus &DesktopSyncChatDiscovery::status() const {
 const SyncChatResolveInput &DesktopSyncChatDiscovery::input() const {
 	return _input;
 }
+std::optional<DesktopSyncChatPeer> DesktopSyncChatDiscovery::peer(
+		PeerToken chat) const {
+	const auto key = PeerTokenText(chat, _origin.account.userId);
+	if (!key) {
+		return {};
+	}
+	const auto found = _facts.find(*key);
+	return found == _facts.end() ? std::nullopt : std::optional(found->second);
+}
 auto DesktopSyncChatDiscovery::cache() const
 -> const std::optional<DesktopSyncChatCacheRecord> & {
 	return _cache;

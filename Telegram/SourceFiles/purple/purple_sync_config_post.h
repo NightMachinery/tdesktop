@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_account_config.h"
 #include "data/data_msg_id.h"
 #include "purple/purple_sync_candidate_reader.h"
+#include "purple/purple_sync_auto_transport.h"
+#include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_config_flow.h"
 
 #include <QtCore/QByteArray>
@@ -39,7 +41,14 @@ struct SyncConfigPostResult {
 
 [[nodiscard]] SyncConfigSendQueue SyncConfigSendQueueOf(
 	not_null<Main::Session*> session);
+[[nodiscard]] SyncConfigSendQueue SyncConfigSendQueueOf(
+	not_null<Main::Session*> session, PeerToken chat);
 [[nodiscard]] uint64_t SyncConfigPostsStarted(not_null<Main::Session*> session);
+
+[[nodiscard]] uint64_t SyncConfigPostsStarted(
+	not_null<Main::Session*> session, PeerToken chat);
+[[nodiscard]] std::function<void()> BeginSyncConfigNetworkOperation(
+	not_null<Main::Session*> session, PeerToken chat);
 
 [[nodiscard]] std::function<void()> BeginSyncConfigNetworkOperation(not_null<Main::Session*> session);
 
@@ -49,7 +58,15 @@ public:
 		not_null<Main::Session*> session,
 		QByteArray staged,
 		Fn<void(SyncConfigPostResult)> finished,
-		Fn<bool()> stillCurrent);
+		Fn<bool()> stillCurrent,
+		DesktopSyncChatOperation operation = {});
+	SyncConfigPost(
+		not_null<Main::Session*> session,
+		DesktopSyncChatIo route,
+		QByteArray staged,
+		Fn<void(SyncConfigPostResult)> finished,
+		Fn<bool()> stillCurrent,
+		DesktopSyncChatOperation operation = {});
 	~SyncConfigPost();
 
 	SyncConfigPost(const SyncConfigPost &) = delete;
@@ -61,7 +78,7 @@ public:
 private:
 	[[nodiscard]] bool ContextCurrent() const;
 	void OnReceipt(std::optional<MsgId> messageId);
-	void OnReadback(SyncCandidateReadResult result);
+	void OnReadback(SyncAutoServerRead result);
 	void Finish(SyncConfigPostResult result);
 
 	not_null<Main::Session*> _session;
@@ -70,7 +87,10 @@ private:
 	std::optional<AccountOperationTarget> _target;
 	Fn<void(SyncConfigPostResult)> _finished;
 	Fn<bool()> _stillCurrent;
-	std::unique_ptr<SyncCandidateReader> _reader;
+	std::optional<DesktopSyncChatIo> _route;
+	DesktopSyncChatOperation _operation;
+	Fn<bool()> _readbackCurrent;
+	std::unique_ptr<DesktopSyncExactRead> _reader;
 	std::shared_ptr<SyncConfigUpload> _upload;
 	MsgId _messageId;
 	bool _started = false;

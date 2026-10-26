@@ -9,7 +9,8 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_auto_service.cpp', 'purple_sync_chat_service.cpp',
     'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp',
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
-    'purple_sync_auto_transport.cpp']}
+    'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
+    'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp']}
 
 RouteNames = set()
 
@@ -50,6 +51,30 @@ def inspect(values):
     require('inventory-route-preserved', '_session, *_route, progress, finished, _current' in inventory and '_session, *_route, _result.scan.candidateIds, finished, _current' in inventory)
     require('ledger-chat-fence', values['purple_sync_local_store.cpp'].count('DesktopSyncChatLedgerMatches(*_state, chat)') == 2)
     require('readback-typed-route', 'DesktopSyncChatRecordRequest(*_route, _id)' in values['purple_sync_auto_transport.cpp'])
+    write = values['purple_sync_chat_write.cpp']
+    upload = values['purple_sync_config_upload.cpp']
+    post = values['purple_sync_config_post.cpp']
+    publisher = values['purple_sync_config_publish.cpp']
+    require('send-silent', 'MTP_flags(MTPmessages_SendMedia::Flag::f_silent), route.input' in write)
+    require('edit-typed', 'route.input, MTP_int(id), MTP_string("#purplesync"), media' in write)
+    require('receipt-random-map', 'uint64_t(data.vrandom_id().v) == randomId' in write)
+    require('receipt-peer', 'DesktopSyncChatToken(data.vpeer_id(), route.peer.origin.account.userId)' in write)
+    require('receipt-c0', 'GetSyncChatMessageOwnership(MapDesktopSyncChatMessage(' in write)
+    require('parts-before-gate', '_offset == _content.size()' in upload and upload.index('void SyncConfigUpload::SendMedia()') < upload.index('CheckSyncChatBeforePost(') < upload.index('self->DispatchMedia();'))
+    require('final-route-compatibility', 'CompatibleDesktopSyncChatIo(*self->_route, lease->route)' in upload)
+    require('final-lease-current', '!lease->current || !lease->current()' in upload)
+    require('updates-before-completion', upload.index('session->api().applyUpdates(result,') < upload.index('Finish(Current() && receipt'))
+    require('upload-callback-lifetime', 'return !_done && session && !session->account().loggingOut()' in upload and 'SessionAccountKey(session) == _account' in upload)
+    require('post-typed-readback', '_session, *_route, int32_t(_messageId.bare)' in post)
+    require('post-exact-confirm', 'result.messageId == _messageId.bare && result.record == _staged' in post and 'result.fresh && result.owned' in post)
+    require('post-cancel-stops-upload', 'void SyncConfigPost::Cancel()' in post and post.count('_upload->Cancel();') == 2)
+    require('publisher-typed-ledger', 'DesktopSyncChatLedgerMatches(*state, _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{})' in publisher)
+    require('download-metadata-seal', 'if (self->_downloaded)' in read and 'documentId != self->_documentId || editDate != self->_editDate' in read and 'size != self->_expectedBytes' in read)
+    require('auto-effect-self', '&& _store->local().state()->version == 1' in auto and '&& _store->local().state()->chat.kind == PeerTokenKind::Self' in auto)
+    operation = auto.split('DesktopSyncChatOperation AutoSession::OperationFor(', 1)[1].split('void AutoSession::Send(', 1)[0]
+    require('borrowed-proof-run', 'self->_store.get() == store && self->_sessionId == owner' in operation and 'store->Current()' in operation)
+    require('borrowed-proof-observer-free', 'SyncChatSelfResolved' not in operation and 'Accept(' not in operation and 'CheckCompletion(' not in operation)
+    require('auto-typed-self-inventory', 'lease->route, nullptr' in auto and 'DesktopSyncChatInventoryMatches(inventory, origin, PeerToken{})' in auto)
     return failures
 
 assert not inspect(files), inspect(files)
@@ -73,6 +98,25 @@ negative = [
     ('purple_sync_account_inventory.cpp', '_session, *_route, _result.scan.candidateIds, finished, _current', '_session, _result.scan.candidateIds, finished', 'inventory-route-preserved'),
     ('purple_sync_local_store.cpp', 'DesktopSyncChatLedgerMatches(*_state, chat)', 'true', 'ledger-chat-fence'),
     ('purple_sync_auto_transport.cpp', 'DesktopSyncChatRecordRequest(*_route, _id)', 'Other()', 'readback-typed-route'),
+    ('purple_sync_chat_write.cpp', 'MTP_flags(MTPmessages_SendMedia::Flag::f_silent), route.input', 'MTP_flags(0), route.input', 'send-silent'),
+    ('purple_sync_chat_write.cpp', 'route.input, MTP_int(id), MTP_string("#purplesync"), media', 'MTP_inputPeerSelf(), MTP_int(id), MTP_string("#purplesync"), media', 'edit-typed'),
+    ('purple_sync_chat_write.cpp', 'uint64_t(data.vrandom_id().v) == randomId', 'true', 'receipt-random-map'),
+    ('purple_sync_chat_write.cpp', 'DesktopSyncChatToken(data.vpeer_id(), route.peer.origin.account.userId)', 'PeerToken{}', 'receipt-peer'),
+    ('purple_sync_chat_write.cpp', 'GetSyncChatMessageOwnership(MapDesktopSyncChatMessage(', 'Other(MapDesktopSyncChatMessage(', 'receipt-c0'),
+    ('purple_sync_config_upload.cpp', '_offset == _content.size()', 'true', 'parts-before-gate'),
+    ('purple_sync_config_upload.cpp', 'CompatibleDesktopSyncChatIo(*self->_route, lease->route)', 'true', 'final-route-compatibility'),
+    ('purple_sync_config_upload.cpp', '!lease->current || !lease->current()', 'false', 'final-lease-current'),
+    ('purple_sync_config_upload.cpp', 'session->api().applyUpdates(result,', 'Other(result,', 'updates-before-completion'),
+    ('purple_sync_config_upload.cpp', 'SessionAccountKey(session) == _account', 'true', 'upload-callback-lifetime'),
+    ('purple_sync_config_post.cpp', '_session, *_route, int32_t(_messageId.bare)', '_session, int32_t(_messageId.bare)', 'post-typed-readback'),
+    ('purple_sync_config_post.cpp', 'result.messageId == _messageId.bare && result.record == _staged', 'true', 'post-exact-confirm'),
+    ('purple_sync_config_post.cpp', '_upload->Cancel();', 'Other();', 'post-cancel-stops-upload'),
+    ('purple_sync_config_publish.cpp', 'DesktopSyncChatLedgerMatches(*state, _inventoryRoute ? _inventoryRoute->peer.chat : PeerToken{})', 'true', 'publisher-typed-ledger'),
+    ('purple_sync_candidate_reader.cpp', 'documentId != self->_documentId || editDate != self->_editDate', 'false', 'download-metadata-seal'),
+    ('purple_sync_auto_service.cpp', '&& _store->local().state()->version == 1', '&& true', 'auto-effect-self'),
+    ('purple_sync_auto_service.cpp', 'self->_store.get() == store && self->_sessionId == owner', 'true', 'borrowed-proof-run'),
+    ('purple_sync_auto_service.cpp', 'store->Current() && store->local().state()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && store->local().state()', 'borrowed-proof-observer-free'),
+    ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, PeerToken{})', 'true', 'auto-typed-self-inventory'),
 ]
 for name, before, after, expected in negative:
     mutated = dict(files)
@@ -81,6 +125,6 @@ for name, before, after, expected in negative:
     try:
         rejected = inspect(mutated)
     except ValueError:
-        rejected = ['startup-order']
+        rejected = ['startup-order', 'updates-before-completion']
     assert expected in rejected, (expected, rejected)
 print(json.dumps({'routes': len(RouteNames), 'negative_controls': len(negative), 'failures': 0}))
