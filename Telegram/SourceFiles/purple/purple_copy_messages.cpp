@@ -9,6 +9,7 @@
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_config.h"
 #include "purple/purple_markdown_delivery.h"
+#include "purple/purple_archive_markdown.h"
 #include <QtCore/QCryptographicHash>
 #include "base/weak_qptr.h"
 #include "core/application.h"
@@ -326,8 +327,9 @@ void CopyBatch::start() {
 			verified->write(wire);
 			const auto raw = QByteArray(reinterpret_cast<const char*>(wire.constData()), wire.size() * sizeof(mtpPrime));
 			const auto id = QString::fromLatin1(QCryptographicHash::hash(raw, QCryptographicHash::Sha256).toHex());
-			if (const auto event = DesktopArchiveSnapshot(SessionAccountKey(response.session), *verified,
+			if (auto event = DesktopArchiveSnapshot(SessionAccountKey(response.session), *verified,
 					ArchiveOrigin::Hydration, id, base::unixtime::now())) {
+				AttachDesktopArticleMarkdown(*event, *page);
 				const auto retainedBytes = event->observation.payload.size()
 					+ (event->content ? QJsonDocument(event->content->rich.toObject()).toJson().size() : 0);
 				if (retainedBytes > 8 * 1024 * 1024 - strong->_resolvedBytes) { continue; }

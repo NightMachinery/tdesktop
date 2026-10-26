@@ -1,5 +1,6 @@
 #include "purple/purple_desktop_archive_store.h"
 #include "purple/purple_markdown_publication.h"
+#include "purple/purple_archive_markdown.h"
 #include "purple/purple_archive_stream.h"
 #include "purple/purple_archive_attention.h"
 #include "purple/purple_archive_files.h"
@@ -1734,7 +1735,7 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 		return result;
 	}
 	const auto plan
-		= PlanArchiveSqlCapture(*slice, event, _impl->security, &_impl->epoch);
+		= PlanDesktopArchiveMarkdownCapture(*slice, event, _impl->security, &_impl->epoch);
 	result.model = plan.transaction.status;
 	if (plan.program.status == ArchiveSqlStatus::RetentionGap) {
 		result.status = DesktopArchiveStatus::RetentionGap;

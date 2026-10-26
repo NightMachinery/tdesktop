@@ -146,3 +146,34 @@ the raw opening and completed message values, checks their revision and native
 prefix, and binds the decoded completed page to the selected cached page. Missing
 evidence refuses Copy. The bounded observation registry includes retained full
 responses; eviction cannot revoke snapshots already owned by an active Copy.
+
+Edit-history and deleted-message views offer Copy as Markdown for each retained
+version with a body. Each action binds that version's canonical digest, identity,
+representation, store/login epoch and purge generations. The worker rereads that
+exact version and asks the shared core to choose genuine source or reconstruction.
+It never resolves a current Telegram message or fetches a newer body. The final
+publication gate also checks the open page, account/window and copy generation.
+Changing pages, closing the view, purging, logging out or starting another copy
+leaves an older pending copy unable to change the clipboard.
+
+Supported ordinary entities use the existing formatter. Newly observed articles
+retain the existing article writer's successful result as a structural cache,
+bound to the exact content hash and representation. This is generated Markdown,
+never genuine source. Legacy articles without that cache, unknown entities and
+unsupported or opaque bodies copy labelled JSON containing their retained content
+and original TL payload bytes as base64. Unknown version fields remain explicit
+in that fallback, and invalid entity boundaries never split a surrogate pair.
+Backtick fences grow to contain literal
+fences. Partial and opaque versions have explicit disclosure labels. No formatter
+error is promoted into a successful article cache.
+
+Archive copying opens no hidden history view, media lease or document model. Its
+read snapshot is local to the worker and is released before immutable text reaches
+the UI queue, including when final delivery is cancelled. Source/unit qualification
+does not establish native menu placement or clipboard behavior.
+
+Optional article cache admission uses the actual retained SQL slice, including
+preserved version and envelope fields. If the cache prevents planning, capture
+retries once with only that cache removed. Outbox admission likewise retries
+without it. The original observation and unknown metadata remain intact; optional
+presentation data cannot turn an otherwise valid capture into a retention gap.

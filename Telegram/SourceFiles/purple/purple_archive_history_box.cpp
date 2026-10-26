@@ -203,8 +203,28 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 					state->attachments.clear();
 					const auto epoch = page.epoch;
 					auto previews = QStringList();
+					auto versionIndex = size_t(0);
 					for (const auto &version : page.versions) {
-						previews.push_back(Preview(version));
+						previews.push_back(QString::number(versionIndex + 1) + u". "_q + Preview(version));
+						const auto digest = versionIndex < page.markdownDigests.size()
+							? page.markdownDigests[versionIndex] : QString();
+						++versionIndex;
+						if (!digest.isEmpty()) {
+							const auto request = DesktopArchiveMarkdownRequest{page.epoch, key,
+								version.version.id, digest, page.generation};
+							const auto button = attachments->add(object_ptr<Ui::RoundButton>(attachments,
+								rpl::single(tr::lng_purple_copy_as_markdown(tr::now) + u" ("_q
+									+ QString::number(versionIndex) + u", "_q + QDateTime::fromSecsSinceEpoch(version.version.firstObservedAt).toString(Qt::ISODate) + ')'),
+								st::defaultBoxButton));
+							state->attachments.push_back(button);
+							button->setClickedCallback([=] {
+								const auto origin = [=] {
+									return current() && !state->loading && state->ticket == ticket
+										&& state->epoch && *state->epoch == epoch;
+								};
+								if (session) { CopyArchiveVersionAsMarkdown(session.get(), request, origin); }
+							});
+						}
 						auto index = 0;
 						for (const auto &ref : version.version.media) {
 							++index;

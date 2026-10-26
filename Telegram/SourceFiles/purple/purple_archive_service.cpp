@@ -15,6 +15,9 @@
 #include "purple/purple_archive_journal.h"
 #include "purple/purple_config.h"
 #include "purple/purple_markdown_source.h"
+#include "purple/purple_copy.h"
+#include "purple/purple_markdown_delivery.h"
+#include "ui/text/text_utilities.h"
 #include "settings.h"
 #include "storage/storage_account.h"
 #include "storage/details/storage_file_utilities.h"
@@ -1053,6 +1056,34 @@ std::optional<DesktopMarkdownCopyScope> OpenDesktopMarkdownCopy(
 		journal->access().epoch, publication, current, publication->stamp()}) : std::nullopt;
 }
 
+void CopyArchiveVersionAsMarkdown(not_null<Main::Session*> session,
+		DesktopArchiveMarkdownRequest request, std::function<bool()> current) {
+	const auto token = BeginMarkdownCopy();
+	const auto scope = OpenDesktopMarkdownCopy(session);
+	if (!scope || !current || !current() || request.epoch != scope->epoch
+		|| request.key.account != SessionAccountKey(session)) { return; }
+	const auto found = Sessions.find(session.get());
+	if (found == Sessions.end()) { return; }
+	const auto weak = base::make_weak(session.get());
+	const auto journal = found->second.journal;
+	static_cast<void>(found->second.worker->Post([weak, token, scope = *scope, current,
+			journal, request = std::move(request)](DesktopArchiveStore &store) {
+		if (!scope.current() || !journal->Drain(store)) { return; }
+		auto text = ReadDesktopArchiveMarkdown(store, request);
+		if (!text) { return; }
+		crl::on_main([weak, token, scope, current, text = std::move(*text)] {
+			const auto permitted = [&] {
+				return weak && !Retired.contains(weak.get()) && !weak->account().loggingOut()
+					&& weak->account().maybeSession() == weak.get()
+					&& IsCurrentMarkdownCopy(token) && scope.current() && current();
+			};
+			static_cast<void>(scope.publication->publish(scope.stamp, permitted, [&] {
+				SetDesktopMarkdownClipboard(text);
+			}));
+		});
+	}));
+}
+
 void QueueDesktopResolvedRichBody(not_null<Main::Session*> session, ArchiveEvent event) {
 	const auto found = Sessions.find(session.get());
 	if (Retired.contains(session.get()) || found == Sessions.end() || !found->second.journal
@@ -1298,6 +1329,9 @@ void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key
 		};
 		auto page = journal && !journal->Drain(store) ? DesktopArchiveHistoryPage()
 			: store.History(key, 32, before, revision, history, revoked);
+		for (const auto &version : page.versions) {
+			page.markdownDigests.push_back(DesktopArchiveMarkdownDigest(version));
+		}
 		if (page.active) {
 			worker->RevokeOnStop(page.active);
 		}

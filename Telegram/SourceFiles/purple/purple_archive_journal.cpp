@@ -1,4 +1,5 @@
 #include "purple/purple_archive_journal.h"
+#include "purple/purple_archive_markdown.h"
 #include "purple/purple_archive_attention.h"
 #include "purple/purple_archive_files.h"
 #include "purple/purple_sync_json.h"
@@ -277,7 +278,11 @@ bool DesktopArchiveJournal::Append(ArchiveEvent event, int byteLimit) {
 		return false;
 	}
 	event.order = _sequence + 1;
-	const auto bytes = Encode(event);
+	auto bytes = Encode(event);
+	if ((!bytes || (byteLimit > 0 && bytes->size() > byteLimit))
+		&& DropDesktopArticleMarkdown(event)) {
+		bytes = Encode(event);
+	}
 	if (!bytes || (byteLimit > 0 && bytes->size() > byteLimit)) {
 		_failure = u"outbox-version-too-large"_q;
 		return false;

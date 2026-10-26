@@ -1,4 +1,5 @@
 #include "purple/purple_archive_queries.h"
+#include "purple/purple_archive_markdown.h"
 
 #include "purple/purple_archive_codec.h"
 #include "purple/purple_archive_envelope.h"
@@ -247,6 +248,7 @@ std::optional<ArchiveDeletedEntry> DesktopArchiveDeletedQuery::DecodeEntry(
 		}
 		result.head = std::get<ArchiveVersionSnapshot>(version->row.value);
 		result.headMetadata = version->row.preserved;
+		result.markdownDigest = DesktopArchiveMarkdownDigest(*result.head);
 		const auto &content = result.head->version.content;
 		result.contentHash = ArchiveContentHash(content);
 		result.displayContent.text = content.text.left(8193);

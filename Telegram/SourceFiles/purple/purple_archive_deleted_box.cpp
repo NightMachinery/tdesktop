@@ -236,6 +236,20 @@ void ShowArchiveDeleted(not_null<Window::SessionController*> controller,
 						continue;
 					}
 					const auto &version = entry.head->version;
+					if (!entry.markdownDigest.isEmpty()) {
+						const auto request = DesktopArchiveMarkdownRequest{page.epoch, key,
+							version.id, entry.markdownDigest, entry.generation};
+						const auto button = actions->add(object_ptr<Ui::RoundButton>(actions,
+							rpl::single(tr::lng_purple_copy_as_markdown(tr::now)
+								+ u" ("_q + QString::number(key.messageId) + ')'), st::defaultBoxButton));
+						state->actions.push_back(button);
+						button->setClickedCallback([=] {
+							const auto origin = [=] {
+								return current() && active->load() && !state->loading && state->ticket == ticket;
+							};
+							if (session) { CopyArchiveVersionAsMarkdown(session.get(), request, origin); }
+						});
+					}
 					auto index = 0;
 					for (const auto &ref : version.media) {
 						++index;

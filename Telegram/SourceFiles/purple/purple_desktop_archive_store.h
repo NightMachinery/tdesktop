@@ -90,6 +90,7 @@ struct DesktopArchiveHistoryPage {
 	ArchiveStoreEpoch epoch;
 	DesktopArchiveStatus status = DesktopArchiveStatus::Invalid;
 	std::vector<ArchiveVersionSnapshot> versions;
+	std::vector<QString> markdownDigests;
 	QString beforeOrder;
 	uint64_t revision = 0;
 	bool more = false;

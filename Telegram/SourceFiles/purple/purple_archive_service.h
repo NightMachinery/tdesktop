@@ -3,6 +3,7 @@
 #include "purple/purple_archive_files.h"
 #include "purple/purple_markdown_publication.h"
 #include "purple/purple_markdown_source.h"
+#include "purple/purple_archive_markdown.h"
 #include "purple/purple_archive_acquired_source.h"
 #include "purple/purple_desktop_archive_store.h"
 
@@ -25,6 +26,8 @@ struct DesktopMarkdownCopySource {
 };
 [[nodiscard]] std::optional<DesktopMarkdownCopyScope> OpenDesktopMarkdownCopy(
 	not_null<Main::Session*> session);
+void CopyArchiveVersionAsMarkdown(not_null<Main::Session*> session,
+	DesktopArchiveMarkdownRequest request, std::function<bool()> current);
 void QueueDesktopResolvedRichBody(not_null<Main::Session*> session, ArchiveEvent event);
 void ReadDesktopMarkdownSource(not_null<Main::Session*> session,
 	DesktopMarkdownCopyScope scope, DesktopMarkdownBody body,

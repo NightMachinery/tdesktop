@@ -16,6 +16,7 @@ struct ArchiveDeletedEntry {
 	QJsonObject headMetadata;
 	ArchiveContent displayContent;
 	QString contentHash;
+	QString markdownDigest;
 	std::optional<ArchiveVersionSnapshot> head;
 	ArchiveGeneration generation;
 	ArchiveTranscriptCursor cursor;

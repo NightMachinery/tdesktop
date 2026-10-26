@@ -21,6 +21,7 @@
 #include "history/history_item_components.h"
 #include "purple/purple_article_markdown.h"
 #include "purple/purple_markdown_current.h"
+#include "purple/purple_archive_markdown.h"
 #include "purple/purple_config.h"
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QJsonArray>
@@ -45,6 +46,15 @@ QJsonArray Entities(const EntitiesInText &entities) {
 				{u"length"_q, entity.length()}, {u"data"_q, entity.data()}});
 	}
 	return result;
+}
+
+void Decorate(not_null<Main::Session*> session, const MTPMessage &message, ArchiveEvent &event) {
+	if (message.type() != mtpc_message || tl::count_length(message) > 1024 * 1024) { return; }
+	const auto rich = message.c_message().vrich_message();
+	if (!rich) { return; }
+	if (const auto page = Iv::ParseRichPage(session, *rich)) {
+		AttachDesktopArticleMarkdown(event, *page);
+	}
 }
 
 void Available(not_null<Main::Session*> session, const ArchiveEvent &event) {
@@ -81,6 +91,9 @@ std::optional<ArchiveEvent> LiveSnapshot(
 			event.content->media.push_back(
 				{u"photo:"_q + QString::number(photo->id), u"photo"_q});
 		}
+	}
+	if (const auto page = item->fullRichPage() ? item->fullRichPage() : item->richPage()) {
+		AttachDesktopArticleMarkdown(event, *page);
 	}
 	event.completeness = ArchiveCompleteness::Partial;
 	event.missing.content.push_back({{u"observedStructure"_q}});
@@ -141,8 +154,9 @@ void ObserveArchiveMessage(not_null<Main::Session*> session, const MTPMessage &m
 		return;
 	}
 	RememberDesktopRichPreview(session, message);
-	if (const auto event = DesktopArchiveSnapshot(SessionAccountKey(session), message,
+	if (auto event = DesktopArchiveSnapshot(SessionAccountKey(session), message,
 			ArchiveOrigin::Baseline, Fresh(), base::unixtime::now())) {
+		Decorate(session, message, *event);
 		QueueArchiveObservation(session, *event);
 		Available(session, *event);
 	}
@@ -168,6 +182,7 @@ void ObserveArchiveEdit(
 				 + QByteArray::number(pts) + '/' + QByteArray::number(event->key.chat.id)
 				 + '/' + QByteArray::number(event->key.messageId) + '/'
 				 + ArchiveContentHash(*event->content).toUtf8());
+	Decorate(session, message, *event);
 	event->observation.context.insert(u"acceptedPts"_q, pts);
 	QueueArchiveObservation(session, *event);
 	Available(session, *event);

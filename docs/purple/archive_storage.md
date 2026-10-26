@@ -702,3 +702,23 @@ exact document version, including historical versions. Neither adds an author
 edit or replaces body order. Account, store/login, revision, content hash,
 representation and purge generations remain bound through commit. No separate
 source database or inferred historical source is created.
+
+Archive Markdown actions carry the digest of the canonical retained version,
+including optional source and preserved version metadata. Digests are computed on
+the archive worker when pages are read. Copy rereads the exact version and checks
+that digest and the account/chat generations before selecting source. No extra
+archive reader or media capability is allocated by a copy. Existing visible views
+keep their existing ownership and closure rules.
+
+Successful article reconstruction may be retained in observation context as
+`desktopStructuralMarkdown`, with format, content hash, representation, partial
+flag and generated text. It is optional structural cache metadata under the same
+encryption and purge ownership as the version. It cannot establish source
+provenance. Older versions remain readable and use a labelled lossless fallback
+when their retained structure cannot pass the existing writer.
+
+Optional article cache admission uses the actual retained SQL slice, including
+preserved version and envelope fields. If the cache prevents planning, capture
+retries once with only that cache removed. Outbox admission likewise retries
+without it. The original observation and unknown metadata remain intact; optional
+presentation data cannot turn an otherwise valid capture into a retention gap.
