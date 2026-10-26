@@ -1,5 +1,8 @@
 #include "purple/purple_sync_chat_facts.h"
 
+#include <QtCore/QCryptographicHash>
+
+#include <algorithm>
 #include <limits>
 #include <set>
 
@@ -167,6 +170,19 @@ DesktopSyncChatPeer MapDesktopSyncChatPeer(
 			}
 			if (!chat.is_left() && ids.contains(origin.account.userId)) {
 				facts.otherMembers = ids.size() - 1;
+				if (ids.size() <= 200) {
+					result.readerMembers = std::vector<QString>();
+					for (const auto id : ids) {
+						if (uint64_t(id) != origin.account.userId) {
+							result.readerMembers->push_back(QString::fromLatin1(
+								QCryptographicHash::hash("purple-sync-chat-reader-v1:"
+									+ QByteArray::number(origin.account.environment) + ':'
+									+ QByteArray::number(origin.account.userId) + ':'
+									+ QByteArray::number(id), QCryptographicHash::Sha256).toHex()));
+						}
+					}
+					std::sort(result.readerMembers->begin(), result.readerMembers->end());
+				}
 				facts.otherAdmins = admins - (selfAdmin ? 1 : 0);
 			}
 		}

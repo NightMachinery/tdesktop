@@ -19,8 +19,9 @@ InputChannel; Self, User and basic Chat use messages.getMessages. Returned
 message id and typed peer are checked independently of request construction.
 Unknown constructors, inexact/flood or contradictory counts, wrong target/id,
 transport failure and capped or unfinished scans cannot prove absence. Modern
-history retains the 20-page bound and checks exact terminal evidence before it
-can be Empty. Q remains a hint before complete inventory.
+full inventory permits fewer than 1000 pages and checks exact terminal evidence
+before it can be Empty. Reaching page 1000 is Unknown, including a terminal reply
+on that page. R1 global mark search retains its separate 20-page bound. Q remains a hint before complete inventory.
 
 `DesktopSyncChatInventory` carries the route beside the unchanged core inventory.
 The service checks the captured origin and exact typed chat before converting
@@ -88,8 +89,10 @@ New sends set the generated sendMedia silent flag. The current Telegram schema
 has no silent flag on editMessage; edits use its ordinary media/message flags
 with the same typed peer. No extra flag is invented. Missing send-as evidence,
 lost rights, unresolved discovery and account retirement remain posting holds.
-The separate parity follow-up will apply the shared known-new-reader warning
-policy; this slice preserves the reviewed reader-snapshot gate.
+Prior consent applies to known reader changes in the same chat. The device
+persists a warning when new members are known, while unknown readers and lost
+rights hold. The opening and fresh typed routes still match origin, chat and kind;
+a route-compatibility check does not grant reader consent by itself.
 
 Send receipts match random id, server message id, typed target and C0 ownership.
 Ordinary and channel new/edit Updates, updatesCombined and the direct non-channel

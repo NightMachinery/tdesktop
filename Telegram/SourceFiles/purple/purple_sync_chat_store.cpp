@@ -77,6 +77,7 @@ std::shared_ptr<DesktopSyncChatDisk> OpenDesktopSyncChatDisk(
 		}
 		result->settingsBound = true;
 		result->settingsChat = state.state.chat;
+		result->settingsSpace = state.state.space;
 	}
 	if (!current->load()
 		|| SyncPathIdentity(result->cachePath) != result->identity

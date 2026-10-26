@@ -1,6 +1,7 @@
 #include "purple/purple_sync_chat_cache.h"
 
 #include <QtCore/QJsonDocument>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonParseError>
 #include <algorithm>
 #include <limits>
@@ -29,6 +30,12 @@ std::optional<uint64_t> Number(const QJsonValue &value) {
 	return result;
 }
 
+bool DigestValid(const QString &text) {
+	return text.size() == 64 && std::all_of(text.begin(), text.end(), [](QChar value) {
+		return (value >= u'0' && value <= u'9') || (value >= u'a' && value <= u'f');
+	});
+}
+
 bool ReadersValid(const SyncChatReaderFacts &readers) {
 	return !(readers.privateRecipient && readers.botOwner)
 		&& readers.warningRequired
@@ -42,6 +49,41 @@ QJsonValue Count(std::optional<uint64_t> value) {
 				 : QJsonValue(QJsonValue::Null);
 }
 
+}
+
+bool ReuseDesktopSyncChatDiscovery(
+		const DesktopSyncChatDiscoveryReceipt &receipt,
+		const DesktopSyncChatDiscoveryScope &current,
+		int64_t now) {
+	return receipt.completedAt > 0 && now >= receipt.completedAt
+		&& now - receipt.completedAt < 15 * 60
+		&& ValidDesktopSyncChatOrigin(current.origin)
+		&& !current.root.isEmpty() && DigestValid(current.loginBinding)
+		&& current.mark && !current.carry
+		&& (current.mark->markId > 0 || current.mark->chat == PeerToken{})
+		&& receipt.scope == current;
+}
+
+bool NewDesktopSyncChatReaders(
+		const DesktopSyncChatCacheRecord &previous,
+		const DesktopSyncChatPeer &peer) {
+	const auto eligibility = DesktopSyncChatEligibility(peer);
+	if (previous.mark.chat != peer.chat || !eligibility
+		|| eligibility->readers.populationUnknown) {
+		return false;
+	}
+	if (previous.readerCreator == true && peer.creator == false) {
+		return true;
+	}
+	if (previous.readerMembers && peer.readerMembers) {
+		return std::any_of(peer.readerMembers->begin(), peer.readerMembers->end(),
+			[&](const QString &member) {
+				return !std::binary_search(previous.readerMembers->begin(),
+					previous.readerMembers->end(), member);
+			});
+	}
+	return previous.readers.otherMembers && eligibility->readers.otherMembers
+		&& *eligibility->readers.otherMembers > *previous.readers.otherMembers;
 }
 
 QString DesktopSyncChatCacheFileName(const AccountKey &account) {
@@ -100,6 +142,29 @@ ParseDesktopSyncChatCache(const QByteArray &bytes, const AccountKey &account) {
 		return {};
 	}
 	record.readerConsent = object.value(u"reader_consent"_q).toBool();
+	const auto warning = object.value(u"new_readers"_q);
+	const auto creator = object.value(u"reader_creator"_q);
+	const auto memberSnapshot = object.value(u"reader_members"_q);
+	if ((!warning.isUndefined() && !warning.isBool())
+		|| (!creator.isUndefined() && !creator.isNull() && !creator.isBool())
+		|| (!memberSnapshot.isUndefined() && !memberSnapshot.isNull() && !memberSnapshot.isArray())) {
+		return {};
+	}
+	record.newReaders = warning.toBool();
+	if (creator.isBool()) record.readerCreator = creator.toBool();
+	if (memberSnapshot.isArray()) {
+		const auto array = memberSnapshot.toArray();
+		if (array.size() > 200) return {};
+		record.readerMembers = std::vector<QString>();
+		for (const auto &value : array) {
+			const auto member = value.toString();
+			if (!value.isString() || !DigestValid(member)
+				|| (!record.readerMembers->empty() && record.readerMembers->back() >= member)) {
+				return {};
+			}
+			record.readerMembers->push_back(member);
+		}
+	}
 	const auto readers = object.value(u"readers"_q).toObject();
 	for (const auto &name :
 		 {u"warning"_q, u"private"_q, u"bot"_q, u"unknown"_q}) {
@@ -153,6 +218,16 @@ std::optional<QByteArray> SerializeDesktopSyncChatCache(const DesktopSyncChatCac
 	object.insert(u"mark_date"_q, QString::number(record.mark.markDate));
 	object.insert(u"title"_q, record.title);
 	object.insert(u"reader_consent"_q, record.readerConsent);
+	object.insert(u"new_readers"_q, record.newReaders);
+	object.insert(u"reader_creator"_q, record.readerCreator
+		? QJsonValue(*record.readerCreator) : QJsonValue(QJsonValue::Null));
+	auto memberSnapshot = QJsonValue(QJsonValue::Null);
+	if (record.readerMembers) {
+		auto array = QJsonArray();
+		for (const auto &member : *record.readerMembers) array.push_back(member);
+		memberSnapshot = array;
+	}
+	object.insert(u"reader_members"_q, memberSnapshot);
 	object.insert(
 		u"readers"_q,
 		QJsonObject{

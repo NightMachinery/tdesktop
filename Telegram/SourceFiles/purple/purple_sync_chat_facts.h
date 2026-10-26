@@ -20,6 +20,7 @@ struct DesktopSyncChatPeer {
 	std::optional<bool> creator;
 	std::optional<bool> soleAdmin;
 	std::optional<SyncChatFacts> facts;
+	std::optional<std::vector<QString>> readerMembers;
 };
 
 struct DesktopSyncChatPeerInput {

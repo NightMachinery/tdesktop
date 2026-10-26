@@ -207,13 +207,13 @@ DesktopSyncChatPageStatus DesktopSyncChatHistoryGuard::Add(
 	}
 	_seen = after;
 	++_pages;
+	if (_pages >= kDesktopSyncChatInventoryPages) {
+		_finished = true;
+		return DesktopSyncChatPageStatus::Capped;
+	}
 	if (messages->empty() || (_total && after == *_total)) {
 		_finished = true;
 		return DesktopSyncChatPageStatus::Complete;
-	}
-	if (_pages >= 20) {
-		_finished = true;
-		return DesktopSyncChatPageStatus::Capped;
 	}
 	return DesktopSyncChatPageStatus::Next;
 }

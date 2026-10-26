@@ -103,11 +103,29 @@ void DesktopSyncChatDiscovery::Start(int64_t now) {
 	Begin(now, false);
 }
 
+void DesktopSyncChatDiscovery::StartBeforePost(int64_t now) {
+	if (_command.step != DesktopSyncChatStep::Idle) {
+		return;
+	}
+	Start(now);
+	if (_command.step == DesktopSyncChatStep::Idle) {
+		return;
+	}
+	const auto effective = _input.cache ? _input.cache
+		: _input.settingsBound
+		? std::optional(SyncChatCache{_input.settingsChat, 0, 0}) : std::nullopt;
+	if (effective && (effective->markId > 0 || effective->chat == PeerToken{})) {
+		_cacheRead = true;
+		Issue(DesktopSyncChatStep::ExactMark, effective->chat, effective);
+	}
+}
+
 void DesktopSyncChatDiscovery::Begin(int64_t now, bool retry) {
 	if (!retry) {
 		_retries = 0;
 	}
 	_status = {};
+	_status.newReaders = _cache && _cache->newReaders;
 	_status.reason = u"resolving"_q;
 	_status.postingHeld = true;
 	if (!ValidDesktopSyncChatOrigin(_origin) || _loginBinding.size() != 64
@@ -531,9 +549,14 @@ void DesktopSyncChatDiscovery::Resolve(int64_t now) {
 	}
 	auto resolved = ResolveSyncChat(_input);
 	if (_cache && resolved.cache && resolved.cache->chat == _cache->mark.chat
-		&& _cache->readerConsent && _cache->readers == resolved.readers) {
+		&& _cache->readerConsent && !resolved.readers.populationUnknown
+		&& _cache->readers.privateRecipient == resolved.readers.privateRecipient
+		&& _cache->readers.botOwner == resolved.readers.botOwner) {
 		_input.readerWarningAccepted = true;
 		resolved = ResolveSyncChat(_input);
+	}
+	if (resolved.action == SyncChatAction::Use && resolved.readers.populationUnknown) {
+		resolved.postingHeld = true;
 	}
 	_status.resolution = resolved;
 	if (resolved.action == SyncChatAction::VerifyMark && resolved.winner) {
@@ -589,7 +612,19 @@ void DesktopSyncChatDiscovery::Resolve(int64_t now) {
 			next.account = _origin.account;
 			next.loginBinding = _loginBinding;
 			next.mark = *resolved.cache;
-			next.readers = resolved.readers;
+			const auto previous = _cache;
+			const auto facts = peer(resolved.cache->chat);
+			if (previous && previous->mark.chat == resolved.cache->chat) {
+				next.newReaders = previous->newReaders
+					|| (facts && NewDesktopSyncChatReaders(*previous, *facts));
+				if (previous->readers.populationUnknown) next.readers = resolved.readers;
+			} else {
+				next.readers = resolved.readers;
+			}
+			if (facts) {
+				if (!next.readerCreator) next.readerCreator = facts->creator;
+				if (!next.readerMembers) next.readerMembers = facts->readerMembers;
+			}
 			next.readerConsent = _input.readerWarningAccepted;
 			_cache = next;
 		}
@@ -601,6 +636,10 @@ void DesktopSyncChatDiscovery::Resolve(int64_t now) {
 			: resolved.action == SyncChatAction::NewerMark
 			? u"newer-mark"_q
 			: u"resolution-held"_q;
+	}
+	_status.newReaders = _cache && _cache->newReaders;
+	if (resolved.action == SyncChatAction::Use && resolved.readers.populationUnknown) {
+		_status.reason = u"unknown-readers"_q;
 	}
 	_command = {_origin, ++_ticket};
 }
@@ -619,6 +658,7 @@ void DesktopSyncChatDiscovery::Finish(QString reason) {
 			_status.resolution.readChat = cached->chat;
 		}
 	}
+	_status.newReaders = _cache && _cache->newReaders;
 	_status.reason = std::move(reason);
 	_status.retryAt = 0;
 	_command = {_origin, ++_ticket};

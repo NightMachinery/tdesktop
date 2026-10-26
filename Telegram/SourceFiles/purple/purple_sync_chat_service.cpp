@@ -170,12 +170,16 @@ public:
 	void Ensure(
 		bool force,
 		Fn<void(DesktopSyncChatStatus)> done = {},
-		DesktopSyncChatOperation operation = {});
+		DesktopSyncChatOperation operation = {},
+		bool beforePost = false);
 	void Cancel(QString reason);
 	DesktopSyncChatStatus status() const;
 	bool Owns(Main::Session* session) const;
 	std::optional<DesktopSyncChatLease> Lease(PeerToken chat);
 	bool HasOrigin(const DesktopSyncChatIo &route) const;
+	DesktopSyncChatDiscoveryScope ScopeFor(
+		const DesktopSyncChatDisk &disk,
+		const std::optional<DesktopSyncChatCacheRecord> &cache) const;
 
 private:
 	bool Current() const;
@@ -215,6 +219,9 @@ private:
 	std::optional<AccountKey> _owner;
 	AccountWorkMode _mode = AccountWorkMode::Own;
 	int64_t _lastStarted = 0;
+	std::optional<DesktopSyncChatDiscoveryReceipt> _recent;
+	bool _beforePost = false;
+	bool _directBeforePost = false;
 	bool _busy = false;
 	base::Timer _timer;
 	base::Timer _requestTimeout;
@@ -286,6 +293,7 @@ std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
 		? MTPInputPeer(MTP_inputPeerSelf()) : native->input() };
 	const auto eligible = DesktopSyncChatEligibility(*peer);
 	if (!ValidDesktopSyncChatIo(route) || !eligible
+		|| eligible->readers.populationUnknown
 		|| eligible->readers != _status.resolution.readers) {
 		return {};
 	}
@@ -307,6 +315,15 @@ std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
 		} };
 }
 
+DesktopSyncChatDiscoveryScope SyncChatSession::ScopeFor(
+		const DesktopSyncChatDisk &disk,
+		const std::optional<DesktopSyncChatCacheRecord> &cache) const {
+	return { _origin, _root, _binding, _loginBinding, _owner, _mode,
+		disk.settingsSpace, disk.settingsBound, disk.settingsChat,
+		cache ? std::optional(cache->mark) : std::nullopt,
+		cache && cache->carry.has_value() };
+}
+
 bool SyncChatSession::Current() const {
 	const auto session = _session.get();
 	return session && _current && _current->load()
@@ -325,9 +342,10 @@ bool SyncChatSession::Current() const {
 void SyncChatSession::Ensure(
 	bool force,
 	Fn<void(DesktopSyncChatStatus)> done,
-	DesktopSyncChatOperation operation) {
+	DesktopSyncChatOperation operation,
+	bool beforePost) {
 	if (_busy) {
-		if (operation.current) {
+		if (operation.current || beforePost) {
 			auto held = status();
 			held.postingHeld = true;
 			held.phase = DesktopSyncChatPhase::Paused;
@@ -350,6 +368,7 @@ void SyncChatSession::Ensure(
 		}
 		return;
 	}
+	_beforePost = beforePost;
 	_operation = std::move(operation);
 	if (done) {
 		_callbacks.push_back(std::move(done));
@@ -358,6 +377,7 @@ void SyncChatSession::Ensure(
 }
 
 void SyncChatSession::Cancel(QString reason) {
+	_recent.reset();
 	if (_current) {
 		_current->store(false);
 	}
@@ -495,8 +515,19 @@ void SyncChatSession::Begin(bool retry) {
 					disk->settingsChat,
 					DialogsFor(*self->_session, self->_origin.account.userId),
 					disk->loginBinding);
-				self->_model->Start(base::unixtime::now());
+				const auto now = int64_t(base::unixtime::now());
+				const auto scope = self->ScopeFor(*disk, disk->cache);
+				self->_directBeforePost = self->_beforePost && self->_recent
+					&& ReuseDesktopSyncChatDiscovery(*self->_recent, scope, now);
+				if (self->_directBeforePost) {
+					self->_model->StartBeforePost(now);
+				} else {
+					self->_recent.reset();
+					self->_model->Start(now);
+				}
 			} else {
+				self->_directBeforePost = false;
+				self->_recent.reset();
 				self->_model->Tick(base::unixtime::now());
 			}
 			self->Run();
@@ -977,6 +1008,24 @@ void SyncChatSession::Finish() {
 			self->_expectedCacheBytes = bytes;
 			self->_expectedStateIdentity = disk->stateIdentity;
 			self->_expectedStateBytes = disk->stateBytes;
+			if (saved && cache && self->_status.complete
+				&& self->_status.phase == DesktopSyncChatPhase::Use
+				&& !self->_status.postingHeld) {
+				const auto now = int64_t(base::unixtime::now());
+				const auto scope = self->ScopeFor(*disk, cache);
+				if (self->_directBeforePost && (!self->_recent
+					|| !ReuseDesktopSyncChatDiscovery(*self->_recent, scope, now))) {
+					self->_recent.reset();
+					self->Begin(false);
+					return;
+				}
+				if (!self->_directBeforePost) {
+					self->_recent = DesktopSyncChatDiscoveryReceipt{
+						scope, now };
+				}
+			} else {
+				self->_recent.reset();
+			}
 			if (!saved) {
 				self->_status.phase = DesktopSyncChatPhase::Paused;
 				self->_status.postingHeld = true;
@@ -1063,7 +1112,7 @@ void CheckSyncChatBeforePost(
 	not_null<Main::Session*> session,
 	Fn<void(DesktopSyncChatStatus)> done,
 	DesktopSyncChatOperation operation) {
-	For(session).Ensure(true, std::move(done), std::move(operation));
+	For(session).Ensure(true, std::move(done), std::move(operation), true);
 }
 DesktopSyncChatStatus SyncChatStatusOf(not_null<Main::Session*> session) {
 	return For(session).status();

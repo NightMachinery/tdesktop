@@ -245,7 +245,7 @@ void ReceiptMatrix() {
 		}
 		if (route.peer.chat.kind == PeerTokenKind::Chat || route.peer.chat.kind == PeerTokenKind::Channel) {
 			auto readers=route; readers.peer.facts->otherMembers=5;
-			CHECK(!CompatibleDesktopSyncChatIo(route,readers));
+			CHECK(CompatibleDesktopSyncChatIo(route,readers));
 			auto unknown=route; unknown.peer.facts->otherMembers.reset();
 			CHECK(!CompatibleDesktopSyncChatIo(route,unknown));
 		}
@@ -476,9 +476,12 @@ void PostReadbackSchedules() {
 
 }
 
+#ifndef PURPLE_SYNC_CHAT_WRITE_EMBEDDED
 int main() {
 	AuthorMain(); RoutesAndWire(); FullReadPath(); ExactReadback(); CandidateSeal(); LedgerScope();
 	ReceiptMatrix(); UploadSchedules(); PostReadbackSchedules(); BorrowedRunProof(); CounterScopes();
 	std::printf("TYPED WRITE %d checks, %d failures\n",Checks,Failures);
 	return Failures?1:0;
 }
+
+#endif

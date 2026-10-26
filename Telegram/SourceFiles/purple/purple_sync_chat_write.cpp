@@ -9,8 +9,7 @@ bool CompatibleDesktopSyncChatIo(
 		&& opening.peer.origin == fresh.peer.origin
 		&& opening.peer.chat == fresh.peer.chat
 		&& opening.peer.kind == fresh.peer.kind
-		&& DesktopSyncChatEligibility(opening.peer)->readers
-			== DesktopSyncChatEligibility(fresh.peer)->readers;
+		&& !DesktopSyncChatEligibility(fresh.peer)->readers.populationUnknown;
 }
 
 std::optional<MTPmessages_SendMedia> DesktopSyncChatSendMediaRequest(

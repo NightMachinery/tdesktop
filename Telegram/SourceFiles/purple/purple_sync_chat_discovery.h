@@ -27,6 +27,7 @@ struct DesktopSyncChatStatus {
 	bool complete = false;
 	bool postingHeld = true;
 	int64_t retryAt = 0;
+	bool newReaders = false;
 };
 
 struct DesktopSyncChatCommand {
@@ -74,6 +75,7 @@ public:
 		std::vector<PeerToken> loadedDialogs,
 		QString loginBinding);
 	void Start(int64_t now);
+	void StartBeforePost(int64_t now);
 	void Tick(int64_t now);
 	void Cancel();
 	[[nodiscard]] bool Complete(const DesktopSyncChatReply &reply, int64_t now);

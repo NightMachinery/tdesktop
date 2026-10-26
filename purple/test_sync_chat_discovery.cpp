@@ -312,6 +312,7 @@ struct ProbeSession : base::has_weak_ptr {
 		DesktopSyncChatStatus status() const { return {}; }
 	};
 	bool _busy = true;
+	std::optional<DesktopSyncChatDiscoveryReceipt> _recent;
 	Model model;
 	Model *_model = &model;
 	uint64_t _run = 11;

@@ -54,6 +54,8 @@ using DesktopSyncChatExactRequest =
 	DesktopSyncChatSearch kind,
 	std::optional<PeerToken> target);
 
+inline constexpr auto kDesktopSyncChatInventoryPages = 1000;
+
 class DesktopSyncChatHistoryGuard final {
 public:
 	explicit DesktopSyncChatHistoryGuard(

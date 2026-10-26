@@ -21,6 +21,7 @@ struct DesktopSyncChatDisk {
 	std::unique_ptr<QLockFile> lock;
 	bool settingsBound = false;
 	PeerToken settingsChat;
+	QString settingsSpace;
 	QString error;
 };
 

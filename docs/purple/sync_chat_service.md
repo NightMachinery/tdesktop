@@ -147,3 +147,48 @@ Native source syntax checks must replace a reused recipe's `LANG_KEYS_SUBSET`
 for the actual unit. A different file's subset causes misleading missing-string
 errors. Use generated headers only in the unit workspace; do not rewrite a
 native build tree for source-only checks.
+
+## Before-post policy and reader warning state
+
+Every before-post check rereads the exact cached mark through R3 and obtains
+fresh full info, eligibility and reader facts. A complete, unheld discovery
+result can avoid another R1/R2/Q/inventory cycle for less than 15 minutes. Its
+RAM receipt matches the account, environment, login, settings root, owner and
+Work Mode, binding token, settings space/chat, and cached mark. A carry, restart,
+changed scope, incomplete result, failed save or backwards clock cannot reuse
+it. Fast checks do not extend that deadline. Expiry while a direct check is
+running restarts full discovery before completion is delivered. Existing account
+locks, current-operation proofs and unknown/lost-mark posting holds remain.
+
+Full record inventory has its own 1000-page limit. Reaching that page stays
+Unknown, even if the response also looks terminal. R1 global mark search keeps
+20 pages. Inexact, flood, changed-count or unfinished evidence still holds and
+retains the original cache.
+
+Known new readers retain prior consent for the same chat and set a sticky,
+device-local `new_readers` cache/status flag. The original reader baseline stays
+available. Available small basic-group rosters are retained as sorted,
+account-scoped member digests; an added id, a higher count when no list is
+available, or loss of creator rights sets the warning. Departures alone do not.
+Channels without a roster retain the count-based blind spot: replacement at an
+unchanged count cannot be detected. Unknown populations and lost posting rights
+still hold. A previously unknown baseline is initialized when facts become
+known. Optional warning/snapshot fields accept old caches, while malformed new
+fields refuse. No discovery-freshness receipt is persisted across restarts.
+
+This policy/state patch adds no presentation. T3 owns Sync screen warnings and
+controls. It activates no setup or automatic non-Self writes.
+
+The compact unit fixture compiles actual model, mapper, cache, request and disk
+code. It uses literal service scope and existing upload/read callback bodies with
+controlled transport endpoints, and verifies complete inventories beyond20pages,
+1000-page refusal, exact R3 outcomes, scope/expiry, real staged-store changes and
+warning persistence. Reused support objects require matching source/object hashes:
+
+```sh
+python3 purple/test_sync_chat_alignment.py --build-dir EXISTING_DEBUG_TREE --output-dir UNIT_DIRECTORY --reuse-unit-dir QUALIFIED_TYPED_UNIT_DIRECTORY --build-only
+UNIT_DIRECTORY/test_sync_chat_alignment
+python3 purple/test_sync_chat_alignment_routes.py
+```
+
+These source/unit cases do not qualify native Telegram, app lifecycle or UI.

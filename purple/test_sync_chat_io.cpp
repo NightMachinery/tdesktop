@@ -375,16 +375,16 @@ void FullReadPath() {
 		}
 		{
 			auto capped = ScanProbe(route);
-			for (auto page = 0; page < 20; ++page) {
+			for (auto page = 0; page < kDesktopSyncChatInventoryPages; ++page) {
 				if (chat.kind == PeerTokenKind::Channel) {
-					auto response = NativeChannelMessages(); response.count = MTP_int(21);
-					response.messages = MTP_vector<MTPMessage>({ DocumentMessage(route,100-page) }); capped.Reply(response.Build());
+					auto response = NativeChannelMessages(); response.count = MTP_int(kDesktopSyncChatInventoryPages+1);
+					response.messages = MTP_vector<MTPMessage>({ DocumentMessage(route,2000-page) }); capped.Reply(response.Build());
 				} else {
-					auto response = NativeMessagesSlice(); response.count = MTP_int(21);
-					response.messages = MTP_vector<MTPMessage>({ DocumentMessage(route,100-page) }); capped.Reply(response.Build());
+					auto response = NativeMessagesSlice(); response.count = MTP_int(kDesktopSyncChatInventoryPages+1);
+					response.messages = MTP_vector<MTPMessage>({ DocumentMessage(route,2000-page) }); capped.Reply(response.Build());
 				}
 			}
-			CHECK(capped.status == SyncHistoryScanStatus::InvalidResponse && capped.next == 19);
+			CHECK(capped.status == SyncHistoryScanStatus::InvalidResponse && capped.next == kDesktopSyncChatInventoryPages-1);
 			const auto bad = FinishSyncAccountInventory(123,{capped.status,{},capped._pages.count()},std::nullopt);
 			CHECK(!MapDesktopSyncChatInventoryReply(Origin,1,chat,{route,bad}).success);
 		}
