@@ -405,6 +405,67 @@ std::optional<DesktopSyncChatCreateCommand> DesktopSyncChatSetupExecutor::Next()
 	return _issued;
 }
 
+bool DesktopSyncChatSetupExecutor::Renew(
+		const DesktopSyncChatCreateCommand &command,
+		const DesktopSyncChatSetupResumeProof &proof, int64_t now,
+		Fn<bool(const DesktopSyncChatCreateJournal &)> commitCache) {
+	const auto bytes = _issued ? SerializeDesktopSyncChatCreateJournal(_issued->journal) : std::nullopt;
+	if (!_issued || _phase != DesktopSyncChatCreatePhase::Running
+		|| command.origin != _origin || command.operation != _journal.operation
+		|| command.ticket != _issued->ticket || command.step != _issued->step
+		|| !bytes || SerializeDesktopSyncChatCreateJournal(command.journal) != bytes
+		|| !_current || !_current()) {
+		return false;
+	}
+	auto candidate = _journal;
+	if (command.step == DesktopSyncChatCreateStep::Create
+		|| command.step == DesktopSyncChatCreateStep::PostMark) {
+		candidate.pending = false;
+	}
+	if (command.step == DesktopSyncChatCreateStep::Create) {
+		candidate.createAttempts = std::max(0, candidate.createAttempts - 1);
+	}
+	auto verifier = DesktopSyncChatSetupExecutor(_origin, candidate,
+		[](const DesktopSyncChatCreateJournal &) { return true; }, _current);
+	verifier.Start(now);
+	auto peerIndex = size_t(0);
+	for (auto count = 0; count != 12; ++count) {
+		const auto next = verifier.Next();
+		if (!next) { return false; }
+		if (next->step == command.step) {
+			if (verifier.journal().chat != _journal.chat
+				|| verifier.journal().randomId != _journal.randomId
+				|| verifier.journal().markId != _journal.markId
+				|| verifier.journal().markDate != _journal.markDate) { return false; }
+			auto renewed = _journal;
+			renewed.readerConsent = verifier.journal().readerConsent;
+			renewed.readerSnapshot = verifier.journal().readerSnapshot;
+			renewed.newReaders = verifier.journal().newReaders;
+			if (!Save(std::move(renewed))) { return false; }
+			_peer = verifier._peer;
+			_resolvedMark = verifier._resolvedMark;
+			return _current && _current();
+		}
+		auto reply = DesktopSyncChatCreateReply{
+			_origin, next->operation, next->ticket, DesktopSyncChatCreateOutcome::Okay };
+		switch (next->step) {
+		case DesktopSyncChatCreateStep::Resolve: reply.resolution = proof.resolution; break;
+		case DesktopSyncChatCreateStep::PeerInfo:
+			if (peerIndex == proof.peers.size()) { return false; }
+			reply.peer = proof.peers[peerIndex++];
+			break;
+		case DesktopSyncChatCreateStep::Inventory: reply.inventory = proof.inventory; break;
+		case DesktopSyncChatCreateStep::ReadMark: reply.readback = proof.readback; break;
+		case DesktopSyncChatCreateStep::Commit:
+			if (!commitCache || !commitCache(verifier.journal())) { return false; }
+			break;
+		default: return false;
+		}
+		if (!verifier.Complete(reply, now)) { return false; }
+	}
+	return false;
+}
+
 bool DesktopSyncChatSetupExecutor::AcceptMark(const MTPMessage &message) {
 	if (!_peer || message.type() != mtpc_message || !_journal.chat) return false;
 	const auto &data = message.c_message();
@@ -482,7 +543,13 @@ bool DesktopSyncChatSetupExecutor::Complete(const DesktopSyncChatCreateReply &re
 			auto next = _journal;
 			if ((step == DesktopSyncChatCreateStep::Create || step == DesktopSyncChatCreateStep::PostMark)
 				&& reply.outcome != DesktopSyncChatCreateOutcome::Ambiguous) next.pending = false;
-			if (reply.outcome == DesktopSyncChatCreateOutcome::FloodWait) next.retryAt = now + std::clamp(reply.retryAfter, 1, 86400);
+			if (reply.outcome == DesktopSyncChatCreateOutcome::FloodWait) {
+				const auto delay = std::max(int64_t(1), reply.retryAfter);
+				if (delay > std::numeric_limits<int64_t>::max() - now) {
+					Hold(u"clock-held"_q); return true;
+				}
+				next.retryAt = now + delay;
+			}
 			if (!Save(std::move(next))) return true;
 		}
 		Hold(reply.outcome == DesktopSyncChatCreateOutcome::Limit ? u"channel-limit"_q

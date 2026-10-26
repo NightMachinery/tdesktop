@@ -8,7 +8,7 @@ rules = [
  ('Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp', 'AcceptDesktopSyncChatSetup(*state->opening,', 'final confirmation validates opening snapshot'),
  ('Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp', 'SameDesktopSyncChatDisclosure(*peer, *acceptedPeer)', 'fresh consent snapshot comparison'),
  ('Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp', 'ValidateAccountSettingsOpenTarget(session, *state.target)', 'account-settings r3 authority'),
- ('Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp', 'state->status->setText(tr::lng_purple_chat_qualification_held(tr::now))', 'confirmation is qualification-held'),
+ ('Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp', 'std::make_unique<DesktopSyncChatSetupService>', 'confirmation enters worker-owned setup'),
  ('Telegram/SourceFiles/purple/purple_sync_chat_peer_request.cpp', 'self->Current()', 'full-info callbacks revalidate authority'),
  ('Telegram/SourceFiles/purple/purple_sync_retry.h', '_deadline(nowMs + 30000)', 'transient-aware full-info request deadline'),
  ('Telegram/SourceFiles/purple/purple_sync_chat_peer_request.cpp', 'SyncRequestSender _api;', 'full-info shares transient controller'),
@@ -23,13 +23,13 @@ for path, sentinel, label in rules:
     assert sentinel not in source.replace(sentinel, ''), 'negative guard did not fail: ' + label
 ui = (repo / rules[0][0]).read_text()
 for forbidden in ['MTPchannels_CreateChannel', 'MTPmessages_SendMessage', 'DesktopSyncChatSetupExecutor', 'MTPmessages_UpdatePinnedMessage']:
-    assert forbidden not in ui, 'outward route in held UI: ' + forbidden
+    assert forbidden not in ui, 'direct outward route in setup UI: ' + forbidden
 request = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_peer_request.cpp').read_text()
 assert '_timeout' not in request, 'outer timeout must not finalize a transient full-info request'
 assert request.count('_api.request(') == 3
 assert all(name in request for name in ['MTPusers_GetFullUser', 'MTPmessages_GetFullChat', 'MTPchannels_GetFullChannel'])
 assert 'status.reason;' not in ui
-print(f'T3A routes {len(rules)} guards + {len(rules)} negative, held/read-only boundaries PASS')
+print(f'T3A routes {len(rules)} guards + {len(rules)} negative, service-only UI boundaries PASS')
 
 assert 'scope.owner ==' not in ui
 assert 'Readers(DesktopSyncChatEligibility(*peer)->readers, chosen.title)' in ui

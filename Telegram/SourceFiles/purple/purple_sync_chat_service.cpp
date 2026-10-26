@@ -177,6 +177,7 @@ public:
 	DesktopSyncChatStatus status() const;
 	std::optional<DesktopSyncChatSetupSnapshot> Setup() const;
 	bool Owns(Main::Session* session) const;
+	bool SetupContextCurrent(const DesktopSyncChatDiscoveryScope &scope) const;
 	std::optional<DesktopSyncChatLease> Lease(PeerToken chat);
 	bool HasOrigin(const DesktopSyncChatIo &route) const;
 	DesktopSyncChatDiscoveryScope ScopeFor(
@@ -346,6 +347,24 @@ bool SyncChatSession::ContextMatches() const {
 		&& session->local().readPref<QByteArray>(kLoginNoncePref) == _loginNonce
 		&& DesktopArchiveLoginKeysOverlap(_loginKeys, LoginKeys(*session))
 		&& (!_operation.current || _operation.current());
+}
+
+bool SyncChatSession::SetupContextCurrent(
+		const DesktopSyncChatDiscoveryScope &scope) const {
+	const auto session = _session.get();
+	if (!session || scope.origin != _origin
+		|| SessionAccountKey(session) != scope.origin.account
+		|| session->account().maybeSession() != session || session->account().loggingOut()
+		|| !AccountSyncOperationsAllowed(session) || ConfigDirectory() != scope.root
+		|| SettingsStartupOwner() != scope.owner || AccountWorkModeForSession(session) != scope.mode
+		|| AccountSyncBindingToken(session->account()) != scope.binding) {
+		return false;
+	}
+	const auto nonce = session->local().readPref<QByteArray>(kLoginNoncePref);
+	const auto keys = session->local().readPref<QByteArray>(kLoginKeysPref);
+	return !nonce.isEmpty() && DesktopArchiveLoginKeysOverlap(keys, LoginKeys(*session))
+		&& QString::fromLatin1(QCryptographicHash::hash(
+			"purple-sync-chat-v1:" + nonce, QCryptographicHash::Sha256).toHex()) == scope.loginBinding;
 }
 
 void SyncChatSession::Ensure(
@@ -1073,6 +1092,11 @@ std::optional<DesktopSyncChatLease> SyncChatIoForPost(
 std::optional<DesktopSyncChatSetupSnapshot> SyncChatSetupSnapshotOf(
 		not_null<Main::Session*> session) {
 	return For(session).Setup();
+}
+
+bool SyncChatSetupContextCurrent(not_null<Main::Session*> session,
+		const DesktopSyncChatDiscoveryScope &scope) {
+	return For(session).SetupContextCurrent(scope);
 }
 
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {

@@ -56,10 +56,10 @@ for file, guards in rules.items():
    raise AssertionError('negative inventory did not fail')
 ui = (p / 'purple_sync_chat_setup_box.cpp').read_text()
 for forbidden in ['DesktopSyncChatSetupExecutor', 'DesktopSyncChatSetupRequest(', 'MTPchannels_CreateChannel', '.send()']:
- assert forbidden not in ui, 'write activation in qualification-held UI'
+ assert forbidden not in ui, 'direct write activation in UI'
 for file in p.glob('*.cpp'):
- if file.name in ['purple_sync_chat_create.cpp', 'purple_sync_chat_create_requests.cpp']:
+ if file.name in ['purple_sync_chat_create.cpp', 'purple_sync_chat_create_requests.cpp', 'purple_sync_chat_setup_flow.cpp']:
   continue
  source = file.read_text()
  assert 'DesktopSyncChatSetupExecutor' not in source, 'production executor callsite: ' + file.name
-print(f'T3B routes {count} guards + {count} negative, no production write transport/UI executor PASS')
+print(f'T3B routes {count} guards + {count} negative, worker-only executor / no direct UI transport PASS')

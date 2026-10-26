@@ -28,6 +28,9 @@ struct DesktopSyncChatLease {
 [[nodiscard]] std::optional<DesktopSyncChatSetupSnapshot> SyncChatSetupSnapshotOf(
 	not_null<Main::Session*> session);
 
+[[nodiscard]] bool SyncChatSetupContextCurrent(
+	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
+
 void StartSyncChatDiscovery();
 void EnsureSyncChatResolved(
 	not_null<Main::Session*> session, bool force = false);

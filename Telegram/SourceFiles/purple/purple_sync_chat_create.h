@@ -58,7 +58,7 @@ struct DesktopSyncChatCreateReply {
 	std::optional<DesktopSyncChatInventory> inventory;
 	uint64_t randomId = 0;
 	int32_t markId = 0;
-	int retryAfter = 0;
+	int64_t retryAfter = 0;
 };
 
 [[nodiscard]] QString DesktopSyncChatSetupAuthority(
@@ -87,6 +87,13 @@ struct DesktopSyncChatConsentOffer {
 	const DesktopSyncChatCreateJournal &journal,
 	const DesktopSyncChatDiscoveryScope &scope, QString title);
 
+struct DesktopSyncChatSetupResumeProof {
+	std::optional<DesktopSyncChatSetupSnapshot> resolution;
+	std::vector<DesktopSyncChatPeer> peers;
+	std::optional<DesktopSyncChatInventory> inventory;
+	std::optional<MTPmessages_Messages> readback;
+};
+
 class DesktopSyncChatSetupExecutor final {
 public:
 	DesktopSyncChatSetupExecutor(DesktopSyncChatOrigin origin,
@@ -100,6 +107,9 @@ public:
 	[[nodiscard]] bool Reconsent(const DesktopSyncChatConsentOffer &offer, int64_t now);
 	[[nodiscard]] std::optional<DesktopSyncChatCreateCommand> Next();
 	[[nodiscard]] bool Complete(const DesktopSyncChatCreateReply &reply, int64_t now);
+	[[nodiscard]] bool Renew(const DesktopSyncChatCreateCommand &command,
+		const DesktopSyncChatSetupResumeProof &proof, int64_t now,
+		Fn<bool(const DesktopSyncChatCreateJournal &)> commitCache);
 	[[nodiscard]] const DesktopSyncChatCreateJournal &journal() const;
 	[[nodiscard]] DesktopSyncChatCreatePhase phase() const;
 	[[nodiscard]] QString reason() const;

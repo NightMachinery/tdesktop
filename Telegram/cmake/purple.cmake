@@ -217,6 +217,14 @@ PRIVATE
     purple/purple_sync_chat_create_store.h
     purple/purple_sync_chat_create_requests.cpp
     purple/purple_sync_chat_create_requests.h
+    purple/purple_sync_chat_setup_flow.cpp
+    purple/purple_sync_chat_setup_flow.h
+    purple/purple_sync_chat_setup_requests.cpp
+    purple/purple_sync_chat_setup_requests.h
+    purple/purple_sync_chat_setup_service.cpp
+    purple/purple_sync_chat_setup_service.h
+    purple/purple_sync_chat_setup_transport.cpp
+    purple/purple_sync_chat_setup_transport.h
     purple/purple_sync_chat_setup.cpp
     purple/purple_sync_chat_setup.h
     purple/purple_sync_retry.h

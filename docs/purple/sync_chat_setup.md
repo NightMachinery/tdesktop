@@ -22,11 +22,14 @@ persistent warning is shown without blocking posting under prior consent. The
 current reader counts, pre-history distinction and unavailable-list blind spot
 are stated. Refused marks name the chat and the core refusal reason.
 
-Setup confirmation currently ends in a qualification-held state. It cannot call
-a write executor or Telegram. This source/unit delivery does not authorize
-channel creation, marks, pin, mute, archive, migration or automatic non-Self sync.
-The normal Self-only automatic guard remains in place. Native outward execution
-requires a separately reviewed transport and the user's explicit GO.
+Setup confirmation starts the per-account, journaled setup service. It supports
+private Purple channel creation, Saved Messages and eligible existing chats, with
+explicit retry, Saved Messages after a definite channel limit, same-target reader
+reconsent and cancellation. Existing/bound streams are not moved. First non-Self
+settings posting is still off; the separate first-post delivery must also move
+SyncConfigPublish disk work off the GUI thread. Automatic sync remains Self-only.
+Source and host tests do not authorize native writes. Native qualification still
+requires the user's explicit GO.
 
 ## D-M2B4-8
 
@@ -61,10 +64,12 @@ belongs to the legacy send-after-save route. None of those switches hides this
 setup disclosure, so an enabled account can never miss it. The confirmation names
 the chosen chat and states that state.toml stays on this device.
 
-## Offline fresh-setup executor
+## Journaled setup service
 
-The Purple-owned executor exposes Next and Complete, with injected transports and
-a durable save callback. It has no production write transport and no UI callsite.
+The Purple-owned executor exposes Next, Complete and effect-specific Renew, with
+a durable save callback. The UI calls a service whose serial worker owns the
+executor, journal, account lock and cache writes. A separate foreground transport
+owns the shared transient request sender and native API callbacks.
 Genuine TL builders prepare private broadcast creation, a silent canonical mark,
 a silent pin, origin-account mute_until INT_MAX and folder 1 archive requests.
 Tests inspect those requests; they never send them. Limit, restricted and flood
@@ -133,24 +138,50 @@ no GUI thread enters file IO or waits for an executor callback.
 The foreground owner supplies an atomic current capability revoked on logout,
 login reuse, source or binding change, account switch and close. The GUI never
 waits for this executor or file adapter. Cancel drops the in-flight ticket,
-keeps uncertain evidence and starts no cleanup. A stale completion cannot cancel
+keeps uncertain intent bytes and starts no cleanup. Terminal cancellation releases
+the journal store and account lock on the worker queue even while the box remains
+open. It does not regain admission to write a cancellation marker. A stale completion cannot cancel
 a newer ticket. Store failure visibly holds and preserves the last durable
-checkpoint. No step runs on a background discovery timer. Native UI limit boxes,
-normal Updates integration and outward execution remain behind the separate GO.
+checkpoint. No step runs on a background discovery timer. The UI displays running, held, channel-limit, cancelled and complete states.
+Resume opens only an existing journal. A missing journal completes the lookup
+without creating an intent and releases the empty store and worker. The chooser
+then clears the service on the next GUI turn, shows a clear no-pending-setup
+message and enables fresh Continue and Check again. A generation fence prevents
+a late empty result from resetting a newer setup. Closing the box
+revokes admission immediately. Native outward testing remains behind explicit GO.
 
 Android A3 shares these states, journal/ambiguity rules, request flags and reader
 consent boundaries. Platform details differ: Desktop uses a QLockFile/private
-atomic-file adapter and cancelable MTP::Sender full-info reader; Android uses its
+atomic-file adapter and cancelable shared-sender full-info reader; Android uses its
 account-specific storage and request owner. D6/D7/C6 policy already landed on
 Desktop; Android delivers its alignment separately. Neither source delivery is
 native or outward qualification.
 
-During this qualification hold, Desktop keeps a confirmed choice only in the
-open box and asks again after reopening. Android may retain a device-local
-intent receipt. This conservative Desktop difference grants no posting consent
-in the live discovery cache and changes no destination. The durable creation
-journal is exercised only by injected tests until outward GO; activation must
-load or resume it before creating a new operation.
+The setup journal is durable before any transport command and is loaded before
+any new operation can begin. Reopening requires explicit Resume. Its only
+creation reconciliation evidence is the original request's retained Updates and
+operation UUID. If that receipt was lost across restart, setup remains held;
+there is no title-based adoption or blind create retry. Saved Messages and
+existing-chat setup never pin, mute or archive an unrelated chat.
+
+A definite deferred write goes through the same shared resumeEffect path as
+other sync writes. Before replaying the captured request, the service renews R3
+and full-info evidence. An unissued mark additionally repeats exact complete
+Empty inventory and a second full-info reader check. Decorations re-read the
+exact canonical owned mark and publish any C6 warning to the cache first. The
+worker replays these proofs through the real executor before releasing the gate.
+Chat, random id, mark id/date, operation and ticket cannot change. The original
+TL request is reused, so retry does not mint a new send identity. Ambiguous
+server/transport/timeout outcomes enter reconciliation or a held state instead.
+The shared transport wait is in memory, while the pending effect intent is
+durable. Restart uses journal reconciliation; it does not reset uncertainty.
+
+Tests compile the real flow, journal, executor, request builders and cache adapter.
+A second fixture includes literal production renewal callback bodies, with only
+session, before-post, metadata, inventory, API queue and worker delivery endpoints
+substituted. It checks cancellation and superseded callbacks as well as all five
+write kinds. These host fixtures never contact Telegram. The source route gates
+also enforce worker ownership and keep first settings posting disabled.
 
 The exact setup mark uses the shared canonical settings/playlists and deletion
 explanation, followed by #purplechatsync v1. Discovery's grammar is unchanged.

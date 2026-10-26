@@ -11,7 +11,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', default='test_sync_chat_create.cpp', choices=['test_sync_chat_create.cpp', 'test_sync_chat_d8_record_exact.cpp', 'test_sync_chat_c6_late_warning.cpp'])
+parser.add_argument('--test-source', default='test_sync_chat_create.cpp', choices=['test_sync_chat_create.cpp', 'test_sync_chat_d8_record_exact.cpp', 'test_sync_chat_c6_late_warning.cpp', 'test_sync_chat_setup_flow.cpp', 'test_sync_chat_setup_transport.cpp', 'test_sync_chat_setup_lifecycle.cpp'])
+parser.add_argument('--external-test-source', type=Path)
 parser.add_argument('--reuse-unit-dir', required=True, type=Path)
 parser.add_argument('--reuse-support-dir', required=True, type=Path)
 args = parser.parse_args()
@@ -19,7 +20,7 @@ repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
 work = args.output_dir.resolve()
 work.mkdir(parents=True, exist_ok=True)
-test_source = repo / 'purple' / args.test_source
+test_source = args.external_test_source.resolve() if args.external_test_source else repo / 'purple' / args.test_source
 test_name = test_source.stem
 (work / 'create-fixture.inc').write_text('#define PURPLE_SYNC_CHAT_CREATE_EMBEDDED\n#include "' + str(repo / 'purple/test_sync_chat_create.cpp') + '"\n')
 header = build / 'Telegram/gen/scheme.h'
@@ -105,6 +106,31 @@ for method in ['SendNextPart', 'SendMedia', 'RenewBeforePost', 'ResumeEffect', '
 for method in ['OnReceipt', 'OnReadback', 'Finish', 'Cancel']:
     (work / ('post-' + method + '.inc')).write_text(block(post, 'void SyncConfigPost::' + method + '('))
 
+setup_transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_transport.cpp').read_text()
+for method in ['current', 'cancel', 'renewEffect', 'renewPeer', 'renewMark', 'approveRenewal', 'finishRenewal']:
+    prefix = 'bool' if method == 'current' else 'void'
+    marker = prefix + ' DesktopSyncChatSetupTransport::' + method + '('
+    start = setup_transport.index(marker)
+    brace = setup_transport.index('{', start)
+    depth = 1
+    end = brace + 1
+    while depth:
+        depth += (setup_transport[end] == '{') - (setup_transport[end] == '}')
+        end += 1
+    (work / ('setup-transport-' + method + '.inc')).write_text(setup_transport[start:end]
+        .replace('DesktopSyncChatSetupTransport::', 'SetupTransportProbe::'))
+
+setup_service = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_service.cpp').read_text()
+setup_ui = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_text()
+def whole_function(text, marker):
+    start = text.index(marker)
+    return text[start:text.index('{', start)] + block(text, marker)
+(work / 'setup-finish-resume.inc').write_text(whole_function(setup_service,
+    'void DesktopSyncChatSetupService::Impl::finishResumeLookup(').replace(
+        'DesktopSyncChatSetupService::Impl::', 'ServiceResumeProbe::'))
+(work / 'setup-restore-fresh.inc').write_text(whole_function(setup_ui,
+    'bool RestoreFreshSetup(').replace('SetupState *', 'ChooserProbe *'))
+
 assert 'return entry;' in (work / 'post-counters.inc').read_text()
 recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=') and not value.startswith('-g')]
 recipe[1:1] = ['-g0']
@@ -115,13 +141,15 @@ with (work / 'build.log').open('w') as log:
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create_store.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create_requests.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_flow.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_requests.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_facts.cpp']:
         target = work / (source.stem + '.o')
         command = recipe[:]
         for flag, value in [('-c', str(source)), ('-o', str(target)),
                             ('-MF', str(target.with_suffix('.d'))), ('-MT', str(target))]:
             command[command.index(flag) + 1] = value
-        command[1:1] = ['-I' + str(overlay),
+        command[1:1] = ['-I' + str(overlay), '-I' + str(repo / 'purple'),
                          '-I' + str(repo / 'Telegram/ThirdParty/purple_core'), '-I' + str(work)]
         compiled.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
@@ -183,18 +211,19 @@ with (work / 'build.log').open('w') as log:
     'A_inputs_sha256': hashlib.sha256((qualified / 'inputs.json').read_bytes()).hexdigest(),
     'reused_inputs_sha256': hashlib.sha256((parent / 'inputs.json').read_bytes()).hexdigest(),
     'schema_sha256': hashlib.sha256(header.read_bytes()).hexdigest(),
-    'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp']},
+    'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp', 'purple_sync_chat_setup_transport.cpp', 'purple_sync_chat_setup_service.cpp', 'purple_sync_chat_setup_box.cpp']},
     'included_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_discovery.cpp').read_bytes()).hexdigest(),
     'included_io_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_io.cpp').read_bytes()).hexdigest(),
+    'included_flow_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_setup_flow.cpp').read_bytes()).hexdigest(),
     'included_create_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_create.cpp').read_bytes()).hexdigest(),
     'included_write_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_write.cpp').read_bytes()).hexdigest(),
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-    'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'service-scope.inc', work / 'service-selection.inc', work / 'service-completion.inc', work / 'auto-operation.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
+    'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'service-scope.inc', work / 'service-selection.inc', work / 'service-completion.inc', work / 'auto-operation.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + list(work.glob('setup-transport-*.inc')) + [work / 'setup-finish-resume.inc', work / 'setup-restore-fresh.inc'] + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
     'headers_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in (repo / 'Telegram/SourceFiles/purple').glob('purple_sync_chat_*.h')},
     'sources_sha256': {str(source): hashlib.sha256(Path(source).read_bytes()).hexdigest()
                        for source in [c[c.index('-c') + 1] for c in compiled]},
     'objects_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in objects},
-    'boundary': 'Real T3 executor, strict journal store, typed builders and peer eligibility are compiled. A objects are reused only after source/object checks. All creation and write transports are injected, never Telegram. Full target inventory scanner/real mapper/executor and full exact TL response boundaries are tested. Service scope, direct/full selection and receipt completion bodies are literal ports, with a controlled clock and Begin delivery endpoint. Upload parts/fresh-gate/dispatch/Updates/finish/cancel and post receipt/readback/finish/cancel bodies are literal production ports; session, API queue, before-post service and exact-reader transports are substituted without network. Entropy endpoint is deterministic in test; stage/ledger and TL objects are real. Actual mapper, requests, cache, discovery and disk adapter compiled directly; unchanged C0 and support objects reused only after source/object hash checks; literal Accept/Cancel/Publish and scanner/reader ownership bodies are ported with substituted session/notification/worker endpoints. Real generated TL constructors; reused schema/base/private-file/core-state objects. Unit-only, no app build/network/native acceptance.'}, indent=2) + '\n')
+    'boundary': 'Setup renewal callback bodies are literal ports with substituted session, before-post, peer metadata, inventory, API queue and worker delivery endpoints. Real worker flow/store/executor authorize each proof. Real T3 executor, strict journal store, typed builders and peer eligibility are compiled. A objects are reused only after source/object checks. All creation and write transports are injected, never Telegram. Full target inventory scanner/real mapper/executor and full exact TL response boundaries are tested. Service scope, direct/full selection and receipt completion bodies are literal ports, with a controlled clock and Begin delivery endpoint. Upload parts/fresh-gate/dispatch/Updates/finish/cancel and post receipt/readback/finish/cancel bodies are literal production ports; session, API queue, before-post service and exact-reader transports are substituted without network. Entropy endpoint is deterministic in test; stage/ledger and TL objects are real. Actual mapper, requests, cache, discovery and disk adapter compiled directly; unchanged C0 and support objects reused only after source/object hash checks; literal Accept/Cancel/Publish and scanner/reader ownership bodies are ported with substituted session/notification/worker endpoints. Real generated TL constructors; reused schema/base/private-file/core-state objects. Unit-only, no app build/network/native acceptance.'}, indent=2) + '\n')
 if not args.build_only:
     result = subprocess.run([str(work / test_name)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (work / 'run.log').write_bytes(result.stdout)

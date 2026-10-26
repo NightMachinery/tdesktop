@@ -321,7 +321,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_fresh_choices" = "Choose where this account keeps sync data. Existing choices below are up to 50 loaded chats, including archived chats. Each is checked with fresh full info.";
 "lng_purple_chat_change_disabled" = "Changing an existing or bound sync stream is disabled. Setup requires a complete, empty, unbound stream.";
 "lng_purple_chat_qualification_held" = "Setup confirmed locally. Execution is held until native qualification is approved. Nothing was created, posted or changed on Telegram.";
-"lng_purple_chat_create_disclosure" = "Purple can create a private channel named Purple sync, with only you in it. It posts and silently pins a Purple mark, mutes the channel and archives it. Sync data is Telegram cloud data, not end-to-end encrypted. Execution remains held until native qualification is approved.";
+"lng_purple_chat_create_disclosure" = "Purple can create a private channel named Purple sync, with only you in it. It posts and silently pins a Purple mark, mutes the channel and archives it. Sync data is Telegram cloud data, not end-to-end encrypted.";
 "lng_purple_chat_refused_mark" = "You marked %1 as the sync chat, but Purple can't sync there: %2";
 "lng_purple_chat_refuse_secret" = "secret chats are not on the server.";
 "lng_purple_chat_refuse_topic" = "forums and channel direct messages need unsupported topic routing.";
@@ -355,6 +355,20 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_sync_telegram_wait" = "Telegram asked to wait. Retrying at %1.";
 "lng_purple_sync_transient_wait" = "Telegram is temporarily unavailable. Retrying at %1.";
+
+"lng_purple_chat_setup_complete" = "Sync chat is ready.";
+"lng_purple_chat_setup_cancelled" = "Setup stopped. Any uncertain operation is kept for an explicit resume.";
+"lng_purple_chat_setup_limit" = "Telegram's channel limit was reached. You can retry later or use Saved Messages.";
+"lng_purple_chat_setup_running" = "Setting up this account's sync chat…";
+"lng_purple_chat_setup_held" = "Setup is waiting. Retry resumes the same operation; an uncertain channel creation will never create another channel.";
+"lng_purple_chat_setup_resume" = "A previous setup is pending for %1. Retry resumes that operation and keeps its original destination.";
+"lng_purple_chat_setup_retry" = "Retry or resume setup";
+"lng_purple_chat_setup_self" = "Use Saved Messages instead";
+"lng_purple_chat_setup_consent" = "Review changed readers";
+
+"lng_purple_chat_setup_reason" = "Setup status: %1";
+
+"lng_purple_chat_setup_no_journal" = "There is no unfinished setup to resume. Choose a sync chat and Continue, or Check again.";
 
 "lng_purple_emoji_export" = "Export custom emoji for local tools";
 "lng_purple_emoji_export_about" = "Saves your emoji library catalog and 128 px artwork to {path}.";
