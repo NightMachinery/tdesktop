@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "purple/purple_compose_source.h"
 #include "history/view/history_view_chat_section.h"
 
 #include "history/view/controls/history_view_compose_controls.h"
@@ -1677,6 +1678,7 @@ void ChatWidget::sendTextWithTags(
 		});
 	}
 
+	Purple::PrepareDesktopCompose(message, _composeControls->fieldForMention());
 	session().api().sendMessage(std::move(message), nextLocalMessageId);
 
 	_composeControls->clear();

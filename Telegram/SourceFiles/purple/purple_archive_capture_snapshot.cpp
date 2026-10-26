@@ -62,13 +62,19 @@ void Document(ArchiveContent &content, const MTPDocument &document) {
 		return;
 	}
 	const auto &data = document.c_document();
+	auto name = QString();
+	for (const auto &attribute : data.vattributes().v) {
+		if (attribute.type() == mtpc_documentAttributeFilename) {
+			name = qs(attribute.c_documentAttributeFilename().vfile_name());
+		}
+	}
 	const auto identity = u"document:"_q + QString::number(data.vid().v);
 	if (std::any_of(content.media.begin(), content.media.end(),
 			[&](const auto &entry) { return entry.identity == identity; })) {
 		return;
 	}
 	content.media.push_back({identity, u"document"_q,
-		{{u"mime"_q, qs(data.vmime_type())}, {u"size"_q, QString::number(data.vsize().v)},
+		{{u"name"_q, name}, {u"mime"_q, qs(data.vmime_type())}, {u"size"_q, QString::number(data.vsize().v)},
 			{u"attributes"_q, DocumentAttributes(data.vattributes().v)}}});
 }
 
@@ -379,6 +385,7 @@ std::optional<ArchiveEvent> DesktopArchiveSnapshotData(const AccountKey &account
 	}
 	event.observation.observedAt = observedAt;
 	event.observation.serverTime = data.vdate().v;
+	event.observation.context.insert(u"editDate"_q, data.vedit_date().value_or(0));
 	if (const auto from = data.vfrom_id()) {
 		const auto sender = DesktopArchiveChat(peerFromMTP(*from));
 		event.observation.context.insert(

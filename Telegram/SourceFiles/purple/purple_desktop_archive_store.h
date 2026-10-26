@@ -193,13 +193,15 @@ class DesktopArchiveStore final {
 	[[nodiscard]] static std::optional<AccountKey> AccountForSlot(
 		const DesktopArchiveOptions &options, const QString &slot, bool* valid = nullptr);
 	[[nodiscard]] bool Execute(const ArchiveSqlProgram &program);
+	[[nodiscard]] bool Execute(const ArchiveSqlProgram &program, std::function<bool()> active);
 	DesktopArchiveSqlite &database();
 
   private:
 	friend class DesktopArchiveStream;
 	void CountStagingProof();
 	void CountStagingOpen();
-	[[nodiscard]] bool Execute(const ArchiveSqlProgram &program, bool maintenance);
+	[[nodiscard]] bool Execute(const ArchiveSqlProgram &program, bool maintenance,
+		std::function<bool()> active = {});
 	[[nodiscard]] std::optional<DesktopArchiveJournalAccess> JournalAccess(bool renewing);
 	class Impl;
 	std::unique_ptr<Impl> _impl;

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_drafts.h"
 
 class History;
+namespace Purple { struct DesktopComposeSource; }
 
 namespace Data {
 class Thread;
@@ -76,6 +77,7 @@ struct MessageToSend {
 
 	SendAction action;
 	TextWithTags textWithTags;
+	std::shared_ptr<Purple::DesktopComposeSource> purpleMarkdownSource;
 	Data::WebPageDraft webPage;
 };
 

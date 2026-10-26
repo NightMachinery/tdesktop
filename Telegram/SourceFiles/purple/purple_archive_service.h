@@ -11,6 +11,14 @@ class Session;
 
 namespace Purple {
 
+struct DesktopComposeIngress {
+	ArchiveStoreEpoch epoch;
+	std::function<bool()> current;
+	Fn<void(ArchiveEvent, ArchiveSource)> submit;
+};
+[[nodiscard]] std::optional<DesktopComposeIngress> DesktopComposeSourceIngress(
+	not_null<Main::Session*> session, ArchiveChatKey chat);
+
 void StartArchiveServices();
 [[nodiscard]] Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session);
 void QueueArchiveRetentionGap(not_null<Main::Session*> session, QString reason);

@@ -1144,8 +1144,16 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program) {
 	return Execute(program, false);
 }
 
-bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program, bool maintenance) {
+bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program, std::function<bool()> active) {
+	return Execute(program, false, std::move(active));
+}
+
+bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program, bool maintenance,
+		std::function<bool()> active) {
 	const auto current = [&] {
+		if (active && !active()) {
+			return false;
+		}
 		if (!maintenance) {
 			return Current();
 		}

@@ -692,3 +692,13 @@ a visible held reason; no second allocator opens. Queued old-writer callbacks
 leave replay to the replacement instead of draining with a stale sequence.
 The GUI only pauses admission and never waits for retirement. Stop/logout and
 discard cancel replacement immediately, including during the bounded wait.
+
+### Optional Markdown source
+
+Genuine compose and Markdown-document source is optional encrypted version
+metadata. Existing versions without source remain readable. Attachment uses
+core SendMetadata for the exact initial compose baseline or Hydration for the
+exact document version, including historical versions. Neither adds an author
+edit or replaces body order. Account, store/login, revision, content hash,
+representation and purge generations remain bound through commit. No separate
+source database or inferred historical source is created.

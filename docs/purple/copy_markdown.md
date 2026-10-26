@@ -89,3 +89,18 @@ source tree with actual imported structure, exact code content/range and anchors
 including whitespace and corruption controls. Source language metadata is exact;
 reader-specific language-property retention remains a presentation limitation.
 The old fence-origin failure remains retained as historical evidence.
+
+Optional genuine source is captured from now onward. Ordinary compose captures
+only unstyled raw input whose Markdown parsing matches the outgoing message.
+A bounded, expiring token follows that exact request and random/local identity.
+Only a complete ordinary acknowledgement and its complete initial retained
+baseline can attach source. Partial short-send snapshots keep their existing
+semantics and use the structural fallback. Received ordinary text and rich-editor
+blocks never establish the author's Markdown syntax.
+
+Already acquired Markdown documents use authenticated owned archive bytes, at
+most 1 MiB. Filename/MIME, exact document identity and length must agree; captions
+or additional displayed content prevent substitution. Invalid UTF-8 remains
+exact bytes in storage and refuses textual source decoding. Source stays inside
+the encrypted version, under existing purge/logout ownership. Attachment checks
+the captured journal and generations through the real SQLite precommit boundary.

@@ -1382,3 +1382,17 @@ The D4b purge layer extends the owned archive menu and Purple settings code.
 It adds no further upstream hunk beyond D4a's include and owned menu hook in
 `window/window_peer_menu.cpp`. Purge policy, dialogs, worker execution and IO
 remain under `purple/`.
+
+## Markdown compose provenance (M3B5)
+
+`Telegram/SourceFiles/api/api_common.h` adds a forward declaration and an opaque
+shared source token to MessageToSend. `history/history_widget.cpp` and
+`history/view/history_view_chat_section.cpp` each add one include and one call
+before sending, while the raw compose field is still available. The helper
+verifies the parsed field matches the actual outgoing parameters.
+
+`Telegram/SourceFiles/apiwrap.cpp` adds one include and a request-bound receipt
+hook in the ordinary send path. Purple owns source capture, bounds, account and
+journal authority, acknowledgement validation and encrypted attachment. No
+parser or send implementation moves into these hooks. Scheduled, split,
+short-send, rich-editor and transformed acknowledgements remain source-less.

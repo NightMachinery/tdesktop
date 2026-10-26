@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "purple/purple_compose_source.h"
 #include "history/history_widget.h"
 #include "purple/hooks/mute.h"
 
@@ -5706,6 +5707,7 @@ void HistoryWidget::sendTextWithTags(
 	// Just a flag not to drop reply info if we're not sending anything.
 	_justMarkingAsRead = !hasText
 		&& message.webPage.url.isEmpty();
+	Purple::PrepareDesktopCompose(message, _field);
 	session().api().sendMessage(std::move(message), nextLocalMessageId);
 	_justMarkingAsRead = false;
 

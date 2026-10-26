@@ -14,6 +14,7 @@
 #include "purple/purple_archive_files.h"
 #include "purple/purple_archive_journal.h"
 #include "purple/purple_config.h"
+#include "purple/purple_markdown_source.h"
 #include "settings.h"
 #include "storage/storage_account.h"
 #include "storage/details/storage_file_utilities.h"
@@ -1022,6 +1023,10 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 				*owned = version && std::any_of(version->media.begin(), version->media.end(),
 					[&](const auto &ref) { return ref.identity == observation.identity
 						&& ref.state == ArchiveMediaState::Complete; });
+				if (*owned) {
+					static_cast<void>(CaptureDesktopMarkdownFile(store, observation.key,
+						(**binding).source.version, observation.identity));
+				}
 			}
 		});
 		if (!accepted) {
@@ -1029,6 +1034,57 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 			QueueArchiveRetentionGap(weak.get(), u"stream-queue-full"_q);
 		}
 	};
+}
+
+std::optional<DesktopComposeIngress> DesktopComposeSourceIngress(
+		not_null<Main::Session*> session, ArchiveChatKey chat) {
+	const auto found = Sessions.find(session.get());
+	if (Retired.contains(session.get()) || found == Sessions.end() || !found->second.journal) {
+		return {};
+	}
+	const auto journal = found->second.journal;
+	const auto worker = found->second.worker;
+	const auto routing = found->second.routing;
+	const auto current = [journal, routing] {
+		return routing->load() && journal->CaptureAllowed()
+			&& journal->access().active && journal->access().active();
+	};
+	if (!current()) {
+		return {};
+	}
+	const auto generation = journal->CaptureGeneration(chat);
+	const auto weak = base::make_weak(session.get());
+	return DesktopComposeIngress{journal->access().epoch, current,
+		[weak, journal, worker, current, generation, chat](ArchiveEvent observed, ArchiveSource source) {
+			if (!weak || !current() || !observed.content || observed.key.chat != chat) {
+				return;
+			}
+			const auto found = Sessions.find(weak.get());
+			if (found == Sessions.end() || found->second.worker != worker
+				|| found->second.journal != journal) {
+				return;
+			}
+			static_cast<void>(worker->Post([journal, current, generation, observed = std::move(observed),
+				source = std::move(source)](DesktopArchiveStore &store) mutable {
+				if (!current() || !CanRunArchiveWork(journal->access().epoch, store.epoch())
+					|| !journal->Drain(store)) {
+					return;
+				}
+				const auto target = DesktopMarkdownTarget(store, observed.key);
+				const auto slice = target ? store.ReadSlice(observed.key, {}, target->request.version) : std::nullopt;
+				const auto message = slice ? FindArchiveMessage(slice->state, observed.key) : nullptr;
+				const auto version = message && message->versions.size() == 1 ? &message->versions.front() : nullptr;
+				if (!target || !version || message->deleted || version->source
+					|| version->origin != ArchiveOrigin::Baseline || version->missingPreimage
+					|| version->revision != version->id || version->content != *observed.content
+					|| target->request.generation != generation
+					|| version->observation.serverTime != observed.observation.serverTime
+					|| version->observation.context.value(u"editDate"_q).toInt() != 0) {
+					return;
+				}
+				static_cast<void>(AttachDesktopMarkdownSource(store, *target, std::move(source), current));
+			}));
+		}};
 }
 
 void QueueArchiveObservation(not_null<Main::Session*> session, ArchiveEvent event) {
@@ -1097,6 +1153,8 @@ void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessage
 					{QString::fromLatin1(hash.result().toHex()), size})) {
 				static_cast<void>(store.Gap(*version + u"-media"_q,
 					u"media-copy-incomplete"_q, base::unixtime::now()));
+			} else {
+				static_cast<void>(CaptureDesktopMarkdownFile(store, key, *version, identity));
 			}
 		});
 	if (!accepted) {
