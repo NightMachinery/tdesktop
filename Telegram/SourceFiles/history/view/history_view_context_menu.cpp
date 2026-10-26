@@ -1558,6 +1558,8 @@ void FillContextMenuItems(
 	}
 
 	AddTopMessageActions(result, request, list);
+	Purple::AddMarkdownDocumentCopyAction(result, list, item,
+		!request.overSelection && !hasSelection, request.pointState != PointState::GroupPart);
 	if (lnkPhoto && request.selectedItems.empty()) {
 		AddPhotoActions(result, lnkPhoto, item, list);
 	} else if (lnkDocument) {

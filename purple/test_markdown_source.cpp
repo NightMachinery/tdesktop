@@ -1,6 +1,13 @@
 #include "purple/purple_markdown_source.h"
 #include "purple/purple_compose_receipt.h"
 #include "purple/purple_archive_capture.h"
+#include "purple/purple_markdown_publication.h"
+#include "purple/purple_markdown_current.h"
+#include "purple/purple_markdown_delivery.h"
+#include <QtCore/QMimeData>
+#include "purple/purple_archive_journal.h"
+#include <future>
+#include <thread>
 #include "purple/purple_archive_files.h"
 #include "tests/archive_test_support.h"
 #include <QtCore/QBuffer>
@@ -148,6 +155,30 @@ void ComposeCases(const QString &root) {
 	CHECK(now.versions.front().content == old.versions.front().content);
 	CHECK(now.versions.front().source->binding->localMessageId == -99);
 	CHECK(now.versions.front().source->binding->randomId == 12345);
+	auto displayed = DesktopMarkdownBody{Key(), old.versions.front().content};
+	displayed.serverTime = 90;
+	CHECK(ChooseDesktopCurrentMarkdown(store, displayed).kind == ArchiveCopySourceKind::GenuineSource);
+	for (auto index = 0; index != 4; ++index) {
+		auto stale = displayed;
+		switch (index) {
+		case 0: ++stale.serverTime; break;
+		case 1: ++stale.editDate; break;
+		case 2: stale.content.text += 'x'; break;
+		case 3: stale.content.entities.push_back(QJsonObject{{u"unknown"_q, true}}); break;
+		}
+		CHECK(ChooseDesktopCurrentMarkdown(store, stale).kind == ArchiveCopySourceKind::StructuralWriter);
+	}
+	const auto access = store.JournalAccess();
+	CHECK(access && access->markdownPublication);
+	if (access) {
+		auto journal = DesktopArchiveJournal(*access);
+		CHECK(journal.access().markdownPublication == access->markdownPublication);
+		const auto stamp = access->markdownPublication->stamp();
+		CHECK(store.Gap(u"publication-revocation"_q, u"synthetic"_q, 100));
+		auto delivered = false;
+		CHECK(!access->markdownPublication->publish(stamp, [] { return true; }, [&] { delivered = true; }));
+		CHECK(!delivered);
+	}
 	const auto genuine = Choice(store, *target);
 	CHECK(genuine.validTarget && !genuine.partial);
 	CHECK(genuine.kind == ArchiveCopySourceKind::GenuineSource && genuine.bytes == "**original source**");
@@ -280,27 +311,241 @@ void PurgeCases(const QString &root) {
 	CHECK(store.Close());
 }
 
+void RichHydrationCases(const QString &root) {
+	Section = "exact observed rich body hydration";
+	auto store = DesktopArchiveStore();
+	CHECK(store.Open(Options(root)) == DesktopArchiveStatus::Ready);
+	const auto block = MTP_pageBlockParagraph(MTP_textPlain(MTP_string("observed prefix")));
+	auto message = NativeMarkdownMessage();
+	message.id = MTP_int(int(Key().messageId));
+	message.peer_id = MTP_peerChannel(MTP_long(Key().chat.id));
+	message.flags = MTP_flags(MTPDmessage::Flag::f_rich_message);
+	message.message = MTP_string("");
+	message.date = MTP_int(90);
+	message.rich_message = MTP_richMessage(MTP_flags(MTPDrichMessage::Flag::f_part),
+		MTP_vector<MTPPageBlock>({block}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	const auto partial = DesktopArchiveSnapshot({0, 123}, message.Build(), ArchiveOrigin::Baseline,
+		u"rich-partial"_q, 100);
+	CHECK(partial && partial->completeness == ArchiveCompleteness::Partial);
+	if (!partial) { return; }
+	CHECK(store.Capture(*partial).retained);
+	const auto before = store.ReadSlice(Key());
+	const auto &version = before->state.messages.front().versions.front();
+	message.rich_message = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()),
+		MTP_vector<MTPPageBlock>({block, block}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	auto complete = DesktopArchiveSnapshot({0, 123}, message.Build(), ArchiveOrigin::Hydration,
+		u"rich-complete"_q, 101);
+	CHECK(complete.has_value());
+	if (!complete) { return; }
+	complete->targetVersion = version.id;
+	complete->targetRevision = version.revision;
+	complete->expectedContentHash = ArchiveContentHash(version.content);
+	complete->generation = ArchiveGenerationFor(before->state, Key().chat);
+	CHECK(store.Capture(*complete).retained);
+	const auto after = store.ReadSlice(Key());
+	CHECK(after && after->state.messages.front().versions.size() == 1);
+	CHECK(after && after->state.messages.front().versions.front().revision == version.revision);
+	CHECK(after && after->state.messages.front().versions.front().content == *complete->content);
+	CHECK(after && after->state.messages.front().versions.front().observation.payload == complete->observation.payload);
+	CHECK(store.Close());
+}
+
+void PublicationCases() {
+	Section = "publication serialization and stale completion";
+	auto publication = DesktopMarkdownPublication();
+	const auto stamp = publication.stamp();
+	auto delivered = 0;
+	CHECK(publication.publish(stamp, [] { return true; }, [&] { ++delivered; }));
+	CHECK(delivered == 1);
+	CHECK(!publication.publish(stamp, [] { return false; }, [&] { ++delivered; }));
+	auto entered = std::promise<void>();
+	auto release = std::promise<void>();
+	auto signal = release.get_future();
+	auto writer = std::thread([&] {
+		const auto lock = publication.write();
+		entered.set_value();
+		signal.wait();
+		publication.committed();
+	});
+	entered.get_future().wait();
+	CHECK(!publication.publish(stamp, [] { return true; }, [&] { ++delivered; }));
+	release.set_value();
+	writer.join();
+	CHECK(!publication.publish(stamp, [] { return true; }, [&] { ++delivered; }));
+	CHECK(publication.publish(publication.stamp(), [] { return true; }, [&] { ++delivered; }));
+	publication.revoke();
+	CHECK(!publication.publish(publication.stamp(), [] { return true; }, [&] { ++delivered; }));
+	CHECK(delivered == 2);
+	Section = "original partial response prefix";
+	auto preview = Iv::RichPage();
+	preview.part = true;
+	auto block = Iv::RichPage::Block();
+	block.kind = Iv::RichPage::BlockKind::Paragraph;
+	block.text.text.text = u"observed prefix"_q;
+	preview.blocks.push_back(block);
+	auto full = preview;
+	full.part = false;
+	full.blocks.push_back(block);
+	CHECK(DesktopRichPageExtends(preview, full));
+	full.blocks.front().text.text.text = u"changed prefix"_q;
+	CHECK(!DesktopRichPageExtends(preview, full));
+	full = preview;
+	CHECK(!DesktopRichPageExtends(preview, full));
+	full.part = false;
+	full.rtl = true;
+	CHECK(!DesktopRichPageExtends(preview, full));
+	full = preview;
+	full.part = false;
+	full.blocks.clear();
+	CHECK(!DesktopRichPageExtends(preview, full));
+	const auto blockWire = MTP_pageBlockParagraph(MTP_textPlain(MTP_string("observed")));
+	const auto original = MTP_richMessage(MTP_flags(MTPDrichMessage::Flag::f_part),
+		MTP_vector<MTPPageBlock>({blockWire}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	const auto complete = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()),
+		MTP_vector<MTPPageBlock>({blockWire, blockWire}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	CHECK(DesktopRichWireExtends(original, complete));
+	CHECK(!DesktopRichWireExtends(original, original));
+	const auto changed = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()),
+		MTP_vector<MTPPageBlock>({MTP_pageBlockParagraph(MTP_textPlain(MTP_string("different")))}),
+		MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	CHECK(!DesktopRichWireExtends(original, changed));
+}
+
+void RichCopyOpeningCases() {
+	Section = "request-owned rich opening validation";
+	auto preview = NativeMarkdownMessage();
+	preview.id = MTP_int(100);
+	preview.peer_id = MTP_peerChannel(MTP_long(45));
+	preview.date = MTP_int(90);
+	preview.message = MTP_string("");
+	preview.flags = MTP_flags(MTPDmessage::Flag::f_rich_message);
+	const auto block = MTP_pageBlockParagraph(MTP_textPlain(MTP_string("opening prefix")));
+	preview.rich_message = MTP_richMessage(MTP_flags(MTPDrichMessage::Flag::f_part),
+		MTP_vector<MTPPageBlock>({block}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	const auto opening = preview.Build();
+	auto full = preview;
+	full.rich_message = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()),
+		MTP_vector<MTPPageBlock>({block, block}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	const auto response = [](QVector<MTPMessage> messages) {
+		return MTP_messages_messages(MTP_vector<MTPMessage>(messages),
+			MTP_vector<MTPForumTopic>(), MTP_vector<MTPChat>(), MTP_vector<MTPUser>());
+	};
+	CHECK(ValidateDesktopRichCopyResponse(opening, response({full.Build()})).has_value());
+	CHECK(!ValidateDesktopRichCopyResponse(MTP_messageEmpty(MTP_flags(MTPDmessageEmpty::Flags()), MTP_int(0), MTPPeer()), response({full.Build()})));
+	CHECK(!ValidateDesktopRichCopyResponse(opening, response({full.Build(), full.Build()})));
+	CHECK(!ValidateDesktopRichCopyResponse(opening, response({opening})));
+	for (auto i = 0; i != 5; ++i) {
+		auto changed = full;
+		switch (i) {
+		case 0: changed.peer_id = MTP_peerChannel(MTP_long(999)); break;
+		case 1: changed.date = MTP_int(91); break;
+		case 2: changed.message = MTP_string("unverified replacement"); break;
+		case 3: changed.id = MTP_int(101); break;
+		case 4: changed.rich_message = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()),
+			MTP_vector<MTPPageBlock>({MTP_pageBlockParagraph(MTP_textPlain(MTP_string("changed prefix")))}),
+			MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>()); break;
+		}
+		CHECK(!ValidateDesktopRichCopyResponse(opening, response({changed.Build()})));
+	}
+	Section = "cached Copy admission boundary";
+	auto parsedOpening = Iv::RichPage();
+	parsedOpening.part = true;
+	auto paragraph = Iv::RichPage::Block();
+	paragraph.kind = Iv::RichPage::BlockKind::Paragraph;
+	paragraph.text.text.text = u"opening prefix"_q;
+	parsedOpening.blocks.push_back(paragraph);
+	auto parsedFull = std::make_shared<Iv::RichPage>(parsedOpening);
+	parsedFull->part = false;
+	parsedFull->blocks.push_back(paragraph);
+	CHECK(AdmitDesktopRichCopyPage(parsedOpening, *parsedFull, opening, full.Build(), parsedFull));
+	CHECK(!AdmitDesktopRichCopyPage(parsedOpening, *parsedFull, std::nullopt, full.Build(), parsedFull));
+	CHECK(!AdmitDesktopRichCopyPage(parsedOpening, *parsedFull, opening, std::nullopt, parsedFull));
+	auto changedPage = std::make_shared<Iv::RichPage>(*parsedFull);
+	changedPage->blocks.front().text.text.text = u"replacement prefix"_q;
+	CHECK(!AdmitDesktopRichCopyPage(parsedOpening, *changedPage, opening, full.Build(), changedPage));
+	CHECK(!AdmitDesktopRichCopyPage(parsedOpening, *changedPage, opening, full.Build(), parsedFull));
+	auto newer = full;
+	newer.flags = MTP_flags(MTPDmessage::Flag::f_rich_message | MTPDmessage::Flag::f_edit_date);
+	newer.edit_date = MTP_int(91);
+	CHECK(!AdmitDesktopRichCopyPage(parsedOpening, *parsedFull, opening, newer.Build(), parsedFull));
+
+}
+
+void DeliveryCases() {
+	Section = "empty, absent and stale delivery boundary";
+	auto gate = DesktopMarkdownPublication();
+	auto clipboard = u"sentinel"_q;
+	auto deliveries = 0;
+	const auto deliver = [&](std::unique_ptr<QMimeData> data) {
+		CHECK(data && data->hasText());
+		clipboard = data->text();
+		++deliveries;
+	};
+	CHECK(!DeliverDesktopMarkdownText(std::nullopt, deliver));
+	CHECK(deliveries == 0 && clipboard == u"sentinel"_q);
+	CHECK(gate.publish(gate.stamp(), [] { return true; }, [&] {
+		CHECK(DeliverDesktopMarkdownText(QString(), deliver));
+	}));
+	CHECK(deliveries == 1 && clipboard.isEmpty());
+	CHECK(DeliverDesktopMarkdownText(u"nonempty control"_q, deliver));
+	CHECK(deliveries == 2 && clipboard == u"nonempty control"_q);
+	const auto stamp = gate.stamp();
+	gate.committed();
+	CHECK(!gate.publish(stamp, [] { return true; }, [&] {
+		CHECK(DeliverDesktopMarkdownText(QString(), deliver));
+	}));
+	CHECK(deliveries == 2 && clipboard == u"nonempty control"_q);
+}
+
 }
 
 int main(int argc, char *argv[]) {
 	QCoreApplication application(argc, argv);
 	if (argc != 2) { return 2; }
 	const auto root = QString::fromLocal8Bit(argv[1]);
+	PublicationCases();
+	RichCopyOpeningCases();
+	DeliveryCases();
 	AcknowledgementCases();
 	ComposeCases(root + u"/compose"_q);
 	RevocationCases(root + u"/revocation"_q);
 	FileCases(root + u"/file"_q);
 	PurgeCases(root + u"/purge"_q);
+	RichHydrationCases(root + u"/rich"_q);
 	Section = "UTF-8 provenance";
 	CHECK(DecodeDesktopMarkdownSource(QByteArray()).has_value());
 	CHECK(DecodeDesktopMarkdownSource("source") == u"source"_q);
 	CHECK(!DecodeDesktopMarkdownSource(QByteArray("\xff", 1)));
 	CHECK(DecodeDesktopMarkdownSource(QByteArray::fromHex("efbbbf61")) == QString(QChar(0xfeff)) + 'a');
+	Section = "Android Markdown document recognition parity";
 	auto descriptor = ArchiveMediaDescriptor{u"document:1"_q, u"document"_q,
 		{{u"name"_q, u"source.txt"_q}, {u"mime"_q, u"text/plain"_q}}};
 	CHECK(!IsDesktopMarkdownFile(descriptor));
+	for (const auto suffix : { u".md"_q, u".markdown"_q, u".mkd"_q,
+			u".mdown"_q, u".mkdn"_q, u".mdwn"_q }) {
+		descriptor.attributes.insert(u"name"_q, u"source"_q + suffix);
+		CHECK(IsDesktopMarkdownFile(descriptor));
+		descriptor.attributes.insert(u"name"_q, u"SOURCE"_q + suffix.toUpper());
+		CHECK(IsDesktopMarkdownFile(descriptor));
+		descriptor.attributes.insert(u"name"_q, u"source"_q + suffix + u".txt"_q);
+		CHECK(!IsDesktopMarkdownFile(descriptor));
+	}
+	descriptor.attributes.insert(u"name"_q, u"source.txt"_q);
+	for (const auto mime : { u"text/markdown"_q, u"text/x-markdown"_q,
+			u"text/x-web-markdown"_q }) {
+		descriptor.attributes.insert(u"mime"_q, mime);
+		CHECK(IsDesktopMarkdownFile(descriptor));
+		descriptor.attributes.insert(u"mime"_q,
+			u" \t"_q + mime.toUpper() + u" \t; charset=UTF-8; other=value"_q);
+		CHECK(IsDesktopMarkdownFile(descriptor));
+		descriptor.attributes.insert(u"mime"_q, mime + u"-other; charset=UTF-8"_q);
+		CHECK(!IsDesktopMarkdownFile(descriptor));
+	}
+	descriptor.attributes.insert(u"mime"_q, u"text/plain; type=text/markdown"_q);
+	CHECK(!IsDesktopMarkdownFile(descriptor));
+	descriptor.attributes.insert(u"mime"_q, u";text/markdown"_q);
+	CHECK(!IsDesktopMarkdownFile(descriptor));
 	descriptor.attributes.insert(u"mime"_q, u"text/markdown"_q);
-	CHECK(IsDesktopMarkdownFile(descriptor));
 	descriptor.kind = u"photo"_q;
 	CHECK(!IsDesktopMarkdownFile(descriptor));
 	std::printf("%d checks, %d failures\n", Checks, Failures);

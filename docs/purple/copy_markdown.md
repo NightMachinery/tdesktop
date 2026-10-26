@@ -104,3 +104,45 @@ or additional displayed content prevent substitution. Invalid UTF-8 remains
 exact bytes in storage and refuses textual source decoding. Source stays inside
 the encrypted version, under existing purge/logout ownership. Attachment checks
 the captured journal and generations through the real SQLite precommit boundary.
+
+Whole current-message and album actions now try the retained source through the
+shared core after matching the displayed original body, revision metadata and
+Markdown document identity. Text fragments and selections keep their displayed
+content. Empty genuine source remains distinguishable from absent source.
+Document context menus also expose the action for Markdown files; unretained
+bytes never cause a download.
+
+A copy captures its journal/store/login lifetime and publication stamp. Final
+clipboard publication uses a nonblocking gate shared with archive commits. A
+committed write or purge changes the stamp; store closure revokes the gate.
+The UI never waits for archive SQL. Message edits, deletion, migration, album
+membership, translation, account/controller changes and a newer copy invalidate
+pending work. Every source lookup releases its read snapshot on the worker
+before posting an immutable result.
+
+Partial original article Copy captures its own bounded raw preview at the start.
+Responses must preserve every observed TL block and media object, match the
+opening peer/body/date/edit/group metadata, and preserve parsed display structure.
+Missing preview evidence refuses only that Copy. The shared resolver continues
+viewing, editing and export normally after preview eviction. A Copy that already
+captured its opening snapshot can still validate a coherent full response after
+the registry evicts that preview. A complete displayed translation
+uses its own page; a partial translation refuses. Successful copies queue full
+observed rich structure as exact-version Hydration after clipboard publication;
+core preservation rules can refuse it without inventing a new author edit.
+
+Markdown document recognition matches Android: `.md`, `.markdown`, `.mkd`,
+`.mdown`, `.mkdn` and `.mdwn` suffixes ignore case. MIME recognition takes the
+first semicolon-delimited value, trims surrounding whitespace and ignores case
+for `text/markdown`, `text/x-markdown` and `text/x-web-markdown`. The exact stored
+document identity and verified bytes still determine source eligibility.
+
+A present empty genuine source writes an explicit empty plain-text MIME value.
+Absent output remains a no-op, and stale results never reach delivery. This
+Purple delivery boundary avoids the ordinary UI helper's empty-text no-op.
+
+Cached full articles pass the same Copy admission as a fresh response. Copy owns
+the raw opening and completed message values, checks their revision and native
+prefix, and binds the decoded completed page to the selected cached page. Missing
+evidence refuses Copy. The bounded observation registry includes retained full
+responses; eviction cannot revoke snapshots already owned by an active Copy.

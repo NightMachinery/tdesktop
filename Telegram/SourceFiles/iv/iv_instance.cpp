@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "purple/purple_markdown_current.h"
 #include "iv/iv_instance.h"
 
 #include "apiwrap.h"
@@ -1651,6 +1652,7 @@ auto Instance::processReceivedRichMessage(
 		|| !MatchesRichMessageGeneration(not_null{ current }, generation)) {
 		return processed;
 	}
+	Purple::ObserveDesktopRichResponse(session, itemId, result);
 	if (page) {
 		current->setFullRichPage(page);
 	}

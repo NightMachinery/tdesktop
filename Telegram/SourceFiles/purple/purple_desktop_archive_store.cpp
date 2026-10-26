@@ -1,4 +1,5 @@
 #include "purple/purple_desktop_archive_store.h"
+#include "purple/purple_markdown_publication.h"
 #include "purple/purple_archive_stream.h"
 #include "purple/purple_archive_attention.h"
 #include "purple/purple_archive_files.h"
@@ -520,6 +521,7 @@ class DesktopArchiveStore::Impl {
 	DesktopArchiveSqlite database;
 	DesktopArchiveCrypto crypto;
 	ArchiveSqlSecurity security;
+	std::shared_ptr<DesktopMarkdownPublication> markdownPublication = std::make_shared<DesktopMarkdownPublication>();
 	ArchiveStoreEpoch epoch;
 	DesktopArchiveStatus status = DesktopArchiveStatus::Disabled;
 	QString failure;
@@ -686,6 +688,7 @@ class DesktopArchiveStore::Impl {
 
 DesktopArchiveStore::DesktopArchiveStore() : _impl(std::make_unique<Impl>()) {}
 DesktopArchiveStore::~DesktopArchiveStore() {
+	_impl->markdownPublication->revoke();
 	_impl->RevokeJournalAdmission();
 	_impl->streams.clear();
 	ExpireHistory(true);
@@ -720,6 +723,7 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 		self.Fail(DesktopArchiveStatus::Unreadable, u"key-or-account-unavailable"_q);
 		return self.status;
 	}
+	self.markdownPublication = std::make_shared<DesktopMarkdownPublication>();
 	self.failure.clear();
 	self.admissionFailure.clear();
 	self.journalRenewal.reset();
@@ -1094,6 +1098,7 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 }
 
 bool DesktopArchiveStore::Close() {
+	_impl->markdownPublication->revoke();
 	_impl->journalRenewal.reset();
 	_impl->RevokeJournalAdmission();
 	_impl->streams.clear();
@@ -1163,6 +1168,7 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program, bool mainten
 	if (!current()) {
 		return false;
 	}
+	const auto publicationLock = _impl->markdownPublication->write();
 	auto keepAdmission = true;
 	auto admissionReadFailure = false;
 	const auto result = _impl->database.Execute(program, [&] {
@@ -1174,6 +1180,7 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program, bool mainten
 		return current();
 	});
 	if (result.committed) {
+		_impl->markdownPublication->committed();
 		if (!keepAdmission) {
 			if (admissionReadFailure) {
 				if (!_impl->journalRenewal) {
@@ -2662,7 +2669,7 @@ std::optional<DesktopArchiveJournalAccess> DesktopArchiveStore::JournalAccess(bo
 			}, [active, alive, admission] {
 				return admission->load() && alive->load() && (!active || active());
 			},
-			std::move(generations), std::move(deleteGenerations)};
+			std::move(generations), std::move(deleteGenerations), self.markdownPublication};
 	}();
 	return self.database.EndRead() ? loaded : std::nullopt;
 }

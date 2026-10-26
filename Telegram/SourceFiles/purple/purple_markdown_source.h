@@ -7,6 +7,20 @@ namespace Purple {
 
 inline constexpr auto kDesktopMarkdownSourceLimit = 1024 * 1024;
 
+struct DesktopMarkdownBody {
+	ArchiveMessageKey key;
+	ArchiveContent content;
+	QString document;
+	QString name;
+	QString mime;
+	uint64_t size = 0;
+	int64 serverTime = 0;
+	int64 editDate = 0;
+	friend bool operator==(const DesktopMarkdownBody &, const DesktopMarkdownBody &) = default;
+};
+[[nodiscard]] ArchiveCopySourceChoice ChooseDesktopCurrentMarkdown(
+	DesktopArchiveStore &store, const DesktopMarkdownBody &body);
+
 struct DesktopMarkdownSourceTarget {
 	ArchiveCopyRequest request;
 	ArchiveStoreEpoch epoch;

@@ -1,7 +1,15 @@
 #include "purple/purple_copy.h"
 
 #include "apiwrap.h"
+#include "main/main_account.h"
+#include "purple/purple_archive_service.h"
+#include "purple/purple_markdown_current.h"
 #include "base/weak_ptr.h"
+#include "base/unixtime.h"
+#include "purple/purple_archive_capture.h"
+#include "purple/purple_config.h"
+#include "purple/purple_markdown_delivery.h"
+#include <QtCore/QCryptographicHash>
 #include "base/weak_qptr.h"
 #include "core/application.h"
 #include "data/data_changes.h"
@@ -25,6 +33,7 @@
 #include "styles/style_menu_icons.h"
 
 #include <QtCore/QStringList>
+#include <QtCore/QJsonDocument>
 
 #include <memory>
 #include <map>
@@ -77,6 +86,14 @@ DisplayedArticleState ReadDisplayedArticleState(const HistoryItem *item) {
 	};
 }
 
+MessageIdsList GroupIds(not_null<HistoryItem*> item) {
+	auto ids = MessageIdsList();
+	if (const auto group = item->history()->session().data().groups().find(item)) {
+		for (const auto member : group->items) { ids.push_back(member->fullId()); }
+	}
+	return ids;
+}
+
 class CopyBatch final : public std::enable_shared_from_this<CopyBatch> {
 public:
 	CopyBatch(
@@ -95,8 +112,18 @@ private:
 		FullMsgId id;
 		const HistoryItem *identity = nullptr;
 		History *historyIdentity = nullptr;
+		History *migratedFrom = nullptr;
+		History *migratedTo = nullptr;
+		MessageIdsList groupIds;
+		TextWithEntities original;
+		DesktopMarkdownBody body;
+		TimeId date = 0;
+		TimeId editDate = 0;
 		std::shared_ptr<const Iv::RichPage> inlinePage;
 		std::shared_ptr<const Iv::RichPage> fullPage;
+		std::optional<MTPMessage> richOpening;
+		std::optional<MTPMessage> richCompletion;
+		std::shared_ptr<const Iv::RichPage> verifiedResponse;
 		uint64 version = 0;
 		DisplayedArticleState display;
 		TextForMimeData ordinary;
@@ -106,6 +133,8 @@ private:
 	[[nodiscard]] bool contextValid() const;
 	[[nodiscard]] bool entriesValid() const;
 	[[nodiscard]] bool displayStatesValid() const;
+	void publish();
+	void ordinary(size_t index);
 	void rendered(size_t index, const std::shared_ptr<const Iv::RichPage> &page);
 	void next(size_t index);
 	void failed(const QString &error);
@@ -118,6 +147,10 @@ private:
 	MarkdownCopyToken _copyToken;
 	MessageIdsList _ids;
 	std::vector<Entry> _entries;
+	std::optional<DesktopMarkdownCopyScope> _archiveScope;
+	bool _hasGenuine = false;
+	std::vector<ArchiveEvent> _resolvedBodies;
+	qsizetype _resolvedBytes = 0;
 	bool _selection = false;
 	bool _group = false;
 	bool _cancelled = false;
@@ -153,7 +186,8 @@ bool CopyBatch::contextValid() const {
 		|| Core::App().activeWindow() != window
 		|| &Core::App().activeAccount() != _domainAccount
 		|| window->locked() || Core::App().passcodeLocked()
-		|| Core::App().screenIsLocked() || (_selection && session->frozen())) {
+		|| Core::App().screenIsLocked() || (_selection && session->frozen())
+		|| session->account().loggingOut() || session->account().maybeSession() != session) {
 		return false;
 	}
 	if (_selection && list->purpleSelectedIdsInOrder() != _ids) {
@@ -179,7 +213,13 @@ bool CopyBatch::displayStatesValid() const {
 	if (!session) return false;
 	for (const auto &entry : _entries) {
 		const auto item = session->data().message(entry.id);
-		if (!item || item != entry.identity
+		const auto edited = item ? item->Get<HistoryMessageEdited>() : nullptr;
+		if (!item || item != entry.identity || item->originalText() != entry.original
+			|| DesktopMarkdownBodyForItem(item) != entry.body
+			|| item->date() != entry.date || (edited ? edited->date : 0) != entry.editDate
+			|| item->history()->migrateFrom() != entry.migratedFrom
+			|| item->history()->migrateToOrMe().get() != entry.migratedTo
+			|| GroupIds(item) != entry.groupIds
 			|| ReadDisplayedArticleState(item) != entry.display) {
 			return false;
 		}
@@ -221,6 +261,7 @@ void CopyBatch::start() {
 	if (_ids.empty() || !contextValid()) {
 		return;
 	}
+	_archiveScope = OpenDesktopMarkdownCopy(_session.get());
 	const auto owner = &_session.get()->data();
 	for (const auto id : _ids) {
 		const auto item = owner->message(id);
@@ -234,8 +275,25 @@ void CopyBatch::start() {
 		entry.id = id;
 		entry.identity = item;
 		entry.historyIdentity = item->history();
+		entry.migratedFrom = item->history()->migrateFrom();
+		entry.migratedTo = item->history()->migrateToOrMe();
+		entry.groupIds = GroupIds(item);
+		entry.original = item->originalText();
+		entry.body = DesktopMarkdownBodyForItem(item);
+		entry.date = item->date();
+		const auto edited = item->Get<HistoryMessageEdited>();
+		entry.editDate = edited ? edited->date : 0;
 		entry.inlinePage = inlinePage;
 		entry.fullPage = fullPage;
+		if (inlinePage && (inlinePage->part || (fullPage && fullPage != inlinePage))) {
+			entry.richOpening = DesktopRichCopyOpening(_session.get(), id);
+			entry.richCompletion = DesktopRichCopyCachedMessage(_session.get(), id);
+			if (entry.richCompletion && entry.richCompletion->type() == mtpc_message) {
+				if (const auto rich = entry.richCompletion->c_message().vrich_message()) {
+					entry.verifiedResponse = Iv::ParseRichPage(_session.get(), *rich);
+				}
+			}
+		}
 		entry.version = item->fullRichPageVersion();
 		entry.display = ReadDisplayedArticleState(item);
 		entry.ordinary = inlinePage || fullPage ? TextForMimeData() : HistoryItemText(item);
@@ -248,6 +306,36 @@ void CopyBatch::start() {
 		_entries.push_back(std::move(entry));
 	}
 	const auto weak = std::weak_ptr<CopyBatch>(shared_from_this());
+	DesktopRichResponses() | rpl::on_next([=](const DesktopRichResponse &response) {
+		const auto strong = weak.lock();
+		if (!strong || !strong->contextValid() || !strong->displayStatesValid()
+			|| response.session != strong->_session.get()) { return; }
+		for (auto &entry : strong->_entries) {
+			if (entry.id != response.id || !entry.richOpening || !entry.inlinePage) { continue; }
+			entry.verifiedResponse.reset();
+			entry.richCompletion.reset();
+			const auto verified = ValidateDesktopRichCopyResponse(*entry.richOpening, response.response);
+			if (!verified) { continue; }
+			const auto page = Iv::ParseRichPage(response.session, *verified->c_message().vrich_message());
+			if (!page || !DesktopRichPageExtends(*entry.inlinePage, *page)) { continue; }
+			entry.verifiedResponse = page;
+			entry.richCompletion = *verified;
+			const auto bytes = tl::count_length(*verified);
+			if (bytes > 8 * 1024 * 1024 - strong->_resolvedBytes) { continue; }
+			auto wire = mtpBuffer();
+			verified->write(wire);
+			const auto raw = QByteArray(reinterpret_cast<const char*>(wire.constData()), wire.size() * sizeof(mtpPrime));
+			const auto id = QString::fromLatin1(QCryptographicHash::hash(raw, QCryptographicHash::Sha256).toHex());
+			if (const auto event = DesktopArchiveSnapshot(SessionAccountKey(response.session), *verified,
+					ArchiveOrigin::Hydration, id, base::unixtime::now())) {
+				const auto retainedBytes = event->observation.payload.size()
+					+ (event->content ? QJsonDocument(event->content->rich.toObject()).toJson().size() : 0);
+				if (retainedBytes > 8 * 1024 * 1024 - strong->_resolvedBytes) { continue; }
+				strong->_resolvedBytes += retainedBytes;
+				strong->_resolvedBodies.push_back(*event);
+			}
+		}
+	}, _lifetime);
 	owner->itemResizeRequest() | rpl::on_next([=] {
 		if (const auto strong = weak.lock()) {
 			if (!strong->displayStatesValid()) strong->cancel();
@@ -267,6 +355,17 @@ void CopyBatch::start() {
 			if (ranges::contains(strong->_ids, item->fullId())) strong->cancel();
 		}
 	}, _lifetime);
+	_session.get()->changes().realtimeMessageUpdates(Data::MessageUpdate::Flag::Edited) | rpl::on_next([=](const Data::MessageUpdate &update) {
+		if (const auto strong = weak.lock()) {
+			if (ranges::contains(strong->_ids, update.item->fullId())) strong->cancel();
+		}
+	}, _lifetime);
+	_session.get()->changes().realtimePeerUpdates(Data::PeerUpdate::Flag::Migration)
+		| rpl::on_next([=] {
+			if (const auto strong = weak.lock()) {
+				if (!strong->displayStatesValid()) strong->cancel();
+			}
+		}, _lifetime);
 	Core::App().domain().activeChanges() | rpl::on_next([=] {
 		if (const auto strong = weak.lock()) strong->cancel();
 	}, _lifetime);
@@ -285,18 +384,12 @@ void CopyBatch::next(size_t index) {
 		return;
 	}
 	if (index == _entries.size()) {
-		auto parts = QStringList();
-		for (const auto &entry : _entries) parts.push_back(entry.markdown);
-		const auto markdown = parts.join(u"\n\n"_q);
-		if (!markdown.isEmpty()) {
-			TextUtilities::SetClipboardText(TextForMimeData::Simple(markdown));
-		}
+		publish();
 		return;
 	}
 	auto &entry = _entries[index];
 	if (!entry.inlinePage && !entry.fullPage) {
-		entry.markdown = CopyTextAsMarkdown(entry.ordinary);
-		next(index + 1);
+		ordinary(index);
 		return;
 	}
 	if (const auto page = SelectCompleteArticlePage(entry.inlinePage,
@@ -306,6 +399,10 @@ void CopyBatch::next(size_t index) {
 	}
 	if (entry.display.translated()) {
 		failed(u"The complete displayed translation is unavailable. Nothing was copied."_q);
+		return;
+	}
+	if (!entry.richOpening) {
+		failed(u"The original article preview is unavailable. Nothing was copied."_q);
 		return;
 	}
 	const auto session = _session.get();
@@ -319,7 +416,7 @@ void CopyBatch::next(size_t index) {
 		if (!current || current != entry.identity
 			|| current->richPage() != entry.inlinePage
 			|| current->fullRichPageVersion() != entry.version
-			|| !page || page->part
+			|| !page || page->part || !entry.verifiedResponse || *entry.verifiedResponse != *page
 			|| (current->fullRichPage() != page && current->richPage() != page)) {
 			self->failed(u"The complete current article is unavailable. Nothing was copied."_q);
 			return;
@@ -327,6 +424,62 @@ void CopyBatch::next(size_t index) {
 		entry.fullPage = current->fullRichPage();
 		self->rendered(index, page);
 	});
+}
+
+void CopyBatch::publish() {
+	if (!entriesValid()) { return; }
+	auto parts = QStringList();
+	for (const auto &entry : _entries) { parts.push_back(entry.markdown); }
+	auto markdown = parts.join(u"\n\n"_q);
+	if (_group && !_hasGenuine && ranges::none_of(_entries, [](const Entry &entry) {
+		return entry.inlinePage || entry.fullPage;
+	})) {
+		const auto item = _session.get()->data().message(_ids.front());
+		const auto group = item ? _session.get()->data().groups().find(item) : nullptr;
+		if (!group) { return; }
+		markdown = CopyTextAsMarkdown(HistoryGroupText(group));
+	}
+	if (markdown.isEmpty() && !_hasGenuine) { return; }
+	const auto deliver = [&] { SetDesktopMarkdownClipboard(markdown); };
+	auto published = false;
+	if (_archiveScope) {
+		const auto &scope = *_archiveScope;
+		published = scope.publication->publish(scope.stamp, [&] {
+			return scope.current() && entriesValid();
+		}, deliver);
+	} else if (!markdown.isEmpty()) {
+		deliver();
+		published = true;
+	}
+	if (published && contextValid()) {
+		for (auto &event : _resolvedBodies) {
+			QueueDesktopResolvedRichBody(_session.get(), std::move(event));
+		}
+		_resolvedBodies.clear();
+	}
+
+}
+
+void CopyBatch::ordinary(size_t index) {
+	auto &entry = _entries[index];
+	const auto item = _session.get()->data().message(entry.id);
+	const auto sameDisplay = entry.ordinary.rich == entry.original;
+	const auto &body = entry.body;
+	if (!_archiveScope || _selection || entry.display.translated()
+		|| (!sameDisplay && body.document.isEmpty())) {
+		entry.markdown = CopyTextAsMarkdown(entry.ordinary);
+		next(index + 1);
+		return;
+	}
+	const auto self = shared_from_this();
+	ReadDesktopMarkdownSource(_session.get(), *_archiveScope, body,
+		[self, index](DesktopMarkdownCopySource source) {
+			if (!source.current || !self->entriesValid()) { self->cancel(); return; }
+			auto &entry = self->_entries[index];
+			self->_hasGenuine = self->_hasGenuine || source.text.has_value();
+			entry.markdown = source.text ? *source.text : CopyTextAsMarkdown(entry.ordinary);
+			self->next(index + 1);
+		});
 }
 
 void CopyBatch::rendered(size_t index, const std::shared_ptr<const Iv::RichPage> &page) {
@@ -338,6 +491,12 @@ void CopyBatch::rendered(size_t index, const std::shared_ptr<const Iv::RichPage>
 		current->fullRichPage(), entry.display.translationPage, entry.display.translated());
 	if (page != expected) {
 		failed(u"The displayed article changed. Nothing was copied."_q);
+		return;
+	}
+	if (!entry.display.translated() && page != entry.inlinePage
+		&& (!entry.inlinePage || !AdmitDesktopRichCopyPage(*entry.inlinePage, *page,
+			entry.richOpening, entry.richCompletion, entry.verifiedResponse))) {
+		failed(u"The cached article does not match the opening message. Nothing was copied."_q);
 		return;
 	}
 	const auto permalink = current->id.bare > 0 && current->history()->peer->isChannel()
@@ -415,11 +574,24 @@ void AddSelectionCopyAsMarkdownAction(
 	}, &st::menuIconCopy);
 }
 
+void AddMarkdownDocumentCopyAction(not_null<Ui::PopupMenu*> menu,
+		not_null<HistoryView::ListWidget*> list, HistoryItem *item,
+		bool permitted, bool asGroup) {
+	if (!permitted || !item || item->richPage() || !item->media()) { return; }
+	const auto body = DesktopMarkdownBodyForItem(item);
+	if (!body.document.isEmpty() && IsDesktopMarkdownFile({body.document, u"document"_q,
+		{{u"name"_q, body.name}, {u"mime"_q, body.mime}}})) {
+		AddMessageCopyAsMarkdownAction(menu, list, item->fullId(), asGroup);
+	}
+}
+
 void AddMessageCopyAsMarkdownAction(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<HistoryView::ListWidget*> list,
 		FullMsgId itemId,
 		bool asGroup) {
+	if (menu->property("purple_markdown_copy").toBool()) { return; }
+	menu->setProperty("purple_markdown_copy", true);
 	const auto weak = base::make_weak(list);
 	menu->addAction(tr::lng_purple_copy_as_markdown(tr::now), [=] {
 		BeginMarkdownCopy();
@@ -436,17 +608,7 @@ void AddMessageCopyAsMarkdownAction(
 				grouped = true;
 			}
 		}
-		const auto hasArticle = ranges::any_of(ids, [&](FullMsgId id) {
-			const auto part = strong->session().data().message(id);
-			return part && (part->richPage() || part->fullRichPage());
-		});
-		if (hasArticle) {
-			BeginCopy(strong, std::move(ids), false, grouped);
-		} else {
-			const auto group = grouped ? strong->session().data().groups().find(item) : nullptr;
-			const auto markdown = CopyTextAsMarkdown(group ? HistoryGroupText(group) : HistoryItemText(item));
-			if (!markdown.isEmpty()) TextUtilities::SetClipboardText(TextForMimeData::Simple(markdown));
-		}
+		BeginCopy(strong, std::move(ids), false, grouped);
 	}, &st::menuIconCopy);
 }
 

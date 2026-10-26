@@ -1036,6 +1036,90 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 	};
 }
 
+std::optional<DesktopMarkdownCopyScope> OpenDesktopMarkdownCopy(
+		not_null<Main::Session*> session) {
+	const auto found = Sessions.find(session.get());
+	if (Retired.contains(session.get()) || found == Sessions.end() || !found->second.journal) {
+		return {};
+	}
+	const auto journal = found->second.journal;
+	const auto routing = found->second.routing;
+	const auto publication = journal->access().markdownPublication;
+	const auto current = [journal, routing] {
+		return routing->load() && journal->CaptureAllowed()
+			&& journal->access().active && journal->access().active();
+	};
+	return publication && current() ? std::optional(DesktopMarkdownCopyScope{
+		journal->access().epoch, publication, current, publication->stamp()}) : std::nullopt;
+}
+
+void QueueDesktopResolvedRichBody(not_null<Main::Session*> session, ArchiveEvent event) {
+	const auto found = Sessions.find(session.get());
+	if (Retired.contains(session.get()) || found == Sessions.end() || !found->second.journal
+		|| event.key.account != SessionAccountKey(session) || !event.content) {
+		return;
+	}
+	const auto journal = found->second.journal;
+	const auto generation = journal->CaptureGeneration(event.key.chat);
+	static_cast<void>(found->second.worker->Post([journal, generation, event = std::move(event)](
+			DesktopArchiveStore &store) mutable {
+		if (!journal->CaptureAllowed() || !journal->access().active() || !journal->Drain(store)
+			|| !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
+			return;
+		}
+		const auto slice = store.ReadSlice(event.key);
+		const auto message = slice ? FindArchiveMessage(slice->state, event.key) : nullptr;
+		const auto version = message && !message->versions.empty() ? &message->versions.back() : nullptr;
+		if (!version || message->deleted || version->completeness != ArchiveCompleteness::Partial
+			|| ArchiveGenerationFor(slice->state, event.key.chat) != generation
+			|| version->observation.serverTime != event.observation.serverTime
+			|| version->observation.context.value(u"editDate"_q) != event.observation.context.value(u"editDate"_q)) {
+			return;
+		}
+		event.origin = ArchiveOrigin::Hydration;
+		event.generation = generation;
+		event.targetVersion = version->id;
+		event.targetRevision = version->revision;
+		event.expectedContentHash = ArchiveContentHash(version->content);
+		static_cast<void>(store.Capture(std::move(event)));
+	}));
+}
+
+void ReadDesktopMarkdownSource(not_null<Main::Session*> session,
+		DesktopMarkdownCopyScope scope, DesktopMarkdownBody body,
+		Fn<void(DesktopMarkdownCopySource)> done) {
+	const auto found = Sessions.find(session.get());
+	if (Retired.contains(session.get()) || found == Sessions.end() || !found->second.journal
+		|| !scope.current || !scope.current() || scope.epoch.account != body.key.account
+		|| found->second.journal->access().epoch != scope.epoch
+		|| found->second.journal->access().markdownPublication != scope.publication) {
+		done({});
+		return;
+	}
+	const auto weak = base::make_weak(session.get());
+	const auto journal = found->second.journal;
+	const auto accepted = found->second.worker->Post([weak, scope, body = std::move(body), done,
+		journal](DesktopArchiveStore &store) {
+		auto result = DesktopMarkdownCopySource();
+		if (scope.current() && CanRunArchiveWork(scope.epoch, store.epoch()) && journal->Drain(store)) {
+			const auto choice = ChooseDesktopCurrentMarkdown(store, body);
+			result.current = store.Current() && scope.current();
+			if (choice.kind == ArchiveCopySourceKind::GenuineSource) {
+				result.text = DecodeDesktopMarkdownSource(choice.bytes);
+				result.current = result.current && result.text.has_value();
+			}
+		}
+		crl::on_main([weak, scope, result = std::move(result), done]() mutable {
+			if (!weak || !scope.current() || scope.publication->stamp() != scope.stamp) {
+				result.current = false;
+				result.text.reset();
+			}
+			done(std::move(result));
+		});
+	});
+	if (!accepted) { done({}); }
+}
+
 std::optional<DesktopComposeIngress> DesktopComposeSourceIngress(
 		not_null<Main::Session*> session, ArchiveChatKey chat) {
 	const auto found = Sessions.find(session.get());

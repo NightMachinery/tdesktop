@@ -11,6 +11,8 @@
 
 namespace Purple {
 
+class DesktopMarkdownPublication;
+
 struct DesktopArchiveJournalAccess {
 	QString root;
 	ArchiveStoreEpoch epoch;
@@ -21,6 +23,7 @@ struct DesktopArchiveJournalAccess {
 	std::function<bool()> active;
 	std::vector<ArchiveChatGeneration> chatGenerations;
 	QJsonObject deleteGenerations;
+	std::shared_ptr<DesktopMarkdownPublication> markdownPublication;
 };
 
 enum class DesktopArchiveStatus {

@@ -20,6 +20,7 @@
 #include "purple/purple_archive_lifecycle_capture.h"
 #include "history/history_item_components.h"
 #include "purple/purple_article_markdown.h"
+#include "purple/purple_markdown_current.h"
 #include "purple/purple_config.h"
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QJsonArray>
@@ -139,6 +140,7 @@ void ObserveArchiveMessage(not_null<Main::Session*> session, const MTPMessage &m
 	if (!DesktopArchiveReceivedId(id, flags, message)) {
 		return;
 	}
+	RememberDesktopRichPreview(session, message);
 	if (const auto event = DesktopArchiveSnapshot(SessionAccountKey(session), message,
 			ArchiveOrigin::Baseline, Fresh(), base::unixtime::now())) {
 		QueueArchiveObservation(session, *event);
@@ -148,6 +150,7 @@ void ObserveArchiveMessage(not_null<Main::Session*> session, const MTPMessage &m
 
 void ObserveArchiveEdit(
 	not_null<Main::Session*> session, const MTPMessage &message, int pts, bool channel) {
+	RememberDesktopRichPreview(session, message);
 	if (ObserveArchiveExpiredReplacement(session, message, pts)) {
 		return;
 	}

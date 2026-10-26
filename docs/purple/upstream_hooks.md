@@ -1396,3 +1396,12 @@ hook in the ordinary send path. Purple owns source capture, bounds, account and
 journal authority, acknowledgement validation and encrypted attachment. No
 parser or send implementation moves into these hooks. Scheduled, split,
 short-send, rich-editor and transformed acknowledgements remain source-less.
+
+`Telegram/SourceFiles/iv/iv_instance.cpp` adds one include and a Purple
+response observation call. It never changes resolver acceptance for viewing,
+editing or export. Each Copy request owns its opening raw snapshot and checks
+native peer/revision metadata, duplicate targets and exact preview prefix/media
+independently, with no networking of its own. `history/view/history_view_context_menu.cpp`
+adds one document-action hook so Markdown files without captions can expose the
+same source-aware copy action. Ordinary action duplication is suppressed inside
+Purple code. No resolver, parser or context-menu implementation moves.

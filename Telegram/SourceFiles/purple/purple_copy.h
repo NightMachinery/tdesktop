@@ -6,6 +6,7 @@
 #include <memory>
 
 struct TextForMimeData;
+class HistoryItem;
 namespace Ui { class PopupMenu; }
 namespace HistoryView { class ListWidget; }
 
@@ -27,6 +28,9 @@ void AddSelectionCopyAsMarkdownAction(
 	not_null<HistoryView::ListWidget*> list,
 	bool wholeMessages,
 	bool overSelection);
+void AddMarkdownDocumentCopyAction(not_null<Ui::PopupMenu*> menu,
+	not_null<HistoryView::ListWidget*> list, HistoryItem *item,
+	bool permitted, bool asGroup);
 void AddMessageCopyAsMarkdownAction(
 	not_null<Ui::PopupMenu*> menu,
 	not_null<HistoryView::ListWidget*> list,

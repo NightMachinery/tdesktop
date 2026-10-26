@@ -75,11 +75,18 @@ bool AttachDesktopMarkdownSource(
 
 bool IsDesktopMarkdownFile(const ArchiveMediaDescriptor &document) {
 	const auto name = document.attributes.value(u"name"_q).toString();
-	const auto mime = document.attributes.value(u"mime"_q).toString().toLower();
+	const auto mime = document.attributes.value(u"mime"_q).toString()
+		.section(';', 0, 0).trimmed().toLower();
 	return document.kind == u"document"_q
 		&& (name.endsWith(u".md"_q, Qt::CaseInsensitive)
 			|| name.endsWith(u".markdown"_q, Qt::CaseInsensitive)
-			|| mime == u"text/markdown"_q || mime == u"text/x-markdown"_q);
+			|| name.endsWith(u".mkd"_q, Qt::CaseInsensitive)
+			|| name.endsWith(u".mdown"_q, Qt::CaseInsensitive)
+			|| name.endsWith(u".mkdn"_q, Qt::CaseInsensitive)
+			|| name.endsWith(u".mdwn"_q, Qt::CaseInsensitive)
+			|| mime == u"text/markdown"_q
+			|| mime == u"text/x-markdown"_q
+			|| mime == u"text/x-web-markdown"_q);
 }
 
 bool CaptureDesktopMarkdownFile(
@@ -116,6 +123,35 @@ bool CaptureDesktopMarkdownFile(
 		return false;
 	}
 	return AttachDesktopMarkdownSource(store, *target, std::move(source), [&] { return store.Current(); });
+}
+
+ArchiveCopySourceChoice ChooseDesktopCurrentMarkdown(
+		DesktopArchiveStore &store, const DesktopMarkdownBody &body) {
+	const auto target = DesktopMarkdownTarget(store, body.key);
+	const auto slice = target ? store.ReadSlice(body.key, {}, target->request.version) : std::nullopt;
+	const auto version = slice ? FindArchiveVersion(slice->state, body.key, target->request.version) : nullptr;
+	if (!version || version->observation.serverTime != body.serverTime
+		|| version->observation.context.value(u"editDate"_q).toInt() != body.editDate) {
+		return {};
+	}
+	const auto &content = version->content;
+	if (body.document.isEmpty()) {
+		if (content != body.content) { return {}; }
+	} else {
+		if (!body.content.text.isEmpty() || !body.content.entities.isEmpty()
+			|| !content.text.isEmpty() || !content.caption.isEmpty() || !content.entities.isEmpty()
+			|| !content.rich.isNull() || !content.opaque.isEmpty() || content.media.size() != 1) {
+			return {};
+		}
+		const auto &document = content.media.front();
+		if (document.identity != body.document || !IsDesktopMarkdownFile(document)
+			|| document.attributes.value(u"name"_q).toString() != body.name
+			|| document.attributes.value(u"mime"_q).toString() != body.mime
+			|| document.attributes.value(u"size"_q).toString() != QString::number(body.size)) {
+			return {};
+		}
+	}
+	return ChooseCopySource(slice->state, target->request);
 }
 
 std::optional<QString> DecodeDesktopMarkdownSource(const QByteArray &bytes) {

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "purple/purple_archive_files.h"
+#include "purple/purple_markdown_publication.h"
+#include "purple/purple_markdown_source.h"
 #include "purple/purple_archive_acquired_source.h"
 #include "purple/purple_desktop_archive_store.h"
 
@@ -10,6 +12,23 @@ class Session;
 }
 
 namespace Purple {
+
+struct DesktopMarkdownCopyScope {
+	ArchiveStoreEpoch epoch;
+	std::shared_ptr<DesktopMarkdownPublication> publication;
+	std::function<bool()> current;
+	uint64_t stamp = 0;
+};
+struct DesktopMarkdownCopySource {
+	bool current = false;
+	std::optional<QString> text;
+};
+[[nodiscard]] std::optional<DesktopMarkdownCopyScope> OpenDesktopMarkdownCopy(
+	not_null<Main::Session*> session);
+void QueueDesktopResolvedRichBody(not_null<Main::Session*> session, ArchiveEvent event);
+void ReadDesktopMarkdownSource(not_null<Main::Session*> session,
+	DesktopMarkdownCopyScope scope, DesktopMarkdownBody body,
+	Fn<void(DesktopMarkdownCopySource)> done);
 
 struct DesktopComposeIngress {
 	ArchiveStoreEpoch epoch;

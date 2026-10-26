@@ -84,6 +84,12 @@ PRIVATE
     purple/purple_bypass.h
     purple/purple_chat_menus.cpp
     purple/purple_chat_menus.h
+    purple/purple_markdown_publication.cpp
+    purple/purple_markdown_publication.h
+    purple/purple_markdown_delivery.cpp
+    purple/purple_markdown_delivery.h
+    purple/purple_markdown_current.cpp
+    purple/purple_markdown_current.h
     purple/purple_markdown_source.cpp
     purple/purple_markdown_source.h
     purple/purple_compose_receipt.cpp
