@@ -167,3 +167,5 @@ Local saving and screenshot behavior are documented in [user_control.md](user_co
 The encrypted account archive adapter is described in [archive_storage.md](archive_storage.md).
 
 Sync-chat setup and its current qualification hold are described in [sync_chat_setup.md](sync_chat_setup.md).
+
+Local emoji artwork export is described in [emoji_export.md](emoji_export.md).

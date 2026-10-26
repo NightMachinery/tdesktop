@@ -355,3 +355,6 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_sync_telegram_wait" = "Telegram asked to wait. Retrying at %1.";
 "lng_purple_sync_transient_wait" = "Telegram is temporarily unavailable. Retrying at %1.";
+
+"lng_purple_emoji_export" = "Export custom emoji for local tools";
+"lng_purple_emoji_export_about" = "Saves your emoji library catalog and 128 px artwork to {path}.";

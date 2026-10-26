@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
 #include "purple/purple_archive_service.h"
+#include "purple/purple_emoji_export.h"
 
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
@@ -526,6 +527,7 @@ void Account::logOut() {
 	if (_loggingOut) {
 		return;
 	}
+	Purple::StopEmojiExportAtLogout(*this);
 	Purple::RemoveArchiveAtLogout(*this);
 	_loggingOut = true;
 	if (_mtp) {
@@ -542,6 +544,7 @@ bool Account::loggingOut() const {
 
 void Account::forcedLogOut() {
 	if (sessionExists()) {
+		Purple::StopEmojiExportAtLogout(*this);
 		Purple::RemoveArchiveAtLogout(*this);
 		resetAuthorizationKeys();
 		loggedOut();

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_archive_purge_box.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
+#include "purple/purple_emoji_export.h"
 #include "purple/purple_last_seen.h"
 #include "purple/purple_preset_box.h"
 #include "purple/purple_schedule.h"
@@ -668,6 +669,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		"Stored in "_q + Purple::SettingsFilePath() + '.'));
 	builder.addSkip();
 
+	BuildEmojiExportSetting(builder);
 	BuildPurpleLastSeenSection(builder);
 	BuildPurpleScreenTimeSection(builder);
 }

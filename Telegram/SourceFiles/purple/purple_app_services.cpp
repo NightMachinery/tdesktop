@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_chat_service.h"
 
 #include "purple/purple_focus.h"
+#include "purple/purple_emoji_export.h"
 #include "purple/purple_archive_service.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_auto_service.h"
@@ -31,6 +32,7 @@ void StartAppServices() {
 	StartFocusSync();
 	StartScreenTime();
 	StartUiWitness();
+	StartEmojiExport();
 }
 
 void OnScreenLockChanged(bool locked) {

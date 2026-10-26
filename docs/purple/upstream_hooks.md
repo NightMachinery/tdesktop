@@ -13,6 +13,13 @@ an upstream file updates its entry here in the same commit, together with the
 feature doc's "Upstream hooks" section. `purple/upstream_report.sh` produces
 the numbers.
 
+## Custom emoji artwork export
+
+- `main/main_account.cpp`: one Purple header and calls before ordinary and forced
+  logout revoke the local emoji export immediately. Preference, primary-session,
+  passcode, queue, rendering and publication decisions live in
+  `purple/purple_emoji_export.*`; see [emoji_export.md](emoji_export.md).
+
 ## Recipient picker visibility
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server

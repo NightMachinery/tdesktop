@@ -109,6 +109,14 @@ PRIVATE
     purple/purple_config_file.h
     purple/purple_device.cpp
     purple/purple_device.h
+    purple/purple_emoji_export.cpp
+    purple/purple_emoji_export.h
+    purple/purple_emoji_export_queue.cpp
+    purple/purple_emoji_export_queue.h
+    purple/purple_emoji_export_worker.cpp
+    purple/purple_emoji_export_worker.h
+    purple/purple_emoji_export_store.cpp
+    purple/purple_emoji_export_store.h
     purple/purple_focus.cpp
     purple/purple_focus.h
     purple/purple_folder_strip.cpp
