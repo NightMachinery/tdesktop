@@ -129,6 +129,96 @@ in about a second. Run it after touching the core or anything in
 `Telegram/SourceFiles/purple/`; a full app build to test a config change is
 never necessary.
 
+### Running every host gate
+
+Before delivering a patch, run the full host gate set on the exact base you
+deliver against, and again after any rebase:
+
+```bash
+python3 purple/run_host_gates.py --tree <tree> --build-dir <Debug build> \
+    --output-dir <dir outside the tree> --compile-wrapper '<hold wrapper>'
+```
+
+`purple/host_gates.json` is the canonical list: every static route check and
+compiled host test, with each variant. A patch that adds, renames or removes a
+driver, a variant, a `purple/test_*.cpp` fixture or a program under
+`Telegram/SourceFiles/purple/tests/` updates that list in the same commit. A
+program no driver compiles yet is recorded under `undriven` with the reason. The
+runner refuses to start while any driver or program is missing from the list,
+while a listed file does not exist, or while a configuration of a driver with
+several lists fixtures other than the ones its arguments select (a file name in
+its arguments, or a flag mapped under `variants`). `--list` prints the list and
+runs only that check.
+
+The compiled gates reuse the recipes and objects of an existing Debug build, which
+may come from another checkout. The runner keeps that checkout's include roots,
+because the build's precompiled header was made from them, and puts in front of
+each root an overlay holding the tree's new or changed files there, plus an
+`#error` stub for every header the tree deleted. The source each recipe compiles
+is always the tree's. The tree needs the `purple_core` submodule populated.
+
+A configuration is STALE, not PASS, when anything it compiled or reused may not
+match the tree. Three checks decide it:
+
+- Every compile leaves a dependency file (the runner adds `-MD -MF` where the
+  driver does not ask for one). A file read from the build's checkout whose tree
+  copy differs or is gone makes the gate STALE. That covers what the overlays
+  cannot intercept: a header included from its own directory, a root without an
+  overlay, and the precompiled header.
+- For every object, archive member and precompiled header the gate linked or
+  force-included, and every generated header it read, ninja is asked whether it
+  would rebuild it: a dry run (`-n -d explain`) from a copy of `build.ninja`
+  outside the build, with no regeneration edge and without the order-only
+  dependencies that only order a first build. Any planned step makes the gate
+  STALE, and `results.json` lists the steps and ninja's explanations. This is
+  ninja's own answer, so a generated header that is behind its `.strings`,
+  `.style`, `.palette` or `.tl` source counts too. Only ninja's exact
+  "no work to do" is clean: the status format is pinned (`NINJA_STATUS`), and a
+  dry run that fails or prints anything of another shape fails the gate. A
+  manifest behind its CMake inputs makes every gate that reuses the build STALE.
+  The runner learns that from a dry run of `build.ninja` in the same copy, whose
+  regeneration edge has lost the `CONFIGURE_DEPENDS` glob check that is dirty on
+  every run, so ninja compares the CMake files themselves. A glob that has gained
+  files is still visible only to a real build.
+- The same reused targets are compared with the tree by content: an input the
+  tree changes or deletes, a missing or out-of-date dependency record, or an
+  output older than an input. Inputs inside a submodule the tree leaves
+  unpopulated count as changed when the build's copy is not at the tree's
+  gitlink or has local changes. Changed generator inputs in the tree make every
+  gate that reuses the build STALE.
+
+A configuration that reuses the output of a STALE one is STALE too. Refresh the
+build and run again; `--accept-stale` counts STALE configurations as passing,
+but the summary then starts with `STALE ACCEPTED` and names them.
+
+Compiles run one at a time. `--compile-wrapper` is a command prefix around each
+compiler or linker call, for example a script that takes a short
+`compiler:local` hold, runs `"$@"` and releases it. A compiling gate that makes
+no call through it fails. The gates that do not compile run in parallel
+(`--jobs`). `--only` and `--skip` select configurations; `--only` also runs
+whatever a selected configuration reuses.
+
+The output directory receives `results.json`, with the list's sha256 and length,
+the source tree hash, every submodule's state, and the command, exit code,
+duration, log path, reused build targets and stale reasons of every
+configuration, plus one log per gate. The tree hash is the one
+`git add -A && git write-tree` would give, computed without writing to the
+repository. Like write-tree, it records a submodule only by its commit, so the
+runner also hashes each populated submodule's files as a git tree (`coreHash` for
+`purple_core`) and compares that with the tree the gitlink names; a submodule
+whose files differ from its gitlink fails the run. Both hashes are taken again at
+the end, and a change fails the run too.
+
+The last line is `N/M PASS` followed by the count of every other status, the
+number of programs recorded as undriven and the list's hash, where `M` is always
+the length of the canonical list. A run that is not clean says so first: `PARTIAL`
+for a run of fewer configurations, `STALE ACCEPTED`, and `NOT CLEAN` when a
+submodule is not at its gitlink, the tree changed during the run, or the run
+stopped. The exit status is 0 only for a complete run in which everything passed
+with nothing stale, so a clean run is exit 0 with a last line starting
+`M/M PASS`; 2 when everything passed only because of `--accept-stale`, 3 for a
+partial run in which every selected configuration passed, and 1 otherwise.
+
 ## Feature overview
 
 This Purple fork adds a [pinned music cache action](pinned_music.md)
