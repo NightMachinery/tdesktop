@@ -13,6 +13,29 @@ an upstream file updates its entry here in the same commit, together with the
 feature doc's "Upstream hooks" section. `purple/upstream_report.sh` produces
 the numbers.
 
+## Marked chooser WebP paste
+
+- `core/mime_type.cpp` and the existing chat/confirmation admission checks call
+  Purple for a valid Qt-produced marker, without reading a file at Check time.
+
+- `history/history_widget.cpp`, `history/view/history_view_chat_section.cpp`,
+  `history/view/history_view_scheduled_section.cpp`, `boxes/send_files_box.cpp`:
+  one Purple include and an early marked-paste preparation call before ordinary
+  URL/image handling.
+- `ui/chat/attach/attach_prepare.h`: one false-default per-file original-byte
+  extension flag. `ui/chat/attach/attach_prepare.cpp` calls Purple when grouping
+  files and recognizing immutable stickers, so each marked sticker forms its own
+  send group and remains outside photo albums. Its existing non-groupable type
+  supplies slow-mode and editor admission. Caption visibility follows sticker
+  policy, and the confirmation uses a sticker preview with either checkbox.
+- `apiwrap.cpp`: one Purple include and per-file upload-type hooks in normal
+  sending and media replacement. `data/data_chat_participant_status.cpp`
+  selects the marked file's sticker permission through Purple before ordinary
+  restriction handling.
+- `storage/storage_media_prepare.cpp`: one Purple include and a guard preserving
+  marked original bytes at the editor-modification boundary. Decisions and byte
+  validation live in `purple_webp_paste*`; see [webp_paste.md](webp_paste.md).
+
 ## Custom emoji artwork export
 
 - `main/main_account.cpp`: one Purple header and calls before ordinary and forced

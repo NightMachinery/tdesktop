@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/mime_type.h"
+#include "purple/purple_webp_paste.h"
 
 #include "core/utils.h"
 #include "ui/image/image_prepare.h"
@@ -223,7 +224,7 @@ QList<QUrl> ReadMimeUrls(not_null<const QMimeData*> data) {
 }
 
 bool CanSendFiles(not_null<const QMimeData*> data) {
-	if (data->hasImage()) {
+	if (data->hasImage() || Purple::CanPasteMarkedWebp(data)) {
 		return true;
 	} else if (const auto urls = ReadMimeUrls(data); !urls.empty()) {
 		if (ranges::all_of(urls, &QUrl::isLocalFile)) {

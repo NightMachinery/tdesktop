@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "storage/storage_media_prepare.h"
+#include "purple/purple_webp_paste_route.h"
 
 #include "editor/photo_editor_common.h"
 #include "platform/platform_file_utilities.h"
@@ -372,6 +373,7 @@ void UpdateImageDetails(
 bool ApplyModifications(PreparedList &list) {
 	auto applied = false;
 	const auto apply = [&](PreparedFile &file, QSize strictSize = {}) {
+		if (Purple::KeepClipboardWebpOriginal(file)) return;
 		const auto image = std::get_if<Image>(&file.information->media);
 		const auto guard = gsl::finally([&] {
 			if (!image || strictSize.isEmpty()) {

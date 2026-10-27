@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_chat_participant_status.h"
+#include "purple/purple_webp_paste_route.h"
 
 #include "base/unixtime.h"
 #include "boxes/peers/edit_peer_permissions_box.h"
@@ -485,6 +486,10 @@ SendError FileRestrictionError(
 		not_null<PeerData*> peer,
 		const Ui::PreparedFile &file,
 		std::optional<bool> compress) {
+	if (const auto restriction = Purple::ClipboardWebpRestriction(file)) {
+		return RestrictionError(peer, *restriction);
+	}
+	compress = Purple::ClipboardWebpCompression(file, compress);
 	using Type = Ui::PreparedFile::Type;
 	using Restriction = ChatRestriction;
 	const auto stickers = RestrictionError(peer, Restriction::SendStickers);

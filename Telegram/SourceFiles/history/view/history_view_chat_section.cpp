@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_compose_source.h"
+#include "purple/purple_webp_paste_route.h"
 #include "history/view/history_view_chat_section.h"
 
 #include "history/view/controls/history_view_compose_controls.h"
@@ -1202,6 +1203,11 @@ bool ChatWidget::confirmSendingFiles(
 		not_null<const QMimeData*> data,
 		std::optional<bool> overrideSendImagesAsPhotos,
 		const QString &insertTextOnCancel) {
+	if (auto list = Purple::PrepareMarkedWebpPaste(data, st::sendMediaPreviewSize)) {
+		confirmSendingFiles(std::move(*list), insertTextOnCancel);
+		return true;
+	}
+
 	const auto hasImage = data->hasImage();
 	const auto premium = controller()->session().user()->isPremium();
 

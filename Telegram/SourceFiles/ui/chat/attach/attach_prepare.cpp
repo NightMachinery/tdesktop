@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/chat/attach/attach_prepare.h"
+#include "purple/purple_webp_paste_route.h"
 
 #include "ui/rp_widget.h"
 #include "ui/widgets/popup_menu.h"
@@ -131,12 +132,13 @@ struct HighQualityBadgeCache {
 	auto from = 0;
 	auto groupType = AlbumType::None;
 	for (auto i = 0; i != int(files.size()); ++i) {
-		const auto fileGroupType = GroupTypeForFile(
+		const auto fileGroupType = Purple::ClipboardWebpAlbumType(files[i], GroupTypeForFile(
 			files[i].type,
 			groupFiles,
-			sendImagesAsPhotos);
+			sendImagesAsPhotos));
 		const auto count = (i - from);
-		if ((i > from && groupType != fileGroupType)
+		if ((i > from && (groupType != fileGroupType
+				|| Purple::ClipboardWebpSeparateGroup(files[i - 1], files[i])))
 			|| ((groupType != AlbumType::None) && (count == kMaxAlbumCount))) {
 			result.push_back(GroupRange{
 				.from = from,
@@ -175,6 +177,7 @@ bool PreparedFile::canBeInAlbumType(AlbumType album) const {
 }
 
 bool PreparedFile::isSticker() const {
+	if (Purple::KeepClipboardWebpOriginal(*this)) return true;
 	Expects(information != nullptr);
 
 	return (type == PreparedFile::Type::Photo)
@@ -321,6 +324,7 @@ bool PreparedList::canAddCaption(bool compress) const {
 		return false;
 	}
 	const auto &last = files.back();
+	if (Purple::KeepClipboardWebpOriginal(last)) return false;
 	const auto isSticker = last.path.endsWith(u".tgs"_q, Qt::CaseInsensitive)
 		|| (!compress
 			&& last.information

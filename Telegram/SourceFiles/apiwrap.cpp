@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_compose_source.h"
+#include "purple/purple_webp_paste_route.h"
 #include "apiwrap.h"
 
 #include "api/api_authorizations.h"
@@ -4192,7 +4193,7 @@ void ApiWrap::editMedia(
 				.idOverride = 0,
 			})
 			: nullptr),
-		.type = type,
+		.type = Purple::ClipboardWebpSendType(file, type),
 		.to = to,
 		.caption = caption,
 		.spoiler = file.spoiler,
@@ -4269,7 +4270,7 @@ void ApiWrap::sendFiles(
 					.idOverride = 0,
 				})
 				: nullptr),
-			.type = uploadWithType,
+			.type = Purple::ClipboardWebpSendType(file, uploadWithType),
 			.to = to,
 			.caption = std::move(file.caption),
 			.spoiler = file.spoiler,

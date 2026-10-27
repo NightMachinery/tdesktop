@@ -13,6 +13,7 @@ This is the complete source code and the build instructions for the official [Te
 The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
 
 This fork's feature overview and contributor instructions are in the [Purple guide](docs/purple/agents.md).
+Chooser-marked transparent WebPs keep their original bytes when pasted; see [the marker contract](docs/purple/webp_paste.md).
 
 ## Supported systems
 

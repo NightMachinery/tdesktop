@@ -98,6 +98,7 @@ struct PreparedFile {
 	Type type = Type::File;
 	bool spoiler = false;
 	bool sendLargePhotos = false;
+	bool preserveOriginalBytes = false;
 };
 
 [[nodiscard]] bool CanBeInAlbumType(PreparedFile::Type type, AlbumType album);

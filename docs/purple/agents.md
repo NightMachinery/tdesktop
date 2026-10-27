@@ -169,3 +169,5 @@ The encrypted account archive adapter is described in [archive_storage.md](archi
 Sync-chat setup and its native qualification boundary are described in [sync_chat_setup.md](sync_chat_setup.md).
 
 Local emoji artwork export is described in [emoji_export.md](emoji_export.md).
+
+Marked chooser WebP paste is documented in [webp_paste.md](webp_paste.md).

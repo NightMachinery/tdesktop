@@ -117,6 +117,11 @@ PRIVATE
     purple/purple_emoji_export_worker.h
     purple/purple_emoji_export_store.cpp
     purple/purple_emoji_export_store.h
+    purple/purple_webp_paste.cpp
+    purple/purple_webp_paste.h
+    purple/purple_webp_paste_mac.h
+    purple/purple_webp_paste_route.cpp
+    purple/purple_webp_paste_route.h
     purple/purple_focus.cpp
     purple/purple_focus.h
     purple/purple_folder_strip.cpp
@@ -286,6 +291,7 @@ PRIVATE
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_webp_paste_mac.mm)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_ui_witness_mac.mm purple/purple_archive_backup_mac.mm)
 endif()
 

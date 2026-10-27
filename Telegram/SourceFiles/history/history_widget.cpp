@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_compose_source.h"
+#include "purple/purple_webp_paste_route.h"
 #include "history/history_widget.h"
 #include "purple/hooks/mute.h"
 
@@ -7743,7 +7744,7 @@ bool HistoryWidget::confirmSendingFiles(
 bool HistoryWidget::canSendFiles(not_null<const QMimeData*> data) const {
 	if (!canWriteMessage()) {
 		return false;
-	} else if (data->hasImage()) {
+	} else if (data->hasImage() || Purple::CanPasteMarkedWebp(data)) {
 		return true;
 	} else if (const auto urls = Core::ReadMimeUrls(data); !urls.empty()) {
 		if (ranges::all_of(urls, &QUrl::isLocalFile)) {
@@ -7763,6 +7764,11 @@ bool HistoryWidget::confirmSendingFiles(
 		} else {
 			return false;
 		}
+	}
+
+	if (auto list = Purple::PrepareMarkedWebpPaste(data, st::sendMediaPreviewSize)) {
+		confirmSendingFiles(std::move(*list), insertTextOnCancel);
+		return true;
 	}
 
 	const auto hasImage = data->hasImage();

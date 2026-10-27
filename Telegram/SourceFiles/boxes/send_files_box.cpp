@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/send_files_box.h"
+#include "purple/purple_webp_paste_route.h"
 
 #include "lang/lang_keys.h"
 #include "storage/localimageloader.h"
@@ -87,7 +88,8 @@ using Ui::SendFilesWay;
 }
 
 [[nodiscard]] bool CanAddFiles(not_null<const QMimeData*> data) {
-	return data->hasImage() || CanAddUrls(Core::ReadMimeUrls(data));
+	return data->hasImage() || Purple::CanPasteMarkedWebp(data)
+		|| CanAddUrls(Core::ReadMimeUrls(data));
 }
 
 void FileDialogCallback(
@@ -354,6 +356,7 @@ void EditPriceBox(
 [[nodiscard]] bool SkipCaption(
 		const Ui::PreparedFile &file,
 		const Ui::SendFilesWay &way) {
+	if (Purple::KeepClipboardWebpOriginal(file)) return true;
 	return way.sendImagesAsPhotos()
 		? (file.type == Ui::PreparedFile::Type::Photo
 			|| file.type == Ui::PreparedFile::Type::Video)
@@ -432,7 +435,9 @@ SendFilesBox::Block::Block(
 			way);
 		_preview.reset(preview);
 	} else {
-		const auto media = way.sendImagesAsPhotos()
+		const auto media = Purple::ClipboardWebpPreview(
+			first,
+			way.sendImagesAsPhotos())
 			? Ui::SingleMediaPreview::Create(
 				parent,
 				st,
@@ -2127,6 +2132,9 @@ void SendFilesBox::captionResized() {
 bool SendFilesBox::addFiles(
 		not_null<const QMimeData*> data,
 		std::optional<bool> overrideSendImagesAsPhotos) {
+	if (auto list = Purple::PrepareMarkedWebpPaste(data, st::sendMediaPreviewSize)) {
+		return addFiles(std::move(*list));
+	}
 	const auto premium = _show->session().premium();
 	auto list = [&] {
 		const auto urls = Core::ReadMimeUrls(data);
@@ -2495,7 +2503,9 @@ void SendFilesBox::send(
 				auto &captioned = (group.type == Ui::AlbumType::PhotoVideo)
 					? files.front()
 					: files.back();
-				if (!captioned.isSticker() || way.sendImagesAsPhotos()) {
+				if (Purple::ClipboardWebpCaption(
+						captioned,
+						!captioned.isSticker() || way.sendImagesAsPhotos())) {
 					captioned.caption = std::move(caption);
 				}
 			}
