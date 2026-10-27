@@ -184,8 +184,39 @@ SyncAutoPlan DesktopSyncAutoStore::Transition(
 		&& _record.preserved.value(u"desktop_saved_identity"_q).toString().toLatin1() == SyncPathIdentity(_files.settings)) {
 		facts.savedFingerprint = facts.local.fingerprint;
 	}
+	if (inventory && inventory->inventory.read) {
+		for (const auto &record : inventory->inventory.read->records) {
+			(void)_local.SupplyRetainedConfigBase(record.bytes);
+		}
+	}
+	if (SyncStoreWorkerThread() && !_record.active && _record.expectedState.isEmpty() && !_local.state()->config.pendingSeq
+		&& (_local.state()->configData.base.isEmpty() || ReadSyncRetainedConfigBase(*_local.state())
+			|| !_local._retainedBootstrap.isEmpty())) {
+		if (_local.CheckpointRetainedConfigBases() != SyncStoreStatus::Ready) { return Refused(_record); }
+		facts.state = *_local.state();
+	}
 	auto plan = PlanSyncAuto({ _record, facts, event, _record.event + 1,
-		now, completedTicket, outcome, std::move(inventory) });
+		now, completedTicket, outcome, inventory });
+	if (plan.nextState) {
+		auto record = (plan.action == SyncAutoAction::Publish) ? plan.bytes
+			: plan.record.retiring ? QByteArray() : plan.record.record;
+		if (plan.action == SyncAutoAction::AutoApply) {
+			record.clear();
+			if (inventory && inventory->inventory.read) {
+				for (const auto &candidate : inventory->inventory.read->records) {
+					const auto payload = InspectConfigPayload(ParseSyncEnvelope(candidate.bytes));
+					if (payload.status == ConfigPayloadStatus::Valid
+						&& payload.version.key == plan.nextState->configData.base
+						&& payload.version.lineage == plan.nextState->configData.baseLineage) {
+						record = candidate.bytes; break;
+					}
+				}
+			}
+		}
+		const auto retained = _local.PrepareRetainedConfig(*plan.nextState, record);
+		if (retained != SyncStoreStatus::Ready) { return Refused(_record); }
+		plan.record.expectedState = StateBytes(*plan.nextState);
+	}
 	if (_saveSettled && facts.local.status == SyncSettingsFileStatus::Present
 		&& !facts.savedFingerprint.isEmpty() && facts.savedFingerprint == facts.local.fingerprint) {
 		const auto identity = SyncPathIdentity(_files.settings);
@@ -236,8 +267,9 @@ bool DesktopSyncAutoStore::ExecuteLocal(
 				observation, payload.version);
 			auto id = int32_t(0);
 			for (const auto &entry : plan.nextState->ownMessages) {
-				const auto recorded = RecordConfirmedOwnConfigMessage(confirmed.state, entry.messageId, pending.staged);
-				if (recorded && StateBytes(recorded.state) == expected) { id = entry.messageId; break; }
+				auto recorded = RecordConfirmedOwnConfigMessage(confirmed.state, entry.messageId, pending.staged);
+				if (recorded && _local.PrepareRetainedConfig(recorded.state, pending.staged) == SyncStoreStatus::Ready
+					&& StateBytes(recorded.state) == expected) { id = entry.messageId; break; }
 			}
 			if (id <= 0 || !_local.ConfirmConfigReadBack(pending.staged, _local.state()->createdDevice, id)) { return false; }
 		} else if (plan.record.retiring) {

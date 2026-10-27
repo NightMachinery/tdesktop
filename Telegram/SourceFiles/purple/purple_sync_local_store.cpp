@@ -6,33 +6,107 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_local_store.h"
-#include "purple/purple_sync_chat_scope.h"
 
+#include "purple/purple_sync_chat_scope.h"
 #include "purple/purple_sync_config_flow.h"
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QLockFile>
 #include <QtCore/QSaveFile>
 #include <QtCore/QStringList>
+#include <QtCore/QThread>
 
+#include <set>
 #include <utility>
+
 #ifdef Q_OS_WIN
 #include <QtCore/qt_windows.h>
 #else
 #include <sys/stat.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
-#include <cerrno>
 #endif
 
 namespace Purple {
 namespace {
 
 constexpr auto kStateBytes = 4 * 1024 * 1024;
-constexpr auto kConfigBytes = 256 * 1024;
+constexpr auto kConfigBytes = kSyncSettingsRecordStorageLimit;
+
+constexpr auto kRetainedField = u"retained_config_bases";
+
+struct RetainedRecords {
+	SyncStoreStatus status = SyncStoreStatus::Ready;
+	QJsonObject object;
+	QJsonArray entries;
+	qsizetype total = 0;
+};
+
+[[nodiscard]] bool MatchesBase(const SyncLocalState &state, const QByteArray &record) {
+	const auto payload = InspectConfigPayload(ParseSyncEnvelope(record));
+	return payload.status == ConfigPayloadStatus::Valid
+		&& payload.version.key == state.configData.base
+		&& payload.version.lineage == state.configData.baseLineage;
+}
+
+[[nodiscard]] bool ValidRetainedRecord(const SyncLocalState &state, const QByteArray &record) {
+	const auto parsed = ParseSyncEnvelope(record);
+	const auto encoded = parsed ? SerializeSyncEnvelope(parsed.envelope) : SyncEnvelopeWriteResult();
+	return encoded && encoded.canonical == record
+		&& parsed.envelope.document.value(u"space"_q).toString() == state.space
+		&& InspectConfigPayload(parsed).status == ConfigPayloadStatus::Valid;
+}
+
+[[nodiscard]] RetainedRecords RetainedOf(const SyncLocalState &state) {
+	auto result = RetainedRecords();
+	const auto value = state.preserved.value(QString::fromUtf16(kRetainedField));
+	if (value.isUndefined()) { return result; }
+	if (!value.isObject()) { result.status = SyncStoreStatus::InvalidRetention; return result; }
+	result.object = value.toObject();
+	const auto version = result.object.value(u"version"_q);
+	if (version.isDouble() && version.toDouble() > 1) {
+		result.status = SyncStoreStatus::NewerRetention; return result;
+	}
+	if (!version.isDouble() || version.toDouble() != 1
+		|| !result.object.value(u"records"_q).isArray()) {
+		result.status = SyncStoreStatus::InvalidRetention; return result;
+	}
+	result.entries = result.object.value(u"records"_q).toArray();
+	if (result.entries.size() > kSyncRetainedBaseCountLimit) {
+		result.status = SyncStoreStatus::RetentionFull; return result;
+	}
+	auto hashes = std::set<QString>();
+	for (const auto &entry : result.entries) {
+		const auto object = entry.toObject();
+		const auto text = object.value(u"record"_q);
+		const auto hash = object.value(u"sha256"_q);
+		if (!entry.isObject() || !text.isString() || !hash.isString()) {
+			result.status = SyncStoreStatus::InvalidRetention; return result;
+		}
+		const auto bytes = text.toString().toUtf8();
+		if (bytes.size() > kSyncSettingsRecordStorageLimit) {
+			result.status = SyncStoreStatus::BaseRecordTooLarge; return result;
+		}
+		result.total += bytes.size();
+		if (result.total > kSyncRetainedBaseTotalLimit) {
+			result.status = SyncStoreStatus::RetentionFull; return result;
+		}
+		if (hash.toString() != QString::fromLatin1(QCryptographicHash::hash(bytes,
+			QCryptographicHash::Sha256).toHex()) || !hashes.insert(hash.toString()).second
+			|| !ValidRetainedRecord(state, bytes)) {
+			result.status = SyncStoreStatus::InvalidRetention; return result;
+		}
+	}
+	return result;
+}
 
 [[nodiscard]] bool PrivatePermissions(const QString &path) {
 	const auto info = QFileInfo(path);
@@ -163,6 +237,9 @@ struct ConfigReservation {
 			if (!ReserveConfigRecord(*state, bytes).result) {
 				return SyncStoreStatus::OrphanStage;
 			}
+			if (MatchesBase(*state, bytes) && !ReadSyncRetainedConfigBase(*state)) {
+				return SyncStoreStatus::MissingLocalVersion;
+			}
 			obsolete.push_back(path);
 			continue;
 		}
@@ -187,6 +264,11 @@ struct ConfigReservation {
 						!= state->configData.baseLineage))) {
 			return SyncStoreStatus::OrphanStage;
 		}
+		if (inspected.version.key == state->configData.base
+			&& inspected.version.lineage == state->configData.baseLineage
+			&& !ReadSyncRetainedConfigBase(*state)) {
+			return SyncStoreStatus::MissingLocalVersion;
+		}
 		obsolete.push_back(path);
 	}
 	for (const auto &path : obsolete) {
@@ -197,6 +279,87 @@ struct ConfigReservation {
 	return SyncStoreStatus::Ready;
 }
 
+}
+
+SyncStoreStatus ValidateSyncRetainedConfig(const SyncLocalState &state) {
+	return RetainedOf(state).status;
+}
+
+SyncStoreResult ReadSyncRetainedConfigBase(const SyncLocalState &state) {
+	const auto retained = RetainedOf(state);
+	if (retained.status != SyncStoreStatus::Ready) { return { retained.status }; }
+	for (const auto &entry : retained.entries) {
+		const auto record = entry.toObject().value(u"record"_q).toString().toUtf8();
+		if (MatchesBase(state, record)) { return { SyncStoreStatus::Ready,
+			SyncLocalError::None, SyncEnvelopeError::None, ConfigPayloadError::None, record }; }
+	}
+	return { SyncStoreStatus::MissingLocalVersion };
+}
+
+SyncStoreStatus RetainSyncConfigRecord(SyncLocalState &state, const QByteArray &record) {
+	auto retained = RetainedOf(state);
+	if (retained.status != SyncStoreStatus::Ready) { return retained.status; }
+	if (record.size() > kSyncSettingsRecordStorageLimit) { return SyncStoreStatus::BaseRecordTooLarge; }
+	if (!ValidRetainedRecord(state, record)) { return SyncStoreStatus::InvalidRecord; }
+	const auto hash = QString::fromLatin1(QCryptographicHash::hash(record, QCryptographicHash::Sha256).toHex());
+	for (const auto &entry : retained.entries) {
+		if (entry.toObject().value(u"sha256"_q).toString() == hash) { return SyncStoreStatus::Ready; }
+	}
+	if (retained.entries.size() == kSyncRetainedBaseCountLimit
+		|| retained.total + record.size() > kSyncRetainedBaseTotalLimit) {
+		return SyncStoreStatus::RetentionFull;
+	}
+	retained.entries.append(QJsonObject{
+		{ u"sha256"_q, hash }, { u"record"_q, QString::fromUtf8(record) } });
+	retained.object.insert(u"version"_q, 1);
+	retained.object.insert(u"records"_q, retained.entries);
+	auto next = state;
+	next.preserved.insert(QString::fromUtf16(kRetainedField), retained.object);
+	if (!SerializeSyncLocalState(next)) { return SyncStoreStatus::RetentionFull; }
+	state = std::move(next);
+	return SyncStoreStatus::Ready;
+}
+
+SyncStoreStatus SyncLocalStore::CheckConfigRetention(
+		const SyncLocalConfigState &config, const QByteArray &record) {
+	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+		return SyncStoreStatus::InvalidTransition;
+	}
+	auto next = *_state;
+	next.configData = config;
+	return PrepareRetainedConfig(next, record);
+}
+
+SyncStoreStatus SyncLocalStore::SupplyRetainedConfigBase(const QByteArray &record) {
+	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+		return SyncStoreStatus::InvalidTransition;
+	}
+	if (record.size() > kSyncSettingsRecordStorageLimit) { return SyncStoreStatus::BaseRecordTooLarge; }
+	if (!ValidRetainedRecord(*_state, record) || !MatchesBase(*_state, record)) {
+		return SyncStoreStatus::MissingLocalVersion;
+	}
+	_retainedBootstrap = record;
+	return SyncStoreStatus::Ready;
+}
+
+SyncStoreStatus SyncLocalStore::PrepareRetainedConfig(
+		SyncLocalState &next, const QByteArray &record) {
+	if (!_state) { return SyncStoreStatus::InvalidState; }
+	for (const auto &bytes : { _retainedBootstrap, record }) {
+		if (!bytes.isEmpty()) {
+			const auto status = RetainSyncConfigRecord(next, bytes);
+			if (status != SyncStoreStatus::Ready) { return status; }
+		}
+	}
+	const auto status = ValidateSyncRetainedConfig(next);
+	if (status != SyncStoreStatus::Ready) { return status; }
+	auto before = next;
+	before.configData = _state->configData;
+	if ((!before.configData.base.isEmpty() && !ReadSyncRetainedConfigBase(before))
+		|| (!next.configData.base.isEmpty() && !ReadSyncRetainedConfigBase(next))) {
+		return SyncStoreStatus::MissingLocalVersion;
+	}
+	return SyncStoreStatus::Ready;
 }
 
 SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path) {
@@ -350,6 +513,197 @@ SyncStoreStatus WriteSyncPrivateFile(
 		: SyncStoreStatus::IoError;
 }
 
+bool SyncStoreWorkerThread() {
+	const auto app = QCoreApplication::instance();
+	return !app || QThread::currentThread() != app->thread();
+}
+
+SyncPrivateSnapshot CaptureSyncPrivateFile(const QString &path, qsizetype limit) {
+	auto result = SyncPrivateSnapshot();
+	const auto parent = QFileInfo(path).absolutePath();
+	result.parentIdentity = SyncPathIdentity(parent);
+	if (result.parentIdentity.isEmpty() || result.parentIdentity == "missing"
+		|| !ReadablePrivateDirectory(QFileInfo(parent))) { return result; }
+	result.identity = SyncPathIdentity(path);
+	if (result.identity.isEmpty()) { return result; }
+	if (result.identity == "missing") { result.status = SyncStoreStatus::Ready; return result; }
+	result.status = ReadSyncPrivateFile(path, limit, result.bytes);
+	if (result.status == SyncStoreStatus::Ready
+		&& (SyncPathIdentity(path) != result.identity || SyncPathIdentity(parent) != result.parentIdentity)) {
+		result.status = SyncStoreStatus::Changed;
+	}
+	return result;
+}
+
+namespace {
+
+bool SameSnapshot(const QString &path, const SyncPrivateSnapshot &expected) {
+	if (expected.status != SyncStoreStatus::Ready) { return false; }
+	const auto fresh = CaptureSyncPrivateFile(path, std::max(qsizetype(1), expected.bytes.size()));
+	return fresh.status == SyncStoreStatus::Ready && fresh.identity == expected.identity
+		&& fresh.parentIdentity == expected.parentIdentity && fresh.bytes == expected.bytes;
+}
+
+bool FaultAllows(const SyncDurableFault &fault, SyncDurablePoint point) {
+	return !fault || fault(point);
+}
+
+SyncStoreStatus FileBarrier(const QString &path, const SyncPrivateSnapshot &expected) {
+	if (!SameSnapshot(path, expected) || expected.absent()) { return SyncStoreStatus::Changed; }
+#ifdef Q_OS_WIN
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), GENERIC_WRITE,
+		FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return SyncStoreStatus::DurabilityFailed; }
+	auto info = BY_HANDLE_FILE_INFORMATION();
+	const auto ok = GetFileInformationByHandle(handle, &info)
+		&& !(info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))
+		&& info.nNumberOfLinks == 1
+		&& QByteArray::number(info.dwVolumeSerialNumber) + ':' + QByteArray::number(info.nFileIndexHigh)
+			+ ':' + QByteArray::number(info.nFileIndexLow) == expected.identity
+		&& FlushFileBuffers(handle);
+	const auto closed = CloseHandle(handle) != 0;
+#else
+	const auto fd = ::open(QFile::encodeName(path).constData(), O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0) { return SyncStoreStatus::DurabilityFailed; }
+	struct stat info = {};
+	auto ok = ::fstat(fd, &info) == 0 && S_ISREG(info.st_mode) && info.st_nlink == 1
+		&& info.st_uid == ::geteuid() && !(info.st_mode & 0077)
+		&& QByteArray::number(qulonglong(info.st_dev)) + ':' + QByteArray::number(qulonglong(info.st_ino)) == expected.identity
+		&& ::fsync(fd) == 0;
+#ifdef Q_OS_MAC
+	ok = ok && ::fcntl(fd, F_FULLFSYNC) == 0;
+#endif
+	const auto closed = ::close(fd) == 0;
+#endif
+	return ok && closed && SameSnapshot(path, expected)
+		? SyncStoreStatus::Ready : SyncStoreStatus::DurabilityFailed;
+}
+
+}
+
+SyncStoreStatus SyncPrivateDirectoryBarrier(const QString &path) {
+	if (!SyncStoreWorkerThread()) { return SyncStoreStatus::WrongThread; }
+	const auto identity = SyncPathIdentity(path);
+	if (identity.isEmpty() || identity == "missing" || !ReadablePrivateDirectory(QFileInfo(path))) {
+		return SyncStoreStatus::Changed;
+	}
+#ifdef Q_OS_WIN
+	auto mount = QString(32768, QChar());
+	if (!GetVolumePathNameW(reinterpret_cast<LPCWSTR>(path.utf16()), reinterpret_cast<LPWSTR>(mount.data()), DWORD(mount.size()))) {
+		return SyncStoreStatus::DurabilityFailed;
+	}
+	auto volume = QString(32768, QChar());
+	if (!GetVolumeNameForVolumeMountPointW(reinterpret_cast<LPCWSTR>(mount.utf16()), reinterpret_cast<LPWSTR>(volume.data()), DWORD(volume.size()))) {
+		return SyncStoreStatus::DurabilityFailed;
+	}
+	volume.resize(volume.indexOf(QChar()));
+	if (!volume.endsWith(u'\\')) { return SyncStoreStatus::DurabilityFailed; }
+	volume.chop(1);
+	const auto handle = CreateFileW(reinterpret_cast<LPCWSTR>(volume.utf16()), GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+	if (handle == INVALID_HANDLE_VALUE) { return SyncStoreStatus::DurabilityFailed; }
+	const auto ok = FlushFileBuffers(handle) != 0;
+	const auto closed = CloseHandle(handle) != 0;
+#else
+	const auto fd = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0) { return SyncStoreStatus::DurabilityFailed; }
+	struct stat info = {};
+	const auto ok = ::fstat(fd, &info) == 0 && S_ISDIR(info.st_mode)
+		&& info.st_uid == ::geteuid() && !(info.st_mode & 0077)
+		&& QByteArray::number(qulonglong(info.st_dev)) + ':' + QByteArray::number(qulonglong(info.st_ino)) == identity
+		&& ::fsync(fd) == 0;
+	const auto closed = ::close(fd) == 0;
+#endif
+	return ok && closed && SyncPathIdentity(path) == identity
+		? SyncStoreStatus::Ready : SyncStoreStatus::DurabilityFailed;
+}
+
+SyncStoreStatus ConfirmSyncDurableFile(
+		const QString &path, const SyncPrivateSnapshot &expected, const SyncDurableFault &fault) {
+	if (!SyncStoreWorkerThread()) { return SyncStoreStatus::WrongThread; }
+	if (!FaultAllows(fault, SyncDurablePoint::FileBarrier)) { return SyncStoreStatus::DurabilityFailed; }
+	const auto file = FileBarrier(path, expected);
+	if (file != SyncStoreStatus::Ready) { return file; }
+	if (!FaultAllows(fault, SyncDurablePoint::DirectoryBarrier)) { return SyncStoreStatus::DurabilityFailed; }
+	const auto directory = SyncPrivateDirectoryBarrier(QFileInfo(path).absolutePath());
+	return directory == SyncStoreStatus::Ready ? FileBarrier(path, expected) : directory;
+}
+
+SyncStoreStatus WriteSyncDurableFile(
+		const QString &path, const QByteArray &bytes,
+		const SyncPrivateSnapshot &expected, const SyncDurableFault &fault) {
+	if (!SyncStoreWorkerThread()) { return SyncStoreStatus::WrongThread; }
+	if (!SameSnapshot(path, expected)) { return SyncStoreStatus::Changed; }
+	if (!FaultAllows(fault, SyncDurablePoint::BeforeWrite)) { return SyncStoreStatus::DurabilityFailed; }
+	auto file = QSaveFile(path); file.setDirectWriteFallback(false);
+	if (!file.open(QIODevice::WriteOnly)) { return SyncStoreStatus::IoError; }
+#ifdef Q_OS_UNIX
+	if (!file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) { return SyncStoreStatus::InsecurePermissions; }
+#endif
+	const auto half = bytes.size() / 2;
+	if (file.write(bytes.constData(), half) != half || !FaultAllows(fault, SyncDurablePoint::PartialWrite)
+		|| file.write(bytes.constData() + half, bytes.size() - half) != bytes.size() - half
+		|| !file.flush()) { return SyncStoreStatus::DurabilityFailed; }
+	if (!FaultAllows(fault, SyncDurablePoint::BeforeRename) || !SameSnapshot(path, expected)) {
+		return SyncStoreStatus::Changed;
+	}
+	if (!file.commit()) { return SyncStoreStatus::IoError; }
+	if (!FaultAllows(fault, SyncDurablePoint::AfterRename)) { return SyncStoreStatus::DurabilityFailed; }
+	const auto actual = CaptureSyncPrivateFile(path, std::max(qsizetype(1), bytes.size()));
+	if (actual.status != SyncStoreStatus::Ready || actual.bytes != bytes
+		|| actual.parentIdentity != expected.parentIdentity) { return SyncStoreStatus::Changed; }
+	return ConfirmSyncDurableFile(path, actual, fault);
+}
+
+SyncStoreStatus SyncLocalStore::CheckpointRetainedConfigBases(const SyncDurableFault &fault) {
+	if (!SyncStoreWorkerThread()) { return SyncStoreStatus::WrongThread; }
+	if (_carryOwner || _status != SyncStoreStatus::Ready || !_state || !_lock || !_lock->isLocked()) {
+		return SyncStoreStatus::InvalidTransition;
+	}
+	auto next = *_state;
+	if (!_retainedBootstrap.isEmpty()) {
+		const auto status = RetainSyncConfigRecord(next, _retainedBootstrap);
+		if (status != SyncStoreStatus::Ready) { return status; }
+	}
+	const auto retained = RetainedOf(next);
+	if (retained.status != SyncStoreStatus::Ready) { return retained.status; }
+	if (retained.entries.isEmpty() && next.configData.base.isEmpty()) { return SyncStoreStatus::Ready; }
+	const auto base = ReadSyncRetainedConfigBase(next);
+	if (!next.configData.base.isEmpty() && !base) { return SyncStoreStatus::MissingLocalVersion; }
+	const auto expected = CaptureSyncPrivateFile(StatePath(), kStateBytes);
+	if (expected.status != SyncStoreStatus::Ready || expected.absent()
+		|| SerializeSyncLocalState(ParseSyncLocalState(expected.bytes).state).canonical != SerializeSyncLocalState(*_state).canonical) {
+		return SyncStoreStatus::Changed;
+	}
+	const auto directory = _root + u"/retained-bases"_q;
+	const auto created = EnsureSyncPrivateDirectory(directory);
+	if (created != SyncStoreStatus::Ready) { return created; }
+	if (SyncPrivateDirectoryBarrier(_root) != SyncStoreStatus::Ready) { return SyncStoreStatus::DurabilityFailed; }
+	auto kept = QJsonArray();
+	for (const auto &entry : retained.entries) {
+		const auto object = entry.toObject();
+		const auto record = object.value(u"record"_q).toString().toUtf8();
+		const auto path = directory + u'/' + object.value(u"sha256"_q).toString() + u".json"_q;
+		const auto old = CaptureSyncPrivateFile(path, kConfigBytes);
+		if (old.status != SyncStoreStatus::Ready || (!old.absent() && old.bytes != record)) { return SyncStoreStatus::Changed; }
+		const auto status = old.absent() ? WriteSyncDurableFile(path, record, old, fault)
+			: ConfirmSyncDurableFile(path, old, fault);
+		if (status != SyncStoreStatus::Ready) { return status; }
+		if (record == base.staged || object.size() != 2) { kept.append(entry); }
+	}
+	auto object = retained.object; object.insert(u"records"_q, kept);
+	next.preserved.insert(QString::fromUtf16(kRetainedField), object);
+	const auto encoded = SerializeSyncLocalState(next);
+	if (!encoded) { return SyncStoreStatus::RetentionFull; }
+	const auto status = encoded.canonical == expected.bytes
+		? ConfirmSyncDurableFile(StatePath(), expected, fault)
+		: WriteSyncDurableFile(StatePath(), encoded.canonical, expected, fault);
+	if (status != SyncStoreStatus::Ready) { _status = status; return status; }
+	_state = std::move(next);
+	_retainedBootstrap.clear();
+	return SyncStoreStatus::Ready;
+}
+
 SyncLocalStore::SyncLocalStore(QString syncRoot)
 : _root(std::move(syncRoot)) {
 }
@@ -427,6 +781,15 @@ SyncRecoveryRead ReadSyncRecoveryStore(
 }
 
 SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToken) {
+	return OpenChecked(optedIn, bindingToken, false);
+}
+
+SyncStoreResult SyncLocalStore::OpenForCarry(const QByteArray &bindingToken) {
+	return OpenChecked(true, bindingToken, true);
+}
+
+SyncStoreResult SyncLocalStore::OpenChecked(
+		bool optedIn, const QByteArray &bindingToken, bool carryOwner) {
 	if (_opened) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
@@ -434,6 +797,7 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToke
 		return { SyncStoreStatus::Disabled };
 	}
 	_opened = true;
+	_carryOwner = carryOwner;
 	if (_root.isEmpty()
 		|| !QDir().mkpath(QFileInfo(_root).absolutePath())) {
 		return SetFailure({ SyncStoreStatus::IoError });
@@ -451,6 +815,10 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToke
 				: SyncStoreStatus::LockError,
 		});
 	}
+	const auto carryPath = _root + u"/carry.json"_q;
+	if (!carryOwner && SyncPathIdentity(carryPath) != "missing") {
+		return SetFailure({ SyncStoreStatus::CarryPending });
+	}
 	if (QFileInfo::exists(_root + u"/recovery.json"_q) || QFileInfo(_root + u"/recovery.json"_q).isSymLink()) {
 		return SetFailure({ SyncStoreStatus::InvalidTransition });
 	}
@@ -460,7 +828,8 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToke
 	}
 	const auto stateInfo = QFileInfo(StatePath());
 	if (!stateInfo.exists() && !stateInfo.isSymLink()) {
-		if (!bindingToken.isEmpty()) { return SetFailure({ SyncStoreStatus::AccountUnbound }); }
+		if (!bindingToken.isEmpty() && !carryOwner) { return SetFailure({ SyncStoreStatus::AccountUnbound }); }
+		if (carryOwner) { return SetFailure({ SyncStoreStatus::Uninitialized }); }
 		const auto stageStatus = CheckStages(
 			_root + u"/pending"_q, nullptr);
 		return SetFailure({ stageStatus == SyncStoreStatus::Ready
@@ -494,8 +863,11 @@ SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToke
 		const auto pendingStatus = EnsureSyncPrivateDirectory(_root + u"/pending"_q);
 		if (pendingStatus != SyncStoreStatus::Ready) { return SetFailure({ pendingStatus }); }
 	}
+	const auto retention = ValidateSyncRetainedConfig(parsed.state);
+	if (retention != SyncStoreStatus::Ready) { return SetFailure({ retention }); }
 	_state = parsed.state;
 	_status = SyncStoreStatus::Ready;
+	if (carryOwner) { return { SyncStoreStatus::Ready }; }
 	if (_state->config.pendingSeq != 0) {
 		const auto pending = ReadPendingConfigLocked();
 		if (!pending) {
@@ -519,6 +891,8 @@ SyncStoreResult SyncLocalStore::Initialize(const SyncLocalState &initial) {
 		|| initial.library.seq != 0) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
+	const auto retention = ValidateSyncRetainedConfig(initial);
+	if (retention != SyncStoreStatus::Ready) { return { retention }; }
 	const auto serialized = SerializeSyncLocalState(initial);
 	if (!serialized) {
 		return {
@@ -588,13 +962,14 @@ SyncStoreResult SyncLocalStore::StageConfig(
 		const QByteArray &canonicalRecord,
 		const SyncLocalConfigState &nextConfigData,
 		const QByteArray &accountBindingToken) {
-	if (_status != SyncStoreStatus::Ready || !_state) {
+	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (CheckSyncAccountBinding(*_state, accountBindingToken)
 		!= SyncAccountBindingVerdict::Bound) {
 		return { SyncStoreStatus::AccountUnbound };
 	}
+	if (canonicalRecord.size() > kConfigBytes) { return { SyncStoreStatus::BaseRecordTooLarge }; }
 	auto reserved = ReserveConfigRecord(*_state, canonicalRecord);
 	if (!reserved.result) {
 		return reserved.result;
@@ -604,6 +979,8 @@ SyncStoreResult SyncLocalStore::StageConfig(
 	}
 	auto next = std::move(reserved.state);
 	next.configData = nextConfigData;
+	const auto retention = PrepareRetainedConfig(next, canonicalRecord);
+	if (retention != SyncStoreStatus::Ready) { return { retention }; }
 	const auto serialized = SerializeSyncLocalState(next);
 	if (!serialized) {
 		return { SyncStoreStatus::InvalidState, serialized.error };
@@ -644,7 +1021,7 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 		const QString &currentDevice,
 		int32_t messageId,
 		PeerToken chat) {
-	if (_status != SyncStoreStatus::Ready || !_state) {
+	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (!DesktopSyncChatLedgerMatches(*_state, chat)) {
@@ -703,7 +1080,10 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 		return { recorded.error == SyncOwnMessageError::InvalidState
 			? SyncStoreStatus::InvalidState : SyncStoreStatus::InvalidRecord };
 	}
-	const auto serialized = SerializeSyncLocalState(recorded.state);
+	auto nextState = recorded.state;
+	const auto retention = PrepareRetainedConfig(nextState, serverRecord);
+	if (retention != SyncStoreStatus::Ready) { return { retention }; }
+	const auto serialized = SerializeSyncLocalState(nextState);
 	if (!serialized) {
 		return { SyncStoreStatus::InvalidState, serialized.error };
 	}
@@ -713,7 +1093,7 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 	if (stateStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stateStatus });
 	}
-	_state = recorded.state;
+	_state = std::move(nextState);
 	if (!QFile::remove(PendingPath(observation.seq))) {
 		return SetFailure({ SyncStoreStatus::CleanupFailed });
 	}
@@ -729,8 +1109,9 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 
 SyncStoreResult SyncLocalStore::CommitConfigData(
 		const SyncLocalConfigState &next,
-		const QByteArray &accountBindingToken) {
-	if (_status != SyncStoreStatus::Ready || !_state) {
+		const QByteArray &accountBindingToken,
+		const QByteArray &baseRecord) {
+	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (CheckSyncAccountBinding(*_state, accountBindingToken)
@@ -748,13 +1129,18 @@ SyncStoreResult SyncLocalStore::CommitConfigData(
 	case SyncConfigCommitStatus::InvalidState:
 		return { SyncStoreStatus::InvalidState, checked.error };
 	}
+	auto retainedState = checked.state;
+	const auto retention = PrepareRetainedConfig(retainedState, baseRecord);
+	if (retention != SyncStoreStatus::Ready) { return { retention }; }
+	const auto serialized = SerializeSyncLocalState(retainedState);
+	if (!serialized) { return { SyncStoreStatus::RetentionFull }; }
 	const auto stateStatus = WriteSyncPrivateFile(
 		StatePath(),
-		checked.canonical);
+		serialized.canonical);
 	if (stateStatus != SyncStoreStatus::Ready) {
 		return SetFailure({ stateStatus });
 	}
-	_state = checked.state;
+	_state = std::move(retainedState);
 	return { SyncStoreStatus::Ready };
 }
 
@@ -764,7 +1150,7 @@ SyncStoreResult SyncLocalStore::RemoveAbsentConfigMessage(
 		const QByteArray &accountBindingToken,
 		PeerToken chat) {
 	if (_status != SyncStoreStatus::Ready || !_state
-		|| !DesktopSyncChatLedgerMatches(*_state, chat)
+		|| _carryOwner || !DesktopSyncChatLedgerMatches(*_state, chat)
 		|| CheckSyncAccountBinding(*_state, accountBindingToken) != SyncAccountBindingVerdict::Bound
 		|| !CheckOwnConfigMessageDeletion(*_state, messageId, record)) {
 		return { SyncStoreStatus::InvalidTransition };

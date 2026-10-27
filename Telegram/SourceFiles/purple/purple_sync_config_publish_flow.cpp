@@ -250,12 +250,24 @@ void SyncConfigPublishFlow::prepare() {
 	if (!current() || !_store || !_store->state()) {
 		finish({ SyncConfigPublishStatus::AccountUnavailable }); return;
 	}
-	const auto state = _store->state();
+	auto state = _store->state();
 	if (!DesktopSyncChatLedgerMatches(*state, _input.chat)) {
 		finish({ SyncConfigPublishStatus::NeedsReview }); return;
 	}
 	if (CheckSyncAccountBinding(*state, _input.binding) != SyncAccountBindingVerdict::Bound) {
 		finish({ SyncConfigPublishStatus::AccountUnbound }); return;
+	}
+	if (_input.inventory.read) {
+		for (const auto &record : _input.inventory.read->records) {
+			(void)_store->SupplyRetainedConfigBase(record.bytes);
+		}
+	}
+	if (!state->config.pendingSeq) {
+		const auto retained = _store->CheckpointRetainedConfigBases();
+		if (retained != SyncStoreStatus::Ready) {
+			finish({ SyncConfigPublishStatus::StoreError, retained }); return;
+		}
+		state = _store->state();
 	}
 	_storeInput = ReadSettingsFileInput(_target->files.syncStore);
 	if (!authorize()) { finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }

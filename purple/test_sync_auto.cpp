@@ -13,6 +13,8 @@
 #include <QtCore/QDir>
 #include <cstdio>
 #include <limits>
+#include <thread>
+#include <QtCore/QJsonArray>
 
 namespace base { void LogWriteMain(const QString &) {} namespace assertion { void log(const char *, const char *, int) {} } }
 namespace {
@@ -286,6 +288,15 @@ void BackoffRunBudget() {
 void RetirementAndRefusal() {
 	for (auto presence = 0; presence != 3; ++presence) {
 		auto f = Fixture(); f.Seed(T0); f.Seed(T1); f.Open();
+		const auto before = ReadSettingsFileInput(f.files.syncStore);
+		const auto worker = SyncStoreWorkerThread();
+		CHECK(f.store->local().CheckpointRetainedConfigBases()
+			== (worker ? SyncStoreStatus::Ready : SyncStoreStatus::WrongThread));
+		CHECK(f.store->local().state()->preserved.value(u"retained_config_bases"_q).toObject().value(u"records"_q).toArray().size() == (worker ? 1 : 2));
+		if (!worker) {
+			CHECK(ReadSettingsFileInput(f.files.syncStore) == before);
+			CHECK(!QFileInfo::exists(f.files.syncDirectory + u"/retained-bases"_q));
+		}
 		CHECK(f.Event(SyncAutoEvent::Enable).action == SyncAutoAction::Check);
 		const auto retire = f.Inventory(); CHECK(retire.action == SyncAutoAction::Retire);
 		const auto unknown = SyncAutoServerRead{ retire.messageId, {}, true, false, SyncAutoMessagePresence::Unknown };
@@ -799,7 +810,17 @@ void CasAndOpaque() {
 
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
+	const auto run = [] {
 	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts();
-	std::printf("%d checks, %d failures\n", Checks, Failures);
+	};
+	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
+		auto worker = std::thread(run);
+		worker.join();
+	} else {
+		CHECK(!SyncStoreWorkerThread());
+		run();
+	}
+	std::printf("%s: %d checks, %d failures\n",
+		(argc > 1) ? "worker" : "application-main", Checks, Failures);
 	return Failures ? 1 : 0;
 }

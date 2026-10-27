@@ -788,3 +788,11 @@ account-specific access hashes, or file references. A song in Saved Messages
 uses a `self` peer token instead of the account's numeric user ID. Unavailable
 songs remain visible with an explanation instead of disappearing. Download
 state, playback state, and any **Keep downloaded** preference stay device-local.
+
+## Carry storage and retained settings bases
+
+[The local carry storage contract](sync_chat_move.md) specifies the separately
+versioned retained-base subobject, bounded journal, immutable images and checked
+worker barriers. Shared local-state versions stay 1/2. Confirmation and adoption
+retain exact records before retiring their last copy; a missing base holds rather
+than relabelling dirty settings. This storage slice adds no move transport or UI.

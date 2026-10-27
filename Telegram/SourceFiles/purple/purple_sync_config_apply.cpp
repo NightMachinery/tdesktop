@@ -224,6 +224,11 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 			!= SyncAccountBindingVerdict::Bound) {
 		return Stop(result, SyncConfigApplyStatus::AccountUnbound);
 	}
+	if (inventory.read) {
+		for (const auto &record : inventory.read->records) {
+			(void)store.SupplyRetainedConfigBase(record.bytes);
+		}
+	}
 	auto staged = QByteArray();
 	if (state->config.pendingSeq) {
 		const auto pending = store.ReadPendingConfig();
@@ -252,6 +257,23 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 				: StatusOf(plan.status)));
 	}
 
+	const auto anticipated = CompleteSyncConfigApply(plan, plan.choice.writeRemote
+		? MakeSyncSettingsFile(SyncSettingsFileStatus::Present, plan.source->text) : local);
+	auto baseRecord = QByteArray();
+	if (anticipated.adopted) {
+		const auto next = SyncLocalConfigOf(*anticipated.adopted);
+		if (inventory.read) {
+			for (const auto &record : inventory.read->records) {
+				const auto payload = InspectConfigPayload(ParseSyncEnvelope(record.bytes));
+				if (payload.status == ConfigPayloadStatus::Valid && payload.version.key == next.base
+					&& payload.version.lineage == next.baseLineage) { baseRecord = record.bytes; break; }
+			}
+		}
+		const auto retained = store.CheckConfigRetention(next, baseRecord);
+		if (retained != SyncStoreStatus::Ready) {
+			return Stop(result, SyncConfigApplyStatus::StoreError, retained);
+		}
+	}
 	auto current = local;
 	result.fingerprint = local.fingerprint;
 	if (plan.choice.writeRemote) {
@@ -304,7 +326,7 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	if (completion.adopted) {
 		const auto committed = store.CommitConfigData(
 			SyncLocalConfigOf(*completion.adopted),
-			token);
+			token, baseRecord);
 		if (!committed) {
 			return Stop(
 				result,

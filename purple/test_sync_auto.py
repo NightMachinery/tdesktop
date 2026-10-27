@@ -77,8 +77,11 @@ with (work / 'build.log').open('w') as log:
     link += ['-Wl,-dead_strip', *map(str, objects), '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-framework', 'AppKit', '-o', str(work / 'test_sync_auto')]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
 (work / 'inputs.json').write_text(json.dumps({'compile': commands, 'link': link, 'apply_body': 'unchanged production source except opaque session include', 'service_boundary': 'production Facts (method name only changed), exact Accept/Hold/Stop/Complete and inventory callback bodies with controlled session/transport/UI endpoints'}, indent=2) + '\n')
-with (work / 'run.log').open('w') as log:
-    result = subprocess.run([str(work / 'test_sync_auto')], stdout=log, stderr=subprocess.STDOUT)
-(work / 'run.exit').write_text(str(result.returncode) + '\n')
-print((work / 'run.log').read_text())
-raise SystemExit(result.returncode)
+exits = []
+for name, args in [('run', []), ('worker-run', ['--worker'])]:
+    with (work / (name + '.log')).open('w') as log:
+        result = subprocess.run([str(work / 'test_sync_auto'), *args], stdout=log, stderr=subprocess.STDOUT)
+    (work / (name + '.exit')).write_text(str(result.returncode) + '\n')
+    print((work / (name + '.log')).read_text())
+    exits.append(result.returncode)
+raise SystemExit(next((code for code in exits if code), 0))

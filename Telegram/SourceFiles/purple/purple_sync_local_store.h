@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -42,6 +43,15 @@ enum class SyncStoreStatus {
 	CloneDetected,
 	AccountUnbound,
 	CleanupFailed,
+	CarryPending,
+	InvalidRetention,
+	NewerRetention,
+	BaseRecordTooLarge,
+	RetentionFull,
+	MissingLocalVersion,
+	WrongThread,
+	Changed,
+	DurabilityFailed,
 };
 
 struct SyncStoreResult {
@@ -75,6 +85,15 @@ struct SyncStoreResult {
 	}
 };
 
+inline constexpr auto kSyncSettingsRecordStorageLimit = 256 * 1024;
+inline constexpr auto kSyncRetainedBaseTotalLimit = 2 * 1024 * 1024;
+inline constexpr auto kSyncRetainedBaseCountLimit = 16;
+
+[[nodiscard]] SyncStoreStatus ValidateSyncRetainedConfig(const SyncLocalState &state);
+[[nodiscard]] SyncStoreResult ReadSyncRetainedConfigBase(const SyncLocalState &state);
+[[nodiscard]] SyncStoreStatus RetainSyncConfigRecord(
+	SyncLocalState &state, const QByteArray &record);
+
 [[nodiscard]] SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path);
 [[nodiscard]] SyncStoreStatus ReadSyncPrivateFile(
 	const QString &path,
@@ -86,6 +105,27 @@ struct SyncStoreResult {
 
 [[nodiscard]] QByteArray SyncPathIdentity(const QString &path);
 
+enum class SyncDurablePoint { BeforeWrite, PartialWrite, BeforeRename, AfterRename, FileBarrier, DirectoryBarrier };
+using SyncDurableFault = std::function<bool(SyncDurablePoint)>;
+
+struct SyncPrivateSnapshot {
+	SyncStoreStatus status = SyncStoreStatus::IoError;
+	QByteArray identity;
+	QByteArray parentIdentity;
+	QByteArray bytes;
+	[[nodiscard]] bool absent() const { return status == SyncStoreStatus::Ready && identity == "missing"; }
+};
+
+[[nodiscard]] SyncPrivateSnapshot CaptureSyncPrivateFile(const QString &path, qsizetype limit);
+[[nodiscard]] SyncStoreStatus WriteSyncDurableFile(
+	const QString &path, const QByteArray &bytes,
+	const SyncPrivateSnapshot &expected, const SyncDurableFault &fault = {});
+[[nodiscard]] SyncStoreStatus ConfirmSyncDurableFile(
+	const QString &path, const SyncPrivateSnapshot &expected,
+	const SyncDurableFault &fault = {});
+[[nodiscard]] SyncStoreStatus SyncPrivateDirectoryBarrier(const QString &path);
+[[nodiscard]] bool SyncStoreWorkerThread();
+
 struct SyncRecoveryRead {
 	SyncStoreStatus status = SyncStoreStatus::IoError;
 	SyncRecoveryStore store;
@@ -94,6 +134,8 @@ struct SyncRecoveryRead {
 
 [[nodiscard]] SyncRecoveryRead ReadSyncRecoveryStore(
 	const AccountFiles &files, std::optional<AccountKey> directoryAccount);
+
+class SyncChatCarryStore;
 
 class SyncLocalStore final {
 public:
@@ -117,7 +159,12 @@ public:
 		PeerToken chat = {});
 	[[nodiscard]] SyncStoreResult CommitConfigData(
 		const SyncLocalConfigState &next,
-		const QByteArray &accountBindingToken);
+		const QByteArray &accountBindingToken,
+		const QByteArray &baseRecord = {});
+	[[nodiscard]] SyncStoreStatus CheckConfigRetention(
+		const SyncLocalConfigState &next, const QByteArray &record = {});
+	[[nodiscard]] SyncStoreStatus SupplyRetainedConfigBase(const QByteArray &record);
+	[[nodiscard]] SyncStoreStatus CheckpointRetainedConfigBases(const SyncDurableFault &fault = {});
 	[[nodiscard]] SyncStoreResult RemoveAbsentConfigMessage(
 		int32_t messageId,
 		const QByteArray &record,
@@ -128,6 +175,13 @@ public:
 	[[nodiscard]] const QString &directory() const;
 
 private:
+	friend class SyncChatCarryStore;
+	friend class DesktopSyncAutoStore;
+	[[nodiscard]] SyncStoreResult OpenForCarry(const QByteArray &bindingToken);
+	[[nodiscard]] SyncStoreResult OpenChecked(
+		bool optedIn, const QByteArray &bindingToken, bool carryOwner);
+	[[nodiscard]] SyncStoreStatus PrepareRetainedConfig(
+		SyncLocalState &next, const QByteArray &record = {});
 	[[nodiscard]] QString StatePath() const;
 	[[nodiscard]] QString PendingPath(uint64_t seq) const;
 	[[nodiscard]] SyncStoreResult ReadPendingConfigLocked();
@@ -138,6 +192,8 @@ private:
 	std::optional<SyncLocalState> _state;
 	SyncStoreStatus _status = SyncStoreStatus::Disabled;
 	bool _opened = false;
+	bool _carryOwner = false;
+	QByteArray _retainedBootstrap;
 };
 
 }

@@ -261,6 +261,8 @@ PRIVATE
     purple/purple_sync_auto_transport.h
     purple/purple_sync_auto_service.cpp
     purple/purple_sync_auto_service.h
+    purple/purple_sync_chat_carry_store.cpp
+    purple/purple_sync_chat_carry_store.h
     purple/purple_sync_local_store.cpp
     purple/purple_sync_local_store.h
     purple/purple_sync_review_box.cpp
