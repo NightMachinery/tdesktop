@@ -77,6 +77,37 @@ use purpose-specific destinations; legacy global writes and unrelated editors do
 not gain permission from them. Missing, invalid or stale routing disables the row.
 Queued actions retain the originating session, window, account and file snapshot.
 
+A row that cannot be written keeps drawing the value in effect, with its switch
+locked and disabled, and says why in the caption under it. It never carries a
+right label: `SettingsButton` puts that label at the right edge, under
+the switch, so `purple/test_settings_row_layout.py` fails on any Purple row that
+has both. `ClassifyAccountSettingsRow` names the reason:
+
+- **NeedsOwner**: no account owns the root `settings.toml` on this device yet.
+  This is the ordinary state of an install with two or more signed-in accounts
+  and no owner record, because routing will not guess which account the file
+  belongs to. Every per-account write path (these rows, list ticks, Lists in
+  Work Mode, Open and Send settings) then refuses with one plain message and
+  offers **Choose owner**, which opens the owner chooser.
+  Only startup states `NeedsChoice` and `SingleFileError` count.
+- **Held**: the owner records could not be read or saved, or startup refused or
+  has not finished its plan (for example a duplicate account identity). The
+  precise reason is on the Original settings file owner row and in each refusal,
+  and the chooser is not offered, because choosing cannot fix it.
+- **AccountClosed**: the account is signing out or not current in the window.
+- **FileProblem**: there is an owner, but this account's file is missing,
+  unreadable, malformed or not a regular file.
+
+The owner chooser lists the eligible accounts as radio rows (name, then phone
+number) and marks the opening window's account. It preselects that account only
+when it is eligible; otherwise nothing is selected and Choose owner stays
+disabled until a row is picked, because the choice cannot be undone. Close is
+the only other button. Its status line is written for
+the box. The owner is still recorded without asking only on a fresh install
+with exactly one signed-in account and no owner evidence (no `local.toml`, no
+`accounts/`), where there is nothing to guess; any other case asks, because
+picking the wrong owner would attach one account's settings to another.
+
 With two or more loaded accounts, row captions distinguish the global default,
 inherited values and explicit own values. A pinned non-global Last Seen row offers
 Use the global account's value, removing exactly that own key through the shared

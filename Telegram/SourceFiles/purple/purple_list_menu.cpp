@@ -218,7 +218,9 @@ void FillListsMenu(
 					: AccountSettingsEditResult{ .error = !captureError.isEmpty() ? captureError
 						: u"List editing is unavailable for the opening account. Reopen the menu."_q };
 				if (!result.ok) {
-					if (show && *show) { show->showToast(result.error); }
+					if (show && *show) {
+						ShowAccountSettingsRefusal(show, result.error, SessionAccountKey(not_null{ live }));
+					}
 				} else if (!notice.isEmpty() && show && *show) {
 					show->showToast(notice);
 				}

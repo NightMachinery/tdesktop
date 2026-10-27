@@ -85,6 +85,33 @@ void AddAccountScopeCaption(
 	}, AccountRowChanges() | rpl::map([=] { return !caption().isEmpty(); }));
 }
 
+void AddSettingsOwnerLink(SectionBuilder &builder, const QString &id, AccountSettingsRow row) {
+	const auto weakSession = base::make_weak(builder.session().get());
+	const auto weakController = base::make_weak(builder.controller());
+	const auto needsOwner = [=] {
+		const auto live = weakSession.get();
+		return live && AccountSettingsRowFor(live, row).availability
+			== AccountSettingsRowAvailability::NeedsOwner;
+	};
+	builder.addControl({
+		.factory = [=](not_null<Ui::VerticalLayout*> parent) -> object_ptr<Ui::RpWidget> {
+			auto link = object_ptr<Ui::LinkButton>(parent, tr::lng_purple_settings_owner_box_choose(tr::now));
+			link->setClickedCallback([=] {
+				const auto live = weakSession.get();
+				const auto window = weakController.get();
+				if (live && window && &window->session() == live && needsOwner()) {
+					window->show(Box(ChooseSettingsOwnerBox, std::make_optional(SessionAccountKey(live))));
+				}
+			});
+			return std::move(link);
+		},
+		.id = id + u"_owner"_q,
+		.title = tr::lng_purple_settings_owner_box_choose(),
+		.margin = st::settingsButtonNoIcon.padding,
+		.shown = AccountRowChanges() | rpl::map(needsOwner),
+	});
+}
+
 void BuildAccountSettingsRow(
 		SectionBuilder &builder,
 		const QString &id,
@@ -99,15 +126,16 @@ void BuildAccountSettingsRow(
 		const auto live = weakSession.get();
 		return live ? AccountSettingsRowFor(live, row) : AccountSettingsRowState();
 	};
+	// A row that cannot be written keeps showing the value in effect, with the
+	// switch locked and disabled, and says why in the caption below. It has no
+	// right label: SettingsButton places one at the right edge, under the switch.
+	const auto shown = [=] { return AccountSettingsRowShownValue(state()); };
 	const auto toggle = builder.addButton({
 		.id = id,
 		.title = std::move(title),
-		.label = AccountRowChanges() | rpl::map([=] {
-			return state().target ? QString() : tr::lng_proxy_box_table_unavailable(tr::now);
-		}),
 		.st = &st::settingsButtonNoIcon,
 		.toggled = rpl::merge(AccountRowChanges(), refresh->events())
-			| rpl::map([=] { return state().value; }),
+			| rpl::map(shown),
 		.keywords = row == AccountSettingsRow::SendAfterSave
 			? QStringList{ u"purple"_q, u"sync"_q, u"saved"_q, u"send"_q, u"backup"_q }
 			: QStringList{ u"purple"_q, u"last"_q, u"seen"_q, u"privacy"_q },
@@ -120,10 +148,12 @@ void BuildAccountSettingsRow(
 			return button && live && window && &window->session() == live;
 		};
 		AccountRowChanges() | rpl::on_next([=] {
-			toggle->setEnabled(windowCurrent() && state().target.has_value());
+			const auto writable = state().target.has_value();
+			toggle->setToggleLocked(!writable);
+			toggle->setEnabled(windowCurrent() && writable);
 		}, toggle->lifetime());
 		toggle->toggledValue() | rpl::filter([=](bool value) {
-			return value != state().value;
+			return value != shown();
 		}) | rpl::on_next([=](bool value) {
 			const auto target = windowCurrent() ? state().target : std::nullopt;
 			if (!target) { refresh->fire({}); return; }
@@ -139,6 +169,10 @@ void BuildAccountSettingsRow(
 		}, toggle->lifetime());
 	}
 	AddAccountScopeCaption(builder, row);
+	// The two last-seen rows sit together, so only the second offers it.
+	if (controller && row != AccountSettingsRow::LastSeenReasons) {
+		AddSettingsOwnerLink(builder, id, row);
+	}
 	if (row == AccountSettingsRow::SendAfterSave) { return; }
 	builder.addControl({
 		.factory = [=](not_null<Ui::VerticalLayout*> parent) -> object_ptr<Ui::RpWidget> {
@@ -251,7 +285,10 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 			.onClick = [=] {
 				const auto selected = target();
 				if (!selected) {
-					if (const auto window = weakController.get()) {
+					if (const auto window = weakController.get(); window && AccountSettingsNeedOwner()) {
+						ShowAccountSettingsRefusal(window->uiShow(), AccountSettingsNeedsOwnerText(),
+							SessionAccountKey(&window->session()));
+					} else if (window) {
 						window->show(Ui::MakeInformBox(tr::lng_purple_settings_open_unavailable(tr::now)));
 					}
 					return;
@@ -513,7 +550,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			.id = u"advanced/purple_settings_owner"_q,
 			.title = tr::lng_purple_settings_file_owner(),
 			.label = rpl::single(SettingsOwnerStatus()),
-			.onClick = [=] { controller->show(Box(ChooseSettingsOwnerBox)); },
+			.onClick = [=] { controller->show(Box(ChooseSettingsOwnerBox, std::make_optional(SessionAccountKey(&controller->session())))); },
 		});
 	}
 

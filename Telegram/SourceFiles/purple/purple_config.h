@@ -15,7 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config_file.h"
 
 namespace Main { class Session; }
-namespace Ui { class GenericBox; }
+namespace Ui { class GenericBox; class Show; }
 namespace Window { class SessionController; }
 
 namespace Purple {
@@ -89,6 +89,9 @@ void RefreshDesktopAccounts();
 	const AccountSettingsRowTarget &target,
 	std::optional<bool> value,
 	const std::function<bool()> &windowCurrent);
+// Why a per-account row cannot be written, with its current value; empty
+// when it can.
+[[nodiscard]] QString AccountSettingsUnavailableCaption(const AccountSettingsRowState &state);
 [[nodiscard]] QString AccountSettingsScopeCaption(
 	not_null<Main::Session*> session,
 	std::optional<AccountSettingsRow> row = std::nullopt);
@@ -103,7 +106,19 @@ void ChooseGlobalAccountBox(
 
 [[nodiscard]] std::optional<AccountKey> SettingsStartupOwner();
 [[nodiscard]] QString SettingsOwnerStatus();
-void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box);
+// Lists the signed-in accounts that may own settings.toml as rows, with the
+// account of the opening window (current) marked.
+void ChooseSettingsOwnerBox(
+	not_null<Ui::GenericBox*> box,
+	std::optional<AccountKey> current);
+// Per-account writes are refused only because no account owns settings.toml.
+[[nodiscard]] bool AccountSettingsNeedOwner();
+// Shows a write refusal: the owner chooser offer when the owner is missing,
+// the error as a toast otherwise.
+void ShowAccountSettingsRefusal(
+	std::shared_ptr<Ui::Show> show,
+	const QString &error,
+	std::optional<AccountKey> current);
 
 
 // The write every file in that directory goes through: QSaveFile puts a

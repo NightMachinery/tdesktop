@@ -829,7 +829,11 @@ void SendSettingsToSavedMessages(
 	if (!originCurrent || !originCurrent()) { return; }
 	const auto target = AccountManualExportTarget(session);
 	if (!target) {
-		show->showBox(Ui::MakeInformBox(tr::lng_proxy_box_table_unavailable(tr::now)));
+		if (AccountSettingsNeedOwner()) {
+			ShowAccountSettingsRefusal(show, AccountSettingsNeedsOwnerText(), SessionAccountKey(session));
+		} else {
+			show->showBox(Ui::MakeInformBox(tr::lng_purple_send_settings_unavailable(tr::now)));
+		}
 		return;
 	}
 	const auto path = target->file.path;

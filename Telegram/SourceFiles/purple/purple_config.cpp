@@ -37,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_local_store.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/labels.h"
+#include "ui/text/format_values.h"
+#include "styles/style_layers.h"
 #include <utility>
 #include <algorithm>
 #include "lang/lang_keys.h"
@@ -1552,7 +1554,7 @@ bool AccountAutomaticOperationsAllowed(not_null<Main::Session*> session) {
 AccountSettingsRowState AccountSettingsRowFor(
 		not_null<Main::Session*> session, AccountSettingsRow row) {
 	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
-		return {};
+		return { .availability = AccountSettingsRowAvailability::AccountClosed };
 	}
 	return AccountRouting().rowState(SessionAccountKey(session), row);
 }
@@ -1730,8 +1732,28 @@ void ShowAccountListReloadNotices() {
 
 }
 
+QString AccountSettingsUnavailableCaption(const AccountSettingsRowState &state) {
+	const auto reason = [&] {
+		switch (state.availability) {
+		case AccountSettingsRowAvailability::Available: return QString();
+		case AccountSettingsRowAvailability::NeedsOwner: return tr::lng_purple_settings_row_needs_owner(tr::now);
+		case AccountSettingsRowAvailability::Held: return tr::lng_purple_settings_row_held(tr::now);
+		case AccountSettingsRowAvailability::AccountClosed: return tr::lng_purple_settings_row_closed(tr::now);
+		case AccountSettingsRowAvailability::FileProblem: return tr::lng_purple_settings_row_file(tr::now);
+		}
+		return QString();
+	}();
+	return reason;
+}
+
 QString AccountSettingsScopeCaption(
 		not_null<Main::Session*> session, std::optional<AccountSettingsRow> row) {
+	if (row) {
+		const auto state = AccountSettingsRowFor(session, *row);
+		if (!state.target) {
+			return AccountSettingsUnavailableCaption(state);
+		}
+	}
 	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) {
 		return {};
 	}
@@ -1975,6 +1997,19 @@ void ChooseAccountWorkModeBox(
 	const auto target = AccountRouting().workModeTarget(key, &captureError);
 	const auto labels = SettingsRowLabels(&controller->session(), std::nullopt);
 	box->setTitle(rpl::single(AccountWorkModeTitle(&controller->session())));
+	if (!target && AccountSettingsNeedOwner()) {
+		// Nothing below could be saved, so offer the one step that unblocks it.
+		box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_purple_settings_row_needs_owner(), st::boxLabel));
+		const auto window = base::make_weak(controller.get());
+		box->addButton(tr::lng_purple_settings_owner_box_choose(), [=] {
+			box->closeBox();
+			if (const auto live = window.get()) {
+				live->show(Box(ChooseSettingsOwnerBox, std::make_optional(key)));
+			}
+		});
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		return;
+	}
 	const auto group = std::make_shared<Ui::RadiobuttonGroup>();
 	const auto modes = key == AppWideSettingsAccount(&controller->session())
 		? std::vector{ AccountWorkMode::Own, AccountWorkMode::Stock }
@@ -2263,12 +2298,38 @@ QString SettingsOwnerStatus() {
 		: u"settings.toml has no owner on this device · Choose"_q;
 }
 
-void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box) {
+QString SettingsOwnerBoxStatus() {
+	const auto &plan = AccountRouting().ownerPlan();
+	if (!plan.error.isEmpty()) {
+		return plan.error;
+	} else if (const auto owner = AccountRouting().owner()) {
+		const auto key = AccountKeyText(owner->environment, owner->userId).value_or(QString());
+		for (const auto &entry : Core::App().domain().accounts()) {
+			const auto session = entry.account->maybeSession();
+			if (session && !entry.account->loggingOut() && SessionAccountKey(session) == *owner) {
+				return tr::lng_purple_settings_owner_box_owned(tr::now, lt_account, session->user()->name());
+			}
+		}
+		return tr::lng_purple_settings_owner_box_owned(tr::now, lt_account, key);
+	}
+	return tr::lng_purple_settings_owner_box_missing(tr::now);
+}
+
+void ChooseSettingsOwnerBox(
+		not_null<Ui::GenericBox*> box,
+		std::optional<AccountKey> current) {
 	RefreshDesktopAccounts();
-	box->setTitle(rpl::single(u"settings.toml"_q));
-	box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(SettingsOwnerStatus())));
+	box->setTitle(tr::lng_purple_settings_file_owner());
+	box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(SettingsOwnerBoxStatus()),
+		st::boxLabel));
 	AccountRouting().acknowledgeOwnerNotice();
+	struct Choice {
+		base::weak_ptr<Main::Session> session;
+		AccountKey key;
+	};
+	auto choices = std::vector<Choice>();
 	if (!AccountRouting().owner()) {
+		const auto group = std::make_shared<Ui::RadiobuttonGroup>();
 		auto &domain = Core::App().domain();
 		for (const auto &entry : domain.accounts()) {
 			const auto session = entry.account->maybeSession();
@@ -2280,9 +2341,35 @@ void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box) {
 			if (!text || QFileInfo::exists(ConfigDirectory() + u"/accounts/"_q + *text)) {
 				continue;
 			}
-			const auto weak = base::make_weak(session);
-			box->addButton(rpl::single(session->user()->name() + u" ("_q + *text + u")"_q), [=] {
-				const auto live = weak.get();
+			// Name on the first line, marked when it is this window's account;
+			// the phone number on the second, as Telegram formats it.
+			const auto phone = session->user()->phone();
+			const auto title = (key == current
+				? tr::lng_purple_settings_owner_box_this_window(tr::now, lt_account, session->user()->name())
+				: session->user()->name())
+				+ '\n' + (phone.isEmpty() ? *text : Ui::FormatPhone(phone));
+			const auto index = int(choices.size());
+			choices.push_back({ base::make_weak(session), key });
+			const auto radio = box->addRow(object_ptr<Ui::Radiobutton>(box, group, index, title));
+			radio->setAllowTextLines(2);
+		}
+		// The choice cannot be undone, so nothing is picked for the user unless
+		// it is the opening window's own account.
+		auto eligible = std::vector<AccountKey>();
+		for (const auto &choice : choices) {
+			eligible.push_back(choice.key);
+		}
+		if (const auto initial = SettingsOwnerChooserInitialChoice(eligible, current)) {
+			group->setValue(*initial);
+		}
+		if (!choices.empty()) {
+			const auto choose = box->addButton(tr::lng_purple_settings_owner_box_choose(), [=] {
+				const auto chosen = group->hasValue() ? group->current() : -1;
+				if (chosen < 0 || chosen >= int(choices.size())) {
+					return;
+				}
+				const auto live = choices[chosen].session.get();
+				const auto key = choices[chosen].key;
 				if (!live || live->account().loggingOut()
 					|| live->account().maybeSession() != live
 					|| SessionAccountKey(live) != key) {
@@ -2304,9 +2391,53 @@ void ChooseSettingsOwnerBox(not_null<Ui::GenericBox*> box) {
 				AccountRouting().start(std::move(accounts), key);
 				box->closeBox();
 			});
+			if (choose) {
+				// A RoundButton ignores setDisabled for both colour and
+				// clicks, so grey it and pass clicks through until a pick.
+				const auto setPicked = [=](bool picked) {
+					choose->setDisabled(!picked);
+					choose->setTextFgOverride(picked
+						? std::optional<QColor>()
+						: std::optional<QColor>(st::windowSubTextFg->c));
+					choose->setAttribute(
+						Qt::WA_TransparentForMouseEvents,
+						!picked);
+				};
+				setPicked(group->hasValue());
+				group->setChangedCallback([=](int) {
+					setPicked(true);
+				});
+			}
 		}
 	}
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+}
+
+bool AccountSettingsNeedOwner() {
+	return AccountRouting().ownerMissing();
+}
+
+void ShowAccountSettingsRefusal(
+		std::shared_ptr<Ui::Show> show,
+		const QString &error,
+		std::optional<AccountKey> current) {
+	if (!show || !show->valid()) {
+		return;
+	} else if (!AccountSettingsNeedOwner()) {
+		show->showToast(error);
+		return;
+	}
+	const auto weak = std::weak_ptr<Ui::Show>(show);
+	show->showBox(Ui::MakeConfirmBox({
+		.text = tr::lng_purple_settings_row_needs_owner(),
+		.confirmed = [=](Fn<void()> close) {
+			close();
+			if (const auto strong = weak.lock()) {
+				strong->showBox(Box(ChooseSettingsOwnerBox, current));
+			}
+		},
+		.confirmText = tr::lng_purple_settings_owner_box_choose(),
+	}));
 }
 
 } // namespace Purple

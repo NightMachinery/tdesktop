@@ -90,6 +90,15 @@ docs/purple/upstream_hooks.md.
 "lng_purple_settings_scope_override" = "{account} sets their own value.";
 "lng_purple_settings_scope_reset" = "Use {account}'s value";
 "lng_purple_settings_row_changed" = "Settings changed or could not be saved. Reopen this setting and try again.";
+"lng_purple_settings_row_needs_owner" = "No account owns settings.toml on this device yet, so this account's own settings cannot be changed. Choose the settings file owner first.";
+"lng_purple_settings_row_held" = "Account settings are on hold because the owner records could not be read, saved or checked. See Original settings file owner for the reason.";
+"lng_purple_settings_row_closed" = "This account is signing out or is not open in this window.";
+"lng_purple_settings_row_file" = "This account's settings file is missing, unreadable or not a regular file, so this cannot be changed here. Open the settings file and repair it.";
+"lng_purple_settings_owner_box_missing" = "No account owns settings.toml on this device yet. Choose the account whose settings it holds; every other account then keeps its own file.";
+"lng_purple_settings_owner_box_owned" = "settings.toml belongs to {account} on this device. This cannot be changed here.";
+"lng_purple_settings_owner_box_this_window" = "{account} (this window)";
+"lng_purple_settings_owner_box_choose" = "Choose owner";
+"lng_purple_send_settings_unavailable" = "This account's settings file cannot be sent right now. Check that it exists and is a valid regular file.";
 
 "lng_purple_global_source" = "App-wide settings from {account}";
 "lng_purple_global_change" = "Change";

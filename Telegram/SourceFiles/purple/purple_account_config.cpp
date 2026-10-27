@@ -1059,10 +1059,43 @@ SettingsOpenResult DesktopAccountConfig::prepareInput(
 	return { SettingsOpenStatus::Created, current };
 }
 
+QString AccountSettingsNeedsOwnerText() {
+	return u"No account owns settings.toml on this device yet, so per-account settings "
+		"cannot be changed. Choose the settings file owner first."_q;
+}
+
+AccountSettingsRowAvailability ClassifyAccountSettingsRow(
+		bool hasTarget, bool hasOwner, bool held, AccountOwnerStartupStatus startup) {
+	const auto choosable = startup == AccountOwnerStartupStatus::NeedsChoice
+		|| startup == AccountOwnerStartupStatus::SingleFileError;
+	return hasTarget ? AccountSettingsRowAvailability::Available
+		: held ? AccountSettingsRowAvailability::Held
+		: !hasOwner ? (choosable
+			? AccountSettingsRowAvailability::NeedsOwner
+			: AccountSettingsRowAvailability::Held)
+		: AccountSettingsRowAvailability::FileProblem;
+}
+
+bool AccountSettingsRowShownValue(const AccountSettingsRowState &state) {
+	return state.value;
+}
+
+std::optional<int> SettingsOwnerChooserInitialChoice(
+		const std::vector<AccountKey> &eligible,
+		std::optional<AccountKey> current) {
+	if (!current) {
+		return std::nullopt;
+	}
+	const auto i = std::find(eligible.begin(), eligible.end(), *current);
+	return (i == eligible.end()) ? std::nullopt : std::make_optional(int(i - eligible.begin()));
+}
+
 AccountSettingsRowState DesktopAccountConfig::rowState(
 		const AccountKey &key, AccountSettingsRow row) {
 	auto result = AccountSettingsRowState();
 	result.target = rowTarget(key, row);
+	result.availability = ClassifyAccountSettingsRow(
+		result.target.has_value(), _owner.has_value(), _persistFailed, _plan.status);
 	const auto read = [&](const Settings &effective) {
 		switch (row) {
 		case AccountSettingsRow::LastSeenReasons: result.value = effective.lastSeen.reasons; break;
@@ -1279,7 +1312,8 @@ std::optional<AccountSettingsWriteTarget> DesktopAccountConfig::settingsEditTarg
 				return refuse(u"A settings path is not a safe regular file."_q);
 			}
 		}
-		return refuse(!_plan.error.isEmpty() ? _plan.error
+		return refuse(ownerMissing() ? AccountSettingsNeedsOwnerText()
+			: !_plan.error.isEmpty() ? _plan.error
 			: u"The account settings route is unavailable. Check the app-wide account and local settings."_q);
 	}
 	if (!AccountFilePathSafe(destination->file.path) || !AccountFilePathSafe(global->file.path)) {
@@ -1552,7 +1586,11 @@ auto DesktopAccountConfig::workModeTarget(const AccountKey &key, QString *error)
 	const auto own = openTarget(key, SettingsOpenRole::Own);
 	const auto global = openTarget(key, SettingsOpenRole::AppWide);
 	if (!own || !global) {
-		if (error && !_plan.error.isEmpty()) { *error = _plan.error; }
+		if (error && ownerMissing()) {
+			*error = AccountSettingsNeedsOwnerText();
+		} else if (error && !_plan.error.isEmpty()) {
+			*error = _plan.error;
+		}
 		return std::nullopt;
 	}
 	if (QString::fromUtf8(own->localInput.bytes).toUtf8() != own->localInput.bytes) {
@@ -2323,6 +2361,11 @@ GuardedFileWrite DesktopAccountConfig::replace(
 
 bool DesktopAccountConfig::permissionsReady() const {
 	return _owner.has_value() && !_persistFailed;
+}
+
+bool DesktopAccountConfig::ownerMissing() const {
+	return ClassifyAccountSettingsRow(false, _owner.has_value(), _persistFailed, _plan.status)
+		== AccountSettingsRowAvailability::NeedsOwner;
 }
 
 bool DesktopAccountConfig::accountTrafficReady(const AccountKey &key) const {

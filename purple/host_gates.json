@@ -9,6 +9,7 @@
   },
   "gates": [
     {"name": "test_wait_routes", "driver": "purple/test_wait_routes.py"},
+    {"name": "test_settings_row_layout", "driver": "purple/test_settings_row_layout.py"},
     {"name": "test_sync_chat_routes", "driver": "purple/test_sync_chat_routes.py"},
     {"name": "test_sync_chat_setup_routes", "driver": "purple/test_sync_chat_setup_routes.py"},
     {"name": "test_sync_chat_create_routes", "driver": "purple/test_sync_chat_create_routes.py"},

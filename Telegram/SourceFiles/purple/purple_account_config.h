@@ -113,11 +113,42 @@ struct AccountSettingsRowTarget {
 	SettingsFileInput globalGoodInput;
 };
 
+// Why a per-account row has no write target. NeedsOwner is the ordinary state
+// of an install that has several signed-in accounts and no recorded owner of
+// the root settings.toml: routing will not guess which account owns that file.
+// Only that state (startup NeedsChoice or SingleFileError) can be fixed by
+// choosing an owner; refused, held or unfinished startup plans are Held and
+// keep their precise error.
+enum class AccountSettingsRowAvailability {
+	Available,
+	NeedsOwner,
+	Held,
+	AccountClosed,
+	FileProblem,
+};
+
+[[nodiscard]] AccountSettingsRowAvailability ClassifyAccountSettingsRow(
+	bool hasTarget, bool hasOwner, bool held, AccountOwnerStartupStatus startup);
+// The routing-layer refusal every per-account write path gives while the owner
+// is missing; the UI recognises the state through ownerMissing() and shows its
+// own translated text with the owner chooser.
+[[nodiscard]] QString AccountSettingsNeedsOwnerText();
+// The owner chooser preselects the opening window's account only when it is
+// one of the eligible accounts; otherwise nothing, so no owner is recorded
+// without an explicit pick.
+[[nodiscard]] std::optional<int> SettingsOwnerChooserInitialChoice(
+	const std::vector<AccountKey> &eligible,
+	std::optional<AccountKey> current);
+
 struct AccountSettingsRowState {
 	bool value = false;
 	bool pinned = false;
 	std::optional<AccountSettingsRowTarget> target;
+	AccountSettingsRowAvailability availability = AccountSettingsRowAvailability::AccountClosed;
 };
+
+// What a row's switch draws: the value in effect, also while it is locked.
+[[nodiscard]] bool AccountSettingsRowShownValue(const AccountSettingsRowState &state);
 
 struct AccountSettingsRowWriteResult {
 	bool ok = false;
@@ -379,6 +410,7 @@ public:
 	[[nodiscard]] bool shouldAutoSend(const AccountOperationTarget &target);
 	[[nodiscard]] GuardedFileWrite replace(const AccountOperationTarget &target, const QByteArray &bytes);
 	[[nodiscard]] bool permissionsReady() const;
+	[[nodiscard]] bool ownerMissing() const;
 	[[nodiscard]] bool accountTrafficReady(const AccountKey &key) const;
 	[[nodiscard]] uint64_t generation() const;
 	[[nodiscard]] AccountWorkMode workMode(const AccountKey &key) const;

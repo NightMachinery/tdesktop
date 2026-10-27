@@ -3687,6 +3687,155 @@ void ModernSyncSnapshotBoundaryCases() {
 	}
 }
 
+void AccountSettingsRowAvailabilityCases() {
+	using Availability = AccountSettingsRowAvailability;
+	using Startup = AccountOwnerStartupStatus;
+	CHECK(ClassifyAccountSettingsRow(true, false, false, Startup::InvalidInput) == Availability::Available);
+	CHECK(ClassifyAccountSettingsRow(true, true, true, Startup::Owned) == Availability::Available);
+	CHECK(ClassifyAccountSettingsRow(false, false, false, Startup::NeedsChoice) == Availability::NeedsOwner);
+	CHECK(ClassifyAccountSettingsRow(false, false, false, Startup::SingleFileError) == Availability::NeedsOwner);
+	for (const auto startup : { Startup::InvalidInput, Startup::PendingOwnerWrites,
+		Startup::WaitingForFirstSignIn, Startup::Owned }) {
+		// Only a genuine "needs a choice" state is fixed by choosing an owner.
+		CHECK(ClassifyAccountSettingsRow(false, false, false, startup) == Availability::Held);
+	}
+	CHECK(ClassifyAccountSettingsRow(false, false, true, Startup::NeedsChoice) == Availability::Held);
+	CHECK(ClassifyAccountSettingsRow(false, true, true, Startup::Owned) == Availability::Held);
+	CHECK(ClassifyAccountSettingsRow(false, true, false, Startup::Owned) == Availability::FileProblem);
+	CHECK(AccountSettingsRowState().availability == Availability::AccountClosed);
+	// A locked row still draws the value in effect.
+	CHECK(AccountSettingsRowShownValue({ .value = true, .availability = Availability::NeedsOwner }));
+	CHECK(!AccountSettingsRowShownValue({ .value = false, .availability = Availability::NeedsOwner }));
+	CHECK(AccountSettingsRowShownValue({ .value = true, .availability = Availability::Held }));
+	const auto a = AccountKey{ 0, 101 };
+	const auto b = AccountKey{ 0, 202 };
+	const auto t = AccountKey{ 1, 101 };
+	// The chooser preselects only the opening window's own eligible account.
+	CHECK(SettingsOwnerChooserInitialChoice({ a, b }, b) == 1);
+	CHECK(SettingsOwnerChooserInitialChoice({ a, b }, a) == 0);
+	CHECK(!SettingsOwnerChooserInitialChoice({ a, b }, t));
+	CHECK(!SettingsOwnerChooserInitialChoice({ a, b }, std::nullopt));
+	CHECK(!SettingsOwnerChooserInitialChoice({}, a));
+	const auto rows = { AccountSettingsRow::LastSeenReasons,
+		AccountSettingsRow::LastSeenPeek, AccountSettingsRow::SendAfterSave };
+	const auto root = QByteArray("version=1\n[last_seen]\ntrade_p = true\n");
+	{
+		// Two signed-in accounts and no owner record: routing will not guess.
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } });
+		CHECK(config.ownerPlan().status == AccountOwnerStartupStatus::NeedsChoice);
+		CHECK(!config.owner());
+		CHECK(config.ownerMissing());
+		for (const auto row : rows) {
+			for (const auto &key : { a, b }) {
+				const auto state = config.rowState(key, row);
+				CHECK(!state.target);
+				CHECK(state.availability == Availability::NeedsOwner);
+			}
+		}
+		// Peek is on in the root file: the locked switch shows it on.
+		CHECK(AccountSettingsRowShownValue(config.rowState(a, AccountSettingsRow::LastSeenPeek)));
+		CHECK(!AccountSettingsRowShownValue(config.rowState(a, AccountSettingsRow::SendAfterSave)));
+		auto error = QString();
+		CHECK(!config.workModeTarget(a, &error));
+		CHECK(error == AccountSettingsNeedsOwnerText());
+		error.clear();
+		CHECK(!config.settingsEditTarget(a, SettingsOpenRole::Own, &error));
+		CHECK(error == AccountSettingsNeedsOwnerText());
+		CHECK(!QFileInfo::exists(temp.filePath(u"local.toml"_q)));
+		CHECK(!QFileInfo::exists(temp.filePath(u"accounts"_q)));
+		CHECK(Get(temp.filePath(u"settings.toml"_q)) == root);
+
+		// Choosing the owner makes every row writable for both accounts.
+		config.start({ { a, false, false }, { b, false, false } }, a);
+		CHECK(config.owner() == a);
+		CHECK(!config.ownerMissing());
+		for (const auto row : rows) {
+			for (const auto &key : { a, b }) {
+				const auto state = config.rowState(key, row);
+				CHECK(state.target.has_value());
+				CHECK(state.availability == Availability::Available);
+			}
+		}
+		CHECK(config.rowState(a, AccountSettingsRow::LastSeenPeek).value);
+		CHECK(config.workModeTarget(a).has_value());
+
+		// An owned install whose own file is broken is a file problem, not a
+		// missing owner.
+		Put(temp.filePath(u"settings.toml"_q), QByteArray("version = [\n"));
+		const auto broken = config.rowState(a, AccountSettingsRow::LastSeenPeek);
+		CHECK(!broken.target);
+		CHECK(broken.availability == Availability::FileProblem);
+		CHECK(!config.ownerMissing());
+	}
+	{
+		// One signed-in account on a fresh install records itself as owner.
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false } });
+		CHECK(config.owner() == a);
+		CHECK(config.rowState(a, AccountSettingsRow::LastSeenPeek).availability == Availability::Available);
+	}
+	{
+		// A refused startup plan keeps its precise error and offers no chooser.
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		Put(temp.filePath(u"settings.toml"_q), root);
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { a, false, false } });
+		CHECK(config.ownerPlan().status == Startup::InvalidInput);
+		CHECK(!config.ownerPlan().error.isEmpty());
+		CHECK(!config.owner());
+		CHECK(!config.ownerMissing());
+		CHECK(config.rowState(a, AccountSettingsRow::LastSeenPeek).availability == Availability::Held);
+		auto error = QString();
+		CHECK(!config.workModeTarget(a, &error));
+		CHECK(error == config.ownerPlan().error);
+		error.clear();
+		CHECK(!config.settingsEditTarget(a, SettingsOpenRole::Own, &error));
+		CHECK(error == config.ownerPlan().error);
+	}
+	{
+		// A hand-broken local.toml with no owner is the migrated "choose an
+		// eligible account" state, which the chooser does fix.
+		auto temp = QTemporaryDir();
+		CHECK(temp.isValid());
+		Put(temp.filePath(u"settings.toml"_q), root);
+		Put(temp.filePath(u"local.toml"_q), QByteArray("x = [\n"));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } });
+		CHECK(config.ownerPlan().status == Startup::SingleFileError);
+		CHECK(config.ownerMissing());
+		CHECK(config.rowState(b, AccountSettingsRow::LastSeenPeek).availability == Availability::NeedsOwner);
+	}
+#ifndef Q_OS_WIN
+	{
+		// Unreadable owner records hold every account write; that is not the
+		// missing-owner state and must not offer the owner chooser.
+		auto temp = QTemporaryDir();
+		auto elsewhere = QTemporaryDir();
+		CHECK(temp.isValid() && elsewhere.isValid());
+		Put(temp.filePath(u"settings.toml"_q), root);
+		CHECK(QFile::link(elsewhere.path(), temp.filePath(u"accounts"_q)));
+		auto config = DesktopAccountConfig(temp.path());
+		config.start({ { a, false, false }, { b, false, false } });
+		CHECK(!config.owner());
+		CHECK(!config.ownerMissing());
+		const auto held = config.rowState(a, AccountSettingsRow::LastSeenPeek);
+		CHECK(!held.target);
+		CHECK(held.availability == Availability::Held);
+		auto error = QString();
+		CHECK(!config.workModeTarget(a, &error));
+		CHECK(!error.isEmpty() && error != AccountSettingsNeedsOwnerText());
+	}
+#endif
+}
+
 int main(int argc, char *argv[]) {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 	auto application = QCoreApplication(argc, argv);
@@ -3716,6 +3865,7 @@ int main(int argc, char *argv[]) {
 	std::printf("priorBatch967 %d checks, %d failures\n", Checks, Failures);
 	const auto beforeRows = Checks;
 	AccountSettingsRowsAndResetCases();
+	AccountSettingsRowAvailabilityCases();
 	std::printf("accountRowsReset %d checks\n", Checks - beforeRows);
 	std::printf("priorBatch1340 %d checks, %d failures\n", Checks, Failures);
 	const auto beforeGlobalChoice = Checks;
