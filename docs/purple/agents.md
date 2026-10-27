@@ -150,6 +150,16 @@ several lists fixtures other than the ones its arguments select (a file name in
 its arguments, or a flag mapped under `variants`). `--list` prints the list and
 runs only that check.
 
+`purple/test_cases.py --case <name>` builds and runs one program under
+`Telegram/SourceFiles/purple/tests/` from the Debug build's recipes: the
+production units it needs, the tree's `purple_core` where it uses the core, and
+the build's own objects and libraries for the rest. The WebP cases compile a few
+production functions on their own (sliced from their files at run time), and a
+small Qt program writes a synthetic 512 by 512 WebP and PNG for them, so no
+artwork is checked in. Before compiling `webp_paste_cases.mm` the driver checks
+that it still uses only a pasteboard it creates by unique name, under a
+`QCoreApplication`.
+
 The compiled gates reuse the recipes and objects of an existing Debug build, which
 may come from another checkout. The runner keeps that checkout's include roots,
 because the build's precompiled header was made from them, and puts in front of

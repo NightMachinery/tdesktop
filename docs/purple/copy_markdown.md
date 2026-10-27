@@ -46,7 +46,8 @@ header adds a read-only selection-order accessor implemented in Purple source.
 The structural writer, action ownership, strings and build registrations remain
 in Purple files. See [peek_copy_regressions.md](peek_copy_regressions.md) for the
 real Qt results and remaining native qualification cases. The eight affected
-production units and both host programs passed. Countdown/context/clipboard native
+production units and both host programs passed; `purple/test_archive.py --markdown`
+and `--markdown-source` build and run them as host gates. Countdown/context/clipboard native
 behavior, the complete app and release acceptance remain separate gates.
 
 Every Markdown menu action advances one shared production copy generation,

@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import re
+import shutil
 import tempfile
 
 parser = argparse.ArgumentParser()
@@ -20,6 +21,8 @@ parser.add_argument('--access', action='store_true')
 parser.add_argument('--pagination-only', action='store_true')
 parser.add_argument('--handoff', action='store_true')
 parser.add_argument('--passive', action='store_true')
+parser.add_argument('--markdown', action='store_true')
+parser.add_argument('--markdown-source', action='store_true')
 parser.add_argument('--build-only', action='store_true')
 parser.add_argument('--reuse-from', type=Path)
 args = parser.parse_args()
@@ -128,6 +131,14 @@ recipes = subprocess.check_output(['ninja', '-C', str(build), '-t', 'commands', 
 recipe = next(shlex.split(line) for line in recipes.splitlines() if ' -c ' in line and shlex.split(line)[shlex.split(line).index('-c') + 1] == str(recipe_source))
 objects = []
 commands = []
+markdown_units = ['purple_article_markdown', 'purple_copy'] if args.markdown else ['purple_compose_receipt', 'purple_markdown_current', 'purple_markdown_delivery'] if args.markdown_source else []
+if args.markdown:
+    recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=')]
+markdown_objects = [build / 'Telegram/CMakeFiles/td_iv.dir/SourceFiles/iv/markdown/iv_markdown_prepare_serialize.cpp.o', build / (base + 'SourceFiles/iv/iv_rich_page.cpp.o'), build / 'Telegram/lib_ui/liblib_ui.a'] if args.markdown else []
+root = work / 'root' if args.markdown or args.markdown_source else None
+if root:
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir()
 with (work / 'build.log').open('w') as log:
     def compile(source, name):
         target = work / (name + '.o')
@@ -153,10 +164,11 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    objects += [compile(repo / ('purple/test_archive_purge.cpp' if args.purge else 'purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
-    for name in ['purple_desktop_archive_store', 'purple_archive_maintenance', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader', 'purple_archive_markdown', 'purple_markdown_publication', 'purple_markdown_source']:
+    objects += [compile(repo / ('purple/test_archive_markdown.cpp' if args.markdown else 'purple/test_markdown_source.cpp' if args.markdown_source else 'purple/test_archive_purge.cpp' if args.purge else 'purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
+    for name in ['purple_desktop_archive_store', 'purple_archive_maintenance', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader', 'purple_archive_markdown', 'purple_markdown_publication', 'purple_markdown_source', *markdown_units]:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
+    objects += markdown_objects
     objects += [build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o') for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp'))]
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o']
     objects += [build / 'Telegram/lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o']
@@ -181,7 +193,7 @@ with (work / 'build.log').open('w') as log:
 if args.build_only:
     raise SystemExit(0)
 with (work / 'run.log').open('w') as log:
-    result = subprocess.run([str(work / 'test_archive')] + (['pagination-only'] if args.pagination_only else ['capture-only'] if args.capture_only else []), stdout=log, stderr=subprocess.STDOUT)
+    result = subprocess.run([str(work / 'test_archive')] + (['pagination-only'] if args.pagination_only else ['capture-only'] if args.capture_only else [str(root)] if root else []), stdout=log, stderr=subprocess.STDOUT)
 (work / 'run.exit').write_text(str(result.returncode) + '\n')
 print((work / 'run.log').read_text())
 raise SystemExit(result.returncode)

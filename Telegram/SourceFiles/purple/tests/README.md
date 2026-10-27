@@ -70,3 +70,7 @@ decoy anchors/code tags. Imported language is checked when Qt exposes it; exact
 escaped source language remains authoritative, without a claim that every reader
 retains a Qt language property. No production sources or unchanged suites were
 recompiled for this successor. Independent source/native gates remain separate.
+
+Every program here now has a host gate (`cases-<name>` in `purple/host_gates.json`,
+built by `purple/test_cases.py`). On 27 October the successor above ran there
+again with 88 checks and zero failures.

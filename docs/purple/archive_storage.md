@@ -178,6 +178,9 @@ also recorded in the external review-fix evidence.
 Headless checks: `python3 purple/test_archive.py --build-dir <Debug tree>` runs
 real adapters with temporary profiles. `--use-build-objects` uses the exact
 production objects. On macOS these tests need backup-metadata access.
+`--markdown` runs `purple/test_archive_markdown.cpp` (archived versions copied as
+Markdown) and `--markdown-source` runs `purple/test_markdown_source.cpp` (kept
+Markdown sources), each against a fresh root under the output directory.
 `ARCHIVE_SQLITE_TESTS=1 purple/test_config.sh` also runs the shared real-SQL suite.
 Neither test opens an application window or accesses a signed-in profile.
 
