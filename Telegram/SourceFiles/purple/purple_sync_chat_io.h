@@ -12,11 +12,19 @@ struct DesktopSyncChatIo {
 	MTPInputPeer input;
 };
 
+struct DesktopSyncChatRecordReceipt {
+	DesktopSyncChatIo route;
+	MTPmessages_Messages response;
+	SyncCandidateRecord record;
+};
+
 struct DesktopSyncChatInventory {
 	DesktopSyncChatIo route;
 	SyncAccountInventoryResult inventory;
+	std::vector<DesktopSyncChatRecordReceipt> receipts;
 };
 
+[[nodiscard]] bool ValidDesktopSyncChatReadIo(const DesktopSyncChatIo &route);
 [[nodiscard]] bool ValidDesktopSyncChatIo(const DesktopSyncChatIo &route);
 [[nodiscard]] std::optional<MTPInputChannel> DesktopSyncChatInputChannel(
 	const DesktopSyncChatIo &route);
@@ -29,6 +37,12 @@ struct DesktopSyncChatInventory {
 	const DesktopSyncChatIo &route,
 	const MTPmessages_Messages &response,
 	int id);
+[[nodiscard]] std::optional<DesktopSyncChatRecordReceipt> SealDesktopSyncChatRecord(
+	const DesktopSyncChatIo &route,
+	const MTPmessages_Messages &response,
+	const SyncCandidateRecord &record,
+	uint64_t documentId,
+	uint64_t editDate);
 [[nodiscard]] std::optional<FullMsgId> DesktopSyncChatFileOrigin(
 	const DesktopSyncChatIo &route, int id);
 [[nodiscard]] bool DesktopSyncChatInventoryMatches(

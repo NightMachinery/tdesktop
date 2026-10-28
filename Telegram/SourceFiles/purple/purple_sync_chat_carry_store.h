@@ -6,6 +6,9 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QThread>
 
+#include <atomic>
+#include <map>
+
 namespace Purple {
 
 inline constexpr auto kSyncCarryJournalStorageLimit = 4 * 1024 * 1024;
@@ -46,6 +49,7 @@ public:
 	[[nodiscard]] SyncStoreResult OwnBase() const;
 
 private:
+	friend class DesktopSyncChatCarryIo;
 	[[nodiscard]] bool Current() const;
 	[[nodiscard]] bool StateMatches() const;
 	[[nodiscard]] SyncChatCarryStorageResult Fail(SyncStoreStatus status);
@@ -71,6 +75,8 @@ private:
 	QJsonObject _objects;
 	qsizetype _objectBytes = 0;
 	bool _failed = false;
+	std::map<QString, std::pair<uint64_t, std::weak_ptr<std::atomic<bool>>>> _ioActive;
+	std::shared_ptr<std::atomic<uint64_t>> _ioEpoch = std::make_shared<std::atomic<uint64_t>>(0);
 
 };
 

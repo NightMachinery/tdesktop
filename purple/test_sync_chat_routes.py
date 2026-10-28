@@ -10,7 +10,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp',
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
-    'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp']}
+    'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp']}
 
 RouteNames = set()
 
@@ -63,7 +63,14 @@ def inspect(values):
     require('parts-before-gate', '_offset == _content.size()' in upload and all(value in upload for value in ['ResumeEffect([self](bool ready)', 'if (ready) { self->DispatchMedia(); }', 'RenewBeforePost([self, ready = std::move(ready)]', 'CheckSyncChatBeforePost(']))
     require('final-route-compatibility', 'CompatibleDesktopSyncChatIo(*self->_route, lease->route)' in upload)
     require('final-lease-current', '!lease->current || !lease->current()' in upload)
-    require('updates-before-completion', upload.index('session->api().applyUpdates(result,') < upload.index('Finish(Current() && receipt'))
+    ordinary = upload.split('\n\tconst auto target = route();', 1)[1]
+    require('updates-before-completion', ordinary.index('session->api().applyUpdates(result,') < ordinary.index('Finish(Current() && receipt'))
+    carry_upload = upload.split('void SyncConfigUpload::OnMedia(', 1)[1].split('\n\tconst auto target = route();', 1)[0]
+    carry_receipt = values['purple_sync_chat_carry_io.cpp'].split('std::optional<int32_t> DesktopSyncCarryUpdatesReceipt(', 1)[1].split('std::optional<MTPmessages_ForwardMessages>', 1)[0]
+    require('carry-updates-before-completion', 'current->api().applyUpdates(updates, randomId);' in carry_upload
+        and carry_upload.index('DesktopSyncCarryUpdatesReceipt(*_carry, result,') < carry_upload.index('Finish(Current() && receipt')
+        and 'applyUpdates(updates, captured.randomId());' in carry_receipt
+        and carry_receipt.index('applyUpdates(updates, captured.randomId());') < carry_receipt.index('return captured.current()'))
     require('upload-callback-lifetime', 'return !_done && session && !session->account().loggingOut()' in upload and 'SessionAccountKey(session) == _account' in upload)
     require('post-typed-readback', '_session, *_route, int32_t(_messageId.bare)' in post)
     require('post-exact-confirm', 'result.messageId == _messageId.bare && result.record == _staged' in post and 'result.fresh && result.owned' in post)
@@ -93,6 +100,8 @@ def inspect(values):
 
 assert not inspect(files), inspect(files)
 negative = [
+    ('purple_sync_config_upload.cpp', 'current->api().applyUpdates(updates, randomId);', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),
+    ('purple_sync_chat_carry_io.cpp', 'applyUpdates(updates, captured.randomId());', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),
     ('purple_sync_config_publish.cpp', '_done = true;\n\t_admitted->store(false);\n\tif (_post) { _post->Cancel(); }', '_admitted->store(false);\n\tif (_post) { _post->Cancel(); }\n\t_done = true;', 'publisher-terminal-before-child'),
     ('purple_account_config.cpp', 'a.sourceGeneration == b.sourceGeneration', 'true', 'publisher-source-epoch'),
     ('purple_sync_chat_service.cpp', 'disk->stateBytes != self->_expectedStateBytes', 'false', 'retry-snapshot'),

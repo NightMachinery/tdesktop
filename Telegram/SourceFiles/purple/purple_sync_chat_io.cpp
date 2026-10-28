@@ -2,7 +2,7 @@
 
 namespace Purple {
 
-bool ValidDesktopSyncChatIo(const DesktopSyncChatIo &route) {
+bool ValidDesktopSyncChatReadIo(const DesktopSyncChatIo &route) {
 	const auto &peer = route.peer;
 	if (!ValidDesktopSyncChatOrigin(peer.origin)
 		|| !PeerTokenText(peer.chat, peer.origin.account.userId)
@@ -11,10 +11,6 @@ bool ValidDesktopSyncChatIo(const DesktopSyncChatIo &route) {
 	}
 	const auto token = *PeerTokenText(peer.chat, peer.origin.account.userId);
 	if (ParsePeerToken(token, peer.origin.account.userId) != peer.chat) {
-		return false;
-	}
-	const auto eligible = DesktopSyncChatEligibility(peer);
-	if (!eligible || !*eligible) {
 		return false;
 	}
 	const auto id = int64_t(peer.chat.id);
@@ -37,9 +33,14 @@ bool ValidDesktopSyncChatIo(const DesktopSyncChatIo &route) {
 	});
 }
 
+bool ValidDesktopSyncChatIo(const DesktopSyncChatIo &route) {
+	const auto eligible = DesktopSyncChatEligibility(route.peer);
+	return ValidDesktopSyncChatReadIo(route) && eligible && bool(*eligible);
+}
+
 std::optional<MTPInputChannel> DesktopSyncChatInputChannel(
 		const DesktopSyncChatIo &route) {
-	if (!ValidDesktopSyncChatIo(route)
+	if (!ValidDesktopSyncChatReadIo(route)
 		|| route.peer.chat.kind != PeerTokenKind::Channel) {
 		return {};
 	}
@@ -50,7 +51,7 @@ std::optional<MTPInputChannel> DesktopSyncChatInputChannel(
 std::optional<MTPmessages_GetHistory> DesktopSyncChatHistoryRequest(
 		const DesktopSyncChatIo &route,
 		int offset) {
-	if (!ValidDesktopSyncChatIo(route) || offset < 0) {
+	if (!ValidDesktopSyncChatReadIo(route) || offset < 0) {
 		return {};
 	}
 	return MTPmessages_GetHistory(route.input, MTP_int(offset), MTP_int(0),
@@ -60,7 +61,7 @@ std::optional<MTPmessages_GetHistory> DesktopSyncChatHistoryRequest(
 
 auto DesktopSyncChatRecordRequest(const DesktopSyncChatIo &route, int id)
 -> std::optional<DesktopSyncChatExactRequest> {
-	return ValidDesktopSyncChatIo(route)
+	return ValidDesktopSyncChatReadIo(route)
 		? DesktopSyncChatExactReadRequest(
 			route.peer.chat, id, DesktopSyncChatInputChannel(route))
 		: std::nullopt;
@@ -70,7 +71,7 @@ std::optional<MTPMessage> DesktopSyncChatRecordMessage(
 		const DesktopSyncChatIo &route,
 		const MTPmessages_Messages &response,
 		int id) {
-	if (!ValidDesktopSyncChatIo(route) || id <= 0
+	if (!ValidDesktopSyncChatReadIo(route) || id <= 0
 		|| !RecognizedDesktopSyncChatRead(response, route.peer.chat)) {
 		return {};
 	}
@@ -115,10 +116,52 @@ std::optional<MTPMessage> DesktopSyncChatRecordMessage(
 	return valid ? std::optional(message) : std::nullopt;
 }
 
+std::optional<DesktopSyncChatRecordReceipt> SealDesktopSyncChatRecord(
+		const DesktopSyncChatIo &route,
+		const MTPmessages_Messages &response,
+		const SyncCandidateRecord &record,
+		uint64_t documentId,
+		uint64_t editDate) {
+	const auto selected = DesktopSyncChatRecordMessage(route, response, record.id);
+	if (!selected || selected->type() != mtpc_message || !documentId
+		|| record.bytes.isEmpty() || record.bytes.size() > kSyncRecordMaximumBytes) {
+		return {};
+	}
+	const auto &message = selected->c_message();
+	const auto media = message.vmedia();
+	if (!media || media->type() != mtpc_messageMediaDocument) { return {}; }
+	const auto native = media->c_messageMediaDocument().vdocument();
+	if (!native || native->type() != mtpc_document) { return {}; }
+	const auto &document = native->c_document();
+	const auto edit = message.vedit_date();
+	const auto edited = edit && edit->v > 0 ? uint64_t(edit->v) : 0;
+	if (document.vid().v <= 0 || uint64_t(document.vid().v) != documentId
+		|| edited != editDate || document.vsize().v != record.bytes.size()
+		|| GetSyncChatMessageOwnership(MapDesktopSyncChatMessage(
+			route.peer.origin, route.peer, *selected)) != SyncChatMessageOwnership::Own) {
+		return {};
+	}
+	auto meta = SyncHistoryMessageMeta();
+	meta.isMessage = meta.isDocument = true;
+	meta.forwarded = bool(message.vfwd_from());
+	meta.caption = qs(message.vmessage());
+	for (const auto &attribute : document.vattributes().v) {
+		if (attribute.type() == mtpc_documentAttributeFilename) {
+			meta.fileNames.push_back(qs(attribute.c_documentAttributeFilename().vfile_name()));
+		}
+	}
+	if (!IsSyncHistoryCandidate(meta)) { return {}; }
+	auto classified = ClassifySyncCandidate(record.id, record.bytes);
+	if (classified.status != record.status) { return {}; }
+	classified.documentId = documentId;
+	classified.editDate = editDate;
+	return DesktopSyncChatRecordReceipt{ route, response, std::move(classified) };
+}
+
 std::optional<FullMsgId> DesktopSyncChatFileOrigin(
 		const DesktopSyncChatIo &route,
 		int id) {
-	if (!ValidDesktopSyncChatIo(route) || id <= 0) {
+	if (!ValidDesktopSyncChatReadIo(route) || id <= 0) {
 		return {};
 	}
 	const auto chat = route.peer.chat;
@@ -134,7 +177,7 @@ bool DesktopSyncChatInventoryMatches(
 		const DesktopSyncChatInventory &inventory,
 		const DesktopSyncChatOrigin &origin,
 		PeerToken chat) {
-	return ValidDesktopSyncChatIo(inventory.route)
+	return ValidDesktopSyncChatReadIo(inventory.route)
 		&& inventory.route.peer.origin == origin
 		&& inventory.route.peer.chat == chat
 		&& inventory.inventory.accountUserId == origin.account.userId;

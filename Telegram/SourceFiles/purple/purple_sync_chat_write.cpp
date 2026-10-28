@@ -42,6 +42,35 @@ std::optional<MTPmessages_EditMessage> DesktopSyncChatEditRequest(
 		MTP_int(0), MTPInputRichMessage());
 }
 
+std::optional<MTPmessages_ForwardMessages> DesktopSyncChatForwardRequest(
+		const DesktopSyncChatIo &source,
+		const DesktopSyncChatIo &target,
+		int32_t id,
+		uint64_t randomId) {
+	if (!ValidDesktopSyncChatIo(source) || !ValidDesktopSyncChatIo(target)
+		|| source.peer.origin != target.peer.origin || source.peer.chat == target.peer.chat
+		|| id <= 0 || !randomId) { return {}; }
+	return MTPmessages_ForwardMessages(
+		MTP_flags(MTPmessages_ForwardMessages::Flag::f_silent
+			| MTPmessages_ForwardMessages::Flag::f_drop_author),
+		source.input, MTP_vector<MTPint>({ MTP_int(id) }),
+		MTP_vector<MTPlong>({ MTP_long(randomId) }), target.input,
+		MTP_int(0), MTPInputReplyTo(), MTP_int(0), MTP_int(0), MTPInputPeer(),
+		MTPInputQuickReplyShortcut(), MTP_long(0), MTP_int(0), MTP_long(0),
+		MTPSuggestedPost());
+}
+
+std::optional<DesktopSyncChatDelete> DesktopSyncChatDeleteRequest(
+		const DesktopSyncChatIo &route, int32_t id) {
+	if (!ValidDesktopSyncChatIo(route) || id <= 0) { return {}; }
+	const auto ids = MTP_vector<MTPint>({ MTP_int(id) });
+	if (route.peer.chat.kind == PeerTokenKind::Channel) {
+		const auto channel = DesktopSyncChatInputChannel(route);
+		return channel ? std::optional<DesktopSyncChatDelete>(MTPchannels_DeleteMessages(*channel, ids)) : std::nullopt;
+	}
+	return MTPmessages_DeleteMessages(MTP_flags(MTPmessages_DeleteMessages::Flag::f_revoke), ids);
+}
+
 std::optional<int32_t> DesktopSyncChatUploadReceipt(
 		const DesktopSyncChatIo &route,
 		const MTPUpdates &updates,

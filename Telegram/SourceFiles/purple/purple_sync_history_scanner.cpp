@@ -84,7 +84,7 @@ bool SyncHistoryScanner::Current() const {
 	return _sessionGuard
 		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
 			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
-		&& (!_route || (ValidDesktopSyncChatIo(*_route)
+		&& (!_route || (ValidDesktopSyncChatReadIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)
 			&& _current && _current()));
 }

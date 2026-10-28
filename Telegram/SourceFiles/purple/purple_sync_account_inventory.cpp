@@ -39,9 +39,9 @@ SyncAccountInventory::SyncAccountInventory(
 		Fn<bool()> current,
 		std::optional<AccountRoutingSnapshot> routing)
 : SyncAccountInventory(session, std::move(progress),
-		[route, finished = std::move(finished)](SyncAccountInventoryResult result) {
+		[this, route, finished = std::move(finished)](SyncAccountInventoryResult result) {
 			if (finished) {
-				finished({ route, std::move(result) });
+				finished({ route, std::move(result), std::move(_receipts) });
 			}
 		}, {}, std::move(routing)) {
 	_route = std::move(route);
@@ -52,7 +52,7 @@ bool SyncAccountInventory::Current() const {
 	return _sessionGuard
 		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
 			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
-		&& (!_route || (ValidDesktopSyncChatIo(*_route)
+		&& (!_route || (ValidDesktopSyncChatReadIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)
 			&& _current && _current()));
 }
@@ -146,6 +146,7 @@ void SyncAccountInventory::ReadFinished(SyncCandidateReadResult result) {
 		Finish(SyncAccountInventoryStatus::Incomplete);
 		return;
 	}
+	if (_route && _reader) { _receipts = _reader->receipts(); }
 	_result = FinishSyncAccountInventory(
 		_result.accountUserId,
 		std::move(_result.scan),

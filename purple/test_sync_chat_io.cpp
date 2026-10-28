@@ -168,6 +168,7 @@ struct ReaderProbe : base::has_weak_ptr {
 	std::optional<FullMsgId> origin;
 	std::optional<SyncCandidateRecord> record;
 	std::optional<SyncCandidateRecord> _downloaded;
+	std::vector<DesktopSyncChatRecordReceipt> _receipts;
 	bool rereading = false;
 	void RequestNext() { rereading = true; }
 	bool Current() const { return current; }

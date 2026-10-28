@@ -1,3 +1,4 @@
+#define PURPLE_SYNC_CHAT_MARK_TEXT_NATIVE
 #define PURPLE_SYNC_CHAT_WRITE_EMBEDDED
 #include "test_sync_chat_write.cpp"
 #include "purple/purple_sync_chat_create.h"

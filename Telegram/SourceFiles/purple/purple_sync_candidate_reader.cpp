@@ -59,9 +59,13 @@ bool SyncCandidateReader::Current() const {
 	return _sessionGuard
 		&& (_routing ? AccountSyncRoutingCurrent(_session, *_routing)
 			: (_opening && ValidateAccountSyncTarget(_session, *_opening)))
-		&& (!_route || (ValidDesktopSyncChatIo(*_route)
+		&& (!_route || (ValidDesktopSyncChatReadIo(*_route)
 			&& _route->peer.origin.account == SessionAccountKey(_session)
 			&& _current && _current()));
+}
+
+const std::vector<DesktopSyncChatRecordReceipt> &SyncCandidateReader::receipts() const {
+	return _receipts;
 }
 
 SyncCandidateReader::~SyncCandidateReader() {
@@ -191,7 +195,14 @@ void SyncCandidateReader::RequestNext() {
 				self->CompleteCurrent({ .id = id,
 					.status = SyncCandidateStatus::Changed });
 			} else {
-				self->CompleteCurrent(*base::take(self->_downloaded));
+				const auto receipt = SealDesktopSyncChatRecord(*self->_route, result,
+					*self->_downloaded, self->_documentId, self->_editDate);
+				if (!receipt) {
+					self->CompleteCurrent({ .id = id, .status = SyncCandidateStatus::Changed });
+				} else {
+					self->_receipts.push_back(*receipt);
+					self->CompleteCurrent(receipt->record);
+				}
 			}
 			return;
 		}
@@ -322,7 +333,7 @@ void SyncCandidateReader::OnDownload() {
 		});
 	} else {
 		auto record = ClassifySyncCandidate(id, loader->bytes());
-		if (_route && record.status == SyncCandidateStatus::Valid) {
+		if (_route && !record.bytes.isEmpty()) {
 			_downloaded = std::move(record);
 			RequestNext();
 		} else {

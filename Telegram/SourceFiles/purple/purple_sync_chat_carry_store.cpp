@@ -41,9 +41,11 @@ SyncChatCarryStore::SyncChatCarryStore(QString directory, SyncChatCarryStoreScop
 , _fault(std::move(fault)) {
 }
 
-SyncChatCarryStore::~SyncChatCarryStore() = default;
+SyncChatCarryStore::~SyncChatCarryStore() { Close(); }
 
 void SyncChatCarryStore::Close() {
+	_ioEpoch->fetch_add(1);
+	_ioActive.clear();
 	_local.reset();
 	_thread = nullptr;
 }
@@ -194,6 +196,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::Persist(const SyncCarryJournalRes
 	_journalFile = CaptureSyncPrivateFile(path, kSyncCarryJournalStorageLimit);
 	if (_journalFile.status != SyncStoreStatus::Ready || _journalFile.bytes != encoded.canonical
 		|| _journalFile.parentIdentity != _directoryIdentity) { return Fail(SyncStoreStatus::Changed); }
+	if (!_journal || SerializeSyncCarryJournal(*_journal).canonical != next.canonical) { _ioEpoch->fetch_add(1); }
 	_envelope = document; _journal = next.journal;
 	return { SyncStoreStatus::Ready, next.status };
 }

@@ -80,6 +80,8 @@ transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_transport.cpp'
 (work / 'typed-exact-reply.inc').write_text(block(transport, 'const auto completed = [weak, readback](const MTPmessages_Messages &result)'))
 (work / 'typed-download.inc').write_text(block(reader, 'void SyncCandidateReader::OnDownload()'))
 
+create = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp').read_text()
+(work / 'carry-mark-text.inc').write_text('namespace Purple { QString DesktopSyncChatMarkText() ' + block(create, 'QString DesktopSyncChatMarkText(') + ' }\n')
 upload = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_upload.cpp').read_text()
 post = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_post.cpp').read_text()
 (work / 'service-scope.inc').write_text(block(service, 'DesktopSyncChatDiscoveryScope SyncChatSession::ScopeFor('))
@@ -129,7 +131,7 @@ with (work / 'build.log').open('w') as log:
     parent = args.reuse_unit_dir.resolve()
     previous = json.loads((parent / 'inputs.json').read_text())
     reused_sources = {}
-    for name in ['purple_sync_local_store', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']:
+    for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']:
         matches = [path for path in previous['sources_sha256'] if Path(path).name == name + '.cpp']
         assert len(matches) == 1, name
         old = Path(matches[0])
@@ -138,7 +140,7 @@ with (work / 'build.log').open('w') as log:
         assert hashlib.sha256(current.read_bytes()).hexdigest() == previous['sources_sha256'][str(old)], current
         assert hashlib.sha256((parent / (name + '.o')).read_bytes()).hexdigest() == previous['objects_sha256'][str(parent / (name + '.o'))], name
         reused_sources[str(current)] = previous['sources_sha256'][str(old)]
-    objects += [parent / (name + '.o') for name in ['purple_sync_local_store', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']]
+    objects += [parent / (name + '.o') for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']]
     objects += [build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_sync_directory.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_types.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_peer_id.cpp.o',
@@ -169,7 +171,7 @@ with (work / 'build.log').open('w') as log:
     'reused_sources_sha256': reused_sources,
     'reused_inputs_sha256': hashlib.sha256((parent / 'inputs.json').read_bytes()).hexdigest(),
     'schema_sha256': hashlib.sha256(header.read_bytes()).hexdigest(),
-    'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp']},
+    'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_create.cpp', 'purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp']},
     'included_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_discovery.cpp').read_bytes()).hexdigest(),
     'included_io_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_io.cpp').read_bytes()).hexdigest(),
     'included_write_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_write.cpp').read_bytes()).hexdigest(),

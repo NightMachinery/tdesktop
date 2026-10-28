@@ -181,7 +181,7 @@ with (work / 'build.log').open('w') as log:
     parent = args.reuse_support_dir.resolve()
     previous = json.loads((parent / 'inputs.json').read_text())
     reused_sources = {}
-    for name in ['purple_sync_local_store', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']:
+    for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']:
         matches = [path for path in previous['sources_sha256'] if Path(path).name == name + '.cpp']
         assert len(matches) == 1, name
         old = Path(matches[0])
@@ -190,7 +190,7 @@ with (work / 'build.log').open('w') as log:
         assert hashlib.sha256(current.read_bytes()).hexdigest() == previous['sources_sha256'][str(old)], current
         assert hashlib.sha256((parent / (name + '.o')).read_bytes()).hexdigest() == previous['objects_sha256'][str(parent / (name + '.o'))], name
         reused_sources[str(current)] = previous['sources_sha256'][str(old)]
-    objects += [parent / (name + '.o') for name in ['purple_sync_local_store', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']]
+    objects += [parent / (name + '.o') for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']]
     objects += [build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_sync_directory.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_types.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_peer_id.cpp.o',

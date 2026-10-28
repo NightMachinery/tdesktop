@@ -384,6 +384,7 @@ struct PublishRetryProbe : base::has_weak_ptr {
 #include "publisher-retry-resume.inc"
 };
 struct PublishUploadProbe {
+	std::optional<DesktopSyncCarryPermit> _carry;
 	bool _done = false;
 	std::shared_ptr<PublishRetryProbe> _api = std::make_shared<PublishRetryProbe>();
 	rpl::lifetime _lifetime;

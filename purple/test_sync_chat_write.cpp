@@ -1,6 +1,7 @@
 #define PURPLE_SYNC_CHAT_IO_EMBEDDED
 #include "test_sync_chat_io.cpp"
 #include "purple/purple_sync_chat_write.h"
+#include "purple/purple_sync_chat_carry_io.h"
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_config_post.h"
 #include "base/random.h"
@@ -17,6 +18,10 @@ void RandomFill(bytes::span data) {
 	}
 }
 }
+
+#ifndef PURPLE_SYNC_CHAT_MARK_TEXT_NATIVE
+#include "carry-mark-text.inc"
+#endif
 
 namespace {
 
@@ -79,6 +84,7 @@ struct UploadAccount {
 struct UploadSession : base::has_weak_ptr {
 	UploadAccount owner{this};
 	AccountKey key = Origin.account;
+	QString login = Origin.login;
 	UploadAccount &account() { return owner; }
 	ControlledApi endpoint;
 	ControlledApi &api() { return endpoint; }
@@ -86,6 +92,9 @@ struct UploadSession : base::has_weak_ptr {
 };
 
 AccountKey SessionAccountKey(UploadSession *session) { return session->key; }
+bool SyncChatIoBelongsToSession(UploadSession *session, const DesktopSyncChatIo &route) {
+	return route.peer.origin.account == session->key && route.peer.origin.login == session->login;
+}
 
 struct PostCounters {
 	base::weak_ptr<UploadSession> session;
@@ -137,6 +146,10 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	std::optional<DesktopSyncChatIo> _route;
 	std::optional<DesktopSyncChatLease> _lease;
 	DesktopSyncChatOperation _operation;
+	std::optional<DesktopSyncCarryPermit> _carry;
+	bool _carryContentValid = false;
+	uint64_t _carryGateTicket = 0;
+	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
 	QByteArray _content;
 	Fn<void(std::optional<MsgId>)> _finished;
 	Fn<void()> _editRefused;
@@ -169,8 +182,8 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	}
 	bool Current() const
 #include "upload-Current.inc"
-	std::optional<DesktopSyncChatIo> route() const { return _lease ? std::optional(_lease->route) : std::nullopt; }
-	Fn<bool()> readbackCurrent() const { return _lease ? _lease->current : Fn<bool()>(); }
+	std::optional<DesktopSyncChatIo> route() const { return _carry ? std::optional(_carry->target()) : _lease ? std::optional(_lease->route) : std::nullopt; }
+	Fn<bool()> readbackCurrent() const { return _carry ? Fn<bool()>([permit = *_carry] { return permit.current(); }) : _lease ? _lease->current : Fn<bool()>(); }
 	void SendNextPart()
 #include "upload-SendNextPart.inc"
 	void SendMedia()
@@ -417,6 +430,10 @@ struct PostExactEndpoint {
 
 struct PostProbe : base::has_weak_ptr {
 	DesktopSyncChatOperation _operation;
+	std::optional<DesktopSyncCarryPermit> _carry;
+	bool _carryContentValid = false;
+	uint64_t _carryGateTicket = 0;
+	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
 	UploadSession *_session;
 	std::optional<DesktopSyncChatIo> _route;
 	Fn<bool()> _readbackCurrent;

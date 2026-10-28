@@ -58,6 +58,7 @@ private:
 	Fn<void(uint64_t)> _progress;
 	Fn<void(SyncAccountInventoryResult)> _finished;
 	SyncAccountInventoryResult _result;
+	std::vector<DesktopSyncChatRecordReceipt> _receipts;
 	std::unique_ptr<SyncHistoryScanner> _scanner;
 	std::unique_ptr<SyncCandidateReader> _reader;
 	Fn<SyncChatMessageOwnership(const MTPMessage &)> _owned;

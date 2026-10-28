@@ -70,6 +70,20 @@ SyncConfigUpload::SyncConfigUpload(
 	_route = std::move(route);
 }
 
+SyncConfigUpload::SyncConfigUpload(
+		Main::Session &session,
+		DesktopSyncCarryPermit permit,
+		Fn<void(std::optional<MsgId>)> finished,
+		Fn<bool()> stillCurrent,
+		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry)
+: SyncConfigUpload(session, permit.target(), permit.uploadContent(), std::move(finished), std::move(stillCurrent)) {
+	_carryContentValid = permit.fileId() && !_content.isEmpty();
+	_fileId = permit.fileId();
+	_randomId = permit.randomId();
+	_carry = std::move(permit);
+	_renewCarry = std::move(renewCarry);
+}
+
 bool SyncConfigUpload::Current() const {
 	const auto session = _session.get();
 	return !_done && session && !session->account().loggingOut()
@@ -78,15 +92,17 @@ bool SyncConfigUpload::Current() const {
 		&& _stillCurrent && _stillCurrent()
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == _account))
-		&& (!_lease || (_lease->current && _lease->current()));
+		&& (!_lease || (_lease->current && _lease->current()))
+		&& (!_carry || (!_editId && _carryContentValid && _carry->current()
+			&& SyncChatIoBelongsToSession(session, _carry->target())));
 }
 
 std::optional<DesktopSyncChatIo> SyncConfigUpload::route() const {
-	return _lease ? std::optional(_lease->route) : std::nullopt;
+	return _carry ? std::optional(_carry->target()) : _lease ? std::optional(_lease->route) : std::nullopt;
 }
 
 Fn<bool()> SyncConfigUpload::readbackCurrent() const {
-	return _lease ? _lease->current : Fn<bool()>();
+	return _carry ? Fn<bool()>([permit = *_carry] { return permit.current(); }) : _lease ? _lease->current : Fn<bool()>();
 }
 
 SyncConfigUpload::~SyncConfigUpload() {
@@ -101,6 +117,7 @@ SyncConfigUpload::~SyncConfigUpload() {
 }
 
 void SyncConfigUpload::Cancel() {
+	if (_carry) { _carry->revoke(); }
 	Finish(std::nullopt);
 }
 
@@ -125,7 +142,7 @@ void SyncConfigUpload::Start() {
 			}
 		}
 	}, _lifetime);
-	_fileId = base::RandomValue<uint64>();
+	if (!_carry) { _fileId = base::RandomValue<uint64>(); }
 	_parts = int((_content.size() + kUploadPartBytes - 1)
 		/ kUploadPartBytes);
 	SendNextPart();
@@ -178,6 +195,22 @@ void SyncConfigUpload::RenewBeforePost(Fn<void(bool)> ready) {
 		return;
 	}
 	_checking = true;
+	if (_carry) {
+		if (!_renewCarry) { _checking = false; ready(false); return; }
+		const auto self = shared_from_this();
+		const auto opening = *_carry;
+		const auto ticket = ++_carryGateTicket;
+		_renewCarry([self, opening, ticket, ready = std::move(ready)](std::optional<DesktopSyncCarryPermit> fresh) {
+			if (self->_done || !self->_checking || self->_carryGateTicket != ticket
+				|| !self->_carry || self->_carry->renewal() != opening.renewal()) { return; }
+			self->_checking = false;
+			if (!self->Current() || !fresh || !opening.compatible(*fresh)) { ready(false); return; }
+			self->_carry = std::move(fresh);
+			self->_route = self->_carry->target();
+			ready(true);
+		});
+		return;
+	}
 	_lease.reset();
 	const auto self = shared_from_this();
 	const auto chat = _route ? _route->peer.chat : PeerToken{};
@@ -227,12 +260,12 @@ void SyncConfigUpload::ResumeEffect(Fn<void(bool)> ready) {
 }
 
 void SyncConfigUpload::DispatchMedia() {
-	if (_done || !Current() || !_lease
+	if (_done || !Current() || (!_lease && !_carry)
 		|| _editId.bare < 0 || _editId.bare > std::numeric_limits<int32_t>::max()) {
 		Finish(std::nullopt);
 		return;
 	}
-	_randomId = base::RandomValue<uint64>();
+	if (!_carry) { _randomId = base::RandomValue<uint64>(); }
 	const auto filename = SyncSettingsRecordFileName();
 	const auto checksum = QCryptographicHash::hash(
 		_content,
@@ -258,7 +291,7 @@ void SyncConfigUpload::DispatchMedia() {
 		MTP_int(0));
 	const auto self = shared_from_this();
 	if (_editId) {
-		auto request = DesktopSyncChatEditRequest(_lease->route, media, int32_t(_editId.bare));
+		auto request = DesktopSyncChatEditRequest(*route(), media, int32_t(_editId.bare));
 		if (!request) {
 			Finish(std::nullopt);
 			return;
@@ -288,7 +321,7 @@ void SyncConfigUpload::DispatchMedia() {
 		}).handleAllErrors().send();
 		return;
 	}
-	auto request = DesktopSyncChatSendMediaRequest(_lease->route, media, _randomId);
+	auto request = DesktopSyncChatSendMediaRequest(*route(), media, _randomId);
 	if (!request) {
 		Finish(std::nullopt);
 		return;
@@ -303,8 +336,18 @@ void SyncConfigUpload::DispatchMedia() {
 }
 
 void SyncConfigUpload::OnMedia(const MTPUpdates &result) {
-	const auto receipt = _lease
-		? DesktopSyncChatUploadReceipt(_lease->route, result, _randomId, int32_t(_editId.bare))
+	if (_carry) {
+		const auto session = _session;
+		const auto receipt = DesktopSyncCarryUpdatesReceipt(*_carry, result,
+			[session](const MTPUpdates &updates, uint64_t randomId) {
+				if (const auto current = session.get()) { current->api().applyUpdates(updates, randomId); }
+			});
+		Finish(Current() && receipt ? std::optional(MsgId(*receipt)) : std::nullopt);
+		return;
+	}
+	const auto target = route();
+	const auto receipt = target
+		? DesktopSyncChatUploadReceipt(*target, result, _randomId, int32_t(_editId.bare))
 		: std::nullopt;
 	if (const auto session = _session.get()) {
 		session->api().applyUpdates(result, _editId ? uint64_t(0) : _randomId);

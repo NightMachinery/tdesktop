@@ -181,6 +181,12 @@ struct PeerToken {int id=0;bool operator==(const PeerToken&)const=default;};
 struct Io {struct Peer {struct Origin {int account=1;} origin;PeerToken chat;} peer;};
 bool ValidDesktopSyncChatIo(const Io&){return true;}
 bool CompatibleDesktopSyncChatIo(const Io&,const Io&){return true;}
+struct DesktopSyncCarryPermit {
+ Io route;bool current()const{return true;}const Io&target()const{return route;}
+ bool compatible(const DesktopSyncCarryPermit&)const{return true;}
+ bool uploadMatches(const std::string&)const{return true;}uint64_t renewal()const{return 0;}
+};
+bool SyncChatIoBelongsToSession(Main::Session*,const Io&){return true;}
 struct Lease {Io route;Fn<bool()>current;};
 enum class DesktopSyncChatPhase {Use,Paused,Searching};
 struct DesktopSyncChatStatus {bool complete=true,postingHeld=false;DesktopSyncChatPhase phase=DesktopSyncChatPhase::Use;struct Resolution {PeerToken readChat;} resolution;int64_t retryAt=0;std::string reason;};
@@ -192,6 +198,8 @@ class SyncConfigUpload:public std::enable_shared_from_this<SyncConfigUpload> {
  public:
   struct WeakSession {Main::Session *value;Main::Session*get()const{return value;}}_session;
   bool _done=false,_checking=false;int _editId=0;Fn<void(Fn<void(bool)>)> _authorizeEdit;int _account=1,finals=0;DesktopSyncChatOperation _operation;std::optional<Io>_route;std::optional<Lease>_lease;
+  std::optional<DesktopSyncCarryPermit>_carry;bool _carryContentValid=false;uint64_t _carryGateTicket=0;std::string _content;
+  Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
   Fn<bool()>_stillCurrent=[]{return true;};std::unique_ptr<SyncRequestSender>_api;
   SyncConfigUpload(Main::Session *s):_session{s},_api(std::make_unique<SyncRequestSender>()){_api->_current=[this]{return Current();};}
   bool Current()const;void SendMedia();void RenewBeforePost(Fn<void(bool)> ready);void ResumeEffect(Fn<void(bool)> ready);

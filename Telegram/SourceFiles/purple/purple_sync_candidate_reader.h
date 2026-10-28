@@ -48,6 +48,7 @@ public:
 
 	void Start();
 	void Cancel();
+	[[nodiscard]] const std::vector<DesktopSyncChatRecordReceipt> &receipts() const;
 
 private:
 	[[nodiscard]] bool Current() const;
@@ -69,6 +70,7 @@ private:
 	std::vector<int32_t> _candidateIds;
 	Fn<void(SyncCandidateReadResult)> _finished;
 	SyncCandidateReadResult _result;
+	std::vector<DesktopSyncChatRecordReceipt> _receipts;
 	std::optional<SyncCandidateRecord> _downloaded;
 	std::unique_ptr<FileLoader> _loader;
 	mtpRequestId _requestId = 0;

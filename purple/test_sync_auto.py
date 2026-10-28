@@ -17,9 +17,15 @@ owned = tempfile.TemporaryDirectory(prefix='purple-auto-test.') if not args.outp
 work = args.output_dir.resolve() if args.output_dir else Path(owned.name)
 work.mkdir(parents=True, exist_ok=True)
 base = 'Telegram/CMakeFiles/Telegram.dir/'
-recipe_source = repo / 'Telegram/SourceFiles/purple/purple_config_file.cpp'
-recipes = subprocess.check_output(['ninja', '-C', str(build), '-t', 'commands', base + 'SourceFiles/purple/purple_config_file.cpp.o'], text=True)
-recipe = next(shlex.split(line) for line in recipes.splitlines() if ' -c ' in line and shlex.split(line)[shlex.split(line).index('-c') + 1] == str(recipe_source))
+def unit_recipe(name):
+    relative = 'Telegram/SourceFiles/purple/' + name + '.cpp'
+    target = base + 'SourceFiles/purple/' + name + '.cpp.o'
+    recipes = subprocess.check_output(['ninja', '-C', str(build), '-t', 'commands', target], text=True)
+    matches = [shlex.split(line) for line in recipes.splitlines() if ' -c ' in line]
+    return next(command for command in matches
+        if Path(command[command.index('-c') + 1]).as_posix().endswith('/' + relative))
+
+recipe = unit_recipe('purple_config_file')
 (work / 'opaque-session.h').write_text('#pragma once\nnamespace Main { class Session {}; class Account {}; }\n')
 source = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_apply.cpp').read_text()
 body = source.replace('#include "main/main_session.h"', '#include "' + str(work / 'opaque-session.h') + '"')
@@ -44,9 +50,9 @@ methods += 'void AutoSession::InvokeInventory(const SyncAutoPlan &plan, SyncAcco
 objects = []
 commands = []
 with (work / 'build.log').open('w') as log:
-    def compile(source, name, opaque=False):
+    def compile(source, name, opaque=False, own_recipe=None):
         target = work / (name + '.o')
-        command = recipe[:]
+        command = (own_recipe if own_recipe is not None else recipe)[:]
         for flag, value in [('-c', str(source)), ('-o', str(target)), ('-MF', str(target.with_suffix('.d'))), ('-MT', str(target))]:
             command[command.index(flag) + 1] = value
         if opaque:
@@ -57,7 +63,10 @@ with (work / 'build.log').open('w') as log:
     objects += [compile(repo / 'purple/test_sync_auto.cpp', 'test', True), compile(work / 'apply-body.cpp', 'apply')]
     adapters = ['purple_account_config', 'purple_config_file', 'purple_sync_local_store', 'purple_sync_config_history', 'purple_sync_config_review', 'purple_sync_config_text', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']
     for name in adapters:
-        if not args.use_build_objects and name in ['purple_account_config', 'purple_sync_local_store', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']:
+        if name in ['purple_sync_config_text', 'purple_sync_config_review']:
+            objects.append(compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name,
+                own_recipe=unit_recipe(name)))
+        elif not args.use_build_objects and name in ['purple_account_config', 'purple_sync_local_store', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']:
             objects.append(compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
         else:
             objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o'))

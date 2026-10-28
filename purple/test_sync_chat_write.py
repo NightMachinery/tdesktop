@@ -11,11 +11,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
 work = args.output_dir.resolve()
 work.mkdir(parents=True, exist_ok=True)
+binary = work / Path(args.test_source).stem
 header = build / 'Telegram/gen/scheme.h'
 schema = header.read_text()
 constructors = []
@@ -79,6 +81,8 @@ transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_transport.cpp'
 (work / 'typed-exact-reply.inc').write_text(block(transport, 'const auto completed = [weak, readback](const MTPmessages_Messages &result)'))
 (work / 'typed-download.inc').write_text(block(reader, 'void SyncCandidateReader::OnDownload()'))
 
+create = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp').read_text()
+(work / 'carry-mark-text.inc').write_text('namespace Purple { QString DesktopSyncChatMarkText() ' + block(create, 'QString DesktopSyncChatMarkText(') + ' }\n')
 upload = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_upload.cpp').read_text()
 post = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_post.cpp').read_text()
 automatic = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_service.cpp').read_text()
@@ -96,7 +100,7 @@ recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=
 objects = []
 compiled = []
 with (work / 'build.log').open('w') as log:
-    for source in [repo / 'purple/test_sync_chat_write.cpp',
+    for source in [repo / 'purple' / args.test_source,
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_write.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_facts.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_requests.cpp',
@@ -104,6 +108,8 @@ with (work / 'build.log').open('w') as log:
                    repo / 'Telegram/SourceFiles/purple/purple_sync_auto_transport.cpp',
                    repo / 'Telegram/SourceFiles/mtproto/mtproto_response.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_local_store.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_store.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_io.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cache.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_discovery.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_store.cpp',
@@ -143,11 +149,11 @@ with (work / 'build.log').open('w') as log:
             link += [value, '-Wl,-rpath,' + value[2:]]
     link += ['-Wl,-dead_strip', *map(str, objects), '-framework', 'QtCore',
              '-framework', 'QtGui', '-framework', 'QtWidgets', '-framework', 'AppKit',
-             '-o', str(work / 'test_sync_chat_write')]
+             '-o', str(binary)]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
 (work / 'inputs.json').write_text(json.dumps({'compile': compiled, 'link': link,
     'schema_sha256': hashlib.sha256(header.read_bytes()).hexdigest(),
-    'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp']},
+    'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_create.cpp', 'purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp']},
     'included_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_discovery.cpp').read_bytes()).hexdigest(),
     'included_io_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_io.cpp').read_bytes()).hexdigest(),
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -158,7 +164,7 @@ with (work / 'build.log').open('w') as log:
     'objects_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in objects},
     'boundary': 'Upload parts/fresh-gate/dispatch/Updates/finish/cancel and post receipt/readback/finish/cancel bodies are literal production ports; session, API queue, before-post service and exact-reader transports are substituted without network. Entropy endpoint is deterministic in test; stage/ledger and TL objects are real. Actual mapper, C0, requests, cache, discovery and disk adapter compiled directly; literal Accept/Cancel/Publish and scanner/reader ownership bodies are ported with substituted session/notification/worker endpoints. Real generated TL constructors; reused schema/base/private-file/core-state objects. Unit-only, no app build/network/native acceptance.'}, indent=2) + '\n')
 if not args.build_only:
-    result = subprocess.run([str(work / 'test_sync_chat_write')], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run([str(binary)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (work / 'run.log').write_bytes(result.stdout)
     (work / 'run.exit').write_text(str(result.returncode) + '\n')
     print(result.stdout.decode())
