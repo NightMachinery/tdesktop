@@ -1331,6 +1331,13 @@ id by hand: the ids in `members` are not shown anywhere in Telegram's UI, so
 building a list used to mean turning on an experimental option, reading the
 number off a profile, and typing it into the file.
 
+The chat's own top-bar menu (the three dots in an open chat) offers the same
+row right under the mute rows, near `Silenced by 'Work'`: same wording, same
+checks, same write. It shares the mute rows' rule above it instead of drawing
+a second one (`AddHistoryListsSubmenu`). A tick that cannot be saved because no
+account owns `settings.toml` yet leads to the settings-owner chooser, as it does
+in the chat list ([account_routing.md](account_routing.md)).
+
 The write goes through the same splice as everything else the app writes to
 that file, so your comments, your ordering and your blank lines survive it, and
 the line it adds carries the chat's name as a trailing comment. Names go stale,

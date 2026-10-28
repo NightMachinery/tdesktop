@@ -1878,6 +1878,7 @@ void Filler::fillContextMenuActions() {
 
 void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
+	Purple::AddHistoryListsSubmenu(_controller, _peer, _topic, _sublist, _addAction);
 	Purple::AddPinnedMusicAction(_controller, _thread, _sublist, _addAction);
 	addCreateTopic();
 	addInfo();

@@ -64,6 +64,18 @@ void AddPeerListsSubmenu(
 	AddListsSubmenu(addAction, controller->uiShow(), peer);
 }
 
+void AddHistoryListsSubmenu(
+		not_null<Window::SessionController*> controller,
+		PeerData *peer,
+		bool topic,
+		bool sublist,
+		const Ui::Menu::MenuCallback &addAction) {
+	if (!peer || topic || sublist) {
+		return;
+	}
+	AddListsSubmenu(addAction, controller->uiShow(), peer, false);
+}
+
 void AddLastSeenPeekAction(
 		not_null<Window::SessionController*> controller,
 		PeerData *peer,

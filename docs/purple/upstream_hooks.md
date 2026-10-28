@@ -746,6 +746,11 @@ B11.
 - The pin-ownership query receives `&controller->session()`. The active preset
   and its pin order remain shared app-wide in this version of Work Mode; this
   call does not add an account selector or synchronization binding.
+- `fillHistoryActions` (the chat's top-bar menu) calls
+  `Purple::AddHistoryListsSubmenu` right after `addToggleMuteSubmenu(true)`. It
+  is the chat list's `Work Mode` row without the rule above it, since the mute
+  rows already end with one. No other row moves. Pinned by
+  `purple/test_history_menu_lists.py`.
 
 **`Telegram/SourceFiles/window/window_main_menu.cpp`**: B8 extraction.
 - One `purple_chat_menus.h` include replaces the direct preset-box include.

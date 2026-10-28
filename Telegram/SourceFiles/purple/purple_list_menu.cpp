@@ -315,7 +315,8 @@ void FillListsMenu(
 void AddListsSubmenu(
 		const Ui::Menu::MenuCallback &add,
 		std::shared_ptr<Ui::Show> show,
-		not_null<PeerData*> peer) {
+		not_null<PeerData*> peer,
+		bool separatorAbove) {
 	if ((!HasCustomLists() && !Filtering()) || !IdOf(peer)) {
 		// Left out entirely rather than opening on an empty submenu, so an
 		// unconfigured fork's menus are untouched.
@@ -327,7 +328,9 @@ void AddListsSubmenu(
 	// builds its menu with popupMenuExpandedSeparator, so this is the thick
 	// divider there and the ordinary hairline elsewhere, which is right in
 	// both.
-	add(Ui::Menu::MenuCallback::Args{ .isSeparator = true });
+	if (separatorAbove) {
+		add(Ui::Menu::MenuCallback::Args{ .isSeparator = true });
+	}
 	add(Ui::Menu::MenuCallback::Args{
 		.text = u"Work Mode"_q,
 		.handler = nullptr,

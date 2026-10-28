@@ -39,6 +39,14 @@ void AddPeerListsSubmenu(
 	bool topic,
 	bool sublist,
 	const Ui::Menu::MenuCallback &addAction);
+// The same Work Mode row in the chat's top-bar menu, right under the mute
+// rows, whose own separator stands in for the rule above it.
+void AddHistoryListsSubmenu(
+	not_null<Window::SessionController*> controller,
+	PeerData *peer,
+	bool topic,
+	bool sublist,
+	const Ui::Menu::MenuCallback &addAction);
 void AddLastSeenPeekAction(
 	not_null<Window::SessionController*> controller,
 	PeerData *peer,

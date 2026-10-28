@@ -49,9 +49,13 @@ void FillListsMenu(
 //
 // Does nothing when the user has written no lists, or when the peer has no id
 // a list could name, so a caller does not have to ask first.
+//
+// separatorAbove = false is for a menu whose rows above already end with a
+// rule, such as the chat's top-bar menu after its mute rows.
 void AddListsSubmenu(
 	const Ui::Menu::MenuCallback &add,
 	std::shared_ptr<Ui::Show> show,
-	not_null<PeerData*> peer);
+	not_null<PeerData*> peer,
+	bool separatorAbove = true);
 
 } // namespace Purple
