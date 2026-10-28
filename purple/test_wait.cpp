@@ -396,13 +396,25 @@ void ReadyStepCases() {
 
 void PresenceCases() {
 	const auto settle = kWaitAwaySettle;
+	const auto grace = kWaitLockAfterAway;
 	{
-		// A switch to another app cancels once the settle window ends.
+		// A switch to another app cancels once no lock came in time.
 		auto presence = WaitPresence();
 		CHECK(!presence.update(true, false, 0));
 		CHECK(!presence.update(false, false, 100));
-		CHECK(!presence.update(false, false, 100 + settle - 1));
-		CHECK(presence.update(false, false, 100 + settle));
+		CHECK(!presence.update(false, false, 100 + grace - 1));
+		CHECK(presence.update(false, false, 100 + grace));
+	}
+	{
+		// Switch away, lock a second later, unlock, click back within the
+		// settle window: still a switch, so the wait is gone.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, false, 100));
+		CHECK(presence.update(false, true, 1100));
+		auto lateTick = WaitPresence();
+		CHECK(!lateTick.update(false, false, 100));
+		CHECK(lateTick.update(false, false, 350 + grace));
+		CHECK(!presence.locked());
 	}
 	{
 		// Switching away and back before it ends still cancels.
@@ -411,11 +423,11 @@ void PresenceCases() {
 		CHECK(presence.update(true, false, 400));
 	}
 	{
-		// Inactive first, lock inside the settle window: a lock. The wait
-		// lives through it, however long, and resumes on return.
+		// Inactive first, lock right after it: a lock. The wait lives
+		// through it, however long, and resumes on return.
 		auto presence = WaitPresence();
 		CHECK(!presence.update(false, false, 100));
-		CHECK(!presence.update(false, true, 100 + settle - 1));
+		CHECK(!presence.update(false, true, 100 + grace - 1));
 		CHECK(presence.locked());
 		CHECK(!presence.update(false, true, 8 * 3600 * 1000));
 		CHECK(!presence.update(false, false, 8 * 3600 * 1000 + 50));
@@ -424,13 +436,13 @@ void PresenceCases() {
 		CHECK(!presence.update(true, false, 8 * 3600 * 1000 + 300 + 10 * settle));
 		// And a later switch away still cancels.
 		CHECK(!presence.update(false, false, 9 * 3600 * 1000));
-		CHECK(presence.update(false, false, 9 * 3600 * 1000 + settle));
+		CHECK(presence.update(false, false, 9 * 3600 * 1000 + grace));
 	}
 	{
-		// A lock signal later than the settle window is a switch.
+		// A lock signal later than that is a switch.
 		auto presence = WaitPresence();
 		CHECK(!presence.update(false, false, 100));
-		CHECK(presence.update(false, true, 100 + settle));
+		CHECK(presence.update(false, true, 100 + grace));
 	}
 	{
 		// Lock first, inactive after: still a lock.
@@ -469,6 +481,59 @@ void PresenceCases() {
 	const auto first = WaitClockNow();
 	const auto second = WaitClockNow();
 	CHECK(first > 0 && second >= first);
+}
+
+void CoverLayoutCases() {
+	// The ready step's action never covers the countdown's Abort, and its
+	// Abort sits exactly there, for any window and any wrapping.
+	auto cases = 0;
+	for (const auto width : { 120, 200, 320, 640, 1600 }) {
+		for (const auto height : { 80, 240, 480, 900, 2000 }) {
+			for (const auto countdownTitle : { 32, 64, 128 }) {
+				for (const auto readyTitle : { 32, 64, 128, 256 }) {
+					for (const auto hint : { 20, 60, 140, 300 }) {
+						for (const auto confirm : { QSize(240, 56), QSize(560, 56), QSize(1800, 56) }) {
+							const auto rects = LayoutWaitCover({
+								.width = width,
+								.height = height,
+								.gap = 24,
+								.countdownTitle = countdownTitle,
+								.number = 96,
+								.abort = QSize(240, 56),
+								.readyTitle = readyTitle,
+								.hint = hint,
+								.confirm = confirm,
+								.readyAbort = QSize(240, 56),
+							});
+							++cases;
+							CHECK(!rects.confirm.intersects(rects.abort));
+							CHECK(rects.readyAbort == rects.abort);
+							CHECK(rects.confirm.bottom() < rects.abort.top());
+							CHECK(rects.hint.bottom() < rects.confirm.top());
+							CHECK(rects.readyTitle.bottom() < rects.hint.top());
+						}
+					}
+				}
+			}
+		}
+	}
+	// No gap at all still keeps them apart.
+	const auto tight = LayoutWaitCover({
+		.width = 200, .height = 100, .gap = 0, .countdownTitle = 64, .number = 96,
+		.abort = QSize(240, 56), .readyTitle = 128, .hint = 140,
+		.confirm = QSize(400, 56), .readyAbort = QSize(240, 56),
+	});
+	CHECK(!tight.confirm.intersects(tight.abort) && tight.readyAbort == tight.abort);
+	// A ready Abort of another height is centred on the old one, and the
+	// action still clears both.
+	const auto taller = LayoutWaitCover({
+		.width = 640, .height = 480, .gap = 24, .countdownTitle = 64, .number = 96,
+		.abort = QSize(240, 56), .readyTitle = 64, .hint = 20,
+		.confirm = QSize(240, 72), .readyAbort = QSize(240, 72),
+	});
+	CHECK(taller.readyAbort.center() == taller.abort.center());
+	CHECK(!taller.confirm.intersects(taller.abort) && !taller.confirm.intersects(taller.readyAbort));
+	CHECK(cases == 5 * 5 * 3 * 4 * 4 * 3);
 }
 
 void ReadyKeyCases() {
@@ -1417,6 +1482,7 @@ int main(int argc, char *argv[]) {
 	KeyCases();
 	FocusPreferenceProbe::ReadyStepCases();
 	FocusPreferenceProbe::PresenceCases();
+	FocusPreferenceProbe::CoverLayoutCases();
 	FocusPreferenceProbe::ReadyKeyCases();
 	FocusPreferenceProbe::ReadyTimeoutOptionCases();
 	DefaultDelayCases();

@@ -165,8 +165,8 @@ Normal, explicit Show overrides and genuinely visible chats stay open.
 ## Application focus and locks
 
 A pending countdown or ready step aborts quietly when another Telegram window or
-dialog takes focus, or when the application stays inactive for 2 s, or returns,
-without a lock signal. Screen, OS session and passcode locks and sleep keep it:
+dialog takes focus, or when the application goes inactive and no lock signal
+follows within 300 ms. Screen, OS session and passcode locks and sleep keep it:
 see [locks versus app switches](work_mode_wait.md#locks-versus-app-switches).
 Application-state, activation and lock events drive it; the 250 ms tick is a
 backstop. Abort leaves the requested write

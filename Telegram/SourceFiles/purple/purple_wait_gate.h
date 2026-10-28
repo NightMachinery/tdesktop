@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QRect>
 #include <QtCore/QString>
 
 #include <cstdint>
@@ -104,7 +105,11 @@ private:
 inline constexpr auto kWaitReadyGuard = int64_t(500);
 
 // How long after the host window loses activation a lock signal may still
-// arrive and make it a lock rather than a switch to another app.
+// arrive and make it a lock rather than a switch to another app. Short, so
+// that switching away and locking a moment later stays a switch.
+inline constexpr auto kWaitLockAfterAway = int64_t(300);
+
+// How long after an unlock the host window has to be in the foreground again.
 inline constexpr auto kWaitAwaySettle = int64_t(2000);
 
 enum class WaitPhase { Idle, Countdown, Ready };
@@ -140,8 +145,9 @@ private:
 
 // Whether the person is at the host window, away in another app, or behind
 // a lock. The order of "inactive" and "locked" is not fixed on any platform,
-// so leaving the window starts a settle window in which a lock may still
-// arrive. A return or the end of the settle window without one cancels.
+// so leaving the window leaves kWaitLockAfterAway for a lock to arrive. A
+// return, or that time passing, without one cancels. After an unlock the
+// window has kWaitAwaySettle to be in the foreground again.
 class WaitPresence final {
 public:
 	void reset();
@@ -156,6 +162,35 @@ private:
 	int64_t _since = 0;
 
 };
+
+// The cover's two layouts. The countdown stacks its title, number and Abort,
+// centred. The ready step keeps Abort exactly where the countdown's was and
+// stacks the action, hint and title above it, so a click aimed at Abort
+// never lands on the action, whatever wraps.
+struct WaitCoverSizes {
+	int width = 0;
+	int height = 0;
+	int gap = 0;
+	int countdownTitle = 0;
+	int number = 0;
+	QSize abort;
+	int readyTitle = 0;
+	int hint = 0;
+	QSize confirm;
+	QSize readyAbort;
+};
+
+struct WaitCoverRects {
+	QRect countdownTitle;
+	QRect number;
+	QRect abort;
+	QRect readyTitle;
+	QRect hint;
+	QRect confirm;
+	QRect readyAbort;
+};
+
+[[nodiscard]] WaitCoverRects LayoutWaitCover(const WaitCoverSizes &sizes);
 
 enum class WaitKeyVerdict { Ignore, Abort, Confirm };
 

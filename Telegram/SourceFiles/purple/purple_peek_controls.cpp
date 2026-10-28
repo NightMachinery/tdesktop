@@ -109,9 +109,9 @@ private:
 
 	Fn<void()> _abortCallback;
 	Fn<void(bool, bool)> _keyCallback;
-	WaitAction _action = WaitAction::StartPeek;
 	object_ptr<Ui::FlatLabel> _title;
 	object_ptr<Ui::FlatLabel> _number;
+	object_ptr<Ui::FlatLabel> _readyTitle;
 	object_ptr<Ui::FlatLabel> _hint;
 	object_ptr<Ui::RoundButton> _abort;
 	object_ptr<Ui::RoundButton> _confirm;
@@ -173,7 +173,6 @@ WaitCover::WaitCover(
 : RpWidget(parent)
 , _abortCallback(std::move(abort))
 , _keyCallback(std::move(key))
-, _action(action)
 , _title(
 	this,
 	action == WaitAction::ChangePeekOption
@@ -185,6 +184,7 @@ WaitCover::WaitCover(
 		: tr::lng_purple_work_mode_changing(),
 	st::purplePeekHeading)
 , _number(this, QString(), st::purplePeekCountdown)
+, _readyTitle(this, ReadyTitle(action), st::purplePeekHeading)
 , _hint(this, tr::lng_purple_wait_ready_hint(), st::purplePeekHint)
 , _abort(this, tr::lng_purple_wait_abort(), st::purplePeekAbort)
 , _confirm(this, rpl::single(actionText), st::purplePeekConfirm)
@@ -199,6 +199,7 @@ WaitCover::WaitCover(
 	if (_confirm->width() < _readyAbort->width()) {
 		_confirm->setFullWidth(st::purplePeekAbort.width);
 	}
+	_readyTitle->hide();
 	_hint->hide();
 	_confirm->hide();
 	_readyAbort->hide();
@@ -219,8 +220,11 @@ void WaitCover::setRemaining(int seconds) {
 void WaitCover::showReady(bool guarded) {
 	if (!_ready) {
 		_ready = true;
-		_title->setText(ReadyTitle(_action));
+		// The countdown's title and number stay measurable: the ready step
+		// is laid out from where the countdown's Abort was.
+		_title->hide();
 		_number->hide();
+		_readyTitle->show();
 		_abort->hide();
 		_hint->show();
 		_confirm->show();
@@ -250,31 +254,31 @@ void WaitCover::resizeEvent(QResizeEvent *e) {
 void WaitCover::layout() {
 	const auto available = std::max(width() - 2 * st::purplePeekPadding, 0);
 	_title->resizeToWidth(available);
-	if (!_ready) {
-		_number->resizeToWidth(available);
-		const auto total = _title->height() + _number->height()
-			+ _abort->height() + 2 * st::purplePeekGap;
-		auto top = std::max((height() - total) / 2, 0);
-		_title->move((width() - _title->width()) / 2, top);
-		top += _title->height() + st::purplePeekGap;
-		_number->move((width() - _number->width()) / 2, top);
-		top += _number->height() + st::purplePeekGap;
-		_abort->move((width() - _abort->width()) / 2, top);
-		return;
-	}
+	_number->resizeToWidth(available);
+	_readyTitle->resizeToWidth(available);
 	_hint->resizeToWidth(available);
-	const auto buttons = _confirm->height() + st::purplePeekGap
-		+ _readyAbort->height();
-	const auto total = _title->height() + _hint->height() + buttons
-		+ 2 * st::purplePeekGap;
-	auto top = std::max((height() - total) / 2, 0);
-	_title->move((width() - _title->width()) / 2, top);
-	top += _title->height() + st::purplePeekGap;
-	_hint->move((width() - _hint->width()) / 2, top);
-	top += _hint->height() + st::purplePeekGap;
-	_confirm->move((width() - _confirm->width()) / 2, top);
-	top += _confirm->height() + st::purplePeekGap;
-	_readyAbort->move((width() - _readyAbort->width()) / 2, top);
+	const auto rects = LayoutWaitCover({
+		.width = width(),
+		.height = height(),
+		.gap = st::purplePeekGap,
+		.countdownTitle = _title->height(),
+		.number = _number->height(),
+		.abort = _abort->size(),
+		.readyTitle = _readyTitle->height(),
+		.hint = _hint->height(),
+		.confirm = _confirm->size(),
+		.readyAbort = _readyAbort->size(),
+	});
+	const auto place = [&](not_null<QWidget*> label, const QRect &rect) {
+		label->move((width() - label->width()) / 2, rect.top());
+	};
+	place(_title.data(), rects.countdownTitle);
+	place(_number.data(), rects.number);
+	_abort->move(rects.abort.topLeft());
+	place(_readyTitle.data(), rects.readyTitle);
+	place(_hint.data(), rects.hint);
+	_confirm->move(rects.confirm.topLeft());
+	_readyAbort->move(rects.readyAbort.topLeft());
 }
 
 void WaitCover::keyPressEvent(QKeyEvent *e) {

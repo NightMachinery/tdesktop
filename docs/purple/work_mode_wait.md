@@ -64,7 +64,10 @@ Keys in the ready step: Return or keypad Enter presses the button; Escape and
 any other key abort. For 500 ms after the step appears, and again when it
 reappears after a lock, every key is swallowed and the button is greyed and
 deaf to the mouse, so a held or late key cannot confirm. Auto-repeat is always
-ignored. Abort stays clickable throughout.
+ignored. Abort stays clickable throughout. The ready step's Abort sits exactly
+where the countdown's Abort was, with the action button, hint and title stacked
+above it, so a late click aimed at Abort can never land on the action, however
+narrow the window or long the text.
 
 The step aborts by itself, quietly, `[peek] ready_timeout_seconds` after the
 countdown ended: default 600, at least 10. It counts from the end of the
@@ -91,14 +94,19 @@ The signals are the ones Desktop already has. All feed
 A lock can make the app inactive before its signal arrives, so `WaitPresence`
 never acts on inactivity alone:
 
-- leaving the window opens a 2 s settle window;
-- a lock signal inside it makes this a lock;
-- coming back without a lock, or reaching its end, cancels;
+- leaving the window leaves 300 ms for a lock signal;
+- a lock signal inside that makes this a lock;
+- coming back without a lock, or the 300 ms passing, cancels;
 - after an unlock the window must be in the foreground again within 2 s.
+
+The 300 ms is short on purpose: switching to another app and locking a second
+later is still a switch, so the wait is gone, even if the person clicks back
+into Telegram right after unlocking. (It was 2 s before PEEK-CONFIRM-2, which
+let that sequence keep the wait.)
 
 Where a lock cannot be told apart from a switch, the wait cancels:
 
-- a lock signal later than 2 s;
+- a lock signal more than 300 ms after the app went inactive;
 - Linux without the portal;
 - sleep that deactivates the app without a lock;
 - macOS fast user switching without `screenIsLocked`.

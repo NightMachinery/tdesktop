@@ -277,8 +277,9 @@ void WaitPresence::reset() {
 }
 
 bool WaitPresence::update(bool foreground, bool locked, int64_t now) {
-	const auto settled = (now - _since >= kWaitAwaySettle);
-	if (_phase == Phase::Away && settled) {
+	// Checked before the lock: a lock that comes later than this follows a
+	// switch to another app, and the switch already cancelled the wait.
+	if (_phase == Phase::Away && now - _since >= kWaitLockAfterAway) {
 		return true;
 	} else if (locked) {
 		_phase = Phase::Locked;
@@ -311,6 +312,40 @@ bool WaitPresence::update(bool foreground, bool locked, int64_t now) {
 
 bool WaitPresence::locked() const {
 	return _phase == Phase::Locked;
+}
+
+WaitCoverRects LayoutWaitCover(const WaitCoverSizes &sizes) {
+	const auto centred = [&](int top, int width, int height) {
+		return QRect((sizes.width - width) / 2, top, width, height);
+	};
+	auto result = WaitCoverRects();
+	const auto total = sizes.countdownTitle + sizes.number
+		+ sizes.abort.height() + 2 * sizes.gap;
+	auto top = std::max((sizes.height - total) / 2, 0);
+	result.countdownTitle = centred(top, sizes.width, sizes.countdownTitle);
+	top += sizes.countdownTitle + sizes.gap;
+	result.number = centred(top, sizes.width, sizes.number);
+	top += sizes.number + sizes.gap;
+	result.abort = centred(top, sizes.abort.width(), sizes.abort.height());
+
+	// Upwards from the countdown's Abort. A title that no longer fits starts
+	// above the top edge rather than pushing the buttons down.
+	result.readyAbort = centred(
+		result.abort.top()
+			+ (sizes.abort.height() - sizes.readyAbort.height()) / 2,
+		sizes.readyAbort.width(),
+		sizes.readyAbort.height());
+	auto bottom = std::min(result.readyAbort.top(), result.abort.top())
+		- sizes.gap;
+	result.confirm = centred(
+		bottom - sizes.confirm.height(),
+		sizes.confirm.width(),
+		sizes.confirm.height());
+	bottom = result.confirm.top() - sizes.gap;
+	result.hint = centred(bottom - sizes.hint, sizes.width, sizes.hint);
+	bottom = result.hint.top() - sizes.gap;
+	result.readyTitle = centred(bottom - sizes.readyTitle, sizes.width, sizes.readyTitle);
+	return result;
 }
 
 WaitKeyVerdict ClassifyWaitKey(
