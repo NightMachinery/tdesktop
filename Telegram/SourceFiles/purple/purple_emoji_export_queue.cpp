@@ -47,6 +47,23 @@ void EmojiExportQueue::next() {
 	if (_cursor < _order.size()) ++_cursor;
 }
 
+void EmojiExportQueue::prioritize(size_t index) {
+	const auto found = std::find(_order.begin(), _order.end(), index);
+	if (found == _order.end()) {
+		_order.push_back(index);
+		std::rotate(_order.begin() + _cursor, _order.end() - 1, _order.end());
+	} else if (size_t(found - _order.begin()) < _cursor) {
+		std::rotate(found, found + 1, _order.begin() + _cursor);
+		--_cursor;
+	} else {
+		std::rotate(_order.begin() + _cursor, found, found + 1);
+	}
+}
+
+qint64 EmojiExportQueue::metadataRetryAt() const {
+	return _resolveRetryAt;
+}
+
 void EmojiExportQueue::continueSlice() {
 	_used = 0;
 }

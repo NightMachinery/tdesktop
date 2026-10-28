@@ -79,6 +79,8 @@ queue_header = (root / 'purple_emoji_export_queue.h').read_text().replace('#incl
 (work / 'emoji-queue-header.inc').write_text(queue_header)
 (work / 'emoji-queue.inc').write_text((root / 'purple_emoji_export_queue.cpp').read_text().replace('#include "purple/purple_emoji_export_queue.h"', ''))
 emoji = (root / 'purple_emoji_export.cpp').read_text()
+(work / 'emoji-title-retry.inc').write_text(member(emoji, 'std::optional<qint64> NextEmojiExportRetry('))
+(work / 'emoji-hold-demand.inc').write_text(member(emoji, 'void EmojiExporter::holdDemandForMetadataWait(').replace('EmojiExporter::', 'EmojiExporterProbe::'))
 (work / 'emoji-deferred.inc').write_text(member(emoji, 'void EmojiExporter::deferred(').replace('EmojiExporter::', 'EmojiExporterProbe::'))
 resolve = member(emoji, 'void EmojiExporter::resolve()')
 marker = '}).fail([=](const MTP::Error &) '
@@ -104,7 +106,7 @@ subprocess.run(['xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
 subprocess.run([str(emoji_binary)], check=True)
 
 expected = {
-    'purple_emoji_export.cpp': 1,
+    'purple_emoji_export.cpp': 2,
     'purple_sync_chat_peer_request.cpp': 3,
     'purple_sync_chat_service.cpp': 5,
     'purple_sync_history_scanner.cpp': 1,
@@ -168,7 +170,7 @@ assert 'std::unique_ptr<MTP::Sender>' not in emoji
 handoff = member(source, 'void SyncRequestSender::failed(')
 assert handoff.index('cancel(id);') < handoff.index('callback(id, *transient);')
 print(f'{negative_count} effect/local-open/download source guards and negative mutations PASS')
-print('16 request sites inventoried, controller/current/timeout/immutable-wire gates PASS')
+print('17 request sites inventoried, controller/current/timeout/immutable-wire gates PASS')
 (work / 'receipt.json').write_text(json.dumps({'siteCounts': expected,
     'productionMethods': ['dispatch', 'failed', 'tick', 'resume', 'cancel'],
     'literalIntegration': ['send-template', 'watch', 'upload-Current', 'upload-SendMedia', 'upload-RenewBeforePost', 'upload-ResumeEffect', 'service-RetryLocalOpen', 'service-Publish', 'service-Ensure', 'download-watch', 'download-retire', 'download-retry', 'delete-RenewEffect'],

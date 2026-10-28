@@ -114,6 +114,28 @@
     {"name": "test_sync_local_store", "driver": "purple/test_sync_local_store.sh", "compiles": true, "fixtures": ["purple/test_sync_local_store.cpp"]},
     {"name": "test_sync_record_names", "driver": "purple/test_sync_record_names.sh", "compiles": true, "fixtures": ["purple/test_sync_record_names.cpp"]},
     {"name": "test_version", "driver": "purple/test_version.sh", "compiles": true, "fixtures": ["purple/test_version.cpp"]},
-    {"name": "test_config", "driver": "purple/test_config.sh", "compiles": true, "env": {"ARCHIVE_SQLITE_TESTS": "1"}}
+    {"name": "test_config", "driver": "purple/test_config.sh", "compiles": true, "env": {"ARCHIVE_SQLITE_TESTS": "1"}},
+    {
+      "name": "test_emoji_large",
+      "driver": "purple/test_emoji_large.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/emoji_large_policy_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_store_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_bounds_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_demand_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_render_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_metadata_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_maintenance_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_recent_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/emoji_large_preferences_cases.cpp"
+      ]
+    }
   ]
 }

@@ -74,3 +74,16 @@ recompiled for this successor. Independent source/native gates remain separate.
 Every program here now has a host gate (`cases-<name>` in `purple/host_gates.json`,
 built by `purple/test_cases.py`). On 27 October the successor above ran there
 again with 88 checks and zero failures.
+
+The large emoji programs (`emoji_large_*_cases.cpp`) run through
+`purple/test_emoji_large.py` and its canonical `test_emoji_large` configuration.
+They use synthetic artwork and preference/network endpoints, plus the actual
+export worker and frame generators. They never open a real account or chooser.
+
+`emoji_large_bounds_cases.cpp` runs on the production export worker. It pins the 256-entry maintenance page, 2,048-file index, 1,024-entry request admission ceiling, overflow draining, parent identity checks, and persistent quit/restart cleanup.
+
+`emoji_large_demand_cases.cpp` checks a new demand late in a full old-file scan, an indexed file touched during that scan, and literal production publication/maintenance. A successful acknowledgement requires an advertised existing image; a missing rendered file leaves its request for retry.
+
+The large-cap preference case extracts the production preference API and integer serialization definitions. It checks restart persistence, malformed byte fallback and signed integer endpoints. The large driver also checks that the actual cap object defines both integer preference symbols, so a TU-only compile cannot hide an app link failure.
+
+The demand case also checks a full future-dated cohort after clock rollback. Times strictly beyond five minutes rank oldest; an exact five-minute boundary stays plausible, and equal times use filename order. Each case executes real pruning on EmojiExportWorker.

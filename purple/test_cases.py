@@ -67,14 +67,14 @@ CASES = {
     },
     'emoji-export': {
         'program': 'emoji_export_cases.cpp',
-        'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_export_queue.cpp', 'purple/purple_emoji_export_worker.cpp'],
+        'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_large.cpp', 'purple/purple_emoji_large_store.cpp', 'purple/purple_emoji_export_queue.cpp', 'purple/purple_emoji_export_worker.cpp'],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation'],
         'link': ['-lobjc'],
     },
     'emoji-export-async': {
         'program': 'emoji_export_async_cases.cpp',
-        'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_export_queue.cpp', 'purple/purple_emoji_export_worker.cpp'],
+        'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_large.cpp', 'purple/purple_emoji_large_store.cpp', 'purple/purple_emoji_export_queue.cpp', 'purple/purple_emoji_export_worker.cpp'],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation'],
         'link': ['-lobjc'],
@@ -83,7 +83,7 @@ CASES = {
         # The worker is compiled with its condition variable replaced by the
         # program's instrumented one, as the shutdown cases require.
         'program': 'emoji_export_shutdown_cases.cpp',
-        'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_export_worker.cpp'],
+        'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_large.cpp', 'purple/purple_emoji_large_store.cpp', 'purple/purple_emoji_export_worker.cpp'],
         'shim': {'header': 'purple/purple_emoji_export_worker.h', 'prefix': '#include "purple/tests/emoji_export_shutdown_cv.h"\n',
             'replace': ['std::condition_variable _ready;', 'Purple::Tests::EmojiShutdownCondition _ready;']},
         'libraries': ['Telegram/lib_base/liblib_base.a'],

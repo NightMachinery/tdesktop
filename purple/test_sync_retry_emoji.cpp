@@ -5,9 +5,22 @@
 #include "emoji-queue.inc"
 #include <limits>
 
+#include "emoji-title-retry.inc"
+
+struct SetTitleProbe {
+	std::optional<quint64> id;
+	std::optional<qint64> retry;
+	std::optional<quint64> active() const { return id; }
+	void defer(quint64 value) { if (id == value) id.reset(); }
+	std::optional<qint64> retryAt(qint64 now) const {
+		return retry && now < *retry ? retry : std::nullopt;
+	}
+};
+
 struct EmojiExporterProbe {
 	mtpRequestId _request = 0;
 	EmojiExportQueue _queue;
+	SetTitleProbe _setTitles;
 	struct Clock { int64_t offset = 12345; int64_t elapsed() const { return Mono + offset; } } _clock;
 	struct Entry { uint64_t id = 0; };
 	std::vector<Entry> _entries{{42}, {43}};
@@ -15,22 +28,29 @@ struct EmojiExporterProbe {
 	struct Epoch { bool accepts(int token) const { return token == 7; } } _epoch;
 	bool current = true;
 	int advances = 0;
+	int pumps = 0;
+	std::optional<quint64> _demandId;
+	std::optional<quint64> _deferredDemand;
 	int reconciles = 0;
 	EmojiExporterProbe() { _queue.begin({42, 43}, {}); }
 	bool admitted() const { return current; }
 	void reconcile() { ++reconciles; }
 	void next() { ++advances; _queue.next(); }
+	void pump() { ++pumps; }
+	void holdDemandForMetadataWait();
 	void deferred(mtpRequestId request, const SyncRequestTransient &transient);
 	void permanent(int token, uint64_t id) {
 #include "emoji-permanent-fail.inc"
 	}
 };
+#include "emoji-hold-demand.inc"
 #include "emoji-deferred.inc"
 
 #include "emoji-publication-constant.inc"
 
 struct EmojiPublicationProbe {
 	EmojiExportQueue _queue;
+	SetTitleProbe _setTitles;
 	struct Clock { int64_t value = 0; int64_t elapsed() const { return value; } } _clock;
 	struct Timer {
 		int delay = 0;
@@ -42,10 +62,19 @@ struct EmojiPublicationProbe {
 	bool _rendering = true;
 	bool _running = true;
 	bool _pending = false;
+	bool _publishPending = true;
+	std::vector<int> _ready;
+	std::shared_ptr<std::vector<int>> _published;
+	std::shared_ptr<std::vector<int>> published = std::make_shared<std::vector<int>>();
+	std::shared_ptr<std::vector<int>> ready = std::make_shared<std::vector<int>>();
+	std::set<quint64> _acknowledge;
+	std::shared_ptr<std::set<quint64>> acknowledge = std::make_shared<std::set<quint64>>();
+	int pumps = 0;
+	void pump() { ++pumps; }
 	bool admitted() const { return true; }
 	void reconcile() { Check(false, "publication authority remains current"); }
 	void outputFailed() { Check(false, "publication succeeds"); }
-	void complete(quint64 generation = 7, bool ok = true, quint64 token = 7)
+	void complete(quint64 generation = 7, bool ok = true, quint64 token = 7, bool finished = true)
 #include "emoji-publication-completion.inc"
 };
 
@@ -80,6 +109,54 @@ struct EmojiRequestRun {
 };
 
 int main() {
+	{
+		auto r = EmojiRequestRun(); r.exporter._demandId = 42;
+		r.wire().fail({420, MTP::Text("FLOOD_WAIT_90")});
+		Check(r.exporter._deferredDemand == 42 && !r.exporter._demandId
+			&& r.exporter.advances == 1, "chooser demand remains retained across transient while cursor advances");
+	}
+	{
+		auto r = EmojiPublicationProbe(); r.ready->assign({1, 2, 3});
+		r.acknowledge->insert(42);
+		r.complete(7, true, 7, false);
+		Check(r._ready == std::vector<int>({1, 2, 3}) && !r._acknowledge.contains(42)
+			&& r._published == r.published
+			&& !r._publishPending && r._running && r.pumps == 1,
+			"partial publication restores snapshots without deferring successful acknowledgements");
+	}
+
+	{
+		auto r = EmojiPublicationProbe();
+		r.complete(6);
+		Check(r._rendering && r._running && !r._debounce.starts,
+			"retired generation cannot clear newer render or arm timer");
+		r.complete(7, true, 6);
+		Check(r._rendering && r._running && !r._debounce.starts,
+			"retired epoch cannot clear newer render or arm timer");
+	}
+
+	{
+		auto r = EmojiRequestRun();
+		r.exporter._setTitles.id = 99;
+		r.wire().fail({420, MTP::Text("FLOOD_WAIT_90")});
+		Check(!r.exporter._setTitles.active() && r.exporter.pumps == 1
+			&& r.exporter.advances == 0 && r.exporter._queue.current() == 0,
+			"set-title transient releases only request and retains cached-artwork cursor");
+		Check(r.exporter._queue.resolve(42, 102344) == EmojiResolveAdmission::Cooldown
+			&& r.exporter._queue.resolve(42, 102345) == EmojiResolveAdmission::Ready,
+			"set-title handoff applies same monotonic hold to both request kinds");
+	}
+	{
+		auto r = EmojiPublicationProbe();
+		r._setTitles.retry = 60000;
+		r.complete();
+		Check(r._debounce.delay == 60000, "unknown set retries after bounded cooldown without outside trigger");
+		r._clock.value = 60000;
+		r._pending = false;
+		r.complete();
+		Check(r._debounce.starts == 1, "expired set retry cannot create publication loop");
+	}
+
 	for (const auto type : {"FLOOD_WAIT_8", "FLOOD_PREMIUM_WAIT_8"}) {
 		auto r = EmojiRequestRun(); const auto first = r.wire();
 		first.fail({420, MTP::Text(type)});

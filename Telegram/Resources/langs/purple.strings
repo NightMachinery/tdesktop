@@ -394,3 +394,5 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_emoji_export" = "Export custom emoji for local tools";
 "lng_purple_emoji_export_about" = "Saves your emoji library catalog and 128 px artwork to {path}.";
+
+"lng_purple_emoji_large_cap" = "Large emoji cache limit";

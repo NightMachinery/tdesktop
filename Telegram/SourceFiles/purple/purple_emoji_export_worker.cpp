@@ -1,6 +1,7 @@
 #include "purple/purple_emoji_export_worker.h"
 
 #include "purple/purple_emoji_export_store.h"
+#include "purple/purple_emoji_large_store.h"
 #include <QtCore/QMetaObject>
 
 namespace Purple {
@@ -58,6 +59,8 @@ void EmojiExportWorker::completed(Job job, bool ok) {
 }
 
 void EmojiExportWorker::run() {
+	auto recovery = EmojiExportCleanupRecorded(_directory);
+	auto cleanup = std::make_unique<EmojiExportCleanup>();
 	while (true) {
 		auto job = Job();
 		auto clear = false;
@@ -65,24 +68,37 @@ void EmojiExportWorker::run() {
 			auto lock = std::unique_lock(_mutex);
 			_ready.wait(lock, [&] { return _stopping.load() || _pending.has_value(); });
 			if (_stopping.load()) {
-				const auto clearOnStop = _clearRequired;
+				const auto clearOnStop = _clearRequired || recovery;
 				lock.unlock();
-				if (clearOnStop) static_cast<void>(ClearEmojiExport(_directory));
+				if (clearOnStop) static_cast<void>(RecordEmojiExportCleanup(_directory));
 				return;
 			}
 			job = std::move(*_pending);
 			_pending.reset();
-			clear = _clearRequired;
+			clear = _clearRequired || recovery;
 		}
 		const auto current = [this, generation = job.generation] {
 			return !_stopping.load() && _generation.load() == generation;
 		};
-		const auto ok = current() && (job.barrier
-			? (!clear || ClearEmojiExport(_directory, current)) : job.work(current));
-		if (job.barrier && ok) {
-			const auto lock = std::lock_guard(_mutex);
-			if (current()) _clearRequired = false;
+		auto cleaned = !clear;
+		while (clear && current()) {
+			const auto result = cleanup->step(_directory, current);
+			if (result == EmojiExportCleanupResult::Pending) {
+				std::this_thread::yield();
+				continue;
+			}
+			cleaned = result == EmojiExportCleanupResult::Done;
+			break;
 		}
+		const auto ok = current() && cleaned && (job.barrier || job.work(current));
+		if (clear && cleaned) {
+			const auto lock = std::lock_guard(_mutex);
+			if (current()) {
+				_clearRequired = false;
+				recovery = false;
+			}
+		}
+		if (clear) cleanup = std::make_unique<EmojiExportCleanup>();
 		completed(std::move(job), ok);
 	}
 }

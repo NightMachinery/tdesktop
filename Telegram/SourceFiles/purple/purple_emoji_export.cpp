@@ -3,6 +3,10 @@
 #include "purple/purple_emoji_export_store.h"
 #include "purple/purple_emoji_export_queue.h"
 #include "purple/purple_emoji_export_worker.h"
+#include "purple/purple_emoji_large.h"
+#include "purple/purple_emoji_large_render.h"
+#include "purple/purple_emoji_large_setting.h"
+#include "purple/purple_emoji_large_store.h"
 #include "purple/purple_sync_request_sender.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
@@ -14,10 +18,7 @@
 #include "data/data_file_origin.h"
 #include "data/stickers/data_stickers.h"
 #include "data/stickers/data_stickers_set.h"
-#include "ffmpeg/ffmpeg_frame_generator.h"
 #include "lang/lang_keys.h"
-#include "lottie/lottie_common.h"
-#include "lottie/lottie_frame_generator.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -54,31 +55,18 @@ QString CanonicalDirectory(const QString &path) {
 	return canonical.isEmpty() ? QDir::cleanPath(path) : canonical;
 }
 
-QImage RenderEmoji(
-		const QByteArray &data,
-		const QString &filepath,
-		StickerType type,
-		std::optional<QColor> tint) {
-	if (data.size() > kMaxMediaBytes
-		|| (data.isEmpty() && QFileInfo(filepath).size() > kMaxMediaBytes)) {
-		return {};
-	}
-	const auto bytes = Lottie::ReadContent(data, filepath);
-	auto generator = std::unique_ptr<Ui::FrameGenerator>();
+EmojiExportSource ExportSource(StickerType type) {
 	switch (type) {
-	case StickerType::Tgs:
-		generator = std::make_unique<Lottie::FrameGenerator>(bytes);
-		break;
-	case StickerType::Webm:
-		generator = std::make_unique<FFmpeg::FrameGenerator>(bytes);
-		break;
-	case StickerType::Webp:
-		generator = std::make_unique<Ui::ImageFrameGenerator>(bytes);
-		break;
+	case StickerType::Tgs: return EmojiExportSource::Tgs;
+	case StickerType::Webm: return EmojiExportSource::Webm;
+	case StickerType::Webp: return EmojiExportSource::Webp;
 	}
-	return generator ? EmojiExportFrame(generator->renderNext(QImage(),
-		QSize(kEmojiExportPixels, kEmojiExportPixels), Qt::KeepAspectRatio).image, tint)
-		: QImage();
+	Unexpected("Sticker type");
+}
+
+std::optional<qint64> NextEmojiExportRetry(
+		std::optional<qint64> queue, std::optional<qint64> titles) {
+	return !queue ? titles : !titles ? queue : std::optional(std::min(*queue, *titles));
 }
 
 class EmojiExporter final : public QObject {
@@ -98,6 +86,12 @@ private:
 	void outputFailed();
 	void checkMedia();
 	void resolve();
+	void maintainRequests();
+	void admitRequests(const std::vector<quint64> &ids);
+	void chooseDemand();
+	void holdDemandForMetadataWait();
+	[[nodiscard]] bool resolveSetTitle(DocumentData *document);
+	void applySetTitle(quint64 id);
 	void deferred(mtpRequestId request, const SyncRequestTransient &transient);
 	void fillMetadata(DocumentData *document);
 	[[nodiscard]] bool admitted() const;
@@ -111,6 +105,21 @@ private:
 	QTimer _debounce;
 	QElapsedTimer _clock;
 	EmojiExportQueue _queue{ kMaxResolvesPerSlice };
+	EmojiSetTitleCache _setTitles;
+	std::set<quint64> _largeIds;
+	std::set<quint64> _demandIds;
+	std::set<quint64> _retiredDemandIds;
+	size_t _baseCount = 0;
+	size_t _demandReplace = 0;
+	EmojiLargeRequestQueue _largeRequests;
+	std::set<quint64> _acknowledge;
+	std::set<quint64> _afterPublicationAck;
+	std::optional<quint64> _demandId;
+	std::optional<quint64> _deferredDemand;
+	bool _demandRendered = false;
+	bool _scanDue = true;
+	bool _pruneLarge = true;
+	bool _publishPending = false;
 	QTimer _poll;
 	QElapsedTimer _taskTime;
 	base::weak_ptr<Main::Session> _session;
@@ -122,6 +131,8 @@ private:
 	std::shared_ptr<Data::DocumentMedia> _media;
 	std::vector<EmojiExportEntry> _entries;
 	std::vector<std::optional<EmojiExportEntry>> _ready;
+	std::shared_ptr<const std::vector<EmojiExportEntry>> _published
+		= std::make_shared<const std::vector<EmojiExportEntry>>();
 	EmojiExportEpoch _epoch;
 	quint64 _token = 0;
 	size_t _index = 0;
@@ -153,12 +164,14 @@ EmojiExporter::EmojiExporter()
 		if (!admitted()) {
 			return;
 		}
+		_scanDue = true;
+		if (!_rendering && _epoch.accepts(_token)) maintainRequests();
 		if (_transferId && !transferBusy()) {
 			dirty();
 		}
 		if (_media) {
 			checkMedia();
-		} else if (_running) {
+		} else if (_running || _largeRequests.pending() || _deferredDemand) {
 			pump();
 		}
 	});
@@ -173,10 +186,18 @@ EmojiExporter::EmojiExporter()
 		_outputFailed = false;
 		reconcile();
 	}, _lifetime);
+	EmojiLargeCacheCapValue() | rpl::on_next([=](qint64) {
+		_pruneLarge = true;
+		_scanDue = true;
+		if (admitted() && !_rendering) maintainRequests();
+	}, _lifetime);
 	Core::App().settings().recentEmojiUpdated() | rpl::on_next([=] {
 		dirty();
 	}, _lifetime);
-	style::PaletteChanged() | rpl::on_next([=] { dirty(); }, _lifetime);
+	style::PaletteChanged() | rpl::on_next([=] {
+		revoke();
+		reconcile();
+	}, _lifetime);
 	reconcile();
 	_poll.start(1000);
 }
@@ -267,7 +288,23 @@ void EmojiExporter::revoke(bool clear) {
 	_session = {};
 	_entries.clear();
 	_ready.clear();
+	_published = std::make_shared<const std::vector<EmojiExportEntry>>();
 	_queue.clear();
+	_setTitles.clear();
+	_largeIds.clear();
+	_demandIds.clear();
+	_retiredDemandIds.clear();
+	_baseCount = _demandReplace = 0;
+	_largeRequests.clear();
+	_acknowledge.clear();
+	_afterPublicationAck.clear();
+	_demandId.reset();
+	_deferredDemand.reset();
+	_demandRendered = false;
+	_scanDue = true;
+	_pruneLarge = true;
+	_publishPending = false;
+	_rendering = false;
 	_running = _pending = _bound = false;
 	resetOutput(clear);
 }
@@ -297,15 +334,18 @@ void EmojiExporter::start() {
 	}
 	_entries.clear();
 	_ready.clear();
+	_largeIds.clear();
 	const auto session = _session.get();
 	auto rank = 0;
 	AppendBoundedEmojiExportEntries(_entries, Core::App().settings().recentEmoji(),
 		kMaxEntries, [&](const Core::RecentEmoji &recent) -> std::optional<EmojiExportEntry> {
 			++rank;
 			const auto document = std::get_if<Core::RecentEmojiDocument>(&recent.id.data);
-			return document && document->id && document->test == session->isTestMode()
-				? std::optional(EmojiExportEntry{ .id = document->id, .recentRank = rank })
-				: std::nullopt;
+			if (!document || !document->id || document->test != session->isTestMode()) {
+				return std::nullopt;
+			}
+			if (_largeIds.size() < 50) _largeIds.insert(document->id);
+			return EmojiExportEntry{ .id = document->id, .recentRank = rank };
 		});
 	const auto &stickers = session->data().stickers();
 	for (const auto id : stickers.emojiSetsOrder()) {
@@ -321,6 +361,10 @@ void EmojiExporter::start() {
 	for (const auto id : kExtraIds) {
 		_entries.push_back({ .id = id });
 	}
+	_entries = UniqueEmojiExportEntries(_entries);
+	_baseCount = _entries.size();
+	_demandReplace = 0;
+	for (const auto id : _demandIds) _entries.push_back({ .id = id });
 	_entries = UniqueEmojiExportEntries(_entries);
 	_ready.resize(_entries.size());
 	auto ids = std::vector<quint64>();
@@ -342,10 +386,108 @@ void EmojiExporter::fillMetadata(DocumentData *document) {
 	entry.textColor = document->emojiUsesTextColor();
 	entry.setShortName = sticker->set.shortName;
 	const auto &sets = _session.get()->data().stickers().sets();
+	const auto &installed = _session.get()->data().stickers().emojiSetsOrder();
+	entry.installed = std::find(installed.begin(), installed.end(), entry.setId) != installed.end();
 	const auto i = sets.find(entry.setId);
 	if (i != sets.end()) {
 		entry.setTitle = i->second->title;
 		entry.setShortName = i->second->shortName;
+		if (!entry.setTitle.isEmpty()) {
+			_setTitles.known(entry.setId, {entry.setTitle, entry.setShortName});
+		}
+	}
+	if (const auto title = _setTitles.lookup(entry.setId)) {
+		entry.setTitle = title->title;
+		entry.setShortName = title->shortName;
+	}
+}
+
+void EmojiExporter::admitRequests(const std::vector<quint64> &ids) {
+	for (const auto id : ids) {
+		if (_acknowledge.contains(id) || _afterPublicationAck.contains(id)) continue;
+		const auto admission = _largeRequests.offer(id, _clock.elapsed());
+		if (admission == EmojiLargeAdmission::Cooldown) _acknowledge.insert(id);
+	}
+}
+
+void EmojiExporter::maintainRequests() {
+	if (!admitted() || _rendering || !_scanDue || !_epoch.accepts(_token)) return;
+	const auto token = _token;
+	const auto directory = _directory;
+	const auto scanGeneration = _workerGeneration;
+	const auto cap = EmojiLargeCacheCap();
+	const auto acknowledge = std::make_shared<std::set<quint64>>(std::move(_acknowledge));
+	const auto requests = std::make_shared<std::vector<quint64>>();
+	_rendering = true;
+	const auto accepted = _worker.submit(_workerGeneration,
+		[=](const EmojiExportAuthority &current) {
+			if (!current() || !EnsureEmojiLargeDirectories(directory)) return false;
+			if (!PruneEmojiLargeExport(directory, cap, current)) return false;
+			for (const auto id : *acknowledge) {
+				if (!current()) return false;
+				static_cast<void>(AcknowledgeEmojiLargeRequest(directory, id, current));
+			}
+			*requests = ScanEmojiLargeRequests(directory, scanGeneration, current);
+			return current();
+		}, [=](quint64 generation, bool ok) {
+			if (generation != _workerGeneration || !_epoch.accepts(token)) return;
+			_rendering = false;
+			if (!admitted()) { reconcile(); return; }
+			if (!ok) { outputFailed(); return; }
+			admitRequests(*requests);
+			if (_media) checkMedia();
+			else pump();
+		});
+	if (accepted) {
+		_scanDue = false;
+		_pruneLarge = false;
+	} else {
+		_rendering = false;
+		_acknowledge.insert(acknowledge->begin(), acknowledge->end());
+	}
+}
+
+void EmojiExporter::chooseDemand() {
+	if (_demandId) return;
+	auto selected = std::optional<quint64>();
+	if (_deferredDemand) {
+		if (_clock.elapsed() < _queue.metadataRetryAt()) return;
+		selected = _deferredDemand;
+		_deferredDemand.reset();
+	} else {
+		selected = _largeRequests.take(_clock.elapsed());
+	}
+	if (!selected) return;
+	const auto id = *selected;
+	const auto entry = std::find_if(_entries.begin(), _entries.end(),
+		[=](const EmojiExportEntry &entry) { return entry.id == id; });
+	auto index = size_t(entry - _entries.begin());
+	if (entry == _entries.end()) {
+		if (_entries.size() >= _baseCount + 1024) {
+			index = _baseCount + (_demandReplace++ % 1024);
+			const auto retired = _entries[index].id;
+			_demandIds.erase(retired);
+			_retiredDemandIds.insert(retired);
+			_publishPending = true;
+			_entries[index] = { .id = id };
+			_ready[index].reset();
+		} else {
+			_entries.push_back({ .id = id });
+			_ready.emplace_back();
+		}
+	}
+	if (_demandIds.size() >= 1024) _demandIds.erase(_demandIds.begin());
+	_demandIds.insert(id);
+	_demandId = id;
+	_demandRendered = false;
+	_queue.prioritize(index);
+	_running = true;
+}
+
+void EmojiExporter::holdDemandForMetadataWait() {
+	if (_demandId && _clock.elapsed() < _queue.metadataRetryAt()) {
+		_deferredDemand = _demandId;
+		_demandId.reset();
 	}
 }
 
@@ -354,9 +496,12 @@ void EmojiExporter::pump() {
 		reconcile();
 		return;
 	}
-	if (!_running || _rendering || _media || _request || _continuation.isActive()) {
-		return;
-	}
+	if (_rendering) return;
+	if (_scanDue && _epoch.accepts(_token)) { maintainRequests(); return; }
+	if (_media || _request || _continuation.isActive()) return;
+	if (_publishPending) { publish(); return; }
+	chooseDemand();
+	if (!_running) return;
 	const auto current = _queue.current();
 	if (!current) {
 		publish();
@@ -378,6 +523,7 @@ void EmojiExporter::pump() {
 		return;
 	}
 	fillMetadata(document);
+	if (resolveSetTitle(document)) return;
 	_media = document->createMediaView();
 	_taskTime.start();
 	if (_media->bytes().isEmpty() && document->filepath().isEmpty() && transferBusy()) {
@@ -395,6 +541,7 @@ void EmojiExporter::resolve() {
 		_continuation.start(250);
 		return;
 	} else if (admission == EmojiResolveAdmission::Cooldown) {
+		holdDemandForMetadataWait();
 		next();
 		return;
 	}
@@ -432,6 +579,69 @@ void EmojiExporter::resolve() {
 	}).handleAllErrors().send();
 }
 
+void EmojiExporter::applySetTitle(quint64 id) {
+	const auto title = _setTitles.lookup(id);
+	if (!title) return;
+	for (auto &entry : _entries) {
+		if (entry.setId != id) continue;
+		entry.setTitle = title->title;
+		entry.setShortName = title->shortName;
+	}
+	for (auto &entry : _ready) {
+		if (!entry || entry->setId != id) continue;
+		entry->setTitle = title->title;
+		entry->setShortName = title->shortName;
+	}
+}
+
+bool EmojiExporter::resolveSetTitle(DocumentData *document) {
+	const auto set = document->sticker()->set;
+	if (_entries[_index].installed.value_or(false) || !set.accessHash
+		|| !_setTitles.canBegin(set.id, _clock.elapsed())) return false;
+	const auto admission = _queue.resolve(document->id, _clock.elapsed());
+	if (admission == EmojiResolveAdmission::Continue) {
+		_continuation.start(250);
+		return true;
+	} else if (admission == EmojiResolveAdmission::Cooldown) {
+		return false;
+	}
+	if (!_setTitles.begin(set.id, _clock.elapsed())) return false;
+	const auto token = _token;
+	const auto id = document->id;
+	_request = _api->request(MTPmessages_GetStickerSet(
+		MTP_inputStickerSetID(MTP_long(set.id), MTP_long(set.accessHash)),
+		MTP_int(0)
+	)).done([=](const MTPmessages_StickerSet &result) {
+		if (!_epoch.accepts(token) || !_queue.current() || _entries[_index].id != id
+			|| _setTitles.active() != set.id) return;
+		_request = 0;
+		if (!admitted()) {
+			reconcile();
+			return;
+		}
+		result.match([&](const MTPDmessages_stickerSet &data) {
+			const auto &metadata = data.vset().data();
+			if (metadata.vid().v == set.id && !qs(metadata.vtitle()).isEmpty()) {
+				_setTitles.complete(set.id, {qs(metadata.vtitle()), qs(metadata.vshort_name())});
+			} else {
+				_setTitles.failed(set.id, _clock.elapsed());
+			}
+		}, [&](const MTPDmessages_stickerSetNotModified &) {
+			_setTitles.failed(set.id, _clock.elapsed());
+		});
+		applySetTitle(set.id);
+		pump();
+	}).fail([=](const MTP::Error &) {
+		if (!_epoch.accepts(token) || !_queue.current() || _entries[_index].id != id
+			|| _setTitles.active() != set.id) return;
+		_request = 0;
+		_setTitles.failed(set.id, _clock.elapsed());
+		if (admitted()) pump();
+		else reconcile();
+	}).handleAllErrors().send();
+	return true;
+}
+
 void EmojiExporter::deferred(mtpRequestId request, const SyncRequestTransient &transient) {
 	if (request != _request || !_queue.current()) {
 		return;
@@ -441,8 +651,15 @@ void EmojiExporter::deferred(mtpRequestId request, const SyncRequestTransient &t
 		reconcile();
 		return;
 	}
+	const auto title = _setTitles.active();
+	if (title) _setTitles.defer(*title);
 	_queue.transient(transient.retryAt, base::unixtime::now(), _clock.elapsed(), transient.delayMs);
-	next();
+	if (title) {
+		pump();
+	} else {
+		holdDemandForMetadataWait();
+		next();
+	}
 }
 
 void EmojiExporter::outputFailed() {
@@ -451,6 +668,17 @@ void EmojiExporter::outputFailed() {
 }
 
 void EmojiExporter::next() {
+	if (_demandId && _queue.current() && _entries[_index].id == *_demandId) {
+		const auto id = *_demandId;
+		_largeRequests.complete(id, _demandRendered, _clock.elapsed());
+		if (_demandRendered) {
+			_afterPublicationAck.insert(id);
+			_publishPending = true;
+		} else {
+			_acknowledge.insert(id);
+		}
+		_demandId.reset();
+	}
 	rememberTransfer();
 	_media.reset();
 	_queue.next();
@@ -462,9 +690,8 @@ void EmojiExporter::checkMedia() {
 		reconcile();
 		return;
 	}
-	if (!_media || _rendering) {
-		return;
-	}
+	if (!_media || _rendering) return;
+	if (_scanDue) { maintainRequests(); return; }
 	const auto document = _media->owner();
 	const auto data = _media->bytes();
 	const auto filepath = document->filepath();
@@ -476,7 +703,9 @@ void EmojiExporter::checkMedia() {
 		return;
 	}
 	const auto token = _token;
-	const auto type = document->sticker()->type;
+	const auto source = ExportSource(document->sticker()->type);
+	const auto wantLarge = _largeIds.contains(document->id)
+		|| _demandIds.contains(document->id) || _demandId == document->id;
 	const auto tint = _entries[_index].textColor
 		? std::make_optional(st::windowFg->c) : std::nullopt;
 	const auto entry = _entries[_index];
@@ -484,17 +713,32 @@ void EmojiExporter::checkMedia() {
 	_rendering = true;
 	const auto index = _index;
 	const auto storageFailed = std::make_shared<bool>(false);
+	const auto renderedEntry = std::make_shared<EmojiExportEntry>(entry);
+	const auto cap = EmojiLargeCacheCap();
 	const auto directory = _directory;
 	const auto accepted = _worker.submit(_workerGeneration,
 		[=](const EmojiExportAuthority &current) {
-			const auto image = RenderEmoji(data, filepath, type, tint);
-			if (!current() || image.isNull()) return false;
+			const auto rendered = RenderEmojiExport(data, filepath, source, wantLarge);
+			if (!current() || rendered.preview.isNull()) return false;
+			const auto image = EmojiExportFrame(rendered.preview, tint);
 			const auto ok = WriteEmojiExportPng(directory, entry.id, image, current);
 			*storageFailed = !ok && current();
-			return ok;
+			if (!ok) return false;
+			renderedEntry->sourceKind = EmojiExportSourceName(source);
+			renderedEntry->sourcePx = rendered.sourcePx;
+			if (!rendered.large.isNull()
+				&& WriteEmojiLargePng(directory, entry.id, rendered.large, tint, current)) {
+				renderedEntry->large = EmojiLargePngName(entry.id, rendered.sourcePx);
+				if (!PruneEmojiLargeExport(directory, cap, current)) {
+					*storageFailed = current();
+					return false;
+				}
+			}
+			return current();
 		}, [=](quint64 generation, bool ok) {
+			if (generation != _workerGeneration || !_epoch.accepts(token)) return;
 			_rendering = false;
-			if (generation != _workerGeneration || !_epoch.accepts(token) || !admitted()) {
+			if (!admitted()) {
 				reconcile();
 				if (_pending && !_running) _debounce.start(kDebounceMs);
 				return;
@@ -504,7 +748,8 @@ void EmojiExporter::checkMedia() {
 				return;
 			}
 			if (ok) {
-				_ready[index] = entry;
+				_ready[index] = *renderedEntry;
+				if (_demandId == entry.id) _demandRendered = !renderedEntry->large.isEmpty();
 				_queue.succeeded(entry.id);
 			} else {
 				_queue.failed(entry.id, _clock.elapsed());
@@ -521,20 +766,22 @@ void EmojiExporter::checkMedia() {
 void EmojiExporter::publish() {
 	const auto token = _token;
 	const auto directory = _directory;
+	const auto finished = !_queue.current();
+	const auto previous = _published;
+	const auto retired = std::make_shared<std::set<quint64>>(std::move(_retiredDemandIds));
+	const auto published = std::make_shared<std::vector<EmojiExportEntry>>();
+	const auto ready = std::make_shared<decltype(_ready)>(std::move(_ready));
+	const auto acknowledge = std::make_shared<std::set<quint64>>(std::move(_afterPublicationAck));
 	_rendering = true;
 	const auto accepted = _worker.submit(_workerGeneration,
-		[ready = std::move(_ready), directory](const EmojiExportAuthority &current) {
-			auto entries = std::vector<EmojiExportEntry>();
-			entries.reserve(ready.size());
-			for (const auto &entry : ready) {
-				if (!current()) return false;
-				if (entry) entries.push_back(*entry);
-			}
-			return PublishEmojiExportCatalog(directory, entries,
-				QDateTime::currentDateTimeUtc(), current);
+		[ready, previous, retired, published, acknowledge, finished, directory](const EmojiExportAuthority &current) {
+			*published = MergeEmojiLargePublication(*previous, *ready, finished, current, *retired);
+			return PublishEmojiLargeRequests(directory, *published,
+				QDateTime::currentDateTimeUtc(), *acknowledge, current);
 		}, [=](quint64 generation, bool ok) {
+			if (generation != _workerGeneration || !_epoch.accepts(token)) return;
 			_rendering = false;
-			if (generation != _workerGeneration || !_epoch.accepts(token) || !admitted()) {
+			if (!admitted()) {
 				reconcile();
 				if (_pending && !_running) _debounce.start(kDebounceMs);
 				return;
@@ -543,10 +790,15 @@ void EmojiExporter::publish() {
 				outputFailed();
 				return;
 			}
+			_ready = std::move(*ready);
+			_published = published;
+			_publishPending = false;
+			if (!finished) { pump(); return; }
 			_running = false;
 			if (_pending) {
 				_debounce.start(kDebounceMs);
-			} else if (const auto retry = _queue.retryAt(_clock.elapsed())) {
+			} else if (const auto retry = NextEmojiExportRetry(
+				_queue.retryAt(_clock.elapsed()), _setTitles.retryAt(_clock.elapsed()))) {
 				_pending = true;
 				_debounce.start(int(std::clamp(*retry - _clock.elapsed(), qint64(1000), qint64(60000))));
 			}
@@ -609,6 +861,7 @@ void BuildEmojiExportSetting(::Settings::Builder::SectionBuilder &builder) {
 			SetEmojiExportEnabled(enabled);
 		}, toggle->lifetime());
 	}
+	BuildEmojiLargeCacheSetting(builder);
 	builder.addDividerText(tr::lng_purple_emoji_export_about(
 		lt_path, rpl::single(CurrentEmojiExportDirectory())));
 }

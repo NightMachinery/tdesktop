@@ -109,6 +109,14 @@ PRIVATE
     purple/purple_config_file.h
     purple/purple_device.cpp
     purple/purple_device.h
+    purple/purple_emoji_large.h
+    purple/purple_emoji_large.cpp
+    purple/purple_emoji_large_store.h
+    purple/purple_emoji_large_store.cpp
+    purple/purple_emoji_large_render.h
+    purple/purple_emoji_large_setting.cpp
+    purple/purple_emoji_large_setting.h
+    purple/purple_emoji_large_render.cpp
     purple/purple_emoji_export.cpp
     purple/purple_emoji_export.h
     purple/purple_emoji_export_queue.cpp
@@ -117,6 +125,7 @@ PRIVATE
     purple/purple_emoji_export_worker.h
     purple/purple_emoji_export_store.cpp
     purple/purple_emoji_export_store.h
+    purple/purple_emoji_export_path.h
     purple/purple_webp_paste.cpp
     purple/purple_webp_paste.h
     purple/purple_webp_paste_mac.h

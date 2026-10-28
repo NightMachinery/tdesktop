@@ -23,6 +23,10 @@ struct EmojiExportEntry {
 	QString setShortName;
 	bool textColor = false;
 	std::optional<int> recentRank;
+	QString large;
+	QString sourceKind;
+	std::optional<int> sourcePx;
+	std::optional<bool> installed;
 };
 
 template <typename Range, typename Project>

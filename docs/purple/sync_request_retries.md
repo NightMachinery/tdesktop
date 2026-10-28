@@ -116,7 +116,7 @@ cooldown scheduler. Transients hold metadata resolution globally, while cached
 artwork may continue; permanent document failures keep their own cooldown. Its
 outer request timeout is removed so it cannot turn an extended short wait into
 a document failure. Media loading retains its separate timeout. The complete
-Purple inventory now covers sixteen managed request sites.
+Purple inventory now covers seventeen managed request sites, including the read-only emoji set-title lookup.
 
 Manual settings publication keeps its worker-owned store and RAM capability
 through a transient request. Every resumed definite send first renews R3/full-info
@@ -124,3 +124,11 @@ and then asks that worker to validate the unchanged source and pending store.
 No staged file or routing target is reread on the GUI thread. Edits retain their
 additional exact owned-target gate. Cancellation revokes the capability and
 releases the worker/store while preserving pending reconciliation evidence.
+
+Unknown emoji-set titles share the exporter's document-resolution request slot,
+slice budget and monotonic global hold. A set-title transient releases the old
+request identity while retaining the current cached-artwork cursor. A document
+transient retains an active chooser demand for the global deadline while cached
+ordinary work continues. Permanent set errors leave the title empty for a
+bounded cooldown, and successful per-set results are reused across all entries.
+No request installs a set or feeds the response into the stickers model.

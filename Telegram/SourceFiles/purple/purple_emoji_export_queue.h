@@ -16,7 +16,9 @@ public:
 	void clear();
 	[[nodiscard]] std::optional<size_t> current() const;
 	void next();
+	void prioritize(size_t index);
 	void continueSlice();
+	[[nodiscard]] qint64 metadataRetryAt() const;
 	[[nodiscard]] bool cooling(quint64 id, qint64 now) const;
 	[[nodiscard]] EmojiResolveAdmission resolve(quint64 id, qint64 now);
 	void failed(quint64 id, qint64 now);
