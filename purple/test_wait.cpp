@@ -39,6 +39,17 @@ void Check(bool ok, int line) {
 
 QString operator""_q(const char16_t *text, size_t size) { return QString::fromUtf16(text, int(size)); }
 
+// Runs a wait to its end: the countdown's last tick, then the ready step's
+// confirmation once the input guard has passed. Returns the first result
+// that is not the ready step itself.
+WaitResult Finish(WaitGate &gate, int64_t now) {
+	const auto result = gate.tick(now);
+	if (result.outcome != WaitOutcome::Pending || gate.phase() != WaitPhase::Ready) {
+		return result;
+	}
+	return gate.confirm(now + kWaitReadyGuard);
+}
+
 namespace FocusPreferenceProbe {
 
 namespace Main { struct Session {}; }
@@ -61,6 +72,7 @@ struct PeekOptionChange {
 	std::optional<int> startDelaySeconds;
 	std::optional<bool> exitHiddenChats;
 	std::optional<bool> endOnFocusLoss;
+	std::optional<int> readyTimeoutSeconds;
 };
 struct LocalSettings {
 	bool present = false;
@@ -89,6 +101,7 @@ inline constexpr auto now = 0;
 QString lng_purple_wait_context_changed(int) { return QString::fromLatin1("context changed"); }
 QString lng_purple_wait_editor_closed(int) { return QString::fromLatin1("editor closed"); }
 QString lng_purple_wait_delay_invalid(int) { return QString::fromLatin1("invalid delay"); }
+QString lng_purple_wait_ready_timeout_invalid(int) { return QString::fromLatin1("invalid timeout"); }
 }
 struct Changes { int delivered = 0; void fire_copy(bool) { ++delivered; } } FocusLossChanges;
 struct WaitRequest {
@@ -208,6 +221,359 @@ auto Reset(int delay = 10, bool exit = true, bool focus = false) {
 	return editor;
 }
 
+void ReadyTimeoutOptionCases() {
+	auto session = Main::Session();
+	auto editor = Reset();
+	// Absent: the ten-minute fallback, and asking for it writes nothing.
+	CHECK(PeekReadyTimeoutSeconds(Loaded) == kPeekReadyTimeoutDefaultSeconds);
+	RequestPeekReadyTimeoutChange(kPeekReadyTimeoutDefaultSeconds, editor, &session);
+	CHECK(Last.outcome == WaitOutcome::NoOp && FileWrites == 0);
+	// Lowering only tightens: instant, no countdown, no ready step.
+	RequestPeekReadyTimeoutChange(120, editor, &session);
+	CHECK(Last.outcome == WaitOutcome::Applied && FileWrites == 1);
+	CHECK(PeekReadyTimeoutSeconds(Loaded) == 120);
+	CHECK(Text.contains(QString::fromLatin1("ready_timeout_seconds")));
+	CHECK(PeekWaitDelaySeconds(Loaded) == 10 && PeekExitHiddenChats(Loaded));
+	// Raising loosens: the countdown, then its own ready step.
+	RequestPeekReadyTimeoutChange(900, editor, &session);
+	CHECK(Last.outcome == WaitOutcome::Pending && FileWrites == 1);
+	CHECK(Gate.tick(10000).outcome == WaitOutcome::Pending && Gate.phase() == WaitPhase::Ready);
+	CHECK(PeekReadyTimeoutSeconds(Loaded) == 120 && FileWrites == 1);
+	CHECK(Gate.confirm(10000 + kWaitReadyGuard).outcome == WaitOutcome::Applied);
+	CHECK(PeekReadyTimeoutSeconds(Loaded) == 900 && FileWrites == 2);
+	// Abort, in either phase, keeps the old value.
+	RequestPeekReadyTimeoutChange(1200, editor, &session);
+	CHECK(Last.outcome == WaitOutcome::Pending);
+	Gate.cancel();
+	RequestPeekReadyTimeoutChange(1200, editor, &session);
+	CHECK(Gate.tick(10000).outcome == WaitOutcome::Pending);
+	Gate.cancel();
+	CHECK(PeekReadyTimeoutSeconds(Loaded) == 900 && FileWrites == 2);
+	// Below the minimum is refused, never written.
+	for (const auto low : { kPeekReadyTimeoutMinimumSeconds - 1, 0, -5 }) {
+		RequestPeekReadyTimeoutChange(low, editor, &session);
+		CHECK(Last.outcome == WaitOutcome::Refused && FileWrites == 2);
+	}
+	// A shorter timeout with a looser companion change still waits.
+	RequestPeekOptionChange({.exitHiddenChats = false, .readyTimeoutSeconds = 60}, editor, &session, {});
+	CHECK(Last.outcome == WaitOutcome::Pending);
+	CHECK(Finish(Gate, 10000).outcome == WaitOutcome::Applied);
+	CHECK(PeekReadyTimeoutSeconds(Loaded) == 60 && !PeekExitHiddenChats(Loaded));
+}
+
+void ReadyStepCases() {
+	auto gate = WaitGate();
+	auto writes = 0;
+	auto foreground = true;
+	auto valid = true;
+	const auto operation = [&](int delay, int timeout) {
+		return WaitOperation{
+			.action = WaitAction::StartPeek,
+			.delaySeconds = delay,
+			.readyTimeoutSeconds = timeout,
+			.validate = [&] { return valid ? QString() : QString::fromLatin1("changed"); },
+			.originCurrent = [&] { return foreground; },
+			.apply = [&](const std::function<bool()> &current) {
+				CHECK(current());
+				++writes;
+				return QString();
+			},
+		};
+	};
+
+	// Countdown, then the ready step; only the button applies.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.phase() == WaitPhase::Countdown && gate.remaining(1) == 10);
+	CHECK(gate.confirm(5000).outcome == WaitOutcome::Pending && writes == 0);
+	CHECK(gate.tick(9999).outcome == WaitOutcome::Pending && gate.phase() == WaitPhase::Countdown);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending && gate.phase() == WaitPhase::Ready);
+	CHECK(gate.remaining(10000) == 0 && writes == 0);
+	for (auto now = int64_t(10000); now < 40000; now += 250) {
+		CHECK(gate.tick(now).outcome == WaitOutcome::Pending);
+	}
+	CHECK(writes == 0);
+	// The input guard: nothing confirms for 500 ms after it shows.
+	gate.cancel();
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending);
+	CHECK(gate.inputGuarded(10000) && gate.inputGuarded(10499) && !gate.inputGuarded(10500));
+	CHECK(gate.confirm(10000).outcome == WaitOutcome::Pending);
+	CHECK(gate.confirm(10499).outcome == WaitOutcome::Pending && writes == 0);
+	CHECK(gate.confirm(10500).outcome == WaitOutcome::Applied && writes == 1);
+	CHECK(!gate.pending() && gate.phase() == WaitPhase::Idle);
+	CHECK(gate.confirm(10600).outcome == WaitOutcome::NoOp && writes == 1);
+	// The guard counts from the tick that showed the step, and starts again
+	// when the cover comes back from a lock.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(12000).outcome == WaitOutcome::Pending);
+	CHECK(gate.confirm(12499).outcome == WaitOutcome::Pending);
+	gate.guardInput(20000);
+	CHECK(gate.confirm(20499).outcome == WaitOutcome::Pending && writes == 1);
+	CHECK(gate.confirm(20500).outcome == WaitOutcome::Applied && writes == 2);
+
+	// Abort in the ready step writes nothing.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending);
+	gate.cancel();
+	CHECK(gate.tick(10500).outcome == WaitOutcome::NoOp);
+	CHECK(gate.confirm(10500).outcome == WaitOutcome::NoOp && writes == 2);
+
+	// The timeout ends it quietly, counted from the end of the countdown.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(39999).outcome == WaitOutcome::Pending);
+	const auto expired = gate.tick(40000);
+	CHECK(expired.outcome == WaitOutcome::Expired && expired.error.isEmpty());
+	CHECK(!gate.pending() && writes == 2);
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending);
+	CHECK(gate.confirm(40000).outcome == WaitOutcome::Expired && writes == 2);
+	// Slept through: the first tick after waking sees the real time.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(25000).outcome == WaitOutcome::Pending && gate.phase() == WaitPhase::Ready);
+	CHECK(gate.tick(40000).outcome == WaitOutcome::Expired);
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(3600000).outcome == WaitOutcome::Expired && writes == 2);
+	// Zero means the ten-minute default; less than the minimum is raised.
+	CHECK(gate.request(operation(10, 0), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000 + kPeekReadyTimeoutDefaultSeconds * 1000 - 1).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000 + kPeekReadyTimeoutDefaultSeconds * 1000).outcome == WaitOutcome::Expired);
+	CHECK(gate.request(operation(10, 3), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000 + kPeekReadyTimeoutMinimumSeconds * 1000 - 1).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000 + kPeekReadyTimeoutMinimumSeconds * 1000).outcome == WaitOutcome::Expired);
+
+	// While waiting, foreground is presence's question, not the gate's: a
+	// lock keeps the wait. The button checks it again and refuses.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	foreground = false;
+	CHECK(gate.tick(5000).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending && gate.phase() == WaitPhase::Ready);
+	CHECK(gate.confirm(10500).outcome == WaitOutcome::Refused && writes == 2);
+	foreground = true;
+	// A stale context still cancels in either phase, with its message.
+	for (const auto ready : { false, true }) {
+		CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+		if (ready) {
+			CHECK(gate.tick(10000).outcome == WaitOutcome::Pending);
+		}
+		valid = false;
+		const auto refused = gate.tick(10250);
+		CHECK(refused.outcome == WaitOutcome::Refused && !refused.error.isEmpty());
+		CHECK(!gate.pending() && writes == 2);
+		valid = true;
+	}
+	// The button re-validates: a change between the last tick and the press
+	// refuses.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending);
+	valid = false;
+	CHECK(gate.confirm(10500).outcome == WaitOutcome::Refused && writes == 2);
+	valid = true;
+	// Zero delay: applied at once, no countdown and no ready step.
+	CHECK(gate.request(operation(0, 30), 0).outcome == WaitOutcome::Applied && writes == 3);
+	CHECK(gate.phase() == WaitPhase::Idle);
+	// A late tick of a cancelled wait cannot touch the next one.
+	CHECK(gate.request(operation(10, 30), 0).outcome == WaitOutcome::Pending);
+	gate.cancel();
+	CHECK(gate.request(operation(20, 30), 0).outcome == WaitOutcome::Pending);
+	CHECK(gate.tick(10000).outcome == WaitOutcome::Pending && gate.phase() == WaitPhase::Countdown);
+	gate.cancel();
+
+	// Keys.
+	using enum WaitKeyVerdict;
+	for (const auto enter : { false, true }) {
+		for (const auto repeat : { false, true }) {
+			for (const auto guarded : { false, true }) {
+				CHECK(ClassifyWaitKey(WaitPhase::Countdown, guarded, enter, repeat) == Abort);
+			}
+			CHECK(ClassifyWaitKey(WaitPhase::Ready, true, enter, repeat) == Ignore);
+		}
+		CHECK(ClassifyWaitKey(WaitPhase::Ready, false, enter, true) == Ignore);
+	}
+	CHECK(ClassifyWaitKey(WaitPhase::Ready, false, true, false) == Confirm);
+	CHECK(ClassifyWaitKey(WaitPhase::Ready, false, false, false) == Abort);
+}
+
+void PresenceCases() {
+	const auto settle = kWaitAwaySettle;
+	{
+		// A switch to another app cancels once the settle window ends.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(true, false, 0));
+		CHECK(!presence.update(false, false, 100));
+		CHECK(!presence.update(false, false, 100 + settle - 1));
+		CHECK(presence.update(false, false, 100 + settle));
+	}
+	{
+		// Switching away and back before it ends still cancels.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, false, 100));
+		CHECK(presence.update(true, false, 400));
+	}
+	{
+		// Inactive first, lock inside the settle window: a lock. The wait
+		// lives through it, however long, and resumes on return.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, false, 100));
+		CHECK(!presence.update(false, true, 100 + settle - 1));
+		CHECK(presence.locked());
+		CHECK(!presence.update(false, true, 8 * 3600 * 1000));
+		CHECK(!presence.update(false, false, 8 * 3600 * 1000 + 50));
+		CHECK(!presence.locked());
+		CHECK(!presence.update(true, false, 8 * 3600 * 1000 + 300));
+		CHECK(!presence.update(true, false, 8 * 3600 * 1000 + 300 + 10 * settle));
+		// And a later switch away still cancels.
+		CHECK(!presence.update(false, false, 9 * 3600 * 1000));
+		CHECK(presence.update(false, false, 9 * 3600 * 1000 + settle));
+	}
+	{
+		// A lock signal later than the settle window is a switch.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, false, 100));
+		CHECK(presence.update(false, true, 100 + settle));
+	}
+	{
+		// Lock first, inactive after: still a lock.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(true, true, 0));
+		CHECK(!presence.update(false, true, 50));
+		CHECK(!presence.update(false, true, 50 + 10 * settle));
+		CHECK(presence.locked());
+	}
+	{
+		// Telegram's passcode lock: the app stays active throughout.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(true, true, 0));
+		CHECK(presence.locked());
+		CHECK(!presence.update(true, false, 60000));
+		CHECK(!presence.locked());
+		CHECK(!presence.update(true, false, 60000 + 10 * settle));
+	}
+	{
+		// Unlocked, but never back at the window: cancels at the settle end.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, true, 0));
+		CHECK(!presence.update(false, false, 1000));
+		CHECK(!presence.update(false, false, 1000 + settle - 1));
+		CHECK(presence.update(false, false, 1000 + settle));
+	}
+	{
+		// reset() starts a fresh wait present.
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, false, 100));
+		presence.reset();
+		CHECK(!presence.update(true, false, 200));
+		CHECK(!presence.update(true, false, 200 + 10 * settle));
+	}
+	// A clock that counts sleep and only moves forward.
+	const auto first = WaitClockNow();
+	const auto second = WaitClockNow();
+	CHECK(first > 0 && second >= first);
+}
+
+void ReadyKeyCases() {
+	auto host = QWidget();
+	auto cover = QWidget(&host);
+	auto child = QPushButton(&cover);
+	auto editor = QLineEdit(&host);
+	auto filter = WaitKeyFilter();
+	auto gate = WaitGate();
+	auto writes = 0;
+	auto aborted = 0;
+	auto suspended = false;
+	auto now = int64_t(0);
+	host.show();
+	cover.show();
+	child.show();
+	QCoreApplication::processEvents();
+	const auto arm = [&] {
+		gate.cancel();
+		CHECK(gate.request({
+			.action = WaitAction::StartPeek,
+			.delaySeconds = 10,
+			.readyTimeoutSeconds = 30,
+			.validate = [] { return QString(); },
+			.apply = [&](const std::function<bool()> &) { ++writes; return QString(); },
+		}, 0).outcome == WaitOutcome::Pending);
+		cover.show();
+		child.setFocus();
+		filter.arm(&host, &cover, {
+			.abort = [&] { ++aborted; gate.cancel(); cover.hide(); },
+			.presence = [] {},
+			.suspended = [&] { return suspended; },
+			.classify = [&](bool enter, bool repeat) {
+				return ClassifyWaitKey(gate.phase(), gate.inputGuarded(now), enter, repeat);
+			},
+			.confirm = [&] {
+				if (gate.confirm(now).outcome == WaitOutcome::Applied) {
+					filter.disarm();
+					cover.hide();
+				}
+			},
+		});
+	};
+	const auto press = [&](Qt::Key key, bool repeat = false) {
+		auto event = QKeyEvent(QEvent::KeyPress, key, Qt::NoModifier, QString(), repeat);
+		QApplication::sendEvent(&child, &event);
+		return event.isAccepted();
+	};
+	// Countdown: Enter aborts like any key.
+	arm();
+	now = 5000;
+	press(Qt::Key_Return);
+	CHECK(aborted == 1 && writes == 0 && !gate.pending());
+	// Ready, inside the guard: Enter, Escape and letters are swallowed.
+	arm();
+	now = 10000;
+	CHECK(gate.tick(now).outcome == WaitOutcome::Pending);
+	for (const auto key : { Qt::Key_Return, Qt::Key_Enter, Qt::Key_Escape, Qt::Key_A }) {
+		CHECK(press(key));
+	}
+	CHECK(aborted == 1 && writes == 0 && gate.pending());
+	// After the guard, auto-repeat of Enter is ignored, a fresh Enter applies.
+	now = 10500;
+	CHECK(press(Qt::Key_Return, true));
+	CHECK(writes == 0 && gate.pending());
+	press(Qt::Key_Return);
+	CHECK(writes == 1 && !gate.pending() && aborted == 1);
+	// Keypad Enter works too.
+	arm();
+	now = 10000;
+	CHECK(gate.tick(now).outcome == WaitOutcome::Pending);
+	now = 10500;
+	press(Qt::Key_Enter);
+	CHECK(writes == 2 && aborted == 1);
+	// Escape and any other key abort after the guard.
+	for (const auto key : { Qt::Key_Escape, Qt::Key_Space, Qt::Key_A }) {
+		arm();
+		now = 10000;
+		CHECK(gate.tick(now).outcome == WaitOutcome::Pending);
+		now = 10500;
+		const auto before = aborted;
+		press(key);
+		CHECK(aborted == before + 1 && writes == 2 && !gate.pending());
+	}
+	// Behind a lock the filter passes keys through: a passcode can be typed
+	// and nothing aborts or confirms.
+	arm();
+	now = 10000;
+	CHECK(gate.tick(now).outcome == WaitOutcome::Pending);
+	now = 10500;
+	suspended = true;
+	cover.hide();
+	const auto before = aborted;
+	editor.setFocus();
+	auto typed = QKeyEvent(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, QString::fromLatin1("x"));
+	QApplication::sendEvent(&editor, &typed);
+	auto enter = QKeyEvent(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+	QApplication::sendEvent(&editor, &enter);
+	CHECK(editor.text().endsWith('x'));
+	CHECK(aborted == before && writes == 2 && gate.pending());
+	suspended = false;
+	filter.disarm();
+	gate.cancel();
+}
+
 void Cases() {
 	auto session = Main::Session();
 	{
@@ -219,12 +585,12 @@ void Cases() {
 		CHECK(CompletionChecks == 1 && editor->target->identity == FileIdentity);
 		RequestPeekOptionChange({.exitHiddenChats = false, .endOnFocusLoss = true}, editor, &session, {});
 		CHECK(Last.outcome == WaitOutcome::Pending);
-		CHECK(Gate.tick(20000).outcome == WaitOutcome::Applied);
+		CHECK(Finish(Gate, 20000).outcome == WaitOutcome::Applied);
 		CHECK(CompletionChecks == 2 && editor->target->identity == FileIdentity);
 		CHECK(!PeekExitHiddenChats(Loaded) && PeekEndsOnFocusLoss());
 		RequestPeekDelayChange(10, editor, &session);
 		CHECK(Last.outcome == WaitOutcome::Pending);
-		CHECK(Gate.tick(20000).outcome == WaitOutcome::Applied);
+		CHECK(Finish(Gate, 20000).outcome == WaitOutcome::Applied);
 		CHECK(CompletionChecks == 3 && editor->target->identity == FileIdentity);
 	}
 	{
@@ -244,7 +610,7 @@ void Cases() {
 		};
 		RequestPeekOptionChange({.startDelaySeconds = 20, .exitHiddenChats = false, .endOnFocusLoss = true}, editor, &session, {});
 		CHECK(Last.outcome == WaitOutcome::Pending);
-		CHECK(Gate.tick(20000).outcome == WaitOutcome::Refused);
+		CHECK(Finish(Gate, 20000).outcome == WaitOutcome::Refused);
 		CHECK(FileWrites == 0 && Core::App().local.writes == 0 && CompletionChecks == 0);
 	}
 	for (const auto stale : {0, 1, 2, 3, 4, 5}) {
@@ -285,7 +651,7 @@ void Cases() {
 					Gate.cancel(); CHECK(Gate.tick(int64_t(delay) * 1000).outcome == WaitOutcome::NoOp);
 					CHECK(Text == original && FileWrites == 0 && Core::App().local.writes == 0);
 					request(); CHECK(Gate.tick(int64_t(delay) * 1000 - 1).outcome == WaitOutcome::Pending);
-					CHECK(Gate.tick(int64_t(delay) * 1000).outcome == WaitOutcome::Applied);
+					CHECK(Finish(Gate, int64_t(delay) * 1000).outcome == WaitOutcome::Applied);
 				}
 				CHECK(PeekWaitDelaySeconds(Loaded) == nextDelay);
 				CHECK(PeekExitHiddenChats(Loaded) == nextExit);
@@ -327,13 +693,13 @@ void Cases() {
 		else if (stale == 1) ++AccountIdentity;
 		else if (stale == 2) ++FileIdentity;
 		else Loaded.peek.exitHiddenChats = false;
-		CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused); CHECK(FileWrites == 0);
+		CHECK(Finish(Gate, 10000).outcome == WaitOutcome::Refused); CHECK(FileWrites == 0);
 	}
 	{
 		auto editor = Reset();
 		RequestPeekOptionChange({.exitHiddenChats = false}, editor, &session, {});
 		editor->target->identity = 77;
-		CHECK(Gate.tick(10000).outcome == WaitOutcome::Applied);
+		CHECK(Finish(Gate, 10000).outcome == WaitOutcome::Applied);
 		CHECK(UsedTarget == 1 && FileWrites == 1);
 	}
 	{
@@ -352,7 +718,7 @@ void Cases() {
 	{
 		auto editor = Reset(); FileFails = true;
 		RequestPeekOptionChange({.exitHiddenChats = false, .endOnFocusLoss = true}, editor, &session, {});
-		CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused);
+		CHECK(Finish(Gate, 10000).outcome == WaitOutcome::Refused);
 		CHECK(FileWrites == 0 && Core::App().local.writes == 0);
 	}
 	{
@@ -365,9 +731,9 @@ void Cases() {
 		CHECK(Last.outcome == WaitOutcome::Pending); Gate.cancel();
 		CHECK(Gate.tick(10000).outcome == WaitOutcome::NoOp && PeekEndsOnFocusLoss());
 		RequestPeekFocusLossChange(false, &session, [&] { return open; }); open = false;
-		CHECK(Gate.tick(10000).outcome == WaitOutcome::Refused && PeekEndsOnFocusLoss());
+		CHECK(Finish(Gate, 10000).outcome == WaitOutcome::Refused && PeekEndsOnFocusLoss());
 		open = true; RequestPeekFocusLossChange(false, &session, [&] { return open; });
-		CHECK(Gate.tick(10000).outcome == WaitOutcome::Applied && !PeekEndsOnFocusLoss());
+		CHECK(Finish(Gate, 10000).outcome == WaitOutcome::Applied && !PeekEndsOnFocusLoss());
 	}
 }
 
@@ -486,7 +852,13 @@ void FocusCases() {
 	}, 0);
 	CHECK(pending.outcome == WaitOutcome::Pending);
 	const auto before = validations;
-	const auto cancelled = gate.tick(250, false);
+	// Leaving the window with no lock in the settle window is a switch to
+	// another app: presence cancels, quietly and without validating.
+	auto presence = WaitPresence();
+	CHECK(!presence.update(false, false, 250));
+	CHECK(presence.update(false, false, 250 + kWaitAwaySettle));
+	gate.cancel();
+	const auto cancelled = gate.tick(250);
 	CHECK(cancelled.outcome == WaitOutcome::NoOp);
 	CHECK(cancelled.error.isEmpty());
 	CHECK(validations == before && writes == 0);
@@ -528,18 +900,19 @@ void FocusPreferenceWaitCases() {
 	CHECK(gate.tick(10000).outcome == WaitOutcome::NoOp);
 	CHECK(enabled && writes == 1);
 	CHECK(gate.request(operation(false), 0).outcome == WaitOutcome::Pending);
-	CHECK(gate.tick(0, false).outcome == WaitOutcome::NoOp);
+	gate.cancel();
+	CHECK(gate.tick(0).outcome == WaitOutcome::NoOp);
 	CHECK(enabled && writes == 1);
 	CHECK(gate.tick(10000).outcome == WaitOutcome::NoOp);
 	CHECK(gate.request(operation(false), 0).outcome == WaitOutcome::Pending);
 	CHECK(gate.tick(9999).outcome == WaitOutcome::Pending);
 	CHECK(enabled && writes == 1);
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Applied);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Applied);
 	CHECK(!enabled && writes == 2);
 	CHECK(gate.request(operation(true), 0).outcome == WaitOutcome::Applied);
 	CHECK(gate.request(operation(false), 0).outcome == WaitOutcome::Pending);
 	editorOpen = false;
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Refused);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Refused);
 	CHECK(enabled && writes == 3);
 }
 
@@ -595,7 +968,7 @@ void GateCases() {
 	CHECK(writes == 0);
 	displayedAccount = 20;
 	CHECK(displayedAccount != openingAccount);
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Applied);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Applied);
 	CHECK(writes == 1);
 	CHECK(!gate.pending());
 	CHECK(gate.tick(20000).outcome == WaitOutcome::NoOp);
@@ -610,12 +983,12 @@ void GateCases() {
 	held = false;
 	CHECK(gate.request(operation(), 0).outcome == WaitOutcome::Pending);
 	liveAccount = 30;
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Refused);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Refused);
 	CHECK(writes == 1);
 	liveAccount = openingAccount;
 	CHECK(gate.request(operation(), 0).outcome == WaitOutcome::Pending);
 	valid = false;
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Refused);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Refused);
 	CHECK(!gate.pending());
 	valid = true;
 	auto instant = operation();
@@ -639,7 +1012,7 @@ void GateCases() {
 		return QString();
 	};
 	CHECK(gate.request(reentrant, 0).outcome == WaitOutcome::Pending);
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Refused);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Refused);
 	CHECK(writes == 3);
 	auto replace = operation();
 	auto validations = 0;
@@ -648,9 +1021,9 @@ void GateCases() {
 		return QString();
 	};
 	CHECK(gate.request(replace, 0).outcome == WaitOutcome::Pending);
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Refused);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Refused);
 	CHECK(gate.pending());
-	CHECK(gate.tick(30000).outcome == WaitOutcome::Applied);
+	CHECK(Finish(gate, 30000).outcome == WaitOutcome::Applied);
 	CHECK(writes == 4);
 	auto mutation = operation();
 	mutation.delaySeconds = 0;
@@ -699,17 +1072,17 @@ void PeekCases() {
 	CHECK(SerializeState(state) == original);
 	CHECK(gate.request(operation(WaitAction::ExtendPeek), 0).outcome == WaitOutcome::Pending);
 	now = 110;
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Applied);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Applied);
 	CHECK(state.peekDeadlineUnix == 700);
 	state = ParseState(original, QString());
 	CHECK(gate.request(operation(WaitAction::StartPeek), 0).outcome == WaitOutcome::Pending);
 	now = 120;
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Applied);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Applied);
 	CHECK(state.peekDeadlineUnix == 420);
 	state = ParseState(original, QString());
 	CHECK(gate.request(operation(WaitAction::ExtendPeek), 0).outcome == WaitOutcome::Pending);
 	now = 401;
-	CHECK(gate.tick(10000).outcome == WaitOutcome::Refused);
+	CHECK(Finish(gate, 10000).outcome == WaitOutcome::Refused);
 	CHECK(SerializeState(state) == original);
 	CHECK(!ExtendPeek(state, now, 300, kPeekExtendCapSeconds));
 	CHECK(StartPeek(state, 100, kPeekExtendCapSeconds));
@@ -734,7 +1107,7 @@ void PeekCases() {
 			if (std::max(oldDelay, newDelay)) {
 				CHECK(writes == 0);
 				CHECK(gate.tick(std::max(oldDelay, newDelay) * 1000 - 1).outcome == WaitOutcome::Pending);
-				CHECK(gate.tick(std::max(oldDelay, newDelay) * 1000).outcome == WaitOutcome::Applied);
+				CHECK(Finish(gate, std::max(oldDelay, newDelay) * 1000).outcome == WaitOutcome::Applied);
 			}
 			CHECK(writes == 1);
 		}
@@ -1042,6 +1415,10 @@ int main(int argc, char *argv[]) {
 	GateCases();
 	PeekCases();
 	KeyCases();
+	FocusPreferenceProbe::ReadyStepCases();
+	FocusPreferenceProbe::PresenceCases();
+	FocusPreferenceProbe::ReadyKeyCases();
+	FocusPreferenceProbe::ReadyTimeoutOptionCases();
 	DefaultDelayCases();
 	SourceNoOpCases();
 	PlatformKeyCases();

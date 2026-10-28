@@ -47,7 +47,8 @@ def function(signature):
     return source[begin:position]
 pref_key = next(line for line in source.splitlines() if line.startswith('constexpr auto kPeekFocusLossPref ='))
 (work / 'peek-focus-preference.inc').write_text(pref_key + '\n' + source[read_start:read_end] + '\n' + '\n'.join(function(signature) for signature in (
-    'void RequestPeekOptionChange(', 'void RequestPeekFocusLossChange(', 'void RequestPeekDelayChange(')))
+    'void RequestPeekOptionChange(', 'void RequestPeekFocusLossChange(', 'void RequestPeekDelayChange(',
+    'void RequestPeekReadyTimeoutChange(')))
 config_source = (repo / 'Telegram/SourceFiles/purple/purple_config.cpp').read_text()
 begin = config_source.index('WriteResult Config::write(')
 end = config_source.index('std::optional<AccountSettingsWriteTarget> Config::checkedInput', begin)

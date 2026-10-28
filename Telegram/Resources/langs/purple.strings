@@ -267,6 +267,19 @@ docs/purple/upstream_hooks.md.
 "lng_purple_wait_peek_limit" = "This Peek is already at its time limit.";
 "lng_purple_wait_peek_invalid_extension" = "The Peek extension must be longer than zero seconds.";
 "lng_purple_wait_delay_invalid" = "The start delay must be a non-negative whole number of seconds.";
+"lng_purple_peek_ready_start" = "Peek is ready to start";
+"lng_purple_peek_ready_extend" = "Peek is ready to extend";
+"lng_purple_peek_options_ready" = "Peek options are ready to change";
+"lng_purple_work_mode_ready" = "Work Mode is ready to change";
+"lng_purple_wait_ready_hint" = "Press Enter to confirm. Any other key aborts.";
+"lng_purple_wait_ready_start_peek" = "Start Peek";
+"lng_purple_wait_ready_extend_peek" = "Extend Peek";
+"lng_purple_wait_ready_switch" = "Switch to {preset}";
+"lng_purple_wait_ready_apply" = "Apply change";
+"lng_purple_wait_ready_timeout_invalid" = "The ready step timeout must be a whole number of seconds, at least 10.";
+"lng_purple_peek_ready_timeout" = "Ready step timeout (seconds)";
+"lng_purple_peek_ready_timeout_apply" = "Apply ready timeout";
+"lng_purple_peek_ready_timeout_about" = "After the start delay, a ready step waits until you confirm the change. It aborts by itself after this many seconds, at least 10. This global setting applies to every preset. Lowering it is instant. Raising it waits and needs a confirmation too.";
 
 "lng_purple_archive_deleted" = "Deleted messages";
 "lng_purple_archive_deleted_scope" = "Account: {account}\nChat: {chat}";

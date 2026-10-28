@@ -41,6 +41,7 @@ struct PeekOptionChange {
 	std::optional<int> startDelaySeconds;
 	std::optional<bool> exitHiddenChats;
 	std::optional<bool> endOnFocusLoss;
+	std::optional<int> readyTimeoutSeconds;
 };
 
 void RequestPeekOptionChange(
@@ -78,6 +79,10 @@ void EndPeekOnApplicationLock();
 void RequestPeekFocusLossChange(bool enabled, not_null<Main::Session*> session,
 	std::function<bool()> editorCurrent = {});
 void RequestPeekDelayChange(
+	int seconds,
+	const std::shared_ptr<AppWideSettingsEditorState> &editor,
+	not_null<Main::Session*> session);
+void RequestPeekReadyTimeoutChange(
 	int seconds,
 	const std::shared_ptr<AppWideSettingsEditorState> &editor,
 	not_null<Main::Session*> session);

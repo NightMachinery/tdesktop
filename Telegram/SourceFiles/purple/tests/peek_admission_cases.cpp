@@ -12,6 +12,21 @@
 
 using namespace Purple;
 
+namespace {
+
+// The countdown's last tick, then the ready step's confirmation once its
+// input guard has passed.
+Purple::WaitResult Finish(Purple::WaitGate &gate, int64_t now) {
+	const auto result = gate.tick(now);
+	if (result.outcome != Purple::WaitOutcome::Pending
+		|| gate.phase() != Purple::WaitPhase::Ready) {
+		return result;
+	}
+	return gate.confirm(now + Purple::kWaitReadyGuard);
+}
+
+} // namespace
+
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	auto checks = 0;
@@ -85,14 +100,14 @@ int main(int argc, char **argv) {
 		check(result.outcome == (delay ? WaitOutcome::Pending : WaitOutcome::Applied),
 			"ownerless Peek request admitted");
 		if (delay) {
-			check(gate.tick(2000).outcome == WaitOutcome::Applied, "ownerless countdown applies");
+			check(Finish(gate, 2000).outcome == WaitOutcome::Applied, "ownerless countdown applies");
 		}
 		check(PeekLive(state, 1000), "Peek activated");
 		state.peekActive = false;
 		request();
 		if (delay) {
 			check(write(path, bytes + "# edit before watcher settles\n"), "external synthetic edit");
-			check(gate.tick(2000).outcome == WaitOutcome::Refused, "synchronous input change refuses");
+			check(Finish(gate, 2000).outcome == WaitOutcome::Refused, "synchronous input change refuses");
 			check(!state.peekActive, "changed input never reveals chats");
 			check(write(path, bytes), "restore synthetic fixture");
 		}

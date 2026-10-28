@@ -18,3 +18,15 @@ purplePeekAbort: RoundButton(defaultActiveButton) {
 	height: 56px;
 	textTop: 17px;
 }
+purplePeekHint: FlatLabel(defaultFlatLabel) {
+	align: align(center);
+	textFg: windowSubTextFg;
+}
+purplePeekConfirm: RoundButton(purplePeekAbort) {
+	width: -48px;
+}
+purplePeekReadyAbort: RoundButton(defaultLightButton) {
+	width: 240px;
+	height: 56px;
+	textTop: 17px;
+}

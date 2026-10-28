@@ -9,6 +9,7 @@
   },
   "gates": [
     {"name": "test_wait_routes", "driver": "purple/test_wait_routes.py"},
+    {"name": "check_wait_routes", "driver": "purple/check_wait_routes.py"},
     {"name": "test_settings_row_layout", "driver": "purple/test_settings_row_layout.py"},
     {"name": "test_history_menu_lists", "driver": "purple/test_history_menu_lists.py", "compiles": true, "args": ["--output-dir", "{out}"],
      "fixtures": ["purple/test_history_menu_lists.cpp"]},

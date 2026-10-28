@@ -289,6 +289,9 @@ exit_hidden_chats_p = true
 # Optional global activation delay in whole seconds. Absence means ten on
 # desktop and mobile. An explicit value, including zero, travels to both.
 # start_delay_seconds = 0
+# After the delay, a ready step waits for a confirmation and aborts by itself
+# after this many whole seconds. Absence means ten minutes; at least 10.
+# ready_timeout_seconds = 600
 # Temporarily reveal what the active preset is hiding.
 hotkey   = "Ctrl+Shift+E"
 auto_off = "2m"

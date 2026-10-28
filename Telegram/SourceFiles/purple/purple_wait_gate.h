@@ -45,7 +45,8 @@ enum class PeekRequestRefusal { None, WorkModeOff, Ended, Untimed, Limit, Invali
 	int seconds);
 [[nodiscard]] bool WaitOriginValid(WaitAction action, WaitOrigin origin);
 
-enum class WaitOutcome { NoOp, Pending, Applied, Refused };
+// Expired is the ready step's own timeout: quiet, like Abort.
+enum class WaitOutcome { NoOp, Pending, Applied, Refused, Expired };
 
 struct WaitResult {
 	WaitOutcome outcome = WaitOutcome::NoOp;
@@ -64,6 +65,8 @@ void FinishNoOpWait(const WaitResult &result, const std::function<void()> &finis
 struct WaitOperation {
 	WaitAction action = WaitAction::StartPeek;
 	int delaySeconds = 0;
+	// Zero means kPeekReadyTimeoutDefaultSeconds; never below its minimum.
+	int readyTimeoutSeconds = 0;
 	bool same = false;
 	bool onlyTightening = false;
 	bool fromBypass = false;
@@ -91,20 +94,77 @@ private:
 
 };
 
+// Milliseconds on a monotonic clock that keeps counting while the machine
+// sleeps, so a deadline slept through is over on wake. crl::now() stops in
+// sleep on macOS and Linux until something adjusts it.
+[[nodiscard]] int64_t WaitClockNow();
+
+// Ignore every key and the action button this long after the ready step
+// shows, so a held or late key from the countdown cannot confirm.
+inline constexpr auto kWaitReadyGuard = int64_t(500);
+
+// How long after the host window loses activation a lock signal may still
+// arrive and make it a lock rather than a switch to another app.
+inline constexpr auto kWaitAwaySettle = int64_t(2000);
+
+enum class WaitPhase { Idle, Countdown, Ready };
+
+// A positive delay counts down, then waits in a ready step until confirm()
+// applies it, Abort cancels it, or the ready timeout expires it. Each tick
+// re-validates the context; foreground is checked only at confirm(), because
+// presence while waiting is WaitPresence's job.
 class WaitGate final {
 public:
 	WaitResult request(WaitOperation operation, int64_t now);
-	WaitResult tick(int64_t now, bool foregroundUnlocked = true);
+	WaitResult tick(int64_t now);
+	WaitResult confirm(int64_t now);
+	void guardInput(int64_t now);
 	void cancel();
 	[[nodiscard]] bool pending() const;
+	[[nodiscard]] WaitPhase phase() const;
+	[[nodiscard]] bool inputGuarded(int64_t now) const;
 	[[nodiscard]] int remaining(int64_t now) const;
 	[[nodiscard]] std::optional<WaitAction> action() const;
 
 private:
+	WaitResult complete();
+
 	std::optional<WaitOperation> _operation;
 	uint64_t _generation = 0;
+	WaitPhase _phase = WaitPhase::Idle;
 	int64_t _until = 0;
+	int64_t _readyUntil = 0;
+	int64_t _guardUntil = 0;
 
 };
+
+// Whether the person is at the host window, away in another app, or behind
+// a lock. The order of "inactive" and "locked" is not fixed on any platform,
+// so leaving the window starts a settle window in which a lock may still
+// arrive. A return or the end of the settle window without one cancels.
+class WaitPresence final {
+public:
+	void reset();
+	// True when the wait must be cancelled.
+	[[nodiscard]] bool update(bool foreground, bool locked, int64_t now);
+	[[nodiscard]] bool locked() const;
+
+private:
+	enum class Phase { Present, Away, Locked, Returning };
+
+	Phase _phase = Phase::Present;
+	int64_t _since = 0;
+
+};
+
+enum class WaitKeyVerdict { Ignore, Abort, Confirm };
+
+// Countdown: every key aborts. Ready: nothing during the guard or on
+// auto-repeat; Return and keypad Enter confirm; any other key aborts.
+[[nodiscard]] WaitKeyVerdict ClassifyWaitKey(
+	WaitPhase phase,
+	bool guarded,
+	bool enter,
+	bool autoRepeat);
 
 } // namespace Purple

@@ -46,7 +46,7 @@
     "ActivatePeekExtension": 1,
     "ActivatePeekFor": 1,
     "DeactivatePeek": 3,
-    "ExtendPeek": 1,
+    "SetPeekReadyTimeout": 1,
     "SetPeekStartDelay": 1,
     "SetTableBool": 1,
     "UpdateState": 1,
@@ -68,6 +68,9 @@
   "Telegram/SourceFiles/purple/purple_screentime_box.cpp": {
     "SetTableBool": 1
   },
+  "Telegram/SourceFiles/purple/purple_wait_gate.cpp": {
+    "ExtendPeek": 1
+  },
   "Telegram/ThirdParty/purple_core/purple/purple_engine.cpp": {
     "StopPeek": 1,
     "activePreset=": 4
@@ -77,12 +80,14 @@
   },
   "Telegram/ThirdParty/purple_core/purple/purple_splice.cpp": {
     "SetAccountWorkMode": 1,
+    "SetPeekReadyTimeout": 1,
     "SetPeekStartDelay": 1,
     "SetTableBool": 1,
     "SetTableString": 1
   },
   "Telegram/ThirdParty/purple_core/purple/purple_splice.h": {
     "SetAccountWorkMode": 1,
+    "SetPeekReadyTimeout": 1,
     "SetPeekStartDelay": 1,
     "SetTableBool": 1,
     "SetTableString": 1

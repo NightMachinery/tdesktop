@@ -6,11 +6,32 @@
 #include <algorithm>
 #include <utility>
 
+#if defined Q_OS_WIN
+#include <windows.h>
+#else // Q_OS_WIN
+#include <time.h>
+#endif // Q_OS_WIN
+
 namespace Purple {
 namespace {
 
 constexpr auto kInactiveGrace = int64_t(2000);
 
+}
+
+int64_t WaitClockNow() {
+#if defined Q_OS_WIN
+	// Counts sleep and hibernation, unlike QueryUnbiasedInterruptTime.
+	return int64_t(GetTickCount64());
+#elif defined Q_OS_DARWIN
+	// CLOCK_MONOTONIC keeps counting while the Mac sleeps; CLOCK_UPTIME_RAW
+	// and mach_absolute_time(), behind crl::now(), do not.
+	return int64_t(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1000000);
+#else
+	auto value = timespec();
+	clock_gettime(CLOCK_BOOTTIME, &value);
+	return int64_t(value.tv_sec) * 1000 + value.tv_nsec / 1000000;
+#endif
 }
 
 int PeekWaitDelaySeconds(const Settings &settings) {
@@ -139,16 +160,16 @@ WaitResult WaitGate::request(WaitOperation operation, int64_t now) {
 		operation.toBypass,
 		operation.onlyTightening)
 		? std::max(operation.delaySeconds, 0) : 0;
-	_until = now + int64_t(delay) * 1000;
 	_operation = std::move(operation);
+	if (!delay) {
+		return complete();
+	}
+	_phase = WaitPhase::Countdown;
+	_until = now + int64_t(delay) * 1000;
 	return tick(now);
 }
 
-WaitResult WaitGate::tick(int64_t now, bool foregroundUnlocked) {
-	if (_operation && !foregroundUnlocked) {
-		cancel();
-		return {};
-	}
+WaitResult WaitGate::tick(int64_t now) {
 	if (!_operation) {
 		return {};
 	}
@@ -162,9 +183,42 @@ WaitResult WaitGate::tick(int64_t now, bool foregroundUnlocked) {
 		cancel();
 		return { WaitOutcome::Refused, error };
 	}
-	if (now < _until) {
+	if (_phase == WaitPhase::Countdown) {
+		if (now < _until) {
+			return { WaitOutcome::Pending };
+		}
+		// Counted from the end of the countdown, not from the tick that saw
+		// it, so a deadline slept through does not buy a fresh ready step.
+		const auto timeout = operation.readyTimeoutSeconds > 0
+			? std::max(operation.readyTimeoutSeconds, kPeekReadyTimeoutMinimumSeconds)
+			: kPeekReadyTimeoutDefaultSeconds;
+		_phase = WaitPhase::Ready;
+		_readyUntil = _until + int64_t(timeout) * 1000;
+		guardInput(now);
+	}
+	if (now >= _readyUntil) {
+		cancel();
+		return { WaitOutcome::Expired };
+	}
+	return { WaitOutcome::Pending };
+}
+
+WaitResult WaitGate::confirm(int64_t now) {
+	if (!_operation) {
+		return {};
+	}
+	if (_phase != WaitPhase::Ready || now < _guardUntil) {
 		return { WaitOutcome::Pending };
 	}
+	if (now >= _readyUntil) {
+		cancel();
+		return { WaitOutcome::Expired };
+	}
+	return complete();
+}
+
+WaitResult WaitGate::complete() {
+	const auto operation = *_operation;
 	cancel();
 	const auto completion = _generation;
 	const auto current = [=, this] {
@@ -182,22 +236,94 @@ WaitResult WaitGate::tick(int64_t now, bool foregroundUnlocked) {
 	return { failed.isEmpty() ? WaitOutcome::Applied : WaitOutcome::Refused, failed };
 }
 
+void WaitGate::guardInput(int64_t now) {
+	if (_phase == WaitPhase::Ready) {
+		_guardUntil = now + kWaitReadyGuard;
+	}
+}
+
 void WaitGate::cancel() {
 	++_generation;
 	_operation.reset();
-	_until = 0;
+	_phase = WaitPhase::Idle;
+	_until = _readyUntil = _guardUntil = 0;
 }
 
 bool WaitGate::pending() const {
 	return _operation.has_value();
 }
 
+WaitPhase WaitGate::phase() const {
+	return _phase;
+}
+
+bool WaitGate::inputGuarded(int64_t now) const {
+	return _phase == WaitPhase::Ready && now < _guardUntil;
+}
+
 int WaitGate::remaining(int64_t now) const {
-	return pending() ? int((std::max(_until - now, int64_t(0)) + 999) / 1000) : 0;
+	return (_phase == WaitPhase::Countdown)
+		? int((std::max(_until - now, int64_t(0)) + 999) / 1000)
+		: 0;
 }
 
 std::optional<WaitAction> WaitGate::action() const {
 	return _operation ? std::make_optional(_operation->action) : std::nullopt;
+}
+
+void WaitPresence::reset() {
+	_phase = Phase::Present;
+	_since = 0;
+}
+
+bool WaitPresence::update(bool foreground, bool locked, int64_t now) {
+	const auto settled = (now - _since >= kWaitAwaySettle);
+	if (_phase == Phase::Away && settled) {
+		return true;
+	} else if (locked) {
+		_phase = Phase::Locked;
+		return false;
+	} else if (_phase == Phase::Locked) {
+		_phase = Phase::Returning;
+		_since = now;
+	}
+	switch (_phase) {
+	case Phase::Returning:
+		if (foreground) {
+			_phase = Phase::Present;
+			return false;
+		}
+		return (now - _since >= kWaitAwaySettle);
+	case Phase::Away:
+		// Back without a lock in between: it was a switch to another app.
+		return foreground;
+	case Phase::Present:
+		if (!foreground) {
+			_phase = Phase::Away;
+			_since = now;
+		}
+		return false;
+	case Phase::Locked:
+		break;
+	}
+	return false;
+}
+
+bool WaitPresence::locked() const {
+	return _phase == Phase::Locked;
+}
+
+WaitKeyVerdict ClassifyWaitKey(
+		WaitPhase phase,
+		bool guarded,
+		bool enter,
+		bool autoRepeat) {
+	if (phase != WaitPhase::Ready) {
+		return WaitKeyVerdict::Abort;
+	} else if (guarded || autoRepeat) {
+		return WaitKeyVerdict::Ignore;
+	}
+	return enter ? WaitKeyVerdict::Confirm : WaitKeyVerdict::Abort;
 }
 
 } // namespace Purple

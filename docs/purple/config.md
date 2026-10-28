@@ -1168,7 +1168,12 @@ only if it becomes hidden when Peek ends. `start_delay_seconds` is an optional
 non-negative integer: absence means ten seconds on desktop and mobile; explicit zero wins on
 both devices. Both keys are global. The app edits preserve unrelated TOML.
 The delay setting itself changes only after a countdown of max(old,new), with
-Abort retaining the previous value and no implicit Peek start. See
+Abort retaining the previous value and no implicit Peek start.
+`ready_timeout_seconds` is how long the ready step after that delay waits for a
+confirmation: whole seconds, default 600 when absent, global and shared by every
+device. Values 0 to 9 are raised to the minimum of 10 with a warning; anything
+else invalid warns and keeps the default. The starter file documents it without
+writing it. Lowering it in the app is instant; raising it waits. See
 [Peek controls](peek_controls.md) for lifecycle and qualification details.
 
 Desktop account ownership and the current routing boundary are described in

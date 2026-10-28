@@ -808,6 +808,58 @@ void PresetBox(
 			st::boxDividerLabel),
 		padding);
 
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			tr::lng_purple_peek_ready_timeout(),
+			st::boxLabel),
+		padding);
+	const auto timeoutWrap = container->add(
+		object_ptr<Ui::FixedHeightWidget>(
+			container,
+			st::defaultInputField.heightMin),
+		padding);
+	const auto timeout = Ui::CreateChild<Ui::MaskedInputField>(
+		timeoutWrap,
+		st::defaultInputField,
+		tr::lng_purple_peek_ready_timeout(),
+		QString::number(PeekReadyTimeoutSeconds(ActiveSettings())));
+	timeout->setValidator(new QIntValidator(
+		0,
+		std::numeric_limits<int>::max(),
+		timeout));
+	timeoutWrap->widthValue() | rpl::on_next([=](int width) {
+		timeout->resize(width, timeout->height());
+		timeoutWrap->resize(width, timeout->height());
+	}, timeoutWrap->lifetime());
+	const auto applyTimeout = container->add(
+		object_ptr<Ui::RoundButton>(
+			container,
+			tr::lng_purple_peek_ready_timeout_apply(),
+			st::defaultActiveButton),
+		padding);
+	applyTimeout->setClickedCallback([=] {
+		auto valid = false;
+		const auto seconds = timeout->getLastText().toInt(&valid);
+		if (!valid || seconds < kPeekReadyTimeoutMinimumSeconds) {
+			timeout->showError();
+			return;
+		}
+		if (const auto live = originSession.get()) {
+			RequestPeekReadyTimeoutChange(seconds, editor, not_null{ live });
+		}
+	});
+	SettingsChanges() | rpl::on_next([=] {
+		timeout->setText(QString::number(
+			PeekReadyTimeoutSeconds(ActiveSettings())));
+	}, timeout->lifetime());
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			tr::lng_purple_peek_ready_timeout_about(),
+			st::boxDividerLabel),
+		padding);
+
 	// Which stop the peek is at: the chip that lights and the place the dial
 	// rests are the same number, read once here so the two pictures of one
 	// peek cannot come to disagree about it.
@@ -943,6 +995,8 @@ void PresetBox(
 		if (!PeekCountdownPending()) {
 			delay->setText(QString::number(
 				PeekWaitDelaySeconds(ActiveSettings())));
+			timeout->setText(QString::number(
+				PeekReadyTimeoutSeconds(ActiveSettings())));
 		}
 	}, peek->lifetime());
 

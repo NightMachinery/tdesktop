@@ -9,7 +9,7 @@ WRITERS = (
     'StartPeek', 'ExtendPeek', 'StopPeek', 'ActivatePeekFor',
     'ActivatePeekExtension', 'DeactivatePeek', 'writeWorkMode', 'SetAccountWorkMode',
     'switchGlobalAccount', 'commitGlobalChoice', 'activateGlobalChoice',
-    'UpdateState', 'SetPeekStartDelay',
+    'UpdateState', 'SetPeekStartDelay', 'SetPeekReadyTimeout',
 )
 TOKENS = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|R"(?P<tag>[^ ()\\\t\r\n]{0,16})\([\s\S]*?\)(?P=tag)"|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 CALL = re.compile(r'\b(' + '|'.join(WRITERS) + r'|SetTable\w*)\s*\(')

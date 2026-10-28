@@ -34,11 +34,78 @@ Completion validates the original context again and calls the existing guarded
 writer. A fresh settings capture never substitutes a different destination for
 an old editor. Ending Peek stays available even when settings cannot be edited.
 
-Abort, any key, closing the owning window, backgrounding it, screen lock or app
-lock cancel the pending operation. Key presses on the cover or its Abort button
-cancel quietly; the temporary application filter also intercepts shortcuts.
+Abort, any key during the countdown, closing the owning window and switching to
+another app cancel the pending operation. Locks do not: see
+[The ready step](#the-ready-step). Key presses on the cover or its buttons are
+handled quietly; the temporary application filter also intercepts shortcuts.
 It is removed synchronously at cancellation/completion, before deferred cover
-deletion. Subsequent keys work normally. A pending countdown is never persisted.
+deletion. Subsequent keys work normally. A pending wait is never persisted.
+
+## The ready step
+
+@Opus5.5 [2026-10-28 Tue]. When the countdown ends nothing is applied. The cover
+becomes a **ready step**: a heading, "Press Enter to confirm. Any other key
+aborts.", the action button and Abort. The button names the action: "Start
+Peek", "Extend Peek", "Switch to <preset>" or "Apply change". The change
+applies only on that button, so a Peek's duration starts at the press. Every
+route in this document gets the step: Peek starts and extensions, preset
+hotkeys and pickers, missing-preset recovery, per-account list modes, app-wide
+source choices and the Peek option editors. Zero delay, only-tightening
+changes, no-ops and the sync and automation exemptions get neither countdown
+nor step. Nothing announces the end of the countdown: no notification, sound or
+window raise.
+
+Pressing the button re-runs today's completion: the generation check, the
+validation of account, session, preset, state and exact disk input, the
+foreground and unlocked check, and the guarded writer. A failure aborts with
+today's message.
+
+Keys in the ready step: Return or keypad Enter presses the button; Escape and
+any other key abort. For 500 ms after the step appears, and again when it
+reappears after a lock, every key is swallowed and the button is greyed and
+deaf to the mouse, so a held or late key cannot confirm. Auto-repeat is always
+ignored. Abort stays clickable throughout.
+
+The step aborts by itself, quietly, `[peek] ready_timeout_seconds` after the
+countdown ended: default 600, at least 10. It counts from the end of the
+countdown, so a Mac that sleeps past the deadline does not wake into a fresh
+step. All wait times use `WaitClockNow()`, a monotonic clock that keeps
+counting in sleep (`CLOCK_MONOTONIC` on macOS, `CLOCK_BOOTTIME` on Linux,
+`GetTickCount64` on Windows). `crl::now()` stops in sleep on macOS and Linux
+until something adjusts it.
+
+### Locks versus app switches
+
+Switching to another app cancels, in both phases. Screen lock, OS session lock,
+sleep and Telegram's passcode lock do not. On return the countdown or ready
+step is still there, unless the timeout passed.
+
+The signals are the ones Desktop already has. All feed
+`Core::App().screenIsLocked()`:
+
+- macOS: `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked`;
+- Windows: `WTS_SESSION_LOCK`/`LOGOFF` and `UNLOCK`/`LOGON`;
+- Linux: the XDG portal's `screensaver-active`;
+- passcode lock, on every platform: `passcodeLocked()`.
+
+A lock can make the app inactive before its signal arrives, so `WaitPresence`
+never acts on inactivity alone:
+
+- leaving the window opens a 2 s settle window;
+- a lock signal inside it makes this a lock;
+- coming back without a lock, or reaching its end, cancels;
+- after an unlock the window must be in the foreground again within 2 s.
+
+Where a lock cannot be told apart from a switch, the wait cancels:
+
+- a lock signal later than 2 s;
+- Linux without the portal;
+- sleep that deactivates the app without a lock;
+- macOS fast user switching without `screenIsLocked`.
+
+While locked the cover is hidden, so it never sits over the passcode widget,
+and the key filter passes every event through. Another Telegram window or
+dialog taking activation cancels at once, except behind a lock.
 
 An aborted restart or extension leaves the active Peek untouched. A completed
 restart replaces its deadline then. A completed extension adds to its existing

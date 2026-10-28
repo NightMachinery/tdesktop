@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_schedule.h"
 #include "purple/purple_wait_key_filter.h"
 #include "ui/painter.h"
 #include "ui/widgets/buttons.h"
@@ -60,14 +61,42 @@ QString PeekRefusalText(PeekRequestRefusal reason) {
 	return {};
 }
 
+QString ReadyTitle(WaitAction action) {
+	switch (action) {
+	case WaitAction::StartPeek: return tr::lng_purple_peek_ready_start(tr::now);
+	case WaitAction::ExtendPeek: return tr::lng_purple_peek_ready_extend(tr::now);
+	case WaitAction::ChangePeekOption: return tr::lng_purple_peek_options_ready(tr::now);
+	default: return tr::lng_purple_work_mode_ready(tr::now);
+	}
+}
+
+QString ReadyActionText(WaitAction action, const QString &preset) {
+	switch (action) {
+	case WaitAction::StartPeek: return tr::lng_purple_wait_ready_start_peek(tr::now);
+	case WaitAction::ExtendPeek: return tr::lng_purple_wait_ready_extend_peek(tr::now);
+	case WaitAction::ChangePreset:
+		return tr::lng_purple_wait_ready_switch(
+			tr::now,
+			lt_preset,
+			PresetDisplayName(ActiveSettings(), preset));
+	default: return tr::lng_purple_wait_ready_apply(tr::now);
+	}
+}
+
 class WaitCover final : public Ui::RpWidget {
 public:
 	WaitCover(
 		not_null<Ui::RpWidget*> parent,
 		WaitAction action,
-		Fn<void()> abort);
+		const QString &actionText,
+		Fn<void()> abort,
+		Fn<void()> confirm,
+		Fn<void(bool enter, bool autoRepeat)> key);
 
 	void setRemaining(int seconds);
+	// The ready step: the action and Abort, the action greyed and deaf to
+	// the mouse while the input guard is on.
+	void showReady(bool guarded);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -79,9 +108,16 @@ private:
 	void layout();
 
 	Fn<void()> _abortCallback;
+	Fn<void(bool, bool)> _keyCallback;
+	WaitAction _action = WaitAction::StartPeek;
 	object_ptr<Ui::FlatLabel> _title;
 	object_ptr<Ui::FlatLabel> _number;
+	object_ptr<Ui::FlatLabel> _hint;
 	object_ptr<Ui::RoundButton> _abort;
+	object_ptr<Ui::RoundButton> _confirm;
+	object_ptr<Ui::RoundButton> _readyAbort;
+	bool _ready = false;
+	std::optional<bool> _guarded;
 
 };
 
@@ -101,6 +137,10 @@ public:
 
 private:
 	void tick();
+	void render(int64_t now);
+	void confirm();
+	void key(bool enter, bool autoRepeat);
+	void presenceChanged();
 	void focusChanged();
 	void closeCover();
 	void report(const WaitResult &result, base::weak_ptr<Window::Controller> window);
@@ -108,6 +148,8 @@ private:
 	std::vector<not_null<Ui::RpWidget*>> _widgets;
 	base::weak_ptr<Window::Controller> _window;
 	WaitGate _gate;
+	WaitPresence _presence;
+	bool _coverHidden = false;
 	PeekFocusGate _focusGate;
 	uint64_t _quietFocusGeneration = 0;
 	WaitKeyFilter _keys;
@@ -124,9 +166,14 @@ private:
 WaitCover::WaitCover(
 		not_null<Ui::RpWidget*> parent,
 		WaitAction action,
-		Fn<void()> abort)
+		const QString &actionText,
+		Fn<void()> abort,
+		Fn<void()> confirm,
+		Fn<void(bool enter, bool autoRepeat)> key)
 : RpWidget(parent)
 , _abortCallback(std::move(abort))
+, _keyCallback(std::move(key))
+, _action(action)
 , _title(
 	this,
 	action == WaitAction::ChangePeekOption
@@ -138,10 +185,23 @@ WaitCover::WaitCover(
 		: tr::lng_purple_work_mode_changing(),
 	st::purplePeekHeading)
 , _number(this, QString(), st::purplePeekCountdown)
-, _abort(this, tr::lng_purple_wait_abort(), st::purplePeekAbort) {
+, _hint(this, tr::lng_purple_wait_ready_hint(), st::purplePeekHint)
+, _abort(this, tr::lng_purple_wait_abort(), st::purplePeekAbort)
+, _confirm(this, rpl::single(actionText), st::purplePeekConfirm)
+, _readyAbort(this, tr::lng_purple_wait_abort(), st::purplePeekReadyAbort) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	setFocusPolicy(Qt::StrongFocus);
 	_abort->setClickedCallback([=] { _abortCallback(); });
+	// Abort stays live through the input guard: aborting is always safe, and
+	// a late click meant for the countdown's Abort should still abort.
+	_readyAbort->setClickedCallback([=] { _abortCallback(); });
+	_confirm->setClickedCallback(std::move(confirm));
+	if (_confirm->width() < _readyAbort->width()) {
+		_confirm->setFullWidth(st::purplePeekAbort.width);
+	}
+	_hint->hide();
+	_confirm->hide();
+	_readyAbort->hide();
 	parent->sizeValue() | rpl::on_next([=](QSize size) {
 		setGeometry(QRect(QPoint(), size));
 	}, lifetime());
@@ -152,6 +212,28 @@ WaitCover::WaitCover(
 
 void WaitCover::setRemaining(int seconds) {
 	_number->setText(QString::number(seconds));
+	layout();
+	raise();
+}
+
+void WaitCover::showReady(bool guarded) {
+	if (!_ready) {
+		_ready = true;
+		_title->setText(ReadyTitle(_action));
+		_number->hide();
+		_abort->hide();
+		_hint->show();
+		_confirm->show();
+		_readyAbort->show();
+	}
+	if (_guarded != guarded) {
+		_guarded = guarded;
+		_confirm->setDisabled(guarded);
+		_confirm->setTextFgOverride(guarded
+			? std::make_optional(st::windowSubTextFg->c)
+			: std::nullopt);
+		_confirm->setAttribute(Qt::WA_TransparentForMouseEvents, guarded);
+	}
 	layout();
 	raise();
 }
@@ -168,20 +250,38 @@ void WaitCover::resizeEvent(QResizeEvent *e) {
 void WaitCover::layout() {
 	const auto available = std::max(width() - 2 * st::purplePeekPadding, 0);
 	_title->resizeToWidth(available);
-	_number->resizeToWidth(available);
-	const auto total = _title->height() + _number->height()
-		+ _abort->height() + 2 * st::purplePeekGap;
+	if (!_ready) {
+		_number->resizeToWidth(available);
+		const auto total = _title->height() + _number->height()
+			+ _abort->height() + 2 * st::purplePeekGap;
+		auto top = std::max((height() - total) / 2, 0);
+		_title->move((width() - _title->width()) / 2, top);
+		top += _title->height() + st::purplePeekGap;
+		_number->move((width() - _number->width()) / 2, top);
+		top += _number->height() + st::purplePeekGap;
+		_abort->move((width() - _abort->width()) / 2, top);
+		return;
+	}
+	_hint->resizeToWidth(available);
+	const auto buttons = _confirm->height() + st::purplePeekGap
+		+ _readyAbort->height();
+	const auto total = _title->height() + _hint->height() + buttons
+		+ 2 * st::purplePeekGap;
 	auto top = std::max((height() - total) / 2, 0);
 	_title->move((width() - _title->width()) / 2, top);
 	top += _title->height() + st::purplePeekGap;
-	_number->move((width() - _number->width()) / 2, top);
-	top += _number->height() + st::purplePeekGap;
-	_abort->move((width() - _abort->width()) / 2, top);
+	_hint->move((width() - _hint->width()) / 2, top);
+	top += _hint->height() + st::purplePeekGap;
+	_confirm->move((width() - _confirm->width()) / 2, top);
+	top += _confirm->height() + st::purplePeekGap;
+	_readyAbort->move((width() - _readyAbort->width()) / 2, top);
 }
 
 void WaitCover::keyPressEvent(QKeyEvent *e) {
 	e->accept();
-	_abortCallback();
+	_keyCallback(
+		e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter,
+		e->isAutoRepeat());
 }
 
 void WaitCover::mousePressEvent(QMouseEvent *e) {
@@ -211,12 +311,47 @@ PendingWait::PendingWait()
 	_focusTimer.callOnce(1);
 }
 
+void PendingWait::presenceChanged() {
+	if (!pending() || !_cover) {
+		return;
+	}
+	const auto window = _window.get();
+	const auto foreground = window
+		&& QGuiApplication::applicationState() == Qt::ApplicationActive
+		&& window->widget()->isActive()
+		&& Core::App().activeWindow() == window;
+	const auto locked = Core::App().passcodeLocked() || Core::App().screenIsLocked();
+	if (_presence.update(foreground, locked, WaitClockNow())) {
+		quietCancel();
+		return;
+	}
+	// Hidden behind a lock, so the cover cannot sit over the passcode
+	// widget; shown again, with a fresh input guard, when the lock ends.
+	const auto hide = _presence.locked();
+	if (hide == _coverHidden) {
+		return;
+	}
+	// The key filter passes everything through while _coverHidden is set,
+	// so it is set before hiding and cleared only once the cover shows.
+	if (hide) {
+		_coverHidden = true;
+		_cover->hide();
+	} else {
+		_gate.guardInput(WaitClockNow());
+		_cover->show();
+		_coverHidden = false;
+		_cover->raise();
+		if (foreground) {
+			_cover->setFocus();
+		}
+		render(WaitClockNow());
+	}
+}
+
 void PendingWait::focusChanged() {
 	const auto applicationActive = QGuiApplication::applicationState() == Qt::ApplicationActive;
 	const auto locked = Core::App().passcodeLocked() || Core::App().screenIsLocked();
-	if (!applicationActive || locked) {
-		quietCancel();
-	}
+	presenceChanged();
 	const auto now = crl::now();
 	_focusTimer.cancel();
 	if (_focusGate.update(
@@ -234,7 +369,7 @@ void PendingWait::focusChanged() {
 }
 
 void PendingWait::locked() {
-	quietCancel();
+	presenceChanged();
 	_focusTimer.cancel();
 	if (_focusGate.update(
 			PeekEndsOnFocusLoss(),
@@ -287,6 +422,8 @@ void PendingWait::closeCover() {
 		focus->setFocus();
 	}
 	_window = nullptr;
+	_presence.reset();
+	_coverHidden = false;
 	if (cover) {
 		_changes.fire({});
 	}
@@ -358,7 +495,9 @@ WaitResult PendingWait::request(WaitRequest request) {
 		: SettingsInputForOperation(&inputError);
 	const auto external = request.validate;
 	const auto editor = request.editor;
-	const auto originCurrent = [=]() -> QString {
+	// Foreground is checked when the request is made and when it is
+	// confirmed. While waiting, presence decides: a lock keeps the wait.
+	const auto originCurrent = [=](bool foreground) -> QString {
 		const auto live = weak.get();
 		const auto host = origin.get();
 		const auto accountValid = host && live && !live->account().loggingOut()
@@ -369,15 +508,17 @@ WaitResult PendingWait::request(WaitRequest request) {
 		const auto current = WaitOriginValid(action, {
 			.accountValid = accountValid,
 			.displayedAccountSame = host->maybeSession() == live && &Core::App().activeAccount() == domain,
-			.foregroundUnlocked = QGuiApplication::applicationState() == Qt::ApplicationActive
-				&& host->widget()->isActive() && Core::App().activeWindow() == host
-				&& !host->locked() && !Core::App().passcodeLocked() && !Core::App().screenIsLocked(),
+			.foregroundUnlocked = !foreground
+				|| (QGuiApplication::applicationState() == Qt::ApplicationActive
+					&& host->widget()->isActive() && Core::App().activeWindow() == host
+					&& !host->locked() && !Core::App().passcodeLocked()
+					&& !Core::App().screenIsLocked()),
 		});
 		return current ? QString() : tr::lng_purple_wait_context_changed(tr::now);
 	};
-	const auto validate = [=]() -> QString {
+	const auto validateAt = [=](bool foreground) -> QString {
 		const auto live = weak.get();
-		const auto originError = originCurrent();
+		const auto originError = originCurrent(foreground);
 		if (!originError.isEmpty()) {
 			return originError;
 		}
@@ -408,7 +549,8 @@ WaitResult PendingWait::request(WaitRequest request) {
 		}
 		return {};
 	};
-	const auto before = validate();
+	const auto validate = [=] { return validateAt(false); };
+	const auto before = validateAt(true);
 	if (!before.isEmpty()) {
 		const auto result = WaitResult{ WaitOutcome::Refused, before };
 		report(result, origin);
@@ -444,7 +586,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 	}
 	const auto apply = [=](const std::function<bool()> &current) -> QString {
 		closeCover();
-		const auto error = validate();
+		const auto error = validateAt(true);
 		if (!error.isEmpty()) {
 			return error;
 		}
@@ -484,19 +626,40 @@ WaitResult PendingWait::request(WaitRequest request) {
 	const auto result = _gate.request({
 		.action = action,
 		.delaySeconds = delay,
+		.readyTimeoutSeconds = PeekReadyTimeoutSeconds(ActiveSettings()),
 		.same = request.same,
 		.onlyTightening = request.onlyTightening,
 		.fromBypass = request.fromBypass,
 		.toBypass = request.toBypass,
 		.validate = validate,
-		.originCurrent = [=] { return originCurrent().isEmpty(); },
+		.originCurrent = [=] { return originCurrent(true).isEmpty(); },
 		.apply = apply,
-	}, crl::now());
+	}, WaitClockNow());
 	if (result.outcome == WaitOutcome::Pending) {
 		_window = origin;
 		_previousFocus = QApplication::focusWidget();
-		_cover = new WaitCover(window->widget()->body(), action, [=] { quietCancel(); });
-		_keys.arm(window->widget(), _cover, [=] { quietCancel(); });
+		_presence.reset();
+		_coverHidden = false;
+		_cover = new WaitCover(
+			window->widget()->body(),
+			action,
+			ReadyActionText(action, request.preset),
+			[=] { quietCancel(); },
+			[=] { confirm(); },
+			[=](bool enter, bool autoRepeat) { key(enter, autoRepeat); });
+		_keys.arm(window->widget(), _cover, {
+			.abort = [=] { quietCancel(); },
+			.presence = [=] { presenceChanged(); },
+			.suspended = [=] { return _coverHidden; },
+			.classify = [=](bool enter, bool autoRepeat) {
+				return ClassifyWaitKey(
+					_gate.phase(),
+					_gate.inputGuarded(WaitClockNow()),
+					enter,
+					autoRepeat);
+			},
+			.confirm = [=] { confirm(); },
+		});
 		if (!workMode) {
 			window->sessionControllerChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
 			Core::App().domain().activeChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
@@ -511,20 +674,52 @@ WaitResult PendingWait::request(WaitRequest request) {
 	return result;
 }
 
-void PendingWait::tick() {
-	const auto origin = _window;
-	const auto window = origin.get();
-	const auto foregroundUnlocked = QGuiApplication::applicationState() == Qt::ApplicationActive
-		&& window && window->widget()->isActive()
-		&& Core::App().activeWindow() == window && !window->locked()
-		&& !Core::App().passcodeLocked() && !Core::App().screenIsLocked();
-	const auto quietGeneration = _quietFocusGeneration;
-	const auto result = _gate.tick(crl::now(), foregroundUnlocked);
-	if (pending() && _cover) {
-		_cover->setRemaining(_gate.remaining(crl::now()));
+void PendingWait::render(int64_t now) {
+	if (!pending() || !_cover) {
+		closeCover();
+	} else if (_coverHidden) {
+		return;
+	} else if (_gate.phase() == WaitPhase::Ready) {
+		_cover->showReady(_gate.inputGuarded(now));
 	} else {
+		_cover->setRemaining(_gate.remaining(now));
+	}
+}
+
+void PendingWait::key(bool enter, bool autoRepeat) {
+	const auto verdict = ClassifyWaitKey(
+		_gate.phase(),
+		_gate.inputGuarded(WaitClockNow()),
+		enter,
+		autoRepeat);
+	if (verdict == WaitKeyVerdict::Abort) {
+		quietCancel();
+	} else if (verdict == WaitKeyVerdict::Confirm) {
+		confirm();
+	}
+}
+
+void PendingWait::confirm() {
+	if (_coverHidden) {
+		return;
+	}
+	const auto origin = _window;
+	const auto result = _gate.confirm(WaitClockNow());
+	if (!pending()) {
 		closeCover();
 	}
+	report(result, origin);
+}
+
+void PendingWait::tick() {
+	const auto origin = _window;
+	// The activation and lock signals come first; this is the backstop, and
+	// what ends a settle window or shows the cover again after a lock.
+	presenceChanged();
+	const auto quietGeneration = _quietFocusGeneration;
+	const auto now = WaitClockNow();
+	const auto result = _gate.tick(now);
+	render(now);
 	if (quietGeneration == _quietFocusGeneration
 		&& QGuiApplication::applicationState() == Qt::ApplicationActive
 		&& !Core::App().passcodeLocked() && !Core::App().screenIsLocked()) {
@@ -616,23 +811,31 @@ void RequestPeekOptionChange(
 	const auto openingDelay = PeekWaitDelaySeconds(ActiveSettings());
 	const auto openingExit = PeekExitHiddenChats(ActiveSettings());
 	const auto openingFocus = PeekEndsOnFocusLoss();
+	const auto openingTimeout = PeekReadyTimeoutSeconds(ActiveSettings());
 	const auto nextDelay = change.startDelaySeconds.value_or(openingDelay);
 	const auto nextExit = change.exitHiddenChats.value_or(openingExit);
 	const auto nextFocus = change.endOnFocusLoss.value_or(openingFocus);
+	const auto nextTimeout = change.readyTimeoutSeconds.value_or(openingTimeout);
 	const auto writesSettings = change.startDelaySeconds.has_value()
-		|| change.exitHiddenChats.has_value();
+		|| change.exitHiddenChats.has_value()
+		|| change.readyTimeoutSeconds.has_value();
 	const auto validateValues = [=](bool committed) -> QString {
 		const auto expectedDelay = committed ? nextDelay : openingDelay;
 		const auto expectedExit = committed ? nextExit : openingExit;
+		const auto expectedTimeout = committed ? nextTimeout : openingTimeout;
 		if (writesSettings && (!target || !editor || !editor->originCurrent || !editor->originCurrent())) {
 			return tr::lng_purple_wait_editor_closed(tr::now);
 		}
 		if (nextDelay < 0) {
 			return tr::lng_purple_wait_delay_invalid(tr::now);
 		}
+		if (nextTimeout < kPeekReadyTimeoutMinimumSeconds) {
+			return tr::lng_purple_wait_ready_timeout_invalid(tr::now);
+		}
 		if ((editorCurrent && !editorCurrent())
 			|| (change.startDelaySeconds && PeekWaitDelaySeconds(ActiveSettings()) != expectedDelay)
 			|| (change.exitHiddenChats && PeekExitHiddenChats(ActiveSettings()) != expectedExit)
+			|| (change.readyTimeoutSeconds && PeekReadyTimeoutSeconds(ActiveSettings()) != expectedTimeout)
 			|| (change.endOnFocusLoss && PeekEndsOnFocusLoss() != openingFocus)) {
 			return tr::lng_purple_wait_context_changed(tr::now);
 		}
@@ -645,9 +848,12 @@ void RequestPeekOptionChange(
 		.seconds = nextDelay,
 		.editor = editor,
 		.same = nextDelay == openingDelay
-			&& nextExit == openingExit && nextFocus == openingFocus,
+			&& nextExit == openingExit && nextFocus == openingFocus
+			&& nextTimeout == openingTimeout,
+		// A shorter ready timeout only tightens; a longer one loosens.
 		.onlyTightening = nextDelay >= openingDelay
-			&& (!openingExit || nextExit) && (!openingFocus || nextFocus),
+			&& (!openingExit || nextExit) && (!openingFocus || nextFocus)
+			&& nextTimeout <= openingTimeout,
 		.writesSettings = writesSettings,
 		.validate = validate,
 		.apply = [=](const std::function<bool()> &current) -> QString {
@@ -658,7 +864,8 @@ void RequestPeekOptionChange(
 			if (!valid()) {
 				return tr::lng_purple_wait_context_changed(tr::now);
 			}
-			if (nextDelay != openingDelay || nextExit != openingExit) {
+			if (nextDelay != openingDelay || nextExit != openingExit
+				|| nextTimeout != openingTimeout) {
 				const auto result = WriteSettingsGuarded(
 					*target,
 					[=](const QString &text) {
@@ -673,6 +880,12 @@ void RequestPeekOptionChange(
 							const auto changed = result.changed;
 							result = SetTableBool(result.text, target->destination.file.path,
 								u"peek"_q, u"exit_hidden_chats_p"_q, nextExit);
+							result.changed = result.changed || changed;
+						}
+						if (result.ok() && nextTimeout != openingTimeout) {
+							const auto changed = result.changed;
+							result = SetPeekReadyTimeout(result.text,
+								target->destination.file.path, nextTimeout);
 							result.changed = result.changed || changed;
 						}
 						return result;
@@ -715,6 +928,13 @@ void RequestPeekDelayChange(
 		const std::shared_ptr<AppWideSettingsEditorState> &editor,
 		not_null<Main::Session*> session) {
 	RequestPeekOptionChange({ .startDelaySeconds = seconds }, editor, session);
+}
+
+void RequestPeekReadyTimeoutChange(
+		int seconds,
+		const std::shared_ptr<AppWideSettingsEditorState> &editor,
+		not_null<Main::Session*> session) {
+	RequestPeekOptionChange({ .readyTimeoutSeconds = seconds }, editor, session);
 }
 
 void CloseHiddenPeekChats() {

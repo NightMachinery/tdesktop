@@ -21,12 +21,15 @@ the common ten-second fallback when that file is shared.
 All desktop start routes enter one transient controller: shortcut, checkbox,
 chips and dial. A positive delay shows a full app-content cover with a large
 countdown and Abort. It covers the Telegram window, not the OS desktop.
-Abort or any key cancels quietly, including when the Abort button has focus.
+When the countdown ends, a ready step waits for the "Start Peek" button or
+Enter; see [the ready step](work_mode_wait.md#the-ready-step).
+Abort or any key during the countdown cancels quietly, including when the Abort
+button has focus.
 The temporary application key filter is removed before the cover is deleted.
 End Peek cancels pending work and ends active Peek immediately. No pending
 activation is persisted. A restart or extension with positive delay leaves the
 old Peek untouched until completion. The requested duration starts only when
-the countdown commits the actual activation.
+the ready step's button commits the actual activation.
 
 A stale window, account, session, preset, lock, settings reload or app termination
 cancels pending Peek work. The cover also refuses completion if its originating
@@ -40,7 +43,11 @@ recovery immediately because its effective preset is already Normal.
 The deliberately coarse rule and the sync
 and automation exemptions are described in [Work Mode waits](work_mode_wait.md).
 
-All three dedicated option editors use `RequestPeekOptionChange` on that same
+The ready step timeout, `[peek] ready_timeout_seconds` (whole seconds, default
+600, at least 10), has its own editor under the start delay. Lowering it is
+instant; raising it waits and gets the ready step itself.
+
+All four dedicated option editors use `RequestPeekOptionChange` on that same
 cover engine. Increasing start delay, enabling exit-hidden and enabling the local
 focus option are restrictive and instant. Decreases, disabling either option
 and mixed changes wait; delay edits use the greater of old and new effective delays. Abort keeps the previous setting. Completing a delay
@@ -157,10 +164,12 @@ Normal, explicit Show overrides and genuinely visible chats stay open.
 
 ## Application focus and locks
 
-A pending countdown always aborts immediately and quietly when its host window
-loses activation, another Telegram window or dialog takes focus, the application
-becomes inactive, or the screen/app locks. Application-state and activation events
-cancel it directly; the 250 ms tick is a backstop. Abort leaves the requested write
+A pending countdown or ready step aborts quietly when another Telegram window or
+dialog takes focus, or when the application stays inactive for 2 s, or returns,
+without a lock signal. Screen, OS session and passcode locks and sleep keep it:
+see [locks versus app switches](work_mode_wait.md#locks-versus-app-switches).
+Application-state, activation and lock events drive it; the 250 ms tick is a
+backstop. Abort leaves the requested write
 unapplied and shows no context-changed toast, including reentrant focus cancellation.
 
 Desktop's Peek section has "End Peek when Telegram loses focus", off by default.
