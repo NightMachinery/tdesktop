@@ -36,6 +36,11 @@ struct DesktopSyncChatLease {
 [[nodiscard]] bool CachedSyncChatSetupContextCurrent(
 	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
 
+[[nodiscard]] bool ReviewSyncChatMove(
+	not_null<Main::Session*> session, DesktopSyncChatMoveAction &action,
+	const DesktopSyncChatMoveOffer &offer, std::optional<DesktopSyncChatPeer> peer,
+	bool cleanup, bool consent);
+
 void StartSyncChatDiscovery();
 void QuiesceSyncChatPublishers(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<Main::Session*> SyncChatPublisherQuiescence();

@@ -4,10 +4,14 @@
 #include "purple/purple_sync_chat_create.h"
 #include "purple/purple_sync_chat_create_store.h"
 #include "purple/purple_sync_chat_create_requests.h"
+#include "purple/purple_sync_chat_setup_requests.h"
+#include "purple/purple_sync_chat_journal.h"
+#include "purple/purple_sync_chat_carry_store.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QJsonArray>
 #include <QtCore/QUuid>
+#include <array>
 #include <thread>
 
 namespace {
@@ -26,6 +30,26 @@ DesktopSyncChatSetupSnapshot Fresh() {
 	snapshot.status.resolution.action = SyncChatAction::Unset;
 	snapshot.input.settingsHint = SyncChatSettingsHint::Absent;
 	snapshot.run = 1;
+	return snapshot;
+}
+
+DesktopSyncChatSetupSnapshot ProvisionSource() {
+	auto snapshot = Fresh();
+	auto state = SyncLocalState();
+	state.install = u"in-"_q + QString(26, u'a');
+	state.space = u"sp-"_q + QString(26, u'a');
+	state.createdDevice = u"Synthetic"_q;
+	state.bindingToken = QString(32, u'a');
+	snapshot.stateImage = SerializeSyncLocalState(state).canonical;
+	snapshot.scope.binding = state.bindingToken.toLatin1();
+	snapshot.scope.settingsBound = true;
+	snapshot.scope.space = state.space;
+	snapshot.status.phase = DesktopSyncChatPhase::Use;
+	snapshot.status.postingHeld = false;
+	snapshot.status.resolution.postingHeld = false;
+	snapshot.status.resolution.action = SyncChatAction::Use;
+	snapshot.status.resolution.readChat = PeerToken{};
+	snapshot.input.settingsBound = true;
 	return snapshot;
 }
 
@@ -122,7 +146,7 @@ struct Injected {
 		CHECK(!executor->Next());
 		auto reply = DesktopSyncChatCreateReply{Origin, command.operation, command.ticket, Outcome::Okay};
 		if (command.step == Step::Resolve) {
-			reply.resolution = Fresh();
+			reply.resolution = saved.provisionSource.isEmpty() ? Fresh() : ProvisionSource();
 			if (saved.markId > 0) {
 				reply.resolution->status.phase = DesktopSyncChatPhase::Use;
 				reply.resolution->status.resolution.action = SyncChatAction::Use;
@@ -700,6 +724,260 @@ void RequestWire() {
 	}
 }
 
+void DecorationCallbacks(const DesktopSyncChatSetupSnapshot &opening,
+		const DesktopSyncChatCreateJournal &provision, const SyncCarryJournal &journal,
+		const DesktopSyncChatIo &route) {
+	using DecorationPhase = DesktopSyncChatMoveDecorationPhase;
+	const auto steps = std::array{Step::Pin, Step::Mute, Step::Archive};
+	auto success = DesktopSyncChatMoveDecorationAction(opening, provision, [] { return true; });
+	for (const auto step : steps) {
+		const auto command = success.observe(journal, route); CHECK(command && command->step == step);
+		if (command) { success.complete(*command, true); }
+	}
+	CHECK(success.phase() == DecorationPhase::Complete && !success.observe(journal, route));
+	for (auto failAt = 0; failAt != 3; ++failAt) {
+		auto action = DesktopSyncChatMoveDecorationAction(opening, provision, [] { return true; });
+		auto effects = std::vector<Step>();
+		for (auto at = 0; at != 3; ++at) {
+			const auto command = action.observe(journal, route); CHECK(command);
+			if (!command) { break; }
+			effects.push_back(command->step); CHECK(command->step == steps[at]);
+			for (const auto phase : {SyncCarryPhase::Cleanup, SyncCarryPhase::Done}) {
+				auto status = journal; status.phase = phase;
+				CHECK(!action.observe(status, route));
+				CHECK(action.phase() == DecorationPhase::Waiting);
+			}
+			const auto callback = [&](bool okay) { action.complete(*command, okay); };
+			if (at != failAt) { callback(true); continue; }
+			callback(false);
+			CHECK(action.phase() == DecorationPhase::Held);
+			const auto reason = action.reason(); CHECK(!reason.isEmpty());
+			for (const auto phase : {SyncCarryPhase::Cleanup, SyncCarryPhase::Done, SyncCarryPhase::CleanupSkipped}) {
+				auto status = journal; status.phase = phase;
+				CHECK(!action.observe(status, route));
+				CHECK(action.phase() == DecorationPhase::Held && action.reason() == reason);
+			}
+			CHECK(effects.size() == at + 1);
+			auto other = journal; other.operationId = QString(32, u'e');
+			CHECK(!action.retry(other, route)); CHECK(action.phase() == DecorationPhase::Held);
+			CHECK(!action.observe(journal, route));
+			const auto retry = action.retry(journal, route); CHECK(retry);
+			if (!retry) { break; }
+			effects.push_back(retry->step); CHECK(retry->step == steps[at]);
+			CHECK(retry->ticket != command->ticket);
+			callback(true); CHECK(action.phase() == DecorationPhase::Waiting);
+			action.complete(*retry, true);
+		}
+		CHECK(action.phase() == DecorationPhase::Complete);
+		CHECK(effects.size() == 4);
+		for (auto at = 0; at != 3; ++at) {
+			CHECK(std::count(effects.begin(), effects.end(), steps[at]) == (at == failAt ? 2 : 1));
+		}
+		CHECK(!action.observe(journal, route) && !action.retry(journal, route));
+	}
+	for (auto closeAt = 0; closeAt != 3; ++closeAt) {
+		auto current = true;
+		auto action = DesktopSyncChatMoveDecorationAction(opening, provision, [&] { return current; });
+		for (auto at = 0; at != closeAt; ++at) {
+			const auto command = action.observe(journal, route); CHECK(command);
+			if (command) { action.complete(*command, true); }
+		}
+		current = false;
+		CHECK(!action.observe(journal, route) && action.phase() == DecorationPhase::Cancelled);
+		current = true;
+		CHECK(!action.observe(journal, route) && !action.retry(journal, route));
+	}
+	auto first = DesktopSyncChatMoveDecorationAction(opening, provision, [] { return true; });
+	auto second = DesktopSyncChatMoveDecorationAction(opening, provision, [] { return true; });
+	const auto old = first.observe(journal, route); const auto next = second.observe(journal, route);
+	CHECK(old && next && old->run != next->run);
+	if (old && next) {
+		second.complete(*old, false); CHECK(second.phase() == DecorationPhase::Waiting);
+		second.complete(*next, true); CHECK(second.phase() == DecorationPhase::Ready);
+	}
+	first.cancel(); second.cancel();
+}
+
+void MoveDecorations(const DesktopSyncChatCreateJournal &provision) {
+	const auto opening = ProvisionSource();
+	const auto route = Route(*provision.chat);
+	const auto state = ParseSyncLocalState(opening.stateImage); CHECK(state);
+	auto input = SyncCarryInput();
+	input.account = Origin.account;
+	input.source = opening.scope.settingsChat;
+	input.target = route.peer.chat;
+	input.access = SyncCarrySourceAccess::Readable;
+	input.state = state.state;
+	input.preferenceToken = opening.scope.binding;
+	input.targetEligibility = *DesktopSyncChatEligibility(route.peer);
+	input.readerConsentAccepted = true;
+	input.oldInventory = {Origin.account, input.source, true, {}};
+	input.newInventory = {Origin.account, input.target, true, {}};
+	const auto plan = PlanCarry(input); CHECK(plan);
+	const auto committed = PrepareSyncCarryCommit(plan.plan, input.state, input.newInventory);
+	CHECK(committed);
+	auto journal = SyncCarryJournal();
+	journal.version = 2;
+	journal.operationId = QString(32, u'c');
+	journal.account = Origin.account;
+	journal.source = input.source;
+	journal.target = input.target;
+	journal.phase = SyncCarryPhase::Cleanup;
+	journal.stateHash = SyncCarryRecordHash(opening.stateImage);
+	journal.expectedAction = SyncChatAction::Use;
+	journal.markText = DesktopSyncChatMarkText();
+	journal.markRequestId = u"123"_q;
+	journal.ownRequestId = u"456"_q;
+	journal.plan = plan.plan;
+	journal.nextStateHash = committed.stateHash;
+	journal.commitPrepared = journal.destinationVerified = journal.markVerified = true;
+	journal.cachePrepared = journal.stateCommitted = journal.cacheCompleted = true;
+	journal.targetMark = SyncChatCache{input.target, 42, 200};
+	journal.loginAuthority = DesktopSyncCarryLogin(opening.scope.loginBinding);
+	journal.readerBaseline = input.targetEligibility.readers;
+	CHECK(SerializeSyncCarryJournal(journal));
+	DecorationCallbacks(opening, provision, journal, route);
+	for (const auto step : {Step::Pin, Step::Mute, Step::Archive}) {
+		const auto request = DesktopSyncChatMoveDecorationRequest(opening, provision, journal, route, step);
+		CHECK(request);
+		if (request && step == Step::Pin) {
+			const auto pin = std::get_if<MTPmessages_UpdatePinnedMessage>(&*request);
+			CHECK(pin);
+			if (pin) {
+				auto actual = mtpBuffer(); pin->write(actual);
+				auto expected = mtpBuffer();
+				MTPmessages_UpdatePinnedMessage(MTP_flags(
+					MTPmessages_UpdatePinnedMessage::Flag::f_silent),
+					route.input, MTP_int(42)).write(expected);
+				CHECK(actual == expected);
+			}
+		}
+		for (auto n = 0; n != 18; ++n) {
+			auto source = opening;
+			auto created = provision;
+			auto carry = journal;
+			auto target = route;
+			if (n == 0) carry.stateCommitted = false;
+			if (n == 1) carry.cacheCompleted = false;
+			if (n == 2) carry.markVerified = false;
+			if (n == 3) carry.destinationVerified = false;
+			if (n == 4) carry.loginAuthority = DesktopSyncCarryLogin(QString(64, u'b'));
+			if (n == 5) carry.target = PeerToken{};
+			if (n == 6) carry.source = input.target;
+			if (n == 7) carry.account.userId = 124;
+			if (n == 8) carry.stateHash = QString(64, u'b');
+			if (n == 9) created.cancelled = true;
+			if (n == 10) created.pending = true;
+			if (n == 11) created.provisionSource.clear();
+			if (n == 12) created.created = false;
+			if (n == 13) created.choice = DesktopSyncChatSetupChoice::Existing;
+			if (n == 14) target = Route({});
+			if (n == 15) target.peer.origin.login += u"other"_q;
+			if (n == 16) source.stateImage += ' ';
+			if (n == 17) target.peer.facts->protectedContent = true;
+			CHECK(!DesktopSyncChatMoveDecorationRequest(source, created, carry, target, step));
+		}
+	}
+	CHECK(!DesktopSyncChatMoveDecorationRequest(opening, provision, journal, route, Step::PostMark));
+}
+
+void ProvisionOnly() {
+	const auto opening = ProvisionSource();
+	const auto selection = DesktopSyncChatSetupSelection{
+		DesktopSyncChatSetupChoice::Create, {}, true, true};
+	const auto original = BeginDesktopSyncChatProvision(opening, selection);
+	CHECK(original && !original->provisionSource.isEmpty());
+	CHECK(!BeginDesktopSyncChatProvision(Fresh(), selection));
+	const auto bytes = SerializeDesktopSyncChatCreateJournal(*original); CHECK(bytes);
+	for (auto mode = 0; mode != 4; ++mode) {
+		auto h = Injected(); h.saved = *original; h.bytes = *bytes; h.Restart();
+		const auto command = h.At(Step::Create);
+		auto proof = DesktopSyncChatSetupResumeProof(); proof.resolution = opening;
+		if (mode == 1) proof.resolution = Fresh();
+		if (mode == 2) proof.resolution->stateImage += ' ';
+		if (mode == 3) proof.resolution->scope.origin.login += u"other"_q;
+		CHECK(h.executor->Renew(command, proof, 1000, {}) == (mode == 0));
+		CHECK(h.saved.operation == original->operation && h.saved.randomId == original->randomId);
+		CHECK(h.saved.pending && h.saved.createAttempts == 1);
+		CHECK(!h.executor->Next());
+		CHECK(std::count(h.effects.begin(), h.effects.end(), Step::Create) == 0);
+	}
+	const auto object = QJsonDocument::fromJson(*bytes).object();
+	CHECK(object.size() == 24 && object.value(u"version"_q) == 2);
+	CHECK(object.value(u"purpose"_q) == u"provision-move"_q);
+	for (auto i = object.begin(); i != object.end(); ++i) {
+		auto missing = object; missing.remove(i.key());
+		CHECK(!ParseDesktopSyncChatCreateJournal(QJsonDocument(missing).toJson(
+			QJsonDocument::Compact), original->authority, Origin.account));
+	}
+	for (auto n = 0; n != 6; ++n) {
+		auto changed = *original;
+		if (n == 0) changed.step = Step::PostMark;
+		if (n == 1) changed.step = Step::Commit;
+		if (n == 2) changed.step = Step::Pin;
+		if (n == 3) changed.step = Step::Mute;
+		if (n == 4) changed.step = Step::Archive;
+		if (n == 5) changed.adopted = true;
+		CHECK(!SerializeDesktopSyncChatCreateJournal(changed));
+	}
+	for (auto restartAt = 0; restartAt != 9; ++restartAt) {
+		auto h = Injected(); h.saved = *original; h.bytes = *bytes; h.Restart();
+		h.executor->Start(1000);
+		for (auto step = 0; step != 12; ++step) {
+			if (step == restartAt) { h.Restart(); h.executor->Start(1000); }
+			const auto command = h.executor->Next();
+			if (!command) { break; }
+			CHECK(command->step != Step::PostMark && command->step != Step::Commit
+				&& command->step != Step::ReadMark && command->step != Step::Pin
+				&& command->step != Step::Mute && command->step != Step::Archive);
+			CHECK(h.executor->Complete(h.Reply(*command), 1000));
+		}
+		CHECK(h.executor->phase() == Phase::Complete);
+		CHECK(h.saved.created && h.saved.chat == (PeerToken{PeerTokenKind::Channel, 456}));
+		CHECK(h.saved.markId == 0 && h.saved.markDate == 0 && !h.saved.pending);
+		if (!restartAt) { MoveDecorations(h.saved); }
+		CHECK(!DesktopSyncChatSetupCache(h.saved, opening.scope, u"Synthetic"_q));
+		CHECK(std::count(h.effects.begin(), h.effects.end(), Step::Create) == 1);
+		h.Restart(); h.executor->Start(1000); CHECK(!h.executor->Next());
+	}
+	for (auto mode = 0; mode != 4; ++mode) {
+		auto h = Injected(); h.saved = *original; h.bytes = *bytes; h.Restart();
+		const auto command = h.At(Step::Create);
+		if (mode == 0) {
+			auto reply = h.Reply(command); reply.outcome = Outcome::Ambiguous;
+			CHECK(h.executor->Complete(reply, 1000));
+		} else if (mode == 1) {
+			h.failSave = h.saves + 1;
+			CHECK(h.executor->Complete(h.Reply(command), 1000));
+			h.failSave = 0;
+		} else if (mode == 2) {
+			h.executor->Cancel();
+		}
+		h.Restart(); h.executor->Start(1000);
+		auto resolve = h.executor->Next(); CHECK(resolve && resolve->step == Step::Resolve);
+		CHECK(h.executor->Complete(h.Reply(*resolve), 1000));
+		const auto reconcile = h.executor->Next(); CHECK(reconcile && reconcile->step == Step::ReconcileCreate);
+		auto refused = h.Reply(*reconcile); refused.creationProof = DesktopSyncChatCreationProof::TitleOnly;
+		CHECK(h.executor->Complete(refused, 1000));
+		CHECK(h.executor->phase() == Phase::Held && !h.executor->Next());
+		CHECK(h.saved.pending && !h.saved.created && !h.saved.chat);
+		CHECK(h.saved.operation == original->operation && h.saved.createAttempts == 1);
+		CHECK(std::count(h.effects.begin(), h.effects.end(), Step::Create) <= 1);
+	}
+	for (auto mode = 0; mode != 4; ++mode) {
+		auto h = Injected(); h.saved = *original; h.bytes = *bytes; h.Restart();
+		h.executor->Start(1000);
+		const auto command = h.executor->Next(); CHECK(command && command->step == Step::Resolve);
+		auto reply = h.Reply(*command);
+		if (mode == 0) reply.resolution->stateImage += ' ';
+		if (mode == 1) reply.resolution->status.resolution.winner = SyncChatCache{{}, 50, 100};
+		if (mode == 2) reply.resolution->scope.carry = true;
+		if (mode == 3) reply.resolution->status.complete = false;
+		CHECK(h.executor->Complete(reply, 1000));
+		CHECK(h.executor->phase() == Phase::Held && !h.executor->Next());
+	}
+}
+
 void StoreCases() {
 	const auto make = [] { return QString::fromUtf8(qgetenv("TMPDIR"))
 		+ u"/purple-t3-journal-"_q + QUuid::createUuid().toString(QUuid::Id128); };
@@ -736,7 +1014,7 @@ void StoreCases() {
 int main(int argc, char **argv) {
 	std::setvbuf(stdout,nullptr,_IONBF,0);
 	std::puts("Typed controls"); RoutesAndWire(); ReceiptMatrix(); UploadSchedules(); PostReadbackSchedules(); BorrowedRunProof(); CounterScopes();
-	std::puts("Codec"); Codec();
+	std::puts("Codec"); Codec(); ProvisionOnly();
 	std::puts("NormalAndRestart"); NormalAndRestart();
 	std::puts("FailureSchedules"); FailureSchedules();
 	std::puts("AmbiguousAndLimits"); AmbiguousAndLimits();

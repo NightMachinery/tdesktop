@@ -17,6 +17,7 @@ struct DesktopSyncChatCreateJournal {
 	AccountKey account;
 	QString authority;
 	QString operation;
+	QString provisionSource;
 	DesktopSyncChatSetupChoice choice = DesktopSyncChatSetupChoice::Create;
 	DesktopSyncChatCreateStep step = DesktopSyncChatCreateStep::Create;
 	std::optional<PeerToken> chat;
@@ -73,6 +74,10 @@ struct DesktopSyncChatCreateReply {
 [[nodiscard]] std::optional<DesktopSyncChatCreateJournal> ParseDesktopSyncChatCreateJournal(
 	const QByteArray &bytes, const QString &authority, const AccountKey &account);
 [[nodiscard]] std::optional<DesktopSyncChatCreateJournal> BeginDesktopSyncChatCreate(
+	const DesktopSyncChatSetupSnapshot &snapshot,
+	const DesktopSyncChatSetupSelection &selection);
+
+[[nodiscard]] std::optional<DesktopSyncChatCreateJournal> BeginDesktopSyncChatProvision(
 	const DesktopSyncChatSetupSnapshot &snapshot,
 	const DesktopSyncChatSetupSelection &selection);
 

@@ -1,4 +1,8 @@
 #include "purple/purple_sync_chat_setup_requests.h"
+#include "purple/purple_sync_chat_journal.h"
+#include "purple/purple_sync_chat_carry_store.h"
+
+#include <QtCore/QUuid>
 
 #include <cstring>
 #include <limits>
@@ -23,7 +27,8 @@ std::optional<DesktopSyncChatDecoration> DesktopSyncChatDecorationRequest(
 		const DesktopSyncChatCreateCommand &command,
 		const DesktopSyncChatIo &route) {
 	const auto &journal = command.journal;
-	if (!ValidDesktopSyncChatIo(route) || !journal.created || !journal.chat
+	if (!journal.provisionSource.isEmpty()
+		|| !ValidDesktopSyncChatIo(route) || !journal.created || !journal.chat
 		|| *journal.chat != route.peer.chat || journal.markId <= 0
 		|| route.peer.chat.kind != PeerTokenKind::Channel
 		|| route.peer.origin != command.origin) {
@@ -48,6 +53,135 @@ std::optional<DesktopSyncChatDecoration> DesktopSyncChatDecorationRequest(
 		return {};
 	}
 }
+
+auto DesktopSyncChatMoveDecorationRequest(
+		const DesktopSyncChatSetupSnapshot &opening,
+		const DesktopSyncChatCreateJournal &provision,
+		const SyncCarryJournal &carry, const DesktopSyncChatIo &route,
+		DesktopSyncChatCreateStep step)
+-> std::optional<DesktopSyncChatDecoration> {
+	const auto eligibility = DesktopSyncChatEligibility(route.peer);
+	if (!SerializeDesktopSyncChatCreateJournal(provision)
+		|| !SerializeSyncCarryJournal(carry)
+		|| provision.provisionSource.isEmpty()
+		|| provision.provisionSource != DesktopSyncChatMoveFingerprint(opening)
+		|| provision.authority != DesktopSyncChatSetupAuthority(opening.scope)
+		|| provision.account != opening.scope.origin.account
+		|| provision.cancelled || provision.pending || !provision.created
+		|| provision.step != DesktopSyncChatCreateStep::Done
+		|| !provision.chat || provision.chat->kind != PeerTokenKind::Channel
+		|| carry.mode != SyncCarryMode::Switch
+		|| carry.account != provision.account
+		|| carry.loginAuthority != DesktopSyncCarryLogin(opening.scope.loginBinding)
+		|| carry.source != opening.scope.settingsChat || carry.target != *provision.chat
+		|| carry.stateHash != SyncCarryRecordHash(opening.stateImage)
+		|| !carry.stateCommitted || !carry.cacheCompleted || !carry.markVerified
+		|| !carry.destinationVerified || !carry.targetMark
+		|| (carry.phase != SyncCarryPhase::Cleanup
+			&& carry.phase != SyncCarryPhase::CleanupSkipped
+			&& carry.phase != SyncCarryPhase::Done)
+		|| route.peer.origin != opening.scope.origin
+		|| route.peer.chat != carry.target
+		|| !eligibility || !*eligibility) {
+		return {};
+	}
+	auto journal = provision;
+	journal.provisionSource.clear();
+	journal.markId = carry.targetMark->markId;
+	journal.markDate = carry.targetMark->markDate;
+	return DesktopSyncChatDecorationRequest({opening.scope.origin,
+		provision.operation, 0, step, std::move(journal)}, route);
+}
+
+DesktopSyncChatMoveDecorationAction::DesktopSyncChatMoveDecorationAction(
+		DesktopSyncChatSetupSnapshot opening, DesktopSyncChatCreateJournal provision,
+		Fn<bool()> current)
+: _opening(std::move(opening))
+, _provision(std::move(provision))
+, _current(std::move(current))
+, _run(QUuid::createUuid().toString(QUuid::Id128)) {
+}
+
+auto DesktopSyncChatMoveDecorationAction::observe(
+		const SyncCarryJournal &carry, const DesktopSyncChatIo &route)
+-> std::optional<DesktopSyncChatMoveDecorationCommand> {
+	if (!_current || !_current()) { cancel(); return {}; }
+	if (_phase != DesktopSyncChatMoveDecorationPhase::NotStarted
+		&& _phase != DesktopSyncChatMoveDecorationPhase::Ready) { return {}; }
+	const auto request = DesktopSyncChatMoveDecorationRequest(
+		_opening, _provision, carry, route, _next);
+	if (!request) {
+		if (_phase == DesktopSyncChatMoveDecorationPhase::Ready) {
+			_phase = DesktopSyncChatMoveDecorationPhase::Held;
+			_reason = u"decoration-admission-held"_q;
+		}
+		return {};
+	}
+	const auto receipt = carry.operationId + u':' + carry.nextStateHash
+		+ u':' + QString::number(carry.targetMark->markId)
+		+ u':' + QString::number(carry.targetMark->markDate);
+	if ((!_receipt.isEmpty() && _receipt != receipt)
+		|| _ticket == std::numeric_limits<uint64_t>::max()) {
+		_phase = DesktopSyncChatMoveDecorationPhase::Held;
+		_reason = u"decoration-receipt-held"_q;
+		return {};
+	}
+	_receipt = receipt;
+	_active = DesktopSyncChatMoveDecorationCommand{
+		_run, carry.operationId, ++_ticket, _next, *request};
+	_phase = DesktopSyncChatMoveDecorationPhase::Waiting;
+	_reason.clear();
+	return _active;
+}
+
+auto DesktopSyncChatMoveDecorationAction::retry(
+		const SyncCarryJournal &carry, const DesktopSyncChatIo &route)
+-> std::optional<DesktopSyncChatMoveDecorationCommand> {
+	if (_phase != DesktopSyncChatMoveDecorationPhase::Held) { return {}; }
+	_phase = DesktopSyncChatMoveDecorationPhase::Ready;
+	return observe(carry, route);
+}
+
+bool DesktopSyncChatMoveDecorationAction::accepts(
+		const DesktopSyncChatMoveDecorationCommand &command) const {
+	return _phase == DesktopSyncChatMoveDecorationPhase::Waiting && _active
+		&& command.run == _active->run && command.operation == _active->operation
+		&& command.ticket == _active->ticket && command.step == _active->step;
+}
+
+void DesktopSyncChatMoveDecorationAction::complete(
+		const DesktopSyncChatMoveDecorationCommand &command, bool okay) {
+	if (!accepts(command)) { return; }
+	if (!_current || !_current()) { cancel(); return; }
+	if (!accepts(command)) { return; }
+	_active.reset();
+	if (!okay) {
+		_phase = DesktopSyncChatMoveDecorationPhase::Held;
+		_reason = command.step == DesktopSyncChatCreateStep::Pin ? u"pin-held"_q
+			: command.step == DesktopSyncChatCreateStep::Mute ? u"mute-held"_q : u"archive-held"_q;
+		return;
+	}
+	if (command.step == DesktopSyncChatCreateStep::Archive) {
+		_phase = DesktopSyncChatMoveDecorationPhase::Complete;
+	} else {
+		_next = command.step == DesktopSyncChatCreateStep::Pin
+			? DesktopSyncChatCreateStep::Mute : DesktopSyncChatCreateStep::Archive;
+		_phase = DesktopSyncChatMoveDecorationPhase::Ready;
+	}
+}
+
+void DesktopSyncChatMoveDecorationAction::cancel() {
+	_active.reset();
+	_phase = DesktopSyncChatMoveDecorationPhase::Cancelled;
+	_reason = u"decoration-cancelled"_q;
+}
+
+auto DesktopSyncChatMoveDecorationAction::phase() const
+-> DesktopSyncChatMoveDecorationPhase {
+	return _phase;
+}
+
+QString DesktopSyncChatMoveDecorationAction::reason() const { return _reason; }
 
 QByteArray EncodeDesktopSyncChatSetupUpdates(const MTPUpdates &updates) {
 	auto words = mtpBuffer();

@@ -16,7 +16,9 @@ rules = {
   'SaveDesktopSyncChatDisk(disk, record, _admitted)',
   '_executor->Renew(command, proof, now,',
   '_admitted->store(false)',
-  'status.phase == DesktopSyncChatCreatePhase::Complete) { _store.reset();',
+  'status.provisioned = !_executor->journal().provisionSource.isEmpty()',
+  '_store.reset();',
+  'existing->provisionSource.isEmpty() != _selection.provisionOnly',
  ],
  'purple_sync_chat_setup_service.cpp': [
   'crl::object_on_queue<DesktopSyncChatSetupFlow>',
@@ -134,3 +136,29 @@ assert '_store.reset();\n\t\tpublish(u"setup-no-journal"_q, true);' in flow
 assert 'crl::on_main(box, [=] {\n\t\t\tif (RestoreFreshSetup(state, generation, message))' in ui
 assert 'state->loading || !Current(*state)' in ui
 print('Q2A lifecycle release/order, deferred chooser reset and generation negative guards PASS')
+
+requests = (p / 'purple_sync_chat_setup_requests.cpp').read_text()
+move_decoration = body(requests, 'auto DesktopSyncChatMoveDecorationRequest(')
+for guard in ['!SerializeSyncCarryJournal(carry)', '!carry.stateCommitted', '!carry.cacheCompleted',
+              'carry.stateHash != SyncCarryRecordHash(opening.stateImage)',
+              'provision.provisionSource != DesktopSyncChatMoveFingerprint(opening)',
+              'carry.loginAuthority != DesktopSyncCarryLogin(opening.scope.loginBinding)',
+              'route.peer.origin != opening.scope.origin']:
+ assert guard in move_decoration
+ assert guard not in move_decoration.replace(guard, '')
+for name in ['purple_sync_chat_setup_box.cpp', 'purple_sync_chat_service.cpp', 'purple_sync_chat_setup_service.cpp']:
+ assert 'DesktopSyncChatMoveDecorationRequest(' not in (p / name).read_text(), 'held move must not dispatch decorations'
+print('T5d committed-only newly created destination decoration guards and held no-callsite PASS')
+
+for marker in ['DesktopSyncChatMoveDecorationAction::observe(', 'DesktopSyncChatMoveDecorationAction::retry(',
+               'DesktopSyncChatMoveDecorationAction::complete(']:
+ assert marker in requests
+observe = body(requests, 'auto DesktopSyncChatMoveDecorationAction::observe(')
+assert 'DesktopSyncChatMoveDecorationPhase::NotStarted' in observe
+assert 'DesktopSyncChatMoveDecorationPhase::Ready' in observe
+assert 'DesktopSyncChatMoveDecorationPhase::Waiting' in observe
+completion = body(requests, 'void DesktopSyncChatMoveDecorationAction::complete(')
+assert 'if (!okay)' in completion and 'DesktopSyncChatMoveDecorationPhase::Held' in completion
+for name in ['purple_sync_chat_setup_box.cpp', 'purple_sync_chat_service.cpp', 'purple_sync_chat_setup_service.cpp']:
+ assert 'DesktopSyncChatMoveDecorationAction(' not in (p / name).read_text(), 'qualification-held action must stay disconnected'
+print('T5d decoration failed/waiting state and explicit retry route inventory PASS')

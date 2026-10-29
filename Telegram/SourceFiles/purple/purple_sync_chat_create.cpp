@@ -102,6 +102,14 @@ bool Valid(const DesktopSyncChatCreateJournal &j, uint64_t self) {
 	return self > 0 && self <= uint64_t(std::numeric_limits<int64_t>::max())
 		&& j.account.userId == self && (j.account.environment == 0 || j.account.environment == 1)
 		&& Hex(j.authority, 64) && Hex(j.operation, 32)
+		&& (j.provisionSource.isEmpty() || (Hex(j.provisionSource, 64)
+			&& j.choice == DesktopSyncChatSetupChoice::Create && !j.adopted
+			&& j.markId == 0 && j.markDate == 0 && !j.decorationAfterCache
+			&& (j.step == DesktopSyncChatCreateStep::Create
+				|| j.step == DesktopSyncChatCreateStep::ApplyUpdates
+				|| j.step == DesktopSyncChatCreateStep::PeerInfo
+				|| j.step == DesktopSyncChatCreateStep::Inventory
+				|| j.step == DesktopSyncChatCreateStep::Done)))
 		&& j.choice >= DesktopSyncChatSetupChoice::Create
 		&& j.choice <= DesktopSyncChatSetupChoice::Existing
 		&& step >= int(DesktopSyncChatCreateStep::Create)
@@ -127,7 +135,8 @@ bool Valid(const DesktopSyncChatCreateJournal &j, uint64_t self) {
 		&& (j.step != DesktopSyncChatCreateStep::Create
 			|| (j.choice == DesktopSyncChatSetupChoice::Create && !j.created
 				&& !j.chat && j.markId == 0))
-		&& (j.step < DesktopSyncChatCreateStep::Pin || j.adopted || j.markDate > 0)
+		&& (j.step < DesktopSyncChatCreateStep::Pin || j.adopted || j.markDate > 0
+			|| (!j.provisionSource.isEmpty() && j.step == DesktopSyncChatCreateStep::Done))
 		&& ((j.step != DesktopSyncChatCreateStep::Pin && j.step != DesktopSyncChatCreateStep::Mute
 			&& j.step != DesktopSyncChatCreateStep::Archive && j.step != DesktopSyncChatCreateStep::ApplyUpdates) || j.created)
 		&& (j.choice != DesktopSyncChatSetupChoice::Create || j.step == DesktopSyncChatCreateStep::Create || j.created || j.adopted)
@@ -221,8 +230,8 @@ std::optional<QByteArray> SerializeDesktopSyncChatCreateJournal(
 	if (!Valid(j, j.account.userId)) {
 		return {};
 	}
-	return QJsonDocument(QJsonObject{
-		{u"version"_q, 1}, {u"environment"_q, j.account.environment}, {u"user_id"_q, QString::number(j.account.userId)}, {u"authority"_q, j.authority}, {u"operation"_q, j.operation},
+	auto object = QJsonObject{
+		{u"version"_q, j.provisionSource.isEmpty() ? 1 : 2}, {u"environment"_q, j.account.environment}, {u"user_id"_q, QString::number(j.account.userId)}, {u"authority"_q, j.authority}, {u"operation"_q, j.operation},
 		{u"choice"_q, int(j.choice)}, {u"step"_q, int(j.step)},
 		{u"chat"_q, j.chat ? PeerTokenText(*j.chat).value_or(QString()) : QString()},
 		{u"created"_q, j.created}, {u"pending"_q, j.pending},
@@ -231,7 +240,12 @@ std::optional<QByteArray> SerializeDesktopSyncChatCreateJournal(
 		{u"mark_id"_q, j.markId}, {u"mark_date"_q, QString::number(j.markDate)},
 		{u"updates"_q, QString::fromLatin1(j.updates.toBase64())},
 		{u"after_cache"_q, j.decorationAfterCache ? int(*j.decorationAfterCache) : -1},
-		{u"reader_snapshot"_q,j.readerSnapshot}, {u"new_readers"_q,j.newReaders}, {u"reader_consent"_q, j.readerConsent}}).toJson(QJsonDocument::Compact);
+		{u"reader_snapshot"_q,j.readerSnapshot}, {u"new_readers"_q,j.newReaders}, {u"reader_consent"_q, j.readerConsent}};
+	if (!j.provisionSource.isEmpty()) {
+		object.insert(u"purpose"_q, u"provision-move"_q);
+		object.insert(u"source_fingerprint"_q, j.provisionSource);
+	}
+	return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
 
 std::optional<DesktopSyncChatCreateJournal> ParseDesktopSyncChatCreateJournal(
@@ -242,7 +256,12 @@ std::optional<DesktopSyncChatCreateJournal> ParseDesktopSyncChatCreateJournal(
 	}
 	const auto doc = QJsonDocument::fromJson(bytes);
 	const auto object = doc.object();
-	if (!doc.isObject() || object.size() != 22 || object.value(u"version"_q) != 1
+	const auto provision = object.value(u"version"_q) == 2;
+	if (!doc.isObject() || object.size() != (provision ? 24 : 22)
+		|| (!provision && object.value(u"version"_q) != 1)
+		|| (provision && (object.value(u"purpose"_q) != u"provision-move"_q
+			|| !object.value(u"source_fingerprint"_q).isString()
+			|| !Hex(object.value(u"source_fingerprint"_q).toString(), 64)))
 		|| object.value(u"authority"_q) != authority
 		|| object.value(u"environment"_q) != account.environment
 		|| object.value(u"user_id"_q) != QString::number(account.userId)) {
@@ -261,6 +280,7 @@ std::optional<DesktopSyncChatCreateJournal> ParseDesktopSyncChatCreateJournal(
 	}
 	auto j = DesktopSyncChatCreateJournal();
 	j.account = account;
+	if (provision) j.provisionSource = object.value(u"source_fingerprint"_q).toString();
 	j.authority = authority; j.operation = object.value(u"operation"_q).toString();
 	j.choice = DesktopSyncChatSetupChoice(object.value(u"choice"_q).toInt());
 	j.step = DesktopSyncChatCreateStep(object.value(u"step"_q).toInt());
@@ -308,6 +328,26 @@ std::optional<DesktopSyncChatCreateJournal> BeginDesktopSyncChatCreate(
 		result.readerSnapshot=ReaderSnapshot(*selection.peer);
 		result.readerConsent=DesktopSyncChatReaderConsent(*selection.peer);
 	}
+	return result;
+}
+
+std::optional<DesktopSyncChatCreateJournal> BeginDesktopSyncChatProvision(
+		const DesktopSyncChatSetupSnapshot &snapshot,
+		const DesktopSyncChatSetupSelection &selection) {
+	const auto fingerprint = DesktopSyncChatMoveFingerprint(snapshot);
+	const auto authority = DesktopSyncChatSetupAuthority(snapshot.scope);
+	if (fingerprint.isEmpty() || authority.isEmpty() || !selection.provisionOnly
+		|| !selection.readerConsent || selection.choice != DesktopSyncChatSetupChoice::Create
+		|| selection.peer) { return {}; }
+	auto result = DesktopSyncChatCreateJournal();
+	result.account = snapshot.scope.origin.account;
+	result.authority = authority;
+	result.operation = QUuid::createUuid().toString(QUuid::Id128);
+	result.provisionSource = fingerprint;
+	do {
+		result.randomId = QRandomGenerator::system()->generate64()
+			& uint64_t(std::numeric_limits<int64_t>::max());
+	} while (!result.randomId);
 	return result;
 }
 
@@ -368,7 +408,8 @@ void DesktopSyncChatSetupExecutor::Cancel() {
 }
 
 void DesktopSyncChatSetupExecutor::UseSelf(int64_t now) {
-	if (_phase == DesktopSyncChatCreatePhase::Running || _journal.chat
+	if (!_journal.provisionSource.isEmpty()
+		|| _phase == DesktopSyncChatCreatePhase::Running || _journal.chat
 		|| _journal.created || _journal.markId || _journal.step != DesktopSyncChatCreateStep::Create) {
 		Hold(u"self-fallback-held"_q); return;
 	}
@@ -515,6 +556,13 @@ bool DesktopSyncChatSetupExecutor::AcceptReadback(
 }
 
 void DesktopSyncChatSetupExecutor::ContinueAfterPeer() {
+	if (!_journal.provisionSource.isEmpty() && _inventoryReady) {
+		auto next = _journal;
+		next.pending = false;
+		next.step = DesktopSyncChatCreateStep::Done;
+		if (Save(std::move(next))) { _phase = DesktopSyncChatCreatePhase::Complete; }
+		return;
+	}
 	_next = _journal.markId ? DesktopSyncChatCreateStep::ReadMark : _journal.step;
 	if (_next == DesktopSyncChatCreateStep::PostMark && !_journal.pending && !_inventoryReady) {
 		_next = DesktopSyncChatCreateStep::Inventory;
@@ -565,6 +613,17 @@ bool DesktopSyncChatSetupExecutor::Complete(const DesktopSyncChatCreateReply &re
 			Hold(u"resolution-authority-held"_q); return true;
 		}
 		const auto &resolved = *reply.resolution;
+		if (!_journal.provisionSource.isEmpty()) {
+			if (DesktopSyncChatMoveFingerprint(resolved) != _journal.provisionSource) {
+				Hold(u"move-source-changed"_q);
+				return true;
+			}
+			_next = _journal.step == DesktopSyncChatCreateStep::Create
+				? DesktopSyncChatCreateStep::Create
+				: _journal.step == DesktopSyncChatCreateStep::ApplyUpdates
+				? DesktopSyncChatCreateStep::ApplyUpdates : DesktopSyncChatCreateStep::PeerInfo;
+			return true;
+		}
 		if (resolved.scope.settingsBound || resolved.input.settingsBound || resolved.scope.carry
 			|| !resolved.scope.space.isEmpty()) { Hold(u"bound-stream-held"_q); return true; }
 		if (resolved.status.complete && resolved.status.resolution.action == SyncChatAction::Use
@@ -660,7 +719,8 @@ bool DesktopSyncChatSetupExecutor::Complete(const DesktopSyncChatCreateReply &re
 			Hold(u"target-inventory-not-empty-or-incomplete"_q); return true;
 		}
 		auto next = _journal;
-		next.pending = false; next.step = DesktopSyncChatCreateStep::PostMark;
+		next.pending = false; next.step = _journal.provisionSource.isEmpty()
+			? DesktopSyncChatCreateStep::PostMark : DesktopSyncChatCreateStep::Inventory;
 		if (Save(std::move(next))) {
 			_inventoryReady=true;
 			_next=DesktopSyncChatCreateStep::PeerInfo;
@@ -706,7 +766,7 @@ bool DesktopSyncChatSetupExecutor::Complete(const DesktopSyncChatCreateReply &re
 std::optional<DesktopSyncChatCacheRecord> DesktopSyncChatSetupCache(
 		const DesktopSyncChatCreateJournal &j,
 		const DesktopSyncChatDiscoveryScope &scope, QString title) {
-	if (!Valid(j,j.account.userId) || !j.chat || j.markId<=0 || j.markDate<=0
+	if (!j.provisionSource.isEmpty() || !Valid(j,j.account.userId) || !j.chat || j.markId<=0 || j.markDate<=0
 		|| scope.origin.account!=j.account || DesktopSyncChatSetupAuthority(scope)!=j.authority
 		|| j.readerSnapshot.isEmpty()) return {};
 	auto result=ReaderBaseline(j);

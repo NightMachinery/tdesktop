@@ -76,3 +76,57 @@ for source in negative:
 for source in positive:
     assert not temporary_input_accessors(source), 'named input or borrowed TL accessor rejected'
 print(f'Temporary input lifetimes: {checked} Purple sources, {len(negative)} negative and {len(positive)} safe controls PASS')
+
+move = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup.cpp').read_text()
+service = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_service.cpp').read_text()
+for sentinel in ['DesktopSyncChatMoveEligibility(*state->opening, *peer)',
+                 'ReviewSyncChatMove(', 'offer->cleanup', 'confirmation->boxClosing()',
+                 'state->move->dismiss(offer->ticket)', 'lng_purple_chat_move_disclosure']:
+    assert sentinel in ui, sentinel
+    assert sentinel not in ui.replace(sentinel, ''), 'move negative route failed'
+assert 'bool DesktopSyncChatMoveActivated() { return false; }' in move
+review = service[service.index('bool ReviewSyncChatMove('):service.index('void StartSyncChatDiscovery()')]
+for forbidden in ['DesktopSyncChatCarryService', 'DesktopSyncChatSetupService', 'crl::', '.send(', 'Write', 'ReadSyncPrivateFile']:
+    assert forbidden not in review, 'qualification review dispatches or performs IO'
+assert 'action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {})' in review
+assert 'status.reason;' not in ui
+print('T5d move UI: shared eligibility, exact cleanup/confirmation, close revocation and qualification service no-dispatch PASS')
+
+
+def move_cleanup_warning(source, target):
+    begin = source.index('void AcceptMove(')
+    end = source.index('\nvoid Accept(', begin)
+    body = source[begin:end]
+    checkbox = body.index('const auto cleanup = confirmation->addRow(')
+    submit = body.index('confirmation->addButton(tr::lng_continue()')
+    adjacent = body[checkbox:submit]
+    expected = '''if (state->opening->scope.settingsChat == PeerToken{}) {
+            confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
+                tr::lng_purple_chat_move_cleanup_self_warning(tr::now), st::boxLabel));
+        }'''
+    compact = lambda text: re.sub(r'\s+', '', text)
+    assert compact(expected) in compact(adjacent), target + ': missing old-Self warning beside cleanup'
+    assert adjacent.count('if (') == 1, target + ': warning must not depend on destination choice'
+    assert 'selection.choice' not in adjacent and 'chosen.' not in adjacent, target
+    return True
+
+
+for target in ('Create', 'Existing'):
+    assert move_cleanup_warning(ui, target)
+    warning = 'tr::lng_purple_chat_move_cleanup_self_warning(tr::now)'
+    for broken in (
+            ui.replace(warning, 'QString()'),
+            ui.replace('state->opening->scope.settingsChat == PeerToken{}', 'offer->selection.peer->chat == PeerToken{}'),
+            ui.replace('state->opening->scope.settingsChat == PeerToken{}',
+                       'state->opening->scope.settingsChat == PeerToken{} && offer->selection.choice == DesktopSyncChatSetupChoice::Create'),
+            ui.replace('state->opening->scope.settingsChat == PeerToken{}',
+                       'state->opening->scope.settingsChat == PeerToken{} && offer->selection.choice == DesktopSyncChatSetupChoice::Existing')):
+        try:
+            move_cleanup_warning(broken, target)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(target + ': cleanup-warning negative guard passed')
+assert 'Older Purple builds still read settings from Saved Messages.' in strings
+assert 'Removing these messages may make them pause or offer to start over.' in strings
+print('T5d FIX1 old-Self cleanup warning: Create and Existing, 8 negative controls PASS')

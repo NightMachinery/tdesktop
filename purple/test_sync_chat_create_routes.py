@@ -16,7 +16,7 @@ rules = {
   'reply.ticket != _issued->ticket',
   '_journal.createAttempts >= 3',
   'now < _journal.retryAt',
-  'object.size() != 22',
+  'object.size() != (provision ? 24 : 22)',
   'o.size() != 10',
   'next.decorationAfterCache = next.step;',
   'next.decorationAfterCache.reset();',

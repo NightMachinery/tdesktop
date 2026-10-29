@@ -1085,7 +1085,7 @@ std::optional<DesktopSyncChatSetupSnapshot> SyncChatSession::Setup() const {
 		return {};
 	}
 	return DesktopSyncChatSetupSnapshot{
-		*_setupScope, status(), _model->input(), _model->cache(), _run };
+		*_setupScope, status(), _model->input(), _model->cache(), _run, _expectedStateBytes };
 }
 
 std::map<Main::Session*, std::unique_ptr<SyncChatSession>> Sessions;
@@ -1156,6 +1156,17 @@ bool SyncChatSelfResolved(not_null<Main::Session*> session) {
 }
 rpl::producer<Main::Session*> SyncChatStatusChanges() {
 	return Changes.events();
+}
+
+bool ReviewSyncChatMove(not_null<Main::Session*> session,
+		DesktopSyncChatMoveAction &action, const DesktopSyncChatMoveOffer &offer,
+		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent) {
+	const auto fresh = SyncChatSetupSnapshotOf(session);
+	if (!fresh || !CachedSyncChatSetupContextCurrent(session, fresh->scope)) {
+		action.cancel();
+		return false;
+	}
+	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {});
 }
 
 void StartSyncChatDiscovery() {

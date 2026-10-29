@@ -2,6 +2,8 @@
 
 #include "base/weak_ptr.h"
 #include "crl/crl_on_main.h"
+#include "core/application.h"
+#include <QtGui/QGuiApplication>
 #include <QtCore/QPointer>
 #include "data/data_channel.h"
 #include "data/data_folder.h"
@@ -138,6 +140,17 @@ QString StatusText(Main::Session &session,
 	return text;
 }
 
+QString MoveNotice(DesktopSyncChatMoveNotice notice) {
+	switch (notice) {
+	case DesktopSyncChatMoveNotice::Held: return tr::lng_purple_chat_move_held(tr::now);
+	case DesktopSyncChatMoveNotice::Retryable: return tr::lng_purple_chat_move_retry(tr::now);
+	case DesktopSyncChatMoveNotice::Committed: return tr::lng_purple_chat_move_committed(tr::now);
+	case DesktopSyncChatMoveNotice::Complete: return tr::lng_purple_chat_move_complete(tr::now);
+	case DesktopSyncChatMoveNotice::Cancelled: return tr::lng_purple_chat_setup_cancelled(tr::now);
+	}
+	return tr::lng_purple_chat_move_stale(tr::now);
+}
+
 struct Choice {
 	DesktopSyncChatSetupSelection selection;
 	QString title;
@@ -153,6 +166,8 @@ struct SetupState {
 	std::vector<PeerToken> pending;
 	std::unique_ptr<DesktopSyncChatPeerRequest> request;
 	std::unique_ptr<DesktopSyncChatSetupService> service;
+	std::unique_ptr<DesktopSyncChatMoveAction> move;
+	QPointer<QWidget> window;
 	DesktopSyncChatSetupProgress progress;
 	Ui::RoundButton *retry = nullptr;
 	Ui::RoundButton *self = nullptr;
@@ -166,9 +181,25 @@ struct SetupState {
 	bool loading = false;
 };
 
+bool MoveContextCurrent(const SetupState &state) {
+	const auto session = state.session.get();
+	return session && state.current && state.current() && state.target && state.opening
+		&& state.window && state.window->isActiveWindow()
+		&& QGuiApplication::applicationState() == Qt::ApplicationActive
+		&& !Core::App().passcodeLocked()
+		&& ValidateAccountSettingsOpenTarget(session, *state.target)
+		&& CachedSyncChatSetupContextCurrent(session, state.opening->scope);
+}
+
 bool Current(const SetupState &state) {
 	const auto session = state.session.get();
 	const auto fresh = session ? SyncChatSetupSnapshotOf(session) : std::nullopt;
+	if (state.move) {
+		return MoveContextCurrent(state) && fresh && state.opening
+			&& fresh->scope == state.opening->scope
+			&& DesktopSyncChatMoveFingerprint(*fresh)
+				== DesktopSyncChatMoveFingerprint(*state.opening);
+	}
 	return session && state.current && state.current() && state.target
 		&& ValidateAccountSettingsOpenTarget(session, *state.target)
 		&& state.opening && (state.service
@@ -210,7 +241,9 @@ void SetupProgress(not_null<Ui::GenericBox*> box, SetupState *state,
 		return;
 	}
 	state->busy = state->progress.phase == DesktopSyncChatCreatePhase::Running;
-	auto text = state->progress.phase == DesktopSyncChatCreatePhase::Complete
+	auto text = state->progress.provisioned
+		? tr::lng_purple_chat_move_provisioned(tr::now)
+		: state->progress.phase == DesktopSyncChatCreatePhase::Complete
 		? tr::lng_purple_chat_setup_complete(tr::now)
 		: state->progress.phase == DesktopSyncChatCreatePhase::Cancelled
 		? tr::lng_purple_chat_setup_cancelled(tr::now)
@@ -265,8 +298,10 @@ void LoadNext(not_null<Ui::GenericBox*> box, SetupState *state) {
 				return;
 			}
 			const auto title = Title(*state->session.get(), chat);
-			const auto eligible = peer && DesktopSyncChatSetupEligibility(
-				*state->opening, *peer) == DesktopSyncChatSetupRefusal::None;
+			const auto eligible = peer && (state->move
+				? DesktopSyncChatMoveEligibility(*state->opening, *peer)
+				: DesktopSyncChatSetupEligibility(*state->opening, *peer))
+				== DesktopSyncChatSetupRefusal::None;
 			const auto index = int(state->choices.size());
 			state->choices.push_back({ { chat == PeerToken{}
 				? DesktopSyncChatSetupChoice::Self
@@ -283,7 +318,81 @@ void LoadNext(not_null<Ui::GenericBox*> box, SetupState *state) {
 		}));
 }
 
+void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
+	if (!state->move || !Current(*state) || state->busy) { return; }
+	const auto index = state->group->current();
+	if (index < 0 || index >= int(state->choices.size())) { return; }
+	const auto chosen = state->choices[index];
+	const auto offer = state->move->choose(chosen.selection);
+	if (!offer) {
+		state->status->setText(tr::lng_purple_chat_move_stale(tr::now));
+		return;
+	}
+	const auto disclosure = offer->selection.peer
+		? Readers(DesktopSyncChatEligibility(*offer->selection.peer)->readers, chosen.title)
+		: tr::lng_purple_chat_create_disclosure(tr::now)
+			+ u"\n"_q + SettingsDisclosure(chosen.title);
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> confirmation) {
+		const auto submitted = std::make_shared<bool>(false);
+		confirmation->boxClosing() | rpl::on_next([=] {
+			if (!*submitted && weak && state->move) { state->move->dismiss(offer->ticket); }
+		}, confirmation->lifetime());
+		confirmation->setTitle(tr::lng_purple_chat_move_title());
+		confirmation->setWidth(st::boxWideWidth);
+		confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
+			tr::lng_purple_chat_move_disclosure(tr::now).arg(
+				Title(*state->session.get(), state->opening->scope.settingsChat), chosen.title)
+				+ u"\n\n"_q + disclosure, st::boxLabel));
+		const auto cleanup = confirmation->addRow(object_ptr<Ui::Checkbox>(confirmation,
+			tr::lng_purple_chat_move_cleanup(tr::now), offer->cleanup, st::defaultCheckbox));
+		if (state->opening->scope.settingsChat == PeerToken{}) {
+			confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
+				tr::lng_purple_chat_move_cleanup_self_warning(tr::now), st::boxLabel));
+		}
+		confirmation->addButton(tr::lng_continue(), [=] {
+			const auto removeOld = cleanup->checked();
+			*submitted = true;
+			confirmation->closeBox();
+			if (!weak || !Current(*state) || state->busy) { return; }
+			state->busy = true;
+			state->accept->setDisabled(true);
+			const auto finish = crl::guard(box, [=](std::optional<DesktopSyncChatPeer> peer) {
+				state->busy = false;
+				const auto accepted = Current(*state) && ReviewSyncChatMove(
+					state->session.get(), *state->move, *offer, std::move(peer), removeOld, true);
+				state->status->setText(accepted
+					? MoveNotice(DesktopSyncChatMoveNotice::Held)
+					: tr::lng_purple_chat_move_stale(tr::now));
+				state->accept->setDisabled(!Current(*state));
+			});
+			const auto context = [weak, state] { return weak && MoveContextCurrent(*state); };
+			CheckSyncChatBeforePost(state->session.get(), crl::guard(box,
+				[=](DesktopSyncChatStatus status) {
+					if (!context() || !status.complete || !Current(*state)) {
+						state->busy = false;
+						state->accept->setDisabled(!Current(*state));
+						state->status->setText(tr::lng_purple_chat_move_stale(tr::now));
+						return;
+					}
+					if (offer->selection.choice == DesktopSyncChatSetupChoice::Create) {
+						finish(std::optional<DesktopSyncChatPeer>());
+					} else {
+						state->request = std::make_unique<DesktopSyncChatPeerRequest>(
+							state->session.get(), state->opening->scope.origin,
+							offer->selection.peer->chat, context, finish);
+					}
+				}), DesktopSyncChatOperation{.current = context});
+		});
+		confirmation->addButton(tr::lng_cancel(), [=] {
+			if (weak && state->move) { state->move->dismiss(offer->ticket); }
+			confirmation->closeBox();
+		});
+	}));
+}
+
 void Accept(not_null<Ui::GenericBox*> box, SetupState *state) {
+	if (state->move) { AcceptMove(box, state); return; }
 	if (!Current(*state) || state->busy || state->service) {
 		state->status->setText(tr::lng_purple_chat_stale(tr::now));
 		return;
@@ -381,21 +490,45 @@ void Accept(not_null<Ui::GenericBox*> box, SetupState *state) {
 	}
 }
 
+void BuildSetupBox(not_null<Ui::GenericBox*> box,
+	not_null<Main::Session*> session, Fn<bool()> current, bool moving);
+
+void MoveBox(not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session, Fn<bool()> current) {
+	BuildSetupBox(box, session, std::move(current), true);
 }
 
-void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
-		not_null<Main::Session*> session, Fn<bool()> current) {
+void BuildSetupBox(not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session, Fn<bool()> current, bool moving) {
 	box->setTitle(tr::lng_purple_chat_title());
 	box->setWidth(st::boxWideWidth);
 	const auto state = box->lifetime().make_state<SetupState>();
 	state->session = session;
 	state->current = std::move(current);
+	state->window = box->window();
 	state->target = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
 	state->opening = SyncChatSetupSnapshotOf(session);
+	if (moving && state->opening) {
+		const auto weak = QPointer<Ui::GenericBox>(box.get());
+		state->move = std::make_unique<DesktopSyncChatMoveAction>(*state->opening,
+			[weak, state] { return weak && Current(*state); });
+		box->setTitle(tr::lng_purple_chat_move_title());
+		QObject::connect(qGuiApp, &QGuiApplication::applicationStateChanged, box, [=] {
+			if (!MoveContextCurrent(*state)) { state->move->cancel(); }
+		});
+		QObject::connect(qGuiApp, &QGuiApplication::focusWindowChanged, box, [=] {
+			if (!MoveContextCurrent(*state)) { state->move->cancel(); }
+		});
+		Core::App().passcodeLockChanges() | rpl::on_next([=] {
+			if (!MoveContextCurrent(*state)) { state->move->cancel(); }
+		}, box->lifetime());
+	}
 	state->status = box->addRow(object_ptr<Ui::FlatLabel>(box,
 		StatusText(*session, SyncChatStatusOf(session)), st::boxLabel));
 	const auto refresh = [=] {
-		if (!state->service) {
+		if (state->move && state->move->reason() == u"move-qualification-held"_q) {
+			state->status->setText(tr::lng_purple_chat_move_held(tr::now));
+		} else if (!state->service) {
 			state->status->setText(Current(*state)
 				? StatusText(*session, SyncChatStatusOf(session))
 				: tr::lng_purple_chat_stale(tr::now));
@@ -445,9 +578,12 @@ void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
 			}
 		}
 	}
-	if (Current(*state) && DesktopSyncChatFreshSetup(*state->opening)) {
+	if (Current(*state) && (moving
+		? !DesktopSyncChatMoveFingerprint(*state->opening).isEmpty()
+		: DesktopSyncChatFreshSetup(*state->opening))) {
 		box->addRow(object_ptr<Ui::FlatLabel>(box,
-			tr::lng_purple_chat_fresh_choices(tr::now), st::boxLabel));
+			moving ? tr::lng_purple_chat_move_choices(tr::now)
+				: tr::lng_purple_chat_fresh_choices(tr::now), st::boxLabel));
 		state->group = std::make_shared<Ui::RadiobuttonGroup>();
 		state->choices.push_back({ { DesktopSyncChatSetupChoice::Create },
 			tr::lng_purple_chat_create(tr::now) });
@@ -469,6 +605,12 @@ void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
 		}
 		state->accept = box->addButton(tr::lng_continue(), [=] { Accept(box, state); });
 		LoadNext(box, state);
+	} else if (!moving && state->opening
+		&& !DesktopSyncChatMoveFingerprint(*state->opening).isEmpty()) {
+		box->addButton(tr::lng_purple_chat_move_title(), [=] {
+			if (!Current(*state)) { return; }
+			box->uiShow()->showBox(Box(MoveBox, session, state->current));
+		});
 	} else {
 		box->addRow(object_ptr<Ui::FlatLabel>(box,
 			tr::lng_purple_chat_change_disabled(tr::now), st::boxLabel));
@@ -477,6 +619,10 @@ void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
 		tr::lng_purple_chat_setup_retry(), st::defaultBoxButton));
 	state->retry->setClickedCallback([=] {
 		if (!Current(*state)) { return; }
+		if (state->move) {
+			state->status->setText(tr::lng_purple_chat_move_held(tr::now));
+			return;
+		}
 		if (state->service) { state->service->retry(); return; }
 		if (state->loading) {
 			state->loading = false;
@@ -529,8 +675,16 @@ void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
 	});
 	box->addButton(tr::lng_cancel(), [=] {
 		if (state->service) { state->service->cancel(); }
+		if (state->move) { state->move->cancel(); }
 		box->closeBox();
 	});
+}
+
+}
+
+void SyncChatSetupBox(not_null<Ui::GenericBox*> box,
+		not_null<Main::Session*> session, Fn<bool()> current) {
+	BuildSetupBox(box, session, std::move(current), false);
 }
 
 }

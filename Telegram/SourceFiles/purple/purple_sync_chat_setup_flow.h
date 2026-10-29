@@ -12,6 +12,7 @@ struct DesktopSyncChatSetupProgress {
 	std::optional<DesktopSyncChatConsentOffer> consent;
 	std::optional<DesktopSyncChatCreateCommand> command;
 	bool resumeAbsent = false;
+	bool provisioned = false;
 };
 
 class DesktopSyncChatSetupFlow final {

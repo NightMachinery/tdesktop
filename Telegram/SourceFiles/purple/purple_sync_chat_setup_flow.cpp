@@ -36,8 +36,16 @@ void DesktopSyncChatSetupFlow::open(int64_t now) {
 		publish(u"setup-no-journal"_q, true);
 		return;
 	}
-	const auto journal = existing
-		? existing : BeginDesktopSyncChatCreate(_opening, _selection);
+	if (existing && ((!existing->provisionSource.isEmpty() != _selection.provisionOnly)
+		|| (_selection.provisionOnly && existing->provisionSource
+			!= DesktopSyncChatMoveFingerprint(_opening)))) {
+		_store.reset();
+		publish(u"setup-purpose-or-source-held"_q);
+		return;
+	}
+	const auto journal = existing ? existing : _selection.provisionOnly
+		? BeginDesktopSyncChatProvision(_opening, _selection)
+		: BeginDesktopSyncChatCreate(_opening, _selection);
 	if (!journal || (!existing && !_store->Save(*journal))) {
 		publish(u"setup-intent-held"_q);
 		return;
@@ -146,7 +154,10 @@ void DesktopSyncChatSetupFlow::advance(int64_t now) {
 	auto status = DesktopSyncChatSetupProgress{
 		_executor->phase(), _executor->reason(), _executor->journal(),
 		_executor->offeredReaders(), command };
-	if (status.phase == DesktopSyncChatCreatePhase::Complete) { _store.reset(); }
+	if (status.phase == DesktopSyncChatCreatePhase::Complete) {
+		status.provisioned = !_executor->journal().provisionSource.isEmpty();
+		_store.reset();
+	}
 	if (_progress) {
 		_progress(std::move(status));
 	}

@@ -15,6 +15,7 @@ std::optional<DesktopSyncChatSetupWriteRequest> DesktopSyncChatSetupRequest(
 		return !j.created && !j.chat && j.step == DesktopSyncChatCreateStep::Create
 			&& j.createAttempts > 0 ? std::optional<DesktopSyncChatSetupWriteRequest>(DesktopSyncChatCreateRequest()) : std::nullopt;
 	}
+	if (!j.provisionSource.isEmpty()) { return {}; }
 	if (!route || !ValidDesktopSyncChatIo(*route) || route->peer.origin != command.origin
 		|| route->peer.chat != j.chat || DesktopSyncChatEligibility(route->peer)->readers.populationUnknown) return {};
 	if (command.step == DesktopSyncChatCreateStep::PostMark && j.step == command.step) {

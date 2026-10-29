@@ -275,3 +275,59 @@ callback, which may destroy the publisher. Pending stage bytes remain available
 for an explicitly reviewed retry. The real-file worker and literal coordinator
 fixtures cover source changes during a long wait, change then restore, account
 lock release on queued retirement, and destruction from the completion callback.
+
+
+## Change sync chat (qualification held)
+
+The bound account has a distinct **Change sync chat** entry. Fresh setup remains
+separate and still refuses a bound settings stream. The move chooser captures
+its owning window and account/login, exact state bytes already retained by the
+discovery worker, the admitted cache, the source chat and current winner. There
+is no additional GUI-thread disk read. A changed source, state, cache, account,
+login, winner, destination eligibility or reader disclosure refuses the old
+confirmation. Foreground/window loss, passcode lock and closing revoke it.
+Dismissing a confirmation grants nothing and allows another explicit choice.
+
+The confirmation shows the destination's current reader facts, the settings
+file disclosure (including Work Mode list identities) and cloud visibility.
+The old chat itself stays. The optional cleanup covers only Purple's own
+settings messages and mark after commitment, never unrelated content or the
+whole chat. It starts unticked when the old settings chat is Saved Messages.
+The exact checkbox value belongs to that confirmation, not a global preference.
+Cleanup remains subject to the Carry executor's separate authorization and its
+currently held deletion adapter.
+
+Native move activation is off. The service validates the final RAM snapshot and
+then reports qualification-held. It creates neither a provisioning worker nor
+a Carry worker, transport, durable intent or background permission. Reopening,
+Retry and closing cannot enable dispatch. The production activation predicate
+is pinned off by host tests; a future owner-approved activation must supply the
+reviewed executor integration rather than changing the checkbox into consent
+for arbitrary background effects.
+
+### Provision-only creation
+
+A purpose-tagged variant of the T3 create journal prepares a new destination
+without selecting it. It is bound to the captured source fingerprint, including
+exact settings state and cache. Its explicit consent precedes the durable create
+intent. It reuses T3's operation identity, at-most-three definite create attempts,
+matched-request receipt and retained ambiguous-create proof. Restart with an
+uncertain create reconciles or holds; a matching title is never adoption proof,
+and another channel is never created just because the first response was lost.
+
+The sequence is fresh resolution, create/reconcile, apply the owned Updates,
+full info, complete exact Empty inventory, then full info again. It finishes as
+**provisioned**, with no mark and no admitted cache. It cannot issue PostMark,
+Commit, Pin, Mute or Archive. Nothing silently deletes the channel after failure
+or cancellation. A provisioned channel is not a committed move. Carry owns the
+records and mark, and only its verified commitment can precede decoration.
+The existing T3 silent pin/mute/archive policy is for a newly created channel
+only; existing chats and Saved Messages must never be decorated. All move
+provisioning and subsequent decoration remain held with native activation off.
+
+Fresh setup journals keep version 1. Provision-only journals use version 2 with
+mandatory `purpose: "provision-move"` and a 64-character lowercase SHA256
+`source_fingerprint`. The bounded canonical codec refuses missing, extra,
+unknown-purpose and newer-version fields without replacing the file. A fresh
+setup flow cannot resume a provision journal, or vice versa. The shared core
+state and Carry journal formats are unchanged.

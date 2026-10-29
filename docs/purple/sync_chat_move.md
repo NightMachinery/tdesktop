@@ -342,3 +342,60 @@ survives both. A genuinely new complete scan restores reconciliation; no core
 state/journal format or hash semantics change. This is the same ordering rule
 as Android's generation-bound read tickets, expressed as a scan-start stamp and
 per-slot store fence rather than a transport-specific ticket.
+
+
+## Explicit Change sync chat UI
+
+T5d adds a bound-move chooser alongside T3 fresh setup, with activation off.
+The action captures the opening account/login/window, exact worker-published
+state bytes and admitted cache, the old chat and resolution winner. Both target
+preview and fresh acceptance use the same core eligibility predicate. The
+settings/reader/cloud disclosure is explicit even for Saved Messages. The old
+chat remains, and only the optional own-settings/mark cleanup is offered. Its
+default is off for an old Saved Messages source. In both Create and Existing
+confirmations, an adjacent warning explains that older Purple builds still read
+settings from Saved Messages and may pause or offer to start over if those
+messages are removed. This warning depends on the old source, never the target.
+No whole-chat deletion is implied. State/cache/winner and reader changes invalidate the confirmation.
+An inactive or closed owning window and passcode lock revoke it immediately.
+All comparisons are in RAM on the application thread.
+
+The production service stops after qualification review. It does not construct
+T5c's worker or acquire its Carry lease, and does not start a network transport.
+A held confirmation is not a durable operation, a successful move, or authority
+for background work. Source-only tests establish the held UI/model and durable
+provision adapter, not native Telegram behavior. New native activation needs
+an explicit owner GO and a reviewed transport hookup.
+
+For a new destination, the purpose-tagged T3 provision sequence retains the
+create operation and exact matched-request proof, but produces no mark or
+cache. It verifies fresh full info around a complete Empty target inventory.
+Uncertain creation after restart reconciles or holds without duplicate create
+or orphan deletion. Carry must complete verification, mark readback, local
+state and cache commitment before T3's created-channel-only silent pin, mute
+and archive policy can be used. Provisioning alone is never shown as committed;
+existing/Self targets cannot take that decoration route. Postcommit cleanup
+failures retain T5c's checkpoint and continue to require explicit Retry or
+Skip cleanup, not another fresh choice.
+
+
+The dormant `DesktopSyncChatMoveDecorationRequest` builder accepts only a
+completed provision receipt and a valid committed Carry journal for its exact
+opening state, account, domain-separated Carry login authority, source and created
+channel. It reuses T3's silent
+pin, mute and archive request shapes with the Carry mark id. Precommit,
+provision-only, existing-chat and Saved Messages receipts refuse. There is no
+production dispatch callsite while move activation is off. Activation must wire
+this builder after durable commit and renew its foreground and scope authority
+before each effect; provisioning alone grants no decoration permission.
+
+
+The dormant decoration action distinguishes NotStarted, Ready, Waiting, Held,
+Complete and Cancelled. A failed pin, mute or archive callback keeps Held and
+its exact step across unrelated Carry Cleanup/Done publications. A waiting
+callback similarly admits no second command. Only explicit Retry renews
+admission for the failed step; earlier successful decorations are not replayed.
+Run, operation, ticket and step fence stale callbacks. The same committed
+receipt stays bound throughout. No production UI or service constructs this
+action while move activation is off; native activation must retain one action
+per operation and renew the existing foreground and request gates.
