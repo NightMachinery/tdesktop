@@ -1,5 +1,7 @@
 #include "purple/purple_control_commands.h"
 
+#include "purple/purple_emoji_large.h"
+
 #include "base/basic_types.h"
 #include <algorithm>
 
@@ -7,7 +9,7 @@ namespace Purple {
 namespace {
 
 const auto Commands = std::array{
-	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q,
+	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q, u"emoji.render"_q,
 };
 
 }
@@ -63,6 +65,10 @@ ControlResult AuthorizeControlCommand(const QString &command, const ControlPolic
 		if (!policy.groups[0]) return ControlError(u"capability-off"_q, u"The window capability is disabled."_q);
 		if (policy.locked) return ControlError(u"locked"_q, u"Window automation is unavailable while locked."_q);
 	}
+	if (command == u"emoji.render"_q) {
+		if (!policy.groups[4]) return ControlError(u"capability-off"_q, u"The emoji capability is disabled."_q);
+		if (policy.locked) return ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q);
+	}
 	return {};
 }
 
@@ -71,7 +77,8 @@ void DispatchControlRequest(
 		const ControlPolicy &policy,
 		const QString &build,
 		const ControlWindowAdapter &windows,
-		ControlReply reply) {
+		ControlReply reply,
+		const ControlEmojiAdapter &emoji) {
 	if (auto error = AuthorizeControlCommand(request.command, policy)
 		; !error.code.isEmpty()) {
 		reply(std::move(error));
@@ -91,6 +98,19 @@ void DispatchControlRequest(
 	}
 	if (request.command == u"ping"_q) {
 		reply({ QJsonObject{ { u"pong"_q, true } } });
+		return;
+	}
+	if (request.command == u"emoji.render"_q) {
+		const auto id = ControlUnsignedArgument(request, u"id"_q);
+		const auto pixels = request.arguments.contains(u"px"_q)
+			? ControlIntegerArgument(request, u"px"_q) : std::optional<qint64>(kEmojiLargePixels);
+		if (!id || !pixels || *pixels < 1 || *pixels > kEmojiLargePixels) {
+			reply(ControlError(u"bad-request"_q, u"Expected a nonzero uint64 id and px from 1 to 512."_q));
+		} else if (!emoji) {
+			reply(ControlError(u"export-disabled"_q, u"Enable local emoji export in Purple Settings."_q));
+		} else {
+			emoji(*id, int(*pixels), request.active, std::move(reply));
+		}
 		return;
 	}
 	const auto list = windows.list ? windows.list() : std::vector<ControlWindow>();

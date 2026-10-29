@@ -6,11 +6,10 @@ allow commands. Automation starts off. A socket request cannot open a consent
 dialog, enable automation or change settings.
 
 This version supports `hello`, `ping`, `window.list`, `window.activate` and
-`window.cycle`. Window commands use the old primary-first window order and
+`window.cycle`, plus `emoji.render`. Window and emoji commands use the old primary-first window order and
 refuse while the app passcode is locked. All five capability groups start on:
-window, media.control, media.info, lock and emoji. Only window commands are
-implemented here. Media, lock, artwork rendering and subscriptions are later
-slices. `hello` advertises the implemented commands, build and enabled groups.
+window, media.control, media.info, lock and emoji. Window control and emoji rendering are implemented here. Media, lock and
+subscriptions are later slices. `hello` advertises the implemented commands, build and enabled groups.
 All commands except `hello`, including `ping`, require the master switch.
 
 ## Try the CLI
@@ -26,6 +25,7 @@ go build -o tdesktop-cli .
 ./tdesktop-cli windows
 ./tdesktop-cli activate 0
 ./tdesktop-cli cycle
+./tdesktop-cli emoji render 5339220291157500400 --px 256
 ```
 
 The CLI accepts `--socket PATH` and `--json` before or after the command. Socket
@@ -39,7 +39,9 @@ XDG_DATA_HOME is empty or relative. A default socket path of 104 or more
 UTF-8 bytes instead uses `~/Library/Application Support/Purple/control.sock`,
 matching the app on every supported platform. The CLI never scans
 single-instance sockets. A call has a two-second connection deadline and a
-two-second exchange deadline. Human window titles are quoted to keep line breaks
+two-second exchange deadline for ordinary commands. Emoji rendering has a
+ten-second exchange deadline, covering the app's eight-second render wait.
+Human window titles and rendered paths are quoted to keep line breaks
 and terminal controls from changing the output layout. JSON output is the full
 v1 response envelope.
 
@@ -47,6 +49,54 @@ Exit codes are 0 for success, 2 for automation/capability/lock refusal, 3 for no
 reachable socket, 4 for an unsupported protocol or command, and 1 for other
 errors. The CLI prints local enable instructions when automation is disabled.
 The CMake app target does not build or install this separate command.
+
+## Emoji rendering
+
+`emoji.render` takes `args:{id,px?}` in the `emoji` capability group. It requires
+Local automation, the emoji group, an unlocked active account and Local emoji
+export. The optional pixel bound defaults to 512 and accepts exact integers
+from 1 through 512. Artwork IDs are nonzero uint64 values, checked against their
+original JSON tokens without floating-point rounding. Exact decimal and exponent
+forms work within that range. A catalog's string ID also works when it is the
+canonical ASCII decimal spelling: no sign, whitespace or leading zero. Request
+correlation IDs remain signed64 and are independent of artwork IDs.
+
+A successful asynchronous reply retains the request's correlation ID:
+
+```json
+{"v":1,"id":7,"cmd":"emoji.render","args":{"id":"5339220291157500400","px":256}}
+{"v":1,"id":7,"ok":true,"result":{"path":"/owned/emoji-export/large/5339220291157500400-256.png","px":256,"sourceKind":"tgs"}}
+```
+
+The command shares [the Large demand queue and renderer](emoji_export.md),
+including its 64-item admission bound, spacing and cooldown. Concurrent requests
+for one artwork share the demand and retain separate replies and pixel bounds.
+At most 64 socket waiters are retained. A full or cooling queue returns `busy`.
+Unknown artwork returns `not-found`; non-emoji, oversized or unrenderable artwork
+returns `unsupported`. Disabled or unavailable export returns `export-disabled`.
+The existing `automation-disabled`, `capability-off` and `locked` refusals apply
+both at admission and again before sending a late reply. An unfinished request
+returns `timeout` after eight monotonic seconds, checked every 100 milliseconds.
+
+Publication and scaling run on the existing export worker. The worker reads a
+verified owned PNG capped at 4 MiB and 512 pixels per side, scales down with its
+aspect ratio intact and never upscales a native raster. `px` reports the actual
+longer side, which may be below the requested bound. `sourceKind` is `tgs`,
+`webp` or `webm`. Each variant is written through the Large store, participates
+in its existing file and byte caps, and is advertised in the atomic catalog
+before its nonempty regular file is checked again and the reply is completed.
+The exporter retains its full-size source metadata so a later larger request
+does not upscale an earlier small variant. A missing or evicted source returns
+`not-found`, allowing a fresh demand.
+
+Disconnect, server stop and pending expiry retire the request's active ticket.
+Cancelled callbacks are dropped within the next 100 ms check. Shared artwork
+work may finish for other consumers; it retains no dead socket. Epochs and
+per-waiter serials make old worker completions inert after revocation or rearm.
+Multiple outstanding requests on one connection are supported; duplicate
+correlation IDs return `busy` without replacing the original request.
+The request-file fallback remains available as documented in the export guide.
+Paths are cache entries and may later be evicted, as with request-file results.
 
 ## Paths and ownership
 
@@ -98,7 +148,7 @@ are checked against their original JSON number tokens. Decimal and exponent
 forms are accepted only when their exact mathematical value is an integer
 within the signed 64-bit range. Overflow and fractions are rejected before
 rounding can change request identity or invoke an action. JSON strings do not
-stand in for numbers. A parallel token document preserves escaped member names
+stand in for those numbers. The artwork ID exception is described below. A parallel token document preserves escaped member names
 and the JSON parser's member selection; argument tokens travel with the request
 to the main-thread handler. The token document is at most twice the bounded
 64 KiB input frame.
@@ -141,7 +191,11 @@ It runs actual worker socket/protocol/authorization/window-adapter tests, litera
 preference bodies plus a production-symbol link check, static CTRL removal and
 Go fake-server tests. Every test socket is in its own private temporary directory;
 no GUI, account, installed client or Telegram request is needed. The canonical
-`test_control` gate registers both native programs and the Go tests.
+`test_control` gate registers all three native programs and the Go tests.
+The emoji program uses the actual server, bounded waiter broker, literal
+exporter admission/serving methods and production disk worker with synthetic
+source PNGs. It covers exact uint64/pixel parsing, concurrent replies, duplicate
+IDs, cancellation, revocation, timeout, publication and no-upscale variants.
 
 `core/sandbox.cpp` loses only the fork's CTRL include and branch. The upstream
 CMD, OPEN and XDG activation branches stay intact. The fork-only

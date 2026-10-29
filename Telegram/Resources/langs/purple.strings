@@ -411,4 +411,4 @@ docs/purple/upstream_hooks.md.
 "lng_purple_control_media_info" = "Media information";
 "lng_purple_control_lock" = "Lock";
 "lng_purple_control_emoji" = "Emoji artwork";
-"lng_purple_control_groups_about" = "Capability groups are local to this device and start enabled. This version supports window commands; media, lock and emoji commands will be added later.";
+"lng_purple_control_groups_about" = "Capability groups are local to this device and start enabled. This version supports window commands and emoji rendering; media and lock commands will be added later.";

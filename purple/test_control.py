@@ -104,12 +104,22 @@ for flag in ('-arch', '-isysroot'):
 for flag in recipe:
     if flag.startswith('-F'):
         prefix += [flag, '-Wl,-rpath,' + flag[2:]]
-for fixture in ['control_cases.cpp', 'control_preferences_cases.cpp']:
+frontend = (source / 'purple/purple_emoji_export.cpp').read_text()
+(work / 'control-emoji-frontend.inc').write_text('\n'.join(definition(frontend, marker) for marker in [
+    'void EmojiExporter::render(', 'bool EmojiExporter::serveRender(', 'void EmojiExporter::passcodeChanged(']))
+(work / 'control-emoji-completion.inc').write_text(definition(
+    definition(frontend, 'void EmojiExporter::checkMedia('), '[=](quint64 generation, bool ok)'))
+emoji_objects = [compile('purple/' + name + '.cpp') for name in [
+    'purple_emoji_render', 'purple_emoji_large', 'purple_emoji_large_store', 'purple_emoji_export_queue',
+    'purple_emoji_export_store', 'purple_emoji_export_worker']]
+for fixture in ['control_cases.cpp', 'control_preferences_cases.cpp', 'control_emoji_cases.cpp']:
     obj = compile('purple/tests/' + fixture)
     binary = work / Path(fixture).stem
     name = Path(fixture).stem
-    run([*prefix, obj, *(objects if name == 'control_cases' else []),
-        '-framework', 'QtCore', '-framework', 'QtNetwork', '-o', binary], compile=True)
+    run([*prefix, obj, *(objects if name != 'control_preferences_cases' else []),
+        *(emoji_objects if name == 'control_emoji_cases' else []),
+        '-framework', 'QtCore', '-framework', 'QtNetwork',
+        '-framework', 'QtGui', '-o', binary], compile=True)
     run([binary], timeout=90)
 
 sandbox = (source / 'core/sandbox.cpp').read_text()
@@ -131,4 +141,4 @@ with tempfile.TemporaryDirectory(prefix='purple-control-', dir='/private/tmp' if
         + shlex.quote(str(repo / 'purple/control_go_tool.py')), '-o', work / 'tdesktop-cli', '.'],
         cwd=repo / 'purple/cli/tdesktop-cli', env=environment, timeout=600)
     run([work / 'tdesktop-cli', '--help'], env=environment)
-print('IPC-1 native, preference link contract, CTRL removal and Go fake-server tests PASS')
+print('IPC native, emoji async/publication, preference link contract, CTRL removal and Go fake-server tests PASS')

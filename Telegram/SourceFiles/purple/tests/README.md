@@ -103,3 +103,17 @@ compiles all eleven changed production units with scratch-generated language,
 runs these programs, checks the legacy CTRL removal, and tests/builds the Go CLI
 against private fake servers. The canonical `test_control` gate registers both
 programs and the Go test source. No GUI or live Telegram profile is used.
+
+`control_emoji_cases.cpp` pins exact unsigned artwork IDs and pixel bounds, the
+64-waiter index and monotonic timeout, stale completion/rearm and reentrant
+retirement, then runs concurrent socket renders through literal exporter
+admission/serving methods, production worker and store with synthetic PNGs.
+It checks duplicate request IDs, export/group/lock refusals, pending disconnect
+and server stop, advertised existing images, aspect ratio and no raster upscale.
+It is registered in the canonical `test_control` gate with Go fake-server tests
+for the CLI's exact uint64 command, pixel options, human/JSON output and errors.
+
+The emoji control fixture also extracts the literal ordinary-render completion
+callback. It admits a socket demand behind a preview-only job and requires one
+eventual successful reply, while actual failed or unsupported Large attempts
+still retire their waiters.

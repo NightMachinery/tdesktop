@@ -42,7 +42,7 @@ QByteArray QuoteJsonNumbers(const QByteArray &line) {
 	return result;
 }
 
-std::optional<qint64> ExactInteger(
+std::optional<QByteArray> IntegerDigits(
 		const QJsonValue &value,
 		const QJsonValue &raw) {
 	if (!value.isDouble() || !raw.isString()) return {};
@@ -58,7 +58,7 @@ std::optional<qint64> ExactInteger(
 	auto first = qsizetype(0);
 	while (first < digits.size() && digits[first] == '0') ++first;
 	digits.remove(0, first);
-	if (digits.isEmpty()) return qint64(0);
+	if (digits.isEmpty()) return QByteArray("0");
 	if (exponentAt >= 0) {
 		auto i = exponentAt + 1;
 		const auto subtract = token[i] == '-';
@@ -75,11 +75,17 @@ std::optional<qint64> ExactInteger(
 		digits.chop(1);
 		++scale;
 	}
-	if (scale < 0 || digits.size() + scale > 19) return {};
+	if (scale < 0 || digits.size() + scale > 20) return {};
 	digits.append(QByteArray(scale, '0'));
 	if (negative) digits.prepend('-');
+	return digits;
+}
+
+std::optional<qint64> ExactInteger(const QJsonValue &value, const QJsonValue &raw) {
+	const auto digits = IntegerDigits(value, raw);
+	if (!digits) return {};
 	auto valid = false;
-	const auto integer = digits.toLongLong(&valid, 10);
+	const auto integer = digits->toLongLong(&valid, 10);
 	return valid ? std::make_optional(integer) : std::nullopt;
 }
 
@@ -91,6 +97,23 @@ std::optional<qint64> ControlIntegerArgument(
 	return ExactInteger(
 		request.arguments.value(name),
 		request.argumentTokens.value(name));
+}
+
+std::optional<quint64> ControlUnsignedArgument(
+		const ControlRequest &request, const QString &name) {
+	const auto value = request.arguments.value(name);
+	if (value.isString()) {
+		const auto text = value.toString();
+		auto valid = false;
+		const auto id = text.toULongLong(&valid, 10);
+		return valid && id && text == QString::number(id)
+			? std::make_optional(id) : std::nullopt;
+	}
+	const auto digits = IntegerDigits(value, request.argumentTokens.value(name));
+	if (!digits || digits->startsWith('-')) return {};
+	auto valid = false;
+	const auto id = digits->toULongLong(&valid, 10);
+	return valid && id ? std::make_optional(id) : std::nullopt;
 }
 
 ControlResult ControlError(QString code, QString message) {

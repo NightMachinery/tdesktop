@@ -36,11 +36,13 @@ func fakeServer(t *testing.T, send func(net.Conn, map[string]any)) string {
 		defer conn.Close()
 		conn.SetDeadline(time.Now().Add(3 * time.Second))
 		var request map[string]any
-		if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
+		decoder := json.NewDecoder(bufio.NewReader(conn))
+		decoder.UseNumber()
+		if err := decoder.Decode(&request); err != nil {
 			t.Errorf("request: %v", err)
 			return
 		}
-		if request["v"] != float64(1) || request["id"] != float64(1) || request["args"] == nil {
+		if request["v"] != json.Number("1") || request["id"] != json.Number("1") || request["args"] == nil {
 			t.Errorf("invalid request: %v", request)
 			return
 		}
@@ -182,7 +184,7 @@ func TestCommandsAndHumanOutput(t *testing.T) {
 				if req["cmd"] != tc.command {
 					t.Errorf("command=%v", req["cmd"])
 				}
-				if tc.command == "window.activate" && req["args"].(map[string]any)["index"] != float64(2) {
+				if tc.command == "window.activate" && req["args"].(map[string]any)["index"] != json.Number("2") {
 					t.Errorf("index not preserved")
 				}
 				fmt.Fprintf(c, "{\"v\":1,\"id\":1,\"ok\":true,\"result\":%s}\n", tc.result)
@@ -274,5 +276,86 @@ func TestDeadline(t *testing.T) {
 	code := run([]string{"ping", "--socket", path}, func(string) string { return "" }, "/unused", &out, &diagnostic)
 	if code != 1 || time.Since(started) > callTimeout+time.Second {
 		t.Errorf("deadline code%d elapsed%v: %s", code, time.Since(started), diagnostic.String())
+	}
+}
+
+func TestEmojiRenderOptions(t *testing.T) {
+	for _, args := range [][]string{
+		{"emoji", "render", "18446744073709551615"},
+		{"--json", "emoji", "render", "9007199254740993", "--px", "128"},
+		{"--px=512", "emoji", "render", "1"},
+	} {
+		o, err := parseOptions(args)
+		if err != nil || o.command != "emoji.render" {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"emoji"}, {"emoji", "render"}, {"emoji", "other", "1"},
+		{"emoji", "render", "0"}, {"emoji", "render", "01"}, {"emoji", "render", "+1"},
+		{"emoji", "render", "1.0"}, {"emoji", "render", "1e2"}, {"emoji", "render", "18446744073709551616"},
+		{"emoji", "render", "1", "--px"}, {"emoji", "render", "1", "--px=0"},
+		{"emoji", "render", "1", "--px=513"}, {"emoji", "render", "1", "--px=1.5"},
+		{"emoji", "render", "1", "--px=01"}, {"emoji", "render", "1", "--px="},
+		{"emoji", "render", "1", "--px=2", "--px=3"}, {"ping", "--px=128"},
+	} {
+		if _, err := parseOptions(args); err == nil {
+			t.Errorf("accepted %v", args)
+		}
+	}
+	if exchangeTimeout("emoji.render") != 10*time.Second || exchangeTimeout("ping") != 2*time.Second {
+		t.Fatal("render wait must outlast the bounded app render timeout")
+	}
+}
+
+func TestEmojiRenderFakeServer(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		path := fakeServer(t, func(conn net.Conn, request map[string]any) {
+			args := request["args"].(map[string]any)
+			if request["cmd"] != "emoji.render" || args["id"] != json.Number("18446744073709551615") || args["px"] != json.Number("128") {
+				t.Errorf("wrong exact emoji command: %v", request)
+			}
+			fmt.Fprintln(conn, `{"v":1,"id":1,"ok":true,"result":{"path":"/owned/emoji-export/large/18446744073709551615-128.png","px":128,"sourceKind":"tgs"}}`)
+		})
+		args := []string{"--socket", path, "emoji", "render", "18446744073709551615", "--px", "128"}
+		if asJSON {
+			args = append(args, "--json")
+		}
+		var out, diagnostic bytes.Buffer
+		if code := run(args, func(string) string { return "" }, "/unused", &out, &diagnostic); code != 0 || !strings.Contains(out.String(), "18446744073709551615-128.png") {
+			t.Fatalf("render: code=%d out=%s err=%s", code, out.String(), diagnostic.String())
+		}
+		if asJSON && !strings.Contains(out.String(), `"ok":true`) {
+			t.Fatal("missing JSON envelope")
+		}
+	}
+	for _, tc := range []struct {
+		code string
+		exit int
+	}{
+		{"automation-disabled", 2}, {"capability-off", 2}, {"locked", 2}, {"unsupported", 4},
+		{"export-disabled", 1}, {"busy", 1}, {"timeout", 1}, {"not-found", 1},
+	} {
+		path := fakeServer(t, func(conn net.Conn, _ map[string]any) {
+			fmt.Fprintf(conn, `{"v":1,"id":1,"ok":false,"error":{"code":%q,"message":"refused"}}`+"\n", tc.code)
+		})
+		var out, diagnostic bytes.Buffer
+		if code := run([]string{"--socket", path, "emoji", "render", "1"}, func(string) string { return "" }, "/unused", &out, &diagnostic); code != tc.exit {
+			t.Errorf("%s exit=%d want%d", tc.code, code, tc.exit)
+		}
+	}
+	if _, err := humanResult("emoji.render", json.RawMessage(`{"path":"relative","px":1024,"sourceKind":"bad"}`)); err == nil {
+		t.Fatal("invalid render result accepted")
+	}
+}
+
+func TestEmojiRenderWaitsBeyondOrdinaryDeadline(t *testing.T) {
+	path := fakeServer(t, func(conn net.Conn, _ map[string]any) {
+		time.Sleep(2100 * time.Millisecond)
+		fmt.Fprintln(conn, `{"v":1,"id":1,"ok":true,"result":{"path":"/owned/emoji-export/large/1-128.png","px":128,"sourceKind":"webp"}}`)
+	})
+	var out, diagnostic bytes.Buffer
+	if code := run([]string{"--socket", path, "emoji", "render", "1"}, func(string) string { return "" }, "/unused", &out, &diagnostic); code != 0 {
+		t.Fatalf("render inherited ordinary deadline: code=%d %s", code, diagnostic.String())
 	}
 }

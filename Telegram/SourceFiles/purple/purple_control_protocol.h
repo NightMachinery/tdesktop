@@ -19,6 +19,7 @@ struct ControlRequest {
 	QString command;
 	QJsonObject arguments;
 	QJsonObject argumentTokens;
+	std::function<bool()> active;
 };
 
 struct ControlResult {
@@ -36,6 +37,9 @@ struct ControlParseResult {
 using ControlReply = std::function<void(ControlResult)>;
 
 [[nodiscard]] std::optional<qint64> ControlIntegerArgument(
+	const ControlRequest &request,
+	const QString &name);
+[[nodiscard]] std::optional<quint64> ControlUnsignedArgument(
 	const ControlRequest &request,
 	const QString &name);
 [[nodiscard]] ControlParseResult ParseControlRequest(const QByteArray &line);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "purple/purple_control_protocol.h"
 #include <QtCore/QString>
 #include <rpl/producer.h>
 
@@ -13,6 +14,8 @@ class SectionBuilder;
 
 namespace Purple {
 
+void RequestEmojiRender(quint64 id, int pixels,
+	std::function<bool()> active, ControlReply reply);
 void StartEmojiExport();
 void StopEmojiExportAtLogout(Main::Account &account);
 void BuildEmojiExportSetting(::Settings::Builder::SectionBuilder &builder);

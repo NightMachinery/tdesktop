@@ -8,6 +8,7 @@
 #include "purple/purple_emoji_large_render.h"
 #include "purple/purple_emoji_large_setting.h"
 #include "purple/purple_emoji_large_store.h"
+#include "purple/purple_emoji_render.h"
 #include "purple/purple_sync_request_sender.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
@@ -74,9 +75,12 @@ class EmojiExporter final : public QObject {
 public:
 	EmojiExporter();
 	void logout(Main::Account &account);
+	void render(quint64 id, int pixels, std::function<bool()> active, ControlReply reply);
 
 private:
 	void reconcile();
+	void passcodeChanged(bool locked);
+	[[nodiscard]] bool serveRender();
 	void revoke(bool clear = true);
 	void resetOutput(bool clear);
 	void publish();
@@ -122,6 +126,8 @@ private:
 	bool _pruneLarge = true;
 	bool _publishPending = false;
 	QTimer _poll;
+	QTimer _renderPoll;
+	EmojiRenderRequests _renderRequests;
 	QElapsedTimer _taskTime;
 	base::weak_ptr<Main::Session> _session;
 	base::weak_ptr<Main::Session> _transferSession;
@@ -153,6 +159,11 @@ EmojiExporter::EmojiExporter()
 : QObject(QCoreApplication::instance())
 , _worker(_directory, this) {
 	_clock.start();
+	QObject::connect(&_renderPoll, &QTimer::timeout, this, [=] {
+		_renderRequests.poll(_clock.elapsed());
+		if (admitted() && !_rendering) static_cast<void>(serveRender());
+	});
+	_renderPoll.start(100);
 	_continuation.setSingleShot(true);
 	QObject::connect(&_continuation, &QTimer::timeout, this, [=] {
 		_queue.continueSlice();
@@ -181,7 +192,7 @@ EmojiExporter::EmojiExporter()
 		reconcile();
 	}, _lifetime);
 	Core::App().passcodeLockChanges() | rpl::on_next([=] {
-		reconcile();
+		passcodeChanged(Core::App().passcodeLocked());
 	}, _lifetime);
 	PreferenceChanges.events() | rpl::on_next([=] {
 		_outputFailed = false;
@@ -217,6 +228,13 @@ void EmojiExporter::logout(Main::Account &account) {
 		_retiredSession = _session;
 		revoke();
 	}
+}
+
+void EmojiExporter::passcodeChanged(bool locked) {
+	if (locked) {
+		_renderRequests.clear(ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q));
+	}
+	reconcile();
 }
 
 void EmojiExporter::reconcile() {
@@ -309,6 +327,7 @@ void EmojiExporter::revoke(bool clear) {
 	_rendering = false;
 	_running = _pending = _bound = false;
 	resetOutput(clear);
+	_renderRequests.clear(ControlError(u"export-disabled"_q, u"Emoji export was revoked; retry after enabling it."_q));
 }
 
 void EmojiExporter::resetOutput(bool clear) {
@@ -321,6 +340,65 @@ void EmojiExporter::resetOutput(bool clear) {
 		if (!ok) _outputFailed = true;
 		if (!Core::Quitting()) reconcile();
 	});
+}
+
+void EmojiExporter::render(quint64 id, int pixels,
+		std::function<bool()> active, ControlReply reply) {
+	if (active && !active()) return;
+	if (!admitted()) {
+		reply(ControlError(u"export-disabled"_q, u"Enable local emoji export with an active unlocked account."_q));
+		return;
+	}
+	if (_renderRequests.full()) {
+		reply(ControlError(u"busy"_q, u"The emoji render queue is full."_q));
+		return;
+	}
+	const auto token = _token;
+	const auto admission = _largeRequests.offer(id, _clock.elapsed());
+	if (admission != EmojiLargeAdmission::Queued && admission != EmojiLargeAdmission::Duplicate) {
+		reply(ControlError(u"busy"_q, u"The emoji demand queue is full or cooling down; retry."_q));
+		return;
+	}
+	_renderRequests.add(id, pixels, _clock.elapsed(), std::move(active), std::move(reply));
+	if (_token != token || !admitted()) return;
+	if (!_epoch.accepts(_token)) {
+		_pending = true;
+		start();
+	} else {
+		pump();
+	}
+}
+
+bool EmojiExporter::serveRender() {
+	if (_rendering || !admitted()) return false;
+	const auto job = _renderRequests.take();
+	if (!job) return false;
+	const auto token = _token;
+	const auto directory = _directory;
+	const auto entries = _published;
+	const auto socket = CurrentControlSocketPath();
+	const auto cap = EmojiLargeCacheCap();
+	const auto result = std::make_shared<ControlResult>();
+	_rendering = true;
+	const auto accepted = _worker.submit(_workerGeneration,
+		[=](const EmojiExportAuthority &current) {
+			*result = PublishEmojiRender(directory, *entries, *job, cap, current, socket);
+			return current();
+		}, [=](quint64 generation, bool ok) {
+			if (generation != _workerGeneration || !_epoch.accepts(token)) return;
+			_rendering = false;
+			if (!admitted()) { reconcile(); return; }
+			_renderRequests.complete(job->serial, _clock.elapsed(), ok ? *result
+				: ControlError(u"not-found"_q, u"The emoji output is unavailable."_q));
+			if (!_epoch.accepts(token) || !admitted()) return;
+			pump();
+		});
+	if (!accepted) {
+		_rendering = false;
+		_renderRequests.complete(job->serial, _clock.elapsed(),
+			ControlError(u"busy"_q, u"The emoji export worker is busy; retry."_q));
+	}
+	return accepted;
 }
 
 void EmojiExporter::dirty() {
@@ -500,6 +578,7 @@ void EmojiExporter::pump() {
 	}
 	if (_rendering) return;
 	if (_scanDue && _epoch.accepts(_token)) { maintainRequests(); return; }
+	if (serveRender()) return;
 	if (_media || _request || _continuation.isActive()) return;
 	if (_publishPending) { publish(); return; }
 	chooseDemand();
@@ -521,6 +600,9 @@ void EmojiExporter::pump() {
 		return;
 	}
 	if (sticker->setType != Data::StickersType::Emoji || document->size > kMaxMediaBytes) {
+		const auto token = _token;
+		_renderRequests.fail(document->id, ControlError(u"unsupported"_q, u"This artwork cannot be rendered as an emoji."_q));
+		if (!_epoch.accepts(token) || !admitted()) return;
 		next();
 		return;
 	}
@@ -563,6 +645,8 @@ void EmojiExporter::resolve() {
 		}
 		const auto sticker = _session.get()->data().document(id)->sticker();
 		if (!sticker) {
+			_renderRequests.fail(id, ControlError(u"not-found"_q, u"No such emoji artwork."_q));
+			if (!_epoch.accepts(token) || !admitted()) return;
 			_queue.failed(id, _clock.elapsed());
 			next();
 		} else {
@@ -752,8 +836,14 @@ void EmojiExporter::checkMedia() {
 			if (ok) {
 				_ready[index] = *renderedEntry;
 				if (_demandId == entry.id) _demandRendered = !renderedEntry->large.isEmpty();
+				if (wantLarge && renderedEntry->large.isEmpty()) {
+					_renderRequests.fail(entry.id, ControlError(u"unsupported"_q, u"A large frame is unavailable for this artwork."_q));
+					if (!_epoch.accepts(token) || !admitted()) return;
+				}
 				_queue.succeeded(entry.id);
 			} else {
+				_renderRequests.fail(entry.id, ControlError(u"unsupported"_q, u"This emoji frame cannot be rendered."_q));
+				if (!_epoch.accepts(token) || !admitted()) return;
 				_queue.failed(entry.id, _clock.elapsed());
 			}
 			next();
@@ -795,6 +885,7 @@ void EmojiExporter::publish() {
 			}
 			_ready = std::move(*ready);
 			_published = published;
+			_renderRequests.published(*published);
 			_publishPending = false;
 			if (!finished) { pump(); return; }
 			_running = false;
@@ -835,6 +926,15 @@ rpl::producer<bool> EmojiExportEnabledValue() {
 QString CurrentEmojiExportDirectory() {
 	return EmojiExportDirectory(CanonicalDirectory(QDir::homePath()),
 		CanonicalDirectory(cWorkingDir()), CanonicalDirectory(psAppDataPath()));
+}
+
+void RequestEmojiRender(quint64 id, int pixels,
+		std::function<bool()> active, ControlReply reply) {
+	if (!Exporter) {
+		reply(ControlError(u"export-disabled"_q, u"Local emoji export is unavailable."_q));
+		return;
+	}
+	Exporter->render(id, pixels, std::move(active), std::move(reply));
 }
 
 void StartEmojiExport() {

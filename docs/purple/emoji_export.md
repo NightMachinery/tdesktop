@@ -90,8 +90,8 @@ outstanding obligation without walking the directories. On the next start,
 recorded cleanup completes before any new export work. An ordinary application quit keeps
 the last catalog for offline local tools while stopping publication. No rendering
 completion from a revoked generation may publish. The export follows the application's primary
-(active) session, including when several accounts are signed in. There is no
-manual control/socket command; a chooser reads the catalog and can request a large render using the bounded file protocol below.
+(active) session, including when several accounts are signed in. A chooser reads the catalog and can request a large render through the control socket
+or the bounded file protocol below.
 
 Host fixtures are in `Telegram/SourceFiles/purple/tests/emoji_export_cases.cpp`
 and `emoji_export_async_cases.cpp`. The latter uses the production queue and
@@ -216,3 +216,13 @@ wait. The queue's next deadline is the global deadline unless cached or media
 work has an earlier future retry. The publication scheduler retains its bounded
 one-minute refresh tick during long waits; expired metadata cooldowns cannot
 turn it into repeated one-second catalog publications.
+
+## Socket demand
+
+When Local automation and its emoji capability are enabled, `emoji.render`
+uses the same Large demand queue and renderer, with bounded asynchronous replies
+and optional downscaling. A demand admitted while an ordinary preview-only job is
+running waits for its own Large render; a successful preview does not reject that
+waiter merely because it did not request Large output. See [the control socket guide](control_socket.md#emoji-rendering)
+for arguments, errors and CLI examples. Request files remain the fallback for
+consumers that cannot reach the running app's control socket.

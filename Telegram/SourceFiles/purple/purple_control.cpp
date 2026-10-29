@@ -1,6 +1,7 @@
 #include "purple/purple_control.h"
 
 #include "purple/purple_control_server.h"
+#include "purple/purple_emoji_export.h"
 #include "purple/purple_version.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -105,7 +106,7 @@ QPointer<ControlService> Service;
 ControlService::ControlService()
 : QObject(QCoreApplication::instance())
 , _server([](const ControlRequest &request, const ControlPolicy &policy, ControlReply reply) {
-	DispatchControlRequest(request, policy, VersionText(), WindowAdapter(), std::move(reply));
+	DispatchControlRequest(request, policy, VersionText(), WindowAdapter(), std::move(reply), RequestEmojiRender);
 }, [](QString path, QString error) {
 	SocketPath = path;
 	SocketStatus = error.isEmpty() ? path : error;

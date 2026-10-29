@@ -27,6 +27,9 @@ struct ControlWindowAdapter {
 	std::function<bool(int)> activate;
 };
 
+using ControlEmojiAdapter = std::function<void(
+	quint64, int, std::function<bool()>, ControlReply)>;
+
 class ControlConsent final {
 public:
 	[[nodiscard]] quint64 begin();
@@ -51,6 +54,7 @@ void DispatchControlRequest(
 	const ControlPolicy &policy,
 	const QString &build,
 	const ControlWindowAdapter &windows,
-	ControlReply reply);
+	ControlReply reply,
+	const ControlEmojiAdapter &emoji = {});
 
 }

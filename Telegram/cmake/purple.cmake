@@ -120,6 +120,8 @@ PRIVATE
     purple/purple_config_file.h
     purple/purple_device.cpp
     purple/purple_device.h
+    purple/purple_emoji_render.h
+    purple/purple_emoji_render.cpp
     purple/purple_emoji_large.h
     purple/purple_emoji_large.cpp
     purple/purple_emoji_large_store.h

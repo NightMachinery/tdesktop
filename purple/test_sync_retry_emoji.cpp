@@ -65,6 +65,7 @@ struct EmojiPublicationProbe {
 	bool _publishPending = true;
 	std::vector<int> _ready;
 	std::shared_ptr<std::vector<int>> _published;
+	struct { void published(const std::vector<int> &) {} } _renderRequests;
 	std::shared_ptr<std::vector<int>> published = std::make_shared<std::vector<int>>();
 	std::shared_ptr<std::vector<int>> ready = std::make_shared<std::vector<int>>();
 	std::set<quint64> _acknowledge;

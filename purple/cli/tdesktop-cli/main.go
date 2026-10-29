@@ -20,7 +20,7 @@ import (
 const lineLimit = 64 * 1024
 const callTimeout = 2 * time.Second
 
-var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle"
+var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]"
 
 type options struct {
 	socket  string
@@ -43,6 +43,7 @@ type response struct {
 func parseOptions(args []string) (options, error) {
 	o := options{args: map[string]any{}}
 	var positional []string
+	var pixels string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -59,6 +60,24 @@ func parseOptions(args []string) (options, error) {
 			if o.socket == "" {
 				return o, errors.New("--socket needs a path")
 			}
+		case a == "--px" || strings.HasPrefix(a, "--px="):
+			if pixels != "" {
+				return o, errors.New("--px may be specified once")
+			}
+			if a == "--px" {
+				i++
+				if i == len(args) {
+					return o, errors.New("--px needs an integer from 1 to 512")
+				}
+				pixels = args[i]
+			} else {
+				pixels = strings.TrimPrefix(a, "--px=")
+			}
+			n, err := strconv.ParseUint(pixels, 10, 16)
+			if err != nil || n < 1 || n > 512 || strconv.FormatUint(n, 10) != pixels {
+				return o, errors.New("--px needs an integer from 1 to 512")
+			}
+			o.args["px"] = n
 		case strings.HasPrefix(a, "-"):
 			return o, fmt.Errorf("unknown option: %s", a)
 		default:
@@ -68,6 +87,9 @@ func parseOptions(args []string) (options, error) {
 	if len(positional) == 0 {
 		return o, errors.New(usage)
 	}
+	if pixels != "" && positional[0] != "emoji" {
+		return o, errors.New("--px is only valid for emoji render")
+	}
 	switch positional[0] {
 	case "ping", "hello":
 		o.command = positional[0]
@@ -75,6 +97,17 @@ func parseOptions(args []string) (options, error) {
 		o.command = "window.list"
 	case "cycle":
 		o.command = "window.cycle"
+	case "emoji":
+		if len(positional) != 3 || positional[1] != "render" {
+			return o, errors.New("emoji render needs an artwork id")
+		}
+		id, err := strconv.ParseUint(positional[2], 10, 64)
+		if err != nil || id == 0 || strconv.FormatUint(id, 10) != positional[2] {
+			return o, errors.New("artwork id must be a canonical nonzero uint64")
+		}
+		o.command = "emoji.render"
+		o.args["id"] = id
+		return o, nil
 	case "activate":
 		o.command = "window.activate"
 		if len(positional) != 2 {
@@ -142,6 +175,13 @@ func resolveSocket(explicit, environment, home string) (string, error) {
 	return path, nil
 }
 
+func exchangeTimeout(command string) time.Duration {
+	if command == "emoji.render" {
+		return 10 * time.Second
+	}
+	return callTimeout
+}
+
 func exchange(path string, o options) ([]byte, response, int, error) {
 	var reply response
 	conn, err := net.DialTimeout("unix", path, callTimeout)
@@ -149,7 +189,7 @@ func exchange(path string, o options) ([]byte, response, int, error) {
 		return nil, reply, 3, err
 	}
 	defer conn.Close()
-	if err = conn.SetDeadline(time.Now().Add(callTimeout)); err != nil {
+	if err = conn.SetDeadline(time.Now().Add(exchangeTimeout(o.command))); err != nil {
 		return nil, reply, 1, err
 	}
 	request, err := json.Marshal(map[string]any{"v": 1, "id": 1, "cmd": o.command, "args": o.args})
@@ -209,6 +249,16 @@ func exchange(path string, o options) ([]byte, response, int, error) {
 
 func humanResult(command string, result json.RawMessage) (string, error) {
 	switch command {
+	case "emoji.render":
+		var value struct {
+			Path       string `json:"path"`
+			Pixels     int    `json:"px"`
+			SourceKind string `json:"sourceKind"`
+		}
+		if json.Unmarshal(result, &value) != nil || !filepath.IsAbs(value.Path) || value.Pixels < 1 || value.Pixels > 512 || (value.SourceKind != "tgs" && value.SourceKind != "webp" && value.SourceKind != "webm") {
+			return "", errors.New("invalid emoji render result")
+		}
+		return fmt.Sprintf("%s (%d px, %s)\n", strconv.QuoteToGraphic(value.Path), value.Pixels, value.SourceKind), nil
 	case "ping":
 		var value struct {
 			Pong bool `json:"pong"`

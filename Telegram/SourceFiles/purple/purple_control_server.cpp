@@ -324,7 +324,7 @@ ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObje
 		[this](quint64 epoch, quint64 client, quint64 serial, quint64 generation,
 				ControlWorker::Ticket active, std::shared_ptr<ControlDispatchLease> lease,
 				ControlRequest request) {
-			QMetaObject::invokeMethod(this, [=, this] {
+			QMetaObject::invokeMethod(this, [=, this]() mutable {
 				(void)lease;
 				auto &state = *_state;
 				if (state.stopped || state.epoch != epoch || !active->load()) return;
@@ -343,6 +343,7 @@ ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObje
 				}
 				if (!error.code.isEmpty()) reply(std::move(error));
 				else {
+					request.active = [active] { return active->load(); };
 					const auto handler = state.handler;
 					handler(request, *policy, reply);
 				}

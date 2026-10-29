@@ -48,6 +48,7 @@ public:
 	quint64 _token = _epoch.begin();
 	EmojiExportQueue _queue{ 1 };
 	EmojiSetTitleCache _setTitles;
+	struct { void published(const std::vector<EmojiExportEntry> &) {} } _renderRequests;
 	QElapsedTimer _clock;
 	std::vector<std::optional<EmojiExportEntry>> _ready;
 	std::shared_ptr<const std::vector<EmojiExportEntry>> _published
