@@ -177,6 +177,9 @@ namespace Main { struct Session; }
 struct AccountMock {Main::Session *session=nullptr;bool loggingOut()const{return false;}Main::Session*maybeSession()const{return session;}};
 namespace Main {struct Session {AccountMock a;AccountMock&account(){a.session=this;return a;}};}
 int SessionAccountKey(Main::Session*){return 1;}
+struct CarryGateProbe {bool held=false;bool postingHeld()const{return held;}};
+CarryGateProbe CarryGate;
+CarryGateProbe*DesktopSyncCarryGateFor(int){return &CarryGate;}
 struct PeerToken {int id=0;bool operator==(const PeerToken&)const=default;};
 struct Io {struct Peer {struct Origin {int account=1;} origin;PeerToken chat;} peer;};
 bool ValidDesktopSyncChatIo(const Io&){return true;}
@@ -272,6 +275,11 @@ public:
 #include "retry-delete-gate.inc"
 
 int main(){
+ {
+  Main::Session session;auto upload=std::make_shared<SyncConfigUpload>(&session);
+  CarryGate.held=true;Check(!upload->Current(),"ordinary upload is held during Carry");
+  CarryGate.held=false;Check(upload->Current(),"ordinary upload can resume after Carry releases");upload->Finish({});
+ }
  for(const auto type:{"FLOOD_WAIT_8","FLOOD_WAIT_90","FLOOD_PREMIUM_WAIT_90"}){
   for(bool valid:{false,true}){
    Mono=0;Unix=1000000;MarkValid=true;HoldGate=false;Gates=0;Main::Session session;

@@ -341,8 +341,10 @@ void CarryCommit(bool ownStage, int failRename = 0) {
 		REQUIRE(carry.Advance(event));
 	}
 	CHECK(carry.journal()->phase == SyncCarryPhase::Done);
-	carry.Close(); REQUIRE(carry.Open()); REQUIRE(carry.Resume());
-	CHECK(carry.journal()->phase == SyncCarryPhase::Done);
+	carry.Close(); REQUIRE(carry.Open());
+	CHECK(!carry.journal());
+	const auto retained = carry.RetainedEffects(); REQUIRE(retained);
+	CHECK(retained->size() == 1 && retained->front().phase == SyncCarryPhase::Done);
 	CHECK(carry.OwnBase());
 }
 
@@ -418,7 +420,9 @@ void RefusalMatrix() {
 				QByteArray(kSyncCarryJournalStorageLimit + 1, ' ')) == SyncStoreStatus::Ready);
 		}
 		auto refused = SyncChatCarryStore(files.root, scope);
-		const auto result = refused.Open(); CHECK(!result);
+		const auto result = refused.Open();
+		if (mode == 2) { CHECK(result && refused.foreignLogin()); CHECK(!refused.Resume()); refused.Close(); }
+		else { CHECK(!result); }
 		CHECK(files.bytes(u"state.json"_q) == state);
 		if (mode < 3 || mode == 5) { CHECK(files.bytes(u"carry.json"_q) == journal); }
 		if (mode < 3) { auto valid = SyncChatCarryStore(files.root, files.scope); CHECK(valid.Open()); }
@@ -481,7 +485,7 @@ void Journals() {
 		{
 			auto wrong = files.scope; wrong.loginAuthority = QString(64, u'b');
 			auto foreign = SyncChatCarryStore(files.root, wrong);
-			CHECK(foreign.Open().status == SyncStoreStatus::AccountUnbound);
+			REQUIRE(foreign.Open()); CHECK(foreign.foreignLogin()); CHECK(!foreign.Resume());
 			CHECK(files.bytes(u"carry.json"_q) == original);
 		}
 		REQUIRE(carry.Open()); REQUIRE(carry.Resume());

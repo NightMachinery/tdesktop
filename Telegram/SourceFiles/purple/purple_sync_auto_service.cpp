@@ -1,6 +1,7 @@
 #include "purple/purple_sync_auto_service.h"
 
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -94,6 +95,7 @@ private:
 	SyncAutoReason _failureReason = SyncAutoReason::None;
 	base::Timer _retry;
 	base::Timer _save;
+	rpl::lifetime _lifetime;
 	QString _savedFingerprint;
 	QString _pendingFingerprint;
 	std::optional<AccountSettingsOpenTarget> _pendingOpening;
@@ -137,13 +139,18 @@ AutoSession::AutoSession(not_null<Main::Session*> session)
 		Replaced();
 	}
 }) {
+	SyncChatPublisherQuiescence() | rpl::on_next([weak = base::make_weak(this)](Main::Session *session) {
+		if (const auto self = weak.get(); self && self->_session.get() == session) { self->Stop(); }
+	}, _lifetime);
+
 }
 
 AutoSession::~AutoSession() { Stop(); }
 
 bool AutoSession::Current() const {
 	const auto session = _session.get();
-	if (!session || session->account().loggingOut() || session->account().maybeSession() != session
+	if (!session || DesktopSyncCarryGateFor(_account)->postingHeld()
+		|| session->account().loggingOut() || session->account().maybeSession() != session
 		|| SessionAccountKey(session) != _account || !_opening
 		|| AccountSyncBindingToken(session->account()) != _token) { return false; }
 	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
@@ -153,7 +160,8 @@ bool AutoSession::Current() const {
 bool AutoSession::Open() {
 	if (_store) { return Current() && _store->Current(); }
 	const auto session = _session.get();
-	if (!session || session->account().loggingOut() || session->account().maybeSession() != session) { return false; }
+	if (!session || DesktopSyncCarryGateFor(_account)->postingHeld()
+		|| session->account().loggingOut() || session->account().maybeSession() != session) { return false; }
 	_opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
 	const auto target = AccountSyncInspectionTarget(session);
 	if (!_opening || !target || !SettingsStartupOwner()) { return false; }

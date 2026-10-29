@@ -1,6 +1,7 @@
 #include "purple/purple_sync_chat_carry_io.h"
 
 #include "purple/purple_sync_chat_create.h"
+#include "purple/purple_sync_chat_cache.h"
 #include "purple/purple_sync_json.h"
 
 #include <QtCore/QJsonArray>
@@ -13,14 +14,6 @@
 namespace Purple {
 namespace {
 
-std::optional<uint64_t> Id(const QJsonValue &value) {
-	if (!value.isString()) { return {}; }
-	const auto text = value.toString();
-	auto ok = false;
-	const auto number = text.toULongLong(&ok);
-	return ok && number && QString::number(number) == text ? std::optional<uint64_t>(number) : std::nullopt;
-}
-
 QJsonArray Members(const DesktopSyncChatPeer &peer) {
 	auto result = QJsonArray();
 	if (peer.readerMembers) {
@@ -32,35 +25,19 @@ QJsonArray Members(const DesktopSyncChatPeer &peer) {
 	return result;
 }
 
-std::optional<QString> TransportHash(const QJsonObject &transport,
-		const QJsonObject &envelope, const SyncCarryJournal &journal) {
-	const auto source = PeerTokenText(journal.source, journal.account.userId);
-	const auto target = PeerTokenText(journal.target, journal.account.userId);
-	if (!source || !target) { return {}; }
-	const auto scoped = QJsonObject{
-		{u"domain"_q,u"purple-sync-carry-transport-v1"_q},
-		{u"operation"_q,journal.operationId}, {u"mode"_q,int(journal.mode)},
-		{u"source"_q,*source}, {u"target"_q,*target},
-		{u"account"_q,envelope.value(u"account"_q)},
-		{u"binding_sha256"_q,envelope.value(u"binding_sha256"_q)},
-		{u"login_authority"_q,envelope.value(u"login_authority"_q)},
-		{u"transport"_q,transport} };
-	const auto encoded = CanonicalizeSyncJson(QJsonDocument(scoped).toJson());
-	return encoded ? std::optional(SyncCarryRecordHash(encoded.canonical)) : std::nullopt;
-}
-
 bool ReceiptCapacity(const QJsonObject &envelope, QJsonObject transport) {
 	auto entries = transport.value(u"entries"_q).toObject();
 	for (auto i = entries.begin(); i != entries.end(); ++i) {
 		auto entry = i.value().toObject();
 		entry.insert(u"ack_id"_q,std::numeric_limits<int32_t>::max());
+		entry.insert(u"generation"_q,QString::number(std::numeric_limits<uint64_t>::max()));
 		i.value() = entry;
 	}
 	transport.insert(u"entries"_q,entries);
 	auto future = envelope;
 	future.insert(u"transport"_q,transport);
 	future.insert(u"transport_sha256"_q,QString(64,u'a'));
-	const auto encoded = CanonicalizeSyncJson(QJsonDocument(future).toJson());
+	const auto encoded = CanonicalizeSyncJson(QJsonDocument(future).toJson(QJsonDocument::Compact));
 	return encoded && encoded.canonical.size() <= kSyncCarryJournalStorageLimit;
 }
 
@@ -86,31 +63,16 @@ bool ExactForward(const SyncCarryJournal &journal, const DesktopSyncCarryFresh &
 				&& value.date == native->c_message().vdate().v; });
 }
 
-bool Entry(const QJsonObject &entry) {
-	const auto kind = entry.value(u"kind"_q).toString();
-	const auto state = entry.value(u"state"_q).toString();
-	return (kind == u"forward"_q || kind == u"own"_q || kind == u"mark"_q)
-		&& (state == u"prepared"_q || state == u"issued"_q || state == u"unknown"_q || state == u"verified"_q)
-		&& IsSyncCarryHash(entry.value(u"hash"_q).toString())
-		&& Id(entry.value(u"random_id"_q))
-		&& (kind == u"own"_q ? bool(Id(entry.value(u"file_id"_q))) : entry.value(u"file_id"_q).toString() == u"0"_q)
-		&& entry.value(u"source_id"_q).isDouble()
-		&& entry.value(u"source_id"_q).toDouble() >= 0
-		&& entry.value(u"source_id"_q).toDouble() <= std::numeric_limits<int32_t>::max()
-		&& entry.value(u"source_id"_q).toDouble() == entry.value(u"source_id"_q).toInt()
-		&& (!entry.contains(u"ack_id"_q) || (entry.value(u"ack_id"_q).isDouble()
-			&& entry.value(u"ack_id"_q).toDouble() > 0
-			&& entry.value(u"ack_id"_q).toDouble() <= std::numeric_limits<int32_t>::max()
-			&& entry.value(u"ack_id"_q).toDouble() == entry.value(u"ack_id"_q).toInt()))
-		&& ((kind == u"forward"_q) == (entry.value(u"source_id"_q).toInt() > 0));
-}
-
 }
 
 bool DesktopSyncCarryPermit::current() const {
 	if (!_epoch || !_active || !_active->load() || _epoch->load() != _openingEpoch) { return false; }
 	const auto allowed = _current && _current();
 	return allowed && _active->load() && _epoch->load() == _openingEpoch;
+}
+bool DesktopSyncCarryPermit::claimUpload() const {
+	return current() && (_effect == DesktopSyncCarryEffect::OwnRecord || _effect == DesktopSyncCarryEffect::Pending)
+		&& _uploadClaim && !_uploadClaim->exchange(true);
 }
 void DesktopSyncCarryPermit::revoke() const { if (_active) { _active->store(false); } }
 const DesktopSyncChatIo &DesktopSyncCarryPermit::source() const { return _source; }
@@ -120,14 +82,14 @@ uint64_t DesktopSyncCarryPermit::fileId() const { return _identity.fileId; }
 uint64_t DesktopSyncCarryPermit::renewal() const { return _renewal; }
 bool DesktopSyncCarryPermit::readerWarning() const { return _readerWarning; }
 bool DesktopSyncCarryPermit::uploadMatches(const QByteArray &bytes) const {
-	return current() && _effect == DesktopSyncCarryEffect::OwnRecord
+	return current() && (_effect == DesktopSyncCarryEffect::OwnRecord || _effect == DesktopSyncCarryEffect::Pending)
 		&& _identity.fileId && SyncCarryRecordHash(bytes) == _hash;
 }
-QByteArray DesktopSyncCarryPermit::uploadContent() const { return _effect == DesktopSyncCarryEffect::OwnRecord ? _content : QByteArray(); }
+QByteArray DesktopSyncCarryPermit::uploadContent() const { return (_effect == DesktopSyncCarryEffect::OwnRecord || _effect == DesktopSyncCarryEffect::Pending) ? _content : QByteArray(); }
 bool DesktopSyncCarryPermit::compatible(const DesktopSyncCarryPermit &fresh) const {
 	return current() && fresh.current() && _epoch == fresh._epoch && _active == fresh._active
 		&& _openingEpoch == fresh._openingEpoch && fresh._renewal > _renewal && _operation == fresh._operation && _revision == fresh._revision
-		&& _effect == fresh._effect && _identity.slot == fresh._identity.slot
+		&& _effect == fresh._effect && _uploadClaim == fresh._uploadClaim && _identity.slot == fresh._identity.slot
 		&& _identity.randomId == fresh._identity.randomId && _identity.fileId == fresh._identity.fileId
 		&& _hash == fresh._hash && _sourceId == fresh._sourceId && _mark == fresh._mark
 		&& _source.peer.origin == fresh._source.peer.origin && _source.peer.chat == fresh._source.peer.chat
@@ -203,8 +165,17 @@ DesktopSyncChatCarryIo::~DesktopSyncChatCarryIo() {
 }
 bool DesktopSyncChatCarryIo::cleanupEnabled() const { return false; }
 
+std::optional<bool> DesktopSyncChatCarryIo::PendingIssued() const {
+	return _store.Current() && _store._journal
+		? DesktopSyncCarryPendingIssued(_store._envelope, *_store._journal) : std::nullopt;
+}
+
+bool DesktopSyncChatCarryIo::RememberPendingIssued() {
+	return _store.RememberPendingIssued();
+}
+
 bool DesktopSyncChatCarryIo::Context(const DesktopSyncCarryFresh &fresh) const {
-	if (!_store.Current() || !_store._journal) { return false; }
+	if (!_store.Current() || !_store._journal || _store.foreignLogin()) { return false; }
 	const auto journal = *_store._journal;
 	if (!fresh.current || !fresh.current() || !_store.StateMatches() || !_store._journal
 		|| SerializeSyncCarryJournal(*_store._journal).canonical != SerializeSyncCarryJournal(journal).canonical) { return false; }
@@ -227,41 +198,82 @@ bool DesktopSyncChatCarryIo::Fresh(const DesktopSyncCarryFresh &fresh) const {
 		&& resolution.cache == journal.oldMark;
 }
 
+bool DesktopSyncChatCarryIo::PendingFresh(const DesktopSyncCarryFresh &fresh) const {
+	if (!Fresh(fresh) || !_store._journal->oldMark || _store._journal->phase != SyncCarryPhase::ResolvePending
+		|| !ValidDesktopSyncChatIo(fresh.source) || !fresh.resolutionInput.cache
+		|| fresh.resolutionInput.cache->chat != _store._journal->source
+		|| fresh.resolutionInput.cacheRead != SyncChatDirectRead::Valid) { return false; }
+	const auto eligible = DesktopSyncChatEligibility(fresh.source.peer);
+	const auto cache = ParseDesktopSyncChatCache(_store._cacheFile.bytes, _store._scope.account);
+	const auto current = CaptureSyncPrivateFile(_store._scope.cacheFile, 64 * 1024);
+	return eligible && *eligible && !eligible->readers.populationUnknown
+		&& cache.record && cache.record->loginBinding == fresh.loginAuthority
+		&& cache.record->mark == *_store._journal->oldMark
+		&& (!eligible->readers.warningRequired || cache.record->readerConsent)
+		&& current.status == SyncStoreStatus::Ready && current.bytes == _store._cacheFile.bytes
+		&& current.identity == _store._cacheFile.identity && current.parentIdentity == _store._cacheFile.parentIdentity;
+}
+
+std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarryIo::PendingPermit(
+		const DesktopSyncCarryFresh &fresh, const DesktopSyncChatInventory &input,
+		uint64_t proposedRandomId, uint64_t proposedFileId) {
+	if (!PendingFresh(fresh) || !proposedRandomId || !proposedFileId
+		|| input.route.peer.origin != fresh.source.peer.origin || input.route.peer.chat != _store._journal->source) { return {}; }
+	const auto inventory = DesktopSyncChatCarryInventory(input);
+	const auto staged = _store.Pending();
+	if (!inventory || !staged || staged.staged.isEmpty()
+		|| SyncCarryRecordHash(staged.staged) != _store._envelope.value(u"opening_pending_sha256"_q).toString()) { return {}; }
+	const auto hash = SyncCarryRecordHash(staged.staged);
+	if (std::any_of(inventory->messages.begin(), inventory->messages.end(), [&](const auto &message) { return message.reference.recordHash == hash; })) { return {}; }
+	auto transport = Transport();
+	if (!transport || !Readers(*transport, fresh)) { return {}; }
+	const auto cache = ParseDesktopSyncChatCache(_store._cacheFile.bytes, _store._scope.account);
+	transport->insert(u"pending_reader_warning"_q, transport->value(u"pending_reader_warning"_q).toBool()
+		|| cache.record->newReaders || NewDesktopSyncChatReaders(*cache.record, fresh.source.peer));
+	auto entries = transport->value(u"entries"_q).toObject();
+	const auto slot = SyncCarryRecordHash((u"pending:0:"_q + hash).toUtf8());
+	if (!ReadFresh(slot, input)) { return {}; }
+	if (const auto active = _store._ioActive[slot].second.lock(); active && active->load()) { return {}; }
+	auto entry = entries.value(slot).toObject();
+	if (entries.contains(slot)) {
+		if (!DesktopSyncCarryTransportEntry(entry) || entry.value(u"kind"_q).toString() != u"pending"_q
+			|| entry.value(u"hash"_q).toString() != hash || entry.contains(u"ack_id"_q)) { return {}; }
+	} else {
+		if (entries.size() == 1024 || DesktopSyncCarryTransportId(_store._journal->ownRequestId) == proposedRandomId
+			|| DesktopSyncCarryTransportId(_store._journal->markRequestId) == proposedRandomId) { return {}; }
+		const auto retained = _store.RetainedImages();
+		if (!retained) { return {}; }
+		for (const auto &image : *retained) {
+			const auto saved = QJsonDocument::fromJson(image).object();
+			const auto old = ParseSyncCarryJournal(QJsonDocument(saved.value(u"journal"_q).toObject()).toJson(QJsonDocument::Compact));
+			if (!old || (old.journal.operationId != _store._journal->operationId
+				&& (DesktopSyncCarryTransportId(old.journal.ownRequestId) == proposedRandomId || DesktopSyncCarryTransportId(old.journal.markRequestId) == proposedRandomId))) { return {}; }
+			for (const auto &value : saved.value(u"transport"_q).toObject().value(u"entries"_q).toObject()) {
+				const auto effect = value.toObject();
+				if (DesktopSyncCarryTransportId(effect.value(u"random_id"_q)) == proposedRandomId || DesktopSyncCarryTransportId(effect.value(u"file_id"_q)) == proposedFileId) { return {}; }
+			}
+		}
+		entry = {{u"kind"_q,u"pending"_q},{u"hash"_q,hash},{u"source_id"_q,0},
+			{u"random_id"_q,QString::number(proposedRandomId)},{u"file_id"_q,QString::number(proposedFileId)}};
+	}
+	entry.insert(u"state"_q,u"issued"_q); entries.insert(slot,entry); transport->insert(u"entries"_q,entries);
+	if (!ReceiptCapacity(_store._envelope,*transport) || !SaveGeneration(slot,entry,*transport)) { return {}; }
+	auto active = std::make_shared<std::atomic<bool>>(true);
+	auto permit = Permit(slot,entry,*transport,fresh,active);
+	if (!permit) { return {}; }
+	permit->_uploadClaim = std::make_shared<std::atomic<bool>>(false);
+	_active[slot] = {_store._ioEpoch->load(),active}; _store._ioActive[slot] = _active[slot];
+	return permit;
+}
+
 std::optional<QJsonObject> DesktopSyncChatCarryIo::Transport() const {
-	if (!_store.Current() || !_store._journal) { return {}; }
-	const auto value = _store._envelope.value(u"transport"_q);
-	if (value.isUndefined()) {
-		return _store._envelope.contains(u"transport_sha256"_q) ? std::nullopt
-			: std::optional(QJsonObject{ {u"version"_q, 1}, {u"entries"_q, QJsonObject()} });
-	}
-	if (!value.isObject()) { return {}; }
-	const auto result = value.toObject();
-	if (!result.value(u"version"_q).isDouble() || result.value(u"version"_q).toDouble() != 1
-		|| !result.value(u"entries"_q).isObject() || result.value(u"entries"_q).toObject().size() > 1024) { return {}; }
-	const auto digest = TransportHash(result,_store._envelope,*_store._journal);
-	if (!digest || _store._envelope.value(u"transport_sha256"_q).toString() != *digest) { return {}; }
-	const auto entries = result.value(u"entries"_q).toObject();
-	auto randoms = std::set<uint64_t>();
-	for (auto i = entries.begin(); i != entries.end(); ++i) {
-		if (!IsSyncCarryHash(i.key()) || !i.value().isObject() || !Entry(i.value().toObject())) { return {}; }
-		const auto entry = i.value().toObject();
-		const auto key = SyncCarryRecordHash((entry.value(u"kind"_q).toString() + u":"_q
-			+ QString::number(entry.value(u"source_id"_q).toInt()) + u":"_q + entry.value(u"hash"_q).toString()).toUtf8());
-		if (i.key() != key || !randoms.emplace(*Id(entry.value(u"random_id"_q))).second) { return {}; }
-		const auto random = Id(entry.value(u"random_id"_q));
-		const auto own = Id(_store._journal->ownRequestId);
-		const auto mark = Id(_store._journal->markRequestId);
-		const auto kind = entry.value(u"kind"_q).toString();
-		if ((kind == u"own"_q && random != own) || (kind == u"mark"_q && random != mark)
-			|| (kind == u"forward"_q && (random == own || (mark && random == mark)))) { return {}; }
-	}
-	if (!entries.isEmpty() && (!result.value(u"readers"_q).isObject() || !result.value(u"reader_warning"_q).isBool())) { return {}; }
-	return result;
+	return _store.Current() && _store._journal
+		? DesktopSyncCarryTransportOf(_store._envelope, *_store._journal) : std::nullopt;
 }
 
 bool DesktopSyncChatCarryIo::Save(QJsonObject transport) {
 	if (!_store.Current() || !_store._journal) { return false; }
-	const auto digest = TransportHash(transport,_store._envelope,*_store._journal);
+	const auto digest = DesktopSyncCarryTransportHash(transport,_store._envelope,*_store._journal);
 	if (!digest) { return false; }
 	const auto before = _store._envelope;
 	_store._envelope.insert(u"transport"_q, std::move(transport));
@@ -271,11 +283,52 @@ bool DesktopSyncChatCarryIo::Save(QJsonObject transport) {
 	return bool(written);
 }
 
+bool DesktopSyncChatCarryIo::ReadFresh(const QString &slot, const DesktopSyncChatInventory &inventory) const {
+	const auto transport = Transport();
+	if (!transport || !inventory.readStarted.after(_store._ioReadOpened)) { return false; }
+	const auto entry = transport->value(u"entries"_q).toObject().value(slot).toObject();
+	const auto generation = DesktopSyncCarryTransportGeneration(entry);
+	if (!generation) { return false; }
+	const auto fence = _store._ioReadFences.find(slot);
+	return fence == _store._ioReadFences.end()
+		|| (fence->second.first == *generation && inventory.readStarted.after(fence->second.second));
+}
+
+bool DesktopSyncChatCarryIo::SaveGeneration(const QString &slot, QJsonObject entry, QJsonObject transport) {
+	const auto generation = DesktopSyncCarryTransportGeneration(entry);
+	const auto fence = DesktopSyncChatReadStamp::Begin();
+	if (!generation || *generation == std::numeric_limits<uint64_t>::max() || !fence.valid()) { return false; }
+	entry.insert(u"generation"_q, QString::number(*generation + 1));
+	auto entries = transport.value(u"entries"_q).toObject();
+	entries.insert(slot, entry); transport.insert(u"entries"_q, entries);
+	if (!Save(std::move(transport))) { return false; }
+	_store._ioReadFences[slot] = {*generation + 1, fence};
+	return true;
+}
+
+bool DesktopSyncChatCarryIo::ConsumePendingRead(const DesktopSyncChatInventory &inventory) {
+	if (!_store.Current() || !_store._journal || _store._journal->phase != SyncCarryPhase::ResolvePending
+		|| inventory.route.peer.origin.account != _store._scope.account
+		|| inventory.route.peer.chat != _store._journal->source) { return false; }
+	const auto slot = SyncCarryRecordHash((u"pending:0:"_q
+		+ _store._envelope.value(u"opening_pending_sha256"_q).toString()).toUtf8());
+	if (!ReadFresh(slot, inventory)) { return false; }
+	const auto transport = Transport();
+	const auto entries = transport->value(u"entries"_q).toObject();
+	if (entries.contains(slot)) { return SaveGeneration(slot, entries.value(slot).toObject(), *transport); }
+	const auto fence = DesktopSyncChatReadStamp::Begin();
+	if (!fence.valid()) { return false; }
+	_store._ioReadFences[slot] = {0, fence};
+	return true;
+}
+
 bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCarryFresh &fresh) {
 	const auto eligible = DesktopSyncChatEligibility(fresh.target.peer);
 	if (!eligible || !*eligible || eligible->readers.populationUnknown) { return false; }
-	const auto readers = eligible->readers;
-	const auto snapshot = QJsonObject{ {u"members"_q, Members(fresh.target.peer)},
+	const auto verdict = _store._journal->version == 2 ? CheckSyncCarryReaders(*_store._journal, *eligible) : SyncCarryReaderVerdict::Proceed;
+	if (verdict == SyncCarryReaderVerdict::Hold) { return false; }
+	const auto readers = _store._journal->readerBaseline.value_or(eligible->readers);
+	auto snapshot = QJsonObject{ {u"members"_q, Members(fresh.target.peer)},
 		{u"other_members"_q, readers.otherMembers ? QString::number(*readers.otherMembers) : QString()},
 		{u"other_admins"_q, readers.otherAdmins ? QString::number(*readers.otherAdmins) : QString()},
 		{u"warning"_q, readers.warningRequired} };
@@ -285,10 +338,19 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 			const auto opening = DesktopSyncChatEligibility(*fresh.consentPeer);
 			if (!opening || !*opening || opening->readers != readers
 				|| fresh.consentPeer->origin != fresh.target.peer.origin || fresh.consentPeer->chat != fresh.target.peer.chat
-				|| fresh.consentPeer->kind != fresh.target.peer.kind || Members(*fresh.consentPeer) != Members(fresh.target.peer)) { return false; }
+				|| fresh.consentPeer->kind != fresh.target.peer.kind || (_store._journal->version == 1 && Members(*fresh.consentPeer) != Members(fresh.target.peer))) { return false; }
+		}
+		if (_store._journal->version == 2) {
+			const auto consent = fresh.consentPeer ? DesktopSyncChatEligibility(*fresh.consentPeer) : std::nullopt;
+			if (consent && consent->readers == readers && fresh.consentPeer->origin == fresh.target.peer.origin
+				&& fresh.consentPeer->chat == fresh.target.peer.chat) {
+				snapshot.insert(u"members"_q, Members(*fresh.consentPeer));
+				if (fresh.consentPeer->creator) { snapshot.insert(u"creator"_q, *fresh.consentPeer->creator); }
+			} else if (readers.otherMembers.value_or(0) == 0) { snapshot.insert(u"members"_q, QJsonArray()); }
+			else { return false; }
 		}
 		transport.insert(u"readers"_q, snapshot);
-		transport.insert(u"reader_warning"_q, false);
+		transport.insert(u"reader_warning"_q, verdict == SyncCarryReaderVerdict::WarnAndProceed);
 	} else {
 		const auto previous = transport.value(u"readers"_q).toObject();
 		if (!previous.value(u"members"_q).isArray() || !previous.value(u"other_members"_q).isString()
@@ -301,10 +363,11 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 			auto ok = false; const auto count = text.toULongLong(&ok);
 			if (!text.isEmpty() && (!ok || QString::number(count) != text)) { return false; }
 		}
-		auto added = readers.warningRequired && !previous.value(u"warning"_q).toBool();
-		for (const auto &member : snapshot.value(u"members"_q).toArray()) { if (!members.contains(member)) { added = true; } }
+		auto added = verdict == SyncCarryReaderVerdict::WarnAndProceed
+			|| (eligible->readers.warningRequired && !previous.value(u"warning"_q).toBool());
+		for (const auto &member : Members(fresh.target.peer)) { if (!members.contains(member)) { added = true; } }
 		for (const auto &name : { u"other_members"_q, u"other_admins"_q }) {
-			if (snapshot.value(name).toString().toULongLong() > previous.value(name).toString().toULongLong()) { added = true; }
+			if ((name == u"other_members"_q ? eligible->readers.otherMembers.value_or(0) : eligible->readers.otherAdmins.value_or(0)) > previous.value(name).toString().toULongLong()) { added = true; }
 		}
 		if (added) { transport.insert(u"reader_warning"_q, true); }
 	}
@@ -314,7 +377,7 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 std::optional<DesktopSyncCarryIdentity> DesktopSyncChatCarryIo::Reserve(
 		DesktopSyncCarryEffect effect, const QString &recordHash,
 		const DesktopSyncCarryFresh &fresh, uint64_t proposedRandomId, uint64_t proposedFileId) {
-	if (!Fresh(fresh)) { return {}; }
+	if (effect == DesktopSyncCarryEffect::Pending || !Fresh(fresh)) { return {}; }
 	const auto journal = *_store._journal;
 	if (journal.mode == SyncCarryMode::Switch && journal.markText != DesktopSyncChatMarkText()) { return {}; }
 	const auto mark = effect == DesktopSyncCarryEffect::Mark;
@@ -325,10 +388,10 @@ std::optional<DesktopSyncCarryIdentity> DesktopSyncChatCarryIo::Reserve(
 	auto randomId = proposedRandomId;
 	if (mark) {
 		hash = SyncCarryRecordHash(journal.markText.toUtf8());
-		randomId = Id(journal.markRequestId).value_or(0);
+		randomId = DesktopSyncCarryTransportId(journal.markRequestId).value_or(0);
 	} else if (effect == DesktopSyncCarryEffect::OwnRecord) {
 		if (!SyncCarryJournalPostsOwnRecord(journal) || recordHash != journal.plan->ownRecordHash) { return {}; }
-		randomId = Id(journal.ownRequestId).value_or(0);
+		randomId = DesktopSyncCarryTransportId(journal.ownRequestId).value_or(0);
 	} else {
 		if (!ValidDesktopSyncChatIo(fresh.source) || journal.plan->access != SyncCarrySourceAccess::Readable) { return {}; }
 		const auto forwards = SyncCarryJournalForwards(journal);
@@ -338,8 +401,8 @@ std::optional<DesktopSyncCarryIdentity> DesktopSyncChatCarryIo::Reserve(
 		sourceId = found->messageId;
 		if (!ExactForward(journal, fresh, recordHash, sourceId)) { return {}; }
 	}
-	const auto ownId = Id(journal.ownRequestId);
-	const auto markId = Id(journal.markRequestId);
+	const auto ownId = DesktopSyncCarryTransportId(journal.ownRequestId);
+	const auto markId = DesktopSyncCarryTransportId(journal.markRequestId);
 	if (!ownId || (journal.mode == SyncCarryMode::Switch && (!markId || ownId == markId))
 		|| (effect == DesktopSyncCarryEffect::Forward && (randomId == *ownId || (markId && randomId == *markId)))) { return {}; }
 	if (!IsSyncCarryHash(hash) || !randomId || (effect == DesktopSyncCarryEffect::OwnRecord && !proposedFileId)) { return {}; }
@@ -363,33 +426,50 @@ std::optional<DesktopSyncCarryIdentity> DesktopSyncChatCarryIo::Reserve(
 		const auto entry = entries.value(key).toObject();
 		if (entry.value(u"kind"_q).toString() != Kind(effect) || entry.value(u"hash"_q).toString() != hash
 			|| entry.value(u"source_id"_q).toInt() != sourceId
-			|| (effect != DesktopSyncCarryEffect::Forward && Id(entry.value(u"random_id"_q)) != randomId)) { return {}; }
+			|| (effect != DesktopSyncCarryEffect::Forward && DesktopSyncCarryTransportId(entry.value(u"random_id"_q)) != randomId)) { return {}; }
 		if (!Save(*transport)) { return {}; }
-		return DesktopSyncCarryIdentity{ key, *Id(entry.value(u"random_id"_q)), Id(entry.value(u"file_id"_q)).value_or(0) };
+		return DesktopSyncCarryIdentity{ key, *DesktopSyncCarryTransportId(entry.value(u"random_id"_q)), DesktopSyncCarryTransportId(entry.value(u"file_id"_q)).value_or(0) };
 	}
 	if (entries.size() == 1024) { return {}; }
+	const auto retained = _store.RetainedImages();
+	if (!retained) { return {}; }
+	for (const auto &bytes : *retained) {
+		const auto envelope = QJsonDocument::fromJson(bytes).object();
+		if (envelope.value(u"operation"_q).toString() == journal.operationId) { continue; }
+		const auto previous = envelope.value(u"journal"_q).toObject();
+		const auto oldJournal = ParseSyncCarryJournal(QJsonDocument(previous).toJson(QJsonDocument::Compact));
+		if (!oldJournal || DesktopSyncCarryTransportId(oldJournal.journal.ownRequestId) == randomId || DesktopSyncCarryTransportId(oldJournal.journal.markRequestId) == randomId) { return {}; }
+		const auto oldEntries = envelope.value(u"transport"_q).toObject().value(u"entries"_q).toObject();
+		for (const auto &saved : oldEntries) {
+			const auto old = saved.toObject();
+			if (DesktopSyncCarryTransportId(old.value(u"random_id"_q)) == randomId
+				|| (effect == DesktopSyncCarryEffect::OwnRecord && DesktopSyncCarryTransportId(old.value(u"file_id"_q)) == proposedFileId)) { return {}; }
+		}
+	}
 	for (auto i = entries.begin(); i != entries.end(); ++i) {
-		if (Id(i.value().toObject().value(u"random_id"_q)) == randomId) { return {}; }
+		if (DesktopSyncCarryTransportId(i.value().toObject().value(u"random_id"_q)) == randomId) { return {}; }
 	}
 	entries.insert(key, QJsonObject{ {u"kind"_q, Kind(effect)}, {u"hash"_q, hash}, {u"source_id"_q, sourceId},
 		{u"random_id"_q, QString::number(randomId)}, {u"file_id"_q, QString::number(effect == DesktopSyncCarryEffect::OwnRecord ? proposedFileId : 0)},
 		{u"state"_q, u"prepared"_q} });
 	transport->insert(u"entries"_q, entries);
-	return Save(*transport) ? std::optional(DesktopSyncCarryIdentity{ key, randomId, effect == DesktopSyncCarryEffect::OwnRecord ? proposedFileId : 0 }) : std::nullopt;
+	return ReceiptCapacity(_store._envelope,*transport) && Save(*transport)
+		? std::optional(DesktopSyncCarryIdentity{ key, randomId, effect == DesktopSyncCarryEffect::OwnRecord ? proposedFileId : 0 }) : std::nullopt;
 }
 
 std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarryIo::Permit(
 		const QString &slot, const QJsonObject &entry, const QJsonObject &transport,
 		const DesktopSyncCarryFresh &fresh, std::shared_ptr<std::atomic<bool>> active) {
-	if (!Fresh(fresh) || !Entry(entry)
+	if (!Fresh(fresh) || !DesktopSyncCarryTransportEntry(entry)
 		|| (_store._journal->mode == SyncCarryMode::Switch
 			&& _store._journal->markText != DesktopSyncChatMarkText())) { return {}; }
 	const auto &journal = *_store._journal;
 	const auto kind = entry.value(u"kind"_q).toString();
 	const auto mark = kind == u"mark"_q;
-	if (mark ? (journal.phase != SyncCarryPhase::Mark || !journal.markAttempted || !journal.destinationVerified)
+	const auto pending = kind == u"pending"_q;
+	if (pending ? !PendingFresh(fresh) : mark ? (journal.phase != SyncCarryPhase::Mark || !journal.markAttempted || !journal.destinationVerified)
 		: (journal.phase != SyncCarryPhase::VerifyDestination || !journal.plan)) { return {}; }
-	if (!mark) {
+	if (!mark && !pending) {
 		auto delivery = journal;
 		delivery.phase = SyncCarryPhase::Deliver;
 		if (!SerializeSyncCarryJournal(delivery)) { return {}; }
@@ -397,7 +477,7 @@ std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarryIo::Permit(
 		const auto reserved = [&](const QString &kind, int32_t id, const QString &hash) {
 			const auto key = SyncCarryRecordHash((kind + u":"_q + QString::number(id) + u":"_q + hash).toUtf8());
 			const auto saved = entries.value(key).toObject();
-			return Entry(saved) && saved.value(u"kind"_q).toString() == kind
+			return DesktopSyncCarryTransportEntry(saved) && saved.value(u"kind"_q).toString() == kind
 				&& saved.value(u"source_id"_q).toInt() == id && saved.value(u"hash"_q).toString() == hash;
 		};
 		if (journal.mode == SyncCarryMode::Switch
@@ -409,18 +489,23 @@ std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarryIo::Permit(
 			&& !reserved(u"own"_q, 0, delivery.plan->ownRecordHash)) { return {}; }
 	}
 	const auto hash = entry.value(u"hash"_q).toString();
-	if (mark ? (hash != SyncCarryRecordHash(journal.markText.toUtf8()) || Id(journal.markRequestId) != Id(entry.value(u"random_id"_q)))
-		: kind == u"own"_q ? (hash != journal.plan->ownRecordHash || Id(journal.ownRequestId) != Id(entry.value(u"random_id"_q)))
+	if (pending ? (hash != _store._envelope.value(u"opening_pending_sha256"_q).toString() || !_store.Pending() || SyncCarryRecordHash(_store.Pending().staged) != hash)
+		: mark ? (hash != SyncCarryRecordHash(journal.markText.toUtf8()) || DesktopSyncCarryTransportId(journal.markRequestId) != DesktopSyncCarryTransportId(entry.value(u"random_id"_q)))
+		: kind == u"own"_q ? (hash != journal.plan->ownRecordHash || DesktopSyncCarryTransportId(journal.ownRequestId) != DesktopSyncCarryTransportId(entry.value(u"random_id"_q)))
 		: (!ExactForward(journal, fresh, hash, entry.value(u"source_id"_q).toInt()))) { return {}; }
 	auto permit = DesktopSyncCarryPermit();
 	permit._operation = journal.operationId; permit._revision = journal.revision;
-	permit._effect = mark ? DesktopSyncCarryEffect::Mark : kind == u"own"_q ? DesktopSyncCarryEffect::OwnRecord : DesktopSyncCarryEffect::Forward;
-	permit._identity = {slot, *Id(entry.value(u"random_id"_q)), Id(entry.value(u"file_id"_q)).value_or(0)};
+	permit._effect = pending ? DesktopSyncCarryEffect::Pending : mark ? DesktopSyncCarryEffect::Mark : kind == u"own"_q ? DesktopSyncCarryEffect::OwnRecord : DesktopSyncCarryEffect::Forward;
+	permit._identity = {slot, *DesktopSyncCarryTransportId(entry.value(u"random_id"_q)), DesktopSyncCarryTransportId(entry.value(u"file_id"_q)).value_or(0)};
 	if (kind == u"own"_q) { permit._content = journal.plan->ownRecord; }
+	if (pending) { permit._content = _store.Pending().staged; }
 	permit._sourceId = entry.value(u"source_id"_q).toInt(); permit._hash = hash; permit._mark = journal.markText;
-	permit._source = fresh.source; permit._target = fresh.target; permit._current = fresh.current;
+	permit._source = fresh.source; permit._target = pending ? fresh.source : fresh.target; permit._current = fresh.current;
 	permit._epoch = _store._ioEpoch; permit._openingEpoch = permit._epoch->load(); permit._active = std::move(active);
-	permit._readerWarning = transport.value(u"reader_warning"_q).toBool();
+	if (permit._effect == DesktopSyncCarryEffect::OwnRecord || pending) {
+		permit._uploadClaim = std::make_shared<std::atomic<bool>>(false);
+	}
+	permit._readerWarning = transport.value(pending ? u"pending_reader_warning"_q : u"reader_warning"_q).toBool();
 	return permit;
 }
 
@@ -430,13 +515,13 @@ std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarryIo::Authorize(const QS
 	if (!transport || !Readers(*transport, fresh)) { return {}; }
 	auto entries = transport->value(u"entries"_q).toObject();
 	auto entry = entries.value(slot).toObject();
-	if (!Entry(entry) || entry.value(u"state"_q).toString() != u"prepared"_q) { return {}; }
+	if (!DesktopSyncCarryTransportEntry(entry) || entry.value(u"state"_q).toString() != u"prepared"_q) { return {}; }
 	if (!ReceiptCapacity(_store._envelope,*transport)) { return {}; }
 	auto active = std::make_shared<std::atomic<bool>>(true);
 	const auto permit = Permit(slot, entry, *transport, fresh, active);
 	if (!permit) { return {}; }
 	entry.insert(u"state"_q, u"issued"_q); entries.insert(slot, entry); transport->insert(u"entries"_q, entries);
-	if (!Save(*transport)) { active->store(false); return {}; }
+	if (!SaveGeneration(slot,entry,*transport)) { active->store(false); return {}; }
 	_active[slot] = { _store._ioEpoch->load(), active };
 	_store._ioActive[slot] = _active[slot];
 	return permit;
@@ -449,6 +534,7 @@ std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarryIo::Renew(const Deskto
 	const auto entry = transport->value(u"entries"_q).toObject().value(opening._identity.slot).toObject();
 	if (entry.value(u"state"_q).toString() != u"issued"_q) { return {}; }
 	auto permit = Permit(opening._identity.slot, entry, *transport, fresh, opening._active);
+	if (permit) { permit->_uploadClaim = opening._uploadClaim; }
 	if (!permit || opening._renewal == std::numeric_limits<uint64_t>::max()) { return {}; }
 	permit->_renewal = opening._renewal + 1;
 	return opening.compatible(*permit) ? permit : std::nullopt;
@@ -463,7 +549,7 @@ std::optional<int32_t> DesktopSyncChatCarryIo::RecordReceipt(
 	if (!id || !transport) { return {}; }
 	auto entries = transport->value(u"entries"_q).toObject();
 	auto entry = entries.value(permit._identity.slot).toObject();
-	if (!Entry(entry) || entry.value(u"state"_q).toString() != u"issued"_q
+	if (!DesktopSyncCarryTransportEntry(entry) || entry.value(u"state"_q).toString() != u"issued"_q
 		|| (entry.contains(u"ack_id"_q) && entry.value(u"ack_id"_q).toInt() != *id)) { return {}; }
 	entry.insert(u"ack_id"_q,*id); entries.insert(permit._identity.slot,entry); transport->insert(u"entries"_q,entries);
 	return Save(*transport) ? id : std::nullopt;
@@ -476,10 +562,10 @@ bool DesktopSyncChatCarryIo::OutcomeUnknown(const DesktopSyncCarryPermit &permit
 	if (!transport) { return false; }
 	auto entries = transport->value(u"entries"_q).toObject();
 	auto entry = entries.value(permit._identity.slot).toObject();
-	if (!Entry(entry) || entry.value(u"state"_q).toString() != u"issued"_q) { return false; }
+	if (!DesktopSyncCarryTransportEntry(entry) || entry.value(u"state"_q).toString() != u"issued"_q) { return false; }
 	entry.insert(u"state"_q, u"unknown"_q); entries.insert(permit._identity.slot, entry); transport->insert(u"entries"_q, entries);
 	permit._active->store(false);
-	return Save(*transport);
+	return SaveGeneration(permit._identity.slot,entry,*transport);
 }
 
 DesktopSyncCarryReconcile DesktopSyncChatCarryIo::Reconcile(const QString &slot, const DesktopSyncChatInventory &input, const DesktopSyncCarryFresh &fresh) {
@@ -487,15 +573,15 @@ DesktopSyncCarryReconcile DesktopSyncChatCarryIo::Reconcile(const QString &slot,
 		|| input.route.peer.chat != _store._journal->target) { return DesktopSyncCarryReconcile::Held; }
 	const auto inventory = DesktopSyncChatCarryInventory(input);
 	auto transport = Transport();
-	if (!inventory || !transport) { return DesktopSyncCarryReconcile::Held; }
+	if (!inventory || !transport || !ReadFresh(slot,input)) { return DesktopSyncCarryReconcile::Held; }
 	auto entries = transport->value(u"entries"_q).toObject();
 	auto entry = entries.value(slot).toObject();
-	if (!Entry(entry) || entry.value(u"kind"_q).toString() == u"mark"_q) { return DesktopSyncCarryReconcile::Held; }
+	if (!DesktopSyncCarryTransportEntry(entry) || entry.value(u"kind"_q).toString() == u"mark"_q) { return DesktopSyncCarryReconcile::Held; }
 	if (const auto active = _store._ioActive[slot].second.lock(); active && active->load()
 		&& _store._ioActive[slot].first == _store._ioEpoch->load()) { return DesktopSyncCarryReconcile::Held; }
 	const auto found = std::any_of(inventory->messages.begin(), inventory->messages.end(), [&](const auto &message) { return message.reference.recordHash == entry.value(u"hash"_q).toString(); });
 	entry.insert(u"state"_q, found ? u"verified"_q : u"prepared"_q); entries.insert(slot, entry); transport->insert(u"entries"_q, entries);
-	return Save(*transport) ? (found ? DesktopSyncCarryReconcile::Present : DesktopSyncCarryReconcile::Absent) : DesktopSyncCarryReconcile::Held;
+	return SaveGeneration(slot,entry,*transport) ? (found ? DesktopSyncCarryReconcile::Present : DesktopSyncCarryReconcile::Absent) : DesktopSyncCarryReconcile::Held;
 }
 
 DesktopSyncCarryReconcile DesktopSyncChatCarryIo::ReconcileMark(
@@ -507,12 +593,54 @@ DesktopSyncCarryReconcile DesktopSyncChatCarryIo::ReconcileMark(
 	if (!read || !transport) { return DesktopSyncCarryReconcile::Held; }
 	auto entries = transport->value(u"entries"_q).toObject();
 	auto entry = entries.value(slot).toObject();
-	if (!Entry(entry) || entry.value(u"kind"_q).toString() != u"mark"_q
+	if (!DesktopSyncCarryTransportEntry(entry) || entry.value(u"kind"_q).toString() != u"mark"_q
 		|| entry.value(u"ack_id"_q).toInt() != id) { return DesktopSyncCarryReconcile::Held; }
 	if (const auto active = _store._ioActive[slot].second.lock(); active && active->load()
 		&& _store._ioActive[slot].first == _store._ioEpoch->load()) { return DesktopSyncCarryReconcile::Held; }
 	entry.insert(u"state"_q, u"verified"_q); entries.insert(slot, entry); transport->insert(u"entries"_q, entries);
 	return Save(*transport) ? DesktopSyncCarryReconcile::Present : DesktopSyncCarryReconcile::Held;
+}
+
+bool DesktopSyncChatCarryIo::ReconcileAll(const DesktopSyncChatInventory &inventory, const DesktopSyncCarryFresh &fresh) {
+	const auto transport = Transport();
+	if (!transport) { return false; }
+	const auto entries = transport->value(u"entries"_q).toObject();
+	for (auto i = entries.begin(); i != entries.end(); ++i) {
+		if (i.value().toObject().value(u"kind"_q).toString() == u"mark"_q
+			|| i.value().toObject().value(u"kind"_q).toString() == u"pending"_q) { continue; }
+		if (Reconcile(i.key(), inventory, fresh) == DesktopSyncCarryReconcile::Held) { return false; }
+	}
+	return true;
+}
+
+int32_t DesktopSyncChatCarryIo::MarkReceiptId() const {
+	const auto transport = Transport();
+	if (!transport) { return 0; }
+	const auto entries = transport->value(u"entries"_q).toObject();
+	for (const auto &entry : entries) {
+		const auto value = entry.toObject();
+		if (value.value(u"kind"_q).toString() == u"mark"_q) { return value.value(u"ack_id"_q).toInt(); }
+	}
+	return 0;
+}
+
+bool DesktopSyncChatCarryIo::RetainedMarkReceipt(const DesktopSyncCarryFresh &fresh, const MTPUpdates &updates) {
+	if (!Context(fresh) || !_store._journal->markAttempted) { return false; }
+	const auto random = DesktopSyncCarryTransportId(_store._journal->markRequestId);
+	const auto id = random ? DesktopSyncChatUploadReceipt(fresh.target, updates, *random) : std::nullopt;
+	auto transport = Transport();
+	if (!id || !transport) { return false; }
+	auto entries = transport->value(u"entries"_q).toObject();
+	for (auto i = entries.begin(); i != entries.end(); ++i) {
+		auto entry = i.value().toObject();
+		if (entry.value(u"kind"_q).toString() != u"mark"_q) { continue; }
+		if (const auto active = _store._ioActive[i.key()].second.lock(); active && active->load()
+			&& _store._ioActive[i.key()].first == _store._ioEpoch->load()) { return false; }
+		if (entry.contains(u"ack_id"_q) && entry.value(u"ack_id"_q).toInt() != *id) { return false; }
+		entry.insert(u"ack_id"_q, *id); i.value() = entry; transport->insert(u"entries"_q, entries);
+		return Save(*transport);
+	}
+	return false;
 }
 
 }

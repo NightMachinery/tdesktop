@@ -7,6 +7,8 @@
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 #include "purple/purple_sync_chat_setup_transport.h"
 
 #include <QtCore/QDir>
@@ -61,6 +63,9 @@ DesktopSyncChatSetupService::Impl::Impl(not_null<Main::Session*> session,
 		}
 	};
 	SettingsChanges() | rpl::on_next(changed, _lifetime);
+	SyncChatPublisherQuiescence() | rpl::on_next([weak, expected = session.get()](Main::Session *value) {
+		if (value == expected) { if (const auto self = weak.get()) { self->cancel(true); } }
+	}, _lifetime);
 	StateChanges() | rpl::on_next(changed, _lifetime);
 	session->account().sessionChanges() | rpl::on_next([weak, session](Main::Session *value) {
 		if (value != session) {
@@ -77,7 +82,8 @@ DesktopSyncChatSetupService::Impl::~Impl() {
 }
 
 bool DesktopSyncChatSetupService::Impl::current() const {
-	return _session && _admitted->load() && _current && _current()
+	return _session && !DesktopSyncCarryGateFor(_opening.scope.origin.account)->postingHeld()
+		&& _admitted->load() && _current && _current()
 		&& SyncChatSetupContextCurrent(_session.get(), _opening.scope);
 }
 

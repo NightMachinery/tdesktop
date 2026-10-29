@@ -413,6 +413,7 @@ struct PublishWorkerEndpoint {
 };
 
 struct PublishCoordinatorProbe : base::has_weak_ptr {
+	std::shared_ptr<DesktopSyncCarryGate::Lease> _carryWriter;
 	bool _done = false;
 	bool _posted = true;
 	std::shared_ptr<std::atomic<bool>> _admitted = std::make_shared<std::atomic<bool>>(true);

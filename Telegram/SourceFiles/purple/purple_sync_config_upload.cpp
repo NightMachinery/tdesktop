@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_upload.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 
 #include "api/api_common.h"
 #include "apiwrap.h"
@@ -77,7 +78,7 @@ SyncConfigUpload::SyncConfigUpload(
 		Fn<bool()> stillCurrent,
 		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry)
 : SyncConfigUpload(session, permit.target(), permit.uploadContent(), std::move(finished), std::move(stillCurrent)) {
-	_carryContentValid = permit.fileId() && !_content.isEmpty();
+	_carryContentValid = permit.fileId() && !_content.isEmpty() && permit.claimUpload();
 	_fileId = permit.fileId();
 	_randomId = permit.randomId();
 	_carry = std::move(permit);
@@ -85,6 +86,8 @@ SyncConfigUpload::SyncConfigUpload(
 }
 
 bool SyncConfigUpload::Current() const {
+	if (!_carry && DesktopSyncCarryGateFor(_account)->postingHeld()) { return false; }
+
 	const auto session = _session.get();
 	return !_done && session && !session->account().loggingOut()
 		&& session->account().maybeSession() == session

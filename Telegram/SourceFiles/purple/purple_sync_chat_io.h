@@ -22,6 +22,7 @@ struct DesktopSyncChatInventory {
 	DesktopSyncChatIo route;
 	SyncAccountInventoryResult inventory;
 	std::vector<DesktopSyncChatRecordReceipt> receipts;
+	DesktopSyncChatReadStamp readStarted;
 };
 
 [[nodiscard]] bool ValidDesktopSyncChatReadIo(const DesktopSyncChatIo &route);

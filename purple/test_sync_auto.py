@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_carry_units import add_carry_units
 import argparse
 import json
 from pathlib import Path
@@ -63,7 +64,7 @@ with (work / 'build.log').open('w') as log:
     objects += [compile(repo / 'purple/test_sync_auto.cpp', 'test', True), compile(work / 'apply-body.cpp', 'apply')]
     adapters = ['purple_account_config', 'purple_config_file', 'purple_sync_local_store', 'purple_sync_config_history', 'purple_sync_config_review', 'purple_sync_config_text', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']
     for name in adapters:
-        if name in ['purple_sync_config_text', 'purple_sync_config_review']:
+        if name in ['purple_sync_config_text', 'purple_sync_config_review', 'purple_sync_config_history']:
             objects.append(compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name,
                 own_recipe=unit_recipe(name)))
         elif not args.use_build_objects and name in ['purple_account_config', 'purple_sync_local_store', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']:
@@ -76,6 +77,7 @@ with (work / 'build.log').open('w') as log:
         else:
             objects.append(build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o'))
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o', build / 'Telegram/lib_base/liblib_base.a']
+    add_carry_units(repo, build, work, objects, commands, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe:

@@ -23,6 +23,10 @@ class QLockFile;
 
 namespace Purple {
 
+struct SyncCarryJournal;
+[[nodiscard]] std::optional<SyncCarryJournal> InspectSyncCarryJournal(
+	const QByteArray &bytes, const QByteArray &bindingToken);
+
 enum class SyncStoreStatus {
 	Disabled,
 	Uninitialized,
@@ -53,6 +57,9 @@ enum class SyncStoreStatus {
 	Changed,
 	DurabilityFailed,
 };
+
+[[nodiscard]] SyncStoreStatus SyncCarryStartupAdmission(
+	const QString &directory, const QByteArray &bindingToken);
 
 struct SyncStoreResult {
 	SyncStoreResult(

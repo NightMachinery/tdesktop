@@ -816,8 +816,9 @@ SyncStoreResult SyncLocalStore::OpenChecked(
 		});
 	}
 	const auto carryPath = _root + u"/carry.json"_q;
-	if (!carryOwner && SyncPathIdentity(carryPath) != "missing") {
-		return SetFailure({ SyncStoreStatus::CarryPending });
+	if (!carryOwner) {
+		const auto admission = SyncCarryStartupAdmission(_root, bindingToken);
+		if (admission != SyncStoreStatus::Ready) { return SetFailure({ admission }); }
 	}
 	if (QFileInfo::exists(_root + u"/recovery.json"_q) || QFileInfo(_root + u"/recovery.json"_q).isSymLink()) {
 		return SetFailure({ SyncStoreStatus::InvalidTransition });
@@ -1174,6 +1175,10 @@ const QString &SyncLocalStore::directory() const { return _root; }
 
 SyncStoreStatus SyncLocalStore::status() const {
 	return _status;
+}
+
+SyncStoreStatus SyncCarryStartupAdmission(const QString &directory, const QByteArray &bindingToken) {
+	return SyncPathIdentity(directory + u"/carry.json"_q) == "missing" ? SyncStoreStatus::Ready : SyncStoreStatus::CarryPending;
 }
 
 }

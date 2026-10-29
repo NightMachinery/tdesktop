@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_carry_units import add_carry_units
 import argparse
 import hashlib
 import json
@@ -105,6 +106,11 @@ with (work / 'build.log').open('w') as log:
                 build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o',
                 build / 'Telegram/lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o',
                 build / 'Telegram/lib_base/liblib_base.a']
+    existing = set(objects)
+    for path in (build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o'):
+        if path.stem.removesuffix('.cpp') not in ['purple_sync_chat', 'purple_peer_token'] and path not in existing:
+            objects.append(path)
+    add_carry_units(repo, build, work, objects, compiled, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe:

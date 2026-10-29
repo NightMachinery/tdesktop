@@ -41,7 +41,7 @@ SyncAccountInventory::SyncAccountInventory(
 : SyncAccountInventory(session, std::move(progress),
 		[this, route, finished = std::move(finished)](SyncAccountInventoryResult result) {
 			if (finished) {
-				finished({ route, std::move(result), std::move(_receipts) });
+				finished({ route, std::move(result), std::move(_receipts), _readStarted });
 			}
 		}, {}, std::move(routing)) {
 	_route = std::move(route);
@@ -64,6 +64,7 @@ void SyncAccountInventory::Start() {
 		return;
 	}
 	_started = true;
+	_readStarted = DesktopSyncChatReadStamp::Begin();
 	if (!Current()) {
 		Finish(SyncAccountInventoryStatus::Incomplete);
 		return;

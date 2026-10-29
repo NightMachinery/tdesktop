@@ -64,8 +64,8 @@ cache remains available when resolution is held.
 The private device-local cache is named
 `purple-sync-chat-<environment>-<user>.json` under the configuration root.
 It stores a typed chat, mark id/date, display title, local reader facts and
-consent, plus preserved future fields. A present carry object holds discovery;
-this slice cannot execute an established-stream move. Follow, Fill and winner
+consent, plus preserved future fields. A present carry object holds discovery; an established-stream move is executed
+only by the separate serialized Carry service, with an injected transport. Follow, Fill and winner
 inventory retain the original cache and never commit a moved state or cache.
 
 Cache admission also requires a purpose-specific persisted login nonce from
@@ -192,3 +192,31 @@ python3 purple/test_sync_chat_alignment_routes.py
 ```
 
 These source/unit cases do not qualify native Telegram, app lifecycle or UI.
+
+## Carry service seam
+
+`CaptureSyncChatCarryScope` freezes the same per-account persisted login and RAM
+origin used by discovery. `DesktopSyncChatCarryService` owns one queued worker and
+an injected transport, with no production backend or UI caller here. It quiesces
+all account publishers through the RAM carry gate before opening the store. A
+busy writer produces a held status; explicit retry resumes after worker leases
+have drained. Source/account/login changes revoke callbacks and queue retirement.
+
+Startup discovery checks the active carry marker before ordinary stage cleanup.
+Only the worker reads journal bodies. Terminal archived journals contribute
+retained effects without becoming admitted cache entries. Missing, malformed,
+future or foreign evidence cannot trigger a new move or send on Resume. A new
+login requires explicit shared-core abandonment; a missing journal completes the
+lookup and releases the lock. See [move storage and recovery](sync_chat_move.md)
+for exact durability order and the action sequence.
+
+
+T5c recovery keeps the opening O/N and operation fixed when discovery observes
+this operation's accepted own mark. Only exact acknowledged owned readback can
+open the local-completion path, with new sends still refused. A new login has
+explicit Discard only. It repairs the known committed deferred-stage pairing
+before terminal abandonment; conflicting files and other unpaired-stage shapes
+stay held. It does not resume the old login or discard its external-effect
+evidence. Definite scoped O ChatGone can complete committed cleanup without
+activating deletion policy. Transport intent observations survive incomplete
+reads, and copied or renewed OwnRecord permits share one uploader claim.

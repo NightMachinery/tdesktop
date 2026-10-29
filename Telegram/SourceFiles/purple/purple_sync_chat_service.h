@@ -37,6 +37,10 @@ struct DesktopSyncChatLease {
 	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
 
 void StartSyncChatDiscovery();
+void QuiesceSyncChatPublishers(not_null<Main::Session*> session);
+[[nodiscard]] rpl::producer<Main::Session*> SyncChatPublisherQuiescence();
+[[nodiscard]] std::optional<DesktopSyncChatDiscoveryScope> CaptureSyncChatCarryScope(
+	not_null<Main::Session*> session);
 void EnsureSyncChatResolved(
 	not_null<Main::Session*> session, bool force = false);
 void CheckSyncChatBeforePost(

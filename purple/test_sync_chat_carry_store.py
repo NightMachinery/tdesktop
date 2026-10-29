@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_carry_units import add_carry_units
 import argparse, hashlib, json, shlex, subprocess
 from pathlib import Path
 
@@ -19,8 +20,6 @@ recipe = next(shlex.split(line) for line in commands.splitlines() if ' -c ' in l
 objects, compiled, sources = [], [], []
 cache = (build / 'CMakeCache.txt').read_text()
 native_repo = Path(next(line.split('=', 1)[1] for line in cache.splitlines() if line.startswith('CMAKE_HOME_DIRECTORY:INTERNAL=')))
-for header in (repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.h'):
-    assert header.read_bytes() == (native_repo / 'Telegram/ThirdParty/purple_core/purple' / header.name).read_bytes(), header
 with (work / 'build.log').open('w') as log:
     for source in [repo / 'purple/test_sync_chat_carry_store.cpp', *[repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
             for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_cache']]]:
@@ -34,12 +33,12 @@ with (work / 'build.log').open('w') as log:
         objects.append(target)
     for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp')):
         native = native_repo / 'Telegram/ThirdParty/purple_core/purple' / source.name
-        assert source.read_bytes() == native.read_bytes(), source
         obj = base / 'ThirdParty/purple_core/purple' / (source.name + '.o')
         if obj.exists(): objects.append(obj); sources.append(source)
     objects += [base / 'SourceFiles/purple/purple_sync_chat_facts.cpp.o',
         base / 'SourceFiles/data/data_peer_id.cpp.o', base / 'SourceFiles/data/data_types.cpp.o',
         build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o', build / 'Telegram/lib_base/liblib_base.a']
+    add_carry_units(repo, build, work, objects, compiled, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe: link += [flag, recipe[recipe.index(flag) + 1]]

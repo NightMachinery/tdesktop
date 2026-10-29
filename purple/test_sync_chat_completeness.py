@@ -57,7 +57,8 @@ with (work / 'build.log').open('w') as log:
         link[link.index('-o') + 1] = str(work / label)
         if label == 'complete':
             core = args.build_dir / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple'
-            link[1:1] = [str(core / (name + '.cpp.o')) for name in ['purple_config_payload', 'purple_settings', 'purple_state']]
+            link[1:1] = [str(core / (name + '.cpp.o')) for name in ['purple_config_payload', 'purple_settings', 'purple_state']
+                          if str(core / (name + '.cpp.o')) not in link]
         subprocess.run(link, stdout=log, stderr=subprocess.STDOUT, check=True)
         commands.append({'label': label, 'compile': compile, 'link': link})
 (work / 'inputs.json').write_text(json.dumps({'commands': commands,

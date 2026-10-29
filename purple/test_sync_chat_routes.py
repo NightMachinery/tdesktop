@@ -48,6 +48,10 @@ def inspect(values):
     require('reader-exact-route', 'DesktopSyncChatRecordRequest(*_route, id)' in read)
     require('download-typed-origin', 'DesktopSyncChatFileOrigin(*_route, _candidateIds[_next])' in read)
     require('download-exact-size', 'loader->bytes().size() != _expectedBytes' in read and '_downloadFailed ||' in read)
+    started = inventory.split('void SyncAccountInventory::Start()', 1)[1].split('void SyncAccountInventory::Cancel()', 1)[0]
+    require('inventory-read-start', '_readStarted = DesktopSyncChatReadStamp::Begin();' in started
+        and started.index('_readStarted = DesktopSyncChatReadStamp::Begin();') < started.index('_scanner->Start();'))
+    require('inventory-read-stamp', 'std::move(_receipts), _readStarted' in inventory)
     require('inventory-route-preserved', '_session, *_route, progress, finished, _current' in inventory and '_session, *_route, _result.scan.candidateIds, finished, _current' in inventory)
     require('ledger-chat-fence', values['purple_sync_local_store.cpp'].count('DesktopSyncChatLedgerMatches(*_state, chat)') == 2)
     require('readback-typed-route', 'DesktopSyncChatRecordRequest(*_route, _id)' in values['purple_sync_auto_transport.cpp'])
@@ -100,6 +104,8 @@ def inspect(values):
 
 assert not inspect(files), inspect(files)
 negative = [
+    ('purple_sync_account_inventory.cpp', '_readStarted = DesktopSyncChatReadStamp::Begin();', '', 'inventory-read-start'),
+    ('purple_sync_account_inventory.cpp', 'std::move(_receipts), _readStarted', 'std::move(_receipts), {}', 'inventory-read-stamp'),
     ('purple_sync_config_upload.cpp', 'current->api().applyUpdates(updates, randomId);', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),
     ('purple_sync_chat_carry_io.cpp', 'applyUpdates(updates, captured.randomId());', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),
     ('purple_sync_config_publish.cpp', '_done = true;\n\t_admitted->store(false);\n\tif (_post) { _post->Cancel(); }', '_admitted->store(false);\n\tif (_post) { _post->Cancel(); }\n\t_done = true;', 'publisher-terminal-before-child'),

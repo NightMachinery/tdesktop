@@ -288,6 +288,11 @@ PRIVATE
     purple/purple_sync_auto_service.h
     purple/purple_sync_chat_carry_io.cpp
     purple/purple_sync_chat_carry_io.h
+    purple/purple_sync_chat_carry_executor.cpp
+    purple/purple_sync_chat_carry_executor.h
+    purple/purple_sync_chat_carry_gate.h
+    purple/purple_sync_chat_carry_service.cpp
+    purple/purple_sync_chat_carry_service.h
     purple/purple_sync_chat_carry_store.cpp
     purple/purple_sync_chat_carry_store.h
     purple/purple_sync_local_store.cpp

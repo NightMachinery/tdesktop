@@ -7,7 +7,7 @@
 
 namespace Purple {
 
-enum class DesktopSyncCarryEffect { Forward, OwnRecord, Mark };
+enum class DesktopSyncCarryEffect { Forward, OwnRecord, Mark, Pending };
 enum class DesktopSyncCarryReconcile { Held, Absent, Present };
 
 struct DesktopSyncCarryIdentity {
@@ -30,6 +30,7 @@ struct DesktopSyncCarryFresh {
 class DesktopSyncCarryPermit final {
 public:
 	[[nodiscard]] bool current() const;
+	[[nodiscard]] bool claimUpload() const;
 	void revoke() const;
 	[[nodiscard]] const DesktopSyncChatIo &source() const;
 	[[nodiscard]] const DesktopSyncChatIo &target() const;
@@ -61,6 +62,7 @@ private:
 	std::shared_ptr<std::atomic<uint64_t>> _epoch;
 	uint64_t _openingEpoch = 0;
 	std::shared_ptr<std::atomic<bool>> _active;
+	std::shared_ptr<std::atomic<bool>> _uploadClaim;
 	bool _readerWarning = false;
 
 };
@@ -101,11 +103,24 @@ public:
 	[[nodiscard]] DesktopSyncCarryReconcile ReconcileMark(
 		const QString &slot, const DesktopSyncChatIo &route, int32_t id,
 		const MTPmessages_Messages &response, const DesktopSyncCarryFresh &fresh);
+	[[nodiscard]] bool ReconcileAll(const DesktopSyncChatInventory &inventory, const DesktopSyncCarryFresh &fresh);
+	[[nodiscard]] int32_t MarkReceiptId() const;
+	[[nodiscard]] bool RetainedMarkReceipt(const DesktopSyncCarryFresh &fresh, const MTPUpdates &updates);
 	[[nodiscard]] bool cleanupEnabled() const;
+	[[nodiscard]] std::optional<bool> PendingIssued() const;
+	[[nodiscard]] bool RememberPendingIssued();
+	[[nodiscard]] bool ConsumePendingRead(const DesktopSyncChatInventory &inventory);
 
 private:
+	friend class DesktopSyncChatCarry;
+	[[nodiscard]] std::optional<DesktopSyncCarryPermit> PendingPermit(
+		const DesktopSyncCarryFresh &fresh, const DesktopSyncChatInventory &inventory,
+		uint64_t proposedRandomId, uint64_t proposedFileId);
+	[[nodiscard]] bool ReadFresh(const QString &slot, const DesktopSyncChatInventory &inventory) const;
+	[[nodiscard]] bool SaveGeneration(const QString &slot, QJsonObject entry, QJsonObject transport);
 	[[nodiscard]] bool Context(const DesktopSyncCarryFresh &fresh) const;
 	[[nodiscard]] bool Fresh(const DesktopSyncCarryFresh &fresh) const;
+	[[nodiscard]] bool PendingFresh(const DesktopSyncCarryFresh &fresh) const;
 	[[nodiscard]] std::optional<QJsonObject> Transport() const;
 	[[nodiscard]] bool Save(QJsonObject transport);
 	[[nodiscard]] bool Readers(QJsonObject &transport, const DesktopSyncCarryFresh &fresh);

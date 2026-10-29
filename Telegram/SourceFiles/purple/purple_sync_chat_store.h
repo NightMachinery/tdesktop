@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_sync_chat_cache.h"
+#include "purple/purple_sync_chat_journal.h"
 
 #include <QtCore/QLockFile>
 #include <atomic>
@@ -23,6 +24,8 @@ struct DesktopSyncChatDisk {
 	PeerToken settingsChat;
 	QString settingsSpace;
 	QString error;
+	std::vector<SyncCarryJournal> retainedCarryEffects;
+	std::vector<QByteArray> retainedCarryImages;
 };
 
 [[nodiscard]] std::shared_ptr<DesktopSyncChatDisk> OpenDesktopSyncChatDisk(

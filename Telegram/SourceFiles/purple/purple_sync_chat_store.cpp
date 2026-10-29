@@ -1,7 +1,11 @@
 #include "purple/purple_sync_chat_store.h"
 
 #include "purple/purple_sync_local_store.h"
+#include "purple/purple_sync_chat_carry_store.h"
+#include <QtCore/QDirIterator>
+#include <QtCore/QFileInfo>
 #include <QtCore/QDir>
+#include <algorithm>
 
 namespace Purple {
 
@@ -39,6 +43,33 @@ std::shared_ptr<DesktopSyncChatDisk> OpenDesktopSyncChatDisk(
 			return fail(u"account-lock-busy"_q);
 		}
 	}
+	if (SyncCarryStartupAdmission(syncDirectory, bindingToken) != SyncStoreStatus::Ready) {
+		return fail(u"carry-recovery-required"_q);
+	}
+	auto carryPaths = QStringList{syncDirectory + u"/carry.json"_q};
+	const auto historyDirectory = syncDirectory + u"/carry-history"_q;
+	if (SyncPathIdentity(historyDirectory) != "missing" && (QFileInfo(historyDirectory).isSymLink() || !QFileInfo(historyDirectory).isDir())) { return fail(u"carry-history-held"_q); }
+	auto history = QDirIterator(historyDirectory, QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+	while (history.hasNext()) {
+		carryPaths.push_back(history.next());
+		if (carryPaths.size() > 65) { return fail(u"carry-retention-full"_q); }
+	}
+	auto retainedBytes = qint64(0);
+	for (const auto &path : carryPaths) {
+		const auto snapshot = CaptureSyncPrivateFile(path, kSyncCarryJournalStorageLimit);
+		if (snapshot.status != SyncStoreStatus::Ready) { return fail(u"carry-history-held"_q); }
+		if (snapshot.absent()) { continue; }
+		const auto journal = InspectSyncCarryJournal(snapshot.bytes, bindingToken);
+		if (!journal || journal->account != account || SyncCarryJournalHoldsWrites(*journal)) { return fail(u"carry-history-held"_q); }
+		retainedBytes += snapshot.bytes.size();
+		if (retainedBytes > kSyncCarryObjectStorageLimit
+			|| (path != syncDirectory + u"/carry.json"_q
+				&& QFileInfo(path).fileName() != SyncCarryRecordHash(snapshot.bytes) + u".json"_q)) { return fail(u"carry-history-held"_q); }
+		const auto existing = std::find_if(result->retainedCarryEffects.begin(), result->retainedCarryEffects.end(), [&](const auto &saved) { return saved.operationId == journal->operationId; });
+		if (existing != result->retainedCarryEffects.end()) {
+			if (result->retainedCarryImages[size_t(existing - result->retainedCarryEffects.begin())] != snapshot.bytes) { return fail(u"carry-history-conflict"_q); }
+		} else { result->retainedCarryEffects.push_back(*journal); result->retainedCarryImages.push_back(snapshot.bytes); }
+	}
 	result->identity = SyncPathIdentity(result->cachePath);
 	if (result->identity.isEmpty()) {
 		return fail(u"cache-path-held"_q);
@@ -55,9 +86,10 @@ std::shared_ptr<DesktopSyncChatDisk> OpenDesktopSyncChatDisk(
 					: u"invalid-cache"_q);
 		}
 		if (parsed.record->loginBinding != loginBinding) {
-			return fail(u"cache-login-held"_q);
+			if (result->retainedCarryEffects.empty()) { return fail(u"cache-login-held"_q); }
+		} else {
+			result->cache = parsed.record;
 		}
-		result->cache = parsed.record;
 	}
 	result->stateIdentity = SyncPathIdentity(statePath);
 	if (result->stateIdentity.isEmpty()) {

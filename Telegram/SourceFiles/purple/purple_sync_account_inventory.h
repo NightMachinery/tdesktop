@@ -62,6 +62,7 @@ private:
 	std::unique_ptr<SyncHistoryScanner> _scanner;
 	std::unique_ptr<SyncCandidateReader> _reader;
 	Fn<SyncChatMessageOwnership(const MTPMessage &)> _owned;
+	DesktopSyncChatReadStamp _readStarted;
 	bool _started = false;
 	bool _scanFinished = false;
 	bool _done = false;

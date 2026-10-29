@@ -1,4 +1,5 @@
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -164,10 +165,13 @@ void RetireDisk(std::shared_ptr<DesktopSyncChatDisk> disk) {
 	}
 }
 
+rpl::event_stream<Main::Session*> PublisherQuiescence;
+
 class SyncChatSession final : public base::has_weak_ptr {
 public:
 	explicit SyncChatSession(not_null<Main::Session*> session);
 	~SyncChatSession();
+	std::optional<DesktopSyncChatDiscoveryScope> CarryScope();
 	void Ensure(
 		bool force,
 		Fn<void(DesktopSyncChatStatus)> done = {},
@@ -285,7 +289,7 @@ bool SyncChatSession::HasOrigin(const DesktopSyncChatIo &route) const {
 }
 
 std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
-	if (_busy || !Current() || !_model || !_status.complete
+	if (DesktopSyncCarryGateFor(_origin.account)->postingHeld() || _busy || !Current() || !_model || !_status.complete
 		|| _status.phase != DesktopSyncChatPhase::Use || _status.postingHeld
 		|| _status.resolution.readChat != chat) {
 		return {};
@@ -328,6 +332,18 @@ DesktopSyncChatDiscoveryScope SyncChatSession::ScopeFor(
 		disk.settingsSpace, disk.settingsBound, disk.settingsChat,
 		cache ? std::optional(cache->mark) : std::nullopt,
 		cache && cache->carry.has_value() };
+}
+
+std::optional<DesktopSyncChatDiscoveryScope> SyncChatSession::CarryScope() {
+	const auto session = _session.get();
+	if (!session || session->account().loggingOut() || !CachedAccountSyncOperationsAllowed(session)) { return {}; }
+	const auto login = LoginFor(*session);
+	if (!login) { return {}; }
+	auto scope = DesktopSyncChatDiscoveryScope();
+	scope.origin = _origin; scope.root = ConfigDirectory(); scope.binding = AccountSyncBindingToken(session->account());
+	scope.loginBinding = QString::fromLatin1(QCryptographicHash::hash("purple-sync-chat-v1:" + login->nonce, QCryptographicHash::Sha256).toHex());
+	scope.owner = SettingsStartupOwner(); scope.mode = AccountWorkModeForSession(session);
+	return scope;
 }
 
 bool SyncChatSession::Current() const {
@@ -1108,6 +1124,17 @@ bool SyncChatSetupContextCurrent(not_null<Main::Session*> session,
 bool CachedSyncChatSetupContextCurrent(not_null<Main::Session*> session,
 		const DesktopSyncChatDiscoveryScope &scope) {
 	return For(session).SetupContextCurrent(scope, true);
+}
+
+void QuiesceSyncChatPublishers(not_null<Main::Session*> session) {
+	For(session).Cancel(u"carry-in-progress"_q);
+	PublisherQuiescence.fire_copy(session.get());
+}
+
+rpl::producer<Main::Session*> SyncChatPublisherQuiescence() { return PublisherQuiescence.events(); }
+
+std::optional<DesktopSyncChatDiscoveryScope> CaptureSyncChatCarryScope(not_null<Main::Session*> session) {
+	return For(session).CarryScope();
 }
 
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {

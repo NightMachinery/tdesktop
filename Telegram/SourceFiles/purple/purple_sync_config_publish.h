@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/weak_ptr.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 #include "crl/crl_object_on_queue.h"
 #include "purple/purple_sync_config_publish_flow.h"
 #include "purple/purple_sync_account_inventory.h"
@@ -78,6 +79,7 @@ private:
 	QByteArray _bindingToken;
 	QString _directory;
 	std::shared_ptr<std::atomic<bool>> _admitted;
+	std::shared_ptr<DesktopSyncCarryGate::Lease> _carryWriter;
 	std::unique_ptr<crl::object_on_queue<SyncConfigPublishFlow>> _worker;
 	rpl::lifetime _lifetime;
 	std::unique_ptr<SyncConfigPost> _post;

@@ -55,7 +55,7 @@ DesktopSyncChatInventory CarryInventory(const DesktopSyncChatIo &route, const QB
 		receipts.push_back(Receipt(route, bytes, id)); read.records.push_back(receipts.front().record);
 		read.status = AggregateSyncCandidateRead(read.records); scan.candidateIds.push_back(id); scan.scannedCount = 1;
 	}
-	return { route, FinishSyncAccountInventory(route.peer.origin.account.userId, scan, read), std::move(receipts) };
+	return { route, FinishSyncAccountInventory(route.peer.origin.account.userId, scan, read), std::move(receipts), DesktopSyncChatReadStamp::Begin() };
 }
 
 void NativeReceiptsAndReads() {
@@ -246,6 +246,45 @@ private:
 
 };
 
+void StaleAbsenceReuse() {
+	for (const auto own : {false, true}) {
+		auto worker = Worker(own);
+		worker.Run([&](CarryWorkerState &s) {
+			const auto identity = s.io->Reserve(own ? DesktopSyncCarryEffect::OwnRecord : DesktopSyncCarryEffect::Forward,
+				SyncCarryRecordHash(s.Payload()), s.fresh, 901, 902); Must(identity);
+			s.Prepared();
+			const auto first = s.io->Authorize(identity->slot, s.fresh); Must(first);
+			Must(s.io->OutcomeUnknown(*first));
+			const auto inventory = CarryInventory(s.fresh.target);
+			CHECK(s.io->Reconcile(identity->slot, inventory, s.fresh) == DesktopSyncCarryReconcile::Absent);
+			const auto second = s.io->Authorize(identity->slot, s.fresh); Must(second);
+			CHECK(first->randomId() == second->randomId() && first->fileId() == second->fileId());
+			Must(s.io->OutcomeUnknown(*second));
+			auto observer = DesktopSyncChatCarryIo(*s.store);
+			CHECK(observer.Reconcile(identity->slot, inventory, s.fresh) == DesktopSyncCarryReconcile::Held);
+			const auto staleRetry = s.io->Authorize(identity->slot, s.fresh);
+			CHECK(!staleRetry);
+			if (staleRetry) { Must(s.io->OutcomeUnknown(*staleRetry)); }
+			const auto fresh = CarryInventory(s.fresh.target);
+			CHECK(observer.Reconcile(identity->slot, fresh, s.fresh) == DesktopSyncCarryReconcile::Absent);
+			CHECK(s.io->Reconcile(identity->slot, fresh, s.fresh) == DesktopSyncCarryReconcile::Held);
+			const auto path = s.directory.path() + u"/sync/carry.json"_q;
+			const auto saved = QJsonDocument::fromJson(CaptureSyncPrivateFile(path, 4 * 1024 * 1024).bytes).object();
+			const auto generation = saved.value(u"transport"_q).toObject().value(u"entries"_q).toObject()
+				.value(identity->slot).toObject().value(u"generation"_q).toString();
+			CHECK(generation == u"6"_q);
+			s.store->Close(); Must(s.store->Open());
+			CHECK(observer.Reconcile(identity->slot, fresh, s.fresh) == DesktopSyncCarryReconcile::Held);
+			const auto after = QJsonDocument::fromJson(CaptureSyncPrivateFile(path, 4 * 1024 * 1024).bytes).object();
+			CHECK(after.value(u"transport"_q).toObject().value(u"entries"_q).toObject()
+				.value(identity->slot).toObject().value(u"generation"_q).toString() == generation);
+			CHECK(observer.Reconcile(identity->slot, CarryInventory(s.fresh.target), s.fresh) == DesktopSyncCarryReconcile::Absent);
+			const auto resumed = s.io->Authorize(identity->slot, s.fresh); Must(resumed);
+			CHECK(resumed->randomId() == first->randomId() && resumed->fileId() == first->fileId());
+		});
+	}
+}
+
 void DurableIdentityAndReconcile() {
 	for (auto own : {false,true}) {
 		auto worker = Worker(own);
@@ -431,7 +470,10 @@ void ReceiptStorageBounds() {
 		transport.insert(u"future_padding"_q,QString(kSyncCarryJournalStorageLimit-empty.size()-1,u'x'));
 		envelope.insert(u"transport"_q,transport);
 		const auto bounded = CarryEnvelope(envelope); CHECK(bounded.size() == kSyncCarryJournalStorageLimit-1);
-		Must(WriteSyncPrivateFile(path,bounded) == SyncStoreStatus::Ready); Must(s.store->Open());
+		Must(WriteSyncPrivateFile(path,bounded) == SyncStoreStatus::Ready);
+		const auto opened=s.store->Open();
+		if (!opened) { std::fprintf(stderr,"Bounded receipt reopen status=%d\n",int(opened.status)); }
+		Must(opened);
 		CHECK(!s.io->Authorize(identity->slot,s.fresh));
 		auto after = QByteArray(); Must(ReadSyncPrivateFile(path,kSyncCarryJournalStorageLimit,after) == SyncStoreStatus::Ready); CHECK(after == bounded);
 	});
@@ -442,11 +484,12 @@ void ConsentFaultsAndAuthority() {
 		auto worker = Worker();
 		worker.Run([](CarryWorkerState &s) {
 			auto fresh = s.fresh; fresh.target.peer.facts->otherMembers = 1; fresh.target.peer.readerMembers = std::vector<QString>{u"unit-member"_q};
-			CHECK(!s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),fresh,900));
+			const auto added=s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),fresh,900);
+			Must(added); CHECK(s.store->journal()->readerBaseline->otherMembers.value_or(0)==0);
 			fresh.consentPeer = fresh.target.peer;
 			const auto identity = s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),fresh,900); Must(identity);
 			s.fresh = fresh; s.Prepared(); const auto permit = s.io->Authorize(identity->slot,fresh); Must(permit);
-			CHECK(!permit->compatible(*permit));
+			CHECK(permit->readerWarning() && !permit->compatible(*permit));
 			auto before = QByteArray(); Must(ReadSyncPrivateFile(s.directory.path()+u"/sync/carry.json"_q,4*1024*1024,before) == SyncStoreStatus::Ready);
 			const auto baseline = QJsonDocument::fromJson(before).object().value(u"transport"_q).toObject().value(u"readers"_q);
 			auto changed = fresh; changed.target.peer.facts->otherMembers = 2; changed.target.peer.readerMembers->push_back(u"later-member"_q);
@@ -509,13 +552,51 @@ void ConsentFaultsAndAuthority() {
 	}
 }
 
+void ReadStartAndGenerationControls() {
+	CHECK(!DesktopSyncChatReadStamp().valid());
+	const auto first = DesktopSyncChatReadStamp::Begin();
+	const auto second = DesktopSyncChatReadStamp::Begin();
+	CHECK(second.after(first) && !first.after(second) && !second.after(second));
+	for (const auto bad : {QJsonValue(0),QJsonValue(u"00"_q),QJsonValue(u"-1"_q),
+		QJsonValue(u"1.0"_q),QJsonValue(u"18446744073709551616"_q)}) {
+		CHECK(!DesktopSyncCarryTransportGeneration({{u"generation"_q,bad}}));
+	}
+	CHECK(DesktopSyncCarryTransportGeneration({{u"generation"_q,u"18446744073709551615"_q}})
+		== std::numeric_limits<uint64_t>::max());
+	auto worker = Worker();
+	worker.Run([&](CarryWorkerState &s) {
+		const auto id = s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),s.fresh,901); Must(id);
+		s.Prepared(); const auto permit = s.io->Authorize(id->slot,s.fresh); Must(permit);
+		const auto started = DesktopSyncChatReadStamp::Begin();
+		Must(s.io->OutcomeUnknown(*permit));
+		auto finished = CarryInventory(s.fresh.target); finished.readStarted = started;
+		CHECK(s.io->Reconcile(id->slot,finished,s.fresh) == DesktopSyncCarryReconcile::Held);
+		finished.readStarted = {};
+		CHECK(s.io->Reconcile(id->slot,finished,s.fresh) == DesktopSyncCarryReconcile::Held);
+		CHECK(s.io->Reconcile(id->slot,CarryInventory(s.fresh.target),s.fresh) == DesktopSyncCarryReconcile::Absent);
+		const auto path = s.directory.path()+u"/sync/carry.json"_q;
+		auto envelope = QJsonDocument::fromJson(CaptureSyncPrivateFile(path,4*1024*1024).bytes).object();
+		auto transport = envelope.value(u"transport"_q).toObject(); auto entries = transport.value(u"entries"_q).toObject();
+		auto entry = entries.value(id->slot).toObject(); entry.insert(u"generation"_q,u"18446744073709551615"_q);
+		entries.insert(id->slot,entry);transport.insert(u"entries"_q,entries);envelope.insert(u"transport"_q,transport);
+		s.store->Close(); Must(WriteSyncPrivateFile(path,CarryEnvelope(envelope))==SyncStoreStatus::Ready);Must(s.store->Open());
+		CHECK(!s.io->Authorize(id->slot,s.fresh));
+		CHECK(s.io->Reconcile(id->slot,CarryInventory(s.fresh.target),s.fresh) == DesktopSyncCarryReconcile::Held);
+		CHECK(QJsonDocument::fromJson(CaptureSyncPrivateFile(path,4*1024*1024).bytes).object()
+			.value(u"transport"_q).toObject().value(u"entries"_q).toObject().value(id->slot).toObject()
+			.value(u"generation"_q).toString()==u"18446744073709551615"_q);
+	});
 }
 
+}
+
+#ifndef PURPLE_SYNC_CHAT_CARRY_EMBEDDED
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc,argv);
 	std::setbuf(stdout,nullptr);
 	std::puts("Native receipts"); NativeReceiptsAndReads();
 	std::puts("Durable identities"); DurableIdentityAndReconcile();
+	std::puts("Stale absence"); StaleAbsenceReuse(); ReadStartAndGenerationControls();
 	std::puts("Follow/Fill"); FollowAndFill();
 	std::puts("Mark boundary"); MarkAndWorkerBoundary();
 	std::puts("Uploads"); CarryUploadSchedules();
@@ -524,3 +605,5 @@ int main(int argc, char **argv) {
 	std::printf("CARRY IO %d checks, %d failures\n",Checks,Failures);
 	return Failures ? 1 : 0;
 }
+
+#endif

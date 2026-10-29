@@ -2,6 +2,7 @@
 #include "test_sync_chat_io.cpp"
 #include "purple/purple_sync_chat_write.h"
 #include "purple/purple_sync_chat_carry_io.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_config_post.h"
 #include "base/random.h"
@@ -180,6 +181,15 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 		_finished = [this](std::optional<MsgId> id) { ++completions; receipt = id; };
 		_editRefused = [this] { ++refusals; };
 	}
+	UploadProbe(UploadSession &session, DesktopSyncChatIo route, QByteArray content,
+			Fn<void(std::optional<MsgId>)> finished, Fn<bool()> stillCurrent)
+	: UploadProbe(session, std::move(route), std::move(content)) {
+		_finished = std::move(finished);
+		_stillCurrent = std::move(stillCurrent);
+	}
+	UploadProbe(UploadSession &session, DesktopSyncCarryPermit permit,
+		Fn<void(std::optional<MsgId>)> finished, Fn<bool()> stillCurrent,
+		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry);
 	bool Current() const
 #include "upload-Current.inc"
 	std::optional<DesktopSyncChatIo> route() const { return _carry ? std::optional(_carry->target()) : _lease ? std::optional(_lease->route) : std::nullopt; }
@@ -201,6 +211,8 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	void Cancel()
 #include "upload-Cancel.inc"
 };
+
+#include "upload-CarryConstructor.inc"
 
 DesktopSyncChatStatus Usable(PeerToken chat) {
 	auto status = DesktopSyncChatStatus(); status.complete = true; status.postingHeld = false;
@@ -426,6 +438,23 @@ struct PostExactEndpoint {
 		std::optional<AccountRoutingSnapshot> routing = std::nullopt)
 	: route(std::move(value)), id(target), current(std::move(proof)), done(std::move(callback)) {}
 	void Start() {}
+};
+
+bool ValidateAccountSyncTarget(UploadSession *, int) { return true; }
+bool AccountSyncRoutingCurrent(UploadSession *, const AccountRoutingSnapshot &) { return true; }
+
+struct OrdinaryPostContext {
+	explicit OrdinaryPostContext(UploadSession &session)
+	: _sessionGuard(base::make_weak(&session)), _session(&session) {}
+	base::weak_ptr<UploadSession> _sessionGuard;
+	not_null<UploadSession*> _session;
+	DesktopSyncChatOperation _operation;
+	std::optional<int> _target = 1;
+	Fn<bool()> _stillCurrent = [] { return true; };
+	std::optional<DesktopSyncChatIo> _route;
+	Fn<bool()> _readbackCurrent;
+	bool ContextCurrent() const
+#include "post-current.inc"
 };
 
 struct PostProbe : base::has_weak_ptr {

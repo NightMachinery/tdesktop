@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_carry_units import add_carry_units
 import argparse
 import hashlib
 import json
@@ -83,6 +84,15 @@ transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_transport.cpp'
 create = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp').read_text()
 (work / 'carry-mark-text.inc').write_text('namespace Purple { QString DesktopSyncChatMarkText() ' + block(create, 'QString DesktopSyncChatMarkText(') + ' }\n')
 upload = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_upload.cpp').read_text()
+carry_constructor_at = upload.index('\t\tDesktopSyncCarryPermit permit,')
+carry_constructor_start = upload.rfind('SyncConfigUpload::SyncConfigUpload(', 0, carry_constructor_at)
+carry_constructor_body = block(upload, '\t\tDesktopSyncCarryPermit permit,')
+carry_constructor_end = upload.index(carry_constructor_body, carry_constructor_at) + len(carry_constructor_body)
+carry_constructor = upload[carry_constructor_start:carry_constructor_end]
+(work / 'upload-CarryConstructor.inc').write_text(carry_constructor.replace(
+    'SyncConfigUpload::SyncConfigUpload(', 'UploadProbe::UploadProbe(').replace(
+    'Main::Session', 'UploadSession').replace(': SyncConfigUpload(', ': UploadProbe(') + '\n')
+
 post = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_post.cpp').read_text()
 (work / 'service-scope.inc').write_text(block(service, 'DesktopSyncChatDiscoveryScope SyncChatSession::ScopeFor('))
 selection_start = service.index('self->_directBeforePost = self->_beforePost && self->_recent')
@@ -99,6 +109,7 @@ automatic = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_service.cpp').
 (work / 'post-network.inc').write_text(block(post, 'std::function<void()> BeginSyncConfigNetworkOperation(\n\t\tnot_null<Main::Session*> session,\n\t\tPeerToken chat)'))
 for method in ['SendNextPart', 'SendMedia', 'RenewBeforePost', 'ResumeEffect', 'DispatchMedia', 'OnMedia', 'Finish', 'Cancel']:
     (work / ('upload-' + method + '.inc')).write_text(block(upload, 'void SyncConfigUpload::' + method + '('))
+(work / 'post-current.inc').write_text(block(post, 'bool SyncConfigPost::ContextCurrent('))
 for method in ['OnReceipt', 'OnReadback', 'Finish', 'Cancel']:
     (work / ('post-' + method + '.inc')).write_text(block(post, 'void SyncConfigPost::' + method + '('))
 
@@ -131,7 +142,7 @@ with (work / 'build.log').open('w') as log:
     parent = args.reuse_unit_dir.resolve()
     previous = json.loads((parent / 'inputs.json').read_text())
     reused_sources = {}
-    for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']:
+    for name in ['purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']:
         matches = [path for path in previous['sources_sha256'] if Path(path).name == name + '.cpp']
         assert len(matches) == 1, name
         old = Path(matches[0])
@@ -140,7 +151,7 @@ with (work / 'build.log').open('w') as log:
         assert hashlib.sha256(current.read_bytes()).hexdigest() == previous['sources_sha256'][str(old)], current
         assert hashlib.sha256((parent / (name + '.o')).read_bytes()).hexdigest() == previous['objects_sha256'][str(parent / (name + '.o'))], name
         reused_sources[str(current)] = previous['sources_sha256'][str(old)]
-    objects += [parent / (name + '.o') for name in ['purple_sync_local_store', 'purple_sync_chat_carry_store', 'purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']]
+    objects += [parent / (name + '.o') for name in ['purple_sync_chat_carry_io', 'mtproto_response', 'purple_sync_chat', 'purple_peer_token']]
     objects += [build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/purple_sync_directory.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_types.cpp.o',
                 build / 'Telegram/CMakeFiles/Telegram.dir/SourceFiles/data/data_peer_id.cpp.o',
@@ -156,6 +167,7 @@ with (work / 'build.log').open('w') as log:
     for path in (build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o'):
         if path.stem.removesuffix('.cpp') not in ['purple_sync_chat', 'purple_peer_token'] and path not in existing:
             objects.append(path)
+    add_carry_units(repo, build, work, objects, compiled, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe:
