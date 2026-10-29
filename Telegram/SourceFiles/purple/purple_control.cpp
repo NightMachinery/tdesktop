@@ -1,13 +1,16 @@
 #include "purple/purple_control.h"
 
-#include "purple/purple_control_server.h"
-#include "purple/purple_emoji_export.h"
-#include "purple/purple_version.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "media/audio/media_audio.h"
+#include "media/player/media_player_instance.h"
 #include "platform/platform_specific.h"
-#include "settings.h"
+#include "purple/purple_control_server.h"
+#include "purple/purple_emoji_export.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_version.h"
 #include "window/window_controller.h"
+#include "settings.h"
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QPointer>
@@ -93,6 +96,7 @@ class ControlService final : public QObject {
 public:
 	ControlService();
 	void refreshPolicy();
+	void bindPlayerEvents();
 	void reconfigure();
 
 private:
@@ -110,7 +114,14 @@ ControlService::ControlService()
 }, [](QString path, QString error) {
 	SocketPath = path;
 	SocketStatus = error.isEmpty() ? path : error;
-}, this) {
+}, this, [](ControlTopic topic, const ControlPolicy &policy, auto active, ControlReply reply) {
+	if (topic == ControlTopic::Lock) {
+		reply({ QJsonObject{ { u"locked"_q, Core::App().passcodeLocked() } } });
+	} else {
+		AppControlMediaAdapter().now(std::nullopt, std::move(active), std::move(reply));
+	}
+}) {
+	ActiveChanges() | rpl::on_next([=] { _server.notify(ControlTopic::Media); }, _lifetime);
 	Core::App().passcodeLockChanges() | rpl::on_next([=] { refreshPolicy(); }, _lifetime);
 	connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [=] {
 		Consent.invalidate();
@@ -120,12 +131,22 @@ ControlService::ControlService()
 	reconfigure();
 }
 
+void ControlService::bindPlayerEvents() {
+	Media::Player::instance()->updatedNotifier() | rpl::on_next([=] {
+		_server.notify(ControlTopic::Media);
+	}, _lifetime);
+	Media::Player::instance()->trackChanged() | rpl::on_next([=] {
+		_server.notify(ControlTopic::Media);
+	}, _lifetime);
+}
+
 void ControlService::refreshPolicy() {
 	auto policy = ControlPolicy();
 	policy.enabled = ControlAutomationEnabled();
 	policy.locked = Core::App().passcodeLocked();
 	for (auto i = 0; i < kControlGroupCount; ++i) policy.groups[i] = ControlGroupEnabled(i);
 	_server.setPolicy(policy);
+	_server.notify(ControlTopic::Lock);
 }
 
 void ControlService::reconfigure() {
@@ -150,6 +171,10 @@ void Changed(bool path = false) {
 
 void StartControlServer() {
 	if (!Service) Service = new ControlService();
+}
+
+void StartControlPlayerEvents() {
+	if (Service) Service->bindPlayerEvents();
 }
 
 QString CurrentControlSocketPath() {

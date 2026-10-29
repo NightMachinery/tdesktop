@@ -982,7 +982,10 @@ explanation. The rest of apiwrap.cpp belongs to B16.
 passcode lock/unlock calls at their original points. The helper preserves the
 schedule, focus-sync, screen-time and optional default-disabled UI-witness start
 order, plus the existing lock and peek notifications. These services are
-device-wide; no passcode-lock signal redesign is needed.
+device-wide; no passcode-lock signal redesign is needed. IPC-3 adds
+`Purple::OnMediaPlayerStarted()` immediately after `Media::Player::start()`:
+the control service starts earlier, so its player-event subscriptions must wait
+until the player exists. The callback binds only Purple-owned subscription glue.
 
 **`Telegram/SourceFiles/window/main_window.cpp`**: B15 keeps the single
 `Purple::ListenHotkeys(this)` hook for the peek key and removes its explanation.

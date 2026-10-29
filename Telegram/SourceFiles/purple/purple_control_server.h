@@ -2,6 +2,7 @@
 
 #include "purple/purple_control_commands.h"
 #include "purple/purple_control_endpoint.h"
+#include "purple/purple_control_subscriptions.h"
 #include <QtCore/QObject>
 #include <memory>
 
@@ -13,11 +14,13 @@ using ControlStatus = std::function<void(QString, QString)>;
 
 class ControlServer final : public QObject {
 public:
-	ControlServer(ControlHandler handler, ControlStatus status, QObject *parent = nullptr);
+	ControlServer(ControlHandler handler, ControlStatus status, QObject *parent = nullptr,
+		ControlEventHandler events = {});
 	~ControlServer();
 	void configure(ControlEndpointOptions options);
 	void setPolicy(ControlPolicy policy);
 	void stop();
+	void notify(ControlTopic topic);
 
 private:
 	struct State;

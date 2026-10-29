@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 
 void StartAppServices();
+void OnMediaPlayerStarted();
 void OnScreenLockChanged(bool locked);
 void OnAppPasscodeLock();
 void OnAppPasscodeUnlock();

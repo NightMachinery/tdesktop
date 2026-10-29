@@ -10,6 +10,7 @@ class SectionBuilder;
 namespace Purple {
 
 void StartControlServer();
+void StartControlPlayerEvents();
 void BuildControlSettings(::Settings::Builder::SectionBuilder &builder);
 [[nodiscard]] QString CurrentControlSocketPath();
 [[nodiscard]] rpl::producer<QString> ControlSocketPathValue();

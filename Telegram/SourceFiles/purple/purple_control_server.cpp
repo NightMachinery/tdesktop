@@ -19,10 +19,20 @@
 namespace Purple {
 namespace {
 
+struct ControlRevocation {
+	quint64 generation = 0;
+	ControlResult reason;
+};
+
+constexpr auto kSnapshotTimeout = qint64(10000);
+
 struct ControlAuthority {
 	std::shared_ptr<const ControlPolicy> policy
 		= std::make_shared<const ControlPolicy>();
 	std::atomic<int> queued = 0;
+	std::atomic<int> eventWork = 0;
+	std::array<std::shared_ptr<const ControlRevocation>, 2> revocations = {};
+	std::array<std::atomic<quint64>, 2> revisions = {};
 };
 
 struct ControlLockTransition {
@@ -38,6 +48,21 @@ public:
 
 private:
 	std::shared_ptr<ControlAuthority> _authority;
+
+};
+
+class ControlEventLease final {
+public:
+	explicit ControlEventLease(std::shared_ptr<ControlAuthority> authority);
+	~ControlEventLease();
+	[[nodiscard]] bool acquired() const;
+	[[nodiscard]] std::shared_ptr<std::atomic<bool>> finished() const;
+	bool complete();
+
+private:
+	std::shared_ptr<ControlAuthority> _authority;
+	std::shared_ptr<std::atomic<bool>> _finished
+		= std::make_shared<std::atomic<bool>>(false);
 
 };
 
@@ -59,11 +84,16 @@ public:
 	using Dispatch = std::function<void(
 		quint64, quint64, quint64, quint64, Ticket,
 		std::shared_ptr<ControlDispatchLease>, ControlRequest)>;
+	using EventDispatch = std::function<void(
+		quint64, quint64, quint64, quint64, quint64, ControlTopic, Ticket,
+		std::shared_ptr<ControlDispatchLease>, std::shared_ptr<ControlEventLease>)>;
 	using Status = std::function<void(quint64, QString, QString)>;
-	ControlWorker(std::shared_ptr<ControlAuthority> authority, Dispatch dispatch, Status status);
+	ControlWorker(std::shared_ptr<ControlAuthority> authority, Dispatch dispatch, Status status, EventDispatch events);
 	void configure(quint64 epoch, ControlEndpointOptions options);
 	void stop();
 	void reply(quint64 epoch, quint64 client, quint64 serial, quint64 lockGeneration, ControlResult result);
+	void eventReply(quint64 epoch, quint64 client, quint64 serial, quint64 generation,
+		quint64 revision, ControlTopic topic, ControlResult result);
 
 private:
 	struct Pending {
@@ -73,12 +103,26 @@ private:
 		qint64 started = 0;
 		Ticket active;
 	};
+	struct Subscription {
+		quint64 serial = 0;
+		quint64 generation = 0;
+		quint64 revision = 0;
+		Ticket active;
+		Ticket finished;
+		QByteArray latest;
+		quint64 admitted = 0;
+		qint64 started = 0;
+		bool dirty = true;
+		bool ended = false;
+	};
 	struct Client {
 		QLocalSocket *socket = nullptr;
 		QByteArray input;
 		ControlRateLimit rate;
 		std::map<qint64, Pending> pending;
+		std::map<ControlTopic, Subscription> subscriptions;
 		qint64 activity = 0;
+		qint64 terminalStarted = 0;
 	};
 	void acceptReady();
 	void addConnection();
@@ -87,14 +131,22 @@ private:
 	void send(quint64 client, QJsonValue id, ControlResult result);
 	void drop(quint64 client);
 	void expire();
+	void subscriptions();
+	void subscribe(quint64 client, const ControlRequest &request);
+	void clearSubscriptions(Client &client);
+	void write(quint64 client, const QByteArray &bytes);
+	void stage(quint64 client, ControlTopic topic, ControlResult result, bool ended);
+	[[nodiscard]] qint64 stagedBytes(const Client &client) const;
 
 	std::shared_ptr<ControlAuthority> _authority;
 	Dispatch _dispatch;
 	Status _status;
+	EventDispatch _events;
 	ControlEndpoint _endpoint;
 	PendingConnections _connections{ this };
 	std::unique_ptr<QSocketNotifier> _notifier;
 	QTimer _expiry{ this };
+	QTimer _updates{ this };
 	QElapsedTimer _clock;
 	std::map<quint64, Client> _clients;
 	quint64 _epoch = 0;
@@ -120,6 +172,33 @@ bool ControlDispatchLease::acquired() const {
 	return _authority != nullptr;
 }
 
+ControlEventLease::ControlEventLease(std::shared_ptr<ControlAuthority> authority)
+: _authority(std::move(authority)) {
+	if (_authority->eventWork.fetch_add(1) >= kControlPending) {
+		_authority->eventWork.fetch_sub(1);
+		_authority.reset();
+		_finished->store(true);
+	}
+}
+
+ControlEventLease::~ControlEventLease() {
+	complete();
+}
+
+bool ControlEventLease::acquired() const {
+	return _authority != nullptr;
+}
+
+std::shared_ptr<std::atomic<bool>> ControlEventLease::finished() const {
+	return _finished;
+}
+
+bool ControlEventLease::complete() {
+	if (!_authority || _finished->exchange(true)) return false;
+	_authority->eventWork.fetch_sub(1);
+	return true;
+}
+
 PendingConnections::PendingConnections(QObject *parent) : QLocalServer(parent) {
 }
 
@@ -138,11 +217,14 @@ QLocalSocket *PendingConnections::nextPendingConnection() {
 }
 
 ControlWorker::ControlWorker(
-		std::shared_ptr<ControlAuthority> authority, Dispatch dispatch, Status status)
+		std::shared_ptr<ControlAuthority> authority, Dispatch dispatch, Status status, EventDispatch events)
 : _authority(std::move(authority))
 , _dispatch(std::move(dispatch))
-, _status(std::move(status)) {
+, _status(std::move(status))
+, _events(std::move(events)) {
 	_clock.start();
+	_updates.setInterval(100);
+	connect(&_updates, &QTimer::timeout, this, [=] { subscriptions(); });
 	connect(&_connections, &QLocalServer::newConnection, this, [=] { addConnection(); });
 	_expiry.setInterval(1000);
 	connect(&_expiry, &QTimer::timeout, this, [=] { expire(); });
@@ -157,12 +239,14 @@ void ControlWorker::configure(quint64 epoch, ControlEndpointOptions options) {
 	_notifier = std::make_unique<QSocketNotifier>(_endpoint.descriptor(), QSocketNotifier::Read, this);
 	connect(_notifier.get(), &QSocketNotifier::activated, this, [=] { acceptReady(); });
 	_expiry.start();
+	_updates.start();
 	_status(epoch, path, {});
 }
 
 void ControlWorker::stop() {
 	++_epoch;
 	_expiry.stop();
+	_updates.stop();
 	_notifier.reset();
 	while (!_clients.empty()) drop(_clients.begin()->first);
 	_endpoint.close();
@@ -204,6 +288,7 @@ void ControlWorker::drop(quint64 client) {
 	const auto socket = i->second.socket;
 	for (const auto &[id, pending] : i->second.pending) pending.active->store(false);
 	_pending -= i->second.pending.size();
+	clearSubscriptions(i->second);
 	_clients.erase(i);
 	socket->disconnect(this);
 	socket->abort();
@@ -211,11 +296,14 @@ void ControlWorker::drop(quint64 client) {
 }
 
 void ControlWorker::send(quint64 client, QJsonValue id, ControlResult result) {
+	write(client, EncodeControlReply(id, std::move(result)));
+}
+
+void ControlWorker::write(quint64 client, const QByteArray &bytes) {
 	const auto i = _clients.find(client);
 	if (i == _clients.end()) return;
-	const auto bytes = EncodeControlReply(id, std::move(result));
 	const auto socket = i->second.socket;
-	if (socket->bytesToWrite() + bytes.size() > 2 * kControlLineBytes
+	if (bytes.size() > kControlLineBytes || socket->bytesToWrite() + stagedBytes(i->second) + bytes.size() > 2 * kControlLineBytes
 		|| socket->write(bytes) != bytes.size()) drop(client);
 }
 
@@ -256,8 +344,16 @@ void ControlWorker::request(quint64 client, const QByteArray &line) {
 	const auto policy = std::atomic_load(&_authority->policy);
 	auto error = AuthorizeControlCommand(request.command, *policy);
 	if (!error.code.isEmpty()) { send(client, request.id, std::move(error)); return; }
-	if (entry.pending.size() >= kControlClientPending || _pending >= kControlPending
-		|| entry.pending.contains(request.id)) {
+	if (entry.pending.contains(request.id)) {
+		send(client, request.id, ControlError(u"busy"_q, u"Duplicate pending id."_q));
+		return;
+	}
+	if (request.command == u"subscribe"_q || request.command == u"unsubscribe"_q) {
+		subscribe(client, request);
+		return;
+	}
+	if (entry.pending.size() + entry.subscriptions.size() >= kControlClientPending
+		|| _pending >= kControlPending) {
 		send(client, request.id, ControlError(u"busy"_q, u"Too many pending requests or duplicate id."_q));
 		return;
 	}
@@ -298,6 +394,209 @@ void ControlWorker::reply(quint64 epoch, quint64 client, quint64 serial, quint64
 	send(client, id, std::move(result));
 }
 
+void ControlWorker::clearSubscriptions(Client &client) {
+	for (const auto &[topic, subscription] : client.subscriptions) {
+		if (subscription.active) subscription.active->store(false);
+	}
+	_pending -= client.subscriptions.size();
+	client.subscriptions.clear();
+}
+
+void ControlWorker::subscribe(quint64 client, const ControlRequest &request) {
+	auto &entry = _clients.at(client);
+	if (request.command == u"unsubscribe"_q) {
+		if (!request.arguments.isEmpty()) {
+			send(client, request.id, ControlError(u"bad-request"_q, u"unsubscribe takes no arguments."_q));
+			return;
+		}
+		clearSubscriptions(entry);
+		send(client, request.id, { QJsonObject{ { u"topics"_q, QJsonArray() } } });
+		return;
+	}
+	const auto topics = ParseControlTopics(request.arguments);
+	if (!topics) {
+		send(client, request.id, ControlError(u"bad-request"_q, u"Expected unique media.state or lock.state topics."_q));
+		return;
+	}
+	const auto policy = std::atomic_load(&_authority->policy);
+	for (const auto topic : *topics) {
+		auto error = AuthorizeControlTopic(topic, *policy);
+		if (!error.code.isEmpty()) { send(client, request.id, std::move(error)); return; }
+	}
+	const auto extra = int(topics->size()) - int(entry.subscriptions.size());
+	if (entry.pending.size() + topics->size() > kControlClientPending || _pending + extra > kControlPending) {
+		send(client, request.id, ControlError(u"busy"_q, u"Subscription limit exceeded."_q));
+		return;
+	}
+	clearSubscriptions(entry);
+	auto names = QJsonArray();
+	for (const auto topic : *topics) {
+		entry.subscriptions.emplace(topic, Subscription{
+			.serial = ++_nextSerial, .admitted = policy->generation });
+		++_pending;
+		names.append(ControlTopicName(topic));
+	}
+	send(client, request.id, { QJsonObject{ { u"topics"_q, names } } });
+}
+
+qint64 ControlWorker::stagedBytes(const Client &client) const {
+	auto bytes = qint64(0);
+	for (const auto &[topic, subscription] : client.subscriptions) {
+		bytes += subscription.latest.size();
+	}
+	return bytes;
+}
+
+void ControlWorker::stage(quint64 client, ControlTopic topic, ControlResult result, bool ended) {
+	const auto i = _clients.find(client);
+	if (i == _clients.end()) return;
+	const auto p = i->second.subscriptions.find(topic);
+	if (p == i->second.subscriptions.end()) return;
+	auto &subscription = p->second;
+	const auto bytes = EncodeControlEvent(topic, std::move(result), ended);
+	if (bytes.size() > kControlLineBytes
+		|| i->second.socket->bytesToWrite() + stagedBytes(i->second)
+			- subscription.latest.size() + bytes.size() > 2 * kControlLineBytes) {
+		drop(client);
+		return;
+	}
+	if (subscription.active) subscription.active->store(false);
+	subscription.active.reset();
+	subscription.latest = bytes;
+	subscription.dirty = false;
+	subscription.ended = ended;
+	if (ended) subscription.started = _clock.elapsed();
+	else if (!subscription.finished || subscription.finished->load()) subscription.started = 0;
+}
+
+void ControlWorker::subscriptions() {
+	auto clients = std::vector<quint64>();
+	for (const auto &[client, entry] : _clients) clients.push_back(client);
+	for (const auto client : clients) {
+		const auto currentClient = _clients.find(client);
+		if (currentClient == _clients.end()) continue;
+		if (!currentClient->second.socket->bytesToWrite()) currentClient->second.terminalStarted = 0;
+		if (currentClient->second.terminalStarted
+			&& _clock.elapsed() - currentClient->second.terminalStarted >= kSnapshotTimeout) {
+			drop(client);
+			continue;
+		}
+		for (const auto topic : { ControlTopic::Media, ControlTopic::Lock }) {
+			const auto i = _clients.find(client);
+			if (i == _clients.end()) break;
+			auto &entry = i->second;
+			const auto p = entry.subscriptions.find(topic);
+			if (p == entry.subscriptions.end()) continue;
+			auto &subscription = p->second;
+			const auto now = _clock.elapsed();
+			if (subscription.ended) {
+				if (now - subscription.started >= kSnapshotTimeout) drop(client);
+				continue;
+			}
+			const auto policy = std::atomic_load(&_authority->policy);
+			const auto revision = _authority->revisions[int(topic)].load();
+			const auto revocation = std::atomic_load(&_authority->revocations[int(topic)]);
+			if (revocation && revocation->generation > subscription.admitted) {
+				stage(client, topic, revocation->reason, true);
+				continue;
+			}
+			if (subscription.generation != policy->generation || subscription.revision != revision) {
+				if (subscription.active) subscription.active->store(false);
+				subscription.active.reset();
+				subscription.latest.clear();
+				subscription.dirty = true;
+				subscription.generation = policy->generation;
+				subscription.revision = revision;
+			}
+			auto authorization = AuthorizeControlTopic(topic, *policy);
+			if (!authorization.code.isEmpty()) {
+				stage(client, topic, std::move(authorization), true);
+				continue;
+			}
+			if (!subscription.active && !subscription.dirty
+				&& (!subscription.finished || subscription.finished->load())) subscription.started = 0;
+			if (subscription.started && now - subscription.started >= kSnapshotTimeout) {
+				stage(client, topic, ControlError(u"busy"_q, u"State snapshot timed out."_q), true);
+				continue;
+			}
+			if (!subscription.dirty || subscription.active) continue;
+			auto snapshotAuthorization = AuthorizeControlEvent(topic, *policy);
+			if (!snapshotAuthorization.code.isEmpty()) {
+				const auto ended = snapshotAuthorization.code != u"locked"_q;
+				stage(client, topic, std::move(snapshotAuthorization), ended);
+				continue;
+			}
+			if (subscription.finished && !subscription.finished->load()) continue;
+			if (entry.socket->bytesToWrite()) {
+				subscription.started = 0;
+				continue;
+			}
+			if (!subscription.started) subscription.started = now;
+			const auto lease = std::make_shared<ControlDispatchLease>(_authority);
+			if (!lease->acquired()) continue;
+			const auto operation = std::make_shared<ControlEventLease>(_authority);
+			if (!operation->acquired()) continue;
+			subscription.active = std::make_shared<std::atomic<bool>>(true);
+			subscription.finished = operation->finished();
+			subscription.started = now;
+			subscription.dirty = false;
+			_events(_epoch, client, subscription.serial, policy->generation, revision,
+				topic, subscription.active, lease, operation);
+		}
+		for (const auto topic : { ControlTopic::Media, ControlTopic::Lock }) {
+			const auto i = _clients.find(client);
+			if (i == _clients.end() || i->second.socket->bytesToWrite()) break;
+			auto &topics = i->second.subscriptions;
+			const auto p = topics.find(topic);
+			if (p == topics.end() || p->second.latest.isEmpty()) continue;
+			auto &subscription = p->second;
+			auto authorization = ControlResult();
+			if (!subscription.ended) {
+				const auto current = std::atomic_load(&_authority->policy);
+				const auto revoked = std::atomic_load(&_authority->revocations[int(topic)]);
+				if (subscription.generation != current->generation
+					|| subscription.revision != _authority->revisions[int(topic)].load()
+					|| (revoked && revoked->generation > subscription.admitted)) continue;
+				authorization = AuthorizeControlEvent(topic, *current);
+			}
+			auto bytes = std::exchange(subscription.latest, {});
+			auto ended = subscription.ended;
+			if (!ended && !authorization.code.isEmpty()) {
+				ended = authorization.code != u"locked"_q;
+				bytes = EncodeControlEvent(topic, std::move(authorization), ended);
+			}
+			if (ended) { topics.erase(p); --_pending; }
+			write(client, bytes);
+			const auto remaining = _clients.find(client);
+			if (ended && remaining != _clients.end() && remaining->second.socket->bytesToWrite()
+				&& !remaining->second.terminalStarted) remaining->second.terminalStarted = _clock.elapsed();
+		}
+	}
+}
+
+void ControlWorker::eventReply(quint64 epoch, quint64 client, quint64 serial, quint64 generation,
+		quint64 revision, ControlTopic topic, ControlResult result) {
+	if (epoch != _epoch) return;
+	const auto i = _clients.find(client);
+	if (i == _clients.end()) return;
+	const auto p = i->second.subscriptions.find(topic);
+	if (p == i->second.subscriptions.end() || p->second.serial != serial || !p->second.active
+		|| p->second.generation != generation || p->second.revision != revision) return;
+	auto &subscription = p->second;
+	if (!subscription.active->exchange(false)) return;
+	subscription.active.reset();
+	const auto policy = std::atomic_load(&_authority->policy);
+	const auto revoked = std::atomic_load(&_authority->revocations[int(topic)]);
+	if (generation != policy->generation || revision != _authority->revisions[int(topic)].load()
+		|| (revoked && revoked->generation > subscription.admitted)) {
+		subscription.dirty = true;
+		return;
+	}
+	const auto ended = !result.code.isEmpty()
+		&& (topic != ControlTopic::Media || result.code != u"locked"_q);
+	stage(client, topic, std::move(result), ended);
+}
+
 void ControlWorker::expire() {
 	auto expired = std::vector<quint64>();
 	const auto now = _clock.elapsed();
@@ -305,7 +604,7 @@ void ControlWorker::expire() {
 		const auto overdue = std::any_of(client.pending.begin(), client.pending.end(), [&](const auto &entry) {
 			return now - entry.second.started >= 10000;
 		});
-		if (overdue || now - client.activity >= 30000) expired.push_back(id);
+		if (overdue || (client.subscriptions.empty() && now - client.activity >= 30000)) expired.push_back(id);
 	}
 	for (const auto id : expired) drop(id);
 }
@@ -318,16 +617,19 @@ struct ControlServer::State {
 	ControlWorker *worker = nullptr;
 	ControlHandler handler;
 	ControlStatus status;
+	ControlEventHandler events;
 	quint64 epoch = 0;
 	bool stopped = false;
 	std::shared_ptr<ControlLockTransition> lockTransition;
 };
 
-ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObject *parent)
+ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObject *parent,
+		ControlEventHandler events)
 : QObject(parent)
 , _state(std::make_unique<State>()) {
 	auto &state = *_state;
 	state.handler = std::move(handler);
+	state.events = std::move(events);
 	state.status = std::move(status);
 	state.worker = new ControlWorker(state.authority,
 		[this](quint64 epoch, quint64 client, quint64 serial, quint64 generation,
@@ -372,6 +674,33 @@ ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObje
 					status(path, error);
 				}
 			});
+		}, [this](quint64 epoch, quint64 client, quint64 serial, quint64 generation, quint64 revision,
+				ControlTopic topic, ControlWorker::Ticket active, std::shared_ptr<ControlDispatchLease> lease,
+				std::shared_ptr<ControlEventLease> operation) {
+			QMetaObject::invokeMethod(this, [=, this] {
+				(void)lease;
+				if (_state->stopped || _state->epoch != epoch || !active->load()) return;
+				const auto weak = QPointer<ControlServer>(this);
+				const auto mainThread = thread();
+				const auto reply = [=](ControlResult result) {
+					if (QThread::currentThread() != mainThread || !operation->complete() || !active->load()
+						|| !weak || weak->_state->stopped || weak->_state->epoch != epoch) return;
+					const auto worker = weak->_state->worker;
+					QMetaObject::invokeMethod(worker, [=] {
+						worker->eventReply(epoch, client, serial, generation, revision, topic, result);
+					});
+				};
+				const auto policy = std::atomic_load(&_state->authority->policy);
+				if (generation != policy->generation) {
+					reply(ControlError(u"busy"_q, u"Policy changed."_q));
+					return;
+				}
+				auto error = AuthorizeControlEvent(topic, *policy);
+				const auto handler = _state->events;
+				if (!error.code.isEmpty()) reply(std::move(error));
+				else if (handler) handler(topic, *policy, [active] { return active->load(); }, reply);
+				else reply(ControlError(u"unsupported"_q, u"State adapter unavailable."_q));
+			});
 		});
 	state.worker->moveToThread(&state.thread);
 	connect(&state.thread, &QThread::finished, state.worker, &QObject::deleteLater);
@@ -407,7 +736,19 @@ void ControlServer::setPolicy(ControlPolicy policy) {
 			transition->allowedGeneration.store(policy.generation);
 		}
 	}
+	for (const auto topic : { ControlTopic::Media, ControlTopic::Lock }) {
+		auto reason = AuthorizeControlTopic(topic, policy);
+		if (!reason.code.isEmpty()) {
+			std::atomic_store(&state.authority->revocations[int(topic)],
+				std::make_shared<const ControlRevocation>(ControlRevocation{
+					policy.generation, std::move(reason) }));
+		}
+	}
 	std::atomic_store(&state.authority->policy, std::make_shared<const ControlPolicy>(policy));
+}
+
+void ControlServer::notify(ControlTopic topic) {
+	_state->authority->revisions[int(topic)].fetch_add(1);
 }
 
 void ControlServer::stop() {

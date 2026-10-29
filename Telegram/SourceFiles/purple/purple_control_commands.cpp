@@ -10,7 +10,7 @@ namespace {
 
 const auto Commands = std::array{
 	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q, u"emoji.render"_q,
-	u"media.toggle"_q, u"media.play"_q, u"media.pause"_q, u"media.now"_q, u"lock"_q,
+	u"media.toggle"_q, u"media.play"_q, u"media.pause"_q, u"media.now"_q, u"lock"_q, u"subscribe"_q, u"unsubscribe"_q,
 };
 
 }
@@ -104,7 +104,7 @@ void DispatchControlRequest(
 			if (policy.enabled && policy.groups[i]) groups.append(ControlGroupName(i));
 		}
 		reply({ QJsonObject{
-			{ u"version"_q, 1 }, { u"build"_q, build.left(256) },
+			{ u"version"_q, 1 }, { u"minor"_q, 1 }, { u"build"_q, build.left(256) },
 			{ u"automation"_q, policy.enabled }, { u"groups"_q, groups },
 			{ u"commands"_q, ControlCommandNames() },
 		} });
@@ -159,6 +159,10 @@ void DispatchControlRequest(
 		} else {
 			reply(ControlError(u"not-found"_q, u"Media service unavailable."_q));
 		}
+		return;
+	}
+	if (request.command == u"subscribe"_q || request.command == u"unsubscribe"_q) {
+		reply(ControlError(u"unsupported"_q, u"Subscriptions require a socket connection."_q));
 		return;
 	}
 	const auto list = windows.list ? windows.list() : std::vector<ControlWindow>();

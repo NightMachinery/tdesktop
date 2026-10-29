@@ -37,6 +37,10 @@ void StartAppServices() {
 	StartEmojiExport();
 }
 
+void OnMediaPlayerStarted() {
+	StartControlPlayerEvents();
+}
+
 void OnScreenLockChanged(bool locked) {
 	if (locked) {
 		ReportLock(LockKind::Screen);

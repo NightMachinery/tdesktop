@@ -263,3 +263,61 @@ handler. It does not derive permission from the returned JSON. Any later
 generation invalidates the completion, even if a disabled switch has been
 re-enabled or the policy values are unchanged: the reply uses the current
 authorization error, or `busy` when the request is authorized again.
+
+## Subscriptions, protocol 1.1
+
+`hello` advertises `version:1, minor:1`; wire envelopes retain `v:1`.
+`subscribe {"topics":["media.state","lock.state"]}` replaces this connection's
+entire topic set atomically and replies with the accepted topics before any
+initial snapshot. The set must contain one or two distinct supported topics.
+Unknown topics or extra fields are rejected without changing an existing set.
+`unsubscribe {}` removes all topics; disconnect, reconfigure and stop cancel them.
+Clients that never subscribe receive only ordinary command replies.
+
+Events are JSON Lines with `v`, `event` and either `result` or a typed `error`.
+They have no request id or `ok` field. `media.state` is the same snapshot as
+`media.now`, including downloaded-path verification and Work Mode withholding.
+While passcode-locked it emits only an error with code `locked`, without ending
+the topic. `lock.state` returns `{"locked":true|false}`. Other snapshot errors
+end that topic with `ended:true`.
+
+Media information and lock topics require the `media.info` and `lock` groups,
+respectively. The master switch and topic capability are checked at admission
+and every publication. Revocation ends affected topics with `ended:true` and
+`automation-disabled` or `capability-off`, even if a setting is disabled and
+re-enabled between worker slices. Re-enabling requires a new subscription.
+Event authorization delegates to the same command-policy function as
+`media.now` or `lock`, both when computing and immediately before sending.
+Subscription admission permits the typed `locked` state without bypassing master
+or capability checks. Epoch, client, topic serial, generation and revision fence
+stale callbacks.
+An event already written to the OS socket cannot be retracted; policy checks
+apply immediately before adding bytes to the socket queue.
+
+Each topic occupies one of the existing eight per-client and 64 total pending
+slots. A topic retains only its latest bounded serialized event; the sum of all
+staged events and Qt outbound bytes stays within 128 KiB, and each line within
+64 KiB. Oversize output closes the connection. Notifications coalesce through
+two atomic revision counters; a stalled transport stops new snapshot dispatch.
+Each topic waits for its previous asynchronous operation to finish before
+replacing it. An independent 64-operation lease also counts cancelled work
+until completion or callback destruction, including across disconnects.
+Snapshot/dispatch waits time out after ten monotonic seconds with a terminal
+`busy` event. A terminal event blocked in the transport is retained for at most
+another ten seconds before the connection is closed and its topic slots freed.
+Already queued kernel bytes remain subject to the existing connection lifecycle.
+
+Player subscriptions bind through `Purple::OnMediaPlayerStarted()` immediately
+after upstream creates the player. The earlier app-service hook starts the
+control listener before player creation, so binding signals there is unsafe.
+The hook itself is one call in `core/application.cpp`; all event logic stays
+in Purple sources. Host fixtures use a thin adapter and private sockets, not
+real playback or a live profile.
+
+`tdesktop-cli watch [media|lock|all] [--json]` defaults to both topics and prints
+one line per event until interrupted. JSON mode prints the complete event;
+human mode prefixes the topic and formats the snapshot on one line. A media
+`locked` event leaves the watch running. Any terminal topic error prints its
+reason and exits with the existing error code, closing the remaining topics.
+Subscription acknowledgement uses the ordinary two-second deadline, then an
+idle watch has no read deadline. Interrupt/SIGTERM closes the socket and exits0.

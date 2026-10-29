@@ -128,3 +128,14 @@ The media control socket cases also retain a lock completion across automation
 and lock-capability disable/re-enable, with and without its own lock transition.
 Only the exact own post-lock generation may complete; later changes fail closed,
 including a repeated unchanged policy and unrelated capability changes.
+
+`control_subscription_cases.cpp` runs real private-socket subscriptions with a
+thin media/lock adapter. It covers admission/replacement/unsubscribe, Work Mode
+withholding, locked-only events, rapid master/group disable/re-enable, stale
+callbacks, reconfigure/disconnect/stop, coalescing behind a stalled reader,
+64 retained asynchronous leases across churn, typed terminal errors, oversize
+output, monotonic snapshot timeout, and shared eight/64 pending limits. The
+control driver also compiles the real app and player glue with generated tree
+language headers. Real playback and live-profile lifecycle checks remain native
+integration work under the task's no-GUI/no-profile restrictions. Go watch tests
+cover framing, acknowledgement topics, output, refusals, idle time and interrupt.

@@ -35,3 +35,10 @@ No command enables automation or changes settings.
 See [the control socket guide](../../../docs/purple/control_socket.md) for paths,
 capabilities, exit codes, limits and host tests. CMake does not build or install
 this command.
+
+`tdesktop-cli watch [media|lock|all] [--json]` watches protocol1.1 snapshots
+without polling. It defaults to both topics, prints one line per event, and
+runs until interrupted. Media lock events contain no metadata and keep watching;
+master/group revocation or another terminal topic error exits with the existing
+error code and closes both topics. An idle watch has no read timeout after its
+subscription acknowledgement. See the control-socket documentation for bounds.

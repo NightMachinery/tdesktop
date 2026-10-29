@@ -43,6 +43,8 @@ PRIVATE
     purple/purple_control_protocol.cpp
     purple/purple_control_protocol.h
     purple/purple_control_server.cpp
+    purple/purple_control_subscriptions.h
+    purple/purple_control_subscriptions.cpp
     purple/purple_control_server.h
     purple/purple_control_settings.cpp
     purple/purple_desktop_archive_store.cpp

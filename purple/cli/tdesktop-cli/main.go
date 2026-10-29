@@ -3,16 +3,19 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -20,7 +23,7 @@ import (
 const lineLimit = 64 * 1024
 const callTimeout = 2 * time.Second
 
-var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|voice now|lock"
+var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|voice now|lock|watch [media|lock|all]"
 
 type options struct {
 	socket  string
@@ -129,6 +132,28 @@ func parseOptions(args []string) (options, error) {
 		}
 		o.command = "media." + action
 		return o, nil
+	case "watch":
+		if len(positional) > 2 {
+			return o, errors.New("watch accepts media, lock or all")
+		}
+		kind := "all"
+		if len(positional) == 2 {
+			kind = positional[1]
+		}
+		var topics []string
+		switch kind {
+		case "media":
+			topics = []string{"media.state"}
+		case "lock":
+			topics = []string{"lock.state"}
+		case "all":
+			topics = []string{"media.state", "lock.state"}
+		default:
+			return o, errors.New("watch accepts media, lock or all")
+		}
+		o.command = "subscribe"
+		o.args["topics"] = topics
+		return o, nil
 	case "emoji":
 		if len(positional) != 3 || positional[1] != "render" {
 			return o, errors.New("emoji render needs an artwork id")
@@ -235,7 +260,12 @@ func exchange(path string, o options) ([]byte, response, int, error) {
 	if err != nil {
 		return nil, reply, 1, fmt.Errorf("incomplete or oversized reply: %w", err)
 	}
-	line = line[:len(line)-1]
+	return decodeControlReply(line[:len(line)-1])
+}
+
+func decodeControlReply(line []byte) ([]byte, response, int, error) {
+	var reply response
+	var err error
 	if len(line) > lineLimit || !utf8.Valid(line) {
 		return nil, reply, 1, errors.New("invalid or oversized UTF-8 reply")
 	}
@@ -424,6 +454,10 @@ func humanMedia(result json.RawMessage) (string, error) {
 }
 
 func run(args []string, getenv func(string) string, home string, out, diagnostic io.Writer) int {
+	return runContext(context.Background(), args, getenv, home, out, diagnostic)
+}
+
+func runContext(ctx context.Context, args []string, getenv func(string) string, home string, out, diagnostic io.Writer) int {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprintln(out, usage)
 		return 0
@@ -437,6 +471,9 @@ func run(args []string, getenv func(string) string, home string, out, diagnostic
 	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
+	}
+	if o.command == "subscribe" {
+		return watch(ctx, path, o, out, diagnostic)
 	}
 	line, reply, code, err := exchange(path, o)
 	if o.asJSON && line != nil {
@@ -466,5 +503,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	os.Exit(run(os.Args[1:], os.Getenv, home, os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := runContext(ctx, os.Args[1:], os.Getenv, home, os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
