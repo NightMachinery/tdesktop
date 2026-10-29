@@ -1,4 +1,5 @@
 #include "purple/purple_emoji_export.h"
+#include "purple/purple_control.h"
 
 #include "purple/purple_emoji_export_store.h"
 #include "purple/purple_emoji_export_queue.h"
@@ -198,6 +199,7 @@ EmojiExporter::EmojiExporter()
 		revoke();
 		reconcile();
 	}, _lifetime);
+	ControlSocketPathValue() | rpl::on_next([=] { dirty(); }, _lifetime);
 	reconcile();
 	_poll.start(1000);
 }
@@ -764,6 +766,7 @@ void EmojiExporter::checkMedia() {
 }
 
 void EmojiExporter::publish() {
+	const auto controlSocket = CurrentControlSocketPath();
 	const auto token = _token;
 	const auto directory = _directory;
 	const auto finished = !_queue.current();
@@ -774,10 +777,10 @@ void EmojiExporter::publish() {
 	const auto acknowledge = std::make_shared<std::set<quint64>>(std::move(_afterPublicationAck));
 	_rendering = true;
 	const auto accepted = _worker.submit(_workerGeneration,
-		[ready, previous, retired, published, acknowledge, finished, directory](const EmojiExportAuthority &current) {
+		[ready, previous, retired, published, acknowledge, finished, directory, controlSocket](const EmojiExportAuthority &current) {
 			*published = MergeEmojiLargePublication(*previous, *ready, finished, current, *retired);
 			return PublishEmojiLargeRequests(directory, *published,
-				QDateTime::currentDateTimeUtc(), *acknowledge, current);
+				QDateTime::currentDateTimeUtc(), *acknowledge, current, controlSocket);
 		}, [=](quint64 generation, bool ok) {
 			if (generation != _workerGeneration || !_epoch.accepts(token)) return;
 			_rendering = false;

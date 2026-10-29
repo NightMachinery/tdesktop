@@ -50,6 +50,10 @@ int main(int argc, char **argv) {
 	check(unique[0].recentRank == 1, "first seen recent rank retained");
 	check(!unique[3].recentRank, "nonpositive rank becomes null");
 	const auto catalog = EmojiExportCatalog(entries, stamp);
+	check(!catalog.contains(u"controlSocket"_q), "absent listener preserves catalog v1 shape");
+	check(EmojiExportCatalog(entries, stamp, u"/private/owned/control.sock"_q)
+		.value(u"controlSocket"_q).toString() == u"/private/owned/control.sock"_q,
+		"listening control socket is an optional catalog v1 field");
 	check(catalog.value(u"version"_q).toInt() == 1, "version one");
 	check(catalog.value(u"generatedAt"_q).toString() == u"2026-01-02T03:04:05.000Z"_q,
 		"UTC ISO timestamp");

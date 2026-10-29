@@ -149,7 +149,8 @@ std::vector<EmojiExportEntry> UniqueEmojiExportEntries(
 
 QJsonObject EmojiExportCatalog(
 		const std::vector<EmojiExportEntry> &entries,
-		const QDateTime &generatedAt) {
+		const QDateTime &generatedAt,
+		const QString &controlSocket) {
 	auto array = QJsonArray();
 	for (const auto &entry : UniqueEmojiExportEntries(entries)) {
 		auto object = QJsonObject{
@@ -174,11 +175,13 @@ QJsonObject EmojiExportCatalog(
 		if (entry.installed) object.insert(u"installed"_q, *entry.installed);
 		array.push_back(std::move(object));
 	}
-	return {
+	auto result = QJsonObject{
 		{ u"version"_q, 1 },
 		{ u"generatedAt"_q, generatedAt.toUTC().toString(Qt::ISODateWithMs) },
 		{ u"entries"_q, array },
 	};
+	if (!controlSocket.isEmpty()) result.insert(u"controlSocket"_q, controlSocket);
+	return result;
 }
 
 QImage EmojiExportFrame(QImage frame, std::optional<QColor> tint) {
@@ -226,7 +229,8 @@ bool PublishEmojiExportCatalog(
 		const QString &directory,
 		const std::vector<EmojiExportEntry> &entries,
 		const QDateTime &generatedAt,
-		const std::function<bool()> &current) {
+		const std::function<bool()> &current,
+		const QString &controlSocket) {
 	if ((current && !current()) || !generatedAt.isValid() || !SafeExport(directory, true)) {
 		return false;
 	}
@@ -244,7 +248,7 @@ bool PublishEmojiExportCatalog(
 		keep.insert(info.fileName());
 	}
 	if (!AtomicWrite(directory + u"/catalog.json"_q,
-		QJsonDocument(EmojiExportCatalog(verified, generatedAt)).toJson(QJsonDocument::Compact), current, parent)) {
+		QJsonDocument(EmojiExportCatalog(verified, generatedAt, controlSocket)).toJson(QJsonDocument::Compact), current, parent)) {
 		return false;
 	}
 	return RemoveStale(directory, keep, current);

@@ -271,3 +271,6 @@ Sync-chat setup and its native qualification boundary are described in [sync_cha
 Local emoji artwork export is described in [emoji_export.md](emoji_export.md).
 
 Marked chooser WebP paste is documented in [webp_paste.md](webp_paste.md).
+
+The opt-in local control socket and standalone Go command are documented in
+[control_socket.md](control_socket.md).

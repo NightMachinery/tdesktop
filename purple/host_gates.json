@@ -114,6 +114,8 @@
     {"name": "test_sync_local_store", "driver": "purple/test_sync_local_store.sh", "compiles": true, "fixtures": ["purple/test_sync_local_store.cpp"]},
     {"name": "test_sync_record_names", "driver": "purple/test_sync_record_names.sh", "compiles": true, "fixtures": ["purple/test_sync_record_names.cpp"]},
     {"name": "test_version", "driver": "purple/test_version.sh", "compiles": true, "fixtures": ["purple/test_version.cpp"]},
+    {"name": "test_control", "driver": "purple/test_control.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}"],
+     "fixtures": ["Telegram/SourceFiles/purple/tests/control_cases.cpp", "Telegram/SourceFiles/purple/tests/control_preferences_cases.cpp", "purple/cli/tdesktop-cli/main_test.go"]},
     {"name": "test_config", "driver": "purple/test_config.sh", "compiles": true, "env": {"ARCHIVE_SQLITE_TESTS": "1"}},
     {
       "name": "test_emoji_large",

@@ -62,7 +62,8 @@ private:
 	const std::vector<EmojiExportEntry> &entries);
 [[nodiscard]] QJsonObject EmojiExportCatalog(
 	const std::vector<EmojiExportEntry> &entries,
-	const QDateTime &generatedAt);
+	const QDateTime &generatedAt,
+	const QString &controlSocket = {});
 [[nodiscard]] QImage EmojiExportFrame(QImage frame, std::optional<QColor> tint);
 [[nodiscard]] bool WriteEmojiExportPng(
 	const QString &directory,
@@ -73,7 +74,8 @@ private:
 	const QString &directory,
 	const std::vector<EmojiExportEntry> &entries,
 	const QDateTime &generatedAt,
-	const std::function<bool()> &current = {});
+	const std::function<bool()> &current = {},
+	const QString &controlSocket = {});
 [[nodiscard]] bool ClearEmojiExport(
 	const QString &directory,
 	const std::function<bool()> &current = {});

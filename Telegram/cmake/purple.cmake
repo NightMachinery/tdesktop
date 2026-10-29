@@ -31,6 +31,17 @@ endif()
 
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
+    purple/purple_control.cpp
+    purple/purple_control.h
+    purple/purple_control_commands.cpp
+    purple/purple_control_commands.h
+    purple/purple_control_endpoint.cpp
+    purple/purple_control_endpoint.h
+    purple/purple_control_protocol.cpp
+    purple/purple_control_protocol.h
+    purple/purple_control_server.cpp
+    purple/purple_control_server.h
+    purple/purple_control_settings.cpp
     purple/purple_desktop_archive_store.cpp
     purple/purple_desktop_archive_store.h
     purple/purple_archive_attention.cpp

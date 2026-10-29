@@ -396,3 +396,19 @@ docs/purple/upstream_hooks.md.
 "lng_purple_emoji_export_about" = "Saves your emoji library catalog and 128 px artwork to {path}.";
 
 "lng_purple_emoji_large_cap" = "Large emoji cache limit";
+
+"lng_purple_control_title" = "Local automation";
+"lng_purple_control_enable" = "Enable";
+"lng_purple_control_confirm" = "Allow programs running under your user account to read and activate Purple windows? Only enable this if you trust those programs. The control socket never changes settings or asks for permission remotely.";
+"lng_purple_control_confirm_twice" = "Confirm once more to enable local automation on this device. You can turn it off here at any time.";
+"lng_purple_control_about" = "Off by default. Enabling takes two confirmations here. Other programs cannot enable automation or change these settings.";
+"lng_purple_control_path" = "Control socket path";
+"lng_purple_control_path_placeholder" = "Empty uses the default";
+"lng_purple_control_default" = "Default";
+"lng_purple_control_no_socket" = "No control socket is available for this profile.";
+"lng_purple_control_window" = "Window control";
+"lng_purple_control_media_control" = "Media playback control";
+"lng_purple_control_media_info" = "Media information";
+"lng_purple_control_lock" = "Lock";
+"lng_purple_control_emoji" = "Emoji artwork";
+"lng_purple_control_groups_about" = "Capability groups are local to this device and start enabled. This version supports window commands; media, lock and emoji commands will be added later.";

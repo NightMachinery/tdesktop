@@ -440,9 +440,10 @@ std::vector<EmojiExportEntry> MergeEmojiLargePublication(
 
 bool PublishEmojiLargeRequests(const QString &directory,
 		std::vector<EmojiExportEntry> &entries, const QDateTime &generatedAt,
-		const std::set<quint64> &acknowledge, const std::function<bool()> &current) {
+		const std::set<quint64> &acknowledge, const std::function<bool()> &current,
+		const QString &controlSocket) {
 	ValidateEmojiLargeEntries(directory, entries);
-	if (!PublishEmojiExportCatalog(directory, entries, generatedAt, current)) return false;
+	if (!PublishEmojiExportCatalog(directory, entries, generatedAt, current, controlSocket)) return false;
 	for (const auto &entry : entries) {
 		if (!Current(current)) return false;
 		if (!acknowledge.contains(entry.id) || entry.large.isEmpty()) continue;

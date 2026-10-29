@@ -26,6 +26,7 @@ void Check(bool value, const char *name) {
 	if (!value) { ++failures; std::printf("FAIL: %s\n", name); }
 }
 qint64 EmojiLargeCacheCap() { return kEmojiLargeDefaultBytes; }
+QString CurrentControlSocketPath() { return u"synthetic-control.sock"_q; }
 
 class EmojiExporter final : public QObject {
 public:
@@ -170,7 +171,9 @@ void RunDemandCohort(QCoreApplication &app, bool future) {
 	Check(work([&](const EmojiExportAuthority &) {
 		auto file = QFile(directory + u"/catalog.json"_q);
 		if (!file.open(QIODevice::ReadOnly)) return false;
-		const auto entries = QJsonDocument::fromJson(file.readAll()).object().value(u"entries"_q).toArray();
+		const auto catalog = QJsonDocument::fromJson(file.readAll()).object();
+		if (catalog.value(u"controlSocket"_q).toString() != CurrentControlSocketPath()) return false;
+		const auto entries = catalog.value(u"entries"_q).toArray();
 		const auto entry = entries.isEmpty() ? QJsonObject() : entries[0].toObject();
 		const auto relative = entry.value(u"large"_q).toString();
 		return entry.value(u"id"_q).toString() == QString::number(late)
@@ -191,7 +194,9 @@ void RunDemandCohort(QCoreApplication &app, bool future) {
 	Check(work([&](const EmojiExportAuthority &) {
 		auto file = QFile(directory + u"/catalog.json"_q);
 		if (!file.open(QIODevice::ReadOnly)) return false;
-		const auto entries = QJsonDocument::fromJson(file.readAll()).object().value(u"entries"_q).toArray();
+		const auto catalog = QJsonDocument::fromJson(file.readAll()).object();
+		if (catalog.value(u"controlSocket"_q).toString() != CurrentControlSocketPath()) return false;
+		const auto entries = catalog.value(u"entries"_q).toArray();
 		return entries.size() == 1 && !entries[0].toObject().contains(u"large"_q)
 			&& QFileInfo::exists(directory + u"/requests/"_q + QString::number(missing));
 	}), "missing output is not advertised and its successful demand is not acknowledged");

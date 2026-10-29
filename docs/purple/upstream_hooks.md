@@ -13,6 +13,17 @@ an upstream file updates its entry here in the same commit, together with the
 feature doc's "Upstream hooks" section. `purple/upstream_report.sh` produces
 the numbers.
 
+## Purple control socket
+
+- `core/sandbox.cpp`: remove only the fork's CTRL include and command branch;
+  upstream CMD, OPEN and XDG activation routes stay in place.
+- `core/external_control.cpp` and `.h`: remove these fork-only files and their
+  old `Telegram/CMakeLists.txt` registrations. Window routing and local consent
+  now live under Purple; no new implementation enters upstream files.
+- The existing Purple startup and settings hooks call the owned control service.
+  New source registration is in `Telegram/cmake/purple.cmake`. See
+  [control_socket.md](control_socket.md).
+
 ## Marked chooser WebP paste
 
 - `core/mime_type.cpp` and the existing chat/confirmation admission checks call

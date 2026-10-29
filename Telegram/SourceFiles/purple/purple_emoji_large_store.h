@@ -74,7 +74,8 @@ private:
 	std::vector<EmojiExportEntry> &entries,
 	const QDateTime &generatedAt,
 	const std::set<quint64> &acknowledge,
-	const std::function<bool()> &current = {});
+	const std::function<bool()> &current = {},
+	const QString &controlSocket = {});
 void ValidateEmojiLargeEntries(
 	const QString &directory,
 	std::vector<EmojiExportEntry> &entries);

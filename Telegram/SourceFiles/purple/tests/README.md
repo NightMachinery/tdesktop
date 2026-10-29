@@ -87,3 +87,19 @@ export worker and frame generators. They never open a real account or chooser.
 The large-cap preference case extracts the production preference API and integer serialization definitions. It checks restart persistence, malformed byte fallback and signed integer endpoints. The large driver also checks that the actual cap object defines both integer preference symbols, so a TU-only compile cannot hide an app link failure.
 
 The demand case also checks a full future-dated cohort after clock rollback. Times strictly beyond five minutes rank oldest; an exact five-minute boundary stays plausible, and equal times use filename order. Each case executes real pruning on EmojiExportWorker.
+
+## Local control socket
+
+`control_cases.cpp` exercises actual protocol/authorization/consent code and the
+worker under QCoreApplication with private sockets and a fake main-thread window
+adapter. It covers fragmented frames, exact line limits, signed IDs, group/lock
+refusal, queued cancellation, 64-slot dispatch/pending bounds, owned stale/live
+sockets, parent permissions and replacement-safe shutdown.
+
+`control_preferences_cases.cpp` extracts the real public preference templates
+and Purple byte-array specialization bodies. The driver also requires strong
+production definitions of both specialization symbols. `purple/test_control.py`
+compiles all eleven changed production units with scratch-generated language,
+runs these programs, checks the legacy CTRL removal, and tests/builds the Go CLI
+against private fake servers. The canonical `test_control` gate registers both
+programs and the Go test source. No GUI or live Telegram profile is used.
