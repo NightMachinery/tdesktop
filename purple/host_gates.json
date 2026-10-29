@@ -8,7 +8,7 @@
     "purple/test_cases.py": {"copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp", "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp", "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp", "account-routing-file": "Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp", "emoji-export": "Telegram/SourceFiles/purple/tests/emoji_export_cases.cpp", "emoji-export-async": "Telegram/SourceFiles/purple/tests/emoji_export_async_cases.cpp", "emoji-export-shutdown": "Telegram/SourceFiles/purple/tests/emoji_export_shutdown_cases.cpp", "webp-paste": "Telegram/SourceFiles/purple/tests/webp_paste_cases.mm", "webp-paste-flow": "Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp"}
   },
   "gates": [
-    {"name": "test_wait_routes", "driver": "purple/test_wait_routes.py"},
+    {"name": "test_wait_routes", "driver": "purple/test_wait_routes.py", "coverage": "Writer inventory and wait-cover focus teardown wiring"},
     {"name": "check_wait_routes", "driver": "purple/check_wait_routes.py"},
     {"name": "test_settings_row_layout", "driver": "purple/test_settings_row_layout.py"},
     {"name": "test_history_menu_lists", "driver": "purple/test_history_menu_lists.py", "compiles": true, "args": ["--output-dir", "{out}"],
@@ -73,7 +73,7 @@
      "fixtures": ["purple/test_picker.cpp"]},
     {"name": "test_picker_routes", "driver": "purple/test_picker_routes.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}"],
      "fixtures": ["purple/test_picker_routes.cpp", "purple/test_picker_gifts.cpp"]},
-    {"name": "test_wait", "driver": "purple/test_wait.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}"],
+    {"name": "test_wait", "driver": "purple/test_wait.py", "coverage": "Wait and presence policy, key isolation and production cover focus teardown", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}"],
      "fixtures": ["purple/test_wait.cpp"]},
     {"name": "archive-files", "driver": "purple/test_archive.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}"],
      "fixtures": ["purple/test_archive.cpp"]},

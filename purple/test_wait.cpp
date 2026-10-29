@@ -1275,6 +1275,72 @@ void SourceNoOpCases() {
 	CHECK(writes == 0);
 }
 
+void CoverFocusCases() {
+	for (const auto childFocused : { false, true }) {
+		for (auto target = 0; target != 8; ++target) {
+			auto host = QWidget();
+			auto other = QWidget();
+			auto cover = QPointer<QWidget>(new QWidget(&host));
+			auto button = QPushButton(cover);
+			auto search = QLineEdit(&host);
+			auto editor = QLineEdit(&host);
+			auto list = QWidget(&host);
+			auto foreign = QLineEdit(&other);
+			cover->setFocusPolicy(Qt::StrongFocus);
+			list.setFocusPolicy(Qt::StrongFocus);
+			QWidget::setTabOrder(cover, &button);
+			QWidget::setTabOrder(&button, &search);
+			QWidget::setTabOrder(&search, &editor);
+			QWidget::setTabOrder(&editor, &list);
+			QWidget::setTabOrder(&list, cover);
+			host.show();
+			host.activateWindow();
+			QCoreApplication::processEvents();
+			auto previous = QPointer<QWidget>();
+			if (target == 0) {
+				previous = &editor;
+			} else if (target == 1) {
+				previous = &list;
+			} else if (target == 2) {
+				previous = new QLineEdit(&host);
+				delete previous.data();
+			} else if (target == 3) {
+				previous = &editor;
+				editor.hide();
+			} else if (target == 4) {
+				previous = &editor;
+				editor.setEnabled(false);
+			} else if (target == 5) {
+				previous = &foreign;
+			} else if (target == 7) {
+				previous = &search;
+			}
+			if (childFocused) {
+				button.setFocus();
+			} else {
+				cover->setFocus();
+			}
+			CHECK(QApplication::focusWidget() == (childFocused ? &button : cover.data()));
+			auto searchFocused = 0;
+			const auto connection = QObject::connect(qApp, &QApplication::focusChanged,
+				[&](QWidget*, QWidget *now) {
+					if (now == &search) {
+						++searchFocused;
+					}
+				});
+			CloseWaitCover(cover, previous);
+			CHECK(cover && cover->isHidden());
+			CHECK(searchFocused == (target == 7 ? 1 : 0));
+			CHECK(QApplication::focusWidget() == (target < 2 || target == 7 ? previous.data() : nullptr));
+			QObject::disconnect(connection);
+			button.setParent(nullptr);
+			QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+			CHECK(!cover);
+		}
+	}
+	CloseWaitCover(nullptr, nullptr);
+}
+
 void PlatformKeyCases() {
 	auto host = QWidget();
 	auto cover = QWidget(&host);
@@ -1524,6 +1590,7 @@ int main(int argc, char *argv[]) {
 	FocusPreferenceProbe::ReadyTimeoutOptionCases();
 	DefaultDelayCases();
 	SourceNoOpCases();
+	CoverFocusCases();
 	PlatformKeyCases();
 	std::printf("wait: %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;

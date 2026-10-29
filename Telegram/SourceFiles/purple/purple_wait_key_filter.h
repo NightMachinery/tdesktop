@@ -10,6 +10,10 @@
 
 namespace Purple {
 
+void CloseWaitCover(
+	QPointer<QWidget> cover,
+	QPointer<QWidget> previousFocus);
+
 struct WaitKeyHandlers {
 	std::function<void()> abort;
 	// The host window or the application gained or lost activation. Without

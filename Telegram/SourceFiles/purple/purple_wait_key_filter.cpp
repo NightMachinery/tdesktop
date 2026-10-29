@@ -9,6 +9,35 @@
 
 namespace Purple {
 
+void CloseWaitCover(
+		QPointer<QWidget> cover,
+		QPointer<QWidget> previousFocus) {
+	if (!cover) {
+		return;
+	}
+	if (previousFocus
+		&& previousFocus->isVisible()
+		&& previousFocus->isEnabled()
+		&& previousFocus->window() == cover->window()
+		&& previousFocus != cover
+		&& !cover->isAncestorOf(previousFocus)) {
+		previousFocus->setFocus(Qt::OtherFocusReason);
+	}
+	if (!cover) {
+		return;
+	}
+	const auto focused = QPointer<QWidget>(QApplication::focusWidget());
+	if (focused && (focused == cover || cover->isAncestorOf(focused))) {
+		focused->clearFocus();
+	}
+	if (cover) {
+		cover->hide();
+	}
+	if (cover) {
+		cover->deleteLater();
+	}
+}
+
 void WaitKeyFilter::arm(
 		QWidget *host,
 		QWidget *cover,

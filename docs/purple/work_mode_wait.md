@@ -61,9 +61,10 @@ foreground and unlocked check, and the guarded writer. A failure aborts with
 today's message.
 
 Keys in the ready step: Return or keypad Enter presses the button; Escape and
-any other key abort. For 500 ms after the step appears, and again when it
-reappears after a lock, every key is swallowed and the button is greyed and
-deaf to the mouse, so a held or late key cannot confirm. Auto-repeat is always
+any other key abort. For 500 ms after the step appears every key is swallowed
+and the button is greyed and deaf to the mouse, so a held or late key cannot
+confirm. The WaitPresence model also rearms this guard on a modeled lock return;
+the public lock hooks cancel first, as described below. Auto-repeat is always
 ignored. Abort stays clickable throughout. The ready step's Abort sits exactly
 where the countdown's Abort was, with the action button, hint and title stacked
 above it, so a late click aimed at Abort can never land on the action, however
@@ -77,22 +78,29 @@ counting in sleep (`CLOCK_MONOTONIC` on macOS, `CLOCK_BOOTTIME` on Linux,
 `GetTickCount64` on Windows). `crl::now()` stops in sleep on macOS and Linux
 until something adjusts it.
 
-### Locks versus app switches
+### Public lock cancellation
 
-Switching to another app cancels, in both phases. Screen lock, OS session lock,
-sleep and Telegram's passcode lock do not. On return the countdown or ready
-step is still there, unless the timeout passed.
+Switching to another app cancels, in both phases. Telegram's application-passcode
+and screen-lock hooks also cancel the pending wait. `OnAppPasscodeLock()` and
+`OnScreenLockChanged(true)` call `ReportLock()`, which calls
+`CancelPendingPeek()` before `EndPeekOnApplicationLock()` reaches the presence
+handler. Unlocking does not resume that cancelled wait or start Peek.
 
-The signals are the ones Desktop already has. All feed
-`Core::App().screenIsLocked()`:
+Desktop already has these screen-lock signals, feeding
+`Core::App().screenIsLocked()`, and the separate application-passcode signal:
 
 - macOS: `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked`;
 - Windows: `WTS_SESSION_LOCK`/`LOGOFF` and `UNLOCK`/`LOGON`;
 - Linux: the XDG portal's `screensaver-active`;
 - passcode lock, on every platform: `passcodeLocked()`.
 
-A lock can make the app inactive before its signal arrives, so `WaitPresence`
-never acts on inactivity alone:
+### WaitPresence model
+
+The following describes the `WaitPresence` state machine when supplied foreground
+and lock inputs directly. Its suspension and return rules do not bypass the
+earlier cancellation in the public application-passcode and screen-lock hooks.
+A lock can make the app inactive before its signal arrives, so this model never
+acts on inactivity alone:
 
 - leaving the window leaves 300 ms for a lock signal;
 - a lock signal inside that makes this a lock;
@@ -225,3 +233,48 @@ refreshes that editor target before any mixed device-local preference write.
 Later edits from the same open editor use the refreshed target. Other settings
 writers retain their existing completion checks unless they supply a separate
 committed-value check.
+
+## Focus when a wait ends
+
+The cover remembers the focused widget before it appears. Every terminal path
+uses the same teardown: repeated Peek hotkey, Abort (countdown or ready), Escape,
+ready timeout, presence cancellation, validation failure, and successful action.
+It restores the original widget while it is still visible and enabled in the
+same window. If that widget was destroyed or hidden, it clears focus from the
+cover or its focused child instead. It never chooses search as a fallback.
+Starting Peek follows this same rule. Teardown does not activate an inactive
+window. The public application-passcode and screen-lock paths cancel the pending
+wait through this teardown; it does not resume after unlock. The suspension
+behavior described above belongs only to the WaitPresence model.
+
+Focus is restored or cleared **before** hiding the cover. Qt's widget hide path
+otherwise advances focus from the hidden cover (or its child button) to the next
+widget in the tab chain. That temporary search focus can engage search UI even
+when focus is restored afterward. No upstream focus or keyboard handler changes
+are needed. The key filter still consumes the aborting key.
+
+`purple/test_wait.py` exercises the production teardown under headless Qt with
+cover and child-button focus, valid input/list targets and absent, destroyed,
+hidden, disabled or foreign-window targets. It observes every focus change, so
+transient search activation fails too. `purple/test_wait_routes.py` pins capture
+before showing the cover and central teardown on cancel, confirm and timeout.
+
+Native confirmation (manual, not run by the host tests): do each item once with
+a chat open and its message input focused, then again with no chat open and the
+chat list focused. After each ending, type an inert letter and confirm that the
+original input receives it, or the list keeps focus, without opening search.
+
+- Press Cmd+Shift+E, then press it again during the countdown.
+- Start again and click countdown Abort; repeat with ready-step Abort.
+- Start again and press Escape in both countdown and ready steps.
+- Let the ready step expire without acting.
+- Switch to another app during countdown; return and check focus. Repeat with
+  Telegram's other window.
+- Start a countdown, invoke Telegram's passcode lock, then unlock. Verify that
+  the wait is gone, Peek did not start and search was not chosen as a fallback.
+  Repeat from the ready step. Repeat both phases with the system screen lock.
+  A new Peek request must start a new wait, not resume the cancelled one.
+- Complete the countdown and click Start Peek after the ready input guard.
+  Repeat with Enter. Verify Peek starts and focus returns to the original widget.
+- Open a wait from an editor, then close or hide the original editor before
+  ending the wait. Confirm search never becomes the fallback.

@@ -10,6 +10,26 @@ from check_wait_routes import inventory, WRITERS
 
 
 class WaitRoutes(unittest.TestCase):
+    def test_cover_teardown_restores_before_hiding(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / 'Telegram/SourceFiles/purple/purple_peek_controls.cpp').read_text()
+        close = source.split('void PendingWait::closeCover() {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('CloseWaitCover(cover, focus);', close)
+        self.assertNotIn('->hide()', close)
+        self.assertNotIn('setInnerFocus', close)
+        self.assertLess(close.index('std::exchange(_previousFocus, nullptr)'), close.index('CloseWaitCover('))
+        self.assertLess(close.index('_window = nullptr'), close.index('CloseWaitCover('))
+        request = source.split('if (result.outcome == WaitOutcome::Pending) {', 1)[1]
+        self.assertLess(request.index('_previousFocus = QApplication::focusWidget()'), request.index('new WaitCover('))
+        for signature in ('void PendingWait::cancel()', 'void PendingWait::confirm()', 'void PendingWait::render('):
+            body = source.split(signature, 1)[1].split('\n}', 1)[0]
+            self.assertIn('closeCover();', body)
+        key = (root / 'Telegram/SourceFiles/purple/purple_wait_key_filter.cpp').read_text()
+        close = key.split('void CloseWaitCover(', 1)[1].split('\n}', 1)[0]
+        self.assertLess(close.index('previousFocus->setFocus'), close.index('cover->hide()'))
+        self.assertLess(close.index('focused->clearFocus()'), close.index('cover->hide()'))
+        self.assertNotIn('setInnerFocus', close)
+
     def test_called_writer_with_any_receiver(self):
         for name in WRITERS:
             for prefix in ('', 'Purple::', 'Renamed::', 'any.', 'something->', 'factory().', 'obj.template '):

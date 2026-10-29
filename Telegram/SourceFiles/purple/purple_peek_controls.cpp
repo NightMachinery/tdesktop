@@ -417,17 +417,11 @@ void PendingWait::closeCover() {
 	_keys.disarm();
 	_pendingLifetime.destroy();
 	const auto cover = std::exchange(_cover, nullptr);
-	if (cover) {
-		cover->hide();
-		cover->deleteLater();
-	}
 	const auto focus = std::exchange(_previousFocus, nullptr);
-	if (focus && focus->isVisible() && focus->window()->isActiveWindow()) {
-		focus->setFocus();
-	}
 	_window = nullptr;
 	_presence.reset();
 	_coverHidden = false;
+	CloseWaitCover(cover, focus);
 	if (cover) {
 		_changes.fire({});
 	}
