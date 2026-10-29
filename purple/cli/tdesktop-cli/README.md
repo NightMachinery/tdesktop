@@ -10,6 +10,12 @@ go build -o tdesktop-cli .
 ./tdesktop-cli windows
 ./tdesktop-cli activate 0
 ./tdesktop-cli cycle
+./tdesktop-cli media toggle
+./tdesktop-cli media play --music
+./tdesktop-cli media pause --voice
+./tdesktop-cli media now --json
+./tdesktop-cli voice now
+./tdesktop-cli lock
 ./tdesktop-cli emoji render 5339220291157500400 --px 256 --json
 ```
 
@@ -19,6 +25,11 @@ Emoji artwork IDs are canonical nonzero uint64 decimals; `--px` accepts 1 throug
 512 and defaults to 512. Render calls wait up to ten seconds and report the
 published path, actual pixel bound and source kind. Enable Local emoji export
 and the emoji capability group as well as Local automation.
+Playback commands use the active media type unless `--voice` or `--music` selects
+one. `media now` reports the active item; `voice now` requests voice explicitly.
+A not-downloaded file has no path. Work Mode hidden items return only their
+filename and available path. Media information refuses while passcode locked;
+playback and lock still work. `lock` requires a configured local passcode.
 No command enables automation or changes settings.
 
 See [the control socket guide](../../../docs/purple/control_socket.md) for paths,

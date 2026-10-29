@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_control_protocol.h"
+#include "purple/purple_control_media.h"
 #include <QtCore/QJsonArray>
 #include <array>
 #include <vector>
@@ -55,6 +56,7 @@ void DispatchControlRequest(
 	const QString &build,
 	const ControlWindowAdapter &windows,
 	ControlReply reply,
-	const ControlEmojiAdapter &emoji = {});
+	const ControlEmojiAdapter &emoji = {},
+	const ControlMediaAdapter &media = {});
 
 }

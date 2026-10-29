@@ -83,7 +83,7 @@ void PolicyCases() {
 	Check(AuthorizeControlCommand(u"window.list"_q, policy).code == u"locked"_q, "window titles refuse locked");
 	Check(AuthorizeControlCommand(u"ping"_q, policy).code.isEmpty(), "ping allowed while locked with master enabled");
 	policy.locked = false;
-	for (const auto &name : { u"media.now"_q, u"lock"_q, u"subscribe"_q, u"automation-off"_q }) {
+	for (const auto &name : { u"subscribe"_q, u"automation-off"_q }) {
 		Check(AuthorizeControlCommand(name, policy).code == u"unsupported"_q, "future and settings commands unavailable");
 	}
 	auto activated = -1;
@@ -101,7 +101,7 @@ void PolicyCases() {
 	Check(call(u"window.activate"_q, {{u"index"_q, 0.5}}).code == u"bad-request"_q && activated == 1, "fractional activate never defaults to zero");
 	Check(call(u"window.activate"_q, {{u"index"_q, 5}}).code == u"not-found"_q, "missing index refusal");
 	Check(call(u"window.cycle"_q).code.isEmpty() && activated == 1, "window cycle routes adapter");
-	Check(call(u"hello"_q).value.value(u"commands"_q).toArray().size() == 6, "hello advertises only implemented commands");
+	Check(call(u"hello"_q).value.value(u"commands"_q).toArray().size() == 11, "hello advertises only implemented commands");
 	auto consent = ControlConsent();
 	auto old = consent.begin();
 	Check(!consent.confirm(old), "enable requires first step");
@@ -225,11 +225,16 @@ void RawIntegerCases() {
 				}
 				for (const auto &entry : ControlCommandNames()) {
 					const auto command = entry.toString();
+					const auto group = command.startsWith(u"window."_q) ? 0
+						: command == u"emoji.render"_q ? 4
+						: command == u"media.now"_q ? 2
+						: command == u"lock"_q ? 3 : 1;
+					const auto refusesLocked = group == 0 || group == 2 || group == 4;
 					const auto expected = (command == u"hello"_q) ? QString()
 						: !enabled ? u"automation-disabled"_q
 						: (command == u"ping"_q) ? QString()
-						: !policy.groups[command == u"emoji.render"_q ? 4 : 0] ? u"capability-off"_q
-						: locked ? u"locked"_q : QString();
+						: !policy.groups[group] ? u"capability-off"_q
+						: (locked && refusesLocked) ? u"locked"_q : QString();
 					Check(AuthorizeControlCommand(command, policy).code == expected,
 						"every registered command follows the complete authorization matrix");
 				}

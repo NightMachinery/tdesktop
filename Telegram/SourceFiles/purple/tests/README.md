@@ -117,3 +117,14 @@ The emoji control fixture also extracts the literal ordinary-render completion
 callback. It admits a socket demand behind a preview-only job and requires one
 eventual successful reply, while actual failed or unsupported Large attempts
 still retire their waiters.
+
+`control_media_cases.cpp` covers the media value adapter, strict dispatch,
+Work Mode withholding, downloaded-file checks on a worker and lock completion
+across its own policy refresh without bypassing revocation. The canonical
+control driver also compiles the real player/passcode adapter; host tests use
+inert fixtures and perform no real playback or live-profile lock.
+
+The media control socket cases also retain a lock completion across automation
+and lock-capability disable/re-enable, with and without its own lock transition.
+Only the exact own post-lock generation may complete; later changes fail closed,
+including a repeated unchanged policy and unrelated capability changes.

@@ -5,12 +5,14 @@ Open Settings, Advanced, Purple, Local automation and confirm both dialogs to
 allow commands. Automation starts off. A socket request cannot open a consent
 dialog, enable automation or change settings.
 
-This version supports `hello`, `ping`, `window.list`, `window.activate` and
-`window.cycle`, plus `emoji.render`. Window and emoji commands use the old primary-first window order and
-refuse while the app passcode is locked. All five capability groups start on:
-window, media.control, media.info, lock and emoji. Window control and emoji rendering are implemented here. Media, lock and
-subscriptions are later slices. `hello` advertises the implemented commands, build and enabled groups.
-All commands except `hello`, including `ping`, require the master switch.
+This version supports `hello`, `ping`, `window.list`, `window.activate`,
+`window.cycle`, `emoji.render`, `media.toggle`, `media.play`, `media.pause`,
+`media.now` and `lock`. Window commands keep the primary-first order. Window,
+emoji and media information commands refuse while the app passcode is locked;
+playback controls and lock remain available. All five capability groups start
+on: window, media.control, media.info, lock and emoji. `hello` advertises the
+implemented commands, build and enabled groups. All commands except `hello`,
+including `ping`, require the master switch. Subscriptions remain a later slice.
 
 ## Try the CLI
 
@@ -25,6 +27,11 @@ go build -o tdesktop-cli .
 ./tdesktop-cli windows
 ./tdesktop-cli activate 0
 ./tdesktop-cli cycle
+./tdesktop-cli media toggle
+./tdesktop-cli media pause --voice
+./tdesktop-cli media now --json
+./tdesktop-cli voice now
+./tdesktop-cli lock
 ./tdesktop-cli emoji render 5339220291157500400 --px 256
 ```
 
@@ -49,6 +56,42 @@ Exit codes are 0 for success, 2 for automation/capability/lock refusal, 3 for no
 reachable socket, 4 for an unsupported protocol or command, and 1 for other
 errors. The CLI prints local enable instructions when automation is disabled.
 The CMake app target does not build or install this separate command.
+
+## Media and lock
+
+`media.toggle`, `media.play` and `media.pause` belong to `media.control`.
+Their only optional argument is `type:"music"` or `type:"voice"`; omission uses
+the player's active type. They use the existing player and return its selected
+`type` and resulting `state`. No current item returns `not-found`.
+
+`media.now` belongs to `media.info`. It accepts the same optional type selector;
+`voice now` in the CLI supplies `type:"voice"`. A normal result contains `type`,
+`state` (`playing`, `paused` or `stopped`), `position_ms`, `duration_ms`, and
+`file:{name,path,mime}`. Music adds `music:{title,performer}`; voice adds
+`voice:{sender,chat,date}`, with date in Unix seconds. No current item has a
+null type, stopped state and an empty file. A missing or not-downloaded file has
+a null path. The app never downloads a file to answer this command.
+
+The app copies cached metadata on main, verifies a candidate regular non-link
+file on a worker, then recollects the current metadata and Work Mode visibility
+on main before replying. A path is returned only when that fresh snapshot still
+names the verified file. If Work Mode hides the current chat, the entire result
+is `hidden:true` and `file:{name,path}`. Sender, chat, MIME, timestamps, playback
+state and music metadata are withheld. Missing message context while filtering
+is treated as hidden. Paths describe a local snapshot and may disappear later.
+Media information returns `locked` while the passcode lock is active, including
+when lock changes during an asynchronous path check.
+
+`lock` belongs to `lock`, takes no arguments, and returns `locked:true` after the
+existing local passcode lock succeeds. It is idempotent when already locked.
+Without a configured passcode it returns `no-passcode`. Its successful reply
+survives the policy generation change caused by its own lock operation; master
+or lock-capability revocation still fences that reply. No unlock command exists.
+
+The CLI's `--voice` and `--music` select playback controls; `media now` reads the
+active type and `voice now` explicitly reads voice. Human output quotes file
+paths and metadata. JSON returns the unchanged response envelope. A hidden
+result prints only its file fields and the hidden marker.
 
 ## Emoji rendering
 
@@ -185,13 +228,21 @@ on local disable or reconfiguration, so an old dialog cannot enable a new intent
 
 ## Validation and upstream hooks
 
+The media fixture uses a thin value adapter and inert synthetic files. It tests
+music/voice/empty/not-downloaded snapshots, Work Mode withholding, argument and
+capability refusals, file checks on their production worker thread, and a real
+socket lock completion across policy changes. The production player and passcode
+adapter is compiled against app headers. Real playback and a live-profile lock
+remain native integration checks; host qualification does not open a profile or
+change audio playback.
+
 `purple/test_control.py` compiles all changed production units using the Debug
 build's recipes, physical stdafx and language headers generated from this tree.
 It runs actual worker socket/protocol/authorization/window-adapter tests, literal
 preference bodies plus a production-symbol link check, static CTRL removal and
-Go fake-server tests. Every test socket is in its own private temporary directory;
+media snapshot/adapter/lock-generation tests and Go fake-server tests. Every test socket is in its own private temporary directory;
 no GUI, account, installed client or Telegram request is needed. The canonical
-`test_control` gate registers all three native programs and the Go tests.
+`test_control` gate registers all four native programs and the Go tests.
 The emoji program uses the actual server, bounded waiter broker, literal
 exporter admission/serving methods and production disk worker with synthetic
 source PNGs. It covers exact uint64/pixel parsing, concurrent replies, duplicate
@@ -202,3 +253,13 @@ CMD, OPEN and XDG activation branches stay intact. The fork-only
 `core/external_control.cpp` and `.h`, and their old Telegram/CMakeLists entries,
 are removed. All new implementation and registration live in Purple files and
 Telegram/cmake/purple.cmake. See [upstream_hooks.md](upstream_hooks.md).
+
+### Lock completion generation
+
+A lock request may cross only its own synchronous unlocked-to-locked policy
+transition, with automation and every capability unchanged. The server records
+that exact post-lock generation in a request-local scope around the main-thread
+handler. It does not derive permission from the returned JSON. Any later
+generation invalidates the completion, even if a disabled switch has been
+re-enabled or the policy values are unchanged: the reply uses the current
+authorization error, or `busy` when the request is authorized again.

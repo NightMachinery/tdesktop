@@ -86,10 +86,10 @@ def compile(relative):
     return obj
 
 
-base = ['purple_control_protocol', 'purple_control_commands', 'purple_control_endpoint', 'purple_control_server']
+base = ['purple_control_protocol', 'purple_control_commands', 'purple_control_endpoint', 'purple_control_server', 'purple_control_media']
 objects = [compile('purple/' + name + '.cpp') for name in base]
 for name in ['purple_control', 'purple_control_settings', 'purple_app_services', 'purple_settings_section',
-        'purple_emoji_export_store', 'purple_emoji_export']:
+        'purple_emoji_export_store', 'purple_emoji_export', 'purple_control_media_app']:
     compile('purple/' + name + '.cpp')
 compile('core/sandbox.cpp')
 symbols = run(['nm', '-gU', work / 'purple_control.o'], stdout=subprocess.PIPE, text=True).stdout
@@ -112,7 +112,7 @@ frontend = (source / 'purple/purple_emoji_export.cpp').read_text()
 emoji_objects = [compile('purple/' + name + '.cpp') for name in [
     'purple_emoji_render', 'purple_emoji_large', 'purple_emoji_large_store', 'purple_emoji_export_queue',
     'purple_emoji_export_store', 'purple_emoji_export_worker']]
-for fixture in ['control_cases.cpp', 'control_preferences_cases.cpp', 'control_emoji_cases.cpp']:
+for fixture in ['control_cases.cpp', 'control_preferences_cases.cpp', 'control_emoji_cases.cpp', 'control_media_cases.cpp']:
     obj = compile('purple/tests/' + fixture)
     binary = work / Path(fixture).stem
     name = Path(fixture).stem

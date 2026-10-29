@@ -25,6 +25,11 @@ struct ControlAuthority {
 	std::atomic<int> queued = 0;
 };
 
+struct ControlLockTransition {
+	ControlPolicy before;
+	std::atomic<quint64> allowedGeneration = 0;
+};
+
 class ControlDispatchLease final {
 public:
 	explicit ControlDispatchLease(std::shared_ptr<ControlAuthority> authority);
@@ -58,7 +63,7 @@ public:
 	ControlWorker(std::shared_ptr<ControlAuthority> authority, Dispatch dispatch, Status status);
 	void configure(quint64 epoch, ControlEndpointOptions options);
 	void stop();
-	void reply(quint64 epoch, quint64 client, quint64 serial, ControlResult result);
+	void reply(quint64 epoch, quint64 client, quint64 serial, quint64 lockGeneration, ControlResult result);
 
 private:
 	struct Pending {
@@ -269,7 +274,7 @@ void ControlWorker::request(quint64 client, const QByteArray &line) {
 	_dispatch(_epoch, client, serial, policy->generation, active, lease, request);
 }
 
-void ControlWorker::reply(quint64 epoch, quint64 client, quint64 serial, ControlResult result) {
+void ControlWorker::reply(quint64 epoch, quint64 client, quint64 serial, quint64 lockGeneration, ControlResult result) {
 	if (epoch != _epoch) return;
 	const auto i = _clients.find(client);
 	if (i == _clients.end()) return;
@@ -280,8 +285,11 @@ void ControlWorker::reply(quint64 epoch, quint64 client, quint64 serial, Control
 	if (p == pending.end()) return;
 	const auto policy = std::atomic_load(&_authority->policy);
 	if (policy->generation != p->second.generation) {
-		result = AuthorizeControlCommand(p->second.command, *policy);
-		if (result.code.isEmpty()) result = ControlError(u"busy"_q, u"Automation settings changed; retry."_q);
+		auto authorization = AuthorizeControlCommand(p->second.command, *policy);
+		const auto ownLockTransition = p->second.command == u"lock"_q
+			&& lockGeneration == policy->generation && lockGeneration == p->second.generation + 1;
+		if (!authorization.code.isEmpty()) result = std::move(authorization);
+		else if (!ownLockTransition) result = ControlError(u"busy"_q, u"Automation settings changed; retry."_q);
 	}
 	const auto id = p->first;
 	p->second.active->store(false);
@@ -312,6 +320,7 @@ struct ControlServer::State {
 	ControlStatus status;
 	quint64 epoch = 0;
 	bool stopped = false;
+	std::shared_ptr<ControlLockTransition> lockTransition;
 };
 
 ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObject *parent)
@@ -330,11 +339,13 @@ ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObje
 				if (state.stopped || state.epoch != epoch || !active->load()) return;
 				const auto weak = QPointer<ControlServer>(this);
 				const auto mainThread = thread();
+				const auto transition = std::make_shared<ControlLockTransition>();
 				const auto reply = [=](ControlResult result) {
 					if (QThread::currentThread() != mainThread || !active->load()
 						|| !weak || weak->_state->stopped || weak->_state->epoch != epoch) return;
 					const auto worker = weak->_state->worker;
-					QMetaObject::invokeMethod(worker, [=] { worker->reply(epoch, client, serial, result); });
+					const auto lockGeneration = transition->allowedGeneration.load();
+					QMetaObject::invokeMethod(worker, [=] { worker->reply(epoch, client, serial, lockGeneration, result); });
 				};
 				const auto policy = std::atomic_load(&state.authority->policy);
 				auto error = AuthorizeControlCommand(request.command, *policy);
@@ -344,6 +355,12 @@ ControlServer::ControlServer(ControlHandler handler, ControlStatus status, QObje
 				if (!error.code.isEmpty()) reply(std::move(error));
 				else {
 					request.active = [active] { return active->load(); };
+					const auto previous = state.lockTransition;
+					const auto restore = gsl::finally([=] {
+						if (weak) weak->_state->lockTransition = previous;
+					});
+					transition->before = *policy;
+					state.lockTransition = request.command == u"lock"_q ? transition : nullptr;
 					const auto handler = state.handler;
 					handler(request, *policy, reply);
 				}
@@ -381,7 +398,15 @@ void ControlServer::configure(ControlEndpointOptions options) {
 
 void ControlServer::setPolicy(ControlPolicy policy) {
 	auto &state = *_state;
-	policy.generation = std::atomic_load(&state.authority->policy)->generation + 1;
+	const auto before = std::atomic_load(&state.authority->policy);
+	policy.generation = before->generation + 1;
+	if (const auto transition = state.lockTransition) {
+		if (transition->before.generation == before->generation
+			&& !before->locked && policy.locked
+			&& before->enabled == policy.enabled && before->groups == policy.groups) {
+			transition->allowedGeneration.store(policy.generation);
+		}
+	}
 	std::atomic_store(&state.authority->policy, std::make_shared<const ControlPolicy>(policy));
 }
 

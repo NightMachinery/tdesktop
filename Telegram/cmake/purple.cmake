@@ -35,6 +35,9 @@ PRIVATE
     purple/purple_control.h
     purple/purple_control_commands.cpp
     purple/purple_control_commands.h
+    purple/purple_control_media.h
+    purple/purple_control_media.cpp
+    purple/purple_control_media_app.cpp
     purple/purple_control_endpoint.cpp
     purple/purple_control_endpoint.h
     purple/purple_control_protocol.cpp

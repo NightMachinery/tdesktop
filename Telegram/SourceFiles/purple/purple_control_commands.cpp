@@ -10,6 +10,7 @@ namespace {
 
 const auto Commands = std::array{
 	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q, u"emoji.render"_q,
+	u"media.toggle"_q, u"media.play"_q, u"media.pause"_q, u"media.now"_q, u"lock"_q,
 };
 
 }
@@ -69,6 +70,18 @@ ControlResult AuthorizeControlCommand(const QString &command, const ControlPolic
 		if (!policy.groups[4]) return ControlError(u"capability-off"_q, u"The emoji capability is disabled."_q);
 		if (policy.locked) return ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q);
 	}
+	if (command.startsWith(u"media."_q)) {
+		const auto info = command == u"media.now"_q;
+		if (!policy.groups[info ? 2 : 1]) {
+			return ControlError(u"capability-off"_q, u"This media capability is disabled."_q);
+		}
+		if (info && policy.locked) {
+			return ControlError(u"locked"_q, u"Media information is unavailable while locked."_q);
+		}
+	}
+	if (command == u"lock"_q && !policy.groups[3]) {
+		return ControlError(u"capability-off"_q, u"The lock capability is disabled."_q);
+	}
 	return {};
 }
 
@@ -78,7 +91,8 @@ void DispatchControlRequest(
 		const QString &build,
 		const ControlWindowAdapter &windows,
 		ControlReply reply,
-		const ControlEmojiAdapter &emoji) {
+		const ControlEmojiAdapter &emoji,
+		const ControlMediaAdapter &media) {
 	if (auto error = AuthorizeControlCommand(request.command, policy)
 		; !error.code.isEmpty()) {
 		reply(std::move(error));
@@ -110,6 +124,40 @@ void DispatchControlRequest(
 			reply(ControlError(u"export-disabled"_q, u"Enable local emoji export in Purple Settings."_q));
 		} else {
 			emoji(*id, int(*pixels), request.active, std::move(reply));
+		}
+		return;
+	}
+	if (request.command == u"lock"_q) {
+		if (!request.arguments.isEmpty()) {
+			reply(ControlError(u"bad-request"_q, u"lock takes no arguments."_q));
+		} else {
+			reply(media.lock ? media.lock() : ControlError(u"not-found"_q, u"Lock service unavailable."_q));
+		}
+		return;
+	}
+	if (request.command.startsWith(u"media."_q)) {
+		auto type = std::optional<ControlMediaType>();
+		if (request.arguments.contains(u"type"_q)) {
+			const auto value = request.arguments.value(u"type"_q);
+			if (!value.isString() || (value.toString() != u"music"_q && value.toString() != u"voice"_q)) {
+				reply(ControlError(u"bad-request"_q, u"type must be music or voice."_q));
+				return;
+			}
+			type = value.toString() == u"music"_q ? ControlMediaType::Music : ControlMediaType::Voice;
+		}
+		if (request.arguments.size() != (type ? 1 : 0)) {
+			reply(ControlError(u"bad-request"_q, u"Unexpected media argument."_q));
+			return;
+		}
+		if (request.command == u"media.now"_q) {
+			if (media.now) media.now(type, request.active, std::move(reply));
+			else reply(ControlError(u"not-found"_q, u"Media service unavailable."_q));
+		} else if (media.control) {
+			const auto action = request.command == u"media.play"_q ? ControlMediaAction::Play
+				: request.command == u"media.pause"_q ? ControlMediaAction::Pause : ControlMediaAction::Toggle;
+			reply(media.control(action, type));
+		} else {
+			reply(ControlError(u"not-found"_q, u"Media service unavailable."_q));
 		}
 		return;
 	}

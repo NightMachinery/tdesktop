@@ -20,7 +20,7 @@ import (
 const lineLimit = 64 * 1024
 const callTimeout = 2 * time.Second
 
-var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]"
+var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|voice now|lock"
 
 type options struct {
 	socket  string
@@ -44,6 +44,7 @@ func parseOptions(args []string) (options, error) {
 	o := options{args: map[string]any{}}
 	var positional []string
 	var pixels string
+	var mediaType string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -78,6 +79,11 @@ func parseOptions(args []string) (options, error) {
 				return o, errors.New("--px needs an integer from 1 to 512")
 			}
 			o.args["px"] = n
+		case a == "--voice" || a == "--music":
+			if mediaType != "" {
+				return o, errors.New("choose --voice or --music once")
+			}
+			mediaType = strings.TrimPrefix(a, "--")
 		case strings.HasPrefix(a, "-"):
 			return o, fmt.Errorf("unknown option: %s", a)
 		default:
@@ -90,13 +96,39 @@ func parseOptions(args []string) (options, error) {
 	if pixels != "" && positional[0] != "emoji" {
 		return o, errors.New("--px is only valid for emoji render")
 	}
+	if mediaType != "" && positional[0] != "media" {
+		return o, errors.New("--voice and --music are only valid for media controls")
+	}
 	switch positional[0] {
-	case "ping", "hello":
+	case "ping", "hello", "lock":
 		o.command = positional[0]
 	case "windows":
 		o.command = "window.list"
 	case "cycle":
 		o.command = "window.cycle"
+	case "media", "voice":
+		if len(positional) != 2 {
+			return o, errors.New("media needs toggle, play, pause or now; voice needs now")
+		}
+		action := positional[1]
+		if positional[0] == "voice" {
+			if action != "now" {
+				return o, errors.New("voice only supports now")
+			}
+			o.args["type"] = "voice"
+		} else {
+			if action != "toggle" && action != "play" && action != "pause" && action != "now" {
+				return o, errors.New("unknown media action")
+			}
+			if action == "now" && mediaType != "" {
+				return o, errors.New("use voice now for voice information")
+			}
+			if mediaType != "" {
+				o.args["type"] = mediaType
+			}
+		}
+		o.command = "media." + action
+		return o, nil
 	case "emoji":
 		if len(positional) != 3 || positional[1] != "render" {
 			return o, errors.New("emoji render needs an artwork id")
@@ -249,6 +281,25 @@ func exchange(path string, o options) ([]byte, response, int, error) {
 
 func humanResult(command string, result json.RawMessage) (string, error) {
 	switch command {
+	case "lock":
+		var value struct {
+			Locked bool `json:"locked"`
+		}
+		if json.Unmarshal(result, &value) != nil || !value.Locked {
+			return "", errors.New("invalid lock result")
+		}
+		return "locked\n", nil
+	case "media.toggle", "media.play", "media.pause":
+		var value struct {
+			Type  string `json:"type"`
+			State string `json:"state"`
+		}
+		if json.Unmarshal(result, &value) != nil || (value.Type != "music" && value.Type != "voice") || !mediaState(value.State) {
+			return "", errors.New("invalid media control result")
+		}
+		return value.Type + " " + value.State + "\n", nil
+	case "media.now":
+		return humanMedia(result)
 	case "emoji.render":
 		var value struct {
 			Path       string `json:"path"`
@@ -303,6 +354,73 @@ func humanResult(command string, result json.RawMessage) (string, error) {
 		}
 		return formatted.String() + "\n", nil
 	}
+}
+
+func mediaState(state string) bool {
+	return state == "playing" || state == "paused" || state == "stopped"
+}
+
+func humanMedia(result json.RawMessage) (string, error) {
+	var value struct {
+		Type     *string `json:"type"`
+		State    string  `json:"state"`
+		Position int64   `json:"position_ms"`
+		Duration int64   `json:"duration_ms"`
+		Hidden   bool    `json:"hidden"`
+		File     *struct {
+			Name string  `json:"name"`
+			Path *string `json:"path"`
+			Mime string  `json:"mime"`
+		} `json:"file"`
+		Music *struct {
+			Title     string `json:"title"`
+			Performer string `json:"performer"`
+		} `json:"music"`
+		Voice *struct {
+			Sender string `json:"sender"`
+			Chat   string `json:"chat"`
+			Date   int64  `json:"date"`
+		} `json:"voice"`
+	}
+	if json.Unmarshal(result, &value) != nil || value.File == nil {
+		return "", errors.New("invalid media information result")
+	}
+	path := "not downloaded"
+	if value.File.Path != nil {
+		if !filepath.IsAbs(*value.File.Path) {
+			return "", errors.New("invalid media file path")
+		}
+		path = strconv.QuoteToGraphic(*value.File.Path)
+	}
+	file := strconv.QuoteToGraphic(value.File.Name) + "\t" + path + "\n"
+	if value.Hidden {
+		return "hidden\t" + file, nil
+	}
+	if !mediaState(value.State) || value.Position < 0 || value.Duration < 0 {
+		return "", errors.New("invalid media state")
+	}
+	if value.Type == nil {
+		if value.State != "stopped" {
+			return "", errors.New("missing media type")
+		}
+		return "nothing playing\n", nil
+	}
+	var detail string
+	switch *value.Type {
+	case "music":
+		if value.Music == nil {
+			return "", errors.New("missing music information")
+		}
+		detail = strconv.QuoteToGraphic(value.Music.Title) + " by " + strconv.QuoteToGraphic(value.Music.Performer)
+	case "voice":
+		if value.Voice == nil {
+			return "", errors.New("missing voice information")
+		}
+		detail = strconv.QuoteToGraphic(value.Voice.Sender) + " in " + strconv.QuoteToGraphic(value.Voice.Chat) + fmt.Sprintf(" (%d)", value.Voice.Date)
+	default:
+		return "", errors.New("invalid media type")
+	}
+	return fmt.Sprintf("%s %s %d/%d ms\n%s\n%s", *value.Type, value.State, value.Position, value.Duration, detail, file), nil
 }
 
 func run(args []string, getenv func(string) string, home string, out, diagnostic io.Writer) int {

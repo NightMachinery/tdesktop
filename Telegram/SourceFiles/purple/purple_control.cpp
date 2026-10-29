@@ -106,7 +106,7 @@ QPointer<ControlService> Service;
 ControlService::ControlService()
 : QObject(QCoreApplication::instance())
 , _server([](const ControlRequest &request, const ControlPolicy &policy, ControlReply reply) {
-	DispatchControlRequest(request, policy, VersionText(), WindowAdapter(), std::move(reply), RequestEmojiRender);
+	DispatchControlRequest(request, policy, VersionText(), WindowAdapter(), std::move(reply), RequestEmojiRender, AppControlMediaAdapter());
 }, [](QString path, QString error) {
 	SocketPath = path;
 	SocketStatus = error.isEmpty() ? path : error;

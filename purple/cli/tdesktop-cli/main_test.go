@@ -71,7 +71,7 @@ func TestOptionsAndDiscovery(t *testing.T) {
 			t.Errorf("%v: %v", args, err)
 		}
 	}
-	for _, args := range [][]string{{}, {"--socket"}, {"--socket="}, {"--bad", "ping"}, {"activate"}, {"activate", "-1"}, {"activate", "1.5"}, {"ping", "extra"}, {"media", "now"}} {
+	for _, args := range [][]string{{}, {"--socket"}, {"--socket="}, {"--bad", "ping"}, {"activate"}, {"activate", "-1"}, {"activate", "1.5"}, {"ping", "extra"}, {"media", "seek"}} {
 		if _, err := parseOptions(args); err == nil {
 			t.Errorf("accepted %v", args)
 		}
@@ -357,5 +357,91 @@ func TestEmojiRenderWaitsBeyondOrdinaryDeadline(t *testing.T) {
 	var out, diagnostic bytes.Buffer
 	if code := run([]string{"--socket", path, "emoji", "render", "1"}, func(string) string { return "" }, "/unused", &out, &diagnostic); code != 0 {
 		t.Fatalf("render inherited ordinary deadline: code=%d %s", code, diagnostic.String())
+	}
+}
+
+func TestMediaOptions(t *testing.T) {
+	for _, tc := range []struct {
+		args          []string
+		command, kind string
+	}{
+		{[]string{"media", "toggle"}, "media.toggle", ""},
+		{[]string{"media", "play", "--voice"}, "media.play", "voice"},
+		{[]string{"--music", "media", "pause"}, "media.pause", "music"},
+		{[]string{"media", "now", "--json"}, "media.now", ""},
+		{[]string{"voice", "now"}, "media.now", "voice"},
+		{[]string{"lock"}, "lock", ""},
+	} {
+		o, e := parseOptions(tc.args)
+		if e != nil || o.command != tc.command || (tc.kind != "" && o.args["type"] != tc.kind) || (tc.kind == "" && o.args["type"] != nil) {
+			t.Fatalf("%v: %+v %v", tc.args, o, e)
+		}
+	}
+	for _, args := range [][]string{
+		{"media"}, {"media", "seek"}, {"media", "play", "extra"}, {"voice", "pause"}, {"lock", "extra"},
+		{"media", "play", "--voice", "--music"}, {"media", "play", "--voice", "--voice"},
+		{"ping", "--music"}, {"voice", "now", "--voice"}, {"media", "now", "--voice"}, {"lock", "--px=1"},
+	} {
+		if _, e := parseOptions(args); e == nil {
+			t.Errorf("accepted %v", args)
+		}
+	}
+}
+
+func TestMediaAndLockFakeServer(t *testing.T) {
+	for _, tc := range []struct {
+		args                         []string
+		command, kind, result, human string
+	}{
+		{[]string{"media", "toggle"}, "media.toggle", "", `{"type":"music","state":"paused"}`, "music paused"},
+		{[]string{"media", "play", "--voice"}, "media.play", "voice", `{"type":"voice","state":"playing"}`, "voice playing"},
+		{[]string{"media", "pause", "--music"}, "media.pause", "music", `{"type":"music","state":"paused"}`, "music paused"},
+		{[]string{"lock"}, "lock", "", `{"locked":true}`, "locked"},
+		{[]string{"media", "now"}, "media.now", "", `{"type":"music","state":"playing","position_ms":123,"duration_ms":456,"file":{"name":"song.ogg","path":"/owned/song.ogg","mime":"audio/ogg"},"music":{"title":"Title","performer":"Artist"}}`, "Title"},
+		{[]string{"voice", "now"}, "media.now", "voice", `{"type":"voice","state":"paused","position_ms":0,"duration_ms":456,"file":{"name":"voice.ogg","path":null,"mime":"audio/ogg"},"voice":{"sender":"Sender","chat":"Chat","date":123}}`, "not downloaded"},
+		{[]string{"media", "now"}, "media.now", "", `{"type":null,"state":"stopped","position_ms":0,"duration_ms":0,"file":{"name":"","path":null,"mime":""}}`, "nothing playing"},
+		{[]string{"voice", "now"}, "media.now", "voice", `{"hidden":true,"file":{"name":"voice.ogg","path":"/owned/voice.ogg"}}`, "hidden"},
+	} {
+		for _, asJSON := range []bool{false, true} {
+			path := fakeServer(t, func(c net.Conn, q map[string]any) {
+				a := q["args"].(map[string]any)
+				if q["cmd"] != tc.command || (tc.kind != "" && a["type"] != tc.kind) || (tc.kind == "" && a["type"] != nil) {
+					t.Errorf("wrong command: %v", q)
+				}
+				fmt.Fprintf(c, `{"v":1,"id":1,"ok":true,"result":%s}`+"\n", tc.result)
+			})
+			args := append([]string{"--socket", path}, tc.args...)
+			if asJSON {
+				args = append(args, "--json")
+			}
+			var out, diag bytes.Buffer
+			if code := run(args, func(string) string { return "" }, "/unused", &out, &diag); code != 0 {
+				t.Fatalf("%v code%d %s", args, code, diag.String())
+			}
+			if asJSON {
+				if !strings.Contains(out.String(), `"ok":true`) {
+					t.Fatal(out.String())
+				}
+			} else if !strings.Contains(out.String(), tc.human) {
+				t.Fatal(out.String())
+			}
+		}
+	}
+	for _, tc := range []struct {
+		reason string
+		code   int
+	}{{"no-passcode", 1}, {"automation-disabled", 2}, {"capability-off", 2}, {"locked", 2}, {"not-found", 1}, {"unsupported", 4}} {
+		path := fakeServer(t, func(c net.Conn, _ map[string]any) {
+			fmt.Fprintf(c, `{"v":1,"id":1,"ok":false,"error":{"code":%q,"message":"refused"}}`+"\n", tc.reason)
+		})
+		var out, diag bytes.Buffer
+		if code := run([]string{"lock", "--socket", path}, func(string) string { return "" }, "/unused", &out, &diag); code != tc.code {
+			t.Errorf("%s:%d", tc.reason, code)
+		}
+	}
+	for command, result := range map[string]string{"lock": `{"locked":false}`, "media.play": `{"type":"bad","state":"playing"}`, "media.now": `{"type":"music","state":"invalid","file":{"path":null}}`} {
+		if _, e := humanResult(command, json.RawMessage(result)); e == nil {
+			t.Error("invalid result accepted", command)
+		}
 	}
 }

@@ -411,7 +411,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_control_media_info" = "Media information";
 "lng_purple_control_lock" = "Lock";
 "lng_purple_control_emoji" = "Emoji artwork";
-"lng_purple_control_groups_about" = "Capability groups are local to this device and start enabled. This version supports window commands and emoji rendering; media and lock commands will be added later.";
+"lng_purple_control_groups_about" = "Capability groups are local to this device and start enabled. Window commands, media playback controls, media information, passcode locking and emoji rendering are available. Media information and window commands are unavailable while locked.";
 
 "lng_purple_chat_move_title" = "Change sync chat";
 "lng_purple_chat_move_choices" = "Choose where this account keeps its sync data next.";
