@@ -97,7 +97,16 @@ never acts on inactivity alone:
 - leaving the window leaves 300 ms for a lock signal;
 - a lock signal inside that makes this a lock;
 - coming back without a lock, or the 300 ms passing, cancels;
-- after an unlock the window must be in the foreground again within 2 s.
+- after an unlock the window enters Returning and must regain the foreground
+  before the 2 s settle expires.
+
+Returning checks expiry first: at exactly 2 s, or later, the wait cancels even
+if a lock or foreground signal arrives on that tick. A relock before expiry
+also cancels unless an earlier unlocked foreground update already moved the
+phase to Present. Foreground and lock arriving together are not evidence of
+an unlocked return. After an unlocked foreground return, leaving again uses
+the ordinary 300 ms lock window: a lock before that boundary keeps the wait;
+at the boundary it cancels.
 
 The 300 ms is short on purpose: switching to another app and locking a second
 later is still a switch, so the wait is gone, even if the person clicks back

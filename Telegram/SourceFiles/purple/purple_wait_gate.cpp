@@ -277,6 +277,10 @@ void WaitPresence::reset() {
 }
 
 bool WaitPresence::update(bool foreground, bool locked, int64_t now) {
+	if (_phase == Phase::Returning
+		&& (now - _since >= kWaitAwaySettle || locked)) {
+		return true;
+	}
 	// Checked before the lock: a lock that comes later than this follows a
 	// switch to another app, and the switch already cancelled the wait.
 	if (_phase == Phase::Away && now - _since >= kWaitLockAfterAway) {

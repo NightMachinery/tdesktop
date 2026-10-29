@@ -470,6 +470,43 @@ void PresenceCases() {
 		CHECK(presence.update(false, false, 1000 + settle));
 	}
 	{
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, true, 0));
+		CHECK(!presence.update(false, false, 1000));
+		CHECK(presence.update(false, true, 1000 + settle + 1));
+	}
+	for (const auto foreground : { false, true }) {
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, true, 0));
+		CHECK(!presence.update(false, false, 1000));
+		CHECK(presence.update(foreground, true, 1001));
+	}
+	for (const auto foreground : { false, true }) {
+		for (const auto locked : { false, true }) {
+			auto presence = WaitPresence();
+			CHECK(!presence.update(false, true, 0));
+			CHECK(!presence.update(false, false, 1000));
+			CHECK(!presence.update(false, false, 1000 + settle - 1));
+			CHECK(presence.update(foreground, locked, 1000 + settle));
+		}
+	}
+	for (const auto lockAfter : { grace - 1, grace }) {
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, true, 0));
+		CHECK(!presence.update(false, false, 1000));
+		CHECK(!presence.update(true, false, 1001));
+		CHECK(!presence.update(false, false, 1100));
+		CHECK(presence.update(false, true, 1100 + lockAfter)
+			== (lockAfter >= grace));
+	}
+	{
+		auto presence = WaitPresence();
+		CHECK(!presence.update(false, true, 0));
+		CHECK(!presence.update(false, false, 1000));
+		CHECK(!presence.update(true, false, 1000 + settle - 1));
+		CHECK(!presence.update(true, false, 1000 + 10 * settle));
+	}
+	{
 		// reset() starts a fresh wait present.
 		auto presence = WaitPresence();
 		CHECK(!presence.update(false, false, 100));
