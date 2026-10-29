@@ -2,6 +2,7 @@
 
 #include "purple/purple_sync_local_store.h"
 #include "purple/purple_sync_chat_carry_store.h"
+#include "purple/purple_sync_chat_carry_gate.h"
 #include <QtCore/QDirIterator>
 #include <QtCore/QFileInfo>
 #include <QtCore/QDir>
@@ -79,15 +80,16 @@ std::shared_ptr<DesktopSyncChatDisk> OpenDesktopSyncChatDisk(
 			return fail(u"cache-read-held"_q);
 		}
 		const auto parsed = ParseDesktopSyncChatCache(result->bytes, account);
-		if (!parsed.record) {
+		if (parsed.status == DesktopSyncChatCacheStatus::Valid && parsed.paused) { return fail(u"sync-paused-here"_q); }
+		if (parsed.status != DesktopSyncChatCacheStatus::Valid) {
 			return fail(
 				parsed.status == DesktopSyncChatCacheStatus::Newer
 					? u"newer-cache"_q
 					: u"invalid-cache"_q);
 		}
-		if (parsed.record->loginBinding != loginBinding) {
+		if (parsed.record && parsed.record->loginBinding != loginBinding) {
 			if (result->retainedCarryEffects.empty()) { return fail(u"cache-login-held"_q); }
-		} else {
+		} else if (parsed.record) {
 			result->cache = parsed.record;
 		}
 	}
@@ -119,6 +121,28 @@ std::shared_ptr<DesktopSyncChatDisk> OpenDesktopSyncChatDisk(
 	return result;
 }
 
+bool WriteDesktopSyncChatPause(
+		const QString &path, const AccountKey &account, const QString &login,
+		const QByteArray &expected, bool paused, const std::shared_ptr<std::atomic<bool>> &current) {
+	if (!SyncStoreWorkerThread() || !current || !current->load()
+		|| QFileInfo(path).fileName() != DesktopSyncChatCacheFileName(account)) { return false; }
+	const auto gate = DesktopSyncCarryGateFor(account);
+	const auto lease = gate ? gate->carry() : nullptr;
+	if (!lease || !lease->quiescent()) { return false; }
+	const auto before = CaptureSyncPrivateFile(path, 64 * 1024);
+	const auto bytes = DesktopSyncChatPauseImage(expected, account, login, paused, true);
+	return before.status == SyncStoreStatus::Ready && before.bytes == expected && bytes
+		&& current->load() && WriteSyncDurableFile(path, *bytes, before) == SyncStoreStatus::Ready && current->load();
+}
+
+void ForgetDesktopSyncChatLogin(const QString &path, const AccountKey &account, const QString &login) {
+	if (!SyncStoreWorkerThread() || QFileInfo(path).fileName() != DesktopSyncChatCacheFileName(account)) { return; }
+	const auto before = CaptureSyncPrivateFile(path, 64 * 1024);
+	if (before.status != SyncStoreStatus::Ready || before.absent()) { return; }
+	const auto bytes = DesktopSyncChatForgetLoginImage(before.bytes, account, login);
+	if (bytes) { static_cast<void>(WriteSyncDurableFile(path, *bytes, before)); }
+}
+
 bool SaveDesktopSyncChatDisk(
 	const std::shared_ptr<DesktopSyncChatDisk> &disk,
 	const std::optional<DesktopSyncChatCacheRecord> &record,
@@ -126,7 +150,7 @@ bool SaveDesktopSyncChatDisk(
 	if (!disk
 		|| (record
 			&& (record->account != disk->account
-				|| record->loginBinding != disk->loginBinding))
+				|| record->loginBinding != disk->loginBinding || record->paused))
 		|| !disk->error.isEmpty() || !current || !current->load()
 		|| SyncPathIdentity(disk->cachePath) != disk->identity
 		|| SyncPathIdentity(disk->statePath) != disk->stateIdentity) {

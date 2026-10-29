@@ -5,6 +5,11 @@
 
 namespace Purple {
 
+struct DesktopSyncCarryOpening {
+	QByteArray state;
+	QByteArray cache;
+};
+
 struct DesktopSyncCarryCommand {
 	uint64_t ticket = 0;
 	uint64_t run = 0;
@@ -58,7 +63,9 @@ public:
 		std::shared_ptr<DesktopSyncCarryGate::Lease> lease,
 		Fn<void(DesktopSyncCarryProgress)> progress, SyncDurableFault fault = {});
 	~DesktopSyncChatCarry();
-	void open(std::optional<SyncCarryJournalStart> start = std::nullopt);
+	void open(std::optional<SyncCarryJournalStart> start = std::nullopt,
+		std::optional<DesktopSyncChatPeer> consentPeer = std::nullopt, QString stream = u"config"_q,
+		std::optional<DesktopSyncCarryOpening> opening = std::nullopt);
 	void resume();
 	void complete(DesktopSyncCarryReply reply);
 	void cancel();
@@ -71,7 +78,7 @@ public:
 private:
 	[[nodiscard]] bool current() const;
 	[[nodiscard]] bool accept(const DesktopSyncCarryCommand &command) const;
-	[[nodiscard]] bool fresh(const DesktopSyncCarryFresh &facts, bool sameResolution = true) const;
+	[[nodiscard]] bool fresh(const DesktopSyncCarryFresh &facts, bool sameResolution = true);
 	void advance();
 	void issue(SyncCarryJournalAction action, bool dispatch = false,
 		std::vector<DesktopSyncCarryPermit> effects = {});

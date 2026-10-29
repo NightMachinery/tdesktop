@@ -322,17 +322,52 @@ bool DesktopSyncChatCarryIo::ConsumePendingRead(const DesktopSyncChatInventory &
 	return true;
 }
 
+bool DesktopSyncChatCarryIo::AcceptReaders(const DesktopSyncChatPeer &peer, const QString &stream) {
+	if (!_store.Current() || !_store._journal || _store.foreignLogin()
+		|| (stream != u"config"_q && stream != u"library"_q)
+		|| peer.origin.account != _store._scope.account || peer.chat != _store._journal->target
+		|| _store._journal->deliveryAttempted || _store._journal->markAttempted) { return false; }
+	const auto eligible = DesktopSyncChatEligibility(peer);
+	if (!eligible || !*eligible || eligible->readers.populationUnknown
+		|| !_store._journal->readerBaseline || *_store._journal->readerBaseline != eligible->readers) { return false; }
+	auto transport = Transport();
+	if (!transport || transport->contains(u"readers"_q)) { return false; }
+	auto readers = QJsonObject{{u"members"_q, Members(peer)},
+		{u"members_known"_q, peer.readerMembers.has_value()}, {u"admin"_q, peer.facts->admin}, {u"kind"_q, int(peer.kind)},
+		{u"other_members"_q, eligible->readers.otherMembers ? QString::number(*eligible->readers.otherMembers) : QString()},
+		{u"other_admins"_q, eligible->readers.otherAdmins ? QString::number(*eligible->readers.otherAdmins) : QString()},
+		{u"warning"_q, eligible->readers.warningRequired}, {u"stream"_q, stream}, {u"settings_disclosed"_q, true}};
+	if (peer.creator) { readers.insert(u"creator"_q, *peer.creator); }
+	transport->insert(u"readers"_q, readers);
+	transport->insert(u"reader_warning"_q, false);
+	return Save(*transport);
+}
+
+bool DesktopSyncChatCarryIo::CheckReaders(const DesktopSyncCarryFresh &fresh) {
+	auto transport = Transport();
+	if (!transport) { return false; }
+	if (!transport->contains(u"readers"_q)) { return !_store._envelope.value(u"consent_required"_q).toBool(); }
+	const auto before = *transport;
+	return Readers(*transport, fresh) && (before == *transport || Save(*transport));
+}
+
 bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCarryFresh &fresh) {
 	const auto eligible = DesktopSyncChatEligibility(fresh.target.peer);
 	if (!eligible || !*eligible || eligible->readers.populationUnknown) { return false; }
 	const auto verdict = _store._journal->version == 2 ? CheckSyncCarryReaders(*_store._journal, *eligible) : SyncCarryReaderVerdict::Proceed;
-	if (verdict == SyncCarryReaderVerdict::Hold) { return false; }
+	if (verdict == SyncCarryReaderVerdict::Hold
+		|| (verdict == SyncCarryReaderVerdict::WarnAndProceed
+			&& !_store._journal->deliveryAttempted && !_store._journal->markAttempted)) { return false; }
 	const auto readers = _store._journal->readerBaseline.value_or(eligible->readers);
 	auto snapshot = QJsonObject{ {u"members"_q, Members(fresh.target.peer)},
+		{u"members_known"_q, fresh.target.peer.readerMembers.has_value()},
+		{u"admin"_q, fresh.target.peer.facts->admin}, {u"kind"_q, int(fresh.target.peer.kind)},
+		{u"stream"_q, u"config"_q}, {u"settings_disclosed"_q, true},
 		{u"other_members"_q, readers.otherMembers ? QString::number(*readers.otherMembers) : QString()},
 		{u"other_admins"_q, readers.otherAdmins ? QString::number(*readers.otherAdmins) : QString()},
 		{u"warning"_q, readers.warningRequired} };
 	if (!transport.contains(u"readers"_q)) {
+		if (_store._envelope.value(u"consent_required"_q).toBool()) { return false; }
 		if (readers.warningRequired) {
 			if (!fresh.readerConsentAccepted || !fresh.consentPeer) { return false; }
 			const auto opening = DesktopSyncChatEligibility(*fresh.consentPeer);
@@ -345,6 +380,7 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 			if (consent && consent->readers == readers && fresh.consentPeer->origin == fresh.target.peer.origin
 				&& fresh.consentPeer->chat == fresh.target.peer.chat) {
 				snapshot.insert(u"members"_q, Members(*fresh.consentPeer));
+				snapshot.insert(u"members_known"_q, fresh.consentPeer->readerMembers.has_value());
 				if (fresh.consentPeer->creator) { snapshot.insert(u"creator"_q, *fresh.consentPeer->creator); }
 			} else if (readers.otherMembers.value_or(0) == 0) { snapshot.insert(u"members"_q, QJsonArray()); }
 			else { return false; }
@@ -355,6 +391,13 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 		const auto previous = transport.value(u"readers"_q).toObject();
 		if (!previous.value(u"members"_q).isArray() || !previous.value(u"other_members"_q).isString()
 			|| !previous.value(u"other_admins"_q).isString() || !previous.value(u"warning"_q).isBool()) { return false; }
+		const auto known = previous.value(u"members_known"_q);
+		if ((!known.isUndefined() && !known.isBool()) || (known == QJsonValue(true) && !fresh.target.peer.readerMembers)
+			|| (previous.value(u"creator"_q) == QJsonValue(true) && fresh.target.peer.creator != true)
+			|| (previous.value(u"admin"_q) == QJsonValue(true) && !fresh.target.peer.facts->admin)
+			|| previous.value(u"kind"_q).toInt(-1) != int(fresh.target.peer.kind)
+			|| !previous.value(u"settings_disclosed"_q).toBool()
+			|| (previous.value(u"stream"_q) != QJsonValue(u"config"_q) && previous.value(u"stream"_q) != QJsonValue(u"library"_q))) { return false; }
 		const auto members = previous.value(u"members"_q).toArray();
 		auto seen = std::set<QString>();
 		for (const auto &member : members) { if (!member.isString() || member.toString().isEmpty() || !seen.emplace(member.toString()).second) { return false; } }
@@ -365,10 +408,13 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 		}
 		auto added = verdict == SyncCarryReaderVerdict::WarnAndProceed
 			|| (eligible->readers.warningRequired && !previous.value(u"warning"_q).toBool());
-		for (const auto &member : Members(fresh.target.peer)) { if (!members.contains(member)) { added = true; } }
+		if (known == QJsonValue(true)) {
+			for (const auto &member : Members(fresh.target.peer)) { if (!members.contains(member)) { added = true; } }
+		}
 		for (const auto &name : { u"other_members"_q, u"other_admins"_q }) {
 			if ((name == u"other_members"_q ? eligible->readers.otherMembers.value_or(0) : eligible->readers.otherAdmins.value_or(0)) > previous.value(name).toString().toULongLong()) { added = true; }
 		}
+		if (added && !_store._journal->deliveryAttempted && !_store._journal->markAttempted) { return false; }
 		if (added) { transport.insert(u"reader_warning"_q, true); }
 	}
 	return true;

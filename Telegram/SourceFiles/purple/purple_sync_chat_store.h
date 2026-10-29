@@ -37,6 +37,10 @@ struct DesktopSyncChatDisk {
 	const QString &loginBinding,
 	const std::shared_ptr<std::atomic<bool>> &current,
 	bool borrowedLock = false);
+[[nodiscard]] bool WriteDesktopSyncChatPause(
+	const QString &path, const AccountKey &account, const QString &login,
+	const QByteArray &expected, bool paused, const std::shared_ptr<std::atomic<bool>> &current);
+void ForgetDesktopSyncChatLogin(const QString &path, const AccountKey &account, const QString &login);
 [[nodiscard]] bool SaveDesktopSyncChatDisk(
 	const std::shared_ptr<DesktopSyncChatDisk> &disk,
 	const std::optional<DesktopSyncChatCacheRecord> &record,

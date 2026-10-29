@@ -51,7 +51,7 @@ bool DesktopSyncChatCarry::accept(const DesktopSyncCarryCommand &command) const 
 		&& command.dispatch == _command->dispatch;
 }
 
-bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameResolution) const {
+bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameResolution) {
 	if (!current() || !_store || !_store->journal() || !facts.current || !facts.current()) { return false; }
 	const auto &journal = *_store->journal();
 	const auto eligible = DesktopSyncChatEligibility(facts.target.peer);
@@ -68,7 +68,8 @@ bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameRe
 			: resolution.action == SyncChatAction::Follow || resolution.action == SyncChatAction::Fill
 				|| resolution.action == SyncChatAction::NewerMark || (resolution.action == SyncChatAction::Use && !resolution.postingHeld))
 		&& eligible
-		&& CheckSyncCarryReaders(journal, *eligible) != SyncCarryReaderVerdict::Hold;
+		&& CheckSyncCarryReaders(journal, *eligible) != SyncCarryReaderVerdict::Hold
+		&& _io && _io->CheckReaders(facts);
 }
 
 void DesktopSyncChatCarry::retire() {
@@ -116,20 +117,27 @@ SyncCarryJournalEvent DesktopSyncChatCarry::event(SyncCarryEventKind kind) const
 	return result;
 }
 
-void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start) {
+void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start,
+		std::optional<DesktopSyncChatPeer> consentPeer, QString stream, std::optional<DesktopSyncCarryOpening> opening) {
 	if (!SyncStoreWorkerThread()) { retire(); publish(u"worker-required"_q, {SyncStoreStatus::WrongThread}); return; }
 	if (!current() || _store) { _start = std::move(start); publish(u"publishers-not-quiescent"_q, {SyncStoreStatus::LockBusy}); return; }
 	_store = std::make_unique<SyncChatCarryStore>(_directory, _scope, _fault);
 	if (!result(_store->Open())) { retire(); return; }
+	if (opening && (_store->_stateFile.bytes != opening->state || _store->_cacheFile.bytes != opening->cache)) {
+		publish(u"opening-images-held"_q); retire(); return;
+	}
 	if (start) {
 		if (start->account != _origin.account || start->preferenceToken != _scope.binding
 			|| ((start->mode == SyncCarryMode::Switch || start->mode == SyncCarryMode::RepairMark) && start->markText != DesktopSyncChatMarkText())
 			|| (start->loginAuthority != DesktopSyncCarryLogin(_scope.loginAuthority))) {
 			publish(u"opening-scope-held"_q); retire(); return;
 		}
-		if (!result(_store->Begin(*start))) { retire(); return; }
+		if (!result(_store->Begin(*start, consentPeer.has_value()))) { retire(); return; }
 	} else if (!_store->journal()) { publish(u"no-carry-journal"_q); return; }
 	_io = std::make_unique<DesktopSyncChatCarryIo>(*_store);
+	if (consentPeer && (!start || consentPeer->origin != _origin || !_io->AcceptReaders(*consentPeer, stream))) {
+		publish(u"reader-baseline-held"_q); retire(); return;
+	}
 	if (_store->foreignLogin() && SyncCarryJournalHoldsWrites(*_store->journal())) {
 		publish(u"interrupted-login-discard-only"_q); return;
 	}

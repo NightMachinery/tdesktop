@@ -1,5 +1,6 @@
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_chat_consent.h"
 
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -202,6 +203,7 @@ private:
 	void Finish();
 	void Publish(bool final = true);
 	void RetryLocalOpen();
+	void ForgetLogin();
 	void Peers(const MTPmessages_Messages &response);
 	std::vector<MTPMessage> Messages(
 		const MTPmessages_Messages &response) const;
@@ -261,6 +263,7 @@ SyncChatSession::SyncChatSession(not_null<Main::Session*> session)
 	const auto weak = base::make_weak(this);
 	session->lifetime().add([weak] {
 		if (const auto self = weak.get()) {
+			if (self->_session && self->_session->account().loggingOut()) { self->ForgetLogin(); }
 			self->Cancel(u"session-ended"_q);
 		}
 	});
@@ -276,6 +279,14 @@ SyncChatSession::~SyncChatSession() {
 	_api.reset();
 	_inventory.reset();
 	RetireDisk(std::move(_disk));
+}
+
+void SyncChatSession::ForgetLogin() {
+	if (_root.isEmpty() || _loginBinding.isEmpty()) { return; }
+	const auto path = QDir(_root).filePath(DesktopSyncChatCacheFileName(_origin.account));
+	const auto account = _origin.account;
+	const auto login = _loginBinding;
+	crl::async([=] { ForgetDesktopSyncChatLogin(path, account, login); });
 }
 
 bool SyncChatSession::Owns(Main::Session* session) const {
@@ -1085,7 +1096,7 @@ std::optional<DesktopSyncChatSetupSnapshot> SyncChatSession::Setup() const {
 		return {};
 	}
 	return DesktopSyncChatSetupSnapshot{
-		*_setupScope, status(), _model->input(), _model->cache(), _run, _expectedStateBytes };
+		*_setupScope, status(), _model->input(), _model->cache(), _run, _expectedStateBytes, _expectedCacheBytes };
 }
 
 std::map<Main::Session*, std::unique_ptr<SyncChatSession>> Sessions;
@@ -1156,6 +1167,15 @@ bool SyncChatSelfResolved(not_null<Main::Session*> session) {
 }
 rpl::producer<Main::Session*> SyncChatStatusChanges() {
 	return Changes.events();
+}
+
+bool ReviewSyncChatFollowFill(not_null<Main::Session*> session,
+		DesktopSyncChatConsentAction &action, const DesktopSyncChatFollowOffer &offer,
+		const DesktopSyncChatPeer &peer, DesktopSyncChatConsentChoice choice, bool disclosed) {
+	if (!DesktopSyncChatFollowFillActivated()) { return false; }
+	const auto fresh = SyncChatSetupSnapshotOf(session);
+	return fresh && CachedSyncChatSetupContextCurrent(session, fresh->scope)
+		&& action.accept(offer, *fresh, peer, choice, disclosed).has_value();
 }
 
 bool ReviewSyncChatMove(not_null<Main::Session*> session,

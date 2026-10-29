@@ -221,6 +221,10 @@ SyncChatCarryStorageResult SyncChatCarryStore::Open() {
 		|| _directoryIdentity == "missing") { return Fail(SyncStoreStatus::IoError); }
 	_cacheFile = CaptureSyncPrivateFile(_scope.cacheFile, 64 * 1024);
 	if (_cacheFile.status != SyncStoreStatus::Ready) { return Fail(_cacheFile.status); }
+	if (!_cacheFile.absent()) {
+		const auto cache = ParseDesktopSyncChatCache(_cacheFile.bytes, _scope.account);
+		if (cache.status == DesktopSyncChatCacheStatus::Valid && cache.paused) { return Fail(SyncStoreStatus::InvalidTransition); }
+	}
 	const auto path = _directory + u"/carry.json"_q;
 	_journalFile = CaptureSyncPrivateFile(path, kSyncCarryJournalStorageLimit);
 	if (_journalFile.status != SyncStoreStatus::Ready) { return Fail(_journalFile.status); }
@@ -372,7 +376,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::Persist(const SyncCarryJournalRes
 	return { SyncStoreStatus::Ready, next.status };
 }
 
-SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart &input) {
+SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart &input, bool consentRequired) {
 	const auto retained = RetainedEffects();
 	if (!retained) { return { SyncStoreStatus::InvalidState }; }
 	for (const auto &old : *retained) {
@@ -398,6 +402,10 @@ SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart
 		|| (!input.state && (!input.stateAbsentConfirmed || !_stateFile.absent()))) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
+	if (!_cacheFile.absent()) {
+		const auto cache = ParseDesktopSyncChatCache(_cacheFile.bytes, _scope.account);
+		if (cache.status != DesktopSyncChatCacheStatus::Valid || cache.paused) { return { SyncStoreStatus::InvalidState }; }
+	}
 	auto start = input;
 	start.loginAuthority = DesktopSyncCarryLogin(_scope.loginAuthority);
 	const auto directory = _directory + u"/pending"_q;
@@ -415,6 +423,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart
 		if (!retained) { return retained; }
 		_envelope.insert(u"opening_pending_sha256"_q, SyncCarryRecordHash(pending.staged));
 	}
+	if (consentRequired) { _envelope.insert(u"consent_required"_q, true); }
 	const auto next = BeginSyncCarryJournal(start);
 	if (!next) { return { SyncStoreStatus::InvalidTransition, next.status }; }
 	if (_local->_state) {
@@ -794,11 +803,13 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 	auto record = DesktopSyncChatCacheRecord();
 	if (!_cacheFile.absent()) {
 		const auto previous = ParseDesktopSyncChatCache(_cacheFile.bytes, _scope.account);
-		if (!previous.record || previous.record->loginBinding != _scope.loginAuthority
-			|| (previous.record->mark != *_journal->targetMark && (!_journal->oldMark || previous.record->mark != *_journal->oldMark))) { return { SyncStoreStatus::InvalidState }; }
-		record = *previous.record;
+		if (previous.status != DesktopSyncChatCacheStatus::Valid || previous.paused
+			|| (previous.record && (previous.record->loginBinding != _scope.loginAuthority
+				|| (previous.record->mark != *_journal->targetMark && (!_journal->oldMark || previous.record->mark != *_journal->oldMark))))) { return { SyncStoreStatus::InvalidState }; }
+		if (previous.record) { record = *previous.record; }
 		if (record.mark.chat != _journal->target) {
 			record.readerMembers.reset(); record.readerCreator.reset();
+			record.disclosedStreams.clear(); record.newReaders = false;
 		}
 	}
 	if (complete) {
@@ -808,15 +819,19 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 			|| !parsed.record->carry || parsed.record->carry->value(u"operation"_q).toString() != _journal->operationId
 			|| parsed.record->mark != *_journal->targetMark || parsed.record->loginBinding != _scope.loginAuthority) { return { SyncStoreStatus::InvalidState }; }
 		const auto warning = record.newReaders;
+		const auto streams = record.disclosedStreams;
 		record = *parsed.record;
 		record.newReaders = record.newReaders || warning;
+		for (const auto &stream : streams) {
+			if (std::find(record.disclosedStreams.begin(), record.disclosedStreams.end(), stream) == record.disclosedStreams.end()) { record.disclosedStreams.push_back(stream); }
+		}
 		record.carry.reset();
 	} else {
 		record.account = _scope.account; record.mark = *_journal->targetMark;
 		record.readers = *_journal->readerBaseline;
 		const auto transport = _envelope.value(u"transport"_q).toObject();
 		const auto baseline = transport.value(u"readers"_q).toObject();
-		if (baseline.value(u"members"_q).isArray()) {
+		if (baseline.value(u"members"_q).isArray() && baseline.value(u"members_known"_q) == QJsonValue(true)) {
 			auto members = std::vector<QString>();
 			for (const auto &member : baseline.value(u"members"_q).toArray()) {
 				if (!member.isString()) { return { SyncStoreStatus::InvalidState }; } members.push_back(member.toString());
@@ -826,6 +841,10 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 		if (baseline.value(u"creator"_q).isBool() && !record.readerCreator) { record.readerCreator = baseline.value(u"creator"_q).toBool(); }
 		record.newReaders = record.newReaders || transport.value(u"reader_warning"_q).toBool()
 			|| transport.value(u"pending_reader_warning"_q).toBool();
+		const auto stream = baseline.value(u"stream"_q).toString();
+		if ((stream != u"config"_q && stream != u"library"_q) || !baseline.value(u"settings_disclosed"_q).toBool()) { return { SyncStoreStatus::InvalidState }; }
+		if (std::find(record.disclosedStreams.begin(), record.disclosedStreams.end(), stream) == record.disclosedStreams.end()) { record.disclosedStreams.push_back(stream); }
+		if (std::find(record.disclosedStreams.begin(), record.disclosedStreams.end(), u"config"_q) == record.disclosedStreams.end()) { record.disclosedStreams.push_back(u"config"_q); }
 		record.readerConsent = true;
 		record.loginBinding = _scope.loginAuthority;
 		record.carry = QJsonObject{{u"operation"_q, _journal->operationId}};

@@ -144,6 +144,8 @@
         "Telegram/SourceFiles/purple/tests/emoji_large_recent_cases.cpp",
         "Telegram/SourceFiles/purple/tests/emoji_large_preferences_cases.cpp"
       ]
-    }
+    },
+    {"name": "test_sync_chat_consent", "driver": "purple/test_sync_chat_write.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--test-source", "test_sync_chat_consent.cpp"], "fixtures": ["purple/test_sync_chat_consent.cpp"]},
+    {"name": "test_sync_chat_consent_routes", "driver": "purple/test_sync_chat_consent_routes.py"}
   ]
 }

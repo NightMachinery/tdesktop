@@ -485,9 +485,8 @@ void ConsentFaultsAndAuthority() {
 		worker.Run([](CarryWorkerState &s) {
 			auto fresh = s.fresh; fresh.target.peer.facts->otherMembers = 1; fresh.target.peer.readerMembers = std::vector<QString>{u"unit-member"_q};
 			const auto added=s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),fresh,900);
-			Must(added); CHECK(s.store->journal()->readerBaseline->otherMembers.value_or(0)==0);
-			fresh.consentPeer = fresh.target.peer;
-			const auto identity = s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),fresh,900); Must(identity);
+			CHECK(!added); CHECK(s.store->journal()->readerBaseline->otherMembers.value_or(0)==0);
+			const auto identity = s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),s.fresh,900); Must(identity);
 			s.fresh = fresh; s.Prepared(); const auto permit = s.io->Authorize(identity->slot,fresh); Must(permit);
 			CHECK(permit->readerWarning() && !permit->compatible(*permit));
 			auto before = QByteArray(); Must(ReadSyncPrivateFile(s.directory.path()+u"/sync/carry.json"_q,4*1024*1024,before) == SyncStoreStatus::Ready);

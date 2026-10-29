@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_sync_chat_setup.h"
+#include "purple/purple_sync_chat_consent.h"
 #include "purple/purple_account_config.h"
 #include <rpl/producer.h>
 
@@ -35,6 +36,11 @@ struct DesktopSyncChatLease {
 	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
 [[nodiscard]] bool CachedSyncChatSetupContextCurrent(
 	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
+
+[[nodiscard]] bool ReviewSyncChatFollowFill(
+	not_null<Main::Session*> session, DesktopSyncChatConsentAction &action,
+	const DesktopSyncChatFollowOffer &offer, const DesktopSyncChatPeer &peer,
+	DesktopSyncChatConsentChoice choice, bool disclosed);
 
 [[nodiscard]] bool ReviewSyncChatMove(
 	not_null<Main::Session*> session, DesktopSyncChatMoveAction &action,

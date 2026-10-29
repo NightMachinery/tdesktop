@@ -11,6 +11,7 @@ struct DesktopSyncChatSetupSnapshot {
 	std::optional<DesktopSyncChatCacheRecord> cache;
 	uint64_t run = 0;
 	QByteArray stateImage;
+	QByteArray cacheImage;
 };
 
 enum class DesktopSyncChatSetupChoice { Create, Self, Existing };

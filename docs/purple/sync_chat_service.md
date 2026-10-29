@@ -220,3 +220,57 @@ stay held. It does not resume the old login or discard its external-effect
 evidence. Definite scoped O ChatGone can complete committed cleanup without
 activating deletion policy. Transport intent observations survive incomplete
 reads, and copied or renewed OwnRecord permits share one uploader claim.
+
+## Follow/Fill consent qualification
+
+Follow and Fill use the existing Carry journal and executor before an ordinary
+reader or publisher can treat the new location as current. The T5e activation
+constant remains false. The setup screen has no actionable Follow/Fill or
+Pause/Resume control, and the production review entry returns held before
+constructing a worker or transport. Host fixtures reach the flow through
+injected worker, resolver, metadata and transport ports. This is not native
+activation qualification.
+
+A consent offer captures the account, persistent login authority, window,
+source, exact winning mark, stream, state image, cache image and reader facts.
+Acceptance checks that same disclosure against a fresh resolution and full
+peer snapshot. Final worker admission repeats both checks before opening the
+Carry operation. A background, closed, switched or stale callback cannot
+present a choice or start Carry. Follow with other readers offers Follow or
+Pause sync here. Fill requires its first-post transfer disclosure. A private
+eligible target without other readers needs no reader question, but it still
+requires the captured foreground owner; background discovery grants nothing.
+
+The consent baseline is the original accepted reader population and, when
+available, the hashed member roster. It is scoped to a chat and disclosed
+stream. Its journal and authenticated transport snapshot are durable before
+the first delivery or mark intent (D-M2B5-9). A crash between journal creation
+and that snapshot leaves a consent-required operation held. Reopen cannot
+substitute the latest population for the missing baseline.
+
+Before an outward intent, a changed disclosure requires a fresh choice. After
+an intent, known additions keep the original baseline, persist a sticky C6
+warning and allow the operation to continue. Known-roster same-count
+replacement is an addition; departures alone are not. A count-only original
+remains count-only even if identities later become available, so same-count
+replacement cannot be detected for that original snapshot. Loss of a known
+roster, unknown population or lost rights holds. Cache completion unions
+disclosed streams and sticky warnings for the same chat rather than replacing
+them; an unrelated old chat grants no consent to the destination.
+
+Pause sync here is a negative account/device choice and blocks every stream.
+Its bounded cache representation may contain no location at all. Logout
+revokes RAM authority immediately and schedules a worker-only exact-snapshot
+replacement of a paused admitted cache by an account-only Pause envelope. A
+new login sees the negative choice without admitting the old location, reader
+consent or interrupted move. Old-login cleanup cannot overwrite a newer
+login's cache. Only an explicit foreground Resume clears Pause. A cleared
+empty envelope remains a no-grant tombstone until fresh discovery replaces it;
+this avoids introducing an unlink durability path merely to clear a bit.
+
+Disk adapters and Carry run on the serialized worker. The GUI offer/action
+uses only published RAM snapshots. Pause takes the account's RAM write fence
+and requires quiescence before its exact-file replacement. Queued cleanup
+still runs after admission is revoked; no GUI wait is added. Account removal,
+interrupted-journal abandonment and native activation remain their separately
+defined contracts.

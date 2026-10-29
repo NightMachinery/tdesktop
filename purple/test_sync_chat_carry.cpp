@@ -333,8 +333,8 @@ void ThreadAndMergeControls() {
 		auto flow=DesktopSyncChatCarry(u"/unused"_q,{},Origin,admitted,gate->carry(),[&](auto){++calls;pointer->cancel();});
 		pointer=&flow; flow.cancel(); CHECK(calls==1 && !gate->postingHeld());
 	}
-	{
-		auto f=ExecutorFiles();
+	for (const auto mode : {SyncCarryMode::Switch, SyncCarryMode::RepairMark}) {
+		auto f=ExecutorFiles(false, mode);
 		auto record=DesktopSyncChatCacheRecord(); record.account=f.scope.account;
 		record.mark=*f.start.resolution.cache; record.readers=DesktopSyncChatEligibility(f.fresh.source.peer)->readers;
 		record.readerConsent=true; record.newReaders=true; record.loginBinding=f.scope.loginAuthority;
@@ -343,7 +343,7 @@ void ThreadAndMergeControls() {
 		Must(WriteSyncPrivateFile(f.scope.cacheFile,*bytes)==SyncStoreStatus::Ready);
 		f.engine->open(f.start); f.finish();
 		const auto saved=ParseDesktopSyncChatCache(CaptureSyncPrivateFile(f.scope.cacheFile,64*1024).bytes,f.scope.account);
-		Must(saved.record); CHECK(saved.record->newReaders && saved.record->readerConsent);
+		Must(saved.record); CHECK(saved.record->newReaders == (mode == SyncCarryMode::RepairMark)); CHECK(saved.record->readerConsent);
 		CHECK(saved.record->preserved.value(u"future-consent"_q).toObject().value(u"accepted"_q).toBool());
 	}
 	{

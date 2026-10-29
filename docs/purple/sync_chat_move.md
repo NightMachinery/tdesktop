@@ -399,3 +399,49 @@ Run, operation, ticket and step fence stale callbacks. The same committed
 receipt stays bound throughout. No production UI or service constructs this
 action while move activation is off; native activation must retain one action
 per operation and renew the existing foreground and request gates.
+
+## Follow/Fill consent and the first effect
+
+Desktop T5e reuses this Carry executor for resolver Follow and Fill. The
+production activation constant remains off, and the real setup screen exposes
+no actionable Follow/Fill or Pause/Resume control. The injected host flow
+resolves and checks fresh full peer information at acceptance and again at
+final admission, bound to the opening window, account/login, exact O/N, winning
+mark, stream and state/cache bytes.
+
+Follow reconciles its own late O posts before changing the local binding,
+including an implicit-v1 Saved Messages source. Fill reads and verifies the
+recovery source before copying into N. A complete readable Empty source is
+different from an unreadable or incomplete source, which holds. Fill with no
+local state leaves that state absent. These are existing core transitions,
+not a second client move state machine. Settings Carry retains the
+playlist-required refusal where playlists are in use; this slice does not
+implement a playlist transport.
+
+D-M2B5-9 fixes the accepted N readers and disclosed stream before the first
+outward record delivery or mark intent, whichever is first. The client writes
+its original hashed roster and known-roster flag into the authenticated
+transport envelope before any reservation. Journal creation also records that
+the operation requires this snapshot, so a restart in the intervening window
+holds instead of manufacturing consent. A retry/reopen preserves that exact
+baseline. Counts, eligibility and the shared core journal version/hash
+semantics stay unchanged.
+
+Before intent, a newly added reader or changed initial disclosure holds for
+another foreground choice. After intent, known additions warn and continue
+under C6, with a durable sticky warning; unknown readers and lost rights still
+hold. Compare member identities only when the original roster was known.
+Count-only originals retain their count-based detection and same-count
+replacement blind spot when a roster later becomes available. Departures alone
+do not warn. Completing a same-chat cache merges disclosure streams and
+warnings without overwriting that original baseline. An old different chat's
+disclosure does not transfer to N.
+
+Pause is local to this account/device and covers every stream. Logout keeps
+the negative choice in an account-only envelope, never the old login's reader
+or move authority. Explicit foreground Resume alone clears it. The unchanged
+D-M2B5-11 interrupted-journal rule still refuses a different login even after
+Resume: a retained operation is Discard-only, with its unresolved effects
+preserved. The worker performs exact-snapshot cache changes; no disk wait is
+added to the GUI. Production activation and server behavior are not claimed by
+the host fixtures.

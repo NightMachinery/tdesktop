@@ -107,6 +107,8 @@ public:
 	[[nodiscard]] int32_t MarkReceiptId() const;
 	[[nodiscard]] bool RetainedMarkReceipt(const DesktopSyncCarryFresh &fresh, const MTPUpdates &updates);
 	[[nodiscard]] bool cleanupEnabled() const;
+	[[nodiscard]] bool AcceptReaders(const DesktopSyncChatPeer &peer, const QString &stream);
+	[[nodiscard]] bool CheckReaders(const DesktopSyncCarryFresh &fresh);
 	[[nodiscard]] std::optional<bool> PendingIssued() const;
 	[[nodiscard]] bool RememberPendingIssued();
 	[[nodiscard]] bool ConsumePendingRead(const DesktopSyncChatInventory &inventory);

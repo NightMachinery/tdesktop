@@ -424,3 +424,11 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_move_retry" = "The move is waiting. Retry to check it again; nothing will be sent twice.";
 "lng_purple_chat_move_committed" = "Moved. Old-chat cleanup is incomplete or was skipped.";
 "lng_purple_chat_move_complete" = "Moved. The authorized cleanup is complete.";
+
+"lng_purple_chat_follow_disclosure" = "Follow the sync data in %1. Your own late settings posts will be reconciled before this account switches.";
+"lng_purple_chat_fill_disclosure" = "Copy the recovered sync data into %1 before using it. Other readers there can read the copied data.";
+"lng_purple_chat_library_reader_warning" = "This disclosure covers playlist sync and the settings messages used to recover this account's data.";
+"lng_purple_chat_follow_action" = "Follow";
+"lng_purple_chat_pause_here_action" = "Pause sync here";
+"lng_purple_chat_paused_here" = "Sync is paused for this account on this device. Sign-in does not resume it. Resume explicitly when you are ready.";
+"lng_purple_chat_follow_fill_held" = "Follow and recovery are waiting for qualification. No data was copied or sent.";

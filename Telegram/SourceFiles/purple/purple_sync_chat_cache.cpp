@@ -116,6 +116,15 @@ ParseDesktopSyncChatCache(const QByteArray &bytes, const AccountKey &account) {
 	}
 	const auto environment = Number(object.value(u"environment"_q));
 	const auto user = Number(object.value(u"user"_q));
+	if (!environment || *environment != uint64_t(account.environment) || !user
+		|| *user != uint64_t(account.userId)) { return {}; }
+	const auto paused = object.value(u"paused"_q);
+	if (!paused.isUndefined() && !paused.isBool()) { return {}; }
+	if (object.contains(u"pause_only"_q)) {
+		if (object.value(u"pause_only"_q) != QJsonValue(true) || !paused.isBool()
+			|| object.keys().size() != 5 || object.contains(u"chat"_q)) { return {}; }
+		return {DesktopSyncChatCacheStatus::Valid, {}, paused.toBool(), true};
+	}
 	const auto id = Number(object.value(u"mark_id"_q));
 	const auto date = Number(object.value(u"mark_date"_q));
 	const auto peer = object.value(u"chat"_q).isString()
@@ -140,6 +149,16 @@ ParseDesktopSyncChatCache(const QByteArray &bytes, const AccountKey &account) {
 			!= record.loginBinding.toLatin1()
 		|| QByteArray::fromHex(record.loginBinding.toLatin1()).size() != 32) {
 		return {};
+	}
+	record.paused = paused.toBool();
+	const auto disclosed = object.value(u"disclosed_streams"_q);
+	if (!disclosed.isUndefined()) {
+		if (!disclosed.isArray() || disclosed.toArray().size() > 2) { return {}; }
+		for (const auto &stream : disclosed.toArray()) {
+			if (!stream.isString() || (stream.toString() != u"config"_q && stream.toString() != u"library"_q)
+				|| std::find(record.disclosedStreams.begin(), record.disclosedStreams.end(), stream.toString()) != record.disclosedStreams.end()) { return {}; }
+			record.disclosedStreams.push_back(stream.toString());
+		}
 	}
 	record.readerConsent = object.value(u"reader_consent"_q).toBool();
 	const auto warning = object.value(u"new_readers"_q);
@@ -195,7 +214,7 @@ ParseDesktopSyncChatCache(const QByteArray &bytes, const AccountKey &account) {
 		record.carry = object.value(u"carry"_q).toObject();
 	}
 	record.preserved = object;
-	return {DesktopSyncChatCacheStatus::Valid, record};
+	return {DesktopSyncChatCacheStatus::Valid, record, record.paused, false};
 }
 
 std::optional<QByteArray> SerializeDesktopSyncChatCache(const DesktopSyncChatCacheRecord &record) {
@@ -217,6 +236,11 @@ std::optional<QByteArray> SerializeDesktopSyncChatCache(const DesktopSyncChatCac
 	object.insert(u"mark_id"_q, QString::number(record.mark.markId));
 	object.insert(u"mark_date"_q, QString::number(record.mark.markDate));
 	object.insert(u"title"_q, record.title);
+	object.remove(u"pause_only"_q);
+	object.insert(u"paused"_q, record.paused);
+	auto streams = QJsonArray();
+	for (const auto &stream : record.disclosedStreams) { streams.push_back(stream); }
+	object.insert(u"disclosed_streams"_q, streams);
 	object.insert(u"reader_consent"_q, record.readerConsent);
 	object.insert(u"new_readers"_q, record.newReaders);
 	object.insert(u"reader_creator"_q, record.readerCreator
@@ -248,6 +272,33 @@ std::optional<QByteArray> SerializeDesktopSyncChatCache(const DesktopSyncChatCac
 		: std::nullopt;
 }
 
+std::optional<QByteArray> DesktopSyncChatPauseImage(
+		const QByteArray &opening, const AccountKey &account, const QString &login,
+		bool paused, bool foreground) {
+	if (!foreground || !DigestValid(login) || DesktopSyncChatCacheFileName(account).isEmpty()) { return {}; }
+	const auto parsed = opening.isEmpty() ? DesktopSyncChatCacheParse{DesktopSyncChatCacheStatus::Valid}
+		: ParseDesktopSyncChatCache(opening, account);
+	if (parsed.status != DesktopSyncChatCacheStatus::Valid || (parsed.record && parsed.record->carry)) { return {}; }
+	if (parsed.record && parsed.record->loginBinding == login) {
+		auto record = *parsed.record;
+		record.paused = paused;
+		return SerializeDesktopSyncChatCache(record);
+	}
+	const auto object = QJsonObject{{u"version"_q, u"1"_q},
+		{u"environment"_q, QString::number(account.environment)}, {u"user"_q, QString::number(account.userId)},
+		{u"pause_only"_q, true}, {u"paused"_q, paused}};
+	return QJsonDocument(object).toJson(QJsonDocument::Compact);
+}
+
+std::optional<QByteArray> DesktopSyncChatForgetLoginImage(
+		const QByteArray &opening, const AccountKey &account, const QString &login) {
+	const auto parsed = ParseDesktopSyncChatCache(opening, account);
+	if (parsed.status != DesktopSyncChatCacheStatus::Valid
+		|| (parsed.record && parsed.record->loginBinding != login)) { return {}; }
+	if (!parsed.record) { return parsed.pauseOnly ? std::optional(opening) : std::nullopt; }
+	return DesktopSyncChatPauseImage({}, account, login, parsed.paused, true);
+}
+
 bool DesktopSyncChatCacheCanCommit(
 	const std::optional<DesktopSyncChatCacheRecord> &previous,
 	const SyncChatResolveInput &input,
@@ -256,7 +307,7 @@ bool DesktopSyncChatCacheCanCommit(
 	bool current) {
 	if (!current || !completeDiscovery
 		|| resolution.action != SyncChatAction::Use || resolution.postingHeld
-		|| !resolution.cache || (previous && previous->carry)
+		|| !resolution.cache || (previous && (previous->carry || previous->paused))
 		|| (input.settingsBound && input.settingsChat != resolution.cache->chat)
 		|| (previous && previous->mark.chat != resolution.cache->chat)) {
 		return false;

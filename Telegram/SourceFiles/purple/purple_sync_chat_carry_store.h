@@ -52,7 +52,7 @@ public:
 	[[nodiscard]] SyncChatCarryStorageResult Open();
 	[[nodiscard]] SyncChatCarryStorageResult RemoveAccount(bool explicitlyConfirmed);
 	void Close();
-	[[nodiscard]] SyncChatCarryStorageResult Begin(const SyncCarryJournalStart &input);
+	[[nodiscard]] SyncChatCarryStorageResult Begin(const SyncCarryJournalStart &input, bool consentRequired = false);
 	[[nodiscard]] SyncChatCarryStorageResult Advance(SyncCarryJournalEvent event);
 	[[nodiscard]] SyncChatCarryStorageResult PrepareState(const SyncLocalState &state);
 	[[nodiscard]] SyncChatCarryStorageResult StageOwn();

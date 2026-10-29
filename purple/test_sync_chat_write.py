@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -110,6 +110,8 @@ assert 'return entry;' in (work / 'post-counters.inc').read_text()
 recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=')]
 objects = []
 compiled = []
+consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
+    for name in ['purple_sync_chat_consent', 'purple_sync_chat_setup']] if args.test_source == 'test_sync_chat_consent.cpp' else []
 with (work / 'build.log').open('w') as log:
     for source in [repo / 'purple' / args.test_source,
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_write.cpp',
@@ -127,7 +129,7 @@ with (work / 'build.log').open('w') as log:
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_discovery.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_store.cpp',
                    repo / 'Telegram/ThirdParty/purple_core/purple/purple_sync_chat.cpp',
-                   repo / 'Telegram/ThirdParty/purple_core/purple/purple_peer_token.cpp']:
+                   repo / 'Telegram/ThirdParty/purple_core/purple/purple_peer_token.cpp', *consent_sources]:
         target = work / (('core-' if 'purple_core' in source.parts and source.stem in ['purple_sync_chat_carry','purple_sync_chat_carry_codec','purple_sync_chat_journal'] else '') + source.stem + '.o')
         command = recipe[:]
         for flag, value in [('-c', str(source)), ('-o', str(target)),

@@ -75,6 +75,16 @@ QString Refusal(SyncChatRefusal refusal) {
 	return tr::lng_purple_chat_refuse_unknown(tr::now);
 }
 
+QString FollowFillDisclosure(const DesktopSyncChatFollowOffer &offer, const QString &chat) {
+	auto text = (offer.firstPost ? tr::lng_purple_chat_fill_disclosure(tr::now)
+		: tr::lng_purple_chat_follow_disclosure(tr::now)).arg(chat);
+	text += u"\n"_q + tr::lng_purple_chat_settings_reader_warning(tr::now)
+		+ u"\n"_q + tr::lng_purple_chat_settings_disclosure(tr::now).arg(chat)
+		+ u"\n"_q + tr::lng_purple_chat_cloud_disclosure(tr::now);
+	if (offer.stream == u"library"_q) { text += u"\n"_q + tr::lng_purple_chat_library_reader_warning(tr::now); }
+	return text;
+}
+
 QString SettingsDisclosure(const QString &chat) {
 	return tr::lng_purple_chat_settings_reader_warning(tr::now)
 		+ u"\n"_q + tr::lng_purple_chat_settings_disclosure(tr::now).arg(chat);
@@ -120,6 +130,8 @@ QString StatusText(Main::Session &session,
 			? tr::lng_purple_chat_update_required(tr::now)
 			: status.reason == u"unknown-readers"_q
 			? tr::lng_purple_chat_readers_unknown(tr::now)
+			: status.reason == u"sync-paused-here"_q
+			? tr::lng_purple_chat_paused_here(tr::now)
 			: status.reason == u"follow-required"_q || status.reason == u"fill-required"_q
 			? tr::lng_purple_chat_change_disabled(tr::now)
 			: tr::lng_purple_chat_check_failed(tr::now));
