@@ -88,7 +88,7 @@ assert 'bool DesktopSyncChatMoveActivated() { return false; }' in move
 review = service[service.index('bool ReviewSyncChatMove('):service.index('void StartSyncChatDiscovery()')]
 for forbidden in ['DesktopSyncChatCarryService', 'DesktopSyncChatSetupService', 'crl::', '.send(', 'Write', 'ReadSyncPrivateFile']:
     assert forbidden not in review, 'qualification review dispatches or performs IO'
-assert 'action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {})' in review
+assert 'action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {}, removeOldMark)' in review
 assert 'status.reason;' not in ui
 print('T5d move UI: shared eligibility, exact cleanup/confirmation, close revocation and qualification service no-dispatch PASS')
 

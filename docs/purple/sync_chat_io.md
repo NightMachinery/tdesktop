@@ -137,7 +137,8 @@ It adds no move executor, UI callsite, Telegram request dispatch or cleanup
 activation. `DesktopSyncChatDeleteRequest` builds one exact id, using
 channels.deleteMessages for Channel and messages.deleteMessages(revoke) otherwise.
 It never builds deleteHistory or a whole-chat delete. `cleanupEnabled()` remains
-false; future cleanup must separately apply the core journal deletion policy.
+false. T5g uses a separate worker cleanup adapter that applies the core journal
+deletion policy and keeps production activation off.
 
 A typed candidate now retains `DesktopSyncChatRecordReceipt`: the captured route,
 the actual final exact messages response and the classified downloaded bytes.
@@ -265,3 +266,16 @@ depend on the typed reader headers; reusing unrelated Debug versions would make
 the gate stale. The shared runner's compile wrapper and depfile checks apply.
 Other unchanged native support objects remain reusable only while the runner
 verifies their inputs and Ninja reports no pending work.
+
+
+T5g adds an injected cleanup adapter in purple_sync_chat_cleanup.*; production
+activation stays OFF. It uses the core's frozen cleanup candidates and exact
+record/old-mark authorization, never the standalone stale-mark exception.
+Complete N coverage and a fresh positive owned O read precede each single-id
+request. The durable scoped ledger records issued intent and explicit same-id,
+matching-peer absence. Peerless/zero-row/inexact responses remain Unknown.
+Acknowledgement counters are applied before exact reconciliation, with a worker
+renewal before every deferred replay. Superseding an item permit does not end
+the operation: a bounded renewal timeout finishes into a recoverable hold once,
+and late grants cannot send. See sync_chat_move.md for progress, partial results,
+Retry/Skip and the ledger shape. No native or server execution is qualified.

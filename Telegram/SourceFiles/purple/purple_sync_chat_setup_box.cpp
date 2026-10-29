@@ -389,6 +389,13 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 			tr::lng_purple_chat_move_disclosure(tr::now).arg(
 				Title(*state->session.get(), state->opening->scope.settingsChat), chosen.title)
 				+ u"\n\n"_q + disclosure, st::boxLabel));
+		const auto removeMark = DesktopSyncChatCleanupActivated()
+			? confirmation->addRow(object_ptr<Ui::Checkbox>(confirmation,
+				tr::lng_purple_chat_cleanup_remove_mark(tr::now), false, st::defaultCheckbox))
+			: nullptr;
+		if (removeMark) {
+			removeMark->setDisabled(!state->opening->scope.mark || state->opening->scope.mark->markId<=0);
+		}
 		const auto cleanup = confirmation->addRow(object_ptr<Ui::Checkbox>(confirmation,
 			tr::lng_purple_chat_move_cleanup(tr::now), offer->cleanup, st::defaultCheckbox));
 		if (state->opening->scope.settingsChat == PeerToken{}) {
@@ -397,6 +404,7 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 		}
 		confirmation->addButton(tr::lng_continue(), [=] {
 			const auto removeOld = cleanup->checked();
+			const auto oldMark = removeMark && removeMark->checked();
 			*submitted = true;
 			confirmation->closeBox();
 			if (!weak || !Current(*state) || state->busy) { return; }
@@ -405,7 +413,7 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 			const auto finish = crl::guard(box, [=](std::optional<DesktopSyncChatPeer> peer) {
 				state->busy = false;
 				const auto accepted = Current(*state) && ReviewSyncChatMove(
-					state->session.get(), *state->move, *offer, std::move(peer), removeOld, true);
+					state->session.get(), *state->move, *offer, std::move(peer), removeOld, true, oldMark);
 				state->status->setText(accepted
 					? MoveNotice(DesktopSyncChatMoveNotice::Held)
 					: tr::lng_purple_chat_move_stale(tr::now));
@@ -726,6 +734,42 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 	});
 }
 
+}
+
+void SyncChatCleanupBox(not_null<Ui::GenericBox*> box, DesktopSyncCarryProgress opening,
+		Fn<std::optional<DesktopSyncCarryProgress>()> latest, Fn<bool()> current, Fn<void()> retry, Fn<void(bool)> skip) {
+	box->setTitle(tr::lng_purple_chat_cleanup_title());
+	box->setWidth(st::boxWideWidth);
+	if (!DesktopSyncChatCleanupActivated() || !opening.journal || !current || !current()) {
+		box->addRow(object_ptr<Ui::FlatLabel>(box,tr::lng_purple_chat_move_held(tr::now),st::boxLabel));
+		box->addButton(tr::lng_close(),[=] { box->closeBox(); }); return;
+	}
+	const auto text=opening.cleanup.skipped ? tr::lng_purple_chat_cleanup_skipped(tr::now)
+		: opening.cleanup.pending ? tr::lng_purple_chat_cleanup_pending(tr::now) : tr::lng_purple_chat_move_complete(tr::now);
+	box->addRow(object_ptr<Ui::FlatLabel>(box,text,st::boxLabel));
+	if (opening.cleanup.uncopied) { box->addRow(object_ptr<Ui::FlatLabel>(box,tr::lng_purple_chat_cleanup_uncopied(tr::now),st::boxLabel)); }
+	const auto weak=QPointer<Ui::GenericBox>(box.get());
+	const auto allowed=[weak,current,latest,opening] {
+		if (!weak || !current || !current() || !latest) { return false; }
+		const auto fresh=latest();
+		return fresh && fresh->journal && fresh->cleanup.pending && fresh->cleanup.canAct
+			&& fresh->journal->operationId==opening.journal->operationId && fresh->journal->revision==opening.journal->revision
+			&& fresh->journal->account==opening.journal->account && fresh->journal->loginAuthority==opening.journal->loginAuthority
+			&& fresh->journal->source==opening.journal->source && fresh->journal->target==opening.journal->target;
+	};
+	if (opening.cleanup.pending && opening.cleanup.canAct) {
+		box->addButton(tr::lng_purple_chat_cleanup_retry(),[allowed,retry] { if (allowed() && retry) { retry(); } });
+		box->addButton(tr::lng_purple_chat_cleanup_skip(),[=] {
+			if (!allowed()) { return; }
+			box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> confirmation) {
+				confirmation->setTitle(tr::lng_purple_chat_cleanup_skip());
+				confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,tr::lng_purple_chat_cleanup_skip_confirm(tr::now),st::boxLabel));
+				confirmation->addButton(tr::lng_continue(),[=] { confirmation->closeBox(); if (allowed() && skip) { skip(true); } });
+				confirmation->addButton(tr::lng_cancel(),[=] { confirmation->closeBox(); });
+			}));
+		});
+	}
+	box->addButton(tr::lng_close(),[=] { box->closeBox(); });
 }
 
 void SyncChatSetupBox(not_null<Ui::GenericBox*> box,

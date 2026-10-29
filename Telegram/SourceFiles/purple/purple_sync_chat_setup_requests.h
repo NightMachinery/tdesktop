@@ -3,6 +3,7 @@
 #include "purple/purple_sync_chat_create.h"
 #include "purple/purple_sync_chat_io.h"
 #include "purple/purple_sync_retry.h"
+#include "purple/purple_sync_chat_cleanup.h"
 
 namespace Purple {
 
@@ -47,6 +48,7 @@ public:
 	void cancel();
 	[[nodiscard]] DesktopSyncChatMoveDecorationPhase phase() const;
 	[[nodiscard]] QString reason() const;
+	[[nodiscard]] DesktopSyncCleanupProgress cleanupProgress(const SyncCarryJournal &journal, bool pendingRequest) const;
 
 private:
 	bool accepts(const DesktopSyncChatMoveDecorationCommand &command) const;

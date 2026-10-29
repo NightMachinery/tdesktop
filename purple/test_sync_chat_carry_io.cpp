@@ -543,7 +543,9 @@ void ConsentFaultsAndAuthority() {
 			const auto edited = corruption == 0 ? CarryEnvelope(envelope)
 				: CanonicalizeSyncJson(QJsonDocument(envelope).toJson()).canonical;
 			Must(!edited.isEmpty());
-			Must(WriteSyncPrivateFile(path,edited) == SyncStoreStatus::Ready); Must(s.store->Open());
+			Must(WriteSyncPrivateFile(path,edited) == SyncStoreStatus::Ready);
+			const auto reopened = s.store->Open();
+			CHECK(reopened.status == SyncStoreStatus::InvalidState);
 			CHECK(!s.io->Reserve(DesktopSyncCarryEffect::Forward,SyncCarryRecordHash(s.Payload()),s.fresh,901));
 			CHECK(!s.io->Authorize(id->slot,s.fresh));
 			auto after = QByteArray(); Must(ReadSyncPrivateFile(path,4*1024*1024,after) == SyncStoreStatus::Ready); CHECK(after == edited);

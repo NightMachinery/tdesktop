@@ -214,7 +214,7 @@ std::optional<DesktopSyncChatMoveOffer> DesktopSyncChatMoveAction::choose(
 
 bool DesktopSyncChatMoveAction::confirm(const DesktopSyncChatMoveOffer &offer,
 		const DesktopSyncChatSetupSnapshot &fresh, std::optional<DesktopSyncChatPeer> peer,
-		bool cleanup, bool consent, Fn<void(DesktopSyncChatMoveDraft)> start) {
+		bool cleanup, bool consent, Fn<void(DesktopSyncChatMoveDraft)> start, bool removeOldMark) {
 	const auto same = _offer && offer.ticket == _offer->ticket
 		&& offer.sourceFingerprint == _offer->sourceFingerprint
 		&& offer.selection.choice == _offer->selection.choice
@@ -241,7 +241,7 @@ bool DesktopSyncChatMoveAction::confirm(const DesktopSyncChatMoveOffer &offer,
 	selected.peer = std::move(peer);
 	selected.readerConsent = true;
 	selected.provisionOnly = selected.choice == DesktopSyncChatSetupChoice::Create;
-	_reviewed = DesktopSyncChatMoveDraft{fresh, std::move(selected), cleanup};
+	_reviewed = DesktopSyncChatMoveDraft{fresh, std::move(selected), cleanup, removeOldMark};
 	if (!DesktopSyncChatMoveActivated()) {
 		_reason = u"move-qualification-held"_q;
 		return true;

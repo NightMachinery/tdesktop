@@ -455,3 +455,64 @@ reader-authority guard before mark/cache/commit processing. Cache writes also
 check original-known roster and creator/admin authority directly. An issued
 receipt remains retained when later reader authority is lost, and reopening
 cannot replace that baseline to make the operation proceed.
+
+## Explicit old-settings cleanup (T5g, qualification only)
+
+Cleanup remains OFF in production. The injected Carry executor may clean only
+its frozen O after verified delivery to N, durable state/cache commitment and
+recorded authorization. `SyncCarryCleanupCandidates`, `CheckSyncCarryDeletion`
+and `CheckSyncCarryOldMarkDeletion` are the only deletion authorities. There is
+no whole-channel or history deletion builder.
+
+AllSettings needs the accepted cleanup checkbox; Saved Messages starts unticked
+and retains the older-build warning. The old mark has a separate unchecked
+choice, stored in the core's `removeOldMarkAuthorized`. Follow selects only the
+core's OwnLatePosts outside Saved Messages. Fill grants no cleanup. Ordinary
+messages, legacy settings.toml documents, foreign records, changed bytes/dates,
+other installs' late posts and records without N coverage are not broadened into
+cleanup candidates.
+
+Each single-id request has a new worker-issued permit after an exact owned
+readback with the original hash, date and classification, plus a complete typed
+N inventory. Issued intent is durable before a request exists. Acknowledgement
+counters must be applied before reconciliation; acknowledgement alone never
+marks an item absent. Deletion uncertainty holds until a fresh scoped exact
+absence is proved. Empty result vectors, search omissions, incomplete reads,
+peerless messageEmpty and contradictory peers remain Unknown. The standalone
+selected stale-mark exception does not apply to cleanup or the Switch old mark.
+A definite scoped ChatGone uses core CleanupChatGone; protection or lost rights
+never becomes ChatGone.
+
+The cleanup ledger is version 1 under the Carry transport's `cleanup` object,
+with `entries` keyed by a domain-specific hash of item kind, id and record hash
+(or old-mark date). Each entry stores kind, id, decimal date, hash, state
+(issued/absent), and the body_sha256 of an owned retained text/record object when
+positive evidence exists. The existing transport hash binds it to account,
+login, operation, O and N. Unknown future ledger versions, substituted bodies,
+foreign references and size overflow refuse. Unknown fields remain preserved.
+The existing four-MiB journal and 64-MiB object limits apply, never truncation.
+Confirmed results survive restart and partial completion; Skip passes them to
+core SkipCleanup so only remaining references are abandoned.
+
+Progress says “Moved; old settings cleanup is incomplete” while a durable hold
+remains. Retry and confirmed Skip stay available after I/O failure, uncertain
+responses and slow renewal. Remembered phase/counts are presentation only;
+recovery reopens and validates the actual journal and committed state/cache.
+Only a first start compares the original chooser's exact file images. A failed
+or waiting Pin/Mute/Archive keeps its step and reason while cleanup receives its
+latest controls; status updates never implicitly retry that decoration.
+
+Operation liveness is separate from an item permit's superseded generation.
+Every deferred deletion renews full reader/N and exact O evidence through the
+shared request controller. A bounded renewal timeout completes once into a held
+state, with late grants fenced. Copied permits share one request claim. Close,
+logout, wrong account, stale operation/revision and new runs cannot use them.
+The GUI reads RAM capabilities only; all journal, cache and record work stays on
+the existing serialized worker.
+
+The install-moved note is based on a genuine own config record in N with this
+install/device, excluding required carried hashes and the operation's own carried
+record. Copying historical records is not evidence that this install has begun
+using N. The OFF-gated progress box has Retry and a separately confirmed Skip;
+a stale box cannot act on a successor operation. Host tests do not qualify native
+UI, Telegram server behavior or physical power-loss durability.

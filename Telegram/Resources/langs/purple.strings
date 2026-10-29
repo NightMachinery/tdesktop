@@ -437,3 +437,12 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_remove_mark_row" = "Remove older Purple mark in %1";
 "lng_purple_chat_remove_mark_disclosure" = "Remove only this selected older Purple mark from %1? No settings records or other messages will be removed.";
 "lng_purple_chat_remove_mark_held" = "Mark removal is waiting for qualification. Nothing was deleted.";
+
+"lng_purple_chat_cleanup_title" = "Old settings cleanup";
+"lng_purple_chat_cleanup_remove_mark" = "Also remove the old sync mark";
+"lng_purple_chat_cleanup_pending" = "Moved; old settings cleanup is incomplete.";
+"lng_purple_chat_cleanup_skipped" = "Moved; remaining old settings cleanup was skipped.";
+"lng_purple_chat_cleanup_uncopied" = "This install has settings in the new chat that were not copied by this move. Other devices may still use the old chat.";
+"lng_purple_chat_cleanup_retry" = "Retry cleanup";
+"lng_purple_chat_cleanup_skip" = "Skip cleanup";
+"lng_purple_chat_cleanup_skip_confirm" = "Leave the remaining old settings messages and continue syncing in the new chat?";

@@ -46,7 +46,7 @@ struct DesktopSyncChatLease {
 [[nodiscard]] bool ReviewSyncChatMove(
 	not_null<Main::Session*> session, DesktopSyncChatMoveAction &action,
 	const DesktopSyncChatMoveOffer &offer, std::optional<DesktopSyncChatPeer> peer,
-	bool cleanup, bool consent);
+	bool cleanup, bool consent, bool removeOldMark = false);
 
 [[nodiscard]] std::vector<DesktopSyncChatStaleMark> SyncChatStaleMarksOf(not_null<Main::Session*> session);
 [[nodiscard]] bool ReviewSyncChatStaleMark(not_null<Main::Session*> session,

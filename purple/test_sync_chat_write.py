@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -121,6 +121,16 @@ if args.test_source == 'test_sync_chat_marks.cpp':
     consent_sources = [repo / 'Telegram/SourceFiles/purple/purple_sync_chat_mark_actions.cpp']
     mark_transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_mark_transport.cpp').read_text()
     (work / 'mark-transport.inc').write_text('bool ProbeMarkTransport(MarkSenderProbe &sender, DesktopSyncChatMarkPermit permit, DesktopSyncChatMarkRenewal renew, Fn<void(Fn<void()>)> onSender, Fn<void(std::optional<MTPmessages_AffectedMessages>)> done) ' + block(mark_transport, 'bool SendDesktopSyncChatMarkDelete('))
+if args.test_source == 'test_sync_chat_cleanup.cpp':
+    cleanup_choices = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_text()
+    choice_begin = cleanup_choices.index('const auto removeMark =')
+    choice_end = cleanup_choices.index('const auto cleanup =', choice_begin)
+    choice = cleanup_choices[choice_begin:choice_end]
+    choice = choice.replace('object_ptr<Ui::Checkbox>', 'std::make_unique<CleanupChoiceCheckbox>').replace('tr::lng_purple_chat_cleanup_remove_mark(tr::now)', 'QString()').replace('st::defaultCheckbox', '0')
+    accepted_choice = next(line.strip() for line in cleanup_choices.splitlines() if 'const auto oldMark =' in line)
+    (work / 'cleanup-choice.inc').write_text(choice + '\n' + accepted_choice + '\n')
+    cleanup = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp').read_text()
+    (work / 'cleanup-transport.inc').write_text('bool ProbeCleanupTransport(CleanupSenderProbe &sender, DesktopSyncCleanupPermit permit, DesktopSyncCleanupRenew renew, Fn<void(Fn<void()>)> onSender, Fn<void(int, Fn<void()>)> delay, Fn<void(std::optional<MTPmessages_AffectedMessages>)> done) ' + block(cleanup, 'bool SendDesktopSyncChatCleanup('))
 with (work / 'build.log').open('w') as log:
     for source in [repo / 'purple' / args.test_source,
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_write.cpp',
@@ -133,6 +143,7 @@ with (work / 'build.log').open('w') as log:
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_store.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_io.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_executor.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp',
 
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cache.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_discovery.cpp',
@@ -191,6 +202,10 @@ with (work / 'build.log').open('w') as log:
     'sources_sha256': {str(source): hashlib.sha256(Path(source).read_bytes()).hexdigest()
                        for source in [c[c.index('-c') + 1] for c in compiled]},
     'objects_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in objects},
+    'cleanup_choices_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
+    'cleanup_choices_port_sha256': hashlib.sha256((work / 'cleanup-choice.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
+    'cleanup_transport_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
+    'cleanup_transport_port_sha256': hashlib.sha256((work / 'cleanup-transport.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
     'boundary': 'Upload parts/fresh-gate/dispatch/Updates/finish/cancel and post receipt/readback/finish/cancel bodies are literal production ports; session, API queue, before-post service and exact-reader transports are substituted without network. Entropy endpoint is deterministic in test; stage/ledger and TL objects are real. Actual mapper, C0, requests, cache, discovery and disk adapter compiled directly; literal Accept/Cancel/Publish and scanner/reader ownership bodies are ported with substituted session/notification/worker endpoints. Real generated TL constructors; reused schema/base/private-file/core-state objects. Unit-only, no app build/network/native acceptance.'}, indent=2) + '\n')
 if not args.build_only:
     result = subprocess.run([str(binary)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

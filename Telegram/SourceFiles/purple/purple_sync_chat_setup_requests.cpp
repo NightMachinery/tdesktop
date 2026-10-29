@@ -181,6 +181,23 @@ auto DesktopSyncChatMoveDecorationAction::phase() const
 	return _phase;
 }
 
+DesktopSyncCleanupProgress DesktopSyncChatMoveDecorationAction::cleanupProgress(
+		const SyncCarryJournal &journal, bool pendingRequest) const {
+	if (!_current || !_current() || _receipt.isEmpty() || !journal.targetMark
+		|| journal.account != _opening.scope.origin.account
+		|| journal.loginAuthority != DesktopSyncCarryLogin(_opening.scope.loginBinding)
+		|| journal.source != _opening.scope.settingsChat || !_provision.chat
+		|| journal.target != *_provision.chat || !SerializeSyncCarryJournal(journal)) {
+		return {};
+	}
+	const auto receipt = journal.operationId + u':' + journal.nextStateHash
+		+ u':' + QString::number(journal.targetMark->markId)
+		+ u':' + QString::number(journal.targetMark->markDate);
+	return receipt == _receipt
+		? DesktopSyncChatCleanupProgressOf(journal, pendingRequest)
+		: DesktopSyncCleanupProgress();
+}
+
 QString DesktopSyncChatMoveDecorationAction::reason() const { return _reason; }
 
 QByteArray EncodeDesktopSyncChatSetupUpdates(const MTPUpdates &updates) {

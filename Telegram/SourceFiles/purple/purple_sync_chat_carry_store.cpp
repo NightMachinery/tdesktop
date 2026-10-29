@@ -36,6 +36,36 @@ bool Same(const SyncPrivateSnapshot &a, const SyncPrivateSnapshot &b) {
 		&& a.identity == b.identity && a.parentIdentity == b.parentIdentity && a.bytes == b.bytes;
 }
 
+bool CleanupShape(const QJsonValue &value, const SyncCarryJournal &j) {
+	if (value.isUndefined()) { return true; }
+	if (!value.isObject()) { return false; }
+	const auto document=value.toObject();
+	if (document.value(u"version"_q)!=QJsonValue(1) || !document.value(u"entries"_q).isObject()) { return false; }
+	const auto entries=document.value(u"entries"_q).toObject(); if (entries.size()>1024 || !j.plan) { return false; }
+	for (auto i=entries.begin();i!=entries.end();++i) {
+		if (!IsSyncCarryHash(i.key()) || !i.value().isObject()) { return false; }
+		const auto e=i.value().toObject(); const auto kind=e.value(u"kind"_q).toString();
+		const auto id=e.value(u"id"_q); const auto date=DesktopSyncCarryTransportId(e.value(u"date"_q));
+		const auto hash=e.value(u"hash"_q).toString(); const auto state=e.value(u"state"_q).toString();
+		if (!id.isDouble() || id.toDouble()!=id.toInt() || id.toInt()<=0 || !date || *date>uint64_t(std::numeric_limits<int64_t>::max())
+			|| (state!=u"issued"_q && state!=u"absent"_q)
+			|| (e.contains(u"body_sha256"_q) && !IsSyncCarryHash(e.value(u"body_sha256"_q).toString()))
+			|| (state==u"issued"_q && !e.contains(u"body_sha256"_q))) { return false; }
+		if (kind==u"record"_q) {
+			const auto found=std::find_if(j.plan->cleanupCandidates.begin(),j.plan->cleanupCandidates.end(),[&](const auto &v) {
+				return v.reference.account==j.account && v.reference.chat==j.source && v.reference.messageId==id.toInt()
+					&& v.reference.recordHash==hash && v.date==int64_t(*date);
+			});
+			if (found==j.plan->cleanupCandidates.end() || i.key()!=SyncCarryRecordHash((u"record:"_q+QString::number(id.toInt())+u":"_q+hash).toUtf8())) { return false; }
+		} else if (kind==u"mark"_q) {
+			if (!hash.isEmpty() || !j.removeOldMarkAuthorized || !j.oldMark || j.mode!=SyncCarryMode::Switch
+				|| j.oldMark->markId!=id.toInt() || j.oldMark->markDate!=int64_t(*date)
+				|| i.key()!=SyncCarryRecordHash((u"mark:"_q+QString::number(id.toInt())+u":"_q+QString::number(*date)).toUtf8())) { return false; }
+		} else { return false; }
+	}
+	return true;
+}
+
 }
 
 std::optional<uint64_t> DesktopSyncCarryTransportId(const QJsonValue &value) {
@@ -141,6 +171,9 @@ std::optional<QJsonObject> DesktopSyncCarryTransportOf(
 	const auto result = value.toObject();
 	if (!result.value(u"version"_q).isDouble() || result.value(u"version"_q).toDouble() != 1
 		|| !result.value(u"entries"_q).isObject() || result.value(u"entries"_q).toObject().size() > 1024) { return {}; }
+	if (!CleanupShape(result.value(u"cleanup"_q),journal)) { return {}; }
+	if (result.contains(u"cleanup_settings_authorized"_q) && (!result.value(u"cleanup_settings_authorized"_q).isBool()
+		|| (result.value(u"cleanup_settings_authorized"_q).toBool() && journal.mode!=SyncCarryMode::Switch))) { return {}; }
 	const auto digest = DesktopSyncCarryTransportHash(result,envelope,journal);
 	if (!digest || envelope.value(u"transport_sha256"_q).toString() != *digest) { return {}; }
 	const auto entries = result.value(u"entries"_q).toObject();
@@ -208,6 +241,7 @@ bool SyncChatCarryStore::StateMatches() const {
 }
 
 SyncChatCarryStorageResult SyncChatCarryStore::Fail(SyncStoreStatus status) {
+	_lastFailure = status;
 	_failed = true;
 	Close();
 	return { status };
@@ -221,7 +255,8 @@ SyncChatCarryStorageResult SyncChatCarryStore::Open() {
 	}
 	_ioReadOpened = DesktopSyncChatReadStamp::Begin();
 	if (!_ioReadOpened.valid()) { return {SyncStoreStatus::InvalidTransition}; }
-	_failed = false; _objects = {}; _envelope = {}; _journal.reset(); _objectBytes = 0; _foreignLogin = false;
+	_failed = false; _lastFailure = SyncStoreStatus::Ready;
+	_objects = {}; _envelope = {}; _journal.reset(); _objectBytes = 0; _foreignLogin = false;
 	_thread = QThread::currentThread();
 	_local = std::make_unique<SyncLocalStore>(_directory);
 	const auto opened = _local->OpenForCarry(_scope.binding);
@@ -285,7 +320,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::Open() {
 	if (_journal->version != 2 || _journal->loginAuthority != DesktopSyncCarryLogin(_envelope.value(u"login_authority"_q).toString())) {
 		return Fail(SyncStoreStatus::AccountUnbound);
 	}
-	if (!RetainedEffects()) { return Fail(SyncStoreStatus::InvalidState); }
+	if (!RetainedEffects() || !CleanupLedger()) { return Fail(SyncStoreStatus::InvalidState); }
 	return { SyncStoreStatus::Ready, journal.status };
 }
 
@@ -386,10 +421,49 @@ SyncChatCarryStorageResult SyncChatCarryStore::Persist(const SyncCarryJournalRes
 	if (!SyncCarryJournalHoldsWrites(*_journal)) {
 		const auto archived = ArchiveTerminal(false); if (!archived) { return archived; }
 	}
+	_lastFailure = SyncStoreStatus::Ready;
 	return { SyncStoreStatus::Ready, next.status };
 }
 
-SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart &input, bool consentRequired) {
+bool SyncChatCarryStore::WitnessCleanup() {
+	if (!Current() || !_journal || !_journal->plan || foreignLogin() || _journal->phase!=SyncCarryPhase::Cleanup
+		|| !_journal->stateCommitted || !_journal->cacheCompleted || !_journal->targetMark
+		|| StateHash(_local->_state)!=_journal->nextStateHash) { return false; }
+	const auto state=WitnessState(_journal->nextStateHash);
+	if (state!=SyncStoreStatus::Ready) { static_cast<void>(Fail(state)); return false; }
+	if (!Same(_cacheFile,CaptureSyncPrivateFile(_scope.cacheFile,64*1024))) { static_cast<void>(Fail(SyncStoreStatus::Changed)); return false; }
+	const auto cache=WitnessCache({_journal->operationId,_scope.account,*_journal->targetMark,true});
+	if (cache!=SyncStoreStatus::Ready) { static_cast<void>(Fail(cache)); return false; }
+	return bool(CleanupLedger());
+}
+
+std::optional<QJsonObject> SyncChatCarryStore::CleanupLedger() const {
+	if (!Current() || !_journal) { return {}; }
+	const auto transport=DesktopSyncCarryTransportOf(_envelope,*_journal); if (!transport) { return {}; }
+	const auto entries=transport->value(u"cleanup"_q).toObject().value(u"entries"_q).toObject();
+	for (const auto &v:entries) {
+		const auto e=v.toObject(); const auto hash=e.value(u"body_sha256"_q).toString();
+		if (!hash.isEmpty() && !ReadObject(e.value(u"kind"_q)==QJsonValue(u"mark"_q)?u"text"_q:u"record"_q,hash)) { return {}; }
+	}
+	return entries;
+}
+
+SyncChatCarryStorageResult SyncChatCarryStore::SaveCleanupLedger(const QJsonObject &entries) {
+	if (!WitnessCleanup()) { return {Current()?SyncStoreStatus::InvalidTransition:_lastFailure}; }
+	auto transport=DesktopSyncCarryTransportOf(_envelope,*_journal); if (!transport) { return {SyncStoreStatus::InvalidState}; }
+	auto value=transport->value(u"cleanup"_q).toObject();
+	value.insert(u"version"_q,1); value.insert(u"entries"_q,entries);
+	if (!CleanupShape(value,*_journal)) { return {SyncStoreStatus::InvalidState}; }
+	transport->insert(u"cleanup"_q,value);
+	const auto hash=DesktopSyncCarryTransportHash(*transport,_envelope,*_journal); if (!hash) { return {SyncStoreStatus::InvalidState}; }
+	const auto before=_envelope;
+	_envelope.insert(u"transport"_q,*transport); _envelope.insert(u"transport_sha256"_q,*hash);
+	const auto written=Persist(SerializeSyncCarryJournal(*_journal));
+	if (!written) { _envelope=before; _lastFailure=written.status; }
+	return written;
+}
+
+SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart &input, bool consentRequired, bool cleanupSettings) {
 	const auto retained = RetainedEffects();
 	if (!retained) { return { SyncStoreStatus::InvalidState }; }
 	for (const auto &old : *retained) {
@@ -445,6 +519,14 @@ SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart
 			const auto record = StoreObject(u"record"_q, OwnBase().staged); if (!record) { return record; }
 		}
 		const auto prepared = PrepareState(*_local->_state); if (!prepared) { return prepared; }
+	}
+	if (cleanupSettings) {
+		if (input.mode!=SyncCarryMode::Switch || !input.operationConfirmed) { return {SyncStoreStatus::InvalidTransition}; }
+		const auto transport=QJsonObject{{u"version"_q,1},{u"entries"_q,QJsonObject()},{u"cleanup_settings_authorized"_q,true}};
+		const auto hash=DesktopSyncCarryTransportHash(transport,QJsonObject{{u"account"_q,*AccountKeyText(_scope.account.environment,_scope.account.userId)},
+			{u"binding_sha256"_q,BindingHash(_scope.binding)},{u"login_authority"_q,_scope.loginAuthority}},next.journal);
+		if (!hash) { return {SyncStoreStatus::InvalidState}; }
+		_envelope.insert(u"transport"_q,transport); _envelope.insert(u"transport_sha256"_q,*hash);
 	}
 	return Persist(next);
 }

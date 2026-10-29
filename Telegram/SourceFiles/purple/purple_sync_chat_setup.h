@@ -56,6 +56,7 @@ struct DesktopSyncChatMoveDraft {
 	DesktopSyncChatSetupSnapshot opening;
 	DesktopSyncChatSetupSelection selection;
 	bool cleanup = false;
+	bool removeOldMark = false;
 };
 
 [[nodiscard]] QString DesktopSyncChatMoveFingerprint(
@@ -72,7 +73,7 @@ public:
 	[[nodiscard]] bool confirm(const DesktopSyncChatMoveOffer &offer,
 		const DesktopSyncChatSetupSnapshot &fresh,
 		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent,
-		Fn<void(DesktopSyncChatMoveDraft)> start);
+		Fn<void(DesktopSyncChatMoveDraft)> start, bool removeOldMark = false);
 	void dismiss(uint64_t ticket);
 	void cancel();
 	[[nodiscard]] DesktopSyncChatMovePhase phase() const;

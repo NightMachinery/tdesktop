@@ -1,6 +1,6 @@
 #pragma once
 
-#include "purple/purple_sync_chat_carry_io.h"
+#include "purple/purple_sync_chat_cleanup.h"
 #include "purple/purple_sync_chat_carry_gate.h"
 
 namespace Purple {
@@ -8,6 +8,7 @@ namespace Purple {
 struct DesktopSyncCarryOpening {
 	QByteArray state;
 	QByteArray cache;
+	bool cleanupSettings = false;
 };
 
 struct DesktopSyncCarryCommand {
@@ -23,6 +24,8 @@ struct DesktopSyncCarryCommand {
 	QByteArray pendingRecord;
 	int32_t markId = 0;
 	std::vector<DesktopSyncCarryPermit> effects;
+	std::optional<DesktopSyncCleanupRead> cleanupRead;
+	std::optional<DesktopSyncCleanupPermit> cleanupPermit;
 };
 
 struct DesktopSyncCarryReply {
@@ -41,6 +44,8 @@ struct DesktopSyncCarryReply {
 	SyncPlaylistCarryReceipt playlist;
 	bool neverLandedConfirmed = false;
 	QString neverLandedRequestId;
+	std::optional<MTPmessages_Messages> cleanupResponse;
+	std::optional<MTPmessages_AffectedMessages> cleanupResult;
 };
 
 struct DesktopSyncCarryProgress {
@@ -54,6 +59,7 @@ struct DesktopSyncCarryProgress {
 	std::optional<SyncLocalState> bindingRecoveryState;
 	bool terminal = false;
 	bool absent = false;
+	DesktopSyncCleanupProgress cleanup;
 };
 
 class DesktopSyncChatCarry final {
@@ -75,13 +81,20 @@ public:
 		const DesktopSyncCarryCommand &command, const DesktopSyncCarryPermit &permit,
 		const DesktopSyncCarryFresh &fresh);
 
+	[[nodiscard]] std::optional<DesktopSyncCleanupRead> beginCleanupRenew(const DesktopSyncCarryCommand &command, const DesktopSyncCleanupPermit &permit);
+	[[nodiscard]] std::optional<DesktopSyncCleanupPermit> renewCleanup(const DesktopSyncCarryCommand &command,
+		const DesktopSyncCleanupPermit &permit, const DesktopSyncCleanupRead &read, const DesktopSyncCarryReply &reply);
+
 private:
+	void cleanup(const DesktopSyncCarryReply &reply);
+	void cleanupHold(QString reason);
 	[[nodiscard]] bool current() const;
 	[[nodiscard]] bool accept(const DesktopSyncCarryCommand &command) const;
 	[[nodiscard]] bool fresh(const DesktopSyncCarryFresh &facts, bool sameResolution = true);
 	void advance();
 	void issue(SyncCarryJournalAction action, bool dispatch = false,
-		std::vector<DesktopSyncCarryPermit> effects = {});
+		std::vector<DesktopSyncCarryPermit> effects = {},
+		std::optional<DesktopSyncCleanupRead> cleanupRead = {}, std::optional<DesktopSyncCleanupPermit> cleanupPermit = {});
 	void publish(QString reason = {}, SyncChatCarryStorageResult result = {SyncStoreStatus::Ready});
 	void retire();
 	[[nodiscard]] bool result(SyncChatCarryStorageResult value);
@@ -98,6 +111,11 @@ private:
 	SyncDurableFault _fault;
 	std::unique_ptr<SyncChatCarryStore> _store;
 	std::unique_ptr<DesktopSyncChatCarryIo> _io;
+	std::unique_ptr<DesktopSyncChatCleanup> _cleanup;
+	std::optional<SyncCarryJournal> _rememberedJournal;
+	size_t _cleanupConfirmed = 0;
+	bool _cleanupUncopied = false;
+	bool _skipCleanupRequested = false;
 	std::optional<DesktopSyncCarryCommand> _command;
 	std::optional<DesktopSyncChatPeer> _peer;
 	uint64_t _run = 1;

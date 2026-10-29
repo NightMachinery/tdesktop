@@ -31,7 +31,7 @@ guards = [
     ('service', 'if (!DesktopSyncChatFollowFillActivated()) { return false; }'),
     ('service', 'self->_session->account().loggingOut()'),
     ('service', 'crl::async([=] { ForgetDesktopSyncChatLogin(path, account, login); });'),
-    ('worker', '_store->Begin(*start, consentPeer.has_value())'),
+    ('worker', '_store->Begin(*start, consentPeer.has_value(), opening && opening->cleanupSettings)'),
     ('worker', '_io->AcceptReaders(*consentPeer, stream)'),
     ('worker', '_io && _io->CheckReaders(facts)'),
     ('worker', 'std::move(pending->consentPeer), std::move(pending->stream), std::move(pending->opening)'),

@@ -75,7 +75,7 @@ bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameRe
 void DesktopSyncChatCarry::retire() {
 	++_run;
 	if (_command) { for (const auto &permit : _command->effects) { permit.revoke(); } }
-	_command.reset(); _io.reset(); _store.reset(); _lease.reset(); _pendingOpening.reset();
+	_command.reset(); _cleanup.reset(); _io.reset(); _store.reset(); _lease.reset(); _pendingOpening.reset();
 	_closed = true;
 }
 
@@ -86,6 +86,7 @@ void DesktopSyncChatCarry::publish(QString reason, SyncChatCarryStorageResult va
 		if (_store->foreignLogin() && _scope.binding.isEmpty() && _store->state()) { progress.bindingRecoveryState = *_store->state(); }
 		if (_store->journal()) {
 			progress.journal = *_store->journal();
+			_rememberedJournal = progress.journal;
 			progress.terminal = value.status == SyncStoreStatus::Ready && _store->Current()
 				&& !SyncCarryJournalHoldsWrites(*progress.journal);
 		}
@@ -94,7 +95,9 @@ void DesktopSyncChatCarry::publish(QString reason, SyncChatCarryStorageResult va
 		const auto images = _store->RetainedImages();
 		if (images) { progress.retainedImages = *images; }
 	}
+	if (!progress.journal) { progress.journal = _rememberedJournal; }
 	progress.command = _command;
+	if (progress.journal) { progress.cleanup = DesktopSyncChatCleanupProgressOf(*progress.journal,_command.has_value(),_cleanupConfirmed,_cleanupUncopied); }
 	progress.absent = value.status == SyncStoreStatus::Ready && _store && _store->Current() && !_store->journal();
 	if (progress.terminal || progress.absent) { retire(); }
 	if (_progress) { _progress(std::move(progress)); }
@@ -105,7 +108,7 @@ bool DesktopSyncChatCarry::result(SyncChatCarryStorageResult value) {
 		_command.reset();
 		publish(value.status == SyncStoreStatus::Ready && value.journalStatus == SyncCarryJournalStatus::Retry
 			? u"carry-retry-required"_q : u"carry-held"_q, value);
-		if (_store && !_store->Current()) { _io.reset(); _store.reset(); }
+		if (_store && !_store->Current()) { _cleanup.reset(); _io.reset(); _store.reset(); }
 		return false;
 	}
 	return true;
@@ -127,8 +130,8 @@ void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start,
 		publish(u"publishers-not-quiescent"_q, {SyncStoreStatus::LockBusy}); return;
 	}
 	_store = std::make_unique<SyncChatCarryStore>(_directory, _scope, _fault);
-	if (!result(_store->Open())) { retire(); return; }
-	if (opening && (_store->_stateFile.bytes != opening->state || _store->_cacheFile.bytes != opening->cache)) {
+	if (!result(_store->Open())) { if (!_rememberedJournal || _rememberedJournal->phase!=SyncCarryPhase::Cleanup) { retire(); } return; }
+	if (start && opening && (_store->_stateFile.bytes != opening->state || _store->_cacheFile.bytes != opening->cache)) {
 		publish(u"opening-images-held"_q); retire(); return;
 	}
 	if (start) {
@@ -137,7 +140,7 @@ void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start,
 			|| (start->loginAuthority != DesktopSyncCarryLogin(_scope.loginAuthority))) {
 			publish(u"opening-scope-held"_q); retire(); return;
 		}
-		if (!result(_store->Begin(*start, consentPeer.has_value()))) { retire(); return; }
+		if (!result(_store->Begin(*start, consentPeer.has_value(), opening && opening->cleanupSettings))) { retire(); return; }
 	} else if (!_store->journal()) { publish(u"no-carry-journal"_q); return; }
 	_io = std::make_unique<DesktopSyncChatCarryIo>(*_store);
 	if (consentPeer && (!start || consentPeer->origin != _origin || !_io->AcceptReaders(*consentPeer, stream))) {
@@ -151,6 +154,7 @@ void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start,
 		_resumeRefused = resumed.journalStatus == SyncCarryJournalStatus::NeedsReview;
 		if (!result(resumed)) { return; }
 	}
+	if (_skipCleanupRequested) { _skipCleanupRequested=false; skipCleanup(true); return; }
 	_needsFresh = !start;
 	advance();
 }
@@ -169,13 +173,15 @@ void DesktopSyncChatCarry::resume() {
 	advance();
 }
 
-void DesktopSyncChatCarry::issue(SyncCarryJournalAction action, bool dispatch, std::vector<DesktopSyncCarryPermit> effects) {
+void DesktopSyncChatCarry::issue(SyncCarryJournalAction action, bool dispatch, std::vector<DesktopSyncCarryPermit> effects,
+		std::optional<DesktopSyncCleanupRead> cleanupRead, std::optional<DesktopSyncCleanupPermit> cleanupPermit) {
 	const auto &journal = *_store->journal();
 	auto command = DesktopSyncCarryCommand();
 	command.ticket = ++_ticket; command.run = _run; command.operation = journal.operationId;
 	command.revision = journal.revision; command.action = action; command.origin = _origin;
 	command.source = journal.source; command.target = journal.target;
 	command.dispatch = dispatch; command.effects = std::move(effects);
+	command.cleanupRead=std::move(cleanupRead); command.cleanupPermit=std::move(cleanupPermit);
 	command.markId = _recoveryWinner ? _recoveryWinner->markId
 		: journal.targetMark ? journal.targetMark->markId : _io->MarkReceiptId();
 	if (action == SyncCarryJournalAction::ResolvePending) {
@@ -239,6 +245,13 @@ void DesktopSyncChatCarry::plan(const DesktopSyncCarryReply &reply) {
 		input.playlistsInUse = library.seq || library.confirmedSeq || library.abandonedSeq
 			|| !library.ownHash.isEmpty() || !library.issuedRecords.empty()
 			|| std::any_of(input.state->ownMessages.begin(), input.state->ownMessages.end(), [](const auto &message) { return message.stream == SyncLocalStream::Library; });
+	}
+	const auto authority=DesktopSyncCarryTransportOf(_store->_envelope,journal);
+	if (!authority) { publish(u"cleanup-authorization-held"_q); return; }
+	if (journal.mode==SyncCarryMode::Switch && authority->value(u"cleanup_settings_authorized"_q)==QJsonValue(true)) {
+		input.cleanup=SyncCarryCleanup::AllSettings; input.cleanupAuthorized=true;
+	} else if (journal.mode==SyncCarryMode::Follow && journal.source!=PeerToken{}) {
+		input.cleanup=SyncCarryCleanup::OwnLatePosts; input.cleanupAuthorized=true;
 	}
 	input.oldInventory = source.value_or(SyncCarryInventory{journal.account, journal.source, false, {}});
 	input.newInventory = *destination;
@@ -331,6 +344,11 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 		issue(SyncCarryJournalAction::ReadMark);
 		return;
 	}
+	if (opening.action==SyncCarryJournalAction::Cleanup && opening.dispatch) {
+		if (opening.cleanupPermit) { opening.cleanupPermit->revoke(); }
+		if (reply.outcome!=SyncCarryOutcome::Success || !reply.cleanupResult) { cleanupHold(u"cleanup-delete-uncertain"_q); return; }
+		issue(SyncCarryJournalAction::Cleanup); return;
+	}
 	if (opening.dispatch) {
 		auto outcome = reply.outcome;
 		if (outcome == SyncCarryOutcome::Success && reply.updates.size() != opening.effects.size()) { outcome = SyncCarryOutcome::Unknown; }
@@ -361,7 +379,9 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 		if (!facts.current || !facts.current() || facts.source.peer.origin != _origin || facts.target.peer.origin != _origin
 			|| facts.source.peer.chat != opening.source || facts.target.peer.chat != opening.target
 			|| facts.loginAuthority != _scope.loginAuthority || !_io->CheckReaders(facts)) {
-			publish(u"reader-authority-held"_q); return;
+			if (opening.action==SyncCarryJournalAction::Cleanup) { cleanupHold(u"reader-authority-held"_q); }
+			else { publish(u"reader-authority-held"_q); }
+			return;
 		}
 		if (fresh(facts)) { _peer = facts.target.peer; }
 	}
@@ -452,28 +472,68 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 	case SyncCarryJournalAction::CompleteCache:
 		if (!reply.fresh || !_peer) { publish(u"cache-peer-held"_q); return; }
 		advance(); return;
-	case SyncCarryJournalAction::Cleanup: {
-		if (reply.access == SyncCarrySourceAccess::ChatGone && reply.oldRead == SyncChatDirectRead::ChatGone) {
-			if (!reply.fresh || !fresh(*reply.fresh, false)) {
-				publish(u"cleanup-gone-scope-held"_q); return;
-			}
-			auto accepted = event(SyncCarryEventKind::CleanupChatGone);
-			accepted.noRequestInFlight = true;
-			accepted.mark = {SyncCarryMarkOutcome::ChatGone, _origin.account, opening.source};
-			if (result(_store->Advance(accepted))) { advance(); }
-			return;
-		}
-		if (!reply.destination) { publish(u"cleanup-read-required"_q); return; }
-		const auto destination = DesktopSyncChatCarryInventory(*reply.destination);
-		if (!destination || reply.destination->route.peer.origin != _origin || destination->chat != opening.target
-			|| !_store->journal()->plan || !VerifySyncCarryReadback(*_store->journal()->plan, *destination, reply.playlist)) { publish(u"cleanup-verification-held"_q); return; }
-		if (!SyncCarryCleanupCandidates(*_store->journal()->plan, *destination, reply.playlist).empty()
-			|| _store->journal()->removeOldMarkAuthorized) { publish(u"cleanup-policy-not-enabled"_q); return; }
-		auto accepted = event(SyncCarryEventKind::CleanupCompleted); accepted.destination = *destination; accepted.playlist = reply.playlist;
-		if (result(_store->Advance(accepted))) { advance(); }
-	} return;
+	case SyncCarryJournalAction::Cleanup: cleanup(reply); return;
 	default: publish(u"unexpected-transport-action"_q); return;
 	}
+}
+
+void DesktopSyncChatCarry::cleanupHold(QString reason) {
+	_command.reset();
+	if (_store && (!_store->Current() || _store->_lastFailure != SyncStoreStatus::Ready)) {
+		const auto failure = _store->_lastFailure != SyncStoreStatus::Ready
+			? _store->_lastFailure : SyncStoreStatus::Changed;
+		static_cast<void>(result({failure}));
+		return;
+	}
+	publish(std::move(reason));
+}
+
+void DesktopSyncChatCarry::cleanup(const DesktopSyncCarryReply &reply) {
+	const auto &opening=reply.command;
+	if (reply.access==SyncCarrySourceAccess::ChatGone && reply.oldRead==SyncChatDirectRead::ChatGone) {
+		if (!reply.fresh || !fresh(*reply.fresh,false) || !_store->WitnessCleanup()) { cleanupHold(u"cleanup-gone-scope-held"_q); return; }
+		auto accepted=event(SyncCarryEventKind::CleanupChatGone); accepted.noRequestInFlight=true;
+		accepted.mark={SyncCarryMarkOutcome::ChatGone,_origin.account,opening.source};
+		if (result(_store->Advance(accepted))) { advance(); } return;
+	}
+	if (!reply.destination || !reply.fresh) { cleanupHold(u"cleanup-read-required"_q); return; }
+	if (!_cleanup) { _cleanup=std::make_unique<DesktopSyncChatCleanup>(*_store,_origin,_admitted); }
+	if (!_cleanup->prepare(*reply.fresh,*reply.destination,reply.playlist)) { cleanupHold(u"cleanup-verification-held"_q); return; }
+	if (opening.cleanupRead) {
+		if (!reply.cleanupResponse || !_cleanup->inspect(*opening.cleanupRead,*reply.fresh,*reply.destination,reply.playlist,*reply.cleanupResponse,reply.fresh->sourceRecord)) {
+			cleanupHold(u"cleanup-exact-held"_q); return;
+		}
+		if (const auto permit=_cleanup->permit()) {
+			issue(SyncCarryJournalAction::Cleanup,true,{}, {},permit); return;
+		}
+	}
+	const auto deleted=_cleanup->deleted(); if (!deleted) { cleanupHold(u"cleanup-ledger-held"_q); return; }
+	_cleanupConfirmed=deleted->size(); _cleanupUncopied=_cleanup->uncopied();
+	if (const auto read=_cleanup->next()) {
+		issue(SyncCarryJournalAction::Cleanup,false,{},read); return;
+	}
+	if (!_store->Current()) { cleanupHold(u"cleanup-storage-held"_q); return; }
+	const auto destination=DesktopSyncChatCarryInventory(*reply.destination); if (!destination) { cleanupHold(u"cleanup-destination-held"_q); return; }
+	auto accepted=event(SyncCarryEventKind::CleanupCompleted); accepted.destination=*destination; accepted.playlist=reply.playlist;
+	accepted.deleted=*deleted; accepted.mark=_cleanup->oldMarkAbsent();
+	if (result(_store->Advance(accepted))) { advance(); }
+}
+
+std::optional<DesktopSyncCleanupRead> DesktopSyncChatCarry::beginCleanupRenew(
+		const DesktopSyncCarryCommand &command, const DesktopSyncCleanupPermit &permit) {
+	if (!accept(command) || command.action!=SyncCarryJournalAction::Cleanup || !command.dispatch
+		|| !command.cleanupPermit || !permit.operationCurrent() || !_cleanup || command.cleanupPermit->item()!=permit.item()) { return {}; }
+	const auto read=_cleanup->next();
+	return read && read->item==permit.item() ? read : std::nullopt;
+}
+std::optional<DesktopSyncCleanupPermit> DesktopSyncChatCarry::renewCleanup(const DesktopSyncCarryCommand &command,
+		const DesktopSyncCleanupPermit &permit, const DesktopSyncCleanupRead &read, const DesktopSyncCarryReply &reply) {
+	if (!accept(command) || !command.dispatch || !_cleanup || !command.cleanupPermit || command.cleanupPermit->item()!=permit.item()
+		|| !permit.operationCurrent() || read.item!=permit.item() || !reply.fresh || !reply.destination || !reply.cleanupResponse) { return {}; }
+	auto facts=*reply.fresh; facts.current=[admitted=_admitted] { return admitted->load(); };
+	if (!fresh(facts,false) || !_cleanup->prepare(facts,*reply.destination,reply.playlist)
+		|| !_cleanup->inspect(read,facts,*reply.destination,reply.playlist,*reply.cleanupResponse,facts.sourceRecord)) { return {}; }
+	const auto next=_cleanup->permit(); return next && permit.successor(*next) ? next : std::nullopt;
 }
 
 std::optional<DesktopSyncCarryPermit> DesktopSyncChatCarry::renew(const DesktopSyncCarryCommand &command,
@@ -504,10 +564,16 @@ void DesktopSyncChatCarry::discardInterrupted(bool confirmed) {
 }
 
 void DesktopSyncChatCarry::skipCleanup(bool confirmed) {
-	if (!current() || !_store || !_store->journal() || (_command && _command->dispatch)) { return; }
-	_command.reset();
-	auto skipped = event(SyncCarryEventKind::SkipCleanup);
-	skipped.skipCleanupConfirmed = confirmed; skipped.noRequestInFlight = true;
+	if (!confirmed || !current() || (_command && _command->dispatch)) { return; }
+	_command.reset(); _cleanup.reset();
+	if (!_store) { _skipCleanupRequested=true; open(); return; }
+	if (!_store->journal() || !_store->WitnessCleanup()) { cleanupHold(u"cleanup-skip-held"_q); return; }
+	const auto ledger=_store->CleanupLedger(); if (!ledger) { cleanupHold(u"cleanup-ledger-held"_q); return; }
+	auto skipped=event(SyncCarryEventKind::SkipCleanup);
+	for (const auto &v:*ledger) { const auto e=v.toObject(); if (e.value(u"state"_q)==QJsonValue(u"absent"_q)) {
+		skipped.deleted.push_back({_origin.account,_store->journal()->source,e.value(u"id"_q).toInt(),e.value(u"hash"_q).toString()});
+	} }
+	skipped.skipCleanupConfirmed=true; skipped.noRequestInFlight=true;
 	if (result(_store->Advance(skipped))) { publish(u"cleanup-skipped"_q); }
 }
 

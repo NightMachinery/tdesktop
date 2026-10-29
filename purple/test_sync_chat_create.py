@@ -165,6 +165,7 @@ with (work / 'build.log').open('w') as log:
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create_requests.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_flow.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_requests.cpp',
+                   repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp',
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_facts.cpp', *publish_sources]:
         target = work / (source.stem + '.o')
         command = recipe[:]

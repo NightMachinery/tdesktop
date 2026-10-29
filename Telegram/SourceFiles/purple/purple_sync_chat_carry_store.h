@@ -55,7 +55,7 @@ public:
 	[[nodiscard]] SyncChatCarryStorageResult Open();
 	[[nodiscard]] SyncChatCarryStorageResult RemoveAccount(bool explicitlyConfirmed);
 	void Close();
-	[[nodiscard]] SyncChatCarryStorageResult Begin(const SyncCarryJournalStart &input, bool consentRequired = false);
+	[[nodiscard]] SyncChatCarryStorageResult Begin(const SyncCarryJournalStart &input, bool consentRequired = false, bool cleanupSettings = false);
 	[[nodiscard]] SyncChatCarryStorageResult Advance(SyncCarryJournalEvent event);
 	[[nodiscard]] SyncChatCarryStorageResult PrepareState(const SyncLocalState &state);
 	[[nodiscard]] SyncChatCarryStorageResult StageOwn();
@@ -73,8 +73,12 @@ public:
 	[[nodiscard]] SyncStoreResult OwnBase() const;
 
 private:
+	friend class DesktopSyncChatCleanup;
 	friend class DesktopSyncChatCarryIo;
 	friend class DesktopSyncChatCarry;
+	[[nodiscard]] bool WitnessCleanup();
+	[[nodiscard]] std::optional<QJsonObject> CleanupLedger() const;
+	[[nodiscard]] SyncChatCarryStorageResult SaveCleanupLedger(const QJsonObject &entries);
 	[[nodiscard]] bool Current() const;
 	[[nodiscard]] bool StateMatches() const;
 	[[nodiscard]] SyncStoreStatus LoadObjects();
@@ -107,6 +111,7 @@ private:
 	QJsonObject _objects;
 	qsizetype _objectBytes = 0;
 	bool _failed = false;
+	SyncStoreStatus _lastFailure = SyncStoreStatus::Ready;
 	DesktopSyncChatReadStamp _ioReadOpened;
 	std::map<QString, std::pair<uint64_t, DesktopSyncChatReadStamp>> _ioReadFences;
 	std::map<QString, std::pair<uint64_t, std::weak_ptr<std::atomic<bool>>>> _ioActive;

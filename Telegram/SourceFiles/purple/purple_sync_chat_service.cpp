@@ -1194,13 +1194,13 @@ bool ReviewSyncChatFollowFill(not_null<Main::Session*> session,
 
 bool ReviewSyncChatMove(not_null<Main::Session*> session,
 		DesktopSyncChatMoveAction &action, const DesktopSyncChatMoveOffer &offer,
-		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent) {
+		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent, bool removeOldMark) {
 	const auto fresh = SyncChatSetupSnapshotOf(session);
 	if (!fresh || !CachedSyncChatSetupContextCurrent(session, fresh->scope)) {
 		action.cancel();
 		return false;
 	}
-	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {});
+	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {}, removeOldMark);
 }
 
 std::vector<DesktopSyncChatStaleMark> SyncChatStaleMarksOf(not_null<Main::Session*> session) {

@@ -299,6 +299,8 @@ PRIVATE
     purple/purple_sync_auto_service.h
     purple/purple_sync_chat_carry_io.cpp
     purple/purple_sync_chat_carry_io.h
+    purple/purple_sync_chat_cleanup.cpp
+    purple/purple_sync_chat_cleanup.h
     purple/purple_sync_chat_carry_executor.cpp
     purple/purple_sync_chat_carry_executor.h
     purple/purple_sync_chat_carry_gate.h

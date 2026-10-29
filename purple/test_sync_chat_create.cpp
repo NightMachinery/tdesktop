@@ -746,12 +746,16 @@ void DecorationCallbacks(const DesktopSyncChatSetupSnapshot &opening,
 				auto status = journal; status.phase = phase;
 				CHECK(!action.observe(status, route));
 				CHECK(action.phase() == DecorationPhase::Waiting);
+				CHECK(action.cleanupProgress(journal,false).canAct);
 			}
 			const auto callback = [&](bool okay) { action.complete(*command, okay); };
 			if (at != failAt) { callback(true); continue; }
 			callback(false);
 			CHECK(action.phase() == DecorationPhase::Held);
 			const auto reason = action.reason(); CHECK(!reason.isEmpty());
+			const auto cleanup=action.cleanupProgress(journal,false);
+			CHECK(cleanup.pending && cleanup.canAct && !cleanup.skipped);
+			CHECK(action.phase()==DecorationPhase::Held && action.reason()==reason);
 			for (const auto phase : {SyncCarryPhase::Cleanup, SyncCarryPhase::Done, SyncCarryPhase::CleanupSkipped}) {
 				auto status = journal; status.phase = phase;
 				CHECK(!action.observe(status, route));
@@ -759,6 +763,11 @@ void DecorationCallbacks(const DesktopSyncChatSetupSnapshot &opening,
 			}
 			CHECK(effects.size() == at + 1);
 			auto other = journal; other.operationId = QString(32, u'e');
+			CHECK(!action.cleanupProgress(other, false).pending);
+			CHECK(!action.cleanupProgress(other, false).canAct);
+			auto changedReceipt = journal;
+			++changedReceipt.targetMark->markId;
+			CHECK(!action.cleanupProgress(changedReceipt, false).canAct);
 			CHECK(!action.retry(other, route)); CHECK(action.phase() == DecorationPhase::Held);
 			CHECK(!action.observe(journal, route));
 			const auto retry = action.retry(journal, route); CHECK(retry);

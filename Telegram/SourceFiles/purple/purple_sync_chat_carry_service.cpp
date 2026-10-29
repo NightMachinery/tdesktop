@@ -80,8 +80,15 @@ public:
 		if (!command || !_transport.send) { return; }
 		const auto admitted = _admitted;
 		const auto apply = _transport.applyUpdates;
-		_transport.send(*command, [weak, admitted, apply, command = *command](DesktopSyncCarryReply reply) mutable {
+		const auto applyCleanup = _transport.applyCleanup;
+		_transport.send(*command, [weak, admitted, apply, applyCleanup, command = *command](DesktopSyncCarryReply reply) mutable {
 			if (apply) { for (const auto &updates : reply.updates) { apply(updates); } }
+			try {
+				if (reply.cleanupResult && (!command.cleanupPermit || !applyCleanup
+					|| !applyCleanup(command.cleanupPermit->route(),*reply.cleanupResult))) {
+					reply.cleanupResult.reset(); reply.outcome=SyncCarryOutcome::Unknown;
+				}
+			} catch (...) { reply.cleanupResult.reset(); reply.outcome=SyncCarryOutcome::Unknown; }
 			const auto self = weak.get();
 			if (!self || !self->current() || !self->_worker) { return; }
 			reply.command = command;
@@ -120,6 +127,29 @@ public:
 		});
 	}
 
+	void beginCleanupRenew(DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit,
+			Fn<void(std::optional<DesktopSyncCleanupRead>)> ready) {
+		if (!current() || !_worker) { ready({}); return; }
+		const auto weak=base::make_weak(this);
+		_worker->with([weak,command=std::move(command),permit=std::move(permit),ready=std::move(ready)](DesktopSyncChatCarry &flow) mutable {
+			auto read=flow.beginCleanupRenew(command,permit);
+			crl::on_main([weak,read=std::move(read),ready=std::move(ready)]() mutable {
+				const auto self=weak.get(); ready(self && self->current()?std::move(read):std::nullopt);
+			});
+		});
+	}
+	void renewCleanup(DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit, DesktopSyncCleanupRead read,
+			DesktopSyncCarryReply reply, Fn<void(std::optional<DesktopSyncCleanupPermit>)> ready) {
+		if (!current() || !_worker) { ready({}); return; }
+		const auto weak=base::make_weak(this);
+		_worker->with([weak,command=std::move(command),permit=std::move(permit),read=std::move(read),reply=std::move(reply),ready=std::move(ready)](DesktopSyncChatCarry &flow) mutable {
+			auto next=flow.renewCleanup(command,permit,read,reply);
+			crl::on_main([weak,next=std::move(next),ready=std::move(ready)]() mutable {
+				const auto self=weak.get(); ready(self && self->current()?std::move(next):std::nullopt);
+			});
+		});
+	}
+
 private:
 	base::weak_ptr<Main::Session> _session;
 	DesktopSyncChatDiscoveryScope _opening;
@@ -145,5 +175,12 @@ void DesktopSyncChatCarryService::discardInterrupted(bool confirmed) { _impl->di
 void DesktopSyncChatCarryService::skipCleanup(bool confirmed) { _impl->skipCleanup(confirmed); }
 void DesktopSyncChatCarryService::renew(const DesktopSyncCarryCommand &command, const DesktopSyncCarryPermit &permit,
 		DesktopSyncCarryFresh fresh, Fn<void(std::optional<DesktopSyncCarryPermit>)> ready) { _impl->renew(command, permit, std::move(fresh), std::move(ready)); }
+
+void DesktopSyncChatCarryService::beginCleanupRenew(DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit,
+		Fn<void(std::optional<DesktopSyncCleanupRead>)> ready) { _impl->beginCleanupRenew(std::move(command),std::move(permit),std::move(ready)); }
+void DesktopSyncChatCarryService::renewCleanup(DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit,
+		DesktopSyncCleanupRead read, DesktopSyncCarryReply reply, Fn<void(std::optional<DesktopSyncCleanupPermit>)> ready) {
+	_impl->renewCleanup(std::move(command),std::move(permit),std::move(read),std::move(reply),std::move(ready));
+}
 
 }

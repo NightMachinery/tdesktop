@@ -11,6 +11,7 @@ struct DesktopSyncCarryTransport {
 	Fn<void(DesktopSyncCarryCommand, Fn<void(DesktopSyncCarryReply)>)> send;
 	Fn<void()> cancel;
 	Fn<void(const MTPUpdates &)> applyUpdates;
+	Fn<bool(const DesktopSyncChatIo &, const MTPmessages_AffectedMessages &)> applyCleanup;
 };
 
 class DesktopSyncChatCarryService final {
@@ -26,6 +27,12 @@ public:
 	void skipCleanup(bool confirmed);
 	void renew(const DesktopSyncCarryCommand &command, const DesktopSyncCarryPermit &permit,
 		DesktopSyncCarryFresh fresh, Fn<void(std::optional<DesktopSyncCarryPermit>)> ready);
+
+void beginCleanupRenew(DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit,
+		Fn<void(std::optional<DesktopSyncCleanupRead>)> ready);
+	void renewCleanup(DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit,
+		DesktopSyncCleanupRead read, DesktopSyncCarryReply reply,
+		Fn<void(std::optional<DesktopSyncCleanupPermit>)> ready);
 
 private:
 	class Impl;
