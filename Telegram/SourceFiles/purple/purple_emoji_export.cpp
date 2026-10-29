@@ -211,13 +211,16 @@ EmojiExporter::EmojiExporter()
 		reconcile();
 	}, _lifetime);
 	ControlSocketPathValue() | rpl::on_next([=] { dirty(); }, _lifetime);
+	ControlSettingsChanges() | rpl::on_next([=] {
+		passcodeChanged(Core::App().passcodeLocked());
+	}, _lifetime);
 	reconcile();
 	_poll.start(1000);
 }
 
 bool EmojiExporter::admitted() const {
 	const auto session = _session.get();
-	return !Core::Quitting() && session && EmojiExportEnabled() && !Core::App().passcodeLocked()
+	return !Core::Quitting() && session && EmojiExportEnabled() && ControlEmojiAllowedWhileLocked()
 		&& Core::App().maybePrimarySession() == session
 		&& !session->account().loggingOut() && _clean;
 }
@@ -231,7 +234,7 @@ void EmojiExporter::logout(Main::Account &account) {
 }
 
 void EmojiExporter::passcodeChanged(bool locked) {
-	if (locked) {
+	if (locked && !ControlEmojiAllowedWhileLocked()) {
 		_renderRequests.clear(ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q));
 	}
 	reconcile();
@@ -244,7 +247,7 @@ void EmojiExporter::reconcile() {
 		return;
 	}
 	const auto primary = Core::App().maybePrimarySession();
-	const auto desired = EmojiExportEnabled() && !Core::App().passcodeLocked()
+	const auto desired = EmojiExportEnabled() && ControlEmojiAllowedWhileLocked()
 		&& primary && primary != _retiredSession.get()
 		&& !primary->account().loggingOut() ? primary : nullptr;
 	if (_bound && (!desired || desired != _session.get())) {
@@ -345,8 +348,12 @@ void EmojiExporter::resetOutput(bool clear) {
 void EmojiExporter::render(quint64 id, int pixels,
 		std::function<bool()> active, ControlReply reply) {
 	if (active && !active()) return;
+	if (!ControlEmojiAllowedWhileLocked()) {
+		reply(ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q));
+		return;
+	}
 	if (!admitted()) {
-		reply(ControlError(u"export-disabled"_q, u"Enable local emoji export with an active unlocked account."_q));
+		reply(ControlError(u"export-disabled"_q, u"Enable local emoji export with an active account."_q));
 		return;
 	}
 	if (_renderRequests.full()) {

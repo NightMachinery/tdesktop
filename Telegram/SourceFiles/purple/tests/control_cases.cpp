@@ -229,7 +229,7 @@ void RawIntegerCases() {
 						: command == u"emoji.render"_q ? 4
 						: command == u"media.now"_q ? 2
 						: command == u"lock"_q ? 3 : 1;
-					const auto refusesLocked = group == 0 || group == 2 || group == 4;
+					const auto refusesLocked = group == 0;
 					const auto expected = (command == u"hello"_q) ? QString()
 						: !enabled ? u"automation-disabled"_q
 						: (command == u"ping"_q || command == u"subscribe"_q || command == u"unsubscribe"_q) ? QString()

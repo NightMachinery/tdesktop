@@ -51,6 +51,10 @@ QString Error(const QJsonObject &reply) {
 }
 QString CurrentControlSocketPath() { return u"synthetic-control.sock"_q; }
 qint64 EmojiLargeCacheCap() { return kEmojiLargeDefaultBytes; }
+ControlPolicy ExportPolicy;
+bool ControlEmojiAllowedWhileLocked() {
+	return ControlAllowedWhileLocked(ExportPolicy, ControlLockUnit::Emoji);
+}
 
 class EmojiExporter final : public QObject {
 public:
@@ -68,7 +72,7 @@ public:
 	bool _running = false;
 	QTimer _debounce;
 	static constexpr auto kDebounceMs = 5000;
-	bool admitted() const { return enabled; }
+	bool admitted() const { return enabled && ControlEmojiAllowedWhileLocked(); }
 	void reconcile() {}
 	void start() { pump(); }
 	void pump();
@@ -220,6 +224,34 @@ void OrdinaryPreviewRace(QCoreApplication &app) {
 	server.stop();
 }
 
+void LockedExportCases() {
+	auto temporary = QTemporaryDir(u"/private/tmp/pemojilock-XXXXXX"_q);
+	Check(temporary.isValid(), "owned locked export directory");
+	ExportPolicy = ControlPolicy(); ExportPolicy.locked = true;
+	Check(ControlEmojiAllowedWhileLocked(), "emoji export defaults to continue while locked independently of automation master");
+	auto exporter = EmojiExporter(temporary.path() + u"/emoji-export"_q);
+	exporter.paused = true;
+	auto replies = 0;
+	auto result = ControlResult();
+	exporter.render(91, 128, {}, [&](auto value) { ++replies; result = value; });
+	exporter.passcodeChanged(true);
+	Check(exporter._renderRequests.size() == 1 && replies == 0 && exporter.admitted(), "allowed lock preserves admitted demand and export session");
+	exporter.paused = false; exporter.pump();
+	Check(Wait([&] { return replies == 1; }) && result.code.isEmpty()
+		&& QFileInfo(result.value.value(u"path"_q).toString()).isFile(), "locked demand completes with an existing published image");
+	exporter.paused = true;
+	exporter.render(92, 128, {}, [&](auto value) { ++replies; result = value; });
+	ExportPolicy.allowLocked[4] = false;
+	exporter.passcodeChanged(true);
+	Check(replies == 2 && result.code == u"locked"_q && exporter._renderRequests.size() == 0
+		&& !exporter.admitted(), "switch off while locked retires pending demand exactly once and stops admission");
+	exporter.render(93, 128, {}, [&](auto value) { ++replies; result = value; });
+	Check(replies == 3 && result.code == u"locked"_q, "locked disallowed export refuses new direct demand");
+	ExportPolicy.locked = false;
+	exporter.passcodeChanged(false);
+	Check(exporter.admitted(), "unlock restores export admission with switch off");
+	ExportPolicy = ControlPolicy();
+}
 void NumericCases() {
 	const auto dispatch = [&](QByteArray args) {
 		const auto parsed = ParseControlRequest(Request(9, args));
@@ -456,6 +488,9 @@ void SocketCases(QCoreApplication &app) {
 	server.setPolicy(policy);
 	socket.write(Request(108));
 	Check(Wait([&] { return exporter._renderRequests.size() == 1; }), "pending render before lock notification precedes policy refresh");
+	ExportPolicy.locked = true;
+	ExportPolicy.allowLocked[4] = false;
+	policy.allowLocked[4] = false;
 	exporter.passcodeChanged(true);
 	const auto lockedReply = Receive(socket);
 	Check(Error(lockedReply) == u"locked"_q && lockedReply.value(u"id"_q).toInteger() == 108,
@@ -465,6 +500,7 @@ void SocketCases(QCoreApplication &app) {
 	socket.write(Request(104));
 	Check(Error(Receive(socket)) == u"locked"_q, "locked emoji admission is refused");
 	policy.locked = false;
+	ExportPolicy.locked = false;
 	server.setPolicy(policy);
 	socket.write(Request(105));
 	Check(Wait([&] { return exporter._renderRequests.size() == 1; }), "pending render before disconnect");
@@ -486,7 +522,7 @@ void SocketCases(QCoreApplication &app) {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
-	OrdinaryPreviewRace(app);
+	OrdinaryPreviewRace(app); LockedExportCases();
 	NumericCases();
 	BrokerCases();
 	ExporterBounds();

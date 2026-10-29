@@ -27,8 +27,10 @@ ControlResult ControlMediaInfo(
 		{ u"name"_q, snapshot.name.left(1024) },
 		{ u"path"_q, path },
 	};
+	const auto kind = !snapshot.type ? ControlMediaKind::Empty
+		: *snapshot.type == ControlMediaType::Music ? ControlMediaKind::Music : ControlMediaKind::Voice;
 	if (snapshot.hidden) {
-		return { QJsonObject{ { u"hidden"_q, true }, { u"file"_q, file } } };
+		return { QJsonObject{ { u"hidden"_q, true }, { u"file"_q, file } }, {}, {}, kind };
 	}
 	file.insert(u"mime"_q, snapshot.mime.left(256));
 	const auto state = snapshot.state == ControlMediaState::Playing ? u"playing"_q
@@ -53,7 +55,7 @@ ControlResult ControlMediaInfo(
 			{ u"date"_q, snapshot.date },
 		});
 	}
-	return { result };
+	return { result, {}, {}, kind };
 }
 
 ControlResult ControlLock(bool hasPasscode, const std::function<bool()> &lock) {

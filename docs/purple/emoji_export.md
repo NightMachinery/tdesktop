@@ -75,10 +75,20 @@ changed parent skips the operation. This cheap check detects replacement during
 encoding or a queued operation; it does not claim directory-handle confinement
 against a malicious same-user process racing the final system call.
 
+The Local automation settings include an emoji "Allow while locked" switch,
+which defaults on for new and existing installations. With it on, passcode lock
+keeps the export session, request folder and socket render demands running. With
+it off, locking revokes publication authority and schedules the same bounded
+cleanup below; pending socket renders finish with `locked`. Turning it off while
+already locked has the same effect, including for pending jobs. Unlocking permits
+a fresh session after the cleanup barrier. This switch also governs file requests
+when socket automation is off; existing export consent and enablement still apply.
+No socket command can change the switch.
+
 A single bounded worker performs decoding, PNG encoding and writes, catalog
 validation and JSON publication, stale scanning and removal. It accepts at most
 one active job and one pending job. All output work carries a generation token.
-Disabling the setting, passcode locking, logging out, changing the palette or switching the primary
+Disabling the setting, logging out, changing the palette or switching the primary
 account immediately revokes publication authority and queues removal of the
 catalog, owned previews and large PNGs, and empty regular request-folder files
 behind any active worker. Cleanup enumerates at most 256 entries per worker

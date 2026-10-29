@@ -22,10 +22,13 @@ struct ControlRequest {
 	std::function<bool()> active;
 };
 
+enum class ControlMediaKind { Unspecified, Empty, Music, Voice };
+
 struct ControlResult {
 	QJsonObject value;
 	QString code;
 	QString message;
+	ControlMediaKind mediaKind = ControlMediaKind::Unspecified;
 };
 
 struct ControlParseResult {

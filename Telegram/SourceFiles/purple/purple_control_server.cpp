@@ -110,6 +110,7 @@ private:
 		Ticket active;
 		Ticket finished;
 		QByteArray latest;
+		ControlMediaKind mediaKind = ControlMediaKind::Unspecified;
 		quint64 admitted = 0;
 		qint64 started = 0;
 		bool dirty = true;
@@ -380,13 +381,15 @@ void ControlWorker::reply(quint64 epoch, quint64 client, quint64 serial, quint64
 	});
 	if (p == pending.end()) return;
 	const auto policy = std::atomic_load(&_authority->policy);
+	auto authorization = AuthorizeControlCommand(p->second.command, *policy, result.mediaKind, result.code.isEmpty());
 	if (policy->generation != p->second.generation) {
-		auto authorization = AuthorizeControlCommand(p->second.command, *policy);
 		const auto ownLockTransition = p->second.command == u"lock"_q
 			&& lockGeneration == policy->generation && lockGeneration == p->second.generation + 1;
-		if (!authorization.code.isEmpty()) result = std::move(authorization);
-		else if (!ownLockTransition) result = ControlError(u"busy"_q, u"Automation settings changed; retry."_q);
+		if (authorization.code.isEmpty() && !ownLockTransition) {
+			result = ControlError(u"busy"_q, u"Automation settings changed; retry."_q);
+		}
 	}
+	if (!authorization.code.isEmpty()) result = std::move(authorization);
 	const auto id = p->first;
 	p->second.active->store(false);
 	pending.erase(p);
@@ -453,6 +456,7 @@ void ControlWorker::stage(quint64 client, ControlTopic topic, ControlResult resu
 	const auto p = i->second.subscriptions.find(topic);
 	if (p == i->second.subscriptions.end()) return;
 	auto &subscription = p->second;
+	subscription.mediaKind = result.mediaKind;
 	const auto bytes = EncodeControlEvent(topic, std::move(result), ended);
 	if (bytes.size() > kControlLineBytes
 		|| i->second.socket->bytesToWrite() + stagedBytes(i->second)
@@ -557,7 +561,9 @@ void ControlWorker::subscriptions() {
 				if (subscription.generation != current->generation
 					|| subscription.revision != _authority->revisions[int(topic)].load()
 					|| (revoked && revoked->generation > subscription.admitted)) continue;
-				authorization = AuthorizeControlEvent(topic, *current);
+				authorization = AuthorizeControlCommand(
+					topic == ControlTopic::Media ? u"media.now"_q : u"lock"_q,
+					*current, subscription.mediaKind, true);
 			}
 			auto bytes = std::exchange(subscription.latest, {});
 			auto ended = subscription.ended;
@@ -592,6 +598,10 @@ void ControlWorker::eventReply(quint64 epoch, quint64 client, quint64 serial, qu
 		subscription.dirty = true;
 		return;
 	}
+	auto authorization = AuthorizeControlCommand(
+		topic == ControlTopic::Media ? u"media.now"_q : u"lock"_q,
+		*policy, result.mediaKind, result.code.isEmpty());
+	if (!authorization.code.isEmpty()) result = std::move(authorization);
 	const auto ended = !result.code.isEmpty()
 		&& (topic != ControlTopic::Media || result.code != u"locked"_q);
 	stage(client, topic, std::move(result), ended);
@@ -732,7 +742,8 @@ void ControlServer::setPolicy(ControlPolicy policy) {
 	if (const auto transition = state.lockTransition) {
 		if (transition->before.generation == before->generation
 			&& !before->locked && policy.locked
-			&& before->enabled == policy.enabled && before->groups == policy.groups) {
+			&& before->enabled == policy.enabled && before->groups == policy.groups
+			&& before->allowLocked == policy.allowLocked) {
 			transition->allowedGeneration.store(policy.generation);
 		}
 	}

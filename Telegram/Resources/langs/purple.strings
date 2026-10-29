@@ -446,3 +446,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_cleanup_retry" = "Retry cleanup";
 "lng_purple_chat_cleanup_skip" = "Skip cleanup";
 "lng_purple_chat_cleanup_skip_confirm" = "Leave the remaining old settings messages and continue syncing in the new chat?";
+
+"lng_purple_control_locked" = "Allow while locked";
+"lng_purple_control_locked_music" = "Allow music info while locked";
+"lng_purple_control_locked_voice" = "Allow voice info while locked";

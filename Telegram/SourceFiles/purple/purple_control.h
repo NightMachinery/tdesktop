@@ -9,6 +9,9 @@ class SectionBuilder;
 
 namespace Purple {
 
+enum class ControlLockUnit;
+struct ControlPolicy;
+
 void StartControlServer();
 void StartControlPlayerEvents();
 void BuildControlSettings(::Settings::Builder::SectionBuilder &builder);
@@ -22,6 +25,10 @@ void DisableControlAutomation();
 [[nodiscard]] bool AdvanceControlConsent(quint64 token);
 [[nodiscard]] bool ConfirmControlConsent(quint64 token);
 void CancelControlConsent(quint64 token);
+[[nodiscard]] ControlPolicy CurrentControlPolicy();
+[[nodiscard]] bool ControlAllowLocked(ControlLockUnit unit);
+void SetControlAllowLocked(ControlLockUnit unit, bool allowed);
+[[nodiscard]] bool ControlEmojiAllowedWhileLocked();
 [[nodiscard]] bool ControlGroupEnabled(int index);
 void SetControlGroupEnabled(int index, bool enabled);
 [[nodiscard]] QString ConfiguredControlSocketPath();

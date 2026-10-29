@@ -73,7 +73,9 @@ settings = (source / 'purple/purple_control.cpp').read_text()
     '\ttemplate <typename Type, typename Other = Type>\n\t[[nodiscard]] Type readPref(']))
 (work / 'control-preference-storage.inc').write_text('\n'.join(definition(settings, marker) for marker in [
     'template <>\nstd::optional<QByteArray> Settings::readPrefImpl<QByteArray>(',
-    'template <>\nvoid Settings::writePrefImpl<QByteArray>(']))
+    'template <>\nvoid Settings::writePrefImpl<QByteArray>(']) + '\n' + '\n'.join(definition((source / 'core/core_settings.cpp').read_text(), marker) for marker in [
+    'template <>\nstd::optional<bool> Settings::readPrefImpl<bool>(',
+    'template <>\nvoid Settings::writePrefImpl<bool>(']))
 
 
 def compile(relative):

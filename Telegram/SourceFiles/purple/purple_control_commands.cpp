@@ -54,7 +54,14 @@ QJsonArray ControlCommandNames() {
 	return result;
 }
 
-ControlResult AuthorizeControlCommand(const QString &command, const ControlPolicy &policy) {
+bool ControlAllowedWhileLocked(const ControlPolicy &policy, ControlLockUnit unit) {
+	const auto index = int(unit);
+	return !policy.locked || (index >= 0 && index < kControlLockUnitCount
+		&& policy.allowLocked[index]);
+}
+
+ControlResult AuthorizeControlCommand(const QString &command, const ControlPolicy &policy,
+		ControlMediaKind mediaKind, bool final) {
 	if (command == u"hello"_q) return {};
 	if (!policy.enabled) {
 		return ControlError(u"automation-disabled"_q, u"Enable Local automation in Purple Settings."_q);
@@ -64,19 +71,27 @@ ControlResult AuthorizeControlCommand(const QString &command, const ControlPolic
 	}
 	if (command.startsWith(u"window."_q)) {
 		if (!policy.groups[0]) return ControlError(u"capability-off"_q, u"The window capability is disabled."_q);
-		if (policy.locked) return ControlError(u"locked"_q, u"Window automation is unavailable while locked."_q);
+		if (!ControlAllowedWhileLocked(policy, ControlLockUnit::Window)) return ControlError(u"locked"_q, u"Window automation is unavailable while locked."_q);
 	}
 	if (command == u"emoji.render"_q) {
 		if (!policy.groups[4]) return ControlError(u"capability-off"_q, u"The emoji capability is disabled."_q);
-		if (policy.locked) return ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q);
+		if (!ControlAllowedWhileLocked(policy, ControlLockUnit::Emoji)) return ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q);
 	}
 	if (command.startsWith(u"media."_q)) {
 		const auto info = command == u"media.now"_q;
 		if (!policy.groups[info ? 2 : 1]) {
 			return ControlError(u"capability-off"_q, u"This media capability is disabled."_q);
 		}
-		if (info && policy.locked) {
-			return ControlError(u"locked"_q, u"Media information is unavailable while locked."_q);
+		const auto music = ControlAllowedWhileLocked(policy, ControlLockUnit::MusicInfo);
+		const auto voice = ControlAllowedWhileLocked(policy, ControlLockUnit::VoiceInfo);
+		const auto allowed = !info
+			? ControlAllowedWhileLocked(policy, ControlLockUnit::MediaControl)
+			: mediaKind == ControlMediaKind::Music ? music
+			: mediaKind == ControlMediaKind::Voice ? voice
+			: mediaKind == ControlMediaKind::Empty ? true
+			: final ? music && voice : music || voice;
+		if (!allowed) {
+			return ControlError(u"locked"_q, u"This media capability is unavailable while locked."_q);
 		}
 	}
 	if (command == u"lock"_q && !policy.groups[3]) {
@@ -150,7 +165,15 @@ void DispatchControlRequest(
 			return;
 		}
 		if (request.command == u"media.now"_q) {
-			if (media.now) media.now(type, request.active, std::move(reply));
+			const auto kind = !type ? ControlMediaKind::Unspecified
+				: *type == ControlMediaType::Music ? ControlMediaKind::Music : ControlMediaKind::Voice;
+			if (auto error = AuthorizeControlCommand(request.command, policy, kind)
+				; !error.code.isEmpty()) {
+				reply(std::move(error));
+			} else if (media.now) media.now(type, request.active, [=](ControlResult result) {
+				auto error = AuthorizeControlCommand(request.command, policy, result.mediaKind, true);
+				reply(error.code.isEmpty() ? std::move(result) : std::move(error));
+			});
 			else reply(ControlError(u"not-found"_q, u"Media service unavailable."_q));
 		} else if (media.control) {
 			const auto action = request.command == u"media.play"_q ? ControlMediaAction::Play

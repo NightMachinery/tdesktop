@@ -158,11 +158,90 @@ void DispatchCases() {
 	Check(call(u"media.now"_q, {{u"type"_q, u"voice"_q}}).code.isEmpty()
 		&& reads == 1 && lastType == ControlMediaType::Voice, "voice now routes requested voice snapshot");
 	policy.locked = true;
-	Check(call(u"media.now"_q).code == u"locked"_q && reads == 1, "locked info never reads metadata");
+	Check(call(u"media.now"_q).code.isEmpty() && reads == 2, "locked empty info has no metadata to refuse");
 	Check(call(u"media.play"_q).code.isEmpty() && controls == 10, "playback remains available while locked");
 	Check(call(u"lock"_q).code.isEmpty() && locks == 1, "lock remains idempotently available while locked");
 	Check(call(u"lock"_q, {{u"extra"_q, true}}).code == u"bad-request"_q && locks == 1,
 		"lock rejects arguments without side effects");
+}
+void LockPolicyCases() {
+	auto policy = ControlPolicy();
+	policy.enabled = true;
+	Check(policy.allowLocked == std::array{false, true, true, false, true}, "owner defaults migrate absent local preferences");
+	const auto commands = std::array{u"window.list"_q, u"media.play"_q, u"media.now"_q, u"media.now"_q, u"emoji.render"_q};
+	for (auto index = 0; index < kControlLockUnitCount; ++index) {
+		for (const auto locked : {false, true}) {
+			for (const auto allowed : {false, true}) {
+				policy.locked = locked; policy.allowLocked[index] = allowed;
+				const auto kind = index == 2 ? ControlMediaKind::Music : ControlMediaKind::Voice;
+				Check(ControlAllowedWhileLocked(policy, ControlLockUnit(index)) == (!locked || allowed), "each unit obeys its own lock switch");
+				Check(AuthorizeControlCommand(commands[index], policy, kind, true).code
+					== (locked && !allowed ? u"locked"_q : QString()), "command uses the same unit decision");
+				Check(AuthorizeControlCommand(u"lock"_q, policy).code.isEmpty(), "lock is always allowed by lock policy");
+			}
+		}
+	}
+	policy = ControlPolicy(); policy.enabled = true; policy.locked = true;
+	for (const auto voice : {false, true}) {
+		for (const auto hidden : {false, true}) {
+			for (const auto explicitType : {false, true}) {
+				for (const auto allowVoice : {false, true}) {
+					policy.allowLocked[3] = allowVoice;
+					const auto type = voice ? ControlMediaType::Voice : ControlMediaType::Music;
+					const auto adapter = ControlMediaAdapter{.now = [=](auto, auto, auto reply) {
+						reply(ControlMediaInfo({.type = type, .hidden = hidden}, {}));
+					}};
+					const auto args = explicitType ? QJsonObject{{u"type"_q, voice ? u"voice"_q : u"music"_q}} : QJsonObject();
+					auto result = ControlResult();
+					DispatchControlRequest(*ParseControlRequest(Request(1, u"media.now"_q, args)).request,
+						policy, {}, {}, [&](auto value) { result = value; }, {}, adapter);
+					Check(result.code == (voice && !allowVoice ? u"locked"_q : QString()), "explicit and implicit voice refusal survives hidden wire shape");
+					if (result.code.isEmpty() && hidden) Check(result.value.size() == 2 && !result.value.contains(u"type"_q), "internal type does not leak into Work Mode payload");
+				}
+			}
+		}
+	}
+	for (const auto &command : {u"automation.locked.emoji"_q, u"settings.set"_q, u"allow-locked"_q}) {
+		Check(AuthorizeControlCommand(command, policy).code == u"unsupported"_q, "no RPC can mutate lock preferences");
+	}
+	Check(AuthorizeControlCommand(u"media.now"_q, policy, ControlMediaKind::Unspecified, true).code.isEmpty(), "unknown result requires both media permissions");
+	policy.allowLocked[3] = false;
+	Check(AuthorizeControlCommand(u"media.now"_q, policy, ControlMediaKind::Unspecified, true).code == u"locked"_q, "missing internal type fails closed");
+}
+void SendPolicyCases() {
+	auto temporary = QTemporaryDir(u"/private/tmp/plockpolicy-XXXXXX"_q);
+	Check(temporary.isValid(), "owned policy race socket directory");
+	auto policy = ControlPolicy(); policy.enabled = true;
+	auto deferred = ControlReply(); auto path = QString();
+	auto server = ControlServer([&](const auto &, const auto &, auto reply) { deferred = reply; },
+		[&](auto value, auto) { path = value; });
+	server.setPolicy(policy); server.configure({.configuredPath = temporary.path() + u"/s"_q});
+	Check(Wait([&] { return !path.isEmpty(); }), "policy race listener ready");
+	auto socket = QLocalSocket(); socket.connectToServer(path);
+	Check(Wait([&] { return socket.state() == QLocalSocket::ConnectedState; }), "policy race socket connected");
+	auto id = qint64(0);
+	const auto receive = [&] {
+		Check(Wait([&] { return socket.canReadLine(); }), "policy race reply arrives");
+		return QJsonDocument::fromJson(socket.readLine()).object();
+	};
+	for (const auto lockDuring : {false, true}) {
+		for (const auto voice : {false, true}) {
+			policy.locked = !lockDuring; policy.allowLocked[3] = true; server.setPolicy(policy); deferred = {};
+			socket.write(Request(++id, u"media.now"_q));
+			Check(Wait([&] { return bool(deferred); }), "media request retained before lock transition");
+			policy.locked = lockDuring; policy.allowLocked[3] = false; server.setPolicy(policy);
+			if (deferred) deferred(ControlMediaInfo({.type = voice ? ControlMediaType::Voice : ControlMediaType::Music, .hidden = true}, {}));
+			const auto value = receive();
+			Check(value.value(u"error"_q).toObject().value(u"code"_q)
+				== (lockDuring && voice ? u"locked"_q : u"busy"_q), "send-time current policy wins over captured hidden media");
+		}
+	}
+	policy.locked = true; policy.allowLocked[3] = true; server.setPolicy(policy); deferred = {};
+	socket.write(Request(++id, u"media.now"_q));
+	Check(Wait([&] { return bool(deferred); }), "voice request admitted with allow switch");
+	policy.allowLocked[3] = false; server.setPolicy(policy);
+	if (deferred) deferred(ControlMediaInfo({.type = ControlMediaType::Voice, .hidden = true}, {}));
+	Check(receive().value(u"error"_q).toObject().value(u"code"_q) == u"locked"_q, "switch off during a pending request refuses next send");
 }
 void LockGenerationCases() {
 	auto temporary = QTemporaryDir(u"/private/tmp/plock-XXXXXX"_q);
@@ -222,11 +301,13 @@ void LockReenableCases() {
 	policy.enabled = true;
 	auto deferred = ControlReply();
 	auto transition = false;
+	auto changeLockSwitch = false;
 	auto published = QString();
 	auto server = std::unique_ptr<ControlServer>();
 	server = std::make_unique<ControlServer>([&](const auto &, const auto &, auto reply) {
 		if (transition) {
 			policy.locked = true;
+			if (changeLockSwitch) policy.allowLocked[2] = !policy.allowLocked[2];
 			server->setPolicy(policy);
 		}
 		deferred = reply;
@@ -281,6 +362,13 @@ void LockReenableCases() {
 	Check(Wait([&] { return socket.canReadLine(); }), "exact own transition reply arrives");
 	Check(QJsonDocument::fromJson(socket.readLine()).object().value(u"ok"_q).toBool(),
 		"only the exact own unlocked-to-locked generation is accepted");
+	policy.locked = false; server->setPolicy(policy); changeLockSwitch = true; deferred = {};
+	socket.write(Request(++id, u"lock"_q));
+	Check(Wait([&] { return bool(deferred); }), "own lock transition with a simultaneous lock switch change retained");
+	if (deferred) deferred(ControlLock(true, [] { return true; }));
+	Check(Wait([&] { return socket.canReadLine(); }), "mixed policy transition reply arrives");
+	Check(QJsonDocument::fromJson(socket.readLine()).object().value(u"error"_q).toObject().value(u"code"_q) == u"busy"_q,
+		"own lock exception cannot cross even its first generation when a lock switch changes");
 }
 
 }
@@ -288,7 +376,7 @@ void LockReenableCases() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
-	SnapshotCases(); PathCases(); DispatchCases(); LockGenerationCases(); LockReenableCases();
+	SnapshotCases(); PathCases(); DispatchCases(); LockPolicyCases(); SendPolicyCases(); LockGenerationCases(); LockReenableCases();
 	std::printf("purple media control: %d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
 }

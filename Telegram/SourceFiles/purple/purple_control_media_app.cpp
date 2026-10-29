@@ -1,5 +1,7 @@
 #include "purple/purple_control_media.h"
 
+#include "purple/purple_control.h"
+#include "purple/purple_control_commands.h"
 #include "purple/purple_gate.h"
 #include "core/application.h"
 #include "data/data_document.h"
@@ -76,17 +78,24 @@ ControlResult ControlPlayback(ControlMediaAction action, std::optional<ControlMe
 void ReadMediaInfo(std::optional<ControlMediaType> type,
 		std::function<bool()> active, ControlReply reply) {
 	if (active && !active()) return;
-	const auto candidate = MediaSnapshot(type).path;
+	const auto snapshot = MediaSnapshot(type);
+	const auto kind = !snapshot.type ? ControlMediaKind::Empty
+		: *snapshot.type == ControlMediaType::Music ? ControlMediaKind::Music : ControlMediaKind::Voice;
+	if (auto error = AuthorizeControlCommand(u"media.now"_q, CurrentControlPolicy(), kind, true)
+		; !error.code.isEmpty()) {
+		reply(std::move(error));
+		return;
+	}
+	const auto candidate = snapshot.path;
 	crl::async([=] {
 		if (active && !active()) return;
 		const auto path = ExistingControlMediaPath(candidate);
 		crl::on_main([=] {
 			if (active && !active()) return;
-			if (Core::App().passcodeLocked()) {
-				reply(ControlError(u"locked"_q, u"Media information is unavailable while locked."_q));
-				return;
-			}
-			reply(ControlMediaInfo(MediaSnapshot(type), path));
+			auto result = ControlMediaInfo(MediaSnapshot(type), path);
+			auto error = AuthorizeControlCommand(u"media.now"_q,
+				CurrentControlPolicy(), result.mediaKind, true);
+			reply(error.code.isEmpty() ? std::move(result) : std::move(error));
 		});
 	});
 }

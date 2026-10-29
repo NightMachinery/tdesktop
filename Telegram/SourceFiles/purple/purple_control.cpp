@@ -141,11 +141,7 @@ void ControlService::bindPlayerEvents() {
 }
 
 void ControlService::refreshPolicy() {
-	auto policy = ControlPolicy();
-	policy.enabled = ControlAutomationEnabled();
-	policy.locked = Core::App().passcodeLocked();
-	for (auto i = 0; i < kControlGroupCount; ++i) policy.groups[i] = ControlGroupEnabled(i);
-	_server.setPolicy(policy);
+	_server.setPolicy(CurrentControlPolicy());
 	_server.notify(ControlTopic::Lock);
 }
 
@@ -222,6 +218,37 @@ bool ConfirmControlConsent(quint64 token) {
 void CancelControlConsent(quint64 token) {
 	Consent.cancel(token);
 	SettingsChanges.fire({});
+}
+
+ControlPolicy CurrentControlPolicy() {
+	auto policy = ControlPolicy();
+	policy.enabled = ControlAutomationEnabled();
+	policy.locked = Core::App().passcodeLocked();
+	for (auto i = 0; i < kControlGroupCount; ++i) policy.groups[i] = ControlGroupEnabled(i);
+	for (auto i = 0; i < kControlLockUnitCount; ++i) {
+		policy.allowLocked[i] = ControlAllowLocked(ControlLockUnit(i));
+	}
+	return policy;
+}
+
+bool ControlAllowLocked(ControlLockUnit unit) {
+	const auto index = int(unit);
+	return index >= 0 && index < kControlLockUnitCount
+		&& Core::App().settings().readPref<bool>(kControlLockKeys[index], kControlLockDefaults[index]);
+}
+
+void SetControlAllowLocked(ControlLockUnit unit, bool allowed) {
+	const auto index = int(unit);
+	if (index < 0 || index >= kControlLockUnitCount) return;
+	Core::App().settings().writePref<bool>(kControlLockKeys[index], allowed);
+	Changed();
+}
+
+bool ControlEmojiAllowedWhileLocked() {
+	auto policy = ControlPolicy();
+	policy.locked = Core::App().passcodeLocked();
+	policy.allowLocked[int(ControlLockUnit::Emoji)] = ControlAllowLocked(ControlLockUnit::Emoji);
+	return ControlAllowedWhileLocked(policy, ControlLockUnit::Emoji);
 }
 
 bool ControlGroupEnabled(int index) {

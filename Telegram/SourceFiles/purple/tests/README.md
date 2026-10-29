@@ -131,7 +131,7 @@ including a repeated unchanged policy and unrelated capability changes.
 
 `control_subscription_cases.cpp` runs real private-socket subscriptions with a
 thin media/lock adapter. It covers admission/replacement/unsubscribe, Work Mode
-withholding, locked-only events, rapid master/group disable/re-enable, stale
+withholding, lock-policy refusals, rapid master/group disable/re-enable, stale
 callbacks, reconfigure/disconnect/stop, coalescing behind a stalled reader,
 64 retained asynchronous leases across churn, typed terminal errors, oversize
 output, monotonic snapshot timeout, and shared eight/64 pending limits. The
@@ -139,3 +139,13 @@ control driver also compiles the real app and player glue with generated tree
 language headers. Real playback and live-profile lifecycle checks remain native
 integration work under the task's no-GUI/no-profile restrictions. Go watch tests
 cover framing, acknowledgement topics, output, refusals, idle time and interrupt.
+
+IPC-4 extends these existing registered fixtures with all five allow-locked units,
+owner defaults and persisted local boolean preferences. Media cases cover hidden
+actual music/voice types, explicit and implicit selection, lock/unlock and switch
+changes before reply, and the own-lock generation exception with simultaneous
+preference changes. Subscription cases cover music continuing while locked,
+voice refusal, switch changes and unlock without resubscription. Emoji cases use
+the extracted production lock/demand handlers and real file worker to check
+continuation, existing published output and cancellation when disabled while
+locked. The app session shell is synthetic; production glue is compile-checked.

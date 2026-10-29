@@ -121,6 +121,30 @@ void BuildControlSettings(::Settings::Builder::SectionBuilder &builder) {
 				SetControlGroupEnabled(index, value);
 			}, toggle->lifetime());
 		}
+		const auto addLocked = [&](ControlLockUnit unit, rpl::producer<QString> title) {
+			const auto lockedToggle = builder.addButton({
+				.id = u"advanced/purple_control_locked_"_q + QString::number(int(unit)),
+				.title = std::move(title),
+				.st = &st::settingsButtonNoIcon,
+				.toggled = ControlSettingsChanges() | rpl::map([=] { return ControlAllowLocked(unit); }),
+				.keywords = { u"automation"_q, u"locked"_q },
+			});
+			if (lockedToggle) {
+				lockedToggle->toggledValue() | rpl::filter([=](bool value) {
+					return value != ControlAllowLocked(unit);
+				}) | rpl::on_next([=](bool value) {
+					SetControlAllowLocked(unit, value);
+				}, lockedToggle->lifetime());
+			}
+		};
+		if (index == 2) {
+			addLocked(ControlLockUnit::MusicInfo, tr::lng_purple_control_locked_music());
+			addLocked(ControlLockUnit::VoiceInfo, tr::lng_purple_control_locked_voice());
+		} else if (index != 3) {
+			const auto unit = index == 0 ? ControlLockUnit::Window
+				: index == 1 ? ControlLockUnit::MediaControl : ControlLockUnit::Emoji;
+			addLocked(unit, tr::lng_purple_control_locked());
+		}
 	}
 	builder.addDividerText(tr::lng_purple_control_groups_about());
 }

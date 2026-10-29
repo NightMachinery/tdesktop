@@ -7,12 +7,42 @@ dialog, enable automation or change settings.
 
 This version supports `hello`, `ping`, `window.list`, `window.activate`,
 `window.cycle`, `emoji.render`, `media.toggle`, `media.play`, `media.pause`,
-`media.now` and `lock`. Window commands keep the primary-first order. Window,
-emoji and media information commands refuse while the app passcode is locked;
-playback controls and lock remain available. All five capability groups start
+`media.now`, `lock`, `subscribe` and `unsubscribe`. Window commands keep the
+primary-first order. Lock refusal is configurable per capability as described
+below. All five capability groups start
 on: window, media.control, media.info, lock and emoji. `hello` advertises the
 implemented commands, build and enabled groups. All commands except `hello`,
-including `ping`, require the master switch. Subscriptions remain a later slice.
+including `ping`, require the master switch.
+
+## Allow while locked
+
+In Settings, Advanced, Purple, Local automation, each capability has a local
+"Allow while locked" switch. Media information has separate music and voice
+switches. Defaults also apply to existing installations without saved switches:
+
+- Window commands: refused while locked, since titles can contain chat names.
+- Playback controls: allowed while locked.
+- Music information: allowed while locked, including title, performer and a
+  verified downloaded file path.
+- Voice information: refused while locked, including an implicit active voice
+  item selected by `media.now` or `media.state`.
+- Emoji rendering and the local export session: allowed while locked.
+- Lock itself: always allowed by lock policy, with no switch.
+
+The master switch and capability groups still apply. Only the settings UI can
+change these device-local preferences; no socket command can read-modify them.
+The settings UI remains inaccessible while locked. Work Mode withholding applies
+on top of lock policy, so enabling voice while locked does not reveal hidden
+sender or chat fields. The actual player type is carried internally even when
+Work Mode omits it from JSON. An empty player has no media metadata to refuse;
+a successful result missing its internal type requires both information switches.
+
+Commands and subscription events use one policy function, checked immediately
+before queuing bytes to the socket. A switch disabled while locked affects the
+next send. An in-flight request crossing a policy generation returns the current
+authorization error, or `busy` if still authorized. Subscriptions retain their
+existing epoch and generation fences and refresh after policy changes. Bytes
+already queued to the operating system cannot be retracted.
 
 ## Try the CLI
 
@@ -79,8 +109,9 @@ names the verified file. If Work Mode hides the current chat, the entire result
 is `hidden:true` and `file:{name,path}`. Sender, chat, MIME, timestamps, playback
 state and music metadata are withheld. Missing message context while filtering
 is treated as hidden. Paths describe a local snapshot and may disappear later.
-Media information returns `locked` while the passcode lock is active, including
-when lock changes during an asynchronous path check.
+Media information follows the actual music or voice lock switch, including
+when lock changes during an asynchronous path check. A refused result contains
+only a typed `locked` error, even when its Work Mode wire form would omit type.
 
 `lock` belongs to `lock`, takes no arguments, and returns `locked:true` after the
 existing local passcode lock succeeds. It is idempotent when already locked.
@@ -96,8 +127,8 @@ result prints only its file fields and the hidden marker.
 ## Emoji rendering
 
 `emoji.render` takes `args:{id,px?}` in the `emoji` capability group. It requires
-Local automation, the emoji group, an unlocked active account and Local emoji
-export. The optional pixel bound defaults to 512 and accepts exact integers
+Local automation, the emoji group, an active account and Local emoji export.
+While locked, its allow switch must also be on (the default). The optional pixel bound defaults to 512 and accepts exact integers
 from 1 through 512. Artwork IDs are nonzero uint64 values, checked against their
 original JSON tokens without floating-point rounding. Exact decimal and exponent
 forms work within that range. A catalog's string ID also works when it is the
@@ -257,7 +288,7 @@ Telegram/cmake/purple.cmake. See [upstream_hooks.md](upstream_hooks.md).
 ### Lock completion generation
 
 A lock request may cross only its own synchronous unlocked-to-locked policy
-transition, with automation and every capability unchanged. The server records
+transition, with automation, every capability and all lock switches unchanged. The server records
 that exact post-lock generation in a request-local scope around the main-thread
 handler. It does not derive permission from the returned JSON. Any later
 generation invalidates the completion, even if a disabled switch has been
@@ -277,8 +308,9 @@ Clients that never subscribe receive only ordinary command replies.
 Events are JSON Lines with `v`, `event` and either `result` or a typed `error`.
 They have no request id or `ok` field. `media.state` is the same snapshot as
 `media.now`, including downloaded-path verification and Work Mode withholding.
-While passcode-locked it emits only an error with code `locked`, without ending
-the topic. `lock.state` returns `{"locked":true|false}`. Other snapshot errors
+While passcode-locked it follows the same actual-type lock switches as
+`media.now`. A refused snapshot emits only an error with code `locked`, without
+ending the topic; a later unlock or switch change can resume snapshots. `lock.state` returns `{"locked":true|false}`. Other snapshot errors
 end that topic with `ended:true`.
 
 Media information and lock topics require the `media.info` and `lock` groups,
@@ -321,3 +353,16 @@ human mode prefixes the topic and formats the snapshot on one line. A media
 reason and exits with the existing error code, closing the remaining topics.
 Subscription acknowledgement uses the ordinary two-second deadline, then an
 idle watch has no read deadline. Interrupt/SIGTERM closes the socket and exits0.
+
+### Lock policy qualification
+
+`control_media_cases.cpp` covers every policy unit with both lock and switch
+values, owner defaults, explicit and implicit hidden voice, send-time lock/unlock
+and switch races, and no RPC settings path. `control_subscription_cases.cpp`
+covers retained music/voice subscriptions through lock, unlock and switch changes.
+`control_emoji_cases.cpp` checks the extracted production demand and lock handlers
+with a real worker, including default continuation, an existing published image
+and cancellation when the switch is disabled. Its session shell is synthetic;
+real account/player/passcode integration is compile-checked without launching an
+app or a live profile. `control_preferences_cases.cpp` exercises the production
+boolean KV serialization, missing-key defaults and persistence of each switch.

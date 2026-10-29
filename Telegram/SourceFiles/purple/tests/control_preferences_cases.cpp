@@ -1,4 +1,5 @@
 #include "base/basic_types.h"
+#include "purple/purple_control_commands.h"
 #include <QtCore/QByteArray>
 #include <map>
 #include <optional>
@@ -53,6 +54,18 @@ int main() {
 		const auto writes = settings.writes;
 		settings.writePref<QByteArray>(key, value);
 		check(settings.writes == writes);
+	}
+	for (auto i = 0; i < Purple::kControlLockUnitCount; ++i) {
+		const auto name = Purple::kControlLockKeys[i];
+		const auto fallback = Purple::kControlLockDefaults[i];
+		check(settings.readPref<bool>(name, fallback) == fallback);
+		for (const auto value : { false, true }) {
+			settings.writePref<bool>(name, value);
+			const auto saved = settings;
+			settings = Core::Settings();
+			settings = saved;
+			check(settings.readPref<bool>(name, fallback) == value);
+		}
 	}
 	std::printf("control preference storage: %d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;

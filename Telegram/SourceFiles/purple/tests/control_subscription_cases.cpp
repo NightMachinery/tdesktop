@@ -157,6 +157,7 @@ void Admission() {
 }
 void PrivacyAndPolicy() {
 	auto f = Fixture(); auto socket = f.socket();
+	f.policy.allowLocked[2] = false; f.policyChanged();
 	f.media.hidden = true;
 	socket->write(Request(1, u"subscribe"_q, Topics({u"media.state"_q, u"lock.state"_q})));
 	Receive(*socket);
@@ -189,8 +190,35 @@ void PrivacyAndPolicy() {
 	Check(Code(disabled) == u"automation-disabled"_q && disabled.value(u"ended"_q).toBool()
 		&& disabled.value(u"event"_q) == u"lock.state"_q, "master revocation ends remaining topic");
 }
+void LockedMediaPolicy() {
+	auto f = Fixture(); auto socket = f.socket();
+	f.policy.locked = true; f.media.hidden = true; f.policyChanged();
+	socket->write(Request(1, u"subscribe"_q, Topics({u"media.state"_q}))); Receive(*socket);
+	Check(Receive(*socket).value(u"result"_q).toObject() == ControlMediaInfo(f.media, {}).value,
+		"music event is allowed while locked by default with Work Mode withholding");
+	f.media.type = ControlMediaType::Voice; f.server->notify(ControlTopic::Media);
+	auto value = Receive(*socket);
+	Check(Code(value) == u"locked"_q && !value.contains(u"ended"_q) && !value.contains(u"result"_q),
+		"implicit hidden voice event is refused without ending subscription");
+	f.policy.allowLocked[3] = true; f.policyChanged();
+	Check(Receive(*socket).value(u"result"_q).toObject() == ControlMediaInfo(f.media, {}).value,
+		"allowing voice refreshes retained locked subscription");
+	f.defer = true; f.server->notify(ControlTopic::Media);
+	Check(Wait([&] { return f.replies.size() == 1; }), "voice snapshot held across switch change");
+	f.policy.allowLocked[3] = false; f.policyChanged(); f.defer = false;
+	f.replies[0](ControlMediaInfo(f.media, {}));
+	Check(Code(Receive(*socket)) == u"locked"_q && !f.active[0](), "switch off fences captured voice before next event send");
+	f.policy.locked = false; f.policyChanged();
+	Check(Receive(*socket).contains(u"result"_q), "unlock resumes voice events without resubscribe");
+	f.defer = true; f.server->notify(ControlTopic::Media);
+	Check(Wait([&] { return f.replies.size() == 2; }), "voice snapshot held before lock");
+	f.policy.locked = true; f.policyChanged(); f.defer = false;
+	f.replies[1](ControlMediaInfo(f.media, {}));
+	Check(Code(Receive(*socket)) == u"locked"_q, "lock during in-flight snapshot refuses old private event");
+}
 void Fences() {
 	auto f = Fixture(); auto socket = f.socket(); f.defer = true;
+	f.policy.allowLocked[2] = false; f.policyChanged();
 	socket->write(Request(1, u"subscribe"_q, Topics({u"media.state"_q}))); Receive(*socket);
 	Check(Wait([&] { return f.replies.size() == 1; }), "first snapshot held");
 	for (auto i = 0; i < 5000; ++i) f.server->notify(ControlTopic::Media);
@@ -381,7 +409,7 @@ void Limits() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
-	Admission(); PrivacyAndPolicy(); Fences(); RapidRevocation(); BoundedOperations();
+	Admission(); PrivacyAndPolicy(); LockedMediaPolicy(); Fences(); RapidRevocation(); BoundedOperations();
 	ErrorsAndTimeouts(); SlowReader(); OutboundCap(); Limits();
 	std::printf("purple subscriptions: %d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
