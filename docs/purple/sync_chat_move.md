@@ -445,3 +445,13 @@ Resume: a retained operation is Discard-only, with its unresolved effects
 preserved. The worker performs exact-snapshot cache changes; no disk wait is
 added to the GUI. Production activation and server behavior are not claimed by
 the host fixtures.
+
+A deferred Follow/Fill opening retains the complete accepted admission: start,
+original peer/roster, disclosed stream and exact state/cache byte witnesses.
+Retry uses that same admission; it never substitutes retry-time consent. A
+publisher changing either local image or the original readers therefore holds
+before the first outward intent. Successful replies must pass the persisted
+reader-authority guard before mark/cache/commit processing. Cache writes also
+check original-known roster and creator/admin authority directly. An issued
+receipt remains retained when later reader authority is lost, and reopening
+cannot replace that baseline to make the operation proceed.

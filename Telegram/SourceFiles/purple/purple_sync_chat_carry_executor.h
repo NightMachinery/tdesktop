@@ -102,7 +102,13 @@ private:
 	std::optional<DesktopSyncChatPeer> _peer;
 	uint64_t _run = 1;
 	uint64_t _ticket = 0;
-	std::optional<SyncCarryJournalStart> _start;
+	struct PendingOpening {
+		std::optional<SyncCarryJournalStart> start;
+		std::optional<DesktopSyncChatPeer> consentPeer;
+		QString stream;
+		std::optional<DesktopSyncCarryOpening> opening;
+	};
+	std::optional<PendingOpening> _pendingOpening;
 	std::optional<SyncChatCache> _recoveryWinner;
 	bool _recoveryOnly = false;
 	bool _needsFresh = false;

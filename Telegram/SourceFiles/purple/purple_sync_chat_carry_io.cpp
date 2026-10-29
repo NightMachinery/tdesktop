@@ -392,12 +392,7 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 		if (!previous.value(u"members"_q).isArray() || !previous.value(u"other_members"_q).isString()
 			|| !previous.value(u"other_admins"_q).isString() || !previous.value(u"warning"_q).isBool()) { return false; }
 		const auto known = previous.value(u"members_known"_q);
-		if ((!known.isUndefined() && !known.isBool()) || (known == QJsonValue(true) && !fresh.target.peer.readerMembers)
-			|| (previous.value(u"creator"_q) == QJsonValue(true) && fresh.target.peer.creator != true)
-			|| (previous.value(u"admin"_q) == QJsonValue(true) && !fresh.target.peer.facts->admin)
-			|| previous.value(u"kind"_q).toInt(-1) != int(fresh.target.peer.kind)
-			|| !previous.value(u"settings_disclosed"_q).toBool()
-			|| (previous.value(u"stream"_q) != QJsonValue(u"config"_q) && previous.value(u"stream"_q) != QJsonValue(u"library"_q))) { return false; }
+		if (!DesktopSyncCarryReaderAuthority(previous, fresh.target.peer)) { return false; }
 		const auto members = previous.value(u"members"_q).toArray();
 		auto seen = std::set<QString>();
 		for (const auto &member : members) { if (!member.isString() || member.toString().isEmpty() || !seen.emplace(member.toString()).second) { return false; } }

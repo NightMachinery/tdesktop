@@ -30,6 +30,9 @@ struct SyncChatCarryStorageResult {
 	[[nodiscard]] explicit operator bool() const { return status == SyncStoreStatus::Ready; }
 };
 
+[[nodiscard]] bool DesktopSyncCarryReaderAuthority(
+	const QJsonObject &snapshot, const DesktopSyncChatPeer &peer);
+
 [[nodiscard]] QString DesktopSyncCarryLogin(const QString &loginBinding);
 
 [[nodiscard]] std::optional<uint64_t> DesktopSyncCarryTransportId(const QJsonValue &value);

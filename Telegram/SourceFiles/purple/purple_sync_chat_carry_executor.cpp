@@ -75,7 +75,7 @@ bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameRe
 void DesktopSyncChatCarry::retire() {
 	++_run;
 	if (_command) { for (const auto &permit : _command->effects) { permit.revoke(); } }
-	_command.reset(); _io.reset(); _store.reset(); _lease.reset();
+	_command.reset(); _io.reset(); _store.reset(); _lease.reset(); _pendingOpening.reset();
 	_closed = true;
 }
 
@@ -120,7 +120,12 @@ SyncCarryJournalEvent DesktopSyncChatCarry::event(SyncCarryEventKind kind) const
 void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start,
 		std::optional<DesktopSyncChatPeer> consentPeer, QString stream, std::optional<DesktopSyncCarryOpening> opening) {
 	if (!SyncStoreWorkerThread()) { retire(); publish(u"worker-required"_q, {SyncStoreStatus::WrongThread}); return; }
-	if (!current() || _store) { _start = std::move(start); publish(u"publishers-not-quiescent"_q, {SyncStoreStatus::LockBusy}); return; }
+	if (!current() || _store || _pendingOpening) {
+		if (!_store && !_pendingOpening && !_closed && _admitted && _admitted->load()) {
+			_pendingOpening = PendingOpening{std::move(start), std::move(consentPeer), std::move(stream), std::move(opening)};
+		}
+		publish(u"publishers-not-quiescent"_q, {SyncStoreStatus::LockBusy}); return;
+	}
 	_store = std::make_unique<SyncChatCarryStore>(_directory, _scope, _fault);
 	if (!result(_store->Open())) { retire(); return; }
 	if (opening && (_store->_stateFile.bytes != opening->state || _store->_cacheFile.bytes != opening->cache)) {
@@ -152,7 +157,12 @@ void DesktopSyncChatCarry::open(std::optional<SyncCarryJournalStart> start,
 
 void DesktopSyncChatCarry::resume() {
 	if (!current() || _command) { return; }
-	if (!_store) { open(std::move(_start)); return; }
+	if (!_store) {
+		auto pending = std::move(_pendingOpening); _pendingOpening.reset();
+		if (pending) { open(std::move(pending->start), std::move(pending->consentPeer), std::move(pending->stream), std::move(pending->opening)); }
+		else { open(); }
+		return;
+	}
 	if (_store->foreignLogin()) { publish(u"interrupted-login-discard-only"_q); return; }
 	if (_resumeRefused) { publish(u"recovery-review-required"_q); return; }
 	_needsFresh = true;
@@ -346,7 +356,15 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 	if (reply.outcome != SyncCarryOutcome::Success) {
 		publish(u"transport-transient-or-unknown"_q); return;
 	}
-	if (reply.fresh && fresh(*reply.fresh)) { _peer = reply.fresh->target.peer; }
+	if (reply.fresh) {
+		const auto &facts = *reply.fresh;
+		if (!facts.current || !facts.current() || facts.source.peer.origin != _origin || facts.target.peer.origin != _origin
+			|| facts.source.peer.chat != opening.source || facts.target.peer.chat != opening.target
+			|| facts.loginAuthority != _scope.loginAuthority || !_io->CheckReaders(facts)) {
+			publish(u"reader-authority-held"_q); return;
+		}
+		if (fresh(facts)) { _peer = facts.target.peer; }
+	}
 	switch (opening.action) {
 	case SyncCarryJournalAction::ResolvePending: {
 		const auto issued = _io->PendingIssued();

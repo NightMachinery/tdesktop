@@ -1,6 +1,7 @@
 #define PURPLE_SYNC_CHAT_CARRY_EXECUTOR_EMBEDDED
 #include "test_sync_chat_carry.cpp"
 #include "purple/purple_sync_chat_consent.h"
+#include <QJsonArray>
 #include <deque>
 
 namespace {
@@ -117,6 +118,7 @@ struct FlowHarness {
 	QString login;
 	DesktopSyncChatOrigin origin;
 	QString reason;
+	QString stream = u"config"_q;
 	int starts = 0;
 	int sends = 0;
 	int cancels = 0;
@@ -143,7 +145,7 @@ struct FlowHarness {
 	}
 	void start(DesktopSyncChatConsentChoice choice = DesktopSyncChatConsentChoice::Proceed) {
 		auto action = DesktopSyncChatConsentAction(frame, window, [&] { return live; }, [&] { return foreground; });
-		const auto offer = action.offer(peer, u"config"_q); Must(offer);
+		const auto offer = action.offer(peer, stream); Must(offer);
 		const auto selection = action.accept(*offer, frame, peer, choice, true); Must(selection);
 		auto port = DesktopSyncChatConsentPort();
 		port.origin = [&] { return origin; }; port.login = [&] { return login; }; port.window = [&] { return window; };
@@ -171,7 +173,7 @@ struct FlowHarness {
 			auto result = files.reply();
 			if (command.dispatch) {
 				const auto baseline = TransportReaders(files);
-				CHECK(baseline.value(u"stream"_q).toString() == u"config"_q);
+				CHECK(baseline.value(u"stream"_q).toString() == stream);
 				CHECK(baseline.value(u"settings_disclosed"_q).toBool());
 			}
 			if (holdReply) { reply = std::move(done); pending = std::move(result); }
@@ -352,6 +354,49 @@ void Baselines() {
 	}
 }
 
+void DeferredOpeningControls() {
+	for (const auto mode : {SyncCarryMode::Follow, SyncCarryMode::Fill}) {
+		for (const auto stream : {u"config"_q, u"library"_q}) {
+			auto h = FlowHarness(mode); h.stream = stream; h.holdReply = true;
+			auto writer = h.files.gate->writer(); Must(writer); h.start(); h.drain();
+			CHECK(h.reason == u"publishers-not-quiescent"_q && h.sends == 0);
+			writer.reset(); h.flow->retry(); h.drain();
+			const auto baseline = TransportReaders(h.files);
+			CHECK(baseline.value(u"stream"_q).toString() == stream);
+			CHECK(baseline.value(u"members_known"_q).toBool() && baseline.value(u"members"_q).toArray() == QJsonArray{QString(64,u'a')});
+			h.holdReply = false; const auto callback = h.reply; const auto reply = h.pending; Must(callback); callback(reply); h.drain();
+			CHECK(h.files.progress.terminal && TransportReaders(h.files) == baseline);
+		}
+		if (mode == SyncCarryMode::Follow) {
+			auto h = FlowHarness(mode); auto writer = h.files.gate->writer(); Must(writer);
+			h.start(); h.drain(); CHECK(h.reason == u"publishers-not-quiescent"_q);
+			const auto path = h.files.root + u"/state.json"_q;
+			const auto before = CaptureSyncPrivateFile(path,kSyncCarryJournalStorageLimit); Must(!before.absent());
+			Must(WriteSyncPrivateFile(path,before.bytes + ' ') == SyncStoreStatus::Ready);
+			writer.reset(); h.flow->retry(); h.drain();
+			CHECK(h.reason == u"opening-images-held"_q && h.files.outward == 0 && !h.files.progress.terminal);
+		}
+		for (auto loss = 0; loss != 2; ++loss) {
+			auto f = ExecutorFiles(false,mode); f.fresh.target = Route({PeerTokenKind::Chat,456}); f.start.target = f.fresh.target.peer.chat;
+			for (auto &mark : f.fresh.resolutionInput.marks) { mark.location.chat = f.start.target; }
+			Readers(f,1,std::vector<QString>{QString(64,u'a')}); f.engine->open(f.start,f.fresh.target.peer,u"library"_q);
+			for (auto i = 0; f.progress.command && f.progress.command->action != SyncCarryJournalAction::ReadMark && i != 30; ++i) { f.step(); }
+			Must(f.progress.command && f.progress.command->action == SyncCarryJournalAction::ReadMark);
+			const auto reply = f.reply(); Must(reply.markResponse);
+			const auto read = DesktopSyncChatCarryMarkReadback(f.fresh.target,reply.markId,*reply.markResponse,f.progress.journal->markText); Must(read);
+			f.engine.reset(); auto store = SyncChatCarryStore(f.root,f.scope); Must(store.Open());
+			auto event = SyncCarryEvent(*store.journal(),SyncCarryEventKind::MarkRead); event.outcome = SyncCarryOutcome::Success; event.mark = *read; event.noRequestInFlight = true;
+			Must(store.Advance(event));
+			auto changed = f.fresh.target.peer;
+			if (loss == 0) { changed.readerMembers.reset(); changed.facts->otherMembers = 200; }
+			if (loss == 1) { changed.creator = false; changed.facts->creator = false; changed.soleAdmin = false; changed.facts->soleAdmin = false; changed.facts->otherAdmins = 1; }
+			CHECK(!store.WriteCache(changed,false)); CHECK(!store.journal()->cachePrepared && !store.journal()->stateCommitted);
+			CHECK(store.WriteCache(f.fresh.target.peer,false));
+		}
+	}
+}
+
+
 }
 
 int main(int argc,char **argv) {
@@ -359,7 +404,7 @@ int main(int argc,char **argv) {
 	DesktopSyncChatSetupSnapshot frame; DesktopSyncChatPeer peer;
 	auto prepare=std::thread([&] {auto f=ExecutorFiles(false,SyncCarryMode::Follow); Readers(f,1,std::vector<QString>{QString(64,u'a')});frame=Frame(f);peer=f.fresh.target.peer;});prepare.join();
 	MainActions(frame,peer);
-	auto worker=std::thread([] {Flows();PauseLogout();Baselines();});worker.join();
+	auto worker=std::thread([] {Flows();PauseLogout();Baselines();DeferredOpeningControls();});worker.join();
 	std::printf("T5E CONSENT %d checks, %d failures\n",Checks,Failures);
 	return Failures ? 1 : 0;
 }

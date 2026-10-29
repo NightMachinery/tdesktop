@@ -162,6 +162,19 @@ std::optional<QJsonObject> DesktopSyncCarryTransportOf(
 	return result;
 }
 
+bool DesktopSyncCarryReaderAuthority(const QJsonObject &snapshot, const DesktopSyncChatPeer &peer) {
+	const auto known = snapshot.value(u"members_known"_q);
+	return peer.facts && snapshot.value(u"members"_q).isArray()
+		&& snapshot.value(u"other_members"_q).isString() && snapshot.value(u"other_admins"_q).isString()
+		&& snapshot.value(u"warning"_q).isBool()
+		&& (known.isUndefined() || known.isBool()) && (known != QJsonValue(true) || peer.readerMembers)
+		&& (snapshot.value(u"creator"_q) != QJsonValue(true) || peer.creator == true)
+		&& (snapshot.value(u"admin"_q) != QJsonValue(true) || peer.facts->admin)
+		&& snapshot.value(u"kind"_q).toInt(-1) == int(peer.kind)
+		&& snapshot.value(u"settings_disclosed"_q).toBool()
+		&& (snapshot.value(u"stream"_q) == QJsonValue(u"config"_q) || snapshot.value(u"stream"_q) == QJsonValue(u"library"_q));
+}
+
 QString DesktopSyncCarryLogin(const QString &loginBinding) {
 	return Hash(loginBinding) ? SyncCarryRecordHash("purple-sync-carry-login-v2:" + loginBinding.toLatin1()).left(32) : QString();
 }
@@ -790,6 +803,8 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 	}
 	const auto eligible = DesktopSyncChatEligibility(peer);
 	if (!eligible || CheckSyncCarryReaders(*_journal, *eligible) == SyncCarryReaderVerdict::Hold) { return { SyncStoreStatus::InvalidTransition }; }
+	const auto authority = DesktopSyncCarryTransportOf(_envelope, *_journal);
+	if (!authority || !DesktopSyncCarryReaderAuthority(authority->value(u"readers"_q).toObject(), peer)) { return { SyncStoreStatus::InvalidTransition }; }
 	const auto path = complete ? _scope.cacheFile : _directory + u"/carry-cache.json"_q;
 	auto expected = CaptureSyncPrivateFile(path, 64 * 1024);
 	if (expected.status != SyncStoreStatus::Ready || (complete && !Same(expected, _cacheFile))) { return { SyncStoreStatus::Changed }; }

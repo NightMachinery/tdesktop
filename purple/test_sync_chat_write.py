@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -111,7 +111,12 @@ recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=
 objects = []
 compiled = []
 consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
-    for name in ['purple_sync_chat_consent', 'purple_sync_chat_setup']] if args.test_source == 'test_sync_chat_consent.cpp' else []
+    for name in ['purple_sync_chat_consent', 'purple_sync_chat_setup']] if args.test_source in ['test_sync_chat_consent.cpp', 'test_sync_chat_consent_review.cpp'] else []
+if args.test_source == 'test_sync_chat_consent_review.cpp':
+    source = (repo / 'purple/test_sync_chat_consent.cpp').read_text()
+    assert source.count('int main(') == 1
+    (work / 'embedded_consent.inc').write_text(source.replace('int main(', 'int EmbeddedConsentMain(', 1))
+    recipe[1:1] = ['-I' + str(repo / 'purple')]
 if args.test_source == 'test_sync_chat_marks.cpp':
     consent_sources = [repo / 'Telegram/SourceFiles/purple/purple_sync_chat_mark_actions.cpp']
     mark_transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_mark_transport.cpp').read_text()
@@ -177,6 +182,8 @@ with (work / 'build.log').open('w') as log:
     'included_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_discovery.cpp').read_bytes()).hexdigest(),
     'included_io_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_io.cpp').read_bytes()).hexdigest(),
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    'review_consent_source_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_consent.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_consent_review.cpp' else None,
+    'review_consent_port_sha256': hashlib.sha256((work / 'embedded_consent.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_consent_review.cpp' else None,
     'mark_transport_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_mark_transport.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_marks.cpp' else None,
     'mark_transport_port_sha256': hashlib.sha256((work / 'mark-transport.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_marks.cpp' else None,
     'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'auto-operation.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
