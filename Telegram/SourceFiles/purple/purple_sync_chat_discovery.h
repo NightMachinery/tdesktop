@@ -74,6 +74,7 @@ public:
 		PeerToken settingsChat,
 		std::vector<PeerToken> loadedDialogs,
 		QString loginBinding);
+	[[nodiscard]] std::vector<std::pair<DesktopSyncChatPeer, MTPMessage>> markMessages() const;
 	void Start(int64_t now);
 	void StartBeforePost(int64_t now);
 	void Tick(int64_t now);

@@ -2,6 +2,7 @@
 
 #include "purple/purple_sync_chat_setup.h"
 #include "purple/purple_sync_chat_consent.h"
+#include "purple/purple_sync_chat_mark_actions.h"
 #include "purple/purple_account_config.h"
 #include <rpl/producer.h>
 
@@ -46,6 +47,10 @@ struct DesktopSyncChatLease {
 	not_null<Main::Session*> session, DesktopSyncChatMoveAction &action,
 	const DesktopSyncChatMoveOffer &offer, std::optional<DesktopSyncChatPeer> peer,
 	bool cleanup, bool consent);
+
+[[nodiscard]] std::vector<DesktopSyncChatStaleMark> SyncChatStaleMarksOf(not_null<Main::Session*> session);
+[[nodiscard]] bool ReviewSyncChatStaleMark(not_null<Main::Session*> session,
+	const DesktopSyncChatStaleMark &row, Fn<bool()> current, Fn<void(DesktopSyncChatStaleMark)> start);
 
 void StartSyncChatDiscovery();
 void QuiesceSyncChatPublishers(not_null<Main::Session*> session);

@@ -331,3 +331,52 @@ mandatory `purpose: "provision-move"` and a 64-character lowercase SHA256
 unknown-purpose and newer-version fields without replacing the file. A fresh
 setup flow cannot resume a provision journal, or vice versa. The shared core
 state and Carry journal formats are unchanged.
+
+## Remove one older mark
+
+The dormant selected-mark action lists supported Own marks observed for this
+account when a complete resolution has a newer winner. It is separate from
+moving or cleaning up settings. Production activation remains constant OFF:
+the real screen exposes no clickable Remove mark row or confirmation, and the
+public entry refuses before dispatch. The host injection seam tests the action;
+this does not qualify a native UI or Telegram deletion.
+
+A row captures the account/login, typed chat, exact message id, date, full text
+and author identity. Search only proposes rows. The worker serializes with the
+account's sync operations, holds its local store lock, resolves the winner
+afresh, checks actual active and retained Carry journals, and rereads that
+single message with fresh independently readable peer information.
+`CheckStaleMarkRemoval` is the sole positive authority. A current winner,
+foreign/newer mark, changed date/text/author/chat, incomplete resolution or
+uncertain read holds. No Switch journal or old-mark cleanup authority is
+manufactured. Active or unreadable journals hold; retained unresolved operations
+protect their typed-chat/message-id references (even if a date changed) and attempted mark text. Validated Done history does
+not permanently block the account.
+
+The single-use RAM permit authorizes only the captured id in the captured
+ordinary or channel namespace. The shared request controller's effect-resume
+gate repeats resolution, journal checks and exact authorization before a
+definite retry. It retains the original request bytes and refuses a changed
+typed route. Ambiguous outcomes hold for an explicit new action and reread.
+The native port starts transport on its sender thread and explicitly marshals
+worker renewal back to that thread before resuming the shared request controller.
+Captured-account affected-message counters must be applied successfully before
+the confirmation reread. An acknowledgement alone never reports removal.
+Close/logout/window or account departure revokes the RAM capability immediately,
+then worker cleanup releases only this operation's store and account lease.
+
+D-M2B5-12 accepts peerless MessageEmpty only for an exact single-id read of the
+selected stale Own mark in its captured typed chat, channel-scoped for a
+channel, with the same id and independently established current readability.
+An explicit peer must match. Contradicting/dangling peers, zero or duplicate
+rows, other ids, inexact/flooded responses, changed ordinary messages and other
+uncertain shapes remain Unknown. This exception only concludes AlreadyAbsent
+or confirms absence after applied affected-message counters. It never grants
+deletion authority. Record and history/inventory reads retain their conservative
+rule: peerless record MessageEmpty is Unknown. This action cannot delete
+settings records, other messages or an entire chat.
+
+Host fixtures compile the actual core/TL adapters and worker controller, and
+port the literal shared-controller transport body with a synthetic sender.
+They do not execute a Telegram request. Full canonical qualification is deferred
+to the final landing batch by the owner's velocity rule.

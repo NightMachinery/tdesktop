@@ -432,3 +432,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_pause_here_action" = "Pause sync here";
 "lng_purple_chat_paused_here" = "Sync is paused for this account on this device. Sign-in does not resume it. Resume explicitly when you are ready.";
 "lng_purple_chat_follow_fill_held" = "Follow and recovery are waiting for qualification. No data was copied or sent.";
+
+"lng_purple_chat_remove_mark" = "Remove mark";
+"lng_purple_chat_remove_mark_row" = "Remove older Purple mark in %1";
+"lng_purple_chat_remove_mark_disclosure" = "Remove only this selected older Purple mark from %1? No settings records or other messages will be removed.";
+"lng_purple_chat_remove_mark_held" = "Mark removal is waiting for qualification. Nothing was deleted.";

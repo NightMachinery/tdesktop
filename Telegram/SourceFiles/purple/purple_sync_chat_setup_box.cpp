@@ -330,6 +330,39 @@ void LoadNext(not_null<Ui::GenericBox*> box, SetupState *state) {
 		}));
 }
 
+void ConfirmStaleMark(not_null<Ui::GenericBox*> box, SetupState *state, DesktopSyncChatStaleMark row) {
+	if (!DesktopSyncChatMarkRemovalActivated() || !Current(*state) || state->busy) { return; }
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> confirmation) {
+		if (!DesktopSyncChatMarkRemovalActivated() || !weak || !Current(*state)) { confirmation->closeBox(); return; }
+		confirmation->setTitle(tr::lng_purple_chat_remove_mark());
+		confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
+			tr::lng_purple_chat_remove_mark_disclosure(tr::now).arg(Title(*state->session.get(), row.location.chat))
+				+ u"\n\n"_q + row.text, st::boxLabel));
+		confirmation->addButton(tr::lng_purple_chat_remove_mark(), [=] {
+			confirmation->closeBox();
+			if (!DesktopSyncChatMarkRemovalActivated() || !weak || !Current(*state) || state->busy) { return; }
+			const auto current = [weak, state] { return weak && Current(*state) && !state->busy; };
+			ReviewSyncChatStaleMark(state->session.get(), row, current, [=](DesktopSyncChatStaleMark) {
+				state->status->setText(tr::lng_purple_chat_remove_mark_held(tr::now));
+			});
+		});
+		confirmation->addButton(tr::lng_cancel(), [=] { confirmation->closeBox(); });
+	}));
+}
+
+void AddStaleMarkRows(not_null<Ui::GenericBox*> box, SetupState *state) {
+	if (!DesktopSyncChatMarkRemovalActivated() || !Current(*state)) { return; }
+	for (const auto &row : SyncChatStaleMarksOf(state->session.get())) {
+		const auto button = box->addRow(object_ptr<Ui::RoundButton>(box,
+			rpl::single(tr::lng_purple_chat_remove_mark_row(tr::now).arg(Title(*state->session.get(), row.location.chat))), st::defaultBoxButton));
+		button->setClickedCallback([=] {
+			if (!DesktopSyncChatMarkRemovalActivated() || !Current(*state)) { return; }
+			ConfirmStaleMark(box, state, row);
+		});
+	}
+}
+
 void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 	if (!state->move || !Current(*state) || state->busy) { return; }
 	const auto index = state->group->current();
@@ -627,6 +660,7 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		box->addRow(object_ptr<Ui::FlatLabel>(box,
 			tr::lng_purple_chat_change_disabled(tr::now), st::boxLabel));
 	}
+	AddStaleMarkRows(box, state);
 	state->retry = box->addRow(object_ptr<Ui::RoundButton>(box,
 		tr::lng_purple_chat_setup_retry(), st::defaultBoxButton));
 	state->retry->setClickedCallback([=] {

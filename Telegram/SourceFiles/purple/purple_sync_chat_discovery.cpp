@@ -194,6 +194,21 @@ void DesktopSyncChatDiscovery::Search(DesktopSyncChatSearch kind) {
 	_command.search = kind;
 }
 
+std::vector<std::pair<DesktopSyncChatPeer, MTPMessage>> DesktopSyncChatDiscovery::markMessages() const {
+	auto result = std::vector<std::pair<DesktopSyncChatPeer, MTPMessage>>();
+	for (const auto &message : _hits) {
+		const auto position = Position(_origin, message);
+		if (!position) { continue; }
+		const auto facts = peer(position->chat);
+		if (!facts || GetSyncChatMessageOwnership(MapDesktopSyncChatMessage(_origin, *facts, message)) != SyncChatMessageOwnership::Own) { continue; }
+		if (std::none_of(_input.marks.begin(), _input.marks.end(), [&](const SyncChatMark &mark) {
+			return mark.location == *position && mark.status == SyncChatMarkStatus::Supported;
+		})) { continue; }
+		result.emplace_back(*facts, message);
+	}
+	return result;
+}
+
 void DesktopSyncChatDiscovery::Remember(
 	const std::vector<MTPMessage> &messages) {
 	for (const auto &message : messages) {

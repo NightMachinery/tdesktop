@@ -274,6 +274,10 @@ PRIVATE
     purple/purple_sync_chat_discovery.h
     purple/purple_sync_chat_consent.cpp
     purple/purple_sync_chat_consent.h
+    purple/purple_sync_chat_mark_actions.cpp
+    purple/purple_sync_chat_mark_actions.h
+    purple/purple_sync_chat_mark_transport.cpp
+    purple/purple_sync_chat_mark_transport.h
     purple/purple_sync_chat_cache.cpp
     purple/purple_sync_chat_cache.h
     purple/purple_sync_chat_write.cpp

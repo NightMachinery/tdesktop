@@ -181,6 +181,7 @@ public:
 	void Cancel(QString reason);
 	DesktopSyncChatStatus status() const;
 	std::optional<DesktopSyncChatSetupSnapshot> Setup() const;
+	[[nodiscard]] std::vector<DesktopSyncChatStaleMark> StaleMarks() const;
 	bool Owns(Main::Session* session) const;
 	bool SetupContextCurrent(const DesktopSyncChatDiscoveryScope &scope, bool cached = false) const;
 	std::optional<DesktopSyncChatLease> Lease(PeerToken chat);
@@ -1099,6 +1100,19 @@ std::optional<DesktopSyncChatSetupSnapshot> SyncChatSession::Setup() const {
 		*_setupScope, status(), _model->input(), _model->cache(), _run, _expectedStateBytes, _expectedCacheBytes };
 }
 
+std::vector<DesktopSyncChatStaleMark> SyncChatSession::StaleMarks() const {
+	const auto fresh = Setup();
+	if (!fresh || !fresh->status.complete || fresh->status.postingHeld
+		|| fresh->status.resolution.action != SyncChatAction::Use || !fresh->status.resolution.winner) { return {}; }
+	auto result = std::vector<DesktopSyncChatStaleMark>();
+	for (const auto &[peer, message] : _model->markMessages()) {
+		const auto row = CaptureDesktopSyncChatStaleMark(peer, _loginBinding, message);
+		if (row && SyncChatMarkOutranks(*fresh->status.resolution.winner, row->location)
+			&& std::find(result.begin(), result.end(), *row) == result.end()) { result.push_back(*row); }
+	}
+	return result;
+}
+
 std::map<Main::Session*, std::unique_ptr<SyncChatSession>> Sessions;
 SyncChatSession &For(not_null<Main::Session*> session) {
 	auto &entry = Sessions[session];
@@ -1187,6 +1201,22 @@ bool ReviewSyncChatMove(not_null<Main::Session*> session,
 		return false;
 	}
 	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {});
+}
+
+std::vector<DesktopSyncChatStaleMark> SyncChatStaleMarksOf(not_null<Main::Session*> session) {
+	return For(session).StaleMarks();
+}
+
+bool ReviewSyncChatStaleMark(not_null<Main::Session*> session,
+		const DesktopSyncChatStaleMark &row, Fn<bool()> current, Fn<void(DesktopSyncChatStaleMark)> start) {
+	if (!DesktopSyncChatMarkRemovalActivated() || !current || !current() || !start) { return false; }
+	const auto fresh = SyncChatSetupSnapshotOf(session);
+	if (!fresh || !CachedSyncChatSetupContextCurrent(session, fresh->scope)
+		|| row.origin != fresh->scope.origin || row.login != fresh->scope.loginBinding) { return false; }
+	const auto rows = SyncChatStaleMarksOf(session);
+	if (std::find(rows.begin(), rows.end(), row) == rows.end() || !current()) { return false; }
+	start(row);
+	return true;
 }
 
 void StartSyncChatDiscovery() {
