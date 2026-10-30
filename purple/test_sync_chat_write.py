@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -84,6 +84,12 @@ transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_transport.cpp'
 
 create = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp').read_text()
 (work / 'carry-mark-text.inc').write_text('namespace Purple { QString DesktopSyncChatMarkText() ' + block(create, 'QString DesktopSyncChatMarkText(') + ' }\n')
+if args.test_source == 'test_sync_chat_recovery.cpp':
+    (work / 'carry-mark-text.inc').write_text('')
+    ui = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_text()
+    (work / 'recovery-ui-rows.inc').write_text(block(ui, 'void AddRecoveryRows('))
+    confirmation = block(ui, 'void BuildRecoveryConfirmation(').replace('object_ptr<Ui::FlatLabel>(confirmation, disclosure, st::boxLabel)', '0')
+    (work / 'recovery-ui-confirmation.inc').write_text(confirmation)
 upload = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_upload.cpp').read_text()
 carry_constructor_at = upload.index('\t\tDesktopSyncCarryPermit permit,')
 carry_constructor_start = upload.rfind('SyncConfigUpload::SyncConfigUpload(', 0, carry_constructor_at)
@@ -131,6 +137,9 @@ if args.test_source == 'test_sync_chat_cleanup.cpp':
     (work / 'cleanup-choice.inc').write_text(choice + '\n' + accepted_choice + '\n')
     cleanup = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp').read_text()
     (work / 'cleanup-transport.inc').write_text('bool ProbeCleanupTransport(CleanupSenderProbe &sender, DesktopSyncCleanupPermit permit, DesktopSyncCleanupRenew renew, Fn<void(Fn<void()>)> onSender, Fn<void(int, Fn<void()>)> delay, Fn<void(std::optional<MTPmessages_AffectedMessages>)> done) ' + block(cleanup, 'bool SendDesktopSyncChatCleanup('))
+if args.test_source == 'test_sync_chat_recovery.cpp':
+    consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
+        for name in ['purple_sync_chat_recovery', 'purple_sync_chat_setup', 'purple_sync_chat_create', 'purple_sync_chat_create_store', 'purple_sync_chat_setup_flow']]
 with (work / 'build.log').open('w') as log:
     for source in [repo / 'purple' / args.test_source,
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_write.cpp',
@@ -202,6 +211,8 @@ with (work / 'build.log').open('w') as log:
     'sources_sha256': {str(source): hashlib.sha256(Path(source).read_bytes()).hexdigest()
                        for source in [c[c.index('-c') + 1] for c in compiled]},
     'objects_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in objects},
+    'recovery_ui_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_recovery.cpp' else None,
+    'recovery_ui_ports_sha256': {str(work / name): hashlib.sha256((work / name).read_bytes()).hexdigest() for name in ['recovery-ui-rows.inc', 'recovery-ui-confirmation.inc']} if args.test_source == 'test_sync_chat_recovery.cpp' else None,
     'cleanup_choices_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
     'cleanup_choices_port_sha256': hashlib.sha256((work / 'cleanup-choice.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
     'cleanup_transport_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,

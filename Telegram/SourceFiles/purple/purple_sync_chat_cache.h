@@ -19,6 +19,8 @@ struct DesktopSyncChatCacheRecord {
 	QString loginBinding;
 	bool newReaders = false;
 	std::optional<bool> readerCreator;
+	std::optional<bool> readerAdmin;
+	std::optional<SyncChatKind> readerKind;
 	std::optional<std::vector<QString>> readerMembers;
 };
 

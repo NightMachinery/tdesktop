@@ -65,7 +65,9 @@ bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameRe
 			&& facts.resolutionInput.cacheRead != SyncChatDirectRead::Migrated))
 		&& (sameResolution
 			? resolution.action == journal.expectedAction && resolution.winner == journal.expectedWinner && resolution.cache == journal.oldMark
-			: resolution.action == SyncChatAction::Follow || resolution.action == SyncChatAction::Fill
+			: ((journal.expectedAction == SyncChatAction::Searching || journal.expectedAction == SyncChatAction::Lost)
+					&& resolution.action == journal.expectedAction && resolution.winner == journal.expectedWinner && resolution.cache == journal.oldMark)
+				|| resolution.action == SyncChatAction::Follow || resolution.action == SyncChatAction::Fill
 				|| resolution.action == SyncChatAction::NewerMark || (resolution.action == SyncChatAction::Use && !resolution.postingHeld))
 		&& eligible
 		&& CheckSyncCarryReaders(journal, *eligible) != SyncCarryReaderVerdict::Hold
@@ -107,7 +109,8 @@ bool DesktopSyncChatCarry::result(SyncChatCarryStorageResult value) {
 	if (!value || (value.journalStatus != SyncCarryJournalStatus::Valid && value.journalStatus != SyncCarryJournalStatus::Invalid)) {
 		_command.reset();
 		publish(value.status == SyncStoreStatus::Ready && value.journalStatus == SyncCarryJournalStatus::Retry
-			? u"carry-retry-required"_q : u"carry-held"_q, value);
+			? u"carry-retry-required"_q : value.status == SyncStoreStatus::MissingLocalVersion
+			? u"missing-local-version"_q : u"carry-held"_q, value);
 		if (_store && !_store->Current()) { _cleanup.reset(); _io.reset(); _store.reset(); }
 		return false;
 	}
@@ -265,7 +268,8 @@ void DesktopSyncChatCarry::plan(const DesktopSyncCarryReply &reply) {
 			envelope.header->writerApp, envelope.header->at};
 	}
 	const auto prepared = PlanCarry(input);
-	if (!prepared) { publish(prepared.status == SyncCarryStatus::PlaylistRequired ? u"playlist-required"_q : u"plan-held"_q); return; }
+	if (!prepared) { publish(prepared.status == SyncCarryStatus::PlaylistRequired ? u"playlist-required"_q
+		: prepared.status == SyncCarryStatus::MissingLocalVersion ? u"missing-local-version"_q : u"plan-held"_q); return; }
 	auto accepted = event(SyncCarryEventKind::PlanPrepared); accepted.plan = prepared.plan;
 	if (result(_store->Advance(accepted))) { advance(); }
 }

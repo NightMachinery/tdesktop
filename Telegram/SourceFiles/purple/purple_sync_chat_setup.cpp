@@ -99,13 +99,18 @@ QString DesktopSyncChatMoveFingerprint(const DesktopSyncChatSetupSnapshot &snaps
 		|| scope.root.isEmpty() || !scope.settingsBound || scope.space.isEmpty()
 		|| scope.carry || !snapshot.input.settingsBound
 		|| snapshot.input.settingsChat != scope.settingsChat || !snapshot.status.complete
-		|| snapshot.status.phase != DesktopSyncChatPhase::Use
-		|| resolution.action != SyncChatAction::Use
-		|| resolution.readChat != scope.settingsChat
-		|| resolution.readers.populationUnknown || snapshot.status.postingHeld
-		|| resolution.postingHeld) {
+		|| (resolution.action == SyncChatAction::Use
+			? snapshot.status.phase != DesktopSyncChatPhase::Use
+				|| resolution.readChat != scope.settingsChat
+				|| resolution.readers.populationUnknown || snapshot.status.postingHeld || resolution.postingHeld
+			: (resolution.action != SyncChatAction::Searching && resolution.action != SyncChatAction::Lost)
+				|| (snapshot.status.phase != DesktopSyncChatPhase::Searching && snapshot.status.phase != DesktopSyncChatPhase::Lost)
+				|| !resolution.cache || resolution.cache->chat != scope.settingsChat || resolution.winner)) {
 		return {};
 	}
+	const auto actual = ResolveSyncChat(snapshot.input);
+	if (resolution.action != SyncChatAction::Use && (actual.action != resolution.action || actual.winner != resolution.winner
+		|| actual.cache != resolution.cache || snapshot.input.selfUserId != scope.origin.account.userId)) { return {}; }
 	const auto cache = snapshot.cache
 		? SerializeDesktopSyncChatCache(*snapshot.cache) : std::optional(QByteArray());
 	if (!cache || (snapshot.cache && (snapshot.cache->account != scope.origin.account

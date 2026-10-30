@@ -516,3 +516,76 @@ record. Copying historical records is not evidence that this install has begun
 using N. The OFF-gated progress box has Retry and a separately confirmed Skip;
 a stale box cannot act on a successor operation. Host tests do not qualify native
 UI, Telegram server behavior or physical power-loss durability.
+
+## Lost recovery and same-chat mark repair
+
+Recovery is a separate bound-account flow. Its Create, Choose, Mark this chat
+again and Retry recovery controls, public selection, click handlers and nested
+confirmation are all behind a constant OFF gate. The status remains a
+non-actionable qualification hold. Host injection qualifies the orchestration;
+there is no production recovery transport callsite or activation in this slice.
+
+A missing mark is not a lost chat. Searching keeps the existing 30, 120 and
+600 second retries. Reconnect and explicit retry resolve again. A failed request,
+timeout, incomplete search or unknown direct read never establishes ChatGone.
+The recovery opening captures the account, login, settings binding, original
+cache, exact state and cache images, source, resolution and window. Every fresh
+resolve must match before provisioning and before Carry. Revocation, another
+winner or changed opening holds without retargeting.
+
+Create provisions only through the existing journaled setup path. Its result
+must be a completed, matched-request-created channel for this exact source
+fingerprint. It cannot post a mark, decorate or create an admitted cache itself.
+One controller starts provisioning once; an uncertain result stays in that
+journal for explicit reconciliation, never a second blind create. Choose uses
+the same eligibility and disclosed target snapshot as Change. Both enter core
+Switch through the existing serialized Carry worker, never fresh setup for a
+bound account.
+
+When O is protected or definitely gone, Carry uses only this install's verified
+retained own base. Missing or mismatched bytes yield MissingLocalVersion. Unsynced
+editor text is neither a substitute base nor a new identity for an old version.
+Protected pending sends still use ReconcileProtectedStageForCarry: retained
+Issued intent cannot be downgraded, and a complete inventory must begin after
+the latest uncertain outcome. ChatGone uses AbandonStageForLostChat. Unknown
+reads hold. Fill still requires a complete readable source.
+
+Mark this chat again uses core RepairMark with O=N. It requires the positive
+captured mark's fresh R3 MarkGone, no winner, a readable eligible chat, the
+original settings reader consent and known current readers. The original reader
+snapshot remains authoritative: known additions warn and continue, unknown
+population, loss of a previously known roster, or lost creator/admin rights hold.
+Desktop caches now retain the kind and admin facts when they are known. A legacy
+cache missing those applicable facts holds mark repair instead of inventing
+original consent; another destination can still be reviewed. Self and private chats do not have
+creator/admin roles. The cache fields are `reader_kind` (the shared kind enum
+integer or null) and `reader_admin` (boolean or null); malformed or unsupported
+values refuse cache admission. Existing same-chat baselines are not backfilled
+from a later reader snapshot. Existing baselines and sticky warnings are never overwritten.
+
+The repair store refuses pending or orphan stages. It retains the exact existing
+state image, and its commit performs a durability barrier on that identical image
+instead of rewriting state. Binding and the settings/version ledger therefore
+remain byte-identical. No settings plan, own record, cleanup, deletion or fake
+O-to-O Switch is created. Only a replacement mark and its admitted mark cache
+change. A lost base alone does not require inventing one merely to repair a mark;
+invalid retained-state formats still refuse. Late direct-read, winner or reader
+changes must pass the real per-effect Carry gate before a mark can be issued.
+
+New recovery disk and journal work runs on the serialized worker. The existing
+setup screen still validates its opening target and snapshot synchronously:
+`purple_sync_chat_setup_box.cpp:660-661`, `MoveContextCurrent` at line 206 and
+`Current` at line 216 reach `ValidateAccountSettingsOpenTarget` and
+`SyncChatSession::Setup` (`purple_sync_chat_service.cpp:1095`). Their existing
+filesystem validation is in `purple_account_config.cpp:985` (`validateOpen`)
+and line 1977 (`operationTarget`). This slice does not convert those inherited
+UI paths to asynchronous validation or claim they are RAM-only. Every new
+recovery entry and control returns while activation is OFF; a future production
+factory must retain the worker boundary without copying these reads into its
+GUI callbacks.
+
+Focused generated-TL/core/store fixtures use injected transports only. Literal
+OFF control bodies and the queued controller start run on QCoreApplication's
+main thread; the real store and Carry flow run on the worker. These checks do
+not qualify Telegram, native GUI lifecycle or physical power-loss behavior.
+The full host run belongs to the coordinator's final landing batch.

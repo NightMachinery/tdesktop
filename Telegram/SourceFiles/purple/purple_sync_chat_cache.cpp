@@ -164,6 +164,14 @@ ParseDesktopSyncChatCache(const QByteArray &bytes, const AccountKey &account) {
 	const auto warning = object.value(u"new_readers"_q);
 	const auto creator = object.value(u"reader_creator"_q);
 	const auto memberSnapshot = object.value(u"reader_members"_q);
+	const auto admin = object.value(u"reader_admin"_q);
+	const auto kind = object.value(u"reader_kind"_q);
+	if ((!admin.isUndefined() && !admin.isNull() && !admin.isBool())
+		|| (!kind.isUndefined() && !kind.isNull() && (!kind.isDouble()
+			|| kind.toDouble() != kind.toInt() || kind.toInt() <= int(SyncChatKind::Unknown)
+			|| kind.toInt() > int(SyncChatKind::ChannelDirectMessages)))) { return {}; }
+	if (admin.isBool()) { record.readerAdmin = admin.toBool(); }
+	if (kind.isDouble()) { record.readerKind = SyncChatKind(kind.toInt()); }
 	if ((!warning.isUndefined() && !warning.isBool())
 		|| (!creator.isUndefined() && !creator.isNull() && !creator.isBool())
 		|| (!memberSnapshot.isUndefined() && !memberSnapshot.isNull() && !memberSnapshot.isArray())) {
@@ -245,6 +253,8 @@ std::optional<QByteArray> SerializeDesktopSyncChatCache(const DesktopSyncChatCac
 	object.insert(u"new_readers"_q, record.newReaders);
 	object.insert(u"reader_creator"_q, record.readerCreator
 		? QJsonValue(*record.readerCreator) : QJsonValue(QJsonValue::Null));
+	object.insert(u"reader_admin"_q, record.readerAdmin ? QJsonValue(*record.readerAdmin) : QJsonValue(QJsonValue::Null));
+	object.insert(u"reader_kind"_q, record.readerKind ? QJsonValue(int(*record.readerKind)) : QJsonValue(QJsonValue::Null));
 	auto memberSnapshot = QJsonValue(QJsonValue::Null);
 	if (record.readerMembers) {
 		auto array = QJsonArray();

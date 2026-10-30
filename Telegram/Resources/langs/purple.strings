@@ -450,3 +450,17 @@ docs/purple/upstream_hooks.md.
 "lng_purple_control_locked" = "Allow while locked";
 "lng_purple_control_locked_music" = "Allow music info while locked";
 "lng_purple_control_locked_voice" = "Allow voice info while locked";
+
+"lng_purple_chat_recovery_create" = "Create a new sync chat";
+"lng_purple_chat_recovery_choose" = "Choose another sync chat";
+"lng_purple_chat_recovery_repair" = "Mark this chat again";
+"lng_purple_chat_recovery_retry" = "Retry recovery";
+"lng_purple_chat_recovery_off" = "Sync chat recovery is held for qualification. No recovery action is available yet.";
+"lng_purple_chat_recovery_refused" = "Recovery needs a fresh check of this account, the missing mark, and the original reader consent. Unknown readers, lost rights, a pending send, or a newer mark keep it held.";
+"lng_purple_chat_recovery_repair_disclosure" = "Post a replacement Purple mark in this same chat. Your settings, binding and version history stay unchanged. This requires a confirmed missing mark and the original reader consent.";
+
+"lng_purple_chat_recovery_missing_base" = "The saved local version is unavailable or does not match. Recovery is held; unsynced edits will not replace that saved version.";
+"lng_purple_chat_recovery_gone" = "This chat is confirmed unavailable. Choose another sync chat or create one; its mark cannot be repaired here.";
+"lng_purple_chat_recovery_unproven" = "The old mark is not confirmed missing. Wait for a complete fresh check before repairing it.";
+"lng_purple_chat_recovery_consent" = "The original settings reader consent is unavailable. Mark repair is held; you can review another destination.";
+"lng_purple_chat_recovery_pending" = "A pending send must be resolved before this chat's mark can be repaired.";

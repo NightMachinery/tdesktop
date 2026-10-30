@@ -88,6 +88,9 @@ DesktopSyncChatCacheRecord ReaderBaseline(const DesktopSyncChatCreateJournal &j)
 	result.readers.warningRequired=result.readers.privateRecipient || result.readers.botOwner
 		|| result.readers.otherMembers.value_or(0)>0 || result.readers.otherAdmins.value_or(0)>0;
 	result.readerCreator=o.value(u"creator"_q).toBool();
+	result.readerKind=kind;
+	if (kind==SyncChatKind::Self) { result.readerAdmin=false; }
+	else if (result.readerCreator==true) { result.readerAdmin=true; }
 	if (o.value(u"has_members"_q).toBool()) {
 		result.readerMembers=std::vector<QString>();
 		for (const auto value:o.value(u"members"_q).toArray()) result.readerMembers->push_back(value.toString());

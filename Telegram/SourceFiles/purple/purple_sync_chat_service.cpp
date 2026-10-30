@@ -1196,11 +1196,27 @@ bool ReviewSyncChatMove(not_null<Main::Session*> session,
 		DesktopSyncChatMoveAction &action, const DesktopSyncChatMoveOffer &offer,
 		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent, bool removeOldMark) {
 	const auto fresh = SyncChatSetupSnapshotOf(session);
-	if (!fresh || !CachedSyncChatSetupContextCurrent(session, fresh->scope)) {
+	if (!fresh || (DesktopSyncChatRecoveryHeld(*fresh).isEmpty() && !DesktopSyncChatRecoveryActivated())
+		|| !CachedSyncChatSetupContextCurrent(session, fresh->scope)) {
 		action.cancel();
 		return false;
 	}
 	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {}, removeOldMark);
+}
+
+auto ReviewSyncChatRecovery(
+		not_null<Main::Session*> session, const DesktopSyncChatSetupSnapshot &opening,
+		DesktopSyncChatRecoveryChoice choice, std::optional<DesktopSyncChatPeer> peer,
+		QString window, bool disclosed)
+-> std::optional<DesktopSyncChatRecoverySelection> {
+	if (!DesktopSyncChatRecoveryActivated()) { return {}; }
+	const auto fresh = SyncChatSetupSnapshotOf(session);
+	if (!fresh || !CachedSyncChatSetupContextCurrent(session, opening.scope)
+		|| DesktopSyncChatMoveFingerprint(opening).isEmpty()
+		|| DesktopSyncChatMoveFingerprint(*fresh) != DesktopSyncChatMoveFingerprint(opening)
+		|| fresh->input.cacheRead != opening.input.cacheRead
+		|| fresh->stateImage != opening.stateImage || fresh->cacheImage != opening.cacheImage) { return {}; }
+	return SelectDesktopSyncChatRecovery(*fresh, choice, std::move(peer), std::move(window), disclosed);
 }
 
 std::vector<DesktopSyncChatStaleMark> SyncChatStaleMarksOf(not_null<Main::Session*> session) {

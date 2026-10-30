@@ -513,7 +513,12 @@ SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart
 	if (consentRequired) { _envelope.insert(u"consent_required"_q, true); }
 	const auto next = BeginSyncCarryJournal(start);
 	if (!next) { return { SyncStoreStatus::InvalidTransition, next.status }; }
-	if (_local->_state) {
+	if (_local->_state && input.mode == SyncCarryMode::RepairMark) {
+		const auto retention = ValidateSyncRetainedConfig(*_local->_state);
+		if (retention != SyncStoreStatus::Ready) { return {retention}; }
+		const auto object = StoreObject(u"state"_q, _stateFile.bytes);
+		if (!object || object.objectHash != next.journal.stateHash) { return { SyncStoreStatus::InvalidState }; }
+	} else if (_local->_state) {
 		if (!_local->_state->configData.base.isEmpty() && !OwnBase()) { return { SyncStoreStatus::MissingLocalVersion }; }
 		if (!_local->_state->configData.base.isEmpty()) {
 			const auto record = StoreObject(u"record"_q, OwnBase().staged); if (!record) { return record; }
@@ -675,15 +680,21 @@ SyncChatCarryStorageResult SyncChatCarryStore::CommitPreparedState() {
 		const auto bytes = ReadObject(u"state"_q, hash); if (!bytes) { return { SyncStoreStatus::InvalidState }; }
 		const auto state = ParseSyncLocalState(*bytes);
 		if (!state) { return { SyncStoreStatus::InvalidState }; }
-		if (!state.state.configData.base.isEmpty()) {
-			const auto base = FindBase(state.state); if (!base) { return { base.status }; }
-			const auto retained = StoreObject(u"record"_q, base.staged); if (!retained) { return retained; }
+		if (_journal->mode == SyncCarryMode::RepairMark) {
+			if (*bytes != _stateFile.bytes || hash != _journal->stateHash || _journal->source != _journal->target) { return { SyncStoreStatus::Changed }; }
+			const auto barrier = WitnessState(hash);
+			if (barrier != SyncStoreStatus::Ready) { return Fail(barrier); }
+		} else {
+			if (!state.state.configData.base.isEmpty()) {
+				const auto base = FindBase(state.state); if (!base) { return { base.status }; }
+				const auto retained = StoreObject(u"record"_q, base.staged); if (!retained) { return retained; }
+			}
+			const auto status = WriteSyncDurableFile(_directory + u"/state.json"_q, *bytes, _stateFile, _fault);
+			if (status != SyncStoreStatus::Ready) { return Fail(status); }
+			_stateFile = CaptureSyncPrivateFile(_directory + u"/state.json"_q, kSyncCarryJournalStorageLimit);
+			if (_stateFile.status != SyncStoreStatus::Ready || _stateFile.bytes != *bytes) { return Fail(SyncStoreStatus::Changed); }
+			_local->_state = ParseSyncLocalState(*bytes).state;
 		}
-		const auto status = WriteSyncDurableFile(_directory + u"/state.json"_q, *bytes, _stateFile, _fault);
-		if (status != SyncStoreStatus::Ready) { return Fail(status); }
-		_stateFile = CaptureSyncPrivateFile(_directory + u"/state.json"_q, kSyncCarryJournalStorageLimit);
-		if (_stateFile.status != SyncStoreStatus::Ready || _stateFile.bytes != *bytes) { return Fail(SyncStoreStatus::Changed); }
-		_local->_state = ParseSyncLocalState(*bytes).state;
 	}
 	auto event = SyncCarryEvent(*_journal, SyncCarryEventKind::StateObserved);
 	event.outcome = SyncCarryOutcome::Success;
@@ -905,7 +916,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 				|| (previous.record->mark != *_journal->targetMark && (!_journal->oldMark || previous.record->mark != *_journal->oldMark))))) { return { SyncStoreStatus::InvalidState }; }
 		if (previous.record) { record = *previous.record; }
 		if (record.mark.chat != _journal->target) {
-			record.readerMembers.reset(); record.readerCreator.reset();
+			record.readerMembers.reset(); record.readerCreator.reset(); record.readerAdmin.reset(); record.readerKind.reset();
 			record.disclosedStreams.clear(); record.newReaders = false;
 		}
 	}
@@ -935,6 +946,8 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 			}
 			if (!record.readerMembers) { record.readerMembers = std::move(members); }
 		}
+		if (baseline.value(u"admin"_q).isBool() && !record.readerAdmin) { record.readerAdmin = baseline.value(u"admin"_q).toBool(); }
+		if (!record.readerKind) { record.readerKind = SyncChatKind(baseline.value(u"kind"_q).toInt()); }
 		if (baseline.value(u"creator"_q).isBool() && !record.readerCreator) { record.readerCreator = baseline.value(u"creator"_q).toBool(); }
 		record.newReaders = record.newReaders || transport.value(u"reader_warning"_q).toBool()
 			|| transport.value(u"pending_reader_warning"_q).toBool();

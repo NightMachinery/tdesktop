@@ -380,3 +380,15 @@ Host fixtures compile the actual core/TL adapters and worker controller, and
 port the literal shared-controller transport body with a synthetic sender.
 They do not execute a Telegram request. Full canonical qualification is deferred
 to the final landing batch by the owner's velocity rule.
+
+## Lost recovery
+
+The bound-account recovery controls (Create, Choose, Mark this chat again and
+Retry recovery) stay constant OFF, including nested confirmations. They never
+fall through to fresh setup. The serialized host-injected flow resolves the
+original account and opening before provisioning and Carry. Same-chat repair is
+core RepairMark and preserves state, binding and ledger bytes. Different-chat
+recovery requires the verified retained own base when the old source is protected
+or gone. Unknown reads stay held and Searching keeps 30/120/600 retries. See
+[sync_chat_move.md](sync_chat_move.md#lost-recovery-and-same-chat-mark-repair)
+for the admission, original-reader and recovery limits.

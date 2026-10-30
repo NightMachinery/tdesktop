@@ -259,6 +259,8 @@ PRIVATE
     purple/purple_sync_chat_setup_service.h
     purple/purple_sync_chat_setup_transport.cpp
     purple/purple_sync_chat_setup_transport.h
+    purple/purple_sync_chat_recovery.cpp
+    purple/purple_sync_chat_recovery.h
     purple/purple_sync_chat_setup.cpp
     purple/purple_sync_chat_setup.h
     purple/purple_sync_retry.h

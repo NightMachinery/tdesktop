@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_sync_chat_setup.h"
+#include "purple/purple_sync_chat_recovery.h"
 #include "purple/purple_sync_chat_consent.h"
 #include "purple/purple_sync_chat_mark_actions.h"
 #include "purple/purple_account_config.h"
@@ -47,6 +48,12 @@ struct DesktopSyncChatLease {
 	not_null<Main::Session*> session, DesktopSyncChatMoveAction &action,
 	const DesktopSyncChatMoveOffer &offer, std::optional<DesktopSyncChatPeer> peer,
 	bool cleanup, bool consent, bool removeOldMark = false);
+
+[[nodiscard]] auto ReviewSyncChatRecovery(
+	not_null<Main::Session*> session, const DesktopSyncChatSetupSnapshot &opening,
+	DesktopSyncChatRecoveryChoice choice, std::optional<DesktopSyncChatPeer> peer,
+	QString window, bool disclosed)
+-> std::optional<DesktopSyncChatRecoverySelection>;
 
 [[nodiscard]] std::vector<DesktopSyncChatStaleMark> SyncChatStaleMarksOf(not_null<Main::Session*> session);
 [[nodiscard]] bool ReviewSyncChatStaleMark(not_null<Main::Session*> session,

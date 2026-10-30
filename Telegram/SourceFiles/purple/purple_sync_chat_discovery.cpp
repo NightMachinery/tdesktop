@@ -636,6 +636,7 @@ void DesktopSyncChatDiscovery::Resolve(int64_t now) {
 				if (previous->readers.populationUnknown) next.readers = resolved.readers;
 			} else {
 				next.readers = resolved.readers;
+				if (facts && facts->facts) { next.readerKind = facts->kind; next.readerAdmin = facts->facts->admin; }
 			}
 			if (facts) {
 				if (!next.readerCreator) next.readerCreator = facts->creator;

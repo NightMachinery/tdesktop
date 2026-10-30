@@ -195,7 +195,10 @@ bool DesktopSyncChatCarryIo::Fresh(const DesktopSyncCarryFresh &fresh) const {
 		&& (!fresh.resolutionInput.cache || (fresh.resolutionInput.cacheRead != SyncChatDirectRead::Unknown
 			&& fresh.resolutionInput.cacheRead != SyncChatDirectRead::Migrated))
 		&& resolution.action == journal.expectedAction && resolution.winner == journal.expectedWinner
-		&& resolution.cache == journal.oldMark;
+		&& resolution.cache == journal.oldMark
+		&& (journal.mode != SyncCarryMode::RepairMark || journal.markAttempted
+			|| (fresh.resolutionInput.cacheRead == SyncChatDirectRead::MarkGone
+				&& ValidDesktopSyncChatIo(fresh.source) && journal.source == journal.target));
 }
 
 bool DesktopSyncChatCarryIo::PendingFresh(const DesktopSyncCarryFresh &fresh) const {
@@ -357,7 +360,8 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 	const auto verdict = _store._journal->version == 2 ? CheckSyncCarryReaders(*_store._journal, *eligible) : SyncCarryReaderVerdict::Proceed;
 	if (verdict == SyncCarryReaderVerdict::Hold
 		|| (verdict == SyncCarryReaderVerdict::WarnAndProceed
-			&& !_store._journal->deliveryAttempted && !_store._journal->markAttempted)) { return false; }
+			&& !_store._journal->deliveryAttempted && !_store._journal->markAttempted
+			&& _store._journal->mode != SyncCarryMode::RepairMark)) { return false; }
 	const auto readers = _store._journal->readerBaseline.value_or(eligible->readers);
 	auto snapshot = QJsonObject{ {u"members"_q, Members(fresh.target.peer)},
 		{u"members_known"_q, fresh.target.peer.readerMembers.has_value()},
@@ -409,7 +413,8 @@ bool DesktopSyncChatCarryIo::Readers(QJsonObject &transport, const DesktopSyncCa
 		for (const auto &name : { u"other_members"_q, u"other_admins"_q }) {
 			if ((name == u"other_members"_q ? eligible->readers.otherMembers.value_or(0) : eligible->readers.otherAdmins.value_or(0)) > previous.value(name).toString().toULongLong()) { added = true; }
 		}
-		if (added && !_store._journal->deliveryAttempted && !_store._journal->markAttempted) { return false; }
+		if (added && !_store._journal->deliveryAttempted && !_store._journal->markAttempted
+			&& _store._journal->mode != SyncCarryMode::RepairMark) { return false; }
 		if (added) { transport.insert(u"reader_warning"_q, true); }
 	}
 	return true;
