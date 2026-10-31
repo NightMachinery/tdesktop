@@ -173,7 +173,7 @@ std::optional<QJsonObject> DesktopSyncCarryTransportOf(
 		|| !result.value(u"entries"_q).isObject() || result.value(u"entries"_q).toObject().size() > 1024) { return {}; }
 	if (!CleanupShape(result.value(u"cleanup"_q),journal)) { return {}; }
 	if (result.contains(u"cleanup_settings_authorized"_q) && (!result.value(u"cleanup_settings_authorized"_q).isBool()
-		|| (result.value(u"cleanup_settings_authorized"_q).toBool() && journal.mode!=SyncCarryMode::Switch))) { return {}; }
+		|| (result.value(u"cleanup_settings_authorized"_q).toBool() && journal.mode!=SyncCarryMode::Switch && journal.mode!=SyncCarryMode::Follow))) { return {}; }
 	const auto digest = DesktopSyncCarryTransportHash(result,envelope,journal);
 	if (!digest || envelope.value(u"transport_sha256"_q).toString() != *digest) { return {}; }
 	const auto entries = result.value(u"entries"_q).toObject();
@@ -526,7 +526,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::Begin(const SyncCarryJournalStart
 		const auto prepared = PrepareState(*_local->_state); if (!prepared) { return prepared; }
 	}
 	if (cleanupSettings) {
-		if (input.mode!=SyncCarryMode::Switch || !input.operationConfirmed) { return {SyncStoreStatus::InvalidTransition}; }
+		if ((input.mode!=SyncCarryMode::Switch && input.mode!=SyncCarryMode::Follow) || !input.operationConfirmed) { return {SyncStoreStatus::InvalidTransition}; }
 		const auto transport=QJsonObject{{u"version"_q,1},{u"entries"_q,QJsonObject()},{u"cleanup_settings_authorized"_q,true}};
 		const auto hash=DesktopSyncCarryTransportHash(transport,QJsonObject{{u"account"_q,*AccountKeyText(_scope.account.environment,_scope.account.userId)},
 			{u"binding_sha256"_q,BindingHash(_scope.binding)},{u"login_authority"_q,_scope.loginAuthority}},next.journal);

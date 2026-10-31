@@ -383,7 +383,8 @@ void MoveInstall::start(std::optional<DesktopSyncChatMoveDraft> draft) {
 	begin.loginAuthority = DesktopSyncCarryLogin(scope.loginAuthority);
 	begin.oldRead = SyncChatDirectRead::Valid; begin.sourceAccess = SyncCarrySourceAccess::Readable;
 	auto opening = DesktopSyncCarryOpening{SerializeSyncLocalState(*begin.state).canonical,
-		CaptureSyncPrivateFile(scope.cacheFile, 65536).bytes, cleanup && mode == SyncCarryMode::Switch};
+		CaptureSyncPrivateFile(scope.cacheFile, 65536).bytes,
+		cleanup && (mode == SyncCarryMode::Switch || mode == SyncCarryMode::Follow)};
 	if (draft) {
 		CHECK(draft->opening.stateImage == opening.state && draft->opening.cacheImage == opening.cache);
 		CHECK(draft->opening.scope.settingsChat == source && draft->selection.peer->chat == target);
@@ -740,12 +741,15 @@ void MoveSimultaneous(bool sameChat) {
 	++MoveRaces;
 }
 
-void MoveChain() {
-	MoveCase = u"O-N1-N2-offline-follow"_q;
+// The offline install follows with its own late post in O: Cleanup at its start decides whether
+// that copied post is deleted from O, and the Follow finishes either way.
+void MoveChain(bool cleanup) {
+	MoveCase = cleanup ? u"O-N1-N2-offline-follow"_q : u"O-N1-N2-offline-follow-cleanup-off"_q;
 	std::printf("MOVE_CASE seed=%u case=%s\n", MoveSeed, qPrintable(MoveCase));
 	auto cloud = MoveCloud();
 	auto first = MoveInstall(cloud, 0);
 	auto offline = MoveInstall(cloud, 2, MoveOld, MoveSecond, SyncCarryMode::Follow);
+	offline.cleanup = cleanup;
 	first.cleanup = false;
 	first.start(); first.run(); first.done();
 	const auto firstMark = *first.progress.journal->targetMark;
@@ -777,6 +781,7 @@ void MoveChain() {
 	offline.duplicates = true; offline.start(); MoveTo(offline, SyncCarryJournalAction::VerifyDestination);
 	CHECK(cloud.sends == sends + 1 && cloud.contains(MoveSecond, lateHash) && cloud.find(MoveOld, 999));
 	MoveRequire(offline.progress.journal && offline.progress.journal->plan, "Follow plan persisted");
+	CHECK(offline.progress.journal->plan->cleanup == (cleanup ? SyncCarryCleanup::OwnLatePosts : SyncCarryCleanup::None));
 	CHECK(std::any_of(offline.progress.journal->plan->forwards.begin(), offline.progress.journal->plan->forwards.end(), [&](const auto &reference) {
 		return reference.messageId == 999 && reference.recordHash == lateHash;
 	}));
@@ -787,9 +792,9 @@ void MoveChain() {
 	CHECK(cloud.contains(MoveSecond, lateHash));
 	CHECK(offline.state().config.seq == 2 && offline.state().config.confirmedSeq == 2);
 	cloud.conserved(MoveSecond);
-	CHECK(!cloud.find(MoveOld, 999));
+	CHECK(cloud.find(MoveOld, 999).has_value() == !cleanup);
 	CHECK(cloud.find(MoveOld, 20).has_value());
-	CHECK(cloud.deletes == 1 && cloud.marks == 2);
+	CHECK(cloud.deletes == int(cleanup) && cloud.marks == 2);
 	++MoveRaces;
 }
 
@@ -943,7 +948,7 @@ int main(int argc, char **argv) {
 	auto worker = std::thread([&] {
 		try {
 			if (scenario != u"races"_q) { MoveMatrix(false); MoveMatrix(true); }
-			if (scenario != u"matrix"_q) { MoveSimultaneous(false); MoveSimultaneous(true); MoveChain(); MoveGone(); MoveConsecutive(); MovePlanGone(); MovePlanAffirmativeGone(); MoveProtectedPlan(); }
+			if (scenario != u"matrix"_q) { MoveSimultaneous(false); MoveSimultaneous(true); MoveChain(true); MoveChain(false); MoveGone(); MoveConsecutive(); MovePlanGone(); MovePlanAffirmativeGone(); MoveProtectedPlan(); }
 		} catch (const std::exception &error) {
 			std::fprintf(stderr, "MOVE EXCEPTION seed=%u case=%s: %s\n", MoveSeed, qPrintable(MoveCase), error.what());
 			++Failures;

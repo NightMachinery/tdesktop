@@ -51,9 +51,7 @@ bool Provisioned(const std::optional<DesktopSyncChatCreateJournal> &journal,
 bool SendCarry(const std::shared_ptr<DesktopSyncChatCarryTransportBox> &box, Fn<void(Fn<void()>)> main,
 		const Fn<bool(DesktopSyncChatCarrySwitch)> &activated, DesktopSyncCarryCommand command,
 		std::shared_ptr<std::atomic<bool>> live, Fn<void(DesktopSyncCarryReply)> done) {
-	if (!box || !box->transport.send || !live->load()) { return false; }
-	if ((command.cleanupPermit || command.cleanupRead)
-		&& (!activated || !activated(DesktopSyncChatCarrySwitch::Cleanup))) { return false; }
+	if (!box || !box->transport.send || !live->load() || !DesktopSyncChatCarryCommandAllowed(command, activated)) { return false; }
 	const auto weak = std::weak_ptr<DesktopSyncChatCarryTransportBox>(box);
 	box->transport.send(command, [=](DesktopSyncCarryReply reply) mutable {
 		main([=]() mutable {
@@ -146,6 +144,11 @@ bool DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch value) {
 	case DesktopSyncChatCarrySwitch::Recovery: return DesktopSyncChatRecoveryActivated();
 	}
 	return false;
+}
+
+bool DesktopSyncChatCarryCommandAllowed(const DesktopSyncCarryCommand &command,
+		const Fn<bool(DesktopSyncChatCarrySwitch)> &activated) {
+	return !(command.cleanupPermit || command.cleanupRead) || (activated && activated(DesktopSyncChatCarrySwitch::Cleanup));
 }
 
 SyncChatCarryStoreScope DesktopSyncChatCarryStoreScope(const DesktopSyncChatSetupSnapshot &opening) {
@@ -689,6 +692,7 @@ bool DesktopSyncChatCarryOwner::follow(DesktopSyncChatConsentSelection selection
 	port.cancel = [main = _host.main, weak = std::weak_ptr<DesktopSyncChatCarryTransportBox>(box)] {
 		main([weak] { if (const auto box = weak.lock()) { box->cancel(); } });
 	};
+	port.cleanup = _host.activated(DesktopSyncChatCarrySwitch::Cleanup);
 	_active->consent = std::make_unique<DesktopSyncChatConsentFlow>(std::move(selection), std::move(port));
 	_active->consent->start();
 	return true;

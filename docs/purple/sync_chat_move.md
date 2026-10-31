@@ -473,7 +473,11 @@ no whole-channel or history deletion builder.
 AllSettings needs the accepted cleanup checkbox; Saved Messages starts unticked
 and retains the older-build warning. The old mark has a separate unchecked
 choice, stored in the core's `removeOldMarkAuthorized`. Follow selects only the
-core's OwnLatePosts outside Saved Messages. Fill grants no cleanup. Ordinary
+core's OwnLatePosts outside Saved Messages, and only when the owner admitted it
+with Cleanup ON. `Begin` records that admission in the journal's transport
+authority (`cleanup_settings_authorized`), as it does for a move's accepted
+cleanup. A Follow without it plans no cleanup stage and leaves its late posts in
+O. Fill grants no cleanup. Ordinary
 messages, legacy settings.toml documents, foreign records, changed bytes/dates,
 other installs' late posts and records without N coverage are not broadened into
 cleanup candidates.
@@ -501,7 +505,8 @@ Confirmed results survive restart and partial completion; Skip passes them to
 core SkipCleanup so only remaining references are abandoned.
 
 Progress says “Moved; old settings cleanup is incomplete” while a durable hold
-remains. Retry and confirmed Skip stay available after I/O failure, uncertain
+remains. A run that planned no cleanup still passes the core's Cleanup phase for
+its final readback; its progress reports no pending cleanup. Retry and confirmed Skip stay available after I/O failure, uncertain
 responses and slow renewal. Remembered phase/counts are presentation only;
 recovery reopens and validates the actual journal and committed state/cache.
 Only a first start compares the original chooser's exact file images. A failed

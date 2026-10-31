@@ -181,9 +181,15 @@ void CleanupFlows() {
 
 void CleanupPoliciesAndSavedResult() {
 	for(const auto date:{200,201}) {
-		auto h=CleanupHarness(false,false,SyncCarryMode::Follow,true,date);
+		auto h=CleanupHarness(true,false,SyncCarryMode::Follow,true,date);
 		CHECK(h.f.progress.journal->plan->cleanup==SyncCarryCleanup::OwnLatePosts);
 		h.finish(); CHECK(h.f.progress.terminal && h.deletes==int(date>200));
+	}
+	{
+		// A Follow opened without Cleanup plans no stage for its late post and finishes.
+		auto h=CleanupHarness(false,false,SyncCarryMode::Follow,true,201);
+		CHECK(h.f.progress.journal->plan->cleanup==SyncCarryCleanup::None);
+		h.finish(); CHECK(h.f.progress.terminal && h.deletes==0 && !h.f.progress.cleanup.pending);
 	}
 	for(const auto mode:{SyncCarryMode::Follow,SyncCarryMode::Fill}) {
 		auto h=CleanupHarness(false,false,mode,false);

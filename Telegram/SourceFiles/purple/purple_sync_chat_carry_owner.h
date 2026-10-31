@@ -10,6 +10,9 @@ namespace Purple {
 // The five independent feature switches an owner consults.
 enum class DesktopSyncChatCarrySwitch { Move, FollowFill, MarkRemoval, Cleanup, Recovery };
 [[nodiscard]] bool DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch value);
+// The owner's transport guard: a cleanup read or delete goes out only while Cleanup is ON.
+[[nodiscard]] bool DesktopSyncChatCarryCommandAllowed(const DesktopSyncCarryCommand &command,
+	const Fn<bool(DesktopSyncChatCarrySwitch)> &activated);
 
 enum class DesktopSyncChatCarryKind { None, Resume, Move, Follow, Recovery, Mark };
 

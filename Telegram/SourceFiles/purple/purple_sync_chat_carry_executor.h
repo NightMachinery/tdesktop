@@ -8,6 +8,7 @@ namespace Purple {
 struct DesktopSyncCarryOpening {
 	QByteArray state;
 	QByteArray cache;
+	// Cleanup as the owner admitted the run: a move's accepted settings cleanup, or a Follow's own late posts.
 	bool cleanupSettings = false;
 };
 

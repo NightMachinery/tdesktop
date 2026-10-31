@@ -79,6 +79,11 @@ QString Refusal(SyncChatRefusal refusal) {
 QString FollowFillDisclosure(const DesktopSyncChatFollowOffer &offer, const QString &chat) {
 	auto text = (offer.firstPost ? tr::lng_purple_chat_fill_disclosure(tr::now)
 		: tr::lng_purple_chat_follow_disclosure(tr::now)).arg(chat);
+	// A Follow out of an explicit old chat deletes its copied late posts when Cleanup is ON, the switch the
+	// owner reads when Follow is pressed.
+	if (offer.action == SyncChatAction::Follow && offer.source != PeerToken{} && DesktopSyncChatCleanupActivated()) {
+		text += u" "_q + tr::lng_purple_chat_follow_cleanup_disclosure(tr::now);
+	}
 	text += u"\n"_q + tr::lng_purple_chat_settings_reader_warning(tr::now)
 		+ u"\n"_q + tr::lng_purple_chat_settings_disclosure(tr::now).arg(chat)
 		+ u"\n"_q + tr::lng_purple_chat_cloud_disclosure(tr::now);
@@ -147,7 +152,8 @@ QString StatusText(Main::Session &session,
 			: status.reason == u"sync-paused-here"_q
 			? tr::lng_purple_chat_paused_here(tr::now)
 			: status.reason == u"follow-required"_q || status.reason == u"fill-required"_q
-			? tr::lng_purple_chat_change_disabled(tr::now)
+			? (DesktopSyncChatFollowFillActivated() ? tr::lng_purple_chat_follow_required(tr::now)
+				: tr::lng_purple_chat_change_disabled(tr::now))
 			: tr::lng_purple_chat_check_failed(tr::now));
 	}
 	if (status.postingHeld) {
@@ -221,7 +227,9 @@ QString CarryText(const DesktopSyncChatCarryState &state) {
 	} else if (phase == SyncCarryPhase::Done) {
 		return state.kind == Kind::Follow ? tr::lng_purple_chat_follow_done(tr::now)
 			: state.kind == Kind::Recovery ? tr::lng_purple_chat_recovery_done(tr::now)
-			: tr::lng_purple_chat_move_complete(tr::now);
+			: carry->journal->plan && carry->journal->plan->cleanup != SyncCarryCleanup::None
+			? tr::lng_purple_chat_move_complete(tr::now)
+			: tr::lng_purple_chat_move_done(tr::now);
 	} else if (reason == u"sync-paused-here"_q) {
 		return tr::lng_purple_chat_paused_here(tr::now);
 	} else if (reason == u"carry-retry-required"_q) {
@@ -568,6 +576,7 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 		confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
 			tr::lng_purple_chat_move_disclosure(tr::now).arg(
 				Title(*state->session.get(), state->opening->scope.settingsChat), chosen.title)
+				+ (OffersCleanup(*state) ? u" "_q + tr::lng_purple_chat_move_cleanup_disclosure(tr::now) : QString())
 				+ u"\n\n"_q + disclosure, st::boxLabel));
 		const auto removeMark = DesktopSyncChatCleanupActivated()
 			? confirmation->addRow(object_ptr<Ui::Checkbox>(confirmation,
@@ -1033,8 +1042,9 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 			box->uiShow()->showBox(Box(MoveBox, session, state->current));
 		});
 	} else {
-		box->addRow(object_ptr<Ui::FlatLabel>(box,
-			tr::lng_purple_chat_change_disabled(tr::now), st::boxLabel));
+		box->addRow(object_ptr<Ui::FlatLabel>(box, DesktopSyncChatMoveActivated()
+			? tr::lng_purple_chat_change_unavailable(tr::now)
+			: tr::lng_purple_chat_change_disabled(tr::now), st::boxLabel));
 	}
 	if (!moving && state->opening && DesktopSyncChatRecoveryHeld(*state->opening).isEmpty()) {
 		if (!DesktopSyncChatRecoveryActivated()) {

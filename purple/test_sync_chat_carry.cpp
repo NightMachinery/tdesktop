@@ -44,6 +44,7 @@ struct ExecutorFiles {
 	int pendingPosts = 0;
 	bool unknownDelivery = false;
 	bool unknownMark = false;
+	int sourceDate = 100; // the source settings record's date; N's Follow mark is dated 200
 	SyncCarryMode mode;
 
 	explicit ExecutorFiles(bool own = false, SyncCarryMode mode = SyncCarryMode::Switch, bool pending = false)
@@ -138,7 +139,7 @@ struct ExecutorFiles {
 		actions.push_back(command.action);
 		auto result = DesktopSyncCarryReply(); result.command = command; result.outcome = SyncCarryOutcome::Success;
 		result.fresh = fresh; result.access = own ? SyncCarrySourceAccess::Protected : SyncCarrySourceAccess::Readable;
-		result.source = CarryInventory(fresh.source,original);
+		result.source = InventoryRows(fresh.source,{Receipt(fresh.source,original,10,sourceDate)});
 		if (!own && pending && (pendingPresent || pendingPosts)) {
 			result.source=InventoryRows(fresh.source,{Receipt(fresh.source,original,10),Receipt(fresh.source,RecordBytes(2),11)});
 		}

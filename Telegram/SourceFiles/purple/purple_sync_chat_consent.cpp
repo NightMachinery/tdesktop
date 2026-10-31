@@ -212,8 +212,9 @@ public:
 			}
 		});
 		if (!live()) { close(); return; }
+		const auto cleanup = port.cleanup && input.mode == SyncCarryMode::Follow;
 		if (engine) { engine->open(std::move(input), peer, selection.offer.stream,
-			DesktopSyncCarryOpening{selection.opening.stateImage, selection.opening.cacheImage}); }
+			DesktopSyncCarryOpening{selection.opening.stateImage, selection.opening.cacheImage, cleanup}); }
 	}
 	void dispatch(DesktopSyncCarryCommand command) {
 		if (!live()) { close(); return; }

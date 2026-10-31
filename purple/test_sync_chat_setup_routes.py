@@ -92,6 +92,19 @@ assert 'action.confirm(offer, *fresh, std::move(peer), cleanup, consent, std::mo
 assert 'status.reason;' not in ui
 print('T5d move UI: shared eligibility, exact cleanup/confirmation, close revocation and qualification service no-dispatch PASS')
 
+# With Move or Follow/Fill ON, the setup box says what the user can do instead of the OFF wording.
+for sentinel in ['DesktopSyncChatFollowFillActivated() ? tr::lng_purple_chat_follow_required(tr::now)',
+                 'DesktopSyncChatMoveActivated()\n\t\t\t? tr::lng_purple_chat_change_unavailable(tr::now)']:
+    assert sentinel in ui, sentinel
+    assert sentinel not in ui.replace(sentinel, ''), 'switch-aware text negative failed'
+strings = (repo / 'Telegram/Resources/langs/purple.strings').read_text()
+held_words = r'disabled|not available|qualification|this build'
+for key in ['lng_purple_chat_follow_required', 'lng_purple_chat_change_unavailable', 'lng_purple_chat_carry_unavailable']:
+    value = re.search('"' + key + '" = "([^"]*)";', strings).group(1)
+    assert not re.search(held_words, value, re.I), key
+assert re.search(held_words, re.search('"lng_purple_chat_change_disabled" = "([^"]*)";', strings).group(1)), 'held-word negative failed'
+print('T5d switch-aware texts: Follow required, Change unavailable and held carry say nothing about a held build PASS')
+
 
 def move_cleanup_warning(source, target):
     begin = source.index('void AcceptMove(')

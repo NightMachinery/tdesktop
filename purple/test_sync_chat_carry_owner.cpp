@@ -147,6 +147,8 @@ struct OwnerHarness {
 	DesktopSyncChatCarryState state;
 	std::vector<DesktopSyncChatCarryKind> settled;
 	std::vector<QString> reasons;
+	int cleanupPhaseStates = 0;
+	int cleanupPendingStates = 0;
 	bool live = true;
 	bool transportReady = true;
 	bool holdReply = false;
@@ -155,6 +157,7 @@ struct OwnerHarness {
 	bool cleanupShape = false;
 	bool badCleanupRead = false;
 	std::set<int> removed;
+	std::vector<DesktopSyncCarryCommand> commands; // as the transport received them
 	int cleanupDeletes = 0;
 	int cleanupApplied = 0;
 	int cleanupReads = 0;
@@ -178,9 +181,14 @@ struct OwnerHarness {
 	std::unique_ptr<DesktopSyncChatSetupFlow> setup; // worker thread only
 	DesktopSyncChatProvisionDone provided;
 
-	explicit OwnerHarness(SyncCarryMode mode = SyncCarryMode::Switch, bool lost = false, bool cleanup = false)
-	: files(false, mode), cleanupShape(cleanup) {
+	explicit OwnerHarness(SyncCarryMode mode = SyncCarryMode::Switch, bool lost = false, bool cleanup = false, bool late = false)
+	: files(late, mode), cleanupShape(cleanup) {
 		files.engine.reset();
+		if (late) {
+			// An explicit old chat, not Saved Messages, whose settings post is this install's and newer than N's mark.
+			files.own = false; files.sourceDate = 300;
+			files.fresh.source.peer.facts->protectedContent = false;
+		}
 		if (cleanup) {
 			// The cleanup test's shape: the old mark and the settings record are different messages.
 			files.fresh.source.peer.facts->protectedContent = false;
@@ -248,7 +256,7 @@ struct OwnerHarness {
 			if (!transportReady) { return transport; }
 			transport.send = [this, renewal](DesktopSyncCarryCommand command, Fn<void(DesktopSyncCarryReply)> done) {
 				if (SyncStoreWorkerThread()) { wrongThread = true; }
-				++sends; renewEffects(renewal, std::move(command), 0, std::move(done));
+				++sends; commands.push_back(command); renewEffects(renewal, std::move(command), 0, std::move(done));
 			};
 			transport.cancel = [this] { if (SyncStoreWorkerThread()) { wrongThread = true; } ++transportCancels; };
 			transport.applyUpdates = [this](const MTPUpdates &) { if (SyncStoreWorkerThread()) { wrongThread = true; } ++applied; };
@@ -265,6 +273,8 @@ struct OwnerHarness {
 		host.changed = [this](const DesktopSyncChatCarryState &value) {
 			state = value;
 			if (!value.reason.isEmpty() && (reasons.empty() || reasons.back() != value.reason)) { reasons.push_back(value.reason); }
+			if (value.carry && value.carry->journal && value.carry->journal->phase == SyncCarryPhase::Cleanup) { ++cleanupPhaseStates; }
+			if (value.carry && value.carry->cleanup.pending) { ++cleanupPendingStates; }
 			if (value.carry && (value.carry->journal || value.carry->command)) { files.progress = *value.carry; }
 		};
 		host.settled = [this](DesktopSyncChatCarryKind kind) { settled.push_back(kind); if (onSettled) { onSettled(); } };
@@ -281,7 +291,7 @@ struct OwnerHarness {
 		return reply;
 	}
 	void cleanupRead(DesktopSyncCarryReply &reply) {
-		reply.source = InventoryRows(files.fresh.source, {Receipt(files.fresh.source, files.original, 10, 100)});
+		reply.source = InventoryRows(files.fresh.source, {Receipt(files.fresh.source, files.original, 10, files.sourceDate)});
 		if (!reply.command.cleanupRead) { return; }
 		const auto &item = reply.command.cleanupRead->item;
 		++cleanupReads;
@@ -649,6 +659,47 @@ void FollowAndPause() {
 	}
 }
 
+// A Follow from the late-post fixture cleans up only under the Cleanup the owner admitted it with:
+// ON deletes exactly that copied post; OFF plans no cleanup stage, reads and deletes nothing and
+// leaves nothing pending, so a held switch never strands the run in cleanup.
+void LateFollow(bool held) {
+	auto h = OwnerHarness(SyncCarryMode::Follow, false, true, true);
+	if (held) { h.on.erase(DesktopSyncChatCarrySwitch::Cleanup); }
+	const auto cleanup = h.on.contains(DesktopSyncChatCarrySwitch::Cleanup);
+	CHECK(h.files.initial.chat != PeerToken{} && h.files.fresh.source.peer.chat == h.files.initial.chat);
+	auto action = DesktopSyncChatConsentAction(h.frame, u"window-A"_q, [] { return true; }, [] { return true; });
+	const auto offer = action.offer(h.files.fresh.target.peer, u"config"_q); Must(offer);
+	const auto selection = action.accept(*offer, h.frame, h.files.fresh.target.peer, DesktopSyncChatConsentChoice::Proceed, true); Must(selection);
+	CHECK(h.owner->follow(*selection)); h.drain();
+	if (!h.done()) { std::fprintf(stderr, "Late Follow cleanup=%d: %s\n", int(cleanup), qPrintable(h.state.reason)); }
+	CHECK(h.done() && !h.owner->busy() && !h.wrongThread && h.unrenewed == 0);
+	CHECK(std::find(h.reasons.begin(), h.reasons.end(), u"cleanup-held"_q) == h.reasons.end());
+	if (!h.done()) { return; }
+	const auto &journal = *h.state.carry->journal;
+	CHECK(journal.plan && journal.plan->cleanup == (cleanup ? SyncCarryCleanup::OwnLatePosts : SyncCarryCleanup::None));
+	CHECK(!h.state.carry->cleanup.pending && !h.state.carry->cleanup.skipped);
+	CHECK(!h.owner->latest() || !h.owner->latest()->cleanup.canAct);
+	// Both runs pass the core's Cleanup phase; only the one with a cleanup stage ever reports it pending.
+	CHECK(h.cleanupPhaseStates > 0 && (h.cleanupPendingStates > 0) == cleanup);
+	if (cleanup) {
+		CHECK(h.cleanupReads > 0 && h.cleanupDeletes == 1 && h.cleanupApplied == 1 && h.removed == std::set<int>{10});
+	} else {
+		CHECK(h.cleanupReads == 0 && h.cleanupDeletes == 0 && h.cleanupApplied == 0 && h.removed.empty());
+	}
+	// The transport guard is unchanged: under Cleanup OFF it refuses exactly the cleanup commands.
+	auto removals = 0;
+	for (const auto &command : h.commands) {
+		const auto removal = bool(command.cleanupPermit || command.cleanupRead);
+		removals += int(removal);
+		CHECK(DesktopSyncChatCarryCommandAllowed(command, [&](DesktopSyncChatCarrySwitch value) { return h.on.contains(value); }));
+		CHECK(DesktopSyncChatCarryCommandAllowed(command, [](DesktopSyncChatCarrySwitch value) {
+			return value != DesktopSyncChatCarrySwitch::Cleanup;
+		}) == !removal);
+	}
+	CHECK(!h.commands.empty() && (removals > 0) == cleanup);
+	std::printf("LATE FOLLOW cleanup=%d reads=%d deletes=%d\n", int(cleanup), h.cleanupReads, h.cleanupDeletes);
+}
+
 void Recovery() {
 	auto h = OwnerHarness(SyncCarryMode::RepairMark, true);
 	CHECK(DesktopSyncChatRecoveryHeld(h.frame).isEmpty());
@@ -748,7 +799,8 @@ void Builders() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv); std::setbuf(stdout, nullptr);
 	CHECK(!SyncStoreWorkerThread());
-	Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); FollowAndPause(); Recovery(); Marks();
+	Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); FollowAndPause(); LateFollow(false); LateFollow(true);
+	Recovery(); Marks();
 	std::printf("CARRY OWNER %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

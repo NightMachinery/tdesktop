@@ -104,7 +104,9 @@ void DesktopSyncChatCarry::publish(QString reason, SyncChatCarryStorageResult va
 	}
 	if (!progress.journal) { progress.journal = _rememberedJournal; }
 	progress.command = _command;
-	if (progress.journal) { progress.cleanup = DesktopSyncChatCleanupProgressOf(*progress.journal,_command.has_value(),_cleanupConfirmed,_cleanupUncopied); }
+	// A run that planned no cleanup still passes the core's Cleanup phase for its final readback. That is not a
+	// pending cleanup, so it reports none and offers no cleanup Retry or Skip.
+	if (progress.journal && progress.journal->plan && progress.journal->plan->cleanup != SyncCarryCleanup::None) { progress.cleanup = DesktopSyncChatCleanupProgressOf(*progress.journal,_command.has_value(),_cleanupConfirmed,_cleanupUncopied); }
 	progress.absent = value.status == SyncStoreStatus::Ready && _store && _store->Current() && !_store->journal();
 	if (progress.terminal || progress.absent) { retire(); }
 	if (_progress) { _progress(std::move(progress)); }
@@ -262,9 +264,11 @@ void DesktopSyncChatCarry::plan(const DesktopSyncCarryReply &reply) {
 	}
 	const auto authority=DesktopSyncCarryTransportOf(_store->_envelope,journal);
 	if (!authority) { publish(u"cleanup-authorization-held"_q); return; }
+	// Both cleanups need Cleanup as the owner admitted the run, which Begin recorded; a Follow without it
+	// plans no cleanup stage, so its late posts stay and nothing waits on a held switch.
 	if (journal.mode==SyncCarryMode::Switch && authority->value(u"cleanup_settings_authorized"_q)==QJsonValue(true)) {
 		input.cleanup=SyncCarryCleanup::AllSettings; input.cleanupAuthorized=true;
-	} else if (journal.mode==SyncCarryMode::Follow && journal.source!=PeerToken{}) {
+	} else if (journal.mode==SyncCarryMode::Follow && journal.source!=PeerToken{} && authority->value(u"cleanup_settings_authorized"_q)==QJsonValue(true)) {
 		input.cleanup=SyncCarryCleanup::OwnLatePosts; input.cleanupAuthorized=true;
 	}
 	input.oldInventory = source.value_or(SyncCarryInventory{journal.account, journal.source, false, {}});

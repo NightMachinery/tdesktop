@@ -76,15 +76,26 @@ Resume unfinished change, and the next startup resumes it.
 
 - Change sync chat: Continue reviews the choice, then starts the move. Choosing a
   new channel creates it first (provision only), then moves into it.
-  The cleanup choices and the Saved Messages cleanup warning appear only for an
-  ordinary move with Cleanup ON, because only that move sends them.
+  The cleanup choices, the Saved Messages cleanup warning and the confirmation's
+  sentence about removal appear only for an ordinary move with Cleanup ON,
+  because only that move sends them. Where no Change button is offered, the
+  screen says Change appears once the account uses a confirmed sync chat and no
+  other change runs (Move ON), or that changing is disabled (Move OFF).
 - Lost recovery: Create, Choose and Mark this chat again start the recovery flow.
   It leaves the lost chat alone, so it offers no cleanup.
 - Follow: shown when resolution asks to Follow or Fill. It reads the winner's
   readers, shows the disclosure, and offers Follow, Pause sync here or Cancel.
+  The owner captures Cleanup when it admits the Follow. Only with Cleanup ON does
+  a Follow out of a chat other than Saved Messages delete this device's own
+  settings posts that it copied from the old chat; with Cleanup OFF it leaves
+  them and finishes with no cleanup step. The Follow disclosure says those posts
+  are deleted exactly when that can happen. With Follow/Fill ON, the status says
+  the account has a newer sync chat and points to Follow.
 - Remove older Purple mark: removes only the confirmed row.
-- Old settings cleanup: shown while a move's cleanup is pending. Retry reads
-  again; Skip asks for confirmation first.
+- Old settings cleanup: shown while a planned cleanup is pending. Retry reads
+  again; Skip asks for confirmation first. A run that planned no cleanup still
+  passes the core's Cleanup phase for its final readback, but reports nothing
+  pending, so it shows neither this row nor the cleanup-pending status.
 - Retry: retries the running carry's step. A move that has committed changes the
   fingerprint the window opened with, so Retry uses the carry's own authority.
 - Check again does nothing while this window's carry runs, because it closes the
@@ -107,7 +118,9 @@ is held for qualification appear only while that switch is OFF.
   answering, and answers Unknown without a permit. It covers moves
   into an existing chat and a new channel, cleanup ON and OFF, Skip and Retry,
   refusals, closing the window (including a late reply after it), crash and quit
-  at every step boundary with startup resume, Follow and Pause, recovery, a
+  at every step boundary with startup resume, Follow and Pause, a Follow from an
+  old chat with a late post of this device's under Cleanup ON and OFF, the
+  owner's cleanup transport guard, recovery, a
   renewal answered empty when its window closes mid-hop, mark removal, and OFF
   per switch.
 - `test_sync_chat_carry_wire_routes`: the OFF guards of the wiring, with a

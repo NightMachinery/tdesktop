@@ -2,7 +2,7 @@
 from pathlib import Path
 repo=Path(__file__).resolve().parent.parent
 root=repo/'Telegram/SourceFiles/purple'
-paths={'cleanup':root/'purple_sync_chat_cleanup.cpp','worker':root/'purple_sync_chat_carry_executor.cpp','store':root/'purple_sync_chat_carry_store.cpp','ui':root/'purple_sync_chat_setup_box.cpp','decoration':root/'purple_sync_chat_setup_requests.cpp','service':root/'purple_sync_chat_carry_owner.cpp'}
+paths={'cleanup':root/'purple_sync_chat_cleanup.cpp','worker':root/'purple_sync_chat_carry_executor.cpp','store':root/'purple_sync_chat_carry_store.cpp','ui':root/'purple_sync_chat_setup_box.cpp','decoration':root/'purple_sync_chat_setup_requests.cpp','service':root/'purple_sync_chat_carry_owner.cpp','consent':root/'purple_sync_chat_consent.cpp'}
 sources={k:p.read_text() for k,p in paths.items()}
 guards=[
  ('cleanup','bool DesktopSyncChatCleanupActivated() { return false; }'),
@@ -37,7 +37,20 @@ guards=[
  ('worker','SyncCarryEventKind::SkipCleanup'),
  ('worker','accepted.deleted=*deleted; accepted.mark=_cleanup->oldMarkAbsent()'),
  ('worker','input.cleanup=SyncCarryCleanup::OwnLatePosts'),
- ('worker','cleanup_settings_authorized'),
+ ('worker','journal.mode==SyncCarryMode::Switch && authority->value(u"cleanup_settings_authorized"_q)==QJsonValue(true)'),
+ # A Follow's late-post cleanup needs the Cleanup switch as the owner admitted it, recorded by Begin.
+ ('worker','journal.source!=PeerToken{} && authority->value(u"cleanup_settings_authorized"_q)==QJsonValue(true)'),
+ ('service','port.cleanup = _host.activated(DesktopSyncChatCarrySwitch::Cleanup);'),
+ # A run without a cleanup stage reports no pending cleanup, and the texts name removal only where it can happen.
+ ('worker','progress.journal->plan->cleanup != SyncCarryCleanup::None) { progress.cleanup = DesktopSyncChatCleanupProgressOf('),
+ ('ui','offer.action == SyncChatAction::Follow && offer.source != PeerToken{} && DesktopSyncChatCleanupActivated()'),
+ ('ui','(OffersCleanup(*state) ? u" "_q + tr::lng_purple_chat_move_cleanup_disclosure(tr::now) : QString())'),
+ ('ui','carry->journal->plan->cleanup != SyncCarryCleanup::None\n\t\t\t? tr::lng_purple_chat_move_complete(tr::now)'),
+ ('consent','const auto cleanup = port.cleanup && input.mode == SyncCarryMode::Follow;'),
+ ('consent','DesktopSyncCarryOpening{selection.opening.stateImage, selection.opening.cacheImage, cleanup}'),
+ ('store','(input.mode!=SyncCarryMode::Switch && input.mode!=SyncCarryMode::Follow) || !input.operationConfirmed'),
+ ('service','|| !DesktopSyncChatCarryCommandAllowed(command, activated)) { return false; }'),
+ ('service','return !(command.cleanupPermit || command.cleanupRead) || (activated && activated(DesktopSyncChatCarrySwitch::Cleanup));'),
  ('service','!transport.applyCleanup(command.cleanupPermit->route(), *reply.cleanupResult)'),
  ('ui','if (!DesktopSyncChatCleanupActivated() || !opening.journal'),
  ('ui','if (!DesktopSyncChatCleanupActivated() || !owner'),

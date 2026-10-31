@@ -70,6 +70,8 @@ struct DesktopSyncChatConsentPort {
 	Fn<void(const DesktopSyncChatConsentSelection &, std::shared_ptr<std::atomic<bool>>, Fn<void(bool)>)> pause;
 	Fn<void(DesktopSyncCarryProgress)> status;
 	Fn<void()> cancel;
+	// The Cleanup switch, captured when the owner admitted this Follow; without it the run plans no cleanup.
+	bool cleanup = false;
 };
 
 class DesktopSyncChatConsentFlow final {

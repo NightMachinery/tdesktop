@@ -342,6 +342,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_stale" = "The account, login, Work Mode, source or sync result changed. Reopen Sync chat before continuing.";
 "lng_purple_chat_fresh_choices" = "Choose where this account keeps sync data. Existing choices below are up to 50 loaded chats, including archived chats. Each is checked with fresh full info.";
 "lng_purple_chat_change_disabled" = "Changing an existing or bound sync stream is disabled. Setup requires a complete, empty, unbound stream.";
+"lng_purple_chat_change_unavailable" = "Change sync chat appears here once this account uses a confirmed sync chat and no other change is running.";
+"lng_purple_chat_follow_required" = "This account has a newer sync chat. Press Follow to review it before this account uses it.";
 "lng_purple_chat_qualification_held" = "Setup confirmed locally. Execution is held until native qualification is approved. Nothing was created, posted or changed on Telegram.";
 "lng_purple_chat_create_disclosure" = "Purple can create a private channel named Purple sync, with only you in it. It posts and silently pins a Purple mark, mutes the channel and archives it. Sync data is Telegram cloud data, not end-to-end encrypted.";
 "lng_purple_chat_refused_mark" = "You marked %1 as the sync chat, but Purple can't sync there: %2";
@@ -415,7 +417,8 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_chat_move_title" = "Change sync chat";
 "lng_purple_chat_move_choices" = "Choose where this account keeps its sync data next.";
-"lng_purple_chat_move_disclosure" = "Copy this account's sync data from %1 to %2, then use the new chat. The old chat itself stays. Only Purple's own settings messages and mark may be removed if you choose cleanup.";
+"lng_purple_chat_move_disclosure" = "Copy this account's sync data from %1 to %2, then use the new chat. The old chat itself stays.";
+"lng_purple_chat_move_cleanup_disclosure" = "Only Purple's own settings messages and mark may be removed if you choose cleanup.";
 "lng_purple_chat_move_cleanup" = "Remove Purple's own settings messages and mark from the old chat after the move";
 "lng_purple_chat_move_cleanup_self_warning" = "Older Purple builds still read settings from Saved Messages. Removing these messages may make them pause or offer to start over.";
 "lng_purple_chat_move_held" = "Chat moves are waiting for qualification. Nothing was created, copied, marked or removed.";
@@ -424,8 +427,10 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_move_retry" = "The move is waiting. Retry to check it again; nothing will be sent twice.";
 "lng_purple_chat_move_committed" = "Moved. Old-chat cleanup is incomplete or was skipped.";
 "lng_purple_chat_move_complete" = "Moved. The authorized cleanup is complete.";
+"lng_purple_chat_move_done" = "Moved. This account now syncs through the new chat.";
 
 "lng_purple_chat_follow_disclosure" = "Follow the sync data in %1. Your own late settings posts will be reconciled before this account switches.";
+"lng_purple_chat_follow_cleanup_disclosure" = "Once they are copied, Purple deletes those late posts from the old sync chat.";
 "lng_purple_chat_fill_disclosure" = "Copy the recovered sync data into %1 before using it. Other readers there can read the copied data.";
 "lng_purple_chat_library_reader_warning" = "This disclosure covers playlist sync and the settings messages used to recover this account's data.";
 "lng_purple_chat_follow_action" = "Follow";
@@ -448,7 +453,7 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_chat_carry_running" = "Changing this account's sync chat. Keep this window open; closing it stops after the current step.";
 "lng_purple_chat_carry_busy" = "Another sync chat change is already running for this account. Wait for it or close its window.";
-"lng_purple_chat_carry_unavailable" = "This build cannot send this change yet. The change is held and sends nothing more.";
+"lng_purple_chat_carry_unavailable" = "This change cannot be sent right now. It is held and sends nothing more.";
 "lng_purple_chat_carry_stopped" = "The change stopped. Copies already delivered stay; nothing will be sent twice.";
 "lng_purple_chat_carry_no_journal" = "There is no unfinished sync chat change to resume.";
 "lng_purple_chat_carry_winner_held" = "The current sync chat mark could not be confirmed. The change is held and sends nothing more.";
