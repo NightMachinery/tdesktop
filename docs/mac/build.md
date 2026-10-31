@@ -268,6 +268,11 @@ and cargo's target directory go under `RustWorkRoot`, with their own
 `RUSTUP_HOME` and `CARGO_HOME`, so `~/.rustup` is untouched. It refuses to run
 if `mac_packaged.yml` no longer pins the same commits.
 
+The generated `wallet_engine.cpp` relies on class template argument deduction
+for aggregates (P1816), which Apple clang 15 from Xcode 15.1 does not have. The
+script therefore adds one explicit deduction guide for `RustFutureHandleGuard`
+after generating the binding, and stops if that struct changes shape.
+
 `build_app.sh` searches every prefix under `local/`, and also `RustPrefix` when
 it is set, so a prefix on another volume works:
 
