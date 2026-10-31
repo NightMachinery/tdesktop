@@ -230,6 +230,9 @@ void DesktopSyncChatCarry::advance() {
 }
 
 void DesktopSyncChatCarry::plan(const DesktopSyncCarryReply &reply) {
+	if (reply.access == SyncCarrySourceAccess::ChatGone && reply.oldRead != SyncChatDirectRead::ChatGone) {
+		publish(u"source-gone-evidence-required"_q); return;
+	}
 	if (!reply.fresh || !fresh(*reply.fresh) || !reply.destination) { publish(u"fresh-plan-held"_q); return; }
 	const auto destination = DesktopSyncChatCarryInventory(*reply.destination);
 	const auto source = reply.source ? DesktopSyncChatCarryInventory(*reply.source) : std::optional<SyncCarryInventory>();

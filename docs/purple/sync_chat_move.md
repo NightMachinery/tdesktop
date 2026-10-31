@@ -1,4 +1,9 @@
 # Moving a settings sync chat: local storage
+A Plan reply classifying O as ChatGone must also carry its affirmative scoped
+old-chat direct-read result. A readable, unknown, migrated or merely missing-mark
+read cannot authorize planning without O's records. The executor holds before
+any reservation or outward effect when these two pieces of evidence disagree.
+
 
 Desktop has bounded storage, typed effect capabilities and a serialized Carry
 executor. The shared `NextSyncCarryJournalAction` selects every move phase;
