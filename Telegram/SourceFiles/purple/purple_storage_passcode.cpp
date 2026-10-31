@@ -12,13 +12,35 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QString>
 
 namespace Purple {
+namespace {
+
+[[nodiscard]] QByteArray PersianKeyboardCounterpart(
+		const QByteArray &passcode) {
+	return PersianKeyboardToEnglish(QString::fromUtf8(passcode)).toUtf8();
+}
+
+} // namespace
 
 bool TryPersianKeyboardPasscode(
 		const QByteArray &passcode,
 		Fn<bool(const QByteArray &mapped)> attempt) {
-	const auto mapped = PersianKeyboardToEnglish(
-		QString::fromUtf8(passcode)).toUtf8();
+	const auto mapped = PersianKeyboardCounterpart(passcode);
 	return (mapped != passcode) && attempt(mapped);
+}
+
+void PreferPersianKeyboardPasscode(
+		QByteArray &passcode,
+		Fn<bool(const QByteArray &candidate)> opens) {
+	if (passcode.isEmpty()) {
+		return;
+	}
+	auto mapped = PersianKeyboardCounterpart(passcode);
+	if ((mapped != passcode) && !opens(passcode) && opens(mapped)) {
+		passcode.fill('\0');
+		passcode = std::move(mapped);
+	} else {
+		mapped.fill('\0');
+	}
 }
 
 } // namespace Purple

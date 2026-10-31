@@ -106,6 +106,8 @@
      "fixtures": ["Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp"]},
     {"name": "cases-account-routing-file", "driver": "purple/test_cases.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--case", "account-routing-file"],
      "fixtures": ["Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp"]},
+    {"name": "cases-storage-passcode", "driver": "purple/test_cases.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--case", "storage-passcode"],
+     "fixtures": ["Telegram/SourceFiles/purple/tests/storage_passcode_cases.cpp"]},
     {"name": "cases-emoji-export", "driver": "purple/test_cases.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--case", "emoji-export"],
      "fixtures": ["Telegram/SourceFiles/purple/tests/emoji_export_cases.cpp"]},
     {"name": "cases-emoji-export-async", "driver": "purple/test_cases.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--case", "emoji-export-async"],

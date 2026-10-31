@@ -213,6 +213,7 @@ PRIVATE
     purple/purple_screentime_recorder.h
     purple/purple_storage_passcode.cpp
     purple/purple_storage_passcode.h
+    purple/purple_storage_passcode_wrap.cpp
     purple/purple_settings_chat.h
     purple/purple_settings_section.cpp
     purple/purple_settings_section.h

@@ -65,6 +65,13 @@ CASES = {
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtNetwork', 'AppKit'],
         'arguments': ['{fixtures}/emoji.webp'],
     },
+    'storage-passcode': {
+        # The Persian-keyboard passcode decision that storage_domain.cpp's
+        # derivation hook makes, over the real purple-core mapper.
+        'program': 'storage_passcode_cases.cpp',
+        'units': ['purple/purple_storage_passcode.cpp', 'core:purple/purple_passcode.cpp'],
+        'frameworks': ['QtCore'],
+    },
     'emoji-export': {
         'program': 'emoji_export_cases.cpp',
         'units': ['purple/purple_emoji_export_store.cpp', 'purple/purple_emoji_large.cpp', 'purple/purple_emoji_large_store.cpp', 'purple/purple_emoji_export_queue.cpp', 'purple/purple_emoji_export_worker.cpp'],
