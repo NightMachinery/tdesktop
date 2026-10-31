@@ -659,7 +659,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 			.confirm = [=] { confirm(); },
 		});
 		if (!workMode) {
-			window->sessionControllerChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
+			window->sessionControllerValue() | rpl::skip(1) | rpl::on_next([=] { cancel(); }, _pendingLifetime);
 			Core::App().domain().activeChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
 		}
 		SettingsChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);

@@ -118,7 +118,7 @@ void ShowArchiveMedia(not_null<Window::SessionController*> controller,
 				guard->closeBox();
 			}
 		});
-		controller->window().sessionControllerChanges() | rpl::on_next([=](auto) {
+		controller->window().sessionControllerValue() | rpl::skip(1) | rpl::on_next([=](auto) {
 			if (!current()) {
 				stop();
 				box->closeBox();

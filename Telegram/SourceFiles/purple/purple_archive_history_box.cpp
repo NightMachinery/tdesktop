@@ -133,7 +133,7 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 				guard->closeBox();
 			}
 		});
-		controller->window().sessionControllerChanges()
+		controller->window().sessionControllerValue() | rpl::skip(1)
 			| rpl::on_next(
 				[guard, window](Window::SessionController* now) {
 					if (guard && now != window.get()) {

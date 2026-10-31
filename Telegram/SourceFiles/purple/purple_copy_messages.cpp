@@ -371,7 +371,7 @@ void CopyBatch::start() {
 	Core::App().domain().activeChanges() | rpl::on_next([=] {
 		if (const auto strong = weak.lock()) strong->cancel();
 	}, _lifetime);
-	_window.get()->sessionControllerChanges() | rpl::on_next([=] {
+	_window.get()->sessionControllerValue() | rpl::skip(1) | rpl::on_next([=] {
 		if (const auto strong = weak.lock()) strong->cancel();
 	}, _lifetime);
 	owner->sessionDataAboutToBeCleared() | rpl::on_next([=] {

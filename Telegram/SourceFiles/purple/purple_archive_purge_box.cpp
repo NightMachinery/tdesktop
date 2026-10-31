@@ -122,7 +122,7 @@ void ShowArchivePurgeBox(not_null<Window::SessionController *> controller,
 					}
 				},
 				box->lifetime());
-		controller->window().sessionControllerChanges()
+		controller->window().sessionControllerValue() | rpl::skip(1)
 			| rpl::on_next(
 				[=](Window::SessionController *now) {
 					if (now != window.get()) {
