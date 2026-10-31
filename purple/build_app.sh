@@ -26,7 +26,7 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13}"
 # "qt" formula installed has it linked into /opt/homebrew, where CMake would
 # otherwise find it and compile against the wrong Qt version.
 #
-# There are two such prefixes. purple/build_qt.sh builds Qt 6.11.1 with
+# There are two such prefixes. purple/build_qt.sh builds Qt 6.11.2 with
 # upstream's patch set into "qt-patched"; when that exists it wins, because it
 # is the same version with the macOS rendering fixes the stock build lacks.
 # Otherwise merge_qt_prefix.py assembles Homebrew's four unlinked Qt kegs into
@@ -51,7 +51,9 @@ if [ ! -d "$QtPrefix" ]; then
     exit 1
 fi
 echo "=== Qt prefix: $QtPrefix ==="
-export CMAKE_PREFIX_PATH="$QtPrefix:/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt/openal-soft:/opt/homebrew/opt/openssl@3$(find "$LibrariesPath/local" -mindepth 1 -maxdepth 1 -type d -exec printf ':%s' {} +)"
+# Every prefix under local/ is searched, which covers build_deps.sh's and, by
+# default, build_rust_deps.sh's. RustPrefix adds a Rust prefix kept elsewhere.
+export CMAKE_PREFIX_PATH="$QtPrefix:/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt/openal-soft:/opt/homebrew/opt/openssl@3$(find "$LibrariesPath/local" -mindepth 1 -maxdepth 1 -type d -exec printf ':%s' {} +)${RustPrefix:+:$RustPrefix}"
 
 # Pins every translation unit to the Qt we configured against; see
 # make_framework_search_dir() in merge_qt_prefix.py for why this is needed and

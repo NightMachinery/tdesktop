@@ -10,6 +10,9 @@ set -e
 RepoPath="$(cd "$(dirname "$0")/.." && pwd)"
 LibrariesPath="${LibrariesPath:-$(dirname "$RepoPath")/tdesktop-libs}"
 TDE2E="${TDE2E:-51743dfd01dff6179e2d8f7095729caa4e2222e9}"
+# The commit Telegram/build/prepare/prepare.py pins. The packaged workflow
+# takes tg_owt's master instead; a pin keeps WebRTC from moving under a build.
+TgOwt="${TgOwt:-07fb35bc33b3e79125a1beab7690e830f183f5d8}"
 GIT="${GIT:-https://github.com}"
 
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13}"
@@ -31,14 +34,24 @@ if [ ! -d "$LibrariesPath/local/rnnoise" ]; then
     cd "$LibrariesPath"
 fi
 
+if [ -d "$LibrariesPath/local/tg_owt" ] \
+        && [ "$(cat "$LibrariesPath/local/tg_owt/purple-commit" 2>/dev/null)" != "$TgOwt" ]; then
+    echo "local/tg_owt is not tg_owt $TgOwt; move it aside to rebuild." >&2
+    exit 1
+fi
 if [ ! -d "$LibrariesPath/local/tg_owt" ]; then
-    echo "=== tg_owt ==="
+    echo "=== tg_owt $TgOwt ==="
     rm -rf tg_owt
-    git clone --depth=1 --recursive --shallow-submodules $GIT/desktop-app/tg_owt.git
+    git init tg_owt
     cd tg_owt
+    git remote add origin $GIT/desktop-app/tg_owt.git
+    git fetch --depth=1 origin $TgOwt
+    git reset --hard FETCH_HEAD
+    git submodule update --init --recursive --depth=1
     cmake -Bbuild . -G Ninja -DCMAKE_INSTALL_PREFIX=$LibrariesPath/local/tg_owt
     cmake --build build
     cmake --install build
+    echo "$TgOwt" > "$LibrariesPath/local/tg_owt/purple-commit"
     cd "$LibrariesPath"
 fi
 

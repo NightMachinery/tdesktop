@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Qt 6.11.1 with upstream Telegram Desktop's patch set, into a prefix
+# Builds Qt 6.11.2 with upstream Telegram Desktop's patch set, into a prefix
 # that build_app.sh and install.sh pick up in place of Homebrew's Qt.
 #
 # Why: Homebrew's qtbase is the right version and none of the patches. The set
@@ -25,20 +25,22 @@ set -e
 RepoPath="$(cd "$(dirname "$0")/.." && pwd)"
 LibrariesPath="${LibrariesPath:-$(dirname "$RepoPath")/tdesktop-libs}"
 
-QtVersion="${QtVersion:-6.11.1}"
+QtVersion="${QtVersion:-6.11.2}"
 QtTag="v$QtVersion"
 
 # Both pinned to the commits Telegram/build/prepare/prepare.py pins, not to
-# either repository's HEAD. HEAD of desktop-app/patches has moved on to
-# qtbase_6.11.2 (renumbered, 46 patches) and qt6_highsierra_patches has been
-# rebased onto 6.11.2 as well; neither set applies to 6.11.1.
-PatchesCommit="${PatchesCommit:-a17d54b63128c83cb53bd71044119e77b3a2da02}"
-HighSierraCommit="${HighSierraCommit:-4aae812a405f47553e001faf566de572d3eccd16}"
+# either repository's HEAD. Upstream v7.3.3 moved to Qt 6.11.2 and these
+# commits; the 6.11.1 pins were a17d54b6 and 4aae812a.
+PatchesCommit="${PatchesCommit:-a895fef40eaa7d66481cff542c623b039b7ce494}"
+HighSierraCommit="${HighSierraCommit:-7387476bb3b7200d3b044015696cb3c28f78593c}"
 
 QtJobs="${QtJobs:-6}"
 
-SourcePath="${SourcePath:-$LibrariesPath/qt-src}"
-BuildRoot="${BuildRoot:-$LibrariesPath/qt-build}"
+# Per version, so a bump never reuses clones or a patch stamp made for the
+# previous version. The prefix keeps one name because build_app.sh and
+# install.sh look for it; the check below refuses one of another version.
+SourcePath="${SourcePath:-$LibrariesPath/qt-src-$QtVersion}"
+BuildRoot="${BuildRoot:-$LibrariesPath/qt-build-$QtVersion}"
 Prefix="${QtPatchedPrefix:-$LibrariesPath/qt-patched}"
 
 Modules="qtbase qtshadertools qtsvg qtimageformats"
@@ -48,6 +50,13 @@ Stamp="$SourcePath/qtbase/.purple-patched"
 # lose functions qtbase still calls (QTBUG-128900) - and the app links Qt, so
 # the two have to agree with what the Homebrew build produced.
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+
+Installed="$Prefix/lib/cmake/Qt6/Qt6ConfigVersionImpl.cmake"
+if [ -f "$Installed" ] \
+        && ! command grep -q "PACKAGE_VERSION \"$QtVersion\"" "$Installed"; then
+    echo "$Prefix holds another Qt version; move it aside first." >&2
+    exit 1
+fi
 
 mkdir -p "$SourcePath" "$BuildRoot"
 
@@ -80,16 +89,26 @@ clone_patches qt6_highsierra \
 # ---------------------------------------------------------------- patches
 
 # prepare.py's order exactly: the High Sierra set first, sorted, then the
-# version's own set, sorted, all against qtbase. Applied one at a time rather
+# version's own set, sorted, all against qtbase; then the version's qtsvg set,
+# which prepare.py applies since Qt 6.11.2. Applied one at a time rather
 # than in one xargs run so that a failure names the patch that failed instead
 # of taking the whole batch down with it.
 if [ -f "$Stamp" ]; then
     echo "=== patches already applied ($(cat "$Stamp")) ==="
 else
     Failed=""
+    SvgPatches=""
+    if [ -d "$SourcePath/patches/qtsvg_$QtVersion" ]; then
+        SvgPatches="$(ls "$SourcePath/patches/qtsvg_$QtVersion"/*.patch | sort)"
+    fi
     for patch in $(ls "$SourcePath/qt6_highsierra"/*.patch | sort) \
-                 $(ls "$SourcePath/patches/qtbase_$QtVersion"/*.patch | sort); do
-        Output="$(git -C "$SourcePath/qtbase" apply -v "$patch" 2>&1)" \
+                 $(ls "$SourcePath/patches/qtbase_$QtVersion"/*.patch | sort) \
+                 $SvgPatches; do
+        case "$patch" in
+            */qtsvg_*) Module=qtsvg ;;
+            *) Module=qtbase ;;
+        esac
+        Output="$(git -C "$SourcePath/$Module" apply -v "$patch" 2>&1)" \
             && Status=0 || Status=$?
         echo "$Output" | sed "s|^|    |"
         if [ "$Status" -eq 0 ]; then

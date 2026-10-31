@@ -253,6 +253,33 @@ Once the app links, the set-aside prefix and the new clone tree under
 the rebuilt app has actually been run, not merely linked. It is the only
 rollback, and `brew cleanup` will have destroyed the matching keg.
 
+### Rust libraries (tlottie and wallet-engine)
+
+Upstream v7.3.3 links two Rust libraries, the tlottie animation renderer and
+the wallet engine, and the packaged CMake route requires them.
+`purple/build_rust_deps.sh` builds both the way upstream's
+`.github/workflows/mac_packaged.yml` does: one umbrella crate, `tdesktop_rust`,
+so a single copy of the Rust standard library ends up in the app. The script
+installs `lib/libtdesktop_rust.a`, `include/tlottie/tlottie.h`, and the
+generated `wallet_engine.hpp` and `wallet_engine.cpp` under
+`include/wallet_engine` into `RustPrefix` (default
+`../tdesktop-libs/local/tdesktop_rust`). The pinned Rust toolchain, the sources
+and cargo's target directory go under `RustWorkRoot`, with their own
+`RUSTUP_HOME` and `CARGO_HOME`, so `~/.rustup` is untouched. It refuses to run
+if `mac_packaged.yml` no longer pins the same commits.
+
+`build_app.sh` searches every prefix under `local/`, and also `RustPrefix` when
+it is set, so a prefix on another volume works:
+
+    RustWorkRoot=/Volumes/External/purple-deps/rust \
+        RustPrefix=/Volumes/External/purple-deps/tdesktop_rust \
+        purple/build_rust_deps.sh
+    RustPrefix=/Volumes/External/purple-deps/tdesktop_rust purple/build_app.sh
+
+`build_deps.sh` now pins tg_owt to prepare.py's commit (`07fb35bc` for v7.3.3)
+and records it in `local/tg_owt/purple-commit`; it stops when the installed
+tg_owt is another commit, so move the old one aside to rebuild.
+
 ### Configure and build
 
 ```bash
@@ -993,6 +1020,13 @@ change to the artwork lands as a binary conflict. Resolve it by taking upstream'
 files and re-running `recolour_icons.py`.
 
 ### Qt with upstream's patches
+
+From the v7.3.3 merge on, `build_qt.sh` defaults to Qt 6.11.2 with the pins
+upstream moved to: `desktop-app/patches` at `a895fef4`, High Sierra set at
+`7387476b`. It now also applies the version's `qtsvg_6.11.2` patches to qtsvg,
+as prepare.py does, clones into `qt-src-6.11.2` and `qt-build-6.11.2`, and stops
+if `qt-patched` still holds another version: move the 6.11.1 prefix aside first.
+The rest of this section records the 6.11.1 build as it was run.
 
 This build no longer takes Qt from Homebrew. `purple/build_qt.sh` builds
 Qt 6.11.1 from source with upstream Telegram Desktop's patch set and installs
