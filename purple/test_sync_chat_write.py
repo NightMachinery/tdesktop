@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from sync_carry_units import add_carry_units
+from sync_carry_units import add_carry_units, write_upload_current_checks
 import argparse
 import hashlib
 import json
@@ -105,8 +105,7 @@ carry_constructor = upload[carry_constructor_start:carry_constructor_end]
 post = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_post.cpp').read_text()
 automatic = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_service.cpp').read_text()
 (work / 'auto-operation.inc').write_text(block(automatic, 'DesktopSyncChatOperation AutoSession::OperationFor('))
-(work / 'upload-RequestCurrent.inc').write_text(block(upload, 'bool SyncConfigUpload::RequestCurrent('))
-(work / 'upload-Current.inc').write_text(block(upload, 'bool SyncConfigUpload::Current('))
+write_upload_current_checks(work, upload, block)
 (work / 'post-counters.inc').write_text(block(post, 'std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session, PeerToken chat = {})'))
 (work / 'post-network.inc').write_text(block(post, 'std::function<void()> BeginSyncConfigNetworkOperation(\n\t\tnot_null<Main::Session*> session,\n\t\tPeerToken chat)'))
 for method in ['SendNextPart', 'SendMedia', 'RenewBeforePost', 'ResumeEffect', 'DispatchMedia', 'OnMedia', 'Finish', 'Cancel']:

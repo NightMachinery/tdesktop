@@ -29,3 +29,9 @@ def add_carry_units(repo, build, work, objects, compiled, log):
         compiled.append(recipe)
         subprocess.run(recipe, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         objects.append(output)
+
+
+def write_upload_current_checks(work, upload, block):
+    for method in ['RequestCurrent', 'Current']:
+        (work / ('upload-' + method + '.inc')).write_text(
+            block(upload, 'bool SyncConfigUpload::' + method + '('))
