@@ -20,20 +20,6 @@
 #include <rpl/variable.h>
 #include <algorithm>
 
-namespace Core {
-
-template <>
-std::optional<QByteArray> Settings::readPrefImpl<QByteArray>(std::string_view key) {
-	return readPrefGeneric(key);
-}
-
-template <>
-void Settings::writePrefImpl<QByteArray>(std::string_view key, QByteArray value) {
-	writePrefGeneric(key, value);
-}
-
-}
-
 namespace Purple {
 namespace {
 
