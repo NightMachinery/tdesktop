@@ -2,6 +2,7 @@
 #include "purple/purple_archive_lifecycle_capture.h"
 
 #include "base/base_file_utilities.h"
+#include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
@@ -39,13 +40,17 @@ rpl::event_stream<not_null<HistoryItem*>> &SelfDestructSaveInvalidations() {
 	return result;
 }
 
+[[nodiscard]] crl::time UnixNow() {
+	return crl::time(base::unixtime::now());
+}
+
 std::optional<crl::time> SelfDestructDeadline(not_null<HistoryItem*> item) {
 	const auto selfdestruct = item->Get<HistoryServiceSelfDestruct>();
 	if (!selfdestruct) {
 		return crl::time(0);
 	}
-	const auto at = std::get_if<crl::time>(&selfdestruct->destructAt);
-	return at ? std::make_optional(*at) : std::nullopt;
+	const auto at = std::get_if<TimeId>(&selfdestruct->destructAt);
+	return at ? std::make_optional(crl::time(*at)) : std::nullopt;
 }
 
 class SelfDestructSaveMedia final
@@ -100,7 +105,7 @@ SelfDestructSaveMedia::SelfDestructSaveMedia(
 bool SelfDestructSaveMedia::active() const {
 	return parent()->Has<HistoryServiceSelfDestruct>()
 		&& _source.active(
-			parent()->media(), SelfDestructDeadline(parent()), crl::now());
+			parent()->media(), SelfDestructDeadline(parent()), UnixNow());
 }
 
 void SelfDestructSaveMedia::consume() {
@@ -281,7 +286,7 @@ bool AddSelfDestructDocumentSaveAction(
 			&& current->media()
 			&& current->media()->document() == document
 			&& source->state.active(
-				current->media(), SelfDestructDeadline(current), crl::now());
+				current->media(), SelfDestructDeadline(current), UnixNow());
 	};
 	if (active()) {
 		addAction(
