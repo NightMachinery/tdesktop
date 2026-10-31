@@ -88,7 +88,7 @@ assert 'bool DesktopSyncChatMoveActivated() { return false; }' in move
 review = service[service.index('bool ReviewSyncChatMove('):service.index('void StartSyncChatDiscovery()')]
 for forbidden in ['DesktopSyncChatCarryService', 'DesktopSyncChatSetupService', 'crl::', '.send(', 'Write', 'ReadSyncPrivateFile']:
     assert forbidden not in review, 'qualification review dispatches or performs IO'
-assert 'action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {}, removeOldMark)' in review
+assert 'action.confirm(offer, *fresh, std::move(peer), cleanup, consent, std::move(start), removeOldMark)' in review
 assert 'status.reason;' not in ui
 print('T5d move UI: shared eligibility, exact cleanup/confirmation, close revocation and qualification service no-dispatch PASS')
 
@@ -100,7 +100,7 @@ def move_cleanup_warning(source, target):
     checkbox = body.index('const auto cleanup = confirmation->addRow(')
     submit = body.index('confirmation->addButton(tr::lng_continue()')
     adjacent = body[checkbox:submit]
-    expected = '''if (state->opening->scope.settingsChat == PeerToken{}) {
+    expected = '''if (OffersCleanup(*state) && state->opening->scope.settingsChat == PeerToken{}) {
             confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
                 tr::lng_purple_chat_move_cleanup_self_warning(tr::now), st::boxLabel));
         }'''

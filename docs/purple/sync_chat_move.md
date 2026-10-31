@@ -7,9 +7,9 @@ any reservation or outward effect when these two pieces of evidence disagree.
 
 Desktop has bounded storage, typed effect capabilities and a serialized Carry
 executor. The shared `NextSyncCarryJournalAction` selects every move phase;
-Desktop supplies only durable file receipts and injected typed I/O. There is no
-production network backend, Carry screen or automatic non-Self posting in this
-slice. The foreground UI belongs to T5d and cleanup policy activation to T5g.
+Desktop supplies only durable file receipts and injected typed I/O. The setup
+screen runs carries through one owner per account, described in
+[Sync chat changes](sync_chat_wiring.md); automatic non-Self posting stays off. The foreground UI belongs to T5d and cleanup policy activation to T5g.
 
 ## Retained base format, shared by clients
 
@@ -356,8 +356,9 @@ The action captures the opening account/login/window, exact worker-published
 state bytes and admitted cache, the old chat and resolution winner. Both target
 preview and fresh acceptance use the same core eligibility predicate. The
 settings/reader/cloud disclosure is explicit even for Saved Messages. The old
-chat remains, and only the optional own-settings/mark cleanup is offered. Its
-default is off for an old Saved Messages source. In both Create and Existing
+chat remains, and only the optional own-settings/mark cleanup is offered, while
+Cleanup is ON and outside Lost recovery. Its default is off for an old Saved
+Messages source. In both Create and Existing
 confirmations, an adjacent warning explains that older Purple builds still read
 settings from Saved Messages and may pause or offer to start over if those
 messages are removed. This warning depends on the old source, never the target.
@@ -528,7 +529,8 @@ Recovery is a separate bound-account flow. Its Create, Choose, Mark this chat
 again and Retry recovery controls, public selection, click handlers and nested
 confirmation are all behind a constant OFF gate. The status remains a
 non-actionable qualification hold. Host injection qualifies the orchestration;
-there is no production recovery transport callsite or activation in this slice.
+the setup screen starts it through the carry owner
+([Sync chat changes](sync_chat_wiring.md)) and activation stays OFF.
 
 A missing mark is not a lost chat. Searching keeps the existing 30, 120 and
 600 second retries. Reconnect and explicit retry resolve again. A failed request,

@@ -436,7 +436,6 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_remove_mark" = "Remove mark";
 "lng_purple_chat_remove_mark_row" = "Remove older Purple mark in %1";
 "lng_purple_chat_remove_mark_disclosure" = "Remove only this selected older Purple mark from %1? No settings records or other messages will be removed.";
-"lng_purple_chat_remove_mark_held" = "Mark removal is waiting for qualification. Nothing was deleted.";
 
 "lng_purple_chat_cleanup_title" = "Old settings cleanup";
 "lng_purple_chat_cleanup_remove_mark" = "Also remove the old sync mark";
@@ -446,6 +445,20 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_cleanup_retry" = "Retry cleanup";
 "lng_purple_chat_cleanup_skip" = "Skip cleanup";
 "lng_purple_chat_cleanup_skip_confirm" = "Leave the remaining old settings messages and continue syncing in the new chat?";
+
+"lng_purple_chat_carry_running" = "Changing this account's sync chat. Keep this window open; closing it stops after the current step.";
+"lng_purple_chat_carry_busy" = "Another sync chat change is already running for this account. Wait for it or close its window.";
+"lng_purple_chat_carry_unavailable" = "This build cannot send this change yet. Nothing was copied, marked or removed.";
+"lng_purple_chat_carry_stopped" = "The change stopped. Copies already delivered stay; nothing will be sent twice.";
+"lng_purple_chat_carry_no_journal" = "There is no unfinished sync chat change to resume.";
+"lng_purple_chat_carry_winner_held" = "Another sync chat became the newer one while this change ran. The change is held and sends nothing more.";
+"lng_purple_chat_carry_unreadable" = "An unfinished sync chat change on this device cannot be read. Sync stays held and nothing was sent.";
+"lng_purple_chat_carry_resume" = "Resume unfinished change";
+"lng_purple_chat_follow_done" = "This account now syncs through the chosen sync chat.";
+"lng_purple_chat_recovery_done" = "Recovery finished. This account syncs through the recovered sync chat.";
+"lng_purple_chat_remove_mark_running" = "Removing the selected older mark…";
+"lng_purple_chat_remove_mark_done" = "The selected older mark was removed. Nothing else was deleted.";
+"lng_purple_chat_remove_mark_stopped" = "The mark was not removed. Nothing else was deleted.";
 
 "lng_purple_control_locked" = "Allow while locked";
 "lng_purple_control_locked_music" = "Allow music info while locked";

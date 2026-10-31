@@ -15,6 +15,7 @@
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "purple/purple_config.h"
+#include "purple/purple_sync_chat_carry_owner.h"
 #include "purple/purple_sync_chat_peer_request.h"
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_chat_setup_service.h"
@@ -90,15 +91,18 @@ QString SettingsDisclosure(const QString &chat) {
 		+ u"\n"_q + tr::lng_purple_chat_settings_disclosure(tr::now).arg(chat);
 }
 
-QString Readers(const SyncChatReaderFacts &readers, const QString &chat) {
-	const auto text = readers.populationUnknown
+QString ReaderCount(const SyncChatReaderFacts &readers) {
+	return readers.populationUnknown
 		? tr::lng_purple_chat_readers_unknown(tr::now)
 		: readers.privateRecipient ? tr::lng_purple_chat_readers_private(tr::now)
 		: readers.botOwner ? tr::lng_purple_chat_readers_bot(tr::now)
 		: tr::lng_purple_chat_readers_count(tr::now).arg(
 			QString::number(readers.otherMembers.value_or(0)),
 			QString::number(readers.otherAdmins.value_or(0)));
-	return text + u"\n"_q + SettingsDisclosure(chat)
+}
+
+QString Readers(const SyncChatReaderFacts &readers, const QString &chat) {
+	return ReaderCount(readers) + u"\n"_q + SettingsDisclosure(chat)
 		+ u"\n"_q + tr::lng_purple_chat_cloud_disclosure(tr::now);
 }
 
@@ -173,6 +177,74 @@ QString MoveNotice(DesktopSyncChatMoveNotice notice) {
 	return tr::lng_purple_chat_move_stale(tr::now);
 }
 
+// With all five carry switches OFF the account's carry service is never constructed.
+bool CarryOn() {
+	using Switch = DesktopSyncChatCarrySwitch;
+	for (const auto value : { Switch::Move, Switch::FollowFill, Switch::MarkRemoval,
+			Switch::Cleanup, Switch::Recovery }) {
+		if (DesktopSyncChatCarrySwitchActivated(value)) { return true; }
+	}
+	return false;
+}
+
+bool ResumeOn() {
+	return DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch::Move)
+		|| DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch::FollowFill)
+		|| DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch::Recovery);
+}
+
+QString CarryReason(const QString &reason) {
+	return reason.isEmpty() ? QString()
+		: u"\n"_q + tr::lng_purple_chat_setup_reason(tr::now).arg(reason);
+}
+
+QString CarryText(const DesktopSyncChatCarryState &state) {
+	using Kind = DesktopSyncChatCarryKind;
+	const auto &reason = state.reason;
+	if (state.kind == Kind::Mark) {
+		return state.removed ? tr::lng_purple_chat_remove_mark_done(tr::now)
+			: state.running ? tr::lng_purple_chat_remove_mark_running(tr::now)
+			: reason == u"mark-transport-held"_q ? tr::lng_purple_chat_carry_unavailable(tr::now)
+			: tr::lng_purple_chat_remove_mark_stopped(tr::now) + CarryReason(reason);
+	}
+	const auto &carry = state.carry;
+	const auto phase = carry && carry->journal
+		? std::make_optional(carry->journal->phase) : std::nullopt;
+	if (state.kind == Kind::None || (carry && carry->absent)) {
+		// A startup resume that found nothing says nothing; an explicit Resume says so.
+		return (state.kind == Kind::None || state.window.isEmpty()) ? QString()
+			: tr::lng_purple_chat_carry_no_journal(tr::now);
+	} else if (carry && carry->cleanup.pending) {
+		return tr::lng_purple_chat_cleanup_pending(tr::now);
+	} else if (phase == SyncCarryPhase::CleanupSkipped) {
+		return tr::lng_purple_chat_cleanup_skipped(tr::now);
+	} else if (phase == SyncCarryPhase::Done) {
+		return state.kind == Kind::Follow ? tr::lng_purple_chat_follow_done(tr::now)
+			: state.kind == Kind::Recovery ? tr::lng_purple_chat_recovery_done(tr::now)
+			: tr::lng_purple_chat_move_complete(tr::now);
+	} else if (reason == u"sync-paused-here"_q) {
+		return tr::lng_purple_chat_paused_here(tr::now);
+	} else if (reason == u"carry-retry-required"_q) {
+		return tr::lng_purple_chat_move_retry(tr::now);
+	} else if (reason == u"carry-journal-unreadable"_q) {
+		return tr::lng_purple_chat_carry_unreadable(tr::now);
+	} else if (reason == u"carry-writer-busy"_q) {
+		return tr::lng_purple_chat_carry_busy(tr::now);
+	} else if (reason == u"carry-transport-held"_q || reason == u"carry-unavailable"_q
+			|| reason == u"cleanup-held"_q) {
+		return tr::lng_purple_chat_carry_unavailable(tr::now);
+	} else if (reason == u"mark-winner-held"_q || reason == u"recovery-own-mark-held"_q) {
+		return tr::lng_purple_chat_carry_winner_held(tr::now);
+	} else if (state.running) {
+		return state.provisioned ? tr::lng_purple_chat_move_provisioned(tr::now)
+			: tr::lng_purple_chat_carry_running(tr::now);
+	} else if (!state.finished) {
+		// Held, not stopped: the operation is still this window's, and Retry checks it again.
+		return tr::lng_purple_chat_move_retry(tr::now) + CarryReason(reason);
+	}
+	return tr::lng_purple_chat_carry_stopped(tr::now) + CarryReason(reason);
+}
+
 struct Choice {
 	DesktopSyncChatSetupSelection selection;
 	QString title;
@@ -189,12 +261,18 @@ struct SetupState {
 	std::unique_ptr<DesktopSyncChatPeerRequest> request;
 	std::unique_ptr<DesktopSyncChatSetupService> service;
 	std::unique_ptr<DesktopSyncChatMoveAction> move;
+	std::unique_ptr<DesktopSyncChatConsentAction> follow;
+	std::optional<DesktopSyncChatRecoveryChoice> recovery;
+	std::optional<DesktopSyncChatCarryState> carry;
+	QString windowId;
 	QPointer<QWidget> window;
 	DesktopSyncChatSetupProgress progress;
 	Ui::RoundButton *retry = nullptr;
 	Ui::RoundButton *self = nullptr;
 	Ui::RoundButton *consent = nullptr;
 	Ui::RoundButton *check = nullptr;
+	Ui::RoundButton *cleanup = nullptr;
+	Ui::RoundButton *resume = nullptr;
 	Ui::FlatLabel *status = nullptr;
 	Ui::RoundButton *accept = nullptr;
 	size_t next = 0;
@@ -228,6 +306,81 @@ bool Current(const SetupState &state) {
 			? SyncChatSetupContextCurrent(session, state.opening->scope)
 			: fresh && fresh->run == state.opening->run
 				&& fresh->scope == state.opening->scope);
+}
+
+DesktopSyncChatCarryOwner *CarryOwner(const SetupState &state) {
+	const auto session = state.session.get();
+	return (session && CarryOn()) ? &SyncChatCarry(session).owner() : nullptr;
+}
+
+// A box shows and controls the operations it started, and a resume started at startup.
+bool OwnsCarry(const SetupState &state, const DesktopSyncChatCarryState &value) {
+	return value.kind != DesktopSyncChatCarryKind::None && (value.window == state.windowId
+		|| (value.kind == DesktopSyncChatCarryKind::Resume && value.window.isEmpty()));
+}
+
+bool CarryRunning(const SetupState &state) {
+	const auto owner = CarryOwner(state);
+	return owner && owner->busy();
+}
+
+void UpdateCarryButtons(SetupState *state) {
+	const auto owner = CarryOwner(*state);
+	const auto value = owner ? owner->state() : DesktopSyncChatCarryState();
+	const auto own = owner && owner->busy() && OwnsCarry(*state, value);
+	const auto latest = owner ? owner->latest() : std::nullopt;
+	if (state->cleanup) {
+		state->cleanup->setVisible(own && latest && latest->cleanup.pending && latest->cleanup.canAct);
+	}
+	if (state->resume) {
+		state->resume->setVisible(owner && !owner->busy() && latest && latest->journal
+			&& !latest->terminal && !latest->absent);
+	}
+	if (state->retry && own) { state->retry->setDisabled(false); }
+	if (state->accept && owner && owner->busy()) { state->accept->setDisabled(true); }
+}
+
+void ShowCarry(SetupState *state, const DesktopSyncChatCarryState &value) {
+	if (OwnsCarry(*state, value)) {
+		if (const auto text = CarryText(value); !text.isEmpty()) {
+			state->carry = value;
+			state->status->setText(text);
+		}
+	}
+	if (state->accept && value.finished && !state->service && !state->busy) {
+		state->accept->setDisabled(!Current(*state));
+	}
+	UpdateCarryButtons(state);
+}
+
+bool StartMove(SetupState *state, const DesktopSyncChatMoveDraft &draft) {
+	const auto owner = CarryOwner(*state);
+	if (!owner) { return false; }
+	if (!state->recovery) { return owner->move(draft, state->windowId); }
+	// Lost recovery creates or chooses through the same review, under its own switch.
+	auto selection = ReviewSyncChatRecovery(state->session.get(), *state->opening, *state->recovery,
+		draft.selection.peer, state->windowId, true);
+	return selection && owner->recover(std::move(*selection));
+}
+
+void OpenCleanup(not_null<Ui::GenericBox*> box, SetupState *state) {
+	const auto owner = CarryOwner(*state);
+	const auto opening = owner ? owner->latest() : std::nullopt;
+	if (!DesktopSyncChatCleanupActivated() || !owner || !opening || !owner->busy()
+		|| !OwnsCarry(*state, owner->state())) { return; }
+	const auto session = state->session;
+	const auto generation = owner->state().generation;
+	const auto live = [session, generation]() -> DesktopSyncChatCarryOwner* {
+		const auto strong = session.get();
+		if (!strong || !CarryOn()) { return nullptr; }
+		auto &owner = SyncChatCarry(strong).owner();
+		return (owner.busy() && owner.state().generation == generation) ? &owner : nullptr;
+	};
+	box->uiShow()->showBox(Box(SyncChatCleanupBox, *opening,
+		[=] { const auto owner = live(); return owner ? owner->latest() : std::nullopt; },
+		[=] { return live() != nullptr; },
+		[=] { if (const auto owner = live()) { owner->retry(); } },
+		[=](bool confirmed) { if (const auto owner = live()) { owner->skipCleanup(confirmed); } }));
 }
 
 void LoadNext(not_null<Ui::GenericBox*> box, SetupState *state);
@@ -353,9 +506,14 @@ void ConfirmStaleMark(not_null<Ui::GenericBox*> box, SetupState *state, DesktopS
 			confirmation->closeBox();
 			if (!DesktopSyncChatMarkRemovalActivated() || !weak || !Current(*state) || state->busy) { return; }
 			const auto current = [weak, state] { return weak && Current(*state) && !state->busy; };
-			ReviewSyncChatStaleMark(state->session.get(), row, current, [=](DesktopSyncChatStaleMark) {
-				state->status->setText(tr::lng_purple_chat_remove_mark_held(tr::now));
+			const auto reviewed = ReviewSyncChatStaleMark(state->session.get(), row, current, [=](DesktopSyncChatStaleMark value) {
+				const auto owner = CarryOwner(*state);
+				const auto opening = SyncChatSetupSnapshotOf(state->session.get());
+				if (!owner || !opening || !owner->removeMark(std::move(value), state->windowId, *opening)) {
+					state->status->setText(tr::lng_purple_chat_carry_busy(tr::now));
+				}
 			});
+			if (!reviewed) { state->status->setText(tr::lng_purple_chat_stale(tr::now)); }
 		});
 		confirmation->addButton(tr::lng_cancel(), [=] { confirmation->closeBox(); });
 	}));
@@ -371,6 +529,18 @@ void AddStaleMarkRows(not_null<Ui::GenericBox*> box, SetupState *state) {
 			ConfirmStaleMark(box, state, row);
 		});
 	}
+}
+
+// Cleanup choices appear only where they are sent: an ordinary move with Cleanup ON. Lost
+// recovery leaves the lost chat alone.
+bool OffersCleanup(const SetupState &state) {
+	return !state.recovery && DesktopSyncChatCleanupActivated();
+}
+
+void HideCleanupChoices(const SetupState &state, Ui::Checkbox *removeMark, not_null<Ui::Checkbox*> cleanup) {
+	if (OffersCleanup(state)) { return; }
+	if (removeMark) { removeMark->hide(); }
+	cleanup->hide();
 }
 
 void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
@@ -408,12 +578,13 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 		}
 		const auto cleanup = confirmation->addRow(object_ptr<Ui::Checkbox>(confirmation,
 			tr::lng_purple_chat_move_cleanup(tr::now), offer->cleanup, st::defaultCheckbox));
-		if (state->opening->scope.settingsChat == PeerToken{}) {
+		if (OffersCleanup(*state) && state->opening->scope.settingsChat == PeerToken{}) {
 			confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
 				tr::lng_purple_chat_move_cleanup_self_warning(tr::now), st::boxLabel));
 		}
+		HideCleanupChoices(*state, removeMark, cleanup);
 		confirmation->addButton(tr::lng_continue(), [=] {
-			const auto removeOld = cleanup->checked();
+			const auto removeOld = OffersCleanup(*state) && cleanup->checked();
 			const auto oldMark = removeMark && removeMark->checked();
 			*submitted = true;
 			confirmation->closeBox();
@@ -422,12 +593,19 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 			state->accept->setDisabled(true);
 			const auto finish = crl::guard(box, [=](std::optional<DesktopSyncChatPeer> peer) {
 				state->busy = false;
+				auto draft = std::optional<DesktopSyncChatMoveDraft>();
 				const auto accepted = Current(*state) && ReviewSyncChatMove(
-					state->session.get(), *state->move, *offer, std::move(peer), removeOld, true, oldMark);
-				state->status->setText(accepted
-					? MoveNotice(DesktopSyncChatMoveNotice::Held)
-					: tr::lng_purple_chat_move_stale(tr::now));
-				state->accept->setDisabled(!Current(*state));
+					state->session.get(), *state->move, *offer, std::move(peer), removeOld, true, oldMark,
+					[&](DesktopSyncChatMoveDraft value) { draft = std::move(value); });
+				// Move OFF holds an ordinary move at review; Lost recovery has its own switch.
+				if (accepted && !draft && state->recovery) { draft = state->move->reviewed(); }
+				if (!accepted || !draft || !StartMove(state, *draft)) {
+					state->status->setText(!accepted ? tr::lng_purple_chat_move_stale(tr::now)
+						: !draft ? MoveNotice(DesktopSyncChatMoveNotice::Held)
+						: state->recovery ? tr::lng_purple_chat_recovery_refused(tr::now)
+						: tr::lng_purple_chat_carry_busy(tr::now));
+				}
+				state->accept->setDisabled(!Current(*state) || CarryRunning(*state));
 			});
 			const auto context = [weak, state] { return weak && MoveContextCurrent(*state); };
 			CheckSyncChatBeforePost(state->session.get(), crl::guard(box,
@@ -622,9 +800,13 @@ void ConfirmRecovery(not_null<Ui::GenericBox*> box, SetupState *state, DesktopSy
 					if (!weak || !DesktopSyncChatRecoveryActivated() || !Current(*state) || !MoveContextCurrent(*state)) { return; }
 					CheckSyncChatBeforePost(state->session.get(), crl::guard(box, [=](DesktopSyncChatStatus) {
 						if (!DesktopSyncChatRecoveryActivated() || !Current(*state) || !MoveContextCurrent(*state)) { return; }
-						const auto accepted = ReviewSyncChatRecovery(state->session.get(), *state->opening, choice, peer,
-							QString::number(quintptr(state->window.data())), true);
-						state->status->setText(accepted ? tr::lng_purple_chat_move_held(tr::now) : tr::lng_purple_chat_recovery_refused(tr::now));
+						auto accepted = ReviewSyncChatRecovery(state->session.get(), *state->opening, choice, peer,
+							state->windowId, true);
+						const auto owner = CarryOwner(*state);
+						if (!accepted || !owner || !owner->recover(std::move(*accepted))) {
+							state->status->setText(accepted ? tr::lng_purple_chat_carry_busy(tr::now)
+								: tr::lng_purple_chat_recovery_refused(tr::now));
+						}
 					}), DesktopSyncChatOperation{.current = [weak, state] { return weak && MoveContextCurrent(*state); }});
 				});
 			}));
@@ -648,6 +830,63 @@ void AddRecoveryRows(not_null<Ui::GenericBox*> box, SetupState *state) {
 	}
 }
 
+void OfferFollow(not_null<Ui::GenericBox*> box, SetupState *state) {
+	if (!DesktopSyncChatFollowFillActivated() || !state->follow || !Current(*state) || state->busy) { return; }
+	const auto &winner = state->opening->status.resolution.winner;
+	if (!winner) { state->status->setText(tr::lng_purple_chat_stale(tr::now)); return; }
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	state->request = std::make_unique<DesktopSyncChatPeerRequest>(state->session.get(), state->opening->scope.origin,
+		winner->chat, [weak, state] { return weak && Current(*state); },
+		crl::guard(box, [=](std::optional<DesktopSyncChatPeer> peer) {
+			const auto offer = (peer && state->follow && Current(*state))
+				? state->follow->offer(*peer, u"config"_q) : std::nullopt;
+			if (!offer) { state->status->setText(tr::lng_purple_chat_stale(tr::now)); return; }
+			const auto title = Title(*state->session.get(), peer->chat);
+			box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> confirmation) {
+				confirmation->setTitle(tr::lng_purple_chat_title());
+				confirmation->setWidth(st::boxWideWidth);
+				const auto eligible = DesktopSyncChatEligibility(offer->peer);
+				confirmation->addRow(object_ptr<Ui::FlatLabel>(confirmation,
+					(offer->askReaders && eligible ? ReaderCount(eligible->readers) + u"\n"_q : QString())
+						+ FollowFillDisclosure(*offer, title), st::boxLabel));
+				const auto choose = [=](DesktopSyncChatConsentChoice choice) {
+					confirmation->closeBox();
+					if (!weak || !state->follow || !Current(*state)) { return; }
+					auto selection = ReviewSyncChatFollowFill(state->session.get(), *state->follow, *offer, *peer,
+						choice, true);
+					const auto owner = CarryOwner(*state);
+					if (!selection || !owner || !owner->follow(std::move(*selection))) {
+						state->status->setText(selection ? tr::lng_purple_chat_carry_busy(tr::now)
+							: tr::lng_purple_chat_stale(tr::now));
+					}
+				};
+				confirmation->addButton(tr::lng_purple_chat_follow_action(), [=] {
+					choose(DesktopSyncChatConsentChoice::Proceed);
+				});
+				confirmation->addButton(tr::lng_purple_chat_pause_here_action(), [=] {
+					choose(DesktopSyncChatConsentChoice::Pause);
+				});
+				confirmation->addButton(tr::lng_cancel(), [=] { confirmation->closeBox(); });
+			}));
+		}));
+}
+
+// Follow and Fill offer the resolved winner with its disclosure, or Pause sync here.
+void AddFollowRows(not_null<Ui::GenericBox*> box, SetupState *state) {
+	if (!DesktopSyncChatFollowFillActivated() || !state->opening || !Current(*state)) { return; }
+	const auto action = state->opening->status.resolution.action;
+	if (action != SyncChatAction::Follow && action != SyncChatAction::Fill) { return; }
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	state->follow = std::make_unique<DesktopSyncChatConsentAction>(*state->opening, state->windowId,
+		[weak, state] { return weak && Current(*state); },
+		[weak, state] {
+			return weak && state->window && state->window->isActiveWindow()
+				&& QGuiApplication::applicationState() == Qt::ApplicationActive
+				&& !Core::App().passcodeLocked();
+		});
+	box->addButton(tr::lng_purple_chat_follow_action(), [=] { OfferFollow(box, state); });
+}
+
 void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		not_null<Main::Session*> session, Fn<bool()> current, bool moving,
 		std::optional<DesktopSyncChatRecoveryChoice> recovery) {
@@ -659,6 +898,9 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 	state->window = box->window();
 	state->target = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
 	state->opening = SyncChatSetupSnapshotOf(session);
+	state->recovery = recovery;
+	static auto Windows = uint64_t();
+	state->windowId = u"setup-"_q + QString::number(++Windows);
 	if (moving && state->opening && DesktopSyncChatRecoveryHeld(*state->opening).isEmpty()
 		&& !DesktopSyncChatRecoveryActivated()) {
 		state->status = box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_purple_chat_recovery_off(tr::now), st::boxLabel));
@@ -683,7 +925,13 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 	state->status = box->addRow(object_ptr<Ui::FlatLabel>(box,
 		StatusText(*session, SyncChatStatusOf(session)), st::boxLabel));
 	const auto refresh = [=] {
-		if (state->move && state->move->reason() == u"move-qualification-held"_q) {
+		if (state->carry && !state->service) {
+			auto text = CarryText(*state->carry);
+			if (state->carry->finished && Current(*state)) {
+				text += u"\n\n"_q + StatusText(*session, SyncChatStatusOf(session));
+			}
+			state->status->setText(text);
+		} else if (state->move && !state->recovery && state->move->reason() == u"move-qualification-held"_q) {
 			state->status->setText(tr::lng_purple_chat_move_held(tr::now));
 		} else if (!state->service) {
 			state->status->setText(Current(*state)
@@ -694,9 +942,21 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		}
 		if (state->accept) {
 			state->accept->setDisabled(!Current(*state) || state->service
-				|| state->busy);
+				|| state->busy || CarryRunning(*state));
 		}
 	};
+	if (CarryOn()) {
+		// The box owns what it starts: closing it stops that operation like any controller.
+		SyncChatCarry(session).changes() | rpl::on_next([=](const DesktopSyncChatCarryState &value) {
+			ShowCarry(state, value);
+		}, box->lifetime());
+		const auto closed = [weak = state->session, id = state->windowId] {
+			const auto live = weak.get();
+			if (live && CarryOn()) { SyncChatCarry(live).owner().closeWindow(id, u"window-closed"_q); }
+		};
+		box->boxClosing() | rpl::on_next(closed, box->lifetime());
+		box->lifetime().add([=] { crl::on_main(closed); });
+	}
 	SyncRequestChanges() | rpl::on_next([=](MTP::Instance *instance) {
 		if (state->session && &state->session->mtp() == instance) {
 			refresh();
@@ -782,13 +1042,22 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		}
 		AddRecoveryRows(box, state);
 	}
+	if (!moving) { AddFollowRows(box, state); }
 	AddStaleMarkRows(box, state);
 	state->retry = box->addRow(object_ptr<Ui::RoundButton>(box,
 		tr::lng_purple_chat_setup_retry(), st::defaultBoxButton));
 	state->retry->setClickedCallback([=] {
+		// A running operation retries on its own authority: a committed move changes the
+		// fingerprint this box opened with.
+		if (const auto owner = CarryOwner(*state); owner && owner->busy() && OwnsCarry(*state, owner->state())) {
+			owner->retry();
+			return;
+		}
 		if (!Current(*state)) { return; }
 		if (state->move) {
-			state->status->setText(tr::lng_purple_chat_move_held(tr::now));
+			if (DesktopSyncChatMoveActivated() || state->recovery) { refresh(); } else {
+				state->status->setText(tr::lng_purple_chat_move_held(tr::now));
+			}
 			return;
 		}
 		if (state->service) { state->service->retry(); return; }
@@ -810,6 +1079,26 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		state->service->start();
 	});
 	state->retry->setDisabled(!Current(*state));
+	if (DesktopSyncChatCleanupActivated()) {
+		state->cleanup = box->addRow(object_ptr<Ui::RoundButton>(box,
+			tr::lng_purple_chat_cleanup_title(), st::defaultBoxButton));
+		state->cleanup->setClickedCallback([=] { OpenCleanup(box, state); });
+		state->cleanup->hide();
+	}
+	if (ResumeOn()) {
+		state->resume = box->addRow(object_ptr<Ui::RoundButton>(box,
+			tr::lng_purple_chat_carry_resume(), st::defaultBoxButton));
+		state->resume->setClickedCallback([=] {
+			const auto owner = CarryOwner(*state);
+			if (owner && !owner->resume(state->windowId)) {
+				state->status->setText(tr::lng_purple_chat_carry_busy(tr::now));
+			}
+		});
+		state->resume->hide();
+	}
+	if (const auto owner = CarryOwner(*state)) {
+		if (owner->busy()) { ShowCarry(state, owner->state()); } else { UpdateCarryButtons(state); }
+	}
 	state->self = box->addRow(object_ptr<Ui::RoundButton>(box,
 		tr::lng_purple_chat_setup_self(), st::defaultBoxButton));
 	state->self->setClickedCallback([=] { if (state->service) { state->service->useSelf(); } });
@@ -831,7 +1120,8 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 	});
 	state->consent->hide();
 	state->check = box->addButton(tr::lng_purple_chat_check_again(), [=] {
-		if (state->service) { return; }
+		// Check again closes this box, which would stop a running change it owns.
+		if (state->service || (CarryRunning(*state) && OwnsCarry(*state, CarryOwner(*state)->state()))) { return; }
 		const auto live = state->session.get();
 		if (!live || !state->current || !state->current() || !state->target
 			|| !ValidateAccountSettingsOpenTarget(live, *state->target)) {
@@ -855,7 +1145,8 @@ void SyncChatCleanupBox(not_null<Ui::GenericBox*> box, DesktopSyncCarryProgress 
 	box->setTitle(tr::lng_purple_chat_cleanup_title());
 	box->setWidth(st::boxWideWidth);
 	if (!DesktopSyncChatCleanupActivated() || !opening.journal || !current || !current()) {
-		box->addRow(object_ptr<Ui::FlatLabel>(box,tr::lng_purple_chat_move_held(tr::now),st::boxLabel));
+		box->addRow(object_ptr<Ui::FlatLabel>(box,DesktopSyncChatCleanupActivated() ? tr::lng_purple_chat_stale(tr::now)
+			: tr::lng_purple_chat_move_held(tr::now),st::boxLabel));
 		box->addButton(tr::lng_close(),[=] { box->closeBox(); }); return;
 	}
 	const auto text=opening.cleanup.skipped ? tr::lng_purple_chat_cleanup_skipped(tr::now)

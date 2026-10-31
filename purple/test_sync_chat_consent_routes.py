@@ -28,7 +28,7 @@ guards = [
     ('policy', 'admitted->store(false)'),
     ('policy', 'port.carry(admitted,'),
     ('policy', 'port.pause(selection, admitted,'),
-    ('service', 'if (!DesktopSyncChatFollowFillActivated()) { return false; }'),
+    ('service', 'if (!DesktopSyncChatFollowFillActivated()) { return {}; }'),
     ('service', 'self->_session->account().loggingOut()'),
     ('service', 'crl::async([=] { ForgetDesktopSyncChatLogin(path, account, login); });'),
     ('worker', '_store->Begin(*start, consentPeer.has_value(), opening && opening->cleanupSettings)'),
@@ -53,12 +53,29 @@ guards = [
     ('ui', 'lng_purple_chat_library_reader_warning'),
 ]
 
+def body(text, marker):
+    start = text.index('{', text.index(marker))
+    depth, end = 1, start + 1
+    while depth:
+        depth += (text[end] == '{') - (text[end] == '}')
+        end += 1
+    return text[start:end]
+
+
 def validate(values):
     for name, token in guards:
         assert token in values[name], (name, token)
     for forbidden in ['MTPmessages_SendMessage', 'MTPchannels_CreateChannel', 'std::thread', 'QFile(']:
         assert forbidden not in values['policy'], forbidden
-    assert not re.search(r'addButton\([^;]*lng_purple_chat_(?:follow_action|pause_here_action)', values['ui'], re.S)
+    # Follow and Pause controls exist only behind the Follow/Fill switch, ahead of any row or request.
+    ui = values['ui']
+    rows = body(ui, 'void AddFollowRows(')
+    offer = body(ui, 'void OfferFollow(')
+    gate = 'if (!DesktopSyncChatFollowFillActivated()'
+    assert rows.index(gate) < rows.index('addButton') and offer.index(gate) < offer.index('DesktopSyncChatPeerRequest')
+    outside = ui.replace(rows, '').replace(offer, '')
+    assert not re.search(r'addButton\([^;]*lng_purple_chat_(?:follow_action|pause_here_action)', outside, re.S)
+    assert 'if (!moving) { AddFollowRows(box, state); }' in ui
     assert 'DesktopSyncChatConsentFlow' not in values['ui']
     assert 'DesktopSyncChatConsentFlow' not in values['service']
     assert 'Core::App' not in values['policy']
@@ -72,4 +89,4 @@ for name, token in guards:
     except AssertionError:
         continue
     raise AssertionError(('negative mutation escaped', name, token))
-print(f'T5e consent routes: {len(guards)} production guards and {len(guards)} negative mutations PASS; activationOFF/no actionable UI')
+print(f'T5e consent routes: {len(guards)} production guards and {len(guards)} negative mutations PASS; activation OFF, Follow/Pause rows behind the OFF guard')

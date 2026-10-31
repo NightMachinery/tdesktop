@@ -159,6 +159,8 @@
     {"name": "test_sync_chat_recovery", "driver": "purple/test_sync_chat_write.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--test-source", "test_sync_chat_recovery.cpp"], "fixtures": ["purple/test_sync_chat_recovery.cpp"]},
     {"name": "test_sync_chat_recovery_routes", "driver": "purple/test_sync_chat_recovery_routes.py"},
     {"name": "test_sync_chat_native", "driver": "purple/test_sync_chat_write.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--test-source", "test_sync_chat_native.cpp"], "fixtures": ["purple/test_sync_chat_native.cpp"], "coverage": "Held-OFF native carry dispatcher and resolver with injected native replies, executor renewal and mark port"},
-    {"name": "test_sync_chat_native_routes", "driver": "purple/test_sync_chat_native_routes.py", "coverage": "Native dispatch guards and five OFF switch regressions"}
+    {"name": "test_sync_chat_native_routes", "driver": "purple/test_sync_chat_native_routes.py", "coverage": "Native dispatch guards and five OFF switch regressions"},
+    {"name": "test_sync_chat_carry_owner", "driver": "purple/test_sync_chat_write.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--test-source", "test_sync_chat_carry_owner.cpp"], "fixtures": ["purple/test_sync_chat_carry_owner.cpp"]},
+    {"name": "test_sync_chat_carry_wire_routes", "driver": "purple/test_sync_chat_carry_wire_routes.py"}
   ]
 }

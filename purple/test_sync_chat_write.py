@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp', 'test_sync_chat_move.cpp', 'test_sync_chat_native.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp', 'test_sync_chat_move.cpp', 'test_sync_chat_native.cpp', 'test_sync_chat_carry_owner.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -84,6 +84,8 @@ transport = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_transport.cpp'
 
 create = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_create.cpp').read_text()
 (work / 'carry-mark-text.inc').write_text('namespace Purple { QString DesktopSyncChatMarkText() ' + block(create, 'QString DesktopSyncChatMarkText(') + ' }\n')
+if args.test_source == 'test_sync_chat_carry_owner.cpp':
+    (work / 'carry-mark-text.inc').write_text('')
 if args.test_source == 'test_sync_chat_recovery.cpp':
     (work / 'carry-mark-text.inc').write_text('')
     ui = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_text()
@@ -146,6 +148,9 @@ if args.test_source == 'test_sync_chat_native.cpp':
 if args.test_source == 'test_sync_chat_recovery.cpp':
     consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
         for name in ['purple_sync_chat_recovery', 'purple_sync_chat_setup', 'purple_sync_chat_create', 'purple_sync_chat_create_store', 'purple_sync_chat_setup_flow']]
+if args.test_source == 'test_sync_chat_carry_owner.cpp':
+    consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
+        for name in ['purple_sync_chat_carry_owner', 'purple_sync_chat_consent', 'purple_sync_chat_recovery', 'purple_sync_chat_mark_actions', 'purple_sync_chat_setup', 'purple_sync_chat_create', 'purple_sync_chat_create_store', 'purple_sync_chat_setup_flow']]
 with (work / 'build.log').open('w') as log:
     for source in [repo / 'purple' / args.test_source,
                    repo / 'Telegram/SourceFiles/purple/purple_sync_chat_write.cpp',

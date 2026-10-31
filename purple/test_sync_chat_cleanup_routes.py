@@ -2,7 +2,7 @@
 from pathlib import Path
 repo=Path(__file__).resolve().parent.parent
 root=repo/'Telegram/SourceFiles/purple'
-paths={'cleanup':root/'purple_sync_chat_cleanup.cpp','worker':root/'purple_sync_chat_carry_executor.cpp','store':root/'purple_sync_chat_carry_store.cpp','ui':root/'purple_sync_chat_setup_box.cpp','decoration':root/'purple_sync_chat_setup_requests.cpp','service':root/'purple_sync_chat_carry_service.cpp'}
+paths={'cleanup':root/'purple_sync_chat_cleanup.cpp','worker':root/'purple_sync_chat_carry_executor.cpp','store':root/'purple_sync_chat_carry_store.cpp','ui':root/'purple_sync_chat_setup_box.cpp','decoration':root/'purple_sync_chat_setup_requests.cpp','service':root/'purple_sync_chat_carry_owner.cpp'}
 sources={k:p.read_text() for k,p in paths.items()}
 guards=[
  ('cleanup','bool DesktopSyncChatCleanupActivated() { return false; }'),
@@ -38,8 +38,10 @@ guards=[
  ('worker','accepted.deleted=*deleted; accepted.mark=_cleanup->oldMarkAbsent()'),
  ('worker','input.cleanup=SyncCarryCleanup::OwnLatePosts'),
  ('worker','cleanup_settings_authorized'),
- ('service','!applyCleanup(command.cleanupPermit->route(),*reply.cleanupResult)'),
- ('ui','!DesktopSyncChatCleanupActivated()'),
+ ('service','!transport.applyCleanup(command.cleanupPermit->route(), *reply.cleanupResult)'),
+ ('ui','if (!DesktopSyncChatCleanupActivated() || !opening.journal'),
+ ('ui','if (!DesktopSyncChatCleanupActivated() || !owner'),
+ ('ui','if (DesktopSyncChatCleanupActivated()) {\n\t\tstate->cleanup = box->addRow('),
  ('ui','tr::lng_purple_chat_cleanup_remove_mark(tr::now), false'),
  ('ui','fresh->journal->revision==opening.journal->revision'),
  ('ui','fresh->journal->loginAuthority==opening.journal->loginAuthority'),

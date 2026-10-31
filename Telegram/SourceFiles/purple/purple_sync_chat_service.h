@@ -39,15 +39,17 @@ struct DesktopSyncChatLease {
 [[nodiscard]] bool CachedSyncChatSetupContextCurrent(
 	not_null<Main::Session*> session, const DesktopSyncChatDiscoveryScope &scope);
 
-[[nodiscard]] bool ReviewSyncChatFollowFill(
+[[nodiscard]] auto ReviewSyncChatFollowFill(
 	not_null<Main::Session*> session, DesktopSyncChatConsentAction &action,
 	const DesktopSyncChatFollowOffer &offer, const DesktopSyncChatPeer &peer,
-	DesktopSyncChatConsentChoice choice, bool disclosed);
+	DesktopSyncChatConsentChoice choice, bool disclosed)
+-> std::optional<DesktopSyncChatConsentSelection>;
 
 [[nodiscard]] bool ReviewSyncChatMove(
 	not_null<Main::Session*> session, DesktopSyncChatMoveAction &action,
 	const DesktopSyncChatMoveOffer &offer, std::optional<DesktopSyncChatPeer> peer,
-	bool cleanup, bool consent, bool removeOldMark = false);
+	bool cleanup, bool consent, bool removeOldMark = false,
+	Fn<void(DesktopSyncChatMoveDraft)> start = nullptr);
 
 [[nodiscard]] auto ReviewSyncChatRecovery(
 	not_null<Main::Session*> session, const DesktopSyncChatSetupSnapshot &opening,
@@ -69,6 +71,10 @@ void QuiesceSyncChatPublishers(not_null<Main::Session*> session);
 	not_null<Main::Session*> session);
 void EnsureSyncChatResolved(
 	not_null<Main::Session*> session, bool force = false);
+// Forces a fresh resolution, then answers with the session's setup snapshot.
+void ResolveSyncChatSetup(
+	not_null<Main::Session*> session,
+	Fn<void(std::optional<DesktopSyncChatSetupSnapshot>)> done);
 void CheckSyncChatBeforePost(
 	not_null<Main::Session*> session,
 	Fn<void(DesktopSyncChatStatus)> done,

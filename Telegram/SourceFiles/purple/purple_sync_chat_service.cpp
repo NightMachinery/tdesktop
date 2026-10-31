@@ -1,5 +1,6 @@
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_chat_carry_service.h"
 #include "purple/purple_sync_chat_consent.h"
 
 #include "apiwrap.h"
@@ -1165,6 +1166,15 @@ std::optional<DesktopSyncChatDiscoveryScope> CaptureSyncChatCarryScope(not_null<
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {
 	For(session).Ensure(force);
 }
+void ResolveSyncChatSetup(
+		not_null<Main::Session*> session,
+		Fn<void(std::optional<DesktopSyncChatSetupSnapshot>)> done) {
+	const auto weak = base::make_weak(session);
+	For(session).Ensure(true, [weak, done = std::move(done)](DesktopSyncChatStatus) {
+		const auto live = weak.get();
+		done(live ? SyncChatSetupSnapshotOf(live) : std::nullopt);
+	});
+}
 void CheckSyncChatBeforePost(
 	not_null<Main::Session*> session,
 	Fn<void(DesktopSyncChatStatus)> done,
@@ -1183,25 +1193,27 @@ rpl::producer<Main::Session*> SyncChatStatusChanges() {
 	return Changes.events();
 }
 
-bool ReviewSyncChatFollowFill(not_null<Main::Session*> session,
+auto ReviewSyncChatFollowFill(not_null<Main::Session*> session,
 		DesktopSyncChatConsentAction &action, const DesktopSyncChatFollowOffer &offer,
-		const DesktopSyncChatPeer &peer, DesktopSyncChatConsentChoice choice, bool disclosed) {
-	if (!DesktopSyncChatFollowFillActivated()) { return false; }
+		const DesktopSyncChatPeer &peer, DesktopSyncChatConsentChoice choice, bool disclosed)
+-> std::optional<DesktopSyncChatConsentSelection> {
+	if (!DesktopSyncChatFollowFillActivated()) { return {}; }
 	const auto fresh = SyncChatSetupSnapshotOf(session);
-	return fresh && CachedSyncChatSetupContextCurrent(session, fresh->scope)
-		&& action.accept(offer, *fresh, peer, choice, disclosed).has_value();
+	if (!fresh || !CachedSyncChatSetupContextCurrent(session, fresh->scope)) { return {}; }
+	return action.accept(offer, *fresh, peer, choice, disclosed);
 }
 
 bool ReviewSyncChatMove(not_null<Main::Session*> session,
 		DesktopSyncChatMoveAction &action, const DesktopSyncChatMoveOffer &offer,
-		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent, bool removeOldMark) {
+		std::optional<DesktopSyncChatPeer> peer, bool cleanup, bool consent, bool removeOldMark,
+		Fn<void(DesktopSyncChatMoveDraft)> start) {
 	const auto fresh = SyncChatSetupSnapshotOf(session);
 	if (!fresh || (DesktopSyncChatRecoveryHeld(*fresh).isEmpty() && !DesktopSyncChatRecoveryActivated())
 		|| !CachedSyncChatSetupContextCurrent(session, fresh->scope)) {
 		action.cancel();
 		return false;
 	}
-	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, {}, removeOldMark);
+	return action.confirm(offer, *fresh, std::move(peer), cleanup, consent, std::move(start), removeOldMark);
 }
 
 auto ReviewSyncChatRecovery(
@@ -1250,10 +1262,14 @@ void StartSyncChatDiscovery() {
 		accounts.destroy();
 		auto live = std::set<Main::Session*>();
 		for (const auto &entry : Core::App().domain().accounts()) {
+			// An unfinished carry journal resumes before ordinary reconciliation; with the carry
+			// switches OFF this is EnsureSyncChatResolved alone.
 			const auto ready = [](Main::Session* session) {
 				if (session) {
 					crl::on_main(session, [=] {
-						EnsureSyncChatResolved(session);
+						ResumeSyncChatCarry(session, [=] {
+							EnsureSyncChatResolved(session);
+						});
 					});
 				}
 			};

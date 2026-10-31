@@ -308,6 +308,8 @@ PRIVATE
     purple/purple_sync_chat_carry_executor.cpp
     purple/purple_sync_chat_carry_executor.h
     purple/purple_sync_chat_carry_gate.h
+    purple/purple_sync_chat_carry_owner.cpp
+    purple/purple_sync_chat_carry_owner.h
     purple/purple_sync_chat_carry_service.cpp
     purple/purple_sync_chat_carry_service.h
     purple/purple_sync_chat_native.h

@@ -196,8 +196,9 @@ These source/unit cases do not qualify native Telegram, app lifecycle or UI.
 ## Carry service seam
 
 `CaptureSyncChatCarryScope` freezes the same per-account persisted login and RAM
-origin used by discovery. `DesktopSyncChatCarryService` owns one queued worker and
-an injected transport, with no production backend or UI caller here. It quiesces
+origin used by discovery. `DesktopSyncChatCarryService` hosts the account's carry owner
+on a dedicated store thread; the setup screen and startup resume use it, as
+described in [Sync chat changes](sync_chat_wiring.md). It quiesces
 all account publishers through the RAM carry gate before opening the store. A
 busy writer produces a held status; explicit retry resumes after worker leases
 have drained. Source/account/login changes revoke callbacks and queue retirement.
