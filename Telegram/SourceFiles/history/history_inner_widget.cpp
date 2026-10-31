@@ -3999,9 +3999,6 @@ bool HistoryInner::hasCopyRestriction(HistoryItem *item) const {
 
 bool HistoryInner::hasCopyMediaRestriction(
 		not_null<HistoryItem*> item) const {
-	if (Purple::SaveRestrictionsDisabled()) {
-		return false;
-	}
 	return hasCopyRestriction(item) || item->forbidsSaving();
 }
 
