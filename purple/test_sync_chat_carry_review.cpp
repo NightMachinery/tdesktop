@@ -159,6 +159,40 @@ void ReviewOwnWinner() {
 	}
 }
 
+void ReviewLiveWinner() {
+	for (auto mismatch = 0; mismatch != 6; ++mismatch) {
+		auto f = ExecutorFiles(); f.engine->open(f.start);
+		while (f.progress.command && f.progress.command->action != SyncCarryJournalAction::ReadMark) { f.step(); }
+		Must(f.progress.command && f.markWrites == 1);
+		const auto before = CaptureSyncPrivateFile(f.root + u"/state.json"_q, 4 * 1024 * 1024).bytes;
+		const auto outward = f.outward;
+		auto observed = f.reply();
+		if (mismatch == 1 || mismatch == 2) {
+			const auto rival = mismatch == 1 ? f.fresh.target : Route({PeerTokenKind::Channel, 999});
+			observed.fresh->resolutionInput.marks.push_back({{rival.peer.chat, 91, 600}, SyncChatMarkStatus::Supported,
+				*DesktopSyncChatEligibility(rival.peer), SyncChatRecordPresence::Present, true, true});
+		}
+		if (mismatch == 3) {
+			for (auto &mark : observed.fresh->resolutionInput.marks) {
+				if (mark.location.markId == observed.markId) { ++mark.location.markDate; }
+			}
+		}
+		if (mismatch == 4) { observed.fresh->resolutionInput.selfUserId = 0; }
+		if (mismatch == 5) { observed.fresh->target.peer.facts->canSendFiles = false; }
+		f.engine->complete(observed);
+		if (!mismatch) {
+			f.finish();
+			CHECK(f.progress.terminal && f.progress.journal->stateCommitted);
+		} else {
+			CHECK(!f.progress.command && !f.progress.terminal && !f.progress.journal->stateCommitted);
+			CHECK(f.progress.reason == (mismatch == 5 ? u"reader-authority-held"_q : u"mark-winner-held"_q));
+			CHECK(f.outward == outward && f.markWrites == 1);
+			CHECK(CaptureSyncPrivateFile(f.root + u"/state.json"_q, 4 * 1024 * 1024).bytes == before);
+		}
+		f.engine->cancel();
+	}
+}
+
 void ReviewCleanupGone() {
 	for (auto control = 0; control != 7; ++control) {
 		auto f = ExecutorFiles(); f.start.removeOldMarkAuthorized = true; f.engine->open(f.start);
@@ -290,7 +324,7 @@ void FixedReviewProbes() {
 	std::puts("FIX1 discard window"); ReviewDiscardWindow(); ReviewDiscardRefusalsAndFailures();
 	std::puts("FIX1 pending floor"); ReviewPendingFloor();
 	std::puts("FIX2 unknown imported intent"); PendingUnknownObservation(); PendingUnknownStateControls();
-	std::puts("FIX1 own-winner restart"); ReviewOwnWinner();
+	std::puts("FIX1 own-winner restart"); ReviewOwnWinner(); ReviewLiveWinner();
 	std::puts("FIX1 definite cleanup gone"); ReviewCleanupGone();
 	std::puts("FIX1 actual uploader constructor"); ReviewUploadConstructor();
 }

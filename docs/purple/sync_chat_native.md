@@ -91,6 +91,15 @@ bounded settings-file read runs on a worker. Facts and permits passed to the
 executor carry an atomic admission predicate, so worker checks do not inspect
 GUI objects. Cancellation retires only this adapter's requests and read jobs.
 
+## Winning-mark commitment
+
+ReadMark accepts a live mark only when fresh resolution passes the executor's
+scope and reader checks, and its exact winning chat, message id and date match
+the read mark. This applies to uninterrupted and restarted operations. A newer
+same-chat or different-chat winner holds the existing operation before state or
+cache commitment and before old-source cleanup. Automatic recovery from that
+hold is a separate slice (D-M2B5-13).
+
 ## Host verification
 
 `test_sync_chat_native` drives the actual resolver and dispatcher using injected

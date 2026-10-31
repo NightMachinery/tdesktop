@@ -650,6 +650,81 @@ void NativeResolverLoss() {
 	}
 }
 
+void NativeLiveLosingMark() {
+	for (const auto sameChat : {false, true}) {
+		auto h = NativeHarness();
+		const auto rival = sameChat ? h.files->fresh.target.peer.chat
+			: PeerToken{PeerTokenKind::Channel, 999};
+		const auto ordinaryRequest = h.io.request;
+		const auto ordinaryInventory = h.io.inventory;
+		h.io.inventory = [&](auto route, auto done) {
+			if (!sameChat && route.peer.chat == rival) {
+				done(InventoryRows(route, {}));
+			} else {
+				ordinaryInventory(route, done);
+			}
+		};
+		h.io.request = [&](DesktopSyncNativeRequest request, auto gate, auto done) {
+			if (h.files->markWrites) {
+				if (std::holds_alternative<MTPmessages_SearchGlobal>(request)) {
+					auto result = DesktopSyncNativeReply();
+					result.messages = Response(Route({}), {
+						NativeMark(h.files->fresh.source, 9, 100),
+						NativeMark(h.files->fresh.target, 90, 500),
+						NativeMark(Route(rival), 91, 600)});
+					done(result);
+					return;
+				}
+				if (std::holds_alternative<MTPchannels_GetMessages>(request)) {
+					auto wire = mtpBuffer();
+					std::get<MTPchannels_GetMessages>(request).write(wire);
+					auto cursor = wire.constData();
+					const auto end = cursor + wire.size();
+					Read<MTPint>(cursor, end);
+					const auto channel = Read<MTPInputChannel>(cursor, end);
+					const auto ids = Read<MTPVector<MTPInputMessage>>(cursor, end);
+					if (channel.c_inputChannel().vchannel_id().v == rival.id
+						&& ids.v.size() == 1 && ids.v.front().c_inputMessageID().vid().v == 91) {
+						auto result = DesktopSyncNativeReply();
+						result.messages = Response(Route(rival), {NativeMark(Route(rival), 91, 600)});
+						done(result);
+						return;
+					}
+				}
+			}
+			ordinaryRequest(std::move(request), std::move(gate), std::move(done));
+		};
+		h.adapter.reset();
+		h.adapter = std::make_unique<DesktopSyncChatNative>(h.opening, h.io, h.renewal);
+		h.open(true);
+		const auto before = Worker([&] {
+			return CaptureSyncPrivateFile(h.files->root + u"/state.json"_q,
+				kSyncCarryJournalStorageLimit).bytes;
+		});
+		auto observed = false;
+		for (auto n = 0; h.files->progress.command && n != 100; ++n) {
+			const auto command = *h.files->progress.command;
+			const auto reply = h.send(command);
+			if (command.action == SyncCarryJournalAction::ReadMark) {
+				Must(reply.fresh);
+				const auto resolved = ResolveSyncChat(reply.fresh->resolutionInput);
+				CHECK(resolved.winner == std::optional(SyncChatCache{rival, 91, 600}));
+				CHECK(command.markId == 90 && reply.outcome == SyncCarryOutcome::Success);
+				observed = true;
+			}
+			Worker([&] { h.files->engine->complete(reply); });
+		}
+		CHECK(observed && !h.files->progress.terminal && !h.files->progress.command);
+		CHECK(h.files->progress.journal && !h.files->progress.journal->stateCommitted);
+		CHECK(h.files->progress.reason == u"mark-winner-held"_q);
+		CHECK(h.cleanupDeletes == 0 && h.deleted.empty());
+		CHECK(Worker([&] {
+			return CaptureSyncPrivateFile(h.files->root + u"/state.json"_q,
+				kSyncCarryJournalStorageLimit).bytes;
+		}) == before);
+	}
+}
+
 void NativeMarkPort() {
 	for (const auto malformed : {false, true}) {
 		auto h = NativeHarness();
@@ -724,6 +799,7 @@ int main(int argc, char** argv) {
 	NativeMarkPort();
 	NativeCommandRefusals();
 	NativeResolverLoss();
+	NativeLiveLosingMark();
 	TestWorker.reset();
 	std::printf("NATIVE ADAPTER %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;

@@ -456,13 +456,14 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 		} else if (!journal.targetMark || reply.markId != journal.targetMark->markId) { publish(u"winner-mark-mismatch"_q); return; }
 		const auto read = DesktopSyncChatCarryMarkReadback(reply.fresh->target, reply.markId, *reply.markResponse, _store->journal()->markText);
 		if (!read) { publish(u"mark-unknown"_q); return; }
+		const auto resolution = ResolveSyncChat(reply.fresh->resolutionInput);
+		const auto winner = resolution.winner;
+		if (!fresh(*reply.fresh, false) || !winner || !FrozenTargetWinner(journal, resolution, *winner)
+			|| read->messageId != winner->markId || read->date != winner->markDate || read->chat != winner->chat
+			|| (_recoveryWinner && winner != _recoveryWinner)) {
+			publish(_recoveryWinner ? u"recovery-own-mark-held"_q : u"mark-winner-held"_q); return;
+		}
 		if (_recoveryWinner) {
-			const auto resolution = ResolveSyncChat(reply.fresh->resolutionInput);
-			if (!fresh(*reply.fresh, false) || resolution.winner != _recoveryWinner
-				|| !FrozenTargetWinner(journal, resolution, *_recoveryWinner) || read->messageId != _recoveryWinner->markId
-				|| read->date != _recoveryWinner->markDate || read->chat != _recoveryWinner->chat) {
-				publish(u"recovery-own-mark-held"_q); return;
-			}
 			_recoveryWinner.reset();
 			_peer = reply.fresh->target.peer;
 			if (NextSyncCarryJournalAction(journal) != SyncCarryJournalAction::ReadMark) {
