@@ -48,6 +48,9 @@ struct MoveCloud {
 	std::set<QString> requests;
 	std::vector<std::pair<PeerToken, QString>> origins;
 	int sends = 0;
+	int forwards = 0;
+	int unavailableSourceReads = 0;
+	std::map<uint64_t, std::pair<uint64_t, QByteArray>> uploads;
 	int marks = 0;
 	int deletes = 0;
 	int markDate = 500;
@@ -135,6 +138,7 @@ void MoveCloud::conserved(PeerToken winner) {
 
 DesktopSyncChatInventory MoveCloud::inventory(const DesktopSyncChatIo &route) {
 	if (gone && route.peer.chat == MoveOld) {
+		++unavailableSourceReads;
 		auto result = InventoryRows(route, {});
 		result.inventory.scan.status = SyncHistoryScanStatus::InvalidResponse;
 		return result;
@@ -199,8 +203,10 @@ MTPUpdates MoveCloud::effect(const DesktopSyncCarryCommand &command,
 			const auto source = find(command.source, ids.v.front().v);
 			MoveRequire(source.has_value(), "forward references actual cloud bytes");
 			bytes = source->bytes;
+			++forwards;
 		} else {
 			MoveRequire(permit.claimUpload() && permit.uploadMatches(bytes), "single exact upload");
+			MoveRequire(permit.fileId() && uploads.emplace(permit.randomId(), std::make_pair(permit.fileId(), bytes)).second, "one upload per durable identity");
 		}
 		MoveRequire(!bytes.isEmpty(), "nonempty delivered record");
 		add(peer, {id, 400, bytes, false, {}});
@@ -253,7 +259,8 @@ struct MoveInstall {
 	int deleteEffects = 0;
 
 	MoveInstall(MoveCloud &cloud, int identity, PeerToken source = MoveOld,
-		PeerToken target = MoveFirst, SyncCarryMode mode = SyncCarryMode::Switch);
+		PeerToken target = MoveFirst, SyncCarryMode mode = SyncCarryMode::Switch,
+		bool sourceCopy = true);
 	~MoveInstall();
 	SyncLocalState state();
 	DesktopSyncChatCacheRecord cache();
@@ -272,7 +279,7 @@ struct MoveInstall {
 };
 
 MoveInstall::MoveInstall(MoveCloud &cloud, int identity, PeerToken source,
-		PeerToken target, SyncCarryMode mode)
+		PeerToken target, SyncCarryMode mode, bool sourceCopy)
 : cloud(cloud)
 , temporary(MoveDirectory + u"/install-XXXXXX"_q)
 , source(source)
@@ -307,7 +314,7 @@ MoveInstall::MoveInstall(MoveCloud &cloud, int identity, PeerToken source,
 		MoveRequire(bool(local.StageConfig(own, data, scope.binding)), "stage own record");
 		MoveRequire(bool(local.ConfirmConfigReadBack(own, initial.createdDevice, 20 + identity, source)), "confirm own record");
 	}
-	cloud.add(source, {20 + identity, 150, own, false, {}});
+	if (sourceCopy) { cloud.add(source, {20 + identity, 150, own, false, {}}); }
 	if (!cloud.find(source, 90)) { cloud.rows(source).push_back({90, 100, {}, true, {}}); }
 	auto cached = DesktopSyncChatCacheRecord();
 	cached.account = Origin.account; cached.mark = {source, 90, 100};
@@ -416,7 +423,7 @@ DesktopSyncCarryReply MoveInstall::reply() {
 	auto value = DesktopSyncCarryReply();
 	value.command = command; value.outcome = SyncCarryOutcome::Success;
 	value.fresh = fresh();
-	if (value.fresh->source.peer.facts) { value.source = cloud.inventory(value.fresh->source); }
+	if (value.fresh->source.peer.facts && !cloud.gone) { value.source = cloud.inventory(value.fresh->source); }
 	value.destination = cloud.inventory(value.fresh->target);
 	value.access = access == u"Readable"_q ? SyncCarrySourceAccess::Readable
 		: access == u"Protected"_q ? SyncCarrySourceAccess::Protected
@@ -530,13 +537,43 @@ void MovePreserved(const QByteArray &before, const QByteArray &after) {
 	const auto newEntries = QJsonDocument::fromJson(after).object().value(u"transport"_q).toObject().value(u"entries"_q).toObject();
 	for (auto i = oldEntries.begin(); i != oldEntries.end(); ++i) {
 		const auto old = i.value().toObject(); const auto now = newEntries.value(i.key()).toObject();
-		for (const auto &field : {u"random_id"_q, u"file_id"_q, u"hash"_q, u"source_id"_q}) {
+		for (const auto &field : {u"kind"_q, u"random_id"_q, u"file_id"_q, u"hash"_q, u"source_id"_q}) {
 			CHECK(old.contains(field) && now.contains(field) && old.value(field) == now.value(field));
 		}
 	}
 }
 
-void MoveMatrix() {
+QByteArray MoveImage(MoveInstall &install, const QString &operation) {
+	if (!install.active().isEmpty()) { return install.active(); }
+	auto store = SyncChatCarryStore(install.root, install.scope);
+	MoveRequire(bool(store.Open()), "reopen archived operation");
+	const auto images = store.RetainedImages();
+	MoveRequire(images.has_value(), "archived wrappers readable");
+	for (const auto &image : *images) {
+		const auto journal = InspectSyncCarryJournal(image, install.scope.binding);
+		if (journal && journal->operationId == operation) { return image; }
+	}
+	MoveRequire(false, "completed operation archived");
+	return {};
+}
+
+QJsonObject MoveOwnEntry(const QByteArray &image) {
+	const auto entries = QJsonDocument::fromJson(image).object().value(u"transport"_q).toObject()
+		.value(u"entries"_q).toObject();
+	auto own = QJsonObject();
+	for (const auto &entry : entries) {
+		if (entry.toObject().value(u"kind"_q).toString() == u"own"_q) {
+			MoveRequire(own.isEmpty(), "one own transport slot");
+			own = entry.toObject();
+		}
+	}
+	MoveRequire(!own.isEmpty(), "real own transport slot exists");
+	CHECK(own.value(u"file_id"_q).toString().toULongLong() != 0);
+	CHECK(own.value(u"source_id"_q).toInt() == 0);
+	return own;
+}
+
+void MoveMatrix(bool uploadOwn) {
 	const auto phases = std::vector<std::pair<QString, SyncCarryJournalAction>>{
 		{u"Deliver"_q, SyncCarryJournalAction::Deliver},
 		{u"VerifyDestination"_q, SyncCarryJournalAction::VerifyDestination},
@@ -546,13 +583,15 @@ void MoveMatrix() {
 		{u"Cleanup"_q, SyncCarryJournalAction::Cleanup}};
 	for (const auto &[name, action] : phases) {
 		for (const auto &window : {u"before"_q, u"effect"_q, u"durable"_q}) {
-			MoveCase = name + u'/' + window;
+			MoveCase = (uploadOwn ? u"own-upload/"_q : u"forward/"_q) + name + u'/' + window;
 			std::printf("MOVE_WINDOW seed=%u case=%s\n", MoveSeed, qPrintable(MoveCase));
 			auto cloud = MoveCloud();
-			auto first = MoveInstall(cloud, 0);
+			auto first = MoveInstall(cloud, 0, MoveOld, MoveFirst, SyncCarryMode::Switch, !uploadOwn);
 			auto second = MoveInstall(cloud, 1);
 			auto third = MoveInstall(cloud, 2);
 			first.duplicates = true;
+			CHECK(cloud.contains(MoveOld, SyncCarryRecordHash(first.own)) == !uploadOwn);
+			CHECK(!cloud.contains(MoveFirst, SyncCarryRecordHash(first.own)));
 			if (action == SyncCarryJournalAction::CommitState) { first.commitWindow = window; }
 			first.start();
 			if (action == SyncCarryJournalAction::CommitState) {
@@ -584,6 +623,20 @@ void MoveMatrix() {
 			const auto before = first.active();
 			const auto previous = first.progress.journal;
 			const auto alreadyDone = first.progress.terminal;
+			MoveRequire(previous && previous->plan, "crash boundary has durable plan");
+			const auto image = MoveImage(first, previous->operationId);
+			const auto ownEntry = uploadOwn ? MoveOwnEntry(image) : QJsonObject();
+			if (uploadOwn) {
+				MoveRequire(!previous->plan->ownRecord.isEmpty(), "retained-only install requires own upload");
+				CHECK(ParseSyncEnvelope(previous->plan->ownRecord).header->seq == 2);
+				CHECK(InspectConfigPayload(ParseSyncEnvelope(previous->plan->ownRecord)).text
+					== InspectConfigPayload(ParseSyncEnvelope(first.own)).text);
+				CHECK(ownEntry.value(u"random_id"_q).toString() == previous->ownRequestId);
+				CHECK(ownEntry.value(u"hash"_q).toString() == previous->plan->ownRecordHash);
+				if (action == SyncCarryJournalAction::Deliver) {
+					CHECK(cloud.uploads.size() == (window == u"before"_q ? 0 : 1));
+				}
+			}
 			first.restart(); first.stale(); first.run(); first.stale();
 			if (action == SyncCarryJournalAction::PostMark && window != u"durable"_q) {
 				CHECK(!first.progress.terminal && !first.progress.command);
@@ -599,7 +652,28 @@ void MoveMatrix() {
 			}
 			CHECK(cloud.marks == (action == SyncCarryJournalAction::PostMark && window == u"before"_q ? 0 : 1));
 			CHECK(cloud.sends == 3);
-			first.ledger(); cloud.conserved(MoveFirst); ++MoveWindows;
+			CHECK(cloud.forwards == (uploadOwn ? 2 : 3) && cloud.uploads.size() == (uploadOwn ? 1 : 0));
+			if (uploadOwn) {
+				const auto reopened = MoveImage(first, previous->operationId);
+				const auto journal = InspectSyncCarryJournal(reopened, first.scope.binding);
+				MoveRequire(journal && journal->plan, "own plan survives reopen or terminal archival");
+				MovePreserved(image, reopened);
+				CHECK(journal->plan->ownRecord == previous->plan->ownRecord);
+				CHECK(journal->ownRequestId == previous->ownRequestId && first.state().config.seq == 2);
+				CHECK(MoveOwnEntry(reopened).value(u"file_id"_q) == ownEntry.value(u"file_id"_q));
+				const auto sent = cloud.uploads.find(previous->ownRequestId.toULongLong());
+				MoveRequire(sent != cloud.uploads.end(), "expected own request actually uploaded");
+				CHECK(sent->second.first == ownEntry.value(u"file_id"_q).toString().toULongLong());
+				CHECK(sent->second.second == previous->plan->ownRecord);
+				CHECK(cloud.contains(MoveFirst, previous->plan->ownRecordHash));
+			}
+			if (!uploadOwn || first.state().chat == MoveFirst) { first.ledger(); }
+			else {
+				const auto held = first.state();
+				CHECK(held.chat == MoveOld && held.config.confirmedSeq == 1);
+				CHECK(held.ownMessages.size() == 1 && held.ownMessages.front().messageId == 20);
+			}
+			cloud.conserved(MoveFirst); ++MoveWindows;
 		}
 	}
 }
@@ -736,6 +810,35 @@ void MovePlanGone() {
 	cloud.conserved(MoveFirst); ++MoveRaces;
 }
 
+void MovePlanAffirmativeGone() {
+	MoveCase = u"Plan-affirmative-ChatGone"_q;
+	std::printf("MOVE_CASE seed=%u case=%s\n", MoveSeed, qPrintable(MoveCase));
+	auto cloud = MoveCloud();
+	auto first = MoveInstall(cloud, 0, MoveOld, MoveFirst, SyncCarryMode::Switch, false);
+	cloud.gone = true; first.access = u"ChatGone"_q;
+	CHECK(!cloud.contains(MoveOld, SyncCarryRecordHash(first.own)));
+	first.start(); MoveTo(first, SyncCarryJournalAction::Plan);
+	auto reply = first.reply();
+	CHECK(reply.access == SyncCarrySourceAccess::ChatGone && reply.oldRead == SyncChatDirectRead::ChatGone);
+	CHECK(!reply.source && reply.destination->inventory.scan.status == SyncHistoryScanStatus::Complete);
+	first.engine->complete(reply);
+	MoveRequire(first.progress.journal && first.progress.journal->plan, "affirmative loss passes Plan guard");
+	const auto plan = *first.progress.journal->plan;
+	CHECK(plan.access == SyncCarrySourceAccess::ChatGone && plan.forwards.empty());
+	MoveRequire(!plan.ownRecord.isEmpty(), "lost chat requires retained own upload");
+	CHECK(InspectConfigPayload(ParseSyncEnvelope(plan.ownRecord)).text
+		== InspectConfigPayload(ParseSyncEnvelope(first.own)).text);
+	CHECK(ParseSyncEnvelope(plan.ownRecord).header->seq == 2);
+	first.restart(); first.run(); first.done();
+	MoveRequire(cloud.uploads.size() == 1, "affirmative loss uploads exactly once");
+	CHECK(cloud.forwards == 0 && cloud.sends == 1);
+	CHECK(cloud.marks == 1 && cloud.deletes == 0 && cloud.unavailableSourceReads == 0);
+	CHECK(first.progress.journal->cleanupChatGone && first.state().config.confirmedSeq == 2);
+	CHECK(cloud.contains(MoveFirst, plan.ownRecordHash));
+	CHECK(cloud.uploads.begin()->second.second == plan.ownRecord);
+	cloud.conserved(MoveFirst); ++MoveRaces;
+}
+
 void MoveGone() {
 	for (const auto &evidence : {u"Unknown"_q, u"Protected"_q, u"ChatGone"_q}) {
 		MoveCase = u"nonaffirmative-"_q + evidence;
@@ -770,8 +873,8 @@ int main(int argc, char **argv) {
 	const auto scenario = QString::fromLatin1(argv[3]);
 	auto worker = std::thread([&] {
 		try {
-			if (scenario != u"races"_q) { MoveMatrix(); }
-			if (scenario != u"matrix"_q) { MoveSimultaneous(false); MoveSimultaneous(true); MoveChain(); MoveGone(); MoveConsecutive(); MovePlanGone(); }
+			if (scenario != u"races"_q) { MoveMatrix(false); MoveMatrix(true); }
+			if (scenario != u"matrix"_q) { MoveSimultaneous(false); MoveSimultaneous(true); MoveChain(); MoveGone(); MoveConsecutive(); MovePlanGone(); MovePlanAffirmativeGone(); }
 		} catch (const std::exception &error) {
 			std::fprintf(stderr, "MOVE EXCEPTION seed=%u case=%s: %s\n", MoveSeed, qPrintable(MoveCase), error.what());
 			++Failures;

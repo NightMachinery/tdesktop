@@ -620,6 +620,15 @@ ledger entry must reference verified cloud bytes from this install and device.
 Ordinary messages and actual legacy settings.toml document sentinels survive,
 with candidate classification taken from the production scanner.
 
+Each seed runs the crash matrix twice: all three records are forwarded in one
+pass; the other pass retains the first install's confirmed base only in its
+local files, with no copy in O or N. That pass must create one own-record upload
+and forward the other two installs' records. All 36 windows require unique send
+attempts. The upload pass checks a real `own` transport slot, exact bytes and
+sequence, and stable request/file identities across reopen and terminal archival.
+Effect-before-acknowledgement must reconcile the existing upload without sending
+it again.
+
 Seeded schedules shuffle inventories and mark resolution, interleave three
 installs, replay duplicate replies immediately and in later shuffled order,
 and send old replies to a replacement executor after restart. Simultaneous
@@ -634,7 +643,10 @@ A conservation invariant records every settings body introduced into the cloud:
 each hash must remain in its original chat or exist in the final winner chat. Unknown/protected evidence and an uncorroborated
 ChatGone label hold; matching affirmative scoped evidence permits completion.
 A Plan-phase ChatGone label paired with a positively readable O holds before
-planning, reservation, sending or deletion. Old replies are also shuffled into
+planning, reservation, sending or deletion. Its affirmative Plan companion pairs
+ChatGone access with a scoped ChatGone direct read and no source inventory. It
+must plan from the retained own base, upload it to N, restart, verify it, commit
+and finish without reading O or issuing a deletion. Old replies are also shuffled into
 a replacement executor while its current command remains pending.
 
 The consecutive-change case reopens the normal store and actual state/cache
