@@ -416,7 +416,7 @@ bool ThanosEffectController::geometryBusy() const {
 		|| _collapseAnimation.animating()
 		|| !_collapseGaps.empty()
 		|| !_renderGaps.empty()
-		|| _removalHeight != 0;
+		|| !_pending.empty();
 }
 
 void ThanosEffectController::pinScroll() {
