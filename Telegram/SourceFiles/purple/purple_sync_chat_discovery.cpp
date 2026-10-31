@@ -78,11 +78,13 @@ DesktopSyncChatDiscovery::DesktopSyncChatDiscovery(
 	bool settingsBound,
 	PeerToken settingsChat,
 	std::vector<PeerToken> loadedDialogs,
-	QString loginBinding)
+	QString loginBinding,
+	bool forceDialogSearch)
 : _origin(std::move(origin))
 , _loginBinding(std::move(loginBinding))
 , _cache(std::move(cache))
-, _dialogs(std::move(loadedDialogs)) {
+, _dialogs(std::move(loadedDialogs))
+, _forceDialogSearch(forceDialogSearch) {
 	_input.selfUserId = _origin.account.userId;
 	_input.settingsBound = settingsBound;
 	_input.settingsChat = settingsChat;
@@ -248,7 +250,7 @@ void DesktopSyncChatDiscovery::SearchDone(int64_t now) {
 		return;
 	}
 	if (!_fallbackUsed && !_dialogs.empty()
-		&& (_globalCapped || _hits.empty())) {
+		&& (_forceDialogSearch || _globalCapped || _hits.empty())) {
 		_fallbackUsed = true;
 		_dialogIndex = 0;
 		Search(DesktopSyncChatSearch::Dialog);
@@ -341,6 +343,11 @@ void DesktopSyncChatDiscovery::PeerNext(int64_t now) {
 		}
 		if (!_cacheRead) {
 			_cacheRead = true;
+			if (!effective->markId && effective->chat != PeerToken{}) {
+				_input.cacheRead = SyncChatDirectRead::MarkGone;
+				Resolve(now);
+				return;
+			}
 			Issue(DesktopSyncChatStep::ExactMark, effective->chat, effective);
 			return;
 		}

@@ -62,7 +62,8 @@ Resolution::Resolution(DesktopSyncChatSetupSnapshot opening,
       _opening.scope.settingsBound,
       _opening.scope.settingsChat,
       _io.dialogs,
-      _opening.scope.loginBinding) {}
+      _opening.scope.loginBinding,
+      _io.forceDialogSearch) {}
 
 bool Resolution::live() const {
 	return !_finished && _io.current && _io.current();

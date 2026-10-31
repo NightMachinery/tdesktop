@@ -18,6 +18,7 @@
 #include <QtGui/QGuiApplication>
 #include <rpl/event_stream.h>
 #include <condition_variable>
+#include <chrono>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -48,20 +49,40 @@ public:
 			state->condition.notify_one();
 		};
 	}
+	[[nodiscard]] Fn<void(int64_t, Fn<void()>)> delayedPoster() const {
+		return [state = _state](int64_t delay, Fn<void()> task) {
+			const auto lock = std::lock_guard(state->mutex);
+			if (state->stop || state->exited || delay <= 0) { return; }
+			const auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay);
+			state->delayed.emplace(std::pair(due, ++state->timer), std::move(task));
+			state->condition.notify_one();
+		};
+	}
 
 private:
 	struct State {
 		std::mutex mutex;
 		std::condition_variable condition;
 		std::deque<Fn<void()>> tasks;
+		std::map<std::pair<std::chrono::steady_clock::time_point, uint64_t>, Fn<void()>> delayed;
+		uint64_t timer = 0;
 		bool stop = false;
 		bool exited = false;
 	};
 	static void Run(std::shared_ptr<State> state) {
 		auto lock = std::unique_lock(state->mutex);
 		while (true) {
-			state->condition.wait(lock, [&] { return state->stop || !state->tasks.empty(); });
-			if (state->tasks.empty()) { state->exited = true; return; }
+			while (state->tasks.empty()) {
+				if (state->stop) { state->exited = true; return; }
+				if (state->delayed.empty()) {
+					state->condition.wait(lock);
+				} else if (state->delayed.begin()->first.first <= std::chrono::steady_clock::now()) {
+					state->tasks.push_back(std::move(state->delayed.begin()->second));
+					state->delayed.erase(state->delayed.begin());
+				} else {
+					state->condition.wait_until(lock, state->delayed.begin()->first.first);
+				}
+			}
 			auto task = std::move(state->tasks.front());
 			state->tasks.pop_front();
 			lock.unlock();
@@ -71,6 +92,7 @@ private:
 		}
 	}
 	std::shared_ptr<State> _state;
+
 };
 
 std::optional<QString> CarryDirectory(const DesktopSyncChatDiscoveryScope &scope) {
@@ -198,6 +220,7 @@ DesktopSyncChatCarryHost DesktopSyncChatCarryService::Impl::host() {
 		return self && self->current() ? CaptureSyncChatCarryScope(self->_session.get()) : std::nullopt;
 	};
 	host.worker = _thread.poster();
+	host.delayedWorker = _thread.delayedPoster();
 	host.main = [](Fn<void()> task) { crl::on_main(std::move(task)); };
 	host.directory = [](const DesktopSyncChatDiscoveryScope &scope) { return CarryDirectory(scope); };
 	host.lease = [](const AccountKey &account) -> std::shared_ptr<DesktopSyncCarryGate::Lease> {
@@ -296,6 +319,9 @@ void DesktopSyncChatCarryService::Impl::revoke(QString reason, bool resumeLater)
 }
 
 void DesktopSyncChatCarryService::Impl::changed(const DesktopSyncChatCarryState &state) {
+	if (state.carry && state.carry->markRecoveryRefusal) {
+		LOG(("Purple: sync chat mark recovery refused, reason %1.").arg(int(*state.carry->markRecoveryRefusal)));
+	}
 	if (state.finished && _provision) { ++_provisionGeneration; _provision->cancel(); _provision.reset(); }
 	_changes.fire_copy(state);
 }

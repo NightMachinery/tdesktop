@@ -3,6 +3,7 @@ from sync_carry_units import add_carry_units, write_upload_current_checks
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -60,6 +61,9 @@ def block(text, marker):
         depth += (text[end] == '{') - (text[end] == '}')
         end += 1
     return text[start:end]
+if args.test_source == 'test_sync_chat_carry_owner.cpp':
+    carry_service = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_service.cpp').read_text()
+    (work / 'store-thread.inc').write_text('class StoreThread final ' + block(carry_service, 'class StoreThread final') + ';\n')
 accept = block(service, 'bool SyncChatSession::Accept(')
 cancel = block(service, 'void SyncChatSession::Cancel(')
 publish = block(service, 'void SyncChatSession::Publish(')
@@ -211,6 +215,7 @@ with (work / 'build.log').open('w') as log:
     'production_ports_sha256': {str(repo / 'Telegram/SourceFiles/purple' / name): hashlib.sha256((repo / 'Telegram/SourceFiles/purple' / name).read_bytes()).hexdigest() for name in ['purple_sync_chat_create.cpp', 'purple_sync_chat_service.cpp', 'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_auto_service.cpp']},
     'included_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_discovery.cpp').read_bytes()).hexdigest(),
     'included_io_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_io.cpp').read_bytes()).hexdigest(),
+    'test_run_wrapper': os.environ.get('PURPLE_HOST_TEST_WRAPPER', ''),
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     'review_consent_source_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_consent.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_consent_review.cpp' else None,
     'review_consent_port_sha256': hashlib.sha256((work / 'embedded_consent.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_consent_review.cpp' else None,
@@ -221,6 +226,8 @@ with (work / 'build.log').open('w') as log:
     'sources_sha256': {str(source): hashlib.sha256(Path(source).read_bytes()).hexdigest()
                        for source in [c[c.index('-c') + 1] for c in compiled]},
     'objects_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in objects},
+    'store_thread_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_service.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_carry_owner.cpp' else None,
+    'store_thread_body_sha256': hashlib.sha256((work / 'store-thread.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_carry_owner.cpp' else None,
     'recovery_ui_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_recovery.cpp' else None,
     'recovery_ui_ports_sha256': {str(work / name): hashlib.sha256((work / name).read_bytes()).hexdigest() for name in ['recovery-ui-rows.inc', 'recovery-ui-confirmation.inc']} if args.test_source == 'test_sync_chat_recovery.cpp' else None,
     'cleanup_choices_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
@@ -229,7 +236,7 @@ with (work / 'build.log').open('w') as log:
     'cleanup_transport_port_sha256': hashlib.sha256((work / 'cleanup-transport.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
     'boundary': 'Upload parts/fresh-gate/dispatch/Updates/finish/cancel and post receipt/readback/finish/cancel bodies are literal production ports; session, API queue, before-post service and exact-reader transports are substituted without network. Entropy endpoint is deterministic in test; stage/ledger and TL objects are real. Actual mapper, C0, requests, cache, discovery and disk adapter compiled directly; literal Accept/Cancel/Publish and scanner/reader ownership bodies are ported with substituted session/notification/worker endpoints. Real generated TL constructors; reused schema/base/private-file/core-state objects. Unit-only, no app build/network/native acceptance.'}, indent=2) + '\n')
 if not args.build_only:
-    result = subprocess.run([str(binary)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run([*shlex.split(os.environ.get('PURPLE_HOST_TEST_WRAPPER', '')), str(binary)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (work / 'run.log').write_bytes(result.stdout)
     (work / 'run.exit').write_text(str(result.returncode) + '\n')
     print(result.stdout.decode())

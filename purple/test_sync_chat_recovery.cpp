@@ -228,7 +228,7 @@ void Policy() {
 
 void WorkerSchedules() {
 	{
-		auto h=RecoveryHarness(); h.start(); h.drain(); std::printf("FLOW held=%s starts=%d\n",qPrintable(h.reason),h.starts); CHECK(h.files.progress.terminal && h.files.markWrites==1 && h.files.cloud.empty());
+		auto h=RecoveryHarness(); h.start(); h.drain(); std::printf("FLOW held=%s starts=%d\n",qPrintable(h.reason),h.starts); CHECK(h.files.progress.terminal && h.files.markWrites==1 && h.files.cloud.size() == 1);
 		CHECK(CaptureSyncPrivateFile(h.files.root+u"/state.json"_q,kSyncCarryJournalStorageLimit).bytes==h.frame.stateImage);
 		CHECK(h.files.initial.bindingToken==ParseSyncLocalState(h.frame.stateImage).state.bindingToken); h.close();
 	}

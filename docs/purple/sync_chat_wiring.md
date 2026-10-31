@@ -105,8 +105,13 @@ The status line shows progress, then the result: moved, cleanup pending or
 skipped, paused here, stopped, unavailable or busy. A carry that is held but not
 finished says it is waiting, with its reason. When a carry cannot confirm the
 current mark (T5K's mark-winner-held and recovery-own-mark-held), it holds and
-says the mark could not be confirmed, without claiming why; its automatic exit
-belongs to the auto-recovery slice. An unreadable journal says nothing further
+says the mark could not be confirmed, without claiming why. Its automatic check
+says it is checking whether the move finished, never that the move is finishing,
+because the check can end with finishing for Follow. After that finish, the
+status says the settings were carried and another sync chat holds the newest
+settings, then asks the user to open Sync chat and press Follow. Nothing follows
+by itself: the Follow is the ordinary one, with its own consent, and the window
+that ran the move does not offer it. An unreadable journal says nothing further
 will be sent; it does not claim that nothing was sent before. The labels that say a change
 is held for qualification appear only while that switch is OFF.
 

@@ -73,7 +73,8 @@ public:
 		bool settingsBound,
 		PeerToken settingsChat,
 		std::vector<PeerToken> loadedDialogs,
-		QString loginBinding);
+		QString loginBinding,
+		bool forceDialogSearch = false);
 	[[nodiscard]] std::vector<std::pair<DesktopSyncChatPeer, MTPMessage>> markMessages() const;
 	void Start(int64_t now);
 	void StartBeforePost(int64_t now);
@@ -123,6 +124,7 @@ private:
 	bool _uncertain = false;
 	bool _cacheRead = false;
 	int _retries = 0;
+	bool _forceDialogSearch = false;
 };
 
 }

@@ -549,8 +549,9 @@ SyncStoreStatus SyncChatCarryStore::WitnessState(const QString &hash) {
 }
 
 SyncStoreStatus SyncChatCarryStore::WitnessCache(const SyncCarryCacheReceipt &receipt) {
-	if (!_journal || !_journal->targetMark || receipt.operationId != _journal->operationId
-		|| receipt.account != _scope.account || receipt.mark != *_journal->targetMark) { return SyncStoreStatus::InvalidTransition; }
+	const auto mark = _journal ? SyncCarryJournalCacheMark(*_journal) : std::nullopt;
+	if (!_journal || !mark || receipt.operationId != _journal->operationId
+		|| receipt.account != _scope.account || receipt.mark != *mark) { return SyncStoreStatus::InvalidTransition; }
 	const auto path = receipt.complete ? _scope.cacheFile : _directory + u"/carry-cache.json"_q;
 	if (path.isEmpty() || (receipt.complete && QFileInfo(path).fileName() != DesktopSyncChatCacheFileName(_scope.account))) {
 		return SyncStoreStatus::InvalidTransition;
@@ -889,7 +890,8 @@ SyncChatCarryStorageResult SyncChatCarryStore::DiscardInterrupted(bool confirmed
 }
 
 SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatPeer &peer, bool complete) {
-	if (!StateMatches() || !_journal || _foreignLogin || !_journal->targetMark
+	const auto mark = _journal ? SyncCarryJournalCacheMark(*_journal) : std::nullopt;
+	if (!StateMatches() || !_journal || _foreignLogin || !mark
 		|| peer.origin.account != _scope.account || peer.chat != _journal->target
 		|| NextSyncCarryJournalAction(*_journal) != (complete ? SyncCarryJournalAction::CompleteCache : SyncCarryJournalAction::PrepareCache)) {
 		return { SyncStoreStatus::InvalidTransition };
@@ -913,7 +915,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 		const auto previous = ParseDesktopSyncChatCache(_cacheFile.bytes, _scope.account);
 		if (previous.status != DesktopSyncChatCacheStatus::Valid || previous.paused
 			|| (previous.record && (previous.record->loginBinding != _scope.loginAuthority
-				|| (previous.record->mark != *_journal->targetMark && (!_journal->oldMark || previous.record->mark != *_journal->oldMark))))) { return { SyncStoreStatus::InvalidState }; }
+				|| (previous.record->mark != *mark && (!_journal->oldMark || previous.record->mark != *_journal->oldMark))))) { return { SyncStoreStatus::InvalidState }; }
 		if (previous.record) { record = *previous.record; }
 		if (record.mark.chat != _journal->target) {
 			record.readerMembers.reset(); record.readerCreator.reset(); record.readerAdmin.reset(); record.readerKind.reset();
@@ -925,7 +927,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 		const auto parsed = ParseDesktopSyncChatCache(prepared.bytes, _scope.account);
 		if (prepared.status != SyncStoreStatus::Ready || prepared.absent() || !parsed.record
 			|| !parsed.record->carry || parsed.record->carry->value(u"operation"_q).toString() != _journal->operationId
-			|| parsed.record->mark != *_journal->targetMark || parsed.record->loginBinding != _scope.loginAuthority) { return { SyncStoreStatus::InvalidState }; }
+			|| parsed.record->mark != *mark || parsed.record->loginBinding != _scope.loginAuthority) { return { SyncStoreStatus::InvalidState }; }
 		const auto warning = record.newReaders;
 		const auto streams = record.disclosedStreams;
 		record = *parsed.record;
@@ -935,7 +937,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 		}
 		record.carry.reset();
 	} else {
-		record.account = _scope.account; record.mark = *_journal->targetMark;
+		record.account = _scope.account; record.mark = *mark;
 		record.readers = *_journal->readerBaseline;
 		const auto transport = _envelope.value(u"transport"_q).toObject();
 		const auto baseline = transport.value(u"readers"_q).toObject();
@@ -968,7 +970,7 @@ SyncChatCarryStorageResult SyncChatCarryStore::WriteCache(const DesktopSyncChatP
 	if (complete) { _cacheFile = CaptureSyncPrivateFile(path, 64 * 1024); }
 	auto event = SyncCarryEvent(*_journal, complete ? SyncCarryEventKind::CacheCompleted : SyncCarryEventKind::CachePrepared);
 	event.outcome = SyncCarryOutcome::Success;
-	event.cache = {_journal->operationId, _scope.account, *_journal->targetMark, complete};
+	event.cache = {_journal->operationId, _scope.account, *mark, complete};
 	return Advance(event);
 }
 

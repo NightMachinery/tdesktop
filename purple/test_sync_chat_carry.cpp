@@ -46,6 +46,7 @@ struct ExecutorFiles {
 	bool unknownMark = false;
 	int sourceDate = 100; // the source settings record's date; N's Follow mark is dated 200
 	SyncCarryMode mode;
+	int64_t clock = 1000000;
 
 	explicit ExecutorFiles(bool own = false, SyncCarryMode mode = SyncCarryMode::Switch, bool pending = false)
 	: own(own), pending(pending), mode(mode) {
@@ -72,6 +73,7 @@ struct ExecutorFiles {
 		fresh.source.peer.facts->protectedContent = own;
 		fresh.loginAuthority = scope.loginAuthority; fresh.current = [alive=admitted] { return alive->load(); };
 		fresh.readerConsentAccepted = true; fresh.consentPeer = fresh.target.peer;
+		fresh.fullResolutionComplete = true;
 		fresh.resolutionInput.selfUserId = Origin.account.userId;
 		fresh.resolutionInput.cache = SyncChatCache{initial.chat,10,100};
 		fresh.resolutionInput.cacheRead = mode == SyncCarryMode::RepairMark ? SyncChatDirectRead::MarkGone : SyncChatDirectRead::Valid;
@@ -95,6 +97,7 @@ struct ExecutorFiles {
 		start.ownRequestId = u"42"_q; start.loginAuthority = DesktopSyncCarryLogin(scope.loginAuthority);
 		start.oldRead = mode == SyncCarryMode::RepairMark ? SyncChatDirectRead::MarkGone : SyncChatDirectRead::Valid;
 		start.sourceAccess = SyncCarrySourceAccess::Readable;
+		if (mode == SyncCarryMode::RepairMark) { cloud.push_back(Receipt(fresh.target, original, 10, 100)); }
 		gate = DesktopSyncCarryGateFor(scope.account);
 		newEngine();
 	}
@@ -107,7 +110,7 @@ struct ExecutorFiles {
 			[this](DesktopSyncCarryProgress value) { progress = std::move(value); }, [this](SyncDurablePoint point) {
 				if (point == SyncDurablePoint::BeforeWrite) { ++writes; if (armed && writes == failWrite) { failing = true; } }
 				return !failing || point != failPoint;
-			});
+			}, [this] { return clock; });
 		if (resume) { engine->open(); }
 	}
 	void actualResolution() {
@@ -124,10 +127,11 @@ struct ExecutorFiles {
 			&& state.state.chat == fresh.target.peer.chat) {
 			fresh.resolutionInput.settingsChat = state.state.chat;
 			fresh.resolutionInput.settingsBound = true;
-			fresh.resolutionInput.cache = SyncChatCache{fresh.target.peer.chat,
-				mode==SyncCarryMode::Follow || mode==SyncCarryMode::Fill ? 20 : 90,
-				mode==SyncCarryMode::Follow || mode==SyncCarryMode::Fill ? 200 : 500};
-			fresh.resolutionInput.cacheRead = SyncChatDirectRead::Valid;
+			const auto cache = ParseDesktopSyncChatCache(CaptureSyncPrivateFile(scope.cacheFile, 64 * 1024).bytes, scope.account);
+			if (cache.record) {
+				fresh.resolutionInput.cache = cache.record->mark;
+				fresh.resolutionInput.cacheRead = cache.record->mark.markId ? SyncChatDirectRead::Valid : SyncChatDirectRead::MarkGone;
+			}
 			fresh.resolutionInput.cachedEligibility = *DesktopSyncChatEligibility(fresh.target.peer);
 		}
 	}
@@ -179,20 +183,20 @@ struct ExecutorFiles {
 			if ((unknownDelivery && command.action == SyncCarryJournalAction::Deliver) || (unknownMark && command.action == SyncCarryJournalAction::PostMark)) { result.outcome = SyncCarryOutcome::Unknown; result.updates.clear(); }
 		}
 		if (command.action == SyncCarryJournalAction::ReadMark) {
-			if ((mode==SyncCarryMode::Switch || mode==SyncCarryMode::RepairMark) && !markWrites) {
-				result.markResponse=Response(fresh.target,{}); return result;
-			}
-			result.markId = mode == SyncCarryMode::Follow || mode == SyncCarryMode::Fill ? 20 : 90;
-			auto message = CarryMark(fresh.target,DesktopSyncChatMarkText(),result.markId);
-			if (mode == SyncCarryMode::Follow || mode == SyncCarryMode::Fill) {
+			result.markId = command.markId;
+			const auto found = std::find_if(fresh.resolutionInput.marks.begin(), fresh.resolutionInput.marks.end(),
+				[&](const auto &mark) { return mark.location.chat == fresh.target.peer.chat && mark.location.markId == command.markId; });
+			if (found == fresh.resolutionInput.marks.end()) {
+				result.markResponse = Response(fresh.target, {MTP_messageEmpty(MTP_flags(MTPDmessageEmpty::Flag::f_peer_id), MTP_int(command.markId), Target(fresh.target.peer.chat))});
+			} else {
 				auto native = NativeMessage();
-				native.id = MTP_int(result.markId); native.date = MTP_int(200);
+				native.id = MTP_int(result.markId); native.date = MTP_int(found->location.markDate);
 				native.flags = MTP_flags(MTPDmessage::Flag::f_out | MTPDmessage::Flag::f_from_id);
 				native.peer_id = Target(fresh.target.peer.chat); native.from_id = MTP_peerUser(MTP_long(Origin.account.userId));
-				native.message = MTP_string(DesktopSyncChatMarkText()); message = native.Build();
+				native.message = MTP_string(DesktopSyncChatMarkText());
+				result.markResponse = Response(fresh.target, {native.Build()});
 			}
-			result.markResponse = Response(fresh.target,{message});
-			if (unknownMark && (mode==SyncCarryMode::Switch || mode==SyncCarryMode::RepairMark)) { result.updates.push_back(Receipt(fresh.target,uint64_t(41),result.markId)); }
+			if (unknownMark && markWrites && result.markId == 90) { result.updates.push_back(Receipt(fresh.target,uint64_t(41),result.markId)); }
 		}
 		return result;
 	}
@@ -219,6 +223,193 @@ struct ExecutorFiles {
 	}
 };
 
+QJsonObject MarkRecoveryImage(const ExecutorFiles &f) {
+	return QJsonDocument::fromJson(CaptureSyncPrivateFile(f.root + u"/carry.json"_q,
+		kSyncCarryJournalStorageLimit).bytes).object().value(u"transport"_q).toObject().value(u"mark_recovery"_q).toObject();
+}
+
+void ExhaustMarkRecovery(ExecutorFiles &f, int expectedMarks = 0) {
+	for (auto n = 0; !f.progress.terminal && n != 4; ++n) {
+		Must(f.progress.markRecoveryAfter);
+		f.clock += *f.progress.markRecoveryAfter;
+		f.engine->resume(); f.run();
+	}
+	Must(f.progress.terminal && f.progress.journal);
+	CHECK(f.progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+	CHECK(!f.gate->postingHeld() && f.markWrites == expectedMarks);
+}
+
+void MarkEffect(ExecutorFiles &f) {
+	f.engine->open(f.start);
+	while (f.progress.command && !(f.progress.command->action == SyncCarryJournalAction::PostMark && f.progress.command->dispatch)) { f.step(); }
+	Must(f.progress.command);
+}
+
+void FinishThenFollowControls() {
+	for (const auto changed : {false, true}) {
+		auto f = ExecutorFiles(); f.engine->open(f.start);
+		while (f.progress.command && f.progress.command->action != SyncCarryJournalAction::PostMark) { f.step(); }
+		Must(f.progress.command && !f.progress.command->dispatch);
+		f.engine.reset();
+		{
+			auto store = SyncChatCarryStore(f.root, f.scope); Must(store.Open());
+			auto io = DesktopSyncChatCarryIo(store);
+			const auto id = io.Reserve(DesktopSyncCarryEffect::Mark, {}, f.fresh, 0); Must(id);
+			auto event = SyncCarryEvent(*store.journal(), SyncCarryEventKind::MarkPostPrepared);
+			event.outcome = SyncCarryOutcome::Success; Must(store.Advance(event));
+			const auto slot = io.MarkState(); Must(slot);
+			CHECK(slot->state == u"prepared"_q && !slot->inFlight && slot->receiptId == 0 && id->randomId == 41);
+		}
+		if (changed) {
+			f.fresh.resolutionInput.marks.push_back({{{PeerTokenKind::Channel, 789}, 77, 500}, SyncChatMarkStatus::Supported,
+				*DesktopSyncChatEligibility(Route({PeerTokenKind::Channel, 789}).peer), SyncChatRecordPresence::Present, true, true});
+		}
+		f.newEngine(true); f.run();
+		if (!f.progress.terminal) { std::fprintf(stderr, "PREPARED changed=%d reason=%s phase=%d store=%d journal=%d\n", changed, qPrintable(f.progress.reason), f.progress.journal ? int(f.progress.journal->phase) : -1, int(f.progress.storeStatus), int(f.progress.journalStatus)); }
+		Must(f.progress.terminal && f.progress.journal);
+		CHECK(f.progress.journal->markRequestId == u"41"_q);
+		CHECK(f.markWrites == (changed ? 0 : 1));
+		CHECK(f.progress.journal->phase == (changed ? SyncCarryPhase::FinishedForFollow : SyncCarryPhase::Done));
+		CHECK(f.cloud.size() == 1 && MarkRecoveryImage(f).isEmpty());
+	}
+	for (const auto peerWinner : {false, true}) {
+		auto f = ExecutorFiles(); MarkEffect(f);
+		if (peerWinner) {
+			f.fresh.resolutionInput.marks.push_back({{f.fresh.target.peer.chat, 91, 700}, SyncChatMarkStatus::Supported,
+				*DesktopSyncChatEligibility(f.fresh.target.peer), SyncChatRecordPresence::Present, true, true});
+		} else { static_cast<void>(f.reply()); }
+		f.newEngine(true); f.finish();
+		CHECK(f.markWrites == (peerWinner ? 0 : 1));
+		CHECK(f.progress.journal->targetMark->markId == (peerWinner ? 91 : 90));
+		CHECK(f.cloud.size() == 1);
+	}
+	for (const auto acknowledged : {false, true}) {
+		for (const auto mode : {SyncCarryMode::Switch, SyncCarryMode::RepairMark}) {
+			auto f = ExecutorFiles(false, mode); MarkEffect(f);
+			const auto sent = f.reply();
+			if (acknowledged) { f.engine->complete(sent); }
+			f.fresh.resolutionInput.marks.push_back({{{PeerTokenKind::Channel, 789}, 77, mode == SyncCarryMode::RepairMark ? 700 : 500}, SyncChatMarkStatus::Supported,
+				*DesktopSyncChatEligibility(Route({PeerTokenKind::Channel, 789}).peer), SyncChatRecordPresence::Present, true, true});
+			CHECK(ResolveSyncChat(f.fresh.resolutionInput).winner == f.fresh.resolutionInput.marks.back().location);
+			if (!acknowledged) { f.newEngine(true); }
+			f.run();
+			if (!acknowledged) { ExhaustMarkRecovery(f, 1); }
+			Must(f.progress.terminal && f.progress.journal);
+			CHECK(f.progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+			CHECK(f.progress.journal->attemptedMark == (acknowledged
+				? std::optional(SyncChatCache{f.fresh.target.peer.chat, 90, 500}) : std::nullopt));
+			CHECK(f.markWrites == 1 && f.cloud.size() == 1 && !f.gate->postingHeld());
+		}
+	}
+	{
+		auto f = ExecutorFiles(); MarkEffect(f);
+		const auto stale = *f.progress.command;
+		f.newEngine(true); f.run();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 1);
+		const auto image = MarkRecoveryImage(f);
+		f.clock += 1000; f.engine->resume(); f.run();
+		CHECK(MarkRecoveryImage(f) == image);
+		f.newEngine(true); f.run();
+		CHECK(MarkRecoveryImage(f) == image);
+		f.clock += 29000; f.engine->resume();
+		Must(f.progress.command); auto failed = f.reply(); failed.fresh->fullResolutionComplete = false;
+		f.engine->complete(failed);
+		CHECK(MarkRecoveryImage(f) == image && !f.progress.terminal);
+		f.engine->resume(); f.run();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 2);
+		CHECK(f.progress.markRecoveryAfter == 120000);
+		auto late = DesktopSyncCarryReply(); late.command = stale;
+		const auto before = MarkRecoveryImage(f); f.engine->complete(late);
+		CHECK(MarkRecoveryImage(f) == before);
+		f.clock += 120000; f.newEngine(true); f.run();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 3);
+		CHECK(f.progress.markRecoveryAfter == 600000);
+		f.admitted->store(false); f.clock += 600000; f.engine->resume();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 3);
+		f.newEngine(true); f.run();
+		Must(f.progress.terminal && f.progress.journal);
+		CHECK(f.progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+		CHECK(f.clock == 1750000 && f.markWrites == 0 && f.cloud.size() == 1);
+		const auto cached = ParseDesktopSyncChatCache(CaptureSyncPrivateFile(f.scope.cacheFile, 65536).bytes, f.scope.account);
+		Must(cached.record); CHECK(cached.record->mark == (SyncChatCache{f.fresh.target.peer.chat, 0, 0}));
+		CHECK(!cached.record->carry && !f.gate->postingHeld());
+	}
+}
+
+void FinishThenFollowSafetyControls() {
+	{
+		auto f = ExecutorFiles(); MarkEffect(f);
+		static_cast<void>(f.reply());
+		const auto sent = f.outward;
+		f.cloud.clear(); f.newEngine(true); f.run();
+		CHECK(f.progress.reason == u"mark-recovery-destination-incomplete"_q);
+		CHECK(!f.progress.terminal && !f.progress.command && f.gate->postingHeld());
+		CHECK(f.markWrites == 1 && f.outward == sent && MarkRecoveryImage(f).isEmpty());
+	}
+	{
+		auto f = ExecutorFiles(); MarkEffect(f);
+		f.step();
+		while (f.progress.command && f.progress.command->action != SyncCarryJournalAction::ReadMark) { f.step(); }
+		Must(f.progress.command);
+		const auto prior = CaptureSyncPrivateFile(f.root + u"/carry.json"_q, kSyncCarryJournalStorageLimit).bytes;
+		auto mismatched = f.reply(); ++mismatched.command.markId;
+		f.engine->complete(mismatched);
+		CHECK(f.progress.command && CaptureSyncPrivateFile(f.root + u"/carry.json"_q, kSyncCarryJournalStorageLimit).bytes == prior);
+		auto malformed = f.reply(); malformed.markResponse = Response(f.fresh.target, {});
+		f.engine->complete(malformed);
+		CHECK(!f.progress.terminal && !f.progress.command && f.gate->postingHeld());
+		CHECK(f.progress.reason == u"mark-recovery-incomplete"_q && MarkRecoveryImage(f).isEmpty());
+		f.engine->resume(); f.finish(); CHECK(f.markWrites == 1);
+	}
+	{
+		auto f = ExecutorFiles(); MarkEffect(f); f.newEngine(true); f.run();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 1);
+		f.clock = 10; f.newEngine(true); f.run();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 1 && f.progress.markRecoveryAfter == 30000);
+		f.clock += 30000; f.engine->resume(); f.run();
+		CHECK(MarkRecoveryImage(f).value(u"checks"_q).toInt() == 2 && f.progress.markRecoveryAfter == 120000);
+		ExhaustMarkRecovery(f);
+	}
+}
+
+void FinishThenFollowDurableControls() {
+	const auto prepare = [](ExecutorFiles &f) {
+		MarkEffect(f); f.engine->complete(f.reply());
+		f.fresh.resolutionInput.marks.push_back({{{PeerTokenKind::Channel, 789}, 77, 700}, SyncChatMarkStatus::Supported,
+			*DesktopSyncChatEligibility(Route({PeerTokenKind::Channel, 789}).peer), SyncChatRecordPresence::Present, true, true});
+	};
+	auto count = 0;
+	{
+		auto f = ExecutorFiles(true); prepare(f); const auto before = f.writes;
+		f.run(); Must(f.progress.terminal && f.progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+		count = f.writes - before;
+	}
+	CHECK(count > 0);
+	for (const auto point : {SyncDurablePoint::BeforeWrite, SyncDurablePoint::PartialWrite, SyncDurablePoint::BeforeRename,
+			SyncDurablePoint::AfterRename, SyncDurablePoint::FileBarrier, SyncDurablePoint::DirectoryBarrier}) {
+		for (auto write = 1; write <= count; ++write) {
+			auto f = ExecutorFiles(true); prepare(f);
+			f.failPoint = point; f.failWrite = f.writes + write; f.armed = true;
+			f.run();
+			if (!f.failing) { continue; }
+			const auto effects = f.outward;
+			f.failing = false; f.armed = false; f.newEngine(true); f.run();
+			if (!f.progress.terminal && !f.progress.absent) {
+				std::fprintf(stderr, "FTF durable point=%d write=%d reason=%s phase=%d\n", int(point), write,
+					qPrintable(f.progress.reason), f.progress.journal ? int(f.progress.journal->phase) : -1);
+			}
+			Must(f.progress.terminal || f.progress.absent);
+			if (f.progress.journal) {
+				CHECK(f.progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+				CHECK(f.progress.journal->attemptedMark == std::optional(SyncChatCache{f.fresh.target.peer.chat, 90, 500}));
+			}
+			CHECK(f.markWrites == 1 && f.outward == effects && f.cloud.size() == 1 && !f.gate->postingHeld());
+			auto local = SyncLocalStore(f.root); Must(local.Open(true, f.scope.binding));
+			CHECK(local.state()->chat == f.fresh.target.peer.chat);
+		}
+	}
+}
+
 void Executors() {
 	for (const auto own : {false,true}) {
 		for (const auto mode : {SyncCarryMode::Switch,SyncCarryMode::Follow,SyncCarryMode::Fill}) {
@@ -230,7 +421,7 @@ void Executors() {
 	}
 	for (const auto own : {false,true}) { auto f=ExecutorFiles(own,SyncCarryMode::Switch,true); f.engine->open(f.start); f.finish(); }
 	{
-		auto f=ExecutorFiles(false,SyncCarryMode::RepairMark); f.engine->open(f.start); f.finish(); CHECK(f.cloud.empty() && f.outward==1);
+		auto f=ExecutorFiles(false,SyncCarryMode::RepairMark); f.engine->open(f.start); f.finish(); CHECK(f.cloud.size() == 1 && f.outward==1);
 		CHECK(CaptureSyncPrivateFile(f.root+u"/state.json"_q,4*1024*1024).bytes == SerializeSyncLocalState(f.initial).canonical);
 	}
 }
@@ -243,11 +434,10 @@ void RecoverySchedules() {
 		if (f.progress.terminal) { continue; }
 		const auto seq=f.progress.journal->plan ? ParseSyncEnvelope(f.progress.journal->plan->ownRecord).header->seq : 0;
 		f.newEngine(true); f.run();
-		if (f.progress.reason==u"matched-mark-receipt-required"_q && !f.markWrites) {
+		if (f.progress.reason==u"mark-recovery-waiting"_q && !f.markWrites) {
 			CHECK(f.progress.journal && f.progress.journal->markAttempted && !f.progress.journal->stateCommitted);
-			f.engine->cancel(); CHECK(!f.gate->postingHeld()); continue;
+			ExhaustMarkRecovery(f); continue;
 		}
-		if (f.progress.reason==u"matched-mark-receipt-required"_q && f.markWrites) { f.unknownMark=true; f.engine->resume(); }
 		f.finish();
 		if (seq) { CHECK(f.progress.journal->plan && ParseSyncEnvelope(f.progress.journal->plan->ownRecord).header->seq==seq); }
 		CHECK(f.markWrites<=1);
@@ -265,8 +455,7 @@ void EffectBeforeCallbackControls() {
 		Must(f.progress.command); auto lost=f.reply(); const auto sent=f.outward;
 		f.newEngine(true); f.run();
 		if(action==SyncCarryJournalAction::PostMark){
-			CHECK(f.progress.reason==u"matched-mark-receipt-required"_q && f.markWrites==1 && !f.progress.terminal);
-			f.unknownMark=true; f.engine->resume();
+			CHECK(f.progress.terminal && f.markWrites==1);
 		}
 		f.finish(); CHECK(f.markWrites==1 && f.outward>=sent && f.cloud.size()==1);
 	}
@@ -421,8 +610,8 @@ void RefusalAndLoginControls() {
 		auto f=ExecutorFiles(); f.unknownMark=true; f.engine->open(f.start);
 		while (f.progress.command && f.progress.command->action!=SyncCarryJournalAction::ReadMark) { f.step(); }
 		Must(f.progress.command); auto reply=f.reply(); reply.updates.clear(); f.engine->complete(reply);
-		CHECK(f.progress.reason==u"matched-mark-receipt-required"_q && f.markWrites==1);
-		f.engine->resume(); f.finish(); CHECK(f.markWrites==1);
+		CHECK(f.markWrites == 1 && f.progress.reason != u"matched-mark-receipt-required"_q);
+		f.finish(); CHECK(f.markWrites == 1);
 	}
 }
 
@@ -461,10 +650,9 @@ void DurableFailureControls() {
 			if (journal.absent()) { f.engine->open(f.start); }
 			else { f.engine->open(); }
 			f.run();
-			if (!f.progress.terminal && f.progress.reason==u"matched-mark-receipt-required"_q) {
-				Must(f.progress.journal); CHECK(f.progress.journal->markAttempted && f.markWrites<=1);
-				CHECK(!CaptureSyncPrivateFile(f.root+u"/carry.json"_q,4*1024*1024).absent());
-				CHECK(f.outward==sends); f.engine->cancel(); CHECK(!f.gate->postingHeld());
+			if (!f.progress.terminal && f.progress.markRecoveryAfter) { ExhaustMarkRecovery(f, f.markWrites); }
+			if (f.progress.terminal && f.progress.journal->phase == SyncCarryPhase::FinishedForFollow) {
+				CHECK(f.progress.journal->markAttempted && !f.gate->postingHeld() && f.outward == sends);
 			} else {
 				if (!f.progress.terminal) { std::fprintf(stderr,"Durable point=%d write=%d\n",int(point),write); }
 				f.finish();
@@ -571,7 +759,7 @@ void PendingAndRetentionControls() {
 int main(int argc,char **argv) {
 	auto app=QCoreApplication(argc,argv); std::setbuf(stdout,nullptr);
 	GateControls(); MainThreadAndConcurrentGateControls();
-	auto worker=std::thread([] { Executors(); RecoverySchedules(); EffectBeforeCallbackControls(); RefusalAndLoginControls(); std::puts("Pending controls"); PendingAndRetentionControls(); std::puts("Logout controls"); LogoutWithoutPreferences(); std::puts("Thread controls"); ThreadAndMergeControls(); std::puts("Durable controls"); DurableFailureControls(); }); worker.join();
+	auto worker=std::thread([] { Executors(); FinishThenFollowControls(); FinishThenFollowSafetyControls(); FinishThenFollowDurableControls(); RecoverySchedules(); EffectBeforeCallbackControls(); RefusalAndLoginControls(); std::puts("Pending controls"); PendingAndRetentionControls(); std::puts("Logout controls"); LogoutWithoutPreferences(); std::puts("Thread controls"); ThreadAndMergeControls(); std::puts("Durable controls"); DurableFailureControls(); }); worker.join();
 	std::printf("CARRY EXECUTOR %d checks, %d failures\n",Checks,Failures);
 	return Failures ? 1 : 0;
 }

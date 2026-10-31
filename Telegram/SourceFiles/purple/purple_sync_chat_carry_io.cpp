@@ -8,6 +8,7 @@
 #include <QtCore/QJsonDocument>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <set>
 
@@ -672,6 +673,73 @@ int32_t DesktopSyncChatCarryIo::MarkReceiptId() const {
 		if (value.value(u"kind"_q).toString() == u"mark"_q) { return value.value(u"ack_id"_q).toInt(); }
 	}
 	return 0;
+}
+
+std::optional<DesktopSyncCarryMarkState> DesktopSyncChatCarryIo::MarkState() const {
+	const auto transport = Transport();
+	if (!transport || !_store.Current() || _store.foreignLogin()) { return {}; }
+	auto result = DesktopSyncCarryMarkState();
+	const auto entries = transport->value(u"entries"_q).toObject();
+	for (auto i = entries.begin(); i != entries.end(); ++i) {
+		const auto entry = i.value().toObject();
+		if (entry.value(u"kind"_q) != QJsonValue(u"mark"_q)) { continue; }
+		if (!result.state.isEmpty()
+			|| entry.value(u"hash"_q).toString() != SyncCarryRecordHash(_store._journal->markText.toUtf8())) { return {}; }
+		result.state = entry.value(u"state"_q).toString();
+		result.receiptId = entry.value(u"ack_id"_q).toInt();
+		const auto active = _store._ioActive.find(i.key());
+		if (active != _store._ioActive.end() && active->second.first == _store._ioEpoch->load()) {
+			if (const auto live = active->second.second.lock()) { result.inFlight = live->load(); }
+		}
+	}
+	return result;
+}
+
+std::optional<DesktopSyncCarryMarkRecovery> DesktopSyncChatCarryIo::MarkRecovery() const {
+	const auto transport = Transport();
+	if (!transport || !_store.Current() || _store.foreignLogin()) { return {}; }
+	const auto value = transport->value(u"mark_recovery"_q);
+	if (value.isUndefined()) { return DesktopSyncCarryMarkRecovery(); }
+	if (!value.isObject()) { return {}; }
+	const auto object = value.toObject();
+	const auto count = object.value(u"checks"_q);
+	const auto read = [&](const QString &key) -> std::optional<int64_t> {
+		const auto value = object.value(key);
+		if (!value.isString()) { return {}; }
+		auto ok = false;
+		const auto number = value.toString().toLongLong(&ok);
+		return ok && number >= 0 && QString::number(number) == value.toString()
+			? std::optional(number) : std::nullopt;
+	};
+	const auto checkedAt = read(u"checked_at"_q);
+	const auto nextAt = read(u"next_at"_q);
+	if (!count.isDouble() || count.toInt(-1) < 1 || count.toInt() > 4
+		|| count.toDouble() != count.toInt() || !checkedAt || !nextAt
+		|| *checkedAt <= 0 || *nextAt < *checkedAt) { return {}; }
+	const auto delays = std::array<int64_t, 4>{30000, 120000, 600000, 0};
+	if (*nextAt - *checkedAt != delays[count.toInt() - 1]) { return {}; }
+	return DesktopSyncCarryMarkRecovery{count.toInt(), *checkedAt, *nextAt};
+}
+
+std::optional<DesktopSyncCarryMarkRecovery> DesktopSyncChatCarryIo::CheckedMarkRecovery(int64_t now) {
+	auto recovery = MarkRecovery();
+	auto transport = Transport();
+	if (!recovery || !transport || now <= 0 || !_store._journal
+		|| _store._journal->phase != SyncCarryPhase::Mark || !_store._journal->markAttempted) { return {}; }
+	if (now >= recovery->checkedAt && now < recovery->nextAt) { return recovery; }
+	const auto clockReset = now < recovery->checkedAt;
+	if (!clockReset && recovery->checks < 4) { ++recovery->checks; }
+	const auto delays = std::array<int64_t, 4>{30000, 120000, 600000, 0};
+	const auto delay = delays[recovery->checks - 1];
+	if (now > std::numeric_limits<int64_t>::max() - delay) { return {}; }
+	recovery->checkedAt = now;
+	recovery->nextAt = now + delay;
+	auto saved = transport->value(u"mark_recovery"_q).toObject();
+	saved.insert(u"checks"_q, recovery->checks);
+	saved.insert(u"checked_at"_q, QString::number(recovery->checkedAt));
+	saved.insert(u"next_at"_q, QString::number(recovery->nextAt));
+	transport->insert(u"mark_recovery"_q, saved);
+	return Save(*transport) ? recovery : std::nullopt;
 }
 
 bool DesktopSyncChatCarryIo::RetainedMarkReceipt(const DesktopSyncCarryFresh &fresh, const MTPUpdates &updates) {

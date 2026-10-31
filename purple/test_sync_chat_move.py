@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import runpy
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -40,7 +41,8 @@ if not args.build_only:
     for seed in args.seed or [271828, 314159, 424242]:
         fixtures = work / ('fixtures-' + str(seed))
         fixtures.mkdir(exist_ok=True)
-        command = [str(work / 'test_sync_chat_move'), str(seed), str(fixtures), args.scenario]
+        command = [*shlex.split(os.environ.get('PURPLE_HOST_TEST_WRAPPER', '')),
+            str(work / 'test_sync_chat_move'), str(seed), str(fixtures), args.scenario]
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env=os.environ | {'TMPDIR': str(fixtures)})
         (work / ('seed-' + str(seed) + '.log')).write_bytes(result.stdout)

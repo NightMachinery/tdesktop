@@ -1,5 +1,7 @@
 #include "purple/purple_sync_chat_native.h"
 
+#include <algorithm>
+
 namespace Purple {
 namespace {
 
@@ -126,6 +128,12 @@ void DesktopSyncChatNative::State::gather(DesktopSyncCarryCommand command,
 	}
 	const auto self = shared_from_this();
 	auto io = _io;
+	if (work->command.markRecovery) {
+		io.delay = {};
+		std::erase(io.dialogs, work->command.target);
+		io.dialogs.insert(io.dialogs.begin(), work->command.target);
+		io.forceDialogSearch = true;
+	}
 	io.current = [weak = weak_from_this(), epoch = work->epoch] {
 		const auto self = weak.lock();
 		return self && self->live(epoch);
@@ -161,6 +169,7 @@ void DesktopSyncChatNative::State::target(std::shared_ptr<Gathering> work,
 		auto facts = DesktopSyncCarryFresh();
 		facts.target = *route;
 		facts.resolutionInput = fresh.input;
+		facts.fullResolutionComplete = fresh.status.complete;
 		facts.loginAuthority = self->_opening.scope.loginBinding;
 		facts.current
 		    = [admitted = self->_admitted] { return admitted->load(); };
@@ -291,9 +300,8 @@ void DesktopSyncChatNative::State::exact(std::shared_ptr<Gathering> work) {
 		        {},
 		        [self, work, cleanup, route, id](auto result) {
 			        if (!self->live(work->epoch) || !result.messages
-			            || !DesktopSyncChatRecordMessage(route,
-			                *result.messages,
-			                id)) {
+			            || ((!work->command.markRecovery || cleanup)
+			                && !DesktopSyncChatRecordMessage(route, *result.messages, id))) {
 				        self->finish(work, false);
 				        return;
 			        }

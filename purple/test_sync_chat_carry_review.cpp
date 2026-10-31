@@ -141,19 +141,27 @@ void ReviewOwnWinner() {
 		while (f.progress.command && f.progress.command->action != SyncCarryJournalAction::ReadMark) { f.step(); }
 		Must(f.progress.command); Must(f.markWrites == 1);
 		f.actualResolution();
-		if (mismatch == 1) f.fresh.resolutionInput.marks.push_back({{f.fresh.target.peer.chat,91,600},SyncChatMarkStatus::Supported,
-			*DesktopSyncChatEligibility(f.fresh.target.peer),SyncChatRecordPresence::Present,true,true});
-		if (mismatch == 2) f.fresh.target.peer.origin.login = u"wrong"_q;
+		if (mismatch == 1) { f.fresh.resolutionInput.marks.push_back({{f.fresh.target.peer.chat, 91, 600}, SyncChatMarkStatus::Supported,
+			*DesktopSyncChatEligibility(f.fresh.target.peer), SyncChatRecordPresence::Present, true, true}); }
+		if (mismatch == 2) { f.fresh.target.peer.origin.login = u"wrong"_q; }
 		const auto writes = f.outward;
-		f.newEngine(true); Must(f.progress.command); f.step();
-		if (mismatch == 0) {
-			CHECK(f.progress.command && f.progress.command->action == SyncCarryJournalAction::ReadMark);
-			if (f.progress.command) { f.finish(); }
-			CHECK(f.progress.terminal && f.outward == writes && f.markWrites == 1);
-		} else if (mismatch == 3 && f.progress.command) {
-			auto wrong = f.reply(); wrong.markResponse = Response(f.fresh.target, {CarryMark(f.fresh.target, u"changed"_q)});
-			f.engine->complete(wrong); CHECK(!f.progress.command && !f.progress.terminal);
-		} else { CHECK(!f.progress.command && !f.progress.terminal); }
+		f.newEngine(true);
+		while (f.progress.command && f.progress.command->action != SyncCarryJournalAction::ReadMark) { f.step(); }
+		if (mismatch == 2) {
+			CHECK(!f.progress.command && !f.progress.terminal);
+		} else {
+			Must(f.progress.command);
+			CHECK(f.progress.command->markId == (mismatch == 1 ? 91 : 90));
+			if (mismatch == 3) {
+				auto wrong = f.reply(); wrong.markResponse = Response(f.fresh.target, {CarryMark(f.fresh.target, u"changed"_q)});
+				f.engine->complete(wrong);
+				CHECK(!f.progress.command && !f.progress.terminal && !f.progress.journal->stateCommitted);
+				CHECK(f.progress.markRecoveryAfter && f.progress.journal->markAttempted);
+			} else {
+				f.finish();
+				CHECK(f.progress.journal->targetMark->markId == (mismatch == 1 ? 91 : 90));
+			}
+		}
 		CHECK(f.markWrites == 1 && f.outward == writes);
 		f.engine->cancel();
 	}
@@ -161,9 +169,9 @@ void ReviewOwnWinner() {
 
 void ReviewLiveWinner() {
 	for (auto mismatch = 0; mismatch != 6; ++mismatch) {
-		auto f = ExecutorFiles(); f.engine->open(f.start);
+		auto f = ExecutorFiles(false, SyncCarryMode::Follow); f.engine->open(f.start);
 		while (f.progress.command && f.progress.command->action != SyncCarryJournalAction::ReadMark) { f.step(); }
-		Must(f.progress.command && f.markWrites == 1);
+		Must(f.progress.command && f.markWrites == 0);
 		const auto before = CaptureSyncPrivateFile(f.root + u"/state.json"_q, 4 * 1024 * 1024).bytes;
 		const auto outward = f.outward;
 		auto observed = f.reply();
@@ -186,7 +194,7 @@ void ReviewLiveWinner() {
 		} else {
 			CHECK(!f.progress.command && !f.progress.terminal && !f.progress.journal->stateCommitted);
 			CHECK(f.progress.reason == (mismatch == 5 ? u"reader-authority-held"_q : u"mark-winner-held"_q));
-			CHECK(f.outward == outward && f.markWrites == 1);
+			CHECK(f.outward == outward && f.markWrites == 0);
 			CHECK(CaptureSyncPrivateFile(f.root + u"/state.json"_q, 4 * 1024 * 1024).bytes == before);
 		}
 		f.engine->cancel();

@@ -57,6 +57,8 @@ struct DesktopSyncChatCarryHost {
 	Fn<bool()> current; // GUI: account, login and foreground still current
 	Fn<std::optional<DesktopSyncChatDiscoveryScope>()> scope; // GUI: live account authority
 	Fn<void(Fn<void()>)> worker;
+	Fn<void(int64_t, Fn<void()>)> delayedWorker;
+	Fn<int64_t()> clock;
 	Fn<void(Fn<void()>)> main;
 	Fn<std::optional<QString>(const DesktopSyncChatDiscoveryScope &)> directory; // any thread
 	Fn<std::shared_ptr<DesktopSyncCarryGate::Lease>(const AccountKey &)> lease; // worker
@@ -131,6 +133,7 @@ private:
 	std::unique_ptr<Active> _active;
 	DesktopSyncChatCarryState _state;
 	uint64_t _generation = 0;
+	uint64_t _timerEpoch = 0;
 	std::shared_ptr<DesktopSyncChatCarryOwner*> _self;
 
 };

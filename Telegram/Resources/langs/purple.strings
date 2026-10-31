@@ -482,3 +482,11 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_recovery_unproven" = "The old mark is not confirmed missing. Wait for a complete fresh check before repairing it.";
 "lng_purple_chat_recovery_consent" = "The original settings reader consent is unavailable. Mark repair is held; you can review another destination.";
 "lng_purple_chat_recovery_pending" = "A pending send must be resolved before this chat's mark can be repaired.";
+
+"lng_purple_chat_mark_recovery_running" = "Checking whether the move to {chat} finished.";
+"lng_purple_chat_mark_recovery_waiting" = "Checking whether the move to {chat} finished. Next check in {time} s.";
+"lng_purple_chat_mark_recovery_follow" = "Your settings were carried, but another device moved sync to {chat}, which holds the newest settings. Open Sync chat and press Follow to use it.";
+"lng_purple_chat_mark_recovery_unconfirmed" = "The move could not be confirmed. Your settings were carried, but {chat} holds the newest settings. Open Sync chat and press Follow to use it.";
+"lng_purple_chat_mark_recovery_old" = "The move did not finish. Your settings were carried, but {chat} still holds the newest settings. Open Sync chat and press Follow to use it. You can move again after that.";
+"lng_purple_chat_mark_recovery_searching" = "The move could not be confirmed. Searching for the current sync chat.";
+"lng_purple_chat_mark_recovery_held" = "The move's mark could not be checked safely. Sync stays held for a complete check or review.";

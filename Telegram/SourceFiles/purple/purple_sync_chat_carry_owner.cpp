@@ -380,6 +380,7 @@ public:
 		if (host.quiesce) { host.quiesce(); }
 		const auto weak = weak_from_this();
 		host.worker([slot = slot, live = live, lease = host.lease, main = host.main, directory = *directory,
+				clock = host.clock,
 				scope = DesktopSyncChatCarryStoreScope(opening()), origin = opening().scope.origin,
 				receive = OnMain(host.main, [weak](DesktopSyncCarryProgress progress) {
 					if (const auto self = weak.lock()) { self->receive(std::move(progress)); }
@@ -390,7 +391,8 @@ public:
 			if (!slot->engine) {
 				auto taken = lease(origin.account);
 				if (!taken) { busy(); return; }
-				slot->engine = std::make_unique<DesktopSyncChatCarry>(directory, scope, origin, live, std::move(taken), receive);
+				slot->engine = std::make_unique<DesktopSyncChatCarry>(directory, scope, origin, live, std::move(taken), receive,
+					SyncDurableFault(), clock);
 			}
 			slot->engine->open(std::move(input), std::move(peer), u"config"_q, std::move(images));
 		});
@@ -787,6 +789,7 @@ Fn<void(QString)> DesktopSyncChatCarryOwner::held(uint64_t generation) {
 
 void DesktopSyncChatCarryOwner::retry() {
 	if (!_active || _state.finished || !_host.current || !_host.current()) { return; }
+	++_timerEpoch;
 	if (_active->run) { _active->run->retry(); }
 	else if (_active->consent) { _active->consent->retry(); }
 	else if (_active->recovery) { _active->recovery->retry(); }
@@ -806,6 +809,7 @@ void DesktopSyncChatCarryOwner::discardInterrupted(bool confirmed) {
 
 void DesktopSyncChatCarryOwner::close(QString reason) {
 	if (!_active) { return; }
+	++_timerEpoch;
 	const auto kind = _active->kind;
 	const auto running = !_state.finished;
 	_active->stop();
@@ -827,6 +831,8 @@ std::optional<DesktopSyncCarryProgress> DesktopSyncChatCarryOwner::latest() cons
 
 void DesktopSyncChatCarryOwner::progress(uint64_t generation, DesktopSyncCarryProgress value) {
 	if (!_active || _active->generation != generation || _state.finished) { return; }
+	const auto timerEpoch = ++_timerEpoch;
+	const auto retryAfter = value.markRecoveryAfter;
 	if (!value.reason.isEmpty()) { _state.reason = value.reason; }
 	if (value.reason == u"move-provisioned"_q) { _state.provisioned = true; }
 	_state.running = value.command.has_value()
@@ -836,8 +842,20 @@ void DesktopSyncChatCarryOwner::progress(uint64_t generation, DesktopSyncCarryPr
 			&& (value.reason == u"sync-paused-here"_q || value.reason == u"pause-held"_q));
 	if (value.journal || value.command || ended) { _state.carry = std::move(value); }
 	else if (_state.carry) { _state.carry->command.reset(); _state.carry->reason = _state.reason; }
+	const auto weak = std::weak_ptr<DesktopSyncChatCarryOwner*>(_self);
 	publish();
+	const auto alive = weak.lock();
+	if (!alive || !*alive || !(*alive)->_active || (*alive)->_active->generation != generation
+		|| (*alive)->_timerEpoch != timerEpoch || (*alive)->_state.finished) { return; }
 	if (ended) { finish(generation); }
+	else if (retryAfter && *retryAfter > 0 && _host.delayedWorker) {
+		const auto self = std::weak_ptr<DesktopSyncChatCarryOwner*>(_self);
+		_host.delayedWorker(*retryAfter, OnMain(_host.main, [self, generation, timerEpoch] {
+			const auto owner = self.lock();
+			if (owner && *owner && (*owner)->_active && (*owner)->_active->generation == generation
+				&& (*owner)->_timerEpoch == timerEpoch && !(*owner)->_state.finished) { (*owner)->retry(); }
+		}));
+	}
 }
 
 void DesktopSyncChatCarryOwner::marked(uint64_t generation, DesktopSyncChatMarkProgress value) {

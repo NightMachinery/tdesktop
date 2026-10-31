@@ -6,8 +6,53 @@
 #include <deque>
 #include <mutex>
 #include <set>
+#include <chrono>
 
 namespace {
+
+#include "store-thread.inc"
+
+void StoreThreadTimers() {
+	using Clock = std::chrono::steady_clock;
+	const auto identity = std::make_shared<std::promise<std::thread::id>>();
+	auto identityReady = identity->get_future();
+	const auto timed = std::make_shared<std::promise<std::thread::id>>();
+	auto timedReady = timed->get_future();
+	{
+		auto thread = StoreThread();
+		thread.poster()([identity] { identity->set_value(std::this_thread::get_id()); });
+		thread.delayedPoster()(20, [timed] { timed->set_value(std::this_thread::get_id()); });
+		const auto first = identityReady.wait_for(std::chrono::seconds(2));
+		const auto second = timedReady.wait_for(std::chrono::seconds(2));
+		CHECK(first == std::future_status::ready && second == std::future_status::ready);
+		if (first == std::future_status::ready && second == std::future_status::ready) {
+			const auto worker = identityReady.get();
+			CHECK(worker == timedReady.get() && worker != std::this_thread::get_id());
+		}
+	}
+	struct Dropped {
+		std::shared_ptr<std::promise<void>> result;
+		~Dropped() { result->set_value(); }
+	};
+	const auto result = std::make_shared<std::promise<void>>();
+	auto dropped = result->get_future();
+	const auto ran = std::make_shared<std::atomic<bool>>(false);
+	const auto drained = std::make_shared<std::atomic<bool>>(false);
+	const auto early = std::make_shared<std::promise<void>>();
+	auto earlyReady = early->get_future();
+	const auto begin = Clock::now();
+	{
+		auto thread = StoreThread();
+		auto lifetime = std::make_shared<Dropped>(); lifetime->result = result;
+		thread.delayedPoster()(600000, [lifetime, ran] { ran->store(true); });
+		thread.delayedPoster()(20, [early] { early->set_value(); });
+		CHECK(earlyReady.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+		thread.poster()([] { throw std::runtime_error("synthetic worker failure"); });
+		thread.poster()([drained] { drained->store(true); });
+	}
+	CHECK(dropped.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+	CHECK(!ran->load() && drained->load() && Clock::now() - begin < std::chrono::seconds(3));
+}
 
 DesktopSyncChatCacheRecord SourceCache(ExecutorFiles &f, const SyncChatCache &mark) {
 	auto cache = DesktopSyncChatCacheRecord();
@@ -152,6 +197,8 @@ struct OwnerHarness {
 	bool live = true;
 	bool transportReady = true;
 	bool holdReply = false;
+	bool dropMark = false;
+	std::vector<std::pair<int64_t, Fn<void()>>> timers;
 	bool provisionCreates = true;
 	bool wrongThread = false;
 	bool cleanupShape = false;
@@ -165,6 +212,7 @@ struct OwnerHarness {
 	DesktopSyncCarryReply held;
 	std::optional<DesktopSyncChatMarkPort> nativeMark;
 	Fn<void()> onSettled;
+	Fn<void(const DesktopSyncChatCarryState &)> onChanged;
 	int resolves = 0;
 	int inspections = 0;
 	int provisions = 0;
@@ -216,6 +264,8 @@ struct OwnerHarness {
 		host.current = [this] { if (SyncStoreWorkerThread()) { wrongThread = true; } return live; };
 		host.scope = [this] { return std::optional(frame.scope); };
 		host.worker = [this](Fn<void()> task) { work.push_back(std::move(task)); };
+		host.delayedWorker = [this](int64_t after, Fn<void()> task) { timers.emplace_back(after, std::move(task)); };
+		host.clock = [this] { CHECK(SyncStoreWorkerThread()); return files.clock; };
 		host.main = [this](Fn<void()> task) { gui.push_back(std::move(task)); };
 		host.directory = [this](const DesktopSyncChatDiscoveryScope &) { return std::optional(files.root); };
 		host.lease = [this](const AccountKey &) { if (!SyncStoreWorkerThread()) { wrongThread = true; } ++leases; return files.gate->carry(); };
@@ -276,6 +326,7 @@ struct OwnerHarness {
 			if (value.carry && value.carry->journal && value.carry->journal->phase == SyncCarryPhase::Cleanup) { ++cleanupPhaseStates; }
 			if (value.carry && value.carry->cleanup.pending) { ++cleanupPendingStates; }
 			if (value.carry && (value.carry->journal || value.carry->command)) { files.progress = *value.carry; }
+			if (onChanged) { const auto callback = onChanged; callback(value); }
 		};
 		host.settled = [this](DesktopSyncChatCarryKind kind) { settled.push_back(kind); if (onSettled) { onSettled(); } };
 		return host;
@@ -342,7 +393,10 @@ struct OwnerHarness {
 	}
 	void answer(DesktopSyncCarryCommand command, Fn<void(DesktopSyncCarryReply)> done) {
 		files.progress.command = command;
-		auto reply = command.dispatch && command.cleanupPermit ? cleanupDelete(command) : files.reply();
+		auto reply = DesktopSyncCarryReply();
+		if (dropMark && command.dispatch && command.action == SyncCarryJournalAction::PostMark) {
+			reply.command = command;
+		} else { reply = command.dispatch && command.cleanupPermit ? cleanupDelete(command) : files.reply(); }
 		if (cleanupShape && !command.cleanupPermit) { cleanupRead(reply); }
 		// The fixture forges a lost mark's receipt with its own start's request id; an owner
 		// move draws a random one, so stamp the journal's.
@@ -368,15 +422,12 @@ struct OwnerHarness {
 			setup->complete(reply, 1000);
 		});
 	}
-	// The user's Retry after a retryable hold. A matched mark receipt is required after an
-	// interrupted mark post; the fixture answers it as the executor test does.
 	void reconcile() {
 		for (auto i = 0; i != 6 && !state.finished; ++i) {
 			if (state.reason == u"carry-retry-required"_q) {
 				owner->retry(); drain();
-			} else if (state.reason == u"matched-mark-receipt-required"_q) {
-				if (!files.markWrites) { owner->close(u"cancelled"_q); drain(); return; }
-				files.unknownMark = true; owner->retry(); drain();
+			} else if (state.carry && state.carry->markRecoveryAfter) {
+				files.clock += *state.carry->markRecoveryAfter; owner->retry(); drain();
 			} else {
 				return;
 			}
@@ -404,6 +455,10 @@ struct OwnerHarness {
 	}
 	bool done() const {
 		return state.finished && state.carry && state.carry->journal && state.carry->journal->phase == SyncCarryPhase::Done;
+	}
+	bool followFinished() const {
+		return state.finished && state.carry && state.carry->journal
+			&& state.carry->journal->phase == SyncCarryPhase::FinishedForFollow;
 	}
 	bool moved() const {
 		const auto cache = ParseDesktopSyncChatCache(CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024).bytes, files.scope.account);
@@ -567,8 +622,8 @@ void Restart() {
 		Must(h.journal());
 		CHECK(h.owner->resume()); h.drain(); h.reconcile();
 		if (h.state.reason == u"cancelled"_q) { CHECK(!h.files.gate->postingHeld()); continue; }
-		if (!h.done()) { std::fprintf(stderr, "Restart hold steps=%d: %s\n", steps, qPrintable(h.state.reason)); }
-		CHECK(h.done() && h.moved() && h.files.markWrites <= 1 && !h.files.gate->postingHeld());
+		if (!h.done() && !h.followFinished()) { std::fprintf(stderr, "Restart hold steps=%d: %s\n", steps, qPrintable(h.state.reason)); }
+		CHECK((h.done() || h.followFinished()) && h.moved() && h.files.markWrites <= 1 && !h.files.gate->postingHeld());
 		CHECK(!h.settled.empty() && h.settled.back() == DesktopSyncChatCarryKind::Resume && h.leases >= 1 && !h.wrongThread);
 	}
 	// The app quits mid-move: the owner is destroyed and cancels, as every carry controller does.
@@ -591,8 +646,8 @@ void Restart() {
 		h.holdReply = false; h.make();
 		CHECK(h.owner->resume()); h.drain(); h.reconcile();
 		if (h.state.reason == u"cancelled"_q) { CHECK(!h.files.gate->postingHeld()); continue; }
-		if (!h.done()) { std::fprintf(stderr, "Quit hold boundary=%d: %s\n", boundary, qPrintable(h.state.reason)); }
-		CHECK(h.done() && h.moved() && h.files.markWrites <= 1);
+		if (!h.done() && !h.followFinished()) { std::fprintf(stderr, "Quit hold boundary=%d: %s\n", boundary, qPrintable(h.state.reason)); }
+		CHECK((h.done() || h.followFinished()) && h.moved() && h.files.markWrites <= 1);
 	}
 	{
 		auto h = OwnerHarness(); CHECK(h.owner->resume()); h.drain();
@@ -616,8 +671,58 @@ void Restart() {
 		CHECK(h.state.finished && h.state.reason == u"carry-resume-held"_q && h.leases == 0 && h.transports == 0 && h.journal());
 		h.on.clear(); h.make(); CHECK(!h.owner->resume());
 		h.on = {DesktopSyncChatCarrySwitch::Recovery}; h.make(); CHECK(h.owner->resume()); h.drain(); h.reconcile();
-		CHECK(h.done() && h.moved());
+		CHECK((h.done() || h.followFinished()) && h.moved());
 	}
+}
+
+void RecoveryTimers() {
+	{
+		auto h = OwnerHarness(); h.dropMark = true;
+		h.onChanged = [&](const DesktopSyncChatCarryState &value) {
+			if (value.reason != u"mark-recovery-waiting"_q) { return; }
+			h.onChanged = nullptr;
+			h.owner->close(u"timer-reentry"_q);
+		};
+		CHECK(h.owner->move(h.draft(), u"window-A"_q)); h.drain();
+		CHECK(h.state.finished && !h.owner->busy() && h.timers.empty() && !h.files.gate->postingHeld());
+		CHECK(h.owner->resume(u"window-B"_q)); h.drain();
+		CHECK(h.state.carry && h.state.carry->markRecoveryAfter && !h.timers.empty());
+	}
+	auto h = OwnerHarness(); h.dropMark = true;
+	CHECK(h.owner->move(h.draft(), u"window-A"_q)); h.drain();
+	Must(!h.timers.empty() && h.files.progress.markRecoveryAfter);
+	CHECK(h.timers.back().first == 30000 && MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 1);
+	const auto stale = h.timers.back().second;
+	h.holdReply = true; h.owner->retry(); h.drain(); Must(h.heldReply);
+	const auto inFlight = h.sends;
+	h.work.push_back(stale); h.drain();
+	CHECK(h.sends == inFlight && h.heldReply);
+	h.holdReply = false;
+	auto done = std::move(h.heldReply); h.heldReply = nullptr; done(std::move(h.held)); h.drain();
+	CHECK(MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 1);
+	const auto sends = h.sends;
+	h.work.push_back(stale); h.drain();
+	CHECK(h.sends == sends && MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 1);
+	h.files.clock += 30000;
+	h.work.push_back(h.timers.back().second); h.drain();
+	CHECK(MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 2 && h.timers.back().first == 120000);
+	const auto oldOwnerTimer = h.timers.back().second;
+	h.live = false; h.files.clock += 120000;
+	h.work.push_back(oldOwnerTimer); h.drain();
+	CHECK(MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 2);
+	h.owner.reset(); h.drain(); CHECK(!h.files.gate->postingHeld());
+	h.live = true; h.make(); CHECK(h.owner->resume(u"window-B"_q)); h.drain();
+	CHECK(MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 3 && h.timers.back().first == 600000);
+	const auto restartedSends = h.sends;
+	h.work.push_back(oldOwnerTimer); h.drain();
+	CHECK(h.sends == restartedSends && MarkRecoveryImage(h.files).value(u"checks"_q).toInt() == 3);
+	const auto settled = h.settled.size();
+	h.files.clock += 600000;
+	h.work.push_back(h.timers.back().second); h.drain();
+	Must(h.state.carry && h.state.carry->journal);
+	CHECK(h.state.finished && !h.owner->busy() && h.state.carry->journal->phase == SyncCarryPhase::FinishedForFollow);
+	CHECK(h.settled.size() == settled + 1 && h.files.markWrites == 0 && h.cleanupDeletes == 0);
+	CHECK(!h.files.gate->postingHeld() && !h.wrongThread);
 }
 
 void FollowAndPause() {
@@ -711,7 +816,7 @@ void Recovery() {
 	h.on.insert(DesktopSyncChatCarrySwitch::Recovery);
 	CHECK(h.owner->recover(selection)); h.drain();
 	if (!h.done()) { std::fprintf(stderr, "Recovery hold: %s\n", qPrintable(h.state.reason)); }
-	CHECK(h.done() && h.files.markWrites == 1 && h.files.cloud.empty() && !h.files.gate->postingHeld());
+	CHECK(h.done() && h.files.markWrites == 1 && h.files.cloud.size() == 1 && !h.files.gate->postingHeld());
 	CHECK(h.settled == std::vector{DesktopSyncChatCarryKind::Recovery} && !h.wrongThread);
 	// The replacement mark is an effect: the recovery flow's own engine renewed it.
 	CHECK(h.renewals > 0 && h.unrenewed == 0);
@@ -799,8 +904,8 @@ void Builders() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv); std::setbuf(stdout, nullptr);
 	CHECK(!SyncStoreWorkerThread());
-	Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); FollowAndPause(); LateFollow(false); LateFollow(true);
-	Recovery(); Marks();
+	StoreThreadTimers(); Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); RecoveryTimers(); FollowAndPause();
+	LateFollow(false); LateFollow(true); Recovery(); Marks();
 	std::printf("CARRY OWNER %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

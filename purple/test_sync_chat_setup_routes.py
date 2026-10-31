@@ -105,6 +105,25 @@ for key in ['lng_purple_chat_follow_required', 'lng_purple_chat_change_unavailab
 assert re.search(held_words, re.search('"lng_purple_chat_change_disabled" = "([^"]*)";', strings).group(1)), 'held-word negative failed'
 print('T5d switch-aware texts: Follow required, Change unavailable and held carry say nothing about a held build PASS')
 
+# A mark check that can end in finish-for-Follow never claims the move or the Follow happened: the finish
+# texts say the settings were carried and ask for the ordinary Follow.
+claims = r'Following that chat|Sync follows|Sync continues|Finishing the move'
+ftf = {key: re.search('"' + key + '" = "([^"]*)";', strings).group(1) for key in [
+    'lng_purple_chat_mark_recovery_running', 'lng_purple_chat_mark_recovery_follow',
+    'lng_purple_chat_mark_recovery_unconfirmed', 'lng_purple_chat_mark_recovery_old']}
+assert ftf['lng_purple_chat_mark_recovery_running'] == 'Checking whether the move to {chat} finished.'
+for key, value in ftf.items():
+    assert not re.search(claims, value), key
+    if key != 'lng_purple_chat_mark_recovery_running':
+        assert 'settings were carried' in value and 'newest settings' in value, key
+        assert value.endswith('Open Sync chat and press Follow to use it.') or value.endswith(
+            'Open Sync chat and press Follow to use it. You can move again after that.'), key
+for old in ['Another device moved sync to {chat}. Following that chat.', 'The move could not be confirmed. Sync follows {chat}.',
+            'The move did not finish. Sync continues in {chat}. You can move again.', 'Finishing the move to {chat}.']:
+    assert re.search(claims, old), 'FtF claim negative failed'
+assert 'tr::lng_purple_chat_mark_recovery_running(tr::now, lt_chat, target)' in ui
+print('FtF texts: the check and the finish never claim a move or Follow that did not happen, 4 negatives PASS')
+
 
 def move_cleanup_warning(source, target):
     begin = source.index('void AcceptMove(')

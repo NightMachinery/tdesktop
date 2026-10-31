@@ -3,6 +3,8 @@
 #include "base/random.h"
 #include "purple/purple_sync_chat_create.h"
 
+#include <QtCore/QElapsedTimer>
+
 #include <algorithm>
 
 namespace Purple {
@@ -22,16 +24,47 @@ bool FrozenTargetWinner(const SyncCarryJournal &journal,
 				&& resolution.source == journal.source && resolution.cache == journal.oldMark));
 }
 
+bool PublishesMark(const SyncCarryJournal &journal) {
+	return journal.mode == SyncCarryMode::Switch || journal.mode == SyncCarryMode::RepairMark;
+}
+
+bool CompleteRecoveryRead(const DesktopSyncChatIo &route, int32_t id,
+		const MTPmessages_Messages &response) {
+	if (DesktopSyncChatRecordMessage(route, response, id)) { return true; }
+	if (!RecognizedDesktopSyncChatRead(response, route.peer.chat)) { return false; }
+	const auto consistent = response.match([](const MTPDmessages_messagesSlice &data) {
+		return data.vcount().v >= data.vmessages().v.size();
+	}, [](const MTPDmessages_channelMessages &data) {
+		return data.vcount().v >= data.vmessages().v.size();
+	}, [](const auto &) { return true; });
+	if (!consistent) { return false; }
+	return response.match([](const MTPDmessages_messagesNotModified &) { return false; },
+		[&](const auto &data) {
+			const auto &messages = data.vmessages().v;
+			if (messages.size() != 1 || messages.front().type() != mtpc_messageEmpty) { return false; }
+			const auto &empty = messages.front().c_messageEmpty();
+			return empty.vid().v == id && (!empty.vpeer_id()
+				|| DesktopSyncChatToken(*empty.vpeer_id(), route.peer.origin.account.userId) == route.peer.chat);
+		});
+}
+
 }
 
 DesktopSyncChatCarry::DesktopSyncChatCarry(QString directory, SyncChatCarryStoreScope scope,
 		DesktopSyncChatOrigin origin, std::shared_ptr<std::atomic<bool>> admitted,
 		std::shared_ptr<DesktopSyncCarryGate::Lease> lease,
-		Fn<void(DesktopSyncCarryProgress)> progress, SyncDurableFault fault)
+		Fn<void(DesktopSyncCarryProgress)> progress, SyncDurableFault fault, Fn<int64_t()> clock)
 : _directory(std::move(directory)), _scope(std::move(scope)), _origin(std::move(origin))
 , _admitted(std::move(admitted)), _lease(std::move(lease))
-, _progress(std::move(progress)), _fault(std::move(fault)) {
+, _progress(std::move(progress)), _fault(std::move(fault)), _clock(std::move(clock)) {
 	_run = RandomId();
+}
+
+int64_t DesktopSyncChatCarry::now() const {
+	if (_clock) { return _clock(); }
+	auto timer = QElapsedTimer();
+	timer.start();
+	return timer.msecsSinceReference();
 }
 
 DesktopSyncChatCarry::~DesktopSyncChatCarry() { retire(); }
@@ -48,7 +81,8 @@ bool DesktopSyncChatCarry::accept(const DesktopSyncCarryCommand &command) const 
 		&& command.revision == _store->journal()->revision
 		&& command.origin == _origin && command.action == _command->action
 		&& command.source == _store->journal()->source && command.target == _store->journal()->target
-		&& command.dispatch == _command->dispatch;
+		&& command.dispatch == _command->dispatch && command.markId == _command->markId
+		&& command.markRecovery == _command->markRecovery;
 }
 
 bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameResolution) {
@@ -104,6 +138,14 @@ void DesktopSyncChatCarry::publish(QString reason, SyncChatCarryStorageResult va
 	}
 	if (!progress.journal) { progress.journal = _rememberedJournal; }
 	progress.command = _command;
+	progress.markRecoveryAfter = _markRecoveryAfter;
+	progress.markRecoveryRefusal = _markRecoveryRefusal;
+	if (_classifyingMark && progress.reason.isEmpty()) { progress.reason = u"mark-recovery-checking"_q; }
+	if (progress.journal && progress.journal->phase == SyncCarryPhase::FinishedForFollow) {
+		progress.reason = progress.journal->attemptedMark ? u"mark-recovery-superseded"_q
+			: progress.journal->supersededBy == progress.journal->oldMark && progress.journal->oldMark
+			? u"mark-recovery-continues-old"_q : u"mark-recovery-unconfirmed"_q;
+	}
 	// A run that planned no cleanup still passes the core's Cleanup phase for its final readback. That is not a
 	// pending cleanup, so it reports none and offers no cleanup Retry or Skip.
 	if (progress.journal && progress.journal->plan && progress.journal->plan->cleanup != SyncCarryCleanup::None) { progress.cleanup = DesktopSyncChatCleanupProgressOf(*progress.journal,_command.has_value(),_cleanupConfirmed,_cleanupUncopied); }
@@ -179,6 +221,11 @@ void DesktopSyncChatCarry::resume() {
 	}
 	if (_store->foreignLogin()) { publish(u"interrupted-login-discard-only"_q); return; }
 	if (_resumeRefused) { publish(u"recovery-review-required"_q); return; }
+	_markRecoveryAfter.reset(); _markRecoveryRefusal.reset();
+	_classifyingMark = false; _recoveryMarkId = 0; _recoveryWinner.reset();
+	_markDestinationVerified = false;
+	if (PublishesMark(*_store->journal()) && _store->journal()->markAttempted
+		&& !_store->journal()->stateCommitted && !result(_store->Resume())) { return; }
 	_needsFresh = true;
 	advance();
 }
@@ -192,8 +239,9 @@ void DesktopSyncChatCarry::issue(SyncCarryJournalAction action, bool dispatch, s
 	command.source = journal.source; command.target = journal.target;
 	command.dispatch = dispatch; command.effects = std::move(effects);
 	command.cleanupRead=std::move(cleanupRead); command.cleanupPermit=std::move(cleanupPermit);
-	command.markId = _recoveryWinner ? _recoveryWinner->markId
+	command.markId = _classifyingMark ? _recoveryMarkId : _recoveryWinner ? _recoveryWinner->markId
 		: journal.targetMark ? journal.targetMark->markId : _io->MarkReceiptId();
+	command.markRecovery = PublishesMark(journal) && journal.markAttempted;
 	if (action == SyncCarryJournalAction::ResolvePending) {
 		const auto pending = _store->Pending();
 		if (!pending) { publish(u"pending-unreadable"_q, {pending.status}); return; }
@@ -211,6 +259,15 @@ void DesktopSyncChatCarry::advance() {
 	if (!SyncCarryJournalHoldsWrites(*_store->journal())) { publish(u"carry-terminal"_q); return; }
 	if (_needsFresh) { issue(SyncCarryJournalAction::ResolveAgain); return; }
 	const auto action = NextSyncCarryJournalAction(*_store->journal());
+	if (action == SyncCarryJournalAction::ReadMark && PublishesMark(*_store->journal())
+		&& _store->journal()->markAttempted) {
+		_recoveryOnly = true;
+		if (!_markDestinationVerified) { issue(SyncCarryJournalAction::VerifyDestination); return; }
+		_classifyingMark = true;
+		_recoveryMarkId = 0;
+		issue(SyncCarryJournalAction::ResolveAgain);
+		return;
+	}
 	if (_recoveryOnly && (action == SyncCarryJournalAction::Deliver
 		|| action == SyncCarryJournalAction::PostMark || action == SyncCarryJournalAction::ResolvePending)) {
 		publish(u"recovery-reconciliation-only"_q); return;
@@ -327,6 +384,121 @@ void DesktopSyncChatCarry::prepareEffects(const DesktopSyncCarryReply &reply) {
 	issue(action, true, std::move(permits));
 }
 
+bool DesktopSyncChatCarry::markFresh(const DesktopSyncCarryFresh &facts) {
+	if (!current() || !_store || !_store->journal() || !_io || !facts.fullResolutionComplete
+		|| !facts.current || !facts.current() || !ValidDesktopSyncChatIo(facts.target)) { return false; }
+	const auto &journal = *_store->journal();
+	const auto eligible = DesktopSyncChatEligibility(facts.target.peer);
+	const auto resolution = ResolveSyncChat(facts.resolutionInput);
+	const auto action = resolution.action;
+	return facts.source.peer.origin == _origin && facts.target.peer.origin == _origin
+		&& facts.source.peer.chat == journal.source && facts.target.peer.chat == journal.target
+		&& facts.loginAuthority == _scope.loginAuthority
+		&& facts.resolutionInput.selfUserId == _scope.account.userId
+		&& (!facts.resolutionInput.cache || (facts.resolutionInput.cacheRead != SyncChatDirectRead::Unknown
+			&& facts.resolutionInput.cacheRead != SyncChatDirectRead::Migrated))
+		&& (action == SyncChatAction::Use || action == SyncChatAction::Follow
+			|| action == SyncChatAction::Searching || action == SyncChatAction::Lost)
+		&& eligible && CheckSyncCarryReaders(journal, *eligible) != SyncCarryReaderVerdict::Hold
+		&& _io->CheckReaders(facts);
+}
+
+void DesktopSyncChatCarry::markHold(QString reason) {
+	_classifyingMark = false;
+	_markRecoveryAfter = 30000;
+	publish(std::move(reason));
+}
+
+void DesktopSyncChatCarry::classifyMark(const DesktopSyncCarryReply &reply) {
+	if (!reply.fresh || reply.outcome != SyncCarryOutcome::Success || !markFresh(*reply.fresh)) {
+		markHold(u"mark-recovery-incomplete"_q); return;
+	}
+	const auto journal = *_store->journal();
+	if (journal.phase != SyncCarryPhase::Mark || !_markDestinationVerified || !journal.destinationVerified || !journal.commitPrepared
+		|| !journal.markAttempted || journal.stateCommitted) { markHold(u"mark-recovery-phase-held"_q); return; }
+	const auto slot = _io->MarkState();
+	if (!slot || slot->inFlight) { markHold(u"mark-recovery-request-in-flight"_q); return; }
+	const auto resolution = ResolveSyncChat(reply.fresh->resolutionInput);
+	const auto winner = resolution.winner;
+	const auto targetWins = winner && winner->chat == journal.target;
+	const auto known = journal.attemptedMark ? journal.attemptedMark : journal.targetMark;
+	const auto id = targetWins ? winner->markId : known ? known->markId : slot->receiptId;
+	if (id > 0 && (reply.command.action != SyncCarryJournalAction::ReadMark || reply.command.markId != id)) {
+		_recoveryMarkId = id;
+		issue(SyncCarryJournalAction::ReadMark);
+		return;
+	}
+	auto read = std::optional<SyncCarryMarkReadback>();
+	if (id > 0) {
+		if (!reply.markResponse || reply.markId != id
+			|| !CompleteRecoveryRead(reply.fresh->target, id, *reply.markResponse)) {
+			markHold(u"mark-recovery-incomplete"_q); return;
+		}
+		read = DesktopSyncChatCarryMarkReadback(reply.fresh->target, id, *reply.markResponse, journal.markText);
+	}
+	if (targetWins) {
+		if (!read || read->date != winner->markDate || read->chat != winner->chat
+			|| !FrozenTargetWinner(journal, resolution, *winner)) {
+			markHold(u"mark-recovery-winner-read-held"_q); return;
+		}
+		auto accepted = event(SyncCarryEventKind::MarkRead);
+		accepted.mark = *read;
+		accepted.noRequestInFlight = true;
+		_classifyingMark = false; _markRecoveryAfter.reset(); _peer = reply.fresh->target.peer;
+		if (result(_store->Advance(accepted))) { advance(); }
+		return;
+	}
+	const auto neverSent = slot->state == u"prepared"_q && !slot->receiptId
+		&& !journal.targetMark && !journal.attemptedMark;
+	const auto unchanged = fresh(*reply.fresh);
+	if (neverSent && unchanged) {
+		auto accepted = event(SyncCarryEventKind::MarkRead);
+		accepted.mark.outcome = SyncCarryMarkOutcome::Absent;
+		accepted.mark.account = journal.account; accepted.mark.chat = journal.target;
+		accepted.neverLandedConfirmed = true;
+		accepted.neverLandedRequestId = journal.markRequestId;
+		accepted.noRequestInFlight = true;
+		_classifyingMark = false; _markRecoveryAfter.reset(); _recoveryOnly = false;
+		const auto saved = _store->Advance(accepted);
+		if (saved && saved.journalStatus == SyncCarryJournalStatus::Retry
+			&& _store->journal() && !_store->journal()->markAttempted) { advance(); }
+		else { static_cast<void>(result(saved)); }
+		return;
+	}
+	if (read && (!winner || !SyncChatMarkOutranks(*winner, {read->chat, read->messageId, read->date}))) {
+		_classifyingMark = false; _markRecoveryAfter.reset();
+		publish(u"mark-recovery-conflicting-winner"_q); return;
+	}
+	if (!neverSent && !read) {
+		const auto checked = _io->CheckedMarkRecovery(now());
+		if (!checked) { markHold(u"mark-recovery-storage-held"_q); return; }
+		if (checked->checks < 4) {
+			_classifyingMark = false;
+			_markRecoveryAfter = std::max<int64_t>(1, checked->nextAt - now());
+			publish(u"mark-recovery-waiting"_q); return;
+		}
+	}
+	auto accepted = event(SyncCarryEventKind::FinishThenFollow);
+	accepted.resolution = resolution;
+	accepted.fullResolutionComplete = true;
+	accepted.noRequestInFlight = true;
+	if (read) { accepted.mark = *read; }
+	else if (neverSent) {
+		accepted.mark.outcome = SyncCarryMarkOutcome::Absent;
+		accepted.mark.account = journal.account; accepted.mark.chat = journal.target;
+		accepted.neverLandedConfirmed = true;
+		accepted.neverLandedRequestId = journal.markRequestId;
+	}
+	const auto refusal = CheckSyncCarryFinishThenFollow(journal, accepted, DesktopSyncCarryLogin(_scope.loginAuthority));
+	_classifyingMark = false; _markRecoveryAfter.reset();
+	if (refusal != SyncCarryFinishRefusal::None) {
+		_markRecoveryRefusal = refusal;
+		publish(u"mark-recovery-refused"_q); return;
+	}
+	_peer = reply.fresh->target.peer;
+	if (result(_store->Advance(accepted))) { advance(); }
+}
+
 void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 	if (!accept(reply.command)) { return; }
 	const auto opening = *_command;
@@ -334,16 +506,26 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 	if (reply.fresh) { reply.fresh->current = [admitted = _admitted] { return admitted->load(); }; }
 	if (_needsFresh) {
 		if (!reply.fresh || reply.outcome != SyncCarryOutcome::Success) {
-			publish(u"startup-resolution-held"_q); return;
+			if (PublishesMark(*_store->journal()) && _store->journal()->markAttempted) { markHold(u"mark-recovery-incomplete"_q); }
+			else { publish(u"startup-resolution-held"_q); }
+			return;
 		}
 		if (fresh(*reply.fresh)) {
+			if (PublishesMark(*_store->journal()) && _store->journal()->markAttempted
+				&& !_store->journal()->stateCommitted) { _recoveryOnly = true; }
 			_needsFresh = false; _peer = reply.fresh->target.peer; advance(); return;
 		}
 		const auto &journal = *_store->journal();
+		if (PublishesMark(journal) && journal.markAttempted
+			&& (!journal.stateCommitted || journal.finishThenFollow) && markFresh(*reply.fresh)) {
+			_needsFresh = false; _recoveryOnly = true;
+			_peer = reply.fresh->target.peer;
+			advance(); return;
+		}
 		const auto resolution = ResolveSyncChat(reply.fresh->resolutionInput);
 		const auto winner = resolution.winner;
 		const auto own = journal.mode == SyncCarryMode::Switch || journal.mode == SyncCarryMode::RepairMark;
-		const auto id = own ? _io->MarkReceiptId() : journal.targetMark ? journal.targetMark->markId : 0;
+		const auto id = journal.targetMark ? journal.targetMark->markId : own ? _io->MarkReceiptId() : 0;
 		const auto next = NextSyncCarryJournalAction(journal);
 		const auto localCompletion = next == SyncCarryJournalAction::VerifyDestination
 			|| next == SyncCarryJournalAction::ReadMark
@@ -361,6 +543,11 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 		_recoveryOnly = true;
 		_recoveryWinner = winner;
 		issue(SyncCarryJournalAction::ReadMark);
+		return;
+	}
+	if (_classifyingMark && (opening.action == SyncCarryJournalAction::ResolveAgain
+		|| opening.action == SyncCarryJournalAction::ReadMark)) {
+		classifyMark(reply);
 		return;
 	}
 	if (opening.action==SyncCarryJournalAction::Cleanup && opening.dispatch) {
@@ -391,6 +578,8 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 		publish(u"pending-intent-held"_q); return;
 	}
 	if (reply.outcome != SyncCarryOutcome::Success) {
+		if (PublishesMark(*_store->journal()) && _store->journal()->markAttempted
+			&& !_store->journal()->stateCommitted) { markHold(u"mark-recovery-incomplete"_q); return; }
 		publish(u"transport-transient-or-unknown"_q); return;
 	}
 	if (reply.fresh) {
@@ -443,21 +632,24 @@ void DesktopSyncChatCarry::complete(DesktopSyncCarryReply reply) {
 		const auto destination = DesktopSyncChatCarryInventory(*reply.destination);
 		if (!destination) { publish(u"complete-destination-required"_q); return; }
 		if (!reply.fresh || !_io->ReconcileAll(*reply.destination, *reply.fresh)) { publish(u"delivery-reconciliation-held"_q); return; }
+		if (_store->journal()->markAttempted && _store->journal()->plan
+			&& !VerifySyncCarryReadback(*_store->journal()->plan, *destination, reply.playlist)) {
+			markHold(u"mark-recovery-destination-incomplete"_q); return;
+		}
 		if (_store->journal()->plan && VerifySyncCarryReadback(*_store->journal()->plan, *destination, reply.playlist).status == SyncCarryStatus::PlaylistRequired) { publish(u"playlist-required"_q); return; }
+		if (_store->journal()->mode == SyncCarryMode::RepairMark && _store->journal()->phase == SyncCarryPhase::Mark) {
+			_markDestinationVerified = true;
+			advance(); return;
+		}
 		auto accepted = event(SyncCarryEventKind::DestinationRead); accepted.destination = *destination;
 		accepted.playlist = reply.playlist;
-		if (result(_store->Advance(accepted))) { advance(); }
+		if (result(_store->Advance(accepted))) { _markDestinationVerified = true; advance(); }
 	} return;
 	case SyncCarryJournalAction::ReadMark: {
 		if (!reply.fresh || !reply.markResponse || reply.fresh->target.peer.origin != _origin
 			|| reply.fresh->target.peer.chat != opening.target) { publish(u"exact-mark-required"_q); return; }
 		const auto journal = *_store->journal();
-		if (journal.mode == SyncCarryMode::Switch || journal.mode == SyncCarryMode::RepairMark) {
-			if (!reply.updates.empty()) {
-				if (reply.updates.size() != 1 || !_io->RetainedMarkReceipt(*reply.fresh, reply.updates.front())) { publish(u"matched-mark-receipt-required"_q); return; }
-			}
-			if (_io->MarkReceiptId() <= 0 || _io->MarkReceiptId() != reply.markId) { publish(u"matched-mark-receipt-required"_q); return; }
-		} else if (!journal.targetMark || reply.markId != journal.targetMark->markId) { publish(u"winner-mark-mismatch"_q); return; }
+		if (!journal.targetMark || reply.markId != journal.targetMark->markId) { publish(u"winner-mark-mismatch"_q); return; }
 		const auto read = DesktopSyncChatCarryMarkReadback(reply.fresh->target, reply.markId, *reply.markResponse, _store->journal()->markText);
 		if (!read) { publish(u"mark-unknown"_q); return; }
 		const auto resolution = ResolveSyncChat(reply.fresh->resolutionInput);

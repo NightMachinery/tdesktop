@@ -147,6 +147,7 @@ struct CarryWorkerState {
 			Must(local.StageConfig(original,next,scope.binding)); Must(local.ConfirmConfigReadBack(original,state.createdDevice,10,state.chat));
 		}
 		fresh.source = Route(state.chat); fresh.target = Route({PeerTokenKind::Channel,456});
+		fresh.fullResolutionComplete = true;
 		fresh.source.peer.facts->protectedContent = own;
 		fresh.current = [alive=current] { return alive->load(); }; fresh.loginAuthority = scope.loginAuthority; fresh.readerConsentAccepted = true;
 		fresh.resolutionInput.cache = SyncChatCache{state.chat,10,100}; fresh.resolutionInput.settingsBound = true;

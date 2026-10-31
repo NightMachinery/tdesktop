@@ -204,7 +204,7 @@ QString CarryReason(const QString &reason) {
 		: u"\n"_q + tr::lng_purple_chat_setup_reason(tr::now).arg(reason);
 }
 
-QString CarryText(const DesktopSyncChatCarryState &state) {
+QString CarryText(const DesktopSyncChatCarryState &state, Main::Session *session) {
 	using Kind = DesktopSyncChatCarryKind;
 	const auto &reason = state.reason;
 	if (state.kind == Kind::Mark) {
@@ -216,6 +216,30 @@ QString CarryText(const DesktopSyncChatCarryState &state) {
 	const auto &carry = state.carry;
 	const auto phase = carry && carry->journal
 		? std::make_optional(carry->journal->phase) : std::nullopt;
+	if (carry && carry->journal) {
+		const auto title = [&](PeerToken chat) {
+			return session ? Title(*session, chat) : tr::lng_purple_chat_title(tr::now);
+		};
+		const auto &journal = *carry->journal;
+		const auto target = title(journal.target);
+		if (phase == SyncCarryPhase::FinishedForFollow) {
+			if (reason == u"mark-recovery-continues-old"_q) {
+				return tr::lng_purple_chat_mark_recovery_old(tr::now, lt_chat, title(journal.source));
+			} else if (journal.supersededBy) {
+				return journal.attemptedMark
+					? tr::lng_purple_chat_mark_recovery_follow(tr::now, lt_chat, title(journal.supersededBy->chat))
+					: tr::lng_purple_chat_mark_recovery_unconfirmed(tr::now, lt_chat, title(journal.supersededBy->chat));
+			}
+			return tr::lng_purple_chat_mark_recovery_searching(tr::now);
+		} else if (phase == SyncCarryPhase::Mark && reason == u"mark-recovery-checking"_q) {
+			return tr::lng_purple_chat_mark_recovery_running(tr::now, lt_chat, target);
+		} else if (phase == SyncCarryPhase::Mark && reason == u"mark-recovery-waiting"_q && carry->markRecoveryAfter) {
+			return tr::lng_purple_chat_mark_recovery_waiting(tr::now, lt_chat, target,
+				lt_time, QString::number((*carry->markRecoveryAfter + 999) / 1000));
+		} else if (phase == SyncCarryPhase::Mark && reason.startsWith(u"mark-recovery-"_q)) {
+			return tr::lng_purple_chat_mark_recovery_held(tr::now);
+		}
+	}
 	if (state.kind == Kind::None || (carry && carry->absent)) {
 		// A startup resume that found nothing says nothing; an explicit Resume says so.
 		return (state.kind == Kind::None || state.window.isEmpty()) ? QString()
@@ -350,7 +374,7 @@ void UpdateCarryButtons(SetupState *state) {
 
 void ShowCarry(SetupState *state, const DesktopSyncChatCarryState &value) {
 	if (OwnsCarry(*state, value)) {
-		if (const auto text = CarryText(value); !text.isEmpty()) {
+		if (const auto text = CarryText(value, state->session.get()); !text.isEmpty()) {
 			state->carry = value;
 			state->status->setText(text);
 		}
@@ -935,7 +959,7 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		StatusText(*session, SyncChatStatusOf(session)), st::boxLabel));
 	const auto refresh = [=] {
 		if (state->carry && !state->service) {
-			auto text = CarryText(*state->carry);
+			auto text = CarryText(*state->carry, session);
 			if (state->carry->finished && Current(*state)) {
 				text += u"\n\n"_q + StatusText(*session, SyncChatStatusOf(session));
 			}

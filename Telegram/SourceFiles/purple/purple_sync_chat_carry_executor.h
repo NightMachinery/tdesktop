@@ -25,6 +25,7 @@ struct DesktopSyncCarryCommand {
 	QByteArray pendingRecord;
 	SyncCarrySendIntent pendingIntent = SyncCarrySendIntent::Unknown;
 	int32_t markId = 0;
+	bool markRecovery = false;
 	std::vector<DesktopSyncCarryPermit> effects;
 	std::optional<DesktopSyncCleanupRead> cleanupRead;
 	std::optional<DesktopSyncCleanupPermit> cleanupPermit;
@@ -62,6 +63,8 @@ struct DesktopSyncCarryProgress {
 	bool terminal = false;
 	bool absent = false;
 	DesktopSyncCleanupProgress cleanup;
+	std::optional<int64_t> markRecoveryAfter;
+	std::optional<SyncCarryFinishRefusal> markRecoveryRefusal;
 };
 
 class DesktopSyncChatCarry final {
@@ -69,7 +72,8 @@ public:
 	DesktopSyncChatCarry(QString directory, SyncChatCarryStoreScope scope,
 		DesktopSyncChatOrigin origin, std::shared_ptr<std::atomic<bool>> admitted,
 		std::shared_ptr<DesktopSyncCarryGate::Lease> lease,
-		Fn<void(DesktopSyncCarryProgress)> progress, SyncDurableFault fault = {});
+		Fn<void(DesktopSyncCarryProgress)> progress, SyncDurableFault fault = {},
+		Fn<int64_t()> clock = {});
 	~DesktopSyncChatCarry();
 	void open(std::optional<SyncCarryJournalStart> start = std::nullopt,
 		std::optional<DesktopSyncChatPeer> consentPeer = std::nullopt, QString stream = u"config"_q,
@@ -103,6 +107,10 @@ private:
 	[[nodiscard]] SyncCarryJournalEvent event(SyncCarryEventKind kind) const;
 	void plan(const DesktopSyncCarryReply &reply);
 	void prepareEffects(const DesktopSyncCarryReply &reply);
+	[[nodiscard]] bool markFresh(const DesktopSyncCarryFresh &facts);
+	void classifyMark(const DesktopSyncCarryReply &reply);
+	void markHold(QString reason);
+	[[nodiscard]] int64_t now() const;
 
 	QString _directory;
 	SyncChatCarryStoreScope _scope;
@@ -111,6 +119,7 @@ private:
 	std::shared_ptr<DesktopSyncCarryGate::Lease> _lease;
 	Fn<void(DesktopSyncCarryProgress)> _progress;
 	SyncDurableFault _fault;
+	Fn<int64_t()> _clock;
 	std::unique_ptr<SyncChatCarryStore> _store;
 	std::unique_ptr<DesktopSyncChatCarryIo> _io;
 	std::unique_ptr<DesktopSyncChatCleanup> _cleanup;
@@ -134,6 +143,11 @@ private:
 	bool _needsFresh = false;
 	bool _resumeRefused = false;
 	bool _closed = false;
+	bool _classifyingMark = false;
+	bool _markDestinationVerified = false;
+	int32_t _recoveryMarkId = 0;
+	std::optional<int64_t> _markRecoveryAfter;
+	std::optional<SyncCarryFinishRefusal> _markRecoveryRefusal;
 
 };
 

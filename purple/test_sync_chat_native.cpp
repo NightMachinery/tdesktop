@@ -2,6 +2,7 @@
 #include "purple/purple_sync_chat_native.h"
 #include "test_sync_chat_carry.cpp"
 #include <deque>
+#include "base/unixtime.h"
 
 namespace {
 
@@ -95,6 +96,12 @@ struct NativeHarness {
 	bool duplicate = false;
 	bool removeOld = false;
 	bool malformedExact = false;
+	bool hideTargetFromGlobal = false;
+	bool missingTargetMark = false;
+	int peerMark = 0;
+	int targetSearches = 0;
+	int targetHistories = 0;
+	std::vector<int> exactIds;
 	int markDeletes = 0;
 	int cleanupDeletes = 0;
 	std::set<int> deleted;
@@ -235,9 +242,10 @@ struct NativeHarness {
 			} else if (type == int(mtpc_messages_searchGlobal)) {
 				auto rows = QVector<MTPMessage>{
 				    NativeMark(files->fresh.source, 9, 100)};
-				if (files->markWrites) {
+				if (files->markWrites && !hideTargetFromGlobal && !missingTargetMark) {
 					rows.push_back(NativeMark(files->fresh.target, 90, 500));
 				}
+				if (peerMark && !hideTargetFromGlobal) { rows.push_back(NativeMark(files->fresh.target, peerMark, 700)); }
 				result.messages = Response(Route({}), rows);
 			} else if (type == int(mtpc_messages_search)) {
 				Read<MTPint>(cursor, end);
@@ -245,17 +253,25 @@ struct NativeHarness {
 				const auto query = qs(Read<MTPstring>(cursor, end));
 				const auto route = input.type() == mtpc_inputPeerSelf
 				    ? Route({})
-				    : files->fresh.source;
+				    : input.type() == mtpc_inputPeerChannel
+					&& input.c_inputPeerChannel().vchannel_id().v == files->fresh.target.peer.chat.id
+					? files->fresh.target : files->fresh.source;
 				auto rows = QVector<MTPMessage>();
 				if (query == u"#purplesync"_q) {
 					rows.push_back(CarryDocument(route, files->original));
 				} else if (route.peer.chat
 				    == files->fresh.source.peer.chat) {
 					rows.push_back(NativeMark(route, 9, 100));
+				} else if (route.peer.chat == files->fresh.target.peer.chat) {
+					++targetSearches;
+					if (files->markWrites && !missingTargetMark) { rows.push_back(NativeMark(route, 90, 500)); }
+					if (peerMark) { rows.push_back(NativeMark(route, peerMark, 700)); }
 				}
 				result.messages = Response(route, rows);
 			} else if (type == int(mtpc_messages_getHistory)) {
 				const auto input = Read<MTPInputPeer>(cursor, end);
+				if (input.type() == mtpc_inputPeerChannel
+					&& input.c_inputPeerChannel().vchannel_id().v == files->fresh.target.peer.chat.id) { ++targetHistories; }
 				result.messages
 				    = Response(input.type() == mtpc_inputPeerChannel
 				            ? files->fresh.target
@@ -271,7 +287,10 @@ struct NativeHarness {
 				    = Read<MTPVector<MTPInputMessage>>(cursor, end);
 				Must(ids.v.size() == 1);
 				const auto id = ids.v.front().c_inputMessageID().vid().v;
-				if (deleted.contains(id)) {
+				exactIds.push_back(id);
+				if (missingTargetMark && id == 90) {
+					result.messages = Response(route, {MTP_messageEmpty(MTP_flags(MTPDmessageEmpty::Flags()), MTP_int(id), MTPPeer())});
+				} else if (deleted.contains(id)) {
 					result.messages = Response(route,
 					    {MTP_messageEmpty(
 					        MTP_flags(MTPDmessageEmpty::Flag::f_peer_id),
@@ -282,7 +301,7 @@ struct NativeHarness {
 					    = Receipt(route, files->original, 10, 100).response;
 				} else {
 					result.messages = Response(route,
-					    {NativeMark(route, id, id == 9 ? 100 : 500)});
+					    {NativeMark(route, id, id == 9 ? 100 : id == peerMark ? 700 : 500)});
 				}
 				if (malformedExact) {
 					result.messages = Response(route, {});
@@ -709,20 +728,284 @@ void NativeLiveLosingMark() {
 				Must(reply.fresh);
 				const auto resolved = ResolveSyncChat(reply.fresh->resolutionInput);
 				CHECK(resolved.winner == std::optional(SyncChatCache{rival, 91, 600}));
-				CHECK(command.markId == 90 && reply.outcome == SyncCarryOutcome::Success);
+				CHECK(command.markId == (sameChat ? 91 : 90) && reply.outcome == SyncCarryOutcome::Success);
 				observed = true;
 			}
 			Worker([&] { h.files->engine->complete(reply); });
 		}
-		CHECK(observed && !h.files->progress.terminal && !h.files->progress.command);
-		CHECK(h.files->progress.journal && !h.files->progress.journal->stateCommitted);
-		CHECK(h.files->progress.reason == u"mark-winner-held"_q);
-		CHECK(h.cleanupDeletes == 0 && h.deleted.empty());
-		CHECK(Worker([&] {
-			return CaptureSyncPrivateFile(h.files->root + u"/state.json"_q,
-				kSyncCarryJournalStorageLimit).bytes;
-		}) == before);
+		CHECK(observed && h.files->progress.terminal && !h.files->progress.command);
+		Must(h.files->progress.journal);
+		CHECK(h.files->progress.journal->stateCommitted);
+		CHECK(h.files->progress.journal->phase == (sameChat ? SyncCarryPhase::Done : SyncCarryPhase::FinishedForFollow));
+		CHECK(h.cleanupDeletes == int(sameChat) && h.deleted.size() == size_t(sameChat));
+		CHECK(Worker([&] { return ParseSyncLocalState(CaptureSyncPrivateFile(h.files->root + u"/state.json"_q,
+			kSyncCarryJournalStorageLimit).bytes).state.chat; }) == h.files->fresh.target.peer.chat);
+		CHECK(!before.isEmpty());
 	}
+}
+
+void NativeRecoverySeedAndNamedRead() {
+	for (const auto peerWinner : {false, true}) {
+		auto h = NativeHarness(); h.open();
+		for (auto budget = 0; h.files->progress.command && budget != 100; ++budget) {
+			const auto command = *h.files->progress.command;
+			if (command.action == SyncCarryJournalAction::PostMark && command.dispatch) { break; }
+			const auto reply = h.send(command);
+			Worker([&] { h.files->engine->complete(reply); });
+		}
+		Must(h.files->progress.command && h.files->progress.command->dispatch);
+		if (peerWinner) { h.peerMark = 91; }
+		else { static_cast<void>(h.send(*h.files->progress.command)); }
+		h.hideTargetFromGlobal = true;
+		const auto effects = h.effects;
+		Worker([&] { h.files->newEngine(true); });
+		h.run();
+		Must(h.files->progress.journal);
+		CHECK(h.files->progress.terminal && h.files->progress.journal->phase == SyncCarryPhase::Done);
+		CHECK(h.targetSearches > 0 && h.effects == effects && h.files->markWrites == int(!peerWinner));
+		CHECK(h.files->progress.journal->targetMark->markId == (peerWinner ? 91 : 90));
+		CHECK(std::find(h.exactIds.begin(), h.exactIds.end(), peerWinner ? 91 : 90) != h.exactIds.end());
+	}
+}
+
+void NativePeerlessEmptyNeverProvesAbsent() {
+	auto h = NativeHarness(); h.files->start.removeOldMarkAuthorized = true; h.open(true);
+	for (auto budget = 0; h.files->progress.command && budget != 100; ++budget) {
+		const auto command = *h.files->progress.command;
+		const auto reply = h.send(command);
+		Worker([&] { h.files->engine->complete(reply); });
+		if (command.action == SyncCarryJournalAction::PostMark && command.dispatch) { break; }
+	}
+	Must(h.files->markWrites == 1);
+	const auto effects = h.effects;
+	const auto request = h.files->progress.journal->markRequestId;
+	h.missingTargetMark = true;
+	auto uncertain = 0;
+	const auto check = [&] {
+		for (auto budget = 0; h.files->progress.command && budget != 100; ++budget) {
+			const auto command = *h.files->progress.command;
+			CHECK(!command.dispatch && command.action != SyncCarryJournalAction::PostMark
+				&& command.action != SyncCarryJournalAction::Deliver && command.action != SyncCarryJournalAction::Cleanup);
+			const auto reply = h.send(command);
+			if (command.action == SyncCarryJournalAction::ReadMark) {
+				Must(reply.fresh && reply.markResponse);
+				CHECK(reply.outcome == SyncCarryOutcome::Success && reply.markId == 90);
+				CHECK(!reply.neverLandedConfirmed && reply.neverLandedRequestId.isEmpty());
+				const auto read = DesktopSyncChatCarryMarkReadback(reply.fresh->target, 90,
+					*reply.markResponse, DesktopSyncChatMarkText());
+				CHECK(!read);
+				const auto &journal = *h.files->progress.journal;
+				auto event = SyncCarryEvent(journal, SyncCarryEventKind::MarkRead);
+				event.outcome = SyncCarryOutcome::Success; event.noRequestInFlight = true;
+				event.mark = read.value_or(SyncCarryMarkReadback());
+				CHECK(event.mark.outcome == SyncCarryMarkOutcome::Unknown && !event.neverLandedConfirmed);
+				const auto held = AdvanceSyncCarryJournal(journal, event, DesktopSyncCarryLogin(h.files->scope.loginAuthority));
+				CHECK(held.status == SyncCarryJournalStatus::Wait && held.journal.markAttempted);
+				CHECK(NextSyncCarryJournalAction(held.journal) == SyncCarryJournalAction::ReadMark);
+				event.mark.outcome = SyncCarryMarkOutcome::Absent;
+				event.mark.account = journal.account; event.mark.chat = journal.target;
+				const auto unproven = AdvanceSyncCarryJournal(journal, event, DesktopSyncCarryLogin(h.files->scope.loginAuthority));
+				CHECK(unproven.status == SyncCarryJournalStatus::Wait && unproven.journal.markAttempted);
+				CHECK(NextSyncCarryJournalAction(unproven.journal) == SyncCarryJournalAction::ReadMark);
+				++uncertain;
+			}
+			Worker([&] { h.files->engine->complete(reply); });
+		}
+		CHECK(h.effects == effects && h.files->markWrites == 1 && h.cleanupDeletes == 0 && h.markDeletes == 0);
+		CHECK(h.files->progress.journal->markAttempted && h.files->progress.journal->markRequestId == request);
+	};
+	check();
+	for (const auto delay : {30000, 120000, 600000}) {
+		Must(h.files->progress.markRecoveryAfter);
+		CHECK(*h.files->progress.markRecoveryAfter == delay && !h.files->progress.terminal);
+		Worker([&] { h.files->clock += delay; h.files->newEngine(true); });
+		check();
+	}
+	Must(h.files->progress.terminal && h.files->progress.journal);
+	const auto &journal = *h.files->progress.journal;
+	CHECK(journal.phase == SyncCarryPhase::FinishedForFollow && journal.removeOldMarkAuthorized);
+	CHECK(!journal.attemptedMark && !journal.targetMark && !journal.abandonedCleanup.empty());
+	CHECK(uncertain == 4 && std::count(h.exactIds.begin(), h.exactIds.end(), 90) == 4);
+}
+
+void NativeNoWinnerRecoveryCadence() {
+	for (const auto backwards : {false, true}) {
+		auto h = NativeHarness();
+		h.files->start.removeOldMarkAuthorized = true;
+		Worker([&] { MarkEffect(*h.files); });
+		h.deleted.insert(9);
+		auto delays = 0;
+		h.io.delay = [&](int, Fn<void()>) { ++delays; };
+		const auto request = h.io.request;
+		h.io.request = [&](auto value, auto gate, auto done) {
+			if (std::holds_alternative<MTPmessages_SearchGlobal>(value)
+				|| std::holds_alternative<MTPmessages_Search>(value)) {
+				CHECK(!gate);
+				auto reply = DesktopSyncNativeReply();
+				reply.messages = Response(Route({}), {});
+				done(reply);
+			} else {
+				request(std::move(value), std::move(gate), std::move(done));
+			}
+		};
+		const auto restart = [&] {
+			h.adapter.reset();
+			h.adapter = std::make_unique<DesktopSyncChatNative>(h.opening,
+				h.io, h.renewal);
+			Worker([&] { h.files->newEngine(true); });
+		};
+		const auto image = [&] {
+			return Worker([&] {
+				auto result = MarkRecoveryImage(*h.files);
+				if (result.isEmpty()) {
+					for (const auto &bytes : h.files->progress.retainedImages) {
+						result = QJsonDocument::fromJson(bytes).object()
+							.value(u"transport"_q).toObject()
+							.value(u"mark_recovery"_q).toObject();
+						if (!result.isEmpty()) { break; }
+					}
+				}
+				return result;
+			});
+		};
+		auto advances = 0;
+		const auto check = [&] {
+			for (auto budget = 0; h.files->progress.command && budget != 80; ++budget) {
+				const auto command = *h.files->progress.command;
+				CHECK(command.markRecovery && !command.dispatch);
+				CHECK(command.action == SyncCarryJournalAction::VerifyDestination
+					|| command.action == SyncCarryJournalAction::ResolveAgain);
+				const auto before = image().value(u"checks"_q).toInt();
+				auto reply = std::optional<DesktopSyncCarryReply>();
+				h.adapter->transport().send(command,
+					[&](auto value) { reply = std::move(value); });
+				CHECK(reply.has_value() && delays == 0);
+				if (!reply) { return false; }
+				if (command.action == SyncCarryJournalAction::ResolveAgain) {
+					Must(reply->fresh);
+					CHECK(reply->fresh->fullResolutionComplete);
+					CHECK(ResolveSyncChat(reply->fresh->resolutionInput).action
+						== SyncChatAction::Searching);
+				}
+				Worker([&] { h.files->engine->complete(*reply); });
+				const auto after = image().value(u"checks"_q).toInt();
+				CHECK(after >= before && after <= before + 1);
+				CHECK(command.action == SyncCarryJournalAction::ResolveAgain || after == before);
+				advances += after - before;
+			}
+			CHECK(!h.files->progress.command);
+			CHECK(delays == 0 && h.effects == 0 && h.files->markWrites == 0
+				&& h.cleanupDeletes == 0 && h.markDeletes == 0);
+			CHECK(h.deleted == std::set<int>{9} && h.files->cloud.size() == 1);
+			return true;
+		};
+		restart();
+		if (!check()) { return; }
+		CHECK(advances == 1 && image().value(u"checks"_q).toInt() == 1);
+		CHECK(image().value(u"next_at"_q).toString().toLongLong() == h.files->clock + 30000);
+		const auto retained = image();
+		Worker([&] { h.files->clock += 1000; });
+		restart();
+		if (!check()) { return; }
+		CHECK(image() == retained && h.files->progress.markRecoveryAfter == 29000);
+		const auto wall = base::unixtime::now();
+		if (backwards) {
+			base::unixtime::update(wall - 86400, true);
+			Worker([&] { h.files->clock = 10; });
+			restart();
+			if (!check()) { return; }
+			CHECK(image().value(u"checks"_q).toInt() == 1);
+			CHECK(image().value(u"next_at"_q).toString() == u"30010"_q);
+			CHECK(h.files->progress.markRecoveryAfter == 30000);
+		}
+		for (const auto delay : {30000, 120000, 600000}) {
+			Must(h.files->progress.markRecoveryAfter);
+			CHECK(*h.files->progress.markRecoveryAfter
+				== (delay == 30000 && !backwards ? 29000 : delay));
+			Worker([&] { h.files->clock += *h.files->progress.markRecoveryAfter; });
+			const auto before = image().value(u"checks"_q).toInt();
+			const auto priorAdvances = advances;
+			restart();
+			if (!check()) { return; }
+			CHECK(advances == priorAdvances + 1 && image().value(u"checks"_q).toInt() == before + 1);
+			CHECK(image().value(u"next_at"_q).toString().toLongLong()
+				== h.files->clock + (before == 1 ? 120000 : before == 2 ? 600000 : 0));
+			if (backwards) { CHECK(base::unixtime::now() < wall - 86000); }
+		}
+		if (backwards) { base::unixtime::update(wall, true); }
+		Must(h.files->progress.journal);
+		CHECK(h.files->progress.terminal
+			&& h.files->progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+		CHECK(image().value(u"checks"_q).toInt() == 4 && delays == 0);
+		CHECK(!h.files->progress.retainedImages.empty());
+	}
+}
+
+void NativeOrdinarySearchingCadence() {
+	auto h = NativeHarness();
+	auto opening = h.opening;
+	opening.scope.settingsChat = h.files->fresh.target.peer.chat;
+	opening.cache->mark = {opening.scope.settingsChat, 0, 0};
+	opening.scope.mark = opening.cache->mark;
+	h.io.request = [&](auto request, auto gate, auto done) {
+		CHECK(!gate);
+		CHECK(std::holds_alternative<MTPmessages_SearchGlobal>(request)
+			|| std::holds_alternative<MTPmessages_Search>(request));
+		auto reply = DesktopSyncNativeReply();
+		reply.messages = Response(Route({}), {});
+		done(reply);
+	};
+	auto timer = Fn<void()>();
+	auto milliseconds = 0;
+	auto timers = 0;
+	h.io.delay = [&](int delay, Fn<void()> task) {
+		++timers;
+		milliseconds = delay;
+		timer = std::move(task);
+	};
+	auto resolved = std::optional<DesktopSyncChatSetupSnapshot>();
+	const auto wall = base::unixtime::now();
+	ResolveDesktopSyncNative(opening, h.io,
+		[&](auto value) { resolved = std::move(value); });
+	CHECK(!resolved && timer && timers == 1
+		&& milliseconds >= 29000 && milliseconds <= 30000);
+	for (const auto seconds : {30, 120, 600}) {
+		Must(timer);
+		base::unixtime::update(base::unixtime::now() + seconds, true);
+		auto task = std::move(timer);
+		task();
+		if (seconds == 600) {
+			Must(resolved);
+			CHECK(!timer && resolved->status.complete
+				&& resolved->status.phase == DesktopSyncChatPhase::Lost);
+		} else {
+			CHECK(!resolved && timer && milliseconds == 60000);
+		}
+	}
+	CHECK(timers == 3);
+	base::unixtime::update(wall, true);
+}
+
+void NativeUnmarkedBinding() {
+	auto h = NativeHarness();
+	auto opening = h.opening;
+	opening.scope.settingsChat = h.files->fresh.target.peer.chat;
+	opening.cache->mark = {opening.scope.settingsChat, 0, 0};
+	opening.scope.mark = opening.cache->mark;
+	auto calls = 0;
+	h.io.request = [&](auto request, auto gate, auto done) {
+		CHECK(!gate);
+		CHECK(std::holds_alternative<MTPmessages_SearchGlobal>(request) || std::holds_alternative<MTPmessages_Search>(request));
+		++calls;
+		auto reply = DesktopSyncNativeReply(); reply.messages = Response(Route({}), {});
+		done(reply);
+	};
+	auto resolved = std::optional<DesktopSyncChatSetupSnapshot>();
+	ResolveDesktopSyncNative(opening, h.io, [&](auto value) { resolved = std::move(value); });
+	Must(resolved);
+	CHECK(resolved->input.cacheRead == SyncChatDirectRead::MarkGone);
+	CHECK(resolved->status.resolution.action == SyncChatAction::Searching);
+	CHECK(calls == 2 && h.exactIds.empty() && h.targetHistories == 0);
 }
 
 void NativeMarkPort() {
@@ -800,6 +1083,11 @@ int main(int argc, char** argv) {
 	NativeCommandRefusals();
 	NativeResolverLoss();
 	NativeLiveLosingMark();
+	NativeRecoverySeedAndNamedRead();
+	NativePeerlessEmptyNeverProvesAbsent();
+	NativeUnmarkedBinding();
+	NativeNoWinnerRecoveryCadence();
+	NativeOrdinarySearchingCadence();
 	TestWorker.reset();
 	std::printf("NATIVE ADAPTER %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;

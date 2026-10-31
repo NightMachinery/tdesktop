@@ -25,6 +25,19 @@ struct DesktopSyncCarryFresh {
 	bool readerConsentAccepted = false;
 	std::optional<DesktopSyncChatPeer> consentPeer;
 	Fn<bool()> current;
+	bool fullResolutionComplete = false;
+};
+
+struct DesktopSyncCarryMarkState {
+	QString state;
+	int32_t receiptId = 0;
+	bool inFlight = false;
+};
+
+struct DesktopSyncCarryMarkRecovery {
+	int checks = 0;
+	int64_t checkedAt = 0;
+	int64_t nextAt = 0;
 };
 
 class DesktopSyncCarryPermit final {
@@ -106,6 +119,9 @@ public:
 		const MTPmessages_Messages &response, const DesktopSyncCarryFresh &fresh);
 	[[nodiscard]] bool ReconcileAll(const DesktopSyncChatInventory &inventory, const DesktopSyncCarryFresh &fresh);
 	[[nodiscard]] int32_t MarkReceiptId() const;
+	[[nodiscard]] std::optional<DesktopSyncCarryMarkState> MarkState() const;
+	[[nodiscard]] std::optional<DesktopSyncCarryMarkRecovery> MarkRecovery() const;
+	[[nodiscard]] std::optional<DesktopSyncCarryMarkRecovery> CheckedMarkRecovery(int64_t now);
 	[[nodiscard]] bool RetainedMarkReceipt(const DesktopSyncCarryFresh &fresh, const MTPUpdates &updates);
 	[[nodiscard]] bool cleanupEnabled() const;
 	[[nodiscard]] bool AcceptReaders(const DesktopSyncChatPeer &peer, const QString &stream);

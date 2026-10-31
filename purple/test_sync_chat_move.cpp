@@ -46,6 +46,8 @@ struct MoveMessage {
 struct MoveCloud {
 	std::map<QString, std::vector<MoveMessage>> chats;
 	std::set<QString> requests;
+	std::set<std::pair<QString, int>> erased;
+	int repeatedDeletes = 0;
 	std::vector<std::pair<PeerToken, QString>> origins;
 	int sends = 0;
 	int forwards = 0;
@@ -160,7 +162,7 @@ SyncChatResolveInput MoveCloud::resolution(const SyncLocalState &state,
 	input.settingsBound = true;
 	input.settingsChat = state.chat;
 	input.cache = cache.mark;
-	input.cacheRead = SyncChatDirectRead::Valid;
+	input.cacheRead = cache.mark.markId ? SyncChatDirectRead::Valid : SyncChatDirectRead::MarkGone;
 	input.readerWarningAccepted = true;
 	input.cachedEligibility = *DesktopSyncChatEligibility(Route(cache.mark.chat).peer);
 	for (const auto &[token, messages] : chats) {
@@ -220,7 +222,14 @@ void MoveCloud::erase(const DesktopSyncCleanupPermit &permit) {
 	CHECK(!permit.request());
 	const auto &reference = permit.item().reference;
 	const auto before = find(reference.chat, reference.messageId);
-	MoveRequire(before && (!before->bytes.isEmpty() || before->mark), "cleanup never targets a sentinel");
+	const auto identity = std::make_pair(MoveToken(reference.chat), reference.messageId);
+	if (!before) {
+		MoveRequire(erased.contains(identity), "already absent cleanup was previously authorized and deleted");
+		++repeatedDeletes;
+		return;
+	}
+	MoveRequire(!before->bytes.isEmpty() || before->mark, "cleanup never targets a sentinel");
+	MoveRequire(erased.emplace(identity).second, "each cloud message removed once");
 	auto &values = rows(reference.chat);
 	values.erase(std::remove_if(values.begin(), values.end(), [&](const auto &row) {
 		return row.id == reference.messageId;
@@ -276,6 +285,7 @@ struct MoveInstall {
 	void stale();
 	void ledger();
 	void done();
+	int64_t clock = 1000000;
 };
 
 MoveInstall::MoveInstall(MoveCloud &cloud, int identity, PeerToken source,
@@ -345,6 +355,7 @@ QByteArray MoveInstall::active() {
 
 DesktopSyncCarryFresh MoveInstall::fresh() {
 	auto value = DesktopSyncCarryFresh();
+	value.fullResolutionComplete = true;
 	value.source = Route(source); value.target = Route(target);
 	value.loginAuthority = scope.loginAuthority;
 	value.current = [alive = admitted] { return alive && alive->load(); };
@@ -364,7 +375,7 @@ void MoveInstall::owner() {
 	MoveRequire(bool(lease), "process-local carry lease");
 	engine = std::make_unique<DesktopSyncChatCarry>(root, scope, Origin, admitted, lease,
 		[this](DesktopSyncCarryProgress value) { progress = std::move(value); },
-		[this](SyncDurablePoint point) { return fault(point); });
+		[this](SyncDurablePoint point) { return fault(point); }, [this] { return clock; });
 }
 
 void MoveInstall::start(std::optional<DesktopSyncChatMoveDraft> draft) {
@@ -518,6 +529,26 @@ void MoveInstall::done() {
 	ledger();
 }
 
+void MoveFollowFinished(MoveInstall &install, PeerToken winner) {
+	MoveRequire(install.progress.terminal && install.progress.journal
+		&& install.progress.journal->phase == SyncCarryPhase::FinishedForFollow, "terminal FtF before ordinary Follow");
+	const auto journal = *install.progress.journal;
+	CHECK(journal.markAttempted && journal.source == install.source && journal.target == install.target);
+	CHECK(install.state().chat == journal.target && install.cache().mark == *SyncCarryJournalCacheMark(journal));
+	CHECK(!install.cache().carry && !install.gate->postingHeld());
+	install.ledger();
+	const auto marks = install.cloud.marks;
+	const auto old = install.cloud.rows(journal.source);
+	install.source = install.target; install.target = winner; install.mode = SyncCarryMode::Follow;
+	install.start(); install.run(); install.done(); install.stale();
+	CHECK(install.cloud.marks == marks);
+	for (const auto &message : old) {
+		const auto after = install.cloud.find(journal.source, message.id);
+		CHECK(after && after->bytes == message.bytes && after->mark == message.mark && after->date == message.date);
+	}
+	install.cloud.conserved(winner);
+}
+
 bool MoveBoundary(const DesktopSyncCarryCommand &command, SyncCarryJournalAction action) {
 	if (command.action != action) { return false; }
 	if (action == SyncCarryJournalAction::Deliver || action == SyncCarryJournalAction::PostMark) { return command.dispatch; }
@@ -639,10 +670,18 @@ void MoveMatrix(bool uploadOwn) {
 				}
 			}
 			first.restart(); first.stale(); first.run(); first.stale();
-			if (action == SyncCarryJournalAction::PostMark && window != u"durable"_q) {
-				CHECK(!first.progress.terminal && !first.progress.command);
-				CHECK(first.progress.journal && first.progress.journal->markAttempted && !first.progress.journal->stateCommitted);
-				CHECK(cloud.deletes == 0 && first.state().chat == MoveOld);
+			const auto unmarked = action == SyncCarryJournalAction::PostMark && window == u"before"_q;
+			if (unmarked) {
+				CHECK(!first.progress.terminal && !first.progress.command && first.progress.markRecoveryAfter);
+				for (auto check = 0; !first.progress.terminal && check != 3; ++check) {
+					MoveRequire(first.progress.markRecoveryAfter.has_value(), "persisted recovery wait");
+					first.clock += *first.progress.markRecoveryAfter;
+					first.restart(); first.run(); first.stale();
+				}
+				MoveRequire(first.progress.terminal && first.progress.journal
+					&& first.progress.journal->phase == SyncCarryPhase::FinishedForFollow, "uncertain mark finishes after cadence");
+				CHECK(first.progress.journal->markAttempted && first.progress.journal->stateCommitted);
+				CHECK(cloud.deletes == 0 && first.state().chat == MoveFirst && first.clock == 1750000);
 			} else if (alreadyDone) {
 				CHECK(first.progress.absent && !first.gate->postingHeld()); first.ledger();
 			} else { first.done(); }
@@ -674,7 +713,9 @@ void MoveMatrix(bool uploadOwn) {
 				CHECK(held.chat == MoveOld && held.config.confirmedSeq == 1);
 				CHECK(held.ownMessages.size() == 1 && held.ownMessages.front().messageId == 20);
 			}
-			cloud.conserved(MoveFirst); ++MoveWindows;
+			cloud.conserved(MoveFirst);
+			if (unmarked) { MoveFollowFinished(first, MoveOld); }
+			++MoveWindows;
 		}
 	}
 }
@@ -710,7 +751,7 @@ void MoveSimultaneous(bool sameChat) {
 		ownIds.emplace(install->progress.journal->ownRequestId);
 		cloud.markDate = index == MoveSeed % installs.size() ? 900 : 500 + int(index);
 		install->step();
-		MoveRequire(install->progress.command && install->progress.command->action == SyncCarryJournalAction::ReadMark, "all marks visible before any commit");
+		MoveRequire(install->progress.command && install->progress.command->action == SyncCarryJournalAction::ResolveAgain, "all marks visible before classification");
 	}
 	CHECK(markIds.size() == 3 && ownIds.size() == 3);
 	CHECK(cloud.requests.size() == size_t(cloud.sends + cloud.marks));
@@ -721,23 +762,31 @@ void MoveSimultaneous(bool sameChat) {
 	auto finished = 0; auto sameChatLosers = 0;
 	for (const auto install : installs) {
 		install->stale();
-		if (install->progress.terminal) {
+		MoveRequire(install->progress.terminal && install->progress.journal, "every simultaneous mark classified");
+		if (install->target == winner->chat) {
 			++finished; install->done();
 			CHECK(install->progress.journal->targetMark == winner);
+			sameChatLosers += install != installs[MoveSeed % installs.size()];
 		} else {
-			CHECK(install->progress.journal && !install->progress.journal->stateCommitted);
-			CHECK(install->state().chat == MoveOld && install->progress.journal->markAttempted);
+			CHECK(install->progress.journal->phase == SyncCarryPhase::FinishedForFollow);
+			CHECK(install->state().chat == install->target && install->progress.journal->markAttempted);
 			CHECK(install->progress.journal->source == MoveOld && install->progress.journal->target == install->target);
 			CHECK(install->deleteEffects == 0);
-			sameChatLosers += install->target == winner->chat;
 		}
 	}
-	CHECK(finished == 1 && cloud.marks == 3 && cloud.deletes == 3);
+	CHECK(finished == int(std::count_if(installs.begin(), installs.end(), [&](const auto install) { return install->target == winner->chat; })));
+	CHECK(cloud.marks == 3 && cloud.deletes == 3);
 	CHECK(!sameChat || sameChatLosers == 2);
 	CHECK(winner->chat == installs[MoveSeed % installs.size()]->target);
 	std::printf("MOVE_WINNER seed=%u case=%s install=%u chat=%s mark=%d same-chat-losers=%d\n",
 		MoveSeed, qPrintable(MoveCase), unsigned(MoveSeed % installs.size()), qPrintable(MoveToken(winner->chat)), winner->markId, sameChatLosers);
 	cloud.conserved(winner->chat);
+	for (const auto install : installs) {
+		if (install->progress.journal->phase == SyncCarryPhase::FinishedForFollow) { MoveFollowFinished(*install, winner->chat); }
+		CHECK(install->state().chat == winner->chat);
+	}
+	CHECK(cloud.marks == 3);
+	cloud.sentinels();
 	++MoveRaces;
 }
 

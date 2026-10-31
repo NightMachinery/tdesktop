@@ -53,6 +53,7 @@ struct DesktopSyncNativeIo {
 	Fn<void(Fn<void(std::optional<QByteArray>)>)> localText;
 	Fn<void()> cancel;
 	std::vector<PeerToken> dialogs;
+	bool forceDialogSearch = false;
 };
 
 struct DesktopSyncNativeRenewal {

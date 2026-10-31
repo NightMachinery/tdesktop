@@ -286,14 +286,34 @@ No read, partial reads and uncertain absence hold with the original state and
 stage. A definite ChatGone still uses the separate shared abandonment rule.
 The transport metadata codec and digest are shared by the store and I/O layer.
 
-On restart, the resolver must see the accepted mark, rather than replaying the
-opening winner. A changed winner can permit reconciliation only for frozen N
-and the exact retained operation. A scoped read-only lookup may obtain its
-retained acknowledgement; advancement requires that acknowledgement and exact
-owned canonical mark id/date/text readback. A different winner, mismatched
-receipt or unavailable proof holds. This recovery route cannot reserve or send
-another delivery, pending post or mark. After a verified mark it may finish the
-local state/cache steps against the current N resolution; it never retargets.
+At a held mark attempt, a complete read-only check seeds frozen N into discovery
+and reads the exact mark named by the executor. A valid Own winner in N finishes
+with that winner, including another install's mark or a lost acknowledgement.
+Only a retained prepared slot proves the request never left this client: with
+the opening winner unchanged, the core clears the attempt and the same request
+may be sent once. A proven losing mark finishes for Follow immediately. Other
+complete uncertain checks wait 30, 120 and 600 seconds; failed checks do not count.
+Recovery discovery returns complete Searching or Lost facts immediately, without
+its ordinary discovery timer. The executor alone schedules these checks. Ordinary
+discovery keeps its existing retries. The transport sidecar keeps the count and
+monotonic deadline across process restart. An early Retry can discover new evidence but cannot skip a wait. A
+reset monotonic reference starts the current wait again without advancing it.
+
+FinishThenFollow commits the freshly verified image only to frozen N, prepares
+a marked or unmarked cache through the core cache-mark helper, withholds all
+cleanup and retains every effect. FinishedForFollow releases the carry lease
+and restarts ordinary discovery. A new Follow has its own consent, Begin and
+verification; the old journal never retargets. An unmarked non-Self cache reports
+MarkGone without an exact request. With no winner, Searching and Lost offer the
+existing Create and Choose choices; unmarked mark repair remains unavailable.
+Incomplete evidence, conflicting winners or a typed core refusal stays visibly
+held. Checks run only with current admission. Worker timers are fenced by the
+operation generation and timer epoch, and every store call stays on the dedicated
+store thread. The ordinary ReadMark path still requires its exact freshly resolved
+winner; classification is a separate exit from that hold. Peerless Empty exact
+replies remain Unknown: they can count only as complete uncertain checks, never
+as Absent or never-landed proof, and cannot authorize a repost or deletion.
+Zero-row replies remain incomplete and do not advance the recovery cadence.
 Follow retains O as its read pointer until commitment, which is distinct from
 its current winner N.
 
@@ -621,8 +641,11 @@ The matrix stops Deliver, VerifyDestination, PostMark, ReadMark, CommitState
 and Cleanup before dispatch, after the effect/read before acknowledgement,
 and after durable transition. CommitState uses the existing durable-file
 fault seam because the executor performs its local transition internally.
-An issued mark without its matched acknowledgement holds without another send.
-A losing mark never reaches Done, commits local state or erases O. Every bound
+An issued mark with a lost acknowledgement finishes when the seeded check finds
+a valid winner in N, without another send. A request that never reached the fake
+server finishes unmarked after the persisted cadence, then follows O. A winner
+elsewhere produces FinishedForFollow without erasing O; a same-chat winner can
+finish Done with its exact mark. Every bound
 ledger entry must reference verified cloud bytes from this install and device.
 Ordinary messages and actual legacy settings.toml document sentinels survive,
 with candidate classification taken from the production scanner.
@@ -697,3 +720,12 @@ D1 native fixture mapping:
 These mappings establish host adapter facts. They do not qualify Telegram
 forwarding semantics, server completeness, native foreground behavior or
 physical power-loss durability. All production activation gates remain OFF.
+
+The focused write and move drivers accept `PURPLE_HOST_TEST_WRAPPER` as a command
+prefix for each test executable, recorded in their input receipt. This lets a
+host apply the same resource hold and free-space guard to tests and compilers.
+
+The simultaneous same-chat schedules allow multiple verified installs to finish
+against the same winner. Their fake cloud treats a delete of a previously
+authorized, already deleted sync message as idempotent, while rejecting every
+sentinel and every message id that was never an authorized sync deletion.
