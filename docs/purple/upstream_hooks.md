@@ -15,11 +15,15 @@ the numbers.
 
 ## Purple control socket
 
-- `core/sandbox.cpp`: remove only the fork's CTRL include and command branch;
+- `core/sandbox.cpp`: remove only the CTRL include and command branch;
   upstream CMD, OPEN and XDG activation routes stay in place.
-- `core/external_control.cpp` and `.h`: remove these fork-only files and their
-  old `Telegram/CMakeLists.txt` registrations. Window routing and local consent
-  now live under Purple; no new implementation enters upstream files.
+- `core/external_control.cpp` and `.h`: removed with their
+  `Telegram/CMakeLists.txt` registrations. Window routing and local consent
+  live under Purple; no new implementation enters upstream files. Upstream
+  v7.3.3 grew these files into its own local control socket (proxy, lock and
+  theme commands); the fork keeps them deleted, so each merge deletes them
+  again and drops the CTRL branch upstream adds to `sandbox.cpp`. Moving
+  Purple's commands onto upstream's channel instead is a backlog item.
 - The existing Purple startup and settings hooks call the owned control service.
   New source registration is in `Telegram/cmake/purple.cmake`. See
   [control_socket.md](control_socket.md).
@@ -990,12 +994,19 @@ until the player exists. The callback binds only Purple-owned subscription glue.
 **`Telegram/SourceFiles/window/main_window.cpp`**: B15 keeps the single
 `Purple::ListenHotkeys(this)` hook for the peek key and removes its explanation.
 
-**`Telegram/SourceFiles/storage/storage_domain.cpp`**: B15 keeps upstream
-include order with one Purple include and delegates Persian-layout mapping and
-the byte-difference check to `Purple::TryPersianKeyboardPasscode`. The modern
-retry remains one clause around the mapped decryption attempt. D15 keeps the
-legacy retry, including `legacyStart` and the effective passcode passed to
-`startWithSingleAccount`; no storage format or failure behavior changes.
+**`Telegram/SourceFiles/storage/storage_domain.cpp`**: upstream include
+order with one Purple include after the file's own header. Upstream v7.3.3
+derives every passcode key in `PasscodeDerivation`, so the Persian-layout
+fallback sits at its two derivation entry points: the top of `run()` (the
+worker job behind unlock, startup and Settings checks) and the top of
+`keyFor()` when nothing was derived yet (the synchronous
+`verifyPasscode(bytes)` path PasscodeBox uses). Both call
+`Purple::PreferPasscodeForWrap`, which swaps the typed bytes for their
+counterpart only when the counterpart alone opens the stored wrap, so legacy
+migration wraps the bytes that unlocked. D15 keeps the legacy retry around
+`legacyStart`, which has no wrap to test; it sets the effective passcode that
+upstream's `startWithSingleAccount` call then reads. No storage format or
+failure behavior changes.
 
 **`Telegram/SourceFiles/window/notifications_manager.cpp`**,
 **`notifications_manager.h`** and
@@ -1280,7 +1291,8 @@ surface, not a new measurement of the older merge-base figures above.
 **`Telegram/SourceFiles/ui/effects/thanos_effect_controller.cpp`**:
 - Declaration and implementation of the read-only `geometryBusy()` observer.
   It reads existing effect animation/shown state, collapse animation,
-  internal/published collapse gaps and unconsumed removal height. No
+  internal/published collapse gaps and removals still pending a flush
+  (`_pending`, which replaced the removal height in upstream v7.3.3). No
   capability probe, forced layout, pointer-existence gate or independent
   precapture/prepend/restore/saved-scroll gate is introduced. Native hide,
   collapse completion and geometry/paint consumption release those fields.
@@ -1315,8 +1327,13 @@ at the secondary-list TTL save-menu gate and adds an early Purple action hook fo
 TTL documents in the common menu builder. Purple owns the source token, item
 lookup and expiry checks before the dialog and after its callback.
 
-`menu/menu_item_download_files.cpp` calls Purple policy when admitting a protected
-message to a local file/photo download batch. Forwarding flags stay intact.
+Upstream v7.3.3 routes item save checks through `HistoryItem::forbidsSaving()`,
+so `history/history_item.cpp` returns early there under the save policy. That one
+hook replaced the policy call in `menu/menu_item_download_files.cpp`, now equal to
+upstream, and the early return in `HistoryInner::hasCopyMediaRestriction()`. It
+also lifts the TTL and protected-content result for upstream's other
+`forbidsSaving()` readers: the media viewer, screenshot protection, the photo
+editor source and the external-viewer check. Forwarding flags stay intact.
 
 `info/media/info_media_provider.cpp` adds an early policy return for shared-media
 selection after its frozen-session check.
@@ -1395,8 +1412,11 @@ are excluded from the received-message creation hook.
 
 ## M3B3 expiring-media and passive acquisition hooks
 
-- history/history_item.cpp: Purple lifecycle calls before clearMediaAsExpired,
-  actual expired refreshMedia replacement and timer service-text destruction.
+- history/history_item.cpp: Purple lifecycle call at the top of
+  clearMediaAsExpired and at actual expired refreshMedia replacement. Upstream
+  v7.3.3 replaced the timer service-text path with armMediaDestroy and a
+  Data::Session timer that both end in clearMediaAsExpired, so that one call
+  captures before cache removal and clearLocalCache.
 - data/data_session.cpp: Purple lifecycle call for each explicitly expired TTL item
   before about-to-destroy notification and destroy. No generic removal observer.
 - data/data_streaming.cpp: Purple registration after Reader construction and on
@@ -1454,3 +1474,50 @@ independently, with no networking of its own. `history/view/history_view_context
 adds one document-action hook so Markdown files without captions can expose the
 same source-aware copy action. Ordinary action duplication is suppressed inside
 Purple code. No resolver, parser or context-menu implementation moves.
+
+## Upstream v7.3.3 merge
+
+@Opus5.5/high [2026-10-31 Sat]
+
+Merging v7.3.3 (5c674f1f6a) into dev 7916710aa8 resolved 33 conflicts. Upstream
+files went from 154 files, +2,518 / -887 to 152 files, +2,405 / -1,184; the
+larger deletion count is upstream's grown `external_control.cpp`, which the fork
+keeps deleted.
+
+New hooks:
+- `storage/storage_domain.cpp`, `PasscodeDerivation::run()` and `keyFor()`: one
+  guarded `Purple::PreferPasscodeForWrap` call each, +4 lines apiece. They replace
+  the startModern and checkPasscode retries; the file went from +35 / -10 to
+  +21 / -1.
+- `history/history_item.cpp`, `forbidsSaving()`: one early return, +3 lines.
+
+Moved hooks, with the same calls in the new upstream shape:
+- `ui/widgets/chat_filters_tabs_strip.cpp` and `window/window_filters_menu.cpp`:
+  `ShowViewTabMenu` and `FillViewMenu` are now an early return that pops the menu
+  Purple filled, before upstream builds its own. The rest of both files follows
+  upstream; they shrank from +84 / -66 and +70 / -51 to +33 / -16 and +29 / -12.
+- `history/view/history_view_list_widget.cpp`: upstream moved the focus-in body
+  into `announceAccessibilityFocusedChild()`, which now carries the
+  `InvalidateUiWitness` call.
+- `info/media/info_media_list_widget.cpp`: the import-settings file action now
+  opens the document branch of upstream's rebuilt context menu.
+- `apiwrap.cpp`, `api/api_updates.cpp`, `ui/chat/attach/attach_prepare.*`,
+  `history/view/media/history_view_gif.cpp`, `main/main_account.cpp`,
+  `payments/payments_non_panel_process.*`, `boxes/star_gift_box.cpp` and
+  `boxes/url_auth_box.cpp`: same hooks on upstream's changed lines.
+- `ui/effects/thanos_effect_controller.cpp`: `geometryBusy()` reads upstream's
+  pending-removal list instead of the removed removal height.
+
+Removed hooks: the policy call in `menu/menu_item_download_files.cpp` and the
+Purple line in `history/view/history_view_top_peers_selector.cpp` (both files now
+equal upstream), and the save-policy return in
+`HistoryInner::hasCopyMediaRestriction()`.
+
+Purple-only follow-ups to removed upstream APIs: `sessionControllerValue() |
+rpl::skip(1)` for the dropped `sessionControllerChanges()`,
+`MarkAsReadMenu::AddChatListAction` for `Window::MenuAddMarkAsReadChatListAction`,
+the TimeId `destructAt` in `purple_user_control.cpp`, and `MediaPhoto::Args`.
+
+The watch count of `TopPeers::list()` callers rose to 4 with upstream's new
+`data/components/recent_money_recipients.cpp`, which reads the list Purple
+already filters at its source.

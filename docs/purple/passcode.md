@@ -8,7 +8,11 @@ outside that mapper stay unchanged. A failed pair of checks counts as one
 passcode attempt for the lock screen and existing passcode controls.
 
 This applies to an already running account and to startup decryption, including
-the legacy single-account format. Legacy migration encrypts the new local key
+the legacy single-account format. Upstream derives each key in
+`Storage::PasscodeDerivation`; Purple's `PreferPasscodeForWrap` runs at its start
+and keeps the counterpart only when it alone opens the stored wrap, so a KDF
+passcode costs extra derivations only when its text has a counterpart. The host
+gate `cases-storage-passcode` checks that decision. Legacy migration encrypts the new local key
 with whichever candidate actually unlocked the old key. Setting or changing a
 passcode still stores the exact new passcode entered; no stored passcode is
 rewritten just because its keyboard-layout counterpart was accepted.

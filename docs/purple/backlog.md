@@ -316,6 +316,14 @@ clients. Historical Android verification notes remain in [todo.md](todo.md).
   peekable person still needs runtime verification. A repeat on the
   `b0bd74c7` build on 2026-09-30 gave the same result. The second disposable
   contact that would reach Peek (above) reaches this filter too.
+- **Control socket on upstream's channel (desktop):** upstream v7.3.3 grew
+  `core/external_control.cpp` into a local control socket with proxy, lock and
+  theme commands, reached through a CTRL branch in `core/sandbox.cpp`. The fork
+  still deletes both and runs its own Purple control service, so every merge
+  deletes them again. Option c of the v7.3.3 merge: move Purple's commands onto
+  upstream's channel as Purple handlers, keep the local-consent and window
+  routing, and stop deleting the upstream files. See
+  [control_socket.md](control_socket.md).
 
 ## Verified
 
