@@ -175,15 +175,13 @@ void PaintMediaBadge(
 	auto from = 0;
 	auto groupType = AlbumType::None;
 	for (auto i = 0; i != int(files.size()); ++i) {
-		const auto fileGroupType = Purple::ClipboardWebpAlbumType(
-			files[i],
-			(SendsAnimationAsGif(files[i])
-				|| files[i].sendsVideoAsGif())
-				? AlbumType::None
-				: GroupTypeForFile(
-					files[i].type,
-					groupFiles,
-					sendImagesAsPhotos));
+		const auto fileGroupType = Purple::ClipboardWebpAlbumType(files[i], (SendsAnimationAsGif(files[i])
+			|| files[i].sendsVideoAsGif())
+			? AlbumType::None
+			: GroupTypeForFile(
+				files[i].type,
+				groupFiles,
+				sendImagesAsPhotos));
 		const auto count = (i - from);
 		if ((i > from && (groupType != fileGroupType
 				|| Purple::ClipboardWebpSeparateGroup(files[i - 1], files[i])))
