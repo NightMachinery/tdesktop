@@ -6,13 +6,13 @@
 #include "data/data_unread_value.h"
 #include "dialogs/dialogs_main_list.h"
 #include "main/main_session.h"
+#include "menu/menu_mark_as_read.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_preset_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/rp_widget.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
-#include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
 
@@ -90,8 +90,9 @@ bool AddViewMenu(
 	const auto session = &controller->session();
 	const auto addAction = Ui::Menu::CreateAddActionCallback(menu);
 	const auto index = Data::PurpleViewIndex(id);
-	Window::MenuAddMarkAsReadChatListAction(
+	MarkAsReadMenu::AddChatListAction(
 		controller,
+		MarkAsReadMenu::ChatListKind::Folder,
 		[=] { return Purple::ViewList(&session->data(), index); },
 		addAction);
 	addAction(
