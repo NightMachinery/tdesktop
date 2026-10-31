@@ -405,7 +405,7 @@ QString Writer::block(const Page::Block &value, bool html, int depth) {
 		auto label = value.kind == Kind::Photo ? u"Photo"_q : value.kind == Kind::Video ? u"Video"_q
 			: value.kind == Kind::Audio ? u"Audio"_q : value.kind == Kind::Channel ? u"Channel"_q
 			: value.kind == Kind::Map ? u"Map"_q : u"Embedded content"_q;
-		for (const auto &part : { value.audioFileName, value.audioPerformer, value.audioTitle, value.channelTitle }) {
+		for (const auto &part : { value.fileName, value.audioPerformer, value.audioTitle, value.channelTitle }) {
 			if (!part.isEmpty()) label += u": "_q + part;
 		}
 		if (value.kind == Kind::Audio && value.audioDuration > 0) label += u": %1 seconds"_q.arg(value.audioDuration);
