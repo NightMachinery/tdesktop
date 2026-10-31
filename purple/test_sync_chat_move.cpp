@@ -839,6 +839,75 @@ void MovePlanAffirmativeGone() {
 	cloud.conserved(MoveFirst); ++MoveRaces;
 }
 
+void MoveProtectedPlan() {
+	for (auto control = 0; control != 3; ++control) {
+		MoveCase = control == 0 ? u"Plan-readable-baseline"_q
+			: control == 1 ? u"Plan-Protected-agrees"_q : u"Plan-Protected-contradicts"_q;
+		std::printf("MOVE_CASE seed=%u case=%s\n", MoveSeed, qPrintable(MoveCase));
+		auto cloud = MoveCloud();
+		auto first = MoveInstall(cloud, 0); auto second = MoveInstall(cloud, 1); auto third = MoveInstall(cloud, 2);
+		const auto old = cloud.rows(MoveOld);
+		first.duplicates = true;
+		if (control == 1) { first.access = u"Protected"_q; }
+		first.start(); MoveTo(first, SyncCarryJournalAction::Plan);
+		auto reply = first.reply();
+		reply.access = control == 0 ? SyncCarrySourceAccess::Readable : SyncCarrySourceAccess::Protected;
+		reply.oldRead = SyncChatDirectRead::Valid;
+		MoveRequire(reply.source && reply.fresh && reply.destination, "scoped direct Plan inventories");
+		CHECK(reply.source->route.peer.origin == Origin && reply.source->route.peer.chat == MoveOld);
+		CHECK(reply.source->inventory.scan.status == SyncHistoryScanStatus::Complete);
+		CHECK(reply.source->route.peer.facts->protectedContent == (control == 1));
+		CHECK(reply.fresh->source.peer.facts->protectedContent == (control == 1));
+		CHECK(ValidDesktopSyncChatReadIo(reply.source->route));
+		CHECK(ValidDesktopSyncChatIo(reply.source->route) == (control != 1));
+		CHECK(reply.destination->inventory.scan.status == SyncHistoryScanStatus::Complete);
+		first.engine->complete(reply);
+		MoveRequire(first.progress.journal && first.progress.journal->plan, "Plan accepts scoped source classification");
+		const auto plan = *first.progress.journal->plan;
+		CHECK(plan.access == (control == 0 ? SyncCarrySourceAccess::Readable : SyncCarrySourceAccess::Protected));
+		if (control == 0) {
+			CHECK(plan.ownRecord.isEmpty() && plan.forwards.size() == 3 && plan.cleanupCandidates.size() == 3);
+		} else {
+			MoveRequire(!plan.ownRecord.isEmpty(), "Protected plan retains this install's own base");
+			CHECK(plan.forwards.empty() && plan.cleanupCandidates.empty());
+			const auto initial = InspectConfigPayload(ParseSyncEnvelope(first.own));
+			const auto retained = InspectConfigPayload(ParseSyncEnvelope(plan.ownRecord));
+			CHECK(retained.text == initial.text && retained.version.key == initial.version.key);
+			CHECK(plan.ownRecord != first.own && ParseSyncEnvelope(plan.ownRecord).header->seq == 2);
+		}
+		MoveTo(first, SyncCarryJournalAction::Deliver);
+		const auto before = first.active();
+		const auto ownRequest = first.progress.journal->ownRequestId;
+		auto delivered = first.reply(); first.late.push_back(delivered);
+		first.restart(); first.stale(); first.run(); first.done(); first.stale();
+		const auto after = MoveImage(first, first.progress.journal->operationId);
+		MovePreserved(before, after);
+		CHECK(cloud.marks == 1);
+		if (control == 0) {
+			CHECK(cloud.sends == 3 && cloud.forwards == 3 && cloud.uploads.empty() && cloud.deletes == 3);
+			CHECK(first.state().config.confirmedSeq == 1);
+		} else {
+			MoveRequire(cloud.uploads.size() == 1, "one own upload across unacknowledged delivery and restart");
+			const auto upload = cloud.uploads.find(ownRequest.toULongLong());
+			MoveRequire(upload != cloud.uploads.end(), "own upload uses its durable request identity");
+			CHECK(upload->second.second == plan.ownRecord);
+			CHECK(upload->second.first == MoveOwnEntry(after).value(u"file_id"_q).toString().toULongLong());
+			CHECK(cloud.sends == 1 && cloud.forwards == 0 && cloud.deletes == 0);
+			CHECK(first.state().config.confirmedSeq == 2);
+			CHECK(cloud.rows(MoveOld).size() == old.size());
+			for (const auto &row : old) {
+				const auto retained = cloud.find(MoveOld, row.id);
+				CHECK(retained && retained->bytes == row.bytes && retained->mark == row.mark && retained->sentinel == row.sentinel);
+			}
+			CHECK(cloud.contains(MoveFirst, plan.ownRecordHash));
+		}
+		std::printf("PLAN_PROTECTED_RESULT seed=%u case=%s sends=%d uploads=%zu forwards=%d deletes=%d confirmed=%llu\n",
+			MoveSeed, qPrintable(MoveCase), cloud.sends, cloud.uploads.size(), cloud.forwards, cloud.deletes,
+			static_cast<unsigned long long>(first.state().config.confirmedSeq));
+		cloud.conserved(MoveFirst); ++MoveRaces;
+	}
+}
+
 void MoveGone() {
 	for (const auto &evidence : {u"Unknown"_q, u"Protected"_q, u"ChatGone"_q}) {
 		MoveCase = u"nonaffirmative-"_q + evidence;
@@ -874,7 +943,7 @@ int main(int argc, char **argv) {
 	auto worker = std::thread([&] {
 		try {
 			if (scenario != u"races"_q) { MoveMatrix(false); MoveMatrix(true); }
-			if (scenario != u"matrix"_q) { MoveSimultaneous(false); MoveSimultaneous(true); MoveChain(); MoveGone(); MoveConsecutive(); MovePlanGone(); MovePlanAffirmativeGone(); }
+			if (scenario != u"matrix"_q) { MoveSimultaneous(false); MoveSimultaneous(true); MoveChain(); MoveGone(); MoveConsecutive(); MovePlanGone(); MovePlanAffirmativeGone(); MoveProtectedPlan(); }
 		} catch (const std::exception &error) {
 			std::fprintf(stderr, "MOVE EXCEPTION seed=%u case=%s: %s\n", MoveSeed, qPrintable(MoveCase), error.what());
 			++Failures;

@@ -649,6 +649,18 @@ must plan from the retained own base, upload it to N, restart, verify it, commit
 and finish without reading O or issuing a deletion. Old replies are also shuffled into
 a replacement executor while its current command remains pending.
 
+Protected Plan controls supply a scoped Valid direct read and compare the
+source peer's protected-content flag with the access label. A readable baseline
+forwards three records and deletes their verified source copies. Both an agreed
+Protected label and a contradictory label on a forwardable source instead upload
+one new own record at sequence 2, preserving the retained base's text and version.
+They retain every record in O byte for byte and issue no deletion. Delivery before
+acknowledgement followed by restart must reconcile that single upload, keeping
+its exact bytes, request and file identity. No record vanishes and no send repeats;
+the contradictory label changes the preservation route, leaving the other
+installs' records in O. These controls do not justify another Plan guard. The
+executor's fresh-source admission behavior is unchanged.
+
 The consecutive-change case reopens the normal store and actual state/cache
 files after O to N1, takes a new ordinary setup choice/confirmation for N1 to
 N2, and starts a fresh executor using the accepted draft at the existing test
