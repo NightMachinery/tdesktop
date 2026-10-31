@@ -594,3 +594,75 @@ OFF control bodies and the queued controller start run on QCoreApplication's
 main thread; the real store and Carry flow run on the worker. These checks do
 not qualify Telegram, native GUI lifecycle or physical power-loss behavior.
 The full host run belongs to the coordinator's final landing batch.
+
+## Seeded restart and ordering host qualification (T5i)
+
+`purple/test_sync_chat_move.py` drives the production Desktop Carry executor,
+private store, sealed I/O and unchanged shared core against real durable files.
+Three distinct install/device identities share a synthetic cloud. Each has its
+own production gate, representing independent process memory. The fixture
+recreates executors and reopens state, cache, journal and retained objects from
+the same install directory. It does not reconstruct journal state from a test
+model.
+
+The registered `test_sync_chat_move` gate uses seeds 271828, 314159 and 424242.
+The driver accepts repeated `--seed` arguments and `--scenario matrix|races|all`.
+Failures print both seed and named case. Compiler, source and object receipts
+are retained by the existing write-fixture driver and canonical host runner.
+
+The matrix stops Deliver, VerifyDestination, PostMark, ReadMark, CommitState
+and Cleanup before dispatch, after the effect/read before acknowledgement,
+and after durable transition. CommitState uses the existing durable-file
+fault seam because the executor performs its local transition internally.
+An issued mark without its matched acknowledgement holds without another send.
+A losing mark never reaches Done, commits local state or erases O. Every bound
+ledger entry must reference verified cloud bytes from this install and device.
+Ordinary messages and actual legacy settings.toml document sentinels survive,
+with candidate classification taken from the production scanner.
+
+Seeded schedules shuffle inventories and mark resolution, interleave three
+installs, replay duplicate replies immediately and in later shuffled order,
+and send old replies to a replacement executor after restart. Simultaneous
+changes make every mark visible before any read/commit. Distinct per-install mark and
+own request ids prevent accidental deduplication. Seeded mark dates vary the
+winning install, and a separate same-chat schedule requires two losing marks.
+The winner performs cleanup while each losing install must issue no deletion. The O to N1 to N2
+chain includes an offline install's new sequence and changed record bytes, absent
+from N2 until Follow transfers them. Incomplete destination readback keeps that
+late post in O. Cleanup can remove it only after its exact hash exists in N2.
+A conservation invariant records every settings body introduced into the cloud:
+each hash must remain in its original chat or exist in the final winner chat. Unknown/protected evidence and an uncorroborated
+ChatGone label hold; matching affirmative scoped evidence permits completion.
+A Plan-phase ChatGone label paired with a positively readable O holds before
+planning, reservation, sending or deletion. Old replies are also shuffled into
+a replacement executor while its current command remains pending.
+
+The consecutive-change case reopens the normal store and actual state/cache
+files after O to N1, takes a new ordinary setup choice/confirmation for N1 to
+N2, and starts a fresh executor using the accepted draft at the existing test
+seam. Production setup remains OFF and dispatches nothing. It checks the new
+command scope, distinct operation and exact archival of the first wrapper.
+This is host setup policy and executor qualification, not a native screen or
+session-service integration test.
+
+The existing executor's RecoverySchedules, EffectBeforeCallbackControls,
+DurableFailureControls and PendingAndRetentionControls cover the remaining
+phase/pending/fault matrix. Store, I/O, consent and cleanup suites retain their
+existing scope and source/ownership/durability checks. The new suite does not
+repeat the full priority-three list.
+
+D1 native fixture mapping:
+
+- N6 typed routes and ownership: existing Carry I/O fixtures.
+- N7 restart: T5i crash matrix and existing executor/store durability controls.
+- N8 Follow/Fill: existing executor modes and consent, plus the T5i Follow chain.
+- N9 offline late post: T5i O to N1 to N2 chain.
+- N10 protected/gone O: existing pending controls and T5i affirmative evidence.
+- N11 cleanup/stale: existing cleanup/mark fixtures and T5i durable cleanup/sentinels.
+- N12 convergence: T5i simultaneous and chained schedules.
+- N13 Lost/lifecycle: existing consent and executor lifecycle fixtures; Lost
+  recovery remains separately qualified.
+
+These mappings establish host adapter facts. They do not qualify Telegram
+forwarding semantics, server completeness, native foreground behavior or
+physical power-loss durability. All production activation gates remain OFF.

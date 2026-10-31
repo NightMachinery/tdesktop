@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp', 'test_sync_chat_move.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -118,6 +118,8 @@ objects = []
 compiled = []
 consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
     for name in ['purple_sync_chat_consent', 'purple_sync_chat_setup']] if args.test_source in ['test_sync_chat_consent.cpp', 'test_sync_chat_consent_review.cpp'] else []
+if args.test_source == 'test_sync_chat_move.cpp':
+    consent_sources = [repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup.cpp']
 if args.test_source == 'test_sync_chat_consent_review.cpp':
     source = (repo / 'purple/test_sync_chat_consent.cpp').read_text()
     assert source.count('int main(') == 1
