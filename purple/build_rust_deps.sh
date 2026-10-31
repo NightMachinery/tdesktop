@@ -135,6 +135,23 @@ cp "$RustWorkRoot/tlottie/include/tlottie.h" "$RustPrefix/include/tlottie/"
     --library --out-dir "$RustPrefix/include/wallet_engine" \
     "$Release/libtdesktop_rust.dylib")
 
+# Apple clang 15 (Xcode 15.1) lacks class template argument deduction for
+# aggregates (P1816, clang 17), which the generated binding relies on for
+# RustFutureHandleGuard. One explicit deduction guide names the same type.
+python3 - "$RustPrefix/include/wallet_engine/wallet_engine.cpp" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+guide = ('template <typename F>\n'
+    'RustFutureHandleGuard(uint64_t, F) -> RustFutureHandleGuard<F>;\n')
+anchor = '    ~RustFutureHandleGuard() {\n        free(handle);\n    }\n};\n'
+if guide not in text:
+    if text.count(anchor) != 1:
+        sys.exit('wallet_engine.cpp: RustFutureHandleGuard changed; recheck the clang 15 guide')
+    text = text.replace(anchor, anchor + guide)
+    open(path, 'w').write(text)
+PY
+
 # The packaged route compiles wallet_engine.cpp from the header's directory,
 # where the generator writes it.
 for file in lib/libtdesktop_rust.a include/tlottie/tlottie.h \
