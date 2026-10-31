@@ -377,7 +377,7 @@ void MarkAndWorkerBoundary() {
 }
 
 void CarryUploadSchedules() {
-	for (auto mode = 0; mode != 7; ++mode) {
+	for (auto mode = 0; mode != 8; ++mode) {
 		auto worker = Worker(true,40000);
 		const auto opened = worker.Run([](CarryWorkerState &s) {
 			const auto identity = s.io->Reserve(DesktopSyncCarryEffect::OwnRecord,SyncCarryRecordHash(s.Payload()),s.fresh,800,901); Must(identity);
@@ -400,6 +400,10 @@ void CarryUploadSchedules() {
 			CHECK(Read<MTPint>(cursor,end).v == part++);
 			const auto bytes = Read<MTPbytes>(cursor,end).v;
 			CHECK(bytes == opened.second.mid(offset,bytes.size()) && cursor == end); offset += bytes.size();
+			CHECK(!call.resume && upload->RequestCurrent());
+			upload->current = false;
+			CHECK(!upload->RequestCurrent());
+			upload->current = true;
 			call.boolean(MTP_bool(true));
 		}
 		CHECK(offset == opened.second.size() && part > 1 && awaiting && upload->completions == 0);
@@ -428,9 +432,17 @@ void CarryUploadSchedules() {
 		}
 		const auto updates = Receipt(opened.first.target(),opened.first.randomId(),80);
 		if (mode == 5) { upload->Cancel(); CHECK(upload->completions == 1); }
+		if (mode == 7) {
+			upload->current = false;
+			CHECK(!upload->Current() && upload->RequestCurrent());
+			session.owner.leaving = true;
+			CHECK(!upload->RequestCurrent());
+			session.owner.leaving = false;
+		}
 		call.updates(updates);
+		CHECK(upload->_carryResult.has_value());
 		CHECK(session.endpoint.applied == 1 && session.endpoint.appliedRandom == opened.first.randomId());
-		CHECK(upload->completions == 1 && bool(upload->receipt) == (mode != 5));
+		CHECK(upload->completions == 1 && bool(upload->receipt) == (mode != 5 && mode != 7));
 		worker.Run([&](CarryWorkerState &s) {
 			CHECK(s.store->journal()->phase == SyncCarryPhase::VerifyDestination);
 			CHECK(s.store->state()->config.pendingSeq != 0);

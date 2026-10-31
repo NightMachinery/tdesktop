@@ -274,3 +274,6 @@ Marked chooser WebP paste is documented in [webp_paste.md](webp_paste.md).
 
 The opt-in local control socket and standalone Go command are documented in
 [control_socket.md](control_socket.md).
+
+The held-off native carry adapter and mark port are described in
+[sync_chat_native.md](sync_chat_native.md).

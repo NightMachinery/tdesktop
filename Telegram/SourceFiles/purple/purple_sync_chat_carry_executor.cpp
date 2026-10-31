@@ -67,6 +67,11 @@ bool DesktopSyncChatCarry::fresh(const DesktopSyncCarryFresh &facts, bool sameRe
 			? resolution.action == journal.expectedAction && resolution.winner == journal.expectedWinner && resolution.cache == journal.oldMark
 			: ((journal.expectedAction == SyncChatAction::Searching || journal.expectedAction == SyncChatAction::Lost)
 					&& resolution.action == journal.expectedAction && resolution.winner == journal.expectedWinner && resolution.cache == journal.oldMark)
+				|| (journal.expectedAction == SyncChatAction::Use
+					&& resolution.action == journal.expectedAction
+					&& resolution.winner == journal.expectedWinner
+					&& resolution.cache == journal.oldMark
+					&& facts.source.peer.facts && facts.source.peer.facts->protectedContent)
 				|| resolution.action == SyncChatAction::Follow || resolution.action == SyncChatAction::Fill
 				|| resolution.action == SyncChatAction::NewerMark || (resolution.action == SyncChatAction::Use && !resolution.postingHeld))
 		&& eligible
@@ -191,6 +196,9 @@ void DesktopSyncChatCarry::issue(SyncCarryJournalAction action, bool dispatch, s
 		const auto pending = _store->Pending();
 		if (!pending) { publish(u"pending-unreadable"_q, {pending.status}); return; }
 		command.pendingRecord = pending.staged;
+		const auto issued = _io->PendingIssued();
+		command.pendingIntent = !issued ? SyncCarrySendIntent::Unknown
+			: *issued ? SyncCarrySendIntent::Issued : SyncCarrySendIntent::NotIssued;
 	}
 	_command = std::move(command);
 	publish();

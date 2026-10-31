@@ -22,6 +22,7 @@ struct DesktopSyncCarryCommand {
 	PeerToken target;
 	bool dispatch = false;
 	QByteArray pendingRecord;
+	SyncCarrySendIntent pendingIntent = SyncCarrySendIntent::Unknown;
 	int32_t markId = 0;
 	std::vector<DesktopSyncCarryPermit> effects;
 	std::optional<DesktopSyncCleanupRead> cleanupRead;

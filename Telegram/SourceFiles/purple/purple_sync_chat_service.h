@@ -59,6 +59,9 @@ struct DesktopSyncChatLease {
 [[nodiscard]] bool ReviewSyncChatStaleMark(not_null<Main::Session*> session,
 	const DesktopSyncChatStaleMark &row, Fn<bool()> current, Fn<void(DesktopSyncChatStaleMark)> start);
 
+[[nodiscard]] std::vector<PeerToken> SyncChatLoadedDialogs(
+	not_null<Main::Session*> session);
+
 void StartSyncChatDiscovery();
 void QuiesceSyncChatPublishers(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<Main::Session*> SyncChatPublisherQuiescence();

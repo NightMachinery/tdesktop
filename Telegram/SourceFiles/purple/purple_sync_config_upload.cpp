@@ -44,7 +44,7 @@ SyncConfigUpload::SyncConfigUpload(
 		Fn<void(std::optional<MsgId>)> finished,
 		Fn<bool()> stillCurrent, MsgId editId, Fn<void()> editRefused,
 		DesktopSyncChatOperation operation, Fn<void(Fn<void(bool)>)> authorizeEdit)
-: _api(std::make_unique<SyncRequestSender>(&session.mtp(), [this] { return Current(); }))
+: _api(std::make_unique<SyncRequestSender>(&session.mtp(), [this] { return RequestCurrent(); }))
 , _session(base::make_weak(&session))
 , _account(SessionAccountKey(&session))
 , _operation(std::move(operation))
@@ -83,6 +83,14 @@ SyncConfigUpload::SyncConfigUpload(
 	_randomId = permit.randomId();
 	_carry = std::move(permit);
 	_renewCarry = std::move(renewCarry);
+}
+
+bool SyncConfigUpload::RequestCurrent() const {
+	if (!_carry || _offset < _content.size()) { return Current(); }
+	const auto session = _session.get();
+	return !_done && session && !session->account().loggingOut()
+		&& session->account().maybeSession() == session
+		&& SessionAccountKey(session) == _account;
 }
 
 bool SyncConfigUpload::Current() const {
@@ -338,8 +346,13 @@ void SyncConfigUpload::DispatchMedia() {
 	}).handleAllErrors().send();
 }
 
+std::optional<MTPUpdates> SyncConfigUpload::carryResult() const {
+	return _carryResult;
+}
+
 void SyncConfigUpload::OnMedia(const MTPUpdates &result) {
 	if (_carry) {
+		_carryResult = result;
 		const auto session = _session;
 		const auto receipt = DesktopSyncCarryUpdatesReceipt(*_carry, result,
 			[session](const MTPUpdates &updates, uint64_t randomId) {

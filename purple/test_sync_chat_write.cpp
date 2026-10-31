@@ -148,6 +148,7 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	std::optional<DesktopSyncChatLease> _lease;
 	DesktopSyncChatOperation _operation;
 	std::optional<DesktopSyncCarryPermit> _carry;
+	std::optional<MTPUpdates> _carryResult;
 	bool _carryContentValid = false;
 	uint64_t _carryGateTicket = 0;
 	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
@@ -190,6 +191,8 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	UploadProbe(UploadSession &session, DesktopSyncCarryPermit permit,
 		Fn<void(std::optional<MsgId>)> finished, Fn<bool()> stillCurrent,
 		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry);
+	bool RequestCurrent() const
+#include "upload-RequestCurrent.inc"
 	bool Current() const
 #include "upload-Current.inc"
 	std::optional<DesktopSyncChatIo> route() const { return _carry ? std::optional(_carry->target()) : _lease ? std::optional(_lease->route) : std::nullopt; }
@@ -460,6 +463,7 @@ struct OrdinaryPostContext {
 struct PostProbe : base::has_weak_ptr {
 	DesktopSyncChatOperation _operation;
 	std::optional<DesktopSyncCarryPermit> _carry;
+	std::optional<MTPUpdates> _carryResult;
 	bool _carryContentValid = false;
 	uint64_t _carryGateTicket = 0;
 	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;

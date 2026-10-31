@@ -146,6 +146,10 @@ std::optional<int32_t> DesktopSyncCarryUpdatesReceipt(
 	return captured.current() ? DesktopSyncChatUploadReceipt(captured.target(), updates, captured.randomId()) : std::nullopt;
 }
 
+int32_t DesktopSyncCarryPermit::sourceMessageId() const {
+	return _effect == DesktopSyncCarryEffect::Forward ? _sourceId : 0;
+}
+
 std::optional<MTPmessages_ForwardMessages> DesktopSyncCarryForwardRequest(const DesktopSyncCarryPermit &permit) {
 	return permit.current() && permit._effect == DesktopSyncCarryEffect::Forward
 		? DesktopSyncChatForwardRequest(permit._source, permit._target, permit._sourceId, permit.randomId()) : std::nullopt;

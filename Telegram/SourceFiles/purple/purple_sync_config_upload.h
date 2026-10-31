@@ -60,9 +60,11 @@ public:
 	void Start();
 	void Cancel();
 	[[nodiscard]] std::optional<DesktopSyncChatIo> route() const;
+	[[nodiscard]] std::optional<MTPUpdates> carryResult() const;
 	[[nodiscard]] Fn<bool()> readbackCurrent() const;
 
 private:
+	[[nodiscard]] bool RequestCurrent() const;
 	[[nodiscard]] bool Current() const;
 	void SendNextPart();
 	void SendMedia();
@@ -79,6 +81,7 @@ private:
 	std::optional<DesktopSyncChatLease> _lease;
 	DesktopSyncChatOperation _operation;
 	std::optional<DesktopSyncCarryPermit> _carry;
+	std::optional<MTPUpdates> _carryResult;
 	bool _carryContentValid = false;
 	uint64_t _carryGateTicket = 0;
 	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;

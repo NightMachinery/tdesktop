@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', required=True, type=Path)
 parser.add_argument('--output-dir', required=True, type=Path)
 parser.add_argument('--build-only', action='store_true')
-parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp', 'test_sync_chat_move.cpp'], default='test_sync_chat_write.cpp')
+parser.add_argument('--test-source', choices=['test_sync_chat_write.cpp', 'test_sync_chat_carry_io.cpp', 'test_sync_chat_carry.cpp', 'test_sync_chat_carry_review.cpp', 'test_sync_chat_consent.cpp', 'test_sync_chat_marks.cpp', 'test_sync_chat_consent_review.cpp', 'test_sync_chat_cleanup.cpp', 'test_sync_chat_recovery.cpp', 'test_sync_chat_move.cpp', 'test_sync_chat_native.cpp'], default='test_sync_chat_write.cpp')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
@@ -103,6 +103,7 @@ carry_constructor = upload[carry_constructor_start:carry_constructor_end]
 post = (repo / 'Telegram/SourceFiles/purple/purple_sync_config_post.cpp').read_text()
 automatic = (repo / 'Telegram/SourceFiles/purple/purple_sync_auto_service.cpp').read_text()
 (work / 'auto-operation.inc').write_text(block(automatic, 'DesktopSyncChatOperation AutoSession::OperationFor('))
+(work / 'upload-RequestCurrent.inc').write_text(block(upload, 'bool SyncConfigUpload::RequestCurrent('))
 (work / 'upload-Current.inc').write_text(block(upload, 'bool SyncConfigUpload::Current('))
 (work / 'post-counters.inc').write_text(block(post, 'std::shared_ptr<PostCounters> PostsFor(not_null<Main::Session*> session, PeerToken chat = {})'))
 (work / 'post-network.inc').write_text(block(post, 'std::function<void()> BeginSyncConfigNetworkOperation(\n\t\tnot_null<Main::Session*> session,\n\t\tPeerToken chat)'))
@@ -139,6 +140,9 @@ if args.test_source == 'test_sync_chat_cleanup.cpp':
     (work / 'cleanup-choice.inc').write_text(choice + '\n' + accepted_choice + '\n')
     cleanup = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_cleanup.cpp').read_text()
     (work / 'cleanup-transport.inc').write_text('bool ProbeCleanupTransport(CleanupSenderProbe &sender, DesktopSyncCleanupPermit permit, DesktopSyncCleanupRenew renew, Fn<void(Fn<void()>)> onSender, Fn<void(int, Fn<void()>)> delay, Fn<void(std::optional<MTPmessages_AffectedMessages>)> done) ' + block(cleanup, 'bool SendDesktopSyncChatCleanup('))
+if args.test_source == 'test_sync_chat_native.cpp':
+    consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
+        for name in ['purple_sync_chat_native', 'purple_sync_chat_native_io', 'purple_sync_chat_native_resolver', 'purple_sync_chat_mark_actions', 'purple_sync_chat_mark_transport']]
 if args.test_source == 'test_sync_chat_recovery.cpp':
     consent_sources = [repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
         for name in ['purple_sync_chat_recovery', 'purple_sync_chat_setup', 'purple_sync_chat_create', 'purple_sync_chat_create_store', 'purple_sync_chat_setup_flow']]

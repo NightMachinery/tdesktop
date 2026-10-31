@@ -279,3 +279,12 @@ renewal before every deferred replay. Superseding an item permit does not end
 the operation: a bounded renewal timeout finishes into a recoverable hold once,
 and late grants cannot send. See sync_chat_move.md for progress, partial results,
 Retry/Skip and the ledger shape. No native or server execution is qualified.
+
+## Native carry transport, held off
+
+The native adapter now supplies carry-command requests and stale-mark native
+ports. It reuses the existing resolver, complete inventories, issued permits,
+uploader and shared retry controller. All five switches remain off, and this
+adapter does not construct a foreground service or resume startup journals.
+See [native sync-chat requests](sync_chat_native.md) for its factory signatures,
+thread rules, command mapping and host-test boundary.

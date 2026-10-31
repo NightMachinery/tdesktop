@@ -310,6 +310,10 @@ PRIVATE
     purple/purple_sync_chat_carry_gate.h
     purple/purple_sync_chat_carry_service.cpp
     purple/purple_sync_chat_carry_service.h
+    purple/purple_sync_chat_native.h
+    purple/purple_sync_chat_native.cpp
+    purple/purple_sync_chat_native_io.cpp
+    purple/purple_sync_chat_native_resolver.cpp
     purple/purple_sync_chat_carry_store.cpp
     purple/purple_sync_chat_carry_store.h
     purple/purple_sync_local_store.cpp

@@ -35,6 +35,7 @@ public:
 	[[nodiscard]] const DesktopSyncChatIo &source() const;
 	[[nodiscard]] const DesktopSyncChatIo &target() const;
 	[[nodiscard]] uint64_t randomId() const;
+	[[nodiscard]] int32_t sourceMessageId() const;
 	[[nodiscard]] uint64_t fileId() const;
 	[[nodiscard]] uint64_t renewal() const;
 	[[nodiscard]] bool uploadMatches(const QByteArray &bytes) const;

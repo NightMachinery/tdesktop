@@ -1235,6 +1235,10 @@ bool ReviewSyncChatStaleMark(not_null<Main::Session*> session,
 	return true;
 }
 
+std::vector<PeerToken> SyncChatLoadedDialogs(not_null<Main::Session*> session) {
+	return DialogsFor(*session, SessionAccountKey(session).userId);
+}
+
 void StartSyncChatDiscovery() {
 	static auto started = false;
 	if (std::exchange(started, true)) {
