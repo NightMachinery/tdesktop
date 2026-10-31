@@ -359,7 +359,7 @@ std::unique_ptr<Data::Media> SelfDestructMediaForSaving(
 			std::make_unique<Data::MediaPhoto>(
 				item,
 				owner->processPhoto(*data.vphoto()),
-				data.is_spoiler()),
+				Data::MediaPhoto::Args{ .spoiler = data.is_spoiler() }),
 			data.vttl_seconds()->v);
 	}, [&](const MTPDmessageMediaDocument &data) -> Result {
 		return std::make_unique<SelfDestructSaveMedia>(
