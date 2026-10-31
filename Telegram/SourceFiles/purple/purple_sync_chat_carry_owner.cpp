@@ -76,11 +76,55 @@ bool SendCarry(const std::shared_ptr<DesktopSyncChatCarryTransportBox> &box, Fn<
 	return true;
 }
 
-DesktopSyncChatCarryRenewal Unrenewable() {
+// GUI access to a controller's own engine. `valid` is the GUI-side generation and liveness
+// check; `engine` runs its work on the store worker, with nullptr once the operation is gone.
+struct ControllerEngine {
+	Fn<bool()> valid;
+	Fn<void(Fn<void(DesktopSyncChatCarry *)>)> engine;
+	Fn<void(Fn<void()>)> main;
+	std::shared_ptr<std::atomic<bool>> live;
+};
+
+// GUI -> store worker -> GUI, as Run::renewOnWorker: an answer reaches the transport only while
+// the same operation is live on both sides of the hop.
+template <typename Result, typename Work>
+void RenewOnController(const ControllerEngine &access, Work work, Fn<void(std::optional<Result>)> ready) {
+	if (!access.valid()) { ready({}); return; }
+	access.engine([main = access.main, valid = access.valid, work = std::move(work), ready = std::move(ready)](
+			DesktopSyncChatCarry *engine) mutable {
+		auto result = engine ? work(*engine) : std::optional<Result>();
+		main([valid, ready = std::move(ready), result = std::move(result)]() mutable {
+			ready(valid() ? std::move(result) : std::nullopt);
+		});
+	});
+}
+
+// Follow/Fill and recovery own their engines. T5K renews before every effect, the first one
+// included, so their transport renews against that engine exactly as Run renews its own.
+DesktopSyncChatCarryRenewal ControllerRenewal(ControllerEngine access) {
 	auto result = DesktopSyncChatCarryRenewal();
-	result.effect = [](auto, auto, auto, Fn<void(std::optional<DesktopSyncCarryPermit>)> ready) { ready({}); };
-	result.beginCleanup = [](auto, auto, Fn<void(std::optional<DesktopSyncCleanupRead>)> ready) { ready({}); };
-	result.cleanup = [](auto, auto, auto, auto, Fn<void(std::optional<DesktopSyncCleanupPermit>)> ready) { ready({}); };
+	result.effect = [access](DesktopSyncCarryCommand command, DesktopSyncCarryPermit permit,
+			DesktopSyncCarryFresh fresh, Fn<void(std::optional<DesktopSyncCarryPermit>)> ready) {
+		fresh.current = [live = access.live] { return live->load(); };
+		RenewOnController<DesktopSyncCarryPermit>(access, [command = std::move(command), permit = std::move(permit),
+				fresh = std::move(fresh)](DesktopSyncChatCarry &engine) {
+			return engine.renew(command, permit, fresh);
+		}, std::move(ready));
+	};
+	result.beginCleanup = [access](DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit,
+			Fn<void(std::optional<DesktopSyncCleanupRead>)> ready) {
+		RenewOnController<DesktopSyncCleanupRead>(access, [command = std::move(command), permit = std::move(permit)](
+				DesktopSyncChatCarry &engine) {
+			return engine.beginCleanupRenew(command, permit);
+		}, std::move(ready));
+	};
+	result.cleanup = [access](DesktopSyncCarryCommand command, DesktopSyncCleanupPermit permit, DesktopSyncCleanupRead read,
+			DesktopSyncCarryReply reply, Fn<void(std::optional<DesktopSyncCleanupPermit>)> ready) {
+		RenewOnController<DesktopSyncCleanupPermit>(access, [command = std::move(command), permit = std::move(permit),
+				read = std::move(read), reply = std::move(reply)](DesktopSyncChatCarry &engine) {
+			return engine.renewCleanup(command, permit, read, reply);
+		}, std::move(ready));
+	};
 	return result;
 }
 
@@ -590,11 +634,33 @@ std::shared_ptr<DesktopSyncChatCarryTransportBox> DesktopSyncChatCarryOwner::tra
 		const std::shared_ptr<std::atomic<bool>> &live) {
 	auto box = std::make_shared<DesktopSyncChatCarryTransportBox>();
 	if (_host.transport) {
-		box->transport = _host.transport(opening, Unrenewable(), [live, current = _host.current] {
+		box->transport = _host.transport(opening, controllerRenewal(_generation, live), [live, current = _host.current] {
 			return live->load() && current && current();
 		});
 	}
 	return box;
+}
+
+DesktopSyncChatCarryRenewal DesktopSyncChatCarryOwner::controllerRenewal(uint64_t generation,
+		std::shared_ptr<std::atomic<bool>> live) {
+	const auto owner = [self = std::weak_ptr<DesktopSyncChatCarryOwner*>(_self), generation]() -> DesktopSyncChatCarryOwner* {
+		const auto strong = self.lock();
+		const auto result = strong ? *strong : nullptr;
+		return (result && result->_active && result->_active->generation == generation && result->_active->live->load()
+			&& result->_host.current && result->_host.current()) ? result : nullptr;
+	};
+	return ControllerRenewal({
+		.valid = [owner] { return owner() != nullptr; },
+		.engine = [owner](Fn<void(DesktopSyncChatCarry *)> work) {
+			const auto current = owner();
+			const auto active = current ? current->_active.get() : nullptr;
+			if (active && active->consent) { active->consent->withEngine(std::move(work)); }
+			else if (active && active->recovery) { active->recovery->withEngine(std::move(work)); }
+			else { work(nullptr); }
+		},
+		.main = _host.main,
+		.live = std::move(live),
+	});
 }
 
 bool DesktopSyncChatCarryOwner::follow(DesktopSyncChatConsentSelection selection) {

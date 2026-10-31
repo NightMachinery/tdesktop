@@ -243,5 +243,12 @@ DesktopSyncChatConsentFlow::~DesktopSyncChatConsentFlow() { close(); }
 void DesktopSyncChatConsentFlow::start() { _state->start(); }
 void DesktopSyncChatConsentFlow::retry() { _state->post([](State &state) { if (state.engine) { state.engine->resume(); } }); }
 void DesktopSyncChatConsentFlow::close() { if (_state) { _state->close(); } }
+void DesktopSyncChatConsentFlow::withEngine(Fn<void(DesktopSyncChatCarry *)> work) {
+	if (!_state || !_state->port.worker) { work(nullptr); return; }
+	_state->port.worker([weak = std::weak_ptr<State>(_state), work = std::move(work)] {
+		const auto self = weak.lock();
+		work(self && SyncStoreWorkerThread() && self->live() ? self->engine.get() : nullptr);
+	});
+}
 
 }

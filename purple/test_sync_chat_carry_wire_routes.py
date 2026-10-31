@@ -11,6 +11,8 @@ paths = {
     'service': root / 'purple_sync_chat_service.cpp',
     'ui': root / 'purple_sync_chat_setup_box.cpp',
     'setup': root / 'purple_sync_chat_setup.cpp',
+    'consent': root / 'purple_sync_chat_consent.cpp',
+    'recovery': root / 'purple_sync_chat_recovery.cpp',
 }
 sources = {name: path.read_text() for name, path in paths.items()}
 
@@ -34,6 +36,11 @@ guards = [
     ('owner', 'if (kind != DesktopSyncChatCarryKind::Resume && !_host.activated(gate)) { return false; }'),
     ('owner', '!(_host.activated(DesktopSyncChatCarrySwitch::Move) || _host.activated(DesktopSyncChatCarrySwitch::Recovery)'),
     ('owner', '_active->run->cleanup = _host.activated(DesktopSyncChatCarrySwitch::Cleanup);'),
+    # Follow/Fill and recovery renew each effect against their controller's own engine.
+    ('owner', '_host.transport(opening, controllerRenewal(_generation, live)'),
+    ('owner', 'ready(valid() ? std::move(result) : std::nullopt);'),
+    ('consent', 'work(self && SyncStoreWorkerThread() && self->live() ? self->engine.get() : nullptr);'),
+    ('recovery', 'work(self && SyncStoreWorkerThread() && self->live() ? self->engine.get() : nullptr);'),
     # Startup: OFF is ordinary reconciliation alone.
     ('host', 'if (!ResumeActivated()) { if (then) { then(); } return; }'),
     ('host', 'if (!ResumeActivated()) {\n\t\tif (then) { then(); }\n\t\treturn;\n\t}\n\tSyncChatCarry(session).startup(std::move(then));'),
@@ -58,6 +65,7 @@ def validate(values):
     for name, token in guards:
         assert token in values[name], (name, token)
     ui = values['ui']
+    assert 'Unrenewable' not in values['owner']
     # Every construction site of the carry service is behind CarryOn().
     index = ui.find('SyncChatCarry(')
     while index >= 0:

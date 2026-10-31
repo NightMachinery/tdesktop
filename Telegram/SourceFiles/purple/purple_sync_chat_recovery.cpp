@@ -287,5 +287,12 @@ void DesktopSyncChatRecovery::retry() {
 	});
 }
 void DesktopSyncChatRecovery::close() { if (_state) { _state->close(); } }
+void DesktopSyncChatRecovery::withEngine(Fn<void(DesktopSyncChatCarry *)> work) {
+	if (!_state || !_state->port.worker) { work(nullptr); return; }
+	_state->port.worker([weak = std::weak_ptr<State>(_state), work = std::move(work)] {
+		const auto self = weak.lock();
+		work(self && SyncStoreWorkerThread() && self->live() ? self->engine.get() : nullptr);
+	});
+}
 
 }

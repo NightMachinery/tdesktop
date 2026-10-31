@@ -171,6 +171,10 @@ struct OwnerHarness {
 	int transportCancels = 0;
 	int applied = 0;
 	int leases = 0;
+	int renewals = 0;
+	int unrenewed = 0;
+	bool holdEffects = false;
+	Fn<void(Fn<void(bool)>)> pendingRenewal;
 	std::unique_ptr<DesktopSyncChatSetupFlow> setup; // worker thread only
 	DesktopSyncChatProvisionDone provided;
 
@@ -242,17 +246,9 @@ struct OwnerHarness {
 			CHECK(opening.scope.origin == frame.scope.origin && renewal.effect && renewal.beginCleanup && renewal.cleanup && current);
 			auto transport = DesktopSyncCarryTransport();
 			if (!transportReady) { return transport; }
-			transport.send = [this](DesktopSyncCarryCommand command, Fn<void(DesktopSyncCarryReply)> done) {
+			transport.send = [this, renewal](DesktopSyncCarryCommand command, Fn<void(DesktopSyncCarryReply)> done) {
 				if (SyncStoreWorkerThread()) { wrongThread = true; }
-				++sends; files.progress.command = command;
-				auto reply = command.dispatch && command.cleanupPermit ? cleanupDelete(command) : files.reply();
-				if (cleanupShape && !command.cleanupPermit) { cleanupRead(reply); }
-				// The fixture forges a lost mark's receipt with its own start's request id; an owner
-				// move draws a random one, so stamp the journal's.
-				if (command.action == SyncCarryJournalAction::ReadMark && files.unknownMark && reply.updates.size() == 1 && files.progress.journal) {
-					reply.updates = {Receipt(files.fresh.target, DesktopSyncCarryTransportId(files.progress.journal->markRequestId).value_or(0), reply.markId)};
-				}
-				if (holdReply) { heldReply = std::move(done); held = std::move(reply); } else { done(std::move(reply)); }
+				++sends; renewEffects(renewal, std::move(command), 0, std::move(done));
 			};
 			transport.cancel = [this] { if (SyncStoreWorkerThread()) { wrongThread = true; } ++transportCancels; };
 			transport.applyUpdates = [this](const MTPUpdates &) { if (SyncStoreWorkerThread()) { wrongThread = true; } ++applied; };
@@ -297,6 +293,53 @@ struct OwnerHarness {
 			auto record = Receipt(files.fresh.source, files.original, item.reference.messageId, item.date);
 			reply.cleanupResponse = record.response; reply.fresh->sourceRecord = record;
 		}
+	}
+	// T5K's contract: before each effect, the first one included, the transport reads fresh facts
+	// and asks the renewal hook for a current permit. With none, or an incompatible one, the
+	// command ends Unknown and nothing is sent.
+	void renewEffects(DesktopSyncChatCarryRenewal renewal, DesktopSyncCarryCommand command, size_t index,
+			Fn<void(DesktopSyncCarryReply)> done) {
+		if (!command.dispatch || command.cleanupPermit || index == command.effects.size()) { answer(std::move(command), std::move(done)); return; }
+		auto read = command; read.dispatch = false; read.effects.clear();
+		files.progress.command = read;
+		auto gathered = files.reply(); Must(gathered.fresh && gathered.source);
+		auto fresh = *gathered.fresh;
+		const auto permit = command.effects[index];
+		if (const auto id = permit.sourceMessageId(); id > 0) {
+			const auto &receipts = gathered.source->receipts;
+			const auto found = std::find_if(receipts.begin(), receipts.end(), [&](const auto &receipt) { return receipt.record.id == id; });
+			if (found == receipts.end()) { unknown(std::move(command), std::move(done)); return; }
+			fresh.sourceRecord = *found;
+		}
+		if (holdEffects) {
+			pendingRenewal = [=](Fn<void(bool)> report) {
+				renewal.effect(command, permit, fresh, [report](std::optional<DesktopSyncCarryPermit> renewed) { report(renewed.has_value()); });
+			};
+			return;
+		}
+		++renewals;
+		renewal.effect(command, permit, fresh, [=, this](std::optional<DesktopSyncCarryPermit> renewed) mutable {
+			if (SyncStoreWorkerThread()) { wrongThread = true; }
+			if (!renewed || !permit.compatible(*renewed)) { unknown(std::move(command), std::move(done)); return; }
+			command.effects[index] = *renewed;
+			renewEffects(renewal, std::move(command), index + 1, std::move(done));
+		});
+	}
+	void unknown(DesktopSyncCarryCommand command, Fn<void(DesktopSyncCarryReply)> done) {
+		++unrenewed;
+		auto reply = DesktopSyncCarryReply(); reply.command = std::move(command); reply.outcome = SyncCarryOutcome::Unknown;
+		done(std::move(reply));
+	}
+	void answer(DesktopSyncCarryCommand command, Fn<void(DesktopSyncCarryReply)> done) {
+		files.progress.command = command;
+		auto reply = command.dispatch && command.cleanupPermit ? cleanupDelete(command) : files.reply();
+		if (cleanupShape && !command.cleanupPermit) { cleanupRead(reply); }
+		// The fixture forges a lost mark's receipt with its own start's request id; an owner
+		// move draws a random one, so stamp the journal's.
+		if (command.action == SyncCarryJournalAction::ReadMark && files.unknownMark && reply.updates.size() == 1 && files.progress.journal) {
+			reply.updates = {Receipt(files.fresh.target, DesktopSyncCarryTransportId(files.progress.journal->markRequestId).value_or(0), reply.markId)};
+		}
+		if (holdReply) { heldReply = std::move(done); held = std::move(reply); } else { done(std::move(reply)); }
 	}
 	void setupProgress(DesktopSyncChatSetupProgress progress) {
 		if (!SyncStoreWorkerThread()) { wrongThread = true; }
@@ -371,7 +414,7 @@ void Moves() {
 		CHECK(h.done() && h.moved());
 		CHECK(h.provisions == (create ? 1 : 0) && h.state.provisioned == create);
 		CHECK(h.resolves == (create ? 3 : 2) && h.inspections == 2 && h.quiesces == 1 && h.transports == 1 && h.leases == 1);
-		CHECK(h.files.markWrites == 1 && h.sends > 0 && h.applied > 0);
+		CHECK(h.files.markWrites == 1 && h.sends > 0 && h.applied > 0 && h.renewals > 0 && h.unrenewed == 0);
 		CHECK(!h.files.gate->postingHeld() && SyncCarryStartupAdmission(h.files.root, h.files.scope.binding) == SyncStoreStatus::Ready);
 		CHECK(h.settled == std::vector{DesktopSyncChatCarryKind::Move} && h.transportCancels == 1 && !h.owner->busy());
 		CHECK(!h.wrongThread);
@@ -568,6 +611,7 @@ void Restart() {
 }
 
 void FollowAndPause() {
+	auto renewals = 0;
 	for (const auto mode : {SyncCarryMode::Follow, SyncCarryMode::Fill}) {
 		auto h = OwnerHarness(mode);
 		auto action = DesktopSyncChatConsentAction(h.frame, u"window-A"_q, [] { return true; }, [] { return true; });
@@ -580,8 +624,11 @@ void FollowAndPause() {
 		CHECK(h.owner->follow(*selection)); h.drain();
 		if (!h.done()) { std::fprintf(stderr, "Follow hold mode=%d: %s\n", int(mode), qPrintable(h.state.reason)); }
 		CHECK(h.done() && h.resolves == 2 && h.inspections == 2 && h.files.markWrites == 0 && !h.files.gate->postingHeld());
-		CHECK(h.settled == std::vector{DesktopSyncChatCarryKind::Follow} && !h.wrongThread);
+		CHECK(h.settled == std::vector{DesktopSyncChatCarryKind::Follow} && !h.wrongThread && h.unrenewed == 0);
+		renewals += h.renewals;
 	}
+	std::printf("FOLLOW renewals=%d\n", renewals);
+	CHECK(renewals > 0);
 	{
 		auto h = OwnerHarness(SyncCarryMode::Follow);
 		auto action = DesktopSyncChatConsentAction(h.frame, u"window-A"_q, [] { return true; }, [] { return true; });
@@ -615,6 +662,21 @@ void Recovery() {
 	if (!h.done()) { std::fprintf(stderr, "Recovery hold: %s\n", qPrintable(h.state.reason)); }
 	CHECK(h.done() && h.files.markWrites == 1 && h.files.cloud.empty() && !h.files.gate->postingHeld());
 	CHECK(h.settled == std::vector{DesktopSyncChatCarryKind::Recovery} && !h.wrongThread);
+	// The replacement mark is an effect: the recovery flow's own engine renewed it.
+	CHECK(h.renewals > 0 && h.unrenewed == 0);
+	// A renewal in flight when its window closes answers empty on the far side of the worker hop.
+	for (const auto close : {false, true}) {
+		auto r = OwnerHarness(SyncCarryMode::RepairMark, true); r.holdEffects = true;
+		r.files.fresh.target = r.files.fresh.source;
+		auto repair = DesktopSyncChatRecoverySelection{r.frame, DesktopSyncChatRecoveryChoice::RepairMark,
+			r.files.fresh.source.peer, u"window-A"_q, DesktopSyncChatMoveFingerprint(r.frame)};
+		CHECK(r.owner->recover(repair)); r.drain(); Must(r.pendingRenewal);
+		auto answered = std::optional<bool>();
+		r.pendingRenewal([&](bool renewed) { answered = renewed; });
+		if (close) { r.owner->closeWindow(u"window-A"_q, u"window-closed"_q); }
+		r.drain();
+		CHECK(answered.has_value() && *answered == !close && !r.wrongThread);
+	}
 }
 
 void Marks() {

@@ -114,6 +114,9 @@ private:
 		DesktopSyncChatCarrySwitch gate);
 	[[nodiscard]] std::shared_ptr<DesktopSyncChatCarryTransportBox> transportFor(
 		const DesktopSyncChatSetupSnapshot &opening, const std::shared_ptr<std::atomic<bool>> &live);
+	// Renewal for the consent and recovery controllers' own engines.
+	[[nodiscard]] DesktopSyncChatCarryRenewal controllerRenewal(uint64_t generation,
+		std::shared_ptr<std::atomic<bool>> live);
 	[[nodiscard]] Fn<void(DesktopSyncCarryProgress)> reporter(uint64_t generation);
 	[[nodiscard]] Fn<void(QString)> held(uint64_t generation);
 	void progress(uint64_t generation, DesktopSyncCarryProgress value);

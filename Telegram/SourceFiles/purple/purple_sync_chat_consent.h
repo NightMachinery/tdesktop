@@ -79,6 +79,10 @@ public:
 	void start();
 	void retry();
 	void close();
+	// Store worker: runs `work` with this flow's own engine, or with nullptr when the flow is
+	// closed, no longer live or has no engine yet. The native transport renews each effect
+	// against this engine through it.
+	void withEngine(Fn<void(DesktopSyncChatCarry *)> work);
 
 private:
 	class State;

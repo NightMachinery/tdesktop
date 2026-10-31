@@ -38,6 +38,14 @@ with it. It supplies:
 - the account's carry lease and publisher quiescence before a journal opens;
 - the native transport and mark port from `purple_sync_chat_native.h`.
 
+The native transport renews every effect before it sends it, the first one
+included. The renewal asks the carry's own engine, on the store thread, for a
+current permit. A move or a startup resume asks the owner's engine. Follow/Fill
+and recovery ask their controller's engine through `withEngine`. Both paths check
+on the GUI thread and again after the store-thread hop that the same carry is
+still running and its account still current. A carry that has stopped gets no
+permit, so the transport sends nothing.
+
 ## Startup
 
 When discovery starts a session, `ResumeSyncChatCarry` resumes an unfinished
@@ -84,19 +92,24 @@ Resume unfinished change, and the next startup resumes it.
 
 The status line shows progress, then the result: moved, cleanup pending or
 skipped, paused here, stopped, unavailable or busy. A carry that is held but not
-finished says it is waiting, with its reason. When another chat wins while a
-carry reads its mark (T5K's mark-winner-held), the carry holds and says so; its
-automatic exit belongs to the auto-recovery slice. The labels that say a change
+finished says it is waiting, with its reason. When a carry cannot confirm the
+current mark (T5K's mark-winner-held and recovery-own-mark-held), it holds and
+says the mark could not be confirmed, without claiming why; its automatic exit
+belongs to the auto-recovery slice. An unreadable journal says nothing further
+will be sent; it does not claim that nothing was sent before. The labels that say a change
 is held for qualification appear only while that switch is OFF.
 
 ## Tests
 
 - `test_sync_chat_carry_owner`: the owner with the real controllers, executor and
-  setup flow, a fake transport and a persistent worker thread. It covers moves
+  setup flow, a fake transport and a persistent worker thread. The fake transport
+  keeps T5K's contract: it renews every effect through the renewal hooks before
+  answering, and answers Unknown without a permit. It covers moves
   into an existing chat and a new channel, cleanup ON and OFF, Skip and Retry,
   refusals, closing the window (including a late reply after it), crash and quit
-  at every step boundary with startup resume, Follow and Pause, recovery, mark
-  removal, and OFF per switch.
+  at every step boundary with startup resume, Follow and Pause, recovery, a
+  renewal answered empty when its window closes mid-hop, mark removal, and OFF
+  per switch.
 - `test_sync_chat_carry_wire_routes`: the OFF guards of the wiring, with a
   negative mutation for each.
 
