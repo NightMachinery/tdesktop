@@ -33,7 +33,7 @@ guards = [
  ('native_io', 'SendDesktopSyncChatCleanup(self->_api'),
  ('native_io', 'session->api().applyAffectedMessages'),
  ('native_io', 'crl::async('),
- ('native_io', 'CaptureSyncPrivateFile(path, kSyncRecordMaximumBytes)'),
+ ('native_io', 'CaptureSyncOwnedFile(path, kSyncRecordMaximumBytes)'),
  ('native_io', '.resumeEffect('),
  ('native_io', 'generation != self->_generation'),
  ('config_upload', '_carryResult = result;'),
@@ -51,6 +51,11 @@ for name, token in guards:
     changed = dict(sources)
     changed[name] = re.sub(r'\s+', '', changed[name]).replace(re.sub(r'\s+', '', token), 'REMOVED_GUARD')
     assert not valid(changed), (name, token)
+# The owned-file rule reads settings.toml only: no header declares it and no other source uses it, so every
+# sync/ file keeps the private rule.
+owned = sorted(path.name for path in root.glob('purple_*.cpp') if 'CaptureSyncOwnedFile(' in path.read_text())
+assert owned == ['purple_sync_chat_native_io.cpp', 'purple_sync_local_store.cpp'], owned
+assert not any('CaptureSyncOwnedFile' in path.read_text() for path in root.glob('*.h'))
 # Each production switch is one constant, ON or OFF; the native guards above hold for either value.
 switches = []
 for name, function in [('setup', 'Move'), ('consent', 'FollowFill'), ('mark_actions', 'MarkRemoval'), ('cleanup', 'Cleanup'), ('recovery', 'Recovery')]:

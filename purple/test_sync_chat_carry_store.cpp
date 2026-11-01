@@ -1,5 +1,6 @@
 #include "purple/purple_sync_chat_carry_store.h"
 #include "purple/purple_sync_chat_cache.h"
+#include "purple/purple_sync_inventory.h"
 #include "purple/purple_sync_json.h"
 
 #include <QtCore/QCoreApplication>
@@ -13,7 +14,13 @@
 #include <cstdlib>
 #include <thread>
 
+#include <unistd.h>
+
 using namespace Purple;
+
+namespace Purple {
+[[nodiscard]] SyncPrivateSnapshot CaptureSyncOwnedFile(const QString &path, qsizetype limit);
+}
 
 namespace {
 
@@ -312,6 +319,54 @@ void ConfigRootModes() {
 	}
 }
 
+// settings.toml is written with default modes (0644). With an unposted settings change pending, the
+// carry reads it through the owned-file rule; a group- or other-writable, symlinked or hard-linked file
+// still refuses, and the pending stage under sync/ keeps the private rule.
+void SettingsFileModes() {
+	constexpr auto owner = QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+	constexpr auto shared = owner | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+		| QFileDevice::ReadOther | QFileDevice::ExeOther;
+	constexpr auto readable = QFileDevice::ReadOwner | QFileDevice::WriteOwner
+		| QFileDevice::ReadGroup | QFileDevice::ReadOther;
+	auto files = Files();
+	const auto configRoot = files.temporary.path();
+	const auto built = Record(files.initial);
+	{
+		auto store = SyncLocalStore(files.root); REQUIRE(store.Open(true, files.scope.binding));
+		auto next = store.state()->configData; next.pending = built.version.key;
+		REQUIRE(store.StageConfig(built.canonical, next, files.scope.binding));
+	}
+	const auto staged = files.root + u"/pending/config-1.json"_q;
+	const auto settings = configRoot + u"/settings.toml"_q;
+	const auto text = QByteArray("version = 2\n");
+	{
+		auto file = QFile(settings);
+		REQUIRE(file.open(QIODevice::WriteOnly) && file.write(text) == text.size());
+	}
+	REQUIRE(QFile(settings).setPermissions(readable) && QFile(configRoot).setPermissions(shared));
+	const auto read = CaptureSyncOwnedFile(settings, kSyncRecordMaximumBytes);
+	CHECK(read.status == SyncStoreStatus::Ready && read.bytes == text);
+	CHECK(CaptureSyncPrivateFile(settings, kSyncRecordMaximumBytes).status != SyncStoreStatus::Ready);
+	CHECK(CaptureSyncPrivateFile(staged, kSyncSettingsRecordStorageLimit).status == SyncStoreStatus::Ready);
+	for (const auto loose : { QFileDevice::WriteGroup, QFileDevice::WriteOther }) {
+		REQUIRE(QFile(settings).setPermissions(readable | loose));
+		CHECK(CaptureSyncOwnedFile(settings, kSyncRecordMaximumBytes).status == SyncStoreStatus::InsecurePermissions);
+	}
+	REQUIRE(QFile(settings).setPermissions(readable));
+	const auto alias = configRoot + u"/alias.toml"_q;
+	REQUIRE(QFile::link(settings, alias));
+	CHECK(CaptureSyncOwnedFile(alias, kSyncRecordMaximumBytes).status != SyncStoreStatus::Ready);
+	const auto second = configRoot + u"/second.toml"_q;
+	REQUIRE(::link(QFile::encodeName(settings).constData(), QFile::encodeName(second).constData()) == 0);
+	CHECK(CaptureSyncOwnedFile(settings, kSyncRecordMaximumBytes).status != SyncStoreStatus::Ready);
+	REQUIRE(QFile::remove(second));
+	CHECK(CaptureSyncOwnedFile(settings, kSyncRecordMaximumBytes).bytes == text);
+	REQUIRE(QFile(staged).setPermissions(readable));
+	CHECK(CaptureSyncPrivateFile(staged, kSyncSettingsRecordStorageLimit).status != SyncStoreStatus::Ready);
+	REQUIRE(QFile(staged).setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+	REQUIRE(QFile(configRoot).setPermissions(owner));
+}
+
 void CarryCommit(bool ownStage, int failRename = 0) {
 	auto files = Files();
 	const auto built = Record(files.initial);
@@ -580,7 +635,7 @@ void Journals() {
 }
 
 int main(int argc, char **argv) {
-	Retention(); Ordinary(); Barriers(); ConfigRootModes(); Journals(); RefusalMatrix(); PendingRetirement();
+	Retention(); Ordinary(); Barriers(); ConfigRootModes(); SettingsFileModes(); Journals(); RefusalMatrix(); PendingRetirement();
 	CarryCommit(false); CarryCommit(true);
 	for (auto i = 1; i <= 3; ++i) { CarryCommit(true, i); }
 	{

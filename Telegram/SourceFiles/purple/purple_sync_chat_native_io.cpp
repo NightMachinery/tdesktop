@@ -22,6 +22,11 @@
 #include <QtCore/QTimer>
 
 namespace Purple {
+
+// Defined in purple_sync_local_store.cpp and declared only where settings.toml is read, so that no
+// sync/ file can reach the owned-file rule by including the store's header.
+[[nodiscard]] SyncPrivateSnapshot CaptureSyncOwnedFile(const QString &path, qsizetype limit);
+
 namespace {
 
 PeerData* Loaded(Main::Session &session, PeerToken chat) {
@@ -297,7 +302,7 @@ void NativeIo::localText(Fn<void(std::optional<QByteArray>)> done) {
 	const auto generation = _generation;
 	crl::async([weak, generation, path, done = std::move(done)] {
 		const auto file
-		    = CaptureSyncPrivateFile(path, kSyncRecordMaximumBytes);
+		    = CaptureSyncOwnedFile(path, kSyncRecordMaximumBytes);
 		crl::on_main([weak, generation, file, done] {
 			const auto self = weak.lock();
 			done(self && self->current() && self->_generation == generation

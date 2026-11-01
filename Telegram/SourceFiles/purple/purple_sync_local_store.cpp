@@ -126,6 +126,22 @@ struct RetainedRecords {
 #endif
 }
 
+// settings.toml is written by the config writer or the user's editor with default modes (0644 under the
+// usual umask). A regular file with one link, owned by this user and writable by nobody else, cannot be
+// swapped or edited by another user. Files under sync/ keep the private rule.
+[[nodiscard]] bool OwnedPermissions(const QString &path) {
+	const auto info = QFileInfo(path);
+	if (info.isSymLink() || (info.isFile() && SyncPathIdentity(path).isEmpty())) {
+		return false;
+	}
+#ifdef Q_OS_UNIX
+	return info.ownerId() == ::geteuid()
+		&& !(info.permissions() & (QFileDevice::WriteGroup | QFileDevice::WriteOther));
+#else
+	return true;
+#endif
+}
+
 [[nodiscard]] bool ReadablePrivateDirectory(const QFileInfo &info) {
 	if (!info.isDir() || !info.isReadable() || !PrivatePermissions(info.filePath())) { return false; }
 #ifdef Q_OS_UNIX
@@ -449,14 +465,18 @@ QByteArray SyncPathIdentity(const QString &path) {
 #endif
 }
 
-SyncStoreStatus ReadSyncPrivateFile(
+namespace {
+
+SyncStoreStatus ReadSyncFile(
 		const QString &path,
 		qsizetype limit,
-		QByteArray &bytes) {
+		QByteArray &bytes,
+		bool owned) {
+	const auto permitted = [&] { return owned ? OwnedPermissions(path) : PrivatePermissions(path); };
 	const auto info = QFileInfo(path);
 	if (!info.exists()) { return SyncStoreStatus::PendingMissing; }
 	if (!info.isFile() || info.size() > limit) { return SyncStoreStatus::PendingMismatch; }
-	if (!PrivatePermissions(path)) { return SyncStoreStatus::InsecurePermissions; }
+	if (!permitted()) { return SyncStoreStatus::InsecurePermissions; }
 	const auto identity = SyncPathIdentity(path);
 	if (identity.isEmpty() || identity == "missing") { return SyncStoreStatus::IoError; }
 	auto file = QFile(path);
@@ -466,6 +486,7 @@ SyncStoreStatus ReadSyncPrivateFile(
 	struct stat opened = {};
 	const auto same = ::fstat(descriptor, &opened) == 0 && S_ISREG(opened.st_mode)
 		&& opened.st_nlink == 1 && opened.st_size <= limit
+		&& (!owned || (opened.st_uid == ::geteuid() && !(opened.st_mode & 0022)))
 		&& QByteArray::number(qulonglong(opened.st_dev)) + ':' + QByteArray::number(qulonglong(opened.st_ino)) == identity;
 	if (!same || !file.open(descriptor, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
 		::close(descriptor);
@@ -492,13 +513,39 @@ SyncStoreStatus ReadSyncPrivateFile(
 			&& ReadFile(handle, &extra, 1, &extraCount, nullptr) && extraCount == 0;
 	}
 	CloseHandle(handle);
-	return ok && SyncPathIdentity(path) == identity && PrivatePermissions(path)
+	return ok && SyncPathIdentity(path) == identity && permitted()
 		? SyncStoreStatus::Ready : SyncStoreStatus::IoError;
 #endif
 	bytes = file.read(limit + 1);
 	return file.error() == QFileDevice::NoError && file.atEnd() && bytes.size() == info.size()
-		&& bytes.size() <= limit && SyncPathIdentity(path) == identity && PrivatePermissions(path)
+		&& bytes.size() <= limit && SyncPathIdentity(path) == identity && permitted()
 		? SyncStoreStatus::Ready : SyncStoreStatus::IoError;
+}
+
+SyncPrivateSnapshot CaptureSyncFile(const QString &path, qsizetype limit, bool owned) {
+	auto result = SyncPrivateSnapshot();
+	const auto parent = QFileInfo(path).absolutePath();
+	result.parentIdentity = SyncPathIdentity(parent);
+	if (result.parentIdentity.isEmpty() || result.parentIdentity == "missing"
+		|| !StableOwnedDirectory(QFileInfo(parent))) { return result; }
+	result.identity = SyncPathIdentity(path);
+	if (result.identity.isEmpty()) { return result; }
+	if (result.identity == "missing") { result.status = SyncStoreStatus::Ready; return result; }
+	result.status = ReadSyncFile(path, limit, result.bytes, owned);
+	if (result.status == SyncStoreStatus::Ready
+		&& (SyncPathIdentity(path) != result.identity || SyncPathIdentity(parent) != result.parentIdentity)) {
+		result.status = SyncStoreStatus::Changed;
+	}
+	return result;
+}
+
+}
+
+SyncStoreStatus ReadSyncPrivateFile(
+		const QString &path,
+		qsizetype limit,
+		QByteArray &bytes) {
+	return ReadSyncFile(path, limit, bytes, false);
 }
 
 SyncStoreStatus WriteSyncPrivateFile(
@@ -535,20 +582,11 @@ bool SyncStoreWorkerThread() {
 }
 
 SyncPrivateSnapshot CaptureSyncPrivateFile(const QString &path, qsizetype limit) {
-	auto result = SyncPrivateSnapshot();
-	const auto parent = QFileInfo(path).absolutePath();
-	result.parentIdentity = SyncPathIdentity(parent);
-	if (result.parentIdentity.isEmpty() || result.parentIdentity == "missing"
-		|| !StableOwnedDirectory(QFileInfo(parent))) { return result; }
-	result.identity = SyncPathIdentity(path);
-	if (result.identity.isEmpty()) { return result; }
-	if (result.identity == "missing") { result.status = SyncStoreStatus::Ready; return result; }
-	result.status = ReadSyncPrivateFile(path, limit, result.bytes);
-	if (result.status == SyncStoreStatus::Ready
-		&& (SyncPathIdentity(path) != result.identity || SyncPathIdentity(parent) != result.parentIdentity)) {
-		result.status = SyncStoreStatus::Changed;
-	}
-	return result;
+	return CaptureSyncFile(path, limit, false);
+}
+
+SyncPrivateSnapshot CaptureSyncOwnedFile(const QString &path, qsizetype limit) {
+	return CaptureSyncFile(path, limit, true);
 }
 
 namespace {
