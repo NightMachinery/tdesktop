@@ -67,13 +67,13 @@ run([build / 'Telegram/codegen/codegen/lang/codegen_lang', '-o' + str(work / 'ge
 flags = ['-I' + str(work), '-I' + str(work / 'gen'), '-I' + str(source), *flags,
     '-g0', '-include', str(work / 'stdafx.hxx')]
 header = (source / 'core/core_settings.h').read_text()
-settings = (source / 'purple/purple_control.cpp').read_text()
+settings = (source / 'core/core_settings.cpp').read_text()
 (work / 'control-preference-api.inc').write_text('\n'.join(definition(header, marker) for marker in [
     '\ttemplate <typename Type, typename Other>\n\tvoid writePref(',
     '\ttemplate <typename Type, typename Other = Type>\n\t[[nodiscard]] Type readPref(']))
 (work / 'control-preference-storage.inc').write_text('\n'.join(definition(settings, marker) for marker in [
     'template <>\nstd::optional<QByteArray> Settings::readPrefImpl<QByteArray>(',
-    'template <>\nvoid Settings::writePrefImpl<QByteArray>(']) + '\n' + '\n'.join(definition((source / 'core/core_settings.cpp').read_text(), marker) for marker in [
+    'template <>\nvoid Settings::writePrefImpl<QByteArray>(',
     'template <>\nstd::optional<bool> Settings::readPrefImpl<bool>(',
     'template <>\nvoid Settings::writePrefImpl<bool>(']))
 
@@ -98,8 +98,8 @@ compile('core/application.cpp')
 symbols = run(['nm', '-gU', work / 'purple_control.o'], stdout=subprocess.PIPE, text=True).stdout
 definitions = run(['c++filt'], input=symbols, stdout=subprocess.PIPE, text=True).stdout
 for member in ['readPrefImpl', 'writePrefImpl']:
-    assert any(' T ' in line and 'Core::Settings::' + member + '<QByteArray>' in line
-        for line in definitions.splitlines()), 'Missing byte-array preference definition: ' + member
+    assert not any('Core::Settings::' + member + '<QByteArray>' in line
+        for line in definitions.splitlines()), 'Duplicate byte-array preference definition: ' + member
 prefix = [recipe[0]]
 for flag in ('-arch', '-isysroot'):
     if flag in recipe:
