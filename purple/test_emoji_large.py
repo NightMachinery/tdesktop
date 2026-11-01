@@ -122,8 +122,9 @@ records.append({'capPreferenceDefinitions': [line for line in cap_definitions.sp
 
 link_line = next(line for line in subprocess.check_output(
     ['ninja', '-C', str(build), '-t', 'commands', 'Telegram'], text=True).splitlines()
-    if 'libavformat' in line and 'libexternal_rlottie' in line)
+    if 'libavformat' in line and 'libtdesktop_rust.a' in line)
 link_recipe = shlex.split(link_line)
+lottie_library = next(token for token in link_recipe if Path(token).name == 'libtdesktop_rust.a')
 ffmpeg_libraries = [token for token in link_recipe if Path(token).name.startswith(
     ('libavformat.', 'libavcodec.', 'libswscale.', 'libswresample.', 'libavutil.'))]
 assert len(ffmpeg_libraries) >= 5, 'FFmpeg link recipe missing'
@@ -167,7 +168,7 @@ for program in ['emoji_large_bounds_cases.cpp', 'emoji_large_policy_cases.cpp', 
     extra = []
     if name == 'emoji_large_render_cases':
         extra = [*render_objects, build / 'Telegram/lib_ui/liblib_ui.a',
-            build / 'cmake/external/rlottie/libexternal_rlottie_bundled.a', *ffmpeg_libraries, '-lz']
+            build / 'Telegram/lib_lottie/CMakeFiles/lib_lottie.dir/lottie/details/lottie_instance.cpp.o', lottie_library, *ffmpeg_libraries, '-lz', '-liconv', '-framework', 'CoreFoundation']
     run([*prefix, '-Wl,-dead_strip', test, *objects, *extra, base,
         '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets',
         '-framework', 'QtSvg', '-framework', 'Foundation', '-o', binary])
