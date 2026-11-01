@@ -190,7 +190,9 @@ declarations are reviewed inventory entries, not newly gated operations. The
 core parser's `SetTables` type construction is a deliberate conservative match. `purple/wait_routes.json` records the
 inventory. Request completion, guarded writer implementations, core resolution,
 schedule/Focus, Last Seen Peek and automatic Peek termination are the reviewed
-non-UI writers. Comments and string literals are excluded. This is a syntactic
+non-UI writers. Upstream's `wallet/wallet_ton_connect_box.cpp` (v7.3.3) has a
+file-local `UpdateState` for its own box; it only shares the name and is a
+reviewed entry. Comments and string literals are excluded. This is a syntactic
 regression check, not type resolution or a proof against aliases/reflection.
 Review an inventory change rather than regenerating it without checking routes.
 

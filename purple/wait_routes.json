@@ -71,6 +71,9 @@
   "Telegram/SourceFiles/purple/purple_wait_gate.cpp": {
     "ExtendPeek": 1
   },
+  "Telegram/SourceFiles/wallet/wallet_ton_connect_box.cpp": {
+    "UpdateState": 2
+  },
   "Telegram/ThirdParty/purple_core/purple/purple_engine.cpp": {
     "StopPeek": 1,
     "activePreset=": 4
