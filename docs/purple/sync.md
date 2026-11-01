@@ -625,9 +625,46 @@ valid `.good` baseline retain their actual bytes in History; missing-file adopti
 remains available.
 
 The Desktop build registers the shared peer-token, sync-chat carry/journal and
-received-content archive core modules. Registration alone does not expose sync-chat
-moves or an archive UI. Desktop's automatic adapter is limited to implicit
+received-content archive core modules. Sync-chat changes are described below;
+there is no archive UI. Desktop's automatic adapter is limited to implicit
 Saved Messages as described below.
+
+## Changing the sync chat
+
+Each account keeps its synced settings in one sync chat: Saved Messages at
+first, or a private channel or group the account owns. A short Purple mark in
+that chat tells the account's other devices where to look. **Sync chat** in Sync
+across devices shows the chat in use and offers the changes below when they
+apply. Each one has its own switch in the code, and the first release may keep
+Old settings cleanup off; see [Sync chat changes](sync_chat_wiring.md).
+
+- **Change sync chat** moves this account's sync to another chat it owns, or to
+  a new private channel created for it. It copies the current settings there and
+  marks the new chat; the account's other devices then find the newer chat and
+  offer to follow it. Keep the window open until it says the move is complete.
+  If the app quits midway, the next start resumes the move and checks where it
+  stands. It may then wait until the new chat's mark is confirmed, or until you
+  press Retry.
+- **Follow** appears on a device whose account has already moved its sync to a
+  newer chat elsewhere. It shows who can read that chat, then offers Follow,
+  Pause sync here, or Cancel. Following first copies any settings this device
+  posted to the old chat after the move; with Old settings cleanup on, it then
+  deletes those copies from the old chat. **Fill** is the same choice when the
+  newer chat does not have the settings yet: it copies them in from the old chat.
+- **Remove older Purple mark** deletes one old mark this account left in a chat
+  it no longer uses, after you confirm that exact message.
+- **Old settings cleanup** deletes this account's own old settings messages and
+  mark from the chat a move left, and only those it can prove are its own and
+  already copied. You choose it in the move's confirmation, and you can retry it
+  or skip it. While it is off, a move offers no cleanup, a Follow deletes
+  nothing, and the old messages stay where they are.
+- **Lost recovery** appears once Purple has confirmed that the sync chat, or its
+  mark, is gone; a mark that is merely not found yet keeps searching. It offers
+  to create a new chat, choose another one, or mark the same chat again, and it
+  leaves the lost chat alone.
+
+A change that cannot continue stops and says why. Copies already delivered stay,
+and nothing is sent twice.
 
 ## Automatic settings sync on Desktop
 

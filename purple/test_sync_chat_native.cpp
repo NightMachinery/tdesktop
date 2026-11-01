@@ -1,6 +1,7 @@
 #define PURPLE_SYNC_CHAT_CARRY_EXECUTOR_EMBEDDED
 #include "purple/purple_sync_chat_native.h"
 #include "test_sync_chat_carry.cpp"
+#include "test_sync_chat_switch_entry.h"
 #include <deque>
 #include "base/unixtime.h"
 
@@ -106,6 +107,7 @@ struct NativeHarness {
 	int cleanupDeletes = 0;
 	std::set<int> deleted;
 	std::vector<SyncCarryJournalAction> actions;
+	std::vector<DesktopSyncCarryCommand> cleanupCommands;
 	int requests = 0;
 	int effects = 0;
 	int applies = 0;
@@ -436,6 +438,7 @@ struct NativeHarness {
 		for (auto n = 0; files->progress.command && n != 80; ++n) {
 			const auto command = *files->progress.command;
 			actions.push_back(command.action);
+			if (command.cleanupPermit || command.cleanupRead) { cleanupCommands.push_back(command); }
 			const auto reply = send(command);
 			CHECK(reply.command.ticket == command.ticket
 			    && reply.command.run == command.run
@@ -453,8 +456,19 @@ struct NativeHarness {
 
 void NativeFlows() {
 	CHECK(!SyncStoreWorkerThread());
-	CHECK(!DesktopSyncChatCleanupActivated()
-	    && !DesktopSyncChatMarkRemovalActivated());
+	// The production entries, under the carry service's switch mapping: a native cleanup command
+	// passes the owner's transport guard only while Cleanup is ON (checked on the cleanup flow
+	// below), and the owner admits a mark removal only while Mark removal is ON. An injected OFF
+	// refuses each whatever the constant.
+	const auto cleanup = DesktopSyncChatCleanupActivated();
+	const auto markRemoval = DesktopSyncChatMarkRemovalActivated();
+	std::printf("SWITCH cleanup=%d markRemoval=%d\n", int(cleanup), int(markRemoval));
+	{
+		auto production = SwitchEntry();
+		CHECK(production.removeMark() == markRemoval && production.marks == int(markRemoval));
+		auto held = SwitchEntry(AllButSwitch(DesktopSyncChatCarrySwitch::MarkRemoval));
+		CHECK(!held.removeMark() && held.idle());
+	}
 	for (const auto own : {false, true}) {
 		auto h = NativeHarness(own);
 		h.open();
@@ -537,6 +551,11 @@ void NativeFlows() {
 		h.run();
 		CHECK(h.files->progress.terminal && h.cleanupDeletes == 1
 		    && h.deleted.contains(10));
+		CHECK(!h.cleanupCommands.empty());
+		for (const auto &command : h.cleanupCommands) {
+			CHECK(DesktopSyncChatCarryCommandAllowed(command, DesktopSyncChatCarrySwitchActivated) == cleanup);
+			CHECK(!DesktopSyncChatCarryCommandAllowed(command, AllButSwitch(DesktopSyncChatCarrySwitch::Cleanup)));
+		}
 	}
 }
 

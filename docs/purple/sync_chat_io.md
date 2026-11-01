@@ -280,11 +280,12 @@ the operation: a bounded renewal timeout finishes into a recoverable hold once,
 and late grants cannot send. See sync_chat_move.md for progress, partial results,
 Retry/Skip and the ledger shape. No native or server execution is qualified.
 
-## Native carry transport, held off
+## Native carry transport
 
 The native adapter now supplies carry-command requests and stale-mark native
 ports. It reuses the existing resolver, complete inventories, issued permits,
-uploader and shared retry controller. All five switches remain off, and this
-adapter does not construct a foreground service or resume startup journals.
+uploader and shared retry controller. This adapter does not construct a
+foreground service or resume startup journals; the carry service of
+[Sync chat changes](sync_chat_wiring.md) does, behind the five switches.
 See [native sync-chat requests](sync_chat_native.md) for its factory signatures,
 thread rules, command mapping and host-test boundary.

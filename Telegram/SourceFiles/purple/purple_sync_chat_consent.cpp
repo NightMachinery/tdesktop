@@ -18,7 +18,7 @@ std::optional<PeerToken> Source(const SyncChatResolution &resolution) {
 
 }
 
-bool DesktopSyncChatFollowFillActivated() { return false; }
+bool DesktopSyncChatFollowFillActivated() { return true; }
 
 QString DesktopSyncChatConsentFingerprint(const DesktopSyncChatSetupSnapshot &snapshot) {
 	const auto &scope = snapshot.scope;

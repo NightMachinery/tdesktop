@@ -1,6 +1,7 @@
 #define PURPLE_SYNC_CHAT_CARRY_EXECUTOR_EMBEDDED
 #include "test_sync_chat_carry.cpp"
 #include "purple/purple_sync_chat_mark_actions.h"
+#include "test_sync_chat_switch_entry.h"
 #include <deque>
 
 namespace {
@@ -319,6 +320,19 @@ void References() {
 
 }
 
+// The production entry is the owner's admission under the carry service's switch mapping: it
+// admits a removal only while Mark removal is ON. An injected OFF refuses it whatever the constant.
+void MarkRemovalEntry() {
+	const auto on = DesktopSyncChatMarkRemovalActivated();
+	std::printf("SWITCH markRemoval=%d\n", int(on));
+	auto production = SwitchEntry();
+	CHECK(production.removeMark() == on && production.marks == int(on));
+	CHECK(on ? (production.reason == u"mark-transport-held"_q && production.settled == std::vector{DesktopSyncChatCarryKind::Mark})
+		: production.idle());
+	auto held = SwitchEntry(AllButSwitch(DesktopSyncChatCarrySwitch::MarkRemoval));
+	CHECK(!held.removeMark() && held.idle());
+}
+
 void MainThreadBoundaries() {
 	auto queue = std::deque<Fn<void()>>(); auto cancels = 0;
 	auto port = DesktopSyncChatMarkPort();
@@ -332,7 +346,7 @@ void MainThreadBoundaries() {
 
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc,argv); std::setbuf(stdout,nullptr);
-	CHECK(!DesktopSyncChatMarkRemovalActivated()); MainThreadBoundaries();
+	MarkRemovalEntry(); MainThreadBoundaries();
 	auto worker = std::thread([] { ExactAndAuthority(); Flows(); TypedTransport(); MoreFlows(); References(); }); worker.join();
 	std::printf("T5F MARKS %d checks, %d failures\n",Checks,Failures);
 	return Failures ? 1 : 0;

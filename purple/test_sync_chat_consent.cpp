@@ -1,6 +1,7 @@
 #define PURPLE_SYNC_CHAT_CARRY_EXECUTOR_EMBEDDED
 #include "test_sync_chat_carry.cpp"
 #include "purple/purple_sync_chat_consent.h"
+#include "test_sync_chat_switch_entry.h"
 #include <QJsonArray>
 #include <deque>
 
@@ -60,7 +61,18 @@ QJsonObject TransportReaders(ExecutorFiles &f) {
 
 void MainActions(const DesktopSyncChatSetupSnapshot &frame, const DesktopSyncChatPeer &peer) {
 	CHECK(!SyncStoreWorkerThread());
-	CHECK(!DesktopSyncChatFollowFillActivated());
+	// The production entry is the owner's admission under the carry service's switch mapping: it
+	// admits a Follow only while Follow/Fill is ON. An injected OFF refuses it whatever the constant.
+	const auto on = DesktopSyncChatFollowFillActivated();
+	std::printf("SWITCH followFill=%d\n", int(on));
+	{
+		auto production = SwitchEntry();
+		CHECK(production.follow() == on && production.transports == int(on));
+		CHECK(on ? (production.reason == u"carry-transport-held"_q && production.settled == std::vector{DesktopSyncChatCarryKind::Follow})
+			: production.idle());
+		auto held = SwitchEntry(AllButSwitch(DesktopSyncChatCarrySwitch::FollowFill));
+		CHECK(!held.follow() && held.idle());
+	}
 	auto live = true;
 	auto foreground = true;
 	for (const auto stream : {u"config"_q, u"library"_q}) {

@@ -411,7 +411,7 @@ opening state, account, domain-separated Carry login authority, source and creat
 channel. It reuses T3's silent
 pin, mute and archive request shapes with the Carry mark id. Precommit,
 provision-only, existing-chat and Saved Messages receipts refuse. There is no
-production dispatch callsite while move activation is off. Activation must wire
+production dispatch callsite yet, with or without move activation. Activation must wire
 this builder after durable commit and renew its foreground and scope authority
 before each effect; provisioning alone grants no decoration permission.
 
@@ -423,14 +423,14 @@ callback similarly admits no second command. Only explicit Retry renews
 admission for the failed step; earlier successful decorations are not replayed.
 Run, operation, ticket and step fence stale callbacks. The same committed
 receipt stays bound throughout. No production UI or service constructs this
-action while move activation is off; native activation must retain one action
+action yet; its future activation must retain one action
 per operation and renew the existing foreground and request gates.
 
 ## Follow/Fill consent and the first effect
 
-Desktop T5e reuses this Carry executor for resolver Follow and Fill. The
-production activation constant remains off, and the real setup screen exposes
-no actionable Follow/Fill or Pause/Resume control. The injected host flow
+Desktop T5e reuses this Carry executor for resolver Follow and Fill. The setup
+screen shows Follow, Pause sync here and Cancel only while the Follow/Fill switch
+is ON (see [Sync chat changes](sync_chat_wiring.md)). The injected host flow
 resolves and checks fresh full peer information at acceptance and again at
 final admission, bound to the opening window, account/login, exact O/N, winning
 mark, stream and state/cache bytes.
@@ -482,9 +482,10 @@ check original-known roster and creator/admin authority directly. An issued
 receipt remains retained when later reader authority is lost, and reopening
 cannot replace that baseline to make the operation proceed.
 
-## Explicit old-settings cleanup (T5g, qualification only)
+## Explicit old-settings cleanup (T5g)
 
-Cleanup remains OFF in production. The injected Carry executor may clean only
+Cleanup runs only while its switch is ON (see [Sync chat changes](sync_chat_wiring.md)).
+The Carry executor may clean only
 its frozen O after verified delivery to N, durable state/cache commitment and
 recorded authorization. `SyncCarryCleanupCandidates`, `CheckSyncCarryDeletion`
 and `CheckSyncCarryOldMarkDeletion` are the only deletion authorities. There is
@@ -544,7 +545,7 @@ the existing serialized worker.
 The install-moved note is based on a genuine own config record in N with this
 install/device, excluding required carried hashes and the operation's own carried
 record. Copying historical records is not evidence that this install has begun
-using N. The OFF-gated progress box has Retry and a separately confirmed Skip;
+using N. The cleanup progress box, shown only with Cleanup ON, has Retry and a separately confirmed Skip;
 a stale box cannot act on a successor operation. Host tests do not qualify native
 UI, Telegram server behavior or physical power-loss durability.
 
@@ -552,10 +553,9 @@ UI, Telegram server behavior or physical power-loss durability.
 
 Recovery is a separate bound-account flow. Its Create, Choose, Mark this chat
 again and Retry recovery controls, public selection, click handlers and nested
-confirmation are all behind a constant OFF gate. The status remains a
-non-actionable qualification hold. Host injection qualifies the orchestration;
-the setup screen starts it through the carry owner
-([Sync chat changes](sync_chat_wiring.md)) and activation stays OFF.
+confirmation are all behind the Recovery switch; with it OFF the status is a
+non-actionable hold. Host injection qualifies the orchestration; the setup
+screen starts it through the carry owner ([Sync chat changes](sync_chat_wiring.md)).
 
 A missing mark is not a lost chat. Searching keeps the existing 30, 120 and
 600 second retries. Reconnect and explicit retry resolve again. A failed request,
@@ -612,12 +612,12 @@ setup screen still validates its opening target and snapshot synchronously:
 filesystem validation is in `purple_account_config.cpp:985` (`validateOpen`)
 and line 1977 (`operationTarget`). This slice does not convert those inherited
 UI paths to asynchronous validation or claim they are RAM-only. Every new
-recovery entry and control returns while activation is OFF; a future production
+recovery entry and control returns while the Recovery switch is OFF; the production
 factory must retain the worker boundary without copying these reads into its
 GUI callbacks.
 
 Focused generated-TL/core/store fixtures use injected transports only. Literal
-OFF control bodies and the queued controller start run on QCoreApplication's
+control bodies and the queued controller start run on QCoreApplication's
 main thread; the real store and Carry flow run on the worker. These checks do
 not qualify Telegram, native GUI lifecycle or physical power-loss behavior.
 The full host run belongs to the coordinator's final landing batch.
@@ -694,7 +694,7 @@ executor's fresh-source admission behavior is unchanged.
 The consecutive-change case reopens the normal store and actual state/cache
 files after O to N1, takes a new ordinary setup choice/confirmation for N1 to
 N2, and starts a fresh executor using the accepted draft at the existing test
-seam. Production setup remains OFF and dispatches nothing. It checks the new
+seam, as the carry owner does with Move ON. It checks the new
 command scope, distinct operation and exact archival of the first wrapper.
 This is host setup policy and executor qualification, not a native screen or
 session-service integration test.
@@ -719,7 +719,7 @@ D1 native fixture mapping:
 
 These mappings establish host adapter facts. They do not qualify Telegram
 forwarding semantics, server completeness, native foreground behavior or
-physical power-loss durability. All production activation gates remain OFF.
+physical power-loss durability. Activation is described in [Sync chat changes](sync_chat_wiring.md).
 
 The focused write and move drivers accept `PURPLE_HOST_TEST_WRAPPER` as a command
 prefix for each test executable, recorded in their input receipt. This lets a

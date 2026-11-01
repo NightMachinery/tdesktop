@@ -4,8 +4,11 @@ import re
 repo=Path(__file__).resolve().parent.parent
 paths={'recovery':'Telegram/SourceFiles/purple/purple_sync_chat_recovery.cpp','ui':'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp','service':'Telegram/SourceFiles/purple/purple_sync_chat_service.cpp','store':'Telegram/SourceFiles/purple/purple_sync_chat_carry_store.cpp','io':'Telegram/SourceFiles/purple/purple_sync_chat_carry_io.cpp','discovery':'Telegram/SourceFiles/purple/purple_sync_chat_discovery.cpp'}
 sources={name:(repo/path).read_text() for name,path in paths.items()}
+# The switch is one constant, ON or OFF; the guards below hold for either value.
+switch=re.findall(r'^bool DesktopSyncChatRecoveryActivated\(\) \{ return (true|false); \}$',sources['recovery'],re.M)
+assert len(switch)==1,'Recovery switch is one constant'
 guards=[
- ('recovery','bool DesktopSyncChatRecoveryActivated() { return false; }'),
+ ('recovery','bool DesktopSyncChatRecoveryActivated() { return '),
  ('recovery','if (!DesktopSyncChatRecoveryActivated() || !DesktopSyncChatRecoveryHeld(snapshot).isEmpty())'),
  ('recovery','if (!DesktopSyncChatRecoveryActivated() || !disclosed || window.isEmpty()'),
  ('recovery','port.window() == selection.window'),
@@ -51,4 +54,4 @@ for name,guard in guards:
  try:validate(changed)
  except AssertionError:continue
  raise AssertionError(('negative guard escaped',name,guard))
-print(f'T5h recovery routes: {len(guards)} guards and {len(guards)} negative mutations PASS; four recovery rows and nested confirmation OFF; no direct transport or GUI IO')
+print(f'T5h recovery routes: {len(guards)} guards and {len(guards)} negative mutations PASS; Recovery {"ON" if switch[0]=="true" else "OFF"}; four recovery rows and nested confirmation behind the OFF guard; no direct transport or GUI IO')

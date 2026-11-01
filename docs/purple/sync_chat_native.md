@@ -1,7 +1,8 @@
 # Native sync-chat requests
 
 The Desktop native adapter connects the carry executor and stale-mark controller
-to Telegram requests. All five feature switches remain off. Constructing the
+to Telegram requests behind the five feature switches of [Sync chat changes](sync_chat_wiring.md).
+Constructing the
 adapter sends nothing; foreground service and startup integration are separate.
 
 ## Constructing the adapter
@@ -104,6 +105,7 @@ hold is a separate slice (D-M2B5-13).
 
 `test_sync_chat_native` drives the actual resolver and dispatcher using injected
 native replies and the real worker executor. `test_sync_chat_native_routes`
-checks native wiring guards and all five OFF switches. The backend is compiled
+checks native wiring guards and that each of the five switches is one constant.
+The backend is compiled
 with the test; it is never given a real session. These checks do not qualify a
 native account, server timing, installation or activation.

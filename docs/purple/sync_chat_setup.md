@@ -277,7 +277,7 @@ fixtures cover source changes during a long wait, change then restore, account
 lock release on queued retirement, and destruction from the completion callback.
 
 
-## Change sync chat (qualification held)
+## Change sync chat
 
 The bound account has a distinct **Change sync chat** entry. Fresh setup remains
 separate and still refuses a bound settings stream. The move chooser captures
@@ -294,16 +294,16 @@ The old chat itself stays. The optional cleanup covers only Purple's own
 settings messages and mark after commitment, never unrelated content or the
 whole chat. It starts unticked when the old settings chat is Saved Messages.
 The exact checkbox value belongs to that confirmation, not a global preference.
-Cleanup remains subject to the Carry executor's separate authorization and its
-currently held deletion adapter.
+Cleanup is offered and sent only with the Cleanup switch ON, and remains subject
+to the Carry executor's separate authorization.
 
-Native move activation is off. The service validates the final RAM snapshot and
+With the Move switch OFF, the service validates the final RAM snapshot and
 then reports qualification-held. It creates neither a provisioning worker nor
 a Carry worker, transport, durable intent or background permission. Reopening,
-Retry and closing cannot enable dispatch. The production activation predicate
-is pinned off by host tests; a future owner-approved activation must supply the
-reviewed executor integration rather than changing the checkbox into consent
-for arbitrary background effects.
+Retry and closing cannot enable dispatch. With Move ON, the accepted draft goes
+to the carry owner ([Sync chat changes](sync_chat_wiring.md)), which provisions a new
+channel if one was chosen and runs the reviewed executor; the checkbox never
+becomes consent for arbitrary background effects.
 
 ### Provision-only creation
 
@@ -336,9 +336,10 @@ state and Carry journal formats are unchanged.
 
 The dormant selected-mark action lists supported Own marks observed for this
 account when a complete resolution has a newer winner. It is separate from
-moving or cleaning up settings. Production activation remains constant OFF:
-the real screen exposes no clickable Remove mark row or confirmation, and the
-public entry refuses before dispatch. The host injection seam tests the action;
+moving or cleaning up settings. With its switch OFF, the real screen exposes no
+clickable Remove mark row or confirmation, and the public entry refuses before
+dispatch. With it ON, the confirmed row goes to the carry owner
+([Sync chat changes](sync_chat_wiring.md)). The host injection seam tests the action;
 this does not qualify a native UI or Telegram deletion.
 
 A row captures the account/login, typed chat, exact message id, date, full text
@@ -384,7 +385,8 @@ to the final landing batch by the owner's velocity rule.
 ## Lost recovery
 
 The bound-account recovery controls (Create, Choose, Mark this chat again and
-Retry recovery) stay constant OFF, including nested confirmations. They never
+Retry recovery) follow the Recovery switch: with it OFF they offer nothing
+actionable, including nested confirmations. They never
 fall through to fresh setup. The serialized host-injected flow resolves the
 original account and opening before provisioning and Carry. Same-chat repair is
 core RepairMark and preserves state, binding and ledger bytes. Different-chat

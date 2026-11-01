@@ -39,9 +39,10 @@ DesktopSyncChatMoveDraft MoveReview(MoveInstall &install) {
 	auto starts = 0;
 	MoveRequire(action.confirm(*offer, frame, selection.peer, false, true,
 		[&](DesktopSyncChatMoveDraft) { ++starts; }), "ordinary setup accepts next chat");
-	CHECK(starts == 0 && !DesktopSyncChatMoveActivated());
-	CHECK(action.reason() == u"move-qualification-held"_q);
-	MoveRequire(action.reviewed().has_value(), "accepted setup draft retained behind activation gate");
+	const auto on = DesktopSyncChatMoveActivated();
+	CHECK(starts == int(on));
+	CHECK(on ? action.reason().isEmpty() : action.reason() == u"move-qualification-held"_q);
+	MoveRequire(action.reviewed().has_value(), "accepted setup draft retained for the start");
 	result = *action.reviewed();
 	}, Qt::BlockingQueuedConnection);
 	MoveRequire(result.has_value(), "main-thread setup review accepted");

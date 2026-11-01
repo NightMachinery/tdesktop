@@ -100,4 +100,4 @@ for line in ['\tSyncChatCarry(session).changes();\n', '\tconst auto held = tr::l
     except AssertionError:
         continue
     raise AssertionError(('negative insertion escaped', line))
-print(f'T5J wiring routes: {len(guards)} guards and {len(guards)} negative mutations, 2 insertion negatives PASS; carry service OFF-unconstructed')
+print(f'T5J wiring routes: {len(guards)} guards and {len(guards)} negative mutations, 2 insertion negatives PASS; carry service constructed only behind CarryOn()')

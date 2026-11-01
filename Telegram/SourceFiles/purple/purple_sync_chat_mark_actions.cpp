@@ -56,7 +56,7 @@ bool Resolution(const DesktopSyncChatStaleMark &row, const DesktopSyncChatSetupS
 
 }
 
-bool DesktopSyncChatMarkRemovalActivated() { return false; }
+bool DesktopSyncChatMarkRemovalActivated() { return true; }
 
 std::optional<DesktopSyncChatStaleMark> CaptureDesktopSyncChatStaleMark(
 		const DesktopSyncChatPeer &peer, const QString &login, const MTPMessage &message) {

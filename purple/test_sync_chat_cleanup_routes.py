@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 repo=Path(__file__).resolve().parent.parent
 root=repo/'Telegram/SourceFiles/purple'
 paths={'cleanup':root/'purple_sync_chat_cleanup.cpp','worker':root/'purple_sync_chat_carry_executor.cpp','store':root/'purple_sync_chat_carry_store.cpp','ui':root/'purple_sync_chat_setup_box.cpp','decoration':root/'purple_sync_chat_setup_requests.cpp','service':root/'purple_sync_chat_carry_owner.cpp','consent':root/'purple_sync_chat_consent.cpp'}
 sources={k:p.read_text() for k,p in paths.items()}
+# The switch is one constant, ON or OFF; the guards below hold for either value.
+switch=re.findall(r'^bool DesktopSyncChatCleanupActivated\(\) \{ return (true|false); \}$',sources['cleanup'],re.M)
+assert len(switch)==1,'Cleanup switch is one constant'
 guards=[
- ('cleanup','bool DesktopSyncChatCleanupActivated() { return false; }'),
+ ('cleanup','bool DesktopSyncChatCleanupActivated() { return '),
  ('cleanup','SyncCarryCleanupCandidates(*j.plan,inventory,playlist)'),
  ('cleanup','CheckSyncCarryDeletion(j,*message,inventory,playlist)'),
  ('cleanup','CheckSyncCarryOldMarkDeletion(j,readback,inventory,playlist)'),
@@ -70,4 +74,4 @@ for name,fragment in guards:
  changed=dict(sources);changed[name]=changed[name].replace(fragment,'REMOVED_GUARD',1);assert not valid(changed),(name,fragment)
 for method in ['MTPchannels_DeleteChannel','MTPmessages_DeleteHistory','MTPchannels_DeleteHistory']:
  changed=dict(sources);changed['cleanup']+=method;assert not valid(changed),method
-print(f'T5g cleanup routes: {len(guards)} guards, {len(guards)} negative mutations, 3 whole-chat negatives PASS; activation OFF')
+print(f'T5g cleanup routes: {len(guards)} guards, {len(guards)} negative mutations, 3 whole-chat negatives PASS; Cleanup {"ON" if switch[0]=="true" else "OFF"}')

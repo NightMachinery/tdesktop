@@ -6,7 +6,7 @@ recovery, or the removal of one older Purple mark. The journal, its phases and
 the executor are described in [move storage and recovery](sync_chat_move.md).
 This page covers how Desktop starts, shows and stops carries.
 
-All five feature switches are OFF in this build. Each one is a constant:
+Each feature has its own switch, a constant that is either ON or OFF:
 
 - Move: `DesktopSyncChatMoveActivated` in `purple_sync_chat_setup.cpp`;
 - Follow/Fill: `DesktopSyncChatFollowFillActivated` in `purple_sync_chat_consent.cpp`;
@@ -14,9 +14,14 @@ All five feature switches are OFF in this build. Each one is a constant:
 - Cleanup: `DesktopSyncChatCleanupActivated` in `purple_sync_chat_cleanup.cpp`;
 - Recovery: `DesktopSyncChatRecoveryActivated` in `purple_sync_chat_recovery.cpp`.
 
-With all five OFF, nothing on this page runs: the carry service is never
-constructed, startup goes straight to ordinary reconciliation, and every control
-keeps its existing OFF result.
+The activation turns each switch ON in its own one-line change, so any one can
+be held back. The first release may keep Cleanup OFF. A switch that is OFF keeps
+its control's OFF result: no row, or a label saying the change is held. With all
+five OFF, nothing on this page runs: the carry service is never constructed and
+startup goes straight to ordinary reconciliation. With Cleanup OFF and the other
+four ON, a move never offers or sends cleanup, a Follow plans none for its late
+posts, and the old chat's settings messages stay where they are. What each change does for the user is in
+[Syncing settings between devices](sync.md#changing-the-sync-chat).
 
 ## One owner per account
 
@@ -127,7 +132,17 @@ is held for qualification appear only while that switch is OFF.
   old chat with a late post of this device's under Cleanup ON and OFF, the
   owner's cleanup transport guard, recovery, a
   renewal answered empty when its window closes mid-hop, mark removal, and OFF
-  per switch.
+  per switch. A second pass reruns the ON operations with Cleanup held OFF and
+  the other four ON, including a move that asks for cleanup and old-mark removal
+  and a Follow from an old chat with a late post of this device's. Neither sends
+  a cleanup command, and both finish.
+- The compiled suites of the setup, move, cleanup, consent, mark, native and
+  recovery controllers check each switch against its own constant. They expect
+  the ON behavior when it is ON and the OFF behavior when it is OFF, so the
+  build stays verified with any switch held back. The consent, mark and native
+  suites check at the owner, the production entry: it admits Follow/Fill and
+  mark removal, and its transport guard passes a cleanup command, only while
+  that switch is ON. Each also keeps a control with only that switch held OFF.
 - `test_sync_chat_carry_wire_routes`: the OFF guards of the wiring, with a
   negative mutation for each.
 
@@ -136,5 +151,9 @@ is held for qualification appear only while that switch is OFF.
 - Leaving the app, locking it and account changes are wired in the service and
   checked only by source review and the route test, not by a host test.
 - The decoration of a newly created channel (pin, mute, archive) is not run.
+- Turning Cleanup OFF after a build that had it ON can leave an unfinished move
+  or Follow that still needs cleanup. Its resume then holds at cleanup with no
+  Skip control, because the cleanup row is behind the switch. Holding Cleanup
+  OFF first and turning it ON later never creates such a journal.
 - These are host tests with injected native replies. They do not qualify the
   native app, the network or power loss.

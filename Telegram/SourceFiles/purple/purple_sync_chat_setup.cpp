@@ -181,7 +181,7 @@ DesktopSyncChatMoveNotice DesktopSyncChatMoveNoticeOf(
 	return retryable ? DesktopSyncChatMoveNotice::Retryable : DesktopSyncChatMoveNotice::Held;
 }
 
-bool DesktopSyncChatMoveActivated() { return false; }
+bool DesktopSyncChatMoveActivated() { return true; }
 
 DesktopSyncChatMoveAction::DesktopSyncChatMoveAction(
 		DesktopSyncChatSetupSnapshot opening, Fn<bool()> current)

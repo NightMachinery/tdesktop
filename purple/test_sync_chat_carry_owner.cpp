@@ -1,6 +1,7 @@
 #define PURPLE_SYNC_CHAT_CARRY_EXECUTOR_EMBEDDED
 #include "test_sync_chat_carry.cpp"
 #include "purple/purple_sync_chat_carry_owner.h"
+#include "purple/purple_sync_chat_cleanup.h"
 #include "purple/purple_sync_chat_setup_flow.h"
 #include <condition_variable>
 #include <deque>
@@ -179,6 +180,17 @@ struct WorkerThread {
 	}
 };
 
+// The owner may hold Cleanup OFF at first while the other four switches are ON; the held pass
+// reruns the ON operations with that default.
+bool CleanupHeld = false;
+
+std::set<DesktopSyncChatCarrySwitch> DefaultSwitches() {
+	auto result = std::set{DesktopSyncChatCarrySwitch::Move, DesktopSyncChatCarrySwitch::FollowFill,
+		DesktopSyncChatCarrySwitch::MarkRemoval, DesktopSyncChatCarrySwitch::Recovery};
+	if (!CleanupHeld) { result.insert(DesktopSyncChatCarrySwitch::Cleanup); }
+	return result;
+}
+
 // The owner's GUI side runs on the QCoreApplication thread.
 struct OwnerHarness {
 	ExecutorFiles files;
@@ -187,8 +199,7 @@ struct OwnerHarness {
 	std::deque<Fn<void()>> work;
 	WorkerThread worker{work};
 	std::unique_ptr<DesktopSyncChatCarryOwner> owner;
-	std::set<DesktopSyncChatCarrySwitch> on = {DesktopSyncChatCarrySwitch::Move, DesktopSyncChatCarrySwitch::FollowFill,
-		DesktopSyncChatCarrySwitch::MarkRemoval, DesktopSyncChatCarrySwitch::Cleanup, DesktopSyncChatCarrySwitch::Recovery};
+	std::set<DesktopSyncChatCarrySwitch> on = DefaultSwitches();
 	DesktopSyncChatCarryState state;
 	std::vector<DesktopSyncChatCarryKind> settled;
 	std::vector<QString> reasons;
@@ -893,10 +904,41 @@ void Builders() {
 	}
 	CHECK(DesktopSyncChatCarryResumeActivated(SyncCarryMode::Switch, [](DesktopSyncChatCarrySwitch value) { return value == DesktopSyncChatCarrySwitch::Recovery; }));
 	CHECK(!DesktopSyncChatCarryResumeActivated(SyncCarryMode::Follow, [](DesktopSyncChatCarrySwitch value) { return value == DesktopSyncChatCarrySwitch::Move; }));
-	for (const auto value : {DesktopSyncChatCarrySwitch::Move, DesktopSyncChatCarrySwitch::FollowFill, DesktopSyncChatCarrySwitch::MarkRemoval,
-			DesktopSyncChatCarrySwitch::Cleanup, DesktopSyncChatCarrySwitch::Recovery}) {
-		CHECK(!DesktopSyncChatCarrySwitchActivated(value));
+	// Production reads each switch's own constant, whichever value it has.
+	const auto production = std::vector<std::pair<DesktopSyncChatCarrySwitch, bool>>{
+		{DesktopSyncChatCarrySwitch::Move, DesktopSyncChatMoveActivated()},
+		{DesktopSyncChatCarrySwitch::FollowFill, DesktopSyncChatFollowFillActivated()},
+		{DesktopSyncChatCarrySwitch::MarkRemoval, DesktopSyncChatMarkRemovalActivated()},
+		{DesktopSyncChatCarrySwitch::Cleanup, DesktopSyncChatCleanupActivated()},
+		{DesktopSyncChatCarrySwitch::Recovery, DesktopSyncChatRecoveryActivated()},
+	};
+	for (const auto &[value, expected] : production) {
+		CHECK(DesktopSyncChatCarrySwitchActivated(value) == expected);
 	}
+	std::printf("SWITCH move=%d followFill=%d markRemoval=%d cleanup=%d recovery=%d\n",
+		int(production[0].second), int(production[1].second), int(production[2].second),
+		int(production[3].second), int(production[4].second));
+}
+
+// Cleanup held OFF, the other four ON: every operation runs as with all five ON, and a move that
+// asks for cleanup and old-mark removal, or a Follow with a late own post, finishes with no
+// cleanup command at all.
+void CleanupHeldOff() {
+	CleanupHeld = true;
+	Moves(); Restart(); FollowAndPause(); LateFollow(false); Recovery(); Marks();
+	{
+		auto h = OwnerHarness(SyncCarryMode::Switch, false, true);
+		CHECK(h.on.size() == 4 && !h.on.contains(DesktopSyncChatCarrySwitch::Cleanup));
+		auto draft = h.draft(false, true); draft.removeOldMark = true;
+		CHECK(h.owner->move(draft, u"window-A"_q)); h.drain(); h.reconcile();
+		if (!h.done()) { std::fprintf(stderr, "Cleanup held move: %s\n", qPrintable(h.state.reason)); }
+		CHECK(h.done() && h.moved() && !h.wrongThread && h.unrenewed == 0);
+		CHECK(h.cleanupReads == 0 && h.cleanupDeletes == 0 && h.cleanupApplied == 0);
+		CHECK(!h.state.carry->cleanup.pending && !h.state.carry->cleanup.skipped);
+		CHECK(!h.owner->latest() || !h.owner->latest()->cleanup.canAct);
+	}
+	CleanupHeld = false;
+	std::printf("CLEANUP HELD: Move, Follow/Fill, mark removal and Recovery ON, Cleanup OFF\n");
 }
 
 }
@@ -906,6 +948,7 @@ int main(int argc, char **argv) {
 	CHECK(!SyncStoreWorkerThread());
 	StoreThreadTimers(); Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); RecoveryTimers(); FollowAndPause();
 	LateFollow(false); LateFollow(true); Recovery(); Marks();
+	CleanupHeldOff();
 	std::printf("CARRY OWNER %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }

@@ -51,6 +51,10 @@ for name, token in guards:
     changed = dict(sources)
     changed[name] = re.sub(r'\s+', '', changed[name]).replace(re.sub(r'\s+', '', token), 'REMOVED_GUARD')
     assert not valid(changed), (name, token)
+# Each production switch is one constant, ON or OFF; the native guards above hold for either value.
+switches = []
 for name, function in [('setup', 'Move'), ('consent', 'FollowFill'), ('mark_actions', 'MarkRemoval'), ('cleanup', 'Cleanup'), ('recovery', 'Recovery')]:
-    assert 'bool DesktopSyncChat' + function + 'Activated() { return false; }' in (root / ('purple_sync_chat_' + name + '.cpp')).read_text()
-print(f'T5K native routes: {len(guards)} guards and {len(guards)} negative mutations PASS; all five production switches OFF')
+    value = re.findall(r'^bool DesktopSyncChat' + function + r'Activated\(\) \{ return (true|false); \}$', (root / ('purple_sync_chat_' + name + '.cpp')).read_text(), re.M)
+    assert len(value) == 1, function
+    switches.append(function + ('=ON' if value[0] == 'true' else '=OFF'))
+print(f'T5K native routes: {len(guards)} guards and {len(guards)} negative mutations PASS; production switches ' + ' '.join(switches))

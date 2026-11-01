@@ -53,16 +53,25 @@ void LiteralRecoveryConfirmation(RecoveryBox *confirmation, QString disclosure, 
 
 void MainControls(const DesktopSyncChatSetupSnapshot &frame, const DesktopSyncChatPeer &peer) {
 	CHECK(!SyncStoreWorkerThread());
-	CHECK(!DesktopSyncChatRecoveryActivated());
+	// Recovery ON shows one row per choice plus Retry, and a confirmation with Continue; Recovery OFF
+	// shows no rows and a Close-only confirmation. Nothing dispatches without a click.
+	const auto on = DesktopSyncChatRecoveryActivated();
+	std::printf("SWITCH recovery=%d\n", int(on));
+	CHECK(DesktopSyncChatRecoveryHeld(frame).isEmpty());
+	const auto choices = DesktopSyncChatRecoveryChoices(frame);
+	CHECK(on ? choices.size() >= 2 : choices.empty());
 	auto box = RecoveryBox(); auto state = RecoverySetup{frame}; LiteralRecoveryRows(&box, &state);
-	CHECK(box.rows == 0);
+	CHECK(box.rows == (on ? int(choices.size()) + 1 : 0));
 	auto dispatched=0;auto nested=RecoveryBox();LiteralRecoveryConfirmation(&nested,{},[&]{++dispatched;});
-	CHECK(nested.continueRows==0 && nested.closeRows==1 && dispatched==0);
+	CHECK(nested.continueRows==int(on) && nested.closeRows==int(!on) && dispatched==0);
 	for (const auto choice : {DesktopSyncChatRecoveryChoice::Create, DesktopSyncChatRecoveryChoice::Choose, DesktopSyncChatRecoveryChoice::RepairMark}) {
-		CHECK(DesktopSyncChatRecoveryChoices(frame).empty());
 		const auto selected = choice == DesktopSyncChatRecoveryChoice::Create ? std::nullopt
 			: std::optional(choice == DesktopSyncChatRecoveryChoice::Choose ? Route({PeerTokenKind::Channel,456}).peer : peer);
-		CHECK(!SelectDesktopSyncChatRecovery(frame, choice, selected, u"window"_q, true));
+		const auto allowed = choice == DesktopSyncChatRecoveryChoice::Create
+			|| (choice == DesktopSyncChatRecoveryChoice::Choose
+				? DesktopSyncChatMoveEligibility(frame, *selected) == DesktopSyncChatSetupRefusal::None
+				: DesktopSyncChatRepairHeld(frame, *selected).isEmpty());
+		CHECK(bool(SelectDesktopSyncChatRecovery(frame, choice, selected, u"window"_q, true)) == (on && allowed));
 	}
 }
 

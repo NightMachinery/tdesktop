@@ -13,8 +13,11 @@ paths = {
     'cache': 'Telegram/SourceFiles/purple/purple_sync_chat_cache.cpp',
 }
 sources = {name: (repo / path).read_text() for name, path in paths.items()}
+# The switch is one constant, ON or OFF; the guards below hold for either value.
+switch = re.findall(r'^bool DesktopSyncChatFollowFillActivated\(\) \{ return (true|false); \}$', sources['policy'], re.M)
+assert len(switch) == 1, 'Follow/Fill switch is one constant'
 guards = [
-    ('policy', 'bool DesktopSyncChatFollowFillActivated() { return false; }'),
+    ('policy', 'bool DesktopSyncChatFollowFillActivated() { return '),
     ('policy', 'DesktopSyncChatConsentFingerprint(fresh) == offer.fingerprint'),
     ('policy', 'offer.window != _window'),
     ('policy', 'port.foreground && port.foreground()'),
@@ -89,4 +92,4 @@ for name, token in guards:
     except AssertionError:
         continue
     raise AssertionError(('negative mutation escaped', name, token))
-print(f'T5e consent routes: {len(guards)} production guards and {len(guards)} negative mutations PASS; activation OFF, Follow/Pause rows behind the OFF guard')
+print(f'T5e consent routes: {len(guards)} production guards and {len(guards)} negative mutations PASS; Follow/Fill {"ON" if switch[0] == "true" else "OFF"}, Follow/Pause rows behind the OFF guard')

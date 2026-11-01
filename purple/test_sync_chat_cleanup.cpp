@@ -37,8 +37,11 @@ struct CleanupChoiceSink {
 		const auto result = row.get(); rows.push_back(std::move(row)); return result;
 	}
 };
-void CleanupChoiceOff() {
-	CHECK(!DesktopSyncChatCleanupActivated() && !SyncStoreWorkerThread());
+// Cleanup ON offers the old-mark removal row, enabled for a known mark and unchecked;
+// Cleanup OFF offers nothing.
+void CleanupChoice() {
+	CHECK(!SyncStoreWorkerThread());
+	const auto on = DesktopSyncChatCleanupActivated();
 	struct State { std::optional<DesktopSyncChatSetupSnapshot> opening; };
 	auto state = std::make_unique<State>();
 	state->opening.emplace();
@@ -49,8 +52,8 @@ void CleanupChoiceOff() {
 #include "cleanup-choice.inc"
 	auto enabled = 0;
 	for (const auto &row : sink.rows) { enabled += row->enabled; }
-	std::printf("OFF_CLEANUP_CHOICES rows=%zu enabled=%d\n", sink.rows.size(), enabled);
-	CHECK(sink.rows.empty() && !removeMark && enabled == 0 && !oldMark);
+	std::printf("CLEANUP_CHOICES on=%d rows=%zu enabled=%d\n", int(on), sink.rows.size(), enabled);
+	CHECK(sink.rows.size() == size_t(on) && bool(removeMark) == on && enabled == int(on) && !oldMark);
 }
 
 MTPMessage CleanupEmpty(int id,std::optional<PeerToken> peer) {
@@ -113,7 +116,6 @@ struct CleanupHarness {
 };
 
 void CleanupFlows() {
-	CHECK(!DesktopSyncChatCleanupActivated());
 	{
 		auto h=CleanupHarness(false); h.finish(); CHECK(h.f.progress.terminal && h.deletes==0);
 	}
@@ -332,7 +334,7 @@ void CleanupCompletionRelease() {
 
 }
 int main(int argc,char **argv) {
-	auto app=QCoreApplication(argc,argv); std::setbuf(stdout,nullptr); CHECK(!SyncStoreWorkerThread()); CleanupChoiceOff();
+	auto app=QCoreApplication(argc,argv); std::setbuf(stdout,nullptr); CHECK(!SyncStoreWorkerThread()); CleanupChoice();
 	auto worker=std::thread([]{CleanupFlows();CleanupPoliciesAndSavedResult();CleanupLedgerControls();CleanupDurability();CleanupDirectoryReplacement();CleanupRenewal();CleanupCompletionRelease();});worker.join();
 	std::printf("T5G CLEANUP %d checks, %d failures\n",Checks,Failures);return Failures?1:0;
 }

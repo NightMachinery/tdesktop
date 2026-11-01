@@ -54,7 +54,9 @@ DesktopSyncChatSetupSnapshot BoundMove(PeerToken source = {}) {
 void BoundMoveActions() {
 	CHECK(QCoreApplication::instance());
 	CHECK(QThread::currentThread() == QCoreApplication::instance()->thread());
-	CHECK(!DesktopSyncChatMoveActivated());
+	// Move ON starts the reviewed draft; Move OFF keeps it and reports the qualification hold.
+	const auto on = DesktopSyncChatMoveActivated();
+	std::printf("SWITCH move=%d\n", int(on));
 	for (const auto source : {PeerToken{}, PeerToken{PeerTokenKind::Chat, 999}}) {
 		const auto opening = BoundMove(source);
 		CHECK(!DesktopSyncChatMoveFingerprint(opening).isEmpty());
@@ -73,7 +75,8 @@ void BoundMoveActions() {
 			auto writes = 0;
 			CHECK(action.confirm(*offer, opening, route.peer, !offer->cleanup, true,
 				[&](DesktopSyncChatMoveDraft) { ++writes; }));
-			CHECK(writes == 0 && action.reason() == u"move-qualification-held"_q);
+			CHECK(writes == int(on) && (on ? action.reason().isEmpty() : action.reason() == u"move-qualification-held"_q));
+			writes = 0;
 			CHECK(action.reviewed() && action.reviewed()->cleanup == !offer->cleanup);
 			CHECK(action.reviewed()->selection.readerConsent);
 			CHECK(action.reviewed()->opening.stateImage == opening.stateImage);
@@ -119,7 +122,7 @@ void BoundMoveActions() {
 		CHECK(!action.confirm(*second, opening, {}, true, false, {}));
 		const auto third = action.choose({}); CHECK(third);
 		CHECK(action.confirm(*third, opening, {}, true, true, {}));
-		CHECK(action.reason() == u"move-qualification-held"_q);
+		CHECK(on ? action.reason().isEmpty() : action.reason() == u"move-qualification-held"_q);
 		CHECK(action.reviewed() && action.reviewed()->selection.provisionOnly);
 		action.cancel(); CHECK(!action.reviewed());
 	}

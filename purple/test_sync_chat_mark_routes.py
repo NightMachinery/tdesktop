@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 repo = Path(__file__).resolve().parent.parent
 sources = {name: (repo / path).read_text() for name, path in {
@@ -8,6 +9,9 @@ sources = {name: (repo / path).read_text() for name, path in {
     'service': 'Telegram/SourceFiles/purple/purple_sync_chat_service.cpp',
     'ui': 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp',
 }.items()}
+# The switch is one constant, ON or OFF; the guards below hold for either value.
+switch = re.findall(r'^bool DesktopSyncChatMarkRemovalActivated\(\) \{ return (true|false); \}$', sources['actions'], re.M)
+assert len(switch) == 1, 'Mark removal switch is one constant'
 
 def body(text, marker):
     start = text.index('{', text.index(marker))
@@ -18,7 +22,7 @@ def body(text, marker):
     return text[start:end]
 
 guards = [
-    ('actions', 'bool DesktopSyncChatMarkRemovalActivated() { return false; }'),
+    ('actions', 'bool DesktopSyncChatMarkRemovalActivated() { return '),
     ('actions', 'CheckStaleMarkRemoval(row.origin.account,'),
     ('actions', 'GetSyncChatMessageOwnership(MapDesktopSyncChatMessage'),
     ('actions', 'ParseSyncChatMark(text, hasMedia, own).status != SyncChatMarkStatus::Supported'),
@@ -84,4 +88,4 @@ for marker, count, name in [('void AddStaleMarkRows(', 2, 'ui'), ('void ConfirmS
         except (AssertionError, ValueError):
             continue
         raise AssertionError(('UI gate negative escaped', marker, index))
-print(f'T5f mark routes: {len(guards)} guards + {len(guards)} negative mutations, six OFF entry mutations PASS')
+print(f'T5f mark routes: {len(guards)} guards + {len(guards)} negative mutations, six OFF entry mutations PASS; mark removal {"ON" if switch[0] == "true" else "OFF"}')

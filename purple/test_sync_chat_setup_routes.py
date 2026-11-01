@@ -84,7 +84,8 @@ for sentinel in ['DesktopSyncChatMoveEligibility(*state->opening, *peer)',
                  'state->move->dismiss(offer->ticket)', 'lng_purple_chat_move_disclosure']:
     assert sentinel in ui, sentinel
     assert sentinel not in ui.replace(sentinel, ''), 'move negative route failed'
-assert 'bool DesktopSyncChatMoveActivated() { return false; }' in move
+# The Move switch is one constant, ON or OFF; the routes above hold for either value.
+assert len(re.findall(r'^bool DesktopSyncChatMoveActivated\(\) \{ return (true|false); \}$', move, re.M)) == 1
 review = service[service.index('bool ReviewSyncChatMove('):service.index('void StartSyncChatDiscovery()')]
 for forbidden in ['DesktopSyncChatCarryService', 'DesktopSyncChatSetupService', 'crl::', '.send(', 'Write', 'ReadSyncPrivateFile']:
     assert forbidden not in review, 'qualification review dispatches or performs IO'

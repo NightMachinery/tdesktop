@@ -7,7 +7,7 @@
 
 namespace Purple {
 
-bool DesktopSyncChatCleanupActivated() { return false; }
+bool DesktopSyncChatCleanupActivated() { return true; }
 
 DesktopSyncCleanupProgress DesktopSyncChatCleanupProgressOf(
 		const SyncCarryJournal &journal, bool pendingRequest, size_t confirmed, bool uncopied) {
