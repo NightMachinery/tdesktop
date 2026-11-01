@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
 	bulletItem.blocks = { paragraph("bullet second paragraph"), nested }; bullet.listItems.push_back(bulletItem); page.blocks.push_back(bullet);
 	auto video = Page::Block(); video.kind = Kind::Video; video.caption = rich("video caption"); page.blocks.push_back(video);
 	auto audio = Page::Block(); audio.kind = Kind::Audio; audio.audioTitle = q("audio title"); audio.audioPerformer = q("performer");
-	audio.audioFileName = q("example.ogg"); audio.audioDuration = 77; audio.caption = rich("audio credit"); page.blocks.push_back(audio);
+	audio.fileName = q("example.ogg"); audio.audioDuration = 77; audio.caption = rich("audio credit"); page.blocks.push_back(audio);
 	auto post = paragraph("embedded post"); post.kind = Kind::EmbedPost; post.author = q("embedded author"); post.date = 1;
 	post.photoId = 7; post.blocks = { paragraph("embedded child") }; post.caption = rich("embedded credit"); page.blocks.push_back(post);
 	auto channel = Page::Block(); channel.kind = Kind::Channel; channel.channelTitle = q("channel title"); page.blocks.push_back(channel);
