@@ -7,31 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 using "info/info.style";
 
-infoTopBarColoredBack: IconButton(infoTopBarBack) {
-	icon: icon {{ "info/info_back", groupCallMembersFg }};
-	iconOver: icon {{ "info/info_back", groupCallMembersFg }};
-	ripple: universalRippleAnimation;
-}
-infoLayerTopBarColoredBack: IconButton(infoLayerTopBarBack) {
-	icon: icon {{ "info/info_back", groupCallMembersFg }};
-	iconOver: icon {{ "info/info_back", groupCallMembersFg }};
-	ripple: universalRippleAnimation;
-}
-infoTopBarColoredClose: IconButton(infoTopBarClose) {
-	icon: icon {{ "info/info_close", groupCallMembersFg }};
-	iconOver: icon {{ "info/info_close", groupCallMembersFg }};
-	ripple: universalRippleAnimation;
-}
-infoTopBarColoredEdit: IconButton(infoTopBarEdit) {
-	icon: icon {{ "menu/edit", groupCallMembersFg }};
-	iconOver: icon {{ "menu/edit", groupCallMembersFg }};
-	ripple: universalRippleAnimation;
-}
-infoLayerTopBarColoredEdit: IconButton(infoLayerTopBarEdit) {
-	icon: icon {{ "menu/edit", groupCallMembersFg }};
-	iconOver: icon {{ "menu/edit", groupCallMembersFg }};
-	ripple: universalRippleAnimation;
-}
 infoTopBarBlackBack: IconButton(infoTopBarBack) {
 	icon: icon {{ "info/info_back", windowBoldFg }};
 	iconOver: icon {{ "info/info_back", windowBoldFg }};
@@ -47,9 +22,9 @@ infoTopBarBlackClose: IconButton(infoTopBarClose) {
 	iconOver: icon {{ "info/info_close", windowBoldFg }};
 	ripple: universalRippleAnimation;
 }
-infoTopBarColoredMenu: IconButton(infoTopBarMenu) {
-	icon: icon {{ "title_menu_dots", groupCallMembersFg }};
-	iconOver: icon {{ "title_menu_dots", groupCallMembersFg }};
+infoLayerTopBarBlackClose: IconButton(infoLayerTopBarClose) {
+	icon: icon {{ "info/info_close", windowBoldFg }};
+	iconOver: icon {{ "info/info_close", windowBoldFg }};
 	ripple: universalRippleAnimation;
 }
 infoTopBarBlackMenu: IconButton(infoTopBarMenu) {
@@ -57,20 +32,9 @@ infoTopBarBlackMenu: IconButton(infoTopBarMenu) {
 	iconOver: icon {{ "title_menu_dots", windowBoldFg }};
 	ripple: universalRippleAnimation;
 }
-infoTopBarColoredSearch: IconButton(infoTopBarSearch) {
-	icon: icon {{ "top_bar_search", groupCallMembersFg }};
-	iconOver: icon {{ "top_bar_search", groupCallMembersFg }};
-	ripple: universalRippleAnimation;
-}
 infoTopBarBlackSearch: IconButton(infoTopBarSearch) {
 	icon: icon {{ "top_bar_search", windowBoldFg }};
 	iconOver: icon {{ "top_bar_search", windowBoldFg }};
-	ripple: universalRippleAnimation;
-}
-infoTopBarColoredGroup: IconButton(infoTopBarSearch) {
-	icon: icon {{ "menu/admin", groupCallMembersFg }};
-	iconOver: icon {{ "menu/admin", groupCallMembersFg }};
-	iconPosition: point(15px, -1px);
 	ripple: universalRippleAnimation;
 }
 infoTopBarBlackGroup: IconButton(infoTopBarSearch) {
@@ -138,6 +102,28 @@ infoProfileTopBarShowLastSeen: RoundButton(defaultActiveButton) {
 	}
 	ripple: universalRippleAnimation;
 }
+// The status line's 18px (infoProfileStatus.maxHeight) and a 4px gap.
+infoProfileTopBarBalanceSkip: 22px;
+infoProfileTopBarBalanceBottomSkip: 4px;
+infoProfileBalancePillHeight: 16px;
+infoProfileTopBarBalanceReserve: infoProfileTopBarStatusTop
+	+ infoProfileTopBarBalanceSkip
+	+ infoProfileBalancePillHeight
+	+ infoProfileTopBarBalanceBottomSkip
+	+ infoProfileTopBarActionButtonsHeight
+	- infoProfileTopBarHeightMax;
+// Sized like the unique gift cover's "released by" pill.
+infoProfileBalancePillPadding: margins(6px, 0px, 5px, 0px);
+infoProfileBalancePillLabelFont: font(10px);
+infoProfileBalancePillAmountFont: font(10px semibold);
+infoProfileBalancePillFractionFont: font(8px semibold);
+infoProfileBalancePillIconSize: 12px;
+infoProfileBalancePillLabelSkip: 3px;
+infoProfileBalancePillIconSkip: 2px;
+infoProfileBalancePillArrowSkip: 2px;
+infoProfileBalancePillArrow: icon{{ "dialogs/dialogs_topic_arrow", windowBoldFg }};
+infoProfileBalancePillColoredBgOpacity: 0.2;
+infoProfileBalancePillColoredIconTint: 0.5;
 infoStatusHiddenToastIcon: icon{{ "community/requests_hidden", toastFg }};
 infoBotVerifyBadge: InfoPeerBadge(infoPeerBadge) {
 	position: point(-2px, 2px);

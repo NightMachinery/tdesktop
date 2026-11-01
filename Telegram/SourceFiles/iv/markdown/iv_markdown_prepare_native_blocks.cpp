@@ -115,6 +115,10 @@ struct NativeIvDepthContext {
 	return u"details-"_q + QString::number(++state->nextGeneratedId);
 }
 
+[[nodiscard]] QString NativeIvQuoteToggleId(NativeIvPrepareState *state) {
+	return u"quote-"_q + QString::number(++state->nextGeneratedId);
+}
+
 void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
@@ -279,7 +283,7 @@ bool AppendPreparedQuoteParagraph(
 }
 
 [[nodiscard]] QString PreparedOrderedRomanText(int value, bool upper) {
-	if (value <= 0) {
+	if (!OrderedRomanSupported(value)) {
 		return QString::number(value);
 	}
 	struct RomanPart {
@@ -1038,6 +1042,7 @@ void RefreshPreparedNativeIvPlaceholderCopyText(PreparedBlock *block) {
 	case RichPageBlockKind::Photo:
 	case RichPageBlockKind::Video:
 	case RichPageBlockKind::Audio:
+	case RichPageBlockKind::File:
 	case RichPageBlockKind::Map:
 	case RichPageBlockKind::GroupedMedia: {
 		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
@@ -1222,6 +1227,19 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	return true;
 }
 
+[[nodiscard]] bool AppendNativeIvUnsupportedNoticeBlock(
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.placeholder.intent = PlaceholderIntent::UnsupportedBlock;
+	block.placeholder.label = tr::lng_unsupported_block_title(tr::now);
+	block.placeholder.copyText = block.placeholder.label;
+	block.placeholder.id = { .value = uint64(++state->nextGeneratedId) };
+	result->push_back(std::move(block));
+	return true;
+}
+
 [[nodiscard]] auto EmbedRequestFromCanonicalBlock(
 		const RichPageBlock &block) -> std::optional<EmbedRequest> {
 	auto request = EmbedRequest{
@@ -1299,6 +1317,12 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	block.kind = PreparedBlockKind::Quote;
 	block.anchorId = data.anchorId;
 	block.pullquote = data.pullquote;
+	const auto collapsible = RichBlockquoteIsCollapsible(data);
+	const auto atomic = collapsible && data.collapsed && state->editMode;
+	if (collapsible && (data.collapsed || state->editMode)) {
+		block.collapseToggleId = NativeIvQuoteToggleId(state);
+		block.collapsed = data.collapsed;
+	}
 	block.actualDepth = depthContext.quoteDepth;
 	block.visualDepth = CappedNativeIvQuoteDepth(block.actualDepth);
 	block.depthClamped = (block.actualDepth > block.visualDepth);
@@ -1312,9 +1336,11 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			std::move(body),
 			data.pullquote,
 			false,
-			state->editMode,
+			state->editMode && !atomic,
 			false,
-			BlockTextLeafSource(path))) {
+			atomic
+				? std::nullopt
+				: std::make_optional(BlockTextLeafSource(path)))) {
 		return false;
 	}
 	auto childContext = depthContext;
@@ -1332,15 +1358,18 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		return false;
 	}
 	const auto quoteAuthorEmpty = cite.text.text.isEmpty();
-	const auto includeQuoteAuthor = state->editMode || !quoteAuthorEmpty;
+	const auto includeQuoteAuthor = (state->editMode && !atomic)
+		|| !quoteAuthorEmpty;
 	if (includeQuoteAuthor && !AppendPreparedQuoteParagraph(
 			&block.children,
 			std::move(cite),
 			data.pullquote,
 			true,
-			state->editMode,
+			state->editMode && !atomic,
 			true,
-			BlockCaptionLeafSource(path))) {
+			atomic
+				? std::nullopt
+				: std::make_optional(BlockCaptionLeafSource(path)))) {
 		return false;
 	}
 	if (block.children.empty()) {
@@ -1479,6 +1508,7 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	block.kind = PreparedBlockKind::Table;
 	block.tableBordered = data.bordered;
 	block.tableStriped = data.striped;
+	block.tableCompact = data.compact;
 	block.editBlock = BlockSource(path);
 	auto title = PreparedIvRichText();
 	block.anchorId = data.anchorId;
@@ -1803,7 +1833,10 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	}
 	switch (block.kind) {
 	case RichPageBlockKind::Unsupported:
-		return true;
+		if (!state->unsupportedBlockNotices) {
+			return true;
+		}
+		return AppendNativeIvUnsupportedNoticeBlock(result, state);
 	case RichPageBlockKind::Heading:
 		return AppendNativeIvFlowBlock(
 			result,
@@ -1841,7 +1874,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			0,
 			block.text,
 			block.anchorId,
-			std::nullopt,
+			(IsQuotableNativeContent(state->result)
+				? std::make_optional(path)
+				: std::nullopt),
 			state);
 	case RichPageBlockKind::AuthorDate: {
 		auto prepared = PreparedIvRichText();
@@ -1915,6 +1950,16 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			false,
 			std::move(editBlock));
 	}
+	case RichPageBlockKind::ButtonRow: {
+		const auto count = result->size();
+		if (!PrepareNativeIvButtonRowBlock(block, result, state)) {
+			return false;
+		}
+		if (result->size() > count) {
+			result->back().editBlock = BlockSource(path);
+		}
+		return true;
+	}
 	case RichPageBlockKind::List: {
 		auto prepared = PreparedBlock();
 		prepared.kind = PreparedBlockKind::List;
@@ -1984,12 +2029,13 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	case RichPageBlockKind::Channel:
 		return PrepareNativeIvChannelBlock(block, result, state);
 	case RichPageBlockKind::Audio:
+	case RichPageBlockKind::File:
 		return PrepareCanonicalNativeIvMediaBlock(
 			block,
 			result,
 			state,
 			path,
-			PrepareNativeIvAudioBlock);
+			PrepareNativeIvDocumentBlock);
 	case RichPageBlockKind::Math:
 		if (block.formula.trimmed().isEmpty() && !state->editMode) {
 			return true;
@@ -2049,7 +2095,7 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			if (state->result.failure.failed()) {
 				return false;
 			}
-			(void)PrepareNativeIvPlainPlaceholderBlock(
+			PrepareNativeIvPlainPlaceholderBlock(
 				u"Unsupported Block"_q,
 				result);
 		}
@@ -2153,6 +2199,66 @@ NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvLeaf(
 			formulaRange);
 	}
 	return NativeInstantViewLeafUpdateResult::Unsupported;
+}
+
+const QString *ResolveCanonicalNativeIvLeafText(
+		const Iv::RichPage &page,
+		const PreparedEditLeafSource &source) {
+	if (source.kind == PreparedEditLeafKind::MathFormula) {
+		const auto block = ResolveCanonicalNativeIvBlock(page, source.block);
+		return (block && block->kind == RichPageBlockKind::Math)
+			? &block->formula
+			: nullptr;
+	}
+	const auto text = ResolveCanonicalNativeIvLeafRichText(page, source);
+	return text ? &text->text : nullptr;
+}
+
+const TextWithEntities *ResolveCanonicalNativeIvLeafRichText(
+		const Iv::RichPage &page,
+		const PreparedEditLeafSource &source) {
+	const auto block = ResolveCanonicalNativeIvBlock(page, source.block);
+	if (!block) {
+		return nullptr;
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::BlockText:
+		return &block->text.text;
+	case PreparedEditLeafKind::BlockCaption:
+		return &block->caption.text;
+	case PreparedEditLeafKind::ListItemText: {
+		const auto &items = block->listItems;
+		if (block->kind != RichPageBlockKind::List
+			|| source.listItemIndex < 0
+			|| std::size_t(source.listItemIndex) >= items.size()) {
+			return nullptr;
+		}
+		return &items[source.listItemIndex].text.text;
+	}
+	case PreparedEditLeafKind::TableCellText: {
+		const auto &rows = block->tableRows;
+		if (block->kind != RichPageBlockKind::Table
+			|| source.tableRowIndex < 0
+			|| std::size_t(source.tableRowIndex) >= rows.size()) {
+			return nullptr;
+		}
+		const auto &cells = rows[source.tableRowIndex].cells;
+		if (source.tableCellIndex < 0
+			|| std::size_t(source.tableCellIndex) >= cells.size()) {
+			return nullptr;
+		}
+		return &cells[source.tableCellIndex].text.text;
+	}
+	case PreparedEditLeafKind::MathFormula:
+		return nullptr;
+	}
+	return nullptr;
+}
+
+bool IsQuotableNativeContent(const MarkdownArticleContent &content) {
+	return !content.editMode
+		&& content.richPage
+		&& (content.richPage->quoteModel.get() != nullptr);
 }
 
 } // namespace Iv::Markdown

@@ -342,6 +342,10 @@ protected:
 	void fullInfoLoadedHook(not_null<PeerData*> peer);
 
 private:
+	void resolveContactToken(
+		const QString &token,
+		Fn<void(not_null<PeerData*>)> done);
+	void cancelContactTokenResolve();
 	void resolvePhone(
 		const QString &phone,
 		Fn<void(not_null<PeerData*>)> done);
@@ -387,6 +391,9 @@ private:
 	MTP::Sender _api;
 
 	mtpRequestId _resolveRequestId = 0;
+	mtpRequestId _contactTokenRequestId = 0;
+	QString _contactToken;
+	Fn<void(not_null<PeerData*>)> _contactTokenDone;
 	PeerData *_waitingDirectChannel = nullptr;
 
 	History *_showingRepliesHistory = nullptr;
@@ -483,8 +490,6 @@ public:
 
 	void setDialogsEntryState(Dialogs::EntryState state);
 	[[nodiscard]] Dialogs::EntryState dialogsEntryStateCurrent() const;
-	[[nodiscard]] auto dialogsEntryStateValue() const
-		-> rpl::producer<Dialogs::EntryState>;
 	bool switchInlineQuery(
 		Dialogs::EntryState to,
 		not_null<UserData*> bot,
@@ -525,7 +530,6 @@ public:
 	void resizeForThirdSection();
 	void closeThirdSection();
 
-	[[nodiscard]] bool canShowSeparateWindow(SeparateId id) const;
 	void showPeer(not_null<PeerData*> peer, MsgId msgId = ShowAtUnreadMsgId);
 
 	void startOrJoinGroupCall(not_null<PeerData*> peer);
@@ -758,6 +762,7 @@ private:
 
 	void init();
 	void setupShortcuts();
+	void setupScreenshotProtection();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();
 	void activateFirstChatsFilter();
@@ -807,7 +812,8 @@ private:
 
 	[[nodiscard]] bool openPhotoExternal(
 		not_null<PhotoData*> photo,
-		Data::FileOrigin origin);
+		Data::FileOrigin origin,
+		HistoryItem *item);
 	void handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 	[[nodiscard]] Data::Thread *resolveDrawToReplyThread(
 		const Data::DrawToReplyRequest &request) const;

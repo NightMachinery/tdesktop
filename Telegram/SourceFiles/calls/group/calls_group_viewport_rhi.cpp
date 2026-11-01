@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "calls/group/calls_group_viewport_rhi.h"
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 
 #include "calls/group/calls_group_viewport_tile.h"
 #include "calls/group/calls_group_members_row.h"
@@ -32,9 +32,11 @@ constexpr auto kNoiseTextureSize = 256;
 constexpr auto kBlurTextureSizeFactor = 4.;
 constexpr auto kBlurOpacity = 0.65f;
 
+// The NDC Y flip stays at offset 12 in every block, see NdcFlipY().
 struct GroupFrameUniforms {
 	float viewport[2];
-	float _pad0[2];
+	float _pad0;
+	float flipY;
 	float frameBg[4];
 	float shadow[4];
 	float paused;
@@ -56,13 +58,30 @@ static_assert(sizeof(BlurUniforms) == 16);
 struct ImageUniforms {
 	float viewport[2];
 	float g_opacity;
-	float _pad;
+	float flipY;
 };
 static_assert(sizeof(ImageUniforms) == 16);
 
 [[nodiscard]] QShader LoadShader(const QString &name) {
 	return Ui::Rhi::ShaderFromFile(
 		u":/shaders/"_q + name + u".qsb"_q);
+}
+
+// Vulkan is the only backend with the NDC Y axis pointing down.
+[[nodiscard]] float NdcFlipY(not_null<QRhi*> rhi) {
+	return rhi->isYUpInNDC() ? 1.f : -1.f;
+}
+
+// A full render target quad for the offscreen passes, with the same
+// orientation on every backend.
+[[nodiscard]] std::array<float, 16> OffscreenQuad(not_null<QRhi*> rhi) {
+	const auto flipY = NdcFlipY(rhi);
+	return { {
+		-1.f, -1.f * flipY, 0.f, 1.f,
+		 1.f, -1.f * flipY, 1.f, 1.f,
+		-1.f,  1.f * flipY, 0.f, 0.f,
+		 1.f,  1.f * flipY, 1.f, 0.f,
+	} };
 }
 
 [[nodiscard]] bool UseExpandForCamera(QSize original, QSize viewport) {
@@ -152,9 +171,7 @@ Viewport::RendererRhi::RendererRhi(not_null<Viewport*> owner)
 }
 
 Viewport::RendererRhi::~RendererRhi() {
-	if (_initialized) {
-		releaseResources();
-	}
+	releaseResources();
 }
 
 QColor Viewport::RendererRhi::rhiClearColor() {
@@ -177,6 +194,11 @@ void Viewport::RendererRhi::initialize(
 		return;
 	}
 	releaseResources();
+	const auto guard = gsl::finally([&] {
+		if (!_initialized) {
+			releaseResources();
+		}
+	});
 
 	_rhi = rhi;
 	_rt = rt;
@@ -186,19 +208,25 @@ void Viewport::RendererRhi::initialize(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::VertexBuffer,
 		4 * 4 * sizeof(float));
-	_offscreenVertexBuffer->create();
+	if (!_offscreenVertexBuffer->create()) {
+		return;
+	}
 
 	_onscreenVertexBuffer = rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::VertexBuffer,
 		kMaxOnscreenDraws * kOnscreenVertexSlot);
-	_onscreenVertexBuffer->create();
+	if (!_onscreenVertexBuffer->create()) {
+		return;
+	}
 
 	_uniformBuffer = rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		kMaxOnscreenDraws * kUniformSlot);
-	_uniformBuffer->create();
+	if (!_uniformBuffer->create()) {
+		return;
+	}
 
 	_linearSampler = rhi->newSampler(
 		QRhiSampler::Linear,
@@ -206,7 +234,9 @@ void Viewport::RendererRhi::initialize(
 		QRhiSampler::None,
 		QRhiSampler::ClampToEdge,
 		QRhiSampler::ClampToEdge);
-	_linearSampler->create();
+	if (!_linearSampler->create()) {
+		return;
+	}
 
 	_nearestSampler = rhi->newSampler(
 		QRhiSampler::Nearest,
@@ -214,7 +244,9 @@ void Viewport::RendererRhi::initialize(
 		QRhiSampler::None,
 		QRhiSampler::ClampToEdge,
 		QRhiSampler::ClampToEdge);
-	_nearestSampler->create();
+	if (!_nearestSampler->create()) {
+		return;
+	}
 
 	_noiseRepeatSampler = rhi->newSampler(
 		QRhiSampler::Nearest,
@@ -222,16 +254,22 @@ void Viewport::RendererRhi::initialize(
 		QRhiSampler::None,
 		QRhiSampler::Repeat,
 		QRhiSampler::Repeat);
-	_noiseRepeatSampler->create();
+	if (!_noiseRepeatSampler->create()) {
+		return;
+	}
 
 	_placeholderTexture = rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1));
-	_placeholderTexture->create();
+	if (!_placeholderTexture->create()) {
+		return;
+	}
 
-	createPipelines();
+	if (!createPipelines()) {
+		return;
+	}
 	_initialized = true;
 }
 
-void Viewport::RendererRhi::createPipelines() {
+bool Viewport::RendererRhi::createPipelines() {
 	const auto rpDesc = _rt->renderPassDescriptor();
 
 	const auto passthroughVert = LoadShader(u"passthrough.vert"_q);
@@ -274,7 +312,9 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_linearSampler),
 	});
-	_downscaleArgb32Srb->create();
+	if (!_downscaleArgb32Srb->create()) {
+		return false;
+	}
 
 	_downscaleYuv420Srb = _rhi->newShaderResourceBindings();
 	_downscaleYuv420Srb->setBindings({
@@ -294,7 +334,9 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_linearSampler),
 	});
-	_downscaleYuv420Srb->create();
+	if (!_downscaleYuv420Srb->create()) {
+		return false;
+	}
 
 	_blurHSrb = _rhi->newShaderResourceBindings();
 	_blurHSrb->setBindings({
@@ -310,23 +352,28 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_nearestSampler),
 	});
-	_blurHSrb->create();
+	if (!_blurHSrb->create()) {
+		return false;
+	}
 
 	{
-		auto *tex = _rhi->newTexture(
+		auto tex = std::unique_ptr<QRhiTexture>(_rhi->newTexture(
 			QRhiTexture::RGBA8,
 			QSize(1, 1),
 			1,
-			QRhiTexture::RenderTarget);
-		tex->create();
-		auto colorAtt = QRhiColorAttachment(tex);
-		auto *offscreenRT = _rhi->newTextureRenderTarget(
-			QRhiTextureRenderTargetDescription(colorAtt));
+			QRhiTexture::RenderTarget));
+		if (!tex->create()) {
+			return false;
+		}
+		auto colorAtt = QRhiColorAttachment(tex.get());
+		auto offscreenRT = std::unique_ptr<QRhiTextureRenderTarget>(
+			_rhi->newTextureRenderTarget(
+				QRhiTextureRenderTargetDescription(colorAtt)));
 		_offscreenRpDesc = offscreenRT->newCompatibleRenderPassDescriptor();
 		offscreenRT->setRenderPassDescriptor(_offscreenRpDesc);
-		offscreenRT->create();
-		delete offscreenRT;
-		delete tex;
+		if (!offscreenRT->create()) {
+			return false;
+		}
 	}
 
 	_downscaleArgb32Pipeline = _rhi->newGraphicsPipeline();
@@ -339,7 +386,9 @@ void Viewport::RendererRhi::createPipelines() {
 		QRhiGraphicsPipeline::TriangleStrip);
 	_downscaleArgb32Pipeline->setShaderResourceBindings(_downscaleArgb32Srb);
 	_downscaleArgb32Pipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_downscaleArgb32Pipeline->create();
+	if (!_downscaleArgb32Pipeline->create()) {
+		return false;
+	}
 
 	_downscaleYuv420Pipeline = _rhi->newGraphicsPipeline();
 	_downscaleYuv420Pipeline->setShaderStages({
@@ -352,7 +401,9 @@ void Viewport::RendererRhi::createPipelines() {
 	_downscaleYuv420Pipeline->setShaderResourceBindings(
 		_downscaleYuv420Srb);
 	_downscaleYuv420Pipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_downscaleYuv420Pipeline->create();
+	if (!_downscaleYuv420Pipeline->create()) {
+		return false;
+	}
 
 	_blurHPipeline = _rhi->newGraphicsPipeline();
 	_blurHPipeline->setShaderStages({
@@ -363,7 +414,9 @@ void Viewport::RendererRhi::createPipelines() {
 	_blurHPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_blurHPipeline->setShaderResourceBindings(_blurHSrb);
 	_blurHPipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_blurHPipeline->create();
+	if (!_blurHPipeline->create()) {
+		return false;
+	}
 
 	_blurVPipeline = _rhi->newGraphicsPipeline();
 	_blurVPipeline->setShaderStages({
@@ -374,7 +427,9 @@ void Viewport::RendererRhi::createPipelines() {
 	_blurVPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_blurVPipeline->setShaderResourceBindings(_blurHSrb);
 	_blurVPipeline->setRenderPassDescriptor(_offscreenRpDesc);
-	_blurVPipeline->create();
+	if (!_blurVPipeline->create()) {
+		return false;
+	}
 
 	auto *frameSrb = _rhi->newShaderResourceBindings();
 	frameSrb->setBindings({
@@ -401,7 +456,10 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_noiseRepeatSampler),
 	});
-	frameSrb->create();
+	if (!frameSrb->create()) {
+		delete frameSrb;
+		return false;
+	}
 	_perDrawSrbs.push_back(frameSrb);
 
 	_framePipeline = _rhi->newGraphicsPipeline();
@@ -413,7 +471,9 @@ void Viewport::RendererRhi::createPipelines() {
 	_framePipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_framePipeline->setShaderResourceBindings(frameSrb);
 	_framePipeline->setRenderPassDescriptor(rpDesc);
-	_framePipeline->create();
+	if (!_framePipeline->create()) {
+		return false;
+	}
 
 	auto *controlsSrb = _rhi->newShaderResourceBindings();
 	controlsSrb->setBindings({
@@ -430,7 +490,10 @@ void Viewport::RendererRhi::createPipelines() {
 			_placeholderTexture,
 			_linearSampler),
 	});
-	controlsSrb->create();
+	if (!controlsSrb->create()) {
+		delete controlsSrb;
+		return false;
+	}
 	_perDrawSrbs.push_back(controlsSrb);
 
 	QRhiGraphicsPipeline::TargetBlend blend;
@@ -450,10 +513,17 @@ void Viewport::RendererRhi::createPipelines() {
 	_controlsPipeline->setTopology(QRhiGraphicsPipeline::TriangleStrip);
 	_controlsPipeline->setShaderResourceBindings(controlsSrb);
 	_controlsPipeline->setRenderPassDescriptor(rpDesc);
-	_controlsPipeline->create();
+	if (!_controlsPipeline->create()) {
+		return false;
+	}
+	return true;
 }
 
 void Viewport::RendererRhi::releaseResources() {
+	_onscreenDraws.clear();
+	if (const auto rub = base::take(_rub)) {
+		rub->release();
+	}
 	for (auto *srb : _perDrawSrbs) {
 		delete srb;
 	}
@@ -520,12 +590,19 @@ QRhiTexture *Viewport::RendererRhi::acquirePoolTexture(QSize size) {
 		}
 		delete entry.texture;
 		entry.texture = _rhi->newTexture(QRhiTexture::BGRA8, size);
-		entry.texture->create();
+		if (!entry.texture->create()) {
+			_initialized = false;
+			return nullptr;
+		}
 		entry.size = size;
 		return entry.texture;
 	}
 	auto *tex = _rhi->newTexture(QRhiTexture::BGRA8, size);
-	tex->create();
+	if (!tex->create()) {
+		delete tex;
+		_initialized = false;
+		return nullptr;
+	}
 	_texturePool.push_back({ tex, size });
 	_nextPoolIndex++;
 	return tex;
@@ -536,15 +613,27 @@ void Viewport::RendererRhi::render(
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
 	renderOffscreen(rhi, rt, cb);
+	if (!_initialized) {
+		return;
+	}
+	const auto guard = gsl::finally([&] {
+		if (_rub) {
+			base::take(_rub)->release();
+		}
+	});
 
 	_nextOnscreenSlot = 0;
 	_onscreenDraws.clear();
 	auto *screenRub = _rhi->nextResourceUpdateBatch();
 	if (_rub) {
 		screenRub->merge(_rub);
+		_rub->release();
 	}
 	_rub = screenRub;
 	collectOnscreenDraws();
+	if (!_initialized) {
+		return;
+	}
 	cb->beginPass(rt, *clearColor(), { 1.0f, 0 }, _rub);
 	_rub = nullptr;
 	issueOnscreenDraws();
@@ -555,6 +644,18 @@ void Viewport::RendererRhi::renderOffscreen(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!rhi || rhi->isDeviceLost() || !rt || !cb) {
+		return;
+	}
+	initialize(rhi, rt, cb);
+	if (!_initialized) {
+		return;
+	}
+	const auto guard = gsl::finally([&] {
+		if (!_initialized && _rub) {
+			base::take(_rub)->release();
+		}
+	});
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -573,6 +674,9 @@ void Viewport::RendererRhi::renderOffscreen(
 
 	validateDatas();
 	ensureNoiseTexture();
+	if (!_initialized) {
+		return;
+	}
 
 	for (auto *srb : _perDrawSrbs) {
 		delete srb;
@@ -598,15 +702,22 @@ void Viewport::RendererRhi::renderOffscreen(
 		auto *rub = _rhi->nextResourceUpdateBatch();
 		if (_rub) {
 			rub->merge(_rub);
+			_rub->release();
 		}
 		_rub = rub;
 		collectOnscreenDraws();
+		if (!_initialized) {
+			return;
+		}
 		cb->resourceUpdate(_rub);
 		_rub = nullptr;
 	}
 }
 
 void Viewport::RendererRhi::collectOnscreenDraws() {
+	if (!_initialized) {
+		return;
+	}
 	const auto pw = float(_rt->pixelSize().width());
 	const auto ph = float(_rt->pixelSize().height());
 
@@ -624,6 +735,9 @@ void Viewport::RendererRhi::collectOnscreenDraws() {
 }
 
 void Viewport::RendererRhi::issueOnscreenDraws() {
+	if (!_initialized) {
+		return;
+	}
 	const auto pw = float(_rt->pixelSize().width());
 	const auto ph = float(_rt->pixelSize().height());
 	for (const auto &draw : _onscreenDraws) {
@@ -642,6 +756,9 @@ void Viewport::RendererRhi::renderOnscreen(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (!_initialized || rhi != _rhi || rhi->isDeviceLost()) {
+		return;
+	}
 	_rhi = rhi;
 	_rt = rt;
 	_cb = cb;
@@ -665,7 +782,10 @@ void Viewport::RendererRhi::ensureNoiseTexture() {
 	_noiseTexture = _rhi->newTexture(
 		QRhiTexture::RGBA8,
 		QSize(kNoiseTextureSize, kNoiseTextureSize));
-	_noiseTexture->create();
+	if (!_noiseTexture->create()) {
+		_initialized = false;
+		return;
+	}
 
 	const auto fade = [](float t) {
 		return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
@@ -766,6 +886,9 @@ void Viewport::RendererRhi::ensureNoiseTexture() {
 void Viewport::RendererRhi::paintTileOffscreen(
 		not_null<VideoTile*> tile,
 		TileData &tileData) {
+	if (!_initialized) {
+		return;
+	}
 	const auto track = tile->track();
 	const auto markGuard = gsl::finally([&] {
 		tile->track()->markFrameShown();
@@ -800,12 +923,27 @@ void Viewport::RendererRhi::paintTileOffscreen(
 		_factor);
 
 	uploadFrame(data, tileData);
+	if (!_initialized) {
+		return;
+	}
 	if (!_rgbaFrame) {
 		drawYuv2RgbPass(tileData, frameSize);
+		if (!_initialized) {
+			return;
+		}
 	}
 	prepareOffscreenTargets(tileData, blurSize);
+	if (!_initialized) {
+		return;
+	}
 	drawDownscalePass(tileData, blurSize);
+	if (!_initialized) {
+		return;
+	}
 	drawBlurPass(tileData, blurSize);
+	if (!_initialized) {
+		return;
+	}
 }
 
 void Viewport::RendererRhi::paintTileOnscreen(
@@ -813,6 +951,9 @@ void Viewport::RendererRhi::paintTileOnscreen(
 		TileData &tileData,
 		float pw,
 		float ph) {
+	if (!_initialized) {
+		return;
+	}
 	const auto data = tile->track()->frameWithInfo(false);
 	_userpicFrame = (data.format == Webrtc::FrameFormat::None);
 	const auto frameSize = _userpicFrame
@@ -846,12 +987,13 @@ void Viewport::RendererRhi::uploadFrame(
 		TileData &tileData) {
 	const auto imageIndex = _userpicFrame ? 0 : (data.index + 1);
 	const auto upload = (tileData.trackIndex != imageIndex);
-	tileData.trackIndex = imageIndex;
 	if (!upload) {
 		return;
 	}
 
-	_rub = _rhi->nextResourceUpdateBatch();
+	if (!_rub) {
+		_rub = _rhi->nextResourceUpdateBatch();
+	}
 
 	if (_rgbaFrame) {
 		const auto &image = _userpicFrame
@@ -862,7 +1004,10 @@ void Viewport::RendererRhi::uploadFrame(
 			delete tileData.rgbaTexture;
 			tileData.rgbaTexture = _rhi->newTexture(
 				QRhiTexture::BGRA8, image.size());
-			tileData.rgbaTexture->create();
+			if (!tileData.rgbaTexture->create()) {
+				_initialized = false;
+				return;
+			}
 			tileData.rgbaSize = image.size();
 		}
 		_rub->uploadTexture(
@@ -876,7 +1021,10 @@ void Viewport::RendererRhi::uploadFrame(
 			delete tileData.yTexture;
 			tileData.yTexture = _rhi->newTexture(
 				QRhiTexture::R8, yuv->size);
-			tileData.yTexture->create();
+			if (!tileData.yTexture->create()) {
+				_initialized = false;
+				return;
+			}
 			tileData.lumaSize = yuv->size;
 		}
 		auto yDesc = QRhiTextureSubresourceUploadDescription(
@@ -893,11 +1041,17 @@ void Viewport::RendererRhi::uploadFrame(
 			delete tileData.uTexture;
 			tileData.uTexture = _rhi->newTexture(
 				QRhiTexture::R8, yuv->chromaSize);
-			tileData.uTexture->create();
+			if (!tileData.uTexture->create()) {
+				_initialized = false;
+				return;
+			}
 			delete tileData.vTexture;
 			tileData.vTexture = _rhi->newTexture(
 				QRhiTexture::R8, yuv->chromaSize);
-			tileData.vTexture->create();
+			if (!tileData.vTexture->create()) {
+				_initialized = false;
+				return;
+			}
 			tileData.chromaSize = yuv->chromaSize;
 		}
 		auto uDesc = QRhiTextureSubresourceUploadDescription(
@@ -917,11 +1071,15 @@ void Viewport::RendererRhi::uploadFrame(
 			QRhiTextureUploadDescription(
 				QRhiTextureUploadEntry(0, 0, vDesc)));
 	}
+	tileData.trackIndex = imageIndex;
 }
 
 void Viewport::RendererRhi::prepareOffscreenTargets(
 		TileData &tileData,
 		QSize blurSize) {
+	if (!_initialized) {
+		return;
+	}
 	if (tileData.blurSize == blurSize
 		&& tileData.downscaleRt
 		&& tileData.blurHRt
@@ -934,47 +1092,68 @@ void Viewport::RendererRhi::prepareOffscreenTargets(
 			QRhiTexture *&tex,
 			QRhiTextureRenderTarget *&rt,
 			QRhiRenderPassDescriptor *&rpDesc) {
-		delete rt;
-		delete rpDesc;
+		delete base::take(rt);
+		delete base::take(rpDesc);
 		delete tex;
 		tex = _rhi->newTexture(
 			QRhiTexture::RGBA8, blurSize, 1, QRhiTexture::RenderTarget);
-		tex->create();
+		if (!tex->create()) {
+			_initialized = false;
+			return;
+		}
 		auto colorAtt = QRhiColorAttachment(tex);
 		rt = _rhi->newTextureRenderTarget(
 			QRhiTextureRenderTargetDescription(colorAtt));
 		rpDesc = rt->newCompatibleRenderPassDescriptor();
 		rt->setRenderPassDescriptor(rpDesc);
-		rt->create();
+		if (!rt->create()) {
+			_initialized = false;
+			return;
+		}
 	};
 	createOffscreenRT(
 		tileData.downscaleTexture,
 		tileData.downscaleRt,
 		tileData.downscaleRpDesc);
+	if (!_initialized) {
+		return;
+	}
 	createOffscreenRT(
 		tileData.blurHTexture,
 		tileData.blurHRt,
 		tileData.blurHRpDesc);
+	if (!_initialized) {
+		return;
+	}
 	createOffscreenRT(
 		tileData.blurVTexture,
 		tileData.blurVRt,
 		tileData.blurVRpDesc);
+	if (!_initialized) {
+		return;
+	}
 }
 
 void Viewport::RendererRhi::drawYuv2RgbPass(
 		TileData &tileData,
 		QSize frameSize) {
+	if (!_initialized) {
+		return;
+	}
 	if (!tileData.convertedTexture
 		|| tileData.convertedSize != frameSize) {
-		delete tileData.convertedRt;
-		delete tileData.convertedRpDesc;
+		delete base::take(tileData.convertedRt);
+		delete base::take(tileData.convertedRpDesc);
 		delete tileData.convertedTexture;
 		tileData.convertedTexture = _rhi->newTexture(
 			QRhiTexture::RGBA8,
 			frameSize,
 			1,
 			QRhiTexture::RenderTarget);
-		tileData.convertedTexture->create();
+		if (!tileData.convertedTexture->create()) {
+			_initialized = false;
+			return;
+		}
 		auto colorAtt = QRhiColorAttachment(tileData.convertedTexture);
 		tileData.convertedRt = _rhi->newTextureRenderTarget(
 			QRhiTextureRenderTargetDescription(colorAtt));
@@ -982,24 +1161,22 @@ void Viewport::RendererRhi::drawYuv2RgbPass(
 			tileData.convertedRt->newCompatibleRenderPassDescriptor();
 		tileData.convertedRt->setRenderPassDescriptor(
 			tileData.convertedRpDesc);
-		tileData.convertedRt->create();
+		if (!tileData.convertedRt->create()) {
+			_initialized = false;
+			return;
+		}
 		tileData.convertedSize = frameSize;
 	}
 
 	// Convert with a fixed orientation for every backend; the OpenGL
 	// compositing flip is compensated later, in drawFramePass().
-	const auto coords = std::array{
-		-1.f, -1.f, 0.f, 1.f,
-		 1.f, -1.f, 1.f, 1.f,
-		-1.f,  1.f, 0.f, 0.f,
-		 1.f,  1.f, 1.f, 0.f,
-	};
+	const auto coords = OffscreenQuad(_rhi);
 
 	if (!_rub) {
 		_rub = _rhi->nextResourceUpdateBatch();
 	}
 	_rub->updateDynamicBuffer(
-		_offscreenVertexBuffer, 0, coords.size(), coords.data());
+		_offscreenVertexBuffer, 0, sizeof(coords), coords.data());
 
 	auto *srb = _rhi->newShaderResourceBindings();
 	_perDrawSrbs.push_back(srb);
@@ -1020,7 +1197,10 @@ void Viewport::RendererRhi::drawYuv2RgbPass(
 			tileData.vTexture,
 			_linearSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		_initialized = false;
+		return;
+	}
 
 	_cb->beginPass(
 		tileData.convertedRt, Qt::black, { 1.0f, 0 }, _rub);
@@ -1039,20 +1219,18 @@ void Viewport::RendererRhi::drawYuv2RgbPass(
 void Viewport::RendererRhi::drawDownscalePass(
 		TileData &tileData,
 		QSize blurSize) {
+	if (!_initialized) {
+		return;
+	}
 	const float w = float(blurSize.width());
 	const float h = float(blurSize.height());
-	const float coords[] = {
-		-1.f, -1.f, 0.f, 1.f,
-		 1.f, -1.f, 1.f, 1.f,
-		-1.f,  1.f, 0.f, 0.f,
-		 1.f,  1.f, 1.f, 0.f,
-	};
+	const auto coords = OffscreenQuad(_rhi);
 
 	if (!_rub) {
 		_rub = _rhi->nextResourceUpdateBatch();
 	}
 	_rub->updateDynamicBuffer(
-		_offscreenVertexBuffer, 0, sizeof(coords), coords);
+		_offscreenVertexBuffer, 0, sizeof(coords), coords.data());
 
 	auto *srb = _rhi->newShaderResourceBindings();
 	_perDrawSrbs.push_back(srb);
@@ -1069,7 +1247,10 @@ void Viewport::RendererRhi::drawDownscalePass(
 			srcTexture,
 			_linearSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		_initialized = false;
+		return;
+	}
 
 	_cb->beginPass(tileData.downscaleRt, Qt::black, { 1.0f, 0 }, _rub);
 	_rub = nullptr;
@@ -1086,21 +1267,19 @@ void Viewport::RendererRhi::drawDownscalePass(
 void Viewport::RendererRhi::drawBlurPass(
 		TileData &tileData,
 		QSize blurSize) {
+	if (!_initialized) {
+		return;
+	}
 	const float w = float(blurSize.width());
 	const float h = float(blurSize.height());
-	const float coords[] = {
-		-1.f, -1.f, 0.f, 1.f,
-		 1.f, -1.f, 1.f, 1.f,
-		-1.f,  1.f, 0.f, 0.f,
-		 1.f,  1.f, 1.f, 0.f,
-	};
+	const auto coords = OffscreenQuad(_rhi);
 
 	{
 		BlurUniforms blurUniforms{};
 		blurUniforms.texelOffset = 1.f / w;
 		auto *rub = _rhi->nextResourceUpdateBatch();
 		rub->updateDynamicBuffer(
-			_offscreenVertexBuffer, 0, sizeof(coords), coords);
+			_offscreenVertexBuffer, 0, sizeof(coords), coords.data());
 		rub->updateDynamicBuffer(
 			_uniformBuffer, 0, sizeof(blurUniforms), &blurUniforms);
 
@@ -1117,7 +1296,11 @@ void Viewport::RendererRhi::drawBlurPass(
 				tileData.downscaleTexture,
 				_nearestSampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			rub->release();
+			_initialized = false;
+			return;
+		}
 
 		_cb->beginPass(
 			tileData.blurHRt, Qt::black, { 1.0f, 0 }, rub);
@@ -1136,7 +1319,7 @@ void Viewport::RendererRhi::drawBlurPass(
 		blurUniforms.texelOffset = 1.f / h;
 		auto *rub = _rhi->nextResourceUpdateBatch();
 		rub->updateDynamicBuffer(
-			_offscreenVertexBuffer, 0, sizeof(coords), coords);
+			_offscreenVertexBuffer, 0, sizeof(coords), coords.data());
 		rub->updateDynamicBuffer(
 			_uniformBuffer, 0, sizeof(blurUniforms), &blurUniforms);
 
@@ -1153,7 +1336,11 @@ void Viewport::RendererRhi::drawBlurPass(
 				tileData.blurHTexture,
 				_nearestSampler),
 		});
-		srb->create();
+		if (!srb->create()) {
+			rub->release();
+			_initialized = false;
+			return;
+		}
 
 		_cb->beginPass(
 			tileData.blurVRt, Qt::black, { 1.0f, 0 }, rub);
@@ -1172,6 +1359,9 @@ void Viewport::RendererRhi::drawFramePass(
 		not_null<VideoTile*> tile,
 		TileData &tileData,
 		QSize blurSize) {
+	if (!_initialized) {
+		return;
+	}
 	const auto geometry = tile->geometry().translated(
 		_owner->borrowedOrigin());
 
@@ -1262,6 +1452,7 @@ void Viewport::RendererRhi::drawFramePass(
 	GroupFrameUniforms uniforms{};
 	uniforms.viewport[0] = pw;
 	uniforms.viewport[1] = ph;
+	uniforms.flipY = NdcFlipY(_rhi);
 
 	const auto bg = fullscreen ? QColor(0, 0, 0) : rhiClearColor();
 	uniforms.frameBg[0] = bg.redF();
@@ -1348,7 +1539,10 @@ void Viewport::RendererRhi::drawFramePass(
 			_noiseTexture ? _noiseTexture : _placeholderTexture,
 			_noiseRepeatSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		_initialized = false;
+		return;
+	}
 
 	_onscreenDraws.push_back({ _framePipeline, srb, vOffset });
 }
@@ -1356,6 +1550,9 @@ void Viewport::RendererRhi::drawFramePass(
 void Viewport::RendererRhi::drawControls(
 		not_null<VideoTile*> tile,
 		TileData &tileData) {
+	if (!_initialized) {
+		return;
+	}
 	const auto geometry = tile->geometry().translated(
 		_owner->borrowedOrigin());
 	const auto x = geometry.x();
@@ -1529,6 +1726,9 @@ void Viewport::RendererRhi::paintUsingRaster(
 		QRect rect,
 		Fn<void(Painter&)> method,
 		float opacity) {
+	if (!_initialized) {
+		return;
+	}
 	if (!_controlsPipeline || rect.isEmpty()) {
 		return;
 	}
@@ -1551,6 +1751,9 @@ void Viewport::RendererRhi::paintUsingRaster(
 	const auto uOffset = slot * kUniformSlot;
 
 	auto *tex = acquirePoolTexture(size);
+	if (!tex) {
+		return;
+	}
 	_rub->uploadTexture(
 		tex,
 		QRhiTextureUploadDescription(
@@ -1563,6 +1766,7 @@ void Viewport::RendererRhi::paintUsingRaster(
 	imgUniforms.viewport[0] = pw;
 	imgUniforms.viewport[1] = ph;
 	imgUniforms.g_opacity = opacity;
+	imgUniforms.flipY = NdcFlipY(_rhi);
 
 	_rub->updateDynamicBuffer(
 		_uniformBuffer, uOffset, sizeof(imgUniforms), &imgUniforms);
@@ -1600,7 +1804,10 @@ void Viewport::RendererRhi::paintUsingRaster(
 			tex,
 			_linearSampler),
 	});
-	srb->create();
+	if (!srb->create()) {
+		_initialized = false;
+		return;
+	}
 
 	_onscreenDraws.push_back({ _controlsPipeline, srb, vOffset });
 }
@@ -1825,4 +2032,4 @@ void Viewport::RendererRhi::validateUserpicFrame(
 
 } // namespace Calls::Group
 
-#endif // Qt >= 6.7
+#endif // Qt >= 6.7 && !DESKTOP_APP_DISABLE_PRIVATE_QT_API

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_folder_strip.h"
 
+#include "menu/menu_mark_as_read.h"
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -126,6 +127,13 @@ void FiltersMenu::setup() {
 
 	_outer.setAttribute(Qt::WA_OpaquePaintEvent);
 	_outer.show();
+
+	// Keep the sidebar's Tab chain in visual order: the main menu button
+	// above the scroll area, and inside it the folders list (entered at
+	// its roving Tab-stop), the favorite link and the edit button - even
+	// as folders are reordered and the favorite appears or disappears.
+	_outer.setVisualTabOrder(true);
+	_container->setVisualTabOrder(true);
 	_outer.paintRequest(
 	) | rpl::on_next([=](QRect clip) {
 		auto p = QPainter(&_outer);
@@ -253,7 +261,9 @@ void FiltersMenu::scrollToButton(not_null<Ui::RpWidget*> widget) {
 	const auto scrollTo = scrollTop + (isBottomEdge ? localBottom : localTop);
 
 	auto scroll = [=] {
-		_scroll.scrollToY(qRound(_scrollToAnimation.value(scrollTo)));
+		const auto animated
+			= int(base::SafeRound(_scrollToAnimation.value(scrollTo)));
+		_scroll.scrollToY(animated);
 	};
 
 	_scrollToAnimation.start(
@@ -312,23 +322,21 @@ void FiltersMenu::moveToFilterEdge(int delta) {
 }
 
 void FiltersMenu::setListTabStop(not_null<Ui::SideBarButton*> stop) {
-	// Single source of truth for the list's roving Tab-stop, wired between the
-	// main menu and the edit button. Promote `stop` to the only TabFocus item
-	// and demote the previous one, so Tab/Shift+Tab always leave the list the
-	// same way regardless of which folder is focused.
+	// Single source of truth for the list's roving Tab-stop: promote `stop`
+	// to the only TabFocus item and demote the previous one, so Tab always
+	// enters the list at the same folder. Its position in the Tab chain
+	// comes from the containers' visual order (see setup()).
 	if (const auto previous = _tabStop.get(); previous && previous != stop) {
 		previous->setFocusPolicy(Qt::ClickFocus);
 	}
 	stop->setFocusPolicy(Qt::TabFocus);
 	_tabStop = stop.get();
-	QWidget::setTabOrder(&_menu, stop.get());
-	const auto favorite = _favorite ? _favorite->entity() : nullptr;
-	if (favorite) {
-		QWidget::setTabOrder(stop.get(), favorite);
-		QWidget::setTabOrder(favorite, _setup.get());
-	} else {
-		QWidget::setTabOrder(stop.get(), _setup.get());
-	}
+
+	// The Tab-stop moved outside of any layout change, so a Tab entering
+	// the sidebar from outside would still walk to the demoted button's
+	// old chain position - rewire the visual order right away.
+	_outer.refreshVisualTabOrder();
+	_container->refreshVisualTabOrder();
 }
 
 bool FiltersMenu::listFocused() const {
@@ -541,16 +549,6 @@ const style::SideBarButton &FiltersMenu::buttonStyle() const {
 	return st::windowFiltersButton;
 }
 
-base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareAll() {
-	return prepareButton(
-		_container,
-		0,
-		{},
-		Ui::FilterIcon::All,
-		false,
-		true);
-}
-
 base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 		not_null<Ui::VerticalLayout*> container,
 		FilterId id,
@@ -756,52 +754,45 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 	_popupMenu = base::make_unique_q<Ui::PopupMenu>(
 		i->second.get(),
 		st::popupMenuWithIcons);
-	if (!Purple::FillViewMenu(
+	if (Purple::FillViewMenu(_session, id, _popupMenu.get(), &_outer)) {
+		_popupMenu->popup(position);
+		return;
+	}
+	const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
+	if (id) {
+		addAction(
+			tr::lng_filters_context_edit(tr::now),
+			crl::guard(&_outer, [=] { EditExistingFilter(_session, id); }),
+			&st::menuIconEdit);
+
+		auto filteredChats = [=] {
+			return _session->session().data().chatsFilters().chatsList(id);
+		};
+		MarkAsReadMenu::AddChatListAction(
 			_session,
-			id,
-			_popupMenu.get(),
-			&_outer)) {
-		const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
-		if (id) {
-			addAction(
-				tr::lng_filters_context_edit(tr::now),
-				crl::guard(&_outer, [=] { EditExistingFilter(_session, id); }),
-				&st::menuIconEdit);
+			MarkAsReadMenu::ChatListKind::Folder,
+			std::move(filteredChats),
+			addAction);
 
-			auto filteredChats = [=] {
-				return _session->session().data().chatsFilters().chatsList(id);
-			};
-			Window::MenuAddMarkAsReadChatListAction(
-				_session,
-				std::move(filteredChats),
-				addAction);
+		addAction({
+			.text = tr::lng_filters_context_remove(tr::now),
+			.handler = crl::guard(&_outer, [=, this] {
+				_removeApi.request(base::make_weak(&_outer), _session, id);
+			}),
+			.icon = &st::menuIconDeleteAttention,
+			.isAttention = true,
+		});
+	} else {
+		addAction(
+			tr::lng_filters_setup_menu(tr::now),
+			crl::guard(&_outer, [=] { openFiltersSettings(); }),
+			&st::menuIconEdit);
 
-			addAction({
-				.text = tr::lng_filters_context_remove(tr::now),
-				.handler = crl::guard(&_outer, [=, this] {
-					_removeApi.request(base::make_weak(&_outer), _session, id);
-				}),
-				.icon = &st::menuIconDeleteAttention,
-				.isAttention = true,
-			});
-		} else {
-			auto customUnreadState = [=] {
-				const auto session = &_session->session();
-				return Data::MainListMapUnreadState(
-					session,
-					session->data().chatsList()->unreadState());
-			};
-			Window::MenuAddMarkAsReadChatListAction(
-				_session,
-				[=] { return _session->session().data().chatsList(); },
-				addAction,
-				std::move(customUnreadState));
-
-			addAction(
-				tr::lng_filters_setup_menu(tr::now),
-				crl::guard(&_outer, [=] { openFiltersSettings(); }),
-				&st::menuIconEdit);
-		}
+		MarkAsReadMenu::AddChatListAction(
+			_session,
+			MarkAsReadMenu::ChatListKind::AllChats,
+			[=] { return _session->session().data().chatsList(); },
+			addAction);
 	}
 	if (_popupMenu->empty()) {
 		_popupMenu = nullptr;

@@ -174,11 +174,12 @@ void ReplyPillHeader::updateShownMessageText() {
 		.session = &_data->session(),
 		.repaint = [=] { customEmojiRepaint(); },
 	});
+	const auto &quote = HistoryView::Reply::ComposePreviewQuote(_replyTo);
 	_shownMessageText.setMarkedText(
 		st::messageTextStyle,
-		(_replyTo.quote.empty()
+		(quote.empty()
 			? _shownMessage->inReplyText()
-			: _replyTo.quote),
+			: quote),
 		Ui::DialogTextOptions(),
 		context);
 }
@@ -264,7 +265,7 @@ void ReplyPillHeader::paintEvent(QPaintEvent *e) {
 
 	const auto iconPos = st::sendFilesReplyIconPosition
 		+ QPoint(pillRect.left(), pillRect.top());
-	if (!_replyTo.quote.empty()) {
+	if (!HistoryView::Reply::ComposePreviewQuote(_replyTo).empty()) {
 		st::historyQuoteIcon.paint(p, iconPos, width());
 	} else {
 		st::historyReplyIcon.paint(p, iconPos, width());
@@ -309,7 +310,7 @@ void ReplyPillHeader::paintEvent(QPaintEvent *e) {
 	const auto media = _shownMessage->media();
 	const auto hasPreview = media && media->hasReplyPreview();
 	const auto preview = hasPreview ? media->replyPreview() : nullptr;
-	const auto spoilered = media && media->hasSpoiler();
+	const auto spoilered = media && media->hasSpoilerForPreview();
 	if (!spoilered) {
 		_previewSpoiler = nullptr;
 	} else if (!_previewSpoiler) {
@@ -328,18 +329,21 @@ void ReplyPillHeader::paintEvent(QPaintEvent *e) {
 			pillCenterY - st::historyReplyPreview / 2,
 			st::historyReplyPreview,
 			st::historyReplyPreview);
-		p.drawPixmap(to.x(), to.y(), preview->pixSingle(
+		const auto pixmap = preview->pixSingle(
 			preview->size() / style::DevicePixelRatio(),
 			{
 				.options = Images::Option::RoundSmall,
 				.outer = to.size(),
-			}));
+			});
+		p.drawPixmap(to.x(), to.y(), pixmap);
 		if (_previewSpoiler) {
-			Ui::FillSpoilerRect(
+			HistoryView::FillPreviewSpoiler(
 				p,
 				to,
+				pixmap,
 				Ui::DefaultImageSpoiler().frame(
-					_previewSpoiler->index(crl::now(), p.inactive())));
+					_previewSpoiler->index(crl::now(), p.inactive())),
+				_spoilerCache);
 		}
 	}
 

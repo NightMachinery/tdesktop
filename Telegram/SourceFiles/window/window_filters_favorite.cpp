@@ -191,8 +191,9 @@ struct KnownContent {
 const char kOptionFolderFavoriteLink[] = "folder-favorite-link";
 
 bool ValidFolderFavoriteLink(const QString &link) {
-	return Core::TryConvertUrlToLocal(link.trimmed())
-		.startsWith(u"tg://"_q, Qt::CaseInsensitive);
+	const auto local = Core::TryConvertUrlToLocal(link.trimmed());
+	return local.startsWith(u"tg://"_q, Qt::CaseInsensitive)
+		|| Core::IsGetPremiumLocalUrl(local);
 }
 
 void EditFolderFavoriteLinkBox(not_null<Ui::GenericBox*> box) {
@@ -202,6 +203,9 @@ void EditFolderFavoriteLinkBox(not_null<Ui::GenericBox*> box) {
 		st::defaultInputField,
 		tr::lng_info_link_label(),
 		FavoriteLink.value()));
+	field->setInputMethodHints(Qt::ImhUrlCharactersOnly
+		| Qt::ImhNoAutoUppercase
+		| Qt::ImhNoPredictiveText);
 	box->setFocusCallback([=] { field->setFocusFast(); });
 	const auto submit = [=] {
 		const auto link = field->getLastText().trimmed();

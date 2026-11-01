@@ -350,14 +350,20 @@ DictLoader::DictLoader(
 }
 
 void DictLoader::unpack(const QString &path) {
+	const auto weak = base::make_weak(this);
+	const auto id = DictLoader::id();
 	crl::async([=] {
-		const auto success = Spellchecker::UnpackDictionary(path, id());
+		const auto success = Spellchecker::UnpackDictionary(path, id);
 		if (success) {
 			QFile(path).remove();
-			destroy();
-			return;
 		}
-		crl::on_main([=] { fail(); });
+		crl::on_main(weak, [=] {
+			if (success) {
+				destroy();
+			} else {
+				fail();
+			}
+		});
 	});
 }
 
@@ -394,7 +400,10 @@ MTP::DedicatedLoader::Location GetDownloadLocation(int id) {
 	if (i == end(DictionariesList)) {
 		return MTP::DedicatedLoader::Location{};
 	}
-	return MTP::DedicatedLoader::Location{ i->channel, i->postId };
+	return MTP::DedicatedLoader::Location{
+		.username = i->channel,
+		.postId = i->postId,
+	};
 }
 
 QString DictPathByLangId(int langId) {
@@ -450,32 +459,6 @@ bool RemoveDictionary(int langId) {
 		DictionariesPath(),
 		fileName);
 	return QDir(folder).removeRecursively();
-}
-
-bool WriteDefaultDictionary() {
-	// This is an unused function.
-	const auto en = QLocale::English;
-	if (DictionaryExists(en)) {
-		return false;
-	}
-	const auto fileName = QLocale(en).name();
-	const auto folder = u"%1/%2/"_q.arg(
-		DictionariesPath(),
-		fileName);
-	QDir(folder).removeRecursively();
-
-	const auto path = folder + fileName;
-	QDir().mkpath(folder);
-	auto input = QFile(u":/misc/en_US_dictionary"_q);
-	auto output = QFile(path);
-	if (input.open(QIODevice::ReadOnly)
-		&& output.open(QIODevice::WriteOnly)) {
-		output.write(input.readAll());
-		const auto result = Spellchecker::UnpackDictionary(path, en);
-		output.remove();
-		return result;
-	}
-	return false;
 }
 
 rpl::producer<QString> ButtonManageDictsState(
@@ -557,6 +540,11 @@ void Start(not_null<Main::Session*> session) {
 		onEnabled(settings->spellcheckerEnabled());
 	});
 
+	// The custom dictionary of user-added words is stored here on every
+	// platform, including those using the system spellchecker, so the
+	// working dir must be set before the early return below.
+	Spellchecker::SetWorkingDirPath(DictionariesPath());
+
 	if (Platform::Spellchecker::IsSystemSpellchecker()) {
 		Spellchecker::SupportedScriptsChanged()
 		| rpl::take(1)
@@ -567,8 +555,6 @@ void Start(not_null<Main::Session*> session) {
 
 	Spellchecker::SupportedScriptsChanged(
 	) | rpl::on_next(AddExceptions, lifetime);
-
-	Spellchecker::SetWorkingDirPath(DictionariesPath());
 
 	settings->dictionariesEnabledChanges(
 	) | rpl::on_next([](auto dictionaries) {

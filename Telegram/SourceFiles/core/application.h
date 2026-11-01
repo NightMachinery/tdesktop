@@ -28,6 +28,7 @@ class Databases;
 
 namespace Window {
 class Controller;
+class SavedWindows;
 } // namespace Window
 
 namespace Window::Notifications {
@@ -112,6 +113,7 @@ class Environment;
 namespace Core {
 
 struct LocalUrlHandler;
+class ScreenshotProtection;
 class Settings;
 class Tray;
 
@@ -162,6 +164,9 @@ public:
 	[[nodiscard]] base::BatterySaving &batterySaving() const {
 		return *_batterySaving;
 	}
+	[[nodiscard]] ScreenshotProtection &screenshotProtection() const {
+		return *_screenshotProtection;
+	}
 
 	// Windows interface.
 	bool hasActiveWindow(not_null<Main::Session*> session) const;
@@ -174,7 +179,7 @@ public:
 	void setActivePrimaryWindow(not_null<Window::Controller*> window);
 	[[nodiscard]] Window::Controller *separateWindowFor(
 		Window::SeparateId id) const;
-	Window::Controller *ensureSeparateWindowFor(
+	not_null<Window::Controller*> ensureSeparateWindowFor(
 		Window::SeparateId id,
 		MsgId showAtMsgId = 0);
 	[[nodiscard]] Window::Controller *windowFor( // Doesn't auto-switch.
@@ -188,6 +193,7 @@ public:
 	void closeWindow(not_null<Window::Controller*> window);
 	void windowActivated(not_null<Window::Controller*> window);
 	bool closeActiveWindow();
+	bool closeOtherWindows();
 	bool minimizeActiveWindow();
 	bool toggleActiveWindowFullScreen();
 	[[nodiscard]] QWidget *getFileDialogParent();
@@ -197,6 +203,15 @@ public:
 	void closeChatFromWindows(not_null<PeerData*> peer);
 	void checkWindowId(not_null<Window::Controller*> window);
 	void activate();
+	[[nodiscard]] Window::SavedWindows *savedWindows() const {
+		return _savedWindows.get();
+	}
+	[[nodiscard]] auto windowStack() const
+	-> const std::vector<not_null<Window::Controller*>> & {
+		return _windowStack;
+	}
+	void enumerateWindows(
+		Fn<void(not_null<Window::Controller*>)> callback) const;
 
 	// Media view interface.
 	bool hideMediaView();
@@ -274,6 +289,8 @@ public:
 
 	// Internal links.
 	void checkStartUrls();
+	[[nodiscard]] QPointer<QWidget> checkStartUrlsActivating();
+	void registerWindowActivation(not_null<QWidget*> window);
 	bool openLocalUrl(const QString &url, QVariant context);
 	bool openInternalUrl(const QString &url, QVariant context);
 	[[nodiscard]] QString changelogLink() const;
@@ -344,6 +361,9 @@ public:
 	// Global runtime variables.
 	void setScreenIsLocked(bool locked);
 	bool screenIsLocked() const;
+	[[nodiscard]] rpl::producer<bool> screenIsLockedValue() const;
+	void notifySystemSleep();
+	[[nodiscard]] rpl::producer<> systemSleepEvents() const;
 
 	static void RegisterUrlScheme();
 
@@ -372,8 +392,6 @@ private:
 	void updateWindowTitles();
 	void setLastActiveWindow(Window::Controller *window);
 	void showAccount(not_null<Main::Account*> account);
-	void enumerateWindows(
-		Fn<void(not_null<Window::Controller*>)> callback) const;
 	void processCreatedWindow(not_null<Window::Controller*> window);
 	void refreshApplicationIcon(Main::Session *session);
 
@@ -409,6 +427,7 @@ private:
 	const std::unique_ptr<Platform::Integration> _platformIntegration;
 	const std::unique_ptr<base::BatterySaving> _batterySaving;
 	const std::unique_ptr<Webrtc::Environment> _mediaDevices;
+	const std::unique_ptr<ScreenshotProtection> _screenshotProtection;
 
 	const std::unique_ptr<Storage::Databases> _databases;
 	const std::unique_ptr<Ui::Animations::Manager> _animationsManager;
@@ -436,6 +455,7 @@ private:
 	Window::Controller *_lastActiveWindow = nullptr;
 	Window::Controller *_lastActivePrimaryWindow = nullptr;
 	Window::Controller *_windowInSettings = nullptr;
+	std::unique_ptr<Window::SavedWindows> _savedWindows;
 	bool _lastMouseIgnored = false;
 	bool _lastTouchProcessed = false;
 
@@ -445,6 +465,7 @@ private:
 	const std::unique_ptr<ChatHelpers::EmojiKeywords> _emojiKeywords;
 	std::unique_ptr<Lang::Translator> _translator;
 	base::weak_qptr<Ui::BoxContent> _badProxyDisableBox;
+	base::weak_qptr<Ui::BoxContent> _webProxyFallbackBox;
 
 	const std::unique_ptr<Tray> _tray;
 
@@ -454,12 +475,14 @@ private:
 
 	rpl::variable<bool> _passcodeLock;
 	rpl::variable<bool> _setupEmailLock;
-	bool _screenIsLocked = false;
+	rpl::variable<bool> _screenIsLocked = false;
+	rpl::event_stream<> _systemSleep;
 
 	crl::time _shouldLockAt = 0;
 	base::Timer _autoLockTimer;
 
 	QList<QUrl> _urlsToOpen;
+	std::optional<QPointer<QWidget>> _startUrlActivated;
 
 	std::optional<base::Timer> _saveSettingsTimer;
 

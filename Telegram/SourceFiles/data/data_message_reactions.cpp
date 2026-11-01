@@ -20,7 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/session/send_as_peers.h"
 #include "data/components/credits.h"
-#include "data/data_channel.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
 #include "data/data_histories.h"
@@ -194,13 +193,6 @@ PossibleItemReactionsRef LookupPossibleReactions(
 		}
 	}
 	const auto session = &peer->session();
-	if (const auto channel = peer->asChannel()) {
-		if ((!channel->amCreator())
-			&& (channel->adminRights() & ChatAdminRight::Anonymous)
-			&& (session->sendAsPeers().resolveChosen(channel) == channel)) {
-			return {};
-		}
-	}
 	const auto reactions = &session->data().reactions();
 	const auto &full = reactions->list(Reactions::Type::Active);
 	const auto &top = reactions->list(Reactions::Type::Top);
@@ -742,7 +734,7 @@ void Reactions::preloadImageFor(const ReactionId &id) {
 		loadImage(set, lookupPaid()->centerIcon, true);
 		return;
 	}
-	auto &list = set.effect ? _effects : _available;
+	const auto &list = set.effect ? _effects : _available;
 	const auto i = ranges::find(list, id, &Reaction::id);
 	const auto document = (i == end(list))
 		? nullptr
@@ -1458,6 +1450,7 @@ std::optional<Reaction> Reactions::parse(const MTPAvailableReaction &entry) {
 			? _owner->processDocument(*data.varound_animation()).get()
 			: nullptr),
 		.active = !data.is_inactive(),
+		.premium = data.is_premium(),
 	});
 }
 

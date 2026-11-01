@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_unread_value.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
+#include "menu/menu_mark_as_read.h"
 #include "main/main_session.h"
 #include "settings/sections/settings_folders.h"
 #include "ui/widgets/menu/menu_action.h"
@@ -58,6 +59,7 @@ struct State final {
 
 	std::unique_ptr<Ui::ChatsFiltersTabsReorder> reorder;
 	bool ignoreRefresh = false;
+	bool ignoreActivation = false;
 };
 
 void ShowMenu(
@@ -78,63 +80,58 @@ void ShowMenu(
 	state->menu = base::make_unique_q<Ui::PopupMenu>(
 		parent,
 		st::popupMenuWithIcons);
-	if (!Purple::ShowViewTabMenu(
+	if (Purple::ShowViewTabMenu(controller, id, state->menu.get(), parent)) {
+		state->menu->popup(QCursor::pos());
+		return;
+	}
+	const auto addAction = Ui::Menu::CreateAddActionCallback(
+		state->menu.get());
+
+	if (id) {
+		addAction(
+			tr::lng_filters_context_edit(tr::now),
+			[=] { EditExistingFilter(controller, id); },
+			&st::menuIconEdit);
+
+		MarkAsReadMenu::AddChatListAction(
 			controller,
-			id,
-			state->menu.get(),
-			parent)) {
-		const auto addAction = Ui::Menu::CreateAddActionCallback(
-			state->menu.get());
-		if (id) {
-			addAction(
-				tr::lng_filters_context_edit(tr::now),
-				[=] { EditExistingFilter(controller, id); },
-				&st::menuIconEdit);
+			MarkAsReadMenu::ChatListKind::Folder,
+			[=] { return session->data().chatsFilters().chatsList(id); },
+			addAction);
 
-			Window::MenuAddMarkAsReadChatListAction(
-				controller,
-				[=] { return session->data().chatsFilters().chatsList(id); },
-				addAction);
-
-			auto showRemoveBox = [=] {
-				state->removeApi.request(base::make_weak(parent), controller, id);
-			};
-			addAction({
-				.text = tr::lng_filters_context_remove(tr::now),
-				.handler = std::move(showRemoveBox),
-				.icon = &st::menuIconDeleteAttention,
-				.isAttention = true,
-			});
-		} else {
-			auto customUnreadState = [=] {
-				return Data::MainListMapUnreadState(
-					session,
-					session->data().chatsList()->unreadState());
-			};
-			Window::MenuAddMarkAsReadChatListAction(
-				controller,
-				[=] { return session->data().chatsList(); },
-				addAction,
-				std::move(customUnreadState));
-
-			auto openFiltersSettings = [=] {
-				const auto filters = &session->data().chatsFilters();
-				if (filters->suggestedLoaded()) {
+		auto showRemoveBox = [=] {
+			state->removeApi.request(base::make_weak(parent), controller, id);
+		};
+		addAction({
+			.text = tr::lng_filters_context_remove(tr::now),
+			.handler = std::move(showRemoveBox),
+			.icon = &st::menuIconDeleteAttention,
+			.isAttention = true,
+		});
+	} else {
+		auto openFiltersSettings = [=] {
+			const auto filters = &session->data().chatsFilters();
+			if (filters->suggestedLoaded()) {
+				controller->showSettings(Settings::FoldersId());
+			} else if (!state->waitingSuggested) {
+				state->waitingSuggested = true;
+				filters->requestSuggested();
+				filters->suggestedUpdated(
+				) | rpl::take(1) | rpl::on_next([=] {
 					controller->showSettings(Settings::FoldersId());
-				} else if (!state->waitingSuggested) {
-					state->waitingSuggested = true;
-					filters->requestSuggested();
-					filters->suggestedUpdated(
-					) | rpl::take(1) | rpl::on_next([=] {
-						controller->showSettings(Settings::FoldersId());
-					}, parent->lifetime());
-				}
-			};
-			addAction(
-				tr::lng_filters_setup_menu(tr::now),
-				std::move(openFiltersSettings),
-				&st::menuIconEdit);
-		}
+				}, parent->lifetime());
+			}
+		};
+		addAction(
+			tr::lng_filters_setup_menu(tr::now),
+			std::move(openFiltersSettings),
+			&st::menuIconEdit);
+
+		MarkAsReadMenu::AddChatListAction(
+			controller,
+			MarkAsReadMenu::ChatListKind::AllChats,
+			[=] { return session->data().chatsList(); },
+			addAction);
 	}
 	if (state->menu->empty()) {
 		state->menu = nullptr;
@@ -488,7 +485,9 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 				const auto &list = Purple::ShownList(session);
 				for (auto i = 0; i < list.size(); ++i) {
 					if (list[i].id() == id) {
+						state->ignoreActivation = true;
 						slider->setActiveSection(i);
+						state->ignoreActivation = false;
 						scrollToIndex(i, anim::type::normal);
 						break;
 					}
@@ -508,7 +507,9 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 				state->lastFilterId = filter.id();
 				scrollToIndex(index, anim::type::normal);
 			}
-			applyFilter(filter);
+			if (!state->ignoreActivation) {
+				applyFilter(filter);
+			}
 		}, state->rebuildLifetime);
 		slider->contextMenuRequested() | rpl::on_next([=](int index) {
 			if (trackActiveFilterAndUnreadAndReorder) {

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_credits.h"
 #include "api/api_global_privacy.h"
+#include "api/api_share_themes.h"
 #include "api/api_statistics.h"
 #include "base/timer_rpl.h"
 #include "data/components/credits.h"
@@ -1368,7 +1369,8 @@ void ApplyChannelUpdate(
 		| Flag::StargiftsAvailable
 		| Flag::PaidMessagesAvailable
 		| (channel->starsPerMessage() ? Flag::HasStarsPerMessage : Flag())
-		| Flag::StarsPerMessageKnown;
+		| Flag::StarsPerMessageKnown
+		| Flag::HasWelcomeMessages;
 	channel->setFlags((channel->flags() & ~mask)
 		| (update.is_can_set_username() ? Flag::CanSetUsername : Flag())
 		| (update.is_can_view_participants()
@@ -1397,7 +1399,10 @@ void ApplyChannelUpdate(
 			? Flag::PaidMessagesAvailable
 			: Flag())
 		| (channel->starsPerMessage() ? Flag::HasStarsPerMessage : Flag())
-		| Flag::StarsPerMessageKnown);
+		| Flag::StarsPerMessageKnown
+		| (update.is_has_welcome_messages()
+			? Flag::HasWelcomeMessages
+			: Flag()));
 	channel->setUserpicPhoto(update.vchat_photo());
 	if (const auto migratedFrom = update.vmigrated_from_chat_id()) {
 		channel->addFlags(Flag::Megagroup);
@@ -1412,6 +1417,9 @@ void ApplyChannelUpdate(
 	channel->setSlowmodeSeconds(update.vslowmode_seconds().value_or_empty());
 	channel->setPeerGiftsCount(update.vstargifts_count().value_or_empty());
 	channel->setMainProfileTab(Data::ParseProfileTab(update.vmain_tab()));
+	channel->session().api().shareThemes().apply(
+		channel,
+		update.vshare_theme());
 	if (const auto next = update.vslowmode_next_send_date()) {
 		channel->growSlowmodeLastMessage(
 			next->v - channel->slowmodeSeconds());

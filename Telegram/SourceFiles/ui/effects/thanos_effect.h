@@ -33,6 +33,7 @@ public:
 	[[nodiscard]] bool shown() const;
 
 	[[nodiscard]] rpl::producer<> allDone() const;
+	[[nodiscard]] static bool FailedOnce();
 
 	void setGeometry(QRect rect);
 	void raise();
@@ -56,7 +57,7 @@ private:
 	const not_null<QWidget*> _parent;
 
 	std::unique_ptr<RpWidgetWrap> _surface;
-	[[maybe_unused]] ThanosEffectRenderer *_renderer = nullptr;
+	ThanosEffectRenderer *_renderer = nullptr;
 	bool _shown = false;
 
 	Ui::Animations::Basic _animation;

@@ -28,6 +28,7 @@ public:
 	[[nodiscard]] Fn<void()> hiddenLinkCallback() const;
 
 	void setOnlineCount(int count);
+	[[nodiscard]] int onlineCount() const;
 	void setColorized(bool enabled);
 
 private:

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_article.h"
+#include "iv/markdown/iv_markdown_article_quote.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "ui/dynamic_image.h"
 #include "ui/effects/path_shift_gradient.h"
@@ -14,8 +15,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/integration.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/round_rect.h"
 
 #include "styles/palette.h"
+#include "styles/style_chat.h"
 #include "styles/style_iv.h"
 #include "styles/style_window.h"
 #include "styles/style_widgets.h"
@@ -109,7 +112,7 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 	return false;
 }
 
-[[nodiscard]] bool PaintThumbnailImage(
+bool PaintThumbnailImage(
 		Painter &p,
 		QRect rect,
 		const std::shared_ptr<Ui::DynamicImage> &thumbnail,
@@ -174,7 +177,7 @@ void RefreshResolvedBlockImage(
 	});
 }
 
-[[nodiscard]] bool PaintRelatedArticleImage(
+bool PaintRelatedArticleImage(
 		Painter &p,
 		QRect rect,
 		const std::shared_ptr<Ui::DynamicImage> &thumbnail,
@@ -204,6 +207,15 @@ void RefreshResolvedBlockImage(
 	auto result = context;
 	result.clip = clip;
 	return result;
+}
+
+[[nodiscard]] MarkdownArticlePaintContext ChildrenPaintContext(
+		const MarkdownArticlePaintContext &context,
+		const LaidOutBlock &block) {
+	const auto clip = ChildrenPaintClip(block);
+	return clip
+		? ClippedContext(context, context.clip.intersected(*clip))
+		: context;
 }
 
 [[nodiscard]] MarkdownArticlePaintContext RevealSuppressedContext(
@@ -308,6 +320,7 @@ void PaintSelectableTextLeaf(
 			block.textRect,
 			block.textWidth);
 	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::ButtonRow:
 		return CountGenericRevealBand(block.outer);
 	case PreparedBlockKind::List:
 	case PreparedBlockKind::ListItem:
@@ -327,7 +340,7 @@ void PaintSelectableTextLeaf(
 			block.textWidth) + CountRevealLinesForBlocks(block.children, st);
 	case PreparedBlockKind::Photo:
 	case PreparedBlockKind::Video:
-	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Document:
 	case PreparedBlockKind::Map:
 	case PreparedBlockKind::Channel:
 	case PreparedBlockKind::GroupedMedia:
@@ -797,6 +810,9 @@ void PaintTextLeaf(
 	drawContext.selection = selection.value_or(TextSelection());
 	drawContext.linePostprocess = linePostprocess ? &*linePostprocess : nullptr;
 	leaf.draw(p, drawContext);
+	if (context.quoteRanges) {
+		AppendQuoteTextHighlight(p, leaf, makeContext(), context, segmentIndex);
+	}
 	const auto searchRanges = PaintSearchRangesForSegmentIndex(
 		context.selectionState,
 		context.searchState,
@@ -1453,11 +1469,12 @@ void PaintTableCaption(
 	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::ButtonRow:
 	case PreparedBlockKind::List:
 	case PreparedBlockKind::ListItem:
 	case PreparedBlockKind::Photo:
 	case PreparedBlockKind::Video:
-	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Document:
 	case PreparedBlockKind::Map:
 	case PreparedBlockKind::Channel:
 	case PreparedBlockKind::GroupedMedia:
@@ -1471,30 +1488,6 @@ void PaintTableCaption(
 [[nodiscard]] bool HorizontalRightEdgeHidden(const LaidOutBlock &block) {
 	return block.horizontalScrollMax > 0
 		&& (block.horizontalScrollLeft < block.horizontalScrollMax);
-}
-
-[[nodiscard]] QRect HorizontalOverflowContentClip(
-		const LaidOutBlock &block,
-		const style::Markdown &st,
-		QRect viewport) {
-	if (block.horizontalScrollMax <= 0 || viewport.isEmpty()) {
-		return viewport;
-	}
-	const auto indicatorWidth = std::min(
-		std::max(OverflowIndicatorWidth(block, st), 1),
-		viewport.width());
-	const auto left = (block.horizontalScrollLeft > 0)
-		? indicatorWidth
-		: 0;
-	const auto right = HorizontalRightEdgeHidden(block)
-		? indicatorWidth
-		: 0;
-	const auto width = std::max(viewport.width() - left - right, 0);
-	return QRect(
-		viewport.x() + left,
-		viewport.y(),
-		width,
-		viewport.height());
 }
 
 [[nodiscard]] QRect HorizontalScrollLogicalPaintRect(
@@ -1884,6 +1877,10 @@ void PaintDisplayMathBlock(
 				&& (formulaContext.hiddenSegmentIndex == block.segmentIndex)) {
 				return;
 			}
+			AppendQuoteFormulaHighlight(
+				block.visibleFormulaRect,
+				formulaContext,
+				block.segmentIndex);
 			const auto &paintSt = PaintStyle(formulaContext, st);
 			const auto formula = PreparedFormulaFor(formulas, block.formulaIndex);
 			p.setPen(paintSt.textColor->c);
@@ -1966,13 +1963,18 @@ void PaintQuoteBlock(
 			*context.caches.blockquote,
 			quoteStyle);
 		if (!block.pullquote) {
+			const auto control = QuoteHasCollapseControl(block);
 			p.save();
 			p.setClipRect(quoteClip);
 			Ui::Text::FillQuotePaint(
 				p,
 				HorizontalScrollLogicalPaintRect(block),
 				*context.caches.blockquote,
-				quoteStyle);
+				quoteStyle,
+				{
+					.expandIcon = control && block.collapsed,
+					.collapseIcon = control && !block.collapsed,
+				});
 			p.restore();
 		} else {
 			p.save();
@@ -2022,9 +2024,7 @@ void PaintQuoteBlock(
 		}
 	}
 
-	auto local = ClippedContext(
-		context,
-		context.clip.intersected(block.contentRect));
+	auto local = ChildrenPaintContext(context, block);
 	local.caches.supplementaryColorOverride
 		= NonPullquoteQuoteCaptionColor(context, st);
 	PaintBlocks(
@@ -2133,12 +2133,35 @@ void PaintCodeBlock(
 	PaintHorizontalScrollbar(p, block, st, context);
 }
 
+bool PaintUnsupportedNoticeBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintContext &context) {
+	if (block.activation.kind != MediaActivationKind::UnsupportedBlock) {
+		return false;
+	}
+	const auto &runtime = block.placeholderRuntime;
+	Assert(runtime != nullptr);
+	Assert(runtime->unsupportedCard != nullptr);
+
+	const auto card = runtime->unsupportedCard.get();
+	const auto cardRect = QRect(
+		block.mediaRect.topLeft() - card->buttonRect().topLeft(),
+		QSize(card->width(), card->height()));
+	card->paint(p, context, cardRect, runtime->ripple.get());
+	return true;
+}
+
 void PaintPlaceholderBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		int outerWidth,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
+	if (PaintUnsupportedNoticeBlock(p, block, context)) {
+		return;
+	}
+	const auto &paintSt = PaintStyle(context, st);
 	PaintRevealBand(
 		p,
 		context,
@@ -2160,10 +2183,10 @@ void PaintPlaceholderBlock(
 				const auto pressed = ClickHandler::showAsPressed(
 					block.placeholderRuntime->clickHandler);
 				p.setPen(Qt::NoPen);
-				p.setBrush(st.placeholder.bg);
+				p.setBrush(paintSt.placeholder.bg);
 				p.drawRoundedRect(block.mediaRect, radius, radius);
 				if (active || pressed) {
-					p.setBrush(st.placeholder.bgActive);
+					p.setBrush(paintSt.placeholder.bgActive);
 					p.drawRoundedRect(block.mediaRect, radius, radius);
 				}
 				if (const auto &ripple = block.placeholderRuntime->ripple) {
@@ -2172,9 +2195,9 @@ void PaintPlaceholderBlock(
 						block.mediaRect.x(),
 						block.mediaRect.y(),
 						outerWidth,
-						&st.placeholder.rippleBg->c);
+						&paintSt.placeholder.rippleBg->c);
 				}
-				auto pen = QPen(st.placeholder.borderFg->c);
+				auto pen = QPen(paintSt.placeholder.borderFg->c);
 				pen.setWidth(border);
 				p.setPen(pen);
 				p.setBrush(Qt::NoBrush);
@@ -2192,10 +2215,10 @@ void PaintPlaceholderBlock(
 						spinner.topLeft(),
 						spinner.size(),
 						outerWidth,
-						QPen(st.placeholder.spinnerFg->c),
+						QPen(paintSt.placeholder.spinnerFg->c),
 						st.placeholder.spinnerWidth);
 				} else {
-					p.setPen(st.placeholder.labelFgActive->c);
+					p.setPen(paintSt.placeholder.labelFgActive->c);
 					PaintTextLeaf(
 						p,
 						block.labelLeaf,
@@ -2207,7 +2230,7 @@ void PaintPlaceholderBlock(
 			} else {
 				const auto max = block.labelLeaf.maxWidth();
 				const auto radius = st.placeholder.radius;
-				p.setBrush(st.placeholder.bg);
+				p.setBrush(paintSt.placeholder.bg);
 				p.setPen(Qt::NoPen);
 				const auto skip = (max < block.labelRect.width())
 					? ((block.labelRect.width() - max) / 2)
@@ -2218,7 +2241,7 @@ void PaintPlaceholderBlock(
 					).marginsAdded(st.placeholder.padding),
 					radius,
 					radius);
-				p.setPen(st.placeholder.labelFg->c);
+				p.setPen(paintSt.placeholder.labelFg->c);
 				PaintTextLeaf(
 					p,
 					block.labelLeaf,
@@ -2269,6 +2292,22 @@ void PaintPlaceholderBlock(
 	return path;
 }
 
+[[nodiscard]] QPainterPath MediaRoundedRectPath(
+		QRect rect,
+		Ui::BubbleRounding rounding,
+		int radius) {
+	const auto corner = [&](Ui::BubbleCornerRounding value) {
+		const auto bubble = Ui::BubbleCornerRadius(value);
+		return bubble ? bubble : radius;
+	};
+	return Ui::ComplexRoundedRectPath(
+		rect,
+		corner(rounding.topLeft),
+		corner(rounding.topRight),
+		corner(rounding.bottomLeft),
+		corner(rounding.bottomRight));
+}
+
 void PaintEmbedPostBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -2280,6 +2319,7 @@ void PaintEmbedPostBlock(
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
 	const auto &style = st.embedPost;
+	const auto &paintSt = PaintStyle(context, st);
 	const auto paintHeader = [&](
 			Painter &p,
 			const MarkdownArticlePaintContext &headerContext) {
@@ -2291,7 +2331,7 @@ void PaintEmbedPostBlock(
 					block.mediaRect.y(),
 					style.accentWidth,
 					block.mediaRect.height()),
-				style.accentFg->c);
+				paintSt.embedPost.accentFg->c);
 		}
 		if (block.photoRuntime && !block.thumbnailRect.isEmpty()) {
 			auto hq = PainterHighQualityEnabler(p);
@@ -2302,7 +2342,7 @@ void PaintEmbedPostBlock(
 			p.setClipPath(
 				avatarPath,
 				Qt::IntersectClip);
-			(void)PaintThumbnailImage(
+			PaintThumbnailImage(
 				p,
 				block.thumbnailRect,
 				block.thumbnailImage,
@@ -2311,7 +2351,7 @@ void PaintEmbedPostBlock(
 			p.restore();
 		}
 		if (!block.labelRect.isEmpty()) {
-			p.setPen(style.authorFg->c);
+			p.setPen(paintSt.embedPost.authorFg->c);
 			PaintSelectableTextLeaf(
 				p,
 				block.labelLeaf,
@@ -2325,7 +2365,7 @@ void PaintEmbedPostBlock(
 					block.segmentIndex));
 		}
 		if (!block.subtitleRect.isEmpty()) {
-			p.setPen(style.dateFg->c);
+			p.setPen(paintSt.embedPost.dateFg->c);
 			PaintSelectableTextLeaf(
 				p,
 				block.subtitleLeaf,
@@ -2381,17 +2421,12 @@ void PaintEmbedPostBlock(
 		if (!accentClip.isEmpty()) {
 			p.save();
 			p.setClipRect(accentClip);
-			p.fillRect(accentRect, style.accentFg->c);
+			p.fillRect(accentRect, paintSt.embedPost.accentFg->c);
 			p.restore();
 		}
 	}
 	if (!block.bodyRect.isEmpty()) {
-		const auto bodyContext = ClippedContext(
-			context,
-			context.clip.intersected(
-				block.scrollViewportRect.isEmpty()
-					? block.bodyRect
-					: block.scrollViewportRect));
+		const auto bodyContext = ChildrenPaintContext(context, block);
 		PaintBlocks(
 			p,
 			block.children,
@@ -2477,7 +2512,19 @@ void PaintPersistentMediaBlock(
 				&& WholeSegmentSelected(
 					mediaContext.selectionState,
 					block.segmentIndex)) {
-				p.fillRect(block.mediaRect, p.textPalette().selectOverlay);
+				const auto rounding = block.mediaBlock
+					? block.mediaBlock->bubbleRounding()
+					: Ui::BubbleRounding();
+				if (rounding == Ui::BubbleRounding()) {
+					p.fillRect(
+						block.mediaRect,
+						p.textPalette().selectOverlay);
+				} else {
+					auto hq = PainterHighQualityEnabler(p);
+					p.fillPath(
+						MediaRoundedRectPath(block.mediaRect, rounding, 0),
+						p.textPalette().selectOverlay);
+				}
 			}
 		});
 }
@@ -2523,7 +2570,7 @@ void PaintCardSurface(
 	}
 }
 
-void PaintAudioBlock(
+void PaintDocumentBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
@@ -2546,6 +2593,7 @@ void PaintRelatedArticleBlock(
 		const LaidOutBlock &block,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
+	const auto &paintSt = PaintStyle(context, st);
 	PaintRevealBand(
 		p,
 		context,
@@ -2557,11 +2605,11 @@ void PaintRelatedArticleBlock(
 				p,
 				block.mediaRect,
 				style.border,
-				style.borderFg,
-				style.bg,
+				paintSt.relatedArticle.borderFg,
+				paintSt.relatedArticle.bg,
 				style.radius);
 			if (!block.thumbnailRect.isEmpty()) {
-				p.fillRect(block.thumbnailRect, style.bg->c);
+				p.fillRect(block.thumbnailRect, paintSt.relatedArticle.bg->c);
 				if (style.thumbnailRadius > 0) {
 					auto hq = PainterHighQualityEnabler(p);
 					auto path = RoundedRectPath(
@@ -2569,7 +2617,7 @@ void PaintRelatedArticleBlock(
 						style.thumbnailRadius);
 					p.save();
 					p.setClipPath(path, Qt::IntersectClip);
-					(void)PaintRelatedArticleImage(
+					PaintRelatedArticleImage(
 						p,
 						block.thumbnailRect,
 						block.thumbnailImage,
@@ -2579,7 +2627,7 @@ void PaintRelatedArticleBlock(
 						visibleContext.mediaPixelScale);
 					p.restore();
 				} else {
-					(void)PaintRelatedArticleImage(
+					PaintRelatedArticleImage(
 						p,
 						block.thumbnailRect,
 						block.thumbnailImage,
@@ -2590,7 +2638,7 @@ void PaintRelatedArticleBlock(
 				}
 			}
 			if (!block.labelRect.isEmpty()) {
-				p.setPen(st.textColor->c);
+				p.setPen(paintSt.textColor->c);
 				PaintRelatedArticleTextLeaf(
 					p,
 					block.labelLeaf,
@@ -2600,7 +2648,7 @@ void PaintRelatedArticleBlock(
 					style.titleLines);
 			}
 			if (!block.subtitleRect.isEmpty()) {
-				p.setPen(st.textColor->c);
+				p.setPen(paintSt.textColor->c);
 				PaintRelatedArticleTextLeaf(
 					p,
 					block.subtitleLeaf,
@@ -2610,7 +2658,7 @@ void PaintRelatedArticleBlock(
 					style.subtitleLines);
 			}
 			if (!block.actionRect.isEmpty()) {
-				p.setPen(st.supplementaryTextColor->c);
+				p.setPen(paintSt.supplementaryTextColor->c);
 				PaintRelatedArticleTextLeaf(
 					p,
 					block.actionLeaf,
@@ -2636,7 +2684,7 @@ void PaintRelatedArticleBlock(
 							- style.separator,
 						block.mediaRect.width(),
 						style.separator),
-					style.separatorFg->c);
+					paintSt.relatedArticle.separatorFg->c);
 			}
 		});
 }
@@ -2692,9 +2740,20 @@ void PaintGroupedMediaBlock(
 						style.overlayOpacity,
 						0.,
 						1.));
-					p.fillPath(
-						RoundedRectPath(block.mediaRect, style.radius),
-						overlay);
+					const auto rounding = block.mediaBlock->bubbleRounding();
+					if (rounding == Ui::BubbleRounding()) {
+						p.fillPath(
+							RoundedRectPath(block.mediaRect, style.radius),
+							overlay);
+					} else {
+						auto hq = PainterHighQualityEnabler(p);
+						p.fillPath(
+							MediaRoundedRectPath(
+								block.mediaRect,
+								rounding,
+								style.radius),
+							overlay);
+					}
 				}
 			}
 		});
@@ -2779,9 +2838,7 @@ void PaintDetailsBlock(
 	p.restore();
 
 	if (!block.bodyRect.isEmpty()) {
-		const auto bodyContext = ClippedContext(
-			context,
-			context.clip.intersected(block.bodyRect));
+		const auto bodyContext = ChildrenPaintContext(context, block);
 		PaintBlocks(
 			p,
 			block.children,
@@ -2880,7 +2937,7 @@ void PaintThinkingBlock(
 		PaintSelectableTextLeaf(
 			maskPainter,
 			block.leaf,
-			ClippedContext(context, logicalRect),
+			ClippedContext(context, contentClip),
 			block.textRect,
 			block.textWidth,
 			block.segmentIndex,
@@ -3061,13 +3118,18 @@ void PaintBlock(
 				p.fillRect(block.outer, EffectiveDividerFg(paintSt, context));
 			});
 		break;
+	case PreparedBlockKind::ButtonRow:
+		PaintRevealBand(
+			p,
+			context,
+			block.outer,
+			[&](Painter &p, const MarkdownArticlePaintContext &context) {
+				PaintButtonRow(p, block, st, context, outerWidth);
+			});
+		break;
 	case PreparedBlockKind::List:
 		{
-			const auto childContext = block.scrollViewportRect.isEmpty()
-				? context
-				: ClippedContext(
-					context,
-					context.clip.intersected(block.scrollViewportRect));
+			const auto childContext = ChildrenPaintContext(context, block);
 			PaintBlocks(
 				p,
 				block.children,
@@ -3107,11 +3169,7 @@ void PaintBlock(
 			}
 		}
 		{
-			const auto childContext = block.scrollViewportRect.isEmpty()
-				? context
-				: ClippedContext(
-					context,
-					context.clip.intersected(block.scrollViewportRect));
+			const auto childContext = ChildrenPaintContext(context, block);
 			PaintBlocks(
 				p,
 				block.children,
@@ -3163,8 +3221,8 @@ void PaintBlock(
 	case PreparedBlockKind::Video:
 		PaintVideoBlock(p, block, st, context);
 		break;
-	case PreparedBlockKind::Audio:
-		PaintAudioBlock(p, block, st, context);
+	case PreparedBlockKind::Document:
+		PaintDocumentBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Map:
 		PaintMapBlock(p, block, st, context);
@@ -3210,6 +3268,64 @@ void PaintBlock(
 }
 
 } // namespace
+
+QRect HorizontalOverflowContentClip(
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		QRect viewport) {
+	if (block.horizontalScrollMax <= 0 || viewport.isEmpty()) {
+		return viewport;
+	}
+	const auto indicatorWidth = std::min(
+		std::max(OverflowIndicatorWidth(block, st), 1),
+		viewport.width());
+	const auto left = (block.horizontalScrollLeft > 0)
+		? indicatorWidth
+		: 0;
+	const auto right = HorizontalRightEdgeHidden(block)
+		? indicatorWidth
+		: 0;
+	const auto width = std::max(viewport.width() - left - right, 0);
+	return QRect(
+		viewport.x() + left,
+		viewport.y(),
+		width,
+		viewport.height());
+}
+
+std::optional<QRect> ChildrenPaintClip(const LaidOutBlock &block) {
+	const auto list = (block.kind == PreparedBlockKind::List)
+		|| (block.kind == PreparedBlockKind::ListItem);
+	if (block.kind == PreparedBlockKind::Details) {
+		return block.bodyRect;
+	} else if (block.kind == PreparedBlockKind::Quote) {
+		return block.contentRect;
+	} else if (block.kind == PreparedBlockKind::EmbedPost) {
+		return block.scrollViewportRect.isEmpty()
+			? block.bodyRect
+			: block.scrollViewportRect;
+	} else if (list && !block.scrollViewportRect.isEmpty()) {
+		return block.scrollViewportRect;
+	}
+	return std::nullopt;
+}
+
+std::optional<QRect> DescendantPaintClip(
+		const LaidOutBlock &ancestor,
+		const LaidOutBlock *block,
+		QRect clip) {
+	if (const auto own = ChildrenPaintClip(ancestor)) {
+		clip = clip.intersected(*own);
+	}
+	for (const auto &child : ancestor.children) {
+		if (&child == block) {
+			return clip;
+		} else if (const auto found = DescendantPaintClip(child, block, clip)) {
+			return found;
+		}
+	}
+	return std::nullopt;
+}
 
 QColor NonPullquoteQuoteCaptionColor(
 		const MarkdownArticlePaintContext &context,

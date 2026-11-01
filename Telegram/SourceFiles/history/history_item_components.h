@@ -59,6 +59,7 @@ struct CornersMaskRef;
 
 namespace Iv {
 struct RichPage;
+struct RichQuote;
 } // namespace Iv
 
 namespace HistoryView {
@@ -157,6 +158,7 @@ struct HistoryMessageRichPageSource
 : RuntimeComponent<HistoryMessageRichPageSource, HistoryItem> {
 	std::shared_ptr<const Iv::RichPage> page;
 	std::shared_ptr<const Iv::RichPage> fullPage;
+	base::flat_map<QByteArray, HistoryMessageMarkupButton> buttonRecords;
 	std::optional<Data::FileOriginCloudDraft> draftOrigin;
 	uint64 fullPageVersion = 0;
 	bool canEdit = false;
@@ -204,6 +206,9 @@ struct HistoryMessageForwarded
 	void create(
 		const HistoryMessageVia *via,
 		not_null<const HistoryItem*> item) const;
+	[[nodiscard]] TextWithEntities phrase(
+		const HistoryMessageVia *via,
+		TextWithEntities userpic = {}) const;
 
 	[[nodiscard]] bool forwardOfForward() const {
 		return savedFromSender || savedFromHiddenSenderInfo;
@@ -322,8 +327,11 @@ private:
 
 struct ReplyFields {
 	[[nodiscard]] ReplyFields clone(not_null<HistoryItem*> parent) const;
+	[[nodiscard]] const TextWithEntities &displayQuote() const;
+	[[nodiscard]] MessageHighlightId highlight() const;
 
 	TextWithEntities quote;
+	std::shared_ptr<const Iv::RichQuote> richQuote;
 	std::unique_ptr<Data::Media> externalMedia;
 	PeerId externalSenderId = 0;
 	QString externalSenderName;
@@ -827,6 +835,13 @@ struct HistoryServiceCommunityAdded
 	rpl::lifetime lifetime;
 };
 
+struct HistoryServiceJoinedViaCommunity
+: RuntimeComponent<HistoryServiceJoinedViaCommunity, HistoryItem> {
+	ChannelId communityId = 0;
+	ChannelData *community = nullptr;
+	rpl::lifetime lifetime;
+};
+
 struct HistoryServiceGameScore
 : RuntimeComponent<HistoryServiceGameScore, HistoryItem>
 , HistoryServiceDependentData {
@@ -868,6 +883,30 @@ struct HistoryServicePaymentRefund
 	uint64 amount = 0;
 };
 
+struct HistoryServiceGramTransfer
+: RuntimeComponent<HistoryServiceGramTransfer, HistoryItem> {
+	[[nodiscard]] QString commentText() const;
+
+	int64 amount = 0;
+	QString peerAddress;
+	QString transactionId;
+	QString comment;
+	QString failReason;
+	bool commentEncrypted = false;
+};
+
+struct HistoryServiceTonConnectRequest
+: RuntimeComponent<HistoryServiceTonConnectRequest, HistoryItem> {
+	uint64 sessionId = 0;
+	QString topic;
+	QString dappName;
+	TextWithEntities notificationText;
+	rpl::lifetime lifetime;
+	TimeId expires = 0;
+	bool accepted = false;
+	bool declined = false;
+};
+
 enum class HistorySelfDestructType {
 	Photo,
 	Video,
@@ -887,8 +926,8 @@ struct HistoryServiceSelfDestruct
 	using Type = HistorySelfDestructType;
 
 	Type type = Type::Photo;
-	std::variant<crl::time, TimeToLiveSingleView> timeToLive = crl::time();
-	std::variant<crl::time, TimeToLiveSingleView> destructAt = crl::time();
+	std::variant<TimeId, TimeToLiveSingleView> timeToLive = TimeId();
+	std::variant<TimeId, TimeToLiveSingleView> destructAt = TimeId();
 };
 
 struct HistoryServiceOngoingCall
