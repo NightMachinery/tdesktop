@@ -137,6 +137,28 @@ assert 'crl::on_main(box, [=] {\n\t\t\tif (RestoreFreshSetup(state, generation, 
 assert 'state->loading || !Current(*state)' in ui
 print('Q2A lifecycle release/order, deferred chooser reset and generation negative guards PASS')
 
+# A fresh setup's checks run under the setup's operation; once it ends the account status reads as
+# retired. Completion must resolve again under the account's own authority, once, after progress,
+# and never for a move's provisioning (the carry owns that).
+receive = body(service, 'void DesktopSyncChatSetupService::Impl::receive(')
+resolve = ['const auto session = _session;',
+ 'const auto committed = _last.phase == DesktopSyncChatCreatePhase::Complete',
+ '&& !_last.provisioned && !std::exchange(_resolvedCommit, true);',
+ 'if (_progress) { _progress(_last); }',
+ 'if (committed) { if (const auto live = session.get()) { EnsureSyncChatResolved(live, true); } }']
+ordered(receive, *resolve)
+for part in resolve:
+ try:
+  ordered(receive.replace(part, 'REMOVED'), *resolve)
+ except AssertionError:
+  pass
+ else:
+  raise AssertionError('setup completion resolve negative guard did not refuse')
+assert service.count('EnsureSyncChatResolved(') == 1, 'one completion resolve, no other service resolve'
+assert 'bool _resolvedCommit = false;' in service
+assert 'void CheckSyncChatBeforePost(' not in service
+print('P0a setup completion resolves once under the account authority, after progress, not for provisioning PASS')
+
 requests = (p / 'purple_sync_chat_setup_requests.cpp').read_text()
 move_decoration = body(requests, 'auto DesktopSyncChatMoveDecorationRequest(')
 for guard in ['!SerializeSyncCarryJournal(carry)', '!carry.stateCommitted', '!carry.cacheCompleted',

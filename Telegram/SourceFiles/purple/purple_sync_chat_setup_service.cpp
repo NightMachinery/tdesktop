@@ -13,6 +13,8 @@
 
 #include <QtCore/QDir>
 
+#include <utility>
+
 namespace Purple {
 
 class DesktopSyncChatSetupService::Impl final : public base::has_weak_ptr {
@@ -43,6 +45,7 @@ private:
 	rpl::lifetime _lifetime;
 	bool _started = false;
 	bool _resumeOnly = false;
+	bool _resolvedCommit = false;
 
 };
 
@@ -137,7 +140,13 @@ void DesktopSyncChatSetupService::Impl::receive(DesktopSyncChatSetupProgress pro
 	if (_last.resumeAbsent) { finishResumeLookup(); }
 	const auto command = _last.command;
 	const auto weak = base::make_weak(this);
+	// This setup's own checks ran under its operation, which ends with it: resolve the committed
+	// chat again under the account's authority. A move's provisioning stays with its carry.
+	const auto session = _session;
+	const auto committed = _last.phase == DesktopSyncChatCreatePhase::Complete
+		&& !_last.provisioned && !std::exchange(_resolvedCommit, true);
 	if (_progress) { _progress(_last); }
+	if (committed) { if (const auto live = session.get()) { EnsureSyncChatResolved(live, true); } }
 	const auto self = weak.get();
 	if (!self || !self->current() || !command || !self->_transport) {
 		return;
