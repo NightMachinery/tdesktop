@@ -130,7 +130,7 @@ struct GiftTypeStars {};
 struct Details { bool byStars = false; std::variant<int, GiftTypeStars> descriptor = 0; };
 struct Credits { void load(bool) {} };
 struct Session { Credits value; Credits &credits() { return value; } };
-struct Window { Session value; Session &session() { return value; } void showPeerHistory(PeerData*) {} };
+struct Window : base::has_weak_ptr { Session value; Session &session() { return value; } void showPeerHistory(PeerData*) {} };
 struct State { int media = 0; };
 int Gifts = 0, HiddenGifts = 0;
 template <typename F> void SendGift(Window*, PeerData *peer, void*, const Details&, F, std::shared_ptr<ChatHelpers::Show>) { ++Gifts; HiddenGifts += peer->hidden; }

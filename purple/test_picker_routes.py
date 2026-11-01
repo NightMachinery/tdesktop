@@ -124,9 +124,9 @@ inventory.update({
  'payments/payments_form.h': {'std::function<bool()> pickerCurrent;': 3},
  'payments/payments_checkout_process.cpp': {'Purple::WatchPickerPayment(id,': 1},
  'boxes/send_credits_box.cpp': {'Purple::PickerPaymentAllowed(data->id)': 1},
- 'payments/payments_non_panel_process.cpp': {'recipientShow ? recipientShow : controller->uiShow()': 1},
+ 'payments/payments_non_panel_process.cpp': {'recipientShow ? recipientShow : strong->uiShow()': 1},
  'settings/settings_credits_graphics.cpp': {'.pickerCurrent = Purple::PickerGiftCurrent(show)': 1}})
-inventory['boxes/star_gift_box.cpp'].update({'SendGiftBoxWithShow,': 1, '.pickerCurrent = Purple::PickerGiftCurrent(show)': 3, 'invoice.pickerCurrent = Purple::PickerGiftCurrent(show)': 1, 'if (!show->valid()) return;': 6, 'Purple::PickerGiftShow(window->uiShow(), peer)': 1, '.show = show,': 2})
+inventory['boxes/star_gift_box.cpp'].update({'SendGiftBoxWithShow,': 1, '.pickerCurrent = Purple::PickerGiftCurrent(show)': 3, 'invoice.pickerCurrent = Purple::PickerGiftCurrent(show)': 1, 'if (!show->valid()) return;': 6, 'Purple::PickerGiftShow(window->uiShow(), peer)': 1, '.show = show,': 3})
 negative = 0
 for file, expected in inventory.items():
     text = (src / file).read_text()
