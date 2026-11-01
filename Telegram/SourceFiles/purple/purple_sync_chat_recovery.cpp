@@ -33,7 +33,7 @@ bool Matches(const DesktopSyncChatRecoverySelection &selection, const DesktopSyn
 
 }
 
-bool DesktopSyncChatRecoveryActivated() { return true; }
+bool DesktopSyncChatRecoveryActivated() { return false; }
 
 QString DesktopSyncChatRecoveryHeld(const DesktopSyncChatSetupSnapshot &snapshot) {
 	if (!snapshot.status.complete) { return u"recovery-searching"_q; }

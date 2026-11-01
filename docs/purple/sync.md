@@ -635,8 +635,9 @@ Each account keeps its synced settings in one sync chat: Saved Messages at
 first, or a private channel or group the account owns. A short Purple mark in
 that chat tells the account's other devices where to look. **Sync chat** in Sync
 across devices shows the chat in use and offers the changes below when they
-apply. Each one has its own switch in the code, and the first release may keep
-Old settings cleanup off; see [Sync chat changes](sync_chat_wiring.md).
+apply. Each one has its own switch in the code. All five switches are off in
+this build, so Desktop offers none of these changes yet; see
+[Sync chat changes](sync_chat_wiring.md).
 
 - **Change sync chat** moves this account's sync to another chat it owns, or to
   a new private channel created for it. It copies the current settings there and

@@ -15,7 +15,7 @@ Each feature has its own switch, a constant that is either ON or OFF:
 - Recovery: `DesktopSyncChatRecoveryActivated` in `purple_sync_chat_recovery.cpp`.
 
 The activation turns each switch ON in its own one-line change, so any one can
-be held back. The first release may keep Cleanup OFF. A switch that is OFF keeps
+be held back. All five are OFF in this build. A switch that is OFF keeps
 its control's OFF result: no row, or a label saying the change is held. With all
 five OFF, nothing on this page runs: the carry service is never constructed and
 startup goes straight to ordinary reconciliation. With Cleanup OFF and the other
