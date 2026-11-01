@@ -134,7 +134,7 @@ commands = []
 markdown_units = ['purple_article_markdown', 'purple_copy'] if args.markdown else ['purple_compose_receipt', 'purple_markdown_current', 'purple_markdown_delivery'] if args.markdown_source else []
 if args.markdown:
     recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=')]
-markdown_objects = [build / 'Telegram/CMakeFiles/td_iv.dir/SourceFiles/iv/markdown/iv_markdown_prepare_serialize.cpp.o', build / (base + 'SourceFiles/iv/iv_rich_page.cpp.o'), build / 'Telegram/lib_ui/liblib_ui.a'] if args.markdown else []
+markdown_objects = [build / 'Telegram/CMakeFiles/td_iv.dir/SourceFiles/iv/markdown/iv_markdown_prepare_serialize.cpp.o', build / (base + 'SourceFiles/iv/iv_rich_page.cpp.o'), build / (base + 'SourceFiles/iv/iv_rich_page_quote.cpp.o'), build / 'Telegram/lib_ui/liblib_ui.a'] if args.markdown else []
 root = work / 'root' if args.markdown or args.markdown_source else None
 if root:
     shutil.rmtree(root, ignore_errors=True)
@@ -169,6 +169,14 @@ with (work / 'build.log').open('w') as log:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
     objects += markdown_objects
+    if args.markdown_source:
+        # Upstream's RichPage carries a quote model slot and compares markup
+        # buttons; link the slot and compile the button equality on its own.
+        markup = (repo / 'Telegram/SourceFiles/history/history_item_reply_markup.cpp').read_text()
+        (work / 'markdown-source-markup.cpp').write_text('#include "history/history_item_reply_markup.h"\n'
+            + extract(markup, 'bool operator==(\n\t\tconst HistoryMessageMarkupButton &a,'))
+        objects += [compile(work / 'markdown-source-markup.cpp', 'markdown-source-markup'),
+            build / (base + 'SourceFiles/iv/iv_rich_page_quote.cpp.o')]
     objects += [build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o') for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp'))]
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o']
     objects += [build / 'Telegram/lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o']
