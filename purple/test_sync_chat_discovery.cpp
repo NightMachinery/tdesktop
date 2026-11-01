@@ -329,12 +329,18 @@ struct ProbeSession : base::has_weak_ptr {
 	std::unique_ptr<int> _api;
 	std::unique_ptr<int> _inventory;
 	std::vector<Fn<void(DesktopSyncChatStatus)>> _callbacks;
+	struct Operation { Fn<bool()> current; } _operation;
+	Fn<bool()> _leaseCaller;
+	bool _resolveAgain = false;
+	int ensured = 0;
+	void Ensure(bool) { ++ensured; }
 	struct Timer { void cancel() {} } _timer, _requestTimeout;
 	struct Session { Main::Session *value = nullptr; Main::Session *get() const { return value; } } _session;
 	bool Current() const { return current; }
 	void Cancel(QString value) { ++cancelled; reason = value; ProductionCancel(value); }
 	void ProductionCancel(QString reason);
 	void Publish(bool final = true);
+	Fn<bool()> LeaseCaller();
 	bool Accept(const DesktopSyncChatCommand &command);
 };
 
@@ -406,6 +412,87 @@ void CallbackCases() {
 		if (obsolete == 2) command.origin.login = u"old-login"_q;
 		if (obsolete == 3) command.origin.account.environment = 1;
 		CHECK(!self.Accept(command) && self.cancelled == 0 && self._busy);
+	}
+}
+
+// A settled run hands the account back to itself. Its caller's operation leaves the session and
+// bounds only that result's callbacks and leases; a forced resolve held during the run follows it.
+void RetainedOperationCases() {
+	{
+		auto self = ProbeSession(); self._busy = false; self._status.postingHeld = false;
+		auto live = true;
+		self._operation.current = [&] { return live; };
+		auto delivered = DesktopSyncChatStatus();
+		self._callbacks.push_back([&](DesktopSyncChatStatus value) { delivered = value; });
+		self.Publish();
+		CHECK(!self._operation.current && self._leaseCaller && self._leaseCaller());
+		CHECK(!delivered.postingHeld && delivered.reason.isEmpty());
+		live = false;
+		CHECK(!self._leaseCaller());
+		std::printf("RETAINED_OP settled operation_kept=%d lease_bound=%d\n",
+			int(bool(self._operation.current)), int(bool(self._leaseCaller)));
+	}
+	{
+		auto self = ProbeSession(); self._busy = false; self._status.postingHeld = false;
+		self._operation.current = [] { return false; };
+		auto delivered = DesktopSyncChatStatus();
+		self._callbacks.push_back([&](DesktopSyncChatStatus value) { delivered = value; });
+		self.Publish();
+		CHECK(delivered.postingHeld && delivered.reason == u"completion-superseded"_q);
+		CHECK(!self._operation.current);
+	}
+	{
+		auto self = ProbeSession(); self._busy = false;
+		self._leaseCaller = [] { return false; };
+		self.Publish();
+		CHECK(!self._leaseCaller);
+	}
+	{
+		// Leases taken while the settled caller lives stay bound to it; once it retires, later leases
+		// answer to the account, as the status does, and the caller never returns.
+		auto self = ProbeSession(); self._busy = false;
+		auto live = true;
+		self._operation.current = [&] { return live; };
+		self.Publish();
+		const auto bound = self.LeaseCaller();
+		CHECK(bound && bound() && self._leaseCaller);
+		live = false;
+		CHECK(!bound() && !self.LeaseCaller() && !self._leaseCaller);
+		live = true;
+		CHECK(!self.LeaseCaller());
+		std::printf("RETAINED_OP retired_caller later_lease_bound=%d taken_lease_live=%d\n",
+			int(bool(self.LeaseCaller())), int(bound()));
+	}
+	{
+		auto self = ProbeSession();
+		CHECK(!self.LeaseCaller() && !self._leaseCaller);
+	}
+	for (const auto variant : {0, 1, 2}) {
+		auto self = ProbeSession(); self._busy = (variant == 0); self._retryLocalOpen = (variant == 1);
+		self._operation.current = [] { return true; }; self._resolveAgain = true;
+		self.Publish(variant != 2);
+		CHECK(self._operation.current && self._resolveAgain && self.ensured == 0);
+	}
+	{
+		auto self = ProbeSession(); self._busy = false; self._resolveAgain = true;
+		auto delivered = 0;
+		self._callbacks.push_back([&](DesktopSyncChatStatus) { ++delivered; CHECK(self.ensured == 0); });
+		self.Publish();
+		CHECK(delivered == 1 && self.ensured == 1 && !self._resolveAgain);
+		self.Publish();
+		CHECK(self.ensured == 1);
+		std::printf("RETAINED_OP held_resolve ensured=%d after_callbacks=1\n", self.ensured);
+	}
+	{
+		auto self = ProbeSession(); self._resolveAgain = true;
+		self.ProductionCancel(u"carry-in-progress"_q);
+		CHECK(self.ensured == 0 && !self._resolveAgain && !self._busy);
+	}
+	{
+		auto self = std::make_unique<ProbeSession>(); self->_busy = false; self->_resolveAgain = true;
+		self->_callbacks.push_back([&](DesktopSyncChatStatus) { self.reset(); });
+		self->Publish();
+		CHECK(!self);
 	}
 }
 
@@ -584,6 +671,7 @@ int main() {
 	CacheCases();
 	DiscoveryCases();
 	CallbackCases();
+	RetainedOperationCases();
 	OwnershipPorts();
 	DiskCases();
 	std::printf("%d checks, %d failures\n", Checks, Failures);

@@ -641,9 +641,10 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 				state->accept->setDisabled(!Current(*state) || CarryRunning(*state));
 			});
 			const auto context = [weak, state] { return weak && MoveContextCurrent(*state); };
-			CheckSyncChatBeforePost(state->session.get(), crl::guard(box,
-				[=](DesktopSyncChatStatus status) {
-					if (!context() || !status.complete || !Current(*state)) {
+			// The account resolves under its own authority; this box checks its context on the answer.
+			ResolveSyncChatSetup(state->session.get(), crl::guard(box,
+				[=](std::optional<DesktopSyncChatSetupSnapshot> fresh) {
+					if (!context() || !fresh || !fresh->status.complete || !Current(*state)) {
 						state->busy = false;
 						state->accept->setDisabled(!Current(*state));
 						state->status->setText(tr::lng_purple_chat_move_stale(tr::now));
@@ -656,7 +657,7 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 							state->session.get(), state->opening->scope.origin,
 							offer->selection.peer->chat, context, finish);
 					}
-				}), DesktopSyncChatOperation{.current = context});
+				}));
 		});
 		confirmation->addButton(tr::lng_cancel(), [=] {
 			if (weak && state->move) { state->move->dismiss(offer->ticket); }
@@ -806,12 +807,10 @@ void ConfirmRecovery(not_null<Ui::GenericBox*> box, SetupState *state, DesktopSy
 	if (!DesktopSyncChatRecoveryActivated() || !Current(*state) || !MoveContextCurrent(*state)
 		|| state->busy || !state->opening || !DesktopSyncChatRecoveryHeld(*state->opening).isEmpty()) { return; }
 	if (choice != DesktopSyncChatRecoveryChoice::RepairMark) {
-		CheckSyncChatBeforePost(state->session.get(), crl::guard(box, [=](DesktopSyncChatStatus) {
+		ResolveSyncChatSetup(state->session.get(), crl::guard(box, [=](std::optional<DesktopSyncChatSetupSnapshot>) {
 			if (!DesktopSyncChatRecoveryActivated() || !Current(*state) || !MoveContextCurrent(*state)) { return; }
 			box->uiShow()->showBox(Box(RecoveryMoveBox, state->session.get(), state->current, choice));
-		}), DesktopSyncChatOperation{.current = [weak = QPointer<Ui::GenericBox>(box.get()), state] {
-			return weak && DesktopSyncChatRecoveryActivated() && MoveContextCurrent(*state);
-		}});
+		}));
 		return;
 	}
 	if (state->opening->input.cacheRead != SyncChatDirectRead::MarkGone) {
@@ -831,7 +830,7 @@ void ConfirmRecovery(not_null<Ui::GenericBox*> box, SetupState *state, DesktopSy
 				BuildRecoveryConfirmation(confirmation, tr::lng_purple_chat_recovery_repair_disclosure(tr::now)
 					+ u"\n"_q + Readers(DesktopSyncChatEligibility(*peer)->readers, Title(*state->session.get(), peer->chat)), [=] {
 					if (!weak || !DesktopSyncChatRecoveryActivated() || !Current(*state) || !MoveContextCurrent(*state)) { return; }
-					CheckSyncChatBeforePost(state->session.get(), crl::guard(box, [=](DesktopSyncChatStatus) {
+					ResolveSyncChatSetup(state->session.get(), crl::guard(box, [=](std::optional<DesktopSyncChatSetupSnapshot>) {
 						if (!DesktopSyncChatRecoveryActivated() || !Current(*state) || !MoveContextCurrent(*state)) { return; }
 						auto accepted = ReviewSyncChatRecovery(state->session.get(), *state->opening, choice, peer,
 							state->windowId, true);
@@ -840,7 +839,7 @@ void ConfirmRecovery(not_null<Ui::GenericBox*> box, SetupState *state, DesktopSy
 							state->status->setText(accepted ? tr::lng_purple_chat_carry_busy(tr::now)
 								: tr::lng_purple_chat_recovery_refused(tr::now));
 						}
-					}), DesktopSyncChatOperation{.current = [weak, state] { return weak && MoveContextCurrent(*state); }});
+					}));
 				});
 			}));
 		}));

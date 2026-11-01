@@ -225,10 +225,11 @@ struct LocalOpenProbe {
  std::shared_ptr<int> lifetime=std::make_shared<int>(0);
  bool Current()const{return context&&(!borrowed||operationCurrent)&&_current&&_current->load();}
  bool _beforePost=false;int64_t _lastStarted=0;DesktopSyncChatOperation _operation;
+ bool _resolveAgain=false;Fn<bool()> _leaseCaller;
  int begins=0;bool openedBorrowed=false;
  DesktopSyncChatStatus status()const{return _status;}
  void Begin(bool){++begins;openedBorrowed=bool(_operation.current);_busy=true;}
- void Ensure(bool force,Fn<void(DesktopSyncChatStatus)> done,DesktopSyncChatOperation operation,bool beforePost);
+ void Ensure(bool force,Fn<void(DesktopSyncChatStatus)> done={},DesktopSyncChatOperation operation={},bool beforePost=false);
  void Publish(bool final=true);void RetryLocalOpen();
 };
 #include "retry-local-open.inc"
@@ -384,6 +385,25 @@ int main(){
     service._current=std::make_shared<std::atomic<bool>>(true);service._status=DesktopSyncChatStatus();service.Publish();service.Publish();
     Check(original==1&&joined==1,"retained and joined local-open callbacks each complete once");
    }
+  }
+ }
+ for(int kind=0;kind!=4;++kind){
+  for(bool retrying:{false,true}){
+   // A forced account resolve behind a busy or retrying run is held, not dropped, and starts once, under the
+   // account's own authority, after that run settles and its callbacks ran. Borrowed or before-post calls are not.
+   Mono=0;Unix=1000000;LocalOpenProbe service;service._operation={[]{return true;},19};int original=0;
+   service._callbacks.push_back([&](DesktopSyncChatStatus){++original;Check(service.begins==0,"held resolve waits for the settled callbacks");});
+   if(retrying){service.RetryLocalOpen();}
+   auto op=DesktopSyncChatOperation();if(kind==2){op={[]{return true;},77};}
+   service.Ensure(kind!=0,{},op,kind==3);
+   Check(service._resolveAgain==(kind==1)&&service.begins==0&&service._callbacks.size()==1&&service._operation.marker==19,
+     "only a forced callback-free account resolve is held behind a busy or retrying run");
+   service._busy=false;service._retryLocalOpen=false;
+   service._current=std::make_shared<std::atomic<bool>>(true);service._status=DesktopSyncChatStatus();service.Publish();
+   Check(original==1&&!service._resolveAgain&&service.begins==(kind==1?1:0),"held resolve starts once after the run settles");
+   Check(!service._operation.current&&service._operation.marker==0&&!service.openedBorrowed,
+     "settled run releases the borrowed operation; the held resolve opens under the account");
+   Check(service._leaseCaller&&service._leaseCaller(),"settled caller still bounds the leases taken from its result");
   }
  }
  std::cout<<"INTEGRATION "<<Checks<<" checks, "<<Failures<<" failures\n";return Failures?1:0;

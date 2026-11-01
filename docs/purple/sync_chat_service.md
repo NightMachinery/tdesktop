@@ -90,6 +90,16 @@ with the captured account, exact sync directory and a current-operation proof.
 Without that proof it acquires the same lock itself. Completion releases its
 own lock before publishing status. The GUI never waits for worker I/O.
 
+A caller's operation governs only its own run. When the run settles, the
+session drops it: account status, setup snapshots and later checks answer to
+the account again, and the caller's proof survives only in that run's callbacks
+and in the leases taken from its result while it lives. Once it retires, later
+leases answer to the account too. A forced account resolve that arrives
+while a run is busy starts once that run settles; a cancelled run drops it, so
+the hold reason stands. UI prechecks (Change and recovery) use the
+account-owned `ResolveSyncChatSetup` and check their box context on the answer;
+only a caller that holds the account lock passes a scoped operation.
+
 Settings/source, Work Mode, binding or login changes retire a run and cancel
 its session-owned sender. A callback with a superseded run/ticket/origin cannot
 cancel newer work. A still-owned callback that loses authority stops, publishes

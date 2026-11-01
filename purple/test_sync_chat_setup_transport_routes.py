@@ -137,27 +137,71 @@ assert 'crl::on_main(box, [=] {\n\t\t\tif (RestoreFreshSetup(state, generation, 
 assert 'state->loading || !Current(*state)' in ui
 print('Q2A lifecycle release/order, deferred chooser reset and generation negative guards PASS')
 
-# A fresh setup's checks run under the setup's operation; once it ends the account status reads as
-# retired. Completion must resolve again under the account's own authority, once, after progress,
-# and never for a move's provisioning (the carry owns that).
-receive = body(service, 'void DesktopSyncChatSetupService::Impl::receive(')
-resolve = ['const auto session = _session;',
- 'const auto committed = _last.phase == DesktopSyncChatCreatePhase::Complete',
- '&& !_last.provisioned && !std::exchange(_resolvedCommit, true);',
- 'if (_progress) { _progress(_last); }',
+# A fresh setup's checks run under the setup's operation, before its mark exists. Completion must
+# resolve the account again under its own authority, once, after progress, even when the service
+# closed before delivery, and never for a move's provisioning (the carry owns that).
+start = body(service, 'void DesktopSyncChatSetupService::Impl::start()')
+resolve = ['session = _session, resolved = std::make_shared<bool>(false)',
+ 'const auto committed = progress.phase == DesktopSyncChatCreatePhase::Complete',
+ '&& !progress.provisioned && !std::exchange(*resolved, true);',
+ 'if (const auto self = weak.get()) { self->receive(std::move(progress)); }',
  'if (committed) { if (const auto live = session.get()) { EnsureSyncChatResolved(live, true); } }']
-ordered(receive, *resolve)
+ordered(start, *resolve)
 for part in resolve:
  try:
-  ordered(receive.replace(part, 'REMOVED'), *resolve)
+  ordered(start.replace(part, 'REMOVED'), *resolve)
  except AssertionError:
   pass
  else:
   raise AssertionError('setup completion resolve negative guard did not refuse')
 assert service.count('EnsureSyncChatResolved(') == 1, 'one completion resolve, no other service resolve'
-assert 'bool _resolvedCommit = false;' in service
-assert 'void CheckSyncChatBeforePost(' not in service
+assert 'EnsureSyncChatResolved(' not in body(service, 'void DesktopSyncChatSetupService::Impl::receive(')
 print('P0a setup completion resolves once under the account authority, after progress, not for provisioning PASS')
+
+# Retained operations: a caller's operation governs only its own run. UI prechecks resolve the account
+# under its own authority (a current-only operation can never match Begin's borrowed-lock scope), and a
+# settled run hands the account back, keeping the caller only for that result's callbacks and leases.
+session = (p / 'purple_sync_chat_service.cpp').read_text()
+assert 'DesktopSyncChatOperation{' not in ui, 'UI prechecks must not borrow an operation'
+assert 'CheckSyncChatBeforePost(' not in ui, 'UI prechecks use the account-owned resolve'
+assert ui.count('ResolveSyncChatSetup(state->session.get(), crl::guard(box,') == 3, 'Change and both recovery prechecks'
+assert '!fresh || !fresh->status.complete' in ui
+publish = body(session, 'void SyncChatSession::Publish(')
+settle = ['const auto settled = final && !_busy && !_retryLocalOpen;',
+ 'const auto caller = settled ? base::take(_operation).current : Fn<bool()>();',
+ 'const auto again = settled && std::exchange(_resolveAgain, false);',
+ '_leaseCaller = caller;',
+ 'Changes.fire_copy(session);',
+ '|| (caller && !caller())',
+ 'callback(delivered);',
+ 'if (const auto self = again ? weak.get() : nullptr) {',
+ 'self->Ensure(true);']
+ordered(publish, *settle)
+ensure = body(session, 'void SyncChatSession::Ensure(')
+held = ['else if (force && !operation.current && !beforePost) { _resolveAgain = true; }',
+ '} else if (force) {', '_resolveAgain = true;', 'Begin(false);']
+ordered(ensure, *held)
+cancel = body(session, 'void SyncChatSession::Cancel(')
+lease = body(session, 'std::optional<DesktopSyncChatLease> SyncChatSession::Lease(')
+retire = body(session, 'Fn<bool()> SyncChatSession::LeaseCaller(')
+assert '_leaseCaller' not in lease, 'leases take the caller only through LeaseCaller'
+contexts = body(session, 'bool SyncChatSession::ContextMatches(')
+guards = [(publish, settle), (ensure, held), (cancel, ['_resolveAgain = false;', 'Publish();']),
+ (lease, ['const auto caller = LeaseCaller();', '_busy || !Current()', 'chat, caller] {',
+  '!self->Current() || (caller && !caller())']),
+ (retire, ['if (_leaseCaller && !_leaseCaller()) {', '_leaseCaller = nullptr;', 'return _leaseCaller;']),
+ (contexts, ['(!_operation.current || _operation.current())'])]
+checks = 0
+for text, parts in guards:
+ ordered(text, *parts)
+ for part in parts:
+  try:
+   ordered(text.replace(part, 'REMOVED'), *parts)
+  except AssertionError:
+   checks += 1
+  else:
+   raise AssertionError('retained operation negative guard did not refuse')
+print(f'Retained operation: UI prechecks account-owned; settled runs release callers ({checks} negative guards) PASS')
 
 requests = (p / 'purple_sync_chat_setup_requests.cpp').read_text()
 move_decoration = body(requests, 'auto DesktopSyncChatMoveDecorationRequest(')

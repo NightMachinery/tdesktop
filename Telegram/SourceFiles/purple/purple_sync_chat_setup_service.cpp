@@ -45,7 +45,6 @@ private:
 	rpl::lifetime _lifetime;
 	bool _started = false;
 	bool _resumeOnly = false;
-	bool _resolvedCommit = false;
 
 };
 
@@ -124,9 +123,16 @@ void DesktopSyncChatSetupService::Impl::start() {
 		DesktopSyncChatSetupSelection(_selection),
 		QString(directory), QString(statePath),
 		std::shared_ptr<std::atomic<bool>>(_admitted),
-		[weak](DesktopSyncChatSetupProgress progress) {
-			crl::on_main([weak, progress = std::move(progress)]() mutable {
+		[weak, session = _session, resolved = std::make_shared<bool>(false)](
+				DesktopSyncChatSetupProgress progress) {
+			crl::on_main([weak, session, resolved, progress = std::move(progress)]() mutable {
+				// The setup's own checks ran under its operation: resolve the committed chat again
+				// under the account's authority, even if this service closed first. A move's
+				// provisioning leaves that to its carry.
+				const auto committed = progress.phase == DesktopSyncChatCreatePhase::Complete
+					&& !progress.provisioned && !std::exchange(*resolved, true);
 				if (const auto self = weak.get()) { self->receive(std::move(progress)); }
+				if (committed) { if (const auto live = session.get()) { EnsureSyncChatResolved(live, true); } }
 			});
 		}, bool(_resumeOnly));
 	_worker->with([now = int64_t(base::unixtime::now())](DesktopSyncChatSetupFlow &flow) {
@@ -140,13 +146,7 @@ void DesktopSyncChatSetupService::Impl::receive(DesktopSyncChatSetupProgress pro
 	if (_last.resumeAbsent) { finishResumeLookup(); }
 	const auto command = _last.command;
 	const auto weak = base::make_weak(this);
-	// This setup's own checks ran under its operation, which ends with it: resolve the committed
-	// chat again under the account's authority. A move's provisioning stays with its carry.
-	const auto session = _session;
-	const auto committed = _last.phase == DesktopSyncChatCreatePhase::Complete
-		&& !_last.provisioned && !std::exchange(_resolvedCommit, true);
 	if (_progress) { _progress(_last); }
-	if (committed) { if (const auto live = session.get()) { EnsureSyncChatResolved(live, true); } }
 	const auto self = weak.get();
 	if (!self || !self->current() || !command || !self->_transport) {
 		return;

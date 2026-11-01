@@ -127,9 +127,9 @@ date, typed peer and no media. Cache commit follows that reread. Only a newly
 created channel then advances through silent pin, mute and archive. Existing
 chats and Saved Messages finish after the mark/cache step and are never pinned,
 muted or archived by setup. A completed fresh setup then resolves the account
-once more under the account's own authority, because the setup's own checks ran
-under its operation, which ends with it; a move's provisioning leaves that to
-Carry. These steps are idempotent and are recorded before
+once more under the account's own authority, even when its box has closed,
+because the setup's own checks ran before its mark existed; a move's
+provisioning leaves that to Carry. These steps are idempotent and are recorded before
 and after each effect. Restart/resume first resolves again and revalidates full
 info and an already known mark. A bound stream, Follow/Fill/carry or an uncertain
 inventory stays held. A newly resolved stream may be adopted before any own

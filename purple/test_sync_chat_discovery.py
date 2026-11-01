@@ -70,6 +70,7 @@ meta = 'namespace Purple { SyncHistoryMessageMeta SyncHistoryMessageMetaOf(const
     'bool ProbeSession::Accept(const DesktopSyncChatCommand &command) ' + accept + '\n'
     + 'void ProbeSession::ProductionCancel(QString reason) ' + cancel + '\n'
     + 'void ProbeSession::Publish(bool final) ' + publish + '\n'
+    + 'Fn<bool()> ProbeSession::LeaseCaller() ' + block(service, 'Fn<bool()> SyncChatSession::LeaseCaller(') + '\n'
     + 'void ProbeScan(ProbeOwnership *self, const QVector<MTPMessage> *messages, std::vector<SyncHistoryPageItem> &page) { for (const auto &message : *messages) ' + scan + ' }\n'
     + 'void ProbeReadOwnership(ProbeOwnership *self, const MTPMessage &message, int id) { if (self->_owned) ' + owned + ' self->accepted = true; }\n')
 recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=')]

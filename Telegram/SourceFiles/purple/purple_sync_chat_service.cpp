@@ -204,6 +204,7 @@ private:
 	void Exact(const DesktopSyncChatCommand &command);
 	void Finish();
 	void Publish(bool final = true);
+	Fn<bool()> LeaseCaller();
 	void RetryLocalOpen();
 	void ForgetLogin();
 	void Peers(const MTPmessages_Messages &response);
@@ -214,6 +215,7 @@ private:
 	DesktopSyncChatOrigin _origin;
 	DesktopSyncChatStatus _status;
 	DesktopSyncChatOperation _operation;
+	Fn<bool()> _leaseCaller;
 	std::unique_ptr<DesktopSyncChatDiscovery> _model;
 	std::unique_ptr<SyncRequestSender> _api;
 	std::unique_ptr<DesktopSyncChatPeerRequest> _peerRequest;
@@ -238,6 +240,7 @@ private:
 	bool _beforePost = false;
 	bool _directBeforePost = false;
 	bool _busy = false;
+	bool _resolveAgain = false;
 	bool _retryLocalOpen = false;
 	bool _openContinuation = false;
 	base::Timer _timer;
@@ -302,6 +305,7 @@ bool SyncChatSession::HasOrigin(const DesktopSyncChatIo &route) const {
 }
 
 std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
+	const auto caller = LeaseCaller();
 	if (DesktopSyncCarryGateFor(_origin.account)->postingHeld() || _busy || !Current() || !_model || !_status.complete
 		|| _status.phase != DesktopSyncChatPhase::Use || _status.postingHeld
 		|| _status.resolution.readChat != chat) {
@@ -322,10 +326,10 @@ std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
 	}
 	const auto weak = base::make_weak(this);
 	return DesktopSyncChatLease{ route,
-		[weak, run = _run, origin = _origin, chat] {
+		[weak, run = _run, origin = _origin, chat, caller] {
 			const auto self = weak.get();
 			if (!self || self->_busy || self->_run != run
-				|| self->_origin != origin || !self->Current()
+				|| self->_origin != origin || !self->Current() || (caller && !caller())
 				|| !self->_status.complete || self->_status.postingHeld
 				|| self->_status.phase != DesktopSyncChatPhase::Use
 				|| self->_status.resolution.readChat != chat) {
@@ -336,6 +340,15 @@ std::optional<DesktopSyncChatLease> SyncChatSession::Lease(PeerToken chat) {
 				&& Token(self->_session->sendAsPeers().resolveChosen(native)->id,
 					origin.account.userId) == PeerToken{};
 		} };
+}
+
+Fn<bool()> SyncChatSession::LeaseCaller() {
+	// The caller whose check settled this result bounds the leases taken while it lives. Once it
+	// retires the result is the account's own again, as status() reports it, and so are later leases.
+	if (_leaseCaller && !_leaseCaller()) {
+		_leaseCaller = nullptr;
+	}
+	return _leaseCaller;
 }
 
 DesktopSyncChatDiscoveryScope SyncChatSession::ScopeFor(
@@ -407,6 +420,7 @@ void SyncChatSession::Ensure(
 	bool beforePost) {
 	if (_retryLocalOpen) {
 		if (done) { _callbacks.push_back(std::move(done)); }
+		else if (force && !operation.current && !beforePost) { _resolveAgain = true; }
 		return;
 	}
 
@@ -421,6 +435,9 @@ void SyncChatSession::Ensure(
 			}
 		} else if (done) {
 			_callbacks.push_back(std::move(done));
+		} else if (force) {
+			// A forced account resolve held behind a run starts once that run settles.
+			_resolveAgain = true;
 		}
 		return;
 	}
@@ -446,6 +463,7 @@ void SyncChatSession::Ensure(
 void SyncChatSession::Cancel(QString reason) {
 	_retryLocalOpen = false;
 	_openContinuation = false;
+	_resolveAgain = false;
 	_recent.reset();
 	if (_current) {
 		_current->store(false);
@@ -1050,6 +1068,14 @@ void SyncChatSession::Finish() {
 void SyncChatSession::Publish(bool final) {
 	const auto callbacks = final ? base::take(_callbacks)
 		: std::vector<Fn<void(DesktopSyncChatStatus)>>();
+	// A settled run hands the account back: its caller's operation now bounds only this result's
+	// callbacks and leases, and a forced resolve held during the run follows it.
+	const auto settled = final && !_busy && !_retryLocalOpen;
+	const auto caller = settled ? base::take(_operation).current : Fn<bool()>();
+	const auto again = settled && std::exchange(_resolveAgain, false);
+	if (settled) {
+		_leaseCaller = caller;
+	}
 	const auto current = _current;
 	const auto run = _run;
 	const auto status = _status;
@@ -1061,12 +1087,16 @@ void SyncChatSession::Publish(bool final) {
 		auto delivered = status;
 		const auto self = weak.get();
 		if (!status.postingHeld
-			&& (!self || self->_current != current || self->_run != run || !self->Current())) {
+			&& (!self || self->_current != current || self->_run != run || !self->Current()
+				|| (caller && !caller()))) {
 			delivered.phase = DesktopSyncChatPhase::Paused;
 			delivered.postingHeld = true;
 			delivered.reason = u"completion-superseded"_q;
 		}
 		callback(delivered);
+	}
+	if (const auto self = again ? weak.get() : nullptr) {
+		self->Ensure(true);
 	}
 }
 
