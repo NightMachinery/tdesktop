@@ -115,6 +115,18 @@ for method in ['OnReceipt', 'OnReadback', 'Finish', 'Cancel']:
     (work / ('post-' + method + '.inc')).write_text(block(post, 'void SyncConfigPost::' + method + '('))
 
 assert 'return entry;' in (work / 'post-counters.inc').read_text()
+# The Change box's app-state, focus-window and passcode hooks run against the real move action.
+setup_ui = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_text()
+move_hooks = ['QObject::connect(qGuiApp, &QGuiApplication::applicationStateChanged, box, [=]',
+              'QObject::connect(qGuiApp, &QGuiApplication::focusWindowChanged, box, [=]',
+              'Core::App().passcodeLockChanges() | rpl::on_next([=]']
+move_revoke = 'void RevokeMoveConfirmation(SetupState &state)'
+assert all(setup_ui.count(marker) == 1 for marker in move_hooks)
+(work / 'move-hooks.inc').write_text(
+    (move_revoke.replace('SetupState', 'MoveHookState') + ' ' + block(setup_ui, move_revoke) + '\n'
+        if move_revoke in setup_ui else '')
+    + ''.join('void MoveHook%d(MoveHookState *state) %s\n' % (index, block(setup_ui, marker))
+        for index, marker in enumerate(move_hooks)))
 recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=') and not value.startswith('-g')]
 recipe[1:1] = ['-g0']
 objects = []
@@ -189,7 +201,7 @@ with (work / 'build.log').open('w') as log:
     'included_io_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_io.cpp').read_bytes()).hexdigest(),
     'included_write_fixture_sha256': hashlib.sha256((repo / 'purple/test_sync_chat_write.cpp').read_bytes()).hexdigest(),
     'driver_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-    'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'service-scope.inc', work / 'service-selection.inc', work / 'service-completion.inc', work / 'auto-operation.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
+    'literal_callback_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [work / 'service-scope.inc', work / 'service-selection.inc', work / 'service-completion.inc', work / 'auto-operation.inc', work / 'move-hooks.inc'] + list(work.glob('upload-*.inc')) + list(work.glob('post-*.inc')) + [work / 'typed-scan-reply.inc', work / 'typed-reader-reply.inc', work / 'typed-download.inc', work / 'typed-exact-reply.inc', work / 'typed-scan-failure.inc', work / 'typed-reader-failure.inc']},
     'headers_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in (repo / 'Telegram/SourceFiles/purple').glob('purple_sync_chat_*.h')},
     'sources_sha256': {str(source): hashlib.sha256(Path(source).read_bytes()).hexdigest()
                        for source in [c[c.index('-c') + 1] for c in compiled]},

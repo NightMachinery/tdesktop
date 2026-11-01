@@ -383,7 +383,10 @@ confirmations, an adjacent warning explains that older Purple builds still read
 settings from Saved Messages and may pause or offer to start over if those
 messages are removed. This warning depends on the old source, never the target.
 No whole-chat deletion is implied. State/cache/winner and reader changes invalidate the confirmation.
-An inactive or closed owning window and passcode lock revoke it immediately.
+An inactive or closed owning window and passcode lock revoke it immediately: an
+open confirmation closes, and one already submitted fails its review. The chooser
+itself stays. Once the window is active again, Continue opens a fresh
+confirmation, and every step checks the opening context again.
 All comparisons are in RAM on the application thread.
 
 The production service stops after qualification review. It does not construct

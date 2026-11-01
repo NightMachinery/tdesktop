@@ -293,6 +293,8 @@ struct SetupState {
 	std::unique_ptr<DesktopSyncChatPeerRequest> request;
 	std::unique_ptr<DesktopSyncChatSetupService> service;
 	std::unique_ptr<DesktopSyncChatMoveAction> move;
+	uint64_t moveOffer = 0;
+	QPointer<Ui::GenericBox> moveConfirmation;
 	std::unique_ptr<DesktopSyncChatConsentAction> follow;
 	std::optional<DesktopSyncChatRecoveryChoice> recovery;
 	std::optional<DesktopSyncChatCarryState> carry;
@@ -321,6 +323,14 @@ bool MoveContextCurrent(const SetupState &state) {
 		&& !Core::App().passcodeLocked()
 		&& ValidateAccountSettingsOpenTarget(session, *state.target)
 		&& CachedSyncChatSetupContextCurrent(session, state.opening->scope);
+}
+
+// Leaving the window or the app, or a passcode lock, revokes an open move confirmation at once.
+// The choice stays: Continue opens a fresh confirmation, and every step checks the context again.
+void RevokeMoveConfirmation(SetupState &state) {
+	if (!state.move || MoveContextCurrent(state)) { return; }
+	state.move->dismiss(state.moveOffer);
+	if (state.moveConfirmation) { state.moveConfirmation->closeBox(); }
 }
 
 bool Current(const SetupState &state) {
@@ -585,6 +595,7 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 		state->status->setText(tr::lng_purple_chat_move_stale(tr::now));
 		return;
 	}
+	state->moveOffer = offer->ticket;
 	const auto disclosure = offer->selection.peer
 		? Readers(DesktopSyncChatEligibility(*offer->selection.peer)->readers, chosen.title)
 		: tr::lng_purple_chat_create_disclosure(tr::now)
@@ -592,6 +603,7 @@ void AcceptMove(not_null<Ui::GenericBox*> box, SetupState *state) {
 	const auto weak = QPointer<Ui::GenericBox>(box.get());
 	box->uiShow()->showBox(Box([=](not_null<Ui::GenericBox*> confirmation) {
 		const auto submitted = std::make_shared<bool>(false);
+		state->moveConfirmation = confirmation.get();
 		confirmation->boxClosing() | rpl::on_next([=] {
 			if (!*submitted && weak && state->move) { state->move->dismiss(offer->ticket); }
 		}, confirmation->lifetime());
@@ -945,13 +957,13 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 			[weak, state] { return weak && Current(*state); });
 		box->setTitle(tr::lng_purple_chat_move_title());
 		QObject::connect(qGuiApp, &QGuiApplication::applicationStateChanged, box, [=] {
-			if (!MoveContextCurrent(*state)) { state->move->cancel(); }
+			RevokeMoveConfirmation(*state);
 		});
 		QObject::connect(qGuiApp, &QGuiApplication::focusWindowChanged, box, [=] {
-			if (!MoveContextCurrent(*state)) { state->move->cancel(); }
+			RevokeMoveConfirmation(*state);
 		});
 		Core::App().passcodeLockChanges() | rpl::on_next([=] {
-			if (!MoveContextCurrent(*state)) { state->move->cancel(); }
+			RevokeMoveConfirmation(*state);
 		}, box->lifetime());
 	}
 	state->status = box->addRow(object_ptr<Ui::FlatLabel>(box,

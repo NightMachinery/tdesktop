@@ -163,3 +163,29 @@ for target in ('Create', 'Existing'):
 assert 'Older Purple builds still read settings from Saved Messages.' in strings
 assert 'Removing these messages may make them pause or offer to start over.' in strings
 print('T5d FIX1 old-Self cleanup warning: Create and Existing, 8 negative controls PASS')
+
+
+def move_focus_hooks(text):
+    # Leaving the app revokes only an open move confirmation; the box's Cancel alone ends the move.
+    marker = 'void RevokeMoveConfirmation(SetupState &state) {'
+    revoke = text.split(marker, 1)[1].split('\n}\n', 1)[0] if marker in text else ''
+    return (text.count('RevokeMoveConfirmation(*state);') == 3 and text.count('state->move->cancel()') == 1
+        and 'if (!state.move || MoveContextCurrent(state)) { return; }' in revoke
+        and 'state.move->dismiss(state.moveOffer);' in revoke
+        and 'if (state.moveConfirmation) { state.moveConfirmation->closeBox(); }' in revoke
+        and 'state->moveOffer = offer->ticket;' in text
+        and 'state->moveConfirmation = confirmation.get();' in text)
+
+
+assert move_focus_hooks(ui), 'Change box focus hooks'
+focus_negatives = [
+    ('RevokeMoveConfirmation(*state);', 'if (!MoveContextCurrent(*state)) { state->move->cancel(); }'),
+    ('state.move->dismiss(state.moveOffer);', 'state.move->cancel();'),
+    ('if (state.moveConfirmation) { state.moveConfirmation->closeBox(); }', ''),
+    ('if (!state.move || MoveContextCurrent(state)) { return; }', 'if (!state.move) { return; }'),
+    ('state->moveOffer = offer->ticket;', ''),
+    ('state->moveConfirmation = confirmation.get();', ''),
+]
+for before, after in focus_negatives:
+    assert before in ui and not move_focus_hooks(ui.replace(before, after, 1)), 'focus-hook negative passed: ' + before
+print(f'P2 Change focus hooks: revoke the open confirmation only, {len(focus_negatives)} negative controls PASS')

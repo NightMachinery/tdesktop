@@ -149,6 +149,67 @@ void BoundMoveActions() {
 	CHECK(reentrant->phase() == DesktopSyncChatMovePhase::Cancelled);
 }
 
+// The Change box's hooks, sliced from purple_sync_chat_setup_box.cpp.
+struct MoveHookConfirmation {
+	bool closed = false;
+	void closeBox() { closed = true; }
+};
+
+struct MoveHookState {
+	std::unique_ptr<DesktopSyncChatMoveAction> move;
+	uint64_t moveOffer = 0;
+	MoveHookConfirmation *moveConfirmation = nullptr;
+};
+
+bool MoveHookActive = true;
+bool MoveContextCurrent(const MoveHookState &) { return MoveHookActive; }
+
+#include "move-hooks.inc"
+
+void MoveFocusRoundTrip() {
+	const auto opening = BoundMove();
+	auto peer = std::optional<DesktopSyncChatPeer>();
+	for (const auto &route : SetupRoutes()) {
+		if (route.peer.chat.kind == PeerTokenKind::Channel
+			&& DesktopSyncChatMoveEligibility(opening, route.peer) == DesktopSyncChatSetupRefusal::None) {
+			peer = route.peer;
+			break;
+		}
+	}
+	CHECK(peer.has_value());
+	if (!peer) { return; }
+	const auto selected = DesktopSyncChatSetupSelection{ DesktopSyncChatSetupChoice::Existing, peer };
+	for (const auto hook : { &MoveHook0, &MoveHook1, &MoveHook2 }) {
+		auto state = MoveHookState();
+		state.move = std::make_unique<DesktopSyncChatMoveAction>(opening, [] { return true; });
+		// Leaving the app and coming back while choosing keeps the choice usable.
+		MoveHookActive = false; hook(&state);
+		MoveHookActive = true; hook(&state);
+		const auto offer = state.move->choose(selected);
+		CHECK(offer);
+		std::printf("MOVE_HOOK chooser_after_round_trip=%d\n", int(bool(offer)));
+		if (!offer) { continue; }
+		// Leaving with the confirmation open revokes and closes it at once.
+		auto confirmation = MoveHookConfirmation();
+		state.moveOffer = offer->ticket;
+		state.moveConfirmation = &confirmation;
+		hook(&state);
+		CHECK(!confirmation.closed && state.move->phase() == DesktopSyncChatMovePhase::Confirming);
+		MoveHookActive = false; hook(&state); MoveHookActive = true;
+		CHECK(confirmation.closed);
+		CHECK(!state.move->confirm(*offer, opening, peer, false, true, {}));
+		// Continue again opens a fresh confirmation that can be accepted.
+		const auto again = state.move->choose(selected);
+		CHECK(again && again->ticket != offer->ticket);
+		auto starts = 0;
+		CHECK(again && state.move->confirm(*again, opening, peer, false, true,
+			[&](DesktopSyncChatMoveDraft) { ++starts; }));
+		CHECK(starts == int(DesktopSyncChatMoveActivated()));
+		std::printf("MOVE_HOOK confirmation_revoked=%d fresh_confirmed=%d\n",
+			int(confirmation.closed), int(bool(again)));
+	}
+}
+
 void MoveNotices() {
 	auto journal = SyncCarryJournal();
 	CHECK(DesktopSyncChatMoveNoticeOf(journal, true, false) == DesktopSyncChatMoveNotice::Held);
@@ -288,7 +349,7 @@ int main(int argc, char **argv) {
 
 	AuthorMain(); ServiceReceiptTransitions(); RecentScopes(); RealStoreScope(); FreshBeforePost(); ReaderWarnings(); InventoryPageLimits(); SetupChoices(); Decision8();
 	auto app = QCoreApplication(argc, argv);
-	BoundMoveActions(); MoveNotices();
+	BoundMoveActions(); MoveFocusRoundTrip(); MoveNotices();
 	std::printf("T3A %d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;
 }
