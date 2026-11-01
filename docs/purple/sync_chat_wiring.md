@@ -54,14 +54,35 @@ permit, so the transport sends nothing.
 ## Startup
 
 When discovery starts a session, `ResumeSyncChatCarry` resumes an unfinished
-journal first and runs ordinary reconciliation when it settles. If the app is
-inactive or locked, reconciliation runs now and the resume waits until the app
-is active again. With Move, Follow/Fill and Recovery OFF, it is ordinary
-reconciliation alone.
+journal first and runs ordinary reconciliation when it settles. With Move,
+Follow/Fill and Recovery OFF, it is ordinary reconciliation alone.
+
+The resume can *wait*: it is refused at startup because the account's context
+is not current yet (the app is inactive or locked, the account's sync scope is
+not captured yet, or its setup context is not current). It can also *stop
+early*: it starts, but ends before its engine opens the journal, because the
+context changed, the carry lease is busy, or no transport is available. In both
+cases reconciliation runs now, and the resume runs again on the next activation
+or unlock, and on the next resolver status or settings change. Status and
+settings changes start it at most three times between activations, so a stop
+that persists does not loop. A resume that stopped later, with its journal open,
+keeps its own Retry.
 
 A journal that cannot be read, or belongs to another account, is not treated as
 absent. The resume ends held without creating or sending anything, and discovery
 keeps sync held and reports it. The resume does not retry by itself.
+
+Every wait and stop is logged once per change, with codes and enums only:
+
+- `sync chat carry resume waits, check <check>`: the first check that refused
+  it, one of `session`, `scope`, `app-inactive`, `app-locked`, `setup-context`,
+  `owner-busy` or `owner-refused`;
+- `sync chat carry resume opening stopped, check <check>`: why no resumable
+  journal was read, for example `no-carry-marker` (nothing to resume),
+  `journal-read:<store status>`, `journal-invalid`, `state-binding`,
+  `cache-paused` or `cache-login`;
+- `sync chat carry resume <reason>, <running|stopped|finished>, store <status>,
+  journal <phase>`: each change of the resume's reason or outcome.
 
 ## Stopping
 
@@ -103,6 +124,11 @@ Resume unfinished change, and the next startup resumes it.
   pending, so it shows neither this row nor the cleanup-pending status.
 - Retry: retries the running carry's step. A move that has committed changes the
   fingerprint the window opened with, so Retry uses the carry's own authority.
+  While the resolver holds sync for an unfinished carry (`carry-recovery-required`)
+  and no carry runs, Retry resumes that carry instead of starting setup.
+- Resume unfinished change: shown when no carry runs and either the last carry
+  stopped with its journal open, or the resolver holds sync for an unfinished
+  carry. The second case covers a restart whose startup resume never ran.
 - Check again does nothing while this window's carry runs, because it closes the
   window.
 
@@ -128,7 +154,11 @@ is held for qualification appear only while that switch is OFF.
   answering, and answers Unknown without a permit. It covers moves
   into an existing chat and a new channel, cleanup ON and OFF, Skip and Retry,
   refusals, closing the window (including a late reply after it), crash and quit
-  at every step boundary with startup resume, Follow and Pause, a Follow from an
+  at every step boundary with startup resume, Follow and Pause,
+  the service's startup resume (its real method bodies, sliced onto a probe) after
+  a kill between the journal write and the mark: one that waits and runs on a
+  status change with no activation, one that stops early on a busy lease and
+  finishes once the lease is free, and the bound on repeated status changes, a Follow from an
   old chat with a late post of this device's under Cleanup ON and OFF, the
   owner's cleanup transport guard, recovery, a
   renewal answered empty when its window closes mid-hop, mark removal, and OFF

@@ -361,6 +361,14 @@ bool OwnsCarry(const SetupState &state, const DesktopSyncChatCarryState &value) 
 		|| (value.kind == DesktopSyncChatCarryKind::Resume && value.window.isEmpty()));
 }
 
+// The resolver holds sync chat while an unfinished carry journal waits on disk. With nothing
+// running, that journal is this box's to resume, even when no resume ran in this process.
+bool CarryPending(const SetupState &state, const DesktopSyncChatCarryOwner &owner) {
+	const auto session = state.session.get();
+	return session && ResumeOn() && !owner.busy()
+		&& SyncChatStatusOf(session).reason == u"carry-recovery-required"_q;
+}
+
 bool CarryRunning(const SetupState &state) {
 	const auto owner = CarryOwner(state);
 	return owner && owner->busy();
@@ -375,8 +383,8 @@ void UpdateCarryButtons(SetupState *state) {
 		state->cleanup->setVisible(own && latest && latest->cleanup.pending && latest->cleanup.canAct);
 	}
 	if (state->resume) {
-		state->resume->setVisible(owner && !owner->busy() && latest && latest->journal
-			&& !latest->terminal && !latest->absent);
+		state->resume->setVisible(owner && !owner->busy() && ((latest && latest->journal
+			&& !latest->terminal && !latest->absent) || CarryPending(*state, *owner)));
 	}
 	if (state->retry && own) { state->retry->setDisabled(false); }
 	if (state->accept && owner && owner->busy()) { state->accept->setDisabled(true); }
@@ -1009,6 +1017,7 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 	SyncChatStatusChanges() | rpl::on_next([=](Main::Session *changed) {
 		if (changed == state->session.get()) {
 			refresh();
+			UpdateCarryButtons(state);
 		}
 	}, box->lifetime());
 	SettingsChanges() | rpl::on_next(refresh, box->lifetime());
@@ -1096,6 +1105,12 @@ void BuildSetupBox(not_null<Ui::GenericBox*> box,
 		// fingerprint this box opened with.
 		if (const auto owner = CarryOwner(*state); owner && owner->busy() && OwnsCarry(*state, owner->state())) {
 			owner->retry();
+			return;
+		} else if (owner && CarryPending(*state, *owner)) {
+			// Setup cannot proceed past an unfinished carry: resume the carry instead.
+			if (!owner->resume(state->windowId)) {
+				state->status->setText(tr::lng_purple_chat_carry_busy(tr::now));
+			}
 			return;
 		}
 		if (!Current(*state)) { return; }

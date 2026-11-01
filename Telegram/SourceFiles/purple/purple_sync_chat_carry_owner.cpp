@@ -215,32 +215,44 @@ std::optional<SyncCarryJournalStart> DesktopSyncChatFollowStart(const DesktopSyn
 }
 
 std::optional<DesktopSyncChatCarryResume> DesktopSyncChatCarryResumeOpening(
-		const DesktopSyncChatDiscoveryScope &scope, const QString &directory) {
-	if (!SyncStoreWorkerThread() || directory.isEmpty() || scope.root.isEmpty() || scope.binding.isEmpty()
-		|| SyncCarryStartupAdmission(directory, scope.binding) == SyncStoreStatus::Ready) { return {}; }
+		const DesktopSyncChatDiscoveryScope &scope, const QString &directory, QString *stop) {
+	const auto stopped = [&](QString check, std::optional<int> status = std::nullopt)
+			-> std::optional<DesktopSyncChatCarryResume> {
+		if (stop) { *stop = status ? check + u":"_q + QString::number(*status) : check; }
+		return std::nullopt;
+	};
+	if (!SyncStoreWorkerThread()) { return stopped(u"worker-thread"_q); }
+	if (directory.isEmpty() || scope.root.isEmpty() || scope.binding.isEmpty()) { return stopped(u"scope-incomplete"_q); }
+	if (SyncCarryStartupAdmission(directory, scope.binding) == SyncStoreStatus::Ready) { return stopped(u"no-carry-marker"_q); }
 	const auto journalFile = CaptureSyncPrivateFile(directory + u"/carry.json"_q, kSyncCarryJournalStorageLimit);
-	const auto journal = journalFile.status == SyncStoreStatus::Ready && !journalFile.absent()
-		? InspectSyncCarryJournal(journalFile.bytes, scope.binding) : std::nullopt;
-	if (!journal || journal->account != scope.origin.account) { return {}; }
+	if (journalFile.status != SyncStoreStatus::Ready) { return stopped(u"journal-read"_q, int(journalFile.status)); }
+	if (journalFile.absent()) { return stopped(u"journal-absent"_q); }
+	const auto journal = InspectSyncCarryJournal(journalFile.bytes, scope.binding);
+	if (!journal) { return stopped(u"journal-invalid"_q); }
+	if (journal->account != scope.origin.account) { return stopped(u"journal-account"_q); }
 	auto result = DesktopSyncChatCarryResume{{scope}, journal->mode};
 	auto &opening = result.opening;
 	const auto state = CaptureSyncPrivateFile(directory + u"/state.json"_q, kSyncCarryJournalStorageLimit);
-	if (state.status != SyncStoreStatus::Ready) { return {}; }
+	if (state.status != SyncStoreStatus::Ready) { return stopped(u"state-read"_q, int(state.status)); }
 	if (!state.absent()) {
 		const auto parsed = ParseSyncLocalState(state.bytes);
-		if (!parsed || CheckSyncAccountBinding(parsed.state, scope.binding) != SyncAccountBindingVerdict::Bound) { return {}; }
+		if (!parsed) { return stopped(u"state-invalid"_q); }
+		if (CheckSyncAccountBinding(parsed.state, scope.binding) != SyncAccountBindingVerdict::Bound) {
+			return stopped(u"state-binding"_q);
+		}
 		opening.stateImage = state.bytes;
 		opening.scope.settingsBound = true;
 		opening.scope.settingsChat = parsed.state.chat;
 		opening.scope.space = parsed.state.space;
 	}
 	const auto cache = CaptureSyncPrivateFile(DesktopSyncChatCarryStoreScope(opening).cacheFile, 64 * 1024);
-	if (cache.status != SyncStoreStatus::Ready) { return {}; }
+	if (cache.status != SyncStoreStatus::Ready) { return stopped(u"cache-read"_q, int(cache.status)); }
 	if (!cache.absent()) {
 		const auto parsed = ParseDesktopSyncChatCache(cache.bytes, scope.origin.account);
-		if (parsed.status != DesktopSyncChatCacheStatus::Valid || parsed.paused
-			|| (parsed.record && (parsed.record->account != scope.origin.account
-				|| parsed.record->loginBinding != scope.loginBinding))) { return {}; }
+		if (parsed.status != DesktopSyncChatCacheStatus::Valid) { return stopped(u"cache-invalid"_q, int(parsed.status)); }
+		if (parsed.paused) { return stopped(u"cache-paused"_q); }
+		if (parsed.record && parsed.record->account != scope.origin.account) { return stopped(u"cache-account"_q); }
+		if (parsed.record && parsed.record->loginBinding != scope.loginBinding) { return stopped(u"cache-login"_q); }
 		opening.cacheImage = cache.bytes;
 		opening.cache = parsed.record;
 		if (parsed.record) {

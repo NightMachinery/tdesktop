@@ -58,6 +58,24 @@ guards = [
     ('ui', ': !draft ? MoveNotice(DesktopSyncChatMoveNotice::Held)'),
     ('ui', 'if (DesktopSyncChatMoveActivated() || state->recovery) { refresh(); } else {'),
     ('ui', 'DesktopSyncChatCleanupActivated() ? tr::lng_purple_chat_stale(tr::now)'),
+    # P2 resume: a startup resume that waits or stops early runs again once the context is current,
+    # each stop is logged by its check, and the setup screen resumes a carry the resolver holds for.
+    ('host', 'crl::on_main([weak] { if (const auto self = weak.get()) { self->contextChanged(); } });'),
+    ('host', '\t\tself->contextChanged();\n\t};\n\tSettingsChanges()'),
+    ('host', 'if (!_resumePending || _autoResumes >= kAutoResumes) { return; }'),
+    ('host', 'self->_autoResumes = 0; self->resumeWhenActive();'),
+    ('host', 'if (ResumeHalted(state)) {'),
+    ('host', 'self->revoke(reason, true);'),
+    ('host', 'waiting(_owner->busy() ? u"owner-busy"_q : currentRefusal());'),
+    ('host', 'logResume(state);'),
+    ('host', 'LOG(("Purple: sync chat carry resume %1, store %2, journal %3.").arg(line)'),
+    ('host', 'LOG(("Purple: sync chat carry resume waits, check %1.").arg(check));'),
+    ('host', 'LOG(("Purple: sync chat carry resume opening stopped, check %1.").arg(stop));'),
+    ('host', 'DesktopSyncChatCarryResumeOpening(scope, *directory, &stop)'),
+    ('ui', '&& SyncChatStatusOf(session).reason == u"carry-recovery-required"_q;'),
+    ('ui', '|| CarryPending(*state, *owner)));'),
+    ('ui', '} else if (owner && CarryPending(*state, *owner)) {'),
+    ('ui', 'refresh();\n\t\t\tUpdateCarryButtons(state);'),
 ]
 
 
@@ -81,6 +99,13 @@ def validate(values):
         assert forbidden not in ui, forbidden
     resume = body(values['host'], 'void ResumeSyncChatCarry(')
     assert resume.index('ResumeActivated()') < resume.index('SyncChatCarry(session)')
+    # Retry resumes a held carry before it would start a setup journal.
+    retry = body(ui, 'state->retry->setClickedCallback([=]')
+    assert retry.index('CarryPending(*state, *owner)') < retry.index('std::make_unique<DesktopSyncChatSetupService>')
+    # The resume log carries codes and enums only.
+    logged = body(values['host'], 'void DesktopSyncChatCarryService::Impl::logResume(')
+    for private in ['window', '_scope', '.chat', 'account', 'Peer', '_session']:
+        assert private not in logged, private
 
 
 validate(sources)
@@ -100,4 +125,4 @@ for line in ['\tSyncChatCarry(session).changes();\n', '\tconst auto held = tr::l
     except AssertionError:
         continue
     raise AssertionError(('negative insertion escaped', line))
-print(f'T5J wiring routes: {len(guards)} guards and {len(guards)} negative mutations, 2 insertion negatives PASS; carry service constructed only behind CarryOn()')
+print(f'T5J wiring routes: {len(guards)} guards and {len(guards)} negative mutations, 2 insertion negatives PASS; carry service constructed only behind CarryOn(); P2 resume reruns, logs and box routes pinned')

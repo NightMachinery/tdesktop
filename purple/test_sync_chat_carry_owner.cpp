@@ -686,6 +686,139 @@ void Restart() {
 	}
 }
 
+// The service around one owner, for its startup resume. Production's method bodies come from
+// service-resume.inc; this base supplies the members they use, with the harness as the app.
+template <typename T>
+struct ProbeWeak {
+	T *value = nullptr;
+	T *get() const { return value; }
+};
+template <typename T>
+ProbeWeak<T> MakeWeak(T *value) { return {value}; }
+
+bool ResumeActivated() { return true; }
+
+struct ServiceProbeBase {
+	struct Provision { void cancel() {} };
+	struct Changes { void fire_copy(const DesktopSyncChatCarryState &) {} };
+	explicit ServiceProbeBase(OwnerHarness &harness) : h(harness), _owner(harness.owner.get()) {}
+	bool current() const { return h.live; }
+	QString currentRefusal() const { return h.live ? QString() : u"app-inactive"_q; }
+	void refreshScope() {}
+	void PostMain(Fn<void()> task) { h.gui.push_back(std::move(task)); }
+	void ProbeLog(QString line) { logs.push_back(std::move(line)); }
+	bool logged(const QString &part) const {
+		return std::any_of(logs.begin(), logs.end(), [&](const QString &line) { return line.contains(part); });
+	}
+
+	OwnerHarness &h;
+	DesktopSyncChatCarryOwner *_owner = nullptr;
+	Fn<void()> _startup;
+	bool _resumePending = false;
+	int _autoResumes = 0;
+	QString _waiting;
+	QString _logged;
+	std::unique_ptr<Provision> _provision;
+	uint64_t _provisionGeneration = 0;
+	std::map<uint64_t, int> _requests;
+	Changes _changes;
+	std::vector<QString> logs;
+};
+
+#include "service-resume.inc"
+
+// The process died after the journal was written and before the mark was attempted.
+void CrashBeforeMark(OwnerHarness &h) {
+	h.work.push_back([&] {
+		h.files.newEngine(); h.files.engine->open(h.files.start);
+		while (h.files.progress.command && h.files.progress.command->action != SyncCarryJournalAction::PostMark) { h.files.step(); }
+		h.files.engine.reset();
+	});
+	h.worker.run();
+	Must(h.files.progress.command && !h.files.progress.command->dispatch && h.journal() && h.files.markWrites == 0);
+}
+
+// Wires the probe as production's host does: the owner reports to the service, and a settled
+// operation first runs the reconciliation that startup deferred.
+void Wire(OwnerHarness &h, ServiceProbe &p) {
+	h.onChanged = [&p](const DesktopSyncChatCarryState &state) { p.changed(state); };
+	h.onSettled = [&p] { if (auto then = std::exchange(p._startup, nullptr)) { then(); } };
+}
+
+void ServiceResume() {
+	// Refused at startup while the app was not current, then the context becomes current with no
+	// activation event: the next status change runs the resume, which sends the mark once.
+	{
+		auto h = OwnerHarness(); CrashBeforeMark(h);
+		auto p = ServiceProbe(h); Wire(h, p);
+		auto reconciled = 0;
+		h.live = false;
+		p.startup([&] { ++reconciled; }); h.drain();
+		CHECK(reconciled == 1 && !h.owner->busy() && h.journal() && h.leases == 0);
+		CHECK(p.logged(u"waits, check app-inactive"_q));
+		h.live = true;
+		p.contextChanged(); h.drain(); h.reconcile();
+		if (!h.done()) { std::fprintf(stderr, "Service resume hold: %s\n", qPrintable(h.state.reason)); }
+		CHECK(h.done() && h.moved() && h.files.markWrites == 1 && !h.journal() && !h.files.gate->postingHeld());
+		CHECK(reconciled == 1 && p.logged(u", finished"_q) && !h.wrongThread);
+	}
+	// Admitted at startup with the context current, the resume stops before its engine opens
+	// (another writer holds the carry lease). It ends, startup's reconciliation runs, the log names
+	// the stop, and once the lease is free the next status change finishes the move.
+	{
+		auto h = OwnerHarness(); CrashBeforeMark(h);
+		auto p = ServiceProbe(h); Wire(h, p);
+		auto reconciled = 0;
+		auto lease = h.files.gate->carry(); Must(lease);
+		p.startup([&] { ++reconciled; }); h.drain();
+		CHECK(reconciled == 1 && !h.owner->busy() && h.journal() && h.leases == 1 && h.files.markWrites == 0);
+		CHECK(p.logged(u"resume carry-writer-busy, stopped"_q));
+		lease.reset();
+		p.contextChanged(); h.drain(); h.reconcile();
+		if (!h.done()) { std::fprintf(stderr, "Service halted resume hold: %s\n", qPrintable(h.state.reason)); }
+		CHECK(h.done() && h.moved() && h.files.markWrites == 1 && !h.journal() && !h.files.gate->postingHeld());
+		CHECK(reconciled == 1 && p.logged(u", finished"_q) && !h.wrongThread);
+	}
+	// A stop that persists is retried a bounded number of times by status changes, and the next
+	// activation starts the count again.
+	{
+		auto h = OwnerHarness(); CrashBeforeMark(h);
+		auto p = ServiceProbe(h); Wire(h, p);
+		auto lease = h.files.gate->carry(); Must(lease);
+		p.startup(nullptr); h.drain();
+		for (auto i = 0; i != 10; ++i) { p.contextChanged(); h.drain(); }
+		CHECK(h.leases == 1 + kAutoResumes && kAutoResumes > 0 && !h.owner->busy() && h.files.markWrites == 0);
+		lease.reset();
+		p._autoResumes = 0; p.resumeWhenActive(); h.drain(); h.reconcile();
+		CHECK(h.done() && h.moved() && h.files.markWrites == 1);
+	}
+	// Nothing waits: status changes start nothing.
+	{
+		auto h = OwnerHarness(); auto p = ServiceProbe(h); Wire(h, p);
+		p.startup(nullptr); h.drain();
+		CHECK(h.state.finished && h.state.carry && h.state.carry->absent);
+		const auto settled = h.settled.size();
+		for (auto i = 0; i != 3; ++i) { p.contextChanged(); h.drain(); }
+		CHECK(h.settled.size() == settled && h.leases == 0 && h.sends == 0);
+	}
+	std::printf("SERVICE RESUME: startup resumes that wait or stop early finish with one mark\n");
+}
+
+// Each opening refusal names its check.
+void OpeningStops() {
+	auto h = OwnerHarness();
+	auto stop = QString();
+	h.work.push_back([&] { CHECK(!DesktopSyncChatCarryResumeOpening(h.frame.scope, h.files.root, &stop)); });
+	h.worker.run();
+	CHECK(stop == u"no-carry-marker"_q);
+	CHECK(!Crash(h, 2)); Must(h.journal());
+	Must(WriteSyncPrivateFile(h.files.root + u"/carry.json"_q, QByteArray("{\"version\":")) == SyncStoreStatus::Ready);
+	h.work.push_back([&] { CHECK(!DesktopSyncChatCarryResumeOpening(h.frame.scope, h.files.root, &stop)); });
+	h.worker.run();
+	CHECK(stop == u"journal-invalid"_q);
+	CHECK(!DesktopSyncChatCarryResumeOpening(h.frame.scope, h.files.root, &stop) && stop == u"worker-thread"_q);
+}
+
 void RecoveryTimers() {
 	{
 		auto h = OwnerHarness(); h.dropMark = true;
@@ -946,7 +1079,7 @@ void CleanupHeldOff() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv); std::setbuf(stdout, nullptr);
 	CHECK(!SyncStoreWorkerThread());
-	StoreThreadTimers(); Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); RecoveryTimers(); FollowAndPause();
+	StoreThreadTimers(); Builders(); Moves(); Cleanup(); MoveRefusals(); Revocation(); Restart(); ServiceResume(); OpeningStops(); RecoveryTimers(); FollowAndPause();
 	LateFollow(false); LateFollow(true); Recovery(); Marks();
 	CleanupHeldOff();
 	std::printf("CARRY OWNER %d checks, %d failures\n", Checks, Failures);

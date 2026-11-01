@@ -80,8 +80,9 @@ struct DesktopSyncChatCarryHost {
 	const DesktopSyncChatMoveDraft &draft, const DesktopSyncChatPeer &target, bool cleanup);
 [[nodiscard]] std::optional<SyncCarryJournalStart> DesktopSyncChatFollowStart(
 	const DesktopSyncChatConsentSelection &selection);
+// Without a resumable journal, `stop` names the first check that refused it.
 [[nodiscard]] std::optional<DesktopSyncChatCarryResume> DesktopSyncChatCarryResumeOpening(
-	const DesktopSyncChatDiscoveryScope &scope, const QString &directory);
+	const DesktopSyncChatDiscoveryScope &scope, const QString &directory, QString *stop = nullptr);
 [[nodiscard]] bool DesktopSyncChatCarryResumeActivated(
 	SyncCarryMode mode, const Fn<bool(DesktopSyncChatCarrySwitch)> &activated);
 

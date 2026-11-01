@@ -120,6 +120,18 @@ DesktopSyncChatMarkPort NativeMarkPort(not_null<Main::Session*> session, Fn<bool
 	return MakeDesktopSyncMarkNativePort(session, std::move(current), opening);
 }
 
+// Status and settings changes may repeat while a resume keeps stopping at the same check, so
+// they start it at most this many times between activations.
+constexpr auto kAutoResumes = 3;
+
+// A resume stopped before its engine opened holds no journal of its own run.
+bool ResumeHalted(const DesktopSyncChatCarryState &state) {
+	return state.kind == DesktopSyncChatCarryKind::Resume && !state.finished && !state.running
+		&& !(state.carry && state.carry->journal)
+		&& (state.reason == u"carry-context-changed"_q || state.reason == u"carry-unavailable"_q
+			|| state.reason == u"carry-transport-held"_q || state.reason == u"carry-writer-busy"_q);
+}
+
 bool ResumeActivated() {
 	return DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch::Move)
 		|| DesktopSyncChatCarrySwitchActivated(DesktopSyncChatCarrySwitch::Recovery)
@@ -139,6 +151,7 @@ public:
 
 private:
 	[[nodiscard]] bool current() const;
+	[[nodiscard]] QString currentRefusal() const;
 	[[nodiscard]] DesktopSyncChatCarryHost host();
 	void inspect(PeerToken chat, Fn<void(std::optional<DesktopSyncChatPeer>)> done);
 	void provision(DesktopSyncChatMoveDraft draft, bool resume, DesktopSyncChatProvisionDone done);
@@ -146,6 +159,10 @@ private:
 	void changed(const DesktopSyncChatCarryState &state);
 	void settled(DesktopSyncChatCarryKind kind);
 	void resumeWhenActive();
+	void contextChanged();
+	void refreshScope();
+	void waiting(QString check);
+	void logResume(const DesktopSyncChatCarryState &state);
 
 	base::weak_ptr<Main::Session> _session;
 	std::optional<DesktopSyncChatDiscoveryScope> _scope;
@@ -158,6 +175,9 @@ private:
 	uint64_t _requestId = 0;
 	uint64_t _provisionGeneration = 0;
 	bool _resumePending = false;
+	int _autoResumes = 0;
+	QString _waiting;
+	QString _logged;
 	rpl::lifetime _lifetime;
 
 };
@@ -176,18 +196,25 @@ DesktopSyncChatCarryService::Impl::Impl(not_null<Main::Session*> session)
 			self->revoke(u"account-context-changed"_q);
 			self->_scope = scope;
 		}
+		self->contextChanged();
 	};
 	SettingsChanges() | rpl::on_next(changed, _lifetime);
 	StateChanges() | rpl::on_next(changed, _lifetime);
+	// The resolver publishes once its context settles; a resume waiting since startup runs then.
+	SyncChatStatusChanges() | rpl::filter([session](Main::Session *value) {
+		return value == session.get();
+	}) | rpl::on_next([weak](Main::Session*) {
+		crl::on_main([weak] { if (const auto self = weak.get()) { self->contextChanged(); } });
+	}, _lifetime);
 	Core::App().appDeactivatedValue() | rpl::on_next([weak](bool inactive) {
 		const auto self = weak.get();
 		if (!self) { return; }
-		if (inactive) { self->revoke(u"app-inactive"_q, true); } else { self->resumeWhenActive(); }
+		if (inactive) { self->revoke(u"app-inactive"_q, true); } else { self->_autoResumes = 0; self->resumeWhenActive(); }
 	}, _lifetime);
 	Core::App().passcodeLockChanges() | rpl::on_next([weak](bool locked) {
 		const auto self = weak.get();
 		if (!self) { return; }
-		if (locked) { self->revoke(u"app-locked"_q, true); } else { self->resumeWhenActive(); }
+		if (locked) { self->revoke(u"app-locked"_q, true); } else { self->_autoResumes = 0; self->resumeWhenActive(); }
 	}, _lifetime);
 	session->account().sessionChanges() | rpl::on_next([weak, session](Main::Session *value) {
 		if (value != session) { if (const auto self = weak.get()) { self->revoke(u"account-switched"_q); } }
@@ -202,12 +229,24 @@ DesktopSyncChatCarryService::Impl::~Impl() {
 }
 
 bool DesktopSyncChatCarryService::Impl::current() const {
+	return currentRefusal().isEmpty();
+}
+
+// The first check that keeps carry work from starting, empty when none does.
+QString DesktopSyncChatCarryService::Impl::currentRefusal() const {
 	const auto session = _session.get();
-	return session && _scope && !session->account().loggingOut()
-		&& session->account().maybeSession() == session
-		&& QGuiApplication::applicationState() == Qt::ApplicationActive
-		&& !Core::App().passcodeLocked()
-		&& CachedSyncChatSetupContextCurrent(session, *_scope);
+	if (!session || session->account().loggingOut() || session->account().maybeSession() != session) {
+		return u"session"_q;
+	} else if (!_scope) {
+		return u"scope"_q;
+	} else if (QGuiApplication::applicationState() != Qt::ApplicationActive) {
+		return u"app-inactive"_q;
+	} else if (Core::App().passcodeLocked()) {
+		return u"app-locked"_q;
+	} else if (!CachedSyncChatSetupContextCurrent(session, *_scope)) {
+		return u"setup-context"_q;
+	}
+	return QString();
 }
 
 DesktopSyncChatCarryHost DesktopSyncChatCarryService::Impl::host() {
@@ -245,7 +284,10 @@ DesktopSyncChatCarryHost DesktopSyncChatCarryService::Impl::host() {
 	};
 	host.resumeOpening = [](const DesktopSyncChatDiscoveryScope &scope) -> std::optional<DesktopSyncChatCarryResume> {
 		const auto directory = CarryDirectory(scope);
-		return directory ? DesktopSyncChatCarryResumeOpening(scope, *directory) : std::nullopt;
+		auto stop = directory ? QString() : u"directory"_q;
+		auto result = directory ? DesktopSyncChatCarryResumeOpening(scope, *directory, &stop) : std::nullopt;
+		if (!result) { LOG(("Purple: sync chat carry resume opening stopped, check %1.").arg(stop)); }
+		return result;
 	};
 	host.transport = [weak](const DesktopSyncChatSetupSnapshot &opening, DesktopSyncChatCarryRenewal renewal,
 			Fn<bool()> current) {
@@ -322,8 +364,34 @@ void DesktopSyncChatCarryService::Impl::changed(const DesktopSyncChatCarryState 
 	if (state.carry && state.carry->markRecoveryRefusal) {
 		LOG(("Purple: sync chat mark recovery refused, reason %1.").arg(int(*state.carry->markRecoveryRefusal)));
 	}
+	logResume(state);
 	if (state.finished && _provision) { ++_provisionGeneration; _provision->cancel(); _provision.reset(); }
+	if (ResumeHalted(state)) {
+		// Stopped before its engine opened: end it and wait, as leaving the app does, so the
+		// startup reconciliation runs and the resume starts again once the context is current.
+		const auto weak = base::make_weak(this);
+		crl::on_main([weak, generation = state.generation, reason = state.reason] {
+			const auto self = weak.get();
+			if (self && self->_owner->busy() && self->_owner->state().generation == generation
+				&& ResumeHalted(self->_owner->state())) {
+				self->revoke(reason, true);
+			}
+		});
+	}
 	_changes.fire_copy(state);
+}
+
+// One line each time a resume's reason or outcome changes. Reasons are fixed codes and the
+// store status an enum: no ids, names or paths.
+void DesktopSyncChatCarryService::Impl::logResume(const DesktopSyncChatCarryState &state) {
+	if (state.kind != DesktopSyncChatCarryKind::Resume) { return; }
+	const auto outcome = state.finished ? u"finished"_q : state.running ? u"running"_q : u"stopped"_q;
+	const auto line = (state.reason.isEmpty() ? u"none"_q : state.reason) + u", "_q + outcome;
+	if (line == _logged) { return; }
+	_logged = line;
+	LOG(("Purple: sync chat carry resume %1, store %2, journal %3.").arg(line)
+		.arg(state.carry ? int(state.carry->storeStatus) : -1)
+		.arg(state.carry && state.carry->journal ? int(state.carry->journal->phase) : -1));
 }
 
 void DesktopSyncChatCarryService::Impl::settled(DesktopSyncChatCarryKind kind) {
@@ -336,9 +404,10 @@ void DesktopSyncChatCarryService::Impl::settled(DesktopSyncChatCarryKind kind) {
 void DesktopSyncChatCarryService::Impl::startup(Fn<void()> then) {
 	if (!ResumeActivated()) { if (then) { then(); } return; }
 	if (_owner->busy() || !_owner->resume()) {
-		// Inactive, locked or busy: ordinary reconciliation reports any pending carry as held,
-		// and the resume runs when the app is next active.
+		// Inactive, locked, busy or not yet bound: ordinary reconciliation reports any pending
+		// carry as held, and the resume runs once the context is current again.
 		_resumePending = !_owner->busy();
+		waiting(_owner->busy() ? u"owner-busy"_q : currentRefusal());
 		if (then) { then(); }
 		return;
 	}
@@ -346,14 +415,40 @@ void DesktopSyncChatCarryService::Impl::startup(Fn<void()> then) {
 }
 
 void DesktopSyncChatCarryService::Impl::resumeWhenActive() {
-	if (!_resumePending || !current() || _owner->busy()) { return; }
+	if (!_resumePending) { return; }
+	if (const auto check = _owner->busy() ? u"owner-busy"_q : currentRefusal(); !check.isEmpty()) {
+		waiting(check);
+		return;
+	}
 	const auto weak = base::make_weak(this);
 	crl::on_main([weak] {
 		const auto self = weak.get();
 		if (self && self->_resumePending && self->current() && !self->_owner->busy() && self->_owner->resume()) {
 			self->_resumePending = false;
+			self->_waiting = QString();
 		}
 	});
+}
+
+// Startup may run before the account's routing is ready or the app is active; a waiting resume
+// then starts on the next status or settings change, not only on the next activation.
+void DesktopSyncChatCarryService::Impl::contextChanged() {
+	if (!_resumePending || _autoResumes >= kAutoResumes) { return; }
+	refreshScope();
+	if (!_owner->busy() && current()) { ++_autoResumes; }
+	resumeWhenActive();
+}
+
+// A scope missing since construction is captured once it exists; nothing ran without one.
+void DesktopSyncChatCarryService::Impl::refreshScope() {
+	if (const auto session = _session.get(); session && !_scope) { _scope = CaptureSyncChatCarryScope(session); }
+}
+
+void DesktopSyncChatCarryService::Impl::waiting(QString check) {
+	if (check.isEmpty()) { check = u"owner-refused"_q; }
+	if (check == _waiting) { return; }
+	_waiting = check;
+	LOG(("Purple: sync chat carry resume waits, check %1.").arg(check));
 }
 
 DesktopSyncChatCarryService::DesktopSyncChatCarryService(not_null<Main::Session*> session)

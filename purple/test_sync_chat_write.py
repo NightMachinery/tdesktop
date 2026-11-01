@@ -64,6 +64,27 @@ def block(text, marker):
 if args.test_source == 'test_sync_chat_carry_owner.cpp':
     carry_service = (repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_service.cpp').read_text()
     (work / 'store-thread.inc').write_text('class StoreThread final ' + block(carry_service, 'class StoreThread final') + ';\n')
+    # The service's startup resume, sliced onto a probe over the owner harness. A method this
+    # tree lacks is empty, so the same test counts what fails before it exists.
+    def impl(signature):
+        marker = 'DesktopSyncChatCarryService::Impl::' + signature.split(' ', 1)[1]
+        body = block(carry_service, marker) if marker in carry_service else '{}'
+        body = body.replace('crl::on_main(', 'PostMain(').replace('base::make_weak(this)', 'MakeWeak(this)')
+        return '\t' + signature + ' ' + body.replace('LOG(', 'ProbeLog(QString') + '\n'
+    halted = 'bool ResumeHalted(const DesktopSyncChatCarryState &state) '
+    limit = re.search(r'constexpr auto kAutoResumes = (\d+);', carry_service)
+    (work / 'service-resume.inc').write_text(
+        (halted + block(carry_service, halted) if halted in carry_service else halted + '{ return false; }') + '\n'
+        + 'constexpr auto kAutoResumes = ' + (limit[1] if limit else '0') + ';\n'
+        + 'struct ServiceProbe final : ServiceProbeBase {\n\tusing ServiceProbeBase::ServiceProbeBase;\n'
+        + impl('void startup(Fn<void()> then)')
+        + impl('void resumeWhenActive()')
+        + impl('void contextChanged()')
+        + impl('void revoke(QString reason, bool resumeLater)')
+        + impl('void changed(const DesktopSyncChatCarryState &state)')
+        + impl('void logResume(const DesktopSyncChatCarryState &state)')
+        + impl('void waiting(QString check)')
+        + '};\n')
 accept = block(service, 'bool SyncChatSession::Accept(')
 cancel = block(service, 'void SyncChatSession::Cancel(')
 publish = block(service, 'void SyncChatSession::Publish(')
@@ -235,6 +256,7 @@ with (work / 'build.log').open('w') as log:
     'objects_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in objects},
     'store_thread_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_carry_service.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_carry_owner.cpp' else None,
     'store_thread_body_sha256': hashlib.sha256((work / 'store-thread.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_carry_owner.cpp' else None,
+    'service_resume_body_sha256': hashlib.sha256((work / 'service-resume.inc').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_carry_owner.cpp' else None,
     'recovery_ui_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_recovery.cpp' else None,
     'recovery_ui_ports_sha256': {str(work / name): hashlib.sha256((work / name).read_bytes()).hexdigest() for name in ['recovery-ui-rows.inc', 'recovery-ui-confirmation.inc']} if args.test_source == 'test_sync_chat_recovery.cpp' else None,
     'cleanup_choices_source_sha256': hashlib.sha256((repo / 'Telegram/SourceFiles/purple/purple_sync_chat_setup_box.cpp').read_bytes()).hexdigest() if args.test_source == 'test_sync_chat_cleanup.cpp' else None,
