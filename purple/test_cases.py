@@ -136,7 +136,8 @@ def flow_include(sources):
     read = lambda relative: (sources / relative).read_text()
     attach = read('ui/chat/attach/attach_prepare.cpp')
     ui = 'namespace Ui {\nconstexpr auto kMaxAlbumCount = 10;\n' + function(attach, 'struct GroupRange {') + ';\n'
-    for signature in ['[[nodiscard]] AlbumType GroupTypeForFile(', '[[nodiscard]] std::vector<GroupRange> GroupRanges(',
+    for signature in ['[[nodiscard]] AlbumType GroupTypeForFile(', '[[nodiscard]] bool SendsAnimationAsGif(',
+            'bool PreparedFile::sendsVideoAsGif()', '[[nodiscard]] std::vector<GroupRange> GroupRanges(',
             'bool PreparedList::canBeSentInSlowmode()', 'bool PreparedList::canBeSentInSlowmodeWith(', 'std::vector<PreparedGroup> DivideByGroups(',
             'bool PreparedFile::isSticker()', 'AlbumType PreparedFile::albumType(', 'bool CanBeInAlbumType(',
             'bool PreparedFile::canBeInAlbumType(', 'bool PreparedList::canAddCaption(']:
@@ -144,8 +145,14 @@ def flow_include(sources):
     ui += '}\n'
     core = 'namespace Core {\n' + ''.join(function(read('core/mime_type.cpp'), signature) + '\n'
         for signature in ['bool IsMimeStickerAnimated(', 'bool IsMimeSticker(']) + '}\n'
+    # The probes never give an image a paint scene, so upstream's animated
+    # sticker composition is cut out of the slice with the editor scene it needs.
+    apply = function(read('storage/storage_media_prepare.cpp'), 'bool ApplyModifications(')
+    animated = apply.index('\t\tconst auto &scene = image->modifications.paint;')
+    apply = apply[:animated] + apply[apply.index('\t\timage->data = Editor::ImageModified(', animated):]
+    apply = apply.replace(function(apply, '\t\tif (file.animationJob) {'), '', 1)
     storage = ('namespace Storage {using Ui::PreparedList; using Ui::PreparedFile; using Image=Ui::PreparedFileInformation::Image;\n'
-        + function(read('storage/storage_media_prepare.cpp'), 'bool ApplyModifications(') + '\n}\n')
+        + apply + '\n}\n')
     editor = """namespace Editor {
 bool PhotoModifications::empty() const {return !angle && !flipped && !crop.isValid() && !paint;}
 PhotoModifications::operator bool() const {return !empty();}
@@ -165,7 +172,7 @@ QImage ImageModified(QImage image,const PhotoModifications &mods) {return mods.c
     box = read('boxes/send_files_box.cpp')
     start = box.index('const auto canOpenPhotoEditor =')
     condition = box[start:box.index(';', start) + 1].replace('_sendWay.current().sendImagesAsPhotos()', 'compress')
-    probes += 'bool ProbeContextEditor(const Ui::PreparedFile &file,bool compress) {\n' + condition + ' return canOpenPhotoEditor;\n}\n'
+    probes += 'bool ProbeContextEditor(const Ui::PreparedFile &file,bool compress) {\nconst auto compressed=compress;\n' + condition + ' return canOpenPhotoEditor;\n}\n'
     preview = function(read('ui/chat/attach/attach_abstract_single_media_preview.cpp'), 'bool AbstractSingleMediaPreview::isPhoto() const')
     background = function(read('ui/chat/attach/attach_single_media_preview.cpp'), 'bool SingleMediaPreview::drawBackground() const')
     probes += 'bool ProbePreviewBackground(bool _sticker) ' + background[background.index('{'):] + '\n'
@@ -190,7 +197,7 @@ struct ProbeConfirmation {
 };
 """
     probes += function(box, 'void SendFilesBox::addFile(').replace('SendFilesBox::addFile', 'ProbeConfirmation::addFile') + '\n'
-    return '#include "core/mime_type.h"\n#include "editor/photo_editor_common.h"\n' + core + ui + editor + storage + probes
+    return '#include "core/mime_type.h"\n#include "editor/photo_editor_common.h"\n#include "media/media_video_encode.h"\n' + core + ui + editor + storage + probes
 
 
 # A synthetic sticker for the WebP cases: 512 by 512 with a transparent
