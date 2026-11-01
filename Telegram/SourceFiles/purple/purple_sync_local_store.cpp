@@ -136,6 +136,22 @@ struct RetainedRecords {
 #endif
 }
 
+// The sync chat cache lives in the config root, which the app creates with default modes (0755 under
+// the usual umask). A parent that only this user owns and can write still keeps its files from being
+// swapped, and each file's own 0600 keeps it private. Directories under sync/ stay 0700: the store
+// creates them so and refuses any other mode when it opens them.
+[[nodiscard]] bool StableOwnedDirectory(const QFileInfo &info) {
+	if (ReadablePrivateDirectory(info)) { return true; }
+#ifdef Q_OS_UNIX
+	constexpr auto required = QFileDevice::ReadOwner | QFileDevice::ExeOwner;
+	constexpr auto shared = QFileDevice::WriteGroup | QFileDevice::WriteOther;
+	return info.isDir() && info.isReadable() && !info.isSymLink() && info.ownerId() == ::geteuid()
+		&& (info.permissions() & required) == required && !(info.permissions() & shared);
+#else
+	return false;
+#endif
+}
+
 [[nodiscard]] SyncStoreResult RecordError(
 		const SyncEnvelopeParseResult &parsed,
 		const ConfigPayloadInspection &inspected) {
@@ -523,7 +539,7 @@ SyncPrivateSnapshot CaptureSyncPrivateFile(const QString &path, qsizetype limit)
 	const auto parent = QFileInfo(path).absolutePath();
 	result.parentIdentity = SyncPathIdentity(parent);
 	if (result.parentIdentity.isEmpty() || result.parentIdentity == "missing"
-		|| !ReadablePrivateDirectory(QFileInfo(parent))) { return result; }
+		|| !StableOwnedDirectory(QFileInfo(parent))) { return result; }
 	result.identity = SyncPathIdentity(path);
 	if (result.identity.isEmpty()) { return result; }
 	if (result.identity == "missing") { result.status = SyncStoreStatus::Ready; return result; }
@@ -584,7 +600,7 @@ SyncStoreStatus FileBarrier(const QString &path, const SyncPrivateSnapshot &expe
 SyncStoreStatus SyncPrivateDirectoryBarrier(const QString &path) {
 	if (!SyncStoreWorkerThread()) { return SyncStoreStatus::WrongThread; }
 	const auto identity = SyncPathIdentity(path);
-	if (identity.isEmpty() || identity == "missing" || !ReadablePrivateDirectory(QFileInfo(path))) {
+	if (identity.isEmpty() || identity == "missing" || !StableOwnedDirectory(QFileInfo(path))) {
 		return SyncStoreStatus::Changed;
 	}
 #ifdef Q_OS_WIN
@@ -609,7 +625,7 @@ SyncStoreStatus SyncPrivateDirectoryBarrier(const QString &path) {
 	if (fd < 0) { return SyncStoreStatus::DurabilityFailed; }
 	struct stat info = {};
 	const auto ok = ::fstat(fd, &info) == 0 && S_ISDIR(info.st_mode)
-		&& info.st_uid == ::geteuid() && !(info.st_mode & 0077)
+		&& info.st_uid == ::geteuid() && !(info.st_mode & 0022)
 		&& QByteArray::number(qulonglong(info.st_dev)) + ':' + QByteArray::number(qulonglong(info.st_ino)) == identity
 		&& ::fsync(fd) == 0;
 	const auto closed = ::close(fd) == 0;

@@ -244,6 +244,74 @@ void Barriers() {
 	CHECK(CaptureSyncPrivateFile(files.root + u"/link"_q, 16).status != SyncStoreStatus::Ready);
 }
 
+// The sync chat cache lives in the config root, which the app creates with default modes. A root only
+// this user can write must open, capture and durably write the cache; a group- or other-writable root,
+// or a symlink to a root, must still refuse, and the sync directory itself stays strictly private.
+void ConfigRootModes() {
+	constexpr auto owner = QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+	constexpr auto shared = owner | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+		| QFileDevice::ReadOther | QFileDevice::ExeOther;
+	const auto cacheBytes = [](const Files &files) {
+		auto record = DesktopSyncChatCacheRecord(); record.account = Account;
+		record.loginBinding = files.scope.loginAuthority; record.mark = SyncChatCache{ Target(), 2, 7000 };
+		const auto bytes = SerializeDesktopSyncChatCache(record); REQUIRE(bytes); return *bytes;
+	};
+	for (const auto withCache : { false, true }) {
+		auto files = Files();
+		const auto configRoot = files.temporary.path();
+		REQUIRE(QFile(configRoot).setPermissions(shared));
+		const auto absent = CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024);
+		CHECK(absent.status == SyncStoreStatus::Ready && absent.absent());
+		if (withCache) {
+			CHECK(WriteSyncDurableFile(files.scope.cacheFile, cacheBytes(files), absent) == SyncStoreStatus::Ready);
+			const auto written = CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024);
+			CHECK(written.status == SyncStoreStatus::Ready && written.bytes == cacheBytes(files));
+			CHECK(ConfirmSyncDurableFile(files.scope.cacheFile, written) == SyncStoreStatus::Ready);
+		}
+		CHECK(SyncPrivateDirectoryBarrier(configRoot) == SyncStoreStatus::Ready);
+		auto carry = SyncChatCarryStore(files.root, files.scope);
+		const auto opened = carry.Open();
+		CHECK(opened.status == SyncStoreStatus::Ready);
+		CHECK(opened && carry.Begin(files.start(*carry.state())));
+		carry.Close();
+		REQUIRE(QFile(configRoot).setPermissions(owner));
+	}
+	for (const auto loose : { QFileDevice::WriteGroup, QFileDevice::WriteOther }) {
+		auto files = Files();
+		const auto configRoot = files.temporary.path();
+		const auto absent = CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024); REQUIRE(absent.absent());
+		REQUIRE(WriteSyncDurableFile(files.scope.cacheFile, cacheBytes(files), absent) == SyncStoreStatus::Ready);
+		const auto written = CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024); REQUIRE(written.status == SyncStoreStatus::Ready);
+		REQUIRE(QFile(configRoot).setPermissions(shared | loose));
+		CHECK(CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024).status == SyncStoreStatus::IoError);
+		CHECK(SyncPrivateDirectoryBarrier(configRoot) != SyncStoreStatus::Ready);
+		CHECK(ConfirmSyncDurableFile(files.scope.cacheFile, written) != SyncStoreStatus::Ready);
+		CHECK(WriteSyncDurableFile(files.scope.cacheFile, "{}", written) != SyncStoreStatus::Ready);
+		auto carry = SyncChatCarryStore(files.root, files.scope);
+		CHECK(carry.Open().status == SyncStoreStatus::IoError);
+		carry.Close();
+		REQUIRE(QFile(configRoot).setPermissions(owner));
+		CHECK(CaptureSyncPrivateFile(files.scope.cacheFile, 64 * 1024).bytes == cacheBytes(files));
+	}
+	{
+		auto files = Files();
+		const auto real = files.temporary.path() + u"/real"_q;
+		const auto alias = files.temporary.path() + u"/alias"_q;
+		REQUIRE(QDir().mkdir(real) && QFile(real).setPermissions(shared) && QFile::link(real, alias));
+		const auto name = u"/"_q + DesktopSyncChatCacheFileName(Account);
+		CHECK(CaptureSyncPrivateFile(real + name, 64 * 1024).status == SyncStoreStatus::Ready);
+		CHECK(CaptureSyncPrivateFile(alias + name, 64 * 1024).status == SyncStoreStatus::IoError);
+		CHECK(SyncPrivateDirectoryBarrier(alias) != SyncStoreStatus::Ready);
+	}
+	{
+		auto files = Files();
+		REQUIRE(QFile(files.root).setPermissions(shared));
+		CHECK(SyncLocalStore(files.root).Open(true).status == SyncStoreStatus::InsecurePermissions);
+		CHECK(SyncChatCarryStore(files.root, files.scope).Open().status == SyncStoreStatus::InsecurePermissions);
+		REQUIRE(QFile(files.root).setPermissions(owner));
+	}
+}
+
 void CarryCommit(bool ownStage, int failRename = 0) {
 	auto files = Files();
 	const auto built = Record(files.initial);
@@ -512,7 +580,7 @@ void Journals() {
 }
 
 int main(int argc, char **argv) {
-	Retention(); Ordinary(); Barriers(); Journals(); RefusalMatrix(); PendingRetirement();
+	Retention(); Ordinary(); Barriers(); ConfigRootModes(); Journals(); RefusalMatrix(); PendingRetirement();
 	CarryCommit(false); CarryCommit(true);
 	for (auto i = 1; i <= 3; ++i) { CarryCommit(true, i); }
 	{
