@@ -19,8 +19,9 @@ remain. The existing manual Send/Import actions remain available.
 
 The manual settings publisher now uses a serial worker for store opening,
 initialization, staging, confirmation and lock release. Self retains a version-1
-ledger; a fresh non-Self destination requires an exact complete Empty inventory
-and initializes a version-2 typed ledger. Canonical record bytes and ancestry
+ledger; a fresh non-Self destination initializes a version-2 typed ledger when
+its exact complete inventory is Empty or holds one other device's sync space
+that this device's setup did not create, as on Android. Canonical record bytes and ancestry
 remain shared with Self. An existing ledger is never moved by setup or a first
 post. GUI admission includes a settings-source epoch, so changing and restoring
 a reviewed source cannot revive its upload or flood wait. See
@@ -315,7 +316,9 @@ switch, logout, or box close; a generation counter drops every confirmation,
 review choice, or apply result that belongs to an older check. The review's
 verdict picks one action. Empty offers Publish settings. Adopt offers Join sync
 on an unlinked device; on a linked one the check adopts silently and reviews
-again. UpdateReady offers Review update, Choose and Conflict offer Choose
+again. An unlinked non-Self chat holding another device's records offers Join
+sync first, which sends nothing, and the bound check after it offers the
+choice. UpdateReady offers Review update, Choose and Conflict offer Choose
 settings, LocalChanges offers Publish changes, and Pending offers Finish
 sending, but only from a ready review, so an Invalid verdict or unusable
 foreign records pause a staged post as the planner's precedence requires; the

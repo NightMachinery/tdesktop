@@ -2,9 +2,15 @@
 #include "test_sync_chat_create.cpp"
 #include "purple/purple_sync_config_publish_flow.h"
 #include "purple/purple_sync_config_review.h"
+#include "purple/purple_config_payload.h"
+#include "purple/purple_sync_config_flow.h"
+#include "purple/purple_sync_envelope.h"
 
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
+
+#include <cstring>
+#include <functional>
 
 namespace {
 
@@ -566,6 +572,140 @@ void RoutingSnapshotCases() {
 	CHECK(SameAccountRoutingSnapshot(files.routing, files.routing));
 }
 
+// Another install's canonical config record, as a joining device reads it from the chat.
+struct OtherRecord {
+	ConfigRecordBuildResult built;
+	QString space;
+};
+
+OtherRecord BuildOther(int writer, uint64_t milliseconds) {
+	auto input = ConfigRecordBuildInput();
+	input.text = "version = 2\n# other device " + QByteArray::number(writer) + '\n';
+	const auto space = FormatTimeOrderedSyncSpaceId(milliseconds, QByteArray(10, char(writer)));
+	const auto install = FormatSyncInstallId(QByteArray(16, char(0x40 + writer)));
+	CHECK(space && install);
+	input.space = space.value_or(QString()); input.install = install.value_or(QString());
+	input.device = u"android:"_q + input.install; input.platform = u"Android"_q;
+	input.app = u"Purple Telegram"_q; input.seq = 1; input.at = 1700000000;
+	auto built = BuildConfigRecord(input); CHECK(built);
+	return { std::move(built), input.space };
+}
+
+SyncAccountInventoryResult InventoryOf(const std::vector<QByteArray> &records) {
+	auto candidates = std::vector<SyncCandidateRecord>();
+	auto ids = std::vector<int32_t>();
+	for (auto i = 0; i != int(records.size()); ++i) {
+		auto candidate = ClassifySyncCandidate(20 + i, records[i]);
+		candidate.documentId = 6020 + i; candidate.editDate = 1700000000;
+		candidates.push_back(candidate); ids.push_back(20 + i);
+	}
+	return FinishSyncAccountInventory(123,
+		{ SyncHistoryScanStatus::Complete, ids, uint64_t(ids.size()) },
+		SyncCandidateReadResult{ SyncCandidateReadStatus::Complete, candidates });
+}
+
+// A device without sync state joins the one sync space another device already uses in the chat
+// the user chose, as Android's A5Q does: Saved Messages (selfJoin), an existing channel picked at
+// setup (existingChannelJoin) and a channel another device set up, found by discovery with no setup
+// journal here (discoveredChannelJoin). Joining initializes this chat's ledger in that space and
+// sends nothing; keeping this device's settings publishes once with the other record as parent.
+// A channel this device's setup created, or one holding records from two spaces, stays refused.
+void RewriteJournal(PublishFiles &files, PeerToken chat,
+		const std::function<void(DesktopSyncChatCreateJournal&)> &change) {
+	files.journal(chat);
+	const auto path = files.files.syncDirectory + u"/sync-chat-setup.json"_q;
+	auto bytes = QByteArray();
+	CHECK(ReadSyncPrivateFile(path, 512 * 1024, bytes) == SyncStoreStatus::Ready);
+	auto journal = ParseDesktopSyncChatCreateJournal(bytes,
+		DesktopSyncChatSetupAuthority(files.setup.scope), Origin.account);
+	CHECK(journal);
+	if (!journal) { return; }
+	change(*journal);
+	const auto changed = SerializeDesktopSyncChatCreateJournal(*journal);
+	CHECK(changed);
+	CHECK(WriteSyncPrivateFile(path, changed.value_or(QByteArray())) == SyncStoreStatus::Ready);
+}
+
+void ExistingJoins() {
+	const auto channel = PeerToken{ PeerTokenKind::Channel, 456 };
+	// The adopted journals are what Desktop setup leaves when the chosen chat already carries
+	// another device's mark: no mark of its own, and for Create nothing was created.
+	for (const auto name : { "selfJoin", "existingChannelJoin", "discoveredChannelJoin",
+			"adoptedChannelJoin", "adoptedCreateJoin" }) {
+		for (const auto keep : { false, true }) {
+			const auto self = !std::strcmp(name, "selfJoin");
+			const auto chat = self ? PeerToken{} : channel;
+			auto files = PublishFiles(chat);
+			if (!std::strcmp(name, "existingChannelJoin")) { files.journal(chat); }
+			if (!std::strncmp(name, "adopted", 7)) {
+				const auto create = !std::strcmp(name, "adoptedCreateJoin");
+				RewriteJournal(files, chat, [&](DesktopSyncChatCreateJournal &journal) {
+					if (create) { journal.choice = DesktopSyncChatSetupChoice::Create; }
+					journal.adopted = true; journal.markId = 0; journal.markDate = 0;
+					journal.readerConsent.clear(); journal.readerSnapshot = {}; journal.newReaders = false;
+				});
+			}
+			const auto other = BuildOther(2, 1700000000000);
+			auto input = files.input(chat);
+			input.inventory = InventoryOf({ other.built.canonical });
+			if (keep) {
+				input.request.expectedParents = SyncConfigVersionKeys({ other.built.version });
+			} else {
+				input.initializeOnly = true;
+			}
+			auto reply = SyncConfigPublishDiskReply();
+			auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
+				[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
+			flow.start();
+			CHECK(reply.step == SyncConfigPublishDiskStep::Binding && reply.initial);
+			std::printf("JOIN %s keep=%d admitted=%d\n", name, int(keep), int(bool(reply.initial)));
+			if (!reply.initial) { continue; }
+			CHECK(reply.initial->space == other.space && reply.initial->chat == chat);
+			CHECK(reply.initial->version == (self ? 1 : 2));
+			files.token = reply.initial->bindingToken.toLatin1();
+			flow.bindingCommitted(files.token);
+			if (keep) {
+				CHECK(reply.step == SyncConfigPublishDiskStep::Post && !reply.staged.isEmpty());
+				const auto parsed = ParseSyncEnvelope(reply.staged);
+				CHECK(parsed.header && parsed.header->space == other.space);
+				const auto parents = InspectConfigPayload(parsed).version.parents;
+				CHECK(parents == std::vector<QString>{ other.built.version.key });
+				flow.confirm(reply.staged, 30);
+				CHECK(reply.result.status == SyncConfigPublishStatus::Confirmed && reply.result.messageId == 30);
+			} else {
+				CHECK(reply.step == SyncConfigPublishDiskStep::Finished
+					&& reply.result.status == SyncConfigPublishStatus::AlreadySynced);
+			}
+			const auto state = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
+			CHECK(state && state.state.space == other.space && state.state.chat == chat
+				&& state.state.version == (self ? 1 : 2) && state.state.config.seq == (keep ? 1u : 0u));
+		}
+	}
+	for (const auto name : { "occupiedFresh", "occupiedMixed" }) {
+		auto files = PublishFiles(channel);
+		auto records = std::vector<QByteArray>{ BuildOther(2, 1700000000000).built.canonical };
+		if (!std::strcmp(name, "occupiedFresh")) {
+			RewriteJournal(files, channel, [](DesktopSyncChatCreateJournal &journal) {
+				journal.choice = DesktopSyncChatSetupChoice::Create;
+				journal.created = true; journal.updates = CreatedUpdates();
+			});
+		} else {
+			records.push_back(BuildOther(3, 1700000001000).built.canonical);
+		}
+		auto input = files.input(channel);
+		input.inventory = InventoryOf(records);
+		CHECK(input.inventory.status == SyncAccountInventoryStatus::Complete);
+		auto reply = SyncConfigPublishDiskReply();
+		auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
+			[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
+		flow.start();
+		CHECK(reply.step == SyncConfigPublishDiskStep::Finished
+			&& reply.result.status == SyncConfigPublishStatus::NeedsReview);
+		CHECK(SyncPathIdentity(files.files.syncStore) == "missing");
+		std::printf("JOIN %s refused=%d\n", name, int(SyncPathIdentity(files.files.syncStore) == "missing"));
+	}
+}
+
 }
 
 int main(int argc, char **argv) {
@@ -576,6 +716,7 @@ int main(int argc, char **argv) {
 			FirstPublish(chat, false); FirstPublish(chat, true);
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
+		ExistingJoins();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);

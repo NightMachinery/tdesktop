@@ -218,11 +218,27 @@ keep the persistent warning and prior consent; unknown readers or lost posting
 rights hold. Setup completion alone never sends settings. Automatic sync remains
 Self-only.
 
-A fresh non-Self destination initializes a version-2 ledger only after its exact,
-complete inventory is empty. Self retains the version-1 initializer and document
-format. An existing ledger must match its typed chat and stream. Choosing another
-mark does not move or overwrite it. Carry and migration remain separate work.
-Joining without a local settings file initializes on the worker and sends nothing.
+A fresh non-Self destination initializes a version-2 ledger when its exact,
+complete inventory is empty, or when it holds another device's sync space: every
+record valid and from one space, and no setup journal here that created the chat
+or was still creating it. Discovery through the pinned mark writes no journal, so
+a chat another device set up stays joinable. Setup that finds another device's
+mark in the chosen chat adopts it and records no mark of its own; the publisher
+ties such a journal to the cache by its chat alone, so it admits the join too. A
+chat this device created must still be empty, and mixed or unreadable records
+refuse. This is Android's rule.
+Self retains the version-1 initializer and document format, and still joins the
+lowest space when records are mixed. An existing ledger must match its typed chat
+and stream. Choosing another mark does not move or overwrite it. Carry and
+migration remain separate work. Joining without a local settings file
+initializes on the worker and sends nothing.
+
+An unlinked check of a non-Self chat that already holds another device's records
+offers Join sync unless its verdict is Invalid. Joining initializes
+the typed ledger on the worker in that device's space and sends nothing; the
+next check is bound and offers that device's settings or this device's. Choosing
+settings before joining is refused, because the local choice path would
+initialize a Saved Messages ledger for that chat.
 
 The first settings record uses the shared canonical config builder, filename,
 MIME and #purplesync caption. The durable pending record precedes upload. There

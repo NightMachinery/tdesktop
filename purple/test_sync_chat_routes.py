@@ -81,6 +81,30 @@ def inspect(values):
     require('post-cancel-stops-upload', 'void SyncConfigPost::Cancel()' in post and post.count('_upload->Cancel();') == 2)
     require('publisher-typed-ledger', 'DesktopSyncChatLedgerMatches(*state, _input.chat)' in values['purple_sync_config_publish_flow.cpp'])
     require('publisher-gui-no-files', all(marker not in publisher for marker in ['AccountSyncInspectionTarget(', 'AccountSyncTarget(', 'ValidateAccountSyncTarget(', 'ReadSettingsFileInput(', 'ReadSyncSettingsFile(', 'InspectSyncAccountRecovery(', 'SyncLocalStore(', '->StageConfig(', '->ConfirmConfigReadBack(']))
+    flow = values['purple_sync_config_publish_flow.cpp']
+    one_space = flow.split('bool OneSyncSpace(', 1)[1].split('bool CreatedBySetup(', 1)[0]
+    created = flow.split('bool CreatedBySetup(', 1)[1].split('SyncConfigPublishFlow::SyncConfigPublishFlow(', 1)[0]
+    require('unbound-join-admission', 'record.status == SyncCandidateStatus::Valid' in one_space
+        and 'record.header->space == *space' in one_space and '!inventory.read->records.empty()' in one_space
+        and 'if (identity == "missing") { return false; }' in created and 'return !journal || journal->created' in created
+        and '(journal->choice == DesktopSyncChatSetupChoice::Create && !journal->adopted)' in created
+        and 'const auto joinable = empty || (complete && OneSyncSpace(inventory)' in flow
+        and '&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));' in flow
+        and '|| (_input.chat != PeerToken{} && !joinable)' in flow and '(_input.chat != PeerToken{} && !empty)' not in flow)
+    require('adopted-setup-join', '|| (!journal->adopted && (journal->markId != setup->cache->mark.markId' in flow
+        and '|| journal->markDate != setup->cache->mark.markDate))' in flow and '|| setup->cache->mark.chat != _input.chat) {' in flow)
+    box = values['purple_sync_setup_box.cpp']
+    joins = box.split('bool JoinsTypedChat(', 1)[1].split('bool UnboundTypedChoice(', 1)[0]
+    require('typed-join-route', 'state.route->peer.chat != PeerToken{}' in joins and '!state.review->bound' in joins
+        and 'ConfigSyncVerdict::Empty' in joins and 'if (JoinsTypedChat(state)) {' in box
+        and '|| JoinsTypedChat(*state))) {' in box and '(action == Action::Join && JoinsTypedChat(*state))' in box)
+    def guarded(start, guard):
+        # The guard sits in the function, before its call that applies settings.
+        body = box.split(start, 1)[1] if start in box else ''
+        return guard in body and 'ApplySyncConfigChoice(' in body and body.find(guard) < body.find('ApplySyncConfigChoice(')
+    require('unbound-typed-choice-guard', box.count('ApplySyncConfigChoice(') == 3
+        and guarded('void RunAction(', 'if (UnboundTypedChoice(*state, *state->review)) {')
+        and guarded('void ApplyChoice(', 'if (UnboundTypedChoice(*state, review)) {'))
     confirmation = values['purple_sync_setup_box.cpp'].split('QString ConfirmText(', 1)[1].split('void RefreshButtons(', 1)[0]
     require('typed-settings-confirmation', 'Saved' not in confirmation and 'selected' in confirmation)
     finish = publisher.split('void SyncConfigPublish::Finish(', 1)[1]
@@ -146,6 +170,15 @@ negative = [
     ('purple_sync_config_post.cpp', '_upload->Cancel();', 'Other();', 'post-cancel-stops-upload'),
     ('purple_sync_config_publish_flow.cpp', 'DesktopSyncChatLedgerMatches(*state, _input.chat)', 'true', 'publisher-typed-ledger'),
     ('purple_sync_setup_box.cpp', "this account's selected ", "this account's Saved ", 'typed-settings-confirmation'),
+    ('purple_sync_config_publish_flow.cpp', 'record.status == SyncCandidateStatus::Valid', 'true', 'unbound-join-admission'),
+    ('purple_sync_config_publish_flow.cpp', 'record.header->space == *space', 'true', 'unbound-join-admission'),
+    ('purple_sync_config_publish_flow.cpp', 'return !journal || journal->created', 'return !journal', 'unbound-join-admission'),
+    ('purple_sync_config_publish_flow.cpp', '&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));', ');', 'unbound-join-admission'),
+    ('purple_sync_config_publish_flow.cpp', '(!journal->adopted && (', '(true && (', 'adopted-setup-join'),
+    ('purple_sync_setup_box.cpp', '|| JoinsTypedChat(*state))) {', ')) {', 'typed-join-route'),
+    ('purple_sync_setup_box.cpp', 'state.route->peer.chat != PeerToken{}\n', 'true\n', 'typed-join-route'),
+    ('purple_sync_setup_box.cpp', 'if (UnboundTypedChoice(*state, *state->review)) {', 'if (false) {', 'unbound-typed-choice-guard'),
+    ('purple_sync_setup_box.cpp', 'if (UnboundTypedChoice(*state, review)) {', 'if (false) {', 'unbound-typed-choice-guard'),
     ('purple_sync_config_publish.cpp', 'void SyncConfigPublish::Start()', 'void SyncConfigPublish::Start() /* ReadSettingsFileInput( */', 'publisher-gui-no-files'),
     ('purple_sync_config_upload.cpp', '_operation.authorize([self, ready = std::move(ready)]', 'SkipDisk([self, ready = std::move(ready)]', 'publisher-worker-renewal'),
     ('purple_sync_candidate_reader.cpp', 'documentId != self->_documentId || editDate != self->_editDate', 'false', 'download-metadata-seal'),

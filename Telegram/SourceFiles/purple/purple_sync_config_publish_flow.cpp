@@ -26,6 +26,29 @@ bool Worker() {
 	return !app || QThread::currentThread() != app->thread();
 }
 
+// Every record in the chat is a valid one from the selected sync space: the only non-empty chat a
+// device without sync state may join.
+bool OneSyncSpace(const SyncAccountInventoryResult &inventory) {
+	const auto &space = inventory.directory.selectedSpace;
+	return space && inventory.read && !inventory.read->records.empty()
+		&& std::all_of(inventory.read->records.begin(), inventory.read->records.end(),
+			[&](const SyncCandidateRecord &record) {
+				return record.status == SyncCandidateStatus::Valid
+					&& record.header && record.header->space == *space;
+			});
+}
+
+// This device's setup created the chat, or was creating it. A chat found by discovery leaves no
+// journal; one picked at setup, or adopted from another device's stream, was not created here.
+bool CreatedBySetup(const QByteArray &identity, const QByteArray &bytes,
+		const std::optional<DesktopSyncChatSetupSnapshot> &setup, const AccountKey &account) {
+	if (identity == "missing") { return false; }
+	const auto journal = setup ? ParseDesktopSyncChatCreateJournal(bytes,
+		DesktopSyncChatSetupAuthority(setup->scope), account) : std::nullopt;
+	return !journal || journal->created
+		|| (journal->choice == DesktopSyncChatSetupChoice::Create && !journal->adopted);
+}
+
 }
 
 SyncConfigPublishFlow::SyncConfigPublishFlow(SyncConfigPublishDiskInput input,
@@ -60,11 +83,13 @@ bool SyncConfigPublishFlow::setupAllowed() {
 		}
 		const auto journal = ParseDesktopSyncChatCreateJournal(bytes,
 			DesktopSyncChatSetupAuthority(setup->scope), _input.account);
+		// A setup that adopted the account's resolved mark posted none of its own; only its chat ties
+		// it to the cache.
 		if (!journal || journal->step != DesktopSyncChatCreateStep::Done
 			|| journal->pending || journal->cancelled || !journal->chat
 			|| *journal->chat != _input.chat || !setup->cache
-			|| journal->markId != setup->cache->mark.markId
-			|| journal->markDate != setup->cache->mark.markDate
+			|| (!journal->adopted && (journal->markId != setup->cache->mark.markId
+				|| journal->markDate != setup->cache->mark.markDate))
 			|| setup->cache->mark.chat != _input.chat) {
 			return false;
 		}
@@ -149,11 +174,15 @@ void SyncConfigPublishFlow::start() {
 			&& inventory.scan.candidateIds.empty() && !inventory.directory.selectedSpace
 			&& inventory.directory.canCreateSpace;
 		const auto &directory = inventory.directory;
+		// Another device's chat may be joined while it holds that device's records; a chat this
+		// device created must still be empty.
+		const auto joinable = empty || (complete && OneSyncSpace(inventory)
+			&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));
 		if (_input.request.pendingOnly || !complete
 			|| (directory.selectedSpace && (!directory.publishableSpace
 				|| *directory.selectedSpace != *directory.publishableSpace
 				|| !IsSyncSpaceId(*directory.selectedSpace)))
-			|| (_input.chat != PeerToken{} && !empty)
+			|| (_input.chat != PeerToken{} && !joinable)
 			|| (!inventory.directory.selectedSpace && !inventory.directory.canCreateSpace)) {
 			finish({ SyncConfigPublishStatus::NeedsReview }); return;
 		}

@@ -349,6 +349,21 @@ void SetStatus(SetupBoxState &state, const QString &text) {
 	return ReviewSyncConfig(account, session, inventory);
 }
 
+// An unbound check of a chat other than Saved Messages that already holds another device's records.
+// This device first joins that sync space on the worker, typed for this chat, and sends nothing; the
+// bound review after it offers that device's settings or this device's.
+[[nodiscard]] bool JoinsTypedChat(const SetupBoxState &state) {
+	return state.review && state.route && state.route->peer.chat != PeerToken{}
+		&& state.review->status == SyncConfigReviewStatus::Ready && !state.review->bound
+		&& state.review->plan.verdict != ConfigSyncVerdict::Empty
+		&& state.review->plan.verdict != ConfigSyncVerdict::Invalid;
+}
+
+// Choosing settings before joining would initialize a Saved Messages ledger for this chat.
+[[nodiscard]] bool UnboundTypedChoice(const SetupBoxState &state, const SyncConfigReview &review) {
+	return !review.bound && state.route && state.route->peer.chat != PeerToken{};
+}
+
 void ShowReview(
 		SetupBoxState &state,
 		SyncAccountInventoryResult inventory,
@@ -362,6 +377,9 @@ void ShowReview(
 		&& state.review->local.status == SyncSettingsFileStatus::Absent
 		&& !state.review->local.usingLastGood && state.review->plan.offered.empty()
 		&& state.review->plan.verdict != ConfigSyncVerdict::Invalid) {
+		state.currentAction = Action::Join;
+	}
+	if (JoinsTypedChat(state)) {
 		state.currentAction = Action::Join;
 	}
 	++state.generation;
@@ -522,8 +540,9 @@ void RunAction(
 		return;
 	}
 	if (action == Action::Join && !state->review->bound
-		&& state->review->local.status == SyncSettingsFileStatus::Absent
-		&& !state->review->local.usingLastGood && state->review->plan.offered.empty()) {
+		&& ((state->review->local.status == SyncSettingsFileStatus::Absent
+			&& !state->review->local.usingLastGood && state->review->plan.offered.empty())
+			|| JoinsTypedChat(*state))) {
 		auto inventory = *state->completed;
 		ClearReview(*state);
 		StartPublisher(box, state, std::move(inventory), {}, {},
@@ -548,6 +567,10 @@ void RunAction(
 		ClearReview(*state);
 		StartPublisher(box, state, std::move(inventory), request, {},
 			u"Publishing settings to the reviewed sync destination."_q);
+		return;
+	}
+	if (UnboundTypedChoice(*state, *state->review)) {
+		SetStatus(*state, u"Join sync in the selected chat first, then check again to choose settings."_q);
 		return;
 	}
 	const auto applied = ApplySyncConfigChoice(
@@ -593,8 +616,13 @@ void ConfirmAction(
 	const auto target = origin ? CaptureAccountSyncRouting(origin.get()) : std::nullopt;
 	if (!target || !state->route || !state->setup
 		|| !CachedSyncChatSetupContextCurrent(origin.get(), state->setup->scope)) { return; }
+	const auto text = (action == Action::Join && JoinsTypedChat(*state))
+		? u"Join the sync space another device already uses in the selected chat? Nothing is "
+			"sent now. Check again afterwards to choose between its settings and this "
+			"device's. "_q + SyncCloudDisclosureText()
+		: ConfirmText(action, *state->review);
 	box->uiShow()->showBox(Ui::MakeConfirmBox({
-		.text = Joined(ConfirmText(action, *state->review),
+		.text = Joined(text,
 			tr::lng_purple_chat_settings_disclosure(tr::now).arg(PublishDestination(*state))),
 		.confirmed = crl::guard(box, [=](Fn<void()> close) {
 			close();
@@ -756,6 +784,10 @@ void ApplyChoice(
 	const auto account = state->selectedAccount.get();
 	const auto session = state->selectedSession.get();
 	const auto review = *state->review;
+	if (UnboundTypedChoice(*state, review)) {
+		SetStatus(*state, u"Join sync in the selected chat first, then check again to choose settings."_q);
+		return;
+	}
 	const auto applied = ApplySyncConfigChoice(
 		*account,
 		*session,
