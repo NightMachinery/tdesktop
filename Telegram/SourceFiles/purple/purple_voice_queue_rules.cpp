@@ -9,6 +9,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple::VoiceQueueRules {
 
+PlaybackChat PlaybackChatFor(ChatFacts facts) {
+	return facts.self
+		? PlaybackChat::Self
+		: (facts.user && !facts.replies && !facts.verifyCodes)
+		? PlaybackChat::OneToOne
+		: PlaybackChat::Other;
+}
+
 std::optional<int> ConfinedIndex(
 		VoiceQueueAnchor anchor,
 		int from,
@@ -28,6 +36,12 @@ std::optional<int> ConfinedIndex(
 
 void PlayTracker::automaticNext(PlayKey key) {
 	_automatic = key;
+}
+
+void PlayTracker::expire(PlayKey key) {
+	if (_automatic == key) {
+		_automatic = std::nullopt;
+	}
 }
 
 bool PlayTracker::manual(PlayKey played) {

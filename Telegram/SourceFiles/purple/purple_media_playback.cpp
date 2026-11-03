@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_float.h"
 #include "media/player/media_player_instance.h"
 #include "base/event_filter.h"
+#include <crl/crl_on_main.h>
 #include "settings/settings_builder.h"
 #include "ui/style/style_core.h"
 #include "ui/painter.h"
@@ -118,7 +119,7 @@ void RelayoutVideoMessages() {
 						? media->getDocument()
 						: nullptr;
 					if (document && document->isVideoMessage()) {
-						owner.requestViewResize(view.get());
+						owner.requestItemResize(view->data());
 					}
 				}
 			}
@@ -155,21 +156,22 @@ void ChooseVideoMessageScaleBox(not_null<Ui::GenericBox*> box) {
 		|| Media::Player::IsStoppedOrStopping(state.state);
 }
 
-[[nodiscard]] bool RestartsCurrentVoice(FullMsgId context) {
+[[nodiscard]] bool SeekableCurrentVoice() {
 	using Type = AudioMsgId::Type;
 	const auto player = Media::Player::instance();
-	const auto current = player->current(Type::Voice);
 	const auto state = player->getState(Type::Voice);
-	return context
-		&& (current.contextId() == context)
-		&& (state.id == current)
+	return (state.id == player->current(Type::Voice))
 		&& !Media::Player::IsStoppedOrStopping(state.state)
 		&& (state.length > 0);
 }
 
-void RestartCurrentVoice() {
+void RestartCurrentVoice(MediaRules::Restart restart) {
 	using Type = AudioMsgId::Type;
 	const auto player = Media::Player::instance();
+	if (restart == MediaRules::Restart::Replay) {
+		player->play(player->current(Type::Voice));
+		return;
+	}
 	player->finishSeeking(Type::Voice, 0.);
 	if (Media::Player::IsPausedOrPausing(player->getState(Type::Voice).state)) {
 		player->play(Type::Voice);
@@ -321,10 +323,14 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 }
 
 bool RestartFloatOnDoubleClick(const HistoryItem *item) {
-	if (!item || !RestartsCurrentVoice(item->fullId())) {
+	const auto current = Media::Player::instance()->current(
+		AudioMsgId::Type::Voice);
+	if (!item || !current || current.contextId() != item->fullId()) {
 		return false;
 	}
-	RestartCurrentVoice();
+	RestartCurrentVoice(SeekableCurrentVoice()
+		? MediaRules::Restart::Seek
+		: MediaRules::Restart::Replay);
 	return true;
 }
 
@@ -364,10 +370,7 @@ void DecorateFloat(
 		const auto skip = st::purpleFloatButtonSkip;
 		const auto count = int(buttons.size());
 		auto left = (size.width() - count * side - (count - 1) * skip) / 2;
-		const auto top = size.height()
-			- st::mediaPlayerFloatMargin
-			- st::purpleFloatButtonBottom
-			- side;
+		const auto top = (size.height() - side) / 2;
 		for (const auto &button : buttons) {
 			button->move(left, top);
 			left += side + skip;
@@ -381,6 +384,8 @@ void DecorateFloat(
 			show(false);
 		} else if (type == QEvent::MouseMove && floating->dragged()) {
 			show(false);
+		} else if (type == QEvent::MouseButtonRelease) {
+			crl::on_main(floating, [=] { show(floating->underMouse()); });
 		}
 		return base::EventFilterResult::Continue;
 	});
@@ -400,12 +405,15 @@ bool RestartOnDoubleClick(
 	using Type = AudioMsgId::Type;
 	const auto open = dynamic_cast<DocumentOpenClickHandler*>(active.get());
 	const auto document = open ? open->document().get() : nullptr;
-	const auto context = open ? open->context() : FullMsgId();
-	const auto item = document ? document->owner().message(context) : nullptr;
-	const auto media = item ? item->media() : nullptr;
 	const auto player = Media::Player::instance();
 	const auto current = player->current(Type::Voice);
-	const auto facts = MediaRules::RestartFacts{
+	const auto context = MediaRules::ResolveRestartContext(
+		open ? open->context() : FullMsgId(),
+		document && (current.audio() == document),
+		current.contextId());
+	const auto item = document ? document->owner().message(context) : nullptr;
+	const auto media = item ? item->media() : nullptr;
+	const auto restart = MediaRules::RestartOnDoubleClick({
 		.leftButton = (button == Qt::LeftButton),
 		.selecting = selecting,
 		.documentOpen = (open != nullptr),
@@ -413,14 +421,15 @@ bool RestartOnDoubleClick(
 			&& (document->isVoiceMessage() || document->isVideoMessage()),
 		.viewOnce = media && (media->ttlSeconds() > 0),
 		.currentTrack = document
+			&& context
 			&& (current.audio() == document)
 			&& (current.contextId() == context),
-		.seekable = RestartsCurrentVoice(context),
-	};
-	if (!MediaRules::RestartsOnDoubleClick(facts)) {
+		.seekable = SeekableCurrentVoice(),
+	});
+	if (restart == MediaRules::Restart::None) {
 		return false;
 	}
-	RestartCurrentVoice();
+	RestartCurrentVoice(restart);
 	return true;
 }
 

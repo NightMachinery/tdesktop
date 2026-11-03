@@ -63,6 +63,19 @@ int main() {
 	plays.automaticNext(PlayKey{ 2, 10 });
 	expect(plays.manual(a), "the same message id in another chat is manual");
 
+	plays.automaticNext(b);
+	plays.expire(b);
+	expect(plays.manual(b), "an announcement no track change followed has expired");
+	plays.automaticNext(b);
+	plays.expire(c);
+	expect(!plays.manual(b), "expiring another announcement keeps this one");
+
+	expect(PlaybackChatFor({ .user = true }) == PlaybackChat::OneToOne, "a user or bot chat is one-to-one");
+	expect(PlaybackChatFor({ .self = true, .user = true }) == PlaybackChat::Self, "Saved Messages are Self");
+	expect(PlaybackChatFor({ .user = true, .replies = true }) == PlaybackChat::Other, "Replies is not one-to-one");
+	expect(PlaybackChatFor({ .user = true, .verifyCodes = true }) == PlaybackChat::Other, "Verification Codes is not one-to-one");
+	expect(PlaybackChatFor({}) == PlaybackChat::Other, "a group or channel is Other");
+
 	std::cout << (checks - failures) << '/' << checks << " voice queue checks passed\n";
 	return failures ? 1 : 0;
 }

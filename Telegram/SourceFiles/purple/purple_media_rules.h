@@ -23,7 +23,21 @@ struct RestartFacts {
 	bool seekable = false;
 };
 
-[[nodiscard]] bool RestartsOnDoubleClick(const RestartFacts &facts);
+enum class Restart {
+	None,
+	Seek,
+	Replay,
+};
+
+[[nodiscard]] Restart RestartOnDoubleClick(const RestartFacts &facts);
+
+template <typename Context>
+[[nodiscard]] Context ResolveRestartContext(
+		Context handler,
+		bool documentIsCurrent,
+		Context current) {
+	return (!handler && documentIsCurrent) ? current : handler;
+}
 
 inline constexpr auto kVideoMessageScales = std::array{ 100, 150, 200, 250 };
 inline constexpr auto kVideoMessageScaleDefault = 200;

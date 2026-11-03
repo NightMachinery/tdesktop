@@ -23,11 +23,20 @@ track seeks it to 0:00 and plays it, even if it was paused.
 - It is declined, and upstream's double-click runs as before, for any button
   other than the left one, while messages are selected, for a handler that
   does not open a document, for a document that is not a voice or round
-  message, for view-once media, for a message that is not the current track,
-  and for a track that is not streaming yet (nothing to seek).
+  message, for view-once media, and for a message that is not the current
+  track.
+- The message is the click handler's own when it has one. The seek areas
+  (a round's whole circle, a voice message's waveform) are built without
+  one, and upstream returns them only while the hovered message is the
+  current track, so a handler with no message whose document is the current
+  track's takes the current track's message.
+- A track that is streaming is seeked to 0:00. One that is current but not
+  streaming yet (its length is not known) is played again from its start,
+  which restarts the stream; the position saved for it was already used up
+  by the first click.
 - The first click of the pair still does what a click does: a playing message
   pauses for under one double-click interval, then restarts. A stopped one
-  starts, then jumps to 0:00 once it streams. Waiting for a possible second
+  starts, then starts again from 0:00. Waiting for a possible second
   click would delay every single click, so it is not done.
 - When the restart happens the double-click never reaches
   `mouseActionStart`, so the second release toggles nothing and the
@@ -57,8 +66,10 @@ queue to the other person switches it; the value lives in `settings.toml`
   `switchToNextEvents` announces the message an automatic advance is about to
   play; a voice-type `trackChanged` to any other message is manual (a click in
   a chat, the player bar's next or previous, the control socket) and sets a
-  new anchor for that chat. The setting is read only then, so toggling it
-  never changes a queue in the middle.
+  new anchor for that chat. The announcement expires on the next main-loop
+  turn, so one no track change followed (upstream's play returned early) can
+  never make a later manual play look automatic. The setting is read only
+  then, so toggling it never changes a queue in the middle.
 - The walk starts at the message upstream would play and skips your messages
   until one of theirs. It stops at the edge of the loaded playlist window
   (about 32 messages either side), so more than about 31 of your own voice
@@ -91,8 +102,9 @@ large a round message is drawn in chats: 100, 150, 200 or 250% of upstream's
   round carries an ephemeral plate Purple leaves upstream's limit, which is
   already computed from the larger round.
 - Changing the size re-measures every round message in loaded chat
-  histories at once. Rounds in other lists (replies, pinned, scheduled) take
-  the new size when the list is next opened. Moving the window to a screen
+  histories at once, in every list that shows it (`requestItemResize`).
+  Rounds only loaded in another list (replies, pinned, scheduled) take the
+  new size when that list is next opened. Moving the window to a screen
   with another pixel ratio changes Actual size from the next layout.
 - Larger sizes look softer: a 400px recording drawn at 480px on a 2x screen
   is a 2.4x upscale. The row's caption says so.
@@ -122,8 +134,9 @@ size" instead, plus the float's shadow margins.
 ## Floating round controls
 
 The floating round is still dragged as before, and dragging it mostly off
-the window still closes it. Hovering over it shows three buttons along the
-bottom of the circle:
+the window still closes it. Hovering over it shows a row of three buttons
+across the middle of the circle, where it is widest, so the row fits the
+stock 128px circle too:
 
 - Open the message: what a double-click on the float did upstream. It goes
   through the same callback, so the chat opens the same way.
@@ -132,10 +145,9 @@ bottom of the circle:
 
 Clicks land only on the buttons; a press anywhere else still drags, and a
 single click still pauses or resumes. A double-click on the float now
-restarts the round from 0:00, like a double-click on a round in a chat. When
-the round cannot be restarted yet (it is not streaming), the double-click
-keeps upstream's behaviour and opens the message. The buttons hide while the
-float is dragged.
+restarts the round from 0:00, like a double-click on a round in a chat,
+including one that is not streaming yet. The buttons hide while the float is
+dragged and come back when the drag ends with the pointer still over it.
 
 Following the queue: when the next voice or round message starts on its own,
 upstream already leaves the chat where it is if you scrolled away.
@@ -176,14 +188,15 @@ fails when a merge drops one of them.
 ## Tests
 
 - `purple/tests/media_restart_cases.cpp` (gate `cases-media-restart`): the
-  restart decision for every reason to decline.
+  restart decision for every reason to decline, seek against replay, and the
+  handler-context resolution.
 - `purple/tests/media_size_cases.cpp` (gate `cases-media-size`): the stored
   preference, the sides for every choice including Actual size, the column
   clamp, the bubble limit and the float size with its window cap.
 - `purple/tests/voice_queue_cases.cpp` (gate `cases-voice-queue`): the walk
   over a fake playlist (skips yours, stops at the edge, declines when not
-  confined) and the manual or automatic classification, with the real
-  purple-core rule.
+  confined), the manual or automatic classification with its expiry, and
+  which chats count as one-to-one, with the real purple-core rule.
 - `purple/test_media_hooks.py` (gate `test_media_hooks`): the hook pins.
 - Needs a GUI check after a build: double-click a playing and a paused voice
   message and round, in a chat and in a replies thread; each size, Actual

@@ -2,7 +2,6 @@ using "ui/basic.style";
 
 purpleFloatButtonSize: 32px;
 purpleFloatButtonSkip: 6px;
-purpleFloatButtonBottom: 10px;
 purpleFloatOpenIcon: icon {{ "menu/show_in_chat", msgDateImgFg }};
 purpleFloatPauseIcon: icon {{ "media_pause", msgDateImgFg }};
 purpleFloatPlayIcon: icon {{ "media_play", msgDateImgFg }};

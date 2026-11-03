@@ -13,14 +13,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple::MediaRules {
 
-bool RestartsOnDoubleClick(const RestartFacts &facts) {
-	return facts.leftButton
+Restart RestartOnDoubleClick(const RestartFacts &facts) {
+	const auto restarts = facts.leftButton
 		&& !facts.selecting
 		&& facts.documentOpen
 		&& facts.voiceOrRound
 		&& !facts.viewOnce
-		&& facts.currentTrack
-		&& facts.seekable;
+		&& facts.currentTrack;
+	return !restarts
+		? Restart::None
+		: facts.seekable
+		? Restart::Seek
+		: Restart::Replay;
 }
 
 int VideoMessageScaleFrom(std::optional<int> stored) {

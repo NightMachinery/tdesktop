@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_voice_queue_rules.h"
 
 #include "base/weak_ptr.h"
+#include <crl/crl_on_main.h>
 #include "data/data_document.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -43,14 +44,12 @@ rpl::lifetime Lifetime;
 }
 
 [[nodiscard]] PlaybackChat ChatOf(not_null<PeerData*> peer) {
-	if (peer->isSelf()) {
-		return PlaybackChat::Self;
-	} else if (peer->isUser()
-		&& !peer->isRepliesChat()
-		&& !peer->isVerifyCodes()) {
-		return PlaybackChat::OneToOne;
-	}
-	return PlaybackChat::Other;
+	return VoiceQueueRules::PlaybackChatFor({
+		.self = peer->isSelf(),
+		.user = peer->isUser(),
+		.replies = peer->isRepliesChat(),
+		.verifyCodes = peer->isVerifyCodes(),
+	});
 }
 
 void AnchorManualPlay(const AudioMsgId &played) {
@@ -97,7 +96,9 @@ void StartVoiceQueue() {
 	) | rpl::filter([](const Media::Player::Instance::Switch &pair) {
 		return (pair.from.type() == Type::Voice);
 	}) | rpl::on_next([](const Media::Player::Instance::Switch &pair) {
-		Plays.automaticNext(KeyOf(pair.to));
+		const auto key = KeyOf(pair.to);
+		Plays.automaticNext(key);
+		crl::on_main([=] { Plays.expire(key); });
 	}, Lifetime);
 	player->trackChanged(
 	) | rpl::filter([](Type type) {

@@ -22,6 +22,15 @@ enum class Candidate {
 	Outgoing,
 };
 
+struct ChatFacts {
+	bool self = false;
+	bool user = false;
+	bool replies = false;
+	bool verifyCodes = false;
+};
+
+[[nodiscard]] PlaybackChat PlaybackChatFor(ChatFacts facts);
+
 [[nodiscard]] std::optional<int> ConfinedIndex(
 	VoiceQueueAnchor anchor,
 	int from,
@@ -32,6 +41,7 @@ using PlayKey = std::pair<std::uint64_t, std::int64_t>;
 class PlayTracker final {
 public:
 	void automaticNext(PlayKey key);
+	void expire(PlayKey key);
 	[[nodiscard]] bool manual(PlayKey played);
 
 private:
