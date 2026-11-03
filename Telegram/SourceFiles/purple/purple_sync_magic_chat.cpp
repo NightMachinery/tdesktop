@@ -171,6 +171,7 @@ QString SyncMagicTriggerName(SyncMagicTrigger trigger) {
 	case SyncMagicTrigger::Manual: return u"manual"_q;
 	case SyncMagicTrigger::Auto: return u"auto"_q;
 	case SyncMagicTrigger::Post: return u"post"_q;
+	case SyncMagicTrigger::Retry: return u"retry"_q;
 	}
 	return QString();
 }
@@ -307,6 +308,7 @@ void SyncMagicChat::lookup(SyncMagicTrigger trigger, bool fresh, Done done) {
 		_running = true;
 		_created = false;
 		_resumed = false;
+		_partial = false;
 		_allChats.reset();
 		_retried.clear();
 		_trigger = trigger;
@@ -370,6 +372,27 @@ void SyncMagicChat::close() {
 	});
 }
 
+int64_t SyncMagicChat::waitUntil(const QString &method) const {
+	const auto bytes = _port->readBinding();
+	const auto binding = bytes ? Parse(*bytes) : std::nullopt;
+	return binding ? SyncChatWaitUntil(*binding, method, _port->now()) : 0;
+}
+
+void SyncMagicChat::recordWait(const QString &method, int64_t retryAt) {
+	later([=] {
+		const auto kept = !_closed && _port->current() && edit([&](SyncChatBinding &binding) {
+			RecordSyncChatWait(binding, method, retryAt);
+			return true;
+		});
+		if (kept) {
+			_port->diag(u"wait_recorded"_q, {
+				Method(method),
+				SyncDiagSeconds(std::max(int64_t(0), retryAt - _port->now())),
+			});
+		}
+	});
+}
+
 void SyncMagicChat::step(uint64_t run) {
 	if (!live(run)) {
 		finish(run, SyncMagicResult());
@@ -382,19 +405,23 @@ void SyncMagicChat::step(uint64_t run) {
 		return;
 	}
 	_binding = parsed;
-	if (parsed->problem != SyncChatProblem::None
-		&& _trigger == SyncMagicTrigger::Manual
-		&& !_resumed) {
+	if (_trigger == SyncMagicTrigger::Manual && !_resumed) {
 		_resumed = true;
-		const auto cleared = edit([](SyncChatBinding &binding) {
-			ClearSyncChatProblem(binding);
+		const auto paused = (parsed->problem != SyncChatProblem::None);
+		const auto cleared = edit([&](SyncChatBinding &binding) {
+			ReadmitSyncChatCandidates(binding);
+			if (paused) {
+				ClearSyncChatProblem(binding);
+			}
 			return true;
 		});
 		if (!cleared) {
 			unavailable(run, u"binding_unreadable"_q);
 			return;
 		}
-		_port->diag(u"auto_resumed"_q, { SyncDiagReason(u"user_check"_q) });
+		if (paused) {
+			_port->diag(u"auto_resumed"_q, { SyncDiagReason(u"user_check"_q) });
+		}
 		step(run);
 		return;
 	}
@@ -437,6 +464,10 @@ void SyncMagicChat::planned(
 			return;
 		}
 		const auto found = Find(*_allChats, binding.chat->id);
+		if (!found && _partial) {
+			listPartial(run);
+			return;
+		}
 		input.bound = found ? *found : MagicChatCandidate();
 		input.boundState = found
 			? SyncChatBoundState::Present
@@ -466,15 +497,67 @@ void SyncMagicChat::planned(
 }
 
 void SyncMagicChat::proveAbsent(uint64_t run, const SyncChatBinding &binding) {
-	using List = std::vector<MagicChatCandidate>;
-	gated<List>(run, binding, QString::fromLatin1(kSyncChatAllChatsMethod), [=](auto done) {
-		_port->allChats(std::move(done));
-	}, [=](std::optional<List> list) {
-		_allChats = list.value_or(List());
+	page(run, binding, {}, {}, 1);
+}
+
+// WHY: only a complete list proves no magic chat exists. A slice is paged with except_ids; a list still
+// partial after kSyncMagicAllChatsPages pages is used only for the magic chats it holds, or else waits.
+void SyncMagicChat::page(
+		uint64_t run,
+		const SyncChatBinding &binding,
+		std::vector<uint64_t> seen,
+		std::vector<MagicChatCandidate> found,
+		int pages) {
+	const auto method = QString::fromLatin1(kSyncChatAllChatsMethod);
+	gated<SyncMagicChats>(run, binding, method, [=](auto done) {
+		_port->allChats(seen, std::move(done));
+	}, [=](std::optional<SyncMagicChats> chats) {
+		auto all = found;
+		auto ids = seen;
+		if (chats) {
+			all.insert(end(all), begin(chats->candidates), end(chats->candidates));
+			for (const auto id : chats->ids) {
+				if (std::find(begin(ids), end(ids), id) == end(ids)) {
+					ids.push_back(id);
+				}
+			}
+		}
+		_partial = chats
+			&& chats->count >= 0
+			&& int64_t(ids.size()) < chats->count
+			&& !chats->ids.empty();
+		if (_partial && pages < kSyncMagicAllChatsPages) {
+			page(run, binding, std::move(ids), std::move(all), pages + 1);
+			return;
+		} else if (_partial && Titled(all).empty()) {
+			listPartial(run);
+			return;
+		}
+		_allChats = std::move(all);
 		step(run);
-	}, [=](SyncMagicReply<List>) {
-		unavailable(run, u"rpc"_q);
+	}, [=](SyncMagicReply<SyncMagicChats>) {
+		backOff(run, method);
 	});
+}
+
+void SyncMagicChat::listPartial(uint64_t run) {
+	_port->diag(u"lookup_result"_q, {
+		SyncDiagCode(u"result"_q, u"absent_waiting"_q),
+		SyncDiagReason(u"list_partial"_q),
+	});
+	hold(run, QString::fromLatin1(kSyncChatAllChatsMethod), _port->now() + kSyncMagicPartialWait, nullptr);
+}
+
+// A refusal that is not a flood (PEER_FLOOD, an unexpected 400) is not sent again by every lookup.
+void SyncMagicChat::backOff(uint64_t run, const QString &method) {
+	const auto seconds = std::min(
+		kSyncMagicErrorWait << std::min(_errors++, 8),
+		int64_t(24 * 60 * 60));
+	_port->diag(u"lookup_result"_q, {
+		SyncDiagCode(u"result"_q, u"absent_waiting"_q),
+		SyncDiagReason(u"rpc"_q),
+	});
+	hold(run, method, _port->now() + seconds, nullptr);
 }
 
 void SyncMagicChat::verify(
@@ -503,6 +586,11 @@ void SyncMagicChat::verify(
 		if (!next) {
 			unavailable(run, u"binding_unreadable"_q);
 			return;
+		} else if (found != SyncChatProblem::None
+			&& SyncChatCandidateRejected(*next, id)) {
+			_port->diag(u"rejected"_q, { SyncDiagReason(SyncChatProblemCode(found)) });
+			step(run);
+			return;
 		} else if (found != SyncChatProblem::None) {
 			problem(run, found, !next->problemShown, next, &input);
 			return;
@@ -515,7 +603,7 @@ void SyncMagicChat::verify(
 		}
 		step(run);
 	}, [=](SyncMagicReply<MagicChatCandidate>) {
-		unavailable(run, u"rpc"_q);
+		backOff(run, QString::fromLatin1(kSyncChatFullInfoMethod));
 	});
 }
 
@@ -571,7 +659,7 @@ void SyncMagicChat::create(uint64_t run, const SyncChatBinding &binding) {
 				bytes ? Parse(*bytes) : std::nullopt,
 				nullptr);
 		} else {
-			unavailable(run, u"rpc"_q);
+			backOff(run, QString::fromLatin1(kSyncChatCreateMethod));
 		}
 	}, [=] {
 		uncertain(run, started);
@@ -670,6 +758,7 @@ void SyncMagicChat::done(
 		SyncDiagCount(u"count"_q, Candidates(input)),
 	});
 	_failures = 0;
+	_errors = 0;
 	finish(run, std::move(result));
 }
 
@@ -708,7 +797,7 @@ void SyncMagicChat::schedule(int64_t retryAt) {
 	const auto weak = std::weak_ptr<int>(_guard);
 	_port->delay([=] {
 		if (weak.lock() && wake == _wake) {
-			lookup(_trigger, false);
+			lookup(SyncMagicTrigger::Retry, false);
 		}
 	}, std::max(int64_t(1000), (retryAt - _port->now()) * 1000));
 }

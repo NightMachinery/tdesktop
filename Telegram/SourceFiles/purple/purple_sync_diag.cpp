@@ -44,6 +44,7 @@ const std::vector<QString> &Words() {
 		u"user_action"_q, u"choose"_q, u"default"_q, u"join"_q,
 		u"listed"_q, u"value"_q, u"on"_q, u"off"_q,
 		u"action"_q, u"slot"_q, u"lists_unreadable"_q, u"native_unavailable"_q,
+		u"rejected"_q, u"wait_recorded"_q, u"retry"_q,
 	};
 	return result;
 }

@@ -16,7 +16,7 @@
 
 namespace Purple {
 
-enum class SyncMagicTrigger { Startup, Screen, Manual, Auto, Post };
+enum class SyncMagicTrigger { Startup, Screen, Manual, Auto, Post, Retry };
 
 template <typename T>
 struct SyncMagicReply {
@@ -37,6 +37,13 @@ struct SyncMagicReply {
 	[[nodiscard]] static SyncMagicReply TimedOut() {
 		return { std::nullopt, QString(), -504, true };
 	}
+};
+
+// One messages.getAllChats page: its megagroups, every chat id it named, and the total of a slice (-1 when complete).
+struct SyncMagicChats {
+	std::vector<MagicChatCandidate> candidates;
+	std::vector<uint64_t> ids;
+	int64_t count = -1;
 };
 
 struct SyncMagicLocal {
@@ -63,8 +70,9 @@ public:
 	virtual void local(
 		std::optional<PeerToken> bound,
 		std::function<void(std::optional<SyncMagicLocal>)> done) = 0;
-	virtual void allChats(std::function<void(
-		SyncMagicReply<std::vector<MagicChatCandidate>>)> done) = 0;
+	virtual void allChats(
+		std::vector<uint64_t> except,
+		std::function<void(SyncMagicReply<SyncMagicChats>)> done) = 0;
 	virtual void fullInfo(
 		uint64_t channelId,
 		std::function<void(SyncMagicReply<MagicChatCandidate>)> done) = 0;
@@ -93,6 +101,9 @@ struct SyncMagicResult {
 };
 
 inline constexpr auto kSyncMagicShortFlood = int64_t(30);
+inline constexpr auto kSyncMagicAllChatsPages = 5;
+inline constexpr auto kSyncMagicPartialWait = int64_t(60 * 60);
+inline constexpr auto kSyncMagicErrorWait = int64_t(10 * 60);
 inline constexpr auto kSyncMagicFoldersMethod = "folders.editPeerFolders";
 inline constexpr auto kSyncMagicNotifyMethod = "account.updateNotifySettings";
 
@@ -150,6 +161,8 @@ public:
 	void shown();
 	void raise(SyncChatProblem problem);
 	void close();
+	[[nodiscard]] int64_t waitUntil(const QString &method) const;
+	void recordWait(const QString &method, int64_t retryAt);
 
 private:
 	using Change = std::function<bool(SyncChatBinding&)>;
@@ -165,6 +178,14 @@ private:
 		const SyncChatBinding &binding,
 		std::optional<SyncMagicLocal> local);
 	void proveAbsent(uint64_t run, const SyncChatBinding &binding);
+	void page(
+		uint64_t run,
+		const SyncChatBinding &binding,
+		std::vector<uint64_t> seen,
+		std::vector<MagicChatCandidate> found,
+		int pages);
+	void listPartial(uint64_t run);
+	void backOff(uint64_t run, const QString &method);
 	void verify(
 		uint64_t run,
 		const SyncChatBinding &binding,
@@ -236,9 +257,11 @@ private:
 	bool _closed = false;
 	bool _created = false;
 	bool _resumed = false;
+	bool _partial = false;
 	uint64_t _generation = 0;
 	uint64_t _wake = 0;
 	int _failures = 0;
+	int _errors = 0;
 
 };
 

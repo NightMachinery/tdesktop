@@ -169,11 +169,18 @@ public:
 		}
 		done(std::move(result));
 	}
-	void allChats(std::function<void(SyncMagicReply<std::vector<MagicChatCandidate>>)> done) override {
-		using Reply = SyncMagicReply<std::vector<MagicChatCandidate>>;
+	void allChats(
+			std::vector<uint64_t> except,
+			std::function<void(SyncMagicReply<SyncMagicChats>)> done) override {
+		using Reply = SyncMagicReply<SyncMagicChats>;
 		const auto weak = base::make_weak(_session.get());
-		send<MTPmessages_GetAllChats, std::vector<MagicChatCandidate>>(
-			MTPmessages_GetAllChats(MTP_vector<MTPlong>()),
+		auto ids = QVector<MTPlong>();
+		ids.reserve(int(except.size()));
+		for (const auto id : except) {
+			ids.push_back(MTP_long(int64_t(id)));
+		}
+		send<MTPmessages_GetAllChats, SyncMagicChats>(
+			MTPmessages_GetAllChats(MTP_vector<MTPlong>(std::move(ids))),
 			std::move(done),
 			[=](const MTPmessages_Chats &result) {
 				const auto session = weak.get();
@@ -184,11 +191,19 @@ public:
 					return data.vchats();
 				});
 				session->data().processChats(chats);
-				auto list = std::vector<MagicChatCandidate>();
+				auto list = SyncMagicChats();
+				list.count = result.match([](const MTPDmessages_chats &) {
+					return int64_t(-1);
+				}, [](const MTPDmessages_chatsSlice &data) {
+					return int64_t(data.vcount().v);
+				});
 				for (const auto &chat : chats.v) {
+					list.ids.push_back(uint64_t(chat.match([](const auto &data) {
+						return int64_t(data.vid().v);
+					})));
 					const auto candidate = SyncMagicCandidate(chat, nullptr);
 					if (candidate && candidate->megagroup) {
-						list.push_back(*candidate);
+						list.candidates.push_back(*candidate);
 					}
 				}
 				return Reply::Ok(std::move(list));

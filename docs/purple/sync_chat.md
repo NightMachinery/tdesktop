@@ -13,13 +13,20 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
   compare-and-set through `WriteGuardedSettingsFile`. It records the mode
   (magic or manual), the chat, when its full info was last read, the
   Telegram methods that must not be sent before a deadline, the creation
-  journal, a problem and whether it was shown, and the list choice.
+  journal, a problem and whether it was shown, the list choice, and the
+  candidates that failed verification.
 - **Lookup**: one at a time per account; a trigger that arrives while one runs
-  shares its result. Triggers are startup, screen, manual, auto and post.
+  shares its result. Triggers are startup, screen, manual, auto, post and
+  retry (the timed wake-up after a wait, never taken for a user's check).
   The local candidates are the magic-titled chats in the main and archive
-  dialog lists. With none visible, one `messages.getAllChats` proves absence
+  dialog lists. With none visible, `messages.getAllChats` proves absence
   before anything is created; the same reply settles a bound chat that is not
-  in memory. Desktop's schema has no such method, so
+  in memory. Desktop keeps no local chat database, so that costs one request
+  per process, after which the reply's chats are in memory. A reply the
+  server sliced (`messages.chatsSlice`) is paged with `except_ids`, up to five
+  pages; a list still incomplete proves nothing absent, so the lookup never
+  creates from it and waits an hour (`list_partial`), though a magic chat on
+  a page is still found. Desktop's schema has no such method, so
   purple_sync_magic_telegram declares the request itself.
 - **Create**: `channels.createChannel` (megagroup), then archive
   (`folders.editPeerFolders`, folder 1) and mute
@@ -27,12 +34,23 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
   is logged and the lookup goes on. A lost reply blocks another creation for a
   day; the chat binds when it appears. A creation limit is a problem.
 - **Verify**: `channels.getFullChannel` confirms the member and admin counts
-  before a chat is bound, and again at most once a day before a post.
+  before a chat is bound, and again at most once a day before a post. Another
+  candidate that fails (an older magic chat someone joined, say) is only
+  rejected: core keeps it in the binding and skips it, so sync goes on in the
+  bound chat and an unbound lookup tries the next one. A manual check
+  considers rejected chats again.
 - **Waits**: a flood of up to 30 seconds is retried once in place. A longer
   one, a network failure, a timeout or a 5xx error records a deadline for its
   method in the binding (5, 10, 20, 40, then 60 seconds of backoff for the
-  latter) and the lookup answers Wait. Every trigger honours the deadline,
-  across restarts. Waits never pause automatic sync.
+  latter) and the lookup answers Wait. Any other refusal of getAllChats,
+  createChannel or getFullChannel (`PEER_FLOOD`, an unexpected 400) is kept
+  the same way for ten minutes, doubling up to a day. Every trigger honours
+  the deadline, across restarts. Waits never pause automatic sync.
+- **Sync request waits**: a flood over 30 seconds on a record read, post,
+  edit, deletion or upload sent through `SyncRequestSender` is kept in the
+  same binding under its method (`wait_recorded`), and every sender holds
+  that method's requests until it ends, after a restart too. The emoji
+  exporter, which hands long waits back to its own queue, keeps none.
 - **Problems**: a chat that is gone, left, shared, public, restricted or
   unpostable, a creation limit, magic-titled chats none of which is eligible,
   or another sync group's records in the chat. A problem pauses automatic sync
