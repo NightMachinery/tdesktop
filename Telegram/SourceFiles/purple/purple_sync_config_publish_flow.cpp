@@ -40,7 +40,7 @@ bool OneSyncSpace(const SyncAccountInventoryResult &inventory) {
 }
 
 // WHY: a magic chat may also hold the records of a device that lost the race to start the first space;
-// every device joins the earliest space, the one core selects.
+// every device joins the space core selects: the lowest space id, not always the earliest.
 bool SelectedSyncSpace(const SyncAccountInventoryResult &inventory) {
 	const auto &space = inventory.directory.selectedSpace;
 	const auto &records = inventory.read ? inventory.read->records : std::vector<SyncCandidateRecord>();

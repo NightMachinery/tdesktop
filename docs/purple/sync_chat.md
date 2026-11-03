@@ -101,7 +101,7 @@ lookup reports a new bound chat and when the Sync screen's Check starts
 it again. The Sync screen and the publish flow take the bound chat's lease
 and the binding file as their authority; the legacy setup snapshot and
 discovery cache are checked only when they exist. A first publish to a
-verified magic chat joins the space core selects there (the earliest one), even
+verified magic chat joins the space core selects there (the lowest space id, which is the earliest only for time-ordered ids from correct clocks), even
 when the chat also holds the records of a device that lost the race to start it.
 
 The automatic facts call the chat resolved when the lookup's chat equals the
