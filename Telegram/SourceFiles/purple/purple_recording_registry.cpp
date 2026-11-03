@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <charconv>
 #include <cstring>
 #include <map>
+#include <set>
 #include <utility>
 #include <variant>
 
@@ -66,6 +67,10 @@ struct Value {
 class Parser final {
 public:
 	explicit Parser(const std::string &text) : _text(text) {
+	}
+
+	[[nodiscard]] bool dropped() const {
+		return _dropped;
 	}
 
 	[[nodiscard]] std::optional<Value> document() {
@@ -189,6 +194,8 @@ private:
 					return std::nullopt;
 				} else if (result.size() < kMaxEntries) {
 					result.push_back(std::move(*item));
+				} else {
+					_dropped = true;
 				}
 			} while (take(','));
 			return take(']') ? std::optional(Value{ std::move(result) }) : std::nullopt;
@@ -204,6 +211,7 @@ private:
 
 	const std::string &_text;
 	std::size_t _at = 0;
+	bool _dropped = false;
 
 };
 
@@ -438,7 +446,8 @@ Manifest Decode(const std::string &text, ReadStatus *status) {
 	if (text.find_first_not_of(" \t\r\n") == std::string::npos) {
 		return set(ReadStatus::Empty);
 	}
-	const auto document = Parser(text).document();
+	auto parser = Parser(text);
+	const auto document = parser.document();
 	const auto object = document
 		? std::get_if<Object>(&document->data)
 		: nullptr;
@@ -455,7 +464,7 @@ Manifest Decode(const std::string &text, ReadStatus *status) {
 		return set(ReadStatus::Damaged);
 	}
 	auto result = Manifest();
-	auto damaged = false;
+	auto damaged = parser.dropped();
 	for (const auto &item : *list) {
 		if (auto entry = ReadEntry(item); entry && !result.find(entry->id)) {
 			result.entries.push_back(std::move(*entry));
@@ -547,13 +556,34 @@ std::optional<std::size_t> MatchSent(
 	if (exact) {
 		return exact;
 	}
-	return earliest([&](const Entry &entry) {
-		return entry.fromListen
+	const auto waiting = [&](const Entry &entry) {
+		return same(entry)
+			&& entry.fromListen
 			&& (entry.state == State::Sending
 				|| (entry.state == State::Discarded
 					&& entry.binned <= facts.now
 					&& facts.now - entry.binned <= kListenSendWindowSeconds));
-	});
+	};
+	auto result = std::optional<std::size_t>();
+	auto sized = false;
+	for (auto i = std::size_t(); i != manifest.entries.size(); ++i) {
+		const auto &entry = manifest.entries[i];
+		if (!waiting(entry)) {
+			continue;
+		}
+		const auto match = (entry.kind == Kind::Voice)
+			&& facts.size >= 0
+			&& mediaSize
+			&& mediaSize(entry) == facts.size;
+		if (!result
+			|| (match && !sized)
+			|| (match == sized
+				&& entry.binned >= manifest.entries[*result].binned)) {
+			result = i;
+			sized = match;
+		}
+	}
+	return result;
 }
 
 std::vector<std::string> GroupOf(
@@ -703,6 +733,13 @@ std::vector<std::string> Expired(
 		}
 	}
 	return result;
+}
+
+bool FirstTopicRequest(
+		std::set<std::int64_t> &requested,
+		std::int64_t topic,
+		bool deleted) {
+	return topic && !deleted && requested.insert(topic).second;
 }
 
 std::vector<std::string> OfAccount(const Manifest &manifest, int account) {

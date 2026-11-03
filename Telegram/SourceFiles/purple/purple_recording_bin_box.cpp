@@ -41,6 +41,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QFile>
 #include <QtGui/QPainterPath>
 
+#include <set>
+
 namespace Purple {
 namespace {
 
@@ -57,6 +59,7 @@ struct Playing {
 
 struct BinState {
 	Playing playing;
+	std::set<std::int64_t> requestedTopics;
 	Fn<void()> rebuild;
 };
 
@@ -115,6 +118,7 @@ struct BinState {
 
 [[nodiscard]] Data::Thread *OriginalThread(
 		const RecordingBinItem &item,
+		std::set<std::int64_t> *requested = nullptr,
 		Fn<void()> topicLoaded = nullptr) {
 	const auto history = HistoryOf(item);
 	if (!history || !item.topic) {
@@ -125,7 +129,10 @@ struct BinState {
 		return nullptr;
 	} else if (const auto topic = forum->topicFor(item.topic)) {
 		return topic;
-	} else if (topicLoaded) {
+	} else if (requested && RecordingRegistry::FirstTopicRequest(
+			*requested,
+			item.topic.bare,
+			forum->topicDeleted(item.topic))) {
 		forum->requestTopic(item.topic, std::move(topicLoaded));
 	}
 	return nullptr;
@@ -266,7 +273,7 @@ void AddItem(
 			: tr::lng_purple_recording_bin_play(tr::now), [=] {
 			TogglePlay(box, state, copy);
 		});
-		if (OriginalThread(item, crl::guard(box, [=] { state->rebuild(); }))) {
+		if (OriginalThread(item, &state->requestedTopics, crl::guard(box, [=] { state->rebuild(); }))) {
 			add(tr::lng_purple_recording_bin_send(tr::now), [=] {
 				if (const auto thread = OriginalThread(copy)) {
 					Send(box, id, thread);

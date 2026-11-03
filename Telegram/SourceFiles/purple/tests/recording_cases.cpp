@@ -16,6 +16,7 @@
 #include <iterator>
 #include <map>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -403,7 +404,10 @@ int main() {
 	}
 	many += "]}";
 	const auto longest = Registry::Decode(many, &readStatus);
-	expect(longest.entries.size() == 4096 && readStatus == Registry::ReadStatus::Ok, "an over-long manifest keeps its first entries instead of failing whole");
+	expect(longest.entries.size() == 4096 && readStatus == Registry::ReadStatus::Damaged, "an over-long manifest keeps its first entries and reads as damaged, so nothing is deleted as a stray");
+	auto requested = std::set<std::int64_t>();
+	expect(Registry::FirstTopicRequest(requested, 7, false) && !Registry::FirstTopicRequest(requested, 7, false), "a topic is requested once per box");
+	expect(!Registry::FirstTopicRequest(requested, 8, true) && !Registry::FirstTopicRequest(requested, 0, false), "a deleted topic, or none, is never requested");
 
 	{
 		using Registry::State;
@@ -484,11 +488,27 @@ int main() {
 		stop(StopKind::Send, true, 401);
 		close(401, true);
 		expect(settle(7000, 402) == std::vector<std::string>{ "f5" } && flow.find("f4"), "a direct send of the same size settles the new recording, not an older preview discard");
-		expect(settle(5555, 403) == std::vector<std::string>{ "f4" }, "the preview discard stays for a later preview send only");
+		expect(settle(5555, 403) == std::vector<std::string>{ "f4" }, "a preview send with no other candidate settles the waiting preview entry");
 		record(7000);
 		stop(StopKind::Send, true, 500);
 		close(500, true);
 		expect(settle(1234, 501).empty() && flow.find("f6"), "a voice of another size, such as a forward, does not settle a recording");
+
+		record(3000);
+		stop(StopKind::Listen, true, 700);
+		stop(StopKind::Cancel, true, 701);
+		close(701, true);
+		record(4000);
+		stop(StopKind::Listen, true, 710);
+		stop(StopKind::Cancel, true, 711);
+		close(711, true);
+		expect(settle(3900, 712) == std::vector<std::string>{ "f8" } && flow.find("f7"), "a trimmed preview send settles the latest preview entry, never an earlier discard");
+		record(5000);
+		stop(StopKind::Listen, true, 720);
+		stop(StopKind::Cancel, true, 721);
+		close(721, true);
+		expect(settle(3000, 722) == std::vector<std::string>{ "f7" } && flow.find("f9"), "an exact size wins over the latest");
+		flow.remove("f9");
 
 		flow.entries.push_back({ .id = "r1", .account = 0, .peer = 9, .kind = Registry::Kind::Round, .started = 600, .group = "r1", .media = "r1.mp4.prc", .state = State::Recording });
 		flow.entries.push_back({ .id = "r2", .account = 0, .peer = 9, .kind = Registry::Kind::Round, .started = 601, .group = "r1", .media = "r2.mp4.prc", .state = State::Recording });

@@ -159,7 +159,8 @@ recording file is kept, and each one no surviving entry names is adopted as
 an "Unknown chat" item and goes through recovery like a crash. Stray files
 are deleted only after a clean read, or when there is no manifest at all. If
 the manifest cannot even be moved aside, nothing is loaded until the next
-session start. A manifest longer than 4096 entries keeps its first 4096. The
+session start. A manifest longer than 4096 entries keeps its first 4096 and counts as
+not read cleanly, so nothing is deleted as a stray. The
 temporary file of every whole-file write is flushed to disk before the
 rename. A profile started under another data name (`-key`) keeps its own
 directory, `recordings-<name>`. CTR has no authentication, as the owner chose; a
@@ -212,7 +213,9 @@ passcode. Until then nothing is mirrored.
   settles a waiting recording of the same account, chat and kind only when
   its document is exactly the mirror's size (the mirror holds the sent
   bytes); only a recording stopped from the preview, whose sent copy may be
-  trimmed, is matched without the size, and only after no exact match. A
+  trimmed, is matched without the size, and only after no exact match;
+  among those, one of exactly the sent size wins, otherwise the latest one
+  stopped, never an earlier discard. A
   round has no size match. A round in several parts is settled whole.
 - A recording upstream never sends (a voice under a second, a round under
   200 ms) is dropped from `sending` once its file is finalised. A write at
@@ -308,7 +311,8 @@ mark: "Recovered after a crash", "Partly recovered", "Not sent",
   `Editor::SegmentPlayer`, from memory; nothing decrypted touches the disk.
 - Send sends it to its own chat and topic, with the recording's own account.
   A recording made in a forum topic is never sent to General instead: until
-  that topic is loaded (the box asks for it) there is no Send button, and a
+  that topic is loaded (the box asks for it once, and never for a deleted
+  topic) there is no Send button, and a
   deleted topic, or a chat that is no longer a forum, never gets one. The chat
   is found among every peer the account knows, not only the open dialogs, and
   the box refreshes when a peer's name arrives. It is sent

@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -203,6 +204,11 @@ struct CloseResult {
 [[nodiscard]] std::vector<std::string> Expired(
 	const Manifest &manifest,
 	const std::function<bool(std::int64_t binned)> &expired);
+
+[[nodiscard]] bool FirstTopicRequest(
+	std::set<std::int64_t> &requested,
+	std::int64_t topic,
+	bool deleted);
 
 [[nodiscard]] std::vector<std::string> OfAccount(
 	const Manifest &manifest,
