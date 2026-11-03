@@ -194,3 +194,107 @@ it.
   macOS shortcut check (finding 1) and the media viewer case (finding 2).
 - Whatever keys fix finding 1, extend `SHORTCUT_LINES` to pin them, including
   any `MediaCommands` entries added for finding 2.
+
+## Re-check 1
+
+Scope: `903eb4a..2e58de3` on `recording` (one commit, "Fix the seek keys and
+seeking back after a track ends"). Read-only; `recording` was not changed.
+Checks run here: `recording_cases.cpp` with `g++ -std=c++20 -Wall -Wextra`
+passes 41/41 with no warnings; `purple/test_media_hooks.py` passes 40/40; the
+`test_media_hooks` and `test_wait_routes` host gates pass. The app still
+cannot be built on this VM.
+
+Verdict: CHANGES. P1=0 P2=1 (finding 3 is not fixed). No new P1 or P2.
+
+### Findings from the first pass
+
+- **1 (P1), macOS keys: fixed.** `fillDefaults` now calls
+  `set(Purple::SeekShortcutKeys(±1), ...)`, which gives `ctrl+alt+left/right`
+  on macOS (Command+Option+Arrow, since Qt maps `ctrl` to Command and this
+  app does not set `AA_MacDontSwapCtrlAndMeta`) and keeps `alt+shift+left/right`
+  elsewhere. Command+Option+Arrow is not in Qt's macOS text-editing key table
+  (word moves are Option+Arrow, line moves Command+Arrow, selection adds
+  Shift), so `QInputControl::isCommonTextEditShortcut` does not claim it and
+  a focused message field no longer swallows the key. Upstream binds no
+  Left/Right with Command+Option (its `ctrl+alt` defaults are Home and End).
+  The `QString` argument binds to the `set(const QString &, Command, bool)`
+  overload (an exact match beats the conversion to `QKeySequence`), so the
+  keys are parsed as `PortableText` like every other default. On Windows and
+  Linux, word selection is Ctrl+Shift+Arrow, so Alt+Shift+Arrow in a text
+  field reaches the seek, as intended.
+- **2 (P2), keys taken app-wide: fixed.** Both commands are now in
+  `MediaCommands`, so their actions start disabled and are switched by
+  `ToggleMediaShortcuts`. That means on from `MainWidget` showing the player
+  bar, and off in `Instance::stopAndClose`. With no bar, macOS word
+  selection in the message list and the media viewer's Alt+Arrow timestamp
+  jump get their keys back. One narrow leftover, documented by the author:
+  on Windows and Linux, while the bar is shown, Alt+Shift+Arrow in the media
+  viewer still seeks the background audio instead of jumping a timestamp.
+  Plain Alt+Arrow still works there. Not counted.
+- **3 (P2), back after a song ends: not fixed.** `PlanSeek` now treats a
+  stopped current track as sitting at its end and plans `SeekPlaying` to
+  `length − step`, and a case tests that. That state is never reached in
+  the app. Trace: a song plays to its end. `handleStreamingUpdate` gets
+  `Finished`, calls `emitUpdate`, and then, because `player().finished()`
+  is true, calls `clearStreamed(data)`, which sets `data->streamed` to
+  null. `handleStreamingError` does the same after a failure, and
+  `Instance::stop` does it for a user stop. From then on
+  `Instance::getState(type)` returns a default `TrackState`, whose `id` is
+  empty. So `SeekFacts.current` is false and `PlanSeek` returns `Decline`.
+  The bar still shows the song, and "−10", the float and the shortcut do
+  nothing. Even if `SeekPlaying` were planned, `finishSeeking` would reach
+  `seekStreamed`, which returns at once with no `streamed`.
+  `media_recording.md` now promises that "−10" right after a song ends
+  replays its last ten seconds; it does not. The case "back after the end
+  replays the last step" only proves the plan for a state the player never
+  reports.
+
+  Fix, still without a hook: when the type's `current()` is set and there
+  is no streamed state, `SeekBy` with direction −1 starts
+  `player->play(current)`. On the first `updatedNotifier` state for that id
+  with a known length, it then calls `finishSeeking(type, (length − step) /
+  length)`. Forward stays a no-op. If that is not wanted, drop the stopped
+  branch and the doc promise instead.
+
+  Correction to my first pass: I wrote that the system media controls
+  "disagree" here because upstream's skip branch replays from 15 s before
+  the end. That was wrong for the same reason: after `clearStreamed`,
+  upstream's branch sees `state.length == 0` and also does nothing. The
+  remaining defect is only that Purple's controls do nothing.
+- **4 (P3), docs on upstream's audio skip: fixed.** `media_recording.md` and
+  the `upstream_hooks.md` entry now say that the hook changes upstream's
+  audio skip (step instead of 15 s, paused stays paused, end guard).
+- **6 (P3), duplicate clamping rule: addressed as requested.** It is kept as
+  a documented temporary copy, with the unknown-length difference stated
+  and the switch to core's `Purple::SeekTarget` planned for the next gitlink
+  move. Acceptable while the gitlink must stay at `d7f3785`.
+- **7 (P3), overflow: fixed.** `SeekRules::ToMs` divides before it
+  multiplies and rejects anything over `kLongestMs` (equal to upstream's
+  `kDurationMax`), so `kDurationUnavailable` reads as unknown. The bounds
+  hold: the whole-seconds part is at most 2147483 before `* 1000`, and the
+  remainder term is below `frequency * 1000`.
+- **8 (P3), auto-repeat: fixed.** Both commands are in `AutoRepeatCommands`.
+  Repeats while playing each restart the stream at the accumulated target
+  (`prepareLegacyState` reads back `_options.position` while
+  re-initialising), so a held key scrubs steadily, with audio restarting on
+  each step. That is acceptable for a scrub.
+- 5 and 9 are listed under "Known follow-ups" in `media_recording.md`, as
+  allowed.
+
+### New defects from the fixes
+
+- None at P1 or P2. Shortcut handling was checked on macOS (above), in text
+  fields on every platform, and with the player bar hidden.
+- Hook shape: `core/shortcuts.cpp` gains the facade include after its own
+  header (pinned), two data lines in each of two sets and the two
+  `fillDefaults` calls; each hunk reads as a hook. The facade now pulls
+  `data/data_audio_msg_id.h` and the system media controls header into
+  `core/shortcuts.cpp`. That costs only compile time, so it is not counted.
+- `HandleSystemMediaCommand` now returns true for `Consume` (at 0:00, or
+  inside the last second) and false for `Decline`, so upstream's skip runs
+  only for tracks Purple cannot seek. That is consistent with the docs.
+
+### Still to do
+
+1. Finding 3: make "−10" after a song ends work as described above, or
+   remove the stopped branch, its test and the doc promise.
