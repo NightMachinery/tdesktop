@@ -93,6 +93,16 @@ cleared, and the Sync screen's next check offers to join the records already
 in the chat. The old setup box (purple_sync_chat_setup_box) is no longer
 opened; it is deleted with the rest of the search-based discovery.
 
+The magic chat is a bookkeeping chat, so Purple leaves it out of the main
+list, the archive, folder tabs, Work Mode views and the forward picker, with
+or without a preset, unless the user turned on Show sync chat in chat list. A
+chat the user picked is never hidden, and search and links still open it.
+`History::purpleHiddenFromChatList` asks `SyncMagicHidden`, which answers
+from a per-session map and returns at once for any peer that is not a channel.
+The magic service updates the map whenever the lookup or the binding changes
+(created, bound, listed, picked, signed out) and re-evaluates the old and new
+chat's list rows at once.
+
 Purple builds from before Magic Purple Sync keep reading and posting in Saved
 Messages, so a device that is not updated drifts apart from the updated ones
 until it is (owner decision Q5).

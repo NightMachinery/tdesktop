@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/hooks/history.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_folder_strip.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_work_view.h"
 
 #include <QtCore/QDateTime>
@@ -393,7 +394,8 @@ bool History::purpleHiddenFromChatList() const {
 	// `hide_scope = "hide_everywhere"'. A preset-wide switch and a decision
 	// about a single chat, doing the same thing for the same reason - the
 	// second one simply expires by itself.
-	return (Purple::HideEverywhere(&session()) && purpleHiddenFromView())
+	return Purple::SyncMagicHidden(peer)
+		|| (Purple::HideEverywhere(&session()) && purpleHiddenFromView())
 		|| purpleHideUntilReaches(Purple::HideScope::Everywhere);
 }
 

@@ -5,6 +5,7 @@
 #include "data/data_chat_participant_status.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "history/history.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/session/send_as_peers.h"
@@ -25,6 +26,7 @@ rpl::event_stream<Main::Session*> Changes;
 class Holder final : public base::has_weak_ptr {
 public:
 	explicit Holder(not_null<Main::Session*> session);
+	~Holder();
 
 	[[nodiscard]] bool matches() const;
 	[[nodiscard]] bool current() const;
@@ -38,6 +40,7 @@ private:
 	[[nodiscard]] std::optional<DesktopSyncChatPeer> peer(PeerToken chat) const;
 	[[nodiscard]] PeerData *native(PeerToken chat) const;
 	[[nodiscard]] bool usingChat(PeerToken chat) const;
+	void refreshHidden(bool clear = false);
 
 	base::weak_ptr<Main::Session> _session;
 	DesktopSyncChatOrigin _origin;
@@ -47,6 +50,11 @@ private:
 	std::unique_ptr<SyncMagicChat> _chat;
 
 };
+
+std::map<Main::Session*, PeerId> &HiddenPeers() {
+	static auto result = std::map<Main::Session*, PeerId>();
+	return result;
+}
 
 std::map<Main::Session*, std::unique_ptr<Holder>> &Holders() {
 	static auto result = std::map<Main::Session*, std::unique_ptr<Holder>>();
@@ -66,6 +74,7 @@ Holder &For(not_null<Main::Session*> session) {
 		if (watched.emplace(session).second) {
 			session->lifetime().add([raw = session.get()] {
 				watched.erase(raw);
+				HiddenPeers().erase(raw);
 				Holders().erase(raw);
 			});
 		}
@@ -101,9 +110,42 @@ Holder::Holder(not_null<Main::Session*> session)
 	_chat->setChanged([=] {
 		const auto self = weak.get();
 		if (const auto session = self ? self->_session.get() : nullptr) {
+			self->refreshHidden();
 			Changes.fire_copy(session);
 		}
 	});
+}
+
+Holder::~Holder() {
+	refreshHidden(true);
+}
+
+void Holder::refreshHidden(bool clear) {
+	const auto session = _session.get();
+	if (!session) {
+		return;
+	}
+	const auto token = (!clear && _chat && current())
+		? _chat->hidden()
+		: std::nullopt;
+	const auto next = (token && token->kind == PeerTokenKind::Channel)
+		? peerFromChannel(ChannelId(token->id))
+		: PeerId();
+	auto &hidden = HiddenPeers();
+	const auto i = hidden.find(session);
+	const auto was = (i != end(hidden)) ? i->second : PeerId();
+	if (was == next) {
+		return;
+	} else if (next) {
+		hidden[session] = next;
+	} else {
+		hidden.erase(i);
+	}
+	for (const auto id : { was, next }) {
+		if (const auto history = id ? session->data().historyLoaded(id) : nullptr) {
+			history->updateChatListExistence();
+		}
+	}
 }
 
 bool Holder::matches() const {
@@ -362,6 +404,15 @@ void SyncMagicJoin(not_null<Main::Session*> session, Fn<void(bool)> done) {
 		}
 	}
 	chat->joined([=](SyncMagicResult) { done(true); });
+}
+
+bool SyncMagicHidden(not_null<const PeerData*> peer) {
+	if (!peer->isChannel()) {
+		return false;
+	}
+	const auto &hidden = HiddenPeers();
+	const auto i = hidden.find(&peer->session());
+	return (i != end(hidden)) && (i->second == peer->id);
 }
 
 rpl::producer<Main::Session*> SyncMagicChanges() {
