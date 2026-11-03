@@ -391,6 +391,21 @@ int main() {
 	const auto newest = Registry::BinNewestFirst(manifest);
 	expect(newest.size() == 1 && newest[0]->id == "e2", "the bin lists only bin states");
 
+	auto orphans = Registry::Manifest();
+	orphans.entries.push_back({ .id = "kept", .media = "kept.ogg.prc", .state = Registry::State::Discarded });
+	const auto adopted = Registry::AdoptOrphans(orphans, { "kept.ogg.prc", "aa.ogg.prc", "bb.mp4.prc", "bb.pjr.prc", "cc.pjr.prc", "recordings.json", "../x.ogg.prc" }, 77);
+	expect(adopted == std::vector<std::string>{ "aa", "bb" }, "files without an entry are adopted, nothing else");
+	const auto round = orphans.find("bb");
+	expect(round && round->kind == Registry::Kind::Round && round->journal == "bb.pjr.prc" && round->state == Registry::State::Recording && round->account == -1, "an adopted round keeps its journal and goes through recovery for an unknown chat");
+	expect(orphans.find("aa") && orphans.find("aa")->kind == Registry::Kind::Voice, "an adopted voice is a voice");
+	auto many = std::string("{\"version\":1,\"entries\":[");
+	for (auto i = 0; i != 4100; ++i) {
+		many += (i ? "," : "") + std::string("{\"id\":\"n") + std::to_string(i) + "\",\"kind\":\"voice\",\"media\":\"n" + std::to_string(i) + ".ogg.prc\",\"state\":\"discarded\"}";
+	}
+	many += "]}";
+	const auto longest = Registry::Decode(many, &readStatus);
+	expect(longest.entries.size() == 4096 && readStatus == Registry::ReadStatus::Ok, "an over-long manifest keeps its first entries instead of failing whole");
+
 	const auto torn = OpusStream(5, false);
 	auto cut = Bytes(torn.begin(), torn.end() - 20);
 	const auto voicePath = root / "v.prc";

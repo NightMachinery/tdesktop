@@ -9,6 +9,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <openssl/evp.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -41,6 +48,33 @@ constexpr auto kChunk = std::size_t(64 * 1024);
 		carry = (carry >> 8) + (sum >> 8);
 	}
 	return result;
+}
+
+[[nodiscard]] bool SyncToDisk(const std::filesystem::path &path) {
+#ifdef _WIN32
+	const auto handle = CreateFileW(
+		path.c_str(),
+		GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		nullptr,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		nullptr);
+	if (handle == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	const auto result = (FlushFileBuffers(handle) != 0);
+	CloseHandle(handle);
+	return result;
+#else
+	const auto descriptor = ::open(path.c_str(), O_RDONLY);
+	if (descriptor < 0) {
+		return false;
+	}
+	const auto result = (::fsync(descriptor) == 0);
+	::close(descriptor);
+	return result;
+#endif
 }
 
 } // namespace
@@ -271,6 +305,10 @@ bool WriteWhole(
 		}
 	}
 	auto error = std::error_code();
+	if (!SyncToDisk(temporary)) {
+		std::filesystem::remove(temporary, error);
+		return false;
+	}
 	std::filesystem::rename(temporary, path, error);
 	if (error) {
 		std::filesystem::remove(temporary, error);

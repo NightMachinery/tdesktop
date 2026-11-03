@@ -76,7 +76,10 @@ struct Store {
 }
 
 [[nodiscard]] QString Directory() {
-	return cWorkingDir() + u"tdata/purple/recordings/"_q;
+	const auto name = cDataFile();
+	return cWorkingDir() + u"tdata/purple/recordings"_q
+		+ ((name == u"data"_q) ? QString() : (u"-"_q + name))
+		+ '/';
 }
 
 [[nodiscard]] std::filesystem::path Native(const QString &path) {
@@ -374,14 +377,36 @@ void Load(not_null<Main::Account*> account) {
 				std::string(bytes->begin(), bytes->end()),
 				&read);
 		}
-		if (status != RecordingCrypt::OpenStatus::Ok
-			&& status != RecordingCrypt::OpenStatus::Missing) {
-			LOG(("Purple Recording: the manifest is unreadable, %1."
-				).arg(int(status)));
-		} else if (read == ReadStatus::Damaged
-			|| read == ReadStatus::UnknownVersion) {
-			LOG(("Purple Recording: the manifest is damaged, %1 kept."
+		auto error = std::error_code();
+		const auto path = RecordingPath(kManifestName);
+		const auto exists = std::filesystem::exists(path, error);
+		const auto clean = !exists
+			|| (status == RecordingCrypt::OpenStatus::Ok
+				&& (read == ReadStatus::Ok || read == ReadStatus::Empty));
+		if (!clean) {
+			LOG(("Purple Recording: the manifest did not read cleanly"
+				" (%1, %2), %3 entries kept, moved aside."
+				).arg(int(status)
+				).arg(int(read)
 				).arg(int(store.manifest.entries.size())));
+			auto aside = path;
+			aside += ".bad";
+			std::filesystem::rename(path, aside, error);
+			if (error) {
+				store.manifest = Manifest();
+				store.key = nullptr;
+				return;
+			}
+			auto names = std::vector<std::string>();
+			for (const auto &name : QDir(Directory()).entryList(QDir::Files)) {
+				names.push_back(name.toStdString());
+			}
+			const auto adopted = AdoptOrphans(
+				store.manifest,
+				names,
+				base::unixtime::now());
+			LOG(("Purple Recording: adopted %1 files without an entry."
+				).arg(int(adopted.size())));
 		}
 		store.loaded = true;
 		for (const auto &entry : store.manifest.entries) {
@@ -389,7 +414,11 @@ void Load(not_null<Main::Account*> account) {
 				pending.push_back(entry);
 			}
 		}
-		RemoveStrays(store);
+		if (clean) {
+			RemoveStrays(store);
+		} else {
+			SaveLocked(store);
+		}
 	}
 	Recover(std::move(pending));
 	Sweep();

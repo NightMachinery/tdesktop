@@ -185,10 +185,11 @@ private:
 			}
 			do {
 				auto item = value(depth + 1);
-				if (!item || result.size() >= kMaxEntries) {
+				if (!item) {
 					return std::nullopt;
+				} else if (result.size() < kMaxEntries) {
+					result.push_back(std::move(*item));
 				}
-				result.push_back(std::move(*item));
 			} while (take(','));
 			return take(']') ? std::optional(Value{ std::move(result) }) : std::nullopt;
 		} else if (_text.compare(_at, 4, "true") == 0) {
@@ -540,6 +541,52 @@ std::vector<std::string> Expired(
 			|| (InBin(entry.state) && expired && expired(entry.binned))) {
 			result.push_back(entry.id);
 		}
+	}
+	return result;
+}
+
+std::vector<std::string> AdoptOrphans(
+		Manifest &manifest,
+		const std::vector<std::string> &names,
+		std::int64_t now) {
+	auto result = std::vector<std::string>();
+	const auto has = [&](const std::string &name) {
+		return std::find(names.begin(), names.end(), name) != names.end();
+	};
+	const auto named = [&](const std::string &name) {
+		return std::any_of(
+			manifest.entries.begin(),
+			manifest.entries.end(),
+			[&](const Entry &entry) {
+				return entry.media == name || entry.journal == name;
+			});
+	};
+	for (const auto &name : names) {
+		const auto dot = name.find('.');
+		const auto suffix = (dot == std::string::npos)
+			? std::string()
+			: name.substr(dot);
+		const auto round = (suffix == ".mp4.prc");
+		if ((!round && suffix != ".ogg.prc")
+			|| !ValidFileName(name)
+			|| named(name)) {
+			continue;
+		}
+		const auto id = name.substr(0, dot);
+		if (id.empty() || manifest.find(id)) {
+			continue;
+		}
+		const auto journal = id + ".pjr.prc";
+		manifest.entries.push_back({
+			.id = id,
+			.kind = round ? Kind::Round : Kind::Voice,
+			.started = now,
+			.binned = now,
+			.media = name,
+			.journal = (round && has(journal)) ? journal : std::string(),
+			.state = State::Recording,
+		});
+		result.push_back(id);
 	}
 	return result;
 }

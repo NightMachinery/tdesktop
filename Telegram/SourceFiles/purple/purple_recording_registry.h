@@ -154,6 +154,11 @@ struct SentFacts {
 	const Manifest &manifest,
 	const std::function<bool(std::int64_t binned)> &expired);
 
+[[nodiscard]] std::vector<std::string> AdoptOrphans(
+	Manifest &manifest,
+	const std::vector<std::string> &names,
+	std::int64_t now);
+
 [[nodiscard]] std::vector<const Entry*> BinNewestFirst(
 	const Manifest &manifest);
 

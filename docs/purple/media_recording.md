@@ -144,8 +144,19 @@ bytes of `HMAC(key, "check")`. The counter for byte `n` of the content is the
 IV plus `n / 16`, so the mirror writes at any offset without rewriting what
 is around it. A file whose check does not match (the local key changed, for
 instance after every account logged out) is reported as written under
-another key and never decrypted into garbage; a manifest in that state is
-replaced by an empty one. CTR has no authentication, as the owner chose; a
+another key and never decrypted into garbage.
+
+A manifest that does not read cleanly (another key, an unknown version,
+damage, or a file that exists but cannot be opened) is never trusted to say
+which files are strays: it is renamed to `recordings.json.bad`, every
+recording file is kept, and each one no surviving entry names is adopted as
+an "Unknown chat" item and goes through recovery like a crash. Stray files
+are deleted only after a clean read, or when there is no manifest at all. If
+the manifest cannot even be moved aside, nothing is loaded until the next
+session start. A manifest longer than 4096 entries keeps its first 4096. The
+temporary file of every whole-file write is flushed to disk before the
+rename. A profile started under another data name (`-key`) keeps its own
+directory, `recordings-<name>`. CTR has no authentication, as the owner chose; a
 tampered file decrypts to wrong bytes, which recovery then treats like any
 damaged recording.
 
