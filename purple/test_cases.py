@@ -103,6 +103,11 @@ CASES = {
         'units': ['purple/purple_media_rules.cpp'],
         'frameworks': [],
     },
+    'media-size': {
+        'program': 'media_size_cases.cpp',
+        'units': ['purple/purple_media_rules.cpp'],
+        'frameworks': [],
+    },
 }
 
 

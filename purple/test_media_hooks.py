@@ -9,6 +9,8 @@ FACADE = '#include "purple/hooks/media_playback.h"'
 HOOKS = [
     ('history/history_inner_widget.cpp', 'void HistoryInner::mouseDoubleClickEvent(', 'Purple::RestartOnDoubleClick('),
     ('history/view/history_view_list_widget.cpp', 'void ListWidget::mouseDoubleClickEvent(', 'Purple::RestartOnDoubleClick('),
+    ('history/view/media/history_view_gif.cpp', 'QSize Gif::countThumbSize(', 'Purple::VideoMessageThumbSize('),
+    ('history/view/media/history_view_gif.cpp', 'int Gif::bubbleWidthLimit(', 'Purple::VideoMessageBubbleWidthLimit('),
 ]
 
 

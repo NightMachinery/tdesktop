@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_gif.h"
+#include "purple/hooks/media_playback.h"
 
 #include "apiwrap.h"
 #include "api/api_transcribes.h"
@@ -363,6 +364,12 @@ QSize Gif::sizeForAspectRatio() const {
 }
 
 QSize Gif::countThumbSize(int &inOutWidthMax) const {
+	if (const auto size = Purple::VideoMessageThumbSize(
+			_data,
+			_parent,
+			inOutWidthMax); !size.isEmpty()) {
+		return size;
+	}
 	const auto hostedInstantView = IsHostedInstantViewMedia(_parent);
 	const auto maxSize = [&] {
 		if (hostedInstantView) {
@@ -2400,6 +2407,13 @@ bool Gif::enforceBubbleWidth() const {
 }
 
 int Gif::bubbleWidthLimit() const {
+	if (const auto limit = Purple::VideoMessageBubbleWidthLimit(
+			_data,
+			_parent,
+			maxWidth(),
+			!_ephemeral.text.isEmpty())) {
+		return limit;
+	}
 	if (_ephemeral.text.isEmpty()
 		|| !_data->isVideoMessage()
 		|| !isUnwrapped()) {

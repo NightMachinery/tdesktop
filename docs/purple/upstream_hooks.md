@@ -1493,6 +1493,16 @@ no facade covers those yet.
 **`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**: +7 -0.
 - `ListWidget::mouseDoubleClickEvent`: the same early return.
 
+**`Telegram/SourceFiles/history/view/media/history_view_gif.cpp`**: +14 -0.
+- The facade include, after the file's own header.
+- `Gif::countThumbSize`: one early return through
+  `Purple::VideoMessageThumbSize` (the round size).
+- `Gif::bubbleWidthLimit`: one early return through
+  `Purple::VideoMessageBubbleWidthLimit`, so a round wider than
+  `st::msgMaxWidth` is not clipped.
+- The older content-origin hunks of this file are listed under "Import
+  content provenance and menu routes".
+
 ## Upstream v7.3.3 merge
 
 @Opus5.5/high [2026-10-31 Sat]

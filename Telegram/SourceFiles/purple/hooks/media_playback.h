@@ -7,11 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <QtCore/QSize>
 #include <QtCore/qnamespace.h>
 
 #include <memory>
 
 class ClickHandler;
+class DocumentData;
+
+namespace HistoryView {
+class Element;
+} // namespace HistoryView
 
 namespace Purple {
 
@@ -19,5 +25,15 @@ namespace Purple {
 	const std::shared_ptr<ClickHandler> &active,
 	Qt::MouseButton button,
 	bool selecting);
+
+[[nodiscard]] QSize VideoMessageThumbSize(
+	const DocumentData *document,
+	const HistoryView::Element *parent,
+	int &inOutWidthMax);
+[[nodiscard]] int VideoMessageBubbleWidthLimit(
+	const DocumentData *document,
+	const HistoryView::Element *parent,
+	int maxWidth,
+	bool ephemeral);
 
 } // namespace Purple
