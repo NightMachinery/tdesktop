@@ -20,9 +20,11 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
   retry (the timed wake-up after a wait, never taken for a user's check).
   The local candidates are the magic-titled chats in the main and archive
   dialog lists. With none visible, `messages.getAllChats` proves absence
-  before anything is created; the same reply settles a bound chat that is not
-  in memory. Desktop keeps no local chat database, so that costs one request
-  per process, after which the reply's chats are in memory. A reply the
+  before anything is created. A bound chat not yet in memory after a cold
+  start first waits for the dialog lists: the archive is paged until the chat
+  is loaded or both lists are, at most 60 seconds (`SyncMagicListsStepOf`).
+  Only a chat still missing then costs a getAllChats, once per process, after
+  which the reply's chats are in memory. A reply the
   server sliced (`messages.chatsSlice`) is paged with `except_ids`, up to five
   pages; a list still incomplete proves nothing absent, so the lookup never
   creates from it and waits an hour (`list_partial`), though a magic chat on

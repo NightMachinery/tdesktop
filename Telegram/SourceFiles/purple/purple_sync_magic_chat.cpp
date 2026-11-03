@@ -129,6 +129,18 @@ SyncMagicFrame SyncMagicFrameOf(
 	return frame;
 }
 
+SyncMagicListsStep SyncMagicListsStepOf(
+		bool boundLoaded,
+		bool mainLoaded,
+		bool archiveLoaded) {
+	if (boundLoaded) {
+		return SyncMagicListsStep::Done;
+	} else if (!archiveLoaded) {
+		return SyncMagicListsStep::MoreArchive;
+	}
+	return mainLoaded ? SyncMagicListsStep::Done : SyncMagicListsStep::Wait;
+}
+
 SyncMagicPick SyncMagicPickOf(
 		PeerToken chat,
 		const std::optional<MagicChatCandidate> &local) {
@@ -465,7 +477,7 @@ void SyncMagicChat::planned(
 		if (!_listsWaited && !(local->mainLoaded && local->archiveLoaded)) {
 			_listsWaited = true;
 			const auto weak = std::weak_ptr<int>(_guard);
-			_port->loadLists([=] {
+			_port->loadLists(*binding.chat, [=] {
 				if (weak.lock()) {
 					later([=] { step(run); });
 				}

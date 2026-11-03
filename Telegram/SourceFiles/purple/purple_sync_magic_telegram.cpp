@@ -170,7 +170,7 @@ public:
 		}
 		done(std::move(result));
 	}
-	void loadLists(std::function<void()> done) override {
+	void loadLists(PeerToken bound, std::function<void()> done) override {
 		const auto session = _session.get();
 		if (!session || !current()) {
 			done();
@@ -189,17 +189,24 @@ public:
 			}
 			auto &data = session->data();
 			const auto archive = data.folderLoaded(Data::Folder::kId);
-			if (!data.chatsListLoaded(nullptr)) {
-				return;
-			} else if (archive && !data.chatsListLoaded(archive)) {
+			const auto step = SyncMagicListsStepOf(
+				data.channelLoaded(ChannelId(bound.id)) != nullptr,
+				data.chatsListLoaded(nullptr),
+				!archive || data.chatsListLoaded(archive));
+			if (step == SyncMagicListsStep::MoreArchive) {
 				session->api().requestDialogs(archive);
+				return;
+			} else if (step == SyncMagicListsStep::Wait) {
 				return;
 			}
 			*finished = true;
 			done();
 		};
 		_lists.destroy();
-		session->data().chatsListLoadedEvents() | rpl::on_next([=](Data::Folder*) {
+		rpl::merge(
+			session->data().chatsListChanges(),
+			session->data().chatsListLoadedEvents()
+		) | rpl::on_next([=](Data::Folder*) {
 			check();
 		}, _lists);
 		delay([=] {

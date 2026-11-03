@@ -11,7 +11,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
     'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
-    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp']}
+    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp']}
 
 RouteNames = set()
 
@@ -31,6 +31,10 @@ def inspect(values):
         and 'ToastSyncMagicProblem(session);' in magic
         and 'chat->shown();' in toast and toast.index('chat->shown();') < toast.index('showToast(')
         and 'SyncMagicChatBox' in toast)
+    lists = values['purple_sync_magic_telegram.cpp'].split('void loadLists(PeerToken bound,', 1)[-1].split('void allChats(', 1)[0]
+    require('magic-lists-early', 'data.channelLoaded(ChannelId(bound.id)) != nullptr' in lists
+        and 'session->data().chatsListChanges(),' in lists and 'SyncMagicListsStepOf(' in lists
+        and 'kListsTimeoutMs' in lists)
     auto = values['purple_sync_auto_service.cpp']
     require('auto-bound-facts', 'facts.chatResolved = Resolved();' in auto and 'facts.chatProblem = SyncMagicPaused(' in auto
         and 'bound && *bound == StateChat()' in auto)
@@ -209,6 +213,8 @@ negative = [
     ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
     ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-toast'),
+    ('purple_sync_magic_telegram.cpp', '\t\t\tsession->data().chatsListChanges(),\n', '', 'magic-lists-early'),
+    ('purple_sync_magic_telegram.cpp', 'data.channelLoaded(ChannelId(bound.id)) != nullptr', 'false', 'magic-lists-early'),
     ('purple_sync_config_publish_flow.cpp', ' || binding->verifiedAt > 0)', ')', 'magic-publish-authority'),
     ('purple_sync_config_publish_flow.cpp', '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {', '} else if (false) {', 'magic-publish-authority'),
     ('purple_sync_setup_box.cpp', '\tMoveSyncStateToBoundChat(session);\n', '', 'magic-manual-check'),

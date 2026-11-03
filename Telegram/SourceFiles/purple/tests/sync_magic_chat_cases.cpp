@@ -41,6 +41,7 @@ struct Fake final : SyncMagicPort {
 	std::deque<SyncMagicReply<SyncMagicChats>> allReplies;
 	std::vector<std::vector<uint64_t>> excepts;
 	int listLoads = 0;
+	std::optional<PeerToken> listBound;
 	std::map<uint64_t, MagicChatCandidate> archived;
 	std::deque<SyncMagicReply<MagicChatCandidate>> fullReplies;
 	std::deque<SyncMagicReply<MagicChatCandidate>> createReplies;
@@ -77,8 +78,9 @@ struct Fake final : SyncMagicPort {
 		}
 		done(result);
 	}
-	void loadLists(std::function<void()> done) override {
+	void loadLists(PeerToken bound, std::function<void()> done) override {
 		++listLoads;
+		listBound = bound;
 		known.insert(archived.begin(), archived.end());
 		lists.mainLoaded = lists.archiveLoaded = true;
 		done();
@@ -503,6 +505,20 @@ int main() {
 		expect(result.kind == Kind::Use && result.chat == channel(60) && port->listLoads == 1,
 			"cold start: the archive list finds the bound chat");
 		expect(port->sent.isEmpty(), "cold start: no getAllChats");
+		expect(port->listBound == channel(60), "cold start: the list wait is told the bound chat");
+	}
+	{
+		using Step = SyncMagicListsStep;
+		expect(SyncMagicListsStepOf(true, false, false) == Step::Done,
+			"lists: done once the bound chat is loaded, before either list");
+		expect(SyncMagicListsStepOf(false, true, false) == Step::MoreArchive,
+			"lists: an archive still loading is paged further");
+		expect(SyncMagicListsStepOf(false, false, false) == Step::MoreArchive,
+			"lists: the archive is paged while the main list loads");
+		expect(SyncMagicListsStepOf(false, false, true) == Step::Wait,
+			"lists: waits for the main list");
+		expect(SyncMagicListsStepOf(false, true, true) == Step::Done,
+			"lists: done once both lists are loaded");
 	}
 	{
 		auto port = std::make_shared<Fake>();

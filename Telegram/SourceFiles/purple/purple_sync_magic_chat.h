@@ -70,8 +70,8 @@ public:
 	virtual void local(
 		std::optional<PeerToken> bound,
 		std::function<void(std::optional<SyncMagicLocal>)> done) = 0;
-	// Loads the main and archive dialog lists if they are not loaded; done once they are or give up.
-	virtual void loadLists(std::function<void()> done) = 0;
+	// Loads the dialog lists; done once `bound` is loaded, both lists are, or it gives up.
+	virtual void loadLists(PeerToken bound, std::function<void()> done) = 0;
 	virtual void allChats(
 		std::vector<uint64_t> except,
 		std::function<void(SyncMagicReply<SyncMagicChats>)> done) = 0;
@@ -138,6 +138,13 @@ struct SyncMagicFrame {
 [[nodiscard]] SyncMagicFrame SyncMagicFrameOf(
 	const SyncMagicResult &result,
 	const std::optional<SyncChatBinding> &binding);
+
+enum class SyncMagicListsStep { Wait, MoreArchive, Done };
+
+[[nodiscard]] SyncMagicListsStep SyncMagicListsStepOf(
+	bool boundLoaded,
+	bool mainLoaded,
+	bool archiveLoaded);
 
 enum class SyncMagicPick { Allowed, NotAlone, Unknown, Unsupported };
 
