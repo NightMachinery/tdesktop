@@ -774,11 +774,22 @@ void SendRecordingBinItem(
 		return;
 	}
 	const auto weak = base::make_weak(thread);
-	const auto content = *bytes;
-	crl::async([=] {
+	crl::async([=, content = *bytes]() mutable {
 		auto waveform = VoiceWaveform();
 		auto length = duration;
-		if (kind == Kind::Voice) {
+		if (kind == Kind::Round) {
+			const auto data = reinterpret_cast<const std::uint8_t*>(content.constData());
+			const auto standard = RoundMedia::Remux(
+				RoundMedia::Bytes(data, data + content.size()));
+			if (!standard || standard->videoPackets <= 0) {
+				crl::on_main([=] { done(false); });
+				return;
+			}
+			content = QByteArray(
+				reinterpret_cast<const char*>(standard->bytes.data()),
+				qsizetype(standard->bytes.size()));
+			length = standard->durationMs ? standard->durationMs : duration;
+		} else {
 			auto edit = ::Media::TrimAudioToRange(
 				content,
 				0,

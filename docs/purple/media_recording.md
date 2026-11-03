@@ -275,6 +275,8 @@ mark: "Recovered after a crash", "Partly recovered", "Not sent",
 - Send sends it to its own chat and topic, with the recording's own account,
   through `ApiWrap::sendVoiceMessage`, the route the voice bar uses. A voice
   recording gets its waveform and duration from `Media::TrimAudioToRange`.
+  A round is remuxed into a standard MP4 first, so a fragmented recovery
+  copy is never sent, even in the seconds before it is finalised.
   View-once is kept. The item waits in `sending` until the message is sent.
 - Send to another chat opens upstream's chooser for the recording's account
   (`send_elsewhere_p`).
