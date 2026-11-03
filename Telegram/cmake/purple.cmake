@@ -168,6 +168,10 @@ PRIVATE
     purple/purple_last_seen_ui.h
     purple/purple_list_menu.cpp
     purple/purple_list_menu.h
+    purple/purple_media_playback.cpp
+    purple/purple_media_playback.h
+    purple/purple_media_rules.cpp
+    purple/purple_media_rules.h
     purple/purple_mute.cpp
     purple/purple_mute.h
     purple/purple_notification_privacy.cpp
@@ -175,6 +179,7 @@ PRIVATE
     purple/hooks/dialogs_inner_widget.h
     purple/hooks/chat_filters.h
     purple/hooks/history.h
+    purple/hooks/media_playback.h
     purple/hooks/mute.h
     purple/hooks/work_view.h
     purple/purple_peek.cpp

@@ -1188,6 +1188,7 @@ surface, not a new measurement of the older merge-base figures above.
   exports visible item geometry and existing selection, touch, report,
   overlay, resize, reveal and removal readiness. Purple exclusions invalidate
   only the optional result; stock refresh and menus continue.
+- The double-click restart hook is listed under "Media playback".
 
 **`Telegram/SourceFiles/history/history_inner_widget.h`**:
 - Forward declarations and private optional-output/read-only signatures.
@@ -1211,6 +1212,7 @@ surface, not a new measurement of the older merge-base figures above.
   id independently of resolved views and links. The observer adds existing
   refresh/reveal/resize readiness to native
   selection, overlay, touch and removal state.
+- The double-click restart hook is listed under "Media playback".
 
 **`Telegram/SourceFiles/history/view/history_view_list_widget.h`**:
 - Forward declarations and private optional-output/read-only signatures.
@@ -1474,6 +1476,22 @@ independently, with no networking of its own. `history/view/history_view_context
 adds one document-action hook so Markdown files without captions can expose the
 same source-aware copy action. Ordinary action duplication is suppressed inside
 Purple code. No resolver, parser or context-menu implementation moves.
+
+## Media playback (round PiP, restart, voice queue, round size)
+
+The feature doc is [media_playback.md](media_playback.md). Every file below
+takes one Purple include, `purple/hooks/media_playback.h`, right after its own
+header, and `purple/test_media_hooks.py` pins each call. In the two message
+list files the include sits beside their older direct Purple includes, since
+no facade covers those yet.
+
+**`Telegram/SourceFiles/history/history_inner_widget.cpp`**: +7 -0.
+- `HistoryInner::mouseDoubleClickEvent`: one early return through
+  `Purple::RestartOnDoubleClick` before `mouseActionStart` (double-click
+  restarts the playing voice or round message).
+
+**`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**: +7 -0.
+- `ListWidget::mouseDoubleClickEvent`: the same early return.
 
 ## Upstream v7.3.3 merge
 

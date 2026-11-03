@@ -5,12 +5,13 @@
     "purple/test_archive.py": {"": "purple/test_archive.cpp", "--lifecycle": "purple/test_archive_lifecycle.cpp", "--access": "purple/test_archive_access.cpp",
       "--views": "purple/test_archive_views.cpp", "--purge": "purple/test_archive_purge.cpp", "--handoff": "purple/test_archive_handoff.cpp", "--passive": "purple/test_archive_passive.cpp",
       "--markdown": "purple/test_archive_markdown.cpp", "--markdown-source": "purple/test_markdown_source.cpp"},
-    "purple/test_cases.py": {"copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp", "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp", "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp", "account-routing-file": "Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp", "storage-passcode": "Telegram/SourceFiles/purple/tests/storage_passcode_cases.cpp", "emoji-export": "Telegram/SourceFiles/purple/tests/emoji_export_cases.cpp", "emoji-export-async": "Telegram/SourceFiles/purple/tests/emoji_export_async_cases.cpp", "emoji-export-shutdown": "Telegram/SourceFiles/purple/tests/emoji_export_shutdown_cases.cpp", "webp-paste": "Telegram/SourceFiles/purple/tests/webp_paste_cases.mm", "webp-paste-flow": "Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp"}
+    "purple/test_cases.py": {"copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp", "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp", "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp", "account-routing-file": "Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp", "storage-passcode": "Telegram/SourceFiles/purple/tests/storage_passcode_cases.cpp", "emoji-export": "Telegram/SourceFiles/purple/tests/emoji_export_cases.cpp", "emoji-export-async": "Telegram/SourceFiles/purple/tests/emoji_export_async_cases.cpp", "emoji-export-shutdown": "Telegram/SourceFiles/purple/tests/emoji_export_shutdown_cases.cpp", "webp-paste": "Telegram/SourceFiles/purple/tests/webp_paste_cases.mm", "webp-paste-flow": "Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp", "media-restart": "Telegram/SourceFiles/purple/tests/media_restart_cases.cpp"}
   },
   "gates": [
     {"name": "test_wait_routes", "driver": "purple/test_wait_routes.py", "coverage": "Writer inventory and wait-cover focus teardown wiring"},
     {"name": "check_wait_routes", "driver": "purple/check_wait_routes.py"},
     {"name": "test_settings_row_layout", "driver": "purple/test_settings_row_layout.py"},
+    {"name": "test_media_hooks", "driver": "purple/test_media_hooks.py"},
     {"name": "test_history_menu_lists", "driver": "purple/test_history_menu_lists.py", "compiles": true, "args": ["--output-dir", "{out}"],
      "fixtures": ["purple/test_history_menu_lists.cpp"]},
     {"name": "test_sync_chat_routes", "driver": "purple/test_sync_chat_routes.py"},
@@ -120,6 +121,8 @@
      "fixtures": ["Telegram/SourceFiles/purple/tests/webp_paste_cases.mm"]},
     {"name": "cases-webp-paste-flow", "driver": "purple/test_cases.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--case", "webp-paste-flow"],
      "fixtures": ["Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp"]},
+    {"name": "cases-media-restart", "driver": "purple/test_cases.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--case", "media-restart"],
+     "fixtures": ["Telegram/SourceFiles/purple/tests/media_restart_cases.cpp"]},
     {"name": "test_sync_history_page", "driver": "purple/test_sync_history_page.sh", "compiles": true, "fixtures": ["purple/test_sync_history_page.cpp"]},
     {"name": "test_sync_import", "driver": "purple/test_sync_import.sh", "compiles": true, "fixtures": ["purple/test_sync_import.cpp"]},
     {"name": "test_sync_local_store", "driver": "purple/test_sync_local_store.sh", "compiles": true, "fixtures": ["purple/test_sync_local_store.cpp"]},

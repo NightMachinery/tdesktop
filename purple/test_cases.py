@@ -98,6 +98,11 @@ CASES = {
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation'],
         'link': ['-lobjc'],
     },
+    'media-restart': {
+        'program': 'media_restart_cases.cpp',
+        'units': ['purple/purple_media_rules.cpp'],
+        'frameworks': [],
+    },
 }
 
 
