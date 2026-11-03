@@ -145,8 +145,12 @@ customised devices racing into an empty chat, or D1's Desktop after Android
 started a fresh space. `ReviewSyncFirstUse` (purple_sync_config_review) reads
 the local file and the store, calls core's `SyncFirstUseInputOf` and
 `PlanSyncFirstUse`, and returns the need (`NoState` or `OtherSpace`), the
-action, the publish request (the local fingerprint, every head of the selected
-space as parent) and the single head's key. A device whose own pending stage
+action, the publish request (the local fingerprint, and core's `headKey` as
+the one parent) and that key. Core picks the head from the chat's current
+heads (`MaximalConfigHeads`: a head another install's head supersedes does not
+count), so a space where several devices have published still joins without a
+question; Desktop never re-derives the key. When the current heads disagree
+there is no key, and a customised device is asked. A device whose own pending stage
 waits with no state, or whose inventory core cannot plan from, gets no action
 and the usual named refusal.
 

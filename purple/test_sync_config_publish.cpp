@@ -1066,6 +1066,73 @@ void FirstUseMarkKeepsAnswer() {
 		int(settled.settled));
 }
 
+ConfigRecordBuildResult BuildInSpace(const QString &space, char writer, const QByteArray &text,
+		std::vector<ConfigVersion> parents, uint64_t at) {
+	auto input = ConfigRecordBuildInput();
+	input.text = text; input.parents = std::move(parents); input.space = space;
+	input.install = FormatSyncInstallId(QByteArray(16, writer)).value_or(QString());
+	input.device = u"android:"_q + input.install; input.platform = u"Android"_q;
+	input.app = u"Purple Telegram"_q; input.seq = 1; input.at = at;
+	auto built = BuildConfigRecord(input); CHECK(built);
+	return built;
+}
+
+void FirstUseCurrentHead() {
+	const auto space = FormatTimeOrderedSyncSpaceId(1700000000000, QByteArray(10, 'w')).value_or(QString());
+	const auto r1 = BuildInSpace(space, 'D', kCustomOther, {}, 1700000000);
+	const auto r2 = BuildInSpace(space, 'A', kCustom, { r1.version }, 1700000100);
+	const auto inventory = InventoryAt({ { 20, r1.canonical }, { 21, r2.canonical } });
+	CHECK(inventory.directory.selectedSpace == space);
+	const auto heads = ExtractSyncConfigHeads(inventory, space, QString());
+	CHECK(heads.status == SyncConfigHeadsStatus::Complete && heads.heads.size() == 2);
+	struct Row {
+		const char *name;
+		QByteArray local;
+		SyncFirstUseChoice choice;
+		SyncFirstUseAction action;
+	};
+	const auto rows = std::vector<Row>{
+		{ "join_defaults", "version = 2\n", SyncFirstUseChoice::None, SyncFirstUseAction::Join },
+		{ "join_silently_same_bytes", kCustom, SyncFirstUseChoice::None, SyncFirstUseAction::JoinSilently },
+		{ "join_silently_same_meaning", kCustomSame, SyncFirstUseChoice::None, SyncFirstUseAction::JoinSilently },
+		{ "ask_holding_r1", kCustomOther, SyncFirstUseChoice::None, SyncFirstUseAction::Ask },
+		{ "use_synced", kCustomOther, SyncFirstUseChoice::Synced, SyncFirstUseAction::Join },
+		{ "use_this_device", kCustomOther, SyncFirstUseChoice::ThisDevice, SyncFirstUseAction::Publish },
+	};
+	for (const auto &row : rows) {
+		auto files = PublishFiles(kMagicChat);
+		MagicDevice(files, row.local);
+		const auto review = ReviewSyncFirstUse(files.files, inventory, row.choice);
+		CHECK(review.need == SyncFirstUseNeed::NoState && review.action == row.action);
+		CHECK(review.headKey == r2.version.key && review.input.headKey == r2.version.key);
+		CHECK(review.request.expectedParents == std::vector<QString>{ r2.version.key });
+		std::printf("FIRST USE current head %s action=%d head_r2=%d\n", row.name,
+			review.action ? int(*review.action) : -1, int(review.headKey == r2.version.key));
+		if (!review.action || *review.action == SyncFirstUseAction::Ask) {
+			continue;
+		}
+		const auto publish = *review.action == SyncFirstUseAction::Publish
+			|| (*review.action == SyncFirstUseAction::JoinSilently && !review.sameBytes);
+		CHECK(review.sameBytes == !std::strcmp(row.name, "join_silently_same_bytes"));
+		const auto run = RunMagicFlow(files, inventory, publish ? std::optional(review.request) : std::nullopt, 40);
+		CHECK(run.reply.result.status == (publish
+			? SyncConfigPublishStatus::Confirmed : SyncConfigPublishStatus::AlreadySynced));
+		const auto state = StateOf(files);
+		CHECK(state.space == space);
+		if (publish) {
+			CHECK(ParentsOf(run.staged) == std::vector<QString>{ r2.version.key });
+			continue;
+		}
+		const auto joined = ReviewSyncConfigInventory(inventory, &state, QByteArray(), ReadSyncSettingsFile(files.files));
+		CHECK(joined.status == SyncConfigReviewStatus::Ready);
+		if (joined.plan.verdict == ConfigSyncVerdict::Adopt) {
+			CHECK(review.sameBytes);
+		} else {
+			CHECK(!joined.plan.offered.empty() && joined.plan.offered.front().key == *review.headKey);
+		}
+	}
+}
+
 void FirstUseRace() {
 	for (const auto choice : { SyncFirstUseChoice::Synced, SyncFirstUseChoice::ThisDevice }) {
 		auto first = PublishFiles(kMagicChat);
@@ -1123,7 +1190,7 @@ int main(int argc, char **argv) {
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
 		ExistingJoins(); MagicPublish();
-		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer();
+		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer(); FirstUseCurrentHead();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);

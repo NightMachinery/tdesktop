@@ -131,6 +131,10 @@ it without rewriting it:
   FirstUseRace in `purple/test_sync_config_publish.cpp` (gate setup-publish); FirstUseJoinAppliesHead and
   AutoBeforeState in `purple/test_sync_auto.cpp`. The routes gate `purple/test_sync_chat_routes.py` pins the first-use
   routes, with a negative mutation for each.
+- After review CHANGES (P1-1): the gitlink is at core 493d0dbb03, whose `SyncFirstUseInput::headKey` comes from the
+  current (maximal) heads. `ReviewSyncFirstUse` uses it as the head key and `{ headKey }` as the expected parents and
+  no longer reads `ExtractSyncConfigHeads`. Cases: FirstUseCurrentHead (setup-publish) and
+  FirstUseJoinAppliesCurrentHead (test_sync_auto), with R1 and its successor R2 from another install.
 - `purple.cmake` is unchanged.
 
 Still to run locally (the session that finished the code had no Qt and no Debug build, so no compiled gate ran there):
@@ -139,7 +143,7 @@ Still to run locally (the session that finished the code had no Qt and no Debug 
    (main and worker) and cases-sync-magic-chat with the changed cases.
 2. Negative controls for the compiled cases, each a revert to see fail and restore. None has a result yet:
    - N1 `input->choice = choice;` to `SyncFirstUseChoice::None`, config_review, setup-publish;
-   - N2 `*selected == parsed.state.space) { return result; }` to `true) {...`, config_review, setup-publish;
+   - N2 `} else if (*selected != parsed.state.space) {` to `} else if (false) {`, config_review, setup-publish;
    - N3 the `SyncCarryLeftoversPresent` early return to `if (true)`, account_recovery, setup-publish;
    - N4 `recovery.status != SyncAccountRecoveryStatus::Bound ||` to `true ||`, account_recovery, setup-publish;
    - N5 `SelectedSyncSpace(inventory)` to `OneSyncSpace(inventory)`, publish_flow, setup-publish;
