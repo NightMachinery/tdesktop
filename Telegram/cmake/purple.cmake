@@ -388,6 +388,8 @@ PRIVATE
     purple/purple_sync_chat_carry_codec.cpp
     purple/purple_sync_chat_journal.cpp
     purple/purple_sync_chat_journal.h
+    purple/purple_sync_chat_magic.cpp
+    purple/purple_sync_chat_magic.h
     purple/purple_account_files.cpp
     purple/purple_account_files.h
     purple/purple_local_choice.cpp
@@ -402,6 +404,8 @@ PRIVATE
     purple/purple_engine.h
     purple/purple_passcode.cpp
     purple/purple_passcode.h
+    purple/purple_playback.cpp
+    purple/purple_playback.h
     purple/purple_screentime.cpp
     purple/purple_screentime.h
     purple/purple_settings.cpp
