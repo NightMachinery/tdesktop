@@ -16,6 +16,18 @@ namespace Purple {
 [[nodiscard]] rpl::producer<MTP::Instance*> SyncRequestChanges();
 [[nodiscard]] QString SyncRequestWaitText(const SyncRequestTransient &pending);
 
+// WHY: a long flood wait outlives the process. The magic binding keeps it per method,
+// and a sender holds that method's requests until it ends, across restarts.
+void SetSyncRequestWaits(
+	Fn<int64_t(not_null<MTP::Instance*>, const QString &)> read,
+	Fn<void(not_null<MTP::Instance*>, const QString &, int64_t)> write);
+// The sync method name of a request type; empty for the ones whose waits are not kept.
+[[nodiscard]] QString SyncRequestMethodName(mtpTypeId type);
+template <typename Request>
+[[nodiscard]] QString SyncRequestMethodOf(const Request &request) {
+	return SyncRequestMethodName(request.type());
+}
+
 class SyncRequestSender final : public base::has_weak_ptr {
 public:
 	SyncRequestSender(not_null<MTP::Instance*> instance, Fn<bool()> current,
@@ -89,6 +101,7 @@ private:
 		int64_t retryAtMs = 0;
 		uint64_t generation = 0;
 		bool active = true;
+		QString method;
 	};
 
 	template <typename Request>
@@ -98,6 +111,7 @@ private:
 			Fn<void(Fn<void(bool)>)> resume) {
 		const auto pending = create(std::move(fail));
 		pending->resume = std::move(resume);
+		pending->method = SyncRequestMethodOf(request);
 		const auto id = pending->id;
 		const auto weak = base::make_weak(this);
 		const auto state = std::weak_ptr<Pending>(pending);
@@ -153,6 +167,8 @@ private:
 	void arm(const std::shared_ptr<Pending> &pending, int64_t delayMs);
 	void cancel(mtpRequestId id);
 	void publish();
+	[[nodiscard]] int64_t kept(const QString &method) const;
+	void keep(const QString &method, int64_t retryAt) const;
 
 	not_null<MTP::Instance*> _instance;
 	MTP::Sender _api;

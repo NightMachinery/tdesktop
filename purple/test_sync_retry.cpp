@@ -67,6 +67,7 @@ public:
 		int64_t retryAtMs = 0;
 		uint64_t generation = 0;
 		bool active = true;
+		QString method;
 	};
 	Fn<bool()> _current;
 	Fn<void(mtpRequestId, SyncRequestTransient)> _deferred;
@@ -75,6 +76,13 @@ public:
 	std::map<mtpRequestId, std::shared_ptr<Pending>> _pending;
 	int publishes = 0;
 	void publish() { ++publishes; }
+	std::map<QString, int64_t> waits;
+	std::vector<std::pair<QString, int64_t>> keeps;
+	int64_t kept(const QString &method) const {
+		const auto i = waits.find(method);
+		return (i == waits.end()) ? 0 : i->second;
+	}
+	void keep(const QString &method, int64_t retryAt) { keeps.emplace_back(method, retryAt); }
 	void arm(const std::shared_ptr<Pending> &p, int64_t ms) {
 		p->timer.due = Mono + std::max(int64_t(1), ms);
 	}
@@ -165,6 +173,31 @@ int main() {
 		Check(run.pending->timer.due == 17000, "one deferred timer");
 		run.Advance(8000);
 		Check(run.sends == 3 && run.finals == 0, "caller reschedules deferred transient");
+	}
+	{
+		auto run = Run();
+		run.pending->method = "messages.getHistory";
+		run.sender.failed(run.pending, {420, MTP::Text("FLOOD_WAIT_8")});
+		Check(run.sender.keeps.empty(), "short flood is not kept");
+		run.Advance(9000);
+		run.sender.failed(run.pending, {420, MTP::Text("FLOOD_WAIT_600")});
+		Check(run.sender.keeps.size() == 1 && run.sender.keeps[0].first == "messages.getHistory"
+			&& run.sender.keeps[0].second == run.pending->transient->retryAt, "long flood is kept with its end");
+	}
+	{
+		auto run = Run();
+		run.pending->method = "messages.sendMedia";
+		run.sender.waits["messages.sendMedia"] = Unix + 600;
+		run.sender.dispatch(run.pending);
+		Check(run.sends == 1 && run.pending->transient
+			&& run.pending->transient->kind == SyncTransientKind::Flood
+			&& run.pending->transient->retryAt == 1000600, "kept wait holds the request");
+		run.Advance(599999);
+		Check(run.sends == 1 && run.finals == 0, "kept wait: never early, never final");
+		run.Advance(1);
+		Check(run.sends == 2 && !run.pending->transient, "kept wait: sent once it ends");
+		run.Advance(29999);
+		Check(run.finals == 0, "kept wait: the request keeps its full deadline");
 	}
 	{
 		auto run = Run();

@@ -76,6 +76,7 @@ template <typename T> struct Weak {
 template<typename T>Weak<T> make_weak(T*);
 }
 
+template <typename Request> QString SyncRequestMethodOf(const Request &) { return "fake.method"; }
 class SyncRequestSender {
 public:
 	struct Pending {
@@ -93,6 +94,7 @@ public:
 		int64_t retryAtMs = 0;
 		uint64_t generation = 0;
 		bool active = true;
+		QString method;
 	};
 	Fn<bool()> _current;
 	Fn<void(mtpRequestId, SyncRequestTransient)> _deferred;
@@ -101,6 +103,8 @@ public:
 	std::map<mtpRequestId, std::shared_ptr<Pending>> _pending;
 	int publishes = 0;
 	void publish() { ++publishes; }
+	int64_t kept(const QString &) const { return 0; }
+	void keep(const QString &, int64_t) const {}
 	#include "retry-wire.inc"
 
 	std::shared_ptr<Pending> create(Fn<void(const MTP::Error &)> fail);

@@ -19,6 +19,16 @@ struct Notice {
 std::map<SyncRequestSender*, Notice> Notices;
 rpl::event_stream<MTP::Instance*> Changes;
 
+Fn<int64_t(not_null<MTP::Instance*>, const QString &)> &WaitRead() {
+	static auto result = Fn<int64_t(not_null<MTP::Instance*>, const QString &)>();
+	return result;
+}
+
+Fn<void(not_null<MTP::Instance*>, const QString &, int64_t)> &WaitWrite() {
+	static auto result = Fn<void(not_null<MTP::Instance*>, const QString &, int64_t)>();
+	return result;
+}
+
 }
 
 std::optional<SyncRequestTransient> PendingSyncRequest(
@@ -44,6 +54,29 @@ QString SyncRequestWaitText(const SyncRequestTransient &pending) {
 	return (pending.kind == SyncTransientKind::Flood
 		? tr::lng_purple_sync_telegram_wait(tr::now)
 		: tr::lng_purple_sync_transient_wait(tr::now)).arg(time);
+}
+
+void SetSyncRequestWaits(
+		Fn<int64_t(not_null<MTP::Instance*>, const QString &)> read,
+		Fn<void(not_null<MTP::Instance*>, const QString &, int64_t)> write) {
+	WaitRead() = std::move(read);
+	WaitWrite() = std::move(write);
+}
+
+QString SyncRequestMethodName(mtpTypeId type) {
+	switch (type) {
+	case mtpc_messages_getHistory: return u"messages.getHistory"_q;
+	case mtpc_messages_getMessages: return u"messages.getMessages"_q;
+	case mtpc_channels_getMessages: return u"channels.getMessages"_q;
+	case mtpc_messages_sendMedia: return u"messages.sendMedia"_q;
+	case mtpc_messages_editMessage: return u"messages.editMessage"_q;
+	case mtpc_messages_deleteMessages: return u"messages.deleteMessages"_q;
+	case mtpc_channels_deleteMessages: return u"channels.deleteMessages"_q;
+	case mtpc_upload_saveFilePart: return u"upload.saveFilePart"_q;
+	case mtpc_upload_saveBigFilePart: return u"upload.saveBigFilePart"_q;
+	case mtpc_upload_getFile: return u"upload.getFile"_q;
+	}
+	return QString();
 }
 
 SyncRequestSender::SyncRequestSender(
@@ -119,6 +152,16 @@ void SyncRequestSender::dispatch(const std::shared_ptr<Pending> &pending) {
 		}
 		return;
 	}
+	const auto unix = base::unixtime::now();
+	if (const auto until = kept(pending->method); until > unix) {
+		const auto delay = (until - unix) * 1000;
+		pending->policy.accountForResumeWait(crl::now(), crl::now() + delay);
+		pending->transient = SyncRequestTransient{ SyncTransientKind::Flood, until, delay, false };
+		pending->retryAtMs = crl::now() + delay;
+		arm(pending, delay);
+		publish();
+		return;
+	}
 	++pending->generation;
 	pending->retryAtMs = 0;
 	pending->transient.reset();
@@ -154,6 +197,9 @@ void SyncRequestSender::failed(const std::shared_ptr<Pending> &pending,
 		cancel(pending->id);
 		if (callback) { callback(MTP::Error::Local(u"PURPLE_EFFECT_OUTCOME_UNKNOWN"_q, {})); }
 		return;
+	}
+	if (transient->kind == SyncTransientKind::Flood && transient->delayMs > kSyncKeptFloodMs) {
+		keep(pending->method, transient->retryAt);
 	}
 	if (_deferred && !transient->shortRetry) {
 		const auto callback = _deferred;
@@ -243,6 +289,17 @@ void SyncRequestSender::resume(const std::shared_ptr<Pending> &pending) {
 			if (callback) { callback(MTP::Error::Local(u"PURPLE_EFFECT_RESUME_REFUSED"_q, {})); }
 		}
 	});
+}
+
+// A deferring sender hands long waits back to its own queue, which keeps them itself.
+int64_t SyncRequestSender::kept(const QString &method) const {
+	return (_deferred || method.isEmpty() || !WaitRead()) ? 0 : WaitRead()(_instance, method);
+}
+
+void SyncRequestSender::keep(const QString &method, int64_t retryAt) const {
+	if (!_deferred && !method.isEmpty() && WaitWrite()) {
+		WaitWrite()(_instance, method, retryAt);
+	}
 }
 
 void SyncRequestSender::publish() {

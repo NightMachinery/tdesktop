@@ -10,6 +10,8 @@ namespace Purple {
 
 enum class SyncTransientKind { Flood, Server, Transport, Timeout };
 
+inline constexpr auto kSyncKeptFloodMs = int64_t(30000);
+
 struct SyncRequestTransient {
 	SyncTransientKind kind = SyncTransientKind::Transport;
 	int64_t retryAt = 0;

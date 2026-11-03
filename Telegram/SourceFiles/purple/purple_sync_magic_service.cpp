@@ -1,12 +1,14 @@
 #include "purple/purple_sync_magic_service.h"
 
 #include "base/weak_ptr.h"
+#include "core/application.h"
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "history/history.h"
 #include "main/main_account.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "main/session/send_as_peers.h"
 #include "purple/purple_config.h"
@@ -14,6 +16,7 @@
 #include "purple/purple_sync_chat_carry_gate.h"
 #include "purple/purple_sync_local_store.h"
 #include "purple/purple_sync_magic_telegram.h"
+#include "purple/purple_sync_request_sender.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QUuid>
@@ -360,6 +363,31 @@ SyncMagicChat *SyncMagicChatOf(not_null<Main::Session*> session) {
 	auto &holder = For(session);
 	return holder.current() ? holder.chat() : nullptr;
 }
+
+namespace {
+
+SyncMagicChat *ChatOf(not_null<MTP::Instance*> instance) {
+	for (const auto &[index, account] : Core::App().domain().accounts()) {
+		if (&account->mtp() == instance && account->sessionExists()) {
+			return SyncMagicChatOf(&account->session());
+		}
+	}
+	return nullptr;
+}
+
+[[maybe_unused]] const auto WaitsKept = [] {
+	SetSyncRequestWaits([](not_null<MTP::Instance*> instance, const QString &method) {
+		const auto chat = ChatOf(instance);
+		return chat ? chat->waitUntil(method) : int64_t(0);
+	}, [](not_null<MTP::Instance*> instance, const QString &method, int64_t retryAt) {
+		if (const auto chat = ChatOf(instance)) {
+			chat->recordWait(method, retryAt);
+		}
+	});
+	return true;
+}();
+
+} // namespace
 
 std::optional<PeerToken> SyncMagicBound(not_null<Main::Session*> session) {
 	const auto chat = SyncMagicChatOf(session);

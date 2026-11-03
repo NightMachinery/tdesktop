@@ -84,6 +84,20 @@ while waiting would need a distinct core transient completion carrying retryAt,
 plus persisted pending-request identity and resume authority. It must not reuse
 Paused/UnknownFacts for that purpose. This patch does not add that durable state.
 
+## Waits across restarts
+
+The flood deadline itself is durable. Each request records its sync method
+name (`messages.getHistory`, `messages.sendMedia`, `upload.saveFilePart` and the
+other seven the sync paths send; other types are not kept). A flood longer
+than 30 seconds hands that method and its end to the hook that
+purple_sync_magic_service registers with `SetSyncRequestWaits`, which keeps
+it in the account's magic binding (`sync/chat.json`, logged as
+`wait_recorded`). `dispatch` asks the same hook first: while a kept wait
+lasts, the request is held as a Flood transient with that end, and its
+response deadline starts when the wait ends. A restart therefore never sends
+the request early. A sender with a deferred callback (the emoji exporter)
+keeps and reads nothing, because it hands long waits back to its own queue.
+
 ## Verification
 
 Run `python3 purple/test_sync_retry.py --output-dir <private-scratch>`. The host
@@ -92,7 +106,8 @@ fixture uses the production retry state and extracts the literal production
 uses the literal templated wire callbacks, effect renewal, delete gate,
 local-open retry/publication and download watch/retirement/restart bodies. An injected clock, timer and
 transport replace the event loop and Telegram. It covers both flood forms,
-short and long waits, one-short-retry budget, deadline boundaries, timeouts,
+short and long waits, one-short-retry budget, kept waits that hold a request
+and the long floods that are kept, deadline boundaries, timeouts,
 bounded server/transport backoff, unchanged permanent mappings, cancellation,
 reentrant origin retirement and immutable payload identity. A source gate
 inventories all 15 call sites and checks the common controller and timeout
