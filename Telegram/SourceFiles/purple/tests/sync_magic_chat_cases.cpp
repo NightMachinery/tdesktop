@@ -378,6 +378,29 @@ int main() {
 			&& SyncMagicFloodSeconds(u"FLOOD_PREMIUM_WAIT_3"_q) == 3 && !SyncMagicFloodSeconds(u"PEER_FLOOD"_q),
 			"flood seconds parse");
 	}
+	{
+		const auto group = [](QString space) {
+			auto result = SyncDirectoryGroup();
+			result.space = std::move(space);
+			return result;
+		};
+		auto directory = SyncDirectory();
+		directory.complete = true;
+		directory.groups = { group(u"other"_q) };
+		expect(SyncMagicSpaceMismatch(directory, u"mine"_q), "space: only foreign records mismatch");
+		directory.groups.push_back(group(u"mine"_q));
+		expect(!SyncMagicSpaceMismatch(directory, u"mine"_q), "space: an own record matches");
+		directory.groups = { group(u"other"_q) };
+		directory.unreadableCandidate = true;
+		expect(!SyncMagicSpaceMismatch(directory, u"mine"_q), "space: an unreadable record decides nothing");
+		directory.unreadableCandidate = false;
+		directory.complete = false;
+		expect(!SyncMagicSpaceMismatch(directory, u"mine"_q), "space: an incomplete scan decides nothing");
+		directory.complete = true;
+		expect(!SyncMagicSpaceMismatch(directory, QString()), "space: no own space decides nothing");
+		directory.groups.clear();
+		expect(!SyncMagicSpaceMismatch(directory, u"mine"_q), "space: an empty chat matches");
+	}
 
 	std::cout << "sync-magic-chat checks=" << checks << " failures=" << failures << '\n';
 	return failures ? 1 : 0;

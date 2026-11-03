@@ -49,6 +49,29 @@ from it. The search-based discovery below stays compiled for the old setup box
 until that box is rewritten, and is then deleted. The launch-time search of
 Saved Messages for a newer settings file is gone.
 
+Automatic sync follows the bound chat. When it opens the account's store and
+the lookup has bound a chat other than the one the state names,
+`DesktopSyncAutoStore::MoveTo` moves the state there: it writes the automatic
+record first (core `MoveSyncAutoRecord`: the step in flight is dropped and the
+settings file on disk counts as saved), then the state (core
+`MoveSyncStateToChat`), and last deletes a config stage that was still pending
+in the old chat, which is abandoned because that chat is no longer read.
+Opening the store removes such a stage if an interrupted move left it behind.
+The next run finds its own head missing from the new chat and publishes the
+local settings there with the old base as parent. A refused move leaves the
+state where it was, and automatic sync then holds instead of using the old
+chat. Each move writes one `sync_chat migration` diagnostic line.
+
+The automatic facts call the chat resolved when the lookup's chat equals the
+state's chat, and report a lookup problem, which pauses automatic sync
+(`SyncChatProblem`). Check, read, post, edit and retire all use the lease for
+the state's chat; a retire in a supergroup uses `channels.deleteMessages`.
+When a complete scan of the chat finds records of other sync spaces only,
+automatic sync raises `space_mismatch` in the binding and pauses until the
+user acts. Send after Save posts to the bound chat (Saved Messages or the
+Magic Purple Sync chat); the explicit Send to Saved Messages action still goes
+to Saved Messages.
+
 ## Discovery (being retired)
 
 The Desktop M2B4 adapter uses the shared sync-chat ownership, eligibility and
@@ -103,8 +126,9 @@ cache, service and startup/Sync wiring are a separate T1b layer.
 R2 remains required until Desktop N1 self-parity qualifies it. Ordinary R1 must
 include archived chats, use the empty filter and consume bounded pages; the
 caption/document limit-one settings hint is not inventory. Incomplete scans and
-unknown exact reads never prove absence. Automatic settings sync remains
-Self-only, and established-stream moves remain held for carry execution.
+unknown exact reads never prove absence. Automatic settings sync follows the
+chat Magic Purple Sync bound (above), and established-stream moves remain held
+for carry execution.
 
 ## Diagnostics
 

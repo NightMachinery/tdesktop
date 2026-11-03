@@ -4,6 +4,7 @@
 #include "purple/purple_sync_config_apply.h"
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_config_post.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_config.h"
 #include "base/unixtime.h"
 #include <QtCore/QUuid>
@@ -40,8 +41,10 @@ void Put(const QString &path, const QByteArray &bytes) {
 }
 
 namespace Purple {
-uint64_t SyncConfigPostsStarted(not_null<Main::Session*>) { return 0; }
-SyncConfigSendQueue SyncConfigSendQueueOf(not_null<Main::Session*>) { return SyncConfigSendQueue::Empty; }
+uint64_t SyncConfigPostsStarted(not_null<Main::Session*>, PeerToken) { return 0; }
+SyncConfigSendQueue SyncConfigSendQueueOf(not_null<Main::Session*>, PeerToken) { return SyncConfigSendQueue::Empty; }
+bool MagicPaused = false;
+bool SyncMagicPaused(not_null<Main::Session*>) { return MagicPaused; }
 std::optional<AccountKey> SettingsStartupOwner() { return AccountKey{ 0, 101 }; }
 std::optional<AccountTransferReview> ReviewAccountTransfer(not_null<Main::Session*>, const QByteArray &bytes) {
 	return Config ? Config->reviewTransfer(Account, bytes) : std::nullopt;
@@ -152,6 +155,7 @@ struct Fixture {
 		read.status = AggregateSyncCandidateRead(read.records);
 		snapshot.inventory = FinishSyncAccountInventory(uint64_t(key.userId), scan, read);
 		snapshot.account = key;
+		snapshot.chat = store->local().state()->chat;
 		snapshot.session = session;
 		snapshot.ticket = store->record().ticket;
 		snapshot.readAt = now;
@@ -547,8 +551,14 @@ void ConflictCloneFutureAndV2() {
 		CHECK(ReadSyncPrivateFile(f.files.syncStore, 4 * 1024 * 1024, bytes) == SyncStoreStatus::Ready);
 		auto parsed = ParseSyncLocalState(bytes); CHECK(parsed); parsed.state.version = 2; parsed.state.chat = chat;
 		CHECK(WriteSyncPrivateFile(f.files.syncStore, SerializeSyncLocalState(parsed.state).canonical) == SyncStoreStatus::Ready);
-		f.Open(); CHECK(f.Event(SyncAutoEvent::Enable).reason == SyncAutoReason::SyncChatNotResolved);
+		f.Open();
+		const auto plan = f.Event(SyncAutoEvent::Enable);
+		CHECK(chat == PeerToken() ? plan.action == SyncAutoAction::Check : plan.reason == SyncAutoReason::SyncChatNotResolved);
 		CHECK(f.store->local().state()->config.seq == 0);
+		f.facts.chat = chat; f.facts.chatProblem = true;
+		CHECK(f.Event(SyncAutoEvent::Foreground).reason == SyncAutoReason::SyncChatProblem);
+		f.facts.chatProblem = false;
+		CHECK(chat == PeerToken() || f.Event(SyncAutoEvent::Foreground).action == SyncAutoAction::Check);
 	}
 	{
 		auto f = Fixture(); f.Open(); f.facts.ownerAnswered = false;
@@ -646,6 +656,14 @@ public:
 	int runs = 0;
 	std::optional<SyncAutoFacts> Facts() { ++factsBuilt; return BuildFacts(); }
 	void ReadNext() { ++readNext; }
+	bool resolved = true;
+	bool foreignSpace = false;
+	bool Resolved() const { return resolved && _store && _store->local().state(); }
+	PeerToken StateChat() const { return _store && _store->local().state() ? _store->local().state()->chat : PeerToken{}; }
+	bool PauseOnForeignSpace(PeerToken) {
+		if (foreignSpace) { Hold(SyncAutoReason::SyncChatProblem); }
+		return foreignSpace;
+	}
 	void Run(SyncAutoPlan) { ++runs; }
 
 };
@@ -710,7 +728,7 @@ void FailedLocalCompletionCheckpoints() {
 }
 
 void CurrentAndSupersededCallbacks() {
-	for (auto scenario = 0; scenario != 6; ++scenario) {
+	for (auto scenario = 0; scenario != 7; ++scenario) {
 		auto f = Fixture(); f.strictContext = true; f.Open();
 		const auto plan = f.Event(SyncAutoEvent::Enable); CHECK(plan.action == SyncAutoAction::Check);
 		const auto inventory = f.Snapshot().inventory;
@@ -724,7 +742,7 @@ void CurrentAndSupersededCallbacks() {
 		}
 		auto session = AutoSession(); session._plan = live; session._sessionId = f.session;
 		session._account = f.key; session._store = std::move(f.store);
-		if (scenario == 1 || scenario >= 3) {
+		if (scenario == 1 || (scenario >= 3 && scenario != 6)) {
 			CHECK(f.config->writeWorkMode(*f.config->workModeTarget(f.key), AccountWorkMode::Follow, [] { return true; }).ok);
 		}
 		if (scenario == 2) {
@@ -735,6 +753,7 @@ void CurrentAndSupersededCallbacks() {
 		auto callback = plan;
 		if (scenario == 4) { callback.record.session = u"obsolete-owner"_q; }
 		if (scenario == 5) { session.alive = false; }
+		if (scenario == 6) { session.foreignSpace = true; }
 		const auto notices = Changes.count;
 		session.InvokeInventory(callback, inventory);
 		CHECK(session.factsBuilt == 0);
@@ -747,6 +766,10 @@ void CurrentAndSupersededCallbacks() {
 			const auto held = ReadDesktopSyncAuto(f.files, f.key);
 			CHECK(held.record && !held.record->active && held.record->held == SyncAutoReason::OwnershipChanged);
 			CHECK(held.record && held.record->ticket == plan.ticket && held.record->pending == plan.action);
+		} else if (scenario == 6) {
+			CHECK(!session._store && !session._inFlight && session.readNext == 0);
+			CHECK(status == SyncStoreStatus::Ready && Changes.count > notices);
+			CHECK(session._failureReason == SyncAutoReason::SyncChatProblem);
 		} else {
 			CHECK(session._store && session._inFlight && status == SyncStoreStatus::LockBusy);
 			CHECK(Changes.count == notices && session._failureReason == SyncAutoReason::None);
@@ -755,6 +778,39 @@ void CurrentAndSupersededCallbacks() {
 		}
 		std::printf("CALLBACK_FIXED scenario=%d read-next=%d lock-busy=%d in-flight=%d\n", scenario, session.readNext, status == SyncStoreStatus::LockBusy, session._inFlight);
 	}
+}
+
+void MoveIntoBoundChat() {
+	const auto chat = PeerToken{ PeerTokenKind::Channel, 77 };
+	auto f = Fixture(); f.Local(T1);
+	const auto plan = Stage(f); CHECK(plan.action == SyncAutoAction::Post);
+	const auto stage = f.files.syncDirectory + u"/pending/config-1.json"_q;
+	const auto staged = ReadSettingsFileInput(stage).bytes;
+	CHECK(!staged.isEmpty() && f.store->local().state()->config.pendingSeq == 1);
+	CHECK(!f.store->MoveTo(PeerToken{}, uint64_t(f.key.userId), SettingsFingerprint(T1)));
+	CHECK(!f.store->MoveTo(chat, uint64_t(f.key.userId), QString()));
+	CHECK(f.store->MoveTo(chat, uint64_t(f.key.userId), SettingsFingerprint(T1)));
+	const auto moved = *f.store->local().state();
+	CHECK(moved.chat == chat && moved.version == 2);
+	CHECK(moved.config.pendingSeq == 0 && moved.config.abandonedSeq == 1);
+	CHECK(!QFile::exists(stage));
+	const auto record = ReadDesktopSyncAuto(f.files, f.key).record;
+	CHECK(record && !record->active && record->queuedCheck && record->savedFingerprint == SettingsFingerprint(T1));
+	CHECK(!f.store->MoveTo(chat, uint64_t(f.key.userId), SettingsFingerprint(T1)));
+	Put(stage, staged);
+	CHECK(QFile::setPermissions(stage, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+	f.Restart();
+	const auto reopened = f.store->local().state();
+	CHECK(reopened && reopened->chat == chat && !QFile::exists(stage));
+	if (!reopened) { return; }
+	f.facts.chat = chat;
+	f.facts.savedFingerprint = SettingsFingerprint(T1);
+	f.cloud.clear();
+	CHECK(f.Event(SyncAutoEvent::Foreground).action == SyncAutoAction::Check);
+	CHECK(f.Inventory().action == SyncAutoAction::Publish);
+	f.current = false;
+	CHECK(!f.store->MoveTo(PeerToken{}, uint64_t(f.key.userId), SettingsFingerprint(T1)));
+	std::printf("MOVE_FIXED abandoned=%llu reopened=1 publish=1\n", (unsigned long long)moved.config.abandonedSeq);
 }
 
 void PendingReadFailureDuringFacts() {
@@ -811,7 +867,7 @@ void CasAndOpaque() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts();
+	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

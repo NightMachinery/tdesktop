@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync.h"
 
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_ui_witness.h"
 
 #include "api/api_common.h"
@@ -607,6 +608,7 @@ void AddQualifiedImportAction(
 
 void UploadTo(
 		not_null<Main::Session*> session,
+		not_null<PeerData*> peer,
 		const QByteArray &content,
 		int version,
 		Fn<void(std::optional<MsgId>)> finished) {
@@ -624,7 +626,7 @@ void UploadTo(
 	auto list = Ui::PreparedList();
 	list.files.push_back(std::move(file));
 
-	const auto history = session->data().history(session->user());
+	const auto history = session->data().history(peer);
 	auto action = Api::SendAction(history);
 	action.clearDraft = false;
 	session->api().sendFiles(
@@ -659,13 +661,14 @@ bool Upload(
 		int version,
 		Fn<void(std::optional<MsgId>)> finished) {
 	const auto target = AccountLegacySendTarget(session);
-	if (!target || target->file.input.bytes != content
+	const auto bound = SyncMagicBoundPeer(session);
+	if (!target || !bound || target->file.input.bytes != content
 		|| !CanApplyAccountSettingsDocument(SettingsDocumentFileName(version), content)
 		|| ParseSettings(QString::fromUtf8(content), target->file.path).settings.version != version) {
 		return false;
 	}
 	const auto weak = base::make_weak(session);
-	UploadTo(session, content, version, [=](std::optional<MsgId> messageId) {
+	UploadTo(session, bound, content, version, [=](std::optional<MsgId> messageId) {
 		if (messageId) {
 			if (const auto live = weak.get(); live
 				&& ValidateAccountLegacySendTarget(live, *target)) {
@@ -739,7 +742,7 @@ void SendSettingsToSavedMessages(
 				|| !ValidateAccountManualExportTarget(live, *target)) {
 				return;
 			}
-			UploadTo(live, content, version, crl::guard(live, [=](
+			UploadTo(live, live->user(), content, version, crl::guard(live, [=](
 					std::optional<MsgId> messageId) {
 				if (!ValidateAccountManualExportTarget(live, *target)) {
 					return;

@@ -27,7 +27,7 @@ private Purple channel creation, Saved Messages and eligible existing chats, wit
 explicit retry, Saved Messages after a definite channel limit, same-target reader
 reconsent and cancellation. Existing/bound streams are not moved. Explicit manual settings publication uses the selected typed chat and a
 worker-owned publisher, described in [Manual settings publication](#manual-settings-publication).
-Automatic sync remains Self-only.
+Automatic sync follows the chat Magic Purple Sync bound.
 Source and host tests do not authorize native writes. Native qualification still
 requires the user's explicit GO.
 
@@ -215,8 +215,7 @@ confirmation remain tied to that account and login. Reader consent still comes
 from the setup disclosure. The settings confirmation repeats the account-settings
 disclosure, including IDs and names added from other accounts. Known new readers
 keep the persistent warning and prior consent; unknown readers or lost posting
-rights hold. Setup completion alone never sends settings. Automatic sync remains
-Self-only.
+rights hold. Setup completion alone never sends settings.
 
 A fresh non-Self destination initializes a version-2 ledger when its exact,
 complete inventory is empty, or when it holds another device's sync space: every

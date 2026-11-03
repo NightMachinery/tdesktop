@@ -25,10 +25,11 @@ def inspect(values):
     require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
     require('sync-screen-origin', 'EnsureSyncChatResolved(session, true);' in values['purple_sync_setup_box.cpp'])
     auto = values['purple_sync_auto_service.cpp']
-    require('auto-self-facts', 'facts.chat.kind == PeerTokenKind::Self && SyncChatSelfResolved(_session.get())' in auto)
-    require('disable-exempt', 'event != SyncAutoEvent::Disable && !SyncChatSelfResolved(session)' in auto)
+    require('auto-bound-facts', 'facts.chatResolved = Resolved();' in auto and 'facts.chatProblem = SyncMagicPaused(' in auto
+        and 'bound && *bound == StateChat()' in auto)
+    require('disable-exempt', 'event != SyncAutoEvent::Disable && !SyncMagicBound(session) && !SyncMagicPaused(session)' in auto)
     require('auto-owned-hold', 'Hold(SyncAutoReason::SyncChatNotResolved);' in auto)
-    require('auto-visible', 'if (!SyncChatSelfResolved(session)) { return tr::lng_purple_auto_chat(tr::now); }' in auto)
+    require('auto-visible', 'if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }' in auto)
     service = values['purple_sync_chat_service.cpp']
     require('typed-inventory-route', 'ValidDesktopSyncChatIo(route)' in service and 'command.origin, command.ticket, command.chat, result' in service)
     require('tri-state-records', all('return GetSyncChatMessageOwnership(' in values[name] for name in ['purple_sync_history_scanner.cpp','purple_sync_candidate_reader.cpp']))
@@ -119,11 +120,13 @@ def inspect(values):
         and 'AccountSyncRoutingCurrent(session, *_routing)' in publisher)
     require('publisher-worker-renewal', '_operation.authorize([self, ready = std::move(ready)]' in upload and 'self->Renew(std::move(ready));' in publisher)
     require('download-metadata-seal', 'if (self->_downloaded)' in read and 'documentId != self->_documentId || editDate != self->_editDate' in read and 'size != self->_expectedBytes' in read)
-    require('auto-effect-self', '&& _store->local().state()->version == 1' in auto and '&& _store->local().state()->chat.kind == PeerTokenKind::Self' in auto)
+    require('auto-effect-bound', '_store && _session && Current() && Resolved()' in auto)
     operation = auto.split('DesktopSyncChatOperation AutoSession::OperationFor(', 1)[1].split('void AutoSession::Send(', 1)[0]
     require('borrowed-proof-run', 'self->_store.get() == store && self->_sessionId == owner' in operation and 'store->Current()' in operation)
     require('borrowed-proof-observer-free', 'SyncChatSelfResolved' not in operation and 'Accept(' not in operation and 'CheckCompletion(' not in operation)
-    require('auto-typed-self-inventory', 'lease->route, nullptr' in auto and 'DesktopSyncChatInventoryMatches(inventory, origin, PeerToken{})' in auto)
+    require('auto-typed-inventory', 'lease->route, nullptr' in auto and 'DesktopSyncChatInventoryMatches(inventory, origin, chat)' in auto)
+    require('auto-space-pause', 'if (self->PauseOnForeignSpace(chat)) { return; }' in auto
+        and 'magic->raise(SyncChatProblem::SpaceMismatch);' in auto)
     return failures
 
 assert not inspect(files), inspect(files)
@@ -182,10 +185,12 @@ negative = [
     ('purple_sync_config_publish.cpp', 'void SyncConfigPublish::Start()', 'void SyncConfigPublish::Start() /* ReadSettingsFileInput( */', 'publisher-gui-no-files'),
     ('purple_sync_config_upload.cpp', '_operation.authorize([self, ready = std::move(ready)]', 'SkipDisk([self, ready = std::move(ready)]', 'publisher-worker-renewal'),
     ('purple_sync_candidate_reader.cpp', 'documentId != self->_documentId || editDate != self->_editDate', 'false', 'download-metadata-seal'),
-    ('purple_sync_auto_service.cpp', '&& _store->local().state()->version == 1', '&& true', 'auto-effect-self'),
+    ('purple_sync_auto_service.cpp', '_store && _session && Current() && Resolved()', '_store && _session && Current()', 'auto-effect-bound'),
+    ('purple_sync_auto_service.cpp', 'facts.chatProblem = SyncMagicPaused(', 'facts.chatWritable = SyncMagicPaused(', 'auto-bound-facts'),
+    ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-pause'),
     ('purple_sync_auto_service.cpp', 'self->_store.get() == store && self->_sessionId == owner', 'true', 'borrowed-proof-run'),
-    ('purple_sync_auto_service.cpp', 'store->Current() && store->local().state()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && store->local().state()', 'borrowed-proof-observer-free'),
-    ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, PeerToken{})', 'true', 'auto-typed-self-inventory'),
+    ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
+    ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
 ]
 for name, before, after, expected in negative:
     mutated = dict(files)

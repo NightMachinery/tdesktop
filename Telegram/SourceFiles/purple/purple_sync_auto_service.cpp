@@ -23,6 +23,8 @@
 #include "purple/purple_sync_config_post.h"
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_config_upload.h"
+#include "purple/purple_sync_diag.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_request_sender.h"
 #include "purple/purple_sync_setup_box.h"
 
@@ -54,6 +56,8 @@ public:
 private:
 	bool Current() const;
 	bool Open();
+	[[nodiscard]] PeerToken StateChat() const;
+	[[nodiscard]] bool Resolved() const;
 	std::optional<SyncAutoFacts> Facts();
 	bool Accept(const SyncAutoPlan &plan);
 	void Hold(SyncAutoReason reason);
@@ -61,6 +65,7 @@ private:
 	void Complete(const SyncAutoPlan &plan, SyncAutoOutcome outcome,
 		std::optional<SyncAutoInventory> inventory = std::nullopt);
 	void Check(const SyncAutoPlan &plan);
+	bool PauseOnForeignSpace(PeerToken chat);
 	void ReadNext();
 	void Send(const SyncAutoPlan &plan);
 	[[nodiscard]] bool EffectCurrent(const SyncAutoPlan &plan) const;
@@ -174,7 +179,27 @@ bool AutoSession::Open() {
 		return self && self->Current();
 	});
 	if (!_store->Open()) { _store.reset(); return false; }
+	const auto bound = SyncMagicBound(session);
+	if (bound && *bound != StateChat()) {
+		const auto local = ReadSyncSettingsFile(_store->files());
+		const auto moved = !local.fingerprint.isEmpty()
+			&& _store->MoveTo(*bound, session->userId().bare, local.fingerprint);
+		SyncDiag(u"sync_chat"_q, u"migration"_q, {
+			SyncDiagCode(u"step"_q, u"move"_q),
+			SyncDiagCode(u"outcome"_q, moved ? u"ok"_q : u"error"_q) });
+	}
 	return true;
+}
+
+PeerToken AutoSession::StateChat() const {
+	const auto state = _store ? _store->local().state() : nullptr;
+	return state ? state->chat : PeerToken{};
+}
+
+bool AutoSession::Resolved() const {
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	return _store && _store->local().state() && bound && *bound == StateChat();
 }
 
 std::optional<SyncAutoFacts> AutoSession::Facts() {
@@ -189,16 +214,16 @@ std::optional<SyncAutoFacts> AutoSession::Facts() {
 	facts.state = *_store->local().state();
 	facts.currentDevice = facts.state->createdDevice;
 	facts.chat = facts.state->chat;
-	facts.chatResolved = facts.state->version == 1
-		&& facts.chat.kind == PeerTokenKind::Self && SyncChatSelfResolved(_session.get());
+	facts.chatResolved = Resolved();
+	facts.chatProblem = SyncMagicPaused(not_null{ _session.get() });
 	facts.chatWritable = true;
 	facts.local = ReadSyncSettingsFile(_store->files());
 	facts.savedFingerprint = SyncPathIdentity(_store->files().settings) == _savedIdentity
 		? _savedFingerprint : QString();
 	facts.saveDebounceFinished = !_save.isActive();
-	facts.queue = SyncConfigSendQueueOf(not_null{ _session.get() });
+	facts.queue = SyncConfigSendQueueOf(not_null{ _session.get() }, facts.chat);
 	if (_inFlight && (_scanQueue != SyncConfigSendQueue::Empty
-		|| SyncConfigPostsStarted(not_null{ _session.get() }) != _scanPosts)) {
+		|| SyncConfigPostsStarted(not_null{ _session.get() }, facts.chat) != _scanPosts)) {
 		facts.queue = SyncConfigSendQueue::HoldsSyncRecord;
 	}
 	facts.editSupported = true;
@@ -246,7 +271,7 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	const auto read = ReadDesktopSyncAuto(target->files, _account);
 	if (!read.record) { Stop(); return false; }
 	if (!read.record->enabled && event != SyncAutoEvent::Enable && event != SyncAutoEvent::Disable) { return true; }
-	if (event != SyncAutoEvent::Disable && !SyncChatSelfResolved(session)) {
+	if (event != SyncAutoEvent::Disable && !SyncMagicBound(session) && !SyncMagicPaused(session)) {
 		Stop();
 		EnsureSyncChatResolved(session);
 		return false;
@@ -277,13 +302,13 @@ bool AutoSession::Accept(const SyncAutoPlan &plan) {
 	if (!_inFlight || !_store || _plan.ticket != plan.ticket || _sessionId != plan.record.session) { return false; }
 	const auto completion = _store->CheckCompletion(plan, _sessionId);
 	if (completion == DesktopSyncAutoCompletion::Obsolete) { return false; }
-	if (!SyncChatSelfResolved(_session.get())) {
-		Hold(SyncAutoReason::SyncChatNotResolved);
-		return false;
-	}
 	if (completion != DesktopSyncAutoCompletion::Ready) {
 		Hold(completion == DesktopSyncAutoCompletion::ContextChanged
 			? SyncAutoReason::OwnershipChanged : SyncAutoReason::StateChanged);
+		return false;
+	}
+	if (!Resolved()) {
+		Hold(SyncAutoReason::SyncChatNotResolved);
 		return false;
 	}
 	return true;
@@ -401,7 +426,7 @@ void AutoSession::Complete(const SyncAutoPlan &completed, SyncAutoOutcome outcom
 	auto facts = Facts();
 	if (!facts) { Hold(SyncAutoReason::StateChanged); return; }
 	if (outcome == SyncAutoOutcome::Inventory && (_scanQueue != SyncConfigSendQueue::Empty
-		|| SyncConfigPostsStarted(not_null{ _session.get() }) != _scanPosts)) {
+		|| SyncConfigPostsStarted(not_null{ _session.get() }, StateChat()) != _scanPosts)) {
 		facts->queue = SyncConfigSendQueue::HoldsSyncRecord;
 	}
 	const auto plan = _store->Transition(*facts, SyncAutoEvent::Completed,
@@ -410,19 +435,20 @@ void AutoSession::Complete(const SyncAutoPlan &completed, SyncAutoOutcome outcom
 }
 
 void AutoSession::Check(const SyncAutoPlan &plan) {
-	const auto lease = SyncChatIoForPost(_session.get(), PeerToken{});
+	const auto chat = StateChat();
+	const auto lease = SyncChatIoForPost(_session.get(), chat);
 	if (!lease || !lease->current || !lease->current()) {
 		Hold(SyncAutoReason::SyncChatNotResolved);
 		return;
 	}
 	const auto weak = base::make_weak(this);
-	_scanPosts = SyncConfigPostsStarted(not_null{ _session.get() });
-	_scanQueue = SyncConfigSendQueueOf(not_null{ _session.get() });
+	_scanPosts = SyncConfigPostsStarted(not_null{ _session.get() }, chat);
+	_scanQueue = SyncConfigSendQueueOf(not_null{ _session.get() }, chat);
 	_scan = std::make_unique<SyncAccountInventory>(not_null{ _session.get() }, lease->route, nullptr,
-		[weak, plan, origin = lease->route.peer.origin](DesktopSyncChatInventory inventory) {
+		[weak, plan, chat, origin = lease->route.peer.origin](DesktopSyncChatInventory inventory) {
 			const auto self = weak.get();
 			if (!self || !self->Accept(plan)) { return; }
-			if (!DesktopSyncChatInventoryMatches(inventory, origin, PeerToken{})) {
+			if (!DesktopSyncChatInventoryMatches(inventory, origin, chat)) {
 				self->Hold(SyncAutoReason::StateChanged);
 				return;
 			}
@@ -430,6 +456,7 @@ void AutoSession::Check(const SyncAutoPlan &plan) {
 			if (self->_inventory.status == SyncAccountInventoryStatus::Incomplete) {
 				self->Complete(plan, SyncAutoOutcome::NetworkFailure); return;
 			}
+			if (self->PauseOnForeignSpace(chat)) { return; }
 			self->_snapshot = {};
 			self->_snapshot.account = self->_account;
 			self->_snapshot.chat = self->_store->local().state()->chat;
@@ -456,6 +483,17 @@ void AutoSession::Check(const SyncAutoPlan &plan) {
 	_scan->Start();
 }
 
+bool AutoSession::PauseOnForeignSpace(PeerToken chat) {
+	const auto magic = SyncMagicChatOf(not_null{ _session.get() });
+	if (!magic || chat == PeerToken{} || !_store || !_store->local().state()
+		|| !SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {
+		return false;
+	}
+	magic->raise(SyncChatProblem::SpaceMismatch);
+	Hold(SyncAutoReason::SyncChatProblem);
+	return true;
+}
+
 void AutoSession::ReadNext() {
 	if (!Accept(_plan)) { return; }
 	if (_readIndex == _readIds.size()) {
@@ -464,7 +502,7 @@ void AutoSession::ReadNext() {
 		Complete(_plan, SyncAutoOutcome::Inventory, _snapshot);
 		return;
 	}
-	const auto lease = SyncChatIoForPost(_session.get(), PeerToken{});
+	const auto lease = SyncChatIoForPost(_session.get(), StateChat());
 	if (!lease || !lease->current || !lease->current()) {
 		Hold(SyncAutoReason::SyncChatNotResolved);
 		return;
@@ -488,7 +526,7 @@ void AutoSession::ReadNext() {
 }
 
 void AutoSession::ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServerRead)> done) {
-	const auto lease = SyncChatIoForPost(_session.get(), PeerToken{});
+	const auto lease = SyncChatIoForPost(_session.get(), StateChat());
 	if (!lease || !lease->current || !lease->current()) {
 		Hold(SyncAutoReason::SyncChatNotResolved);
 		return;
@@ -497,7 +535,7 @@ void AutoSession::ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServer
 	_exact = std::make_unique<DesktopSyncExactRead>(not_null{ _session.get() }, lease->route, plan.messageId,
 		[weak, plan, proof = lease->current] { const auto self = weak.get(); return proof() && self && self->_store
 			&& self->_store->CheckCompletion(plan, self->_sessionId) == DesktopSyncAutoCompletion::Ready
-			&& self->_store->Authorized(plan) && SyncChatSelfResolved(self->_session.get()); },
+			&& self->_store->Authorized(plan) && self->Resolved(); },
 		[weak, plan, done = std::move(done)](SyncAutoServerRead read) mutable {
 			const auto self = weak.get();
 			if (!self || !self->Accept(plan)) { return; }
@@ -508,9 +546,7 @@ void AutoSession::ReadForEffect(const SyncAutoPlan &plan, Fn<void(SyncAutoServer
 }
 
 bool AutoSession::EffectCurrent(const SyncAutoPlan &plan) const {
-	return _store && _session && Current() && _store->local().state()
-		&& _store->local().state()->version == 1
-		&& _store->local().state()->chat.kind == PeerTokenKind::Self
+	return _store && _session && Current() && Resolved()
 		&& _store->CheckCompletion(plan, _sessionId) == DesktopSyncAutoCompletion::Ready
 		&& _store->Authorized(plan);
 }
@@ -525,9 +561,7 @@ DesktopSyncChatOperation AutoSession::OperationFor(const SyncAutoPlan &plan) {
 	return { _store->local().directory(), _account, [weak, store, owner] {
 		const auto self = weak.get();
 		return self && self->_store.get() == store && self->_sessionId == owner
-			&& self->Current() && store->Current() && store->local().state()
-			&& store->local().state()->version == 1
-			&& store->local().state()->chat.kind == PeerTokenKind::Self;
+			&& self->Current() && store->Current() && self->Resolved();
 	} };
 }
 
@@ -537,7 +571,7 @@ void AutoSession::RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready) {
 		const auto self = weak.get();
 		if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
 		if (!status.complete || status.postingHeld || status.phase != DesktopSyncChatPhase::Use
-			|| status.resolution.readChat != PeerToken{}) { ready(false); return; }
+			|| status.resolution.readChat != self->StateChat()) { ready(false); return; }
 		self->ReadForEffect(plan, [weak, plan, ready](SyncAutoServerRead read) {
 			const auto self = weak.get();
 			ready(self && self->EffectCurrent(plan) && self->_store->AuthorizeEffect(plan, &read));
@@ -548,8 +582,10 @@ void AutoSession::RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready) {
 void AutoSession::Send(const SyncAutoPlan &plan) {
 	const auto weak = base::make_weak(this);
 	if (plan.action == SyncAutoAction::Post) {
+		const auto lease = SyncChatIoForPost(_session.get(), StateChat());
+		if (!lease) { Hold(SyncAutoReason::SyncChatNotResolved); return; }
 		if (!_store->AuthorizeEffect(plan)) { Complete(plan, SyncAutoOutcome::OutcomeUnknown); return; }
-		_post = std::make_unique<SyncConfigPost>(not_null{ _session.get() }, plan.bytes,
+		_post = std::make_unique<SyncConfigPost>(not_null{ _session.get() }, lease->route, plan.bytes,
 			[weak, plan](SyncConfigPostResult result) {
 				if (const auto self = weak.get()) { self->Complete(plan,
 					result.status == SyncConfigPostStatus::Confirmed ? SyncAutoOutcome::Sent : SyncAutoOutcome::OutcomeUnknown); }
@@ -563,21 +599,24 @@ void AutoSession::Send(const SyncAutoPlan &plan) {
 	ReadForEffect(plan, [weak, plan](SyncAutoServerRead read) {
 		const auto self = weak.get();
 		if (!self || !self->_store) { return; }
+		const auto chat = self->StateChat();
+		const auto lease = SyncChatIoForPost(self->_session.get(), chat);
+		if (!lease) { self->Hold(SyncAutoReason::SyncChatNotResolved); return; }
 		const auto authorized = self->_store->AuthorizeEffect(plan, &read);
 		if (!authorized) { self->Complete(plan, SyncAutoOutcome::OutcomeUnknown); return; }
-		const auto finish = BeginSyncConfigNetworkOperation(not_null{ self->_session.get() });
-		self->_upload = std::make_shared<SyncConfigUpload>(*self->_session.get(), plan.bytes,
+		const auto finish = BeginSyncConfigNetworkOperation(not_null{ self->_session.get() }, chat);
+		self->_upload = std::make_shared<SyncConfigUpload>(*self->_session.get(), lease->route, plan.bytes,
 			[weak, plan, finish](std::optional<MsgId> id) {
 				finish();
 				if (const auto self = weak.get()) { self->Complete(plan, id ? SyncAutoOutcome::Sent : SyncAutoOutcome::OutcomeUnknown); }
 			}, [weak, plan] {
 				const auto self = weak.get();
 				return self && self->EffectCurrent(plan);
-			},
+			}, self->OperationFor(plan),
 			MsgId(plan.messageId), [weak, plan, finish] {
 				finish();
 				if (const auto self = weak.get()) { self->Complete(plan, SyncAutoOutcome::EditRefused); }
-			}, self->OperationFor(plan), [weak, plan](Fn<void(bool)> ready) {
+			}, [weak, plan](Fn<void(bool)> ready) {
 			const auto self = weak.get();
 			if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
 			self->ReadForEffect(plan, [weak, plan, ready](SyncAutoServerRead read) {
@@ -594,6 +633,12 @@ void AutoSession::Delete(const SyncAutoPlan &plan) {
 	ReadForEffect(plan, [weak, plan](SyncAutoServerRead read) {
 		const auto self = weak.get();
 		if (!self || !self->_store) { return; }
+		const auto lease = SyncChatIoForPost(self->_session.get(), self->StateChat());
+		const auto channel = lease ? DesktopSyncChatInputChannel(lease->route) : std::nullopt;
+		if (!lease || (self->StateChat() != PeerToken{} && !channel)) {
+			self->Hold(SyncAutoReason::SyncChatNotResolved);
+			return;
+		}
 		if (!self->_store->AuthorizeEffect(plan, &read)) {
 			self->Complete(plan, SyncAutoOutcome::OutcomeUnknown); return;
 		}
@@ -601,26 +646,35 @@ void AutoSession::Delete(const SyncAutoPlan &plan) {
 			const auto live = weak.get();
 			return live && live->EffectCurrent(plan);
 		});
-		self->_api->request(MTPmessages_DeleteMessages(MTP_flags(0), MTP_vector<MTPint>(1, MTP_int(plan.messageId))))
-		.done([weak, plan](const MTPmessages_AffectedMessages &result) {
-			const auto self = weak.get();
-			if (!self || !self->Accept(plan)) { return; }
-			if (!self->_store->Authorized(plan)) { self->Hold(SyncAutoReason::StateChanged); return; }
-			self->_session.get()->api().applyAffectedMessages(self->_session.get()->user(), result);
-			self->ReadForEffect(plan, [weak, plan](SyncAutoServerRead absence) {
+		const auto send = [&](auto &&request) {
+			request.done([weak, plan](const MTPmessages_AffectedMessages &result) {
 				const auto self = weak.get();
-				if (!self || !self->_store) { return; }
-				const auto committed = self->_store->CommitRetirement(plan, absence);
-				self->Complete(plan, committed ? SyncAutoOutcome::Deleted : SyncAutoOutcome::OutcomeUnknown);
-			});
-		}).resumeEffect([weak, plan](Fn<void(bool)> ready) {
-			const auto self = weak.get();
-			if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
-			self->RenewEffect(plan, std::move(ready));
-		}).fail([weak, plan](const MTP::Error &error) {
-			if (const auto self = weak.get()) { self->Complete(plan,
-				error.type() == u"MESSAGE_DELETE_FORBIDDEN"_q ? SyncAutoOutcome::DeletionRefused : SyncAutoOutcome::OutcomeUnknown); }
-		}).handleAllErrors().send();
+				if (!self || !self->Accept(plan)) { return; }
+				if (!self->_store->Authorized(plan)) { self->Hold(SyncAutoReason::StateChanged); return; }
+				if (const auto peer = SyncMagicBoundPeer(not_null{ self->_session.get() })) {
+					self->_session.get()->api().applyAffectedMessages(peer, result);
+				}
+				self->ReadForEffect(plan, [weak, plan](SyncAutoServerRead absence) {
+					const auto self = weak.get();
+					if (!self || !self->_store) { return; }
+					const auto committed = self->_store->CommitRetirement(plan, absence);
+					self->Complete(plan, committed ? SyncAutoOutcome::Deleted : SyncAutoOutcome::OutcomeUnknown);
+				});
+			}).resumeEffect([weak, plan](Fn<void(bool)> ready) {
+				const auto self = weak.get();
+				if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
+				self->RenewEffect(plan, std::move(ready));
+			}).fail([weak, plan](const MTP::Error &error) {
+				if (const auto self = weak.get()) { self->Complete(plan,
+					error.type() == u"MESSAGE_DELETE_FORBIDDEN"_q ? SyncAutoOutcome::DeletionRefused : SyncAutoOutcome::OutcomeUnknown); }
+			}).handleAllErrors().send();
+		};
+		const auto ids = MTP_vector<MTPint>(1, MTP_int(plan.messageId));
+		if (channel) {
+			send(self->_api->request(MTPchannels_DeleteMessages(*channel, ids)));
+		} else {
+			send(self->_api->request(MTPmessages_DeleteMessages(MTP_flags(0), ids)));
+		}
 	});
 }
 
@@ -646,7 +700,7 @@ void StartAutomaticSettingsSync() {
 	}, lifetime);
 	SyncChatStatusChanges() | rpl::on_next([](Main::Session *session) {
 		Changes.fire({});
-		if (session && SyncChatSelfResolved(session)) {
+		if (session && (SyncMagicBound(session) || SyncMagicPaused(session))) {
 			For(session).Event(SyncAutoEvent::SessionReady);
 		}
 	}, lifetime);
@@ -691,7 +745,7 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 	if (const auto pending = PendingSyncRequest(&session->mtp())) {
 		return SyncRequestWaitText(*pending);
 	}
-	if (!SyncChatSelfResolved(session)) { return tr::lng_purple_auto_chat(tr::now); }
+	if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }
 	const auto executor = Sessions.find(session.get());
 	const auto failure = executor != Sessions.end() && executor->second->FailureReason() != SyncAutoReason::None
 		? executor->second->FailureReason() : record.held;
@@ -703,12 +757,12 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 	if (!state || CheckAccountSyncBinding(state.state, session->account()) != SyncAccountBindingVerdict::Bound) {
 		return tr::lng_purple_auto_review(tr::now);
 	}
-	if (state.state.version != 1 || state.state.chat.kind != PeerTokenKind::Self) { return tr::lng_purple_auto_chat(tr::now); }
 	const auto recovery = InspectSyncAccountRecovery(*session);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Bound) {
 		return tr::lng_purple_auto_review(tr::now);
 	}
-	if (record.held == SyncAutoReason::SyncChatNotResolved) { return tr::lng_purple_auto_chat(tr::now); }
+	if (record.held == SyncAutoReason::SyncChatNotResolved
+		|| record.held == SyncAutoReason::SyncChatProblem) { return tr::lng_purple_auto_chat(tr::now); }
 	if (record.held == SyncAutoReason::OwnershipUnanswered) { return tr::lng_purple_auto_owner(tr::now); }
 	if (record.held != SyncAutoReason::None && record.held != SyncAutoReason::RetryStopped) { return tr::lng_purple_auto_review(tr::now); }
 	if (record.runStopped) { return tr::lng_purple_auto_stopped(tr::now); }

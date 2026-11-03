@@ -37,7 +37,7 @@ methods = service[service.index('std::optional<SyncAutoFacts> AutoSession::Facts
 methods += service[service.index('bool AutoSession::Accept('):service.index('void AutoSession::RetryLater(')]
 methods += service[service.index('void AutoSession::Complete('):service.index('void AutoSession::Check(')]
 check = service[service.index('void AutoSession::Check('):service.index('void AutoSession::ReadNext(')]
-marker = '[weak, plan, origin = lease->route.peer.origin](DesktopSyncChatInventory inventory)'
+marker = '[weak, plan, chat, origin = lease->route.peer.origin](DesktopSyncChatInventory inventory)'
 start = check.index('{', check.index(marker)) + 1
 end = start
 depth = 1
@@ -45,7 +45,7 @@ while depth:
     depth += (check[end] == '{') - (check[end] == '}')
     end += 1
 callback = check[start:end - 1]
-methods += 'void AutoSession::InvokeInventory(const SyncAutoPlan &plan, SyncAccountInventoryResult reply) {\n auto weak = Weak{ this, alive };\n const auto route = ProbeSelfRoute(_account);\n const auto origin = route.peer.origin;\n auto inventory = DesktopSyncChatInventory{route, std::move(reply)};\n' + callback + '\n}\n'
+methods += 'void AutoSession::InvokeInventory(const SyncAutoPlan &plan, SyncAccountInventoryResult reply) {\n auto weak = Weak{ this, alive };\n const auto route = ProbeSelfRoute(_account);\n const auto origin = route.peer.origin;\n const auto chat = route.peer.chat;\n auto inventory = DesktopSyncChatInventory{route, std::move(reply)};\n' + callback + '\n}\n'
 (work / 'auto-service-boundary.inc').write_text(methods)
 
 objects = []

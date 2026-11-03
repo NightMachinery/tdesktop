@@ -1,5 +1,6 @@
 #include "purple/purple_sync_auto_store.h"
 #include "purple/purple_sync_config_review.h"
+#include "purple/purple_sync_chat_magic.h"
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QSaveFile>
@@ -146,6 +147,26 @@ bool DesktopSyncAutoStore::WriteRecord(const SyncAutoRecord &record, bool requir
 	return current();
 }
 
+bool DesktopSyncAutoStore::MoveTo(PeerToken chat, uint64_t selfUserId,
+		const QString &localFingerprint) {
+	const auto state = _local.state();
+	if (!_opened || !state || state->chat == chat || !Current()) { return false; }
+	const auto moved = MoveSyncStateToChat(*state, chat, selfUserId);
+	const auto record = MoveSyncAutoRecord(_record, localFingerprint);
+	if (!moved.move || !moved.move.changed || !record) { return false; }
+	const auto encoded = SerializeSyncLocalState(moved.move.state);
+	if (!encoded) { return false; }
+	// WHY: the record goes first, so a crash before the state follows leaves a
+	// fresh record beside the old chat, and the next open simply moves again.
+	if (!WriteRecord(*record, true)
+		|| WriteSyncPrivateFile(_local.StatePath(), encoded.canonical) != SyncStoreStatus::Ready) {
+		return false;
+	}
+	_local._state = moved.move.state;
+	if (moved.abandonedSeq) { static_cast<void>(QFile::remove(_local.PendingPath(moved.abandonedSeq))); }
+	return Current();
+}
+
 bool DesktopSyncAutoStore::HoldCheckpoint(const SyncAutoPlan &plan, SyncAutoReason reason) {
 	if (!_opened || !_record.active || _record.ticket != plan.ticket
 		|| _record.session != plan.record.session
@@ -176,7 +197,6 @@ SyncAutoPlan DesktopSyncAutoStore::Transition(
 		facts.local = MakeSyncSettingsFile(SyncSettingsFileStatus::Invalid);
 	}
 	facts.state = *_local.state();
-	if (facts.state->version != 1) { facts.chatResolved = false; }
 	facts.accountLock = true;
 	_saveSettled = facts.saveDebounceFinished;
 	if (_saveSettled && facts.savedFingerprint.isEmpty()

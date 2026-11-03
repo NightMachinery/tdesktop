@@ -42,6 +42,8 @@ public:
 		const SyncAutoPlan &plan, const QString &owner) const;
 	[[nodiscard]] bool HoldCheckpoint(
 		const SyncAutoPlan &plan, SyncAutoReason reason);
+	[[nodiscard]] bool MoveTo(PeerToken chat, uint64_t selfUserId,
+		const QString &localFingerprint);
 	[[nodiscard]] const SyncAutoRecord &record() const;
 	[[nodiscard]] SyncLocalStore &local();
 	[[nodiscard]] const AccountFiles &files() const;

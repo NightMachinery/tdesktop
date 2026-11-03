@@ -310,6 +310,30 @@ SyncMagicChat *SyncMagicChatOf(not_null<Main::Session*> session) {
 	return holder.current() ? holder.chat() : nullptr;
 }
 
+std::optional<PeerToken> SyncMagicBound(not_null<Main::Session*> session) {
+	const auto chat = SyncMagicChatOf(session);
+	return (chat && chat->last().kind == SyncMagicResult::Kind::Use)
+		? chat->last().chat
+		: std::nullopt;
+}
+
+PeerData *SyncMagicBoundPeer(not_null<Main::Session*> session) {
+	const auto chat = SyncMagicBound(session);
+	if (!chat) {
+		return nullptr;
+	} else if (*chat == PeerToken{}) {
+		return session->user().get();
+	}
+	return (chat->kind == PeerTokenKind::Channel)
+		? session->data().channelLoaded(ChannelId(chat->id))
+		: nullptr;
+}
+
+bool SyncMagicPaused(not_null<Main::Session*> session) {
+	const auto chat = SyncMagicChatOf(session);
+	return chat && chat->last().kind == SyncMagicResult::Kind::Problem;
+}
+
 rpl::producer<Main::Session*> SyncMagicChanges() {
 	return Changes.events();
 }

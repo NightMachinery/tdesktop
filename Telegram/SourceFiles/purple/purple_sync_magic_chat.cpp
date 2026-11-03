@@ -82,6 +82,21 @@ std::optional<int64_t> SyncMagicFloodSeconds(const QString &error) {
 	return std::nullopt;
 }
 
+bool SyncMagicSpaceMismatch(
+		const SyncDirectory &directory,
+		const QString &space) {
+	return directory.complete
+		&& !directory.unreadableCandidate
+		&& !space.isEmpty()
+		&& !directory.groups.empty()
+		&& std::none_of(
+			directory.groups.begin(),
+			directory.groups.end(),
+			[&](const SyncDirectoryGroup &group) {
+				return group.space == space;
+			});
+}
+
 QString SyncMagicTriggerName(SyncMagicTrigger trigger) {
 	switch (trigger) {
 	case SyncMagicTrigger::Startup: return u"startup"_q;

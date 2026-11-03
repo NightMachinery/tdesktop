@@ -19,6 +19,11 @@ void SyncMagicLookup(
 	not_null<Main::Session*> session,
 	const DesktopSyncChatIo &route);
 [[nodiscard]] SyncMagicChat *SyncMagicChatOf(not_null<Main::Session*> session);
+// The chat the last lookup bound; nullopt while it waits, has a problem or has not run.
+[[nodiscard]] std::optional<PeerToken> SyncMagicBound(
+	not_null<Main::Session*> session);
+[[nodiscard]] PeerData *SyncMagicBoundPeer(not_null<Main::Session*> session);
+[[nodiscard]] bool SyncMagicPaused(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<Main::Session*> SyncMagicChanges();
 
 } // namespace Purple

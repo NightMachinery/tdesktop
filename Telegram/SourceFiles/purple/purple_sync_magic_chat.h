@@ -2,6 +2,7 @@
 
 #include "purple/purple_sync_chat_magic.h"
 #include "purple/purple_sync_diag.h"
+#include "purple/purple_sync_directory.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
@@ -97,6 +98,9 @@ inline constexpr auto kSyncMagicNotifyMethod = "account.updateNotifySettings";
 
 [[nodiscard]] std::optional<int64_t> SyncMagicFloodSeconds(const QString &error);
 [[nodiscard]] QString SyncMagicTriggerName(SyncMagicTrigger trigger);
+[[nodiscard]] bool SyncMagicSpaceMismatch(
+	const SyncDirectory &directory,
+	const QString &space);
 
 class SyncMagicChat final {
 public:

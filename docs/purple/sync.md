@@ -740,7 +740,8 @@ full-info facts for the separately gated M2B4 discovery work.
 The per-account [sync-chat service](sync_chat_service.md) adds read-only discovery,
 login-bound local cache, held status and bounded retries. Its typed inventory and writer integration supports explicitly confirmed manual
 settings publication. The publisher owns disk work on a serial worker; automatic
-sync stays Self-only and stream moves remain separate work.
+sync follows the chat [Magic Purple Sync](sync_chat.md#magic-purple-sync) bound,
+and stream moves remain separate work.
 
 Typed read/download routes and chat-scoped ledger guards are documented in
-[typed sync-chat I/O](sync_chat_io.md). Automatic sync remains Self-only.
+[typed sync-chat I/O](sync_chat_io.md).

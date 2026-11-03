@@ -27,7 +27,8 @@ post. GUI admission includes a settings-source epoch, so changing and restoring
 a reviewed source cannot revive its upload or flood wait. See
 [sync-chat setup](sync_chat_setup.md#manual-settings-publication) for consent,
 reconciliation and the separate native qualification boundary. Automatic sync
-remains Self-only. Older milestone notes below describe their original slices.
+follows the chat Magic Purple Sync bound. Older milestone notes below describe
+their original slices.
 
 The shared core now has tested config version construction, remote-head
 classification, strict JSON canonicalization, validated uncompressed record

@@ -512,7 +512,9 @@ struct AutoProofProbe : base::has_weak_ptr {
 	AccountKey _account=Origin.account;
 	std::unique_ptr<ProofStore> _store=std::make_unique<ProofStore>();
 	bool current=true;
+	PeerToken bound;
 	bool Current() const {return current;}
+	bool Resolved() const {return _store && _store->state() && _store->state()->chat==bound;}
 	DesktopSyncChatOperation OperationFor(const SyncAutoPlan &plan)
 #include "auto-operation.inc"
 };
@@ -526,10 +528,13 @@ void BorrowedRunProof() {
 		if(mode==3) owner.current=false;
 		if(mode==4) owner._store->current=false;
 		if(mode==5) owner._store->valid=false;
-		if(mode==6) owner._store->value.version=2;
+		if(mode==6) owner.bound={PeerTokenKind::Channel,456};
 		if(mode==7) owner._store->value.chat={PeerTokenKind::Channel,456};
 		CHECK(proof.current()==(mode==0));
 	}
+	auto moved=AutoProofProbe(); moved._plan.ticket=1;
+	moved._store->value.version=2; moved._store->value.chat=moved.bound={PeerTokenKind::Channel,456};
+	const auto proof=moved.OperationFor(moved._plan); CHECK(proof.current && proof.current());
 }
 
 void PostReadbackSchedules() {

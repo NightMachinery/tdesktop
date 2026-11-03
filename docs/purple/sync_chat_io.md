@@ -74,8 +74,8 @@ python3 purple/test_sync_chat_routes.py
 ```
 
 Native server calls, posting, setup execution and full Desktop builds require a
-later GO. Automatic sync remains Self-only in the core and service. Typed manual
-I/O support cannot enable automatic non-Self posting.
+later GO. Automatic sync posts only in the chat Magic Purple Sync bound, through
+that chat's lease ([sync chat](sync_chat.md#magic-purple-sync)).
 
 ## Upload and confirmation
 

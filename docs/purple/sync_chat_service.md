@@ -121,9 +121,9 @@ Complete non-Self unit inventories are controlled evidence, not native server
 coverage. `CheckSyncChatBeforePost` remains the fresh-resolution interface for
 writer integration; typed I/O does not bypass the publish gates.
 
-Automatic settings sync additionally requires a resolved, unheld Self result.
-Its existing core Self-only guard remains intact. This slice does not activate
-automatic non-Self sync or allow Follow/Fill to post.
+Automatic settings sync additionally requires that the bound chat equals the
+state's chat ([sync chat](sync_chat.md#magic-purple-sync)). Follow and Fill
+still never post.
 
 ## Focused checks
 

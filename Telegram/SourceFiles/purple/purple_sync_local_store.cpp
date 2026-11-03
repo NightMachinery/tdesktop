@@ -252,6 +252,9 @@ struct ConfigReservation {
 		}
 		if (seq == state->config.pendingSeq) {
 			continue;
+		} else if (seq == state->config.abandonedSeq) {
+			obsolete.push_back(path);
+			continue;
 		}
 		const auto unreserved = (seq > state->config.seq);
 		if (unreserved && seq != state->config.seq + 1) {
