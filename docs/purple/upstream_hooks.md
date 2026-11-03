@@ -1607,8 +1607,8 @@ Purple edit in this file (it is in `td_ui`, which already calls Purple from
 +2 -0. First Purple edit in this file.
 - The facade include, after the file's own header.
 - `VoiceRecordBar::stopRecording`: `Purple::NoteRecordingStop(...)` as its
-  first line, with the stop type's ordinal, `isListenState()` and
-  `ttlBeforeHide`. Purple ignores Listen and records Send or Cancel; the
+  first line, with the stop type's ordinal and `ttlBeforeHide`. Purple
+  marks the open recordings on Listen and records Send or Cancel; the
   order of `StopType` is pinned by `purple/test_media_hooks.py`.
 
 ## Upstream v7.3.3 merge

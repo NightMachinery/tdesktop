@@ -89,6 +89,7 @@ struct Entry {
 	bool viewOnce = false;
 	bool partial = false;
 	bool fromListen = false;
+	std::string group;
 	std::string media;
 	std::string journal;
 	State state = State::Recording;
@@ -140,17 +141,64 @@ struct StopDecision {
 [[nodiscard]] bool NeedsRecovery(State state);
 [[nodiscard]] Mark MarkOf(const Entry &entry);
 
+inline constexpr std::int64_t kShortestVoiceMs = 1000;
+inline constexpr std::int64_t kShortestRoundMs = 200;
+
 struct SentFacts {
 	int account = -1;
-	std::uint64_t user = 0;
 	std::uint64_t peer = 0;
 	Kind kind = Kind::Voice;
 	std::int64_t now = 0;
+	std::int64_t size = -1;
 };
+
+using MediaSize = std::function<std::int64_t(const Entry &entry)>;
 
 [[nodiscard]] std::optional<std::size_t> MatchSent(
 	const Manifest &manifest,
-	const SentFacts &facts);
+	const SentFacts &facts,
+	const MediaSize &mediaSize = nullptr);
+
+[[nodiscard]] std::vector<std::string> GroupOf(
+	const Manifest &manifest,
+	const std::string &id);
+
+void NoteListen(Manifest &manifest, const std::vector<std::string> &ids);
+
+[[nodiscard]] std::vector<std::string> NoteStop(
+	Manifest &manifest,
+	const std::vector<std::string> &ids,
+	StopKind kind,
+	bool keepDiscarded,
+	bool viewOnce,
+	int account,
+	std::int64_t now);
+
+struct ClosedFacts {
+	std::string id;
+	bool failed = false;
+};
+
+struct CloseResult {
+	std::vector<std::string> removed;
+	std::vector<std::string> finalise;
+};
+
+[[nodiscard]] CloseResult NoteClosed(
+	Manifest &manifest,
+	const std::vector<ClosedFacts> &closed,
+	std::vector<std::string> &deleteAfterClose,
+	bool keepDiscarded,
+	std::int64_t now);
+
+[[nodiscard]] bool DropAfterFinalise(
+	const Entry &entry,
+	bool recovered,
+	std::int64_t durationMs);
+
+[[nodiscard]] std::vector<std::string> UnclaimedListen(
+	const Manifest &manifest,
+	std::int64_t now);
 
 [[nodiscard]] std::vector<std::string> Expired(
 	const Manifest &manifest,

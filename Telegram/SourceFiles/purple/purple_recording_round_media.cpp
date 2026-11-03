@@ -610,25 +610,38 @@ std::uint64_t CopyMuxer::size() const {
 }
 
 std::optional<Remuxed> Remux(const Bytes &bytes) {
-	auto reader = Reader{ bytes.data(), std::int64_t(bytes.size()) };
-	auto input = Input();
-	if (!OpenInput(input, reader) || !input.format->nb_streams) {
+	return Join({ bytes });
+}
+
+std::optional<Remuxed> Join(const std::vector<Bytes> &parts) {
+	if (parts.empty()) {
 		return std::nullopt;
 	}
+	auto readers = std::vector<Reader>(parts.size());
+	auto inputs = std::vector<Input>(parts.size());
+	for (auto i = std::size_t(); i != parts.size(); ++i) {
+		readers[i] = Reader{ parts[i].data(), std::int64_t(parts[i].size()) };
+		if (!OpenInput(inputs[i], readers[i])
+			|| !inputs[i].format->nb_streams
+			|| inputs[i].format->nb_streams != inputs[0].format->nb_streams) {
+			return std::nullopt;
+		}
+	}
+	const auto first = inputs[0].format;
 	auto writer = Writer();
 	auto output = Output();
 	if (!OpenOutput(output, writer)) {
 		return std::nullopt;
 	}
-	const auto count = int(input.format->nb_streams);
+	const auto count = int(first->nb_streams);
 	auto lastDts = std::vector<std::int64_t>(count, std::numeric_limits<std::int64_t>::min());
 	for (auto i = 0; i != count; ++i) {
 		const auto stream = avformat_new_stream(output.format, nullptr);
-		if (!stream || avcodec_parameters_copy(stream->codecpar, Parameters(input.format, i)) < 0) {
+		if (!stream || avcodec_parameters_copy(stream->codecpar, Parameters(first, i)) < 0) {
 			return std::nullopt;
 		}
 		stream->codecpar->codec_tag = 0;
-		stream->time_base = input.format->streams[i]->time_base;
+		stream->time_base = first->streams[i]->time_base;
 	}
 	if (avformat_write_header(output.format, nullptr) < 0) {
 		return std::nullopt;
@@ -638,47 +651,57 @@ std::optional<Remuxed> Remux(const Bytes &bytes) {
 	if (!packet) {
 		return std::nullopt;
 	}
-	while (true) {
-		const auto read = av_read_frame(input.format, packet);
-		if (read == AVERROR_EOF) {
-			break;
-		} else if (read < 0 || (packet->flags & AV_PKT_FLAG_CORRUPT)) {
-			result.partial = true;
+	auto offsetMs = std::int64_t();
+	for (auto &input : inputs) {
+		auto partEnd = std::int64_t();
+		while (true) {
+			const auto read = av_read_frame(input.format, packet);
+			if (read == AVERROR_EOF) {
+				break;
+			} else if (read < 0 || (packet->flags & AV_PKT_FLAG_CORRUPT)) {
+				result.partial = true;
+				av_packet_unref(packet);
+				break;
+			}
+			const auto index = packet->stream_index;
+			if (index < 0 || index >= count) {
+				av_packet_unref(packet);
+				continue;
+			}
+			const auto inBase = input.format->streams[index]->time_base;
+			const auto outBase = output.format->streams[index]->time_base;
+			partEnd = std::max(partEnd, EndMs(inBase, packet->pts, packet->duration));
+			if (Parameters(input.format, index)->codec_type == AVMEDIA_TYPE_VIDEO) {
+				++result.videoPackets;
+			}
+			av_packet_rescale_ts(packet, inBase, outBase);
+			const auto shift = av_rescale_q(offsetMs, AVRational{ 1, 1000 }, outBase);
+			if (packet->pts != AV_NOPTS_VALUE) {
+				packet->pts += shift;
+			}
+			packet->dts = (packet->dts == AV_NOPTS_VALUE)
+				? packet->pts
+				: (packet->dts + shift);
+			if (packet->dts <= lastDts[index]) {
+				packet->dts = lastDts[index] + 1;
+				packet->pts = std::max(packet->pts, packet->dts);
+			}
+			lastDts[index] = packet->dts;
+			const auto written = av_write_frame(output.format, packet);
 			av_packet_unref(packet);
-			break;
+			if (written < 0) {
+				av_packet_free(&packet);
+				return std::nullopt;
+			}
 		}
-		const auto index = packet->stream_index;
-		if (index < 0 || index >= count) {
-			av_packet_unref(packet);
-			continue;
-		}
-		const auto inBase = input.format->streams[index]->time_base;
-		const auto outBase = output.format->streams[index]->time_base;
-		result.durationMs = std::max(result.durationMs, EndMs(inBase, packet->pts, packet->duration));
-		if (Parameters(input.format, index)->codec_type == AVMEDIA_TYPE_VIDEO) {
-			++result.videoPackets;
-		}
-		av_packet_rescale_ts(packet, inBase, outBase);
-		if (packet->dts == AV_NOPTS_VALUE) {
-			packet->dts = packet->pts;
-		}
-		if (packet->dts <= lastDts[index]) {
-			packet->dts = lastDts[index] + 1;
-			packet->pts = std::max(packet->pts, packet->dts);
-		}
-		lastDts[index] = packet->dts;
-		const auto written = av_write_frame(output.format, packet);
-		av_packet_unref(packet);
-		if (written < 0) {
-			av_packet_free(&packet);
-			return std::nullopt;
-		}
+		offsetMs += partEnd;
 	}
 	av_packet_free(&packet);
 	if (av_write_trailer(output.format) < 0) {
 		return std::nullopt;
 	}
 	avio_flush(output.io);
+	result.durationMs = offsetMs;
 	result.bytes = std::move(writer.bytes);
 	return result;
 }

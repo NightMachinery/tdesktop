@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 
 void StartRoundCopies();
+[[nodiscard]] std::vector<std::string> RoundCopyIds();
 [[nodiscard]] std::vector<std::string> RequestRoundCopiesClose();
 void FinishRoundCopiesLater();
 

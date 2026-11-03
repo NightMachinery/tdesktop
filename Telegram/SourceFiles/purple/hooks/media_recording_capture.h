@@ -28,7 +28,6 @@ void MirrorRecordingWrite(
 void NoteRecordingStop(
 	not_null<Main::Session*> session,
 	int type,
-	bool listen,
 	bool viewOnce);
 void OnRoundEncodingStarted(const void *owner, AVFormatContext *format);
 void OnRoundPacket(const void *owner, const AVPacket *packet);

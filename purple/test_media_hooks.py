@@ -34,7 +34,7 @@ RECORDING_HOOKS = [
 CAPTURE_FACADE = '#include "purple/hooks/media_recording_capture.h"'
 CAPTURE_HOOKS = [
     ('media/audio/media_audio_capture.cpp', 'static int WriteData(void *opaque, uint8_t *buf, int buf_size) {', 'Purple::MirrorRecordingWrite(l, l->dataPos, buf, buf_size);'),
-    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::stopRecording(', 'Purple::NoteRecordingStop(&_show->session(), int(type), isListenState(), ttlBeforeHide);'),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::stopRecording(', 'Purple::NoteRecordingStop(&_show->session(), int(type), ttlBeforeHide);'),
     ('ui/controls/round_video_recorder.cpp', 'void RoundVideoRecorder::Private::initEncoding() {', 'Purple::OnRoundEncodingStarted(this, _format.get());'),
     ('ui/controls/round_video_recorder.cpp', 'bool RoundVideoRecorder::Private::writeFrame(', 'Purple::OnRoundPacket(this, pkt);'),
 ]

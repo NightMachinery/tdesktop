@@ -33,9 +33,8 @@ public:
 	};
 	using Open = std::function<std::optional<Opened>()>;
 	using Failed = std::function<void(const std::string &id)>;
-	using Restarted = std::function<void(Closed closed)>;
 
-	RecordingMirror(Open open, Failed failed, Restarted restarted);
+	RecordingMirror(Open open, Failed failed);
 
 	void write(
 		const void *owner,
@@ -43,6 +42,7 @@ public:
 		const std::uint8_t *data,
 		std::size_t size);
 	[[nodiscard]] std::vector<std::string> requestCloseAll();
+	[[nodiscard]] std::vector<std::string> activeIds() const;
 	[[nodiscard]] std::optional<Closed> close(const void *owner);
 	[[nodiscard]] std::vector<Closed> closeAll();
 	[[nodiscard]] std::optional<std::string> activeId(
@@ -60,7 +60,6 @@ private:
 
 	const Open _open;
 	const Failed _failed;
-	const Restarted _restarted;
 	mutable std::mutex _mutex;
 	std::map<const void*, Active> _active;
 

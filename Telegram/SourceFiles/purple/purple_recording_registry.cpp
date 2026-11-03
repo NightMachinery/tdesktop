@@ -283,12 +283,13 @@ template <typename Enum, std::size_t Size>
 	const auto viewOnce = Bool(Field(*object, "view_once"));
 	const auto partial = Bool(Field(*object, "partial"));
 	const auto fromListen = Bool(Field(*object, "from_listen"));
+	const auto group = String(Field(*object, "group"));
 	const auto media = String(Field(*object, "media"));
 	const auto journal = String(Field(*object, "journal"));
 	const auto state = String(Field(*object, "state"));
 	if (!id || id->empty() || !account || !user || !peer || !topic || !reply
 		|| !kind || !started || !duration || !binned || !viewOnce
-		|| !partial || !fromListen || !media || !journal || !state
+		|| !partial || !fromListen || !group || !media || !journal || !state
 		|| !ValidFileName(*media)
 		|| (!journal->empty() && !ValidFileName(*journal))
 		|| *account < -1 || *account > 1000) {
@@ -312,6 +313,7 @@ template <typename Enum, std::size_t Size>
 	result.viewOnce = *viewOnce;
 	result.partial = *partial;
 	result.fromListen = *fromListen;
+	result.group = *group;
 	result.media = *media;
 	result.journal = *journal;
 	result.state = *stateValue;
@@ -415,6 +417,7 @@ std::string Encode(const Manifest &manifest) {
 		flag("view_once", entry.viewOnce);
 		flag("partial", entry.partial);
 		flag("from_listen", entry.fromListen);
+		text("group", entry.group);
 		text("media", entry.media);
 		text("journal", entry.journal);
 		out += "\"state\":";
@@ -513,23 +516,177 @@ Mark MarkOf(const Entry &entry) {
 
 std::optional<std::size_t> MatchSent(
 		const Manifest &manifest,
-		const SentFacts &facts) {
-	auto result = std::optional<std::size_t>();
-	for (auto i = std::size_t(); i != manifest.entries.size(); ++i) {
-		const auto &entry = manifest.entries[i];
-		const auto waiting = (entry.state == State::Sending)
-			|| (entry.state == State::Discarded
-				&& entry.fromListen
-				&& entry.binned <= facts.now
-				&& facts.now - entry.binned <= kListenSendWindowSeconds);
-		if (!waiting
-			|| entry.account != facts.account
-			|| entry.peer != facts.peer
-			|| entry.kind != facts.kind) {
+		const SentFacts &facts,
+		const MediaSize &mediaSize) {
+	const auto same = [&](const Entry &entry) {
+		return entry.account == facts.account
+			&& entry.peer == facts.peer
+			&& entry.kind == facts.kind;
+	};
+	const auto earliest = [&](auto &&accept) {
+		auto result = std::optional<std::size_t>();
+		for (auto i = std::size_t(); i != manifest.entries.size(); ++i) {
+			const auto &entry = manifest.entries[i];
+			if (same(entry) && accept(entry)
+				&& (!result
+					|| entry.started < manifest.entries[*result].started)) {
+				result = i;
+			}
+		}
+		return result;
+	};
+	const auto exact = earliest([&](const Entry &entry) {
+		if (entry.state != State::Sending) {
+			return false;
+		} else if (entry.kind == Kind::Round || entry.fromListen) {
+			return entry.kind == Kind::Round;
+		}
+		const auto size = mediaSize ? mediaSize(entry) : -1;
+		return facts.size < 0 || size < 0 || size == facts.size;
+	});
+	if (exact) {
+		return exact;
+	}
+	return earliest([&](const Entry &entry) {
+		return entry.fromListen
+			&& (entry.state == State::Sending
+				|| (entry.state == State::Discarded
+					&& entry.binned <= facts.now
+					&& facts.now - entry.binned <= kListenSendWindowSeconds));
+	});
+}
+
+std::vector<std::string> GroupOf(
+		const Manifest &manifest,
+		const std::string &id) {
+	const auto entry = manifest.find(id);
+	if (!entry) {
+		return {};
+	} else if (entry->group.empty()) {
+		return { id };
+	}
+	auto parts = std::vector<const Entry*>();
+	for (const auto &other : manifest.entries) {
+		if (other.group == entry->group) {
+			parts.push_back(&other);
+		}
+	}
+	std::stable_sort(parts.begin(), parts.end(), [](const Entry *a, const Entry *b) {
+		return a->started < b->started;
+	});
+	auto result = std::vector<std::string>();
+	for (const auto part : parts) {
+		result.push_back(part->id);
+	}
+	return result;
+}
+
+void NoteListen(Manifest &manifest, const std::vector<std::string> &ids) {
+	for (const auto &id : ids) {
+		if (const auto entry = manifest.find(id)) {
+			entry->fromListen = true;
+		}
+	}
+}
+
+std::vector<std::string> NoteStop(
+		Manifest &manifest,
+		const std::vector<std::string> &ids,
+		StopKind kind,
+		bool keepDiscarded,
+		bool viewOnce,
+		int account,
+		std::int64_t now) {
+	auto deleteAfterClose = std::vector<std::string>();
+	if (kind == StopKind::Listen) {
+		NoteListen(manifest, ids);
+		return deleteAfterClose;
+	}
+	for (const auto &id : ids) {
+		const auto entry = manifest.find(id);
+		if (!entry) {
 			continue;
-		} else if (!result
-			|| entry.started < manifest.entries[*result].started) {
-			result = i;
+		}
+		const auto decision = DecideStop(kind, keepDiscarded || entry->fromListen);
+		entry->state = decision.state;
+		entry->viewOnce = viewOnce && (kind == StopKind::Send);
+		entry->binned = now;
+		if (entry->account < 0) {
+			entry->account = account;
+		}
+		if (!decision.keepFiles) {
+			deleteAfterClose.push_back(id);
+		}
+	}
+	return deleteAfterClose;
+}
+
+CloseResult NoteClosed(
+		Manifest &manifest,
+		const std::vector<ClosedFacts> &closed,
+		std::vector<std::string> &deleteAfterClose,
+		bool keepDiscarded,
+		std::int64_t now) {
+	auto result = CloseResult();
+	for (const auto &one : closed) {
+		if (one.id.empty()) {
+			continue;
+		}
+		const auto pending = std::find(
+			deleteAfterClose.begin(),
+			deleteAfterClose.end(),
+			one.id);
+		if (pending != deleteAfterClose.end()) {
+			deleteAfterClose.erase(pending);
+			if (manifest.remove(one.id)) {
+				result.removed.push_back(one.id);
+			}
+			continue;
+		}
+		const auto entry = manifest.find(one.id);
+		if (!entry) {
+			continue;
+		} else if (entry->state == State::Sent) {
+			manifest.remove(one.id);
+			result.removed.push_back(one.id);
+			continue;
+		} else if (entry->state == State::Recording) {
+			const auto decision = DecideStop(
+				StopKind::Cancel,
+				keepDiscarded || entry->fromListen);
+			if (!decision.keepFiles) {
+				manifest.remove(one.id);
+				result.removed.push_back(one.id);
+				continue;
+			}
+			entry->state = decision.state;
+			entry->binned = now;
+		}
+		entry->partial = entry->partial || one.failed;
+		result.finalise.push_back(one.id);
+	}
+	return result;
+}
+
+bool DropAfterFinalise(
+		const Entry &entry,
+		bool recovered,
+		std::int64_t durationMs) {
+	return (entry.state == State::Sending)
+		&& (!recovered || durationMs < ((entry.kind == Kind::Round)
+			? kShortestRoundMs
+			: kShortestVoiceMs));
+}
+
+std::vector<std::string> UnclaimedListen(
+		const Manifest &manifest,
+		std::int64_t now) {
+	auto result = std::vector<std::string>();
+	for (const auto &entry : manifest.entries) {
+		if (entry.state == State::Discarded
+			&& entry.fromListen
+			&& now - entry.binned > kListenSendWindowSeconds) {
+			result.push_back(entry.id);
 		}
 	}
 	return result;
@@ -607,9 +764,15 @@ std::vector<std::string> AdoptOrphans(
 std::vector<const Entry*> BinNewestFirst(const Manifest &manifest) {
 	auto result = std::vector<const Entry*>();
 	for (const auto &entry : manifest.entries) {
-		if (InBin(entry.state)) {
-			result.push_back(&entry);
+		if (!InBin(entry.state)) {
+			continue;
+		} else if (!entry.group.empty()) {
+			const auto parts = GroupOf(manifest, entry.id);
+			if (!parts.empty() && parts.front() != entry.id) {
+				continue;
+			}
 		}
+		result.push_back(&entry);
 	}
 	std::stable_sort(result.begin(), result.end(), [](
 			const Entry *a,

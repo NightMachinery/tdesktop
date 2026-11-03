@@ -63,7 +63,8 @@ void SendRecordingBinItem(
 [[nodiscard]] std::optional<std::string> BeginRecordingEntry(
 	RecordingRegistry::Kind kind,
 	const std::string &mediaSuffix,
-	const std::string &journalSuffix);
+	const std::string &journalSuffix,
+	const std::string &group = std::string());
 void UpdateRecordingEntry(
 	const std::string &id,
 	Fn<void(RecordingRegistry::Entry&)> update);

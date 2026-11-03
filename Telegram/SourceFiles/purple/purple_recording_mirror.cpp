@@ -9,13 +9,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 
-RecordingMirror::RecordingMirror(
-	Open open,
-	Failed failed,
-	Restarted restarted)
+RecordingMirror::RecordingMirror(Open open, Failed failed)
 : _open(std::move(open))
-, _failed(std::move(failed))
-, _restarted(std::move(restarted)) {
+, _failed(std::move(failed)) {
 }
 
 void RecordingMirror::write(
@@ -28,20 +24,11 @@ void RecordingMirror::write(
 	}
 	auto lock = std::unique_lock(_mutex);
 	auto i = _active.find(owner);
-	auto restarted = std::optional<Closed>();
-	if (i != _active.end() && i->second.closing && offset == 0) {
-		restarted = Finish(i->second);
-		_active.erase(i);
-		i = _active.end();
-	}
 	if (i == _active.end()) {
 		if (offset != 0 || !_open) {
 			return;
 		}
 		lock.unlock();
-		if (restarted && _restarted) {
-			_restarted(std::move(*restarted));
-		}
 		auto opened = _open();
 		lock.lock();
 		auto active = Active();
@@ -64,6 +51,17 @@ void RecordingMirror::write(
 			_failed(id);
 		}
 	}
+}
+
+std::vector<std::string> RecordingMirror::activeIds() const {
+	const auto lock = std::lock_guard(_mutex);
+	auto result = std::vector<std::string>();
+	for (const auto &[owner, active] : _active) {
+		if (!active.id.empty()) {
+			result.push_back(active.id);
+		}
+	}
+	return result;
 }
 
 std::vector<std::string> RecordingMirror::requestCloseAll() {

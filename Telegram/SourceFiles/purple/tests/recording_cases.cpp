@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
@@ -256,7 +257,6 @@ int main() {
 
 	auto opened = 0;
 	auto failedIds = std::vector<std::string>();
-	auto restartedIds = std::vector<std::string>();
 	auto refuse = false;
 	auto mirror = Purple::RecordingMirror([&]() -> std::optional<Purple::RecordingMirror::Opened> {
 		if (refuse) {
@@ -270,8 +270,6 @@ int main() {
 		return Purple::RecordingMirror::Opened{ id, std::move(file) };
 	}, [&](const std::string &id) {
 		failedIds.push_back(id);
-	}, [&](Purple::RecordingMirror::Closed closed) {
-		restartedIds.push_back(closed.id);
 	});
 	const auto owner = reinterpret_cast<const void*>(&opened);
 	const auto block = Bytes(4096, 0xAB);
@@ -298,17 +296,16 @@ int main() {
 	expect(closed && closed->id == "m1" && closed->size == memory.size() && !closed->failed, "closing reports the size");
 	expect(Crypt::ReadWhole(root / "m1.prc", key) == memory, "the mirror holds exactly the bytes written, seeks included");
 	model(0, Bytes(10, 0x55));
-	const auto ids2 = mirror.requestCloseAll();
+	expect(mirror.requestCloseAll() == std::vector<std::string>{ "m2" }, "a second recording opens its own file");
 	model(0, Bytes(10, 0x66));
-	expect(opened == 3 && mirror.activeId(owner) == std::string("m3"), "a write at 0 after a close request starts the next recording");
-	expect(Crypt::ReadWhole(root / "m2.prc", key) == Bytes(10, 0x55), "the earlier recording is left whole");
-	expect(restartedIds == std::vector<std::string>{ "m2" }, "a recording closed by the next one is reported");
+	expect(opened == 2 && mirror.activeId(owner) == std::string("m2"), "a write at 0 after a close request is the closing recording's trailer, not a new one");
+	expect(Crypt::ReadWhole(root / "m2.prc", key) == Bytes(10, 0x66), "it rewrites the same file");
 	expect(mirror.closeAll().size() == 1 && !mirror.activeId(owner), "close all closes every recording");
 	refuse = true;
 	mirror.write(owner, 0, block.data(), block.size());
 	mirror.write(owner, 4096, block.data(), block.size());
 	closed = mirror.close(owner);
-	expect(closed && closed->failed && closed->id.empty() && opened == 3, "a refused open writes nothing until the recording ends");
+	expect(closed && closed->failed && closed->id.empty() && opened == 2, "a refused open writes nothing until the recording ends");
 	refuse = false;
 	expect(failedIds.empty(), "no write failed so far");
 
@@ -407,6 +404,103 @@ int main() {
 	many += "]}";
 	const auto longest = Registry::Decode(many, &readStatus);
 	expect(longest.entries.size() == 4096 && readStatus == Registry::ReadStatus::Ok, "an over-long manifest keeps its first entries instead of failing whole");
+
+	{
+		using Registry::State;
+		using Registry::StopKind;
+		auto flow = Registry::Manifest();
+		auto pending = std::vector<std::string>();
+		auto sizes = std::map<std::string, std::int64_t>();
+		auto counter = 0;
+		auto flowMirror = Purple::RecordingMirror([&]() -> std::optional<Purple::RecordingMirror::Opened> {
+			const auto id = "f" + std::to_string(++counter);
+			flow.entries.push_back({ .id = id, .account = 0, .peer = 9, .kind = Registry::Kind::Voice, .started = counter, .media = id + ".ogg.prc", .state = State::Recording });
+			auto file = Crypt::File::Create(root / (id + ".ogg.prc"), key, Random);
+			return Purple::RecordingMirror::Opened{ id, std::move(file) };
+		}, nullptr);
+		const auto capture = reinterpret_cast<const void*>(&flow);
+		const auto record = [&](int bytes) {
+			flowMirror.write(capture, 0, Bytes(bytes, 1).data(), bytes);
+		};
+		const auto stop = [&](StopKind kind, bool keep, std::int64_t now) {
+			const auto ids = (kind == StopKind::Listen) ? flowMirror.activeIds() : flowMirror.requestCloseAll();
+			for (auto &id : Registry::NoteStop(flow, ids, kind, keep, false, 0, now)) {
+				pending.push_back(std::move(id));
+			}
+		};
+		const auto close = [&](std::int64_t now, bool keep) {
+			auto facts = std::vector<Registry::ClosedFacts>();
+			for (const auto &one : flowMirror.closeAll()) {
+				sizes[one.id] = std::int64_t(one.size);
+				facts.push_back({ one.id, one.failed });
+			}
+			return Registry::NoteClosed(flow, facts, pending, keep, now);
+		};
+		const auto sizeOf = [&](const Registry::Entry &entry) {
+			return sizes.contains(entry.id) ? sizes[entry.id] : std::int64_t(-1);
+		};
+		const auto settle = [&](std::int64_t size, std::int64_t now, Registry::Kind kind = Registry::Kind::Voice) {
+			const auto index = Registry::MatchSent(flow, { .account = 0, .peer = 9, .kind = kind, .now = now, .size = size }, sizeOf);
+			if (!index) {
+				return std::vector<std::string>();
+			}
+			const auto group = Registry::GroupOf(flow, flow.entries[*index].id);
+			for (const auto &id : group) {
+				flow.remove(id);
+			}
+			return group;
+		};
+
+		record(5000);
+		stop(StopKind::Listen, false, 100);
+		stop(StopKind::Cancel, false, 101);
+		expect(pending.empty() && flow.find("f1")->state == State::Discarded && flow.find("f1")->fromListen, "preview then send: the upstream Cancel keeps the file even with keep_discarded_p off");
+		const auto closedFirst = close(101, false);
+		expect(closedFirst.finalise == std::vector<std::string>{ "f1" }, "and it is finalised when the capture stops");
+		expect(settle(4321, 110) == std::vector<std::string>{ "f1" }, "the sent message, trimmed in the preview, settles it");
+
+		record(5000);
+		stop(StopKind::Listen, true, 200);
+		stop(StopKind::Cancel, true, 201);
+		expect(close(201, true).finalise == std::vector<std::string>{ "f2" }, "preview then discard is finalised");
+		expect(flow.find("f2")->state == State::Discarded, "and stays Discarded with keep_discarded_p on");
+		expect(Registry::UnclaimedListen(flow, 201 + Registry::kListenSendWindowSeconds + 1) == std::vector<std::string>{ "f2" }, "with it off, the sweep deletes it once the send window has passed");
+		flow.remove("f2");
+
+		record(5000);
+		stop(StopKind::Send, true, 300);
+		record(16);
+		expect(counter == 3, "the trailer of a recording that is closing opens no new entry");
+		close(300, true);
+		expect(Registry::DropAfterFinalise(*flow.find("f3"), true, 400), "a sub-second recording upstream never sends is dropped");
+		expect(!Registry::DropAfterFinalise(*flow.find("f3"), true, 4000), "a sent one of a few seconds is kept until the send");
+		flow.remove("f3");
+
+		record(6000);
+		stop(StopKind::Cancel, true, 400);
+		close(400, true);
+		flow.find("f4")->fromListen = true;
+		record(7000);
+		stop(StopKind::Send, true, 401);
+		close(401, true);
+		expect(settle(7000, 402) == std::vector<std::string>{ "f5" } && flow.find("f4"), "a direct send of the same size settles the new recording, not an older preview discard");
+		expect(settle(5555, 403) == std::vector<std::string>{ "f4" }, "the preview discard stays for a later preview send only");
+		record(7000);
+		stop(StopKind::Send, true, 500);
+		close(500, true);
+		expect(settle(1234, 501).empty() && flow.find("f6"), "a voice of another size, such as a forward, does not settle a recording");
+
+		flow.entries.push_back({ .id = "r1", .account = 0, .peer = 9, .kind = Registry::Kind::Round, .started = 600, .group = "r1", .media = "r1.mp4.prc", .state = State::Recording });
+		flow.entries.push_back({ .id = "r2", .account = 0, .peer = 9, .kind = Registry::Kind::Round, .started = 601, .group = "r1", .media = "r2.mp4.prc", .state = State::Recording });
+		const auto parts = Registry::NoteStop(flow, { "r1", "r2" }, StopKind::Send, true, false, 0, 602);
+		expect(parts.empty() && flow.find("r1")->state == State::Sending && flow.find("r2")->state == State::Sending, "pause, resume, send: both parts wait for the send");
+		expect(Registry::BinNewestFirst(flow).size() == 0 && Registry::GroupOf(flow, "r2") == std::vector<std::string>{ "r1", "r2" }, "the parts are one recording");
+		expect(settle(-1, 603, Registry::Kind::Round) == std::vector<std::string>{ "r1", "r2" }, "one sent round settles every part");
+		flow.entries.push_back({ .id = "r3", .account = 0, .peer = 9, .kind = Registry::Kind::Round, .started = 700, .group = "r3", .media = "r3.mp4.prc", .state = State::Recovered });
+		flow.entries.push_back({ .id = "r4", .account = 0, .peer = 9, .kind = Registry::Kind::Round, .started = 701, .group = "r3", .media = "r4.mp4.prc", .state = State::Recovered });
+		const auto listed = Registry::BinNewestFirst(flow);
+		expect(std::count_if(listed.begin(), listed.end(), [](const Registry::Entry *entry) { return entry->group == "r3"; }) == 1, "a crashed resumed round is one bin item");
+	}
 
 	const auto torn = OpusStream(5, false);
 	auto cut = Bytes(torn.begin(), torn.end() - 20);

@@ -32,6 +32,7 @@ constexpr auto kCloseDelay = 3000;
 struct Owner {
 	std::vector<Closed> closedParts;
 	std::string activeId;
+	std::string group;
 	std::unique_ptr<RoundMedia::CopyMuxer> active;
 	bool closing = false;
 };
@@ -88,11 +89,20 @@ void OnRoundEncodingStarted(const void *owner, AVFormatContext *format) {
 	}
 	const auto journalSeconds = JournalSeconds.load();
 	const auto config = RoundMedia::ConfigOf(format);
+	auto group = std::string();
+	{
+		const auto lock = std::lock_guard(Mutex());
+		const auto i = Owners().find(owner);
+		if (i != Owners().end() && !i->second.closing) {
+			group = i->second.group;
+		}
+	}
 	const auto id = config
 		? BeginRecordingEntry(
 			Kind::Round,
 			".mp4.prc",
-			journalSeconds > 0 ? std::string() : std::string(".pjr.prc"))
+			journalSeconds > 0 ? std::string() : std::string(".pjr.prc"),
+			group)
 		: std::nullopt;
 	auto muxer = std::unique_ptr<RoundMedia::CopyMuxer>();
 	if (id) {
@@ -128,6 +138,10 @@ void OnRoundEncodingStarted(const void *owner, AVFormatContext *format) {
 		if (entry.closing) {
 			report = base::take(entry.closedParts);
 			entry.closing = false;
+			entry.group = std::string();
+		}
+		if (entry.group.empty() && id) {
+			entry.group = *id;
 		}
 		if (muxer) {
 			entry.active = std::move(muxer);
@@ -147,6 +161,23 @@ void OnRoundPacket(const void *owner, const AVPacket *packet) {
 	if (!active->failed() && !active->write(packet) && active->failed()) {
 		LOG(("Purple Recording: a round copy write failed, copying stopped."));
 	}
+}
+
+std::vector<std::string> RoundCopyIds() {
+	const auto lock = std::lock_guard(Mutex());
+	auto result = std::vector<std::string>();
+	for (const auto &[owner, entry] : Owners()) {
+		if (entry.closing) {
+			continue;
+		}
+		for (const auto &part : entry.closedParts) {
+			result.push_back(part.id);
+		}
+		if (entry.active) {
+			result.push_back(entry.activeId);
+		}
+	}
+	return result;
 }
 
 std::vector<std::string> RequestRoundCopiesClose() {

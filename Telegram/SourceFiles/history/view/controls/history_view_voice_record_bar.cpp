@@ -2928,7 +2928,7 @@ Ui::RoundVideoResult VoiceRecordBar::mergeWithResumePrefix(
 }
 
 void VoiceRecordBar::stopRecording(StopType type, bool ttlBeforeHide) {
-	Purple::NoteRecordingStop(&_show->session(), int(type), isListenState(), ttlBeforeHide);
+	Purple::NoteRecordingStop(&_show->session(), int(type), ttlBeforeHide);
 	using namespace ::Media::Capture;
 	if (type == StopType::Cancel) {
 		clearResumeState();

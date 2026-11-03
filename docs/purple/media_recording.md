@@ -179,7 +179,8 @@ passcode. Until then nothing is mirrored.
   Upstream's voice bar does not know the reply it would send with, so the
   reply id is 0.
 - `Purple::NoteRecordingStop` at the top of `VoiceRecordBar::stopRecording`
-  says Send or Cancel (Listen, the pause into preview, is ignored). Send moves
+  says Send or Cancel; Listen, the pause into the preview, only marks the
+  open recordings as stopped from the preview. Send moves
   the entry to `sending`. Cancel moves it to the bin as "Discarded" while
   `keep_discarded_p` is on (owner answer 1 = A), and deletes it once the file
   is closed while it is off.
@@ -192,10 +193,24 @@ passcode. Until then nothing is mirrored.
   and its file and entry are deleted. Desktop does not keep unsent uploads
   across restarts, so until then the entry stays.
 - Sending from the preview goes through upstream's Cancel (the bar sends,
-  then hides with `StopType::Cancel`). That entry is marked as stopped from
-  the preview, and a message of the same chat and kind sent within two
-  minutes settles it as well. A recording discarded from the preview with no
-  send stays "Discarded".
+  then hides with `StopType::Cancel`, and by then it has already left the
+  preview). So Purple keeps the preview state itself: the Listen stop marks
+  every recording still open as stopped from the preview. A Cancel of such a
+  recording keeps its file even with `keep_discarded_p` off, as "Discarded",
+  and a voice or video message of the same chat and kind sent within two
+  minutes settles it. If none comes, it stays in the bin with
+  `keep_discarded_p` on, and the hourly sweep deletes it once the two minutes
+  have passed with it off. A resumed voice recording keeps the mark (the
+  capture does not tell Purple about a resume).
+- Settling: forwarded messages never settle anything. A voice message
+  settles a waiting recording of the same account, chat and kind only when
+  its document is exactly the mirror's size (the mirror holds the sent
+  bytes); only a recording stopped from the preview, whose sent copy may be
+  trimmed, is matched without the size, and only after no exact match. A
+  round has no size match. A round in several parts is settled whole.
+- A recording upstream never sends (a voice under a second, a round under
+  200 ms) is dropped from `sending` once its file is finalised. A write at
+  offset 0 while a recording is closing is its trailer, never a new recording.
 - If a write fails (a full disk), mirroring stops quietly for that recording
   with one log line, and the recording goes on as upstream does. The item is
   then marked partial.
@@ -232,8 +247,10 @@ the same encoded packets.
   muxes its own copy of the same packets with the same muxer, which gives
   the same layout without a third hook.
 - A paused and resumed round is several encoder runs. Each run is its own
-  copy and its own manifest entry, and Send or Cancel applies to all of them,
-  so a round paused once shows in the bin as two items.
+  copy and its own manifest entry, all in one group (the first part's id).
+  Send, Cancel, a sent message and Delete act on the whole group, and the bin
+  lists the group as one item: Play, Send and Save join the parts in order
+  with `RoundMedia::Join`, as `appendToPrevious` does.
 - The copies are closed three seconds after Send or Cancel, so the encoder's
   last packets still reach them. A round closed into the bin is turned into a
   standard MP4 then; one that is being sent is left as it is.
@@ -357,8 +374,8 @@ drops one of them.
   `av_interleaved_write_frame` in `RoundVideoRecorder::Private::writeFrame`.
 - `history/view/controls/history_view_voice_record_bar.cpp`: the capture
   facade include and `Purple::NoteRecordingStop(...)` at the top of
-  `VoiceRecordBar::stopRecording`, with the stop type, whether the bar is in
-  the preview, and the view-once flag. The stop type travels as its ordinal,
+  `VoiceRecordBar::stopRecording`, with the stop type and the view-once
+  flag. The stop type travels as its ordinal,
   so the test pins the order of `StopType`.
 - The floating round's buttons need no new hook: they come from the
   existing `Purple::DecorateFloat` call.

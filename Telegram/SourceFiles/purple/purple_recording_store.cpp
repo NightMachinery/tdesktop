@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_key.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -61,7 +62,7 @@ struct Store {
 	std::shared_ptr<const RecordingCrypt::Key> key;
 	Manifest manifest;
 	bool loaded = false;
-	std::set<std::string> deleteAfterClose;
+	std::vector<std::string> deleteAfterClose;
 	rpl::event_stream<> changes;
 	rpl::lifetime captureLifetime;
 	rpl::lifetime lifetime;
@@ -271,9 +272,14 @@ void Sweep() {
 		}
 		const auto now = base::unixtime::now();
 		const auto &settings = ActiveSettings().recording;
-		const auto ids = Expired(store.manifest, [&](std::int64_t binned) {
+		auto ids = Expired(store.manifest, [&](std::int64_t binned) {
 			return BinItemExpired(settings, binned, now);
 		});
+		if (!settings.keepDiscarded) {
+			for (auto &id : UnclaimedListen(store.manifest, now)) {
+				ids.push_back(std::move(id));
+			}
+		}
 		for (const auto &id : ids) {
 			RemoveLocked(store, id);
 			++removed;
@@ -288,6 +294,31 @@ void Sweep() {
 	}
 }
 
+[[nodiscard]] std::int64_t MediaSizeOf(const Entry &entry) {
+	auto error = std::error_code();
+	const auto size = std::filesystem::file_size(RecordingPath(entry.media), error);
+	return (error || size < RecordingCrypt::kHeaderBytes)
+		? -1
+		: std::int64_t(size - RecordingCrypt::kHeaderBytes);
+}
+
+void SettleLocked(Store &store, const std::string &id) {
+	for (const auto &part : GroupOf(store.manifest, id)) {
+		const auto pending = std::find(
+			store.deleteAfterClose.begin(),
+			store.deleteAfterClose.end(),
+			part);
+		const auto entry = store.manifest.find(part);
+		if (pending != store.deleteAfterClose.end() || !entry) {
+			continue;
+		} else if (entry->state == State::Recording) {
+			entry->state = State::Sent;
+		} else {
+			RemoveLocked(store, part);
+		}
+	}
+}
+
 void HandleSent(
 		not_null<Main::Session*> session,
 		const Data::Session::IdChange &change) {
@@ -295,6 +326,7 @@ void HandleSent(
 	const auto media = item ? item->media() : nullptr;
 	const auto document = media ? media->document() : nullptr;
 	if (!item || !item->out() || !document
+		|| item->Get<HistoryMessageForwarded>()
 		|| !(document->isVoiceMessage() || document->isVideoMessage())) {
 		return;
 	}
@@ -306,16 +338,12 @@ void HandleSent(
 			.peer = change.newId.peer.value,
 			.kind = document->isVideoMessage() ? Kind::Round : Kind::Voice,
 			.now = base::unixtime::now(),
-		});
+			.size = document->size,
+		}, MediaSizeOf);
 		if (!index) {
 			return;
 		}
-		const auto id = store.manifest.entries[*index].id;
-		if (store.deleteAfterClose.contains(id)) {
-			store.manifest.entries[*index].state = State::Sent;
-		} else {
-			RemoveLocked(store, id);
-		}
+		SettleLocked(store, store.manifest.entries[*index].id);
 		SaveLocked(store);
 	}
 	Fire();
@@ -463,10 +491,6 @@ void Refresh() {
 		return RecordingMirror::Opened{ *id, std::move(file) };
 	}, [](const std::string &) {
 		LOG(("Purple Recording: a voice mirror write failed, mirroring stopped."));
-	}, [](RecordingMirror::Closed closed) {
-		crl::on_main([closed = std::move(closed)]() mutable {
-			FinishClosed({ std::move(closed) });
-		});
 	});
 	return result;
 }
@@ -479,30 +503,23 @@ void FinishClosed(std::vector<RecordingMirror::Closed> closed) {
 	auto finalise = std::vector<std::string>();
 	{
 		const auto lock = std::lock_guard(store.mutex);
+		auto facts = std::vector<ClosedFacts>();
 		for (const auto &one : closed) {
-			if (one.id.empty()) {
-				continue;
-			} else if (store.deleteAfterClose.erase(one.id)) {
-				RemoveLocked(store, one.id);
-				continue;
-			}
-			const auto entry = store.manifest.find(one.id);
-			if (!entry) {
-				continue;
-			} else if (entry->state == State::Recording) {
-				const auto decision = DecideStop(
-					StopKind::Cancel,
-					ActiveSettings().recording.keepDiscarded);
-				if (!decision.keepFiles) {
-					RemoveLocked(store, one.id);
-					continue;
-				}
-				entry->state = decision.state;
-				entry->binned = base::unixtime::now();
-			}
-			entry->partial = one.failed;
-			finalise.push_back(one.id);
+			facts.push_back({ .id = one.id, .failed = one.failed });
 		}
+		const auto copies = store.manifest;
+		auto result = NoteClosed(
+			store.manifest,
+			facts,
+			store.deleteAfterClose,
+			ActiveSettings().recording.keepDiscarded,
+			base::unixtime::now());
+		for (const auto &id : result.removed) {
+			if (const auto entry = copies.find(id)) {
+				RemoveFilesOf(*entry);
+			}
+		}
+		finalise = std::move(result.finalise);
 		SaveLocked(store);
 	}
 	const auto key = RecordingKey();
@@ -515,7 +532,7 @@ void FinishClosed(std::vector<RecordingMirror::Closed> closed) {
 					copy = *entry;
 				}
 			}
-			if (!copy || (copy->kind == Kind::Round && !InBin(copy->state))) {
+			if (!copy) {
 				continue;
 			}
 			const auto result = RecoverFiles(
@@ -525,14 +542,26 @@ void FinishClosed(std::vector<RecordingMirror::Closed> closed) {
 				key,
 				false);
 			crl::on_main([=] {
-				UpdateRecordingEntry(id, [&](Entry &entry) {
-					entry.durationMs = result.durationMs;
-					entry.partial = entry.partial || result.partial;
-					if (result.state == State::Unrecoverable
-						&& InBin(entry.state)) {
-						entry.state = State::Unrecoverable;
+				auto &store = TheStore();
+				{
+					const auto lock = std::lock_guard(store.mutex);
+					const auto entry = store.manifest.find(id);
+					if (!entry) {
+						return;
 					}
-				});
+					const auto recovered = (result.state != State::Unrecoverable);
+					if (DropAfterFinalise(*entry, recovered, result.durationMs)) {
+						RemoveLocked(store, id);
+					} else {
+						entry->durationMs = result.durationMs;
+						entry->partial = entry->partial || result.partial;
+						if (!recovered && InBin(entry->state)) {
+							entry->state = State::Unrecoverable;
+						}
+					}
+					SaveLocked(store);
+				}
+				Fire();
 			});
 		}
 	});
@@ -557,11 +586,7 @@ void ForgetRecordingsAtLogout(Main::Account &account) {
 	{
 		const auto lock = std::lock_guard(store.mutex);
 		for (const auto &id : OfAccount(store.manifest, index)) {
-			if (store.deleteAfterClose.contains(id)) {
-				store.manifest.find(id)->state = State::Sent;
-			} else {
-				RemoveLocked(store, id);
-			}
+			SettleLocked(store, id);
 			++removed;
 		}
 		if (removed) {
@@ -610,7 +635,8 @@ std::filesystem::path RecordingPath(const std::string &name) {
 std::optional<std::string> BeginRecordingEntry(
 		Kind kind,
 		const std::string &mediaSuffix,
-		const std::string &journalSuffix) {
+		const std::string &journalSuffix,
+		const std::string &group) {
 	auto &store = TheStore();
 	auto id = NewId();
 	if (id.empty()) {
@@ -628,6 +654,7 @@ std::optional<std::string> BeginRecordingEntry(
 			.kind = kind,
 			.started = base::unixtime::now(),
 			.media = id + mediaSuffix,
+			.group = (group.empty() && kind == Kind::Round) ? id : group,
 			.journal = journalSuffix.empty() ? std::string() : (id + journalSuffix),
 			.state = State::Recording,
 		});
@@ -693,45 +720,40 @@ void MirrorRecordingWrite(
 void NoteRecordingStop(
 		not_null<Main::Session*> session,
 		int type,
-		bool listen,
 		bool viewOnce) {
 	const auto kind = StopKindFromOrdinal(type);
-	if (!kind || *kind == StopKind::Listen) {
+	if (!kind) {
 		return;
 	}
-	auto ids = VoiceMirror().requestCloseAll();
-	for (auto &id : RequestRoundCopiesClose()) {
+	const auto listen = (*kind == StopKind::Listen);
+	auto ids = listen
+		? VoiceMirror().activeIds()
+		: VoiceMirror().requestCloseAll();
+	for (auto &id : (listen ? RoundCopyIds() : RequestRoundCopiesClose())) {
 		ids.push_back(std::move(id));
 	}
 	if (ids.empty()) {
 		return;
 	}
-	const auto decision = DecideStop(
-		*kind,
-		ActiveSettings().recording.keepDiscarded);
 	const auto account = RecordingAccountIndex(session);
 	auto &store = TheStore();
 	{
 		const auto lock = std::lock_guard(store.mutex);
-		for (const auto &id : ids) {
-			const auto entry = store.manifest.find(id);
-			if (!entry) {
-				continue;
-			}
-			entry->state = decision.state;
-			entry->viewOnce = viewOnce && (*kind == StopKind::Send);
-			entry->fromListen = listen;
-			entry->binned = base::unixtime::now();
-			if (entry->account < 0) {
-				entry->account = account;
-			}
-			if (!decision.keepFiles) {
-				store.deleteAfterClose.insert(id);
-			}
+		for (auto &id : NoteStop(
+				store.manifest,
+				ids,
+				*kind,
+				ActiveSettings().recording.keepDiscarded,
+				viewOnce,
+				account,
+				base::unixtime::now())) {
+			store.deleteAfterClose.push_back(std::move(id));
 		}
 		SaveLocked(store);
 	}
-	FinishRoundCopiesLater();
+	if (!listen) {
+		FinishRoundCopiesLater();
+	}
 	Fire();
 }
 
@@ -744,6 +766,16 @@ std::vector<RecordingBinItem> RecordingBinItems() {
 	const auto lock = std::lock_guard(store.mutex);
 	auto result = std::vector<RecordingBinItem>();
 	for (const auto entry : BinNewestFirst(store.manifest)) {
+		auto duration = std::int64_t();
+		auto partial = false;
+		for (const auto &part : GroupOf(store.manifest, entry->id)) {
+			const auto one = store.manifest.find(part);
+			duration += one->durationMs;
+			partial = partial
+				|| one->partial
+				|| (one->state == State::Unrecoverable);
+		}
+		const auto mark = MarkOf(*entry);
 		const auto session = RecordingAccountSession(entry->account);
 		const auto own = session
 			&& (!entry->user || session->userId().bare == entry->user);
@@ -754,9 +786,9 @@ std::vector<RecordingBinItem> RecordingBinItems() {
 			.topic = MsgId(entry->topic),
 			.reply = MsgId(entry->reply),
 			.kind = entry->kind,
-			.mark = MarkOf(*entry),
+			.mark = (partial && mark == Mark::Recovered) ? Mark::Partial : mark,
 			.started = TimeId(entry->started),
-			.duration = crl::time(entry->durationMs),
+			.duration = crl::time(duration),
 			.viewOnce = entry->viewOnce,
 		});
 	}
@@ -774,7 +806,7 @@ rpl::producer<> RecordingBinChanges() {
 }
 
 std::optional<QByteArray> RecordingBinMedia(const QString &id) {
-	auto path = std::filesystem::path();
+	auto paths = std::vector<std::filesystem::path>();
 	{
 		auto &store = TheStore();
 		const auto lock = std::lock_guard(store.mutex);
@@ -782,19 +814,44 @@ std::optional<QByteArray> RecordingBinMedia(const QString &id) {
 		if (!entry || !InBin(entry->state)) {
 			return std::nullopt;
 		}
-		path = RecordingPath(entry->media);
+		for (const auto &part : GroupOf(store.manifest, entry->id)) {
+			const auto one = store.manifest.find(part);
+			if (one->state != State::Unrecoverable || part == entry->id) {
+				paths.push_back(RecordingPath(one->media));
+			}
+		}
 	}
-	const auto bytes = RecordingCrypt::ReadWhole(path, RecordingKey());
-	if (!bytes) {
-		return std::nullopt;
+	auto parts = std::vector<RoundMedia::Bytes>();
+	for (const auto &path : paths) {
+		auto bytes = RecordingCrypt::ReadWhole(path, RecordingKey());
+		if (!bytes) {
+			return std::nullopt;
+		}
+		parts.push_back(std::move(*bytes));
 	}
-	return QByteArray(
-		reinterpret_cast<const char*>(bytes->data()),
-		qsizetype(bytes->size()));
+	if (parts.size() > 1) {
+		auto joined = RoundMedia::Join(parts);
+		if (!joined) {
+			return std::nullopt;
+		}
+		parts = { std::move(joined->bytes) };
+	}
+	return parts.empty()
+		? std::nullopt
+		: std::optional(QByteArray(
+			reinterpret_cast<const char*>(parts.front().data()),
+			qsizetype(parts.front().size())));
 }
 
 void DeleteRecordingBinItem(const QString &id) {
-	ForgetRecordingEntry(id.toStdString());
+	auto parts = std::vector<std::string>();
+	{
+		const auto lock = std::lock_guard(TheStore().mutex);
+		parts = GroupOf(TheStore().manifest, id.toStdString());
+	}
+	for (const auto &part : parts) {
+		ForgetRecordingEntry(part);
+	}
 }
 
 void ClearRecordingBin() {
@@ -878,13 +935,21 @@ void SendRecordingBinItem(
 				length,
 				(kind == Kind::Round),
 				action);
-			UpdateRecordingEntry(id.toStdString(), [&](Entry &entry) {
-				entry.state = State::Sending;
-				entry.fromListen = false;
-				entry.account = RecordingAccountIndex(session);
-				entry.peer = strong->peer()->id.value;
-				entry.topic = strong->topicRootId().bare;
-			});
+			auto parts = std::vector<std::string>();
+			{
+				const auto lock = std::lock_guard(TheStore().mutex);
+				parts = GroupOf(TheStore().manifest, id.toStdString());
+			}
+			for (const auto &part : parts) {
+				UpdateRecordingEntry(part, [&](Entry &entry) {
+					entry.state = State::Sending;
+					entry.fromListen = false;
+					entry.account = RecordingAccountIndex(session);
+					entry.user = session->userId().bare;
+					entry.peer = strong->peer()->id.value;
+					entry.topic = strong->topicRootId().bare;
+				});
+			}
 			done(true);
 		});
 	});

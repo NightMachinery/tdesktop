@@ -84,6 +84,7 @@ struct Remuxed {
 };
 
 [[nodiscard]] std::optional<Remuxed> Remux(const Bytes &bytes);
+[[nodiscard]] std::optional<Remuxed> Join(const std::vector<Bytes> &parts);
 [[nodiscard]] std::optional<Remuxed> Rebuild(
 	const Bytes &media,
 	const RoundRecovery &recovery);

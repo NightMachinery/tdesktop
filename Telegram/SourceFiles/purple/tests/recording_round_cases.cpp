@@ -311,6 +311,10 @@ int main() {
 	std::tie(result, bytes) = recover(fragmented, nullptr, true);
 	expect(result.state == State::Unsent, "one that was being sent is marked not sent");
 
+	const auto joined = Media::Join({ fragmented, fragmented });
+	expect(joined && joined->videoPackets == 2 * recorded.video && joined->durationMs >= 5800 && joined->durationMs <= 6400, "two parts of a resumed round join into one, back to back");
+	expect(joined && CountVideo(joined->bytes) == 2 * recorded.video, "and the joined file reads back whole");
+
 	const auto crashed = copy(1, false, nullptr);
 	expect(!crashed.empty() && CountVideo(crashed) >= recorded.video - 2 * kFps, "a crash keeps the fragments written before it");
 	for (const auto keep : { 0.95, 0.8, 0.6 }) {
