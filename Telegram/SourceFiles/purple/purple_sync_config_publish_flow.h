@@ -70,6 +70,7 @@ private:
 	QByteArray _setupIdentity;
 	QByteArray _setupBytes;
 	bool _bindingPending = false;
+	bool _magic = false;
 	bool _done = false;
 
 };

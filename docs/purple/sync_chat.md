@@ -81,8 +81,13 @@ state where it was, and automatic sync then holds instead of using the old
 chat. Each move writes one `sync_chat migration` diagnostic line.
 
 The move does not depend on automatic sync being on. It also runs when the
-lookup reports a new bound chat (`MoveSyncStateToBoundChat`), opening the
-store only for the move and closing it again.
+lookup reports a new bound chat and when the Sync screen's Check starts
+(`MoveSyncStateToBoundChat`), opening the store only for the move and closing
+it again. The Sync screen and the publish flow take the bound chat's lease
+and the binding file as their authority; the legacy setup snapshot and
+discovery cache are checked only when they exist. A first publish to a
+verified magic chat may join the one sync space another device already uses
+there.
 
 The automatic facts call the chat resolved when the lookup's chat equals the
 state's chat, and report a lookup problem, which pauses automatic sync

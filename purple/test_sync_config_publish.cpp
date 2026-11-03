@@ -5,6 +5,7 @@
 #include "purple/purple_config_payload.h"
 #include "purple/purple_sync_config_flow.h"
 #include "purple/purple_sync_envelope.h"
+#include "purple/purple_sync_magic_chat.h"
 
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
@@ -706,6 +707,62 @@ void ExistingJoins() {
 	}
 }
 
+void WriteMagicBinding(const PublishFiles &files, PeerToken chat, int64_t verifiedAt,
+		SyncChatProblem problem = SyncChatProblem::None) {
+	auto binding = SyncChatBinding();
+	binding.chat = chat; binding.verifiedAt = verifiedAt; binding.problem = problem;
+	const auto bytes = SerializeSyncChatBinding(binding); CHECK(bytes);
+	if (!bytes) { return; }
+	CHECK(WriteSyncPrivateFile(QDir(files.files.syncDirectory).filePath(
+		QString::fromLatin1(kSyncMagicBindingFile)), *bytes) == SyncStoreStatus::Ready);
+}
+
+void MagicPublish() {
+	const auto channel = PeerToken{PeerTokenKind::Channel,456};
+	for (const auto join : { false, true }) {
+		auto files = PublishFiles(channel);
+		WriteMagicBinding(files, channel, 100);
+		const auto other = BuildOther(2, 1700000000000);
+		auto input = files.input(channel); input.setup.reset();
+		if (join) {
+			input.inventory = InventoryOf({ other.built.canonical });
+			input.request.expectedParents = SyncConfigVersionKeys({ other.built.version });
+		}
+		auto reply = SyncConfigPublishDiskReply();
+		auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
+			[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
+		flow.start();
+		CHECK(reply.step == SyncConfigPublishDiskStep::Binding && reply.initial);
+		std::printf("MAGIC join=%d admitted=%d\n", int(join), int(bool(reply.initial)));
+		if (!reply.initial) { continue; }
+		CHECK(reply.initial->chat == channel && reply.initial->version == 2);
+		CHECK(!join || reply.initial->space == other.space);
+		files.token = reply.initial->bindingToken.toLatin1();
+		flow.bindingCommitted(files.token);
+		CHECK(reply.step == SyncConfigPublishDiskStep::Post && !reply.staged.isEmpty());
+		CHECK(flow.authorize());
+		WriteMagicBinding(files, PeerToken{PeerTokenKind::Channel,457}, 100);
+		CHECK(!flow.authorize());
+		WriteMagicBinding(files, channel, 100);
+		flow.confirm(reply.staged, 10);
+		CHECK(reply.result.status == SyncConfigPublishStatus::Confirmed && reply.result.messageId == 10);
+	}
+	for (auto mode = 0; mode != 4; ++mode) {
+		auto files = PublishFiles(channel);
+		if (mode == 1) WriteMagicBinding(files, channel, 0);
+		if (mode == 2) WriteMagicBinding(files, PeerToken{PeerTokenKind::Channel,457}, 100);
+		if (mode == 3) WriteMagicBinding(files, channel, 100, SyncChatProblem::MagicIneligible);
+		auto input = files.input(channel); input.setup.reset();
+		auto reply = SyncConfigPublishDiskReply();
+		auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
+			[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
+		flow.start();
+		CHECK(reply.step == SyncConfigPublishDiskStep::Finished
+			&& reply.result.status == SyncConfigPublishStatus::NeedsReview);
+		CHECK(SyncPathIdentity(files.files.syncStore) == "missing");
+	}
+}
+
 }
 
 int main(int argc, char **argv) {
@@ -716,7 +773,7 @@ int main(int argc, char **argv) {
 			FirstPublish(chat, false); FirstPublish(chat, true);
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
-		ExistingJoins();
+		ExistingJoins(); MagicPublish();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);

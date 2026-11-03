@@ -37,7 +37,6 @@ def inspect(values):
     require('disable-exempt', 'event != SyncAutoEvent::Disable && !SyncMagicBound(session) && !SyncMagicPaused(session)' in auto)
     require('auto-owned-hold', 'Hold(SyncAutoReason::SyncChatNotResolved);' in auto)
     require('auto-visible', 'if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }' in auto)
-    require('magic-move-unbound-auto', 'if (session && SyncMagicBound(session)) {\n\t\t\tFor(session).MoveToBound();' in auto and 'MoveStore();' in auto)
     service = values['purple_sync_chat_service.cpp']
     require('typed-inventory-route', 'ValidDesktopSyncChatIo(route)' in service and 'command.origin, command.ticket, command.chat, result' in service)
     require('tri-state-records', all('return GetSyncChatMessageOwnership(' in values[name] for name in ['purple_sync_history_scanner.cpp','purple_sync_candidate_reader.cpp']))
@@ -99,7 +98,17 @@ def inspect(values):
         and '(journal->choice == DesktopSyncChatSetupChoice::Create && !journal->adopted)' in created
         and 'const auto joinable = empty || (complete && OneSyncSpace(inventory)' in flow
         and '&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));' in flow
-        and '|| (_input.chat != PeerToken{} && !joinable)' in flow and '(_input.chat != PeerToken{} && !empty)' not in flow)
+        and '|| (_input.chat != PeerToken{} && !joinable && !magicJoinable)' in flow and '(_input.chat != PeerToken{} && !empty)' not in flow)
+    magic_bound = flow.split('bool MagicBound(', 1)[1].split('SyncConfigPublishFlow::SyncConfigPublishFlow(', 1)[0]
+    require('magic-publish-authority', 'binding->chat == chat && binding->problem == SyncChatProblem::None' in magic_bound
+        and '(chat == PeerToken{} || binding->verifiedAt > 0)' in magic_bound
+        and 'if (!setup && MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow
+        and 'const auto magicJoinable = _magic && complete && OneSyncSpace(inventory);' in flow
+        and '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow)
+    check = values['purple_sync_setup_box.cpp'].split('void StartCheck(', 1)[1]
+    require('magic-manual-check', 'MoveSyncStateToBoundChat(session);' in check
+        and '!lease->current() || !setup' not in check and 'state->setup = SyncChatSetupSnapshotOf(session);' in check)
+    require('magic-move-unbound-auto', 'if (session && SyncMagicBound(session)) {\n\t\t\tFor(session).MoveToBound();' in auto and 'MoveStore();' in auto)
     require('adopted-setup-join', '|| (!journal->adopted && (journal->markId != setup->cache->mark.markId' in flow
         and '|| journal->markDate != setup->cache->mark.markDate))' in flow and '|| setup->cache->mark.chat != _input.chat) {' in flow)
     box = values['purple_sync_setup_box.cpp']
@@ -200,6 +209,9 @@ negative = [
     ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
     ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-toast'),
+    ('purple_sync_config_publish_flow.cpp', ' || binding->verifiedAt > 0)', ')', 'magic-publish-authority'),
+    ('purple_sync_config_publish_flow.cpp', '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {', '} else if (false) {', 'magic-publish-authority'),
+    ('purple_sync_setup_box.cpp', '\tMoveSyncStateToBoundChat(session);\n', '', 'magic-manual-check'),
     ('purple_sync_auto_service.cpp', '\t\t\tFor(session).MoveToBound();\n', '', 'magic-move-unbound-auto'),
     ('purple_sync_magic_box.cpp', '\tchat->shown();\n\tconst auto weak = base::make_weak(controller);', '\tconst auto weak = base::make_weak(controller);', 'magic-problem-toast'),
 ]

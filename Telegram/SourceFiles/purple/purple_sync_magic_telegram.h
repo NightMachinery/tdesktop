@@ -10,9 +10,6 @@ class Session;
 
 namespace Purple {
 
-inline constexpr auto kSyncMagicBindingFile = "chat.json";
-inline constexpr auto kSyncMagicBindingLimit = 16 * 1024;
-
 [[nodiscard]] std::optional<MagicChatCandidate> SyncMagicCandidate(
 	const MTPChat &chat,
 	const MTPChatFull *full);

@@ -159,6 +159,12 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 	return state.running || state.publishing;
 }
 
+// The checked route's lease still holds; a legacy setup snapshot, when there is one, still matches too.
+[[nodiscard]] bool RouteCurrent(const SetupBoxState &state, Main::Session *session) {
+	return session && state.routeCurrent && state.routeCurrent()
+		&& (!state.setup || CachedSyncChatSetupContextCurrent(session, state.setup->scope));
+}
+
 [[nodiscard]] bool StillCurrent(
 		const SetupBoxState &state,
 		uint64_t generation) {
@@ -447,8 +453,7 @@ void StartPublisher(
 		const QString &progress, bool initializeOnly = false) {
 	const auto account = state->selectedAccount.get();
 	const auto session = state->selectedSession.get();
-	if (!SelectedAvailable(*state) || !state->route || !state->setup
-		|| !CachedSyncChatSetupContextCurrent(session, state->setup->scope)) {
+	if (!SelectedAvailable(*state) || !state->route || !RouteCurrent(*state, session)) {
 		SetStatus(*state, u"The sync destination changed. Check it again before sending."_q);
 		return;
 	}
@@ -615,8 +620,7 @@ void ConfirmAction(
 	const auto generation = state->generation;
 	const auto origin = state->selectedSession;
 	const auto target = origin ? CaptureAccountSyncRouting(origin.get()) : std::nullopt;
-	if (!target || !state->route || !state->setup
-		|| !CachedSyncChatSetupContextCurrent(origin.get(), state->setup->scope)) { return; }
+	if (!target || !state->route || !RouteCurrent(*state, origin.get())) { return; }
 	const auto text = (action == Action::Join && JoinsTypedChat(*state))
 		? u"Join the sync space another device already uses in the selected chat? Nothing is "
 			"sent now. Check again afterwards to choose between its settings and this "
@@ -709,15 +713,15 @@ void StartCheck(
 	const auto lease = status.complete && status.phase == DesktopSyncChatPhase::Use
 		&& !status.postingHeld && status.resolution.readChat
 		? SyncChatIoForPost(session, *status.resolution.readChat) : std::nullopt;
-	const auto setup = SyncChatSetupSnapshotOf(session);
-	if (!lease || !lease->current || !lease->current() || !setup) {
+	if (!lease || !lease->current || !lease->current()) {
 		EnsureSyncChatResolved(session);
 		SetStatus(*state, u"Resolve or choose this account's sync chat, then check again."_q);
 		return;
 	}
+	MoveSyncStateToBoundChat(session);
 	state->route = lease->route;
 	state->routeCurrent = lease->current;
-	state->setup = setup;
+	state->setup = SyncChatSetupSnapshotOf(session);
 	ClearReview(*state);
 	state->inventory.reset();
 	state->running = true;

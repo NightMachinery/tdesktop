@@ -102,6 +102,8 @@ struct SyncMagicResult {
 	bool manual = false;
 };
 
+inline constexpr auto kSyncMagicBindingFile = "chat.json";
+inline constexpr auto kSyncMagicBindingLimit = 16 * 1024;
 inline constexpr auto kSyncMagicShortFlood = int64_t(30);
 inline constexpr auto kSyncMagicAllChatsPages = 5;
 inline constexpr auto kSyncMagicPartialWait = int64_t(60 * 60);

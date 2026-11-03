@@ -6,6 +6,7 @@
 #include "purple/purple_sync_chat_io.h"
 #include "purple/purple_sync_chat_store.h"
 #include "purple/purple_sync_config_review.h"
+#include "purple/purple_sync_magic_chat.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
@@ -49,6 +50,18 @@ bool CreatedBySetup(const QByteArray &identity, const QByteArray &bytes,
 		|| (journal->choice == DesktopSyncChatSetupChoice::Create && !journal->adopted);
 }
 
+// A verified magic binding to `chat` stands in for the legacy setup journal and discovery cache.
+bool MagicBound(const QString &syncDirectory, PeerToken chat) {
+	const auto input = ReadSettingsFileInput(
+		QDir(syncDirectory).filePath(QString::fromLatin1(kSyncMagicBindingFile)));
+	if (input.state != SettingsFileState::Readable || input.bytes.size() > kSyncMagicBindingLimit) {
+		return false;
+	}
+	const auto binding = ParseSyncChatBinding(input.bytes);
+	return binding && binding->chat == chat && binding->problem == SyncChatProblem::None
+		&& (chat == PeerToken{} || binding->verifiedAt > 0);
+}
+
 }
 
 SyncConfigPublishFlow::SyncConfigPublishFlow(SyncConfigPublishDiskInput input,
@@ -66,6 +79,16 @@ bool SyncConfigPublishFlow::current() const {
 
 bool SyncConfigPublishFlow::setupAllowed() {
 	const auto &setup = _input.setup;
+	if (!setup && MagicBound(_target->files.syncDirectory, _input.chat)) {
+		_magic = true;
+		_setupPath = QDir(_target->files.syncDirectory).filePath(u"sync-chat-setup.json"_q);
+		_setupIdentity = SyncPathIdentity(_setupPath);
+		if (_setupIdentity.isEmpty() || (_setupIdentity != "missing"
+			&& ReadSyncPrivateFile(_setupPath, 512 * 1024, _setupBytes) != SyncStoreStatus::Ready)) {
+			return false;
+		}
+		return current() && _setupIdentity == SyncPathIdentity(_setupPath);
+	}
 	if (setup && (setup->scope.origin.account != _input.account
 		|| setup->scope.root != _input.routing.root
 		|| setup->scope.owner != _input.routing.owner
@@ -178,11 +201,12 @@ void SyncConfigPublishFlow::start() {
 		// device created must still be empty.
 		const auto joinable = empty || (complete && OneSyncSpace(inventory)
 			&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));
+		const auto magicJoinable = _magic && complete && OneSyncSpace(inventory);
 		if (_input.request.pendingOnly || !complete
 			|| (directory.selectedSpace && (!directory.publishableSpace
 				|| *directory.selectedSpace != *directory.publishableSpace
 				|| !IsSyncSpaceId(*directory.selectedSpace)))
-			|| (_input.chat != PeerToken{} && !joinable)
+			|| (_input.chat != PeerToken{} && !joinable && !magicJoinable)
 			|| (!inventory.directory.selectedSpace && !inventory.directory.canCreateSpace)) {
 			finish({ SyncConfigPublishStatus::NeedsReview }); return;
 		}
@@ -219,7 +243,7 @@ void SyncConfigPublishFlow::bindingCommitted(QByteArray token) {
 		|| CheckSyncAccountBinding(*_store->state(), token) != SyncAccountBindingVerdict::Bound) {
 		finish({ SyncConfigPublishStatus::AccountUnbound }); return;
 	}
-	if (_setupIdentity != "missing") {
+	if (!_magic && _setupIdentity != "missing") {
 		if (!_input.setup || !current() || !_routing.validateOpen(*_opening)
 			|| SyncPathIdentity(_setupPath) != _setupIdentity) {
 			finish({ SyncConfigPublishStatus::NeedsReview }); return;
@@ -271,6 +295,8 @@ bool SyncConfigPublishFlow::authorize() {
 		if (!disk->error.isEmpty() || !_input.setup->cache || !disk->cache
 			|| disk->cache->mark != _input.setup->cache->mark || disk->cache->carry
 			|| (_input.chat != PeerToken{} && !disk->cache->readerConsent)) { return false; }
+	} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {
+		return false;
 	}
 	return current();
 }
