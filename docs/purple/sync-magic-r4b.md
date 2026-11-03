@@ -111,25 +111,33 @@ Trap: `showDialog` dismisses the visible dialog, so a picker over a dialog must 
 ## Desktop state
 
 Base: the head of `sync-magic-r4b`. Its commit "Name each sync refusal and stop naming Saved Messages as the sync chat"
-has the gitlink, named refusals and wording. The commit labelled WIP above it has first use and is compiled and run
-only through local dev drivers:
+has the gitlink, named refusals and wording. The commit labelled WIP above it has first use; the commits after it finish
+it without rewriting it:
 
 - `ReviewSyncFirstUse`, `SyncCarryLeftoversPresent` (config_review); `PlanSyncFirstUseArchive`,
   `StartAgainSyncAccount(firstUse)`, `RetireSyncCarryLeftovers` to `sync/carry-retired-<date>/` (account_recovery);
   `ApplySyncFirstUseJoin` (config_apply); `SetDesktopSyncAutoBeforeState` (auto_store); `AutoSession` FirstUse,
   FirstUseRun, FirstUseJoined, FirstUseFinish, NoStateEvent, RetireCarry, and PauseOnForeignSpace leading to first use;
   `RunSyncFirstUse`, `SyncFirstUseResultOf`; box RunFirstUse, FirstUse and the useSynced and useThisDevice buttons;
-  strings `lng_purple_sync_first_*`, `lng_purple_auto_first_*`; diag words.
-- Host cases written: FirstUseActions, FirstUseD1, FirstUseMigration, FirstUseRace in `purple/test_sync_config_publish.cpp`
-  (the setup-publish gate: 1968 checks, 0 failures in a local dev run), and FirstUseJoinAppliesHead and AutoBeforeState
-  in `purple/test_sync_auto.cpp` (1778/0 main, 1771/0 worker). `sync_magic_chat_cases`: 146/0.
+  strings `lng_purple_sync_first_*`, `lng_purple_auto_first_*`; diag words. The behaviour is described in
+  [sync_chat.md](sync_chat.md#first-use).
+- Fixed after the WIP review: automatic sync started first use only when the chat held no record of the state's own
+  space, so the loser of a race (its own record beside the winner's) got a dead-end `space_mismatch` refusal instead of
+  the one-time choice; it now uses `ReviewSyncFirstUse`, as Check does. First use refuses while a Start again journal
+  is present. A broken local file (Invalid, or last-good in use) no longer reads as "waiting for a device with your
+  settings" with "default settings"; it is named as a file error.
+- Host cases: FirstUseActions, FirstUseD1 (both answers, carry admission, and a core review that is Ready afterwards),
+  FirstUseMigration (both states moved from an old chat by `MoveSyncStateToChat`, one space, zero prompts) and
+  FirstUseRace in `purple/test_sync_config_publish.cpp` (gate setup-publish); FirstUseJoinAppliesHead and
+  AutoBeforeState in `purple/test_sync_auto.cpp`. The routes gate `purple/test_sync_chat_routes.py` pins the first-use
+  routes, with a negative mutation for each.
+- `purple.cmake` is unchanged.
 
-To do:
+Still to run locally (the session that finished the code had no Qt and no Debug build, so no compiled gate ran there):
 
-1. Review the host cases against the policy and the findings and fill the gaps: each action, the D1 state with both
-   answers (a later Check is Ready with no prompt), migration, race.
-2. Negative controls. None has a result yet: the run was interrupted during the first. Planned mutations, each a
-   revert to see fail and restore:
+1. The Debug build and the full host gate set (`purple/run_host_gates.py`), including setup-publish, test_sync_auto
+   (main and worker) and cases-sync-magic-chat with the changed cases.
+2. Negative controls for the compiled cases, each a revert to see fail and restore. None has a result yet:
    - N1 `input->choice = choice;` to `SyncFirstUseChoice::None`, config_review, setup-publish;
    - N2 `*selected == parsed.state.space) { return result; }` to `true) {...`, config_review, setup-publish;
    - N3 the `SyncCarryLeftoversPresent` early return to `if (true)`, account_recovery, setup-publish;
@@ -140,9 +148,6 @@ To do:
    - N8 the owner-only `QDir().mkdir` to a plain one, account_recovery, setup-publish;
    - N9 `head.key == *headKey` to `!=`, config_apply, test_sync_auto;
    - N10 `record.enabled = enabled;` to `false`, auto_store, test_sync_auto.
-3. Docs under `docs/purple/` (`sync_chat.md`, the automatic sync doc): say what first use does. The "First use manual
-   Check" text goes.
-4. Routes gate entries (`purple/test_sync_chat_routes.py`) if the automatic service gained routes.
-5. Remove the WIP state: a follow-up commit, never a rewrite.
+3. The RelWithDebInfo stage, signing, and the GUI and device checks of D1.
 
 Keep `purple.cmake` unchanged if you can, and say why if you cannot.

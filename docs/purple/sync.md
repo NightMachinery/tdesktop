@@ -669,10 +669,11 @@ and nothing is sent twice.
 
 ## Automatic settings sync on Desktop
 
-After an account has joined or published through manual sync, enable
-**Automatically sync this account's settings** in Sync across devices. The choice
-belongs to that account on this installation and starts off. It neither enables
-legacy `send_after_save_p` nor creates a settings file or joins a stream.
+Enable **Automatically sync this account's settings** in Sync across devices.
+The choice belongs to that account on this installation and starts off. It never
+enables legacy `send_after_save_p`. An account with no state in the bound magic
+chat's space runs first use instead of waiting for a manual Check: it publishes,
+joins, waits or asks once (see [first use](sync_chat.md#first-use)).
 
 Session readiness, foreground/unlock and that account's settled saves trigger
 checks. Lifecycle checks run at most once in 15 minutes per account. A save uses
@@ -725,8 +726,8 @@ ordinary trigger after RetryStopped starts a new run. Holds do not install an
 immediate retry loop. Status/attention stays inside the sync screen with one
 persisted notice fact per account/distinct reason, without background dialogs.
 
-Q1-unanswered, signed-out, unbound, ambiguous recovery and recovery-journal states
-perform no automatic work. Moved/state-v2 streams are held as sync chat not
+Q1-unanswered, signed-out, ambiguous recovery and recovery-journal states perform
+no automatic work; an unbound account with a bound magic chat runs only first use. Moved/state-v2 streams are held as sync chat not
 resolved until Desktop has its resolution/carry adapters. Library/playlist
 publishing remains disabled. Tests exercise real file/record/state adapters and
 an unchanged production Apply body through opaque session-boundary shims; run

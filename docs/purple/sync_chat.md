@@ -101,16 +101,15 @@ lookup reports a new bound chat and when the Sync screen's Check starts
 it again. The Sync screen and the publish flow take the bound chat's lease
 and the binding file as their authority; the legacy setup snapshot and
 discovery cache are checked only when they exist. A first publish to a
-verified magic chat may join the one sync space another device already uses
-there.
+verified magic chat joins the space core selects there (the earliest one), even
+when the chat also holds the records of a device that lost the race to start it.
 
 The automatic facts call the chat resolved when the lookup's chat equals the
 state's chat, and report a lookup problem, which pauses automatic sync
 (`SyncChatProblem`). Check, read, post, edit and retire all use the lease for
 the state's chat; a retire in a supergroup uses `channels.deleteMessages`.
-When a complete scan of the chat finds records of other sync spaces only,
-automatic sync raises `space_mismatch` in the binding and pauses until the
-user acts. Send after Save posts to the bound chat (Saved Messages or the
+When a complete scan of the chat selects a space other than the state's,
+automatic sync runs first use (below) instead of pausing. Send after Save posts to the bound chat (Saved Messages or the
 Magic Purple Sync chat); the explicit Send to Saved Messages action still goes
 to Saved Messages.
 
@@ -128,12 +127,80 @@ local main and archive lists, with no search, and accepts only Saved Messages
 or a supergroup the user is in alone, judged from the cached member count
 (owner decision Q2); the lookup then checks it like any manual binding. Use
 Magic Purple Sync forgets the pick and keeps the waits and the list choice.
-For `space_mismatch` the box offers Join: `SyncLocalStore::SetAside` moves
+Automatic sync no longer raises `space_mismatch`; a binding that still
+records it from an older build keeps the box's Join until a manual check
+clears it. For `space_mismatch` the box offers Join: `SyncLocalStore::SetAside` moves
 the pending stages, the automatic record, the retained bases and last the
 state into a new `orphaned-<date>` folder (nothing is deleted), the problem is
 cleared, and the Sync screen's next check offers to join the records already
 in the chat. The old setup box (purple_sync_chat_setup_box) is no longer
 opened; it is deleted with the rest of the search-based discovery.
+
+### First use
+
+A device acts on the bound magic chat for the first time while it has no
+state in the chat's space: a fresh login or install (no `state.json`, recovery
+status Setup), or a state in another space, such as the loser of two
+customised devices racing into an empty chat, or D1's Desktop after Android
+started a fresh space. `ReviewSyncFirstUse` (purple_sync_config_review) reads
+the local file and the store, calls core's `SyncFirstUseInputOf` and
+`PlanSyncFirstUse`, and returns the need (`NoState` or `OtherSpace`), the
+action, the publish request (the local fingerprint, every head of the selected
+space as parent) and the single head's key. A device whose own pending stage
+waits with no state, or whose inventory core cannot plan from, gets no action
+and the usual named refusal.
+
+It runs from two places, both through `RunSyncFirstUse` in the automatic
+service: the automatic service, when an enabled account cannot open its store
+because it has no state (`NoStateEvent`) or when a check of an open store
+finds the state outside the selected space (`PauseOnForeignSpace`); and the
+Sync screen's Check, before its usual review. An unfinished Start again
+archive (a recovery journal) refuses it. Enabling or disabling automatic sync
+on a device with no state writes the switch beside the missing state
+(`SetDesktopSyncAutoBeforeState`), so the store opens enabled once first use
+creates it.
+
+- Wait (empty chat, default settings): nothing is sent. The Sync screen says
+  it waits for a device with your settings; the automatic status says so too.
+  A local file that does not load, or a last-good copy in use, is named as a
+  file error instead and needs attention.
+- Publish (empty chat, customised settings, or the answer "Use this device's
+  settings"): the existing publisher posts the first record, or the successor
+  of the chat's heads, with no confirmation.
+- Join (default settings, or the answer "Use the synced settings"): the
+  publisher initializes the state in the selected space without sending, then
+  `ApplySyncFirstUseJoin` applies the chosen head through the manual Apply
+  path, with History and Undo for the previous file.
+- JoinSilently (the same meaning as the chat's one head): the same join; the
+  local file is never touched. When the bytes differ although the meaning is
+  the same, Desktop publishes them as the successor.
+- Ask (different customised settings): one choice on the Sync screen, "Use
+  the synced settings" or "Use this device's settings", and an attention line
+  in the automatic status. No dialog opens by itself. The answer is fed back
+  as `SyncFirstUseChoice`; the state it creates in the chat's space settles
+  it, so the question never comes back.
+
+Before acting on `OtherSpace`, the old state is archived with the Start again
+machinery (`StartAgainSyncAccount` with `firstUse`, planned by
+`PlanSyncFirstUseArchive`): the state and complete pending stages move to
+`sync/orphaned-<date>/`, while History, the settings file and the chat binding
+stay. The device then acts as an unbound one.
+
+Pre-magic carry leftovers (`carry.json`, `carry-cache.json`, `carry-objects`,
+`carry-history`) would otherwise hold the store's startup admission
+(`carry-recovery-required`). While a magic chat is bound and no carry posting
+is held, every store open and every first use first moves them, under the
+account lock, into a new owner-only `sync/carry-retired-<date>/`
+(`RetireSyncCarryLeftovers`); nothing is deleted. Each step writes one
+diagnostic line: `sync_chat first_use trigger=<auto|manual> action=<...>
+choice=<...>`, then `step=archive|publish|join|apply outcome=ok|error`, and
+`sync_chat migration step=carry` for the retirement.
+
+The host cases are FirstUseActions, FirstUseD1, FirstUseMigration and
+FirstUseRace in `purple/test_sync_config_publish.cpp` (gate setup-publish), and
+FirstUseJoinAppliesHead and AutoBeforeState in `purple/test_sync_auto.cpp`.
+The routes gate (`purple/test_sync_chat_routes.py`) pins the triggers, the
+journal guard, the carry retirement, the actions and the Sync screen's choice.
 
 The magic chat is a bookkeeping chat, so Purple leaves it out of the main
 list, the archive, folder tabs, Work Mode views and the forward picker, with
