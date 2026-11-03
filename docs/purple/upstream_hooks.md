@@ -623,9 +623,9 @@ hunks, near 3. Owners: B10u, B3c, B13.
   B12 adds the top-peers restart at line 2151 (see "Suggestions, stories and
   top peers").
 
-**`Telegram/SourceFiles/window/window_session_controller.cpp`**: +44 -14, 8
-hunks, near 3. Owners: B10u, B7, B5.
-- Today: three includes, the settings offer at session start, the
+**`Telegram/SourceFiles/window/window_session_controller.cpp`**: +41 -14, 7
+hunks, near 3. Owners: B10u, B7.
+- Today: three includes, the
   `ActiveChanges()` producer in the filters-menu merge, `WatchScreenTime`,
   `checkOpenedFilter` rewritten, home-filter literals in `openFolder` and
   `openCommunity`, and the `CheckAndJumpToNearChatsFilter` swap.
@@ -636,8 +636,8 @@ hunks, near 3. Owners: B10u, B7, B5.
   home id zero; callers use `defaultId()` for home only while a preset is
   active.
 - B7 leaves: `Purple::WatchScreenTime(this)` without its 3-line comment.
-- B5 and D4: `Purple::OfferNewerSettingsFromSavedMessages(session, uiShow())`
-  stays (a 3-line hook) until the sync chat ships and the offer retires.
+- B5 and D4: the settings offer at session start is removed; the Magic
+  Purple Sync lookup replaced the Saved Messages search it ran.
 - Includes: one facade include (rule 5).
 - Account: `CheckOpenedView(this)` and `HomeFilterId(&session())` are *in
   hand*; `ActiveChanges()` needs none.
@@ -1121,7 +1121,8 @@ All of them exist at HEAD, and each now has an owner:
   sponsored early returns;
 - B8: `addTranslate`'s local-premium term;
 - B7: `WatchScreenTime(this)` without its explanatory comment;
-- B5 and D4: the settings-offer hook in window_session_controller.cpp;
+- B5 and D4: the settings-offer hook in window_session_controller.cpp
+  (removed with the Magic Purple Sync lookup);
 - B9: the twelve instant-replace sites, including the text-only tag field;
 - B16: file_upload.{h,cpp}.
 

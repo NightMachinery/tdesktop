@@ -4,7 +4,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
 #include <list>
 #include <map>
 #include <mutex>
@@ -34,7 +33,7 @@ inline constexpr auto kSyncDiagLineLimit = 512;
 [[nodiscard]] QString SyncDiagLine(
 	const QString &area,
 	const QString &event,
-	std::initializer_list<SyncDiagField> fields);
+	const std::vector<SyncDiagField> &fields);
 
 class SyncDiagRepeats final {
 public:
@@ -87,7 +86,7 @@ public:
 	void write(
 		const QString &area,
 		const QString &event,
-		std::initializer_list<SyncDiagField> fields);
+		const std::vector<SyncDiagField> &fields);
 	void flush();
 
 private:
@@ -104,6 +103,6 @@ void SetSyncDiagSink(SyncDiagLog::Sink sink);
 void SyncDiag(
 	const QString &area,
 	const QString &event,
-	std::initializer_list<SyncDiagField> fields = {});
+	const std::vector<SyncDiagField> &fields = {});
 
 } // namespace Purple

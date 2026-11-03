@@ -7,6 +7,12 @@ returns through the existing outcome-unknown reconciliation path. It does not co
 into Gone, discard a discovery cache, or publish an empty inventory. Permanent
 errors continue through the existing failure handlers.
 
+The Magic Purple Sync lookup does not use this adapter. It sends its five
+requests through the session's `MTP::Sender` with flood errors handled by the
+caller and a 30 second timeout, and keeps each method's deadline in
+`sync/chat.json`, so a wait outlives a restart and holds every trigger. See
+sync_chat.md.
+
 ## Timing and ownership
 
 Flood waits and premium flood waits of at most 30 seconds get one short retry

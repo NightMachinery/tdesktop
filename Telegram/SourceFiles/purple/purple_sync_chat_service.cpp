@@ -30,6 +30,7 @@
 #include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_account_inventory.h"
 #include "purple/purple_sync_chat_store.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_chat_peer_request.h"
 #include "storage/storage_account.h"
 #include <QtCore/QCryptographicHash>
@@ -1158,13 +1159,13 @@ SyncChatSession &For(not_null<Main::Session*> session) {
 bool SyncChatIoBelongsToSession(
 		not_null<Main::Session*> session,
 		const DesktopSyncChatIo &route) {
-	return For(session).HasOrigin(route);
+	return SyncMagicOwnsRoute(session, route) || For(session).HasOrigin(route);
 }
 
 std::optional<DesktopSyncChatLease> SyncChatIoForPost(
 		not_null<Main::Session*> session,
 		PeerToken chat) {
-	return For(session).Lease(chat);
+	return SyncMagicLease(session, chat);
 }
 
 std::optional<DesktopSyncChatSetupSnapshot> SyncChatSetupSnapshotOf(
@@ -1194,7 +1195,10 @@ std::optional<DesktopSyncChatDiscoveryScope> CaptureSyncChatCarryScope(not_null<
 }
 
 void EnsureSyncChatResolved(not_null<Main::Session*> session, bool force) {
-	For(session).Ensure(force);
+	SyncMagicLookup(
+		session,
+		force ? SyncMagicTrigger::Manual : SyncMagicTrigger::Screen,
+		force);
 }
 void ResolveSyncChatSetup(
 		not_null<Main::Session*> session,
@@ -1209,10 +1213,18 @@ void CheckSyncChatBeforePost(
 	not_null<Main::Session*> session,
 	Fn<void(DesktopSyncChatStatus)> done,
 	DesktopSyncChatOperation operation) {
-	For(session).Ensure(true, std::move(done), std::move(operation), true);
+	const auto current = operation.current;
+	SyncMagicLookup(session, SyncMagicTrigger::Post, true, [=](DesktopSyncChatStatus status) {
+		if (current && !current()) {
+			status.phase = DesktopSyncChatPhase::Paused;
+			status.postingHeld = true;
+			status.reason = u"caller-retired"_q;
+		}
+		done(status);
+	});
 }
 DesktopSyncChatStatus SyncChatStatusOf(not_null<Main::Session*> session) {
-	return For(session).status();
+	return SyncMagicStatusOf(session);
 }
 bool SyncChatSelfResolved(not_null<Main::Session*> session) {
 	const auto status = SyncChatStatusOf(session);
@@ -1220,7 +1232,7 @@ bool SyncChatSelfResolved(not_null<Main::Session*> session) {
 		&& status.resolution.readChat == PeerToken{};
 }
 rpl::producer<Main::Session*> SyncChatStatusChanges() {
-	return Changes.events();
+	return rpl::merge(Changes.events(), SyncMagicChanges());
 }
 
 auto ReviewSyncChatFollowFill(not_null<Main::Session*> session,
@@ -1292,14 +1304,10 @@ void StartSyncChatDiscovery() {
 		accounts.destroy();
 		auto live = std::set<Main::Session*>();
 		for (const auto &entry : Core::App().domain().accounts()) {
-			// An unfinished carry journal resumes before ordinary reconciliation; with the carry
-			// switches OFF this is EnsureSyncChatResolved alone.
 			const auto ready = [](Main::Session* session) {
 				if (session) {
 					crl::on_main(session, [=] {
-						ResumeSyncChatCarry(session, [=] {
-							EnsureSyncChatResolved(session);
-						});
+						SyncMagicLookup(session, SyncMagicTrigger::Startup, false);
 					});
 				}
 			};

@@ -45,7 +45,6 @@ guards = [
     ('host', 'if (!ResumeActivated()) { if (then) { then(); } return; }'),
     ('host', 'if (!ResumeActivated()) {\n\t\tif (then) { then(); }\n\t\treturn;\n\t}\n\tSyncChatCarry(session).startup(std::move(then));'),
     ('host', 'if (unfinished && resumeLater && ResumeActivated())'),
-    ('service', 'ResumeSyncChatCarry(session, [=] {\n\t\t\t\t\t\t\tEnsureSyncChatResolved(session);'),
     # The setup screen constructs the carry service only behind CarryOn().
     ('ui', 'return (session && CarryOn()) ? &SyncChatCarry(session).owner() : nullptr;'),
     ('ui', 'if (!strong || !CarryOn()) { return nullptr; }'),

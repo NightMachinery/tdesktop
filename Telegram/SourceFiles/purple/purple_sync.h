@@ -191,10 +191,6 @@ void AddImportSettingsFileAction(
 	GlobalMsgId globalId,
 	const ImportSettingsViewState &native);
 
-void OfferNewerSettingsFromSavedMessages(
-	not_null<Main::Session*> session,
-	std::shared_ptr<Ui::Show> show);
-
 [[nodiscard]] inline bool IsSyncRecordFileName(const QString &name) {
 	return (name == SyncSettingsRecordFileName())
 		|| (name == SyncPlaylistsRecordFileName());

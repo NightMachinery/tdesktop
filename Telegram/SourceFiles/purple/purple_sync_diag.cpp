@@ -43,6 +43,7 @@ const std::vector<QString> &Words() {
 		u"user_check"_q, u"user_resume"_q, u"chat_changed"_q,
 		u"user_action"_q, u"choose"_q, u"default"_q, u"join"_q,
 		u"listed"_q, u"value"_q, u"on"_q, u"off"_q,
+		u"action"_q, u"slot"_q, u"lists_unreadable"_q, u"native_unavailable"_q,
 	};
 	return result;
 }
@@ -143,7 +144,7 @@ SyncDiagField SyncDiagFlag(const QString &key, bool value) {
 QString SyncDiagLine(
 		const QString &area,
 		const QString &event,
-		std::initializer_list<SyncDiagField> fields) {
+		const std::vector<SyncDiagField> &fields) {
 	auto result = SyncDiagToken(area) + ' ' + SyncDiagToken(event);
 	for (const auto &field : fields) {
 		result += ' ' + field.key + '=' + field.value;
@@ -234,7 +235,7 @@ void SyncDiagLog::emit(const std::vector<SyncDiagRepeats::Summary> &list) {
 void SyncDiagLog::write(
 		const QString &area,
 		const QString &event,
-		std::initializer_list<SyncDiagField> fields) {
+		const std::vector<SyncDiagField> &fields) {
 	const auto line = SyncDiagLine(area, event, fields);
 	const auto lock = std::lock_guard(_mutex);
 	const auto decision = _repeats.offer(
@@ -261,7 +262,7 @@ void SetSyncDiagSink(SyncDiagLog::Sink sink) {
 void SyncDiag(
 		const QString &area,
 		const QString &event,
-		std::initializer_list<SyncDiagField> fields) {
+		const std::vector<SyncDiagField> &fields) {
 	Global().write(area, event, fields);
 }
 

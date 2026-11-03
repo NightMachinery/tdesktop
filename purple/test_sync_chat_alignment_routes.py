@@ -8,7 +8,7 @@ def check(v):
  result=[]
  def require(name,value):
   if not value:result.append(name)
- require('before-post-path','For(session).Ensure(true, std::move(done), std::move(operation), true);' in s)
+ require('before-post-path','SyncMagicLookup(session, SyncMagicTrigger::Post, true,' in s)
  require('busy-post-held','if (operation.current || beforePost)' in s)
  require('scope-from-disk','disk.settingsSpace, disk.settingsBound, disk.settingsChat' in s)
  require('complete-save-stamp','if (saved && cache && self->_status.complete' in s and '&& !self->_status.postingHeld)' in s)
@@ -27,7 +27,7 @@ def check(v):
  return result
 assert not check(files),check(files)
 controls=[
- ('purple_sync_chat_service.cpp','For(session).Ensure(true, std::move(done), std::move(operation), true);','Other();','before-post-path'),
+ ('purple_sync_chat_service.cpp','SyncMagicLookup(session, SyncMagicTrigger::Post, true,','Other(','before-post-path'),
  ('purple_sync_chat_service.cpp','if (operation.current || beforePost)','if (operation.current)','busy-post-held'),
  ('purple_sync_chat_service.cpp','disk.settingsSpace, disk.settingsBound, disk.settingsChat','QString(), disk.settingsBound, disk.settingsChat','scope-from-disk'),
  ('purple_sync_chat_service.cpp','if (saved && cache && self->_status.complete','if (saved && cache','complete-save-stamp'),

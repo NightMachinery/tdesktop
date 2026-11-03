@@ -197,7 +197,6 @@ bool HistoryContextMenuShortcutFilter::eventFilter(
 // the file, and offering to import it would be offering to import something
 // the download path cannot even hold.
 constexpr auto kMaxSize = 4 * 1024 * 1024;
-constexpr auto kSearchLimit = 100;
 
 [[nodiscard]] QString SettingsFileName() {
 	return SettingsDocumentFileName(kSettingsVersion);
@@ -605,144 +604,6 @@ void AddQualifiedImportAction(
 		}
 	}
 }
-
-struct ImportCandidate {
-	not_null<DocumentData*> document;
-	FullMsgId itemId;
-	TimeId date = 0;
-};
-
-[[nodiscard]] std::optional<ImportCandidate> FindImportCandidate(
-		not_null<Main::Session*> session,
-		const MTPmessages_Messages &result) {
-	auto messages = (const QVector<MTPMessage>*)nullptr;
-	result.match([](const MTPDmessages_messagesNotModified &) {
-	}, [&](const auto &data) {
-		session->data().processUsers(data.vusers());
-		session->data().processChats(data.vchats());
-		messages = &data.vmessages().v;
-	});
-	if (!messages) {
-		return std::nullopt;
-	}
-	session->data().processMessages(*messages, NewMessageType::Existing);
-
-	auto candidate = std::optional<ImportCandidate>();
-	for (const auto &message : *messages) {
-		const auto itemId = FullMsgId(
-			PeerFromMessage(message),
-			IdFromMessage(message));
-		const auto item = session->data().message(itemId);
-		const auto media = item ? item->media() : nullptr;
-		const auto document = media ? media->document() : nullptr;
-		if (!document
-			|| (document->size > kMaxSize)
-			|| ClassifySettingsDocumentName(document->filename()) == LegacySettingsDocumentKind::Unrelated) {
-			continue;
-		}
-		if (!candidate || (itemId.msg > candidate->itemId.msg)) {
-			candidate = ImportCandidate{ document, itemId, item->date() };
-		}
-	}
-	return candidate;
-}
-
-void OfferImportCandidate(
-		not_null<Main::Session*> session,
-		std::shared_ptr<Ui::Show> show,
-		const ImportCandidate &candidate) {
-	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
-	if (!opening || !show || !(*show)) {
-		ReleaseSettingsOfferStart(session);
-		return;
-	}
-	const auto global = AccountSettingsOpenTargetFor(session, SettingsOpenRole::AppWide);
-	if (!global) { return; }
-	const auto missingOwn = opening->file.input.state == SettingsFileState::Missing;
-	const auto verdict = JudgeImportOffer(
-		IsActiveSession(session),
-		candidate.itemId.msg.bare,
-		SettingsOfferMessageId(session).bare,
-		candidate.date,
-		SettingsImportBaselineTime(!missingOwn,
-			QFileInfo(opening->file.path).lastModified().toSecsSinceEpoch(),
-			QFileInfo(global->file.path).lastModified().toSecsSinceEpoch()));
-	if (verdict == ImportOfferVerdict::InactiveAccount) {
-		LOG(("Purple: Saved Messages settings offer dropped: "
-			"the account is no longer the active one."));
-		ReleaseSettingsOfferStart(session);
-		return;
-	} else if (verdict == ImportOfferVerdict::AlreadyOffered) {
-		return;
-	}
-	SetSettingsOfferMessageId(session, candidate.itemId.msg);
-	if (verdict == ImportOfferVerdict::NotNewer) {
-		return;
-	}
-	const auto account = AccountLabel(session);
-	const auto weakSession = base::make_weak(session.get());
-	const auto expectedItem = session->data().message(candidate.itemId);
-	const auto stillValid = [=] {
-		const auto live = weakSession.get();
-		if (!live || !IsActiveSession(live) || AskingWindowSwitched(show)) {
-			return false;
-		}
-		if (missingOwn && global->file.path != opening->file.path
-			&& !ValidateAccountSettingsOpenTarget(live, *global)) { return false; }
-		const auto item = live->data().message(candidate.itemId);
-		return item
-			&& item == expectedItem
-			&& item->date() == candidate.date
-			&& item->media()
-			&& item->media()->document() == candidate.document;
-	};
-	if (stillValid() && ValidateAccountSettingsOpenTarget(session, *opening)) {
-		ResolveAndImport(candidate.document, candidate.itemId, candidate.date, show, stillValid);
-	}
-}
-
-[[nodiscard]] auto SettingsSearchRequest(
-		not_null<Main::Session*> session,
-		const QString &query) {
-	return MTPmessages_Search(
-		MTP_flags(0),
-		session->user()->input(),
-		MTP_string(query),
-		MTP_inputPeerEmpty(),
-		MTPInputPeer(),
-		MTPVector<MTPReaction>(),
-		MTPint(),
-		MTP_inputMessagesFilterDocument(),
-		MTP_int(0),
-		MTP_int(0),
-		MTP_int(0),
-		MTP_int(0),
-		MTP_int(kSearchLimit),
-		MTP_int(0),
-		MTP_int(0),
-		MTP_long(0));
-}
-
-void SearchForSettingsOffer(
-		not_null<Main::Session*> session,
-		std::shared_ptr<Ui::Show> show,
-		bool fallback) {
-	const auto query = fallback ? QString() : SettingsFileName();
-	session->api().request(SettingsSearchRequest(session, query)).done(
-		crl::guard(session, [=](const MTPmessages_Messages &result) {
-			if (const auto candidate = FindImportCandidate(session, result)) {
-				OfferImportCandidate(session, show, *candidate);
-			} else if (!fallback) {
-				SearchForSettingsOffer(session, show, true);
-			}
-		})
-	).fail(crl::guard(session, [=](const MTP::Error &error) {
-		LOG(("Purple Error: Saved Messages settings search failed: %1."
-			).arg(error.type()));
-	})
-	).send();
-}
-
 
 void UploadTo(
 		not_null<Main::Session*> session,
@@ -1272,22 +1133,6 @@ void AddImportSettingsFileAction(
 		return;
 	}
 	AddQualifiedImportAction(menu, target->context);
-}
-
-void OfferNewerSettingsFromSavedMessages(
-		not_null<Main::Session*> session,
-		std::shared_ptr<Ui::Show> show) {
-	EnsureSyncChatResolved(session);
-	if (!AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own)) {
-		return;
-	}
-
-	if (!show || !(*show)
-		|| !IsActiveSession(session)
-		|| !TakeSettingsOfferStart(session)) {
-		return;
-	}
-	SearchForSettingsOffer(session, std::move(show), false);
 }
 
 } // namespace Purple

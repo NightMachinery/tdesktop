@@ -1622,9 +1622,6 @@ SessionController::SessionController(
 			Theme::CheckChatThemeWallPaper(this);
 		});
 	}
-	if (_isPrimary && _hasDialogs) {
-		Purple::OfferNewerSettingsFromSavedMessages(session, uiShow());
-	}
 	style::PaletteChanged(
 	) | rpl::on_next([=] {
 		for (auto &[key, value] : _customChatThemes) {

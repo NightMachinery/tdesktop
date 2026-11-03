@@ -71,6 +71,11 @@ CASES = {
         'units': ['purple/purple_sync_diag.cpp'],
         'frameworks': ['QtCore'],
     },
+    'sync-magic-chat': {
+        'program': 'sync_magic_chat_cases.cpp',
+        'units': ['purple/purple_sync_magic_chat.cpp', 'purple/purple_sync_diag.cpp', CORE],
+        'frameworks': ['QtCore'],
+    },
     'storage-passcode': {
         # The Persian-keyboard passcode decision that storage_domain.cpp's
         # derivation hook makes, over the real purple-core mapper.

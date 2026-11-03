@@ -53,9 +53,9 @@ permit, so the transport sends nothing.
 
 ## Startup
 
-When discovery starts a session, `ResumeSyncChatCarry` resumes an unfinished
-journal first and runs ordinary reconciliation when it settles. With Move,
-Follow/Fill and Recovery OFF, it is ordinary reconciliation alone.
+Startup no longer resumes carry journals: `StartSyncChatDiscovery` runs the
+magic lookup alone, and a chat move goes through `MoveSyncStateToChat`. The
+resume machinery below is deleted with the rest of carry.
 
 The resume can *wait*: it is refused at startup because the account's context
 is not current yet (the app is inactive or locked, the account's sync scope is

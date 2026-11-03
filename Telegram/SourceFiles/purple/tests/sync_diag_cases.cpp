@@ -48,7 +48,7 @@ int main() {
 		SyncDiagReason(u"Family group"_q),
 	});
 	expect(smuggled == u"sync_chat lookup_result reason=invalid"_q, "a title cannot be a reason");
-	auto many = std::initializer_list<SyncDiagField>();
+	auto many = std::vector<SyncDiagField>();
 	auto longLine = SyncDiagLine(u"sync_chat"_q, u"request"_q, many);
 	for (auto i = 0; i != 100; ++i) {
 		longLine = SyncDiagLine(u"sync_chat"_q, u"request"_q, {

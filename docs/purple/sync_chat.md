@@ -1,10 +1,61 @@
-# Desktop sync-chat discovery
+# Desktop sync chat
+
+## Magic Purple Sync
+
+Each account syncs through one chat that every device finds or creates by
+itself: a megagroup titled `Magic Purple Sync` that the user created and is the
+only member and admin of. purple-core decides (`PlanSyncChatLookup`, see the
+core doc `docs/sync-chat-magic.md`); purple_sync_magic_chat runs the requests
+it asks for. It is a line-by-line port of Android's PurpleSyncMagicChat and
+needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
+
+- **Binding**: `sync/chat.json` in the account's sync directory, written by
+  compare-and-set through `WriteGuardedSettingsFile`. It records the mode
+  (magic or manual), the chat, when its full info was last read, the
+  Telegram methods that must not be sent before a deadline, the creation
+  journal, a problem and whether it was shown, and the list choice.
+- **Lookup**: one at a time per account; a trigger that arrives while one runs
+  shares its result. Triggers are startup, screen, manual, auto and post.
+  The local candidates are the magic-titled chats in the main and archive
+  dialog lists. With none visible, one `messages.getAllChats` proves absence
+  before anything is created; the same reply settles a bound chat that is not
+  in memory. Desktop's schema has no such method, so
+  purple_sync_magic_telegram declares the request itself.
+- **Create**: `channels.createChannel` (megagroup), then archive
+  (`folders.editPeerFolders`, folder 1) and mute
+  (`account.updateNotifySettings`). Archive and mute are cosmetic: a failure
+  is logged and the lookup goes on. A lost reply blocks another creation for a
+  day; the chat binds when it appears. A creation limit is a problem.
+- **Verify**: `channels.getFullChannel` confirms the member and admin counts
+  before a chat is bound, and again at most once a day before a post.
+- **Waits**: a flood of up to 30 seconds is retried once in place. A longer
+  one, a network failure, a timeout or a 5xx error records a deadline for its
+  method in the binding (5, 10, 20, 40, then 60 seconds of backoff for the
+  latter) and the lookup answers Wait. Every trigger honours the deadline,
+  across restarts. Waits never pause automatic sync.
+- **Problems**: a chat that is gone, left, shared, public, restricted or
+  unpostable, a creation limit, magic-titled chats none of which is eligible,
+  or another sync group's records in the chat. A problem pauses automatic sync
+  until the user acts and is shown once; a manual check clears it and decides
+  afresh.
+
+purple_sync_magic_service keeps one lookup per session and maps its result onto
+the facade's `DesktopSyncChatStatus` (Use, Searching for a wait, Paused for a
+problem). Its lease builds the typed route for Saved Messages or the bound
+supergroup; a magic chat verified by full info counts as read only by the
+user. The facade functions `EnsureSyncChatResolved`, `CheckSyncChatBeforePost`,
+`SyncChatStatusOf`, `SyncChatIoForPost` and `SyncChatStatusChanges` now answer
+from it. The search-based discovery below stays compiled for the old setup box
+until that box is rewritten, and is then deleted. The launch-time search of
+Saved Messages for a newer settings file is gone.
+
+## Discovery (being retired)
 
 The Desktop M2B4 adapter uses the shared sync-chat ownership, eligibility and
 resolution contracts. Source preparation and unit tests do not establish native
 search coverage or authorize Telegram requests, setup or posting.
 
-## Native facts
+### Native facts
 
 purple_sync_chat_facts maps the generated Desktop TL message, user, chat and
 full-info objects. Every snapshot has an explicit account environment, bare
@@ -39,7 +90,7 @@ full info, never the Desktop ChannelData default admin count. A missing broadcas
 admin count cannot establish sole-admin status. Reader snapshots are local
 facts and do not claim that a roster of accounts is synced.
 
-## Source and qualification boundary
+### Source and qualification boundary
 
 The mapper and core C0 are compiled directly by purple/test_sync_chat_facts.py.
 The fixture constructs real generated TL objects and reuses the pinned schema

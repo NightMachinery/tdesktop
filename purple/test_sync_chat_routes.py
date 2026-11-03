@@ -22,7 +22,7 @@ def inspect(values):
             failures.append(name)
     app = values['purple_app_services.cpp']
     require('startup-order', app.index('StartSyncChatDiscovery();') < app.index('StartAutomaticSettingsSync();'))
-    require('startup-origin', 'EnsureSyncChatResolved(session);' in values['purple_sync.cpp'])
+    require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
     require('sync-screen-origin', 'EnsureSyncChatResolved(session, true);' in values['purple_sync_setup_box.cpp'])
     auto = values['purple_sync_auto_service.cpp']
     require('auto-self-facts', 'facts.chat.kind == PeerTokenKind::Self && SyncChatSelfResolved(_session.get())' in auto)
@@ -136,7 +136,7 @@ negative = [
     ('purple_account_config.cpp', 'a.sourceGeneration == b.sourceGeneration', 'true', 'publisher-source-epoch'),
     ('purple_sync_chat_service.cpp', 'disk->stateBytes != self->_expectedStateBytes', 'false', 'retry-snapshot'),
     ('purple_app_services.cpp', 'StartSyncChatDiscovery();', 'StartSyncChatDiscoveryLater();', 'startup-order'),
-    ('purple_sync.cpp', 'EnsureSyncChatResolved(session);', 'Other(session);', 'startup-origin'),
+    ('purple_sync_chat_service.cpp', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);', 'Other(session);', 'startup-origin'),
     ('purple_sync_setup_box.cpp', 'EnsureSyncChatResolved(session, true);', 'Other(session);', 'sync-screen-origin'),
     ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable', 'event != SyncAutoEvent::Enable', 'disable-exempt'),
     ('purple_sync_auto_service.cpp', 'Hold(SyncAutoReason::SyncChatNotResolved);', 'Stop();', 'auto-owned-hold'),

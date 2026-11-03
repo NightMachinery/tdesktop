@@ -6,8 +6,10 @@ qualification and outward execution require a later GO; the standalone unit
 program does not construct a Telegram session or send requests.
 
 `StartSyncChatDiscovery` subscribes to account/session startup before automatic
-settings sync starts. The existing Saved Messages startup hook calls
-`EnsureSyncChatResolved`; opening the Sync screen requests a fresh resolution.
+settings sync starts and runs the Magic Purple Sync lookup (see sync_chat.md),
+which now answers `EnsureSyncChatResolved`, `CheckSyncChatBeforePost`, the
+status and the post lease. What follows describes the search-based discovery
+that the old setup box still uses until it is rewritten.
 `SyncChatStatusOf` and `SyncChatStatusChanges` expose Unset, Searching, Use,
 Paused and Lost, the core resolution, a held reason and retry deadline. The
 chooser and reader-consent UI belong to the setup slice. Background failures
