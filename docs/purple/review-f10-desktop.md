@@ -236,3 +236,131 @@ and manifest, as the existing cases do.
   sentence (P3-5).
 
 REVIEW F10 desktop: CHANGES P1=4 P2=5 P3=6
+
+## Re-check 1
+
+Range `1f4213134c..0b9d9f30b925ffa9dfe6e4cb166b5699ad284a03` (five commits). The gitlink is still
+`a6631f8de3e813096b70dc63d01268fce009e4fd`. Only the P1 and P2 findings above, plus defects that the fixes
+themselves introduce, were checked against the code at that head. Nothing was built or run.
+
+Verdict: **CHANGES**. P1 = 0, P2 = 3. All four P1s are fixed. Two P2s are left: a remainder of P2-2 and of
+the over-long manifest trigger in P1-3. One new P2 comes from the P1-4 fix.
+
+### The original findings
+
+- **P1-1: fixed.** The hook no longer passes `isListenState()`. `NoteRecordingStop(Listen)` now marks every open
+  voice and round entry `fromListen` (`NoteStop`, then `NoteListen`, over `VoiceMirror().activeIds()` and
+  `RoundCopyIds()`), so the later Cancel reads the flag from the entry. A preview send now settles its entry
+  through the second pass of `MatchSent`. A Cancel after the preview keeps the file even with
+  `keep_discarded_p` off (`DecideStop(..., keepDiscarded || fromListen)`), so an upload from the preview stays
+  crash-safe. With the setting off, `UnclaimedListen` removes the entry once the 2-minute window has passed.
+  The hook pin in `test_media_hooks.py` and the facade header are updated, and the hook is still one line.
+- **P1-2: fixed.** Each encoder run of a round inherits the owner's `group`, unless the owner is closing.
+  `SettleLocked` settles the whole group. The bin lists the first part only, sums the durations, and
+  `RecordingBinMedia` joins the parts with `RoundMedia::Join`, offsetting each part by the end of the one before
+  it, as `appendToPrevious` does. Send from the bin moves every part to `sending`, and Delete removes every part.
+  A crash during a resumed round now gives one bin item.
+- **P1-3: fixed for the triggers listed, except one.** `Load` now deletes strays only when the manifest is
+  missing, or read `Ok`/`Empty`. Otherwise it moves the manifest to `recordings.json.bad`, adopts every
+  `.ogg.prc` and `.mp4.prc` file that has no entry as a `recording` entry (so it is recovered with "Unknown
+  chat", round journals included), and saves. If the rename fails, it sets `store.key = nullptr` and returns,
+  so nothing is mirrored and nothing is deleted. `WriteWhole` now flushes the temporary file to disk before the
+  rename (`fsync`, or `FlushFileBuffers` on Windows). The directory is per data name (`recordings-<name>` for
+  `-key` profiles). The over-long manifest case is not fully fixed; see R1-2.
+- **P1-4: fixed, but the fix adds R1-3.** `OriginalThread` never falls back to the history when the item has a
+  topic. When the topic is not loaded, it calls `Forum::requestTopic` and shows no Send button until the box
+  rebuilds. "Send to another chat" still works meanwhile.
+- **P2-1: fixed.** The restart branch is gone from the mirror. A write at offset 0 while a recording is closing
+  goes into the same file, so the trailer of a sub-second recording no longer opens a second entry.
+  `FinishClosed` now finalises every closed entry, and `DropAfterFinalise` removes an entry still in `sending`
+  that came out unrecoverable or shorter than 1 s (voice) or 200 ms (round). The stuck "Not sent" item is gone.
+  A small remainder is R1-P3c.
+- **P2-2: partly fixed; the rest is R1-1.** Forwarded items are now ignored (`HistoryMessageForwarded`).
+  For voice, the first pass of `MatchSent` requires a direct send's mirror size to equal the document size, so a
+  direct send can no longer settle an older recording.
+- **P2-3: fixed.** `ForgetRecordingsAtLogout` runs from `RemoveArchiveAtLogout`. Upstream already calls that on
+  both `Account::logOut` and `forcedLogOut`, so no upstream line was added. It settles every entry of that
+  account index. Entries also carry the user id, and an item whose user does not match the session at its index
+  shows as another account's (no Send to the original chat).
+- **P2-4: fixed.** `HistoryOf` uses `peerLoaded` and then `history(peer)`, so any known peer resolves. The box
+  rebuilds on `PeerUpdate::Flag::Name`, which fires when a peer's name first arrives.
+- **P2-5: fixed.** `recording_cases.cpp` now runs the registry halves of the store flow in the order upstream
+  calls them: a preview send (keep on and off), a preview discard, a sub-second recording, a direct send
+  against an older preview discard, a voice of another size, pause and resume and send, a crashed resumed
+  round, the join, logout, the adopted orphans and the over-long manifest. The Qt glue in
+  `purple_recording_store.cpp` is still untested, but it now only routes into these functions.
+
+### R1-1 (P2). A preview send settles an earlier preview discard in the same chat
+
+This is the remainder of P2-2. The second pass of `MatchSent` takes the **earliest** `fromListen` entry of the
+same account, chat and kind, and it does not check sizes.
+
+Trace, with `keep_discarded_p` on (the default):
+
+1. Record V1, pause into the preview, press the trash icon. `NoteListen` marks V1, then the Cancel makes it
+   `discarded`, still `fromListen`.
+2. Within two minutes, record V2 in the same chat, pause into the preview, press Send. Upstream sends, then
+   `clearListenState` runs `hideAnimated`, and the Cancel makes V2 `discarded` and `fromListen` too. This
+   happens before the upload's `itemIdChanged` arrives.
+3. The first pass skips both, because neither is in `sending`. The second pass returns the earliest, V1.
+   `SettleLocked(V1)` calls `RemoveLocked`.
+
+So V1, the recording the user discarded and the bin exists to keep, is deleted. V2, which was sent, stays in the
+bin as "Discarded" for 48 h, and its Send button sends it again. The new test pins this behaviour: "the
+preview discard stays for a later preview send only" expects an unrelated later send to settle the older
+discard.
+
+Fix: in the second pass, first prefer an entry whose mirror size equals the document size (an untrimmed
+preview send matches exactly). Otherwise take the **latest** `binned` within the window, because the Cancel of
+a preview send always comes right before its `itemIdChanged`.
+
+### R1-2 (P2). An over-long manifest still deletes the newest recordings' files
+
+The parser no longer fails the whole array past `kMaxEntries` (4096). It now drops every entry after the
+4096th without telling anyone, and `Decode` still reports `Ok`. In `Load`, that counts as clean, so
+`RemoveStrays` deletes the files of the dropped entries. `Encode` writes entries in creation order, so the
+entries dropped are the **newest** ones, including a crash recording that is still in `recording`. Reaching
+4096 needs `bin_keep = "off"`, which is a listed choice, plus a heavy user. The test "an over-long manifest
+keeps its first entries instead of failing whole" covers the parse, not this deletion.
+
+Fix: report `Damaged` when entries were dropped, so `Load` takes the move-aside-and-adopt path, or keep the
+newest entries instead of the first. Better still, never write more than the cap: evict the oldest bin items
+when saving.
+
+### R1-3 (P2, new). A deleted or unreachable topic makes the bin request it over and over
+
+`AddItem` calls `OriginalThread(item, crl::guard(box, rebuild))` on every rebuild. For a topic that
+`topicFor` cannot find, that calls `Forum::requestTopic(rootId, done)`. `Forum::finishTopicRequest` runs `done`
+on success **and** on failure (`requestSomeStale`, `.fail`), and a deleted topic comes back as
+`forumTopicDeleted`, so `topicFor` stays null. Then `done` rebuilds the box, the rebuild requests the topic
+again, and so on. While the bin box is open and holds an item from a deleted topic (or one the account can no
+longer see), the app sends `messages.getForumTopicsByID` in a loop, as fast as the server answers, and rebuilds
+the whole list each time. Also, every rebuild while a request is pending adds another callback. Startup brings
+a burst of `Name` updates, so one answer can fan out into many rebuilds.
+
+The doc says a deleted topic "never gets" a Send button. That is true, but the box keeps asking for it.
+
+Fix: skip the request when `forum->topicDeleted(item.topic)`. Request each topic at most once per box (keep the
+requested ids in `BinState`), and pass the callback only on that first request.
+
+### New P3 notes (not counted)
+
+- **R1-P3a.** The new `fsync` in `WriteWhole` runs on every manifest save, under the store mutex: on the main
+  thread for every state change, and on the capture or round recorder thread when a recording opens
+  (`BeginRecordingEntry`). Right after that, the voice opener's `RecordingKey()` waits on the same mutex while
+  the main thread saves the chat it just captured, which means a second `fsync`. Fine on an SSD. On a busy
+  spinning disk, the start of a recording can stall for longer than before, which makes P3-1 worse. An `fsync`
+  on the manifest alone, from a writer thread, would avoid it.
+- **R1-P3b.** `media_recording.md` still says the file is closed "at the next recording's first write if that
+  report never came", which contradicts its own new line that a write at offset 0 while closing "is its
+  trailer, never a new recording". With the restart branch gone, if the capture's stopped report never arrives,
+  the next recording writes over the previous file under the previous entry.
+- **R1-P3c.** A sub-second recording cancelled by sliding (not sent) still leaves a junk "Discarded" item with
+  `keep_discarded_p` on. Upstream resets `dataPos` to 0, so the trailer overwrites the file's start, and
+  `DropAfterFinalise` only drops `sending` entries.
+- **R1-P3d.** With `keep_discarded_p` off, a recording discarded from the preview sits in the bin as
+  "Discarded" until the next hourly sweep (up to about 62 minutes), not 2 minutes.
+- **R1-P3e.** At logout, `OfAccount` skips entries whose account is still -1, where capturing the chat failed.
+  These stay in the bin, and their "Send to another chat" uses the current window's account.
+
+RECHECK F10 desktop: CHANGES P1=0 P2=3
