@@ -13,7 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple::RecordingRecovery {
 
-VoiceResult RecoverVoice(
+Result RecoverVoice(
 		const std::filesystem::path &path,
 		std::shared_ptr<const RecordingCrypt::Key> key,
 		const RecordingCrypt::RandomFill &random,

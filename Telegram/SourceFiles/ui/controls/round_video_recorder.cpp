@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/controls/round_video_recorder.h"
+#include "purple/hooks/media_recording_capture.h"
 
 #include "base/concurrent_timer.h"
 #include "base/debug_log.h"
@@ -334,6 +335,7 @@ void RoundVideoRecorder::Private::initEncoding() {
 		LogError("avformat_write_header", error);
 		fail(Error::Encoding);
 	}
+	Purple::OnRoundEncodingStarted(this, _format.get());
 }
 
 bool RoundVideoRecorder::Private::initVideo() {
@@ -1079,6 +1081,7 @@ bool RoundVideoRecorder::Private::writeFrame(
 
 		updateResultDuration(pkt->pts, stream->time_base);
 
+		Purple::OnRoundPacket(this, pkt);
 		error = AvErrorWrap(av_interleaved_write_frame(_format.get(), pkt));
 		if (error) {
 			LogError("av_interleaved_write_frame", error);

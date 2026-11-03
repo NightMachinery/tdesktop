@@ -7,12 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_recording_store.h"
 
-#include "purple/hooks/media_recording.h"
+#include "purple/hooks/media_recording_capture.h"
 #include "purple/purple_archive_crypto.h"
 #include "purple/purple_config.h"
 #include "purple/purple_recording.h"
 #include "purple/purple_recording_mirror.h"
 #include "purple/purple_recording_recovery.h"
+#include "purple/purple_recording_round.h"
+#include "purple/purple_recording_round_media.h"
 
 #include "apiwrap.h"
 #include "api/api_common.h"
@@ -188,9 +190,26 @@ void RemoveStrays(const Store &store) {
 	}
 }
 
-void ApplyVoiceRecovery(
+[[nodiscard]] RecordingRecovery::Result RecoverFiles(
+		Kind kind,
+		const std::filesystem::path &media,
+		const std::filesystem::path &journal,
+		std::shared_ptr<const RecordingCrypt::Key> key,
+		bool wasSending) {
+	return (kind == Kind::Round)
+		? RoundMedia::Recover(media, journal, key, RecordingRandom(), wasSending)
+		: RecordingRecovery::RecoverVoice(media, key, RecordingRandom(), wasSending);
+}
+
+[[nodiscard]] std::filesystem::path JournalPath(const Entry &entry) {
+	return entry.journal.empty()
+		? std::filesystem::path()
+		: RecordingPath(entry.journal);
+}
+
+void ApplyRecovery(
 		const std::string &id,
-		RecordingRecovery::VoiceResult result,
+		RecordingRecovery::Result result,
 		TimeId now) {
 	auto &store = TheStore();
 	{
@@ -201,6 +220,7 @@ void ApplyVoiceRecovery(
 		}
 		entry->state = result.state;
 		entry->durationMs = result.durationMs;
+		entry->partial = entry->partial || result.partial;
 		entry->binned = now;
 		SaveLocked(store);
 	}
@@ -217,10 +237,11 @@ void Recover(std::vector<Entry> entries) {
 		auto unrecoverable = 0;
 		for (const auto &entry : entries) {
 			const auto now = base::unixtime::now();
-			const auto result = RecordingRecovery::RecoverVoice(
+			const auto result = RecoverFiles(
+				entry.kind,
 				RecordingPath(entry.media),
+				JournalPath(entry),
 				key,
-				RecordingRandom(),
 				entry.state == State::Sending);
 			if (result.state == State::Unrecoverable) {
 				++unrecoverable;
@@ -228,7 +249,7 @@ void Recover(std::vector<Entry> entries) {
 				++recovered;
 			}
 			crl::on_main([=] {
-				ApplyVoiceRecovery(entry.id, result, now);
+				ApplyRecovery(entry.id, result, now);
 			});
 		}
 		LOG(("Purple Recording: recovered %1, unrecoverable %2."
@@ -458,23 +479,26 @@ void FinishClosed(std::vector<RecordingMirror::Closed> closed) {
 	const auto key = RecordingKey();
 	crl::async([=] {
 		for (const auto &id : finalise) {
-			auto path = std::filesystem::path();
+			auto copy = std::optional<Entry>();
 			{
 				const auto lock = std::lock_guard(TheStore().mutex);
-				const auto entry = TheStore().manifest.find(id);
-				if (!entry) {
-					continue;
+				if (const auto entry = TheStore().manifest.find(id)) {
+					copy = *entry;
 				}
-				path = RecordingPath(entry->media);
 			}
-			const auto result = RecordingRecovery::RecoverVoice(
-				path,
+			if (!copy || (copy->kind == Kind::Round && !InBin(copy->state))) {
+				continue;
+			}
+			const auto result = RecoverFiles(
+				copy->kind,
+				RecordingPath(copy->media),
+				JournalPath(*copy),
 				key,
-				RecordingRandom(),
 				false);
 			crl::on_main([=] {
 				UpdateRecordingEntry(id, [&](Entry &entry) {
 					entry.durationMs = result.durationMs;
+					entry.partial = entry.partial || result.partial;
 					if (result.state == State::Unrecoverable
 						&& InBin(entry.state)) {
 						entry.state = State::Unrecoverable;
@@ -498,6 +522,7 @@ void StartRecordingStore() {
 		return;
 	}
 	static auto lifetime = rpl::lifetime();
+	StartRoundCopies();
 	Core::App().domain().accountsChanges(
 	) | rpl::on_next(Refresh, lifetime);
 	Refresh();
@@ -615,6 +640,9 @@ void NoteRecordingStop(
 		return;
 	}
 	auto ids = VoiceMirror().requestCloseAll();
+	for (auto &id : RequestRoundCopiesClose()) {
+		ids.push_back(std::move(id));
+	}
 	if (ids.empty()) {
 		return;
 	}
@@ -643,7 +671,12 @@ void NoteRecordingStop(
 		}
 		SaveLocked(store);
 	}
+	FinishRoundCopiesLater();
 	Fire();
+}
+
+void FinishRecordingFiles(std::vector<RecordingMirror::Closed> closed) {
+	FinishClosed(std::move(closed));
 }
 
 std::vector<RecordingBinItem> RecordingBinItems() {

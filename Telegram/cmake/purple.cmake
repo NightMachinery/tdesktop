@@ -184,6 +184,10 @@ PRIVATE
     purple/purple_recording_recovery.h
     purple/purple_recording_registry.cpp
     purple/purple_recording_registry.h
+    purple/purple_recording_round.cpp
+    purple/purple_recording_round.h
+    purple/purple_recording_round_media.cpp
+    purple/purple_recording_round_media.h
     purple/purple_recording_settings.cpp
     purple/purple_recording_settings.h
     purple/purple_recording_store.cpp
@@ -197,6 +201,7 @@ PRIVATE
     purple/hooks/history.h
     purple/hooks/media_playback.h
     purple/hooks/media_recording.h
+    purple/hooks/media_recording_capture.h
     purple/hooks/mute.h
     purple/hooks/work_view.h
     purple/purple_peek.cpp
@@ -435,6 +440,10 @@ PRIVATE
     purple/purple_recording.h
     purple/purple_recording_file.cpp
     purple/purple_recording_file.h
+    purple/purple_mp4_repair.cpp
+    purple/purple_mp4_repair.h
+    purple/purple_round_journal.cpp
+    purple/purple_round_journal.h
     purple/purple_screentime.cpp
     purple/purple_screentime.h
     purple/purple_settings.cpp

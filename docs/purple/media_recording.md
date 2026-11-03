@@ -13,6 +13,8 @@ The code is in `Telegram/SourceFiles/purple/`:
 - `purple_seek_rules.{h,cpp}`: the step and the clamping, with no Qt and no
   app types, so `purple/tests/recording_cases.cpp` runs them on their own.
 - `hooks/media_recording.h`: the facade that upstream files include.
+- `hooks/media_recording_capture.h`: the light facade the three F10
+  hooks include.
 - F10, all in Purple's own files:
   - `purple_recording_crypt.{h,cpp}`: the encrypted file format (below).
   - `purple_recording_mirror.{h,cpp}`: the voice mirror, one file per
@@ -21,14 +23,20 @@ The code is in `Telegram/SourceFiles/purple/`:
     its states, and the decisions on stop, on start and on a sent message.
   - `purple_recording_recovery.{h,cpp}`: voice recovery over purple-core's
     `FinaliseOgg`.
+  - `purple_recording_round_media.{h,cpp}`: the round copy muxer, the
+    remux, the rebuild from purple-core's repair and the AAC frame measure,
+    on FFmpeg alone.
+  - `purple_recording_round.{h,cpp}`: the two round hooks and the copies'
+    lifetime.
   - `purple_recording_store.{h,cpp}`: the app side: the key, the manifest
     on disk, the two voice hooks, recovery at start, the sweep and sent
     detection.
   - `purple_recording_bin_box.{h,cpp}`: the Recording bin box.
   - `purple_recording_settings.{h,cpp}`: the "Media recording" settings group.
 
-  These files, apart from the store, the box and the settings, use no Qt
-  and no app types, so `purple/tests/recording_cases.cpp` runs them alone.
+  These files, apart from the store, the round glue, the box and the
+  settings, use no Qt and no app types, so `purple/tests/recording_cases.cpp`
+  and `purple/tests/recording_round_cases.cpp` run them alone.
 
 ## F9. Seek back and forward
 
@@ -111,7 +119,8 @@ playback > Seek step writes it. Changing it relabels the buttons at once.
 
 Everything lives in `tdata/purple/recordings/`: the manifest
 `recordings.json` and one file per recording, named by a random 16-hex id
-(`<id>.ogg.prc` for voice). Nothing in the names says which chat a
+(`<id>.ogg.prc` for voice, `<id>.mp4.prc` and, with the journal Off,
+`<id>.pjr.prc` for a round). Nothing in the names says which chat a
 recording belongs to.
 
 Each manifest entry holds the id, the account index, the chat's peer id,
@@ -180,12 +189,72 @@ passcode. Until then nothing is mirrored.
   with one log line, and the recording goes on as upstream does. The item is
   then marked partial.
 
+### Video messages
+
+The sent file is never touched: upstream still builds it in memory with
+FFmpeg's MP4 muxer. Purple keeps a second output, a recovery copy, made from
+the same encoded packets.
+
+- `Purple::OnRoundEncodingStarted` after `avformat_write_header` in
+  `RoundVideoRecorder::Private::initEncoding` copies the streams' codec
+  parameters and time bases into a new MP4 muxer that writes, through its
+  own AVIO, to an encrypted `<id>.mp4.prc`, and opens a manifest entry.
+- `Purple::OnRoundPacket` before `av_interleaved_write_frame` in
+  `RoundVideoRecorder::Private::writeFrame` hands the packet to that muxer,
+  which clones it (`av_packet_clone`, a new reference; upstream keeps
+  ownership of its own) and writes it with `av_write_frame`, then flushes, so
+  nothing waits in an interleaving queue or an AVIO buffer when the app
+  crashes. The design named the write in `copyPackets`; that one only joins
+  the parts of a resumed round at the end, so the live encoder's write in
+  `writeFrame` is the one hooked.
+- With `round_journal` at 1, 2 or 5 s (1 s by default) the copy is a
+  fragmented MP4: `movflags=delay_moov+default_base_moof` and
+  `frag_duration` set to the interval. The encoder sends its SPS and PPS in
+  the first key frame rather than in extradata, which is why `moov` waits for
+  the first fragment. A crash loses at most the fragment being built.
+- With `round_journal` Off (owner answer 2 = A) the copy is a standard MP4,
+  `moov` at the end, and Purple writes the config header once into
+  `<id>.pjr.prc`: purple-core's `EncodeRoundJournalStart`, with AVCC framing,
+  the AAC AudioSpecificConfig and, when the encoder gave them in extradata,
+  the SPS and PPS. The design described this mode as a mirror of
+  `WriteBytesWrap`'s bytes; the two hooks see packets, not bytes, so Purple
+  muxes its own copy of the same packets with the same muxer, which gives
+  the same layout without a third hook.
+- A paused and resumed round is several encoder runs. Each run is its own
+  copy and its own manifest entry, and Send or Cancel applies to all of them,
+  so a round paused once shows in the bin as two items.
+- The copies are closed three seconds after Send or Cancel, so the encoder's
+  last packets still reach them. A round closed into the bin is turned into a
+  standard MP4 then; one that is being sent is left as it is.
+
+Recovery, for a crashed round and for a discarded one:
+
+1. FFmpeg's `mov` demuxer reads the copy from memory and the packets are
+   remuxed into a standard MP4 with `moov` at the end. This covers the
+   fragmented copy (whole fragments only; a packet torn by the crash ends it
+   and marks it partial) and a copy whose trailer was written.
+2. Otherwise (the Off copy, which has no `moov` after a crash) purple-core's
+   `RecoverRound` reads the config header and scans the media data, timing
+   it on the audio clock. Its `AacFrameMeasure` is FFmpeg's AAC decoder:
+   the smallest prefix that decodes into one 1024-sample frame is the frame's
+   length, found by bisection with the decoder flushed between tries. The
+   sample list is then muxed into a standard MP4 with an avcC built from the
+   SPS and PPS (from the config header, or from the first key frame). A scan
+   that stopped early marks it "Partly recovered".
+3. Without a config header, or with nothing found, it is "Could not be
+   recovered" and its bytes are kept as they were.
+
+`round_journal` is read when a round starts, so a change applies from the
+next round. Settings > Advanced > Purple > Media recording > Video message
+crash safety writes it.
+
 ### At start
 
 Once the key is there, every entry still in `recording` or `sending` belongs
-to a crash. On a background thread its file is decrypted and handed to
-purple-core's `FinaliseOgg`, which cuts it after the last good page and sets
-the end-of-stream flag; the fixed bytes are encrypted again. A `recording`
+to a crash. On a background thread its file is decrypted and recovered: a
+voice recording by purple-core's `FinaliseOgg`, which cuts it after the last
+good page and sets the end-of-stream flag, a round as above; the fixed bytes
+are encrypted again. A `recording`
 entry becomes "Recovered after a crash", a `sending` one "Not sent", and one
 without any audio page "Could not be recovered" (its bytes are kept as they
 were until auto-clear, and Save still exports them). Files in the directory
@@ -250,11 +319,16 @@ drops one of them.
   `Purple::OnMediaPlayerStarted`.
 - `settings/sections/settings_shortcuts.cpp`: two rows in the shortcuts
   list, so the commands can be rebound in the UI.
-- `media/audio/media_audio_capture.cpp`: the facade include and
+- `media/audio/media_audio_capture.cpp`: the capture facade include and
   `Purple::MirrorRecordingWrite(l, l->dataPos, buf, buf_size)` in
   `Instance::Inner::Private::WriteData`, before the copy.
-- `history/view/controls/history_view_voice_record_bar.cpp`: the facade
-  include and `Purple::NoteRecordingStop(...)` at the top of
+- `ui/controls/round_video_recorder.cpp`: the capture facade include,
+  `Purple::OnRoundEncodingStarted(this, _format.get())` at the end of
+  `RoundVideoRecorder::Private::initEncoding` and
+  `Purple::OnRoundPacket(this, pkt)` before the live encoder's
+  `av_interleaved_write_frame` in `RoundVideoRecorder::Private::writeFrame`.
+- `history/view/controls/history_view_voice_record_bar.cpp`: the capture
+  facade include and `Purple::NoteRecordingStop(...)` at the top of
   `VoiceRecordBar::stopRecording`, with the stop type, whether the bar is in
   the preview, and the view-once flag. The stop type travels as its ordinal,
   so the test pins the order of `StopType`.
@@ -275,6 +349,20 @@ drops one of them.
   sweep, and voice recovery of a torn Ogg stream through purple-core's
   `FinaliseOgg` (duration, a finished stream, junk kept as it was, another
   key).
+- `purple/tests/recording_round_cases.cpp` (gate `cases-recording-round`)
+  encodes a three second round with FFmpeg the way the recorder does
+  (H.264 without a global header, no B-frames, AAC at 48 kHz) and checks:
+  the SPS and PPS from avcC, Annex B and an AVCC key frame; the config
+  header; that the AAC measure finds every raw frame's exact length and
+  refuses a torn one; the fragmented copy holding every packet and
+  remuxing whole, as "Not sent" when it was being sent; a crashed and then
+  torn fragmented copy recovered up to the tear; the Off copy, which has no
+  index after a crash, rebuilt from the config header alone with about the
+  right duration, and torn at two thirds; no config header leaving it
+  unrecoverable and untouched; a finished Off copy needing no journal; and
+  junk. Its link line names the FFmpeg, OpenH264 and OpenSSL archives it
+  finds in the Debug build's `build.ninja` and the macOS frameworks static
+  FFmpeg needs; that line has not been run against a real Debug build yet.
 
 - `purple/tests/recording_cases.cpp` (gate `cases-recording`): the step
   choices and their spelling, the clamping at 0, at one second before the
@@ -300,7 +388,9 @@ drops one of them.
 
 ## Known follow-ups
 
-- F10 needs a GUI check after a build: a voice recording killed mid-way
+- F10 needs a GUI check after a build: a round killed mid-way with
+  `round_journal` at 1 s and Off, a paused and resumed round, and a voice
+  recording killed mid-way
   (the bin shows it recovered and it plays and sends), Send, Cancel with
   `keep_discarded_p` on and off, a send from the preview, the bin's Play,
   Send, Send to another chat, Save, Delete and Clear all, and the hourly

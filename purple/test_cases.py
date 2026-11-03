@@ -118,6 +118,18 @@ CASES = {
         'build_libraries': ['libcrypto.a'],
         'frameworks': [],
     },
+    'recording-round': {
+        # F10's round copy, remux, repair rebuild and AAC measure over the
+        # build's own FFmpeg, on a round encoded at test time.
+        'program': 'recording_round_cases.cpp',
+        'units': ['purple/purple_recording_round_media.cpp', 'purple/purple_recording_crypt.cpp',
+            'purple/purple_recording_recovery.cpp', 'purple/purple_recording_registry.cpp',
+            'core:purple/purple_mp4_repair.cpp', 'core:purple/purple_round_journal.cpp',
+            'core:purple/purple_ogg_repair.cpp', 'core:purple/purple_recording_file.cpp'],
+        'build_libraries': ['libavformat.a', 'libavcodec.a', 'libswresample.a', 'libavutil.a', '?libopenh264.a', 'libcrypto.a'],
+        'frameworks': ['VideoToolbox', 'AudioToolbox', 'CoreMedia', 'CoreVideo', 'CoreFoundation', 'CoreServices', 'Security'],
+        'link': ['-lz', '-lbz2', '-liconv', '-lc++'],
+    },
     'voice-queue': {
         # The confined walk and the manual-play tracker over the real
         # purple-core rule.
@@ -338,9 +350,10 @@ with (work / 'build.log').open('w') as log:
     if case.get('build_libraries'):
         manifest = (build / 'build.ninja').read_text(errors='replace')
         for name in case['build_libraries']:
+            optional, name = name.startswith('?'), name.lstrip('?')
             hits = sorted({value for value in manifest.split() if value.endswith('/' + name)})
-            assert hits, 'no ' + name + ' in build.ninja'
-            found.append(hits[0])
+            assert hits or optional, 'no ' + name + ' in build.ninja'
+            found += hits[:1]
     link += ['-Wl,-dead_strip', *map(str, objects), *[str(build / name) for name in case.get('objects', []) + case.get('libraries', [])], *found,
         *[value for name in case['frameworks'] for value in ('-framework', name)], *case.get('link', []), '-o', str(binary)]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)

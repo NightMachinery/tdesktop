@@ -653,7 +653,11 @@ from when it entered the bin: `"12h"`, `"24h"`, `"48h"` (the default), `"7d"`
 or `"off"` (never clear); any other duration of at least an hour is read too.
 `[recording] keep_discarded_p` moves a discarded recording to the bin as a
 "Discarded" item instead of deleting it; true unless you say otherwise.
-Settings > Advanced > Purple > Media recording writes both. The other
+`[recording] round_journal` is how often a video message's recovery copy
+is cut into a fragment: `"1s"` (the default), `"2s"`, `"5s"` or `"off"`. Off
+keeps a plain copy and its codec header, so a crash is repaired by scanning
+rather than read back exactly. Any other value warns and keeps 1 s.
+Settings > Advanced > Purple > Media recording writes all three. The other
 `[recording]` keys are read by purple-core but not used by Desktop yet. See
 [media_recording.md](media_recording.md).
 

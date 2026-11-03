@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_recording_crypt.h"
+#include "purple/purple_recording_mirror.h"
 #include "purple/purple_recording_registry.h"
 
 #include <filesystem>
@@ -65,5 +66,6 @@ void UpdateRecordingEntry(
 	const std::string &id,
 	Fn<void(RecordingRegistry::Entry&)> update);
 void ForgetRecordingEntry(const std::string &id);
+void FinishRecordingFiles(std::vector<RecordingMirror::Closed> closed);
 
 } // namespace Purple

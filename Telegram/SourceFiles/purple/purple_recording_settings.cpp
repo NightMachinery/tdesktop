@@ -55,6 +55,45 @@ void WriteRecording(const QString &key, const QString &value, const QString &wha
 	}, what);
 }
 
+[[nodiscard]] QString JournalText(int seconds) {
+	return seconds
+		? tr::lng_seconds(tr::now, lt_count, seconds)
+		: tr::lng_purple_recording_journal_off(tr::now);
+}
+
+[[nodiscard]] rpl::producer<int> JournalValue() {
+	return rpl::single(rpl::empty) | rpl::then(
+		SettingsChanges()
+	) | rpl::map([] {
+		return ActiveSettings().recording.roundJournalSeconds;
+	}) | rpl::distinct_until_changed();
+}
+
+void ChooseJournalBox(not_null<Ui::GenericBox*> box) {
+	auto options = std::vector<QString>();
+	for (const auto &choice : kJournalChoices) {
+		options.push_back(choice.seconds
+			? tr::lng_purple_recording_journal_every(
+				tr::now,
+				lt_interval,
+				tr::lng_seconds(tr::now, lt_count, choice.seconds))
+			: tr::lng_purple_recording_journal_off(tr::now));
+	}
+	SingleChoiceBox(box, {
+		.title = tr::lng_purple_recording_journal(),
+		.options = options,
+		.initialSelection = ChoiceIndex(
+			kJournalChoices,
+			ActiveSettings().recording.roundJournalSeconds),
+		.callback = [=](int index) {
+			WriteRecording(
+				u"round_journal"_q,
+				QString::fromLatin1(kJournalChoices[index].setting),
+				u"the video message crash safety"_q);
+		},
+	});
+}
+
 void ChooseKeepBox(not_null<Ui::GenericBox*> box) {
 	auto options = std::vector<QString>();
 	for (const auto &choice : kBinKeepChoices) {
@@ -98,6 +137,20 @@ void BuildMediaRecordingSettings(::Settings::Builder::SectionBuilder &builder) {
 		.title = tr::lng_purple_media_recording(),
 		.keywords = { u"purple"_q, u"recording"_q, u"voice"_q, u"round"_q },
 	});
+	builder.addButton({
+		.id = u"advanced/purple_recording_journal"_q,
+		.title = tr::lng_purple_recording_journal(),
+		.st = &st::settingsButtonNoIcon,
+		.label = JournalValue() | rpl::map(JournalText),
+		.onClick = [=] {
+			if (controller) {
+				controller->show(Box(ChooseJournalBox));
+			}
+		},
+		.keywords = { u"purple"_q, u"recording"_q, u"round"_q, u"crash"_q, u"journal"_q },
+	});
+	builder.addDividerText(tr::lng_purple_recording_journal_info());
+	builder.addSkip();
 	builder.addButton({
 		.id = u"advanced/purple_recording_bin_keep"_q,
 		.title = tr::lng_purple_recording_bin_keep(),

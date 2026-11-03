@@ -508,6 +508,10 @@ docs/purple/upstream_hooks.md.
 "lng_purple_shortcuts_seek_forward" = "Seek forward";
 "lng_purple_media_recording" = "Media recording";
 "lng_purple_recording_bin" = "Recording bin";
+"lng_purple_recording_journal" = "Video message crash safety";
+"lng_purple_recording_journal_off" = "Off";
+"lng_purple_recording_journal_every" = "Save the index every {interval}";
+"lng_purple_recording_journal_info" = "If the app closes unexpectedly, a video message can be recovered exactly up to the last save. Without it, Purple tries to rebuild it, which can drift slightly.";
 "lng_purple_recording_bin_about" = "Recordings that were not sent, were discarded or were interrupted by a crash stay in the bin, encrypted, until they are cleared.";
 "lng_purple_recording_bin_keep" = "Keep recordings for";
 "lng_purple_recording_bin_keep_never" = "Until cleared";

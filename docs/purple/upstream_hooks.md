@@ -1528,7 +1528,10 @@ The feature doc is [media_recording.md](media_recording.md); the design is
 [media-recording-design.md](media-recording-design.md). So far F9 (seek
 back and forward) and F10 (crash-safe recordings) are built. The hooked `.cpp` files take one Purple include,
 `purple/hooks/media_recording.h`, right after their own header, and
-`purple/test_media_hooks.py` pins each call and each shortcut line.
+`purple/test_media_hooks.py` pins each call and each shortcut line. The three
+F10 files take `purple/hooks/media_recording_capture.h` instead, which
+declares only plain and forward-declared types, so the round recorder in
+`td_ui` pulls in no app headers.
 
 **`Telegram/SourceFiles/media/player/media_player_widget.cpp`**: +4 -0. First
 Purple edit in this file.
@@ -1588,6 +1591,17 @@ Purple edit in this file.
   l->dataPos, buf, buf_size);` after the size check and before the copy, so
   Purple mirrors every block FFmpeg writes at its offset into an encrypted
   file (F10 voice).
+
+**`Telegram/SourceFiles/ui/controls/round_video_recorder.cpp`**: +3 -0. First
+Purple edit in this file (it is in `td_ui`, which already calls Purple from
+`attach_prepare.cpp`).
+- The facade include, after the file's own header.
+- `RoundVideoRecorder::Private::initEncoding`: `Purple::OnRoundEncodingStarted(this,
+  _format.get());` as its last line, after `avformat_write_header`; a failed
+  header has already reset `_format`, so Purple gets null and does nothing.
+- `RoundVideoRecorder::Private::writeFrame`: `Purple::OnRoundPacket(this, pkt);`
+  just before `av_interleaved_write_frame`. Purple clones the packet for its
+  own recovery copy; upstream's packet and sent bytes are unchanged.
 
 **`Telegram/SourceFiles/history/view/controls/history_view_voice_record_bar.cpp`**:
 +2 -0. First Purple edit in this file.

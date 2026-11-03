@@ -30,8 +30,13 @@ RECORDING_HOOKS = [
     ('core/shortcuts.cpp', 'const auto AutoRepeatCommands = ', 'Command::MediaSeekForward,'),
     ('core/shortcuts.cpp', 'const auto MediaCommands = ', 'Command::MediaSeekBackward,'),
     ('core/shortcuts.cpp', 'const auto MediaCommands = ', 'Command::MediaSeekForward,'),
+]
+CAPTURE_FACADE = '#include "purple/hooks/media_recording_capture.h"'
+CAPTURE_HOOKS = [
     ('media/audio/media_audio_capture.cpp', 'static int WriteData(void *opaque, uint8_t *buf, int buf_size) {', 'Purple::MirrorRecordingWrite(l, l->dataPos, buf, buf_size);'),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::stopRecording(', 'Purple::NoteRecordingStop(&_show->session(), int(type), isListenState(), ttlBeforeHide);'),
+    ('ui/controls/round_video_recorder.cpp', 'void RoundVideoRecorder::Private::initEncoding() {', 'Purple::OnRoundEncodingStarted(this, _format.get());'),
+    ('ui/controls/round_video_recorder.cpp', 'bool RoundVideoRecorder::Private::writeFrame(', 'Purple::OnRoundPacket(this, pkt);'),
 ]
 # Purple::NoteRecordingStop reads the StopType ordinal, so its order is pinned.
 BLOCKS = [
@@ -61,7 +66,7 @@ def main():
     sources = Path(__file__).resolve().parent.parent / 'Telegram/SourceFiles'
     failures = []
     checks = 0
-    for facade, hooks in ((FACADE, HOOKS), (RECORDING_FACADE, RECORDING_HOOKS)):
+    for facade, hooks in ((FACADE, HOOKS), (RECORDING_FACADE, RECORDING_HOOKS), (CAPTURE_FACADE, CAPTURE_HOOKS)):
         for relative in sorted({hook[0] for hook in hooks}):
             text = (sources / relative).read_text()
             lines = text.splitlines()
@@ -80,7 +85,7 @@ def main():
         checks += 1
         if (sources / relative).read_text().count(block) != 1:
             failures.append(relative + ': expected the block ' + block.split('\n')[0] + ' exactly once, in this order')
-    for relative, signature, call in HOOKS + RECORDING_HOOKS:
+    for relative, signature, call in HOOKS + RECORDING_HOOKS + CAPTURE_HOOKS:
         text = (sources / relative).read_text()
         checks += 1
         if signature not in text:

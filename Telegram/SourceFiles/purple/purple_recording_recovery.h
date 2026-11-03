@@ -16,13 +16,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple::RecordingRecovery {
 
-struct VoiceResult {
+struct Result {
 	RecordingRegistry::State state = RecordingRegistry::State::Unrecoverable;
 	std::int64_t durationMs = 0;
 	bool changed = false;
+	bool partial = false;
 };
 
-[[nodiscard]] VoiceResult RecoverVoice(
+[[nodiscard]] Result RecoverVoice(
 	const std::filesystem::path &path,
 	std::shared_ptr<const RecordingCrypt::Key> key,
 	const RecordingCrypt::RandomFill &random,
