@@ -11,7 +11,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
     'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
-    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp']}
+    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp']}
 
 RouteNames = set()
 
@@ -26,6 +26,9 @@ def inspect(values):
     require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
     discovery = values['purple_sync_chat_service.cpp'].split('void StartSyncChatDiscovery() {', 1)[-1]
     require('startup-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in discovery)
+    archive = values['purple_archive_service.cpp'].split('void StartArchiveServices() {', 1)[-1].split('void RemoveArchiveAtLogout(', 1)[0]
+    require('archive-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in archive
+        and archive.index('accountsChanges()') < archive.index('activeSessionChanges()') < archive.index('\trefresh();'))
     require('sync-screen-origin', 'EnsureSyncChatResolved(session, true);' in values['purple_sync_setup_box.cpp'])
     magic = values['purple_sync_magic_service.cpp']
     toast = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
@@ -210,6 +213,7 @@ negative = [
     ('purple_app_services.cpp', 'StartSyncChatDiscovery();', 'StartSyncChatDiscoveryLater();', 'startup-order'),
     ('purple_sync_chat_service.cpp', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);', 'Other(session);', 'startup-origin'),
     ('purple_sync_chat_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'startup-stored-sessions'),
+    ('purple_archive_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'archive-stored-sessions'),
     ('purple_sync_setup_box.cpp', 'EnsureSyncChatResolved(session, true);', 'Other(session);', 'sync-screen-origin'),
     ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable', 'event != SyncAutoEvent::Enable', 'disable-exempt'),
     ('purple_sync_auto_service.cpp', 'Hold(SyncAutoReason::SyncChatNotResolved);', 'Stop();', 'auto-owned-hold'),
