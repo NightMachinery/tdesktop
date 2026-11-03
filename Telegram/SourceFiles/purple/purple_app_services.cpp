@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_sync_auto_service.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_media_seek.h"
 #include "purple/purple_peek.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_schedule.h"
@@ -41,6 +42,7 @@ void StartAppServices() {
 void OnMediaPlayerStarted() {
 	StartControlPlayerEvents();
 	StartVoiceQueue();
+	StartMediaSeek();
 }
 
 void OnScreenLockChanged(bool locked) {

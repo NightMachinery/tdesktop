@@ -108,6 +108,13 @@ CASES = {
         'units': ['purple/purple_media_rules.cpp'],
         'frameworks': [],
     },
+    'recording': {
+        # F9's seek step and clamping; the shortcut names are pinned by
+        # test_media_hooks.py, which reads core/shortcuts.cpp.
+        'program': 'recording_cases.cpp',
+        'units': ['purple/purple_seek_rules.cpp'],
+        'frameworks': [],
+    },
     'voice-queue': {
         # The confined walk and the manual-play tracker over the real
         # purple-core rule.

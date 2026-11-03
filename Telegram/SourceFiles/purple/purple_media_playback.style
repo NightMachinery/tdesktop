@@ -6,3 +6,9 @@ purpleFloatOpenIcon: icon {{ "menu/show_in_chat", msgDateImgFg }};
 purpleFloatPauseIcon: icon {{ "media_pause", msgDateImgFg }};
 purpleFloatPlayIcon: icon {{ "media_play", msgDateImgFg }};
 purpleFloatCloseIcon: icon {{ "menu/cancel", msgDateImgFg }};
+purpleFloatSeekFont: font(12px semibold);
+
+purpleSeekButtonSize: size(30px, 30px);
+purpleSeekButtonPadding: margins(0px, 6px, 0px, 0px);
+purpleSeekButtonOver: 24px;
+purpleSeekButtonFont: font(11px bold);

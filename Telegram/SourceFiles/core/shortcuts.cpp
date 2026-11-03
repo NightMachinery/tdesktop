@@ -86,6 +86,8 @@ const auto CommandByName = base::flat_map<QString, Command>{
 	{ u"media_stop"_q                    , Command::MediaStop },
 	{ u"media_previous"_q                , Command::MediaPrevious },
 	{ u"media_next"_q                    , Command::MediaNext },
+	{ u"media_seek_backward"_q           , Command::MediaSeekBackward },
+	{ u"media_seek_forward"_q            , Command::MediaSeekForward },
 
 	{ u"search"_q                        , Command::Search },
 
@@ -511,6 +513,8 @@ void Manager::fillDefaults() {
 	set(u"media stop"_q              , Command::MediaStop);
 	set(u"media previous"_q          , Command::MediaPrevious);
 	set(u"media next"_q              , Command::MediaNext);
+	set(u"alt+shift+left"_q          , Command::MediaSeekBackward);
+	set(u"alt+shift+right"_q         , Command::MediaSeekForward);
 
 	set(u"ctrl+f"_q                  , Command::Search);
 	set(u"search"_q                  , Command::Search);

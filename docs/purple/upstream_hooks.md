@@ -1522,6 +1522,54 @@ Purple edit in this file.
 - `Float::mouseDoubleClickEvent`: one early return through
   `Purple::RestartFloatOnDoubleClick` (double-click restarts the round).
 
+## Media recording (dock, background, PiP, seek, crash safety)
+
+The feature doc is [media_recording.md](media_recording.md); the design is
+[media-recording-design.md](media-recording-design.md). So far only F9 (seek
+back and forward) is built. The hooked `.cpp` files take one Purple include,
+`purple/hooks/media_recording.h`, right after their own header, and
+`purple/test_media_hooks.py` pins each call and each shortcut line.
+
+**`Telegram/SourceFiles/media/player/media_player_widget.cpp`**: +4 -0. First
+Purple edit in this file.
+- The facade include, after the file's own header.
+- `Widget::Widget`: `Purple::DecoratePlayerSeek(rightControls(), ...)` just
+  before `setType`, which creates the two seek buttons in the right-hand
+  controls; the lambda hands Purple the bar's current track type.
+- `Widget::updateControlsGeometry`: `right += Purple::PlacePlayerSeek(...)`
+  after the volume toggle, placing the buttons and returning their width.
+- `Widget::getTimeRight`: `result += Purple::PlayerSeekWidth(this);`, the
+  same width, so the time label and the controls' width include them.
+
+**`Telegram/SourceFiles/media/system_media_controls_manager.cpp`**: +4 -0.
+First Purple edit in this file.
+- The facade include, after the file's own header.
+- The `commandRequests` handler in the constructor: one early return through
+  `Purple::HandleSystemMediaCommand`, only when no video delegate is set. It
+  takes skip backward and forward for the active audio track and returns
+  false, so upstream runs unchanged, for every other command.
+
+**`Telegram/SourceFiles/core/shortcuts.h`**: +2 -0. First Purple edit in this
+file.
+- `Command::MediaSeekBackward` and `Command::MediaSeekForward`, after
+  `MediaNext`. Commands are stored by name, never by number.
+
+**`Telegram/SourceFiles/core/shortcuts.cpp`**: +4 -0. First Purple edit in
+this file.
+- `CommandByName`: `media_seek_backward` and `media_seek_forward`, which makes
+  them bindable in the custom shortcuts file.
+- `Manager::fillDefaults`: `alt+shift+left` and `alt+shift+right`, which
+  upstream binds to nothing. The handler is Purple's own
+  `Shortcuts::Requests()` subscription, so no handler hook is needed.
+
+**`Telegram/SourceFiles/settings/sections/settings_shortcuts.cpp`**: +2 -0.
+First Purple edit in this file.
+- Two rows after "Next track" in the shortcuts list, labelled by
+  `lng_purple_shortcuts_seek_*`, so the commands can be rebound in the UI.
+
+The floating round's seek buttons ride the existing `Purple::DecorateFloat`
+call listed under "Media playback" and add no line there.
+
 ## Upstream v7.3.3 merge
 
 @Opus5.5/high [2026-10-31 Sat]

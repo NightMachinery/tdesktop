@@ -143,6 +143,9 @@ stock 128px circle too:
 - Play or pause, with the glyph following the player.
 - Close: stops the voice-type player, as dragging it off does.
 
+A second row under them seeks back and forward by the seek step; see
+[media_recording.md](media_recording.md).
+
 Clicks land only on the buttons; a press anywhere else still drags, and a
 single click still pauses or resumes. A double-click on the float now
 restarts the round from 0:00, like a double-click on a round in a chat,

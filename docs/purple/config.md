@@ -641,6 +641,12 @@ voice and round messages and skips yours. It is read when a manual play
 starts, so a change applies from the next one. Settings > Advanced > Purple >
 Media playback writes it. See [media_playback.md](media_playback.md).
 
+`[playback] seek_step` is how far the seek back and forward controls jump:
+`"5s"`, `"10s"` (the default), `"15s"` or `"30s"`. Any other value warns and
+keeps 10 seconds. It drives the player bar's and the floating round's seek
+buttons, the seek shortcuts and the system media controls' skip commands.
+See [media_recording.md](media_recording.md).
+
 `[suggestions] hide_invisible_p` decides whether the strips of chats the app
 offers you unasked leave out what the running preset hides. True unless you say
 otherwise, and asked only while a preset is filtering.

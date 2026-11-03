@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# Pins the media playback hooks: each upstream function named below must still
-# contain its one Purple call, and each file its one facade include, so a merge
-# that silently drops a hook fails here. See docs/purple/media_playback.md.
+# Pins the media playback and recording hooks: each upstream function named
+# below must still contain its one Purple call, and each file its one facade
+# include, so a merge that silently drops a hook fails here. The seek shortcut
+# lines are pinned verbatim. See docs/purple/media_playback.md and
+# docs/purple/media_recording.md.
 from pathlib import Path
 import sys
 
@@ -16,11 +18,28 @@ HOOKS = [
     ('media/player/media_player_float.cpp', 'void Float::mouseDoubleClickEvent(', 'Purple::RestartFloatOnDoubleClick('),
     ('media/player/media_player_instance.cpp', 'bool Instance::moveInPlaylist(', 'Purple::ConfinedVoiceNext('),
 ]
+RECORDING_FACADE = '#include "purple/hooks/media_recording.h"'
+RECORDING_HOOKS = [
+    ('media/player/media_player_widget.cpp', 'Widget::Widget(', 'Purple::DecoratePlayerSeek('),
+    ('media/player/media_player_widget.cpp', 'void Widget::updateControlsGeometry(', 'Purple::PlacePlayerSeek('),
+    ('media/player/media_player_widget.cpp', 'int Widget::getTimeRight(', 'Purple::PlayerSeekWidth('),
+    ('media/system_media_controls_manager.cpp', 'SystemMediaControlsManager::SystemMediaControlsManager(', 'Purple::HandleSystemMediaCommand('),
+]
+SHORTCUT_LINES = [
+    ('core/shortcuts.h', 'MediaSeekBackward,'),
+    ('core/shortcuts.h', 'MediaSeekForward,'),
+    ('core/shortcuts.cpp', '{ u"media_seek_backward"_q           , Command::MediaSeekBackward },'),
+    ('core/shortcuts.cpp', '{ u"media_seek_forward"_q            , Command::MediaSeekForward },'),
+    ('core/shortcuts.cpp', 'set(u"alt+shift+left"_q          , Command::MediaSeekBackward);'),
+    ('core/shortcuts.cpp', 'set(u"alt+shift+right"_q         , Command::MediaSeekForward);'),
+    ('settings/sections/settings_shortcuts.cpp', '{ C::MediaSeekBackward, tr::lng_purple_shortcuts_seek_backward() },'),
+    ('settings/sections/settings_shortcuts.cpp', '{ C::MediaSeekForward, tr::lng_purple_shortcuts_seek_forward() },'),
+]
 
 
 def body(text, signature):
     start = text.index(signature)
-    end = text.index('{', start) + 1
+    end = text.index('{\n', start) + 1
     depth = 1
     while depth:
         depth += (text[end] == '{') - (text[end] == '}')
@@ -32,17 +51,22 @@ def main():
     sources = Path(__file__).resolve().parent.parent / 'Telegram/SourceFiles'
     failures = []
     checks = 0
-    for relative in sorted({hook[0] for hook in HOOKS}):
-        text = (sources / relative).read_text()
-        lines = text.splitlines()
-        own = '#include "' + relative[:-len('.cpp')] + '.h"'
+    for facade, hooks in ((FACADE, HOOKS), (RECORDING_FACADE, RECORDING_HOOKS)):
+        for relative in sorted({hook[0] for hook in hooks}):
+            text = (sources / relative).read_text()
+            lines = text.splitlines()
+            own = '#include "' + relative[:-len('.cpp')] + '.h"'
+            checks += 1
+            if own not in lines or lines.index(own) + 1 >= len(lines) or lines[lines.index(own) + 1] != facade:
+                failures.append(relative + ': the facade include must follow the file\'s own header')
+            checks += 1
+            if text.count(facade) != 1:
+                failures.append(relative + ': expected exactly one facade include')
+    for relative, line in SHORTCUT_LINES:
         checks += 1
-        if own not in lines or lines.index(own) + 1 >= len(lines) or lines[lines.index(own) + 1] != FACADE:
-            failures.append(relative + ': the facade include must follow the file\'s own header')
-        checks += 1
-        if text.count(FACADE) != 1:
-            failures.append(relative + ': expected exactly one facade include')
-    for relative, signature, call in HOOKS:
+        if [row.strip() for row in (sources / relative).read_text().splitlines()].count(line) != 1:
+            failures.append(relative + ': expected the line ' + line + ' exactly once')
+    for relative, signature, call in HOOKS + RECORDING_HOOKS:
         text = (sources / relative).read_text()
         checks += 1
         if signature not in text:

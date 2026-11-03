@@ -131,6 +131,8 @@ struct Labeled {
 		{ C::MediaStop, tr::lng_shortcuts_media_stop() },
 		{ C::MediaPrevious, tr::lng_shortcuts_media_previous() },
 		{ C::MediaNext, tr::lng_shortcuts_media_next() },
+		{ C::MediaSeekBackward, tr::lng_purple_shortcuts_seek_backward() },
+		{ C::MediaSeekForward, tr::lng_purple_shortcuts_seek_forward() },
 	};
 }
 

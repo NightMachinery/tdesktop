@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_widget.h"
+#include "purple/hooks/media_recording.h"
 
 #include "platform/platform_specific.h"
 #include "data/data_document.h"
@@ -227,6 +228,7 @@ Widget::Widget(
 	_orderController->setOtherDropdownCheck(otherDropdownCheck);
 	_speedController->setOtherDropdownCheck(otherDropdownCheck);
 
+	Purple::DecoratePlayerSeek(rightControls(), [=] { return _type; });
 	setType(AudioMsgId::Type::Song);
 	_playPause->finishTransform();
 }
@@ -422,6 +424,7 @@ void Widget::updateControlsGeometry() {
 		_orderToggle->moveToRight(right, 0); right += _orderToggle->width();
 	}
 	_volumeToggle->moveToRight(right, 0); right += _volumeToggle->width();
+	right += Purple::PlacePlayerSeek(rightControls(), right);
 
 	updateControlsWrapGeometry();
 
@@ -596,6 +599,7 @@ int Widget::getTimeRight() const {
 	if (hasPlaybackSpeedControl()) {
 		result += _speedToggle->width();
 	}
+	result += Purple::PlayerSeekWidth(this);
 	result += st::mediaPlayerPadding;
 	return result;
 }

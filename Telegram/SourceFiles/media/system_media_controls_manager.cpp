@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/system_media_controls_manager.h"
+#include "purple/hooks/media_recording.h"
 
 #include "base/platform/base_platform_system_media_controls.h"
 #include "core/application.h"
@@ -378,6 +379,9 @@ SystemMediaControlsManager::SystemMediaControlsManager()
 
 	_controls->commandRequests(
 	) | rpl::on_next([=](Command command) {
+		if (!_videoDelegate && Purple::HandleSystemMediaCommand(command)) {
+			return;
+		}
 		if (_videoDelegate) {
 			switch (command) {
 			case Command::PlayPause: _videoDelegate->smtcPlayPause(); break;

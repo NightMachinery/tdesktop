@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_media_playback.h"
 
 #include "purple/purple_media_rules.h"
+#include "purple/purple_media_seek.h"
 #include "purple/purple_voice_queue.h"
 
 #include "core/application.h"
@@ -359,22 +360,30 @@ void DecorateFloat(
 			Media::Player::instance()->stop(Type::Voice);
 		}, tr::lng_purple_round_float_close(tr::now)),
 	};
+	const auto seek = AddFloatSeekButtons(floating);
 	const auto show = [=](bool shown) {
 		const auto visible = shown && floating->item() && !floating->dragged();
 		for (const auto &button : buttons) {
+			button->setVisible(visible);
+		}
+		for (const auto &button : seek) {
 			button->setVisible(visible);
 		}
 	};
 	floating->sizeValue() | rpl::on_next([=](QSize size) {
 		const auto side = st::purpleFloatButtonSize;
 		const auto skip = st::purpleFloatButtonSkip;
-		const auto count = int(buttons.size());
-		auto left = (size.width() - count * side - (count - 1) * skip) / 2;
+		const auto row = [&](const auto &list, int top) {
+			const auto count = int(list.size());
+			auto left = (size.width() - count * side - (count - 1) * skip) / 2;
+			for (const auto &button : list) {
+				button->move(left, top);
+				left += side + skip;
+			}
+		};
 		const auto top = (size.height() - side) / 2;
-		for (const auto &button : buttons) {
-			button->move(left, top);
-			left += side + skip;
-		}
+		row(buttons, top);
+		row(seek, top + side + skip);
 	}, floating->lifetime());
 	base::install_event_filter(floating, [=](not_null<QEvent*> e) {
 		const auto type = e->type();

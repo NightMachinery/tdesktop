@@ -172,6 +172,8 @@ PRIVATE
     purple/purple_media_playback.h
     purple/purple_media_rules.cpp
     purple/purple_media_rules.h
+    purple/purple_media_seek.cpp
+    purple/purple_media_seek.h
     purple/purple_mute.cpp
     purple/purple_mute.h
     purple/purple_notification_privacy.cpp
@@ -180,6 +182,7 @@ PRIVATE
     purple/hooks/chat_filters.h
     purple/hooks/history.h
     purple/hooks/media_playback.h
+    purple/hooks/media_recording.h
     purple/hooks/mute.h
     purple/hooks/work_view.h
     purple/purple_peek.cpp
@@ -206,6 +209,8 @@ PRIVATE
     purple/purple_schedule.h
     purple/purple_schedule_box.cpp
     purple/purple_schedule_box.h
+    purple/purple_seek_rules.cpp
+    purple/purple_seek_rules.h
     purple/purple_session_settings.cpp
     purple/purple_session_settings.h
     purple/purple_suggestions.cpp
