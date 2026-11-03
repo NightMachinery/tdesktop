@@ -219,7 +219,10 @@ are used.
 
 The host cases are FirstUseActions, FirstUseD1, FirstUseMigration and
 FirstUseRace in `purple/test_sync_config_publish.cpp` (gate setup-publish), and
-FirstUseJoinAppliesHead and AutoBeforeState in `purple/test_sync_auto.cpp`.
+FirstUseJoinAppliesHead, AutoBeforeState and MigrationKeepsSharedSpace (two
+installs that adopted one head in an old chat both move, one republishes, the
+other's next run settles with Adopt or UpToDate and no conflict) in
+`purple/test_sync_auto.cpp`. FirstUseMarkKeepsAnswer covers the mark.
 The routes gate (`purple/test_sync_chat_routes.py`) pins the triggers, the
 journal guard, the carry retirement, the actions and the Sync screen's choice.
 

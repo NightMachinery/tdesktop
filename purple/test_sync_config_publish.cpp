@@ -978,7 +978,7 @@ void FirstUseMigration() {
 	auto first = PublishFiles(kMagicChat);
 	auto second = PublishFiles(kMagicChat);
 	MagicDevice(first, kCustom);
-	MagicDevice(second, kCustomOther);
+	MagicDevice(second, kCustom);
 	const auto seed = RunMagicFlow(first, InventoryOf({}), SyncConfigPublishRequest{
 		.expectedFingerprint = MakeSyncSettingsFile(SyncSettingsFileStatus::Present, kCustom).fingerprint,
 		.expectedParents = std::vector<QString>() }, 60);
@@ -1024,6 +1024,8 @@ void FirstUseMigration() {
 	const auto secondState = StateOf(second);
 	const auto checked = ReviewSyncConfigInventory(magic, &secondState, QByteArray(), ReadSyncSettingsFile(second.files));
 	CHECK(checked.status == SyncConfigReviewStatus::Ready && checked.reason == SyncConfigReviewReason::None);
+	CHECK(checked.plan.verdict == ConfigSyncVerdict::Adopt || checked.plan.verdict == ConfigSyncVerdict::UpToDate);
+	prompts += (checked.plan.verdict == ConfigSyncVerdict::Adopt || checked.plan.verdict == ConfigSyncVerdict::UpToDate) ? 0 : 1;
 	CHECK(prompts == 0);
 	std::printf("FIRST USE migration prompts=%d one_space=%d\n", prompts,
 		int(StateOf(first).space == StateOf(second).space));

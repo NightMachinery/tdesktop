@@ -902,6 +902,83 @@ SyncAccountInventoryResult CloudInventory(const Fixture &f) {
 	return FinishSyncAccountInventory(uint64_t(f.key.userId), scan, read);
 }
 
+SyncAutoPlan Drive(Fixture &f, SyncAutoPlan plan) {
+	for (auto step = 0; step != 16; ++step) {
+		switch (plan.action) {
+		case SyncAutoAction::Check:
+			plan = f.Inventory();
+			break;
+		case SyncAutoAction::Reconcile:
+			if (!plan.commitOnly) { plan = f.Inventory(); break; }
+			CHECK(f.Execute(plan));
+			plan = f.Event(SyncAutoEvent::Completed, SyncAutoOutcome::Committed);
+			break;
+		case SyncAutoAction::Publish:
+			CHECK(f.Execute(plan));
+			plan = f.Event(SyncAutoEvent::Completed, SyncAutoOutcome::Staged);
+			break;
+		case SyncAutoAction::AutoApply:
+			CHECK(f.Execute(plan));
+			plan = f.Event(SyncAutoEvent::Completed, SyncAutoOutcome::Applied);
+			break;
+		case SyncAutoAction::Post:
+			CHECK(f.store->AuthorizeEffect(plan));
+			f.cloud[f.nextId++] = plan.bytes;
+			plan = f.Event(SyncAutoEvent::Completed, SyncAutoOutcome::Sent);
+			break;
+		default:
+			return plan;
+		}
+	}
+	CHECK(false);
+	return plan;
+}
+
+void MigrationKeepsSharedSpace() {
+	const auto magic = PeerToken{ PeerTokenKind::Channel, 88 };
+	auto a = Fixture(); auto b = Fixture();
+	auto other = SyncLocalState();
+	{
+		auto local = SyncLocalStore(b.files.syncDirectory); CHECK(local.Open(true, b.token));
+		if (local.state()) { other = *local.state(); }
+	}
+	other.install = *FormatSyncInstallId(QByteArray(16, 'c'));
+	other.createdDevice = u"android:"_q + other.install;
+	CHECK(QFile::remove(b.files.syncStore));
+	{ auto local = SyncLocalStore(b.files.syncDirectory); CHECK(local.Open(true).status == SyncStoreStatus::Uninitialized); CHECK(local.Initialize(other)); }
+	a.Local(T1);
+	CHECK(Drive(a, a.Event(SyncAutoEvent::Enable)).action == SyncAutoAction::NoOp);
+	CHECK(a.cloud.size() == 1);
+	b.cloud = a.cloud; b.nextId = a.nextId;
+	b.Local(T1);
+	CHECK(Drive(b, b.Event(SyncAutoEvent::Enable)).action == SyncAutoAction::NoOp);
+	CHECK(b.cloud.size() == 1);
+	const auto base = b.store->local().state()->configData.base;
+	CHECK(!base.isEmpty() && base == a.store->local().state()->configData.base);
+	const auto space = a.store->local().state()->space;
+	CHECK(b.store->local().state()->space == space);
+	for (const auto f : { &a, &b }) {
+		CHECK(f->store->MoveTo(magic, uint64_t(f->key.userId), SettingsFingerprint(T1)));
+		CHECK(f->store->local().state()->chat == magic && f->store->local().state()->space == space);
+		f->facts.chat = magic;
+		f->facts.savedFingerprint = SettingsFingerprint(T1);
+	}
+	a.cloud.clear();
+	CHECK(Drive(a, a.Event(SyncAutoEvent::Foreground)).action == SyncAutoAction::NoOp);
+	CHECK(a.cloud.size() == 1);
+	b.cloud = a.cloud; b.nextId = a.nextId;
+	const auto settled = Drive(b, b.Event(SyncAutoEvent::Foreground));
+	CHECK(settled.action == SyncAutoAction::NoOp && settled.reason != SyncAutoReason::Conflict);
+	CHECK(b.cloud.size() == 1 && ReadSettingsFileInput(b.files.settings).bytes == T1);
+	const auto review = ReviewSyncConfigInventory(b.Snapshot().inventory, b.store->local().state(), {},
+		ReadSyncSettingsFile(b.files));
+	CHECK(review.status == SyncConfigReviewStatus::Ready);
+	CHECK(review.plan.verdict == ConfigSyncVerdict::UpToDate || review.plan.verdict == ConfigSyncVerdict::Adopt);
+	CHECK(b.store->local().state()->space == space && a.store->local().state()->space == space);
+	std::printf("MIGRATION_SHARED one_space=%d verdict=%d\n",
+		int(b.store->local().state()->space == a.store->local().state()->space), int(review.plan.verdict));
+}
+
 void FirstUseJoinAppliesHead() {
 	for (const auto local : { T0, QByteArray("version = 2\n") }) {
 		for (const auto known : { true, false }) {
@@ -961,7 +1038,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); AutoBeforeState();
+	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); AutoBeforeState(); MigrationKeepsSharedSpace();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);
