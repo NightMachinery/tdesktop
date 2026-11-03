@@ -532,8 +532,11 @@ void AutoSession::Check(const SyncAutoPlan &plan) {
 
 bool AutoSession::PauseOnForeignSpace(PeerToken chat) {
 	const auto magic = SyncMagicChatOf(not_null{ _session.get() });
-	if (!magic || chat == PeerToken{} || !_store || !_store->local().state()
-		|| !SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {
+	// WHY: the chat may also hold this state's own space when another device won the race to start it;
+	// any state outside the selected space is first use, as the Sync screen's Check decides it.
+	const auto first = (magic && chat != PeerToken{} && _store && _store->local().state())
+		? ReviewSyncFirstUse(_store->files(), _inventory) : SyncFirstUseReview();
+	if (first.need != SyncFirstUseNeed::OtherSpace || !first.action) {
 		_firstUse.reset();
 		return false;
 	}
@@ -622,6 +625,11 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 		return;
 	}
 	RetireCarry();
+	const auto recovery = InspectSyncAccountRecovery(*session, &inventory.inventory);
+	if (!recovery || recovery->journalPresent) {
+		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		return;
+	}
 	const auto review = ReviewSyncFirstUse(target->files, inventory.inventory, choice);
 	if (review.need == SyncFirstUseNeed::None) { FirstUseFinish(SyncFirstUseOutcome::NotNeeded); return; }
 	if (!review.action) {
@@ -638,14 +646,20 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 			: action == SyncFirstUseAction::JoinSilently ? u"join_silently"_q : u"ask"_q),
 		SyncDiagCode(u"choice"_q, choice == SyncFirstUseChoice::Synced ? u"synced"_q
 			: choice == SyncFirstUseChoice::ThisDevice ? u"this_device"_q : u"none"_q) });
-	if (action == SyncFirstUseAction::Wait || action == SyncFirstUseAction::Ask) {
+	const auto broken = (review.input.local.status == SyncSettingsFileStatus::Invalid)
+		|| review.input.local.usingLastGood;
+	if (action == SyncFirstUseAction::Wait && broken) {
+		FirstUseFinish(SyncFirstUseOutcome::Failed, tr::lng_purple_sync_first_wait_file(tr::now));
+		return;
+	} else if (action == SyncFirstUseAction::Wait || action == SyncFirstUseAction::Ask) {
 		FirstUseFinish(action == SyncFirstUseAction::Wait ? SyncFirstUseOutcome::Waiting : SyncFirstUseOutcome::Asking);
 		return;
 	}
 	if (review.need == SyncFirstUseNeed::OtherSpace) {
 		Stop();
-		const auto recovery = InspectSyncAccountRecovery(*session, &inventory.inventory);
-		const auto archived = recovery && StartAgainSyncAccount(*session, *recovery, true, false, true).ready;
+		const auto fresh = InspectSyncAccountRecovery(*session, &inventory.inventory);
+		const auto archived = fresh && !fresh->journalPresent
+			&& StartAgainSyncAccount(*session, *fresh, true, false, true).ready;
 		SyncDiag(u"sync_chat"_q, u"first_use"_q, {
 			SyncDiagCode(u"step"_q, u"archive"_q),
 			SyncDiagCode(u"outcome"_q, archived ? u"ok"_q : u"error"_q) });

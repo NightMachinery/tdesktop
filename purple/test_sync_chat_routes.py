@@ -120,8 +120,11 @@ def inspect(values):
     require('magic-publish-authority', 'binding->chat == chat && binding->problem == SyncChatProblem::None' in magic_bound
         and '(chat == PeerToken{} || binding->verifiedAt > 0)' in magic_bound
         and 'if (!setup && MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow
-        and 'const auto magicJoinable = _magic && complete && OneSyncSpace(inventory);' in flow
+        and 'const auto magicJoinable = _magic && complete && SelectedSyncSpace(inventory);' in flow
         and '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow)
+    selected = flow.split('bool SelectedSyncSpace(', 1)[-1].split('bool CreatedBySetup(', 1)[0]
+    require('magic-join-selected-space', 'return record.status == SyncCandidateStatus::Valid && record.header;' in selected
+        and 'record.header && record.header->space == *space' in selected and 'inventory.directory.selectedSpace' in selected)
     check = values['purple_sync_setup_box.cpp'].split('void StartCheck(', 1)[1]
     require('magic-manual-check', 'MoveSyncStateToBoundChat(session);' in check
         and '!lease->current() || !setup' not in check and 'state->setup = SyncChatSetupSnapshotOf(session);' in check)
@@ -159,8 +162,40 @@ def inspect(values):
     require('borrowed-proof-run', 'self->_store.get() == store && self->_sessionId == owner' in operation and 'store->Current()' in operation)
     require('borrowed-proof-observer-free', 'SyncChatSelfResolved' not in operation and 'Accept(' not in operation and 'CheckCompletion(' not in operation)
     require('auto-typed-inventory', 'lease->route, nullptr' in auto and 'DesktopSyncChatInventoryMatches(inventory, origin, chat)' in auto)
-    require('auto-space-pause', 'if (self->PauseOnForeignSpace(chat)) { return; }' in auto
-        and 'magic->raise(SyncChatProblem::SpaceMismatch);' in auto)
+    pause = auto.split('bool AutoSession::PauseOnForeignSpace(', 1)[-1].split('void AutoSession::RetireCarry(', 1)[0]
+    require('auto-space-first-use', 'if (self->PauseOnForeignSpace(chat)) { return; }' in auto
+        and 'ReviewSyncFirstUse(_store->files(), _inventory)' in pause
+        and 'if (first.need != SyncFirstUseNeed::OtherSpace || !first.action) {' in pause
+        and 'self->FirstUse(std::move(inventory), SyncFirstUseChoice::None, nullptr, false);' in pause
+        and 'raise(SyncChatProblem::SpaceMismatch)' not in auto)
+    opened = auto.split('bool AutoSession::Open() {', 1)[-1].split('void AutoSession::MoveStore()', 1)[0]
+    retire = auto.split('void AutoSession::RetireCarry() {', 1)[-1].split('bool AutoSession::NoStateEvent(', 1)[0]
+    require('first-use-carry-retire', 'RetireCarry();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);' in opened
+        and '!SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()' in retire
+        and 'RetireSyncCarryLeftovers(target->files.syncDirectory, date)' in retire)
+    unbound = auto.split('bool AutoSession::NoStateEvent(', 1)[-1].split('void AutoSession::FirstUse(', 1)[0]
+    require('auto-first-use-unbound', 'if (!Open()) { Stop(); return NoStateEvent(event); }' in auto
+        and 'recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup' in unbound
+        and '} else if (event != SyncAutoEvent::Disable) {\n\t\tFirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);' in unbound)
+    run = auto.split('void AutoSession::FirstUseRun(', 1)[-1].split('void AutoSession::FirstUseJoined(', 1)[0]
+    require('first-use-journal-guard', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);' in run
+        and run.index('recovery->journalPresent') < run.index('ReviewSyncFirstUse(')
+        and 'fresh && !fresh->journalPresent' in run and run.index('Stop();') < run.index('StartAgainSyncAccount(')
+        and 'StartAgainSyncAccount(*session, *fresh, true, false, true)' in run)
+    require('first-use-actions', 'publish ? review.request : SyncConfigPublishRequest()' in run
+        and '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)' in run
+        and 'self->FirstUseJoined(inventory, review);' in run
+        and all(marker not in run for marker in ['ConfirmAction(', 'showBox(', 'Ui::show(', 'uiShow(']))
+    box = values['purple_sync_setup_box.cpp']
+    first = box.split('void RunFirstUse(', 1)[-1].split('void OnInventory(', 1)[0]
+    require('first-use-box', 'if (followup == CheckFollowup::None && FirstUse(box, state, result)) {' in box
+        and box.index('FirstUse(box, state, result)') < box.index('auto recovery = InspectSyncAccountRecovery(*session, &result);')
+        and 'RunFirstUse(box, state, SyncFirstUseChoice::Synced);' in box
+        and 'RunFirstUse(box, state, SyncFirstUseChoice::ThisDevice);' in box
+        and 'if (*first.action == SyncFirstUseAction::Ask) {\n\t\tstate->asking = true;' in first
+        and all(marker not in first for marker in ['ConfirmAction(', 'showBox(', 'Ui::show(', 'uiShow(']))
+    require('first-use-auto-status', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }' in auto
+        and 'first->outcome == SyncFirstUseOutcome::Waiting) { return tr::lng_purple_auto_first_wait(tr::now); }' in auto)
     return failures
 
 assert not inspect(files), inspect(files)
@@ -222,7 +257,20 @@ negative = [
     ('purple_sync_candidate_reader.cpp', 'documentId != self->_documentId || editDate != self->_editDate', 'false', 'download-metadata-seal'),
     ('purple_sync_auto_service.cpp', '_store && _session && Current() && Resolved()', '_store && _session && Current()', 'auto-effect-bound'),
     ('purple_sync_auto_service.cpp', 'facts.chatProblem = SyncMagicPaused(', 'facts.chatWritable = SyncMagicPaused(', 'auto-bound-facts'),
-    ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-pause'),
+    ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-first-use'),
+    ('purple_sync_auto_service.cpp', 'if (first.need != SyncFirstUseNeed::OtherSpace || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
+    ('purple_sync_auto_service.cpp', '\tRetireCarry();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);', '\tconst auto recovery = InspectSyncAccountRecovery(*session);', 'first-use-carry-retire'),
+    ('purple_sync_auto_service.cpp', '!SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()', '!SyncMagicBound(session)', 'first-use-carry-retire'),
+    ('purple_sync_auto_service.cpp', 'if (!Open()) { Stop(); return NoStateEvent(event); }', 'if (!Open()) { Stop(); return false; }', 'auto-first-use-unbound'),
+    ('purple_sync_auto_service.cpp', 'recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup', 'recovery->plan.status != SyncAccountRecoveryStatus::Setup', 'auto-first-use-unbound'),
+    ('purple_sync_auto_service.cpp', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);', 'if (!recovery) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);', 'first-use-journal-guard'),
+    ('purple_sync_auto_service.cpp', 'fresh && !fresh->journalPresent', 'fresh', 'first-use-journal-guard'),
+    ('purple_sync_auto_service.cpp', '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)', '(action == SyncFirstUseAction::JoinSilently)', 'first-use-actions'),
+    ('purple_sync_auto_service.cpp', 'self->FirstUseJoined(inventory, review);', 'self->FirstUseFinish(SyncFirstUseOutcome::Joined);', 'first-use-actions'),
+    ('purple_sync_setup_box.cpp', 'if (followup == CheckFollowup::None && FirstUse(box, state, result)) {', 'if (false) {', 'first-use-box'),
+    ('purple_sync_setup_box.cpp', 'RunFirstUse(box, state, SyncFirstUseChoice::Synced);', 'RunFirstUse(box, state, SyncFirstUseChoice::None);', 'first-use-box'),
+    ('purple_sync_setup_box.cpp', 'if (*first.action == SyncFirstUseAction::Ask) {\n\t\tstate->asking = true;', 'if (*first.action == SyncFirstUseAction::Ask) {\n\t\tConfirmAction(box, state, Action::Join);', 'first-use-box'),
+    ('purple_sync_auto_service.cpp', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_review(tr::now); }', 'first-use-auto-status'),
     ('purple_sync_auto_service.cpp', 'self->_store.get() == store && self->_sessionId == owner', 'true', 'borrowed-proof-run'),
     ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
@@ -235,6 +283,9 @@ negative = [
     ('purple_sync_magic_box.cpp', 'return frame.telegram', 'return true', 'magic-wait-wording'),
     ('purple_sync_config_publish_flow.cpp', ' || binding->verifiedAt > 0)', ')', 'magic-publish-authority'),
     ('purple_sync_config_publish_flow.cpp', '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {', '} else if (false) {', 'magic-publish-authority'),
+    ('purple_sync_config_publish_flow.cpp', '_magic && complete && SelectedSyncSpace(inventory);', '_magic && complete;', 'magic-publish-authority'),
+    ('purple_sync_config_publish_flow.cpp', 'return record.status == SyncCandidateStatus::Valid && record.header;', 'return true;', 'magic-join-selected-space'),
+    ('purple_sync_config_publish_flow.cpp', 'record.header && record.header->space == *space;', 'record.header;', 'magic-join-selected-space'),
     ('purple_sync_setup_box.cpp', '\tMoveSyncStateToBoundChat(session);\n', '', 'magic-manual-check'),
     ('purple_sync_auto_service.cpp', '\t\t\tFor(session).MoveToBound();\n', '', 'magic-move-unbound-auto'),
     ('purple_sync_magic_box.cpp', '\tchat->shown();\n\tconst auto weak = base::make_weak(controller);', '\tconst auto weak = base::make_weak(controller);', 'magic-problem-toast'),
