@@ -162,9 +162,9 @@ void SelectReviewOption(not_null<ReviewBoxState*> state, int index) {
 	const auto publishes = !update && SyncChoicePublishes(review, key);
 	state->disclosure->entity()->setText(publishes
 		? u"This choice also sends this device's settings to this account's "
-			"Saved Messages. "_q + SyncCloudDisclosureText()
+			"sync chat. "_q + SyncCloudDisclosureText()
 		: u"Joining links this device to this account's sync, so settings "
-			"you publish from it later are sent to Saved Messages. "_q
+			"you publish from it later are sent to the sync chat. "_q
 			+ SyncCloudDisclosureText());
 	state->disclosure->toggle(
 		publishes || !review.bound,

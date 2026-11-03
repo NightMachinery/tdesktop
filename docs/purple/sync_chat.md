@@ -224,3 +224,13 @@ the 64 most recently seen ones, or when the clock goes backwards, one
 copies. StartAppServices installs the log.txt sink; earlier lines are dropped.
 The gate `cases-sync-diag` (purple/tests/sync_diag_cases.cpp) checks the
 vocabulary, the line shape and the limit.
+
+Every NeedsReview refusal of a sync check, from the box or from automatic sync,
+writes `sync_chat review_refused trigger=<manual|auto> reason=<code>`, with
+core's `SyncConfigReviewReasonCode`: `space_mismatch`, `unreadable`,
+`ambiguous`, `newer_schema`, `heads_unclear` or `own_records` (`unknown` if a
+refusal has none). The box shows one line per reason instead of a generic
+sentence. Desktop's own refusals name theirs too: a newer local file or a head
+Desktop cannot apply (`newer_schema` or `unreadable`), an ambiguous or
+unreadable recovery inspection, and a state that names another chat
+(`space_mismatch` when the chat holds another space, else `own_records`).

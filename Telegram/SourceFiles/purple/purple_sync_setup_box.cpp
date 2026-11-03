@@ -298,7 +298,7 @@ void RefreshButtons(SetupBoxState &state) {
 	}
 	state.checkText = state.running
 		? u"Cancel check"_q
-		: u"Check the selected sync chat"_q;
+		: u"Check sync chat"_q;
 	state.check->setDisabled(!state.running && (busy || !available));
 	state.close->setDisabled(state.publishing);
 	if (state.recoveryButton) {
@@ -377,6 +377,7 @@ void ShowReview(
 		SyncConfigReview review,
 		const QString &prefix) {
 	const auto described = DescribeSyncConfigReview(review, state.checkedAt);
+	NoteSyncConfigRefusal(review, true);
 	state.completed = std::move(inventory);
 	state.review = std::move(review);
 	state.currentAction = described.action;
@@ -1183,7 +1184,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		updateChat();
 	});
 
-	state->checkText = u"Check the selected sync chat"_q;
+	state->checkText = u"Check sync chat"_q;
 	state->check = box->addButton(
 		state->checkText.value(),
 		[=] {

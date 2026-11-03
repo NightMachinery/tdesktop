@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_sync_auto.h"
+#include "purple/purple_sync_config_flow.h"
 #include "rpl/producer.h"
 
 namespace Main { class Session; }
@@ -17,5 +18,7 @@ bool MoveSyncStateToBoundChat(not_null<Main::Session*> session);
 [[nodiscard]] bool AutomaticSettingsSyncEnabled(not_null<Main::Session*> session);
 [[nodiscard]] QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<> AutomaticSettingsSyncChanges();
+// Logs a NeedsReview refusal with its reason code; other statuses log nothing.
+void NoteSyncConfigRefusal(const SyncConfigReview &review, bool manual);
 
 }

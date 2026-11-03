@@ -375,6 +375,10 @@ void AutoSession::Run(SyncAutoPlan plan) {
 	if (plan.action == SyncAutoAction::NoOp || plan.action == SyncAutoAction::Hold
 		|| plan.action == SyncAutoAction::RetryAt) {
 		const auto retry = plan.action != SyncAutoAction::Hold;
+		const auto session = _session.get();
+		if (!retry && session && plan.reason == SyncAutoReason::NeedsReview && _inventory.read) {
+			NoteSyncConfigRefusal(ReviewSyncConfig(session->account(), *session, _inventory, StateChat()), false);
+		}
 		Stop();
 		if (retry) { RetryLater(); }
 		return;
@@ -804,5 +808,13 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 }
 
 rpl::producer<> AutomaticSettingsSyncChanges() { return Changes.events(); }
+
+void NoteSyncConfigRefusal(const SyncConfigReview &review, bool manual) {
+	if (review.status != SyncConfigReviewStatus::NeedsReview) { return; }
+	const auto code = SyncConfigReviewReasonCode(review.reason);
+	SyncDiag(u"sync_chat"_q, u"review_refused"_q, {
+		SyncDiagCode(u"trigger"_q, manual ? u"manual"_q : u"auto"_q),
+		SyncDiagReason(code.isEmpty() ? u"unknown"_q : code) });
+}
 
 }

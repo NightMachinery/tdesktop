@@ -105,6 +105,34 @@ namespace {
 		"The previous file is in History. Check again."_q + undo;
 }
 
+[[nodiscard]] QString RefusalText(SyncConfigReviewReason reason) {
+	switch (reason) {
+	case SyncConfigReviewReason::SpaceMismatch:
+		return u"The selected sync chat holds settings from another sync "
+			"space than this device's."_q;
+	case SyncConfigReviewReason::Unreadable:
+		return u"The selected sync chat has a sync record this device "
+			"cannot read."_q;
+	case SyncConfigReviewReason::Ambiguous:
+		return u"The sync records in the selected sync chat, or this "
+			"device's sync files, are ambiguous: they collide or cannot be "
+			"told apart."_q;
+	case SyncConfigReviewReason::NewerSchema:
+		return u"The selected sync chat or this device's settings.toml uses "
+			"a newer settings format. Update Purple to use it."_q;
+	case SyncConfigReviewReason::HeadsUnclear:
+		return u"The latest settings of another device in the selected sync "
+			"chat cannot be determined."_q;
+	case SyncConfigReviewReason::OwnRecords:
+		return u"This device's own records in the selected sync chat do not "
+			"match its sync state."_q;
+	case SyncConfigReviewReason::None:
+		break;
+	}
+	return u"The selected sync chat has sync records this device cannot "
+		"safely use."_q;
+}
+
 } // namespace
 
 QString SyncCloudDisclosureText() {
@@ -166,15 +194,12 @@ SyncConfigBoxStatus DescribeSyncConfigReview(
 	const auto action = described.action;
 	switch (described.message) {
 	case Message::NeedsReviewWithPending:
-		return { u"A settings post from this device may not have finished, "
-			"but the selected sync chat also has sync records this device cannot "
-			"safely use: they are ambiguous, unreadable, or in another sync "
-			"space. The earlier post stays paused while they remain. Nothing "
-			"was sent."_q };
+		return { u"A settings post from this device may not have finished. "_q
+			+ RefusalText(review.reason)
+			+ u" The earlier post stays paused while this lasts. Nothing was "
+				"sent."_q };
 	case Message::NeedsReview:
-		return { u"The selected sync chat has sync records this device cannot "
-			"safely use: they are ambiguous, unreadable, or in another sync "
-			"space. Nothing was changed."_q };
+		return { RefusalText(review.reason) + u" Nothing was changed."_q };
 	case Message::Incomplete:
 		return { u"The check did not finish, so nothing can be decided yet. "
 			"Check again."_q };

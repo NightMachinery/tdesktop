@@ -49,12 +49,16 @@ namespace {
 SyncConfigReview ClientSupportedReview(SyncConfigReview result) {
 	if (result.local.status == SyncSettingsFileStatus::Present && SettingsTextNewer(result.local.text)) {
 		result.status = SyncConfigReviewStatus::NeedsReview;
+		result.reason = SyncConfigReviewReason::NewerSchema;
 		return result;
 	}
 	for (const auto &head : result.heads) {
 		const auto parsed = ParseSettings(QString::fromUtf8(head.text), u"sync record"_q);
 		if (!parsed.ok() || !CanApplyAccountSettingsDocument(u"settings.toml"_q, head.text)) {
 			result.status = SyncConfigReviewStatus::NeedsReview;
+			result.reason = SettingsTextNewer(head.text)
+				? SyncConfigReviewReason::NewerSchema
+				: SyncConfigReviewReason::Unreadable;
 			break;
 		}
 	}
@@ -149,6 +153,11 @@ SyncConfigReview ReviewSyncConfig(
 			: recovery->plan.status == SyncAccountRecoveryStatus::RootRelink
 				|| recovery->plan.status == SyncAccountRecoveryStatus::AutoRelink ? SyncConfigReviewStatus::AccountUnbound
 			: SyncConfigReviewStatus::NeedsReview;
+		if (result.status == SyncConfigReviewStatus::NeedsReview) {
+			result.reason = (recovery && recovery->plan.status == SyncAccountRecoveryStatus::NeedsReview)
+				? SyncConfigReviewReason::Unreadable
+				: SyncConfigReviewReason::Ambiguous;
+		}
 		return result;
 	}
 	const auto target = AccountSyncInspectionTarget(&session);
@@ -169,7 +178,11 @@ SyncConfigReview ReviewSyncConfig(
 	if (!parsed) { result.status = SyncConfigReviewStatus::StoreError; return result; }
 	const auto state = &parsed.state;
 	if (!DesktopSyncChatLedgerMatches(*state, chat)) {
+		const auto &selected = inventory.directory.selectedSpace;
 		result.status = SyncConfigReviewStatus::NeedsReview;
+		result.reason = (selected && *selected != state->space)
+			? SyncConfigReviewReason::SpaceMismatch
+			: SyncConfigReviewReason::OwnRecords;
 		return result;
 	}
 	if (CheckAccountSyncBinding(*state, account) != SyncAccountBindingVerdict::Bound) {

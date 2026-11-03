@@ -45,6 +45,8 @@ const std::vector<QString> &Words() {
 		u"listed"_q, u"value"_q, u"on"_q, u"off"_q,
 		u"action"_q, u"slot"_q, u"lists_unreadable"_q, u"native_unavailable"_q,
 		u"rejected"_q, u"wait_recorded"_q, u"retry"_q, u"request_refused"_q,
+		u"review_refused"_q, u"unreadable"_q, u"ambiguous"_q, u"newer_schema"_q,
+		u"heads_unclear"_q, u"own_records"_q, u"unknown"_q,
 	};
 	return result;
 }

@@ -1,4 +1,6 @@
 #include "purple/purple_sync_magic_chat.h"
+#include "purple/purple_sync_config_flow.h"
+#include "purple/purple_sync_diag.h"
 
 #include <QtCore/QStringList>
 
@@ -662,6 +664,22 @@ int main() {
 		expect(SyncMagicPickOf(channel(8), Magic(7, true)) == SyncMagicPick::Unsupported, "pick: another chat's facts");
 		expect(SyncMagicPickOf(PeerToken{ PeerTokenKind::User, 9 }, std::nullopt) == SyncMagicPick::Unsupported,
 			"pick: a private chat");
+	}
+
+	{
+		using Reason = SyncConfigReviewReason;
+		const auto expected = std::vector<std::pair<Reason, QString>>{
+			{ Reason::SpaceMismatch, u"space_mismatch"_q }, { Reason::Unreadable, u"unreadable"_q },
+			{ Reason::Ambiguous, u"ambiguous"_q }, { Reason::NewerSchema, u"newer_schema"_q },
+			{ Reason::HeadsUnclear, u"heads_unclear"_q }, { Reason::OwnRecords, u"own_records"_q } };
+		for (const auto &[reason, code] : expected) {
+			expect(SyncConfigReviewReasonCode(reason) == code, "reason: core code");
+			const auto line = SyncDiagLine(u"sync_chat"_q, u"review_refused"_q, {
+				SyncDiagCode(u"trigger"_q, u"manual"_q), SyncDiagReason(SyncConfigReviewReasonCode(reason)) });
+			expect(line == u"sync_chat review_refused trigger=manual reason="_q + code, "reason: a diag word");
+		}
+		expect(SyncConfigReviewReasonCode(Reason::None).isEmpty(), "reason: none has no code");
+		expect(SyncDiagToken(u"unknown"_q) == u"unknown"_q, "reason: the fallback is a word");
 	}
 
 	std::cout << "sync-magic-chat checks=" << checks << " failures=" << failures << '\n';
