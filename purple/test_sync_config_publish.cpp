@@ -361,6 +361,7 @@ struct PublishRetryProbe : base::has_weak_ptr {
 		Fn<void(Fn<void(bool)>)> resume;
 		Fn<void(const MTP::Error &)> fail;
 		std::optional<SyncRequestTransient> transient;
+		QString method;
 		mtpRequestId id = 1;
 		mtpRequestId wire = 0;
 		int64_t retryAtMs = 0;
@@ -375,6 +376,8 @@ struct PublishRetryProbe : base::has_weak_ptr {
 	Fn<void(mtpRequestId, SyncRequestTransient)> _deferred;
 	std::map<mtpRequestId, std::shared_ptr<Pending>> _pending;
 	void publish() {}
+	int64_t kept(const QString &) const { return 0; }
+	void keep(const QString &, int64_t) const {}
 	void cancelAll()
 #include "publisher-retry-cancelAll.inc"
 	void cancel(mtpRequestId id)
@@ -710,7 +713,8 @@ void ExistingJoins() {
 void WriteMagicBinding(const PublishFiles &files, PeerToken chat, int64_t verifiedAt,
 		SyncChatProblem problem = SyncChatProblem::None) {
 	auto binding = SyncChatBinding();
-	binding.chat = chat; binding.verifiedAt = verifiedAt; binding.problem = problem;
+	binding.mode = SyncChatBindingMode::Magic; binding.chat = chat;
+	binding.verifiedAt = verifiedAt; binding.problem = problem;
 	const auto bytes = SerializeSyncChatBinding(binding); CHECK(bytes);
 	if (!bytes) { return; }
 	CHECK(WriteSyncPrivateFile(QDir(files.files.syncDirectory).filePath(
