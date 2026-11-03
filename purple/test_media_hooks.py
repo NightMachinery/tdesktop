@@ -12,6 +12,8 @@ HOOKS = [
     ('history/view/media/history_view_gif.cpp', 'QSize Gif::countThumbSize(', 'Purple::VideoMessageThumbSize('),
     ('history/view/media/history_view_gif.cpp', 'int Gif::bubbleWidthLimit(', 'Purple::VideoMessageBubbleWidthLimit('),
     ('media/player/media_player_float.cpp', 'Float::Float(', 'Purple::FloatPlayerSize('),
+    ('media/player/media_player_float.cpp', 'Float::Float(', 'Purple::DecorateFloat('),
+    ('media/player/media_player_float.cpp', 'void Float::mouseDoubleClickEvent(', 'Purple::RestartFloatOnDoubleClick('),
 ]
 
 

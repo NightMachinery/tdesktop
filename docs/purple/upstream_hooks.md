@@ -1503,12 +1503,16 @@ no facade covers those yet.
 - The older content-origin hunks of this file are listed under "Import
   content provenance and menu routes".
 
-**`Telegram/SourceFiles/media/player/media_player_float.cpp`**: +2 -0. First
+**`Telegram/SourceFiles/media/player/media_player_float.cpp`**: +6 -0. First
 Purple edit in this file.
 - The facade include, after the file's own header.
 - `Float::Float`: one inserted line after the stock size,
   `size = Purple::FloatPlayerSize(parent, document, size);` (the float keeps
-  the in-chat size).
+  the in-chat size), and `Purple::DecorateFloat(this, _doubleClickedCallback);`
+  as its last statement (hover controls). The constructor passes its own
+  double-click callback because the "open the message" button reuses it.
+- `Float::mouseDoubleClickEvent`: one early return through
+  `Purple::RestartFloatOnDoubleClick` (double-click restarts the round).
 
 ## Upstream v7.3.3 merge
 

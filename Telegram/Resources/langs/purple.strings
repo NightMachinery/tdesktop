@@ -495,4 +495,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_video_message_size_percent" = "{percent}%";
 "lng_purple_video_message_size_actual" = "Actual size ({percent}%)";
 "lng_purple_video_message_float_keep" = "Keep the size when it floats";
+"lng_purple_round_float_open" = "Open the message";
+"lng_purple_round_float_pause" = "Play or pause";
+"lng_purple_round_float_close" = "Close";
 "lng_purple_video_message_size_about" = "Larger sizes look softer, because video messages are recorded at about 400 pixels. Actual size shows each video message pixel for pixel on this screen.";

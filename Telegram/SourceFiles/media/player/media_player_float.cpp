@@ -131,6 +131,7 @@ Float::Float(
 	}, lifetime());
 
 	setCursor(style::cur_pointer);
+	Purple::DecorateFloat(this, _doubleClickedCallback);
 }
 
 void Float::mousePressEvent(QMouseEvent *e) {
@@ -185,6 +186,9 @@ void Float::finishDrag(bool closed) {
 }
 
 void Float::mouseDoubleClickEvent(QMouseEvent *e) {
+	if (Purple::RestartFloatOnDoubleClick(_item)) {
+		return;
+	}
 	if (_item && _doubleClickedCallback) {
 		// Handle second click.
 		pauseResume();

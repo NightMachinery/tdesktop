@@ -28,18 +28,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "media/audio/media_audio.h"
+#include "media/player/media_player_float.h"
 #include "media/player/media_player_instance.h"
+#include "base/event_filter.h"
 #include "settings/settings_builder.h"
 #include "ui/style/style_core.h"
+#include "ui/painter.h"
 #include "ui/widgets/buttons.h"
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 #include "styles/style_media_player.h"
+#include "styles/style_purple_media_playback.h"
 #include "styles/style_settings.h"
 
+#include <QtGui/QPainter>
 #include <QtWidgets/QWidget>
+
+#include <array>
 
 namespace Purple {
 namespace {
@@ -138,6 +145,55 @@ void ChooseVideoMessageScaleBox(not_null<Ui::GenericBox*> box) {
 			SetVideoMessageScale(scales[index]);
 		},
 	});
+}
+
+[[nodiscard]] bool VoicePaused() {
+	const auto state = Media::Player::instance()->getState(
+		AudioMsgId::Type::Voice);
+	return Media::Player::IsPausedOrPausing(state.state)
+		|| Media::Player::IsStoppedOrStopping(state.state);
+}
+
+[[nodiscard]] bool RestartsCurrentVoice(FullMsgId context) {
+	using Type = AudioMsgId::Type;
+	const auto player = Media::Player::instance();
+	const auto current = player->current(Type::Voice);
+	const auto state = player->getState(Type::Voice);
+	return context
+		&& (current.contextId() == context)
+		&& (state.id == current)
+		&& !Media::Player::IsStoppedOrStopping(state.state)
+		&& (state.length > 0);
+}
+
+void RestartCurrentVoice() {
+	using Type = AudioMsgId::Type;
+	const auto player = Media::Player::instance();
+	player->finishSeeking(Type::Voice, 0.);
+	if (Media::Player::IsPausedOrPausing(player->getState(Type::Voice).state)) {
+		player->play(Type::Voice);
+	}
+}
+
+not_null<Ui::AbstractButton*> AddFloatButton(
+		not_null<Media::Player::Float*> floating,
+		Fn<const style::icon&()> icon,
+		Fn<void()> clicked,
+		const QString &name) {
+	const auto button = Ui::CreateChild<Ui::AbstractButton>(floating.get());
+	button->resize(st::purpleFloatButtonSize, st::purpleFloatButtonSize);
+	button->setAccessibleName(name);
+	button->setClickedCallback(std::move(clicked));
+	button->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(button);
+		PainterHighQualityEnabler hq(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(button->isOver() ? st::msgDateImgBgOver : st::msgDateImgBg);
+		p.drawEllipse(button->rect());
+		icon().paintInCenter(p, button->rect());
+	}, button->lifetime());
+	button->hide();
+	return button;
 }
 
 } // namespace
@@ -262,6 +318,79 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 	builder.addSkip();
 }
 
+bool RestartFloatOnDoubleClick(const HistoryItem *item) {
+	if (!item || !RestartsCurrentVoice(item->fullId())) {
+		return false;
+	}
+	RestartCurrentVoice();
+	return true;
+}
+
+void DecorateFloat(
+		not_null<Media::Player::Float*> floating,
+		Fn<void(not_null<const HistoryItem*>)> open) {
+	using Type = AudioMsgId::Type;
+	const auto buttons = std::array{
+		AddFloatButton(floating, []() -> const style::icon& {
+			return st::purpleFloatOpenIcon;
+		}, [=] {
+			if (const auto item = floating->item(); item && open) {
+				open(item);
+			}
+		}, tr::lng_purple_round_float_open(tr::now)),
+		AddFloatButton(floating, []() -> const style::icon& {
+			return VoicePaused()
+				? st::purpleFloatPlayIcon
+				: st::purpleFloatPauseIcon;
+		}, [] {
+			Media::Player::instance()->playPause(Type::Voice);
+		}, tr::lng_purple_round_float_pause(tr::now)),
+		AddFloatButton(floating, []() -> const style::icon& {
+			return st::purpleFloatCloseIcon;
+		}, [] {
+			Media::Player::instance()->stop(Type::Voice);
+		}, tr::lng_purple_round_float_close(tr::now)),
+	};
+	const auto show = [=](bool shown) {
+		const auto visible = shown && floating->item() && !floating->dragged();
+		for (const auto &button : buttons) {
+			button->setVisible(visible);
+		}
+	};
+	floating->sizeValue() | rpl::on_next([=](QSize size) {
+		const auto side = st::purpleFloatButtonSize;
+		const auto skip = st::purpleFloatButtonSkip;
+		const auto count = int(buttons.size());
+		auto left = (size.width() - count * side - (count - 1) * skip) / 2;
+		const auto top = size.height()
+			- st::mediaPlayerFloatMargin
+			- st::purpleFloatButtonBottom
+			- side;
+		for (const auto &button : buttons) {
+			button->move(left, top);
+			left += side + skip;
+		}
+	}, floating->lifetime());
+	base::install_event_filter(floating, [=](not_null<QEvent*> e) {
+		const auto type = e->type();
+		if (type == QEvent::Enter) {
+			show(true);
+		} else if (type == QEvent::Leave) {
+			show(false);
+		} else if (type == QEvent::MouseMove && floating->dragged()) {
+			show(false);
+		}
+		return base::EventFilterResult::Continue;
+	});
+	const auto pause = buttons[1];
+	Media::Player::instance()->updatedNotifier(
+	) | rpl::filter([](const Media::Player::TrackState &state) {
+		return (state.id.type() == Type::Voice);
+	}) | rpl::on_next([=] {
+		pause->update();
+	}, pause->lifetime());
+}
+
 bool RestartOnDoubleClick(
 		const std::shared_ptr<ClickHandler> &active,
 		Qt::MouseButton button,
@@ -274,7 +403,6 @@ bool RestartOnDoubleClick(
 	const auto media = item ? item->media() : nullptr;
 	const auto player = Media::Player::instance();
 	const auto current = player->current(Type::Voice);
-	const auto state = player->getState(Type::Voice);
 	const auto facts = MediaRules::RestartFacts{
 		.leftButton = (button == Qt::LeftButton),
 		.selecting = selecting,
@@ -285,17 +413,12 @@ bool RestartOnDoubleClick(
 		.currentTrack = document
 			&& (current.audio() == document)
 			&& (current.contextId() == context),
-		.seekable = (state.id == current)
-			&& !Media::Player::IsStoppedOrStopping(state.state)
-			&& (state.length > 0),
+		.seekable = RestartsCurrentVoice(context),
 	};
 	if (!MediaRules::RestartsOnDoubleClick(facts)) {
 		return false;
 	}
-	player->finishSeeking(Type::Voice, 0.);
-	if (Media::Player::IsPausedOrPausing(player->getState(Type::Voice).state)) {
-		player->play(Type::Voice);
-	}
+	RestartCurrentVoice();
 	return true;
 }
 

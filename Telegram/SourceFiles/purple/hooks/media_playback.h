@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/basic_types.h"
+
 #include <QtCore/QSize>
 #include <QtCore/qnamespace.h>
 
@@ -14,7 +16,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class ClickHandler;
 class DocumentData;
+class HistoryItem;
 class QWidget;
+
+namespace Media::Player {
+class Float;
+} // namespace Media::Player
 
 namespace HistoryView {
 class Element;
@@ -41,5 +48,10 @@ namespace Purple {
 	const QWidget *parent,
 	const DocumentData *document,
 	int size);
+
+[[nodiscard]] bool RestartFloatOnDoubleClick(const HistoryItem *item);
+void DecorateFloat(
+	not_null<Media::Player::Float*> floating,
+	Fn<void(not_null<const HistoryItem*>)> open);
 
 } // namespace Purple

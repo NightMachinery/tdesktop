@@ -30,7 +30,9 @@ track seeks it to 0:00 and plays it, even if it was paused.
 - When the restart happens the double-click never reaches
   `mouseActionStart`, so the second release toggles nothing and the
   Reply or React quick action does not run.
-- The floating round's own double-click is unchanged: it opens the message.
+- The floating round restarts the same way on a double-click (see "Floating
+  round controls"); its old double-click action, opening the message, moved
+  to a hover button.
 
 ## Video message size
 
@@ -84,6 +86,32 @@ size" instead, plus the float's shadow margins.
   close.
 - Device-local, like the size: `purple-video-message-float-keep`.
 
+## Floating round controls
+
+The floating round is still dragged as before, and dragging it mostly off
+the window still closes it. Hovering over it shows three buttons along the
+bottom of the circle:
+
+- Open the message: what a double-click on the float did upstream. It goes
+  through the same callback, so the chat opens the same way.
+- Play or pause, with the glyph following the player.
+- Close: stops the voice-type player, as dragging it off does.
+
+Clicks land only on the buttons; a press anywhere else still drags, and a
+single click still pauses or resumes. A double-click on the float now
+restarts the round from 0:00, like a double-click on a round in a chat. When
+the round cannot be restarted yet (it is not streaming), the double-click
+keeps upstream's behaviour and opens the message. The buttons hide while the
+float is dragged.
+
+Following the queue: when the next voice or round message starts on its own,
+upstream already leaves the chat where it is if you scrolled away.
+`HistoryWidget::scrollToCurrentVoiceMessage` and
+`ListWidget::scrollToCurrentVoiceMessage` scroll only when the message that
+just finished is still on screen and you have not scrolled in the last
+second, and the floating round shows the new message whenever it is off
+screen. So Purple changes nothing there.
+
 ## Upstream hooks
 
 Every hook is listed in [upstream_hooks.md](upstream_hooks.md), section
@@ -101,6 +129,10 @@ fails when a merge drops one of them.
 - `media/player/media_player_float.cpp`, `Float::Float`: one line after the
   stock size, `size = Purple::FloatPlayerSize(parent, document, size);`.
   The shadow, frame and progress arc all follow `size` already.
+- The same file: `Purple::DecorateFloat(this, _doubleClickedCallback)` at the
+  end of `Float::Float` (hover controls), and one early return through
+  `Purple::RestartFloatOnDoubleClick` at the top of
+  `Float::mouseDoubleClickEvent`.
 
 ## Tests
 
@@ -113,4 +145,5 @@ fails when a merge drops one of them.
 - Needs a GUI check after a build: double-click a playing and a paused voice
   message and round, in a chat and in a replies thread; each size, Actual
   size on a 1x and a 2x screen, a narrow window, a round with a reply, and
-  the float with the toggle on and off in a large and a small window.
+  the float with the toggle on and off in a large and a small window, and
+  the float's hover buttons, drag and double-click.
