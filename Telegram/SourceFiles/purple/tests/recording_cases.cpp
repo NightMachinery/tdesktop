@@ -316,6 +316,7 @@ int main() {
 	manifest.entries.push_back({
 		.id = "e1",
 		.account = 0,
+		.user = 0xFEDC'BA98'7654ULL,
 		.peer = 0x1234'5678'9ABCULL,
 		.topic = 7,
 		.kind = Registry::Kind::Voice,
@@ -391,6 +392,7 @@ int main() {
 	const auto newest = Registry::BinNewestFirst(manifest);
 	expect(newest.size() == 1 && newest[0]->id == "e2", "the bin lists only bin states");
 
+	expect(Registry::OfAccount(manifest, 0) == std::vector<std::string>{ "e1" } && Registry::OfAccount(manifest, -1).empty(), "logout finds exactly that account's recordings, never the unknown ones");
 	auto orphans = Registry::Manifest();
 	orphans.entries.push_back({ .id = "kept", .media = "kept.ogg.prc", .state = Registry::State::Discarded });
 	const auto adopted = Registry::AdoptOrphans(orphans, { "kept.ogg.prc", "aa.ogg.prc", "bb.mp4.prc", "bb.pjr.prc", "cc.pjr.prc", "recordings.json", "../x.ogg.prc" }, 77);

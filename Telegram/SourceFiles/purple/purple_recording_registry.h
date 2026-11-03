@@ -78,6 +78,7 @@ enum class Mark {
 struct Entry {
 	std::string id;
 	int account = -1;
+	std::uint64_t user = 0;
 	std::uint64_t peer = 0;
 	std::int64_t topic = 0;
 	std::int64_t reply = 0;
@@ -141,6 +142,7 @@ struct StopDecision {
 
 struct SentFacts {
 	int account = -1;
+	std::uint64_t user = 0;
 	std::uint64_t peer = 0;
 	Kind kind = Kind::Voice;
 	std::int64_t now = 0;
@@ -153,6 +155,10 @@ struct SentFacts {
 [[nodiscard]] std::vector<std::string> Expired(
 	const Manifest &manifest,
 	const std::function<bool(std::int64_t binned)> &expired);
+
+[[nodiscard]] std::vector<std::string> OfAccount(
+	const Manifest &manifest,
+	int account);
 
 [[nodiscard]] std::vector<std::string> AdoptOrphans(
 	Manifest &manifest,

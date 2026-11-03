@@ -307,6 +307,16 @@ the same group.
 
 Desktop never had recordings on disk before this, so there is no orphan scan.
 
+### Logout
+
+Logging out (`Main::Account::logOut` or a forced logout) deletes every
+recording of that account, waiting or in the bin. Purple's own
+`RemoveArchiveAtLogout`, which upstream already calls on both paths, calls
+`ForgetRecordingsAtLogout`, so no new upstream line was needed. Each entry
+also keeps the user id it was recorded under, and an item whose account
+index now belongs to someone else is shown as "Unknown chat", without the
+original chat's Send.
+
 ### Privacy
 
 The app log gets counts and states only: how many items were recovered,

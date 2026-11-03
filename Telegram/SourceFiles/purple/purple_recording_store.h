@@ -22,6 +22,7 @@ class Thread;
 } // namespace Data
 
 namespace Main {
+class Account;
 class Session;
 } // namespace Main
 
@@ -41,6 +42,7 @@ struct RecordingBinItem {
 };
 
 void StartRecordingStore();
+void ForgetRecordingsAtLogout(Main::Account &account);
 
 [[nodiscard]] std::vector<RecordingBinItem> RecordingBinItems();
 [[nodiscard]] int RecordingBinCount();

@@ -272,6 +272,7 @@ template <typename Enum, std::size_t Size>
 	auto result = Entry();
 	const auto id = String(Field(*object, "id"));
 	const auto account = Signed(Field(*object, "account"));
+	const auto user = Unsigned(Field(*object, "user"));
 	const auto peer = Unsigned(Field(*object, "peer"));
 	const auto topic = Signed(Field(*object, "topic"));
 	const auto reply = Signed(Field(*object, "reply"));
@@ -285,7 +286,7 @@ template <typename Enum, std::size_t Size>
 	const auto media = String(Field(*object, "media"));
 	const auto journal = String(Field(*object, "journal"));
 	const auto state = String(Field(*object, "state"));
-	if (!id || id->empty() || !account || !peer || !topic || !reply
+	if (!id || id->empty() || !account || !user || !peer || !topic || !reply
 		|| !kind || !started || !duration || !binned || !viewOnce
 		|| !partial || !fromListen || !media || !journal || !state
 		|| !ValidFileName(*media)
@@ -300,6 +301,7 @@ template <typename Enum, std::size_t Size>
 	}
 	result.id = *id;
 	result.account = int(*account);
+	result.user = *user;
 	result.peer = *peer;
 	result.topic = *topic;
 	result.reply = *reply;
@@ -402,6 +404,7 @@ std::string Encode(const Manifest &manifest) {
 		out += '{';
 		text("id", entry.id);
 		number("account", entry.account);
+		number("user", entry.user);
 		number("peer", entry.peer);
 		number("topic", entry.topic);
 		number("reply", entry.reply);
@@ -539,6 +542,16 @@ std::vector<std::string> Expired(
 	for (const auto &entry : manifest.entries) {
 		if (entry.state == State::Sent
 			|| (InBin(entry.state) && expired && expired(entry.binned))) {
+			result.push_back(entry.id);
+		}
+	}
+	return result;
+}
+
+std::vector<std::string> OfAccount(const Manifest &manifest, int account) {
+	auto result = std::vector<std::string>();
+	for (const auto &entry : manifest.entries) {
+		if (account >= 0 && entry.account == account) {
 			result.push_back(entry.id);
 		}
 	}

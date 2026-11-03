@@ -545,6 +545,35 @@ void FinishVoice() {
 
 } // namespace
 
+void ForgetRecordingsAtLogout(Main::Account &account) {
+	auto index = -1;
+	for (const auto &entry : Core::App().domain().accounts()) {
+		if (entry.account.get() == &account) {
+			index = entry.index;
+		}
+	}
+	auto &store = TheStore();
+	auto removed = 0;
+	{
+		const auto lock = std::lock_guard(store.mutex);
+		for (const auto &id : OfAccount(store.manifest, index)) {
+			if (store.deleteAfterClose.contains(id)) {
+				store.manifest.find(id)->state = State::Sent;
+			} else {
+				RemoveLocked(store, id);
+			}
+			++removed;
+		}
+		if (removed) {
+			SaveLocked(store);
+		}
+	}
+	if (removed) {
+		LOG(("Purple Recording: logout removed %1 recordings.").arg(removed));
+		Fire();
+	}
+}
+
 void StartRecordingStore() {
 	static auto started = false;
 	if (std::exchange(started, true)) {
@@ -614,8 +643,10 @@ std::optional<std::string> BeginRecordingEntry(
 		const auto peer = chat.peer();
 		const auto topic = chat.topic();
 		const auto account = RecordingAccountIndex(&controller->session());
+		const auto user = controller->session().userId().bare;
 		UpdateRecordingEntry(id, [&](Entry &entry) {
 			entry.account = account;
+			entry.user = user;
 			entry.peer = peer ? peer->id.value : 0;
 			entry.topic = topic ? topic->rootId().bare : 0;
 		});
@@ -713,9 +744,12 @@ std::vector<RecordingBinItem> RecordingBinItems() {
 	const auto lock = std::lock_guard(store.mutex);
 	auto result = std::vector<RecordingBinItem>();
 	for (const auto entry : BinNewestFirst(store.manifest)) {
+		const auto session = RecordingAccountSession(entry->account);
+		const auto own = session
+			&& (!entry->user || session->userId().bare == entry->user);
 		result.push_back({
 			.id = QString::fromStdString(entry->id),
-			.account = entry->account,
+			.account = own ? entry->account : -1,
 			.peer = PeerId(PeerIdHelper(entry->peer)),
 			.topic = MsgId(entry->topic),
 			.reply = MsgId(entry->reply),
