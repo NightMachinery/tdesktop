@@ -76,13 +76,13 @@ Rules (`SeekRules::PlanSeek` and `SeekRules::SeekTarget`):
 - Lengths are converted to milliseconds without overflow; a length above
   about 24 days (upstream's `kDurationMax`), including the "unavailable"
   marker, counts as unknown.
-- The clamping rule is a temporary local copy. purple-core states the same
-  rule as `Purple::SeekTarget` in `purple/purple_recording.h` on its
-  `recording` branch, after the commit this checkout pins; the two differ
-  only for an unknown length (core's forward adds the step, this one does
-  nothing, and Desktop never seeks an unknown length anyway). When the
-  gitlink next moves past it, Desktop switches to core's function and
-  `purple_seek_rules` keeps only the Desktop parts.
+- The clamping rule is still a local copy. purple-core states the same
+  rule as `Purple::SeekTarget` in `purple/purple_recording.h`, which the
+  pinned gitlink now includes; the two differ only for an unknown length
+  (core's forward adds the step, this one does nothing, and Desktop never
+  seeks an unknown length anyway). Switching Desktop to core's function,
+  so that `purple_seek_rules` keeps only the Desktop parts, is a pending
+  follow-up.
 
 The step is `[playback] seek_step` in `settings.toml`, `"5s"`, `"10s"`,
 `"15s"` or `"30s"`, read by purple-core into `Playback::seekStepSeconds`
