@@ -142,9 +142,15 @@ and `Hmac` for the key check. A file starts with a 32-byte header: the magic
 `PRC1`, version 1, two reserved bytes, a random 16-byte IV and the first 8
 bytes of `HMAC(key, "check")`. The counter for byte `n` of the content is the
 IV plus `n / 16`, so the mirror writes at any offset without rewriting what
-is around it. A file whose check does not match (the local key changed, for
-instance after every account logged out) is reported as written under
-another key and never decrypted into garbage.
+is around it. A write at an offset that was written before (the muxer
+patching a box size, any seek back) reuses that offset's keystream, so the
+difference of the two plaintexts there is exposed; these are a few known
+header bytes, never audio. A file whose check does not match (the local key
+changed, which in this tree happens only when the local data is started
+from scratch, such as a forgotten-passcode reset with no accounts) is
+reported as written under another key and never decrypted into garbage. A
+reset in the same run keeps the old key in memory until restart, so
+recordings made in between are unreadable at the next start.
 
 A manifest that does not read cleanly (another key, an unknown version,
 damage, or a file that exists but cannot be opened) is never trusted to say

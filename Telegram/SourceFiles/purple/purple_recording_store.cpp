@@ -924,7 +924,7 @@ void SendRecordingBinItem(
 				return;
 			}
 			auto options = Api::SendOptions();
-			if (viewOnce) {
+			if (viewOnce && strong->peer()->isUser()) {
 				options.ttlSeconds = std::numeric_limits<int>::max();
 			}
 			auto action = Api::SendAction(strong, options);
