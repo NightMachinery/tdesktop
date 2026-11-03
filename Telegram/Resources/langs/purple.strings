@@ -501,6 +501,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_round_float_pause" = "Play or pause";
 "lng_purple_round_float_close" = "Close";
 "lng_purple_video_message_size_about" = "Larger sizes look softer, because video messages are recorded at about 400 pixels. Actual size shows each video message pixel for pixel on this screen.";
+"lng_purple_seek_step" = "Seek step";
 "lng_purple_seek_back" = "Back {seconds} s";
 "lng_purple_seek_forward" = "Forward {seconds} s";
 "lng_purple_shortcuts_seek_backward" = "Seek back";

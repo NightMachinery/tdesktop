@@ -49,8 +49,8 @@ Rules (`SeekRules::SeekTarget`):
 
 The step is `[playback] seek_step` in `settings.toml`, `"5s"`, `"10s"`,
 `"15s"` or `"30s"`, read by purple-core into `Playback::seekStepSeconds`
-(any other value warns and keeps 10). Changing it relabels the buttons at
-once.
+(any other value warns and keeps 10). Settings > Advanced > Purple > Media
+playback > Seek step writes it. Changing it relabels the buttons at once.
 
 ## Upstream hooks
 

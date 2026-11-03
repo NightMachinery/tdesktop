@@ -293,6 +293,7 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"voice"_q, u"video"_q, u"round"_q },
 	});
 	AddVoiceQueueSetting(builder);
+	AddSeekStepSetting(builder);
 	builder.addButton({
 		.id = u"advanced/purple_video_message_size"_q,
 		.title = tr::lng_purple_video_message_size(),

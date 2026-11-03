@@ -15,10 +15,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_float.h"
 #include "media/player/media_player_instance.h"
+#include "settings/settings_builder.h"
+#include "ui/boxes/single_choice_box.h"
+#include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
 #include "ui/widgets/buttons.h"
+#include "window/window_session_controller.h"
 #include "styles/style_purple_media_playback.h"
+#include "styles/style_settings.h"
 
 #include <QtGui/QPainter>
 
@@ -51,6 +56,37 @@ rpl::lifetime Lifetime;
 	return (direction < 0)
 		? tr::lng_purple_seek_back(tr::now, lt_seconds, seconds)
 		: tr::lng_purple_seek_forward(tr::now, lt_seconds, seconds);
+}
+
+void SetStep(int seconds) {
+	const auto value = QString::fromStdString(
+		SeekRules::StepSetting(seconds));
+	WriteSettings([=](const QString &text) {
+		return SetTableString(
+			text,
+			SettingsFilePath(),
+			u"playback"_q,
+			u"seek_step"_q,
+			value);
+	}, u"the seek step"_q);
+}
+
+void ChooseStepBox(not_null<Ui::GenericBox*> box) {
+	auto options = std::vector<QString>();
+	for (const auto step : SeekRules::kSteps) {
+		options.push_back(tr::lng_seconds(tr::now, lt_count, step));
+	}
+	const auto initial = int(std::ranges::find(
+		SeekRules::kSteps,
+		SeekStepSeconds()) - begin(SeekRules::kSteps));
+	SingleChoiceBox(box, {
+		.title = tr::lng_purple_seek_step(),
+		.options = options,
+		.initialSelection = initial,
+		.callback = [=](int index) {
+			SetStep(SeekRules::kSteps[index]);
+		},
+	});
 }
 
 not_null<Ui::AbstractButton*> AddSeekButton(
@@ -233,6 +269,24 @@ auto AddFloatSeekButtons(not_null<Media::Player::Float*> floating)
 		return button;
 	};
 	return { add(-1), add(1) };
+}
+
+void AddSeekStepSetting(::Settings::Builder::SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	builder.addButton({
+		.id = u"advanced/purple_seek_step"_q,
+		.title = tr::lng_purple_seek_step(),
+		.st = &st::settingsButtonNoIcon,
+		.label = SeekStepValue() | rpl::map([](int step) {
+			return tr::lng_seconds(tr::now, lt_count, step);
+		}),
+		.onClick = [=] {
+			if (controller) {
+				controller->show(Box(ChooseStepBox));
+			}
+		},
+		.keywords = { u"purple"_q, u"seek"_q, u"rewind"_q, u"skip"_q },
+	});
 }
 
 } // namespace Purple

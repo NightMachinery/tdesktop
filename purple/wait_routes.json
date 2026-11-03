@@ -39,6 +39,9 @@
     "StartPeek": 3,
     "UpdateState": 2
   },
+  "Telegram/SourceFiles/purple/purple_media_seek.cpp": {
+    "SetTableString": 1
+  },
   "Telegram/SourceFiles/purple/purple_peek.cpp": {
     "UpdateState": 1
   },
