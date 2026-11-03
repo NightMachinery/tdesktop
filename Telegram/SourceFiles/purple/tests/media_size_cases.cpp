@@ -57,6 +57,15 @@ int main() {
 	expect(VideoMessageBubbleLimit(430, bound) == 0, "a round at the limit leaves upstream's");
 	expect(VideoMessageBubbleLimit(360, bound) == 0, "a smaller round leaves upstream's");
 
+	constexpr auto floatStock = 152;
+	constexpr auto margins = 24;
+	expect(FloatPlayerSide(floatStock, margins, 480, 1600) == 504, "the float keeps the in-chat side");
+	expect(FloatPlayerSide(floatStock, margins, 480, 800) == 400, "a small window caps the float at half its shorter side");
+	expect(FloatPlayerSide(floatStock, margins, 480, 200) == floatStock, "a tiny window never shrinks the float below stock");
+	expect(FloatPlayerSide(floatStock, margins, 240, 1600) == 264, "100% keeps the stock in-chat side");
+	expect(FloatPlayerSide(floatStock, margins, 100, 1600) == floatStock, "a small actual size keeps the stock float");
+	expect(FloatPlayerSide(floatStock, margins, 480, 0) == 504, "an unknown window does not clamp");
+
 	std::cout << (checks - failures) << '/' << checks << " media size checks passed\n";
 	return failures ? 1 : 0;
 }

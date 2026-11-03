@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class ClickHandler;
 class DocumentData;
+class QWidget;
 
 namespace HistoryView {
 class Element;
@@ -35,5 +36,10 @@ namespace Purple {
 	const HistoryView::Element *parent,
 	int maxWidth,
 	bool ephemeral);
+
+[[nodiscard]] int FloatPlayerSize(
+	const QWidget *parent,
+	const DocumentData *document,
+	int size);
 
 } // namespace Purple

@@ -67,6 +67,23 @@ fixed bound, so Purple reads exactly that width as "no limit". A chat whose
 room for the round is exactly 430px wide therefore shows the full size for
 that one width and may overflow it by the difference.
 
+## The floating round keeps its size
+
+When a playing round scrolls out of view it continues in the floating player.
+Upstream draws that at 128px; with Media playback > Keep the size when it
+floats (on by default) it is drawn at the in-chat side from "Video message
+size" instead, plus the float's shadow margins.
+
+- It is capped at half the shorter side of the window, so it never covers
+  most of a small window, and it is never smaller than upstream's float.
+- Off restores upstream's 128px.
+- The size is fixed when the float is created. Resizing the window
+  afterwards does not resize it; the next round that floats gets the new cap.
+- Docking to a corner and closing by dragging out work on the widget's own
+  size, so a larger float follows the same rules and needs a longer drag to
+  close.
+- Device-local, like the size: `purple-video-message-float-keep`.
+
 ## Upstream hooks
 
 Every hook is listed in [upstream_hooks.md](upstream_hooks.md), section
@@ -81,6 +98,9 @@ fails when a merge drops one of them.
 - `history/view/media/history_view_gif.cpp`, `Gif::countThumbSize` and
   `Gif::bubbleWidthLimit`: one early return each, through
   `Purple::VideoMessageThumbSize` and `Purple::VideoMessageBubbleWidthLimit`.
+- `media/player/media_player_float.cpp`, `Float::Float`: one line after the
+  stock size, `size = Purple::FloatPlayerSize(parent, document, size);`.
+  The shadow, frame and progress arc all follow `size` already.
 
 ## Tests
 
@@ -88,8 +108,9 @@ fails when a merge drops one of them.
   restart decision for every reason to decline.
 - `purple/tests/media_size_cases.cpp` (gate `cases-media-size`): the stored
   preference, the sides for every choice including Actual size, the column
-  clamp and the bubble limit.
+  clamp, the bubble limit and the float size with its window cap.
 - `purple/test_media_hooks.py` (gate `test_media_hooks`): the hook pins.
 - Needs a GUI check after a build: double-click a playing and a paused voice
   message and round, in a chat and in a replies thread; each size, Actual
-  size on a 1x and a 2x screen, a narrow window, and a round with a reply.
+  size on a 1x and a 2x screen, a narrow window, a round with a reply, and
+  the float with the toggle on and off in a large and a small window.

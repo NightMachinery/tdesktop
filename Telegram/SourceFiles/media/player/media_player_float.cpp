@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_float.h"
+#include "purple/hooks/media_playback.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -104,6 +105,7 @@ Float::Float(
 
 	auto margin = st::mediaPlayerFloatMargin;
 	auto size = 2 * margin + st::mediaPlayerFloatSize;
+	size = Purple::FloatPlayerSize(parent, document, size);
 	resize(size, size);
 
 	_roundPainter = std::make_unique<RoundPainter>(item);

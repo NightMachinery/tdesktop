@@ -31,16 +31,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "settings/settings_builder.h"
 #include "ui/style/style_core.h"
+#include "ui/widgets/buttons.h"
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
+#include "styles/style_media_player.h"
 #include "styles/style_settings.h"
+
+#include <QtWidgets/QWidget>
 
 namespace Purple {
 namespace {
 
 constexpr auto kVideoMessageScalePref = "purple-video-message-scale"_cs;
+constexpr auto kFloatKeepPref = "purple-video-message-float-keep"_cs;
 
 rpl::event_stream<> VideoMessageScaleChanges;
 
@@ -169,6 +174,30 @@ int VideoMessageSide(const DocumentData *document) {
 	return MediaRules::VideoMessageSide(percent, st::maxVideoMessageSize);
 }
 
+bool FloatKeepsSize() {
+	return Core::App().settings().readPref<bool>(kFloatKeepPref, true);
+}
+
+void SetFloatKeepsSize(bool keep) {
+	Core::App().settings().writePref<bool>(kFloatKeepPref, keep);
+	Core::App().saveSettingsDelayed();
+}
+
+int FloatPlayerSize(
+		const QWidget *parent,
+		const DocumentData *document,
+		int size) {
+	if (!FloatKeepsSize()) {
+		return size;
+	}
+	const auto window = parent ? parent->window()->size() : QSize();
+	return MediaRules::FloatPlayerSide(
+		size,
+		2 * st::mediaPlayerFloatMargin,
+		VideoMessageSide(document),
+		std::min(window.width(), window.height()));
+}
+
 QSize VideoMessageThumbSize(
 		const DocumentData *document,
 		const HistoryView::Element *parent,
@@ -217,6 +246,18 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 		},
 		.keywords = { u"purple"_q, u"video"_q, u"round"_q, u"size"_q },
 	});
+	const auto keep = builder.addButton({
+		.id = u"advanced/purple_video_message_float_keep"_q,
+		.title = tr::lng_purple_video_message_float_keep(),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::single(FloatKeepsSize()),
+		.keywords = { u"purple"_q, u"video"_q, u"round"_q, u"float"_q },
+	});
+	if (keep) {
+		keep->toggledValue() | rpl::filter([](bool value) {
+			return value != FloatKeepsSize();
+		}) | rpl::on_next(SetFloatKeepsSize, keep->lifetime());
+	}
 	builder.addDividerText(tr::lng_purple_video_message_size_about());
 	builder.addSkip();
 }

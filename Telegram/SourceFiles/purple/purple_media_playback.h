@@ -18,6 +18,8 @@ namespace Purple {
 [[nodiscard]] int VideoMessageScale();
 void SetVideoMessageScale(int percent);
 [[nodiscard]] int VideoMessageSide(const DocumentData *document);
+[[nodiscard]] bool FloatKeepsSize();
+void SetFloatKeepsSize(bool keep);
 
 void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder);
 

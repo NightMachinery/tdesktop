@@ -72,4 +72,10 @@ int VideoMessageBubbleLimit(int maxWidth, int stockLimit) {
 	return (maxWidth > stockLimit) ? maxWidth : 0;
 }
 
+int FloatPlayerSide(int stockSize, int margins, int side, int windowShortSide) {
+	const auto wanted = margins + side;
+	const auto room = (windowShortSide > 0) ? (windowShortSide / 2) : wanted;
+	return std::max(std::min(wanted, room), stockSize);
+}
+
 } // namespace Purple::MediaRules

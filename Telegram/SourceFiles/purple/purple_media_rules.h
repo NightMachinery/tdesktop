@@ -41,5 +41,10 @@ inline constexpr auto kVideoMessageActualText = std::string_view("actual");
 [[nodiscard]] int VideoMessageSide(int percent, int stockSide);
 [[nodiscard]] int VideoMessageThumbSide(int side, int widthMax, int optimalBound);
 [[nodiscard]] int VideoMessageBubbleLimit(int maxWidth, int stockLimit);
+[[nodiscard]] int FloatPlayerSide(
+	int stockSize,
+	int margins,
+	int side,
+	int windowShortSide);
 
 } // namespace Purple::MediaRules
