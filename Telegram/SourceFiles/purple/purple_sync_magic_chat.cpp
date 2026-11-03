@@ -16,6 +16,13 @@ int64_t Candidates(const SyncChatLookupInput &input) {
 	return int64_t(input.visible.size());
 }
 
+bool Usable(const SyncChatBinding &binding, std::vector<MagicChatCandidate> chats) {
+	chats.erase(std::remove_if(chats.begin(), chats.end(), [&](const MagicChatCandidate &chat) {
+		return SyncChatCandidateRejected(binding, chat.channelId);
+	}), chats.end());
+	return PickMagicChat(chats).has_value();
+}
+
 SyncDiagField Method(const QString &method) {
 	return SyncDiagCode(u"method"_q, method.toLower());
 }
@@ -74,7 +81,7 @@ SyncMagicFrame SyncMagicFrameOf(
 		frame.chat = result.chat;
 		break;
 	case SyncMagicResult::Kind::Wait:
-		frame.line = SyncMagicFrame::Line::Waiting;
+		frame.line = result.loading ? SyncMagicFrame::Line::Looking : SyncMagicFrame::Line::Waiting;
 		frame.retryAt = result.retryAt;
 		frame.telegram = result.telegram;
 		break;
@@ -441,9 +448,9 @@ void SyncMagicChat::planned(
 	const auto bound = binding.chat && binding.chat->kind == PeerTokenKind::Channel;
 	const auto missing = bound
 		? (input.boundState == SyncChatBoundState::Unknown)
-		: (binding.mode == SyncChatBindingMode::None && input.visible.empty());
-	// WHY: only complete lists prove a chat absent; upstream loads the archive only when asked, so the
-	// lookup pages it once per run before it plans.
+		: (binding.mode == SyncChatBindingMode::None && !Usable(binding, input.visible));
+	// WHY: only complete lists prove a chat absent, even with unusable magic chats in view; upstream
+	// loads the archive only when asked, so the lookup pages it once per run before it plans.
 	if (missing && !input.listsComplete && !_listsWaited) {
 		_listsWaited = true;
 		const auto weak = std::weak_ptr<int>(_guard);
@@ -485,7 +492,9 @@ void SyncMagicChat::listsLoading(uint64_t run, const SyncChatLookupInput &input)
 		SyncDiagReason(u"lists_loading"_q),
 		SyncDiagCount(u"count"_q, Candidates(input)),
 	});
-	finish(run, WaitUntil(_port->now() + kSyncMagicListsRetry));
+	auto result = WaitUntil(_port->now() + kSyncMagicListsRetry);
+	result.loading = true;
+	finish(run, result);
 }
 
 void SyncMagicChat::verify(

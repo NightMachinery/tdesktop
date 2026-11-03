@@ -28,9 +28,11 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
   wait ends as soon as a bound chat is loaded (`SyncMagicListsStepOf`) and
   lasts at most 60 seconds. Until both lists are complete, no chat is created
   and a bound chat missing from memory is not called gone; the lookup answers
-  a short wait of Purple's own (`lists_loading`) and looks again a minute
-  later. With complete lists and no magic chat it creates one; a bound chat
-  still missing is gone. No request outside upstream's layer is sent:
+  a short wait of Purple's own (`lists_loading`, shown as the Looking line)
+  and looks again a minute later. Magic chats in view that are all unusable
+  or rejected start the same wait; only complete lists make them
+  `magic_ineligible`. With complete lists and no magic chat it creates one;
+  a bound chat still missing is gone. No request outside upstream's layer is sent:
   `messages.getAllChats` is not in layer 232, and the server refuses it.
 - **Create**: `channels.createChannel` (megagroup), then archive
   (`folders.editPeerFolders`, folder 1) and mute

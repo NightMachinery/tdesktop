@@ -406,6 +406,36 @@ int main() {
 	}
 	{
 		auto port = std::make_shared<Fake>();
+		auto shared = Magic(70, true);
+		shared.facts.otherMembers = 2;
+		port->lists.visible = { shared };
+		port->partialLists = true;
+		auto chat = SyncMagicChat(port);
+		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
+		expect(result.kind == Kind::Wait && !result.telegram && port->listLoads == 1 && port->sent.isEmpty()
+			&& port->stored().problem == SyncChatProblem::None,
+			"lists: only an unusable magic chat in view still waits for the lists");
+		expect(SyncMagicFrameOf(result, port->stored()).line == SyncMagicFrame::Line::Looking,
+			"lists: a list wait shows the Looking line");
+		port->partialLists = false;
+		port->advance(kSyncMagicListsRetry + 1);
+		expect(port->listLoads == 2 && port->stored().problem == SyncChatProblem::MagicIneligible
+			&& !port->sent.contains(u"create"_q), "lists: complete lists make it ineligible, never a create");
+	}
+	{
+		auto port = std::make_shared<Fake>();
+		auto binding = SyncChatBinding();
+		binding.rejected[40] = port->clock;
+		port->file = *SerializeSyncChatBinding(binding);
+		port->lists.visible = { Magic(40, true) };
+		port->partialLists = true;
+		auto chat = SyncMagicChat(port);
+		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
+		expect(result.kind == Kind::Wait && port->listLoads == 1 && port->sent.isEmpty(),
+			"lists: a rejected chat in view still waits for the lists");
+	}
+	{
+		auto port = std::make_shared<Fake>();
 		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"INPUT_METHOD_INVALID_1_2"_q, 400));
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);

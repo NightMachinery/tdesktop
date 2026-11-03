@@ -90,6 +90,7 @@ struct SyncMagicResult {
 	bool show = false;
 	int64_t retryAt = 0;
 	bool telegram = false;
+	bool loading = false;
 	bool manual = false;
 };
 
