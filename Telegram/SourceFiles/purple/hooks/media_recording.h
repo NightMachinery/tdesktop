@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_system_media_controls.h"
 #include "data/data_audio_msg_id.h"
 
+#include <QtCore/QString>
+
 class QWidget;
 
 namespace Ui {
@@ -24,6 +26,8 @@ void DecoratePlayerSeek(
 	Fn<AudioMsgId::Type()> type);
 [[nodiscard]] int PlacePlayerSeek(not_null<Ui::RpWidget*> controls, int right);
 [[nodiscard]] int PlayerSeekWidth(not_null<const QWidget*> player);
+
+[[nodiscard]] QString SeekShortcutKeys(int direction);
 
 [[nodiscard]] bool HandleSystemMediaCommand(
 	base::Platform::SystemMediaControls::Command command);

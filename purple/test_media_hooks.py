@@ -24,14 +24,18 @@ RECORDING_HOOKS = [
     ('media/player/media_player_widget.cpp', 'void Widget::updateControlsGeometry(', 'Purple::PlacePlayerSeek('),
     ('media/player/media_player_widget.cpp', 'int Widget::getTimeRight(', 'Purple::PlayerSeekWidth('),
     ('media/system_media_controls_manager.cpp', 'SystemMediaControlsManager::SystemMediaControlsManager(', 'Purple::HandleSystemMediaCommand('),
+    ('core/shortcuts.cpp', 'void Manager::fillDefaults(', 'set(Purple::SeekShortcutKeys(-1)  , Command::MediaSeekBackward);'),
+    ('core/shortcuts.cpp', 'void Manager::fillDefaults(', 'set(Purple::SeekShortcutKeys(1)   , Command::MediaSeekForward);'),
+    ('core/shortcuts.cpp', 'const auto AutoRepeatCommands = ', 'Command::MediaSeekBackward,'),
+    ('core/shortcuts.cpp', 'const auto AutoRepeatCommands = ', 'Command::MediaSeekForward,'),
+    ('core/shortcuts.cpp', 'const auto MediaCommands = ', 'Command::MediaSeekBackward,'),
+    ('core/shortcuts.cpp', 'const auto MediaCommands = ', 'Command::MediaSeekForward,'),
 ]
 SHORTCUT_LINES = [
     ('core/shortcuts.h', 'MediaSeekBackward,'),
     ('core/shortcuts.h', 'MediaSeekForward,'),
     ('core/shortcuts.cpp', '{ u"media_seek_backward"_q           , Command::MediaSeekBackward },'),
     ('core/shortcuts.cpp', '{ u"media_seek_forward"_q            , Command::MediaSeekForward },'),
-    ('core/shortcuts.cpp', 'set(u"alt+shift+left"_q          , Command::MediaSeekBackward);'),
-    ('core/shortcuts.cpp', 'set(u"alt+shift+right"_q         , Command::MediaSeekForward);'),
     ('settings/sections/settings_shortcuts.cpp', '{ C::MediaSeekBackward, tr::lng_purple_shortcuts_seek_backward() },'),
     ('settings/sections/settings_shortcuts.cpp', '{ C::MediaSeekForward, tr::lng_purple_shortcuts_seek_forward() },'),
 ]

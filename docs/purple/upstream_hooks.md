@@ -1547,20 +1547,31 @@ First Purple edit in this file.
 - The `commandRequests` handler in the constructor: one early return through
   `Purple::HandleSystemMediaCommand`, only when no video delegate is set. It
   takes skip backward and forward for the active audio track and returns
-  false, so upstream runs unchanged, for every other command.
+  false, so upstream runs unchanged, for every other command. This does
+  change upstream for audio skips: the step instead of upstream's 15 s, a
+  paused track stays paused, and forward stops one second before the end.
+  A track Purple declines (not current, unknown length) still gets
+  upstream's skip.
 
 **`Telegram/SourceFiles/core/shortcuts.h`**: +2 -0. First Purple edit in this
 file.
 - `Command::MediaSeekBackward` and `Command::MediaSeekForward`, after
   `MediaNext`. Commands are stored by name, never by number.
 
-**`Telegram/SourceFiles/core/shortcuts.cpp`**: +4 -0. First Purple edit in
+**`Telegram/SourceFiles/core/shortcuts.cpp`**: +9 -0. First Purple edit in
 this file.
+- The facade include, after the file's own header.
+- `AutoRepeatCommands`: both seek commands, so holding a key repeats it.
+- `MediaCommands`: both seek commands, so their keys are switched on only
+  while the player is shown (`ToggleMediaShortcuts`) and never taken from
+  text fields, the message list or the media viewer with nothing loaded.
 - `CommandByName`: `media_seek_backward` and `media_seek_forward`, which makes
   them bindable in the custom shortcuts file.
-- `Manager::fillDefaults`: `alt+shift+left` and `alt+shift+right`, which
-  upstream binds to nothing. The handler is Purple's own
-  `Shortcuts::Requests()` subscription, so no handler hook is needed.
+- `Manager::fillDefaults`: `set(Purple::SeekShortcutKeys(-1 or 1), ...)`.
+  Purple picks `alt+shift+left/right` on Windows and Linux and
+  `ctrl+alt+left/right` (Command+Option) on macOS, where Option+Shift+Arrow
+  is word selection; upstream binds none of these. The handler is Purple's
+  own `Shortcuts::Requests()` subscription, so no handler hook is needed.
 
 **`Telegram/SourceFiles/settings/sections/settings_shortcuts.cpp`**: +2 -0.
 First Purple edit in this file.

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_seek_rules.h"
 
+#include "base/platform/base_platform_info.h"
 #include "core/shortcuts.h"
 #include "lang/lang_keys.h"
 #include "media/audio/media_audio.h"
@@ -164,30 +165,28 @@ int SeekStepSeconds() {
 }
 
 bool SeekBy(AudioMsgId::Type type, int direction) {
+	using Action = SeekRules::SeekAction;
 	const auto player = Media::Player::instance();
 	const auto state = player->getState(type);
-	if (!state.id
-		|| state.id != player->current(type)
-		|| Media::Player::IsStoppedOrStopping(state.state)
-		|| (state.frequency <= 0)
-		|| (state.length <= 0)) {
-		return false;
+	const auto plan = SeekRules::PlanSeek({
+		.current = state.id && (state.id == player->current(type)),
+		.stopped = Media::Player::IsStoppedOrStopping(state.state),
+		.paused = Media::Player::IsPausedOrPausing(state.state),
+		.position = state.position,
+		.length = state.length,
+		.frequency = state.frequency,
+	}, direction, SeekStepSeconds());
+	if (plan.action == Action::SeekPaused) {
+		player->updateSeeking(type, plan.progress);
+	} else if (plan.action == Action::SeekPlaying) {
+		player->finishSeeking(type, plan.progress);
 	}
-	const auto duration = (state.length * 1000LL) / state.frequency;
-	const auto target = SeekRules::SeekTarget(
-		(state.position * 1000LL) / state.frequency,
-		duration,
-		direction,
-		SeekStepSeconds());
-	if (target && duration > 0) {
-		const auto progress = double(*target) / double(duration);
-		if (Media::Player::IsPausedOrPausing(state.state)) {
-			player->updateSeeking(type, progress);
-		} else {
-			player->finishSeeking(type, progress);
-		}
-	}
-	return true;
+	return (plan.action != Action::Decline);
+}
+
+QString SeekShortcutKeys(int direction) {
+	return QString::fromStdString(
+		SeekRules::SeekShortcutKeys(direction, Platform::IsMac()));
 }
 
 void StartMediaSeek() {

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/shortcuts.h"
+#include "purple/hooks/media_recording.h"
 
 #include "base/platform/base_platform_info.h"
 #include "base/event_filter.h"
@@ -49,6 +50,8 @@ std::array<Qt::Key, kChatSwitchSpecialKeys.size()> ChatSwitchKeyPressHandled;
 const auto AutoRepeatCommands = base::flat_set<Command>{
 	Command::MediaPrevious,
 	Command::MediaNext,
+	Command::MediaSeekBackward,
+	Command::MediaSeekForward,
 	Command::ChatPrevious,
 	Command::ChatNext,
 	Command::ChatFirst,
@@ -62,6 +65,8 @@ const auto MediaCommands = base::flat_set<Command>{
 	Command::MediaStop,
 	Command::MediaPrevious,
 	Command::MediaNext,
+	Command::MediaSeekBackward,
+	Command::MediaSeekForward,
 };
 
 const auto SupportCommands = base::flat_set<Command>{
@@ -513,8 +518,8 @@ void Manager::fillDefaults() {
 	set(u"media stop"_q              , Command::MediaStop);
 	set(u"media previous"_q          , Command::MediaPrevious);
 	set(u"media next"_q              , Command::MediaNext);
-	set(u"alt+shift+left"_q          , Command::MediaSeekBackward);
-	set(u"alt+shift+right"_q         , Command::MediaSeekForward);
+	set(Purple::SeekShortcutKeys(-1)  , Command::MediaSeekBackward);
+	set(Purple::SeekShortcutKeys(1)   , Command::MediaSeekForward);
 
 	set(u"ctrl+f"_q                  , Command::Search);
 	set(u"search"_q                  , Command::Search);

@@ -41,4 +41,40 @@ std::optional<std::int64_t> SeekTarget(
 	return target;
 }
 
+std::optional<std::int64_t> ToMs(std::int64_t value, int frequency) {
+	if (frequency <= 0
+		|| value < 0
+		|| value / frequency > kLongestMs / 1000) {
+		return std::nullopt;
+	}
+	const auto whole = value / frequency;
+	return whole * 1000 + ((value % frequency) * 1000) / frequency;
+}
+
+SeekPlan PlanSeek(const SeekFacts &facts, int direction, int stepSeconds) {
+	const auto duration = ToMs(facts.length, facts.frequency);
+	const auto position = facts.stopped
+		? duration
+		: ToMs(facts.position, facts.frequency);
+	if (!facts.current || !duration || !*duration || !position) {
+		return {};
+	}
+	const auto from = *position;
+	const auto target = SeekTarget(from, *duration, direction, stepSeconds);
+	if (!target) {
+		return { .action = SeekAction::Consume };
+	}
+	return {
+		.action = (facts.paused && !facts.stopped)
+			? SeekAction::SeekPaused
+			: SeekAction::SeekPlaying,
+		.progress = double(*target) / double(*duration),
+	};
+}
+
+std::string SeekShortcutKeys(int direction, bool mac) {
+	const auto arrow = (direction < 0) ? "left" : "right";
+	return std::string(mac ? "ctrl+alt+" : "alt+shift+") + arrow;
+}
+
 } // namespace Purple::SeekRules
