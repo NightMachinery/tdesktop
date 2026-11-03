@@ -2,6 +2,7 @@
 
 #include "purple/purple_sync_auto.h"
 #include "purple/purple_sync_config_flow.h"
+#include "purple/purple_sync_chat_io.h"
 #include "rpl/producer.h"
 
 namespace Main { class Session; }
@@ -20,5 +21,18 @@ bool MoveSyncStateToBoundChat(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<> AutomaticSettingsSyncChanges();
 // Logs a NeedsReview refusal with its reason code; other statuses log nothing.
 void NoteSyncConfigRefusal(const SyncConfigReview &review, bool manual);
+
+enum class SyncFirstUseOutcome { Waiting, Asking, Published, Joined, Failed, NotNeeded };
+struct SyncFirstUseResult {
+	SyncFirstUseOutcome outcome = SyncFirstUseOutcome::Failed;
+	QString text;
+};
+// Decides on `inventory`, or on a fresh scan of the bound chat; `choice` answers an earlier Ask.
+void RunSyncFirstUse(
+	not_null<Main::Session*> session,
+	std::optional<DesktopSyncChatInventory> inventory,
+	SyncFirstUseChoice choice,
+	Fn<void(SyncFirstUseResult)> done);
+[[nodiscard]] std::optional<SyncFirstUseResult> SyncFirstUseResultOf(not_null<Main::Session*> session);
 
 }

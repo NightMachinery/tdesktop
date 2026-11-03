@@ -114,12 +114,15 @@ struct SetupBoxState {
 	Ui::RoundButton *close = nullptr;
 	Ui::SlideWrap<Ui::SettingsButton> *action = nullptr;
 	Ui::SlideWrap<Ui::SettingsButton> *undoButton = nullptr;
+	Ui::SlideWrap<Ui::SettingsButton> *useSynced = nullptr;
+	Ui::SlideWrap<Ui::SettingsButton> *useThisDevice = nullptr;
 	Action currentAction = Action::None;
 	uint64_t scanned = 0;
 	uint64_t generation = 0;
 	int selectedIndex = -1;
 	bool running = false;
 	bool publishing = false;
+	bool asking = false;
 };
 
 std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
@@ -317,9 +320,15 @@ void RefreshButtons(SetupBoxState &state) {
 	state.undoButton->toggle(
 		!busy && LastUndoFor(state).has_value(),
 		anim::type::instant);
+	const auto asking = !busy && available && state.asking && state.completed.has_value();
+	if (state.useSynced && state.useThisDevice) {
+		state.useSynced->toggle(asking, anim::type::instant);
+		state.useThisDevice->toggle(asking, anim::type::instant);
+	}
 }
 
 void ClearReview(SetupBoxState &state) {
+	state.asking = false;
 	state.completed.reset();
 	state.recovery.reset();
 	state.review.reset();
@@ -646,6 +655,59 @@ void ConfirmAction(
 	}));
 }
 
+void RunFirstUse(
+		not_null<Ui::GenericBox*> box,
+		SetupBoxState *state,
+		SyncFirstUseChoice choice) {
+	const auto session = state->selectedSession.get();
+	if (!SelectedAvailable(*state) || !state->route || !state->completed || !RouteCurrent(*state, session)) {
+		ClearReview(*state);
+		SetStatus(*state, tr::lng_purple_sync_first_failed(tr::now));
+		return;
+	}
+	const auto inventory = DesktopSyncChatInventory{ *state->route, *state->completed };
+	const auto origin = state->selectedSession;
+	const auto generation = ++state->generation;
+	state->asking = false;
+	state->publishing = true;
+	SetStatus(*state, tr::lng_purple_sync_first_running(tr::now));
+	RunSyncFirstUse(session, inventory, choice, crl::guard(box, [=](SyncFirstUseResult result) {
+		if (!state->publishing || state->generation != generation || state->selectedSession.get() != origin.get()) {
+			return;
+		}
+		state->publishing = false;
+		if (result.outcome == SyncFirstUseOutcome::Asking) {
+			state->asking = true;
+			SetStatus(*state, result.text);
+		} else if (result.outcome == SyncFirstUseOutcome::Waiting
+			|| result.outcome == SyncFirstUseOutcome::Failed) {
+			SetStatus(*state, result.text);
+		} else {
+			StartCheck(box, state, CheckFollowup::None, result.text);
+		}
+	}));
+}
+
+[[nodiscard]] bool FirstUse(
+		not_null<Ui::GenericBox*> box,
+		SetupBoxState *state,
+		const SyncAccountInventoryResult &inventory) {
+	const auto session = state->selectedSession.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	if (!bound || !target || !state->route || state->route->peer.chat != *bound) { return false; }
+	const auto first = ReviewSyncFirstUse(target->files, inventory);
+	if (first.need == SyncFirstUseNeed::None || !first.action) { return false; }
+	state->completed = inventory;
+	if (*first.action == SyncFirstUseAction::Ask) {
+		state->asking = true;
+		SetStatus(*state, tr::lng_purple_sync_first_ask(tr::now));
+	} else {
+		RunFirstUse(box, state, SyncFirstUseChoice::None);
+	}
+	return true;
+}
+
 void OnInventory(
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
@@ -670,6 +732,9 @@ void OnInventory(
 			share->request,
 			share->prefix,
 			u"Sharing the chosen settings to the selected sync chat."_q);
+		return;
+	}
+	if (followup == CheckFollowup::None && FirstUse(box, state, result)) {
 		return;
 	}
 	auto recovery = InspectSyncAccountRecovery(*session, &result);
@@ -1117,6 +1182,18 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 				container,
 				rpl::single(u"Undo last update"_q),
 				st::settingsButtonNoIcon)));
+	state->useSynced = container->add(object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+		container, ::Settings::CreateButtonWithIcon(container, tr::lng_purple_sync_first_synced(), st::settingsButtonNoIcon)));
+	state->useThisDevice = container->add(object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+		container, ::Settings::CreateButtonWithIcon(container, tr::lng_purple_sync_first_this_device(), st::settingsButtonNoIcon)));
+	state->useSynced->hide(anim::type::instant);
+	state->useThisDevice->hide(anim::type::instant);
+	state->useSynced->entity()->setClickedCallback([=] {
+		if (state->asking && !Busy(*state)) { RunFirstUse(box, state, SyncFirstUseChoice::Synced); }
+	});
+	state->useThisDevice->entity()->setClickedCallback([=] {
+		if (state->asking && !Busy(*state)) { RunFirstUse(box, state, SyncFirstUseChoice::ThisDevice); }
+	});
 	state->recoveryButton = container->add(object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
 		container, ::Settings::CreateButtonWithIcon(container, tr::lng_purple_sync_recovery(), st::settingsButtonNoIcon)));
 	state->recoveryButton->hide(anim::type::instant);

@@ -21,13 +21,16 @@
 #include "purple/purple_sync_auto_transport.h"
 #include "purple/purple_sync_config_apply.h"
 #include "purple/purple_sync_config_post.h"
+#include "purple/purple_sync_config_publish.h"
 #include "purple/purple_sync_config_review.h"
+#include "purple/purple_sync_config_text.h"
 #include "purple/purple_sync_config_upload.h"
 #include "purple/purple_sync_diag.h"
 #include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_request_sender.h"
 #include "purple/purple_sync_setup_box.h"
 
+#include <QtCore/QDateTime>
 #include <QtCore/QFileInfo>
 #include <QtCore/QUuid>
 
@@ -53,6 +56,12 @@ public:
 	bool Running(const SyncAutoRecord &record) const {
 		return _inFlight && _store && record.active && record.session == _sessionId && record.ticket == _plan.ticket;
 	}
+	void FirstUse(std::optional<DesktopSyncChatInventory> inventory, SyncFirstUseChoice choice,
+		Fn<void(SyncFirstUseResult)> done, bool manual);
+	[[nodiscard]] std::optional<SyncFirstUseResult> FirstUseResult() const {
+		return _firstRunning ? std::nullopt : _firstUse;
+	}
+	[[nodiscard]] bool FirstUseRunning() const { return _firstRunning; }
 
 private:
 	bool Current() const;
@@ -68,6 +77,11 @@ private:
 		std::optional<SyncAutoInventory> inventory = std::nullopt);
 	void Check(const SyncAutoPlan &plan);
 	bool PauseOnForeignSpace(PeerToken chat);
+	bool NoStateEvent(SyncAutoEvent event);
+	void RetireCarry();
+	void FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual);
+	void FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review);
+	void FirstUseFinish(SyncFirstUseOutcome outcome, QString text = QString());
 	void ReadNext();
 	void Send(const SyncAutoPlan &plan);
 	[[nodiscard]] bool EffectCurrent(const SyncAutoPlan &plan) const;
@@ -108,6 +122,11 @@ private:
 	std::optional<AccountSettingsOpenTarget> _pendingOpening;
 	QByteArray _pendingIdentity;
 	QByteArray _savedIdentity;
+	std::unique_ptr<SyncAccountInventory> _firstScan;
+	std::unique_ptr<SyncConfigPublish> _firstPublish;
+	std::vector<Fn<void(SyncFirstUseResult)>> _firstDone;
+	std::optional<SyncFirstUseResult> _firstUse;
+	bool _firstRunning = false;
 
 };
 
@@ -172,6 +191,7 @@ bool AutoSession::Open() {
 	_opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
 	const auto target = AccountSyncInspectionTarget(session);
 	if (!_opening || !target || !SettingsStartupOwner()) { return false; }
+	RetireCarry();
 	const auto recovery = InspectSyncAccountRecovery(*session);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Bound) { return false; }
 	_token = AccountSyncBindingToken(session->account());
@@ -299,7 +319,7 @@ bool AutoSession::Event(SyncAutoEvent event) {
 		SyncMagicLookup(session, SyncMagicTrigger::Auto, false);
 		return false;
 	}
-	if (!Open()) { Stop(); return false; }
+	if (!Open()) { Stop(); return NoStateEvent(event); }
 	const auto facts = Facts();
 	if (!facts) { Hold(SyncAutoReason::StateChanged); return false; }
 	const auto plan = _store->Transition(*facts, event, int64_t(base::unixtime::now()));
@@ -514,11 +534,202 @@ bool AutoSession::PauseOnForeignSpace(PeerToken chat) {
 	const auto magic = SyncMagicChatOf(not_null{ _session.get() });
 	if (!magic || chat == PeerToken{} || !_store || !_store->local().state()
 		|| !SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {
+		_firstUse.reset();
 		return false;
 	}
-	magic->raise(SyncChatProblem::SpaceMismatch);
-	Hold(SyncAutoReason::SyncChatProblem);
+	const auto lease = SyncChatIoForPost(_session.get(), chat);
+	if (!lease) {
+		Hold(SyncAutoReason::SyncChatNotResolved);
+		return true;
+	}
+	auto inventory = DesktopSyncChatInventory{ lease->route, _inventory };
+	Stop();
+	crl::on_main([weak = base::make_weak(this), inventory = std::move(inventory)]() mutable {
+		if (const auto self = weak.get()) {
+			self->FirstUse(std::move(inventory), SyncFirstUseChoice::None, nullptr, false);
+		}
+	});
 	return true;
+}
+
+void AutoSession::RetireCarry() {
+	const auto session = _session.get();
+	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	if (!target || !SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()
+		|| !SyncCarryLeftoversPresent(target->files.syncDirectory)) { return; }
+	const auto date = QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd-HHmmss"_q);
+	const auto retired = RetireSyncCarryLeftovers(target->files.syncDirectory, date);
+	SyncDiag(u"sync_chat"_q, u"migration"_q, {
+		SyncDiagCode(u"step"_q, u"carry"_q),
+		SyncDiagCode(u"outcome"_q, retired ? u"ok"_q : u"error"_q) });
+}
+
+bool AutoSession::NoStateEvent(SyncAutoEvent event) {
+	const auto session = _session.get();
+	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	if (!target || !SyncMagicBound(session)) { return false; }
+	RetireCarry();
+	const auto recovery = InspectSyncAccountRecovery(*session);
+	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup) {
+		return false;
+	} else if ((event == SyncAutoEvent::Enable || event == SyncAutoEvent::Disable)
+		&& !SetDesktopSyncAutoBeforeState(target->files, _account, event == SyncAutoEvent::Enable)) {
+		return false;
+	} else if (event != SyncAutoEvent::Disable) {
+		FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);
+	}
+	Changes.fire({});
+	return true;
+}
+
+void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, SyncFirstUseChoice choice,
+		Fn<void(SyncFirstUseResult)> done, bool manual) {
+	if (done) { _firstDone.push_back(std::move(done)); }
+	if (_firstRunning) { return; }
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	if (!session || !bound || _inFlight) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	_firstRunning = true;
+	Changes.fire({});
+	if (inventory) {
+		FirstUseRun(std::move(*inventory), choice, manual);
+		return;
+	}
+	const auto lease = SyncChatIoForPost(session, *bound);
+	if (!lease || !lease->current || !lease->current()) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	const auto weak = base::make_weak(this);
+	_firstScan = std::make_unique<SyncAccountInventory>(not_null{ session }, lease->route, nullptr,
+		[weak, choice, manual](DesktopSyncChatInventory result) {
+			const auto self = weak.get();
+			if (!self || !self->_firstRunning) { return; }
+			crl::on_main([weak, choice, manual, result = std::move(result)]() mutable {
+				if (const auto self = weak.get(); self && self->_firstRunning) {
+					self->_firstScan.reset();
+					self->FirstUseRun(std::move(result), choice, manual);
+				}
+			});
+		}, lease->current);
+	_firstScan->Start();
+}
+
+void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual) {
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	if (!session || !bound || *bound != inventory.route.peer.chat || !target
+		|| inventory.inventory.status != SyncAccountInventoryStatus::Complete) {
+		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		return;
+	}
+	RetireCarry();
+	const auto review = ReviewSyncFirstUse(target->files, inventory.inventory, choice);
+	if (review.need == SyncFirstUseNeed::None) { FirstUseFinish(SyncFirstUseOutcome::NotNeeded); return; }
+	if (!review.action) {
+		NoteSyncConfigRefusal(ReviewSyncConfig(session->account(), *session, inventory.inventory, *bound), manual);
+		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		return;
+	}
+	const auto action = *review.action;
+	SyncDiag(u"sync_chat"_q, u"first_use"_q, {
+		SyncDiagCode(u"trigger"_q, manual ? u"manual"_q : u"auto"_q),
+		SyncDiagCode(u"action"_q, action == SyncFirstUseAction::Wait ? u"wait"_q
+			: action == SyncFirstUseAction::Publish ? u"publish"_q
+			: action == SyncFirstUseAction::Join ? u"join"_q
+			: action == SyncFirstUseAction::JoinSilently ? u"join_silently"_q : u"ask"_q),
+		SyncDiagCode(u"choice"_q, choice == SyncFirstUseChoice::Synced ? u"synced"_q
+			: choice == SyncFirstUseChoice::ThisDevice ? u"this_device"_q : u"none"_q) });
+	if (action == SyncFirstUseAction::Wait || action == SyncFirstUseAction::Ask) {
+		FirstUseFinish(action == SyncFirstUseAction::Wait ? SyncFirstUseOutcome::Waiting : SyncFirstUseOutcome::Asking);
+		return;
+	}
+	if (review.need == SyncFirstUseNeed::OtherSpace) {
+		Stop();
+		const auto recovery = InspectSyncAccountRecovery(*session, &inventory.inventory);
+		const auto archived = recovery && StartAgainSyncAccount(*session, *recovery, true, false, true).ready;
+		SyncDiag(u"sync_chat"_q, u"first_use"_q, {
+			SyncDiagCode(u"step"_q, u"archive"_q),
+			SyncDiagCode(u"outcome"_q, archived ? u"ok"_q : u"error"_q) });
+		if (!archived) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	}
+	const auto publish = (action == SyncFirstUseAction::Publish)
+		|| (action == SyncFirstUseAction::JoinSilently && !review.sameBytes);
+	const auto chat = inventory.route.peer.chat;
+	const auto weak = base::make_weak(this);
+	_firstPublish = std::make_unique<SyncConfigPublish>(session->account(), *session, inventory,
+		SyncConfigSendQueueOf(not_null{ session }, chat), SyncConfigPostsStarted(not_null{ session }, chat),
+		[weak, publish, inventory, review](SyncConfigPublishResult result) {
+			crl::on_main([weak, publish, inventory, review, result] {
+				const auto self = weak.get();
+				if (!self || !self->_firstRunning) { return; }
+				self->_firstPublish.reset();
+				SyncDiag(u"sync_chat"_q, u"first_use"_q, {
+					SyncDiagCode(u"step"_q, publish ? u"publish"_q : u"join"_q),
+					SyncDiagCode(u"outcome"_q, (result.status == SyncConfigPublishStatus::Confirmed
+						|| result.status == SyncConfigPublishStatus::AlreadySynced) ? u"ok"_q : u"error"_q) });
+				const auto sent = (result.status == SyncConfigPublishStatus::Confirmed
+					|| result.status == SyncConfigPublishStatus::AlreadySynced);
+				if (publish && review.action == SyncFirstUseAction::JoinSilently) {
+					self->FirstUseFinish(sent ? SyncFirstUseOutcome::Joined : SyncFirstUseOutcome::Failed,
+						sent ? tr::lng_purple_sync_first_joined_same(tr::now) : QString());
+				} else if (publish) {
+					self->FirstUseFinish(sent ? SyncFirstUseOutcome::Published : SyncFirstUseOutcome::Failed);
+				} else if (result.status != SyncConfigPublishStatus::AlreadySynced) {
+					self->FirstUseFinish(SyncFirstUseOutcome::Failed);
+				} else {
+					self->FirstUseJoined(inventory, review);
+				}
+			});
+		}, publish ? review.request : SyncConfigPublishRequest(), std::nullopt,
+		[weak, chat] {
+			const auto self = weak.get();
+			const auto session = self ? self->_session.get() : nullptr;
+			return session && SyncMagicBound(session) == chat;
+		}, !publish);
+	_firstPublish->Start();
+}
+
+void AutoSession::FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review) {
+	const auto session = _session.get();
+	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	const auto local = target ? ReadSyncSettingsFile(target->files) : SyncSettingsFile();
+	const auto current = session ? ReviewAccountTransfer(session,
+		local.status == SyncSettingsFileStatus::Present ? local.text : QByteArray("version = 2\n")) : std::nullopt;
+	if (!session || !current) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	const auto applied = ApplySyncFirstUseJoin(session->account(), *session, inventory.inventory,
+		review.headKey, *current, inventory.route.peer.chat);
+	NoteAutomaticSyncApply(session, applied);
+	SyncDiag(u"sync_chat"_q, u"first_use"_q, {
+		SyncDiagCode(u"step"_q, u"apply"_q),
+		SyncDiagCode(u"outcome"_q, applied.status == SyncConfigApplyStatus::Applied ? u"ok"_q : u"error"_q) });
+	if (applied.status != SyncConfigApplyStatus::Applied) {
+		FirstUseFinish(SyncFirstUseOutcome::Failed, SyncConfigApplyFailureText(applied));
+		return;
+	}
+	FirstUseFinish(SyncFirstUseOutcome::Joined, !applied.wroteFile ? tr::lng_purple_sync_first_joined_same(tr::now)
+		: applied.undoAvailable ? tr::lng_purple_sync_first_joined(tr::now)
+		: tr::lng_purple_sync_first_joined_new(tr::now));
+}
+
+void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text) {
+	_firstRunning = false;
+	_firstScan.reset();
+	_firstPublish.reset();
+	if (text.isEmpty()) {
+		text = (outcome == SyncFirstUseOutcome::Waiting) ? tr::lng_purple_sync_first_wait(tr::now)
+			: (outcome == SyncFirstUseOutcome::Asking) ? tr::lng_purple_sync_first_ask(tr::now)
+			: (outcome == SyncFirstUseOutcome::Published) ? tr::lng_purple_sync_first_published(tr::now)
+			: (outcome == SyncFirstUseOutcome::Failed) ? tr::lng_purple_sync_first_failed(tr::now)
+			: QString();
+	}
+	const auto result = SyncFirstUseResult{ outcome, text };
+	_firstUse = result;
+	Changes.fire({});
+	for (const auto &done : base::take(_firstDone)) { done(result); }
+	const auto session = _session.get();
+	if (session && (outcome == SyncFirstUseOutcome::Published || outcome == SyncFirstUseOutcome::Joined)
+		&& AutomaticSettingsSyncEnabled(session)) {
+		Event(SyncAutoEvent::SessionReady);
+	}
 }
 
 void AutoSession::ReadNext() {
@@ -779,6 +990,12 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 	}
 	if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }
 	const auto executor = Sessions.find(session.get());
+	if (executor != Sessions.end() && executor->second->FirstUseRunning()) {
+		return tr::lng_purple_auto_running(tr::now);
+	} else if (const auto first = SyncFirstUseResultOf(session)) {
+		if (first->outcome == SyncFirstUseOutcome::Waiting) { return tr::lng_purple_auto_first_wait(tr::now); }
+		if (first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }
+	}
 	const auto failure = executor != Sessions.end() && executor->second->FailureReason() != SyncAutoReason::None
 		? executor->second->FailureReason() : record.held;
 	if (failure == SyncAutoReason::StateChanged) { return tr::lng_purple_auto_local_failure(tr::now); }
@@ -808,6 +1025,19 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 }
 
 rpl::producer<> AutomaticSettingsSyncChanges() { return Changes.events(); }
+
+void RunSyncFirstUse(
+		not_null<Main::Session*> session,
+		std::optional<DesktopSyncChatInventory> inventory,
+		SyncFirstUseChoice choice,
+		Fn<void(SyncFirstUseResult)> done) {
+	For(session).FirstUse(std::move(inventory), choice, std::move(done), true);
+}
+
+std::optional<SyncFirstUseResult> SyncFirstUseResultOf(not_null<Main::Session*> session) {
+	const auto i = Sessions.find(session.get());
+	return (i != Sessions.end()) ? i->second->FirstUseResult() : std::nullopt;
+}
 
 void NoteSyncConfigRefusal(const SyncConfigReview &review, bool manual) {
 	if (review.status != SyncConfigReviewStatus::NeedsReview) { return; }

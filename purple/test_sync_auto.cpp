@@ -888,12 +888,80 @@ void CasAndOpaque() {
 	f.store = std::make_unique<DesktopSyncAutoStore>(f.files, f.key, f.token, [&] { return f.current; });
 	CHECK(!f.store->Open());
 }
+
+SyncAccountInventoryResult CloudInventory(const Fixture &f) {
+	auto scan = SyncHistoryScanResult(); scan.status = SyncHistoryScanStatus::Complete;
+	auto read = SyncCandidateReadResult();
+	for (const auto &[id, bytes] : f.cloud) {
+		scan.candidateIds.push_back(id);
+		auto candidate = ClassifySyncCandidate(id, bytes);
+		candidate.documentId = uint64_t(id) + 5000; candidate.editDate = uint64_t(f.now);
+		read.records.push_back(candidate);
+	}
+	read.status = AggregateSyncCandidateRead(read.records);
+	return FinishSyncAccountInventory(uint64_t(f.key.userId), scan, read);
+}
+
+void FirstUseJoinAppliesHead() {
+	for (const auto local : { T0, QByteArray("version = 2\n") }) {
+		for (const auto known : { true, false }) {
+			auto f = Fixture(); f.Open(); f.Local(local);
+			f.Remote(T2, false);
+			f.store.reset();
+			Config = f.config.get(); Account = f.key; Token = f.token;
+			auto session = Main::Session(); auto account = Main::Account();
+			const auto inventory = CloudInventory(f);
+			const auto head = Version(f.cloud.begin()->second).key;
+			const auto current = f.config->reviewTransfer(f.key, ReadSyncSettingsFile(f.files).text);
+			CHECK(current);
+			if (!current) { continue; }
+			const auto result = ApplySyncFirstUseJoin(account, session, inventory,
+				known ? std::optional(head) : std::nullopt, *current, PeerToken{});
+			const auto defaults = (local != T0);
+			CHECK((result.status == SyncConfigApplyStatus::Applied) == known);
+			CHECK(ReadSettingsFileInput(f.files.settings).bytes == (known ? T2 : local));
+			if (known) {
+				CHECK(result.wroteFile && result.undoAvailable);
+				CHECK(!QDir(f.files.history).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).isEmpty());
+			}
+			std::printf("FIRST_USE_JOIN defaults=%d known=%d applied=%d\n", int(defaults), int(known),
+				int(result.status == SyncConfigApplyStatus::Applied));
+		}
+	}
+}
+
+void AutoBeforeState() {
+	auto temp = QTemporaryDir();
+	Put(temp.filePath(u"settings.toml"_q), T0);
+	auto config = DesktopAccountConfig(temp.path());
+	const auto key = AccountKey{ 0, 202 };
+	config.start({ { { 0, 101 }, false, false }, { key, false, false } }, AccountKey{ 0, 101 });
+	const auto files = *config.files(key);
+	Put(files.settings, T0);
+	CHECK(SetDesktopSyncAutoBeforeState(files, key, true));
+	CHECK(ReadDesktopSyncAuto(files, key).record->enabled);
+	CHECK(SyncPathIdentity(files.syncStore) == "missing");
+	CHECK(SetDesktopSyncAutoBeforeState(files, key, false));
+	CHECK(!ReadDesktopSyncAuto(files, key).record->enabled);
+	CHECK(SetDesktopSyncAutoBeforeState(files, key, true));
+	auto state = SyncLocalState();
+	state.install = *FormatSyncInstallId(QByteArray(16, 'a'));
+	state.createdDevice = u"desktop:"_q + state.install;
+	state.space = *FormatSyncSpaceId(QByteArray(16, 's'));
+	state.bindingToken = *FormatSyncBindingToken(QByteArray(16, 't'));
+	{ auto local = SyncLocalStore(files.syncDirectory); CHECK(local.Open(true).status == SyncStoreStatus::Uninitialized); CHECK(local.Initialize(state)); }
+	CHECK(!SetDesktopSyncAutoBeforeState(files, key, false));
+	auto store = DesktopSyncAutoStore(files, key, state.bindingToken.toLatin1(), [] { return true; });
+	CHECK(store.Open() && store.record().enabled);
+	std::printf("AUTO_BEFORE_STATE enabled=%d\n", int(store.record().enabled));
+}
+
 }
 
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin();
+	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); AutoBeforeState();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

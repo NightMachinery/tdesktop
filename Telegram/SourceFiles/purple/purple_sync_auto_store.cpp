@@ -3,6 +3,7 @@
 #include "purple/purple_sync_chat_magic.h"
 
 #include <QtCore/QFileInfo>
+#include <QtCore/QLockFile>
 #include <QtCore/QSaveFile>
 
 #include <limits>
@@ -52,6 +53,21 @@ DesktopSyncAutoRead ReadDesktopSyncAuto(
 	}
 	result.record = parsed.record;
 	return result;
+}
+
+bool SetDesktopSyncAutoBeforeState(
+		const AccountFiles &files, const AccountKey &account, bool enabled) {
+	if (EnsureSyncPrivateDirectory(files.syncDirectory) != SyncStoreStatus::Ready) { return false; }
+	auto lock = QLockFile(files.syncDirectory + u"/lock"_q);
+	lock.setStaleLockTime(0);
+	if (!lock.tryLock(0) || SyncPathIdentity(files.syncStore) != "missing") { return false; }
+	const auto read = ReadDesktopSyncAuto(files, account);
+	if (!read.record || read.status != SyncStoreStatus::Ready) { return false; }
+	auto record = *read.record;
+	record.enabled = enabled;
+	const auto bytes = SerializeSyncAutoRecord(record);
+	return bytes && WriteSyncPrivateFile(AutoPath(files), *bytes) == SyncStoreStatus::Ready
+		&& ReadDesktopSyncAuto(files, account).record == record;
 }
 
 bool DesktopSyncAutoEditAuthorized(const SyncLocalState &state, const SyncAutoServerRead &read) {

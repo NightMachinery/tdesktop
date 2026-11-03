@@ -47,6 +47,14 @@ struct SyncConfigApplyResult {
 	const AccountTransferReview *replacement = nullptr,
 	SyncLocalStore *lockedStore = nullptr);
 
+[[nodiscard]] SyncConfigApplyResult ApplySyncFirstUseJoin(
+	Main::Account &account,
+	Main::Session &session,
+	const SyncAccountInventoryResult &inventory,
+	const std::optional<QString> &headKey,
+	const AccountTransferReview &current,
+	PeerToken chat);
+
 struct SyncConfigRestoreResult {
 	SyncConfigRestoreStatus status = SyncConfigRestoreStatus::NotFound;
 	QString historyId;

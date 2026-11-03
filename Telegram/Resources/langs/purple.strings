@@ -199,6 +199,17 @@ docs/purple/upstream_hooks.md.
 "lng_purple_sync_reset_done" = "Sync state archived. History and settings were preserved. Check the sync chat to set up sync again.";
 "lng_purple_sync_reset_partial" = "The archive is incomplete. Setup is blocked. Review sync recovery again to resume the same archive.";
 
+"lng_purple_sync_first_ask" = "This device's settings differ from the settings in the sync chat. Choose once which to keep. Using the synced settings keeps this device's file in History; using this device's settings offers them to your other devices.";
+"lng_purple_sync_first_synced" = "Use the synced settings";
+"lng_purple_sync_first_this_device" = "Use this device's settings";
+"lng_purple_sync_first_wait" = "Waiting for a device with your settings. This device still has the default settings, so it publishes nothing.";
+"lng_purple_sync_first_running" = "Setting up sync with the sync chat.";
+"lng_purple_sync_first_published" = "Sync is set up: this device's settings are in the sync chat.";
+"lng_purple_sync_first_joined" = "Sync is set up with the synced settings. This device's previous file is in History.";
+"lng_purple_sync_first_joined_new" = "Sync is set up with the synced settings.";
+"lng_purple_sync_first_joined_same" = "Sync is set up. This device already had the synced settings.";
+"lng_purple_sync_first_failed" = "Setting up sync did not finish. Check the sync chat again.";
+
 "lng_purple_auto_description" = "Settings sync through this account's sync chat. Check sync chat reviews the selected account. Automatic sync is off by default. When enabled, safe updates apply with History and saved changes publish after a fresh check. Conflicts, losses and account-link problems wait for your review. Settings can contain chat IDs and names; the sync chat is a Telegram cloud chat readable by your signed-in sessions. state.toml stays local.";
 "lng_purple_auto_enable" = "Automatically sync this account's settings";
 "lng_purple_auto_select" = "Select an account to see automatic sync.";
@@ -210,6 +221,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_auto_chat" = "Sync chat not resolved. Check this account manually.";
 "lng_purple_auto_review" = "Automatic sync needs attention. Check sync chat to review the account, file or conflicting versions.";
 "lng_purple_auto_running" = "Automatic sync is checking this account.";
+"lng_purple_auto_first_wait" = "Automatic sync is waiting for a device with your settings.";
+"lng_purple_auto_first_ask" = "Automatic sync needs one choice: open Sync across devices and choose the synced settings or this device's.";
 "lng_purple_auto_ready" = "Automatic sync is on. Safe updates and saved changes sync on activation or save.";
 "lng_purple_auto_remote" = "another device";
 

@@ -135,6 +135,56 @@ SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files) {
 			|| (!SettingsTextNewer(text) && !SettingsTextLoads(text, path) && LastGoodSettingsLoad(files.good)));
 }
 
+bool SyncCarryLeftoversPresent(const QString &syncDirectory) {
+	for (const auto &name : { u"carry.json"_q, u"carry-cache.json"_q, u"carry-objects"_q, u"carry-history"_q }) {
+		if (SyncPathIdentity(syncDirectory + u'/' + name) != "missing") { return true; }
+	}
+	return false;
+}
+
+SyncFirstUseReview ReviewSyncFirstUse(
+		const AccountFiles &files,
+		const SyncAccountInventoryResult &inventory,
+		SyncFirstUseChoice choice) {
+	auto result = SyncFirstUseReview();
+	result.carry = SyncCarryLeftoversPresent(files.syncDirectory);
+	const auto snapshot = ReadSyncRecoveryStore(files, std::nullopt);
+	if (snapshot.status != SyncStoreStatus::Ready) { return result; }
+	const auto &selected = inventory.directory.selectedSpace;
+	if (!snapshot.store.statePresent) {
+		if (!snapshot.store.pendingFiles.empty()) { return result; }
+		result.need = SyncFirstUseNeed::NoState;
+	} else {
+		const auto parsed = ParseSyncLocalState(snapshot.store.state);
+		if (!parsed || !selected || *selected == parsed.state.space) { return result; }
+		result.need = SyncFirstUseNeed::OtherSpace;
+	}
+	auto local = ReadSyncSettingsFile(files);
+	if (local.status == SyncSettingsFileStatus::Present && !local.usingLastGood
+		&& !SettingsTextNewer(local.text) && !SettingsTextLoads(local.text, files.settings)) {
+		local.status = SyncSettingsFileStatus::Invalid;
+	}
+	auto input = SyncFirstUseInputOf(inventory, local);
+	if (!input) { return result; }
+	input->choice = choice;
+	result.input = *input;
+	result.action = PlanSyncFirstUse(*input);
+	auto parents = std::vector<QString>();
+	if (selected) {
+		const auto heads = ExtractSyncConfigHeads(inventory, *selected, QString());
+		for (const auto &record : heads.heads) {
+			parents.push_back(record.head.key);
+		}
+		if (heads.heads.size() == 1) {
+			result.headKey = heads.heads.front().head.key;
+		}
+	}
+	result.sameBytes = input->head && input->head->fingerprint == local.fingerprint;
+	result.request.expectedFingerprint = local.fingerprint;
+	result.request.expectedParents = std::move(parents);
+	return result;
+}
+
 SyncConfigReview ReviewSyncConfig(
 		Main::Account &account,
 		Main::Session &session,

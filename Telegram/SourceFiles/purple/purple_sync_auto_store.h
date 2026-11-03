@@ -14,6 +14,8 @@ struct DesktopSyncAutoRead {
 
 [[nodiscard]] DesktopSyncAutoRead ReadDesktopSyncAuto(
 	const AccountFiles &files, const AccountKey &account);
+[[nodiscard]] bool SetDesktopSyncAutoBeforeState(
+	const AccountFiles &files, const AccountKey &account, bool enabled);
 [[nodiscard]] bool DesktopSyncAutoEditAuthorized(const SyncLocalState &state, const SyncAutoServerRead &read);
 [[nodiscard]] bool SameDesktopSyncAutoContext(
 	const AccountSettingsOpenTarget &opening,

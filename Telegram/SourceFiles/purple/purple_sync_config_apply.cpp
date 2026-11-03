@@ -346,6 +346,33 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	return result;
 }
 
+SyncConfigApplyResult ApplySyncFirstUseJoin(
+		Main::Account &account,
+		Main::Session &session,
+		const SyncAccountInventoryResult &inventory,
+		const std::optional<QString> &headKey,
+		const AccountTransferReview &current,
+		PeerToken chat) {
+	const auto review = ReviewSyncConfig(account, session, inventory, chat);
+	if (review.status != SyncConfigReviewStatus::Ready || !review.bound) {
+		return Stop(SyncConfigApplyResult(), SyncConfigApplyStatus::NeedsReview);
+	} else if (review.plan.verdict == ConfigSyncVerdict::Adopt) {
+		return ApplySyncConfigChoice(account, session, inventory, review, std::nullopt);
+	}
+	const auto offered = std::find_if(review.plan.offered.begin(), review.plan.offered.end(), [&](const ConfigHead &head) {
+		return headKey && head.key == *headKey;
+	});
+	const auto record = (offered != review.plan.offered.end()) ? FindSyncConfigHeadRecord(review, *offered) : nullptr;
+	if (!record) { return Stop(SyncConfigApplyResult(), SyncConfigApplyStatus::InvalidChoice); }
+	auto replacement = current;
+	replacement.context.proposed = { record->text, true };
+	replacement.impact = AnalyzeConfigChange(replacement.context);
+	if (replacement.impact.status != ConfigImpactStatus::Ready || replacement.usingGood) {
+		return Stop(SyncConfigApplyResult(), SyncConfigApplyStatus::NeedsRecheck);
+	}
+	return ApplySyncConfigChoice(account, session, inventory, review, headKey, &replacement);
+}
+
 SyncConfigRestoreResult RestoreSyncConfigHistory(
 		Main::Session &session,
 		const QString &id,

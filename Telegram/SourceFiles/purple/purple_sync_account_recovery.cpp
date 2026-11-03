@@ -455,11 +455,56 @@ SyncArchiveResult ArchiveSyncAccountState(
 	return result;
 }
 
+std::optional<SyncStartAgainPlan> PlanSyncFirstUseArchive(
+		const SyncAccountRecoveryInput &input,
+		const QString &date,
+		bool archiveAvailable) {
+	auto plan = PlanSyncStartAgain({ input, date, archiveAvailable, true, false, SyncConfigSendQueue::Empty });
+	if (plan.status == SyncStartAgainStatus::Ready) { return plan; }
+	const auto recovery = PlanSyncAccountRecovery(input);
+	const auto format = u"yyyyMMdd-HHmmss"_q;
+	if (recovery.status != SyncAccountRecoveryStatus::Bound || !recovery.store || !recovery.files
+		|| !archiveAvailable || QDateTime::fromString(date, format).toString(format) != date) { return std::nullopt; }
+	const auto &store = input.stores[*recovery.store];
+	if (!store.statePresent || (store.pendingPresent && !store.pendingComplete)) { return std::nullopt; }
+	plan = SyncStartAgainPlan();
+	plan.status = SyncStartAgainStatus::Ready;
+	plan.account = input.account;
+	plan.archiveDirectory = recovery.files->syncDirectory + u"/orphaned-"_q + date;
+	plan.history = recovery.files->history;
+	plan.expected = store;
+	plan.preferenceToken = input.preferenceToken;
+	if (store.pendingPresent) {
+		plan.moves.push_back({ SyncOrphanMoveKind::PendingDirectory,
+			recovery.files->syncDirectory + u"/pending"_q, plan.archiveDirectory + u"/pending"_q });
+	}
+	plan.moves.push_back({ SyncOrphanMoveKind::StateFile,
+		recovery.files->syncStore, plan.archiveDirectory + u"/state.json"_q });
+	return plan;
+}
+
+bool RetireSyncCarryLeftovers(const QString &syncDirectory, const QString &date) {
+	if (!SyncCarryLeftoversPresent(syncDirectory)) { return true; }
+	auto lock = QLockFile(syncDirectory + u"/lock"_q);
+	lock.setStaleLockTime(0);
+	if (!lock.tryLock(0)) { return false; }
+	const auto folder = syncDirectory + u"/carry-retired-"_q + date;
+	if (SyncPathIdentity(folder) != "missing"
+		|| !QDir().mkdir(folder, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)
+		|| EnsureSyncPrivateDirectory(folder) != SyncStoreStatus::Ready) { return false; }
+	for (const auto &name : { u"carry.json"_q, u"carry-cache.json"_q, u"carry-objects"_q, u"carry-history"_q }) {
+		const auto path = syncDirectory + u'/' + name;
+		if (SyncPathIdentity(path) != "missing" && !MoveExclusive(path, folder + u'/' + name)) { return false; }
+	}
+	return FlushSyncDirectory(syncDirectory) && !SyncCarryLeftoversPresent(syncDirectory);
+}
+
 SyncArchiveResult StartAgainSyncAccount(
 		Main::Session &session,
 		const DesktopSyncRecovery &review,
 		bool confirmed,
-		bool operationInFlight) {
+		bool operationInFlight,
+		bool firstUse) {
 	if (!confirmed || operationInFlight || SyncConfigSendQueueOf(&session) != SyncConfigSendQueue::Empty
 		|| !ValidateAccountSettingsOpenTarget(&session, review.opening)) { return {}; }
 	const auto target = AccountSyncInspectionTarget(&session);
@@ -478,8 +523,10 @@ SyncArchiveResult StartAgainSyncAccount(
 	} else {
 		const auto date = QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd-HHmmss"_q);
 		const auto archive = target->files.syncDirectory + u"/orphaned-"_q + date;
-		plan = PlanSyncStartAgain({ review.input, date, SyncPathIdentity(archive) == "missing",
-			true, operationInFlight, SyncConfigSendQueueOf(&session) });
+		plan = firstUse
+			? PlanSyncFirstUseArchive(review.input, date, SyncPathIdentity(archive) == "missing")
+			: PlanSyncStartAgain({ review.input, date, SyncPathIdentity(archive) == "missing",
+				true, operationInFlight, SyncConfigSendQueueOf(&session) });
 	}
 	if (!plan || plan->status != SyncStartAgainStatus::Ready
 		|| plan->preferenceToken != AccountSyncBindingToken(session.account())) { return {}; }

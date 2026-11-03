@@ -39,6 +39,18 @@ bool OneSyncSpace(const SyncAccountInventoryResult &inventory) {
 			});
 }
 
+// WHY: a magic chat may also hold the records of a device that lost the race to start the first space;
+// every device joins the earliest space, the one core selects.
+bool SelectedSyncSpace(const SyncAccountInventoryResult &inventory) {
+	const auto &space = inventory.directory.selectedSpace;
+	const auto &records = inventory.read ? inventory.read->records : std::vector<SyncCandidateRecord>();
+	return space && std::all_of(records.begin(), records.end(), [](const SyncCandidateRecord &record) {
+			return record.status == SyncCandidateStatus::Valid && record.header;
+		}) && std::any_of(records.begin(), records.end(), [&](const SyncCandidateRecord &record) {
+			return record.header && record.header->space == *space;
+		});
+}
+
 // This device's setup created the chat, or was creating it. A chat found by discovery leaves no
 // journal; one picked at setup, or adopted from another device's stream, was not created here.
 bool CreatedBySetup(const QByteArray &identity, const QByteArray &bytes,
@@ -201,7 +213,7 @@ void SyncConfigPublishFlow::start() {
 		// device created must still be empty.
 		const auto joinable = empty || (complete && OneSyncSpace(inventory)
 			&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));
-		const auto magicJoinable = _magic && complete && OneSyncSpace(inventory);
+		const auto magicJoinable = _magic && complete && SelectedSyncSpace(inventory);
 		if (_input.request.pendingOnly || !complete
 			|| (directory.selectedSpace && (!directory.publishableSpace
 				|| *directory.selectedSpace != *directory.publishableSpace

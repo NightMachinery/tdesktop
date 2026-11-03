@@ -55,10 +55,16 @@ struct SyncArchiveResult {
 	const QString &root,
 	const AccountFiles &files,
 	const AccountKey &account);
+[[nodiscard]] std::optional<SyncStartAgainPlan> PlanSyncFirstUseArchive(
+	const SyncAccountRecoveryInput &input,
+	const QString &date,
+	bool archiveAvailable);
 [[nodiscard]] SyncArchiveResult StartAgainSyncAccount(
 	Main::Session &session,
 	const DesktopSyncRecovery &review,
 	bool confirmed,
-	bool operationInFlight);
+	bool operationInFlight,
+	bool firstUse = false);
+[[nodiscard]] bool RetireSyncCarryLeftovers(const QString &syncDirectory, const QString &date);
 
 }

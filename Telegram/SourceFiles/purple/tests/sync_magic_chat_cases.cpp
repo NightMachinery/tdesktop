@@ -680,6 +680,10 @@ int main() {
 		}
 		expect(SyncConfigReviewReasonCode(Reason::None).isEmpty(), "reason: none has no code");
 		expect(SyncDiagToken(u"unknown"_q) == u"unknown"_q, "reason: the fallback is a word");
+		for (const auto &word : { u"first_use"_q, u"ask"_q, u"join_silently"_q, u"choice"_q, u"synced"_q,
+				u"this_device"_q, u"none"_q, u"carry"_q, u"apply"_q, u"archive"_q }) {
+			expect(SyncDiagToken(word) == word, "first use: a diag word");
+		}
 	}
 
 	std::cout << "sync-magic-chat checks=" << checks << " failures=" << failures << '\n';

@@ -33,6 +33,29 @@ namespace Purple {
 [[nodiscard]] SyncConfigWriter SyncWriter();
 
 [[nodiscard]] SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files);
+
+enum class SyncFirstUseNeed {
+	None,
+	NoState,
+	OtherSpace,
+};
+
+// First use of a sync chat by an account with no state in its space (core PlanSyncFirstUse).
+struct SyncFirstUseReview {
+	SyncFirstUseNeed need = SyncFirstUseNeed::None;
+	std::optional<SyncFirstUseAction> action;
+	SyncFirstUseInput input;
+	SyncConfigPublishRequest request;
+	std::optional<QString> headKey;
+	bool sameBytes = false;
+	bool carry = false;
+};
+
+[[nodiscard]] bool SyncCarryLeftoversPresent(const QString &syncDirectory);
+[[nodiscard]] SyncFirstUseReview ReviewSyncFirstUse(
+	const AccountFiles &files,
+	const SyncAccountInventoryResult &inventory,
+	SyncFirstUseChoice choice = SyncFirstUseChoice::None);
 [[nodiscard]] SyncConfigReview ReviewSyncConfig(
 	Main::Account &account,
 	Main::Session &session,

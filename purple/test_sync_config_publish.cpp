@@ -6,6 +6,7 @@
 #include "purple/purple_sync_config_flow.h"
 #include "purple/purple_sync_envelope.h"
 #include "purple/purple_sync_magic_chat.h"
+#include "purple/purple_sync_account_recovery.h"
 
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
@@ -582,9 +583,9 @@ struct OtherRecord {
 	QString space;
 };
 
-OtherRecord BuildOther(int writer, uint64_t milliseconds) {
+OtherRecord BuildOther(int writer, uint64_t milliseconds, const QByteArray &text = QByteArray()) {
 	auto input = ConfigRecordBuildInput();
-	input.text = "version = 2\n# other device " + QByteArray::number(writer) + '\n';
+	input.text = text.isEmpty() ? "version = 2\n# other device " + QByteArray::number(writer) + '\n' : text;
 	const auto space = FormatTimeOrderedSyncSpaceId(milliseconds, QByteArray(10, char(writer)));
 	const auto install = FormatSyncInstallId(QByteArray(16, char(0x40 + writer)));
 	CHECK(space && install);
@@ -767,6 +768,265 @@ void MagicPublish() {
 	}
 }
 
+
+const auto kCustom = QByteArray("version = 2\n[last_seen]\ntrade_p = false\n");
+const auto kCustomSame = QByteArray("version = 2\n# kept here\n[last_seen]\ntrade_p = false\n");
+const auto kCustomOther = QByteArray("version = 2\n[last_seen]\nreasons_p = false\n");
+const auto kMagicChat = PeerToken{PeerTokenKind::Channel,456};
+const auto kArchiveDate = u"20261103-120000"_q;
+
+struct FirstUseRun {
+	SyncConfigPublishDiskReply reply;
+	QByteArray staged;
+};
+
+FirstUseRun RunMagicFlow(PublishFiles &files, const SyncAccountInventoryResult &inventory,
+		const std::optional<SyncConfigPublishRequest> &request, int32_t messageId) {
+	auto input = files.input(kMagicChat); input.setup.reset();
+	input.inventory = inventory;
+	if (request) { input.request = *request; } else { input.initializeOnly = true; }
+	auto run = FirstUseRun();
+	auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
+		[&](SyncConfigPublishDiskReply value) { run.reply = std::move(value); });
+	flow.start();
+	if (run.reply.step == SyncConfigPublishDiskStep::Binding && run.reply.initial) {
+		files.token = run.reply.initial->bindingToken.toLatin1();
+		flow.bindingCommitted(files.token);
+	}
+	if (run.reply.step == SyncConfigPublishDiskStep::Post) {
+		run.staged = run.reply.staged;
+		flow.confirm(run.staged, messageId);
+	}
+	return run;
+}
+
+PublishFiles &MagicDevice(PublishFiles &files, const QByteArray &settings) {
+	WriteMagicBinding(files, kMagicChat, 100);
+	CHECK(WriteSyncPrivateFile(files.files.settings, settings) == SyncStoreStatus::Ready);
+	return files;
+}
+
+SyncLocalState StateOf(const PublishFiles &files) {
+	const auto parsed = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
+	CHECK(parsed);
+	return parsed ? parsed.state : SyncLocalState();
+}
+
+std::vector<QString> ParentsOf(const QByteArray &staged) {
+	return InspectConfigPayload(ParseSyncEnvelope(staged)).version.parents;
+}
+
+QString SpaceOf(const QByteArray &record) {
+	const auto parsed = ParseSyncEnvelope(record);
+	return parsed.header ? parsed.header->space : QString();
+}
+
+bool ArchiveForFirstUse(PublishFiles &files, const SyncAccountInventoryResult &inventory) {
+	const auto discovered = DiscoverDesktopSyncStores(files.root.path());
+	CHECK(discovered);
+	if (!discovered) { return false; }
+	auto input = SyncAccountRecoveryInput();
+	input.account = Origin.account; input.startupOwner = Origin.account; input.signedIn = true;
+	input.preferenceToken = files.token; input.stores = discovered->stores;
+	input.local = ReadSyncSettingsFile(files.files); input.discoveryComplete = true;
+	input.cloud = SyncRecoveryCloud{ Origin.account, true, inventory };
+	const auto plan = PlanSyncFirstUseArchive(input, kArchiveDate, true);
+	CHECK(plan && plan->status == SyncStartAgainStatus::Ready);
+	if (!plan) { return false; }
+	const auto archived = ArchiveSyncAccountState(files.root.path(), files.files, *plan, [] { return true; });
+	CHECK(archived.ready && !archived.partial);
+	CHECK(SyncPathIdentity(files.files.syncStore) == "missing");
+	CHECK(SyncPathIdentity(files.files.syncDirectory + u"/orphaned-"_q + kArchiveDate + u"/state.json"_q) != "missing");
+	return archived.ready;
+}
+
+void FirstUseActions() {
+	const auto other = BuildOther(2, 1700000000000);
+	const auto otherCustom = BuildOther(3, 1700000000000, kCustom);
+	const auto empty = InventoryOf({});
+	const auto withOther = InventoryOf({ other.built.canonical });
+	const auto withCustom = InventoryOf({ otherCustom.built.canonical });
+	struct Row {
+		const char *name;
+		QByteArray local;
+		SyncAccountInventoryResult inventory;
+		SyncFirstUseChoice choice;
+		SyncFirstUseAction action;
+	};
+	const auto rows = std::vector<Row>{
+		{ "wait_empty_defaults", "version = 2\n", empty, SyncFirstUseChoice::None, SyncFirstUseAction::Wait },
+		{ "wait_unreadable", "version = 2\n[last_seen\n", withOther, SyncFirstUseChoice::None, SyncFirstUseAction::Wait },
+		{ "publish_empty_custom", kCustom, empty, SyncFirstUseChoice::None, SyncFirstUseAction::Publish },
+		{ "join_defaults", "version = 2\n", withOther, SyncFirstUseChoice::None, SyncFirstUseAction::Join },
+		{ "join_silently_same_bytes", kCustom, withCustom, SyncFirstUseChoice::None, SyncFirstUseAction::JoinSilently },
+		{ "join_silently_same_meaning", kCustomSame, withCustom, SyncFirstUseChoice::None, SyncFirstUseAction::JoinSilently },
+		{ "ask_custom", kCustom, withOther, SyncFirstUseChoice::None, SyncFirstUseAction::Ask },
+		{ "ask_synced", kCustom, withOther, SyncFirstUseChoice::Synced, SyncFirstUseAction::Join },
+		{ "ask_this_device", kCustom, withOther, SyncFirstUseChoice::ThisDevice, SyncFirstUseAction::Publish },
+	};
+	for (const auto &row : rows) {
+		auto files = PublishFiles(kMagicChat);
+		MagicDevice(files, row.local);
+		const auto review = ReviewSyncFirstUse(files.files, row.inventory, row.choice);
+		CHECK(review.need == SyncFirstUseNeed::NoState && !review.carry);
+		CHECK(review.action == row.action);
+		std::printf("FIRST USE %s action=%d\n", row.name, review.action ? int(*review.action) : -1);
+		if (!review.action || *review.action == SyncFirstUseAction::Wait
+			|| *review.action == SyncFirstUseAction::Ask) {
+			CHECK(SyncPathIdentity(files.files.syncStore) == "missing");
+			continue;
+		}
+		const auto publish = *review.action == SyncFirstUseAction::Publish
+			|| (*review.action == SyncFirstUseAction::JoinSilently && !review.sameBytes);
+		CHECK(review.sameBytes == !std::strcmp(row.name, "join_silently_same_bytes"));
+		const auto settings = ReadSettingsFileInput(files.files.settings);
+		const auto run = RunMagicFlow(files, row.inventory,
+			publish ? std::optional(review.request) : std::nullopt, 40);
+		CHECK(run.reply.result.status == (publish
+			? SyncConfigPublishStatus::Confirmed : SyncConfigPublishStatus::AlreadySynced));
+		CHECK(ReadSettingsFileInput(files.files.settings) == settings);
+		const auto state = StateOf(files);
+		CHECK(state.chat == kMagicChat && state.config.seq == (publish ? 1u : 0u));
+		if (row.inventory.directory.selectedSpace) {
+			CHECK(state.space == *row.inventory.directory.selectedSpace);
+		}
+		if (publish && row.inventory.directory.selectedSpace) {
+			CHECK(review.request.expectedParents && review.request.expectedParents->size() == 1 && review.headKey
+				&& ParentsOf(run.staged) == review.request.expectedParents);
+		}
+		auto later = row.inventory.read->records.empty()
+			? InventoryOf({ run.staged })
+			: row.inventory;
+		const auto again = ReviewSyncFirstUse(files.files, later);
+		CHECK(again.need == SyncFirstUseNeed::None && !again.action);
+	}
+	auto stale = PublishFiles(kMagicChat);
+	MagicDevice(stale, kCustom);
+	const auto partial = FinishSyncAccountInventory(123,
+		{ SyncHistoryScanStatus::Complete, { 20 }, 1 },
+		SyncCandidateReadResult{ SyncCandidateReadStatus::Incomplete, {} });
+	const auto refused = ReviewSyncFirstUse(stale.files, partial);
+	CHECK(refused.need == SyncFirstUseNeed::NoState && !refused.action);
+}
+
+void FirstUseD1() {
+	for (const auto choice : { SyncFirstUseChoice::Synced, SyncFirstUseChoice::ThisDevice }) {
+		auto files = PublishFiles(kMagicChat);
+		MagicDevice(files, kCustom);
+		const auto old = RunMagicFlow(files, InventoryOf({}), std::nullopt, 0);
+		CHECK(old.reply.result.status == SyncConfigPublishStatus::AlreadySynced);
+		const auto oldSpace = StateOf(files).space;
+		CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/carry.json"_q, "{}") == SyncStoreStatus::Ready);
+		CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/carry-cache.json"_q, "{}") == SyncStoreStatus::Ready);
+		CHECK(EnsureSyncPrivateDirectory(files.files.syncDirectory + u"/carry-objects"_q) == SyncStoreStatus::Ready);
+		const auto fresh = BuildOther(2, 1800000000000, kCustomOther);
+		const auto inventory = InventoryOf({ fresh.built.canonical });
+		CHECK(*inventory.directory.selectedSpace != oldSpace);
+		const auto blocked = RunMagicFlow(files, inventory, std::nullopt, 0);
+		CHECK(blocked.reply.result.status != SyncConfigPublishStatus::AlreadySynced);
+		CHECK(StateOf(files).space == oldSpace);
+		const auto review = ReviewSyncFirstUse(files.files, inventory);
+		CHECK(review.need == SyncFirstUseNeed::OtherSpace && review.carry);
+		CHECK(review.action == SyncFirstUseAction::Ask);
+		CHECK(RetireSyncCarryLeftovers(files.files.syncDirectory, kArchiveDate));
+		CHECK(!SyncCarryLeftoversPresent(files.files.syncDirectory));
+		CHECK(SyncPathIdentity(files.files.syncDirectory + u"/carry-retired-"_q + kArchiveDate + u"/carry.json"_q) != "missing");
+		CHECK(RetireSyncCarryLeftovers(files.files.syncDirectory, kArchiveDate));
+		const auto answered = ReviewSyncFirstUse(files.files, inventory, choice);
+		CHECK(answered.need == SyncFirstUseNeed::OtherSpace && !answered.carry);
+		const auto join = (choice == SyncFirstUseChoice::Synced);
+		CHECK(answered.action == (join ? SyncFirstUseAction::Join : SyncFirstUseAction::Publish));
+		CHECK(answered.request.expectedParents == SyncConfigVersionKeys({ fresh.built.version }));
+		CHECK(ArchiveForFirstUse(files, inventory));
+		const auto settings = ReadSettingsFileInput(files.files.settings);
+		const auto run = RunMagicFlow(files, inventory, join ? std::nullopt : std::optional(answered.request), 50);
+		CHECK(run.reply.result.status == (join
+			? SyncConfigPublishStatus::AlreadySynced : SyncConfigPublishStatus::Confirmed));
+		CHECK(ReadSettingsFileInput(files.files.settings) == settings);
+		const auto state = StateOf(files);
+		CHECK(state.space == fresh.space && state.chat == kMagicChat);
+		if (!join) {
+			CHECK(SpaceOf(run.staged) == fresh.space);
+			CHECK(ParentsOf(run.staged) == SyncConfigVersionKeys({ fresh.built.version }));
+		}
+		const auto later = join ? inventory : InventoryOf({ fresh.built.canonical, run.staged });
+		const auto again = ReviewSyncFirstUse(files.files, later);
+		CHECK(again.need == SyncFirstUseNeed::None && !again.action && !again.carry);
+		std::printf("FIRST USE D1 choice=%d space_ok=%d\n", int(choice), int(state.space == fresh.space));
+	}
+}
+
+void FirstUseMigration() {
+	auto first = PublishFiles(kMagicChat);
+	auto second = PublishFiles(kMagicChat);
+	MagicDevice(first, kCustom);
+	MagicDevice(second, kCustomOther);
+	const auto seed = RunMagicFlow(first, InventoryOf({}), SyncConfigPublishRequest{
+		.expectedFingerprint = MakeSyncSettingsFile(SyncSettingsFileStatus::Present, kCustom).fingerprint,
+		.expectedParents = std::vector<QString>() }, 60);
+	CHECK(seed.reply.result.status == SyncConfigPublishStatus::Confirmed);
+	const auto shared = RunMagicFlow(second, InventoryOf({ seed.staged }), std::nullopt, 0);
+	CHECK(shared.reply.result.status == SyncConfigPublishStatus::AlreadySynced);
+	CHECK(StateOf(first).space == StateOf(second).space);
+	auto prompts = 0;
+	for (const auto &records : { std::vector<QByteArray>(), std::vector<QByteArray>{ seed.staged } }) {
+		const auto inventory = InventoryOf(records);
+		for (const auto device : { &first, &second }) {
+			const auto review = ReviewSyncFirstUse(device->files, inventory);
+			CHECK(review.need == SyncFirstUseNeed::None && !review.action);
+			prompts += (review.action == SyncFirstUseAction::Ask) ? 1 : 0;
+		}
+	}
+	CHECK(prompts == 0);
+	std::printf("FIRST USE migration prompts=%d\n", prompts);
+}
+
+void FirstUseRace() {
+	for (const auto choice : { SyncFirstUseChoice::Synced, SyncFirstUseChoice::ThisDevice }) {
+		auto first = PublishFiles(kMagicChat);
+		auto second = PublishFiles(kMagicChat);
+		MagicDevice(first, kCustom);
+		MagicDevice(second, kCustomOther);
+		const auto empty = InventoryOf({});
+		const auto a = ReviewSyncFirstUse(first.files, empty);
+		const auto b = ReviewSyncFirstUse(second.files, empty);
+		CHECK(a.action == SyncFirstUseAction::Publish && b.action == SyncFirstUseAction::Publish);
+		const auto ra = RunMagicFlow(first, empty, a.request, 70);
+		const auto rb = RunMagicFlow(second, empty, b.request, 71);
+		CHECK(ra.reply.result.status == SyncConfigPublishStatus::Confirmed);
+		CHECK(rb.reply.result.status == SyncConfigPublishStatus::Confirmed);
+		const auto mixed = InventoryOf({ ra.staged, rb.staged });
+		CHECK(mixed.directory.selectedSpace && SpaceOf(ra.staged) != SpaceOf(rb.staged));
+		if (!mixed.directory.selectedSpace) { continue; }
+		const auto winnerFirst = (*mixed.directory.selectedSpace == SpaceOf(ra.staged));
+		auto &winner = winnerFirst ? first : second;
+		auto &loser = winnerFirst ? second : first;
+		const auto &head = winnerFirst ? ra.staged : rb.staged;
+		const auto won = ReviewSyncFirstUse(winner.files, mixed);
+		CHECK(won.need == SyncFirstUseNeed::None && !won.action);
+		const auto lost = ReviewSyncFirstUse(loser.files, mixed);
+		CHECK(lost.need == SyncFirstUseNeed::OtherSpace && lost.action == SyncFirstUseAction::Ask);
+		const auto answered = ReviewSyncFirstUse(loser.files, mixed, choice);
+		const auto join = (choice == SyncFirstUseChoice::Synced);
+		CHECK(answered.action == (join ? SyncFirstUseAction::Join : SyncFirstUseAction::Publish));
+		CHECK(ArchiveForFirstUse(loser, mixed));
+		const auto run = RunMagicFlow(loser, mixed, join ? std::nullopt : std::optional(answered.request), 72);
+		CHECK(run.reply.result.status == (join
+			? SyncConfigPublishStatus::AlreadySynced : SyncConfigPublishStatus::Confirmed));
+		CHECK(StateOf(loser).space == *mixed.directory.selectedSpace);
+		if (!join) {
+			CHECK(SpaceOf(run.staged) == *mixed.directory.selectedSpace);
+			CHECK(ParentsOf(run.staged) == std::vector<QString>{ answered.headKey.value_or(QString()) });
+			CHECK(answered.headKey && InspectConfigPayload(ParseSyncEnvelope(head)).version.key == *answered.headKey);
+		}
+		const auto after = join ? mixed : InventoryOf({ ra.staged, rb.staged, run.staged });
+		const auto again = ReviewSyncFirstUse(loser.files, after);
+		CHECK(again.need == SyncFirstUseNeed::None && !again.action);
+		std::printf("FIRST USE race choice=%d loser_joined=%d\n", int(choice),
+			int(StateOf(loser).space == *mixed.directory.selectedSpace));
+	}
+}
+
 }
 
 int main(int argc, char **argv) {
@@ -778,6 +1038,7 @@ int main(int argc, char **argv) {
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
 		ExistingJoins(); MagicPublish();
+		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);
