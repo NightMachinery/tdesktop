@@ -438,6 +438,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_magic_pick_unknown" = "Open that group once so Purple can see its members, then choose it again.";
 "lng_purple_magic_pick_unsupported" = "This chat cannot be the sync chat. Use Saved Messages or a supergroup where you are the only member.";
 "lng_purple_magic_not_saved" = "Could not save this choice. Try again.";
+"lng_purple_magic_problem_open" = "Open sync chat settings";
 "lng_purple_magic_problem_chat_gone" = "the sync chat was deleted or is no longer available.";
 "lng_purple_magic_problem_chat_left" = "you left the sync chat.";
 "lng_purple_magic_problem_not_megagroup" = "the sync chat is not a group.";

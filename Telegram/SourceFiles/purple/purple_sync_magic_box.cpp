@@ -17,6 +17,8 @@
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
+#include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
@@ -29,6 +31,8 @@
 
 namespace Purple {
 namespace {
+
+constexpr auto kProblemToastDuration = crl::time(8000);
 
 SyncMagicFrame FrameOf(not_null<Main::Session*> session) {
 	const auto chat = SyncMagicChatOf(session);
@@ -209,6 +213,31 @@ void ShowSyncMagicProblemOnce(
 	}
 	chat->shown();
 	show->showBox(Ui::MakeInformBox(SyncMagicStatusText(session, frame)));
+}
+
+void ToastSyncMagicProblem(not_null<Main::Session*> session) {
+	const auto chat = SyncMagicChatOf(session);
+	const auto frame = FrameOf(session);
+	const auto window = Core::App().activeWindow();
+	const auto controller = window ? window->sessionController() : nullptr;
+	if (!chat || !frame.showProblem || !controller || &controller->session() != session) {
+		return;
+	}
+	chat->shown();
+	const auto weak = base::make_weak(controller);
+	controller->uiShow()->showToast({
+		.text = TextWithEntities{ SyncMagicStatusText(session, frame) + ' ' }.append(
+			Ui::Text::Link(tr::lng_purple_magic_problem_open(tr::now))),
+		.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
+			if (const auto strong = weak.get()) {
+				strong->show(Box(SyncMagicChatBox, &strong->session(), [=] {
+					return weak.get() != nullptr;
+				}));
+			}
+			return false;
+		},
+		.duration = kProblemToastDuration,
+	});
 }
 
 void SyncMagicChatBox(

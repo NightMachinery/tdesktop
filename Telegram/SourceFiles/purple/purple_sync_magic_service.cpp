@@ -2,6 +2,7 @@
 
 #include "base/weak_ptr.h"
 #include "core/application.h"
+#include "crl/crl_on_main.h"
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_session.h"
@@ -15,6 +16,7 @@
 #include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_chat_carry_gate.h"
 #include "purple/purple_sync_local_store.h"
+#include "purple/purple_sync_magic_box.h"
 #include "purple/purple_sync_magic_telegram.h"
 #include "purple/purple_sync_request_sender.h"
 
@@ -115,6 +117,14 @@ Holder::Holder(not_null<Main::Session*> session)
 		if (const auto session = self ? self->_session.get() : nullptr) {
 			self->refreshHidden();
 			Changes.fire_copy(session);
+			const auto &last = self->_chat->last();
+			if (last.kind == SyncMagicResult::Kind::Problem && last.show) {
+				crl::on_main([weak = base::make_weak(session)] {
+					if (const auto session = weak.get()) {
+						ToastSyncMagicProblem(session);
+					}
+				});
+			}
 		}
 	});
 	refreshHidden();

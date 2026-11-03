@@ -10,7 +10,8 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp',
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
-    'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp']}
+    'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
+    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp']}
 
 RouteNames = set()
 
@@ -24,6 +25,12 @@ def inspect(values):
     require('startup-order', app.index('StartSyncChatDiscovery();') < app.index('StartAutomaticSettingsSync();'))
     require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
     require('sync-screen-origin', 'EnsureSyncChatResolved(session, true);' in values['purple_sync_setup_box.cpp'])
+    magic = values['purple_sync_magic_service.cpp']
+    toast = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
+    require('magic-problem-toast', 'last.kind == SyncMagicResult::Kind::Problem && last.show' in magic
+        and 'ToastSyncMagicProblem(session);' in magic
+        and 'chat->shown();' in toast and toast.index('chat->shown();') < toast.index('showToast(')
+        and 'SyncMagicChatBox' in toast)
     auto = values['purple_sync_auto_service.cpp']
     require('auto-bound-facts', 'facts.chatResolved = Resolved();' in auto and 'facts.chatProblem = SyncMagicPaused(' in auto
         and 'bound && *bound == StateChat()' in auto)
@@ -191,6 +198,8 @@ negative = [
     ('purple_sync_auto_service.cpp', 'self->_store.get() == store && self->_sessionId == owner', 'true', 'borrowed-proof-run'),
     ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
+    ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-toast'),
+    ('purple_sync_magic_box.cpp', '\tchat->shown();\n\tconst auto weak = base::make_weak(controller);', '\tconst auto weak = base::make_weak(controller);', 'magic-problem-toast'),
 ]
 for name, before, after, expected in negative:
     mutated = dict(files)

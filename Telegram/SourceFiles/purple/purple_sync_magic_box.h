@@ -17,6 +17,8 @@ namespace Purple {
 void ShowSyncMagicProblemOnce(
 	not_null<Main::Session*> session,
 	std::shared_ptr<Ui::Show> show);
+// Shows a new problem once in the active window of that session, linking to the Sync chat box.
+void ToastSyncMagicProblem(not_null<Main::Session*> session);
 
 void SyncMagicChatBox(
 	not_null<Ui::GenericBox*> box,
