@@ -385,6 +385,8 @@ PRIVATE
     purple/purple_sync_chat_carry_codec.cpp
     purple/purple_sync_chat_journal.cpp
     purple/purple_sync_chat_journal.h
+    purple/purple_sync_chat_magic.cpp
+    purple/purple_sync_chat_magic.h
     purple/purple_account_files.cpp
     purple/purple_account_files.h
     purple/purple_local_choice.cpp
