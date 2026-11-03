@@ -66,6 +66,11 @@ CASES = {
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtNetwork', 'AppKit'],
         'arguments': ['{fixtures}/emoji.webp'],
     },
+    'sync-diag': {
+        'program': 'sync_diag_cases.cpp',
+        'units': ['purple/purple_sync_diag.cpp'],
+        'frameworks': ['QtCore'],
+    },
     'storage-passcode': {
         # The Persian-keyboard passcode decision that storage_domain.cpp's
         # derivation hook makes, over the real purple-core mapper.

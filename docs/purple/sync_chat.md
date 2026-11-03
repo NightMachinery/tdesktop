@@ -54,3 +54,21 @@ include archived chats, use the empty filter and consume bounded pages; the
 caption/document limit-one settings hint is not inventory. Incomplete scans and
 unknown exact reads never prove absence. Automatic settings sync remains
 Self-only, and established-stream moves remain held for carry execution.
+
+## Diagnostics
+
+Sync writes structured lines to log.txt as `Purple diag: <area> <event>
+key=value...` through purple_sync_diag. Areas, events, field names and
+enumerated values must be words of its vocabulary; anything else is written
+`invalid`, and counts and seconds are clamped, so an id, a chat title or other
+free text cannot reach a line. The vocabulary matches Android's
+PurpleDiagLogStore words for the `sync_chat` area.
+
+A repeat limit keeps a failure that repeats thousands of times from flooding
+the log. Each distinct line body may be written 3 times per 10 minutes; later
+copies are only counted. When the window ends, when the body is evicted from
+the 64 most recently seen ones, or when the clock goes backwards, one
+`diag repeated area=<area> event=<event> count=<n>` line reports the dropped
+copies. StartAppServices installs the log.txt sink; earlier lines are dropped.
+The gate `cases-sync-diag` (purple/tests/sync_diag_cases.cpp) checks the
+vocabulary, the line shape and the limit.

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_app_services.h"
 
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_diag.h"
 
 #include "purple/purple_focus.h"
 #include "purple/purple_emoji_export.h"
@@ -25,6 +26,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Purple {
 
 void StartAppServices() {
+	SetSyncDiagSink([](const QString &line) {
+		LOG(("Purple diag: %1").arg(line));
+	});
 	StartDesktopAccountRouting();
 	StartSyncChatDiscovery();
 	StartAutomaticSettingsSync();

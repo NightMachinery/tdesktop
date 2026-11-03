@@ -246,6 +246,8 @@ PRIVATE
     purple/purple_sync_config_review.h
     purple/purple_sync_config_text.cpp
     purple/purple_sync_config_text.h
+    purple/purple_sync_diag.cpp
+    purple/purple_sync_diag.h
     purple/purple_sync_chat_create.cpp
     purple/purple_sync_chat_create.h
     purple/purple_sync_chat_create_store.cpp
