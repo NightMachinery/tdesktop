@@ -298,3 +298,78 @@ Verdict: CHANGES. P1=0 P2=1 (finding 3 is not fixed). No new P1 or P2.
 
 1. Finding 3: make "−10" after a song ends work as described above, or
    remove the stopped branch, its test and the doc promise.
+
+## Re-check 2
+
+Scope: `2e58de3..8f792fa` on `recording` (one commit, "Replay the last seek
+step after a track ends"). Read-only; `recording` was not changed. Checks run
+here: `recording_cases.cpp` with `g++ -std=c++20 -Wall -Wextra` passes 46/46
+with no warnings; `purple/test_media_hooks.py` passes 40/40. The change
+touches no upstream file.
+
+Verdict: APPROVE. P1=0 P2=0. Finding 3 is fixed; two new P3 notes below.
+
+### Finding 3: fixed, through upstream's own resume path
+
+Trace: a song plays to its end. `handleStreamingUpdate` gets `Finished` and
+calls `clearStreamed`, so `getState(Song)` is a default `TrackState` with an
+empty id, while `current(Song)` still names the song (the bar still shows
+it). `SeekBy` now passes `ended = !state.id && document` and the
+document's own `duration()` (milliseconds; `-1` when unknown).
+`PlanSeek` takes the `!current` branch:
+`SeekTarget(length, length, -1, step)` gives `length − step`, or 0 for a
+track shorter than the step. The result is `Restart` at that position.
+Forward gives `Consume`, and an unknown or over-long length gives
+`Decline`.
+
+`RestartAt` stores the target with
+`Storage::Account::setMediaLastPlaybackPosition` and calls
+`Instance::play(current)`. That call is synchronous all the way into the
+upstream code that reads the position:
+
+1. `play` gets `sharedDocument`.
+2. `playStreamed` calls `clearStreamed(data, false)`, a no-op because there
+   is no stream, so it does not overwrite the stored position.
+3. `streamingOptions(audioId)`, with the default position `-1`, reads
+   `mediaLastPlaybackPosition` into `result.position` and resets it to 0.
+
+This is the same path upstream uses to resume a long song. If `play`
+returns early (no shared document, or not an audio, voice or video
+message), the stored value is still the target, and `RestartAt` clears it.
+The value 0 is handled too: `setMediaLastPlaybackPosition` erases the entry
+for `time <= 0`, and the stream then starts at 0:00. `setCurrent` returns
+early because `data->current` already equals the id, so passing no
+playlist context does not reset the playlist. That matches upstream's own
+`play(type)` for the bar's play button. A voice restart goes through
+`pauseSongForVoice`, as any voice play does.
+
+The system media controls take the same route: `Restart` is not `Decline`,
+so upstream's skip branch (which would see `length == 0`) is not reached.
+The stopped branch with a live stream now declines, and its old test was
+replaced; the "after the end" cases test the state the player really
+reports. `media_recording.md` now describes the real mechanism. The new
+`// WHY:` comment is two lines, within `AGENTS.md`'s allowance.
+
+### New notes (P3, not blocking)
+
+- **A failed track is retried.** `handleStreamingError` also calls
+  `clearStreamed`, so a track that failed to open, or is not streamable,
+  also reads as "ended". "−10" or the OS skip-back then calls `play` again.
+  For `NotStreamable` and `OpenFailed`, that repeats upstream's
+  `DocumentSaveClickHandler::SaveAndTrack` on the next failure. It is
+  narrow, and the same as pressing play on the bar; a check of
+  `document->loading()` or a remembered failure would avoid it.
+- **One saved resume point can be evicted.** When the per-account list of
+  saved positions is full (`kMaxSavedPlaybackPositions`, 256),
+  `setMediaLastPlaybackPosition` drops the oldest entry before adding the
+  restart position, which `streamingOptions` then removes again. Each
+  restart can therefore delete the oldest saved resume point of some other
+  long track. It needs 256 saved positions and is easy to miss; it only
+  matters if the owner keeps that many.
+
+### Status
+
+All P1 and P2 findings from the first review are fixed. The open items are
+P3 follow-ups: the paused-seek scrubber and the `findChild` walk, both
+listed in `media_recording.md`; the media viewer's Alt+Shift+Arrow while the
+bar is shown on Windows and Linux; and the two notes above.
