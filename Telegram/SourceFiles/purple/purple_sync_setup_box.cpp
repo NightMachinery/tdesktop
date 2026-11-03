@@ -671,7 +671,7 @@ void RunFirstUse(
 	state->asking = false;
 	state->publishing = true;
 	SetStatus(*state, tr::lng_purple_sync_first_running(tr::now));
-	RunSyncFirstUse(session, inventory, choice, crl::guard(box, [=](SyncFirstUseResult result) {
+	RunSyncFirstUse(session, (choice == SyncFirstUseChoice::None) ? std::make_optional(inventory) : std::nullopt, choice, crl::guard(box, [=](SyncFirstUseResult result) {
 		if (!state->publishing || state->generation != generation || state->selectedSession.get() != origin.get()) {
 			return;
 		}
