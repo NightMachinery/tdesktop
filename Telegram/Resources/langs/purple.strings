@@ -203,6 +203,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_sync_first_synced" = "Use the synced settings";
 "lng_purple_sync_first_this_device" = "Use this device's settings";
 "lng_purple_sync_first_wait" = "Waiting for a device with your settings. This device still has the default settings, so it publishes nothing.";
+"lng_purple_sync_first_wait_file" = "This device's settings.toml has an error, so sync publishes and applies nothing for it. Fix the file, then check the sync chat again.";
 "lng_purple_sync_first_running" = "Setting up sync with the sync chat.";
 "lng_purple_sync_first_published" = "Sync is set up: this device's settings are in the sync chat.";
 "lng_purple_sync_first_joined" = "Sync is set up with the synced settings. This device's previous file is in History.";
