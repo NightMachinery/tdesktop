@@ -7,6 +7,7 @@
 #include "purple/purple_sync_envelope.h"
 #include "purple/purple_sync_magic_chat.h"
 #include "purple/purple_sync_account_recovery.h"
+#include "purple/purple_sync_local_store.h"
 
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
@@ -806,6 +807,19 @@ PublishFiles &MagicDevice(PublishFiles &files, const QByteArray &settings) {
 	return files;
 }
 
+SyncAccountInventoryResult InventoryAt(const std::vector<std::pair<int32_t, QByteArray>> &records) {
+	auto candidates = std::vector<SyncCandidateRecord>();
+	auto ids = std::vector<int32_t>();
+	for (const auto &[id, bytes] : records) {
+		auto candidate = ClassifySyncCandidate(id, bytes);
+		candidate.documentId = 6000 + uint64_t(id); candidate.editDate = 1700000000;
+		candidates.push_back(candidate); ids.push_back(id);
+	}
+	return FinishSyncAccountInventory(123,
+		{ SyncHistoryScanStatus::Complete, ids, uint64_t(ids.size()) },
+		SyncCandidateReadResult{ SyncCandidateReadStatus::Complete, candidates });
+}
+
 SyncLocalState StateOf(const PublishFiles &files) {
 	const auto parsed = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
 	CHECK(parsed);
@@ -919,6 +933,7 @@ void FirstUseD1() {
 		CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/carry.json"_q, "{}") == SyncStoreStatus::Ready);
 		CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/carry-cache.json"_q, "{}") == SyncStoreStatus::Ready);
 		CHECK(EnsureSyncPrivateDirectory(files.files.syncDirectory + u"/carry-objects"_q) == SyncStoreStatus::Ready);
+		CHECK(SyncCarryStartupAdmission(files.files.syncDirectory, files.token) != SyncStoreStatus::Ready);
 		const auto fresh = BuildOther(2, 1800000000000, kCustomOther);
 		const auto inventory = InventoryOf({ fresh.built.canonical });
 		CHECK(*inventory.directory.selectedSpace != oldSpace);
@@ -931,6 +946,7 @@ void FirstUseD1() {
 		CHECK(RetireSyncCarryLeftovers(files.files.syncDirectory, kArchiveDate));
 		CHECK(!SyncCarryLeftoversPresent(files.files.syncDirectory));
 		CHECK(SyncPathIdentity(files.files.syncDirectory + u"/carry-retired-"_q + kArchiveDate + u"/carry.json"_q) != "missing");
+		CHECK(SyncCarryStartupAdmission(files.files.syncDirectory, files.token) == SyncStoreStatus::Ready);
 		CHECK(RetireSyncCarryLeftovers(files.files.syncDirectory, kArchiveDate));
 		const auto answered = ReviewSyncFirstUse(files.files, inventory, choice);
 		CHECK(answered.need == SyncFirstUseNeed::OtherSpace && !answered.carry);
@@ -949,9 +965,11 @@ void FirstUseD1() {
 			CHECK(SpaceOf(run.staged) == fresh.space);
 			CHECK(ParentsOf(run.staged) == SyncConfigVersionKeys({ fresh.built.version }));
 		}
-		const auto later = join ? inventory : InventoryOf({ fresh.built.canonical, run.staged });
+		const auto later = join ? inventory : InventoryAt({ { 20, fresh.built.canonical }, { 50, run.staged } });
 		const auto again = ReviewSyncFirstUse(files.files, later);
 		CHECK(again.need == SyncFirstUseNeed::None && !again.action && !again.carry);
+		const auto checked = ReviewSyncConfigInventory(later, &state, QByteArray(), ReadSyncSettingsFile(files.files));
+		CHECK(checked.status == SyncConfigReviewStatus::Ready && checked.reason == SyncConfigReviewReason::None);
 		std::printf("FIRST USE D1 choice=%d space_ok=%d\n", int(choice), int(state.space == fresh.space));
 	}
 }
@@ -967,18 +985,48 @@ void FirstUseMigration() {
 	CHECK(seed.reply.result.status == SyncConfigPublishStatus::Confirmed);
 	const auto shared = RunMagicFlow(second, InventoryOf({ seed.staged }), std::nullopt, 0);
 	CHECK(shared.reply.result.status == SyncConfigPublishStatus::AlreadySynced);
-	CHECK(StateOf(first).space == StateOf(second).space);
-	auto prompts = 0;
-	for (const auto &records : { std::vector<QByteArray>(), std::vector<QByteArray>{ seed.staged } }) {
-		const auto inventory = InventoryOf(records);
-		for (const auto device : { &first, &second }) {
-			const auto review = ReviewSyncFirstUse(device->files, inventory);
-			CHECK(review.need == SyncFirstUseNeed::None && !review.action);
-			prompts += (review.action == SyncFirstUseAction::Ask) ? 1 : 0;
-		}
+	const auto space = StateOf(first).space;
+	CHECK(!space.isEmpty() && StateOf(second).space == space);
+	const auto oldChat = PeerToken{ PeerTokenKind::Channel, 999 };
+	for (const auto device : { &first, &second }) {
+		auto before = StateOf(*device);
+		before.chat = oldChat;
+		const auto old = SerializeSyncLocalState(before); CHECK(old);
+		CHECK(WriteSyncPrivateFile(device->files.syncStore, old.canonical) == SyncStoreStatus::Ready);
+		const auto moved = MoveSyncStateToChat(StateOf(*device), kMagicChat, uint64_t(Origin.account.userId));
+		CHECK(moved.move && moved.move.changed && moved.move.state.space == space);
+		const auto encoded = SerializeSyncLocalState(moved.move.state); CHECK(encoded);
+		CHECK(WriteSyncPrivateFile(device->files.syncStore, encoded.canonical) == SyncStoreStatus::Ready);
+		CHECK(StateOf(*device).chat == kMagicChat && StateOf(*device).space == space);
 	}
+	auto prompts = 0;
+	const auto empty = InventoryOf({});
+	for (const auto device : { &first, &second }) {
+		const auto review = ReviewSyncFirstUse(device->files, empty);
+		CHECK(review.need == SyncFirstUseNeed::None && !review.action);
+		prompts += (review.action == SyncFirstUseAction::Ask) ? 1 : 0;
+	}
+	const auto republished = RunMagicFlow(first, empty, SyncConfigPublishRequest{
+		.expectedFingerprint = MakeSyncSettingsFile(SyncSettingsFileStatus::Present, kCustom).fingerprint,
+		.expectedParents = std::vector<QString>() }, 61);
+	CHECK(republished.reply.result.status == SyncConfigPublishStatus::Confirmed);
+	CHECK(SpaceOf(republished.staged) == space && StateOf(first).space == space);
+	const auto magic = InventoryAt({ { 61, republished.staged } });
+	CHECK(magic.directory.selectedSpace == space);
+	for (const auto device : { &first, &second }) {
+		const auto review = ReviewSyncFirstUse(device->files, magic);
+		CHECK(review.need == SyncFirstUseNeed::None && !review.action);
+		prompts += (review.action == SyncFirstUseAction::Ask) ? 1 : 0;
+	}
+	const auto joined = RunMagicFlow(second, magic, std::nullopt, 0);
+	CHECK(joined.reply.result.status == SyncConfigPublishStatus::AlreadySynced);
+	CHECK(StateOf(second).space == space && StateOf(second).chat == kMagicChat);
+	const auto secondState = StateOf(second);
+	const auto checked = ReviewSyncConfigInventory(magic, &secondState, QByteArray(), ReadSyncSettingsFile(second.files));
+	CHECK(checked.status == SyncConfigReviewStatus::Ready && checked.reason == SyncConfigReviewReason::None);
 	CHECK(prompts == 0);
-	std::printf("FIRST USE migration prompts=%d\n", prompts);
+	std::printf("FIRST USE migration prompts=%d one_space=%d\n", prompts,
+		int(StateOf(first).space == StateOf(second).space));
 }
 
 void FirstUseRace() {
