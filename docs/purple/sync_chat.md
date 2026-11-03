@@ -80,6 +80,10 @@ local settings there with the old base as parent. A refused move leaves the
 state where it was, and automatic sync then holds instead of using the old
 chat. Each move writes one `sync_chat migration` diagnostic line.
 
+The move does not depend on automatic sync being on. It also runs when the
+lookup reports a new bound chat (`MoveSyncStateToBoundChat`), opening the
+store only for the move and closing it again.
+
 The automatic facts call the chat resolved when the lookup's chat equals the
 state's chat, and report a lookup problem, which pauses automatic sync
 (`SyncChatProblem`). Check, read, post, edit and retire all use the lease for

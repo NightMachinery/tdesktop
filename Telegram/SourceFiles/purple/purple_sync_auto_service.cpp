@@ -49,6 +49,7 @@ public:
 	SyncAutoReason FailureReason() const { return _failureReason; }
 	void Saved();
 	void Replaced();
+	bool MoveToBound();
 	bool Running(const SyncAutoRecord &record) const {
 		return _inFlight && _store && record.active && record.session == _sessionId && record.ticket == _plan.ticket;
 	}
@@ -56,6 +57,7 @@ public:
 private:
 	bool Current() const;
 	bool Open();
+	void MoveStore();
 	[[nodiscard]] PeerToken StateChat() const;
 	[[nodiscard]] bool Resolved() const;
 	std::optional<SyncAutoFacts> Facts();
@@ -179,16 +181,37 @@ bool AutoSession::Open() {
 		return self && self->Current();
 	});
 	if (!_store->Open()) { _store.reset(); return false; }
-	const auto bound = SyncMagicBound(session);
-	if (bound && *bound != StateChat()) {
-		const auto local = ReadSyncSettingsFile(_store->files());
-		const auto moved = !local.fingerprint.isEmpty()
-			&& _store->MoveTo(*bound, session->userId().bare, local.fingerprint);
-		SyncDiag(u"sync_chat"_q, u"migration"_q, {
-			SyncDiagCode(u"step"_q, u"move"_q),
-			SyncDiagCode(u"outcome"_q, moved ? u"ok"_q : u"error"_q) });
-	}
+	MoveStore();
 	return true;
+}
+
+void AutoSession::MoveStore() {
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	if (!_store || !bound || *bound == StateChat()) { return; }
+	const auto local = ReadSyncSettingsFile(_store->files());
+	const auto moved = !local.fingerprint.isEmpty()
+		&& _store->MoveTo(*bound, session->userId().bare, local.fingerprint);
+	SyncDiag(u"sync_chat"_q, u"migration"_q, {
+		SyncDiagCode(u"step"_q, u"move"_q),
+		SyncDiagCode(u"outcome"_q, moved ? u"ok"_q : u"error"_q) });
+}
+
+// WHY: manual Check and Share need the state in the bound chat too, so the move runs whether or not
+// automatic sync is on; a store opened only for it is closed again, releasing the account lock.
+bool AutoSession::MoveToBound() {
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	if (!bound || _inFlight) { return false; }
+	const auto opened = (_store != nullptr);
+	if (!Open()) { return false; }
+	if (opened) { MoveStore(); }
+	const auto moved = (StateChat() == *bound);
+	if (!opened) {
+		_store.reset();
+		_opening.reset();
+	}
+	return moved;
 }
 
 PeerToken AutoSession::StateChat() const {
@@ -700,6 +723,9 @@ void StartAutomaticSettingsSync() {
 	}, lifetime);
 	SyncChatStatusChanges() | rpl::on_next([](Main::Session *session) {
 		Changes.fire({});
+		if (session && SyncMagicBound(session)) {
+			For(session).MoveToBound();
+		}
 		if (session && (SyncMagicBound(session) || SyncMagicPaused(session))) {
 			For(session).Event(SyncAutoEvent::SessionReady);
 		}
@@ -723,6 +749,8 @@ void SuppressAutomaticSettingsSave(not_null<Main::Session*> session) {
 }
 
 void ObserveAutomaticSettingsSave(not_null<Main::Session*> session) { For(session).Saved(); }
+
+bool MoveSyncStateToBoundChat(not_null<Main::Session*> session) { return For(session).MoveToBound(); }
 
 bool SetAutomaticSettingsSync(not_null<Main::Session*> session, bool enabled) {
 	return For(session).Event(enabled ? SyncAutoEvent::Enable : SyncAutoEvent::Disable)

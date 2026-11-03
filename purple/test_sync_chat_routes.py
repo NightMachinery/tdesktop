@@ -37,6 +37,7 @@ def inspect(values):
     require('disable-exempt', 'event != SyncAutoEvent::Disable && !SyncMagicBound(session) && !SyncMagicPaused(session)' in auto)
     require('auto-owned-hold', 'Hold(SyncAutoReason::SyncChatNotResolved);' in auto)
     require('auto-visible', 'if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }' in auto)
+    require('magic-move-unbound-auto', 'if (session && SyncMagicBound(session)) {\n\t\t\tFor(session).MoveToBound();' in auto and 'MoveStore();' in auto)
     service = values['purple_sync_chat_service.cpp']
     require('typed-inventory-route', 'ValidDesktopSyncChatIo(route)' in service and 'command.origin, command.ticket, command.chat, result' in service)
     require('tri-state-records', all('return GetSyncChatMessageOwnership(' in values[name] for name in ['purple_sync_history_scanner.cpp','purple_sync_candidate_reader.cpp']))
@@ -199,6 +200,7 @@ negative = [
     ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
     ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-toast'),
+    ('purple_sync_auto_service.cpp', '\t\t\tFor(session).MoveToBound();\n', '', 'magic-move-unbound-auto'),
     ('purple_sync_magic_box.cpp', '\tchat->shown();\n\tconst auto weak = base::make_weak(controller);', '\tconst auto weak = base::make_weak(controller);', 'magic-problem-toast'),
 ]
 for name, before, after, expected in negative:
