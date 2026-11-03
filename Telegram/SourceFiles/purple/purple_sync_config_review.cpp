@@ -230,19 +230,12 @@ SyncFirstUseReview ReviewSyncFirstUse(
 	input->choice = choice;
 	result.input = *input;
 	result.action = PlanSyncFirstUse(*input);
-	auto parents = std::vector<QString>();
-	if (selected) {
-		const auto heads = ExtractSyncConfigHeads(inventory, *selected, QString());
-		for (const auto &record : heads.heads) {
-			parents.push_back(record.head.key);
-		}
-		if (heads.heads.size() == 1) {
-			result.headKey = heads.heads.front().head.key;
-		}
-	}
+	result.headKey = input->headKey;
 	result.sameBytes = input->head && input->head->fingerprint == local.fingerprint;
 	result.request.expectedFingerprint = local.fingerprint;
-	result.request.expectedParents = std::move(parents);
+	result.request.expectedParents = input->headKey
+		? std::vector<QString>{ *input->headKey }
+		: std::vector<QString>();
 	return result;
 }
 

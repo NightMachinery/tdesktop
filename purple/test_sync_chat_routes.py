@@ -12,7 +12,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
     'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
-    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp']}
+    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp', 'purple_sync_config_review.cpp']}
 
 RouteNames = set()
 
@@ -210,6 +210,10 @@ def inspect(values):
     require('first-use-named-failures', auto.count('FirstUseFinish(SyncFirstUseOutcome::Failed') == 2
         and 'SyncDiagReason(reason) });' in auto and 'code.isEmpty() ? u"unknown"_q : code' in run
         and len(reasons) >= 12 and all(f'u"{reason}"_q' in failures_text for reason in reasons if reason != 'apply_refused'))
+    first_review = values['purple_sync_config_review.cpp'].split('SyncFirstUseReview ReviewSyncFirstUse(', 1)[-1].split('SyncConfigReview ReviewSyncConfig(', 1)[0]
+    require('first-use-core-head', 'result.headKey = input->headKey;' in first_review
+        and '? std::vector<QString>{ *input->headKey }' in first_review
+        and 'ExtractSyncConfigHeads(' not in first_review and 'heads.size()' not in first_review)
     require('first-use-actions', 'publish ? review.request : SyncConfigPublishRequest()' in run
         and '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)' in run
         and 'self->FirstUseJoined(inventory, review);' in run
@@ -290,6 +294,7 @@ negative = [
     ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'mark.choice = review.input.choice;', '', 'first-use-mark'),
+    ('purple_sync_config_review.cpp', 'result.headKey = input->headKey;', 'const auto heads = ExtractSyncConfigHeads(inventory, *selected, QString());\n\tif (heads.heads.size() == 1) { result.headKey = heads.heads.front().head.key; }', 'first-use-core-head'),
     ('purple_sync_auto_service.cpp', 'FirstUseFail(u"archive_refused"_q);', 'FirstUseFinish(SyncFirstUseOutcome::Failed);', 'first-use-named-failures'),
     ('purple_sync_auto_service.cpp', ': (reason == u"archive_refused"_q) ? tr::lng_purple_sync_first_failed_archive(tr::now)\n', '', 'first-use-named-failures'),
     ('purple_sync_auto_service.cpp', '\t\tSyncDiagReason(reason) });', '\t\tSyncDiagCode(u"step"_q, u"failed"_q) });', 'first-use-named-failures'),
