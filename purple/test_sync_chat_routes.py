@@ -27,6 +27,8 @@ def inspect(values):
     require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
     discovery = values['purple_sync_chat_service.cpp'].split('void StartSyncChatDiscovery() {', 1)[-1]
     require('startup-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in discovery)
+    autostart = values['purple_sync_auto_service.cpp'].split('void StartAutomaticSettingsSync() {', 1)[-1].split('void TriggerAutomaticSettingsSync(', 1)[0]
+    require('auto-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in autostart)
     archive = values['purple_archive_service.cpp'].split('void StartArchiveServices() {', 1)[-1].split('void RemoveArchiveAtLogout(', 1)[0]
     require('archive-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in archive
         and archive.index('accountsChanges()') < archive.index('activeSessionChanges()') < archive.index('\trefresh();'))
@@ -236,6 +238,7 @@ negative = [
     ('purple_app_services.cpp', 'StartSyncChatDiscovery();', 'StartSyncChatDiscoveryLater();', 'startup-order'),
     ('purple_sync_chat_service.cpp', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);', 'Other(session);', 'startup-origin'),
     ('purple_sync_chat_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'startup-stored-sessions'),
+    ('purple_sync_auto_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'auto-stored-sessions'),
     ('purple_archive_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'archive-stored-sessions'),
     ('purple_sync_setup_box.cpp', 'EnsureSyncChatResolved(session, true);', 'Other(session);', 'sync-screen-origin'),
     ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable', 'event != SyncAutoEvent::Enable', 'disable-exempt'),

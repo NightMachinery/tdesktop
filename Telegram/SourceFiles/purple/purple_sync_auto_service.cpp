@@ -1060,6 +1060,7 @@ void StartAutomaticSettingsSync() {
 		}
 	}, lifetime);
 	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);
+	Core::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);
 	Core::App().appDeactivatedValue() | rpl::on_next([](bool deactivated) {
 		if (!deactivated) { TriggerAutomaticSettingsSync(SyncAutoEvent::Foreground); }
 	}, lifetime);
