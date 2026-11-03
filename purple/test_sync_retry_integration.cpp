@@ -267,8 +267,9 @@ public:
  struct {Main::Session *value;Main::Session *get()const{return value;}}_session;
  std::shared_ptr<int> lifetime=std::make_shared<int>(0);
  std::unique_ptr<EffectStore> _store=std::make_unique<EffectStore>();
- bool current=true,fresh=true,owned=true;int reads=0;
+ bool current=true,fresh=true,owned=true;int reads=0;PeerToken stateChat;
  bool EffectCurrent(const SyncAutoPlan &)const{return current;}
+ PeerToken StateChat()const{return stateChat;}
  DesktopSyncChatOperation OperationFor(const SyncAutoPlan &){return {};}
  void ReadForEffect(const SyncAutoPlan &,Fn<void(SyncAutoServerRead)> done){++reads;done({fresh,owned});}
  void RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready);
@@ -341,15 +342,16 @@ int main(){
   sender.failed(p,{420,MTP::Text("FLOOD_WAIT_8")});Mono=p->retryAtMs;sender.tick(p);sender.cancelAll();gate(true);
   Check(sender._api.events.size()==1,"cancel during asynchronous resume gate prevents replay");
  }
- for(int mode=0;mode!=5;++mode){
+ for(int mode=0;mode!=6;++mode){
   Main::Session session;AutoSession owner;owner._session.value=&session;MarkValid=mode!=0;HoldGate=false;
   if(mode==1)owner._store->target=false;
   if(mode==2)owner.fresh=false;
   if(mode==3)owner.owned=false;
+  if(mode==5)owner.stateChat=PeerToken{7};
   int replies=0;bool allowed=false;
   owner.RenewEffect({},[&](bool value){++replies;allowed=value;});
   Check(replies==1&&allowed==(mode==4),"delete resume renews mark and exact owned target bytes");
-  Check(owner.reads==(mode==0?0:1),"lost mark refuses before delete target read");
+  Check(owner.reads==((mode==0||mode==5)?0:1),"lost mark or another chat refuses before delete target read");
  }
  {
   Mono=0;Unix=1000000;DownloadProbe reader;reader.Start();auto late=reader.late;
