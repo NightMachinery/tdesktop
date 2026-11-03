@@ -283,7 +283,12 @@ mark: "Recovered after a crash", "Partly recovered", "Not sent",
 
 - Play plays it in the box (a round in a small circle) through
   `Editor::SegmentPlayer`, from memory; nothing decrypted touches the disk.
-- Send sends it to its own chat and topic, with the recording's own account,
+- Send sends it to its own chat and topic, with the recording's own account.
+  A recording made in a forum topic is never sent to General instead: until
+  that topic is loaded (the box asks for it) there is no Send button, and a
+  deleted topic, or a chat that is no longer a forum, never gets one. The chat
+  is found among every peer the account knows, not only the open dialogs, and
+  the box refreshes when a peer's name arrives. It is sent
   through `ApiWrap::sendVoiceMessage`, the route the voice bar uses. A voice
   recording gets its waveform and duration from `Media::TrimAudioToRange`.
   A round is remuxed into a standard MP4 first, so a fragmented recovery

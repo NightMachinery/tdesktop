@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "data/data_changes.h"
+#include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -72,9 +74,10 @@ struct BinState {
 
 [[nodiscard]] History *HistoryOf(const RecordingBinItem &item) {
 	const auto session = RecordingAccountSession(item.account);
-	return (session && item.peer)
-		? session->data().historyLoaded(item.peer)
+	const auto peer = (session && item.peer)
+		? session->data().peerLoaded(item.peer)
 		: nullptr;
+	return peer ? session->data().history(peer).get() : nullptr;
 }
 
 [[nodiscard]] QString ChatText(const RecordingBinItem &item) {
@@ -110,16 +113,22 @@ struct BinState {
 	return mark.isEmpty() ? result : (result + '\n' + mark);
 }
 
-[[nodiscard]] Data::Thread *OriginalThread(const RecordingBinItem &item) {
+[[nodiscard]] Data::Thread *OriginalThread(
+		const RecordingBinItem &item,
+		Fn<void()> topicLoaded = nullptr) {
 	const auto history = HistoryOf(item);
-	if (!history) {
-		return nullptr;
-	} else if (item.topic) {
-		if (const auto topic = history->peer->forumTopicFor(item.topic)) {
-			return topic;
-		}
+	if (!history || !item.topic) {
+		return history;
 	}
-	return history;
+	const auto forum = history->peer->forum();
+	if (!forum) {
+		return nullptr;
+	} else if (const auto topic = forum->topicFor(item.topic)) {
+		return topic;
+	} else if (topicLoaded) {
+		forum->requestTopic(item.topic, std::move(topicLoaded));
+	}
+	return nullptr;
 }
 
 void Send(
@@ -257,7 +266,7 @@ void AddItem(
 			: tr::lng_purple_recording_bin_play(tr::now), [=] {
 			TogglePlay(box, state, copy);
 		});
-		if (OriginalThread(item)) {
+		if (OriginalThread(item, crl::guard(box, [=] { state->rebuild(); }))) {
 			add(tr::lng_purple_recording_bin_send(tr::now), [=] {
 				if (const auto thread = OriginalThread(copy)) {
 					Send(box, id, thread);
@@ -340,6 +349,15 @@ void RecordingBinBox(
 	RecordingBinChanges() | rpl::on_next([=] {
 		state->rebuild();
 	}, box->lifetime());
+	for (const auto &entry : Core::App().domain().accounts()) {
+		if (const auto session = entry.account->maybeSession()) {
+			session->changes().peerUpdates(
+				Data::PeerUpdate::Flag::Name
+			) | rpl::on_next([=] {
+				state->rebuild();
+			}, box->lifetime());
+		}
+	}
 	state->rebuild();
 	box->addLeftButton(tr::lng_purple_recording_bin_clear(), [=] {
 		if (!RecordingBinCount()) {
