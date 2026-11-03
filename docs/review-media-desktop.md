@@ -203,3 +203,94 @@ Before merge:
   goes beyond the design but follows the owner's decision and is documented.
 - **Privacy.** No personal paths, emails or tokens in the diff, and all six
   commits are authored by `noreply`.
+
+## Re-check 1
+
+Scope: commit `8842259` on `origin/media`, checked against the findings
+above. I traced each fix and looked only for regressions the fix introduces.
+
+The pure cases pass, with `voice_queue_cases` still built against the same
+purple-core stub:
+- `test_media_hooks.py`: 18/18;
+- `media_restart_cases`: 15/15;
+- `media_size_cases`: 44/44;
+- `voice_queue_cases`: 25/25.
+
+I still did not build the app. The new `crl::on_main` calls, including the
+guarded one on `not_null<Float*>`, are not compile-checked.
+
+Verdict: **CHANGES**, only because P2-2 is untouched. The code fixes are
+sound.
+
+### Closed
+
+- **P1-1: closed.** Take a playing or paused round in a chat:
+  1. `textState` returns `_seekl`, whose context is empty.
+  2. `ResolveRestartContext(FullMsgId(), true, current.contextId())` returns
+     the current track's id. `FullMsgId` has `operator!`, so the template
+     instantiates.
+  3. `owner().message(...)` finds the item, so `currentTrack` is true, and
+     `seekable` is true while the track streams.
+  4. The result is `Restart::Seek`: `finishSeeking(Voice, 0.)`, then
+     `play(Voice)` if paused. The hook returns true, so the second release
+     toggles nothing.
+
+  An incoming voice message's waveform (`voice->seekl`, empty context)
+  takes the same path. The fallback only applies when the handler's
+  document is the current track's. Both seek links are returned only while
+  the hovered message is the current track (`Gif::isRoundSeekable`,
+  `Document::textState`), so it can't pick another message. The new context
+  cases cover all four combinations.
+- **P2-1: closed.** For a track that is current but not seekable yet,
+  `RestartOnDoubleClick` returns `Replay`, which calls `play(current)`.
+  `playStreamed` restarts the stream. `clearStreamed(data, false)` saves no
+  position, because the audio is unchanged, and the first click already used
+  up the saved position. So it starts at 0:00. `setCurrent` sees the same
+  id, so no `trackChanged` fires and the voice-queue anchor is untouched.
+  The doc now matches this.
+- **P3-1: closed.** `PlaybackChatFor` is pure, with cases for Self, Replies,
+  Verification Codes, user or bot, and Other.
+- **P3-2: closed.** `expire` is queued with `crl::on_main` after
+  `automaticNext`. The automatic `trackChanged` fires synchronously inside
+  the same `jumpByItem` → `play` → `playStreamed` → `emitUpdate` stack (see
+  "Verified as correct" above), so `manual()` consumes the announcement
+  before the expiry runs. An announcement that nothing consumed is cleared
+  one loop turn later. `expire(key)` only clears a matching key.
+- **P3-3: partly closed, as documented.** `requestItemResize(view->data())`
+  now reaches every view of each item (`enumerateItemViews`), including
+  `ListWidget` views of items that are in loaded history blocks. Items held
+  only by another list (scheduled messages, thread-only loads) still wait
+  until that list is reopened, which the doc now says.
+- **P3-6: closed.** On a `MouseButtonRelease` on the float, a queued
+  `show(underMouse())` runs after `Float::mouseReleaseEvent` → `finishDrag`
+  has cleared `_drag`. The call is guarded by `floating`. A drag-out close
+  detaches the item first, so `show()` keeps the buttons hidden.
+- **P3-7: closed.** The row is now centred vertically. At the stock size the
+  outer centres are 38px from the circle's centre, and 38 + 16 = 54 < 64, so
+  the buttons stay inside the circle.
+- **P3-4 and P3-5:** documented, accepted. **P3-8:** skipped, accepted
+  (harmless).
+
+### Still open
+
+- **P2-2: not addressed.** The commit doesn't touch
+  `Telegram/ThirdParty/purple_core`. The pointer still sits on core's
+  `media` branch with the magic sync-chat work, and `purple.cmake` still
+  compiles `purple_sync_chat_magic.cpp`. Either fix it before merge, or the
+  coordinator or owner records that they accept it as is. Once they do,
+  this re-check becomes APPROVE.
+
+### Regression introduced by the fix (P3)
+
+- **P3-9. The centred row covers the float's middle.** On hover, the
+  108x32 strip across the centre is now buttons. A press there doesn't drag
+  or single-click-pause; it hits one of the buttons, which does the same
+  thing as a click. A double-click there doesn't restart, because it lands
+  on an `AbstractButton`: on the pause button that is two toggles, and on
+  the open or close button it is a double action. It also covers the centre
+  of the video while hovered.
+  - Restart still works everywhere else on the circle, so this is P3.
+  - Suggested fix: keep the row low but inset it to fit the circle, for
+    example its top at `inner.center().y() + inner.height() / 4 - side / 2`.
+    Or forward a double-click on any button to
+    `Purple::RestartFloatOnDoubleClick`.
