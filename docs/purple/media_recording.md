@@ -58,9 +58,17 @@ Rules (`SeekRules::PlanSeek` and `SeekRules::SeekTarget`):
   advance by surprise. Forward inside that last second does nothing rather
   than jump back.
 - A seek before the start goes to 0:00.
-- A track that ended (or was stopped) but is still the current one
-  seeks back from its end and plays, so "−10" right after a song ends
-  replays its last ten seconds. Forward there does nothing.
+- After a track ends the player drops its stream (`clearStreamed`), so
+  there is nothing to seek. While that track is still the player's
+  current one (the bar still shows it), back plays it again from its
+  length minus the step, or from 0:00 if it is shorter: Purple stores that
+  position with `setMediaLastPlaybackPosition` and calls
+  `Instance::play`, whose `streamingOptions` starts from the stored
+  position, the same path that resumes a long song. So "−10" right after a
+  song ends replays its last ten seconds. If the play does not start, the
+  stored position is cleared again. Forward there does nothing. The length
+  is the document's own duration; an unknown one does nothing.
+- A stream that is stopping is not seeked.
 - A track whose length is not known yet, or that is not the player's
   current track, is not seeked. The system controls then fall back to
   upstream's handling.
@@ -114,7 +122,8 @@ drops one of them.
   choices and their spelling, the clamping at 0, at one second before the
   end, inside the last second, for unknown lengths and for every step,
   the overflow-free conversion, the seek plan (not current, unknown
-  length, playing, paused, after the end, at 0:00) and the default keys
+  length, playing, paused, stopping, after the end with no stream left,
+  at 0:00) and the default keys
   on each platform.
 - `purple/test_media_hooks.py` (gate `test_media_hooks`): the hook pins,
   plus the shortcut enum entries, names, default keys and settings rows,

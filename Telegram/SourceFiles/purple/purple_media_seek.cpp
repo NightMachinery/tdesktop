@@ -12,6 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/platform/base_platform_info.h"
 #include "core/shortcuts.h"
+#include "data/data_document.h"
+#include "main/main_session.h"
+#include "storage/storage_account.h"
 #include "lang/lang_keys.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_float.h"
@@ -154,6 +157,17 @@ void PaintFloatSeek(
 	return parent->findChild<Ui::AbstractButton*>(name);
 }
 
+// WHY: a finished track has no stream left to seek, so it is played again
+// through upstream's own resume path, which starts at the saved position.
+void RestartAt(const AudioMsgId &audio, crl::time position) {
+	auto &local = audio.audio()->session().local();
+	local.setMediaLastPlaybackPosition(audio.audio()->id, position);
+	Media::Player::instance()->play(audio);
+	if (local.mediaLastPlaybackPosition(audio.audio()->id) == position) {
+		local.setMediaLastPlaybackPosition(audio.audio()->id, 0);
+	}
+}
+
 [[nodiscard]] bool SeekActive(int direction) {
 	return SeekBy(Media::Player::instance()->getActiveType(), direction);
 }
@@ -168,6 +182,8 @@ bool SeekBy(AudioMsgId::Type type, int direction) {
 	using Action = SeekRules::SeekAction;
 	const auto player = Media::Player::instance();
 	const auto state = player->getState(type);
+	const auto current = player->current(type);
+	const auto document = current.audio();
 	const auto plan = SeekRules::PlanSeek({
 		.current = state.id && (state.id == player->current(type)),
 		.stopped = Media::Player::IsStoppedOrStopping(state.state),
@@ -175,11 +191,15 @@ bool SeekBy(AudioMsgId::Type type, int direction) {
 		.position = state.position,
 		.length = state.length,
 		.frequency = state.frequency,
+		.ended = !state.id && document,
+		.endedDurationMs = document ? document->duration() : 0,
 	}, direction, SeekStepSeconds());
 	if (plan.action == Action::SeekPaused) {
 		player->updateSeeking(type, plan.progress);
 	} else if (plan.action == Action::SeekPlaying) {
 		player->finishSeeking(type, plan.progress);
+	} else if (plan.action == Action::Restart) {
+		RestartAt(current, plan.restartAtMs);
 	}
 	return (plan.action != Action::Decline);
 }

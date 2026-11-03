@@ -39,6 +39,8 @@ struct SeekFacts {
 	std::int64_t position = 0;
 	std::int64_t length = 0;
 	int frequency = 0;
+	bool ended = false;
+	std::int64_t endedDurationMs = 0;
 };
 
 enum class SeekAction {
@@ -46,11 +48,13 @@ enum class SeekAction {
 	Consume,
 	SeekPaused,
 	SeekPlaying,
+	Restart,
 };
 
 struct SeekPlan {
 	SeekAction action = SeekAction::Decline;
 	double progress = 0.;
+	std::int64_t restartAtMs = 0;
 };
 
 [[nodiscard]] SeekPlan PlanSeek(

@@ -52,20 +52,28 @@ std::optional<std::int64_t> ToMs(std::int64_t value, int frequency) {
 }
 
 SeekPlan PlanSeek(const SeekFacts &facts, int direction, int stepSeconds) {
+	if (!facts.current) {
+		const auto length = facts.endedDurationMs;
+		if (!facts.ended || length <= 0 || length > kLongestMs) {
+			return {};
+		}
+		const auto target = SeekTarget(length, length, direction, stepSeconds);
+		if (!target) {
+			return { .action = SeekAction::Consume };
+		}
+		return { .action = SeekAction::Restart, .restartAtMs = *target };
+	}
 	const auto duration = ToMs(facts.length, facts.frequency);
-	const auto position = facts.stopped
-		? duration
-		: ToMs(facts.position, facts.frequency);
-	if (!facts.current || !duration || !*duration || !position) {
+	const auto position = ToMs(facts.position, facts.frequency);
+	if (facts.stopped || !duration || !*duration || !position) {
 		return {};
 	}
-	const auto from = *position;
-	const auto target = SeekTarget(from, *duration, direction, stepSeconds);
+	const auto target = SeekTarget(*position, *duration, direction, stepSeconds);
 	if (!target) {
 		return { .action = SeekAction::Consume };
 	}
 	return {
-		.action = (facts.paused && !facts.stopped)
+		.action = facts.paused
 			? SeekAction::SeekPaused
 			: SeekAction::SeekPlaying,
 		.progress = double(*target) / double(*duration),
