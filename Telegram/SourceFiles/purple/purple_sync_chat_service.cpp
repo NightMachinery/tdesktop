@@ -1322,6 +1322,9 @@ void StartSyncChatDiscovery() {
 		});
 	};
 	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);
+	// WHY: app services start before the domain, and upstream adds stored accounts without
+	// accountsChanges(), so an active session change is the first sign of a normal launch's sessions.
+	Core::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);
 	refresh();
 }
 

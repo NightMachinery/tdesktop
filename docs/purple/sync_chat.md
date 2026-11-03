@@ -18,6 +18,8 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
 - **Lookup**: one at a time per account; a trigger that arrives while one runs
   shares its result. Triggers are startup, screen, manual, auto, post and
   retry (the timed wake-up after a wait, never taken for a user's check).
+  Startup runs for every session when the active session changes, because
+  upstream loads stored accounts without announcing them.
   The candidates are the magic-titled supergroups the user is in, read from
   every loaded chat in the session and not from a chat list, so a Work Mode
   preset that hides chats everywhere cannot hide one from the lookup. Only

@@ -24,6 +24,8 @@ def inspect(values):
     app = values['purple_app_services.cpp']
     require('startup-order', app.index('StartSyncChatDiscovery();') < app.index('StartAutomaticSettingsSync();'))
     require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
+    discovery = values['purple_sync_chat_service.cpp'].split('void StartSyncChatDiscovery() {', 1)[-1]
+    require('startup-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in discovery)
     require('sync-screen-origin', 'EnsureSyncChatResolved(session, true);' in values['purple_sync_setup_box.cpp'])
     magic = values['purple_sync_magic_service.cpp']
     toast = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
@@ -172,6 +174,7 @@ negative = [
     ('purple_sync_chat_service.cpp', 'disk->stateBytes != self->_expectedStateBytes', 'false', 'retry-snapshot'),
     ('purple_app_services.cpp', 'StartSyncChatDiscovery();', 'StartSyncChatDiscoveryLater();', 'startup-order'),
     ('purple_sync_chat_service.cpp', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);', 'Other(session);', 'startup-origin'),
+    ('purple_sync_chat_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'startup-stored-sessions'),
     ('purple_sync_setup_box.cpp', 'EnsureSyncChatResolved(session, true);', 'Other(session);', 'sync-screen-origin'),
     ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable', 'event != SyncAutoEvent::Enable', 'disable-exempt'),
     ('purple_sync_auto_service.cpp', 'Hold(SyncAutoReason::SyncChatNotResolved);', 'Stop();', 'auto-owned-hold'),
