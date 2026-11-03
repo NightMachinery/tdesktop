@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
@@ -189,7 +190,7 @@ def inspect(values):
         and 'For(session).ChatChanged();' in auto
         and 'mark->checkedAt = int64_t(base::unixtime::now());' in auto)
     run = auto.split('void AutoSession::FirstUseRun(', 1)[-1].split('void AutoSession::FirstUseJoined(', 1)[0]
-    require('first-use-journal-guard', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);' in run
+    require('first-use-journal-guard', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFail(recovery ? u"recovery_journal"_q : u"unreadable"_q);' in run
         and run.index('recovery->journalPresent') < run.index('ReviewSyncFirstUse(')
         and 'fresh && !fresh->journalPresent' in run and run.index('Stop();') < run.index('StartAgainSyncAccount(')
         and 'StartAgainSyncAccount(*session, *fresh, true, false, true)' in run)
@@ -201,6 +202,12 @@ def inspect(values):
         and '} else if (review.need == SyncFirstUseNeed::Unjoined) {\n\t\tFirstUseJoined(inventory, review);' in run
         and 'ClearSyncFirstUseMark(target->files);' in finish
         and 'if (first.settled) {\n\t\tClearSyncFirstUseMark(_store->files());' in pause)
+    failures_text = auto.split('QString FirstUseFailureText(', 1)[-1].split('QString FirstUsePublishReason(', 1)[0]
+    reasons = set(word for line in auto.split('\n') if 'FirstUseFail(' in line and 'void ' not in line
+        for word in re.findall(r'u"(\w+)"_q', line.split('FirstUseFail(', 1)[1])) | set(re.findall(r'return u"(\w+)"_q;', auto.split('QString FirstUsePublishReason(', 1)[-1].split('class AutoSession', 1)[0]))
+    require('first-use-named-failures', auto.count('FirstUseFinish(SyncFirstUseOutcome::Failed') == 2
+        and 'SyncDiagReason(reason) });' in auto and 'code.isEmpty() ? u"unknown"_q : code' in run
+        and len(reasons) >= 12 and all(f'u"{reason}"_q' in failures_text for reason in reasons if reason != 'apply_refused'))
     require('first-use-actions', 'publish ? review.request : SyncConfigPublishRequest()' in run
         and '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)' in run
         and 'self->FirstUseJoined(inventory, review);' in run
@@ -280,6 +287,9 @@ negative = [
     ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'mark.choice = review.input.choice;', '', 'first-use-mark'),
+    ('purple_sync_auto_service.cpp', 'FirstUseFail(u"archive_refused"_q);', 'FirstUseFinish(SyncFirstUseOutcome::Failed);', 'first-use-named-failures'),
+    ('purple_sync_auto_service.cpp', ': (reason == u"archive_refused"_q) ? tr::lng_purple_sync_first_failed_archive(tr::now)\n', '', 'first-use-named-failures'),
+    ('purple_sync_auto_service.cpp', '\t\tSyncDiagReason(reason) });', '\t\tSyncDiagCode(u"step"_q, u"failed"_q) });', 'first-use-named-failures'),
     ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable && FirstUseDue(target->files, event)) {', 'event != SyncAutoEvent::Disable) {', 'first-use-lifecycle-limit'),
     ('purple_sync_auto_service.cpp', 'now - mark->checkedAt >= kSyncAutoCheckSeconds', 'true', 'first-use-lifecycle-limit'),
     ('purple_sync_auto_service.cpp', 'For(session).ChatChanged();', 'For(session).Event(SyncAutoEvent::SessionReady);', 'first-use-lifecycle-limit'),
@@ -290,7 +300,7 @@ negative = [
     ('purple_sync_auto_service.cpp', '!SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()', '!SyncMagicBound(session)', 'first-use-carry-retire'),
     ('purple_sync_auto_service.cpp', 'if (!Open()) { Stop(); return NoStateEvent(event); }', 'if (!Open()) { Stop(); return false; }', 'auto-first-use-unbound'),
     ('purple_sync_auto_service.cpp', 'recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup', 'recovery->plan.status != SyncAccountRecoveryStatus::Setup', 'auto-first-use-unbound'),
-    ('purple_sync_auto_service.cpp', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);', 'if (!recovery) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);', 'first-use-journal-guard'),
+    ('purple_sync_auto_service.cpp', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFail(', 'if (!recovery) {\n\t\tFirstUseFail(', 'first-use-journal-guard'),
     ('purple_sync_auto_service.cpp', 'fresh && !fresh->journalPresent', 'fresh', 'first-use-journal-guard'),
     ('purple_sync_auto_service.cpp', '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)', '(action == SyncFirstUseAction::JoinSilently)', 'first-use-actions'),
     ('purple_sync_auto_service.cpp', 'self->FirstUseJoined(inventory, review);', 'self->FirstUseFinish(SyncFirstUseOutcome::Joined);', 'first-use-actions'),

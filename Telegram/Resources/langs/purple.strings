@@ -209,6 +209,17 @@ docs/purple/upstream_hooks.md.
 "lng_purple_sync_first_joined" = "Sync is set up with the synced settings. This device's previous file is in History.";
 "lng_purple_sync_first_joined_new" = "Sync is set up with the synced settings.";
 "lng_purple_sync_first_joined_same" = "Sync is set up. This device already had the synced settings.";
+"lng_purple_sync_first_failed_busy" = "Automatic sync is checking this account right now, so first use did not start. Check the sync chat again when it has finished.";
+"lng_purple_sync_first_failed_unbound" = "This account has no usable sync chat right now, so nothing was changed. Check the sync chat again once it is found.";
+"lng_purple_sync_first_failed_chat" = "The sync chat cannot be read right now, so nothing was changed. Sync tries again on the next check.";
+"lng_purple_sync_first_failed_incomplete" = "The sync chat could not be read completely, so nothing was changed. Sync tries again on the next check.";
+"lng_purple_sync_first_failed_account" = "This account or its sync chat changed while sync was being set up, so nothing was changed. Check the sync chat again.";
+"lng_purple_sync_first_failed_journal" = "An earlier sync reset did not finish. Review sync recovery to finish it; nothing else was changed.";
+"lng_purple_sync_first_failed_files" = "This device's sync files could not be read or written, so nothing was changed. Check the sync chat again.";
+"lng_purple_sync_first_failed_archive" = "This device's earlier sync state could not be set aside, so nothing was changed. If a sync record is still sending, check the sync chat again after it is sent.";
+"lng_purple_sync_first_failed_changed" = "The sync chat changed while sync was being set up, so nothing was sent. Check the sync chat again.";
+"lng_purple_sync_first_failed_unconfirmed" = "This device's settings were sent, but the sync chat has not confirmed them yet. Check the sync chat again.";
+"lng_purple_sync_first_failed_publish" = "This device's settings could not be sent to the sync chat, so nothing was changed. Check the sync chat again.";
 "lng_purple_sync_first_failed" = "Setting up sync did not finish. Check the sync chat again.";
 
 "lng_purple_auto_description" = "Settings sync through this account's sync chat. Check sync chat reviews the selected account. Automatic sync is off by default. When enabled, safe updates apply with History and saved changes publish after a fresh check. Conflicts, losses and account-link problems wait for your review. Settings can contain chat IDs and names; the sync chat is a Telegram cloud chat readable by your signed-in sessions. state.toml stays local.";

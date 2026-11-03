@@ -208,7 +208,14 @@ account lock, into a new owner-only `sync/carry-retired-<date>/`
 (`RetireSyncCarryLeftovers`); nothing is deleted. Each step writes one
 diagnostic line: `sync_chat first_use trigger=<auto|manual> action=<...>
 choice=<...>`, then `step=archive|publish|join|apply outcome=ok|error`, and
-`sync_chat migration step=carry` for the retirement.
+`sync_chat migration step=carry` for the retirement. A first use that fails
+writes `sync_chat first_use outcome=error reason=<code>` and shows one line
+for that code: `busy`, `unbound`, `chat_unavailable`, `incomplete`,
+`account_changed`, `recovery_journal`, `unreadable`, `files_unwritable`,
+`archive_refused`, `settings_invalid`, `chat_changed`, `publish_unconfirmed`,
+`publish_refused` or `apply_refused` (with the apply's own text). When core
+cannot plan from the inventory, the review's own reason code and refusal text
+are used.
 
 The host cases are FirstUseActions, FirstUseD1, FirstUseMigration and
 FirstUseRace in `purple/test_sync_config_publish.cpp` (gate setup-publish), and

@@ -26,6 +26,7 @@ enum class SyncFirstUseOutcome { Waiting, Asking, Published, Joined, Failed, Not
 struct SyncFirstUseResult {
 	SyncFirstUseOutcome outcome = SyncFirstUseOutcome::Failed;
 	QString text;
+	QString reason;
 };
 // Decides on `inventory`, or on a fresh scan of the bound chat; `choice` answers an earlier Ask.
 void RunSyncFirstUse(

@@ -49,6 +49,9 @@ const std::vector<QString> &Words() {
 		u"heads_unclear"_q, u"own_records"_q, u"unknown"_q,
 		u"first_use"_q, u"ask"_q, u"join_silently"_q, u"choice"_q, u"synced"_q,
 		u"this_device"_q, u"none"_q, u"carry"_q, u"apply"_q, u"mark"_q,
+		u"busy"_q, u"unbound"_q, u"chat_unavailable"_q, u"incomplete"_q, u"account_changed"_q,
+		u"recovery_journal"_q, u"files_unwritable"_q, u"archive_refused"_q, u"settings_invalid"_q,
+		u"publish_unconfirmed"_q, u"publish_refused"_q, u"apply_refused"_q,
 	};
 	return result;
 }

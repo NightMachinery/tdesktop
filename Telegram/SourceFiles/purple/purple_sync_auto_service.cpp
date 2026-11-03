@@ -44,6 +44,40 @@ namespace {
 constexpr auto kSaveDelay = crl::time(5000);
 rpl::event_stream<> Changes;
 
+[[nodiscard]] QString FirstUseFailureText(const QString &reason) {
+	return (reason == u"busy"_q) ? tr::lng_purple_sync_first_failed_busy(tr::now)
+		: (reason == u"unbound"_q) ? tr::lng_purple_sync_first_failed_unbound(tr::now)
+		: (reason == u"chat_unavailable"_q) ? tr::lng_purple_sync_first_failed_chat(tr::now)
+		: (reason == u"incomplete"_q) ? tr::lng_purple_sync_first_failed_incomplete(tr::now)
+		: (reason == u"account_changed"_q) ? tr::lng_purple_sync_first_failed_account(tr::now)
+		: (reason == u"recovery_journal"_q) ? tr::lng_purple_sync_first_failed_journal(tr::now)
+		: (reason == u"files_unwritable"_q || reason == u"unreadable"_q) ? tr::lng_purple_sync_first_failed_files(tr::now)
+		: (reason == u"archive_refused"_q) ? tr::lng_purple_sync_first_failed_archive(tr::now)
+		: (reason == u"settings_invalid"_q) ? tr::lng_purple_sync_first_wait_file(tr::now)
+		: (reason == u"chat_changed"_q) ? tr::lng_purple_sync_first_failed_changed(tr::now)
+		: (reason == u"publish_unconfirmed"_q) ? tr::lng_purple_sync_first_failed_unconfirmed(tr::now)
+		: (reason == u"publish_refused"_q) ? tr::lng_purple_sync_first_failed_publish(tr::now)
+		: tr::lng_purple_sync_first_failed(tr::now);
+}
+
+[[nodiscard]] QString FirstUsePublishReason(SyncConfigPublishStatus status) {
+	switch (status) {
+	case SyncConfigPublishStatus::NeedsReview:
+	case SyncConfigPublishStatus::CloneDetected:
+	case SyncConfigPublishStatus::Incomplete: return u"chat_changed"_q;
+	case SyncConfigPublishStatus::AccountUnavailable:
+	case SyncConfigPublishStatus::AccountUnbound: return u"account_changed"_q;
+	case SyncConfigPublishStatus::StoreError: return u"files_unwritable"_q;
+	case SyncConfigPublishStatus::InvalidSettings: return u"settings_invalid"_q;
+	case SyncConfigPublishStatus::OutcomeUnknown:
+	case SyncConfigPublishStatus::StillSending: return u"publish_unconfirmed"_q;
+	case SyncConfigPublishStatus::Confirmed:
+	case SyncConfigPublishStatus::AlreadySynced:
+	case SyncConfigPublishStatus::Cancelled: break;
+	}
+	return u"publish_refused"_q;
+}
+
 class AutoSession final : public base::has_weak_ptr {
 public:
 	explicit AutoSession(not_null<Main::Session*> session);
@@ -83,7 +117,8 @@ private:
 	void RetireCarry();
 	void FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual);
 	void FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review);
-	void FirstUseFinish(SyncFirstUseOutcome outcome, QString text = QString());
+	void FirstUseFinish(SyncFirstUseOutcome outcome, QString text = QString(), QString reason = QString());
+	void FirstUseFail(const QString &reason, QString text = QString());
 	void ReadNext();
 	void Send(const SyncAutoPlan &plan);
 	[[nodiscard]] bool EffectCurrent(const SyncAutoPlan &plan) const;
@@ -621,7 +656,7 @@ void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, Sy
 	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
 	const auto files = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	_firstFingerprint = files ? ReadSyncSettingsFile(files->files).fingerprint : QString();
-	if (!session || !bound || _inFlight) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	if (!session || !bound || _inFlight) { FirstUseFail(_inFlight ? u"busy"_q : u"unbound"_q); return; }
 	_firstRunning = true;
 	Changes.fire({});
 	if (inventory) {
@@ -629,7 +664,7 @@ void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, Sy
 		return;
 	}
 	const auto lease = SyncChatIoForPost(session, *bound);
-	if (!lease || !lease->current || !lease->current()) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	if (!lease || !lease->current || !lease->current()) { FirstUseFail(u"chat_unavailable"_q); return; }
 	const auto weak = base::make_weak(this);
 	_firstScan = std::make_unique<SyncAccountInventory>(not_null{ session }, lease->route, nullptr,
 		[weak, choice, manual](DesktopSyncChatInventory result) {
@@ -649,22 +684,27 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 	const auto session = _session.get();
 	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
-	if (!session || !bound || *bound != inventory.route.peer.chat || !target
-		|| inventory.inventory.status != SyncAccountInventoryStatus::Complete) {
-		FirstUseFinish(SyncFirstUseOutcome::Failed);
+	if (!session || !bound || *bound != inventory.route.peer.chat || !target) {
+		FirstUseFail(u"account_changed"_q);
+		return;
+	} else if (inventory.inventory.status != SyncAccountInventoryStatus::Complete) {
+		FirstUseFail(u"incomplete"_q);
 		return;
 	}
 	RetireCarry();
 	const auto recovery = InspectSyncAccountRecovery(*session, &inventory.inventory);
 	if (!recovery || recovery->journalPresent) {
-		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		FirstUseFail(recovery ? u"recovery_journal"_q : u"unreadable"_q);
 		return;
 	}
 	const auto review = ReviewSyncFirstUse(target->files, inventory.inventory, choice);
 	if (review.need == SyncFirstUseNeed::None) { FirstUseFinish(SyncFirstUseOutcome::NotNeeded); return; }
 	if (!review.action) {
-		NoteSyncConfigRefusal(ReviewSyncConfig(session->account(), *session, inventory.inventory, *bound), manual);
-		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		const auto refused = ReviewSyncConfig(session->account(), *session, inventory.inventory, *bound);
+		NoteSyncConfigRefusal(refused, manual);
+		const auto code = SyncConfigReviewReasonCode(refused.reason);
+		FirstUseFinish(SyncFirstUseOutcome::Failed, DescribeSyncConfigReview(refused, QDateTime::currentDateTime()).text,
+			code.isEmpty() ? u"unknown"_q : code);
 		return;
 	}
 	const auto action = *review.action;
@@ -679,7 +719,7 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 	const auto broken = (review.input.local.status == SyncSettingsFileStatus::Invalid)
 		|| review.input.local.usingLastGood;
 	if (action == SyncFirstUseAction::Wait && broken) {
-		FirstUseFinish(SyncFirstUseOutcome::Failed, tr::lng_purple_sync_first_wait_file(tr::now));
+		FirstUseFail(u"settings_invalid"_q);
 		return;
 	} else if (action == SyncFirstUseAction::Wait || action == SyncFirstUseAction::Ask) {
 		FirstUseFinish(action == SyncFirstUseAction::Wait ? SyncFirstUseOutcome::Waiting : SyncFirstUseOutcome::Asking);
@@ -691,7 +731,7 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 	mark.choice = review.input.choice;
 	mark.joinSpace = publish ? QString() : inventory.inventory.directory.selectedSpace.value_or(QString());
 	if (!WriteSyncFirstUseMark(target->files, mark)) {
-		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		FirstUseFail(u"files_unwritable"_q);
 		return;
 	} else if (review.need == SyncFirstUseNeed::Unjoined) {
 		FirstUseJoined(inventory, review);
@@ -705,7 +745,7 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 		SyncDiag(u"sync_chat"_q, u"first_use"_q, {
 			SyncDiagCode(u"step"_q, u"archive"_q),
 			SyncDiagCode(u"outcome"_q, archived ? u"ok"_q : u"error"_q) });
-		if (!archived) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+		if (!archived) { FirstUseFail(u"archive_refused"_q); return; }
 	}
 	const auto chat = inventory.route.peer.chat;
 	const auto weak = base::make_weak(this);
@@ -722,13 +762,12 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 						|| result.status == SyncConfigPublishStatus::AlreadySynced) ? u"ok"_q : u"error"_q) });
 				const auto sent = (result.status == SyncConfigPublishStatus::Confirmed
 					|| result.status == SyncConfigPublishStatus::AlreadySynced);
-				if (publish && review.action == SyncFirstUseAction::JoinSilently) {
-					self->FirstUseFinish(sent ? SyncFirstUseOutcome::Joined : SyncFirstUseOutcome::Failed,
-						sent ? tr::lng_purple_sync_first_joined_same(tr::now) : QString());
+				if (!sent || (!publish && result.status != SyncConfigPublishStatus::AlreadySynced)) {
+					self->FirstUseFail(FirstUsePublishReason(result.status));
+				} else if (publish && review.action == SyncFirstUseAction::JoinSilently) {
+					self->FirstUseFinish(SyncFirstUseOutcome::Joined, tr::lng_purple_sync_first_joined_same(tr::now));
 				} else if (publish) {
-					self->FirstUseFinish(sent ? SyncFirstUseOutcome::Published : SyncFirstUseOutcome::Failed);
-				} else if (result.status != SyncConfigPublishStatus::AlreadySynced) {
-					self->FirstUseFinish(SyncFirstUseOutcome::Failed);
+					self->FirstUseFinish(SyncFirstUseOutcome::Published);
 				} else {
 					self->FirstUseJoined(inventory, review);
 				}
@@ -748,7 +787,7 @@ void AutoSession::FirstUseJoined(const DesktopSyncChatInventory &inventory, cons
 	const auto local = target ? ReadSyncSettingsFile(target->files) : SyncSettingsFile();
 	const auto current = session ? ReviewAccountTransfer(session,
 		local.status == SyncSettingsFileStatus::Present ? local.text : QByteArray("version = 2\n")) : std::nullopt;
-	if (!session || !current) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
+	if (!session || !current) { FirstUseFail(u"account_changed"_q); return; }
 	const auto applied = ApplySyncFirstUseJoin(session->account(), *session, inventory.inventory,
 		review.headKey, *current, inventory.route.peer.chat);
 	NoteAutomaticSyncApply(session, applied);
@@ -756,7 +795,7 @@ void AutoSession::FirstUseJoined(const DesktopSyncChatInventory &inventory, cons
 		SyncDiagCode(u"step"_q, u"apply"_q),
 		SyncDiagCode(u"outcome"_q, applied.status == SyncConfigApplyStatus::Applied ? u"ok"_q : u"error"_q) });
 	if (applied.status != SyncConfigApplyStatus::Applied) {
-		FirstUseFinish(SyncFirstUseOutcome::Failed, SyncConfigApplyFailureText(applied));
+		FirstUseFail(u"apply_refused"_q, SyncConfigApplyFailureText(applied));
 		return;
 	}
 	FirstUseFinish(SyncFirstUseOutcome::Joined, !applied.wroteFile ? tr::lng_purple_sync_first_joined_same(tr::now)
@@ -764,7 +803,14 @@ void AutoSession::FirstUseJoined(const DesktopSyncChatInventory &inventory, cons
 		: tr::lng_purple_sync_first_joined_new(tr::now));
 }
 
-void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text) {
+void AutoSession::FirstUseFail(const QString &reason, QString text) {
+	SyncDiag(u"sync_chat"_q, u"first_use"_q, {
+		SyncDiagCode(u"outcome"_q, u"error"_q),
+		SyncDiagReason(reason) });
+	FirstUseFinish(SyncFirstUseOutcome::Failed, text.isEmpty() ? FirstUseFailureText(reason) : text, reason);
+}
+
+void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text, QString reason) {
 	_firstRunning = false;
 	_firstScan.reset();
 	_firstPublish.reset();
@@ -775,7 +821,7 @@ void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text) {
 			: (outcome == SyncFirstUseOutcome::Failed) ? tr::lng_purple_sync_first_failed(tr::now)
 			: QString();
 	}
-	const auto result = SyncFirstUseResult{ outcome, text };
+	const auto result = SyncFirstUseResult{ outcome, text, reason };
 	_firstUse = result;
 	const auto session = _session.get();
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
