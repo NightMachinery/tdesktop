@@ -179,7 +179,15 @@ def inspect(values):
     unbound = auto.split('bool AutoSession::NoStateEvent(', 1)[-1].split('void AutoSession::FirstUse(', 1)[0]
     require('auto-first-use-unbound', 'if (!Open()) { Stop(); return NoStateEvent(event); }' in auto
         and 'recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup' in unbound
-        and '} else if (event != SyncAutoEvent::Disable) {\n\t\tFirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);' in unbound)
+        and 'FirstUseDue(target->files, event)) {\n\t\tFirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);' in unbound)
+    due = auto.split('bool AutoSession::FirstUseDue(', 1)[-1].split('void AutoSession::FirstUse(', 1)[0]
+    require('first-use-lifecycle-limit', '} else if (event != SyncAutoEvent::Disable && FirstUseDue(target->files, event)) {' in unbound
+        and 'now - mark->checkedAt >= kSyncAutoCheckSeconds' in due
+        and 'if (event == SyncAutoEvent::Enable || _firstBypass) {' in due
+        and 'event == SyncAutoEvent::LocalSaved && _save.isActive()' in due
+        and 'mark->fingerprint != ReadSyncSettingsFile(files).fingerprint' in due
+        and 'For(session).ChatChanged();' in auto
+        and 'mark->checkedAt = int64_t(base::unixtime::now());' in auto)
     run = auto.split('void AutoSession::FirstUseRun(', 1)[-1].split('void AutoSession::FirstUseJoined(', 1)[0]
     require('first-use-journal-guard', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFinish(SyncFirstUseOutcome::Failed);' in run
         and run.index('recovery->journalPresent') < run.index('ReviewSyncFirstUse(')
@@ -272,6 +280,10 @@ negative = [
     ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'mark.choice = review.input.choice;', '', 'first-use-mark'),
+    ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable && FirstUseDue(target->files, event)) {', 'event != SyncAutoEvent::Disable) {', 'first-use-lifecycle-limit'),
+    ('purple_sync_auto_service.cpp', 'now - mark->checkedAt >= kSyncAutoCheckSeconds', 'true', 'first-use-lifecycle-limit'),
+    ('purple_sync_auto_service.cpp', 'For(session).ChatChanged();', 'For(session).Event(SyncAutoEvent::SessionReady);', 'first-use-lifecycle-limit'),
+    ('purple_sync_auto_service.cpp', 'mark->checkedAt = int64_t(base::unixtime::now());', 'mark->checkedAt = 0;', 'first-use-lifecycle-limit'),
     ('purple_sync_auto_service.cpp', '} else if (review.need == SyncFirstUseNeed::Unjoined) {\n\t\tFirstUseJoined(inventory, review);', '} else if (false) {\n\t\tFirstUseJoined(inventory, review);', 'first-use-mark'),
     ('purple_sync_auto_service.cpp', 'if (!WriteSyncFirstUseMark(target->files, mark)) {', 'if (false) {', 'first-use-mark'),
     ('purple_sync_auto_service.cpp', '\tRetireCarry();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);', '\tconst auto recovery = InspectSyncAccountRecovery(*session);', 'first-use-carry-retire'),

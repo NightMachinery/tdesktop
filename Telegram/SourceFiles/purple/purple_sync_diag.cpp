@@ -48,7 +48,7 @@ const std::vector<QString> &Words() {
 		u"review_refused"_q, u"unreadable"_q, u"ambiguous"_q, u"newer_schema"_q,
 		u"heads_unclear"_q, u"own_records"_q, u"unknown"_q,
 		u"first_use"_q, u"ask"_q, u"join_silently"_q, u"choice"_q, u"synced"_q,
-		u"this_device"_q, u"none"_q, u"carry"_q, u"apply"_q,
+		u"this_device"_q, u"none"_q, u"carry"_q, u"apply"_q, u"mark"_q,
 	};
 	return result;
 }

@@ -49,6 +49,7 @@ public:
 	explicit AutoSession(not_null<Main::Session*> session);
 	~AutoSession();
 	bool Event(SyncAutoEvent event);
+	void ChatChanged();
 	SyncAutoReason FailureReason() const { return _failureReason; }
 	void Saved();
 	void Replaced();
@@ -78,6 +79,7 @@ private:
 	void Check(const SyncAutoPlan &plan);
 	bool PauseOnForeignSpace(PeerToken chat);
 	bool NoStateEvent(SyncAutoEvent event);
+	[[nodiscard]] bool FirstUseDue(const AccountFiles &files, SyncAutoEvent event);
 	void RetireCarry();
 	void FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual);
 	void FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review);
@@ -126,7 +128,9 @@ private:
 	std::unique_ptr<SyncConfigPublish> _firstPublish;
 	std::vector<Fn<void(SyncFirstUseResult)>> _firstDone;
 	std::optional<SyncFirstUseResult> _firstUse;
+	QString _firstFingerprint;
 	bool _firstRunning = false;
+	bool _firstBypass = false;
 
 };
 
@@ -339,6 +343,12 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	}
 	Run(plan);
 	return true;
+}
+
+void AutoSession::ChatChanged() {
+	_firstBypass = true;
+	Event(SyncAutoEvent::SessionReady);
+	_firstBypass = false;
 }
 
 bool AutoSession::Accept(const SyncAutoPlan &plan) {
@@ -581,11 +591,26 @@ bool AutoSession::NoStateEvent(SyncAutoEvent event) {
 	} else if ((event == SyncAutoEvent::Enable || event == SyncAutoEvent::Disable)
 		&& !SetDesktopSyncAutoBeforeState(target->files, _account, event == SyncAutoEvent::Enable)) {
 		return false;
-	} else if (event != SyncAutoEvent::Disable) {
+	} else if (event != SyncAutoEvent::Disable && FirstUseDue(target->files, event)) {
 		FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);
 	}
 	Changes.fire({});
 	return true;
+}
+
+// WHY: without a state the store's lifecycle limit never runs, so the last first-use outcome beside the
+// missing state limits the scans; Enable, a sync chat change and a changed settled file still decide afresh.
+bool AutoSession::FirstUseDue(const AccountFiles &files, SyncAutoEvent event) {
+	if (event == SyncAutoEvent::Enable || _firstBypass) {
+		return true;
+	} else if (event == SyncAutoEvent::LocalSaved && _save.isActive()) {
+		return false;
+	}
+	const auto mark = ReadSyncFirstUseMark(files);
+	const auto now = int64_t(base::unixtime::now());
+	return !mark || mark->checkedAt <= 0 || now < mark->checkedAt
+		|| now - mark->checkedAt >= kSyncAutoCheckSeconds
+		|| mark->fingerprint != ReadSyncSettingsFile(files).fingerprint;
 }
 
 void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, SyncFirstUseChoice choice,
@@ -594,6 +619,8 @@ void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, Sy
 	if (_firstRunning) { return; }
 	const auto session = _session.get();
 	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	const auto files = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	_firstFingerprint = files ? ReadSyncSettingsFile(files->files).fingerprint : QString();
 	if (!session || !bound || _inFlight) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
 	_firstRunning = true;
 	Changes.fire({});
@@ -754,6 +781,16 @@ void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text) {
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	if (target && (outcome == SyncFirstUseOutcome::Published || outcome == SyncFirstUseOutcome::Joined)) {
 		ClearSyncFirstUseMark(target->files);
+	} else if (target && outcome != SyncFirstUseOutcome::NotNeeded) {
+		if (auto mark = ReadSyncFirstUseMark(target->files)) {
+			mark->checkedAt = int64_t(base::unixtime::now());
+			mark->fingerprint = _firstFingerprint;
+			if (!WriteSyncFirstUseMark(target->files, *mark)) {
+				SyncDiag(u"sync_chat"_q, u"first_use"_q, {
+					SyncDiagCode(u"step"_q, u"mark"_q),
+					SyncDiagCode(u"outcome"_q, u"error"_q) });
+			}
+		}
 	}
 	Changes.fire({});
 	for (const auto &done : base::take(_firstDone)) { done(result); }
@@ -973,7 +1010,7 @@ void StartAutomaticSettingsSync() {
 			For(session).MoveToBound();
 		}
 		if (session && (SyncMagicBound(session) || SyncMagicPaused(session))) {
-			For(session).Event(SyncAutoEvent::SessionReady);
+			For(session).ChatChanged();
 		}
 	}, lifetime);
 	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);

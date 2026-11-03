@@ -158,7 +158,12 @@ Sync screen's Check, before its usual review. An unfinished Start again
 archive (a recovery journal) refuses it. Enabling or disabling automatic sync
 on a device with no state writes the switch beside the missing state
 (`SetDesktopSyncAutoBeforeState`), so the store opens enabled once first use
-creates it.
+creates it. Without a state the store's 15-minute lifecycle limit cannot
+run, so the mark also keeps the time and local fingerprint of the last
+outcome: a lifecycle event (session ready, foreground, unlock, retry) starts
+no new scan within 15 minutes of it. Enable, a sync chat status change, a
+manual Check, and a settled save that changed the file bypass the limit; a
+save still in its five-second delay waits for it.
 
 - Wait (empty chat, default settings): nothing is sent. The Sync screen says
   it waits for a device with your settings; the automatic status says so too.
