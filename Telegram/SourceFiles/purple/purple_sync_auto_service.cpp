@@ -1109,6 +1109,7 @@ QString AutomaticSettingsSyncStatus(not_null<Main::Session*> session) {
 	} else if (const auto first = SyncFirstUseResultOf(session)) {
 		if (first->outcome == SyncFirstUseOutcome::Waiting) { return tr::lng_purple_auto_first_wait(tr::now); }
 		if (first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }
+		if (first->outcome == SyncFirstUseOutcome::Failed && (first->reason == u"incomplete"_q || first->reason == u"chat_unavailable"_q)) { return tr::lng_purple_auto_retry(tr::now); }
 	}
 	const auto failure = executor != Sessions.end() && executor->second->FailureReason() != SyncAutoReason::None
 		? executor->second->FailureReason() : record.held;
