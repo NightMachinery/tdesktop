@@ -179,6 +179,8 @@ QString SyncMagicTriggerName(SyncMagicTrigger trigger) {
 SyncMagicChat::SyncMagicChat(std::shared_ptr<SyncMagicPort> port)
 : _port(std::move(port))
 , _guard(std::make_shared<int>(0)) {
+	const auto bytes = _port->current() ? _port->readBinding() : std::nullopt;
+	_binding = bytes ? Parse(*bytes) : std::nullopt;
 }
 
 SyncMagicChat::~SyncMagicChat() = default;
@@ -191,17 +193,15 @@ const std::optional<SyncChatBinding> &SyncMagicChat::binding() const {
 	return _binding;
 }
 
+// Keyed on the stored binding, so the chat stays hidden before the first lookup and while one waits.
 std::optional<PeerToken> SyncMagicChat::hidden() const {
-	if (_last.kind == SyncMagicResult::Kind::Unavailable
-		|| _last.manual
-		|| !_last.chat
-		|| !_binding) {
-		return std::nullopt;
-	}
-	return (_binding->mode == SyncChatBindingMode::Magic
+	return (_binding
+		&& _binding->mode == SyncChatBindingMode::Magic
 		&& !_binding->listed
-		&& _binding->chat == _last.chat)
-		? _last.chat
+		&& _binding->problem == SyncChatProblem::None
+		&& _binding->chat
+		&& _binding->chat->kind == PeerTokenKind::Channel)
+		? _binding->chat
 		: std::nullopt;
 }
 
@@ -309,6 +309,7 @@ void SyncMagicChat::lookup(SyncMagicTrigger trigger, bool fresh, Done done) {
 		_created = false;
 		_resumed = false;
 		_partial = false;
+		_listsWaited = false;
 		_allChats.reset();
 		_retried.clear();
 		_trigger = trigger;
@@ -459,6 +460,18 @@ void SyncMagicChat::planned(
 	if (local->boundState == SyncChatBoundState::Unknown
 		&& binding.chat
 		&& binding.chat->kind == PeerTokenKind::Channel) {
+		// WHY: the magic chat is archived, so after a cold start it is usually only missing because the
+		// archive list has not loaded; getAllChats is for a chat missing from both loaded lists.
+		if (!_listsWaited && !(local->mainLoaded && local->archiveLoaded)) {
+			_listsWaited = true;
+			const auto weak = std::weak_ptr<int>(_guard);
+			_port->loadLists([=] {
+				if (weak.lock()) {
+					later([=] { step(run); });
+				}
+			});
+			return;
+		}
 		if (!_allChats) {
 			proveAbsent(run, binding);
 			return;
@@ -490,7 +503,11 @@ void SyncMagicChat::planned(
 	case SyncChatLookupAction::ProveAbsent: proveAbsent(run, binding); return;
 	case SyncChatLookupAction::Create: create(run, binding); return;
 	case SyncChatLookupAction::Problem:
-		problem(run, plan.problem, plan.show, binding, &input);
+		if (_partial && plan.problem == SyncChatProblem::MagicIneligible) {
+			listPartial(run);
+		} else {
+			problem(run, plan.problem, plan.show, binding, &input);
+		}
 		return;
 	}
 	unavailable(run, u"native_unavailable"_q);

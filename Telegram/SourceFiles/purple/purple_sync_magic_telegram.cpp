@@ -28,6 +28,7 @@ namespace Purple {
 namespace {
 
 constexpr auto kRequestTimeoutMs = 30 * 1000;
+constexpr auto kListsTimeoutMs = int64_t(60 * 1000);
 constexpr auto kAllChatsType = mtpTypeId(0x875f74be);
 constexpr auto kAbout = "Purple Telegram keeps sync data for your devices here.";
 
@@ -168,6 +169,46 @@ public:
 			}
 		}
 		done(std::move(result));
+	}
+	void loadLists(std::function<void()> done) override {
+		const auto session = _session.get();
+		if (!session || !current()) {
+			done();
+			return;
+		}
+		const auto finished = std::make_shared<bool>(false);
+		const auto weak = base::make_weak(session);
+		const auto check = [=] {
+			const auto session = weak.get();
+			if (*finished) {
+				return;
+			} else if (!session) {
+				*finished = true;
+				done();
+				return;
+			}
+			auto &data = session->data();
+			const auto archive = data.folderLoaded(Data::Folder::kId);
+			if (!data.chatsListLoaded(nullptr)) {
+				return;
+			} else if (archive && !data.chatsListLoaded(archive)) {
+				session->api().requestDialogs(archive);
+				return;
+			}
+			*finished = true;
+			done();
+		};
+		_lists.destroy();
+		session->data().chatsListLoadedEvents() | rpl::on_next([=](Data::Folder*) {
+			check();
+		}, _lists);
+		delay([=] {
+			if (!*finished) {
+				*finished = true;
+				done();
+			}
+		}, kListsTimeoutMs);
+		check();
 	}
 	void allChats(
 			std::vector<uint64_t> except,
@@ -410,6 +451,7 @@ private:
 	QString _path;
 	Fn<bool()> _current;
 	int _slot = -1;
+	rpl::lifetime _lists;
 
 };
 

@@ -273,7 +273,7 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	if (!read.record->enabled && event != SyncAutoEvent::Enable && event != SyncAutoEvent::Disable) { return true; }
 	if (event != SyncAutoEvent::Disable && !SyncMagicBound(session) && !SyncMagicPaused(session)) {
 		Stop();
-		EnsureSyncChatResolved(session);
+		SyncMagicLookup(session, SyncMagicTrigger::Auto, false);
 		return false;
 	}
 	if (!Open()) { Stop(); return false; }

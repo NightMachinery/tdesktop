@@ -70,6 +70,8 @@ public:
 	virtual void local(
 		std::optional<PeerToken> bound,
 		std::function<void(std::optional<SyncMagicLocal>)> done) = 0;
+	// Loads the main and archive dialog lists if they are not loaded; done once they are or give up.
+	virtual void loadLists(std::function<void()> done) = 0;
 	virtual void allChats(
 		std::vector<uint64_t> except,
 		std::function<void(SyncMagicReply<SyncMagicChats>)> done) = 0;
@@ -258,6 +260,7 @@ private:
 	bool _created = false;
 	bool _resumed = false;
 	bool _partial = false;
+	bool _listsWaited = false;
 	uint64_t _generation = 0;
 	uint64_t _wake = 0;
 	int _failures = 0;

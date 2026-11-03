@@ -117,6 +117,7 @@ Holder::Holder(not_null<Main::Session*> session)
 			Changes.fire_copy(session);
 		}
 	});
+	refreshHidden();
 }
 
 Holder::~Holder() {

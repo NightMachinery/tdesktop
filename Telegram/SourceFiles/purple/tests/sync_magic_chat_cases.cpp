@@ -40,6 +40,8 @@ struct Fake final : SyncMagicPort {
 	QStringList lines;
 	std::deque<SyncMagicReply<SyncMagicChats>> allReplies;
 	std::vector<std::vector<uint64_t>> excepts;
+	int listLoads = 0;
+	std::map<uint64_t, MagicChatCandidate> archived;
 	std::deque<SyncMagicReply<MagicChatCandidate>> fullReplies;
 	std::deque<SyncMagicReply<MagicChatCandidate>> createReplies;
 
@@ -74,6 +76,12 @@ struct Fake final : SyncMagicPort {
 			result.bound = known[bound->id];
 		}
 		done(result);
+	}
+	void loadLists(std::function<void()> done) override {
+		++listLoads;
+		known.insert(archived.begin(), archived.end());
+		lists.mainLoaded = lists.archiveLoaded = true;
+		done();
 	}
 	void allChats(std::vector<uint64_t> except, std::function<void(SyncMagicReply<SyncMagicChats>)> done) override {
 		sent.push_back(u"allChats"_q);
@@ -468,6 +476,46 @@ int main() {
 		expect(restarted.waitUntil(history) == port->clock + 600, "kept: across a restart");
 		port->advance(601);
 		expect(restarted.waitUntil(history) == 0, "kept: until it ends");
+	}
+	{
+		auto port = std::make_shared<Fake>();
+		auto binding = SyncChatBinding();
+		binding.mode = SyncChatBindingMode::Magic;
+		binding.chat = channel(60);
+		binding.verifiedAt = port->clock;
+		port->file = *SerializeSyncChatBinding(binding);
+		port->allReplies.push_back(SyncMagicReply<SyncMagicChats>::Failed(u"FLOOD_WAIT_600"_q, 420));
+		auto chat = SyncMagicChat(port);
+		expect(chat.hidden() == channel(60), "hidden: the bound chat is hidden before the first lookup");
+		const auto waited = Run(chat, *port, SyncMagicTrigger::Startup);
+		expect(waited.kind == Kind::Wait && chat.hidden() == channel(60), "hidden: and while a lookup waits");
+	}
+	{
+		auto port = std::make_shared<Fake>();
+		auto binding = SyncChatBinding();
+		binding.mode = SyncChatBindingMode::Magic;
+		binding.chat = channel(60);
+		binding.verifiedAt = port->clock;
+		port->file = *SerializeSyncChatBinding(binding);
+		port->archived[60] = Magic(60, true);
+		auto chat = SyncMagicChat(port);
+		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
+		expect(result.kind == Kind::Use && result.chat == channel(60) && port->listLoads == 1,
+			"cold start: the archive list finds the bound chat");
+		expect(port->sent.isEmpty(), "cold start: no getAllChats");
+	}
+	{
+		auto port = std::make_shared<Fake>();
+		for (auto i = 0; i != kSyncMagicAllChatsPages; ++i) {
+			auto shared = Magic(uint64_t(70 + i), true);
+			shared.facts.otherMembers = 2;
+			port->allReplies.push_back(Slice(100, { Magic(uint64_t(70 + i), false) }, {}));
+			port->fullReplies.push_back(SyncMagicReply<MagicChatCandidate>::Ok(shared));
+		}
+		auto chat = SyncMagicChat(port);
+		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
+		expect(result.kind == Kind::Wait && port->stored().problem == SyncChatProblem::None,
+			"slices: ineligible chats on an incomplete list raise no problem");
 	}
 	{
 		auto port = std::make_shared<Fake>();
