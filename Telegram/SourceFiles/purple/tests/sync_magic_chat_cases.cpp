@@ -273,6 +273,7 @@ int main() {
 			"limit: a creation limit is a problem shown once");
 		expect(port->stored().createStep == SyncChatCreateStep::None, "limit: nothing is pending");
 		chat.shown();
+		expect(!chat.last().show, "limit: a second view does not show it again");
 		port->drain();
 		expect(port->stored().problemShown, "limit: shown is stored");
 		port->sent.clear();
@@ -400,6 +401,57 @@ int main() {
 		expect(!SyncMagicSpaceMismatch(directory, QString()), "space: no own space decides nothing");
 		directory.groups.clear();
 		expect(!SyncMagicSpaceMismatch(directory, u"mine"_q), "space: an empty chat matches");
+	}
+	{
+		auto binding = SyncChatBinding();
+		binding.mode = SyncChatBindingMode::Magic;
+		binding.chat = channel(5);
+		auto use = SyncMagicResult();
+		use.kind = Kind::Use;
+		use.chat = channel(5);
+		auto frame = SyncMagicFrameOf(use, binding);
+		expect(frame.line == SyncMagicFrame::Line::Using && frame.canOpen() && frame.canList()
+			&& !frame.canUseDefault() && !frame.canJoin(), "frame: the magic chat opens and lists");
+		binding.mode = SyncChatBindingMode::Manual;
+		binding.listed = true;
+		frame = SyncMagicFrameOf(use, binding);
+		expect(frame.manual && frame.listed && !frame.canList() && frame.canUseDefault(),
+			"frame: a picked chat is never hidden and offers the default");
+		use.chat = PeerToken{};
+		frame = SyncMagicFrameOf(use, binding);
+		expect(frame.savedMessages() && !frame.canOpen(), "frame: Saved Messages is not opened from here");
+		auto wait = SyncMagicResult();
+		wait.kind = Kind::Wait;
+		wait.retryAt = 1234;
+		frame = SyncMagicFrameOf(wait, std::nullopt);
+		expect(frame.line == SyncMagicFrame::Line::Waiting && frame.retryAt == 1234 && !frame.chat,
+			"frame: a wait shows its end");
+		auto problem = SyncMagicResult();
+		problem.kind = Kind::Problem;
+		problem.chat = channel(5);
+		problem.problem = SyncChatProblem::SpaceMismatch;
+		problem.show = true;
+		frame = SyncMagicFrameOf(problem, std::nullopt);
+		expect(frame.line == SyncMagicFrame::Line::Problem && frame.showProblem && frame.canJoin(),
+			"frame: space mismatch offers Join once shown");
+		problem.problem = SyncChatProblem::ExtraMember;
+		expect(!SyncMagicFrameOf(problem, std::nullopt).canJoin(), "frame: other problems offer no Join");
+		expect(SyncMagicFrameOf(SyncMagicResult(), std::nullopt).line == SyncMagicFrame::Line::Looking,
+			"frame: no result yet is looking");
+
+		auto local = Magic(7, true);
+		expect(SyncMagicPickOf(PeerToken{}, std::nullopt) == SyncMagicPick::Allowed, "pick: Saved Messages");
+		expect(SyncMagicPickOf(channel(7), local) == SyncMagicPick::Allowed, "pick: a supergroup alone");
+		local.facts.otherMembers = 1;
+		expect(SyncMagicPickOf(channel(7), local) == SyncMagicPick::NotAlone, "pick: a shared supergroup");
+		local.facts.otherMembers = std::nullopt;
+		expect(SyncMagicPickOf(channel(7), local) == SyncMagicPick::Unknown, "pick: unknown members");
+		local = Magic(7, true);
+		local.megagroup = false;
+		expect(SyncMagicPickOf(channel(7), local) == SyncMagicPick::Unsupported, "pick: a broadcast channel");
+		expect(SyncMagicPickOf(channel(8), Magic(7, true)) == SyncMagicPick::Unsupported, "pick: another chat's facts");
+		expect(SyncMagicPickOf(PeerToken{ PeerTokenKind::User, 9 }, std::nullopt) == SyncMagicPick::Unsupported,
+			"pick: a private chat");
 	}
 
 	std::cout << "sync-magic-chat checks=" << checks << " failures=" << failures << '\n';

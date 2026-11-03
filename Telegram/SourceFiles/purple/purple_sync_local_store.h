@@ -177,6 +177,7 @@ public:
 		const QByteArray &record,
 		const QByteArray &accountBindingToken,
 		PeerToken chat = {});
+	[[nodiscard]] SyncStoreStatus SetAside();
 	[[nodiscard]] const SyncLocalState *state() const;
 	[[nodiscard]] SyncStoreStatus status() const;
 	[[nodiscard]] const QString &directory() const;

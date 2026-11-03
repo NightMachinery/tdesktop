@@ -82,6 +82,73 @@ std::optional<int64_t> SyncMagicFloodSeconds(const QString &error) {
 	return std::nullopt;
 }
 
+bool SyncMagicFrame::savedMessages() const {
+	return chat && *chat == PeerToken{};
+}
+
+bool SyncMagicFrame::canOpen() const {
+	return chat && !savedMessages();
+}
+
+bool SyncMagicFrame::canList() const {
+	return !manual && chat && chat->kind == PeerTokenKind::Channel;
+}
+
+bool SyncMagicFrame::canUseDefault() const {
+	return manual;
+}
+
+bool SyncMagicFrame::canJoin() const {
+	return (problem == SyncChatProblem::SpaceMismatch) && chat.has_value();
+}
+
+SyncMagicFrame SyncMagicFrameOf(
+		const SyncMagicResult &result,
+		const std::optional<SyncChatBinding> &binding) {
+	auto frame = SyncMagicFrame();
+	frame.manual = binding && binding->mode == SyncChatBindingMode::Manual;
+	frame.listed = binding && binding->listed;
+	switch (result.kind) {
+	case SyncMagicResult::Kind::Use:
+		frame.line = SyncMagicFrame::Line::Using;
+		frame.chat = result.chat;
+		break;
+	case SyncMagicResult::Kind::Wait:
+		frame.line = SyncMagicFrame::Line::Waiting;
+		frame.retryAt = result.retryAt;
+		break;
+	case SyncMagicResult::Kind::Problem:
+		frame.line = SyncMagicFrame::Line::Problem;
+		frame.chat = result.chat;
+		frame.problem = result.problem;
+		frame.showProblem = result.show;
+		break;
+	case SyncMagicResult::Kind::Unavailable:
+		break;
+	}
+	return frame;
+}
+
+SyncMagicPick SyncMagicPickOf(
+		PeerToken chat,
+		const std::optional<MagicChatCandidate> &local) {
+	if (chat == PeerToken{}) {
+		return SyncMagicPick::Allowed;
+	} else if (chat.kind != PeerTokenKind::Channel
+		|| !local
+		|| local->channelId != chat.id
+		|| !local->member
+		|| !local->megagroup
+		|| local->gigagroup) {
+		return SyncMagicPick::Unsupported;
+	} else if (!local->facts.otherMembers) {
+		return SyncMagicPick::Unknown;
+	}
+	return (*local->facts.otherMembers == 0)
+		? SyncMagicPick::Allowed
+		: SyncMagicPick::NotAlone;
+}
+
 bool SyncMagicSpaceMismatch(
 		const SyncDirectory &directory,
 		const QString &space) {
@@ -252,6 +319,7 @@ void SyncMagicChat::lookup(SyncMagicTrigger trigger, bool fresh, Done done) {
 }
 
 void SyncMagicChat::shown() {
+	_last.show = false;
 	later([=] {
 		if (_closed || _last.kind != SyncMagicResult::Kind::Problem) {
 			return;

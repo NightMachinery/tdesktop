@@ -813,6 +813,32 @@ void MoveIntoBoundChat() {
 	std::printf("MOVE_FIXED abandoned=%llu reopened=1 publish=1\n", (unsigned long long)moved.config.abandonedSeq);
 }
 
+void SetAsideForJoin() {
+	auto f = Fixture(); f.Local(T1);
+	CHECK(Stage(f).action == SyncAutoAction::Post);
+	{
+		auto busy = SyncLocalStore(f.files.syncDirectory);
+		CHECK(busy.Open(true, f.token).status == SyncStoreStatus::LockBusy);
+		CHECK(busy.SetAside() == SyncStoreStatus::InvalidTransition);
+	}
+	f.store.reset();
+	auto local = std::make_unique<SyncLocalStore>(f.files.syncDirectory);
+	CHECK(local->Open(true, f.token));
+	CHECK(local->SetAside() == SyncStoreStatus::Ready);
+	CHECK(!local->state() && local->SetAside() == SyncStoreStatus::InvalidTransition);
+	const auto folders = QDir(f.files.syncDirectory).entryList({ u"orphaned-*"_q }, QDir::Dirs);
+	CHECK(folders.size() == 1);
+	const auto folder = f.files.syncDirectory + u'/' + folders.value(0);
+	for (const auto name : { u"state.json"_q, u"auto.json"_q, u"pending/config-1.json"_q }) {
+		CHECK(QFile::exists(folder + u'/' + name) && !QFile::exists(f.files.syncDirectory + u'/' + name));
+	}
+	CHECK(!ReadSyncRecoveryStore(f.files, f.key).store.statePresent);
+	CHECK(SyncLocalStore(f.files.syncDirectory).Open(true, f.token).status == SyncStoreStatus::LockBusy);
+	local.reset();
+	CHECK(SyncLocalStore(f.files.syncDirectory).Open(true, f.token).status == SyncStoreStatus::AccountUnbound);
+	std::printf("SET_ASIDE_FIXED folders=%d\n", int(folders.size()));
+}
+
 void PendingReadFailureDuringFacts() {
 	auto f = Fixture(); f.Local(T1);
 	const auto plan = Stage(f); CHECK(plan.action == SyncAutoAction::Post);
@@ -867,7 +893,7 @@ void CasAndOpaque() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat();
+	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

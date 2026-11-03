@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
@@ -758,6 +759,31 @@ SyncStoreStatus SyncLocalStore::CheckpointRetainedConfigBases(const SyncDurableF
 	if (status != SyncStoreStatus::Ready) { _status = status; return status; }
 	_state = std::move(next);
 	_retainedBootstrap.clear();
+	return SyncStoreStatus::Ready;
+}
+
+SyncStoreStatus SyncLocalStore::SetAside() {
+	if (_carryOwner || _status != SyncStoreStatus::Ready || !_state || !_lock || !_lock->isLocked()) {
+		return SyncStoreStatus::InvalidTransition;
+	}
+	const auto folder = _root + u"/orphaned-"_q
+		+ QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd-HHmmss"_q);
+	if (QFileInfo::exists(folder) || QFileInfo(folder).isSymLink() || !QDir().mkdir(folder)
+		|| !QFile::setPermissions(folder, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
+		return SyncStoreStatus::IoError;
+	}
+	// WHY: the state goes last, so a crash midway leaves it in place and the
+	// store either still opens or is set aside again by the next attempt.
+	for (const auto name : { u"pending"_q, u"auto.json"_q, u"retained-bases"_q, u"state.json"_q }) {
+		const auto path = _root + u'/' + name;
+		const auto info = QFileInfo(path);
+		if (info.exists() && !info.isSymLink() && !QDir().rename(path, folder + u'/' + name)) {
+			_status = SyncStoreStatus::IoError;
+			return _status;
+		}
+	}
+	_state.reset();
+	_status = SyncStoreStatus::Uninitialized;
 	return SyncStoreStatus::Ready;
 }
 

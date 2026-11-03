@@ -9,7 +9,9 @@
 #include "main/main_session.h"
 #include "main/session/send_as_peers.h"
 #include "purple/purple_config.h"
+#include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_local_store.h"
 #include "purple/purple_sync_magic_telegram.h"
 
 #include <QtCore/QDir>
@@ -27,6 +29,7 @@ public:
 	[[nodiscard]] bool matches() const;
 	[[nodiscard]] bool current() const;
 	[[nodiscard]] SyncMagicChat *chat() const;
+	[[nodiscard]] const QString &syncDirectory() const;
 	[[nodiscard]] DesktopSyncChatStatus status() const;
 	[[nodiscard]] std::optional<DesktopSyncChatLease> lease(PeerToken chat);
 	[[nodiscard]] bool owns(const DesktopSyncChatIo &route) const;
@@ -40,6 +43,7 @@ private:
 	DesktopSyncChatOrigin _origin;
 	QString _root;
 	std::optional<AccountKey> _owner;
+	QString _syncDirectory;
 	std::unique_ptr<SyncMagicChat> _chat;
 
 };
@@ -83,7 +87,8 @@ Holder::Holder(not_null<Main::Session*> session)
 	if (!files) {
 		return;
 	}
-	const auto path = QDir(QDir(_root).filePath(files->syncDirectory))
+	_syncDirectory = QDir(_root).filePath(files->syncDirectory);
+	const auto path = QDir(_syncDirectory)
 		.filePath(QString::fromLatin1(kSyncMagicBindingFile));
 	const auto weak = base::make_weak(this);
 	_chat = std::make_unique<SyncMagicChat>(MakeSyncMagicTelegramPort(
@@ -120,6 +125,10 @@ bool Holder::current() const {
 
 SyncMagicChat *Holder::chat() const {
 	return _chat.get();
+}
+
+const QString &Holder::syncDirectory() const {
+	return _syncDirectory;
 }
 
 PeerData *Holder::native(PeerToken chat) const {
@@ -332,6 +341,27 @@ PeerData *SyncMagicBoundPeer(not_null<Main::Session*> session) {
 bool SyncMagicPaused(not_null<Main::Session*> session) {
 	const auto chat = SyncMagicChatOf(session);
 	return chat && chat->last().kind == SyncMagicResult::Kind::Problem;
+}
+
+void SyncMagicJoin(not_null<Main::Session*> session, Fn<void(bool)> done) {
+	auto &holder = For(session);
+	const auto chat = holder.current() ? holder.chat() : nullptr;
+	if (!chat
+		|| chat->last().kind != SyncMagicResult::Kind::Problem
+		|| chat->last().problem != SyncChatProblem::SpaceMismatch
+		|| holder.syncDirectory().isEmpty()) {
+		done(false);
+		return;
+	}
+	{
+		auto store = SyncLocalStore(holder.syncDirectory());
+		const auto token = AccountSyncBindingToken(session->account());
+		if (!store.Open(true, token) || store.SetAside() != SyncStoreStatus::Ready) {
+			done(false);
+			return;
+		}
+	}
+	chat->joined([=](SyncMagicResult) { done(true); });
 }
 
 rpl::producer<Main::Session*> SyncMagicChanges() {

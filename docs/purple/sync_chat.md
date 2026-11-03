@@ -72,6 +72,31 @@ user acts. Send after Save posts to the bound chat (Saved Messages or the
 Magic Purple Sync chat); the explicit Send to Saved Messages action still goes
 to Saved Messages.
 
+The Sync chat box (purple_sync_magic_box, opened from the Sync screen; the
+pure frame and pick policy are `SyncMagicFrameOf` and `SyncMagicPickOf`)
+shows which chat this device syncs through, a Telegram wait with its end, or
+the problem that paused automatic sync. A problem not shown before gets one
+dialog, in the box or on the Sync screen, and is then marked shown in the
+binding, so it is not shown again until it changes. Check now runs a manual
+lookup, which clears a recorded problem and decides afresh. Open sync chat
+opens the bound supergroup. Show sync chat in chat list sets `listed` in the
+binding; without it Purple's chat lists hide the magic chat, never a chat the
+user picked. Use another chat lists Saved Messages and the supergroups in the
+local main and archive lists, with no search, and accepts only Saved Messages
+or a supergroup the user is in alone, judged from the cached member count
+(owner decision Q2); the lookup then checks it like any manual binding. Use
+Magic Purple Sync forgets the pick and keeps the waits and the list choice.
+For `space_mismatch` the box offers Join: `SyncLocalStore::SetAside` moves
+the pending stages, the automatic record, the retained bases and last the
+state into a new `orphaned-<date>` folder (nothing is deleted), the problem is
+cleared, and the Sync screen's next check offers to join the records already
+in the chat. The old setup box (purple_sync_chat_setup_box) is no longer
+opened; it is deleted with the rest of the search-based discovery.
+
+Purple builds from before Magic Purple Sync keep reading and posting in Saved
+Messages, so a device that is not updated drifts apart from the updated ones
+until it is (owner decision Q5).
+
 ## Discovery (being retired)
 
 The Desktop M2B4 adapter uses the shared sync-chat ownership, eligibility and

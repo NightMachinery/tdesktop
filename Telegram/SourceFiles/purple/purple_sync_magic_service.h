@@ -24,6 +24,7 @@ void SyncMagicLookup(
 	not_null<Main::Session*> session);
 [[nodiscard]] PeerData *SyncMagicBoundPeer(not_null<Main::Session*> session);
 [[nodiscard]] bool SyncMagicPaused(not_null<Main::Session*> session);
+void SyncMagicJoin(not_null<Main::Session*> session, Fn<void(bool)> done);
 [[nodiscard]] rpl::producer<Main::Session*> SyncMagicChanges();
 
 } // namespace Purple

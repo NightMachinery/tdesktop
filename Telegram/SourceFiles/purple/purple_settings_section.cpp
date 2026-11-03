@@ -680,7 +680,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	// it behind their back. See ShouldAutoSend() for what stops two machines
 	// from handing the same file back and forth.
 	BuildAccountSettingsRow(builder, u"advanced/purple_send_after_save"_q,
-		rpl::single(u"Send to Saved Messages after every save"_q), AccountSettingsRow::SendAfterSave);
+		rpl::single(u"Send to the sync chat after every save"_q), AccountSettingsRow::SendAfterSave);
 
 	const auto toggle = builder.addButton({
 		.id = u"advanced/purple_premium_toggle"_q,

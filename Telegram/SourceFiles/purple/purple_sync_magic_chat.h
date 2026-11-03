@@ -102,6 +102,34 @@ inline constexpr auto kSyncMagicNotifyMethod = "account.updateNotifySettings";
 	const SyncDirectory &directory,
 	const QString &space);
 
+struct SyncMagicFrame {
+	enum class Line { Looking, Using, Waiting, Problem };
+
+	Line line = Line::Looking;
+	std::optional<PeerToken> chat;
+	SyncChatProblem problem = SyncChatProblem::None;
+	int64_t retryAt = 0;
+	bool manual = false;
+	bool listed = false;
+	bool showProblem = false;
+
+	[[nodiscard]] bool savedMessages() const;
+	[[nodiscard]] bool canOpen() const;
+	[[nodiscard]] bool canList() const;
+	[[nodiscard]] bool canUseDefault() const;
+	[[nodiscard]] bool canJoin() const;
+};
+
+[[nodiscard]] SyncMagicFrame SyncMagicFrameOf(
+	const SyncMagicResult &result,
+	const std::optional<SyncChatBinding> &binding);
+
+enum class SyncMagicPick { Allowed, NotAlone, Unknown, Unsupported };
+
+[[nodiscard]] SyncMagicPick SyncMagicPickOf(
+	PeerToken chat,
+	const std::optional<MagicChatCandidate> &local);
+
 class SyncMagicChat final {
 public:
 	using Done = std::function<void(SyncMagicResult)>;

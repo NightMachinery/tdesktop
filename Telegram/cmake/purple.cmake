@@ -248,6 +248,8 @@ PRIVATE
     purple/purple_sync_config_text.h
     purple/purple_sync_diag.cpp
     purple/purple_sync_diag.h
+    purple/purple_sync_magic_box.cpp
+    purple/purple_sync_magic_box.h
     purple/purple_sync_magic_chat.cpp
     purple/purple_sync_magic_chat.h
     purple/purple_sync_magic_service.cpp

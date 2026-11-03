@@ -9,7 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_chat_write.h"
-#include "purple/purple_sync_chat_setup_box.h"
+#include "purple/purple_sync_magic_box.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_history_guard.h"
 
 #include "core/application.h"
@@ -1044,16 +1045,12 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 			chatStatus->setText(tr::lng_purple_chat_select_account(tr::now));
 			return;
 		}
-		const auto status = SyncChatStatusOf(session);
-		chatStatus->setText(status.newReaders
-			? tr::lng_purple_chat_new_readers(tr::now)
-			: status.phase == DesktopSyncChatPhase::Use
-			? tr::lng_purple_chat_status_open(tr::now)
-			: status.phase == DesktopSyncChatPhase::Searching
-			? tr::lng_purple_chat_searching(tr::now)
-			: status.phase == DesktopSyncChatPhase::Unset
-			? tr::lng_purple_chat_unset(tr::now)
-			: tr::lng_purple_chat_posting_held(tr::now));
+		const auto magic = SyncMagicChatOf(session);
+		const auto frame = magic
+			? SyncMagicFrameOf(magic->last(), magic->binding())
+			: SyncMagicFrame();
+		chatStatus->setText(SyncMagicStatusText(session, frame));
+		ShowSyncMagicProblemOnce(session, box->uiShow());
 	};
 	SyncChatStatusChanges() | rpl::on_next([=](Main::Session*) {
 		updateChat();
@@ -1064,7 +1061,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		}
 		const auto origin = state->selectedSession;
 		const auto weak = QPointer<Ui::GenericBox>(box.get());
-		box->uiShow()->showBox(Box(SyncChatSetupBox, origin.get(), [=] {
+		box->uiShow()->showBox(Box(SyncMagicChatBox, origin.get(), [=] {
 			return weak && origin && state->selectedSession.get() == origin.get()
 				&& SelectedAvailable(*state) && !Busy(*state);
 		}));
