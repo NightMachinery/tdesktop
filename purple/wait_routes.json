@@ -68,6 +68,9 @@
   "Telegram/SourceFiles/purple/purple_screentime_box.cpp": {
     "SetTableBool": 1
   },
+  "Telegram/SourceFiles/purple/purple_voice_queue.cpp": {
+    "SetTableBool": 1
+  },
   "Telegram/SourceFiles/purple/purple_wait_gate.cpp": {
     "ExtendPeek": 1
   },

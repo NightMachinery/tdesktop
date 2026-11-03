@@ -634,6 +634,13 @@ default), `"any_open_chat"` or `"any_open_chat_except_in_folder"` - the last
 skipping chats that are already reachable on an extra view or in a shown folder.
 It is per-install rather than per-preset, and lives in memory only.
 
+`[playback] private_chat_queue_p` keeps an automatic voice queue to the other
+person. True unless you say otherwise. In a one-to-one chat, when you start
+playing their voice or round message by hand, "play next" plays only their
+voice and round messages and skips yours. It is read when a manual play
+starts, so a change applies from the next one. Settings > Advanced > Purple >
+Media playback writes it. See [media_playback.md](media_playback.md).
+
 `[suggestions] hide_invisible_p` decides whether the strips of chats the app
 offers you unasked leave out what the running preset hides. True unless you say
 otherwise, and asked only while a preset is filtering.

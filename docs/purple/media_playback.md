@@ -9,6 +9,8 @@ The code is in `Telegram/SourceFiles/purple/`:
 - `purple_media_playback.{h,cpp}`: the app side of every feature below.
 - `purple_media_rules.{h,cpp}`: the decisions behind the hooks, with no Qt and
   no app types, so the cases in `purple/tests/` run them on their own.
+- `purple_voice_queue.{h,cpp}`: the voice queue tracking and walk, with the
+  pure parts in `purple_voice_queue_rules.{h,cpp}`.
 - `hooks/media_playback.h`: the facade that upstream files include.
 
 ## Double-click restarts from 0:00
@@ -33,6 +35,37 @@ track seeks it to 0:00 and plays it, even if it was paused.
 - The floating round restarts the same way on a double-click (see "Floating
   round controls"); its old double-click action, opening the message, moved
   to a hover button.
+
+## Private-chat voice queue
+
+When a voice or round message ends, upstream plays the next one in the chat
+(unless the experimental `disable-autoplay-next` option is on). With
+`[playback] private_chat_queue_p` on, the default, a queue you start in a
+one-to-one chat on the other person's message plays only their messages and
+skips yours. Settings > Advanced > Purple > Media playback > Keep the voice
+queue to the other person switches it; the value lives in `settings.toml`
+([config.md](config.md)), so it follows the file to other devices.
+
+- The rule is purple-core's `AnchorForManualPlay` and `QueueKeeps`
+  (`purple/purple_playback.h` in the submodule), so Android applies the same
+  one. "Theirs" means incoming: a message they forwarded to you counts as
+  theirs, one you forwarded as yours.
+- One-to-one means a user chat other than Saved Messages, Replies and
+  Verification Codes. Bots count. A manual play on your own message, in Saved
+  Messages, in a group or in a channel changes nothing.
+- Manual or automatic: `purple_voice_queue.cpp` listens to the player.
+  `switchToNextEvents` announces the message an automatic advance is about to
+  play; a voice-type `trackChanged` to any other message is manual (a click in
+  a chat, the player bar's next or previous, the control socket) and sets a
+  new anchor for that chat. The setting is read only then, so toggling it
+  never changes a queue in the middle.
+- The walk starts at the message upstream would play and skips your messages
+  until one of theirs. It stops at the edge of the loaded playlist window
+  (about 32 messages either side), so more than about 31 of your own voice
+  messages in a row end the queue. When none is left the queue ends as it
+  does today.
+- Only automatic advances of the voice-type player in the anchored chat are
+  confined. Songs, manual next and previous, and other chats follow upstream.
 
 ## Video message size
 
@@ -126,6 +159,12 @@ fails when a merge drops one of them.
 - `history/view/media/history_view_gif.cpp`, `Gif::countThumbSize` and
   `Gif::bubbleWidthLimit`: one early return each, through
   `Purple::VideoMessageThumbSize` and `Purple::VideoMessageBubbleWidthLimit`.
+- `media/player/media_player_instance.cpp`, `Instance::moveInPlaylist`: one
+  guarded early return through `Purple::ConfinedVoiceNext`, right after
+  `useIndex` is computed. It plays the chosen message through upstream's own
+  `jumpByItem`, so the chat still follows it the way upstream does. The
+  tracking needs no upstream line: it starts from the existing
+  `Purple::OnMediaPlayerStarted` call in `core/application.cpp`.
 - `media/player/media_player_float.cpp`, `Float::Float`: one line after the
   stock size, `size = Purple::FloatPlayerSize(parent, document, size);`.
   The shadow, frame and progress arc all follow `size` already.
@@ -141,9 +180,14 @@ fails when a merge drops one of them.
 - `purple/tests/media_size_cases.cpp` (gate `cases-media-size`): the stored
   preference, the sides for every choice including Actual size, the column
   clamp, the bubble limit and the float size with its window cap.
+- `purple/tests/voice_queue_cases.cpp` (gate `cases-voice-queue`): the walk
+  over a fake playlist (skips yours, stops at the edge, declines when not
+  confined) and the manual or automatic classification, with the real
+  purple-core rule.
 - `purple/test_media_hooks.py` (gate `test_media_hooks`): the hook pins.
 - Needs a GUI check after a build: double-click a playing and a paused voice
   message and round, in a chat and in a replies thread; each size, Actual
   size on a 1x and a 2x screen, a narrow window, a round with a reply, and
   the float with the toggle on and off in a large and a small window, and
-  the float's hover buttons, drag and double-click.
+  the float's hover buttons, drag and double-click, and a private chat where
+  their message, then yours, then theirs play in turn.

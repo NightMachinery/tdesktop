@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_media_playback.h"
 
 #include "purple/purple_media_rules.h"
+#include "purple/purple_voice_queue.h"
 
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -288,6 +289,7 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 		.title = tr::lng_purple_media_playback(),
 		.keywords = { u"purple"_q, u"voice"_q, u"video"_q, u"round"_q },
 	});
+	AddVoiceQueueSetting(builder);
 	builder.addButton({
 		.id = u"advanced/purple_video_message_size"_q,
 		.title = tr::lng_purple_video_message_size(),

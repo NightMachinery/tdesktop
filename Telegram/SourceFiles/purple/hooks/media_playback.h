@@ -8,14 +8,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/basic_types.h"
+#include "data/data_audio_msg_id.h"
 
 #include <QtCore/QSize>
 #include <QtCore/qnamespace.h>
 
 #include <memory>
+#include <optional>
 
 class ClickHandler;
 class DocumentData;
+class History;
 class HistoryItem;
 class QWidget;
 
@@ -53,5 +56,12 @@ namespace Purple {
 void DecorateFloat(
 	not_null<Media::Player::Float*> floating,
 	Fn<void(not_null<const HistoryItem*>)> open);
+
+[[nodiscard]] std::optional<HistoryItem*> ConfinedVoiceNext(
+	AudioMsgId::Type type,
+	bool autonext,
+	const History *history,
+	int from,
+	Fn<HistoryItem*(int)> itemAt);
 
 } // namespace Purple

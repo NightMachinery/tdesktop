@@ -186,6 +186,10 @@ PRIVATE
     purple/purple_peek.h
     purple/purple_peek_controls.cpp
     purple/purple_peek_controls.h
+    purple/purple_voice_queue.cpp
+    purple/purple_voice_queue.h
+    purple/purple_voice_queue_rules.cpp
+    purple/purple_voice_queue_rules.h
     purple/purple_wait_gate.cpp
     purple/purple_wait_gate.h
     purple/purple_wait_key_filter.cpp

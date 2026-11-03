@@ -1503,6 +1503,14 @@ no facade covers those yet.
 - The older content-origin hunks of this file are listed under "Import
   content provenance and menu routes".
 
+**`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +9 -0.
+First Purple edit in this file.
+- The facade include, after the file's own header.
+- `Instance::moveInPlaylist`: one guarded early return through
+  `Purple::ConfinedVoiceNext` right after `useIndex` (the private-chat voice
+  queue). It returns nullopt, and upstream runs unchanged, for songs, manual
+  next or previous and any queue that is not confined.
+
 **`Telegram/SourceFiles/media/player/media_player_float.cpp`**: +6 -0. First
 Purple edit in this file.
 - The facade include, after the file's own header.

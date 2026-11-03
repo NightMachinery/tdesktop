@@ -108,6 +108,13 @@ CASES = {
         'units': ['purple/purple_media_rules.cpp'],
         'frameworks': [],
     },
+    'voice-queue': {
+        # The confined walk and the manual-play tracker over the real
+        # purple-core rule.
+        'program': 'voice_queue_cases.cpp',
+        'units': ['purple/purple_voice_queue_rules.cpp', 'core:purple/purple_playback.cpp'],
+        'frameworks': ['QtCore'],
+    },
 }
 
 

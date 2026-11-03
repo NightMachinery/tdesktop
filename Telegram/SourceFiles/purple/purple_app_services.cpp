@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_schedule.h"
 #include "purple/purple_screentime_recorder.h"
 #include "purple/purple_ui_witness.h"
+#include "purple/purple_voice_queue.h"
 
 namespace Purple {
 
@@ -39,6 +40,7 @@ void StartAppServices() {
 
 void OnMediaPlayerStarted() {
 	StartControlPlayerEvents();
+	StartVoiceQueue();
 }
 
 void OnScreenLockChanged(bool locked) {

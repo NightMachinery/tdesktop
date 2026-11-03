@@ -14,6 +14,7 @@ HOOKS = [
     ('media/player/media_player_float.cpp', 'Float::Float(', 'Purple::FloatPlayerSize('),
     ('media/player/media_player_float.cpp', 'Float::Float(', 'Purple::DecorateFloat('),
     ('media/player/media_player_float.cpp', 'void Float::mouseDoubleClickEvent(', 'Purple::RestartFloatOnDoubleClick('),
+    ('media/player/media_player_instance.cpp', 'bool Instance::moveInPlaylist(', 'Purple::ConfinedVoiceNext('),
 ]
 
 

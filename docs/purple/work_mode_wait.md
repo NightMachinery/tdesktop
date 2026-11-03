@@ -185,8 +185,9 @@ spellings and active-preset assignments across production Desktop/core sources.
 It matches unqualified calls, namespace-qualified calls and every receiver
 spelling, including declarations. `SetPeekStartDelay` and every `SetTable*` call
 are inventoried conservatively even when their table/key is aliased. Non-Peek
-schedule/device labels, screen-time, Premium, per-account row edits and core
-declarations are reviewed inventory entries, not newly gated operations. The
+schedule/device labels, screen-time, Premium, the private-chat voice queue
+toggle, per-account row edits and core declarations are reviewed inventory
+entries, not newly gated operations. The
 core parser's `SetTables` type construction is a deliberate conservative match. `purple/wait_routes.json` records the
 inventory. Request completion, guarded writer implementations, core resolution,
 schedule/Focus, Last Seen Peek and automatic Peek termination are the reviewed
