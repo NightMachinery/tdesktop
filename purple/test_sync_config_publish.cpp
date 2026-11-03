@@ -1029,6 +1029,41 @@ void FirstUseMigration() {
 		int(StateOf(first).space == StateOf(second).space));
 }
 
+void FirstUseMarkKeepsAnswer() {
+	const auto other = BuildOther(2, 1700000000000);
+	const auto inventory = InventoryOf({ other.built.canonical });
+	auto files = PublishFiles(kMagicChat);
+	MagicDevice(files, kCustom);
+	CHECK(ReadSyncFirstUseMark(files.files) == SyncFirstUseMark());
+	CHECK(ReviewSyncFirstUse(files.files, inventory).action == SyncFirstUseAction::Ask);
+	auto mark = SyncFirstUseMark();
+	mark.choice = SyncFirstUseChoice::Synced;
+	mark.joinSpace = other.space;
+	mark.checkedAt = 1800000000;
+	mark.fingerprint = u"fp"_q;
+	CHECK(WriteSyncFirstUseMark(files.files, mark));
+	CHECK(ReadSyncFirstUseMark(files.files) == mark);
+	const auto answered = ReviewSyncFirstUse(files.files, inventory);
+	CHECK(answered.need == SyncFirstUseNeed::NoState && answered.action == SyncFirstUseAction::Join);
+	CHECK(ReviewSyncFirstUse(files.files, inventory, SyncFirstUseChoice::ThisDevice).action
+		== SyncFirstUseAction::Publish);
+	const auto joined = RunMagicFlow(files, inventory, std::nullopt, 0);
+	CHECK(joined.reply.result.status == SyncConfigPublishStatus::AlreadySynced);
+	const auto resumed = ReviewSyncFirstUse(files.files, inventory);
+	CHECK(resumed.need == SyncFirstUseNeed::Unjoined && resumed.action == SyncFirstUseAction::Join);
+	CHECK(!resumed.settled && resumed.headKey);
+	mark.joinSpace.clear();
+	CHECK(WriteSyncFirstUseMark(files.files, mark));
+	const auto settled = ReviewSyncFirstUse(files.files, inventory);
+	CHECK(settled.need == SyncFirstUseNeed::None && !settled.action && settled.settled);
+	CHECK(ClearSyncFirstUseMark(files.files) && ClearSyncFirstUseMark(files.files));
+	CHECK(ReadSyncFirstUseMark(files.files) == SyncFirstUseMark());
+	CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/first-use.json"_q, "{\"version\":2}") == SyncStoreStatus::Ready);
+	CHECK(!ReadSyncFirstUseMark(files.files));
+	std::printf("FIRST USE mark resumed=%d settled=%d\n", int(resumed.need == SyncFirstUseNeed::Unjoined),
+		int(settled.settled));
+}
+
 void FirstUseRace() {
 	for (const auto choice : { SyncFirstUseChoice::Synced, SyncFirstUseChoice::ThisDevice }) {
 		auto first = PublishFiles(kMagicChat);
@@ -1086,7 +1121,7 @@ int main(int argc, char **argv) {
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
 		ExistingJoins(); MagicPublish();
-		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace();
+		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);

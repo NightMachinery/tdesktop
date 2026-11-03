@@ -168,7 +168,7 @@ def inspect(values):
     pause = auto.split('bool AutoSession::PauseOnForeignSpace(', 1)[-1].split('void AutoSession::RetireCarry(', 1)[0]
     require('auto-space-first-use', 'if (self->PauseOnForeignSpace(chat)) { return; }' in auto
         and 'ReviewSyncFirstUse(_store->files(), _inventory)' in pause
-        and 'if (first.need != SyncFirstUseNeed::OtherSpace || !first.action) {' in pause
+        and 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {' in pause
         and 'self->FirstUse(std::move(inventory), SyncFirstUseChoice::None, nullptr, false);' in pause
         and 'raise(SyncChatProblem::SpaceMismatch)' not in auto)
     opened = auto.split('bool AutoSession::Open() {', 1)[-1].split('void AutoSession::MoveStore()', 1)[0]
@@ -185,6 +185,14 @@ def inspect(values):
         and run.index('recovery->journalPresent') < run.index('ReviewSyncFirstUse(')
         and 'fresh && !fresh->journalPresent' in run and run.index('Stop();') < run.index('StartAgainSyncAccount(')
         and 'StartAgainSyncAccount(*session, *fresh, true, false, true)' in run)
+    finish = auto.split('void AutoSession::FirstUseFinish(', 1)[-1].split('void AutoSession::ReadNext(', 1)[0]
+    require('first-use-mark', 'if (!WriteSyncFirstUseMark(target->files, mark)) {' in run
+        and run.index('WriteSyncFirstUseMark(') < run.index('StartAgainSyncAccount(')
+        and run.index('WriteSyncFirstUseMark(') < run.index('std::make_unique<SyncConfigPublish>(')
+        and 'mark.choice = review.input.choice;' in run
+        and '} else if (review.need == SyncFirstUseNeed::Unjoined) {\n\t\tFirstUseJoined(inventory, review);' in run
+        and 'ClearSyncFirstUseMark(target->files);' in finish
+        and 'if (first.settled) {\n\t\tClearSyncFirstUseMark(_store->files());' in pause)
     require('first-use-actions', 'publish ? review.request : SyncConfigPublishRequest()' in run
         and '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)' in run
         and 'self->FirstUseJoined(inventory, review);' in run
@@ -262,7 +270,10 @@ negative = [
     ('purple_sync_auto_service.cpp', '_store && _session && Current() && Resolved()', '_store && _session && Current()', 'auto-effect-bound'),
     ('purple_sync_auto_service.cpp', 'facts.chatProblem = SyncMagicPaused(', 'facts.chatWritable = SyncMagicPaused(', 'auto-bound-facts'),
     ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-first-use'),
-    ('purple_sync_auto_service.cpp', 'if (first.need != SyncFirstUseNeed::OtherSpace || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
+    ('purple_sync_auto_service.cpp', 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
+    ('purple_sync_auto_service.cpp', 'mark.choice = review.input.choice;', '', 'first-use-mark'),
+    ('purple_sync_auto_service.cpp', '} else if (review.need == SyncFirstUseNeed::Unjoined) {\n\t\tFirstUseJoined(inventory, review);', '} else if (false) {\n\t\tFirstUseJoined(inventory, review);', 'first-use-mark'),
+    ('purple_sync_auto_service.cpp', 'if (!WriteSyncFirstUseMark(target->files, mark)) {', 'if (false) {', 'first-use-mark'),
     ('purple_sync_auto_service.cpp', '\tRetireCarry();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);', '\tconst auto recovery = InspectSyncAccountRecovery(*session);', 'first-use-carry-retire'),
     ('purple_sync_auto_service.cpp', '!SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()', '!SyncMagicBound(session)', 'first-use-carry-retire'),
     ('purple_sync_auto_service.cpp', 'if (!Open()) { Stop(); return NoStateEvent(event); }', 'if (!Open()) { Stop(); return false; }', 'auto-first-use-unbound'),

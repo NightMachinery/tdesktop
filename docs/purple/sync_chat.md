@@ -180,6 +180,15 @@ creates it.
   as `SyncFirstUseChoice`; the state it creates in the chat's space settles
   it, so the question never comes back.
 
+The answer and a join in progress are kept beside the state, in
+`sync/first-use.json` (`SyncFirstUseMark`), written before the archive or the
+publisher runs. A run that dies after the answer applies the same answer next
+time instead of asking again. A join that dies after the publisher wrote the
+new, still unjoined state is resumed (`SyncFirstUseNeed::Unjoined`): the head
+is applied without a second join, so a fresh login never sees a conflict
+review. The mark is removed once a publish or join succeeds, or once the state
+in the chat's space has a base.
+
 Before acting on `OtherSpace`, the old state is archived with the Start again
 machinery (`StartAgainSyncAccount` with `firstUse`, planned by
 `PlanSyncFirstUseArchive`): the state and complete pending stages move to

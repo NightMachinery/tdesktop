@@ -697,6 +697,9 @@ void RunFirstUse(
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	if (!bound || !target || !state->route || state->route->peer.chat != *bound) { return false; }
 	const auto first = ReviewSyncFirstUse(target->files, inventory);
+	if (first.settled) {
+		ClearSyncFirstUseMark(target->files);
+	}
 	if (first.need == SyncFirstUseNeed::None || !first.action) { return false; }
 	state->completed = inventory;
 	if (*first.action == SyncFirstUseAction::Ask) {

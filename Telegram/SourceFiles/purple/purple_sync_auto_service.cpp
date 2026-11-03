@@ -536,7 +536,10 @@ bool AutoSession::PauseOnForeignSpace(PeerToken chat) {
 	// any state outside the selected space is first use, as the Sync screen's Check decides it.
 	const auto first = (magic && chat != PeerToken{} && _store && _store->local().state())
 		? ReviewSyncFirstUse(_store->files(), _inventory) : SyncFirstUseReview();
-	if (first.need != SyncFirstUseNeed::OtherSpace || !first.action) {
+	if (first.settled) {
+		ClearSyncFirstUseMark(_store->files());
+	}
+	if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {
 		_firstUse.reset();
 		return false;
 	}
@@ -644,8 +647,8 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 			: action == SyncFirstUseAction::Publish ? u"publish"_q
 			: action == SyncFirstUseAction::Join ? u"join"_q
 			: action == SyncFirstUseAction::JoinSilently ? u"join_silently"_q : u"ask"_q),
-		SyncDiagCode(u"choice"_q, choice == SyncFirstUseChoice::Synced ? u"synced"_q
-			: choice == SyncFirstUseChoice::ThisDevice ? u"this_device"_q : u"none"_q) });
+		SyncDiagCode(u"choice"_q, review.input.choice == SyncFirstUseChoice::Synced ? u"synced"_q
+			: review.input.choice == SyncFirstUseChoice::ThisDevice ? u"this_device"_q : u"none"_q) });
 	const auto broken = (review.input.local.status == SyncSettingsFileStatus::Invalid)
 		|| review.input.local.usingLastGood;
 	if (action == SyncFirstUseAction::Wait && broken) {
@@ -653,6 +656,18 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 		return;
 	} else if (action == SyncFirstUseAction::Wait || action == SyncFirstUseAction::Ask) {
 		FirstUseFinish(action == SyncFirstUseAction::Wait ? SyncFirstUseOutcome::Waiting : SyncFirstUseOutcome::Asking);
+		return;
+	}
+	const auto publish = (action == SyncFirstUseAction::Publish)
+		|| (action == SyncFirstUseAction::JoinSilently && !review.sameBytes);
+	auto mark = ReadSyncFirstUseMark(target->files).value_or(SyncFirstUseMark());
+	mark.choice = review.input.choice;
+	mark.joinSpace = publish ? QString() : inventory.inventory.directory.selectedSpace.value_or(QString());
+	if (!WriteSyncFirstUseMark(target->files, mark)) {
+		FirstUseFinish(SyncFirstUseOutcome::Failed);
+		return;
+	} else if (review.need == SyncFirstUseNeed::Unjoined) {
+		FirstUseJoined(inventory, review);
 		return;
 	}
 	if (review.need == SyncFirstUseNeed::OtherSpace) {
@@ -665,8 +680,6 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 			SyncDiagCode(u"outcome"_q, archived ? u"ok"_q : u"error"_q) });
 		if (!archived) { FirstUseFinish(SyncFirstUseOutcome::Failed); return; }
 	}
-	const auto publish = (action == SyncFirstUseAction::Publish)
-		|| (action == SyncFirstUseAction::JoinSilently && !review.sameBytes);
 	const auto chat = inventory.route.peer.chat;
 	const auto weak = base::make_weak(this);
 	_firstPublish = std::make_unique<SyncConfigPublish>(session->account(), *session, inventory,
@@ -737,9 +750,13 @@ void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text) {
 	}
 	const auto result = SyncFirstUseResult{ outcome, text };
 	_firstUse = result;
+	const auto session = _session.get();
+	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
+	if (target && (outcome == SyncFirstUseOutcome::Published || outcome == SyncFirstUseOutcome::Joined)) {
+		ClearSyncFirstUseMark(target->files);
+	}
 	Changes.fire({});
 	for (const auto &done : base::take(_firstDone)) { done(result); }
-	const auto session = _session.get();
 	if (session && (outcome == SyncFirstUseOutcome::Published || outcome == SyncFirstUseOutcome::Joined)
 		&& AutomaticSettingsSyncEnabled(session)) {
 		Event(SyncAutoEvent::SessionReady);

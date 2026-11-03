@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 
 namespace Purple {
 namespace {
@@ -142,6 +144,51 @@ bool SyncCarryLeftoversPresent(const QString &syncDirectory) {
 	return false;
 }
 
+std::optional<SyncFirstUseMark> ReadSyncFirstUseMark(const AccountFiles &files) {
+	const auto path = files.syncDirectory + u"/first-use.json"_q;
+	const auto identity = SyncPathIdentity(path);
+	if (identity == "missing") {
+		return SyncFirstUseMark();
+	}
+	auto bytes = QByteArray();
+	if (identity.isEmpty() || ReadSyncPrivateFile(path, 4096, bytes) != SyncStoreStatus::Ready) {
+		return std::nullopt;
+	}
+	const auto object = QJsonDocument::fromJson(bytes).object();
+	if (object.value(u"version"_q).toInt() != 1) {
+		return std::nullopt;
+	}
+	const auto choice = object.value(u"choice"_q).toString();
+	auto result = SyncFirstUseMark();
+	result.choice = (choice == u"synced"_q) ? SyncFirstUseChoice::Synced
+		: (choice == u"this_device"_q) ? SyncFirstUseChoice::ThisDevice
+		: SyncFirstUseChoice::None;
+	result.joinSpace = object.value(u"join_space"_q).toString();
+	result.checkedAt = int64_t(object.value(u"checked_at"_q).toDouble());
+	result.fingerprint = object.value(u"fingerprint"_q).toString();
+	return result;
+}
+
+bool WriteSyncFirstUseMark(const AccountFiles &files, const SyncFirstUseMark &mark) {
+	auto object = QJsonObject();
+	object.insert(u"version"_q, 1);
+	object.insert(u"choice"_q, (mark.choice == SyncFirstUseChoice::Synced) ? u"synced"_q
+		: (mark.choice == SyncFirstUseChoice::ThisDevice) ? u"this_device"_q
+		: u"none"_q);
+	object.insert(u"join_space"_q, mark.joinSpace);
+	object.insert(u"checked_at"_q, double(mark.checkedAt));
+	object.insert(u"fingerprint"_q, mark.fingerprint);
+	return EnsureSyncPrivateDirectory(files.syncDirectory) == SyncStoreStatus::Ready
+		&& WriteSyncPrivateFile(files.syncDirectory + u"/first-use.json"_q,
+			QJsonDocument(object).toJson(QJsonDocument::Compact)) == SyncStoreStatus::Ready
+		&& ReadSyncFirstUseMark(files) == mark;
+}
+
+bool ClearSyncFirstUseMark(const AccountFiles &files) {
+	const auto path = files.syncDirectory + u"/first-use.json"_q;
+	return SyncPathIdentity(path) == "missing" || QFile::remove(path);
+}
+
 SyncFirstUseReview ReviewSyncFirstUse(
 		const AccountFiles &files,
 		const SyncAccountInventoryResult &inventory,
@@ -150,14 +197,28 @@ SyncFirstUseReview ReviewSyncFirstUse(
 	result.carry = SyncCarryLeftoversPresent(files.syncDirectory);
 	const auto snapshot = ReadSyncRecoveryStore(files, std::nullopt);
 	if (snapshot.status != SyncStoreStatus::Ready) { return result; }
+	const auto mark = ReadSyncFirstUseMark(files);
+	if (choice == SyncFirstUseChoice::None && mark) {
+		choice = mark->choice;
+	}
 	const auto &selected = inventory.directory.selectedSpace;
 	if (!snapshot.store.statePresent) {
 		if (!snapshot.store.pendingFiles.empty()) { return result; }
 		result.need = SyncFirstUseNeed::NoState;
 	} else {
 		const auto parsed = ParseSyncLocalState(snapshot.store.state);
-		if (!parsed || !selected || *selected == parsed.state.space) { return result; }
-		result.need = SyncFirstUseNeed::OtherSpace;
+		if (!parsed || !selected) {
+			return result;
+		} else if (*selected != parsed.state.space) {
+			result.need = SyncFirstUseNeed::OtherSpace;
+		} else if (mark && mark->joinSpace == *selected && parsed.state.config.seq == 0
+			&& !parsed.state.config.pendingSeq && parsed.state.configData.base.isEmpty()
+			&& parsed.state.configData.seenSeq.empty()) {
+			result.need = SyncFirstUseNeed::Unjoined;
+		} else {
+			result.settled = true;
+			return result;
+		}
 	}
 	auto local = ReadSyncSettingsFile(files);
 	if (local.status == SyncSettingsFileStatus::Present && !local.usingLastGood
