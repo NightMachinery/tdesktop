@@ -24,7 +24,7 @@ const std::vector<QString> &Words() {
 		u"ineligible"_q, u"bound"_q, u"rebound"_q, u"reason"_q,
 		u"method"_q, u"outcome"_q, u"ok"_q, u"flood"_q, u"network"_q,
 		u"timeout"_q, u"error"_q, u"seconds"_q, u"code"_q, u"rpc"_q,
-		u"messages.getallchats"_q, u"channels.getfullchannel"_q,
+		u"channels.getfullchannel"_q,
 		u"channels.createchannel"_q, u"folders.editpeerfolders"_q,
 		u"account.updatenotifysettings"_q, u"messages.gethistory"_q,
 		u"messages.getmessages"_q, u"channels.getmessages"_q,
@@ -37,14 +37,14 @@ const std::vector<QString> &Words() {
 		u"public_username"_q, u"restricted"_q, u"cannot_post"_q,
 		u"foreign_record"_q, u"forwarded_record"_q, u"via_bot_record"_q,
 		u"create_limit"_q, u"create_uncertain"_q, u"magic_ineligible"_q,
-		u"space_mismatch"_q, u"list_partial"_q, u"binding_unreadable"_q,
+		u"space_mismatch"_q, u"lists_loading"_q, u"binding_unreadable"_q,
 		u"drop_pending"_q, u"move"_q, u"inventory"_q, u"publish"_q,
 		u"joined"_q, u"wait"_q, u"problem"_q, u"step"_q,
 		u"user_check"_q, u"user_resume"_q, u"chat_changed"_q,
 		u"user_action"_q, u"choose"_q, u"default"_q, u"join"_q,
 		u"listed"_q, u"value"_q, u"on"_q, u"off"_q,
 		u"action"_q, u"slot"_q, u"lists_unreadable"_q, u"native_unavailable"_q,
-		u"rejected"_q, u"wait_recorded"_q, u"retry"_q,
+		u"rejected"_q, u"wait_recorded"_q, u"retry"_q, u"request_refused"_q,
 	};
 	return result;
 }

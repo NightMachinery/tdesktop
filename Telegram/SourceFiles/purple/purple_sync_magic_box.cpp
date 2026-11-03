@@ -160,6 +160,7 @@ QString SyncMagicProblemText(SyncChatProblem problem) {
 	case SyncChatProblem::CreateLimit: return tr::lng_purple_magic_problem_create_limit(tr::now);
 	case SyncChatProblem::MagicIneligible: return tr::lng_purple_magic_problem_magic_ineligible(tr::now);
 	case SyncChatProblem::SpaceMismatch: return tr::lng_purple_magic_problem_space_mismatch(tr::now);
+	case SyncChatProblem::RequestRefused: return tr::lng_purple_magic_problem_request_refused(tr::now);
 	case SyncChatProblem::None: break;
 	}
 	return QString();
@@ -183,15 +184,18 @@ QString SyncMagicStatusText(
 			? (line + u' ' + tr::lng_purple_magic_picked(tr::now))
 			: line;
 	}
-	case SyncMagicFrame::Line::Waiting:
-		return frame.retryAt > 0
-			? tr::lng_purple_magic_waiting(
-				tr::now,
-				lt_time,
-				QLocale().toString(
-					base::unixtime::parse(TimeId(frame.retryAt)),
-					QLocale::ShortFormat))
-			: tr::lng_purple_magic_waiting_later(tr::now);
+	case SyncMagicFrame::Line::Waiting: {
+		const auto time = QLocale().toString(
+			base::unixtime::parse(TimeId(frame.retryAt)),
+			QLocale::ShortFormat);
+		return frame.telegram
+			? (frame.retryAt > 0
+				? tr::lng_purple_magic_waiting(tr::now, lt_time, time)
+				: tr::lng_purple_magic_waiting_later(tr::now))
+			: (frame.retryAt > 0
+				? tr::lng_purple_magic_retrying(tr::now, lt_time, time)
+				: tr::lng_purple_magic_retrying_later(tr::now));
+	}
 	case SyncMagicFrame::Line::Problem:
 		return tr::lng_purple_magic_paused(
 			tr::now,

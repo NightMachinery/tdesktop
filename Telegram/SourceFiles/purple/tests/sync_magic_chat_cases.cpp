@@ -38,9 +38,8 @@ struct Fake final : SyncMagicPort {
 	std::multimap<int64_t, std::function<void()>> timers;
 	QStringList sent;
 	QStringList lines;
-	std::deque<SyncMagicReply<SyncMagicChats>> allReplies;
-	std::vector<std::vector<uint64_t>> excepts;
 	int listLoads = 0;
+	bool partialLists = false;
 	std::optional<PeerToken> listBound;
 	std::map<uint64_t, MagicChatCandidate> archived;
 	std::deque<SyncMagicReply<MagicChatCandidate>> fullReplies;
@@ -78,23 +77,14 @@ struct Fake final : SyncMagicPort {
 		}
 		done(result);
 	}
-	void loadLists(PeerToken bound, std::function<void()> done) override {
+	void loadLists(std::optional<PeerToken> bound, std::function<void()> done) override {
 		++listLoads;
 		listBound = bound;
-		known.insert(archived.begin(), archived.end());
-		lists.mainLoaded = lists.archiveLoaded = true;
-		done();
-	}
-	void allChats(std::vector<uint64_t> except, std::function<void(SyncMagicReply<SyncMagicChats>)> done) override {
-		sent.push_back(u"allChats"_q);
-		excepts.push_back(std::move(except));
-		auto reply = allReplies.empty()
-			? SyncMagicReply<SyncMagicChats>::Ok(SyncMagicChats())
-			: allReplies.front();
-		if (!allReplies.empty()) {
-			allReplies.pop_front();
+		if (!partialLists) {
+			known.insert(archived.begin(), archived.end());
+			lists.mainLoaded = lists.archiveLoaded = true;
 		}
-		done(reply);
+		done();
 	}
 	void fullInfo(uint64_t channelId, std::function<void(SyncMagicReply<MagicChatCandidate>)> done) override {
 		sent.push_back(u"fullInfo"_q);
@@ -160,17 +150,6 @@ struct Fake final : SyncMagicPort {
 	}
 };
 
-SyncMagicReply<SyncMagicChats> Slice(int64_t count, std::vector<MagicChatCandidate> magic, std::vector<uint64_t> ids) {
-	auto result = SyncMagicChats();
-	result.count = count;
-	result.ids = std::move(ids);
-	for (const auto &chat : magic) {
-		result.ids.push_back(chat.channelId);
-	}
-	result.candidates = std::move(magic);
-	return SyncMagicReply<SyncMagicChats>::Ok(std::move(result));
-}
-
 SyncMagicResult Run(SyncMagicChat &chat, Fake &port, SyncMagicTrigger trigger, bool fresh = false) {
 	auto result = SyncMagicResult();
 	result.retryAt = -1;
@@ -195,8 +174,9 @@ int main() {
 		auto port = std::make_shared<Fake>();
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(port->sent == QStringList({ u"allChats"_q, u"create"_q, u"archive"_q, u"mute"_q, u"fullInfo"_q }),
-			"absent: one absence proof, one create, archive, mute, then verify");
+		expect(port->sent == QStringList({ u"create"_q, u"archive"_q, u"mute"_q, u"fullInfo"_q }),
+			"absent: complete lists, one create, archive, mute, then verify");
+		expect(port->listLoads == 1 && !port->listBound, "absent: the lists are loaded first");
 		expect(result.kind == Kind::Use && result.chat == channel(900), "absent: the created chat is used");
 		const auto stored = port->stored();
 		expect(stored.mode == SyncChatBindingMode::Magic && stored.chat == channel(900), "absent: the binding is magic");
@@ -239,35 +219,36 @@ int main() {
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		port->allReplies.push_back(SyncMagicReply<SyncMagicChats>::Failed(u"FLOOD_WAIT_120"_q, 420));
+		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"FLOOD_WAIT_120"_q, 420));
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(result.kind == Kind::Wait && result.retryAt == port->clock + 121, "flood: a long flood waits");
-		expect(port->stored().waits.contains(QString::fromLatin1(kSyncChatAllChatsMethod)), "flood: the wait is stored");
+		expect(result.kind == Kind::Wait && result.retryAt == port->clock + 121 && result.telegram,
+			"flood: a long flood is Telegram's wait");
+		expect(port->stored().waits.contains(QString::fromLatin1(kSyncChatCreateMethod)), "flood: the wait is stored");
 		auto restarted = SyncMagicChat(port);
 		port->sent.clear();
 		for (const auto trigger : { SyncMagicTrigger::Startup, SyncMagicTrigger::Screen, SyncMagicTrigger::Manual,
 				SyncMagicTrigger::Auto, SyncMagicTrigger::Post }) {
 			const auto held = Run(restarted, *port, trigger, true);
-			expect(held.kind == Kind::Wait, "flood: every trigger waits after a restart");
+			expect(held.kind == Kind::Wait && held.telegram, "flood: every trigger waits after a restart");
 		}
 		expect(port->sent.isEmpty(), "flood: nothing is sent before the deadline");
 		port->timers.clear();
 		port->advance(122);
 		const auto later = Run(restarted, *port, SyncMagicTrigger::Startup);
-		expect(later.kind == Kind::Use && port->sent.front() == u"allChats"_q, "flood: the request goes after the deadline");
+		expect(later.kind == Kind::Use && port->sent.front() == u"create"_q, "flood: the request goes after the deadline");
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		port->allReplies.push_back(SyncMagicReply<SyncMagicChats>::Failed(u"FLOOD_WAIT_10"_q, 420));
+		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"FLOOD_WAIT_10"_q, 420));
 		auto chat = SyncMagicChat(port);
 		auto result = SyncMagicResult();
 		chat.lookup(SyncMagicTrigger::Startup, false, [&](SyncMagicResult value) { result = value; });
 		port->drain();
-		expect(port->sent == QStringList({ u"allChats"_q }) && result.kind == Kind::Unavailable, "short flood: retried in place");
+		expect(port->sent == QStringList({ u"create"_q }) && result.kind == Kind::Unavailable, "short flood: retried in place");
 		port->advance(11);
-		expect(port->sent.size() >= 2 && port->sent[1] == u"allChats"_q && result.kind == Kind::Use, "short flood: one retry");
-		expect(!port->stored().waits.contains(QString::fromLatin1(kSyncChatAllChatsMethod)), "short flood: not stored");
+		expect(port->sent.size() >= 2 && port->sent[1] == u"create"_q && result.kind == Kind::Use, "short flood: one retry");
+		expect(!port->stored().waits.contains(QString::fromLatin1(kSyncChatCreateMethod)), "short flood: not stored");
 	}
 	{
 		auto port = std::make_shared<Fake>();
@@ -317,7 +298,8 @@ int main() {
 		port->file = *SerializeSyncChatBinding(binding);
 		auto chat = SyncMagicChat(port);
 		const auto gone = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(port->sent == QStringList({ u"allChats"_q }), "gone: an unknown bound chat is settled by one absence proof");
+		expect(port->sent.isEmpty() && port->listLoads == 1,
+			"gone: complete lists settle an unknown bound chat without a request");
 		expect(gone.kind == Kind::Problem && gone.problem == SyncChatProblem::ChatGone, "gone: a missing chat is a problem");
 		auto extra = Magic(50, true);
 		extra.facts.otherMembers = 2;
@@ -399,28 +381,15 @@ int main() {
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		port->allReplies.push_back(Slice(3, {}, { 11, 12 }));
-		port->allReplies.push_back(Slice(3, {}, { 13 }));
+		port->partialLists = true;
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(port->sent.mid(0, 3) == QStringList({ u"allChats"_q, u"allChats"_q, u"create"_q }),
-			"slices: two pages, then create");
-		expect(port->excepts.size() >= 2 && port->excepts[0].empty()
-			&& port->excepts[1] == std::vector<uint64_t>({ 11, 12 }), "slices: the second page excepts the first");
-		expect(result.kind == Kind::Use, "slices: the complete list proves absence");
-	}
-	{
-		auto port = std::make_shared<Fake>();
-		for (auto i = 0; i != kSyncMagicAllChatsPages; ++i) {
-			port->allReplies.push_back(Slice(100, {}, { uint64_t(11 + i) }));
-		}
-		auto chat = SyncMagicChat(port);
-		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(port->sent.count(u"allChats"_q) == kSyncMagicAllChatsPages && !port->sent.contains(u"create"_q),
-			"slices: an incomplete list never creates");
-		expect(result.kind == Kind::Wait && result.retryAt == port->clock + kSyncMagicPartialWait,
-			"slices: an incomplete list waits");
-		expect(port->logged(u"reason=list_partial"_q), "slices: logged");
+		expect(port->sent.isEmpty() && result.kind == Kind::Wait && !result.telegram
+			&& result.retryAt == port->clock + kSyncMagicListsRetry, "lists: incomplete lists never create");
+		expect(port->logged(u"reason=lists_loading"_q), "lists: logged");
+		port->partialLists = false;
+		port->advance(kSyncMagicListsRetry + 1);
+		expect(port->sent.contains(u"create"_q), "lists: the retry creates once the lists are complete");
 	}
 	{
 		auto port = std::make_shared<Fake>();
@@ -429,36 +398,58 @@ int main() {
 		binding.chat = channel(50);
 		binding.verifiedAt = port->clock;
 		port->file = *SerializeSyncChatBinding(binding);
-		for (auto i = 0; i != kSyncMagicAllChatsPages; ++i) {
-			port->allReplies.push_back(Slice(100, { Magic(uint64_t(70 + i), false) }, {}));
-		}
+		port->partialLists = true;
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
 		expect(result.kind == Kind::Wait && port->stored().problem == SyncChatProblem::None,
-			"slices: a bound chat missing from an incomplete list is not gone");
+			"lists: a bound chat missing from incomplete lists is not gone");
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"PEER_FLOOD"_q, 400));
-		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"PEER_FLOOD"_q, 400));
+		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"INPUT_METHOD_INVALID_1_2"_q, 400));
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(result.kind == Kind::Wait && result.retryAt == port->clock + kSyncMagicErrorWait,
-			"refused: PEER_FLOOD is a wait");
-		expect(port->stored().waits.contains(QString::fromLatin1(kSyncChatCreateMethod)), "refused: the wait is stored");
+		expect(result.kind == Kind::Problem && result.problem == SyncChatProblem::RequestRefused && result.show,
+			"refused: a 400 is a problem shown once");
+		expect(port->stored().problem == SyncChatProblem::RequestRefused && port->stored().waits.empty(),
+			"refused: stored as a problem, not a wait");
 		auto restarted = SyncMagicChat(port);
 		port->sent.clear();
 		const auto held = Run(restarted, *port, SyncMagicTrigger::Auto, true);
-		expect(held.kind == Kind::Wait && !port->sent.contains(u"create"_q), "refused: no create before the wait ends");
-		port->timers.clear();
-		port->advance(kSyncMagicErrorWait + 1);
-		const auto second = Run(chat, *port, SyncMagicTrigger::Auto, true);
-		expect(second.kind == Kind::Wait && second.retryAt == port->clock + 2 * kSyncMagicErrorWait,
-			"refused: a second refusal waits twice as long");
+		expect(held.kind == Kind::Problem && port->sent.isEmpty(), "refused: no request until the user acts");
+		const auto frame = SyncMagicFrameOf(held, port->stored());
+		expect(frame.line == SyncMagicFrame::Line::Problem, "refused: never worded as a wait");
+		const auto manual = Run(restarted, *port, SyncMagicTrigger::Manual, true);
+		expect(manual.kind == Kind::Use && port->sent.contains(u"create"_q), "refused: a manual check tries again");
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		port->allReplies.push_back(SyncMagicReply<SyncMagicChats>::Failed(u"FLOOD_WAIT_600"_q, 420));
+		auto binding = SyncChatBinding();
+		binding.mode = SyncChatBindingMode::Magic;
+		binding.chat = channel(60);
+		binding.verifiedAt = port->clock - kSyncChatVerifySeconds;
+		port->file = *SerializeSyncChatBinding(binding);
+		port->known[60] = Magic(60, true);
+		port->fullReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"CHAT_ID_INVALID"_q, 400));
+		auto chat = SyncMagicChat(port);
+		const auto result = Run(chat, *port, SyncMagicTrigger::Post, true);
+		expect(result.kind == Kind::Problem && result.problem == SyncChatProblem::RequestRefused,
+			"refused: a bound chat's refused full info is a problem");
+	}
+	{
+		auto port = std::make_shared<Fake>();
+		port->known[20] = Magic(20, false);
+		port->known[40] = Magic(40, false);
+		port->lists.visible = { Magic(20, false), Magic(40, false) };
+		port->fullReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"CHANNEL_PRIVATE"_q, 406));
+		auto chat = SyncMagicChat(port);
+		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
+		expect(result.kind == Kind::Use && result.chat == channel(40) && port->stored().rejected.contains(20),
+			"refused: a candidate's refused full info only rejects it");
+	}
+	{
+		auto port = std::make_shared<Fake>();
+		port->createReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(u"FLOOD_WAIT_600"_q, 420));
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Manual, true);
 		expect(result.kind == Kind::Wait, "retry: a manual check ends in a wait");
@@ -486,7 +477,7 @@ int main() {
 		binding.chat = channel(60);
 		binding.verifiedAt = port->clock;
 		port->file = *SerializeSyncChatBinding(binding);
-		port->allReplies.push_back(SyncMagicReply<SyncMagicChats>::Failed(u"FLOOD_WAIT_600"_q, 420));
+		port->partialLists = true;
 		auto chat = SyncMagicChat(port);
 		expect(chat.hidden() == channel(60), "hidden: the bound chat is hidden before the first lookup");
 		const auto waited = Run(chat, *port, SyncMagicTrigger::Startup);
@@ -504,7 +495,7 @@ int main() {
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
 		expect(result.kind == Kind::Use && result.chat == channel(60) && port->listLoads == 1,
 			"cold start: the archive list finds the bound chat");
-		expect(port->sent.isEmpty(), "cold start: no getAllChats");
+		expect(port->sent.isEmpty(), "cold start: no request");
 		expect(port->listBound == channel(60), "cold start: the list wait is told the bound chat");
 	}
 	{
@@ -522,19 +513,6 @@ int main() {
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		for (auto i = 0; i != kSyncMagicAllChatsPages; ++i) {
-			auto shared = Magic(uint64_t(70 + i), true);
-			shared.facts.otherMembers = 2;
-			port->allReplies.push_back(Slice(100, { Magic(uint64_t(70 + i), false) }, {}));
-			port->fullReplies.push_back(SyncMagicReply<MagicChatCandidate>::Ok(shared));
-		}
-		auto chat = SyncMagicChat(port);
-		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(result.kind == Kind::Wait && port->stored().problem == SyncChatProblem::None,
-			"slices: ineligible chats on an incomplete list raise no problem");
-	}
-	{
-		auto port = std::make_shared<Fake>();
 		port->unreadable = true;
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
@@ -543,10 +521,14 @@ int main() {
 	}
 	{
 		auto port = std::make_shared<Fake>();
-		port->allReplies.push_back(SyncMagicReply<SyncMagicChats>::Failed(QString(), -1));
+		port->known[40] = Magic(40, false);
+		port->lists.visible = { Magic(40, false) };
+		port->fullReplies.push_back(SyncMagicReply<MagicChatCandidate>::Failed(QString(), -1));
 		auto chat = SyncMagicChat(port);
 		const auto result = Run(chat, *port, SyncMagicTrigger::Startup);
-		expect(result.kind == Kind::Wait && result.retryAt == port->clock + 5, "network: backs off five seconds");
+		expect(result.kind == Kind::Wait && result.retryAt == port->clock + 5 && !result.telegram,
+			"network: backs off five seconds, as Purple's own wait");
+		expect(port->stored().waits.empty(), "network: not kept as a Telegram wait");
 		expect(port->timers.size() == 1, "network: one wake-up is armed");
 		chat.close();
 		port->drain();
@@ -574,9 +556,6 @@ int main() {
 			clean = clean && !line.contains(u"invalid"_q);
 		}
 		expect(clean, "diag: every word is in the vocabulary");
-		expect(SyncMagicFloodSeconds(u"FLOOD_WAIT_7"_q) == 7 && !SyncMagicFloodSeconds(u"FLOOD_WAIT_"_q)
-			&& SyncMagicFloodSeconds(u"FLOOD_PREMIUM_WAIT_3"_q) == 3 && !SyncMagicFloodSeconds(u"PEER_FLOOD"_q),
-			"flood seconds parse");
 	}
 	{
 		const auto group = [](QString space) {
@@ -623,8 +602,10 @@ int main() {
 		wait.kind = Kind::Wait;
 		wait.retryAt = 1234;
 		frame = SyncMagicFrameOf(wait, std::nullopt);
-		expect(frame.line == SyncMagicFrame::Line::Waiting && frame.retryAt == 1234 && !frame.chat,
+		expect(frame.line == SyncMagicFrame::Line::Waiting && frame.retryAt == 1234 && !frame.chat && !frame.telegram,
 			"frame: a wait shows its end");
+		wait.telegram = true;
+		expect(SyncMagicFrameOf(wait, std::nullopt).telegram, "frame: only Telegram's wait is worded as one");
 		auto problem = SyncMagicResult();
 		problem.kind = Kind::Problem;
 		problem.chat = channel(5);

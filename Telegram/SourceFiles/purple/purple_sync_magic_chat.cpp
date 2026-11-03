@@ -12,36 +12,19 @@ std::optional<SyncChatBinding> Parse(const QByteArray &bytes) {
 	return bytes.isEmpty() ? std::optional(SyncChatBinding()) : ParseSyncChatBinding(bytes);
 }
 
-const MagicChatCandidate *Find(const std::vector<MagicChatCandidate> &chats, uint64_t id) {
-	const auto i = std::find_if(begin(chats), end(chats), [&](const MagicChatCandidate &chat) {
-		return chat.channelId == id;
-	});
-	return (i != end(chats)) ? &*i : nullptr;
-}
-
-std::vector<MagicChatCandidate> Titled(const std::vector<MagicChatCandidate> &chats) {
-	auto result = std::vector<MagicChatCandidate>();
-	for (const auto &chat : chats) {
-		if (IsMagicSyncChatTitle(chat.title)) {
-			result.push_back(chat);
-		}
-	}
-	return result;
-}
-
 int64_t Candidates(const SyncChatLookupInput &input) {
-	return int64_t(input.visible.size())
-		+ (input.allChats ? int64_t(input.allChats->size()) : 0);
+	return int64_t(input.visible.size());
 }
 
 SyncDiagField Method(const QString &method) {
 	return SyncDiagCode(u"method"_q, method.toLower());
 }
 
-SyncMagicResult WaitUntil(int64_t retryAt) {
+SyncMagicResult WaitUntil(int64_t retryAt, bool telegram = false) {
 	auto result = SyncMagicResult();
 	result.kind = SyncMagicResult::Kind::Wait;
 	result.retryAt = retryAt;
+	result.telegram = telegram;
 	return result;
 }
 
@@ -58,29 +41,6 @@ void SetCreateStep(
 }
 
 } // namespace
-
-std::optional<int64_t> SyncMagicFloodSeconds(const QString &error) {
-	for (const auto &prefix : { u"FLOOD_WAIT_"_q, u"FLOOD_PREMIUM_WAIT_"_q }) {
-		if (!error.startsWith(prefix)) {
-			continue;
-		}
-		const auto digits = error.mid(prefix.size());
-		if (digits.isEmpty()) {
-			return std::nullopt;
-		}
-		auto result = int64_t(0);
-		for (const auto ch : digits) {
-			if (ch < '0' || ch > '9') {
-				return std::nullopt;
-			}
-			result = std::min(
-				std::numeric_limits<int64_t>::max() / 20,
-				result * 10 + (ch.unicode() - '0'));
-		}
-		return result;
-	}
-	return std::nullopt;
-}
 
 bool SyncMagicFrame::savedMessages() const {
 	return chat && *chat == PeerToken{};
@@ -116,6 +76,7 @@ SyncMagicFrame SyncMagicFrameOf(
 	case SyncMagicResult::Kind::Wait:
 		frame.line = SyncMagicFrame::Line::Waiting;
 		frame.retryAt = result.retryAt;
+		frame.telegram = result.telegram;
 		break;
 	case SyncMagicResult::Kind::Problem:
 		frame.line = SyncMagicFrame::Line::Problem;
@@ -320,9 +281,8 @@ void SyncMagicChat::lookup(SyncMagicTrigger trigger, bool fresh, Done done) {
 		_running = true;
 		_created = false;
 		_resumed = false;
-		_partial = false;
 		_listsWaited = false;
-		_allChats.reset();
+		_createdChat.reset();
 		_retried.clear();
 		_trigger = trigger;
 		const auto run = ++_generation;
@@ -469,37 +429,30 @@ void SyncMagicChat::planned(
 	input.visible = local->visible;
 	input.fresh = _fresh;
 	input.now = _port->now();
-	if (local->boundState == SyncChatBoundState::Unknown
-		&& binding.chat
-		&& binding.chat->kind == PeerTokenKind::Channel) {
-		// WHY: the magic chat is archived, so after a cold start it is usually only missing because the
-		// archive list has not loaded; getAllChats is for a chat missing from both loaded lists.
-		if (!_listsWaited && !(local->mainLoaded && local->archiveLoaded)) {
-			_listsWaited = true;
-			const auto weak = std::weak_ptr<int>(_guard);
-			_port->loadLists(*binding.chat, [=] {
-				if (weak.lock()) {
-					later([=] { step(run); });
-				}
-			});
-			return;
+	input.listsComplete = local->mainLoaded && local->archiveLoaded;
+	if (_createdChat) {
+		if (binding.chat == PeerToken{ PeerTokenKind::Channel, _createdChat->channelId }
+			&& input.boundState == SyncChatBoundState::Unknown) {
+			input.boundState = SyncChatBoundState::Present;
+			input.bound = *_createdChat;
 		}
-		if (!_allChats) {
-			proveAbsent(run, binding);
-			return;
-		}
-		const auto found = Find(*_allChats, binding.chat->id);
-		if (!found && _partial) {
-			listPartial(run);
-			return;
-		}
-		input.bound = found ? *found : MagicChatCandidate();
-		input.boundState = found
-			? SyncChatBoundState::Present
-			: SyncChatBoundState::Gone;
+		input.visible.push_back(*_createdChat);
 	}
-	if (_allChats) {
-		input.allChats = Titled(*_allChats);
+	const auto bound = binding.chat && binding.chat->kind == PeerTokenKind::Channel;
+	const auto missing = bound
+		? (input.boundState == SyncChatBoundState::Unknown)
+		: (binding.mode == SyncChatBindingMode::None && input.visible.empty());
+	// WHY: only complete lists prove a chat absent; upstream loads the archive only when asked, so the
+	// lookup pages it once per run before it plans.
+	if (missing && !input.listsComplete && !_listsWaited) {
+		_listsWaited = true;
+		const auto weak = std::weak_ptr<int>(_guard);
+		_port->loadLists(bound ? binding.chat : std::nullopt, [=] {
+			if (weak.lock()) {
+				later([=] { step(run); });
+			}
+		});
+		return;
 	}
 	const auto plan = PlanSyncChatLookup(input);
 	switch (plan.action) {
@@ -511,82 +464,28 @@ void SyncMagicChat::planned(
 		done(run, result, _created ? u"created"_q : u"bound"_q, input);
 	} return;
 	case SyncChatLookupAction::Verify: verify(run, binding, plan, input); return;
-	case SyncChatLookupAction::Wait: waiting(run, plan.retryAt, input); return;
-	case SyncChatLookupAction::ProveAbsent: proveAbsent(run, binding); return;
+	case SyncChatLookupAction::Wait:
+		if (plan.retryAt > 0) {
+			waiting(run, plan.retryAt, plan.telegram, input);
+		} else {
+			listsLoading(run, input);
+		}
+		return;
 	case SyncChatLookupAction::Create: create(run, binding); return;
 	case SyncChatLookupAction::Problem:
-		if (_partial && plan.problem == SyncChatProblem::MagicIneligible) {
-			listPartial(run);
-		} else {
-			problem(run, plan.problem, plan.show, binding, &input);
-		}
+		problem(run, plan.problem, plan.show, binding, &input);
 		return;
 	}
 	unavailable(run, u"native_unavailable"_q);
 }
 
-void SyncMagicChat::proveAbsent(uint64_t run, const SyncChatBinding &binding) {
-	page(run, binding, {}, {}, 1);
-}
-
-// WHY: only a complete list proves no magic chat exists. A slice is paged with except_ids; a list still
-// partial after kSyncMagicAllChatsPages pages is used only for the magic chats it holds, or else waits.
-void SyncMagicChat::page(
-		uint64_t run,
-		const SyncChatBinding &binding,
-		std::vector<uint64_t> seen,
-		std::vector<MagicChatCandidate> found,
-		int pages) {
-	const auto method = QString::fromLatin1(kSyncChatAllChatsMethod);
-	gated<SyncMagicChats>(run, binding, method, [=](auto done) {
-		_port->allChats(seen, std::move(done));
-	}, [=](std::optional<SyncMagicChats> chats) {
-		auto all = found;
-		auto ids = seen;
-		if (chats) {
-			all.insert(end(all), begin(chats->candidates), end(chats->candidates));
-			for (const auto id : chats->ids) {
-				if (std::find(begin(ids), end(ids), id) == end(ids)) {
-					ids.push_back(id);
-				}
-			}
-		}
-		_partial = chats
-			&& chats->count >= 0
-			&& int64_t(ids.size()) < chats->count
-			&& !chats->ids.empty();
-		if (_partial && pages < kSyncMagicAllChatsPages) {
-			page(run, binding, std::move(ids), std::move(all), pages + 1);
-			return;
-		} else if (_partial && Titled(all).empty()) {
-			listPartial(run);
-			return;
-		}
-		_allChats = std::move(all);
-		step(run);
-	}, [=](SyncMagicReply<SyncMagicChats>) {
-		backOff(run, method);
-	});
-}
-
-void SyncMagicChat::listPartial(uint64_t run) {
+void SyncMagicChat::listsLoading(uint64_t run, const SyncChatLookupInput &input) {
 	_port->diag(u"lookup_result"_q, {
 		SyncDiagCode(u"result"_q, u"absent_waiting"_q),
-		SyncDiagReason(u"list_partial"_q),
+		SyncDiagReason(u"lists_loading"_q),
+		SyncDiagCount(u"count"_q, Candidates(input)),
 	});
-	hold(run, QString::fromLatin1(kSyncChatAllChatsMethod), _port->now() + kSyncMagicPartialWait, nullptr);
-}
-
-// A refusal that is not a flood (PEER_FLOOD, an unexpected 400) is not sent again by every lookup.
-void SyncMagicChat::backOff(uint64_t run, const QString &method) {
-	const auto seconds = std::min(
-		kSyncMagicErrorWait << std::min(_errors++, 8),
-		int64_t(24 * 60 * 60));
-	_port->diag(u"lookup_result"_q, {
-		SyncDiagCode(u"result"_q, u"absent_waiting"_q),
-		SyncDiagReason(u"rpc"_q),
-	});
-	hold(run, method, _port->now() + seconds, nullptr);
+	finish(run, WaitUntil(_port->now() + kSyncMagicListsRetry));
 }
 
 void SyncMagicChat::verify(
@@ -631,8 +530,22 @@ void SyncMagicChat::verify(
 			});
 		}
 		step(run);
-	}, [=](SyncMagicReply<MagicChatCandidate>) {
-		backOff(run, QString::fromLatin1(kSyncChatFullInfoMethod));
+	}, [=](SyncMagicReply<MagicChatCandidate> failure) {
+		const auto found = SyncChatRefusalProblem(
+			QString::fromLatin1(kSyncChatFullInfoMethod),
+			failure.error);
+		const auto next = edit([&](SyncChatBinding &binding) {
+			RecordSyncChatVerifyProblem(binding, id, found, _port->now());
+			return true;
+		});
+		if (!next) {
+			unavailable(run, u"binding_unreadable"_q);
+		} else if (SyncChatCandidateRejected(*next, id)) {
+			_port->diag(u"rejected"_q, { SyncDiagReason(SyncChatProblemCode(found)) });
+			step(run);
+		} else {
+			problem(run, found, !next->problemShown, next, &input);
+		}
 	});
 }
 
@@ -659,9 +572,7 @@ void SyncMagicChat::create(uint64_t run, const SyncChatBinding &binding) {
 		}
 		const auto id = chosen->channelId;
 		_created = true;
-		auto known = _allChats.value_or(std::vector<MagicChatCandidate>());
-		known.push_back(*chosen);
-		_allChats = std::move(known);
+		_createdChat = *chosen;
 		const auto chat = PeerToken{ PeerTokenKind::Channel, id };
 		(void)edit([&](SyncChatBinding &binding) {
 			SetCreateStep(binding, SyncChatCreateStep::Created, started, chat);
@@ -678,18 +589,15 @@ void SyncMagicChat::create(uint64_t run, const SyncChatBinding &binding) {
 		});
 	}, [=](SyncMagicReply<MagicChatCandidate> failure) {
 		notCreated();
-		if (failure.error.contains(u"TOO_MUCH"_q)
-			|| failure.error.startsWith(u"USER_RESTRICTED"_q)) {
-			const auto bytes = _port->readBinding();
-			problem(
-				run,
-				SyncChatProblem::CreateLimit,
-				true,
-				bytes ? Parse(*bytes) : std::nullopt,
-				nullptr);
-		} else {
-			backOff(run, QString::fromLatin1(kSyncChatCreateMethod));
-		}
+		const auto bytes = _port->readBinding();
+		problem(
+			run,
+			SyncChatRefusalProblem(
+				QString::fromLatin1(kSyncChatCreateMethod),
+				failure.error),
+			true,
+			bytes ? Parse(*bytes) : std::nullopt,
+			nullptr);
 	}, [=] {
 		uncertain(run, started);
 	}, [=] {
@@ -769,12 +677,13 @@ void SyncMagicChat::problem(
 void SyncMagicChat::waiting(
 		uint64_t run,
 		int64_t retryAt,
+		bool telegram,
 		const SyncChatLookupInput &input) {
 	_port->diag(u"lookup_result"_q, {
 		SyncDiagCode(u"result"_q, u"absent_waiting"_q),
 		SyncDiagCount(u"count"_q, Candidates(input)),
 	});
-	finish(run, WaitUntil(retryAt));
+	finish(run, WaitUntil(retryAt, telegram));
 }
 
 void SyncMagicChat::done(
@@ -787,7 +696,6 @@ void SyncMagicChat::done(
 		SyncDiagCount(u"count"_q, Candidates(input)),
 	});
 	_failures = 0;
-	_errors = 0;
 	finish(run, std::move(result));
 }
 
@@ -805,7 +713,7 @@ void SyncMagicChat::finish(uint64_t run, SyncMagicResult result) {
 	}
 	_running = false;
 	_fresh = false;
-	_allChats.reset();
+	_createdChat.reset();
 	if (result.kind != SyncMagicResult::Kind::Unavailable || _closed) {
 		_last = result;
 	}
@@ -845,7 +753,7 @@ void SyncMagicChat::gated(
 	const auto until = SyncChatWaitUntil(binding, method, now);
 	if (until > 0) {
 		_port->diag(u"wait_honored"_q, { Method(method), SyncDiagSeconds(until - now) });
-		finish(run, WaitUntil(until));
+		finish(run, WaitUntil(until, true));
 		return;
 	}
 	const auto weak = std::weak_ptr<int>(_guard);
@@ -858,9 +766,12 @@ void SyncMagicChat::gated(
 				finish(run, SyncMagicResult());
 				return;
 			}
-			const auto flood = reply.ok()
-				? std::nullopt
-				: SyncMagicFloodSeconds(reply.error);
+			const auto error = reply.ok()
+				? SyncChatError()
+				: ClassifySyncChatError(reply.code, reply.error, reply.timeout);
+			const auto flood = (!reply.ok() && error.kind == SyncChatErrorKind::Wait)
+				? std::make_optional(error.seconds)
+				: std::nullopt;
 			if (reply.ok()) {
 				_port->diag(u"request"_q, { Method(method), SyncDiagCode(u"outcome"_q, u"ok"_q) });
 				ok(reply.value);
@@ -889,9 +800,7 @@ void SyncMagicChat::gated(
 					beforeFlood();
 				}
 				hold(run, method, now + *flood + 1, nullptr);
-			} else if (reply.timeout
-				|| reply.code < 0
-				|| (reply.code >= 500 && reply.code < 600)) {
+			} else if (error.kind == SyncChatErrorKind::Transient) {
 				_port->diag(u"request"_q, {
 					Method(method),
 					SyncDiagCode(u"outcome"_q, reply.timeout ? u"timeout"_q : u"network"_q),
@@ -900,7 +809,11 @@ void SyncMagicChat::gated(
 				const auto backoff = std::min(
 					int64_t(5) << std::min(_failures++, 4),
 					int64_t(60));
-				hold(run, method, now + backoff, network);
+				if (network) {
+					network();
+				} else {
+					finish(run, WaitUntil(now + backoff));
+				}
 			} else {
 				_port->diag(u"request"_q, {
 					Method(method),
@@ -940,9 +853,12 @@ void SyncMagicChat::gatedQuiet(
 				finish(run, SyncMagicResult());
 				return;
 			}
-			const auto flood = reply.ok()
-				? std::nullopt
-				: SyncMagicFloodSeconds(reply.error);
+			const auto error = reply.ok()
+				? SyncChatError()
+				: ClassifySyncChatError(reply.code, reply.error, reply.timeout);
+			const auto flood = (!reply.ok() && error.kind == SyncChatErrorKind::Wait)
+				? std::make_optional(error.seconds)
+				: std::nullopt;
 			const auto outcome = reply.ok()
 				? u"ok"_q
 				: flood
@@ -985,7 +901,7 @@ void SyncMagicChat::hold(
 		instead();
 		return;
 	}
-	finish(run, WaitUntil(retryAt));
+	finish(run, WaitUntil(retryAt, true));
 }
 
 std::optional<SyncChatBinding> SyncMagicChat::edit(const Change &change) {

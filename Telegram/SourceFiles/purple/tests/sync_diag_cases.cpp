@@ -59,7 +59,7 @@ int main() {
 
 	{
 		auto repeats = SyncDiagRepeats();
-		const auto body = u"sync_chat request method=messages.getallchats outcome=network"_q;
+		const auto body = u"sync_chat request method=channels.createchannel outcome=network"_q;
 		auto written = 0;
 		for (auto i = 0; i != 10; ++i) {
 			const auto decision = repeats.offer(1000 + i, body, u"sync_chat"_q, u"request"_q);

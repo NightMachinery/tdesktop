@@ -18,18 +18,20 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
 - **Lookup**: one at a time per account; a trigger that arrives while one runs
   shares its result. Triggers are startup, screen, manual, auto, post and
   retry (the timed wake-up after a wait, never taken for a user's check).
-  The local candidates are the magic-titled chats in the main and archive
-  dialog lists. With none visible, `messages.getAllChats` proves absence
-  before anything is created. A bound chat not yet in memory after a cold
-  start first waits for the dialog lists: the archive is paged until the chat
-  is loaded or both lists are, at most 60 seconds (`SyncMagicListsStepOf`).
-  Only a chat still missing then costs a getAllChats, once per process, after
-  which the reply's chats are in memory. A reply the
-  server sliced (`messages.chatsSlice`) is paged with `except_ids`, up to five
-  pages; a list still incomplete proves nothing absent, so the lookup never
-  creates from it and waits an hour (`list_partial`), though a magic chat on
-  a page is still found. Desktop's schema has no such method, so
-  purple_sync_magic_telegram declares the request itself.
+  The candidates are the magic-titled supergroups the user is in, read from
+  every loaded chat in the session and not from a chat list, so a Work Mode
+  preset that hides chats everywhere cannot hide one from the lookup. Only
+  complete lists prove absence: the main list (upstream loads it in full)
+  and the archive folder, which the lookup pages through upstream's own
+  `requestDialogs` because upstream loads one archive page. An account with
+  no archive folder counts its archive as loaded once the main list is. The
+  wait ends as soon as a bound chat is loaded (`SyncMagicListsStepOf`) and
+  lasts at most 60 seconds. Until both lists are complete, no chat is created
+  and a bound chat missing from memory is not called gone; the lookup answers
+  a short wait of Purple's own (`lists_loading`) and looks again a minute
+  later. With complete lists and no magic chat it creates one; a bound chat
+  still missing is gone. No request outside upstream's layer is sent:
+  `messages.getAllChats` is not in layer 232, and the server refuses it.
 - **Create**: `channels.createChannel` (megagroup), then archive
   (`folders.editPeerFolders`, folder 1) and mute
   (`account.updateNotifySettings`). Archive and mute are cosmetic: a failure
@@ -41,21 +43,28 @@ needs no app headers, so `cases-sync-magic-chat` runs it over a fake port.
   rejected: core keeps it in the binding and skips it, so sync goes on in the
   bound chat and an unbound lookup tries the next one. A manual check
   considers rejected chats again.
-- **Waits**: a flood of up to 30 seconds is retried once in place. A longer
-  one, a network failure, a timeout or a 5xx error records a deadline for its
-  method in the binding (5, 10, 20, 40, then 60 seconds of backoff for the
-  latter) and the lookup answers Wait. Any other refusal of getAllChats,
-  createChannel or getFullChannel (`PEER_FLOOD`, an unexpected 400) is kept
-  the same way for ten minutes, doubling up to a day. Every trigger honours
-  the deadline, across restarts. Waits never pause automatic sync.
+- **Waits and refusals**: core's `ClassifySyncChatError` sorts every failed
+  lookup request.
+  - Only FLOOD_WAIT, FLOOD_PREMIUM_WAIT and SLOWMODE_WAIT are Telegram's waits.
+    A flood of up to 30 seconds is retried once in place. A longer one records
+    a deadline for its method in the binding, which every trigger honours
+    across restarts. Only these waits are worded "Telegram asked Purple to
+    wait".
+  - A timeout, a network failure, a 5xx or a 401 is transient: Purple backs
+    off 5, 10, 20, 40, then 60 seconds in memory and says only when it looks
+    again.
+  - Any other error is a refusal, a problem (`request_refused`, or
+    `create_limit` / `chat_gone` where core names one). For a candidate other
+    than the bound chat it only rejects that candidate.
+  - Waits never pause automatic sync.
 - **Sync request waits**: a flood over 30 seconds on a record read, post,
   edit, deletion or upload sent through `SyncRequestSender` is kept in the
   same binding under its method (`wait_recorded`), and every sender holds
   that method's requests until it ends, after a restart too. The emoji
   exporter, which hands long waits back to its own queue, keeps none.
 - **Problems**: a chat that is gone, left, shared, public, restricted or
-  unpostable, a creation limit, magic-titled chats none of which is eligible,
-  or another sync group's records in the chat. A problem pauses automatic sync
+  unpostable, a creation limit, a refused request, magic-titled chats none of
+  which is eligible, or another sync group's records in the chat. A problem pauses automatic sync
   until the user acts and is shown once; a manual check clears it and decides
   afresh.
 

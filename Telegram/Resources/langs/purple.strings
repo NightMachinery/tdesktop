@@ -422,6 +422,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_magic_picked" = "You chose this chat on this device.";
 "lng_purple_magic_waiting" = "Telegram asked Purple to wait. Sync looks again at {time}.";
 "lng_purple_magic_waiting_later" = "Telegram asked Purple to wait. Sync looks again later.";
+"lng_purple_magic_retrying" = "Sync looks again at {time}.";
+"lng_purple_magic_retrying_later" = "Sync looks again later.";
 "lng_purple_magic_paused" = "Automatic sync is paused: {reason}";
 "lng_purple_magic_check" = "Check now";
 "lng_purple_magic_open" = "Open sync chat";
@@ -454,6 +456,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_magic_problem_create_limit" = "Telegram did not let Purple create the sync chat; you may be in too many groups.";
 "lng_purple_magic_problem_magic_ineligible" = "a Magic Purple Sync chat exists but Purple cannot use it.";
 "lng_purple_magic_problem_space_mismatch" = "the sync chat holds settings from devices in another sync group.";
+"lng_purple_magic_problem_request_refused" = "Telegram refused a request Purple needs for the sync chat. Check again later, or choose another chat.";
 "lng_purple_chat_move_choices" = "Choose where this account keeps its sync data next.";
 "lng_purple_chat_move_disclosure" = "Copy this account's sync data from %1 to %2, then use the new chat. The old chat itself stays.";
 "lng_purple_chat_move_cleanup_disclosure" = "Only Purple's own settings messages and mark may be removed if you choose cleanup.";

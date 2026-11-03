@@ -29,30 +29,7 @@ namespace {
 
 constexpr auto kRequestTimeoutMs = 30 * 1000;
 constexpr auto kListsTimeoutMs = int64_t(60 * 1000);
-constexpr auto kAllChatsType = mtpTypeId(0x875f74be);
 constexpr auto kAbout = "Purple Telegram keeps sync data for your devices here.";
-
-class MTPmessages_getAllChats {
-public:
-	MTPmessages_getAllChats() = default;
-	explicit MTPmessages_getAllChats(MTPVector<MTPlong> exceptIds)
-	: _exceptIds(std::move(exceptIds)) {
-	}
-	mtpTypeId type() const {
-		return kAllChatsType;
-	}
-	template <typename Accumulator>
-	void write(Accumulator &to) const {
-		_exceptIds.write(to);
-	}
-
-	using ResponseType = MTPmessages_Chats;
-
-private:
-	MTPVector<MTPlong> _exceptIds;
-
-};
-using MTPmessages_GetAllChats = tl::boxed<MTPmessages_getAllChats>;
 
 int SlotOf(not_null<Main::Session*> session) {
 	for (const auto &[index, account] : Core::App().domain().accounts()) {
@@ -63,16 +40,14 @@ int SlotOf(not_null<Main::Session*> session) {
 	return -1;
 }
 
-void AddFromList(
-		not_null<Dialogs::MainList*> list,
-		std::vector<MagicChatCandidate> &result) {
-	for (const auto &row : list->indexed()->all()) {
-		const auto history = row->history();
-		const auto channel = history ? history->peer->asChannel() : nullptr;
-		if (channel && IsMagicSyncChatTitle(channel->name())) {
+// Joined supergroups from the session, not from a chat list a Work Mode preset may have filtered.
+void AddJoined(not_null<Data::Session*> data, std::vector<MagicChatCandidate> &result) {
+	data->enumerateGroups([&](not_null<PeerData*> peer) {
+		const auto channel = peer->asChannel();
+		if (channel && channel->amIn() && !channel->isForbidden() && IsMagicSyncChatTitle(channel->name())) {
 			result.push_back(SyncMagicLocalCandidate(channel));
 		}
-	}
+	});
 }
 
 class TelegramPort final
@@ -145,13 +120,10 @@ public:
 		}
 		auto &data = session->data();
 		auto result = SyncMagicLocal();
-		AddFromList(data.chatsList(nullptr), result.visible);
+		AddJoined(&data, result.visible);
 		const auto archive = data.folderLoaded(Data::Folder::kId);
-		if (archive) {
-			AddFromList(archive->chatsList(), result.visible);
-		}
 		result.mainLoaded = data.chatsListLoaded(nullptr);
-		result.archiveLoaded = archive && data.chatsListLoaded(archive);
+		result.archiveLoaded = archive ? data.chatsListLoaded(archive) : result.mainLoaded;
 		if (bound && bound->kind == PeerTokenKind::Self) {
 			result.boundState = SyncChatBoundState::Present;
 			result.bound.facts.kind = SyncChatKind::Self;
@@ -170,7 +142,7 @@ public:
 		}
 		done(std::move(result));
 	}
-	void loadLists(PeerToken bound, std::function<void()> done) override {
+	void loadLists(std::optional<PeerToken> bound, std::function<void()> done) override {
 		const auto session = _session.get();
 		if (!session || !current()) {
 			done();
@@ -190,7 +162,7 @@ public:
 			auto &data = session->data();
 			const auto archive = data.folderLoaded(Data::Folder::kId);
 			const auto step = SyncMagicListsStepOf(
-				data.channelLoaded(ChannelId(bound.id)) != nullptr,
+				bound && data.channelLoaded(ChannelId(bound->id)) != nullptr,
 				data.chatsListLoaded(nullptr),
 				!archive || data.chatsListLoaded(archive));
 			if (step == SyncMagicListsStep::MoreArchive) {
@@ -216,46 +188,6 @@ public:
 			}
 		}, kListsTimeoutMs);
 		check();
-	}
-	void allChats(
-			std::vector<uint64_t> except,
-			std::function<void(SyncMagicReply<SyncMagicChats>)> done) override {
-		using Reply = SyncMagicReply<SyncMagicChats>;
-		const auto weak = base::make_weak(_session.get());
-		auto ids = QVector<MTPlong>();
-		ids.reserve(int(except.size()));
-		for (const auto id : except) {
-			ids.push_back(MTP_long(int64_t(id)));
-		}
-		send<MTPmessages_GetAllChats, SyncMagicChats>(
-			MTPmessages_GetAllChats(MTP_vector<MTPlong>(std::move(ids))),
-			std::move(done),
-			[=](const MTPmessages_Chats &result) {
-				const auto session = weak.get();
-				if (!session) {
-					return Reply::Failed(QString(), -1);
-				}
-				const auto &chats = result.match([](const auto &data) -> const MTPVector<MTPChat>& {
-					return data.vchats();
-				});
-				session->data().processChats(chats);
-				auto list = SyncMagicChats();
-				list.count = result.match([](const MTPDmessages_chats &) {
-					return int64_t(-1);
-				}, [](const MTPDmessages_chatsSlice &data) {
-					return int64_t(data.vcount().v);
-				});
-				for (const auto &chat : chats.v) {
-					list.ids.push_back(uint64_t(chat.match([](const auto &data) {
-						return int64_t(data.vid().v);
-					})));
-					const auto candidate = SyncMagicCandidate(chat, nullptr);
-					if (candidate && candidate->megagroup) {
-						list.candidates.push_back(*candidate);
-					}
-				}
-				return Reply::Ok(std::move(list));
-			});
 	}
 	void fullInfo(
 			uint64_t channelId,

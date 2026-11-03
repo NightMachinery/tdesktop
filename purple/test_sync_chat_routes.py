@@ -31,10 +31,21 @@ def inspect(values):
         and 'ToastSyncMagicProblem(session);' in magic
         and 'chat->shown();' in toast and toast.index('chat->shown();') < toast.index('showToast(')
         and 'SyncMagicChatBox' in toast)
-    lists = values['purple_sync_magic_telegram.cpp'].split('void loadLists(PeerToken bound,', 1)[-1].split('void allChats(', 1)[0]
-    require('magic-lists-early', 'data.channelLoaded(ChannelId(bound.id)) != nullptr' in lists
+    telegram = values['purple_sync_magic_telegram.cpp']
+    lists = telegram.split('void loadLists(std::optional<PeerToken> bound,', 1)[-1].split('void fullInfo(', 1)[0]
+    require('magic-lists-early', 'bound && data.channelLoaded(ChannelId(bound->id)) != nullptr' in lists
         and 'session->data().chatsListChanges(),' in lists and 'SyncMagicListsStepOf(' in lists
         and 'kListsTimeoutMs' in lists)
+    # Every request goes through upstream's generated layer: nothing Purple serializes by hand.
+    require('no-hand-rolled-tl', all('mtpTypeId(' not in text and 'getAllChats' not in text and '875f74be' not in text
+        for text in values.values()))
+    local = telegram.split('std::function<void(std::optional<SyncMagicLocal>)> done) override {', 1)[-1].split('void loadLists(', 1)[0]
+    require('magic-lists-unfiltered', 'data->enumerateGroups(' in telegram and 'AddJoined(&data, result.visible);' in local
+        and 'chatsList(' not in local.split('result.mainLoaded', 1)[0]
+        and 'result.archiveLoaded = archive ? data.chatsListLoaded(archive) : result.mainLoaded;' in local)
+    box = values['purple_sync_magic_box.cpp']
+    require('magic-wait-wording', 'return frame.telegram' in box and 'tr::lng_purple_magic_retrying(' in box
+        and 'case SyncChatProblem::RequestRefused:' in box)
     auto = values['purple_sync_auto_service.cpp']
     require('auto-bound-facts', 'facts.chatResolved = Resolved();' in auto and 'facts.chatProblem = SyncMagicPaused(' in auto
         and 'bound && *bound == StateChat()' in auto)
@@ -214,7 +225,11 @@ negative = [
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
     ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-toast'),
     ('purple_sync_magic_telegram.cpp', '\t\t\tsession->data().chatsListChanges(),\n', '', 'magic-lists-early'),
-    ('purple_sync_magic_telegram.cpp', 'data.channelLoaded(ChannelId(bound.id)) != nullptr', 'false', 'magic-lists-early'),
+    ('purple_sync_magic_telegram.cpp', 'bound && data.channelLoaded(ChannelId(bound->id)) != nullptr', 'false', 'magic-lists-early'),
+    ('purple_sync_magic_telegram.cpp', 'namespace Purple {', 'namespace Purple {\nconstexpr auto kOld = mtpTypeId(0x875f74be);', 'no-hand-rolled-tl'),
+    ('purple_sync_magic_telegram.cpp', 'AddJoined(&data, result.visible);', 'AddFromList(data.chatsList(nullptr), result.visible);', 'magic-lists-unfiltered'),
+    ('purple_sync_magic_telegram.cpp', 'archive ? data.chatsListLoaded(archive) : result.mainLoaded;', 'archive && data.chatsListLoaded(archive);', 'magic-lists-unfiltered'),
+    ('purple_sync_magic_box.cpp', 'return frame.telegram', 'return true', 'magic-wait-wording'),
     ('purple_sync_config_publish_flow.cpp', ' || binding->verifiedAt > 0)', ')', 'magic-publish-authority'),
     ('purple_sync_config_publish_flow.cpp', '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {', '} else if (false) {', 'magic-publish-authority'),
     ('purple_sync_setup_box.cpp', '\tMoveSyncStateToBoundChat(session);\n', '', 'magic-manual-check'),
@@ -230,4 +245,8 @@ for name, before, after, expected in negative:
     except ValueError:
         rejected = ['startup-order', 'updates-before-completion']
     assert expected in rejected, (expected, rejected)
+for path in sorted(purple.rglob('*')):
+    if path.suffix in ('.cpp', '.h'):
+        text = path.read_text()
+        assert 'mtpTypeId(' not in text and '875f74be' not in text, ('hand-rolled TL', path.name)
 print(json.dumps({'routes': len(RouteNames), 'negative_controls': len(negative), 'failures': 0}))
