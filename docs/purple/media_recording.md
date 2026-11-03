@@ -1,10 +1,10 @@
 # Media recording
 
 Purple's media recording work on Desktop. The design, with the reasoning, the
-Android side and the features still to build (the recording dock, F6 to F8,
-F10 and the extras), is in
+Android side and the features still to build (the recording dock, F6 to F8
+and the extras), is in
 [media-recording-design.md](media-recording-design.md); this page describes
-what is built. So far that is F9.
+what is built: F9 and F10.
 
 The code is in `Telegram/SourceFiles/purple/`:
 
@@ -13,6 +13,22 @@ The code is in `Telegram/SourceFiles/purple/`:
 - `purple_seek_rules.{h,cpp}`: the step and the clamping, with no Qt and no
   app types, so `purple/tests/recording_cases.cpp` runs them on their own.
 - `hooks/media_recording.h`: the facade that upstream files include.
+- F10, all in Purple's own files:
+  - `purple_recording_crypt.{h,cpp}`: the encrypted file format (below).
+  - `purple_recording_mirror.{h,cpp}`: the voice mirror, one file per
+    capture object, written at the offsets FFmpeg writes.
+  - `purple_recording_registry.{h,cpp}`: the manifest (`recordings.json`),
+    its states, and the decisions on stop, on start and on a sent message.
+  - `purple_recording_recovery.{h,cpp}`: voice recovery over purple-core's
+    `FinaliseOgg`.
+  - `purple_recording_store.{h,cpp}`: the app side: the key, the manifest
+    on disk, the two voice hooks, recovery at start, the sweep and sent
+    detection.
+  - `purple_recording_bin_box.{h,cpp}`: the Recording bin box.
+  - `purple_recording_settings.{h,cpp}`: the "Media recording" settings group.
+
+  These files, apart from the store, the box and the settings, use no Qt
+  and no app types, so `purple/tests/recording_cases.cpp` runs them alone.
 
 ## F9. Seek back and forward
 
@@ -89,6 +105,127 @@ The step is `[playback] seek_step` in `settings.toml`, `"5s"`, `"10s"`,
 (any other value warns and keeps 10). Settings > Advanced > Purple > Media
 playback > Seek step writes it. Changing it relabels the buttons at once.
 
+## F10. Crash-safe recordings and the Recording bin
+
+### Where things are kept
+
+Everything lives in `tdata/purple/recordings/`: the manifest
+`recordings.json` and one file per recording, named by a random 16-hex id
+(`<id>.ogg.prc` for voice). Nothing in the names says which chat a
+recording belongs to.
+
+Each manifest entry holds the id, the account index, the chat's peer id,
+the forum topic's root id, a reply id (always 0 on Desktop, see below), the
+kind, the start time, the duration, when it entered the bin, the view-once
+flag, whether it is partial, whether it was stopped from the listen
+(preview) state, its file names and its state: `recording`, `sending`,
+`sent`, `unsent`, `discarded`, `recovered` or `unrecoverable`. The manifest is
+rewritten whole on every change, through a temporary file and a rename.
+
+### Encryption at rest
+
+Owner answer 4 = A. Every file there, the manifest included, is
+AES-256-CTR. The key is derived from the account's local key (the key
+Telegram Desktop encrypts its own cache with, the same for every account)
+with the archive's helpers: `DesktopArchiveCrypto::Derive` (HKDF-SHA256,
+salt `purple-recording-v1`, info `recording-files`), `Random` for the IVs
+and `Hmac` for the key check. A file starts with a 32-byte header: the magic
+`PRC1`, version 1, two reserved bytes, a random 16-byte IV and the first 8
+bytes of `HMAC(key, "check")`. The counter for byte `n` of the content is the
+IV plus `n / 16`, so the mirror writes at any offset without rewriting what
+is around it. A file whose check does not match (the local key changed, for
+instance after every account logged out) is reported as written under
+another key and never decrypted into garbage; a manifest in that state is
+replaced by an empty one. CTR has no authentication, as the owner chose; a
+tampered file decrypts to wrong bytes, which recovery then treats like any
+damaged recording.
+
+The key exists only once an account's session is up, which is after the
+passcode. Until then nothing is mirrored.
+
+### Voice
+
+- `Purple::MirrorRecordingWrite` in `Instance::Inner::Private::WriteData`
+  (`media/audio/media_audio_capture.cpp`) gets every block FFmpeg writes,
+  with its offset, before upstream copies it into memory. The first write at
+  offset 0 opens a new encrypted file and a manifest entry in state
+  `recording`; later writes go to their offsets, so seeks back behave as they
+  do in memory and the file holds the same bytes as `Private::data`. Writes
+  are flushed to the operating system each time, so a crash of the app loses
+  at most the Ogg page being built (about a second).
+- The chat is taken from the active window's current chat a moment after
+  the first write, on the main thread. Desktop recordings cannot leave their
+  chat yet (F8 is not built), so that is the chat the recording belongs to.
+  Upstream's voice bar does not know the reply it would send with, so the
+  reply id is 0.
+- `Purple::NoteRecordingStop` at the top of `VoiceRecordBar::stopRecording`
+  says Send or Cancel (Listen, the pause into preview, is ignored). Send moves
+  the entry to `sending`. Cancel moves it to the bin as "Discarded" while
+  `keep_discarded_p` is on (owner answer 1 = A), and deletes it once the file
+  is closed while it is off.
+- The file is closed when `Media::Capture::Instance` reports that it stopped,
+  which is after the trailer was written, or at the next recording's first
+  write if that report never came. A recording still in `recording` when it is
+  closed was stopped without a decision and is treated as a Cancel.
+- A sent voice or round message is noticed through `itemIdChanged`: the first
+  waiting entry of the same account, chat and kind is the one that was sent,
+  and its file and entry are deleted. Desktop does not keep unsent uploads
+  across restarts, so until then the entry stays.
+- Sending from the preview goes through upstream's Cancel (the bar sends,
+  then hides with `StopType::Cancel`). That entry is marked as stopped from
+  the preview, and a message of the same chat and kind sent within two
+  minutes settles it as well. A recording discarded from the preview with no
+  send stays "Discarded".
+- If a write fails (a full disk), mirroring stops quietly for that recording
+  with one log line, and the recording goes on as upstream does. The item is
+  then marked partial.
+
+### At start
+
+Once the key is there, every entry still in `recording` or `sending` belongs
+to a crash. On a background thread its file is decrypted and handed to
+purple-core's `FinaliseOgg`, which cuts it after the last good page and sets
+the end-of-stream flag; the fixed bytes are encrypted again. A `recording`
+entry becomes "Recovered after a crash", a `sending` one "Not sent", and one
+without any audio page "Could not be recovered" (its bytes are kept as they
+were until auto-clear, and Save still exports them). Files in the directory
+that no entry names are deleted.
+
+### The Recording bin
+
+Settings > Advanced > Purple > Media recording > Recording bin. The row
+shows the number of items when there are any. The box lists them newest
+first, each with the chat ("Unknown chat" when the account or chat is gone,
+"Hidden chat" when the running Work Mode preset hides it), the kind, the
+duration, when it was recorded, the account when there are several, and the
+mark: "Recovered after a crash", "Partly recovered", "Not sent",
+"Discarded" or "Could not be recovered". Per item:
+
+- Play plays it in the box (a round in a small circle) through
+  `Editor::SegmentPlayer`, from memory; nothing decrypted touches the disk.
+- Send sends it to its own chat and topic, with the recording's own account,
+  through `ApiWrap::sendVoiceMessage`, the route the voice bar uses. A voice
+  recording gets its waveform and duration from `Media::TrimAudioToRange`.
+  View-once is kept. The item waits in `sending` until the message is sent.
+- Send to another chat opens upstream's chooser for the recording's account
+  (`send_elsewhere_p`).
+- Save writes the decrypted file where the user picks, the download folder by
+  default. This is the only way a plain copy leaves the bin.
+- Delete deletes it. Clear all asks first.
+
+Items are cleared by `bin_keep` (12 h, 24 h, 48 h by default, 7 d or never),
+counted from when they entered the bin, at start and every hour, by
+purple-core's `BinItemExpired`. `keep_discarded_p` and `bin_keep` are rows in
+the same group.
+
+Desktop never had recordings on disk before this, so there is no orphan scan.
+
+### Privacy
+
+The app log gets counts and states only: how many items were recovered,
+cleared or removed as strays, and that a mirror write failed. Never a file's
+contents, a chat's name or id, a path or a recording's id.
+
 ## Upstream hooks
 
 Every hook is listed in [upstream_hooks.md](upstream_hooks.md), section
@@ -113,10 +250,31 @@ drops one of them.
   `Purple::OnMediaPlayerStarted`.
 - `settings/sections/settings_shortcuts.cpp`: two rows in the shortcuts
   list, so the commands can be rebound in the UI.
+- `media/audio/media_audio_capture.cpp`: the facade include and
+  `Purple::MirrorRecordingWrite(l, l->dataPos, buf, buf_size)` in
+  `Instance::Inner::Private::WriteData`, before the copy.
+- `history/view/controls/history_view_voice_record_bar.cpp`: the facade
+  include and `Purple::NoteRecordingStop(...)` at the top of
+  `VoiceRecordBar::stopRecording`, with the stop type, whether the bar is in
+  the preview, and the view-once flag. The stop type travels as its ordinal,
+  so the test pins the order of `StopType`.
 - The floating round's buttons need no new hook: they come from the
   existing `Purple::DecorateFloat` call.
 
 ## Tests
+
+- `purple/tests/recording_cases.cpp` also runs F10's Qt-free parts against
+  OpenSSL: the CTR keystream at any offset and across a counter carry, the
+  encrypted file (no plain bytes on disk, another key refused, a future
+  version, a foreign file, the atomic whole-file write and a fresh IV each
+  time), the voice mirror (opening only at offset 0, seeks and rewrites, the
+  close, the next recording after a close request, a refused open), the
+  manifest (round trip, empty, future, torn, and an entry naming a path
+  outside the directory), the stop decisions, the marks, sent matching
+  (earliest first, by account, chat and kind, the preview window) and the
+  sweep, and voice recovery of a torn Ogg stream through purple-core's
+  `FinaliseOgg` (duration, a finished stream, junk kept as it was, another
+  key).
 
 - `purple/tests/recording_cases.cpp` (gate `cases-recording`): the step
   choices and their spelling, the clamping at 0, at one second before the
@@ -141,6 +299,14 @@ drops one of them.
   live.
 
 ## Known follow-ups
+
+- F10 needs a GUI check after a build: a voice recording killed mid-way
+  (the bin shows it recovered and it plays and sends), Send, Cancel with
+  `keep_discarded_p` on and off, a send from the preview, the bin's Play,
+  Send, Send to another chat, Save, Delete and Clear all, and the hourly
+  sweep with a short `bin_keep`.
+- The reply id is not captured on Desktop; F8's hook in
+  `VoiceRecordBar::init` is the place that can give it.
 
 - A paused seek does not move the system media widget's scrubber until
   playback resumes: `SystemMediaControlsManager` updates the platform

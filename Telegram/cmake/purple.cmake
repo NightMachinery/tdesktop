@@ -174,6 +174,20 @@ PRIVATE
     purple/purple_media_rules.h
     purple/purple_media_seek.cpp
     purple/purple_media_seek.h
+    purple/purple_recording_bin_box.cpp
+    purple/purple_recording_bin_box.h
+    purple/purple_recording_crypt.cpp
+    purple/purple_recording_crypt.h
+    purple/purple_recording_mirror.cpp
+    purple/purple_recording_mirror.h
+    purple/purple_recording_recovery.cpp
+    purple/purple_recording_recovery.h
+    purple/purple_recording_registry.cpp
+    purple/purple_recording_registry.h
+    purple/purple_recording_settings.cpp
+    purple/purple_recording_settings.h
+    purple/purple_recording_store.cpp
+    purple/purple_recording_store.h
     purple/purple_mute.cpp
     purple/purple_mute.h
     purple/purple_notification_privacy.cpp
@@ -415,6 +429,12 @@ PRIVATE
     purple/purple_passcode.h
     purple/purple_playback.cpp
     purple/purple_playback.h
+    purple/purple_ogg_repair.cpp
+    purple/purple_ogg_repair.h
+    purple/purple_recording.cpp
+    purple/purple_recording.h
+    purple/purple_recording_file.cpp
+    purple/purple_recording_file.h
     purple/purple_screentime.cpp
     purple/purple_screentime.h
     purple/purple_settings.cpp

@@ -109,10 +109,13 @@ CASES = {
         'frameworks': [],
     },
     'recording': {
-        # F9's seek step and clamping; the shortcut names are pinned by
-        # test_media_hooks.py, which reads core/shortcuts.cpp.
+        # F9's seek step and clamping, and F10's encrypted files, voice
+        # mirror, manifest and voice recovery over purple-core's Ogg finaliser.
         'program': 'recording_cases.cpp',
-        'units': ['purple/purple_seek_rules.cpp'],
+        'units': ['purple/purple_seek_rules.cpp', 'purple/purple_recording_crypt.cpp', 'purple/purple_recording_mirror.cpp',
+            'purple/purple_recording_registry.cpp', 'purple/purple_recording_recovery.cpp',
+            'core:purple/purple_ogg_repair.cpp', 'core:purple/purple_recording_file.cpp'],
+        'build_libraries': ['libcrypto.a'],
         'frameworks': [],
     },
     'voice-queue': {
@@ -331,7 +334,14 @@ with (work / 'build.log').open('w') as log:
         if value.startswith('-F'):
             link += [value, '-Wl,-rpath,' + value[2:]]
     binary = work / Path(case['program']).stem
-    link += ['-Wl,-dead_strip', *map(str, objects), *[str(build / name) for name in case.get('objects', []) + case.get('libraries', [])],
+    found = []
+    if case.get('build_libraries'):
+        manifest = (build / 'build.ninja').read_text(errors='replace')
+        for name in case['build_libraries']:
+            hits = sorted({value for value in manifest.split() if value.endswith('/' + name)})
+            assert hits, 'no ' + name + ' in build.ninja'
+            found.append(hits[0])
+    link += ['-Wl,-dead_strip', *map(str, objects), *[str(build / name) for name in case.get('objects', []) + case.get('libraries', [])], *found,
         *[value for name in case['frameworks'] for value in ('-framework', name)], *case.get('link', []), '-o', str(binary)]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
     if any('{fixtures}' in value for value in case.get('arguments', [])):

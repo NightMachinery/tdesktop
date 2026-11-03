@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_media_seek.h"
 #include "purple/purple_peek.h"
 #include "purple/purple_peek_controls.h"
+#include "purple/purple_recording_store.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_screentime_recorder.h"
 #include "purple/purple_ui_witness.h"
@@ -37,6 +38,7 @@ void StartAppServices() {
 	StartUiWitness();
 	StartControlServer();
 	StartEmojiExport();
+	StartRecordingStore();
 }
 
 void OnMediaPlayerStarted() {

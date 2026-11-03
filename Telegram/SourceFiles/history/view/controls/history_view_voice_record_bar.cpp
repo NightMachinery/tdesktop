@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_voice_record_bar.h"
+#include "purple/hooks/media_recording.h"
 
 #include "api/api_send_progress.h"
 #include "base/event_filter.h"
@@ -2927,6 +2928,7 @@ Ui::RoundVideoResult VoiceRecordBar::mergeWithResumePrefix(
 }
 
 void VoiceRecordBar::stopRecording(StopType type, bool ttlBeforeHide) {
+	Purple::NoteRecordingStop(&_show->session(), int(type), isListenState(), ttlBeforeHide);
 	using namespace ::Media::Capture;
 	if (type == StopType::Cancel) {
 		clearResumeState();

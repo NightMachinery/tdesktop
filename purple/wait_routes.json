@@ -61,6 +61,10 @@
     "ActivatePeekFor": 1,
     "DeactivatePeek": 1
   },
+  "Telegram/SourceFiles/purple/purple_recording_settings.cpp": {
+    "SetTableBool": 1,
+    "SetTableString": 1
+  },
   "Telegram/SourceFiles/purple/purple_schedule.cpp": {
     "UpdateState": 2
   },

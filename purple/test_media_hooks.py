@@ -30,6 +30,12 @@ RECORDING_HOOKS = [
     ('core/shortcuts.cpp', 'const auto AutoRepeatCommands = ', 'Command::MediaSeekForward,'),
     ('core/shortcuts.cpp', 'const auto MediaCommands = ', 'Command::MediaSeekBackward,'),
     ('core/shortcuts.cpp', 'const auto MediaCommands = ', 'Command::MediaSeekForward,'),
+    ('media/audio/media_audio_capture.cpp', 'static int WriteData(void *opaque, uint8_t *buf, int buf_size) {', 'Purple::MirrorRecordingWrite(l, l->dataPos, buf, buf_size);'),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::stopRecording(', 'Purple::NoteRecordingStop(&_show->session(), int(type), isListenState(), ttlBeforeHide);'),
+]
+# Purple::NoteRecordingStop reads the StopType ordinal, so its order is pinned.
+BLOCKS = [
+    ('history/view/controls/history_view_voice_record_bar.h', 'enum class StopType {\n\t\tCancel,\n\t\tSend,\n\t\tListen,\n\t};'),
 ]
 SHORTCUT_LINES = [
     ('core/shortcuts.h', 'MediaSeekBackward,'),
@@ -70,6 +76,10 @@ def main():
         checks += 1
         if [row.strip() for row in (sources / relative).read_text().splitlines()].count(line) != 1:
             failures.append(relative + ': expected the line ' + line + ' exactly once')
+    for relative, block in BLOCKS:
+        checks += 1
+        if (sources / relative).read_text().count(block) != 1:
+            failures.append(relative + ': expected the block ' + block.split('\n')[0] + ' exactly once, in this order')
     for relative, signature, call in HOOKS + RECORDING_HOOKS:
         text = (sources / relative).read_text()
         checks += 1

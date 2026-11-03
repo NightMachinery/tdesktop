@@ -1525,8 +1525,8 @@ Purple edit in this file.
 ## Media recording (dock, background, PiP, seek, crash safety)
 
 The feature doc is [media_recording.md](media_recording.md); the design is
-[media-recording-design.md](media-recording-design.md). So far only F9 (seek
-back and forward) is built. The hooked `.cpp` files take one Purple include,
+[media-recording-design.md](media-recording-design.md). So far F9 (seek
+back and forward) and F10 (crash-safe recordings) are built. The hooked `.cpp` files take one Purple include,
 `purple/hooks/media_recording.h`, right after their own header, and
 `purple/test_media_hooks.py` pins each call and each shortcut line.
 
@@ -1580,6 +1580,22 @@ First Purple edit in this file.
 
 The floating round's seek buttons ride the existing `Purple::DecorateFloat`
 call listed under "Media playback" and add no line there.
+
+**`Telegram/SourceFiles/media/audio/media_audio_capture.cpp`**: +2 -0. First
+Purple edit in this file.
+- The facade include, after the file's own header.
+- `Instance::Inner::Private::WriteData`: `Purple::MirrorRecordingWrite(l,
+  l->dataPos, buf, buf_size);` after the size check and before the copy, so
+  Purple mirrors every block FFmpeg writes at its offset into an encrypted
+  file (F10 voice).
+
+**`Telegram/SourceFiles/history/view/controls/history_view_voice_record_bar.cpp`**:
++2 -0. First Purple edit in this file.
+- The facade include, after the file's own header.
+- `VoiceRecordBar::stopRecording`: `Purple::NoteRecordingStop(...)` as its
+  first line, with the stop type's ordinal, `isListenState()` and
+  `ttlBeforeHide`. Purple ignores Listen and records Send or Cancel; the
+  order of `StopType` is pinned by `purple/test_media_hooks.py`.
 
 ## Upstream v7.3.3 merge
 

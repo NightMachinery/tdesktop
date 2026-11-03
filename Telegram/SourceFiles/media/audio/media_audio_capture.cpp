@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/audio/media_audio_capture.h"
+#include "purple/hooks/media_recording.h"
 
 #include "media/audio/media_audio_capture_common.h"
 #include "media/audio/media_audio_ffmpeg_loader.h"
@@ -264,6 +265,7 @@ struct Instance::Inner::Private {
 		auto l = reinterpret_cast<Private*>(opaque);
 
 		if (buf_size <= 0) return 0;
+		Purple::MirrorRecordingWrite(l, l->dataPos, buf, buf_size);
 		if (l->dataPos + buf_size > l->data.size()) l->data.resize(l->dataPos + buf_size);
 		memcpy(l->data.data() + l->dataPos, buf, buf_size);
 		l->dataPos += buf_size;

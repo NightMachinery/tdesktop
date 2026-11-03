@@ -648,6 +648,15 @@ buttons, the seek shortcuts and the system media controls' skip commands.
 Settings > Advanced > Purple > Media playback > Seek step writes it. See
 [media_recording.md](media_recording.md).
 
+`[recording] bin_keep` is how long the Recording bin keeps an item, counted
+from when it entered the bin: `"12h"`, `"24h"`, `"48h"` (the default), `"7d"`
+or `"off"` (never clear); any other duration of at least an hour is read too.
+`[recording] keep_discarded_p` moves a discarded recording to the bin as a
+"Discarded" item instead of deleting it; true unless you say otherwise.
+Settings > Advanced > Purple > Media recording writes both. The other
+`[recording]` keys are read by purple-core but not used by Desktop yet. See
+[media_recording.md](media_recording.md).
+
 `[suggestions] hide_invisible_p` decides whether the strips of chats the app
 offers you unasked leave out what the running preset hides. True unless you say
 otherwise, and asked only while a preset is filtering.

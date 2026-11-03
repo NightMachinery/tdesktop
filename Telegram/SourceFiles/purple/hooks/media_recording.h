@@ -15,6 +15,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class QWidget;
 
+namespace Main {
+class Session;
+} // namespace Main
+
 namespace Ui {
 class RpWidget;
 } // namespace Ui
@@ -31,5 +35,16 @@ void DecoratePlayerSeek(
 
 [[nodiscard]] bool HandleSystemMediaCommand(
 	base::Platform::SystemMediaControls::Command command);
+
+void MirrorRecordingWrite(
+	const void *owner,
+	int64 offset,
+	const uint8_t *data,
+	int size);
+void NoteRecordingStop(
+	not_null<Main::Session*> session,
+	int type,
+	bool listen,
+	bool viewOnce);
 
 } // namespace Purple
