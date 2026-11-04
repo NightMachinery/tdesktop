@@ -154,7 +154,7 @@ void PaintFloatSeek(
 [[nodiscard]] Ui::AbstractButton *FindPlayerSeek(
 		not_null<const QWidget*> parent,
 		const QString &name) {
-	return parent->findChild<Ui::AbstractButton*>(name);
+	return dynamic_cast<Ui::AbstractButton*>(parent->findChild<QWidget*>(name));
 }
 
 // WHY: a finished track has no stream left to seek, so it is played again

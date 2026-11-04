@@ -210,3 +210,7 @@ its version-tag symbol even when the tested rules themselves use no Qt types.
   the float with the toggle on and off in a large and a small window, and
   the float's hover buttons, drag and double-click, and a private chat where
   their message, then yours, then theirs play in turn.
+
+Player seek button lookup asks Qt for a named QWidget and checks its concrete
+button type with C++ RTTI. AbstractButton has no Q_OBJECT of its own, so Qt's
+typed findChild cannot safely use it as the queried metadata type.
