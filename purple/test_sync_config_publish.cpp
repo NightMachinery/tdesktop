@@ -13,6 +13,7 @@
 
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
+#include <QtCore/QLockFile>
 
 #include <algorithm>
 #include <cstring>

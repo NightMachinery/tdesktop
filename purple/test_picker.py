@@ -71,9 +71,7 @@ for flag in ('-arch', '-isysroot', '-isystem'):
 for value in recipe:
     if value.startswith(('-I', '-D', '-F', '-mmacosx-version-min=')):
         flags.append(value)
-objects = [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o'))]
-    if not (repo / 'Telegram/ThirdParty/purple_core/purple' / path.name.removesuffix('.o')).is_file():
-        continue
+objects = [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o')) if (repo / 'Telegram/ThirdParty/purple_core/purple' / path.name.removesuffix('.o')).is_file()]
 frameworks = next(Path(value[2:]) for value in flags if value.startswith('-F') and (Path(value[2:]) / 'QtCore.framework').exists())
 with (work / 'build.log').open('w') as log:
     subprocess.run([recipe[0], *flags, '-c', str(repo / 'purple/test_picker.cpp'), '-o', str(work / 'test.o')], check=True, stdout=log, stderr=subprocess.STDOUT)

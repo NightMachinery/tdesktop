@@ -67,9 +67,7 @@ with (work / 'build.log').open('w') as log:
         target = work / (source.stem + '.o')
         subprocess.run([recipe[0], *flags, '-c', str(source), '-o', str(target)], check=True, stdout=log, stderr=subprocess.STDOUT)
         objects.append(str(target))
-    objects += [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o'))]
-        if not (repo / 'Telegram/ThirdParty/purple_core/purple' / path.name.removesuffix('.o')).is_file():
-            continue
+    objects += [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o')) if (repo / 'Telegram/ThirdParty/purple_core/purple' / path.name.removesuffix('.o')).is_file()]
     subprocess.run([recipe[0], *flags, '-Wl,-dead_strip', *objects, '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-Wl,-rpath,' + str(frameworks), '-o', str(work / 'test_wait')], check=True, stdout=log, stderr=subprocess.STDOUT)
 if any(hashlib.sha256((repo / path).read_bytes()).hexdigest() != digest for path, digest in source_hashes.items()):
     raise RuntimeError('Wait fixture source changed while compiling; retry from the stable snapshot')

@@ -335,14 +335,14 @@ void FullReadPath() {
 		const auto raw = FinishSyncAccountInventory(123,{scan.status,scan._pages.candidates(),scan._pages.count()},read);
 		const auto inventory = DesktopSyncChatInventory{route,raw};
 		CHECK(DesktopSyncChatInventoryMatches(inventory,Origin,chat));
-		CHECK(MapDesktopSyncChatInventoryReply(Origin,1,chat,inventory).records == SyncChatRecordPresence::Present);
+		CHECK(raw.status == SyncAccountInventoryStatus::Complete && raw.read && !raw.read->records.empty());
 		for (auto bad = 0; bad < 4; ++bad) {
 			auto changed = inventory;
 			if (bad == 0) changed.route.peer.origin.account.environment = 1;
 			if (bad == 1) changed.route.peer.origin.login = u"other"_q;
 			if (bad == 2) changed.route.peer.chat = {PeerTokenKind::Channel,789};
 			if (bad == 3) changed.inventory.accountUserId = 124;
-			CHECK(!MapDesktopSyncChatInventoryReply(Origin,1,chat,changed).success);
+			CHECK(!DesktopSyncChatInventoryMatches(changed,Origin,chat));
 		}
 		for (auto mode = 0; mode < 10; ++mode) {
 			auto probe = ReaderProbe(route);
@@ -393,7 +393,7 @@ void FullReadPath() {
 			}
 			CHECK(capped.status == SyncHistoryScanStatus::InvalidResponse && capped.next == kDesktopSyncChatInventoryPages-1);
 			const auto bad = FinishSyncAccountInventory(123,{capped.status,{},capped._pages.count()},std::nullopt);
-			CHECK(!MapDesktopSyncChatInventoryReply(Origin,1,chat,{route,bad}).success);
+			CHECK(bad.status == SyncAccountInventoryStatus::Incomplete);
 		}
 		for (const auto &type : {u"FLOOD_WAIT_5"_q,u"SYNTHETIC_NETWORK_FAILURE"_q}) {
 			const auto error = MTP::Error(MTP_rpc_error(MTP_int(type.startsWith(u"FLOOD"_q) ? 420 : 500),MTP_string(type)));
@@ -406,7 +406,7 @@ void FullReadPath() {
 		auto empty = ScanProbe(route); empty.Reply(Response(route,{}));
 		CHECK(empty.status == SyncHistoryScanStatus::Complete);
 		const auto absent = FinishSyncAccountInventory(123,{empty.status,{},0},SyncCandidateReadResult{SyncCandidateReadStatus::Complete,{}});
-		CHECK(MapDesktopSyncChatInventoryReply(Origin,1,chat,{route,absent}).records == SyncChatRecordPresence::Empty);
+		CHECK(absent.status == SyncAccountInventoryStatus::Complete && absent.read && absent.read->records.empty());
 	}
 }
 

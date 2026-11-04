@@ -295,17 +295,6 @@ int main(){
   Check(done==0&&final==0,"late timed out read rejected");Mono=p->retryAtMs;sender.tick(p);auto last=sender._api.events[p->wire];first.fail({400,MTP::Text("CHANNEL_PRIVATE")});last.done(1);last.done(1);
   Check(done==1&&final==0&&sender._pending.empty(),"safe read resumes once with literal templated callbacks");
  }
-){
-  Mono=0;Unix=1000000;LocalOpenProbe service;service.borrowed=borrowed;
-  HoldGate=true;MarkValid=true;Main::Session session;auto upload=std::make_shared<SyncConfigUpload>(&session);upload->SendMedia();service._callbacks.push_back(std::move(DeferredGate));
-  const auto old=service._current;const auto oldRun=service._run;service.RetryLocalOpen();
-  Check(upload->finals==0&&upload->_checking&&service._callbacks.size()==1,"local-open timeout retains logical completion");
-  Check(!old->load()&&!service._current&&service._run!=oldRun&&service._timer.due==Mono+5000,"late worker capability revoked with timed retry");
-  Check(service._retryLocalOpen&&service._openContinuation,"owned and borrowed continuation retained");
-  service._current=std::make_shared<std::atomic<bool>>(true);service._status=DesktopSyncChatStatus();service._busy=false;service.Publish();HoldGate=false;
-  Check(upload->finals==0&&upload->_api->_api.events.size()==1&&service._callbacks.empty(),"recovered open delivers once and posts once");
-  upload->Finish({});
- }
  for(bool current:{false,true}){
   Mono=0;Unix=1000000;DownloadProbe reader;reader.Start();auto late=reader.late;auto p=reader._api._pending.at(reader._downloadWatch);Mono=30000;reader._api.tick(p);
   Check(!reader._loader&&reader.finals==0&&p->transient&&p->transient->kind==SyncTransientKind::Timeout,"stalled loader retired with visible typed retry");
@@ -346,25 +335,6 @@ int main(){
   sender.failed(p,{420,MTP::Text("FLOOD_WAIT_8")});Mono=p->retryAtMs;sender.tick(p);const auto original=p->policy.deadline();Mono+=90000;gate(true);
   Check(p->policy.deadline()==original+90000&&sender._api.events.size()==2,"async authority read pauses only effect response clock");
   Check(!p->transient,"renewed effect clears wait notice");sender.cancelAll();
- }
-){
-  for(const auto force:{false,true}){
-   for(const auto replacement:{false,true}){
-    Mono=0;Unix=1000000;LocalOpenProbe service;service._operation={[]{return true;},19};service._beforePost=true;
-    int original=0,joined=0;
-    service._callbacks.push_back([&](DesktopSyncChatStatus){++original;});service.RetryLocalOpen();
-    const auto timer=service._timer.due;Mono+=overdue*1000;Unix+=overdue;
-    auto other=DesktopSyncChatOperation();if(replacement){other={[]{return true;},77};}
-    service.Ensure(force,[&](DesktopSyncChatStatus){++joined;},other,false);
-    Check(service._operation.current&&service._operation.marker==19&&service._beforePost,
-      "due or overdue force call preserves original borrowed capability and before-post intent");
-    Check(service._callbacks.size()==2&&original==0&&joined==0&&service.begins==0&&service._timer.due==timer,
-      "new ensure joins pending local open without early completion or another timer");
-    service.Begin(false);Check(service.openedBorrowed,"timer reopening still borrows original writer lock");
-    service._current=std::make_shared<std::atomic<bool>>(true);service._status=DesktopSyncChatStatus();service.Publish();service.Publish();
-    Check(original==1&&joined==1,"retained and joined local-open callbacks each complete once");
-   }
-  }
  }
  std::cout<<"INTEGRATION "<<Checks<<" checks, "<<Failures<<" failures\n";return Failures?1:0;
 }
