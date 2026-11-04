@@ -934,9 +934,7 @@ SyncAutoPlan Drive(Fixture &f, SyncAutoPlan plan) {
 	return plan;
 }
 
-void MigrationKeepsSharedSpace() {
-	const auto magic = PeerToken{ PeerTokenKind::Channel, 88 };
-	auto a = Fixture(); auto b = Fixture();
+void MakeSecondInstall(Fixture &b) {
 	auto other = SyncLocalState();
 	{
 		auto local = SyncLocalStore(b.files.syncDirectory); CHECK(local.Open(true, b.token));
@@ -946,6 +944,19 @@ void MigrationKeepsSharedSpace() {
 	other.createdDevice = u"android:"_q + other.install;
 	CHECK(QFile::remove(b.files.syncStore));
 	{ auto local = SyncLocalStore(b.files.syncDirectory); CHECK(local.Open(true).status == SyncStoreStatus::Uninitialized); CHECK(local.Initialize(other)); }
+}
+
+void MoveFixture(Fixture &f, PeerToken chat, const QByteArray &settled) {
+	CHECK(f.store->MoveTo(chat, uint64_t(f.key.userId), SettingsFingerprint(settled)));
+	CHECK(f.store->local().state()->chat == chat);
+	f.facts.chat = chat;
+	f.facts.savedFingerprint = SettingsFingerprint(settled);
+}
+
+void MigrationKeepsSharedSpace() {
+	const auto magic = PeerToken{ PeerTokenKind::Channel, 88 };
+	auto a = Fixture(); auto b = Fixture();
+	MakeSecondInstall(b);
 	a.Local(T1);
 	CHECK(Drive(a, a.Event(SyncAutoEvent::Enable)).action == SyncAutoAction::NoOp);
 	CHECK(a.cloud.size() == 1);
@@ -958,10 +969,8 @@ void MigrationKeepsSharedSpace() {
 	const auto space = a.store->local().state()->space;
 	CHECK(b.store->local().state()->space == space);
 	for (const auto f : { &a, &b }) {
-		CHECK(f->store->MoveTo(magic, uint64_t(f->key.userId), SettingsFingerprint(T1)));
-		CHECK(f->store->local().state()->chat == magic && f->store->local().state()->space == space);
-		f->facts.chat = magic;
-		f->facts.savedFingerprint = SettingsFingerprint(T1);
+		MoveFixture(*f, magic, T1);
+		CHECK(f->store->local().state()->space == space);
 	}
 	a.cloud.clear();
 	CHECK(Drive(a, a.Event(SyncAutoEvent::Foreground)).action == SyncAutoAction::NoOp);
@@ -977,6 +986,38 @@ void MigrationKeepsSharedSpace() {
 	CHECK(b.store->local().state()->space == space && a.store->local().state()->space == space);
 	std::printf("MIGRATION_SHARED one_space=%d verdict=%d\n",
 		int(b.store->local().state()->space == a.store->local().state()->space), int(review.plan.verdict));
+}
+
+// Every local commit after a post or a retirement names the chat the moved state lives in.
+void MovedChatCommits() {
+	const auto magic = PeerToken{ PeerTokenKind::Channel, 90 };
+	for (const auto confirmed : { true, false }) {
+		auto f = Fixture(); f.Local(T1);
+		CHECK(Drive(f, f.Event(SyncAutoEvent::Enable)).action == SyncAutoAction::NoOp);
+		MoveFixture(f, magic, T1);
+		f.cloud.clear();
+		CHECK(Drive(f, f.Event(SyncAutoEvent::Foreground)).action == SyncAutoAction::NoOp);
+		f.Local(T2);
+		const auto retire = Drive(f, f.Event(SyncAutoEvent::LocalSaved));
+		CHECK(retire.action == SyncAutoAction::Retire);
+		CHECK(f.store->local().state()->ownMessages.size() == 2);
+		f.cloud.erase(retire.messageId);
+		if (confirmed) {
+			CHECK(f.store->CommitRetirement(retire, { retire.messageId, {}, true, false, SyncAutoMessagePresence::Absent }));
+			CHECK(f.Event(SyncAutoEvent::Completed, SyncAutoOutcome::Deleted).action == SyncAutoAction::Check);
+			CHECK(f.Inventory().action == SyncAutoAction::NoOp);
+		} else {
+			const auto retry = f.Event(SyncAutoEvent::Completed, SyncAutoOutcome::OutcomeUnknown);
+			CHECK(retry.action == SyncAutoAction::RetryAt);
+			f.now = retry.retryAt;
+			CHECK(f.Event(SyncAutoEvent::Retry).action == SyncAutoAction::Reconcile);
+			const auto commit = f.Inventory();
+			CHECK(commit.commitOnly);
+			CHECK(f.Execute(commit));
+		}
+		CHECK(f.store->local().state()->ownMessages.size() == 1);
+		std::printf("MOVED_CHAT_COMMITS confirmed=%d chat=%d\n", int(confirmed), int(f.store->local().state()->chat == magic));
+	}
 }
 
 void FirstUseJoinAppliesHead() {
@@ -1092,7 +1133,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace();
+	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace(); MovedChatCommits();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

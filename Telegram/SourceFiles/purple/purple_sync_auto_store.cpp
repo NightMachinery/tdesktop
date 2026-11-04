@@ -307,11 +307,11 @@ bool DesktopSyncAutoStore::ExecuteLocal(
 				if (recorded && _local.PrepareRetainedConfig(recorded.state, pending.staged) == SyncStoreStatus::Ready
 					&& StateBytes(recorded.state) == expected) { id = entry.messageId; break; }
 			}
-			if (id <= 0 || !_local.ConfirmConfigReadBack(pending.staged, _local.state()->createdDevice, id)) { return false; }
+			if (id <= 0 || !_local.ConfirmConfigReadBack(pending.staged, _local.state()->createdDevice, id, _local.state()->chat)) { return false; }
 		} else if (plan.record.retiring) {
 			const auto next = RemoveAbsentOwnConfigMessage(*_local.state(), plan.messageId, SyncOwnMessagePresence::Absent);
 			if (!next || StateBytes(next.state) != expected
-				|| !_local.RemoveAbsentConfigMessage(plan.messageId, plan.record.record, _token)) { return false; }
+				|| !_local.RemoveAbsentConfigMessage(plan.messageId, plan.record.record, _token, _local.state()->chat)) { return false; }
 		} else { return false; }
 	} else { return false; }
 	return _local.state() && StateBytes(*_local.state()) == expected && Current();
@@ -338,7 +338,7 @@ bool DesktopSyncAutoStore::CommitRetirement(
 		|| absence.presence != SyncAutoMessagePresence::Absent || !absence.record.isEmpty()) { return false; }
 	const auto next = RemoveAbsentOwnConfigMessage(*_local.state(), plan.messageId, SyncOwnMessagePresence::Absent);
 	return next && StateBytes(next.state) == plan.record.expectedState
-		&& _local.RemoveAbsentConfigMessage(plan.messageId, plan.bytes, _token)
+		&& _local.RemoveAbsentConfigMessage(plan.messageId, plan.bytes, _token, _local.state()->chat)
 		&& Current();
 }
 

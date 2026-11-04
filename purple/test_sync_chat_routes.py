@@ -59,6 +59,7 @@ def inspect(values):
         and 'bound && *bound == StateChat()' in auto)
     require('disable-exempt', 'event != SyncAutoEvent::Disable && !SyncMagicBound(session) && !SyncMagicPaused(session)' in auto)
     require('auto-owned-hold', 'Hold(SyncAutoReason::SyncChatNotResolved);' in auto)
+    require('auto-apply-state-chat', 'ReviewSyncConfig(session->account(), *session, self->_inventory, self->StateChat());' in auto)
     require('auto-visible', 'if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }' in auto)
     service = values['purple_sync_chat_service.cpp']
     require('typed-inventory-route', 'ValidDesktopSyncChatIo(route)' in service and 'command.origin, command.ticket, command.chat, result' in service)
@@ -249,6 +250,7 @@ negative = [
     ('purple_sync_setup_box.cpp', 'EnsureSyncChatResolved(session, true);', 'Other(session);', 'sync-screen-origin'),
     ('purple_sync_auto_service.cpp', 'event != SyncAutoEvent::Disable', 'event != SyncAutoEvent::Enable', 'disable-exempt'),
     ('purple_sync_auto_service.cpp', 'Hold(SyncAutoReason::SyncChatNotResolved);', 'Stop();', 'auto-owned-hold'),
+    ('purple_sync_auto_service.cpp', '*session, self->_inventory, self->StateChat());', '*session, self->_inventory);', 'auto-apply-state-chat'),
     ('purple_sync_chat_service.cpp', 'ValidDesktopSyncChatIo(route)', 'true', 'typed-inventory-route'),
     ('purple_sync_history_scanner.cpp', 'return GetSyncChatMessageOwnership(', 'return IsOwnSyncChatMessage(', 'tri-state-records'),
     ('purple_sync_chat_service.cpp', 'command.run != _run', 'false', 'run-generation'),

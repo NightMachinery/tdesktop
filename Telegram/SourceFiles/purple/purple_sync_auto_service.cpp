@@ -482,7 +482,7 @@ void AutoSession::Run(SyncAutoPlan plan) {
 		case SyncAutoAction::AutoApply: {
 			const auto session = self->_session.get();
 			const auto replacement = self->_applyReview;
-			const auto review = ReviewSyncConfig(session->account(), *session, self->_inventory);
+			const auto review = ReviewSyncConfig(session->account(), *session, self->_inventory, self->StateChat());
 			const auto ok = replacement && replacement->impact.status == ConfigImpactStatus::Ready
 				&& !replacement->impact.dangerous && !replacement->usingGood
 				&& RebaseAccountTransferAfterSetup(session, *replacement)
