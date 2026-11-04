@@ -154,4 +154,28 @@ Still to run locally (the session that finished the code had no Qt and no Debug 
    - N10 `record.enabled = enabled;` to `false`, auto_store, test_sync_auto.
 3. The RelWithDebInfo stage, signing, and the GUI and device checks of D1.
 
+### Handoff after review CHANGES (branch head after ab58e54)
+
+Done on this branch, none of it compiled yet: P2-1 (7ab8642, `sync/first-use.json` keeps the answer and a started
+join), P2-3 (7c8b300, 15-minute limit without a state), P2-2 (52277c4, named first-use failures), P2-5 Desktop part
+(81f0bd2, MigrationKeepsSharedSpace), P3-2, P3-4, P3-5, P3-6 (220b76c, df8010a, d734565, 341efca), P1-1 client side
+(45fcb0e gitlink at core 493d0dbb03 and `headKey`; ab58e54 FirstUseCurrentHead and FirstUseJoinAppliesCurrentHead).
+Static gates all pass (`test_sync_chat_routes.py`: 79 routes, 102 negative mutations).
+
+Remaining:
+
+1. Debug build and `purple/run_host_gates.py` in full; fix whatever the new compiled cases expose. Riskiest:
+   `Drive` and MigrationKeepsSharedSpace (test_sync_auto), the Ready and verdict checks in FirstUseMigration and
+   FirstUseD1, FirstUseMarkKeepsAnswer, FirstUseCurrentHead (setup-publish), sync-diag vocabulary (new words).
+2. Negative controls N1 to N10 above, run and recorded.
+3. Bump the gitlink to the core commit that fixes `SameSyncSettingsMeaning` line numbers (P2-4); no client change
+   expected.
+4. Core gap to raise: when current heads disagree, core gives no `headKey`, so "Use this device's settings" publishes
+   with empty expected parents and core's publish gate (which compares them with its own choice's parents) likely
+   refuses it every time (`chat_changed`). Core should name the parents for that case.
+5. P3-3: use the actual cause's reason code (newer schema in `PauseOnForeignSpace` fallback, `!recovery` and the ledger
+   mismatch in `ReviewSyncConfig`).
+6. P3-1: reword the WIP subject of e647b5f at the next rebase (owner's call).
+7. RelWithDebInfo stage, signing, GUI and D1 device checks.
+
 Keep `purple.cmake` unchanged if you can, and say why if you cannot.
