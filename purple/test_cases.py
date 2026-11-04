@@ -116,7 +116,7 @@ CASES = {
             'purple/purple_recording_registry.cpp', 'purple/purple_recording_recovery.cpp',
             'core:purple/purple_ogg_repair.cpp', 'core:purple/purple_recording_file.cpp'],
         'build_libraries': ['libcrypto.a'],
-        'frameworks': [],
+        'frameworks': ['QtCore'],
     },
     'recording-round': {
         # F10's round copy, remux, repair rebuild and AAC measure over the
@@ -127,7 +127,7 @@ CASES = {
             'core:purple/purple_mp4_repair.cpp', 'core:purple/purple_round_journal.cpp',
             'core:purple/purple_ogg_repair.cpp', 'core:purple/purple_recording_file.cpp'],
         'build_libraries': ['libavformat.a', 'libavcodec.a', 'libswresample.a', 'libavutil.a', '?libopenh264.a', 'libcrypto.a'],
-        'frameworks': ['VideoToolbox', 'AudioToolbox', 'CoreMedia', 'CoreVideo', 'CoreFoundation', 'CoreServices', 'Security'],
+        'frameworks': ['QtCore', 'VideoToolbox', 'AudioToolbox', 'CoreMedia', 'CoreVideo', 'CoreFoundation', 'CoreServices', 'Security'],
         'link': ['-lz', '-lbz2', '-liconv', '-lc++'],
     },
     'voice-queue': {
@@ -351,7 +351,9 @@ with (work / 'build.log').open('w') as log:
         manifest = (build / 'build.ninja').read_text(errors='replace')
         for name in case['build_libraries']:
             optional, name = name.startswith('?'), name.lstrip('?')
-            hits = sorted({value for value in manifest.split() if value.endswith('/' + name)})
+            names = {name, name[:-2] + '.dylib'} if name.endswith('.a') else {name}
+            hits = sorted({value for value in manifest.split() if Path(value).name in names},
+                key=lambda value: (not value.endswith('/' + name), value))
             assert hits or optional, 'no ' + name + ' in build.ninja'
             found += hits[:1]
     link += ['-Wl,-dead_strip', *map(str, objects), *[str(build / name) for name in case.get('objects', []) + case.get('libraries', [])], *found,

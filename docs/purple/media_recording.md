@@ -536,3 +536,9 @@ bubble callback and checks its resume route, and pins pause-state publication.
 The recording bin includes UserData's complete definition before reading the
 session user's display name. Its standalone Debug translation unit is compiled
 in the application build as well as the host ownership tests.
+
+Recording host fixtures resolve their crypto and FFmpeg libraries from the
+Debug build manifest. The same named macOS shared library is accepted when the
+build links a dylib instead of a static archive; a required missing library
+still fails. Both fixtures link QtCore for the Debug precompiled header's Qt
+version guard and retain every production unit and assertion.
