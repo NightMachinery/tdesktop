@@ -613,6 +613,11 @@ void RestoreFloatingRecording(not_null<HistoryView::Controls::VoiceRecordBar*> b
 	if (RecordingBarFloats(bar)) ExpandRoundRecording(bar);
 }
 
+void ToggleRoundRecordingPause(not_null<HistoryView::Controls::VoiceRecordBar*> bar) {
+	if (TheDock().roundBar == bar) Pause();
+	else bar->purpleTogglePause();
+}
+
 bool SetRoundRecordingFloat(not_null<HistoryView::Controls::VoiceRecordBar*> bar, bool small) {
 	const auto i = Contexts.find(bar);
 	if (i == Contexts.end()) return false;
@@ -643,9 +648,9 @@ bool SetRoundRecordingFloat(not_null<HistoryView::Controls::VoiceRecordBar*> bar
 		dock.levels[dock.levelIndex++ % 64] = update.level;
 		dock.changes.fire({});
 	}, [=] { RestoreFloatingRecording(bar); }, dock.capture);
-	bar->recordingStateChanges() | rpl::on_next([=] {
+	bar->purplePauseChanges() | rpl::on_next([=](bool paused) {
 		auto &dock = TheDock();
-		if (dock.roundBar == bar && dock.model.pause(dock.model.generation(), !bar->isRecording())) dock.changes.fire({});
+		if (dock.roundBar == bar && dock.model.pause(dock.model.generation(), paused)) dock.changes.fire({});
 	}, dock.capture);
 	dock.changes.fire({});
 	return true;

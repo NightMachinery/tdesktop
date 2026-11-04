@@ -80,6 +80,7 @@ public:
 	[[nodiscard]] int purpleSamples() const;
 	void purpleFloat(bool small);
 	void purpleAdoptCapture(bool once);
+	[[nodiscard]] rpl::producer<bool> purplePauseChanges() const;
 	void purpleTogglePause();
 	void purpleSendRound(Api::SendOptions options);
 	void purpleReleaseCompleted();

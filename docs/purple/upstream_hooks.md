@@ -1692,3 +1692,8 @@ the TimeId `destructAt` in `purple_user_control.cpp`, and `MediaPhoto::Args`.
 The watch count of `TopPeers::list()` callers rose to 4 with upstream's new
 `data/components/recent_money_recipients.cpp`, which reads the list Purple
 already filters at its source.
+
+The round bubble lock callback calls `ToggleRoundRecordingPause`, sharing the
+strip adapter that temporarily restores native control ownership. The native
+voice bar exposes `purplePauseChanges` from its pause variable so the strip
+observes resume after both native recording and pause state have settled.

@@ -527,3 +527,8 @@ cleanup is deferred. The completed bytes and frozen context outlive the native
 bar; closing its window cannot drop the queued send. Account-session teardown
 still invalidates it. Finalization reserves the dock until cleanup completes, so
 a second capture cannot replace that payload in the interim.
+
+Round bubble and strip pause controls share the same native ownership adapter.
+The strip reads native pause changes directly, including the asynchronous
+resume appearance callback. The recording dock host fixture compiles the exact
+bubble callback and checks its resume route, and pins pause-state publication.

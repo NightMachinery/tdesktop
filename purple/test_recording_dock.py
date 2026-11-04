@@ -9,3 +9,6 @@ args.output_dir.mkdir(parents=True, exist_ok=False)
 program = args.output_dir / 'recording-dock'
 subprocess.run(['clang++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-I' + str(root / 'Telegram/SourceFiles'), str(root / 'Telegram/SourceFiles/purple/tests/recording_dock_cases.cpp'), '-o', str(program)], check=True)
 subprocess.run([str(program)], check=True)
+
+from recording_integration import run
+run(root, args.output_dir)

@@ -3195,6 +3195,10 @@ void VoiceRecordBar::purpleAdoptCapture(bool once) {
 	stopRecording(StopType::Listen);
 }
 
+rpl::producer<bool> VoiceRecordBar::purplePauseChanges() const {
+	return _paused.value();
+}
+
 void VoiceRecordBar::purpleTogglePause() {
 	_lock->clicked(Qt::NoModifier, Qt::LeftButton);
 }
@@ -3466,7 +3470,7 @@ bool VoiceRecordBar::createVideoRecorder() {
 			.track = std::move(track),
 			.placeholder = _show->session().local().readRoundPlaceholder(),
 		});
-	Purple::BindRoundRecorder(_videoRecorder.get(), this, [=] { _lock->clicked(Qt::NoModifier, Qt::LeftButton); }, _show);
+	Purple::BindRoundRecorder(_videoRecorder.get(), this, [=] { Purple::ToggleRoundRecordingPause(this); }, _show);
 	_videoRecorder->placeholderUpdates(
 	) | rpl::on_next([=](QImage &&placeholder) {
 		_show->session().local().writeRoundPlaceholder(placeholder);

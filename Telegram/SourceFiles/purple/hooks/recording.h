@@ -36,6 +36,7 @@ void BindRecordingLock(not_null<HistoryView::Controls::VoiceRecordBar*> bar, con
 [[nodiscard]] bool RecordingBarActive(const HistoryView::Controls::VoiceRecordBar *bar, bool nativeActive);
 [[nodiscard]] bool RecordingBarFloats(const HistoryView::Controls::VoiceRecordBar *bar);
 [[nodiscard]] bool SetRoundRecordingFloat(not_null<HistoryView::Controls::VoiceRecordBar*> bar, bool small);
+void ToggleRoundRecordingPause(not_null<HistoryView::Controls::VoiceRecordBar*> bar);
 void RestoreFloatingRecording(not_null<HistoryView::Controls::VoiceRecordBar*> bar);
 [[nodiscard]] bool SendPinnedRecording(not_null<const HistoryView::Controls::VoiceRecordBar*> bar, const HistoryView::Controls::VoiceToSend &data);
 void AttachRecordingStrip(not_null<Ui::RpWidget*> parent, Fn<void()> relayout);
