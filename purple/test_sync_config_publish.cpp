@@ -1007,9 +1007,13 @@ void FirstUseMigration() {
 		CHECK(review.need == SyncFirstUseNeed::None && !review.action);
 		prompts += (review.action == SyncFirstUseAction::Ask) ? 1 : 0;
 	}
+	const auto firstState = StateOf(first);
+	const auto firstReview = ReviewSyncConfigInventory(empty, &firstState, QByteArray(), ReadSyncSettingsFile(first.files));
+	const auto firstChoice = PlanConfigChoice(firstReview.state, firstReview.plan, std::nullopt);
+	CHECK(firstChoice && firstChoice->publish && firstChoice->adopt.empty());
 	const auto republished = RunMagicFlow(first, empty, SyncConfigPublishRequest{
 		.expectedFingerprint = MakeSyncSettingsFile(SyncSettingsFileStatus::Present, kCustom).fingerprint,
-		.expectedParents = std::vector<QString>() }, 61);
+		.expectedParents = firstChoice ? SyncConfigVersionKeys(firstChoice->parents) : std::vector<QString>() }, 61);
 	CHECK(republished.reply.result.status == SyncConfigPublishStatus::Confirmed);
 	CHECK(SpaceOf(republished.staged) == space && StateOf(first).space == space);
 	const auto magic = InventoryAt({ { 61, republished.staged } });
