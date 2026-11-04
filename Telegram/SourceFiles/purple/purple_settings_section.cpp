@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_schedule_box.h"
 #include "purple/purple_screentime_box.h"
 #include "purple/purple_sync.h"
+#include "purple/purple_sync_auto_service.h"
 #include "purple/purple_sync_setup_box.h"
 #include "purple/purple_version.h"
 #include "settings/settings_builder.h"
@@ -662,7 +663,14 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			.id = u"advanced/purple_sync_setup"_q,
 			.title = rpl::single(u"Sync across devices"_q),
 			.icon = { &st::menuIconSavedMessages },
-			.label = rpl::single(u"Off"_q),
+			.label = rpl::single(rpl::empty)
+				| rpl::then(AutomaticSettingsSyncChanges())
+				| rpl::map([weak = base::make_weak(session.get())] {
+					const auto session = weak.get();
+					return session && AutomaticSettingsSyncEnabled(session)
+						? tr::lng_settings_cloud_password_on(tr::now)
+						: tr::lng_settings_cloud_password_off(tr::now);
+				}),
 			.onClick = [=] {
 				controller->show(Box(Purple::SyncSetupBox));
 			},

@@ -12,7 +12,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
     'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
-    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp', 'purple_sync_config_review.cpp']}
+    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp', 'purple_sync_config_review.cpp', 'purple_settings_section.cpp']}
 
 RouteNames = set()
 
@@ -241,10 +241,20 @@ def inspect(values):
         and all(marker not in first for marker in ['ConfirmAction(', 'showBox(', 'Ui::show(', 'uiShow(']))
     require('first-use-auto-status', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }' in auto
         and 'first->outcome == SyncFirstUseOutcome::Waiting) { return tr::lng_purple_auto_first_wait(tr::now); }' in auto)
+    settings = values['purple_settings_section.cpp']
+    row = settings.split('.id = u"advanced/purple_sync_setup"_q,', 1)[-1].split('.keywords =', 1)[0]
+    require('advanced-sync-enabled', '.label = rpl::single(rpl::empty)' in row
+        and '| rpl::then(AutomaticSettingsSyncChanges())' in row
+        and 'session && AutomaticSettingsSyncEnabled(session)' in row
+        and 'base::make_weak(session.get())' in row
+        and '? tr::lng_settings_cloud_password_on(tr::now)' in row
+        and ': tr::lng_settings_cloud_password_off(tr::now)' in row)
     return failures
 
 assert not inspect(files), inspect(files)
 negative = [
+    ('purple_settings_section.cpp', 'session && AutomaticSettingsSyncEnabled(session)', 'false', 'advanced-sync-enabled'),
+    ('purple_settings_section.cpp', '| rpl::then(AutomaticSettingsSyncChanges())', '| rpl::then(rpl::never<>())', 'advanced-sync-enabled'),
     ('purple_sync_account_inventory.cpp', '_readStarted = DesktopSyncChatReadStamp::Begin();', '', 'inventory-read-start'),
     ('purple_sync_account_inventory.cpp', 'std::move(_receipts), _readStarted', 'std::move(_receipts), {}', 'inventory-read-stamp'),
     ('purple_sync_config_upload.cpp', 'current->api().applyUpdates(updates, randomId);', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),

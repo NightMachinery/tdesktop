@@ -186,3 +186,5 @@ Remaining:
 Keep `purple.cmake` unchanged if you can, and say why if you cannot.
 
 When the first-use answer keeps bytes matching one of several conflicting heads, Desktop initializes the selected space, applies the local choice, and publishes the request from that completion. This adopts the matching head before the publish gate and supersedes every conflicting head without rewriting the local file. Sequential migrations reuse a head that already represents their base; racing migrations can publish once each before seeing the other.
+
+The Advanced Sync across devices row reads the same per-account automatic-sync enabled flag as the box, both when the row opens and on automatic-sync change events. It shows On or Off rather than a fixed Off label.
