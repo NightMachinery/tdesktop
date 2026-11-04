@@ -431,6 +431,14 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 				&& captured.model != ArchivePlanStatus::NotFound) {
 				return false;
 			}
+			if (!captured.retained) {
+				LOG(("Purple Archive: stale capture, origin %1 model %2 lifecycle %3 send %4 preimage %5 message %6.").arg(
+					QString::number(int(event.origin)), QString::number(int(captured.model)),
+					QString::number(event.observation.context.contains(u"desktopLifecycle"_q) ? 1 : 0),
+					QString::number(event.observation.context.value(u"desktopSendMetadata"_q).toBool() ? 1 : 0),
+					QString::number(event.observation.context.value(u"desktopLivePreimage"_q).toBool() ? 1 : 0),
+					QString::number(message ? 1 : 0)));
+			}
 			if (!captured.retained
 				&& !store.Gap(
 					event.id, u"stale-capture"_q, event.observation.observedAt)) {

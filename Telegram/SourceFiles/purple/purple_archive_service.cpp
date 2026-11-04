@@ -1292,13 +1292,14 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	if (value.status == DesktopArchiveStatus::MaintenanceHeld || value.failure.startsWith(u"purge-"_q)) {
 		return tr::lng_purple_archive_purge_held(tr::now);
 	}
-	if (value.status == DesktopArchiveStatus::RetentionGap) {
-		return tr::lng_purple_archive_gap(tr::now);
+	// WHY: a gap row is permanent, so showing only the gap text would hide the usage for the store's whole life.
+	const auto usage = [&] { return tr::lng_purple_archive_usage(tr::now, lt_size, QString::number(value.bytes)); };
+	if (value.status == DesktopArchiveStatus::RetentionGap
+		|| (value.status == DesktopArchiveStatus::Ready && !value.failure.isEmpty())) {
+		return tr::lng_purple_archive_gap(tr::now) + u"\n"_q + usage();
 	}
 	if (value.status == DesktopArchiveStatus::Ready) {
-		return value.failure.isEmpty() ? tr::lng_purple_archive_usage(tr::now, lt_size,
-											 QString::number(value.bytes))
-									   : tr::lng_purple_archive_gap(tr::now);
+		return usage();
 	}
 	if (value.status == DesktopArchiveStatus::Disabled) {
 		return tr::lng_purple_archive_opening(tr::now);
