@@ -192,8 +192,10 @@ passcode. Until then nothing is mirrored.
   `keep_discarded_p` is on (owner answer 1 = A), and deletes it once the file
   is closed while it is off.
 - The file is closed when `Media::Capture::Instance` reports that it stopped,
-  which is after the trailer was written, or at the next recording's first
-  write if that report never came. A recording still in `recording` when it is
+  which is after the trailer was written. If that report never came, the
+  next recording would write over the previous file under its entry
+  (a known gap: upstream always sends the report today). A recording still
+  in `recording` when it is
   closed was stopped without a decision and is treated as a Cancel.
 - A sent voice or round message is noticed through `itemIdChanged`: the first
   waiting entry of the same account, chat and kind is the one that was sent,
