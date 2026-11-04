@@ -190,6 +190,9 @@ fails when a merge drops one of them.
 
 ## Tests
 
+The restart and size fixtures link QtCore. The Debug precompiled header uses
+its version-tag symbol even when the tested rules themselves use no Qt types.
+
 - `purple/tests/media_restart_cases.cpp` (gate `cases-media-restart`): the
   restart decision for every reason to decline, seek against replay, and the
   handler-context resolution.
