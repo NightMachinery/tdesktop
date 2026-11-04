@@ -1016,7 +1016,7 @@ void MigrationKeepsSharedSpace() {
 		int(b.store->local().state()->space == a.store->local().state()->space), int(review.plan.verdict));
 }
 
-// Both installs published before the move, so each has a confirmed head and must publish once in the new chat.
+// Sequential moves share one published base; racing moves each publish before they see it.
 void MigrationBothPublished() {
 	const auto magic = PeerToken{ PeerTokenKind::Channel, 89 };
 	for (const auto race : { false, true }) {
@@ -1043,7 +1043,7 @@ void MigrationBothPublished() {
 		CHECK(Drive(b, b.Event(SyncAutoEvent::Foreground)).action == SyncAutoAction::NoOp);
 		auto cloud = a.cloud;
 		cloud.insert(b.cloud.begin(), b.cloud.end());
-		CHECK(cloud.size() == 2);
+		CHECK(cloud.size() == (race ? 2 : 1));
 		for (auto round = 0; round != 2; ++round) {
 			for (const auto f : { &a, &b }) {
 				f->cloud = cloud;
