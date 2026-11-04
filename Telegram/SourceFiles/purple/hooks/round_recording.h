@@ -6,11 +6,13 @@
 class QPainter;
 namespace Ui { class RpWidget; class RoundVideoRecorder; }
 namespace ChatHelpers { class Show; }
+namespace HistoryView::Controls { class VoiceRecordBar; }
 
 namespace Purple {
 
 void BindRoundRecorder(
 	not_null<Ui::RoundVideoRecorder*> recorder,
+	not_null<HistoryView::Controls::VoiceRecordBar*> bar,
 	Fn<void()> pause,
 	std::shared_ptr<ChatHelpers::Show> show);
 [[nodiscard]] bool RoundRecorderFloats(
@@ -18,6 +20,7 @@ void BindRoundRecorder(
 	not_null<Ui::RpWidget*> preview,
 	QSize outer,
 	int side);
+void ExpandRoundRecording(not_null<HistoryView::Controls::VoiceRecordBar*> bar);
 void PaintRoundRecorder(not_null<Ui::RpWidget*> preview, QPainter &painter);
 [[nodiscard]] QRect RoundRecorderCanvas(not_null<Ui::RpWidget*> preview);
 

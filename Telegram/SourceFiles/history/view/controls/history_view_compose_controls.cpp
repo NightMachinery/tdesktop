@@ -6349,7 +6349,7 @@ rpl::producer<> ComposeControls::likeToggled() const {
 }
 
 bool ComposeControls::isRecording() const {
-	return _voiceRecordBar->isRecording();
+	return Purple::RecordingBarActive(_voiceRecordBar.get(), _voiceRecordBar->isRecording());
 }
 
 bool ComposeControls::isRecordingPressed() const {

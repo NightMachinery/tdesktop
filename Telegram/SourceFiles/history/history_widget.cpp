@@ -2649,7 +2649,7 @@ void HistoryWidget::cancelPendingDraftSaves() {
 }
 
 bool HistoryWidget::isRecording() const {
-	return _voiceRecordBar->isRecording();
+	return Purple::RecordingBarActive(_voiceRecordBar.get(), _voiceRecordBar->isRecording());
 }
 
 void HistoryWidget::activate() {

@@ -1618,13 +1618,21 @@ Purple edit in this file (it is in `td_ui`, which already calls Purple from
 send context and focus callback to the Purple dock. Each `preventsClose` adds
 one early adoption call before the stock discard prompt.
 
-`history/view/controls/history_view_voice_record_bar.h` declares two narrow
-extensions. `purpleDockable` exposes whether capture has private round, preview
-or resume-prefix state; `purpleReleaseToDock` takes view-once and calls the
-existing `hideFast`. Their implementations in the matching source are the only
-private-state access. The source also asks Purple to refuse a second recording
-and publish the send context before capture starts, and binds the existing round
-pause path to the float controls. Capture itself is untouched by adoption.
+`history/view/controls/history_view_voice_record_bar.h` exposes native UI seams
+for adopting a paused capture, hiding/restoring a round panel, toggling its pause,
+finishing into preview and releasing completed UI state. Their implementations
+stay beside the private `RecordLock`, `TTLButton` and `ListenWrap` types because
+those types are defined only in that source. They invoke existing native pause,
+listen and send paths; the dock's decisions, targets and transfer state remain in
+Purple files.
+
+The source routes compose activity, native hide cleanup, lock reset, new-record
+preparation and completed payloads through `purple/hooks/recording.h`. The hidden
+round retains native recording and lock state while its compose activity is
+false. The destructor still cancels that native owner. Hidden key filters cannot
+consume typed text. Both history and topic compose implementations use the same
+compose activity hook. Their send contexts are frozen before capture starts and
+remain frozen after native handback.
 
 `mainwidget.cpp` attaches the recording strip, adds its height to the existing
 bar stack, and places it in both column layouts. Decisions and widget creation

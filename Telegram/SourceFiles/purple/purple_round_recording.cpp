@@ -1,4 +1,5 @@
 #include "purple/hooks/round_recording.h"
+#include "purple/hooks/recording.h"
 
 #include "purple/purple_config.h"
 #include "purple/purple_round_recording_geometry.h"
@@ -25,6 +26,7 @@ namespace {
 
 struct Floating {
 	Ui::RoundVideoRecorder *recorder = nullptr;
+	HistoryView::Controls::VoiceRecordBar *bar = nullptr;
 	Ui::RpWidget *preview = nullptr;
 	QSize outer;
 	int side = 0;
@@ -58,7 +60,9 @@ void Place(not_null<Floating*> state) {
 }
 
 void Toggle(not_null<Floating*> state) {
-	state->small = !state->small;
+	const auto small = !state->small;
+	if (state->bar && !SetRoundRecordingFloat(state->bar, small)) return;
+	state->small = small;
 	if (state->small) Place(state);
 	else state->preview->setGeometry((state->outer.width() - state->side) / 2,
 		(state->outer.height() - state->side) / 2, state->side, state->side);
@@ -119,9 +123,11 @@ private:
 } // namespace
 
 void BindRoundRecorder(not_null<Ui::RoundVideoRecorder*> recorder,
+		not_null<HistoryView::Controls::VoiceRecordBar*> bar,
 		Fn<void()> pause, std::shared_ptr<ChatHelpers::Show> show) {
 	for (const auto &[preview, state] : Floats) {
 		if (state->recorder != recorder) continue;
+		state->bar = bar;
 		state->pause = std::move(pause);
 		state->show = std::move(show);
 		state->pauseButton = new QPushButton(tr::lng_purple_recording_toggle(tr::now), preview);
@@ -155,6 +161,12 @@ bool RoundRecorderFloats(not_null<Ui::RoundVideoRecorder*> recorder,
 	owned->side = side;
 	if (owned->small) Place(owned.get());
 	return owned->small;
+}
+
+void ExpandRoundRecording(not_null<HistoryView::Controls::VoiceRecordBar*> bar) {
+	for (const auto &[preview, state] : Floats) {
+		if (state->bar == bar && state->small) { Toggle(state.get()); return; }
+	}
 }
 
 void PaintRoundRecorder(not_null<Ui::RpWidget*> preview, QPainter &painter) {

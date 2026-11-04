@@ -39,6 +39,17 @@ CAPTURE_HOOKS = [
     ('ui/controls/round_video_recorder.cpp', 'bool RoundVideoRecorder::Private::writeFrame(', 'Purple::OnRoundPacket(this, pkt);'),
 ]
 DOCK_HOOKS = [
+    ('history/history_widget.cpp', 'bool HistoryWidget::isRecording()', 'Purple::RecordingBarActive('),
+    ('history/view/controls/history_view_compose_controls.cpp', 'bool ComposeControls::isRecording()', 'Purple::RecordingBarActive('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void RecordLock::init()', 'Purple::RecordingLockFloats('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::init()', 'Purple::BindRecordingLock('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::init()', 'Purple::PreventNewRecording('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::finish()', 'Purple::RecordingBarFloats('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::stop(bool send)', 'Purple::RestoreFloatingRecording('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'bool VoiceRecordBar::isActive()', 'Purple::RecordingBarActive('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'rpl::producer<VoiceToSend> VoiceRecordBar::sendVoiceRequests()', 'Purple::SendPinnedRecording('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'rpl::producer<bool> VoiceRecordBar::recordingStateChanges()', 'Purple::RecordingBarActive('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::startRecordingAndLock(bool round)', 'Purple::PreventNewRecording('),
     ('history/history_widget.cpp', 'bool HistoryWidget::preventsClose(', 'Purple::TryDockRecording('),
     ('history/view/controls/history_view_compose_controls.cpp', 'bool ComposeControls::preventsClose(', 'Purple::TryDockRecording('),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::startRecording()', 'Purple::PreventRecordingStart('),

@@ -76,6 +76,13 @@ public:
 
 	[[nodiscard]] bool purpleDockable() const;
 	bool purpleReleaseToDock();
+	[[nodiscard]] bool purpleOnce() const;
+	[[nodiscard]] int purpleSamples() const;
+	void purpleFloat(bool small);
+	void purpleAdoptCapture(bool once);
+	void purpleTogglePause();
+	void purpleSendRound(Api::SendOptions options);
+	void purpleReleaseCompleted();
 
 	void showDiscardBox(
 		Fn<void()> &&callback,

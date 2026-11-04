@@ -46,13 +46,18 @@ and restores the field. The top strip retains the original account, thread,
 reply, send-as peer and view-once choice. Its Send button sends that recording;
 the open chat's Send button sends its text. Pause/Resume, audio Preview and
 confirmed Discard belong to the strip. Scheduled sends retain the date picker,
-paid sends use the existing payment helper, and unavailable topics are refused
-without falling back to the forum's General topic.
+paid sends use the existing payment helper. An unavailable original target
+changes Send into Send to another chat, using the same-account native recipient
+and topic picker. Cancel leaves the original target intact; selection drops its
+reply and send-as context and rechecks the new recipient before sending.
 
 The capture stays in Media::Capture::Instance; hiding the native bar releases
 its subscriptions and global recording key filter without stopping capture.
-A round, native preview or trimmed resume prefix stays with the native bar and
-keeps the stock discard prompt. Starting another capture offers Discard first.
+A native preview or trimmed resume prefix stays with the native bar and keeps
+the stock discard prompt. Tapping the dock target opens its thread and returns
+the voice to the matching native bar as a paused preview, without restarting the
+microphone or losing view-once. Native sends after that handback still use the
+frozen capture context. Starting another capture offers Discard first.
 Session teardown cancels the capture, and generation checks invalidate old
 callbacks. Work Mode hides the target's name in the strip and opening the target
 uses the normal chat route.
@@ -68,11 +73,18 @@ Drag it to a corner, click it to expand, and use its pause and camera controls.
 The device-local corner is remembered. Preview painting scales independently
 of the camera track and encoder, so shrinking never replaces either.
 
-This is the design's in-chat fallback. Native recording controls retain Send,
-preview, trim and the duration cap. The compose area remains occupied during a
-round; typing during round capture and a round entry in the dock are unfinished.
-Switching chats with a round still uses the native discard prompt. A cross-chat
-round must first pass the design's device spike and acquire an independent owner.
+Shrinking releases the compose field and shows a video row in the recording
+strip. Text uses the normal field and Send button; round Pause/Resume, Preview,
+Send and confirmed Discard use the native recorder with its frozen account,
+thread, reply, send-as and view-once context. Preview expands into native preview
+and trimming. The native duration cap remains in charge. A completed recording
+waiting for a replacement recipient retains its bytes and has a playable video
+preview; it cannot resume capture.
+
+The native bar and recorder remain in their original chat. Before a close check,
+the round expands back to the native controls and uses the stock discard prompt.
+Cross-chat round capture is deliberately unshipped until a separately authorized
+device spike passes and it acquires an independent owner.
 
 `keep_across_chats_p` and `round_float_p` are in the Media recording settings.
 They default on. Preview from the voice dock plays the paused capture and closes before capture
@@ -165,7 +177,7 @@ Everything lives in `tdata/purple/recordings/`: the manifest
 recording belongs to.
 
 Each manifest entry holds the id, the account index, the chat's peer id,
-the forum topic's root id, a reply id (always 0 on Desktop, see below), the
+the forum topic's root id, the original reply id when capture was bound, the
 kind, the start time, the duration, when it entered the bin, the view-once
 flag, whether it is partial, whether it was stopped from the listen
 (preview) state, its file names and its state: `recording`, `sending`,
