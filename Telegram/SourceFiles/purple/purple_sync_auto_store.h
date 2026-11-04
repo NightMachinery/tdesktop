@@ -53,6 +53,8 @@ public:
 private:
 	[[nodiscard]] bool RecordCurrent() const;
 	[[nodiscard]] bool WriteRecord(const SyncAutoRecord &record, bool requireCurrent);
+	[[nodiscard]] bool AdoptSameHeads(const SyncAutoPlan &held, const SyncAutoFacts &facts,
+		const std::optional<SyncAutoInventory> &snapshot);
 	AccountFiles _files;
 	AccountKey _account;
 	QByteArray _token;

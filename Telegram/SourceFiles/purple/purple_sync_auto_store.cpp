@@ -20,6 +20,18 @@ QByteArray StateBytes(const SyncLocalState &state) {
 	return SerializeSyncLocalState(state).canonical;
 }
 
+QByteArray BaseRecordOf(const SyncAccountInventoryResult &inventory, const SyncLocalConfigState &config) {
+	if (!inventory.read) { return {}; }
+	for (const auto &candidate : inventory.read->records) {
+		const auto payload = InspectConfigPayload(ParseSyncEnvelope(candidate.bytes));
+		if (payload.status == ConfigPayloadStatus::Valid && payload.version.key == config.base
+			&& payload.version.lineage == config.baseLineage) {
+			return candidate.bytes;
+		}
+	}
+	return {};
+}
+
 SyncAutoPlan Refused(const SyncAutoRecord &record) {
 	auto result = SyncAutoPlan();
 	result.action = SyncAutoAction::Hold;
@@ -233,21 +245,16 @@ SyncAutoPlan DesktopSyncAutoStore::Transition(
 	}
 	auto plan = PlanSyncAuto({ _record, facts, event, _record.event + 1,
 		now, completedTicket, outcome, inventory });
+	if (AdoptSameHeads(plan, facts, inventory)) {
+		facts.state = *_local.state();
+		plan = PlanSyncAuto({ _record, facts, event, _record.event + 1,
+			now, completedTicket, outcome, inventory });
+	}
 	if (plan.nextState) {
 		auto record = (plan.action == SyncAutoAction::Publish) ? plan.bytes
 			: plan.record.retiring ? QByteArray() : plan.record.record;
 		if (plan.action == SyncAutoAction::AutoApply) {
-			record.clear();
-			if (inventory && inventory->inventory.read) {
-				for (const auto &candidate : inventory->inventory.read->records) {
-					const auto payload = InspectConfigPayload(ParseSyncEnvelope(candidate.bytes));
-					if (payload.status == ConfigPayloadStatus::Valid
-						&& payload.version.key == plan.nextState->configData.base
-						&& payload.version.lineage == plan.nextState->configData.baseLineage) {
-						record = candidate.bytes; break;
-					}
-				}
-			}
+			record = inventory ? BaseRecordOf(inventory->inventory, plan.nextState->configData) : QByteArray();
 		}
 		const auto retained = _local.PrepareRetainedConfig(*plan.nextState, record);
 		if (retained != SyncStoreStatus::Ready) { return Refused(_record); }
@@ -262,6 +269,25 @@ SyncAutoPlan DesktopSyncAutoStore::Transition(
 		}
 	}
 	return WriteRecord(plan.record, true) ? plan : Refused(_record);
+}
+
+// WHY: this file already means what the chat's newest head means, so joining that head asks nothing and writes no
+// settings. Core holds this verdict as NeedsReview, which left a migrated device stopped with nothing to review.
+bool DesktopSyncAutoStore::AdoptSameHeads(const SyncAutoPlan &held, const SyncAutoFacts &facts,
+		const std::optional<SyncAutoInventory> &snapshot) {
+	if (held.action != SyncAutoAction::Hold || held.reason != SyncAutoReason::NeedsReview
+		|| !snapshot || _record.retiring) { return false; }
+	auto inventory = snapshot->inventory;
+	SelectSyncSpaceIfEmpty(inventory, _local.state()->space);
+	const auto review = ReviewSyncConfigInventory(inventory, _local.state(), {}, facts.local);
+	if (review.status != SyncConfigReviewStatus::Ready || !review.bound
+		|| review.plan.verdict != ConfigSyncVerdict::Adopt) { return false; }
+	const auto apply = PlanSyncConfigApply(review, SyncConfigReviewStamp(review), std::nullopt);
+	if (apply.status != SyncConfigApplyPlanStatus::Ready || apply.join) { return false; }
+	const auto completed = CompleteSyncConfigApply(apply, facts.local);
+	if (completed.status != SyncConfigApplyCompletionStatus::Ready || !completed.adopted) { return false; }
+	const auto next = SyncLocalConfigOf(*completed.adopted);
+	return _local.CommitConfigData(next, _token, BaseRecordOf(inventory, next)) && Current();
 }
 
 bool DesktopSyncAutoStore::Authorized(const SyncAutoPlan &plan) const {

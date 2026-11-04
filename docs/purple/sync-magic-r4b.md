@@ -162,6 +162,11 @@ join), P2-3 (7c8b300, 15-minute limit without a state), P2-2 (52277c4, named fir
 (45fcb0e gitlink at core 493d0dbb03 and `headKey`; ab58e54 FirstUseCurrentHead and FirstUseJoinAppliesCurrentHead).
 Static gates all pass (`test_sync_chat_routes.py`: 79 routes, 102 negative mutations).
 
+Local run after this handoff: items 1 to 4 below are done (core aa59ee3191 has items 3 and 4). The compiled cases found
+two product bugs in a moved state. Automatic sync's local commits and its apply review named Saved Messages, so a post
+or update in the magic chat stopped at StateChanged. `PlanSyncAuto` holds the Adopt verdict as NeedsReview, so the
+second migrated device stopped there; Desktop now adopts on its side, and Android needs the same step or a core change.
+
 Remaining:
 
 1. Debug build and `purple/run_host_gates.py` in full; fix whatever the new compiled cases expose. Riskiest:

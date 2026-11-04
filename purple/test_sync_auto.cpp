@@ -953,6 +953,11 @@ void MoveFixture(Fixture &f, PeerToken chat, const QByteArray &settled) {
 	f.facts.savedFingerprint = SettingsFingerprint(settled);
 }
 
+SyncAutoPlan LaterCheck(Fixture &f) {
+	f.now += kSyncAutoCheckSeconds;
+	return Drive(f, f.Event(SyncAutoEvent::Foreground));
+}
+
 void MigrationKeepsSharedSpace() {
 	const auto magic = PeerToken{ PeerTokenKind::Channel, 88 };
 	auto a = Fixture(); auto b = Fixture();
@@ -982,10 +987,52 @@ void MigrationKeepsSharedSpace() {
 	const auto review = ReviewSyncConfigInventory(b.Snapshot().inventory, b.store->local().state(), {},
 		ReadSyncSettingsFile(b.files));
 	CHECK(review.status == SyncConfigReviewStatus::Ready);
-	CHECK(review.plan.verdict == ConfigSyncVerdict::UpToDate || review.plan.verdict == ConfigSyncVerdict::Adopt);
+	CHECK(review.plan.verdict == ConfigSyncVerdict::UpToDate);
 	CHECK(b.store->local().state()->space == space && a.store->local().state()->space == space);
 	std::printf("MIGRATION_SHARED one_space=%d verdict=%d\n",
 		int(b.store->local().state()->space == a.store->local().state()->space), int(review.plan.verdict));
+}
+
+// Both installs published before the move, so each has a confirmed head and must publish once in the new chat.
+void MigrationBothPublished() {
+	const auto magic = PeerToken{ PeerTokenKind::Channel, 89 };
+	for (const auto race : { false, true }) {
+		auto a = Fixture(); auto b = Fixture();
+		MakeSecondInstall(b);
+		a.Local(T1);
+		CHECK(Drive(a, a.Event(SyncAutoEvent::Enable)).action == SyncAutoAction::NoOp);
+		b.cloud = a.cloud; b.nextId = a.nextId;
+		b.Local(T1);
+		CHECK(Drive(b, b.Event(SyncAutoEvent::Enable)).action == SyncAutoAction::NoOp);
+		b.Local(T2);
+		CHECK(Drive(b, b.Event(SyncAutoEvent::LocalSaved)).action == SyncAutoAction::NoOp);
+		a.cloud = b.cloud; a.nextId = b.nextId;
+		CHECK(LaterCheck(a).action == SyncAutoAction::NoOp);
+		CHECK(ReadSettingsFileInput(a.files.settings).bytes == T2);
+		CHECK(a.store->local().state()->config.confirmedSeq && b.store->local().state()->config.confirmedSeq);
+		const auto space = a.store->local().state()->space;
+		MoveFixture(a, magic, T2);
+		MoveFixture(b, magic, T2);
+		a.cloud.clear(); b.cloud.clear();
+		b.nextId = a.nextId + 50;
+		CHECK(Drive(a, a.Event(SyncAutoEvent::Foreground)).action == SyncAutoAction::NoOp);
+		if (!race) { b.cloud = a.cloud; }
+		CHECK(Drive(b, b.Event(SyncAutoEvent::Foreground)).action == SyncAutoAction::NoOp);
+		auto cloud = a.cloud;
+		cloud.insert(b.cloud.begin(), b.cloud.end());
+		CHECK(cloud.size() == 2);
+		for (auto round = 0; round != 2; ++round) {
+			for (const auto f : { &a, &b }) {
+				f->cloud = cloud;
+				const auto settled = LaterCheck(*f);
+				CHECK(settled.action == SyncAutoAction::NoOp && settled.reason == SyncAutoReason::None);
+				CHECK(f->cloud == cloud);
+				CHECK(f->store->local().state()->space == space && !f->store->local().state()->config.pendingSeq);
+				CHECK(ReadSettingsFileInput(f->files.settings).bytes == T2);
+			}
+		}
+		std::printf("MIGRATION_BOTH_PUBLISHED race=%d records=%d\n", int(race), int(cloud.size()));
+	}
 }
 
 // Every local commit after a post or a retirement names the chat the moved state lives in.
@@ -1133,7 +1180,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace(); MovedChatCommits();
+	PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

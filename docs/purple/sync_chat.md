@@ -221,12 +221,22 @@ for that code: `busy`, `unbound`, `chat_unavailable`, `incomplete`,
 cannot plan from the inventory, the review's own reason code and refusal text
 are used.
 
+A device with a state in the chat's space whose settings match the chat's newest
+head (the Adopt verdict, which is how the second of two migrated devices finds
+the first one's record) joins that head with no question and no file write.
+`PlanSyncAuto` holds that verdict as NeedsReview, so `DesktopSyncAutoStore`
+commits the adoption and plans again; a Check on the Sync screen does the same
+in any chat. Core does not know this, so another client needs its own step.
+
 The host cases are FirstUseActions, FirstUseD1, FirstUseMigration and
 FirstUseRace in `purple/test_sync_config_publish.cpp` (gate setup-publish), and
-FirstUseJoinAppliesHead, AutoBeforeState and MigrationKeepsSharedSpace (two
+FirstUseJoinAppliesHead, AutoBeforeState, MigrationKeepsSharedSpace (two
 installs that adopted one head in an old chat both move, one republishes, the
-other's next run settles with Adopt or UpToDate and no conflict) in
-`purple/test_sync_auto.cpp`. FirstUseMarkKeepsAnswer covers the mark.
+other's next run adopts it and settles UpToDate), MigrationBothPublished (both
+also published before the move, in turn and racing: one record each, then no
+more) and MovedChatCommits (a post's and a retirement's local commits in the
+moved chat) in `purple/test_sync_auto.cpp`. FirstUseMarkKeepsAnswer covers the
+mark.
 The routes gate (`purple/test_sync_chat_routes.py`) pins the triggers, the
 journal guard, the carry retirement, the actions and the Sync screen's choice.
 

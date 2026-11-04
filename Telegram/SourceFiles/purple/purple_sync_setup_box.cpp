@@ -347,7 +347,7 @@ void SetStatus(SetupBoxState &state, const QString &text) {
 		const SyncAccountInventoryResult &inventory,
 		QString &failure, PeerToken chat = {}) {
 	auto review = ReviewSyncConfig(account, session, inventory, chat);
-	if (chat != PeerToken{} || review.status != SyncConfigReviewStatus::Ready
+	if (review.status != SyncConfigReviewStatus::Ready
 		|| !review.bound
 		|| review.plan.verdict != ConfigSyncVerdict::Adopt) {
 		return review;
@@ -362,7 +362,7 @@ void SetStatus(SetupBoxState &state, const QString &text) {
 		failure = SyncConfigApplyFailureText(adopted);
 		return review;
 	}
-	return ReviewSyncConfig(account, session, inventory);
+	return ReviewSyncConfig(account, session, inventory, chat);
 }
 
 // An unbound check of a chat other than Saved Messages that already holds another device's records.
