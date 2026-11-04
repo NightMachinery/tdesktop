@@ -187,6 +187,10 @@ fails when a merge drops one of them.
 
 ## Tests
 
+The restart and size cases link QtCore because the Debug recipe force-includes
+the app precompiled header, which references the Qt version-tag symbol even
+when the compiled media rules use no Qt types.
+
 - `purple/tests/media_restart_cases.cpp` (gate `cases-media-restart`): the
   restart decision for every reason to decline, seek against replay, and the
   handler-context resolution.

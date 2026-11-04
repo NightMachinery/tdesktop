@@ -101,12 +101,12 @@ CASES = {
     'media-restart': {
         'program': 'media_restart_cases.cpp',
         'units': ['purple/purple_media_rules.cpp'],
-        'frameworks': [],
+        'frameworks': ['QtCore'],
     },
     'media-size': {
         'program': 'media_size_cases.cpp',
         'units': ['purple/purple_media_rules.cpp'],
-        'frameworks': [],
+        'frameworks': ['QtCore'],
     },
     'voice-queue': {
         # The confined walk and the manual-play tracker over the real
