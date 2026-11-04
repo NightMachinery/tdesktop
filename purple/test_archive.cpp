@@ -1493,6 +1493,47 @@ void CaptureBoundary() {
 		}
 	}
 	CHECK(store.Versions(Key()).versions.size() == 2);
+	CHECK(!store.Versions(Key()).hasGap);
+	const auto reloaded = DesktopArchiveSnapshot({0, 123},
+		WireMessage(u"unanchored reload"_q, 999, "refreshed-file-reference", true),
+		ArchiveOrigin::Baseline, u"history-reload"_q, 103);
+	CHECK(reloaded);
+	const auto captured = store.ReadSlice(Key());
+	CHECK(captured);
+	if (!reloaded || !captured) { return; }
+	auto unanchored = *reloaded;
+	unanchored.generation = ArchiveGenerationFor(captured->state, Key().chat);
+	const auto message = FindArchiveMessage(captured->state, Key());
+	CHECK(message && !message->versions.empty());
+	if (!message || message->versions.empty()) { return; }
+	unanchored.order = message->order + 1;
+	CHECK(!SameArchiveContent(message->versions.back().content, *unanchored.content));
+	CHECK(unanchored.targetVersion.isEmpty() && unanchored.targetRevision.isEmpty());
+	const auto refused = PlanArchiveEvent(captured->state, unanchored);
+	CHECK(refused.status == ArchivePlanStatus::Stale);
+	CHECK(!unanchored.observation.context.contains(u"desktopLifecycle"_q)
+		&& !unanchored.observation.context.value(u"desktopSendMetadata"_q).toBool()
+		&& !unanchored.observation.context.value(u"desktopLivePreimage"_q).toBool());
+	CHECK(journal.Append(*reloaded) && journal.Drain(store));
+	const auto page = store.Versions(Key());
+	CHECK(page.versions.size() == 2 && page.hasGap);
+	CHECK(std::count_if(page.versions.begin(), page.versions.end(), [](const auto &entry) {
+		return entry.version.content.text == u"A"_q;
+	}) == 1);
+	CHECK(std::count_if(page.versions.begin(), page.versions.end(), [](const auto &entry) {
+		return entry.version.content.text == u"B"_q;
+	}) == 1);
+	const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(16));
+	CHECK(gaps.ok && gaps.rows.size() == 2);
+	auto known = *edited;
+	known.id = u"history-reload-known"_q;
+	known.origin = ArchiveOrigin::Baseline;
+	CHECK(journal.Append(known) && journal.Drain(store));
+	CHECK(store.Versions(Key()).versions.size() == 2);
+	const auto after = store.database().Read(ArchiveSqlReadCaptureGaps(16));
+	CHECK(after.ok && after.rows.size() == gaps.rows.size());
+	std::printf("ARCHIVE_HISTORY_RELOAD stale=%d versions=%zu gaps=%zu\n",
+		int(refused.status == ArchivePlanStatus::Stale), page.versions.size(), gaps.rows.size());
 	CHECK(store.Remove());
 }
 
