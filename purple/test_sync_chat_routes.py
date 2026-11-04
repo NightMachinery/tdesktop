@@ -225,6 +225,13 @@ def inspect(values):
         and 'self->FirstUseJoined(inventory, review);' in run
         and all(marker not in run for marker in ['ConfirmAction(', 'showBox(', 'Ui::show(', 'uiShow(']))
     box = values['purple_sync_setup_box.cpp']
+    joined = auto.split('void AutoSession::FirstUseJoined(', 1)[-1].split('void AutoSession::FirstUseFail(', 1)[0]
+    require('first-use-local-choice', 'publish && (review.headKey || review.input.groupEmpty)' in run
+        and 'const auto localChoice = review.action == SyncFirstUseAction::Publish;' in joined
+        and '? ApplySyncConfigChoice(' in joined and 'std::nullopt, &*current)' in joined
+        and 'next.request.expectedFingerprint = applied.fingerprint;' in joined
+        and 'next.request.expectedParents = applied.expectedParents;' in joined
+        and 'FirstUsePublish(inventory, std::move(next), true);' in joined)
     first = box.split('void RunFirstUse(', 1)[-1].split('void OnInventory(', 1)[0]
     require('first-use-box', 'if (followup == CheckFollowup::None && FirstUse(box, state, result)) {' in box
         and box.index('FirstUse(box, state, result)') < box.index('auto recovery = InspectSyncAccountRecovery(*session, &result);')
@@ -323,6 +330,7 @@ negative = [
     ('purple_sync_auto_service.cpp', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFail(', 'if (!recovery) {\n\t\tFirstUseFail(', 'first-use-journal-guard'),
     ('purple_sync_auto_service.cpp', 'fresh && !fresh->journalPresent', 'fresh', 'first-use-journal-guard'),
     ('purple_sync_auto_service.cpp', '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)', '(action == SyncFirstUseAction::JoinSilently)', 'first-use-actions'),
+    ('purple_sync_auto_service.cpp', 'next.request.expectedParents = applied.expectedParents;', 'next.request.expectedParents = std::vector<QString>();', 'first-use-local-choice'),
     ('purple_sync_auto_service.cpp', 'self->FirstUseJoined(inventory, review);', 'self->FirstUseFinish(SyncFirstUseOutcome::Joined);', 'first-use-actions'),
     ('purple_sync_setup_box.cpp', 'if (followup == CheckFollowup::None && FirstUse(box, state, result)) {', 'if (false) {', 'first-use-box'),
     ('purple_sync_setup_box.cpp', 'RunFirstUse(box, state, SyncFirstUseChoice::Synced);', 'RunFirstUse(box, state, SyncFirstUseChoice::None);', 'first-use-box'),

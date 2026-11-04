@@ -1116,6 +1116,47 @@ void MovedChatCommits() {
 	}
 }
 
+void FirstUseLocalChoiceAppliesMatchingHead() {
+	auto f = Fixture(); f.Open();
+	const auto local = QByteArray("version = 2\n[last_seen]\ntrade_p = false\n");
+	const auto other = QByteArray("version = 2\n[last_seen]\nreasons_p = false\n");
+	f.Local(local);
+	const auto state = *f.store->local().state();
+	for (const auto writer : { 'b', 'c' }) {
+		const auto install = *FormatSyncInstallId(QByteArray(16, writer));
+		const auto record = BuildConfigRecord({ writer == 'b' ? local : other, {}, std::nullopt, state.space,
+			install, u"desktop:"_q + install, u"macOS"_q, u"test"_q, 1, uint64_t(f.now) });
+		CHECK(record); f.cloud[f.nextId++] = record.canonical;
+	}
+	f.store.reset();
+	Config = f.config.get(); Account = f.key; Token = f.token;
+	auto session = Main::Session(); auto account = Main::Account();
+	const auto inventory = CloudInventory(f);
+	auto input = SyncFirstUseInputOf(inventory, ReadSyncSettingsFile(f.files));
+	CHECK(input && !input->headKey && input->expectedParents.size() == 2);
+	if (!input) { return; }
+	CHECK(PlanSyncFirstUse(*input) == SyncFirstUseAction::Ask);
+	input->choice = SyncFirstUseChoice::ThisDevice;
+	CHECK(PlanSyncFirstUse(*input) == SyncFirstUseAction::Publish);
+	const auto review = ReviewSyncConfig(account, session, inventory, PeerToken{});
+	const auto current = f.config->reviewTransfer(f.key, ReadSyncSettingsFile(f.files).text);
+	CHECK(current);
+	if (!current) { return; }
+	const auto applied = ApplySyncConfigChoice(account, session, inventory, review, std::nullopt, &*current);
+	CHECK(applied.status == SyncConfigApplyStatus::Applied && applied.adopted && applied.publishNeeded && !applied.wroteFile);
+	CHECK(ReadSettingsFileInput(f.files.settings).bytes == local);
+	CHECK(applied.expectedParents.size() == 2);
+	auto store = SyncLocalStore(f.files.syncDirectory);
+	CHECK(store.Open(true).status == SyncStoreStatus::Ready);
+	if (!store.state()) { return; }
+	const auto own = ReconcileOwnConfigInventory(*store.state(), inventory, uint64_t(f.key.userId), {});
+	const auto gate = PlanSyncConfigPublishGate(*store.state(), inventory, own, applied.fingerprint,
+		SyncConfigPublishRequest{ .expectedFingerprint = applied.fingerprint, .expectedParents = applied.expectedParents });
+	CHECK(gate.status == SyncConfigPublishGateStatus::Proceed);
+	std::printf("FIRST_USE_SPLIT_EXACT adopted=%d publish=%d parents=%d\n",
+		int(applied.adopted), int(applied.publishNeeded), int(applied.expectedParents.size()));
+}
+
 void FirstUseJoinAppliesHead() {
 	for (const auto local : { T0, QByteArray("version = 2\n") }) {
 		for (const auto known : { true, false }) {
@@ -1229,7 +1270,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
+	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);
