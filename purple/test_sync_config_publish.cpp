@@ -1073,12 +1073,12 @@ void FirstUseMarkKeepsAnswer() {
 }
 
 ConfigRecordBuildResult BuildInSpace(const QString &space, char writer, const QByteArray &text,
-		std::vector<ConfigVersion> parents, uint64_t at) {
+		std::vector<ConfigVersion> parents, uint64_t at, uint64_t seq = 1) {
 	auto input = ConfigRecordBuildInput();
 	input.text = text; input.parents = std::move(parents); input.space = space;
 	input.install = FormatSyncInstallId(QByteArray(16, writer)).value_or(QString());
 	input.device = u"android:"_q + input.install; input.platform = u"Android"_q;
-	input.app = u"Purple Telegram"_q; input.seq = 1; input.at = at;
+	input.app = u"Purple Telegram"_q; input.seq = seq; input.at = at;
 	auto built = BuildConfigRecord(input); CHECK(built);
 	return built;
 }
@@ -1111,7 +1111,8 @@ void FirstUseCurrentHead() {
 		const auto review = ReviewSyncFirstUse(files.files, inventory, row.choice);
 		CHECK(review.need == SyncFirstUseNeed::NoState && review.action == row.action);
 		CHECK(review.headKey == r2.version.key && review.input.headKey == r2.version.key);
-		CHECK(review.request.expectedParents == std::vector<QString>{ r2.version.key });
+		// Core names no parents for a choice that would not publish, and a same-bytes join never publishes.
+		CHECK(review.request.expectedParents == (review.sameBytes ? std::vector<QString>() : std::vector<QString>{ r2.version.key }));
 		std::printf("FIRST USE current head %s action=%d head_r2=%d\n", row.name,
 			review.action ? int(*review.action) : -1, int(review.headKey == r2.version.key));
 		if (!review.action || *review.action == SyncFirstUseAction::Ask) {
@@ -1160,7 +1161,7 @@ void FirstUseSplitHeads() {
 	mark.heads = answered.heads;
 	CHECK(WriteSyncFirstUseMark(files.files, mark));
 	CHECK(ReviewSyncFirstUse(files.files, split).action == SyncFirstUseAction::Publish);
-	const auto r3 = BuildInSpace(space, 'D', kCustom, { r1.version, r2.version }, 1700000200);
+	const auto r3 = BuildInSpace(space, 'D', kCustom, { r1.version, r2.version }, 1700000200, 2);
 	const auto resolved = InventoryAt({ { 20, r1.canonical }, { 21, r2.canonical }, { 22, r3.canonical } });
 	const auto stale = ReviewSyncFirstUse(files.files, resolved);
 	CHECK(stale.action == SyncFirstUseAction::Ask && stale.input.choice == SyncFirstUseChoice::None);
