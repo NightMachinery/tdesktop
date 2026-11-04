@@ -1189,6 +1189,7 @@ surface, not a new measurement of the older merge-base figures above.
   exports visible item geometry and existing selection, touch, report,
   overlay, resize, reveal and removal readiness. Purple exclusions invalidate
   only the optional result; stock refresh and menus continue.
+- The double-click restart hook is listed under "Media playback".
 
 **`Telegram/SourceFiles/history/history_inner_widget.h`**:
 - Forward declarations and private optional-output/read-only signatures.
@@ -1212,6 +1213,7 @@ surface, not a new measurement of the older merge-base figures above.
   id independently of resolved views and links. The observer adds existing
   refresh/reveal/resize readiness to native
   selection, overlay, touch and removal state.
+- The double-click restart hook is listed under "Media playback".
 
 **`Telegram/SourceFiles/history/view/history_view_list_widget.h`**:
 - Forward declarations and private optional-output/read-only signatures.
@@ -1476,6 +1478,175 @@ adds one document-action hook so Markdown files without captions can expose the
 same source-aware copy action. Ordinary action duplication is suppressed inside
 Purple code. No resolver, parser or context-menu implementation moves.
 
+## Media playback (round PiP, restart, voice queue, round size)
+
+The feature doc is [media_playback.md](media_playback.md). Every file below
+takes one Purple include, `purple/hooks/media_playback.h`, right after its own
+header, and `purple/test_media_hooks.py` pins each call. In the two message
+list files the include sits beside their older direct Purple includes, since
+no facade covers those yet.
+
+**`Telegram/SourceFiles/history/history_inner_widget.cpp`**: +7 -0.
+- `HistoryInner::mouseDoubleClickEvent`: one early return through
+  `Purple::RestartOnDoubleClick` before `mouseActionStart` (double-click
+  restarts the playing voice or round message).
+
+**`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**: +7 -0.
+- `ListWidget::mouseDoubleClickEvent`: the same early return.
+
+**`Telegram/SourceFiles/history/view/media/history_view_gif.cpp`**: +14 -0.
+- The facade include, after the file's own header.
+- `Gif::countThumbSize`: one early return through
+  `Purple::VideoMessageThumbSize` (the round size).
+- `Gif::bubbleWidthLimit`: one early return through
+  `Purple::VideoMessageBubbleWidthLimit`, so a round wider than
+  `st::msgMaxWidth` is not clipped.
+- The older content-origin hunks of this file are listed under "Import
+  content provenance and menu routes".
+
+**`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +9 -0.
+First Purple edit in this file.
+- The facade include, after the file's own header.
+- `Instance::moveInPlaylist`: one guarded early return through
+  `Purple::ConfinedVoiceNext` right after `useIndex` (the private-chat voice
+  queue). It returns nullopt, and upstream runs unchanged, for songs, manual
+  next or previous and any queue that is not confined.
+
+**`Telegram/SourceFiles/media/player/media_player_float.cpp`**: +6 -0. First
+Purple edit in this file.
+- The facade include, after the file's own header.
+- `Float::Float`: one inserted line after the stock size,
+  `size = Purple::FloatPlayerSize(parent, document, size);` (the float keeps
+  the in-chat size), and `Purple::DecorateFloat(this, _doubleClickedCallback);`
+  as its last statement (hover controls). The constructor passes its own
+  double-click callback because the "open the message" button reuses it.
+- `Float::mouseDoubleClickEvent`: one early return through
+  `Purple::RestartFloatOnDoubleClick` (double-click restarts the round).
+
+## Media recording (dock, background, PiP, seek, crash safety)
+
+The feature doc is [media_recording.md](media_recording.md); the design is
+[media-recording-design.md](media-recording-design.md). So far F9 (seek
+back and forward) and F10 (crash-safe recordings) are built. The hooked `.cpp` files take one Purple include,
+`purple/hooks/media_recording.h`, right after their own header, and
+`purple/test_media_hooks.py` pins each call and each shortcut line. The three
+F10 files take `purple/hooks/media_recording_capture.h` instead, which
+declares only plain and forward-declared types, so the round recorder in
+`td_ui` pulls in no app headers.
+
+**`Telegram/SourceFiles/media/player/media_player_widget.cpp`**: +4 -0. First
+Purple edit in this file.
+- The facade include, after the file's own header.
+- `Widget::Widget`: `Purple::DecoratePlayerSeek(rightControls(), ...)` just
+  before `setType`, which creates the two seek buttons in the right-hand
+  controls; the lambda hands Purple the bar's current track type.
+- `Widget::updateControlsGeometry`: `right += Purple::PlacePlayerSeek(...)`
+  after the volume toggle, placing the buttons and returning their width.
+- `Widget::getTimeRight`: `result += Purple::PlayerSeekWidth(this);`, the
+  same width, so the time label and the controls' width include them.
+
+**`Telegram/SourceFiles/media/system_media_controls_manager.cpp`**: +4 -0.
+First Purple edit in this file.
+- The facade include, after the file's own header.
+- The `commandRequests` handler in the constructor: one early return through
+  `Purple::HandleSystemMediaCommand`, only when no video delegate is set. It
+  takes skip backward and forward for the active audio track and returns
+  false, so upstream runs unchanged, for every other command. This does
+  change upstream for audio skips: the step instead of upstream's 15 s, a
+  paused track stays paused, and forward stops one second before the end.
+  A track Purple declines (not current, unknown length) still gets
+  upstream's skip.
+
+**`Telegram/SourceFiles/core/shortcuts.h`**: +2 -0. First Purple edit in this
+file.
+- `Command::MediaSeekBackward` and `Command::MediaSeekForward`, after
+  `MediaNext`. Commands are stored by name, never by number.
+
+**`Telegram/SourceFiles/core/shortcuts.cpp`**: +9 -0. First Purple edit in
+this file.
+- The facade include, after the file's own header.
+- `AutoRepeatCommands`: both seek commands, so holding a key repeats it.
+- `MediaCommands`: both seek commands, so their keys are switched on only
+  while the player is shown (`ToggleMediaShortcuts`) and never taken from
+  text fields, the message list or the media viewer with nothing loaded.
+- `CommandByName`: `media_seek_backward` and `media_seek_forward`, which makes
+  them bindable in the custom shortcuts file.
+- `Manager::fillDefaults`: `set(Purple::SeekShortcutKeys(-1 or 1), ...)`.
+  Purple picks `alt+shift+left/right` on Windows and Linux and
+  `ctrl+alt+left/right` (Command+Option) on macOS, where Option+Shift+Arrow
+  is word selection; upstream binds none of these. The handler is Purple's
+  own `Shortcuts::Requests()` subscription, so no handler hook is needed.
+
+**`Telegram/SourceFiles/settings/sections/settings_shortcuts.cpp`**: +2 -0.
+First Purple edit in this file.
+- Two rows after "Next track" in the shortcuts list, labelled by
+  `lng_purple_shortcuts_seek_*`, so the commands can be rebound in the UI.
+
+The floating round's seek buttons ride the existing `Purple::DecorateFloat`
+call listed under "Media playback" and add no line there.
+
+**`Telegram/SourceFiles/media/audio/media_audio_capture.cpp`**: +2 -0. First
+Purple edit in this file.
+- The facade include, after the file's own header.
+- `Instance::Inner::Private::WriteData`: `Purple::MirrorRecordingWrite(l,
+  l->dataPos, buf, buf_size);` after the size check and before the copy, so
+  Purple mirrors every block FFmpeg writes at its offset into an encrypted
+  file (F10 voice).
+
+**`Telegram/SourceFiles/ui/controls/round_video_recorder.cpp`**: +3 -0. First
+Purple edit in this file (it is in `td_ui`, which already calls Purple from
+`attach_prepare.cpp`).
+- The facade include, after the file's own header.
+- `RoundVideoRecorder::Private::initEncoding`: `Purple::OnRoundEncodingStarted(this,
+  _format.get());` as its last line, after `avformat_write_header`; a failed
+  header has already reset `_format`, so Purple gets null and does nothing.
+- `RoundVideoRecorder::Private::writeFrame`: `Purple::OnRoundPacket(this, pkt);`
+  just before `av_interleaved_write_frame`. Purple clones the packet for its
+  own recovery copy; upstream's packet and sent bytes are unchanged.
+
+**`Telegram/SourceFiles/history/view/controls/history_view_voice_record_bar.cpp`**:
++2 -0. First Purple edit in this file.
+- The facade include, after the file's own header.
+- `VoiceRecordBar::stopRecording`: `Purple::NoteRecordingStop(...)` as its
+  first line, with the stop type's ordinal and `ttlBeforeHide`. Purple
+  marks the open recordings on Listen and records Send or Cancel; the
+  order of `StopType` is pinned by `purple/test_media_hooks.py`.
+
+### Recording continuity (F6/F8)
+
+`history/history_widget.cpp` and
+`history/view/controls/history_view_compose_controls.cpp` bind their original
+send context and focus callback to the Purple dock. Each `preventsClose` adds
+one early adoption call before the stock discard prompt.
+
+`history/view/controls/history_view_voice_record_bar.h` exposes native UI seams
+for adopting a paused capture, hiding/restoring a round panel, toggling its pause,
+finishing into preview and releasing completed UI state. Their implementations
+stay beside the private `RecordLock`, `TTLButton` and `ListenWrap` types because
+those types are defined only in that source. They invoke existing native pause,
+listen and send paths; the dock's decisions, targets and transfer state remain in
+Purple files. Completed payloads are reserved in Purple before deferred native
+cleanup, and the old bar's compose and listen activity become false once that
+ownership transfers. Its destructor cannot cancel the new owner.
+
+The source routes compose activity, native hide cleanup, lock reset, new-record
+preparation and completed payloads through `purple/hooks/recording.h`. The hidden
+round retains native recording and lock state while its compose activity is
+false. The destructor still cancels that native owner. Hidden key filters cannot
+consume typed text. Both history and topic compose implementations use the same
+compose activity hook. Their send contexts are frozen before capture starts and
+remain frozen after native handback.
+
+`mainwidget.cpp` attaches the recording strip, adds its height to the existing
+bar stack, and places it in both column layouts. Decisions and widget creation
+live in `purple_recording_dock.cpp`.
+
+`ui/controls/round_video_recorder.cpp` adds one geometry guard and two painting
+calls into `purple/hooks/round_recording.h`. Geometry alone cannot shrink the
+preview because its painter uses the encoder-independent logical side. Purple
+sets the painter window and supplies the logical shadow rectangle, preserving
+the camera and encoder. This is the only reason for the two painting hooks.
+
 ## Upstream v7.3.3 merge
 
 @Opus5.5/high [2026-10-31 Sat]
@@ -1522,3 +1693,8 @@ the TimeId `destructAt` in `purple_user_control.cpp`, and `MediaPhoto::Args`.
 The watch count of `TopPeers::list()` callers rose to 4 with upstream's new
 `data/components/recent_money_recipients.cpp`, which reads the list Purple
 already filters at its source.
+
+The round bubble lock callback calls `ToggleRoundRecordingPause`, sharing the
+strip adapter that temporarily restores native control ownership. The native
+voice bar exposes `purplePauseChanges` from its pause variable so the strip
+observes resume after both native recording and pause state have settled.

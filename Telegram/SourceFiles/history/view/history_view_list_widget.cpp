@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
+#include "purple/hooks/media_playback.h"
 
 #include "purple/purple_copy.h"
 #include "purple/purple_sync.h"
@@ -3955,6 +3956,12 @@ auto ListWidget::scrollKeyEvents() const
 
 void ListWidget::mouseDoubleClickEvent(QMouseEvent *e) {
 	registerReadMetricsActivity();
+	if (Purple::RestartOnDoubleClick(
+			ClickHandler::getActive(),
+			e->button(),
+			!_selected.empty())) {
+		return;
+	}
 	mouseActionStart(e->globalPos(), e->button());
 	trySwitchToWordSelection();
 	if (!ClickHandler::getActive()

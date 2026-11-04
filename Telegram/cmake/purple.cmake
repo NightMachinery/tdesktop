@@ -168,6 +168,36 @@ PRIVATE
     purple/purple_last_seen_ui.h
     purple/purple_list_menu.cpp
     purple/purple_list_menu.h
+    purple/purple_media_playback.cpp
+    purple/purple_media_playback.h
+    purple/purple_media_rules.cpp
+    purple/purple_media_rules.h
+    purple/purple_media_seek.cpp
+    purple/purple_media_seek.h
+    purple/purple_recording_bin_box.cpp
+    purple/purple_recording_bin_box.h
+    purple/purple_recording_crypt.cpp
+    purple/purple_recording_crypt.h
+    purple/purple_recording_mirror.cpp
+    purple/purple_recording_mirror.h
+    purple/purple_recording_recovery.cpp
+    purple/purple_recording_recovery.h
+    purple/purple_recording_registry.cpp
+    purple/purple_recording_registry.h
+    purple/purple_recording_round.cpp
+    purple/purple_recording_round.h
+    purple/purple_recording_round_media.cpp
+    purple/purple_recording_round_media.h
+    purple/purple_round_recording.cpp
+    purple/purple_round_recording_geometry.h
+    purple/hooks/round_recording.h
+    purple/purple_recording_dock.cpp
+    purple/purple_recording_dock_model.h
+    purple/hooks/recording.h
+    purple/purple_recording_settings.cpp
+    purple/purple_recording_settings.h
+    purple/purple_recording_store.cpp
+    purple/purple_recording_store.h
     purple/purple_mute.cpp
     purple/purple_mute.h
     purple/purple_notification_privacy.cpp
@@ -175,12 +205,19 @@ PRIVATE
     purple/hooks/dialogs_inner_widget.h
     purple/hooks/chat_filters.h
     purple/hooks/history.h
+    purple/hooks/media_playback.h
+    purple/hooks/media_recording.h
+    purple/hooks/media_recording_capture.h
     purple/hooks/mute.h
     purple/hooks/work_view.h
     purple/purple_peek.cpp
     purple/purple_peek.h
     purple/purple_peek_controls.cpp
     purple/purple_peek_controls.h
+    purple/purple_voice_queue.cpp
+    purple/purple_voice_queue.h
+    purple/purple_voice_queue_rules.cpp
+    purple/purple_voice_queue_rules.h
     purple/purple_wait_gate.cpp
     purple/purple_wait_gate.h
     purple/purple_wait_key_filter.cpp
@@ -197,6 +234,8 @@ PRIVATE
     purple/purple_schedule.h
     purple/purple_schedule_box.cpp
     purple/purple_schedule_box.h
+    purple/purple_seek_rules.cpp
+    purple/purple_seek_rules.h
     purple/purple_session_settings.cpp
     purple/purple_session_settings.h
     purple/purple_suggestions.cpp
@@ -354,6 +393,18 @@ PRIVATE
     purple/purple_engine.h
     purple/purple_passcode.cpp
     purple/purple_passcode.h
+    purple/purple_playback.cpp
+    purple/purple_playback.h
+    purple/purple_ogg_repair.cpp
+    purple/purple_ogg_repair.h
+    purple/purple_recording.cpp
+    purple/purple_recording.h
+    purple/purple_recording_file.cpp
+    purple/purple_recording_file.h
+    purple/purple_mp4_repair.cpp
+    purple/purple_mp4_repair.h
+    purple/purple_round_journal.cpp
+    purple/purple_round_journal.h
     purple/purple_screentime.cpp
     purple/purple_screentime.h
     purple/purple_settings.cpp

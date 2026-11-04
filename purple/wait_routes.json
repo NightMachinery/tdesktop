@@ -39,6 +39,9 @@
     "StartPeek": 3,
     "UpdateState": 2
   },
+  "Telegram/SourceFiles/purple/purple_media_seek.cpp": {
+    "SetTableString": 1
+  },
   "Telegram/SourceFiles/purple/purple_peek.cpp": {
     "UpdateState": 1
   },
@@ -58,6 +61,10 @@
     "ActivatePeekFor": 1,
     "DeactivatePeek": 1
   },
+  "Telegram/SourceFiles/purple/purple_recording_settings.cpp": {
+    "SetTableBool": 3,
+    "SetTableString": 1
+  },
   "Telegram/SourceFiles/purple/purple_schedule.cpp": {
     "UpdateState": 2
   },
@@ -66,6 +73,9 @@
     "SetTableString": 2
   },
   "Telegram/SourceFiles/purple/purple_screentime_box.cpp": {
+    "SetTableBool": 1
+  },
+  "Telegram/SourceFiles/purple/purple_voice_queue.cpp": {
     "SetTableBool": 1
   },
   "Telegram/SourceFiles/purple/purple_wait_gate.cpp": {

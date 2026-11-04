@@ -634,6 +634,33 @@ default), `"any_open_chat"` or `"any_open_chat_except_in_folder"` - the last
 skipping chats that are already reachable on an extra view or in a shown folder.
 It is per-install rather than per-preset, and lives in memory only.
 
+`[playback] private_chat_queue_p` keeps an automatic voice queue to the other
+person. True unless you say otherwise. In a one-to-one chat, when you start
+playing their voice or round message by hand, "play next" plays only their
+voice and round messages and skips yours. It is read when a manual play
+starts, so a change applies from the next one. Settings > Advanced > Purple >
+Media playback writes it. See [media_playback.md](media_playback.md).
+
+`[playback] seek_step` is how far the seek back and forward controls jump:
+`"5s"`, `"10s"` (the default), `"15s"` or `"30s"`. Any other value warns and
+keeps 10 seconds. It drives the player bar's and the floating round's seek
+buttons, the seek shortcuts and the system media controls' skip commands.
+Settings > Advanced > Purple > Media playback > Seek step writes it. See
+[media_recording.md](media_recording.md).
+
+`[recording] bin_keep` is how long the Recording bin keeps an item, counted
+from when it entered the bin: `"12h"`, `"24h"`, `"48h"` (the default), `"7d"`
+or `"off"` (never clear); any other duration of at least an hour is read too.
+`[recording] keep_discarded_p` moves a discarded recording to the bin as a
+"Discarded" item instead of deleting it; true unless you say otherwise.
+`[recording] round_journal` is how often a video message's recovery copy
+is cut into a fragment: `"1s"` (the default), `"2s"`, `"5s"` or `"off"`. Off
+keeps a plain copy and its codec header, so a crash is repaired by scanning
+rather than read back exactly. Any other value warns and keeps 1 s.
+Settings > Advanced > Purple > Media recording writes all three. The other
+`[recording]` keys are read by purple-core but not used by Desktop yet. See
+[media_recording.md](media_recording.md).
+
 `[suggestions] hide_invisible_p` decides whether the strips of chats the app
 offers you unasked leave out what the running preset hides. True unless you say
 otherwise, and asked only while a preset is filtering.

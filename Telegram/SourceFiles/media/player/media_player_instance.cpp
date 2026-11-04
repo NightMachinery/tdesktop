@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_instance.h"
+#include "purple/hooks/media_playback.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -703,6 +704,14 @@ bool Instance::moveInPlaylist(
 		? newIndex
 		: ((newIndex + int(data->playlistSlice->size()))
 			% int(data->playlistSlice->size()));
+	if (const auto next = Purple::ConfinedVoiceNext(
+			data->type,
+			autonext,
+			data->history,
+			useIndex,
+			[&](int index) { return itemByIndex(data, index); })) {
+		return *next && jumpByItem(*next);
+	}
 	if (const auto item = itemByIndex(data, useIndex)) {
 		return jumpByItem(item);
 	} else if (repeatAll

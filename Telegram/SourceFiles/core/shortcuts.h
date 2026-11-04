@@ -28,6 +28,8 @@ enum class Command {
 	MediaStop,
 	MediaPrevious,
 	MediaNext,
+	MediaSeekBackward,
+	MediaSeekForward,
 
 	Search,
 

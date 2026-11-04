@@ -1,4 +1,5 @@
 #include "purple/purple_archive_service.h"
+#include "purple/purple_recording_store.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "config.h"
@@ -752,6 +753,7 @@ void StartArchiveServices() {
 }
 
 void RemoveArchiveAtLogout(Main::Account &account) {
+	ForgetRecordingsAtLogout(account);
 	const auto authority = account.local().readPref<QByteArray>(kLoginAuthorityPref);
 	const auto store = QString::fromLatin1(account.local().readPref<QByteArray>(kLoginStorePref));
 	account.local().clearPref(kLoginAuthorityPref);

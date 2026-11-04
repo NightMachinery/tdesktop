@@ -272,5 +272,14 @@ Local emoji artwork export is described in [emoji_export.md](emoji_export.md).
 
 Marked chooser WebP paste is documented in [webp_paste.md](webp_paste.md).
 
+Voice and round message playback (double-click restart, round size, the
+floating round and the private-chat voice queue) is documented in
+[media_playback.md](media_playback.md).
+
+Media recording, so far seek back and forward in the player bar, on the
+floating round, by shortcut and from the system media controls, and crash-safe
+recordings with the Recording bin, is documented in
+[media_recording.md](media_recording.md).
+
 The opt-in local control socket and standalone Go command are documented in
 [control_socket.md](control_socket.md).

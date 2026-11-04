@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_compose_source.h"
 #include "purple/purple_webp_paste_route.h"
 #include "history/history_widget.h"
+
+#include "purple/hooks/recording.h"
 #include "purple/hooks/mute.h"
 
 #include "api/api_compose_with_ai.h"
@@ -406,6 +408,10 @@ HistoryWidget::HistoryWidget(
 		Ui::ElasticScroll::OverscrollType::Real,
 		Ui::ElasticScroll::OverscrollType::Real);
 	_scroll->setOverscrollBg(QColor(0, 0, 0, 0));
+	Purple::BindRecordingBar(
+        _voiceRecordBar.get(),
+        [=] { return Purple::RecordingHistoryContext(_history, [=] { return prepareSendAction({}); }); },
+        [=] { _field->setFocus(); });
 	_scroll->setOverscrollEdges(
 		[=] { return historyLoadedAtTop(); },
 		[=] { return historyLoadedAtBottom(); });
@@ -2643,7 +2649,7 @@ void HistoryWidget::cancelPendingDraftSaves() {
 }
 
 bool HistoryWidget::isRecording() const {
-	return _voiceRecordBar->isRecording();
+	return Purple::RecordingBarActive(_voiceRecordBar.get(), _voiceRecordBar->isRecording());
 }
 
 void HistoryWidget::activate() {
@@ -7358,6 +7364,7 @@ void HistoryWidget::setTabbedPanel(std::unique_ptr<TabbedPanel> panel) {
 }
 
 bool HistoryWidget::preventsClose(Fn<void()> &&continueCallback) const {
+	if (Purple::TryDockRecording(_voiceRecordBar.get())) return false;
 	if (_voiceRecordBar->isActive()) {
 		_voiceRecordBar->showDiscardBox(std::move(continueCallback));
 		return true;

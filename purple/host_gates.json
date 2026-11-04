@@ -1,5 +1,5 @@
 {
-  "about": "Canonical Purple Desktop host gates, run by purple/run_host_gates.py. A patch that adds, renames or removes a gate, a variant, a compiled purple/test_*.cpp fixture or a program under Telegram/SourceFiles/purple/tests updates this list in the same commit. K3 removes dormant search/mark/setup/carry suites and retains active typed record, ordinary upload, account-fence and Magic first-use coverage. Placeholders: {build} is --build-dir, {out} is this configuration's output directory, {out:NAME} is the output directory of configuration NAME, which then runs first. \"variants\" maps the flags of a driver with several configurations to the fixture each selects; \"\" is its default.",
+  "about": "Canonical Purple Desktop host gates, run by purple/run_host_gates.py. A patch that adds, renames or removes a gate, a variant, a compiled purple/test_*.cpp fixture or a program under Telegram/SourceFiles/purple/tests updates this list in the same commit. K3 removes dormant search/mark/setup/carry suites and retains active typed record, ordinary upload, account-fence and Magic first-use coverage. Placeholders: {build} is --build-dir, {out} is this configuration's output directory, {out:NAME} is the output directory of configuration NAME, which then runs first. \"variants\" maps the flags of a driver with several configurations to the fixture each selects; \"\" is its default. Media integration retains the K3 roster and adds every active media and recording configuration from the frozen reviewed feature tip.",
   "undriven": {},
   "variants": {
     "purple/test_archive.py": {
@@ -25,7 +25,12 @@
       "emoji-export-async": "Telegram/SourceFiles/purple/tests/emoji_export_async_cases.cpp",
       "emoji-export-shutdown": "Telegram/SourceFiles/purple/tests/emoji_export_shutdown_cases.cpp",
       "webp-paste": "Telegram/SourceFiles/purple/tests/webp_paste_cases.mm",
-      "webp-paste-flow": "Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp"
+      "webp-paste-flow": "Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp",
+      "media-restart": "Telegram/SourceFiles/purple/tests/media_restart_cases.cpp",
+      "media-size": "Telegram/SourceFiles/purple/tests/media_size_cases.cpp",
+      "voice-queue": "Telegram/SourceFiles/purple/tests/voice_queue_cases.cpp",
+      "recording": "Telegram/SourceFiles/purple/tests/recording_cases.cpp",
+      "recording-round": "Telegram/SourceFiles/purple/tests/recording_round_cases.cpp"
     }
   },
   "gates": [
@@ -635,6 +640,103 @@
         "Telegram/SourceFiles/purple/tests/emoji_large_recent_cases.cpp",
         "Telegram/SourceFiles/purple/tests/emoji_large_preferences_cases.cpp"
       ]
+    },
+    {
+      "name": "cases-media-restart",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "media-restart"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/media_restart_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-media-size",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "media-size"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/media_size_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-recording",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "recording"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/recording_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-recording-round",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "recording-round"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/recording_round_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-voice-queue",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "voice-queue"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/voice_queue_cases.cpp"
+      ]
+    },
+    {
+      "name": "test_media_hooks",
+      "driver": "purple/test_media_hooks.py"
+    },
+    {
+      "name": "test_recording_dock",
+      "driver": "purple/test_recording_dock.py",
+      "compiles": true,
+      "args": [
+        "--output-dir",
+        "{out}"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/recording_dock_cases.cpp"
+      ],
+      "coverage": "Ownership model, exact native bubble callback and pause publication integration"
     }
   ]
 }

@@ -14,6 +14,9 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 
 This fork's feature overview and contributor instructions are in the [Purple guide](docs/purple/agents.md).
 Chooser-marked transparent WebPs keep their original bytes when pasted; see [the marker contract](docs/purple/webp_paste.md).
+Voice recording can leave its chat for a top control strip, and round cameras have an in-chat float; see [recording behavior and limits](docs/purple/media_recording.md).
+The player seeks back and forward by a configurable step (5, 10, 15 or 30 seconds); see [media recording](docs/purple/media_recording.md).
+Voice and video message recordings survive a crash, and unsent, discarded or recovered recordings wait encrypted in a Recording bin; see [media recording](docs/purple/media_recording.md).
 
 ## Supported systems
 

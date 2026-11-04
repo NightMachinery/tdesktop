@@ -108,6 +108,45 @@ CASES = {
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation'],
         'link': ['-lobjc'],
     },
+    'media-restart': {
+        'program': 'media_restart_cases.cpp',
+        'units': ['purple/purple_media_rules.cpp'],
+        'frameworks': ['QtCore'],
+    },
+    'media-size': {
+        'program': 'media_size_cases.cpp',
+        'units': ['purple/purple_media_rules.cpp'],
+        'frameworks': ['QtCore'],
+    },
+    'recording': {
+        # F9's seek step and clamping, and F10's encrypted files, voice
+        # mirror, manifest and voice recovery over purple-core's Ogg finaliser.
+        'program': 'recording_cases.cpp',
+        'units': ['purple/purple_seek_rules.cpp', 'purple/purple_recording_crypt.cpp', 'purple/purple_recording_mirror.cpp',
+            'purple/purple_recording_registry.cpp', 'purple/purple_recording_recovery.cpp',
+            'core:purple/purple_ogg_repair.cpp', 'core:purple/purple_recording_file.cpp'],
+        'build_libraries': ['libcrypto.a'],
+        'frameworks': ['QtCore'],
+    },
+    'recording-round': {
+        # F10's round copy, remux, repair rebuild and AAC measure over the
+        # build's own FFmpeg, on a round encoded at test time.
+        'program': 'recording_round_cases.cpp',
+        'units': ['purple/purple_recording_round_media.cpp', 'purple/purple_recording_crypt.cpp',
+            'purple/purple_recording_recovery.cpp', 'purple/purple_recording_registry.cpp',
+            'core:purple/purple_mp4_repair.cpp', 'core:purple/purple_round_journal.cpp',
+            'core:purple/purple_ogg_repair.cpp', 'core:purple/purple_recording_file.cpp'],
+        'build_libraries': ['libavformat.a', 'libavcodec.a', 'libswresample.a', 'libavutil.a', '?libopenh264.a', 'libcrypto.a'],
+        'frameworks': ['QtCore', 'VideoToolbox', 'AudioToolbox', 'CoreMedia', 'CoreVideo', 'CoreFoundation', 'CoreServices', 'Security'],
+        'link': ['-lz', '-lbz2', '-liconv', '-lc++'],
+    },
+    'voice-queue': {
+        # The confined walk and the manual-play tracker over the real
+        # purple-core rule.
+        'program': 'voice_queue_cases.cpp',
+        'units': ['purple/purple_voice_queue_rules.cpp', 'core:purple/purple_playback.cpp'],
+        'frameworks': ['QtCore'],
+    },
 }
 
 
@@ -317,7 +356,17 @@ with (work / 'build.log').open('w') as log:
         if value.startswith('-F'):
             link += [value, '-Wl,-rpath,' + value[2:]]
     binary = work / Path(case['program']).stem
-    link += ['-Wl,-dead_strip', *map(str, objects), *[str(build / name) for name in case.get('objects', []) + case.get('libraries', [])],
+    found = []
+    if case.get('build_libraries'):
+        manifest = (build / 'build.ninja').read_text(errors='replace')
+        for name in case['build_libraries']:
+            optional, name = name.startswith('?'), name.lstrip('?')
+            names = {name, name[:-2] + '.dylib'} if name.endswith('.a') else {name}
+            hits = sorted({value for value in manifest.split() if Path(value).name in names},
+                key=lambda value: (not value.endswith('/' + name), value))
+            assert hits or optional, 'no ' + name + ' in build.ninja'
+            found += hits[:1]
+    link += ['-Wl,-dead_strip', *map(str, objects), *[str(build / name) for name in case.get('objects', []) + case.get('libraries', [])], *found,
         *[value for name in case['frameworks'] for value in ('-framework', name)], *case.get('link', []), '-o', str(binary)]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
     if any('{fixtures}' in value for value in case.get('arguments', [])):

@@ -28,6 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_control.h"
 #include "purple/purple_last_seen.h"
+#include "purple/purple_media_playback.h"
+#include "purple/purple_recording_settings.h"
 #include "purple/purple_preset_box.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_schedule_box.h"
@@ -719,6 +721,8 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	BuildControlSettings(builder);
 	BuildPurpleLastSeenSection(builder);
 	BuildPurpleScreenTimeSection(builder);
+	BuildMediaPlaybackSettings(builder);
+	BuildMediaRecordingSettings(builder);
 }
 
 } // namespace

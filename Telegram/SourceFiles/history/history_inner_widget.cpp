@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
+#include "purple/hooks/media_playback.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_sync.h"
 #include "purple/purple_ui_witness.h"
@@ -2731,6 +2732,12 @@ void HistoryInner::mouseReleaseEvent(QMouseEvent *e) {
 
 void HistoryInner::mouseDoubleClickEvent(QMouseEvent *e) {
 	registerReadMetricsActivity();
+	if (Purple::RestartOnDoubleClick(
+			ClickHandler::getActive(),
+			e->button(),
+			inSelectionMode().inSelectionMode)) {
+		return;
+	}
 	mouseActionStart(e->globalPos(), e->button());
 
 	const auto mouseActionView = viewByItem(_mouseActionItem);
