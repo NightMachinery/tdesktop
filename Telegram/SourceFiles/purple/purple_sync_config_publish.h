@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/weak_ptr.h"
-#include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_write_gate.h"
 #include "crl/crl_object_on_queue.h"
 #include "purple/purple_sync_config_publish_flow.h"
 #include "purple/purple_sync_account_inventory.h"
@@ -46,7 +46,6 @@ public:
 		uint64_t scanPosts,
 		Fn<void(SyncConfigPublishResult)> finished,
 		SyncConfigPublishRequest request,
-		std::optional<DesktopSyncChatSetupSnapshot> setup = std::nullopt,
 		Fn<bool()> current = {},
 		bool initializeOnly = false);
 	~SyncConfigPublish();
@@ -74,12 +73,11 @@ private:
 	Fn<void(SyncConfigPublishResult)> _finished;
 	SyncConfigPublishRequest _request;
 	std::optional<AccountRoutingSnapshot> _routing;
-	std::optional<DesktopSyncChatSetupSnapshot> _setup;
 	Fn<bool()> _current;
 	QByteArray _bindingToken;
 	QString _directory;
 	std::shared_ptr<std::atomic<bool>> _admitted;
-	std::shared_ptr<DesktopSyncCarryGate::Lease> _carryWriter;
+	std::shared_ptr<DesktopSyncWriteGate::Lease> _writerLease;
 	std::unique_ptr<crl::object_on_queue<SyncConfigPublishFlow>> _worker;
 	rpl::lifetime _lifetime;
 	std::unique_ptr<SyncConfigPost> _post;

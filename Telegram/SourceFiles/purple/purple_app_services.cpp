@@ -30,7 +30,7 @@ void StartAppServices() {
 		LOG(("Purple diag: %1").arg(line));
 	});
 	StartDesktopAccountRouting();
-	StartSyncChatDiscovery();
+	StartSyncChatService();
 	StartAutomaticSettingsSync();
 	StartArchiveServices();
 	StartSchedule();

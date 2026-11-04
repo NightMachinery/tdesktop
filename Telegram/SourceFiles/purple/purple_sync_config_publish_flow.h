@@ -1,7 +1,6 @@
 #pragma once
 
 #include "purple/purple_account_config.h"
-#include "purple/purple_sync_chat_setup.h"
 #include "purple/purple_sync_local_store.h"
 
 #include <atomic>
@@ -22,7 +21,6 @@ struct SyncConfigPublishDiskInput {
 	PeerToken chat;
 	QByteArray binding;
 	std::vector<SyncRecoveryPreference> otherPreferences;
-	std::optional<DesktopSyncChatSetupSnapshot> setup;
 	SyncAccountInventoryResult inventory;
 	SyncConfigPublishRequest request;
 	SyncConfigWriter writer;

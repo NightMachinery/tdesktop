@@ -290,6 +290,12 @@ SyncChatMessageFacts MapDesktopSyncChatMessage(
 	return result;
 }
 
+bool DesktopSyncChatPopulationKnown(const DesktopSyncChatPeer &peer) {
+	return peer.facts && ((peer.kind != SyncChatKind::BasicGroup
+		&& peer.kind != SyncChatKind::Supergroup && peer.kind != SyncChatKind::Broadcast)
+		|| (peer.facts->otherMembers && peer.facts->otherAdmins));
+}
+
 std::optional<SyncChatEligibilityResult> DesktopSyncChatEligibility(
 		const DesktopSyncChatPeer &peer) {
 	const auto token = PeerTokenText(peer.chat, peer.origin.account.userId);

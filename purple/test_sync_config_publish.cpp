@@ -1,5 +1,7 @@
-#define PURPLE_SYNC_CHAT_CREATE_EMBEDDED
-#include "test_sync_chat_create.cpp"
+#define PURPLE_SYNC_CHAT_WRITE_EMBEDDED
+#include "test_sync_chat_write.cpp"
+#include <QtCore/QCoreApplication>
+#include <thread>
 #include "purple/purple_sync_config_publish_flow.h"
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_config_payload.h"
@@ -18,11 +20,13 @@
 
 namespace {
 
+struct PublishFiles;
+void WriteMagicBinding(const PublishFiles &files, PeerToken chat, int64_t verifiedAt, SyncChatProblem problem = SyncChatProblem::None);
+
 struct PublishFiles {
 	QTemporaryDir root;
 	AccountRoutingSnapshot routing;
 	AccountFiles files;
-	DesktopSyncChatSetupSnapshot setup;
 	QByteArray token;
 
 	explicit PublishFiles(PeerToken chat = {}) {
@@ -42,27 +46,14 @@ struct PublishFiles {
 		const auto paths = config.files(Origin.account);
 		CHECK(paths); files = *paths;
 		CHECK(WriteSyncPrivateFile(files.settings, "version = 2\n") == SyncStoreStatus::Ready);
-		setup = Fresh();
-		setup.scope.root = root.path(); setup.scope.owner = Origin.account;
-		setup.status.phase = DesktopSyncChatPhase::Use;
-		setup.status.postingHeld = false;
-		setup.status.resolution.readChat = chat;
-		setup.cache = Cache(chat);
-		setup.cache->readerConsent = true;
-		const auto route = Route(chat);
-		const auto eligibility = DesktopSyncChatEligibility(route.peer);
-		CHECK(eligibility); setup.cache->readers = eligibility->readers;
-		setup.cache->readerMembers = route.peer.readerMembers;
-		setup.scope.mark = setup.cache->mark;
-		const auto bytes = SerializeDesktopSyncChatCache(*setup.cache); CHECK(bytes);
 		CHECK(EnsureSyncPrivateDirectory(files.syncDirectory) == SyncStoreStatus::Ready);
-		CHECK(WriteSyncPrivateFile(QDir(root.path()).filePath(DesktopSyncChatCacheFileName(Origin.account)), *bytes) == SyncStoreStatus::Ready);
+		WriteMagicBinding(*this, chat, 9000000);
 	}
 
 	SyncConfigPublishDiskInput input(PeerToken chat = {}) const {
 		auto result = SyncConfigPublishDiskInput();
 		result.routing = routing; result.account = Origin.account; result.chat = chat;
-		result.binding = token; result.setup = setup; result.setup->scope.binding = token;
+		result.binding = token;
 		result.inventory = FinishSyncAccountInventory(123,
 			{ SyncHistoryScanStatus::Complete, {}, 0 },
 			SyncCandidateReadResult{ SyncCandidateReadStatus::Complete, {} });
@@ -74,27 +65,10 @@ struct PublishFiles {
 		return result;
 	}
 
-	void journal(PeerToken chat) {
-		auto fresh = setup; fresh.cache.reset(); fresh.scope.mark.reset();
-		fresh.status.phase = DesktopSyncChatPhase::Unset;
-		fresh.status.resolution.action = SyncChatAction::Unset;
-		fresh.scope.settingsBound = false; fresh.scope.space.clear();
-		fresh.input.settingsHint = SyncChatSettingsHint::Absent;
-		auto value = BeginDesktopSyncChatCreate(fresh,
-			{ chat == PeerToken{} ? DesktopSyncChatSetupChoice::Self : DesktopSyncChatSetupChoice::Existing,
-			Route(chat).peer, true });
-		CHECK(value);
-		value->chat = chat; value->markId = 1; value->markDate = 100;
-		value->randomId = 42; value->pending = false;
-		value->step = DesktopSyncChatCreateStep::Done;
-		const auto bytes = SerializeDesktopSyncChatCreateJournal(*value); CHECK(bytes);
-		CHECK(WriteSyncPrivateFile(files.syncDirectory + u"/sync-chat-setup.json"_q, *bytes) == SyncStoreStatus::Ready);
-	}
 };
 
-void FirstPublish(PeerToken chat, bool withJournal) {
+void FirstPublish(PeerToken chat) {
 	auto files = PublishFiles(chat);
-	if (withJournal) { files.journal(chat); }
 	auto admitted = std::make_shared<std::atomic<bool>>(true);
 	auto reply = SyncConfigPublishDiskReply();
 	auto flow = SyncConfigPublishFlow(files.input(chat), admitted,
@@ -105,15 +79,6 @@ void FirstPublish(PeerToken chat, bool withJournal) {
 	CHECK(reply.initial->version == (chat == PeerToken{} ? 1 : 2));
 	CHECK(reply.initial->chat == chat);
 	files.token = reply.initial->bindingToken.toLatin1();
-	auto discoveryFirst = QByteArray();
-	const auto cachePath = QDir(files.root.path()).filePath(DesktopSyncChatCacheFileName(Origin.account));
-	if (withJournal) {
-		auto cache = *files.setup.cache;
-		cache.newReaders = true;
-		const auto bytes = SerializeDesktopSyncChatCache(cache); CHECK(bytes);
-		discoveryFirst = *bytes;
-		CHECK(WriteSyncPrivateFile(cachePath, discoveryFirst) == SyncStoreStatus::Ready);
-	}
 	flow.bindingCommitted(files.token);
 	CHECK(reply.step == SyncConfigPublishDiskStep::Post && !reply.staged.isEmpty());
 	CHECK(flow.authorize());
@@ -127,21 +92,8 @@ void FirstPublish(PeerToken chat, bool withJournal) {
 	const auto state = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
 	CHECK(state && state.state.config.pendingSeq == 0 && state.state.config.seq == 1);
 	CHECK(state.state.chat == chat);
-	if (withJournal) {
-		auto scope = files.setup.scope; scope.binding = files.token;
-		auto bytes = QByteArray();
-		CHECK(ReadSyncPrivateFile(files.files.syncDirectory + u"/sync-chat-setup.json"_q, 512 * 1024, bytes) == SyncStoreStatus::Ready);
-		CHECK(ParseDesktopSyncChatCreateJournal(bytes, DesktopSyncChatSetupAuthority(scope), Origin.account));
-		auto cacheBytes = QByteArray();
-		CHECK(ReadSyncPrivateFile(cachePath, 512 * 1024, cacheBytes) == SyncStoreStatus::Ready);
-		CHECK(cacheBytes == discoveryFirst);
-		const auto cache = ParseDesktopSyncChatCache(cacheBytes, Origin.account);
-		CHECK(cache.record && cache.record->newReaders && cache.record->readerConsent);
-	}
 	auto lock = QLockFile(files.files.syncDirectory + u"/lock"_q); lock.setStaleLockTime(0);
 	CHECK(lock.tryLock(0)); lock.unlock();
-	files.setup.scope.settingsBound = true; files.setup.scope.settingsChat = chat;
-	files.setup.scope.space = state.state.space;
 	auto next = files.input(chat); next.request.pendingOnly = true;
 	auto after = SyncConfigPublishFlow(next, admitted,
 		[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
@@ -151,7 +103,7 @@ void FirstPublish(PeerToken chat, bool withJournal) {
 }
 
 void PublishRefusals() {
-	for (auto mode = 0; mode != 16; ++mode) {
+	for (const auto mode : {0, 1, 2, 3, 4, 5, 6, 10, 11, 12}) {
 		const auto chat = PeerToken{ PeerTokenKind::Channel, 456 };
 		auto files = PublishFiles(chat); auto input = files.input(chat);
 		if (mode == 0) input.inventory.status = SyncAccountInventoryStatus::Incomplete;
@@ -161,48 +113,19 @@ void PublishRefusals() {
 		if (mode == 4) input.inventory.directory.unreadableCandidate = true;
 		if (mode == 5) input.inventory.directory.messageIdCollision = true;
 		if (mode == 6) input.account.userId = 124;
-		if (mode == 7) input.setup->cache->readerConsent = false;
-		if (mode == 8) input.setup->scope.loginBinding = QString(64, u'b');
-		if (mode == 9) input.setup->cache->mark.chat = PeerToken{};
 		if (mode == 10) input.request.pendingOnly = true;
 		if (mode == 11) input.queue = SyncConfigSendQueue::HoldsSyncRecord;
 		if (mode == 12) input.inventory.directory.canCreateSpace = false;
-		if (mode == 13) input.setup->scope.owner = AccountKey{0,124};
-		if (mode == 14) input.setup->scope.mode = AccountWorkMode::Follow;
-		if (mode == 15) input.setup->scope.binding = "different";
 		auto reply = SyncConfigPublishDiskReply();
 		auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
 			[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
 		flow.start(); CHECK(reply.step == SyncConfigPublishDiskStep::Finished);
 		CHECK(SyncPathIdentity(files.files.syncStore) == "missing");
 	}
-	for (auto mode = 0; mode != 5; ++mode) {
-		auto files = PublishFiles({ PeerTokenKind::Channel, 456 });
-		files.journal({ PeerTokenKind::Channel, 456 });
-		const auto path = files.files.syncDirectory + u"/sync-chat-setup.json"_q;
-		auto bytes = QByteArray(); CHECK(ReadSyncPrivateFile(path, 512 * 1024, bytes) == SyncStoreStatus::Ready);
-		const auto journal = ParseDesktopSyncChatCreateJournal(bytes,
-			DesktopSyncChatSetupAuthority(files.setup.scope), Origin.account); CHECK(journal);
-		auto altered = *journal;
-		if (mode == 0) altered.step = DesktopSyncChatCreateStep::PostMark;
-		if (mode == 1) altered.authority = QString(64, u'b');
-		if (mode == 2) altered.chat = PeerToken{};
-		if (mode == 3) altered.account.userId = 124;
-		if (mode == 4) altered.cancelled = true;
-		const auto encoded = SerializeDesktopSyncChatCreateJournal(altered);
-		bytes = encoded.value_or(QByteArray("malformed"));
-		CHECK(WriteSyncPrivateFile(path, bytes) == SyncStoreStatus::Ready);
-		auto reply = SyncConfigPublishDiskReply();
-		auto flow = SyncConfigPublishFlow(files.input({PeerTokenKind::Channel,456}),
-			std::make_shared<std::atomic<bool>>(true), [&](auto value) { reply = std::move(value); });
-		flow.start(); CHECK(reply.step == SyncConfigPublishDiskStep::Finished);
-		auto after = QByteArray(); CHECK(ReadSyncPrivateFile(path, 512 * 1024, after) == SyncStoreStatus::Ready);
-		CHECK(after == bytes && SyncPathIdentity(files.files.syncStore) == "missing");
-	}
 }
 
 void CancelAndScope() {
-	for (auto mode = 0; mode != 7; ++mode) {
+	for (auto mode = 0; mode != 6; ++mode) {
 		auto files = PublishFiles(); auto admitted = std::make_shared<std::atomic<bool>>(true);
 		auto reply = SyncConfigPublishDiskReply();
 		auto flow = SyncConfigPublishFlow(files.input(), admitted, [&](auto value) { reply = std::move(value); });
@@ -216,12 +139,6 @@ void CancelAndScope() {
 		if (mode == 3) CHECK(WriteSyncPrivateFile(files.root.path() + u"/accounts/root.toml"_q, "bad") == SyncStoreStatus::Ready);
 		if (mode == 4) CHECK(WriteSyncPrivateFile(files.files.syncStore, "bad") == SyncStoreStatus::Ready);
 		if (mode == 5) CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/sync-chat-setup.json"_q, "bad") == SyncStoreStatus::Ready);
-		if (mode == 6) {
-			auto cache = *files.setup.cache; ++cache.mark.markId;
-			const auto bytes = SerializeDesktopSyncChatCache(cache); CHECK(bytes);
-			CHECK(WriteSyncPrivateFile(QDir(files.root.path()).filePath(
-				DesktopSyncChatCacheFileName(Origin.account)), *bytes) == SyncStoreStatus::Ready);
-		}
 		CHECK(!flow.authorize()); flow.cancel();
 		if (mode != 4) CHECK(ReadSettingsFileInput(files.files.syncStore) == state);
 		auto lock = QLockFile(files.files.syncDirectory + u"/lock"_q); lock.setStaleLockTime(0); CHECK(lock.tryLock(0));
@@ -229,16 +146,7 @@ void CancelAndScope() {
 }
 
 void ChangeDestination(PublishFiles &files, PeerToken chat) {
-	files.setup.cache = Cache(chat);
-	files.setup.cache->readerConsent = true;
-	const auto route = Route(chat);
-	files.setup.cache->readers = DesktopSyncChatEligibility(route.peer)->readers;
-	files.setup.cache->readerMembers = route.peer.readerMembers;
-	files.setup.scope.mark = files.setup.cache->mark;
-	files.setup.status.resolution.readChat = chat;
-	const auto bytes = SerializeDesktopSyncChatCache(*files.setup.cache); CHECK(bytes);
-	CHECK(WriteSyncPrivateFile(QDir(files.root.path()).filePath(
-		DesktopSyncChatCacheFileName(Origin.account)), *bytes) == SyncStoreStatus::Ready);
+	WriteMagicBinding(files, chat, 9000000);
 }
 
 void NoMoveAndInitializeOnly() {
@@ -397,7 +305,6 @@ struct PublishRetryProbe : base::has_weak_ptr {
 #include "publisher-retry-resume.inc"
 };
 struct PublishUploadProbe {
-	std::optional<DesktopSyncCarryPermit> _carry;
 	bool _done = false;
 	std::shared_ptr<PublishRetryProbe> _api = std::make_shared<PublishRetryProbe>();
 	rpl::lifetime _lifetime;
@@ -426,7 +333,7 @@ struct PublishWorkerEndpoint {
 };
 
 struct PublishCoordinatorProbe : base::has_weak_ptr {
-	std::shared_ptr<DesktopSyncCarryGate::Lease> _carryWriter;
+	std::shared_ptr<DesktopSyncWriteGate::Lease> _writerLease;
 	bool _done = false;
 	bool _posted = true;
 	std::shared_ptr<std::atomic<bool>> _admitted = std::make_shared<std::atomic<bool>>(true);
@@ -611,110 +518,8 @@ SyncAccountInventoryResult InventoryOf(const std::vector<QByteArray> &records) {
 		SyncCandidateReadResult{ SyncCandidateReadStatus::Complete, candidates });
 }
 
-// A device without sync state joins the one sync space another device already uses in the chat
-// the user chose, as Android's A5Q does: Saved Messages (selfJoin), an existing channel picked at
-// setup (existingChannelJoin) and a channel another device set up, found by discovery with no setup
-// journal here (discoveredChannelJoin). Joining initializes this chat's ledger in that space and
-// sends nothing; keeping this device's settings publishes once with the other record as parent.
-// A channel this device's setup created, or one holding records from two spaces, stays refused.
-void RewriteJournal(PublishFiles &files, PeerToken chat,
-		const std::function<void(DesktopSyncChatCreateJournal&)> &change) {
-	files.journal(chat);
-	const auto path = files.files.syncDirectory + u"/sync-chat-setup.json"_q;
-	auto bytes = QByteArray();
-	CHECK(ReadSyncPrivateFile(path, 512 * 1024, bytes) == SyncStoreStatus::Ready);
-	auto journal = ParseDesktopSyncChatCreateJournal(bytes,
-		DesktopSyncChatSetupAuthority(files.setup.scope), Origin.account);
-	CHECK(journal);
-	if (!journal) { return; }
-	change(*journal);
-	const auto changed = SerializeDesktopSyncChatCreateJournal(*journal);
-	CHECK(changed);
-	CHECK(WriteSyncPrivateFile(path, changed.value_or(QByteArray())) == SyncStoreStatus::Ready);
-}
-
-void ExistingJoins() {
-	const auto channel = PeerToken{ PeerTokenKind::Channel, 456 };
-	// The adopted journals are what Desktop setup leaves when the chosen chat already carries
-	// another device's mark: no mark of its own, and for Create nothing was created.
-	for (const auto name : { "selfJoin", "existingChannelJoin", "discoveredChannelJoin",
-			"adoptedChannelJoin", "adoptedCreateJoin" }) {
-		for (const auto keep : { false, true }) {
-			const auto self = !std::strcmp(name, "selfJoin");
-			const auto chat = self ? PeerToken{} : channel;
-			auto files = PublishFiles(chat);
-			if (!std::strcmp(name, "existingChannelJoin")) { files.journal(chat); }
-			if (!std::strncmp(name, "adopted", 7)) {
-				const auto create = !std::strcmp(name, "adoptedCreateJoin");
-				RewriteJournal(files, chat, [&](DesktopSyncChatCreateJournal &journal) {
-					if (create) { journal.choice = DesktopSyncChatSetupChoice::Create; }
-					journal.adopted = true; journal.markId = 0; journal.markDate = 0;
-					journal.readerConsent.clear(); journal.readerSnapshot = {}; journal.newReaders = false;
-				});
-			}
-			const auto other = BuildOther(2, 1700000000000);
-			auto input = files.input(chat);
-			input.inventory = InventoryOf({ other.built.canonical });
-			if (keep) {
-				input.request.expectedParents = SyncConfigVersionKeys({ other.built.version });
-			} else {
-				input.initializeOnly = true;
-			}
-			auto reply = SyncConfigPublishDiskReply();
-			auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
-				[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
-			flow.start();
-			CHECK(reply.step == SyncConfigPublishDiskStep::Binding && reply.initial);
-			std::printf("JOIN %s keep=%d admitted=%d\n", name, int(keep), int(bool(reply.initial)));
-			if (!reply.initial) { continue; }
-			CHECK(reply.initial->space == other.space && reply.initial->chat == chat);
-			CHECK(reply.initial->version == (self ? 1 : 2));
-			files.token = reply.initial->bindingToken.toLatin1();
-			flow.bindingCommitted(files.token);
-			if (keep) {
-				CHECK(reply.step == SyncConfigPublishDiskStep::Post && !reply.staged.isEmpty());
-				const auto parsed = ParseSyncEnvelope(reply.staged);
-				CHECK(parsed.header && parsed.header->space == other.space);
-				const auto parents = InspectConfigPayload(parsed).version.parents;
-				CHECK(parents == std::vector<QString>{ other.built.version.key });
-				flow.confirm(reply.staged, 30);
-				CHECK(reply.result.status == SyncConfigPublishStatus::Confirmed && reply.result.messageId == 30);
-			} else {
-				CHECK(reply.step == SyncConfigPublishDiskStep::Finished
-					&& reply.result.status == SyncConfigPublishStatus::AlreadySynced);
-			}
-			const auto state = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
-			CHECK(state && state.state.space == other.space && state.state.chat == chat
-				&& state.state.version == (self ? 1 : 2) && state.state.config.seq == (keep ? 1u : 0u));
-		}
-	}
-	for (const auto name : { "occupiedFresh", "occupiedMixed" }) {
-		auto files = PublishFiles(channel);
-		auto records = std::vector<QByteArray>{ BuildOther(2, 1700000000000).built.canonical };
-		if (!std::strcmp(name, "occupiedFresh")) {
-			RewriteJournal(files, channel, [](DesktopSyncChatCreateJournal &journal) {
-				journal.choice = DesktopSyncChatSetupChoice::Create;
-				journal.created = true; journal.updates = CreatedUpdates();
-			});
-		} else {
-			records.push_back(BuildOther(3, 1700000001000).built.canonical);
-		}
-		auto input = files.input(channel);
-		input.inventory = InventoryOf(records);
-		CHECK(input.inventory.status == SyncAccountInventoryStatus::Complete);
-		auto reply = SyncConfigPublishDiskReply();
-		auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
-			[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
-		flow.start();
-		CHECK(reply.step == SyncConfigPublishDiskStep::Finished
-			&& reply.result.status == SyncConfigPublishStatus::NeedsReview);
-		CHECK(SyncPathIdentity(files.files.syncStore) == "missing");
-		std::printf("JOIN %s refused=%d\n", name, int(SyncPathIdentity(files.files.syncStore) == "missing"));
-	}
-}
-
 void WriteMagicBinding(const PublishFiles &files, PeerToken chat, int64_t verifiedAt,
-		SyncChatProblem problem = SyncChatProblem::None) {
+		SyncChatProblem problem) {
 	auto binding = SyncChatBinding();
 	binding.mode = SyncChatBindingMode::Magic; binding.chat = chat;
 	binding.verifiedAt = verifiedAt; binding.problem = problem;
@@ -730,7 +535,7 @@ void MagicPublish() {
 		auto files = PublishFiles(channel);
 		WriteMagicBinding(files, channel, 100);
 		const auto other = BuildOther(2, 1700000000000);
-		auto input = files.input(channel); input.setup.reset();
+		auto input = files.input(channel);
 		if (join) {
 			input.inventory = InventoryOf({ other.built.canonical });
 			input.request.expectedParents = SyncConfigVersionKeys({ other.built.version });
@@ -759,7 +564,7 @@ void MagicPublish() {
 		if (mode == 1) WriteMagicBinding(files, channel, 0);
 		if (mode == 2) WriteMagicBinding(files, PeerToken{PeerTokenKind::Channel,457}, 100);
 		if (mode == 3) WriteMagicBinding(files, channel, 100, SyncChatProblem::MagicIneligible);
-		auto input = files.input(channel); input.setup.reset();
+		auto input = files.input(channel);
 		auto reply = SyncConfigPublishDiskReply();
 		auto flow = SyncConfigPublishFlow(input, std::make_shared<std::atomic<bool>>(true),
 			[&](SyncConfigPublishDiskReply value) { reply = std::move(value); });
@@ -784,7 +589,7 @@ struct FirstUseRun {
 
 FirstUseRun RunMagicFlow(PublishFiles &files, const SyncAccountInventoryResult &inventory,
 		const std::optional<SyncConfigPublishRequest> &request, int32_t messageId) {
-	auto input = files.input(kMagicChat); input.setup.reset();
+	auto input = files.input(kMagicChat);
 	input.inventory = inventory;
 	if (request) { input.request = *request; } else { input.initializeOnly = true; }
 	auto run = FirstUseRun();
@@ -934,7 +739,7 @@ void FirstUseD1() {
 		CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/carry.json"_q, "{}") == SyncStoreStatus::Ready);
 		CHECK(WriteSyncPrivateFile(files.files.syncDirectory + u"/carry-cache.json"_q, "{}") == SyncStoreStatus::Ready);
 		CHECK(EnsureSyncPrivateDirectory(files.files.syncDirectory + u"/carry-objects"_q) == SyncStoreStatus::Ready);
-		CHECK(SyncCarryStartupAdmission(files.files.syncDirectory, files.token) != SyncStoreStatus::Ready);
+		CHECK(SyncLegacyArtifactAdmission(files.files.syncDirectory) != SyncStoreStatus::Ready);
 		const auto fresh = BuildOther(2, 1800000000000, kCustomOther);
 		const auto inventory = InventoryOf({ fresh.built.canonical });
 		CHECK(*inventory.directory.selectedSpace != oldSpace);
@@ -944,11 +749,11 @@ void FirstUseD1() {
 		const auto review = ReviewSyncFirstUse(files.files, inventory);
 		CHECK(review.need == SyncFirstUseNeed::OtherSpace && review.carry);
 		CHECK(review.action == SyncFirstUseAction::Ask);
-		CHECK(RetireSyncCarryLeftovers(files.files.syncDirectory, kArchiveDate));
-		CHECK(!SyncCarryLeftoversPresent(files.files.syncDirectory));
+		CHECK(RetireLegacySyncArtifacts(files.files.syncDirectory, kArchiveDate));
+		CHECK(!LegacySyncArtifactsPresent(files.files.syncDirectory));
 		CHECK(SyncPathIdentity(files.files.syncDirectory + u"/carry-retired-"_q + kArchiveDate + u"/carry.json"_q) != "missing");
-		CHECK(SyncCarryStartupAdmission(files.files.syncDirectory, files.token) == SyncStoreStatus::Ready);
-		CHECK(RetireSyncCarryLeftovers(files.files.syncDirectory, kArchiveDate));
+		CHECK(SyncLegacyArtifactAdmission(files.files.syncDirectory) == SyncStoreStatus::Ready);
+		CHECK(RetireLegacySyncArtifacts(files.files.syncDirectory, kArchiveDate));
 		const auto answered = ReviewSyncFirstUse(files.files, inventory, choice);
 		CHECK(answered.need == SyncFirstUseNeed::OtherSpace && !answered.carry);
 		const auto join = (choice == SyncFirstUseChoice::Synced);
@@ -1229,12 +1034,11 @@ void FirstUseRace() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	auto worker = std::thread([] {
-		for (const auto chat : {PeerToken{}, PeerToken{PeerTokenKind::User,456},
-			PeerToken{PeerTokenKind::Chat,789}, PeerToken{PeerTokenKind::Channel,456}}) {
-			FirstPublish(chat, false); FirstPublish(chat, true);
+		for (const auto chat : {PeerToken{}, PeerToken{PeerTokenKind::Channel,456}}) {
+			FirstPublish(chat);
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
-		ExistingJoins(); MagicPublish();
+		MagicPublish();
 		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer(); FirstUseCurrentHead(); FirstUseSplitHeads();
 	});
 	worker.join();

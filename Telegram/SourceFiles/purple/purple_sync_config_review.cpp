@@ -140,7 +140,7 @@ SyncSettingsFile ReadSyncSettingsFile(const AccountFiles &files) {
 			|| (!SettingsTextNewer(text) && !SettingsTextLoads(text, path) && LastGoodSettingsLoad(files.good)));
 }
 
-bool SyncCarryLeftoversPresent(const QString &syncDirectory) {
+bool LegacySyncArtifactsPresent(const QString &syncDirectory) {
 	for (const auto &name : { u"carry.json"_q, u"carry-cache.json"_q, u"carry-objects"_q, u"carry-history"_q }) {
 		if (SyncPathIdentity(syncDirectory + u'/' + name) != "missing") { return true; }
 	}
@@ -201,7 +201,7 @@ SyncFirstUseReview ReviewSyncFirstUse(
 		const SyncAccountInventoryResult &inventory,
 		SyncFirstUseChoice choice) {
 	auto result = SyncFirstUseReview();
-	result.carry = SyncCarryLeftoversPresent(files.syncDirectory);
+	result.carry = LegacySyncArtifactsPresent(files.syncDirectory);
 	const auto snapshot = ReadSyncRecoveryStore(files, std::nullopt);
 	if (snapshot.status != SyncStoreStatus::Ready) { return result; }
 	const auto mark = ReadSyncFirstUseMark(files);

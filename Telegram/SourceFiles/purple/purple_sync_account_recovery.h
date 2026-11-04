@@ -65,6 +65,6 @@ struct SyncArchiveResult {
 	bool confirmed,
 	bool operationInFlight,
 	bool firstUse = false);
-[[nodiscard]] bool RetireSyncCarryLeftovers(const QString &syncDirectory, const QString &date);
+[[nodiscard]] bool RetireLegacySyncArtifacts(const QString &syncDirectory, const QString &date);
 
 }

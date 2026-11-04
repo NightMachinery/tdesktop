@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from sync_carry_units import add_carry_units
+from sync_store_units import add_sync_store_units
 import argparse
 import json
 from pathlib import Path
@@ -77,7 +77,7 @@ with (work / 'build.log').open('w') as log:
         else:
             objects.append(build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o'))
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o', build / 'Telegram/lib_base/liblib_base.a']
-    add_carry_units(repo, build, work, objects, commands, log)
+    add_sync_store_units(repo, build, work, objects, commands, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe:

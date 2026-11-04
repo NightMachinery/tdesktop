@@ -358,7 +358,7 @@ SyncStoreStatus RetainSyncConfigRecord(SyncLocalState &state, const QByteArray &
 
 SyncStoreStatus SyncLocalStore::CheckConfigRetention(
 		const SyncLocalConfigState &config, const QByteArray &record) {
-	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
 		return SyncStoreStatus::InvalidTransition;
 	}
 	auto next = *_state;
@@ -367,7 +367,7 @@ SyncStoreStatus SyncLocalStore::CheckConfigRetention(
 }
 
 SyncStoreStatus SyncLocalStore::SupplyRetainedConfigBase(const QByteArray &record) {
-	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
 		return SyncStoreStatus::InvalidTransition;
 	}
 	if (record.size() > kSyncSettingsRecordStorageLimit) { return SyncStoreStatus::BaseRecordTooLarge; }
@@ -715,7 +715,7 @@ SyncStoreStatus WriteSyncDurableFile(
 
 SyncStoreStatus SyncLocalStore::CheckpointRetainedConfigBases(const SyncDurableFault &fault) {
 	if (!SyncStoreWorkerThread()) { return SyncStoreStatus::WrongThread; }
-	if (_carryOwner || _status != SyncStoreStatus::Ready || !_state || !_lock || !_lock->isLocked()) {
+	if (_status != SyncStoreStatus::Ready || !_state || !_lock || !_lock->isLocked()) {
 		return SyncStoreStatus::InvalidTransition;
 	}
 	auto next = *_state;
@@ -763,7 +763,7 @@ SyncStoreStatus SyncLocalStore::CheckpointRetainedConfigBases(const SyncDurableF
 }
 
 SyncStoreStatus SyncLocalStore::SetAside() {
-	if (_carryOwner || _status != SyncStoreStatus::Ready || !_state || !_lock || !_lock->isLocked()) {
+	if (_status != SyncStoreStatus::Ready || !_state || !_lock || !_lock->isLocked()) {
 		return SyncStoreStatus::InvalidTransition;
 	}
 	const auto folder = _root + u"/orphaned-"_q
@@ -864,15 +864,11 @@ SyncRecoveryRead ReadSyncRecoveryStore(
 }
 
 SyncStoreResult SyncLocalStore::Open(bool optedIn, const QByteArray &bindingToken) {
-	return OpenChecked(optedIn, bindingToken, false);
-}
-
-SyncStoreResult SyncLocalStore::OpenForCarry(const QByteArray &bindingToken) {
-	return OpenChecked(true, bindingToken, true);
+	return OpenChecked(optedIn, bindingToken);
 }
 
 SyncStoreResult SyncLocalStore::OpenChecked(
-		bool optedIn, const QByteArray &bindingToken, bool carryOwner) {
+		bool optedIn, const QByteArray &bindingToken) {
 	if (_opened) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
@@ -880,7 +876,6 @@ SyncStoreResult SyncLocalStore::OpenChecked(
 		return { SyncStoreStatus::Disabled };
 	}
 	_opened = true;
-	_carryOwner = carryOwner;
 	if (_root.isEmpty()
 		|| !QDir().mkpath(QFileInfo(_root).absolutePath())) {
 		return SetFailure({ SyncStoreStatus::IoError });
@@ -898,11 +893,8 @@ SyncStoreResult SyncLocalStore::OpenChecked(
 				: SyncStoreStatus::LockError,
 		});
 	}
-	const auto carryPath = _root + u"/carry.json"_q;
-	if (!carryOwner) {
-		const auto admission = SyncCarryStartupAdmission(_root, bindingToken);
-		if (admission != SyncStoreStatus::Ready) { return SetFailure({ admission }); }
-	}
+	const auto admission = SyncLegacyArtifactAdmission(_root);
+	if (admission != SyncStoreStatus::Ready) { return SetFailure({ admission }); }
 	if (QFileInfo::exists(_root + u"/recovery.json"_q) || QFileInfo(_root + u"/recovery.json"_q).isSymLink()) {
 		return SetFailure({ SyncStoreStatus::InvalidTransition });
 	}
@@ -912,8 +904,7 @@ SyncStoreResult SyncLocalStore::OpenChecked(
 	}
 	const auto stateInfo = QFileInfo(StatePath());
 	if (!stateInfo.exists() && !stateInfo.isSymLink()) {
-		if (!bindingToken.isEmpty() && !carryOwner) { return SetFailure({ SyncStoreStatus::AccountUnbound }); }
-		if (carryOwner) { return SetFailure({ SyncStoreStatus::Uninitialized }); }
+		if (!bindingToken.isEmpty()) { return SetFailure({ SyncStoreStatus::AccountUnbound }); }
 		const auto stageStatus = CheckStages(
 			_root + u"/pending"_q, nullptr);
 		return SetFailure({ stageStatus == SyncStoreStatus::Ready
@@ -951,7 +942,6 @@ SyncStoreResult SyncLocalStore::OpenChecked(
 	if (retention != SyncStoreStatus::Ready) { return SetFailure({ retention }); }
 	_state = parsed.state;
 	_status = SyncStoreStatus::Ready;
-	if (carryOwner) { return { SyncStoreStatus::Ready }; }
 	if (_state->config.pendingSeq != 0) {
 		const auto pending = ReadPendingConfigLocked();
 		if (!pending) {
@@ -1046,7 +1036,7 @@ SyncStoreResult SyncLocalStore::StageConfig(
 		const QByteArray &canonicalRecord,
 		const SyncLocalConfigState &nextConfigData,
 		const QByteArray &accountBindingToken) {
-	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (CheckSyncAccountBinding(*_state, accountBindingToken)
@@ -1105,7 +1095,7 @@ SyncStoreResult SyncLocalStore::ConfirmConfigReadBack(
 		const QString &currentDevice,
 		int32_t messageId,
 		PeerToken chat) {
-	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (!DesktopSyncChatLedgerMatches(*_state, chat)) {
@@ -1195,7 +1185,7 @@ SyncStoreResult SyncLocalStore::CommitConfigData(
 		const SyncLocalConfigState &next,
 		const QByteArray &accountBindingToken,
 		const QByteArray &baseRecord) {
-	if (_status != SyncStoreStatus::Ready || !_state || _carryOwner) {
+	if (_status != SyncStoreStatus::Ready || !_state) {
 		return { SyncStoreStatus::InvalidTransition };
 	}
 	if (CheckSyncAccountBinding(*_state, accountBindingToken)
@@ -1234,7 +1224,7 @@ SyncStoreResult SyncLocalStore::RemoveAbsentConfigMessage(
 		const QByteArray &accountBindingToken,
 		PeerToken chat) {
 	if (_status != SyncStoreStatus::Ready || !_state
-		|| _carryOwner || !DesktopSyncChatLedgerMatches(*_state, chat)
+		|| !DesktopSyncChatLedgerMatches(*_state, chat)
 		|| CheckSyncAccountBinding(*_state, accountBindingToken) != SyncAccountBindingVerdict::Bound
 		|| !CheckOwnConfigMessageDeletion(*_state, messageId, record)) {
 		return { SyncStoreStatus::InvalidTransition };
@@ -1260,7 +1250,7 @@ SyncStoreStatus SyncLocalStore::status() const {
 	return _status;
 }
 
-SyncStoreStatus SyncCarryStartupAdmission(const QString &directory, const QByteArray &bindingToken) {
+SyncStoreStatus SyncLegacyArtifactAdmission(const QString &directory) {
 	return SyncPathIdentity(directory + u"/carry.json"_q) == "missing" ? SyncStoreStatus::Ready : SyncStoreStatus::CarryPending;
 }
 

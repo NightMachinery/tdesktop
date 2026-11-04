@@ -65,7 +65,7 @@ struct SyncFirstUseReview {
 	bool settled = false;
 };
 
-[[nodiscard]] bool SyncCarryLeftoversPresent(const QString &syncDirectory);
+[[nodiscard]] bool LegacySyncArtifactsPresent(const QString &syncDirectory);
 [[nodiscard]] std::optional<SyncFirstUseMark> ReadSyncFirstUseMark(const AccountFiles &files);
 [[nodiscard]] bool WriteSyncFirstUseMark(const AccountFiles &files, const SyncFirstUseMark &mark);
 bool ClearSyncFirstUseMark(const AccountFiles &files);

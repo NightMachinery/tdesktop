@@ -38,9 +38,7 @@ SyncConfigPublish::SyncConfigPublish(
 		if (self && !self->_done && !self->AccountAvailable()) { self->Cancel(); }
 	};
 	SettingsChanges() | rpl::on_next(changed, _lifetime);
-	SyncChatPublisherQuiescence() | rpl::on_next([weak, expected = &session](Main::Session *value) {
-		if (value == expected) { if (const auto self = weak.get()) { self->Cancel(); } }
-	}, _lifetime);
+
 	Core::App().appDeactivatedValue() | rpl::on_next([weak](bool inactive) {
 		const auto self = weak.get();
 		if (inactive && self && self->_started && !self->_done) { self->Cancel(); }
@@ -67,12 +65,10 @@ SyncConfigPublish::SyncConfigPublish(
 		uint64_t scanPosts,
 		Fn<void(SyncConfigPublishResult)> finished,
 		SyncConfigPublishRequest request,
-		std::optional<DesktopSyncChatSetupSnapshot> setup,
 		Fn<bool()> current, bool initializeOnly)
 : SyncConfigPublish(account, session, std::move(inventory.inventory),
 	scanQueue, scanPosts, std::move(finished), std::move(request)) {
 	_inventoryRoute = std::move(inventory.route);
-	_setup = std::move(setup);
 	_current = std::move(current);
 	_initializeOnly = initializeOnly;
 }
@@ -81,9 +77,9 @@ SyncConfigPublish::~SyncConfigPublish() {
 	_admitted->store(false);
 	_done = true;
 	if (_post) { _post->Cancel(); }
-	if (_worker && _carryWriter) {
-		_worker->with([lease = std::move(_carryWriter)](SyncConfigPublishFlow &) {});
-	} else { _carryWriter.reset(); }
+	if (_worker && _writerLease) {
+		_worker->with([lease = std::move(_writerLease)](SyncConfigPublishFlow &) {});
+	} else { _writerLease.reset(); }
 	_worker.reset();
 }
 
@@ -91,7 +87,7 @@ bool SyncConfigPublish::AccountAvailable() const {
 	const auto account = _account.get();
 	const auto session = _session.get();
 	return !_done && _admitted->load() && account && session && _routing
-		&& (!_started || (_carryWriter && _carryWriter->current()))
+		&& (!_started || (_writerLease && _writerLease->current()))
 		&& QGuiApplication::applicationState() == Qt::ApplicationActive
 		&& !Core::App().passcodeLocked()
 		&& AccountSyncRoutingCurrent(session, *_routing)
@@ -99,7 +95,6 @@ bool SyncConfigPublish::AccountAvailable() const {
 		&& SessionAccountKey(session).userId == _inventory.accountUserId
 		&& AccountSyncBindingToken(*account) == _bindingToken
 		&& (!_current || _current())
-		&& (!_setup || CachedSyncChatSetupContextCurrent(session, _setup->scope))
 		&& (!_inventoryRoute || SyncChatIoBelongsToSession(session, *_inventoryRoute));
 }
 
@@ -107,7 +102,7 @@ void SyncConfigPublish::Start() {
 	if (_started || _done) { return; }
 	const auto sessionForGate = _session.get();
 	if (!sessionForGate) { Finish({SyncConfigPublishStatus::AccountUnavailable}); return; }
-	_carryWriter = DesktopSyncCarryGateFor(SessionAccountKey(sessionForGate))->writer();
+	_writerLease = DesktopSyncWriteGateFor(SessionAccountKey(sessionForGate))->writer();
 	_started = true;
 	if (!AccountAvailable()) { Finish({ SyncConfigPublishStatus::AccountUnavailable }); return; }
 	const auto session = _session.get();
@@ -117,7 +112,6 @@ void SyncConfigPublish::Start() {
 	input.account = SessionAccountKey(session);
 	input.chat = chat;
 	input.binding = _bindingToken;
-	input.setup = _setup;
 	input.inventory = _inventory;
 	input.request = _request;
 	input.writer = SyncWriter();
@@ -152,7 +146,6 @@ void SyncConfigPublish::Receive(SyncConfigPublishDiskReply reply) {
 			Finish({ SyncConfigPublishStatus::AccountUnbound }); return;
 		}
 		_bindingToken = AccountSyncBindingToken(*_account.get());
-		if (_setup) { _setup->scope.binding = _bindingToken; }
 		_worker->with([token = _bindingToken](SyncConfigPublishFlow &flow) { flow.bindingCommitted(token); });
 		return;
 	}
@@ -229,9 +222,9 @@ void SyncConfigPublish::Finish(SyncConfigPublishResult result) {
 	_done = true;
 	_admitted->store(false);
 	if (_post) { _post->Cancel(); }
-	if (_worker && _carryWriter) {
-		_worker->with([lease = std::move(_carryWriter)](SyncConfigPublishFlow &) {});
-	} else { _carryWriter.reset(); }
+	if (_worker && _writerLease) {
+		_worker->with([lease = std::move(_writerLease)](SyncConfigPublishFlow &) {});
+	} else { _writerLease.reset(); }
 	_worker.reset();
 	if (auto finished = std::move(_finished)) { finished(std::move(result)); }
 }

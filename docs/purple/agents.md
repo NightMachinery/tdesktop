@@ -266,8 +266,7 @@ Local saving and screenshot behavior are documented in [user_control.md](user_co
 
 The encrypted account archive adapter is described in [archive_storage.md](archive_storage.md).
 
-Sync-chat setup and its native qualification boundary are described in [sync_chat_setup.md](sync_chat_setup.md).
-How the setup screen starts, shows and stops sync chat changes is described in [sync_chat_wiring.md](sync_chat_wiring.md).
+Magic Purple Sync and its host qualification boundary are described in [sync_chat.md](sync_chat.md). Startup and account status are described in [sync_chat_service.md](sync_chat_service.md).
 
 Local emoji artwork export is described in [emoji_export.md](emoji_export.md).
 
@@ -275,6 +274,3 @@ Marked chooser WebP paste is documented in [webp_paste.md](webp_paste.md).
 
 The opt-in local control socket and standalone Go command are documented in
 [control_socket.md](control_socket.md).
-
-The held-off native carry adapter and mark port are described in
-[sync_chat_native.md](sync_chat_native.md).

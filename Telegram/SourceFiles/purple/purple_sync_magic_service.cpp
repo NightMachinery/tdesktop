@@ -14,7 +14,7 @@
 #include "main/session/send_as_peers.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_account_binding.h"
-#include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_write_gate.h"
 #include "purple/purple_sync_local_store.h"
 #include "purple/purple_sync_magic_box.h"
 #include "purple/purple_sync_magic_telegram.h"
@@ -264,13 +264,8 @@ DesktopSyncChatStatus Holder::status() const {
 		result.phase = DesktopSyncChatPhase::Use;
 		result.complete = true;
 		result.postingHeld = !eligible
-			|| DesktopSyncCarryGateFor(_origin.account)->postingHeld();
-		result.resolution.action = SyncChatAction::Use;
-		result.resolution.readChat = chat;
-		result.resolution.postingHeld = result.postingHeld;
-		if (eligible) {
-			result.resolution.readers = eligible->readers;
-		}
+			|| DesktopSyncWriteGateFor(_origin.account)->postingHeld();
+		result.chat = chat;
 		result.reason = last.manual ? u"manual"_q : u"magic"_q;
 	} break;
 	case SyncMagicResult::Kind::Wait:
@@ -291,7 +286,7 @@ DesktopSyncChatStatus Holder::status() const {
 }
 
 std::optional<DesktopSyncChatLease> Holder::lease(PeerToken chat) {
-	if (!usingChat(chat) || DesktopSyncCarryGateFor(_origin.account)->postingHeld()) {
+	if (!usingChat(chat) || DesktopSyncWriteGateFor(_origin.account)->postingHeld()) {
 		return std::nullopt;
 	}
 	const auto mapped = peer(chat);
@@ -305,7 +300,7 @@ std::optional<DesktopSyncChatLease> Holder::lease(PeerToken chat) {
 	const auto eligible = DesktopSyncChatEligibility(*mapped);
 	if (!ValidDesktopSyncChatIo(route)
 		|| !eligible
-		|| eligible->readers.populationUnknown) {
+		|| !DesktopSyncChatPopulationKnown(*mapped)) {
 		return std::nullopt;
 	}
 	const auto weak = base::make_weak(this);

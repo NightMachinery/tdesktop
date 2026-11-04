@@ -11,7 +11,7 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_history_scanner.cpp', 'purple_sync_candidate_reader.cpp',
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
-    'purple_sync_chat_carry_io.cpp', 'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
+    'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
     'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp', 'purple_sync_config_review.cpp', 'purple_settings_section.cpp']}
 
 RouteNames = set()
@@ -23,9 +23,9 @@ def inspect(values):
         if not condition:
             failures.append(name)
     app = values['purple_app_services.cpp']
-    require('startup-order', app.index('StartSyncChatDiscovery();') < app.index('StartAutomaticSettingsSync();'))
+    require('startup-order', app.index('StartSyncChatService();') < app.index('StartAutomaticSettingsSync();'))
     require('startup-origin', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);' in values['purple_sync_chat_service.cpp'])
-    discovery = values['purple_sync_chat_service.cpp'].split('void StartSyncChatDiscovery() {', 1)[-1]
+    discovery = values['purple_sync_chat_service.cpp'].split('void StartSyncChatService() {', 1)[-1]
     require('startup-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in discovery)
     autostart = values['purple_sync_auto_service.cpp'].split('void StartAutomaticSettingsSync() {', 1)[-1].split('void TriggerAutomaticSettingsSync(', 1)[0]
     require('auto-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in autostart)
@@ -65,16 +65,9 @@ def inspect(values):
         and 'return ReviewSyncConfig(account, session, inventory, chat);' in manual)
     require('auto-visible', 'if (!SyncMagicBound(session)) { return tr::lng_purple_auto_chat(tr::now); }' in auto)
     service = values['purple_sync_chat_service.cpp']
-    require('typed-inventory-route', 'ValidDesktopSyncChatIo(route)' in service and 'command.origin, command.ticket, command.chat, result' in service)
     require('tri-state-records', all('return GetSyncChatMessageOwnership(' in values[name] for name in ['purple_sync_history_scanner.cpp','purple_sync_candidate_reader.cpp']))
-    require('owned-retirement', 'Cancel(u"origin-retired"_q);' in service)
-    require('run-generation', 'command.run != _run' in service)
-    require('retry-snapshot', 'disk->stateBytes != self->_expectedStateBytes' in service)
-    require('request-timeout', '_requestTimeout.callOnce(30 * 1000);' in service)
     require('no-posting', all(value not in service for value in ['MTPmessages_Send', 'MTPmessages_Edit', 'MTPchannels_Create', 'MTPmessages_Delete']))
     require('no-active-fallback', all(value not in service for value in ['activeSession(', 'activeAccount(', 'selectedAccount']))
-    require('before-post-lock-proof', '_operation.directory' in service and '_operation.account' in service and '_operation.current()' in service)
-    require('inventory-current-pure', 'self->Current() && self->_model' in service and 'self->_run == command.run' in service)
     scan = values['purple_sync_history_scanner.cpp']
     read = values['purple_sync_candidate_reader.cpp']
     inventory = values['purple_sync_account_inventory.cpp']
@@ -104,12 +97,6 @@ def inspect(values):
     require('final-lease-current', '!lease->current || !lease->current()' in upload)
     ordinary = upload.split('\n\tconst auto target = route();', 1)[1]
     require('updates-before-completion', ordinary.index('session->api().applyUpdates(result,') < ordinary.index('Finish(Current() && receipt'))
-    carry_upload = upload.split('void SyncConfigUpload::OnMedia(', 1)[1].split('\n\tconst auto target = route();', 1)[0]
-    carry_receipt = values['purple_sync_chat_carry_io.cpp'].split('std::optional<int32_t> DesktopSyncCarryUpdatesReceipt(', 1)[1].split('std::optional<MTPmessages_ForwardMessages>', 1)[0]
-    require('carry-updates-before-completion', 'current->api().applyUpdates(updates, randomId);' in carry_upload
-        and carry_upload.index('DesktopSyncCarryUpdatesReceipt(*_carry, result,') < carry_upload.index('Finish(Current() && receipt')
-        and 'applyUpdates(updates, captured.randomId());' in carry_receipt
-        and carry_receipt.index('applyUpdates(updates, captured.randomId());') < carry_receipt.index('return captured.current()'))
     require('upload-callback-lifetime', 'return !_done && session && !session->account().loggingOut()' in upload and 'SessionAccountKey(session) == _account' in upload)
     require('post-typed-readback', '_session, *_route, int32_t(_messageId.bare)' in post)
     require('post-exact-confirm', 'result.messageId == _messageId.bare && result.record == _staged' in post and 'result.fresh && result.owned' in post)
@@ -118,29 +105,23 @@ def inspect(values):
     require('publisher-gui-no-files', all(marker not in publisher for marker in ['AccountSyncInspectionTarget(', 'AccountSyncTarget(', 'ValidateAccountSyncTarget(', 'ReadSettingsFileInput(', 'ReadSyncSettingsFile(', 'InspectSyncAccountRecovery(', 'SyncLocalStore(', '->StageConfig(', '->ConfirmConfigReadBack(']))
     flow = values['purple_sync_config_publish_flow.cpp']
     one_space = flow.split('bool OneSyncSpace(', 1)[1].split('bool CreatedBySetup(', 1)[0]
-    created = flow.split('bool CreatedBySetup(', 1)[1].split('SyncConfigPublishFlow::SyncConfigPublishFlow(', 1)[0]
     require('unbound-join-admission', 'record.status == SyncCandidateStatus::Valid' in one_space
         and 'record.header->space == *space' in one_space and '!inventory.read->records.empty()' in one_space
-        and 'if (identity == "missing") { return false; }' in created and 'return !journal || journal->created' in created
-        and '(journal->choice == DesktopSyncChatSetupChoice::Create && !journal->adopted)' in created
-        and 'const auto joinable = empty || (complete && OneSyncSpace(inventory)' in flow
-        and '&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));' in flow
-        and '|| (_input.chat != PeerToken{} && !joinable && !magicJoinable)' in flow and '(_input.chat != PeerToken{} && !empty)' not in flow)
+        and 'const auto joinable = empty || (complete && OneSyncSpace(inventory));' in flow
+        and '|| (_input.chat != PeerToken{} && !joinable && !magicJoinable)' in flow)
     magic_bound = flow.split('bool MagicBound(', 1)[1].split('SyncConfigPublishFlow::SyncConfigPublishFlow(', 1)[0]
     require('magic-publish-authority', 'binding->chat == chat && binding->problem == SyncChatProblem::None' in magic_bound
         and '(chat == PeerToken{} || binding->verifiedAt > 0)' in magic_bound
-        and 'if (!setup && MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow
+        and '_magic = MagicBound(_target->files.syncDirectory, _input.chat);' in flow
         and 'const auto magicJoinable = _magic && complete && SelectedSyncSpace(inventory);' in flow
-        and '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow)
+        and 'if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {' in flow)
     selected = flow.split('bool SelectedSyncSpace(', 1)[-1].split('bool CreatedBySetup(', 1)[0]
     require('magic-join-selected-space', 'return record.status == SyncCandidateStatus::Valid && record.header;' in selected
         and 'record.header && record.header->space == *space' in selected and 'inventory.directory.selectedSpace' in selected)
     check = values['purple_sync_setup_box.cpp'].split('void StartCheck(', 1)[1]
     require('magic-manual-check', 'MoveSyncStateToBoundChat(session);' in check
-        and '!lease->current() || !setup' not in check and 'state->setup = SyncChatSetupSnapshotOf(session);' in check)
+        and '!lease->current() || !setup' not in check and 'SyncChatSetupSnapshotOf' not in check)
     require('magic-move-unbound-auto', 'if (session && SyncMagicBound(session)) {\n\t\t\tFor(session).MoveToBound();' in auto and 'MoveStore();' in auto)
-    require('adopted-setup-join', '|| (!journal->adopted && (journal->markId != setup->cache->mark.markId' in flow
-        and '|| journal->markDate != setup->cache->mark.markDate))' in flow and '|| setup->cache->mark.chat != _input.chat) {' in flow)
     box = values['purple_sync_setup_box.cpp']
     joins = box.split('bool JoinsTypedChat(', 1)[1].split('bool UnboundTypedChoice(', 1)[0]
     require('typed-join-route', 'state.route->peer.chat != PeerToken{}' in joins and '!state.review->bound' in joins
@@ -172,17 +153,17 @@ def inspect(values):
     require('borrowed-proof-run', 'self->_store.get() == store && self->_sessionId == owner' in operation and 'store->Current()' in operation)
     require('borrowed-proof-observer-free', 'SyncChatSelfResolved' not in operation and 'Accept(' not in operation and 'CheckCompletion(' not in operation)
     require('auto-typed-inventory', 'lease->route, nullptr' in auto and 'DesktopSyncChatInventoryMatches(inventory, origin, chat)' in auto)
-    pause = auto.split('bool AutoSession::PauseOnForeignSpace(', 1)[-1].split('void AutoSession::RetireCarry(', 1)[0]
+    pause = auto.split('bool AutoSession::PauseOnForeignSpace(', 1)[-1].split('void AutoSession::RetireLegacyArtifacts(', 1)[0]
     require('auto-space-first-use', 'if (self->PauseOnForeignSpace(chat)) { return; }' in auto
         and 'ReviewSyncFirstUse(_store->files(), _inventory)' in pause
         and 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {' in pause
         and 'self->FirstUse(std::move(inventory), SyncFirstUseChoice::None, nullptr, false);' in pause
         and 'raise(SyncChatProblem::SpaceMismatch)' not in auto)
     opened = auto.split('bool AutoSession::Open() {', 1)[-1].split('void AutoSession::MoveStore()', 1)[0]
-    retire = auto.split('void AutoSession::RetireCarry() {', 1)[-1].split('bool AutoSession::NoStateEvent(', 1)[0]
-    require('first-use-carry-retire', 'RetireCarry();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);' in opened
-        and '!SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()' in retire
-        and 'RetireSyncCarryLeftovers(target->files.syncDirectory, date)' in retire)
+    retire = auto.split('void AutoSession::RetireLegacyArtifacts() {', 1)[-1].split('bool AutoSession::NoStateEvent(', 1)[0]
+    require('first-use-carry-retire', 'RetireLegacyArtifacts();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);' in opened
+        and '!SyncMagicBound(session) || DesktopSyncWriteGateFor(_account)->postingHeld()' in retire
+        and 'RetireLegacySyncArtifacts(target->files.syncDirectory, date)' in retire)
     unbound = auto.split('bool AutoSession::NoStateEvent(', 1)[-1].split('void AutoSession::FirstUse(', 1)[0]
     require('auto-first-use-unbound', 'if (!Open()) { Stop(); return NoStateEvent(event); }' in auto
         and 'recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup' in unbound
@@ -257,12 +238,9 @@ negative = [
     ('purple_settings_section.cpp', '| rpl::then(AutomaticSettingsSyncChanges())', '| rpl::then(rpl::never<>())', 'advanced-sync-enabled'),
     ('purple_sync_account_inventory.cpp', '_readStarted = DesktopSyncChatReadStamp::Begin();', '', 'inventory-read-start'),
     ('purple_sync_account_inventory.cpp', 'std::move(_receipts), _readStarted', 'std::move(_receipts), {}', 'inventory-read-stamp'),
-    ('purple_sync_config_upload.cpp', 'current->api().applyUpdates(updates, randomId);', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),
-    ('purple_sync_chat_carry_io.cpp', 'applyUpdates(updates, captured.randomId());', 'IgnoreUpdates(updates);', 'carry-updates-before-completion'),
     ('purple_sync_config_publish.cpp', '_done = true;\n\t_admitted->store(false);\n\tif (_post) { _post->Cancel(); }', '_admitted->store(false);\n\tif (_post) { _post->Cancel(); }\n\t_done = true;', 'publisher-terminal-before-child'),
     ('purple_account_config.cpp', 'a.sourceGeneration == b.sourceGeneration', 'true', 'publisher-source-epoch'),
-    ('purple_sync_chat_service.cpp', 'disk->stateBytes != self->_expectedStateBytes', 'false', 'retry-snapshot'),
-    ('purple_app_services.cpp', 'StartSyncChatDiscovery();', 'StartSyncChatDiscoveryLater();', 'startup-order'),
+    ('purple_app_services.cpp', 'StartSyncChatService();', 'StartSyncChatServiceLater();', 'startup-order'),
     ('purple_sync_chat_service.cpp', 'SyncMagicLookup(session, SyncMagicTrigger::Startup, false);', 'Other(session);', 'startup-origin'),
     ('purple_sync_chat_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'startup-stored-sessions'),
     ('purple_sync_auto_service.cpp', '\tCore::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);\n', '', 'auto-stored-sessions'),
@@ -273,11 +251,7 @@ negative = [
     ('purple_sync_auto_service.cpp', '*session, self->_inventory, self->StateChat());', '*session, self->_inventory);', 'auto-apply-state-chat'),
     ('purple_sync_setup_box.cpp', 'if (review.status != SyncConfigReviewStatus::Ready\n\t\t|| !review.bound\n\t\t|| review.plan.verdict != ConfigSyncVerdict::Adopt) {', 'if (chat != PeerToken{} || review.status != SyncConfigReviewStatus::Ready\n\t\t|| !review.bound\n\t\t|| review.plan.verdict != ConfigSyncVerdict::Adopt) {', 'manual-adopt-any-chat'),
     ('purple_sync_setup_box.cpp', 'return ReviewSyncConfig(account, session, inventory, chat);', 'return ReviewSyncConfig(account, session, inventory);', 'manual-adopt-any-chat'),
-    ('purple_sync_chat_service.cpp', 'ValidDesktopSyncChatIo(route)', 'true', 'typed-inventory-route'),
     ('purple_sync_history_scanner.cpp', 'return GetSyncChatMessageOwnership(', 'return IsOwnSyncChatMessage(', 'tri-state-records'),
-    ('purple_sync_chat_service.cpp', 'command.run != _run', 'false', 'run-generation'),
-    ('purple_sync_chat_service.cpp', '_requestTimeout.callOnce(30 * 1000);', '', 'request-timeout'),
-    ('purple_sync_chat_service.cpp', 'self->Current() && self->_model', 'true && self->_model', 'inventory-current-pure'),
     ('purple_sync_history_scanner.cpp', 'DesktopSyncChatHistoryRequest(*_route, _pages.offset())', 'Other()', 'scan-typed-route'),
     ('purple_sync_history_scanner.cpp', 'handleAllErrors().send()', 'send()', 'scan-flood-refusal'),
     ('purple_sync_candidate_reader.cpp', 'DesktopSyncChatRecordRequest(*_route, id)', 'Other()', 'reader-exact-route'),
@@ -305,9 +279,6 @@ negative = [
     ('purple_sync_setup_box.cpp', "this account's selected ", "this account's Saved ", 'typed-settings-confirmation'),
     ('purple_sync_config_publish_flow.cpp', 'record.status == SyncCandidateStatus::Valid', 'true', 'unbound-join-admission'),
     ('purple_sync_config_publish_flow.cpp', 'record.header->space == *space', 'true', 'unbound-join-admission'),
-    ('purple_sync_config_publish_flow.cpp', 'return !journal || journal->created', 'return !journal', 'unbound-join-admission'),
-    ('purple_sync_config_publish_flow.cpp', '&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));', ');', 'unbound-join-admission'),
-    ('purple_sync_config_publish_flow.cpp', '(!journal->adopted && (', '(true && (', 'adopted-setup-join'),
     ('purple_sync_setup_box.cpp', '|| JoinsTypedChat(*state))) {', ')) {', 'typed-join-route'),
     ('purple_sync_setup_box.cpp', 'state.route->peer.chat != PeerToken{}\n', 'true\n', 'typed-join-route'),
     ('purple_sync_setup_box.cpp', 'if (UnboundTypedChoice(*state, *state->review)) {', 'if (false) {', 'unbound-typed-choice-guard'),
@@ -333,8 +304,8 @@ negative = [
     ('purple_sync_auto_service.cpp', 'mark->checkedAt = int64_t(base::unixtime::now());', 'mark->checkedAt = 0;', 'first-use-lifecycle-limit'),
     ('purple_sync_auto_service.cpp', '} else if (review.need == SyncFirstUseNeed::Unjoined) {\n\t\tFirstUseJoined(inventory, review);', '} else if (false) {\n\t\tFirstUseJoined(inventory, review);', 'first-use-mark'),
     ('purple_sync_auto_service.cpp', 'if (!WriteSyncFirstUseMark(target->files, mark)) {', 'if (false) {', 'first-use-mark'),
-    ('purple_sync_auto_service.cpp', '\tRetireCarry();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);', '\tconst auto recovery = InspectSyncAccountRecovery(*session);', 'first-use-carry-retire'),
-    ('purple_sync_auto_service.cpp', '!SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()', '!SyncMagicBound(session)', 'first-use-carry-retire'),
+    ('purple_sync_auto_service.cpp', '\tRetireLegacyArtifacts();\n\tconst auto recovery = InspectSyncAccountRecovery(*session);', '\tconst auto recovery = InspectSyncAccountRecovery(*session);', 'first-use-carry-retire'),
+    ('purple_sync_auto_service.cpp', '!SyncMagicBound(session) || DesktopSyncWriteGateFor(_account)->postingHeld()', '!SyncMagicBound(session)', 'first-use-carry-retire'),
     ('purple_sync_auto_service.cpp', 'if (!Open()) { Stop(); return NoStateEvent(event); }', 'if (!Open()) { Stop(); return false; }', 'auto-first-use-unbound'),
     ('purple_sync_auto_service.cpp', 'recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup', 'recovery->plan.status != SyncAccountRecoveryStatus::Setup', 'auto-first-use-unbound'),
     ('purple_sync_auto_service.cpp', 'if (!recovery || recovery->journalPresent) {\n\t\tFirstUseFail(', 'if (!recovery) {\n\t\tFirstUseFail(', 'first-use-journal-guard'),
@@ -357,7 +328,6 @@ negative = [
     ('purple_sync_magic_telegram.cpp', 'archive ? data.chatsListLoaded(archive) : result.mainLoaded;', 'archive && data.chatsListLoaded(archive);', 'magic-lists-unfiltered'),
     ('purple_sync_magic_box.cpp', 'return frame.telegram', 'return true', 'magic-wait-wording'),
     ('purple_sync_config_publish_flow.cpp', ' || binding->verifiedAt > 0)', ')', 'magic-publish-authority'),
-    ('purple_sync_config_publish_flow.cpp', '} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {', '} else if (false) {', 'magic-publish-authority'),
     ('purple_sync_config_publish_flow.cpp', '_magic && complete && SelectedSyncSpace(inventory);', '_magic && complete;', 'magic-publish-authority'),
     ('purple_sync_config_publish_flow.cpp', 'return record.status == SyncCandidateStatus::Valid && record.header;', 'return true;', 'magic-join-selected-space'),
     ('purple_sync_config_publish_flow.cpp', 'record.header && record.header->space == *space;', 'record.header;', 'magic-join-selected-space'),

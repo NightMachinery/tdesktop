@@ -6,7 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_upload.h"
-#include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_write_gate.h"
 
 #include "api/api_common.h"
 #include "apiwrap.h"
@@ -71,30 +71,13 @@ SyncConfigUpload::SyncConfigUpload(
 	_route = std::move(route);
 }
 
-SyncConfigUpload::SyncConfigUpload(
-		Main::Session &session,
-		DesktopSyncCarryPermit permit,
-		Fn<void(std::optional<MsgId>)> finished,
-		Fn<bool()> stillCurrent,
-		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry)
-: SyncConfigUpload(session, permit.target(), permit.uploadContent(), std::move(finished), std::move(stillCurrent)) {
-	_carryContentValid = permit.fileId() && !_content.isEmpty() && permit.claimUpload();
-	_fileId = permit.fileId();
-	_randomId = permit.randomId();
-	_carry = std::move(permit);
-	_renewCarry = std::move(renewCarry);
-}
 
 bool SyncConfigUpload::RequestCurrent() const {
-	if (!_carry || _offset < _content.size()) { return Current(); }
-	const auto session = _session.get();
-	return !_done && session && !session->account().loggingOut()
-		&& session->account().maybeSession() == session
-		&& SessionAccountKey(session) == _account;
+	return Current();
 }
 
 bool SyncConfigUpload::Current() const {
-	if (!_carry && DesktopSyncCarryGateFor(_account)->postingHeld()) { return false; }
+	if (DesktopSyncWriteGateFor(_account)->postingHeld()) { return false; }
 
 	const auto session = _session.get();
 	return !_done && session && !session->account().loggingOut()
@@ -103,17 +86,15 @@ bool SyncConfigUpload::Current() const {
 		&& _stillCurrent && _stillCurrent()
 		&& (!_route || (ValidDesktopSyncChatIo(*_route)
 			&& _route->peer.origin.account == _account))
-		&& (!_lease || (_lease->current && _lease->current()))
-		&& (!_carry || (!_editId && _carryContentValid && _carry->current()
-			&& SyncChatIoBelongsToSession(session, _carry->target())));
+		&& (!_lease || (_lease->current && _lease->current()));
 }
 
 std::optional<DesktopSyncChatIo> SyncConfigUpload::route() const {
-	return _carry ? std::optional(_carry->target()) : _lease ? std::optional(_lease->route) : std::nullopt;
+	return _lease ? std::optional(_lease->route) : std::nullopt;
 }
 
 Fn<bool()> SyncConfigUpload::readbackCurrent() const {
-	return _carry ? Fn<bool()>([permit = *_carry] { return permit.current(); }) : _lease ? _lease->current : Fn<bool()>();
+	return _lease ? _lease->current : Fn<bool()>();
 }
 
 SyncConfigUpload::~SyncConfigUpload() {
@@ -128,7 +109,6 @@ SyncConfigUpload::~SyncConfigUpload() {
 }
 
 void SyncConfigUpload::Cancel() {
-	if (_carry) { _carry->revoke(); }
 	Finish(std::nullopt);
 }
 
@@ -153,7 +133,7 @@ void SyncConfigUpload::Start() {
 			}
 		}
 	}, _lifetime);
-	if (!_carry) { _fileId = base::RandomValue<uint64>(); }
+	_fileId = base::RandomValue<uint64>();
 	_parts = int((_content.size() + kUploadPartBytes - 1)
 		/ kUploadPartBytes);
 	SendNextPart();
@@ -206,22 +186,6 @@ void SyncConfigUpload::RenewBeforePost(Fn<void(bool)> ready) {
 		return;
 	}
 	_checking = true;
-	if (_carry) {
-		if (!_renewCarry) { _checking = false; ready(false); return; }
-		const auto self = shared_from_this();
-		const auto opening = *_carry;
-		const auto ticket = ++_carryGateTicket;
-		_renewCarry([self, opening, ticket, ready = std::move(ready)](std::optional<DesktopSyncCarryPermit> fresh) {
-			if (self->_done || !self->_checking || self->_carryGateTicket != ticket
-				|| !self->_carry || self->_carry->renewal() != opening.renewal()) { return; }
-			self->_checking = false;
-			if (!self->Current() || !fresh || !opening.compatible(*fresh)) { ready(false); return; }
-			self->_carry = std::move(fresh);
-			self->_route = self->_carry->target();
-			ready(true);
-		});
-		return;
-	}
 	_lease.reset();
 	const auto self = shared_from_this();
 	const auto chat = _route ? _route->peer.chat : PeerToken{};
@@ -230,7 +194,7 @@ void SyncConfigUpload::RenewBeforePost(Fn<void(bool)> ready) {
 		self->_checking = false;
 		if (!self->Current() || !status.complete || status.postingHeld
 			|| status.phase != DesktopSyncChatPhase::Use
-			|| status.resolution.readChat != chat) {
+			|| status.chat != chat) {
 			ready(false);
 			return;
 		}
@@ -271,12 +235,12 @@ void SyncConfigUpload::ResumeEffect(Fn<void(bool)> ready) {
 }
 
 void SyncConfigUpload::DispatchMedia() {
-	if (_done || !Current() || (!_lease && !_carry)
+	if (_done || !Current() || !_lease
 		|| _editId.bare < 0 || _editId.bare > std::numeric_limits<int32_t>::max()) {
 		Finish(std::nullopt);
 		return;
 	}
-	if (!_carry) { _randomId = base::RandomValue<uint64>(); }
+	_randomId = base::RandomValue<uint64>();
 	const auto filename = SyncSettingsRecordFileName();
 	const auto checksum = QCryptographicHash::hash(
 		_content,
@@ -346,21 +310,7 @@ void SyncConfigUpload::DispatchMedia() {
 	}).handleAllErrors().send();
 }
 
-std::optional<MTPUpdates> SyncConfigUpload::carryResult() const {
-	return _carryResult;
-}
-
 void SyncConfigUpload::OnMedia(const MTPUpdates &result) {
-	if (_carry) {
-		_carryResult = result;
-		const auto session = _session;
-		const auto receipt = DesktopSyncCarryUpdatesReceipt(*_carry, result,
-			[session](const MTPUpdates &updates, uint64_t randomId) {
-				if (const auto current = session.get()) { current->api().applyUpdates(updates, randomId); }
-			});
-		Finish(Current() && receipt ? std::optional(MsgId(*receipt)) : std::nullopt);
-		return;
-	}
 	const auto target = route();
 	const auto receipt = target
 		? DesktopSyncChatUploadReceipt(*target, result, _randomId, int32_t(_editId.bare))

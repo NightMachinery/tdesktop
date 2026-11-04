@@ -1,8 +1,7 @@
 #define PURPLE_SYNC_CHAT_IO_EMBEDDED
 #include "test_sync_chat_io.cpp"
 #include "purple/purple_sync_chat_write.h"
-#include "purple/purple_sync_chat_carry_io.h"
-#include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_write_gate.h"
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_config_post.h"
 #include "base/random.h"
@@ -19,10 +18,6 @@ void RandomFill(bytes::span data) {
 	}
 }
 }
-
-#ifndef PURPLE_SYNC_CHAT_MARK_TEXT_NATIVE
-#include "carry-mark-text.inc"
-#endif
 
 namespace {
 
@@ -108,6 +103,21 @@ std::shared_ptr<PostCounters> PostsFor(not_null<UploadSession*> session,PeerToke
 std::function<void()> BeginNetwork(not_null<UploadSession*> session,PeerToken chat)
 #include "post-network.inc"
 
+void WriteFence() {
+	auto gate = DesktopSyncWriteGateFor({0, 789});
+	auto writer = gate->writer();
+	CHECK(writer && writer->current() && !gate->postingHeld());
+	auto exclusive = gate->exclusive();
+	CHECK(exclusive && exclusive->current() && gate->postingHeld());
+	CHECK(!writer->current() && !exclusive->quiescent() && !gate->writer());
+	auto other = DesktopSyncWriteGateFor({0, 790});
+	CHECK(other->writer() && !other->postingHeld());
+	writer.reset();
+	CHECK(exclusive->quiescent());
+	exclusive.reset();
+	CHECK(!gate->postingHeld() && gate->writer()->current());
+}
+
 void CounterScopes() {
 	auto first=std::optional<UploadSession>(); first.emplace();
 	auto second=UploadSession();
@@ -147,11 +157,6 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 	std::optional<DesktopSyncChatIo> _route;
 	std::optional<DesktopSyncChatLease> _lease;
 	DesktopSyncChatOperation _operation;
-	std::optional<DesktopSyncCarryPermit> _carry;
-	std::optional<MTPUpdates> _carryResult;
-	bool _carryContentValid = false;
-	uint64_t _carryGateTicket = 0;
-	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
 	QByteArray _content;
 	Fn<void(std::optional<MsgId>)> _finished;
 	Fn<void()> _editRefused;
@@ -188,15 +193,12 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 		_finished = std::move(finished);
 		_stillCurrent = std::move(stillCurrent);
 	}
-	UploadProbe(UploadSession &session, DesktopSyncCarryPermit permit,
-		Fn<void(std::optional<MsgId>)> finished, Fn<bool()> stillCurrent,
-		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry);
 	bool RequestCurrent() const
 #include "upload-RequestCurrent.inc"
 	bool Current() const
 #include "upload-Current.inc"
-	std::optional<DesktopSyncChatIo> route() const { return _carry ? std::optional(_carry->target()) : _lease ? std::optional(_lease->route) : std::nullopt; }
-	Fn<bool()> readbackCurrent() const { return _carry ? Fn<bool()>([permit = *_carry] { return permit.current(); }) : _lease ? _lease->current : Fn<bool()>(); }
+	std::optional<DesktopSyncChatIo> route() const { return _lease ? std::optional(_lease->route) : std::nullopt; }
+	Fn<bool()> readbackCurrent() const { return _lease ? _lease->current : Fn<bool()>(); }
 	void SendNextPart()
 #include "upload-SendNextPart.inc"
 	void SendMedia()
@@ -215,11 +217,10 @@ struct UploadProbe : std::enable_shared_from_this<UploadProbe> {
 #include "upload-Cancel.inc"
 };
 
-#include "upload-CarryConstructor.inc"
 
 DesktopSyncChatStatus Usable(PeerToken chat) {
 	auto status = DesktopSyncChatStatus(); status.complete = true; status.postingHeld = false;
-	status.phase = DesktopSyncChatPhase::Use; status.resolution.readChat = chat; return status;
+	status.phase = DesktopSyncChatPhase::Use; status.chat = chat; return status;
 }
 
 void Gate(const DesktopSyncChatIo &route, Fn<bool()> current = [] { return true; }) {
@@ -462,11 +463,6 @@ struct OrdinaryPostContext {
 
 struct PostProbe : base::has_weak_ptr {
 	DesktopSyncChatOperation _operation;
-	std::optional<DesktopSyncCarryPermit> _carry;
-	std::optional<MTPUpdates> _carryResult;
-	bool _carryContentValid = false;
-	uint64_t _carryGateTicket = 0;
-	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
 	UploadSession *_session;
 	std::optional<DesktopSyncChatIo> _route;
 	Fn<bool()> _readbackCurrent;
@@ -585,8 +581,8 @@ void PostReadbackSchedules() {
 
 #ifndef PURPLE_SYNC_CHAT_WRITE_EMBEDDED
 int main() {
-	AuthorMain(); RoutesAndWire(); FullReadPath(); ExactReadback(); CandidateSeal(); LedgerScope();
-	ReceiptMatrix(); UploadSchedules(); WorkerEffectSchedules(); PostReadbackSchedules(); BorrowedRunProof(); CounterScopes();
+	RoutesAndWire(); FullReadPath(); ExactReadback(); CandidateSeal(); LedgerScope();
+	ReceiptMatrix(); UploadSchedules(); WorkerEffectSchedules(); PostReadbackSchedules(); BorrowedRunProof(); WriteFence(); CounterScopes();
 	std::printf("TYPED WRITE %d checks, %d failures\n",Checks,Failures);
 	return Failures?1:0;
 }

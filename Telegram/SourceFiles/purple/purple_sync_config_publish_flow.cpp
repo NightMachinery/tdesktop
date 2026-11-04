@@ -2,9 +2,7 @@
 
 #include "base/random.h"
 #include "purple/purple_sync_account_recovery.h"
-#include "purple/purple_sync_chat_create.h"
 #include "purple/purple_sync_chat_io.h"
-#include "purple/purple_sync_chat_store.h"
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_magic_chat.h"
 
@@ -51,17 +49,6 @@ bool SelectedSyncSpace(const SyncAccountInventoryResult &inventory) {
 		});
 }
 
-// This device's setup created the chat, or was creating it. A chat found by discovery leaves no
-// journal; one picked at setup, or adopted from another device's stream, was not created here.
-bool CreatedBySetup(const QByteArray &identity, const QByteArray &bytes,
-		const std::optional<DesktopSyncChatSetupSnapshot> &setup, const AccountKey &account) {
-	if (identity == "missing") { return false; }
-	const auto journal = setup ? ParseDesktopSyncChatCreateJournal(bytes,
-		DesktopSyncChatSetupAuthority(setup->scope), account) : std::nullopt;
-	return !journal || journal->created
-		|| (journal->choice == DesktopSyncChatSetupChoice::Create && !journal->adopted);
-}
-
 // A verified magic binding to `chat` stands in for the legacy setup journal and discovery cache.
 bool MagicBound(const QString &syncDirectory, PeerToken chat) {
 	const auto input = ReadSettingsFileInput(
@@ -90,65 +77,15 @@ bool SyncConfigPublishFlow::current() const {
 }
 
 bool SyncConfigPublishFlow::setupAllowed() {
-	const auto &setup = _input.setup;
-	if (!setup && MagicBound(_target->files.syncDirectory, _input.chat)) {
-		_magic = true;
-		_setupPath = QDir(_target->files.syncDirectory).filePath(u"sync-chat-setup.json"_q);
-		_setupIdentity = SyncPathIdentity(_setupPath);
-		if (_setupIdentity.isEmpty() || (_setupIdentity != "missing"
-			&& ReadSyncPrivateFile(_setupPath, 512 * 1024, _setupBytes) != SyncStoreStatus::Ready)) {
-			return false;
-		}
-		return current() && _setupIdentity == SyncPathIdentity(_setupPath);
+	_magic = MagicBound(_target->files.syncDirectory, _input.chat);
+	_setupPath = QDir(_target->files.syncDirectory).filePath(u"sync-chat-setup.json"_q);
+	_setupIdentity = SyncPathIdentity(_setupPath);
+	if (_setupIdentity.isEmpty() || (_setupIdentity != "missing"
+		&& (!_magic || ReadSyncPrivateFile(_setupPath, 512 * 1024, _setupBytes) != SyncStoreStatus::Ready))) {
+		return false;
 	}
-	if (setup && (setup->scope.origin.account != _input.account
-		|| setup->scope.root != _input.routing.root
-		|| setup->scope.owner != _input.routing.owner
-		|| setup->scope.mode != _routing.workMode(_input.account)
-		|| setup->scope.binding != _input.binding)) { return false; }
-	const auto path = QDir(_target->files.syncDirectory).filePath(u"sync-chat-setup.json"_q);
-	const auto identity = SyncPathIdentity(path);
-	if (identity.isEmpty()) { return false; }
-	auto bytes = QByteArray();
-	if (identity != "missing") {
-		if (!setup || setup->scope.origin.account != _input.account
-			|| setup->scope.root != _input.routing.root
-			|| ReadSyncPrivateFile(path, 512 * 1024, bytes) != SyncStoreStatus::Ready) {
-			return false;
-		}
-		const auto journal = ParseDesktopSyncChatCreateJournal(bytes,
-			DesktopSyncChatSetupAuthority(setup->scope), _input.account);
-		// A setup that adopted the account's resolved mark posted none of its own; only its chat ties
-		// it to the cache.
-		if (!journal || journal->step != DesktopSyncChatCreateStep::Done
-			|| journal->pending || journal->cancelled || !journal->chat
-			|| *journal->chat != _input.chat || !setup->cache
-			|| (!journal->adopted && (journal->markId != setup->cache->mark.markId
-				|| journal->markDate != setup->cache->mark.markDate))
-			|| setup->cache->mark.chat != _input.chat) {
-			return false;
-		}
-	}
-	if (_input.chat != PeerToken{}) {
-		if (!setup || !setup->cache || setup->scope.carry || setup->cache->carry
-			|| !setup->cache->readerConsent
-			|| setup->scope.origin.account != _input.account
-			|| setup->cache->account != _input.account
-			|| setup->cache->mark.chat != _input.chat
-			|| setup->cache->loginBinding != setup->scope.loginBinding) {
-			return false;
-		}
-		const auto disk = OpenDesktopSyncChatDisk(_input.routing.root,
-			_target->files.syncDirectory, _target->files.syncStore,
-			_input.account, _input.binding, setup->scope.loginBinding, _admitted, true);
-		if (!disk->error.isEmpty() || !disk->cache
-			|| disk->cache->mark != setup->cache->mark
-			|| !disk->cache->readerConsent) { return false; }
-	}
-	_setupPath = path;
-	_setupIdentity = identity;
-	_setupBytes = bytes;
-	return current() && identity == SyncPathIdentity(path);
+	return current() && (_magic || _input.chat == PeerToken{})
+		&& _setupIdentity == SyncPathIdentity(_setupPath);
 }
 
 bool SyncConfigPublishFlow::recoveryAllowed() {
@@ -211,8 +148,7 @@ void SyncConfigPublishFlow::start() {
 		const auto &directory = inventory.directory;
 		// Another device's chat may be joined while it holds that device's records; a chat this
 		// device created must still be empty.
-		const auto joinable = empty || (complete && OneSyncSpace(inventory)
-			&& !CreatedBySetup(_setupIdentity, _setupBytes, _input.setup, _input.account));
+		const auto joinable = empty || (complete && OneSyncSpace(inventory));
 		const auto magicJoinable = _magic && complete && SelectedSyncSpace(inventory);
 		if (_input.request.pendingOnly || !complete
 			|| (directory.selectedSpace && (!directory.publishableSpace
@@ -255,32 +191,6 @@ void SyncConfigPublishFlow::bindingCommitted(QByteArray token) {
 		|| CheckSyncAccountBinding(*_store->state(), token) != SyncAccountBindingVerdict::Bound) {
 		finish({ SyncConfigPublishStatus::AccountUnbound }); return;
 	}
-	if (!_magic && _setupIdentity != "missing") {
-		if (!_input.setup || !current() || !_routing.validateOpen(*_opening)
-			|| SyncPathIdentity(_setupPath) != _setupIdentity) {
-			finish({ SyncConfigPublishStatus::NeedsReview }); return;
-		}
-		auto bytes = QByteArray();
-		if (ReadSyncPrivateFile(_setupPath, 512 * 1024, bytes) != SyncStoreStatus::Ready
-			|| bytes != _setupBytes) { finish({ SyncConfigPublishStatus::NeedsReview }); return; }
-		auto journal = ParseDesktopSyncChatCreateJournal(bytes,
-			DesktopSyncChatSetupAuthority(_input.setup->scope), _input.account);
-		if (!journal || journal->step != DesktopSyncChatCreateStep::Done
-			|| journal->pending || journal->cancelled || journal->chat != _input.chat) {
-			finish({ SyncConfigPublishStatus::NeedsReview }); return;
-		}
-		auto scope = _input.setup->scope;
-		scope.binding = token;
-		journal->authority = DesktopSyncChatSetupAuthority(scope);
-		const auto rebound = SerializeDesktopSyncChatCreateJournal(*journal);
-		if (!rebound || !current()
-			|| WriteSyncPrivateFile(_setupPath, *rebound) != SyncStoreStatus::Ready) {
-			finish({ SyncConfigPublishStatus::NeedsReview }); return;
-		}
-		_input.setup->scope = std::move(scope);
-		_setupBytes = *rebound;
-		_setupIdentity = SyncPathIdentity(_setupPath);
-	}
 	_bindingPending = false;
 	_input.binding = std::move(token);
 	prepare();
@@ -299,15 +209,7 @@ bool SyncConfigPublishFlow::authorize() {
 		if (ReadSyncPrivateFile(_setupPath, 512 * 1024, bytes) != SyncStoreStatus::Ready
 			|| bytes != _setupBytes) { return false; }
 	}
-	if (_input.setup) {
-		const auto &scope = _input.setup->scope;
-		const auto disk = OpenDesktopSyncChatDisk(_input.routing.root,
-			_target->files.syncDirectory, _target->files.syncStore,
-			_input.account, _input.binding, scope.loginBinding, _admitted, true);
-		if (!disk->error.isEmpty() || !_input.setup->cache || !disk->cache
-			|| disk->cache->mark != _input.setup->cache->mark || disk->cache->carry
-			|| (_input.chat != PeerToken{} && !disk->cache->readerConsent)) { return false; }
-	} else if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {
+	if (_magic && !MagicBound(_target->files.syncDirectory, _input.chat)) {
 		return false;
 	}
 	return current();

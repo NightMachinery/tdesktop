@@ -44,6 +44,7 @@ struct DesktopSyncChatPeerInput {
 	const DesktopSyncChatOrigin &origin,
 	const DesktopSyncChatPeer &peer,
 	const MTPMessage &message);
+[[nodiscard]] bool DesktopSyncChatPopulationKnown(const DesktopSyncChatPeer &peer);
 [[nodiscard]] std::optional<SyncChatEligibilityResult> DesktopSyncChatEligibility(
 	const DesktopSyncChatPeer &peer);
 

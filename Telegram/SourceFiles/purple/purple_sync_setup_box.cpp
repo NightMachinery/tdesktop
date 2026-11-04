@@ -96,7 +96,6 @@ struct SetupBoxState {
 	std::optional<SyncAccountInventoryResult> completed;
 	std::optional<DesktopSyncChatIo> route;
 	Fn<bool()> routeCurrent;
-	std::optional<DesktopSyncChatSetupSnapshot> setup;
 	SyncConfigSendQueue scanQueue = SyncConfigSendQueue::Empty;
 	uint64_t scanPosts = 0;
 	std::optional<SyncConfigReview> review;
@@ -162,10 +161,9 @@ std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
 	return state.running || state.publishing;
 }
 
-// The checked route's lease still holds; a legacy setup snapshot, when there is one, still matches too.
+// The checked route's lease still holds.
 [[nodiscard]] bool RouteCurrent(const SetupBoxState &state, Main::Session *session) {
-	return session && state.routeCurrent && state.routeCurrent()
-		&& (!state.setup || CachedSyncChatSetupContextCurrent(session, state.setup->scope));
+	return session && state.routeCurrent && state.routeCurrent();
 }
 
 [[nodiscard]] bool StillCurrent(
@@ -491,7 +489,7 @@ void StartPublisher(
 					initializeOnly && result.status == SyncConfigPublishStatus::AlreadySynced
 						? tr::lng_purple_sync_empty_join_done(tr::now) : PublishResult(result)));
 		}),
-		std::move(request), state->setup,
+		std::move(request),
 		crl::guard(box, [=] {
 			return origin && state->selectedSession.get() == origin.get()
 				&& state->generation == generation && state->publishing;
@@ -780,8 +778,8 @@ void StartCheck(
 	}
 	const auto status = SyncChatStatusOf(session);
 	const auto lease = status.complete && status.phase == DesktopSyncChatPhase::Use
-		&& !status.postingHeld && status.resolution.readChat
-		? SyncChatIoForPost(session, *status.resolution.readChat) : std::nullopt;
+		&& !status.postingHeld && status.chat
+		? SyncChatIoForPost(session, *status.chat) : std::nullopt;
 	if (!lease || !lease->current || !lease->current()) {
 		EnsureSyncChatResolved(session);
 		SetStatus(*state, u"Resolve or choose this account's sync chat, then check again."_q);
@@ -790,7 +788,6 @@ void StartCheck(
 	MoveSyncStateToBoundChat(session);
 	state->route = lease->route;
 	state->routeCurrent = lease->current;
-	state->setup = SyncChatSetupSnapshotOf(session);
 	ClearReview(*state);
 	state->inventory.reset();
 	state->running = true;

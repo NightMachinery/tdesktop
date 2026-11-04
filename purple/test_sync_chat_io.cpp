@@ -1,7 +1,4 @@
-#define main AuthorMain
-#include "test_sync_chat_discovery.cpp"
-#undef main
-
+#include "sync_chat_test_fixtures.h"
 #include "purple/purple_sync_chat_io.h"
 #include "purple/purple_config_sync.h"
 #include "purple/purple_sync_auto_transport.h"
@@ -486,7 +483,6 @@ void LedgerScope() {
 
 #ifndef PURPLE_SYNC_CHAT_IO_EMBEDDED
 int main() {
-	AuthorMain();
 	RoutesAndWire(); FullReadPath(); ExactReadback(); CandidateSeal(); LedgerScope();
 	std::printf("TYPED IO %d checks, %d failures\n",Checks,Failures);
 	return Failures ? 1 : 0;

@@ -256,45 +256,11 @@ PRIVATE
     purple/purple_sync_magic_service.h
     purple/purple_sync_magic_telegram.cpp
     purple/purple_sync_magic_telegram.h
-    purple/purple_sync_chat_create.cpp
-    purple/purple_sync_chat_create.h
-    purple/purple_sync_chat_create_store.cpp
-    purple/purple_sync_chat_create_store.h
-    purple/purple_sync_chat_create_requests.cpp
-    purple/purple_sync_chat_create_requests.h
-    purple/purple_sync_chat_setup_flow.cpp
-    purple/purple_sync_chat_setup_flow.h
-    purple/purple_sync_chat_setup_requests.cpp
-    purple/purple_sync_chat_setup_requests.h
-    purple/purple_sync_chat_setup_service.cpp
-    purple/purple_sync_chat_setup_service.h
-    purple/purple_sync_chat_setup_transport.cpp
-    purple/purple_sync_chat_setup_transport.h
-    purple/purple_sync_chat_recovery.cpp
-    purple/purple_sync_chat_recovery.h
-    purple/purple_sync_chat_setup.cpp
-    purple/purple_sync_chat_setup.h
     purple/purple_sync_retry.h
     purple/purple_sync_request_sender.cpp
     purple/purple_sync_request_sender.h
-    purple/purple_sync_chat_peer_request.cpp
-    purple/purple_sync_chat_peer_request.h
-    purple/purple_sync_chat_setup_box.cpp
-    purple/purple_sync_chat_setup_box.h
     purple/purple_sync_chat_service.cpp
     purple/purple_sync_chat_service.h
-    purple/purple_sync_chat_store.cpp
-    purple/purple_sync_chat_store.h
-    purple/purple_sync_chat_discovery.cpp
-    purple/purple_sync_chat_discovery.h
-    purple/purple_sync_chat_consent.cpp
-    purple/purple_sync_chat_consent.h
-    purple/purple_sync_chat_mark_actions.cpp
-    purple/purple_sync_chat_mark_actions.h
-    purple/purple_sync_chat_mark_transport.cpp
-    purple/purple_sync_chat_mark_transport.h
-    purple/purple_sync_chat_cache.cpp
-    purple/purple_sync_chat_cache.h
     purple/purple_sync_chat_write.cpp
     purple/purple_sync_chat_write.h
     purple/purple_sync_chat_io.cpp
@@ -312,23 +278,7 @@ PRIVATE
     purple/purple_sync_auto_transport.h
     purple/purple_sync_auto_service.cpp
     purple/purple_sync_auto_service.h
-    purple/purple_sync_chat_carry_io.cpp
-    purple/purple_sync_chat_carry_io.h
-    purple/purple_sync_chat_cleanup.cpp
-    purple/purple_sync_chat_cleanup.h
-    purple/purple_sync_chat_carry_executor.cpp
-    purple/purple_sync_chat_carry_executor.h
-    purple/purple_sync_chat_carry_gate.h
-    purple/purple_sync_chat_carry_owner.cpp
-    purple/purple_sync_chat_carry_owner.h
-    purple/purple_sync_chat_carry_service.cpp
-    purple/purple_sync_chat_carry_service.h
-    purple/purple_sync_chat_native.h
-    purple/purple_sync_chat_native.cpp
-    purple/purple_sync_chat_native_io.cpp
-    purple/purple_sync_chat_native_resolver.cpp
-    purple/purple_sync_chat_carry_store.cpp
-    purple/purple_sync_chat_carry_store.h
+    purple/purple_sync_write_gate.h
     purple/purple_sync_local_store.cpp
     purple/purple_sync_local_store.h
     purple/purple_sync_review_box.cpp
@@ -388,11 +338,6 @@ PRIVATE
     purple/purple_peer_token.h
     purple/purple_sync_chat.cpp
     purple/purple_sync_chat.h
-    purple/purple_sync_chat_carry.cpp
-    purple/purple_sync_chat_carry.h
-    purple/purple_sync_chat_carry_codec.cpp
-    purple/purple_sync_chat_journal.cpp
-    purple/purple_sync_chat_journal.h
     purple/purple_sync_chat_magic.cpp
     purple/purple_sync_chat_magic.h
     purple/purple_account_files.cpp

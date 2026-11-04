@@ -50,7 +50,6 @@ void Messages() {
 	const auto facts = MapDesktopSyncChatMessage(Origin, self, original);
 	CHECK(facts.regular == true && facts.out == false && !facts.sender);
 	CHECK(IsOwnSyncChatMessage(facts));
-	CHECK(ParseSyncChatMark(qs(original.c_message().vmessage()), false, GetSyncChatMessageOwnership(facts)).status == SyncChatMarkStatus::Supported);
 	using F = MTPDmessage::Flag;
 	for (const auto flag : {F::f_fwd_from, F::f_via_bot_id, F::f_via_business_bot_id,
 		F::f_guestchat_via_from, F::f_from_scheduled, F::f_ttl_period, F::f_schedule_repeat_period}) {
@@ -100,7 +99,7 @@ void Peers() {
 		auto peer = MapDesktopSyncChatPeer(Origin, input);
 		CHECK(peer.kind == (bot ? SyncChatKind::Bot : SyncChatKind::Private));
 		CHECK(DesktopSyncChatEligibility(peer) && bool(*DesktopSyncChatEligibility(peer)));
-		CHECK(DesktopSyncChatEligibility(peer)->readers.warningRequired);
+		CHECK(DesktopSyncChatPopulationKnown(peer));
 		input.canSendFiles.reset(); CHECK(!MapDesktopSyncChatPeer(Origin, input).facts); input.canSendFiles = true;
 		input.chosenSendAs.reset(); CHECK(!MapDesktopSyncChatPeer(Origin, input).facts); input.chosenSendAs = PeerToken{};
 		full.flags = MTP_flags(MTPDuserFull::Flag::f_ttl_period); full.ttl_period = MTP_int(60); input.userFull = full.Build();
@@ -134,12 +133,12 @@ void Peers() {
 		input.group = group.Build(); input.groupFull = full.Build();
 		auto peer = MapDesktopSyncChatPeer(Origin, input);
 		CHECK(peer.facts && peer.facts->otherMembers == 0 && peer.facts->otherAdmins == 0);
-		CHECK(DesktopSyncChatEligibility(peer) && !DesktopSyncChatEligibility(peer)->readers.warningRequired);
+		CHECK(DesktopSyncChatEligibility(peer) && DesktopSyncChatPopulationKnown(peer));
 		full.participants = MTP_chatParticipants(MTP_long(456), MTP_vector<MTPChatParticipant>({creator, creator}), MTP_int(1));
 		input.groupFull = full.Build(); CHECK(!MapDesktopSyncChatPeer(Origin, input).facts);
 		full.participants = MTP_chatParticipantsForbidden(MTP_flags(MTPDchatParticipantsForbidden::Flags()), MTP_long(456), creator);
 		input.groupFull = full.Build(); peer = MapDesktopSyncChatPeer(Origin, input);
-		CHECK(DesktopSyncChatEligibility(peer) && DesktopSyncChatEligibility(peer)->readers.populationUnknown);
+		CHECK(DesktopSyncChatEligibility(peer) && !DesktopSyncChatPopulationKnown(peer));
 		group.flags = MTP_flags(MTPDchat::Flag::f_deactivated); input.group = group.Build();
 		CHECK(DesktopSyncChatEligibility(MapDesktopSyncChatPeer(Origin, input))->refusal == SyncChatRefusal::Migrated);
 	}

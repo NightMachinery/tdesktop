@@ -25,7 +25,7 @@ that this device's setup did not create, as on Android. Canonical record bytes a
 remain shared with Self. An existing ledger is never moved by setup or a first
 post. GUI admission includes a settings-source epoch, so changing and restoring
 a reviewed source cannot revive its upload or flood wait. See
-[sync-chat setup](sync_chat_setup.md#manual-settings-publication) for consent,
+[Magic Purple Sync](sync_chat.md) for consent,
 reconciliation and the separate native qualification boundary. Automatic sync
 follows the chat Magic Purple Sync bound. Older milestone notes below describe
 their original slices.
@@ -793,10 +793,6 @@ uses a `self` peer token instead of the account's numeric user ID. Unavailable
 songs remain visible with an explanation instead of disappearing. Download
 state, playback state, and any **Keep downloaded** preference stay device-local.
 
-## Carry storage and retained settings bases
+## Retained settings bases
 
-[The local carry storage contract](sync_chat_move.md) specifies the separately
-versioned retained-base subobject, bounded journal, immutable images and checked
-worker barriers. Shared local-state versions stay 1/2. Confirmation and adoption
-retain exact records before retiring their last copy; a missing base holds rather
-than relabelling dirty settings. This storage slice adds no move transport or UI.
+Confirmed and adopted versions retain exact record bytes before retirement. Missing bases hold instead of relabelling dirty settings. Dormant carry journals and executors have been removed; see [Magic Purple Sync](sync_chat.md) for current first-use and chat migration behavior.

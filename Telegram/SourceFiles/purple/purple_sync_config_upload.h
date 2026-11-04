@@ -11,7 +11,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_msg_id.h"
 #include "rpl/lifetime.h"
 #include "purple/purple_sync_chat_service.h"
-#include "purple/purple_sync_chat_carry_io.h"
 
 #include <QtCore/QByteArray>
 
@@ -46,12 +45,7 @@ public:
 		DesktopSyncChatOperation operation = {},
 		MsgId editId = 0, Fn<void()> editRefused = nullptr,
 		Fn<void(Fn<void(bool)>)> authorizeEdit = {});
-	SyncConfigUpload(
-		Main::Session &session,
-		DesktopSyncCarryPermit permit,
-		Fn<void(std::optional<MsgId>)> finished,
-		Fn<bool()> stillCurrent,
-		Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> renewCarry);
+
 	~SyncConfigUpload();
 
 	SyncConfigUpload(const SyncConfigUpload &) = delete;
@@ -60,7 +54,6 @@ public:
 	void Start();
 	void Cancel();
 	[[nodiscard]] std::optional<DesktopSyncChatIo> route() const;
-	[[nodiscard]] std::optional<MTPUpdates> carryResult() const;
 	[[nodiscard]] Fn<bool()> readbackCurrent() const;
 
 private:
@@ -80,11 +73,6 @@ private:
 	std::optional<DesktopSyncChatIo> _route;
 	std::optional<DesktopSyncChatLease> _lease;
 	DesktopSyncChatOperation _operation;
-	std::optional<DesktopSyncCarryPermit> _carry;
-	std::optional<MTPUpdates> _carryResult;
-	bool _carryContentValid = false;
-	uint64_t _carryGateTicket = 0;
-	Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
 	QByteArray _content;
 	Fn<void(std::optional<MsgId>)> _finished;
 	Fn<bool()> _stillCurrent;

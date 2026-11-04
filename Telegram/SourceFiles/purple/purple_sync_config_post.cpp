@@ -6,7 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync_config_post.h"
-#include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_write_gate.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -104,7 +104,7 @@ std::function<void()> BeginSyncConfigNetworkOperation(not_null<Main::Session*> s
 std::function<void()> BeginSyncConfigNetworkOperation(
 		not_null<Main::Session*> session,
 		PeerToken chat) {
-	auto writer = DesktopSyncCarryGateFor(SessionAccountKey(session))->writer();
+	auto writer = DesktopSyncWriteGateFor(SessionAccountKey(session))->writer();
 	if (!writer) { return [] {}; }
 	const auto counter = PostsFor(session, chat);
 	const auto done = std::make_shared<bool>(false);
@@ -159,7 +159,7 @@ SyncConfigPost::~SyncConfigPost() {
 
 bool SyncConfigPost::ContextCurrent() const {
 	return _sessionGuard
-		&& !DesktopSyncCarryGateFor(SessionAccountKey(_session))->postingHeld()
+		&& !DesktopSyncWriteGateFor(SessionAccountKey(_session))->postingHeld()
 		&& (_operation.routing
 			? (_operation.authorize && AccountSyncRoutingCurrent(_session, *_operation.routing))
 			: (_target && ValidateAccountSyncTarget(_session, *_target)))

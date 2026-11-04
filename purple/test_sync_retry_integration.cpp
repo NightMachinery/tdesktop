@@ -181,22 +181,17 @@ namespace Main { struct Session; }
 struct AccountMock {Main::Session *session=nullptr;bool loggingOut()const{return false;}Main::Session*maybeSession()const{return session;}};
 namespace Main {struct Session {AccountMock a;AccountMock&account(){a.session=this;return a;}};}
 int SessionAccountKey(Main::Session*){return 1;}
-struct CarryGateProbe {bool held=false;bool postingHeld()const{return held;}};
-CarryGateProbe CarryGate;
-CarryGateProbe*DesktopSyncCarryGateFor(int){return &CarryGate;}
+struct WriteGateProbe {bool held=false;bool postingHeld()const{return held;}};
+WriteGateProbe WriteGate;
+WriteGateProbe*DesktopSyncWriteGateFor(int){return &WriteGate;}
 struct PeerToken {int id=0;bool operator==(const PeerToken&)const=default;};
 struct Io {struct Peer {struct Origin {int account=1;} origin;PeerToken chat;} peer;};
 bool ValidDesktopSyncChatIo(const Io&){return true;}
 bool CompatibleDesktopSyncChatIo(const Io&,const Io&){return true;}
-struct DesktopSyncCarryPermit {
- Io route;bool current()const{return true;}const Io&target()const{return route;}
- bool compatible(const DesktopSyncCarryPermit&)const{return true;}
- bool uploadMatches(const std::string&)const{return true;}uint64_t renewal()const{return 0;}
-};
 bool SyncChatIoBelongsToSession(Main::Session*,const Io&){return true;}
 struct Lease {Io route;Fn<bool()>current;};
 enum class DesktopSyncChatPhase {Use,Paused,Searching};
-struct DesktopSyncChatStatus {bool complete=true,postingHeld=false;DesktopSyncChatPhase phase=DesktopSyncChatPhase::Use;struct Resolution {PeerToken readChat;} resolution;int64_t retryAt=0;std::string reason;};
+struct DesktopSyncChatStatus {bool complete=true,postingHeld=false;DesktopSyncChatPhase phase=DesktopSyncChatPhase::Use;std::optional<PeerToken> chat=PeerToken{};int64_t retryAt=0;std::string reason;};
 struct DesktopSyncChatOperation { Fn<bool()> current; int marker=0; Fn<void(Fn<void(bool)>)> authorize = {}; };
 bool MarkValid=true,HoldGate=false;int Gates=0;Fn<void(DesktopSyncChatStatus)> DeferredGate;
 void CheckSyncChatBeforePost(Main::Session*,Fn<void(DesktopSyncChatStatus)>done,DesktopSyncChatOperation){++Gates;if(HoldGate){DeferredGate=std::move(done);return;}auto s=DesktopSyncChatStatus();s.complete=MarkValid;s.postingHeld=!MarkValid;done(s);}
@@ -205,8 +200,6 @@ class SyncConfigUpload:public std::enable_shared_from_this<SyncConfigUpload> {
  public:
   struct WeakSession {Main::Session *value;Main::Session*get()const{return value;}}_session;
   bool _done=false,_checking=false;int _editId=0;Fn<void(Fn<void(bool)>)> _authorizeEdit;int _account=1,finals=0;DesktopSyncChatOperation _operation;std::optional<Io>_route;std::optional<Lease>_lease;
-  std::optional<DesktopSyncCarryPermit>_carry;bool _carryContentValid=false;uint64_t _carryGateTicket=0;std::string _content;
-  Fn<void(Fn<void(std::optional<DesktopSyncCarryPermit>)>)> _renewCarry;
   Fn<bool()>_stillCurrent=[]{return true;};std::unique_ptr<SyncRequestSender>_api;
   SyncConfigUpload(Main::Session *s):_session{s},_api(std::make_unique<SyncRequestSender>()){_api->_current=[this]{return Current();};}
   bool Current()const;void SendMedia();void RenewBeforePost(Fn<void(bool)> ready);void ResumeEffect(Fn<void(bool)> ready);
@@ -219,26 +212,6 @@ class SyncConfigUpload:public std::enable_shared_from_this<SyncConfigUpload> {
 
 struct ChangesMock {int count=0;void fire_copy(Main::Session*){++count;}} Changes;
 void RetireDisk(int){}
-struct LocalOpenProbe {
- bool _busy=true,_retryLocalOpen=false,_openContinuation=false,context=true,borrowed=true,operationCurrent=true;
- std::shared_ptr<std::atomic<bool>> _current=std::make_shared<std::atomic<bool>>(true);
- uint64_t _run=1;int _disk=1;
- DesktopSyncChatStatus _status;Timer _timer,_requestTimeout;
- struct {Main::Session *get()const{return nullptr;}} _session;
- std::vector<Fn<void(DesktopSyncChatStatus)>> _callbacks;
- std::shared_ptr<int> lifetime=std::make_shared<int>(0);
- bool Current()const{return context&&(!borrowed||operationCurrent)&&_current&&_current->load();}
- bool _beforePost=false;int64_t _lastStarted=0;DesktopSyncChatOperation _operation;
- bool _resolveAgain=false;Fn<bool()> _leaseCaller;
- int begins=0;bool openedBorrowed=false;
- DesktopSyncChatStatus status()const{return _status;}
- void Begin(bool){++begins;openedBorrowed=bool(_operation.current);_busy=true;}
- void Ensure(bool force,Fn<void(DesktopSyncChatStatus)> done={},DesktopSyncChatOperation operation={},bool beforePost=false);
- void Publish(bool final=true);void RetryLocalOpen();
-};
-#include "retry-local-open.inc"
-#include "retry-ensure.inc"
-
 struct DownloadProbe {
  SyncRequestSender _api;std::shared_ptr<int> lifetime=std::make_shared<int>(0);
  bool _done=false,valid=true,fail=false;int requests=0,finals=0;
@@ -283,8 +256,8 @@ public:
 int main(){
  {
   Main::Session session;auto upload=std::make_shared<SyncConfigUpload>(&session);
-  CarryGate.held=true;Check(!upload->Current(),"ordinary upload is held during Carry");
-  CarryGate.held=false;Check(upload->Current(),"ordinary upload can resume after Carry releases");upload->Finish({});
+  WriteGate.held=true;Check(!upload->Current(),"ordinary upload is held while held");
+  WriteGate.held=false;Check(upload->Current(),"ordinary upload can resume after the write fence releases");upload->Finish({});
  }
  for(const auto type:{"FLOOD_WAIT_8","FLOOD_WAIT_90","FLOOD_PREMIUM_WAIT_90"}){
   for(bool valid:{false,true}){
@@ -322,7 +295,7 @@ int main(){
   Check(done==0&&final==0,"late timed out read rejected");Mono=p->retryAtMs;sender.tick(p);auto last=sender._api.events[p->wire];first.fail({400,MTP::Text("CHANNEL_PRIVATE")});last.done(1);last.done(1);
   Check(done==1&&final==0&&sender._pending.empty(),"safe read resumes once with literal templated callbacks");
  }
- for(bool borrowed:{false,true}){
+){
   Mono=0;Unix=1000000;LocalOpenProbe service;service.borrowed=borrowed;
   HoldGate=true;MarkValid=true;Main::Session session;auto upload=std::make_shared<SyncConfigUpload>(&session);upload->SendMedia();service._callbacks.push_back(std::move(DeferredGate));
   const auto old=service._current;const auto oldRun=service._run;service.RetryLocalOpen();
@@ -374,7 +347,7 @@ int main(){
   Check(p->policy.deadline()==original+90000&&sender._api.events.size()==2,"async authority read pauses only effect response clock");
   Check(!p->transient,"renewed effect clears wait notice");sender.cancelAll();
  }
- for(const auto overdue:{0,5,60}){
+){
   for(const auto force:{false,true}){
    for(const auto replacement:{false,true}){
     Mono=0;Unix=1000000;LocalOpenProbe service;service._operation={[]{return true;},19};service._beforePost=true;
@@ -391,25 +364,6 @@ int main(){
     service._current=std::make_shared<std::atomic<bool>>(true);service._status=DesktopSyncChatStatus();service.Publish();service.Publish();
     Check(original==1&&joined==1,"retained and joined local-open callbacks each complete once");
    }
-  }
- }
- for(int kind=0;kind!=4;++kind){
-  for(bool retrying:{false,true}){
-   // A forced account resolve behind a busy or retrying run is held, not dropped, and starts once, under the
-   // account's own authority, after that run settles and its callbacks ran. Borrowed or before-post calls are not.
-   Mono=0;Unix=1000000;LocalOpenProbe service;service._operation={[]{return true;},19};int original=0;
-   service._callbacks.push_back([&](DesktopSyncChatStatus){++original;Check(service.begins==0,"held resolve waits for the settled callbacks");});
-   if(retrying){service.RetryLocalOpen();}
-   auto op=DesktopSyncChatOperation();if(kind==2){op={[]{return true;},77};}
-   service.Ensure(kind!=0,{},op,kind==3);
-   Check(service._resolveAgain==(kind==1)&&service.begins==0&&service._callbacks.size()==1&&service._operation.marker==19,
-     "only a forced callback-free account resolve is held behind a busy or retrying run");
-   service._busy=false;service._retryLocalOpen=false;
-   service._current=std::make_shared<std::atomic<bool>>(true);service._status=DesktopSyncChatStatus();service.Publish();
-   Check(original==1&&!service._resolveAgain&&service.begins==(kind==1?1:0),"held resolve starts once after the run settles");
-   Check(!service._operation.current&&service._operation.marker==0&&!service.openedBorrowed,
-     "settled run releases the borrowed operation; the held resolve opens under the account");
-   Check(service._leaseCaller&&service._leaseCaller(),"settled caller still bounds the leases taken from its result");
   }
  }
  std::cout<<"INTEGRATION "<<Checks<<" checks, "<<Failures<<" failures\n";return Failures?1:0;

@@ -23,10 +23,6 @@ class QLockFile;
 
 namespace Purple {
 
-struct SyncCarryJournal;
-[[nodiscard]] std::optional<SyncCarryJournal> InspectSyncCarryJournal(
-	const QByteArray &bytes, const QByteArray &bindingToken);
-
 enum class SyncStoreStatus {
 	Disabled,
 	Uninitialized,
@@ -58,8 +54,8 @@ enum class SyncStoreStatus {
 	DurabilityFailed,
 };
 
-[[nodiscard]] SyncStoreStatus SyncCarryStartupAdmission(
-	const QString &directory, const QByteArray &bindingToken);
+[[nodiscard]] SyncStoreStatus SyncLegacyArtifactAdmission(
+	const QString &directory);
 
 struct SyncStoreResult {
 	SyncStoreResult(
@@ -183,11 +179,9 @@ public:
 	[[nodiscard]] const QString &directory() const;
 
 private:
-	friend class SyncChatCarryStore;
 	friend class DesktopSyncAutoStore;
-	[[nodiscard]] SyncStoreResult OpenForCarry(const QByteArray &bindingToken);
 	[[nodiscard]] SyncStoreResult OpenChecked(
-		bool optedIn, const QByteArray &bindingToken, bool carryOwner);
+		bool optedIn, const QByteArray &bindingToken);
 	[[nodiscard]] SyncStoreStatus PrepareRetainedConfig(
 		SyncLocalState &next, const QByteArray &record = {});
 	[[nodiscard]] QString StatePath() const;
@@ -200,7 +194,6 @@ private:
 	std::optional<SyncLocalState> _state;
 	SyncStoreStatus _status = SyncStoreStatus::Disabled;
 	bool _opened = false;
-	bool _carryOwner = false;
 	QByteArray _retainedBootstrap;
 };
 

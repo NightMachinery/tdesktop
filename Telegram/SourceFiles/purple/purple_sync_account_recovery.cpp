@@ -483,8 +483,8 @@ std::optional<SyncStartAgainPlan> PlanSyncFirstUseArchive(
 	return plan;
 }
 
-bool RetireSyncCarryLeftovers(const QString &syncDirectory, const QString &date) {
-	if (!SyncCarryLeftoversPresent(syncDirectory)) { return true; }
+bool RetireLegacySyncArtifacts(const QString &syncDirectory, const QString &date) {
+	if (!LegacySyncArtifactsPresent(syncDirectory)) { return true; }
 	auto lock = QLockFile(syncDirectory + u"/lock"_q);
 	lock.setStaleLockTime(0);
 	if (!lock.tryLock(0)) { return false; }
@@ -496,7 +496,7 @@ bool RetireSyncCarryLeftovers(const QString &syncDirectory, const QString &date)
 		const auto path = syncDirectory + u'/' + name;
 		if (SyncPathIdentity(path) != "missing" && !MoveExclusive(path, folder + u'/' + name)) { return false; }
 	}
-	return FlushSyncDirectory(syncDirectory) && !SyncCarryLeftoversPresent(syncDirectory);
+	return FlushSyncDirectory(syncDirectory) && !LegacySyncArtifactsPresent(syncDirectory);
 }
 
 SyncArchiveResult StartAgainSyncAccount(

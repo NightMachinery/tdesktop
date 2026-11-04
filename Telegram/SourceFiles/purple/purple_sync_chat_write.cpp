@@ -9,7 +9,7 @@ bool CompatibleDesktopSyncChatIo(
 		&& opening.peer.origin == fresh.peer.origin
 		&& opening.peer.chat == fresh.peer.chat
 		&& opening.peer.kind == fresh.peer.kind
-		&& !DesktopSyncChatEligibility(fresh.peer)->readers.populationUnknown;
+		&& DesktopSyncChatPopulationKnown(fresh.peer);
 }
 
 std::optional<MTPmessages_SendMedia> DesktopSyncChatSendMediaRequest(
@@ -40,24 +40,6 @@ std::optional<MTPmessages_EditMessage> DesktopSyncChatEditRequest(
 		route.input, MTP_int(id), MTP_string("#purplesync"), media,
 		MTPReplyMarkup(), MTP_vector<MTPMessageEntity>(), MTP_int(0), MTP_int(0),
 		MTP_int(0), MTPInputRichMessage());
-}
-
-std::optional<MTPmessages_ForwardMessages> DesktopSyncChatForwardRequest(
-		const DesktopSyncChatIo &source,
-		const DesktopSyncChatIo &target,
-		int32_t id,
-		uint64_t randomId) {
-	if (!ValidDesktopSyncChatIo(source) || !ValidDesktopSyncChatIo(target)
-		|| source.peer.origin != target.peer.origin || source.peer.chat == target.peer.chat
-		|| id <= 0 || !randomId) { return {}; }
-	return MTPmessages_ForwardMessages(
-		MTP_flags(MTPmessages_ForwardMessages::Flag::f_silent
-			| MTPmessages_ForwardMessages::Flag::f_drop_author),
-		source.input, MTP_vector<MTPint>({ MTP_int(id) }),
-		MTP_vector<MTPlong>({ MTP_long(randomId) }), target.input,
-		MTP_int(0), MTPInputReplyTo(), MTP_int(0), MTP_int(0), MTPInputPeer(),
-		MTPInputQuickReplyShortcut(), MTP_long(0), MTP_int(0), MTP_long(0),
-		MTPSuggestedPost());
 }
 
 std::optional<DesktopSyncChatDelete> DesktopSyncChatDeleteRequest(

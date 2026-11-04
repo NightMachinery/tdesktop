@@ -1,7 +1,7 @@
 #include "purple/purple_sync_auto_service.h"
 
 #include "purple/purple_sync_chat_service.h"
-#include "purple/purple_sync_chat_carry_gate.h"
+#include "purple/purple_sync_write_gate.h"
 
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -114,7 +114,7 @@ private:
 	bool PauseOnForeignSpace(PeerToken chat);
 	bool NoStateEvent(SyncAutoEvent event);
 	[[nodiscard]] bool FirstUseDue(const AccountFiles &files, SyncAutoEvent event);
-	void RetireCarry();
+	void RetireLegacyArtifacts();
 	void FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual);
 	void FirstUsePublish(DesktopSyncChatInventory inventory, SyncFirstUseReview review, bool publish);
 	void FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review);
@@ -205,9 +205,6 @@ AutoSession::AutoSession(not_null<Main::Session*> session)
 		Replaced();
 	}
 }) {
-	SyncChatPublisherQuiescence() | rpl::on_next([weak = base::make_weak(this)](Main::Session *session) {
-		if (const auto self = weak.get(); self && self->_session.get() == session) { self->Stop(); }
-	}, _lifetime);
 
 }
 
@@ -215,7 +212,7 @@ AutoSession::~AutoSession() { Stop(); }
 
 bool AutoSession::Current() const {
 	const auto session = _session.get();
-	if (!session || DesktopSyncCarryGateFor(_account)->postingHeld()
+	if (!session || DesktopSyncWriteGateFor(_account)->postingHeld()
 		|| session->account().loggingOut() || session->account().maybeSession() != session
 		|| SessionAccountKey(session) != _account || !_opening
 		|| AccountSyncBindingToken(session->account()) != _token) { return false; }
@@ -226,12 +223,12 @@ bool AutoSession::Current() const {
 bool AutoSession::Open() {
 	if (_store) { return Current() && _store->Current(); }
 	const auto session = _session.get();
-	if (!session || DesktopSyncCarryGateFor(_account)->postingHeld()
+	if (!session || DesktopSyncWriteGateFor(_account)->postingHeld()
 		|| session->account().loggingOut() || session->account().maybeSession() != session) { return false; }
 	_opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
 	const auto target = AccountSyncInspectionTarget(session);
 	if (!_opening || !target || !SettingsStartupOwner()) { return false; }
-	RetireCarry();
+	RetireLegacyArtifacts();
 	const auto recovery = InspectSyncAccountRecovery(*session);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Bound) { return false; }
 	_token = AccountSyncBindingToken(session->account());
@@ -604,13 +601,13 @@ bool AutoSession::PauseOnForeignSpace(PeerToken chat) {
 	return true;
 }
 
-void AutoSession::RetireCarry() {
+void AutoSession::RetireLegacyArtifacts() {
 	const auto session = _session.get();
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
-	if (!target || !SyncMagicBound(session) || DesktopSyncCarryGateFor(_account)->postingHeld()
-		|| !SyncCarryLeftoversPresent(target->files.syncDirectory)) { return; }
+	if (!target || !SyncMagicBound(session) || DesktopSyncWriteGateFor(_account)->postingHeld()
+		|| !LegacySyncArtifactsPresent(target->files.syncDirectory)) { return; }
 	const auto date = QDateTime::currentDateTimeUtc().toString(u"yyyyMMdd-HHmmss"_q);
-	const auto retired = RetireSyncCarryLeftovers(target->files.syncDirectory, date);
+	const auto retired = RetireLegacySyncArtifacts(target->files.syncDirectory, date);
 	SyncDiag(u"sync_chat"_q, u"migration"_q, {
 		SyncDiagCode(u"step"_q, u"carry"_q),
 		SyncDiagCode(u"outcome"_q, retired ? u"ok"_q : u"error"_q) });
@@ -620,7 +617,7 @@ bool AutoSession::NoStateEvent(SyncAutoEvent event) {
 	const auto session = _session.get();
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	if (!target || !SyncMagicBound(session)) { return false; }
-	RetireCarry();
+	RetireLegacyArtifacts();
 	const auto recovery = InspectSyncAccountRecovery(*session);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup) {
 		return false;
@@ -692,7 +689,7 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 		FirstUseFail(u"incomplete"_q);
 		return;
 	}
-	RetireCarry();
+	RetireLegacyArtifacts();
 	const auto recovery = InspectSyncAccountRecovery(*session, &inventory.inventory);
 	if (!recovery || recovery->journalPresent) {
 		FirstUseFail(recovery ? u"recovery_journal"_q : u"unreadable"_q);
@@ -781,7 +778,7 @@ void AutoSession::FirstUsePublish(DesktopSyncChatInventory inventory, SyncFirstU
 					self->FirstUseJoined(inventory, review);
 				}
 			});
-		}, publish ? review.request : SyncConfigPublishRequest(), std::nullopt,
+		}, publish ? review.request : SyncConfigPublishRequest(),
 		[weak, chat] {
 			const auto self = weak.get();
 			const auto session = self ? self->_session.get() : nullptr;
@@ -943,7 +940,7 @@ void AutoSession::RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready) {
 		const auto self = weak.get();
 		if (!self || !self->EffectCurrent(plan)) { ready(false); return; }
 		if (!status.complete || status.postingHeld || status.phase != DesktopSyncChatPhase::Use
-			|| status.resolution.readChat != self->StateChat()) { ready(false); return; }
+			|| status.chat != self->StateChat()) { ready(false); return; }
 		self->ReadForEffect(plan, [weak, plan, ready](SyncAutoServerRead read) {
 			const auto self = weak.get();
 			ready(self && self->EffectCurrent(plan) && self->_store->AuthorizeEffect(plan, &read));

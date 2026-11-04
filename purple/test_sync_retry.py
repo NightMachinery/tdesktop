@@ -57,10 +57,6 @@ upload = (root / 'purple_sync_config_upload.cpp').read_text()
     'void SyncConfigUpload::SendMedia()',
     'void SyncConfigUpload::RenewBeforePost(',
     'void SyncConfigUpload::ResumeEffect(']))
-service = (root / 'purple_sync_chat_service.cpp').read_text()
-(work / 'retry-local-open.inc').write_text('\n'.join(member(service, 'void SyncChatSession::' + name + '(')
-    .replace('SyncChatSession::', 'LocalOpenProbe::') for name in ['RetryLocalOpen', 'Publish']))
-(work / 'retry-ensure.inc').write_text(member(service, 'void SyncChatSession::Ensure(').replace('SyncChatSession::', 'LocalOpenProbe::'))
 reader = (root / 'purple_sync_candidate_reader.cpp').read_text()
 start = reader.index('\tconst auto weak = base::make_weak(this);', reader.index('void SyncCandidateReader::StartDownload('))
 end = reader.index('\n\tconst auto stopped =', start)
@@ -107,8 +103,6 @@ subprocess.run([str(emoji_binary)], check=True)
 
 expected = {
     'purple_emoji_export.cpp': 2,
-    'purple_sync_chat_peer_request.cpp': 3,
-    'purple_sync_chat_service.cpp': 5,
     'purple_sync_history_scanner.cpp': 1,
     'purple_sync_candidate_reader.cpp': 1,
     'purple_sync_auto_transport.cpp': 1,
@@ -124,15 +118,6 @@ for name, count in expected.items():
     assert 'SyncRequestSender' in combined, name
     assert 'MTP::Sender' not in combined, name
 assert 'session->api().request(' not in (root / 'purple_sync_config_upload.cpp').read_text()
-peer = (root / 'purple_sync_chat_peer_request.cpp').read_text()
-assert '_timeout' not in peer
-service = (root / 'purple_sync_chat_service.cpp').read_text()
-run = service[service.index('void SyncChatSession::Run()'):service.index('void SyncChatSession::Complete(')]
-assert '_requestTimeout.callOnce' not in run and '_requestTimeout.cancel()' in run
-assert '_current.reset();' in service, 'late local-open reply must not cancel the scheduled timeout retry'
-assert 'PendingSyncRequest' in service
-assert 'SyncRequestChanges()' in (root / 'purple_sync_chat_setup_box.cpp').read_text()
-assert 'SyncRequestChanges()' not in service
 sender = (root / 'purple_sync_request_sender.h').read_text()
 assert 'request = std::move(request)' in sender and 'auto copy = request;' in sender
 assert 'self->_current && self->_current()' in sender
@@ -149,9 +134,6 @@ guards = {
     'purple_sync_auto_service.cpp': ['}).resumeEffect([weak, plan]', 'self->RenewEffect(plan, std::move(ready));',
         'self->_store->AuthorizeEffect(plan, &read)', 'void AutoSession::RenewEffect(',
         'CheckSyncChatBeforePost(_session.get(), [weak, plan, ready = std::move(ready)]'],
-    'purple_sync_chat_service.cpp': ['Publish(false);', 'final ? base::take(_callbacks)', 'if (_retryLocalOpen) {',
-        'self->_openContinuation && error == u"account-lock-busy"_q',
-        'if (_retryLocalOpen && !ContextMatches())', 'self->_current != current'],
     'purple_sync_candidate_reader.cpp': ['_downloadWatch = _api.watch(', 'self->_downloadGeneration == generation',
         'self->RetireDownload();', 'self->RetryDownload();', 'void SyncCandidateReader::RetryDownload()',
         'if (_downloadWatch) { _api.request(base::take(_downloadWatch)).cancel(); }'],
@@ -170,10 +152,10 @@ assert 'std::unique_ptr<MTP::Sender>' not in emoji
 handoff = member(source, 'void SyncRequestSender::failed(')
 assert handoff.index('cancel(id);') < handoff.index('callback(id, *transient);')
 print(f'{negative_count} effect/local-open/download source guards and negative mutations PASS')
-print('17 request sites inventoried, controller/current/timeout/immutable-wire gates PASS')
+print(f'{sum(expected.values())} request sites inventoried, controller/current/timeout/immutable-wire gates PASS')
 (work / 'receipt.json').write_text(json.dumps({'siteCounts': expected,
     'productionMethods': ['dispatch', 'failed', 'tick', 'resume', 'cancel'],
-    'literalIntegration': ['send-template', 'watch', 'upload-Current', 'upload-SendMedia', 'upload-RenewBeforePost', 'upload-ResumeEffect', 'service-RetryLocalOpen', 'service-Publish', 'service-Ensure', 'download-watch', 'download-retire', 'download-retry', 'delete-RenewEffect'],
+    'literalIntegration': ['send-template', 'watch', 'upload-Current', 'upload-SendMedia', 'upload-RenewBeforePost', 'upload-ResumeEffect', 'download-watch', 'download-retire', 'download-retry', 'delete-RenewEffect'],
     'negativeGuards': negative_count,
     'emojiDeferredGuards': True,
     'sourcesSha256': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [root / 'purple_sync_request_sender.h', root / 'purple_sync_request_sender.cpp', root / 'purple_sync_retry.h', root / 'purple_emoji_export.cpp', root / 'purple_emoji_export_queue.cpp', root / 'purple_emoji_export_queue.h', repo / 'purple/test_sync_retry_emoji.cpp', root / 'purple_sync_config_upload.cpp', root / 'purple_sync_auto_service.cpp', root / 'purple_sync_chat_service.cpp', root / 'purple_sync_candidate_reader.cpp', repo / 'purple/test_sync_retry.cpp', repo / 'purple/test_sync_retry_integration.cpp', Path(__file__)]},
