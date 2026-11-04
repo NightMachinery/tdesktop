@@ -57,7 +57,7 @@ move or supply setup UI.
 
 ## Qualification boundary
 
-`purple/test_sync_chat_io.py` builds a small standalone program against the
+`purple/test_sync_chat_records.py` builds a small standalone program against the
 existing generated TL schema. It compiles real route helpers, metadata, model
 and store code, and ports the literal full scanner, candidate, download and
 exact reread callbacks. Session, transport and downloader deliveries are
@@ -68,14 +68,14 @@ and wrong-chat ledger controls do not establish server or UI acceptance.
 Compile with compiler:local, release it, then run the output executable:
 
 ```sh
-python3 purple/test_sync_chat_io.py --build-dir EXISTING_DEBUG_TREE --output-dir UNIT_DIRECTORY --build-only
+python3 purple/test_sync_chat_records.py --build-dir EXISTING_DEBUG_TREE --output-dir UNIT_DIRECTORY --build-only
 UNIT_DIRECTORY/test_sync_chat_io
 python3 purple/test_sync_chat_routes.py
 ```
 
-Native server calls, posting, setup execution and full Desktop builds require a
-later GO. Automatic sync posts only in the chat Magic Purple Sync bound, through
-that chat's lease ([sync chat](sync_chat.md#magic-purple-sync)).
+Host fixtures make no Telegram requests and do not qualify application, UI or
+server behavior. Automatic sync posts only in the chat Magic Purple Sync bound,
+through that chat's lease ([sync chat](sync_chat.md#magic-purple-sync)).
 
 ## Upload and confirmation
 
