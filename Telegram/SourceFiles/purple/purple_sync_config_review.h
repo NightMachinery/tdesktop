@@ -47,6 +47,7 @@ struct SyncFirstUseMark {
 	QString joinSpace;
 	int64_t checkedAt = 0;
 	QString fingerprint;
+	std::vector<QString> heads;
 
 	friend bool operator==(const SyncFirstUseMark &, const SyncFirstUseMark &) = default;
 };
@@ -58,6 +59,7 @@ struct SyncFirstUseReview {
 	SyncFirstUseInput input;
 	SyncConfigPublishRequest request;
 	std::optional<QString> headKey;
+	std::vector<QString> heads;
 	bool sameBytes = false;
 	bool carry = false;
 	bool settled = false;

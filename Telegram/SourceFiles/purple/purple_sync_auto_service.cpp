@@ -729,6 +729,7 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 		|| (action == SyncFirstUseAction::JoinSilently && !review.sameBytes);
 	auto mark = ReadSyncFirstUseMark(target->files).value_or(SyncFirstUseMark());
 	mark.choice = review.input.choice;
+	mark.heads = review.heads;
 	mark.joinSpace = publish ? QString() : inventory.inventory.directory.selectedSpace.value_or(QString());
 	if (!WriteSyncFirstUseMark(target->files, mark)) {
 		FirstUseFail(u"files_unwritable"_q);

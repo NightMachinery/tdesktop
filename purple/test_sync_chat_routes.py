@@ -212,7 +212,9 @@ def inspect(values):
         and len(reasons) >= 12 and all(f'u"{reason}"_q' in failures_text for reason in reasons if reason != 'apply_refused'))
     first_review = values['purple_sync_config_review.cpp'].split('SyncFirstUseReview ReviewSyncFirstUse(', 1)[-1].split('SyncConfigReview ReviewSyncConfig(', 1)[0]
     require('first-use-core-head', 'result.headKey = input->headKey;' in first_review
-        and '? std::vector<QString>{ *input->headKey }' in first_review
+        and 'result.request.expectedParents = input->expectedParents;' in first_review
+        and 'if (choice == SyncFirstUseChoice::None && mark && mark->heads == heads) {' in first_review
+        and 'mark.heads = review.heads;' in auto
         and 'ExtractSyncConfigHeads(' not in first_review and 'heads.size()' not in first_review)
     require('first-use-actions', 'publish ? review.request : SyncConfigPublishRequest()' in run
         and '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)' in run
@@ -294,6 +296,9 @@ negative = [
     ('purple_sync_auto_service.cpp', 'if (self->PauseOnForeignSpace(chat)) { return; }', '', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'if ((first.need != SyncFirstUseNeed::OtherSpace && first.need != SyncFirstUseNeed::Unjoined) || !first.action) {', 'if (!SyncMagicSpaceMismatch(_inventory.directory, _store->local().state()->space)) {', 'auto-space-first-use'),
     ('purple_sync_auto_service.cpp', 'mark.choice = review.input.choice;', '', 'first-use-mark'),
+    ('purple_sync_config_review.cpp', 'mark && mark->heads == heads) {', 'mark) {', 'first-use-core-head'),
+    ('purple_sync_config_review.cpp', 'result.request.expectedParents = input->expectedParents;', 'result.request.expectedParents = std::vector<QString>();', 'first-use-core-head'),
+    ('purple_sync_auto_service.cpp', '\tmark.heads = review.heads;\n', '', 'first-use-core-head'),
     ('purple_sync_config_review.cpp', 'result.headKey = input->headKey;', 'const auto heads = ExtractSyncConfigHeads(inventory, *selected, QString());\n\tif (heads.heads.size() == 1) { result.headKey = heads.heads.front().head.key; }', 'first-use-core-head'),
     ('purple_sync_auto_service.cpp', 'FirstUseFail(u"archive_refused"_q);', 'FirstUseFinish(SyncFirstUseOutcome::Failed);', 'first-use-named-failures'),
     ('purple_sync_auto_service.cpp', ': (reason == u"archive_refused"_q) ? tr::lng_purple_sync_first_failed_archive(tr::now)\n', '', 'first-use-named-failures'),

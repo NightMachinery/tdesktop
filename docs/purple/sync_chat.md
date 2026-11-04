@@ -192,7 +192,7 @@ save still in its five-second delay waits for it.
 The answer and a join in progress are kept beside the state, in
 `sync/first-use.json` (`SyncFirstUseMark`), written before the archive or the
 publisher runs. A run that dies after the answer applies the same answer next
-time instead of asking again. A join that dies after the publisher wrote the
+time instead of asking again, but only while the chat's current heads are the ones it answered (the mark keeps their keys); after they change, the answer is dropped and the plan runs again. "Use this device's settings" publishes with core's `expectedParents`, so it supersedes every current head, two disagreeing ones included. A join that dies after the publisher wrote the
 new, still unjoined state is resumed (`SyncFirstUseNeed::Unjoined`): the head
 is applied without a second join, so a fresh login never sees a conflict
 review. The mark is removed once a publish or join succeeds, or once the state

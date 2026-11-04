@@ -18,8 +18,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+
+#include <algorithm>
 
 namespace Purple {
 namespace {
@@ -166,6 +169,9 @@ std::optional<SyncFirstUseMark> ReadSyncFirstUseMark(const AccountFiles &files) 
 	result.joinSpace = object.value(u"join_space"_q).toString();
 	result.checkedAt = int64_t(object.value(u"checked_at"_q).toDouble());
 	result.fingerprint = object.value(u"fingerprint"_q).toString();
+	for (const auto &head : object.value(u"heads"_q).toArray()) {
+		result.heads.push_back(head.toString());
+	}
 	return result;
 }
 
@@ -178,6 +184,7 @@ bool WriteSyncFirstUseMark(const AccountFiles &files, const SyncFirstUseMark &ma
 	object.insert(u"join_space"_q, mark.joinSpace);
 	object.insert(u"checked_at"_q, double(mark.checkedAt));
 	object.insert(u"fingerprint"_q, mark.fingerprint);
+	object.insert(u"heads"_q, QJsonArray::fromStringList(QStringList(mark.heads.begin(), mark.heads.end())));
 	return EnsureSyncPrivateDirectory(files.syncDirectory) == SyncStoreStatus::Ready
 		&& WriteSyncPrivateFile(files.syncDirectory + u"/first-use.json"_q,
 			QJsonDocument(object).toJson(QJsonDocument::Compact)) == SyncStoreStatus::Ready
@@ -198,9 +205,6 @@ SyncFirstUseReview ReviewSyncFirstUse(
 	const auto snapshot = ReadSyncRecoveryStore(files, std::nullopt);
 	if (snapshot.status != SyncStoreStatus::Ready) { return result; }
 	const auto mark = ReadSyncFirstUseMark(files);
-	if (choice == SyncFirstUseChoice::None && mark) {
-		choice = mark->choice;
-	}
 	const auto &selected = inventory.directory.selectedSpace;
 	if (!snapshot.store.statePresent) {
 		if (!snapshot.store.pendingFiles.empty()) { return result; }
@@ -227,15 +231,22 @@ SyncFirstUseReview ReviewSyncFirstUse(
 	}
 	auto input = SyncFirstUseInputOf(inventory, local);
 	if (!input) { return result; }
+	auto heads = input->expectedParents;
+	if (heads.empty() && input->headKey) {
+		heads.push_back(*input->headKey);
+	}
+	std::sort(heads.begin(), heads.end());
+	if (choice == SyncFirstUseChoice::None && mark && mark->heads == heads) {
+		choice = mark->choice;
+	}
+	result.heads = heads;
 	input->choice = choice;
 	result.input = *input;
 	result.action = PlanSyncFirstUse(*input);
 	result.headKey = input->headKey;
 	result.sameBytes = input->head && input->head->fingerprint == local.fingerprint;
 	result.request.expectedFingerprint = local.fingerprint;
-	result.request.expectedParents = input->headKey
-		? std::vector<QString>{ *input->headKey }
-		: std::vector<QString>();
+	result.request.expectedParents = input->expectedParents;
 	return result;
 }
 

@@ -12,6 +12,7 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 
@@ -1041,6 +1042,7 @@ void FirstUseMarkKeepsAnswer() {
 	auto mark = SyncFirstUseMark();
 	mark.choice = SyncFirstUseChoice::Synced;
 	mark.joinSpace = other.space;
+	mark.heads = { other.built.version.key };
 	mark.checkedAt = 1800000000;
 	mark.fingerprint = u"fp"_q;
 	CHECK(WriteSyncFirstUseMark(files.files, mark));
@@ -1133,6 +1135,44 @@ void FirstUseCurrentHead() {
 	}
 }
 
+void FirstUseSplitHeads() {
+	const auto space = FormatTimeOrderedSyncSpaceId(1700000000000, QByteArray(10, 'v')).value_or(QString());
+	const auto kThird = QByteArray("version = 2\n[last_seen]\ntrade_p = false\nreasons_p = false\n");
+	const auto r1 = BuildInSpace(space, 'D', kCustomOther, {}, 1700000000);
+	const auto r2 = BuildInSpace(space, 'A', kCustom, {}, 1700000100);
+	const auto split = InventoryAt({ { 20, r1.canonical }, { 21, r2.canonical } });
+	auto both = std::vector<QString>{ r1.version.key, r2.version.key };
+	std::sort(both.begin(), both.end());
+	const auto sorted = [](std::vector<QString> keys) { std::sort(keys.begin(), keys.end()); return keys; };
+	auto files = PublishFiles(kMagicChat);
+	MagicDevice(files, kThird);
+	const auto asked = ReviewSyncFirstUse(files.files, split);
+	CHECK(asked.action == SyncFirstUseAction::Ask && !asked.headKey && asked.heads == both);
+	const auto answered = ReviewSyncFirstUse(files.files, split, SyncFirstUseChoice::ThisDevice);
+	CHECK(answered.action == SyncFirstUseAction::Publish && answered.request.expectedParents
+		&& sorted(*answered.request.expectedParents) == both);
+	auto mark = SyncFirstUseMark();
+	mark.choice = SyncFirstUseChoice::ThisDevice;
+	mark.heads = answered.heads;
+	CHECK(WriteSyncFirstUseMark(files.files, mark));
+	CHECK(ReviewSyncFirstUse(files.files, split).action == SyncFirstUseAction::Publish);
+	const auto r3 = BuildInSpace(space, 'D', kCustom, { r1.version, r2.version }, 1700000200);
+	const auto resolved = InventoryAt({ { 20, r1.canonical }, { 21, r2.canonical }, { 22, r3.canonical } });
+	const auto stale = ReviewSyncFirstUse(files.files, resolved);
+	CHECK(stale.action == SyncFirstUseAction::Ask && stale.input.choice == SyncFirstUseChoice::None);
+	CHECK(stale.heads != mark.heads && stale.headKey);
+	const auto run = RunMagicFlow(files, split, answered.request, 45);
+	CHECK(run.reply.result.status == SyncConfigPublishStatus::Confirmed);
+	CHECK(sorted(ParentsOf(run.staged)) == both && SpaceOf(run.staged) == space);
+	const auto after = InventoryAt({ { 20, r1.canonical }, { 21, r2.canonical }, { 45, run.staged } });
+	const auto state = StateOf(files);
+	const auto checked = ReviewSyncConfigInventory(after, &state, QByteArray(), ReadSyncSettingsFile(files.files));
+	CHECK(checked.status == SyncConfigReviewStatus::Ready);
+	CHECK(checked.plan.verdict == ConfigSyncVerdict::UpToDate);
+	std::printf("FIRST USE split superseded=%d stale_dropped=%d\n",
+		int(sorted(ParentsOf(run.staged)) == both), int(stale.action == SyncFirstUseAction::Ask));
+}
+
 void FirstUseRace() {
 	for (const auto choice : { SyncFirstUseChoice::Synced, SyncFirstUseChoice::ThisDevice }) {
 		auto first = PublishFiles(kMagicChat);
@@ -1190,7 +1230,7 @@ int main(int argc, char **argv) {
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
 		ExistingJoins(); MagicPublish();
-		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer(); FirstUseCurrentHead();
+		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer(); FirstUseCurrentHead(); FirstUseSplitHeads();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);
