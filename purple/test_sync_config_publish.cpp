@@ -562,6 +562,7 @@ void MagicPublish() {
 	}
 	for (auto mode = 0; mode != 4; ++mode) {
 		auto files = PublishFiles(channel);
+		if (mode == 0) CHECK(QFile::remove(QDir(files.files.syncDirectory).filePath(QString::fromLatin1(kSyncMagicBindingFile))));
 		if (mode == 1) WriteMagicBinding(files, channel, 0);
 		if (mode == 2) WriteMagicBinding(files, PeerToken{PeerTokenKind::Channel,457}, 100);
 		if (mode == 3) WriteMagicBinding(files, channel, 100, SyncChatProblem::MagicIneligible);
