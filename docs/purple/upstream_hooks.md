@@ -1624,7 +1624,9 @@ finishing into preview and releasing completed UI state. Their implementations
 stay beside the private `RecordLock`, `TTLButton` and `ListenWrap` types because
 those types are defined only in that source. They invoke existing native pause,
 listen and send paths; the dock's decisions, targets and transfer state remain in
-Purple files.
+Purple files. Completed payloads are reserved in Purple before deferred native
+cleanup, and the old bar's compose and listen activity become false once that
+ownership transfers. Its destructor cannot cancel the new owner.
 
 The source routes compose activity, native hide cleanup, lock reset, new-record
 preparation and completed payloads through `purple/hooks/recording.h`. The hidden
