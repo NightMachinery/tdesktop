@@ -532,3 +532,7 @@ Round bubble and strip pause controls share the same native ownership adapter.
 The strip reads native pause changes directly, including the asynchronous
 resume appearance callback. The recording dock host fixture compiles the exact
 bubble callback and checks its resume route, and pins pause-state publication.
+
+The recording bin includes UserData's complete definition before reading the
+session user's display name. Its standalone Debug translation unit is compiled
+in the application build as well as the host ownership tests.

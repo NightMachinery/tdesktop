@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "data/data_thread.h"
+#include "data/data_user.h"
 #include "editor/video/video_segment_player.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
