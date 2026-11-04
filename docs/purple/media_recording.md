@@ -75,7 +75,8 @@ Switching chats with a round still uses the native discard prompt. A cross-chat
 round must first pass the design's device spike and acquire an independent owner.
 
 `keep_across_chats_p` and `round_float_p` are in the Media recording settings.
-They default on. Preview from the voice dock plays the paused capture; trimming
+They default on. Preview from the voice dock plays the paused capture and closes before capture
+resumes, so playback is not recorded through the microphone. Trimming
 inside that popup remains an extra beyond this change.
 
 ## F9. Seek back and forward

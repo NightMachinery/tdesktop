@@ -53,6 +53,7 @@ struct Dock {
 	int levelIndex = 0;
 	bool once = false;
 	bool wantsPreview = false;
+    bool previewOpen = false;
 	std::optional<Media::Capture::Result> preview;
 };
 
@@ -79,6 +80,7 @@ void Clear() {
 	dock.context.reset();
 	dock.preview.reset();
 	dock.wantsPreview = false;
+    dock.previewOpen = false;
 	dock.payment.clear();
 	dock.changes.fire({});
 }
@@ -123,6 +125,7 @@ void Pause() {
 	const auto pause = !dock.model.paused();
 	if (!dock.model.pause(token, pause)) return;
 	const auto revision = dock.model.pauseRevision();
+    if (!pause) dock.changes.fire({});
 	dock.preview.reset();
 	Media::Capture::instance()->pause(pause, pause ? Fn<void(Media::Capture::Result&&)>([=](Media::Capture::Result &&result) {
 		if (Current(token) && TheDock().model.paused() && TheDock().model.pauseRevision() == revision) {
@@ -136,12 +139,20 @@ void Pause() {
 
 void ShowPreview() {
 	auto &dock = TheDock();
-	if (!dock.preview || !dock.model.paused()) return;
+	if (!dock.preview || !dock.model.paused() || dock.previewOpen) return;
 	dock.wantsPreview = false;
+    dock.previewOpen = true;
+    const auto token = dock.model.generation();
 	const auto snapshot = *dock.preview;
 	WithWindow([=](not_null<Window::SessionController*> controller) {
 		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 			box->setTitle(tr::lng_purple_recording_preview());
+            box->lifetime().add([=] {
+                if (TheDock().model.generation() == token) TheDock().previewOpen = false;
+            });
+            TheDock().changes.events() | rpl::filter([=] {
+                return !Current(token) || !TheDock().model.paused();
+            }) | rpl::on_next([=] { box->closeBox(); }, box->lifetime());
 			const auto player = box->lifetime().make_state<Editor::SegmentPlayer>(
 				QString(), snapshot.bytes, Editor::SegmentPlayerOptions{ .audio = true });
 			player->start();
