@@ -188,6 +188,12 @@ PRIVATE
     purple/purple_recording_round.h
     purple/purple_recording_round_media.cpp
     purple/purple_recording_round_media.h
+    purple/purple_round_recording.cpp
+    purple/purple_round_recording_geometry.h
+    purple/hooks/round_recording.h
+    purple/purple_recording_dock.cpp
+    purple/purple_recording_dock_model.h
+    purple/hooks/recording.h
     purple/purple_recording_settings.cpp
     purple/purple_recording_settings.h
     purple/purple_recording_store.cpp

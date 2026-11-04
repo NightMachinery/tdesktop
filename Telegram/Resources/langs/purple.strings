@@ -538,3 +538,13 @@ docs/purple/upstream_hooks.md.
 "lng_purple_recording_bin_clear" = "Clear all";
 "lng_purple_recording_bin_clear_sure" = "Delete every recording in the bin?";
 "lng_purple_recording_send_elsewhere" = "Send to another chat";
+
+"lng_purple_recording" = "Recording";
+"lng_purple_recording_pause" = "Pause";
+"lng_purple_recording_resume" = "Resume";
+"lng_purple_recording_preview" = "Preview";
+"lng_purple_recording_keep_chats" = "Keep recording across chats";
+"lng_purple_recording_round_float" = "Floating round camera";
+"lng_purple_recording_camera" = "Camera";
+"lng_purple_recording_play" = "Play / Pause";
+"lng_purple_recording_toggle" = "Pause / Resume";

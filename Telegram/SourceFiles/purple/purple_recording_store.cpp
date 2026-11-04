@@ -54,6 +54,8 @@ namespace {
 
 using namespace RecordingRegistry;
 
+RecordingTargetMailbox CaptureTarget;
+
 constexpr auto kManifestName = "recordings.json";
 constexpr auto kLongestVoice = crl::time(24 * 3600 * 1000);
 
@@ -246,8 +248,8 @@ void Recover(std::vector<Entry> entries) {
 				RecordingPath(entry.media),
 				JournalPath(entry),
 				key,
-				entry.state == State::Sending);
-			if (result.state == State::Unrecoverable) {
+				entry.state == RecordingRegistry::State::Sending);
+			if (result.state == RecordingRegistry::State::Unrecoverable) {
 				++unrecoverable;
 			} else {
 				++recovered;
@@ -311,8 +313,8 @@ void SettleLocked(Store &store, const std::string &id) {
 		const auto entry = store.manifest.find(part);
 		if (pending != store.deleteAfterClose.end() || !entry) {
 			continue;
-		} else if (entry->state == State::Recording) {
-			entry->state = State::Sent;
+		} else if (entry->state == RecordingRegistry::State::Recording) {
+			entry->state = RecordingRegistry::State::Sent;
 		} else {
 			RemoveLocked(store, part);
 		}
@@ -549,14 +551,14 @@ void FinishClosed(std::vector<RecordingMirror::Closed> closed) {
 					if (!entry) {
 						return;
 					}
-					const auto recovered = (result.state != State::Unrecoverable);
+					const auto recovered = (result.state != RecordingRegistry::State::Unrecoverable);
 					if (DropAfterFinalise(*entry, recovered, result.durationMs)) {
 						RemoveLocked(store, id);
 					} else {
 						entry->durationMs = result.durationMs;
 						entry->partial = entry->partial || result.partial;
 						if (!recovered && InBin(entry->state)) {
-							entry->state = State::Unrecoverable;
+							entry->state = RecordingRegistry::State::Unrecoverable;
 						}
 					}
 					SaveLocked(store);
@@ -599,6 +601,10 @@ void ForgetRecordingsAtLogout(Main::Account &account) {
 	}
 }
 
+void SetRecordingCaptureTarget(std::optional<RecordingCaptureTarget> target) {
+	CaptureTarget.set(std::move(target));
+}
+
 void StartRecordingStore() {
 	static auto started = false;
 	if (std::exchange(started, true)) {
@@ -636,7 +642,8 @@ std::optional<std::string> BeginRecordingEntry(
 		Kind kind,
 		const std::string &mediaSuffix,
 		const std::string &journalSuffix,
-		const std::string &group) {
+        const std::string &group) {
+    const auto target = CaptureTarget.get();
 	auto &store = TheStore();
 	auto id = NewId();
 	if (id.empty()) {
@@ -656,28 +663,19 @@ std::optional<std::string> BeginRecordingEntry(
 			.media = id + mediaSuffix,
 			.group = (group.empty() && kind == Kind::Round) ? id : group,
 			.journal = journalSuffix.empty() ? std::string() : (id + journalSuffix),
-			.state = State::Recording,
+			.state = RecordingRegistry::State::Recording,
 		});
+		if (target) {
+			auto &entry = store.manifest.entries.back();
+			entry.account = target->account;
+			entry.user = target->user;
+			entry.peer = target->peer;
+			entry.topic = target->topic;
+			entry.reply = target->reply;
+		}
 		SaveLocked(store);
 	}
-	crl::on_main([=] {
-		const auto window = Core::App().activeWindow();
-		const auto controller = window ? window->sessionController() : nullptr;
-		if (!controller) {
-			return;
-		}
-		const auto chat = controller->activeChatCurrent();
-		const auto peer = chat.peer();
-		const auto topic = chat.topic();
-		const auto account = RecordingAccountIndex(&controller->session());
-		const auto user = controller->session().userId().bare;
-		UpdateRecordingEntry(id, [&](Entry &entry) {
-			entry.account = account;
-			entry.user = user;
-			entry.peer = peer ? peer->id.value : 0;
-			entry.topic = topic ? topic->rootId().bare : 0;
-		});
-	});
+
 	return id;
 }
 
@@ -726,6 +724,7 @@ void NoteRecordingStop(
 		return;
 	}
 	const auto listen = (*kind == StopKind::Listen);
+    if (!listen) CaptureTarget.set(std::nullopt);
 	auto ids = listen
 		? VoiceMirror().activeIds()
 		: VoiceMirror().requestCloseAll();
@@ -773,7 +772,7 @@ std::vector<RecordingBinItem> RecordingBinItems() {
 			duration += one->durationMs;
 			partial = partial
 				|| one->partial
-				|| (one->state == State::Unrecoverable);
+				|| (one->state == RecordingRegistry::State::Unrecoverable);
 		}
 		const auto mark = MarkOf(*entry);
 		const auto session = RecordingAccountSession(entry->account);
@@ -816,7 +815,7 @@ std::optional<QByteArray> RecordingBinMedia(const QString &id) {
 		}
 		for (const auto &part : GroupOf(store.manifest, entry->id)) {
 			const auto one = store.manifest.find(part);
-			if (one->state != State::Unrecoverable || part == entry->id) {
+			if (one->state != RecordingRegistry::State::Unrecoverable || part == entry->id) {
 				paths.push_back(RecordingPath(one->media));
 			}
 		}
@@ -942,7 +941,7 @@ void SendRecordingBinItem(
 			}
 			for (const auto &part : parts) {
 				UpdateRecordingEntry(part, [&](Entry &entry) {
-					entry.state = State::Sending;
+					entry.state = RecordingRegistry::State::Sending;
 					entry.fromListen = false;
 					entry.account = RecordingAccountIndex(session);
 					entry.user = session->userId().bare;

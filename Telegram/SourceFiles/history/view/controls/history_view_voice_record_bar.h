@@ -74,6 +74,9 @@ public:
 		int recorderHeight);
 	~VoiceRecordBar();
 
+	[[nodiscard]] bool purpleDockable() const;
+	bool purpleReleaseToDock();
+
 	void showDiscardBox(
 		Fn<void()> &&callback,
 		anim::type animated = anim::type::instant);

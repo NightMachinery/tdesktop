@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "purple/purple_recording_crypt.h"
+#include "purple/purple_recording_dock_model.h"
 #include "purple/purple_recording_mirror.h"
 #include "purple/purple_recording_registry.h"
 
@@ -42,6 +43,7 @@ struct RecordingBinItem {
 };
 
 void StartRecordingStore();
+void SetRecordingCaptureTarget(std::optional<RecordingCaptureTarget> target);
 void ForgetRecordingsAtLogout(Main::Account &account);
 
 [[nodiscard]] std::vector<RecordingBinItem> RecordingBinItems();

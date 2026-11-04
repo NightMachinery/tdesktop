@@ -38,6 +38,14 @@ CAPTURE_HOOKS = [
     ('ui/controls/round_video_recorder.cpp', 'void RoundVideoRecorder::Private::initEncoding() {', 'Purple::OnRoundEncodingStarted(this, _format.get());'),
     ('ui/controls/round_video_recorder.cpp', 'bool RoundVideoRecorder::Private::writeFrame(', 'Purple::OnRoundPacket(this, pkt);'),
 ]
+DOCK_HOOKS = [
+    ('history/history_widget.cpp', 'bool HistoryWidget::preventsClose(', 'Purple::TryDockRecording('),
+    ('history/view/controls/history_view_compose_controls.cpp', 'bool ComposeControls::preventsClose(', 'Purple::TryDockRecording('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::startRecording()', 'Purple::PreventRecordingStart('),
+    ('mainwidget.cpp', 'int MainWidget::getMainSectionTop()', 'Purple::RecordingStripHeight('),
+    ('ui/controls/round_video_recorder.cpp', 'void RoundVideoRecorder::setup()', 'Purple::RoundRecorderFloats('),
+    ('ui/controls/round_video_recorder.cpp', 'void RoundVideoRecorder::setup()', 'Purple::PaintRoundRecorder('),
+]
 # Purple::NoteRecordingStop reads the StopType ordinal, so its order is pinned.
 BLOCKS = [
     ('history/view/controls/history_view_voice_record_bar.h', 'enum class StopType {\n\t\tCancel,\n\t\tSend,\n\t\tListen,\n\t};'),
@@ -85,7 +93,7 @@ def main():
         checks += 1
         if (sources / relative).read_text().count(block) != 1:
             failures.append(relative + ': expected the block ' + block.split('\n')[0] + ' exactly once, in this order')
-    for relative, signature, call in HOOKS + RECORDING_HOOKS + CAPTURE_HOOKS:
+    for relative, signature, call in HOOKS + RECORDING_HOOKS + CAPTURE_HOOKS + DOCK_HOOKS:
         text = (sources / relative).read_text()
         checks += 1
         if signature not in text:

@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/round_video_recorder.h"
 #include "purple/hooks/media_recording_capture.h"
 
+#include "purple/hooks/round_recording.h"
+
 #include "base/concurrent_timer.h"
 #include "base/debug_log.h"
 #include "ffmpeg/ffmpeg_bytes_io_wrap.h"
@@ -1288,6 +1290,7 @@ void RoundVideoRecorder::setup() {
 	_descriptor.container->sizeValue(
 	) | rpl::on_next([=](QSize outer) {
 		const auto side = _side + 2 * _extent;
+		if (Purple::RoundRecorderFloats(this, raw, outer, side)) return;
 		raw->setGeometry(
 			style::centerrect(
 				QRect(QPoint(), outer),
@@ -1335,6 +1338,7 @@ void RoundVideoRecorder::setup() {
 		prepareFrame();
 
 		auto p = QPainter(raw);
+		Purple::PaintRoundRecorder(raw, p);
 		const auto faded = _fadeAnimation.value(_visible ? 1. : 0.);
 		if (_fadeAnimation.animating()) {
 			p.setOpacity(faded * faded);
@@ -1348,7 +1352,7 @@ void RoundVideoRecorder::setup() {
 			return;
 		}
 
-		p.drawImage(raw->rect(), _shadow);
+		p.drawImage(Purple::RoundRecorderCanvas(raw), _shadow);
 		const auto inner = QRect(_extent, _extent, _side, _side);
 		const auto fading = _fadeContentAnimation.animating();
 		if (!_progressReceived && !fading) {

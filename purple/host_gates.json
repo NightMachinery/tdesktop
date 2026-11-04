@@ -174,6 +174,7 @@
     {"name": "test_sync_chat_native", "driver": "purple/test_sync_chat_write.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--test-source", "test_sync_chat_native.cpp"], "fixtures": ["purple/test_sync_chat_native.cpp"], "coverage": "Held-OFF native carry dispatcher and resolver with injected native replies, executor renewal and mark port"},
     {"name": "test_sync_chat_native_routes", "driver": "purple/test_sync_chat_native_routes.py", "coverage": "Native dispatch guards and five OFF switch regressions"},
     {"name": "test_sync_chat_carry_owner", "driver": "purple/test_sync_chat_write.py", "compiles": true, "args": ["--build-dir", "{build}", "--output-dir", "{out}", "--test-source", "test_sync_chat_carry_owner.cpp"], "fixtures": ["purple/test_sync_chat_carry_owner.cpp"]},
-    {"name": "test_sync_chat_carry_wire_routes", "driver": "purple/test_sync_chat_carry_wire_routes.py"}
+    {"name": "test_sync_chat_carry_wire_routes", "driver": "purple/test_sync_chat_carry_wire_routes.py"},
+    {"name": "test_recording_dock", "driver": "purple/test_recording_dock.py", "compiles": true, "args": ["--output-dir", "{out}"], "fixtures": ["Telegram/SourceFiles/purple/tests/recording_dock_cases.cpp"]}
   ]
 }

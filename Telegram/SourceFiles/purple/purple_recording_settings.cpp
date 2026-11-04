@@ -137,6 +137,38 @@ void BuildMediaRecordingSettings(::Settings::Builder::SectionBuilder &builder) {
 		.title = tr::lng_purple_media_recording(),
 		.keywords = { u"purple"_q, u"recording"_q, u"voice"_q, u"round"_q },
 	});
+	const auto keepAcrossChats = builder.addButton({
+		.id = u"advanced/purple_recording_keep_across_chats_p"_q,
+		.title = tr::lng_purple_recording_keep_chats(),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::single(rpl::empty) | rpl::then(SettingsChanges())
+			| rpl::map([] { return ActiveSettings().recording.keepAcrossChats; }),
+	});
+	if (keepAcrossChats) {
+		keepAcrossChats->toggledValue() | rpl::filter([](bool value) {
+			return value != ActiveSettings().recording.keepAcrossChats;
+		}) | rpl::on_next([](bool value) {
+			WriteSettings([=](const QString &text) {
+				return SetTableBool(text, SettingsFilePath(), u"recording"_q, u"keep_across_chats_p"_q, value);
+			}, u"recording options"_q);
+		}, keepAcrossChats->lifetime());
+	}
+	const auto roundFloat = builder.addButton({
+		.id = u"advanced/purple_recording_round_float_p"_q,
+		.title = tr::lng_purple_recording_round_float(),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = rpl::single(rpl::empty) | rpl::then(SettingsChanges())
+			| rpl::map([] { return ActiveSettings().recording.roundFloat; }),
+	});
+	if (roundFloat) {
+		roundFloat->toggledValue() | rpl::filter([](bool value) {
+			return value != ActiveSettings().recording.roundFloat;
+		}) | rpl::on_next([](bool value) {
+			WriteSettings([=](const QString &text) {
+				return SetTableBool(text, SettingsFilePath(), u"recording"_q, u"round_float_p"_q, value);
+			}, u"recording options"_q);
+		}, roundFloat->lifetime());
+	}
 	builder.addButton({
 		.id = u"advanced/purple_recording_journal"_q,
 		.title = tr::lng_purple_recording_journal(),

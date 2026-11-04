@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwidget.h"
 
+#include "purple/hooks/recording.h"
+
 #include "api/api_updates.h"
 #include "api/api_views.h"
 #include "data/components/scheduled_messages.h"
@@ -285,6 +287,7 @@ MainWidget::MainWidget(
 	: nullptr)
 , _playerPlaylist(this, _controller)
 , _changelogs(Core::Changelogs::Create(&controller->session())) {
+	Purple::AttachRecordingStrip(this, [=] { updateControlsGeometry(); });
 	if (_dialogs) {
 		setupConnectingWidget();
 	}
@@ -2544,7 +2547,7 @@ void MainWidget::paintEvent(QPaintEvent *e) {
 }
 
 int MainWidget::getMainSectionTop() const {
-	return _callTopBarHeight + _exportTopBarHeight + _playerHeight;
+	return _callTopBarHeight + _exportTopBarHeight + _playerHeight + Purple::RecordingStripHeight(this);
 }
 
 int MainWidget::getThirdSectionTop() const {
@@ -2724,6 +2727,7 @@ void MainWidget::updateControlsGeometry() {
 			_player->resizeToWidth(dialogsWidth);
 			_player->moveToLeft(0, _callTopBarHeight + _exportTopBarHeight);
 		}
+		Purple::PlaceRecordingStrip(this, 0, _callTopBarHeight + _exportTopBarHeight + _playerHeight, dialogsWidth);
 		const auto mainSectionGeometry = QRect(
 			0,
 			mainSectionTop,
@@ -2787,6 +2791,7 @@ void MainWidget::updateControlsGeometry() {
 				dialogsWidth,
 				_callTopBarHeight + _exportTopBarHeight);
 		}
+		Purple::PlaceRecordingStrip(this, dialogsWidth, _callTopBarHeight + _exportTopBarHeight + _playerHeight, mainSectionWidth);
 		_history->setGeometryWithTopMoved(QRect(
 			dialogsWidth,
 			mainSectionTop,

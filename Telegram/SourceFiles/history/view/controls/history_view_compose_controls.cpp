@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_compose_controls.h"
 
+#include "purple/hooks/recording.h"
+
 #include "history/view/controls/history_view_bot_menu_button.h"
 
 #include "base/call_delayed.h"
@@ -1299,6 +1301,7 @@ ComposeControls::ComposeControls(
 , _unavailableEmojiPasted(std::move(descriptor.unavailableEmojiPasted))
 , _saveDraftTimer([=] { saveDraft(); })
 , _saveCloudDraftTimer([=] { saveCloudDraft(); }) {
+	Purple::BindRecordingBar(_voiceRecordBar.get(), [=] { return Purple::RecordingComposeContext(_history, replyingToMessage(), sendAsPeer(), _shortcutId, _mode == Mode::Scheduled); }, [=] { _field->setFocus(); });
 	if (_st.radius > 0) {
 		_backgroundRect.emplace(_st.radius, _st.bg);
 	}
@@ -6378,6 +6381,7 @@ int ComposeControls::fieldCharacterCount() const {
 }
 
 bool ComposeControls::preventsClose(Fn<void()> &&continueCallback) const {
+	if (Purple::TryDockRecording(_voiceRecordBar.get())) return false;
 	if (_voiceRecordBar->isActive()) {
 		_voiceRecordBar->showDiscardBox(std::move(continueCallback));
 		return true;

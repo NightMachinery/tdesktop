@@ -1611,6 +1611,31 @@ Purple edit in this file (it is in `td_ui`, which already calls Purple from
   marks the open recordings on Listen and records Send or Cancel; the
   order of `StopType` is pinned by `purple/test_media_hooks.py`.
 
+### Recording continuity (F6/F8)
+
+`history/history_widget.cpp` and
+`history/view/controls/history_view_compose_controls.cpp` bind their original
+send context and focus callback to the Purple dock. Each `preventsClose` adds
+one early adoption call before the stock discard prompt.
+
+`history/view/controls/history_view_voice_record_bar.h` declares two narrow
+extensions. `purpleDockable` exposes whether capture has private round, preview
+or resume-prefix state; `purpleReleaseToDock` takes view-once and calls the
+existing `hideFast`. Their implementations in the matching source are the only
+private-state access. The source also asks Purple to refuse a second recording
+and publish the send context before capture starts, and binds the existing round
+pause path to the float controls. Capture itself is untouched by adoption.
+
+`mainwidget.cpp` attaches the recording strip, adds its height to the existing
+bar stack, and places it in both column layouts. Decisions and widget creation
+live in `purple_recording_dock.cpp`.
+
+`ui/controls/round_video_recorder.cpp` adds one geometry guard and two painting
+calls into `purple/hooks/round_recording.h`. Geometry alone cannot shrink the
+preview because its painter uses the encoder-independent logical side. Purple
+sets the painter window and supplies the logical shadow rectangle, preserving
+the camera and encoder. This is the only reason for the two painting hooks.
+
 ## Upstream v7.3.3 merge
 
 @Opus5.5/high [2026-10-31 Sat]

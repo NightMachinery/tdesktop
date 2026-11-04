@@ -8,6 +8,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_voice_record_bar.h"
 #include "purple/hooks/media_recording_capture.h"
 
+#include "purple/hooks/recording.h"
+#include "purple/hooks/round_recording.h"
+
 #include "api/api_send_progress.h"
 #include "base/event_filter.h"
 #include "base/random.h"
@@ -2595,6 +2598,7 @@ void VoiceRecordBar::startRecordingAndLock(bool round) {
 }
 
 void VoiceRecordBar::startRecording() {
+	if (Purple::PreventRecordingStart(this)) return;
 	if (isRecording()) {
 		return;
 	}
@@ -3131,6 +3135,17 @@ rpl::producer<> VoiceRecordBar::cancelRequests() const {
 	return _cancelRequests.events();
 }
 
+bool VoiceRecordBar::purpleDockable() const {
+	return isRecording() && !_recordingVideo && !_listen
+		&& _resumePrefixData.content.isEmpty();
+}
+
+bool VoiceRecordBar::purpleReleaseToDock() {
+	const auto once = takeTTLState();
+	hideFast();
+	return once;
+}
+
 bool VoiceRecordBar::isRecording() const {
 	return _recording.current() && !_paused.current();
 }
@@ -3380,6 +3395,7 @@ bool VoiceRecordBar::createVideoRecorder() {
 			.track = std::move(track),
 			.placeholder = _show->session().local().readRoundPlaceholder(),
 		});
+	Purple::BindRoundRecorder(_videoRecorder.get(), [=] { _lock->clicked(Qt::NoModifier, Qt::LeftButton); }, _show);
 	_videoRecorder->placeholderUpdates(
 	) | rpl::on_next([=](QImage &&placeholder) {
 		_show->session().local().writeRoundPlaceholder(placeholder);

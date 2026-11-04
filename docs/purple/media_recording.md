@@ -1,10 +1,10 @@
 # Media recording
 
 Purple's media recording work on Desktop. The design, with the reasoning, the
-Android side and the features still to build (the recording dock, F6 to F8
-and the extras), is in
+Android side and the extras is in
 [media-recording-design.md](media-recording-design.md); this page describes
-what is built: F9 and F10.
+the voice dock (F8), the in-chat round float (F6), F9 and F10. F7 applies only
+to Android; Desktop capture already continues while inactive.
 
 The code is in `Telegram/SourceFiles/purple/`:
 
@@ -37,6 +37,46 @@ The code is in `Telegram/SourceFiles/purple/`:
   These files, apart from the store, the round glue, the box and the
   settings, use no Qt and no app types, so `purple/tests/recording_cases.cpp`
   and `purple/tests/recording_round_cases.cpp` run them alone.
+
+## F8. Voice recording across chats
+
+Leaving a chat adopts an active voice into the recording dock. Clicking the
+locked recording bar's message area or typing a printable key also adopts it
+and restores the field. The top strip retains the original account, thread,
+reply, send-as peer and view-once choice. Its Send button sends that recording;
+the open chat's Send button sends its text. Pause/Resume, audio Preview and
+confirmed Discard belong to the strip. Scheduled sends retain the date picker,
+paid sends use the existing payment helper, and unavailable topics are refused
+without falling back to the forum's General topic.
+
+The capture stays in Media::Capture::Instance; hiding the native bar releases
+its subscriptions and global recording key filter without stopping capture.
+A round, native preview or trimmed resume prefix stays with the native bar and
+keeps the stock discard prompt. Starting another capture offers Discard first.
+Session teardown cancels the capture, and generation checks invalidate old
+callbacks. Work Mode hides the target's name in the strip and opening the target
+uses the normal chat route.
+
+Before capture starts, a thread-safe mailbox publishes the original account,
+chat, topic and reply to F10's writer. The writer never looks up the currently
+visible chat after adoption. An unbound capture is kept with an unknown target.
+
+## F6. In-chat round float
+
+Click the background around the camera to shrink it to 160 scaled pixels.
+Drag it to a corner, click it to expand, and use its pause and camera controls.
+The device-local corner is remembered. Preview painting scales independently
+of the camera track and encoder, so shrinking never replaces either.
+
+This is the design's in-chat fallback. Native recording controls retain Send,
+preview, trim and the duration cap. The compose area remains occupied during a
+round; typing during round capture and a round entry in the dock are unfinished.
+Switching chats with a round still uses the native discard prompt. A cross-chat
+round must first pass the design's device spike and acquire an independent owner.
+
+`keep_across_chats_p` and `round_float_p` are in the Media recording settings.
+They default on. Preview from the voice dock plays the paused capture; trimming
+inside that popup remains an extra beyond this change.
 
 ## F9. Seek back and forward
 
@@ -180,11 +220,10 @@ passcode. Until then nothing is mirrored.
   do in memory and the file holds the same bytes as `Private::data`. Writes
   are flushed to the operating system each time, so a crash of the app loses
   at most the Ogg page being built (about a second).
-- The chat is taken from the active window's current chat a moment after
-  the first write, on the main thread. Desktop recordings cannot leave their
-  chat yet (F8 is not built), so that is the chat the recording belongs to.
-  Upstream's voice bar does not know the reply it would send with, so the
-  reply id is 0.
+- The original account, chat, topic and reply are published before capture
+  starts. The mirror takes an immutable snapshot when opening its entry,
+  before the user can dock it and change the active chat. Captures without a
+  bound context keep an unknown target and cannot infer one from another chat.
 - `Purple::NoteRecordingStop` at the top of `VoiceRecordBar::stopRecording`
   says Send or Cancel; Listen, the pause into the preview, only marks the
   open recordings as stopped from the preview. Send moves
@@ -452,8 +491,6 @@ drops one of them.
   `keep_discarded_p` on and off, a send from the preview, the bin's Play,
   Send, Send to another chat, Save, Delete and Clear all, and the hourly
   sweep with a short `bin_keep`.
-- The reply id is not captured on Desktop; F8's hook in
-  `VoiceRecordBar::init` is the place that can give it.
 
 - A paused seek does not move the system media widget's scrubber until
   playback resumes: `SystemMediaControlsManager` updates the platform
@@ -463,3 +500,11 @@ drops one of them.
   bar's children with `findChild`, on every mouse move over the bar.
   Cheap at today's tree size; keeping the two buttons in per-widget state
   set at decoration would avoid it.
+
+The standalone `test_recording_dock` gate covers immutable capture targets,
+recording ownership, stale completion rejection, pause revisions and bubble
+bounds, including surfaces smaller than the bubble. Device qualification must
+check original-recipient/topic/reply/send-as/view-once behavior first, then
+preview/send/discard and F10 recovery, account switch/logout, paid and scheduled
+sends, and round drag/flip/pause/cap behavior. GUI checks are separate from host
+coverage.
