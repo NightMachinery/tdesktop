@@ -47,6 +47,7 @@ DOCK_HOOKS = [
     ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::finish()', 'Purple::RecordingBarFloats('),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::stop(bool send)', 'Purple::RestoreFloatingRecording('),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'bool VoiceRecordBar::isActive()', 'Purple::RecordingBarActive('),
+    ('history/view/controls/history_view_voice_record_bar.cpp', 'bool VoiceRecordBar::isListenState()', 'Purple::RecordingBarActive('),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'rpl::producer<VoiceToSend> VoiceRecordBar::sendVoiceRequests()', 'Purple::SendPinnedRecording('),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'rpl::producer<bool> VoiceRecordBar::recordingStateChanges()', 'Purple::RecordingBarActive('),
     ('history/view/controls/history_view_voice_record_bar.cpp', 'void VoiceRecordBar::startRecordingAndLock(bool round)', 'Purple::PreventNewRecording('),

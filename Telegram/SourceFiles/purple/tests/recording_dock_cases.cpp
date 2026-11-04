@@ -58,6 +58,11 @@ int main() {
 	check(model.pause(model.generation(), true)); check(!model.transitioning());
 	check(model.requestPause(model.generation())); model.clear(); check(!model.transitioning());
 	check(!model.requestPause(first));
+	check(!model.receiveCompletion(first));
+	check(model.begin()); const auto completed = model.generation();
+	check(model.finish(completed)); check(model.receiveCompletion(completed));
+	check(model.paused()); model.clear(); check(!model.receiveCompletion(completed));
+
 	for (auto corner = 0; corner != 4; ++corner) {
 		for (const auto width : { 0, 80, 160, 600, 1200 }) {
 			for (const auto height : { 0, 90, 160, 500, 900 }) {

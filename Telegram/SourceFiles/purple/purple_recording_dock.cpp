@@ -74,6 +74,7 @@ struct Binding {
 	std::optional<RecordingContext> active;
 	bool floating = false;
 	bool pinned = false;
+	bool transferred = false;
 };
 std::map<HistoryView::Controls::VoiceRecordBar*, Binding> Contexts;
 std::map<const QObject*, HistoryView::Controls::VoiceRecordBar*> Locks;
@@ -143,6 +144,7 @@ void ReadoptVoice(std::uint64_t token) {
 		const auto once = dock.once;
 		binding.active = context;
 		binding.pinned = true;
+		binding.transferred = false;
 		Clear();
 		bar->purpleAdoptCapture(once);
 		return;
@@ -570,6 +572,7 @@ bool PreventRecordingStart(not_null<HistoryView::Controls::VoiceRecordBar*> bar)
 		if (!bar->isListenState()) {
 			i->second.active = i->second.context();
 			i->second.pinned = false;
+			i->second.transferred = false;
 		} else if (!i->second.active) i->second.active = i->second.context();
 		if (const auto &context = i->second.active) {
 			const auto &action = context->action;
@@ -597,7 +600,8 @@ bool RecordingLockFloats(const QObject *lock) {
 }
 
 bool RecordingBarActive(const HistoryView::Controls::VoiceRecordBar *bar, bool nativeActive) {
-	return RecordingComposeActive(RecordingBarFloats(bar), nativeActive);
+	const auto i = Contexts.find(const_cast<HistoryView::Controls::VoiceRecordBar*>(bar));
+	return RecordingComposeActive(RecordingBarFloats(bar) || (i != Contexts.end() && i->second.transferred), nativeActive);
 }
 
 bool RecordingBarFloats(const HistoryView::Controls::VoiceRecordBar *bar) {
@@ -653,23 +657,35 @@ bool SendPinnedRecording(not_null<const HistoryView::Controls::VoiceRecordBar*> 
 	if (i == Contexts.end() || !i->second.pinned || !i->second.active) return false;
 	const auto context = *i->second.active;
 	i->second.pinned = false;
-	crl::on_main(crl::guard(bar, [=] {
-		RestoreFloatingRecording(bar);
-		auto &dock = TheDock();
-		Clear();
-		if (!dock.model.begin()) return;
-		dock.context = context;
-		WatchDockSession();
-		dock.once = data.options.ttlSeconds != 0;
-		dock.ready = data;
-		dock.samples = int(std::min<int64>(std::numeric_limits<int>::max(), data.duration * 48));
-		dock.preview = Media::Capture::Result{ data.bytes, data.waveform, data.duration };
-		const auto paused = dock.model.pause(dock.model.generation(), true);
-		if (!paused) return;
-		bar->purpleReleaseCompleted();
-		dock.changes.fire({});
+	i->second.transferred = true;
+	i->second.floating = false;
+	auto &dock = TheDock();
+	if (!dock.model.active() && !dock.model.begin()) return true;
+	const auto token = dock.model.generation();
+	if (!dock.model.finishing() && !dock.model.finish(token)) {
+		if (!dock.model.receiveCompletion(token) || !dock.model.finish(token)) return true;
+	}
+	dock.capture.destroy();
+	dock.roundBar = nullptr;
+	dock.context = context;
+	dock.once = data.options.ttlSeconds != 0;
+	dock.ready = data;
+	dock.samples = int(std::min<int64>(std::numeric_limits<int>::max(), data.duration * 48));
+	dock.preview = Media::Capture::Result{ data.bytes, data.waveform, data.duration };
+	WatchDockSession();
+	const auto weak = base::make_weak(bar);
+	const auto session = base::make_weak(&context.action.history->session());
+	crl::on_main([=] {
+		if (!session || TheDock().model.generation() != token) return;
+		if (weak) {
+			RestoreFloatingRecording(weak.get());
+			if (const auto i = Contexts.find(weak.get()); i != Contexts.end()) i->second.floating = false;
+			weak->purpleReleaseCompleted();
+		}
+		if (!TheDock().model.receiveCompletion(token)) return;
+		TheDock().changes.fire({});
 		Send(data.options);
-	}));
+	});
 	return true;
 }
 

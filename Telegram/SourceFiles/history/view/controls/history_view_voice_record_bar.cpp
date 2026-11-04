@@ -3281,7 +3281,7 @@ bool VoiceRecordBar::isLockPresent() const {
 }
 
 bool VoiceRecordBar::isListenState() const {
-	return !Purple::RecordingBarFloats(this) && _listen != nullptr;
+	return Purple::RecordingBarActive(this, _listen != nullptr);
 }
 
 bool VoiceRecordBar::isTypeRecord() const {

@@ -62,6 +62,12 @@ public:
 		_phase = Phase::Recording;
 		return true;
 	}
+	bool receiveCompletion(std::uint64_t generation) {
+		if (!active() || generation != _generation) return false;
+		_phase = Phase::Paused;
+		_transitioning = false;
+		return true;
+	}
 	bool retarget(std::uint64_t generation) {
 		if (!accepts(generation) || _transitioning) return false;
 		++_targetRevision;

@@ -521,3 +521,9 @@ check original-recipient/topic/reply/send-as/view-once behavior first, then
 preview/send/discard and F10 recovery, account switch/logout, paid and scheduled
 sends, and round drag/flip/pause/cap behavior. GUI checks are separate from host
 coverage.
+
+Completed native payloads transfer into the dock synchronously before native UI
+cleanup is deferred. The completed bytes and frozen context outlive the native
+bar; closing its window cannot drop the queued send. Account-session teardown
+still invalidates it. Finalization reserves the dock until cleanup completes, so
+a second capture cannot replace that payload in the interim.
