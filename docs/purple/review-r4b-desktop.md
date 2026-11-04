@@ -234,3 +234,35 @@ an extra comment line before them.
   fields are codes only.
 
 REVIEW R4b desktop: CHANGES P1=1 P2=5 P3=6
+
+## Re-check 1
+
+Desktop `f53526974f..fda561c426` (gitlink purple-core 493d0dbb03) and purple-core a9dba73e0b. Source only; nothing
+built or run.
+
+- P1-1 fixed. Core `MaximalConfigHeads` uses the same `HeldByAnother` rule as `Classify`, and `SyncFirstUseInputOf`
+  sets `head` and `headKey` when every current head carries one fingerprint. `ReviewSyncFirstUse` takes `headKey` from
+  core and `{ headKey }` as parents, and no longer calls `ExtractSyncConfigHeads`. FirstUseCurrentHead and
+  FirstUseJoinAppliesCurrentHead cover R1 plus its successor R2 from another install.
+- P2-1 fixed. `sync/first-use.json` keeps the answer, written before the archive step, and the space a join entered.
+  `SyncFirstUseNeed::Unjoined` finishes an initialized join that was never applied. The file is cleared on Published,
+  Joined and settled.
+- P2-2 fixed. Every `FirstUseFail` path logs `reason=<code>` and shows its own line. The new words are in the diag
+  vocabulary. Incomplete scans and an unavailable chat read as a retry in the automatic status.
+- P2-3 fixed. `FirstUseDue` applies `kSyncAutoCheckSeconds` from the mark's `checkedAt`. Only Enable, a sync chat
+  change and a changed settings fingerprint bypass it, and the immediate LocalSaved is skipped while the debounce
+  runs.
+- P2-4 fixed in core a9dba73e0b: `SettingsMeaning` clears rule, ruleset and budget positions, and
+  TestFirstUseMeaningIgnoresPositions covers a comment above the rules. Desktop's gitlink is still at 493d0dbb03, so
+  this reaches Desktop only with the planned bump.
+- P2-5 partly fixed. MigrationKeepsSharedSpace and FirstUseMigration now assert an `Adopt` or `UpToDate` verdict.
+  Still open: no compiled gate has run on this head, and none of the negative controls N1 to N10 has a result. That
+  blocks the merge until they run.
+- New P2-6. When the current heads disagree (a true split), core gives no `headKey`. "Use this device's settings" then
+  publishes with empty expected parents, which core's publish gate likely refuses every time (`chat_changed`). Before
+  these fixes, the parents were every head key. The branch's own handoff, item 4, flags the same problem. Because the
+  mark keeps `this_device`, each 15-minute pass retries and fails. If the split later resolves, the stored answer
+  publishes this device's file over the resolved settings without asking again. Core should name the parents for the
+  split case, and the mark's choice should be tied to the head or fingerprint it answered.
+
+RECHECK R4b desktop: CHANGES P1=0 P2=2
