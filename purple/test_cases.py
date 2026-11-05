@@ -113,6 +113,14 @@ CASES = {
         'units': ['purple/purple_media_rules.cpp'],
         'frameworks': ['QtCore'],
     },
+    'media-restart-fifo': {
+        'program': 'media_restart_fifo_cases.cpp',
+        'units': ['purple/purple_media_restart.cpp', 'purple/purple_media_rules.cpp', 'data/data_audio_msg_id.cpp',
+            '../lib_ui/ui/click_handler.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation', 'CoreFoundation'],
+        'link': ['-lobjc'],
+    },
     'media-size': {
         'program': 'media_size_cases.cpp',
         'units': ['purple/purple_media_rules.cpp'],

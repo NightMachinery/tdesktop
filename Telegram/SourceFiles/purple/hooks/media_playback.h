@@ -33,6 +33,7 @@ class Element;
 namespace Purple {
 
 [[nodiscard]] bool RestartOnDoubleClick(
+	not_null<QWidget*> widget,
 	const std::shared_ptr<ClickHandler> &active,
 	Qt::MouseButton button,
 	bool selecting);

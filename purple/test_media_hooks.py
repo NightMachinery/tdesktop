@@ -111,8 +111,18 @@ def main():
         if signature not in text:
             failures.append(relative + ': ' + signature + ' is gone')
             continue
+        if call == 'Purple::RestartOnDoubleClick(':
+            checks += 1
+            if call + '\n\t\t\tthis,' not in body(text, signature):
+                failures.append(relative + ': restart must guard the originating list')
         if body(text, signature).count(call) != 1:
             failures.append(relative + ': ' + signature + ' must contain ' + call + ' exactly once')
+    restart = body((sources / 'purple/purple_media_playback.cpp').read_text(), 'bool RestartOnDoubleClick(')
+    checks += 1
+    if ('QueueHistoryMediaRestart(' not in restart
+            or 'player->updatedNotifier() | rpl::to_empty' not in restart
+            or 'RestartCurrentVoice(SeekableCurrentVoice(player)' not in restart):
+        failures.append('history restart must queue with player completion and late seekability')
     for failure in failures:
         print('FAIL ' + failure)
     print(f'{checks - len(failures)}/{checks} media hook checks passed')

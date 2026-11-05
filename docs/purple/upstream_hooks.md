@@ -1486,13 +1486,15 @@ header, and `purple/test_media_hooks.py` pins each call. In the two message
 list files the include sits beside their older direct Purple includes, since
 no facade covers those yet.
 
-**`Telegram/SourceFiles/history/history_inner_widget.cpp`**: +7 -0.
+**`Telegram/SourceFiles/history/history_inner_widget.cpp`**: +8 -0.
 - `HistoryInner::mouseDoubleClickEvent`: one early return through
   `Purple::RestartOnDoubleClick` before `mouseActionStart` (double-click
-  restarts the playing voice or round message).
+  restarts the playing voice or round message). It passes the originating
+  list as the queued restart lifetime guard, alongside its original window.
 
-**`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**: +7 -0.
-- `ListWidget::mouseDoubleClickEvent`: the same early return.
+**`Telegram/SourceFiles/history/view/history_view_list_widget.cpp`**: +8 -0.
+- `ListWidget::mouseDoubleClickEvent`: the same early return and originating
+  list guard.
 
 **`Telegram/SourceFiles/history/view/media/history_view_gif.cpp`**: +14 -0.
 - The facade include, after the file's own header.

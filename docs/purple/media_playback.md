@@ -7,6 +7,7 @@ design, with the reasoning and the Android side, is in
 The code is in `Telegram/SourceFiles/purple/`:
 
 - `purple_media_playback.{h,cpp}`: the app side of every feature below.
+- `purple_media_restart.{h,cpp}`: the guarded history restart FIFO.
 - `purple_media_rules.{h,cpp}`: the decisions behind the hooks, with no Qt and
   no app types, so the cases in `purple/tests/` run them on their own.
 - `purple_voice_queue.{h,cpp}`: the voice queue tracking and walk, with the
@@ -38,6 +39,12 @@ track seeks it to 0:00 and plays it, even if it was paused.
   pauses for under one double-click interval, then restarts. A stopped one
   starts, then starts again from 0:00. Waiting for a possible second
   click would delay every single click, so it is not done.
+- History queues its restart on the same main queue as the first click's
+  document action. The first click therefore finishes before restart even
+  when native input arrives in a batch. The full voice identity is checked
+  again at execution, and seekability is read then. Destruction of the
+  player, originating list or original window cancels the restart. The float
+  keeps its synchronous restart because its first click toggles directly.
 - When the restart happens the double-click never reaches
   `mouseActionStart`, so the second release toggles nothing and the
   Reply or React quick action does not run.
@@ -196,6 +203,13 @@ its version-tag symbol even when the tested rules themselves use no Qt types.
 - `purple/tests/media_restart_cases.cpp` (gate `cases-media-restart`): the
   restart decision for every reason to decline, seek against replay, and the
   handler-context resolution.
+- `purple/tests/media_restart_fifo_cases.cpp` (gate
+  `cases-media-restart-fifo`): the retained FIFO helper with real
+  `ActivateClickHandler` and CRL dispatch, both initial playback states and
+  queued or settled first clicks, waveform and single-click controls,
+  changed identity, player/list/window destruction and late seekability.
+  Audio state and the history widget are modeled; no decoder or native
+  mouse-event delivery is exercised.
 - `purple/tests/media_size_cases.cpp` (gate `cases-media-size`): the stored
   preference, the sides for every choice including Actual size, the column
   clamp, the bubble limit and the float size with its window cap.

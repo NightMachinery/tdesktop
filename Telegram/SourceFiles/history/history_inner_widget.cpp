@@ -2733,6 +2733,7 @@ void HistoryInner::mouseReleaseEvent(QMouseEvent *e) {
 void HistoryInner::mouseDoubleClickEvent(QMouseEvent *e) {
 	registerReadMetricsActivity();
 	if (Purple::RestartOnDoubleClick(
+			this,
 			ClickHandler::getActive(),
 			e->button(),
 			inSelectionMode().inSelectionMode)) {

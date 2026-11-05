@@ -3957,6 +3957,7 @@ auto ListWidget::scrollKeyEvents() const
 void ListWidget::mouseDoubleClickEvent(QMouseEvent *e) {
 	registerReadMetricsActivity();
 	if (Purple::RestartOnDoubleClick(
+			this,
 			ClickHandler::getActive(),
 			e->button(),
 			!_selected.empty())) {

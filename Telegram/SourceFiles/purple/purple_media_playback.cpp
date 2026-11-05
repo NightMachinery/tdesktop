@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_media_playback.h"
 
 #include "purple/purple_media_rules.h"
+#include "purple/purple_media_restart.h"
 #include "purple/purple_media_seek.h"
 #include "purple/purple_voice_queue.h"
 
@@ -157,18 +158,19 @@ void ChooseVideoMessageScaleBox(not_null<Ui::GenericBox*> box) {
 		|| Media::Player::IsStoppedOrStopping(state.state);
 }
 
-[[nodiscard]] bool SeekableCurrentVoice() {
+[[nodiscard]] bool SeekableCurrentVoice(
+		not_null<Media::Player::Instance*> player = Media::Player::instance()) {
 	using Type = AudioMsgId::Type;
-	const auto player = Media::Player::instance();
 	const auto state = player->getState(Type::Voice);
 	return (state.id == player->current(Type::Voice))
 		&& !Media::Player::IsStoppedOrStopping(state.state)
 		&& (state.length > 0);
 }
 
-void RestartCurrentVoice(MediaRules::Restart restart) {
+void RestartCurrentVoice(
+		MediaRules::Restart restart,
+		not_null<Media::Player::Instance*> player = Media::Player::instance()) {
 	using Type = AudioMsgId::Type;
-	const auto player = Media::Player::instance();
 	if (restart == MediaRules::Restart::Replay) {
 		player->play(player->current(Type::Voice));
 		return;
@@ -409,6 +411,7 @@ void DecorateFloat(
 }
 
 bool RestartOnDoubleClick(
+		not_null<QWidget*> widget,
 		const std::shared_ptr<ClickHandler> &active,
 		Qt::MouseButton button,
 		bool selecting) {
@@ -434,12 +437,21 @@ bool RestartOnDoubleClick(
 			&& context
 			&& (current.audio() == document)
 			&& (current.contextId() == context),
-		.seekable = SeekableCurrentVoice(),
+		.seekable = SeekableCurrentVoice(player),
 	});
 	if (restart == MediaRules::Restart::None) {
 		return false;
 	}
-	RestartCurrentVoice(restart);
+	QueueHistoryMediaRestart(
+		widget,
+		player->updatedNotifier() | rpl::to_empty,
+		current,
+		[=] { return player->current(Type::Voice); },
+		[=] {
+			RestartCurrentVoice(SeekableCurrentVoice(player)
+				? MediaRules::Restart::Seek
+				: MediaRules::Restart::Replay, player);
+		});
 	return true;
 }
 

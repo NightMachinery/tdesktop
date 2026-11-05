@@ -170,6 +170,8 @@ PRIVATE
     purple/purple_list_menu.h
     purple/purple_media_playback.cpp
     purple/purple_media_playback.h
+    purple/purple_media_restart.cpp
+    purple/purple_media_restart.h
     purple/purple_media_rules.cpp
     purple/purple_media_rules.h
     purple/purple_media_seek.cpp
