@@ -280,7 +280,15 @@ passcode. Until then nothing is mirrored.
 
 ### Video messages
 
-The sent file is never touched: upstream still builds it in memory with
+The native H.264 encoder keeps its microsecond time base and actual capture
+timestamps, with a nominal 30 fps for rate control. B-frames are disabled because
+journal-free repair follows video packets in decode order, and x264 uses its
+zero-latency tuning so the live recovery copy receives packets promptly. The
+x264 macroblock-rate warning with an unknown nominal rate is not an encoder-open
+failure. A camera that is listed can still be suspended, including the built-in
+camera in clamshell mode; the native capture selector excludes suspended devices.
+
+The recovery copy never rewrites the sent file: upstream builds it in memory with
 FFmpeg's MP4 muxer. Purple keeps a second output, a recovery copy, made from
 the same encoded packets.
 
@@ -478,7 +486,10 @@ drops one of them.
   unrecoverable and untouched; a finished Off copy needing no journal; and
   junk. Its link line names the FFmpeg, OpenH264 and OpenSSL archives it
   finds in the Debug build's `build.ninja` and the macOS frameworks static
-  FFmpeg needs; that line has not been run against a real Debug build yet.
+  FFmpeg needs; the generated stream uses the native encoder settings extracted from
+  `RoundVideoRecorder::Private::initVideo`, including its Purple hook. The case
+  checks that video packets reach the live copy within the first second and
+  that no B-frames invalidate journal-free repair.
 
 - `purple/tests/recording_cases.cpp` (gate `cases-recording`): the step
   choices and their spelling, the clamping at 0, at one second before the

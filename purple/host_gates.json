@@ -737,7 +737,8 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/recording_round_cases.cpp"
-      ]
+      ],
+      "about": "Uses the native encoder configuration extracted by the driver, including live packet delivery and no frame reordering."
     },
     {
       "name": "cases-voice-queue",

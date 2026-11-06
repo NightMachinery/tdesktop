@@ -147,6 +147,7 @@ CASES = {
         # F10's round copy, remux, repair rebuild and AAC measure over the
         # build's own FFmpeg, on a round encoded at test time.
         'program': 'recording_round_cases.cpp',
+        'generated': ['recording-round-encoder.inc'],
         'units': ['purple/purple_recording_round_media.cpp', 'purple/purple_recording_crypt.cpp',
             'purple/purple_recording_recovery.cpp', 'purple/purple_recording_registry.cpp',
             'core:purple/purple_mp4_repair.cpp', 'core:purple/purple_round_journal.cpp',
@@ -197,6 +198,16 @@ def recording_startup_include(sources):
     store = (sources / 'purple/purple_recording_store.cpp').read_text()
     return '\n'.join(function(store, signature) for signature in (
         'void Refresh()', 'void StartRecordingStore()', 'bool RecordingStoreAvailable()'))
+
+
+def recording_encoder_include(sources):
+    native = (sources / 'ui/controls/round_video_recorder.cpp').read_text()
+    body = function(native, 'bool RoundVideoRecorder::Private::initVideo()')
+    start = body.index('\t_videoCodec->codec_id =')
+    end = body.index('\n\tauto error =', start)
+    setup = body[start:end].replace('_videoCodec.get()', 'video').replace('_videoCodec', 'video')
+    return ('bool ConfigureNativeVideo(AVCodecContext *video, const AVCodec *videoCodec) {\n'
+        + 'constexpr auto kVideoBitRate = 2 * 1024 * 1024;\n' + setup + '\nreturn true;\n}\n')
 
 
 def flow_include(sources):
@@ -348,8 +359,11 @@ if case['program'].endswith('.mm'):
     assert guard.index('qobject_cast<QGuiApplication*>') < guard.index('generalPasteboard'), 'purple_webp_paste_mac.mm'
 pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['units']) else {}
 for name in case.get('generated', []):
-    (work / name).write_text(recording_startup_include(sources)
-        if name == 'recording-store-startup.inc' else flow_include(sources))
+    generate = {
+        'recording-store-startup.inc': recording_startup_include,
+        'recording-round-encoder.inc': recording_encoder_include,
+    }.get(name, flow_include)
+    (work / name).write_text(generate(sources))
     include.append('-I' + str(work))
 units = []
 for unit in [*case['units'], 'purple/tests/' + case['program']]:

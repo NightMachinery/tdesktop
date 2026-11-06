@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <cstdint>
 
+struct AVCodec;
+struct AVCodecContext;
 struct AVFormatContext;
 struct AVPacket;
 
@@ -19,6 +21,12 @@ class Session;
 } // namespace Main
 
 namespace Purple {
+
+namespace RoundMedia {
+[[nodiscard]] bool ConfigureVideoEncoder(
+	AVCodecContext *context,
+	const AVCodec *codec);
+} // namespace RoundMedia
 
 void MirrorRecordingWrite(
 	const void *owner,

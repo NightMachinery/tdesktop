@@ -374,6 +374,7 @@ bool RoundVideoRecorder::Private::initVideo() {
 	_videoCodec->framerate = AVRational{ 0, 1 }; // Variable frame rate.
 	_videoCodec->pix_fmt = AV_PIX_FMT_YUV420P;
 	_videoCodec->bit_rate = kVideoBitRate;
+	if (!Purple::RoundMedia::ConfigureVideoEncoder(_videoCodec.get(), videoCodec)) return false;
 
 	auto error = AvErrorWrap(avcodec_open2(
 		_videoCodec.get(),

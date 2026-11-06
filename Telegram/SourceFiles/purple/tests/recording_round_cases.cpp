@@ -26,9 +26,11 @@ using Bytes = std::vector<std::uint8_t>;
 namespace Crypt = Purple::RecordingCrypt;
 namespace Media = Purple::RoundMedia;
 
-constexpr auto kSide = 240;
+constexpr auto kSide = 400;
 constexpr auto kFps = 30;
 constexpr auto kRate = 48000;
+
+#include "recording-round-encoder.inc"
 
 [[nodiscard]] bool Random(std::uint8_t *data, std::size_t size) {
 	return RAND_bytes(data, int(size)) == 1;
@@ -79,6 +81,8 @@ struct Recorded {
 	std::vector<AVPacket*> packets;
 	int video = 0;
 	int audio = 0;
+	int videoInFirstSecond = 0;
+	bool videoReordered = false;
 	AVFormatContext *upstream = nullptr;
 	Sink sink;
 	Bytes audioRaw;
@@ -127,16 +131,10 @@ void Drain(AVCodecContext *codec, AVStream *stream, Recorded &recorded, bool vid
 	recorded.upstream->flags |= AVFMT_FLAG_CUSTOM_IO;
 
 	auto video = avcodec_alloc_context3(videoCodec);
-	video->width = kSide;
-	video->height = kSide;
-	video->pix_fmt = AV_PIX_FMT_YUV420P;
-	video->time_base = AVRational{ 1, 1'000'000 };
-	video->framerate = AVRational{ kFps, 1 };
-	video->bit_rate = 400'000;
-	video->max_b_frames = 0;
-	video->gop_size = kFps;
-	av_opt_set(video->priv_data, "preset", "ultrafast", 0);
-	av_opt_set(video->priv_data, "tune", "zerolatency", 0);
+	if (!ConfigureNativeVideo(video, videoCodec)) {
+		return false;
+	}
+
 	auto audio = avcodec_alloc_context3(audioCodec);
 	audio->sample_fmt = AV_SAMPLE_FMT_FLTP;
 	audio->bit_rate = 64'000;
@@ -145,6 +143,7 @@ void Drain(AVCodecContext *codec, AVStream *stream, Recorded &recorded, bool vid
 	if (avcodec_open2(video, videoCodec, nullptr) < 0 || avcodec_open2(audio, audioCodec, nullptr) < 0) {
 		return false;
 	}
+	recorded.videoReordered = video->has_b_frames > 0;
 	const auto videoStream = avformat_new_stream(recorded.upstream, videoCodec);
 	const auto audioStream = avformat_new_stream(recorded.upstream, audioCodec);
 	avcodec_parameters_from_context(videoStream->codecpar, video);
@@ -176,6 +175,9 @@ void Drain(AVCodecContext *codec, AVStream *stream, Recorded &recorded, bool vid
 		frame->pts = std::int64_t(i) * 1'000'000 / kFps + ((i % 4 == 1) ? 9'000 : 0);
 		avcodec_send_frame(video, frame);
 		Drain(video, videoStream, recorded, true);
+		if (i == kFps - 1) {
+			recorded.videoInFirstSecond = recorded.video;
+		}
 		while (samples * kFps < std::int64_t(i + 1) * kRate) {
 			av_frame_make_writable(sound);
 			const auto data = reinterpret_cast<float*>(sound->data[0]);
@@ -251,6 +253,8 @@ int main() {
 		return 1;
 	}
 
+	expect(!recorded.videoReordered, "native encoder emits no reordered frames for journal-free repair");
+	expect(recorded.videoInFirstSecond > 0, "live recovery receives video packets within the first second");
 	const auto config = Media::ConfigOf(recorded.upstream);
 	expect(config && config->avccVideo && config->tracks.size() == 2, "the config header names both tracks with AVCC framing");
 	expect(config && config->videoTrack() == 0 && config->audioTrack() == 1, "video comes first, as the recorder adds it");

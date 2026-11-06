@@ -1595,10 +1595,14 @@ Purple edit in this file.
   Purple mirrors every block FFmpeg writes at its offset into an encrypted
   file (F10 voice).
 
-**`Telegram/SourceFiles/ui/controls/round_video_recorder.cpp`**: +3 -0. First
+**`Telegram/SourceFiles/ui/controls/round_video_recorder.cpp`**: +4 -0. First
 Purple edit in this file (it is in `td_ui`, which already calls Purple from
 `attach_prepare.cpp`).
 - The facade include, after the file's own header.
+- `RoundVideoRecorder::Private::initVideo`: `Purple::RoundMedia::ConfigureVideoEncoder`
+  before opening H.264. It supplies a nominal frame rate while keeping microsecond
+  capture timestamps, disables frame reordering for repair, and configures x264
+  for live packet delivery.
 - `RoundVideoRecorder::Private::initEncoding`: `Purple::OnRoundEncodingStarted(this,
   _format.get());` as its last line, after `avformat_write_header`; a failed
   header has already reset `_format`, so Purple gets null and does nothing.

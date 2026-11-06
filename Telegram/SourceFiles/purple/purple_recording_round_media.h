@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 #include <vector>
 
+struct AVCodec;
+struct AVCodecContext;
 struct AVFormatContext;
 struct AVIOContext;
 struct AVPacket;
@@ -25,6 +27,10 @@ struct AVRational;
 namespace Purple::RoundMedia {
 
 using Bytes = std::vector<std::uint8_t>;
+
+[[nodiscard]] bool ConfigureVideoEncoder(
+	AVCodecContext *context,
+	const AVCodec *codec);
 
 struct ParameterSets {
 	Bytes sps;

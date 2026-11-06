@@ -12,6 +12,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/mem.h>
+#include <libavutil/opt.h>
 } // extern "C"
 
 #include <algorithm>
@@ -346,6 +347,15 @@ private:
 }
 
 } // namespace
+
+bool ConfigureVideoEncoder(
+		AVCodecContext *context,
+		const AVCodec *codec) {
+	context->framerate = AVRational{ 30, 1 };
+	context->max_b_frames = 0;
+	return std::strcmp(codec->name, "libx264") != 0
+		|| av_opt_set(context->priv_data, "tune", "zerolatency", 0) >= 0;
+}
 
 std::optional<ParameterSets> ParameterSetsFromExtradata(
 		const std::uint8_t *data,
