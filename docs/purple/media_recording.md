@@ -54,8 +54,9 @@ reply and send-as context and rechecks the new recipient before sending.
 The capture stays in Media::Capture::Instance; hiding the native bar releases
 its subscriptions and global recording key filter without stopping capture.
 A native preview or trimmed resume prefix stays with the native bar and keeps
-the stock discard prompt. Tapping the dock target opens its thread and returns
-the voice to the matching native bar as a paused preview, without restarting the
+the stock discard prompt. Clicking the strip's title on the left (the chat name, or "Recording" when
+Work Mode hides it) opens its thread and returns the voice to the matching native
+bar as a paused preview, without restarting the
 microphone or losing view-once. Native sends after that handback still use the
 frozen capture context. Starting another capture offers Discard first.
 Session teardown cancels the capture, and generation checks invalidate old
@@ -87,8 +88,10 @@ Cross-chat round capture is deliberately unshipped until a separately authorized
 device spike passes and it acquires an independent owner.
 
 `keep_across_chats_p` and `round_float_p` are in the Media recording settings.
-They default on. Preview from the voice dock plays the paused capture and closes before capture
-resumes, so playback is not recorded through the microphone. Trimming
+They default on. The voice strip's **Preview** button opens a local playback dialog and keeps
+the strip. Use the title on the left to hand back to native preview. The playback
+dialog closes before capture resumes, so playback is not recorded through the
+microphone. Trimming
 inside that popup remains an extra beyond this change.
 
 ## F9. Seek back and forward
