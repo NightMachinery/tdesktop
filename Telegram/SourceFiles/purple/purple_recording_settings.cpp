@@ -216,6 +216,9 @@ void BuildMediaRecordingSettings(::Settings::Builder::SectionBuilder &builder) {
 		.label = rpl::single(rpl::empty) | rpl::then(
 			RecordingBinChanges()
 		) | rpl::map([] {
+			if (!RecordingStoreAvailable()) {
+				return tr::lng_purple_recording_unavailable(tr::now);
+			}
 			const auto count = RecordingBinCount();
 			return count ? QString::number(count) : QString();
 		}),

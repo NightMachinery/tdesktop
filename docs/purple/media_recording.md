@@ -341,6 +341,13 @@ crash safety writes it.
 
 ### At start
 
+The store observes active-session changes as well as account-list changes,
+so it opens after stored accounts load at startup. If the local key or manifest
+cannot be opened, the Recording bin row says "Unavailable" and the box explains
+that new recordings cannot be recovered after a crash. It does not report an
+empty bin in that state. This store uses the loaded local key, independently
+of the account message archive and without macOS Keychain access.
+
 Once the key is there, every entry still in `recording` or `sending` belongs
 to a crash. On a background thread its file is decrypted and recovered: a
 voice recording by purple-core's `FinaliseOgg`, which cuts it after the last

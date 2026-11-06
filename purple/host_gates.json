@@ -31,7 +31,8 @@
       "voice-queue": "Telegram/SourceFiles/purple/tests/voice_queue_cases.cpp",
       "recording": "Telegram/SourceFiles/purple/tests/recording_cases.cpp",
       "recording-round": "Telegram/SourceFiles/purple/tests/recording_round_cases.cpp",
-      "media-restart-fifo": "Telegram/SourceFiles/purple/tests/media_restart_fifo_cases.cpp"
+      "media-restart-fifo": "Telegram/SourceFiles/purple/tests/media_restart_fifo_cases.cpp",
+      "recording-store-startup": "Telegram/SourceFiles/purple/tests/recording_store_startup_cases.cpp"
     }
   },
   "gates": [
@@ -688,6 +689,22 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/media_size_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-recording-store-startup",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "recording-store-startup"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/recording_store_startup_cases.cpp"
       ]
     },
     {

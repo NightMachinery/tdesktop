@@ -136,6 +136,13 @@ CASES = {
         'build_libraries': ['libcrypto.a'],
         'frameworks': ['QtCore'],
     },
+    'recording-store-startup': {
+        'program': 'recording_store_startup_cases.cpp',
+        'units': [],
+        'generated': ['recording-store-startup.inc'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'Foundation'],
+    },
     'recording-round': {
         # F10's round copy, remux, repair rebuild and AAC measure over the
         # build's own FFmpeg, on a round encoded at test time.
@@ -184,6 +191,12 @@ def slices(sources):
         'photo-lifetime': '#include "editor/photo_editor_common.h"\n#include "editor/scene/scene.h"\nnamespace Editor {\n'
             + function(editor, 'PhotoModifications::~PhotoModifications()') + '\n}\n',
     }
+
+
+def recording_startup_include(sources):
+    store = (sources / 'purple/purple_recording_store.cpp').read_text()
+    return '\n'.join(function(store, signature) for signature in (
+        'void Refresh()', 'void StartRecordingStore()', 'bool RecordingStoreAvailable()'))
 
 
 def flow_include(sources):
@@ -335,7 +348,8 @@ if case['program'].endswith('.mm'):
     assert guard.index('qobject_cast<QGuiApplication*>') < guard.index('generalPasteboard'), 'purple_webp_paste_mac.mm'
 pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['units']) else {}
 for name in case.get('generated', []):
-    (work / name).write_text(flow_include(sources))
+    (work / name).write_text(recording_startup_include(sources)
+        if name == 'recording-store-startup.inc' else flow_include(sources))
     include.append('-I' + str(work))
 units = []
 for unit in [*case['units'], 'purple/tests/' + case['program']]:

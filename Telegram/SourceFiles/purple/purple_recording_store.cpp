@@ -393,6 +393,7 @@ void Load(not_null<Main::Account*> account) {
 		}
 		const auto key = DeriveKey(account);
 		if (!key) {
+			LOG(("Purple Recording: crash recovery unavailable, local key not ready."));
 			return;
 		}
 		store.key = std::make_shared<const RecordingCrypt::Key>(*key);
@@ -614,7 +615,14 @@ void StartRecordingStore() {
 	StartRoundCopies();
 	Core::App().domain().accountsChanges(
 	) | rpl::on_next(Refresh, lifetime);
+	Core::App().domain().activeSessionChanges(
+	) | rpl::on_next([] { Refresh(); }, lifetime);
 	Refresh();
+}
+
+bool RecordingStoreAvailable() {
+	const auto lock = std::lock_guard(TheStore().mutex);
+	return TheStore().loaded && bool(TheStore().key);
 }
 
 std::shared_ptr<const RecordingCrypt::Key> RecordingKey() {

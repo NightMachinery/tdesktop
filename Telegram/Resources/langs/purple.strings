@@ -583,6 +583,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_recording_bin_keep_never" = "Until cleared";
 "lng_purple_recording_keep_discarded" = "Keep discarded recordings in the bin";
 "lng_purple_recording_bin_empty" = "No unsent recordings";
+"lng_purple_recording_unavailable" = "Unavailable";
+"lng_purple_recording_store_unavailable" = "Recording recovery is unavailable: local data or its key could not be safely opened. New recordings cannot be recovered after a crash.";
 "lng_purple_recording_bin_recovered" = "Recovered after a crash";
 "lng_purple_recording_bin_partial" = "Partly recovered";
 "lng_purple_recording_bin_not_sent" = "Not sent";

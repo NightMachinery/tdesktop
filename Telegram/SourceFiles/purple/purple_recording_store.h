@@ -43,6 +43,7 @@ struct RecordingBinItem {
 };
 
 void StartRecordingStore();
+[[nodiscard]] bool RecordingStoreAvailable();
 void SetRecordingCaptureTarget(std::optional<RecordingCaptureTarget> target);
 void ForgetRecordingsAtLogout(Main::Account &account);
 

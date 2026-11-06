@@ -340,11 +340,13 @@ void RecordingBinBox(
 		crl::on_main(box, [=] {
 			rows->clear();
 			const auto items = RecordingBinItems();
-			if (items.empty()) {
+			if (!RecordingStoreAvailable() || items.empty()) {
 				rows->add(
 					object_ptr<Ui::FlatLabel>(
 						rows,
-						tr::lng_purple_recording_bin_empty(tr::now),
+						RecordingStoreAvailable()
+							? tr::lng_purple_recording_bin_empty(tr::now)
+							: tr::lng_purple_recording_store_unavailable(tr::now),
 						st::boxLabel),
 					st::boxRowPadding);
 			}
