@@ -31,3 +31,25 @@ update while the chat is closed, but prompt delivery cannot be guaranteed.
 Guaranteeing a shorter maximum delay would require polling or a different
 transport, beyond this feature's no-faster-polling rule. Device checks must keep
 the chat closed, hidden, muted and archived on the receiving client.
+
+## Fresh-login cache admission
+
+The Magic chat binding cache creates its `sync/` directory with mode `0700`
+and writes `chat.json` atomically with mode `0600`. Resolving an existing chat
+happens before automatic sync or first-use review reads the account store.
+This lets a newly logged-in device join that chat without a pre-existing
+`state.json` or automatic-sync record.
+
+Older cache writes used ordinary directory defaults, which could leave a
+`0755` directory containing only `chat.json`. Recovery discovery rejected it
+before reviewing any cloud records; manual Check could consequently report an
+ambiguous local store. Cache initialization now tightens that directory only
+when it is owned by this user, writable by nobody else, and contains just an
+owned regular cache with one link. A directory containing state, pending data,
+unknown entries or links is still refused. The state reader's private-mode
+requirements are unchanged.
+
+The automatic-service host gate exercises the production binding file methods
+on disk before enabling sync and joining an existing remote head. It covers
+root and secondary accounts, a fresh cache and the older cache layout, matching
+and customized settings, and refusal of unsafe directory or link layouts.

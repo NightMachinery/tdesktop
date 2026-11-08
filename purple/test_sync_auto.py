@@ -48,6 +48,11 @@ callback = check[start:end - 1]
 methods += 'void AutoSession::InvokeInventory(const SyncAutoPlan &plan, SyncAccountInventoryResult reply) {\n auto weak = Weak{ this, alive };\n const auto route = ProbeSelfRoute(_account);\n const auto origin = route.peer.origin;\n const auto chat = route.peer.chat;\n auto inventory = DesktopSyncChatInventory{route, std::move(reply)};\n' + callback + '\n}\n'
 (work / 'auto-service-boundary.inc').write_text(methods)
 
+binding = (repo / 'Telegram/SourceFiles/purple/purple_sync_magic_telegram.cpp').read_text()
+binding_methods = binding[binding.index('std::optional<QByteArray> readBinding() override'):binding.index('\tvoid local(')]
+(work / 'binding-port-boundary.inc').write_text(binding_methods.replace(' override', ''))
+
+
 objects = []
 commands = []
 with (work / 'build.log').open('w') as log:
@@ -86,7 +91,7 @@ with (work / 'build.log').open('w') as log:
             link += [value, '-Wl,-rpath,' + value[2:]]
     link += ['-Wl,-dead_strip', *map(str, objects), '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-framework', 'AppKit', '-o', str(work / 'test_sync_auto')]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
-(work / 'inputs.json').write_text(json.dumps({'compile': commands, 'link': link, 'apply_body': 'unchanged production source except opaque session include', 'service_boundary': 'production Facts (method name only changed), exact Accept/Hold/Stop/Complete and inventory callback bodies with controlled session/transport/UI endpoints'}, indent=2) + '\n')
+(work / 'inputs.json').write_text(json.dumps({'compile': commands, 'link': link, 'apply_body': 'unchanged production source except opaque session include', 'binding_boundary': 'unchanged production TelegramPort readBinding/writeBinding bodies, only override removed, over real temporary files', 'service_boundary': 'production Facts (method name only changed), exact Accept/Hold/Stop/Complete and inventory callback bodies with controlled session/transport/UI endpoints'}, indent=2) + '\n')
 exits = []
 for name, args in [('run', []), ('worker-run', ['--worker'])]:
     with (work / (name + '.log')).open('w') as log:

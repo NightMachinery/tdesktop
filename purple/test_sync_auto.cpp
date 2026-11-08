@@ -5,6 +5,7 @@
 #include "purple/purple_sync_config_review.h"
 #include "purple/purple_sync_config_post.h"
 #include "purple/purple_sync_magic_service.h"
+#include "purple/purple_sync_magic_chat.h"
 #include "purple/purple_config.h"
 #include "base/unixtime.h"
 #include <QtCore/QUuid>
@@ -16,6 +17,9 @@
 #include <limits>
 #include <thread>
 #include <QtCore/QJsonArray>
+#ifdef Q_OS_UNIX
+#include <unistd.h>
+#endif
 
 namespace base { void LogWriteMain(const QString &) {} namespace assertion { void log(const char *, const char *, int) {} } }
 namespace {
@@ -1239,6 +1243,160 @@ void FirstUseJoinAppliesCurrentHead() {
 	}
 }
 
+class BindingFilePort final : public std::enable_shared_from_this<BindingFilePort> {
+public:
+	explicit BindingFilePort(QString path) : _path(std::move(path)) {}
+	bool current() const { return live; }
+	bool live = true;
+	QString _path;
+
+#include "binding-port-boundary.inc"
+
+};
+
+void FreshLoginExistingChat() {
+	for (const auto rootOwner : { true, false }) {
+		for (const auto legacyCache : { false, true }) {
+			for (const auto &text : { T0, T2 }) {
+				auto temp = QTemporaryDir();
+				Put(temp.filePath(u"settings.toml"_q), text);
+				auto config = DesktopAccountConfig(temp.path());
+				const auto owner = AccountKey{ 0, 101 };
+				const auto key = rootOwner ? owner : AccountKey{ 0, 202 };
+				config.start({ { owner, false, false }, { { 0, 202 }, false, false } }, owner);
+				const auto files = *config.files(key);
+				Put(files.settings, text);
+				const auto path = files.syncDirectory + u"/chat.json"_q;
+				const auto chat = PeerToken{ PeerTokenKind::Channel, 42 };
+				auto binding = SyncChatBinding();
+				binding.mode = SyncChatBindingMode::Magic;
+				binding.chat = chat;
+				const auto encoded = SerializeSyncChatBinding(binding);
+				CHECK(encoded);
+				if (!encoded) { continue; }
+				if (legacyCache) {
+					Put(path, *encoded);
+#ifdef Q_OS_UNIX
+					CHECK(QFile::setPermissions(files.syncDirectory, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+						| QFileDevice::ExeOwner | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+						| QFileDevice::ReadOther | QFileDevice::ExeOther));
+					CHECK(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+						| QFileDevice::ReadGroup | QFileDevice::ReadOther));
+#endif
+				}
+				const auto port = std::make_shared<BindingFilePort>(path);
+				const auto before = port->readBinding();
+				CHECK(before && *before == (legacyCache ? *encoded : QByteArray()));
+				CHECK(before && port->writeBinding(*before, *encoded));
+				auto cached = QByteArray();
+				CHECK(ReadSyncPrivateFile(path, kSyncMagicBindingLimit, cached) == SyncStoreStatus::Ready);
+				CHECK(cached == *encoded);
+				const auto snapshot = ReadSyncRecoveryStore(files, key);
+				CHECK(snapshot.status == SyncStoreStatus::Ready);
+				CHECK(!snapshot.store.statePresent && !snapshot.store.pendingPresent);
+				std::printf("FRESH_LOGIN_CACHE owner=%d legacy=%d custom=%d read=%d\n", int(rootOwner),
+					int(legacyCache), int(text == T0), int(snapshot.status));
+				if (snapshot.status != SyncStoreStatus::Ready) { continue; }
+				CHECK(SetDesktopSyncAutoBeforeState(files, key, true));
+				CHECK(ReadDesktopSyncAuto(files, key).record->enabled);
+				const auto space = *FormatSyncSpaceId(QByteArray(16, 's'));
+				const auto writer = *FormatSyncInstallId(QByteArray(16, 'r'));
+				const auto remote = BuildConfigRecord({ T2, {}, std::nullopt, space, writer,
+					u"android:"_q + writer, u"Android"_q, u"test"_q, 1, 1800000000 });
+				CHECK(remote);
+				auto scan = SyncHistoryScanResult();
+				scan.status = SyncHistoryScanStatus::Complete;
+				scan.candidateIds = { 77 };
+				auto read = SyncCandidateReadResult();
+				auto candidate = ClassifySyncCandidate(77, remote.canonical);
+				candidate.documentId = 5077;
+				candidate.editDate = 1800000000;
+				read.records = { candidate };
+				read.status = AggregateSyncCandidateRead(read.records);
+				const auto inventory = FinishSyncAccountInventory(uint64_t(key.userId), scan, read);
+				CHECK(inventory.status == SyncAccountInventoryStatus::Complete);
+				const auto first = ReviewSyncFirstUse(files, inventory);
+				CHECK(first.need == SyncFirstUseNeed::NoState);
+				CHECK(first.action == ((text == T2) ? SyncFirstUseAction::JoinSilently : SyncFirstUseAction::Ask));
+				auto mark = SyncFirstUseMark();
+				mark.choice = SyncFirstUseChoice::Synced;
+				mark.joinSpace = space;
+				mark.heads = { remote.version.key };
+				CHECK(WriteSyncFirstUseMark(files, mark));
+				auto state = SyncLocalState();
+				state.install = *FormatSyncInstallId(QByteArray(16, 'n'));
+				state.createdDevice = u"desktop:"_q + state.install;
+				state.space = space;
+				state.version = 2;
+				state.chat = chat;
+				state.bindingToken = *FormatSyncBindingToken(QByteArray(16, 't'));
+				{
+					auto store = SyncLocalStore(files.syncDirectory);
+					CHECK(store.Open(true).status == SyncStoreStatus::Uninitialized);
+					const auto initialized = store.Initialize(state);
+					CHECK(initialized);
+					if (!initialized) { continue; }
+				}
+				Config = &config; Account = key; Token = state.bindingToken.toLatin1();
+				auto session = Main::Session(); auto account = Main::Account();
+				const auto current = config.reviewTransfer(key, text);
+				CHECK(current);
+				if (!current) { continue; }
+				const auto joined = ApplySyncFirstUseJoin(account, session, inventory,
+					remote.version.key, *current, chat);
+				CHECK(joined.status == SyncConfigApplyStatus::Applied);
+				CHECK(ReadSettingsFileInput(files.settings).bytes == T2);
+				auto automatic = DesktopSyncAutoStore(files, key, Token, [] { return true; });
+				const auto opened = automatic.Open();
+				CHECK(opened && automatic.record().enabled);
+				if (!opened) { continue; }
+				CHECK(automatic.local().state()->configData.base == remote.version.key);
+			}
+		}
+	}
+}
+
+void RefuseUnsafeCacheDirectories() {
+#ifdef Q_OS_UNIX
+	for (const auto kind : { 0, 1, 2, 3, 4 }) {
+		auto temp = QTemporaryDir();
+		const auto directory = temp.filePath(u"sync"_q);
+		const auto outside = temp.filePath(u"outside"_q);
+		const auto cache = directory + u"/chat.json"_q;
+		if (kind == 4) {
+			CHECK(QDir().mkpath(outside));
+			CHECK(QFile::link(outside, directory));
+		} else {
+			CHECK(QDir().mkpath(directory));
+		}
+		CHECK(QFile::setPermissions(directory, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+			| QFileDevice::ExeOwner | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+			| QFileDevice::ReadOther | QFileDevice::ExeOther
+			| ((kind == 1) ? QFileDevice::WriteOther : QFileDevice::Permissions())));
+		if (kind == 0) {
+			Put(directory + u"/state.json"_q, "opaque-state-sentinel");
+		} else if (kind == 2 || kind == 3) {
+			Put(outside, "outside-sentinel");
+			if (kind == 2) {
+				CHECK(QFile::link(outside, cache));
+			} else {
+				CHECK(::link(QFile::encodeName(outside).constData(), QFile::encodeName(cache).constData()) == 0);
+			}
+		}
+		const auto permissions = QFileInfo(directory).permissions();
+		const auto port = std::make_shared<BindingFilePort>(cache);
+		CHECK(!port->readBinding());
+		CHECK(!port->writeBinding({}, "inert-cache"));
+		CHECK(QFileInfo(directory).permissions() == permissions);
+		if (kind == 0) {
+			CHECK(ReadSettingsFileInput(directory + u"/state.json"_q).bytes == "opaque-state-sentinel");
+		} else if (kind == 2 || kind == 3) {
+			CHECK(ReadSettingsFileInput(outside).bytes == "outside-sentinel");
+		}
+	}
+#endif
+}
+
 void AutoBeforeState() {
 	auto temp = QTemporaryDir();
 	Put(temp.filePath(u"settings.toml"_q), T0);
@@ -1270,7 +1428,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
+	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); FreshLoginExistingChat(); RefuseUnsafeCacheDirectories(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);
