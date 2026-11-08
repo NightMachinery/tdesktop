@@ -201,9 +201,10 @@ A configuration that reuses the output of a STALE one is STALE too. Refresh the
 build and run again; `--accept-stale` counts STALE configurations as passing,
 but the summary then starts with `STALE ACCEPTED` and names them.
 
-Record transport, archive, picker and Wait gates compile the automatic-sync policy
-and record codec from the tree under test. They also compare borrowed core objects'
-Ninja dependencies against the current core and rebuild affected units in their
+Automatic-sync, record transport, archive, picker and Wait gates compile the
+automatic-sync policy and record codec from the tree under test. They also compare
+borrowed core objects' Ninja dependencies against the current core and rebuild
+affected units in their
 gate output directory. This keeps a read-only Debug build usable after core
 changes; all reused inputs still pass the same freshness checks.
 
