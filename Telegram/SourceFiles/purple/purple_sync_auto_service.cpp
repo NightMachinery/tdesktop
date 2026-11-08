@@ -1090,7 +1090,8 @@ void AutoSession::Delete(const SyncAutoPlan &plan) {
 void ObserveAutomaticSyncMessages(
 		not_null<Main::Session*> session,
 		const MTPVector<MTPMessage> &messages) {
-	if (!SyncMagicBound(session) || !AutomaticSettingsSyncEnabled(session)) { return; }
+	const auto bound = SyncMagicBound(session);
+	if (!bound) { return; }
 	for (const auto &message : messages.v) {
 		if (message.type() != mtpc_message) { continue; }
 		const auto &data = message.c_message();
@@ -1099,6 +1100,8 @@ void ObserveAutomaticSyncMessages(
 			: peerIsChannel(peer) ? PeerToken{ PeerTokenKind::Channel, peerToChannel(peer).bare }
 			: peerIsChat(peer) ? PeerToken{ PeerTokenKind::Chat, peerToChat(peer).bare }
 			: PeerToken{ PeerTokenKind::User, peerToUser(peer).bare };
+		if (token != *bound) { continue; }
+		if (!AutomaticSettingsSyncEnabled(session)) { return; }
 		For(session).Updated(token, data.vid().v);
 	}
 }
