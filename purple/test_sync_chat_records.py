@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_store_units import add_sync_policy_units
 import argparse
 import hashlib
 import json
@@ -127,6 +128,7 @@ with (work / 'build.log').open('w') as log:
         build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o',
         build / 'Telegram/lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o',
         build / 'Telegram/lib_base/liblib_base.a']
+    add_sync_policy_units(repo, build, work, objects, compiled, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe: link += [flag, recipe[recipe.index(flag) + 1]]

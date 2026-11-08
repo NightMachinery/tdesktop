@@ -4,8 +4,14 @@ from pathlib import Path
 
 
 def add_sync_store_units(repo, build, work, objects, compiled, log):
-    client = ['purple_sync_local_store']
-    core = []
+    add_current_units(repo, build, work, objects, compiled, log, ['purple_sync_local_store'], [])
+
+
+def add_sync_policy_units(repo, build, work, objects, compiled, log):
+    add_current_units(repo, build, work, objects, compiled, log, [], ['purple_sync_auto', 'purple_sync_auto_state'])
+
+
+def add_current_units(repo, build, work, objects, compiled, log, client, core):
     def replaced(path):
         text = str(path)
         name = Path(path).name.removesuffix('.o').removesuffix('.cpp')
