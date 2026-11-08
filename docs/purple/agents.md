@@ -110,6 +110,25 @@ runs and were found by the owner. So:
   once could not enable sync at all, because the binding cache was written with
   ordinary file modes and the private-directory check refused it.
 
+## Coordinating Purple workers
+
+Lessons from coordinating Codex workers through Paseo on this fork:
+
+- Only an agent's first run notifies its parent when it finishes. After
+  every follow-up `paseo send`, arm a waiter (`paseo wait <id>`, then message
+  the coordinator), or the coordinator sits idle while the worker has stopped.
+  A waiter that watches another machine must report when that machine is
+  unreachable instead of retrying silently.
+- Land a change once its one review has no P1 findings and the must-pass
+  device checks hold; P2 findings become follow-ups. Deliver (install the
+  desktop build, send the APK) as soon as it lands; delivery needs no extra
+  approval.
+- Write each brief as a file the worker reads, with the exact paths, hashes,
+  rules and the result file to write. Copy the accident-handling rules into
+  every GUI brief, since a runner treats anything unmentioned as a stop.
+- Give each worker its own worktree and build directory, and order compiler
+  use by priority instead of letting workers race for it.
+
 ## Quitting the fork on macOS: never by name
 
 Several Telegram clients are usually installed side by side, and their names
