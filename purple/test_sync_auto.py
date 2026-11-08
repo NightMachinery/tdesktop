@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from sync_store_units import add_sync_store_units
+from sync_store_units import add_current_core_units, add_sync_store_units
 import argparse
 import json
 from pathlib import Path
@@ -72,12 +72,11 @@ with (work / 'build.log').open('w') as log:
         else:
             objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o'))
     for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp')):
-        if not args.use_build_objects and source.stem in ['purple_sync_auto', 'purple_sync_auto_state']:
-            objects.append(compile(source, source.stem))
-        else:
-            objects.append(build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o'))
+        objects.append(build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o'))
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o', build / 'Telegram/lib_base/liblib_base.a']
     add_sync_store_units(repo, build, work, objects, commands, log)
+    if not args.use_build_objects:
+        add_current_core_units(repo, build, work, objects, commands, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe:
