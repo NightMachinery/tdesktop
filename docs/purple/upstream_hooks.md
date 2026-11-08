@@ -1704,3 +1704,10 @@ The round bubble lock callback calls `ToggleRoundRecordingPause`, sharing the
 strip adapter that temporarily restores native control ownership. The native
 voice bar exposes `purplePauseChanges` from its pause variable so the strip
 observes resume after both native recording and pause state have settled.
+
+## Sync chat update pickup
+
+`api/api_updates.cpp` calls `ObserveAutomaticSyncUpdate` at update dispatch and
+`ObserveAutomaticSyncMessages` for global and channel difference message vectors.
+The service filters the account's bound chat, coalesces bursts and suppresses
+local issued message ids before requesting the existing automatic sync check.

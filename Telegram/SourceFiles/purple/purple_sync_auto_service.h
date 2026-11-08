@@ -9,6 +9,12 @@ namespace Main { class Session; }
 
 namespace Purple {
 
+void ObserveAutomaticSyncUpdate(
+	not_null<Main::Session*> session,
+	const MTPUpdate &update);
+void ObserveAutomaticSyncMessages(
+	not_null<Main::Session*> session,
+	const MTPVector<MTPMessage> &messages);
 void StartAutomaticSettingsSync();
 void TriggerAutomaticSettingsSync(SyncAutoEvent event);
 void SuppressAutomaticSettingsSave(not_null<Main::Session*> session);

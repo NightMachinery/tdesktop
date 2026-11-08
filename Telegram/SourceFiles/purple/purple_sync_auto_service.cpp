@@ -84,6 +84,8 @@ public:
 	~AutoSession();
 	bool Event(SyncAutoEvent event);
 	void ChatChanged();
+	void Updated(PeerToken chat, int32_t id);
+	void Pickup();
 	SyncAutoReason FailureReason() const { return _failureReason; }
 	void Saved();
 	void Replaced();
@@ -154,6 +156,10 @@ private:
 	SyncAutoReason _failureReason = SyncAutoReason::None;
 	base::Timer _retry;
 	base::Timer _save;
+	base::Timer _pickup;
+	std::optional<PeerToken> _pickupChat;
+	std::set<int32_t> _pickupIds;
+	bool _pickupOverflow = false;
 	rpl::lifetime _lifetime;
 	QString _savedFingerprint;
 	QString _pendingFingerprint;
@@ -204,7 +210,8 @@ AutoSession::AutoSession(not_null<Main::Session*> session)
 	} else {
 		Replaced();
 	}
-}) {
+})
+, _pickup([=] { Pickup(); }) {
 
 }
 
@@ -376,6 +383,37 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	}
 	Run(plan);
 	return true;
+}
+
+void AutoSession::Updated(PeerToken chat, int32_t id) {
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	if (!bound || *bound != chat || id <= 0) { return; }
+	if (_pickupChat != bound) { _pickupIds.clear(); _pickupOverflow = false; }
+	_pickupChat = bound;
+	if (_pickupIds.size() < 128) { _pickupIds.insert(id); }
+	else if (!_pickupIds.contains(id)) { _pickupOverflow = true; }
+	if (!_pickup.isActive()) { _pickup.callOnce(500); }
+}
+
+void AutoSession::Pickup() {
+	const auto session = _session.get();
+	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
+	if (!bound || bound != _pickupChat || !AutomaticSettingsSyncEnabled(session)
+		|| SyncMagicPaused(session)) { _pickupIds.clear(); _pickupOverflow = false; return; }
+	if (_firstRunning || (_inFlight && (_plan.action == SyncAutoAction::Post
+		|| _plan.action == SyncAutoAction::EditInPlace))) {
+		_pickup.callOnce(500);
+		return;
+	}
+	const auto opened = Open();
+	const auto state = opened ? _store->local().state() : nullptr;
+	const auto ids = std::vector<int32_t>(_pickupIds.begin(), _pickupIds.end());
+	_pickupIds.clear();
+	const auto overflow = std::exchange(_pickupOverflow, false);
+	if (overflow || SyncAutoPickupNeeded(*bound, *_pickupChat, ids, state)) {
+		Event(SyncAutoEvent::ChatUpdated);
+	}
 }
 
 void AutoSession::ChatChanged() {
@@ -634,7 +672,7 @@ bool AutoSession::NoStateEvent(SyncAutoEvent event) {
 // WHY: without a state the store's lifecycle limit never runs, so the last first-use outcome beside the
 // missing state limits the scans; Enable, a sync chat change and a changed settled file still decide afresh.
 bool AutoSession::FirstUseDue(const AccountFiles &files, SyncAutoEvent event) {
-	if (event == SyncAutoEvent::Enable || _firstBypass) {
+	if (event == SyncAutoEvent::Enable || event == SyncAutoEvent::ChatUpdated || _firstBypass) {
 		return true;
 	} else if (event == SyncAutoEvent::LocalSaved && _save.isActive()) {
 		return false;
@@ -1047,6 +1085,33 @@ void AutoSession::Delete(const SyncAutoPlan &plan) {
 	});
 }
 
+}
+
+void ObserveAutomaticSyncMessages(
+		not_null<Main::Session*> session,
+		const MTPVector<MTPMessage> &messages) {
+	if (!SyncMagicBound(session) || !AutomaticSettingsSyncEnabled(session)) { return; }
+	for (const auto &message : messages.v) {
+		if (message.type() != mtpc_message) { continue; }
+		const auto &data = message.c_message();
+		const auto peer = PeerFromMessage(message);
+		const auto token = peer == peerFromUser(session->userId()) ? PeerToken{ PeerTokenKind::Self, 0 }
+			: peerIsChannel(peer) ? PeerToken{ PeerTokenKind::Channel, peerToChannel(peer).bare }
+			: peerIsChat(peer) ? PeerToken{ PeerTokenKind::Chat, peerToChat(peer).bare }
+			: PeerToken{ PeerTokenKind::User, peerToUser(peer).bare };
+		For(session).Updated(token, data.vid().v);
+	}
+}
+
+void ObserveAutomaticSyncUpdate(
+		not_null<Main::Session*> session,
+		const MTPUpdate &update) {
+	const auto message = update.match([](const MTPDupdateNewMessage &data) { return &data.vmessage(); },
+		[](const MTPDupdateNewChannelMessage &data) { return &data.vmessage(); },
+		[](const MTPDupdateEditMessage &data) { return &data.vmessage(); },
+		[](const MTPDupdateEditChannelMessage &data) { return &data.vmessage(); },
+		[](const auto &) -> const MTPMessage* { return nullptr; });
+	if (message) { ObserveAutomaticSyncMessages(session, MTP_vector<MTPMessage>({ *message })); }
 }
 
 void StartAutomaticSettingsSync() {

@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_updates.h"
+
+#include "purple/purple_sync_auto_service.h"
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_user_control.h"
 
@@ -455,6 +457,7 @@ void Updates::feedChannelDifference(
 	session().data().processUsers(data.vusers());
 	session().data().processChats(data.vchats());
 
+	Purple::ObserveAutomaticSyncMessages(_session, data.vnew_messages());
 	_handlingChannelDifference = true;
 	applyConvertToScheduledOnSend(data.vother_updates());
 	feedMessageIds(data.vother_updates());
@@ -624,6 +627,7 @@ void Updates::feedDifference(
 	applyConvertToScheduledOnSend(other);
 	feedMessageIds(other);
 	session().data().processMessages(msgs, NewMessageType::Unread);
+	Purple::ObserveAutomaticSyncMessages(_session, msgs);
 	feedUpdateVector(other, SkipUpdatePolicy::SkipMessageIds);
 }
 
@@ -1635,6 +1639,7 @@ void Updates::applyUpdates(
 }
 
 void Updates::feedUpdate(const MTPUpdate &update) {
+	Purple::ObserveAutomaticSyncUpdate(_session, update);
 	switch (update.type()) {
 
 	// New messages.
