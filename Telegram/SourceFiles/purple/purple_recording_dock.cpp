@@ -263,9 +263,13 @@ void Discard() {
 	const auto token = TheDock().model.generation();
 	WithWindow([=](not_null<Window::SessionController*> controller) {
 		controller->show(Ui::MakeConfirmBox({
-			.text = (TheDock().roundBar
-				? tr::lng_record_lock_cancel_sure_round
-				: tr::lng_record_lock_cancel_sure)(),
+			.text = (TheDock().ready
+				? (TheDock().ready->video
+					? tr::lng_record_listen_cancel_sure_round
+					: tr::lng_record_listen_cancel_sure)
+				: (TheDock().roundBar
+					? tr::lng_record_lock_cancel_sure_round
+					: tr::lng_record_lock_cancel_sure))(),
 			.confirmed = [=](Fn<void()> close) {
 				close();
 				if (!Current(token)) return;

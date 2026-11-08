@@ -100,7 +100,8 @@ preview; it cannot resume capture.
 
 The native bar and recorder remain in their original chat. Before a close check,
 the round expands back to the native controls and uses the stock discard prompt. The strip also uses the round-video
-confirmation wording for a round take.
+confirmation wording for a round take, including the listening variant when
+a completed take is waiting for a replacement recipient.
 Cross-chat round capture is deliberately unshipped until a separately authorized
 device spike passes and it acquires an independent owner.
 
