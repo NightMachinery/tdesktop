@@ -58,6 +58,58 @@ client:
    configuration; follow documented configuration requirements for dependency
    builds.
 
+## Sharing the build machine
+
+- Work in your own worktree under the scratch volume. Never switch the
+  branch of the owner's main checkout, and never keep a worktree in a folder
+  the owner empties at will (a "delete-me" folder).
+- Several workers share one compiler. Hold the machine-wide compiler hold only
+  while compiling or linking, release it during runtime-only test phases, and
+  queue with `--wait` rather than asking for a window. Owner-reported bug fixes
+  go first.
+- For delivery, reuse a build whose source tree and configuration exactly match
+  the landed commit instead of rebuilding it.
+- Copy a macOS `.app` bundle with `tar` or `ditto`. `scp -r` flattens the
+  framework symlinks and the bundle no longer verifies.
+
+## GUI and device testing
+
+A test that only checks behaviour misses ugly UI. Several Purple surfaces (a
+plain-text recording strip, unstyled floating-round buttons, a truncated
+recording bin, seek labels drawn over a music title) passed functional device
+runs and were found by the owner. So:
+
+- Any change to visible UI names the stock component it reuses: the stock
+  drawables, colours, shapes, paddings and text styles of this Telegram version,
+  not an imitation of them.
+- Its device pass includes side-by-side screenshots of the Purple surface and
+  the nearest stock equivalent in the same app, in light and dark, with long
+  text and one right-to-left check. The review judges that comparison as well as
+  the behaviour. "Works" is not "passes".
+- A GUI runner looks at a real screenshot after every step and uses judgment.
+  Scripts are only for precise timing. Combine each action with its screenshot
+  in one call and shrink the screenshot; it halves the turns.
+- A runner stops only for real hard rules: session loss, a phone-number or code
+  prompt, a deletion, or a broken safety rule. Every other surprise is a result
+  to describe. An accidental chat open is closed at once and logged in one line
+  without its contents. The test account's "Someone just got access... Is it
+  you?" card is expected after a test login: it gets no tap and is not a stop.
+  Check what is behind any stop rule before writing it into a brief.
+- Launch a desktop test stage only through LaunchServices:
+  `open -n "<stage>.app" --env XDG_CONFIG_HOME=<dir>/config --env XDG_CACHE_HOME=<dir>/cache --env XDG_DATA_HOME=<dir>/data --args -workdir <dir>`.
+  Without the XDG variables the stage reads and writes the owner's real config.
+  Confirm in its log that settings are read from the test directory before
+  doing anything else.
+- The installed `/Applications` Purple has the same bundle id as every stage.
+  Never touch it; act on a stage only by its verified PID, and activate it and
+  confirm it is frontmost before every synthetic click, since a click lands on
+  whatever is in front.
+- A macOS camera is unavailable while the lid is closed; check before reading a
+  failed round recording as a product bug.
+- Test the fresh-login path at least once for every sync change. A fresh device
+  once could not enable sync at all, because the binding cache was written with
+  ordinary file modes and the private-directory check refused it.
+
 ## Quitting the fork on macOS: never by name
 
 Several Telegram clients are usually installed side by side, and their names
