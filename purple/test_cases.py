@@ -136,6 +136,15 @@ CASES = {
         'build_libraries': ['libcrypto.a'],
         'frameworks': ['QtCore'],
     },
+    'recording-bin': {
+        'program': 'recording_bin_cases.cpp',
+        'generated': ['recording-bin.inc'],
+        'units': ['ui/text/format_values.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
+        'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
+        'libraries': ['Telegram/lib_ui/liblib_ui.a', 'Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'Foundation', 'AppKit', 'Metal'],
+        'link': ['-lobjc'],
+    },
     'recording-store-startup': {
         'program': 'recording_store_startup_cases.cpp',
         'units': [],
@@ -300,6 +309,13 @@ int main(int argc, char **argv) {
 }
 """
 
+def recording_bin_include(sources):
+    text = (sources / 'purple/purple_recording_bin_box.cpp').read_text()
+    result = text[text.index('[[nodiscard]] Ui::LinkButton *AddAction('):text.index('void AddItem(')]
+    return result.replace('st::boxLabel', 'st::defaultFlatLabel').replace(
+        'st::boxRowPadding', 'QMargins(8, 8, 8, 8)')
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path)
@@ -360,6 +376,7 @@ if case['program'].endswith('.mm'):
 pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['units']) else {}
 for name in case.get('generated', []):
     generate = {
+        'recording-bin.inc': recording_bin_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,
     }.get(name, flow_include)

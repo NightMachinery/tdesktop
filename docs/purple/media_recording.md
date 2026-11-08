@@ -38,6 +38,15 @@ The code is in `Telegram/SourceFiles/purple/`:
   settings, use no Qt and no app types, so `purple/tests/recording_cases.cpp`
   and `purple/tests/recording_round_cases.cpp` run them alone.
 
+## Recording bin playback
+
+Play shows elapsed and total time for voice and round recordings. Round playback
+also shows its circular video preview. Stop ends the local preview; the other
+recordings keep their action links when the list refreshes. Decoder failures
+appear beside the playback controls. The host presentation case uses real Qt
+widgets and controlled player events to check progress, refreshed links and
+subscription teardown; encrypted recovery fixtures separately check the media.
+
 ## F8. Voice recording across chats
 
 Leaving a chat adopts an active voice into the recording dock. Clicking the

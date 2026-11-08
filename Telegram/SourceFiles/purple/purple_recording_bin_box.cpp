@@ -196,6 +196,7 @@ void TogglePlay(
 	}
 	const auto bytes = RecordingBinMedia(item.id);
 	if (!bytes) {
+		state->rebuild();
 		box->uiShow()->showToast(tr::lng_purple_recording_bin_play_failed(tr::now));
 		return;
 	}
@@ -206,6 +207,7 @@ void TogglePlay(
 		Editor::SegmentPlayerOptions{ .audio = !round });
 	player->start();
 	if (!player->valid()) {
+		state->rebuild();
 		box->uiShow()->showToast(tr::lng_purple_recording_bin_play_failed(tr::now));
 		return;
 	}
@@ -215,6 +217,64 @@ void TogglePlay(
 	state->playing.id = item.id;
 	state->playing.player = std::move(player);
 	state->rebuild();
+}
+
+[[nodiscard]] Ui::LinkButton *AddAction(
+		not_null<Ui::RpWidget*> parent,
+		const QString &text,
+		Fn<void()> callback) {
+	const auto button = Ui::CreateChild<Ui::LinkButton>(parent, text);
+	button->setClickedCallback(std::move(callback));
+	button->show();
+	return button;
+}
+
+void AddPlayback(
+		not_null<Ui::VerticalLayout*> rows,
+		not_null<Editor::SegmentPlayer*> player,
+		Kind kind,
+		crl::time duration) {
+	const auto weak = base::make_weak(player);
+	const auto progress = rows->add(
+		object_ptr<Ui::FlatLabel>(rows, QString(), st::boxLabel),
+		st::boxRowPadding);
+	rpl::single(player->position()) | rpl::then(
+		player->positionUpdates()
+	) | rpl::on_next([=](crl::time position) {
+		progress->setText(Ui::FormatDurationText(position / 1000)
+			+ u" / "_q + Ui::FormatDurationText(duration / 1000));
+	}, progress->lifetime());
+	player->repaints() | rpl::on_next([=] {
+		if (weak && !weak->valid()) {
+			progress->setText(tr::lng_purple_recording_bin_play_failed(tr::now));
+		}
+	}, progress->lifetime());
+	if (kind != Kind::Round) {
+		return;
+	}
+	const auto canvas = rows->add(
+		object_ptr<Ui::RpWidget>(rows),
+		st::boxRowPadding);
+	canvas->resize(kRoundPreview, kRoundPreview);
+	player->repaints() | rpl::on_next([=] {
+		canvas->update();
+	}, canvas->lifetime());
+	canvas->paintRequest() | rpl::on_next([=] {
+		if (!weak || !weak->ready()) {
+			return;
+		}
+		const auto size = QSize(kRoundPreview, kRoundPreview);
+		const auto frame = weak->frame(size * canvas->devicePixelRatio());
+		if (frame.isNull()) {
+			return;
+		}
+		auto p = QPainter(canvas);
+		PainterHighQualityEnabler hq(p);
+		auto path = QPainterPath();
+		path.addEllipse(QRectF(0, 0, kRoundPreview, kRoundPreview));
+		p.setClipPath(path);
+		p.drawImage(QRect(QPoint(), size), frame);
+	}, canvas->lifetime());
 }
 
 void AddItem(
@@ -227,44 +287,15 @@ void AddItem(
 		object_ptr<Ui::FlatLabel>(rows, ItemText(item), st::boxLabel),
 		st::boxRowPadding);
 	const auto playing = (state->playing.id == item.id);
-	const auto canvas = rows->add(
-		object_ptr<Ui::RpWidget>(rows),
-		st::boxRowPadding);
-	if (playing && item.kind == Kind::Round && state->playing.player) {
-		canvas->resize(kRoundPreview, kRoundPreview);
-		state->playing.player->repaints() | rpl::on_next([=] {
-			canvas->update();
-		}, canvas->lifetime());
-		canvas->paintRequest() | rpl::on_next([=] {
-			const auto player = state->playing.player.get();
-			if (!player || !player->ready()) {
-				return;
-			}
-			const auto size = QSize(kRoundPreview, kRoundPreview);
-			const auto frame = player->frame(size * canvas->devicePixelRatio());
-			if (frame.isNull()) {
-				return;
-			}
-			auto p = QPainter(canvas);
-			PainterHighQualityEnabler hq(p);
-			auto path = QPainterPath();
-			path.addEllipse(QRectF(0, 0, kRoundPreview, kRoundPreview));
-			p.setClipPath(path);
-			p.drawImage(QRect(QPoint(), size), frame);
-		}, canvas->lifetime());
-	} else {
-		canvas->resize(0, 0);
+	if (playing && state->playing.player) {
+		AddPlayback(rows, state->playing.player.get(), item.kind, item.duration);
 	}
 	const auto actions = rows->add(
 		object_ptr<Ui::RpWidget>(rows),
 		st::boxRowPadding);
 	auto buttons = std::vector<not_null<Ui::LinkButton*>>();
 	const auto add = [&](const QString &text, Fn<void()> callback) {
-		const auto button = Ui::CreateChild<Ui::LinkButton>(
-			actions,
-			text);
-		button->setClickedCallback(std::move(callback));
-		buttons.push_back(button);
+		buttons.push_back(AddAction(actions, text, std::move(callback)));
 	};
 	const auto id = item.id;
 	const auto copy = item;
