@@ -17,6 +17,7 @@
 #include <limits>
 #include <thread>
 #include <QtCore/QJsonArray>
+#include <QtCore/QCryptographicHash>
 #ifdef Q_OS_UNIX
 #include <unistd.h>
 #include <sys/stat.h>
@@ -1129,6 +1130,62 @@ void MovedChatCommits() {
 	}
 }
 
+void ManualApplyFullRetention() {
+	auto f = Fixture();
+	for (auto i = 0; i != kSyncRetainedBaseCountLimit; ++i) {
+		f.Seed(T0 + "# retained " + QByteArray::number(i) + '\n');
+	}
+	f.Open();
+	const auto before = *f.store->local().state();
+	const auto oldRecords = f.cloud;
+	CHECK(before.preserved.value(u"retained_config_bases"_q).toObject()
+		.value(u"records"_q).toArray().size() == kSyncRetainedBaseCountLimit);
+	f.Remote(T2);
+	f.store.reset();
+	Config = f.config.get(); Account = f.key; Token = f.token;
+	auto session = Main::Session(); auto account = Main::Account();
+	const auto inventory = CloudInventory(f);
+	const auto review = ReviewSyncConfig(account, session, inventory, PeerToken{});
+	CHECK(review.plan.verdict == ConfigSyncVerdict::UpdateReady);
+	const auto current = f.config->reviewTransfer(f.key, T2);
+	CHECK(current);
+	if (!current) { return; }
+	const auto key = Version(f.cloud.rbegin()->second).key;
+	const auto refused = ApplySyncConfigChoice(account, session, inventory, review, key, &*current);
+	CHECK(refused.status == SyncConfigApplyStatus::StoreError
+		&& refused.storeStatus == SyncStoreStatus::RetentionFull);
+	CHECK(!refused.wroteFile && refused.historyId.isEmpty());
+	CHECK(ReadSettingsFileInput(f.files.settings).bytes == review.local.text);
+	auto checkpoint = SyncStoreStatus::InvalidTransition;
+	auto worker = std::thread([&] {
+		auto store = SyncLocalStore(f.files.syncDirectory);
+		CHECK(store.Open(true, f.token));
+		checkpoint = store.CheckpointRetainedConfigBases();
+	});
+	worker.join();
+	CHECK(checkpoint == SyncStoreStatus::Ready);
+	for (const auto &[id, bytes] : oldRecords) {
+		const auto hash = QString::fromLatin1(QCryptographicHash::hash(bytes,
+			QCryptographicHash::Sha256).toHex());
+		auto archived = QByteArray();
+		CHECK(ReadSyncPrivateFile(f.files.syncDirectory + u"/retained-bases/"_q
+			+ hash + u".json"_q, kSyncSettingsRecordStorageLimit, archived) == SyncStoreStatus::Ready);
+		CHECK(archived == bytes);
+	}
+	const auto applied = ApplySyncConfigChoice(account, session, inventory, review, key, &*current);
+	std::printf("MANUAL_FULL_RETENTION status=%d store=%d wrote=%d history=%d\n",
+		int(applied.status), int(applied.storeStatus.value_or(SyncStoreStatus::Ready)),
+		int(applied.wroteFile), int(!applied.historyId.isEmpty()));
+	CHECK(applied.status == SyncConfigApplyStatus::Applied);
+	CHECK(ReadSettingsFileInput(f.files.settings).bytes == T2);
+	CHECK(applied.wroteFile && applied.undoAvailable && !applied.historyId.isEmpty());
+	const auto history = ReadSyncConfigHistory({ f.files, [] { return true; } }, applied.historyId);
+	CHECK(history && *history == review.local.text);
+	auto reopened = SyncLocalStore(f.files.syncDirectory);
+	CHECK(reopened.Open(true, f.token));
+	CHECK(reopened.state() && reopened.state()->configData.base == key);
+}
+
 void FirstUseLocalChoiceAppliesMatchingHead() {
 	auto f = Fixture(); f.Open();
 	const auto local = QByteArray("version = 2\n[last_seen]\ntrade_p = false\n");
@@ -1462,7 +1519,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); FreshLoginExistingChat(); RefuseRacedCacheDirectory(); RefuseUnsafeCacheDirectories(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
+	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); ManualApplyFullRetention(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); FreshLoginExistingChat(); RefuseRacedCacheDirectory(); RefuseUnsafeCacheDirectories(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

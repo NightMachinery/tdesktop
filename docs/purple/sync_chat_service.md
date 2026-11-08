@@ -60,3 +60,21 @@ root and secondary accounts, a fresh cache and the older cache layout, matching
 and customized settings, refusal of unsafe directory or link layouts, and a
 disposable symlink swap immediately before descriptor chmod. The unrelated
 target's original mode must remain unchanged.
+
+## Applying after many saved versions
+
+Before applying a reviewed update to an already bound account, the sync dialog
+runs the existing initialize-only publisher worker. It checkpoints retained
+config bases into private, durably confirmed `retained-bases/` files, retaining
+the current base inline. It sends no records. Without this step, sixteen valid
+inline bases filled the bounded store and a seventeenth update returned
+`RetentionFull` before settings or History could be written.
+
+The dialog uses its existing status label while preparing and keeps actions busy.
+It requires the same session, generation and selected route when the worker
+finishes. Native Apply then repeats the original review, account, binding,
+settings fingerprint and store checks before retaining History and replacing
+settings. Checkpoint failure leaves Apply refused. Existing retained records are
+not dropped, the inline limit is unchanged and strict file admission is unchanged.
+Synthetic host cases cover the native refusal, byte-for-byte preservation of all
+sixteen bases, initialize-only completion without a post, Apply and Undo history.

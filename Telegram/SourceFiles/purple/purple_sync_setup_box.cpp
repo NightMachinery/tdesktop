@@ -531,10 +531,55 @@ void ConfirmRecovery(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 	}));
 }
 
+void PrepareApply(
+		not_null<Ui::GenericBox*> box,
+		SetupBoxState *state,
+		uint64_t generation,
+		Fn<void()> apply) {
+	const auto origin = state->selectedSession;
+	if (!StillCurrent(*state, generation) || !state->route
+		|| !RouteCurrent(*state, origin.get())) {
+		SetStatus(*state, u"The sync destination changed. Check it again."_q);
+		return;
+	}
+	state->publishing = true;
+	SetStatus(*state, u"Preparing this device's saved sync versions."_q);
+	state->publisher = std::make_unique<SyncConfigPublish>(
+		*state->selectedAccount.get(),
+		*origin.get(),
+		DesktopSyncChatInventory{ *state->route, *state->completed },
+		state->scanQueue,
+		state->scanPosts,
+		crl::guard(box, [=, apply = std::move(apply)](SyncConfigPublishResult result) {
+			if (!state->publishing || state->generation != generation
+				|| state->selectedSession.get() != origin.get()) {
+				return;
+			}
+			state->publishing = false;
+			if (!SelectedAvailable(*state) || !RouteCurrent(*state, origin.get())) {
+				StopForLostAccount(*state);
+			} else if (result.status != SyncConfigPublishStatus::AlreadySynced) {
+				ClearReview(*state);
+				SetStatus(*state, PublishResult(result));
+			} else {
+				apply();
+			}
+		}),
+		SyncConfigPublishRequest(),
+		crl::guard(box, [=] {
+			return origin && state->selectedSession.get() == origin.get()
+				&& state->generation == generation && state->publishing
+				&& RouteCurrent(*state, origin.get());
+		}),
+		true);
+	state->publisher->Start();
+}
+
 void RunAction(
 		not_null<Ui::GenericBox*> box,
 		SetupBoxState *state,
-		Action action) {
+		Action action,
+		bool prepared = false) {
 	const auto account = state->selectedAccount.get();
 	const auto session = state->selectedSession.get();
 	if (!SelectedAvailable(*state)) {
@@ -585,6 +630,12 @@ void RunAction(
 	}
 	if (UnboundTypedChoice(*state, *state->review)) {
 		SetStatus(*state, u"Join sync in the selected chat first, then check again to choose settings."_q);
+		return;
+	}
+	if (!prepared && state->review->bound) {
+		PrepareApply(box, state, state->generation, [=] {
+			RunAction(box, state, action, true);
+		});
 		return;
 	}
 	const auto applied = ApplySyncConfigChoice(
@@ -843,7 +894,8 @@ void ApplyChoice(
 		SetupBoxState *state,
 		uint64_t generation,
 		std::optional<QString> key,
-		const AccountTransferReview &replacement) {
+		const AccountTransferReview &replacement,
+		bool prepared = false) {
 	if (!SelectedAvailable(*state)) {
 		StopForLostAccount(*state);
 		return;
@@ -857,6 +909,12 @@ void ApplyChoice(
 	const auto review = *state->review;
 	if (UnboundTypedChoice(*state, review)) {
 		SetStatus(*state, u"Join sync in the selected chat first, then check again to choose settings."_q);
+		return;
+	}
+	if (!prepared && review.bound) {
+		PrepareApply(box, state, generation, [=] {
+			ApplyChoice(box, state, generation, key, replacement, true);
+		});
 		return;
 	}
 	const auto applied = ApplySyncConfigChoice(
