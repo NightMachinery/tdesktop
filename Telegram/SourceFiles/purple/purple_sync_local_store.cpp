@@ -408,6 +408,9 @@ namespace {
 	if (::lstat(encoded.constData(), &named) != 0 || !S_ISDIR(named.st_mode)) {
 		return SyncStoreStatus::IoError;
 	}
+	if (named.st_uid != ::geteuid() || (named.st_mode & 0700) != 0700 || (named.st_mode & 0022)) {
+		return SyncStoreStatus::InsecurePermissions;
+	}
 	const auto descriptor = ::open(encoded.constData(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (descriptor < 0) { return SyncStoreStatus::IoError; }
 	const auto directory = ::fdopendir(descriptor);

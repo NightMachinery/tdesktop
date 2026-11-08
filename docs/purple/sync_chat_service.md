@@ -48,7 +48,8 @@ ambiguous local store. Cache initialization now tightens that directory only
 when it is owned by this user, writable by nobody else, and contains just an
 owned regular cache with one link. A directory containing state, pending data,
 unknown entries or links is still refused. The state reader's private-mode
-requirements are unchanged. On Unix the repair opens the directory without
+requirements and insecure-permission results are unchanged, including refusal
+of directories missing owner read, write or search permission. On Unix the repair opens the directory without
 following a replacement symlink, validates its identity and cache through that
 descriptor, and changes permissions through the descriptor. A pathname swap
 cannot change permissions on the replacement target.
