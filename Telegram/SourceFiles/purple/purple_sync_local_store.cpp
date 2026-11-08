@@ -416,6 +416,25 @@ SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path) {
 		if (!info.isDir()) {
 			return SyncStoreStatus::IoError;
 		}
+#ifdef Q_OS_UNIX
+		// WHY: the old chat cache created sync/ as 0755 before a state existed.
+		// Only an owned cache-only directory can be tightened here.
+		if (!usable() && info.fileName() == u"sync"_q && StableOwnedDirectory(info)
+			&& (info.permissions() & QFileDevice::WriteOwner)) {
+			const auto entries = QDir(path).entryList(
+				QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+			const auto binding = path + u"/chat.json"_q;
+			const auto cacheOnly = entries == QStringList{ u"chat.json"_q }
+				&& QFileInfo(binding).isFile() && OwnedPermissions(binding);
+			const auto identity = SyncPathIdentity(path);
+			if (cacheOnly && !identity.isEmpty()
+				&& (!QFile::setPermissions(path, QFileDevice::ReadOwner
+					| QFileDevice::WriteOwner | QFileDevice::ExeOwner)
+					|| SyncPathIdentity(path) != identity)) {
+				return SyncStoreStatus::IoError;
+			}
+		}
+#endif
 		return usable()
 			? SyncStoreStatus::Ready
 			: SyncStoreStatus::InsecurePermissions;

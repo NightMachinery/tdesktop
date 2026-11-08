@@ -17,9 +17,11 @@
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "purple/purple_config_file.h"
+#include "purple/purple_sync_local_store.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QSaveFile>
 #include <QtCore/QTimer>
 
 #include <limits>
@@ -79,7 +81,9 @@ public:
 			std::move(task));
 	}
 	std::optional<QByteArray> readBinding() override {
-		if (!current()) {
+		const auto directory = QFileInfo(_path).absolutePath();
+		if (!current() || !QDir().mkpath(QFileInfo(directory).absolutePath())
+			|| EnsureSyncPrivateDirectory(directory) != SyncStoreStatus::Ready) {
 			return std::nullopt;
 		}
 		const auto input = ReadSettingsFileInput(_path);
@@ -92,7 +96,10 @@ public:
 		return input.bytes;
 	}
 	bool writeBinding(const QByteArray &expected, const QByteArray &next) override {
-		if (!current() || next.size() > kSyncMagicBindingLimit) {
+		const auto directory = QFileInfo(_path).absolutePath();
+		if (!current() || next.size() > kSyncMagicBindingLimit
+			|| !QDir().mkpath(QFileInfo(directory).absolutePath())
+			|| EnsureSyncPrivateDirectory(directory) != SyncStoreStatus::Ready) {
 			return false;
 		}
 		const auto input = ReadSettingsFileInput(_path);
@@ -101,14 +108,22 @@ public:
 			: (input.state == SettingsFileState::Missing)
 			? std::optional(QByteArray())
 			: std::nullopt;
-		if (stored != expected || !QDir().mkpath(QFileInfo(_path).absolutePath())) {
+		const auto identity = SyncPathIdentity(_path);
+		const auto parent = SyncPathIdentity(directory);
+		if (stored != expected || identity.isEmpty() || parent.isEmpty()) {
 			return false;
 		}
-		const auto weak = weak_from_this();
-		return WriteGuardedSettingsFile(_path, input, next, [=] {
-			const auto self = weak.lock();
-			return self && self->current();
-		}, true) == GuardedFileWrite::Written;
+		auto file = QSaveFile(_path);
+		if (!file.open(QIODevice::WriteOnly)
+			|| !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)
+			|| file.write(next) != next.size()) {
+			return false;
+		} else if (!current() || ReadSettingsFileInput(_path) != input
+			|| SyncPathIdentity(_path) != identity || SyncPathIdentity(directory) != parent) {
+			file.cancelWriting();
+			return false;
+		}
+		return file.commit();
 	}
 	void local(
 			std::optional<PeerToken> bound,
