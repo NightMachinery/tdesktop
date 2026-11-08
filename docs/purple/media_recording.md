@@ -92,7 +92,8 @@ waiting for a replacement recipient retains its bytes and has a playable video
 preview; it cannot resume capture.
 
 The native bar and recorder remain in their original chat. Before a close check,
-the round expands back to the native controls and uses the stock discard prompt.
+the round expands back to the native controls and uses the stock discard prompt. The strip also uses the round-video
+confirmation wording for a round take.
 Cross-chat round capture is deliberately unshipped until a separately authorized
 device spike passes and it acquires an independent owner.
 

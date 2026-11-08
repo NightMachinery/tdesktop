@@ -263,7 +263,9 @@ void Discard() {
 	const auto token = TheDock().model.generation();
 	WithWindow([=](not_null<Window::SessionController*> controller) {
 		controller->show(Ui::MakeConfirmBox({
-			.text = tr::lng_record_lock_cancel_sure(),
+			.text = (TheDock().roundBar
+				? tr::lng_record_lock_cancel_sure_round
+				: tr::lng_record_lock_cancel_sure)(),
 			.confirmed = [=](Fn<void()> close) {
 				close();
 				if (!Current(token)) return;

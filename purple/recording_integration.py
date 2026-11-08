@@ -13,6 +13,8 @@ def run(root, output):
         start = dock.index('void ToggleRoundRecordingPause(')
         end = dock.index('\n}\n', start) + 2
         route = dock[start:end].replace('not_null<HistoryView::Controls::VoiceRecordBar*>', 'Bar*')
+    discard = dock[dock.index('void Discard()'):dock.index('void Discard()') + 500]
+    prompt = re.search(r'\.text = (.*?),\n', discard, re.S).group(1)
     text = r'''#include "purple/purple_recording_dock_model.h"
 #include <cassert>
 #include <cstdio>
@@ -30,14 +32,20 @@ struct Dock { Bar *roundBar; };
 Dock TheDock() { return {roundBar}; }
 void Pause() { ++pauseAdapterCalls; roundBar->floating=false; roundBar->purpleTogglePause(); roundBar->floating=true; }
 }
+namespace tr {
+int lng_record_lock_cancel_sure() { return 1; }
+int lng_record_lock_cancel_sure_round() { return 2; }
+}
+int DiscardPrompt() { return @DISCARD@; }
 namespace Purple { ROUTE }
 void Bar::bubble() { CALLBACK }
 int main() {
  Bar bar; roundBar=&bar; bar.bubble();
  assert(bar.resumes==1); assert(!bar.listen); assert(bar.floating); assert(pauseAdapterCalls==1);
- std::puts("ROUND_RESUME_CHECKS=4");
+ assert(DiscardPrompt()==2); roundBar=nullptr; assert(DiscardPrompt()==1);
+ std::puts("ROUND_RESUME_CHECKS=4 ROUND_DISCARD_PROMPT_CHECKS=2");
 }
-'''.replace('ROUTE', route).replace('CALLBACK', callback)
+'''.replace('ROUTE', route).replace('CALLBACK', callback).replace('@DISCARD@', prompt)
     fixture = output / 'round-resume.cpp'; fixture.write_text(text)
     exe = output / 'round-resume'
     subprocess.run(['clang++', '-std=c++20', '-I'+str(source), str(fixture), '-o', str(exe)], check=True)
