@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from sync_store_units import add_sync_policy_units
+from sync_store_units import add_current_core_units
 import argparse
 import hashlib
 import json
@@ -77,7 +77,7 @@ frameworks = next(Path(value[2:]) for value in flags if value.startswith('-F') a
 policy_compile = []
 with (work / 'build.log').open('w') as log:
     subprocess.run([recipe[0], *flags, '-c', str(repo / 'purple/test_picker.cpp'), '-o', str(work / 'test.o')], check=True, stdout=log, stderr=subprocess.STDOUT)
-    add_sync_policy_units(repo, build, work, objects, policy_compile, log)
+    add_current_core_units(repo, build, work, objects, policy_compile, log)
     subprocess.run([recipe[0], *flags, '-Wl,-dead_strip', str(work / 'test.o'), *objects,
         str(build / 'Telegram/lib_base/liblib_base.a'), '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets',
         '-framework', 'Foundation', '-lobjc', '-Wl,-rpath,' + str(frameworks), '-o', str(work / 'test_picker')], check=True, stdout=log, stderr=subprocess.STDOUT)
