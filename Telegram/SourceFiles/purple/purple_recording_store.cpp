@@ -508,7 +508,11 @@ void FinishClosed(std::vector<RecordingMirror::Closed> closed) {
 		const auto lock = std::lock_guard(store.mutex);
 		auto facts = std::vector<ClosedFacts>();
 		for (const auto &one : closed) {
-			facts.push_back({ .id = one.id, .failed = one.failed });
+			facts.push_back({
+				.id = one.id,
+				.failed = one.failed,
+				.empty = one.empty,
+			});
 		}
 		const auto copies = store.manifest;
 		auto result = NoteClosed(

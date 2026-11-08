@@ -676,7 +676,8 @@ CloseResult NoteClosed(
 		const auto entry = manifest.find(one.id);
 		if (!entry) {
 			continue;
-		} else if (entry->state == State::Sent) {
+		} else if (entry->state == State::Sent
+			|| (entry->kind == Kind::Round && one.empty && !one.failed)) {
 			manifest.remove(one.id);
 			result.removed.push_back(one.id);
 			continue;

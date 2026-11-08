@@ -59,6 +59,10 @@ public:
 	[[nodiscard]] bool write(const AVPacket *packet);
 	[[nodiscard]] bool finish();
 	[[nodiscard]] std::uint64_t size() const;
+	[[nodiscard]] bool empty() const {
+		return !_hasPackets;
+	}
+
 	[[nodiscard]] bool failed() const {
 		return _failed;
 	}
@@ -77,6 +81,7 @@ private:
 	std::vector<AVRational> _inputBase;
 	std::vector<std::int64_t> _lastDts;
 	std::int64_t _position = 0;
+	bool _hasPackets = false;
 	bool _headerWritten = false;
 	bool _failed = false;
 

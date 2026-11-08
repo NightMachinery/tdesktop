@@ -476,6 +476,28 @@ int main() {
 		record(16);
 		expect(counter == 3, "the trailer of a recording that is closing opens no new entry");
 		close(300, true);
+		{
+			auto emptyFlow = Registry::Manifest();
+			auto pending = std::vector<std::string>();
+			for (const auto kind : { Registry::Kind::Round, Registry::Kind::Voice }) {
+				for (const auto failed : { false, true }) {
+					auto entry = Registry::Entry();
+					entry.id = "empty";
+					entry.kind = kind;
+					entry.state = State::Discarded;
+					emptyFlow.entries = { entry };
+					const auto result = Registry::NoteClosed(emptyFlow,
+						{ { .id = "empty", .failed = failed, .empty = true } },
+						pending, true, 100);
+					const auto drop = (kind == Registry::Kind::Round && !failed);
+					expect(emptyFlow.entries.empty() == drop,
+						"only a positively empty successfully closed round is removed");
+					expect(result.removed.empty() != drop
+						&& result.finalise.empty() == drop,
+						"empty removal bypasses recovery, every other close still finalises");
+				}
+			}
+		}
 		expect(Registry::DropAfterFinalise(*flow.find("f3"), true, 400), "a sub-second recording upstream never sends is dropped");
 		expect(!Registry::DropAfterFinalise(*flow.find("f3"), true, 4000), "a sent one of a few seconds is kept until the send");
 		flow.remove("f3");

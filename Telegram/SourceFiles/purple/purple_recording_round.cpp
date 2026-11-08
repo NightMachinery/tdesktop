@@ -58,6 +58,7 @@ void CloseActive(Owner &owner) {
 		.id = owner.activeId,
 		.size = owner.active->size(),
 		.failed = !finished,
+		.empty = finished && owner.active->empty(),
 	});
 	owner.active = nullptr;
 	owner.activeId = std::string();

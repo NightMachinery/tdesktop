@@ -576,6 +576,7 @@ bool CopyMuxer::write(const AVPacket *packet) {
 		|| packet->stream_index >= int(_inputBase.size())) {
 		return false;
 	}
+	_hasPackets = true;
 	const auto index = packet->stream_index;
 	auto copy = av_packet_clone(packet);
 	if (!copy) {

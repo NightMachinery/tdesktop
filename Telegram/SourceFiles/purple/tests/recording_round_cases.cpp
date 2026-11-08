@@ -271,6 +271,15 @@ int main() {
 	expect(exact, "the AAC measure finds every raw frame's exact length");
 	expect(measure(config->tracks[1], recorded.audioRaw.data(), 3) == 0, "a torn frame does not measure");
 
+	{
+		auto empty = Media::CopyMuxer::Start(
+			Crypt::File::Create(root / "empty.prc", key, Random),
+			recorded.upstream,
+			1);
+		expect(empty && empty->empty(), "a header-only copy has no media packets");
+		expect(empty && empty->finish() && empty->empty(), "finishing an empty copy does not invent media");
+	}
+
 	const auto copy = [&](int journalSeconds, bool finish, Bytes *journal) -> Bytes {
 		const auto path = root / ("copy-" + std::to_string(journalSeconds) + (finish ? "-f" : "-c") + ".prc");
 		auto muxer = Media::CopyMuxer::Start(Crypt::File::Create(path, key, Random), recorded.upstream, journalSeconds);
@@ -284,6 +293,7 @@ int main() {
 		for (const auto packet : recorded.packets) {
 			good = muxer->write(packet) && good;
 		}
+		expect(!muxer->empty(), "any observed media packet prevents empty-take removal");
 		if (finish) {
 			good = muxer->finish() && good;
 		}

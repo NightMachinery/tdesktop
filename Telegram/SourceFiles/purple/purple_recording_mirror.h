@@ -30,6 +30,7 @@ public:
 		std::string id;
 		std::uint64_t size = 0;
 		bool failed = false;
+		bool empty = false;
 	};
 	using Open = std::function<std::optional<Opened>()>;
 	using Failed = std::function<void(const std::string &id)>;

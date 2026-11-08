@@ -178,6 +178,7 @@ void NoteListen(Manifest &manifest, const std::vector<std::string> &ids);
 struct ClosedFacts {
 	std::string id;
 	bool failed = false;
+	bool empty = false;
 };
 
 struct CloseResult {

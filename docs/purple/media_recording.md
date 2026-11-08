@@ -47,6 +47,11 @@ appear beside the playback controls. The host presentation case uses real Qt
 widgets and controlled player events to check progress, refreshed links and
 subscription teardown; encrypted recovery fixtures separately check the media.
 
+A normally closed round copy with no media packets is removed before recovery,
+even when discarded takes are retained. A copy that saw any packet or failed to
+finish stays on the normal recovery path. A zero reported recovery duration alone
+does not justify removing bytes.
+
 ## F8. Voice recording across chats
 
 Leaving a chat adopts an active voice into the recording dock. Clicking the
