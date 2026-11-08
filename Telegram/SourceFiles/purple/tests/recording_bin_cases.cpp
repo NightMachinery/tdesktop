@@ -79,11 +79,24 @@ int main(int argc, char **argv) {
                 AddPlayback(&rows, &player, kind, 5000);
                 auto clicks = 0;
                 for (auto item = 0; item != 2; ++item) {
-                    const auto actions = rows.add(object_ptr<Ui::RpWidget>(&rows));
-                    const auto play = AddAction(actions, item ? u"Play"_q : u"Stop"_q, [&] { ++clicks; });
-                    const auto save = AddAction(actions, u"Save"_q, [] {});
-                    actions->resize(200, 40);
-                    save->move(70, 0);
+                    const auto actions = rows.add(object_ptr<BinActions>(&rows));
+                    const auto play = actions->add(item ? u"Play"_q : u"Stop"_q, [&] { ++clicks; });
+                    const auto save = actions->add(u"Save"_q, [] {});
+                    rows.resizeToWidth(480);
+                    QApplication::processEvents();
+                    expect(actions->width() > 0 && actions->height() >= play->height()
+                        && actions->rect().contains(play->geometry())
+                        && actions->rect().contains(save->geometry()),
+                        "production action layout retains painted clickable space after a rebuild");
+                    rows.hide();
+                    const auto wrapWidth = std::max(play->width(), save->width());
+                    rows.resizeToWidth(wrapWidth);
+                    expect(actions->height() >= play->height() + save->height()
+                        && actions->rect().contains(play->geometry())
+                        && actions->rect().contains(save->geometry()),
+                        "hidden action row measures its wrapped height synchronously");
+                    rows.resizeToWidth(480);
+                    rows.show();
                     expect(!play->isHidden() && !save->isHidden(), "rebuilt rows keep both items' actions visible");
                     play->clicked(Qt::NoModifier, Qt::LeftButton);
                 }

@@ -64,6 +64,20 @@ struct BinState {
 	Fn<void()> rebuild;
 };
 
+class BinActions final : public Ui::RpWidget {
+public:
+	using RpWidget::RpWidget;
+
+	Ui::LinkButton *add(const QString &text, Fn<void()> callback);
+
+protected:
+	int resizeGetHeight(int width) override;
+
+private:
+	std::vector<not_null<Ui::LinkButton*>> _buttons;
+
+};
+
 [[nodiscard]] QString MarkText(Mark mark) {
 	switch (mark) {
 	case Mark::Recovered: return tr::lng_purple_recording_bin_recovered(tr::now);
@@ -219,14 +233,29 @@ void TogglePlay(
 	state->rebuild();
 }
 
-[[nodiscard]] Ui::LinkButton *AddAction(
-		not_null<Ui::RpWidget*> parent,
-		const QString &text,
-		Fn<void()> callback) {
-	const auto button = Ui::CreateChild<Ui::LinkButton>(parent, text);
+Ui::LinkButton *BinActions::add(const QString &text, Fn<void()> callback) {
+	const auto button = Ui::CreateChild<Ui::LinkButton>(this, text);
 	button->setClickedCallback(std::move(callback));
 	button->show();
+	_buttons.push_back(button);
+	resizeToWidth(width());
 	return button;
+}
+
+int BinActions::resizeGetHeight(int width) {
+	auto left = 0;
+	auto top = 0;
+	auto height = 0;
+	for (const auto button : _buttons) {
+		if (left > 0 && left + button->width() > width) {
+			left = 0;
+			top += height + st::boxRowPadding.top();
+		}
+		button->moveToLeft(left, top, width);
+		left += button->width() + st::boxRowPadding.left();
+		height = std::max(height, button->height());
+	}
+	return top + height;
 }
 
 void AddPlayback(
@@ -291,11 +320,10 @@ void AddItem(
 		AddPlayback(rows, state->playing.player.get(), item.kind, item.duration);
 	}
 	const auto actions = rows->add(
-		object_ptr<Ui::RpWidget>(rows),
+		object_ptr<BinActions>(rows),
 		st::boxRowPadding);
-	auto buttons = std::vector<not_null<Ui::LinkButton*>>();
 	const auto add = [&](const QString &text, Fn<void()> callback) {
-		buttons.push_back(AddAction(actions, text, std::move(callback)));
+		actions->add(text, std::move(callback));
 	};
 	const auto id = item.id;
 	const auto copy = item;
@@ -337,21 +365,6 @@ void AddItem(
 		}
 		DeleteRecordingBinItem(id);
 	});
-	actions->widthValue() | rpl::on_next([=](int width) {
-		auto left = 0;
-		auto top = 0;
-		auto height = 0;
-		for (const auto button : buttons) {
-			if (left > 0 && left + button->width() > width) {
-				left = 0;
-				top += height + st::boxRowPadding.top();
-			}
-			button->moveToLeft(left, top, width);
-			left += button->width() + st::boxRowPadding.left();
-			height = std::max(height, button->height());
-		}
-		actions->resize(width, top + height);
-	}, actions->lifetime());
 	rows->add(
 		object_ptr<Ui::RpWidget>(rows),
 		st::boxRowPadding)->resize(0, st::boxRowPadding.bottom());

@@ -42,7 +42,9 @@ The code is in `Telegram/SourceFiles/purple/`:
 
 Play shows elapsed and total time for voice and round recordings. Round playback
 also shows its circular video preview. Stop ends the local preview; the other
-recordings keep their action links when the list refreshes. Decoder failures
+recordings keep their action links when the list refreshes. Action rows measure
+their wrapped height synchronously, including while hidden during a rebuild,
+so deferred width events cannot leave their buttons clipped. Decoder failures
 appear beside the playback controls. The host presentation case uses real Qt
 widgets and controlled player events to check progress, refreshed links and
 subscription teardown; encrypted recovery fixtures separately check the media.
