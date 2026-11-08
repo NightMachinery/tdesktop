@@ -19,6 +19,15 @@
 #include <QtCore/QJsonArray>
 #ifdef Q_OS_UNIX
 #include <unistd.h>
+#include <sys/stat.h>
+#endif
+
+#ifdef Q_OS_UNIX
+std::function<void()> SyncDirectoryBeforeChmod;
+extern "C" int SyncDirectoryChmodBoundary(int descriptor, mode_t mode) {
+	if (const auto before = std::exchange(SyncDirectoryBeforeChmod, {})) { before(); }
+	return ::fchmod(descriptor, mode);
+}
 #endif
 
 namespace base { void LogWriteMain(const QString &) {} namespace assertion { void log(const char *, const char *, int) {} } }
@@ -1356,6 +1365,31 @@ void FreshLoginExistingChat() {
 	}
 }
 
+void RefuseRacedCacheDirectory() {
+#ifdef Q_OS_UNIX
+	auto temp = QTemporaryDir();
+	const auto path = temp.filePath(u"sync"_q);
+	const auto parked = temp.filePath(u"parked"_q);
+	const auto outside = temp.filePath(u"outside"_q);
+	CHECK(QDir().mkpath(outside));
+	Put(path + u"/chat.json"_q, "inert-cache");
+	CHECK(::chmod(QFile::encodeName(path).constData(), 0755) == 0);
+	CHECK(::chmod(QFile::encodeName(outside).constData(), 0500) == 0);
+	const auto before = QFileInfo(outside).permissions();
+	auto raced = false;
+	SyncDirectoryBeforeChmod = [&] {
+		raced = true;
+		CHECK(QDir().rename(path, parked));
+		CHECK(QFile::link(outside, path));
+	};
+	CHECK(EnsureSyncPrivateDirectory(path) == SyncStoreStatus::IoError);
+	SyncDirectoryBeforeChmod = {};
+	CHECK(raced && QFileInfo(path).isSymLink());
+	CHECK(QFileInfo(outside).permissions() == before);
+	CHECK(ReadSettingsFileInput(parked + u"/chat.json"_q).bytes == "inert-cache");
+#endif
+}
+
 void RefuseUnsafeCacheDirectories() {
 #ifdef Q_OS_UNIX
 	for (const auto kind : { 0, 1, 2, 3, 4 }) {
@@ -1428,7 +1462,7 @@ void AutoBeforeState() {
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	const auto run = [] {
-	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); FreshLoginExistingChat(); RefuseUnsafeCacheDirectories(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
+	FirstAutomaticApplyStaysClear(); MigrationBehindMovesFirst(); PublishEditAndIsolation(); UncertainAndRestart(); BackoffRunBudget(); RetirementAndRefusal(); ApplyAndBoundaryHolds(); CasAndOpaque(); ExactAbsenceBoundaries(); EditFallbackAndEffectRefusals(); RetirementLimitAndDeadline(); NeutralSaveProvenance(); CapturedSourceAndNativeChanges(); BusyBindingAndNoOp(); SameRootAccountIsolation(); OpeningApplyAndSavedBytes(); PersistedSavedIdentityAndDebounce(); ConflictCloneFutureAndV2(); FailedLocalCompletionCheckpoints(); CurrentAndSupersededCallbacks(); FailedHoldKeepsOpaqueCheckpoint(); PendingReadFailureDuringFacts(); MoveIntoBoundChat(); SetAsideForJoin(); FirstUseLocalChoiceAppliesMatchingHead(); FirstUseJoinAppliesHead(); FirstUseJoinAppliesCurrentHead(); AutoBeforeState(); FreshLoginExistingChat(); RefuseRacedCacheDirectory(); RefuseUnsafeCacheDirectories(); MigrationKeepsSharedSpace(); MigrationBothPublished(); MovedChatCommits();
 	};
 	if (argc > 1 && QByteArray(argv[1]) == "--worker") {
 		auto worker = std::thread(run);

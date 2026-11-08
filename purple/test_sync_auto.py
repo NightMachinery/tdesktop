@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from sync_store_units import add_current_core_units, add_sync_store_units
+from sync_store_units import add_current_core_units
 import argparse
 import json
 from pathlib import Path
@@ -53,6 +53,13 @@ binding_methods = binding[binding.index('std::optional<QByteArray> readBinding()
 (work / 'binding-port-boundary.inc').write_text(binding_methods.replace(' override', ''))
 
 
+store = (repo / 'Telegram/SourceFiles/purple/purple_sync_local_store.cpp').read_text()
+assert store.count('::fchmod(') == 1
+store = store.replace('::fchmod(', '::SyncDirectoryChmodBoundary(')
+store = store.replace('#include <unistd.h>', '#include <unistd.h>\nextern "C" int SyncDirectoryChmodBoundary(int, mode_t);')
+(work / 'local-store-body.cpp').write_text(store)
+
+
 objects = []
 commands = []
 with (work / 'build.log').open('w') as log:
@@ -66,20 +73,19 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    objects += [compile(repo / 'purple/test_sync_auto.cpp', 'test', True), compile(work / 'apply-body.cpp', 'apply')]
-    adapters = ['purple_account_config', 'purple_config_file', 'purple_sync_local_store', 'purple_sync_config_history', 'purple_sync_config_review', 'purple_sync_config_text', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']
+    objects += [compile(repo / 'purple/test_sync_auto.cpp', 'test', True), compile(work / 'apply-body.cpp', 'apply'), compile(work / 'local-store-body.cpp', 'purple_sync_local_store', own_recipe=unit_recipe('purple_sync_local_store'))]
+    adapters = ['purple_account_config', 'purple_config_file', 'purple_sync_config_history', 'purple_sync_config_review', 'purple_sync_config_text', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']
     for name in adapters:
         if name in ['purple_sync_config_text', 'purple_sync_config_review', 'purple_sync_config_history']:
             objects.append(compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name,
                 own_recipe=unit_recipe(name)))
-        elif not args.use_build_objects and name in ['purple_account_config', 'purple_sync_local_store', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']:
+        elif not args.use_build_objects and name in ['purple_account_config', 'purple_sync_auto_store', 'purple_sync_auto_transport', 'purple_sync_chat_facts', 'purple_sync_chat_io', 'purple_sync_chat_requests']:
             objects.append(compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
         else:
             objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o'))
     for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp')):
         objects.append(build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o'))
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o', build / 'Telegram/lib_base/liblib_base.a']
-    add_sync_store_units(repo, build, work, objects, commands, log)
     if not args.use_build_objects:
         add_current_core_units(repo, build, work, objects, commands, log)
     link = [recipe[0]]
@@ -91,7 +97,7 @@ with (work / 'build.log').open('w') as log:
             link += [value, '-Wl,-rpath,' + value[2:]]
     link += ['-Wl,-dead_strip', *map(str, objects), '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-framework', 'AppKit', '-o', str(work / 'test_sync_auto')]
     subprocess.run(link, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
-(work / 'inputs.json').write_text(json.dumps({'compile': commands, 'link': link, 'apply_body': 'unchanged production source except opaque session include', 'binding_boundary': 'unchanged production TelegramPort readBinding/writeBinding bodies, only override removed, over real temporary files', 'service_boundary': 'production Facts (method name only changed), exact Accept/Hold/Stop/Complete and inventory callback bodies with controlled session/transport/UI endpoints'}, indent=2) + '\n')
+(work / 'inputs.json').write_text(json.dumps({'compile': commands, 'link': link, 'apply_body': 'unchanged production source except opaque session include', 'permission_boundary': 'production local store with only descriptor chmod redirected to a fixture interleaving; no pathname chmod', 'binding_boundary': 'unchanged production TelegramPort readBinding/writeBinding bodies, only override removed, over real temporary files', 'service_boundary': 'production Facts (method name only changed), exact Accept/Hold/Stop/Complete and inventory callback bodies with controlled session/transport/UI endpoints'}, indent=2) + '\n')
 exits = []
 for name, args in [('run', []), ('worker-run', ['--worker'])]:
     with (work / (name + '.log')).open('w') as log:

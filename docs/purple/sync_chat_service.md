@@ -15,8 +15,9 @@ burst shares one timer and a bounded set of message ids. The timer rechecks
 the binding and uses core's issued-record filter after a local send settles,
 so own post/edit acknowledgements do not feed checks back into themselves.
 History reads do not enter these hooks. The existing pause, account, problem
-and retry gates still decide whether a check runs. The fifteen-minute timer
-remains the backstop. A chat update also rechecks first use when no state exists.
+and retry gates still decide whether a check runs. Lifecycle events may check
+again after the fifteen-minute eligibility interval. There is no periodic idle
+timer, so an eligible idle client with no delivered update can wait longer. A chat update also rechecks first use when no state exists.
 
 ## Delivery when the sync chat stays closed
 
@@ -47,9 +48,14 @@ ambiguous local store. Cache initialization now tightens that directory only
 when it is owned by this user, writable by nobody else, and contains just an
 owned regular cache with one link. A directory containing state, pending data,
 unknown entries or links is still refused. The state reader's private-mode
-requirements are unchanged.
+requirements are unchanged. On Unix the repair opens the directory without
+following a replacement symlink, validates its identity and cache through that
+descriptor, and changes permissions through the descriptor. A pathname swap
+cannot change permissions on the replacement target.
 
 The automatic-service host gate exercises the production binding file methods
 on disk before enabling sync and joining an existing remote head. It covers
 root and secondary accounts, a fresh cache and the older cache layout, matching
-and customized settings, and refusal of unsafe directory or link layouts.
+and customized settings, refusal of unsafe directory or link layouts, and a
+disposable symlink swap immediately before descriptor chmod. The unrelated
+target's original mode must remain unchanged.
