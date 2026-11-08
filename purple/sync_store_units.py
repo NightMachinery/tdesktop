@@ -7,8 +7,32 @@ def add_sync_store_units(repo, build, work, objects, compiled, log):
     add_current_units(repo, build, work, objects, compiled, log, ['purple_sync_local_store'], [])
 
 
-def add_sync_policy_units(repo, build, work, objects, compiled, log):
-    add_current_units(repo, build, work, objects, compiled, log, [], ['purple_sync_auto', 'purple_sync_auto_state'])
+def add_current_core_units(repo, build, work, objects, compiled, log):
+    prefix = 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple/'
+    targets = {
+        str(Path(path).relative_to(build)): Path(path).name.removesuffix('.cpp.o')
+        for path in objects
+        if Path(path).is_relative_to(build)
+        and str(Path(path).relative_to(build)).startswith(prefix)
+    }
+    changed = {'purple_sync_auto', 'purple_sync_auto_state'}
+    if targets:
+        deps = subprocess.check_output(
+            ['ninja', '-C', str(build), '-t', 'deps', *targets], text=True)
+        current = None
+        seen = set()
+        marker = '/Telegram/ThirdParty/purple_core/'
+        for line in deps.splitlines():
+            if line and not line.startswith(' '):
+                current = targets.get(line.split(': ', 1)[0])
+            elif current and marker in line:
+                dependency = Path(line.strip())
+                local = repo / 'Telegram/ThirdParty/purple_core' / str(dependency).split(marker, 1)[1]
+                seen.add(current)
+                if not dependency.is_file() or not local.is_file() or dependency.read_bytes() != local.read_bytes():
+                    changed.add(current)
+        changed.update(set(targets.values()) - seen)
+    add_current_units(repo, build, work, objects, compiled, log, [], sorted(changed))
 
 
 def add_current_units(repo, build, work, objects, compiled, log, client, core):
