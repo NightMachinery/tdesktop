@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "purple/purple_media_reply_adapter.h"
 #include "api/api_updates.h"
 
 #include "purple/purple_sync_auto_service.h"
@@ -1341,6 +1342,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 				MessageFlags(),
 				NewMessageType::Unread);
 		}
+		Purple::ObserveMediaReplyMessage(_session, d.vmessage(), requestingDifference() || handlingChannelDifference());
 	} break;
 
 	case mtpc_updateReadMessagesContents: {
@@ -1440,6 +1442,7 @@ void Updates::applyUpdateNoPtsCheck(const MTPUpdate &update) {
 				MessageFlags(),
 				NewMessageType::Unread);
 		}
+		Purple::ObserveMediaReplyMessage(_session, d.vmessage(), requestingDifference() || handlingChannelDifference());
 	} break;
 
 	case mtpc_updateEditChannelMessage: {
@@ -1732,6 +1735,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 								local->date());
 						}
 						local->setRealId(newId);
+						Purple::ObserveMediaReplyAck(local);
 						if (const auto topic = local->topic()) {
 							topic->applyMaybeLast(local);
 						}

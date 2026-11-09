@@ -1711,3 +1711,7 @@ observes resume after both native recording and pause state have settled.
 `ObserveAutomaticSyncMessages` for global and channel difference message vectors.
 The service filters the account's bound chat, coalesces bursts and suppresses
 local issued message ids before requesting the existing automatic sync check.
+
+## Media auto-reply
+
+`api/api_updates.cpp` forwards actual new-message updates with difference-state facts and final outgoing message IDs to the Purple adapter. The adapter owns eligibility, account fencing, durable reservations and exact native replies.

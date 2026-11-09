@@ -616,3 +616,24 @@ docs/purple/upstream_hooks.md.
 "lng_purple_recording_camera" = "Camera";
 "lng_purple_recording_play" = "Play / Pause";
 "lng_purple_recording_toggle" = "Pause / Resume";
+
+"lng_purple_media_reply" = "Media auto-reply";
+"lng_purple_media_reply_text" = "Reply text";
+"lng_purple_media_reply_private" = "Private chats";
+"lng_purple_media_reply_groups" = "Groups";
+"lng_purple_media_reply_channels" = "Channels";
+"lng_purple_media_reply_voice" = "Voice notes";
+"lng_purple_media_reply_round" = "Round video notes";
+"lng_purple_media_reply_follow" = "Follow voice settings";
+"lng_purple_media_reply_off" = "Off";
+"lng_purple_media_reply_own" = "My own";
+"lng_purple_media_reply_received" = "Received";
+"lng_purple_media_reply_both" = "Both";
+"lng_purple_media_reply_add" = "New selected chat set";
+"lng_purple_media_reply_name" = "Set name (letters, numbers, underscores or hyphens)";
+"lng_purple_media_reply_select" = "Add a selected chat";
+"lng_purple_media_reply_unavailable" = "Account settings are unavailable. Reopen this screen after setup.";
+"lng_purple_media_reply_info" = "Reply to new voice notes and round video notes in this account. Ordinary videos are excluded. Mentions do not give a bot access to private chats.";
+"lng_purple_media_reply_priority" = "First matching set wins, in the order shown. Unspecified values inherit chat type defaults. These sets do not change Work Mode.";
+"lng_purple_media_reply_inherit" = "Use chat type defaults";
+"lng_purple_media_reply_unknown_chat" = "Unavailable chat (click to remove)";

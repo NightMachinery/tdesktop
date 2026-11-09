@@ -361,3 +361,5 @@ recordings with the Recording bin, is documented in
 
 The opt-in local control socket and standalone Go command are documented in
 [control_socket.md](control_socket.md).
+
+Account-specific voice and round auto-replies are described in [media_auto_reply.md](media_auto_reply.md).

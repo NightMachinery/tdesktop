@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_state.h"
 #include "purple/purple_config_file.h"
 
+class QJsonValue;
 namespace Main { class Session; }
 namespace Ui { class GenericBox; class Show; }
 namespace Window { class SessionController; }
@@ -221,6 +222,16 @@ void DeleteAccountListMembersBox(
 	const AccountListEditTarget &target,
 	bool member);
 [[nodiscard]] QString AccountListFileWarnings(not_null<Main::Session*> session);
+
+[[nodiscard]] std::optional<AccountSettingsWriteTarget> AccountMediaReplyEditTarget(
+	not_null<Main::Session*> session);
+[[nodiscard]] AccountSettingsEditResult WriteAccountMediaReply(
+	not_null<Main::Session*> session,
+	const AccountSettingsWriteTarget &target,
+	const QString &row,
+	const QString &key,
+	const QJsonValue &value,
+	const std::function<bool()> &originCurrent);
 
 [[nodiscard]] std::optional<AccountListEditTarget> AccountListEditFor(
 	not_null<Main::Session*> session,
