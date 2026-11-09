@@ -96,6 +96,7 @@ PRIVATE
     purple/purple_account_send_queue.h
     purple/purple_media_reply_settings.cpp
     purple/purple_media_reply_settings.h
+    purple/purple_media_reply_presentation.h
     purple/purple_media_reply_adapter.cpp
     purple/purple_media_reply_adapter.h
     purple/purple_app_services.cpp

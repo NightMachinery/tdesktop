@@ -10,6 +10,8 @@
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_media_reply_splice.h"
+#include "purple/purple_media_reply_adapter.h"
+#include "purple/purple_media_reply_presentation.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/single_choice_box.h"
@@ -39,6 +41,27 @@ QString Mode(MediaReplyMode value) {
 	case MediaReplyMode::Off: return tr::lng_purple_media_reply_off(tr::now);
 	}
 	return QString();
+}
+
+QString StatusText(const MediaReplyStatus &status) {
+	auto reason = QString();
+	switch (status.reason) {
+	case MediaReplyStatusReason::JournalFull: reason = tr::lng_purple_media_reply_journal_full(tr::now); break;
+	case MediaReplyStatusReason::JournalUnreadable: reason = tr::lng_purple_media_reply_journal_unreadable(tr::now); break;
+	case MediaReplyStatusReason::LockUnavailable: reason = tr::lng_purple_media_reply_lock(tr::now); break;
+	case MediaReplyStatusReason::StorageRefused: reason = tr::lng_purple_media_reply_storage(tr::now); break;
+	case MediaReplyStatusReason::Permission: reason = tr::lng_purple_media_reply_permission(tr::now); break;
+	case MediaReplyStatusReason::Flood: reason = tr::lng_purple_media_reply_flood(tr::now); break;
+	case MediaReplyStatusReason::ApprovalRequired: reason = tr::lng_purple_media_reply_approval(tr::now); break;
+	case MediaReplyStatusReason::Uncertain: reason = tr::lng_purple_media_reply_uncertain(tr::now); break;
+	case MediaReplyStatusReason::Cancelled: reason = tr::lng_purple_media_reply_cancelled(tr::now); break;
+	case MediaReplyStatusReason::None: reason = status.disabled ? tr::lng_purple_media_reply_disabled(tr::now)
+		: status.inFlight ? tr::lng_purple_media_reply_inflight(tr::now) : tr::lng_purple_media_reply_ready(tr::now); break;
+	}
+	return (status.disabled && status.reason != MediaReplyStatusReason::None ? tr::lng_purple_media_reply_disabled(tr::now) + '\n' : QString())
+		+ reason + '\n' + tr::lng_purple_media_reply_capacity(tr::now) + u": "_q
+		+ (status.reserved < 0 ? tr::lng_purple_media_reply_not_read(tr::now) : QString::number(status.reserved))
+		+ u" / 4096; "_q + QString::number(status.inFlight) + u" / 8"_q;
 }
 
 PeerToken Token(not_null<PeerData*> peer) {
@@ -97,7 +120,18 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 	const auto open = [=](QString scope) {
 		if (current()) controller->show(Box(SettingsBox, controller, scope));
 	};
-	const auto &policy = AccountSettings(&controller->session()).mediaReply;
+	const auto &settings = AccountSettings(&controller->session());
+	const auto &policy = settings.mediaReply;
+	const auto status = MediaReplyExecutionStatus(&controller->session());
+	AddButton(box, tr::lng_purple_media_reply_status(tr::now) + u": "_q + StatusText(status), [=] {
+		if (!current()) return;
+		controller->show(Box([=](not_null<Ui::GenericBox*> notice) {
+			notice->setTitle(tr::lng_purple_media_reply_status());
+			notice->addRow(object_ptr<Ui::FlatLabel>(notice, StatusText(MediaReplyExecutionStatus(weakSession.get()))
+				+ u"\n\n"_q + tr::lng_purple_media_reply_status_info(tr::now), st::boxDividerLabel));
+			notice->addButton(tr::lng_close(), [=] { notice->closeBox(); });
+		}));
+	});
 	if (row.isEmpty()) {
 		AddButton(box, tr::lng_purple_media_reply_text(tr::now) + u": "_q + policy.text, [=] {
 			if (current()) controller->show(Box(EditTextBox,
@@ -140,7 +174,7 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 				SingleChoiceBox(chooser, {
 					.title = tr::lng_purple_media_reply(),
 					.options = options,
-					.initialSelection = initial ? int(*initial) : row.startsWith(u"sets."_q) ? 4 : 0,
+					.initialSelection = MediaReplyModeSelection(initial, row.startsWith(u"sets."_q)),
 					.callback = [=](int index) { save(row, key,
 						index == 4 ? QJsonValue() : QJsonValue(MediaReplyModeName(MediaReplyMode(index)))); },
 				});
@@ -151,29 +185,40 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 				: tr::lng_purple_media_reply_inherit(tr::now)), [=] {
 			choose(u"voice"_q, shown.voice);
 		});
-		if (row.startsWith(u"sets."_q) && !shown.roundFollow) {
+		if (row.startsWith(u"sets."_q)) {
 			AddButton(box, tr::lng_purple_media_reply_follow(tr::now) + u": "_q
-				+ tr::lng_purple_media_reply_inherit(tr::now), [=] {
-				save(row, u"round_follow_voice"_q, true);
+				+ (!shown.roundFollow ? tr::lng_purple_media_reply_inherit(tr::now)
+					: *shown.roundFollow ? tr::lng_purple_media_reply_follow(tr::now) : tr::lng_purple_media_reply_independent(tr::now)), [=] {
+				if (!current()) return;
+				controller->show(Box([=](not_null<Ui::GenericBox*> chooser) {
+					SingleChoiceBox(chooser, {.title = tr::lng_purple_media_reply_follow(),
+						.options = {tr::lng_purple_media_reply_follow(tr::now), tr::lng_purple_media_reply_independent(tr::now), tr::lng_purple_media_reply_inherit(tr::now)},
+						.initialSelection = !shown.roundFollow ? 2 : *shown.roundFollow ? 0 : 1,
+						.callback = [=](int index) { save(row, u"round_follow_voice"_q, index == 2 ? QJsonValue() : QJsonValue(index == 0)); }});
+				}));
 			});
+			auto defaults = tr::lng_purple_media_reply_defaults(tr::now);
+			const auto labels = std::array{tr::lng_purple_media_reply_private(tr::now), tr::lng_purple_media_reply_groups(tr::now), tr::lng_purple_media_reply_channels(tr::now)};
+			const auto kinds = std::array{ChatKind::Private, ChatKind::Group, ChatKind::Channel};
+			const auto tokens = std::array{PeerToken{PeerTokenKind::User, 0}, PeerToken{PeerTokenKind::Chat, 0}, PeerToken{PeerTokenKind::Channel, 0}};
+			for (auto index = 0; index != 3; ++index) {
+				const auto value = ResolveMediaReply(settings, tokens[index], kinds[index]);
+				defaults += '\n' + labels[index] + u": "_q + Mode(value.voice) + u" / "_q + Mode(value.round)
+					+ u"; "_q + (value.roundFollow ? tr::lng_purple_media_reply_follow(tr::now) : tr::lng_purple_media_reply_independent(tr::now));
+			}
+			box->addRow(object_ptr<Ui::FlatLabel>(box, defaults, st::boxDividerLabel));
 		} else {
 			const auto follow = box->addRow(object_ptr<Ui::Checkbox>(box,
 				tr::lng_purple_media_reply_follow(tr::now), shown.roundFollow.value_or(true)));
-			follow->checkedChanges() | rpl::on_next([=](bool checked) {
-				save(row, u"round_follow_voice"_q, checked);
-			}, follow->lifetime());
+			follow->checkedChanges() | rpl::on_next([=](bool checked) { save(row, u"round_follow_voice"_q, checked); }, follow->lifetime());
 		}
-		if (row.startsWith(u"sets."_q) && shown.roundFollow) {
-			AddButton(box, tr::lng_purple_media_reply_inherit(tr::now), [=] {
-				save(row, u"round_follow_voice"_q, QJsonValue());
-			});
-		}
+		const auto disabled = MediaReplyRoundDisabled(settings, shown, row.startsWith(u"sets."_q));
+		const auto selection = MediaReplyModeSelection(shown.round, row.startsWith(u"sets."_q));
 		const auto round = ::Settings::AddButtonWithIcon(box->verticalLayout(),
 			rpl::single(tr::lng_purple_media_reply_round(tr::now) + u": "_q
-				+ (row.startsWith(u"sets."_q) && !shown.roundFollow ? tr::lng_purple_media_reply_inherit(tr::now)
-				: shown.roundFollow.value_or(true) ? tr::lng_purple_media_reply_follow(tr::now)
-					: Mode(shown.round.value_or(MediaReplyMode::Off)))), st::settingsButtonNoIcon);
-		round->setDisabled(shown.roundFollow.value_or(true));
+				+ (disabled ? tr::lng_purple_media_reply_follow(tr::now) : selection == 4
+					? tr::lng_purple_media_reply_inherit(tr::now) : Mode(MediaReplyMode(selection)))), st::settingsButtonNoIcon);
+		round->setDisabled(disabled);
 		round->setClickedCallback([=] { choose(u"round"_q, shown.round); });
 		if (row.startsWith(u"sets."_q)) {
 			AddButton(box, tr::lng_purple_media_reply_select(tr::now), [=] {

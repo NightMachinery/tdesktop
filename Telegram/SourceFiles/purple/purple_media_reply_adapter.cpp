@@ -41,6 +41,8 @@ struct State {
 	int pending = 0;
 	int inFlight = 0;
 	std::map<mtpRequestId, uint64_t> requests;
+	MediaReplyStatusReason reason = MediaReplyStatusReason::None;
+	int committed = -1;
 	bool loaded = false;
 	bool failed = false;
 };
@@ -61,6 +63,7 @@ void Activate(not_null<Main::Session*> session, const std::shared_ptr<State> &st
 	const auto requests = std::move(state->requests);
 	state->requests.clear();
 	state->inFlight = 0;
+	if (!requests.empty() && !state->failed) state->reason = MediaReplyStatusReason::Cancelled;
 	for (const auto &request : requests) session->api().request(request.first).cancel();
 	state->policy = AccountSettings(session).mediaReply;
 	state->journal.account = AccountText(session);
@@ -80,37 +83,67 @@ std::shared_ptr<State> Ensure(not_null<Main::Session*> session) {
 	return state;
 }
 
+MediaReplyStatusReason FailureReason(const MTP::Error &error) {
+	const auto type = error.type();
+	if (type.contains(u"PAYMENT"_q) || type.contains(u"STARS"_q)) return MediaReplyStatusReason::ApprovalRequired;
+	if (error.code() == 420 || type.startsWith(u"FLOOD_"_q) || type.startsWith(u"SLOWMODE_"_q)) return MediaReplyStatusReason::Flood;
+	if (type.contains(u"FORBIDDEN"_q) || type.contains(u"BANNED"_q) || type.contains(u"RESTRICTED"_q)) return MediaReplyStatusReason::Permission;
+	return MediaReplyStatusReason::Uncertain;
+}
+
+bool PolicyEnabled(const Settings &settings) {
+	auto enabled = false;
+	const auto inspect = [&](PeerToken peer, ChatKind kind) {
+		const auto value = ResolveMediaReply(settings, peer, kind);
+		enabled = enabled || value.voice != MediaReplyMode::Off || value.round != MediaReplyMode::Off;
+	};
+	inspect({PeerTokenKind::User, 0}, ChatKind::Private);
+	inspect({PeerTokenKind::Chat, 0}, ChatKind::Group);
+	inspect({PeerTokenKind::Channel, 0}, ChatKind::Channel);
+	for (const auto &set : settings.mediaReply.sets) for (const auto &peer : set.peers) {
+		if (peer.kind == PeerTokenKind::User) inspect(peer, ChatKind::Private);
+		else if (peer.kind == PeerTokenKind::Chat) inspect(peer, ChatKind::Group);
+		else { inspect(peer, ChatKind::Group); inspect(peer, ChatKind::Channel); }
+	}
+	return enabled;
+}
+
 bool Persist(not_null<Main::Session*> session, const std::shared_ptr<State> &state,
 		const MediaReplyAction &action) {
+	const auto refuse = [&](MediaReplyStatusReason reason) {
+		state->failed = true; state->reason = reason; return false;
+	};
 	const auto target = AccountSettingsTarget(session);
-	if (!target || !ValidateAccountSettingsTarget(session, *target)) return false;
+	if (!target || !ValidateAccountSettingsTarget(session, *target)) return refuse(MediaReplyStatusReason::StorageRefused);
 	const auto path = QFileInfo(target->path).absolutePath() + u"/media-reply-journal.json"_q;
 	if (!state->loaded) {
 		const auto parent = QFileInfo(path).absolutePath();
 		if (QFileInfo(parent).canonicalFilePath() != QDir(parent).absolutePath()
-			|| QFileInfo(path).isSymLink()) return false;
+			|| QFileInfo(path).isSymLink()) return refuse(MediaReplyStatusReason::StorageRefused);
 		state->lock = std::make_unique<QLockFile>(path + u".lock"_q);
 		state->lock->setStaleLockTime(0);
-		if (!state->lock->tryLock(0)) return false;
+		if (!state->lock->tryLock(0)) return refuse(MediaReplyStatusReason::LockUnavailable);
 		state->path = path;
 		if (QFileInfo::exists(path)) {
 			auto file = QFile(path);
-			if (!file.open(QIODevice::ReadOnly) || file.size() > 32 * 1024 * 1024) return false;
+			if (!file.open(QIODevice::ReadOnly) || file.size() > 32 * 1024 * 1024) return refuse(MediaReplyStatusReason::JournalUnreadable);
 			const auto decoded = DecodeMediaReplyJournal(file.readAll(), state->journal.account);
-			if (!decoded) return false;
+			if (!decoded) return refuse(MediaReplyStatusReason::JournalUnreadable);
 			state->journal.reserved = decoded->reserved;
 		}
 		state->loaded = true;
+		state->committed = int(state->journal.reserved.size());
 	}
 	if (state->path != path || !state->lock || !state->lock->isLocked()
-		|| QFileInfo(path).isSymLink() || !ReserveMediaReply(state->journal, action)) return false;
+		|| QFileInfo(path).isSymLink()) return refuse(MediaReplyStatusReason::StorageRefused);
+	if (state->journal.reserved.size() >= 4096) return refuse(MediaReplyStatusReason::JournalFull);
+	if (!ReserveMediaReply(state->journal, action)) return false;
 	auto file = QSaveFile(path);
-	if (!file.open(QIODevice::WriteOnly)) { state->failed = true; return false; }
-	if (!file.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) { state->failed = true; return false; }
+	if (!file.open(QIODevice::WriteOnly) || !file.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) return refuse(MediaReplyStatusReason::StorageRefused);
 	const auto bytes = EncodeMediaReplyJournal(state->journal);
-	if (bytes.size() > 32 * 1024 * 1024) { state->failed = true; return false; }
-	if (file.write(bytes) != bytes.size() || !file.commit()) { state->failed = true; return false; }
-	return ValidateAccountSettingsTarget(session, *target);
+	if (bytes.size() > 32 * 1024 * 1024 || file.write(bytes) != bytes.size() || !file.commit()) return refuse(MediaReplyStatusReason::StorageRefused);
+	state->committed = int(state->journal.reserved.size());
+	return ValidateAccountSettingsTarget(session, *target) || refuse(MediaReplyStatusReason::StorageRefused);
 }
 
 void Observe(not_null<HistoryItem*> item, MediaReplyOrigin origin) {
@@ -145,7 +178,9 @@ void Observe(not_null<HistoryItem*> item, MediaReplyOrigin origin) {
 		if (!original || original->isScheduled()) return;
 		const auto peer = original->history()->peer;
 		const auto topic = original->topic();
-		if (!(topic ? Data::CanSendTexts(topic) : Data::CanSendTexts(peer))) return;
+		if (!(topic ? Data::CanSendTexts(topic) : Data::CanSendTexts(peer))) {
+			state->reason = MediaReplyStatusReason::Permission; return;
+		}
 		if (!Persist(live, state, *action) || !MediaReplyStillCurrent(AccountSettings(live),
 			*action, AccountText(live), state->journal.cutoff, state->journal.revision)) return;
 		const auto replyFlags = action->message.topic
@@ -165,16 +200,26 @@ void Observe(not_null<HistoryItem*> item, MediaReplyOrigin origin) {
 			if (state->requests.erase(*requestId)) --state->inFlight;
 			if (const auto current = weak.get(); current && !current->account().loggingOut()
 				&& current->account().maybeSession() == current && AccountText(current) == action->message.account) {
+				if (!state->failed && state->journal.revision == action->revision) state->reason = MediaReplyStatusReason::None;
 				current->api().applyUpdates(result);
 			}
-		}).fail([=](const MTP::Error &) {
+		}).fail([=](const MTP::Error &error) {
 			if (state->requests.erase(*requestId)) --state->inFlight;
-		}).handleFloodErrors().send();
+			if (const auto current = weak.get(); current && !current->account().loggingOut()
+				&& current->account().maybeSession() == current && AccountText(current) == action->message.account
+				&& !state->failed && state->journal.revision == action->revision) state->reason = FailureReason(error);
+		}).handleAllErrors().send();
 		state->requests.emplace(*requestId, action->revision);
 	});
 }
 
 } // namespace
+
+MediaReplyStatus MediaReplyExecutionStatus(not_null<Main::Session*> session) {
+	const auto state = Ensure(session);
+	return {state->reason, state->committed, state->inFlight, state->failed,
+		!PolicyEnabled(AccountSettings(session))};
+}
 
 void ObserveMediaReplyMessage(
 		not_null<Main::Session*> session, const MTPMessage &message, bool replay) {

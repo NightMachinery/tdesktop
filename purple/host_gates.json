@@ -811,7 +811,7 @@
         "--output-dir",
         "{out}"
       ],
-      "coverage": "Literal production activation and done/fail bodies over inert sessions, with actual shared policy and durable journal. No native session construction or live transport."
+      "coverage": "Literal production activation/persistence/completion and native Sender builder/error-policy bodies. Actual Qt journal IO/lock, real shared policy/presentation, inert session ports. Checks terminal temporary errors, refusal status/capacity and inheritance. No native Session construction or live transport."
     }
   ]
 }

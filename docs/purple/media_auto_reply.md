@@ -56,3 +56,16 @@ owned cancellation, late outcomes, account replacement and terminal reservations
 it does not construct a native session or exercise live transport. The source-only
 core helper compiles newly added core units with the existing core recipe when
 the reused build predates those units, retaining dependency and stale checks.
+
+Automatic requests select the native Sender handleAllErrors policy, so negative,
+server, flood and permission failures reach the feature’s terminal completion
+without entering default unbounded retries. The native builder and error-policy
+bodies are included in inert qualification, alongside literal production
+persistence with real Qt file/lock operations and the shared policy.
+
+The native status button shows this account’s last confirmed reservation count,
+in-flight capacity and a bounded refusal/cancellation/uncertain reason. A stock
+status box explains payment approval without authorizing spending, retry or
+journal reset. Reopening the page refreshes the snapshot. Independent round
+values that are absent remain labeled as inheritance; chat-type and member
+effective values explain mixed sets, and stock radio selection matches the row.
