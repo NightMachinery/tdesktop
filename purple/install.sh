@@ -118,15 +118,20 @@ fi
 #: designated requirement. Ad-hoc has no certificate, so that requirement is
 #: the code hash of one exact binary and every build invalidates it. With a
 #: certificate the requirement names the identifier and the certificate, and
-#: neither moves when the code does. purple/make_signing_cert.sh creates it.
+#: neither moves when the code does. The certificate is self-signed and kept
+#: as a file by macos-local-signing, which signs from a throwaway keychain so
+#: that codesign never asks for the login password.
+#: https://github.com/NightMachinery/macos-local-signing
 SigningIdentity="${SigningIdentity:-Purple Telegram Local Signing}"
-if security find-identity -v -p codesigning \
-        | grep -qF "$SigningIdentity"; then
+if command -v macos-local-signing >/dev/null 2>&1 \
+        && macos-local-signing ready "$SigningIdentity"; then
     echo "=== signing as '$SigningIdentity' ==="
-    codesign --force --deep --sign "$SigningIdentity" "$Source"
+    macos-local-signing codesign "$SigningIdentity" --force --deep "$Source"
 else
     echo "=== signing ad-hoc ==="
-    echo "    (run purple/make_signing_cert.sh to keep TCC grants across builds)"
+    echo "    (to keep TCC grants across builds, install macos-local-signing from"
+    echo "     https://github.com/NightMachinery/macos-local-signing and run, once:"
+    echo "     macos-local-signing ensure '$SigningIdentity')"
     codesign --force --deep --sign - "$Source"
 fi
 
