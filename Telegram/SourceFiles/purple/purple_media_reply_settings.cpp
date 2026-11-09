@@ -170,7 +170,8 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 		}
 		const auto round = ::Settings::AddButtonWithIcon(box->verticalLayout(),
 			rpl::single(tr::lng_purple_media_reply_round(tr::now) + u": "_q
-				+ (shown.roundFollow.value_or(true) ? tr::lng_purple_media_reply_follow(tr::now)
+				+ (row.startsWith(u"sets."_q) && !shown.roundFollow ? tr::lng_purple_media_reply_inherit(tr::now)
+				: shown.roundFollow.value_or(true) ? tr::lng_purple_media_reply_follow(tr::now)
 					: Mode(shown.round.value_or(MediaReplyMode::Off)))), st::settingsButtonNoIcon);
 		round->setDisabled(shown.roundFollow.value_or(true));
 		round->setClickedCallback([=] { choose(u"round"_q, shown.round); });

@@ -40,6 +40,7 @@ struct State {
 	QString path;
 	int pending = 0;
 	int inFlight = 0;
+	std::map<mtpRequestId, uint64_t> requests;
 	bool loaded = false;
 	bool failed = false;
 };
@@ -57,6 +58,10 @@ PeerToken Token(not_null<PeerData*> peer) {
 }
 
 void Activate(not_null<Main::Session*> session, const std::shared_ptr<State> &state) {
+	const auto requests = std::move(state->requests);
+	state->requests.clear();
+	state->inFlight = 0;
+	for (const auto &request : requests) session->api().request(request.first).cancel();
 	state->policy = AccountSettings(session).mediaReply;
 	state->journal.account = AccountText(session);
 	state->journal.cutoff = base::unixtime::now();
@@ -149,19 +154,23 @@ void Observe(not_null<HistoryItem*> item, MediaReplyOrigin origin) {
 			MTP_int(action->message.topic), MTPInputPeer(), MTPstring(), MTPVector<MTPMessageEntity>(),
 			MTPint(), MTPInputPeer(), MTPint(), MTPbytes(), MTPVector<MTPRichText>());
 		++state->inFlight;
-		live->api().request(MTPmessages_SendMessage(
+		const auto requestId = std::make_shared<mtpRequestId>(0);
+		*requestId = live->api().request(MTPmessages_SendMessage(
 			MTP_flags(MTPmessages_SendMessage::Flag::f_reply_to | MTPmessages_SendMessage::Flag::f_no_webpage),
 			peer->input(), reply, MTP_string(action->text), MTP_long(action->randomId),
 			MTPReplyMarkup(), MTPVector<MTPMessageEntity>(), MTPint(), MTPint(),
 			MTPInputPeer(), MTPInputQuickReplyShortcut(), MTPlong(), MTPlong(),
 			MTPSuggestedPost(), MTPInputRichMessage()
 		)).done([=](const MTPUpdates &result) {
-			--state->inFlight;
+			if (state->requests.erase(*requestId)) --state->inFlight;
 			if (const auto current = weak.get(); current && !current->account().loggingOut()
 				&& current->account().maybeSession() == current && AccountText(current) == action->message.account) {
 				current->api().applyUpdates(result);
 			}
-		}).fail([=](const MTP::Error &) { --state->inFlight; }).handleFloodErrors().send();
+		}).fail([=](const MTP::Error &) {
+			if (state->requests.erase(*requestId)) --state->inFlight;
+		}).handleFloodErrors().send();
+		state->requests.emplace(*requestId, action->revision);
 	});
 }
 

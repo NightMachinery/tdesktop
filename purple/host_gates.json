@@ -800,6 +800,18 @@
         "--output-dir",
         "{out}"
       ]
+    },
+    {
+      "name": "media-auto-reply-callbacks",
+      "driver": "purple/test_media_reply_callbacks.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}"
+      ],
+      "coverage": "Literal production activation and done/fail bodies over inert sessions, with actual shared policy and durable journal. No native session construction or live transport."
     }
   ]
 }

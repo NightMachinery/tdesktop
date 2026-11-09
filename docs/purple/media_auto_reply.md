@@ -42,3 +42,17 @@ The only upstream edits are an include and new-message/ACK calls in
 `api/api_updates.cpp`. All decisions and dispatch code live in Purple files;
 source registration stays in `Telegram/cmake/purple.cmake`. Native UI rendering,
 product builds and live acceptance are separate qualification stages.
+
+Settings or account replacement cancels only request tokens owned by this
+feature on their frozen native connection/session. Cancellation is best effort:
+a reply the server already accepted may still arrive. Cancelled or uncertain
+actions retain their durable reservation and never become automatically
+sendable again. Late success/error callbacks do not reopen a reservation or
+retire a newer generation's capacity.
+
+Host qualification includes literal production activation and completion bodies
+over inert session ports with the actual shared policy and journal. This checks
+owned cancellation, late outcomes, account replacement and terminal reservations;
+it does not construct a native session or exercise live transport. The source-only
+core helper compiles newly added core units with the existing core recipe when
+the reused build predates those units, retaining dependency and stale checks.
