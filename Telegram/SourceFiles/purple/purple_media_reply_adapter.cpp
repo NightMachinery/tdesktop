@@ -9,6 +9,7 @@
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_document.h"
+#include "data/data_forum_topic.h"
 #include "data/data_media_types.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -100,8 +101,9 @@ bool Persist(not_null<Main::Session*> session, const std::shared_ptr<State> &sta
 		|| QFileInfo(path).isSymLink() || !ReserveMediaReply(state->journal, action)) return false;
 	auto file = QSaveFile(path);
 	if (!file.open(QIODevice::WriteOnly)) { state->failed = true; return false; }
-	file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+	if (!file.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) { state->failed = true; return false; }
 	const auto bytes = EncodeMediaReplyJournal(state->journal);
+	if (bytes.size() > 32 * 1024 * 1024) { state->failed = true; return false; }
 	if (file.write(bytes) != bytes.size() || !file.commit()) { state->failed = true; return false; }
 	return ValidateAccountSettingsTarget(session, *target);
 }

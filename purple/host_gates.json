@@ -789,6 +789,17 @@
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/recording_bin_cases.cpp"
       ]
+    },
+    {
+      "name": "media-auto-reply-native",
+      "driver": "purple/test_media_reply_compile.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}"
+      ]
     }
   ]
 }

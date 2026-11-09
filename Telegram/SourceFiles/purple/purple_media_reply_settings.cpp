@@ -61,7 +61,7 @@ void EditTextBox(not_null<Ui::GenericBox*> box,
 	const auto field = box->addRow(object_ptr<Ui::InputField>(box, st::defaultInputField,
 		Ui::InputField::Mode::SingleLine, rpl::single(title), value));
 	box->setFocusCallback([=] { field->setFocusFast(); });
-	box->addButton(tr::lng_save(), [=] {
+	box->addButton(tr::lng_settings_save(), [=] {
 		if (save(field->getLastText())) box->closeBox();
 		else field->showError();
 	});
@@ -151,14 +151,27 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 				: tr::lng_purple_media_reply_inherit(tr::now)), [=] {
 			choose(u"voice"_q, shown.voice);
 		});
-		const auto follow = box->addRow(object_ptr<Ui::Checkbox>(box,
-			tr::lng_purple_media_reply_follow(tr::now), shown.roundFollow.value_or(true)));
-		follow->checkedChanges() | rpl::on_next([=](bool checked) {
-			save(row, u"round_follow_voice"_q, checked);
-		}, follow->lifetime());
+		if (row.startsWith(u"sets."_q) && !shown.roundFollow) {
+			AddButton(box, tr::lng_purple_media_reply_follow(tr::now) + u": "_q
+				+ tr::lng_purple_media_reply_inherit(tr::now), [=] {
+				save(row, u"round_follow_voice"_q, true);
+			});
+		} else {
+			const auto follow = box->addRow(object_ptr<Ui::Checkbox>(box,
+				tr::lng_purple_media_reply_follow(tr::now), shown.roundFollow.value_or(true)));
+			follow->checkedChanges() | rpl::on_next([=](bool checked) {
+				save(row, u"round_follow_voice"_q, checked);
+			}, follow->lifetime());
+		}
+		if (row.startsWith(u"sets."_q) && shown.roundFollow) {
+			AddButton(box, tr::lng_purple_media_reply_inherit(tr::now), [=] {
+				save(row, u"round_follow_voice"_q, QJsonValue());
+			});
+		}
 		const auto round = ::Settings::AddButtonWithIcon(box->verticalLayout(),
 			rpl::single(tr::lng_purple_media_reply_round(tr::now) + u": "_q
-				+ Mode(shown.round.value_or(MediaReplyMode::Off))), st::settingsButtonNoIcon);
+				+ (shown.roundFollow.value_or(true) ? tr::lng_purple_media_reply_follow(tr::now)
+					: Mode(shown.round.value_or(MediaReplyMode::Off)))), st::settingsButtonNoIcon);
 		round->setDisabled(shown.roundFollow.value_or(true));
 		round->setClickedCallback([=] { choose(u"round"_q, shown.round); });
 		if (row.startsWith(u"sets."_q)) {
