@@ -14,6 +14,7 @@ clang++ -std=c++20 -g -O0 -o "$BuildPath/test_sync_local_store" \
     "$CorePath/purple/purple_local_choice.cpp" \
     "$CorePath/purple/purple_config_diff.cpp" \
     "$CorePath/purple/purple_settings.cpp" \
+    "$CorePath/purple/purple_media_reply.cpp" \
     "$CorePath/purple/purple_splice.cpp" \
     "$CorePath/purple/purple_state.cpp" \
     "$CorePath/purple/purple_config_sync.cpp" \
