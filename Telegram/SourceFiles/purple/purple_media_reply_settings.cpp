@@ -123,7 +123,8 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 	const auto &settings = AccountSettings(&controller->session());
 	const auto &policy = settings.mediaReply;
 	const auto status = MediaReplyExecutionStatus(&controller->session());
-	AddButton(box, tr::lng_purple_media_reply_status(tr::now) + u": "_q + StatusText(status), [=] {
+	box->addRow(object_ptr<Ui::FlatLabel>(box, StatusText(status), st::boxDividerLabel));
+	AddButton(box, tr::lng_purple_media_reply_status(tr::now), [=] {
 		if (!current()) return;
 		controller->show(Box([=](not_null<Ui::GenericBox*> notice) {
 			notice->setTitle(tr::lng_purple_media_reply_status());
