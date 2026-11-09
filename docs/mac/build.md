@@ -635,24 +635,28 @@ That hash is the certificate's own and does not move when the code does.
 Verified rather than reasoned about: grant, rebuild, reinstall, relaunch, and
 the refusal that used to appear every time is gone.
 
-Create the certificate once:
+Create the certificate once, with
+[macos-local-signing](https://github.com/NightMachinery/macos-local-signing):
 
-    purple/make_signing_cert.sh
+    macos-local-signing ensure "Purple Telegram Local Signing"
 
-It is self-signed, needs no Apple developer account, lives in the login
-keychain, and is idempotent. `install.sh` signs with it when it is present and
-falls back to ad-hoc with a hint when it is not, so a fresh checkout still
-installs on a machine that has never run it.
+It is self-signed and needs no Apple developer account. Trusting it shows one
+password dialog, so run it at the Mac's screen. The certificate and key are
+kept as a file outside every keychain: with the key in the login keychain,
+codesign asked for the login password on every signing. `install.sh` signs
+through `macos-local-signing codesign`, which uses a throwaway keychain, and
+falls back to ad-hoc with a hint when the tool or the certificate is missing,
+so a fresh checkout still installs on a machine that has neither.
+
+A certificate made by the old `purple/make_signing_cert.sh` is still in the
+login keychain; `macos-local-signing import "Purple Telegram Local Signing"`
+moves it into the file store and keeps the same certificate, so the grants
+it already holds stay.
 
 Switching an app that is already installed from ad-hoc to the certificate
 changes its identity, so any permission it already held has to be granted once
 more. Remove the stale entry with `-` and add the app again rather than
 toggling the switch.
-
-The script pins itself to `/usr/bin/openssl` deliberately. A Homebrew or
-anaconda OpenSSL 3 earlier in `PATH` writes PKCS#12 with a SHA-256 MAC that
-macOS's Security framework will not read, and `security import` then rejects it
-claiming the password is wrong. The system LibreSSL writes what it expects.
 
 Nothing else in the fork wants the permission. Everything but focus sync works
 without it, and the detector says so once per launch instead of going quiet.
