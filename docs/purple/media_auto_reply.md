@@ -40,7 +40,9 @@ host qualification.
 
 The only upstream edits are an include and new-message/ACK calls in
 `api/api_updates.cpp`. All decisions and dispatch code live in Purple files;
-source registration stays in `Telegram/cmake/purple.cmake`. Native UI rendering,
+source registration stays in `Telegram/cmake/purple.cmake`. The media reply
+splice source joins its source-specific toml++ include list so native and host
+recipe builds use the vendored parser header. Native UI rendering,
 product builds and live acceptance are separate qualification stages.
 
 Settings or account replacement cancels only request tokens owned by this

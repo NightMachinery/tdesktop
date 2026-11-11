@@ -455,6 +455,7 @@ target_include_directories(Telegram PRIVATE ${src_loc} ${purple_core_loc})
 # their compile commands and force a full rebuild for no reason.
 set_source_files_properties(
     ${purple_core_loc}/purple/purple_local_choice.cpp
+    ${purple_core_loc}/purple/purple_media_reply_splice.cpp
     ${purple_core_loc}/purple/purple_config_diff.cpp
     ${purple_core_loc}/purple/purple_settings.cpp
     ${purple_core_loc}/purple/purple_splice.cpp
