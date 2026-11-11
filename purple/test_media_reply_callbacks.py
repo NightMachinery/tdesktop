@@ -9,13 +9,14 @@ import subprocess
 parser = argparse.ArgumentParser(description="Exercise literal native revocation and completion bodies over inert session ports")
 parser.add_argument("--build-dir", type=Path, required=True)
 parser.add_argument("--output-dir", type=Path, required=True)
+parser.add_argument("--parent-source", type=Path)
 args = parser.parse_args()
 repo = Path(__file__).resolve().parents[1]
 build = args.build_dir.resolve()
 out = args.output_dir.resolve()
 out.mkdir(parents=True, exist_ok=True)
 source = repo / "Telegram/SourceFiles/purple/purple_media_reply_adapter.cpp"
-text = source.read_text()
+text = (args.parent_source or source).read_text()
 def block(marker):
     start = text.index("{", text.index(marker) + len(marker))
     end, depth = start + 1, 1
@@ -30,6 +31,8 @@ failed = block("}).fail([=](const MTP::Error &")
 failure_reason = "MediaReplyStatusReason FailureReason(const MTP::Error &error) " + block("MediaReplyStatusReason FailureReason(")
 persist = "bool Persist(not_null<Main::Session*> session, const std::shared_ptr<State> &state, const MediaReplyAction &action) " + block("bool Persist(")
 policy_enabled = "bool PolicyEnabled(const Settings &settings) " + block("bool PolicyEnabled(")
+deferred = block("crl::on_main(session, [=]")
+deferred = deferred[:deferred.index("\t\tconst auto replyFlags")] + "\t\t++live->api().sent;\n\t}"
 fixture = r'''
 #include "purple/purple_settings.h"
 #include "purple/purple_media_reply_presentation.h"
@@ -64,13 +67,27 @@ struct Account {
     Session *maybeSession() { return live; }
 };
 struct Api {
+    int sent = 0;
     std::vector<int> cancelled;
     int reconciled = 0;
     struct Request { Api *api; int id; void cancel() { api->cancelled.push_back(id); } };
     Request request(int id) { return {this, id}; }
     void applyUpdates(const MTPUpdates &) { ++reconciled; }
 };
+struct Peer { bool allowed = true; };
+struct Topic { bool allowed = true; };
+struct History { Peer *peer; };
+struct Item {
+    Peer peer;
+    History owner{&peer};
+    bool isScheduled() { return false; }
+    History *history() { return &owner; }
+    Topic *topic() { return nullptr; }
+};
+struct Data { Item item; Item *message(int, int) { return &item; } };
 struct Session {
+    Data storage;
+    Data &data() { return storage; }
     Account owner;
     Api transport;
     Session() { owner.live = this; }
@@ -78,6 +95,12 @@ struct Session {
     Api &api() { return transport; }
 };
 }
+namespace Data {
+bool CanSendTexts(Main::Peer *peer) { return peer->allowed; }
+bool CanSendTexts(Main::Topic *topic) { return topic->allowed; }
+}
+using MsgId = int;
+bool AccountAutomaticOperationsAllowed(Main::Session *) { return true; }
 struct Weak { Main::Session *value; Main::Session *get() const { return value; } };
 namespace Purple {
 Settings settings;
@@ -86,12 +109,25 @@ QString AccountText(Main::Session *session) { return session->account().id; }
 @STATE@
 @ACTIVATE@
 @FAILURE_REASON@
+int persistenceCalls = 0;
 QString StorageDirectory;
 struct Target { QString path; };
-std::optional<Target> AccountSettingsTarget(Main::Session *) { return Target{StorageDirectory + u"/settings.toml"_q}; }
+std::optional<Target> AccountSettingsTarget(Main::Session *) { ++persistenceCalls; return Target{StorageDirectory + u"/settings.toml"_q}; }
 bool ValidateAccountSettingsTarget(Main::Session *, const Target &) { return true; }
 @PERSIST@
 @POLICY_ENABLED@
+std::vector<std::function<void()>> mainQueue;
+void QueueAction(Main::Session *session, const std::shared_ptr<State> &state, int id) {
+    const auto action = PlanMediaReply(AccountSettings(session),
+        {AccountText(session), {PeerTokenKind::User, 17}, ChatKind::Private, id, 0,
+            state->journal.cutoff + 1, MediaReplyMedia::Voice, MediaReplyOrigin::LiveNew, false, true, false},
+        state->journal.account, state->journal.cutoff, state->journal.revision);
+    if (!action) throw std::runtime_error("queued policy fixture must admit");
+    const auto weak = Weak{session};
+    const auto peerId = 17;
+    ++state->pending;
+    mainQueue.emplace_back([=] @DEFERRED@);
+}
 }
 int checks = 0;
 void check(bool value, const char *why) {
@@ -205,6 +241,43 @@ int main(int argc, char **argv) {
     unwritable->lock = std::make_unique<QLockFile>(unwritable->path + u".lock"_q);
     check(unwritable->lock->tryLock(0) && QDir().mkpath(unwritable->path), "real write-refusal fixture prepared");
     check(!Persist(&session, unwritable, storageAction) && unwritable->reason == MediaReplyStatusReason::StorageRefused && unwritable->committed == 0, "write refusal cannot publish false confirmed reservation");
+    for (const auto permission : {false, true}) {
+        settings.mediaReply.defaults[0].voice = MediaReplyMode::Both;
+        auto queued = storageCase(permission ? u"queue-permission"_q : u"queue-recoverable"_q);
+        queued->loaded = true; queued->committed = 0;
+        queued->path = StorageDirectory + u"/media-reply-journal.json"_q;
+        queued->lock = std::make_unique<QLockFile>(queued->path + u".lock"_q);
+        check(queued->lock->tryLock(0) && QDir().mkpath(queued->path), "one-shot real Qt commit refusal prepared");
+        const auto sent = session.api().sent;
+        const auto calls = persistenceCalls;
+        QueueAction(&session, queued, 201); QueueAction(&session, queued, 202);
+        check(mainQueue.size() == 2 && queued->pending == 2, "both eligible callbacks queued before failure");
+        mainQueue[0]();
+        check(queued->failed && queued->reason == MediaReplyStatusReason::StorageRefused && persistenceCalls == calls + 1,
+            "first queued checked Qt write fails and latches reason");
+        check(QDir().rmdir(queued->path), "owned fixture removes transient failure for second queued callback");
+        session.data().item.peer.allowed = !permission;
+        mainQueue[1]();
+        if (@PARENT@) {
+            check(permission ? queued->reason == MediaReplyStatusReason::Permission
+                : persistenceCalls == calls + 2 && session.api().sent == sent + 1 && QFileInfo::exists(queued->path),
+                "exact parent queued callback bypasses failed latch or overwrites reason");
+        } else {
+            check(persistenceCalls == calls + 1 && session.api().sent == sent && !QFileInfo::exists(queued->path)
+                && queued->reason == MediaReplyStatusReason::StorageRefused && queued->pending == 0,
+                "failure latch prevents second write/request and preserves original reason");
+            check(!Persist(&session, queued, storageAction) && persistenceCalls == calls + 1,
+                "persistence boundary independently refuses a failed state");
+        }
+        session.data().item.peer.allowed = true;
+        mainQueue.clear();
+    }
+    auto normal = storageCase(u"queue-normal"_q);
+    const auto sent = session.api().sent;
+    QueueAction(&session, normal, 301); QueueAction(&session, normal, 302);
+    mainQueue[0](); mainQueue[1](); mainQueue.clear();
+    check(!normal->failed && normal->committed == 2 && session.api().sent == sent + 2 && normal->pending == 0,
+        "normal two-action queue still commits and admits both");
     std::cout << "MEDIA_REPLY_CALLBACK_CHECKS=" << checks << '\n';
 }
 '''
@@ -242,6 +315,7 @@ native_sender = native_sender.replace("@ALL_BUILDER@", native_block(sender_text,
 native_sender = native_sender.replace("@FAIL_HANDLER@", native_block(sender_text, "[[nodiscard]] FailHandler MakeFailHandler("))
 assert ").handleAllErrors().send()" in text and ").handleFloodErrors().send()" not in text
 fixture = fixture.replace("@NATIVE_SENDER@", native_sender).replace("@BUILDER@", "handleAllErrors")
+fixture = fixture.replace("@DEFERRED@", deferred).replace("@PARENT@", "true" if args.parent_source else "false")
 fixture = fixture.replace("@PERSIST@", persist).replace("@FAILURE_REASON@", failure_reason).replace("@POLICY_ENABLED@", policy_enabled)
 fixture = fixture.replace("@STATE@", state).replace("@ACTIVATE@", activate).replace("@DONE@", done).replace("@FAIL@", failed)
 overlay = out / "include/purple"
@@ -270,6 +344,6 @@ link = [recipe[0], *flags, *objects, "-framework", "QtCore", "-o", str(out / "ca
 subprocess.run(link, check=True)
 result = subprocess.run([str(out / "callbacks"), str(out / "storage")], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 (out / "run.log").write_bytes(result.stdout)
-(out / "inputs.json").write_text(json.dumps({"source": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "literalBodies": {"state": state, "activate": activate, "done": done, "fail": failed, "persist": persist, "failureReason": failure_reason, "nativeSender": native_sender}, "senderSha256": hashlib.sha256(sender_path.read_bytes()).hexdigest(), "responseSha256": hashlib.sha256(response_path.read_bytes()).hexdigest(), "compile": commands, "link": link, "exit": result.returncode, "boundary": "Literal production activation/storage/completion and actual native Sender builder/error-policy bodies; real Qt journal IO/lock and shared policy, inert session/request ports. No native session construction, GUI, transport or live account."}, indent=2) + "\n")
+(out / "inputs.json").write_text(json.dumps({"source": str(source), "sha256": hashlib.sha256((args.parent_source or source).read_bytes()).hexdigest(), "literalBodies": {"deferred": deferred, "state": state, "activate": activate, "done": done, "fail": failed, "persist": persist, "failureReason": failure_reason, "nativeSender": native_sender}, "senderSha256": hashlib.sha256(sender_path.read_bytes()).hexdigest(), "responseSha256": hashlib.sha256(response_path.read_bytes()).hexdigest(), "compile": commands, "link": link, "exit": result.returncode, "boundary": "Literal production deferred admission/activation/storage/completion and actual native Sender builder/error-policy bodies; real Qt journal IO/lock and shared policy, inert session/request ports. No native session construction, GUI, transport or live account."}, indent=2) + "\n")
 print(result.stdout.decode(), end="")
 raise SystemExit(result.returncode)

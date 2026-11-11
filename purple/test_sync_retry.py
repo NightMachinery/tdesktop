@@ -125,7 +125,16 @@ assert 'pending->active' in sender and 'std::weak_ptr<Pending>' in sender
 assert '.handleAllErrors().send()' in sender
 for path in root.glob('*.cpp'):
     if '.handleAllErrors()' in path.read_text():
-        assert path.name in expected, 'Uninventoried bypass: ' + path.name
+        if path.name == 'purple_media_reply_adapter.cpp':
+            media = path.read_text()
+            assert media.count('.handleAllErrors()') == 1
+            assert 'if (state->failed) return false;' in media
+            assert '|| state->failed || state->inFlight >= 8' in media
+            assert 'state->requests.erase(*requestId)' in media
+            assert 'FailureReason(error)' in media
+            assert 'SyncRequestSender' not in media
+        else:
+            assert path.name in expected, 'Uninventoried bypass: ' + path.name
 guards = {
     'purple_emoji_export.cpp': ['std::make_unique<SyncRequestSender>', '_queue.transient(transient.retryAt,', '_queue.retryAt(_clock.elapsed())'],
     'purple_sync_request_sender.cpp': ['if (_deferred && !transient->shortRetry)', 'callback(id, *transient);'],

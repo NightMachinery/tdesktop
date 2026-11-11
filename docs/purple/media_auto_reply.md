@@ -69,3 +69,9 @@ status box explains payment approval without authorizing spending, retry or
 journal reset. Reopening the page refreshes the snapshot. Independent round
 values that are absent remain labeled as inheritance; chat-type and member
 effective values explain mixed sets, and stock radio selection matches the row.
+
+A storage refusal latches the executor before deferred admission and at the
+persistence boundary. Already queued actions cannot write or send after that
+latch, or replace its original reason with a later local permission refusal.
+The queued two-action control uses literal production admission/persistence
+bodies, real Qt storage and an inert main queue and transport counter.

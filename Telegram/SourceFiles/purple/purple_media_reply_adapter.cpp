@@ -110,6 +110,7 @@ bool PolicyEnabled(const Settings &settings) {
 
 bool Persist(not_null<Main::Session*> session, const std::shared_ptr<State> &state,
 		const MediaReplyAction &action) {
+	if (state->failed) return false;
 	const auto refuse = [&](MediaReplyStatusReason reason) {
 		state->failed = true; state->reason = reason; return false;
 	};
@@ -171,7 +172,7 @@ void Observe(not_null<HistoryItem*> item, MediaReplyOrigin origin) {
 		--state->pending;
 		const auto live = weak.get();
 		if (!live || live->account().loggingOut() || live->account().maybeSession() != live
-			|| state->inFlight >= 8 || !AccountAutomaticOperationsAllowed(live)
+			|| state->failed || state->inFlight >= 8 || !AccountAutomaticOperationsAllowed(live)
 			|| !MediaReplyStillCurrent(AccountSettings(live), *action, AccountText(live),
 				state->journal.cutoff, state->journal.revision)) return;
 		const auto original = live->data().message(peerId, MsgId(action->message.message));
