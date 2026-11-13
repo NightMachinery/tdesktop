@@ -15,6 +15,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
+#include <QtTest/QTest>
 #include <iostream>
 
 namespace crl { rpl::producer<> on_main_update_requests() { return rpl::never<>(); } }
@@ -58,6 +59,26 @@ Ui::FlatLabel *Progress(Ui::VerticalLayout &rows) {
     }
     return nullptr;
 }
+
+struct StripInputModel {
+    bool inFinish = false, inTransition = false;
+    bool finishing() const { return inFinish; }
+    bool transitioning() const { return inTransition; }
+};
+struct StripInputDock {
+    StripInputModel model;
+    std::optional<int> ready;
+    std::array<ushort, 64> levels = {};
+    int levelIndex = 0;
+};
+StripInputDock &TheDock() { static auto dock = StripInputDock(); return dock; }
+std::array<int, 5> StripCalls = {};
+void OpenTarget() { ++StripCalls[0]; }
+void Pause() { ++StripCalls[1]; }
+void Preview() { ++StripCalls[2]; }
+void Send(int) { ++StripCalls[3]; }
+void Discard() { ++StripCalls[4]; }
+
 #include "recording-bin.inc"
 } // namespace
 
@@ -207,6 +228,58 @@ int main(int argc, char **argv) {
                 strip.render(&image);
                 expect(image.save(u"recording-strip-rtl.png"_q), "synthetic RTL strip rendering is saved");
             }
+            for (const auto width : { 120, 320, 640 }) {
+                strip.resize(width, 48);
+                TheDock().levels.fill(65535);
+                auto image = QImage(strip.size(), QImage::Format_ARGB32_Premultiplied);
+                image.fill(Qt::transparent);
+                strip.render(&image);
+                auto redUnderControls = 0;
+                for (const auto control : strip.controls()) {
+                    const auto area = control->geometry().intersected(image.rect());
+                    for (auto y = area.top(); y <= area.bottom(); ++y) {
+                        for (auto x = area.left(); x <= area.right(); ++x) {
+                            const auto color = image.pixelColor(x, y);
+                            redUnderControls += color.red() > 200 && color.green() < 60 && color.blue() < 60;
+                        }
+                    }
+                }
+                expect(!redUnderControls, "actual strip paint never puts waveform pixels under transparent controls");
+                if (width == 320) {
+                    expect(image.save(rtl ? u"recording-strip-wave-rtl.png"_q : u"recording-strip-wave-ltr.png"_q),
+                        "actual nonzero-level strip paint render is saved");
+                }
+            }
+            strip.resize(640, 48);
+            for (const auto finishing : { false, true }) {
+                for (const auto transitioning : { false, true }) {
+                    for (const auto ready : { false, true }) {
+                        TheDock().model.inFinish = finishing;
+                        TheDock().model.inTransition = transitioning;
+                        TheDock().ready = ready ? std::optional<int>(1) : std::nullopt;
+                        strip.applyInputState();
+                        const auto controls = strip.controls();
+                        for (auto i = 1; i != 5; ++i) {
+                            auto control = controls[i];
+                            control->setFocusPolicy(Qt::StrongFocus);
+                            control->setFocus(Qt::OtherFocusReason);
+                            const auto enabled = !finishing && (!transitioning || i == 4)
+                                && (i != 1 || !ready);
+                            for (const auto keyboard : { false, true }) {
+                                const auto before = StripCalls[i];
+                                if (keyboard) QTest::keyClick(control, Qt::Key_Space);
+                                else QTest::mouseClick(control, Qt::LeftButton);
+                                const auto admitted = StripCalls[i] - before;
+                                expect(enabled ? admitted > 0 : admitted == 0,
+                                    keyboard ? "focused key cannot admit a disabled real strip callback"
+                                        : "native mouse cannot admit a disabled real strip callback");
+                            }
+                        }
+                    }
+                }
+            }
+            TheDock().model = {};
+            TheDock().ready.reset();
             auto bubble = BubbleControlsProbe();
             for (const auto side : { 64, 128, 160, 320 }) {
                 bubble.resize(side, side);

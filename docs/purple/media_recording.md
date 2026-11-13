@@ -103,6 +103,10 @@ preview; it cannot resume capture.
 
 The strip uses stock action links, including its keyboard-accessible title. Labels
 elide within their allocated width while their accessible names remain complete.
+Disabled actions preserve QWidget mouse/key gating as well as the toolkit's
+accessibility state. The strip dedicates its row to title and action links, so it
+does not repeat the waveform behind their transparent text; waveform display
+remains in the native bar and recording preview.
 The bubble uses stock pause/resume and camera icons with localized accessible
 names, so translated text cannot overflow the small bubble. Both control rows
 mirror their positions in RTL layouts; the pause icon follows native pause state.

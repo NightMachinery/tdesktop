@@ -143,7 +143,7 @@ CASES = {
         'units': ['ui/text/format_values.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
         'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
         'libraries': ['Telegram/lib_ui/liblib_ui.a', 'Telegram/lib_base/liblib_base.a'],
-        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'Foundation', 'AppKit', 'Metal'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'QtTest', 'Foundation', 'AppKit', 'Metal'],
         'link': ['-lobjc'],
     },
     'recording-store-startup': {
@@ -324,8 +324,16 @@ def recording_controls_include(sources):
         layout += '\n' + function(dock, 'void Strip::layoutButtons(').replace('Strip::layoutButtons', 'layoutButtons')
     refresh = function(strip, 'void refresh()')
     refresh_layout = 'layoutButtons();' if 'layoutButtons();' in refresh else ''
-    result = ('class StripLayoutProbe final : public Ui::RpWidget {\npublic:\n'
-        'StripLayoutProbe() : RpWidget(nullptr), ' + init + ' {}\n'
+    disable = refresh[refresh.index('for (const auto button : { &_pause, &_preview, &_send, &_discard })'):
+        refresh.index('\n\t\tlayoutButtons();')]
+    wiring = '\n'.join(line.strip() for line in strip.splitlines() if '.setClickedCallback(' in line)
+    paint = function(strip, 'paintRequest() | rpl::on_next([=] ') + ', lifetime());'
+    enable_helper = (function(dock, 'void SetStripActionEnabled(') + '\n'
+        if 'void SetStripActionEnabled(' in dock else '')
+
+    result = (enable_helper + 'class StripLayoutProbe final : public Ui::RpWidget {\npublic:\n'
+        'StripLayoutProbe() : RpWidget(nullptr), ' + init + ' { ' + wiring + paint + ' }\n'
+        'void applyInputState() { const auto &dock = TheDock(); ' + disable + ' }\n'
         'void labels(const QString &text) { ' + ' '.join(name + '.setText(text);' for name in names)
         + refresh_layout + ' }\n'
         'std::array<QWidget*, 5> controls() { return { &_title, &_pause, &_preview, &_send, &_discard }; }\n'

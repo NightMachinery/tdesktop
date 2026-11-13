@@ -384,6 +384,11 @@ void Send(Api::SendOptions options, bool scheduleChosen) {
 	});
 }
 
+void SetStripActionEnabled(not_null<Ui::LinkButton*> button, bool enabled) {
+	button->setEnabled(enabled);
+	button->setDisabled(!enabled);
+}
+
 class Strip final : public Ui::RpWidget {
 public:
 	Strip(not_null<Ui::RpWidget*> parent, Fn<void()> relayout)
@@ -422,13 +427,6 @@ public:
 		paintRequest() | rpl::on_next([=] {
 			auto painter = QPainter(this);
 			painter.fillRect(rect(), palette().window());
-			const auto &dock = TheDock();
-			painter.setPen(Qt::red);
-			for (auto i = 0; i != 64; ++i) {
-				const auto level = dock.levels[(dock.levelIndex + i) % 64];
-				const auto h = std::clamp(int(level / 2048), 1, 12);
-				painter.drawLine(width() / 3 + i * 2, 20 - h, width() / 3 + i * 2, 20 + h);
-			}
 		}, lifetime());
 		refresh();
 		setVisible(TheDock().model.active());
@@ -445,12 +443,12 @@ public:
 		_send.setText(TargetUnavailable() ? tr::lng_purple_recording_send_elsewhere(tr::now) : tr::lng_send_button(tr::now));
 		_pause.setText(dock.model.paused() ? tr::lng_purple_recording_resume(tr::now) : tr::lng_purple_recording_pause(tr::now));
 		for (const auto button : { &_pause, &_preview, &_send, &_discard }) {
-			button->setDisabled(dock.model.finishing()
-				|| (dock.model.transitioning() && button != &_discard));
+			SetStripActionEnabled(button, !dock.model.finishing()
+				&& (!dock.model.transitioning() || button == &_discard));
 		}
-		_pause.setDisabled(dock.model.finishing()
-			|| dock.model.transitioning()
-			|| dock.ready.has_value());
+		SetStripActionEnabled(&_pause, !dock.model.finishing()
+			&& !dock.model.transitioning()
+			&& !dock.ready);
 		layoutButtons();
 		update();
 	}
