@@ -4,6 +4,8 @@
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QCheckBox>
+#include <QtWidgets/QLabel>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -141,6 +143,50 @@ bool AutoSession::Event(SyncAutoEvent event) {
     return true;
 }
 
+enum class SyncFirstUseOutcome { Waiting, Asking, Published, Joined, Failed, NotNeeded };
+struct SyncFirstUseResult { SyncFirstUseOutcome outcome; QString text; };
+std::map<Session*, SyncFirstUseResult> FirstResults;
+auto SyncFirstUseResultOf(Session *s) -> std::optional<SyncFirstUseResult> {
+    const auto i = FirstResults.find(s);
+    return i == FirstResults.end() ? std::nullopt : std::optional(i->second);
+}
+enum class SyncConfigReviewStatus { AccountUnavailable, NeedsReview, Ready };
+struct Review { SyncConfigReviewStatus status = SyncConfigReviewStatus::AccountUnavailable; };
+struct Recovery { bool journalPresent = false; };
+struct SetupBoxState {
+    decltype(base::make_weak((Session*)nullptr)) selectedSession, firstUseSession;
+    std::optional<SyncFirstUseOutcome> firstUseOutcome;
+    std::optional<Review> review;
+    std::optional<Recovery> recovery;
+    QLabel *status = nullptr;
+    bool running = false, publishing = false;
+    uint64_t generation = 0;
+};
+bool Busy(const SetupBoxState &state) { return state.running || state.publishing; }
+bool SelectedAvailable(const SetupBoxState &state) {
+    const auto s = state.selectedSession.get();
+    return s && Owner && s->fileEligible && !s->account().logout && s->account().maybeSession() == s;
+}
+void ClearReview(SetupBoxState &state) { state.review.reset(); ++state.generation; }
+void SetStatus(SetupBoxState &state, const QString &text) { state.status->setText(text); }
+QString AutomaticSettingsSyncStatus(Session*) { return u"automatic ready"_q; }
+namespace tr {
+inline constexpr auto now = 0;
+QString lng_purple_auto_select(int) { return u"select"_q; }
+QString lng_purple_auto_owner(int) { return u"choose startup owner"_q; }
+QString lng_purple_account_sync_file_held(int) { return u"file held"_q; }
+}
+namespace Ui {
+class Checkbox : public QCheckBox {
+public:
+    enum class NotifyAboutChange { DontNotify };
+    void setChecked(bool value, NotifyAboutChange) { QCheckBox::setChecked(value); }
+};
+}
+struct Box { rpl::lifetime life; auto &lifetime() { return life; } };
+auto AutomaticSettingsSyncChanges() { return Changes.events(); }
+#include "sync-setup-status.inc"
+
 } // namespace Probe
 
 int main(int argc, char **argv) {
@@ -166,6 +212,47 @@ int main(int argc, char **argv) {
     expect(two._backstop.isActive(), "stored secondary account arms the registered idle callback");
     expect(!For(off)._backstop.isActive(), "off account owns no armed backstop");
     const auto missingBackstop = !one._backstop.isActive() || !two._backstop.isActive();
+    {
+        auto box = std::make_unique<Box>();
+        auto primary = QLabel(u"account unavailable"_q);
+        auto automaticWidget = Probe::Ui::Checkbox();
+        auto automaticLabel = QLabel();
+        auto value = SetupBoxState();
+        value.selectedSession = base::make_weak(root);
+        value.status = &primary;
+        value.review = Review{};
+        RegisterStatus(box.get(), &value, &automaticWidget, &automaticLabel);
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined successfully"_q };
+        Changes.fire({});
+        expect(primary.text() == u"joined successfully"_q && !value.review,
+            "successful first-use join refreshes the already-open dialog's unavailable status");
+        value.review = Review{ SyncConfigReviewStatus::NeedsReview };
+        primary.setText(u"real recovery error"_q);
+        FirstResults.erase(root); Changes.fire({});
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined again"_q }; Changes.fire({});
+        expect(primary.text() == u"real recovery error"_q, "join notification preserves a real recovery error");
+        value.review = Review{}; value.recovery = Recovery{true};
+        FirstResults.erase(root); Changes.fire({});
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined again"_q }; Changes.fire({});
+        expect(primary.text() == u"real recovery error"_q, "unfinished recovery journal is never hidden");
+        value.recovery.reset(); value.publishing = true;
+        FirstResults.erase(root); Changes.fire({});
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"busy result"_q }; Changes.fire({});
+        expect(primary.text() == u"real recovery error"_q, "busy manual flow retains its own completion authority");
+        value.publishing = false; Changes.fire({});
+        expect(primary.text() == u"real recovery error"_q, "busy result is not replayed after manual flow settles");
+        value.selectedSession = base::make_weak(off);
+        Changes.fire({});
+        expect(primary.text() == u"real recovery error"_q, "another account's completion cannot replace selected status");
+        value.selectedSession = base::make_weak(root);
+        Owner = false; RefreshUnavailable(value);
+        expect(primary.text() == u"choose startup owner"_q, "startup owner problem is named instead of an account-file error");
+        Owner = true;
+        box.reset();
+        primary.setText(u"closed"_q); FirstResults.erase(root); Changes.fire({});
+        expect(primary.text() == u"closed"_q, "disposed dialog unsubscribes from completion notifications");
+        FirstResults.clear();
+    }
     if (missingBackstop) { Sessions.clear(); domain.entries.clear(); return 1; }
     const auto interval = crl::time(kSyncAutoCheckSeconds) * 1000;
     const auto arms = one._backstop.arms;
@@ -240,4 +327,3 @@ int main(int argc, char **argv) {
     Sessions.clear(); domain.entries.clear();
     return failures ? 1 : 0;
 }
-

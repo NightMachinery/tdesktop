@@ -19,8 +19,8 @@ CORE = 'purple_core'
 CASES = {
     'sync-auto-service': {
         'program': 'sync_auto_service_cases.cpp',
-        'generated': ['sync-auto-service.inc'],
-        'syntax_units': ['purple/purple_sync_auto_service.cpp'],
+        'generated': ['sync-auto-service.inc', 'sync-setup-status.inc'],
+        'syntax_units': ['purple/purple_sync_auto_service.cpp', 'purple/purple_sync_setup_box.cpp'],
         'units': [],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation', 'AppKit'],
@@ -214,6 +214,20 @@ def slices(sources):
 
 
 
+
+def sync_setup_status_include(sources):
+    text = (sources / 'purple/purple_sync_setup_box.cpp').read_text()
+    result = (function(text, 'void RefreshFirstUseStatus(') if 'void RefreshFirstUseStatus(' in text
+        else 'void RefreshFirstUseStatus(SetupBoxState&) {}')
+    body = function(text, 'const auto updateAutomatic = [=] ')
+    subscription = 'AutomaticSettingsSyncChanges() | rpl::on_next(updateAutomatic, box->lifetime());'
+    assert subscription in text
+    result += '\nvoid RegisterStatus(Box *box, SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) {\n'
+    result += body + ';\n' + subscription + '\n}\n'
+    refresh = function(text, 'void RefreshButtons(')
+    block = function(refresh, 'if (!available && !busy && state.selectedSession)')
+    result += '\nvoid RefreshUnavailable(SetupBoxState &state) { const auto available = SelectedAvailable(state); const auto busy = Busy(state); ' + block + ' }\n'
+    return result
 
 def sync_auto_service_include(sources):
     text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
@@ -452,6 +466,7 @@ for name in case.get('generated', []):
     generate = {
         'recording-bin.inc': recording_bin_include,
         'sync-auto-service.inc': sync_auto_service_include,
+        'sync-setup-status.inc': sync_setup_status_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,
     }.get(name, flow_include)

@@ -43,6 +43,16 @@ Guaranteeing a shorter maximum delay would require polling or a different
 transport, beyond this feature's no-faster-polling rule. Device checks must keep
 the chat closed, hidden, muted and archived on the receiving client.
 
+## First-use status in an open dialog
+
+Automatic first-use completion updates an already-open Sync dialog when its
+primary review still says the account is unavailable. The existing typed Joined
+or Published result supplies the localized completion text; stale review actions
+are discarded. Busy manual flows, other selected accounts, recovery journals and
+real review errors keep their own status. Repeated notifications do not replay
+an old completion. Missing startup-owner authority is described as an owner
+selection problem, using the existing wording, rather than a missing-file error.
+
 ## Fresh-login cache admission
 
 The Magic chat binding cache creates its `sync/` directory with mode `0700`

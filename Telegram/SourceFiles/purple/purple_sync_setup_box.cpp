@@ -122,6 +122,8 @@ struct SetupBoxState {
 	bool running = false;
 	bool publishing = false;
 	bool asking = false;
+	base::weak_ptr<Main::Session> firstUseSession;
+	std::optional<SyncFirstUseOutcome> firstUseOutcome;
 };
 
 std::optional<UndoInfo> &LastUndoFor(SetupBoxState &state) {
@@ -295,7 +297,9 @@ void RefreshButtons(SetupBoxState &state) {
 	const auto available = SelectedAvailable(state);
 	const auto busy = Busy(state);
 	if (!available && !busy && state.selectedSession) {
-		state.status->setText(tr::lng_purple_account_sync_file_held(tr::now));
+		state.status->setText(!SettingsStartupOwner()
+			? tr::lng_purple_auto_owner(tr::now)
+			: tr::lng_purple_account_sync_file_held(tr::now));
 	}
 	state.checkText = state.running
 		? u"Cancel check"_q
@@ -337,6 +341,24 @@ void ClearReview(SetupBoxState &state) {
 void SetStatus(SetupBoxState &state, const QString &text) {
 	state.status->setText(text);
 	RefreshButtons(state);
+}
+
+void RefreshFirstUseStatus(SetupBoxState &state) {
+	const auto session = state.selectedSession.get();
+	const auto result = session ? SyncFirstUseResultOf(session) : std::nullopt;
+	const auto outcome = result ? std::make_optional(result->outcome) : std::nullopt;
+	const auto changed = state.firstUseSession.get() != session || state.firstUseOutcome != outcome;
+	state.firstUseSession = state.selectedSession;
+	state.firstUseOutcome = outcome;
+	if (!changed || !result || !state.status || Busy(state) || !SelectedAvailable(state)
+		|| (state.recovery && state.recovery->journalPresent)
+		|| (state.review && state.review->status != SyncConfigReviewStatus::AccountUnavailable)) {
+		return;
+	}
+	if (result->outcome == SyncFirstUseOutcome::Joined || result->outcome == SyncFirstUseOutcome::Published) {
+		ClearReview(state);
+		SetStatus(state, result->text);
+	}
 }
 
 [[nodiscard]] SyncConfigReview BuildReview(
@@ -1205,6 +1227,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		automatic->setEnabled(session && !state->running && !state->publishing);
 		automatic->setChecked(session && AutomaticSettingsSyncEnabled(session), Ui::Checkbox::NotifyAboutChange::DontNotify);
 		automaticStatus->setText(session ? AutomaticSettingsSyncStatus(session) : tr::lng_purple_auto_select(tr::now));
+		RefreshFirstUseStatus(*state);
 	};
 	AutomaticSettingsSyncChanges() | rpl::on_next(updateAutomatic, box->lifetime());
 	automatic->checkedChanges() | rpl::on_next([=](bool enabled) {
