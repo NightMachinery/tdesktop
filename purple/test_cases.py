@@ -138,6 +138,7 @@ CASES = {
     },
     'recording-bin': {
         'program': 'recording_bin_cases.cpp',
+        'syntax_units': ['purple/purple_media_seek.cpp', 'purple/purple_recording_dock.cpp', 'purple/purple_round_recording.cpp'],
         'generated': ['recording-bin.inc'],
         'units': ['ui/text/format_values.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
         'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
@@ -309,12 +310,47 @@ int main(int argc, char **argv) {
 }
 """
 
+
+def recording_controls_include(sources):
+    dock = (sources / 'purple/purple_recording_dock.cpp').read_text()
+    strip = function(dock, 'class Strip final')
+    stock = 'Ui::LinkButton _title, _pause, _preview, _send, _discard;' in strip
+    fields = ('Ui::LinkButton _title, _pause, _preview, _send, _discard;' if stock
+        else 'QLabel _title; QPushButton _pause, _preview, _send, _discard;')
+    names = ['_title', '_pause', '_preview', '_send', '_discard']
+    init = ', '.join(name + '(this' + (', QString()' if stock else '') + ')' for name in names)
+    layout = function(strip, 'void resizeEvent(')
+    if 'void layoutButtons()' in strip:
+        layout += '\n' + function(dock, 'void Strip::layoutButtons(').replace('Strip::layoutButtons', 'layoutButtons')
+    refresh = function(strip, 'void refresh()')
+    refresh_layout = 'layoutButtons();' if 'layoutButtons();' in refresh else ''
+    result = ('class StripLayoutProbe final : public Ui::RpWidget {\npublic:\n'
+        'StripLayoutProbe() : RpWidget(nullptr), ' + init + ' {}\n'
+        'void labels(const QString &text) { ' + ' '.join(name + '.setText(text);' for name in names)
+        + refresh_layout + ' }\n'
+        'std::array<QWidget*, 5> controls() { return { &_title, &_pause, &_preview, &_send, &_discard }; }\n'
+        + layout + '\nprivate:\n' + fields + '\n};\n')
+    round_source = (sources / 'purple/purple_round_recording.cpp').read_text()
+    place = function(round_source, 'void Place(')
+    block = function(place, 'if (state->pauseButton)')
+    icon = 'Ui::IconButton *pauseButton' in round_source
+    button_type = 'Ui::IconButton' if icon else 'QPushButton'
+    construct = ('new Ui::IconButton(this, st::defaultIconButton)' if icon
+        else 'new QPushButton(QString(), this)')
+    result += ('class BubbleControlsProbe final : public Ui::RpWidget {\npublic:\n'
+        'BubbleControlsProbe() : RpWidget(nullptr), pauseButton(' + construct
+        + '), cameraButton(' + construct + ') {}\n'
+        'void place() { const auto side = width(); const auto state = this; ' + block + ' }\n'
+        + button_type + ' *pauseButton, *cameraButton;\n};\n')
+    return result
+
 def recording_bin_include(sources):
     text = (sources / 'purple/purple_recording_bin_box.cpp').read_text()
     result = text[text.index('class BinActions final'):text.index('[[nodiscard]] QString MarkText(')]
     result += text[text.index('Ui::LinkButton *BinActions::add('):text.index('void AddItem(')]
     seek = (sources / 'purple/purple_media_seek.cpp').read_text()
     result += function(seek, '[[nodiscard]] QString SeekText(') + '\n'
+    result += recording_controls_include(sources)
     return result.replace('st::boxLabel', 'st::defaultFlatLabel').replace(
         'st::boxRowPadding', 'QMargins(8, 8, 8, 8)')
 
@@ -398,6 +434,10 @@ for unit in [*case['units'], 'purple/tests/' + case['program']]:
         units.append(sources / unit)
 objects = []
 with (work / 'build.log').open('w') as log:
+    for unit in case.get('syntax_units', []):
+        command = [recipe[0], *include, *flags['.cpp'], '-fsyntax-only', str(sources / unit),
+            '-MD', '-MF', str(work / (Path(unit).stem + '-syntax.d'))]
+        subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
     for source in units:
         objects.append(work / (source.stem + '.o'))
         toml = ['-I' + str(repo / 'Telegram/ThirdParty/purple_core/tomlplusplus')] if 'purple_core' in source.parts else []
@@ -435,6 +475,7 @@ with (work / 'build.log').open('w') as log:
         subprocess.run([str(work / 'fixture'), str(work / 'fixtures/emoji.webp'), str(work / 'fixtures/emoji.png')],
             cwd=work, env=dict(os.environ, QT_QPA_PLATFORM='offscreen'), stdout=log, stderr=subprocess.STDOUT, check=True)
 (work / 'inputs.json').write_text(json.dumps({'case': args.case, 'link': link,
+    'syntaxSources': {unit: hashlib.sha256((sources / unit).read_bytes()).hexdigest() for unit in case.get('syntax_units', [])},
     'sources': {str(path.relative_to(repo) if repo in path.parents else path.relative_to(work)): hashlib.sha256(path.read_bytes()).hexdigest() for path in units}}, indent=2) + '\n')
 arguments = [value.replace('{fixtures}', str(work / 'fixtures')) for value in case.get('arguments', [])]
 result = subprocess.run([str(binary), *arguments], cwd=work, env=dict(os.environ, QT_QPA_PLATFORM='offscreen'))

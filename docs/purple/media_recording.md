@@ -44,7 +44,8 @@ Play shows elapsed and total time for voice and round recordings. Round playback
 also shows its circular video preview. Stop ends the local preview; the other
 recordings keep their action links when the list refreshes. Action rows measure
 their wrapped height synchronously, including while hidden during a rebuild,
-so deferred width events cannot leave their buttons clipped. Long action labels use the stock link elision while retaining their full accessible
+so deferred width events cannot leave their buttons clipped. Long action labels
+use the stock link elision while retaining their full accessible
 names, and widening restores their natural width. Elapsed/total pairs and signed
 seek numbers stay left-to-right inside Persian or other RTL layouts. Decoder failures
 appear beside the playback controls. The host presentation case uses real Qt
@@ -99,6 +100,12 @@ thread, reply, send-as and view-once context. Preview expands into native previe
 and trimming. The native duration cap remains in charge. A completed recording
 waiting for a replacement recipient retains its bytes and has a playable video
 preview; it cannot resume capture.
+
+The strip uses stock action links, including its keyboard-accessible title. Labels
+elide within their allocated width while their accessible names remain complete.
+The bubble uses stock pause/resume and camera icons with localized accessible
+names, so translated text cannot overflow the small bubble. Both control rows
+mirror their positions in RTL layouts; the pause icon follows native pause state.
 
 The native bar and recorder remain in their original chat. Before a close check,
 the round expands back to the native controls and uses the stock discard prompt. The strip also uses the round-video

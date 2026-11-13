@@ -29,6 +29,7 @@
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
+#include "ui/widgets/buttons.h"
 #include "window/window_controller.h"
 #include "window/window_peer_menu.h"
 #include "base/timer.h"
@@ -36,8 +37,6 @@
 #include "styles/style_layers.h"
 
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QPushButton>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPainterPath>
@@ -388,18 +387,30 @@ void Send(Api::SendOptions options, bool scheduleChosen) {
 class Strip final : public Ui::RpWidget {
 public:
 	Strip(not_null<Ui::RpWidget*> parent, Fn<void()> relayout)
-	: RpWidget(parent), _title(this), _pause(this), _preview(this), _send(this), _discard(this), _timer([=] { if (!isHidden()) refresh(); }) {
+	: RpWidget(parent)
+	, _title(this, QString())
+	, _pause(this, QString())
+	, _preview(this, QString())
+	, _send(this, QString())
+	, _discard(this, QString())
+	, _timer([=] { if (!isHidden()) refresh(); }) {
 		_timer.callEach(500);
 		setObjectName(u"purple-recording-strip"_q);
 		_pause.setText(tr::lng_purple_recording_pause(tr::now));
-		_preview.setText(tr::lng_purple_recording_preview(tr::now));
+		tr::lng_purple_recording_preview() | rpl::on_next([=](const QString &text) {
+			_preview.setText(text);
+			layoutButtons();
+		}, lifetime());
 		_send.setText(tr::lng_send_button(tr::now));
-		_discard.setText(tr::lng_record_lock_discard(tr::now));
-		QObject::connect(&_pause, &QPushButton::clicked, this, [] { Pause(); });
-		QObject::connect(&_send, &QPushButton::clicked, this, [] { Send({}); });
-		QObject::connect(&_discard, &QPushButton::clicked, this, [] { Discard(); });
-		QObject::connect(&_preview, &QPushButton::clicked, this, [] { Preview(); });
-		_title.installEventFilter(this);
+		tr::lng_record_lock_discard() | rpl::on_next([=](const QString &text) {
+			_discard.setText(text);
+			layoutButtons();
+		}, lifetime());
+		_pause.setClickedCallback([] { Pause(); });
+		_send.setClickedCallback([] { Send({}); });
+		_discard.setClickedCallback([] { Discard(); });
+		_preview.setClickedCallback([] { Preview(); });
+		_title.setClickedCallback([] { OpenTarget(); });
 		TheDock().changes.events() | rpl::on_next([=] {
 			const auto visible = TheDock().model.active();
 			const auto changed = visible != !isHidden();
@@ -433,30 +444,45 @@ public:
 			+ u"  %1:%2"_q.arg(seconds / 60).arg(seconds % 60, 2, 10, QChar('0')));
 		_send.setText(TargetUnavailable() ? tr::lng_purple_recording_send_elsewhere(tr::now) : tr::lng_send_button(tr::now));
 		_pause.setText(dock.model.paused() ? tr::lng_purple_recording_resume(tr::now) : tr::lng_purple_recording_pause(tr::now));
-		for (const auto button : { &_pause, &_preview, &_send, &_discard }) button->setEnabled(!dock.model.finishing() && (!dock.model.transitioning() || button == &_discard));
-		_pause.setEnabled(!dock.model.finishing() && !dock.model.transitioning() && !dock.ready);
+		for (const auto button : { &_pause, &_preview, &_send, &_discard }) {
+			button->setDisabled(dock.model.finishing()
+				|| (dock.model.transitioning() && button != &_discard));
+		}
+		_pause.setDisabled(dock.model.finishing()
+			|| dock.model.transitioning()
+			|| dock.ready.has_value());
+		layoutButtons();
 		update();
 	}
 
 protected:
-	bool eventFilter(QObject *object, QEvent *event) override {
-		if (object == &_title && event->type() == QEvent::MouseButtonRelease) { OpenTarget(); return true; }
-		return RpWidget::eventFilter(object, event);
-	}
 	void resizeEvent(QResizeEvent *event) override {
 		RpWidget::resizeEvent(event);
-		const auto w = std::max(44, width() / 8);
-		_title.setGeometry(8, 0, std::max(0, width() - 4 * w - 8), height());
-		auto x = width() - 4 * w;
-		for (const auto button : { &_pause, &_preview, &_send, &_discard }) { button->setGeometry(x, 0, w, height()); x += w; }
+		layoutButtons();
 	}
 
 private:
-	QLabel _title;
-	QPushButton _pause, _preview, _send, _discard;
+	void layoutButtons();
+
+	Ui::LinkButton _title, _pause, _preview, _send, _discard;
 	base::Timer _timer;
 
 };
+
+void Strip::layoutButtons() {
+	const auto w = std::min(
+		std::max(style::ConvertScale(44), width() / 8),
+		width() / 4);
+	const auto skip = std::min(style::ConvertScale(8), width() - 4 * w);
+	_title.resizeToWidth(width() - 4 * w - skip);
+	_title.moveToLeft(skip, (height() - _title.height()) / 2);
+	auto x = width() - 4 * w;
+	for (const auto button : { &_pause, &_preview, &_send, &_discard }) {
+		button->resizeToWidth(w);
+		button->moveToLeft(x, (height() - button->height()) / 2);
+		x += w;
+	}
+}
 
 [[nodiscard]] Strip *FindStrip(not_null<const Ui::RpWidget*> parent) {
 	return static_cast<Strip*>(parent->findChild<Ui::RpWidget*>(u"purple-recording-strip"_q, Qt::FindDirectChildrenOnly));

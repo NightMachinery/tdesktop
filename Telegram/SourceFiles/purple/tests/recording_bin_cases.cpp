@@ -13,6 +13,8 @@
 #include <QtGui/QPainterPath>
 #include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QPushButton>
 #include <iostream>
 
 namespace crl { rpl::producer<> on_main_update_requests() { return rpl::never<>(); } }
@@ -169,6 +171,55 @@ int main(int argc, char **argv) {
                 };
                 expect(glyphX(signIndex) >= 0 && glyphX(signIndex) < glyphX(digitIndex),
                     "seek sign glyph stays before the number in LTR and RTL");
+            }
+        }
+        for (const auto rtl : { false, true }) {
+            style::SetRightToLeft(rtl);
+            auto strip = StripLayoutProbe();
+            const auto text = u"پیش‌نمایش ضبط Pause and preview this recording"_q;
+            strip.labels(text);
+            strip.show();
+            for (const auto width : { 120, 320, 640 }) {
+                strip.resize(width + 1, 48);
+                strip.resize(width, 48);
+                QApplication::processEvents();
+                const auto controls = strip.controls();
+                for (const auto control : controls) {
+                    expect(control->width() == 0 || strip.rect().contains(control->geometry()),
+                        "recording strip controls fit a narrow or wide parent");
+                    const auto stock = dynamic_cast<Ui::LinkButton*>(control);
+                    expect(stock && stock->accessibilityName() == text
+                        && stock->accessibilityRole() == QAccessible::Link,
+                        "recording strip uses stock accessible action links");
+                }
+                expect(rtl ? controls[1]->x() > controls[4]->x() : controls[1]->x() < controls[4]->x(),
+                    "recording strip action order mirrors in RTL");
+                strip.labels(text.repeated(3));
+                for (const auto control : strip.controls()) {
+                    expect(control->width() == 0 || strip.rect().contains(control->geometry()),
+                        "live longer recording labels keep their allocated bounds");
+                }
+                strip.labels(text);
+            }
+            if (rtl) {
+                auto image = QImage(strip.size(), QImage::Format_ARGB32_Premultiplied);
+                image.fill(Qt::transparent);
+                strip.render(&image);
+                expect(image.save(u"recording-strip-rtl.png"_q), "synthetic RTL strip rendering is saved");
+            }
+            auto bubble = BubbleControlsProbe();
+            for (const auto side : { 64, 128, 160, 320 }) {
+                bubble.resize(side, side);
+                bubble.place();
+                expect(bubble.rect().contains(bubble.pauseButton->geometry())
+                    && bubble.rect().contains(bubble.cameraButton->geometry()),
+                    "floating recorder controls stay inside their scaled bubble");
+                expect(dynamic_cast<Ui::IconButton*>(bubble.pauseButton)
+                    && dynamic_cast<Ui::IconButton*>(bubble.cameraButton),
+                    "floating recorder uses stock icons instead of clipped translated text");
+                expect(rtl ? bubble.pauseButton->x() > bubble.cameraButton->x()
+                    : bubble.pauseButton->x() < bubble.cameraButton->x(),
+                    "floating recorder actions mirror in RTL");
             }
         }
         style::SetRightToLeft(false);
