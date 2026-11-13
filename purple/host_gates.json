@@ -33,7 +33,8 @@
       "recording-round": "Telegram/SourceFiles/purple/tests/recording_round_cases.cpp",
       "media-restart-fifo": "Telegram/SourceFiles/purple/tests/media_restart_fifo_cases.cpp",
       "recording-store-startup": "Telegram/SourceFiles/purple/tests/recording_store_startup_cases.cpp",
-      "recording-bin": "Telegram/SourceFiles/purple/tests/recording_bin_cases.cpp"
+      "recording-bin": "Telegram/SourceFiles/purple/tests/recording_bin_cases.cpp",
+      "sync-auto-service": "Telegram/SourceFiles/purple/tests/sync_auto_service_cases.cpp"
     }
   },
   "gates": [
@@ -812,6 +813,22 @@
         "{out}"
       ],
       "coverage": "Literal production activation/persistence/completion and native Sender builder/error-policy bodies. Actual Qt journal IO/lock, real shared policy/presentation, inert session ports. Checks terminal temporary errors, refusal status/capacity and inheritance. No native Session construction or live transport."
+    },
+    {
+      "name": "cases-sync-auto-service",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "sync-auto-service"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/sync_auto_service_cases.cpp"
+      ]
     }
   ]
 }

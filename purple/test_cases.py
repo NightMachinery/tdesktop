@@ -17,6 +17,15 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'sync-auto-service': {
+        'program': 'sync_auto_service_cases.cpp',
+        'generated': ['sync-auto-service.inc'],
+        'syntax_units': ['purple/purple_sync_auto_service.cpp'],
+        'units': [],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation', 'AppKit'],
+    },
+
     'peek-file': {
         'program': 'peek_file_cases.cpp',
         'units': ['purple/purple_config_file.cpp'],
@@ -203,6 +212,24 @@ def slices(sources):
             + function(editor, 'PhotoModifications::~PhotoModifications()') + '\n}\n',
     }
 
+
+
+
+def sync_auto_service_include(sources):
+    text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
+    signatures = ['void AutoSession::RetireBackstop(', 'bool AutoSession::BackstopCurrent(',
+        'void AutoSession::RefreshBackstop(', 'void AutoSession::Backstop(']
+    if signatures[0] in text:
+        result = '\n'.join(function(text, signature) for signature in signatures)
+    else:
+        result = ('void AutoSession::RetireBackstop() {}\nvoid AutoSession::RefreshBackstop() {}\n'
+            'bool AutoSession::BackstopCurrent() const { return false; }\nvoid AutoSession::Backstop(uint64_t) {}\n')
+    event = function(text, 'bool AutoSession::Event(')
+    result += '\nconstexpr auto EventRefreshesBackstop = ' + ('true' if 'gsl::finally([=] { RefreshBackstop(); })' in event else 'false') + ';\n'
+    for signature in ['AutoSession &For(', 'void StartAutomaticSettingsSync(',
+            'void TriggerAutomaticSettingsSync(', 'bool SetAutomaticSettingsSync(']:
+        result += function(text, signature) + '\n'
+    return result.replace('Main::Session', 'Session').replace('crl::on_main(', 'OnMain(').replace('crl::now()', 'ClockNow()').replace('MTP::Instance', 'void')
 
 def recording_startup_include(sources):
     store = (sources / 'purple/purple_recording_store.cpp').read_text()
@@ -424,6 +451,7 @@ pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['unit
 for name in case.get('generated', []):
     generate = {
         'recording-bin.inc': recording_bin_include,
+        'sync-auto-service.inc': sync_auto_service_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,
     }.get(name, flow_include)

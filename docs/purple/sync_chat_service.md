@@ -16,8 +16,18 @@ the binding and uses core's issued-record filter after a local send settles,
 so own post/edit acknowledgements do not feed checks back into themselves.
 History reads do not enter these hooks. The existing pause, account, problem
 and retry gates still decide whether a check runs. Lifecycle events may check
-again after the fifteen-minute eligibility interval. There is no periodic idle
-timer, so an eligible idle client with no delivered update can wait longer. A chat update also rechecks first use when no state exists.
+again after the fifteen-minute eligibility interval. An opted-in live account
+also owns a fifteen-minute idle backstop, including before first-use state exists.
+It uses the same event gates; delivered updates and the five-second save debounce
+remain prompt. Each timer captures account/login, owner/file context and binding
+authority. Disable, logout or disposal retires it, and late callbacks cannot
+act on a replacement context. An eligible replacement gets a fresh delayed timer,
+so an external context change cannot silently remove the idle backstop. It does not renew a stopped run's retry budget or
+override a pending retry or write fence.
+
+Foreground/resume rechecks eligibility and replaces an overdue timer instead of
+replaying missed ticks. Sleep, suspension and process death cannot promise a
+wall-clock delivery deadline. A chat update also rechecks first use when no state exists.
 
 ## Delivery when the sync chat stays closed
 

@@ -131,6 +131,10 @@ private:
 	void RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready);
 	void Stop();
 	void RetryLater();
+	void RefreshBackstop();
+	void RetireBackstop();
+	bool BackstopCurrent() const;
+	void Backstop(uint64_t epoch);
 
 	base::weak_ptr<Main::Session> _session;
 	AccountKey _account;
@@ -157,6 +161,11 @@ private:
 	base::Timer _retry;
 	base::Timer _save;
 	base::Timer _pickup;
+	base::Timer _backstop;
+	std::optional<AccountSettingsOpenTarget> _backstopOpening;
+	QByteArray _backstopToken;
+	uint64_t _backstopEpoch = 0;
+	crl::time _backstopDue = 0;
 	std::optional<PeerToken> _pickupChat;
 	std::set<int32_t> _pickupIds;
 	bool _pickupOverflow = false;
@@ -215,7 +224,7 @@ AutoSession::AutoSession(not_null<Main::Session*> session)
 
 }
 
-AutoSession::~AutoSession() { Stop(); }
+AutoSession::~AutoSession() { RetireBackstop(); Stop(); }
 
 bool AutoSession::Current() const {
 	const auto session = _session.get();
@@ -351,6 +360,7 @@ void AutoSession::Replaced() {
 }
 
 bool AutoSession::Event(SyncAutoEvent event) {
+	const auto refreshBackstop = gsl::finally([=] { RefreshBackstop(); });
 	const auto session = _session.get();
 	if (!session) { Stop(); return false; }
 	const auto target = AccountSyncInspectionTarget(session);
@@ -383,6 +393,90 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	}
 	Run(plan);
 	return true;
+}
+
+
+void AutoSession::RetireBackstop() {
+	++_backstopEpoch;
+	_backstop.cancel();
+	_backstopOpening.reset();
+	_backstopToken.clear();
+	_backstopDue = 0;
+}
+
+bool AutoSession::BackstopCurrent() const {
+	const auto session = _session.get();
+	if (!session || !_backstopOpening || !SettingsStartupOwner()
+		|| session->account().loggingOut() || session->account().maybeSession() != session
+		|| SessionAccountKey(session) != _account
+		|| AccountSyncBindingToken(session->account()) != _backstopToken) {
+		return false;
+	}
+	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
+	return opening && SameDesktopSyncAutoContext(*_backstopOpening, *opening)
+		&& AutomaticSettingsSyncEnabled(session);
+}
+
+void AutoSession::RefreshBackstop() {
+	const auto session = _session.get();
+	if (!session || !SettingsStartupOwner() || session->account().loggingOut()
+		|| session->account().maybeSession() != session || SessionAccountKey(session) != _account
+		|| !AutomaticSettingsSyncEnabled(session)) {
+		RetireBackstop();
+		return;
+	}
+	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
+	if (!opening) {
+		RetireBackstop();
+		return;
+	}
+	const auto token = AccountSyncBindingToken(session->account());
+	const auto now = crl::now();
+	if (_backstopOpening && SameDesktopSyncAutoContext(*_backstopOpening, *opening)
+		&& token == _backstopToken && _backstop.isActive() && now < _backstopDue) {
+		return;
+	}
+	RetireBackstop();
+	_backstopOpening = *opening;
+	_backstopToken = token;
+	const auto epoch = _backstopEpoch;
+	const auto weak = base::make_weak(this);
+	_backstop.setCallback([weak, epoch] {
+		if (const auto self = weak.get(); self && self->_backstopEpoch == epoch) {
+			self->Backstop(epoch);
+		}
+	});
+	const auto delay = crl::time(kSyncAutoCheckSeconds) * 1000;
+	_backstopDue = now + delay;
+	_backstop.callOnce(delay, Qt::PreciseTimer);
+}
+
+void AutoSession::Backstop(uint64_t epoch) {
+	if (epoch != _backstopEpoch) {
+		return;
+	}
+	if (!BackstopCurrent()) {
+		RefreshBackstop();
+		return;
+	}
+	const auto remaining = _backstopDue - crl::now();
+	if (remaining > 0) {
+		_backstop.callOnce(remaining, Qt::PreciseTimer);
+		return;
+	}
+	const auto session = _session.get();
+	const auto target = AccountSyncInspectionTarget(session);
+	const auto read = target ? ReadDesktopSyncAuto(target->files, _account) : DesktopSyncAutoRead();
+	if (!read.record || !read.record->enabled) {
+		RetireBackstop();
+		return;
+	}
+	if (read.record->runStopped || read.record->retryAt
+		|| DesktopSyncWriteGateFor(_account)->postingHeld()) {
+		RefreshBackstop();
+		return;
+	}
+	Event(SyncAutoEvent::Foreground);
 }
 
 void AutoSession::Updated(PeerToken chat, int32_t id) {
