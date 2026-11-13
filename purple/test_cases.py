@@ -19,7 +19,7 @@ CORE = 'purple_core'
 CASES = {
     'sync-auto-service': {
         'program': 'sync_auto_service_cases.cpp',
-        'generated': ['sync-auto-service.inc', 'sync-setup-status.inc'],
+        'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc'],
         'syntax_units': ['purple/purple_sync_auto_service.cpp', 'purple/purple_sync_setup_box.cpp'],
         'units': [],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
@@ -224,9 +224,12 @@ def sync_setup_status_include(sources):
     assert subscription in text
     result += '\nvoid RegisterStatus(Box *box, SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) {\n'
     result += body + ';\n' + subscription + '\n}\n'
+    result += '\nvoid RegisterStatusRefresh(SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) { ' + body + '; updateAutomatic(); }\n'
     refresh = function(text, 'void RefreshButtons(')
     block = function(refresh, 'if (!available && !busy && state.selectedSession)')
     result += '\nvoid RefreshUnavailable(SetupBoxState &state) { const auto available = SelectedAvailable(state); const auto busy = Busy(state); ' + block + ' }\n'
+    refresh = function(text, 'void RefreshButtons(')
+    result += '\nvoid RefreshAuxiliary(SetupBoxState &state) {' + ('if (state.refreshAuxiliary) { state.refreshAuxiliary(); }' if 'state.refreshAuxiliary' in refresh else '') + '}\n'
     return result
 
 def sync_auto_service_include(sources):
@@ -244,6 +247,24 @@ def sync_auto_service_include(sources):
             'void TriggerAutomaticSettingsSync(', 'bool SetAutomaticSettingsSync(']:
         result += function(text, signature) + '\n'
     return result.replace('Main::Session', 'Session').replace('crl::on_main(', 'OnMain(').replace('crl::now()', 'ClockNow()').replace('MTP::Instance', 'void')
+
+def sync_first_use_boundary_include(sources):
+    text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
+    result = function(text, 'void AutoSession::FirstUse(') + '\n' + function(text, 'bool AutoSession::NoStateEvent(')
+    for signature, fallback in [('bool AutoSession::FirstUseCurrent(', 'bool AutoSession::FirstUseCurrent(uint64_t) const { return true; }'),
+            ('void AutoSession::CancelAutomaticFirstUse(', 'void AutoSession::CancelAutomaticFirstUse() {}')]:
+        result += '\n' + (function(text, signature) if signature in text else fallback)
+    result += '\nconstexpr auto DisableCancelsFirstUse = ' + ('true' if 'CancelAutomaticFirstUse();' in function(text, 'bool AutoSession::Event(') else 'false') + ';\n'
+    publish = function(text, 'void AutoSession::FirstUsePublish(')
+    guard = function(publish, '[weak, chat')
+    result += '\nFn<bool()> PublishGuard(AutoSession *self) { const auto weak = base::make_weak(self); const auto chat = 1; const auto epoch = self->_firstEpoch; return ' + guard + '; }\n'
+    joined = function(text, 'void AutoSession::FirstUseJoined(')
+    prefix = joined[joined.index('{') + 1:joined.index('const auto session =')]
+    result += '\nvoid AutoSession::ApplyBoundary() {' + prefix + ' ++applies; }\n'
+    finished = function(text, 'void AutoSession::FirstUseFinish(')
+    success = function(finished, 'if (target && (outcome == SyncFirstUseOutcome::Published')
+    result += '\nvoid AutoSession::FinishSuccessBoundary() { const auto session = _session.get(); const auto target = AccountSyncInspectionTarget(session); const auto outcome = SyncFirstUseOutcome::Joined; ' + success + '}\n'
+    return result.replace('Main::Session', 'Session').replace('crl::on_main(', 'OnMain(')
 
 def recording_startup_include(sources):
     store = (sources / 'purple/purple_recording_store.cpp').read_text()
@@ -466,6 +487,7 @@ for name in case.get('generated', []):
     generate = {
         'recording-bin.inc': recording_bin_include,
         'sync-auto-service.inc': sync_auto_service_include,
+        'sync-first-use-boundary.inc': sync_first_use_boundary_include,
         'sync-setup-status.inc': sync_setup_status_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,

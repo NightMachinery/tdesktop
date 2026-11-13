@@ -53,6 +53,18 @@ real review errors keep their own status. Repeated notifications do not replay
 an old completion. Missing startup-owner authority is described as an owner
 selection problem, using the existing wording, rather than a missing-file error.
 
+Automatic first use carries its own generation and automatic/manual ownership.
+Disable retires automatic scans and publisher admission before persisting the
+option, including when no state exists and chat lookup has not resolved. Old
+callbacks cannot attach to a later run, publish, or apply. An explicit manual
+first-use request keeps its own authority. Cancellation cannot undo a request
+already accepted by the server; existing issued-write reconciliation remains.
+
+The dialog refreshes automatic/chat controls on busy-state completion and account
+loss as well as service notifications. A successful physical join or publication
+clears a superseded executor error only after fresh recovery is bound without a
+journal; current recovery failures and stored hold reasons remain visible.
+
 ## Fresh-login cache admission
 
 The Magic chat binding cache creates its `sync/` directory with mode `0700`

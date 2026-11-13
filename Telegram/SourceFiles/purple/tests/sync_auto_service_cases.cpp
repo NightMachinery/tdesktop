@@ -161,6 +161,7 @@ struct SetupBoxState {
     QLabel *status = nullptr;
     bool running = false, publishing = false;
     uint64_t generation = 0;
+    Fn<void()> refreshAuxiliary;
 };
 bool Busy(const SetupBoxState &state) { return state.running || state.publishing; }
 bool SelectedAvailable(const SetupBoxState &state) {
@@ -188,6 +189,133 @@ auto AutomaticSettingsSyncChanges() { return Changes.events(); }
 #include "sync-setup-status.inc"
 
 } // namespace Probe
+
+
+namespace FirstUseProbe {
+enum class SyncAutoEvent { Enable, Disable, Foreground };
+enum class SyncFirstUseChoice { None };
+enum class SyncFirstUseOutcome { Failed, Joined, Published };
+struct SyncFirstUseResult {};
+struct Account;
+struct Session : base::has_weak_ptr {
+    Account *owner = nullptr;
+    Account &account() { return *owner; }
+};
+struct Account { Session *live = nullptr; bool logout = false; bool loggingOut() { return logout; } Session *maybeSession() { return live; } };
+struct Files {};
+struct Target { Files files; };
+struct AccountRoutingSnapshot { int generation = 0; };
+struct DesktopSyncChatInventory { struct { struct { int chat = 1; } peer; } route; };
+bool Enabled = true, Bound = true, Owner = true;
+int Routing = 1;
+std::optional<Target> AccountSyncInspectionTarget(Session*) { return Target{}; }
+struct SettingsFile { QString fingerprint = u"unchanged"_q; };
+SettingsFile ReadSyncSettingsFile(const Files&) { return {}; }
+std::optional<int> SyncMagicBound(Session*) { return Bound ? std::optional<int>(1) : std::nullopt; }
+bool AutomaticSettingsSyncEnabled(Session*) { return Enabled; }
+int SessionAccountKey(Session*) { return 1; }
+std::optional<int> SettingsStartupOwner() { return Owner ? std::optional<int>(1) : std::nullopt; }
+std::optional<AccountRoutingSnapshot> CaptureAccountSyncRouting(Session*) { return AccountRoutingSnapshot{Routing}; }
+bool AccountSyncRoutingCurrent(Session*, const AccountRoutingSnapshot &r) { return r.generation == Routing; }
+struct Lease { decltype(DesktopSyncChatInventory().route) route; Fn<bool()> current = [] { return true; }; };
+std::optional<Lease> SyncChatIoForPost(Session*, int) { return Lease{}; }
+Fn<void(DesktopSyncChatInventory)> Pending;
+Fn<bool()> PendingAdmission;
+struct SyncAccountInventory {
+    template <typename S, typename R, typename F, typename C>
+    SyncAccountInventory(S, R, std::nullptr_t, F callback, C current) { Pending = callback; PendingAdmission = current; }
+    void Start() {}
+};
+struct SyncConfigPublish {};
+void OnMain(Fn<void()> callback) { QTimer::singleShot(0, QCoreApplication::instance(), std::move(callback)); }
+rpl::event_stream<> Changes;
+enum class SyncAccountRecoveryStatus { Setup, Bound };
+enum class SyncAutoReason { None, StateChanged };
+struct Recovery { bool journalPresent = false; struct { SyncAccountRecoveryStatus status = SyncAccountRecoveryStatus::Setup; } plan; };
+Recovery RecoveryView;
+std::optional<Recovery> InspectSyncAccountRecovery(Session&) { return RecoveryView; }
+void ClearSyncFirstUseMark(const Files&) {}
+bool SetDesktopSyncAutoBeforeState(const Files&, int, bool value) { Enabled = value; return true; }
+class AutoSession : public base::has_weak_ptr {
+public:
+    base::weak_ptr<Session> _session;
+    int _account = 1;
+    bool _inFlight = false, _firstRunning = false, _firstManual = false;
+    uint64_t _firstEpoch = 0;
+    std::optional<AccountRoutingSnapshot> _firstRouting;
+    QString _firstFingerprint;
+    std::optional<SyncFirstUseResult> _firstUse;
+    std::unique_ptr<SyncAccountInventory> _firstScan;
+    std::unique_ptr<SyncConfigPublish> _firstPublish;
+    std::vector<Fn<void(SyncFirstUseResult)>> _firstDone;
+    int runs = 0, applies = 0;
+    SyncAutoReason _failureReason = SyncAutoReason::None;
+    void FinishSuccessBoundary();
+    explicit AutoSession(Session *s) : _session(base::make_weak(s)) {}
+    void FirstUse(std::optional<DesktopSyncChatInventory>, SyncFirstUseChoice, Fn<void(SyncFirstUseResult)>, bool);
+    bool FirstUseCurrent(uint64_t) const;
+    void CancelAutomaticFirstUse();
+    bool NoStateEvent(SyncAutoEvent);
+    bool FirstUseDue(const Files&, SyncAutoEvent) { return false; }
+    void RetireLegacyArtifacts() {}
+    void FirstUseFail(QString) { _firstRunning = false; }
+    void FirstUseRun(DesktopSyncChatInventory, SyncFirstUseChoice, bool) { ++runs; }
+    void ApplyBoundary();
+};
+#include "sync-first-use-boundary.inc"
+int Run() {
+    int checks = 0, failures = 0;
+    const auto expect = [&](bool ok, const char *why) { ++checks; if (!ok) { ++failures; std::cerr << why << '\n'; } };
+    auto session = Session(); auto account = Account(); session.owner = &account; account.live = &session;
+    auto value = AutoSession(&session);
+    value.FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);
+    auto old = Pending; auto admission = PendingAdmission;
+    auto send = PublishGuard(&value);
+    Enabled = false;
+    if (DisableCancelsFirstUse) value.CancelAutomaticFirstUse();
+    expect(!send(), "Disable revokes the exact production publish admission callback");
+    old({}); QCoreApplication::processEvents();
+    expect(value.runs == 0, "late automatic scan cannot enter first-use after Disable");
+    value.ApplyBoundary();
+    expect(value.applies == 0, "automatic local apply boundary rejects disabled first use");
+    Enabled = true; value._firstRunning = false;
+    const auto beforeManual = value.runs;
+    value.FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, true);
+    old({}); QCoreApplication::processEvents();
+    expect(value.runs == beforeManual, "old scan cannot attach to a new manual first-use generation");
+    expect(!send(), "old publish callback remains revoked after a new generation starts");
+    auto manual = Pending;
+    Enabled = false;
+    if (DisableCancelsFirstUse) value.CancelAutomaticFirstUse();
+    expect(value._firstRunning, "Disable does not cancel an explicit manual first use");
+    manual({}); QCoreApplication::processEvents();
+    expect(value.runs == beforeManual + 1, "manual first-use callback retains its own authority while automatic is off");
+    value._firstRunning = false; Enabled = true;
+    value.FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);
+    auto replacing = Pending; ++Routing;
+    replacing({}); QCoreApplication::processEvents();
+    expect(value.runs == beforeManual + 1 && !value._firstRunning, "routing replacement retires stale automatic first-use completion");
+    value._firstRunning = false; Enabled = true;
+    value.FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, false);
+    value.FirstUse(std::nullopt, SyncFirstUseChoice::None, nullptr, true);
+    Enabled = false; value.CancelAutomaticFirstUse();
+    expect(value._firstRunning && value._firstManual, "explicit manual ownership survives disabling the automatic option");
+    value._firstRunning = false; Enabled = true; Bound = false;
+    const auto off = value.NoStateEvent(SyncAutoEvent::Disable);
+    expect(off && !Enabled, "no-state Disable persists off before chat lookup resolves");
+    Bound = true; Enabled = true;
+    value._failureReason = SyncAutoReason::StateChanged;
+    RecoveryView.plan.status = SyncAccountRecoveryStatus::Bound;
+    value.FinishSuccessBoundary();
+    expect(value._failureReason == SyncAutoReason::None, "successful physical join clears superseded executor error after fresh bound recovery");
+    value._failureReason = SyncAutoReason::StateChanged; RecoveryView.journalPresent = true;
+    value.FinishSuccessBoundary();
+    expect(value._failureReason == SyncAutoReason::StateChanged, "successful callback cannot hide a current recovery journal error");
+    RecoveryView = {};
+    std::cout << (checks - failures) << '/' << checks << " production first-use boundary checks passed\n";
+    return failures;
+}
+} // namespace FirstUseProbe
 
 int main(int argc, char **argv) {
     auto app = QApplication(argc, argv);
@@ -248,6 +376,15 @@ int main(int argc, char **argv) {
         Owner = false; RefreshUnavailable(value);
         expect(primary.text() == u"choose startup owner"_q, "startup owner problem is named instead of an account-file error");
         Owner = true;
+        value.review.reset(); value.publishing = true; Changes.fire({});
+        expect(!automaticWidget.isEnabled(), "busy first-use disables automatic control");
+        value.refreshAuxiliary = [&] { RegisterStatusRefresh(&value, &automaticWidget, &automaticLabel); };
+        value.publishing = false; RefreshAuxiliary(value);
+        expect(automaticWidget.isEnabled(), "busy completion refreshes automatic control without another service event");
+        value.selectedSession = {}; RefreshAuxiliary(value);
+        expect(!automaticWidget.isEnabled() && automaticLabel.text() == u"select"_q,
+            "account loss refreshes automatic control and status without a service event");
+        value.selectedSession = base::make_weak(root);
         box.reset();
         primary.setText(u"closed"_q); FirstResults.erase(root); Changes.fire({});
         expect(primary.text() == u"closed"_q, "disposed dialog unsubscribes from completion notifications");
@@ -325,5 +462,6 @@ int main(int argc, char **argv) {
     expect(!one._backstop.isActive(), "logout prevents timer effects and retires scheduling");
     std::cout << (checks - failures) << '/' << checks << " actual registered sync backstop checks passed\n";
     Sessions.clear(); domain.entries.clear();
+    failures += FirstUseProbe::Run();
     return failures ? 1 : 0;
 }
