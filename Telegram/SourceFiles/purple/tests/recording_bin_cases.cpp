@@ -3,6 +3,7 @@
 #include "ui/integration.h"
 #include "ui/painter.h"
 #include "ui/style/style_core.h"
+#include "ui/style/style_core_direction.h"
 #include "ui/text/format_values.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
@@ -10,6 +11,7 @@
 #include "styles/style_widgets.h"
 
 #include <QtGui/QPainterPath>
+#include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
 #include <iostream>
 
@@ -112,6 +114,65 @@ int main(int argc, char **argv) {
                 expect(!Progress(rows), "stopped row unsubscribes before later position events");
             }
         }
+        for (const auto direction : { Qt::LeftToRight, Qt::RightToLeft }) {
+            rows.setLayoutDirection(direction);
+            style::SetRightToLeft(direction == Qt::RightToLeft);
+            for (const auto width : { 120, 240, 480 }) {
+                rows.clear();
+                rows.resizeToWidth(width);
+                const auto actions = rows.add(object_ptr<BinActions>(&rows));
+                const auto text = u"ارسال به گفتگوی دیگری Send to another conversation "_q.repeated(4);
+                auto clicks = 0;
+                const auto button = actions->add(text, [&] { ++clicks; });
+                rows.resizeToWidth(width);
+                expect(actions->rect().contains(button->geometry()), "long translated action stays inside its row");
+                expect(button->accessibilityName() == text, "elided action retains its full accessible name");
+                button->clicked(Qt::NoModifier, Qt::LeftButton);
+                expect(clicks == 1, "narrow translated action remains actionable");
+                rows.resizeToWidth(button->naturalWidth() + 32);
+                expect(button->width() == button->naturalWidth(), "widening restores the natural translated action width");
+            }
+            rows.clear();
+            rows.resizeToWidth(480);
+            AddPlayback(&rows, &player, Kind::Voice, 65000);
+            player.restart(2000);
+            const auto progressText = Progress(rows)->accessibilityName();
+            auto progressLayout = QTextLayout(progressText);
+            auto progressOption = QTextOption();
+            progressOption.setTextDirection(direction);
+            progressLayout.setTextOption(progressOption);
+            progressLayout.beginLayout();
+            const auto progressLine = progressLayout.createLine();
+            progressLayout.endLayout();
+            expect(progressLine.cursorToX(progressText.indexOf(u"0:02"_q))
+                < progressLine.cursorToX(progressText.indexOf(u"1:05"_q)),
+                "elapsed time stays before total time in LTR and RTL");
+            for (const auto sign : { -1, 1 }) {
+                const auto text = SeekText(sign, 10);
+                auto layout = QTextLayout(text);
+                auto option = QTextOption();
+                option.setTextDirection(direction);
+                layout.setTextOption(option);
+                layout.beginLayout();
+                layout.createLine();
+                layout.endLayout();
+                const auto signIndex = text.indexOf(sign < 0 ? QChar(0x2212) : QChar('+'));
+                const auto digitIndex = text.indexOf(QChar('1'));
+                const auto glyphX = [&](int index) {
+                    for (const auto &run : layout.glyphRuns(0, -1,
+                            QTextLayout::RetrieveGlyphPositions | QTextLayout::RetrieveStringIndexes)) {
+                        for (auto i = 0; i != run.stringIndexes().size(); ++i) {
+                            if (run.stringIndexes()[i] == index) return run.positions()[i].x();
+                        }
+                    }
+                    return qreal(-1);
+                };
+                expect(glyphX(signIndex) >= 0 && glyphX(signIndex) < glyphX(digitIndex),
+                    "seek sign glyph stays before the number in LTR and RTL");
+            }
+        }
+        style::SetRightToLeft(false);
+        rows.clear();
         AddPlayback(&rows, &player, Kind::Voice, 5000);
         player.restart(-1);
         expect(Progress(rows)->accessibilityName() == u"Playback failed"_q, "asynchronous decoder errors are visible");

@@ -44,7 +44,9 @@ Play shows elapsed and total time for voice and round recordings. Round playback
 also shows its circular video preview. Stop ends the local preview; the other
 recordings keep their action links when the list refreshes. Action rows measure
 their wrapped height synchronously, including while hidden during a rebuild,
-so deferred width events cannot leave their buttons clipped. Decoder failures
+so deferred width events cannot leave their buttons clipped. Long action labels use the stock link elision while retaining their full accessible
+names, and widening restores their natural width. Elapsed/total pairs and signed
+seek numbers stay left-to-right inside Persian or other RTL layouts. Decoder failures
 appear beside the playback controls. The host presentation case uses real Qt
 widgets and controlled player events to check progress, refreshed links and
 subscription teardown; encrypted recovery fixtures separately check the media.

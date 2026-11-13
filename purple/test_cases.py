@@ -313,6 +313,8 @@ def recording_bin_include(sources):
     text = (sources / 'purple/purple_recording_bin_box.cpp').read_text()
     result = text[text.index('class BinActions final'):text.index('[[nodiscard]] QString MarkText(')]
     result += text[text.index('Ui::LinkButton *BinActions::add('):text.index('void AddItem(')]
+    seek = (sources / 'purple/purple_media_seek.cpp').read_text()
+    result += function(seek, '[[nodiscard]] QString SeekText(') + '\n'
     return result.replace('st::boxLabel', 'st::defaultFlatLabel').replace(
         'st::boxRowPadding', 'QMargins(8, 8, 8, 8)')
 

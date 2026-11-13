@@ -51,8 +51,10 @@ rpl::lifetime Lifetime;
 }
 
 [[nodiscard]] QString SeekText(int direction, int step) {
-	return QString(direction < 0 ? QChar(0x2212) : QChar('+'))
-		+ QString::number(step);
+	return QChar(0x2066)
+		+ QString(direction < 0 ? QChar(0x2212) : QChar('+'))
+		+ QString::number(step)
+		+ QChar(0x2069);
 }
 
 [[nodiscard]] QString SeekName(int direction, int step) {
