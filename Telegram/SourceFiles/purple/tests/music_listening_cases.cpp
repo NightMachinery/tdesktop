@@ -26,6 +26,8 @@ rpl::producer<bool> PrivateMusicListeningValue() {
 
 } // namespace Purple
 
+namespace MusicListeningProbe {
+
 using FullMsgId = int;
 
 namespace Data {
@@ -134,7 +136,7 @@ private:
 
 #include "music-listening-tracker.inc"
 
-int main(int argc, char **argv) {
+int Run(int argc, char **argv) {
 	const auto app = QCoreApplication(argc, argv);
 	auto checks = 0;
 	auto failures = 0;
@@ -235,4 +237,10 @@ int main(int argc, char **argv) {
 	}
 	std::cout << "MUSIC_LISTENING_CHECKS=" << checks << " FAILURES=" << failures << '\n';
 	return failures ? 1 : 0;
+}
+
+} // namespace MusicListeningProbe
+
+int main(int argc, char **argv) {
+	return MusicListeningProbe::Run(argc, argv);
 }

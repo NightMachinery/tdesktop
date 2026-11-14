@@ -153,7 +153,11 @@ duration and retry behavior apply.
 The toggle reuses the stock Settings button, switch, and divider text. Host
 coverage is `cases-music-listening`: the real privacy policy and exact tracker
 methods run with inert clock, timer and Telegram request ports. It exercises
-playing and paused transitions, duration boundaries and delayed retries.
+playing and paused transitions, duration boundaries and delayed retries. The
+ports and extracted tracker definitions share a fixture namespace, so the Debug
+precompiled header's real message and schema types remain distinct. The gate
+also syntax-checks the production tracker, settings and playback units; it does
+not send reports or exercise a live decoder.
 
 ## Floating round controls
 
