@@ -21,10 +21,15 @@ constexpr auto kReportDurationSecondsMin = TimeId(3);
 } // namespace
 
 MusicListenTracker::MusicListenTracker()
-: _pauseTimer([=] { pauseTimedOut(); }) {
+: _pauseTimer([=] { pauseTimedOut(); })
+, _privacy(Purple::PrivateMusicListeningValue(), [=] { finalize(); }) {
 }
 
 void MusicListenTracker::update(const TrackState &state) {
+	if (_privacy.suppressed()) {
+		finalize();
+		return;
+	}
 	const auto document = state.id.audio();
 	if (!document || !document->isSong()) {
 		finalize();
@@ -68,13 +73,17 @@ void MusicListenTracker::report() {
 	const auto document = base::take(_document);
 	const auto contextId = base::take(_contextId);
 	const auto duration = static_cast<int>(base::take(_listenedMs) / 1000);
-	if (!document || duration < kReportDurationSecondsMin) {
+	const auto reportAllowed = _privacy.reportAllowed();
+	if (!reportAllowed() || !document || duration < kReportDurationSecondsMin) {
 		return;
 	}
 
 	const auto origin = Data::FileOrigin(
 		Data::FileOriginMessage(contextId));
 	const auto send = [=](auto resend) -> void {
+		if (!reportAllowed()) {
+			return;
+		}
 		const auto usedFileReference = document->fileReference();
 		document->session().api().request(MTPmessages_ReportMusicListen(
 			document->mtpInput(),

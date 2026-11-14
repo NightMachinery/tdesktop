@@ -559,6 +559,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_chat_mark_recovery_searching" = "The move could not be confirmed. Searching for the current sync chat.";
 "lng_purple_chat_mark_recovery_held" = "The move's mark could not be checked safely. Sync stays held for a complete check or review.";
 "lng_purple_media_playback" = "Media playback";
+"lng_purple_private_music_listening" = "Keep music listening private";
+"lng_purple_private_music_listening_about" = "Do not send music listening reports to Telegram. Turning this off starts a new reporting interval; earlier private listening stays private.";
 "lng_purple_voice_queue_private" = "Keep the voice queue to the other person";
 "lng_purple_voice_queue_private_about" = "In a private chat, when you play the other person's voice or video message, only their next messages play automatically.";
 "lng_purple_video_message_size" = "Video message size";

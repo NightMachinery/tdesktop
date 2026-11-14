@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "purple/hooks/music_listening.h"
 
 #include <crl/crl_time.h>
 
@@ -34,6 +35,7 @@ private:
 	crl::time _playStartedAt = 0;
 	bool _playing = false;
 	base::Timer _pauseTimer;
+	Purple::MusicListeningPrivacy _privacy;
 
 };
 

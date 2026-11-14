@@ -1531,6 +1531,14 @@ size, controls, restart and seek visibility hooks.
   lack of a ready frame during seeking. History hiding, stop, detach and
   first-frame admission retain their existing behavior.
 
+**`Telegram/SourceFiles/media/player/media_player_listen_tracker.{h,cpp}`**:
+the tracker owns `Purple::MusicListeningPrivacy`, initialized with the live
+app-wide setting and its existing `finalize` callback. The update guard avoids
+collecting private intervals; the report guard runs after the existing resets.
+The send closure checks a revocable report ticket before both the initial send
+and file-reference retries. Privacy transitions discard the current interval,
+and destruction invalidates outstanding tickets.
+
 ## Media recording (dock, background, PiP, seek, crash safety)
 
 The feature doc is [media_recording.md](media_recording.md); the design is

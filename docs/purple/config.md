@@ -641,6 +641,12 @@ voice and round messages and skips yours. It is read when a manual play
 starts, so a change applies from the next one. Settings > Purple >
 Media playback writes it. See [media_playback.md](media_playback.md).
 
+`[playback] private_listening_p` defaults to true and suppresses music listening
+reports to Telegram. It is app-wide. Settings > Purple > Media playback > Keep
+music listening private writes it. Changing it discards the current reporting
+interval and revokes pending retries; earlier private listening is not reported
+when the switch is turned off. See [media_playback.md](media_playback.md).
+
 `[playback] seek_step` is how far the seek back and forward controls jump:
 `"5s"`, `"10s"` (the default), `"15s"` or `"30s"`. Any other value warns and
 keeps 10 seconds. It drives the player bar's and the floating round's seek

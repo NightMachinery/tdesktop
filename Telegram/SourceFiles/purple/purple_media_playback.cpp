@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_media_playback.h"
 
+#include "purple/hooks/music_listening.h"
 #include "purple/purple_media_rules.h"
 #include "purple/purple_media_restart.h"
 #include "purple/purple_media_seek.h"
@@ -295,6 +296,7 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 		.keywords = { u"purple"_q, u"voice"_q, u"video"_q, u"round"_q },
 	});
 	AddVoiceQueueSetting(builder);
+	AddPrivateMusicListeningSetting(builder);
 	AddSeekStepSetting(builder);
 	builder.addButton({
 		.id = u"advanced/purple_video_message_size"_q,

@@ -14,3 +14,7 @@ not clean records from the old chat.
 The gzip codec uses the existing `desktop-app::external_zlib` dependency.
 Playlist sources are registered in `Telegram/cmake/purple.cmake`, alongside
 the other shared Purple sources.
+
+Private music listening is connected independently of the playlist UI. It is on
+by default for all music playback, with an app-wide switch under Settings >
+Purple > Media playback. See [media playback](media_playback.md).

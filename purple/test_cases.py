@@ -17,6 +17,15 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'music-listening': {
+        'program': 'music_listening_cases.cpp',
+        'generated': ['music-listening-tracker.inc'],
+        'syntax_units': ['media/player/media_player_listen_tracker.cpp',
+            'purple/purple_music_listening_settings.cpp', 'purple/purple_media_playback.cpp'],
+        'units': ['purple/purple_music_listening_privacy.cpp'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'Foundation', 'AppKit'],
+    },
     'sync-auto-service': {
         'program': 'sync_auto_service_cases.cpp',
         'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc'],
@@ -195,6 +204,20 @@ def function(text, signature):
         depth += (text[end] == '{') - (text[end] == '}')
         end += 1
     return text[start:end]
+
+
+def music_listening_include(sources):
+    text = (sources / 'media/player/media_player_listen_tracker.cpp').read_text()
+    start = text.index('MusicListenTracker::MusicListenTracker()')
+    end = text.index('void MusicListenTracker::update(', start)
+    result = text[start:end]
+    for signature in ['void MusicListenTracker::update(', 'void MusicListenTracker::finalize(',
+            'void MusicListenTracker::report(', 'void MusicListenTracker::pauseTimedOut(']:
+        result += function(text, signature) + '\n'
+    start = text.index('constexpr auto kReportDurationSecondsMin = ')
+    constant = text[start:text.index(';', start) + 1]
+    return ('namespace Media::Player {\n' + constant + '\n'
+        + result.replace('crl::now()', 'ClockNow()') + '\n}\n')
 
 
 def slices(sources):
@@ -485,6 +508,7 @@ if case['program'].endswith('.mm'):
 pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['units']) else {}
 for name in case.get('generated', []):
     generate = {
+        'music-listening-tracker.inc': music_listening_include,
         'recording-bin.inc': recording_bin_include,
         'sync-auto-service.inc': sync_auto_service_include,
         'sync-first-use-boundary.inc': sync_first_use_boundary_include,

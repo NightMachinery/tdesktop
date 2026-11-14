@@ -138,6 +138,23 @@ size" instead, plus the float's shadow margins.
   close.
 - Device-local, like the size: `purple-video-message-float-keep`.
 
+## Private music listening
+
+Settings > Purple > Media playback > Keep music listening private is on by
+default. It suppresses Telegram's music listening reports for chat and playlist
+playback. The switch is app-wide and stored as `[playback] private_listening_p`.
+
+Changing the switch discards the current reporting interval. Turning privacy
+off starts fresh from the next playback update, so earlier private listening
+is never included. A queued file-reference retry is revoked by either privacy
+transition or tracker destruction. With privacy off, the usual minimum listening
+duration and retry behavior apply.
+
+The toggle reuses the stock Settings button, switch, and divider text. Host
+coverage is `cases-music-listening`: the real privacy policy and exact tracker
+methods run with inert clock, timer and Telegram request ports. It exercises
+playing and paused transitions, duration boundaries and delayed retries.
+
 ## Floating round controls
 
 The floating round is still dragged as before, and dragging it mostly off

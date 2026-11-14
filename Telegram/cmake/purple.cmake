@@ -177,6 +177,9 @@ PRIVATE
     purple/purple_list_menu.h
     purple/purple_media_playback.cpp
     purple/purple_media_playback.h
+    purple/hooks/music_listening.h
+    purple/purple_music_listening_privacy.cpp
+    purple/purple_music_listening_settings.cpp
     purple/purple_media_restart.cpp
     purple/purple_media_restart.h
     purple/purple_media_rules.cpp
