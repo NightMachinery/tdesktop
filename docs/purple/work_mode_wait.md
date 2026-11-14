@@ -186,8 +186,11 @@ It matches unqualified calls, namespace-qualified calls and every receiver
 spelling, including declarations. `SetPeekStartDelay` and every `SetTable*` call
 are inventoried conservatively even when their table/key is aliased. Non-Peek
 schedule/device labels, screen-time, Premium, the private-chat voice queue
-toggle, media recording switches, per-account row edits and core declarations are reviewed inventory
-entries, not newly gated operations. The
+toggle, media recording switches, per-account row edits and core declarations are
+reviewed inventory entries, not newly gated operations. The private music-listening
+report toggle (`[playback] private_listening_p`) is also a reviewed non-Peek
+setting: it retains its captured app-wide writer guard and changes no Work Mode
+or Peek policy. The
 core parser's `SetTables` type construction is a deliberate conservative match. `purple/wait_routes.json` records the
 inventory. Request completion, guarded writer implementations, core resolution,
 schedule/Focus, Last Seen Peek and automatic Peek termination are the reviewed

@@ -42,6 +42,9 @@
   "Telegram/SourceFiles/purple/purple_media_seek.cpp": {
     "SetTableString": 1
   },
+  "Telegram/SourceFiles/purple/purple_music_listening_settings.cpp": {
+    "SetTableBool": 1
+  },
   "Telegram/SourceFiles/purple/purple_peek.cpp": {
     "UpdateState": 1
   },
