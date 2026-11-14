@@ -13,6 +13,6 @@ class SectionBuilder;
 
 namespace Purple {
 
-void BuildAdvancedSection(::Settings::Builder::SectionBuilder &builder);
+void AddSettingsSection(::Settings::Builder::SectionBuilder &builder);
 
 } // namespace Purple

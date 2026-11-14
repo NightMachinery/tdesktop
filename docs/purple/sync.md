@@ -137,7 +137,7 @@ keeps no History entry; it keeps `settings.toml.import.bak` and
 
 The current manual transfer has two actions:
 
-- **Settings > Advanced > Purple > Send settings to Saved Messages** uploads
+- **Settings > Purple > Send settings to Saved Messages** uploads
   the current `settings.toml` to your own Saved Messages as a document, named
   `settings.toml`, captioned with the schema version, the local time and the
   platform it came from.

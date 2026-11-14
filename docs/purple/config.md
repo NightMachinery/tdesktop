@@ -119,7 +119,7 @@ substituted from `cWorkingDir()` because it is the one line nobody can guess.
 them in step by itself. Two actions move one to the other, with Saved Messages
 as the transport:
 
-On desktop, **Settings > Advanced > Purple > Sync across devices** keeps the
+On desktop, **Settings > Purple > Sync across devices** keeps the
 file in step with your other devices through one account's Saved Messages, by
 hand. **Check Saved Messages** reviews the sync records there and offers one
 next step: **Publish settings**, **Join sync**, **Review update**, **Choose
@@ -130,7 +130,7 @@ replaces is kept in **History**, and **Undo last update** puts the last one
 back. When more than one account is signed in, you must choose which account
 to check. Nothing runs in the background. See [sync.md](sync.md) for details.
 
-- **Settings > Advanced > Purple > Send settings to Saved Messages** posts the
+- **Settings > Purple > Send settings to Saved Messages** posts the
   current file to your own Saved Messages as a document called `settings.toml`,
   captioned with its schema version, the local time and the platform. It asks
   first, because the file names chats.
@@ -638,14 +638,14 @@ It is per-install rather than per-preset, and lives in memory only.
 person. True unless you say otherwise. In a one-to-one chat, when you start
 playing their voice or round message by hand, "play next" plays only their
 voice and round messages and skips yours. It is read when a manual play
-starts, so a change applies from the next one. Settings > Advanced > Purple >
+starts, so a change applies from the next one. Settings > Purple >
 Media playback writes it. See [media_playback.md](media_playback.md).
 
 `[playback] seek_step` is how far the seek back and forward controls jump:
 `"5s"`, `"10s"` (the default), `"15s"` or `"30s"`. Any other value warns and
 keeps 10 seconds. It drives the player bar's and the floating round's seek
 buttons, the seek shortcuts and the system media controls' skip commands.
-Settings > Advanced > Purple > Media playback > Seek step writes it. See
+Settings > Purple > Media playback > Seek step writes it. See
 [media_recording.md](media_recording.md).
 
 `[recording] bin_keep` is how long the Recording bin keeps an item, counted
@@ -657,7 +657,7 @@ or `"off"` (never clear); any other duration of at least an hour is read too.
 is cut into a fragment: `"1s"` (the default), `"2s"`, `"5s"` or `"off"`. Off
 keeps a plain copy and its codec header, so a crash is repaired by scanning
 rather than read back exactly. Any other value warns and keeps 1 s.
-Settings > Advanced > Purple > Media recording writes all three. The other
+Settings > Purple > Media recording writes all three. The other
 `[recording]` keys are read by purple-core but not used by Desktop yet. See
 [media_recording.md](media_recording.md).
 
@@ -832,7 +832,7 @@ visible, but inert. The sheet's **Skip confirmation for all future peeks on this
 device** checkbox saves a separate local preference when Peek or Cancel closes
 the sheet. It leaves `trade_p` unchanged, so eligible peeks remain available and
 start directly after the cooldown. During a cooldown, the sheet still opens to
-show the remaining wait. Settings > Advanced > Purple > **Confirm before Last
+show the remaining wait. Settings > Purple > **Confirm before Last
 Seen Peek** restores the confirmation. Confirmation is on by default, and this
 preference is absent from `settings.toml` and its sync copies.
 
@@ -898,7 +898,7 @@ next write.
 
 The desktop records and draws this; Android does neither yet. Switched on, the
 desktop appends one line per event to `screentime.log` in this directory,
-beside `settings.toml`, and everything Settings -> Advanced -> Purple -> Screen
+beside `settings.toml`, and everything Settings -> Purple -> Screen
 time shows is derived from that file when you look at it. The log never leaves
 the machine. See docs/purple/work_mode.md for the events, the active rule and
 the cover.
@@ -1237,7 +1237,7 @@ and GUI rows remain native-unmeasured until a separately admitted application ru
 
 ## Settings per account
 
-Settings > Advanced > Purple shows the current account's settings path and an
+Settings > Purple shows the current account's settings path and an
 Open action. A window for another account also offers Open app-wide settings,
 using the selected app-wide account rather than the original root-file owner.
 This works without changing the global account or annotating the root file.
@@ -1274,7 +1274,7 @@ for guarded creation, stale-dialog refusal and recovery-file behavior.
 
 ### Choose the account that supplies app-wide settings
 
-In Settings > Advanced > Purple, **App-wide settings from … · Change** selects
+In Settings > Purple, **App-wide settings from … · Change** selects
 which account supplies Work Mode lists and presets, schedule settings and Local
 Premium. The row appears with multiple signed-in accounts or a signed-out current
 source. Test-server accounts are labeled separately. The original root-file owner
@@ -1338,3 +1338,10 @@ file creation, import, History restore and automatic replacement do not.
 Checks use lifecycle events with a fifteen-minute gate and no polling timer.
 See [automatic sync](sync.md#automatic-settings-sync-on-desktop) for safe apply,
 immutable stages, retry/notice persistence and the current Saved Messages limit.
+
+## Desktop Settings entry
+
+Purple has its own section directly under Settings. It uses Telegram's stock
+section navigation and settings controls. Purple rows are indexed under this
+section for search and no longer appear inside Advanced. Their stored settings
+and existing row identifiers are unchanged.

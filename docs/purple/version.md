@@ -9,7 +9,7 @@ Clicking the line copies it to the clipboard and shows "Text copied to
 clipboard." It appears in two places:
 
 - at the bottom of the main Settings page, below the help rows;
-- as the first row of Settings > Advanced > Purple.
+- as the first row of Settings > Purple.
 
 Settings search finds it under "purple", "version", "commit" and "build".
 Telegram's own version is not in Settings on desktop: it is in the main menu

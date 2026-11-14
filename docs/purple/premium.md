@@ -4,7 +4,7 @@ Purple Telegram unlocks the Telegram Premium features that Telegram Desktop
 gates on the client alone. Nothing here defeats a server check, and nothing here
 is visible to Telegram or to other clients.
 
-The switch lives in Settings > Advanced > Purple > "Local Premium features", and
+The switch lives in Settings > Purple > "Local Premium features", and
 is on by default. It is stored in `settings.toml` (see [config.md](config.md)).
 
 

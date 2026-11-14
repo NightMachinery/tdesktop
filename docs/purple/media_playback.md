@@ -58,7 +58,7 @@ When a voice or round message ends, upstream plays the next one in the chat
 (unless the experimental `disable-autoplay-next` option is on). With
 `[playback] private_chat_queue_p` on, the default, a queue you start in a
 one-to-one chat on the other person's message plays only their messages and
-skips yours. Settings > Advanced > Purple > Media playback > Keep the voice
+skips yours. Settings > Purple > Media playback > Keep the voice
 queue to the other person switches it; the value lives in `settings.toml`
 ([config.md](config.md)), so it follows the file to other devices.
 
@@ -87,7 +87,7 @@ queue to the other person switches it; the value lives in `settings.toml`
 
 ## Video message size
 
-Settings > Advanced > Purple > Media playback > Video message size chooses how
+Settings > Purple > Media playback > Video message size chooses how
 large a round message is drawn in chats: 100, 150, 200 or 250% of upstream's
 240px, or Actual size. The default is 200% (480px).
 

@@ -9,6 +9,8 @@ of upstream's: codegen_lang stops with "duplicate found for key". See
 docs/purple/upstream_hooks.md.
 */
 
+"lng_purple_settings_title" = "Purple";
+
 "lng_lastseen_peek_action" = "Peek Last Seen";
 "lng_lastseen_peek_suffix" = "Peek Last Seen";
 "lng_lastseen_peek_again_suffix" = "Peek Last Seen again";

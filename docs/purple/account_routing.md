@@ -15,7 +15,7 @@ in the same process. Existing root settings, sync state and History never move.
 The check-to-rename interval remains a race against a noncooperating external
 writer; this is not a cross-file transaction or an observed disk-isolation claim.
 
-Settings > Advanced > Purple has an original-file ownership row and an eligible
+Settings > Purple has an original-file ownership row and an eligible
 signed-in account choice. Accounts that already have a directory are excluded.
 The restored-owner notice is acknowledged when that box is opened. A confirmed
 owner survives sign-out. The initial no-account state waits for the first sign-in.

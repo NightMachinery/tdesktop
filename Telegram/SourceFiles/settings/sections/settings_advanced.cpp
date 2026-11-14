@@ -38,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
-#include "purple/purple_settings_section.h"
 #include "settings/settings_builder.h"
 #include "settings/sections/settings_local_storage.h"
 #include "settings/sections/settings_main.h"
@@ -1357,7 +1356,6 @@ const auto kMeta = BuildHelper({
 	BuildSystemIntegrationSection(builder);
 	BuildPerformanceSection(builder);
 	BuildSpellcheckerSection(builder);
-	Purple::BuildAdvancedSection(builder);
 	BuildScreenReaderSection(builder);
 	if (autoUpdate) {
 		BuildUpdateSection(builder, false);

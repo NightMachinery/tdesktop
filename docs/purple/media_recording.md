@@ -184,7 +184,7 @@ Rules (`SeekRules::PlanSeek` and `SeekRules::SeekTarget`):
 
 The step is `[playback] seek_step` in `settings.toml`, `"5s"`, `"10s"`,
 `"15s"` or `"30s"`, read by purple-core into `Playback::seekStepSeconds`
-(any other value warns and keeps 10). Settings > Advanced > Purple > Media
+(any other value warns and keeps 10). Settings > Purple > Media
 playback > Seek step writes it. Changing it relabels the buttons at once.
 
 ## F10. Crash-safe recordings and the Recording bin
@@ -365,7 +365,7 @@ Recovery, for a crashed round and for a discarded one:
    recovered" and its bytes are kept as they were.
 
 `round_journal` is read when a round starts, so a change applies from the
-next round. Settings > Advanced > Purple > Media recording > Video message
+next round. Settings > Purple > Media recording > Video message
 crash safety writes it.
 
 ### At start
@@ -389,7 +389,7 @@ that no entry names are deleted.
 
 ### The Recording bin
 
-Settings > Advanced > Purple > Media recording > Recording bin. The row
+Settings > Purple > Media recording > Recording bin. The row
 shows the number of items when there are any. The box lists them newest
 first, each with the chat ("Unknown chat" when the account or chat is gone,
 "Hidden chat" when the running Work Mode preset hides it), the kind, the

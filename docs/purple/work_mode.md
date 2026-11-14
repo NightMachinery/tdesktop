@@ -1234,7 +1234,7 @@ screen, because a name with no capital in it is one nobody has expressed an
 opinion about, while `iH` or a `default_view_name` is left exactly as it was
 typed.
 
-Settings > Advanced > Purple carries a second entry to the same box. Not because
+Settings > Purple carries a second entry to the same box. Not because
 the main menu is hard to reach, but because Settings is where someone looks for
 a feature they have heard of and cannot find, and a search for "work mode"
 turning up nothing is how a feature stays unused.
@@ -1885,7 +1885,7 @@ neither is allowed to read as `home until 09:00`.
 
 ### Editing it from the app
 
-Settings > Advanced > Purple > Schedule opens the whole thing: the two
+Settings > Purple > Schedule opens the whole thing: the two
 switches, the preset between windows, and one row per ruleset - `phone · Any
 phone · On · 2 windows` - with the flat `[[schedule.rules]]` array shown as a
 ruleset called **Rules**, since that is what the parser makes of it. Tapping a
@@ -2154,7 +2154,7 @@ sheet's **Skip confirmation for all future peeks on this device** checkbox
 saves a separate local preference when Peek or Cancel closes the sheet. It
 leaves `trade_p` on and makes the next eligible peek start directly once its
 cooldown has ended. During a cooldown, the sheet still shows the remaining
-wait. Settings > Advanced > Purple > **Confirm before Last Seen Peek** restores
+wait. Settings > Purple > **Confirm before Last Seen Peek** restores
 the confirmation, which is on by default.
 
 Upstream's own one-tap control is gone on both clients. Telegram puts a small
@@ -2210,7 +2210,7 @@ server - the question the peek was sent to answer, answered fresher - and it
 displaces it by being newer rather than by being a different kind of answer.
 
 The records live in `state.toml`, one per person - a second peek replaces the
-first - and they never leave the machine. Settings > Advanced > Purple > Last
+first - and they never leave the machine. Settings > Purple > Last
 Seen Peeks lists them.
 
 One peek per person per `trade_cooldown`. A peek is a moment of exposure
@@ -2408,7 +2408,7 @@ opened, no timer runs, and no hook does anything.
 
 ### The box
 
-Settings -> Advanced -> Purple -> Screen time. The row itself carries the
+Settings -> Purple -> Screen time. The row itself carries the
 digest - "This week: 6 h 12 m, 41 % active, top: Alice" - which is the whole
 feature on most days: a line that answers the question without opening
 anything.

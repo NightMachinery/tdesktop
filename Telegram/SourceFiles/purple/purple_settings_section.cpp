@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_setup_box.h"
 #include "purple/purple_version.h"
 #include "settings/settings_builder.h"
+#include "settings/settings_common_session.h"
+#include "settings/sections/settings_main.h"
 #include "ui/layers/generic_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
@@ -467,13 +469,7 @@ void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
 void BuildPurpleSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto session = builder.session();
-	builder.addDivider();
 	builder.addSkip();
-	builder.addSubsectionTitle({
-		.id = u"advanced/purple"_q,
-		.title = rpl::single(u"Purple"_q),
-		.keywords = { u"purple"_q, u"premium"_q, u"work"_q },
-	});
 	Purple::AddVersionRow(builder);
 	const auto archiveSession = base::make_weak(session.get());
 	builder.addDividerText(rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges()) | rpl::map([archiveSession] {
@@ -727,10 +723,45 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	BuildMediaReplySettings(builder);
 }
 
+class PurpleSettings final : public ::Settings::Section<PurpleSettings> {
+public:
+	PurpleSettings(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller);
+
+	[[nodiscard]] rpl::producer<QString> title() override;
+
+};
+
+const auto PurpleSettingsMeta = BuildHelper({
+	.id = PurpleSettings::Id(),
+	.parentId = ::Settings::MainId(),
+	.title = &tr::lng_purple_settings_title,
+	.icon = &st::menuIconManage,
+}, BuildPurpleSection);
+
+PurpleSettings::PurpleSettings(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller)
+: Section(parent, controller) {
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	build(content, PurpleSettingsMeta.build);
+	Ui::ResizeFitChild(this, content);
+}
+
+rpl::producer<QString> PurpleSettings::title() {
+	return tr::lng_purple_settings_title();
+}
+
 } // namespace
 
-void BuildAdvancedSection(::Settings::Builder::SectionBuilder &builder) {
-	BuildPurpleSection(builder);
+void AddSettingsSection(::Settings::Builder::SectionBuilder &builder) {
+	builder.addSectionButton({
+		.title = tr::lng_purple_settings_title(),
+		.targetSection = PurpleSettings::Id(),
+		.icon = { &st::menuIconManage },
+		.keywords = { u"purple"_q, u"work mode"_q, u"sync"_q },
+	});
 }
 
 } // namespace Purple

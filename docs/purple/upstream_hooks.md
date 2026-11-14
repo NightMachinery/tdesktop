@@ -893,12 +893,10 @@ near 2. Owners: B11 (two mute lines), then B7.
 
 ## Settings UI and instant replaces
 
-**`Telegram/SourceFiles/settings/sections/settings_advanced.cpp`**, owner B9:
-- The three `BuildPurple*` bodies move to `purple/purple_settings_section.cpp`.
-  The `kMeta` callback keeps one `Purple::BuildAdvancedSection(builder)` call
-  in its existing position, before the screen-reader section. The order on the
-  Advanced page, search metadata, version row and actual `builder.session()`
-  stay the same.
+**`Telegram/SourceFiles/settings/sections/settings_advanced.cpp`** no longer
+includes or builds the Purple controls. `purple/purple_settings_section.cpp`
+owns a stock Settings section, its title, navigation factory and search metadata.
+The existing Purple rows keep their identifiers and behavior.
 
 **`Telegram/SourceFiles/settings/sections/settings_chat.cpp`**, owner B9:
 - The dash search entry and checkbox move behind two Purple facade calls.
@@ -907,9 +905,10 @@ near 2. Owners: B11 (two mute lines), then B7.
 - The read and write live in `purple_instant_replaces.cpp`, using the existing
   generic preference key `purple-replace-dashes`.
 
-**`Telegram/SourceFiles/settings/sections/settings_main.cpp`**: +3 -0, 3
-hunks, near 4. Final.
-- One include, placed per rule 5 (near 1; it scored 2 in the alphabetical
+**`Telegram/SourceFiles/settings/sections/settings_main.cpp`**:
+- `BuildSectionButtons` calls `Purple::AddSettingsSection`, so both the actual
+  main Settings page and its search index expose Purple as a top-level section.
+- One version include, placed per rule 5 (near 1; it scored 2 in the alphabetical
   block), and `Purple::AddVersionFooter(builder)` after
   `BuildHelpSection(builder)` twice: in `Main::setupContent`, which draws the
   page (near 2), and in `kMeta`, which builds the search index (near 1). The

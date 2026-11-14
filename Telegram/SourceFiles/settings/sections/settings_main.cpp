@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_main.h"
 #include "purple/purple_version.h"
+#include "purple/purple_settings_section.h"
 
 #include "settings/settings_common_session.h"
 
@@ -433,6 +434,7 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		});
 	}
 
+	Purple::AddSettingsSection(builder);
 	builder.addSectionButton({
 		.title = tr::lng_settings_advanced(),
 		.targetSection = AdvancedId(),
