@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QLockFile>
 #include <QtCore/QSaveFile>
+#include <QtCore/QScopeGuard>
 #include <QtCore/QStringList>
 #include <QtCore/QThread>
 
@@ -33,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <sys/stat.h>
 #include <cerrno>
 #include <fcntl.h>
+#include <dirent.h>
 #include <unistd.h>
 #endif
 
@@ -398,6 +400,64 @@ SyncStoreStatus SyncLocalStore::PrepareRetainedConfig(
 	return SyncStoreStatus::Ready;
 }
 
+namespace {
+#ifdef Q_OS_UNIX
+[[nodiscard]] SyncStoreStatus EnsureOpenedSyncDirectory(const QString &path) {
+	const auto encoded = QFile::encodeName(path);
+	struct stat named = {};
+	if (::lstat(encoded.constData(), &named) != 0 || !S_ISDIR(named.st_mode)) {
+		return SyncStoreStatus::IoError;
+	}
+	if (named.st_uid != ::geteuid() || (named.st_mode & 0700) != 0700 || (named.st_mode & 0022)) {
+		return SyncStoreStatus::InsecurePermissions;
+	}
+	const auto descriptor = ::open(encoded.constData(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (descriptor < 0) { return SyncStoreStatus::IoError; }
+	const auto directory = ::fdopendir(descriptor);
+	if (!directory) { ::close(descriptor); return SyncStoreStatus::IoError; }
+	const auto cleanup = qScopeGuard([=] { ::closedir(directory); });
+	struct stat opened = {};
+	if (::fstat(descriptor, &opened) != 0 || !S_ISDIR(opened.st_mode)
+		|| opened.st_dev != named.st_dev || opened.st_ino != named.st_ino) {
+		return SyncStoreStatus::IoError;
+	}
+	if (opened.st_uid != ::geteuid() || (opened.st_mode & 0700) != 0700 || (opened.st_mode & 0022)) {
+		return SyncStoreStatus::InsecurePermissions;
+	}
+	if (opened.st_mode & 0077) {
+		// WHY: the old cache alone may predate private sync-directory creation.
+		// Every check and the repair use the opened directory, never a replacement path.
+		if (QFileInfo(path).fileName() != u"sync"_q) { return SyncStoreStatus::InsecurePermissions; }
+		auto cache = false;
+		while (true) {
+			errno = 0;
+			const auto entry = ::readdir(directory);
+			if (!entry) {
+				if (errno) { return SyncStoreStatus::IoError; }
+				break;
+			}
+			const auto name = QByteArray(entry->d_name);
+			if (name == "." || name == "..") { continue; }
+			if (cache || name != "chat.json") { return SyncStoreStatus::InsecurePermissions; }
+			cache = true;
+		}
+		struct stat binding = {};
+		if (!cache || ::fstatat(descriptor, "chat.json", &binding, AT_SYMLINK_NOFOLLOW) != 0
+			|| !S_ISREG(binding.st_mode) || binding.st_uid != ::geteuid()
+			|| binding.st_nlink != 1 || (binding.st_mode & 0022)) {
+			return SyncStoreStatus::InsecurePermissions;
+		}
+		if (::fchmod(descriptor, 0700) != 0) { return SyncStoreStatus::IoError; }
+	}
+	struct stat after = {};
+	return ::fstat(descriptor, &after) == 0 && (after.st_mode & 0777) == 0700
+		&& ::lstat(encoded.constData(), &named) == 0 && S_ISDIR(named.st_mode)
+		&& named.st_dev == opened.st_dev && named.st_ino == opened.st_ino
+		? SyncStoreStatus::Ready : SyncStoreStatus::IoError;
+}
+#endif
+} // namespace
+
 SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path) {
 	const auto usable = [&] {
 		if (!PrivatePermissions(path)) {
@@ -416,6 +476,9 @@ SyncStoreStatus EnsureSyncPrivateDirectory(const QString &path) {
 		if (!info.isDir()) {
 			return SyncStoreStatus::IoError;
 		}
+#ifdef Q_OS_UNIX
+		return EnsureOpenedSyncDirectory(path);
+#endif
 		return usable()
 			? SyncStoreStatus::Ready
 			: SyncStoreStatus::InsecurePermissions;

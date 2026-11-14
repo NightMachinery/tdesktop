@@ -33,6 +33,12 @@ def inspect(values):
     require('archive-stored-sessions', 'domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);' in archive
         and archive.index('accountsChanges()') < archive.index('activeSessionChanges()') < archive.index('\trefresh();'))
     require('sync-screen-origin', 'EnsureSyncChatResolved(session, true);' in values['purple_sync_setup_box.cpp'])
+    auto = values['purple_sync_auto_service.cpp']
+    pickup = auto.split('void AutoSession::Pickup() {', 1)[-1].split('void AutoSession::ChatChanged()', 1)[0]
+    require('chat-pickup-admission', 'bound != _pickupChat' in pickup
+        and 'AutomaticSettingsSyncEnabled(session)' in pickup and 'SyncMagicPaused(session)' in pickup)
+    require('chat-pickup-own-filter', 'SyncAutoPickupNeeded' in pickup and 'SyncAutoEvent::ChatUpdated' in pickup)
+    require('chat-pickup-debounce', 'if (!_pickup.isActive())' in auto and '_pickup.callOnce(500)' in auto)
     magic = values['purple_sync_magic_service.cpp']
     toast = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
     require('magic-problem-toast', 'last.kind == SyncMagicResult::Kind::Problem && last.show' in magic
@@ -171,7 +177,7 @@ def inspect(values):
     due = auto.split('bool AutoSession::FirstUseDue(', 1)[-1].split('void AutoSession::FirstUse(', 1)[0]
     require('first-use-lifecycle-limit', '} else if (event != SyncAutoEvent::Disable && FirstUseDue(target->files, event)) {' in unbound
         and 'now - mark->checkedAt >= kSyncAutoCheckSeconds' in due
-        and 'if (event == SyncAutoEvent::Enable || _firstBypass) {' in due
+        and 'if (event == SyncAutoEvent::Enable || event == SyncAutoEvent::ChatUpdated || _firstBypass) {' in due
         and 'event == SyncAutoEvent::LocalSaved && _save.isActive()' in due
         and 'mark->fingerprint != ReadSyncSettingsFile(files).fingerprint' in due
         and 'For(session).ChatChanged();' in auto

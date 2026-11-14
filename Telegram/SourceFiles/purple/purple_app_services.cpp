@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_auto_service.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_media_seek.h"
+#include "purple/purple_media_reply_adapter.h"
 #include "purple/purple_peek.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_recording_store.h"
@@ -36,6 +37,7 @@ void StartAppServices() {
 	StartSyncChatService();
 	StartAutomaticSettingsSync();
 	StartArchiveServices();
+	StartMediaReplyServices();
 	StartSchedule();
 	StartFocusSync();
 	StartScreenTime();

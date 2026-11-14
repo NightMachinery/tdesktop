@@ -96,6 +96,11 @@ PRIVATE
     purple/purple_account_appwide_removal.h
     purple/purple_account_config.h
     purple/purple_account_send_queue.h
+    purple/purple_media_reply_settings.cpp
+    purple/purple_media_reply_settings.h
+    purple/purple_media_reply_presentation.h
+    purple/purple_media_reply_adapter.cpp
+    purple/purple_media_reply_adapter.h
     purple/purple_app_services.cpp
     purple/purple_app_services.h
     purple/purple_build_checks.cpp
@@ -397,6 +402,10 @@ PRIVATE
     purple/purple_engine.h
     purple/purple_passcode.cpp
     purple/purple_passcode.h
+    purple/purple_media_reply.cpp
+    purple/purple_media_reply.h
+    purple/purple_media_reply_splice.cpp
+    purple/purple_media_reply_splice.h
     purple/purple_playback.cpp
     purple/purple_playback.h
     purple/purple_ogg_repair.cpp
@@ -448,6 +457,7 @@ target_include_directories(Telegram PRIVATE ${src_loc} ${purple_core_loc})
 # their compile commands and force a full rebuild for no reason.
 set_source_files_properties(
     ${purple_core_loc}/purple/purple_local_choice.cpp
+    ${purple_core_loc}/purple/purple_media_reply_splice.cpp
     ${purple_core_loc}/purple/purple_config_diff.cpp
     ${purple_core_loc}/purple/purple_settings.cpp
     ${purple_core_loc}/purple/purple_splice.cpp

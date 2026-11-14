@@ -1,0 +1,259 @@
+#include "purple/purple_media_reply_adapter.h"
+
+#include "apiwrap.h"
+#include "api/api_updates.h"
+#include "base/unixtime.h"
+#include "base/weak_ptr.h"
+#include "core/application.h"
+#include "crl/crl_on_main.h"
+#include "data/data_channel.h"
+#include "data/data_chat_participant_status.h"
+#include "data/data_document.h"
+#include "data/data_forum_topic.h"
+#include "data/data_media_types.h"
+#include "data/data_session.h"
+#include "data/data_user.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
+#include "purple/purple_config.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_media_reply.h"
+
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QLockFile>
+#include <QtCore/QSaveFile>
+
+#include <map>
+
+namespace Purple {
+namespace {
+
+struct State {
+	MediaReplyJournal journal;
+	MediaReplySettings policy;
+	std::unique_ptr<QLockFile> lock;
+	QString path;
+	int pending = 0;
+	int inFlight = 0;
+	std::map<mtpRequestId, uint64_t> requests;
+	MediaReplyStatusReason reason = MediaReplyStatusReason::None;
+	int committed = -1;
+	bool loaded = false;
+	bool failed = false;
+};
+std::map<Main::Session*, std::shared_ptr<State>> States;
+
+QString AccountText(not_null<Main::Session*> session) {
+	const auto key = SessionAccountKey(session);
+	return AccountKeyText(key.environment, key.userId).value_or(QString());
+}
+
+PeerToken Token(not_null<PeerData*> peer) {
+	if (const auto id = peerToUser(peer->id)) return {PeerTokenKind::User, id.bare};
+	if (const auto id = peerToChat(peer->id)) return {PeerTokenKind::Chat, id.bare};
+	return {PeerTokenKind::Channel, peerToChannel(peer->id).bare};
+}
+
+void Activate(not_null<Main::Session*> session, const std::shared_ptr<State> &state) {
+	const auto requests = std::move(state->requests);
+	state->requests.clear();
+	state->inFlight = 0;
+	if (!requests.empty() && !state->failed) state->reason = MediaReplyStatusReason::Cancelled;
+	for (const auto &request : requests) session->api().request(request.first).cancel();
+	state->policy = AccountSettings(session).mediaReply;
+	state->journal.account = AccountText(session);
+	state->journal.cutoff = base::unixtime::now();
+	++state->journal.revision;
+}
+
+std::shared_ptr<State> Ensure(not_null<Main::Session*> session) {
+	if (const auto i = States.find(session.get()); i != States.end()) return i->second;
+	const auto state = std::make_shared<State>();
+	States.emplace(session.get(), state);
+	Activate(session, state);
+	session->lifetime().add([=] { States.erase(session.get()); });
+	SettingsChanges() | rpl::on_next([=] {
+		if (state->policy != AccountSettings(session).mediaReply) Activate(session, state);
+	}, session->lifetime());
+	return state;
+}
+
+MediaReplyStatusReason FailureReason(const MTP::Error &error) {
+	const auto type = error.type();
+	if (type.contains(u"PAYMENT"_q) || type.contains(u"STARS"_q)) return MediaReplyStatusReason::ApprovalRequired;
+	if (error.code() == 420 || type.startsWith(u"FLOOD_"_q) || type.startsWith(u"SLOWMODE_"_q)) return MediaReplyStatusReason::Flood;
+	if (type.contains(u"FORBIDDEN"_q) || type.contains(u"BANNED"_q) || type.contains(u"RESTRICTED"_q)) return MediaReplyStatusReason::Permission;
+	return MediaReplyStatusReason::Uncertain;
+}
+
+bool PolicyEnabled(const Settings &settings) {
+	auto enabled = false;
+	const auto inspect = [&](PeerToken peer, ChatKind kind) {
+		const auto value = ResolveMediaReply(settings, peer, kind);
+		enabled = enabled || value.voice != MediaReplyMode::Off || value.round != MediaReplyMode::Off;
+	};
+	inspect({PeerTokenKind::User, 0}, ChatKind::Private);
+	inspect({PeerTokenKind::Chat, 0}, ChatKind::Group);
+	inspect({PeerTokenKind::Channel, 0}, ChatKind::Channel);
+	for (const auto &set : settings.mediaReply.sets) for (const auto &peer : set.peers) {
+		if (peer.kind == PeerTokenKind::User) inspect(peer, ChatKind::Private);
+		else if (peer.kind == PeerTokenKind::Chat) inspect(peer, ChatKind::Group);
+		else { inspect(peer, ChatKind::Group); inspect(peer, ChatKind::Channel); }
+	}
+	return enabled;
+}
+
+bool Persist(not_null<Main::Session*> session, const std::shared_ptr<State> &state,
+		const MediaReplyAction &action) {
+	if (state->failed) return false;
+	const auto refuse = [&](MediaReplyStatusReason reason) {
+		state->failed = true; state->reason = reason; return false;
+	};
+	const auto target = AccountSettingsTarget(session);
+	if (!target || !ValidateAccountSettingsTarget(session, *target)) return refuse(MediaReplyStatusReason::StorageRefused);
+	const auto path = QFileInfo(target->path).absolutePath() + u"/media-reply-journal.json"_q;
+	if (!state->loaded) {
+		const auto parent = QFileInfo(path).absolutePath();
+		if (QFileInfo(parent).canonicalFilePath() != QDir(parent).absolutePath()
+			|| QFileInfo(path).isSymLink()) return refuse(MediaReplyStatusReason::StorageRefused);
+		state->lock = std::make_unique<QLockFile>(path + u".lock"_q);
+		state->lock->setStaleLockTime(0);
+		if (!state->lock->tryLock(0)) return refuse(MediaReplyStatusReason::LockUnavailable);
+		state->path = path;
+		if (QFileInfo::exists(path)) {
+			auto file = QFile(path);
+			if (!file.open(QIODevice::ReadOnly) || file.size() > 32 * 1024 * 1024) return refuse(MediaReplyStatusReason::JournalUnreadable);
+			const auto decoded = DecodeMediaReplyJournal(file.readAll(), state->journal.account);
+			if (!decoded) return refuse(MediaReplyStatusReason::JournalUnreadable);
+			state->journal.reserved = decoded->reserved;
+		}
+		state->loaded = true;
+		state->committed = int(state->journal.reserved.size());
+	}
+	if (state->path != path || !state->lock || !state->lock->isLocked()
+		|| QFileInfo(path).isSymLink()) return refuse(MediaReplyStatusReason::StorageRefused);
+	if (state->journal.reserved.size() >= 4096) return refuse(MediaReplyStatusReason::JournalFull);
+	if (!ReserveMediaReply(state->journal, action)) return false;
+	auto file = QSaveFile(path);
+	if (!file.open(QIODevice::WriteOnly) || !file.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) return refuse(MediaReplyStatusReason::StorageRefused);
+	const auto bytes = EncodeMediaReplyJournal(state->journal);
+	if (bytes.size() > 32 * 1024 * 1024 || file.write(bytes) != bytes.size() || !file.commit()) return refuse(MediaReplyStatusReason::StorageRefused);
+	state->committed = int(state->journal.reserved.size());
+	return ValidateAccountSettingsTarget(session, *target) || refuse(MediaReplyStatusReason::StorageRefused);
+}
+
+void Observe(not_null<HistoryItem*> item, MediaReplyOrigin origin) {
+	const auto session = &item->history()->session();
+	const auto state = Ensure(session);
+	const auto media = item->media();
+	const auto document = media ? media->document() : nullptr;
+	if (!document || (!document->isVoiceMessage() && !document->isVideoMessage())
+		|| !IsServerMsgId(item->id) || item->isScheduled() || item->isBusinessShortcut()
+		|| state->failed || state->pending >= 32) return;
+	const auto peer = item->history()->peer;
+	const auto message = MediaReplyMessage{
+		AccountText(session), Token(peer), KindOf(peer), int(item->id.bare),
+		int(item->topicRootId().bare), item->date(),
+		document->isVoiceMessage() ? MediaReplyMedia::Voice : MediaReplyMedia::Round,
+		origin, item->out(), true, false };
+	if (state->policy != AccountSettings(session).mediaReply) Activate(session, state);
+	const auto action = PlanMediaReply(AccountSettings(session), message,
+		state->journal.account, state->journal.cutoff, state->journal.revision);
+	if (!action) return;
+	++state->pending;
+	const auto weak = base::make_weak(session);
+	const auto peerId = peer->id;
+	crl::on_main(session, [=] {
+		--state->pending;
+		const auto live = weak.get();
+		if (!live || live->account().loggingOut() || live->account().maybeSession() != live
+			|| state->failed || state->inFlight >= 8 || !AccountAutomaticOperationsAllowed(live)
+			|| !MediaReplyStillCurrent(AccountSettings(live), *action, AccountText(live),
+				state->journal.cutoff, state->journal.revision)) return;
+		const auto original = live->data().message(peerId, MsgId(action->message.message));
+		if (!original || original->isScheduled()) return;
+		const auto peer = original->history()->peer;
+		const auto topic = original->topic();
+		if (!(topic ? Data::CanSendTexts(topic) : Data::CanSendTexts(peer))) {
+			state->reason = MediaReplyStatusReason::Permission; return;
+		}
+		if (!Persist(live, state, *action) || !MediaReplyStillCurrent(AccountSettings(live),
+			*action, AccountText(live), state->journal.cutoff, state->journal.revision)) return;
+		const auto replyFlags = action->message.topic
+			? MTPDinputReplyToMessage::Flag::f_top_msg_id : MTPDinputReplyToMessage::Flags();
+		const auto reply = MTP_inputReplyToMessage(MTP_flags(replyFlags), MTP_int(action->message.message),
+			MTP_int(action->message.topic), MTPInputPeer(), MTPstring(), MTPVector<MTPMessageEntity>(),
+			MTPint(), MTPInputPeer(), MTPint(), MTPbytes(), MTPVector<MTPRichText>());
+		++state->inFlight;
+		const auto requestId = std::make_shared<mtpRequestId>(0);
+		*requestId = live->api().request(MTPmessages_SendMessage(
+			MTP_flags(MTPmessages_SendMessage::Flag::f_reply_to | MTPmessages_SendMessage::Flag::f_no_webpage),
+			peer->input(), reply, MTP_string(action->text), MTP_long(action->randomId),
+			MTPReplyMarkup(), MTPVector<MTPMessageEntity>(), MTPint(), MTPint(),
+			MTPInputPeer(), MTPInputQuickReplyShortcut(), MTPlong(), MTPlong(),
+			MTPSuggestedPost(), MTPInputRichMessage()
+		)).done([=](const MTPUpdates &result) {
+			if (state->requests.erase(*requestId)) --state->inFlight;
+			if (const auto current = weak.get(); current && !current->account().loggingOut()
+				&& current->account().maybeSession() == current && AccountText(current) == action->message.account) {
+				if (!state->failed && state->journal.revision == action->revision) state->reason = MediaReplyStatusReason::None;
+				current->api().applyUpdates(result);
+			}
+		}).fail([=](const MTP::Error &error) {
+			if (state->requests.erase(*requestId)) --state->inFlight;
+			if (const auto current = weak.get(); current && !current->account().loggingOut()
+				&& current->account().maybeSession() == current && AccountText(current) == action->message.account
+				&& !state->failed && state->journal.revision == action->revision) state->reason = FailureReason(error);
+		}).handleAllErrors().send();
+		state->requests.emplace(*requestId, action->revision);
+	});
+}
+
+} // namespace
+
+MediaReplyStatus MediaReplyExecutionStatus(not_null<Main::Session*> session) {
+	const auto state = Ensure(session);
+	return {state->reason, state->committed, state->inFlight, state->failed,
+		!PolicyEnabled(AccountSettings(session))};
+}
+
+void ObserveMediaReplyMessage(
+		not_null<Main::Session*> session, const MTPMessage &message, bool replay) {
+	if (replay || message.type() != mtpc_message) return;
+	const auto &data = message.c_message();
+	if (data.is_from_scheduled()) return;
+	const auto peer = peerFromMTP(data.vpeer_id());
+	if (const auto item = session->data().message(peer, data.vid().v)) {
+		Observe(item, MediaReplyOrigin::LiveNew);
+	}
+}
+
+void ObserveMediaReplyAck(not_null<HistoryItem*> item) {
+	if (item->out()) Observe(item, MediaReplyOrigin::OutgoingAck);
+}
+
+void StartMediaReplyServices() {
+	static auto started = false;
+	if (std::exchange(started, true)) return;
+	static auto lifetime = rpl::lifetime();
+	static auto accounts = rpl::lifetime();
+	const auto refresh = [] {
+		accounts.destroy();
+		for (const auto &entry : Core::App().domain().accounts()) {
+			entry.account->sessionChanges() | rpl::on_next([](Main::Session *session) {
+				if (session) Ensure(session);
+			}, accounts);
+			if (const auto session = entry.account->maybeSession()) Ensure(session);
+		}
+	};
+	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);
+	Core::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);
+	refresh();
+}
+
+} // namespace Purple

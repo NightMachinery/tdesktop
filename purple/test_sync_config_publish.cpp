@@ -14,6 +14,8 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QFile>
 #include <QtCore/QLockFile>
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QJsonArray>
 
 #include <algorithm>
 #include <cstring>
@@ -628,6 +630,52 @@ SyncAccountInventoryResult InventoryAt(const std::vector<std::pair<int32_t, QByt
 		SyncCandidateReadResult{ SyncCandidateReadStatus::Complete, candidates });
 }
 
+void ManualApplyCheckpoint() {
+	auto files = PublishFiles(kMagicChat);
+	CHECK(RunMagicFlow(files, InventoryAt({}), std::nullopt, 0).reply.result.status
+		== SyncConfigPublishStatus::AlreadySynced);
+	auto records = std::vector<std::pair<int32_t, QByteArray>>();
+	auto parents = std::vector<ConfigVersion>();
+	for (auto i = 0; i != kSyncRetainedBaseCountLimit; ++i) {
+		auto store = SyncLocalStore(files.files.syncDirectory);
+		CHECK(store.Open(true, files.token));
+		if (!store.state()) { return; }
+		const auto state = *store.state();
+		const auto built = BuildConfigRecord({ kCustom + "# retained " + QByteArray::number(i) + '\n',
+			parents, std::nullopt, state.space, state.install, state.createdDevice,
+			u"macOS"_q, u"test"_q, state.config.seq + 1, 1800000000 });
+		CHECK(built);
+		auto next = state.configData; next.pending = built.version.key;
+		CHECK(store.StageConfig(built.canonical, next, files.token));
+		CHECK(store.ConfirmConfigReadBack(built.canonical, state.createdDevice, 100 + i, kMagicChat));
+		records.emplace_back(100 + i, built.canonical);
+		parents = { built.version };
+	}
+	const auto before = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
+	CHECK(before && before.state.preserved.value(u"retained_config_bases"_q).toObject()
+		.value(u"records"_q).toArray().size() == kSyncRetainedBaseCountLimit);
+	const auto run = RunMagicFlow(files, InventoryAt(records), std::nullopt, 0);
+	CHECK(run.reply.step == SyncConfigPublishDiskStep::Finished
+		&& run.reply.result.status == SyncConfigPublishStatus::AlreadySynced && run.staged.isEmpty());
+	const auto after = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
+	CHECK(after);
+	auto expected = before.state;
+	expected.preserved.insert(u"retained_config_bases"_q,
+		after.state.preserved.value(u"retained_config_bases"_q));
+	CHECK(SerializeSyncLocalState(after.state).canonical == SerializeSyncLocalState(expected).canonical);
+	CHECK(after.state.preserved.value(u"retained_config_bases"_q).toObject()
+		.value(u"records"_q).toArray().size() == 1);
+	for (const auto &[id, bytes] : records) {
+		const auto hash = QString::fromLatin1(QCryptographicHash::hash(bytes,
+			QCryptographicHash::Sha256).toHex());
+		auto archived = QByteArray();
+		CHECK(ReadSyncPrivateFile(files.files.syncDirectory + u"/retained-bases/"_q
+			+ hash + u".json"_q, kSyncSettingsRecordStorageLimit, archived) == SyncStoreStatus::Ready);
+		CHECK(archived == bytes);
+	}
+	std::printf("MANUAL_APPLY_CHECKPOINT archived=%d posted=%d\n", int(records.size()), int(!run.staged.isEmpty()));
+}
+
 SyncLocalState StateOf(const PublishFiles &files) {
 	const auto parsed = ParseSyncLocalState(ReadSettingsFileInput(files.files.syncStore).bytes);
 	CHECK(parsed);
@@ -1041,7 +1089,7 @@ int main(int argc, char **argv) {
 		}
 		PublishRefusals(); CancelAndScope(); NoMoveAndInitializeOnly(); PendingRestartAndFailures(); RoutingSnapshotCases(); StaleBindingReply(); WorkerEffectSchedules(); PublisherTerminalCancellation(); SourceEpochDuringLongWait();
 		MagicPublish();
-		FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer(); FirstUseCurrentHead(); FirstUseSplitHeads();
+		ManualApplyCheckpoint(); FirstUseActions(); FirstUseD1(); FirstUseMigration(); FirstUseRace(); FirstUseMarkKeepsAnswer(); FirstUseCurrentHead(); FirstUseSplitHeads();
 	});
 	worker.join();
 	std::printf("PUBLISH FLOW %d checks, %d failures\n", Checks, Failures);

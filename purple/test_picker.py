@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_store_units import add_current_core_units
 import argparse
 import hashlib
 import json
@@ -73,12 +74,15 @@ for value in recipe:
         flags.append(value)
 objects = [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o')) if (repo / 'Telegram/ThirdParty/purple_core/purple' / path.name.removesuffix('.o')).is_file()]
 frameworks = next(Path(value[2:]) for value in flags if value.startswith('-F') and (Path(value[2:]) / 'QtCore.framework').exists())
+policy_compile = []
 with (work / 'build.log').open('w') as log:
     subprocess.run([recipe[0], *flags, '-c', str(repo / 'purple/test_picker.cpp'), '-o', str(work / 'test.o')], check=True, stdout=log, stderr=subprocess.STDOUT)
+    add_current_core_units(repo, build, work, objects, policy_compile, log)
     subprocess.run([recipe[0], *flags, '-Wl,-dead_strip', str(work / 'test.o'), *objects,
         str(build / 'Telegram/lib_base/liblib_base.a'), '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets',
         '-framework', 'Foundation', '-lobjc', '-Wl,-rpath,' + str(frameworks), '-o', str(work / 'test_picker')], check=True, stdout=log, stderr=subprocess.STDOUT)
 (work / 'inputs.json').write_text(json.dumps({
+    'policy_compile': policy_compile,
     'source_sha256': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (repo / 'Telegram/SourceFiles/purple/purple_picker.h', repo / 'Telegram/SourceFiles/purple/purple_picker.cpp', repo / 'purple/test_picker.cpp')},
     'boundary': 'Exact production visibility function, projection, recipient reconciliation and share bridge. Controlled synthetic History, session/index/delegate and eligibility providers; real core resolution, RPL and Qt queued refresh.'}, indent=2) + '\n')

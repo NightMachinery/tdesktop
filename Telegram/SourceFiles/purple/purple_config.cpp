@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_media_reply_splice.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_wait_gate.h"
 #include "purple/purple_sync_auto_service.h"
@@ -1061,6 +1062,39 @@ std::optional<AccountListEditTarget> AccountListEditFor(
 		return std::nullopt;
 	}
 	return AccountRouting().listEditTarget(SessionAccountKey(session), list, error);
+}
+
+std::optional<AccountSettingsWriteTarget> AccountMediaReplyEditTarget(
+		not_null<Main::Session*> session) {
+	if (session->account().loggingOut() || session->account().maybeSession() != session.get()) return std::nullopt;
+	return AccountRouting().settingsEditTarget(SessionAccountKey(session), SettingsOpenRole::Own);
+}
+
+AccountSettingsEditResult WriteAccountMediaReply(
+		not_null<Main::Session*> session,
+		const AccountSettingsWriteTarget &target,
+		const QString &row,
+		const QString &key,
+		const QJsonValue &value,
+		const std::function<bool()> &originCurrent) {
+	const auto weak = base::make_weak(session.get());
+	const auto current = [=] {
+		const auto live = weak.get();
+		return live && !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == target.destination.requester
+			&& target.destination.role == SettingsOpenRole::Own
+			&& ConfigDirectory() == target.destination.root && (!originCurrent || originCurrent());
+	};
+	if (!current()) return { .error = u"The opening account changed. Reopen settings."_q };
+	Instance().observeAccountFiles();
+	const auto result = AccountRouting().writeSettingsEdit(target, [=](const QString &text) {
+		return SetMediaReplyValue(text, target.destination.file.path, row, key, value);
+	}, current);
+	if (result.changed) {
+		Instance().refreshAccountRows();
+		Instance().observeAccountFiles();
+	}
+	return result;
 }
 
 AccountSettingsEditResult SetAccountListMember(

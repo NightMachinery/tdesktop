@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_store_units import add_current_core_units
 import argparse
 import hashlib
 import json
@@ -181,6 +182,7 @@ with (work / 'build.log').open('w') as log:
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o']
     objects += [build / 'Telegram/lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o']
     objects += [build / 'Telegram/libpurple_sqlite.a', build / 'Telegram/lib_base/liblib_base.a']
+    add_current_core_units(repo, build, work, objects, commands, log)
     link = [recipe[0]]
     for flag in ['-arch', '-isysroot']:
         if flag in recipe:

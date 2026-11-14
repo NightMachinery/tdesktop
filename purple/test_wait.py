@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from sync_store_units import add_current_core_units
 import argparse
 import hashlib
 import json
@@ -61,6 +62,7 @@ inputs = ('purple/test_wait.cpp', 'purple/test_wait.py',
     'Telegram/SourceFiles/purple/purple_peek_controls.h', 'Telegram/SourceFiles/purple/purple_peek_controls.cpp')
 source_hashes = {path: hashlib.sha256((repo / path).read_bytes()).hexdigest() for path in inputs}
 objects = []
+policy_compile = []
 with (work / 'build.log').open('w') as log:
     for relative in ('purple/test_wait.cpp', 'Telegram/SourceFiles/purple/purple_wait_gate.cpp', 'Telegram/SourceFiles/purple/purple_wait_key_filter.cpp'):
         source = repo / relative
@@ -68,10 +70,12 @@ with (work / 'build.log').open('w') as log:
         subprocess.run([recipe[0], *flags, '-c', str(source), '-o', str(target)], check=True, stdout=log, stderr=subprocess.STDOUT)
         objects.append(str(target))
     objects += [str(path) for path in sorted((build / 'Telegram/CMakeFiles/Telegram.dir/ThirdParty/purple_core/purple').glob('*.cpp.o')) if (repo / 'Telegram/ThirdParty/purple_core/purple' / path.name.removesuffix('.o')).is_file()]
+    add_current_core_units(repo, build, work, objects, policy_compile, log)
     subprocess.run([recipe[0], *flags, '-Wl,-dead_strip', *objects, '-framework', 'QtCore', '-framework', 'QtGui', '-framework', 'QtWidgets', '-Wl,-rpath,' + str(frameworks), '-o', str(work / 'test_wait')], check=True, stdout=log, stderr=subprocess.STDOUT)
 if any(hashlib.sha256((repo / path).read_bytes()).hexdigest() != digest for path, digest in source_hashes.items()):
     raise RuntimeError('Wait fixture source changed while compiling; retry from the stable snapshot')
 (work / 'inputs.json').write_text(json.dumps({
+    'policy_compile': policy_compile,
     'source_sha256': source_hashes,
     'binary_sha256': hashlib.sha256((work / 'test_wait').read_bytes()).hexdigest(),
     'boundary': 'Exact production option request and wrappers, native WaitGate/PeekFocusGate/key filter and real Qt/RPL/core splices. Controlled account/editor/file and preference ports; no real settings files, visible GUI, live account or network.'}, indent=2) + '\n')

@@ -789,6 +789,29 @@
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/recording_bin_cases.cpp"
       ]
+    },
+    {
+      "name": "media-auto-reply-native",
+      "driver": "purple/test_media_reply_compile.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}"
+      ]
+    },
+    {
+      "name": "media-auto-reply-callbacks",
+      "driver": "purple/test_media_reply_callbacks.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}"
+      ],
+      "coverage": "Literal production activation/persistence/completion and native Sender builder/error-policy bodies. Actual Qt journal IO/lock, real shared policy/presentation, inert session ports. Checks terminal temporary errors, refusal status/capacity and inheritance. No native Session construction or live transport."
     }
   ]
 }
