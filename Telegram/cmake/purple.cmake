@@ -408,6 +408,28 @@ PRIVATE
     purple/purple_media_reply_splice.h
     purple/purple_playback.cpp
     purple/purple_playback.h
+    purple/purple_playlists.cpp
+    purple/purple_playlists.h
+    purple/purple_playlists_codec.cpp
+    purple/purple_playlists_codec.h
+    purple/purple_playlists_codec_detail.h
+    purple/purple_playlists_cover.cpp
+    purple/purple_playlists_cover.h
+    purple/purple_playlists_detail.h
+    purple/purple_playlists_diff.cpp
+    purple/purple_playlists_diff.h
+    purple/purple_playlists_inventory.cpp
+    purple/purple_playlists_inventory.h
+    purple/purple_playlists_local.cpp
+    purple/purple_playlists_local.h
+    purple/purple_playlists_ops.cpp
+    purple/purple_playlists_ops.h
+    purple/purple_playlists_policy.cpp
+    purple/purple_playlists_policy.h
+    purple/purple_playlists_step.cpp
+    purple/purple_playlists_step.h
+    purple/purple_playlists_sync.cpp
+    purple/purple_playlists_sync.h
     purple/purple_ogg_repair.cpp
     purple/purple_ogg_repair.h
     purple/purple_recording.cpp
