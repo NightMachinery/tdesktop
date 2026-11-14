@@ -180,6 +180,8 @@ PRIVATE
     purple/hooks/music_listening.h
     purple/purple_music_listening_privacy.cpp
     purple/purple_music_listening_settings.cpp
+    purple/purple_playlists_store.cpp
+    purple/purple_playlists_store.h
     purple/purple_media_restart.cpp
     purple/purple_media_restart.h
     purple/purple_media_rules.cpp

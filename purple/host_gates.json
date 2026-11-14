@@ -35,7 +35,8 @@
       "recording-store-startup": "Telegram/SourceFiles/purple/tests/recording_store_startup_cases.cpp",
       "recording-bin": "Telegram/SourceFiles/purple/tests/recording_bin_cases.cpp",
       "sync-auto-service": "Telegram/SourceFiles/purple/tests/sync_auto_service_cases.cpp",
-      "music-listening": "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp"
+      "music-listening": "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp",
+      "playlists-store": "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp"
     }
   },
   "gates": [
@@ -845,6 +846,22 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-playlists-store",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "playlists-store"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp"
       ]
     }
   ]

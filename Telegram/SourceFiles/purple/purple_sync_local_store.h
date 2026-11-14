@@ -107,6 +107,7 @@ inline constexpr auto kSyncRetainedBaseCountLimit = 16;
 	const QByteArray &bytes);
 
 [[nodiscard]] QByteArray SyncPathIdentity(const QString &path);
+[[nodiscard]] QByteArray SyncDirectoryIdentity(const QString &path);
 
 enum class SyncDurablePoint { BeforeWrite, PartialWrite, BeforeRename, AfterRename, FileBarrier, DirectoryBarrier };
 using SyncDurableFault = std::function<bool(SyncDurablePoint)>;
@@ -120,6 +121,7 @@ struct SyncPrivateSnapshot {
 };
 
 [[nodiscard]] SyncPrivateSnapshot CaptureSyncPrivateFile(const QString &path, qsizetype limit);
+[[nodiscard]] SyncPrivateSnapshot CaptureSyncOwnedFile(const QString &path, qsizetype limit);
 [[nodiscard]] SyncStoreStatus WriteSyncDurableFile(
 	const QString &path, const QByteArray &bytes,
 	const SyncPrivateSnapshot &expected, const SyncDurableFault &fault = {});

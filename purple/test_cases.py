@@ -17,6 +17,16 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'playlists-store': {
+        'program': 'playlists_store_cases.cpp',
+        'units': ['purple/purple_playlists_store.cpp', 'purple/purple_sync_local_store.cpp',
+            'core:purple/purple_account_files.cpp', 'core:purple/purple_local_choice.cpp',
+            'core:purple/purple_peer_token.cpp', 'core:purple/purple_sync_json.cpp',
+            'core:purple/purple_playlists.cpp', 'core:purple/purple_playlists_local.cpp'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'Foundation', 'AppKit'],
+        'link': ['-Wl,-dead_strip'],
+    },
     'music-listening': {
         'program': 'music_listening_cases.cpp',
         'generated': ['music-listening-tracker.inc'],

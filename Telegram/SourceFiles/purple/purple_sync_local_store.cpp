@@ -532,6 +532,12 @@ QByteArray SyncPathIdentity(const QString &path) {
 #endif
 }
 
+QByteArray SyncDirectoryIdentity(const QString &path) {
+	return StableOwnedDirectory(QFileInfo(path))
+		? SyncPathIdentity(path)
+		: QByteArray();
+}
+
 namespace {
 
 SyncStoreStatus ReadSyncFile(
