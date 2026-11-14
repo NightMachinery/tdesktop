@@ -1206,7 +1206,13 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		automatic->setChecked(session && AutomaticSettingsSyncEnabled(session), Ui::Checkbox::NotifyAboutChange::DontNotify);
 		automaticStatus->setText(session ? AutomaticSettingsSyncStatus(session) : tr::lng_purple_auto_select(tr::now));
 	};
-	AutomaticSettingsSyncChanges() | rpl::on_next(updateAutomatic, box->lifetime());
+	rpl::merge(
+		AutomaticSettingsSyncChanges(),
+		SettingsChanges(),
+		SyncChatStatusChanges() | rpl::to_empty
+	) | rpl::on_next([=] {
+		crl::on_main(box, updateAutomatic);
+	}, box->lifetime());
 	automatic->checkedChanges() | rpl::on_next([=](bool enabled) {
 		const auto session = state->selectedSession.get();
 		const auto changed = session && !state->running && !state->publishing && SetAutomaticSettingsSync(session, enabled);

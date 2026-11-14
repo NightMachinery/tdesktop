@@ -78,3 +78,12 @@ settings. Checkpoint failure leaves Apply refused. Existing retained records are
 not dropped, the inline limit is unchanged and strict file admission is unchanged.
 Synthetic host cases cover the native refusal, byte-for-byte preservation of all
 sixteen bases, initialize-only completion without a post, Apply and Undo history.
+
+## Refreshing an open sync dialog
+
+The automatic-sync checkbox and status observe automatic-service, settings-file
+and sync-chat changes. They re-read the current account on the next main-loop
+turn, after the triggering operation has settled. This also refreshes the open
+dialog after a manual first-use check changes local state. Destroying the dialog
+discards queued refreshes; refreshes never enable sync, write preferences or
+start a network request.
