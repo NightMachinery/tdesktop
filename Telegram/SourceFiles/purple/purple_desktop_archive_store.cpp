@@ -136,13 +136,33 @@ QString Marker(const DesktopArchiveOptions &options) {
 }
 
 QByteArray BindingIdentity(const DesktopArchiveOptions &options) {
-	const auto native = DesktopArchiveIdentity(options.profileRoot);
+	const auto native = DesktopArchivePersistentIdentity(options.profileRoot);
 	return native.isEmpty() || options.profileNamespace.isEmpty()
 			   ? native
 			   : native + ':'
 					 + QCryptographicHash::hash(
 						 options.profileNamespace.toUtf8(), QCryptographicHash::Sha256)
 						   .toHex();
+}
+
+bool AuthenticatedProfileBinding(const DesktopArchiveOptions &options,
+	const QString &profileDirectory, const QString &profile);
+
+bool LegacyBindingMatches(const DesktopArchiveOptions &options,
+	const QByteArray &binding) {
+#ifdef Q_OS_MAC
+	const auto old = binding.split(':');
+	const auto native = DesktopArchiveIdentity(options.profileRoot).split(':');
+	const auto count = options.profileNamespace.isEmpty() ? 2 : 3;
+	auto validDevice = false;
+	const auto device = old.empty() ? 0 : old[0].toULongLong(&validDevice);
+	return old.size() == count && native.size() == 2 && validDevice
+		&& QByteArray::number(device) == old[0] && old[1] == native[1]
+		&& (count == 2 || old[2] == QCryptographicHash::hash(
+			options.profileNamespace.toUtf8(), QCryptographicHash::Sha256).toHex());
+#else
+	return false;
+#endif // Q_OS_MAC
 }
 
 bool NoProfileBinding(const DesktopArchiveOptions &options) {
@@ -159,10 +179,12 @@ bool NoProfileBinding(const DesktopArchiveOptions &options) {
 	return !Exists(marker) && !Exists(link);
 }
 
-std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create) {
+std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create,
+	bool explicitRecovery = false) {
 	const auto serial = std::lock_guard(CatalogueMutex);
 	const auto account
 		= AccountKeyText(options.account.environment, options.account.userId);
+	const auto profileNative = DesktopArchiveIdentity(options.profileRoot);
 	const auto native = BindingIdentity(options);
 	if (!account || native.isEmpty() || !QFileInfo(options.profileRoot).isDir()) {
 		return {};
@@ -202,17 +224,54 @@ std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create)
 		identity = QJsonObject{{u"version"_q, 1}, {u"profile"_q, token},
 			{u"identity"_q, QString::fromLatin1(native)}};
 	}
-	if (identity->value(u"version"_q) != QJsonValue(1)
-		|| !Token(identity->value(u"profile"_q).toString())
-		|| identity->value(u"identity"_q).toString().toLatin1() != native) {
+	if (identity->size() != 3 || identity->value(u"version"_q) != QJsonValue(1)
+		|| !Token(identity->value(u"profile"_q).toString())) {
 		return {};
 	}
-	if (Exists(link)) {
+	auto legacyRecovery = false;
+	const auto binding = identity->value(u"identity"_q).toString().toLatin1();
+	if (binding != native) {
+		const auto oldLink = links + '/' + QString::fromLatin1(
+			QCryptographicHash::hash(binding, QCryptographicHash::Sha256).toHex()) + u".json"_q;
+		const auto old = ReadObject(oldLink);
+		const auto directory = QFileInfo(options.archiveRoot).canonicalFilePath()
+			+ '/' + identity->value(u"profile"_q).toString();
+		if (!LegacyBindingMatches(options, binding) || !old || *old != *identity
+			|| ReadObject(marker) != identity) {
+			return {};
+		}
+		legacyRecovery = explicitRecovery && options.loginAuthority.size() == 32
+			&& DesktopArchiveLoginKeysValid(options.loginAuthKeyIds)
+			&& options.active && options.active();
+		if (!legacyRecovery && !AuthenticatedProfileBinding(options, directory,
+			identity->value(u"profile"_q).toString())) {
+			return {};
+		}
+		auto upgraded = *identity;
+		upgraded.insert(u"identity"_q, QString::fromLatin1(native));
+		if (Exists(link) && ReadObject(link) != std::optional(upgraded)) {
+			return {};
+		}
+		if (!legacyRecovery) {
+			const auto existing = Exists(link) ? ReadObject(link) : std::nullopt;
+			if (DesktopArchiveIdentity(options.profileRoot) != profileNative
+				|| BindingIdentity(options) != native || ReadObject(oldLink) != identity
+				|| ReadObject(marker) != identity || (options.active && !options.active())
+				|| (Exists(link) && existing != std::optional(upgraded))
+				|| (!Exists(link) && !WriteObject(link, upgraded))
+				|| ReadObject(marker) != identity || BindingIdentity(options) != native
+				|| (options.active && !options.active()) || !WriteObject(marker, upgraded)) {
+				return {};
+			}
+			identity = std::move(upgraded);
+		}
+	}
+	if (!legacyRecovery && Exists(link)) {
 		const auto old = ReadObject(link);
 		if (!old || *old != *identity) {
 			return {};
 		}
-	} else if (!WriteObject(link, *identity)) {
+	} else if (!legacyRecovery && !WriteObject(link, *identity)) {
 		return {};
 	}
 	if (Exists(marker)) {
@@ -244,7 +303,8 @@ std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create)
 	result.intent = result.profileDirectory + u"/intents/"_q + *account + u".json"_q;
 	result.fence = result.profileDirectory + u"/fences/"_q + *account + u".json"_q;
 	result.lock = result.profileDirectory + u"/locks/"_q + *account + u".lock"_q;
-	return result;
+	return DesktopArchiveIdentity(options.profileRoot) == profileNative
+		&& BindingIdentity(options) == native ? std::optional(result) : std::nullopt;
 }
 
 std::optional<QJsonObject> Catalogue(const Layout &layout, bool create) {
@@ -295,6 +355,49 @@ bool AdmissionShape(const QJsonObject &record) {
 		&& std::all_of(keyId.begin(), keyId.end(), [](char ch) {
 			return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
 		});
+}
+
+bool AuthenticatedProfileBinding(const DesktopArchiveOptions &options,
+	const QString &profileDirectory, const QString &profile) {
+	const auto account = AccountKeyText(options.account.environment, options.account.userId);
+	if (!account || options.localKey.isEmpty() || options.loginAuthority.size() != 32
+		|| !DesktopArchivePrivate(profileDirectory, true)
+		|| !DesktopArchiveLoginKeysValid(options.loginAuthKeyIds)
+		|| !options.loginAuthKeyIds.split(',').contains(options.loginAuthKeyId)
+		|| (options.active && !options.active())) {
+		return false;
+	}
+	auto layout = Layout();
+	layout.catalogue = profileDirectory + u"/catalogue.json"_q;
+	const auto catalogue = Catalogue(layout, false);
+	if (!catalogue) {
+		return false;
+	}
+	auto record = catalogue->value(u"accounts"_q).toObject().value(*account).toObject();
+	if (!AdmissionShape(record)
+		|| record.value(u"loginAuthority"_q).toString().toLatin1()
+			!= QCryptographicHash::hash(options.loginAuthority, QCryptographicHash::Sha256).toHex()
+		|| !DesktopArchiveLoginKeysOverlap(
+			record.value(u"loginAuthKeys"_q).toString().toLatin1(), options.loginAuthKeyIds)) {
+		return false;
+	}
+	auto plan = ArchiveKeyDerivationFor(options.account, profile, profile,
+		ArchiveKeyPurpose::DesktopWrapping);
+	if (!plan) {
+		return false;
+	}
+	plan->info += QByteArray("/login-admission-v1");
+	auto key = DesktopArchiveCrypto::Derive(options.localKey, *plan);
+	if (!key) {
+		return false;
+	}
+	const auto expected = record.take(u"loginAdmissionMac"_q).toString().toLatin1();
+	const auto canonical = CanonicalizeSyncJson(
+		QJsonDocument(record).toJson(QJsonDocument::Compact));
+	const auto mac = canonical ? DesktopArchiveCrypto::Hmac(*key, canonical.canonical)
+		: std::nullopt;
+	DesktopArchiveCrypto::Clear(*key);
+	return mac && mac->toHex() == expected && (!options.active || options.active());
 }
 
 bool ApplyRecord(Layout &layout, const QJsonObject &record) {
@@ -1263,7 +1366,7 @@ std::optional<DesktopArchiveDiscardToken> DesktopArchiveStore::PrepareDiscard(
 			QString::fromLatin1(QCryptographicHash::hash(options.loginAuthority, QCryptographicHash::Sha256).toHex()),
 			options.loginAuthKeyIds};
 	}
-	const auto profile = Profile(options, false);
+	const auto profile = Profile(options, false, true);
 	if (!profile) {
 		return {};
 	}
@@ -1307,7 +1410,7 @@ bool DesktopArchiveStore::DiscardAccount(DesktopArchiveOptions options,
 		return NoProfileBinding(options)
 			&& DesktopArchiveIdentity(options.profileRoot) == token.profileIdentity;
 	}
-	const auto profile = Profile(options, false);
+	const auto profile = Profile(options, false, true);
 	if (!profile || profile->profile != token.profile
 		|| DesktopArchiveIdentity(options.profileRoot) != token.profileIdentity) {
 		return false;

@@ -23,6 +23,7 @@ struct DesktopArchiveSourceIdentity {
 	const QFile &file, const DesktopArchiveSourceIdentity &identity);
 
 [[nodiscard]] QByteArray DesktopArchiveIdentity(const QString &path);
+[[nodiscard]] QByteArray DesktopArchivePersistentIdentity(const QString &path);
 [[nodiscard]] bool DesktopArchivePrivate(const QString &path, bool directory);
 [[nodiscard]] bool DesktopArchiveDirectory(const QString &path);
 [[nodiscard]] bool DesktopArchiveSyncDirectory(const QString &path);

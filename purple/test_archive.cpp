@@ -113,6 +113,139 @@ void KeySetMigrationAndRebind() {
 	CHECK(!DesktopArchiveLoginKeysValid(k1 + ',' + k1));
 }
 
+void LegacyProfileBinding() {
+#ifdef Q_OS_MAC
+	Section = "legacy profile device renumbering and authenticated migration";
+	for (auto scenario = 0; scenario != 16; ++scenario) {
+		auto temporary = QTemporaryDir();
+		auto options = Options(temporary.path());
+		options.active = [] { return true; };
+		if (scenario >= 14) {
+			options.profileNamespace = u"named-profile"_q;
+		}
+		auto store = DesktopArchiveStore();
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		CHECK(store.Capture(Event(Empty(), u"legacy"_q, 1, u"retained"_q)).retained);
+		const auto epoch = store.epoch();
+		const auto root = store.directory();
+		CHECK(store.Close());
+		const auto suffix = options.profileNamespace.isEmpty() ? QByteArray()
+			: '-' + QCryptographicHash::hash(options.profileNamespace.toUtf8(), QCryptographicHash::Sha256).toHex();
+		auto other = options;
+		other.account.userId = 456;
+		auto second = DesktopArchiveStore();
+		auto otherEpoch = ArchiveStoreEpoch();
+		if (scenario == 13) {
+			CHECK(second.Open(other) == DesktopArchiveStatus::Ready);
+			CHECK(second.Capture(Event(Empty(other.account), u"other"_q, 1,
+				u"keep"_q, ArchiveOrigin::Baseline, Key(other.account))).retained);
+			otherEpoch = second.epoch();
+			CHECK(second.Close());
+		}
+		const auto marker = options.profileRoot + u"/purple-archive-profile"_q
+			+ QString::fromLatin1(suffix) + u".json"_q;
+		const auto original = DesktopArchiveRead(marker, 4096);
+		CHECK(original);
+		if (!original) {
+			continue;
+		}
+		auto identity = QJsonDocument::fromJson(*original).object();
+		const auto stable = DesktopArchivePersistentIdentity(options.profileRoot)
+			+ (suffix.isEmpty() ? QByteArray() : ':' + suffix.mid(1));
+		const auto native = DesktopArchiveIdentity(options.profileRoot).split(':');
+		CHECK(stable.startsWith("v2:") && native.size() == 2);
+		const auto linkFor = [&](const QByteArray &binding) {
+			return options.archiveRoot + u"/profile-links/"_q + QString::fromLatin1(
+				QCryptographicHash::hash(binding, QCryptographicHash::Sha256).toHex()) + u".json"_q;
+		};
+		auto legacy = QByteArray("999999999:") + native[1]
+			+ (suffix.isEmpty() ? QByteArray() : ':' + suffix.mid(1));
+		if (scenario == 15) {
+			legacy = QByteArray("999999999:") + native[1] + ':' + QByteArray(64, 'a');
+		}
+		if (scenario == 6) {
+			legacy = "999999999:" + QByteArray::number(native[1].toULongLong() + 1);
+		} else if (scenario == 7) {
+			legacy += ':' + QByteArray(64, 'a');
+		} else if (scenario == 10) {
+			legacy = "v2:" + QByteArray(32, '0') + ':' + native[1];
+		}
+		identity.insert(u"identity"_q, QString::fromLatin1(legacy));
+		const auto bytes = QJsonDocument(identity).toJson(QJsonDocument::Compact);
+		CHECK(DesktopArchiveWrite(marker, bytes));
+		CHECK(DesktopArchiveWrite(linkFor(legacy), bytes));
+		CHECK(QFile::remove(linkFor(stable)));
+		const auto catalogue = options.archiveRoot + '/' + identity.value(u"profile"_q).toString()
+			+ u"/catalogue.json"_q;
+		if (scenario == 1 || scenario == 13) {
+			options.localKey = QByteArray(256, 'x');
+		} else if (scenario == 2) {
+			auto document = QJsonDocument::fromJson(*DesktopArchiveRead(catalogue, 1048576)).object();
+			auto accounts = document.value(u"accounts"_q).toObject();
+			auto record = accounts.value(u"0-123"_q).toObject();
+			record.insert(u"loginAdmissionMac"_q, QString(64, u'0'));
+			accounts.insert(u"0-123"_q, record);
+			document.insert(u"accounts"_q, accounts);
+			CHECK(DesktopArchiveWrite(catalogue, QJsonDocument(document).toJson(QJsonDocument::Compact)));
+		} else if (scenario == 3) {
+			options.account.userId = 456;
+		} else if (scenario == 4) {
+			options.loginAuthority = QByteArray(32, 'x');
+		} else if (scenario == 5) {
+			options.loginAuthKeyId = QByteArray(16, '2');
+			options.loginAuthKeyIds = options.loginAuthKeyId;
+		} else if (scenario == 8) {
+			CHECK(QFile::remove(linkFor(legacy)));
+		} else if (scenario == 9) {
+			CHECK(DesktopArchiveWrite(linkFor(stable), bytes));
+		} else if (scenario == 11) {
+			options.active = [] { return false; };
+		} else if (scenario == 12) {
+			CHECK(DesktopArchiveWrite(linkFor(stable), *original));
+		}
+		const auto before = DesktopArchiveRead(catalogue, 1048576);
+		const auto database = DesktopArchiveRead(root + u"/archive.sqlite"_q, 1048576);
+		CHECK(database);
+		if (scenario == 0 || scenario == 12 || scenario == 14) {
+			CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+			CHECK(store.directory() == root && store.epoch() == epoch);
+			CHECK(store.Versions(Key()).versions.size() == 1);
+			CHECK(DesktopArchivePersistentIdentity(options.profileRoot)
+				+ (suffix.isEmpty() ? QByteArray() : ':' + suffix.mid(1)) == stable);
+			CHECK(store.Close());
+			CHECK(DesktopArchiveRead(marker, 4096) == original);
+		} else {
+			CHECK(store.Open(options) != DesktopArchiveStatus::Ready);
+			CHECK(store.Close());
+			CHECK(DesktopArchiveRead(marker, 4096) == std::optional(bytes));
+			CHECK(DesktopArchiveRead(catalogue, 1048576) == before);
+			CHECK(QFileInfo::exists(root));
+			CHECK(DesktopArchiveRead(root + u"/archive.sqlite"_q, 1048576) == database);
+			if ((scenario >= 6 && scenario <= 10) || scenario == 15) {
+				CHECK(!DesktopArchiveStore::PrepareDiscard(options));
+			}
+			if (scenario == 13) {
+				// A refused record can be discarded without rebinding other accounts.
+				auto refused = options;
+				refused.localKey = QByteArray(256, 'x');
+				const auto token = DesktopArchiveStore::PrepareDiscard(refused);
+				CHECK(token);
+				CHECK(DesktopArchiveRead(marker, 4096) == std::optional(bytes));
+				CHECK(token && !DesktopArchiveStore::DiscardAccount(other, *token));
+				CHECK(token && !DesktopArchiveStore::DiscardAccount(refused, *token, 1));
+				const auto continuation = DesktopArchiveStore::PrepareDiscard(refused);
+				CHECK(continuation && DesktopArchiveStore::DiscardAccount(refused, *continuation));
+				CHECK(DesktopArchiveRead(marker, 4096) == std::optional(bytes));
+				CHECK(second.Open(other) == DesktopArchiveStatus::Ready);
+				CHECK(second.epoch() == otherEpoch);
+				CHECK(second.Versions(Key(other.account)).versions.size() == 1);
+				CHECK(second.Close());
+			}
+		}
+	}
+#endif // Q_OS_MAC
+}
+
 void ExplicitDiscardRecovery() {
 	Section = "explicit fenced discard of refused account only";
 	auto temporary = QTemporaryDir();
@@ -1779,6 +1912,18 @@ int main(int argc, char** argv) {
 		CaptureBoundary();
 		return Failures ? 1 : 0;
 	}
+	if (argc > 1 && QByteArray(argv[1]) == "binding-only") {
+		LegacyProfileBinding();
+		ExplicitDiscardRecovery();
+		AdmissionAuthentication();
+		MtpLoginBinding();
+		LoginAuthorityRevocation();
+		ConcurrentAccounts();
+		Refusals();
+		std::printf("Desktop archive binding: %d checks, %d failures\n", Checks, Failures);
+		return Failures ? 1 : 0;
+	}
+	LegacyProfileBinding();
 	KeySetMigrationAndRebind();
 	ExplicitDiscardRecovery();
 	AdmissionAuthentication();

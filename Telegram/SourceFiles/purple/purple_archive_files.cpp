@@ -16,6 +16,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef Q_OS_MAC
+#include <sys/attr.h>
+#endif // Q_OS_MAC
 #endif
 
 namespace Purple {
@@ -139,6 +142,33 @@ QByteArray DesktopArchiveIdentity(const QString &path) {
 	return QByteArray::number(qulonglong(info.st_dev)) + ':'
 		   + QByteArray::number(qulonglong(info.st_ino));
 #endif
+}
+
+QByteArray DesktopArchivePersistentIdentity(const QString &path) {
+#ifdef Q_OS_MAC
+	const auto native = DesktopArchiveIdentity(path);
+	if (native.isEmpty()) {
+		return {};
+	}
+	auto attributes = attrlist();
+	attributes.bitmapcount = ATTR_BIT_MAP_COUNT;
+	attributes.volattr = ATTR_VOL_UUID | ATTR_VOL_INFO;
+	struct Volume {
+		uint32_t length;
+		unsigned char uuid[16];
+	};
+	auto volume = Volume();
+	if (::getattrlist(QFile::encodeName(path).constData(), &attributes,
+		&volume, sizeof(volume), FSOPT_NOFOLLOW) || volume.length != sizeof(volume)
+		|| DesktopArchiveIdentity(path) != native) {
+		return {};
+	}
+	const auto uuid = QByteArray(reinterpret_cast<const char*>(volume.uuid), 16);
+	return uuid == QByteArray(16, char(0)) ? QByteArray()
+		: "v2:" + uuid.toHex() + ':' + native.mid(native.indexOf(':') + 1);
+#else
+	return DesktopArchiveIdentity(path);
+#endif // Q_OS_MAC
 }
 
 std::optional<DesktopArchiveSourceIdentity> DesktopArchiveInspectSource(

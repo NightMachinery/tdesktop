@@ -727,3 +727,31 @@ without it. The original observation and unknown metadata remain intact; optiona
 presentation data cannot turn an otherwise valid capture into a retention gap.
 
 A launch diagnostic with origin 0, model 4 and no lifecycle, send-metadata or preimage flags comes from ordinary received-history observation (`ObserveArchiveMessage`, called by `History::createItem` and streamed-message adoption). It is a Baseline refused as Stale against an existing message. A changed history reload has no expected archived version/revision, so the core refuses to overwrite a retained head without that provenance. Existing versions are preserved; the new observation is not retained, so it is unsafe to classify every such refusal as harmless or suppress its coverage warning. The capture-boundary host case reproduces the diagnostic shape with current generation and increasing order, preserves the archived versions, records the two gap reasons, and proves an identical current-body reload adds no gap. Fixing missed changed baselines needs an ordering/CAS policy rather than dropping the guard.
+
+### macOS profile binding across remounts
+
+New macOS profile bindings use the filesystem volume UUID and native directory
+inode, plus the existing namespace digest. The mount's device number remains an
+in-process race guard, but is no longer persisted as durable identity: macOS may
+renumber devices after a reboot or remount.
+
+A legacy device/inode binding is upgraded only when its inode and namespace
+still match, its private marker and original recovery link agree, and the
+selected account's version-3 admission record authenticates with the local key,
+current login nonce and overlapping live persistent key set. The stable recovery
+link is published before the marker. An interrupted matching link can resume;
+a conflicting link or changed volume/inode refuses. Store epoch, keys and
+retained messages are preserved. Existing account admission checks still run.
+
+Explicit discard may resolve an agreeing legacy marker/link with a captured
+active login even when its account record cannot authenticate. This resolution
+does not rewrite shared profile binding metadata. The confirmation still binds
+the selected account, login authority, key set, native directory identity,
+record and fence digests, and bounded removal continuation. Other accounts'
+records and data are preserved. It does not bypass a stable volume mismatch,
+changed inode or namespace, missing original link or conflicting stable link.
+
+The native archive binding fixture uses disposable stores, synthetic device
+renumbering and real admission MACs. Its focused `binding-only` entry also runs
+existing discard, authentication, login revocation, account isolation and
+refusal cases. It requires no live profile or Telegram session.
