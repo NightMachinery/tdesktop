@@ -119,3 +119,10 @@ turn, after the triggering operation has settled. This also refreshes the open
 dialog after a manual first-use check changes local state. Destroying the dialog
 discards queued refreshes; refreshes never enable sync, write preferences or
 start a network request.
+
+`cases-sync-auto-service` extracts the production refresh body and merged
+subscription. Synthetic streams and a guarded Qt main-loop delivery port test
+all three notification sources, deferred account selection, existing busy and
+recovery guards, and destruction before a queued callback runs. The gate also
+syntax-checks the production setup box and service. It does not exercise a live
+account, native event delivery or network requests.

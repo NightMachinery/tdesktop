@@ -170,7 +170,8 @@ bool SelectedAvailable(const SetupBoxState &state) {
 }
 void ClearReview(SetupBoxState &state) { state.review.reset(); ++state.generation; }
 void SetStatus(SetupBoxState &state, const QString &text) { state.status->setText(text); }
-QString AutomaticSettingsSyncStatus(Session*) { return u"automatic ready"_q; }
+QString AutomaticStatus = u"automatic ready"_q;
+QString AutomaticSettingsSyncStatus(Session*) { return AutomaticStatus; }
 namespace tr {
 inline constexpr auto now = 0;
 QString lng_purple_auto_select(int) { return u"select"_q; }
@@ -184,7 +185,13 @@ public:
     void setChecked(bool value, NotifyAboutChange) { QCheckBox::setChecked(value); }
 };
 }
-struct Box { rpl::lifetime life; auto &lifetime() { return life; } };
+struct Box : QObject { rpl::lifetime life; auto &lifetime() { return life; } };
+void OnMain(Box *box, Fn<void()> callback) {
+    QPointer<Box> guard(box);
+    Deliver([guard, callback] { if (guard) callback(); });
+}
+rpl::event_stream<> SettingsEvents;
+auto SettingsChanges() { return SettingsEvents.events(); }
 auto AutomaticSettingsSyncChanges() { return Changes.events(); }
 #include "sync-setup-status.inc"
 
@@ -352,31 +359,43 @@ int main(int argc, char **argv) {
         RegisterStatus(box.get(), &value, &automaticWidget, &automaticLabel);
         FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined successfully"_q };
         Changes.fire({});
+        expect(primary.text() == u"account unavailable"_q,
+            "service notification defers status refresh until its operation settles");
+        Pump();
         expect(primary.text() == u"joined successfully"_q && !value.review,
             "successful first-use join refreshes the already-open dialog's unavailable status");
+        AutomaticStatus = u"settings refreshed"_q;
+        SettingsEvents.fire({}); Pump();
+        expect(automaticLabel.text() == AutomaticStatus,
+            "settings-file notification refreshes the open dialog without a service event");
+        AutomaticStatus = u"chat refreshed"_q;
+        Chat.fire_copy(root); Pump();
+        expect(automaticLabel.text() == AutomaticStatus,
+            "sync-chat notification refreshes the open dialog without a service event");
         value.review = Review{ SyncConfigReviewStatus::NeedsReview };
         primary.setText(u"real recovery error"_q);
-        FirstResults.erase(root); Changes.fire({});
-        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined again"_q }; Changes.fire({});
+        FirstResults.erase(root); Changes.fire({}); Pump();
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined again"_q }; Changes.fire({}); Pump();
         expect(primary.text() == u"real recovery error"_q, "join notification preserves a real recovery error");
         value.review = Review{}; value.recovery = Recovery{true};
-        FirstResults.erase(root); Changes.fire({});
-        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined again"_q }; Changes.fire({});
+        FirstResults.erase(root); Changes.fire({}); Pump();
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"joined again"_q }; Changes.fire({}); Pump();
         expect(primary.text() == u"real recovery error"_q, "unfinished recovery journal is never hidden");
         value.recovery.reset(); value.publishing = true;
-        FirstResults.erase(root); Changes.fire({});
-        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"busy result"_q }; Changes.fire({});
+        FirstResults.erase(root); Changes.fire({}); Pump();
+        FirstResults[root] = { SyncFirstUseOutcome::Joined, u"busy result"_q }; Changes.fire({}); Pump();
         expect(primary.text() == u"real recovery error"_q, "busy manual flow retains its own completion authority");
-        value.publishing = false; Changes.fire({});
+        value.publishing = false; Changes.fire({}); Pump();
         expect(primary.text() == u"real recovery error"_q, "busy result is not replayed after manual flow settles");
-        value.selectedSession = base::make_weak(off);
         Changes.fire({});
+        value.selectedSession = base::make_weak(off);
+        Pump();
         expect(primary.text() == u"real recovery error"_q, "another account's completion cannot replace selected status");
         value.selectedSession = base::make_weak(root);
         Owner = false; RefreshUnavailable(value);
         expect(primary.text() == u"choose startup owner"_q, "startup owner problem is named instead of an account-file error");
         Owner = true;
-        value.review.reset(); value.publishing = true; Changes.fire({});
+        value.review.reset(); value.publishing = true; Changes.fire({}); Pump();
         expect(!automaticWidget.isEnabled(), "busy first-use disables automatic control");
         value.refreshAuxiliary = [&] { RegisterStatusRefresh(&value, &automaticWidget, &automaticLabel); };
         value.publishing = false; RefreshAuxiliary(value);
@@ -385,9 +404,13 @@ int main(int argc, char **argv) {
         expect(!automaticWidget.isEnabled() && automaticLabel.text() == u"select"_q,
             "account loss refreshes automatic control and status without a service event");
         value.selectedSession = base::make_weak(root);
+        FirstResults[root] = { SyncFirstUseOutcome::Published, u"late publish"_q };
+        Changes.fire({});
         box.reset();
-        primary.setText(u"closed"_q); FirstResults.erase(root); Changes.fire({});
-        expect(primary.text() == u"closed"_q, "disposed dialog unsubscribes from completion notifications");
+        primary.setText(u"closed"_q); Pump();
+        expect(primary.text() == u"closed"_q, "disposed dialog revokes an already-queued completion refresh");
+        FirstResults.erase(root); Changes.fire({}); SettingsEvents.fire({}); Chat.fire_copy(root); Pump();
+        expect(primary.text() == u"closed"_q, "disposed dialog unsubscribes from all completion notifications");
         FirstResults.clear();
     }
     if (missingBackstop) { Sessions.clear(); domain.entries.clear(); return 1; }

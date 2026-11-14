@@ -285,13 +285,16 @@ def slices(sources):
 
 def sync_setup_status_include(sources):
     text = (sources / 'purple/purple_sync_setup_box.cpp').read_text()
-    result = (function(text, 'void RefreshFirstUseStatus(') if 'void RefreshFirstUseStatus(' in text
-        else 'void RefreshFirstUseStatus(SetupBoxState&) {}')
+    result = function(text, 'void RefreshFirstUseStatus(')
     body = function(text, 'const auto updateAutomatic = [=] ')
-    subscription = 'AutomaticSettingsSyncChanges() | rpl::on_next(updateAutomatic, box->lifetime());'
-    assert subscription in text
+    start = text.index('rpl::merge(', text.index(body) + len(body))
+    subscription = text[start:text.index('automatic->checkedChanges()', start)].strip()
+    for stream in ['AutomaticSettingsSyncChanges()', 'SettingsChanges()', 'SyncChatStatusChanges()']:
+        assert stream in subscription
+    assert subscription.count('rpl::on_next(') == 1
+    assert subscription.endswith('}, box->lifetime());')
     result += '\nvoid RegisterStatus(Box *box, SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) {\n'
-    result += body + ';\n' + subscription + '\n}\n'
+    result += body + ';\n' + subscription.replace('crl::on_main(', 'OnMain(') + '\n}\n'
     result += '\nvoid RegisterStatusRefresh(SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) { ' + body + '; updateAutomatic(); }\n'
     refresh = function(text, 'void RefreshButtons(')
     block = function(refresh, 'if (!available && !busy && state.selectedSession)')
