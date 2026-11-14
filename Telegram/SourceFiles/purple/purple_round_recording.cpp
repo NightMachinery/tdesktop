@@ -8,18 +8,22 @@
 #include "chat_helpers/compose/compose_show.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "history/view/controls/history_view_voice_record_bar.h"
 #include "lang/lang_keys.h"
 #include "settings/sections/settings_calls.h"
 #include "ui/controls/round_video_recorder.h"
-#include "ui/rp_widget.h"
 #include "ui/layers/generic_box.h"
+#include "ui/widgets/buttons.h"
+#include "ui/rp_widget.h"
 
 #include <QtCore/QSettings>
 #include <QtGui/QPainter>
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QPushButton>
 #include <map>
+
+#include "styles/style_calls.h"
+#include "styles/style_purple_media_playback.h"
 
 namespace Purple {
 namespace {
@@ -37,8 +41,8 @@ struct Floating {
 	RoundRecordingGeometry geometry;
 	Fn<void()> pause;
 	std::shared_ptr<ChatHelpers::Show> show;
-	QPushButton *pauseButton = nullptr;
-	QPushButton *cameraButton = nullptr;
+	Ui::IconButton *pauseButton = nullptr;
+	Ui::IconButton *cameraButton = nullptr;
 };
 
 std::map<Ui::RpWidget*, std::shared_ptr<Floating>> Floats;
@@ -54,8 +58,11 @@ void Place(not_null<Floating*> state) {
 	state->geometry.place(available.width(), available.height(), side, style::ConvertScale(12));
 	state->preview->setGeometry(state->geometry.x, state->geometry.y, side, side);
 	if (state->pauseButton) {
-		state->pauseButton->setGeometry(0, side - 28, side / 2, 28);
-		state->cameraButton->setGeometry(side / 2, side - 28, side / 2, 28);
+		const auto height = std::min(side, style::ConvertScale(32));
+		state->pauseButton->resize(side / 2, height);
+		state->pauseButton->moveToLeft(0, side - height, side);
+		state->cameraButton->resize(side - side / 2, height);
+		state->cameraButton->moveToRight(0, side - height, side);
 	}
 }
 
@@ -130,12 +137,27 @@ void BindRoundRecorder(not_null<Ui::RoundVideoRecorder*> recorder,
 		state->bar = bar;
 		state->pause = std::move(pause);
 		state->show = std::move(show);
-		state->pauseButton = new QPushButton(tr::lng_purple_recording_toggle(tr::now), preview);
-		state->cameraButton = new QPushButton(tr::lng_purple_recording_camera(tr::now), preview);
+		state->pauseButton = Ui::CreateChild<Ui::IconButton>(preview, st::defaultIconButton);
+		tr::lng_purple_recording_toggle() | rpl::on_next([=](const QString &text) {
+			state->pauseButton->setAccessibleName(text);
+		}, preview->lifetime());
+		bar->purplePauseChanges() | rpl::on_next([=](bool paused) {
+			const auto icon = paused
+				? &st::purpleFloatPlayIcon
+				: &st::purpleFloatPauseIcon;
+			state->pauseButton->setIconOverride(icon, icon);
+		}, preview->lifetime());
+		state->cameraButton = Ui::CreateChild<Ui::IconButton>(preview, st::defaultIconButton);
+		state->cameraButton->setIconOverride(
+			&st::callCameraReDial.icon,
+			&st::callCameraReDial.iconOver);
+		tr::lng_purple_recording_camera() | rpl::on_next([=](const QString &text) {
+			state->cameraButton->setAccessibleName(text);
+		}, preview->lifetime());
 		state->pauseButton->hide();
 		state->cameraButton->hide();
-		QObject::connect(state->pauseButton, &QPushButton::clicked, preview, [=] { state->pause(); });
-		QObject::connect(state->cameraButton, &QPushButton::clicked, preview, [=] {
+		state->pauseButton->setClickedCallback([=] { state->pause(); });
+		state->cameraButton->setClickedCallback([=] {
 			state->show->showBox(::Settings::ChooseCameraDeviceBox(
 				rpl::single(Core::App().settings().cameraDeviceId()),
 				[](QString id) {

@@ -16,8 +16,18 @@ the binding and uses core's issued-record filter after a local send settles,
 so own post/edit acknowledgements do not feed checks back into themselves.
 History reads do not enter these hooks. The existing pause, account, problem
 and retry gates still decide whether a check runs. Lifecycle events may check
-again after the fifteen-minute eligibility interval. There is no periodic idle
-timer, so an eligible idle client with no delivered update can wait longer. A chat update also rechecks first use when no state exists.
+again after the fifteen-minute eligibility interval. An opted-in live account
+also owns a fifteen-minute idle backstop, including before first-use state exists.
+It uses the same event gates; delivered updates and the five-second save debounce
+remain prompt. Each timer captures account/login, owner/file context and binding
+authority. Disable, logout or disposal retires it, and late callbacks cannot
+act on a replacement context. An eligible replacement gets a fresh delayed timer,
+so an external context change cannot silently remove the idle backstop. It does not renew a stopped run's retry budget or
+override a pending retry or write fence.
+
+Foreground/resume rechecks eligibility and replaces an overdue timer instead of
+replaying missed ticks. Sleep, suspension and process death cannot promise a
+wall-clock delivery deadline. A chat update also rechecks first use when no state exists.
 
 ## Delivery when the sync chat stays closed
 
@@ -32,6 +42,28 @@ update while the chat is closed, but prompt delivery cannot be guaranteed.
 Guaranteeing a shorter maximum delay would require polling or a different
 transport, beyond this feature's no-faster-polling rule. Device checks must keep
 the chat closed, hidden, muted and archived on the receiving client.
+
+## First-use status in an open dialog
+
+Automatic first-use completion updates an already-open Sync dialog when its
+primary review still says the account is unavailable. The existing typed Joined
+or Published result supplies the localized completion text; stale review actions
+are discarded. Busy manual flows, other selected accounts, recovery journals and
+real review errors keep their own status. Repeated notifications do not replay
+an old completion. Missing startup-owner authority is described as an owner
+selection problem, using the existing wording, rather than a missing-file error.
+
+Automatic first use carries its own generation and automatic/manual ownership.
+Disable retires automatic scans and publisher admission before persisting the
+option, including when no state exists and chat lookup has not resolved. Old
+callbacks cannot attach to a later run, publish, or apply. An explicit manual
+first-use request keeps its own authority. Cancellation cannot undo a request
+already accepted by the server; existing issued-write reconciliation remains.
+
+The dialog refreshes automatic/chat controls on busy-state completion and account
+loss as well as service notifications. A successful physical join or publication
+clears a superseded executor error only after fresh recovery is bound without a
+journal; current recovery failures and stored hold reasons remain visible.
 
 ## Fresh-login cache admission
 

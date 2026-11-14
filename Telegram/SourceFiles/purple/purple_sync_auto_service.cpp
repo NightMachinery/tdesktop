@@ -117,6 +117,8 @@ private:
 	bool NoStateEvent(SyncAutoEvent event);
 	[[nodiscard]] bool FirstUseDue(const AccountFiles &files, SyncAutoEvent event);
 	void RetireLegacyArtifacts();
+	bool FirstUseCurrent(uint64_t epoch) const;
+	void CancelAutomaticFirstUse();
 	void FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual);
 	void FirstUsePublish(DesktopSyncChatInventory inventory, SyncFirstUseReview review, bool publish);
 	void FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review);
@@ -131,6 +133,10 @@ private:
 	void RenewEffect(const SyncAutoPlan &plan, Fn<void(bool)> ready);
 	void Stop();
 	void RetryLater();
+	void RefreshBackstop();
+	void RetireBackstop();
+	bool BackstopCurrent() const;
+	void Backstop(uint64_t epoch);
 
 	base::weak_ptr<Main::Session> _session;
 	AccountKey _account;
@@ -157,6 +163,11 @@ private:
 	base::Timer _retry;
 	base::Timer _save;
 	base::Timer _pickup;
+	base::Timer _backstop;
+	std::optional<AccountSettingsOpenTarget> _backstopOpening;
+	QByteArray _backstopToken;
+	uint64_t _backstopEpoch = 0;
+	crl::time _backstopDue = 0;
 	std::optional<PeerToken> _pickupChat;
 	std::set<int32_t> _pickupIds;
 	bool _pickupOverflow = false;
@@ -172,6 +183,9 @@ private:
 	std::optional<SyncFirstUseResult> _firstUse;
 	QString _firstFingerprint;
 	bool _firstRunning = false;
+	bool _firstManual = false;
+	uint64_t _firstEpoch = 0;
+	std::optional<AccountRoutingSnapshot> _firstRouting;
 	bool _firstBypass = false;
 
 };
@@ -215,7 +229,7 @@ AutoSession::AutoSession(not_null<Main::Session*> session)
 
 }
 
-AutoSession::~AutoSession() { Stop(); }
+AutoSession::~AutoSession() { RetireBackstop(); Stop(); }
 
 bool AutoSession::Current() const {
 	const auto session = _session.get();
@@ -351,6 +365,11 @@ void AutoSession::Replaced() {
 }
 
 bool AutoSession::Event(SyncAutoEvent event) {
+	if (event == SyncAutoEvent::Disable
+		|| (_firstRunning && !_firstManual && !FirstUseCurrent(_firstEpoch))) {
+		CancelAutomaticFirstUse();
+	}
+	const auto refreshBackstop = gsl::finally([=] { RefreshBackstop(); });
 	const auto session = _session.get();
 	if (!session) { Stop(); return false; }
 	const auto target = AccountSyncInspectionTarget(session);
@@ -383,6 +402,90 @@ bool AutoSession::Event(SyncAutoEvent event) {
 	}
 	Run(plan);
 	return true;
+}
+
+
+void AutoSession::RetireBackstop() {
+	++_backstopEpoch;
+	_backstop.cancel();
+	_backstopOpening.reset();
+	_backstopToken.clear();
+	_backstopDue = 0;
+}
+
+bool AutoSession::BackstopCurrent() const {
+	const auto session = _session.get();
+	if (!session || !_backstopOpening || !SettingsStartupOwner()
+		|| session->account().loggingOut() || session->account().maybeSession() != session
+		|| SessionAccountKey(session) != _account
+		|| AccountSyncBindingToken(session->account()) != _backstopToken) {
+		return false;
+	}
+	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
+	return opening && SameDesktopSyncAutoContext(*_backstopOpening, *opening)
+		&& AutomaticSettingsSyncEnabled(session);
+}
+
+void AutoSession::RefreshBackstop() {
+	const auto session = _session.get();
+	if (!session || !SettingsStartupOwner() || session->account().loggingOut()
+		|| session->account().maybeSession() != session || SessionAccountKey(session) != _account
+		|| !AutomaticSettingsSyncEnabled(session)) {
+		RetireBackstop();
+		return;
+	}
+	const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
+	if (!opening) {
+		RetireBackstop();
+		return;
+	}
+	const auto token = AccountSyncBindingToken(session->account());
+	const auto now = crl::now();
+	if (_backstopOpening && SameDesktopSyncAutoContext(*_backstopOpening, *opening)
+		&& token == _backstopToken && _backstop.isActive() && now < _backstopDue) {
+		return;
+	}
+	RetireBackstop();
+	_backstopOpening = *opening;
+	_backstopToken = token;
+	const auto epoch = _backstopEpoch;
+	const auto weak = base::make_weak(this);
+	_backstop.setCallback([weak, epoch] {
+		if (const auto self = weak.get(); self && self->_backstopEpoch == epoch) {
+			self->Backstop(epoch);
+		}
+	});
+	const auto delay = crl::time(kSyncAutoCheckSeconds) * 1000;
+	_backstopDue = now + delay;
+	_backstop.callOnce(delay, Qt::PreciseTimer);
+}
+
+void AutoSession::Backstop(uint64_t epoch) {
+	if (epoch != _backstopEpoch) {
+		return;
+	}
+	if (!BackstopCurrent()) {
+		RefreshBackstop();
+		return;
+	}
+	const auto remaining = _backstopDue - crl::now();
+	if (remaining > 0) {
+		_backstop.callOnce(remaining, Qt::PreciseTimer);
+		return;
+	}
+	const auto session = _session.get();
+	const auto target = AccountSyncInspectionTarget(session);
+	const auto read = target ? ReadDesktopSyncAuto(target->files, _account) : DesktopSyncAutoRead();
+	if (!read.record || !read.record->enabled) {
+		RetireBackstop();
+		return;
+	}
+	if (read.record->runStopped || read.record->retryAt
+		|| DesktopSyncWriteGateFor(_account)->postingHeld()) {
+		RefreshBackstop();
+		return;
+	}
+	Event(SyncAutoEvent::Foreground);
 }
 
 void AutoSession::Updated(PeerToken chat, int32_t id) {
@@ -631,8 +734,8 @@ bool AutoSession::PauseOnForeignSpace(PeerToken chat) {
 	}
 	auto inventory = DesktopSyncChatInventory{ lease->route, _inventory };
 	Stop();
-	crl::on_main([weak = base::make_weak(this), inventory = std::move(inventory)]() mutable {
-		if (const auto self = weak.get()) {
+	crl::on_main([weak = base::make_weak(this), epoch = _firstEpoch, inventory = std::move(inventory)]() mutable {
+		if (const auto self = weak.get(); self && self->_firstEpoch == epoch) {
 			self->FirstUse(std::move(inventory), SyncFirstUseChoice::None, nullptr, false);
 		}
 	});
@@ -654,7 +757,7 @@ void AutoSession::RetireLegacyArtifacts() {
 bool AutoSession::NoStateEvent(SyncAutoEvent event) {
 	const auto session = _session.get();
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
-	if (!target || !SyncMagicBound(session)) { return false; }
+	if (!target || (event != SyncAutoEvent::Disable && !SyncMagicBound(session))) { return false; }
 	RetireLegacyArtifacts();
 	const auto recovery = InspectSyncAccountRecovery(*session);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != SyncAccountRecoveryStatus::Setup) {
@@ -684,16 +787,40 @@ bool AutoSession::FirstUseDue(const AccountFiles &files, SyncAutoEvent event) {
 		|| mark->fingerprint != ReadSyncSettingsFile(files).fingerprint;
 }
 
+bool AutoSession::FirstUseCurrent(uint64_t epoch) const {
+	const auto session = _session.get();
+	return _firstRunning && _firstEpoch == epoch && session
+		&& !session->account().loggingOut() && session->account().maybeSession() == session
+		&& SessionAccountKey(session) == _account
+		&& (_firstManual || (_firstRouting && AccountSyncRoutingCurrent(session, *_firstRouting)
+			&& AutomaticSettingsSyncEnabled(session)));
+}
+
+void AutoSession::CancelAutomaticFirstUse() {
+	if (_firstRunning && _firstManual) { return; }
+	++_firstEpoch;
+	_firstRunning = false;
+	_firstScan.reset();
+	_firstPublish.reset();
+	_firstUse.reset();
+	_firstDone.clear();
+	_firstRouting.reset();
+}
+
 void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, SyncFirstUseChoice choice,
 		Fn<void(SyncFirstUseResult)> done, bool manual) {
 	if (done) { _firstDone.push_back(std::move(done)); }
-	if (_firstRunning) { return; }
+	if (_firstRunning) { _firstManual = _firstManual || manual; return; }
 	const auto session = _session.get();
+	if (!manual && (!session || !AutomaticSettingsSyncEnabled(session))) { return; }
 	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
 	const auto files = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	_firstFingerprint = files ? ReadSyncSettingsFile(files->files).fingerprint : QString();
 	if (!session || !bound || _inFlight) { FirstUseFail(_inFlight ? u"busy"_q : u"unbound"_q); return; }
 	_firstRunning = true;
+	_firstManual = manual;
+	_firstRouting = CaptureAccountSyncRouting(session);
+	const auto epoch = ++_firstEpoch;
 	Changes.fire({});
 	if (inventory) {
 		FirstUseRun(std::move(*inventory), choice, manual);
@@ -703,20 +830,26 @@ void AutoSession::FirstUse(std::optional<DesktopSyncChatInventory> inventory, Sy
 	if (!lease || !lease->current || !lease->current()) { FirstUseFail(u"chat_unavailable"_q); return; }
 	const auto weak = base::make_weak(this);
 	_firstScan = std::make_unique<SyncAccountInventory>(not_null{ session }, lease->route, nullptr,
-		[weak, choice, manual](DesktopSyncChatInventory result) {
+		[weak, choice, manual, epoch](DesktopSyncChatInventory result) {
 			const auto self = weak.get();
-			if (!self || !self->_firstRunning) { return; }
-			crl::on_main([weak, choice, manual, result = std::move(result)]() mutable {
-				if (const auto self = weak.get(); self && self->_firstRunning) {
+			if (!self || self->_firstEpoch != epoch) { return; }
+			crl::on_main([weak, choice, manual, epoch, result = std::move(result)]() mutable {
+				if (const auto self = weak.get(); self && self->FirstUseCurrent(epoch)) {
 					self->_firstScan.reset();
 					self->FirstUseRun(std::move(result), choice, manual);
+				} else if (self && self->_firstEpoch == epoch) {
+					self->CancelAutomaticFirstUse();
 				}
 			});
-		}, lease->current);
+		}, [weak, epoch, proof = lease->current] {
+			const auto self = weak.get();
+			return proof() && self && self->FirstUseCurrent(epoch);
+		});
 	_firstScan->Start();
 }
 
 void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseChoice choice, bool manual) {
+	if (!FirstUseCurrent(_firstEpoch)) { CancelAutomaticFirstUse(); return; }
 	const auto session = _session.get();
 	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
@@ -789,16 +922,19 @@ void AutoSession::FirstUseRun(DesktopSyncChatInventory inventory, SyncFirstUseCh
 }
 
 void AutoSession::FirstUsePublish(DesktopSyncChatInventory inventory, SyncFirstUseReview review, bool publish) {
+	if (!FirstUseCurrent(_firstEpoch)) { CancelAutomaticFirstUse(); return; }
 	const auto session = _session.get();
 	if (!session) { FirstUseFail(u"account_changed"_q); return; }
 	const auto chat = inventory.route.peer.chat;
 	const auto weak = base::make_weak(this);
+	const auto epoch = _firstEpoch;
 	_firstPublish = std::make_unique<SyncConfigPublish>(session->account(), *session, inventory,
 		SyncConfigSendQueueOf(not_null{ session }, chat), SyncConfigPostsStarted(not_null{ session }, chat),
-		[weak, publish, inventory, review](SyncConfigPublishResult result) {
-			crl::on_main([weak, publish, inventory, review, result] {
+		[weak, publish, inventory, review, epoch](SyncConfigPublishResult result) {
+			crl::on_main([weak, publish, inventory, review, result, epoch] {
 				const auto self = weak.get();
-				if (!self || !self->_firstRunning) { return; }
+				if (!self || self->_firstEpoch != epoch) { return; }
+				if (!self->FirstUseCurrent(epoch)) { self->CancelAutomaticFirstUse(); return; }
 				self->_firstPublish.reset();
 				SyncDiag(u"sync_chat"_q, u"first_use"_q, {
 					SyncDiagCode(u"step"_q, publish ? u"publish"_q : u"join"_q),
@@ -817,15 +953,16 @@ void AutoSession::FirstUsePublish(DesktopSyncChatInventory inventory, SyncFirstU
 				}
 			});
 		}, publish ? review.request : SyncConfigPublishRequest(),
-		[weak, chat] {
+		[weak, chat, epoch] {
 			const auto self = weak.get();
 			const auto session = self ? self->_session.get() : nullptr;
-			return session && SyncMagicBound(session) == chat;
+			return session && self->FirstUseCurrent(epoch) && SyncMagicBound(session) == chat;
 		}, !publish);
 	_firstPublish->Start();
 }
 
 void AutoSession::FirstUseJoined(const DesktopSyncChatInventory &inventory, const SyncFirstUseReview &review) {
+	if (!FirstUseCurrent(_firstEpoch)) { CancelAutomaticFirstUse(); return; }
 	const auto session = _session.get();
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	const auto local = target ? ReadSyncSettingsFile(target->files) : SyncSettingsFile();
@@ -882,6 +1019,11 @@ void AutoSession::FirstUseFinish(SyncFirstUseOutcome outcome, QString text, QStr
 	const auto target = session ? AccountSyncInspectionTarget(session) : std::nullopt;
 	if (target && (outcome == SyncFirstUseOutcome::Published || outcome == SyncFirstUseOutcome::Joined)) {
 		ClearSyncFirstUseMark(target->files);
+		const auto recovery = InspectSyncAccountRecovery(*session);
+		if (recovery && !recovery->journalPresent
+			&& recovery->plan.status == SyncAccountRecoveryStatus::Bound) {
+			_failureReason = SyncAutoReason::None;
+		}
 	} else if (target && outcome != SyncFirstUseOutcome::NotNeeded) {
 		if (auto mark = ReadSyncFirstUseMark(target->files)) {
 			mark->checkedAt = int64_t(base::unixtime::now());

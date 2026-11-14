@@ -3,6 +3,7 @@
 #include "ui/integration.h"
 #include "ui/painter.h"
 #include "ui/style/style_core.h"
+#include "ui/style/style_core_direction.h"
 #include "ui/text/format_values.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
@@ -10,7 +11,11 @@
 #include "styles/style_widgets.h"
 
 #include <QtGui/QPainterPath>
+#include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QPushButton>
+#include <QtTest/QTest>
 #include <iostream>
 
 namespace crl { rpl::producer<> on_main_update_requests() { return rpl::never<>(); } }
@@ -54,6 +59,26 @@ Ui::FlatLabel *Progress(Ui::VerticalLayout &rows) {
     }
     return nullptr;
 }
+
+struct StripInputModel {
+    bool inFinish = false, inTransition = false;
+    bool finishing() const { return inFinish; }
+    bool transitioning() const { return inTransition; }
+};
+struct StripInputDock {
+    StripInputModel model;
+    std::optional<int> ready;
+    std::array<ushort, 64> levels = {};
+    int levelIndex = 0;
+};
+StripInputDock &TheDock() { static auto dock = StripInputDock(); return dock; }
+std::array<int, 5> StripCalls = {};
+void OpenTarget() { ++StripCalls[0]; }
+void Pause() { ++StripCalls[1]; }
+void Preview() { ++StripCalls[2]; }
+void Send(int) { ++StripCalls[3]; }
+void Discard() { ++StripCalls[4]; }
+
 #include "recording-bin.inc"
 } // namespace
 
@@ -112,6 +137,166 @@ int main(int argc, char **argv) {
                 expect(!Progress(rows), "stopped row unsubscribes before later position events");
             }
         }
+        for (const auto direction : { Qt::LeftToRight, Qt::RightToLeft }) {
+            rows.setLayoutDirection(direction);
+            style::SetRightToLeft(direction == Qt::RightToLeft);
+            for (const auto width : { 120, 240, 480 }) {
+                rows.clear();
+                rows.resizeToWidth(width);
+                const auto actions = rows.add(object_ptr<BinActions>(&rows));
+                const auto text = u"ارسال به گفتگوی دیگری Send to another conversation "_q.repeated(4);
+                auto clicks = 0;
+                const auto button = actions->add(text, [&] { ++clicks; });
+                rows.resizeToWidth(width);
+                expect(actions->rect().contains(button->geometry()), "long translated action stays inside its row");
+                expect(button->accessibilityName() == text, "elided action retains its full accessible name");
+                button->clicked(Qt::NoModifier, Qt::LeftButton);
+                expect(clicks == 1, "narrow translated action remains actionable");
+                rows.resizeToWidth(button->naturalWidth() + 32);
+                expect(button->width() == button->naturalWidth(), "widening restores the natural translated action width");
+            }
+            rows.clear();
+            rows.resizeToWidth(480);
+            AddPlayback(&rows, &player, Kind::Voice, 65000);
+            player.restart(2000);
+            const auto progressText = Progress(rows)->accessibilityName();
+            auto progressLayout = QTextLayout(progressText);
+            auto progressOption = QTextOption();
+            progressOption.setTextDirection(direction);
+            progressLayout.setTextOption(progressOption);
+            progressLayout.beginLayout();
+            const auto progressLine = progressLayout.createLine();
+            progressLayout.endLayout();
+            expect(progressLine.cursorToX(progressText.indexOf(u"0:02"_q))
+                < progressLine.cursorToX(progressText.indexOf(u"1:05"_q)),
+                "elapsed time stays before total time in LTR and RTL");
+            for (const auto sign : { -1, 1 }) {
+                const auto text = SeekText(sign, 10);
+                auto layout = QTextLayout(text);
+                auto option = QTextOption();
+                option.setTextDirection(direction);
+                layout.setTextOption(option);
+                layout.beginLayout();
+                layout.createLine();
+                layout.endLayout();
+                const auto signIndex = text.indexOf(sign < 0 ? QChar(0x2212) : QChar('+'));
+                const auto digitIndex = text.indexOf(QChar('1'));
+                const auto glyphX = [&](int index) {
+                    for (const auto &run : layout.glyphRuns(0, -1,
+                            QTextLayout::RetrieveGlyphPositions | QTextLayout::RetrieveStringIndexes)) {
+                        for (auto i = 0; i != run.stringIndexes().size(); ++i) {
+                            if (run.stringIndexes()[i] == index) return run.positions()[i].x();
+                        }
+                    }
+                    return qreal(-1);
+                };
+                expect(glyphX(signIndex) >= 0 && glyphX(signIndex) < glyphX(digitIndex),
+                    "seek sign glyph stays before the number in LTR and RTL");
+            }
+        }
+        for (const auto rtl : { false, true }) {
+            style::SetRightToLeft(rtl);
+            auto strip = StripLayoutProbe();
+            const auto text = u"پیش‌نمایش ضبط Pause and preview this recording"_q;
+            strip.labels(text);
+            strip.show();
+            for (const auto width : { 120, 320, 640 }) {
+                strip.resize(width + 1, 48);
+                strip.resize(width, 48);
+                QApplication::processEvents();
+                const auto controls = strip.controls();
+                for (const auto control : controls) {
+                    expect(control->width() == 0 || strip.rect().contains(control->geometry()),
+                        "recording strip controls fit a narrow or wide parent");
+                    const auto stock = dynamic_cast<Ui::LinkButton*>(control);
+                    expect(stock && stock->accessibilityName() == text
+                        && stock->accessibilityRole() == QAccessible::Link,
+                        "recording strip uses stock accessible action links");
+                }
+                expect(rtl ? controls[1]->x() > controls[4]->x() : controls[1]->x() < controls[4]->x(),
+                    "recording strip action order mirrors in RTL");
+                strip.labels(text.repeated(3));
+                for (const auto control : strip.controls()) {
+                    expect(control->width() == 0 || strip.rect().contains(control->geometry()),
+                        "live longer recording labels keep their allocated bounds");
+                }
+                strip.labels(text);
+            }
+            if (rtl) {
+                auto image = QImage(strip.size(), QImage::Format_ARGB32_Premultiplied);
+                image.fill(Qt::transparent);
+                strip.render(&image);
+                expect(image.save(u"recording-strip-rtl.png"_q), "synthetic RTL strip rendering is saved");
+            }
+            for (const auto width : { 120, 320, 640 }) {
+                strip.resize(width, 48);
+                TheDock().levels.fill(65535);
+                auto image = QImage(strip.size(), QImage::Format_ARGB32_Premultiplied);
+                image.fill(Qt::transparent);
+                strip.render(&image);
+                auto redUnderControls = 0;
+                for (const auto control : strip.controls()) {
+                    const auto area = control->geometry().intersected(image.rect());
+                    for (auto y = area.top(); y <= area.bottom(); ++y) {
+                        for (auto x = area.left(); x <= area.right(); ++x) {
+                            const auto color = image.pixelColor(x, y);
+                            redUnderControls += color.red() > 200 && color.green() < 60 && color.blue() < 60;
+                        }
+                    }
+                }
+                expect(!redUnderControls, "actual strip paint never puts waveform pixels under transparent controls");
+                if (width == 320) {
+                    expect(image.save(rtl ? u"recording-strip-wave-rtl.png"_q : u"recording-strip-wave-ltr.png"_q),
+                        "actual nonzero-level strip paint render is saved");
+                }
+            }
+            strip.resize(640, 48);
+            for (const auto finishing : { false, true }) {
+                for (const auto transitioning : { false, true }) {
+                    for (const auto ready : { false, true }) {
+                        TheDock().model.inFinish = finishing;
+                        TheDock().model.inTransition = transitioning;
+                        TheDock().ready = ready ? std::optional<int>(1) : std::nullopt;
+                        strip.applyInputState();
+                        const auto controls = strip.controls();
+                        for (auto i = 1; i != 5; ++i) {
+                            auto control = controls[i];
+                            control->setFocusPolicy(Qt::StrongFocus);
+                            control->setFocus(Qt::OtherFocusReason);
+                            const auto enabled = !finishing && (!transitioning || i == 4)
+                                && (i != 1 || !ready);
+                            for (const auto keyboard : { false, true }) {
+                                const auto before = StripCalls[i];
+                                if (keyboard) QTest::keyClick(control, Qt::Key_Space);
+                                else QTest::mouseClick(control, Qt::LeftButton);
+                                const auto admitted = StripCalls[i] - before;
+                                expect(enabled ? admitted > 0 : admitted == 0,
+                                    keyboard ? "focused key cannot admit a disabled real strip callback"
+                                        : "native mouse cannot admit a disabled real strip callback");
+                            }
+                        }
+                    }
+                }
+            }
+            TheDock().model = {};
+            TheDock().ready.reset();
+            auto bubble = BubbleControlsProbe();
+            for (const auto side : { 64, 128, 160, 320 }) {
+                bubble.resize(side, side);
+                bubble.place();
+                expect(bubble.rect().contains(bubble.pauseButton->geometry())
+                    && bubble.rect().contains(bubble.cameraButton->geometry()),
+                    "floating recorder controls stay inside their scaled bubble");
+                expect(dynamic_cast<Ui::IconButton*>(bubble.pauseButton)
+                    && dynamic_cast<Ui::IconButton*>(bubble.cameraButton),
+                    "floating recorder uses stock icons instead of clipped translated text");
+                expect(rtl ? bubble.pauseButton->x() > bubble.cameraButton->x()
+                    : bubble.pauseButton->x() < bubble.cameraButton->x(),
+                    "floating recorder actions mirror in RTL");
+            }
+        }
+        style::SetRightToLeft(false);
+        rows.clear();
         AddPlayback(&rows, &player, Kind::Voice, 5000);
         player.restart(-1);
         expect(Progress(rows)->accessibilityName() == u"Playback failed"_q, "asynchronous decoder errors are visible");

@@ -17,6 +17,15 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'sync-auto-service': {
+        'program': 'sync_auto_service_cases.cpp',
+        'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc'],
+        'syntax_units': ['purple/purple_sync_auto_service.cpp', 'purple/purple_sync_setup_box.cpp'],
+        'units': [],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'Foundation', 'AppKit'],
+    },
+
     'peek-file': {
         'program': 'peek_file_cases.cpp',
         'units': ['purple/purple_config_file.cpp'],
@@ -138,11 +147,12 @@ CASES = {
     },
     'recording-bin': {
         'program': 'recording_bin_cases.cpp',
+        'syntax_units': ['purple/purple_media_seek.cpp', 'purple/purple_recording_dock.cpp', 'purple/purple_round_recording.cpp'],
         'generated': ['recording-bin.inc'],
         'units': ['ui/text/format_values.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
         'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
         'libraries': ['Telegram/lib_ui/liblib_ui.a', 'Telegram/lib_base/liblib_base.a'],
-        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'Foundation', 'AppKit', 'Metal'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'QtTest', 'Foundation', 'AppKit', 'Metal'],
         'link': ['-lobjc'],
     },
     'recording-store-startup': {
@@ -202,6 +212,59 @@ def slices(sources):
             + function(editor, 'PhotoModifications::~PhotoModifications()') + '\n}\n',
     }
 
+
+
+
+def sync_setup_status_include(sources):
+    text = (sources / 'purple/purple_sync_setup_box.cpp').read_text()
+    result = (function(text, 'void RefreshFirstUseStatus(') if 'void RefreshFirstUseStatus(' in text
+        else 'void RefreshFirstUseStatus(SetupBoxState&) {}')
+    body = function(text, 'const auto updateAutomatic = [=] ')
+    subscription = 'AutomaticSettingsSyncChanges() | rpl::on_next(updateAutomatic, box->lifetime());'
+    assert subscription in text
+    result += '\nvoid RegisterStatus(Box *box, SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) {\n'
+    result += body + ';\n' + subscription + '\n}\n'
+    result += '\nvoid RegisterStatusRefresh(SetupBoxState *state, Ui::Checkbox *automatic, QLabel *automaticStatus) { ' + body + '; updateAutomatic(); }\n'
+    refresh = function(text, 'void RefreshButtons(')
+    block = function(refresh, 'if (!available && !busy && state.selectedSession)')
+    result += '\nvoid RefreshUnavailable(SetupBoxState &state) { const auto available = SelectedAvailable(state); const auto busy = Busy(state); ' + block + ' }\n'
+    refresh = function(text, 'void RefreshButtons(')
+    result += '\nvoid RefreshAuxiliary(SetupBoxState &state) {' + ('if (state.refreshAuxiliary) { state.refreshAuxiliary(); }' if 'state.refreshAuxiliary' in refresh else '') + '}\n'
+    return result
+
+def sync_auto_service_include(sources):
+    text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
+    signatures = ['void AutoSession::RetireBackstop(', 'bool AutoSession::BackstopCurrent(',
+        'void AutoSession::RefreshBackstop(', 'void AutoSession::Backstop(']
+    if signatures[0] in text:
+        result = '\n'.join(function(text, signature) for signature in signatures)
+    else:
+        result = ('void AutoSession::RetireBackstop() {}\nvoid AutoSession::RefreshBackstop() {}\n'
+            'bool AutoSession::BackstopCurrent() const { return false; }\nvoid AutoSession::Backstop(uint64_t) {}\n')
+    event = function(text, 'bool AutoSession::Event(')
+    result += '\nconstexpr auto EventRefreshesBackstop = ' + ('true' if 'gsl::finally([=] { RefreshBackstop(); })' in event else 'false') + ';\n'
+    for signature in ['AutoSession &For(', 'void StartAutomaticSettingsSync(',
+            'void TriggerAutomaticSettingsSync(', 'bool SetAutomaticSettingsSync(']:
+        result += function(text, signature) + '\n'
+    return result.replace('Main::Session', 'Session').replace('crl::on_main(', 'OnMain(').replace('crl::now()', 'ClockNow()').replace('MTP::Instance', 'void')
+
+def sync_first_use_boundary_include(sources):
+    text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
+    result = function(text, 'void AutoSession::FirstUse(') + '\n' + function(text, 'bool AutoSession::NoStateEvent(')
+    for signature, fallback in [('bool AutoSession::FirstUseCurrent(', 'bool AutoSession::FirstUseCurrent(uint64_t) const { return true; }'),
+            ('void AutoSession::CancelAutomaticFirstUse(', 'void AutoSession::CancelAutomaticFirstUse() {}')]:
+        result += '\n' + (function(text, signature) if signature in text else fallback)
+    result += '\nconstexpr auto DisableCancelsFirstUse = ' + ('true' if 'CancelAutomaticFirstUse();' in function(text, 'bool AutoSession::Event(') else 'false') + ';\n'
+    publish = function(text, 'void AutoSession::FirstUsePublish(')
+    guard = function(publish, '[weak, chat')
+    result += '\nFn<bool()> PublishGuard(AutoSession *self) { const auto weak = base::make_weak(self); const auto chat = 1; const auto epoch = self->_firstEpoch; return ' + guard + '; }\n'
+    joined = function(text, 'void AutoSession::FirstUseJoined(')
+    prefix = joined[joined.index('{') + 1:joined.index('const auto session =')]
+    result += '\nvoid AutoSession::ApplyBoundary() {' + prefix + ' ++applies; }\n'
+    finished = function(text, 'void AutoSession::FirstUseFinish(')
+    success = function(finished, 'if (target && (outcome == SyncFirstUseOutcome::Published')
+    result += '\nvoid AutoSession::FinishSuccessBoundary() { const auto session = _session.get(); const auto target = AccountSyncInspectionTarget(session); const auto outcome = SyncFirstUseOutcome::Joined; ' + success + '}\n'
+    return result.replace('Main::Session', 'Session').replace('crl::on_main(', 'OnMain(')
 
 def recording_startup_include(sources):
     store = (sources / 'purple/purple_recording_store.cpp').read_text()
@@ -309,10 +372,55 @@ int main(int argc, char **argv) {
 }
 """
 
+
+def recording_controls_include(sources):
+    dock = (sources / 'purple/purple_recording_dock.cpp').read_text()
+    strip = function(dock, 'class Strip final')
+    stock = 'Ui::LinkButton _title, _pause, _preview, _send, _discard;' in strip
+    fields = ('Ui::LinkButton _title, _pause, _preview, _send, _discard;' if stock
+        else 'QLabel _title; QPushButton _pause, _preview, _send, _discard;')
+    names = ['_title', '_pause', '_preview', '_send', '_discard']
+    init = ', '.join(name + '(this' + (', QString()' if stock else '') + ')' for name in names)
+    layout = function(strip, 'void resizeEvent(')
+    if 'void layoutButtons()' in strip:
+        layout += '\n' + function(dock, 'void Strip::layoutButtons(').replace('Strip::layoutButtons', 'layoutButtons')
+    refresh = function(strip, 'void refresh()')
+    refresh_layout = 'layoutButtons();' if 'layoutButtons();' in refresh else ''
+    disable = refresh[refresh.index('for (const auto button : { &_pause, &_preview, &_send, &_discard })'):
+        refresh.index('\n\t\tlayoutButtons();')]
+    wiring = '\n'.join(line.strip() for line in strip.splitlines() if '.setClickedCallback(' in line)
+    paint = function(strip, 'paintRequest() | rpl::on_next([=] ') + ', lifetime());'
+    enable_helper = (function(dock, 'void SetStripActionEnabled(') + '\n'
+        if 'void SetStripActionEnabled(' in dock else '')
+
+    result = (enable_helper + 'class StripLayoutProbe final : public Ui::RpWidget {\npublic:\n'
+        'StripLayoutProbe() : RpWidget(nullptr), ' + init + ' { ' + wiring + paint + ' }\n'
+        'void applyInputState() { const auto &dock = TheDock(); ' + disable + ' }\n'
+        'void labels(const QString &text) { ' + ' '.join(name + '.setText(text);' for name in names)
+        + refresh_layout + ' }\n'
+        'std::array<QWidget*, 5> controls() { return { &_title, &_pause, &_preview, &_send, &_discard }; }\n'
+        + layout + '\nprivate:\n' + fields + '\n};\n')
+    round_source = (sources / 'purple/purple_round_recording.cpp').read_text()
+    place = function(round_source, 'void Place(')
+    block = function(place, 'if (state->pauseButton)')
+    icon = 'Ui::IconButton *pauseButton' in round_source
+    button_type = 'Ui::IconButton' if icon else 'QPushButton'
+    construct = ('new Ui::IconButton(this, st::defaultIconButton)' if icon
+        else 'new QPushButton(QString(), this)')
+    result += ('class BubbleControlsProbe final : public Ui::RpWidget {\npublic:\n'
+        'BubbleControlsProbe() : RpWidget(nullptr), pauseButton(' + construct
+        + '), cameraButton(' + construct + ') {}\n'
+        'void place() { const auto side = width(); const auto state = this; ' + block + ' }\n'
+        + button_type + ' *pauseButton, *cameraButton;\n};\n')
+    return result
+
 def recording_bin_include(sources):
     text = (sources / 'purple/purple_recording_bin_box.cpp').read_text()
     result = text[text.index('class BinActions final'):text.index('[[nodiscard]] QString MarkText(')]
     result += text[text.index('Ui::LinkButton *BinActions::add('):text.index('void AddItem(')]
+    seek = (sources / 'purple/purple_media_seek.cpp').read_text()
+    result += function(seek, '[[nodiscard]] QString SeekText(') + '\n'
+    result += recording_controls_include(sources)
     return result.replace('st::boxLabel', 'st::defaultFlatLabel').replace(
         'st::boxRowPadding', 'QMargins(8, 8, 8, 8)')
 
@@ -378,6 +486,9 @@ pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['unit
 for name in case.get('generated', []):
     generate = {
         'recording-bin.inc': recording_bin_include,
+        'sync-auto-service.inc': sync_auto_service_include,
+        'sync-first-use-boundary.inc': sync_first_use_boundary_include,
+        'sync-setup-status.inc': sync_setup_status_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,
     }.get(name, flow_include)
@@ -396,6 +507,10 @@ for unit in [*case['units'], 'purple/tests/' + case['program']]:
         units.append(sources / unit)
 objects = []
 with (work / 'build.log').open('w') as log:
+    for unit in case.get('syntax_units', []):
+        command = [recipe[0], *include, *flags['.cpp'], '-fsyntax-only', str(sources / unit),
+            '-MD', '-MF', str(work / (Path(unit).stem + '-syntax.d'))]
+        subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
     for source in units:
         objects.append(work / (source.stem + '.o'))
         toml = ['-I' + str(repo / 'Telegram/ThirdParty/purple_core/tomlplusplus')] if 'purple_core' in source.parts else []
@@ -433,6 +548,7 @@ with (work / 'build.log').open('w') as log:
         subprocess.run([str(work / 'fixture'), str(work / 'fixtures/emoji.webp'), str(work / 'fixtures/emoji.png')],
             cwd=work, env=dict(os.environ, QT_QPA_PLATFORM='offscreen'), stdout=log, stderr=subprocess.STDOUT, check=True)
 (work / 'inputs.json').write_text(json.dumps({'case': args.case, 'link': link,
+    'syntaxSources': {unit: hashlib.sha256((sources / unit).read_bytes()).hexdigest() for unit in case.get('syntax_units', [])},
     'sources': {str(path.relative_to(repo) if repo in path.parents else path.relative_to(work)): hashlib.sha256(path.read_bytes()).hexdigest() for path in units}}, indent=2) + '\n')
 arguments = [value.replace('{fixtures}', str(work / 'fixtures')) for value in case.get('arguments', [])]
 result = subprocess.run([str(binary), *arguments], cwd=work, env=dict(os.environ, QT_QPA_PLATFORM='offscreen'))

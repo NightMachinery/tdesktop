@@ -247,6 +247,7 @@ int BinActions::resizeGetHeight(int width) {
 	auto top = 0;
 	auto height = 0;
 	for (const auto button : _buttons) {
+		button->resizeToWidth(std::min(button->naturalWidth(), width));
 		if (left > 0 && left + button->width() > width) {
 			left = 0;
 			top += height + st::boxRowPadding.top();
@@ -270,8 +271,10 @@ void AddPlayback(
 	rpl::single(player->position()) | rpl::then(
 		player->positionUpdates()
 	) | rpl::on_next([=](crl::time position) {
-		progress->setText(Ui::FormatDurationText(position / 1000)
-			+ u" / "_q + Ui::FormatDurationText(duration / 1000));
+		progress->setText(QChar(0x2066)
+			+ Ui::FormatDurationText(position / 1000)
+			+ u" / "_q + Ui::FormatDurationText(duration / 1000)
+			+ QChar(0x2069));
 	}, progress->lifetime());
 	player->repaints() | rpl::on_next([=] {
 		if (weak && !weak->valid()) {
