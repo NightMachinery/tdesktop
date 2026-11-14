@@ -918,6 +918,9 @@ hunks, near 4. Final.
 
 **`Telegram/SourceFiles/core/core_settings.cpp` and `core_settings.h`**, owner
 B9:
+- `macWarnBeforeQuit` defaults false. The settings reader and logout reset call
+  `Purple::ApplyQuitPreferenceDefault` to disable the inherited hold-to-quit
+  flag once per installation, while preserving a later explicit opt-in.
 - The dash preference key, accessor, setter and member leave `Core::Settings`.
   The changed `_replaceEmoji` and `_systemTextReplace` defaults remain false.
 - `resetOnLastLogout` still clears `_prefs`; after that, the Purple getter sees

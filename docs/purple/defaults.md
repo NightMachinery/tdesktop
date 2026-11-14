@@ -17,6 +17,19 @@ desktop has no equivalent file. Its archive default is a member initialiser,
 it. The desktop-only dash replacement choice below is an app preference rather
 than a compile-time default.
 
+## Cmd+Q quits without holding the keys
+
+On macOS, **Warn before quitting** under Settings > Advanced defaults off, so
+Cmd+Q quits immediately. The first upgrade carrying this default also turns off
+the inherited serialized flag in existing installations. A local preference
+records that migration; choosing the warning again afterward persists normally.
+Last-account logout clears the migration preference and resets the warning off.
+This setting is not part of Purple sync or `settings.toml`.
+
+`Purple::ApplyQuitPreferenceDefault` owns the migration. The upstream settings
+reader and logout reset call it after loading or clearing generic preferences;
+the existing macOS quit handler and Advanced checkbox remain unchanged.
+
 ## Automatic text replacements are off by default
 
 Purple Telegram defaults **Replace emoji automatically** under Settings > Chat

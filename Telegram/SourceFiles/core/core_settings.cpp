@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/core_settings.h"
 
+#include "purple/purple_quit_defaults.h"
+
 #include "base/platform/base_platform_info.h"
 #include "calls/group/calls_group_common.h"
 #include "history/view/history_view_quick_action.h"
@@ -1240,6 +1242,7 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	case Media::OrderMode::Shuffle: _playerOrderMode = uncheckedPlayerOrderMode; break;
 	}
 	_macWarnBeforeQuit = (macWarnBeforeQuit == 1);
+	Purple::ApplyQuitPreferenceDefault(*this);
 	_hardwareAcceleratedVideo = (hardwareAcceleratedVideo == 1);
 	{
 		using Quick = HistoryView::DoubleClickQuickAction;
@@ -1766,6 +1769,7 @@ void Settings::resetOnLastLogout() {
 	_ttlVoiceClickTooltipHidden = false;
 	const auto srDisabled = readPref<bool>(kScreenReaderModeDisabledKey);
 	_prefs.clear();
+	Purple::ApplyQuitPreferenceDefault(*this);
 	if (srDisabled) {
 		writePref<bool>(kScreenReaderModeDisabledKey, true);
 	}

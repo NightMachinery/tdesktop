@@ -1174,7 +1174,7 @@ private:
 	rpl::variable<QString> _customDeviceModel;
 	rpl::variable<Media::RepeatMode> _playerRepeatMode;
 	rpl::variable<Media::OrderMode> _playerOrderMode;
-	bool _macWarnBeforeQuit = true;
+	bool _macWarnBeforeQuit = false;
 	std::vector<uint64> _accountsOrder;
 #ifdef Q_OS_MAC
 	bool _hardwareAcceleratedVideo = true;
