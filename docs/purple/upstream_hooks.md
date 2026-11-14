@@ -58,6 +58,13 @@ the numbers.
   passcode, queue, rendering and publication decisions live in
   `purple/purple_emoji_export.*`; see [emoji_export.md](emoji_export.md).
 
+## Playlist account lifecycle
+
+- `main/main_account.cpp`: one Purple include and one call before each ordinary
+  and forced logout revoke playlist worker authority immediately. Queued edits,
+  store closure and callback lifetime checks live in `purple_playlists_service`
+  and `purple_playlists_worker`; see [playlists.md](playlists.md).
+
 ## Recipient picker visibility
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server

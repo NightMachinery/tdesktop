@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_playlists_service.h"
 #include "purple/purple_media_reply_splice.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_wait_gate.h"
@@ -450,6 +451,7 @@ Config::Config()
 
 	startWatching();
 	AccountRouting().setChanged([=] {
+		InvalidatePlaylistServices();
 		_accountRefreshPending = true;
 		_reload.callOnce(kReloadDelay);
 	});

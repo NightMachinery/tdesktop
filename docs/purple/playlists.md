@@ -7,9 +7,9 @@ sync-step planning. Its contract and focused tests are described in
 [the core playlist documentation](../../Telegram/ThirdParty/purple_core/docs/playlists.md).
 
 These sources alone do not expose playlists in the client. Song resolution,
-menus, playlist queues, downloads, sync transport and the account service that
-connects them remain to be implemented. Sharing is deferred, and changing the
-sync chat does not clean records from the old chat.
+menus, playlist queues, downloads and sync transport remain to be implemented.
+Sharing is deferred, and changing the sync chat does not clean records from the
+old chat.
 
 The gzip codec uses the existing `desktop-app::external_zlib` dependency.
 Playlist sources are registered in `Telegram/cmake/purple.cmake`, alongside
@@ -50,3 +50,26 @@ fields, and serialize local edits and merge results through the same store.
 The storage component performs no listing, upload, pruning or account login.
 `cases-playlists-store` exercises real temporary files, the real codecs and
 durability helpers, with controlled routing changes and write failures.
+
+## Account service
+
+`ReadAccountPlaylists` and `EditAccountPlaylists` lazily create an account-owned
+`crl::object_on_thread` worker. Reads and edits run serially on that thread,
+including opening and releasing the per-account store lock. Each edit reloads
+the current library before applying a typed shared-core operation, preserves
+unknown local fields and the earliest unsynced age, then reloads after an
+attempted write. Results keep core edit errors and partial durable-write
+outcomes separate from the current snapshot.
+
+Only the main thread captures the account routing and touches session objects.
+Routing changes, ordinary or forced logout, and session destruction revoke an
+atomic token before retiring the worker. Queued work checks that token through
+the store's durable-write guards. Already committed files remain committed;
+revocation cannot undo accepted writes. Main-thread completions recheck the
+route, and destroyed sessions receive no late callback. A retiring worker may
+briefly retain its lock, so a new route can report Busy until it has closed.
+
+The service performs no automatic account-file access at startup. The playlist
+UI will request a read when needed. `cases-playlists-service` exercises the
+production service body with controlled account and routing ports, real CRL
+threads, temporary files, shared-core edits and the durable store.

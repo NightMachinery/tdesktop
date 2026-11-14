@@ -182,6 +182,10 @@ PRIVATE
     purple/purple_music_listening_settings.cpp
     purple/purple_playlists_store.cpp
     purple/purple_playlists_store.h
+    purple/purple_playlists_worker.cpp
+    purple/purple_playlists_worker.h
+    purple/purple_playlists_service.cpp
+    purple/purple_playlists_service.h
     purple/purple_media_restart.cpp
     purple/purple_media_restart.h
     purple/purple_media_rules.cpp

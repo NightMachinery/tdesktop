@@ -17,6 +17,25 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'playlists-service': {
+        'program': 'playlists_service_cases.cpp',
+        'generated': ['playlists-service.inc'],
+        'syntax_units': ['purple/purple_playlists_service.cpp',
+            'purple/purple_config.cpp', 'main/main_account.cpp'],
+        'units': ['purple/purple_playlists_worker.cpp', 'purple/purple_playlists_store.cpp',
+            'purple/purple_sync_local_store.cpp', 'core:purple/purple_account_files.cpp',
+            'core:purple/purple_local_choice.cpp', 'core:purple/purple_peer_token.cpp',
+            'core:purple/purple_sync_json.cpp', 'core:purple/purple_playlists.cpp',
+            'core:purple/purple_playlists_local.cpp', 'core:purple/purple_playlists_ops.cpp'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'objects': [
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/crl_object_on_thread.cpp.o',
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/common/crl_common_list.cpp.o',
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/common/crl_common_fp_exceptions.cpp.o',
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/dispatch/crl_dispatch_semaphore.cpp.o'],
+        'frameworks': ['QtCore', 'Foundation', 'AppKit', 'CoreFoundation'],
+        'link': ['-Wl,-dead_strip'],
+    },
     'playlists-store': {
         'program': 'playlists_store_cases.cpp',
         'units': ['purple/purple_playlists_store.cpp', 'purple/purple_sync_local_store.cpp',
@@ -214,6 +233,11 @@ def function(text, signature):
         depth += (text[end] == '{') - (text[end] == '}')
         end += 1
     return text[start:end]
+
+
+def playlists_service_include(sources):
+    source = (sources / 'purple/purple_playlists_service.cpp').read_text()
+    return source[source.index('namespace Purple {'):]
 
 
 def music_listening_include(sources):
@@ -518,6 +542,7 @@ if case['program'].endswith('.mm'):
 pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['units']) else {}
 for name in case.get('generated', []):
     generate = {
+        'playlists-service.inc': playlists_service_include,
         'music-listening-tracker.inc': music_listening_include,
         'recording-bin.inc': recording_bin_include,
         'sync-auto-service.inc': sync_auto_service_include,
