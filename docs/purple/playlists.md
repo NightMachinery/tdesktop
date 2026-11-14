@@ -6,8 +6,8 @@ bounded gzip records, record discovery, verified cover checks and complete
 sync-step planning. Its contract and focused tests are described in
 [the core playlist documentation](../../Telegram/ThirdParty/purple_core/docs/playlists.md).
 
-These sources alone do not expose playlists in the client. Song resolution,
-menus, playlist queues, downloads and sync transport remain to be implemented.
+These sources alone do not expose playlists in the client. Menus, playlist
+queues, downloads and sync transport remain to be implemented.
 Sharing is deferred, and changing the sync chat does not clean records from the
 old chat.
 
@@ -73,3 +73,30 @@ The service performs no automatic account-file access at startup. The playlist
 UI will request a read when needed. `cases-playlists-service` exercises the
 production service body with controlled account and routing ports, real CRL
 threads, temporary files, shared-core edits and the durable store.
+
+## Song resolution
+
+`DesktopPlaylistResolver` reads sources for the captured session and account.
+It checks loaded messages first, then batches up to 100 sources through the
+shared `SyncRequestSender`. Self, user and basic-group references use
+`messages.getMessages`; channels use `channels.getMessages` and their access
+hash. An unknown channel can first use its saved public username hint, but the
+resolved numeric channel must match the stored channel. A reassigned username
+cannot redirect a song. Missing hints or access report No access; callers can
+retry when the channel becomes known on that device.
+
+Every successful source must be the expected document, a regular server song
+in the message's main media, and permitted by the existing save policy.
+Definitive Deleted, No access, Changed or Restricted results try the saved
+fallbacks in order. Network failures stop that row until the next explicit
+resolution; flood waits remain with the shared request scheduler. Resolving a
+fallback never relinks the stored song. Invalid or incomplete response shapes
+cannot establish that a song was deleted.
+
+The resolution queue preserves row order, yields between chunks even for
+cached rows, and drops late or duplicate completions. It returns source
+references for playback through the stock message player and file-reference
+refresh path. Results are memory-only. `cases-playlists-resolver` exercises the
+production queue and channel-identity check with controlled cache/read/defer
+ports; the real Telegram adapter is syntax-compiled. Live RPC behavior and
+playlist UI/player integration are not yet qualified.

@@ -68,6 +68,7 @@ QString SyncRequestMethodName(mtpTypeId type) {
 	case mtpc_messages_getHistory: return u"messages.getHistory"_q;
 	case mtpc_messages_getMessages: return u"messages.getMessages"_q;
 	case mtpc_channels_getMessages: return u"channels.getMessages"_q;
+	case mtpc_contacts_resolveUsername: return u"contacts.resolveUsername"_q;
 	case mtpc_messages_sendMedia: return u"messages.sendMedia"_q;
 	case mtpc_messages_editMessage: return u"messages.editMessage"_q;
 	case mtpc_messages_deleteMessages: return u"messages.deleteMessages"_q;

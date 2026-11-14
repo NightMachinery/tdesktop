@@ -186,6 +186,10 @@ PRIVATE
     purple/purple_playlists_worker.h
     purple/purple_playlists_service.cpp
     purple/purple_playlists_service.h
+    purple/purple_playlists_resolve_queue.cpp
+    purple/purple_playlists_resolve_queue.h
+    purple/purple_playlists_resolver.cpp
+    purple/purple_playlists_resolver.h
     purple/purple_media_restart.cpp
     purple/purple_media_restart.h
     purple/purple_media_rules.cpp
