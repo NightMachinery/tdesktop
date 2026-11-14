@@ -338,6 +338,21 @@ bool RestartFloatOnDoubleClick(const HistoryItem *item) {
 	return true;
 }
 
+bool KeepFloatVisible(const HistoryItem *item) {
+	if (!item) {
+		return false;
+	}
+	const auto player = Media::Player::instance();
+	const auto current = player->current(AudioMsgId::Type::Voice);
+	const auto document = current.audio();
+	const auto state = player->getState(AudioMsgId::Type::Voice);
+	return document
+		&& (&document->session() == &item->history()->session())
+		&& (current.contextId() == item->fullId())
+		&& (state.id == current)
+		&& !Media::Player::IsStoppedOrStopping(state.state);
+}
+
 void DecorateFloat(
 		not_null<Media::Player::Float*> floating,
 		Fn<void(not_null<const HistoryItem*>)> open) {

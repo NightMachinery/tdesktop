@@ -1516,8 +1516,8 @@ First Purple edit in this file.
   queue). It returns nullopt, and upstream runs unchanged, for songs, manual
   next or previous and any queue that is not confined.
 
-**`Telegram/SourceFiles/media/player/media_player_float.cpp`**: +6 -0. First
-Purple edit in this file.
+**`Telegram/SourceFiles/media/player/media_player_float.cpp`**: floating-round
+size, controls, restart and seek visibility hooks.
 - The facade include, after the file's own header.
 - `Float::Float`: one inserted line after the stock size,
   `size = Purple::FloatPlayerSize(parent, document, size);` (the float keeps
@@ -1526,6 +1526,10 @@ Purple edit in this file.
   double-click callback because the "open the message" button reuses it.
 - `Float::mouseDoubleClickEvent`: one early return through
   `Purple::RestartFloatOnDoubleClick` (double-click restarts the round).
+- `Float::paintEvent` and `FloatController::toggle`: `Purple::KeepFloatVisible`
+  preserves an already-visible current round across the decoder's temporary
+  lack of a ready frame during seeking. History hiding, stop, detach and
+  first-frame admission retain their existing behavior.
 
 ## Media recording (dock, background, PiP, seek, crash safety)
 

@@ -152,6 +152,11 @@ stock 128px circle too:
 
 A second row under them seeks back and forward by the seek step; see
 [media_recording.md](media_recording.md).
+Step seeking keeps the floating video in place and displays its previous
+frame while the same message's decoder prepares the new position. A temporary
+missing frame does not trigger the slide-out and slide-in animation. Stop,
+close, switching messages, and hiding the float behind its chat still work
+normally; a float that has not appeared yet still waits for its first frame.
 
 Clicks land only on the buttons; a press anywhere else still drags, and a
 single click still pauses or resumes. A double-click on the float now

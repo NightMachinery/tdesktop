@@ -54,6 +54,7 @@ namespace Purple {
 	int size);
 
 [[nodiscard]] bool RestartFloatOnDoubleClick(const HistoryItem *item);
+[[nodiscard]] bool KeepFloatVisible(const HistoryItem *item);
 void DecorateFloat(
 	not_null<Media::Player::Float*> floating,
 	Fn<void(not_null<const HistoryItem*>)> open);

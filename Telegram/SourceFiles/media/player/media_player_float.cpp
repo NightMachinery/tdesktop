@@ -247,6 +247,7 @@ void Float::paintEvent(QPaintEvent *e) {
 
 	const auto inner = getInnerRect();
 	if (!(_roundPainter && _roundPainter->fillFrame(inner.size()))
+		&& !Purple::KeepFloatVisible(_item)
 		&& _toggleCallback) {
 		_toggleCallback(false);
 	}
@@ -434,7 +435,9 @@ void FloatController::create(not_null<HistoryItem*> item) {
 }
 
 void FloatController::toggle(not_null<Item*> instance) {
-	auto visible = !instance->hiddenByHistory && !instance->hiddenByWidget && instance->widget->isReady();
+	auto visible = !instance->hiddenByHistory && !instance->hiddenByWidget
+		&& (instance->widget->isReady()
+			|| (instance->visible && Purple::KeepFloatVisible(instance->widget->item())));
 	if (instance->visible != visible) {
 		instance->widget->resetMouseState();
 		instance->visible = visible;
