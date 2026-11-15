@@ -680,11 +680,14 @@ void PlaylistView::updateSongPlayback() {
 	const auto belongs = _playback.playlistId == _playlistId
 		&& _playback.phase != PlaylistPlaybackPhase::Inactive
 		&& _playback.phase != PlaylistPlaybackPhase::Retired;
-	const auto audio = Media::Player::instance()->current(AudioMsgId::Type::Song).audio();
-	const auto actual = audio && &audio->session() == _session.get() ? audio->id : uint64_t(0);
-	if (belongs && actual && _playback.phase == PlaylistPlaybackPhase::Playing
-		&& _playback.documentId == actual) _currentSong = actual;
-	if (!belongs || !actual || _currentSong != actual) _currentSong = 0;
+	const auto session = _session.get();
+	const auto target = session
+		? CurrentAccountPlaylistTarget(
+			session,
+			Media::Player::instance()->current(AudioMsgId::Type::Song))
+		: std::nullopt;
+	_currentSong = target && target->playlistId == _playlistId
+		? target->documentId : 0;
 	auto state = QString();
 	if (belongs && _playback.problem != PlaylistPlaybackProblem::None) {
 		state = PlaybackText(_playback);

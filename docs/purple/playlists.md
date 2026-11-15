@@ -396,3 +396,11 @@ is no owned target. The label uses the stock pointer cursor for this action.
 The UI bridge requires the virtual-list box entry point `ShowPlaylistBox`.
 Native ownership/publication, account changes during opening, reveal after a
 library edit and real hover/click behavior require integration qualification.
+
+The Current marker also uses that owned-current target directly. A newly opened
+view therefore marks the delivered song while a successor resolves or after
+exhaustion, independently of earlier Playing notifications. The checked-source
+status still belongs only to the facade's reported row. Pending unowned attempts
+do not gain a marker from document membership. Native checks must compare fresh
+and existing views with a held successor, paused/exhausted state and unowned
+initial playback.
