@@ -346,6 +346,16 @@ void AddItem(
 		const auto own = RecordingAccountSession(item.account);
 		const auto session = own ? own : &controller->session();
 		if (ActiveSettings().recording.sendElsewhere) {
+			if (!item.viewOnce) {
+				const auto weakSession = base::make_weak(&controller->session());
+				add(tr::lng_purple_recording_bin_send_saved(tr::now), [=] {
+					if (const auto session = weakSession.get()) {
+						Send(box, id, session->data().history(session->user()).get());
+					} else {
+						box->uiShow()->showToast(tr::lng_purple_recording_bin_send_failed(tr::now));
+					}
+				});
+			}
 			add(tr::lng_purple_recording_send_elsewhere(tr::now), [=] {
 				box->uiShow()->showBox(Window::PrepareChooseRecipientBox(
 					session,

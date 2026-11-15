@@ -424,6 +424,12 @@ mark: "Recovered after a crash", "Partly recovered", "Not sent",
   A round is remuxed into a standard MP4 first, so a fragmented recovery
   copy is never sent, even in the seconds before it is finalised.
   View-once is kept. The item waits in `sending` until the message is sent.
+- Send to Saved Messages sends a playable, non-view-once item to the account
+  that owns the current window, matching Android's shortcut. It uses the
+  existing stock `Ui::LinkButton` action row and the same encrypted-bin
+  send route as Send. The destination session is held weakly, so signing
+  out cannot redirect an obsolete click to a replacement account. This
+  shortcut follows `send_elsewhere_p`; it does not open a recipient picker.
 - Send to another chat opens upstream's chooser for the recording's account
   (`send_elsewhere_p`).
 - Save writes the decrypted file where the user picks, the download folder by

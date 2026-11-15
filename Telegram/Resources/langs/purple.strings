@@ -603,6 +603,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_recording_bin_stop" = "Stop";
 "lng_purple_recording_bin_play_failed" = "This recording cannot be played.";
 "lng_purple_recording_bin_send" = "Send";
+"lng_purple_recording_bin_send_saved" = "Send to Saved Messages";
 "lng_purple_recording_bin_send_failed" = "This recording could not be sent.";
 "lng_purple_recording_bin_save" = "Save";
 "lng_purple_recording_bin_saved" = "Saved.";
