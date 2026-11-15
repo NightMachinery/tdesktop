@@ -1520,8 +1520,8 @@ no facade covers those yet.
   content provenance and menu routes".
 
 **`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +71 -0.
-- The playback facade, saved-playlist adapter and handoff hook includes follow
-  the file's own header.
+- The playback facade immediately follows the file's own header, before the
+  timer, saved-playlist adapter and handoff hook includes.
 - `Instance::play` and `stop` delegate Song intent admission before native work.
   Repeat One uses a one-shot internal authorization. Purple owns revocation of
   pending playlist reads/resolution and the cross-publication start generation.
@@ -1541,7 +1541,8 @@ no facade covers those yet.
 
 **`Telegram/SourceFiles/media/player/media_player_float.cpp`**: floating-round
 size, controls, restart and seek visibility hooks.
-- The facade include, after the file's own header.
+- The facade include immediately follows the file's own header, before the
+  sleep-timer UI include.
 - `Float::Float`: one inserted line after the stock size,
   `size = Purple::FloatPlayerSize(parent, document, size);` (the float keeps
   the in-chat size), and `Purple::DecorateFloat(this, _doubleClickedCallback);`
@@ -1804,7 +1805,8 @@ fall through into replay. Voice remains outside Song frame/token authority.
 
 Native seek and pause scopes retain the frame through seek completion and
 resume-flag writes. The timer's same-item held-seek and viewer/PiP intent rules
-are retained. These hooks remain private, uncompiled and unexecuted.
+are retained. These hooks are integrated and production-compiled; complete host
+and native/GUI qualification remain pending.
 
 The combined source-relative changes in upstream files are:
 

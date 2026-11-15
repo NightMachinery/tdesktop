@@ -6,9 +6,10 @@ bounded gzip records, record discovery, verified cover checks and complete
 sync-step planning. Its contract and focused tests are described in
 [the core playlist documentation](../../Telegram/ThirdParty/purple_core/docs/playlists.md).
 
-The Desktop candidate adds account-local playlist menus and basic saved-order
-playback. It is a private, uncompiled integration draft. Advanced queue modes,
-downloads and sync transport remain to be implemented.
+The Desktop build adds account-local playlist menus and basic saved-order
+playback. The integration is production-compiled; complete host and native/GUI
+qualification remain pending. Advanced queue modes, downloads, sync transport
+and Android parity remain to be implemented.
 Sharing is deferred, and changing the sync chat does not clean records from the
 old chat.
 
@@ -170,15 +171,15 @@ controllers have already removed that subscription; their retained resolvers may
 instead drain at session lifetime destruction. Actual document/destructor order
 remains unqualified and requires native validation.
 
-The proposed `cases-playlist-player` fixture extracts the literal cursor,
+The `cases-playlist-player` fixture extracts the literal cursor,
 resolution classification, bounded-window and handoff authority helpers. It
 covers saved order,
 exhaustion, explicit transient retry admission, stale generation, retired and
 destroyed authority, and forward/backward windows. Production adapter/player
-syntax checks are registered separately. These proposed tests have not been
-compiled or executed. They do not prove real RPC, stock streaming, actual
-session destruction or synchronous player observer behavior; ROOT must run
-those integration and lifetime checks before shipping this draft.
+syntax checks are registered separately. The fixture has compiled, but its host
+qualification is pending. It does not prove real RPC, stock streaming, actual
+session destruction or synchronous player observer behavior; native integration
+and lifetime checks remain required before shipping.
 
 ## Synchronous stock-player handoff
 
@@ -194,8 +195,8 @@ Deferred stock requests capture a weak session and reject logout or session
 replacement. Deferred playlist requests retain numeric resolution data and
 revalidate the source before playback. New playlist intent and player shutdown
 revoke pending work. Voice calls bypass this Song-only handoff authority.
-Only actual native compilation and streaming event-order checks can qualify
-these seams; the drafted helper assertions do not prove native lifetimes.
+The production units compile. Streaming event-order checks remain required;
+the helper assertions do not prove native lifetimes.
 
 ## Upstream hooks
 
@@ -213,7 +214,8 @@ start before it constructs a controller. Adapter-owned Play/Stop and native
 Repeat One consume a one-shot internal authorization at the same entry hook.
 Synchronous subscribers cannot inherit that already-consumed authorization.
 Voice bypasses this Song policy, and the existing autoplay decision order stays
-in stock code. These intent corrections remain uncompiled and unexecuted.
+in stock code. These intent corrections compile; native execution remains
+unqualified.
 
 ## Sleep timer coexistence
 

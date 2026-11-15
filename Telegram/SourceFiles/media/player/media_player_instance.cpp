@@ -6,8 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_instance.h"
-#include "purple/purple_sleep_timer.h"
 #include "purple/hooks/media_playback.h"
+#include "purple/purple_sleep_timer.h"
 #include "purple/hooks/playlist_player.h"
 #include "purple/purple_playlist_player.h"
 

@@ -1,5 +1,8 @@
 # Custom emoji artwork for local tools
 
+The render-cache and demand-wakeup changes are integrated and
+production-compiled. Complete host and native/GUI qualification remain pending.
+
 Turn on **Export custom emoji for local tools** in Purple settings to keep a
 local emoji library catalog, transparent 128 px PNG previews and larger first frames for local choosers. It is off
 by default and applies only to this installation. These files contain emoji

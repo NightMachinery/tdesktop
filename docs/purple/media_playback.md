@@ -258,6 +258,9 @@ typed findChild cannot safely use it as the queried metadata type.
 
 ## Desktop sleep timer
 
+The Desktop integration is production-compiled. Complete host and native/GUI
+qualification remain pending.
+
 One device-local, app-instance timer pauses Song, Voice/round, ordinary viewer
 video and PiP through pause-only paths. Calls, recordings, live streams and
 stories are excluded. Presets are 15 minutes, 30 minutes and one hour; custom
