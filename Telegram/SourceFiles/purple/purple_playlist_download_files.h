@@ -22,12 +22,14 @@ struct PlaylistKeptFileRead {
 	const QString &directory, const QString &token);
 [[nodiscard]] PlaylistKeptFileRead InspectPlaylistStagingFile(
 	const QString &directory, const QString &token,
-	const PlaylistOwnedDownloadIntent &intent);
+	const PlaylistOwnedDownloadIntent &intent,
+	const PlaylistFileAuthority &authority = {});
 [[nodiscard]] PlaylistDownloadStatus DiscardPlaylistStagingFile(
 	const QString &directory, const QString &token, const QByteArray &identity);
 [[nodiscard]] PlaylistKeptFileRead PublishPlaylistStagingFile(
 	const QString &directory, const QString &token,
-	const PlaylistOwnedDownloadIntent &intent);
+	const PlaylistOwnedDownloadIntent &intent,
+	const PlaylistFileAuthority &authority = {});
 [[nodiscard]] QString PlaylistKeptFilePath(
 	const QString &directory, uint64_t id, const QString &extension);
 [[nodiscard]] PlaylistKeptFileRead InspectPlaylistKeptFile(

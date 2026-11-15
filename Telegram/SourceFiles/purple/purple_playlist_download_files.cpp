@@ -143,7 +143,9 @@ PlaylistKeptFileRead CreatePlaylistStagingFile(
 PlaylistKeptFileRead InspectPlaylistStagingFile(
 		const QString &directory,
 		const QString &token,
-		const PlaylistOwnedDownloadIntent &intent) {
+		const PlaylistOwnedDownloadIntent &intent,
+		const PlaylistFileAuthority &authority) {
+	if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 	if (!PlaylistDownloadTokenSafe(token) || intent.identity.isEmpty()) return {};
 #ifdef Q_OS_WIN
 	return { PlaylistDownloadStatus::Unsupported, {} };
@@ -154,7 +156,7 @@ PlaylistKeptFileRead InspectPlaylistStagingFile(
 	const auto incoming = OpenIncoming(files, false);
 	if (incoming < 0) return { PlaylistDownloadStatus::Busy, {} };
 	const auto closeIncoming = qScopeGuard([&] { ::close(incoming); });
-	auto result = Inspect(incoming, token.toLatin1() + ".part", intent.extension, intent.size);
+	auto result = Inspect(incoming, token.toLatin1() + ".part", intent.extension, intent.size, authority);
 	if (result && result.file.identity != intent.identity) return {};
 	return result;
 #endif
@@ -195,7 +197,9 @@ PlaylistDownloadStatus DiscardPlaylistStagingFile(
 PlaylistKeptFileRead PublishPlaylistStagingFile(
 		const QString &directory,
 		const QString &token,
-		const PlaylistOwnedDownloadIntent &intent) {
+		const PlaylistOwnedDownloadIntent &intent,
+		const PlaylistFileAuthority &authority) {
+	if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 	if (!PlaylistDownloadTokenSafe(token) || intent.identity.isEmpty()
 		|| intent.sha256.isEmpty()
 		|| PlaylistKeptFilePath(directory, intent.documentId, intent.extension).isEmpty()) return {};
@@ -219,28 +223,31 @@ PlaylistKeptFileRead PublishPlaylistStagingFile(
 			if (!S_ISREG(stage.st_mode) || stage.st_uid != ::geteuid() || (stage.st_mode & 0077)
 				|| stage.st_nlink != 2 || final.st_nlink != 2
 				|| Identity(stage) != intent.identity) return {};
+			if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 			if (::unlinkat(incoming, stageName.constData(), 0) || ::fsync(incoming)) {
 				return { PlaylistDownloadStatus::IoError, {} };
 			}
 		}
-		auto proof = Inspect(files, finalName, intent.extension, intent.size);
+		auto proof = Inspect(files, finalName, intent.extension, intent.size, authority);
 		if (proof && (proof.file.identity != intent.identity || proof.file.sha256 != intent.sha256)) return {};
 		return proof;
 	}
-	const auto complete = Inspect(incoming, stageName, intent.extension, intent.size);
+	const auto complete = Inspect(incoming, stageName, intent.extension, intent.size, authority);
 	if (!complete || complete.file.identity != intent.identity
 		|| complete.file.sha256 != intent.sha256) return complete ? PlaylistKeptFileRead() : complete;
 	const auto fd = ::openat(incoming, stageName.constData(), O_RDWR | O_NOFOLLOW | O_CLOEXEC);
 	if (fd < 0) return { PlaylistDownloadStatus::IoError, {} };
 	const auto synced = !::fsync(fd);
 	::close(fd);
-	if (!synced || ::linkat(incoming, stageName.constData(), files, finalName.constData(), 0)) {
+	if (!synced) return { PlaylistDownloadStatus::IoError, {} };
+	if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
+	if (::linkat(incoming, stageName.constData(), files, finalName.constData(), 0)) {
 		return { PlaylistDownloadStatus::IoError, {} };
 	}
 	if (::fsync(files) || ::unlinkat(incoming, stageName.constData(), 0) || ::fsync(incoming)) {
 		return { PlaylistDownloadStatus::IoError, {} };
 	}
-	auto proof = Inspect(files, finalName, intent.extension, intent.size);
+	auto proof = Inspect(files, finalName, intent.extension, intent.size, authority);
 	if (proof && (proof.file.identity != intent.identity || proof.file.sha256 != intent.sha256)) return {};
 	return proof;
 #endif

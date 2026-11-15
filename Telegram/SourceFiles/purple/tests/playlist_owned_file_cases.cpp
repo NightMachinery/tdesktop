@@ -65,6 +65,36 @@ int main(int argc, char *argv[]) {
 	expect(RemovePlaylistKeptFile(root.path(), 1, published.file, revokeDuringProof)
 		== PlaylistDownloadStatus::Changed && QFile::exists(PlaylistKeptFilePath(root.path(), 1, u"mp3"_q)),
 		"authority loss during real inspection prevents subsequent unlink");
+	const auto retiredToken = QString(32, u'c');
+	const auto retired = CreatePlaylistStagingFile(root.path(), retiredToken);
+	expect(bool(retired), "cancellation fixture owns a distinct stage");
+	if (!retired) return 1;
+	file.setFileName(PlaylistStagingFilePath(root.path(), retiredToken));
+	expect(file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size(),
+		"cancellation fixture fills its actual owned stage");
+	file.close();
+	auto retiringIntent = intent;
+	retiringIntent.documentId = 3;
+	retiringIntent.identity = retired.file.identity;
+	expect(InspectPlaylistStagingFile(root.path(), retiredToken, retiringIntent, [] { return false; }).status
+		== PlaylistDownloadStatus::Changed,
+		"retired transfer refuses a staged-file hash");
+	expect(PublishPlaylistStagingFile(root.path(), retiredToken, retiringIntent, [] { return false; }).status
+		== PlaylistDownloadStatus::Changed,
+		"retired transfer cannot publish a new final name");
+	auto publicationChecks = 0;
+	const auto retireDuringHash = [&] { return ++publicationChecks < 4; };
+	expect(PublishPlaylistStagingFile(root.path(), retiredToken, retiringIntent, retireDuringHash).status
+		== PlaylistDownloadStatus::Changed
+		&& QFile::exists(PlaylistStagingFilePath(root.path(), retiredToken))
+		&& !QFile::exists(PlaylistKeptFilePath(root.path(), 3, u"mp3"_q)),
+		"revocation during a real staging hash preserves the stage and publishes nothing");
+	const auto recoveredAfterRetirement = PublishPlaylistStagingFile(
+		root.path(), retiredToken, retiringIntent, [] { return true; });
+	expect(bool(recoveredAfterRetirement),
+		"fresh explicit authority can recover the same complete durable intent");
+	expect(RemovePlaylistKeptFile(root.path(), 3, recoveredAfterRetirement.file)
+		== PlaylistDownloadStatus::Ready, "cancellation fixture cleans only its owned final file");
 	expect(RemovePlaylistKeptFile(root.path(), 1, published.file) == PlaylistDownloadStatus::Ready,
 		"verified owned final file is removable");
 #endif

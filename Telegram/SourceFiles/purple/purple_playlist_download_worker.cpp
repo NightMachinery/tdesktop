@@ -67,7 +67,8 @@ PlaylistAccountResult PlaylistAccountWorker::transfer(
 		if (kept != end(next.files)) {
 			if (kept->second.size != request.file.size) return fail(PlaylistDownloadStatus::Changed);
 			const auto proof = InspectPlaylistKeptFile(_store.directory(), request.documentId,
-				kept->second.extension, kept->second.size);
+				kept->second.extension, kept->second.size, current);
+			if (!current()) return fail(PlaylistDownloadStatus::Changed);
 			if (proof && proof.file.identity == kept->second.identity
 				&& proof.file.sha256 == kept->second.sha256) {
 				result.downloads->prepared = PlaylistDownloadPrepared{
@@ -101,7 +102,7 @@ PlaylistAccountResult PlaylistAccountWorker::transfer(
 			const auto finalPath = PlaylistKeptFilePath(_store.directory(), intent.documentId, intent.extension);
 			if (!intent.sha256.isEmpty()) {
 				if (!current()) return fail(PlaylistDownloadStatus::Changed);
-				const auto recovered = PublishPlaylistStagingFile(_store.directory(), token, intent);
+				const auto recovered = PublishPlaylistStagingFile(_store.directory(), token, intent, current);
 				if (recovered) {
 					_downloadOwners[token] = authority;
 					result.downloads->prepared = PlaylistDownloadPrepared{ token, intent, true, false };
@@ -109,7 +110,7 @@ PlaylistAccountResult PlaylistAccountWorker::transfer(
 				}
 				if (SyncPathIdentity(finalPath) != "missing") return fail(recovered.status);
 			}
-			const auto proof = InspectPlaylistStagingFile(_store.directory(), token, intent);
+			const auto proof = InspectPlaylistStagingFile(_store.directory(), token, intent, current);
 			if (proof && (intent.sha256.isEmpty() || proof.file.sha256 == intent.sha256)) {
 				_downloadOwners[token] = authority;
 				result.downloads->prepared = PlaylistDownloadPrepared{ token, intent, true, false };
@@ -158,9 +159,9 @@ PlaylistAccountResult PlaylistAccountWorker::transfer(
 				if (PlaylistDownloadReferences(*result.snapshot.library, request.playlistId).contains(intent.documentId)) {
 					return fail(PlaylistDownloadStatus::Busy);
 				}
-				const auto proof = PublishPlaylistStagingFile(_store.directory(), token, intent);
+				const auto proof = PublishPlaylistStagingFile(_store.directory(), token, intent, current);
 				if (!proof) return fail(proof.status);
-				const auto removed = RemovePlaylistKeptFile(_store.directory(), intent.documentId, proof.file);
+				const auto removed = RemovePlaylistKeptFile(_store.directory(), intent.documentId, proof.file, current);
 				if (removed != PlaylistDownloadStatus::Ready) return fail(removed);
 			} else {
 				const auto removed = DiscardPlaylistStagingFile(_store.directory(), token, intent.identity);
@@ -174,14 +175,14 @@ PlaylistAccountResult PlaylistAccountWorker::transfer(
 	}
 	if (!active || active != authority || !current()) return fail(PlaylistDownloadStatus::Changed);
 	if (intent.sha256.isEmpty()) {
-		const auto proof = InspectPlaylistStagingFile(_store.directory(), token, intent);
+		const auto proof = InspectPlaylistStagingFile(_store.directory(), token, intent, current);
 		if (!proof) return fail(proof.status);
 		intent.sha256 = proof.file.sha256;
 		next.pending[token] = intent;
 		if (!commit()) return result;
 	}
 	if (!current()) return fail(PlaylistDownloadStatus::Changed);
-	const auto proof = PublishPlaylistStagingFile(_store.directory(), token, intent);
+	const auto proof = PublishPlaylistStagingFile(_store.directory(), token, intent, current);
 	if (!proof) return fail(proof.status);
 	auto entry = proof.file;
 	const auto old = next.files.find(intent.documentId);

@@ -583,3 +583,15 @@ The managed-cache fixture refuses invalid temporary-directory setup before any
 file path is formed. Asynchronous database completion state is shared with its
 callbacks, so a bounded wait failure cannot leave a callback referring to an
 unwound stack variable. These checks still require actual native execution.
+
+### Publication authority at the filesystem boundary
+
+Staging verification and publication accept the live transfer authority. Hashing
+checks it between bounded reads, including recovery paths. Publication checks
+again after the file flush and immediately before creating the no-replace final
+link. A cancellation observed before that boundary preserves the stage and
+publishes no new final name. Retirement after the link may leave a published
+file plus its durable intent for explicit recovery; it cannot claim inventory
+commit or successful delivery. This does not provide an atomic compare-and-link
+against an unrelated external filesystem writer. The source correction and
+added real-file fixture still need compilation and native execution.
