@@ -366,11 +366,12 @@ void RetainedSourceCases() {
 	};
 	auto prepared = false;
 	Check(e._worker.submit(e._workerGeneration, [&](const EmojiExportAuthority &current) {
+		auto entries = std::vector{source};
 		auto image = QImage(500, 250, QImage::Format_ARGB32_Premultiplied);
 		image.fill(Qt::green);
 		return WriteEmojiExportPng(directory, source.id, EmojiExportFrame(image, {}), current)
 			&& WriteEmojiLargePng(directory, source.id, image, {}, current)
-			&& PublishEmojiLargeRequests(directory, {source}, QDateTime::currentDateTimeUtc(), {}, current, {});
+			&& PublishEmojiLargeRequests(directory, entries, QDateTime::currentDateTimeUtc(), {}, current, {});
 	}, [&](quint64, bool ok) { prepared = ok; }), "prepare retained image through actual worker");
 	if (!Wait([&] { return prepared; })) { Check(false, "retained preparation completes"); return; }
 	e._published = std::make_shared<const std::vector<EmojiExportEntry>>(std::vector{source});

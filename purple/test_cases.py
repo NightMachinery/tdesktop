@@ -23,7 +23,7 @@ CASES = {
         'syntax_units': ['purple/purple_sleep_timer.cpp', 'purple/purple_sleep_timer_ui.cpp',
             'media/player/media_player_instance.cpp', 'media/player/media_player_widget.cpp',
             'media/view/media_view_overlay_widget.cpp', 'media/view/media_view_pip.cpp'],
-        'frameworks': [],
+        'frameworks': ['QtCore'],
     },
     'playlist-player': {
         'program': 'playlist_player_cases.cpp',
@@ -31,6 +31,7 @@ CASES = {
         'syntax_units': ['purple/purple_playlist_player.cpp',
             'media/player/media_player_instance.cpp'],
         'units': [],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore'],
     },
     'playlists-resolver': {
