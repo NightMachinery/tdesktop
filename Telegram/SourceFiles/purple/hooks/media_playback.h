@@ -24,6 +24,7 @@ class QWidget;
 
 namespace Media::Player {
 class Float;
+struct PlaylistContext;
 } // namespace Media::Player
 
 namespace HistoryView {
@@ -59,10 +60,67 @@ void DecorateFloat(
 	not_null<Media::Player::Float*> floating,
 	Fn<void(not_null<const HistoryItem*>)> open);
 
+class VoicePlaybackAdmission final {
+public:
+	VoicePlaybackAdmission(
+		const AudioMsgId &audioId,
+		const Media::Player::PlaylistContext *context);
+	~VoicePlaybackAdmission();
+	VoicePlaybackAdmission(const VoicePlaybackAdmission&) = delete;
+	VoicePlaybackAdmission &operator=(const VoicePlaybackAdmission&) = delete;
+	[[nodiscard]] bool commit(bool interruptedMusic) const;
+
+private:
+	Fn<bool(bool)> _commit;
+	Fn<void()> _finish;
+
+};
+
+class VoiceMusicPauseGuard final {
+public:
+	VoiceMusicPauseGuard(bool &resumeOnVoiceEnd, Fn<bool()> current);
+	~VoiceMusicPauseGuard();
+	VoiceMusicPauseGuard(const VoiceMusicPauseGuard&) = delete;
+	VoiceMusicPauseGuard &operator=(const VoiceMusicPauseGuard&) = delete;
+
+private:
+	Fn<void()> _finish;
+
+};
+
+[[nodiscard]] bool VoiceMusicInterrupted(bool resumeOnVoiceEnd);
+void ClearVoiceMusicPause();
+
+class VoiceAutomaticPlayGuard final {
+public:
+	VoiceAutomaticPlayGuard(const AudioMsgId &audioId, bool automatic);
+	~VoiceAutomaticPlayGuard();
+	VoiceAutomaticPlayGuard(const VoiceAutomaticPlayGuard&) = delete;
+	VoiceAutomaticPlayGuard &operator=(const VoiceAutomaticPlayGuard&) = delete;
+
+private:
+	Fn<void()> _finish;
+
+};
+
+void FinishVoiceQueue();
+[[nodiscard]] bool VoicePlaybackAvailable();
+void RevokeVoicePlaybackContinuation();
+void NoteVoicePlaybackInteraction();
+[[nodiscard]] Fn<bool()> VoiceQueueTransitionGuard();
+void StopVoicePlaybackContinuation();
+[[nodiscard]] Fn<bool()> VoicePlaybackContinuationGuard();
+[[nodiscard]] Fn<bool()> NewVoicePlaybackStreamGuard();
+void RetireVoicePlaybackStream();
+[[nodiscard]] bool VoiceQueueMayAdvance(AudioMsgId::Type type, bool automatic);
+[[nodiscard]] bool ResumeMusicAfterVoice();
+
 [[nodiscard]] std::optional<HistoryItem*> ConfinedVoiceNext(
 	AudioMsgId::Type type,
 	bool autonext,
 	const History *history,
+	MsgId topicRootId,
+	PeerId monoforumPeerId,
 	int from,
 	Fn<HistoryItem*(int)> itemAt);
 

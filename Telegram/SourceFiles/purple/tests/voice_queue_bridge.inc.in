@@ -1,0 +1,308 @@
+#include "purple/tests/voice_queue_ports.h"
+
+#define AudioMsgId Ports::AudioMsgId
+#define HistoryItem Ports::HistoryItem
+#define History Ports::History
+#define PeerData Ports::PeerData
+#define Main Ports::Main
+#define Media Ports::Media
+#define PeerId Ports::PeerId
+#define MsgId Ports::MsgId
+#define FullMsgId Ports::FullMsgId
+#define Core Ports::Core
+namespace Purple {
+inline Ports::Config Config;
+inline const Ports::Config &ActiveSettings() { return Config; }
+
+/* VOICE_DECLARATIONS */
+namespace {
+
+/* VOICE_STATE */
+}
+
+/* VOICE_BRIDGE */
+
+enum class PlaylistPlayerIntent { Play, Stop, Pause, Resume };
+inline std::uint64_t SongGeneration = 0;
+inline bool AdmitPlaylistPlayerIntent(AudioMsgId::Type type,
+									  PlaylistPlayerIntent intent) {
+	if (type == AudioMsgId::Type::Voice && !VoicePlaybackAvailable())
+		return false;
+	if (type == AudioMsgId::Type::Voice && intent == PlaylistPlayerIntent::Stop)
+		StopVoicePlaybackContinuation();
+	if (type == AudioMsgId::Type::Song) {
+		ClearVoiceMusicPause();
+		++SongGeneration;
+	}
+	return true;
+}
+inline std::optional<bool> MoveInAccountPlaylist(AudioMsgId::Type, const AudioMsgId &,
+												 int, bool) {
+	return std::nullopt;
+}
+inline bool FinishSleepTimerItem(const AudioMsgId &, Fn<void()> before) {
+	Ports::fire(Ports::OnTimer);
+	if (!Ports::TimerEnds)
+		return false;
+	before();
+	return true;
+}
+class PlaylistPlayerInternalCallGuard {
+  public:
+	PlaylistPlayerInternalCallGuard(AudioMsgId::Type, PlaylistPlayerIntent) {}
+};
+inline bool DeferPlaylistPlayerPlay(const AudioMsgId &, Fn<void()>) { return false; }
+inline void DropSleepTimerAdvance(AudioMsgId::Type) {}
+inline void SleepTimerAudioPlaybackIntent(const AudioMsgId &, bool) {
+	Ports::fire(Ports::OnIntent);
+}
+inline Fn<bool()> PlaylistPlayerCallbackGuard(AudioMsgId::Type type) {
+	if (type == AudioMsgId::Type::Voice)
+		return VoicePlaybackContinuationGuard();
+	const auto generation = SongGeneration;
+	return [=] { return type != AudioMsgId::Type::Song || generation == SongGeneration; };
+}
+class PlaylistPlayerCallGuard {
+  public:
+	explicit PlaylistPlayerCallGuard(AudioMsgId::Type type)
+		: check(PlaylistPlayerCallbackGuard(type)) {}
+	bool current() const { return check(); }
+
+  private:
+	Fn<bool()> check;
+};
+} // namespace Purple
+
+namespace Baseline {
+using PlaylistContext = Media::Player::PlaylistContext;
+struct Data {
+	AudioMsgId::Type type = AudioMsgId::Type::Voice;
+	AudioMsgId current, next;
+	MsgId topicRootId = 0;
+	PeerId monoforumPeerId = 0;
+	bool resumeOnVoiceEnd = false;
+};
+struct Switch {
+	AudioMsgId from;
+	FullMsgId to;
+};
+struct SwitchPort {
+	std::function<void()> callback;
+	void fire(Switch) { Ports::fire(callback); }
+};
+struct StartedPort {
+	int count = 0;
+	void fire_copy(std::initializer_list<AudioMsgId::Type>) { ++count; }
+};
+class Instance {
+  public:
+	Data voice, song;
+	SwitchPort _switchToNext;
+	StartedPort _playerStartedPlay;
+	std::optional<PlaylistContext> _pendingContext;
+	AudioMsgId _pendingContextFor;
+	std::vector<AudioMsgId> starts;
+	int pauses = 0;
+	Data *getData(AudioMsgId::Type type) {
+		return type == AudioMsgId::Type::Song ? &song : &voice;
+	}
+	AudioMsgId trackInItem(not_null<Data *> data, int) { return data->next; }
+	void pauseSongForVoice() {
+		++pauses;
+		song.resumeOnVoiceEnd = true;
+		Ports::fire(Ports::OnPause);
+	}
+	void playStreamed(const AudioMsgId &id, std::shared_ptr<Ports::Shared>) {
+		voice.current = id;
+		starts.push_back(id);
+		auto source = Purple::NewVoicePlaybackStreamGuard();
+	}
+	void play(const AudioMsgId &, std::optional<PlaylistContext> context = std::nullopt);
+	bool moveInItem(not_null<Data *>, int, bool);
+};
+
+/* MUTANT_PLAY */
+
+/* MUTANT_MOVE */
+} // namespace Baseline
+
+namespace Proposed {
+using PlaylistContext = Media::Player::PlaylistContext;
+enum class RepeatMode { None, One, All };
+enum class OrderMode { Default, Reverse, Shuffle };
+struct PlaylistSlice {
+	std::vector<FullMsgId> ids;
+	int before = 0, after = 0;
+	int size() const { return int(ids.size()); }
+	int skippedBefore() const { return before; }
+	int skippedAfter() const { return after; }
+	FullMsgId operator[](int i) const { return ids[i]; }
+};
+struct ShuffleData {
+	using UniversalMsgId = MsgId;
+	History *history = nullptr, *migrated = nullptr;
+	std::vector<MsgId> playedIds, nonPlayedIds;
+	int indexInPlayedIds = 0;
+};
+inline constexpr MsgId ServerMaxMsgId = 1000000000;
+struct VideoSize {
+	bool isEmpty() const { return true; }
+};
+struct StreamInfo {
+	struct {
+		VideoSize size;
+	} video;
+};
+struct StreamInstance {
+	StreamInfo info() const { return {}; }
+};
+struct StreamProgress {
+	void updateState(const Media::Player::TrackState &) {}
+};
+struct Streamed {
+	bool clearing = false;
+	StreamInstance instance;
+	StreamProgress progress;
+};
+struct Data {
+	AudioMsgId::Type type = AudioMsgId::Type::Voice;
+	AudioMsgId current, next;
+	MsgId topicRootId = 0;
+	PeerId monoforumPeerId = 0;
+	bool resumeOnVoiceEnd = false, isPlaying = true;
+	History *history = nullptr;
+	std::optional<int> playlistIndex;
+	std::optional<PlaylistSlice> playlistSlice, playlistOtherSlice;
+	std::unique_ptr<ShuffleData> shuffleData;
+	std::shared_ptr<Streamed> streamed = std::make_shared<Streamed>();
+	RepeatMode repeatMode = RepeatMode::None;
+	OrderMode orderMode = OrderMode::Default;
+};
+struct UpdatedPort {
+	void fire_copy(std::initializer_list<Media::Player::TrackState>) {
+		Ports::fire(Ports::OnUpdated);
+	}
+};
+struct FinishedPort {
+	int count = 0;
+	void fire_copy(AudioMsgId::Type) {
+		++count;
+		Ports::fire(Ports::OnFinished);
+	}
+};
+struct ListenTracker {
+	void update(const Media::Player::TrackState &) {}
+};
+struct {
+	bool value() const { return false; }
+} OptionDisableAutoplayNext;
+
+struct Switch {
+	AudioMsgId from;
+	FullMsgId to;
+};
+struct SwitchPort {
+	std::function<void()> callback;
+	void fire(Switch) { Ports::fire(callback); }
+};
+struct StartedPort {
+	int count = 0;
+	void fire_copy(std::initializer_list<AudioMsgId::Type>) { ++count; }
+};
+using State = Media::Player::State;
+using TrackState = Media::Player::TrackState;
+using Media::Player::IsPaused;
+using Media::Player::IsPausedOrPausing;
+using Media::Player::IsStopped;
+using Media::Player::IsStoppedOrStopping;
+inline Ports::DocumentData SongDocument{nullptr, false, false, true};
+class Instance {
+  public:
+	Instance() {
+		song.type = AudioMsgId::Type::Song;
+		song.current = AudioMsgId(&SongDocument, {});
+		Media::Player::GetState = [this](AudioMsgId::Type type) {
+			return getState(type);
+		};
+	}
+	int songResumes = 0;
+	void play(AudioMsgId::Type type) {
+		++songResumes;
+		songState = State::Playing;
+	}
+	void resumeSongAfterVoice(bool force = false);
+	Data voice, song;
+	bool _roundPlaying = false;
+	UpdatedPort _updatedNotifier;
+	FinishedPort _tracksFinished;
+	ListenTracker tracker;
+	ListenTracker *_listenTracker = &tracker;
+	template <typename CheckCallback>
+	void emitUpdate(AudioMsgId::Type type, CheckCallback check);
+	bool moveInPlaylist(not_null<Data *> data, int delta, bool automatic);
+	RepeatMode repeat(not_null<Data *> data) { return data->repeatMode; }
+	OrderMode order(not_null<Data *> data) { return data->orderMode; }
+	void setCurrent(const AudioMsgId &id) { voice.current = id; }
+	void updatePowerSaveBlocker(not_null<Data *>, const TrackState &) {}
+	HistoryItem *itemByIndex(not_null<Data *> data, int index) {
+		return data->playlistSlice && index >= 0 && index < data->playlistSlice->size()
+				   ? data->history->owner().message((*data->playlistSlice)[index])
+				   : nullptr;
+	}
+	MsgId computeCurrentUniversalId(not_null<Data *> data) {
+		return data->current.contextId().msg;
+	}
+	void ensureShuffleMove(not_null<Data *>, int) {}
+
+	SwitchPort _switchToNext;
+	StartedPort _playerStartedPlay;
+	std::optional<PlaylistContext> _pendingContext;
+	AudioMsgId _pendingContextFor;
+	std::vector<AudioMsgId> starts;
+	int pauses = 0;
+	Data *getData(AudioMsgId::Type type) {
+		return type == AudioMsgId::Type::Song ? &song : &voice;
+	}
+	AudioMsgId trackInItem(not_null<Data *> data, int) { return data->next; }
+	State songState = State::Playing, voiceState = State::Playing;
+	TrackState getState(AudioMsgId::Type type) {
+		return type == AudioMsgId::Type::Song ? TrackState{song.current, songState}
+											  : TrackState{voice.current, voiceState};
+	}
+	void pause(AudioMsgId::Type) {
+		++pauses;
+		songState = State::Paused;
+		Ports::fire(Ports::OnPause);
+	}
+	void pauseSongForVoice();
+	void playStreamed(const AudioMsgId &id, std::shared_ptr<Ports::Shared>) {
+		voice.current = id;
+		starts.push_back(id);
+		auto source = Purple::NewVoicePlaybackStreamGuard();
+	}
+	void play(const AudioMsgId &, std::optional<PlaylistContext> context = std::nullopt);
+	bool moveInItem(not_null<Data *>, int, bool);
+};
+
+/* NATIVE_PLAY */
+
+/* NATIVE_ITEM_MOVE */
+
+/* NATIVE_PAUSE */
+
+/* NATIVE_RESUME */
+
+/* NATIVE_PLAYLIST_MOVE */
+
+/* NATIVE_END */
+} // namespace Proposed
+#undef AudioMsgId
+#undef HistoryItem
+#undef History
+#undef PeerData
+#undef Main
+#undef Media
+#undef PeerId
+#undef MsgId
+#undef FullMsgId
+#undef Core

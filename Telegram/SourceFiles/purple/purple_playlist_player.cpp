@@ -1,6 +1,7 @@
 #include "purple/purple_playlist_player.h"
 
 #include "purple/hooks/playlist_player.h"
+#include "purple/hooks/media_playback.h"
 
 #include "purple/purple_config.h"
 #include "purple/purple_playlists_ops.h"
@@ -1273,8 +1274,13 @@ PlaylistPlayerInternalCallGuard::~PlaylistPlayerInternalCallGuard() {
 bool AdmitPlaylistPlayerIntent(
 		AudioMsgId::Type type,
 		PlaylistPlayerIntent intent) {
+	if (type == Type::Voice && !VoicePlaybackAvailable()) return false;
+	if (type == Type::Voice && intent == PlaylistPlayerIntent::Stop) {
+		StopVoicePlaybackContinuation();
+	}
 	if (type != Type::Song || InternalCalls->take(intent)) return true;
 	if (PlayerFinished) return false;
+	ClearVoiceMusicPause();
 	const auto generation = ++StartGeneration;
 	Handoffs->supersede();
 	const auto active = Active;
@@ -1284,7 +1290,9 @@ bool AdmitPlaylistPlayerIntent(
 
 PlaylistPlayerCallGuard::PlaylistPlayerCallGuard(AudioMsgId::Type type) {
 	if (type != AudioMsgId::Type::Song) {
-		_current = [] { return true; };
+		_current = (type == Type::Voice)
+			? VoicePlaybackContinuationGuard()
+			: Fn<bool()>([] { return true; });
 		return;
 	}
 	const auto state = Handoffs;
@@ -1307,6 +1315,7 @@ bool PlaylistPlayerCallGuard::current() const {
 Fn<bool()> PlaylistPlayerCallbackGuard(
 		AudioMsgId::Type type,
 		bool acquire) {
+	if (type == Type::Voice) return VoicePlaybackContinuationGuard();
 	if (type != Type::Song) return [] { return true; };
 	const auto state = Handoffs;
 	if (state->activeCall()) return state->callback();
@@ -1325,6 +1334,7 @@ bool DeferPlaylistResumeAfterSleepTimer(
 		AudioMsgId::Type type,
 		Fn<void()> resume,
 		bool play) {
+	if (type == Type::Voice && play) NoteVoicePlaybackInteraction();
 	if (type != Type::Song || InternalCalls->take(PlaylistPlayerIntent::Resume)) return false;
 	const auto active = Active;
 	return play && active && active->deferExpiryResume(std::move(resume));
@@ -1334,6 +1344,7 @@ Fn<bool()> PlaylistPlayerPauseGuard(
 		AudioMsgId::Type type,
 		bool pause,
 		bool acquire) {
+	if (type == Type::Voice && pause) NoteVoicePlaybackInteraction();
 	if (pause && type == Type::Song && !InternalCalls->take(PlaylistPlayerIntent::Pause)) {
 		const auto active = Active;
 		if (active && active->cancelExpiryResume()) {
@@ -1347,6 +1358,7 @@ Fn<bool()> PlaylistPlayerPauseGuard(
 }
 
 Fn<bool()> NewPlaylistPlayerStreamGuard(AudioMsgId::Type type) {
+	if (type == Type::Voice) return NewVoicePlaybackStreamGuard();
 	if (type != Type::Song) return [] { return true; };
 	SongStream = std::make_shared<int>(0);
 	const auto weak = std::weak_ptr<int>(SongStream);
@@ -1355,6 +1367,7 @@ Fn<bool()> NewPlaylistPlayerStreamGuard(AudioMsgId::Type type) {
 
 void RetirePlaylistPlayerStream(AudioMsgId::Type type) {
 	if (type == Type::Song) SongStream.reset();
+	else if (type == Type::Voice) RetireVoicePlaybackStream();
 }
 
 bool SkipAccountPlaylistShuffle(
@@ -1463,6 +1476,7 @@ void InvalidatePlaylistPlayback() {
 void FinishPlaylistPlayback() {
 	RequireMainThread();
 	PlayerFinished = true;
+	FinishVoiceQueue();
 	SongStream.reset();
 	Handoffs->supersede();
 	++StartGeneration;

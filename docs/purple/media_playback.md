@@ -69,14 +69,33 @@ queue to the other person switches it; the value lives in `settings.toml`
 - One-to-one means a user chat other than Saved Messages, Replies and
   Verification Codes. Bots count. A manual play on your own message, in Saved
   Messages, in a group or in a channel changes nothing.
-- Manual or automatic: `purple_voice_queue.cpp` listens to the player.
-  `switchToNextEvents` announces the message an automatic advance is about to
-  play; a voice-type `trackChanged` to any other message is manual (a click in
-  a chat, the player bar's next or previous, the control socket) and sets a
-  new anchor for that chat. The announcement expires on the next main-loop
-  turn, so one no track change followed (upstream's play returned early) can
-  never make a later manual play look automatic. The setting is read only
-  then, so toggling it never changes a queue in the middle.
+- A manual start, including replay of the same message, captures the settings
+  before callbacks run. The native player commits that snapshot after document
+  admission and before pausing interrupted music. Automatic advancement keeps
+  the snapshot. Its one-use token is installed after the next-item notification,
+  immediately before internal playback, so a listener's manual play stays manual.
+- Settings > Purple > Media playback also offers the stock single-choice
+  "After a voice message" box: Resume music, Unheard messages then music, or All
+  following messages then music. The independent resume switch leaves the same
+  interrupted music track and position paused when off. These shared settings
+  use `after_voice` and `resume_music_after_voice_p` in `[playback]`.
+- As on Android, the continuation chooser applies when music was interrupted.
+  Without interrupted music, the ordinary following-message queue remains in
+  effect, including the private-chat ownership rule. Unheard skips outgoing
+  messages and ends at a heard incoming message. Changes apply on the next
+  manual start rather than halfway through an automatic queue.
+- Queue scope follows the native normalized history, forum topic and monoforum
+  sublist, with a weak session identity. A nested new play or stop invalidates
+  the old native continuation; pause or resume during a next-item notification
+  cancels that pending automatic transition without breaking call/seek resumes.
+- A scoped native music-pause claim publishes the existing resume flag before
+  pause notifications. A successor voice start therefore keeps the interrupted
+  music policy; newer Song intent clears that claim, and the old Voice frame
+  cannot re-arm a consumed flag. No extra track or position bookmark is stored.
+- Player finish retires Voice streams and generations before the singleton is
+  destroyed, and declines callback-issued Voice starts while it is finished.
+- Sleep-timer completion still runs before repeat or next-item selection and
+  never resumes music through the voice-end path.
 - The walk starts at the message upstream would play and skips your messages
   until one of theirs. It stops at the edge of the loaded playlist window
   (about 32 messages either side), so more than about 31 of your own voice
@@ -315,3 +334,11 @@ and waits for active Song frames to unwind before invoking the existing native
 resume. This lets explicit Play from an expiry notification survive the remaining
 expiry pauses. A playPause action that requests Pause keeps the stock pause path.
 No stopped-row resolution is used for an ordinary paused-stream resume.
+
+
+The existing voice-queue host case retains the private-chat checks and adds
+captured continuation settings plus literal current Voice bridge/native method
+coverage with typed document, state and callback ports. Its negative control
+removes only the current navigation guard after the switch notification.
+Complete player units are syntax-checked separately. These port checks do not
+replace real audio-stream, account-lifetime or Settings visual verification.

@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 
+from voice_queue_fixture import voice_queue_include
+
 CORE = 'purple_core'
 CASES = {
     'playlist-managed-cache': {
@@ -319,11 +321,15 @@ CASES = {
         'link': ['-lz', '-lbz2', '-liconv', '-lc++'],
     },
     'voice-queue': {
-        # The confined walk and the manual-play tracker over the real
-        # purple-core rule.
+        # Captured policy and literal native/bridge control flow, with typed ports.
         'program': 'voice_queue_cases.cpp',
+        'generated': ['voice-queue-bridge.inc'],
+        'build_libraries': ['libcrypto.a'],
+        'syntax_units': ['purple/purple_voice_queue.cpp', 'purple/purple_playlist_player.cpp',
+            'media/player/media_player_instance.cpp'],
         'units': ['purple/purple_voice_queue_rules.cpp', 'core:purple/purple_playback.cpp'],
-        'frameworks': ['QtCore'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'Foundation'],
     },
 }
 
@@ -658,6 +664,7 @@ if case['program'].endswith('.mm'):
 pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['units']) else {}
 for name in case.get('generated', []):
     generate = {
+        'voice-queue-bridge.inc': voice_queue_include,
         'playlists-service.inc': playlists_service_include,
         'playlist-player-queue.inc': playlist_player_queue_include,
         'music-listening-tracker.inc': music_listening_include,

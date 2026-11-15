@@ -616,13 +616,15 @@ bool Instance::moveInItem(not_null<Data*> data, int delta, bool autonext) {
 	if (!audioId) {
 		return false;
 	}
+	const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
+	const auto context = PlaylistContext{ data->topicRootId, data->monoforumPeerId };
+	const auto voiceTransition = Purple::VoiceQueueTransitionGuard();
 	if (autonext) {
 		_switchToNext.fire({ data->current, audioId.contextId() });
 	}
-	play(audioId, PlaylistContext{
-		data->topicRootId,
-		data->monoforumPeerId,
-	});
+	if (!current() || (data->type == AudioMsgId::Type::Voice && !voiceTransition())) return true;
+	const auto automatic = Purple::VoiceAutomaticPlayGuard(audioId, autonext);
+	play(audioId, context);
 	return true;
 }
 
@@ -637,6 +639,7 @@ bool Instance::moveInPlaylist(
 			autonext)) {
 		return *handled;
 	}
+	if (!Purple::VoiceQueueMayAdvance(data->type, autonext)) return false;
 	if (moveInItem(data, delta, autonext)) {
 		return true;
 	} else if (!data->playlistIndex) {
@@ -648,21 +651,22 @@ bool Instance::moveInPlaylist(
 				return false;
 			}
 			if (const auto document = media->document()) {
+				const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
+				const auto context = PlaylistContext{ data->topicRootId, data->monoforumPeerId };
+				const auto voiceTransition = Purple::VoiceQueueTransitionGuard();
 				if (autonext) {
 					_switchToNext.fire({
 						data->current,
 						item->fullId()
 					});
 				}
+				if (!current() || (data->type == AudioMsgId::Type::Voice && !voiceTransition())) return true;
 				if (document->isAudioFile()
 					|| document->isVoiceMessage()
 					|| document->isVideoMessage()) {
-					play(
-						AudioMsgId(document, item->fullId()),
-						PlaylistContext{
-							data->topicRootId,
-							data->monoforumPeerId,
-						});
+					const auto audioId = AudioMsgId(document, item->fullId());
+					const auto automatic = Purple::VoiceAutomaticPlayGuard(audioId, autonext);
+					play(audioId, context);
 				}
 				return true;
 			}
@@ -732,6 +736,8 @@ bool Instance::moveInPlaylist(
 			data->type,
 			autonext,
 			data->history,
+			data->topicRootId,
+			data->monoforumPeerId,
 			useIndex,
 			[&](int index) { return itemByIndex(data, index); })) {
 		return *next && jumpByItem(*next);
@@ -971,6 +977,7 @@ void Instance::play(
 	if (!document) {
 		return;
 	}
+	const auto voice = Purple::VoicePlaybackAdmission(audioId, context ? &*context : nullptr);
 	if (!Purple::AdmitPlaylistPlayerIntent(
 			audioId.type(), Purple::PlaylistPlayerIntent::Play)) return;
 	if (Purple::DeferPlaylistPlayerPlay(audioId, [this, audioId, context] {
@@ -981,6 +988,7 @@ void Instance::play(
 	const auto call = Purple::PlaylistPlayerCallGuard(audioId.type());
 	Purple::DropSleepTimerAdvance(audioId.type());
 	Purple::SleepTimerAudioPlaybackIntent(audioId, false);
+	if (!call.current()) return;
 	_pendingContext = context;
 	_pendingContextFor = audioId;
 	if (document->isAudioFile()
@@ -992,15 +1000,20 @@ void Instance::play(
 		if (!shared) {
 			return;
 		}
+		if (!call.current()) return;
 		if (audioId.type() == AudioMsgId::Type::Voice) {
+			if (!voice.commit(Purple::VoiceMusicInterrupted(
+				getData(AudioMsgId::Type::Song)->resumeOnVoiceEnd))) return;
 			pauseSongForVoice();
 		}
+		if (!call.current()) return;
 		playStreamed(audioId, std::move(shared));
 	}
 	if (!call.current()) return;
 	if (document->isVoiceMessage() || document->isVideoMessage()) {
 		document->owner().markMediaRead(document);
 	}
+	if (!call.current()) return;
 	_playerStartedPlay.fire_copy({audioId.type()});
 }
 
@@ -1346,6 +1359,7 @@ void Instance::resumeOnCall(AudioMsgId::Type type) {
 void Instance::pauseSongForVoice() {
 	const auto current = Purple::PlaylistPlayerCallbackGuard(AudioMsgId::Type::Song);
 	if (!current()) return;
+	const auto voiceCurrent = Purple::VoicePlaybackContinuationGuard();
 	const auto state = getState(AudioMsgId::Type::Song);
 	if (!state.id
 		|| IsStopped(state.state)
@@ -1353,8 +1367,10 @@ void Instance::pauseSongForVoice() {
 		|| state.state == State::Pausing) {
 		return;
 	}
+	const auto interrupted = Purple::VoiceMusicPauseGuard(
+		getData(AudioMsgId::Type::Song)->resumeOnVoiceEnd, current);
 	pause(AudioMsgId::Type::Song);
-	if (!current()) return;
+	if (!current() || !voiceCurrent()) return;
 	if (const auto data = getData(AudioMsgId::Type::Song)) {
 		data->resumeOnVoiceEnd = true;
 	}
@@ -1366,6 +1382,7 @@ void Instance::resumeSongAfterVoice(bool force) {
 		return;
 	}
 	data->resumeOnVoiceEnd = false;
+	if (!Purple::ResumeMusicAfterVoice()) return;
 	if (Core::App().calls().currentCall()
 		|| Core::App().calls().currentGroupCall()) {
 		return;
@@ -1792,6 +1809,7 @@ void Instance::handleStreamingError(
 	if (data->streamed && data->streamed->instance.player().failed()) {
 		clearStreamed(data);
 	}
+	if (!current()) return;
 	if (resumeSong && !data->streamed) {
 		resumeSongAfterVoice(true);
 	}

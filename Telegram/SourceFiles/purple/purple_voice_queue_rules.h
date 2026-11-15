@@ -49,4 +49,34 @@ private:
 
 };
 
+struct ContinuationCandidate {
+	Candidate direction = Candidate::Missing;
+	bool unheard = false;
+};
+
+class Continuation final {
+public:
+	void begin(
+		const Playback &settings,
+		PlaybackChat chat,
+		bool outgoing);
+	void clear();
+	void close();
+	[[nodiscard]] bool permitsAdvance() const;
+	[[nodiscard]] bool resumesMusic() const;
+	[[nodiscard]] std::optional<int> next(
+		int from,
+		const std::function<ContinuationCandidate(int)> &at);
+
+private:
+	struct State {
+		VoiceQueueAnchor ownership;
+		VoiceContinuation mode = VoiceContinuation::Unheard;
+		bool resumeMusic = true;
+		bool closed = false;
+	};
+	std::optional<State> _state;
+
+};
+
 } // namespace Purple::VoiceQueueRules

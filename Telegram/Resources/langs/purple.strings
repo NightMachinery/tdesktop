@@ -773,3 +773,10 @@ docs/purple/upstream_hooks.md.
 "lng_purple_playlist_download_absent" = "No verified kept download for this song.";
 
 "lng_purple_playlists_cleanup_pending" = "Playlist saved. Some kept downloads still need cleanup.";
+
+"lng_purple_after_voice" = "After a voice message";
+"lng_purple_after_voice_music" = "Resume music";
+"lng_purple_after_voice_unheard" = "Unheard messages, then music";
+"lng_purple_after_voice_all" = "All following messages, then music";
+"lng_purple_resume_music_after_voice" = "Resume music after voice messages";
+"lng_purple_after_voice_about" = "Applies when voice or video messages interrupt music. New choices take effect when you start a message. Turning music resume off keeps the interrupted track paused.";

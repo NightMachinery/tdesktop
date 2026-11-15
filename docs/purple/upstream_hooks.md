@@ -1526,7 +1526,21 @@ no facade covers those yet.
   Purple call guards in `play` and `stop`, and continuation guards in
   `playStreamed`, `clearStreamed`, `setCurrent` and `emitUpdate`, reject older
   writes after synchronous observers request a successor. The authority and
-  deferred request slot live in `purple_playlist_player`; Voice bypasses them.
+  deferred request slot live in `purple_playlist_player`; Voice keeps separate
+  admission, stream and generation guards in `purple_voice_queue` and never
+  revokes the Song playlist controller.
+- Voice start admission captures settings and native history/topic/sublist scope;
+  the pre-pause guard commits it only for the admitted document. Automatic item
+  and playlist moves capture their original context, recheck after next-item
+  notification and use a one-shot internal Voice token. Voice admission and
+  callback guards invalidate stale outer playback updates after manual replay.
+  Resume suppression checks the captured preference after clearing the native
+  interrupted-music flag. Error cleanup rechecks the same continuation guard.
+- `Instance::pauseSongForVoice` opens a scoped native interruption claim before
+  the pause notification and checks Voice authority before a late flag write.
+  Purple's Song admission clears that claim before newer native Song intent.
+  `FinishPlaylistPlayback` retires Voice authority through the same existing
+  singleton-finish hook before any callback can enter the destroyed player.
 - `Instance::validateShuffleData` delegates owned Song suppression to
   `SkipAccountPlaylistShuffle`. The Purple hook clears the unused stock shuffle
   pager through a callback only after an actual owned Song or deliberate native
