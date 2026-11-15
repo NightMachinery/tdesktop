@@ -408,6 +408,7 @@ public:
 	[[nodiscard]] bool belongsTo(Main::Session *session) const;
 	[[nodiscard]] bool owns(const AudioMsgId &current);
 	[[nodiscard]] bool claimsShuffle(const AudioMsgId &current);
+	[[nodiscard]] bool claimsUi(const AudioMsgId &current) const;
 	[[nodiscard]] bool move(int delta, bool autonext);
 	[[nodiscard]] bool available(int delta) const;
 	[[nodiscard]] PlaylistPlaybackStatus status() const;
@@ -1193,6 +1194,11 @@ bool PlaylistPlayback::claimsShuffle(const AudioMsgId &current) {
 	return _ownsCurrent && owns(current);
 }
 
+bool PlaylistPlayback::claimsUi(const AudioMsgId &current) const {
+	return _ownsCurrent && bound() && (current == _expected
+		|| (_switching && current == _transitionFrom));
+}
+
 bool PlaylistPlayback::move(int delta, bool autonext) {
 	if (!_loaded || delta == 0) {
 		return false;
@@ -1382,6 +1388,21 @@ bool DeferPlaylistPlayerPlay(const AudioMsgId &audioId, Fn<void()> resume) {
 	});
 	ScheduleHandoffDispatch(Handoffs);
 	return true;
+}
+
+std::optional<PlaylistPlayerUiTarget> CurrentAccountPlaylistTarget(
+		not_null<Main::Session*> session,
+		const AudioMsgId &current) {
+	RequireMainThread();
+	const auto active = Active;
+	if (current.type() != Type::Song || !current.audio()
+		|| !active || !active->belongsTo(session)
+		|| !active->claimsUi(current) || Active != active) {
+		return std::nullopt;
+	}
+	const auto status = active->status();
+	if (status.playlistId.isEmpty()) return std::nullopt;
+	return PlaylistPlayerUiTarget{ status.playlistId, current.audio()->id };
 }
 
 void PlayAccountPlaylist(

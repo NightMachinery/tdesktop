@@ -43,6 +43,15 @@ struct PlaylistPlaybackStatus {
 	std::optional<PlaylistSongStatus> sourceStatus;
 };
 
+struct PlaylistPlayerUiTarget {
+	QString playlistId;
+	uint64_t documentId = 0;
+};
+
+[[nodiscard]] std::optional<PlaylistPlayerUiTarget> CurrentAccountPlaylistTarget(
+	not_null<Main::Session*> session,
+	const AudioMsgId &current);
+
 void PlayAccountPlaylist(
 	not_null<Main::Session*> session,
 	const QString &playlistId,

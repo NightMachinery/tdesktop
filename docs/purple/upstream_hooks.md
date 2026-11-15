@@ -1857,3 +1857,15 @@ The additional native hook is an early return in validateShuffleData because
 its recursive SharedMediaMergedViewer pages belong to the song's chat, not the
 saved playlist, and would otherwise run unused under global Shuffle. The
 existing ordinary shared-media window is unchanged.
+
+## Playlist player label and hover routing
+
+- `media/player/media_player_panel.cpp`: `Panel::refreshList` asks
+  `CurrentAccountPlaylistTarget` inside its peer-selection lambda. An owned
+  playlist returns no peer, allowing the stock list-removal path to close it.
+- `media/player/media_player_widget.cpp`: the label branch of
+  `Widget::mouseReleaseEvent` delegates to `OpenAccountPlaylistFromPlayer`
+  after checking the same pressed/hovered label. `updateOverLabelsState`
+  includes `AccountPlaylistTrackClickable` in the existing cursor decision.
+- Purple owns target/session/route checks and box opening. Voice, another
+  account, pending unowned playback and a retired controller fall through.

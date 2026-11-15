@@ -198,6 +198,8 @@ PRIVATE
     purple/purple_playlists_resolver.h
     purple/purple_playlist_player.cpp
     purple/purple_playlist_player.h
+    purple/purple_playlist_player_ui.cpp
+    purple/purple_playlist_player_ui.h
     purple/hooks/playlist_player.h
     purple/purple_media_restart.cpp
     purple/purple_media_restart.h

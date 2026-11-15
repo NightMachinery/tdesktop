@@ -376,3 +376,23 @@ and assistive activation, drag across viewport edges, cancellation, concurrent
 membership changes, failed/partial writes, Undo conflict, account/route loss,
 and opening/focusing rows after refreshed snapshots. Static source checks do
 not establish rendering, smooth scrolling or service/streaming behavior.
+
+## Player bar and hover list
+
+An owned playlist Song uses a Purple target query that checks the captured
+session, route and actual playback claim without retiring or publishing state.
+Pending unowned attempts, retired
+controllers, another account and Voice do not claim this UI. The target keeps
+the playlist identity and the actual current document, even if another row is
+being resolved.
+
+The stock hover panel returns no peer for that target, so it removes the
+unrelated chat list. Clicking the player label opens that account's playlist
+box and asks its virtual list to reveal the current saved document after a
+confirmed read. It does not select a new queue or start playback. The ordinary
+Voice and cross-account message actions keep their stock behavior when there
+is no owned target. The label uses the stock pointer cursor for this action.
+
+The UI bridge requires the virtual-list box entry point `ShowPlaylistBox`.
+Native ownership/publication, account changes during opening, reveal after a
+library edit and real hover/click behavior require integration qualification.

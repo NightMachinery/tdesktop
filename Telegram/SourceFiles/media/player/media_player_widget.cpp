@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_widget.h"
 #include "purple/hooks/media_recording.h"
 #include "purple/purple_sleep_timer_ui.h"
+#include "purple/purple_playlist_player_ui.h"
 
 #include "platform/platform_specific.h"
 #include "data/data_document.h"
@@ -543,6 +544,9 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		if (_labelsOver != downLabels) {
 			return;
 		}
+		if (Purple::OpenAccountPlaylistFromPlayer(_controller, _type)) {
+			return;
+		}
 		if ((_type == AudioMsgId::Type::Voice)
 				|| _lastSongFromAnotherSession) {
 			const auto current = instance()->current(_type);
@@ -572,7 +576,8 @@ void Widget::updateOverLabelsState(bool over) {
 	_labelsOver = over;
 	const auto pressShowsItem = _labelsOver
 		&& ((_type == AudioMsgId::Type::Voice)
-			|| _lastSongFromAnotherSession);
+			|| _lastSongFromAnotherSession
+			|| Purple::AccountPlaylistTrackClickable(_controller, _type));
 	setCursor(pressShowsItem ? style::cur_pointer : style::cur_default);
 	_togglePlaylistRequests.fire(over && (_type == AudioMsgId::Type::Song));
 }

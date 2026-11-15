@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_panel.h"
 
 #include "media/player/media_player_instance.h"
+#include "purple/purple_playlist_player.h"
 #include "info/media/info_media_list_widget.h"
 #include "info/saved/info_saved_music_widget.h"
 #include "history/history.h"
@@ -239,6 +240,9 @@ void Panel::refreshList() {
 	const auto context = instance()->playlistContext(AudioMsgId::Type::Song);
 	auto savedMusicItem = false;
 	const auto peer = [&]() -> PeerData* {
+		if (Purple::CurrentAccountPlaylistTarget(&session(), current)) {
+			return nullptr;
+		}
 		if (const auto document = current.audio()) {
 			if (&document->session() != &session()) {
 				// Different account is playing music.
