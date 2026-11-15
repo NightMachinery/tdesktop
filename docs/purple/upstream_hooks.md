@@ -775,6 +775,8 @@ B11.
   `purple/test_history_menu_lists.py`.
 
 **`Telegram/SourceFiles/window/window_main_menu.cpp`**: B8 extraction.
+- `MainMenu::setupMenu` delegates one reactive Playlists row to
+  `Purple::AddPlaylistsMenuRow`; the Purple helper owns visibility and opening.
 - One `purple_chat_menus.h` include replaces the direct preset-box include.
   The preset label and row position stay the same; opening it goes through
   `Purple::ShowPresetBox(controller)`. The existing generic-box include stays
@@ -1336,7 +1338,9 @@ condition calls the save policy without changing the media's TTL value.
 
 `history/view/media/history_view_save_document_action.cpp` calls the same policy
 at the secondary-list TTL save-menu gate and adds an early Purple action hook for
-TTL documents in the common menu builder. Purple owns the source token, item
+TTL documents in the common menu builder. After that exclusion, one
+`AddPlaylistActions` call offers the account-bound playlist picker for qualifying
+regular music messages. Purple owns the source token, item
 lookup and expiry checks before the dialog and after its callback.
 
 Upstream v7.3.3 routes item save checks through `HistoryItem::forbidsSaving()`,

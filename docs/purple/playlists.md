@@ -6,8 +6,9 @@ bounded gzip records, record discovery, verified cover checks and complete
 sync-step planning. Its contract and focused tests are described in
 [the core playlist documentation](../../Telegram/ThirdParty/purple_core/docs/playlists.md).
 
-These sources alone do not expose playlists in the client. Menus, playlist
-queues, downloads and sync transport remain to be implemented.
+The Desktop candidate adds account-local playlist menus and basic saved-order
+playback. It is a private, uncompiled integration draft. Advanced queue modes,
+downloads and sync transport remain to be implemented.
 Sharing is deferred, and changing the sync chat does not clean records from the
 old chat.
 
@@ -100,3 +101,114 @@ refresh path. Results are memory-only. `cases-playlists-resolver` exercises the
 production queue and channel-identity check with controlled cache/read/defer
 ports; the real Telegram adapter is syntax-compiled. Live RPC behavior and
 playlist UI/player integration are not yet qualified.
+
+
+## Desktop local playlist interface
+
+The main menu has a Playlists entry controlled by the app-wide, default-on
+`playlists.menu_item_p` setting. The music-message Add to playlist action remains
+available when that entry is hidden. Both surfaces bind their account and route
+when opened, and reject stale source messages and late callbacks.
+
+Purple-owned boxes reuse stock settings buttons, single-line inputs, labels and
+box spacing. The library, recently deleted view and song detail use pages of at
+most 25 entries. Create, rename, copy, delete, restore, remove and structured Undo
+submit typed account-worker edits and display the confirmed reloaded snapshot.
+Songs retain saved title, performer and duration without requiring their source
+to resolve. Display order comes from the shared core, not the song map's order.
+Drag reorder and a virtual song list remain later work.
+
+`RecordAccountPlaylistUse` is a separate typed worker request. Open, play and add
+update local recent-use order without changing sync bookkeeping. Its guarded
+`writeLocalState` path preserves library and backup bytes and absence exactly,
+including valid noncanonical library files. Library edits still use the existing
+library-before-local-state durability ordering. Failed or partially durable
+writes remain errors even when the reloaded snapshot contains part of a change.
+
+The UI delegates Play, song selection, Retry and playback status to the separate
+`purple_playlist_player` adapter. UI lifetime does not own playback. The adapter
+owns source resolution and stock player navigation; unsupported modes are shown
+as problems. This interface requires the player adapter to be integrated along
+with the UI. Full queue modes, retained downloads, sync transport and sharing are
+unfinished. The sync line says local-only rather than claiming a sync succeeded.
+
+The shared settings scope registry makes `menu_item_p`, `keep_downloaded_p` and
+private listening app-wide. Automatic playlist sync is per account; its local
+sync switch is per account and device. Future downloads use per-playlist
+On/Off/Inherit plus the global default and Remove downloads now. Changing sync
+chat will publish a snapshot without removing old-chat records. Sharing is for a
+later release.
+
+## Basic saved-order playback
+
+The basic player adapter snapshots one account's saved order and sources in
+memory, then resolves the selected row before starting the stock message
+player. It resolves at most three following rows while that song plays and
+retains at most four cached resolutions. Unavailable metadata rows stay in
+the snapshot. Definitive failures skip in the requested direction; a failed
+resolution or playback admission asks for explicit Retry. Shared resolver
+flood-wait scheduling remains unchanged. Playing a fallback never relinks or
+writes the saved library.
+
+Next, Previous and automatic end continuation are handled before the stock
+chat queue. Exhaustion stays a handled boundary. Voice playback, Repeat One
+and the stock disable-autoplay option retain their own behavior. Shuffle,
+reverse and Repeat All are refused with a typed status in this first slice;
+they are not implemented playlist modes. Queue panel contents, virtual drag,
+download management, sync and sharing remain follow-ups.
+
+The status producer and start/retry/stop API capture the selected session,
+account and routing authority. UI/controller destruction does not own ongoing
+playback. Service route invalidation, account retirement, session destruction,
+player shutdown and unrelated song takeover invalidate old callbacks. The
+expected AudioMsgId is installed before synchronous stock play callbacks.
+The account service invalidates playback before retiring workers and stops the
+captured session on logout. A live controller subscribes to data-clear notification. Previously retired
+controllers have already removed that subscription; their retained resolvers may
+instead drain at session lifetime destruction. Actual document/destructor order
+remains unqualified and requires native validation.
+
+The proposed `cases-playlist-player` fixture extracts the literal cursor,
+resolution classification, bounded-window and handoff authority helpers. It
+covers saved order,
+exhaustion, explicit transient retry admission, stale generation, retired and
+destroyed authority, and forward/backward windows. Production adapter/player
+syntax checks are registered separately. These proposed tests have not been
+compiled or executed. They do not prove real RPC, stock streaming, actual
+session destruction or synchronous player observer behavior; ROOT must run
+those integration and lifetime checks before shipping this draft.
+
+## Synchronous stock-player handoff
+
+A stock player subscriber can call Play while the previous playlist call is
+inside `clearStreamed` or `emitUpdate`. The Purple handoff adapter retains only
+the newest nested Song request until the native call returns. Narrow guards in
+`Instance::play`, `playStreamed`, `clearStreamed`, `setCurrent`, `emitUpdate` and
+`stop` reject older continuations after synchronous notifications. This avoids
+an older clear or stream assignment overwriting a newer request. It does not
+claim that stopping an overwritten stream could restore its successor.
+
+Deferred stock requests capture a weak session and reject logout or session
+replacement. Deferred playlist requests retain numeric resolution data and
+revalidate the source before playback. New playlist intent and player shutdown
+revoke pending work. Voice calls bypass this Song-only handoff authority.
+Only actual native compilation and streaming event-order checks can qualify
+these seams; the drafted helper assertions do not prove native lifetimes.
+
+## Upstream hooks
+
+The main-menu and message-menu hooks delegate to Purple-owned UI helpers.
+`media/player/media_player_instance.cpp` delegates saved-order navigation,
+shutdown and synchronous handoff authority to Purple. All policy, deferred
+request ownership and playlist state remain in Purple sources. The exact hook
+inventory is maintained in [upstream_hooks.md](upstream_hooks.md).
+
+Ordinary stock Song Play and Stop enter shared intent authority before native
+work. Stop revokes a pending library read, initial/manual-step resolution and
+queued start even when the current song id has not changed. A newer ordinary
+Song request during Retired publication invalidates the suspended older playlist
+start before it constructs a controller. Adapter-owned Play/Stop and native
+Repeat One consume a one-shot internal authorization at the same entry hook.
+Synchronous subscribers cannot inherit that already-consumed authorization.
+Voice bypasses this Song policy, and the existing autoplay decision order stays
+in stock code. These intent corrections remain uncompiled and unexecuted.

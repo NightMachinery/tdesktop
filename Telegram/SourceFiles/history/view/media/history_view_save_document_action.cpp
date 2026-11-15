@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
+#include "purple/purple_playlists_menu.h"
 #include "purple/purple_user_control.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
@@ -42,6 +43,7 @@ void AddSaveDocumentAction(
 	if (Purple::AddSelfDestructDocumentSaveAction(addAction, item, document)) {
 		return;
 	}
+	Purple::AddPlaylistActions(addAction, item, document, controller);
 	const auto contextId = item->fullId();
 	const auto fromSaved = item->history()->peer->isSelf();
 	const auto savedMusic = &document->owner().savedMusic();

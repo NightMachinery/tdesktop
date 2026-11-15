@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
 #include "purple/purple_chat_menus.h"
+#include "purple/purple_playlists_box.h"
 #include "settings/sections/settings_advanced.h"
 #include "settings/sections/settings_calls.h"
 #include "settings/sections/settings_information.h"
@@ -769,6 +770,7 @@ void MainMenu::setupMenu() {
 			_controller->session().supportTemplates().reload();
 		});
 	}
+	Purple::AddPlaylistsMenuRow(_menu, controller);
 	addAction(
 		Purple::PresetMenuLabel(),
 		{ &st::menuIconTagFilter }
