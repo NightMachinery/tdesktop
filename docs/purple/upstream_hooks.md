@@ -1541,8 +1541,7 @@ no facade covers those yet.
 
 **`Telegram/SourceFiles/media/player/media_player_float.cpp`**: floating-round
 size, controls, restart and seek visibility hooks.
-- The facade include immediately follows the file's own header, before the
-  sleep-timer UI include.
+- The facade include, after the file's own header.
 - `Float::Float`: one inserted line after the stock size,
   `size = Purple::FloatPlayerSize(parent, document, size);` (the float keeps
   the in-chat size), and `Purple::DecorateFloat(this, _doubleClickedCallback);`
@@ -1576,7 +1575,8 @@ declares only plain and forward-declared types, so the round recorder in
 
 **`Telegram/SourceFiles/media/player/media_player_widget.cpp`**: +4 -0. First
 Purple edit in this file.
-- The facade include, after the file's own header.
+- The facade include immediately follows the file's own header, before the
+  sleep-timer UI include.
 - `Widget::Widget`: `Purple::DecoratePlayerSeek(rightControls(), ...)` just
   before `setType`, which creates the two seek buttons in the right-hand
   controls; the lambda hands Purple the bar's current track type.
