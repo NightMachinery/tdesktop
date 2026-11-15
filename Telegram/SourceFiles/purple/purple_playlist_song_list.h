@@ -3,6 +3,7 @@
 #include "ui/rp_widget.h"
 
 #include <cstdint>
+#include <set>
 #include <vector>
 
 namespace Ui { class ScrollArea; }
@@ -30,6 +31,7 @@ public:
 	[[nodiscard]] int scrollTop() const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
+	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
 

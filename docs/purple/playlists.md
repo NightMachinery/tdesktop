@@ -476,3 +476,38 @@ A bounded large-file managed-cache adapter remains required. Windows owned-file
 operations, download UI, automatic post-edit prune wiring and native/GUI
 qualification also remain open. No C++ compiler or real transfer result is
 implied by helper or source checks.
+
+
+### Download controls
+
+The playlist's Downloads action opens stock GenericBox, SettingsButton and
+Radiobutton controls. Keep downloaded offers On, Off and Use default, displaying
+the current app-wide default. Changes appear only after the account worker has
+confirmed the local-state write. Download all starts a box-owned job; closing the
+box or Stop downloading cancels that job while retaining completed files. Retry
+is explicit and is available for failed or busy rows after the job ends.
+
+Remove downloads now asks for confirmation and uses the owned-file inventory.
+Other playlists, including Recently deleted, retain their references. User
+Downloads paths are untouched. Returning to the playlist reloads its view.
+
+Check selected download verifies the selected song through the serialized
+account worker. A successful identity, digest, size and membership check adds
+the localized Download verified at last check status to the row and its
+accessible name. This is a historical observation; removing the file externally
+can invalidate it. Refresh or another check clears stale observations. Inventory
+presence alone never creates a downloaded mark, and opening the list does not
+hash every song.
+
+This private UI slice depends on the owned-transfer adapter's terminal progress
+and read-only Verify API. Its compilation, worker integration, actual cloud
+transfers and stock light/dark/RTL/accessibility comparisons are not yet proven.
+Managed-cache completion, Windows file handling and automatic pruning retain
+their separate qualification requirements.
+
+The download composition registers two additional host configurations while
+retaining all 63 prior configurations and variants. cases-playlist-download-policy
+executes the real codec, reference and ticket-policy fixture; cases-playlist-owned-files
+executes owned staging, digest, publication, recovery and removal against a
+private QTemporaryDir. Neither is a native cloud, reader-ownership or GUI test.
+The resulting 65-gate campaign remains unrun.

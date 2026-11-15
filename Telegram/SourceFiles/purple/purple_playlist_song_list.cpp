@@ -10,6 +10,7 @@
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
+#include <utility>
 
 #include "styles/style_media_player.h"
 #include "styles/style_menu_icons.h"
@@ -29,6 +30,7 @@ public:
 	[[nodiscard]] uint64_t selectedDocument() const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
+	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
 	[[nodiscard]] int rowHeight() const;
@@ -73,6 +75,7 @@ private:
 	Fn<void(std::vector<uint64_t>)> _reorder;
 	base::Timer _autoscroll;
 	QString _checkedState;
+	std::set<uint64_t> _verifiedDownloads;
 	uint64_t _current = 0;
 	uint64_t _checked = 0;
 	int _selected = -1;
@@ -145,8 +148,12 @@ QRect PlaylistSongList::Rows::handleRect(int slot) const {
 }
 
 QString PlaylistSongList::Rows::sourceState(int index) const {
-	return _data[index].documentId == _checked && !_checkedState.isEmpty()
+	auto result = _data[index].documentId == _checked && !_checkedState.isEmpty()
 		? _checkedState : tr::lng_purple_playlists_not_checked(tr::now);
+	if (_verifiedDownloads.contains(_data[index].documentId)) {
+		result += u" · "_q + tr::lng_purple_playlist_download_verified(tr::now);
+	}
+	return result;
 }
 
 void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
@@ -407,6 +414,18 @@ void PlaylistSongList::Rows::setPlayback(
 	update();
 }
 
+void PlaylistSongList::Rows::setVerifiedDownloads(std::set<uint64_t> documents) {
+	if (_verifiedDownloads == documents) return;
+	const auto previous = std::exchange(_verifiedDownloads, std::move(documents));
+	for (auto i = 0; i < int(_data.size()); ++i) {
+		const auto id = _data[i].documentId;
+		if (previous.contains(id) != _verifiedDownloads.contains(id)) {
+			accessibilityChildNameChanged(i);
+		}
+	}
+	update();
+}
+
 QAccessible::Role PlaylistSongList::Rows::accessibilityRole() {
 	return QAccessible::List;
 }
@@ -543,6 +562,10 @@ void PlaylistSongList::moveSelected(int delta) {
 void PlaylistSongList::setPlayback(
 		uint64_t current, uint64_t checked, QString state, bool unavailable) {
 	_rows->setPlayback(current, checked, std::move(state), unavailable);
+}
+
+void PlaylistSongList::setVerifiedDownloads(std::set<uint64_t> documents) {
+	_rows->setVerifiedDownloads(std::move(documents));
 }
 
 void PlaylistSongList::cancelInteraction() {

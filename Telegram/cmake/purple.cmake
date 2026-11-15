@@ -193,6 +193,8 @@ PRIVATE
     purple/purple_playlist_download_registry.h
     purple/purple_playlist_download_desktop.cpp
     purple/purple_playlist_download_desktop.h
+    purple/purple_playlist_download_box.cpp
+    purple/purple_playlist_download_box.h
     purple/purple_playlists_store.cpp
     purple/purple_playlists_store.h
     purple/purple_playlists_worker.cpp

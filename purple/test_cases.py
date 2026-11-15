@@ -56,6 +56,7 @@ CASES = {
             'media/player/media_player_panel.cpp',
             'media/player/media_player_widget.cpp',
             'purple/purple_playlists_box.cpp',
+            'purple/purple_playlist_download_box.cpp',
             'media/player/media_player_instance.cpp'],
         'units': [],
         'libraries': ['Telegram/lib_base/liblib_base.a'],

@@ -13,6 +13,7 @@
 #include "media/media_common.h"
 #include "media/player/media_player_instance.h"
 #include "purple/purple_config.h"
+#include "purple/purple_playlist_download_box.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
 #include "purple/purple_playlists_service.h"
@@ -32,6 +33,7 @@
 #include <QtCore/QPointer>
 
 #include <algorithm>
+#include <set>
 
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -68,6 +70,7 @@ private:
 	void playbackChanged(PlaylistPlaybackStatus status);
 	void updateSongPlayback();
 	void reorder(std::vector<uint64_t> documentIds);
+	void verifySelectedDownload();
 	void label(rpl::producer<QString> text);
 	Ui::SettingsButton *button(rpl::producer<QString> text, Fn<void()> callback);
 	void pages(size_t count);
@@ -88,6 +91,8 @@ private:
 	not_null<Ui::FlatLabel*> _playbackLabel;
 	not_null<Ui::VerticalLayout*> _rows;
 	uint64_t _generation = 0;
+	uint64_t _downloadGeneration = 0;
+	std::set<uint64_t> _verifiedDownloads;
 	size_t _page = 0;
 	uint64_t _selectedSong = 0;
 	uint64_t _currentSong = 0;
@@ -272,7 +277,12 @@ void PlaylistView::load(bool recordUse) {
 		return;
 	}
 	_busy = true;
-	if (_songList) _songList->cancelInteraction();
+	++_downloadGeneration;
+	_verifiedDownloads.clear();
+	if (_songList) {
+		_songList->cancelInteraction();
+		_songList->setVerifiedDownloads({});
+	}
 	_rows->setEnabled(false);
 	_status->setText(tr::lng_purple_playlists_loading(tr::now));
 	const auto generation = ++_generation;
@@ -291,6 +301,8 @@ void PlaylistView::load(bool recordUse) {
 }
 
 void PlaylistView::receive(PlaylistAccountResult result) {
+	++_downloadGeneration;
+	_verifiedDownloads.clear();
 	const auto ok = bool(result);
 	const auto snapshotStatus = result.snapshot.status;
 	_busy = false;
@@ -416,6 +428,13 @@ void PlaylistView::render() {
 		const auto &playlist = i->second;
 		label(rpl::single(playlist.title->value));
 		const auto songs = PlaylistVisibleSongIds(playlist);
+		button(tr::lng_purple_playlist_downloads(), [weak] {
+			const auto self = weak.get();
+			if (!self || !self->current() || self->_busy) return;
+			ShowPlaylistDownloadsBox(self->_window.get(), self->_playlistId, [weak] {
+				if (const auto self = weak.get()) self->load();
+			});
+		});
 		button(tr::lng_purple_playlists_play(), [=] {
 			if (const auto self = weak.get()) self->play();
 		})->setDisabled(songs.empty());
@@ -493,6 +512,10 @@ void PlaylistView::render() {
 					.documentIds = { id },
 				});
 			});
+			_songList->setVerifiedDownloads(_verifiedDownloads);
+			button(tr::lng_purple_playlist_check_download(), [weak] {
+				if (const auto self = weak.get()) self->verifySelectedDownload();
+			});
 			updateSongPlayback();
 			if (_revealDocument && std::find(songs.begin(), songs.end(), *_revealDocument) != songs.end()) {
 				const auto list = _songList.data();
@@ -514,6 +537,39 @@ void PlaylistView::render() {
 			}
 		});
 	}
+}
+
+void PlaylistView::verifySelectedDownload() {
+	if (!current() || _busy || !_songList || !_snapshot) return;
+	const auto id = _songList->selectedDocument();
+	if (!id) return;
+	const auto weak = base::make_weak(this);
+	const auto playlist = _playlistId;
+	const auto generation = _generation;
+	const auto verification = ++_downloadGeneration;
+	_verifiedDownloads.erase(id);
+	_songList->setVerifiedDownloads(_verifiedDownloads);
+	if (!weak) return;
+	RequestAccountPlaylistDownloads(_session.get(), {
+		.kind = PlaylistDownloadRequestKind::Verify,
+		.playlistId = playlist,
+		.documentId = id,
+	}, [weak, id, playlist, generation, verification](PlaylistAccountResult result) {
+		const auto self = weak.get();
+		if (!self || !self->current() || self->_playlistId != playlist
+			|| self->_generation != generation || self->_downloadGeneration != verification
+			|| !self->_songList) return;
+		if (result && result.downloads && result.downloads->verified.contains(id)) {
+			self->_verifiedDownloads.insert(id);
+		}
+		self->_songList->setVerifiedDownloads(self->_verifiedDownloads);
+		if (!weak) return;
+		self->_status->setText(!result
+			? tr::lng_purple_playlist_download_failed(tr::now)
+			: self->_verifiedDownloads.contains(id)
+			? tr::lng_purple_playlist_download_verified(tr::now)
+			: tr::lng_purple_playlist_download_absent(tr::now));
+	});
 }
 
 void PlaylistView::showLibrary(bool deleted) {
