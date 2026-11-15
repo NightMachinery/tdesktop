@@ -32,7 +32,7 @@ CASES = {
             'media/player/media_player_instance.cpp'],
         'units': [],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
-        'frameworks': ['QtCore'],
+        'frameworks': ['QtCore', 'Foundation'],
     },
     'playlists-resolver': {
         'program': 'playlists_resolver_cases.cpp',
