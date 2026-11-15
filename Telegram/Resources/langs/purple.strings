@@ -765,9 +765,9 @@ docs/purple/upstream_hooks.md.
 "lng_purple_playlist_download_failed" = "Could not complete the download operation. Refresh to check the current state.";
 "lng_purple_playlist_download_remove_confirm" = "Remove files kept only for this playlist? Files still referenced by another playlist or Recently deleted are kept. Your Downloads folder is unchanged.";
 "lng_purple_playlist_download_starting" = "Preparing downloads…";
-"lng_purple_playlist_download_progress" = "Downloaded: {count} of {total}";
-"lng_purple_playlist_download_unavailable" = "Unavailable songs: {count}";
-"lng_purple_playlist_download_retry_count" = "Could not download: {count}";
+"lng_purple_playlist_download_progress" = "Downloaded: {amount} of {total}";
+"lng_purple_playlist_download_unavailable" = "Unavailable songs: {amount}";
+"lng_purple_playlist_download_retry_count" = "Could not download: {amount}";
 "lng_purple_playlist_check_download" = "Check selected download";
 "lng_purple_playlist_download_verified" = "Download verified at last check";
 "lng_purple_playlist_download_absent" = "No verified kept download for this song.";

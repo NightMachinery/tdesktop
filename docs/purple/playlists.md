@@ -511,3 +511,7 @@ executes the real codec, reference and ticket-policy fixture; cases-playlist-own
 executes owned staging, digest, publication, recovery and removal against a
 private QTemporaryDir. Neither is a native cloud, reader-ownership or GUI test.
 The resulting 65-gate campaign remains unrun.
+
+Download status labels use the ordinary `{amount}` placeholder. The language
+generator reserves `{count}` for plural keys, so these numeric summaries and
+their UI call sites must use the same non-plural tag.

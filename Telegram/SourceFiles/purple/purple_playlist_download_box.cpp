@@ -310,12 +310,12 @@ void DownloadView::progress(uint64_t generation, PlaylistDownloadProgress value)
 		: value.terminal && value.problem != PlaylistDownloadProblem::None
 		? tr::lng_purple_playlist_download_failed(tr::now)
 		: tr::lng_purple_playlist_download_progress(tr::now,
-			lt_count, QString::number(qulonglong(value.downloaded)),
+			lt_amount, QString::number(qulonglong(value.downloaded)),
 			lt_total, QString::number(qulonglong(value.total)))
 			+ u"\n"_q + tr::lng_purple_playlist_download_unavailable(tr::now,
-				lt_count, QString::number(qulonglong(value.unavailable)))
+				lt_amount, QString::number(qulonglong(value.unavailable)))
 			+ u"\n"_q + tr::lng_purple_playlist_download_retry_count(tr::now,
-				lt_count, QString::number(qulonglong(value.failed + value.busy)));
+				lt_amount, QString::number(qulonglong(value.failed + value.busy)));
 	_progress->setText(text);
 }
 
