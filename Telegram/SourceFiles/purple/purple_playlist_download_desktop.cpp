@@ -4,6 +4,8 @@
 #include "purple/purple_playlist_download_files.h"
 #include "purple/purple_playlist_download_registry.h"
 #include "purple/purple_playlist_owned_transfer.h"
+#include "purple/purple_playlist_managed_cache.h"
+#include "purple/purple_playlist_streaming_source.h"
 #include "purple/purple_playlists_resolver.h"
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_playlists_policy.h"
@@ -149,7 +151,9 @@ public:
 		authority->store(false, std::memory_order_release);
 		for (auto &[index, token] : transferAuthority) token->store(false, std::memory_order_release);
 		for (const auto &[index, transfer] : transfers) transfer->cancel();
+		for (const auto &[index, transfer] : cacheTransfers) transfer->cancel();
 		transfers.clear();
+		cacheTransfers.clear();
 		policy.cancel();
 		resolvers.clear();
 		if (publish) notify(true);
@@ -162,15 +166,18 @@ public:
 		}
 	}
 
-	void finish(PlaylistDownloadTicket ticket, PlaylistDownloadPhase phase) {
+	void finish(PlaylistDownloadTicket ticket, PlaylistDownloadPhase phase,
+			PlaylistDownloadProblem reason = PlaylistDownloadProblem::None) {
 		if (!current() || !policy.finish(ticket, phase)) return;
-		if (phase == PlaylistDownloadPhase::Failed) problem = PlaylistDownloadProblem::Storage;
+		if (reason != PlaylistDownloadProblem::None) problem = reason;
+		else if (phase == PlaylistDownloadPhase::Failed) problem = PlaylistDownloadProblem::Storage;
 		else if (phase == PlaylistDownloadPhase::Busy) problem = PlaylistDownloadProblem::Busy;
 		else if (phase == PlaylistDownloadPhase::Unavailable) problem = PlaylistDownloadProblem::Unavailable;
 		resolvers.erase(ticket.index);
 		const auto i = transferAuthority.find(ticket.index);
 		if (i != end(transferAuthority)) i->second->store(false, std::memory_order_release);
 		transfers.erase(ticket.index);
+		cacheTransfers.erase(ticket.index);
 		transferAuthority.erase(ticket.index);
 		pump();
 	}
@@ -295,6 +302,65 @@ public:
 		});
 	}
 
+	void cache(PlaylistDownloadTicket ticket, const PlaylistSongResolution &resolution,
+			not_null<DocumentData*> document, not_null<HistoryItem*> item) {
+		const auto token = std::make_shared<std::atomic<bool>>(true);
+		transferAuthority[ticket.index] = token;
+		const auto key = document->bigFileBaseCacheKey();
+		const auto size = document->size;
+		const auto weak = weak_from_this();
+		auto transfer = std::make_shared<PlaylistManagedCacheTransfer>(document,
+			Data::FileOrigin(item->fullId()), token,
+			[weak, ticket, resolution, key, size](PlaylistDownloadStatus status) {
+				const auto self = weak.lock();
+				if (!self) return;
+				if (!self->current()) {
+					self->cancel(true, PlaylistDownloadProblem::Changed);
+					return;
+				}
+				if (!self->policy.current(ticket)) return;
+				if (status != PlaylistDownloadStatus::Ready) {
+					self->finish(ticket,
+						status == PlaylistDownloadStatus::Busy ? PlaylistDownloadPhase::Busy
+						: status == PlaylistDownloadStatus::Unsupported ? PlaylistDownloadPhase::Unavailable
+						: PlaylistDownloadPhase::Failed,
+						status == PlaylistDownloadStatus::Unsupported ? PlaylistDownloadProblem::Unsupported
+						: PlaylistDownloadProblem::None);
+					return;
+				}
+				RequestAccountPlaylistDownloads(self->session.get(), {},
+					[weak, ticket, resolution, key, size](auto result) {
+						const auto owner = weak.lock();
+						if (!owner) return;
+						if (!owner->current()) {
+							owner->cancel(true, PlaylistDownloadProblem::Changed);
+							return;
+						}
+						if (!owner->policy.current(ticket)) return;
+						if (!result || !result.downloads) {
+							owner->finish(ticket, PlaylistDownloadPhase::Failed);
+							return;
+						}
+						const auto &library = *result.snapshot.library;
+						const auto playlist = library.playlists.find(owner->playlistId);
+						const auto &song = owner->songs[ticket.index];
+						auto item = static_cast<HistoryItem*>(nullptr);
+						const auto document = Revalidate(owner->session.get(), resolution, item);
+						if (!document || document->size != size || document->bigFileBaseCacheKey() != key
+							|| playlist == end(library.playlists) || playlist->second.isPartial()
+							|| playlist->second.deleted->value || library.purged.contains(owner->playlistId)
+							|| !playlist->second.songs->contains(song.documentId)
+							|| playlist->second.songs->at(song.documentId).value.source != std::optional(song.source)) {
+							owner->finish(ticket, PlaylistDownloadPhase::Unavailable);
+							return;
+						}
+						owner->finish(ticket, PlaylistDownloadPhase::Downloaded);
+					});
+			});
+		cacheTransfers[ticket.index] = transfer;
+		transfer->start();
+	}
+
 	void save(PlaylistDownloadTicket ticket, const PlaylistSongResolution &resolution,
 			const PlaylistDownloadState &state) {
 		auto item = static_cast<HistoryItem*>(nullptr);
@@ -303,8 +369,12 @@ public:
 			finish(ticket, PlaylistDownloadPhase::Unavailable);
 			return;
 		}
+		if (!PlaylistStreamingSizeSupported(document->size)) {
+			finish(ticket, PlaylistDownloadPhase::Unavailable, PlaylistDownloadProblem::Unsupported);
+			return;
+		}
 		if (!PlaylistKeepsDownloads(state, playlistId, ActiveSettings().playlists.keepDownloaded)) {
-			finish(ticket, PlaylistDownloadPhase::Busy);
+			cache(ticket, resolution, document, item);
 			return;
 		}
 		const auto old = state.files.find(document->id);
@@ -358,7 +428,10 @@ public:
 					if (!owner || !owner->current() || !owner->policy.current(ticket)) return;
 					if (status != PlaylistDownloadStatus::Ready) {
 						owner->finish(ticket, status == PlaylistDownloadStatus::Busy
-							? PlaylistDownloadPhase::Busy : PlaylistDownloadPhase::Failed);
+							? PlaylistDownloadPhase::Busy : status == PlaylistDownloadStatus::Unsupported
+							? PlaylistDownloadPhase::Unavailable : PlaylistDownloadPhase::Failed,
+							status == PlaylistDownloadStatus::Unsupported ? PlaylistDownloadProblem::Unsupported
+							: PlaylistDownloadProblem::None);
 						return;
 					}
 					owner->commitTransfer(ticket, resolution, prepared);
@@ -379,6 +452,7 @@ public:
 	std::map<std::size_t, std::shared_ptr<DesktopPlaylistResolver>> resolvers;
 	std::map<std::size_t, std::shared_ptr<std::atomic<bool>>> transferAuthority;
 	std::map<std::size_t, std::shared_ptr<PlaylistOwnedTransfer>> transfers;
+	std::map<std::size_t, std::shared_ptr<PlaylistManagedCacheTransfer>> cacheTransfers;
 	std::shared_ptr<std::atomic<bool>> authority =
 		std::make_shared<std::atomic<bool>>(true);
 	PlaylistDownloadProblem problem = PlaylistDownloadProblem::None;

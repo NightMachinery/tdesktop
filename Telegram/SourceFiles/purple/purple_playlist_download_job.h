@@ -10,7 +10,7 @@ struct PlaylistDownloadTicket {
 	std::size_t index = 0;
 };
 enum class PlaylistDownloadProblem {
-	None, Changed, Storage, MissingPlaylist, Busy, Unavailable, Cancelled,
+	None, Changed, Storage, MissingPlaylist, Busy, Unavailable, Cancelled, Unsupported,
 };
 struct PlaylistDownloadProgress {
 	std::size_t total = 0;

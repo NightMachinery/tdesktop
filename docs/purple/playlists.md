@@ -469,13 +469,41 @@ destruction cancels silently. The observer must keep its existing weak box and
 captured account/route/generation guards. Failed and Busy rows require explicit
 Retry; definitive unavailable rows do not loop.
 
-This remains an unqualified source foundation. KeepOff/cache mode returns Busy.
-The file loader's whole-buffer cache admission is capped at 10 MiB; downloader
-traffic through a dedicated reader does not prove a large song is fully cached.
-A bounded large-file managed-cache adapter remains required. Windows owned-file
-operations, download UI, automatic post-edit prune wiring and native/GUI
-qualification also remain open. No C++ compiler or real transfer result is
-implied by helper or source checks.
+KeepOff uses a dedicated native streaming reader and the account's ordinary
+big-file cache. It creates no kept or Downloads file, registers no file location,
+and writes no playlist library, backup or local inventory. Source and cache
+passes use 128 KiB buffers on the main thread. A wake-only relay never touches
+readers, devices, sessions or cache; it only schedules the next bounded turn.
+Local file and memory sources retain main-thread device access. Their loader
+bridge safely omits the remote-only downloader attachment optimization, so the
+kept-file path also preserves genuine offline/local reuse.
+
+Native slices, headers and serialized cache objects remain bounded. After each
+8 MiB interval the pump waits for an asynchronous FIFO cache operation before
+continuing, so writes cannot accumulate for the entire song. A cancelled writer
+keeps its transfer lease until an asynchronous fence drains its accepted writes,
+so repeated cancel/restart also stays bounded. The bridge flushes
+remaining slices through the native serializer, drains them the same way, and
+lets those dedicated readers skip destructor cache synchronization. Ordinary
+readers are unchanged. Cancellation wakes and joins only the relay, then stops
+and destroys readers on main before session cache destruction; it does not wait
+for cache work or main delivery from a cache worker.
+
+Completion requires a fresh cache-only reader to reread every byte and match the
+source pass's SHA256, followed by a fresh native cache-mapping/prefix check.
+Cache-only fallback fails instead of reading a local source or the network.
+Neither queued writes nor full-in-cache metadata alone establish completion.
+Failure, eviction or insufficient cache capacity can prevent that proof and
+require explicit Retry. The result records cache contents verified at that
+check; ordinary cache eviction may remove them afterward. Row file-verification
+marks remain kept-file checks and are not invented for managed-cache rows.
+
+Native Reader admission is positive size at most 510 times 8 MiB (4,278,190,080
+bytes), including the native 32-bit addition bound. Larger sizes or a missing
+native document cache key return typed Unsupported. This is a source proposal
+pending compilation and real cache/loader/UI qualification. Windows owned kept
+file operations, automatic post-edit prune wiring and the previously documented
+recovery limits remain open. No native result is implied by helper checks.
 
 
 ### Download controls
@@ -519,3 +547,8 @@ their UI call sites must use the same non-plural tag.
 The download-state validators use Qt's const member iterators for byte arrays
 and strings, preserving the same identity, digest, token and extension checks
 without relying on unqualified iterator lookup.
+
+The managed-cache fixture refuses invalid temporary-directory setup before any
+file path is formed. Asynchronous database completion state is shared with its
+callbacks, so a bounded wait failure cannot leave a callback referring to an
+unwound stack variable. These checks still require actual native execution.

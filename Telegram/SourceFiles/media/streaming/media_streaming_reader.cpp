@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/streaming/media_streaming_reader.h"
+#include "purple/purple_playlist_cache_bridge.h"
 
 #include "media/streaming/media_streaming_common.h"
 #include "media/streaming/media_streaming_loader.h"
@@ -1407,6 +1408,7 @@ void Reader::loadAtOffset(uint32 offset) {
 }
 
 void Reader::finalizeCache() {
+	if (Purple::PlaylistCacheBridge::SkipFinalize(this)) return;
 	if (!_cacheHelper) {
 		return;
 	}

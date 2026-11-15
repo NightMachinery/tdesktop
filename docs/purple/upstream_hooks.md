@@ -1873,3 +1873,15 @@ commands preserve client-local preferences and inventory. The proposed Desktop
 adapter uses the public resolver, uniquely owned streaming loader/downloader,
 dedicated reader, file location and account-local storage APIs. Shared document
 loaders and shared readers are not used for transfer ownership. Playlist player and virtual-list interfaces are unchanged.
+
+### Managed playlist cache readers
+
+`media/streaming/media_streaming_reader.h` grants the Purple cache bridge access
+to native cache slice flushing. `media_streaming_reader.cpp` delegates the
+finalization decision to that bridge before the existing body. Only dedicated
+managed playlist readers register with the bridge. Their final native slice
+writes drain through an asynchronous database FIFO callback; their destructor
+then skips the ordinary synchronous cache barrier. Cancelled managed readers
+discard resident partial slices. Unregistered readers retain the original
+finalization path. This seam prevents main-thread cache I/O waits at account
+retirement without duplicating native cache serialization.

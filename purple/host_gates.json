@@ -42,7 +42,8 @@
       "playlist-player": "Telegram/SourceFiles/purple/tests/playlist_player_cases.cpp",
       "sleep-timer": "Telegram/SourceFiles/purple/tests/sleep_timer_cases.cpp",
       "playlist-download-policy": "Telegram/SourceFiles/purple/tests/playlist_download_cases.cpp",
-      "playlist-owned-files": "Telegram/SourceFiles/purple/tests/playlist_owned_file_cases.cpp"
+      "playlist-owned-files": "Telegram/SourceFiles/purple/tests/playlist_owned_file_cases.cpp",
+      "playlist-managed-cache": "Telegram/SourceFiles/purple/tests/playlist_managed_cache_cases.cpp"
     }
   },
   "gates": [
@@ -964,6 +965,22 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/playlist_owned_file_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-playlist-managed-cache",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "playlist-managed-cache"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/playlist_managed_cache_cases.cpp"
       ]
     }
   ]

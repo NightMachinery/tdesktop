@@ -38,6 +38,7 @@ private:
 	std::shared_ptr<Media::Streaming::Reader> _reader;
 	std::unique_ptr<Storage::StreamedFileDownloader> _loader;
 	rpl::lifetime _updates;
+	bool _unsupported = false;
 	bool _admissionBusy = false;
 	bool _queued = false;
 	bool _started = false;

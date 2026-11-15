@@ -17,6 +17,49 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'playlist-managed-cache': {
+        'program': 'playlist_managed_cache_cases.cpp',
+        'units': [
+            'purple/purple_playlist_streaming_source.cpp',
+            'purple/purple_playlist_managed_cache.cpp',
+            'purple/purple_playlist_cache_bridge.cpp',
+            'purple/purple_playlist_download_registry.cpp',
+            'media/streaming/media_streaming_reader.cpp',
+            'media/streaming/media_streaming_loader.cpp',
+            'media/streaming/media_streaming_loader_local.cpp',
+        ],
+        'syntax_units': [
+            'purple/purple_playlist_download_desktop.cpp',
+            'purple/purple_playlist_owned_transfer.cpp',
+        ],
+        'libraries': [
+            'Telegram/lib_base/liblib_base.a',
+        ],
+        'objects': [
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/storage_encrypted_file.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/storage_encryption.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/cache/storage_cache_binlog_reader.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/cache/storage_cache_cleaner.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/cache/storage_cache_compactor.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/cache/storage_cache_database.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/cache/storage_cache_database_object.cpp.o',
+            'Telegram/lib_storage/CMakeFiles/lib_storage.dir/storage/cache/storage_cache_types.cpp.o',
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/common/crl_common_list.cpp.o',
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/common/crl_common_fp_exceptions.cpp.o',
+            'Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/dispatch/crl_dispatch_semaphore.cpp.o',
+        ],
+        'build_libraries': [
+            'libcrypto.a',
+        ],
+        'frameworks': [
+            'QtCore',
+            'Foundation',
+            'CoreFoundation',
+        ],
+        'link': [
+            '-Wl,-dead_strip',
+        ],
+    },
     'playlist-download-policy': {
         'program': 'playlist_download_cases.cpp',
         'units': ['purple/purple_playlist_download_state.cpp',
