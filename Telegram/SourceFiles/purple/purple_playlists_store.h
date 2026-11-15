@@ -80,6 +80,10 @@ public:
 		const PlaylistLocalState &state,
 		PlaylistStoreWriteKind kind,
 		const SyncDurableFault &fault = {});
+	[[nodiscard]] PlaylistStoreWrite writeLocalState(
+		const PlaylistStoreRead &expected,
+		const PlaylistLocalState &state,
+		const SyncDurableFault &fault = {});
 	[[nodiscard]] const QString &directory() const;
 
 private:

@@ -128,6 +128,17 @@ struct Fixture {
 		});
 	}
 
+	PlaylistAccountResult use(const QString &id, uint64_t nowMs) {
+		auto result = std::optional<PlaylistAccountResult>();
+		RecordAccountPlaylistUse(session.get(), { id, nowMs }, [&](auto value) {
+			Expect(QThread::currentThread() == QCoreApplication::instance()->thread(),
+				"recent-use completion delivered on main thread");
+			result = std::move(value);
+		});
+		Wait([&] { return result.has_value(); });
+		return result.value_or(PlaylistAccountResult());
+	}
+
 	PlaylistAccountResult edit(PlaylistAccountEdit request) {
 		auto result = std::optional<PlaylistAccountResult>();
 		EditAccountPlaylists(session.get(), std::move(request), [&](auto value) {
@@ -150,6 +161,66 @@ PlaylistAccountEdit Create(const QString &title, char seed = 'a') {
 }
 
 void Exercise() {
+	{
+		Fixture fixture;
+		const auto created = fixture.edit(Create(u"Retired use"_q));
+		if (!created || !created.edit) return;
+		const auto service = For(fixture.session.get());
+		auto entered = QSemaphore();
+		auto release = QSemaphore();
+		service->worker.with([&](PlaylistAccountWorker&) { entered.release(); release.acquire(); });
+		Expect(entered.tryAcquire(1, 5000), "recent-use retirement barrier entered");
+		auto result = std::optional<PlaylistAccountResult>();
+		RecordAccountPlaylistUse(fixture.session.get(), { created.edit->playlistId, 200 },
+			[&](auto value) { result = std::move(value); });
+		StopAccountPlaylists(fixture.account);
+		release.release();
+		Wait([&] { return result.has_value(); });
+		Expect(result && !*result && result->snapshot.status == PlaylistStoreStatus::Changed,
+			"retired queued recent use cannot mutate storage or report success");
+		auto file = QFile(fixture.temporary.path() + u"/playlists/local.json"_q);
+		Expect(file.open(QIODevice::ReadOnly) && file.readAll() == created.snapshot.stateFile.bytes,
+			"retired recent use preserves actual state bytes");
+	}
+
+	{
+		Fixture fixture;
+		const auto created = fixture.edit(Create(u"Recent"_q));
+		if (!created || !created.edit) return;
+		const auto id = created.edit->playlistId;
+		const auto path = fixture.temporary.path() + u"/playlists/library.json"_q;
+		const auto statePath = fixture.temporary.path() + u"/playlists/local.json"_q;
+		auto state = *created.snapshot.state;
+		state.sync = false;
+		state.preserved.insert(u"future"_q, u"kept"_q);
+		const auto encodedState = SerializePlaylistLocalState(state, 101);
+		if (!encodedState) return;
+		auto stateFile = QFile(statePath);
+		Expect(stateFile.open(QIODevice::WriteOnly), "recent-use fixture state opens");
+		Expect(stateFile.write(encodedState.json) == encodedState.json.size(), "recent-use fixture state saved");
+		stateFile.close();
+		const auto original = QByteArray(" \n") + created.snapshot.libraryFile.bytes + "\n";
+		auto file = QFile(path);
+		Expect(file.open(QIODevice::WriteOnly), "recent-use noncanonical library opens");
+		Expect(file.write(original) == original.size(), "recent-use noncanonical library saved");
+		file.close();
+		const auto identity = SyncPathIdentity(path);
+		const auto used = fixture.use(id, 200);
+		state.recentUse[id] = 200;
+		Expect(bool(used) && used.snapshot.state && *used.snapshot.state == state,
+			"recent use changes only recentUse, preserving dirty age, sync and future fields");
+		Expect(used.snapshot.libraryFile.bytes == original && SyncPathIdentity(path) == identity
+			&& used.write && !used.write->libraryMayHaveChanged,
+			"service recent use preserves exact noncanonical library bytes and identity");
+		const auto older = fixture.use(id, 150);
+		Expect(bool(older) && !older.write && older.snapshot.state->recentUse.at(id) == 200,
+			"late use cannot move recent time backward or rewrite state");
+		Expect(!fixture.use(u"pl-bbbbbbbbbbbbbbbb"_q, 300), "missing playlist cannot gain recent use");
+		Expect(!fixture.use(id, 0), "zero recent-use time is rejected");
+		const auto removed = fixture.edit({ .kind = PlaylistAccountEditKind::Delete, .playlistId = id, .nowMs = 400 });
+		Expect(bool(removed) && !fixture.use(id, 500), "deleted playlist cannot gain recent use");
+	}
+
 	{
 		Fixture fixture;
 		auto first = fixture.edit(Create(u"First"_q));

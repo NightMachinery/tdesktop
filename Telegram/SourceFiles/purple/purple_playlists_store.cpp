@@ -284,4 +284,48 @@ PlaylistStoreWrite DesktopPlaylistStore::write(
 	return result;
 }
 
+PlaylistStoreWrite DesktopPlaylistStore::writeLocalState(
+		const PlaylistStoreRead &expected,
+		const PlaylistLocalState &state,
+		const SyncDurableFault &fault) {
+	if (_thread != QThread::currentThread()) {
+		return { .status = PlaylistStoreStatus::WrongThread };
+	} else if (_writing) {
+		return { .status = PlaylistStoreStatus::Busy };
+	} else if (!_read || !expected || expected.revision != _read->revision
+		|| !SameFile(expected.libraryFile, _read->libraryFile)
+		|| !SameFile(expected.stateFile, _read->stateFile)
+		|| !current() || !sameFile(path(u"library.json"_q), expected.libraryFile)
+		|| !sameFile(path(u"local.json"_q), expected.stateFile)) {
+		return { .status = PlaylistStoreStatus::Changed };
+	}
+	const auto local = SerializePlaylistLocalState(state, _route.account.userId);
+	if (!local) {
+		return { .status = PlaylistStoreStatus::InvalidWrite };
+	}
+	_writing = true;
+	const auto finish = qScopeGuard([&] {
+		_writing = false;
+		_read.reset();
+	});
+	auto result = PlaylistStoreWrite{ .status = PlaylistStoreStatus::Ready };
+	if (!expected.stateFile.absent() && expected.stateFile.bytes == local.json) {
+		return result;
+	}
+	const auto guard = [&](SyncDurablePoint point) {
+		return current() && (!fault || fault(point)) && current()
+			&& sameFile(path(u"library.json"_q), expected.libraryFile);
+	};
+	result.stateMayHaveChanged = true;
+	const auto status = WriteSyncDurableFile(
+		path(u"local.json"_q), local.json, expected.stateFile, guard);
+	if (status != SyncStoreStatus::Ready) {
+		result.status = PlaylistStoreStatus::StateWriteFailed;
+		result.ioStatus = status;
+		return result;
+	}
+	result.stateCommitted = true;
+	return result;
+}
+
 } // namespace Purple

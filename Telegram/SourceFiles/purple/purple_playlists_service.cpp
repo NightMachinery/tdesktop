@@ -61,6 +61,7 @@ AccountService *For(not_null<Main::Session*> session) {
 void Request(
 		not_null<Main::Session*> session,
 		std::optional<PlaylistAccountEdit> request,
+		std::optional<PlaylistAccountUse> use,
 		PlaylistAccountDone done) {
 	const auto service = For(session);
 	if (!service) {
@@ -71,9 +72,11 @@ void Request(
 	const auto route = service->route;
 	const auto authority = service->authority;
 	service->worker.with([
-		weak, route, authority, request = std::move(request), done = std::move(done)
+		weak, route, authority, request = std::move(request), use = std::move(use),
+		done = std::move(done)
 	](PlaylistAccountWorker &worker) mutable {
-		auto result = request ? worker.edit(*request) : worker.read();
+		auto result = request ? worker.edit(*request)
+			: use ? worker.recordUse(*use) : worker.read();
 		crl::on_main([
 			weak, route, authority, result = std::move(result), done = std::move(done)
 		]() mutable {
@@ -95,14 +98,21 @@ void Request(
 void ReadAccountPlaylists(
 		not_null<Main::Session*> session,
 		PlaylistAccountDone done) {
-	Request(session, std::nullopt, std::move(done));
+	Request(session, std::nullopt, std::nullopt, std::move(done));
 }
 
 void EditAccountPlaylists(
 		not_null<Main::Session*> session,
 		PlaylistAccountEdit request,
 		PlaylistAccountDone done) {
-	Request(session, std::move(request), std::move(done));
+	Request(session, std::move(request), std::nullopt, std::move(done));
+}
+
+void RecordAccountPlaylistUse(
+		not_null<Main::Session*> session,
+		PlaylistAccountUse request,
+		PlaylistAccountDone done) {
+	Request(session, std::nullopt, std::move(request), std::move(done));
 }
 
 void InvalidatePlaylistServices() {

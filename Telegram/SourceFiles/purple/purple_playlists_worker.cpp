@@ -32,14 +32,50 @@ PlaylistAccountResult PlaylistAccountWorker::edit(
 	}
 	result.edit = apply(*result.snapshot.library, request);
 	if (!*result.edit || !result.edit->changed) {
+		if (*result.edit && request.kind == PlaylistAccountEditKind::AddSongs) {
+			auto used = recordUse({ request.playlistId, request.nowMs });
+			used.edit = std::move(result.edit);
+			return used;
+		}
 		return result;
 	}
 	auto state = *result.snapshot.state;
 	state.unsyncedSince = state.unsyncedSince
 		? std::min(*state.unsyncedSince, request.nowMs)
 		: request.nowMs;
+	if (request.kind == PlaylistAccountEditKind::AddSongs
+		|| request.kind == PlaylistAccountEditKind::Create
+		|| request.kind == PlaylistAccountEditKind::Copy) {
+		auto &recent = state.recentUse[result.edit->playlistId];
+		recent = std::max(recent, request.nowMs);
+	}
 	result.write = _store.write(result.snapshot, result.edit->library,
 		state, PlaylistStoreWriteKind::LocalEdit);
+	result.snapshot = read().snapshot;
+	return result;
+}
+
+PlaylistAccountResult PlaylistAccountWorker::recordUse(
+		const PlaylistAccountUse &request) {
+	auto result = read();
+	if (!result.snapshot) {
+		return result;
+	}
+	const auto &library = *result.snapshot.library;
+	const auto i = library.playlists.find(request.playlistId);
+	if (!request.nowMs || request.nowMs > kMaximumPlaylistStamp
+		|| i == end(library.playlists) || i->second.isPartial()
+		|| i->second.deleted->value || library.purged.contains(request.playlistId)) {
+		result.write = PlaylistStoreWrite{ .status = PlaylistStoreStatus::InvalidWrite };
+		return result;
+	}
+	auto state = *result.snapshot.state;
+	auto &recent = state.recentUse[request.playlistId];
+	if (recent >= request.nowMs) {
+		return result;
+	}
+	recent = request.nowMs;
+	result.write = _store.writeLocalState(result.snapshot, state);
 	result.snapshot = read().snapshot;
 	return result;
 }

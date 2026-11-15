@@ -32,6 +32,11 @@ struct PlaylistAccountEdit {
 	uint64_t nowMs = 0;
 };
 
+struct PlaylistAccountUse {
+	QString playlistId;
+	uint64_t nowMs = 0;
+};
+
 struct PlaylistAccountResult {
 	PlaylistStoreRead snapshot;
 	std::optional<PlaylistEditResult> edit;
@@ -49,6 +54,9 @@ public:
 		std::shared_ptr<std::atomic<bool>> authority);
 	[[nodiscard]] PlaylistAccountResult read();
 	[[nodiscard]] PlaylistAccountResult edit(const PlaylistAccountEdit &request);
+
+	[[nodiscard]] PlaylistAccountResult recordUse(
+		const PlaylistAccountUse &request);
 
 private:
 	[[nodiscard]] PlaylistEditResult apply(

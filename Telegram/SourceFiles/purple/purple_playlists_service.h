@@ -15,6 +15,10 @@ void EditAccountPlaylists(
 	not_null<Main::Session*> session,
 	PlaylistAccountEdit request,
 	PlaylistAccountDone done);
+void RecordAccountPlaylistUse(
+	not_null<Main::Session*> session,
+	PlaylistAccountUse request,
+	PlaylistAccountDone done);
 void InvalidatePlaylistServices();
 void StopAccountPlaylists(Main::Account &account);
 

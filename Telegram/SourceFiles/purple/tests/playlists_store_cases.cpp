@@ -76,6 +76,134 @@ struct Fixture {
 };
 
 void Exercise() {
+	for (const auto bytes : { QByteArray("{broken"), QByteArray("{\"format\":2}") }) {
+		Fixture fixture;
+		DesktopPlaylistStore store(fixture.route(), fixture.current());
+		const auto opened = store.open();
+		if (!opened) return;
+		const auto path = store.directory() + u"/library.json"_q;
+		Put(path, bytes);
+		const auto read = store.read();
+		Expect(!read, "unreadable or newer library refuses local-only admission");
+		Expect(!store.writeLocalState(opened, *opened.state)
+			&& Bytes(path) == bytes
+			&& !QFile::exists(store.directory() + u"/local.json"_q),
+			"local-only API cannot bypass failed library read");
+	}
+
+	{
+		Fixture fixture;
+		DesktopPlaylistStore store(fixture.route(), fixture.current());
+		auto read = store.open();
+		if (!read) return;
+		auto state = *read.state;
+		state.sync = false;
+		state.preserved.insert(u"future"_q, u"kept"_q);
+		const auto saved = store.writeLocalState(read, state);
+		Expect(bool(saved) && saved.stateCommitted && !saved.libraryCommitted
+			&& !saved.libraryMayHaveChanged, "local-only write never claims library mutation");
+		Expect(!QFile::exists(store.directory() + u"/library.json"_q)
+			&& !QFile::exists(store.directory() + u"/library.json.bak"_q),
+			"local-only write preserves absent library and backup");
+		read = store.read();
+		Expect(bool(read) && *read.state == state, "local-only write persists typed and unknown state");
+		const auto same = store.writeLocalState(read, state);
+		Expect(bool(same) && !same.stateMayHaveChanged, "local-only identical state is a no-op");
+		Expect(store.writeLocalState(read, state).status == PlaylistStoreStatus::Changed,
+			"local-only no-op invalidates cached revision");
+	}
+	{
+		Fixture fixture;
+		DesktopPlaylistStore store(fixture.route(), fixture.current());
+		auto read = store.open();
+		if (!read) return;
+		const auto libraryPath = store.directory() + u"/library.json"_q;
+		const auto backupPath = store.directory() + u"/library.json.bak"_q;
+		const auto encoded = SerializePlaylistLibrary(Library(u"noncanonical"_q), 101);
+		Expect(bool(encoded), "local-only fixture library valid");
+		if (!encoded) return;
+		const auto original = QByteArray(" \n") + encoded.canonical + "\n";
+		Put(libraryPath, original);
+		Put(backupPath, "backup sentinel");
+		read = store.read();
+		if (!read) return;
+		const auto identity = read.libraryFile.identity;
+		const auto backupIdentity = SyncPathIdentity(backupPath);
+		auto state = *read.state;
+		state.unsyncedSince = 12;
+		state.recentUse[u"pl-aaaaaaaaaaaaaaaa"_q] = 200;
+		Expect(bool(store.writeLocalState(read, state)), "local-only write accepts noncanonical valid library");
+		read = store.read();
+		Expect(bool(read) && read.libraryFile.bytes == original && read.libraryFile.identity == identity,
+			"recent use preserves exact library bytes and identity");
+		Expect(Bytes(backupPath) == "backup sentinel" && SyncPathIdentity(backupPath) == backupIdentity,
+			"recent use preserves backup bytes and identity");
+		const auto stale = read;
+		read = store.read();
+		Expect(store.writeLocalState(stale, state).status == PlaylistStoreStatus::Changed,
+			"local-only write rejects stale revision");
+		Put(libraryPath, encoded.canonical);
+		Expect(store.writeLocalState(read, state).status == PlaylistStoreStatus::Changed,
+			"local-only write rejects changed library snapshot");
+		read = store.read();
+		Put(store.directory() + u"/local.json"_q, "{}");
+		Expect(store.writeLocalState(read, state).status == PlaylistStoreStatus::Changed,
+			"local-only write rejects changed state snapshot");
+	}
+	for (const auto point : { SyncDurablePoint::BeforeWrite,
+		SyncDurablePoint::PartialWrite, SyncDurablePoint::BeforeRename,
+		SyncDurablePoint::AfterRename, SyncDurablePoint::FileBarrier,
+		SyncDurablePoint::DirectoryBarrier }) {
+		Fixture fixture;
+		DesktopPlaylistStore store(fixture.route(), fixture.current());
+		const auto read = store.open();
+		if (!read) return;
+		auto state = *read.state;
+		state.sync = false;
+		const auto failed = store.writeLocalState(read, state,
+			[=](SyncDurablePoint at) { return at != point; });
+		Expect(!failed && failed.status == PlaylistStoreStatus::StateWriteFailed
+			&& failed.stateMayHaveChanged && !failed.stateCommitted
+			&& !failed.libraryCommitted && !failed.libraryMayHaveChanged,
+			"local-only durable failures report uncertainty only for state");
+		Expect(!QFile::exists(store.directory() + u"/library.json"_q),
+			"local-only durable failure never creates library");
+		Expect(bool(store.read()), "local-only durable failure can reload actual state");
+	}
+	{
+		Fixture fixture;
+		DesktopPlaylistStore store(fixture.route(), fixture.current());
+		auto read = store.open();
+		if (!read) return;
+		auto state = *read.state;
+		state.sync = false;
+		const auto failed = store.writeLocalState(read, state, [&](SyncDurablePoint at) {
+			if (at == SyncDurablePoint::BeforeRename) ++fixture.generation;
+			return true;
+		});
+		Expect(!failed && !failed.libraryMayHaveChanged
+			&& !QFile::exists(store.directory() + u"/local.json"_q),
+			"route retirement fences local-only rename");
+	}
+	{
+		Fixture fixture;
+		DesktopPlaylistStore store(fixture.route(), fixture.current());
+		auto read = store.open();
+		if (!read) return;
+		auto state = *read.state;
+		state.sync = false;
+		const auto failed = store.writeLocalState(read, state, [&](SyncDurablePoint at) {
+			if (at == SyncDurablePoint::BeforeRename) {
+				Put(store.directory() + u"/library.json"_q,
+					SerializePlaylistLibrary(Library(u"external"_q), 101).canonical);
+			}
+			return true;
+		});
+		Expect(!failed && !failed.stateCommitted && !failed.libraryMayHaveChanged
+			&& !QFile::exists(store.directory() + u"/local.json"_q),
+			"changed library during durable write fences state rename");
+	}
+
 	{
 		Fixture fixture;
 		DesktopPlaylistStore store(fixture.route(), fixture.current());
