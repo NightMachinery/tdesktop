@@ -4,13 +4,17 @@
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "crl/crl_on_main.h"
+#include "data/data_document.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "media/media_common.h"
+#include "media/player/media_player_instance.h"
 #include "purple/purple_config.h"
 #include "purple/purple_playlist_player.h"
+#include "purple/purple_playlist_song_list.h"
 #include "purple/purple_playlists_service.h"
 #include "settings/settings_common.h"
 #include "ui/layers/generic_box.h"
@@ -26,6 +30,8 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QPointer>
+
+#include <algorithm>
 
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -43,7 +49,9 @@ public:
 	PlaylistView(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
-		std::optional<PlaylistMessage> message);
+		std::optional<PlaylistMessage> message,
+		QString playlistId = {},
+		std::optional<uint64_t> focusedDocumentId = std::nullopt);
 	void start();
 
 private:
@@ -58,6 +66,8 @@ private:
 	void add(const QString &id);
 	void play(std::optional<uint64_t> documentId = std::nullopt);
 	void playbackChanged(PlaylistPlaybackStatus status);
+	void updateSongPlayback();
+	void reorder(std::vector<uint64_t> documentIds);
 	void label(rpl::producer<QString> text);
 	Ui::SettingsButton *button(rpl::producer<QString> text, Fn<void()> callback);
 	void pages(size_t count);
@@ -72,12 +82,17 @@ private:
 	std::optional<PlaylistUndoRecord> _undo;
 	PlaylistPlaybackStatus _playback;
 	QPointer<Ui::SettingsButton> _retry;
+	QPointer<PlaylistSongList> _songList;
 	QString _playlistId;
 	not_null<Ui::FlatLabel*> _status;
 	not_null<Ui::FlatLabel*> _playbackLabel;
 	not_null<Ui::VerticalLayout*> _rows;
 	uint64_t _generation = 0;
 	size_t _page = 0;
+	uint64_t _selectedSong = 0;
+	uint64_t _currentSong = 0;
+	int _songScrollTop = 0;
+	std::optional<uint64_t> _revealDocument;
 	bool _deleted = false;
 	bool _busy = false;
 	bool _closed = false;
@@ -175,16 +190,21 @@ private:
 PlaylistView::PlaylistView(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
-		std::optional<PlaylistMessage> message)
+		std::optional<PlaylistMessage> message,
+		QString playlistId,
+		std::optional<uint64_t> focusedDocumentId)
 : _box(box)
 , _window(base::make_weak(controller.get()))
 , _session(base::make_weak(&controller->session()))
 , _account(SessionAccountKey(&controller->session()))
 , _route(CaptureAccountSyncRouting(&controller->session()))
 , _message(std::move(message))
+, _playlistId(std::move(playlistId))
 , _status(box->addRow(object_ptr<Ui::FlatLabel>(box, QString(), st::boxLabel)))
 , _playbackLabel(box->addRow(object_ptr<Ui::FlatLabel>(box, QString(), st::boxLabel)))
-, _rows(box->addRow(object_ptr<Ui::VerticalLayout>(box), style::margins())) {
+, _rows(box->addRow(object_ptr<Ui::VerticalLayout>(box), style::margins()))
+, _selectedSong(focusedDocumentId.value_or(0))
+, _revealDocument(focusedDocumentId) {
 }
 
 bool PlaylistView::current() const {
@@ -208,6 +228,7 @@ void PlaylistView::start() {
 		if (const auto self = weak.get()) {
 			self->_closed = true;
 			++self->_generation;
+			if (self->_songList) self->_songList->cancelInteraction();
 		}
 	}, _box->lifetime());
 	_box->addButton(tr::lng_close(), [box = _box] { box->closeBox(); });
@@ -238,7 +259,12 @@ void PlaylistView::start() {
 			self->playbackChanged(std::move(status));
 		}
 	}, _box->lifetime());
-	load();
+	Media::Player::instance()->updatedNotifier() | rpl::on_next([weak](const auto &) {
+		if (const auto self = weak.get()) {
+			if (self->current()) self->updateSongPlayback();
+		}
+	}, _box->lifetime());
+	load(!_playlistId.isEmpty());
 }
 
 void PlaylistView::load(bool recordUse) {
@@ -246,6 +272,7 @@ void PlaylistView::load(bool recordUse) {
 		return;
 	}
 	_busy = true;
+	if (_songList) _songList->cancelInteraction();
 	_rows->setEnabled(false);
 	_status->setText(tr::lng_purple_playlists_loading(tr::now));
 	const auto generation = ++_generation;
@@ -321,6 +348,12 @@ void PlaylistView::pages(size_t count) {
 }
 
 void PlaylistView::render() {
+	if (_songList) {
+		_selectedSong = _songList->selectedDocument();
+		_songScrollTop = _songList->scrollTop();
+		_songList->cancelInteraction();
+	}
+	_songList = nullptr;
 	_retry = nullptr;
 	_rows->clear();
 	playbackChanged(_playback);
@@ -414,28 +447,65 @@ void PlaylistView::render() {
 				self->edit({ .kind = PlaylistAccountEditKind::Delete, .playlistId = self->_playlistId });
 			}
 		});
-		_page = std::min(_page, songs.empty() ? size_t(0) : (songs.size() - 1) / kPageSize);
-		const auto stop = std::min(songs.size(), (_page + 1) * kPageSize);
-		if (songs.empty()) label(tr::lng_purple_playlists_empty_songs());
-		for (auto n = _page * kPageSize; n < stop; ++n) {
-			const auto id = songs[n];
-			const auto &meta = playlist.songs->at(id).value.source->meta;
-			const auto title = meta.title.isEmpty() ? tr::lng_purple_playlists_untitled(tr::now) : meta.title;
-			button(rpl::single(title), [=] {
-				if (const auto self = weak.get()) self->play(id);
-			});
-			label(rpl::single(meta.performer + u" · "_q + Ui::FormatDurationText(meta.duration)));
-			button(tr::lng_purple_playlists_remove(), [=] {
+		if (songs.empty()) {
+			label(tr::lng_purple_playlists_empty_songs());
+		} else {
+			auto rows = std::vector<PlaylistSongListRow>();
+			rows.reserve(songs.size());
+			for (const auto id : songs) {
+				const auto &meta = playlist.songs->at(id).value.source->meta;
+				rows.push_back({
+					.documentId = id,
+					.title = meta.title.isEmpty() ? tr::lng_purple_playlists_untitled(tr::now) : meta.title,
+					.performer = meta.performer,
+					.duration = Ui::FormatDurationText(meta.duration),
+				});
+			}
+			label(tr::lng_purple_playlists_list_help());
+			_songList = _rows->add(object_ptr<PlaylistSongList>(
+				_rows,
+				std::move(rows),
+				_selectedSong,
+				_songScrollTop,
+				[weak](uint64_t id) {
+					if (const auto self = weak.get()) self->play(id);
+				},
+				[weak](std::vector<uint64_t> order) {
+					if (const auto self = weak.get()) self->reorder(std::move(order));
+				}), style::margins());
+			button(tr::lng_link_move_up(), [weak] {
 				if (const auto self = weak.get()) {
-					self->edit({
-						.kind = PlaylistAccountEditKind::RemoveSongs,
-						.playlistId = self->_playlistId,
-						.documentIds = { id },
-					});
+					if (self->current() && !self->_busy && self->_songList) self->_songList->moveSelected(-1);
 				}
 			});
+			button(tr::lng_link_move_down(), [weak] {
+				if (const auto self = weak.get()) {
+					if (self->current() && !self->_busy && self->_songList) self->_songList->moveSelected(1);
+				}
+			});
+			button(tr::lng_purple_playlists_remove(), [weak] {
+				const auto self = weak.get();
+				if (!self || !self->current() || self->_busy || !self->_songList) return;
+				const auto id = self->_songList->selectedDocument();
+				if (id) self->edit({
+					.kind = PlaylistAccountEditKind::RemoveSongs,
+					.playlistId = self->_playlistId,
+					.documentIds = { id },
+				});
+			});
+			updateSongPlayback();
+			if (_revealDocument && std::find(songs.begin(), songs.end(), *_revealDocument) != songs.end()) {
+				const auto list = _songList.data();
+				_revealDocument.reset();
+				crl::on_main(list, [=] {
+					const auto self = weak.get();
+					if (!self || !self->current() || self->_songList != list) return;
+					self->_box->scrollToWidget(list);
+					list->focusSelected();
+				});
+			}
+			_revealDocument.reset();
 		}
-		pages(songs.size());
 	}
 	if (_undo && _undo->hasUndo()) {
 		button(tr::lng_purple_playlists_undo(), [=] {
@@ -448,6 +518,12 @@ void PlaylistView::render() {
 
 void PlaylistView::showLibrary(bool deleted) {
 	if (!current() || _busy) return;
+	if (_songList) _songList->cancelInteraction();
+	_songList = nullptr;
+	_selectedSong = 0;
+	_currentSong = 0;
+	_songScrollTop = 0;
+	_revealDocument.reset();
 	_playlistId.clear();
 	_deleted = deleted;
 	_page = 0;
@@ -457,6 +533,12 @@ void PlaylistView::showLibrary(bool deleted) {
 
 void PlaylistView::showDetail(const QString &id) {
 	if (!current() || _busy) return;
+	if (_songList) _songList->cancelInteraction();
+	_songList = nullptr;
+	_selectedSong = 0;
+	_currentSong = 0;
+	_songScrollTop = 0;
+	_revealDocument.reset();
 	_playlistId = id;
 	_page = 0;
 	playbackChanged(_playback);
@@ -505,6 +587,7 @@ void PlaylistView::edit(PlaylistAccountEdit request) {
 	if (!current() || _busy) return;
 	request.nowMs = Now();
 	_busy = true;
+	if (_songList) _songList->cancelInteraction();
 	_rows->setEnabled(false);
 	const auto kind = request.kind;
 	const auto generation = ++_generation;
@@ -542,6 +625,25 @@ void PlaylistView::edit(PlaylistAccountEdit request) {
 	});
 }
 
+void PlaylistView::reorder(std::vector<uint64_t> documentIds) {
+	if (!current() || _busy || !_snapshot || _playlistId.isEmpty()) return;
+	const auto i = _snapshot->library->playlists.find(_playlistId);
+	if (i == _snapshot->library->playlists.end() || i->second.isPartial() || i->second.deleted->value) return;
+	const auto saved = PlaylistVisibleSongIds(i->second);
+	if (documentIds == saved) return;
+	auto sorted = documentIds;
+	auto expected = saved;
+	std::sort(sorted.begin(), sorted.end());
+	std::sort(expected.begin(), expected.end());
+	if (sorted != expected) return;
+	if (_songList) _revealDocument = _songList->selectedDocument();
+	edit({
+		.kind = PlaylistAccountEditKind::ReorderSongs,
+		.playlistId = _playlistId,
+		.documentIds = std::move(documentIds),
+	});
+}
+
 void PlaylistView::add(const QString &id) {
 	if (!current() || _busy || !_message) return;
 	const auto input = CapturePlaylistSong(_session.get(), *_message);
@@ -570,13 +672,57 @@ void PlaylistView::playbackChanged(PlaylistPlaybackStatus status) {
 	}
 	_playbackLabel->setText(_playback.playlistId == _playlistId
 		? PlaybackText(_playback) : QString());
+	updateSongPlayback();
+}
+
+void PlaylistView::updateSongPlayback() {
+	if (!_songList) return;
+	const auto belongs = _playback.playlistId == _playlistId
+		&& _playback.phase != PlaylistPlaybackPhase::Inactive
+		&& _playback.phase != PlaylistPlaybackPhase::Retired;
+	const auto audio = Media::Player::instance()->current(AudioMsgId::Type::Song).audio();
+	const auto actual = audio && &audio->session() == _session.get() ? audio->id : uint64_t(0);
+	if (belongs && actual && _playback.phase == PlaylistPlaybackPhase::Playing
+		&& _playback.documentId == actual) _currentSong = actual;
+	if (!belongs || !actual || _currentSong != actual) _currentSong = 0;
+	auto state = QString();
+	if (belongs && _playback.problem != PlaylistPlaybackProblem::None) {
+		state = PlaybackText(_playback);
+	} else if (belongs && _playback.sourceStatus) {
+		switch (*_playback.sourceStatus) {
+		case PlaylistSongStatus::Ready: state = tr::lng_purple_playlists_source_ready(tr::now); break;
+		case PlaylistSongStatus::EarlierCopy: state = tr::lng_purple_playlists_earlier_copy(tr::now); break;
+		case PlaylistSongStatus::Deleted: state = tr::lng_purple_playlists_source_deleted(tr::now); break;
+		case PlaylistSongStatus::NoAccess: state = tr::lng_purple_playlists_source_no_access(tr::now); break;
+		case PlaylistSongStatus::Changed: state = tr::lng_purple_playlists_source_changed(tr::now); break;
+		case PlaylistSongStatus::Restricted: state = tr::lng_purple_playlists_source_restricted(tr::now); break;
+		case PlaylistSongStatus::InvalidInput: state = tr::lng_purple_playlists_source_failed(tr::now); break;
+		case PlaylistSongStatus::Resolving: state = tr::lng_purple_playlists_resolving(tr::now); break;
+		case PlaylistSongStatus::Failed: state = tr::lng_purple_playlists_retry_required(tr::now); break;
+		}
+	} else if (belongs && _playback.phase == PlaylistPlaybackPhase::Resolving) {
+		state = tr::lng_purple_playlists_resolving(tr::now);
+	}
+	const auto unavailable = belongs && _playback.sourceStatus
+		&& (*_playback.sourceStatus == PlaylistSongStatus::Deleted
+			|| *_playback.sourceStatus == PlaylistSongStatus::NoAccess
+			|| *_playback.sourceStatus == PlaylistSongStatus::Changed
+			|| *_playback.sourceStatus == PlaylistSongStatus::Restricted
+			|| *_playback.sourceStatus == PlaylistSongStatus::InvalidInput);
+	_songList->setPlayback(
+		_currentSong,
+		belongs ? _playback.documentId : 0,
+		std::move(state),
+		unavailable);
 }
 
 void Open(
 		not_null<Window::SessionController*> controller,
-		std::optional<PlaylistMessage> message) {
+		std::optional<PlaylistMessage> message,
+		QString playlistId = {},
+		std::optional<uint64_t> focusedDocumentId = std::nullopt) {
 	controller->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
-		const auto view = box->lifetime().make_state<PlaylistView>(box, controller, message);
+		const auto view = box->lifetime().make_state<PlaylistView>(box, controller, message, playlistId, focusedDocumentId);
 		view->start();
 	}));
 }
@@ -606,6 +752,13 @@ void AddPlaylistsMenuRow(
 
 void ShowPlaylistsBox(not_null<Window::SessionController*> controller) {
 	Open(controller, std::nullopt);
+}
+
+void ShowPlaylistBox(
+		not_null<Window::SessionController*> controller,
+		const QString &playlistId,
+		std::optional<uint64_t> focusedDocumentId) {
+	Open(controller, std::nullopt, playlistId, focusedDocumentId);
 }
 
 void ShowPlaylistPicker(

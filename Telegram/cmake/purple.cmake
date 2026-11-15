@@ -188,6 +188,8 @@ PRIVATE
     purple/purple_playlists_service.h
     purple/purple_playlists_box.cpp
     purple/purple_playlists_box.h
+    purple/purple_playlist_song_list.cpp
+    purple/purple_playlist_song_list.h
     purple/purple_playlists_menu.cpp
     purple/purple_playlists_menu.h
     purple/purple_playlists_resolve_queue.cpp

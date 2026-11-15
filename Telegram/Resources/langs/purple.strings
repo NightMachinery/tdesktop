@@ -743,3 +743,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_playlists_playing" = "Playing this playlist.";
 "lng_purple_playlists_exhausted" = "End of playlist.";
 "lng_purple_playlists_saving" = "Saving playlist change…";
+
+"lng_purple_playlists_list_help" = "Drag a handle to reorder. Use arrow keys to select, Enter to play, or Alt+Up/Down to move the selected song.";
+"lng_purple_playlists_not_checked" = "Source not checked";
+"lng_purple_playlists_source_ready" = "Source available at last playback check";
+"lng_purple_playlists_current_row" = "Current · {status}";

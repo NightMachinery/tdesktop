@@ -115,12 +115,13 @@ when opened, and reject stale source messages and late callbacks.
 Purple-owned boxes reuse stock settings buttons, single-line inputs, labels and
 box spacing. The UI calls the global `::Settings` helpers and uses the stock
 `lng_settings_save` phrase and `window.style` main-menu button.
-The library, recently deleted view and song detail use pages of at
-most 25 entries. Create, rename, copy, delete, restore, remove and structured Undo
-submit typed account-worker edits and display the confirmed reloaded snapshot.
+The library and recently deleted view use pages of at most 25 entries. The
+private virtual-list proposal below replaces pagination in song detail.
+Create, rename, copy, delete, restore, remove, reorder and structured Undo submit
+typed account-worker edits and display the confirmed reloaded snapshot.
 Songs retain saved title, performer and duration without requiring their source
 to resolve. Display order comes from the shared core, not the song map's order.
-Drag reorder and a virtual song list remain later work.
+Drag reorder and the virtual list remain uncompiled until separately qualified.
 
 `RecordAccountPlaylistUse` is a separate typed worker request. Open, play and add
 update local recent-use order without changing sync bookkeeping. Its guarded
@@ -333,3 +334,45 @@ expiry pause/resume, plus a larger queue's rekeyed current slot. Separately hold
 an unowned playlist attempt while a chat song plays, enable Shuffle, retire the
 attempt by route change and verify the chat pager/navigation remain intact.
 Owned playlist handoff, no active controller and Voice are comparison cases.
+
+## Virtual detail list proposal
+
+The private detail-list proposal replaces song pagination with one painted
+content widget under the stock media-player ScrollArea. It paints the clipped
+row range and retains metadata rather than a widget per song. The row uses
+mediaPlayerFileLayout padding, thumbnail/play glyph, normal and semibold fonts,
+stock window colours and the menu reorder glyph. The extra source-state line
+uses those font metrics. Library pagination remains unchanged.
+
+Handle drag previews an in-memory insertion, with edge autoscroll. Escape,
+focus/window loss, hiding, disabled/pending state and mouse-grab loss cancel
+without a write. Arrow/Home/End/Page keys select, Enter/Space plays, and
+Alt+Up/Down or the two stock Move buttons submit a reorder. Remove acts on the
+selected row. The screen-reader list exposes virtual stable row identities,
+selection, rectangles, names and guarded main-thread focus/activation actions.
+
+A drop delegates a complete permutation to the existing typed ReorderSongs
+account edit. Pending edits disable interaction; only a confirmed returned
+snapshot replaces saved order. The existing confirmed Undo record restores it
+with the core conflict checks. Refresh and navigation are serialized with edits.
+Account, route, controller, box lifetime and reply generation guards remain.
+Playback continues using its immutable queue until another Play. No store,
+worker, playback facade or timer API changes are proposed.
+
+ShowPlaylistBox(controller, playlistId, focusedDocumentId) opens and reads the
+bound account playlist, then reveals/focuses a matching saved row. Focus never
+starts playback. A row removed by newer edits is not reinserted. Existing
+ShowPlaylistsBox remains the library entry.
+
+Source state is limited to the public playback status for its reported row;
+other rows say Source not checked. There is no background availability scan or
+invented downloaded mark. Current means a delivered playlist row whose document
+still matches the native Song player, including a paused item. This proposal
+adds no downloads, sync, sharing, queue panel or new playback modes.
+
+Native compilation and a real 2,000-row performance/GUI pass remain required:
+long and RTL metadata, light/dark comparison with stock player rows, keyboard
+and assistive activation, drag across viewport edges, cancellation, concurrent
+membership changes, failed/partial writes, Undo conflict, account/route loss,
+and opening/focusing rows after refreshed snapshots. Static source checks do
+not establish rendering, smooth scrolling or service/streaming behavior.
