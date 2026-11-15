@@ -19,6 +19,10 @@ void RecordAccountPlaylistUse(
 	not_null<Main::Session*> session,
 	PlaylistAccountUse request,
 	PlaylistAccountDone done);
+void RequestAccountPlaylistDownloads(
+	not_null<Main::Session*> session,
+	PlaylistAccountDownloadRequest request,
+	PlaylistAccountDone done);
 void InvalidatePlaylistServices();
 void StopAccountPlaylists(Main::Account &account);
 

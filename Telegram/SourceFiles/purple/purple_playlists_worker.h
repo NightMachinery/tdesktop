@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_playlists_store.h"
+#include "purple/purple_playlist_download_state.h"
 #include "purple/purple_playlists_ops.h"
 
 #include <atomic>
@@ -37,13 +38,29 @@ struct PlaylistAccountUse {
 	uint64_t nowMs = 0;
 };
 
+enum class PlaylistDownloadRequestKind { Read, Preference, Register, RemoveNow, Prune, Verify, PrepareTransfer, CommitTransfer, DiscardTransfer };
+
+struct PlaylistAccountDownloadRequest {
+	PlaylistDownloadRequestKind kind = PlaylistDownloadRequestKind::Read;
+	QString playlistId;
+	QString transferToken;
+	PlaylistKeepDownloaded preference = PlaylistKeepDownloaded::Inherit;
+	uint64_t documentId = 0;
+	PlaylistSource expectedSource;
+	PlaylistKeptFile file;
+	std::optional<PlaylistKeptFile> replacesMissing;
+	std::weak_ptr<std::atomic<bool>> jobAuthority;
+};
+
 struct PlaylistAccountResult {
 	PlaylistStoreRead snapshot;
 	std::optional<PlaylistEditResult> edit;
 	std::optional<PlaylistStoreWrite> write;
+	std::optional<PlaylistDownloadRead> downloads;
 
 	[[nodiscard]] explicit operator bool() const {
-		return bool(snapshot) && (!edit || bool(*edit)) && (!write || bool(*write));
+		return bool(snapshot) && (!edit || bool(*edit)) && (!write || bool(*write))
+			&& (!downloads || bool(*downloads));
 	}
 };
 
@@ -58,7 +75,12 @@ public:
 	[[nodiscard]] PlaylistAccountResult recordUse(
 		const PlaylistAccountUse &request);
 
+	[[nodiscard]] PlaylistAccountResult download(
+		const PlaylistAccountDownloadRequest &request);
+
 private:
+	[[nodiscard]] PlaylistAccountResult transfer(
+		const PlaylistAccountDownloadRequest &request);
 	[[nodiscard]] PlaylistEditResult apply(
 		const PlaylistLibrary &library,
 		const PlaylistAccountEdit &request) const;
@@ -67,6 +89,7 @@ private:
 	std::shared_ptr<std::atomic<bool>> _authority;
 	DesktopPlaylistStore _store;
 	bool _opened = false;
+	std::map<QString, std::weak_ptr<std::atomic<bool>>> _downloadOwners;
 
 };
 

@@ -485,7 +485,6 @@ Owners: B4 (stage 1), B14.
   is passed from that object. The 13 account-less calls move into
   `purple/purple_history.cpp` with B4.
 
-
 **`Telegram/SourceFiles/history/history.h`**: +125 -0, 4 hunks, near 0.
 Owners: B4, B14.
 - Today: the `purple*` member declarations and `_purpleUncounted`; the opened,
@@ -502,7 +501,6 @@ hunks, near 0. Owner: B4.
   `Purple::UnreadThingEdge(_thread, _type)` call. About 3 lines.
 - Account: `UnreadThingEdge` takes `_thread` or its owning history, replacing
   the account-less `Purple::Filtering()` check.
-
 
 **`Telegram/SourceFiles/dialogs/dialogs_entry.cpp`**: +32 -1, 2 hunks, near
 1. Owner: not named in the plan; proposed B4, beside the History hooks.
@@ -1454,7 +1452,6 @@ are rejected. No plaintext enters the shared cache. Ordinary native readers keep
 their default policy. The constructor and private hooks provide the small extension
 needed to carry this policy through native fill and part delivery.
 
-
 ### Dedicated deleted-messages menu
 
 `window/window_peer_menu.cpp` adds one include and one call to
@@ -1759,7 +1756,6 @@ local issued message ids before requesting the existing automatic sync check.
 
 `api/api_updates.cpp` forwards actual new-message updates with difference-state facts and final outgoing message IDs to the Purple adapter. The adapter owns eligibility, account fencing, durable reservations and exact native replies.
 
-
 ## Desktop sleep timer
 
 `media/player/media_player_instance.cpp` delegates end consumption before repeat
@@ -1869,3 +1865,11 @@ existing ordinary shared-media window is unchanged.
   includes `AccountPlaylistTrackClickable` in the existing cursor decision.
 - Purple owns target/session/route checks and box opening. Voice, another
   account, pending unowned playback and a retired controller fall through.
+
+### Playlist desktop download foundation
+
+The download foundation adds no upstream hooks. Purple-owned worker and service
+commands preserve client-local preferences and inventory. The proposed Desktop
+adapter uses the public resolver, uniquely owned streaming loader/downloader,
+dedicated reader, file location and account-local storage APIs. Shared document
+loaders and shared readers are not used for transfer ownership. Playlist player and virtual-list interfaces are unchanged.

@@ -2,6 +2,7 @@
 
 #include "purple/purple_config.h"
 #include "purple/purple_playlist_player.h"
+#include "purple/purple_playlist_download_registry.h"
 #include "base/weak_ptr.h"
 #include "crl/crl_object_on_thread.h"
 #include "main/main_account.h"
@@ -42,6 +43,7 @@ AccountService *For(not_null<Main::Session*> session) {
 	if (i != Services.end()
 		&& (!routing || i->second->route.account != SessionAccountKey(session)
 			|| !SameAccountRoutingSnapshot(i->second->route.routing, *routing))) {
+		StopAccountPlaylistDownloads(session);
 		Services.erase(i);
 		i = Services.end();
 	}
@@ -54,7 +56,10 @@ AccountService *For(not_null<Main::Session*> session) {
 		});
 		i = Services.emplace(session.get(), std::move(value)).first;
 		const auto key = session.get();
-		session->lifetime().add([key] { Services.erase(key); });
+		session->lifetime().add([key] {
+			StopAccountPlaylistDownloads(key);
+			Services.erase(key);
+		});
 	}
 	return i->second.get();
 }
@@ -63,6 +68,7 @@ void Request(
 		not_null<Main::Session*> session,
 		std::optional<PlaylistAccountEdit> request,
 		std::optional<PlaylistAccountUse> use,
+		std::optional<PlaylistAccountDownloadRequest> download,
 		PlaylistAccountDone done) {
 	const auto service = For(session);
 	if (!service) {
@@ -74,10 +80,11 @@ void Request(
 	const auto authority = service->authority;
 	service->worker.with([
 		weak, route, authority, request = std::move(request), use = std::move(use),
-		done = std::move(done)
+		download = std::move(download), done = std::move(done)
 	](PlaylistAccountWorker &worker) mutable {
 		auto result = request ? worker.edit(*request)
-			: use ? worker.recordUse(*use) : worker.read();
+			: use ? worker.recordUse(*use)
+			: download ? worker.download(*download) : worker.read();
 		crl::on_main([
 			weak, route, authority, result = std::move(result), done = std::move(done)
 		]() mutable {
@@ -88,6 +95,7 @@ void Request(
 				|| SessionAccountKey(session) != route.account
 				|| !AccountSyncRoutingCurrent(session, route.routing)) {
 				result.snapshot = { .status = PlaylistStoreStatus::Changed };
+				if (result.downloads) result.downloads->status = PlaylistDownloadStatus::Changed;
 			}
 			done(std::move(result));
 		});
@@ -99,26 +107,41 @@ void Request(
 void ReadAccountPlaylists(
 		not_null<Main::Session*> session,
 		PlaylistAccountDone done) {
-	Request(session, std::nullopt, std::nullopt, std::move(done));
+	Request(session, std::nullopt, std::nullopt, std::nullopt, std::move(done));
 }
 
 void EditAccountPlaylists(
 		not_null<Main::Session*> session,
 		PlaylistAccountEdit request,
 		PlaylistAccountDone done) {
-	Request(session, std::move(request), std::nullopt, std::move(done));
+	Request(session, std::move(request), std::nullopt, std::nullopt, std::move(done));
 }
 
 void RecordAccountPlaylistUse(
 		not_null<Main::Session*> session,
 		PlaylistAccountUse request,
 		PlaylistAccountDone done) {
-	Request(session, std::nullopt, std::move(request), std::move(done));
+	Request(session, std::nullopt, std::move(request), std::nullopt, std::move(done));
+}
+
+void RequestAccountPlaylistDownloads(
+		not_null<Main::Session*> session,
+		PlaylistAccountDownloadRequest request,
+		PlaylistAccountDone done) {
+	if (request.kind == PlaylistDownloadRequestKind::Preference
+		|| request.kind == PlaylistDownloadRequestKind::RemoveNow
+		|| request.kind == PlaylistDownloadRequestKind::DiscardTransfer) {
+		StopAccountPlaylistDownloads(session, request.playlistId);
+	} else if (request.kind == PlaylistDownloadRequestKind::Prune) {
+		StopAccountPlaylistDownloads(session);
+	}
+	Request(session, std::nullopt, std::nullopt, std::move(request), std::move(done));
 }
 
 void InvalidatePlaylistServices() {
 	RequireMainThread();
 	InvalidatePlaylistPlayback();
+	InvalidatePlaylistDownloads();
 	Services.clear();
 }
 
@@ -126,6 +149,7 @@ void StopAccountPlaylists(Main::Account &account) {
 	RequireMainThread();
 	if (const auto session = account.maybeSession()) {
 		StopAccountPlaylistPlayback(session);
+		StopAccountPlaylistDownloads(session);
 		Services.erase(session);
 	}
 }

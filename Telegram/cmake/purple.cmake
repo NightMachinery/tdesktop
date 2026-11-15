@@ -180,6 +180,19 @@ PRIVATE
     purple/hooks/music_listening.h
     purple/purple_music_listening_privacy.cpp
     purple/purple_music_listening_settings.cpp
+    purple/purple_playlist_owned_transfer.cpp
+    purple/purple_playlist_owned_transfer.h
+    purple/purple_playlist_download_worker.cpp
+    purple/purple_playlist_download_state.cpp
+    purple/purple_playlist_download_state.h
+    purple/purple_playlist_download_files.cpp
+    purple/purple_playlist_download_files.h
+    purple/purple_playlist_download_job.cpp
+    purple/purple_playlist_download_job.h
+    purple/purple_playlist_download_registry.cpp
+    purple/purple_playlist_download_registry.h
+    purple/purple_playlist_download_desktop.cpp
+    purple/purple_playlist_download_desktop.h
     purple/purple_playlists_store.cpp
     purple/purple_playlists_store.h
     purple/purple_playlists_worker.cpp

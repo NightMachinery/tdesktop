@@ -17,6 +17,28 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'playlist-download-policy': {
+        'program': 'playlist_download_cases.cpp',
+        'units': ['purple/purple_playlist_download_state.cpp',
+            'purple/purple_playlist_download_job.cpp',
+            'core:purple/purple_peer_token.cpp', 'core:purple/purple_sync_json.cpp',
+            'core:purple/purple_playlists.cpp', 'core:purple/purple_playlists_local.cpp'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'Foundation'],
+        'link': ['-Wl,-dead_strip'],
+    },
+    'playlist-owned-files': {
+        'program': 'playlist_owned_file_cases.cpp',
+        'units': ['purple/purple_playlist_download_state.cpp',
+            'purple/purple_playlist_download_files.cpp',
+            'purple/purple_sync_local_store.cpp',
+            'core:purple/purple_account_files.cpp', 'core:purple/purple_local_choice.cpp',
+            'core:purple/purple_peer_token.cpp', 'core:purple/purple_sync_json.cpp',
+            'core:purple/purple_playlists.cpp', 'core:purple/purple_playlists_local.cpp'],
+        'libraries': ['Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'Foundation', 'AppKit'],
+        'link': ['-Wl,-dead_strip'],
+    },
     'sleep-timer': {
         'program': 'sleep_timer_cases.cpp',
         'units': ['purple/purple_sleep_timer_rules.cpp'],
@@ -55,7 +77,11 @@ CASES = {
         'generated': ['playlists-service.inc'],
         'syntax_units': ['purple/purple_playlists_service.cpp',
             'purple/purple_config.cpp', 'main/main_account.cpp'],
-        'units': ['purple/purple_playlists_worker.cpp', 'purple/purple_playlists_store.cpp',
+        'units': ['purple/purple_playlist_download_worker.cpp',
+            'purple/purple_playlist_download_state.cpp',
+            'purple/purple_playlist_download_files.cpp',
+            'purple/purple_playlist_download_registry.cpp',
+            'purple/purple_playlists_worker.cpp', 'purple/purple_playlists_store.cpp',
             'purple/purple_sync_local_store.cpp', 'core:purple/purple_account_files.cpp',
             'core:purple/purple_local_choice.cpp', 'core:purple/purple_peer_token.cpp',
             'core:purple/purple_sync_json.cpp', 'core:purple/purple_playlists.cpp',

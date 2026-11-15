@@ -1,4 +1,5 @@
 #include "purple/purple_playlists_service.h"
+#include "purple/purple_playlist_download_registry.h"
 #include "base/weak_ptr.h"
 #include "crl/crl_object_on_thread.h"
 #include "rpl/lifetime.h"
@@ -169,6 +170,45 @@ PlaylistAccountEdit Create(const QString &title, char seed = 'a') {
 }
 
 void Exercise() {
+	for (const auto member : {
+		QJsonValue(QJsonObject{ { u"format"_q, 2 }, { u"future"_q, QJsonObject{ { u"opaque"_q, 9 } } } }),
+		QJsonValue(u"malformed-client-download-member"_q),
+	}) {
+		Fixture fixture;
+		const auto created = fixture.edit(Create(u"Future local downloads"_q));
+		if (!created || !created.edit) return;
+		const auto id = created.edit->playlistId;
+		auto local = *created.snapshot.state;
+		local.preserved.insert(u"desktop_playlist_downloads"_q, member);
+		const auto encoded = SerializePlaylistLocalState(local, 101);
+		if (!encoded) return;
+		auto file = QFile(fixture.temporary.path() + u"/playlists/local.json"_q);
+		Expect(file.open(QIODevice::WriteOnly) && file.write(encoded.json) == encoded.json.size(),
+			"future download member fixture writes through real core serialization");
+		file.close();
+		const auto used = fixture.use(id, 200);
+		Expect(bool(used) && used.snapshot.state
+			&& used.snapshot.state->preserved.value(u"desktop_playlist_downloads"_q) == member
+			&& used.snapshot.libraryFile.bytes == created.snapshot.libraryFile.bytes,
+			"future or malformed client download member preserves normal recent use");
+		const auto renamed = fixture.edit({ .kind = PlaylistAccountEditKind::Rename,
+			.playlistId = id, .title = u"Normal rename remains usable"_q, .nowMs = 201 });
+		Expect(bool(renamed) && renamed.snapshot.state
+			&& renamed.snapshot.state->preserved.value(u"desktop_playlist_downloads"_q) == member,
+			"normal library edit preserves the opaque download value exactly");
+		const auto before = renamed.snapshot.stateFile.bytes;
+		auto refused = std::optional<PlaylistAccountResult>();
+		RequestAccountPlaylistDownloads(fixture.session.get(), {
+			.kind = PlaylistDownloadRequestKind::Preference, .playlistId = id,
+			.preference = PlaylistKeepDownloaded::On,
+		}, [&](auto result) { refused = std::move(result); });
+		Wait([&] { return refused.has_value(); });
+		Expect(refused && !*refused && refused->downloads && !*refused->downloads
+			&& refused->snapshot.stateFile.bytes == before
+			&& refused->snapshot.libraryFile.bytes == renamed.snapshot.libraryFile.bytes,
+			"typed download mutation still refuses opaque future state without writes");
+	}
+
 	{
 		Fixture fixture;
 		const auto created = fixture.edit(Create(u"Retired use"_q));

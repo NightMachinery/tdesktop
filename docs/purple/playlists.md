@@ -104,7 +104,6 @@ production queue and channel-identity check with controlled cache/read/defer
 ports; the real Telegram adapter is syntax-compiled. Live RPC behavior and
 playlist UI/player integration are not yet qualified.
 
-
 ## Desktop local playlist interface
 
 The main menu has a Playlists entry controlled by the app-wide, default-on
@@ -404,3 +403,76 @@ status still belongs only to the facade's reported row. Pending unowned attempts
 do not gain a marker from document membership. Native checks must compare fresh
 and existing views with a held successor, paused/exhausted state and unowned
 initial playback.
+
+## Desktop download foundation
+
+Desktop owns download state in the preserved `desktop_playlist_downloads` member
+of account `local.json`. Format 1 has `preferences`, keyed by playlist ID with
+`"on"` or `"off"` values, and `files`, keyed by canonical decimal document ID.
+An absent preference means Inherit. The app-wide `playlists.keep_downloaded_p`
+default stays true. A file entry contains a safe lowercase ASCII `extension`,
+positive decimal-string `size`, filesystem `identity`, and lowercase hex
+`sha256`. Unknown root and entry members survive writes. Malformed or newer
+client download state refuses typed download commands; normal playlist edits
+and recent use remain usable and preserve that opaque value. Core local-state
+and library validation remain mandatory for every operation.
+
+Optional `pending` entries are keyed by a random 32-character lowercase hex
+operation token. Each contains `playlist`, decimal-string `document`,
+`extension`, decimal-string `size`, `identity`, and `sha256`, plus preserved
+unknown members. Empty identity means a confirmed filename reservation before
+file creation. Empty digest means the complete file has not been checkpointed.
+The worker confirms the reservation, exclusively creates the private staging
+file, then confirms its identity before transfer starts. Staging paths are
+always derived as `files/.incoming/<token>.part`; final paths are derived as
+`files/<document id>.<extension>`. JSON never supplies a path.
+
+An explicit `DesktopPlaylistDownloadJob::start` snapshots visible rows and uses
+the real source resolver. At most two rows can resolve or transfer at once.
+Each transfer owns a unique `DocumentData::createStreamingLoader` result,
+a dedicated streaming `Reader` with no shared cache, and its own
+`createStreamedDownloader` result. The downloader's location key is null, so it
+cannot register the staging file as the document's location. Neither the
+ordinary document loader nor a shared reader is retargeted or cancelled.
+Existing local-file and memory-byte sources use this same dedicated path.
+Purple's existing song/save qualification governs protected content.
+
+Native completion is deferred beyond the update callback before releasing the
+owned downloader and reader. The worker independently verifies expected size,
+identity and digest, confirms the completed digest in the intent, publishes
+without overwriting an existing destination, and confirms inventory readback.
+Only then can the guarded main-thread completion call `setLocation` and
+`session.local().writeFileLocation`. An ordinary active document loader postpones
+that final registration as Busy; explicit Retry can register the verified kept
+file after the ordinary operation ends. Playback alone never enters this path.
+
+A failed final inventory write retains a durable intent naming the owned file.
+Retry revalidates the source and recovers verified staged or published bytes,
+including an interrupted two-name publication, without adopting an untracked
+existing destination. Partial/missing owned stages can be replaced by explicit
+Retry. `DiscardTransfer`, Remove downloads now and pruning clean up only proven
+owned artifacts; other unpurged references, including Recently deleted, protect
+retained files. An identity-less reservation whose file unexpectedly exists
+refuses Busy because ownership cannot be proved. It remains durably identified
+for explicit inspection rather than silently adopted or deleted.
+
+`RequestAccountPlaylistDownloads` preserves Read, Preference, RemoveNow and
+Prune. A read-only Verify request takes one playlist ID and document ID, hashes
+only that recorded file on the worker, and returns the ID in `downloads.verified`
+only if its current membership, complete size, identity and digest match.
+Read alone does not verify inventory. UI marks are facts checked at that time,
+not permanent guarantees against later external deletion.
+
+Progress adds `terminal`, `cancelled` and typed `problem` fields. Setup failure,
+missing playlists and external retirement produce terminal notifications;
+destruction cancels silently. The observer must keep its existing weak box and
+captured account/route/generation guards. Failed and Busy rows require explicit
+Retry; definitive unavailable rows do not loop.
+
+This remains an unqualified source foundation. KeepOff/cache mode returns Busy.
+The file loader's whole-buffer cache admission is capped at 10 MiB; downloader
+traffic through a dedicated reader does not prove a large song is fully cached.
+A bounded large-file managed-cache adapter remains required. Windows owned-file
+operations, download UI, automatic post-edit prune wiring and native/GUI
+qualification also remain open. No C++ compiler or real transfer result is
+implied by helper or source checks.

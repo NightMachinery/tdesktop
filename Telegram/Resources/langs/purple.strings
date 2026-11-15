@@ -748,3 +748,11 @@ docs/purple/upstream_hooks.md.
 "lng_purple_playlists_not_checked" = "Source not checked";
 "lng_purple_playlists_source_ready" = "Source available at last playback check";
 "lng_purple_playlists_current_row" = "Current · {status}";
+
+"lng_purple_playlist_download_all" = "Download all";
+"lng_purple_playlist_keep_downloaded" = "Keep downloaded";
+"lng_purple_playlist_keep_inherit" = "Use default";
+"lng_purple_playlist_keep_on" = "On";
+"lng_purple_playlist_keep_off" = "Off";
+"lng_purple_playlist_remove_downloads" = "Remove downloads now";
+"lng_purple_playlist_download_busy" = "Download unavailable while another operation owns this file";
