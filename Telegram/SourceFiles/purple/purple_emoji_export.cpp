@@ -39,6 +39,7 @@
 #include <QtCore/QPointer>
 #include <array>
 #include <algorithm>
+#include <limits>
 
 namespace Purple {
 namespace {
@@ -94,6 +95,7 @@ private:
 	void maintainRequests();
 	void admitRequests(const std::vector<quint64> &ids);
 	void chooseDemand();
+	void scheduleDemand();
 	void holdDemandForMetadataWait();
 	[[nodiscard]] bool resolveSetTitle(DocumentData *document);
 	void applySetTitle(quint64 id);
@@ -127,6 +129,7 @@ private:
 	bool _publishPending = false;
 	QTimer _poll;
 	QTimer _renderPoll;
+	QTimer _demandWake;
 	EmojiRenderRequests _renderRequests;
 	QElapsedTimer _taskTime;
 	base::weak_ptr<Main::Session> _session;
@@ -164,6 +167,9 @@ EmojiExporter::EmojiExporter()
 		if (admitted() && !_rendering) static_cast<void>(serveRender());
 	});
 	_renderPoll.start(100);
+	_demandWake.setSingleShot(true);
+	_demandWake.setTimerType(Qt::PreciseTimer);
+	QObject::connect(&_demandWake, &QTimer::timeout, this, [=] { pump(); });
 	_continuation.setSingleShot(true);
 	QObject::connect(&_continuation, &QTimer::timeout, this, [=] {
 		_queue.continueSlice();
@@ -303,6 +309,7 @@ void EmojiExporter::revoke(bool clear) {
 	_epoch.revoke();
 	_debounce.stop();
 	_continuation.stop();
+	_demandWake.stop();
 	rememberTransfer();
 	_sessionLifetime.destroy();
 	_api.reset();
@@ -361,12 +368,24 @@ void EmojiExporter::render(quint64 id, int pixels,
 		return;
 	}
 	const auto token = _token;
-	const auto admission = _largeRequests.offer(id, _clock.elapsed());
-	if (admission != EmojiLargeAdmission::Queued && admission != EmojiLargeAdmission::Duplicate) {
-		reply(ControlError(u"busy"_q, u"The emoji demand queue is full or cooling down; retry."_q));
-		return;
+	const auto source = std::find_if(_published->begin(), _published->end(),
+		[=](const auto &entry) { return entry.id == id && !entry.large.isEmpty(); });
+	const auto cached = source != _published->end();
+	if (!cached) {
+		const auto admission = _largeRequests.offer(id, _clock.elapsed());
+		if (admission != EmojiLargeAdmission::Queued
+			&& admission != EmojiLargeAdmission::Duplicate) {
+			reply(ControlError(u"busy"_q, u"The emoji demand queue is full or cooling down; retry."_q));
+			return;
+		}
 	}
-	_renderRequests.add(id, pixels, _clock.elapsed(), std::move(active), std::move(reply));
+	_renderRequests.add(
+		id,
+		pixels,
+		_clock.elapsed(),
+		std::move(active),
+		std::move(reply),
+		cached ? &*source : nullptr);
 	if (_token != token || !admitted()) return;
 	if (!_epoch.accepts(_token)) {
 		_pending = true;
@@ -395,8 +414,18 @@ bool EmojiExporter::serveRender() {
 			if (generation != _workerGeneration || !_epoch.accepts(token)) return;
 			_rendering = false;
 			if (!admitted()) { reconcile(); return; }
-			_renderRequests.complete(job->serial, _clock.elapsed(), ok ? *result
-				: ControlError(u"not-found"_q, u"The emoji output is unavailable."_q));
+			if (ok && result->code == u"not-found"_q
+				&& _renderRequests.retry(job->serial, _clock.elapsed())) {
+				const auto admission = _largeRequests.offer(job->id, _clock.elapsed());
+				if (admission != EmojiLargeAdmission::Queued
+					&& admission != EmojiLargeAdmission::Duplicate) {
+					_renderRequests.complete(job->serial, _clock.elapsed(),
+						ControlError(u"busy"_q, u"The emoji demand queue is full or cooling down; retry."_q));
+				}
+			} else {
+				_renderRequests.complete(job->serial, _clock.elapsed(), ok ? *result
+					: ControlError(u"not-found"_q, u"The emoji output is unavailable."_q));
+			}
 			if (!_epoch.accepts(token) || !admitted()) return;
 			pump();
 		});
@@ -534,17 +563,34 @@ void EmojiExporter::maintainRequests() {
 	}
 }
 
+void EmojiExporter::scheduleDemand() {
+	_demandWake.stop();
+	const auto deadline = _deferredDemand
+		? std::optional(_queue.metadataRetryAt()) : _largeRequests.nextAt();
+	if (deadline) {
+		_demandWake.start(int(std::clamp(*deadline - _clock.elapsed(),
+			qint64(1), qint64(std::numeric_limits<int>::max()))));
+	}
+}
+
 void EmojiExporter::chooseDemand() {
+	_demandWake.stop();
 	if (_demandId) return;
 	auto selected = std::optional<quint64>();
 	if (_deferredDemand) {
-		if (_clock.elapsed() < _queue.metadataRetryAt()) return;
+		if (_clock.elapsed() < _queue.metadataRetryAt()) {
+			scheduleDemand();
+			return;
+		}
 		selected = _deferredDemand;
 		_deferredDemand.reset();
 	} else {
 		selected = _largeRequests.take(_clock.elapsed());
 	}
-	if (!selected) return;
+	if (!selected) {
+		scheduleDemand();
+		return;
+	}
 	const auto id = *selected;
 	const auto entry = std::find_if(_entries.begin(), _entries.end(),
 		[=](const EmojiExportEntry &entry) { return entry.id == id; });
@@ -903,6 +949,7 @@ void EmojiExporter::publish() {
 				_pending = true;
 				_debounce.start(int(std::clamp(*retry - _clock.elapsed(), qint64(1000), qint64(60000))));
 			}
+			pump();
 		});
 	if (!accepted) {
 		_rendering = false;

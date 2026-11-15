@@ -29,7 +29,8 @@ size_t EmojiRenderRequests::size() const {
 }
 
 void EmojiRenderRequests::add(quint64 id, int pixels, qint64 now,
-		std::function<bool()> active, ControlReply reply) {
+		std::function<bool()> active, ControlReply reply,
+		const EmojiExportEntry *source) {
 	if (!Active(active)) return;
 	if (full()) {
 		reply(ControlError(u"busy"_q, u"The emoji render queue is full."_q));
@@ -37,8 +38,9 @@ void EmojiRenderRequests::add(quint64 id, int pixels, qint64 now,
 	}
 	const auto serial = ++_serial;
 	_pending.emplace(serial, Pending{
-		{ serial, id, pixels }, now + kEmojiRenderTimeoutMs,
-		std::move(active), std::move(reply),
+		{ serial, id, pixels, source ? *source : EmojiExportEntry() },
+		now + kEmojiRenderTimeoutMs,
+		std::move(active), std::move(reply), false, source != nullptr,
 	});
 }
 
@@ -99,6 +101,16 @@ std::optional<EmojiRenderJob> EmojiRenderRequests::take() {
 		return request.job;
 	}
 	return {};
+}
+
+bool EmojiRenderRequests::retry(quint64 serial, qint64 now) {
+	const auto i = _pending.find(serial);
+	if (i == _pending.end() || !i->second.retryable
+		|| !Active(i->second.active) || now >= i->second.deadline) return false;
+	i->second.retryable = false;
+	i->second.working = false;
+	i->second.job.source = {};
+	return true;
 }
 
 void EmojiRenderRequests::complete(quint64 serial, qint64 now, ControlResult result) {

@@ -3,6 +3,8 @@
 #include "purple/purple_emoji_export_store.h"
 #include <QtCore/QString>
 #include <cstdio>
+#include <algorithm>
+#include <limits>
 #include <functional>
 #include <variant>
 
@@ -98,7 +100,12 @@ struct EmojiExporter {
 	quint64 _token = _epoch.begin();
 	size_t _index = 0;
 	struct Clock { qint64 value = 0; qint64 elapsed() const { return value; } } _clock;
-	struct Timer { int delay = 0; void start(int value) { delay = value; } } _continuation;
+	struct Timer {
+		int delay = 0;
+		bool active = false;
+		void start(int value) { delay = value; active = true; }
+		void stop() { active = false; }
+	} _continuation, _demandWake;
 	FakeApi api;
 	FakeApi *_api = &api;
 	int _request = 0;
@@ -118,6 +125,7 @@ struct EmojiExporter {
 	void rememberTransfer() {}
 	void next();
 	void chooseDemand();
+	void scheduleDemand();
 	void holdDemandForMetadataWait();
 	int resolutionAdmitted = 0;
 	void resolveAdmission() {
@@ -154,6 +162,53 @@ MTPmessages_StickerSet Reply(quint64 id, const QString &title = QString("Resolve
 }
 
 int main() {
+
+	{
+		auto e = EmojiExporter();
+		e.admitRequests({1, 2, 3});
+		auto dispatches = std::vector<qint64>();
+		for (auto index = size_t(0); index != 3; ++index) {
+			e.chooseDemand();
+			if (!e._demandId) {
+				Check(e._demandWake.active && e._demandWake.delay == 240,
+					"idle fast completion arms the exact spacing deadline without a maintenance tick");
+				e._clock.value += e._demandWake.delay;
+				e.chooseDemand();
+			}
+			Check(e._demandId == index + 1, "deadline wake selects the next actual FIFO demand");
+			if (!e._demandId) break;
+			dispatches.push_back(e._clock.value);
+			e._index = *e._queue.current();
+			e._clock.value += 10;
+			e._demandRendered = true;
+			e.next();
+		}
+		Check(dispatches == std::vector<qint64>{0, 250, 500},
+			"three fast demands dispatch at spacing deadlines with no one-second polling");
+		e.chooseDemand();
+		Check(!e._demandWake.active, "empty demand queue disarms its wake");
+		e.admitRequests({1001});
+		e.chooseDemand();
+		Check(e._demandWake.active, "pending demand has a scheduled spacing wake");
+		e._largeRequests.clear(); e.scheduleDemand();
+		Check(!e._demandWake.active, "clearing queued work disarms a pending deadline");
+		e.chooseDemand();
+		Check(!e._demandId, "stale timeout after cancellation cannot dispatch cleared work");
+		e._largeRequests.clear();
+		e.admitRequests({1000}); e.chooseDemand();
+		e._deferredDemand = e._demandId; e._demandId.reset();
+		e._queue.transient(110, 100, e._clock.value);
+		e.chooseDemand();
+		Check(e._demandWake.active && e._demandWake.delay == 10000 && !e._demandId,
+			"deferred demand wake preserves the full global metadata hold");
+		e._clock.value += 9999; e.chooseDemand();
+		Check(!e._demandId && e._demandWake.delay == 1,
+			"metadata hold cannot be shortened by an early wake");
+		e._clock.value += 1; e.chooseDemand();
+		Check(e._demandId == 1000 && !e._demandWake.active,
+			"metadata deadline releases the retained serial demand");
+	}
+
 	{
 		auto e = EmojiExporter();
 		auto ids = std::vector<quint64>();

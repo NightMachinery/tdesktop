@@ -69,7 +69,7 @@ frontend = (sources / 'purple/purple_emoji_export.cpp').read_text()
 settings = (sources / 'purple/purple_emoji_large_setting.cpp').read_text()
 (work / 'emoji-large-metadata-handler.inc').write_text('\n'.join(definition(frontend, marker) for marker in [
     'void EmojiExporter::applySetTitle(', 'bool EmojiExporter::resolveSetTitle(',
-    'void EmojiExporter::chooseDemand(', 'void EmojiExporter::holdDemandForMetadataWait(', 'void EmojiExporter::admitRequests(', 'void EmojiExporter::next(']))
+    'void EmojiExporter::scheduleDemand(', 'void EmojiExporter::chooseDemand(', 'void EmojiExporter::holdDemandForMetadataWait(', 'void EmojiExporter::admitRequests(', 'void EmojiExporter::next(']))
 resolve = definition(frontend, 'void EmojiExporter::resolve()')
 (work / 'emoji-large-resolve-admission.inc').write_text(resolve[resolve.index('{') + 1:resolve.index('const auto token = _token;')])
 (work / 'emoji-large-publication.inc').write_text(

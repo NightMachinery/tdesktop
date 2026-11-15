@@ -45,12 +45,15 @@ int main(int argc, char **argv) {
 	check(queue.offer(1, 0) == EmojiLargeAdmission::Duplicate, "duplicate request coalesced");
 	check(queue.offer(2, 0) == EmojiLargeAdmission::Queued, "second request queued");
 	check(queue.offer(3, 0) == EmojiLargeAdmission::Full && queue.size() == 2, "queue cap enforced");
+	check(queue.nextAt() == 0, "queued request exposes its initial deadline");
 	check(queue.take(0) == 1, "FIFO request dispatch");
+	check(!queue.nextAt(), "active demand has no competing wake deadline");
 	check(!queue.take(1000), "one request in flight");
 	queue.complete(2, true, 1);
 	check(queue.size() == 2 && !queue.take(1000), "foreign completion does not free active request");
 	queue.complete(1, false, 1);
 	check(queue.offer(1, 2) == EmojiLargeAdmission::Cooldown, "failed prefix enters cooldown");
+	check(queue.nextAt() == 250, "fast completion exposes exact next eligibility");
 	check(!queue.take(249), "rate limit enforced before next slot");
 	check(queue.take(250) == 2, "later request progresses past failing prefix");
 	queue.complete(2, true, 250);
@@ -58,6 +61,7 @@ int main(int argc, char **argv) {
 	check(queue.offer(1, 60001) == EmojiLargeAdmission::Queued, "failed request eligible after cooldown");
 	check(queue.take(60001) == 1, "retry dispatch after cooldown");
 	queue.clear();
+	check(!queue.nextAt(), "clear cancels the queue eligibility deadline");
 	check(queue.size() == 0 && !queue.pending() && !queue.take(60002), "clear removes active and pending requests");
 	check(queue.offer(1, 0) == EmojiLargeAdmission::Queued && queue.take(0) == 1, "new generation starts without inherited waits");
 	queue.complete(1, true, 0);

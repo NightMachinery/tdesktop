@@ -31,6 +31,7 @@ public:
 	void clear();
 	[[nodiscard]] size_t size() const;
 	[[nodiscard]] bool pending() const;
+	[[nodiscard]] std::optional<qint64> nextAt() const;
 
 private:
 	const size_t _maximum;

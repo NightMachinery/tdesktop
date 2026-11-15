@@ -104,6 +104,10 @@ bool EmojiLargeRequestQueue::pending() const {
 	return !_pending.empty();
 }
 
+std::optional<qint64> EmojiLargeRequestQueue::nextAt() const {
+	return _active || _pending.empty() ? std::nullopt : std::optional(_nextAt);
+}
+
 EmojiSetTitleCache::EmojiSetTitleCache(size_t maximum)
 : _maximum(maximum) {
 }

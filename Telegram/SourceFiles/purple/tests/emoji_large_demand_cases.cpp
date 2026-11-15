@@ -36,7 +36,7 @@ public:
 	void capChanged();
 	bool admitted() const { return true; }
 	void reconcile() {}
-	void pump() {}
+	void pump() { ++pumps; }
 	void checkMedia() {}
 	void outputFailed() { ++errors; }
 	void admitRequests(const std::vector<quint64> &) {}
@@ -65,6 +65,7 @@ public:
 	bool _pruneLarge = false;
 	bool _media = false;
 	int errors = 0;
+	int pumps = 0;
 
 };
 
@@ -162,8 +163,10 @@ void RunDemandCohort(QCoreApplication &app, bool future) {
 			.sourceKind = u"webp"_q, .sourcePx = 100 } };
 		e._afterPublicationAck.insert(id);
 		e._publishPending = true;
+		const auto pumps = e.pumps;
 		e.publish();
 		Check(wait([&] { return !e._rendering; }) && !e.errors, "literal production publication settles");
+		Check(e.pumps == pumps + 1, "final publication resumes idle demand scheduling without maintenance");
 		e._scanDue = true;
 		e.maintainRequests();
 		Check(wait([&] { return !e._rendering; }) && !e.errors, "later maintenance settles");

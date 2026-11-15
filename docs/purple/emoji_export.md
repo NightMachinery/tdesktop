@@ -236,3 +236,15 @@ running waits for its own Large render; a successful preview does not reject tha
 waiter merely because it did not request Large output. See [the control socket guide](control_socket.md#emoji-rendering)
 for arguments, errors and CLI examples. Request files remain the fallback for
 consumers that cannot reach the running app's control socket.
+
+Socket requests first reuse the exporter's retained full-size publication through
+its existing worker validation. This path only consumes a socket waiter slot,
+so unrelated cold demands cannot prevent a valid cache hit. A missing or corrupt
+retained source gets one fallback through the bounded ordinary demand queue,
+keeping the original socket deadline. A downscaled catalog reply never replaces
+the retained source used by later requests.
+
+A precise single-shot timer resumes queued demands at their next spacing
+eligibility, including after the final publication finishes an ordinary pass.
+Deferred metadata demands retain their shared global retry deadline. Revocation
+stops the timer and invalidates worker completions as before.

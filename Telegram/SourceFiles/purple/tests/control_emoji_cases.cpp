@@ -328,6 +328,92 @@ void BrokerCases() {
 	broker.clear(ControlError(u"export-disabled"_q, u"revoked"_q));
 	Check(broker.size() == 1, "retirement callback can rearm without old clear erasing it");
 	broker.clear({});
+	broker.add(1, 512, 100, {}, [&](auto r) {
+		Check(r.code == u"timeout"_q, "cache fallback retains the original admission deadline");
+	}, &entry);
+	const auto cached = broker.take();
+	Check(cached && broker.retry(cached->serial, 101) && !broker.take()
+		&& !broker.retry(cached->serial, 101), "cached source has exactly one bounded fallback attempt");
+	broker.published({entry});
+	const auto fallback = broker.take();
+	Check(fallback && cached && fallback->serial == cached->serial,
+		"new full-source publication resumes the same waiter serial");
+	if (fallback) broker.complete(fallback->serial, 8100, {});
+	auto cancelledReplies = 0;
+	active = true;
+	broker.add(1, 512, 0, [&] { return active; }, [&](auto) { ++cancelledReplies; }, &entry);
+	const auto cancelled = broker.take();
+	active = false; broker.poll(1);
+	Check(cancelled && !broker.retry(cancelled->serial, 1) && !cancelledReplies,
+		"cancelled cached waiter cannot enqueue a fallback or receive a reply");
+	broker.add(1, 512, 0, {}, [&](auto) { ++cancelledReplies; }, &entry);
+	const auto stopped = broker.take();
+	broker.clear(ControlError(u"export-disabled"_q, u"shutdown"_q));
+	Check(stopped && !broker.retry(stopped->serial, 1) && cancelledReplies == 1,
+		"shutdown retires cached work once and stale fallback cannot revive it");
+}
+
+
+void RetainedSourceCases() {
+	auto temporary = QTemporaryDir(u"/private/tmp/pemoji-retained-XXXXXX"_q);
+	Check(temporary.isValid(), "retained-source fixture owns its directory");
+	if (!temporary.isValid()) return;
+	const auto directory = QFileInfo(temporary.path()).canonicalFilePath() + u"/emoji-export"_q;
+	auto e = EmojiExporter(directory);
+	const auto source = EmojiExportEntry{
+		.id = 700, .large = EmojiLargePngName(700, 500),
+		.sourceKind = u"webp"_q, .sourcePx = 500,
+	};
+	auto prepared = false;
+	Check(e._worker.submit(e._workerGeneration, [&](const EmojiExportAuthority &current) {
+		auto image = QImage(500, 250, QImage::Format_ARGB32_Premultiplied);
+		image.fill(Qt::green);
+		return WriteEmojiExportPng(directory, source.id, EmojiExportFrame(image, {}), current)
+			&& WriteEmojiLargePng(directory, source.id, image, {}, current)
+			&& PublishEmojiLargeRequests(directory, {source}, QDateTime::currentDateTimeUtc(), {}, current, {});
+	}, [&](quint64, bool ok) { prepared = ok; }), "prepare retained image through actual worker");
+	if (!Wait([&] { return prepared; })) { Check(false, "retained preparation completes"); return; }
+	e._published = std::make_shared<const std::vector<EmojiExportEntry>>(std::vector{source});
+	e.paused = true;
+	for (auto id = quint64(1); id <= 64; ++id) {
+		Check(e._largeRequests.offer(id, 0) == EmojiLargeAdmission::Queued, "unrelated cold demand fills bounded queue");
+	}
+	auto replies = 0;
+	auto result = ControlResult();
+	e.render(source.id, 64, {}, [&](auto value) { ++replies; result = value; });
+	Check(e._renderRequests.size() == 1 && e._largeRequests.size() == 64,
+		"retained-source response needs only a waiter slot even with full cold queue");
+	Check(e.serveRender() && Wait([&] { return replies == 1; }), "published source serves without another source publication");
+	Check(result.code.isEmpty() && result.value.value(u"px"_q).toInt() == 64
+		&& QImage(result.value.value(u"path"_q).toString()).pixelColor(0, 0) == QColor(Qt::green),
+		"cache hit returns the retained image rather than synthetic replacement artwork");
+	Check(e.rendered == 0 && e._largeRequests.size() == 64 && !e._rendering,
+		"cache hit does not add a later demand render or source publication");
+	e._largeRequests.clear();
+	e.render(source.id, 512, {}, [&](auto value) { ++replies; result = value; });
+	Check(e.serveRender() && Wait([&] { return replies == 2; }), "second retained-source request completes");
+	Check(result.code.isEmpty() && result.value.value(u"px"_q).toInt() == 500,
+		"retained full-size source survives a catalog downscale and is never upscaled");
+	e.paused = false; e.pump();
+	Check(!e._rendering && e.rendered == 0 && e._largeRequests.size() == 0,
+		"idle exporter has no needless cache-hit demand left to render");
+	for (const auto corrupt : {false, true}) {
+		auto altered = false;
+		Check(e._worker.submit(e._workerGeneration, [&](const EmojiExportAuthority &) {
+			const auto path = directory + '/' + source.large;
+			if (!corrupt) return QFile::remove(path);
+			auto file = QFile(path);
+			return file.open(QIODevice::WriteOnly) && file.write("invalid PNG") == 11;
+		}, [&](quint64, bool ok) { altered = ok; }), "evict or corrupt cached source on worker");
+		if (!Wait([&] { return altered; })) { Check(false, "cache alteration completes"); return; }
+		e._published = std::make_shared<const std::vector<EmojiExportEntry>>(std::vector{source});
+		const auto before = e.rendered;
+		const auto expected = replies + 1;
+		e.render(source.id, 512, {}, [&](auto value) { ++replies; result = value; });
+		Check(Wait([&] { return replies == expected; }) && result.code.isEmpty()
+			&& result.value.value(u"px"_q).toInt() == 300 && e.rendered == before + 1,
+			"missing or corrupt retained file falls back to exactly one ordinary demand render");
+	}
 }
 
 void ExporterBounds() {
@@ -525,6 +611,7 @@ int main(int argc, char **argv) {
 	OrdinaryPreviewRace(app); LockedExportCases();
 	NumericCases();
 	BrokerCases();
+	RetainedSourceCases();
 	ExporterBounds();
 	StoreCases(app);
 	SocketCases(app);
