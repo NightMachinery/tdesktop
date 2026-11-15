@@ -24,13 +24,13 @@ bool FileIdentity(const QByteArray &value) {
 		|| value.back() == ':' || value.contains("::")) return false;
 	const auto separators = value.count(':');
 	return (separators == 1 || separators == 2)
-		&& std::all_of(begin(value), end(value), [](char ch) {
+		&& std::all_of(value.cbegin(), value.cend(), [](char ch) {
 			return ch == ':' || (ch >= '0' && ch <= '9');
 		});
 }
 
 bool Digest(const QByteArray &value) {
-	return value.size() == 64 && std::all_of(begin(value), end(value), [](char ch) {
+	return value.size() == 64 && std::all_of(value.cbegin(), value.cend(), [](char ch) {
 		return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
 	});
 }
@@ -39,14 +39,14 @@ bool Digest(const QByteArray &value) {
 
 bool PlaylistDownloadTokenSafe(const QString &token) {
 	return token.size() == 32
-		&& std::all_of(begin(token), end(token), [](QChar ch) {
+		&& std::all_of(token.cbegin(), token.cend(), [](QChar ch) {
 			return (ch >= u'0' && ch <= u'9') || (ch >= u'a' && ch <= u'f');
 		});
 }
 
 bool PlaylistDownloadExtensionSafe(const QString &extension) {
 	return !extension.isEmpty() && extension.size() <= 12
-		&& std::all_of(begin(extension), end(extension), [](QChar ch) {
+		&& std::all_of(extension.cbegin(), extension.cend(), [](QChar ch) {
 			return (ch >= u'a' && ch <= u'z') || (ch >= u'0' && ch <= u'9');
 		});
 }

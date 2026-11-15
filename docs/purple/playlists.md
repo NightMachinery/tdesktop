@@ -515,3 +515,7 @@ The resulting 65-gate campaign remains unrun.
 Download status labels use the ordinary `{amount}` placeholder. The language
 generator reserves `{count}` for plural keys, so these numeric summaries and
 their UI call sites must use the same non-plural tag.
+
+The download-state validators use Qt's const member iterators for byte arrays
+and strings, preserving the same identity, digest, token and extension checks
+without relying on unqualified iterator lookup.
