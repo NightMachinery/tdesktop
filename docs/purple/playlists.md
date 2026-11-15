@@ -584,6 +584,8 @@ The managed-cache fixture refuses invalid temporary-directory setup before any
 file path is formed. Asynchronous database completion state is shared with its
 callbacks, so a bounded wait failure cannot leave a callback referring to an
 unwound stack variable. These checks still require actual native execution.
+Its native reader links the archive loader's bounded-fill methods and xxHash
+alongside the encrypted cache objects.
 
 ### Publication authority at the filesystem boundary
 

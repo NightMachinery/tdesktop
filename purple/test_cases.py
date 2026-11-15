@@ -27,6 +27,7 @@ CASES = {
             'media/streaming/media_streaming_reader.cpp',
             'media/streaming/media_streaming_loader.cpp',
             'media/streaming/media_streaming_loader_local.cpp',
+            'purple/purple_archive_media_loader.cpp',
         ],
         'syntax_units': [
             'purple/purple_playlist_download_desktop.cpp',
@@ -50,6 +51,7 @@ CASES = {
         ],
         'build_libraries': [
             'libcrypto.a',
+            'libxxhash.dylib',
         ],
         'frameworks': [
             'QtCore',
