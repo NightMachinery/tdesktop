@@ -111,7 +111,9 @@ available when that entry is hidden. Both surfaces bind their account and route
 when opened, and reject stale source messages and late callbacks.
 
 Purple-owned boxes reuse stock settings buttons, single-line inputs, labels and
-box spacing. The library, recently deleted view and song detail use pages of at
+box spacing. The UI calls the global `::Settings` helpers and uses the stock
+`lng_settings_save` phrase and `window.style` main-menu button.
+The library, recently deleted view and song detail use pages of at
 most 25 entries. Create, rename, copy, delete, restore, remove and structured Undo
 submit typed account-worker edits and display the confirmed reloaded snapshot.
 Songs retain saved title, performer and duration without requiring their source

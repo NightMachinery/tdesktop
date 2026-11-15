@@ -27,6 +27,7 @@
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+#include "styles/style_window.h"
 #include "styles/style_window_main_menu.h"
 
 namespace Purple {
@@ -290,7 +291,7 @@ void PlaylistView::label(rpl::producer<QString> text) {
 Ui::SettingsButton *PlaylistView::button(
 		rpl::producer<QString> text,
 		Fn<void()> callback) {
-	const auto result = Settings::AddButtonWithIcon(
+	const auto result = ::Settings::AddButtonWithIcon(
 		_rows, std::move(text), st::settingsButtonNoIcon);
 	result->setClickedCallback(std::move(callback));
 	return result;
@@ -486,7 +487,7 @@ void PlaylistView::name(bool rename) {
 			box->closeBox();
 		};
 		field->submits() | rpl::on_next(submit, field->lifetime());
-		box->addButton(tr::lng_save(), submit);
+		box->addButton(tr::lng_settings_save(), submit);
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	}));
 }
@@ -577,7 +578,7 @@ void AddPlaylistsMenuRow(
 		not_null<Ui::VerticalLayout*> menu,
 		not_null<Window::SessionController*> controller) {
 	const auto row = menu->add(object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
-		menu, Settings::CreateButtonWithIcon(menu, tr::lng_purple_playlists_title(),
+		menu, ::Settings::CreateButtonWithIcon(menu, tr::lng_purple_playlists_title(),
 			st::mainMenuButton, { &st::menuIconFile })));
 	row->toggleOn(rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([] {
 		return ActiveSettings().playlists.menuItem;
