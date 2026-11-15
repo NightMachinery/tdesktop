@@ -54,7 +54,9 @@ PlaylistKeptFileRead Inspect(
 		int files,
 		const QByteArray &name,
 		const QString &extension,
-		uint64_t size) {
+		uint64_t size,
+		const PlaylistFileAuthority &authority = {}) {
+	if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 	const auto fd = ::openat(files, name.constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
 	if (fd < 0) return { PlaylistDownloadStatus::IoError, {} };
 	const auto close = qScopeGuard([&] { ::close(fd); });
@@ -65,6 +67,7 @@ PlaylistKeptFileRead Inspect(
 	auto count = uint64_t(0);
 	char buffer[65536];
 	while (true) {
+		if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 		const auto read = ::read(fd, buffer, sizeof(buffer));
 		if (read < 0) return { PlaylistDownloadStatus::IoError, {} };
 		if (!read) break;
@@ -72,6 +75,7 @@ PlaylistKeptFileRead Inspect(
 		if (count > size) return {};
 		hash.addData(QByteArrayView(buffer, read));
 	}
+	if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 	if (count != size || ::fstat(fd, &after) || !Owned(after, false)
 		|| Identity(after) != Identity(before) || after.st_size != before.st_size
 		|| after.st_mtime != before.st_mtime || after.st_ctime != before.st_ctime) return {};
@@ -255,7 +259,9 @@ PlaylistKeptFileRead InspectPlaylistKeptFile(
 		const QString &directory,
 		uint64_t id,
 		const QString &extension,
-		uint64_t expectedSize) {
+		uint64_t expectedSize,
+		const PlaylistFileAuthority &authority) {
+	if (authority && !authority()) return { PlaylistDownloadStatus::Changed, {} };
 	const auto path = PlaylistKeptFilePath(directory, id, extension);
 	if (path.isEmpty() || !expectedSize
 		|| expectedSize > uint64_t(std::numeric_limits<qint64>::max())) return {};
@@ -266,14 +272,16 @@ PlaylistKeptFileRead InspectPlaylistKeptFile(
 	if (files < 0) return { PlaylistDownloadStatus::Busy, {} };
 	const auto close = qScopeGuard([&] { ::close(files); });
 	const auto name = QString::number(id).toLatin1() + '.' + extension.toLatin1();
-	return Inspect(files, name, extension, expectedSize);
+	return Inspect(files, name, extension, expectedSize, authority);
 #endif
 }
 
 PlaylistDownloadStatus RemovePlaylistKeptFile(
 		const QString &directory,
 		uint64_t id,
-		const PlaylistKeptFile &expected) {
+		const PlaylistKeptFile &expected,
+		const PlaylistFileAuthority &authority) {
+	if (authority && !authority()) return PlaylistDownloadStatus::Changed;
 	if (PlaylistKeptFilePath(directory, id, expected.extension).isEmpty()
 		|| !expected.size) return PlaylistDownloadStatus::Invalid;
 #ifdef Q_OS_WIN
@@ -287,11 +295,12 @@ PlaylistDownloadStatus RemovePlaylistKeptFile(
 	if (::fstatat(files, name.constData(), &linked, AT_SYMLINK_NOFOLLOW)) {
 		return errno == ENOENT ? PlaylistDownloadStatus::Ready : PlaylistDownloadStatus::IoError;
 	}
-	const auto read = Inspect(files, name, expected.extension, expected.size);
+	const auto read = Inspect(files, name, expected.extension, expected.size, authority);
 	if (!read) return read.status;
 	if (read.file.identity != expected.identity || read.file.sha256 != expected.sha256) {
 		return PlaylistDownloadStatus::Changed;
 	}
+	if (authority && !authority()) return PlaylistDownloadStatus::Changed;
 	if (::unlinkat(files, name.constData(), 0) || ::fsync(files)) {
 		return PlaylistDownloadStatus::IoError;
 	}

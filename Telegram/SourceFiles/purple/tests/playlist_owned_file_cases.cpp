@@ -55,6 +55,16 @@ int main(int argc, char *argv[]) {
 		"discard cannot borrow another operation's identity");
 	expect(DiscardPlaylistStagingFile(root.path(), secondToken, second.file.identity) == PlaylistDownloadStatus::Ready,
 		"owned partial or complete stage can be explicitly discarded");
+	expect(InspectPlaylistKeptFile(root.path(), 1, u"mp3"_q, bytes.size(), [] { return false; }).status
+		== PlaylistDownloadStatus::Changed, "revoked account refuses a new kept-file read");
+	expect(RemovePlaylistKeptFile(root.path(), 1, published.file, [] { return false; })
+		== PlaylistDownloadStatus::Changed && QFile::exists(PlaylistKeptFilePath(root.path(), 1, u"mp3"_q)),
+		"revoked account cannot unlink its previous kept file");
+	auto calls = 0;
+	const auto revokeDuringProof = [&] { return ++calls < 3; };
+	expect(RemovePlaylistKeptFile(root.path(), 1, published.file, revokeDuringProof)
+		== PlaylistDownloadStatus::Changed && QFile::exists(PlaylistKeptFilePath(root.path(), 1, u"mp3"_q)),
+		"authority loss during real inspection prevents subsequent unlink");
 	expect(RemovePlaylistKeptFile(root.path(), 1, published.file) == PlaylistDownloadStatus::Ready,
 		"verified owned final file is removable");
 #endif

@@ -55,6 +55,16 @@ PlaylistAccountResult PlaylistAccountWorker::edit(
 	result.write = _store.write(result.snapshot, result.edit->library,
 		state, PlaylistStoreWriteKind::LocalEdit);
 	result.snapshot = read().snapshot;
+	const auto dropsReferences = request.kind == PlaylistAccountEditKind::RemoveSongs
+		|| request.kind == PlaylistAccountEditKind::DeleteForever
+		|| request.kind == PlaylistAccountEditKind::Undo;
+	if (result && dropsReferences
+		&& result.snapshot.state->preserved.contains(u"desktop_playlist_downloads"_q)) {
+		auto retained = download({ .kind = PlaylistDownloadRequestKind::Prune });
+		result.retentionStatus = retained.downloads
+			? retained.downloads->status : PlaylistDownloadStatus::Changed;
+		if (retained) result.snapshot = std::move(retained.snapshot);
+	}
 	return result;
 }
 
@@ -115,6 +125,12 @@ PlaylistAccountResult PlaylistAccountWorker::download(
 		result.downloads = ReadPlaylistDownloadState(*result.snapshot.state);
 		if (!*result.downloads) return result;
 	}
+	const auto fileAuthority = [owner = _authority, job = request.jobAuthority,
+			needsJob = request.kind == PlaylistDownloadRequestKind::Register] {
+		if (!owner->load(std::memory_order_acquire)) return false;
+		const auto token = job.lock();
+		return !needsJob || (token && token->load(std::memory_order_acquire));
+	};
 	auto next = result.downloads->state;
 	const auto &library = *result.snapshot.library;
 	const auto playlist = library.playlists.find(request.playlistId);
@@ -132,7 +148,7 @@ PlaylistAccountResult PlaylistAccountWorker::download(
 		if (song == end(*playlist->second.songs) || song->second.value.isRemoved()
 			|| file == end(next.files)) return result;
 		const auto proof = InspectPlaylistKeptFile(_store.directory(), request.documentId,
-			file->second.extension, file->second.size);
+			file->second.extension, file->second.size, fileAuthority);
 		if (proof && proof.file.identity == file->second.identity
 			&& proof.file.sha256 == file->second.sha256) result.downloads->verified.insert(request.documentId);
 		return result;
@@ -159,7 +175,7 @@ PlaylistAccountResult PlaylistAccountWorker::download(
 			return result;
 		}
 		const auto proof = InspectPlaylistKeptFile(_store.directory(),
-			request.documentId, request.file.extension, request.file.size);
+			request.documentId, request.file.extension, request.file.size, fileAuthority);
 		if (!proof || request.file.identity.isEmpty()
 			|| proof.file.identity != request.file.identity
 			|| (!request.file.sha256.isEmpty()
@@ -196,7 +212,8 @@ PlaylistAccountResult PlaylistAccountWorker::download(
 				return result;
 			}
 			result.snapshot = std::move(fresh);
-			const auto removed = RemovePlaylistKeptFile(_store.directory(), id, next.files.at(id));
+			const auto removed = RemovePlaylistKeptFile(
+				_store.directory(), id, next.files.at(id), fileAuthority);
 			if (removed != PlaylistDownloadStatus::Ready) {
 				result.downloads->status = removed;
 				return result;

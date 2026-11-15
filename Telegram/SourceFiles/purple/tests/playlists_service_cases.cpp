@@ -1,10 +1,12 @@
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_playlist_download_registry.h"
+#include "purple/purple_playlist_download_files.h"
 #include "base/weak_ptr.h"
 #include "crl/crl_object_on_thread.h"
 #include "rpl/lifetime.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
@@ -109,6 +111,10 @@ struct Fixture {
 	std::unique_ptr<Main::Session> session = std::make_unique<Main::Session>();
 
 	Fixture() {
+		if (!temporary.isValid()) {
+			Expect(false, "private service fixture root exists");
+			return;
+		}
 		Expect(EnsureSyncPrivateDirectory(temporary.path() + u"/accounts"_q)
 			== SyncStoreStatus::Ready, "owner directory created");
 		auto file = QFile(temporary.path() + u"/accounts/root.toml"_q);
@@ -128,6 +134,7 @@ struct Fixture {
 	}
 
 	~Fixture() {
+		if (!temporary.isValid()) return;
 		InvalidatePlaylistServices();
 		session.reset();
 		Wait([&] {
@@ -138,6 +145,7 @@ struct Fixture {
 	}
 
 	PlaylistAccountResult use(const QString &id, uint64_t nowMs) {
+		if (!temporary.isValid()) return {};
 		auto result = std::optional<PlaylistAccountResult>();
 		RecordAccountPlaylistUse(session.get(), { id, nowMs }, [&](auto value) {
 			Expect(QThread::currentThread() == QCoreApplication::instance()->thread(),
@@ -148,7 +156,18 @@ struct Fixture {
 		return result.value_or(PlaylistAccountResult());
 	}
 
+	PlaylistAccountResult download(PlaylistAccountDownloadRequest request) {
+		if (!temporary.isValid()) return {};
+		auto result = std::optional<PlaylistAccountResult>();
+		RequestAccountPlaylistDownloads(session.get(), std::move(request), [&](auto value) {
+			result = std::move(value);
+		});
+		Wait([&] { return result.has_value(); });
+		return result.value_or(PlaylistAccountResult());
+	}
+
 	PlaylistAccountResult edit(PlaylistAccountEdit request) {
+		if (!temporary.isValid()) return {};
 		auto result = std::optional<PlaylistAccountResult>();
 		EditAccountPlaylists(session.get(), std::move(request), [&](auto value) {
 			Expect(QThread::currentThread() == QCoreApplication::instance()->thread(),
@@ -167,6 +186,108 @@ PlaylistAccountEdit Create(const QString &title, char seed = 'a') {
 		.entropy = QByteArray(10, seed),
 		.nowMs = 100,
 	};
+}
+
+void ExerciseDownloadPruning() {
+#ifndef Q_OS_WIN
+	for (auto scenario = 0; scenario != 4; ++scenario) {
+		const auto protectedCopy = scenario == 1;
+		const auto changedContent = scenario == 2;
+		const auto alreadyMissing = scenario == 3;
+		Fixture fixture;
+		const auto created = fixture.edit(Create(u"Retention"_q));
+		if (!created || !created.edit) return;
+		const auto id = created.edit->playlistId;
+		const auto added = fixture.edit({
+			.kind = PlaylistAccountEditKind::AddSongs,
+			.playlistId = id,
+			.songs = { { .documentId = 501, .peer = { PeerTokenKind::Self, 0 }, .msg = 1 } },
+			.nowMs = 200,
+		});
+		if (!added) return;
+		auto otherId = QString();
+		if (protectedCopy) {
+			const auto copied = fixture.edit({
+				.kind = PlaylistAccountEditKind::Copy,
+				.entropy = QByteArray(10, 'b'),
+				.source = added.snapshot.library->playlists.at(id),
+				.nowMs = 300,
+			});
+			if (!copied || !copied.edit) return;
+			otherId = copied.edit->playlistId;
+			Expect(bool(fixture.edit({ .kind = PlaylistAccountEditKind::Delete,
+				.playlistId = otherId, .nowMs = 400 })), "retention fixture enters Recently deleted");
+		}
+		const auto directory = fixture.temporary.path() + u"/playlists"_q;
+		Expect(EnsureSyncPrivateDirectory(directory + u"/files"_q) == SyncStoreStatus::Ready,
+			"retention fixture uses a private owned files directory");
+		const auto token = QString(32, u'a');
+		const auto staged = CreatePlaylistStagingFile(directory, token);
+		if (!staged) { Expect(false, "retention staging setup succeeds"); return; }
+		const auto bytes = QByteArray("retention-prune-owned-content");
+		auto file = QFile(PlaylistStagingFilePath(directory, token));
+		Expect(file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size(),
+			"retention fixture writes complete owned bytes");
+		file.close();
+		const auto published = PublishPlaylistStagingFile(directory, token,
+			{ id, 501, u"mp3"_q, uint64_t(bytes.size()), staged.file.identity,
+				QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex(), {} });
+		if (!published) { Expect(false, "retention owned publication succeeds"); return; }
+		const auto authority = std::make_shared<std::atomic<bool>>(true);
+		const auto registered = fixture.download({
+			.kind = PlaylistDownloadRequestKind::Register,
+			.playlistId = id,
+			.documentId = 501,
+			.expectedSource = *added.snapshot.library->playlists.at(id).songs->at(501).value.source,
+			.file = published.file,
+			.jobAuthority = authority,
+		});
+		if (!registered) { Expect(false, "retention fixture registers independently verified bytes"); return; }
+		const auto path = PlaylistKeptFilePath(directory, 501, u"mp3"_q);
+		const auto changedBytes = QByteArray(bytes.size(), 'x');
+		if (changedContent) {
+			file.setFileName(path);
+			Expect(file.open(QIODevice::WriteOnly)
+				&& file.write(changedBytes) == changedBytes.size(), "retention fixture changes actual file digest");
+			file.close();
+		} else if (alreadyMissing) {
+			Expect(QFile::remove(path), "retention fixture removes its own published file");
+		}
+		const auto removed = fixture.edit({
+			.kind = PlaylistAccountEditKind::RemoveSongs,
+			.playlistId = id,
+			.documentIds = { 501 },
+			.nowMs = 500,
+		});
+		const auto status = changedContent
+			? PlaylistDownloadStatus::Changed : PlaylistDownloadStatus::Ready;
+		Expect(bool(removed) && removed.edit->removedCount == 1
+			&& removed.retentionStatus == status,
+			"cleanup refusal never turns a confirmed library edit into a failed edit");
+		Expect(QFile::exists(path) == (protectedCopy || changedContent),
+			"another unpurged or Recently deleted playlist protects owned file bytes");
+		const auto inventory = ReadPlaylistDownloadState(*removed.snapshot.state);
+		Expect(bool(inventory) && inventory.state.files.contains(501) == (protectedCopy || changedContent),
+			"automatic prune updates only the inventory of successfully removed files");
+		if (changedContent) {
+			file.setFileName(path);
+			Expect(file.open(QIODevice::ReadOnly) && file.readAll() == changedBytes,
+				"digest-mismatched file remains byte-exact after refused automatic prune");
+			file.close();
+			const auto undone = fixture.edit({ .kind = PlaylistAccountEditKind::Undo,
+				.undo = removed.edit->undo, .nowMs = 600 });
+			Expect(bool(undone) && PlaylistVisibleSongIds(
+				undone.snapshot.library->playlists.at(id)) == std::vector<uint64_t>({501}),
+				"undo remains available after confirmed remove with deferred retention cleanup");
+		}
+		if (protectedCopy) {
+			const auto purged = fixture.edit({ .kind = PlaylistAccountEditKind::DeleteForever,
+				.playlistId = otherId, .nowMs = 600 });
+			Expect(bool(purged) && purged.retentionStatus == PlaylistDownloadStatus::Ready
+				&& !QFile::exists(path), "permanent removal of last reference prunes the owned file");
+		}
+	}
+#endif
 }
 
 void Exercise() {
@@ -459,6 +580,7 @@ void Exercise() {
 int main(int argc, char *argv[]) {
 	QCoreApplication application(argc, argv);
 	Exercise();
+	ExerciseDownloadPruning();
 	{
 		Fixture fixture;
 		const auto invalidations = PlaybackInvalidations;

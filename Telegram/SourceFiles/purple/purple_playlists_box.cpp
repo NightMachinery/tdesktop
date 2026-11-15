@@ -318,7 +318,10 @@ void PlaylistView::receive(PlaylistAccountResult result) {
 			: StoreError(result.write && !*result.write
 				? result.write->status : snapshotStatus));
 	} else {
-		_status->setText(tr::lng_purple_playlists_local_only(tr::now));
+		_status->setText(result.retentionStatus
+			&& *result.retentionStatus != PlaylistDownloadStatus::Ready
+			? tr::lng_purple_playlists_cleanup_pending(tr::now)
+			: tr::lng_purple_playlists_local_only(tr::now));
 	}
 	if (ok && result.edit && result.edit->changed) {
 		_undo = result.edit->undo;

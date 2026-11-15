@@ -2,7 +2,11 @@
 
 #include "purple/purple_playlist_download_state.h"
 
+#include <functional>
+
 namespace Purple {
+
+using PlaylistFileAuthority = std::function<bool()>;
 
 struct PlaylistKeptFileRead {
 	PlaylistDownloadStatus status = PlaylistDownloadStatus::Invalid;
@@ -28,8 +32,10 @@ struct PlaylistKeptFileRead {
 	const QString &directory, uint64_t id, const QString &extension);
 [[nodiscard]] PlaylistKeptFileRead InspectPlaylistKeptFile(
 	const QString &directory, uint64_t id,
-	const QString &extension, uint64_t expectedSize);
+	const QString &extension, uint64_t expectedSize,
+	const PlaylistFileAuthority &authority = {});
 [[nodiscard]] PlaylistDownloadStatus RemovePlaylistKeptFile(
-	const QString &directory, uint64_t id, const PlaylistKeptFile &expected);
+	const QString &directory, uint64_t id, const PlaylistKeptFile &expected,
+	const PlaylistFileAuthority &authority = {});
 
 } // namespace Purple

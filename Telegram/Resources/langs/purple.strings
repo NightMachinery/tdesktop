@@ -771,3 +771,5 @@ docs/purple/upstream_hooks.md.
 "lng_purple_playlist_check_download" = "Check selected download";
 "lng_purple_playlist_download_verified" = "Download verified at last check";
 "lng_purple_playlist_download_absent" = "No verified kept download for this song.";
+
+"lng_purple_playlists_cleanup_pending" = "Playlist saved. Some kept downloads still need cleanup.";

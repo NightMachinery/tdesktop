@@ -57,6 +57,7 @@ struct PlaylistAccountResult {
 	std::optional<PlaylistEditResult> edit;
 	std::optional<PlaylistStoreWrite> write;
 	std::optional<PlaylistDownloadRead> downloads;
+	std::optional<PlaylistDownloadStatus> retentionStatus;
 
 	[[nodiscard]] explicit operator bool() const {
 		return bool(snapshot) && (!edit || bool(*edit)) && (!write || bool(*write))

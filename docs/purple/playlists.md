@@ -547,6 +547,37 @@ their UI call sites must use the same non-plural tag.
 The download-state validators use Qt's const member iterators for byte arrays
 and strings, preserving the same identity, digest, token and extension checks
 without relying on unqualified iterator lookup.
+### Reference-removal retention maintenance
+
+Confirmed local Remove songs, Delete forever and Undo edits request pruning on
+the same serialized account worker after the library write succeeds. Every
+unpurged playlist, including Recently deleted, protects its referenced owned
+files. Pruning preserves unknown future download state and reports a separate
+retention status; a cleanup failure cannot turn a confirmed edit into a failed
+edit or invite the user to repeat it. The list status explains pending cleanup.
+No download metadata is created when the client member was absent.
+
+The existing identity, digest, private-directory and no-foreign-file checks
+remain authoritative. Active durable transfer intents may defer cleanup. No
+automatic retry loop is added. This hook covers local worker edits; future
+account-sync merge delivery must call the same maintenance operation after a
+confirmed merge. Native I/O failure and route-retirement checks remain part of
+qualification. The service fixture includes actual owned publication, sole
+reference removal, another Recently deleted reference and final purge cases.
+
+The retention service fixture also drafts a changed-digest refusal and an
+already-missing-file cleanup. Confirmed edits and Undo stay available when
+a mismatched file is retained. Temporary-directory setup failure refuses
+all fixture I/O before a fallback path can escape the private test root.
+
+Kept-file verification and removal receive the current account authority, plus
+the job authority for registration. The real hash loop checks it between
+bounded reads, and removal checks again immediately before its unlink
+linearization point. Revocation during a large verification cannot fall
+through to an unlink authorized only before hashing. The authority check
+does not claim an atomic compare-and-unlink against an unrelated external
+filesystem writer. Transfer publication has separate durability and
+authority semantics and still needs its own cancellation audit.
 
 The managed-cache fixture refuses invalid temporary-directory setup before any
 file path is formed. Asynchronous database completion state is shared with its
