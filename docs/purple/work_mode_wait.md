@@ -152,6 +152,16 @@ in advance. Editing their configuration remains a settings operation. An exempt
 apply cancels a pending request whose captured context changes. No automation
 opens a countdown.
 
+### Playback preference writes
+
+The Voice module's `ChooseContinuationBox`, `SetResumeMusic` and
+`SetPrivateChatQueue` edit only `[playback] after_voice`,
+`resume_music_after_voice_p` and `private_chat_queue_p`. They use the existing
+settings writer without a Work Mode countdown: they do not change Peek, the
+active preset, account modes or the app-wide settings source. The writer
+inventory records two boolean splices and one string splice for these three
+preferences; all Work Mode and Peek request routes remain unchanged.
+
 ## Dedicated Peek option editors
 
 `RequestPeekOptionChange` is the common entry for the in-app start-delay,

@@ -79,7 +79,8 @@
     "SetTableBool": 1
   },
   "Telegram/SourceFiles/purple/purple_voice_queue.cpp": {
-    "SetTableBool": 1
+    "SetTableBool": 2,
+    "SetTableString": 1
   },
   "Telegram/SourceFiles/purple/purple_wait_gate.cpp": {
     "ExtendPeek": 1
