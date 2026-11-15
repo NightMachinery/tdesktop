@@ -29,6 +29,7 @@ CASES = {
         'program': 'playlist_player_cases.cpp',
         'generated': ['playlist-player-queue.inc'],
         'syntax_units': ['purple/purple_playlist_player.cpp',
+            'purple/purple_playlists_box.cpp',
             'media/player/media_player_instance.cpp'],
         'units': [],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
@@ -283,6 +284,7 @@ def music_listening_include(sources):
 
 
 def playlist_player_queue_include(sources):
+    """Extract actual order, bounded traversal, cursor and handoff helpers."""
     text = (sources / 'purple/purple_playlist_player.cpp').read_text()
     start = text.index('constexpr auto kResolveWindow = ')
     end = text.index('class PlaylistPlayback final', start)

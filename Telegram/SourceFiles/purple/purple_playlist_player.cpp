@@ -8,6 +8,7 @@
 #include "purple/purple_playlists_resolver.h"
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_user_control.h"
+#include "base/random.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -33,6 +34,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <numeric>
 
 namespace Purple {
 namespace {
@@ -40,16 +42,69 @@ namespace {
 using Type = AudioMsgId::Type;
 constexpr auto kResolveWindow = std::size_t(4);
 
+std::optional<std::size_t> PlaylistIndexForDocument(
+		const std::vector<PlaylistResolveSong> &songs,
+		uint64_t documentId) {
+	const auto found = std::find_if(
+		songs.begin(),
+		songs.end(),
+		[&](const auto &song) { return song.documentId == documentId; });
+	return found != songs.end()
+		? std::optional<std::size_t>(found - songs.begin())
+		: std::nullopt;
+}
+
+std::size_t PlaylistStartIndex(
+		std::size_t size,
+		std::optional<std::size_t> selected,
+		std::optional<std::size_t> current,
+		Media::OrderMode mode,
+		const Fn<std::size_t(std::size_t)> &random) {
+	if (!size) return 0;
+	if (selected) return *selected;
+	if (mode == Media::OrderMode::Reverse) return size - 1;
+	if (mode != Media::OrderMode::Shuffle) return 0;
+	return current ? *current : random(size);
+}
+
+std::vector<std::size_t> PlaylistOrderIndices(
+		std::size_t size,
+		std::size_t selected,
+		Media::OrderMode mode,
+		const Fn<std::size_t(std::size_t)> &random) {
+	auto result = std::vector<std::size_t>(size);
+	std::iota(result.begin(), result.end(), std::size_t(0));
+	if (mode == Media::OrderMode::Reverse) {
+		std::reverse(result.begin(), result.end());
+	} else if (mode == Media::OrderMode::Shuffle && size) {
+		Expects(selected < size);
+		std::swap(result.front(), result[selected]);
+		for (auto remaining = size - 1; remaining > 1; --remaining) {
+			const auto offset = random(remaining);
+			Expects(offset < remaining);
+			std::swap(result[remaining], result[1 + offset]);
+		}
+	}
+	return result;
+}
+
 std::vector<std::size_t> ResolveIndices(
 		std::size_t size,
 		std::size_t first,
 		int direction,
-		std::size_t count) {
+		std::size_t count,
+		bool repeatAll = false) {
 	Expects(direction == -1 || direction == 1);
 	auto result = std::vector<std::size_t>();
-	for (auto offset = std::size_t(0); offset != std::min(count, kResolveWindow); ++offset) {
-		const auto index = std::ptrdiff_t(first) + direction * std::ptrdiff_t(offset);
-		if (index < 0 || std::size_t(index) >= size) break;
+	const auto limit = std::min({ count, kResolveWindow, size });
+	for (auto offset = std::size_t(0); offset != limit; ++offset) {
+		auto index = std::ptrdiff_t(first) + direction * std::ptrdiff_t(offset);
+		if (repeatAll) {
+			const auto total = std::ptrdiff_t(size);
+			index = (index % total + total) % total;
+		} else if (index < 0 || std::size_t(index) >= size) {
+			break;
+		}
 		result.push_back(std::size_t(index));
 	}
 	return result;
@@ -82,8 +137,11 @@ public:
 	PlaylistCursor &operator=(const PlaylistCursor&) = delete;
 
 	void reset(std::size_t size, std::ptrdiff_t position);
+	void setRepeatAll(bool repeatAll);
+	[[nodiscard]] bool repeatAll() const;
 	void select(std::ptrdiff_t position, int direction);
 	void skip();
+	void skipUnresolved(const Fn<bool(std::size_t)> &resolved);
 	void cancel();
 	void retire();
 	[[nodiscard]] std::optional<std::size_t> index() const;
@@ -100,7 +158,9 @@ private:
 	std::shared_ptr<Authority> _authority = std::make_shared<Authority>();
 	std::size_t _size = 0;
 	std::ptrdiff_t _position = 0;
+	std::size_t _remaining = 0;
 	int _direction = 1;
+	bool _repeatAll = false;
 
 };
 
@@ -110,18 +170,48 @@ void PlaylistCursor::reset(std::size_t size, std::ptrdiff_t position) {
 	select(position, 1);
 }
 
+void PlaylistCursor::setRepeatAll(bool repeatAll) {
+	_repeatAll = repeatAll;
+}
+
+bool PlaylistCursor::repeatAll() const {
+	return _repeatAll;
+}
+
 void PlaylistCursor::select(std::ptrdiff_t position, int direction) {
 	Expects(direction == -1 || direction == 1);
 	cancel();
-	_position = std::clamp(position, std::ptrdiff_t(-1), std::ptrdiff_t(_size));
+	const auto boundary = std::clamp(
+		position,
+		std::ptrdiff_t(-1),
+		std::ptrdiff_t(_size));
+	_position = _repeatAll && _size
+		? (boundary + std::ptrdiff_t(_size)) % std::ptrdiff_t(_size)
+		: boundary;
 	_direction = direction;
+	_remaining = _size;
 }
 
 void PlaylistCursor::skip() {
-	_position = std::clamp(
-		_position + _direction,
-		std::ptrdiff_t(-1),
-		std::ptrdiff_t(_size));
+	if (_repeatAll && _size && _remaining > 1) {
+		--_remaining;
+		_position = (_position + _direction + std::ptrdiff_t(_size)) % std::ptrdiff_t(_size);
+	} else if (_repeatAll) {
+		_remaining = 0;
+		_position = _direction > 0 ? std::ptrdiff_t(_size) : -1;
+	} else {
+		_position = std::clamp(
+			_position + _direction,
+			std::ptrdiff_t(-1),
+			std::ptrdiff_t(_size));
+	}
+}
+
+void PlaylistCursor::skipUnresolved(const Fn<bool(std::size_t)> &resolved) {
+	while (const auto current = index()) {
+		if (resolved(*current)) return;
+		skip();
+	}
 }
 
 void PlaylistCursor::cancel() {
@@ -141,7 +231,8 @@ std::optional<std::size_t> PlaylistCursor::index() const {
 
 bool PlaylistCursor::stepAvailable(int delta) const {
 	const auto next = _position + delta;
-	return _authority->active && next >= 0 && std::size_t(next) < _size;
+	return _authority->active && _size && (_repeatAll
+		|| (next >= 0 && std::size_t(next) < _size));
 }
 
 std::ptrdiff_t PlaylistCursor::position() const {
@@ -316,6 +407,7 @@ public:
 	void retire(bool stopOwned, bool immediate = false);
 	[[nodiscard]] bool belongsTo(Main::Session *session) const;
 	[[nodiscard]] bool owns(const AudioMsgId &current);
+	[[nodiscard]] bool claimsShuffle(const AudioMsgId &current);
 	[[nodiscard]] bool move(int delta, bool autonext);
 	[[nodiscard]] bool available(int delta) const;
 	[[nodiscard]] PlaylistPlaybackStatus status() const;
@@ -324,6 +416,12 @@ private:
 	[[nodiscard]] bool bound() const;
 	[[nodiscard]] bool check(const Fn<bool()> &admission);
 	void observe();
+	void updateModes();
+	[[nodiscard]] std::optional<PlaylistSongResolution> resolutionForCurrent(
+		const AudioMsgId &current) const;
+	void reorder(Media::OrderMode mode, uint64_t selected);
+	void trimCache();
+	[[nodiscard]] std::optional<std::size_t> savedIndex() const;
 	void load();
 	void loaded(PlaylistAccountResult result);
 	void resolve();
@@ -334,7 +432,7 @@ private:
 	void prefetch();
 	void resolved(
 		uint64_t request,
-		std::size_t first,
+		std::vector<std::size_t> indices,
 		bool warm,
 		std::vector<PlaylistSongResolution> results);
 	void consume();
@@ -351,7 +449,9 @@ private:
 	std::optional<AccountRoutingSnapshot> _route;
 	QString _id;
 	std::optional<uint64_t> _selected;
+	std::vector<PlaylistResolveSong> _savedSongs;
 	std::vector<PlaylistResolveSong> _songs;
+	Media::OrderMode _orderMode = Media::OrderMode::Default;
 	PlaylistCursor _cursor;
 	std::map<std::size_t, PlaylistSongResolution> _cache;
 	std::unique_ptr<DesktopPlaylistResolver> _resolver;
@@ -362,6 +462,7 @@ private:
 	uint64_t _request = 0;
 	Fn<void()> _cancelHandoff;
 	bool _loaded = false;
+	bool _automatic = false;
 	bool _retired = false;
 	bool _ownsCurrent = false;
 	bool _switching = false;
@@ -388,12 +489,6 @@ void ScheduleHandoffDispatch(const std::shared_ptr<PlaylistHandoffState> &state)
 
 void RequireMainThread() {
 	Expects(QThread::currentThread() == QCoreApplication::instance()->thread());
-}
-
-bool SupportedModes() {
-	const auto &settings = Core::App().settings();
-	return settings.playerOrderMode() == Media::OrderMode::Default
-		&& settings.playerRepeatMode() != Media::RepeatMode::All;
 }
 
 PeerId SourcePeer(const PlaylistSourceRef &source, uint64_t selfUserId) {
@@ -476,6 +571,19 @@ bool PlaylistPlayback::belongsTo(Main::Session *session) const {
 	return session && _session.get() == session;
 }
 
+std::optional<std::size_t> PlaylistPlayback::savedIndex() const {
+	const auto index = _cursor.index();
+	if (!index) return std::nullopt;
+	const auto id = _songs[*index].documentId;
+	const auto saved = std::find_if(
+		_savedSongs.begin(),
+		_savedSongs.end(),
+		[&](const auto &song) { return song.documentId == id; });
+	return saved != _savedSongs.end()
+		? std::optional<std::size_t>(saved - _savedSongs.begin())
+		: std::nullopt;
+}
+
 void PlaylistPlayback::publish(
 		PlaylistPlaybackPhase phase,
 		PlaylistPlaybackProblem problem,
@@ -483,7 +591,7 @@ void PlaylistPlayback::publish(
 	_status = {
 		.playlistId = _id,
 		.documentId = _cursor.index() ? _songs[*_cursor.index()].documentId : 0,
-		.index = _cursor.index(),
+		.index = savedIndex(),
 		.total = _songs.size(),
 		.phase = phase,
 		.problem = problem,
@@ -507,6 +615,7 @@ void PlaylistPlayback::retireResolver() {
 }
 
 void PlaylistPlayback::cancel(bool keepCache) {
+	_automatic = false;
 	_expiryResumePending = false;
 	if (_cancelHandoff) _cancelHandoff();
 	_cursor.cancel();
@@ -537,7 +646,7 @@ void PlaylistPlayback::pauseForExpiry() {
 		_status.problem = PlaylistPlaybackProblem::None;
 		_status.sourceStatus = std::nullopt;
 	}
-	_status.index = _cursor.index();
+	_status.index = savedIndex();
 	_status.documentId = _cursor.index() ? _songs[*_cursor.index()].documentId : 0;
 	const auto weak = weak_from_this();
 	const auto admission = _cursor.admission();
@@ -632,18 +741,8 @@ void PlaylistPlayback::observe() {
 	const auto current = player->current(Type::Song);
 	if (current != _expected && !(_switching && current == _transitionFrom)) {
 		retire(false);
-	} else if (!SupportedModes()) {
-		cancel();
-		const auto admission = _cursor.admission();
-		if (_ownsCurrent) {
-			const auto internal = PlaylistPlayerInternalCallGuard(
-				Type::Song, PlaylistPlayerIntent::Stop);
-			player->stop(Type::Song);
-		}
-		if (!check(admission)) return;
-		publish(
-			PlaylistPlaybackPhase::RetryRequired,
-			PlaylistPlaybackProblem::UnsupportedMode);
+	} else {
+		updateModes();
 	}
 }
 
@@ -686,17 +785,12 @@ void PlaylistPlayback::start() {
 	_session.get()->lifetime().add([weak] {
 		if (const auto self = weak.lock()) self->retire(false, true);
 	});
-	if (!SupportedModes()) {
-		publish(
-			PlaylistPlaybackPhase::RetryRequired,
-			PlaylistPlaybackProblem::UnsupportedMode);
-	} else {
-		load();
-	}
+	load();
 }
 
 void PlaylistPlayback::load() {
 	cancel();
+	_savedSongs.clear();
 	_songs.clear();
 	_loaded = false;
 	_cursor.reset(0, 0);
@@ -738,21 +832,147 @@ void PlaylistPlayback::loaded(PlaylistAccountResult result) {
 	const auto &playlist = found->second;
 	for (const auto id : PlaylistVisibleSongIds(playlist)) {
 		const auto &song = playlist.songs->at(id).value.source;
-		if (song) _songs.push_back({ id, *song });
+		if (song) _savedSongs.push_back({ id, *song });
 	}
 	const auto selected = _selected
-		? std::find_if(_songs.begin(), _songs.end(), [&](const auto &song) {
+		? std::find_if(_savedSongs.begin(), _savedSongs.end(), [&](const auto &song) {
 			return song.documentId == *_selected;
-		}) : _songs.begin();
-	if (_selected && selected == _songs.end()) {
+		}) : _savedSongs.begin();
+	if (_selected && selected == _savedSongs.end()) {
 		publish(
 			PlaylistPlaybackPhase::RetryRequired,
 			PlaylistPlaybackProblem::SelectedSongMissing);
 		return;
 	}
 	_loaded = true;
-	_cursor.reset(_songs.size(), selected - _songs.begin());
+	const auto mode = Core::App().settings().playerOrderMode();
+	const auto current = Media::Player::instance()->current(Type::Song).audio();
+	const auto playing = std::find_if(
+		_savedSongs.begin(),
+		_savedSongs.end(),
+		[&](const auto &song) { return current && song.documentId == current->id; });
+	const auto first = PlaylistStartIndex(
+		_savedSongs.size(),
+		_selected ? std::optional<std::size_t>(selected - _savedSongs.begin()) : std::nullopt,
+		playing != _savedSongs.end()
+			? std::optional<std::size_t>(playing - _savedSongs.begin()) : std::nullopt,
+		mode,
+		[](std::size_t count) { return std::size_t(base::RandomIndex(int(count))); });
+	reorder(mode, _savedSongs.empty() ? 0 : _savedSongs[first].documentId);
 	resolve();
+}
+
+void PlaylistPlayback::reorder(Media::OrderMode mode, uint64_t selected) {
+	const auto saved = std::find_if(_savedSongs.begin(), _savedSongs.end(), [&](const auto &song) {
+		return song.documentId == selected;
+	});
+	const auto order = PlaylistOrderIndices(
+		_savedSongs.size(),
+		saved != _savedSongs.end() ? saved - _savedSongs.begin() : 0,
+		mode,
+		[](std::size_t count) { return std::size_t(base::RandomIndex(int(count))); });
+	_songs.clear();
+	_songs.reserve(order.size());
+	for (const auto index : order) _songs.push_back(_savedSongs[index]);
+	_orderMode = mode;
+	const auto position = std::find_if(_songs.begin(), _songs.end(), [&](const auto &song) {
+		return song.documentId == selected;
+	});
+	_cursor.setRepeatAll(Core::App().settings().playerRepeatMode() == Media::RepeatMode::All);
+	_cursor.reset(
+		_songs.size(),
+		position != _songs.end() ? position - _songs.begin() : 0);
+}
+
+auto PlaylistPlayback::resolutionForCurrent(const AudioMsgId &current) const
+-> std::optional<PlaylistSongResolution> {
+	if (!bound() || !_ownsCurrent || !current.audio()) return std::nullopt;
+	const auto saved = PlaylistIndexForDocument(_savedSongs, current.audio()->id);
+	if (!saved) return std::nullopt;
+	const auto &song = _savedSongs[*saved];
+	auto sources = std::vector<PlaylistSourceRef>{
+		{ song.source.peer, song.source.msg, song.source.username },
+	};
+	sources.insert(sources.end(), song.source.alt.begin(), song.source.alt.end());
+	for (auto index = std::size_t(0); index != sources.size(); ++index) {
+		const auto &source = sources[index];
+		if (SourcePeer(source, _account.userId) != current.contextId().peer
+			|| MsgId(source.msg) != current.contextId().msg) {
+			continue;
+		}
+		auto result = PlaylistSongResolution();
+		result.documentId = song.documentId;
+		result.source = source;
+		result.sourceIndex = index;
+		result.status = index
+			? PlaylistSongStatus::EarlierCopy : PlaylistSongStatus::Ready;
+		auto item = static_cast<HistoryItem*>(nullptr);
+		const auto document = ResolvedDocument(_session.get(), result, item);
+		if (document == current.audio()
+			&& item && item->fullId() == current.contextId()) {
+			return result;
+		}
+	}
+	return std::nullopt;
+}
+
+void PlaylistPlayback::updateModes() {
+	_cursor.setRepeatAll(Core::App().settings().playerRepeatMode() == Media::RepeatMode::All);
+	const auto mode = Core::App().settings().playerOrderMode();
+	if (!_loaded || _orderMode == mode) return;
+	const auto player = Media::Player::instance();
+	const auto current = player->current(Type::Song);
+	const auto owned = _ownsCurrent && current.audio() && (current == _expected
+		|| (_switching && current == _transitionFrom));
+	const auto selected = owned ? current.audio()->id
+		: _cursor.index() ? _songs[*_cursor.index()].documentId : _selected.value_or(0);
+	const auto sourceStatus = _status.documentId == selected
+		? _status.sourceStatus : std::nullopt;
+	const auto retry = _status.phase == PlaylistPlaybackPhase::RetryRequired
+		&& (!owned || _status.documentId == selected);
+	const auto problem = _status.problem;
+	const auto expiry = _pausedForExpiry || _expiryResumePending;
+	cancel();
+	_pausedForExpiry = expiry;
+	reorder(mode, selected);
+	const auto admission = _cursor.admission();
+	if (owned && current == player->current(Type::Song)) {
+		const auto resolution = resolutionForCurrent(current);
+		const auto index = PlaylistIndexForDocument(_songs, selected);
+		if (resolution && index && check(admission)
+			&& current == player->current(Type::Song)) {
+			_cache.emplace(*index, *resolution);
+		}
+	}
+	if (!check(admission)) return;
+	if (retry || (!owned && expiry)) {
+		publish(
+			PlaylistPlaybackPhase::RetryRequired,
+			retry ? problem : PlaylistPlaybackProblem::None,
+			sourceStatus);
+	} else if (owned) {
+		publish(
+			PlaylistPlaybackPhase::Playing,
+			PlaylistPlaybackProblem::None,
+			sourceStatus);
+		if (check(admission) && !_pausedForExpiry) prefetch();
+	} else {
+		resolve();
+	}
+}
+
+void PlaylistPlayback::trimCache() {
+	const auto index = _cursor.index();
+	if (!index) return;
+	const auto window = ResolveIndices(
+		_songs.size(),
+		*index,
+		_cursor.direction(),
+		kResolveWindow,
+		_cursor.repeatAll());
+	std::erase_if(_cache, [&](const auto &entry) {
+		return std::find(window.begin(), window.end(), entry.first) == window.end();
+	});
 }
 
 void PlaylistPlayback::resolve() {
@@ -761,15 +981,15 @@ void PlaylistPlayback::resolve() {
 	if (!check(admission)) {
 		return;
 	}
+	if (_automatic) {
+		_cursor.skipUnresolved([&](std::size_t index) { return _cache.contains(index); });
+	}
 	const auto index = _cursor.index();
 	if (!index) {
 		publish(PlaylistPlaybackPhase::Exhausted);
 		return;
 	}
-	std::erase_if(_cache, [&](const auto &entry) {
-		const auto offset = (std::ptrdiff_t(entry.first) - std::ptrdiff_t(*index)) * _cursor.direction();
-		return offset < 0 || offset >= std::ptrdiff_t(kResolveWindow);
-	});
+	trimCache();
 	if (_cache.contains(*index)) {
 		consume();
 		return;
@@ -783,10 +1003,14 @@ void PlaylistPlayback::requestResolution(
 		bool warm) {
 	retireResolver();
 	const auto admission = _cursor.admission();
+	const auto indices = ResolveIndices(
+		_songs.size(),
+		first,
+		_cursor.direction(),
+		count,
+		_cursor.repeatAll());
 	auto batch = std::vector<PlaylistResolveSong>();
-	for (const auto index : ResolveIndices(_songs.size(), first, _cursor.direction(), count)) {
-		batch.push_back(_songs[index]);
-	}
+	for (const auto index : indices) batch.push_back(_songs[index]);
 	if (batch.empty()) return;
 	const auto request = ++_request;
 	const auto weak = weak_from_this();
@@ -795,10 +1019,10 @@ void PlaylistPlayback::requestResolution(
 	_resolver = std::make_unique<DesktopPlaylistResolver>(
 		_session.get(),
 		std::move(batch),
-		[weak, request, first, warm, admission](auto results) {
-			crl::on_main([weak, request, first, warm, admission, results = std::move(results)]() mutable {
+		[weak, request, indices, warm, admission](auto results) {
+			crl::on_main([weak, request, indices, warm, admission, results = std::move(results)]() mutable {
 				if (const auto self = weak.lock()) {
-					if (self->check(admission)) self->resolved(request, first, warm, std::move(results));
+					if (self->check(admission)) self->resolved(request, indices, warm, std::move(results));
 				}
 			});
 		});
@@ -808,15 +1032,16 @@ void PlaylistPlayback::requestResolution(
 void PlaylistPlayback::prefetch() {
 	const auto index = _cursor.index();
 	if (!index || _status.phase != PlaylistPlaybackPhase::Playing) return;
-	std::erase_if(_cache, [&](const auto &entry) {
-		const auto offset = (std::ptrdiff_t(entry.first) - std::ptrdiff_t(*index)) * _cursor.direction();
-		return offset < 0 || offset >= std::ptrdiff_t(kResolveWindow);
-	});
-	for (auto offset = std::size_t(1); offset != kResolveWindow; ++offset) {
-		const auto next = std::ptrdiff_t(*index) + _cursor.direction() * std::ptrdiff_t(offset);
-		if (next < 0 || std::size_t(next) >= _songs.size()) break;
-		if (!_cache.contains(std::size_t(next))) {
-			requestResolution(std::size_t(next), kResolveWindow - offset, true);
+	trimCache();
+	const auto window = ResolveIndices(
+		_songs.size(),
+		*index,
+		_cursor.direction(),
+		kResolveWindow,
+		_cursor.repeatAll());
+	for (auto offset = std::size_t(1); offset < window.size(); ++offset) {
+		if (!_cache.contains(window[offset])) {
+			requestResolution(window[offset], window.size() - offset, true);
 			break;
 		}
 	}
@@ -824,24 +1049,23 @@ void PlaylistPlayback::prefetch() {
 
 void PlaylistPlayback::resolved(
 		uint64_t request,
-		std::size_t first,
+		std::vector<std::size_t> indices,
 		bool warm,
 		std::vector<PlaylistSongResolution> results) {
 	if (request != _request) return;
 	retireResolver();
-	if (results.empty() || results.size() > kResolveWindow) {
+	if (results.empty() || results.size() != indices.size() || results.size() > kResolveWindow) {
 		if (!warm) publish(PlaylistPlaybackPhase::RetryRequired, PlaylistPlaybackProblem::TransientFailure);
 		return;
 	}
 	for (auto offset = std::size_t(0); offset != results.size(); ++offset) {
-		const auto index = std::ptrdiff_t(first) + _cursor.direction() * std::ptrdiff_t(offset);
-		if (index < 0 || std::size_t(index) >= _songs.size()
-			|| results[offset].documentId != _songs[std::size_t(index)].documentId) {
+		const auto index = indices[offset];
+		if (index >= _songs.size() || results[offset].documentId != _songs[index].documentId) {
 			_cache.clear();
 			if (!warm) publish(PlaylistPlaybackPhase::RetryRequired, PlaylistPlaybackProblem::TransientFailure);
 			return;
 		}
-		_cache.insert_or_assign(std::size_t(index), std::move(results[offset]));
+		_cache.insert_or_assign(index, std::move(results[offset]));
 	}
 	if (!warm) consume();
 }
@@ -965,15 +1189,23 @@ bool PlaylistPlayback::owns(const AudioMsgId &current) {
 	return true;
 }
 
+bool PlaylistPlayback::claimsShuffle(const AudioMsgId &current) {
+	return _ownsCurrent && owns(current);
+}
+
 bool PlaylistPlayback::move(int delta, bool autonext) {
-	if (!SupportedModes() || !_loaded || delta == 0) {
+	if (!_loaded || delta == 0) {
 		return false;
 	} else if (autonext && (!_ownsCurrent || _status.phase != PlaylistPlaybackPhase::Playing)) {
 		return false;
 	}
 	_pausedForExpiry = false;
 	cancel(true);
+	_automatic = autonext;
 	_cursor.select(_cursor.position() + (delta > 0 ? 1 : -1), delta > 0 ? 1 : -1);
+	if (_automatic) {
+		_cursor.skipUnresolved([&](std::size_t index) { return _cache.contains(index); });
+	}
 	if (!_cursor.index()) {
 		publish(PlaylistPlaybackPhase::Exhausted);
 		return false;
@@ -990,12 +1222,12 @@ bool PlaylistPlayback::move(int delta, bool autonext) {
 }
 
 bool PlaylistPlayback::available(int delta) const {
-	return !_retired && _loaded && SupportedModes() && _cursor.stepAvailable(delta);
+	return !_retired && _loaded && _cursor.stepAvailable(delta);
 }
 
 void PlaylistPlayback::retry() {
 	const auto keepAlive = shared_from_this();
-	if (!bound() || !SupportedModes()) {
+	if (!bound()) {
 		observe();
 		return;
 	} else if (_status.phase != PlaylistPlaybackPhase::RetryRequired) {
@@ -1117,6 +1349,16 @@ Fn<bool()> NewPlaylistPlayerStreamGuard(AudioMsgId::Type type) {
 
 void RetirePlaylistPlayerStream(AudioMsgId::Type type) {
 	if (type == Type::Song) SongStream.reset();
+}
+
+bool SkipAccountPlaylistShuffle(
+		AudioMsgId::Type type,
+		const AudioMsgId &current,
+		Fn<void()> clear) {
+	const auto active = Active;
+	if (type != Type::Song || !active || !active->claimsShuffle(current)) return false;
+	clear();
+	return true;
 }
 
 bool DeferPlaylistPlayerPlay(const AudioMsgId &audioId, Fn<void()> resume) {

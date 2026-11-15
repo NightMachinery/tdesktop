@@ -1121,6 +1121,9 @@ void Instance::stopAndClear(not_null<Data*> data) {
 }
 
 void Instance::validateShuffleData(not_null<Data*> data) {
+	if (Purple::SkipAccountPlaylistShuffle(data->type, data->current, [&] {
+		data->shuffleData = nullptr;
+	})) return;
 	if (!data->history) {
 		data->shuffleData = nullptr;
 		return;

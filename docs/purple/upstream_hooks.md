@@ -1519,7 +1519,7 @@ no facade covers those yet.
 - The older content-origin hunks of this file are listed under "Import
   content provenance and menu routes".
 
-**`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +71 -0.
+**`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +74 -0.
 - The playback facade immediately follows the file's own header, before the
   timer, saved-playlist adapter and handoff hook includes.
 - `Instance::play` and `stop` delegate Song intent admission before native work.
@@ -1530,6 +1530,11 @@ no facade covers those yet.
   `playStreamed`, `clearStreamed`, `setCurrent` and `emitUpdate`, reject older
   writes after synchronous observers request a successor. The authority and
   deferred request slot live in `purple_playlist_player`; Voice bypasses them.
+- `Instance::validateShuffleData` delegates owned Song suppression to
+  `SkipAccountPlaylistShuffle`. The Purple hook clears the unused stock shuffle
+  pager through a callback only after an actual owned Song or deliberate native
+  handoff claim. Pending unowned Loading/Retry attempts, retired controllers,
+  normal chat and Voice leave the pager alone.
 - `Instance::moveInPlaylist`, `previousAvailable` and `nextAvailable` delegate
   Song navigation to the saved-playlist adapter before stock item/chat lookup.
   Optional handled results preserve an exhausted playlist boundary; Voice
@@ -1814,7 +1819,7 @@ The combined source-relative changes in upstream files are:
 - `core/shortcuts.cpp`: +1 / -0.
 - `core/shortcuts.h`: +1 / -0.
 - `history/view/media/history_view_save_document_action.cpp`: +2 / -0.
-- `media/player/media_player_instance.cpp`: +187 / -7.
+- `media/player/media_player_instance.cpp`: +190 / -7.
 - `media/player/media_player_instance.h`: +1 / -0.
 - `media/player/media_player_widget.cpp`: +19 / -2.
 - `media/view/media_view_overlay_widget.cpp`: +42 / -2.
@@ -1845,3 +1850,10 @@ Expiry resume intent is admitted before the existing native frame check. Its
 one-shot Resume token is consumed at deferred delivery entry, before any native
 publication, so nested user commands cannot inherit it. Both native toggle
 intent and Pause are classified before testing an older revoked frame.
+
+Queue-mode extension: global settings, saved-snapshot order, shuffle permutation,
+repeat wrapping and bounded unavailable traversal live in the Purple player.
+The additional native hook is an early return in validateShuffleData because
+its recursive SharedMediaMergedViewer pages belong to the song's chat, not the
+saved playlist, and would otherwise run unused under global Shuffle. The
+existing ordinary shared-media window is unchanged.

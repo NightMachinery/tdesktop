@@ -8,7 +8,8 @@ sync-step planning. Its contract and focused tests are described in
 
 The Desktop build adds account-local playlist menus and basic saved-order
 playback. The integration is production-compiled; complete host and native/GUI
-qualification remain pending. Advanced queue modes, downloads, sync transport
+qualification remain pending. The private queue-mode proposal below adds global
+order and repeat; queue panels, downloads, sync transport
 and Android parity remain to be implemented.
 Sharing is deferred, and changing the sync chat does not clean records from the
 old chat.
@@ -130,10 +131,10 @@ writes remain errors even when the reloaded snapshot contains part of a change.
 
 The UI delegates Play, song selection, Retry and playback status to the separate
 `purple_playlist_player` adapter. UI lifetime does not own playback. The adapter
-owns source resolution and stock player navigation; unsupported modes are shown
-as problems. This interface requires the player adapter to be integrated along
-with the UI. Full queue modes, retained downloads, sync transport and sharing are
-unfinished. The sync line says local-only rather than claiming a sync succeeded.
+owns source resolution and stock player navigation, including the existing
+global order and repeat controls. This interface requires the player adapter
+along with the UI. Queue panels, retained downloads, sync transport and sharing
+are unfinished. The sync line says local-only rather than claiming a sync succeeded.
 
 The shared settings scope registry makes `menu_item_p`, `keep_downloaded_p` and
 private listening app-wide. Automatic playlist sync is per account; its local
@@ -142,7 +143,7 @@ On/Off/Inherit plus the global default and Remove downloads now. Changing sync
 chat will publish a snapshot without removing old-chat records. Sharing is for a
 later release.
 
-## Basic saved-order playback
+## Saved-order playback and global modes
 
 The basic player adapter snapshots one account's saved order and sources in
 memory, then resolves the selected row before starting the stock message
@@ -154,11 +155,35 @@ flood-wait scheduling remains unchanged. Playing a fallback never relinks or
 writes the saved library.
 
 Next, Previous and automatic end continuation are handled before the stock
-chat queue. Exhaustion stays a handled boundary. Voice playback, Repeat One
-and the stock disable-autoplay option retain their own behavior. Shuffle,
-reverse and Repeat All are refused with a typed status in this first slice;
-they are not implemented playlist modes. Queue panel contents, virtual drag,
-download management, sync and sharing remain follow-ups.
+chat queue. Global order and repeat come from the existing player controls and
+Core::Settings. Normal uses the saved order; Reverse uses its reverse. A song
+selection starts that row first in either order. Play without a selected row
+starts the first row of the chosen order. Shuffle keeps the selected row first,
+or the current song when it belongs to the new snapshot, then randomly orders
+all remaining rows once in memory. With neither a selected nor a current row,
+its first song is random too. The detail box also offers the stock Shuffle
+action and changes the same global order setting.
+
+Repeat None and Repeat One keep non-wrapping manual boundaries. Repeat One
+continues through the stock end hook before automatic stepping. Repeat All
+wraps Next, Previous and automatic stepping, including a one-song queue. A
+complete traversal containing only definitively unavailable songs exhausts
+instead of looping. Exhaustion remains handled and never falls into the chat
+queue. Voice playback and disable-autoplay retain their stock paths.
+
+Changing global order rebuilds the in-memory traversal around the current
+owned song, cancels old resolver admission and clears position-indexed cache.
+It does not restart the native song. Shuffle starts at that current song;
+normal and reverse retain its position in the original snapshot. A pending
+unowned selection is resolved again with fresh admission, except a selection
+paused by timer expiry stays Retry required until an explicit command. Changing
+order alone cannot undo expiry. A retained row already requiring Retry stays
+Retry required; order changes do not silently retry a failed source or stream.
+Repeat changes update wrapping without rewriting the library. Snapshot edits take effect only
+on the next Play. Status document identity and row index continue to refer to
+the original visible snapshot rather than a shuffled traversal position.
+Queue panel contents, virtual drag, download management, sync and sharing
+remain follow-ups.
 
 The status producer and start/retry/stop API capture the selected session,
 account and routing authority. UI/controller destruction does not own ongoing
@@ -258,3 +283,53 @@ its native frame, and obtains a fresh pause frame if that queued resume revoked
 the enclosing one. The timer's own pause consumes a one-shot Pause token first;
 it does not cancel a manual resume requested after expiry. This distinguishes
 actual pause intent without changing the existing Play/Stop tokens.
+
+## Queue-mode candidate qualification
+
+The queue-mode extension is a private source proposal, not native qualification.
+The existing helper fixture gains deterministic order/permutation checks,
+selected-row reverse traversal, wrapped availability, one/empty-song behavior,
+all-unavailable cycle termination and unique bounded wrapped lookahead. Old
+cursor, handoff, timer and token assertions are retained. The same driver also
+syntax-checks the changed stock-box adapter. No new gate is required.
+
+Resolver batches capture their exact traversal indices, including a repeat
+boundary, and validate document identity before caching each result. Foreground
+resolution still requests the selected row first; at most three later rows are
+warmed. Transient failures still require explicit Retry, and sources are never
+relinked. Automatic continuation skips rows whose resolution is still pending
+and uses the next completed result without waiting for a network operation. If
+no completed row remains, it exhausts. Manual selection/Next and explicit Retry
+may resolve a row asynchronously, matching the existing foreground API. Cache
+contents remain bounded to four traversal positions.
+
+A live order change revalidates the actual owned current message against its
+saved primary or fallback source, then keys that completed resolution to the
+new traversal position. This does not replay the native stream or request RPC.
+It retains Repeat All eligibility for a one-song queue, including a mode change
+while expiry-paused followed by ordinary native resume. Missing, changed or
+restricted sources do not gain a completed cache entry.
+
+The native shuffle pager is suppressed only after Purple claims a delivered
+Song or an intentional owned handoff. Expected-id equality during an unowned
+Loading or Retry-required attempt is insufficient. Retired attempts and Voice
+leave stock navigation alone. Its existing chat-history window remains; the extra whole-chat shuffle listing
+would otherwise run even though Purple never uses it. Ordinary chat shuffle and
+Voice retain their stock behavior.
+
+Later validation must compile the changed player, native hook and stock box,
+then run the existing fixture and real queue traces across all order/repeat
+combinations. Native checks must cover selected-first playback, live mode
+changes during held resolutions, actual shuffle randomness and chat-request
+suppression, final/empty/unavailable boundaries, Repeat One and autoplay order,
+and timer expiry followed by manual advance/resume. Helper assertions do not
+prove streaming, global-setting publication or timer coexistence.
+
+The correction fixture tests the actual document-to-traversal mapping helper
+across all order modes and the one-song current-slot contract. Those checks do
+not exercise controller cache repopulation or the native pager. Native regression
+must cover one-song Repeat All through live Normal/Reverse/Shuffle changes and
+expiry pause/resume, plus a larger queue's rekeyed current slot. Separately hold
+an unowned playlist attempt while a chat song plays, enable Shuffle, retire the
+attempt by route change and verify the chat pager/navigation remain intact.
+Owned playlist handoff, no active controller and Voice are comparison cases.

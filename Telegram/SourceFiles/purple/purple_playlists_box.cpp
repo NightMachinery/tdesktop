@@ -2,10 +2,13 @@
 
 #include "base/random.h"
 #include "base/weak_ptr.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "media/media_common.h"
 #include "purple/purple_config.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlists_service.h"
@@ -382,6 +385,12 @@ void PlaylistView::render() {
 		const auto songs = PlaylistVisibleSongIds(playlist);
 		button(tr::lng_purple_playlists_play(), [=] {
 			if (const auto self = weak.get()) self->play();
+		})->setDisabled(songs.empty());
+		button(tr::lng_audio_player_shuffle(), [=] {
+			const auto self = weak.get();
+			if (!self || !self->current() || self->_busy) return;
+			Core::App().settings().setPlayerOrderMode(Media::OrderMode::Shuffle);
+			if (const auto live = weak.get()) live->play();
 		})->setDisabled(songs.empty());
 		_retry = button(tr::lng_purple_playlists_retry(), [=] {
 			const auto self = weak.get();

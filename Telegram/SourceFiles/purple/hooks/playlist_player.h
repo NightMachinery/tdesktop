@@ -52,6 +52,10 @@ private:
 	bool acquire = true);
 [[nodiscard]] Fn<bool()> NewPlaylistPlayerStreamGuard(AudioMsgId::Type type);
 void RetirePlaylistPlayerStream(AudioMsgId::Type type);
+[[nodiscard]] bool SkipAccountPlaylistShuffle(
+	AudioMsgId::Type type,
+	const AudioMsgId &current,
+	Fn<void()> clear);
 [[nodiscard]] bool DeferPlaylistPlayerPlay(
 	const AudioMsgId &audioId,
 	Fn<void()> resume);
