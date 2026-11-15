@@ -131,7 +131,7 @@ void PlaylistManagedCacheTransfer::pump() {
 	}
 	const auto length = std::min<uint64_t>(_buffer.size(), _size - _offset);
 	const auto result = _reader->fill(int64(_offset),
-		bytes::make_span(_buffer).subspan(0, length), &_signals->wake);
+		bytes::make_detached_span(_buffer).subspan(0, length), &_signals->wake);
 	using Fill = Media::Streaming::Reader::FillState;
 	if (result == Fill::Failed) {
 		finish(PlaylistDownloadStatus::IoError);

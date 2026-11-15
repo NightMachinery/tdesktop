@@ -474,6 +474,7 @@ big-file cache. It creates no kept or Downloads file, registers no file location
 and writes no playlist library, backup or local inventory. Source and cache
 passes use 128 KiB buffers on the main thread. A wake-only relay never touches
 readers, devices, sessions or cache; it only schedules the next bounded turn.
+The reader receives a detached writable byte span of its Qt buffer.
 Local file and memory sources retain main-thread device access. Their loader
 bridge safely omits the remote-only downloader attachment optimization, so the
 kept-file path also preserves genuine offline/local reuse.
