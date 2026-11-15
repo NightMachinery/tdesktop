@@ -17,6 +17,14 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'sleep-timer': {
+        'program': 'sleep_timer_cases.cpp',
+        'units': ['purple/purple_sleep_timer_rules.cpp'],
+        'syntax_units': ['purple/purple_sleep_timer.cpp', 'purple/purple_sleep_timer_ui.cpp',
+            'media/player/media_player_instance.cpp', 'media/player/media_player_widget.cpp',
+            'media/view/media_view_overlay_widget.cpp', 'media/view/media_view_pip.cpp'],
+        'frameworks': [],
+    },
     'playlist-player': {
         'program': 'playlist_player_cases.cpp',
         'generated': ['playlist-player-queue.inc'],

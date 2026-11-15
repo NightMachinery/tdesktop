@@ -49,6 +49,11 @@ void PlayAccountPlaylist(
 	std::optional<uint64_t> documentId = std::nullopt);
 void RetryAccountPlaylistPlayback(not_null<Main::Session*> session);
 void StopAccountPlaylistPlayback(not_null<Main::Session*> session);
+void CancelPlaylistStartsForSleepTimer();
+[[nodiscard]] bool ResumeAccountPlaylistAfterSleepTimer(
+	AudioMsgId::Type type,
+	const AudioMsgId &current,
+	bool restart);
 void InvalidatePlaylistPlayback();
 void FinishPlaylistPlayback();
 

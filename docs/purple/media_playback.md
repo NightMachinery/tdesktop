@@ -254,3 +254,61 @@ its version-tag symbol even when the tested rules themselves use no Qt types.
 Player seek button lookup asks Qt for a named QWidget and checks its concrete
 button type with C++ RTTI. AbstractButton has no Q_OBJECT of its own, so Qt's
 typed findChild cannot safely use it as the queried metadata type.
+
+
+## Desktop sleep timer
+
+One device-local, app-instance timer pauses Song, Voice/round, ordinary viewer
+video and PiP through pause-only paths. Calls, recordings, live streams and
+stories are excluded. Presets are 15 minutes, 30 minutes and one hour; custom
+values range from one minute to twelve hours. The generic device preferences
+remember the last choice and custom value, never the active timer.
+
+The stock player bar owns a moon/countdown IconButton and media-player dropdown;
+its width is reserved outside the fading secondary controls so an active timer
+stays visible in a narrow bar. The viewer offers menu rows; PiP obeys the timer
+without an indicator. The unbound `media_sleep_timer` shortcut toggles the last
+choice and refuses to start with no loaded media or no eligible end item.
+
+Timed mode uses an adjusted crl deadline and base::Timer. A queued system-sleep
+check runs after stock clock adjustment. End mode binds the current player and
+item, follows manual changes on that player and preserves same-stream viewer/PiP
+handoff. Losing the owner cancels it. Its end hook precedes repeat and autoplay,
+clears pending resumes and pauses other players. A finished song keeps one
+pending manual advance through the normal queue; voice ends through stock UI.
+
+Expiry never toggles playback, rewinds or restarts it. All delayed call/voice
+resume flags are cleared before any pause. Active buffering stays user-paused.
+The timer turns off before pausing, including reentrant end updates. Manual play
+afterward has no timer. Android implementation, a PiP indicator and longer fades
+remain future work; no auto-restart, shake, episode counting or socket interface
+is included.
+
+Repeated audio slider starts refresh the same pending item without recapturing
+its temporary paused state. Each start rearms only its upcoming native pause
+as temporary; expiry and explicit Play/Pause intent survive later movements.
+
+Seek pause intent belongs to the exact pending audio seek or video stream.
+Expiry consumes held-seek resume intent even if already paused. Release restarts
+at the selected position with pause retained; explicit Play supersedes it.
+Finishing, cancellation, item changes and teardown retire that intent. Explicit
+viewer/PiP Play and Pause synchronize restart intent for later keyboard, numeric
+and chapter seeks. Temporary seek pauses do not count as user Pause.
+
+### Sleep expiry cancels pending playlist starts
+
+The timer controller revokes pre-expiry playlist and queued native start
+admissions before any expiry pause or publication. It then holds a fresh Song
+frame through expiry so the pause can run after the old frame was revoked.
+The native stream, position and end-item pending advance are retained by the
+pause-only path. Already-owned saved order survives cancellation; fresh manual
+Next/Retry/Play can act after expiry without reviving old store or resolver work.
+An already-stopped outgoing handoff row uses explicit fresh owned recovery, while
+ordinary paused-stream resume keeps the existing native resume operation. This
+is a private source candidate with no native or GUI qualification.
+
+The first owned resume command after expiry is admitted against a fresh cursor
+and waits for active Song frames to unwind before invoking the existing native
+resume. This lets explicit Play from an expiry notification survive the remaining
+expiry pauses. A playPause action that requests Pause keeps the stock pause path.
+No stopped-row resolution is used for an ordinary paused-stream resume.

@@ -1752,3 +1752,94 @@ local issued message ids before requesting the existing automatic sync check.
 ## Media auto-reply
 
 `api/api_updates.cpp` forwards actual new-message updates with difference-state facts and final outgoing message IDs to the Purple adapter. The adapter owns eligibility, account fencing, durable reservations and exact native replies.
+
+
+## Desktop sleep timer
+
+`media/player/media_player_instance.cpp` delegates end consumption before repeat
+and playlist movement, gates the voice finish resume, and delegates pending
+manual-song advance in play and playPause. Explicit play and seeking clear that
+pending choice. Its narrow clearSleepTimerResumes extension clears both delayed
+resume flags without changing playback.
+
+`media/player/media_player_widget.cpp` delegates button creation, placement,
+reserved width, visibility and dropdown coexistence to Purple. The timer button
+is outside the fading controls and never covers the title.
+
+`media/view/media_view_overlay_widget.*` and `media_view_pip.*` expose pause-only
+methods and delegate streaming facts, clearing and teardown to Purple. Bound
+identity is document/message plus player kind, with shared-stream identity for
+viewer/PiP handoff. The overlay clears its call-resume flag; PiP has none. These
+methods never call playbackPauseResume.
+
+`core/application.cpp` starts the timer service after the player and finishes it
+before window and media teardown. `core/shortcuts.*` register the unbound command;
+`settings/sections/settings_shortcuts.cpp` adds its stock shortcuts-page row.
+
+Repeated audio startSeeking calls retain the captured same-item drag intent
+and refresh transient ids in Purple. BeginAudioSeek marks every start’s own
+pause as temporary; native seams and all video seek corrections stay the same.
+
+Sleep timer seek correction: Instance startSeeking, pause, play/playPause,
+finishSeeking and cancelSeeking delegate exact-item seek intent to Purple. The
+expiry resume-clearing extension marks only an in-flight matching seek. Viewer
+and PiP progress/finish/toggle hooks delegate stream-bound intent; their pause
+ports consume pausedBySeek before the already-paused guard. Native restart
+algorithms remain unchanged, and explicit user intent supersedes expiry.
+
+## Desktop playlist and timer composition
+
+Song call frames cover ordinary native calls and asynchronous streaming updates
+through their last synchronous publication. Purple owns the frame lease and
+stream delivery token; upstream only obtains guards and checks them before
+continuing native mutations. A retired Song stream cannot deliver a copied
+update into its successor, including replacement by the same document.
+
+The end seam checks the current frame, current item and fresh native end state
+after the update notification, consumes the timer before Repeat One or movement,
+and checks again after timer publication. Explicit admitted Play consumes timer
+intent only after one-shot playlist admission and deferred delivery. Pending
+manual timer advance delegates owned-playlist exhaustion to Purple and does not
+fall through into replay. Voice remains outside Song frame/token authority.
+
+Native seek and pause scopes retain the frame through seek completion and
+resume-flag writes. The timer's same-item held-seek and viewer/PiP intent rules
+are retained. These hooks remain private, uncompiled and unexecuted.
+
+The combined source-relative changes in upstream files are:
+
+- `core/application.cpp`: +3 / -0.
+- `core/shortcuts.cpp`: +1 / -0.
+- `core/shortcuts.h`: +1 / -0.
+- `history/view/media/history_view_save_document_action.cpp`: +2 / -0.
+- `media/player/media_player_instance.cpp`: +187 / -7.
+- `media/player/media_player_instance.h`: +1 / -0.
+- `media/player/media_player_widget.cpp`: +19 / -2.
+- `media/view/media_view_overlay_widget.cpp`: +42 / -2.
+- `media/view/media_view_overlay_widget.h`: +3 / -0.
+- `media/view/media_view_pip.cpp`: +29 / -2.
+- `media/view/media_view_pip.h`: +2 / -0.
+- `settings/sections/settings_shortcuts.cpp`: +1 / -0.
+- `window/window_main_menu.cpp`: +2 / -0.
+
+Sleep expiry revokes pending playlist admission in the Purple timer controller
+before pause or publication, then holds a fresh Song frame. The native Play and
+playPause seams delegate recovery of an expiry-interrupted, already-stopped owned
+row after the end-item manual-advance hook. The normal paused resume remains in
+stock code. Cancellation, queue retention and fresh recovery policy live in
+Purple; no native Stop is introduced by expiry.
+
+The first owned explicit resume after expiry waits behind active Song frames
+using fresh cursor admission, then invokes stock resume. The playPause recovery
+hook is restricted to its Play branch so a user's Pause remains a pause.
+
+A user Pause cancels an admitted but undelivered expiry resume before checking
+its native frame, and obtains a fresh pause frame if that queued resume revoked
+the enclosing one. The timer's own pause consumes a one-shot Pause token first;
+it does not cancel a manual resume requested after expiry. This distinguishes
+actual pause intent without changing the existing Play/Stop tokens.
+
+Expiry resume intent is admitted before the existing native frame check. Its
+one-shot Resume token is consumed at deferred delivery entry, before any native
+publication, so nested user commands cannot inherit it. Both native toggle
+intent and Pause are classified before testing an older revoked frame.

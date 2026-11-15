@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_pip.h"
+#include "purple/purple_sleep_timer.h"
 
 #include "media/streaming/media_streaming_player.h"
 #include "media/streaming/media_streaming_document.h"
@@ -960,7 +961,9 @@ Pip::Pip(
 	}
 }
 
-Pip::~Pip() = default;
+Pip::~Pip() {
+	Purple::ForgetSleepTimerVideo(this, true);
+}
 
 std::shared_ptr<Streaming::Document> Pip::shared() const {
 	return _instance->shared();
@@ -1180,6 +1183,7 @@ void Pip::seekProgress(float64 value) {
 	if (!_lastDurationMs) {
 		return;
 	}
+	Purple::BeginSleepTimerVideoSeek(this, _instance->player().paused());
 
 	_playbackProgress->setValue(value, false);
 
@@ -1208,7 +1212,8 @@ void Pip::seekFinish(float64 value) {
 		crl::time(0),
 		_lastDurationMs);
 	_seekPositionMs = -1;
-	_startPaused = !_pausedBySeek && !_instance->player().finished();
+	_startPaused = Purple::FinishSleepTimerVideoSeek(this,
+		_instance->player().paused(), _instance->player().finished(), _pausedBySeek);
 	restartAtSeekPosition(positionMs);
 }
 
@@ -1671,6 +1676,7 @@ void Pip::handleStreamingUpdate(Streaming::Update &&update) {
 }
 
 void Pip::updatePlaybackState() {
+	sleepTimerUpdate();
 	const auto state = _instance->player().prepareLegacyState();
 	updatePlayPauseResumeState(state);
 	if (state.position == kTimeUnknown
@@ -1728,10 +1734,14 @@ void Pip::updatePlaybackTexts(
 }
 
 void Pip::handleStreamingError(Streaming::Error &&error) {
+	sleepTimerUpdate();
 	_panel.widget()->close();
 }
 
 void Pip::playbackPauseResume() {
+	Purple::SyncSleepTimerVideoIntent(this, _instance->player().paused(),
+		_instance->player().active(), _instance->player().finished(),
+		_startPaused, _pausedBySeek);
 	if (_instance->player().failed()) {
 		_panel.widget()->close();
 	} else if (_instance->player().finished()
@@ -1896,3 +1906,20 @@ void Pip::waitingAnimationCallback() {
 
 } // namespace View
 } // namespace Media
+
+void Media::View::Pip::sleepTimerPause() {
+	if (_instance) {
+		Purple::PreserveSleepTimerVideoSeek(this, _instance->active(),
+			_startPaused, _pausedBySeek);
+	}
+	if (_instance && _instance->active() && !_instance->paused()) {
+		_instance->pause();
+		updatePlaybackState();
+	}
+}
+
+void Media::View::Pip::sleepTimerUpdate() {
+	Purple::ObserveSleepTimerVideo(this, Purple::SleepTimerRules::kPipOwner, _panel.widget(), _data, _context,
+		_instance ? &*_instance : nullptr, false, !_data->isSilentVideo(),
+		[] {}, [=] { sleepTimerPause(); });
+}

@@ -454,6 +454,9 @@ private:
 		std::optional<QPoint> anchor = std::nullopt);
 
 	void updatePlaybackState();
+	void sleepTimerUpdate();
+	void sleepTimerPause();
+	void sleepTimerClearResume();
 	void refreshSystemMediaControls();
 	void finishSystemMediaControls();
 	[[nodiscard]] QImage systemMediaControlsThumbnail() const;

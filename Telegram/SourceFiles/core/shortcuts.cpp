@@ -93,6 +93,7 @@ const auto CommandByName = base::flat_map<QString, Command>{
 	{ u"media_next"_q                    , Command::MediaNext },
 	{ u"media_seek_backward"_q           , Command::MediaSeekBackward },
 	{ u"media_seek_forward"_q            , Command::MediaSeekForward },
+	{ u"media_sleep_timer"_q             , Command::MediaSleepTimer },
 
 	{ u"search"_q                        , Command::Search },
 

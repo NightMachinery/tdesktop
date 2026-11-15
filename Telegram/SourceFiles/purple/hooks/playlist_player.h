@@ -5,7 +5,7 @@
 
 namespace Purple {
 
-enum class PlaylistPlayerIntent { Play, Stop };
+enum class PlaylistPlayerIntent { Play, Stop, Pause, Resume };
 
 class PlaylistPlayerInternalCallGuard final {
 public:
@@ -39,7 +39,19 @@ private:
 
 };
 
-[[nodiscard]] Fn<bool()> PlaylistPlayerCallbackGuard(AudioMsgId::Type type);
+[[nodiscard]] Fn<bool()> PlaylistPlayerCallbackGuard(
+	AudioMsgId::Type type,
+	bool acquire = true);
+[[nodiscard]] bool DeferPlaylistResumeAfterSleepTimer(
+	AudioMsgId::Type type,
+	Fn<void()> resume,
+	bool play = true);
+[[nodiscard]] Fn<bool()> PlaylistPlayerPauseGuard(
+	AudioMsgId::Type type,
+	bool pause = true,
+	bool acquire = true);
+[[nodiscard]] Fn<bool()> NewPlaylistPlayerStreamGuard(AudioMsgId::Type type);
+void RetirePlaylistPlayerStream(AudioMsgId::Type type);
 [[nodiscard]] bool DeferPlaylistPlayerPlay(
 	const AudioMsgId &audioId,
 	Fn<void()> resume);

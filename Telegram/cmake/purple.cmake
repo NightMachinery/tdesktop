@@ -201,6 +201,12 @@ PRIVATE
     purple/purple_media_restart.h
     purple/purple_media_rules.cpp
     purple/purple_media_rules.h
+    purple/purple_sleep_timer.cpp
+    purple/purple_sleep_timer.h
+    purple/purple_sleep_timer_rules.cpp
+    purple/purple_sleep_timer_rules.h
+    purple/purple_sleep_timer_ui.cpp
+    purple/purple_sleep_timer_ui.h
     purple/purple_media_seek.cpp
     purple/purple_media_seek.h
     purple/purple_recording_bin_box.cpp

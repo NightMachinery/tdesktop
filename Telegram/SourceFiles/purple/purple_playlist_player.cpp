@@ -195,7 +195,7 @@ public:
 	struct Frame { uint64_t generation = 0; };
 	[[nodiscard]] std::shared_ptr<Owner> enter();
 	void leave(const std::shared_ptr<Owner> &owner);
-	[[nodiscard]] std::shared_ptr<Frame> begin();
+	[[nodiscard]] std::shared_ptr<Frame> begin(bool force = false);
 	void finish(const std::shared_ptr<Frame> &frame);
 	void cancel(const std::shared_ptr<Owner> &owner);
 	void supersede();
@@ -228,10 +228,10 @@ void PlaylistHandoffState::leave(const std::shared_ptr<Owner> &owner) {
 	_owners.pop_back();
 }
 
-std::shared_ptr<PlaylistHandoffState::Frame> PlaylistHandoffState::begin() {
+std::shared_ptr<PlaylistHandoffState::Frame> PlaylistHandoffState::begin(bool force) {
 	if (_owners.empty() && _frames.empty()) {
 		if (_pending) supersede();
-		return nullptr;
+		if (!force) return nullptr;
 	}
 	auto frame = std::make_shared<Frame>();
 	frame->generation = ++_generation;
@@ -309,6 +309,10 @@ public:
 		std::optional<uint64_t> documentId);
 	void start();
 	void retry();
+	void pauseForExpiry();
+	[[nodiscard]] bool resumeAfterExpiry(const AudioMsgId &current, bool restart);
+	[[nodiscard]] bool deferExpiryResume(Fn<void()> resume);
+	[[nodiscard]] bool cancelExpiryResume();
 	void retire(bool stopOwned, bool immediate = false);
 	[[nodiscard]] bool belongsTo(Main::Session *session) const;
 	[[nodiscard]] bool owns(const AudioMsgId &current);
@@ -361,6 +365,8 @@ private:
 	bool _retired = false;
 	bool _ownsCurrent = false;
 	bool _switching = false;
+	bool _pausedForExpiry = false;
+	bool _expiryResumePending = false;
 	rpl::lifetime _lifetime;
 
 };
@@ -370,6 +376,7 @@ rpl::event_stream<> Changes;
 bool PlayerFinished = false;
 uint64_t StartGeneration = 0;
 const auto Handoffs = std::make_shared<PlaylistHandoffState>();
+std::shared_ptr<int> SongStream;
 const auto InternalCalls = std::make_shared<PlaylistInternalCalls>();
 
 void ScheduleHandoffDispatch(const std::shared_ptr<PlaylistHandoffState> &state) {
@@ -500,11 +507,97 @@ void PlaylistPlayback::retireResolver() {
 }
 
 void PlaylistPlayback::cancel(bool keepCache) {
+	_expiryResumePending = false;
 	if (_cancelHandoff) _cancelHandoff();
 	_cursor.cancel();
 	++_request;
 	retireResolver();
 	if (!keepCache) _cache.clear();
+}
+
+void PlaylistPlayback::pauseForExpiry() {
+	if (_retired) return;
+	_pausedForExpiry = true;
+	const auto current = Media::Player::instance()->current(Type::Song);
+	const auto owned = _ownsCurrent && (current == _expected
+		|| (_switching && current == _transitionFrom));
+	const auto playing = owned && current.audio()
+		? std::find_if(_songs.begin(), _songs.end(), [&](const auto &song) {
+			return song.documentId == current.audio()->id;
+		}) : _songs.end();
+	cancel(true);
+	if (playing != _songs.end()) {
+		_cursor.select(playing - _songs.begin(), 1);
+	}
+	if (_status.phase == PlaylistPlaybackPhase::Loading
+		|| _status.phase == PlaylistPlaybackPhase::Resolving) {
+		_status.phase = playing != _songs.end()
+			? PlaylistPlaybackPhase::Playing
+			: PlaylistPlaybackPhase::RetryRequired;
+		_status.problem = PlaylistPlaybackProblem::None;
+		_status.sourceStatus = std::nullopt;
+	}
+	_status.index = _cursor.index();
+	_status.documentId = _cursor.index() ? _songs[*_cursor.index()].documentId : 0;
+	const auto weak = weak_from_this();
+	const auto admission = _cursor.admission();
+	crl::on_main([weak, admission] {
+		if (const auto self = weak.lock()) {
+			if (self->check(admission)) Changes.fire({});
+		}
+	});
+}
+
+bool PlaylistPlayback::resumeAfterExpiry(const AudioMsgId &current, bool restart) {
+	if (!_pausedForExpiry || !_loaded || !_ownsCurrent) return false;
+	if (!owns(current)) return false;
+	_pausedForExpiry = false;
+	cancel(true);
+	if (!restart) {
+		Changes.fire({});
+		return false;
+	}
+	_expiryResumePending = true;
+	resolve();
+	return true;
+}
+
+bool PlaylistPlayback::deferExpiryResume(Fn<void()> resume) {
+	if (!Handoffs->activeCall()) return false;
+	if ((!_pausedForExpiry && !_expiryResumePending) || !_loaded || !_ownsCurrent) {
+		return false;
+	}
+	if (!owns(Media::Player::instance()->current(Type::Song))) return false;
+	cancel(true);
+	_pausedForExpiry = true;
+	_expiryResumePending = true;
+	const auto weak = weak_from_this();
+	const auto admission = _cursor.admission();
+	Handoffs->queue([weak, admission, resume = std::move(resume)] {
+		if (const auto self = weak.lock()) {
+			const auto player = Media::Player::instance();
+			if (self->check(admission) && self->owns(player->current(Type::Song))) {
+				self->_expiryResumePending = false;
+				const auto internal = PlaylistPlayerInternalCallGuard(
+					Type::Song, PlaylistPlayerIntent::Resume);
+				resume();
+			}
+		}
+	});
+	ScheduleHandoffDispatch(Handoffs);
+	return true;
+}
+
+bool PlaylistPlayback::cancelExpiryResume() {
+	if (!_expiryResumePending) return false;
+	cancel(true);
+	_pausedForExpiry = true;
+	if (_status.phase == PlaylistPlaybackPhase::Resolving) {
+		_status.phase = PlaylistPlaybackPhase::Playing;
+		_status.problem = PlaylistPlaybackProblem::None;
+		_status.sourceStatus = std::nullopt;
+	}
+	return true;
 }
 
 void PlaylistPlayback::retire(bool stopOwned, bool immediate) {
@@ -844,6 +937,7 @@ void PlaylistPlayback::play(const PlaylistSongResolution &resolution) {
 			PlaylistPlaybackPhase::RetryRequired,
 			PlaylistPlaybackProblem::PlaybackRejected);
 	} else {
+		_expiryResumePending = false;
 		publish(
 			PlaylistPlaybackPhase::Playing,
 			PlaylistPlaybackProblem::None,
@@ -877,6 +971,7 @@ bool PlaylistPlayback::move(int delta, bool autonext) {
 	} else if (autonext && (!_ownsCurrent || _status.phase != PlaylistPlaybackPhase::Playing)) {
 		return false;
 	}
+	_pausedForExpiry = false;
 	cancel(true);
 	_cursor.select(_cursor.position() + (delta > 0 ? 1 : -1), delta > 0 ? 1 : -1);
 	if (!_cursor.index()) {
@@ -906,6 +1001,7 @@ void PlaylistPlayback::retry() {
 	} else if (_status.phase != PlaylistPlaybackPhase::RetryRequired) {
 		return;
 	}
+	_pausedForExpiry = false;
 	cancel();
 	if (!_loaded) load();
 	else resolve();
@@ -954,7 +1050,7 @@ PlaylistPlayerCallGuard::PlaylistPlayerCallGuard(AudioMsgId::Type type) {
 		return;
 	}
 	const auto state = Handoffs;
-	const auto frame = state->begin();
+	const auto frame = state->begin(true);
 	_current = state->guard(frame);
 	_finish = [state, frame] {
 		state->finish(frame);
@@ -970,10 +1066,57 @@ bool PlaylistPlayerCallGuard::current() const {
 	return _current();
 }
 
-Fn<bool()> PlaylistPlayerCallbackGuard(AudioMsgId::Type type) {
-	return type == AudioMsgId::Type::Song
-		? Handoffs->callback()
-		: Fn<bool()>([] { return true; });
+Fn<bool()> PlaylistPlayerCallbackGuard(
+		AudioMsgId::Type type,
+		bool acquire) {
+	if (type != Type::Song) return [] { return true; };
+	const auto state = Handoffs;
+	if (state->activeCall()) return state->callback();
+	if (!acquire) return [] { return true; };
+	const auto frame = state->begin(true);
+	const auto current = state->guard(frame);
+	const auto lease = std::shared_ptr<int>(new int(0), [state, frame](int *value) {
+		delete value;
+		state->finish(frame);
+		ScheduleHandoffDispatch(state);
+	});
+	return [current, lease] { return lease && current(); };
+}
+
+bool DeferPlaylistResumeAfterSleepTimer(
+		AudioMsgId::Type type,
+		Fn<void()> resume,
+		bool play) {
+	if (type != Type::Song || InternalCalls->take(PlaylistPlayerIntent::Resume)) return false;
+	const auto active = Active;
+	return play && active && active->deferExpiryResume(std::move(resume));
+}
+
+Fn<bool()> PlaylistPlayerPauseGuard(
+		AudioMsgId::Type type,
+		bool pause,
+		bool acquire) {
+	if (pause && type == Type::Song && !InternalCalls->take(PlaylistPlayerIntent::Pause)) {
+		const auto active = Active;
+		if (active && active->cancelExpiryResume()) {
+			Handoffs->supersede();
+			const auto lease = std::make_shared<PlaylistPlayerCallGuard>(type);
+			Changes.fire({});
+			return [lease] { return lease->current(); };
+		}
+	}
+	return PlaylistPlayerCallbackGuard(type, acquire);
+}
+
+Fn<bool()> NewPlaylistPlayerStreamGuard(AudioMsgId::Type type) {
+	if (type != Type::Song) return [] { return true; };
+	SongStream = std::make_shared<int>(0);
+	const auto weak = std::weak_ptr<int>(SongStream);
+	return [weak] { return !weak.expired(); };
+}
+
+void RetirePlaylistPlayerStream(AudioMsgId::Type type) {
+	if (type == Type::Song) SongStream.reset();
 }
 
 bool DeferPlaylistPlayerPlay(const AudioMsgId &audioId, Fn<void()> resume) {
@@ -1030,6 +1173,23 @@ void StopAccountPlaylistPlayback(not_null<Main::Session*> session) {
 	}
 }
 
+bool ResumeAccountPlaylistAfterSleepTimer(
+		AudioMsgId::Type type,
+		const AudioMsgId &current,
+		bool restart) {
+	RequireMainThread();
+	const auto active = Active;
+	return type == Type::Song && active && active->resumeAfterExpiry(current, restart);
+}
+
+void CancelPlaylistStartsForSleepTimer() {
+	RequireMainThread();
+	++StartGeneration;
+	Handoffs->supersede();
+	const auto active = Active;
+	if (active) active->pauseForExpiry();
+}
+
 void InvalidatePlaylistPlayback() {
 	RequireMainThread();
 	++StartGeneration;
@@ -1040,6 +1200,7 @@ void InvalidatePlaylistPlayback() {
 void FinishPlaylistPlayback() {
 	RequireMainThread();
 	PlayerFinished = true;
+	SongStream.reset();
 	Handoffs->supersede();
 	++StartGeneration;
 	const auto active = Active;

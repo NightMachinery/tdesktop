@@ -213,6 +213,8 @@ private:
 	void saveGeometry();
 
 	void updatePlaybackState();
+	void sleepTimerUpdate();
+	void sleepTimerPause();
 	void updatePowerSaveBlocker(const Player::TrackState &state);
 	void updatePlayPauseResumeState(const Player::TrackState &state);
 	void restartAtSeekPosition(crl::time position);

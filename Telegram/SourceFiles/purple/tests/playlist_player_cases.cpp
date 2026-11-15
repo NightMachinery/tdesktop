@@ -119,6 +119,14 @@ int main() {
 	}
 	{
 		const auto state = std::make_shared<PlaylistHandoffState>();
+		const auto forced = state->begin(true);
+		const auto asynchronous = state->guard(forced);
+		expect(forced && asynchronous(), "an unowned async Song callback has a frame");
+		state->queue([] {});
+		expect(!asynchronous() && !state->take(),
+			"a successor revokes an async end callback before timer consumption");
+		state->finish(forced);
+		state->supersede();
 		const auto normal = state->begin();
 		expect(!normal && state->guard(normal)(),
 			"ordinary stock playback outside playlist handoff is unchanged");
@@ -200,6 +208,95 @@ int main() {
 			"internal stop authorization is also consumed before callbacks");
 		calls.leave(stop);
 		calls.leave(adapter);
+	}
+	{
+		auto loading = PlaylistCursor();
+		loading.reset(0, 0);
+		const auto oldStore = loading.admission();
+		loading.cancel();
+		expect(!oldStore(), "expiry revokes the held Loading store admission");
+		const auto afterExpiry = loading.admission();
+		expect(afterExpiry(), "expiry cancellation leaves authority available for a fresh command");
+		loading.reset(3, 0);
+		expect(!oldStore(), "an explicit new load cannot revive the expired store reply");
+	}
+	{
+		auto cursor = PlaylistCursor();
+		cursor.reset(3, 0);
+		const auto initialResolve = cursor.admission();
+		cursor.cancel();
+		expect(!initialResolve() && cursor.index() == std::optional<std::size_t>(0),
+			"expiry rejects initial resolution without discarding its saved selection");
+		const auto retry = cursor.admission();
+		expect(retry() && !initialResolve(), "an explicit Retry has fresh admission only");
+		cursor.select(1, 1);
+		const auto manualNext = cursor.admission();
+		cursor.cancel();
+		cursor.select(0, 1);
+		expect(!manualNext() && cursor.index() == std::optional<std::size_t>(0),
+			"expiry cancels pending Next and restores the still-loaded owned song");
+		cursor.select(cursor.position() + 1, 1);
+		const auto nextAfterExpiry = cursor.admission();
+		expect(nextAfterExpiry() && !manualNext()
+			&& cursor.index() == std::optional<std::size_t>(1),
+			"explicit Next after expiry selects the canceled successor with fresh authority");
+	}
+	{
+		const auto state = std::make_shared<PlaylistHandoffState>();
+		const auto owner = state->enter();
+		const auto oldFrame = state->begin();
+		const auto oldNative = state->guard(oldFrame);
+		auto oldPlayed = false;
+		state->queue([&] { oldPlayed = true; });
+		state->supersede();
+		const auto expiryFrame = state->begin(true);
+		expect(!oldNative() && state->guard(expiryFrame)(),
+			"expiry revokes the suspended native call but gives pause its own valid frame");
+		expect(!state->take() && !oldPlayed, "expiry drops the pre-expiry queued start");
+		auto newPlayed = false;
+		state->queue([&] { newPlayed = true; });
+		state->finish(expiryFrame);
+		state->finish(oldFrame);
+		state->leave(owner);
+		auto fresh = state->take();
+		if (fresh) fresh();
+		expect(newPlayed && !oldPlayed,
+			"a command issued after expiry survives until all native frames unwind");
+	}
+	{
+		auto cursor = PlaylistCursor();
+		cursor.reset(2, 1);
+		const auto oldAdmission = cursor.admission();
+		const auto state = std::make_shared<PlaylistHandoffState>();
+		auto played = false;
+		state->queue([&] { if (oldAdmission()) played = true; });
+		auto held = state->take();
+		cursor.cancel();
+		state->supersede();
+		if (held) held();
+		expect(!played && !oldAdmission(),
+			"expiry rejects an adapter start already taken from deferred delivery");
+	}
+	{
+		auto calls = PlaylistInternalCalls();
+		const auto pause = calls.enter(PlaylistPlayerIntent::Pause);
+		expect(!calls.take(PlaylistPlayerIntent::Play),
+			"expiry Pause cannot authorize a Play callback");
+		expect(calls.take(PlaylistPlayerIntent::Pause)
+			&& !calls.take(PlaylistPlayerIntent::Pause),
+			"expiry Pause authorization is consumed before synchronous user Pause");
+		calls.leave(pause);
+	}
+	{
+		auto calls = PlaylistInternalCalls();
+		const auto resume = calls.enter(PlaylistPlayerIntent::Resume);
+		expect(calls.take(PlaylistPlayerIntent::Resume)
+			&& !calls.take(PlaylistPlayerIntent::Resume),
+			"deferred resume consumes its exact authorization before nested manual commands");
+		expect(!calls.take(PlaylistPlayerIntent::Play)
+			&& !calls.take(PlaylistPlayerIntent::Pause),
+			"a resume delivery never authorizes an unrelated Play or Pause");
+		calls.leave(resume);
 	}
 	std::cout << "PLAYLIST_PLAYER_CHECKS=" << checks << " FAILURES=" << failures << '\n';
 	return failures ? 1 : 0;

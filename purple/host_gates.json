@@ -39,7 +39,8 @@
       "playlists-store": "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp",
       "playlists-service": "Telegram/SourceFiles/purple/tests/playlists_service_cases.cpp",
       "playlists-resolver": "Telegram/SourceFiles/purple/tests/playlists_resolver_cases.cpp",
-      "playlist-player": "Telegram/SourceFiles/purple/tests/playlist_player_cases.cpp"
+      "playlist-player": "Telegram/SourceFiles/purple/tests/playlist_player_cases.cpp",
+      "sleep-timer": "Telegram/SourceFiles/purple/tests/sleep_timer_cases.cpp"
     }
   },
   "gates": [
@@ -913,6 +914,22 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/playlist_player_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-sleep-timer",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "sleep-timer"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/sleep_timer_cases.cpp"
       ]
     }
   ]

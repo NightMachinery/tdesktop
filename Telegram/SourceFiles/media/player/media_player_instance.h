@@ -81,6 +81,7 @@ public:
 
 	void play(AudioMsgId::Type type);
 	void pause(AudioMsgId::Type type);
+	void clearSleepTimerResumes();
 	void stop(AudioMsgId::Type type, bool asFinished = false);
 	void playPause(AudioMsgId::Type type);
 	bool next(AudioMsgId::Type type);

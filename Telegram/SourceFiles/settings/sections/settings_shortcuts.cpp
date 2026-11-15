@@ -133,6 +133,7 @@ struct Labeled {
 		{ C::MediaNext, tr::lng_shortcuts_media_next() },
 		{ C::MediaSeekBackward, tr::lng_purple_shortcuts_seek_backward() },
 		{ C::MediaSeekForward, tr::lng_purple_shortcuts_seek_forward() },
+		{ C::MediaSleepTimer, tr::lng_purple_sleep_title() },
 	};
 }
 

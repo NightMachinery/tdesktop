@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_widget.h"
+#include "purple/purple_sleep_timer_ui.h"
 #include "purple/hooks/media_recording.h"
 
 #include "platform/platform_specific.h"
@@ -229,6 +230,11 @@ Widget::Widget(
 	_speedController->setOtherDropdownCheck(otherDropdownCheck);
 
 	Purple::DecoratePlayerSeek(rightControls(), [=] { return _type; });
+	Purple::DecorateSleepTimer(this, _orderMenuParent, _controller->uiShow(),
+		[=] { updateControlsGeometry(); updateLabelsGeometry(); },
+		[=](bool over) { markOver(over); }, otherDropdownCheck);
+	hideDropdownsOn(Purple::SleepTimerControl(this));
+	hidePlaylistOn(Purple::SleepTimerControl(this));
 	setType(AudioMsgId::Type::Song);
 	_playPause->finishTransform();
 }
@@ -257,12 +263,14 @@ bool Widget::overDropdownControl(QPoint globalPosition) const {
 			&& control->rect().contains(
 				control->mapFromGlobal(globalPosition));
 	};
-	return over(_volumeToggle)
+	return Purple::OverSleepTimerDropdown(this, globalPosition)
+		|| over(_volumeToggle)
 		|| over(_orderToggle)
 		|| over(_speedToggle);
 }
 
 void Widget::hideDropdowns(not_null<Ui::RpWidget*> except) {
+	Purple::HideSleepTimerDropdown(this, except);
 	if (except.get() != _volumeToggle.data()) {
 		_volume->hideFast();
 	}
@@ -344,6 +352,7 @@ void Widget::showShadowAndDropdowns() {
 		_volumeHidden = false;
 		_volume->show();
 	}
+	Purple::SuspendSleepTimerDropdown(this, false);
 	_speedController->showBack();
 	_orderController->showBack();
 }
@@ -361,6 +370,7 @@ void Widget::updateDropdownsGeometry() {
 
 	_orderController->updateDropdownGeometry();
 	_speedController->updateDropdownGeometry();
+	Purple::UpdateSleepTimerDropdown(this);
 }
 
 void Widget::hideShadowAndDropdowns() {
@@ -370,6 +380,7 @@ void Widget::hideShadowAndDropdowns() {
 		_volumeHidden = true;
 		_volume->hide();
 	}
+	Purple::SuspendSleepTimerDropdown(this, true);
 	_speedController->hideTemporarily();
 	_orderController->hideTemporarily();
 }
@@ -415,6 +426,7 @@ void Widget::resizeEvent(QResizeEvent *e) {
 
 void Widget::updateControlsGeometry() {
 	_close->moveToRight(st::mediaPlayerCloseRight, st::mediaPlayerPlayTop);
+	Purple::PlaceSleepTimer(this, st::mediaPlayerCloseRight + _close->width(), st::mediaPlayerPlayTop);
 	auto right = 0;
 	if (hasPlaybackSpeedControl()) {
 		_speedToggle->moveToRight(right, 0); right += _speedToggle->width();
@@ -444,11 +456,15 @@ void Widget::updateControlsWrapGeometry() {
 	const auto controls = getTimeRight() + _timeLabel->width() + fade;
 	rightControls()->resize(controls, _repeatToggle->height());
 	_rightControls->move(
-		width() - st::mediaPlayerCloseRight - _close->width() - controls,
+		width() - st::mediaPlayerCloseRight - _close->width()
+			- Purple::SleepTimerButtonWidth(this) - controls,
 		st::mediaPlayerPlayTop);
 }
 
 void Widget::updateControlsWrapVisibility() {
+	Purple::UpdateSleepTimerVisibility(this, _over || !_narrow);
+	updateControlsGeometry();
+	updateLabelsGeometry();
 	_rightControls->toggle(
 		_over || !_narrow,
 		isHidden() ? anim::type::instant : anim::type::normal);
@@ -586,6 +602,7 @@ int Widget::getNameLeft() const {
 int Widget::getNameRight() const {
 	return st::mediaPlayerCloseRight
 		+ _close->width()
+		+ Purple::SleepTimerButtonWidth(this)
 		+ st::mediaPlayerPadding;
 }
 

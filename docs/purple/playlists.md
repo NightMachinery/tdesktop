@@ -212,3 +212,45 @@ Repeat One consume a one-shot internal authorization at the same entry hook.
 Synchronous subscribers cannot inherit that already-consumed authorization.
 Voice bypasses this Song policy, and the existing autoplay decision order stays
 in stock code. These intent corrections remain uncompiled and unexecuted.
+
+## Sleep timer coexistence
+
+The timer consumes a matching ended item before repeat or automatic movement.
+A later manual Play advances the owned saved-order playlist once. Exhaustion
+stays exhausted; ordinary chat playback retains the timer's existing fallback.
+Song callback scopes defer a synchronous successor until native mutation ends,
+and a stream delivery token rejects retired callbacks. Guard checks after end
+notification and timer publication prevent the old frame from consuming or
+clearing the successor. Held seek intent remains item-bound; timer expiry blocks
+automatic resume while explicit Play can resume. This composition has only static
+review and still requires production compilation and real streaming traces.
+
+## Sleep expiry and pending playback
+
+Before sleep expiry publishes or pauses, Purple cancels the playlist cursor and
+resolver admissions, increments the ordinary queued-start generation and drops
+queued native handoffs. Late store replies, resolution replies and skip/prefetch
+continuations cannot authorize playback. The controller retains its saved songs
+and completed cache entries. Pending owned Next returns to the row actually
+loaded; an initial pending selection becomes Retry required. Status notification
+is deferred and admitted against the new cursor generation.
+
+Expiry does not call native Stop or retire the stream delivery token. Normal
+paused-stream Play resumes natively. If a canceled in-flight handoff had already
+stopped the outgoing owned stream, explicit Play can resolve its retained row
+with fresh admission instead of losing the queue through ordinary external Play.
+The end-item manual-advance seam runs first. Explicit Next or Retry after expiry
+creates fresh cursor authority; earlier callbacks remain revoked. These joined
+expiry and player paths still require native verification.
+
+The first owned resume command after expiry is admitted against a fresh cursor
+and waits for active Song frames to unwind before invoking the existing native
+resume. This lets explicit Play from an expiry notification survive the remaining
+expiry pauses. A playPause action that requests Pause keeps the stock pause path.
+No stopped-row resolution is used for an ordinary paused-stream resume.
+
+A user Pause cancels an admitted but undelivered expiry resume before checking
+its native frame, and obtains a fresh pause frame if that queued resume revoked
+the enclosing one. The timer's own pause consumes a one-shot Pause token first;
+it does not cancel a manual resume requested after expiry. This distinguishes
+actual pause intent without changing the existing Play/Stop tokens.

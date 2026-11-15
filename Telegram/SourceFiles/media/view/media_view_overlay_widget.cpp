@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_overlay_widget.h"
+#include "purple/purple_sleep_timer.h"
+#include "purple/purple_sleep_timer_ui.h"
 
 #include "purple/purple_copy.h"
 #include "apiwrap.h"
@@ -1600,6 +1602,7 @@ void OverlayWidget::clearStreaming(bool savePosition) {
 	}
 	_fullScreenVideo = false;
 	_streamed = nullptr;
+	sleepTimerUpdate();
 }
 
 void OverlayWidget::documentUpdated(not_null<DocumentData*> document) {
@@ -2231,6 +2234,7 @@ void OverlayWidget::refreshPollVotersWidgetGeometry() {
 
 void OverlayWidget::fillContextMenuActions(
 		const Ui::Menu::MenuCallback &addAction) {
+	Purple::AddSleepTimerViewerActions(addAction, uiShow(), this);
 	if (_message && _message->isSponsored()) {
 		if (const auto window = findWindow()) {
 			const auto show = window->uiShow();
@@ -3030,6 +3034,7 @@ void OverlayWidget::clearSession() {
 }
 
 OverlayWidget::~OverlayWidget() {
+	Purple::ForgetSleepTimerVideo(this, true);
 	clearSession();
 
 	// Otherwise dropdownHidden() may be called from the destructor.
@@ -3072,6 +3077,7 @@ void OverlayWidget::assignMediaPointer(DocumentData *document) {
 }
 
 void OverlayWidget::assignMediaPointer(not_null<PhotoData*> photo) {
+	Purple::ForgetSleepTimerVideo(this, true);
 	_savePhotoVideoWhenLoaded = SavePhotoVideo::None;
 	_chosenQuality = nullptr;
 	_streamedQualityChangeFrame = QImage();
@@ -3095,6 +3101,7 @@ void OverlayWidget::assignMediaPointer(not_null<PhotoData*> photo) {
 
 void OverlayWidget::assignMediaPointer(
 		std::shared_ptr<Data::GroupCall> call) {
+	Purple::ForgetSleepTimerVideo(this, true);
 	_savePhotoVideoWhenLoaded = SavePhotoVideo::None;
 	_chosenQuality = nullptr;
 	_streamedQualityChangeFrame = QImage();
@@ -3153,6 +3160,7 @@ void OverlayWidget::showSaveMsgFile() {
 }
 
 void OverlayWidget::close() {
+	Purple::ForgetSleepTimerVideo(this, true);
 	if (isHidden()) {
 		return;
 	}
@@ -5046,6 +5054,7 @@ bool OverlayWidget::initStreaming(const StartStreaming &startStreaming) {
 		&& _pip
 		&& (_pip->wrapped.shared().get()
 			== _streamed->instance.shared().get());
+	if (continuing) sleepTimerUpdate();
 	if (startStreaming.continueStreaming) {
 		_pip = nullptr;
 	}
@@ -5328,6 +5337,7 @@ void OverlayWidget::handleStreamingUpdate(Streaming::Update &&update) {
 }
 
 void OverlayWidget::handleStreamingError(Streaming::Error &&error) {
+	sleepTimerUpdate();
 	Expects(_document || _photo);
 
 	if (error == Streaming::Error::NotStreamable) {
@@ -5538,6 +5548,9 @@ void OverlayWidget::playbackControlsRotate() {
 
 void OverlayWidget::playbackPauseResume() {
 	Expects(_streamed != nullptr);
+	Purple::SyncSleepTimerVideoIntent(this, _streamed->instance.player().paused(),
+		_streamed->instance.player().active(), _streamed->instance.player().finished(),
+		_streamingStartPaused, _streamed->pausedBySeek);
 
 	_streamed->resumeOnCallEnd = false;
 	if (_streamed->instance.player().failed()) {
@@ -5659,6 +5672,7 @@ void OverlayWidget::restartAtSeekPosition(crl::time position) {
 
 void OverlayWidget::playbackControlsSeekProgress(crl::time position) {
 	Expects(_streamed != nullptr);
+	Purple::BeginSleepTimerVideoSeek(this, _streamed->instance.player().paused());
 
 	if (!_streamed->instance.player().paused()
 		&& !_streamed->instance.player().finished()) {
@@ -5670,8 +5684,9 @@ void OverlayWidget::playbackControlsSeekProgress(crl::time position) {
 void OverlayWidget::playbackControlsSeekFinished(crl::time position) {
 	Expects(_streamed != nullptr);
 
-	_streamingStartPaused = !_streamed->pausedBySeek
-		&& !_streamed->instance.player().finished();
+	_streamingStartPaused = Purple::FinishSleepTimerVideoSeek(this,
+		_streamed->instance.player().paused(), _streamed->instance.player().finished(),
+		_streamed->pausedBySeek);
 	restartAtSeekPosition(position);
 	activateControls();
 }
@@ -6073,6 +6088,7 @@ void OverlayWidget::playbackPauseMusic() {
 
 void OverlayWidget::updatePlaybackState() {
 	Expects(_streamed != nullptr);
+	sleepTimerUpdate();
 
 	refreshSystemMediaControls();
 	if (!_streamed->controls && !_stories) {
@@ -6203,6 +6219,8 @@ void OverlayWidget::smtcPause() {
 	if (!_streamed) {
 		return;
 	}
+	Purple::SetSleepTimerVideoPlaybackIntent(this, true,
+		_streamingStartPaused, _streamed->pausedBySeek);
 	const auto &player = _streamed->instance.player();
 	if (!player.paused() && !player.finished() && player.active()) {
 		playbackPauseResume();
@@ -9082,3 +9100,25 @@ float64 OverlayWidget::overLevel(Over control) const {
 
 } // namespace View
 } // namespace Media
+
+void Media::View::OverlayWidget::sleepTimerClearResume() {
+	if (_streamed) _streamed->resumeOnCallEnd = false;
+}
+
+void Media::View::OverlayWidget::sleepTimerPause() {
+	if (_streamed) {
+		Purple::PreserveSleepTimerVideoSeek(this, _streamed->instance.active(),
+			_streamingStartPaused, _streamed->pausedBySeek);
+	}
+	if (_streamed && _streamed->instance.active() && !_streamed->instance.paused()) {
+		_streamed->instance.pause();
+		updatePlaybackState();
+	}
+}
+
+void Media::View::OverlayWidget::sleepTimerUpdate() {
+	Purple::ObserveSleepTimerVideo(this, Purple::SleepTimerRules::kViewerOwner, _widget.get(), _document, _message,
+		_streamed ? &_streamed->instance : nullptr, bool(_stories) || bool(_videoStream),
+		_streamed && _streamed->withSound,
+		[=] { sleepTimerClearResume(); }, [=] { sleepTimerPause(); });
+}

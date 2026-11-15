@@ -30,6 +30,7 @@ enum class Command {
 	MediaNext,
 	MediaSeekBackward,
 	MediaSeekForward,
+	MediaSleepTimer,
 
 	Search,
 

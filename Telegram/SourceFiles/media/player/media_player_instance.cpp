@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_instance.h"
+#include "purple/purple_sleep_timer.h"
 #include "purple/hooks/media_playback.h"
 #include "purple/hooks/playlist_player.h"
 #include "purple/purple_playlist_player.h"
@@ -376,6 +377,7 @@ void Instance::clearStreamed(not_null<Data*> data, bool savePosition) {
 	const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
 	if (!current()) return;
 	data->streamed->clearing = true;
+	Purple::RetirePlaylistPlayerStream(data->type);
 	if (savePosition) {
 		SaveLastPlaybackPosition(
 			data->current.audio(),
@@ -931,14 +933,31 @@ not_null<Instance*> instance() {
 }
 
 void Instance::play(AudioMsgId::Type type) {
+	if (Purple::DeferPlaylistResumeAfterSleepTimer(type, [=] { play(type); })) return;
+	const auto current = Purple::PlaylistPlayerCallbackGuard(
+		type, !IsStopped(getState(type).state));
+	if (!current()) return;
 	if (const auto data = getData(type)) {
+		Purple::SleepTimerAudioPlaybackIntent(data->current, false);
+		if (Purple::HandleSleepTimerAdvance(data->current, [&] {
+			return moveInPlaylist(data, 1, false);
+		})) {
+			return;
+		}
+		if (!current()) return;
+		if (Purple::ResumeAccountPlaylistAfterSleepTimer(
+				type, data->current, IsStopped(getState(type).state))) return;
+		if (!current()) return;
 		if (!data->streamed || IsStopped(getState(type).state)) {
 			play(data->current);
+			if (!current()) return;
 		} else {
 			if (data->streamed->instance.active()) {
 				data->streamed->instance.resume();
+				if (!current()) return;
 			}
 			emitUpdate(type);
+			if (!current()) return;
 		}
 		data->resumeOnCallEnd = false;
 		data->resumeOnVoiceEnd = false;
@@ -960,6 +979,8 @@ void Instance::play(
 		return;
 	}
 	const auto call = Purple::PlaylistPlayerCallGuard(audioId.type());
+	Purple::DropSleepTimerAdvance(audioId.type());
+	Purple::SleepTimerAudioPlaybackIntent(audioId, false);
 	_pendingContext = context;
 	_pendingContextFor = audioId;
 	if (document->isAudioFile()
@@ -1013,11 +1034,12 @@ void Instance::playStreamed(
 	data->streamed->instance.lockPlayer();
 	if (!current()) return;
 
+	const auto source = Purple::NewPlaylistPlayerStreamGuard(audioId.type());
 	data->streamed->instance.player().updates(
 	) | rpl::on_next_error([=](Streaming::Update &&update) {
-		handleStreamingUpdate(data, std::move(update));
+		if (source() && data->streamed) handleStreamingUpdate(data, std::move(update));
 	}, [=](Streaming::Error &&error) {
-		handleStreamingError(data, std::move(error));
+		if (source() && data->streamed) handleStreamingError(data, std::move(error));
 	}, data->streamed->lifetime);
 	if (!current()) return;
 
@@ -1050,12 +1072,17 @@ Streaming::PlaybackOptions Instance::streamingOptions(
 }
 
 void Instance::pause(AudioMsgId::Type type) {
+	const auto current = Purple::PlaylistPlayerPauseGuard(type);
+	if (!current()) return;
 	if (const auto data = getData(type)) {
+		Purple::PauseSleepTimerAudioSeek(data->current);
 		if (data->streamed) {
 			if (data->streamed->instance.active()) {
 				data->streamed->instance.pause();
+				if (!current()) return;
 			}
 			emitUpdate(type);
+			if (!current()) return;
 		}
 	}
 }
@@ -1240,19 +1267,47 @@ void Instance::setupShuffleData(not_null<Data*> data) {
 }
 
 void Instance::playPause(AudioMsgId::Type type) {
+	const auto initial = getData(type);
+	const auto pause = initial && initial->streamed
+		&& initial->streamed->instance.active() && !initial->streamed->instance.paused();
+	if (Purple::DeferPlaylistResumeAfterSleepTimer(
+		type, [=] { play(type); }, !pause)) return;
+	const auto current = Purple::PlaylistPlayerPauseGuard(
+		type, pause, initial && initial->streamed);
+	if (!current()) return;
 	if (const auto data = getData(type)) {
+		Purple::SleepTimerAudioPlaybackIntent(data->current,
+			data->streamed && data->streamed->instance.active()
+				&& !data->streamed->instance.paused());
+		if (Purple::HandleSleepTimerAdvance(data->current, [&] {
+			return moveInPlaylist(data, 1, false);
+		})) {
+			return;
+		}
+		if (!current()) return;
+		if ((!data->streamed
+				|| !data->streamed->instance.active()
+				|| data->streamed->instance.paused())
+			&& Purple::ResumeAccountPlaylistAfterSleepTimer(
+				type, data->current, IsStopped(getState(type).state))) return;
+		if (!current()) return;
 		if (!data->streamed) {
 			play(data->current);
+			if (!current()) return;
 		} else {
 			auto &streamed = data->streamed->instance;
 			if (!streamed.active()) {
 				streamed.play(streamingOptions(data->streamed->id));
+				if (!current()) return;
 			} else if (streamed.paused()) {
 				streamed.resume();
+				if (!current()) return;
 			} else {
 				streamed.pause();
+				if (!current()) return;
 			}
 			emitUpdate(type);
+			if (!current()) return;
 		}
 		data->resumeOnCallEnd = false;
 		data->resumeOnVoiceEnd = false;
@@ -1260,6 +1315,8 @@ void Instance::playPause(AudioMsgId::Type type) {
 }
 
 void Instance::pauseOnCall(AudioMsgId::Type type) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(type);
+	if (!current()) return;
 	const auto state = getState(type);
 	if (!state.id
 		|| IsStopped(state.state)
@@ -1268,6 +1325,7 @@ void Instance::pauseOnCall(AudioMsgId::Type type) {
 		return;
 	}
 	pause(type);
+	if (!current()) return;
 	if (const auto data = getData(type)) {
 		data->resumeOnCallEnd = true;
 	}
@@ -1283,6 +1341,8 @@ void Instance::resumeOnCall(AudioMsgId::Type type) {
 }
 
 void Instance::pauseSongForVoice() {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(AudioMsgId::Type::Song);
+	if (!current()) return;
 	const auto state = getState(AudioMsgId::Type::Song);
 	if (!state.id
 		|| IsStopped(state.state)
@@ -1291,6 +1351,7 @@ void Instance::pauseSongForVoice() {
 		return;
 	}
 	pause(AudioMsgId::Type::Song);
+	if (!current()) return;
 	if (const auto data = getData(AudioMsgId::Type::Song)) {
 		data->resumeOnVoiceEnd = true;
 	}
@@ -1345,11 +1406,17 @@ void Instance::playPauseCancelClicked(AudioMsgId::Type type) {
 }
 
 void Instance::startSeeking(AudioMsgId::Type type) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(type);
+	if (!current()) return;
+	Purple::DropSleepTimerAdvance(type);
 	if (auto data = getData(type)) {
+		Purple::BeginSleepTimerAudioSeek(data->current, IsPausedOrPausing(getState(type).state));
 		data->seeking = data->current;
 	}
 	pause(type);
+	if (!current()) return;
 	emitUpdate(type);
+	if (!current()) return;
 	_seekingChanges.fire({ .seeking = Seeking::Start, .type = type });
 }
 
@@ -1375,6 +1442,8 @@ void Instance::seekStreamed(
 		not_null<Data*> data,
 		float64 progress,
 		bool keepPaused) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
+	if (!current()) return;
 	const auto streamed = data->streamed.get();
 	if (!streamed) {
 		return;
@@ -1386,31 +1455,48 @@ void Instance::seekStreamed(
 	const auto position = crl::time(base::SafeRound(
 		std::clamp(progress, 0., 1.) * duration));
 	streamed->instance.play(streamingOptions(streamed->id, position));
+	if (!current()) return;
 	if (keepPaused && streamed->instance.active()) {
 		streamed->instance.pause();
+		if (!current()) return;
 	}
 	emitUpdate(data->type);
+	if (!current()) return;
 }
 
 void Instance::updateSeeking(AudioMsgId::Type type, float64 progress) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(type);
+	if (!current()) return;
+	Purple::DropSleepTimerAdvance(type);
 	if (const auto data = getData(type)) {
 		seekStreamed(data, progress, true);
 	}
 }
 
 void Instance::finishSeeking(AudioMsgId::Type type, float64 progress) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(type);
+	if (!current()) return;
+	Purple::DropSleepTimerAdvance(type);
 	if (const auto data = getData(type)) {
-		seekStreamed(data, progress, false);
+		seekStreamed(data, progress, Purple::FinishSleepTimerAudioSeek(
+			data->current, data->seeking,
+			IsPausedOrPausing(getState(type).state)));
 	}
+	if (!current()) return;
 	cancelSeeking(type);
+	if (!current()) return;
 	_seekingChanges.fire({ .seeking = Seeking::Finish, .type = type });
 }
 
 void Instance::cancelSeeking(AudioMsgId::Type type) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(type);
+	if (!current()) return;
+	Purple::CancelSleepTimerAudioSeek(type);
 	if (const auto data = getData(type)) {
 		data->seeking = AudioMsgId();
 	}
 	emitUpdate(type);
+	if (!current()) return;
 	_seekingChanges.fire({ .seeking = Seeking::Cancel, .type = type });
 }
 
@@ -1533,10 +1619,21 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 		}
 
 		auto finished = false;
+		auto sleepFinished = false;
 		_updatedNotifier.fire_copy({state});
 		if (!current()) return;
 		if (data->isPlaying && state.state == State::StoppedAtEnd) {
-			if (repeat(data) == RepeatMode::One) {
+			const auto fresh = getState(type);
+			if (!data->streamed || data->streamed->clearing
+				|| data->current != state.id || fresh.id != state.id
+				|| fresh.state != State::StoppedAtEnd) return;
+			sleepFinished = Purple::FinishSleepTimerItem(state.id, [&] {
+				data->isPlaying = false;
+			});
+			if (!current()) return;
+			if (sleepFinished) {
+				finished = true;
+			} else if (repeat(data) == RepeatMode::One) {
 				const auto internal = Purple::PlaylistPlayerInternalCallGuard(
 					type, Purple::PlaylistPlayerIntent::Play);
 				play(data->current);
@@ -1550,7 +1647,8 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 		data->isPlaying = !IsStopped(state.state);
 		if (finished) {
 			_tracksFinished.fire_copy(type);
-			if (type == AudioMsgId::Type::Voice) {
+			if (!current()) return;
+			if (type == AudioMsgId::Type::Voice && !sleepFinished) {
 				resumeSongAfterVoice();
 			}
 		}
@@ -1601,6 +1699,8 @@ void Instance::stopAndClose() {
 void Instance::handleStreamingUpdate(
 		not_null<Data*> data,
 		Streaming::Update &&update) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
+	if (!current()) return;
 	using namespace Streaming;
 
 	v::match(update.data, [&](const Information &update) {
@@ -1614,22 +1714,27 @@ void Instance::handleStreamingUpdate(
 			if (data->streamed->videoSize != update.video.size) {
 				data->streamed->videoSize = update.video.size;
 				requestRoundVideoResize();
+				if (!current()) return;
 			}
 		}
 		emitUpdate(data->type);
+		if (!current()) return;
 	}, [&](PreloadedVideo) {
 		//emitUpdate(data->type, [](AudioMsgId) { return true; });
 	}, [&](UpdateVideo) {
 		emitUpdate(data->type);
+		if (!current()) return;
 	}, [&](PreloadedAudio) {
 		//emitUpdate(data->type, [](AudioMsgId) { return true; });
 	}, [&](UpdateAudio) {
 		emitUpdate(data->type);
+		if (!current()) return;
 	}, [](WaitingForData) {
 	}, [](SpeedEstimate) {
 	}, [](MutedByOther) {
 	}, [&](Finished) {
 		emitUpdate(data->type);
+		if (!current()) return;
 		if (data->streamed && data->streamed->instance.player().finished()) {
 			clearStreamed(data);
 		}
@@ -1660,6 +1765,8 @@ void Instance::requestRoundVideoRepaint() const {
 void Instance::handleStreamingError(
 		not_null<Data*> data,
 		Streaming::Error &&error) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
+	if (!current()) return;
 	Expects(data->streamed != nullptr);
 
 	const auto document = data->streamed->id.audio();
@@ -1674,9 +1781,11 @@ void Instance::handleStreamingError(
 			document,
 			DocumentSaveClickHandler::Mode::ToFile);
 	}
+	if (!current()) return;
 	const auto resumeSong = (data->type == AudioMsgId::Type::Voice)
 		&& getData(AudioMsgId::Type::Song)->resumeOnVoiceEnd;
 	emitUpdate(data->type);
+	if (!current()) return;
 	if (data->streamed && data->streamed->instance.player().failed()) {
 		clearStreamed(data);
 	}
@@ -1687,3 +1796,12 @@ void Instance::handleStreamingError(
 
 } // namespace Player
 } // namespace Media
+
+void Media::Player::Instance::clearSleepTimerResumes() {
+	for (const auto type : { AudioMsgId::Type::Song, AudioMsgId::Type::Voice }) {
+		const auto data = getData(type);
+		Purple::PreserveSleepTimerAudioSeek(data->current, data->seeking);
+		data->resumeOnCallEnd = false;
+		data->resumeOnVoiceEnd = false;
+	}
+}

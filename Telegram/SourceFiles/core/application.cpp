@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/application.h"
+#include "purple/purple_sleep_timer.h"
 
 #include "data/data_abstract_structure.h"
 #include "data/data_channel.h"
@@ -262,6 +263,7 @@ void Application::closeAdditionalWindows() {
 }
 
 Application::~Application() {
+	Purple::FinishSleepTimerService();
 	if (_savedWindows) {
 		_savedWindows->writeNow();
 	}
@@ -357,6 +359,7 @@ void Application::run() {
 	startSystemDarkModeViewer();
 	Media::Player::start(_audio.get());
 	Purple::OnMediaPlayerStarted();
+	Purple::StartSleepTimerService();
 	Media::Encode::ClearStaleTempFiles();
 	Storage::ClearStaleArchiveFiles();
 	Webview::ClearStaleTemporaryStorage();
