@@ -37,6 +37,14 @@ public:
 
 namespace Purple {
 
+int PlaybackInvalidations = 0;
+std::vector<Main::Session*> PlaybackStops;
+
+void InvalidatePlaylistPlayback() { ++PlaybackInvalidations; }
+void StopAccountPlaylistPlayback(not_null<Main::Session*> session) {
+	PlaybackStops.push_back(session.get());
+}
+
 std::optional<AccountRoutingSnapshot> Routing;
 AccountKey CurrentAccount = { 0, 101 };
 
@@ -411,6 +419,18 @@ void Exercise() {
 int main(int argc, char *argv[]) {
 	QCoreApplication application(argc, argv);
 	Exercise();
+	{
+		Fixture fixture;
+		const auto invalidations = PlaybackInvalidations;
+		InvalidatePlaylistServices();
+		Expect(PlaybackInvalidations == invalidations + 1,
+			"service routing retirement invalidates the player port");
+		const auto stops = PlaybackStops.size();
+		StopAccountPlaylists(fixture.account);
+		Expect(PlaybackStops.size() == stops + 1
+			&& PlaybackStops.back() == fixture.session.get(),
+			"account retirement stops only the captured player session");
+	}
 	InvalidatePlaylistServices();
 	std::cout << "PLAYLIST_SERVICE_CHECKS=" << Checks << " FAILURES=" << Failures << '\n';
 	return Failures ? 1 : 0;

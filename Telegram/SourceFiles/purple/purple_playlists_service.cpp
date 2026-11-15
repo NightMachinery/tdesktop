@@ -1,6 +1,7 @@
 #include "purple/purple_playlists_service.h"
 
 #include "purple/purple_config.h"
+#include "purple/purple_playlist_player.h"
 #include "base/weak_ptr.h"
 #include "crl/crl_object_on_thread.h"
 #include "main/main_account.h"
@@ -117,12 +118,14 @@ void RecordAccountPlaylistUse(
 
 void InvalidatePlaylistServices() {
 	RequireMainThread();
+	InvalidatePlaylistPlayback();
 	Services.clear();
 }
 
 void StopAccountPlaylists(Main::Account &account) {
 	RequireMainThread();
 	if (const auto session = account.maybeSession()) {
+		StopAccountPlaylistPlayback(session);
 		Services.erase(session);
 	}
 }

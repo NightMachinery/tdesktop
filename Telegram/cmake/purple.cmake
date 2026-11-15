@@ -190,6 +190,9 @@ PRIVATE
     purple/purple_playlists_resolve_queue.h
     purple/purple_playlists_resolver.cpp
     purple/purple_playlists_resolver.h
+    purple/purple_playlist_player.cpp
+    purple/purple_playlist_player.h
+    purple/hooks/playlist_player.h
     purple/purple_media_restart.cpp
     purple/purple_media_restart.h
     purple/purple_media_rules.cpp

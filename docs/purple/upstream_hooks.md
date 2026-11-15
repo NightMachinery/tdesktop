@@ -1515,13 +1515,25 @@ no facade covers those yet.
 - The older content-origin hunks of this file are listed under "Import
   content provenance and menu routes".
 
-**`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +9 -0.
-First Purple edit in this file.
-- The facade include, after the file's own header.
-- `Instance::moveInPlaylist`: one guarded early return through
-  `Purple::ConfinedVoiceNext` right after `useIndex` (the private-chat voice
-  queue). It returns nullopt, and upstream runs unchanged, for songs, manual
-  next or previous and any queue that is not confined.
+**`Telegram/SourceFiles/media/player/media_player_instance.cpp`**: +71 -0.
+- The playback facade, saved-playlist adapter and handoff hook includes follow
+  the file's own header.
+- `Instance::play` and `stop` delegate Song intent admission before native work.
+  Repeat One uses a one-shot internal authorization. Purple owns revocation of
+  pending playlist reads/resolution and the cross-publication start generation.
+- `Instance::play` delegates nested Song requests before touching pending state.
+  Purple call guards in `play` and `stop`, and continuation guards in
+  `playStreamed`, `clearStreamed`, `setCurrent` and `emitUpdate`, reject older
+  writes after synchronous observers request a successor. The authority and
+  deferred request slot live in `purple_playlist_player`; Voice bypasses them.
+- `Instance::moveInPlaylist`, `previousAvailable` and `nextAvailable` delegate
+  Song navigation to the saved-playlist adapter before stock item/chat lookup.
+  Optional handled results preserve an exhausted playlist boundary; Voice
+  returns nullopt and retains the existing `ConfinedVoiceNext` hook.
+- `finish` retires the adapter before deleting the stock player singleton,
+  so late resolver completion cannot call a destroyed player.
+- The existing `ConfinedVoiceNext` early return after `useIndex` remains
+  unchanged for the private-chat voice queue.
 
 **`Telegram/SourceFiles/media/player/media_player_float.cpp`**: floating-round
 size, controls, restart and seek visibility hooks.

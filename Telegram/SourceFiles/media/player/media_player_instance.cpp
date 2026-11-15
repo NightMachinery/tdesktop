@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_instance.h"
 #include "purple/hooks/media_playback.h"
+#include "purple/hooks/playlist_player.h"
+#include "purple/purple_playlist_player.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -119,6 +121,7 @@ void start(not_null<Audio::Instance*> instance) {
 }
 
 void finish(not_null<Audio::Instance*> instance) {
+	Purple::FinishPlaylistPlayback();
 	delete base::take(SingleInstance);
 
 	Capture::Finish();
@@ -248,6 +251,8 @@ void Instance::handleSongUpdate(const AudioMsgId &audioId) {
 }
 
 void Instance::setCurrent(const AudioMsgId &audioId) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(audioId.type());
+	if (!current()) return;
 	if (const auto data = getData(audioId.type())) {
 		if (data->current == audioId) {
 			return;
@@ -261,6 +266,7 @@ void Instance::setCurrent(const AudioMsgId &audioId) {
 			&& changed(data->streamed->id)) {
 			clearStreamed(data);
 		}
+		if (!current()) return;
 		data->current = audioId;
 		data->isPlaying = false;
 
@@ -283,7 +289,9 @@ void Instance::setCurrent(const AudioMsgId &audioId) {
 				nullptr,
 				audioId.audio() ? &audioId.audio()->session() : nullptr);
 		}
+		if (!current()) return;
 		_trackChanged.fire_copy(data->type);
+		if (!current()) return;
 		refreshPlaylist(data);
 	}
 }
@@ -365,17 +373,24 @@ void Instance::clearStreamed(not_null<Data*> data, bool savePosition) {
 	if (!data->streamed || data->streamed->clearing) {
 		return;
 	}
+	const auto current = Purple::PlaylistPlayerCallbackGuard(data->type);
+	if (!current()) return;
 	data->streamed->clearing = true;
 	if (savePosition) {
 		SaveLastPlaybackPosition(
 			data->current.audio(),
 			data->streamed->instance.player().prepareLegacyState());
 	}
+	if (!current()) return;
 	data->streamed->instance.stop();
+	if (!current()) return;
 	data->isPlaying = false;
 	requestRoundVideoResize();
+	if (!current()) return;
 	emitUpdate(data->type);
+	if (!current()) return;
 	data->streamed = nullptr;
+	if (!current()) return;
 
 	_roundPlaying = false;
 	Core::App().floatPlayerToggleGifsPaused(false);
@@ -613,6 +628,13 @@ bool Instance::moveInPlaylist(
 		not_null<Data*> data,
 		int delta,
 		bool autonext) {
+	if (const auto handled = Purple::MoveInAccountPlaylist(
+			data->type,
+			data->current,
+			delta,
+			autonext)) {
+		return *handled;
+	}
 	if (moveInItem(data, delta, autonext)) {
 		return true;
 	} else if (!data->playlistIndex) {
@@ -812,6 +834,12 @@ MsgId Instance::computeCurrentUniversalId(not_null<const Data*> data) const {
 }
 
 bool Instance::previousAvailable(AudioMsgId::Type type) const {
+	if (const auto handled = Purple::AccountPlaylistStepAvailable(
+			type,
+			current(type),
+			-1)) {
+		return *handled;
+	}
 	const auto data = getData(type);
 	Assert(data != nullptr);
 
@@ -831,6 +859,12 @@ bool Instance::previousAvailable(AudioMsgId::Type type) const {
 }
 
 bool Instance::nextAvailable(AudioMsgId::Type type) const {
+	if (const auto handled = Purple::AccountPlaylistStepAvailable(
+			type,
+			current(type),
+			1)) {
+		return *handled;
+	}
 	const auto data = getData(type);
 	Assert(data != nullptr);
 
@@ -918,6 +952,14 @@ void Instance::play(
 	if (!document) {
 		return;
 	}
+	if (!Purple::AdmitPlaylistPlayerIntent(
+			audioId.type(), Purple::PlaylistPlayerIntent::Play)) return;
+	if (Purple::DeferPlaylistPlayerPlay(audioId, [this, audioId, context] {
+		play(audioId, context);
+	})) {
+		return;
+	}
+	const auto call = Purple::PlaylistPlayerCallGuard(audioId.type());
 	_pendingContext = context;
 	_pendingContextFor = audioId;
 	if (document->isAudioFile()
@@ -934,6 +976,7 @@ void Instance::play(
 		}
 		playStreamed(audioId, std::move(shared));
 	}
+	if (!call.current()) return;
 	if (document->isVoiceMessage() || document->isVideoMessage()) {
 		document->owner().markMediaRead(document);
 	}
@@ -960,11 +1003,15 @@ void Instance::playStreamed(
 	const auto data = getData(audioId.type());
 	Assert(data != nullptr);
 
+	const auto current = Purple::PlaylistPlayerCallbackGuard(audioId.type());
+	if (!current()) return;
 	clearStreamed(data, data->current.audio() != audioId.audio());
+	if (!current()) return;
 	data->streamed = std::make_unique<Streamed>(
 		audioId,
 		std::move(shared));
 	data->streamed->instance.lockPlayer();
+	if (!current()) return;
 
 	data->streamed->instance.player().updates(
 	) | rpl::on_next_error([=](Streaming::Update &&update) {
@@ -972,8 +1019,10 @@ void Instance::playStreamed(
 	}, [=](Streaming::Error &&error) {
 		handleStreamingError(data, std::move(error));
 	}, data->streamed->lifetime);
+	if (!current()) return;
 
 	data->streamed->instance.play(streamingOptions(audioId));
+	if (!current()) return;
 
 	emitUpdate(audioId.type());
 }
@@ -1012,16 +1061,22 @@ void Instance::pause(AudioMsgId::Type type) {
 }
 
 void Instance::stop(AudioMsgId::Type type, bool asFinished) {
+	if (!Purple::AdmitPlaylistPlayerIntent(
+			type, Purple::PlaylistPlayerIntent::Stop)) return;
+	const auto call = Purple::PlaylistPlayerCallGuard(type);
 	if (const auto data = getData(type)) {
 		if (data->streamed) {
 			clearStreamed(data);
 		}
+		if (!call.current()) return;
 		if (type == AudioMsgId::Type::Song) {
 			_listenTracker->finalize();
 		}
+		if (!call.current()) return;
 		data->resumeOnCallEnd = false;
 		data->resumeOnVoiceEnd = false;
 		_playerStopped.fire_copy({type});
+		if (!call.current()) return;
 		if (type == AudioMsgId::Type::Voice) {
 			resumeSongAfterVoice();
 		}
@@ -1449,12 +1504,15 @@ View::PlaybackProgress *Instance::roundVideoPlayback(
 
 template <typename CheckCallback>
 void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
+	const auto current = Purple::PlaylistPlayerCallbackGuard(type);
+	if (!current()) return;
 	if (const auto data = getData(type)) {
 		const auto state = getState(type);
 		if (!state.id || !check(state.id)) {
 			return;
 		}
 		setCurrent(state.id);
+		if (!current()) return;
 		if (const auto streamed = data->streamed.get()) {
 			if (!streamed->instance.info().video.size.isEmpty()) {
 				streamed->progress.updateState(state);
@@ -1476,8 +1534,11 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 
 		auto finished = false;
 		_updatedNotifier.fire_copy({state});
+		if (!current()) return;
 		if (data->isPlaying && state.state == State::StoppedAtEnd) {
 			if (repeat(data) == RepeatMode::One) {
+				const auto internal = Purple::PlaylistPlayerInternalCallGuard(
+					type, Purple::PlaylistPlayerIntent::Play);
 				play(data->current);
 			} else if (OptionDisableAutoplayNext.value()) {
 				finished = true;
@@ -1485,6 +1546,7 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 				finished = true;
 			}
 		}
+		if (!current()) return;
 		data->isPlaying = !IsStopped(state.state);
 		if (finished) {
 			_tracksFinished.fire_copy(type);

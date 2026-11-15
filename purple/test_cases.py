@@ -17,6 +17,14 @@ import tempfile
 
 CORE = 'purple_core'
 CASES = {
+    'playlist-player': {
+        'program': 'playlist_player_cases.cpp',
+        'generated': ['playlist-player-queue.inc'],
+        'syntax_units': ['purple/purple_playlist_player.cpp',
+            'media/player/media_player_instance.cpp'],
+        'units': [],
+        'frameworks': ['QtCore'],
+    },
     'playlists-resolver': {
         'program': 'playlists_resolver_cases.cpp',
         'syntax_units': ['purple/purple_playlists_resolver.cpp',
@@ -263,6 +271,13 @@ def music_listening_include(sources):
     constant = text[start:text.index(';', start) + 1]
     return ('namespace Media::Player {\n' + constant + '\n'
         + result.replace('crl::now()', 'ClockNow()') + '\n}\n')
+
+
+def playlist_player_queue_include(sources):
+    text = (sources / 'purple/purple_playlist_player.cpp').read_text()
+    start = text.index('constexpr auto kResolveWindow = ')
+    end = text.index('class PlaylistPlayback final', start)
+    return text[start:end]
 
 
 def slices(sources):
@@ -557,6 +572,7 @@ pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['unit
 for name in case.get('generated', []):
     generate = {
         'playlists-service.inc': playlists_service_include,
+        'playlist-player-queue.inc': playlist_player_queue_include,
         'music-listening-tracker.inc': music_listening_include,
         'recording-bin.inc': recording_bin_include,
         'sync-auto-service.inc': sync_auto_service_include,

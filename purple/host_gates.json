@@ -38,7 +38,8 @@
       "music-listening": "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp",
       "playlists-store": "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp",
       "playlists-service": "Telegram/SourceFiles/purple/tests/playlists_service_cases.cpp",
-      "playlists-resolver": "Telegram/SourceFiles/purple/tests/playlists_resolver_cases.cpp"
+      "playlists-resolver": "Telegram/SourceFiles/purple/tests/playlists_resolver_cases.cpp",
+      "playlist-player": "Telegram/SourceFiles/purple/tests/playlist_player_cases.cpp"
     }
   },
   "gates": [
@@ -896,6 +897,22 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/playlists_resolver_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-playlist-player",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "playlist-player"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/playlist_player_cases.cpp"
       ]
     }
   ]
