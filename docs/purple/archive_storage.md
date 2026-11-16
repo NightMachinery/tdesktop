@@ -755,3 +755,26 @@ The native archive binding fixture uses disposable stores, synthetic device
 renumbering and real admission MACs. Its focused `binding-only` entry also runs
 existing discard, authentication, login revocation, account isolation and
 refusal cases. It requires no live profile or Telegram session.
+
+### Captures before the journal is published
+
+Startup observations enter the archive worker's ordered queue while the main
+thread is waiting for its authenticated journal. Admission is bounded to32
+events,4MiB encoded per event and16MiB encoded in total. New observations keep
+using that queue until admitted startup tasks have finished, preserving order
+across journal publication. Stop cancels queued work; a replacement worker cannot
+inherit it. Purge pauses and retires the initial journal before renewal, so old
+startup captures cannot acquire a fresh generation.
+
+Queued admission is not a durability acknowledgement. The existing deadline gap
+remains, and overflow, journal failures and maintenance preserve a gap or the
+first authenticated maintenance notice. Login-authority and logout-recovery
+holds retain their original status. The byte limit bounds encoded payloads,
+not all object overhead; startup admission also encodes the event on the caller.
+
+The handoff fixture runs the extracted production worker and purge entry point
+against synthetic encrypted stores. Its445 checks cover in-flight ordering,
+unavailable startup, first-notice preservation, post-publication purge and
+generation renewal, replacement, and bounded large-payload drain. Moving charge
+release to queue-pop time fails the in-flight check. Measured component drain
+times do not establish application startup latency or UI behavior.

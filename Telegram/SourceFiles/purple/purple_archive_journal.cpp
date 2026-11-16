@@ -235,6 +235,15 @@ bool DesktopArchiveJournal::Open() {
 	return true;
 }
 
+std::optional<uint64_t> DesktopArchiveJournal::PendingCaptureBytes(ArchiveEvent event) {
+	event.order = 1;
+	auto bytes = Encode(event);
+	if (!bytes && DropDesktopArticleMarkdown(event)) {
+		bytes = Encode(event);
+	}
+	return bytes ? std::optional<uint64_t>(bytes->size()) : std::nullopt;
+}
+
 bool DesktopArchiveJournal::Append(ArchiveEvent event, int byteLimit) {
 	if (!CaptureAllowed()) return false;
 	const auto lock = std::lock_guard(_mutex);

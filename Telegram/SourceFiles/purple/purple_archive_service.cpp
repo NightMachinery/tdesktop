@@ -267,7 +267,68 @@ class ArchiveWorker final {
 		if (!lock.owns_lock() || _state->cancelled || _state->tasks.size() >= (cleanup ? 80 : 64)) {
 			return false;
 		}
-		_state->tasks.push_back(std::move(task));
+		_state->tasks.push_back({
+			[task = std::move(task)](DesktopArchiveStore &store,
+					const std::shared_ptr<DesktopArchiveJournal> &) { task(store); }, 0});
+		_state->condition.notify_one();
+		return true;
+	}
+	bool NeedsStartupCapture() const { return _state->startupCount.load() != 0; }
+	bool StartupFailed() const { return _state->startupFailed.load(); }
+	bool StartupHeld() const { return _state->startupHeld.load(); }
+	bool PostStartupCapture(ArchiveEvent event, int byteLimit) {
+		const auto bytes = DesktopArchiveJournal::PendingCaptureBytes(event);
+		const auto lock = std::unique_lock(_state->mutex, std::try_to_lock);
+		if (!bytes || *bytes > 4 * 1024 * 1024 || !lock.owns_lock()
+			|| _state->cancelled || _state->startupFailed || _state->purgeRequested
+			|| _state->tasks.size() >= 64 || _state->startupCount >= 32
+			|| *bytes > 16 * 1024 * 1024 - _state->startupBytes) {
+			return false;
+		}
+		const auto weak = std::weak_ptr<State>(_state);
+		_state->tasks.push_back({[weak, byteLimit, event = std::move(event)](
+				DesktopArchiveStore &store,
+				const std::shared_ptr<DesktopArchiveJournal> &journal) mutable {
+			const auto state = weak.lock();
+			if (!state || state->cancelled) {
+				return;
+			}
+			const auto gap = [&](const QString &reason) {
+				if (!store.Gap(event.id, reason, event.observation.observedAt)) {
+					const auto status = store.status();
+					state->report(status == DesktopArchiveStatus::Ready
+						? DesktopArchiveStatus::RetentionGap : status, reason, 0);
+				}
+			};
+			if (!journal) {
+				return;
+			}
+			if (state->purgeRequested || !store.Current()
+				|| store.MaintenancePending() || !journal->CaptureAllowed()
+				|| !journal->access().current()
+				|| !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
+				gap(u"capture-startup-unavailable"_q);
+				return;
+			}
+			journal->BindCaptureGeneration(event);
+			if (!journal->Append(event, byteLimit)) {
+				const auto reason = journal->failure().isEmpty()
+					? u"capture-startup-append"_q : journal->failure();
+				if (!journal->Attention(reason, event.observation.observedAt)) {
+					state->report(DesktopArchiveStatus::RetentionGap, reason, 0);
+				}
+				gap(reason);
+				return;
+			}
+			if (!journal->Drain(store)) {
+				gap(u"capture-startup-drain"_q);
+			}
+			if (event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()) {
+				gap(u"snapshot-limited"_q);
+			}
+		}, *bytes});
+		_state->startupBytes += *bytes;
+		++_state->startupCount;
 		_state->condition.notify_one();
 		return true;
 	}
@@ -311,6 +372,12 @@ class ArchiveWorker final {
 				}
 			}
 			_state->mediaReaders.clear();
+			for (const auto &task : _state->tasks) {
+				if (task.startupBytes) {
+					_state->startupBytes -= task.startupBytes;
+					--_state->startupCount;
+				}
+			}
 			_state->tasks.clear();
 		}
 		_state->condition.notify_all();
@@ -319,12 +386,21 @@ class ArchiveWorker final {
 
   private:
 	ArchiveWorker() : _state(std::make_shared<State>()) {}
+	struct QueuedTask {
+		std::function<void(DesktopArchiveStore &,
+			const std::shared_ptr<DesktopArchiveJournal> &)> run;
+		uint64_t startupBytes = 0;
+	};
 	struct State {
 		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report;
 		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready;
 		std::mutex mutex;
 		std::condition_variable condition;
-		std::deque<Task> tasks;
+		std::deque<QueuedTask> tasks;
+		uint64_t startupBytes = 0;
+		std::atomic<int> startupCount = 0;
+		std::atomic<bool> startupFailed = false;
+		std::atomic<bool> startupHeld = false;
 		std::vector<std::weak_ptr<std::atomic<bool>>> mediaReaders;
 		std::atomic<bool> cancelled = false;
 		std::atomic<bool> remove = false;
@@ -355,6 +431,7 @@ class ArchiveWorker final {
 		auto journal = std::shared_ptr<DesktopArchiveJournal>();
 		auto journalFailure = QString();
 		auto startupHeld = false;
+		auto startupJournal = std::shared_ptr<DesktopArchiveJournal>();
 		auto authorityReady = !options.authorityReady;
 		for (const auto delay : {0, 100, 250, 500, 1000, 2000, 3000}) {
 			if (state->cancelled || authorityReady) {
@@ -372,9 +449,13 @@ class ArchiveWorker final {
 		options.authorityReady = {};
 		if (!state->cancelled) {
 			if (!authorityReady) {
+				state->startupFailed = true;
+				state->startupHeld = true;
 				startupHeld = true;
 				state->report(DesktopArchiveStatus::Unreadable, u"login-authority-held"_q, 0);
 			} else if (!DesktopArchiveStore::Recover(options)) {
+				state->startupFailed = true;
+				state->startupHeld = true;
 				startupHeld = true;
 				state->report(DesktopArchiveStatus::RemovalPending, u"logout-recovery"_q, 0);
 			} else {
@@ -385,6 +466,7 @@ class ArchiveWorker final {
 				if (const auto access = store.JournalAccess()) {
 					journal = std::make_shared<DesktopArchiveJournal>(*access);
 					if (journal->Open() && journal->Drain(store)) {
+						startupJournal = journal;
 						if (!state->cancelled) {
 							state->ready(journal);
 						}
@@ -395,6 +477,9 @@ class ArchiveWorker final {
 					}
 				}
 			}
+		}
+		if (!startupJournal) {
+			state->startupFailed = true;
 		}
 		DesktopArchiveCrypto::Clear(options.localKey);
 		DesktopArchiveCrypto::Clear(options.loginAuthority);
@@ -479,7 +564,7 @@ class ArchiveWorker final {
 		auto garbageMore = store.Current();
 		auto maintenanceMore = store.MaintenancePending() && !store.MaintenanceHeld();
 		for (;;) {
-			auto task = Task();
+			auto task = QueuedTask();
 			auto idle = false;
 			auto background = false;
 			{
@@ -492,10 +577,10 @@ class ArchiveWorker final {
 					break;
 				}
 				if (state->streamCleanup.exchange(false)) {
-					task = [](DesktopArchiveStore &store) { store.PruneStreams(); };
+					task.run = [](DesktopArchiveStore &store, const auto &) { store.PruneStreams(); };
 				} else if (state->tasks.empty() && maintenanceMore) {
 					background = true;
-					task = [&](DesktopArchiveStore &store) {
+					task.run = [&](DesktopArchiveStore &store, const auto &) {
 						const auto step = store.ContinuePurge();
 						if (!store.MaintenancePending()) state->purgeRequested = false;
 						if (step.valid && step.finished) {
@@ -506,7 +591,7 @@ class ArchiveWorker final {
 					};
 				} else if (state->tasks.empty() && !streamMore && garbageMore) {
 					background = true;
-					task = [&](DesktopArchiveStore &store) {
+					task.run = [&](DesktopArchiveStore &store, const auto &) {
 						if (!store.ContinueGarbage(garbageMore)) {
 							garbageMore = false;
 						} else if (!garbageMore) {
@@ -517,7 +602,7 @@ class ArchiveWorker final {
 				} else if (state->tasks.empty() && !streamMore) {
 					idle = true;
 				} else if (state->tasks.empty()) {
-					task = [&](DesktopArchiveStore &store) {
+					task.run = [&](DesktopArchiveStore &store, const auto &) {
 						if (!store.ResumeStreams(streamCursor, streamMore)) {
 							streamMore = false;
 							static_cast<void>(store.Gap(u"stream-recovery"_q, u"stream-recovery-held"_q, base::unixtime::now()));
@@ -541,7 +626,12 @@ class ArchiveWorker final {
 			if (!background) {
 				state->delivery->fetch_add(1);
 			}
-			task(store);
+			task.run(store, startupJournal);
+			if (task.startupBytes) {
+				const auto lock = std::lock_guard(state->mutex);
+				state->startupBytes -= task.startupBytes;
+				--state->startupCount;
+			}
 			store.PruneStreams();
 			maintenanceMore = store.MaintenancePending() && !store.MaintenanceHeld();
 			garbageMore = store.Current() && store.GarbagePending();
@@ -908,6 +998,15 @@ void QueueArchiveJournalWrite(not_null<Main::Session*> session, ArchiveEvent eve
 	auto &value = For(session);
 	const auto journal = value.journal;
 	const auto worker = value.worker;
+	if (!journal || worker->NeedsStartupCapture()) {
+		if (worker->StartupHeld()) {
+			return;
+		}
+		const auto accepted = worker->PostStartupCapture(std::move(event), byteLimit);
+		QueueArchiveRetentionGap(session, accepted
+			? u"capture-durability-deadline"_q : u"capture-write-unavailable"_q);
+		return;
+	}
 	static auto writers = std::make_shared<std::atomic<int>>(0);
 	const auto slots = writers;
 	if (!journal || slots->fetch_add(1) >= 8) {

@@ -107,6 +107,12 @@ if args.handoff:
     (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession'))
     post = extract(service, 'bool Post(Task task, bool cleanup = false)')
     (work / 'archive-worker-post.inc').write_text(post.replace('bool Post(', 'bool ProbeWorker::Post(', 1).replace(' = false', ''))
+    startup = extract(service, 'bool PostStartupCapture(ArchiveEvent event, int byteLimit)')
+    (work / 'archive-worker-startup.inc').write_text(startup.replace('bool PostStartupCapture(', 'bool ProbeWorker::PostStartupCapture(', 1))
+    execute = extract(service, 'void ExecuteArchivePurge(').replace('ExecuteArchivePurge(', 'NativeExecuteArchivePurge(', 1).replace('Main::Session', 'ProbeSession').replace('For(session)', 'NativeFor(session)').replace('crl::on_main', 'StartupOnMain')
+    (work / 'archive-startup-purge.inc').write_text(execute)
+    (work / 'archive-native-worker.inc').write_text(extract(service, 'class ArchiveWorker final').replace('ArchiveWorker', 'NativeStartupWorker') + ';\n')
+    (work / 'archive-native-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession').replace('QueueArchive', 'NativeQueueArchive').replace('For(session)', 'NativeFor(session)'))
 if args.passive:
     acquired = (repo / 'Telegram/SourceFiles/purple/purple_archive_acquired_source.cpp').read_text()
     def adapt(text):
@@ -205,5 +211,10 @@ if args.build_only:
 with (work / 'run.log').open('w') as log:
     result = subprocess.run([str(work / 'test_archive')] + (['pagination-only'] if args.pagination_only else ['capture-only'] if args.capture_only else [str(root)] if root else []), stdout=log, stderr=subprocess.STDOUT)
 (work / 'run.exit').write_text(str(result.returncode) + '\n')
-print((work / 'run.log').read_text())
+output = (work / 'run.log').read_text()
+print(output)
+if args.handoff and result.returncode == 0:
+    completion = re.search(r'(?m)^(\d+) checks, (\d+) failures$', output)
+    if not completion or int(completion[1]) < 445 or int(completion[2]) != 0:
+        raise SystemExit('Archive handoff completion checks missing or below floor')
 raise SystemExit(result.returncode)

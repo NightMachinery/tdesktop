@@ -1,11 +1,16 @@
 #include "purple/purple_archive_journal.h"
 #include "base/unixtime.h"
+#include "base/weak_ptr.h"
 #include "purple/purple_archive_files.h"
 #include "purple/purple_archive_envelope.h"
 #include "tests/archive_test_support.h"
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include "purple/purple_archive_attention.h"
 #include <future>
 #include <thread>
 #include <mutex>
@@ -15,6 +20,7 @@
 #include <set>
 #include <chrono>
 #include <dlfcn.h>
+#include "purple/purple_archive_sql_maintenance.h"
 
 using namespace Purple;
 using namespace ArchiveTest;
@@ -32,31 +38,58 @@ extern "C" int fsync(int descriptor) {
 	}
 	return actual(descriptor);
 }
-struct ProbeSession { AccountKey account{0, 123}; };
+struct ProbeSession : base::has_weak_ptr { AccountKey account{0, 123}; };
 struct ProbeWorker {
 	using Task = std::function<void(DesktopArchiveStore&)>;
+	struct QueuedTask {
+		std::function<void(DesktopArchiveStore &,
+			const std::shared_ptr<DesktopArchiveJournal> &)> run;
+		uint64_t startupBytes = 0;
+	};
 	struct State {
+		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report
+			= [](DesktopArchiveStatus, QString, uint64_t) {};
 		std::mutex mutex;
 		std::condition_variable condition;
-		std::deque<Task> tasks;
+		std::deque<QueuedTask> tasks;
+		uint64_t startupBytes = 0;
+		std::atomic<int> startupCount = 0;
+		std::atomic<bool> startupFailed = false;
+		std::atomic<bool> startupHeld = false;
+		std::atomic<bool> purgeRequested = false;
 		bool cancelled = false;
 	};
 	std::shared_ptr<State> _state = std::make_shared<State>();
 	bool Post(Task task, bool cleanup = false);
+	bool PostStartupCapture(ArchiveEvent event, int byteLimit);
+	bool NeedsStartupCapture() const { return _state->startupCount.load() != 0; }
+	bool StartupFailed() const { return _state->startupFailed.load(); }
+	bool StartupHeld() const { return _state->startupHeld.load(); }
+	std::shared_ptr<DesktopArchiveJournal> initialJournal;
 	void Run(DesktopArchiveStore &store) {
 		for (;;) {
-			auto task = Task();
+			auto task = QueuedTask();
 			{
 				const auto lock = std::lock_guard(_state->mutex);
 				if (_state->tasks.empty()) return;
 				task = std::move(_state->tasks.front());
 				_state->tasks.pop_front();
+
 			}
-			task(store);
+			task.run(store, initialJournal);
+			if (task.startupBytes) {
+				const auto lock = std::lock_guard(_state->mutex);
+				_state->startupBytes -= task.startupBytes;
+				--_state->startupCount;
+			}
 		}
 	}
 };
 #include "archive-worker-post.inc"
+#include "archive-worker-startup.inc"
+namespace Purple {
+#include "archive-native-worker.inc"
+}
 struct ProbeValue {
 	std::shared_ptr<DesktopArchiveJournal> journal;
 	std::shared_ptr<ProbeWorker> worker;
@@ -77,6 +110,18 @@ namespace tr { inline constexpr auto now = 0; QString lng_purple_archive_gap(int
 namespace Ui::Toast { void Show(const QString&) {} }
 void QueueArchiveRetentionGap(not_null<ProbeSession*> session, QString reason);
 #include "archive-capture-queue.inc"
+struct NativeProbeValue {
+	std::shared_ptr<DesktopArchiveJournal> journal;
+	std::shared_ptr<NativeStartupWorker> worker;
+	QString failure;
+};
+NativeProbeValue NativeValue;
+NativeProbeValue &NativeFor(not_null<ProbeSession*>) { return NativeValue; }
+void NativeQueueArchiveRetentionGap(not_null<ProbeSession*> session, QString reason);
+#include "archive-native-capture-queue.inc"
+void StartupOnMain(Fn<void()> call) { call(); }
+#include "archive-startup-purge.inc"
+
 
 void Case(bool failed) {
 	Section = failed ? "foreground behind error attention fsync" : "foreground behind lifecycle fsync";
@@ -237,9 +282,466 @@ void RenewalWriterHandoff() {
 	}
 }
 
+void StartupActorCases();
+void StartupReadyOrder();
+void NativeStartupInflight();
+void NativeStartupUnavailable();
+void NativeStartupPurgeRenewal();
+void NativeStartupReplacement();
+void NativeStartupPayload();
+
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
 	RenewalWriterHandoff();
+	StartupActorCases();
+	StartupReadyOrder();
+	NativeStartupInflight();
+	NativeStartupUnavailable();
+	NativeStartupPurgeRenewal();
+	NativeStartupReplacement();
+	NativeStartupPayload();
 	Case(false); Case(true);
 	return Finish();
+}
+
+
+void StartupActorCases() {
+	Section = "native startup actor retains captures without main-thread ready publication";
+	for (auto mode = 0; mode != 7; ++mode) {
+		auto temporary = QTemporaryDir();
+		CHECK(DesktopArchiveDirectory(temporary.path() + u"/profile"_q));
+		auto options = DesktopArchiveOptions{temporary.path() + u"/archives"_q,
+			temporary.path() + u"/profile"_q, {0,123}, u"0"_q, QByteArray(256,'k'), true};
+		options.loginAuthority = QByteArray(32,'a');
+		options.loginAuthKeyId = options.loginAuthKeyIds = QByteArray(16,'1');
+		const auto modeSection = "native startup actor mode " + std::to_string(mode);
+		Section = modeSection.c_str();
+		auto entered = std::promise<void>();
+		auto enteredFuture = entered.get_future();
+		auto gate = std::promise<void>();
+		auto readyGate = gate.get_future().share();
+		auto firstAuthority = std::atomic<bool>(true);
+		options.authorityReady = [&] {
+			if (firstAuthority.exchange(false)) entered.set_value();
+			readyGate.wait();
+			return mode != 6;
+		};
+		auto readyCount = std::atomic<int>(0);
+		auto reported = std::atomic<int>(0);
+		auto lastStatus = std::atomic<DesktopArchiveStatus>(DesktopArchiveStatus::Disabled);
+		auto worker = std::make_shared<NativeStartupWorker>(std::move(options),
+			[&](DesktopArchiveStatus status, QString, uint64_t) { lastStatus = status; ++reported; },
+			[&](std::shared_ptr<DesktopArchiveJournal>) { ++readyCount; });
+		CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+		const auto total = mode == 1 ? 32 : mode == 2 ? 12 : 3;
+		auto accepted = 0;
+		for (auto i = 0; i != total; ++i) {
+			auto event = Event(Empty(), u"startup-"_q + QString::number(i), 0,
+				mode == 2 ? QString(1800000, u'x') : u"before main ready"_q,
+				ArchiveOrigin::Baseline, Key({0,123},45,12000+i));
+			accepted += worker->PostStartupCapture(std::move(event), mode == 5 ? 1 : 0);
+		}
+		if (mode == 2) {
+			CHECK(accepted > 0 && accepted < total);
+		} else {
+			CHECK(accepted == total);
+		}
+		if (mode == 1) {
+			CHECK(!worker->PostStartupCapture(Event(Empty(), u"overflow"_q, 0), 0));
+		}
+		if (mode == 3) {
+			CHECK(worker->ClaimPurge());
+			CHECK(!worker->PostStartupCapture(Event(Empty(), u"purge-new"_q, 0), 0));
+		}
+		if (mode == 4 || mode == 2) {
+			CHECK(worker->Stop(false));
+			CHECK(!worker->PostStartupCapture(Event(Empty(), u"stopped-new"_q, 0), 0));
+			gate.set_value();
+			CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+			CHECK(readyCount == 0);
+			worker.reset();
+			continue;
+		}
+		auto checked = std::promise<int>();
+		auto checkedFuture = checked.get_future();
+		CHECK(worker->Post([&](DesktopArchiveStore &store) {
+			auto retained = 0;
+			for (auto i = 0; i != total; ++i) {
+				const auto page = store.Versions(Key({0,123},45,12000+i));
+				retained += page.versions.size() == 1;
+			}
+			checked.set_value(retained);
+		}));
+		gate.set_value();
+		CHECK(checkedFuture.wait_for(std::chrono::seconds(20)) == std::future_status::ready);
+		if (checkedFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+			CHECK(checkedFuture.get() == (mode == 3 || mode == 5 || mode == 6 ? 0 : accepted));
+		}
+		CHECK(readyCount == (mode == 6 ? 0 : 1));
+		if (mode == 6) {
+			CHECK(lastStatus == DesktopArchiveStatus::Unreadable);
+			CHECK(worker->StartupFailed());
+			CHECK(!worker->PostStartupCapture(Event(Empty(), u"terminal-new"_q, 0), 0));
+		}
+		CHECK(worker->Stop(false));
+		CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+		worker.reset();
+	}
+	std::printf("ARCHIVE_STARTUP_ACTOR_MODES=7\n");
+}
+
+
+void StartupReadyOrder() {
+	Section = "startup FIFO survives main-thread journal publication";
+	auto temporary = QTemporaryDir();
+	CHECK(DesktopArchiveDirectory(temporary.path() + u"/profile"_q));
+	auto options = DesktopArchiveOptions{temporary.path() + u"/archives"_q,
+		temporary.path() + u"/profile"_q, {0,123}, u"0"_q, QByteArray(256,'k'), true};
+	options.loginAuthority = QByteArray(32,'a');
+	options.loginAuthKeyId = options.loginAuthKeyIds = QByteArray(16,'1');
+	auto store = DesktopArchiveStore();
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	const auto access = store.JournalAccess();
+	CHECK(access);
+	if (!access) return;
+	Value = {nullptr, std::make_shared<ProbeWorker>(), {}};
+	Value.worker->initialJournal = std::make_shared<DesktopArchiveJournal>(*access);
+	CHECK(Value.worker->initialJournal->Open());
+	auto session = ProbeSession();
+	for (auto i = 0; i != 3; ++i) {
+		QueueArchiveObservation(&session, Event(Empty(), u"startup-first-"_q + QString::number(i),
+			0, u"before ready"_q, ArchiveOrigin::Baseline, Key({0,123},45,15000+i)));
+	}
+	CHECK(Value.worker->NeedsStartupCapture());
+	Value.journal = Value.worker->initialJournal;
+	QueueArchiveObservation(&session, Event(Empty(), u"startup-edit"_q, 0,
+		u"after ready"_q, ArchiveOrigin::AuthoritativeEdit, Key({0,123},45,15000)));
+	CHECK(Value.worker->_state->startupCount == 4);
+	Value.worker->Run(store);
+	CHECK(!Value.worker->NeedsStartupCapture());
+	CHECK(Value.worker->_state->startupBytes == 0);
+	const auto page = store.Versions(Key({0,123},45,15000));
+	CHECK(page.versions.size() == 2);
+	const auto before = std::find_if(page.versions.begin(), page.versions.end(),
+		[](const auto &row) { return row.version.id == u"startup-first-0"_q; });
+	const auto after = std::find_if(page.versions.begin(), page.versions.end(),
+		[](const auto &row) { return row.version.id == u"startup-edit"_q; });
+	CHECK(before != page.versions.end() && after != page.versions.end());
+	if (before != page.versions.end() && after != page.versions.end()) {
+		CHECK(before->version.content.text == u"before ready"_q);
+		CHECK(after->version.content.text == u"after ready"_q);
+		CHECK(before->version.order < after->version.order);
+	}
+	Value = {};
+	CHECK(store.Remove());
+	std::printf("ARCHIVE_STARTUP_FIFO_HANDOFF=1\n");
+}
+
+
+DesktopArchiveOptions StartupOptions(const QString &path) {
+	CHECK(DesktopArchiveDirectory(path + u"/profile"_q));
+	auto options = DesktopArchiveOptions{path + u"/archives"_q,
+		path + u"/profile"_q, {0,123}, u"0"_q, QByteArray(256,'k'), true};
+	options.loginAuthority = QByteArray(32,'a');
+	options.loginAuthKeyId = options.loginAuthKeyIds = QByteArray(16,'1');
+	return options;
+}
+
+void NativeStartupInflight() {
+	Section = "production worker retains in-flight startup charge through fsync";
+	auto temporary = QTemporaryDir();
+	auto options = StartupOptions(temporary.path());
+	auto entered = std::promise<void>();
+	auto enteredFuture = entered.get_future();
+	auto gate = std::promise<void>();
+	auto future = gate.get_future().share();
+	options.authorityReady = [&] { entered.set_value(); future.wait(); return true; };
+	auto ready = std::promise<std::shared_ptr<DesktopArchiveJournal>>();
+	auto readyFuture = ready.get_future();
+	NativeValue = {};
+	NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
+		[](DesktopArchiveStatus, QString, uint64_t) {},
+		[&](auto journal) { ready.set_value(std::move(journal)); });
+	auto worker = NativeValue.worker;
+	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+	auto published = std::promise<void>();
+	auto publishedFuture = published.get_future().share();
+	CHECK(worker->Post([&](DesktopArchiveStore &) {
+		publishedFuture.wait();
+		GateEntered = GateReleased = false;
+		GateArmed = true;
+	}));
+	auto session = ProbeSession();
+	NativeQueueArchiveObservation(&session, Event(Empty(), u"native-startup-first"_q,
+		0, u"before ready"_q, ArchiveOrigin::Baseline, Key({0,123},45,17000)));
+	CHECK(worker->NeedsStartupCapture());
+	gate.set_value();
+	CHECK(readyFuture.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	if (readyFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+		NativeValue.journal = readyFuture.get();
+	}
+	published.set_value();
+	{
+		auto lock = std::unique_lock(GateMutex);
+		CHECK(GateCv.wait_for(lock, std::chrono::seconds(5), [] { return GateEntered.load(); }));
+	}
+	CHECK(worker->NeedsStartupCapture());
+	NativeQueueArchiveObservation(&session, Event(Empty(), u"native-startup-edit"_q,
+		0, u"after ready"_q, ArchiveOrigin::AuthoritativeEdit, Key({0,123},45,17000)));
+	auto checked = std::promise<bool>();
+	auto checkedFuture = checked.get_future();
+	CHECK(worker->Post([&](DesktopArchiveStore &store) {
+		const auto page = store.Versions(Key({0,123},45,17000));
+		const auto first = std::find_if(page.versions.begin(), page.versions.end(),
+			[](const auto &v) { return v.version.id == u"native-startup-first"_q; });
+		const auto edit = std::find_if(page.versions.begin(), page.versions.end(),
+			[](const auto &v) { return v.version.id == u"native-startup-edit"_q; });
+		checked.set_value(page.versions.size() == 2 && first != page.versions.end()
+			&& edit != page.versions.end() && first->version.order < edit->version.order);
+	}));
+	{
+		const auto lock = std::lock_guard(GateMutex);
+		GateReleased = true;
+	}
+	GateCv.notify_all();
+	CHECK(checkedFuture.wait_for(std::chrono::seconds(20)) == std::future_status::ready);
+	if (checkedFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+		CHECK(checkedFuture.get());
+	}
+	CHECK(!worker->NeedsStartupCapture());
+	CHECK(worker->Stop(false));
+	CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+	NativeValue = {};
+	std::printf("ARCHIVE_STARTUP_NATIVE_INFLIGHT=1\n");
+}
+
+void NativeStartupUnavailable() {
+	for (const auto maintenance : {false, true}) for (const auto early : {false, true}) {
+		Section = maintenance ? "startup maintenance keeps durable attention" : "startup journal failure keeps durable gap";
+		auto temporary = QTemporaryDir();
+		auto options = StartupOptions(temporary.path());
+		{
+			auto setup = DesktopArchiveStore();
+			CHECK(setup.Open(options) == DesktopArchiveStatus::Ready);
+			if (maintenance) {
+				CHECK(setup.Capture(Event(Empty(), u"before-maintenance"_q, 0)).retained);
+				const auto preview = setup.PreparePurge(ArchivePurgeKind::Trashbin, {{0,123}});
+				CHECK(preview.confirmation);
+				if (preview.confirmation) CHECK(setup.BeginPurge(*preview.confirmation));
+				CHECK(setup.MaintenancePending());
+			} else {
+				const auto access = setup.JournalAccess();
+				CHECK(access);
+				if (access) {
+					auto journal = DesktopArchiveJournal(*access);
+					CHECK(journal.Open());
+					const auto files = QDir(access->root + u"/outbox"_q).entryList(QDir::Files);
+					CHECK(files.size() == 1);
+					if (files.size() == 1) {
+						auto corrupt = QFile(access->root + u"/outbox/"_q + files.front());
+						CHECK(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate));
+						CHECK(corrupt.write("synthetic invalid sequence") == 26);
+						corrupt.close();
+					}
+				}
+			}
+			CHECK(setup.Close());
+		}
+		auto entered = std::promise<void>();
+		auto enteredFuture = entered.get_future();
+		auto gate = std::promise<void>();
+		auto future = gate.get_future().share();
+		options.authorityReady = [&] { entered.set_value(); future.wait(); return true; };
+		options.maintenanceAllowed = [] { return false; };
+		auto readyCount = std::atomic<int>(0);
+		NativeValue = {};
+		NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
+			[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto) { ++readyCount; });
+		auto worker = NativeValue.worker;
+		CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+		auto session = ProbeSession();
+		if (early) NativeQueueArchiveObservation(&session, Event(Empty(), u"unavailable-early"_q, 0));
+		auto initialized = std::promise<bool>();
+		auto initializedFuture = initialized.get_future();
+		auto lateScheduled = std::promise<void>();
+		auto lateScheduledFuture = lateScheduled.get_future().share();
+		CHECK(worker->Post([&](DesktopArchiveStore &) { initialized.set_value(true); lateScheduledFuture.wait(); }));
+		gate.set_value();
+		CHECK(initializedFuture.wait_for(std::chrono::seconds(15)) == std::future_status::ready);
+		CHECK(worker->StartupFailed());
+		CHECK(!worker->StartupHeld());
+		CHECK(readyCount == 0);
+		NativeQueueArchiveObservation(&session, Event(Empty(), u"unavailable-late"_q, 0));
+		CHECK(NativeValue.failure == u"capture-write-unavailable"_q);
+		auto checked = std::promise<bool>();
+		auto checkedFuture = checked.get_future();
+		CHECK(worker->Post([&](DesktopArchiveStore &store) {
+			if (maintenance) {
+				const auto attention = ReadDesktopArchiveAttention(store.directory(), store.epoch(), store.security());
+				checked.set_value(store.MaintenancePending() && !store.Current()
+					&& attention.valid && attention.present
+					&& attention.gap.reason == (early ? u"capture-durability-deadline"_q : u"capture-write-unavailable"_q));
+			} else {
+				const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(32));
+				checked.set_value(gaps.ok && !gaps.rows.empty());
+			}
+		}));
+		lateScheduled.set_value();
+		CHECK(checkedFuture.wait_for(std::chrono::seconds(15)) == std::future_status::ready);
+		if (checkedFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) CHECK(checkedFuture.get());
+		CHECK(worker->Stop(false));
+		CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+		NativeValue = {};
+	}
+	std::printf("ARCHIVE_STARTUP_UNAVAILABLE_MODES=4\n");
+}
+
+void NativeStartupPurgeRenewal() {
+	Section = "published purge retires startup generation before renewal";
+	auto temporary = QTemporaryDir();
+	auto options = StartupOptions(temporary.path());
+	auto entered = std::promise<void>(); auto enteredFuture = entered.get_future();
+	auto openGate = std::promise<void>(); auto openFuture = openGate.get_future().share();
+	options.authorityReady = [&] { entered.set_value(); openFuture.wait(); return true; };
+	auto first = std::promise<std::shared_ptr<DesktopArchiveJournal>>(); auto firstFuture = first.get_future();
+	auto renewed = std::promise<std::shared_ptr<DesktopArchiveJournal>>(); auto renewedFuture = renewed.get_future();
+	auto readyCount = std::atomic<int>(0);
+	NativeValue = {};
+	NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
+		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto journal) {
+			const auto index = readyCount.fetch_add(1);
+			if (!index) first.set_value(journal);
+			else if (index == 1) renewed.set_value(journal);
+		});
+	auto worker = NativeValue.worker;
+	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+	auto prepared = std::promise<DesktopArchivePurgePreview>(); auto preparedFuture = prepared.get_future();
+	auto release = std::promise<void>(); auto releaseFuture = release.get_future().share();
+	CHECK(worker->Post([&](DesktopArchiveStore &store) {
+		prepared.set_value(store.PreparePurge(ArchivePurgeKind::Trashbin, {{0,123}}));
+		releaseFuture.wait();
+	}));
+	auto session = ProbeSession();
+	NativeQueueArchiveObservation(&session, Event(Empty(), u"pre-purge-startup"_q, 0,
+		u"old generation"_q, ArchiveOrigin::Baseline, Key({0,123},45,18000)));
+	openGate.set_value();
+	CHECK(firstFuture.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	CHECK(preparedFuture.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	NativeValue.journal = firstFuture.get();
+	const auto initial = NativeValue.journal;
+	const auto preview = preparedFuture.get();
+	CHECK(preview.confirmation);
+	auto status = std::atomic<DesktopArchiveStatus>(DesktopArchiveStatus::Disabled);
+	auto permitted = std::make_shared<std::atomic<bool>>(true);
+	if (preview.confirmation) NativeExecuteArchivePurge(&session, *preview.confirmation,
+		permitted, [&](auto value) { status = value; });
+	CHECK(!initial->CaptureAllowed());
+	CHECK(!worker->PostStartupCapture(Event(Empty(), u"during-purge"_q, 0), 0));
+	release.set_value();
+	const auto completed = renewedFuture.wait_for(std::chrono::seconds(30)) == std::future_status::ready;
+	CHECK(completed);
+	if (completed) {
+		NativeValue.journal = renewedFuture.get();
+		CHECK(NativeValue.journal != initial);
+		CHECK(initial->WriterRetired());
+		CHECK(!initial->CaptureAllowed());
+		CHECK(NativeValue.journal->CaptureAllowed());
+		CHECK(initial->CaptureGeneration(Key({0,123},45,18000).chat)
+			!= NativeValue.journal->CaptureGeneration(Key({0,123},45,18000).chat));
+		CHECK(!worker->NeedsStartupCapture());
+		CHECK(status == DesktopArchiveStatus::Maintenance);
+		NativeQueueArchiveObservation(&session, Event(Empty(), u"post-purge-fresh"_q, 0,
+			u"fresh generation"_q, ArchiveOrigin::Baseline, Key({0,123},45,18001)));
+		auto checked = std::promise<bool>(); auto checkedFuture = checked.get_future();
+		CHECK(worker->Post([&](DesktopArchiveStore &store) {
+			checked.set_value(store.Versions(Key({0,123},45,18000)).versions.empty()
+				&& store.Versions(Key({0,123},45,18001)).versions.size() == 1);
+		}));
+		CHECK(checkedFuture.wait_for(std::chrono::seconds(15)) == std::future_status::ready);
+		if (checkedFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) CHECK(checkedFuture.get());
+		CHECK(readyCount == 2);
+	}
+	CHECK(worker->Stop(false)); CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+	NativeValue = {};
+	std::printf("ARCHIVE_STARTUP_POST_READY_PURGE_RENEWAL=1\n");
+}
+
+void NativeStartupReplacement() {
+	Section = "stopped startup worker cannot replay into successor";
+	auto temporary = QTemporaryDir();
+	auto options = StartupOptions(temporary.path());
+	auto entered = std::promise<void>(); auto enteredFuture = entered.get_future();
+	auto release = std::promise<void>(); auto releaseFuture = release.get_future().share();
+	options.authorityReady = [&] { entered.set_value(); releaseFuture.wait(); return true; };
+	auto oldReady = std::atomic<int>(0);
+	auto old = std::make_shared<NativeStartupWorker>(options,
+		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto) { ++oldReady; });
+	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+	CHECK(old->PostStartupCapture(Event(Empty(), u"replaced-startup"_q, 0,
+		u"must stay absent"_q, ArchiveOrigin::Baseline, Key({0,123},45,19000)), 0));
+	CHECK(old->NeedsStartupCapture());
+	CHECK(old->Stop(false));
+	CHECK(!old->NeedsStartupCapture());
+	release.set_value();
+	CHECK(old->WaitForStopped(std::chrono::seconds(5))); CHECK(oldReady == 0);
+	auto successorEntered = std::promise<void>(); auto successorEnteredFuture = successorEntered.get_future();
+	auto successorRelease = std::promise<void>(); auto successorReleaseFuture = successorRelease.get_future().share();
+	options.authorityReady = [&] { successorEntered.set_value(); successorReleaseFuture.wait(); return true; };
+	auto ready = std::promise<std::shared_ptr<DesktopArchiveJournal>>(); auto readyFuture = ready.get_future();
+	NativeValue = {};
+	NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
+		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto journal) { ready.set_value(journal); });
+	auto worker = NativeValue.worker;
+	CHECK(successorEnteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+	CHECK(!old->PostStartupCapture(Event(Empty(), u"late-old"_q, 0), 0));
+	auto session = ProbeSession();
+	NativeQueueArchiveObservation(&session, Event(Empty(), u"replacement-fresh"_q, 0,
+		u"successor only"_q, ArchiveOrigin::Baseline, Key({0,123},45,19001)));
+	auto checked = std::promise<bool>(); auto checkedFuture = checked.get_future();
+	CHECK(worker->Post([&](DesktopArchiveStore &store) {
+		checked.set_value(store.Versions(Key({0,123},45,19000)).versions.empty()
+			&& store.Versions(Key({0,123},45,19001)).versions.size() == 1);
+	}));
+	successorRelease.set_value();
+	CHECK(readyFuture.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	NativeValue.journal = readyFuture.get();
+	CHECK(checkedFuture.wait_for(std::chrono::seconds(15)) == std::future_status::ready);
+	if (checkedFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) CHECK(checkedFuture.get());
+	CHECK(worker->Stop(false)); CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+	NativeValue = {};
+	std::printf("ARCHIVE_STARTUP_REPLACEMENT=1\n");
+}
+
+void NativeStartupPayload() {
+	Section = "bounded large startup payload drain measured";
+	auto temporary = QTemporaryDir();
+	auto options = StartupOptions(temporary.path());
+	auto entered = std::promise<void>(); auto enteredFuture = entered.get_future();
+	auto release = std::promise<void>(); auto releaseFuture = release.get_future().share();
+	options.authorityReady = [&] { entered.set_value(); releaseFuture.wait(); return true; };
+	auto readyCount = std::atomic<int>(0);
+	auto worker = std::make_shared<NativeStartupWorker>(std::move(options),
+		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto) { ++readyCount; });
+	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+	for (auto i = 0; i != 2; ++i) CHECK(worker->PostStartupCapture(Event(Empty(),
+		u"large-startup-"_q + QString::number(i), 0, QString(1800000, u'x'),
+		ArchiveOrigin::Baseline, Key({0,123},45,20000+i)), 0));
+	auto checked = std::promise<int>(); auto checkedFuture = checked.get_future();
+	CHECK(worker->Post([&](DesktopArchiveStore &store) {
+		auto count = 0;
+		for (auto i = 0; i != 2; ++i) {
+			const auto rows = store.Versions(Key({0,123},45,20000+i));
+			count += rows.versions.size() == 1 && rows.versions.front().version.content.text.size() == 1800000;
+		}
+		checked.set_value(count);
+	}));
+	const auto started = std::chrono::steady_clock::now();
+	release.set_value();
+	const auto completed = checkedFuture.wait_for(std::chrono::seconds(60)) == std::future_status::ready;
+	CHECK(completed);
+	if (completed) CHECK(checkedFuture.get() == 2);
+	const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+	CHECK(readyCount == 1); CHECK(!worker->NeedsStartupCapture());
+	CHECK(worker->Stop(false)); CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+	std::printf("ARCHIVE_STARTUP_LARGE_PAYLOAD=2 chars=3600000 elapsed_ms=%lld\n", static_cast<long long>(elapsed));
 }
