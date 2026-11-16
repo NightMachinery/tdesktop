@@ -324,6 +324,140 @@ int Run() {
 }
 } // namespace FirstUseProbe
 
+#include <cstdint>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+#include <iostream>
+namespace PickupProbe {
+using QString = std::u16string;
+QString operator""_q(const char16_t *value, size_t size) { return QString(value, size); }
+struct Field { QString key; QString value; };
+struct Entry { QString action; QString reason; int count = 0; bool overflow = false; };
+std::vector<Entry> Entries;
+Field SyncDiagCode(QString key, QString value) { return {key, value}; }
+Field SyncDiagReason(QString value) { return {u"reason", value}; }
+Field SyncDiagCount(QString key, int64_t value) {
+    return {key, QString(1, char16_t(value))};
+}
+Field SyncDiagFlag(QString key, bool value) { return {key, value ? u"1" : u"0"}; }
+void SyncDiag(const QString &area, const QString &event, const std::vector<Field> &fields) {
+    if (area != u"sync_chat" || event != u"pickup" || fields.size() != 4) {
+        throw std::runtime_error("unexpected diagnostic shape");
+    }
+    if (fields[0].key != u"action" || fields[1].key != u"reason"
+        || fields[2].key != u"count" || fields[3].key != u"overflow") {
+        throw std::runtime_error("unexpected diagnostic fields");
+    }
+    Entries.push_back({fields[0].value, fields[1].value,
+        int(fields[2].value.at(0)), fields[3].value == u"1"});
+}
+struct Session {};
+struct Weak { Session *value = nullptr; Session *get() const { return value; } };
+struct Timer { int calls = 0; int lastDelay = 0; void callOnce(int delay) { ++calls; lastDelay = delay; } };
+enum class SyncAutoAction { NoOp, Post, EditInPlace };
+enum class SyncAutoEvent { ChatUpdated };
+struct Plan { SyncAutoAction action = SyncAutoAction::NoOp; };
+struct Local { int marker = 0; const int *state() const { return &marker; } };
+struct Store { Local value; Local &local() { return value; } };
+std::optional<int> Bound = 7;
+bool Enabled = true;
+bool Paused = false;
+bool Needed = true;
+int FilterCalls = 0;
+std::vector<int32_t> FilterIds;
+const int *FilterState = nullptr;
+std::optional<int> SyncMagicBound(Session *session) { return session ? Bound : std::nullopt; }
+bool AutomaticSettingsSyncEnabled(Session*) { return Enabled; }
+bool SyncMagicPaused(Session*) { return Paused; }
+bool SyncAutoPickupNeeded(int bound, int selected, const std::vector<int32_t> &ids, const int *state) {
+    if (bound != selected) { throw std::runtime_error("wrong route"); }
+    ++FilterCalls; FilterIds = ids; FilterState = state;
+    return Needed;
+}
+struct AutoSession {
+    Weak _session;
+    std::optional<int> _pickupChat = 7;
+    std::set<int32_t> _pickupIds = {11, 12};
+    bool _pickupOverflow = false;
+    bool _firstRunning = false;
+    bool _inFlight = false;
+    bool open = true;
+    int opens = 0;
+    int events = 0;
+    Plan _plan;
+    Timer _pickup;
+    Store storage;
+    Store *_store = &storage;
+    bool Open() { ++opens; return open; }
+    void Event(SyncAutoEvent) { ++events; }
+    void Pickup();
+};
+#include "sync-pickup.inc"
+
+int Run() {
+    auto checks = 0, failures = 0;
+    const auto expect = [&](bool ok, const char *why) {
+        ++checks;
+        if (!ok) { ++failures; std::cerr << why << '\n'; }
+    };
+    for (auto mode = 0; mode != 14; ++mode) {
+        Session session;
+        AutoSession value;
+        value._session.value = &session;
+        Bound = 7; Enabled = true; Paused = false; Needed = true;
+        Entries.clear(); FilterIds.clear(); FilterState = nullptr; FilterCalls = 0;
+        if (mode == 0) { value._session.value = nullptr; }
+        if (mode == 1) { Bound.reset(); }
+        if (mode == 2) { Bound = 8; }
+        if (mode == 3) { Enabled = false; }
+        if (mode == 4) { Paused = true; }
+        if (mode == 5) { value._firstRunning = true; }
+        if (mode == 6) { value._inFlight = true; value._plan.action = SyncAutoAction::Post; }
+        if (mode == 7) { value._inFlight = true; value._plan.action = SyncAutoAction::EditInPlace; }
+        if (mode == 8) { Needed = false; }
+        if (mode == 9) { value._pickupOverflow = true; Needed = false; }
+        if (mode == 10) { value.open = false; }
+        if (mode == 11) { value._inFlight = true; }
+        if (mode == 12) { value._pickupIds.clear(); Needed = false; }
+        if (mode == 13) {
+            value._pickupIds.clear();
+            for (auto id = 1; id <= 128; ++id) { value._pickupIds.insert(id); }
+            value._pickupOverflow = true;
+        }
+        const auto beforeIds = value._pickupIds;
+        const auto beforeOverflow = value._pickupOverflow;
+        value.Pickup();
+        const auto refused = mode < 5;
+        const auto deferred = mode >= 5 && mode <= 7;
+        const auto suppressed = mode == 8 || mode == 12;
+        expect(value.events == (!refused && !deferred && !suppressed), "original check admission unchanged");
+        expect(value.opens == (!refused && !deferred), "original store access unchanged");
+        expect(value._pickup.calls == deferred && (!deferred || value._pickup.lastDelay == 500), "existing deferral interval unchanged");
+        expect(value._pickupIds == (deferred ? beforeIds : std::set<int32_t>{}), "pending IDs preserved only while deferred");
+        expect(value._pickupOverflow == (deferred && beforeOverflow), "overflow retained only while deferred");
+        expect(FilterCalls == (!refused && !deferred && !beforeOverflow), "own-record filter bypassed only by overflow");
+        if (FilterCalls) {
+            expect(FilterIds == std::vector<int32_t>(beforeIds.begin(), beforeIds.end()), "filter receives exact ID set");
+            expect((FilterState != nullptr) == value.open, "filter receives the original store-state availability");
+        }
+        expect(Entries.size() == 1, "pickup emits one bounded diagnostic per decision");
+        if (Entries.size() == 1) {
+            const auto &entry = Entries.front();
+            expect(entry.action == (refused || suppressed ? u"rejected" : deferred ? u"wait" : u"requested"), "fixed decision action");
+            expect(entry.reason == (refused ? u"ineligible" : deferred ? u"busy" : suppressed ? u"own_records" : beforeOverflow ? u"overflow" : u"remote_update"), "fixed decision reason");
+            expect(entry.count == int(beforeIds.size()) && entry.count <= 128, "only bounded pending count is recorded");
+            expect(entry.overflow == beforeOverflow, "overflow fact captured before queue consumption");
+        }
+    }
+    std::cout << (checks - failures) << '/' << checks << " source-bound pickup diagnostic and behavior checks passed\n";
+    return failures;
+}
+}
+
 int main(int argc, char **argv) {
     auto app = QApplication(argc, argv);
     using namespace Probe;
@@ -486,5 +620,6 @@ int main(int argc, char **argv) {
     std::cout << (checks - failures) << '/' << checks << " actual registered sync backstop checks passed\n";
     Sessions.clear(); domain.entries.clear();
     failures += FirstUseProbe::Run();
+    failures += PickupProbe::Run();
     return failures ? 1 : 0;
 }

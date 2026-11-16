@@ -164,7 +164,7 @@ CASES = {
     },
     'sync-auto-service': {
         'program': 'sync_auto_service_cases.cpp',
-        'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc'],
+        'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc', 'sync-pickup.inc'],
         'syntax_units': ['purple/purple_sync_auto_service.cpp', 'purple/purple_sync_setup_box.cpp'],
         'units': [],
         'libraries': ['Telegram/lib_base/liblib_base.a'],
@@ -427,6 +427,10 @@ def sync_auto_service_include(sources):
         result += function(text, signature) + '\n'
     return result.replace('Main::Session', 'Session').replace('crl::on_main(', 'OnMain(').replace('crl::now()', 'ClockNow()').replace('MTP::Instance', 'void')
 
+def sync_pickup_include(sources):
+    text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
+    return function(text, 'void AutoSession::Pickup(')
+
 def sync_first_use_boundary_include(sources):
     text = (sources / 'purple/purple_sync_auto_service.cpp').read_text()
     result = function(text, 'void AutoSession::FirstUse(') + '\n' + function(text, 'bool AutoSession::NoStateEvent(')
@@ -670,6 +674,7 @@ for name in case.get('generated', []):
         'music-listening-tracker.inc': music_listening_include,
         'recording-bin.inc': recording_bin_include,
         'sync-auto-service.inc': sync_auto_service_include,
+        'sync-pickup.inc': sync_pickup_include,
         'sync-first-use-boundary.inc': sync_first_use_boundary_include,
         'sync-setup-status.inc': sync_setup_status_include,
         'recording-store-startup.inc': recording_startup_include,

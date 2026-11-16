@@ -500,12 +500,28 @@ void AutoSession::Updated(PeerToken chat, int32_t id) {
 }
 
 void AutoSession::Pickup() {
+	const auto note = [count = _pickupIds.size(), overflow = _pickupOverflow](
+			const QString &action,
+			const QString &reason) {
+		SyncDiag(u"sync_chat"_q, u"pickup"_q, {
+			SyncDiagCode(u"action"_q, action),
+			SyncDiagReason(reason),
+			SyncDiagCount(u"count"_q, count),
+			SyncDiagFlag(u"overflow"_q, overflow),
+		});
+	};
 	const auto session = _session.get();
 	const auto bound = session ? SyncMagicBound(session) : std::nullopt;
 	if (!bound || bound != _pickupChat || !AutomaticSettingsSyncEnabled(session)
-		|| SyncMagicPaused(session)) { _pickupIds.clear(); _pickupOverflow = false; return; }
+		|| SyncMagicPaused(session)) {
+		note(u"rejected"_q, u"ineligible"_q);
+		_pickupIds.clear();
+		_pickupOverflow = false;
+		return;
+	}
 	if (_firstRunning || (_inFlight && (_plan.action == SyncAutoAction::Post
 		|| _plan.action == SyncAutoAction::EditInPlace))) {
+		note(u"wait"_q, u"busy"_q);
 		_pickup.callOnce(500);
 		return;
 	}
@@ -515,7 +531,10 @@ void AutoSession::Pickup() {
 	_pickupIds.clear();
 	const auto overflow = std::exchange(_pickupOverflow, false);
 	if (overflow || SyncAutoPickupNeeded(*bound, *_pickupChat, ids, state)) {
+		note(u"requested"_q, overflow ? u"overflow"_q : u"remote_update"_q);
 		Event(SyncAutoEvent::ChatUpdated);
+	} else {
+		note(u"rejected"_q, u"own_records"_q);
 	}
 }
 

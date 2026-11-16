@@ -29,6 +29,13 @@ Foreground/resume rechecks eligibility and replaces an overdue timer instead of
 replaying missed ticks. Sleep, suspension and process death cannot promise a
 wall-clock delivery deadline. A chat update also rechecks first use when no state exists.
 
+Pickup decisions emit a bounded diagnostic with an action, a fixed reason,
+the pending update count (at most 128), and an overflow flag. Ineligible updates
+and own-record acknowledgements are rejected; a busy first-use or publisher
+defers the same batch; remote or overflowing batches request the existing check.
+No account, chat or message identifier is logged. Existing repeat suppression
+applies. These events describe pickup admission, not successful remote delivery.
+
 ## Delivery when the sync chat stays closed
 
 Mute and archive control notifications and list placement, not the message update

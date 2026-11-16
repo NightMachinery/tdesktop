@@ -44,6 +44,16 @@ int main() {
 		SyncDiagSeconds(42),
 	});
 	expect(request == u"sync_chat request method=channels.createchannel outcome=flood seconds=42"_q, "a request line");
+	expect(SyncDiagToken(u"pickup"_q) == u"pickup"_q, "pickup is a vocabulary word");
+	expect(SyncDiagToken(u"overflow"_q) == u"overflow"_q, "overflow is a vocabulary word");
+	expect(SyncDiagToken(u"remote_update"_q) == u"remote_update"_q, "remote_update is a vocabulary word");
+	const auto pickup = SyncDiagLine(u"sync_chat"_q, u"pickup"_q, {
+		SyncDiagCode(u"action"_q, u"requested"_q),
+		SyncDiagReason(u"remote_update"_q),
+		SyncDiagCount(u"count"_q, 128),
+		SyncDiagFlag(u"overflow"_q, true),
+	});
+	expect(pickup == u"sync_chat pickup action=requested reason=remote_update count=128 overflow=1"_q, "a pickup line");
 	const auto smuggled = SyncDiagLine(u"sync_chat"_q, u"lookup_result"_q, {
 		SyncDiagReason(u"Family group"_q),
 	});

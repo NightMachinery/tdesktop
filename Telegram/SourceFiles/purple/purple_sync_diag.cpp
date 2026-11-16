@@ -51,6 +51,7 @@ const std::vector<QString> &Words() {
 		u"this_device"_q, u"none"_q, u"carry"_q, u"apply"_q, u"mark"_q,
 		u"busy"_q, u"unbound"_q, u"chat_unavailable"_q, u"incomplete"_q, u"account_changed"_q,
 		u"recovery_journal"_q, u"files_unwritable"_q, u"archive_refused"_q, u"settings_invalid"_q,
+		u"pickup"_q, u"overflow"_q, u"remote_update"_q,
 		u"publish_unconfirmed"_q, u"publish_refused"_q, u"apply_refused"_q,
 	};
 	return result;
