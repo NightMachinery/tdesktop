@@ -6,13 +6,18 @@ bounded gzip records, record discovery, verified cover checks and complete
 sync-step planning. Its contract and focused tests are described in
 [the core playlist documentation](../../Telegram/ThirdParty/purple_core/docs/playlists.md).
 
-The Desktop build adds account-local playlist menus and basic saved-order
-playback. The integration is production-compiled; complete host and native/GUI
-qualification remain pending. The private queue-mode proposal below adds global
-order and repeat; queue panels, downloads, sync transport
-and Android parity remain to be implemented.
-Sharing is deferred, and changing the sync chat does not clean records from the
-old chat.
+Desktop includes account-local playlist menus, saved-order playback, global
+order and repeat modes, a virtual song list, player-bar navigation, owned
+downloads, managed-cache downloads and reference-based retention maintenance.
+The integrated source passed production compilation and the complete 66-gate
+host campaign. Its fixtures include real temporary-file and encrypted-cache
+execution. These results do not establish live Telegram resolution, audible
+playback, application lifetimes, download UI or timer behavior in the app.
+
+Application playback and UI qualification, playlist sync transport, Android
+playlist parity and the Windows kept-file backend remain unfinished. Sharing
+is deferred, and changing the sync chat does not clean records from the old
+chat. The source is qualified separately from packaged builds and installation.
 
 The gzip codec uses the existing `desktop-app::external_zlib` dependency.
 Playlist sources are registered in `Telegram/cmake/purple.cmake`, alongside
@@ -114,13 +119,14 @@ when opened, and reject stale source messages and late callbacks.
 Purple-owned boxes reuse stock settings buttons, single-line inputs, labels and
 box spacing. The UI calls the global `::Settings` helpers and uses the stock
 `lng_settings_save` phrase and `window.style` main-menu button.
-The library and recently deleted view use pages of at most 25 entries. The
-private virtual-list proposal below replaces pagination in song detail.
+The library and recently deleted view use pages of at most 25 entries. Song
+detail uses the virtual list described below.
 Create, rename, copy, delete, restore, remove, reorder and structured Undo submit
 typed account-worker edits and display the confirmed reloaded snapshot.
 Songs retain saved title, performer and duration without requiring their source
 to resolve. Display order comes from the shared core, not the song map's order.
-Drag reorder and the virtual list remain uncompiled until separately qualified.
+Drag reorder and the virtual list are production-compiled; native interaction
+and rendering checks remain pending.
 
 `RecordAccountPlaylistUse` is a separate typed worker request. Open, play and add
 update local recent-use order without changing sync bookkeeping. Its guarded
@@ -133,12 +139,13 @@ The UI delegates Play, song selection, Retry and playback status to the separate
 `purple_playlist_player` adapter. UI lifetime does not own playback. The adapter
 owns source resolution and stock player navigation, including the existing
 global order and repeat controls. This interface requires the player adapter
-along with the UI. Queue panels, retained downloads, sync transport and sharing
-are unfinished. The sync line says local-only rather than claiming a sync succeeded.
+along with the UI. Retained downloads have their own controls below. Sync
+transport and sharing remain unfinished. The sync line says local-only rather
+than claiming a sync succeeded.
 
 The shared settings scope registry makes `menu_item_p`, `keep_downloaded_p` and
 private listening app-wide. Automatic playlist sync is per account; its local
-sync switch is per account and device. Future downloads use per-playlist
+sync switch is per account and device. Downloads use per-playlist
 On/Off/Inherit plus the global default and Remove downloads now. Changing sync
 chat will publish a snapshot without removing old-chat records. Sharing is for a
 later release.
@@ -182,8 +189,9 @@ Retry required; order changes do not silently retry a failed source or stream.
 Repeat changes update wrapping without rewriting the library. Snapshot edits take effect only
 on the next Play. Status document identity and row index continue to refer to
 the original visible snapshot rather than a shuffled traversal position.
-Queue panel contents, virtual drag, download management, sync and sharing
-remain follow-ups.
+The separate playlist detail view provides virtual rows and drag reorder;
+the player bridge suppresses the unrelated chat hover list for an owned song.
+Download controls are described below. Sync and sharing remain follow-ups.
 
 The status producer and start/retry/stop API capture the selected session,
 account and routing authority. UI/controller destruction does not own ongoing
@@ -201,8 +209,7 @@ resolution classification, bounded-window and handoff authority helpers. It
 covers saved order,
 exhaustion, explicit transient retry admission, stale generation, retired and
 destroyed authority, and forward/backward windows. Production adapter/player
-syntax checks are registered separately. The fixture has compiled, but its host
-qualification is pending. It does not prove real RPC, stock streaming, actual
+syntax checks are registered separately. The fixture passes in the complete host campaign. It does not prove real RPC, stock streaming, actual
 session destruction or synchronous player observer behavior; native integration
 and lifetime checks remain required before shipping.
 
@@ -251,8 +258,8 @@ Song callback scopes defer a synchronous successor until native mutation ends,
 and a stream delivery token rejects retired callbacks. Guard checks after end
 notification and timer publication prevent the old frame from consuming or
 clearing the successor. Held seek intent remains item-bound; timer expiry blocks
-automatic resume while explicit Play can resume. This composition has only static
-review and still requires production compilation and real streaming traces.
+automatic resume while explicit Play can resume. This composition is production-compiled and host-qualified. Real streaming
+traces remain required.
 
 ## Sleep expiry and pending playback
 
@@ -284,10 +291,11 @@ the enclosing one. The timer's own pause consumes a one-shot Pause token first;
 it does not cancel a manual resume requested after expiry. This distinguishes
 actual pause intent without changing the existing Play/Stop tokens.
 
-## Queue-mode candidate qualification
+## Queue-mode qualification
 
-The queue-mode extension is a private source proposal, not native qualification.
-The existing helper fixture gains deterministic order/permutation checks,
+The integrated queue-mode extension passes its host fixture. This is not
+application playback qualification. The fixture covers deterministic
+order/permutation checks,
 selected-row reverse traversal, wrapped availability, one/empty-song behavior,
 all-unavailable cycle termination and unique bounded wrapped lookahead. Old
 cursor, handoff, timer and token assertions are retained. The same driver also
@@ -317,9 +325,9 @@ leave stock navigation alone. Its existing chat-history window remains; the extr
 would otherwise run even though Purple never uses it. Ordinary chat shuffle and
 Voice retain their stock behavior.
 
-Later validation must compile the changed player, native hook and stock box,
-then run the existing fixture and real queue traces across all order/repeat
-combinations. Native checks must cover selected-first playback, live mode
+The changed player, native hook and stock box are production-compiled and the
+fixture passes. Real queue traces across all order/repeat combinations remain
+required. Native checks must cover selected-first playback, live mode
 changes during held resolutions, actual shuffle randomness and chat-request
 suppression, final/empty/unavailable boundaries, Repeat One and autoplay order,
 and timer expiry followed by manual advance/resume. Helper assertions do not
@@ -334,10 +342,9 @@ an unowned playlist attempt while a chat song plays, enable Shuffle, retire the
 attempt by route change and verify the chat pager/navigation remain intact.
 Owned playlist handoff, no active controller and Voice are comparison cases.
 
-## Virtual detail list proposal
+## Virtual detail list
 
-The private detail-list proposal replaces song pagination with one painted
-content widget under the stock media-player ScrollArea. It paints the clipped
+Song detail replaces pagination with one painted content widget under the stock media-player ScrollArea. It paints the clipped
 row range and retains metadata rather than a widget per song. The row uses
 mediaPlayerFileLayout padding, thumbnail/play glyph, normal and semibold fonts,
 stock window colours and the menu reorder glyph. The extra source-state line
@@ -356,7 +363,7 @@ snapshot replaces saved order. The existing confirmed Undo record restores it
 with the core conflict checks. Refresh and navigation are serialized with edits.
 Account, route, controller, box lifetime and reply generation guards remain.
 Playback continues using its immutable queue until another Play. No store,
-worker, playback facade or timer API changes are proposed.
+worker, playback facade or timer API changes are needed for this view.
 
 ShowPlaylistBox(controller, playlistId, focusedDocumentId) opens and reads the
 bound account playlist, then reveals/focuses a matching saved row. Focus never
@@ -366,10 +373,11 @@ ShowPlaylistsBox remains the library entry.
 Source state is limited to the public playback status for its reported row;
 other rows say Source not checked. There is no background availability scan or
 invented downloaded mark. Current means a delivered playlist row whose document
-still matches the native Song player, including a paused item. This proposal
-adds no downloads, sync, sharing, queue panel or new playback modes.
+still matches the native Song player, including a paused item. The list itself
+does not scan sources or start downloads; download controls are separate.
 
-Native compilation and a real 2,000-row performance/GUI pass remain required:
+Production compilation has passed. A real 2,000-row performance/GUI pass remains
+required:
 long and RTL metadata, light/dark comparison with stock player rows, keyboard
 and assistive activation, drag across viewport edges, cancellation, concurrent
 membership changes, failed/partial writes, Undo conflict, account/route loss,
@@ -501,10 +509,11 @@ marks remain kept-file checks and are not invented for managed-cache rows.
 
 Native Reader admission is positive size at most 510 times 8 MiB (4,278,190,080
 bytes), including the native 32-bit addition bound. Larger sizes or a missing
-native document cache key return typed Unsupported. This is a source proposal
-pending compilation and real cache/loader/UI qualification. Windows owned kept
-file operations, automatic post-edit prune wiring and the previously documented
-recovery limits remain open. No native result is implied by helper checks.
+native document cache key return typed Unsupported. The implementation is production-compiled and its real encrypted-cache fixture
+passes. Cloud transfer ownership and UI behavior in the application still need
+native validation. Windows owned kept-file operations and the documented
+recovery limits remain open. Post-edit pruning is integrated as described below;
+host cache execution does not establish application download behavior.
 
 
 ### Download controls
@@ -528,18 +537,18 @@ can invalidate it. Refresh or another check clears stale observations. Inventory
 presence alone never creates a downloaded mark, and opening the list does not
 hash every song.
 
-This private UI slice depends on the owned-transfer adapter's terminal progress
-and read-only Verify API. Its compilation, worker integration, actual cloud
-transfers and stock light/dark/RTL/accessibility comparisons are not yet proven.
-Managed-cache completion, Windows file handling and automatic pruning retain
-their separate qualification requirements.
+These controls use the owned-transfer adapter's terminal progress and read-only
+Verify API. Production compilation and host worker integration pass; actual cloud
+transfers and stock light/dark/RTL/accessibility comparisons remain unverified.
+Managed-cache completion is covered by a real encrypted-cache fixture, while
+application behavior and Windows file handling need separate qualification.
 
-The download composition registers two additional host configurations while
-retaining all 63 prior configurations and variants. cases-playlist-download-policy
-executes the real codec, reference and ticket-policy fixture; cases-playlist-owned-files
-executes owned staging, digest, publication, recovery and removal against a
-private QTemporaryDir. Neither is a native cloud, reader-ownership or GUI test.
-The resulting 65-gate campaign remains unrun.
+The complete 66-gate host campaign includes `cases-playlist-download-policy`,
+`cases-playlist-owned-files` and `cases-playlist-managed-cache`, preserving the
+earlier configurations and variants. They execute the real codec, reference
+and ticket policy, owned staging/digest/publication/recovery/removal against a
+private QTemporaryDir, and real encrypted-cache Reader/LoaderLocal behavior.
+These fixtures do not establish cloud transfer ownership or GUI behavior.
 
 Download status labels use the ordinary `{amount}` placeholder. The language
 generator reserves `{count}` for plural keys, so these numeric summaries and
@@ -566,8 +575,8 @@ confirmed merge. Native I/O failure and route-retirement checks remain part of
 qualification. The service fixture includes actual owned publication, sole
 reference removal, another Recently deleted reference and final purge cases.
 
-The retention service fixture also drafts a changed-digest refusal and an
-already-missing-file cleanup. Confirmed edits and Undo stay available when
+The passing retention service fixture also covers a changed-digest refusal and
+an already-missing-file cleanup. Confirmed edits and Undo stay available when
 a mismatched file is retained. Temporary-directory setup failure refuses
 all fixture I/O before a fallback path can escape the private test root.
 
@@ -583,7 +592,7 @@ authority semantics and still needs its own cancellation audit.
 The managed-cache fixture refuses invalid temporary-directory setup before any
 file path is formed. Asynchronous database completion state is shared with its
 callbacks, so a bounded wait failure cannot leave a callback referring to an
-unwound stack variable. These checks still require actual native execution.
+unwound stack variable. This fixture has passed actual host execution.
 Its native reader links the archive loader's bounded-fill methods and xxHash
 alongside the encrypted cache objects.
 
@@ -596,5 +605,8 @@ link. A cancellation observed before that boundary preserves the stage and
 publishes no new final name. Retirement after the link may leave a published
 file plus its durable intent for explicit recovery; it cannot claim inventory
 commit or successful delivery. This does not provide an atomic compare-and-link
-against an unrelated external filesystem writer. The source correction and
-added real-file fixture still need compilation and native execution.
+against an unrelated external filesystem writer. The production correction and
+real-file fixture pass compilation and host execution. A separate native file
+regression revokes authority immediately after a successful fsync and verifies
+that no final link is created; removing only the final guard fails the unchanged
+assertions. Application cancellation timing remains unverified.
