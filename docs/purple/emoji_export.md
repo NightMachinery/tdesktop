@@ -66,9 +66,9 @@ Each PNG is replaced atomically before the catalog is replaced atomically.
 At publication, catalog entries reference existing PNGs. A consumer retaining
 an old catalog across replacement must reload it or tolerate a missing old PNG. Owned PNG files absent from the
 new catalog are removed afterwards in pages of at most 256 directory entries per
-publication; subsequent publications continue the scan. Unrelated files are preserved. A storage
-failure revokes the output and stops that exporter until the setting is toggled
-or the primary session changes. Symlink export directories are refused.
+publication; subsequent publications continue the scan. Unrelated files are preserved.
+A storage failure pauses export and schedules recovery without clearing the last
+published catalog or artwork. Symlink export directories are refused.
 
 The export directory is in the user's own space. Processes running as that same
 user are trusted: they can already write these files directly. Before each
@@ -208,6 +208,15 @@ equal mtimes and per-step/index limits run on the production worker.
 It also retains a request whose rendered file vanished. All nine programs are registered as the
 `test_emoji_large` configuration in the canonical host gate list. The existing
 emoji export, async and shutdown configurations remain required.
+
+## Storage failure recovery
+
+A failed local write pauses export for 30 seconds using the monotonic clock.
+Existing artwork and the last published catalog remain available to local tools.
+The periodic worker then starts a fresh pass without requiring a settings toggle
+or account switch. Metadata flood waits and per-document cooldowns survive this
+retry. Disabling export, changing the primary account, logout and lock-policy
+revocation still clear output through the existing generation barriers.
 
 ## Upstream hooks
 

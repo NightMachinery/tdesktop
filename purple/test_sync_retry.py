@@ -92,6 +92,8 @@ while depth:
     depth += (publish[end] == '{') - (publish[end] == '}')
     end += 1
 (work / 'emoji-publication-completion.inc').write_text(publish[start:end])
+(work / 'emoji-output-retry.inc').write_text('\n'.join(member(emoji, signature).replace('EmojiExporter::', 'EmojiOutputProbe::') for signature in ['void EmojiExporter::outputFailed(', 'void EmojiExporter::retryOutput(']))
+(work / 'emoji-output-retry-constant.inc').write_text(next(line for line in emoji.splitlines() if line.startswith('constexpr auto kOutputRetryMs = ')) + '\n')
 constant = next(line for line in emoji.splitlines() if line.startswith('constexpr auto kDebounceMs = '))
 (work / 'emoji-publication-constant.inc').write_text(constant + '\n')
 

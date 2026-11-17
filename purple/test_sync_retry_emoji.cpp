@@ -79,6 +79,30 @@ struct EmojiPublicationProbe {
 #include "emoji-publication-completion.inc"
 };
 
+#include "emoji-output-retry-constant.inc"
+
+struct EmojiOutputProbe {
+	struct Clock { qint64 value = 0; qint64 elapsed() const { return value; } } _clock;
+	EmojiExportQueue _queue;
+	std::shared_ptr<const std::vector<int>> _published = std::make_shared<const std::vector<int>>(1, 42);
+	bool _outputFailed = false;
+	qint64 _outputRetryAt = 0;
+	bool cached = true;
+	bool bound = true;
+	int clears = 0;
+	int rearms = 0;
+	void revoke(bool clear = true) {
+		bound = false;
+		_queue.clear();
+		_published = std::make_shared<const std::vector<int>>();
+		if (clear) { cached = false; ++clears; }
+		else ++rearms;
+	}
+	void outputFailed();
+	void retryOutput();
+};
+#include "emoji-output-retry.inc"
+
 struct EmojiRequestRun {
 	SyncRequestSender sender;
 	EmojiExporterProbe exporter;
@@ -272,6 +296,37 @@ int main() {
 		Check(r._queue.resolve(42, 60000) == EmojiResolveAdmission::Ready, "permanent-only metadata is admitted after cooldown");
 		r._queue.succeeded(42); r.complete();
 		Check(r._debounce.starts == 1 && !r._pending, "successful permanent-only retry leaves no publication timer");
+	}
+	{
+		auto r = EmojiOutputProbe();
+		r._queue.begin({42}, {});
+		r._queue.transient(120, 0, 0);
+		r._queue.failed(42, 0);
+		const auto published = r._published;
+		r.outputFailed();
+		Check(r.cached && r.bound && r.clears == 0, "output failure preserves cached library and revocation scope");
+		Check(r._outputFailed && r._outputRetryAt == 30000, "output failure arms bounded monotonic retry");
+		for (auto i = 0; i < 30; ++i) {
+			r._clock.value = i * 1000;
+			r.retryOutput();
+		}
+		Check(r.rearms == 0 && r._outputFailed, "output failure does not retry on each poll");
+		r._clock.value = 30000;
+		r.retryOutput();
+		Check(!r._outputFailed && r.rearms == 1 && r.cached && !r.bound, "output retry rearms fresh work without clearing cache");
+		Check(r._published == published && r._queue.metadataRetryAt() == 120000
+			&& r._queue.cooling(42, 30000), "output retry preserves artwork and metadata cooldowns");
+		r.retryOutput();
+		Check(r.rearms == 1, "output retry rearms once");
+		r.outputFailed();
+		r._clock.value = 59000;
+		r.retryOutput();
+		Check(r.rearms == 1 && r._outputFailed, "repeated output failure gets a fresh retry deadline");
+		r.revoke();
+		Check(!r.cached && r.clears == 1 && r._published->empty(), "disable or account revocation still clears failed output");
+		r._clock.value = 60000;
+		r.retryOutput();
+		Check(!r.cached && r._published->empty() && !r._queue.metadataRetryAt(), "retry cannot resurrect revoked artwork or metadata");
 	}
 	std::cout << "EMOJI TRANSIENT " << Checks << " checks, " << Failures << " failures\n";
 	return Failures ? 1 : 0;

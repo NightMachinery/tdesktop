@@ -45,6 +45,7 @@ namespace Purple {
 namespace {
 
 constexpr auto kDebounceMs = 5000;
+constexpr auto kOutputRetryMs = 30000;
 constexpr auto kTaskTimeoutMs = 30000;
 constexpr auto kMaxEntries = 100000;
 constexpr auto kMaxResolvesPerSlice = 100;
@@ -90,6 +91,7 @@ private:
 	void pump();
 	void next();
 	void outputFailed();
+	void retryOutput();
 	void checkMedia();
 	void resolve();
 	void maintainRequests();
@@ -111,6 +113,7 @@ private:
 	QTimer _continuation;
 	QTimer _debounce;
 	QElapsedTimer _clock;
+	qint64 _outputRetryAt = 0;
 	EmojiExportQueue _queue{ kMaxResolvesPerSlice };
 	EmojiSetTitleCache _setTitles;
 	std::set<quint64> _largeIds;
@@ -226,7 +229,8 @@ EmojiExporter::EmojiExporter()
 
 bool EmojiExporter::admitted() const {
 	const auto session = _session.get();
-	return !Core::Quitting() && session && EmojiExportEnabled() && ControlEmojiAllowedWhileLocked()
+	return !Core::Quitting() && !_outputFailed && session
+		&& EmojiExportEnabled() && ControlEmojiAllowedWhileLocked()
 		&& Core::App().maybePrimarySession() == session
 		&& !session->account().loggingOut() && _clean;
 }
@@ -259,6 +263,7 @@ void EmojiExporter::reconcile() {
 	if (_bound && (!desired || desired != _session.get())) {
 		revoke();
 	}
+	retryOutput();
 	if (!_clean && !_cleanupPending && !_outputFailed) {
 		resetOutput(true);
 	}
@@ -347,7 +352,7 @@ void EmojiExporter::resetOutput(bool clear) {
 		if (generation != _workerGeneration) return;
 		_cleanupPending = false;
 		_clean = ok;
-		if (!ok) _outputFailed = true;
+		if (!ok) outputFailed();
 		if (!Core::Quitting()) reconcile();
 	});
 }
@@ -802,8 +807,18 @@ void EmojiExporter::deferred(mtpRequestId request, const SyncRequestTransient &t
 }
 
 void EmojiExporter::outputFailed() {
-	revoke();
 	_outputFailed = true;
+	_outputRetryAt = _clock.elapsed() + kOutputRetryMs;
+}
+
+void EmojiExporter::retryOutput() {
+	if (!_outputFailed || _clock.elapsed() < _outputRetryAt) return;
+	auto queue = std::move(_queue);
+	const auto published = _published;
+	_outputFailed = false;
+	revoke(false);
+	_queue = std::move(queue);
+	_published = published;
 }
 
 void EmojiExporter::next() {
