@@ -610,3 +610,14 @@ real-file fixture pass compilation and host execution. A separate native file
 regression revokes authority immediately after a successful fsync and verifies
 that no final link is created; removing only the final guard fails the unchanged
 assertions. Application cancellation timing remains unverified.
+
+## Shared download policy
+
+Desktop and Android compile the same download inventory codec and two-active-job
+policy from purple-core. Desktop's existing source and header entry points forward
+to those shared units, so its standalone fixture recipes exercise the same code.
+The Desktop inventory stays in `desktop_playlist_downloads`; Android uses its own
+member and cannot adopt a Desktop filesystem identity. Cleanup markers and unknown
+fields remain client-local. Retention follows explicit download actions.
+
+This integration still needs a fresh full Desktop campaign and application checks.
