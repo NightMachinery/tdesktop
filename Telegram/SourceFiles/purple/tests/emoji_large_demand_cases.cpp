@@ -40,6 +40,7 @@ public:
 	void checkMedia() {}
 	void outputFailed() { ++errors; }
 	void admitRequests(const std::vector<quint64> &) {}
+	void revoke(bool) { Check(false, "demand fixture output remains present"); }
 
 	QString _directory;
 	EmojiExportWorker _worker;
@@ -59,6 +60,8 @@ public:
 	struct Timer { void start(int) {} } _debounce;
 	bool _rendering = false;
 	bool _publishPending = false;
+	bool _outputPublished = false;
+	size_t _healthCursor = 0;
 	bool _pending = false;
 	bool _running = false;
 	bool _scanDue = false;
