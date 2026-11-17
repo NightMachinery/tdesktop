@@ -184,7 +184,7 @@
     {
       "name": "test_wait",
       "driver": "purple/test_wait.py",
-      "coverage": "Wait and presence policy, key isolation and production cover focus teardown",
+      "coverage": "Account-scoped Peek, wait and focus policy, key isolation and production cover focus teardown",
       "compiles": true,
       "args": [
         "--build-dir",

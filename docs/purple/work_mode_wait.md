@@ -294,3 +294,15 @@ original input receives it, or the list keeps focus, without opening search.
   Repeat with Enter. Verify Peek starts and focus returns to the original widget.
 - Open a wait from an editor, then close or hide the original editor before
   ending the wait. Confirm search never becomes the fallback.
+
+## Account-scoped Peek writers
+
+Desktop projects only the captured account's saved Peek into start and extension
+checks and stores only that account's result. Request snapshots ignore other
+accounts' Peek timers while still checking global preset and settings context.
+The central writer inventory also tracks `UpdatePeekState` and `SaveAccountPeek`.
+The reviewed direct writes are the captured activation adapter, lock/focus and
+expiry policy, and acknowledgement of that account's lock notice. Policy ends
+never grant access. Deliberate hidden-chat exit targets only the account whose
+Peek ended. The existing wait host driver extracts the actual account resolver,
+exit loop, request snapshot and focus monitor for multi-account regression cases.

@@ -55,7 +55,7 @@ key order all survive. `enabled   =    true   # keep ads away` comes back as
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
 focus-sync memory, the schedule's pause flag, the moment that pause runs out and
-its last target, the peek timer, the last seens read by trading, and the cached
+its last target, the per-account Peek timers, the last seens read by trading, and the cached
 resolution with its named lists' definitions. It is rewritten
 whenever any of that changes, carries no comments, and preserves nothing. That
 is the entire reason it is a separate file: state churns constantly, and it must
@@ -712,6 +712,23 @@ an extra view or in a folder whose tab is showing, was never hidden and stays.
 
 The rest - `[focus_sync]` and `[peek]` - is documented by the starter file the
 app writes on first run, which carries a commented example of each.
+
+### Per-account Peek state
+
+Each Desktop Peek is stored as an `[[account_peeks]]` entry in `state.toml`,
+keyed by the stable environment and account id:
+
+```toml
+[[account_peeks]]
+account = "0-123"
+active = true
+deadline_unix = 1800000000
+ended_by = ""
+```
+
+A missing entry means no Peek for that account. A zero deadline means until
+stopped. Desktop ignores the legacy shared Peek fields, whose owner cannot be
+identified safely, and does not send these device-local timers through sync.
 
 ### How long a peek lasts
 

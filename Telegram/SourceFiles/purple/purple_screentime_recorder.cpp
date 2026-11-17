@@ -453,7 +453,7 @@ void Recorder::checkPreset() {
 void Recorder::checkPeek() {
 	const auto peeking = Peeking();
 	const auto deadline = peeking
-		? (CurrentState().peekDeadlineUnix * 1000)
+		? (CurrentPeekState().peekDeadlineUnix * 1000)
 		: int64(0);
 	if (peeking == _peeking && deadline == _peekDeadlineMs) {
 		return;

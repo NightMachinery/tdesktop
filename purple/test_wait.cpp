@@ -1,6 +1,7 @@
 #include "purple/purple_wait_gate.h"
 #include "purple/purple_engine.h"
 #include "purple/purple_state.h"
+#include "purple/purple_local_choice.h"
 #include "purple/purple_splice.h"
 #include "purple/purple_wait_key_filter.h"
 
@@ -16,6 +17,7 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
 
+#include <algorithm>
 #include <cstdio>
 
 Q_GUI_EXPORT void qt_handleKeyEvent(
@@ -49,6 +51,428 @@ WaitResult Finish(WaitGate &gate, int64_t now) {
 	}
 	return gate.confirm(now + kWaitReadyGuard);
 }
+
+namespace AccountResolutionProbe {
+
+namespace Main {
+struct Session {
+	AccountKey key;
+	AccountWorkMode mode = AccountWorkMode::Own;
+};
+}
+template <typename T> using not_null = T;
+auto Saved = State();
+auto Clock = int64(1000);
+const State &CurrentState() { return Saved; }
+int64 NowUnix() { return Clock; }
+AccountKey SessionAccountKey(Main::Session *session) { return session->key; }
+AccountWorkMode AccountWorkModeForSession(Main::Session *session) { return session->mode; }
+Resolved NormalResolution() { auto result = Resolved(); result.normal = true; return result; }
+struct Gate {
+	Resolved _resolved;
+	std::map<QString, Resolved> _accountResolved;
+	const Resolved &resolved(not_null<Main::Session*> session);
+};
+
+#include "peek-account-resolution.inc"
+
+void Test() {
+	Saved = State();
+	Clock = 1000;
+	auto a = Main::Session{ { 0, 101 } };
+	auto b = Main::Session{ { 0, 202 } };
+	auto testServer = Main::Session{ { 1, 101 } };
+	auto gate = Gate();
+	gate._resolved.normal = false;
+	CHECK(StartPeek(Saved, Clock, 300));
+	CHECK(!gate.resolved(&a).peeking);
+	gate._accountResolved.clear();
+	auto first = AccountPeekState(Saved, u"0-101"_q);
+	CHECK(StartPeek(first, Clock, 60));
+	SaveAccountPeek(Saved, u"0-101"_q, first);
+	CHECK(gate.resolved(&a).peeking);
+	CHECK(!gate.resolved(&b).peeking);
+	CHECK(!gate.resolved(&testServer).peeking);
+	auto second = AccountPeekState(Saved, u"0-202"_q);
+	CHECK(StartPeek(second, Clock, 0));
+	SaveAccountPeek(Saved, u"0-202"_q, second);
+	Saved = ParseState(SerializeState(Saved), u"fixture"_q);
+	gate._accountResolved.clear();
+	CHECK(gate.resolved(&b).peeking);
+	CHECK(gate.resolved(&a).peeking);
+	Clock += 60;
+	gate._accountResolved.clear();
+	CHECK(!gate.resolved(&a).peeking);
+	CHECK(gate.resolved(&b).peeking);
+	b.mode = AccountWorkMode::Stock;
+	CHECK(gate.resolved(&b).normal);
+	CHECK(!gate.resolved(&b).peeking);
+	b.mode = AccountWorkMode::Own;
+	StopPeek(second);
+	SaveAccountPeek(Saved, u"0-202"_q, second);
+	gate._accountResolved.clear();
+	CHECK(!gate.resolved(&b).peeking);
+	CHECK(!gate.resolved(&a).peeking);
+}
+
+} // namespace AccountResolutionProbe
+
+namespace AccountCloseProbe {
+
+namespace Main {
+struct Session { AccountKey key; bool filtering = true; bool peeking = false; };
+}
+namespace Ui { struct RpWidget {}; }
+template <typename T> using not_null = T;
+struct PeerData { int id = 0; };
+struct History {
+	Main::Session *owner;
+	PeerData *peer;
+	bool hidden = true;
+	Main::Session &session() { return *owner; }
+};
+struct Chat { History *history; History *owningHistory() { return history; } };
+struct Controller {
+	Main::Session *owner;
+	History *history;
+	Main::Session &session() { return *owner; }
+	Chat activeChatCurrent() { return { history }; }
+};
+struct Window {
+	Controller *controller;
+	Controller *sessionController() { return controller; }
+};
+namespace Core {
+struct Application {
+	std::map<Ui::RpWidget*, Window*> windows;
+	std::vector<PeerData*> closed;
+	Window *findWindow(Ui::RpWidget *widget) { return windows[widget]; }
+	void closeChatFromWindows(PeerData *peer) { closed.push_back(peer); }
+};
+Application &App() { static auto result = Application(); return result; }
+}
+namespace ranges {
+bool contains(const std::vector<PeerData*> &peers, PeerData *peer) {
+	return std::find(peers.begin(), peers.end(), peer) != peers.end();
+}
+}
+auto Enabled = true;
+const Settings &ActiveSettings() {
+	static auto result = Settings();
+	result.peek.exitHiddenChats = Enabled;
+	return result;
+}
+bool Filtering(Main::Session *session) { return session->filtering; }
+bool Peeking(Main::Session *session) { return session->peeking; }
+bool Filtering() { return true; }
+bool Peeking() { return false; }
+bool ShouldExit(History *history) { return history->hidden; }
+AccountKey SessionAccountKey(Main::Session *session) { return session->key; }
+struct PendingWait {
+	std::vector<Ui::RpWidget*> _widgets;
+	void closeHiddenChats(const QString &account);
+};
+
+#include "peek-account-close.inc"
+
+void Test() {
+	Core::App() = Core::Application();
+	Enabled = true;
+	auto a = Main::Session{ { 0, 101 } };
+	auto b = Main::Session{ { 0, 202 } };
+	auto peerA = PeerData{ 1 };
+	auto peerB = PeerData{ 2 };
+	auto historyA = History{ &a, &peerA };
+	auto historyB = History{ &b, &peerB };
+	auto controllerA = Controller{ &a, &historyA };
+	auto controllerB = Controller{ &b, &historyB };
+	auto windowA = Window{ &controllerA };
+	auto windowB = Window{ &controllerB };
+	auto widgetA = Ui::RpWidget();
+	auto widgetB = Ui::RpWidget();
+	Core::App().windows = { { &widgetA, &windowA }, { &widgetB, &windowB } };
+	auto pending = PendingWait{ { &widgetA, &widgetB } };
+	pending.closeHiddenChats(u"0-101"_q);
+	CHECK(Core::App().closed == std::vector<PeerData*>{ &peerA });
+	Core::App().closed.clear();
+	a.peeking = true;
+	pending.closeHiddenChats(u"0-101"_q);
+	CHECK(Core::App().closed.empty());
+	a.peeking = false;
+	a.filtering = false;
+	pending.closeHiddenChats(u"0-101"_q);
+	CHECK(Core::App().closed.empty());
+	pending.closeHiddenChats(u"0-202"_q);
+	CHECK(Core::App().closed == std::vector<PeerData*>{ &peerB });
+	Core::App().closed.clear();
+	Enabled = false;
+	pending.closeHiddenChats(u"0-202"_q);
+	CHECK(Core::App().closed.empty());
+	Enabled = true;
+	historyB.hidden = false;
+	pending.closeHiddenChats(u"0-202"_q);
+	CHECK(Core::App().closed.empty());
+}
+
+} // namespace AccountCloseProbe
+
+namespace AccountSnapshotProbe {
+
+auto Saved = State();
+const State &CurrentState() { return Saved; }
+QString Snapshot(const AccountKey &account, WaitAction action) {
+	struct { WaitAction action; } request = { action };
+#include "peek-account-snapshot.inc"
+	return snapshot();
+}
+
+void Test() {
+	const auto account = AccountKey{ 0, 101 };
+	Saved = State();
+	Saved.activePreset = u"work"_q;
+	auto first = State();
+	CHECK(StartPeek(first, 1000, 120));
+	SaveAccountPeek(Saved, u"0-101"_q, first);
+	const auto opening = Snapshot(account, WaitAction::StartPeek);
+	const auto snapshot = [&] { return Snapshot(account, WaitAction::StartPeek); };
+	const auto state = opening;
+	auto canceled = false;
+	const auto cancel = [&] { canceled = true; };
+#include "peek-account-state-change.inc"
+	auto other = State();
+	CHECK(StartPeek(other, 1000, 300));
+	SaveAccountPeek(Saved, u"0-202"_q, other);
+	CHECK(Snapshot(account, WaitAction::StartPeek) == opening);
+	onChange();
+	CHECK(!canceled);
+	StopPeek(other);
+	SaveAccountPeek(Saved, u"0-202"_q, other);
+	CHECK(Snapshot(account, WaitAction::ExtendPeek) == opening);
+	onChange();
+	CHECK(!canceled);
+	const auto strict = Snapshot(account, WaitAction::ChangePreset);
+	CHECK(StartPeek(other, 1000, 300));
+	SaveAccountPeek(Saved, u"1-101"_q, other);
+	CHECK(Snapshot(account, WaitAction::StartPeek) == opening);
+	onChange();
+	CHECK(!canceled);
+	CHECK(Snapshot(account, WaitAction::ChangePreset) != strict);
+	CHECK(ExtendPeek(first, 1000, 60, kPeekExtendCapSeconds));
+	SaveAccountPeek(Saved, u"0-101"_q, first);
+	CHECK(Snapshot(account, WaitAction::StartPeek) != opening);
+	onChange();
+	CHECK(canceled);
+	const auto extended = Snapshot(account, WaitAction::StartPeek);
+	Saved.activePreset = NormalPreset();
+	CHECK(Snapshot(account, WaitAction::StartPeek) != extended);
+}
+
+} // namespace AccountSnapshotProbe
+
+namespace AccountFocusProbe {
+
+auto Saved = State();
+auto Clock = int64_t(0);
+auto Enabled = true;
+auto Foreground = false;
+std::function<void()> Notify;
+const State &CurrentState() { return Saved; }
+template <typename F> void UpdateState(F apply) {
+	apply(Saved);
+	if (Notify) { Notify(); }
+}
+bool PeekEndsOnFocusLoss() { return Enabled; }
+namespace crl { using time = int64_t; time now() { return Clock; } }
+struct QGuiApplication {
+	static Qt::ApplicationState applicationState() {
+		return Foreground ? Qt::ApplicationActive : Qt::ApplicationInactive;
+	}
+};
+namespace Core {
+struct Application {
+	bool locked = false;
+	bool passcodeLocked() { return locked; }
+	bool screenIsLocked() { return locked; }
+};
+Application &App() { static auto result = Application(); return result; }
+}
+struct Timer {
+	std::optional<int64_t> due;
+	void cancel() { due.reset(); }
+	void callOnce(int64_t delay) { due = Clock + delay; }
+};
+struct PendingWait {
+	std::map<QString, PeekFocusGate> _focusGates;
+	Timer _focusTimer;
+	void presenceChanged() {}
+	void focusChanged();
+};
+
+#include "peek-account-focus.inc"
+
+void Start(const QString &key, int seconds = 60) {
+	auto state = AccountPeekState(Saved, key);
+	CHECK(StartPeek(state, 1000, seconds));
+	SaveAccountPeek(Saved, key, state);
+}
+
+void Test() {
+	Saved = State();
+	Clock = 0;
+	Enabled = true;
+	Foreground = false;
+	Core::App().locked = false;
+	auto pending = PendingWait();
+	Notify = [&] { pending.focusChanged(); };
+	Start(u"0-101"_q);
+	pending.focusChanged();
+	Clock = 999;
+	Start(u"0-202"_q);
+	pending.focusChanged();
+	Clock = 2000;
+	pending.focusChanged();
+	CHECK(!AccountPeekState(Saved, u"0-101"_q).peekActive);
+	CHECK(AccountPeekState(Saved, u"0-202"_q).peekActive);
+	Clock = 2999;
+	pending.focusChanged();
+	CHECK(!AccountPeekState(Saved, u"0-202"_q).peekActive);
+	Saved = State();
+	pending = PendingWait();
+	Clock = 0;
+	Start(u"0-101"_q);
+	Start(u"0-202"_q);
+	pending.focusChanged();
+	Clock = 1000;
+	auto first = AccountPeekState(Saved, u"0-101"_q);
+	CHECK(ExtendPeek(first, 1000, 60, kPeekExtendCapSeconds));
+	SaveAccountPeek(Saved, u"0-101"_q, first);
+	pending.focusChanged();
+	Clock = 2000;
+	pending.focusChanged();
+	CHECK(AccountPeekState(Saved, u"0-101"_q).peekActive);
+	CHECK(!AccountPeekState(Saved, u"0-202"_q).peekActive);
+	Clock = 3000;
+	pending.focusChanged();
+	CHECK(!AccountPeekState(Saved, u"0-101"_q).peekActive);
+	Enabled = false;
+	Start(u"0-101"_q);
+	pending.focusChanged();
+	Clock = 10000;
+	pending.focusChanged();
+	CHECK(AccountPeekState(Saved, u"0-101"_q).peekActive);
+	Core::App().locked = true;
+	pending.focusChanged();
+	CHECK(AccountPeekState(Saved, u"0-101"_q).peekActive);
+	Enabled = true;
+	pending.focusChanged();
+	CHECK(!AccountPeekState(Saved, u"0-101"_q).peekActive);
+	Notify = {};
+}
+
+} // namespace AccountFocusProbe
+
+namespace AccountGateRefreshProbe {
+
+namespace Main {
+struct Session { AccountKey key; };
+struct Account {
+	Session *value;
+	Session *maybeSession() { return value; }
+	bool loggingOut() { return false; }
+};
+}
+template <typename T> using not_null = T;
+auto Saved = State();
+auto Loaded = Settings();
+std::function<void()> OnWrite;
+auto Closed = std::vector<QString>();
+const State &CurrentState() { return Saved; }
+const Settings &ActiveSettings() { return Loaded; }
+int64 NowUnix() { return 1000; }
+template <typename F> void UpdateState(F apply) {
+	const auto before = SerializeState(Saved);
+	apply(Saved);
+	if (SerializeState(Saved) != before && OnWrite) { OnWrite(); }
+}
+AccountKey SessionAccountKey(Main::Session *session) { return session->key; }
+AccountWorkMode AccountWorkModeForSession(Main::Session*) { return AccountWorkMode::Own; }
+void CloseHiddenPeekChats(const QString &key) { Closed.push_back(key); }
+namespace Core {
+struct Entry { Main::Account *account; };
+struct Domain { std::vector<Entry> values; const auto &accounts() { return values; } };
+struct Application { Domain value; Domain &domain() { return value; } };
+Application &App() { static auto result = Application(); return result; }
+}
+namespace gsl {
+template <typename F> struct Finally { F f; ~Finally() { f(); } };
+template <typename F> auto finally(F f) { return Finally<F>{ f }; }
+}
+struct Changes {
+	std::function<void()> notify;
+	void fire(int) { const auto callback = notify; if (callback) { callback(); } }
+};
+Resolved NormalResolution() {
+	auto result = Resolved(); result.normal = true; result.preset = NormalPreset(); return result;
+}
+struct Gate {
+	Resolved _resolved = NormalResolution();
+	std::map<QString, Resolved> _accountResolved;
+	std::map<QString, AccountPeek> _accountPeeks;
+	std::vector<Override> _overrides;
+	bool _initialized = false;
+	bool _refreshing = false;
+	std::optional<bool> _refreshPending;
+	Changes _changes;
+	void refresh(bool settingsChanged);
+	void refreshPeekTimer(const State&) {}
+	const Resolved &resolved(not_null<Main::Session*> session);
+};
+
+#define LOG(expression) do {} while (false)
+#include "peek-account-refresh.inc"
+#undef LOG
+#include "peek-account-resolution.inc"
+
+void Test() {
+	Saved = State();
+	Saved.activePreset = u"work"_q;
+	Loaded = Settings();
+	auto preset = Preset();
+	preset.name = u"work"_q;
+	Loaded.presets.push_back(preset);
+	Closed.clear();
+	auto a = Main::Session{ { 0, 101 } };
+	auto b = Main::Session{ { 0, 202 } };
+	auto accountA = Main::Account{ &a };
+	auto accountB = Main::Account{ &b };
+	Core::App().domain().values = { { &accountA }, { &accountB } };
+	auto first = State();
+	CHECK(StartPeek(first, 1000, 120));
+	SaveAccountPeek(Saved, u"0-101"_q, first);
+	auto second = State();
+	CHECK(StartPeek(second, 1000, 0));
+	SaveAccountPeek(Saved, u"0-202"_q, second);
+	auto gate = Gate();
+	auto ended = false;
+	OnWrite = [&] { gate.refresh(false); };
+	gate._changes.notify = [&] {
+		if (ended) { return; }
+		ended = true;
+		CHECK(gate.resolved(&a).peeking);
+		UpdateState([](State &state) {
+			auto peek = AccountPeekState(state, u"0-101"_q);
+			StopPeek(peek);
+			SaveAccountPeek(state, u"0-101"_q, peek);
+		});
+	};
+	gate.refresh(false);
+	CHECK(!gate.resolved(&a).peeking);
+	CHECK(gate.resolved(&b).peeking);
+	CHECK(Closed == std::vector<QString>{ u"0-101"_q });
+	OnWrite = {};
+}
+
+} // namespace AccountGateRefreshProbe
 
 namespace FocusPreferenceProbe {
 
@@ -1577,6 +2001,11 @@ void KeyCases() {
 
 int main(int argc, char *argv[]) {
 	auto app = QApplication(argc, argv);
+	AccountResolutionProbe::Test();
+	AccountCloseProbe::Test();
+	AccountSnapshotProbe::Test();
+	AccountFocusProbe::Test();
+	AccountGateRefreshProbe::Test();
 	FocusCases();
 	FocusPreferenceWaitCases();
 	FocusPreferenceProbe::Cases();

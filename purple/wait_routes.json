@@ -31,9 +31,14 @@
     "ActivatePeekFor": 1,
     "DeactivatePeek": 1,
     "ExtendPeek": 1,
+    "SaveAccountPeek": 2,
     "StartPeek": 1,
     "StopPeek": 1,
-    "UpdateState": 10
+    "UpdatePeekState": 4,
+    "UpdateState": 7
+  },
+  "Telegram/SourceFiles/purple/purple_gate.h": {
+    "UpdatePeekState": 1
   },
   "Telegram/SourceFiles/purple/purple_last_seen.cpp": {
     "StartPeek": 3,
@@ -46,16 +51,18 @@
     "SetTableBool": 1
   },
   "Telegram/SourceFiles/purple/purple_peek.cpp": {
-    "UpdateState": 1
+    "UpdatePeekState": 1
   },
   "Telegram/SourceFiles/purple/purple_peek_controls.cpp": {
     "ActivatePeekExtension": 1,
     "ActivatePeekFor": 1,
-    "DeactivatePeek": 3,
+    "DeactivatePeek": 1,
+    "SaveAccountPeek": 2,
     "SetPeekReadyTimeout": 1,
     "SetPeekStartDelay": 1,
     "SetTableBool": 1,
-    "UpdateState": 1,
+    "StopPeek": 1,
+    "UpdateState": 2,
     "activePreset=": 1,
     "writePref<peek-focus-loss>": 1
   },
@@ -111,12 +118,14 @@
   },
   "Telegram/ThirdParty/purple_core/purple/purple_state.cpp": {
     "ExtendPeek": 1,
+    "SaveAccountPeek": 1,
     "StartPeek": 1,
     "StopPeek": 1,
     "activePreset=": 3
   },
   "Telegram/ThirdParty/purple_core/purple/purple_state.h": {
     "ExtendPeek": 1,
+    "SaveAccountPeek": 1,
     "StartPeek": 1,
     "StopPeek": 1
   }

@@ -128,11 +128,12 @@ public:
 	void watch(not_null<Ui::RpWidget*> widget);
 	[[nodiscard]] bool pending() const;
 	[[nodiscard]] bool starting() const;
+	[[nodiscard]] bool belongsTo(not_null<Main::Session*> session) const;
 	[[nodiscard]] rpl::producer<> changes() const;
 	WaitResult request(WaitRequest request);
 	void cancel();
 	void quietCancel();
-	void closeHiddenChats();
+	void closeHiddenChats(const QString &account);
 	void locked();
 
 private:
@@ -150,7 +151,7 @@ private:
 	WaitGate _gate;
 	WaitPresence _presence;
 	bool _coverHidden = false;
-	PeekFocusGate _focusGate;
+	std::map<QString, PeekFocusGate> _focusGates;
 	uint64_t _quietFocusGeneration = 0;
 	WaitKeyFilter _keys;
 	QPointer<WaitCover> _cover;
@@ -358,31 +359,32 @@ void PendingWait::focusChanged() {
 	presenceChanged();
 	const auto now = crl::now();
 	_focusTimer.cancel();
-	if (_focusGate.update(
-			PeekEndsOnFocusLoss(),
-			CurrentState(),
-			applicationActive,
-			locked,
-			now)) {
-		details::DeactivatePeek();
-		return;
+	const auto snapshot = CurrentState();
+	auto ended = std::vector<QString>();
+	auto next = std::optional<int64_t>();
+	for (const auto &[key, saved] : snapshot.accountPeeks) {
+		auto &gate = _focusGates[key];
+		if (gate.update(PeekEndsOnFocusLoss(), AccountPeekState(snapshot, key),
+				applicationActive, locked, now)) {
+			ended.push_back(key);
+		} else if (const auto remaining = gate.remaining(now)) {
+			next = next ? std::min(*next, *remaining) : *remaining;
+		}
 	}
-	if (const auto remaining = _focusGate.remaining(now)) {
-		_focusTimer.callOnce(std::max(crl::time(1), crl::time(*remaining)));
+	if (!ended.empty()) {
+		UpdateState([&](State &state) {
+			for (const auto &key : ended) {
+				auto peek = AccountPeekState(state, key);
+				StopPeek(peek);
+				SaveAccountPeek(state, key, peek);
+			}
+		});
 	}
+	if (next) { _focusTimer.callOnce(std::max(crl::time(1), crl::time(*next))); }
 }
 
 void PendingWait::locked() {
-	presenceChanged();
-	_focusTimer.cancel();
-	if (_focusGate.update(
-			PeekEndsOnFocusLoss(),
-			CurrentState(),
-			false,
-			true,
-			crl::now())) {
-		details::DeactivatePeek();
-	}
+	focusChanged();
 }
 
 void PendingWait::watch(not_null<Ui::RpWidget*> widget) {
@@ -405,7 +407,12 @@ bool PendingWait::pending() const {
 }
 
 bool PendingWait::starting() const {
-	return _gate.action() == WaitAction::StartPeek;
+	return pending() && _gate.action() == WaitAction::StartPeek;
+}
+
+bool PendingWait::belongsTo(not_null<Main::Session*> session) const {
+	const auto window = _window.get();
+	return window && window->maybeSession() == session;
 }
 
 rpl::producer<> PendingWait::changes() const {
@@ -450,10 +457,11 @@ void PendingWait::report(
 WaitResult PendingWait::request(WaitRequest request) {
 	if (request.action == WaitAction::EndPeek) {
 		cancel();
-		if (!CurrentState().peekActive) {
-			return {};
-		}
-		details::DeactivatePeek();
+		const auto window = Core::App().activeWindow();
+		const auto session = request.session ? request.session : window ? window->maybeSession() : nullptr;
+		if (!window || !session || window->maybeSession() != session
+			|| !CurrentPeekState(session).peekActive) { return {}; }
+		details::DeactivatePeek(session);
 		return { WaitOutcome::Applied };
 	}
 	if (pending()) {
@@ -478,7 +486,17 @@ WaitResult PendingWait::request(WaitRequest request) {
 	const auto account = SessionAccountKey(session);
 	const auto domain = &Core::App().activeAccount();
 	const auto mode = AccountWorkModeForSession(session);
-	const auto state = SerializeState(CurrentState());
+	const auto snapshot = [=] {
+		auto state = CurrentState();
+		if (request.action == WaitAction::StartPeek || request.action == WaitAction::ExtendPeek) {
+			const auto text = AccountKeyText(account.environment, account.userId).value_or(QString());
+			const auto peek = AccountPeekState(state, text);
+			state.accountPeeks.clear();
+			SaveAccountPeek(state, text, peek);
+		}
+		return SerializeState(state);
+	};
+	const auto state = snapshot();
 	const auto ownInput = workMode ? AccountSettingsTarget(session) : std::nullopt;
 	const auto action = request.action;
 	const auto seconds = request.seconds;
@@ -520,7 +538,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 		if (!originError.isEmpty()) {
 			return originError;
 		}
-		if (SerializeState(CurrentState()) != state || AccountWorkModeForSession(live) != mode) {
+		if (snapshot() != state || AccountWorkModeForSession(live) != mode) {
 			return tr::lng_purple_wait_context_changed(tr::now);
 		}
 		if (action == WaitAction::ChangePeekOption && needsInput
@@ -574,7 +592,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 			return result;
 		}
 	} else if (action == WaitAction::StartPeek || action == WaitAction::ExtendPeek) {
-		const auto refusal = CheckPeekRequest(action, Filtering(), CurrentState(),
+		const auto refusal = CheckPeekRequest(action, Filtering(session), CurrentPeekState(session),
 			QDateTime::currentSecsSinceEpoch(), seconds);
 		if (refusal != PeekRequestRefusal::None) {
 			const auto result = WaitResult{ WaitOutcome::Refused, PeekRefusalText(refusal) };
@@ -592,13 +610,13 @@ WaitResult PendingWait::request(WaitRequest request) {
 			return tr::lng_purple_wait_context_changed(tr::now);
 		}
 		if (action == WaitAction::StartPeek) {
-			if (details::ActivatePeekFor(seconds).refused) {
+			if (details::ActivatePeekFor(weak.get(), seconds).refused) {
 				return Filtering() ? tr::lng_purple_wait_context_changed(tr::now)
 					: PeekRefusalText(PeekRequestRefusal::WorkModeOff);
 			}
 		} else if (action == WaitAction::ExtendPeek) {
-			if (!details::ActivatePeekExtension(seconds).extended) {
-				const auto refusal = CheckPeekRequest(action, Filtering(), CurrentState(),
+			if (!details::ActivatePeekExtension(weak.get(), seconds).extended) {
+				const auto refusal = CheckPeekRequest(action, Filtering(weak.get()), CurrentPeekState(weak.get()),
 					QDateTime::currentSecsSinceEpoch(), seconds);
 				return refusal == PeekRequestRefusal::None
 					? tr::lng_purple_wait_context_changed(tr::now) : PeekRefusalText(refusal);
@@ -663,7 +681,9 @@ WaitResult PendingWait::request(WaitRequest request) {
 			Core::App().domain().activeChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
 		}
 		SettingsChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
-		StateChanges() | rpl::on_next([=] { cancel(); }, _pendingLifetime);
+		StateChanges() | rpl::on_next([=] {
+			if (snapshot() != state) { cancel(); }
+		}, _pendingLifetime);
 		_timer.callEach(kCountdownTick);
 		_changes.fire({});
 		tick();
@@ -737,11 +757,11 @@ bool ShouldExit(not_null<History*> history) {
 			hidden = true;
 		}
 	}
-	return hidden && (HideEverywhere() || !history->purpleReachableElsewhere(false));
+	return hidden && (HideEverywhere(&history->session()) || !history->purpleReachableElsewhere(false));
 }
 
-void PendingWait::closeHiddenChats() {
-	if (!Filtering() || Peeking() || !PeekExitHiddenChats(ActiveSettings())) {
+void PendingWait::closeHiddenChats(const QString &account) {
+	if (!PeekExitHiddenChats(ActiveSettings())) {
 		return;
 	}
 	auto peers = std::vector<not_null<PeerData*>>();
@@ -751,7 +771,11 @@ void PendingWait::closeHiddenChats() {
 		const auto history = controller
 			? controller->activeChatCurrent().owningHistory()
 			: nullptr;
-		if (history && ShouldExit(history)
+		const auto key = controller ? SessionAccountKey(&controller->session()) : AccountKey();
+		const auto text = AccountKeyText(key.environment, key.userId);
+		if (history && text && *text == account
+			&& Filtering(&history->session()) && !Peeking(&history->session())
+			&& ShouldExit(history)
 			&& !ranges::contains(peers, history->peer)) {
 			peers.push_back(history->peer);
 		}
@@ -773,7 +797,13 @@ void RegisterPeekWindow(not_null<Ui::RpWidget*> widget) {
 }
 
 bool PeekStartPending() {
-	return Pending().starting();
+	const auto window = Core::App().activeWindow();
+	const auto session = window ? window->maybeSession() : nullptr;
+	return session && PeekStartPending(session);
+}
+
+bool PeekStartPending(not_null<Main::Session*> session) {
+	return Pending().starting() && Pending().belongsTo(session);
 }
 
 bool PeekCountdownPending() {
@@ -935,8 +965,8 @@ void RequestPeekReadyTimeoutChange(
 	RequestPeekOptionChange({ .readyTimeoutSeconds = seconds }, editor, session);
 }
 
-void CloseHiddenPeekChats() {
-	Pending().closeHiddenChats();
+void CloseHiddenPeekChats(const QString &account) {
+	Pending().closeHiddenChats(account);
 }
 
 PeekChange StartPeekFor(int seconds) {
@@ -946,7 +976,7 @@ PeekChange StartPeekFor(int seconds) {
 		.pending = result.outcome == WaitOutcome::Pending,
 		.refused = result.outcome == WaitOutcome::Refused,
 		.seconds = seconds,
-		.leftSeconds = PeekLeftSeconds(CurrentState(), QDateTime::currentSecsSinceEpoch()),
+		.leftSeconds = PeekLeftSeconds(CurrentPeekState(), QDateTime::currentSecsSinceEpoch()),
 	};
 }
 

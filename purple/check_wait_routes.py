@@ -7,7 +7,8 @@ import re
 
 WRITERS = (
     'StartPeek', 'ExtendPeek', 'StopPeek', 'ActivatePeekFor',
-    'ActivatePeekExtension', 'DeactivatePeek', 'writeWorkMode', 'SetAccountWorkMode',
+    'ActivatePeekExtension', 'DeactivatePeek', 'SaveAccountPeek', 'UpdatePeekState',
+    'writeWorkMode', 'SetAccountWorkMode',
     'switchGlobalAccount', 'commitGlobalChoice', 'activateGlobalChoice',
     'UpdateState', 'SetPeekStartDelay', 'SetPeekReadyTimeout',
 )

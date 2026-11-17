@@ -15,12 +15,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "history/history.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
 #include "purple/purple_peek_controls.h"
 #include "window/window_controller.h"
 
 #include <QtCore/QDateTime>
+
+#include <utility>
 
 namespace Purple {
 namespace {
@@ -51,6 +55,7 @@ public:
 	[[nodiscard]] const Resolved &resolved() const {
 		return _resolved;
 	}
+	[[nodiscard]] const Resolved &resolved(not_null<Main::Session*> session);
 	[[nodiscard]] rpl::producer<> changes() const {
 		return _changes.events();
 	}
@@ -59,9 +64,12 @@ private:
 	// `settingsChanged' says which of the two signals brought us here. It
 	// matters only when the resolution comes out identical - see refresh().
 	void refresh(bool settingsChanged);
-	void refreshPeekTimer(const State &state, bool peeking);
+	void refreshPeekTimer(const State &state);
 
 	Resolved _resolved = NormalResolution();
+	std::map<QString, Resolved> _accountResolved;
+	std::map<QString, AccountPeek> _accountPeeks;
+	bool _initialized = false;
 
 	// What the "until" decisions were last time we looked. They live in the
 	// state rather than in the resolution - they are about one chat, not about
@@ -71,6 +79,7 @@ private:
 	std::vector<Override> _overrides;
 
 	bool _refreshing = false;
+	std::optional<bool> _refreshPending;
 
 	// Nothing else would look at the deadline again, so without this a peek
 	// would sit there until the next unrelated config change. It is the only
@@ -79,6 +88,7 @@ private:
 
 	rpl::event_stream<> _changes;
 	rpl::lifetime _lifetime;
+	rpl::lifetime _sessionsLifetime;
 
 };
 
@@ -93,12 +103,7 @@ bool Gate::refreshGlobalChoiceNormal() {
 }
 
 Gate::Gate() {
-	_peekTimer.setCallback([] {
-		UpdateState([](State &state) {
-			state.peekActive = false;
-			state.peekDeadlineUnix = 0;
-		});
-	});
+	_peekTimer.setCallback([=] { refresh(false); });
 	refresh(false);
 
 	// Kept apart rather than merged, because the two are not interchangeable
@@ -113,21 +118,38 @@ Gate::Gate() {
 	) | rpl::on_next([=] {
 		refresh(false);
 	}, _lifetime);
+	auto &domain = Core::App().domain();
+	const auto observe = [=, &domain] {
+		_sessionsLifetime.destroy();
+		for (const auto &entry : domain.accounts()) {
+			entry.account->sessionChanges() | rpl::on_next([=] {
+				refresh(true);
+			}, _sessionsLifetime);
+		}
+		refresh(true);
+	};
+	domain.accountsChanges() | rpl::on_next(observe, _lifetime);
+	domain.activeSessionChanges() | rpl::on_next([=] {
+		refresh(true);
+		_changes.fire({});
+	}, _lifetime);
+	observe();
 }
 
 void Gate::refresh(bool settingsChanged) {
-	// Persisting the cache below fires StateChanges(), which lands back here.
-	// The nested pass would resolve to the same thing and write nothing, so it
-	// is only wasted work and a duplicate notification - but the notification
-	// is what rebuilds every chat list, so it is worth not sending twice.
 	if (_refreshing) {
+		_refreshPending = _refreshPending.value_or(false) || settingsChanged;
 		return;
 	}
 	_refreshing = true;
-	const auto guard = gsl::finally([&] { _refreshing = false; });
+	const auto guard = gsl::finally([&] {
+		_refreshing = false;
+		const auto pending = std::exchange(_refreshPending, std::nullopt);
+		if (pending) { refresh(*pending); }
+	});
 
 	const auto &settings = ActiveSettings();
-	const auto &state = CurrentState();
+	auto state = CurrentState();
 	const auto wanted = state.activePreset.isEmpty()
 		? NormalPreset()
 		: state.activePreset;
@@ -152,12 +174,45 @@ void Gate::refresh(bool settingsChanged) {
 		return;
 	}
 
-	// Peek suspends the hiding of whatever resolution is in force; it is not
-	// part of the resolution itself, which is why it is applied here rather
-	// than in Resolve(). ToCache() below ignores the flag, so a peek can never
-	// be persisted into the fallback.
-	next->peeking = !next->normal && PeekLive(state, NowUnix());
-	refreshPeekTimer(state, next->peeking);
+	const auto now = NowUnix();
+	auto stopped = false;
+	const auto reset = next->normal || (_initialized && _resolved.preset != next->preset);
+	for (auto &[key, peek] : state.accountPeeks) {
+		if (peek.active && (reset || (peek.deadlineUnix && peek.deadlineUnix <= now))) {
+			peek.active = false;
+			peek.deadlineUnix = 0;
+			stopped = true;
+		}
+	}
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto session = entry.account->maybeSession();
+		if (!session || entry.account->loggingOut()) { continue; }
+		const auto key = SessionAccountKey(session);
+		const auto text = AccountKeyText(key.environment, key.userId);
+		if (!text) { continue; }
+		if (AccountWorkModeForSession(session) != AccountWorkMode::Stock) { continue; }
+		const auto i = state.accountPeeks.find(*text);
+		if (i != state.accountPeeks.end() && i->second.active) {
+			i->second.active = false;
+			i->second.deadlineUnix = 0;
+			stopped = true;
+		}
+	}
+	if (stopped) {
+		UpdateState([&](State &current) { current.accountPeeks = state.accountPeeks; });
+	}
+	auto endedAccounts = std::vector<QString>();
+	for (const auto &[key, peek] : _accountPeeks) {
+		if (peek.active && !PeekLive(AccountPeekState(state, key), now)) {
+			endedAccounts.push_back(key);
+		}
+	}
+	const auto peeksChanged = state.accountPeeks != _accountPeeks;
+	_accountPeeks = state.accountPeeks;
+	_accountResolved.clear();
+	_initialized = true;
+	next->peeking = false;
+	refreshPeekTimer(state);
 
 	if (*next == _resolved) {
 		// Membership is not part of a resolution. Resolved holds the list
@@ -176,7 +231,7 @@ void Gate::refresh(bool settingsChanged) {
 		// Normal has nothing to rebuild at all: an unconfigured fork must go on
 		// paying nothing for a file it is not using. A settings change that
 		// *starts* a preset moves the resolution and never reaches here.
-		if ((settingsChanged || overridesChanged) && !_resolved.normal) {
+		if (peeksChanged || ((settingsChanged || overridesChanged) && !_resolved.normal)) {
 			_changes.fire({});
 		}
 		if (settingsChanged && !_resolved.normal) {
@@ -187,9 +242,9 @@ void Gate::refresh(bool settingsChanged) {
 				});
 			}
 		}
+		for (const auto &key : endedAccounts) { CloseHiddenPeekChats(key); }
 		return;
 	}
-	const auto peekEnded = _resolved.peeking && !next->peeking;
 	_resolved = std::move(*next);
 	LOG(("Purple: preset '%1'%2%3, %4 lists."
 		).arg(_resolved.preset
@@ -206,29 +261,35 @@ void Gate::refresh(bool settingsChanged) {
 			state.resolvedCache = cache;
 		});
 	}
-	if (peekEnded) {
-		CloseHiddenPeekChats();
+	for (const auto &key : endedAccounts) { CloseHiddenPeekChats(key); }
+}
+
+void Gate::refreshPeekTimer(const State &state) {
+	_peekTimer.cancel();
+	auto deadline = int64(0);
+	for (const auto &[key, peek] : state.accountPeeks) {
+		if (peek.active && peek.deadlineUnix
+			&& (!deadline || peek.deadlineUnix < deadline)) {
+			deadline = peek.deadlineUnix;
+		}
+	}
+	if (deadline) {
+		_peekTimer.callOnce(std::max(deadline - NowUnix(), int64(1)) * crl::time(1000));
 	}
 }
 
-void Gate::refreshPeekTimer(const State &state, bool peeking) {
-	_peekTimer.cancel();
-	if (peeking) {
-		if (const auto deadline = state.peekDeadlineUnix) {
-			// At least a second, so a deadline that has just landed still goes
-			// through the timer instead of writing state from inside refresh().
-			const auto left = std::max(deadline - NowUnix(), int64(1));
-			_peekTimer.callOnce(left * crl::time(1000));
-		}
-	} else if (state.peekActive) {
-		// A peek that outlived the app, or the preset it was revealing. Clear
-		// it rather than leave state.toml claiming a peek that is not running:
-		// the flag is what the next toggle reads to decide which way to go.
-		UpdateState([](State &state) {
-			state.peekActive = false;
-			state.peekDeadlineUnix = 0;
-		});
+const Resolved &Gate::resolved(not_null<Main::Session*> session) {
+	static const auto normal = NormalResolution();
+	if (AccountWorkModeForSession(session) == AccountWorkMode::Stock) { return normal; }
+	const auto key = SessionAccountKey(session);
+	const auto text = AccountKeyText(key.environment, key.userId);
+	if (!text) { return normal; }
+	const auto [i, inserted] = _accountResolved.try_emplace(*text, _resolved);
+	if (inserted) {
+		i->second.peeking = !i->second.normal
+			&& PeekLive(AccountPeekState(CurrentState(), *text), NowUnix());
 	}
+	return i->second;
 }
 
 // Deliberately never destroyed, for the same reason as the config singleton -
@@ -246,7 +307,7 @@ void Gate::refreshPeekTimer(const State &state, bool peeking) {
 // needs ShowModeRank() and this one does not.
 [[nodiscard]] std::optional<StoryMode> StoryFolderMode(
 		not_null<const PeerData*> peer) {
-	const auto &folders = Instance().resolved().storyFolders;
+	const auto &folders = ActiveResolved(&peer->session()).storyFolders;
 	if (folders.empty()) {
 		// The common case, and free: a preset that said nothing about any
 		// folder's stories never reaches the walk below.
@@ -349,18 +410,18 @@ bool RefreshGlobalAccountChoiceNormal() {
 }
 
 const Resolved &ActiveResolved() {
-	return Instance().resolved();
+	static const auto normal = NormalResolution();
+	const auto window = Core::App().activeWindow();
+	const auto session = window ? window->maybeSession() : nullptr;
+	return session ? Instance().resolved(session) : normal;
 }
 
 const Resolved &ActiveResolved(not_null<Main::Session*> session) {
-	static const auto normal = NormalResolution();
-	return AccountWorkModeForSession(session) == AccountWorkMode::Stock
-		? normal : Instance().resolved();
+	return Instance().resolved(session);
 }
 
 bool Filtering(not_null<Main::Session*> session) {
-	return AccountFilteringEnabled(!Instance().resolved().normal,
-		AccountWorkModeForSession(session));
+	return !ActiveResolved(session).normal;
 }
 
 rpl::producer<> ActiveChanges() {
@@ -368,13 +429,13 @@ rpl::producer<> ActiveChanges() {
 }
 
 QString ViewName() {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	return PresetTitle(resolved.preset, resolved.viewName);
 }
 
 const std::vector<ResolvedView> &ExtraViews() {
 	static const auto kNone = std::vector<ResolvedView>();
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	return resolved.normal ? kNone : resolved.views;
 }
 
@@ -383,7 +444,7 @@ bool ExtraViewHolds(int index, not_null<const PeerData*> peer) {
 		return false;
 	}
 
-	const auto &views = ExtraViews();
+	const auto &views = ExtraViews(&peer->session());
 	if (index < 0 || index >= int(views.size())) {
 		return false;
 	}
@@ -407,7 +468,7 @@ bool SaveExtraViewPins(
 		int index,
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	const auto &views = ExtraViews();
 	if (index < 0 || index >= int(views.size())) {
 		return false;
@@ -417,7 +478,7 @@ bool SaveExtraViewPins(
 
 const std::vector<PeerIdValue> &PresetPins() {
 	static const auto kNone = std::vector<PeerIdValue>();
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	return resolved.normal ? kNone : resolved.pinned;
 }
 
@@ -426,13 +487,13 @@ bool PresetOwnsPins() {
 }
 
 bool PresetOwnsPins(not_null<Main::Session*> session) {
-	return Filtering(session) && PresetOwnsPins();
+	return !PresetPins(session).empty();
 }
 
 bool SavePresetPins(
 		const std::vector<PeerIdValue> &ids,
 		const MemberTitle &title) {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	if (resolved.normal) {
 		return false;
 	}
@@ -508,7 +569,7 @@ int64 NextOverrideDeadline() {
 }
 
 bool Filtering() {
-	return !Instance().resolved().normal;
+	return !ActiveResolved().normal;
 }
 
 bool NamedExplicitly(not_null<const PeerData*> peer) {
@@ -567,16 +628,16 @@ const std::vector<PresetFolder> &ShownFolders() {
 	static const auto kAll = std::vector<PresetFolder>{
 		PresetFolder{ .name = AllFoldersName() },
 	};
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	return resolved.peeking ? kAll : resolved.folders;
 }
 
 bool Peeking() {
-	return Instance().resolved().peeking;
+	return ActiveResolved().peeking;
 }
 
 bool HideEverywhere() {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	return !resolved.normal
 		&& !resolved.peeking
 		&& resolved.hideEverywhere;
@@ -589,7 +650,7 @@ bool HiddenFromSuggestions(not_null<History*> history) {
 	// Ordered so that a chat under Normal costs one bool: the two History
 	// questions below both walk the preset's lists, and this runs once per
 	// row of every strip the app draws.
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved(&history->session());
 	return !resolved.normal
 		&& !resolved.peeking
 		&& ActiveSettings().suggestions.hideInvisible
@@ -597,40 +658,62 @@ bool HiddenFromSuggestions(not_null<History*> history) {
 		&& !history->purpleReachableElsewhere();
 }
 
-PeekChange details::ActivatePeekFor(int seconds) {
+State CurrentPeekState(not_null<Main::Session*> session) {
+	const auto key = SessionAccountKey(session);
+	return AccountPeekState(CurrentState(), AccountKeyText(key.environment, key.userId).value_or(QString()));
+}
+
+State CurrentPeekState() {
 	const auto window = Core::App().activeWindow();
-	if (!window || window->locked() || !window->maybeSession()
+	const auto session = window ? window->maybeSession() : nullptr;
+	return session ? CurrentPeekState(session) : State();
+}
+
+void UpdatePeekState(not_null<Main::Session*> session, Fn<void(State&)> apply) {
+	const auto key = SessionAccountKey(session);
+	const auto text = AccountKeyText(key.environment, key.userId);
+	if (!text || session->account().loggingOut()
+		|| session->account().maybeSession() != session.get()) { return; }
+	UpdateState([&](State &state) {
+		auto peek = AccountPeekState(state, *text);
+		apply(peek);
+		SaveAccountPeek(state, *text, peek);
+	});
+}
+
+PeekChange details::ActivatePeekFor(not_null<Main::Session*> session, int seconds) {
+	const auto window = Core::App().activeWindow();
+	if (!window || window->maybeSession() != session || window->locked()
 		|| Core::App().passcodeLocked() || Core::App().screenIsLocked()
-		|| Instance().resolved().normal) {
+		|| !Filtering(session)) {
 		// Nothing to reveal, and starting one anyway would leave a peek
 		// running that no chat list could show the end of.
 		return { .refused = true };
 	}
 	const auto now = NowUnix();
-	UpdateState([&](State &state) {
+	UpdatePeekState(session, [&](State &state) {
 		[[maybe_unused]] const auto started = StartPeek(state, now, seconds);
 	});
 	return {
 		.peeking = true,
 		.seconds = seconds,
-		.leftSeconds = PeekLeftSeconds(CurrentState(), NowUnix()),
+		.leftSeconds = PeekLeftSeconds(CurrentPeekState(session), NowUnix()),
 	};
 }
 
-PeekChange details::ActivatePeekExtension(int seconds) {
-	if (Instance().resolved().normal) {
-		return { .refused = true };
-	}
+PeekChange details::ActivatePeekExtension(not_null<Main::Session*> session, int seconds) {
+	const auto window = Core::App().activeWindow();
+	if (!window || window->maybeSession() != session || !Filtering(session)) { return { .refused = true }; }
 	const auto now = NowUnix();
 	auto extended = false;
-	UpdateState([&](State &state) {
+	UpdatePeekState(session, [&](State &state) {
 		extended = ExtendPeek(state, now, seconds, kPeekExtendCapSeconds);
 	});
 	return {
-		.peeking = Instance().resolved().peeking,
+		.peeking = Peeking(session),
 		.extended = extended,
 		.seconds = seconds,
-		.leftSeconds = PeekLeftSeconds(CurrentState(), NowUnix()),
+		.leftSeconds = PeekLeftSeconds(CurrentPeekState(session), NowUnix()),
 	};
 }
 
@@ -642,14 +725,12 @@ PeekChange ExtendPeekBy(int seconds) {
 		.refused = result.outcome == WaitOutcome::Refused,
 		.extended = result.outcome == WaitOutcome::Applied,
 		.seconds = seconds,
-		.leftSeconds = PeekLeftSeconds(CurrentState(), NowUnix()),
+		.leftSeconds = PeekLeftSeconds(CurrentPeekState(), NowUnix()),
 	};
 }
 
-PeekChange details::DeactivatePeek() {
-	UpdateState([](State &state) {
-		StopPeek(state);
-	});
+PeekChange details::DeactivatePeek(not_null<Main::Session*> session) {
+	UpdatePeekState(session, [](State &state) { StopPeek(state); });
 	return {};
 }
 
@@ -660,27 +741,23 @@ PeekChange EndPeek() {
 
 bool ReportLock(LockKind kind) {
 	CancelPendingPeek();
-	if (!Instance().resolved().peeking) {
-		// Nothing to end, and the ordinary case: every lock of either kind
-		// arrives here, and almost none of them find a peek running.
-		return false;
-	}
 	const auto now = NowUnix();
 	auto ended = false;
 	UpdateState([&](State &state) {
-		ended = EndPeekForLock(
-			state,
-			now,
-			ActiveSettings(),
-			ThisDevice(),
-			kind);
+		for (const auto &[key, saved] : state.accountPeeks) {
+			auto peek = AccountPeekState(state, key);
+			if (EndPeekForLock(peek, now, ActiveSettings(), ThisDevice(), kind)) {
+				SaveAccountPeek(state, key, peek);
+				ended = true;
+			}
+		}
 	});
 	return ended;
 }
 
 const std::vector<ExemptFolder> &ExemptFolders() {
 	static const auto kNone = std::vector<ExemptFolder>();
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	if (resolved.normal || resolved.folders.empty()) {
 		return kNone;
 	}
@@ -694,7 +771,7 @@ const std::vector<ExemptFolder> &ExemptFolders() {
 
 const std::vector<QString> &QuietFolders() {
 	static const auto kNone = std::vector<QString>();
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 
 	// Not lifted by a peek, unlike hiding. A peek is a look at the chat list;
 	// it is not a request to be interrupted by a folder you asked to be quiet.
@@ -703,12 +780,12 @@ const std::vector<QString> &QuietFolders() {
 
 const std::vector<QString> &SilencedFolders() {
 	static const auto kNone = std::vector<QString>();
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	return resolved.normal ? kNone : resolved.silencedFolders;
 }
 
 bool FoldersRestricted() {
-	const auto &resolved = Instance().resolved();
+	const auto &resolved = ActiveResolved();
 	if (resolved.normal) {
 		return false;
 	} else if (!resolved.views.empty()) {
@@ -806,19 +883,27 @@ bool Peeking(not_null<Main::Session*> session) {
 }
 
 bool HideEverywhere(not_null<Main::Session*> session) {
-	return Filtering(session) && HideEverywhere();
+	const auto &resolved = ActiveResolved(session);
+	return !resolved.normal && !resolved.peeking && resolved.hideEverywhere;
 }
 
 bool FoldersRestricted(not_null<Main::Session*> session) {
-	return Filtering(session) && FoldersRestricted();
+	const auto &resolved = ActiveResolved(session);
+	if (resolved.normal) { return false; }
+	if (!resolved.views.empty()) { return true; }
+	if (resolved.peeking) { return false; }
+	const auto &folders = resolved.folders;
+	return folders.size() != 1 || !IsAllFolders(folders.front())
+		|| folders.front().show.has_value() || folders.front().notify.has_value()
+		|| folders.front().include.has_value();
 }
 
 int RecentStaySeconds(not_null<Main::Session*> session) {
-	return Filtering(session) ? RecentStaySeconds() : 0;
+	return Filtering(session) ? ActiveSettings().recent.staySecondsAfterClose : 0;
 }
 
 RecentStyle RecentMarkStyle(not_null<Main::Session*> session) {
-	return Filtering(session) ? RecentMarkStyle() : RecentStyle::None;
+	return Filtering(session) ? ActiveSettings().recent.style : RecentStyle::None;
 }
 
 const std::vector<ResolvedView> &ExtraViews(not_null<Main::Session*> session) {
@@ -836,7 +921,9 @@ const std::vector<PeerIdValue> &ExtraViewPins(not_null<Main::Session*> session, 
 }
 
 const std::vector<PresetFolder> &ShownFolders(not_null<Main::Session*> session) {
-	return Filtering(session) ? ShownFolders() : ActiveResolved(session).folders;
+	static const auto all = std::vector<PresetFolder>{ PresetFolder{ .name = AllFoldersName() } };
+	const auto &resolved = ActiveResolved(session);
+	return resolved.peeking ? all : resolved.folders;
 }
 
 const std::vector<ExemptFolder> &ExemptFolders(not_null<Main::Session*> session) {
@@ -844,11 +931,11 @@ const std::vector<ExemptFolder> &ExemptFolders(not_null<Main::Session*> session)
 }
 
 const std::vector<QString> &SilencedFolders(not_null<Main::Session*> session) {
-	return ActiveResolved(session).normal ? ActiveResolved(session).silencedFolders : SilencedFolders();
+	return ActiveResolved(session).silencedFolders;
 }
 
 const std::vector<QString> &QuietFolders(not_null<Main::Session*> session) {
-	return ActiveResolved(session).normal ? ActiveResolved(session).quietFolders : QuietFolders();
+	return ActiveResolved(session).quietFolders;
 }
 
 } // namespace Purple

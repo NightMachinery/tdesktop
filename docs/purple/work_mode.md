@@ -22,6 +22,11 @@ from the app-wide account; Follow uses the app-wide members; Stock bypasses Work
 Mode for that account. The choice stays in `local.toml`, so it does not switch
 other devices to Stock or Follow.
 
+Peek is account-specific even when two accounts share the same preset. Each
+account has its own saved deadline and end reason; revealing one does not reveal
+the other. Stock stays Normal while another account peeks. See
+[Peek controls](peek_controls.md) for migration and lifecycle behavior.
+
 Manual preset and account-mode changes reuse the Peek countdown when they may
 loosen access. The rule is coarse: switching between restrictive presets also
 waits, even when the new one is stricter. See [Work Mode waits](work_mode_wait.md)

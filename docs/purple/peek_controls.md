@@ -1,7 +1,20 @@
 # Peek controls
 
-Work Mode's Peek controls are global, beside the duration controls. They do not
-belong to the selected preset or account.
+Peek runs separately for each account. Its active flag, deadline and end reason
+are saved under that account's stable environment/id key in `state.toml`.
+Starting, extending or ending Peek in one account does not reveal chats or lift
+Work Mode notification restrictions in another. An account in Stock remains Normal.
+The duration, delay and exit policy defaults remain app-wide.
+
+An older shared Peek has no recorded account owner. Desktop leaves it inactive
+on upgrade rather than granting its reveal to every account. Independent account
+Peeks survive restart until their own deadlines. Global preset changes end all
+Peeks; account-mode changes to Stock end only that account's Peek. Lock and
+application-focus policies apply to each running Peek with its own clock.
+A pending start captures its account; another account's timer expiring does not
+invalidate it. Headless coverage exercises the actual account resolution method
+with two accounts and a separate test-server identity. Native account switching
+and the installed application remain separate qualification.
 
 Exit hidden chats when peek ends defaults to on. When an active Peek ends,
 the desktop re-evaluates each open conversation against the restored effective

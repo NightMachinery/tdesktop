@@ -35,6 +35,13 @@ private_versions = sorted(path for path in gui_headers.iterdir() if path.is_dir(
 if not private_versions:
     raise RuntimeError('Qt application-state test needs the matching installed QtGui private headers')
 flags += ['-I', str(private_versions[-1])]
+gate_source = (repo / 'Telegram/SourceFiles/purple/purple_gate.cpp').read_text()
+gate_begin = gate_source.index('const Resolved &Gate::resolved(not_null<Main::Session*> session)')
+gate_end = gate_source.index('\n// Deliberately never destroyed', gate_begin)
+(work / 'peek-account-resolution.inc').write_text(gate_source[gate_begin:gate_end])
+refresh_begin = gate_source.index('void Gate::refresh(bool settingsChanged)')
+refresh_end = gate_source.index('\nvoid Gate::refreshPeekTimer(', refresh_begin)
+(work / 'peek-account-refresh.inc').write_text(gate_source[refresh_begin:refresh_end])
 source = (repo / 'Telegram/SourceFiles/purple/purple_peek_controls.cpp').read_text()
 read_start = source.index('bool PeekEndsOnFocusLoss()')
 read_end = source.index('\nrpl::producer<bool> PeekFocusLossValue()', read_start)
@@ -46,6 +53,15 @@ def function(signature):
         depth += (source[position] == '{') - (source[position] == '}')
         position += 1
     return source[begin:position]
+(work / 'peek-account-close.inc').write_text(function('void PendingWait::closeHiddenChats('))
+(work / 'peek-account-focus.inc').write_text(function('void PendingWait::focusChanged()'))
+snapshot_begin = source.index('const auto snapshot = [=] {')
+snapshot_end = source.index('\n\tconst auto state = snapshot();', snapshot_begin)
+(work / 'peek-account-snapshot.inc').write_text(source[snapshot_begin:snapshot_end])
+request_begin = source.index('WaitResult PendingWait::request(')
+change_begin = source.index('StateChanges() | rpl::on_next(', request_begin) + len('StateChanges() | rpl::on_next(')
+change_end = source.index(', _pendingLifetime);', change_begin)
+(work / 'peek-account-state-change.inc').write_text('const auto onChange = ' + source[change_begin:change_end] + ';')
 pref_key = next(line for line in source.splitlines() if line.startswith('constexpr auto kPeekFocusLossPref ='))
 (work / 'peek-focus-preference.inc').write_text(pref_key + '\n' + source[read_start:read_end] + '\n' + '\n'.join(function(signature) for signature in (
     'void RequestPeekOptionChange(', 'void RequestPeekFocusLossChange(', 'void RequestPeekDelayChange(',
@@ -56,6 +72,7 @@ end = config_source.index('std::optional<AccountSettingsWriteTarget> Config::che
 (work / 'peek-config-write.inc').write_text(config_source[begin:end].replace('WriteResult Config::write(', 'WriteResult PortConfig::write(', 1))
 flags += ['-I', str(work)]
 inputs = ('purple/test_wait.cpp', 'purple/test_wait.py',
+    'Telegram/SourceFiles/purple/purple_gate.cpp', 'Telegram/SourceFiles/purple/purple_gate.h',
     'Telegram/SourceFiles/purple/purple_wait_gate.h', 'Telegram/SourceFiles/purple/purple_wait_gate.cpp',
     'Telegram/SourceFiles/purple/purple_wait_key_filter.h', 'Telegram/SourceFiles/purple/purple_wait_key_filter.cpp',
     'Telegram/SourceFiles/purple/purple_config.cpp', 'Telegram/SourceFiles/purple/purple_config.h',

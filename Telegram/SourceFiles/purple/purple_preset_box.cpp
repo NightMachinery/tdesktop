@@ -680,16 +680,16 @@ void PresetBox(
 	// the start was the only warning, so chats reappearing and then going again
 	// two minutes later had no visible cause. The countdown below runs only
 	// while this box is open, which is the only time there is anyone to read it.
-	const auto peekText = [] {
-		const auto &resolved = ActiveResolved();
+	const auto peekText = [=] {
+		const auto &resolved = ActiveResolved(session);
 		if (resolved.normal) {
 			return u"Peek - nothing is hidden under Normal"_q;
-		} else if (PeekStartPending()) {
+		} else if (PeekStartPending(session)) {
 			return tr::lng_purple_peek_starting(tr::now);
 		} else if (!resolved.peeking) {
 			return u"Peek - show what the preset hides (%1)"_q.arg(HotkeyText());
 		}
-		const auto deadline = CurrentState().peekDeadlineUnix;
+		const auto deadline = CurrentPeekState(session).peekDeadlineUnix;
 		if (!deadline) {
 			// auto_off = "off": it runs until it is turned off, and saying so
 			// is the whole difference from a countdown that never moves.
@@ -704,18 +704,18 @@ void PresetBox(
 		object_ptr<Ui::Checkbox>(
 			container,
 			peekText(),
-			Peeking(),
+			Peeking(session),
 			st::defaultCheckbox),
 		padding);
-	peek->setDisabled(ActiveResolved().normal);
+	peek->setDisabled(ActiveResolved(session).normal);
 	peek->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
-		if (checked == (Peeking() || PeekStartPending())) {
+		if (checked == (Peeking(session) || PeekStartPending(session))) {
 			return;
 		} else if (checked) {
-			StartPeekFor(PeekTapSeconds(ActiveSettings()));
+			RequestWait({ .session = session, .seconds = PeekTapSeconds(ActiveSettings()) });
 		} else {
-			EndPeek();
+			RequestWait({ .action = WaitAction::EndPeek, .session = session });
 		}
 	}, peek->lifetime());
 
@@ -868,12 +868,12 @@ void PresetBox(
 	// peek with ninety seconds on it sits at two minutes. Nothing anywhere
 	// remembers the length a peek was started with - state.toml holds a
 	// deadline and that is all.
-	const auto litIndex = [] {
-		return !Peeking()
+	const auto litIndex = [=] {
+		return !Peeking(session)
 			? -1
-			: PeekUntilStopped(CurrentState())
+			: PeekUntilStopped(CurrentPeekState(session))
 			? int(PeekDetentsSeconds().size())
-			: PeekDetentIndex(PeekLeftSeconds(CurrentState(), NowSeconds()));
+			: PeekDetentIndex(PeekLeftSeconds(CurrentPeekState(session), NowSeconds()));
 	};
 
 	// The same stops as the chips below, as a track. The chips are the
@@ -884,7 +884,7 @@ void PresetBox(
 		padding);
 	dial->commitRequests(
 	) | rpl::on_next([=](int index) {
-		StartPeekFor(PeekDetentSecondsAt(index));
+		RequestWait({ .session = session, .seconds = PeekDetentSecondsAt(index) });
 	}, dial->lifetime());
 
 	const auto refreshDial = [=] {
@@ -897,12 +897,12 @@ void PresetBox(
 			? lit
 			: PeekDetentIndex(PeekTapSeconds(ActiveSettings()));
 		const auto left = (lit >= 0)
-			? PeekLeftSeconds(CurrentState(), NowSeconds())
+			? PeekLeftSeconds(CurrentPeekState(session), NowSeconds())
 			: 0;
 		dial->showSelected(index, left
 			? PeekRemainingText(left)
 			: ChipText(PeekDetentSecondsAt(index)));
-		dial->setDisabled(ActiveResolved().normal);
+		dial->setDisabled(ActiveResolved(session).normal);
 	};
 
 	// The checkbox is still the on/off, and this row is the same switch with a
@@ -925,7 +925,7 @@ void PresetBox(
 			rpl::single(ChipText(seconds)),
 			st::defaultTableSmallButton);
 		chip->setFullRadius(true);
-		chip->setClickedCallback([=] { StartPeekFor(seconds); });
+		chip->setClickedCallback([=] { RequestWait({ .session = session, .seconds = seconds }); });
 		row.push_back(chip);
 	}
 	chips->widthValue(
@@ -947,7 +947,7 @@ void PresetBox(
 	}, chips->lifetime());
 
 	const auto refreshChips = [=] {
-		const auto normal = ActiveResolved().normal;
+		const auto normal = ActiveResolved(session).normal;
 
 		const auto lit = litIndex();
 		for (auto i = 0; i != int(row.size()); ++i) {
@@ -977,13 +977,13 @@ void PresetBox(
 	// under Normal, which hides nothing there is anything to peek at.
 	const auto refreshPeek = [=] {
 		peek->setChecked(
-			Peeking() || PeekStartPending(),
+			Peeking(session) || PeekStartPending(session),
 			Ui::Checkbox::NotifyAboutChange::DontNotify);
-		peek->setDisabled(ActiveResolved().normal);
+		peek->setDisabled(ActiveResolved(session).normal);
 		peek->setText(peekText());
 		refreshChips();
 		refreshDial();
-		if (Peeking() && CurrentState().peekDeadlineUnix) {
+		if (Peeking(session) && CurrentPeekState(session).peekDeadlineUnix) {
 			ticker->callEach(crl::time(1000));
 		} else {
 			ticker->cancel();
@@ -1225,7 +1225,7 @@ rpl::producer<QString> PresetMenuLabel() {
 		base::timer_each(
 			crl::time(1000)
 		) | rpl::filter([] {
-			return Peeking() && CurrentState().peekDeadlineUnix;
+			return Peeking() && CurrentPeekState().peekDeadlineUnix;
 		}) | rpl::to_empty
 	) | rpl::map([] {
 		const auto &resolved = ActiveResolved();
@@ -1239,7 +1239,7 @@ rpl::producer<QString> PresetMenuLabel() {
 		// chat list stops matching the preset the label names - and how long
 		// that goes on is the question the word "peeking" raises without
 		// answering.
-		const auto left = PeekLeftSeconds(CurrentState(), NowSeconds());
+		const auto left = PeekLeftSeconds(CurrentPeekState(), NowSeconds());
 		return left
 			? u"Work Mode: %1 (peeking, %2 left)"_q.arg(
 				ViewName(),

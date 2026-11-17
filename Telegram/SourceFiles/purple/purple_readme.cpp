@@ -49,7 +49,7 @@ file is fixed. Do not edit it: the Work Mode box says when it is in use, and
 the parse error still describes the real file.
 
 `state.toml` is the app's. It holds the active preset and why it is active, the
-focus-sync memory, the schedule's pause flag, the peek timer, and a cache of the
+focus-sync memory, the schedule's pause flag, each account's Peek timer, and a cache of the
 last resolution that worked - so a settings.toml that stops parsing mid-edit
 leaves the app running on something known-good instead of on defaults. It is
 rewritten constantly, carries no comments and preserves nothing. That is the

@@ -70,6 +70,7 @@ WaitResult RequestWait(WaitRequest request);
 
 void RegisterPeekWindow(not_null<Ui::RpWidget*> widget);
 [[nodiscard]] bool PeekStartPending();
+[[nodiscard]] bool PeekStartPending(not_null<Main::Session*> session);
 [[nodiscard]] bool PeekCountdownPending();
 [[nodiscard]] rpl::producer<> PeekCountdownChanges();
 void CancelPendingPeek();
@@ -86,13 +87,13 @@ void RequestPeekReadyTimeoutChange(
 	int seconds,
 	const std::shared_ptr<AppWideSettingsEditorState> &editor,
 	not_null<Main::Session*> session);
-void CloseHiddenPeekChats();
+void CloseHiddenPeekChats(const QString &account);
 
 namespace details {
 void RefreshWaitSettings();
-PeekChange ActivatePeekFor(int seconds);
-PeekChange ActivatePeekExtension(int seconds);
-PeekChange DeactivatePeek();
+PeekChange ActivatePeekFor(not_null<Main::Session*> session, int seconds);
+PeekChange ActivatePeekExtension(not_null<Main::Session*> session, int seconds);
+PeekChange DeactivatePeek(not_null<Main::Session*> session);
 } // namespace details
 
 } // namespace Purple

@@ -147,6 +147,9 @@ bool PruneOverrides();
 // Whether a peek is running: the active preset's hiding and added silencing
 // are suspended, while normal Telegram mute settings remain in force. See
 // docs/purple/work_mode.md.
+[[nodiscard]] State CurrentPeekState();
+[[nodiscard]] State CurrentPeekState(not_null<Main::Session*> session);
+void UpdatePeekState(not_null<Main::Session*> session, Fn<void(State&)> apply);
 [[nodiscard]] bool Peeking();
 [[nodiscard]] bool Peeking(not_null<Main::Session*> session);
 
