@@ -24,6 +24,7 @@ def add_current_core_units(repo, build, work, objects, compiled, log):
     changed.update(name for target, name in targets.items() if target not in known)
     targets = {target: name for target, name in targets.items() if target in known}
     if targets:
+        object_mtimes = {name: (build / target).stat().st_mtime_ns for target, name in targets.items()}
         deps = subprocess.check_output(
             ['ninja', '-C', str(build), '-t', 'deps', *targets], text=True)
         current = None
@@ -36,7 +37,9 @@ def add_current_core_units(repo, build, work, objects, compiled, log):
                 dependency = Path(line.strip())
                 local = repo / 'Telegram/ThirdParty/purple_core' / str(dependency).split(marker, 1)[1]
                 seen.add(current)
-                if not dependency.is_file() or not local.is_file() or dependency.read_bytes() != local.read_bytes():
+                if (not dependency.is_file() or not local.is_file()
+                        or dependency.stat().st_mtime_ns > object_mtimes[current]
+                        or dependency.read_bytes() != local.read_bytes()):
                     changed.add(current)
         changed.update(set(targets.values()) - seen)
     add_current_units(repo, build, work, objects, compiled, log, [], sorted(changed))

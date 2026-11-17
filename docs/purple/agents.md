@@ -278,6 +278,10 @@ borrowed core objects' Ninja dependencies against the current core and rebuild
 affected units in their
 gate output directory. This keeps a read-only Debug build usable after core
 changes; all reused inputs still pass the same freshness checks.
+The refresh also rebuilds a core unit when one of its core dependencies is newer
+than the borrowed object, including when the build and test source paths refer
+to the same checkout. Comparing the current file with itself cannot identify
+what an older object compiled.
 
 Compiles run one at a time. `--compile-wrapper` is a command prefix around each
 compiler or linker call, for example a script that takes a short
