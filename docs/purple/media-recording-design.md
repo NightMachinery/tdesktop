@@ -906,8 +906,8 @@ preview_trim_p = true         # extra 6
     existing "Media playback" header, and the "Recording bin" row. Row ids come from a new block
     `0x70750500` to `0x7075050f`; the highest id in use is `0x70750482`, and the `media` branch's
     `ROW_VOICE_QUEUE` is `0x70750027`.
-  - Desktop: a "Media recording" group in the Purple section of the Advanced page (`Purple::BuildAdvancedSection`,
-    `purple/purple_settings_section.cpp`), with the Desktop keys, the seek step chooser in "Media playback", and the
+  - Desktop: a "Media recording" group under **Settings → Purple** (`BuildPurpleSection` in
+    `purple_settings_section.cpp`), with the Desktop keys, the seek step chooser in "Media playback", and the
     "Recording bin" button.
 - **Not synced:** the bubble's corner, the orphan scan marker and the last processed exit time are device-local.
 

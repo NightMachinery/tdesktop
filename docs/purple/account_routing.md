@@ -238,7 +238,7 @@ separate validation.
 
 ## Choosing the app-wide settings account
 
-The Advanced Purple section shows **App-wide settings from … · Change** when
+**Settings → Purple** shows **App-wide settings from … · Change** when
 there are at least two signed-in accounts, or when the current source is signed
 out. The picker uses signed-in account names and marks test-server identities.
 The current signed-out source remains a labeled choice. Choosing a different

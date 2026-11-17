@@ -1,7 +1,7 @@
 # Local automation and tdesktop-cli
 
 Purple exposes an optional local control socket for desktop hotkeys and scripts.
-Open Settings, Advanced, Purple, Local automation and confirm both dialogs to
+Open **Settings → Purple → Local automation** and confirm both dialogs to
 allow commands. Automation starts off. A socket request cannot open a consent
 dialog, enable automation or change settings.
 
@@ -16,7 +16,7 @@ including `ping`, require the master switch.
 
 ## Allow while locked
 
-In Settings, Advanced, Purple, Local automation, each capability has a local
+Under **Settings → Purple → Local automation**, each capability has a local
 "Allow while locked" switch. Media information has separate music and voice
 switches. Defaults also apply to existing installations without saved switches:
 

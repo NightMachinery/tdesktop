@@ -84,9 +84,8 @@ Re-run the two churn commands in "Re-anchoring after the merge" once the merge l
 
 No upstream file changes for any settings row.
 
-- **Desktop:** a "Media playback" group inside the Purple section on the Advanced page. That section is built
-  by `Purple::BuildAdvancedSection` (`purple/purple_settings_section.cpp:718-720`), and its existing toggle
-  pattern is "Local Premium features" at `:685-701`. The group has three rows: the F3 toggle, the F5 size
+- **Desktop:** a "Media playback" group under **Settings → Purple**, built by
+  `BuildPurpleSection` in `purple_settings_section.cpp`. The group has three rows: the F3 toggle, the F5 size
   chooser (a single-choice box: 100, 150, 200, 250%), and the F4 toggle.
 - **Android:** one check row in `PurpleSettingsActivity`, built the way the existing check row is
   (`ui/PurpleSettingsActivity.java:244-247` for the item, `:495-498` for the click). It takes a fresh id from

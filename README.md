@@ -13,6 +13,7 @@ This is the complete source code and the build instructions for the official [Te
 The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
 
 This fork's feature overview and contributor instructions are in the [Purple guide](docs/purple/agents.md).
+Open **Settings → Purple** to configure the fork's features.
 Chooser-marked transparent WebPs keep their original bytes when pasted; see [the marker contract](docs/purple/webp_paste.md).
 Voice recording can leave its chat for a top control strip, and round cameras have an in-chat float; see [recording behavior and limits](docs/purple/media_recording.md).
 The player seeks back and forward by a configurable step (5, 10, 15 or 30 seconds); see [media recording](docs/purple/media_recording.md).
