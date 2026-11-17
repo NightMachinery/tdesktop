@@ -1,6 +1,7 @@
 #include "purple/purple_emoji_large.h"
 #include "purple/purple_emoji_large_store.h"
 #include "purple/purple_emoji_export_worker.h"
+#include "purple/purple_emoji_export_queue.h"
 #include "base/basic_types.h"
 #include <QtCore/QCoreApplication>
 #include <QtCore/QElapsedTimer>
@@ -11,6 +12,7 @@
 #include <QtCore/QTimer>
 #include <atomic>
 #include <cstdio>
+#include <memory>
 
 namespace {
 
@@ -37,6 +39,11 @@ public:
 	bool _rendering = false;
 	bool _scanDue = true;
 	bool _pruneLarge = true;
+	bool _outputPublished = true;
+	size_t _healthCursor = 0;
+	std::shared_ptr<const std::vector<EmojiExportEntry>> _published
+		= std::make_shared<const std::vector<EmojiExportEntry>>();
+	EmojiExportQueue _queue;
 	bool _media = false;
 	bool current = true;
 	std::set<quint64> _acknowledge;
@@ -44,12 +51,23 @@ public:
 	int pumps = 0;
 	int errors = 0;
 	int reconciles = 0;
+	int rebuilds = 0;
 	bool admitted() const { return current; }
 	void reconcile() { ++reconciles; }
 	void outputFailed() { ++errors; }
 	void pump() { ++pumps; }
 	void checkMedia() { ++pumps; }
 	void admitRequests(const std::vector<quint64> &ids) { admittedIds = ids; }
+	void revoke(bool clear) {
+		Check(!clear, "missing output never clears surviving artwork");
+		++rebuilds;
+		_epoch.revoke();
+		_token = _epoch.begin();
+		_outputPublished = false;
+		_published = std::make_shared<const std::vector<EmojiExportEntry>>();
+		_queue.clear();
+		_workerGeneration = _worker.revoke(clear, {});
+	}
 	void maintainRequests();
 	void capChanged();
 
@@ -140,6 +158,16 @@ int main(int argc, char **argv) {
 	Check(e._rendering && e.pumps == before && !e.errors,
 		"retired maintenance callback cannot clear newer render or resume owner");
 	Check(beats > 0, "main event loop remains responsive through maintenance and revocation");
+	Check(EnsureEmojiLargeDirectories(directory), "deleted-output fixture has safe directories");
+	e._outputPublished = true;
+	e._scanDue = true;
+	e._rendering = false;
+	e._queue.transient(50, 0, 0);
+	e.maintainRequests();
+	Check(wait([&] { return e.rebuilds == 1 || e.errors; }) && !e.errors,
+		"actual maintenance notices a missing catalog without a settings event");
+	Check(e.reconciles == 1 && e._queue.metadataRetryAt() == 50000 && !e._outputPublished,
+		"rebuilding resets stale publication and preserves metadata flood wait");
 	std::printf("emoji literal maintenance: %d checks, %d failures, %d heartbeat ticks\n", checks, failures, beats);
 	return failures ? 1 : 0;
 }

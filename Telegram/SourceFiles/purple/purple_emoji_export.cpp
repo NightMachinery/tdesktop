@@ -130,6 +130,8 @@ private:
 	bool _scanDue = true;
 	bool _pruneLarge = true;
 	bool _publishPending = false;
+	bool _outputPublished = false;
+	size_t _healthCursor = 0;
 	QTimer _poll;
 	QTimer _renderPoll;
 	QTimer _demandWake;
@@ -163,7 +165,9 @@ private:
 
 EmojiExporter::EmojiExporter()
 : QObject(QCoreApplication::instance())
-, _worker(_directory, this) {
+, _worker(_directory, this, LegacyEmojiExportDirectory(
+	CanonicalDirectory(QDir::homePath()), CanonicalDirectory(cWorkingDir()),
+	CanonicalDirectory(psAppDataPath()))) {
 	_clock.start();
 	QObject::connect(&_renderPoll, &QTimer::timeout, this, [=] {
 		_renderRequests.poll(_clock.elapsed());
@@ -339,6 +343,8 @@ void EmojiExporter::revoke(bool clear) {
 	_scanDue = true;
 	_pruneLarge = true;
 	_publishPending = false;
+	_outputPublished = false;
+	_healthCursor = 0;
 	_rendering = false;
 	_running = _pending = _bound = false;
 	resetOutput(clear);
@@ -539,10 +545,16 @@ void EmojiExporter::maintainRequests() {
 	const auto cap = EmojiLargeCacheCap();
 	const auto acknowledge = std::make_shared<std::set<quint64>>(std::move(_acknowledge));
 	const auto requests = std::make_shared<std::vector<quint64>>();
+	const auto published = _published;
+	const auto checkOutput = _outputPublished;
+	const auto cursor = std::make_shared<size_t>(_healthCursor);
+	const auto missing = std::make_shared<bool>(false);
 	_rendering = true;
 	const auto accepted = _worker.submit(_workerGeneration,
 		[=](const EmojiExportAuthority &current) {
 			if (!current() || !EnsureEmojiLargeDirectories(directory)) return false;
+			*missing = checkOutput && !EmojiExportFilesPresent(directory, *published, *cursor);
+			if (*missing) return current();
 			if (!PruneEmojiLargeExport(directory, cap, current)) return false;
 			for (const auto id : *acknowledge) {
 				if (!current()) return false;
@@ -555,6 +567,14 @@ void EmojiExporter::maintainRequests() {
 			_rendering = false;
 			if (!admitted()) { reconcile(); return; }
 			if (!ok) { outputFailed(); return; }
+			_healthCursor = *cursor;
+			if (*missing) {
+				auto queue = std::move(_queue);
+				revoke(false);
+				_queue = std::move(queue);
+				reconcile();
+				return;
+			}
 			admitRequests(*requests);
 			if (_media) checkMedia();
 			else pump();
@@ -953,6 +973,7 @@ void EmojiExporter::publish() {
 			}
 			_ready = std::move(*ready);
 			_published = published;
+			_outputPublished = true;
 			_renderRequests.published(*published);
 			_publishPending = false;
 			if (!finished) { pump(); return; }

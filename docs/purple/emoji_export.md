@@ -9,7 +9,10 @@ by default and applies only to this installation. These files contain emoji
 library metadata and artwork, so other local applications can read them.
 
 On the default working directory the catalog is
-`~/Library/Caches/Purple/emoji-export/catalog.json`. A different working directory
+`~/Library/Application Support/Purple/emoji-export/catalog.json`, outside disposable
+cache directories. At startup, the worker retires owned output from the old
+`~/Library/Caches/Purple/emoji-export` location before publishing at the new path.
+Unrelated files remain untouched. A different working directory
 uses `<workdir>/emoji-export/catalog.json`, keeping test profiles separate.
 The setting displays the actual directory; callers cannot choose another one.
 
@@ -217,6 +220,12 @@ The periodic worker then starts a fresh pass without requiring a settings toggle
 or account switch. Metadata flood waits and per-document cooldowns survive this
 retry. Disabling export, changing the primary account, logout and lock-policy
 revocation still clear output through the existing generation barriers.
+
+The one-second maintenance tick also checks the catalog and up to 256 published
+preview files on the worker, advancing through the library across ticks. Missing
+or empty output starts a fresh pass without clearing surviving files. A deleted
+export directory is recreated automatically. Rebuilding preserves metadata flood
+waits and still obeys export consent, account identity and lock policy.
 
 ## Upstream hooks
 

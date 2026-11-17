@@ -57,6 +57,14 @@ private:
 	const QString &home,
 	const QString &workdir,
 	const QString &defaultWorkdir);
+[[nodiscard]] QString LegacyEmojiExportDirectory(
+	const QString &home,
+	const QString &workdir,
+	const QString &defaultWorkdir);
+[[nodiscard]] bool EmojiExportFilesPresent(
+	const QString &directory,
+	const std::vector<EmojiExportEntry> &entries,
+	size_t &cursor);
 [[nodiscard]] QString EmojiExportPngName(quint64 id);
 [[nodiscard]] std::vector<EmojiExportEntry> UniqueEmojiExportEntries(
 	const std::vector<EmojiExportEntry> &entries);

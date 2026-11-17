@@ -76,7 +76,11 @@ int main(int argc, char **argv) {
 	check(array[2].toObject().value(u"recentRank"_q).isNull(), "installed rank null");
 	check(first.value(u"png"_q).toString() == u"png/20-128.png"_q, "relative PNG path");
 	check(EmojiExportDirectory(u"/home/example"_q, u"/app/default/"_q, u"/app/default"_q)
-		== u"/home/example/Library/Caches/Purple/emoji-export"_q, "default workdir path");
+		== u"/home/example/Library/Application Support/Purple/emoji-export"_q, "default workdir avoids cache cleaners");
+	check(LegacyEmojiExportDirectory(u"/home/example"_q, u"/app/default/"_q, u"/app/default"_q)
+		== u"/home/example/Library/Caches/Purple/emoji-export"_q, "default legacy output has bounded retirement scope");
+	check(LegacyEmojiExportDirectory(u"/home/example"_q, u"/app/custom"_q, u"/app/default"_q).isEmpty(),
+		"isolated profile never retires the real legacy export");
 	check(EmojiExportDirectory(u"/home/example"_q, u"/app/custom"_q, u"/app/default"_q)
 		== u"/app/custom/emoji-export"_q, "other workdir isolated");
 	check(EmojiExportDirectory(u"/home/example"_q, u"/app/custom"_q, {}).endsWith(
@@ -125,6 +129,20 @@ int main(int argc, char **argv) {
 	check(QImage(png20).size() == QSize(128, 128), "saved PNG decodes at contract size");
 	check(!QFileInfo::exists(path), "PNG write alone does not publish catalog");
 	check(PublishEmojiExportCatalog(directory, firstOnly, stamp), "catalog published after PNG");
+	auto cursor = size_t(0);
+	check(EmojiExportFilesPresent(directory, firstOnly, cursor), "published output is healthy");
+	check(QFile::remove(path) && !EmojiExportFilesPresent(directory, firstOnly, cursor),
+		"externally deleted catalog requests rebuilding");
+	check(PublishEmojiExportCatalog(directory, firstOnly, stamp), "deleted catalog can be repopulated");
+	check(QFile::remove(png20) && !EmojiExportFilesPresent(directory, firstOnly, cursor),
+		"externally deleted preview requests rebuilding");
+	check(WriteEmojiExportPng(directory, 20, image), "deleted artwork can be repopulated");
+	auto many = std::vector<EmojiExportEntry>(600, entries[0]);
+	cursor = 0;
+	check(EmojiExportFilesPresent(directory, many, cursor) && cursor == 256,
+		"health scan examines at most one maintenance page");
+	check(EmojiExportFilesPresent(directory, many, cursor) && cursor == 512,
+		"health scan advances beyond the first page");
 	const auto original = read(path);
 	check(QJsonDocument::fromJson(original).object() == EmojiExportCatalog(firstOnly, stamp),
 		"published catalog complete");

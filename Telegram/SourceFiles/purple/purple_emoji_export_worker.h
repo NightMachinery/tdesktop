@@ -17,7 +17,8 @@ class EmojiExportWorker final : public QObject {
 public:
 	using Work = std::function<bool(const EmojiExportAuthority&)>;
 	using Done = std::function<void(quint64, bool)>;
-	explicit EmojiExportWorker(QString directory, QObject *parent = nullptr);
+	explicit EmojiExportWorker(QString directory, QObject *parent = nullptr,
+		QString legacyDirectory = {});
 	~EmojiExportWorker();
 	[[nodiscard]] quint64 generation() const;
 	[[nodiscard]] bool submit(quint64 generation, Work work, Done done);
@@ -34,6 +35,7 @@ private:
 	void completed(Job job, bool ok);
 
 	const QString _directory;
+	const QString _legacyDirectory;
 	std::atomic<quint64> _generation = 1;
 	std::atomic<bool> _stopping = false;
 	std::mutex _mutex;

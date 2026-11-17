@@ -63,6 +63,7 @@ struct EmojiPublicationProbe {
 	bool _running = true;
 	bool _pending = false;
 	bool _publishPending = true;
+	bool _outputPublished = false;
 	std::vector<int> _ready;
 	std::shared_ptr<std::vector<int>> _published;
 	struct { void published(const std::vector<int> &) {} } _renderRequests;

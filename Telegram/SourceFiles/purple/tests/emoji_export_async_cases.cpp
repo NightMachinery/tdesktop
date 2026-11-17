@@ -258,6 +258,30 @@ int main(int argc, char **argv) {
 	check(oldCompleted && !oldResult, "revoked worker loses write authority");
 	check(!QFileInfo::exists(directory + '/' + EmojiExportPngName(7)), "revoked worker cannot recreate after cleanup");
 	check(!QFileInfo::exists(directory + u"/catalog.json"_q), "later no-clear barrier preserves earlier revocation requirement");
+	const auto legacy = QFileInfo(temp.path()).canonicalFilePath() + u"/legacy/emoji-export"_q;
+	const auto stable = QFileInfo(temp.path()).canonicalFilePath() + u"/stable/emoji-export"_q;
+	check(WriteEmojiExportPng(legacy, 8, image)
+		&& PublishEmojiExportCatalog(legacy, {{.id = 8}}, stamp), "legacy export fixture");
+	auto note = QFile(legacy + u"/notes.txt"_q);
+	check(note.open(QIODevice::WriteOnly) && note.write("keep") == 4, "unowned legacy file fixture");
+	note.close();
+	auto migrating = EmojiExportWorker(stable, nullptr, legacy);
+	wait([&](auto done) {
+		check(migrating.submit(migrating.generation(), [=](const EmojiExportAuthority &current) {
+			return !QFileInfo::exists(legacy + u"/catalog.json"_q)
+				&& !QFileInfo::exists(legacy + '/' + EmojiExportPngName(8))
+				&& QFileInfo::exists(legacy + u"/notes.txt"_q)
+				&& WriteEmojiExportPng(stable, 8, image, current)
+				&& PublishEmojiExportCatalog(stable, {{.id = 8}}, stamp, current);
+		}, [=](quint64, bool ok) { done(ok); }), "legacy retirement precedes new publication");
+	});
+	check(QDir(stable).removeRecursively(), "externally remove synthetic export directory");
+	wait([&](auto done) {
+		check(migrating.submit(migrating.generation(), [=](const EmojiExportAuthority &current) {
+			return WriteEmojiExportPng(stable, 8, image, current)
+				&& PublishEmojiExportCatalog(stable, {{.id = 8}}, stamp, current);
+		}, [=](quint64, bool ok) { done(ok); }), "same worker repopulates externally deleted directory");
+	});
 	std::printf("emoji async: %d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
 }

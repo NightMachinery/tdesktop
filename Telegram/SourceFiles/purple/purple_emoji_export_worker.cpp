@@ -3,12 +3,15 @@
 #include "purple/purple_emoji_export_store.h"
 #include "purple/purple_emoji_large_store.h"
 #include <QtCore/QMetaObject>
+#include <QtCore/QFileInfo>
 
 namespace Purple {
 
-EmojiExportWorker::EmojiExportWorker(QString directory, QObject *parent)
+EmojiExportWorker::EmojiExportWorker(QString directory, QObject *parent,
+		QString legacyDirectory)
 : QObject(parent)
 , _directory(std::move(directory))
+, _legacyDirectory(std::move(legacyDirectory))
 , _thread([this] { run(); }) {
 }
 
@@ -61,6 +64,9 @@ void EmojiExportWorker::completed(Job job, bool ok) {
 void EmojiExportWorker::run() {
 	auto recovery = EmojiExportCleanupRecorded(_directory);
 	auto cleanup = std::make_unique<EmojiExportCleanup>();
+	auto legacy = !_legacyDirectory.isEmpty() && _legacyDirectory != _directory
+		&& QFileInfo::exists(_legacyDirectory);
+	auto legacyCleanup = EmojiExportCleanup();
 	while (true) {
 		auto job = Job();
 		auto clear = false;
@@ -71,6 +77,7 @@ void EmojiExportWorker::run() {
 				const auto clearOnStop = _clearRequired || recovery;
 				lock.unlock();
 				if (clearOnStop) static_cast<void>(RecordEmojiExportCleanup(_directory));
+				if (legacy && !RecordEmojiExportCleanup(_legacyDirectory)) return;
 				return;
 			}
 			job = std::move(*_pending);
@@ -90,7 +97,16 @@ void EmojiExportWorker::run() {
 			cleaned = result == EmojiExportCleanupResult::Done;
 			break;
 		}
-		const auto ok = current() && cleaned && (job.barrier || job.work(current));
+		while (legacy && current()) {
+			const auto result = legacyCleanup.step(_legacyDirectory, current);
+			if (result == EmojiExportCleanupResult::Pending) {
+				std::this_thread::yield();
+				continue;
+			}
+			legacy = result != EmojiExportCleanupResult::Done;
+			break;
+		}
+		const auto ok = current() && cleaned && !legacy && (job.barrier || job.work(current));
 		if (clear && cleaned) {
 			const auto lock = std::lock_guard(_mutex);
 			if (current()) {

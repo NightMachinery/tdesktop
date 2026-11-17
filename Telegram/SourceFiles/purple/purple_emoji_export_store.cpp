@@ -14,6 +14,7 @@
 #include <QtCore/QSaveFile>
 #include <QtCore/QSet>
 #include <QtGui/QPainter>
+#include <algorithm>
 
 namespace Purple {
 namespace {
@@ -121,8 +122,37 @@ QString EmojiExportDirectory(
 	const auto working = QDir::cleanPath(workdir);
 	return (QDir::isAbsolutePath(defaultWorkdir)
 		&& working == QDir::cleanPath(defaultWorkdir))
-		? QDir::cleanPath(home) + u"/Library/Caches/Purple/emoji-export"_q
+		? QDir::cleanPath(home) + u"/Library/Application Support/Purple/emoji-export"_q
 		: working + u"/emoji-export"_q;
+}
+
+QString LegacyEmojiExportDirectory(
+		const QString &home,
+		const QString &workdir,
+		const QString &defaultWorkdir) {
+	return QDir::isAbsolutePath(home) && QDir::isAbsolutePath(workdir)
+		&& QDir::isAbsolutePath(defaultWorkdir)
+		&& QDir::cleanPath(workdir) == QDir::cleanPath(defaultWorkdir)
+		? QDir::cleanPath(home) + u"/Library/Caches/Purple/emoji-export"_q
+		: QString();
+}
+
+bool EmojiExportFilesPresent(
+		const QString &directory,
+		const std::vector<EmojiExportEntry> &entries,
+		size_t &cursor) {
+	const auto catalog = QFileInfo(directory + u"/catalog.json"_q);
+	if (!SafeExport(directory, false) || !catalog.isFile()
+		|| catalog.isSymLink() || !catalog.size()) return false;
+	if (entries.empty()) { cursor = 0; return true; }
+	cursor %= entries.size();
+	const auto count = std::min(entries.size(), kEmojiExportMaintenancePage);
+	for (auto i = size_t(0); i != count; ++i) {
+		const auto info = QFileInfo(directory + '/' + EmojiExportPngName(entries[cursor].id));
+		cursor = (cursor + 1) % entries.size();
+		if (!info.isFile() || info.isSymLink() || !info.size()) return false;
+	}
+	return true;
 }
 
 QString EmojiExportPngName(quint64 id) {
