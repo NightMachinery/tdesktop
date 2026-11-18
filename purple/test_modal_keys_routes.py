@@ -88,8 +88,22 @@ available = between(keys, "bool Available", "bool IsSearchableAction")
 ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
         "case Action::PreviousTrack:", "case Action::NextTrack:",
         "case Action::SeekBackward:", "case Action::SeekForward:",
-        "return HasPlaybackInSession(target.session)")
-assert keys.count(".session = &owner->session()") == 3
+        "HasPlaybackInSession(&target.controller->session())")
+assert keys.count(".controller = owner") == 3
+accounts = between(keys, "bool CanSwitchAccount", "Dialogs::Widget *ChatsPane")
+ordered(accounts, "if (!controller)", "domain().orderedAccounts()", "index < int(accounts.size())",
+        "accounts[index]->sessionExists()", "!= &controller->session().account()")
+for index in range(1, 7):
+    assert re.search(rf"case Action::Account{index}:\s+launch\(Native::ShowAccount{index}\);", dispatch)
+    assert f"{{ Action::Account{index}, {{ Qt::Key_Space, Qt::Key_A, Qt::Key_{index} }} }}" in keys
+panes = between(keys, "Dialogs::Widget *ChatsPane", "bool Available")
+ordered(panes, "controller->content()->children()", "dynamic_cast<Dialogs::Widget*>",
+        "dialogs->controller() == controller", "dialogs->isEnabled()", "dialogs->purpleKeysList(dialogs)")
+ordered(available, "case Action::FocusChats:", "ChatsPane(target.controller)",
+        "case Action::FocusConversation:", "!target.controller->adaptive().isOneColumn()",
+        "target.controller->mainSectionShown()", "target.controller->activeChatCurrent().thread()")
+ordered(dispatch, "case Action::FocusChats:", "ChatsPane(current)", "dialogs->setInnerFocus(true)",
+        "case Action::FocusConversation:", "current->content()->activate()")
 bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \} \},", keys)
 chords = [tuple(keys.split(", ")) for _, keys in bindings]
 assert len(set(chords)) == len(chords)

@@ -38,6 +38,10 @@ Telegram typing and input-method behavior.
   Scheduled messages become eligible after Telegram confirms them.
   `g s m` opens the native menu for a hinted message. Use the menu to reply,
   forward, or copy a message link when those actions are available.
+- `SPC a 1` through `SPC a 6` switch to another signed-in account in the
+  order shown in Telegram's account list.
+- With the chat list and conversation visible, `SPC w d` focuses the chat list
+  and `SPC w c` focuses the conversation. Focus changes return to Insert.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command

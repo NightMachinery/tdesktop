@@ -14,7 +14,10 @@
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "lang/lang_keys.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
+#include "mainwidget.h"
 #include "media/player/media_player_instance.h"
 #include "mainwindow.h"
 #include "purple/purple_chat_background.h"
@@ -87,6 +90,14 @@ enum class Action {
 	NextTrack,
 	SeekBackward,
 	SeekForward,
+	Account1,
+	Account2,
+	Account3,
+	Account4,
+	Account5,
+	Account6,
+	FocusChats,
+	FocusConversation,
 	Help,
 	Run,
 	DescribeChord,
@@ -148,6 +159,28 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_shortcuts_seek_backward(tr::now); } },
 	{ Action::SeekForward, "playback-seek-forward",
 		[] { return tr::lng_purple_shortcuts_seek_forward(tr::now); } },
+	{ Action::Account1, "switch-account-1",
+		[] { return tr::lng_shortcuts_show_account_n(
+			tr::now, lt_index, QString::number(1)); } },
+	{ Action::Account2, "switch-account-2",
+		[] { return tr::lng_shortcuts_show_account_n(
+			tr::now, lt_index, QString::number(2)); } },
+	{ Action::Account3, "switch-account-3",
+		[] { return tr::lng_shortcuts_show_account_n(
+			tr::now, lt_index, QString::number(3)); } },
+	{ Action::Account4, "switch-account-4",
+		[] { return tr::lng_shortcuts_show_account_n(
+			tr::now, lt_index, QString::number(4)); } },
+	{ Action::Account5, "switch-account-5",
+		[] { return tr::lng_shortcuts_show_account_n(
+			tr::now, lt_index, QString::number(5)); } },
+	{ Action::Account6, "switch-account-6",
+		[] { return tr::lng_shortcuts_show_account_n(
+			tr::now, lt_index, QString::number(6)); } },
+	{ Action::FocusChats, "focus-chat-list",
+		[] { return tr::lng_purple_keys_focus_chats(tr::now); } },
+	{ Action::FocusConversation, "focus-conversation",
+		[] { return tr::lng_purple_keys_focus_conversation(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -193,6 +226,14 @@ const Binding kBindings[] = {
 	{ Action::NextTrack, { Qt::Key_BracketRight, Qt::Key_T } },
 	{ Action::SeekBackward, { Qt::Key_Space, Qt::Key_M, Qt::Key_B } },
 	{ Action::SeekForward, { Qt::Key_Space, Qt::Key_M, Qt::Key_F } },
+	{ Action::Account1, { Qt::Key_Space, Qt::Key_A, Qt::Key_1 } },
+	{ Action::Account2, { Qt::Key_Space, Qt::Key_A, Qt::Key_2 } },
+	{ Action::Account3, { Qt::Key_Space, Qt::Key_A, Qt::Key_3 } },
+	{ Action::Account4, { Qt::Key_Space, Qt::Key_A, Qt::Key_4 } },
+	{ Action::Account5, { Qt::Key_Space, Qt::Key_A, Qt::Key_5 } },
+	{ Action::Account6, { Qt::Key_Space, Qt::Key_A, Qt::Key_6 } },
+	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_D } },
+	{ Action::FocusConversation, { Qt::Key_Space, Qt::Key_W, Qt::Key_C } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -245,7 +286,7 @@ struct Target {
 	MessageHints::Target messages;
 	bool folders = false;
 	bool chatActions = false;
-	Main::Session *session = nullptr;
+	Window::SessionController *controller = nullptr;
 };
 
 Target FindTarget(Window::SessionController *owner, QWidget *focus) {
@@ -261,7 +302,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 				.focus = focus,
 				.messages = { .section = list, .scheduled = scheduled },
 				.chatActions = chatActions,
-				.session = &owner->session(),
+				.controller = owner,
 			}
 			: Target();
 	};
@@ -278,7 +319,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					&& !owner->openedFolder().current()
 					&& !owner->shownForum().current()
 					&& !owner->openedCommunity().current(),
-				.session = &owner->session(),
+				.controller = owner,
 			};
 		}
 		if (const auto history = dynamic_cast<HistoryWidget*>(widget)) {
@@ -288,7 +329,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					.focus = focus,
 					.messages = { .main = history->purpleMessageList() },
 					.chatActions = true,
-					.session = &owner->session(),
+					.controller = owner,
 				}
 				: Target();
 		}
@@ -314,6 +355,30 @@ bool HasPlaybackInSession(Main::Session *session) {
 	return document && (&document->session() == session);
 }
 
+bool CanSwitchAccount(Window::SessionController *controller, int index) {
+	if (!controller) {
+		return false;
+	}
+	const auto accounts = Core::App().domain().orderedAccounts();
+	return index < int(accounts.size())
+		&& accounts[index]->sessionExists()
+		&& accounts[index].get() != &controller->session().account();
+}
+
+Dialogs::Widget *ChatsPane(Window::SessionController *controller) {
+	if (!controller) {
+		return nullptr;
+	}
+	for (const auto child : controller->content()->children()) {
+		const auto dialogs = dynamic_cast<Dialogs::Widget*>(child);
+		if (dialogs && dialogs->controller() == controller
+			&& dialogs->isEnabled() && dialogs->purpleKeysList(dialogs)) {
+			return dialogs;
+		}
+	}
+	return nullptr;
+}
+
 bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::PreviousChat:
@@ -333,7 +398,21 @@ bool Available(Action action, const Target &target) {
 	case Action::PreviousTrack:
 	case Action::NextTrack:
 	case Action::SeekBackward:
-	case Action::SeekForward: return HasPlaybackInSession(target.session);
+	case Action::SeekForward: return target.controller
+		&& HasPlaybackInSession(&target.controller->session());
+	case Action::Account1:
+	case Action::Account2:
+	case Action::Account3:
+	case Action::Account4:
+	case Action::Account5:
+	case Action::Account6: return CanSwitchAccount(
+		target.controller, int(action) - int(Action::Account1));
+	case Action::FocusChats: return !target.list && ChatsPane(target.controller);
+	case Action::FocusConversation:
+		return target.list && target.controller
+			&& !target.controller->adaptive().isOneColumn()
+			&& target.controller->mainSectionShown()
+			&& target.controller->activeChatCurrent().thread();
 	default: return true;
 	}
 }
@@ -763,6 +842,10 @@ void Keys::showWhichKey() {
 			? tr::lng_purple_keys_group_chat(tr::now)
 			: (next == Qt::Key_O)
 			? tr::lng_purple_keys_group_open(tr::now)
+			: (next == Qt::Key_A)
+			? tr::lng_purple_keys_group_accounts(tr::now)
+			: (next == Qt::Key_W)
+			? tr::lng_mac_menu_window(tr::now)
 			: (next == Qt::Key_M)
 			? tr::lng_media_type_media(tr::now)
 			: (next == Qt::Key_S && _prefix == Chord{ Qt::Key_Space })
@@ -897,6 +980,32 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::SeekForward:
 		launch(Native::MediaSeekForward);
+		break;
+	case Action::Account1:
+		launch(Native::ShowAccount1);
+		break;
+	case Action::Account2:
+		launch(Native::ShowAccount2);
+		break;
+	case Action::Account3:
+		launch(Native::ShowAccount3);
+		break;
+	case Action::Account4:
+		launch(Native::ShowAccount4);
+		break;
+	case Action::Account5:
+		launch(Native::ShowAccount5);
+		break;
+	case Action::Account6:
+		launch(Native::ShowAccount6);
+		break;
+	case Action::FocusChats:
+		if (const auto dialogs = ChatsPane(current)) {
+			dialogs->setInnerFocus(true);
+		}
+		break;
+	case Action::FocusConversation:
+		current->content()->activate();
 		break;
 	case Action::SelectMessage:
 	case Action::CopyMessage:
