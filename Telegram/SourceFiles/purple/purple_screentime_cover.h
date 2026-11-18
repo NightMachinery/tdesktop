@@ -34,6 +34,7 @@ public:
 	// Where the cover goes: everything below the top bar, so the chat stays
 	// nameable and closeable while its time is up.
 	void setGeometry(QRect geometry);
+	[[nodiscard]] bool visible() const;
 
 private:
 	class Widget;

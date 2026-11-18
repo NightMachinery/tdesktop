@@ -284,4 +284,8 @@ void ScreenTimeCover::setGeometry(QRect geometry) {
 	_widget->place(geometry);
 }
 
+bool ScreenTimeCover::visible() const {
+	return _widget->isVisible();
+}
+
 } // namespace Purple

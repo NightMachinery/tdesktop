@@ -48,6 +48,11 @@
   },
   "gates": [
     {
+      "name": "test_modal_keys_routes",
+      "driver": "purple/test_modal_keys_routes.py",
+      "coverage": "Modal key event ordering, protected focus, palette context, and live wallpaper routing"
+    },
+    {
       "name": "test_wait_routes",
       "driver": "purple/test_wait_routes.py",
       "coverage": "Writer inventory and wait-cover focus teardown wiring"

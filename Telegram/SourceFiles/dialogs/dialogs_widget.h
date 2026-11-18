@@ -113,6 +113,7 @@ public:
 		const Window::SectionShow &params);
 	void setInnerFocus(bool unfocusSearch = false);
 	[[nodiscard]] bool searchHasFocus() const;
+	[[nodiscard]] InnerWidget *purpleKeysList(QWidget *focus) const;
 
 	[[nodiscard]] Data::Forum *openedForum() const;
 

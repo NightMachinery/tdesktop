@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_control.h"
 #include "purple/purple_last_seen.h"
+#include "purple/purple_keys.h"
 #include "purple/purple_media_playback.h"
 #include "purple/purple_recording_settings.h"
 #include "purple/purple_media_reply_settings.h"
@@ -716,6 +717,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		"Stored in "_q + Purple::SettingsFilePath() + '.'));
 	builder.addSkip();
 
+	BuildModalKeysSetting(builder);
 	BuildEmojiExportSetting(builder);
 	BuildControlSettings(builder);
 	BuildPurpleLastSeenSection(builder);

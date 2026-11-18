@@ -225,6 +225,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_iv.h"
 #include "styles/style_layers.h"
 
+#include <QtGui/QTextBlock>
+#include <QtGui/QTextLayout>
 #include <QtGui/QWindow>
 #include <QtCore/QMimeData>
 
@@ -2662,6 +2664,26 @@ void HistoryWidget::activate() {
 		}
 	}
 	controller()->widget()->setInnerFocus();
+}
+
+bool HistoryWidget::allowsPurpleKeys(QWidget *focus) const {
+	const auto field = (focus == _field->rawTextEdit().get());
+	const auto layout = field ? _field->textCursor().block().layout() : nullptr;
+	return isVisible()
+		&& _history
+		&& !_showAnimation
+		&& !isSearching()
+		&& !isChoosingTheme()
+		&& !isRecording()
+		&& !_editMsgId
+		&& !_nonEmptySelection
+		&& (!_purpleScreenTimeCover || !_purpleScreenTimeCover->visible())
+		&& (!_autocomplete || _autocomplete->isHidden())
+		&& (!_inlineResults || _inlineResults->isHidden())
+		&& (focus == this
+			|| focus == _list.data()
+			|| (field && _field->isVisible()
+				&& (!layout || layout->preeditAreaText().isEmpty())));
 }
 
 void HistoryWidget::setInnerFocus() {

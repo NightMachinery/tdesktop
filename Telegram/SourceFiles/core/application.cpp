@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
 #include "purple/purple_app_services.h"
+#include "purple/purple_keys.h"
 #include "base/unixtime.h"
 #include "core/core_screenshot_protection.h"
 #include "core/core_settings.h"
@@ -742,6 +743,8 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 			return true;
 		} else if (Shortcuts::HandlePossibleChatSwitch(event)) {
 			return true;
+		} else if (Purple::HandleModalKeys(object, e)) {
+			return true;
 		} else if (HandleKeysLegendHotkey(this, object, event)) {
 			return true;
 		}
@@ -752,9 +755,17 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 		updateNonIdle();
 	} break;
 
+	case QEvent::WindowDeactivate:
+	case QEvent::InputMethod: {
+		if (Purple::HandleModalKeys(object, e)) {
+			return true;
+		}
+	} break;
+
 	case QEvent::KeyRelease: {
 		const auto event = static_cast<QKeyEvent*>(e);
-		if (Shortcuts::HandlePossibleChatSwitch(event)) {
+		if (Shortcuts::HandlePossibleChatSwitch(event)
+			|| Purple::HandleModalKeys(object, e)) {
 			return true;
 		}
 	} break;
@@ -764,6 +775,9 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 		// because it not only does an action on the shortcut activation,
 		// but also keeps the UI visible until you release the Ctrl key.
 		Shortcuts::HandlePossibleChatSwitch(static_cast<QKeyEvent*>(e));
+		if (Purple::HandleModalKeys(object, e)) {
+			return true;
+		}
 
 		// Handle all the shortcut management manually.
 		return true;

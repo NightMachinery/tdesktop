@@ -2691,6 +2691,21 @@ bool Widget::searchHasFocus() const {
 	return _searchHasFocus;
 }
 
+InnerWidget *Widget::purpleKeysList(QWidget *focus) const {
+	return ((focus == this || focus == _inner)
+		&& isVisible()
+		&& !_showAnimation
+		&& !_childList
+		&& !_searchHasFocus
+		&& !_searchSuggestionsLocked
+		&& !_suggestions
+		&& !_searchState.inChat
+		&& _searchState.query.isEmpty()
+		&& _inner->state() == WidgetState::Default)
+		? _inner
+		: nullptr;
+}
+
 Data::Forum *Widget::openedForum() const {
 	return _openedForum;
 }

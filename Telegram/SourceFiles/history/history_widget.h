@@ -167,6 +167,8 @@ public:
 		QWidget *parent,
 		not_null<Window::SessionController*> controller);
 
+	[[nodiscard]] bool allowsPurpleKeys(QWidget *focus) const;
+
 	void historyLoaded();
 
 	[[nodiscard]] bool preventsClose(Fn<void()> &&continueCallback) const;

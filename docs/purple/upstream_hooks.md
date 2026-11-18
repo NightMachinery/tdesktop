@@ -13,6 +13,16 @@ an upstream file updates its entry here in the same commit, together with the
 feature doc's "Upstream hooks" section. `purple/upstream_report.sh` produces
 the numbers.
 
+## Modal keyboard shortcuts and chat backgrounds
+
+- `core/application.cpp`: key admission, shortcut override, paired key release,
+  window deactivation, and IME hooks delegate to Purple's per-window state.
+- `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
+  adapters expose the existing dialogs cursor and eligible history controls.
+- `window/section_widget.cpp`: repaint subscription and an early solid-color
+  paint for live history when wallpaper artwork is hidden.
+- See [keys.md](keys.md).
+
 ## Purple control socket
 
 - `core/sandbox.cpp`: remove only the CTRL include and command branch;

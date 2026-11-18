@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "menu/menu_send.h"
+#include "purple/purple_chat_background.h"
 #include "settings/sections/settings_premium.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/toast/toast.h"
@@ -224,6 +225,7 @@ AbstractSectionWidget::AbstractSectionWidget(
 	rpl::producer<PeerData*> peerForBackground)
 : RpWidget(parent)
 , _controller(controller) {
+	Purple::WatchChatBackgroundVisibility(this);
 	std::move(
 		peerForBackground
 	) | rpl::map([=](PeerData *peer) -> rpl::producer<> {
@@ -341,6 +343,9 @@ void SectionWidget::PaintBackground(
 		not_null<Ui::ChatTheme*> theme,
 		not_null<QWidget*> widget,
 		QRect clip) {
+	if (Purple::PaintHiddenChatBackground(widget, theme, clip)) {
+		return;
+	}
 	if (const auto id = theme->background().giftId) {
 		const auto fillHeight = controller->content()->height();
 		const auto fill = QSize(widget->width(), fillHeight);

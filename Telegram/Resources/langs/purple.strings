@@ -787,3 +787,27 @@ docs/purple/upstream_hooks.md.
 "lng_purple_after_voice_all" = "All following messages, then music";
 "lng_purple_resume_music_after_voice" = "Resume music after voice messages";
 "lng_purple_after_voice_about" = "Applies when voice or video messages interrupt music. New choices take effect when you start a message. Turning music resume off keeps the interrupted track paused.";
+
+"lng_purple_keys_settings" = "Modal keyboard shortcuts";
+"lng_purple_keys_settings_hint" = "Press Ctrl+[ in the chat list or main chat to enter Normal mode. Press i or Esc to return to typing.";
+"lng_purple_keys_normal" = "Normal mode";
+"lng_purple_keys_insert" = "Insert mode";
+"lng_purple_keys_backgrounds" = "Toggle chat backgrounds";
+"lng_purple_keys_backgrounds_shown" = "Chat backgrounds visible";
+"lng_purple_keys_backgrounds_hidden" = "Chat backgrounds hidden";
+"lng_purple_keys_chat_previous" = "Move chat cursor up";
+"lng_purple_keys_chat_next" = "Move chat cursor down";
+"lng_purple_keys_chat_open" = "Open highlighted chat";
+"lng_purple_keys_folder_previous" = "Previous folder";
+"lng_purple_keys_folder_next" = "Next folder";
+"lng_purple_keys_help" = "Modal keyboard shortcuts";
+"lng_purple_keys_run" = "Run a command";
+"lng_purple_keys_describe_key" = "Describe a shortcut";
+"lng_purple_keys_describe_command" = "Describe a command";
+"lng_purple_keys_search" = "Filter commands";
+"lng_purple_keys_no_matches" = "No matching commands";
+"lng_purple_keys_describe" = "Describe";
+"lng_purple_keys_execute" = "Run";
+"lng_purple_keys_capture" = "Type a shortcut to describe it.";
+"lng_purple_keys_undefined" = "Undefined shortcut";
+"lng_purple_keys_group_chat" = "Chat";

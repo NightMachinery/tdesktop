@@ -167,6 +167,10 @@ PRIVATE
     purple/purple_gate.cpp
     purple/purple_gate.h
     purple/purple_history.cpp
+    purple/purple_chat_background.cpp
+    purple/purple_chat_background.h
+    purple/purple_keys.cpp
+    purple/purple_keys.h
     purple/purple_instant_replaces.cpp
     purple/purple_instant_replaces.h
     purple/purple_last_seen.cpp

@@ -342,6 +342,9 @@ exposed in the clients; see the
 [sync plan](account_sync_plan.md). Current requests and follow-up work are
 tracked in [docs/purple/backlog.md](backlog.md).
 
+[Modal keyboard shortcuts](keys.md) add optional Normal mode, command search,
+and a local toggle for live chat background artwork.
+
 ## The required hook rule
 
 The upstream hook rule remains in
