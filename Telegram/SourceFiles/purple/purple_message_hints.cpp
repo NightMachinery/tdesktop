@@ -23,12 +23,27 @@
 #include "styles/style_chat.h"
 #include "styles/style_widgets.h"
 
+#include <QtGui/QContextMenuEvent>
 #include <QtGui/QPainter>
 
 #include <string_view>
 
 namespace Purple {
 namespace {
+
+class MessageHintMenuEvent final : public QContextMenuEvent {
+public:
+	MessageHintMenuEvent(
+		not_null<HistoryItem*> item,
+		QPoint local,
+		QPoint global)
+	: QContextMenuEvent(QContextMenuEvent::Keyboard, local, global)
+	, item(item) {
+	}
+
+	const not_null<HistoryItem*> item;
+
+};
 
 constexpr auto kHintLetters = std::u16string_view(u"asdfghjkl");
 
@@ -50,6 +65,13 @@ QSize LabelSize(const QString &label) {
 }
 
 } // namespace
+
+HistoryItem *MessageHintMenuItem(
+		QContextMenuEvent *event,
+		HistoryItem *focused) {
+	const auto hint = dynamic_cast<const MessageHintMenuEvent*>(event);
+	return hint ? hint->item.get() : focused;
+}
 
 class MessageHints::Overlay final : public Ui::RpWidget {
 public:
@@ -153,7 +175,9 @@ bool MessageHints::eligible(
 	const auto section = source.section;
 	auto total = main ? int(main->_selected.size()) : int(section->_selected.size());
 	const auto allowed = [&](not_null<HistoryItem*> candidate) {
-		if (_action == Action::Copy) {
+		if (_action == Action::Menu) {
+			return true;
+		} else if (_action == Action::Copy) {
 			return main
 				? !main->hasCopyRestriction(candidate)
 				: !section->hasCopyRestriction(candidate);
@@ -179,7 +203,9 @@ bool MessageHints::eligible(
 	}
 
 	const auto media = view->media();
-	return view->hasVisibleText() || (media && media->hasTextForCopy());
+	return _action == Action::Menu
+		|| view->hasVisibleText()
+		|| (media && media->hasTextForCopy());
 }
 
 std::vector<MessageHints::Entry> MessageHints::snapshot() const {
@@ -362,14 +388,20 @@ MessageHints::Input MessageHints::type(int key, Target view) {
 		_overlay->update();
 		return Input::Pending;
 	}
-	const auto item = _session->data().message(i->id);
-	const auto valid = item && (view.main
-		? view.main->viewByItem(item)
-		: view.section->viewForItem(item)) == i->element;
+	const auto widget = QPointer(view.widget());
+	const auto id = i->id;
+	const auto element = i->element;
+	const auto point = i->rect.center();
 	const auto action = _action;
 	clear();
-	if (valid) {
-		apply(view, item, action);
+	if (!widget) {
+		return Input::Finished;
+	}
+	const auto item = view.session().data().message(id);
+	if (item && (view.main
+		? view.main->viewByItem(item)
+		: view.section->viewForItem(item)) == element) {
+		apply(view, item, action, point);
 	}
 	return Input::Finished;
 }
@@ -377,7 +409,21 @@ MessageHints::Input MessageHints::type(int key, Target view) {
 void MessageHints::apply(
 		Target view,
 		not_null<HistoryItem*> item,
-		Action action) {
+		Action action,
+		QPoint point) {
+	if (action == Action::Menu) {
+		const auto widget = view.widget();
+		if (!widget->isVisible() || !widget->visibleRegion().contains(point)) {
+			return;
+		}
+		auto event = MessageHintMenuEvent(item, point, widget->mapToGlobal(point));
+		if (const auto main = view.main) {
+			main->showContextMenu(&event);
+		} else {
+			view.section->showContextMenu(&event);
+		}
+		return;
+	}
 	if (const auto main = view.main) {
 		if (action == Action::Copy) {
 			main->copyContextText(item->fullId());

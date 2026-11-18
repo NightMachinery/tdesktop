@@ -69,6 +69,7 @@ enum class Action {
 	NextFolder,
 	SelectMessage,
 	CopyMessage,
+	MessageMenu,
 	Search,
 	OpenMainMenu,
 	OpenSettings,
@@ -125,6 +126,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
 	{ Action::PreviewChat, "preview-chat",
 		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
+	{ Action::MessageMenu, "message-hint-menu",
+		[] { return tr::lng_purple_keys_message_menu(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -153,6 +156,7 @@ const Binding kBindings[] = {
 	{ Action::NextFolder, { Qt::Key_BracketRight, Qt::Key_F } },
 	{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } },
 	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
+	{ Action::MessageMenu, { Qt::Key_G, Qt::Key_S, Qt::Key_M } },
 	{ Action::Search, { Qt::Key_Slash } },
 	{ Action::Search, { Qt::Key_Space, Qt::Key_S, Qt::Key_S } },
 	{ Action::OpenMainMenu, { Qt::Key_Space, Qt::Key_O, Qt::Key_M } },
@@ -280,7 +284,8 @@ bool Available(Action action, const Target &target) {
 	case Action::PreviousFolder:
 	case Action::NextFolder: return target.folders;
 	case Action::SelectMessage:
-	case Action::CopyMessage: return bool(target.messages);
+	case Action::CopyMessage:
+	case Action::MessageMenu: return bool(target.messages);
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
@@ -829,16 +834,21 @@ void Keys::dispatch(Action action, const Target &target) {
 		launch(Native::ShowChatPreview);
 		break;
 	case Action::SelectMessage:
-	case Action::CopyMessage: {
-		const auto copy = (action == Action::CopyMessage);
-		if (_hints.start(target.messages, copy
-				? MessageHints::Action::Copy
-				: MessageHints::Action::Select)) {
+	case Action::CopyMessage:
+	case Action::MessageMenu: {
+		using Hint = MessageHints::Action;
+		const auto hint = (action == Action::CopyMessage)
+			? Hint::Copy
+			: (action == Action::MessageMenu) ? Hint::Menu : Hint::Select;
+		if (_hints.start(target.messages, hint)) {
 			_normal = true;
 		} else {
-			Ui::Toast::Show(_window, copy
+			const auto text = (hint == Hint::Copy)
 				? tr::lng_purple_keys_message_copy_empty(tr::now)
-				: tr::lng_purple_keys_message_select_empty(tr::now));
+				: (hint == Hint::Menu)
+				? tr::lng_purple_keys_message_menu_empty(tr::now)
+				: tr::lng_purple_keys_message_select_empty(tr::now);
+			Ui::Toast::Show(_window, text);
 		}
 	} break;
 	case Action::Help: {

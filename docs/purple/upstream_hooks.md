@@ -30,6 +30,8 @@ the numbers.
   focus during hint selection.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
+- `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
+  accept an explicit hinted item in the native keyboard context menu path.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - `window/window_main_menu.cpp`: installs the stock Settings row navigation

@@ -113,10 +113,14 @@ for cancellation in ("_purpleHintGeometryChanges", "shownValue()", "scrollTopCha
 pick = between(hints, "MessageHints::Input MessageHints::type", "void MessageHints::apply")
 ordered(pick, "view.widget() != _view.data()", "view.scheduled != _scheduled",
         "&view.session() != _session.get()", "snapshot() != _entries",
-        "message(i->id)", "item && (view.main", "view.main->viewByItem(item)",
-        "view.section->viewForItem(item)) == i->element", "clear();", "apply(view, item, action)")
+        "QPointer(view.widget())", "const auto id = i->id", "const auto element = i->element",
+        "const auto point = i->rect.center()", "clear();", "if (!widget)",
+        "view.session().data().message(id)", "item && (view.main", "view.main->viewByItem(item)",
+        "view.section->viewForItem(item)) == element", "apply(view, item, action, point)")
 apply = between(hints, "void MessageHints::apply", "void MessageHints::clear")
-ordered(apply, "if (action == Action::Copy)", "copyContextText", "return;",
+ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
+        "MessageHintMenuEvent(item, point", "main->showContextMenu", "view.section->showContextMenu",
+        "if (action == Action::Copy)", "copyContextText", "return;",
         "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)",
         "view.section->showCopyRestriction(item)", "HistoryGroupText(group)",
         "Iv::SetRichBlocksClipboard", "section->_purpleKeepSelectionFocus, true",
@@ -148,6 +152,17 @@ for name in ("refreshRows", "visibleTopBottomUpdated", "resizeGetHeight",
 chat = read("history/view/history_view_chat_section.cpp")
 ordered(chat, "ChatWidget::listSelectionChanged", "!_inner->keepingPurpleSelectionFocus()",
         "doSetInnerFocus()")
+
+assert "{ Action::MessageMenu, { Qt::Key_G, Qt::Key_S, Qt::Key_M } }" in keys
+ordered(hints, "class MessageHintMenuEvent", "QContextMenuEvent::Keyboard",
+        "dynamic_cast<const MessageHintMenuEvent*>", "hint->item.get() : focused")
+for file, cls in (("history/history_inner_widget.cpp", "HistoryInner"),
+                  ("history/view/history_view_list_widget.cpp", "ListWidget")):
+    context = between(read(file), f"void {cls}::showContextMenu", "\n}\n")
+    ordered(context, "Purple::MessageHintMenuItem", "e, _accessibilityFocusedItem",
+            "QContextMenuEvent::Keyboard", "PrepareImportSettingsKeyboardHit", "keyboardItem",
+            "showFrozenError()")
+    assert context.count("_accessibilityFocusedItem") == 1
 
 menu = read("window/window_main_menu.cpp")
 ordered(menu, "MainMenu::MainMenu(", "setupMenu();",

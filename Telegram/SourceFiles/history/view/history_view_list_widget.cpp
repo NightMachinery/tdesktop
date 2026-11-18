@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/hooks/media_playback.h"
 
 #include "purple/purple_copy.h"
+#include "purple/purple_message_hints.h"
 #include "purple/purple_sync.h"
 #include "purple/purple_ui_witness.h"
 
@@ -4073,19 +4074,21 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		// Every entry of this menu needs a window, like in the chat preview.
 		return;
 	}
+	const auto keyboardItem = Purple::MessageHintMenuItem(
+		e, _accessibilityFocusedItem);
 	auto importHit = Purple::ImportSettingsHit();
 	if (e->reason() == QContextMenuEvent::Mouse) {
 		mouseActionUpdate(e->globalPos(), &importHit);
 	} else if (e->reason() == QContextMenuEvent::Keyboard) {
-		const auto view = viewForItem(_accessibilityFocusedItem);
+		const auto view = viewForItem(keyboardItem);
 		Purple::PrepareImportSettingsKeyboardHit(
 			&importHit,
 			controller(),
 			view,
-			_accessibilityFocusedItem,
+			keyboardItem,
 			importSettingsViewState(view));
-		if (_accessibilityFocusedItem) {
-			_overItemExact = _accessibilityFocusedItem;
+		if (keyboardItem) {
+			_overItemExact = keyboardItem;
 			if (view) {
 				_overElement = view;
 			}
@@ -4221,7 +4224,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	if (!Purple::PrepareHistoryContextMenuKeyboard(
 			e,
 			&request,
-			_accessibilityFocusedItem,
+			keyboardItem,
 			_selectedTextItem)) {
 		request.pointState = _overState.pointState;
 		const auto hasSelection = !request.selectedItems.empty()
@@ -4241,7 +4244,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		&importHit,
 		controller(),
 		importView,
-		_accessibilityFocusedItem,
+		keyboardItem,
 		importSettingsViewState(importView));
 	if (_menu->empty()) {
 		_menu = nullptr;

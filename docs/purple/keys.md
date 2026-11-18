@@ -32,6 +32,8 @@ Telegram typing and input-method behavior.
   group behavior.
   Scrolling or changing chats dismisses the labels, as do `Esc` and `Ctrl+G`.
   Scheduled messages become eligible after Telegram confirms them.
+  `g s m` opens the native menu for a hinted message. Use the menu to reply,
+  forward, or copy a message link when those actions are available.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command

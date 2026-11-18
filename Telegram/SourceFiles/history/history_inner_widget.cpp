@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_inner_widget.h"
 #include "purple/hooks/media_playback.h"
 #include "purple/purple_copy.h"
+#include "purple/purple_message_hints.h"
 #include "purple/purple_sync.h"
 #include "purple/purple_ui_witness.h"
 #include "purple/purple_user_control.h"
@@ -2828,18 +2829,20 @@ void HistoryInner::contextMenuEvent(QContextMenuEvent *e) {
 }
 
 void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+	const auto keyboardItem = Purple::MessageHintMenuItem(
+		e, _accessibilityFocusedItem);
 	auto importHit = Purple::ImportSettingsHit();
 	if (e->reason() == QContextMenuEvent::Mouse) {
 		mouseActionUpdate(e->globalPos(), &importHit);
 	} else if (e->reason() == QContextMenuEvent::Keyboard) {
-		const auto view = viewByItem(_accessibilityFocusedItem);
+		const auto view = viewByItem(keyboardItem);
 		Purple::PrepareImportSettingsKeyboardHit(
 			&importHit,
 			_controller,
 			view,
-			_accessibilityFocusedItem,
+			keyboardItem,
 			importSettingsViewState(view));
-		_dragStateItem = _accessibilityFocusedItem;
+		_dragStateItem = keyboardItem;
 	}
 
 	const auto link = Purple::IsHistoryContextMenuKeyboard(e)
@@ -2887,9 +2890,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	auto hasSelected = 0;
 	if (const auto keyboard = Purple::HistoryContextMenuSelection(
 			e,
-			_accessibilityFocusedItem,
+			keyboardItem,
 			hasSelectedItems(),
-			_accessibilityFocusedItem && _selected.contains(_accessibilityFocusedItem),
+			keyboardItem && _selected.contains(keyboardItem),
 			_selectedTextItem,
 			hasSelectedText() && !_selectedTextSelection.empty())) {
 		isUponSelected = keyboard->upon;
@@ -3028,7 +3031,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		&importHit,
 		_controller,
 		importView,
-		_accessibilityFocusedItem,
+		keyboardItem,
 		importSettingsViewState(importView));
 	const auto controller = _controller;
 	const auto canViewMessageStats = [&](HistoryItem *item) {
@@ -3614,7 +3617,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 
 		const auto sponsored = Purple::HistoryContextMenuSponsored(
 			e,
-			_accessibilityFocusedItem,
+			keyboardItem,
 			[&] {
 				return (item && item->isSponsored())
 					? item
@@ -3973,7 +3976,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	const auto desiredPosition = e->globalPos();
 	const auto reactItem = Purple::HistoryContextMenuItem(
 		e,
-		_accessibilityFocusedItem,
+		keyboardItem,
 		[] {
 			return Element::Hovered()
 				? Element::Hovered()->data().get()

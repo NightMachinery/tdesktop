@@ -7,6 +7,7 @@
 #include <QtCore/QRect>
 #include <QtCore/QString>
 
+class QContextMenuEvent;
 class HistoryInner;
 class HistoryItem;
 
@@ -27,7 +28,7 @@ namespace Purple {
 
 class MessageHints final {
 public:
-	enum class Action { Select, Copy };
+	enum class Action { Select, Copy, Menu };
 
 	enum class Input { Pending, Finished, Unknown };
 
@@ -74,7 +75,8 @@ private:
 	static void apply(
 		Target view,
 		not_null<HistoryItem*> item,
-		Action action);
+		Action action,
+		QPoint point);
 
 	QPointer<Ui::RpWidget> _view;
 	QPointer<Overlay> _overlay;
@@ -87,5 +89,9 @@ private:
 	rpl::lifetime _watch;
 
 };
+
+[[nodiscard]] HistoryItem *MessageHintMenuItem(
+	QContextMenuEvent *event,
+	HistoryItem *focused);
 
 } // namespace Purple

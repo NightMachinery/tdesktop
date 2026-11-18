@@ -818,3 +818,5 @@ docs/purple/upstream_hooks.md.
 "lng_purple_keys_message_copy" = "Copy text from a visible message";
 "lng_purple_keys_message_select_empty" = "No visible messages can be selected";
 "lng_purple_keys_message_copy_empty" = "No visible message text can be copied";
+"lng_purple_keys_message_menu" = "Open the menu for a visible message";
+"lng_purple_keys_message_menu_empty" = "No visible messages can be targeted";
