@@ -32,6 +32,8 @@ the numbers.
   cancellation and focus preservation for hint selection.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
+- `window/window_main_menu.cpp`: installs the stock Settings row navigation
+  in the main menu for modal keyboard users.
 - See [keys.md](keys.md).
 
 ## Purple control socket

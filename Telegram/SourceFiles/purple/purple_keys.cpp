@@ -1,5 +1,6 @@
 #include "purple/purple_keys.h"
 
+#include "base/event_filter.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -17,8 +18,10 @@
 #include "purple/purple_chat_background.h"
 #include "purple/purple_message_hints.h"
 #include "settings/settings_builder.h"
+#include "settings/settings_key_navigation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
+#include "ui/screen_reader_mode.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
@@ -936,6 +939,35 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	return (new Keys(window))->handle(receiver, event);
+}
+
+void InstallMainMenuKeys(
+		not_null<Ui::LayerWidget*> menu,
+		not_null<Ui::RpWidget*> contents) {
+	using Result = base::EventFilterResult;
+	if (!Enabled()) {
+		return;
+	}
+	const auto navigation = menu->lifetime().make_state<Settings::KeyNavigation>(
+		contents);
+	base::install_event_filter(menu, [=](not_null<QEvent*> event) {
+		if (event->type() != QEvent::KeyPress
+			|| Ui::ScreenReaderModeActive()
+			|| QApplication::focusWidget() != menu.get()
+			|| QApplication::activeWindow() != menu->window()
+			|| QApplication::activePopupWidget()
+			|| QApplication::activeModalWidget()) {
+			return Result::Continue;
+		}
+		const auto stack = dynamic_cast<Ui::LayerStackWidget*>(
+			menu->parentWidget());
+		if (!stack || stack->topShownLayer() != menu.get()) {
+			return Result::Continue;
+		}
+		return navigation->handle(static_cast<QKeyEvent*>(event.get()))
+			? Result::Cancel
+			: Result::Continue;
+	});
 }
 
 void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {

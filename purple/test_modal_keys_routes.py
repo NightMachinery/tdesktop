@@ -149,4 +149,13 @@ chat = read("history/view/history_view_chat_section.cpp")
 ordered(chat, "ChatWidget::listSelectionChanged", "!_inner->keepingPurpleSelectionFocus()",
         "doSetInnerFocus()")
 
-print("Modal key, visible message, nested section and chat background routes passed")
+menu = read("window/window_main_menu.cpp")
+ordered(menu, "MainMenu::MainMenu(", "setupMenu();",
+        "Purple::InstallMainMenuKeys(this, _inner)")
+menu_keys = between(keys, "void InstallMainMenuKeys", "void BuildModalKeysSetting")
+ordered(menu_keys, "if (!Enabled())", "Settings::KeyNavigation", "QEvent::KeyPress",
+        "Ui::ScreenReaderModeActive()", "QApplication::focusWidget() != menu.get()",
+        "QApplication::activePopupWidget()", "QApplication::activeModalWidget()",
+        "topShownLayer() != menu.get()", "navigation->handle(")
+
+print("Modal key, menu, visible message, nested section and chat background routes passed")

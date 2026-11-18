@@ -20,7 +20,8 @@ Telegram typing and input-method behavior.
 - `] f` and `[ f` select the adjacent visible folder from the main chat list.
 - `/` or `SPC s s` opens search for the current view.
 - `SPC o m` opens the main menu, `SPC o t` opens Settings, and `SPC o s`
-  opens Saved Messages.
+  opens Saved Messages. Use Up or Down to select a main menu row and Enter
+  to activate it.
 - `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, and `SPC o d`
   opens Scheduled Messages in a chat that supports them.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.

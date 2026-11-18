@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
 #include "purple/purple_chat_menus.h"
+#include "purple/purple_keys.h"
 #include "purple/purple_playlists_box.h"
 #include "settings/sections/settings_advanced.h"
 #include "settings/sections/settings_calls.h"
@@ -357,6 +358,7 @@ MainMenu::MainMenu(
 	setupAccounts();
 	setupArchive();
 	setupMenu();
+	Purple::InstallMainMenuKeys(this, _inner);
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	widthValue(
