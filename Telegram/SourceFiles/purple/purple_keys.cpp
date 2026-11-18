@@ -5,6 +5,7 @@
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/shortcuts.h"
+#include "data/data_document.h"
 #include "data/data_user.h"
 #include "dialogs/dialogs_inner_widget.h"
 #include "dialogs/dialogs_widget.h"
@@ -14,6 +15,7 @@
 #include "history/view/history_view_scheduled_section.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "media/player/media_player_instance.h"
 #include "mainwindow.h"
 #include "purple/purple_chat_background.h"
 #include "purple/purple_message_hints.h"
@@ -79,6 +81,12 @@ enum class Action {
 	OpenScheduled,
 	OpenChatMenu,
 	PreviewChat,
+	TogglePlayback,
+	StopPlayback,
+	PreviousTrack,
+	NextTrack,
+	SeekBackward,
+	SeekForward,
 	Help,
 	Run,
 	DescribeChord,
@@ -128,6 +136,18 @@ const Command kCommands[] = {
 		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
 	{ Action::MessageMenu, "message-hint-menu",
 		[] { return tr::lng_purple_keys_message_menu(tr::now); } },
+	{ Action::TogglePlayback, "playback-toggle",
+		[] { return tr::lng_shortcuts_media_play_pause(tr::now); } },
+	{ Action::StopPlayback, "playback-stop",
+		[] { return tr::lng_shortcuts_media_stop(tr::now); } },
+	{ Action::PreviousTrack, "playback-previous-track",
+		[] { return tr::lng_shortcuts_media_previous(tr::now); } },
+	{ Action::NextTrack, "playback-next-track",
+		[] { return tr::lng_shortcuts_media_next(tr::now); } },
+	{ Action::SeekBackward, "playback-seek-backward",
+		[] { return tr::lng_purple_shortcuts_seek_backward(tr::now); } },
+	{ Action::SeekForward, "playback-seek-forward",
+		[] { return tr::lng_purple_shortcuts_seek_forward(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -167,6 +187,12 @@ const Binding kBindings[] = {
 	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
+	{ Action::TogglePlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_P } },
+	{ Action::StopPlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_S } },
+	{ Action::PreviousTrack, { Qt::Key_BracketLeft, Qt::Key_T } },
+	{ Action::NextTrack, { Qt::Key_BracketRight, Qt::Key_T } },
+	{ Action::SeekBackward, { Qt::Key_Space, Qt::Key_M, Qt::Key_B } },
+	{ Action::SeekForward, { Qt::Key_Space, Qt::Key_M, Qt::Key_F } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -219,6 +245,7 @@ struct Target {
 	MessageHints::Target messages;
 	bool folders = false;
 	bool chatActions = false;
+	Main::Session *session = nullptr;
 };
 
 Target FindTarget(Window::SessionController *owner, QWidget *focus) {
@@ -234,6 +261,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 				.focus = focus,
 				.messages = { .section = list, .scheduled = scheduled },
 				.chatActions = chatActions,
+				.session = &owner->session(),
 			}
 			: Target();
 	};
@@ -250,6 +278,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					&& !owner->openedFolder().current()
 					&& !owner->shownForum().current()
 					&& !owner->openedCommunity().current(),
+				.session = &owner->session(),
 			};
 		}
 		if (const auto history = dynamic_cast<HistoryWidget*>(widget)) {
@@ -259,6 +288,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					.focus = focus,
 					.messages = { .main = history->purpleMessageList() },
 					.chatActions = true,
+					.session = &owner->session(),
 				}
 				: Target();
 		}
@@ -275,6 +305,15 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 	return {};
 }
 
+bool HasPlaybackInSession(Main::Session *session) {
+	if (!session) {
+		return false;
+	}
+	const auto player = Media::Player::instance();
+	const auto document = player->current(player->getActiveType()).audio();
+	return document && (&document->session() == session);
+}
+
 bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::PreviousChat:
@@ -289,6 +328,12 @@ bool Available(Action action, const Target &target) {
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
+	case Action::TogglePlayback:
+	case Action::StopPlayback:
+	case Action::PreviousTrack:
+	case Action::NextTrack:
+	case Action::SeekBackward:
+	case Action::SeekForward: return HasPlaybackInSession(target.session);
 	default: return true;
 	}
 }
@@ -718,6 +763,8 @@ void Keys::showWhichKey() {
 			? tr::lng_purple_keys_group_chat(tr::now)
 			: (next == Qt::Key_O)
 			? tr::lng_purple_keys_group_open(tr::now)
+			: (next == Qt::Key_M)
+			? tr::lng_media_type_media(tr::now)
 			: (next == Qt::Key_S && _prefix == Chord{ Qt::Key_Space })
 			? tr::lng_shortcuts_search(tr::now)
 			: (next == Qt::Key_S)
@@ -832,6 +879,24 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::PreviewChat:
 		launch(Native::ShowChatPreview);
+		break;
+	case Action::TogglePlayback:
+		launch(Native::MediaPlayPause);
+		break;
+	case Action::StopPlayback:
+		launch(Native::MediaStop);
+		break;
+	case Action::PreviousTrack:
+		launch(Native::MediaPrevious);
+		break;
+	case Action::NextTrack:
+		launch(Native::MediaNext);
+		break;
+	case Action::SeekBackward:
+		launch(Native::MediaSeekBackward);
+		break;
+	case Action::SeekForward:
+		launch(Native::MediaSeekForward);
 		break;
 	case Action::SelectMessage:
 	case Action::CopyMessage:

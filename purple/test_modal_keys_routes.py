@@ -72,9 +72,24 @@ ordered(dispatch, "!current || !target.focus || !Available",
 for action, native in (
         ("Search", "Search"), ("OpenArchive", "ShowArchive"),
         ("OpenContacts", "ShowContacts"), ("OpenScheduled", "ShowScheduled"),
-        ("OpenChatMenu", "ShowChatMenu"), ("PreviewChat", "ShowChatPreview")):
+        ("OpenChatMenu", "ShowChatMenu"), ("PreviewChat", "ShowChatPreview"),
+        ("TogglePlayback", "MediaPlayPause"),
+        ("StopPlayback", "MediaStop"),
+        ("PreviousTrack", "MediaPrevious"),
+        ("NextTrack", "MediaNext"),
+        ("SeekBackward", "MediaSeekBackward"),
+        ("SeekForward", "MediaSeekForward")):
     assert re.search(
         rf"case Action::{action}:\s+launch\(Native::{native}\);", dispatch)
+playback_owner = between(keys, "bool HasPlaybackInSession", "bool Available")
+ordered(playback_owner, "if (!session)", "player->current(player->getActiveType()).audio()",
+        "document && (&document->session() == session)")
+available = between(keys, "bool Available", "bool IsSearchableAction")
+ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
+        "case Action::PreviousTrack:", "case Action::NextTrack:",
+        "case Action::SeekBackward:", "case Action::SeekForward:",
+        "return HasPlaybackInSession(target.session)")
+assert keys.count(".session = &owner->session()") == 3
 bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \} \},", keys)
 chords = [tuple(keys.split(", ")) for _, keys in bindings]
 assert len(set(chords)) == len(chords)
