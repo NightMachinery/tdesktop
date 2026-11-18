@@ -171,6 +171,8 @@ PRIVATE
     purple/purple_chat_background.h
     purple/purple_keys.cpp
     purple/purple_keys.h
+    purple/purple_message_hints.cpp
+    purple/purple_message_hints.h
     purple/purple_instant_replaces.cpp
     purple/purple_instant_replaces.h
     purple/purple_last_seen.cpp

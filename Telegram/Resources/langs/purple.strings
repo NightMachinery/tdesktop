@@ -811,3 +811,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_keys_capture" = "Type a shortcut to describe it.";
 "lng_purple_keys_undefined" = "Undefined shortcut";
 "lng_purple_keys_group_chat" = "Chat";
+"lng_purple_keys_group_messages" = "Visible messages";
+"lng_purple_keys_message_select" = "Select a visible message";
+"lng_purple_keys_message_copy" = "Copy text from a visible message";
+"lng_purple_keys_message_select_empty" = "No visible messages can be selected";
+"lng_purple_keys_message_copy_empty" = "No visible message text can be copied";

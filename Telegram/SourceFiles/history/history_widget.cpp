@@ -2676,14 +2676,19 @@ bool HistoryWidget::allowsPurpleKeys(QWidget *focus) const {
 		&& !isChoosingTheme()
 		&& !isRecording()
 		&& !_editMsgId
-		&& !_nonEmptySelection
+		&& !_chooseForReport
 		&& (!_purpleScreenTimeCover || !_purpleScreenTimeCover->visible())
 		&& (!_autocomplete || _autocomplete->isHidden())
+		&& (!_tabbedPanel || _tabbedPanel->isHidden())
 		&& (!_inlineResults || _inlineResults->isHidden())
 		&& (focus == this
 			|| focus == _list.data()
 			|| (field && _field->isVisible()
 				&& (!layout || layout->preeditAreaText().isEmpty())));
+}
+
+HistoryInner *HistoryWidget::purpleMessageList() const {
+	return _list.data();
 }
 
 void HistoryWidget::setInnerFocus() {
@@ -11130,7 +11135,7 @@ void HistoryWidget::updateTopBarChooseForReport() {
 	updateControlsGeometry();
 }
 
-void HistoryWidget::updateTopBarSelection() {
+void HistoryWidget::updateTopBarSelection(bool keepFocus) {
 	if (!_list) {
 		_topBar->showSelected(HistoryView::TopBarWidget::SelectedState {});
 		return;
@@ -11163,7 +11168,8 @@ void HistoryWidget::updateTopBarSelection() {
 		: tr::lng_report_messages_none(tr::now, tr::upper));
 	updateControlsVisibility();
 	updateHistoryGeometry();
-	if (!controller()->isLayerShown()
+	if (!keepFocus
+		&& !controller()->isLayerShown()
 		&& !Core::App().passcodeLocked()) {
 		if (isSearching() && !_nonEmptySelection) {
 			_composeSearch->setInnerFocus();

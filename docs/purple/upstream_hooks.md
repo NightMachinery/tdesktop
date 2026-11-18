@@ -19,6 +19,9 @@ the numbers.
   window deactivation, and IME hooks delegate to Purple's per-window state.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
   adapters expose the existing dialogs cursor and eligible history controls.
+- `history/history_inner_widget.*`: visible message enumeration and geometry
+  notifications for labels. The history widget exposes its current message list
+  and allows the selection top bar to update while preserving focus.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - See [keys.md](keys.md).

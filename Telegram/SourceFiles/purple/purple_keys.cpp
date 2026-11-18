@@ -10,6 +10,7 @@
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "purple/purple_chat_background.h"
+#include "purple/purple_message_hints.h"
 #include "settings/settings_builder.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
@@ -57,6 +58,8 @@ enum class Action {
 	OpenChat,
 	PreviousFolder,
 	NextFolder,
+	SelectMessage,
+	CopyMessage,
 	Help,
 	Run,
 	DescribeChord,
@@ -82,6 +85,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); } },
 	{ Action::NextFolder, "folder-next",
 		[] { return tr::lng_purple_keys_folder_next(tr::now); } },
+	{ Action::SelectMessage, "message-hint-select",
+		[] { return tr::lng_purple_keys_message_select(tr::now); } },
+	{ Action::CopyMessage, "message-hint-copy-text",
+		[] { return tr::lng_purple_keys_message_copy(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -108,6 +115,8 @@ const Binding kBindings[] = {
 	{ Action::OpenChat, { Qt::Key_Return } },
 	{ Action::PreviousFolder, { Qt::Key_BracketLeft, Qt::Key_F } },
 	{ Action::NextFolder, { Qt::Key_BracketRight, Qt::Key_F } },
+	{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } },
+	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -157,6 +166,7 @@ bool StartsWith(const Binding &binding, const Chord &prefix) {
 struct Target {
 	QPointer<QWidget> focus;
 	Dialogs::InnerWidget *list = nullptr;
+	HistoryInner *messages = nullptr;
 	bool folders = false;
 };
 
@@ -179,7 +189,10 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 		if (const auto history = dynamic_cast<HistoryWidget*>(widget)) {
 			return (history->controller() == owner
 					&& history->allowsPurpleKeys(focus))
-				? Target{ .focus = focus }
+				? Target{
+					.focus = focus,
+					.messages = history->purpleMessageList(),
+				}
 				: Target();
 		}
 	}
@@ -193,6 +206,8 @@ bool Available(Action action, const Target &target) {
 	case Action::OpenChat: return target.list != nullptr;
 	case Action::PreviousFolder:
 	case Action::NextFolder: return target.folders;
+	case Action::SelectMessage:
+	case Action::CopyMessage: return target.messages != nullptr;
 	default: return true;
 	}
 }
@@ -203,7 +218,9 @@ bool IsSearchableAction(Action action) {
 		|| action == Action::NextChat
 		|| action == Action::OpenChat
 		|| action == Action::PreviousFolder
-		|| action == Action::NextFolder;
+		|| action == Action::NextFolder
+		|| action == Action::SelectMessage
+		|| action == Action::CopyMessage;
 }
 
 QString CommandDetail(const Command &command) {
@@ -330,6 +347,7 @@ enum class KeyUse {
 	ExitNormal,
 	Cancel,
 	Capture,
+	Hint,
 	Ignore,
 };
 
@@ -352,6 +370,7 @@ private:
 
 	const not_null<MainWindow*> _window;
 	QTimer _timer;
+	MessageHints _hints;
 	base::weak_ptr<Ui::Toast::Instance> _whichKey;
 	Chord _prefix;
 	QSet<int> _held;
@@ -442,9 +461,22 @@ KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 		return KeyUse::Pass;
 	} else if ((key == Qt::Key_Escape && !mods)
 		|| (key == Qt::Key_G && mods == kCtrl)) {
-		return (_prefix.empty() && !_inspect)
+		return (_prefix.empty() && !_inspect && !_hints.active())
 			? KeyUse::ExitNormal
 			: KeyUse::Cancel;
+	} else if (_hints.active()) {
+		const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
+		if (!mods && (printable
+				|| key == Qt::Key_Return
+				|| key == Qt::Key_Backspace
+				|| key == Qt::Key_Delete)) {
+			return KeyUse::Hint;
+		}
+		return ((mods == Qt::NoModifier || mods == Qt::ShiftModifier)
+				&& (!event.text().isEmpty()
+					|| (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Greek)))
+			? KeyUse::Ignore
+			: KeyUse::Pass;
 	} else if (key == Qt::Key_I && !mods && _prefix.empty() && !_inspect) {
 		return KeyUse::ExitNormal;
 	} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
@@ -541,6 +573,11 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	case KeyUse::Capture:
 		stroke(key, target);
 		break;
+	case KeyUse::Hint:
+		if (_hints.type(key, target.messages) == MessageHints::Input::Unknown) {
+			Ui::Toast::Show(_window, tr::lng_purple_keys_undefined(tr::now));
+		}
+		break;
 	case KeyUse::Pass:
 		break;
 	}
@@ -548,6 +585,7 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 }
 
 void Keys::clearPrefix() {
+	_hints.clear();
 	_prefix.clear();
 	_inspect = false;
 	_timer.stop();
@@ -590,6 +628,8 @@ void Keys::showWhichKey() {
 			? FindCommand(binding.action).label()
 			: (next == Qt::Key_C)
 			? tr::lng_purple_keys_group_chat(tr::now)
+			: (next == Qt::Key_S)
+			? tr::lng_purple_keys_group_messages(tr::now)
 			: tr::lng_purple_keys_help(tr::now);
 		lines.push_back(KeyLabel(next) + u"    "_q + label);
 	}
@@ -664,6 +704,19 @@ void Keys::dispatch(Action action, const Target &target) {
 		Window::CheckAndJumpToNearChatsFilter(
 			current, action == Action::NextFolder, true);
 		break;
+	case Action::SelectMessage:
+	case Action::CopyMessage: {
+		const auto copy = (action == Action::CopyMessage);
+		if (_hints.start(target.messages, copy
+				? MessageHints::Action::Copy
+				: MessageHints::Action::Select)) {
+			_normal = true;
+		} else {
+			Ui::Toast::Show(_window, copy
+				? tr::lng_purple_keys_message_copy_empty(tr::now)
+				: tr::lng_purple_keys_message_select_empty(tr::now));
+		}
+	} break;
 	case Action::Help: {
 		auto lines = QStringList{ tr::lng_purple_keys_settings_hint(tr::now) };
 		for (const auto &command : kCommands) {

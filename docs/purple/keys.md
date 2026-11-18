@@ -18,6 +18,10 @@ Telegram typing and input-method behavior.
 - `j` or `] c` moves the chat-list cursor down. `k` or `[ c` moves it up.
   `Enter` opens the highlighted chat.
 - `] f` and `[ f` select the adjacent visible folder from the main chat list.
+- In the main chat, `g s s` labels visible messages for selection and
+  `g s y` labels messages with copyable text. Type the letters on a message
+  to select it or copy its text. Albums use Telegram's group behavior.
+  Scrolling or changing chats dismisses the labels, as do `Esc` and `Ctrl+G`.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command
@@ -34,5 +38,7 @@ to registered command IDs without evaluating code.
 handling, as well as shortcut overrides, paired releases, window deactivation,
 and IME events.
 `dialogs/dialogs_widget.*` and `history/history_widget.*` expose eligible focus
-surfaces. `window/section_widget.cpp` subscribes sections to repaint changes
+surfaces. `history/history_inner_widget.*` exposes the existing visible
+message enumeration and geometry changes. `HistoryWidget::updateTopBarSelection`
+can preserve focus after keyboard selection. `window/section_widget.cpp` subscribes sections to repaint changes
 and checks wallpaper visibility before painting the live background.

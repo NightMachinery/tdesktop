@@ -168,6 +168,7 @@ public:
 		not_null<Window::SessionController*> controller);
 
 	[[nodiscard]] bool allowsPurpleKeys(QWidget *focus) const;
+	[[nodiscard]] HistoryInner *purpleMessageList() const;
 
 	void historyLoaded();
 
@@ -187,7 +188,7 @@ public:
 	void leaveToChildEvent(QEvent *e, QWidget *child) override;
 
 	bool isItemCompletelyHidden(HistoryItem *item) const;
-	void updateTopBarSelection();
+	void updateTopBarSelection(bool keepFocus = false);
 	void updateTopBarChooseForReport();
 	bool handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 

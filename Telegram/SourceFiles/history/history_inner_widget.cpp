@@ -1065,6 +1065,11 @@ void HistoryInner::toggleRemoveFromUserpics(bool remove) {
 	_removeFromUserpics = remove;
 }
 
+void HistoryInner::purpleEnumerateVisible(
+		Fn<bool(not_null<Element*>, int, int)> method) {
+	enumerateItems<EnumItemsDirection::TopToBottom>(method);
+}
+
 template <typename Method>
 void HistoryInner::enumerateUserpics(Method method) {
 	if (!canHaveFromUserpics()) {
@@ -4568,6 +4573,7 @@ void HistoryInner::checkActivation() {
 }
 
 void HistoryInner::recountHistoryGeometry(bool initial) {
+	_purpleHintGeometryChanges.fire({});
 	_contentWidth = _scroll->width();
 
 	if (_history->hasPendingResizedItems()
@@ -4677,6 +4683,9 @@ bool HistoryInner::wasSelectedText() const {
 }
 
 void HistoryInner::visibleAreaUpdated(int top, int bottom) {
+	if (top != _visibleAreaTop || bottom != _visibleAreaBottom) {
+		_purpleHintGeometryChanges.fire({});
+	}
 	auto scrolledUp = (top < _visibleAreaTop);
 	_visibleAreaTop = top;
 	_visibleAreaBottom = bottom;

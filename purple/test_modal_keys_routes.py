@@ -71,4 +71,28 @@ background = read("purple/purple_chat_background.cpp")
 ordered(background, "readPref<bool>(kVisiblePref, true)", "widget->update()",
         "color.setAlpha(255)", "writePref<bool>(kVisiblePref, visible)",
         "VisibilityChanges.fire")
-print("Modal key and chat background routes passed")
+assert "{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } }" in keys
+assert "{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } }" in keys
+ordered(routing, "QEvent::ShortcutOverride", "case KeyUse::Hint:",
+        "_hints.type(key, target.messages)")
+ordered(keys, "void Keys::clearPrefix()", "_hints.clear()")
+
+hints = read("purple/purple_message_hints.cpp")
+ordered(hints, "setFocusPolicy(Qt::NoFocus)", "Qt::WA_TransparentForMouseEvents")
+ordered(hints, "purpleEnumerateVisible", "intersected(visible)", "contentOverlapped",
+        "element->data()->fullId()", "HintLabel(i, digits)")
+ordered(hints, "bool MessageHints::eligible", "goodForSelection", "hasCopyRestriction",
+        "groupIds.push_back", "MaxSelectedItems", "hasTextForCopy()")
+watch = between(hints, "void MessageHints::watch", "MessageHints::Input MessageHints::type")
+for cancellation in ("_purpleHintGeometryChanges", "shownValue()", "scrollTopChanges()",
+                     "itemRemoved()", "viewRemoved()", "viewLayoutChanged()"):
+    assert cancellation in watch, cancellation
+pick = between(hints, "MessageHints::Input MessageHints::type", "void MessageHints::apply")
+ordered(pick, "&_view->session() != _session.get()", "snapshot() != _entries",
+        "message(i->id)", "viewByItem(item) == i->element", "clear();",
+        "apply(view, item, action)")
+apply = between(hints, "void MessageHints::apply", "void MessageHints::clear")
+ordered(apply, "if (action == Action::Copy)", "copyContextText", "return;",
+        "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)")
+
+print("Modal key, visible message and chat background routes passed")

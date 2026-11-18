@@ -31,6 +31,7 @@ struct ClickHandlerContext;
 struct HistorySelectedTextParts;
 
 namespace Purple {
+class MessageHints;
 struct ImportSettingsHit;
 struct ImportSettingsViewState;
 } // namespace Purple
@@ -394,6 +395,9 @@ private:
 		}
 	}
 
+	friend class Purple::MessageHints;
+	void purpleEnumerateVisible(Fn<bool(not_null<Element*>, int, int)> method);
+
 	// This function finds all userpics on the left that are displayed and calls template method
 	// for each found userpic (from the top to the bottom) using enumerateItems() method.
 	//
@@ -613,6 +617,7 @@ private:
 	// Save visible area coords for painting / pressing userpics.
 	int _visibleAreaTop = 0;
 	int _visibleAreaBottom = 0;
+	rpl::event_stream<> _purpleHintGeometryChanges;
 
 	// With migrated history we perhaps do not need to display
 	// the first _history message date (just skip it by height).
