@@ -1315,8 +1315,8 @@ void InstallMainMenuKeys(
 	if (!Enabled()) {
 		return;
 	}
-	const auto navigation = menu->lifetime().make_state<Settings::KeyNavigation>(
-		contents);
+	const auto navigation = menu->lifetime().make_state<
+		::Settings::KeyNavigation>(contents);
 	base::install_event_filter(menu, [=](not_null<QEvent*> event) {
 		if (event->type() != QEvent::KeyPress
 			|| Ui::ScreenReaderModeActive()

@@ -244,7 +244,7 @@ menu = read("window/window_main_menu.cpp")
 ordered(menu, "MainMenu::MainMenu(", "setupMenu();",
         "Purple::InstallMainMenuKeys(this, _inner)")
 menu_keys = between(keys, "void InstallMainMenuKeys", "void BuildModalKeysSetting")
-ordered(menu_keys, "if (!Enabled())", "Settings::KeyNavigation", "QEvent::KeyPress",
+ordered(menu_keys, "if (!Enabled())", "::Settings::KeyNavigation", "QEvent::KeyPress",
         "Ui::ScreenReaderModeActive()", "QApplication::focusWidget() != menu.get()",
         "QApplication::activePopupWidget()", "QApplication::activeModalWidget()",
         "topShownLayer() != menu.get()", "navigation->handle(")
