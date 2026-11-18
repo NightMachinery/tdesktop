@@ -7,6 +7,9 @@
 #include "dialogs/dialogs_inner_widget.h"
 #include "dialogs/dialogs_widget.h"
 #include "history/history_widget.h"
+#include "history/view/history_view_chat_section.h"
+#include "history/view/history_view_pinned_section.h"
+#include "history/view/history_view_scheduled_section.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "purple/purple_chat_background.h"
@@ -166,11 +169,22 @@ bool StartsWith(const Binding &binding, const Chord &prefix) {
 struct Target {
 	QPointer<QWidget> focus;
 	Dialogs::InnerWidget *list = nullptr;
-	HistoryInner *messages = nullptr;
+	MessageHints::Target messages;
 	bool folders = false;
 };
 
 Target FindTarget(Window::SessionController *owner, QWidget *focus) {
+	const auto forSection = [=](auto *section, bool scheduled = false) {
+		const auto list = (section->controller() == owner)
+			? section->purpleMessageList(focus)
+			: nullptr;
+		return list
+			? Target{
+				.focus = focus,
+				.messages = { .section = list, .scheduled = scheduled },
+			}
+			: Target();
+	};
 	for (auto widget = focus; widget; widget = widget->parentWidget()) {
 		if (const auto dialogs = dynamic_cast<Dialogs::Widget*>(widget)) {
 			const auto list = dialogs->purpleKeysList(focus);
@@ -191,9 +205,18 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					&& history->allowsPurpleKeys(focus))
 				? Target{
 					.focus = focus,
-					.messages = history->purpleMessageList(),
+					.messages = { .main = history->purpleMessageList() },
 				}
 				: Target();
+		}
+		if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(widget)) {
+			return forSection(chat);
+		}
+		if (const auto pinned = dynamic_cast<HistoryView::PinnedWidget*>(widget)) {
+			return forSection(pinned);
+		}
+		if (const auto scheduled = dynamic_cast<HistoryView::ScheduledWidget*>(widget)) {
+			return forSection(scheduled, true);
 		}
 	}
 	return {};
@@ -207,7 +230,7 @@ bool Available(Action action, const Target &target) {
 	case Action::PreviousFolder:
 	case Action::NextFolder: return target.folders;
 	case Action::SelectMessage:
-	case Action::CopyMessage: return target.messages != nullptr;
+	case Action::CopyMessage: return bool(target.messages);
 	default: return true;
 	}
 }

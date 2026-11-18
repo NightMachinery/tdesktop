@@ -214,6 +214,9 @@ public:
 
 	bool focus();
 	[[nodiscard]] bool focused() const;
+	[[nodiscard]] bool allowsPurpleMessageKeys(
+		QWidget *focus,
+		bool listFocused) const;
 	[[nodiscard]] rpl::producer<bool> focusedValue() const;
 	[[nodiscard]] rpl::producer<bool> tabbedPanelShownValue() const;
 	[[nodiscard]] bool overlaps(const QRect &globalRect) const;

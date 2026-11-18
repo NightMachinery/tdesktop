@@ -5149,6 +5149,20 @@ bool ChatWidget::listIsLessInOrder(
 		: first->position() < second->position();
 }
 
+ListWidget *ChatWidget::purpleMessageList(QWidget *focus) const {
+	return (_inner
+		&& isVisible()
+		&& _inner->isVisible()
+		&& !animatingShow()
+		&& mode() == Mode::Replies
+		&& !_composeSearch
+		&& !_chooseForReport
+		&& !isChoosingTheme()
+		&& _composeControls->allowsPurpleMessageKeys(focus, focus == _inner.data()))
+		? _inner.data()
+		: nullptr;
+}
+
 void ChatWidget::listSelectionChanged(SelectedItems &&items) {
 	HistoryView::TopBarWidget::SelectedState state;
 	state.count = items.size();
@@ -5167,7 +5181,8 @@ void ChatWidget::listSelectionChanged(SelectedItems &&items) {
 	if ((state.count > 0) && _composeSearch) {
 		_composeSearch->hideAnimated();
 	}
-	if (!_inner->hasFocus() || !Ui::ScreenReaderModeActive()) {
+	if (!_inner->keepingPurpleSelectionFocus()
+		&& (!_inner->hasFocus() || !Ui::ScreenReaderModeActive())) {
 		doSetInnerFocus();
 	}
 }

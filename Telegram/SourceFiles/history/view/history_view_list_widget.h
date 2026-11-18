@@ -28,6 +28,7 @@ struct ClickHandlerContext;
 struct HistorySelectedTextParts;
 
 namespace Purple {
+class MessageHints;
 struct ImportSettingsHit;
 struct ImportSettingsViewState;
 } // namespace Purple
@@ -384,6 +385,7 @@ public:
 	void cancelSelection();
 	void selectItem(not_null<HistoryItem*> item);
 	void selectItemAsGroup(not_null<HistoryItem*> item);
+	[[nodiscard]] bool keepingPurpleSelectionFocus() const;
 	void selectItemsUpTo(not_null<HistoryItem*> item);
 	[[nodiscard]] bool canSelectItemsUpTo(
 		not_null<HistoryItem*> item) const;
@@ -611,6 +613,9 @@ protected:
 	int resizeGetHeight(int newWidth) override;
 
 private:
+	friend class Purple::MessageHints;
+	void purpleEnumerateVisible(Fn<bool(not_null<Element*>, int, int)> method);
+
 	[[nodiscard]] static int SelectionViewOffset(
 		not_null<const ListWidget*> inner,
 		not_null<const Element*> view);
@@ -999,6 +1004,7 @@ private:
 	int _minHeight = 0;
 	int _visibleTop = 0;
 	int _visibleBottom = 0;
+	rpl::event_stream<> _purpleHintGeometryChanges;
 	Element *_visibleTopItem = nullptr;
 	int _visibleTopFromItem = 0;
 	ScrollTopState _scrollTopState;
@@ -1037,6 +1043,7 @@ private:
 	bool _mouseActive = false;
 
 	bool _selectEnabled = false;
+	bool _purpleKeepSelectionFocus = false;
 	HistoryItem *_selectedTextItem = nullptr;
 	MessageSelection _selectedTextSelection;
 	TextForMimeData _selectedText;

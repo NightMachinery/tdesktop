@@ -691,6 +691,17 @@ bool PinnedWidget::listIsLessInOrder(
 	return first->position() < second->position();
 }
 
+ListWidget *PinnedWidget::purpleMessageList(QWidget *focus) const {
+	return (_inner
+		&& isVisible()
+		&& _inner->isVisible()
+		&& !animatingShow()
+		&& !_composeSearch
+		&& focus == _inner.data())
+		? _inner.data()
+		: nullptr;
+}
+
 void PinnedWidget::listSelectionChanged(SelectedItems &&items) {
 	HistoryView::TopBarWidget::SelectedState state;
 	state.count = items.size();

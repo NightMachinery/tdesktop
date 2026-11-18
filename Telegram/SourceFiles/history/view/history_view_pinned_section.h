@@ -95,6 +95,7 @@ public:
 	bool listIsLessInOrder(
 		not_null<HistoryItem*> first,
 		not_null<HistoryItem*> second) override;
+	[[nodiscard]] ListWidget *purpleMessageList(QWidget *focus) const;
 	void listSelectionChanged(SelectedItems &&items) override;
 	void listMarkReadTill(not_null<HistoryItem*> item) override;
 	void listMarkContentsRead(

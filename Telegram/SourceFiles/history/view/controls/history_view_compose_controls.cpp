@@ -145,6 +145,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_iv.h"
 #include "styles/style_layers.h"
 
+#include <QtGui/QTextBlock>
+#include <QtGui/QTextLayout>
+
 namespace HistoryView {
 namespace {
 
@@ -2110,6 +2113,29 @@ bool ComposeControls::focus() {
 
 bool ComposeControls::focused() const {
 	return Ui::InFocusChain(_wrap.get());
+}
+
+bool ComposeControls::allowsPurpleMessageKeys(
+		QWidget *focus,
+		bool listFocused) const {
+	if (isEditingMessage()
+		|| isRecording()
+		|| isRecordingPressed()
+		|| (_autocomplete && _autocomplete->isVisible())
+		|| (_emojiSuggestions && _emojiSuggestions->shown())
+		|| (_inlineResults && _inlineResults->isVisible())
+		|| (_tabbedPanel && _tabbedPanel->isVisible())
+		|| (_attachBotsMenu && _attachBotsMenu->isVisible())) {
+		return false;
+	}
+	if (listFocused) {
+		return true;
+	}
+	if (focus != _field->rawTextEdit().get() || !_field->isVisible()) {
+		return false;
+	}
+	const auto layout = _field->textCursor().block().layout();
+	return !layout || layout->preeditAreaText().isEmpty();
 }
 
 rpl::producer<bool> ComposeControls::focusedValue() const {

@@ -22,6 +22,12 @@ the numbers.
 - `history/history_inner_widget.*`: visible message enumeration and geometry
   notifications for labels. The history widget exposes its current message list
   and allows the selection top bar to update while preserving focus.
+- `history/view/history_view_{chat,pinned,scheduled}_section.*` and
+  `history/view/controls/history_view_compose_controls.*`: explicit nested
+  section and composer focus admission, with the chat section preserving
+  focus during hint selection.
+- `history/view/history_view_list_widget.*`: visible enumeration, layout
+  cancellation and focus preservation for hint selection.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - See [keys.md](keys.md).

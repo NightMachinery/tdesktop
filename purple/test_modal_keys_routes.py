@@ -79,20 +79,58 @@ ordered(keys, "void Keys::clearPrefix()", "_hints.clear()")
 
 hints = read("purple/purple_message_hints.cpp")
 ordered(hints, "setFocusPolicy(Qt::NoFocus)", "Qt::WA_TransparentForMouseEvents")
-ordered(hints, "purpleEnumerateVisible", "intersected(visible)", "contentOverlapped",
-        "element->data()->fullId()", "HintLabel(i, digits)")
-ordered(hints, "bool MessageHints::eligible", "goodForSelection", "hasCopyRestriction",
+ordered(hints, "intersected(visible)", "contentOverlapped", "element->data()->fullId()",
+        "main->purpleEnumerateVisible(collect)", "section->purpleEnumerateVisible(collect)",
+        "HintLabel(i, digits)")
+ordered(hints, "bool MessageHints::eligible", "hasCopyRestriction", "goodForSelection",
         "groupIds.push_back", "MaxSelectedItems", "hasTextForCopy()")
+ordered(hints, "if (source.scheduled)", "IsScheduledMsgId(item->id)", "item->isLocal()",
+        "item->isSending()", "item->hasFailed()", "scheduledMessages().lookupItem",
+        "else if (!IsServerMsgId(item->id)")
+assert "select && (!section->_selectEnabled || section->hasSelectRestriction())" in hints
+assert "section->isGoodForSelection(section->_selected, candidate, total)" in hints
+assert "section->hasCopyRestriction(candidate)" in hints
 watch = between(hints, "void MessageHints::watch", "MessageHints::Input MessageHints::type")
 for cancellation in ("_purpleHintGeometryChanges", "shownValue()", "scrollTopChanges()",
                      "itemRemoved()", "viewRemoved()", "viewLayoutChanged()"):
     assert cancellation in watch, cancellation
 pick = between(hints, "MessageHints::Input MessageHints::type", "void MessageHints::apply")
-ordered(pick, "&_view->session() != _session.get()", "snapshot() != _entries",
-        "message(i->id)", "viewByItem(item) == i->element", "clear();",
-        "apply(view, item, action)")
+ordered(pick, "view.widget() != _view.data()", "view.scheduled != _scheduled",
+        "&view.session() != _session.get()", "snapshot() != _entries",
+        "message(i->id)", "item && (view.main", "view.main->viewByItem(item)",
+        "view.section->viewForItem(item)) == i->element", "clear();", "apply(view, item, action)")
 apply = between(hints, "void MessageHints::apply", "void MessageHints::clear")
 ordered(apply, "if (action == Action::Copy)", "copyContextText", "return;",
-        "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)")
+        "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)",
+        "view.section->showCopyRestriction(item)", "HistoryGroupText(group)",
+        "Iv::SetRichBlocksClipboard", "section->_purpleKeepSelectionFocus, true",
+        "gsl::finally", "section->selectItemAsGroup(item)")
 
-print("Modal key, visible message and chat background routes passed")
+scope = between(keys, "Target FindTarget", "bool Available")
+ordered(scope, "section->controller() == owner", "section->purpleMessageList(focus)",
+        "HistoryView::ChatWidget", "HistoryView::PinnedWidget", "HistoryView::ScheduledWidget",
+        "forSection(scheduled, true)")
+for section, widget, guards in (
+        ("chat", "ChatWidget", ("Mode::Replies", "!_composeSearch",
+                                "!_chooseForReport", "allowsPurpleMessageKeys")),
+        ("pinned", "PinnedWidget", ("!_composeSearch", "focus == _inner.data()")),
+        ("scheduled", "ScheduledWidget", ("allowsPurpleMessageKeys",))):
+    source = read(f"history/view/history_view_{section}_section.cpp")
+    admission = between(source, f"{widget}::purpleMessageList", f"{widget}::listSelectionChanged")
+    ordered(admission, "_inner->isVisible()", "!animatingShow()", *guards)
+
+compose = read("history/view/controls/history_view_compose_controls.cpp")
+admission = between(compose, "ComposeControls::allowsPurpleMessageKeys", "ComposeControls::focusedValue")
+ordered(admission, "isEditingMessage()", "isRecording()", "_autocomplete->isVisible()",
+        "_emojiSuggestions->shown()", "_inlineResults->isVisible()", "_tabbedPanel->isVisible()",
+        "if (listFocused)", "_field->rawTextEdit().get()", "preeditAreaText().isEmpty()")
+
+section_list = read("history/view/history_view_list_widget.cpp")
+for name in ("refreshRows", "visibleTopBottomUpdated", "resizeGetHeight",
+             "refreshAttachmentsAtIndex", "viewReplaced"):
+    assert "_purpleHintGeometryChanges.fire" in section_list.split(f"ListWidget::{name}(", 1)[1].split(chr(10) + "}", 1)[0], name
+chat = read("history/view/history_view_chat_section.cpp")
+ordered(chat, "ChatWidget::listSelectionChanged", "!_inner->keepingPurpleSelectionFocus()",
+        "doSetInnerFocus()")
+
+print("Modal key, visible message, nested section and chat background routes passed")

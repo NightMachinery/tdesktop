@@ -373,6 +373,11 @@ void ListWidget::enumerateItems(Method method) {
 	}
 }
 
+void ListWidget::purpleEnumerateVisible(
+		Fn<bool(not_null<Element*>, int, int)> method) {
+	enumerateItems<EnumItemsDirection::TopToBottom>(method);
+}
+
 template <typename Method>
 void ListWidget::enumerateUserpics(Method method) {
 	// Find and remember the top of an attached messages pack
@@ -784,6 +789,7 @@ void ListWidget::refreshViewer() {
 }
 
 void ListWidget::refreshRows(const Data::MessagesSlice &old) {
+	_purpleHintGeometryChanges.fire({});
 	Expects(_viewsCapacity.empty());
 
 	if (_thanosController) {
@@ -1488,6 +1494,9 @@ int ListWidget::findNearestItem(Data::MessagePosition position) const {
 void ListWidget::visibleTopBottomUpdated(
 		int visibleTop,
 		int visibleBottom) {
+	if (visibleTop != _visibleTop || visibleBottom != _visibleBottom) {
+		_purpleHintGeometryChanges.fire({});
+	}
 	if (!(visibleTop < visibleBottom)) {
 		return;
 	}
@@ -1938,6 +1947,9 @@ void ListWidget::selectItemAsGroup(not_null<HistoryItem*> item) {
 		pushSelectedItems();
 		update();
 	}
+}
+bool ListWidget::keepingPurpleSelectionFocus() const {
+	return _purpleKeepSelectionFocus;
 }
 
 std::vector<not_null<HistoryItem*>> ListWidget::collectBetween(
@@ -2834,6 +2846,7 @@ void ListWidget::revealItemsCallback() {
 }
 
 int ListWidget::resizeGetHeight(int newWidth) {
+	_purpleHintGeometryChanges.fire({});
 	update();
 
 	const auto resizeAllItems = (_itemsWidth != newWidth);
@@ -5754,6 +5767,7 @@ void ListWidget::resizeItem(not_null<Element*> view) {
 }
 
 void ListWidget::refreshAttachmentsAtIndex(int index) {
+	_purpleHintGeometryChanges.fire({});
 	Expects(index >= 0 && index < _items.size());
 
 	const auto from = [&] {
@@ -5901,6 +5915,7 @@ void ListWidget::aboutViewReplaced(const Element *was) {
 }
 
 void ListWidget::viewReplaced(not_null<const Element*> was, Element *now) {
+	_purpleHintGeometryChanges.fire({});
 	if (_activeColumnsView == was.get()) {
 		_activeColumnsView = nullptr;
 		_activeColumns.clear();
