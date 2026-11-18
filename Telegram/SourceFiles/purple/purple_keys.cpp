@@ -32,7 +32,7 @@
 #include "ui/toast/toast.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/scroll_area.h"
+#include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/checkbox.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -528,11 +528,10 @@ Dialogs::Widget *ChatsPane(Window::SessionController *controller) {
 	return nullptr;
 }
 
-Ui::ScrollArea *HistoryScroll(const Target &target) {
+Ui::ElasticScroll *HistoryScroll(const Target &target) {
 	const auto list = target.messages.widget();
-	const auto viewport = list ? list->parentWidget() : nullptr;
-	const auto scroll = viewport
-		? dynamic_cast<Ui::ScrollArea*>(viewport->parentWidget())
+	const auto scroll = list
+		? dynamic_cast<Ui::ElasticScroll*>(list->parentWidget())
 		: nullptr;
 	return (scroll && scroll->widget() == list
 		&& scroll->isVisible() && scroll->isEnabled())
@@ -1175,12 +1174,11 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage:
 		if (const auto scroll = HistoryScroll(target)) {
-			auto page = QKeyEvent(QEvent::KeyPress,
-				(action == Action::NewerMessagesPage)
-					? Qt::Key_PageDown
-					: Qt::Key_PageUp,
-				Qt::NoModifier);
-			scroll->keyPressEvent(&page);
+			const auto delta = scroll->height();
+			const auto top = scroll->scrollTop();
+			scroll->scrollToY((action == Action::OlderMessagesPage)
+				? (top - delta)
+				: (top + delta));
 		}
 		break;
 	case Action::SelectMessage:

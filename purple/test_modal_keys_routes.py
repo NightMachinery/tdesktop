@@ -105,15 +105,17 @@ ordered(available, "case Action::FocusChats:", "ChatsPane(target.controller)",
 ordered(dispatch, "case Action::FocusChats:", "ChatsPane(current)", "dialogs->setInnerFocus(true)",
         "case Action::FocusConversation:", "current->content()->activate()")
 
-history_scroll = between(keys, "Ui::ScrollArea *HistoryScroll", "bool Available")
-ordered(history_scroll, "target.messages.widget()", "list->parentWidget()",
-        "dynamic_cast<Ui::ScrollArea*>(viewport->parentWidget())",
+history_scroll = between(keys, "Ui::ElasticScroll *HistoryScroll", "bool Available")
+ordered(history_scroll, "target.messages.widget()",
+        "dynamic_cast<Ui::ElasticScroll*>(list->parentWidget())",
         "scroll->widget() == list", "scroll->isVisible()", "scroll->isEnabled()")
 for action, bracket in (("OlderMessagesPage", "Left"), ("NewerMessagesPage", "Right")):
     assert f"{{ Action::{action}, {{ Qt::Key_Bracket{bracket}, Qt::Key_M }} }}" in keys
 paging = between(dispatch, "case Action::OlderMessagesPage:", "case Action::SelectMessage:")
 ordered(paging, "case Action::NewerMessagesPage:", "HistoryScroll(target)",
-        "Qt::Key_PageDown", "Qt::Key_PageUp", "scroll->keyPressEvent(&page)")
+        "scroll->height()", "scroll->scrollTop()",
+        "scroll->scrollToY((action == Action::OlderMessagesPage)",
+        "(top - delta)", "(top + delta)")
 for view, assignment in (
         ("history/history_widget.cpp", "_list ="),
         ("history/view/history_view_chat_section.cpp", "_inner ="),
