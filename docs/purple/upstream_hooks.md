@@ -65,6 +65,16 @@ the numbers.
   store closure and callback lifetime checks live in `purple_playlists_service`
   and `purple_playlists_worker`; see [playlists.md](playlists.md).
 
+## Birthday reminders
+
+- `dialogs/suggestions/suggestion_birthday_contacts.cpp` delegates the
+  audience, recipient selection and dismissal to Purple while retaining the
+  stock chat-list banner. `dialogs/dialogs_top_bar_suggestion.cpp` re-evaluates
+  that banner when the account's reminder rules change.
+- `history/history_widget.cpp` and
+  `history/view/controls/history_view_compose_controls.cpp` use the same rule
+  for the birthday-triggered gift button in both composers.
+
 ## Recipient picker visibility
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server

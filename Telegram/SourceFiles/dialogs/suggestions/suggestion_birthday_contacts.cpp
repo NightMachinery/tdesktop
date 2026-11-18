@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/suggestions/suggestion.h"
 
-#include "boxes/star_gift_box.h"
 #include "data/components/promo_suggestions.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -15,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_group_call_bar.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_birthday_reminders.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/painter.h"
 #include "ui/text/text_utilities.h"
@@ -27,12 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Dialogs::TopBarSuggestions {
 namespace {
 
-constexpr auto kSugBirthdayContacts = "BIRTHDAY_CONTACTS_TODAY"_cs;
-
 bool Available(const Context &context) {
-	const auto session = context.session.get();
-	return session->premiumCanBuy()
-		&& session->promoSuggestions().current(kSugBirthdayContacts.utf8());
+	return Purple::BirthdayRemindersAvailable(context.session);
 }
 
 void Activate(ActivateArgs args) {
@@ -45,8 +41,7 @@ void Activate(ActivateArgs args) {
 
 	const auto alive = args.lifetime->make_state<base::has_weak_ptr>();
 	auto ready = crl::guard(content.get(), [=] {
-		const auto users = promo->knownBirthdaysToday().value_or(
-			std::vector<UserId>());
+		const auto users = Purple::BirthdayReminderUsers(session);
 		if (users.empty()) {
 			recompute();
 			return;
@@ -57,18 +52,10 @@ void Activate(ActivateArgs args) {
 		using RightIcon = TopBarSuggestionContent::RightIcon;
 		content->setRightIcon(RightIcon::Close);
 		content->setClickedCallback([=] {
-			if (isSingle) {
-				Ui::ShowStarGiftBox(controller, first);
-			} else {
-				Ui::ChooseStarGiftRecipient(controller);
-			}
+			Purple::ShowBirthdayReminders(controller);
 		});
 		content->setHideCallback([=] {
-			promo->dismiss(kSugBirthdayContacts.utf8());
-			controller->showToast(
-				tr::lng_dialogs_suggestions_birthday_contact_dismiss(
-					tr::now));
-			recompute();
+			Purple::HideBirthdayRemindersToday(session);
 		});
 		auto title = isSingle
 			? tr::lng_dialogs_suggestions_birthday_contact_title(
@@ -81,13 +68,9 @@ void Activate(ActivateArgs args) {
 				lt_count,
 				users.size(),
 				tr::rich);
-		auto text = isSingle
-			? tr::lng_dialogs_suggestions_birthday_contact_about(
-				tr::now,
-				TextWithEntities::Simple)
-			: tr::lng_dialogs_suggestions_birthday_contacts_about(
-				tr::now,
-				TextWithEntities::Simple);
+		auto text = tr::lng_purple_birthday_banner_about(
+			tr::now,
+			tr::marked);
 		content->setContent(std::move(title), std::move(text));
 		if (!isSingle) {
 			struct UserViews {

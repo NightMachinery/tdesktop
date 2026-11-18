@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_compose_source.h"
+#include "purple/purple_birthday_reminders.h"
 #include "purple/purple_webp_paste_route.h"
 #include "history/history_widget.h"
 
@@ -3623,13 +3624,7 @@ void HistoryWidget::showHistory(
 					sendBotStartCommand();
 				}
 			} else {
-				Info::Profile::BirthdayValue(
-					user
-				) | rpl::map(
-					Data::IsBirthdayTodayValue
-				) | rpl::flatten_latest(
-				) | rpl::distinct_until_changed(
-				) | rpl::on_next([=] {
+				Purple::BirthdayReminderValue(user) | rpl::on_next([=] {
 					refreshSendGiftToggle();
 					updateControlsVisibility();
 					updateControlsGeometry();
@@ -4112,7 +4107,7 @@ void HistoryWidget::refreshSendGiftToggle() {
 		&& !user->isBot()
 		&& ((disallowed & Type::SendHide)
 			|| (session().user()->disallowedGiftTypes() & Type::SendHide)
-			|| Data::IsBirthdayToday(user->birthday()))
+			|| Purple::BirthdayReminderFor(user))
 		&& ((disallowed & all) != all);
 	if (!_giftToUser && has) {
 		_giftToUser.create(this, st::historyGiftToUser);

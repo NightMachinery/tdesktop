@@ -106,6 +106,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
 #include "purple/purple_screentime_recorder.h"
+#include "purple/purple_birthday_reminders.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -5637,7 +5638,7 @@ void ComposeControls::refreshSendGiftToggle() {
 		&& !user->isBot()
 		&& ((disallowed & Type::SendHide)
 			|| (session().user()->disallowedGiftTypes() & Type::SendHide)
-			|| Data::IsBirthdayToday(user->birthday()))
+			|| Purple::BirthdayReminderFor(user))
 		&& ((disallowed & all) != all);
 	if (!_giftToUser && has) {
 		_giftToUser = base::make_unique_q<Ui::IconButton>(
@@ -6222,13 +6223,7 @@ void ComposeControls::initWebpageProcess() {
 	}, _historyLifetime);
 
 	if (const auto user = _history->peer->asUser()) {
-		Info::Profile::BirthdayValue(
-			user
-		) | rpl::map(
-			Data::IsBirthdayTodayValue
-		) | rpl::flatten_latest(
-		) | rpl::distinct_until_changed(
-		) | rpl::on_next([=] {
+		Purple::BirthdayReminderValue(user) | rpl::on_next([=] {
 			refreshSendGiftToggle();
 		}, _historyLifetime);
 	}

@@ -10,6 +10,12 @@ docs/purple/upstream_hooks.md.
 */
 
 "lng_purple_settings_title" = "Purple";
+"lng_purple_birthday_reminders" = "Birthday Reminders";
+"lng_purple_birthday_who" = "Whose birthdays should Purple remind you about?";
+"lng_purple_birthday_audience_about" = "Everybody includes people Purple knows whose birthday is visible to you. The Never Remind list applies to every choice.";
+"lng_purple_birthday_never" = "Never Remind";
+"lng_purple_birthday_banner_about" = "View birthday reminders";
+"lng_purple_birthday_empty" = "No birthdays to show.";
 
 "lng_lastseen_peek_action" = "Peek Last Seen";
 "lng_lastseen_peek_suffix" = "Peek Last Seen";

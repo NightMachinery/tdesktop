@@ -300,6 +300,8 @@ PRIVATE
     purple/purple_session_settings.h
     purple/purple_suggestions.cpp
     purple/purple_suggestions.h
+    purple/purple_birthday_reminders.cpp
+    purple/purple_birthday_reminders.h
     purple/purple_picker.cpp
     purple/purple_picker.h
     purple/purple_screentime_box.cpp

@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_archive_service.h"
 #include "purple/purple_archive_purge_box.h"
+#include "purple/purple_birthday_reminders.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
 #include "purple/purple_emoji_export.h"
@@ -471,6 +472,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	const auto session = builder.session();
 	builder.addSkip();
 	Purple::AddVersionRow(builder);
+	AddBirthdayReminderSettings(builder);
 	const auto archiveSession = base::make_weak(session.get());
 	builder.addDividerText(rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges()) | rpl::map([archiveSession] {
 		const auto live = archiveSession.get();

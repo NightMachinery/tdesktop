@@ -182,6 +182,7 @@ with `git grep Purple::`. Read the docs before changing any of it:
   upstream before anybody configures anything
 - **`config.md`** - `settings.toml`, `state.toml`, live reload
 - **`work_mode.md`** - presets, lists, visibility and notify gating
+- **`birthday_reminders.md`** - Desktop reminder audiences and exclusions
 - **`sync.md`** - moving `settings.toml` between installs through
   Saved Messages, and the alternatives that were not built
 - **`version.md`** - the Purple version line in Settings and the

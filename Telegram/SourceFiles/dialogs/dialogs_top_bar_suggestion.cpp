@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/ui/dialogs_top_bar_suggestion_content.h"
 #include "main/main_session.h"
 #include "mainwindow.h"
+#include "purple/purple_birthday_reminders.h"
 #include "ui/ui_utility.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
@@ -130,7 +131,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			std::greater<>(),
 			&TopBarSuggestions::Spec::priority);
 
-		const auto processCurrentSuggestion = [=](auto repeat) -> void {
+		const auto processCurrentSuggestion = [=](
+				auto repeat,
+				bool refreshBirthdays = false) -> void {
 			auto winner = (const TopBarSuggestions::Spec*)(nullptr);
 			for (auto i = 0; i < int(specs->size()); ++i) {
 				const auto &spec = (*specs)[i];
@@ -152,7 +155,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				? std::optional<TopBarSuggestions::Priority>(winner->priority)
 				: std::nullopt;
 			if (state->activeSpec == winnerPriority
-				&& (!winner || state->wrap)) {
+				&& (!winner || state->wrap)
+				&& !(refreshBirthdays && winnerPriority
+					== TopBarSuggestions::Priority::BirthdayContacts)) {
 				return;
 			}
 
@@ -253,6 +258,10 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			session->giftAuctions().hasActiveChanges() | rpl::to_empty
 		) | rpl::on_next([=] {
 			processCurrentSuggestion(processCurrentSuggestion);
+		}, lifetime);
+
+		Purple::BirthdayReminderChanges(session) | rpl::on_next([=] {
+			processCurrentSuggestion(processCurrentSuggestion, true);
 		}, lifetime);
 
 		rpl::duplicate(prepareCollapseSnapshot) | rpl::on_next([=] {
