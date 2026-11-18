@@ -14,6 +14,7 @@
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "lang/lang_keys.h"
+#include "logs.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -21,6 +22,7 @@
 #include "media/player/media_player_instance.h"
 #include "mainwindow.h"
 #include "purple/purple_chat_background.h"
+#include "purple/purple_config.h"
 #include "purple/purple_message_hints.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
@@ -39,6 +41,11 @@
 #include "styles/style_settings.h"
 #include "styles/style_widgets.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
@@ -46,7 +53,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 
-#include <initializer_list>
+#include <optional>
 
 namespace Purple {
 namespace {
@@ -205,7 +212,7 @@ using Chord = std::vector<int>;
 
 struct Binding {
 	Action action;
-	std::initializer_list<int> keys;
+	Chord keys;
 };
 
 const Binding kBindings[] = {
@@ -264,7 +271,7 @@ QString KeyLabel(int key) {
 	return QKeySequence(key).toString(QKeySequence::NativeText);
 }
 
-QString ChordLabel(std::initializer_list<int> keys) {
+QString ChordLabel(const Chord &keys) {
 	auto result = QStringList();
 	for (const auto key : keys) {
 		result.push_back(KeyLabel(key));
@@ -272,9 +279,11 @@ QString ChordLabel(std::initializer_list<int> keys) {
 	return result.join(' ');
 }
 
+const std::vector<Binding> &Bindings();
+
 QString BindingsLabel(Action action) {
 	auto result = QStringList();
-	for (const auto &binding : kBindings) {
+	for (const auto &binding : Bindings()) {
 		if (binding.action == action) {
 			result.push_back(ChordLabel(binding.keys));
 		}
@@ -291,6 +300,133 @@ const Command &FindCommand(Action action) {
 bool StartsWith(const Binding &binding, const Chord &prefix) {
 	return binding.keys.size() >= prefix.size()
 		&& std::equal(prefix.begin(), prefix.end(), binding.keys.begin());
+}
+
+int ParseKey(const QString &token) {
+	if (token.compare(u"SPC"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Space;
+	} else if (token.compare(u"Enter"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Return;
+	} else if (token.size() != 1) {
+		return 0;
+	}
+	const auto key = token.front().unicode();
+	if (key >= 'a' && key <= 'z') {
+		return Qt::Key_A + (key - 'a');
+	} else if ((key >= 'A' && key <= 'Z')
+		|| (key >= '0' && key <= '9')
+		|| key == '[' || key == ']' || key == '/' || key == '?') {
+		return key;
+	}
+	return 0;
+}
+
+Chord ParseChord(const QString &text) {
+	const auto tokens = text.simplified().split(' ', Qt::SkipEmptyParts);
+	if (tokens.empty() || tokens.size() > 4) {
+		return {};
+	}
+	auto result = Chord();
+	for (const auto &token : tokens) {
+		const auto key = ParseKey(token);
+		if (!key) {
+			return {};
+		}
+		result.push_back(key);
+	}
+	if ((result.front() == Qt::Key_I)
+		|| result.front() == Qt::Key_Question) {
+		return {};
+	}
+	return result;
+}
+
+bool IsHelpBinding(Action action) {
+	return action == Action::Help || action == Action::Run
+		|| action == Action::DescribeChord || action == Action::DescribeCommand;
+}
+
+std::optional<std::vector<Binding>> ParseBindings(
+		const QByteArray &bytes,
+		std::vector<Binding> result) {
+	const auto document = QJsonDocument::fromJson(bytes);
+	constexpr auto kEntryLimit = 128;
+	const auto array = document.array();
+	if (!document.isArray() || array.size() > kEntryLimit) {
+		return std::nullopt;
+	}
+	auto edited = std::vector<Chord>();
+	for (const auto value : array) {
+		const auto entry = value.toObject();
+		const auto text = entry.value(u"keys"_q);
+		const auto id = entry.value(u"command"_q);
+		if (entry.size() != 2 || !text.isString()
+			|| (!id.isNull() && !id.isString())) {
+			return std::nullopt;
+		}
+		auto keys = ParseChord(text.toString());
+		if (keys.empty() || ranges::contains(edited, keys)) {
+			return std::nullopt;
+		}
+		edited.push_back(keys);
+		const auto current = ranges::find(result, keys, &Binding::keys);
+		if (current != end(result) && IsHelpBinding(current->action)) {
+			return std::nullopt;
+		}
+		if (id.isNull()) {
+			if (current != end(result)) {
+				result.erase(current);
+			}
+			continue;
+		}
+		const auto name = id.toString();
+		const auto command = ranges::find_if(kCommands, [&](const Command &item) {
+			return name == QString::fromLatin1(item.id);
+		});
+		if (command == std::end(kCommands)) {
+			return std::nullopt;
+		} else if (current != end(result)) {
+			current->action = command->action;
+		} else {
+			result.push_back({ command->action, std::move(keys) });
+		}
+	}
+	for (const auto &binding : result) {
+		if (ranges::any_of(result, [&](const Binding &other) {
+			return binding.keys.size() < other.keys.size()
+				&& StartsWith(other, binding.keys);
+		})) {
+			return std::nullopt;
+		}
+	}
+	return result;
+}
+
+const std::vector<Binding> &Bindings() {
+	static const auto result = [] {
+		auto defaults = std::vector<Binding>(
+			std::begin(kBindings),
+			std::end(kBindings));
+		const auto path = ConfigDirectory() + u"/keys.json"_q;
+		const auto info = QFileInfo(path);
+		if (!info.exists()) {
+			return defaults;
+		}
+		auto file = QFile(path);
+		constexpr auto kByteLimit = 16 * 1024;
+		if (info.isFile() && file.open(QIODevice::ReadOnly)) {
+			const auto bytes = file.read(kByteLimit + 1);
+			if (file.error() == QFileDevice::NoError
+				&& bytes.size() <= kByteLimit) {
+				if (auto parsed = ParseBindings(bytes, defaults)) {
+					return std::move(*parsed);
+				}
+			}
+		}
+		LOG(("Purple modal keys: invalid keys.json, using default bindings."));
+		return defaults;
+	}();
+	return result;
 }
 
 struct Target {
@@ -724,7 +860,7 @@ KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 	} else if (!mods || ((key == Qt::Key_Question || key == Qt::Key_Slash)
 			&& mods == Qt::ShiftModifier)) {
 		const auto nextBinding = ranges::any_of(
-			kBindings,
+			Bindings(),
 			[&](const Binding &binding) {
 				return binding.keys.size() > _prefix.size()
 					&& binding.keys.begin()[_prefix.size()] == key
@@ -854,7 +990,7 @@ void Keys::showWhichKey() {
 	}
 	auto lines = QStringList();
 	auto seen = QSet<int>();
-	for (const auto &binding : kBindings) {
+	for (const auto &binding : Bindings()) {
 		if (!StartsWith(binding, _prefix)
 			|| binding.keys.size() == _prefix.size()
 			|| (!_inspect && !Available(binding.action, target))) {
@@ -903,7 +1039,7 @@ void Keys::stroke(int key, const Target &target) {
 		_whichKey = {};
 	}
 	auto more = false;
-	for (const auto &binding : kBindings) {
+	for (const auto &binding : Bindings()) {
 		if (!StartsWith(binding, _prefix)) {
 			continue;
 		} else if (binding.keys.size() != _prefix.size()) {

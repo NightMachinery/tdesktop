@@ -55,8 +55,32 @@ Telegram typing and input-method behavior.
 
 Menus, settings, and compose overlays use Telegram's built-in navigation.
 Alt+Space stays with the system or editor.
-Bindings use Qt's logical keys. A future local binding file could map chords
-to registered command IDs without evaluating code.
+## Custom bindings
+
+Create `keys.json` beside Purple's local [settings.toml](config.md), then
+restart Purple. It uses the same `keys` and `command` fields as Telegram's
+shortcut file, with space-separated keys for modal sequences. For example,
+this moves the archive command to `SPC o r`:
+
+```json
+[
+  { "keys": "SPC o a", "command": null },
+  { "keys": "SPC o r", "command": "open-archived-chats" }
+]
+```
+
+Use the command IDs from `SPC h f`. A command ID adds or replaces a binding.
+Use `null` to remove one. Help, command search, and which-key show the
+effective bindings. `SPC ?`, `SPC SPC`, `SPC h k`, and `SPC h f`
+always remain available.
+
+Each sequence can contain up to four logical keys. Use letters, digits,
+`SPC`, `Enter`, brackets, slash, or a question mark after the first key.
+Sequences cannot start with `i`, which returns to Insert. Key names are
+case-insensitive.
+Keep the file under 16 KiB and at most 128 entries. Duplicate sequences,
+sequences that start another binding, and unknown command IDs cause Purple to
+log a warning and use the defaults for that run. Purple keeps this file local.
 
 ## Upstream hooks
 

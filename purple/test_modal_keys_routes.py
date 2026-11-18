@@ -120,6 +120,22 @@ for view, assignment in (
         ("history/view/history_view_pinned_section.cpp", "_inner ="),
         ("history/view/history_view_scheduled_section.cpp", "_inner =")):
     assert f"{assignment} _scroll->setOwnedWidget(" in read(view), view
+keymap = between(keys, "std::optional<std::vector<Binding>> ParseBindings", "struct Target")
+ordered(keymap, "QJsonDocument::fromJson(bytes)", "array.size() > kEntryLimit",
+        "ranges::contains(edited, keys)", "IsHelpBinding(current->action)",
+        "if (id.isNull())", "return name == QString::fromLatin1(item.id)",
+        "command == std::end(kCommands)", "current->action = command->action",
+        "binding.keys.size() < other.keys.size()", "StartsWith(other, binding.keys)",
+        'ConfigDirectory() + u"/keys.json"_q', "info.isFile()",
+        "file.read(kByteLimit + 1)", "ParseBindings(bytes, defaults)", "return defaults")
+key_parser = between(keys, "Chord ParseChord", "bool IsHelpBinding")
+ordered(key_parser, "tokens.size() > 4", "ParseKey(token)",
+        "result.front() == Qt::Key_I", "Qt::Key_Question")
+assert "binding : Bindings()" in between(keys, "QString BindingsLabel", "const Command &FindCommand")
+assert "Bindings()," in between(keys, "KeyUse Keys::classify", "bool Keys::handle")
+assert "binding : Bindings()" in between(keys, "void Keys::showWhichKey", "void Keys::stroke")
+assert "binding : Bindings()" in stroke
+
 bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \} \},", keys)
 chords = [tuple(keys.split(", ")) for _, keys in bindings]
 assert len(set(chords)) == len(chords)
