@@ -42,6 +42,9 @@ Telegram typing and input-method behavior.
   order shown in Telegram's account list.
 - With the chat list and conversation visible, `SPC w d` focuses the chat list
   and `SPC w c` focuses the conversation. Focus changes return to Insert.
+- `[ m` and `] m` page toward older or newer messages in the active
+  conversation. They work in the main chat, replies, topics, pinned
+  messages, and scheduled messages.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command

@@ -104,6 +104,22 @@ ordered(available, "case Action::FocusChats:", "ChatsPane(target.controller)",
         "target.controller->mainSectionShown()", "target.controller->activeChatCurrent().thread()")
 ordered(dispatch, "case Action::FocusChats:", "ChatsPane(current)", "dialogs->setInnerFocus(true)",
         "case Action::FocusConversation:", "current->content()->activate()")
+
+history_scroll = between(keys, "Ui::ScrollArea *HistoryScroll", "bool Available")
+ordered(history_scroll, "target.messages.widget()", "list->parentWidget()",
+        "dynamic_cast<Ui::ScrollArea*>(viewport->parentWidget())",
+        "scroll->widget() == list", "scroll->isVisible()", "scroll->isEnabled()")
+for action, bracket in (("OlderMessagesPage", "Left"), ("NewerMessagesPage", "Right")):
+    assert f"{{ Action::{action}, {{ Qt::Key_Bracket{bracket}, Qt::Key_M }} }}" in keys
+paging = between(dispatch, "case Action::OlderMessagesPage:", "case Action::SelectMessage:")
+ordered(paging, "case Action::NewerMessagesPage:", "HistoryScroll(target)",
+        "Qt::Key_PageDown", "Qt::Key_PageUp", "scroll->keyPressEvent(&page)")
+for view, assignment in (
+        ("history/history_widget.cpp", "_list ="),
+        ("history/view/history_view_chat_section.cpp", "_inner ="),
+        ("history/view/history_view_pinned_section.cpp", "_inner ="),
+        ("history/view/history_view_scheduled_section.cpp", "_inner =")):
+    assert f"{assignment} _scroll->setOwnedWidget(" in read(view), view
 bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \} \},", keys)
 chords = [tuple(keys.split(", ")) for _, keys in bindings]
 assert len(set(chords)) == len(chords)

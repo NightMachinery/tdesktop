@@ -30,6 +30,7 @@
 #include "ui/toast/toast.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/scroll_area.h"
 #include "ui/widgets/checkbox.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -98,6 +99,8 @@ enum class Action {
 	Account6,
 	FocusChats,
 	FocusConversation,
+	OlderMessagesPage,
+	NewerMessagesPage,
 	Help,
 	Run,
 	DescribeChord,
@@ -181,6 +184,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_focus_chats(tr::now); } },
 	{ Action::FocusConversation, "focus-conversation",
 		[] { return tr::lng_purple_keys_focus_conversation(tr::now); } },
+	{ Action::OlderMessagesPage, "history-page-older",
+		[] { return tr::lng_purple_keys_history_page_older(tr::now); } },
+	{ Action::NewerMessagesPage, "history-page-newer",
+		[] { return tr::lng_purple_keys_history_page_newer(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -234,6 +241,8 @@ const Binding kBindings[] = {
 	{ Action::Account6, { Qt::Key_Space, Qt::Key_A, Qt::Key_6 } },
 	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_D } },
 	{ Action::FocusConversation, { Qt::Key_Space, Qt::Key_W, Qt::Key_C } },
+	{ Action::OlderMessagesPage, { Qt::Key_BracketLeft, Qt::Key_M } },
+	{ Action::NewerMessagesPage, { Qt::Key_BracketRight, Qt::Key_M } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -379,6 +388,18 @@ Dialogs::Widget *ChatsPane(Window::SessionController *controller) {
 	return nullptr;
 }
 
+Ui::ScrollArea *HistoryScroll(const Target &target) {
+	const auto list = target.messages.widget();
+	const auto viewport = list ? list->parentWidget() : nullptr;
+	const auto scroll = viewport
+		? dynamic_cast<Ui::ScrollArea*>(viewport->parentWidget())
+		: nullptr;
+	return (scroll && scroll->widget() == list
+		&& scroll->isVisible() && scroll->isEnabled())
+		? scroll
+		: nullptr;
+}
+
 bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::PreviousChat:
@@ -390,6 +411,8 @@ bool Available(Action action, const Target &target) {
 	case Action::SelectMessage:
 	case Action::CopyMessage:
 	case Action::MessageMenu: return bool(target.messages);
+	case Action::OlderMessagesPage:
+	case Action::NewerMessagesPage: return HistoryScroll(target) != nullptr;
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
@@ -1006,6 +1029,17 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::FocusConversation:
 		current->content()->activate();
+		break;
+	case Action::OlderMessagesPage:
+	case Action::NewerMessagesPage:
+		if (const auto scroll = HistoryScroll(target)) {
+			auto page = QKeyEvent(QEvent::KeyPress,
+				(action == Action::NewerMessagesPage)
+					? Qt::Key_PageDown
+					: Qt::Key_PageUp,
+				Qt::NoModifier);
+			scroll->keyPressEvent(&page);
+		}
 		break;
 	case Action::SelectMessage:
 	case Action::CopyMessage:

@@ -816,6 +816,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_keys_group_accounts" = "Accounts";
 "lng_purple_keys_focus_chats" = "Focus the chat list";
 "lng_purple_keys_focus_conversation" = "Focus the conversation";
+"lng_purple_keys_history_page_older" = "Page toward older messages";
+"lng_purple_keys_history_page_newer" = "Page toward newer messages";
 "lng_purple_keys_action_unavailable" = "This command is unavailable here.";
 "lng_purple_keys_message_select" = "Select a visible message";
 "lng_purple_keys_message_copy" = "Copy text from a visible message";
