@@ -18,6 +18,12 @@ Telegram typing and input-method behavior.
 - `j` or `] c` moves the chat-list cursor down. `k` or `[ c` moves it up.
   `Enter` opens the highlighted chat.
 - `] f` and `[ f` select the adjacent visible folder from the main chat list.
+- `/` or `SPC s s` opens search for the current view.
+- `SPC o m` opens the main menu, `SPC o t` opens Settings, and `SPC o s`
+  opens Saved Messages.
+- `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, and `SPC o d`
+  opens Scheduled Messages in a chat that supports them.
+- `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
 - In the main chat, replies, topics, pinned messages, and scheduled messages,
   `g s s` labels visible messages for selection and `g s y` labels messages
   with copyable text. In pinned messages, focus the message list first. Type
@@ -40,6 +46,8 @@ to registered command IDs without evaluating code.
 `core/application.cpp` delegates key presses after fullscreen and chat-switch
 handling, as well as shortcut overrides, paired releases, window deactivation,
 and IME events.
+`core/shortcuts.h` exposes the existing pause-aware dispatch overload for
+commands that use Telegram's native request handlers.
 `dialogs/dialogs_widget.*` and `history/history_widget.*` expose eligible focus
 surfaces. `history/history_inner_widget.*` exposes the existing visible
 message enumeration and geometry changes. `HistoryView::ListWidget` exposes

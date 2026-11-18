@@ -4,6 +4,7 @@
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/shortcuts.h"
+#include "data/data_user.h"
 #include "dialogs/dialogs_inner_widget.h"
 #include "dialogs/dialogs_widget.h"
 #include "history/history_widget.h"
@@ -11,6 +12,7 @@
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
 #include "mainwindow.h"
 #include "purple/purple_chat_background.h"
 #include "purple/purple_message_hints.h"
@@ -42,6 +44,7 @@ namespace {
 
 constexpr auto kEnabledPref = "purple-modal-keys-enabled";
 constexpr auto kWhichKeyDelay = 300;
+constexpr auto kPaletteRows = 9;
 #ifdef Q_OS_MAC
 constexpr auto kCtrl = Qt::MetaModifier;
 #else
@@ -63,6 +66,15 @@ enum class Action {
 	NextFolder,
 	SelectMessage,
 	CopyMessage,
+	Search,
+	OpenMainMenu,
+	OpenSettings,
+	OpenSavedMessages,
+	OpenArchive,
+	OpenContacts,
+	OpenScheduled,
+	OpenChatMenu,
+	PreviewChat,
 	Help,
 	Run,
 	DescribeChord,
@@ -92,6 +104,24 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_message_select(tr::now); } },
 	{ Action::CopyMessage, "message-hint-copy-text",
 		[] { return tr::lng_purple_keys_message_copy(tr::now); } },
+	{ Action::Search, "search-messages",
+		[] { return tr::lng_shortcuts_search(tr::now); } },
+	{ Action::OpenMainMenu, "open-main-menu",
+		[] { return tr::lng_main_menu(tr::now); } },
+	{ Action::OpenSettings, "open-settings",
+		[] { return tr::lng_menu_settings(tr::now); } },
+	{ Action::OpenSavedMessages, "open-saved-messages",
+		[] { return tr::lng_saved_messages(tr::now); } },
+	{ Action::OpenArchive, "open-archived-chats",
+		[] { return tr::lng_shortcuts_archive(tr::now); } },
+	{ Action::OpenContacts, "open-contacts",
+		[] { return tr::lng_shortcuts_contacts(tr::now); } },
+	{ Action::OpenScheduled, "open-scheduled-messages",
+		[] { return tr::lng_scheduled_messages(tr::now); } },
+	{ Action::OpenChatMenu, "open-chat-menu",
+		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
+	{ Action::PreviewChat, "preview-chat",
+		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -120,6 +150,16 @@ const Binding kBindings[] = {
 	{ Action::NextFolder, { Qt::Key_BracketRight, Qt::Key_F } },
 	{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } },
 	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
+	{ Action::Search, { Qt::Key_Slash } },
+	{ Action::Search, { Qt::Key_Space, Qt::Key_S, Qt::Key_S } },
+	{ Action::OpenMainMenu, { Qt::Key_Space, Qt::Key_O, Qt::Key_M } },
+	{ Action::OpenSettings, { Qt::Key_Space, Qt::Key_O, Qt::Key_T } },
+	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S } },
+	{ Action::OpenArchive, { Qt::Key_Space, Qt::Key_O, Qt::Key_A } },
+	{ Action::OpenContacts, { Qt::Key_Space, Qt::Key_O, Qt::Key_C } },
+	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
+	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
+	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -171,10 +211,14 @@ struct Target {
 	Dialogs::InnerWidget *list = nullptr;
 	MessageHints::Target messages;
 	bool folders = false;
+	bool chatActions = false;
 };
 
 Target FindTarget(Window::SessionController *owner, QWidget *focus) {
-	const auto forSection = [=](auto *section, bool scheduled = false) {
+	const auto forSection = [=](
+			auto *section,
+			bool scheduled = false,
+			bool chatActions = false) {
 		const auto list = (section->controller() == owner)
 			? section->purpleMessageList(focus)
 			: nullptr;
@@ -182,6 +226,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 			? Target{
 				.focus = focus,
 				.messages = { .section = list, .scheduled = scheduled },
+				.chatActions = chatActions,
 			}
 			: Target();
 	};
@@ -206,11 +251,12 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 				? Target{
 					.focus = focus,
 					.messages = { .main = history->purpleMessageList() },
+					.chatActions = true,
 				}
 				: Target();
 		}
 		if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(widget)) {
-			return forSection(chat);
+			return forSection(chat, false, true);
 		}
 		if (const auto pinned = dynamic_cast<HistoryView::PinnedWidget*>(widget)) {
 			return forSection(pinned);
@@ -226,24 +272,24 @@ bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::PreviousChat:
 	case Action::NextChat:
+	case Action::PreviewChat:
 	case Action::OpenChat: return target.list != nullptr;
 	case Action::PreviousFolder:
 	case Action::NextFolder: return target.folders;
 	case Action::SelectMessage:
 	case Action::CopyMessage: return bool(target.messages);
+	case Action::Search: return !target.messages.scheduled;
+	case Action::OpenScheduled: return target.chatActions;
+	case Action::OpenChatMenu: return target.list || target.chatActions;
 	default: return true;
 	}
 }
 
 bool IsSearchableAction(Action action) {
-	return action == Action::Backgrounds
-		|| action == Action::PreviousChat
-		|| action == Action::NextChat
-		|| action == Action::OpenChat
-		|| action == Action::PreviousFolder
-		|| action == Action::NextFolder
-		|| action == Action::SelectMessage
-		|| action == Action::CopyMessage;
+	return action != Action::Help
+		&& action != Action::Run
+		&& action != Action::DescribeChord
+		&& action != Action::DescribeCommand;
 }
 
 QString CommandDetail(const Command &command) {
@@ -307,10 +353,20 @@ void PaletteBox(
 		std::vector<const Command*>>();
 	const auto render = [=] {
 		auto lines = QStringList();
-		for (auto i = 0; i != int(matches->size()); ++i) {
+		const auto count = int(matches->size());
+		const auto first = std::clamp(
+			*index - kPaletteRows / 2, 0, std::max(count - kPaletteRows, 0));
+		const auto till = std::min(first + kPaletteRows, count);
+		if (first > 0) {
+			lines.push_back(u"↑"_q);
+		}
+		for (auto i = first; i != till; ++i) {
 			const auto command = (*matches)[i];
 			lines.push_back((i == *index ? u"› "_q : u"  "_q)
 				+ command->label() + u"    "_q + BindingsLabel(command->action));
+		}
+		if (till < count) {
+			lines.push_back(u"↓"_q);
 		}
 		if (!matches->empty()) {
 			lines.push_back(u"\n"_q
@@ -504,7 +560,8 @@ KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 		return KeyUse::ExitNormal;
 	} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 		return KeyUse::Pass;
-	} else if (!mods || (key == Qt::Key_Question && mods == Qt::ShiftModifier)) {
+	} else if (!mods || ((key == Qt::Key_Question || key == Qt::Key_Slash)
+			&& mods == Qt::ShiftModifier)) {
 		const auto nextBinding = ranges::any_of(
 			kBindings,
 			[&](const Binding &binding) {
@@ -651,6 +708,10 @@ void Keys::showWhichKey() {
 			? FindCommand(binding.action).label()
 			: (next == Qt::Key_C)
 			? tr::lng_purple_keys_group_chat(tr::now)
+			: (next == Qt::Key_O)
+			? tr::lng_purple_keys_group_open(tr::now)
+			: (next == Qt::Key_S && _prefix == Chord{ Qt::Key_Space })
+			? tr::lng_shortcuts_search(tr::now)
 			: (next == Qt::Key_S)
 			? tr::lng_purple_keys_group_messages(tr::now)
 			: tr::lng_purple_keys_help(tr::now);
@@ -692,6 +753,9 @@ void Keys::stroke(int key, const Target &target) {
 			}
 		} else if (Available(binding.action, target)) {
 			dispatch(binding.action, target);
+		} else {
+			Ui::Toast::Show(_window,
+				tr::lng_purple_keys_action_unavailable(tr::now));
 		}
 		return;
 	}
@@ -705,9 +769,16 @@ void Keys::stroke(int key, const Target &target) {
 
 void Keys::dispatch(Action action, const Target &target) {
 	const auto current = owner();
-	if (!current || !Available(action, target)) {
+	if (!current || !target.focus || !Available(action, target)) {
 		return;
 	}
+	using Native = Shortcuts::Command;
+	const auto launch = [window = QPointer(_window.get())](Native native) {
+		if (!Shortcuts::Launch(std::vector<Native>{ native }) && window) {
+			Ui::Toast::Show(window.data(),
+				tr::lng_purple_keys_action_unavailable(tr::now));
+		}
+	};
 	switch (action) {
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
@@ -726,6 +797,33 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::NextFolder:
 		Window::CheckAndJumpToNearChatsFilter(
 			current, action == Action::NextFolder, true);
+		break;
+	case Action::Search:
+		launch(Native::Search);
+		break;
+	case Action::OpenMainMenu:
+		_window->showMainMenu();
+		break;
+	case Action::OpenSettings:
+		current->showSettings();
+		break;
+	case Action::OpenSavedMessages:
+		current->showPeerHistory(current->session().user());
+		break;
+	case Action::OpenArchive:
+		launch(Native::ShowArchive);
+		break;
+	case Action::OpenContacts:
+		launch(Native::ShowContacts);
+		break;
+	case Action::OpenScheduled:
+		launch(Native::ShowScheduled);
+		break;
+	case Action::OpenChatMenu:
+		launch(Native::ShowChatMenu);
+		break;
+	case Action::PreviewChat:
+		launch(Native::ShowChatPreview);
 		break;
 	case Action::SelectMessage:
 	case Action::CopyMessage: {

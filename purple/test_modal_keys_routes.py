@@ -63,6 +63,22 @@ ordered(dispatch, "Qt::Key_Down : Qt::Key_Up", "processKeyDispatch",
         "case Action::OpenChat:", "chooseRow()")
 assert re.search(r'\{ Action::Backgrounds, "chat-backgrounds-visibility-toggle"', keys)
 assert "{ Action::Backgrounds, { Qt::Key_Space, Qt::Key_C, Qt::Key_B } }" in keys
+stock_launch = between(read("core/shortcuts.cpp"),
+                       "bool Launch(std::vector<Command>", "rpl::producer<not_null<Request*>>")
+ordered(stock_launch, "if (Paused)", "return false;", "RequestHandler", "handler()")
+ordered(dispatch, "!current || !target.focus || !Available",
+        "Shortcuts::Launch(std::vector<Native>{ native })",
+        "lng_purple_keys_action_unavailable", "switch (action)")
+for action, native in (
+        ("Search", "Search"), ("OpenArchive", "ShowArchive"),
+        ("OpenContacts", "ShowContacts"), ("OpenScheduled", "ShowScheduled"),
+        ("OpenChatMenu", "ShowChatMenu"), ("PreviewChat", "ShowChatPreview")):
+    assert re.search(
+        rf"case Action::{action}:\s+launch\(Native::{native}\);", dispatch)
+bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \} \},", keys)
+chords = [tuple(keys.split(", ")) for _, keys in bindings]
+assert len(set(chords)) == len(chords)
+assert not any(a != b and b[:len(a)] == a for a in chords for b in chords)
 
 painter = read("window/section_widget.cpp")
 ordered(painter, "Purple::PaintHiddenChatBackground", "theme->background().giftId",

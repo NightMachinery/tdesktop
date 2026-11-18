@@ -17,6 +17,8 @@ the numbers.
 
 - `core/application.cpp`: key admission, shortcut override, paired key release,
   window deactivation, and IME hooks delegate to Purple's per-window state.
+- `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
+  modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
   adapters expose the existing dialogs cursor and eligible history controls.
 - `history/history_inner_widget.*`: visible message enumeration and geometry

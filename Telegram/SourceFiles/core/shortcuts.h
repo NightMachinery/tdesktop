@@ -146,6 +146,7 @@ void Finish();
 void Listen(not_null<QWidget*> widget);
 
 bool Launch(Command command);
+bool Launch(std::vector<Command> commands);
 bool HandleEvent(not_null<QObject*> object, not_null<QShortcutEvent*> event);
 
 bool HandlePossibleChatSwitch(not_null<QKeyEvent*> event);
