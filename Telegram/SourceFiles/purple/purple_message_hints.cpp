@@ -6,8 +6,10 @@
 #include "data/data_session.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item.h"
+#include "history/history_item_helpers.h"
 #include "history/history_item_text.h"
 #include "history/history_widget.h"
+#include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/view/media/history_view_media.h"
@@ -44,6 +46,12 @@ public:
 	const not_null<HistoryItem*> item;
 
 };
+
+bool CanCopyMessageLink(not_null<HistoryItem*> item) {
+	return IsServerMsgId(item->id)
+		&& item->hasDirectLink()
+		&& !IsAnchoredEphemeral(item);
+}
 
 constexpr auto kHintLetters = std::u16string_view(u"asdfghjkl");
 
@@ -169,6 +177,10 @@ bool MessageHints::eligible(
 		}
 	} else if (!IsServerMsgId(item->id) || !item->isRegular()) {
 		return false;
+	}
+
+	if (_action == Action::Link) {
+		return !source.scheduled && CanCopyMessageLink(item);
 	}
 
 	const auto main = source.main;
@@ -411,6 +423,22 @@ void MessageHints::apply(
 		not_null<HistoryItem*> item,
 		Action action,
 		QPoint point) {
+	if (action == Action::Link) {
+		if (view.scheduled || !CanCopyMessageLink(item)) {
+			return;
+		}
+		const auto controller = view.main
+			? view.main->_widget->controller()
+			: view.section->controller();
+		if (&controller->session() != &view.session()) {
+			return;
+		}
+		const auto context = view.main
+			? HistoryView::Context::History
+			: view.section->elementContext();
+		HistoryView::CopyPostLink(controller, item->fullId(), context);
+		return;
+	}
 	if (action == Action::Menu) {
 		const auto widget = view.widget();
 		if (!widget->isVisible() || !widget->visibleRegion().contains(point)) {

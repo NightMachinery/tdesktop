@@ -36,6 +36,9 @@ Telegram typing and input-method behavior.
   group behavior.
   Scrolling or changing chats dismisses the labels, as do `Esc` and `Ctrl+G`.
   Scheduled messages become eligible after Telegram confirms them.
+- `g s l` copies the link to a visible message when Telegram offers a
+  message link. Private channel and reply links follow the same rules as
+  the context menu.
   `g s m` opens the native menu for a hinted message. Use the menu to reply,
   forward, or copy a message link when those actions are available.
 - `SPC a 1` through `SPC a 6` switch to another signed-in account in the

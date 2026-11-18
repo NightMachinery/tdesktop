@@ -28,7 +28,7 @@ namespace Purple {
 
 class MessageHints final {
 public:
-	enum class Action { Select, Copy, Menu };
+	enum class Action { Select, Copy, Menu, Link };
 
 	enum class Input { Pending, Finished, Unknown };
 

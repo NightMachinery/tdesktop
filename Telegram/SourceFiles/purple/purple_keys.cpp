@@ -76,6 +76,7 @@ enum class Action {
 	SelectMessage,
 	CopyMessage,
 	MessageMenu,
+	CopyMessageLink,
 	Search,
 	OpenMainMenu,
 	OpenSettings,
@@ -188,6 +189,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_history_page_older(tr::now); } },
 	{ Action::NewerMessagesPage, "history-page-newer",
 		[] { return tr::lng_purple_keys_history_page_newer(tr::now); } },
+	{ Action::CopyMessageLink, "message-hint-copy-link",
+		[] { return tr::lng_purple_keys_message_link(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -217,6 +220,7 @@ const Binding kBindings[] = {
 	{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } },
 	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
 	{ Action::MessageMenu, { Qt::Key_G, Qt::Key_S, Qt::Key_M } },
+	{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } },
 	{ Action::Search, { Qt::Key_Slash } },
 	{ Action::Search, { Qt::Key_Space, Qt::Key_S, Qt::Key_S } },
 	{ Action::OpenMainMenu, { Qt::Key_Space, Qt::Key_O, Qt::Key_M } },
@@ -411,6 +415,8 @@ bool Available(Action action, const Target &target) {
 	case Action::SelectMessage:
 	case Action::CopyMessage:
 	case Action::MessageMenu: return bool(target.messages);
+	case Action::CopyMessageLink:
+		return target.messages && !target.messages.scheduled;
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage: return HistoryScroll(target) != nullptr;
 	case Action::Search: return !target.messages.scheduled;
@@ -1043,11 +1049,16 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::SelectMessage:
 	case Action::CopyMessage:
-	case Action::MessageMenu: {
+	case Action::MessageMenu:
+	case Action::CopyMessageLink: {
 		using Hint = MessageHints::Action;
 		const auto hint = (action == Action::CopyMessage)
 			? Hint::Copy
-			: (action == Action::MessageMenu) ? Hint::Menu : Hint::Select;
+			: (action == Action::MessageMenu)
+			? Hint::Menu
+			: (action == Action::CopyMessageLink)
+			? Hint::Link
+			: Hint::Select;
 		if (_hints.start(target.messages, hint)) {
 			_normal = true;
 		} else {
@@ -1055,6 +1066,8 @@ void Keys::dispatch(Action action, const Target &target) {
 				? tr::lng_purple_keys_message_copy_empty(tr::now)
 				: (hint == Hint::Menu)
 				? tr::lng_purple_keys_message_menu_empty(tr::now)
+				: (hint == Hint::Link)
+				? tr::lng_purple_keys_message_link_empty(tr::now)
 				: tr::lng_purple_keys_message_select_empty(tr::now);
 			Ui::Toast::Show(_window, text);
 		}

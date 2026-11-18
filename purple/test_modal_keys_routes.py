@@ -171,6 +171,21 @@ ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
         "Iv::SetRichBlocksClipboard", "section->_purpleKeepSelectionFocus, true",
         "gsl::finally", "section->selectItemAsGroup(item)")
 
+assert "{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } }" in keys
+ordered(available, "case Action::CopyMessageLink:",
+        "target.messages && !target.messages.scheduled")
+ordered(dispatch, "case Action::CopyMessageLink:", "? Hint::Link", "_hints.start")
+link_policy = between(hints, "bool CanCopyMessageLink", "constexpr auto kHintLetters")
+ordered(link_policy, "IsServerMsgId(item->id)", "item->hasDirectLink()",
+        "!IsAnchoredEphemeral(item)")
+link_eligible = between(hints, "if (_action == Action::Link)", "auto total =")
+ordered(link_eligible, "!source.scheduled", "CanCopyMessageLink(item)")
+link_apply = between(apply, "if (action == Action::Link)", "if (action == Action::Menu)")
+ordered(link_apply, "view.scheduled || !CanCopyMessageLink(item)",
+        "view.main->_widget->controller()", "view.section->controller()",
+        "&controller->session() != &view.session()", "HistoryView::Context::History",
+        "view.section->elementContext()", "HistoryView::CopyPostLink(controller, item->fullId(), context)")
+
 scope = between(keys, "Target FindTarget", "bool Available")
 ordered(scope, "section->controller() == owner", "section->purpleMessageList(focus)",
         "HistoryView::ChatWidget", "HistoryView::PinnedWidget", "HistoryView::ScheduledWidget",
