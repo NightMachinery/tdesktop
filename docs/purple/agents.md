@@ -63,6 +63,10 @@ client:
 - Work in your own worktree under the scratch volume. Never switch the
   branch of the owner's main checkout, and never keep a worktree in a folder
   the owner empties at will (a "delete-me" folder).
+- Create a self-contained scratch clone when sharing objects with another
+  repository. Use `git clone --reference <repo> --dissociate` and verify
+  connectivity with `git fsck --connectivity-only` before relying on the clone.
+  Treat partial submodule metadata stores as release evidence.
 - Several workers share one compiler. Hold the machine-wide compiler hold only
   while compiling or linking, release it during runtime-only test phases, and
   queue with `--wait` rather than asking for a window. Owner-reported bug fixes
