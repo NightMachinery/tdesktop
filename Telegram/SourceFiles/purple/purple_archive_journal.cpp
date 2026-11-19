@@ -434,7 +434,10 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 				  && std::any_of(message->receipts.begin(), message->receipts.end(),
 					  [&](const auto &receipt) { return receipt.id == event.id; }));
 		if (!committed) {
-			const auto captured = store.Capture(event);
+			auto captured = store.Capture(event);
+			if (captured.retryableObservationCommit) {
+				captured = store.Capture(event);
+			}
 			if (!captured.retained && captured.model != ArchivePlanStatus::Stale
 				&& captured.model != ArchivePlanStatus::Purged
 				&& captured.model != ArchivePlanStatus::NotFound) {

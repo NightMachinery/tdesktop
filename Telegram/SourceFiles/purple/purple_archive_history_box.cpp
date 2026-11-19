@@ -28,12 +28,13 @@
 namespace Purple {
 namespace {
 
-QString Preview(const ArchiveVersionSnapshot &snapshot) {
+QString Preview(const ArchiveVersionSnapshot &snapshot, bool observation = false) {
 	const auto &version = snapshot.version;
 	auto result
 		= QDateTime::fromSecsSinceEpoch(version.firstObservedAt).toString(Qt::ISODate)
 		  + u"\n"_q;
-	result += version.origin == ArchiveOrigin::AuthoritativeEdit
+	result += observation ? tr::lng_purple_archive_observation_unknown(tr::now)
+				  : version.origin == ArchiveOrigin::AuthoritativeEdit
 				  ? tr::lng_purple_archive_edit(tr::now)
 				  : tr::lng_purple_archive_baseline(tr::now);
 	result += u"\n"_q
@@ -95,6 +96,7 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 			bool loading = false;
 			bool refresh = false;
 			bool closed = false;
+			bool observations = false;
 			std::vector<QPointer<Ui::RoundButton>> attachments;
 			QPointer<Ui::RoundButton> next;
 			Fn<void()> load;
@@ -205,6 +207,10 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 					auto previews = QStringList();
 					auto versionIndex = size_t(0);
 					for (const auto &version : page.versions) {
+						if (state->observations) {
+							previews.push_back(Preview(version, true));
+							continue;
+						}
 						previews.push_back(QString::number(versionIndex + 1) + u". "_q + Preview(version));
 						const auto digest = versionIndex < page.markdownDigests.size()
 							? page.markdownDigests[versionIndex] : QString();
@@ -262,7 +268,8 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 						}
 					}
 					const auto body = previews.empty()
-										  ? tr::lng_purple_archive_history_empty(tr::now)
+										  ? (state->observations ? tr::lng_purple_archive_observation_empty(tr::now)
+												: tr::lng_purple_archive_history_empty(tr::now))
 										  : previews.join(u"\n\n────────\n\n"_q);
 					label->setText(
 						(page.hasGap ? tr::lng_purple_archive_gap(tr::now) + u"\n\n"_q
@@ -271,8 +278,29 @@ void ShowHistory(not_null<Window::SessionController*> controller, ArchiveMessage
 					if (state->next) {
 						state->next->setDisabled(!page.more);
 					}
-				}, state->history);
+				}, state->history, state->observations);
 		};
+		const auto modeButton = box->addLeftButton(tr::lng_purple_archive_observations());
+		modeButton->setClickedCallback([=] {
+			if (!current() || state->loading) {
+				return;
+			}
+			state->observations = !state->observations;
+			state->refresh = true;
+			box->setTitle(state->observations
+				? tr::lng_purple_archive_observations()
+				: tr::lng_purple_archive_history());
+			modeButton->setText(state->observations
+				? tr::lng_purple_archive_history() : tr::lng_purple_archive_observations());
+			state->next->setText(state->observations
+				? tr::lng_purple_archive_observation_next() : tr::lng_purple_archive_older());
+			for (const auto &button : state->attachments) {
+				delete button.data();
+			}
+			state->attachments.clear();
+			label->setText(tr::lng_purple_archive_opening(tr::now));
+			state->load();
+		});
 		state->next
 			= box->addButton(tr::lng_purple_archive_older(), [=] { state->load(); });
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });

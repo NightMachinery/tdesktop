@@ -107,6 +107,50 @@ const T* Value(const std::vector<ArchiveSqlValue> &row, size_t index) {
 	return index < row.size() ? std::get_if<T>(&row[index]) : nullptr;
 }
 
+bool CheckObservationUpgrade(DesktopArchiveSqlite &database,
+		const ArchiveSqlObservationUpgradePlan &upgrade) {
+	return upgrade && std::all_of(upgrade.preflight.begin(), upgrade.preflight.end(),
+		[&](const auto &guard) { return database.Read(guard).ok; });
+}
+
+ArchiveSqlObservationUpgradePlan ProbeObservationUpgrade(
+		DesktopArchiveSqlite &database,
+		const AccountKey &account,
+		const ArchiveSqlSecurity &security) {
+	if (!database.BeginRead()) {
+		return {};
+	}
+	auto upgrade = [&] {
+		const auto metadata = database.Read({
+			u"SELECT maintenance_id,envelope FROM archive_meta WHERE singleton=1"_q,
+			{}, ArchiveSqlExpectation::OneRow });
+		if (!metadata.ok || metadata.rows.size() != 1 || metadata.rows.front().size() != 2) {
+			return ArchiveSqlObservationUpgradePlan();
+		}
+		const auto &row = metadata.rows.front();
+		const auto marker = Value<QString>(row, 0);
+		const auto header = Value<QByteArray>(row, 1);
+		if (!marker || !header) {
+			return ArchiveSqlObservationUpgradePlan();
+		}
+		auto maintenance = QByteArray();
+		if (!marker->isEmpty()) {
+			const auto pending = database.Read({
+				u"SELECT envelope FROM maintenance WHERE singleton=1"_q,
+				{}, ArchiveSqlExpectation::OneRow });
+			const auto envelope = pending.ok && pending.rows.size() == 1
+				&& pending.rows.front().size() == 1 ? Value<QByteArray>(pending.rows.front(), 0) : nullptr;
+			if (!envelope) {
+				return ArchiveSqlObservationUpgradePlan();
+			}
+			maintenance = *envelope;
+		}
+		auto plan = PlanArchiveSqlObservationUpgrade(account, *header, security, *marker, maintenance);
+		return CheckObservationUpgrade(database, plan) ? std::move(plan) : ArchiveSqlObservationUpgradePlan();
+	}();
+	return database.EndRead() ? std::move(upgrade) : ArchiveSqlObservationUpgradePlan();
+}
+
 struct Layout {
 	QString profile;
 	QString profileDirectory;
@@ -1125,18 +1169,40 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 		self.Fail(DesktopArchiveStatus::Invalid, u"database-schema"_q);
 		return self.status;
 	}
-	if (!initialize && !self.RequireAdmission()) {
-		return self.status;
+	auto observationUpgrade = ArchiveSqlObservationUpgradePlan();
+	if (!initialize) {
+		const auto admission = self.Admit();
+		if (admission == ArchiveSqlStatus::SchemaMismatch && self.Authorized()) {
+			observationUpgrade = ProbeObservationUpgrade(self.database, options.account, self.security);
+		}
+		if (admission != ArchiveSqlStatus::Ready && !observationUpgrade && !self.RequireAdmission()) {
+			return self.status;
+		}
 	}
 	if (!self.database.Close() || !self.database.Open(databasePath, false).ok) {
 		self.Fail(DesktopArchiveStatus::IoError, u"database-reopen"_q);
 		return self.status;
 	}
-	if (!initialize && !self.RequireAdmission()) {
+	if (observationUpgrade) {
+		if (!self.Authorized() || !self.database.BeginRead()) {
+			self.Fail(DesktopArchiveStatus::Unreadable, u"observation-upgrade-authority"_q);
+			return self.status;
+		}
+		const auto valid = CheckObservationUpgrade(self.database, observationUpgrade);
+		if (!self.database.EndRead() || !valid || !self.Authorized()) {
+			self.Fail(DesktopArchiveStatus::SchemaMismatch, u"observation-upgrade-changed"_q);
+			return self.status;
+		}
+	} else if (!initialize && !self.RequireAdmission()) {
 		return self.status;
 	}
 	if (!self.database.Configure().ok) {
 		self.Fail(DesktopArchiveStatus::IoError, u"database-configure"_q);
+		return self.status;
+	}
+	if (observationUpgrade && (!self.Authorized()
+		|| !self.database.Execute(observationUpgrade.program, [&] { return self.Authorized(); }).committed)) {
+		self.Fail(DesktopArchiveStatus::IoError, u"observation-upgrade-commit"_q);
 		return self.status;
 	}
 	if (initialize) {
@@ -1826,6 +1892,46 @@ std::optional<ArchiveSqlSlice> DesktopArchiveStore::ReadSlice(
 	return ended && Current() ? result : std::nullopt;
 }
 
+std::optional<ArchiveVersionSnapshot> DesktopArchiveStore::ReadUnorderedObservation(
+		const ArchiveMessageKey &key, const QString &id) {
+	auto &self = *_impl;
+	if (!Current() || key.account != self.options.account || !self.database.BeginRead()) {
+		return {};
+	}
+	const auto decoded = ReadObservationInTransaction(key, id);
+	return self.database.EndRead() && Current() ? decoded : std::nullopt;
+}
+
+std::optional<ArchiveVersionSnapshot> DesktopArchiveStore::ReadObservationInTransaction(
+		const ArchiveMessageKey &key, const QString &id) {
+	auto &self = *_impl;
+	const auto record = self.database.Read(ArchiveSqlReadUnorderedObservation(key, id, self.security));
+	if (!record.ok || record.rows.size() != 1 || record.rows.front().size() != 3) {
+		return {};
+	}
+	const auto &row = record.rows.front();
+	const auto order = Value<QString>(row, 0);
+	const auto bytes = Value<int64>(row, 1);
+	const auto header = Value<QByteArray>(row, 2);
+	if (!order || !bytes || !header) {
+		return {};
+	}
+	const auto data = self.database.Read(ArchiveSqlReadUnorderedObservationChunks(key, id, *bytes, self.security));
+	if (!data.ok) {
+		return {};
+	}
+	auto chunks = std::vector<QByteArray>();
+	for (const auto &chunk : data.rows) {
+		const auto index = Value<int64>(chunk, 0);
+		const auto envelope = Value<QByteArray>(chunk, 1);
+		if (chunk.size() != 2 || !index || *index != int64(chunks.size()) || !envelope) {
+			return {};
+		}
+		chunks.push_back(*envelope);
+	}
+	return RestoreArchiveSqlUnorderedObservation(key, id, *order, *bytes, *header, chunks, self.security);
+}
+
 DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 	auto result = DesktopArchiveCaptureResult();
 	const auto slice = ReadSlice(event.key, event.id, event.targetVersion);
@@ -1840,6 +1946,22 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 	const auto plan
 		= PlanDesktopArchiveMarkdownCapture(*slice, event, _impl->security, &_impl->epoch);
 	result.model = plan.transaction.status;
+	if (result.model == ArchivePlanStatus::Stale) {
+		const auto observation = PlanArchiveSqlUnorderedObservation(slice->state, event, _impl->security);
+		if (observation && (ReadUnorderedObservation(event.key, observation.id) || Execute(observation.program))) {
+			result.model = ArchivePlanStatus::Ready;
+			result.status = DesktopArchiveStatus::Ready;
+			result.retained = true;
+			return result;
+		}
+		if (observation || observation.program.status == ArchiveSqlStatus::EncodingFailed) {
+			result.model = ArchivePlanStatus::Invalid;
+			result.status = DesktopArchiveStatus::IoError;
+			result.reason = u"observation-commit"_q;
+			result.retryableObservationCommit = true;
+			return result;
+		}
+	}
 	if (plan.program.status == ArchiveSqlStatus::RetentionGap) {
 		result.status = DesktopArchiveStatus::RetentionGap;
 		result.reason = plan.program.retentionGapReason;
@@ -1871,6 +1993,11 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 
 DesktopArchiveHistoryPage DesktopArchiveStore::Versions(const ArchiveMessageKey &key,
 	int limit, const QString &beforeOrder, std::optional<uint64_t> revision) {
+	return ReadHistoryPage(key, limit, beforeOrder, revision, false);
+}
+
+DesktopArchiveHistoryPage DesktopArchiveStore::ReadHistoryPage(const ArchiveMessageKey &key,
+	int limit, const QString &beforeOrder, std::optional<uint64_t> revision, bool observations) {
 	auto result = DesktopArchiveHistoryPage();
 	auto &self = *_impl;
 	result.epoch = self.epoch;
@@ -1902,6 +2029,22 @@ DesktopArchiveHistoryPage DesktopArchiveStore::Versions(const ArchiveMessageKey 
 		if (revision && *revision != result.revision) {
 			result.status = DesktopArchiveStatus::Stale;
 			return false;
+		}
+		if (observations) {
+			const auto read = self.database.Read(ArchiveSqlListUnorderedObservations(key, beforeOrder, self.security));
+			if (!read.ok || read.rows.empty()) {
+				return read.ok;
+			}
+			const auto order = Value<QString>(read.rows.front(), 0);
+			const auto id = Value<QString>(read.rows.front(), 1);
+			auto snapshot = id ? ReadObservationInTransaction(key, *id) : std::nullopt;
+			if (!order || !snapshot || *order != ArchiveSqlOrder(snapshot->version.order)) {
+				return false;
+			}
+			result.beforeOrder = *order + '/' + *id;
+			result.versions.push_back(std::move(*snapshot));
+			result.more = read.rows.size() == 2;
+			return true;
 		}
 		const auto read = self.database.Read(
 			ArchiveSqlReadVersions(key, limit, self.security, beforeOrder));
@@ -3176,7 +3319,7 @@ namespace Purple {
 
 DesktopArchiveHistoryPage DesktopArchiveStore::History(const ArchiveMessageKey &key,
 		int limit, const QString &beforeOrder, std::optional<uint64_t> revision,
-		const QString &id, std::function<void()> revoked) {
+		const QString &id, std::function<void()> revoked, bool observations) {
 	auto &self = *_impl;
 	ExpireHistory();
 	auto found = self.histories.find(id);
@@ -3186,7 +3329,7 @@ DesktopArchiveHistoryPage DesktopArchiveStore::History(const ArchiveMessageKey &
 		result.status = DesktopArchiveStatus::Stale;
 		return result;
 	}
-	auto page = Versions(key, limit, beforeOrder, revision);
+	auto page = ReadHistoryPage(key, limit, beforeOrder, revision, observations);
 	if (id.isEmpty() && page.status == DesktopArchiveStatus::Ready) {
 		if (self.histories.size() >= 64) {
 			page.versions.clear();

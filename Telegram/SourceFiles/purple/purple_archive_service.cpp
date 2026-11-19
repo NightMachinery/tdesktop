@@ -1412,7 +1412,7 @@ rpl::producer<> ArchiveStorageChanges() { return Changes.events(); }
 
 void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key,
 		QString before, std::optional<uint64_t> revision,
-		Fn<void(DesktopArchiveHistoryPage)> done, QString history) {
+		Fn<void(DesktopArchiveHistoryPage)> done, QString history, bool observations) {
 	if (Retired.contains(session.get())) {
 		done({});
 		return;
@@ -1423,7 +1423,7 @@ void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key
 	const auto worker = value.worker;
 	const auto fence = worker->DeliveryFence();
 	const auto accepted = worker->Post([key = std::move(key), before = std::move(before),
-		revision, weak, done, journal, fence, worker, history = std::move(history)](DesktopArchiveStore &store) {
+		revision, weak, done, journal, fence, worker, history = std::move(history), observations](DesktopArchiveStore &store) {
 		const auto ticket = fence->load();
 		const auto revoked = [weak] {
 			crl::on_main([weak] {
@@ -1433,9 +1433,11 @@ void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key
 			});
 		};
 		auto page = journal && !journal->Drain(store) ? DesktopArchiveHistoryPage()
-			: store.History(key, 32, before, revision, history, revoked);
-		for (const auto &version : page.versions) {
-			page.markdownDigests.push_back(DesktopArchiveMarkdownDigest(version));
+			: store.History(key, 32, before, revision, history, revoked, observations);
+		if (!observations) {
+			for (const auto &version : page.versions) {
+				page.markdownDigests.push_back(DesktopArchiveMarkdownDigest(version));
+			}
 		}
 		if (page.active) {
 			worker->RevokeOnStop(page.active);

@@ -36,6 +36,112 @@ DesktopArchiveOptions Options(const QString &root, int64 account = 123) {
 	return options;
 }
 
+#include "test_archive_legacy_schema.inc"
+
+void ObservationUpgradeOnOpen(bool interrupted, bool invalidSchema) {
+	Section = invalidSchema ? "archive open refuses modified legacy schema"
+		: interrupted ? "archive open upgrades and resumes interrupted maintenance"
+		: "archive open upgrades valid legacy data";
+	const auto directory = QTemporaryDir();
+	const auto options = Options(directory.path());
+	auto store = DesktopArchiveStore();
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	if (!store.Current()) {
+		return;
+	}
+	CHECK(store.Capture(Event(Empty(), u"legacy-version"_q, 2, u"original history"_q)).retained);
+	CHECK(store.Gap(u"legacy-gap"_q, u"prior-gap"_q, 10));
+	const auto original = store.Versions(Key());
+	CHECK(original.versions.size() == 1 && original.hasGap);
+	const auto sqlitePath = store.directory() + u"/archive.sqlite"_q;
+	const auto epoch = store.epoch();
+	if (interrupted) {
+		const auto preview = store.PreparePurge(ArchivePurgeKind::Trashbin, { options.account });
+		CHECK(preview.confirmation);
+		if (!preview.confirmation) { return; }
+		CHECK(store.BeginPurge(*preview.confirmation));
+		CHECK(store.ContinuePurge().valid);
+		CHECK(store.MaintenancePending());
+	}
+	const auto oldHeader = store.database().Read({
+		u"SELECT account_token,store_id,revision,generation,maintenance_id,envelope FROM archive_meta"_q,
+		{}, ArchiveSqlExpectation::OneRow });
+	CHECK(oldHeader.ok);
+	auto maintenance = ArchiveSqlStatement{
+		u"SELECT operation_id,kind,scope_token,phase,cursor,envelope FROM maintenance"_q,
+		{}, ArchiveSqlExpectation::Rows };
+	const auto checkpoint = store.database().Read(maintenance);
+	CHECK(checkpoint.ok && checkpoint.rows.size() == (interrupted ? 1 : 0));
+	const auto legacyFingerprint = ArchiveSqlSchemaFingerprint(LegacySchema());
+	auto down = ArchiveSqlProgram{ ArchiveSqlStatus::Ready };
+	down.statements = {
+		{ u"BEGIN IMMEDIATE"_q },
+		{ u"DROP TABLE observation_chunks"_q },
+		{ u"DROP TABLE observations"_q },
+		{ u"UPDATE archive_meta SET schema_version=2,schema_fingerprint=?"_q,
+			{ legacyFingerprint }, ArchiveSqlExpectation::OneChange },
+		{ u"COMMIT"_q },
+	};
+	CHECK(store.database().Execute(down).committed);
+	if (invalidSchema) {
+		CHECK(store.database().Execute({ ArchiveSqlStatus::Ready, {
+			{ u"BEGIN IMMEDIATE"_q },
+			{ u"DROP INDEX gap_order"_q },
+			{ u"CREATE INDEX gap_order ON capture_gaps(gap_id)"_q },
+			{ u"COMMIT"_q },
+		} }).committed);
+	}
+	CHECK(store.Close());
+	auto reopened = DesktopArchiveStore();
+	const auto result = reopened.Open(options);
+	if (invalidSchema) {
+		CHECK(result == DesktopArchiveStatus::SchemaMismatch);
+		CHECK(reopened.Close());
+		auto read = DesktopArchiveSqlite();
+		CHECK(read.Open(sqlitePath, false, true).ok);
+		const auto staysLegacy = read.Read({
+			u"SELECT schema_version,schema_fingerprint FROM archive_meta"_q,
+			{}, ArchiveSqlExpectation::OneRow });
+		CHECK(staysLegacy.ok && (staysLegacy.rows == std::vector<std::vector<ArchiveSqlValue>>{
+			{ int64(2), legacyFingerprint } }));
+		const auto noObservations = read.Read({
+			u"SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='observations')"_q,
+			{}, ArchiveSqlExpectation::OneRow });
+		CHECK(noObservations.ok);
+		CHECK(read.Close());
+		return;
+	}
+	CHECK(result == (interrupted ? DesktopArchiveStatus::Maintenance : DesktopArchiveStatus::Ready));
+	if (result != DesktopArchiveStatus::Ready && result != DesktopArchiveStatus::Maintenance) {
+		std::fprintf(stderr, "Open result %d: %s\n", int(result), reopened.failure().toUtf8().constData());
+		return;
+	}
+	const auto upgraded = reopened.database().Read({
+		u"SELECT schema_version,schema_fingerprint FROM archive_meta"_q,
+		{}, ArchiveSqlExpectation::OneRow });
+	CHECK(upgraded.ok && (upgraded.rows == std::vector<std::vector<ArchiveSqlValue>>{
+		{ int64(kArchiveSqlSchemaVersion), ArchiveSqlExpectedSchemaFingerprint() } }));
+	CHECK(reopened.epoch() == epoch);
+	const auto sameHeader = reopened.database().Read({
+		u"SELECT account_token,store_id,revision,generation,maintenance_id,envelope FROM archive_meta"_q,
+		{}, ArchiveSqlExpectation::OneRow });
+	CHECK(sameHeader.ok && sameHeader.rows == oldHeader.rows);
+	const auto sameMaintenance = reopened.database().Read(maintenance);
+	CHECK(sameMaintenance.ok && sameMaintenance.rows == checkpoint.rows);
+	if (interrupted) {
+		for (auto i = 0; i != 8 && reopened.MaintenancePending(); ++i) {
+			CHECK(reopened.ContinuePurge().valid);
+		}
+		CHECK(!reopened.MaintenancePending());
+	}
+	const auto history = reopened.Versions(Key());
+	CHECK(history.versions == original.versions);
+	if (!interrupted) {
+		CHECK(history.hasGap && history.revision == original.revision);
+	}
+	CHECK(reopened.Close());
+}
+
 void KeySetMigrationAndRebind() {
 	Section = "all-DC anchor migration and atomic rebind";
 	auto temporary = QTemporaryDir();
@@ -846,7 +952,7 @@ void ConcurrentAccounts() {
 
 void Refusals() {
 	Section = "read-only refusal and keyless removal";
-	for (const auto version : {int64(3), int64(2147483648LL)}) {
+	for (const auto version : {int64(kArchiveSqlSchemaVersion) + 1, int64(2147483648LL)}) {
 		auto temporary = QTemporaryDir();
 		const auto options = Options(temporary.path());
 		auto store = DesktopArchiveStore();
@@ -1647,9 +1753,19 @@ void CaptureBoundary() {
 	CHECK(!unanchored.observation.context.contains(u"desktopLifecycle"_q)
 		&& !unanchored.observation.context.value(u"desktopSendMetadata"_q).toBool()
 		&& !unanchored.observation.context.value(u"desktopLivePreimage"_q).toBool());
-	CHECK(journal.Append(*reloaded) && journal.Drain(store));
+	store.database().FailForTest(u"commit"_q, 1);
+	const auto failedCommit = store.Capture(unanchored);
+	CHECK(!failedCommit.retained && failedCommit.retryableObservationCommit);
+	const auto noPartialWrite = store.database().Read({
+		u"SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM observations) "
+		"AND NOT EXISTS(SELECT 1 FROM observation_chunks)"_q,
+		{}, ArchiveSqlExpectation::OneRow });
+	CHECK(noPartialWrite.ok);
+	CHECK(journal.Append(*reloaded));
+	store.database().FailForTest(u"commit"_q, 1);
+	CHECK(journal.Drain(store) && journal.failure().isEmpty());
 	const auto page = store.Versions(Key());
-	CHECK(page.versions.size() == 2 && page.hasGap);
+	CHECK(page.versions.size() == 2 && !page.hasGap);
 	CHECK(std::count_if(page.versions.begin(), page.versions.end(), [](const auto &entry) {
 		return entry.version.content.text == u"A"_q;
 	}) == 1);
@@ -1657,16 +1773,153 @@ void CaptureBoundary() {
 		return entry.version.content.text == u"B"_q;
 	}) == 1);
 	const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(16));
-	CHECK(gaps.ok && gaps.rows.size() == 2);
-	auto known = *edited;
-	known.id = u"history-reload-known"_q;
-	known.origin = ArchiveOrigin::Baseline;
-	CHECK(journal.Append(known) && journal.Drain(store));
-	CHECK(store.Versions(Key()).versions.size() == 2);
-	const auto after = store.database().Read(ArchiveSqlReadCaptureGaps(16));
-	CHECK(after.ok && after.rows.size() == gaps.rows.size());
-	std::printf("ARCHIVE_HISTORY_RELOAD stale=%d versions=%zu gaps=%zu\n",
-		int(refused.status == ArchivePlanStatus::Stale), page.versions.size(), gaps.rows.size());
+	CHECK(gaps.ok && gaps.rows.empty());
+	const auto before = store.ReadSlice(Key());
+	CHECK(before);
+	if (!before) { return; }
+	const auto stillCurrent = FindArchiveMessage(before->state, Key());
+	CHECK(stillCurrent && stillCurrent->order == message->order && stillCurrent->versions.back() == message->versions.back());
+	const auto observationRows = ArchiveSqlStatement{
+		u"SELECT observation_id FROM observations ORDER BY order_key,observation_id"_q,
+		{}, ArchiveSqlExpectation::Rows };
+	const auto records = store.database().Read(observationRows);
+	CHECK(records.ok && records.rows.size() == 1 && records.rows.front().size() == 1);
+	if (!records.ok || records.rows.size() != 1 || records.rows.front().size() != 1) { return; }
+	const auto token = std::get<QString>(records.rows.front().front());
+	const auto saved = store.ReadUnorderedObservation(Key(), token);
+	CHECK(saved && saved->version.content.text == u"unanchored reload"_q
+		&& saved->version.observation.payload == reloaded->observation.payload);
+	CHECK(!store.ReadUnorderedObservation(Key({0, 456}), token));
+	auto repeated = *reloaded;
+	repeated.id = u"another-reload"_q;
+	repeated.observation.observedAt += 1;
+	CHECK(journal.Append(repeated) && journal.Drain(store));
+	const auto again = store.database().Read(observationRows);
+	CHECK(again.ok && again.rows == records.rows);
+	CHECK(store.ReadUnorderedObservation(Key(), token) == saved);
+	const auto unchanged = store.ReadSlice(Key());
+	CHECK(unchanged && unchanged->state.revision == before->state.revision);
+
+	const auto largeBody = QString(600000, 'x');
+	const auto large = DesktopArchiveSnapshot({0, 123},
+		WireMessage(largeBody), ArchiveOrigin::Baseline, u"large-reload"_q, 115);
+	CHECK(large && journal.Append(*large) && journal.Drain(store));
+	const auto expanded = store.database().Read(observationRows);
+	CHECK(expanded.ok && expanded.rows.size() == 2);
+	if (!expanded.ok || expanded.rows.size() != 2) { return; }
+	const auto other = std::get<QString>(expanded.rows.back().front());
+	const auto largeSaved = store.ReadUnorderedObservation(Key(), other);
+	CHECK(largeSaved && largeSaved->version.content.text == largeBody);
+	const auto chunkCount = store.database().Read({
+		u"SELECT COUNT(*) FROM observation_chunks WHERE observation_id=?"_q,
+		{ other }, ArchiveSqlExpectation::OneRow });
+	CHECK(chunkCount.ok && !chunkCount.rows.empty()
+		&& std::get<int64>(chunkCount.rows.front().front()) > 1);
+	const auto noNewGap = store.database().Read(ArchiveSqlReadCaptureGaps(16));
+	CHECK(noNewGap.ok && noNewGap.rows.empty());
+	CHECK(store.database().Read({u"UPDATE observations SET bytes=bytes+1 WHERE observation_id=?"_q,
+		{ other }, ArchiveSqlExpectation::OneChange }).ok);
+	CHECK(!store.ReadUnorderedObservation(Key(), other));
+	CHECK(store.database().Read({u"UPDATE observations SET bytes=bytes-1 WHERE observation_id=?"_q,
+		{ other }, ArchiveSqlExpectation::OneChange }).ok);
+	CHECK(store.ReadUnorderedObservation(Key(), other) == largeSaved);
+	auto wrong = unanchored;
+	++wrong.generation.chat;
+	CHECK(!PlanArchiveSqlUnorderedObservation(before->state, wrong, store.security()));
+	auto preimage = unanchored;
+	preimage.observation.context.insert(u"desktopLivePreimage"_q, true);
+	CHECK(!PlanArchiveSqlUnorderedObservation(before->state, preimage, store.security()));
+	auto deleted = before->state;
+	deleted.messages.front().deleted = true;
+	deleted.messages.front().deletionOrigin = ArchiveOrigin::AuthoritativeDelete;
+	CHECK(!PlanArchiveSqlUnorderedObservation(deleted, unanchored, store.security()));
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.ReadUnorderedObservation(Key(), token) == saved);
+	CHECK(store.ReadUnorderedObservation(Key(), other) == largeSaved);
+	CHECK(store.Versions(Key()).versions == page.versions);
+	Section = "authorized pagination of unordered observations";
+	auto revoked = false;
+	const auto pageOne = store.History(Key(), 32, {}, {}, {}, [&] { revoked = true; }, true);
+	CHECK(pageOne.status == DesktopArchiveStatus::Ready && pageOne.more && pageOne.active
+		&& pageOne.active->load() && !pageOne.history.isEmpty());
+	CHECK(pageOne.versions.size() == 1 && pageOne.versions.front() == largeSaved);
+	const auto pageTwo = store.History(Key(), 32, pageOne.beforeOrder, pageOne.revision,
+		pageOne.history, {}, true);
+	CHECK(pageTwo.status == DesktopArchiveStatus::Ready && !pageTwo.more
+		&& pageTwo.versions.size() == 1 && pageTwo.versions.front() == saved);
+	const auto wrongOwner = store.History(Key({0, 456}), 32, {}, {}, pageOne.history, {}, true);
+	CHECK(wrongOwner.status == DesktopArchiveStatus::Stale && wrongOwner.versions.empty());
+	const auto stale = store.History(Key(), 32, pageOne.beforeOrder, pageOne.revision - 1,
+		pageOne.history, {}, true);
+	CHECK(stale.status == DesktopArchiveStatus::Stale && stale.versions.empty());
+	const auto badCursor = store.History(Key(), 32, u"bad"_q, pageOne.revision, pageOne.history, {}, true);
+	CHECK(badCursor.status != DesktopArchiveStatus::Ready && badCursor.versions.empty());
+	std::printf("ARCHIVE_UNORDERED_HISTORY pages=2 bounded=1 scoped=1\n");
+	std::printf("ARCHIVE_UNORDERED_RETENTION ordered=%zu observations=%zu gaps=%zu\n",
+		page.versions.size(), expanded.rows.size(), noNewGap.rows.size());
+	Section = "scoped observation purge and restart";
+	const auto secondKey = Key(options.account, 46, 67);
+	CHECK(store.Capture(Event(Empty(), u"chat-two-base"_q, 20, u"other chat"_q,
+		ArchiveOrigin::AuthoritativeEdit, secondKey)).retained);
+	auto second = unanchored;
+	second.key = secondKey;
+	second.id = u"chat-two-observation"_q;
+	second.order = 21;
+	CHECK(store.Capture(second).retained);
+	const auto secondMessage = ArchiveSqlMessageId(secondKey, store.security());
+	const auto secondRows = store.database().Read({
+		u"SELECT observation_id FROM observations WHERE message_key=?"_q,
+		{secondMessage}, ArchiveSqlExpectation::OneRow });
+	CHECK(secondRows.ok && secondRows.rows.size() == 1);
+	if (!secondRows.ok || secondRows.rows.size() != 1) { return; }
+	const auto secondToken = std::get<QString>(secondRows.rows.front().front());
+	const auto begin = [&](ArchivePurgeKind kind, const ArchiveChatKey &chat) {
+		const auto preview = store.PreparePurge(kind, {options.account, chat});
+		return preview.confirmation && store.BeginPurge(*preview.confirmation);
+	};
+	const auto finish = [&] {
+		for (auto i = 0; i != 20 && store.MaintenancePending(); ++i) {
+			if (!store.ContinuePurge().valid) { return false; }
+		}
+		return !store.MaintenancePending();
+	};
+	CHECK(begin(ArchivePurgeKind::Trashbin, Key().chat) && finish());
+	CHECK(revoked && pageOne.active && !pageOne.active->load());
+	CHECK(store.ReadUnorderedObservation(Key(), token) == saved);
+	CHECK(store.ReadUnorderedObservation(Key(), other) == largeSaved);
+	const auto purgeTarget = store.ReadSlice(Key());
+	CHECK(purgeTarget);
+	if (!purgeTarget) { return; }
+	const auto erase = Event(purgeTarget->state, u"purge-deleted-observation"_q, 40,
+		{}, ArchiveOrigin::AuthoritativeDelete);
+	CHECK(store.Capture(erase).retained);
+	CHECK(begin(ArchivePurgeKind::Trashbin, Key().chat));
+	auto phase = ArchivePurgePhase::Versions;
+	for (auto i = 0; i != 12 && phase != ArchivePurgePhase::Observations; ++i) {
+		const auto step = store.ContinuePurge();
+		CHECK(step.valid);
+		if (!step.valid) { return; }
+		phase = step.phase;
+	}
+	CHECK(phase == ArchivePurgePhase::Observations);
+	CHECK(!store.ReadUnorderedObservation(Key(), token));
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Maintenance);
+	CHECK(finish());
+	const auto remaining = store.database().Read(observationRows);
+	CHECK(remaining.ok && remaining.rows == secondRows.rows);
+	const auto chunks = store.database().Read({
+		u"SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM observation_chunks WHERE observation_id IN (?,?))"_q,
+		{token, other}, ArchiveSqlExpectation::OneRow });
+	CHECK(chunks.ok);
+	CHECK(store.ReadUnorderedObservation(secondKey, secondToken));
+	CHECK(begin(ArchivePurgeKind::EditHistory, secondKey.chat) && finish());
+	CHECK(!store.ReadUnorderedObservation(secondKey, secondToken));
+	CHECK(store.Versions(secondKey).versions.size() == 1);
+	const auto empty = store.database().Read(observationRows);
+	CHECK(empty.ok && empty.rows.empty());
+	std::printf("ARCHIVE_UNORDERED_PURGE trashbin=1 edit_history=1 restart=1 scope=1\n");
 	CHECK(store.Remove());
 }
 
@@ -1908,6 +2161,13 @@ void Crypto() {
 int main(int argc, char** argv) {
 	std::setvbuf(stdout, nullptr, _IOLBF, 0);
 	const auto application = QCoreApplication(argc, argv);
+	if (argc > 1 && QByteArray(argv[1]) == "observation-upgrade-only") {
+		ObservationUpgradeOnOpen(false, false);
+		ObservationUpgradeOnOpen(true, false);
+		ObservationUpgradeOnOpen(false, true);
+		std::printf("Archive open upgrade: %d checks, %d failures\n", Checks, Failures);
+		return Failures ? 1 : 0;
+	}
 	if (argc > 1 && QByteArray(argv[1]) == "capture-only") {
 		CaptureBoundary();
 		return Failures ? 1 : 0;

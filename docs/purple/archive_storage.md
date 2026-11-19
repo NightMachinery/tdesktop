@@ -222,8 +222,18 @@ discarded and a self-owned worker attempts bounded account removal.
 Baseline creation, current preimages and explicit accepted edits are distinct.
 A live preimage supplies a partial baseline when there is no retained head.
 A retained head avoids synthesizing another preimage from a less complete UI
-representation. Changed unbound history responses and quality refreshes cannot
-become authored edits or replace a newer head; they can leave an explicit gap.
+representation. When Telegram supplies a complete or partial snapshot whose
+contents conflict with the current head, the archive keeps it under **Other
+snapshots** in View Edit History. Each entry shows when this client observed it
+and says that edit order is unknown. The current head stays authoritative, and
+repeat copies of the same snapshot reuse one encrypted record. Other snapshots
+retain message text and attachment descriptions. Downloaded attachment access
+and source Markdown belong to the ordered history view.
+
+Clear Edit History removes these snapshots for the selected scope. Empty
+Trashbin removes them for deleted messages. Each purge resumes from its saved
+checkpoint if interrupted. The outbox keeps an observation until its database
+transaction commits.
 Message views, reactions, file references, access hashes and alternative document
 qualities remain in observation payloads, outside ordinary document/photo body
 comparison. Rich page blocks retain semantic structure separately from their

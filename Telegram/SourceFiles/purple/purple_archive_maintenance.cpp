@@ -222,9 +222,10 @@ std::optional<std::vector<ArchiveSqlPurgeRow>> ReadPurgePage(
 	if (!read.ok) {
 		return {};
 	}
+	const auto observations = purge.phase == ArchivePurgePhase::Observations;
 	const auto kind = purge.phase == ArchivePurgePhase::Versions
 						  ? ArchiveRecordKind::Version
-					  : purge.phase == ArchivePurgePhase::Messages
+					  : purge.phase == ArchivePurgePhase::Messages || observations
 						  ? ArchiveRecordKind::Message
 					  : purge.phase == ArchivePurgePhase::Jobs
 						  ? ArchiveRecordKind::Job
@@ -235,12 +236,14 @@ std::optional<std::vector<ArchiveSqlPurgeRow>> ReadPurgePage(
 		const auto frame = Value<QByteArray>(values, 1);
 		const auto stored
 			= values.size() == 2 && id && frame
-				  ? CompactRow(purge.account, kind, *id, *frame, security)
+				  ? CompactRow(purge.account, kind,
+					observations ? id->left(64) : *id, *frame, security)
 				  : std::nullopt;
 		if (!stored) {
 			return {};
 		}
 		auto input = ArchiveSqlPurgeRow{*stored, *frame};
+		input.stored.id = *id;
 		if (kind == ArchiveRecordKind::Version) {
 			if (!AddCopies(database,
 					std::get<ArchiveVersionSnapshot>(stored->row.value),
@@ -248,7 +251,7 @@ std::optional<std::vector<ArchiveSqlPurgeRow>> ReadPurgePage(
 					security)) {
 				return {};
 			}
-		} else if (kind == ArchiveRecordKind::Message
+		} else if (kind == ArchiveRecordKind::Message && !observations
 				   && purge.kind == ArchivePurgeKind::EditHistory) {
 			const auto &message
 				= std::get<ArchiveMessage>(stored->row.value);

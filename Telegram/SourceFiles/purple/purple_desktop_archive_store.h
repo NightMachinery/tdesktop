@@ -85,6 +85,7 @@ struct DesktopArchiveCaptureResult {
 	ArchivePlanStatus model = ArchivePlanStatus::Invalid;
 	QString reason;
 	bool retained = false;
+	bool retryableObservationCommit = false;
 };
 struct DesktopArchiveHistoryPage {
 	ArchiveStoreEpoch epoch;
@@ -126,6 +127,8 @@ class DesktopArchiveStore final {
 	[[nodiscard]] const ArchiveSqlSecurity &security() const;
 	[[nodiscard]] QString directory() const;
 	[[nodiscard]] DesktopArchiveCaptureResult Capture(ArchiveEvent event);
+	[[nodiscard]] std::optional<ArchiveVersionSnapshot> ReadUnorderedObservation(
+		const ArchiveMessageKey &key, const QString &id);
 	[[nodiscard]] std::optional<ArchiveSqlSlice> ReadSlice(const ArchiveMessageKey &key,
 		const QString &event = {}, const QString &target = {}, const QString &lease = {},
 		const QString &blob = {});
@@ -134,7 +137,7 @@ class DesktopArchiveStore final {
 		std::optional<uint64_t> revision = std::nullopt);
 	[[nodiscard]] DesktopArchiveHistoryPage History(const ArchiveMessageKey &key,
 		int limit, const QString &beforeOrder, std::optional<uint64_t> revision,
-		const QString &id, std::function<void()> revoked);
+		const QString &id, std::function<void()> revoked, bool observations = false);
 	void CloseHistory(const QString &id, const ArchiveStoreEpoch &epoch);
 	void ExpireHistory(bool all = false);
 	[[nodiscard]] ArchiveDeletedPage OpenDeletedView(const ArchiveViewScope &scope,
@@ -201,6 +204,10 @@ class DesktopArchiveStore final {
 	DesktopArchiveSqlite &database();
 
   private:
+	[[nodiscard]] DesktopArchiveHistoryPage ReadHistoryPage(const ArchiveMessageKey &key,
+		int limit, const QString &before, std::optional<uint64_t> revision, bool observations);
+	[[nodiscard]] std::optional<ArchiveVersionSnapshot> ReadObservationInTransaction(
+		const ArchiveMessageKey &key, const QString &id);
 	friend class DesktopArchiveStream;
 	void CountStagingProof();
 	void CountStagingOpen();

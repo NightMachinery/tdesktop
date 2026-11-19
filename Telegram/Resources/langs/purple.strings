@@ -270,6 +270,10 @@ docs/purple/upstream_hooks.md.
 "lng_purple_archive_history_changed" = "History is unavailable or changed while loading. Reopen it to refresh.";
 "lng_purple_archive_history_empty" = "No retained version was found. Older observations may be missing.";
 "lng_purple_archive_older" = "Older versions";
+"lng_purple_archive_observations" = "Other snapshots";
+"lng_purple_archive_observation_unknown" = "Observed snapshot with unknown edit order";
+"lng_purple_archive_observation_empty" = "No other snapshots have been saved for this message.";
+"lng_purple_archive_observation_next" = "Next snapshot";
 "lng_purple_archive_attachment_open" = "Open saved attachment {index} from {date}";
 "lng_purple_archive_attachment" = "Saved attachment";
 "lng_purple_archive_attachment_notice" = "This is an owned archive copy. Opening it does not fetch anything from Telegram.";

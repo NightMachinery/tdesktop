@@ -466,7 +466,7 @@ void InitialAdmissionStatus() {
 		auto store = DesktopArchiveStore();
 		CHECK(store.Open(Options(temporary.path())) == DesktopArchiveStatus::Ready);
 		Capture(store, Key(), u"admission"_q);
-		Sql(store, future ? u"UPDATE archive_meta SET schema_version=3"_q
+		Sql(store, future ? u"UPDATE archive_meta SET schema_version="_q + QString::number(kArchiveSqlSchemaVersion + 1)
 			: u"UPDATE archive_meta SET schema_fingerprint='changed'"_q);
 		CHECK(store.Close());
 		CHECK(store.Open(Options(temporary.path())) == (future
@@ -488,7 +488,7 @@ void Corruption() {
 		u"UPDATE messages SET transcript_date=-1"_q,
 		u"UPDATE messages SET chat_token='wrong'"_q,
 		u"DELETE FROM archive_meta"_q,
-		u"UPDATE archive_meta SET schema_version=3"_q,
+		u"UPDATE archive_meta SET schema_version="_q + QString::number(kArchiveSqlSchemaVersion + 1),
 		u"UPDATE archive_meta SET schema_fingerprint='changed'"_q}) {
 		auto temporary = QTemporaryDir();
 		auto store = DesktopArchiveStore();
