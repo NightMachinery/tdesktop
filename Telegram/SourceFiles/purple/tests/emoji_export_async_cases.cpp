@@ -10,6 +10,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
+#include <QtCore/QPointer>
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimer>
@@ -108,10 +109,33 @@ int main(int argc, char **argv) {
 	temp.setAutoRemove(false);
 	check(temp.isValid(), "worker fixture directory");
 	const auto directory = QFileInfo(temp.path()).canonicalFilePath() + u"/emoji-export"_q;
-	auto worker = EmojiExportWorker(directory);
 	const auto stamp = QDateTime::currentDateTimeUtc();
 	auto image = QImage(128, 128, QImage::Format_ARGB32_Premultiplied);
 	image.fill(Qt::transparent);
+	auto large = std::vector<EmojiExportEntry>();
+	large.reserve(20000);
+	if (!WriteEmojiExportPng(directory, 1, image)) {
+		std::fprintf(stderr, "Failed to seed initial emoji PNG\n");
+		return 1;
+	}
+	const auto first = directory + '/' + EmojiExportPngName(1);
+	for (auto id = quint64(1); id <= 20000; ++id) {
+		large.push_back({ .id = id });
+		if (id == 1) continue;
+		const auto path = directory + '/' + EmojiExportPngName(id);
+#ifdef Q_OS_WIN
+		const auto created = QFile::copy(first, path);
+#else
+		const auto created = !::link(
+			QFile::encodeName(first).constData(),
+			QFile::encodeName(path).constData());
+#endif
+		if (!created) {
+			std::fprintf(stderr, "Failed to seed large emoji catalog fixture\n");
+			return 1;
+		}
+	}
+	auto worker = EmojiExportWorker(directory);
 	auto beats = 0;
 	auto maximumGap = qint64(0);
 	const auto wait = [&](const std::function<void(std::function<void(bool)>)> &launch) {
@@ -134,27 +158,17 @@ int main(int argc, char **argv) {
 		QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
 		timer.start(5);
 		timeout.start(30000);
-		launch([&](bool result) { ok = result; done = true; loop.quit(); });
+		launch([live = QPointer(&loop), &ok, &done](bool result) {
+			if (!live) return;
+			ok = result;
+			done = true;
+			live->quit();
+		});
 		if (!done) loop.exec();
 		check(done && ok, "worker operation completed");
 	};
 	wait([&](auto done) {
 		check(worker.submit(worker.generation(), [=](const EmojiExportAuthority &current) {
-			auto large = std::vector<EmojiExportEntry>();
-			large.reserve(20000);
-			if (!WriteEmojiExportPng(directory, 1, image, current)) return false;
-			const auto first = directory + '/' + EmojiExportPngName(1);
-			for (auto id = quint64(1); id <= 20000; ++id) {
-				if (!current()) return false;
-				large.push_back({ .id = id });
-				if (id == 1) continue;
-				const auto path = directory + '/' + EmojiExportPngName(id);
-#ifdef Q_OS_WIN
-				if (!QFile::copy(first, path)) return false;
-#else
-				if (::link(QFile::encodeName(first).constData(), QFile::encodeName(path).constData())) return false;
-#endif
-			}
 			return PublishEmojiExportCatalog(directory, large, stamp, current);
 		}, [=](quint64, bool ok) { done(ok); }), "large publication admitted");
 	});
