@@ -58,6 +58,7 @@ The generic startup waits are opt-in:
   session.
 - `waitForChatsLoaded()` is needed only when the tested setup consumes the
   chats list; it is non-fatal and records whether loading completed.
+  While there is no active session, it waits for a session change.
 - `waitForChatsLoadedStrict()` is appropriate only when chats loading is part
   of the required fixture or result.
 

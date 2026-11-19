@@ -142,7 +142,7 @@ void StartChatsLoadedWait(
 	Core::App().domain().activeSessionValue(
 	) | rpl::map([](Main::Session *session) {
 		if (!session) {
-			return rpl::never<Data::Folder*>();
+			return rpl::never<Data::Folder*>() | rpl::type_erased;
 		}
 		return session->data().chatsListLoaded()
 			? rpl::single<Data::Folder*>(nullptr)
