@@ -26,6 +26,7 @@
 #include "purple/purple_message_hints.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
+#include "ui/abstract_button.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/screen_reader_mode.h"
@@ -34,6 +35,7 @@
 #include "ui/widgets/labels.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
@@ -1305,7 +1307,10 @@ void Keys::dispatch(Action action, const Target &target) {
 		startHint(Hint::Edit, tr::lng_purple_keys_message_menu_empty(tr::now));
 		break;
 	case Action::Help: {
-		auto lines = QStringList{ tr::lng_purple_keys_settings_hint(tr::now) };
+		auto lines = QStringList{
+			tr::lng_purple_keys_settings_hint(tr::now),
+			tr::lng_purple_keys_menu_accounts_help(tr::now),
+		};
 		for (const auto &command : kCommands) {
 			lines.push_back(BindingsLabel(command.action)
 				+ u"    "_q + command.label());
@@ -1426,7 +1431,9 @@ int CalendarDayKeyOffset(const QKeyEvent &event) {
 
 void InstallMainMenuKeys(
 		not_null<Ui::LayerWidget*> menu,
-		not_null<Ui::RpWidget*> contents) {
+		not_null<Ui::RpWidget*> contents,
+		not_null<Ui::AbstractButton*> accountsToggle,
+		not_null<Ui::SlideWrap<Ui::RpWidget>*> accounts) {
 	using Result = base::EventFilterResult;
 	if (!Enabled()) {
 		return;
@@ -1447,7 +1454,21 @@ void InstallMainMenuKeys(
 		if (!stack || stack->topShownLayer() != menu.get()) {
 			return Result::Continue;
 		}
-		return navigation->handle(static_cast<QKeyEvent*>(event.get()))
+		const auto key = static_cast<QKeyEvent*>(event.get());
+		if (key->key() == Qt::Key_A
+			&& key->modifiers() == Qt::NoModifier
+			&& accountsToggle->isVisibleTo(menu)
+			&& !accountsToggle->isDisabled()) {
+			if (!key->isAutoRepeat()) {
+				accountsToggle->clicked(Qt::NoModifier, Qt::LeftButton);
+				accounts->finishAnimating();
+				if (accounts->toggled()) {
+					navigation->selectFirstWithin(accounts);
+				}
+			}
+			return Result::Cancel;
+		}
+		return navigation->handle(key)
 			? Result::Cancel
 			: Result::Continue;
 	});

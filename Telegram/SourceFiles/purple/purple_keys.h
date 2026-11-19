@@ -6,8 +6,11 @@ class QObject;
 class QWidget;
 
 namespace Ui {
+class AbstractButton;
 class LayerWidget;
 class RpWidget;
+template <typename Widget>
+class SlideWrap;
 } // namespace Ui
 
 namespace Settings::Builder {
@@ -23,7 +26,9 @@ namespace Purple {
 
 void InstallMainMenuKeys(
 	not_null<Ui::LayerWidget*> menu,
-	not_null<Ui::RpWidget*> contents);
+	not_null<Ui::RpWidget*> contents,
+	not_null<Ui::AbstractButton*> accountsToggle,
+	not_null<Ui::SlideWrap<Ui::RpWidget>*> accounts);
 
 void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder);
 

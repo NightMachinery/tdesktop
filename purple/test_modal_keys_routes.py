@@ -337,11 +337,21 @@ for file, cls in (("history/history_inner_widget.cpp", "HistoryInner"),
 
 menu = read("window/window_main_menu.cpp")
 ordered(menu, "MainMenu::MainMenu(", "setupMenu();",
-        "Purple::InstallMainMenuKeys(this, _inner)")
+        "Purple::InstallMainMenuKeys(", "_toggleAccounts.data(), _accounts)")
 menu_keys = between(keys, "void InstallMainMenuKeys", "void BuildModalKeysSetting")
 ordered(menu_keys, "if (!Enabled())", "::Settings::KeyNavigation", "QEvent::KeyPress",
         "Ui::ScreenReaderModeActive()", "QApplication::focusWidget() != menu.get()",
         "QApplication::activePopupWidget()", "QApplication::activeModalWidget()",
-        "topShownLayer() != menu.get()", "navigation->handle(")
+        "topShownLayer() != menu.get()", "key->key() == Qt::Key_A",
+        "key->modifiers() == Qt::NoModifier", "accountsToggle->isVisibleTo(menu)",
+        "!accountsToggle->isDisabled()", "!key->isAutoRepeat()",
+        "accountsToggle->clicked(Qt::NoModifier, Qt::LeftButton)",
+        "accounts->finishAnimating()", "accounts->toggled()",
+        "navigation->selectFirstWithin(accounts)",
+        "navigation->handle(key)")
+menu_selection = between(read("settings/settings_key_navigation.cpp"),
+                         "void KeyNavigation::selectFirstWithin", "auto KeyNavigation::list")
+ordered(menu_selection, "list()", "section->isAncestorOf", "select(entries, i)", "return;")
+assert "tr::lng_purple_keys_menu_accounts_help(tr::now)" in dispatch
 
 print("Modal key, menu, visible message, nested section and chat background routes passed")

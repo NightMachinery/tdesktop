@@ -358,7 +358,8 @@ MainMenu::MainMenu(
 	setupAccounts();
 	setupArchive();
 	setupMenu();
-	Purple::InstallMainMenuKeys(this, _inner);
+	Purple::InstallMainMenuKeys(
+		this, _inner, _toggleAccounts.data(), _accounts);
 
 	const auto shadow = Ui::CreateChild<Ui::PlainShadow>(this);
 	widthValue(

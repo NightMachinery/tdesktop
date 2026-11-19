@@ -24,6 +24,7 @@ public:
 
 	[[nodiscard]] bool handle(not_null<QKeyEvent*> e);
 	void anchorTo(not_null<QWidget*> widget);
+	void selectFirstWithin(not_null<const QWidget*> section);
 
 private:
 	struct Entry {

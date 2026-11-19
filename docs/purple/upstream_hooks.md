@@ -40,8 +40,10 @@ the numbers.
   paint for live history when wallpaper artwork is hidden.
 - `window/window_session_controller.cpp`: applies the live chat style through
   Purple so date and service chips can adapt to the flat background.
-- `window/window_main_menu.cpp`: installs the stock Settings row navigation
-  in the main menu for modal keyboard users.
+- `window/window_main_menu.cpp`: passes the stock account toggle and list to
+  the modal main menu navigation.
+- `settings/settings_key_navigation.*`: exposes selection of the first
+  eligible row inside a subsection for entering the expanded account list.
 - `ui/boxes/calendar_box.cpp`: moves the stock date highlight and reuses
   the validated single-date callback for keyboard selection. The calendar
   keeps its existing month keys and mouse date-range selection.

@@ -46,6 +46,16 @@ void KeyNavigation::anchorTo(not_null<QWidget*> widget) {
 	_anchor = raw;
 }
 
+void KeyNavigation::selectFirstWithin(not_null<const QWidget*> section) {
+	const auto entries = list();
+	for (auto i = 0; i != int(entries.size()); ++i) {
+		if (section->isAncestorOf(entries[i].widget)) {
+			select(entries, i);
+			return;
+		}
+	}
+}
+
 auto KeyNavigation::list() const -> std::vector<Entry> {
 	auto result = std::vector<Entry>();
 	const auto widgets = _inner->findChildren<QWidget*>();

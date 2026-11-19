@@ -24,7 +24,8 @@ mode. An input method composition can still open search.
 - `/` or `SPC s s` opens search for the current view.
 - `SPC o m` opens the main menu, `SPC o t` opens Settings, and `SPC o s`
   opens Saved Messages. Use Up or Down to select a main menu row and Enter
-  to activate it.
+  to activate it. In the main menu, `a` shows or hides the account list.
+  Opening the list highlights its first available row.
 - `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, and `SPC o d`
   opens Scheduled Messages in a chat that supports them.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.

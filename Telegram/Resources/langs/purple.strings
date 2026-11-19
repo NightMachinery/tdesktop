@@ -801,6 +801,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_keys_folder_previous" = "Previous folder";
 "lng_purple_keys_folder_next" = "Next folder";
 "lng_purple_keys_help" = "Modal keyboard shortcuts";
+"lng_purple_keys_menu_accounts_help" = "In the main menu, press A to show or hide accounts. Use the arrows and Enter to choose a row.";
 "lng_purple_keys_run" = "Run a command";
 "lng_purple_keys_describe_key" = "Describe a shortcut";
 "lng_purple_keys_describe_command" = "Describe a command";
