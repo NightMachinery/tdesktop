@@ -40,7 +40,10 @@ public:
 	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
+
 	void setViewportLimit(int height);
+	void setSelectionActions(Fn<void(uint64_t)> toggle, Fn<bool()> playSelection);
+	void setChosenSongs(std::set<uint64_t> songs);
 
 protected:
 	int resizeGetHeight(int width) override;

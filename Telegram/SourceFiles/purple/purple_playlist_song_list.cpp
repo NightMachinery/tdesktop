@@ -34,6 +34,8 @@ public:
 	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
+	void setSelectionActions(Fn<void(uint64_t)> toggle, Fn<bool()> playSelection);
+	void setChosenSongs(std::set<uint64_t> songs);
 	[[nodiscard]] int rowHeight() const;
 	QAccessible::Role accessibilityRole() override;
 	Qt::FocusPolicy accessibilityFocusPolicy() override;
@@ -55,6 +57,7 @@ protected:
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
+	void mouseDoubleClickEvent(QMouseEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
 	void focusOutEvent(QFocusEvent *e) override;
@@ -74,6 +77,9 @@ private:
 	std::vector<PlaylistSongListRow> _data;
 	Fn<void(uint64_t)> _play;
 	Fn<void(std::vector<uint64_t>)> _reorder;
+	Fn<void(uint64_t)> _toggle;
+	Fn<bool()> _playSelection;
+	std::set<uint64_t> _chosen;
 	Mode _mode = Mode::Playlist;
 	base::Timer _autoscroll;
 	QString _checkedState;
@@ -193,7 +199,8 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 			layout.songThumbSize,
 			width());
 		p.setPen(Qt::NoPen);
-		p.setBrush(row.documentId == _current ? st::mediaPlayerActiveFg : layout.songIconBg);
+		p.setBrush(row.documentId == _current || _chosen.contains(row.documentId)
+			? st::mediaPlayerActiveFg : layout.songIconBg);
 		p.drawEllipse(thumb);
 		layout.songPlay.paintInCenter(p, thumb);
 		p.setFont(st::semiboldFont);
@@ -328,9 +335,30 @@ void PlaylistSongList::Rows::mouseReleaseEvent(QMouseEvent *e) {
 	if (drag) {
 		submitMove(from, to);
 	} else if (play) {
-		const auto callback = _play;
-		callback(_data[from].documentId);
+		const auto id = _data[from].documentId;
+		if (_toggle) {
+			if (e->modifiers() & Qt::ControlModifier) {
+				const auto callback = _toggle;
+				callback(id);
+			}
+		} else {
+			const auto callback = _play;
+			callback(id);
+		}
 	}
+}
+
+void PlaylistSongList::Rows::mouseDoubleClickEvent(QMouseEvent *e) {
+	const auto index = hit(e->pos());
+	if (!_toggle || !isEnabled() || e->button() != Qt::LeftButton || index < 0
+		|| (e->modifiers() & Qt::ControlModifier)) {
+		RpWidget::mouseDoubleClickEvent(e);
+		return;
+	}
+	e->accept();
+	cancelInteraction();
+	const auto callback = _play;
+	callback(_data[index].documentId);
 }
 
 void PlaylistSongList::Rows::moveSelected(int delta) {
@@ -366,8 +394,16 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 	else if (key == Qt::Key_Return || key == Qt::Key_Enter || key == Qt::Key_Space) {
 		e->accept();
 		cancelInteraction();
-		const auto callback = _play;
-		callback(_data[next].documentId);
+		if (_toggle && key == Qt::Key_Space) {
+			if (e->isAutoRepeat()) return;
+			const auto toggle = _toggle;
+			toggle(_data[next].documentId);
+		} else {
+			const auto playSelection = _playSelection;
+			if (playSelection && playSelection()) return;
+			const auto callback = _play;
+			callback(_data[next].documentId);
+		}
 		return;
 	} else {
 		RpWidget::keyPressEvent(e);
@@ -427,6 +463,25 @@ void PlaylistSongList::Rows::setPlayback(
 	update();
 }
 
+void PlaylistSongList::Rows::setSelectionActions(
+		Fn<void(uint64_t)> toggle,
+		Fn<bool()> playSelection) {
+	_toggle = std::move(toggle);
+	_playSelection = std::move(playSelection);
+}
+
+void PlaylistSongList::Rows::setChosenSongs(std::set<uint64_t> songs) {
+	if (_chosen == songs) return;
+	const auto previous = std::exchange(_chosen, std::move(songs));
+	for (auto index = 0; index != int(_data.size()); ++index) {
+		const auto id = _data[index].documentId;
+		if (previous.contains(id) != _chosen.contains(id)) {
+			accessibilityChildSelectionChanged(index);
+		}
+	}
+	update();
+}
+
 void PlaylistSongList::Rows::setVerifiedDownloads(std::set<uint64_t> documents) {
 	if (_verifiedDownloads == documents) return;
 	const auto previous = std::exchange(_verifiedDownloads, std::move(documents));
@@ -471,7 +526,10 @@ QString PlaylistSongList::Rows::accessibilityChildName(int index) const {
 QAccessible::State PlaylistSongList::Rows::accessibilityChildState(int index) const {
 	auto state = QAccessible::State();
 	state.selectable = true;
-	state.selected = index == _selected;
+	state.selected = _toggle && index >= 0 && index < int(_data.size())
+		? _chosen.contains(_data[index].documentId)
+		: index == _selected;
+	state.multiSelectable = bool(_toggle);
 	state.focusable = true;
 	state.focused = hasFocus() && index == _selected;
 	state.disabled = !isEnabled();
@@ -591,6 +649,16 @@ void PlaylistSongList::cancelInteraction() {
 
 void PlaylistSongList::focusSelected() {
 	_rows->focusSelected();
+}
+
+void PlaylistSongList::setSelectionActions(
+		Fn<void(uint64_t)> toggle,
+		Fn<bool()> playSelection) {
+	_rows->setSelectionActions(std::move(toggle), std::move(playSelection));
+}
+
+void PlaylistSongList::setChosenSongs(std::set<uint64_t> songs) {
+	_rows->setChosenSongs(std::move(songs));
 }
 
 void PlaylistSongList::setViewportLimit(int height) {

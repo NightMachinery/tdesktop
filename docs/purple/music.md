@@ -20,6 +20,13 @@ with a new source folder, it clears the old index. When a chat leaves the
 selected folder, its entries are removed. Search filters out chats hidden by Purple, and playback
 rechecks the account, chat, and source message before opening a track.
 
+Double-click a track to play it. Use Command-click on macOS or Ctrl-click on
+other platforms to select tracks. With the track list focused, the arrow keys
+move the cursor and Space toggles selection. Press Enter or use the playback
+button to play the selection. Two or more tracks create a playlist in Hyper,
+in the order you selected them. Repeating the same selection reuses the
+playlist while the saved sources still match.
+
 Open **Playlists** from the main menu to create folders or move playlists
 between them. Removing a folder places its playlists back at the top level.
 Hyper holds automatically created playlists. Folder names and placement are

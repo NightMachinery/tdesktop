@@ -1,6 +1,7 @@
 #include "purple/purple_music_section.h"
 
 #include "apiwrap.h"
+#include "base/random.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "core/application.h"
@@ -19,9 +20,13 @@
 #include "purple/purple_config.h"
 #include "purple/purple_music_index_service.h"
 #include "purple/purple_music_source_roster.h"
+#include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
+#include "purple/purple_playlists_box.h"
 #include "purple/purple_playlists_menu.h"
 #include "purple/purple_playlists_resolver.h"
+#include "purple/purple_playlists_service.h"
+#include "rpl/variable.h"
 #include "settings/settings_common.h"
 #include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
@@ -44,6 +49,7 @@
 #include "styles/style_window.h"
 #include "styles/style_window_main_menu.h"
 
+#include <QtCore/QDateTime>
 #include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
 #include <deque>
@@ -100,6 +106,13 @@ private:
 	void read(bool restart);
 	void render();
 	void updateListHeight();
+	void toggleTrack(quint64 documentId);
+	void updateSelection();
+	bool playSelection();
+	void saveSelection(const std::vector<MusicIndexEntry> &tracks);
+	[[nodiscard]] PlaylistResolveSong resolveSong(const MusicIndexEntry &entry) const;
+	[[nodiscard]] std::optional<PlaylistAddSongInput> captureTrack(
+		const MusicIndexEntry &entry) const;
 	void play(quint64 documentId);
 	void playResolved(const MusicIndexEntry &entry);
 
@@ -107,6 +120,7 @@ private:
 	not_null<Ui::InputField*> _search;
 	not_null<Ui::FlatLabel*> _status;
 	Ui::SettingsButton *_more = nullptr;
+	Ui::SettingsButton *_playChosen = nullptr;
 	QPointer<PlaylistSongList> _list;
 	MTP::Sender _api;
 	base::Timer _refreshTimer;
@@ -118,6 +132,8 @@ private:
 	std::vector<quint64> _visible;
 	std::deque<Scan> _pending;
 	std::vector<MusicIndexEntry> _rows;
+	std::vector<MusicIndexEntry> _selection;
+	rpl::variable<int> _selectionCount = 0;
 	QString _displayedSearch;
 	std::optional<MusicIndexCursor> _cursor;
 	std::unique_ptr<DesktopPlaylistResolver> _resolver;
@@ -128,6 +144,7 @@ private:
 	bool _paged = false;
 	bool _scanIncomplete = false;
 	bool _configuring = false;
+	bool _savingSelection = false;
 
 };
 
@@ -169,8 +186,17 @@ MusicSection::MusicSection(
 	addButton(tr::lng_purple_music_back(), [=] { controller->showBackFromStack(); });
 	addButton(tr::lng_purple_music_source(), [=] { ChooseMusicSourceFolder(controller); });
 	addButton(tr::lng_purple_music_refresh(), [=] { refresh(true); });
+	addButton(tr::lng_purple_playlists_title(), [=] {
+		if (current()) ShowPlaylistsBox(controller);
+	});
 	_more = addButton(tr::lng_purple_music_more(), [=] { read(false); });
 	_more->hide();
+	_playChosen = addButton(
+		tr::lng_purple_music_play_selected(lt_count, _selectionCount.value()
+			| rpl::map([](int count) { return float64(count); })
+			| tr::to_count()),
+		[=] { playSelection(); });
+	_playChosen->hide();
 	widthValue() | rpl::on_next([=](int width) {
 		_content->resizeToWidth(width);
 	}, lifetime());
@@ -182,6 +208,7 @@ MusicSection::MusicSection(
 		_readTimer.callOnce(kRefreshDelay);
 	}, lifetime());
 	_search->submits() | rpl::on_next([=] {
+		if (playSelection()) return;
 		if (_list && !_rows.empty() && !_reading) {
 			const auto selected = _list->selectedDocument();
 			play(selected ? selected : _rows.front().document);
@@ -282,6 +309,8 @@ void MusicSection::reset() {
 	_pending.clear();
 	_rows.clear();
 	_displayedSearch.clear();
+	_selection.clear();
+	_savingSelection = false;
 	_cursor.reset();
 	_reading = false;
 	_paged = false;
@@ -546,6 +575,7 @@ void MusicSection::render() {
 		&& (focus == _list || _list->isAncestorOf(focus));
 	delete _list.data();
 	_more->setVisible(current() && _moreAvailable);
+	updateSelection();
 	if (_rows.empty() || !current()) return;
 	auto rows = std::vector<PlaylistSongListRow>();
 	for (const auto &track : _rows) {
@@ -561,7 +591,9 @@ void MusicSection::render() {
 		_content, std::move(rows), selected, top,
 		[=](uint64_t id) { play(id); },
 		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library));
-	updateListHeight();
+	_list->setSelectionActions([=](uint64_t id) { toggleTrack(id); },
+		[=] { return playSelection(); });
+	updateSelection();
 	if (hadFocus) _list->focusSelected();
 }
 
@@ -570,7 +602,123 @@ void MusicSection::updateListHeight() {
 	_list->setViewportLimit(std::max(1, height() - _list->y()));
 }
 
+void MusicSection::toggleTrack(quint64 documentId) {
+	if (_savingSelection || _displayedSearch != _search->getLastText().trimmed()
+		|| !rosterCurrent()) {
+		return;
+	}
+	const auto selected = std::ranges::find(_selection, documentId, &MusicIndexEntry::document);
+	if (selected != _selection.end()) {
+		_selection.erase(selected);
+	} else {
+		const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
+		if (row != _rows.end() && visible(row->peer)) {
+			_selection.push_back(*row);
+		}
+	}
+	updateSelection();
+}
+
+void MusicSection::updateSelection() {
+	_selectionCount = int(_selection.size());
+	_playChosen->setVisible(current() && !_selection.empty());
+	_playChosen->setDisabled(_savingSelection);
+	if (_list) {
+		auto chosen = std::set<uint64_t>();
+		for (const auto &entry : _selection) chosen.insert(entry.document);
+		_list->setChosenSongs(std::move(chosen));
+	}
+	updateListHeight();
+}
+
+bool MusicSection::playSelection() {
+	if (_selection.empty()) return false;
+	if (_savingSelection) return true;
+	if (!rosterCurrent()) {
+		refresh();
+		return true;
+	}
+	auto tracks = _selection;
+	if (!std::ranges::all_of(tracks, [=](const auto &entry) { return visible(entry.peer); })) {
+		refresh();
+		return true;
+	}
+	auto requests = std::vector<PlaylistResolveSong>();
+	requests.reserve(tracks.size());
+	for (const auto &entry : tracks) requests.push_back(resolveSong(entry));
+	_savingSelection = true;
+	updateSelection();
+	_status->setText(tr::lng_purple_playlists_resolving(tr::now));
+	const auto route = _route;
+	_resolver = std::make_unique<DesktopPlaylistResolver>(
+		&session(), std::move(requests),
+		crl::guard(this, [=](std::vector<PlaylistSongResolution> result) {
+			if (_route != route) return;
+			if (!rosterCurrent() || result.size() != tracks.size()
+				|| !std::ranges::all_of(result, [](const auto &entry) {
+					return entry.status == PlaylistSongStatus::Ready;
+				})) {
+				_savingSelection = false;
+				updateSelection();
+				_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
+				return;
+			}
+			saveSelection(tracks);
+		}));
+	_resolver->start();
+	return true;
+}
+
+void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
+	auto songs = std::vector<PlaylistAddSongInput>();
+	songs.reserve(tracks.size());
+	for (const auto &entry : tracks) {
+		const auto captured = captureTrack(entry);
+		if (!captured) {
+			_savingSelection = false;
+			updateSelection();
+			_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
+			return;
+		}
+		songs.push_back(*captured);
+	}
+	if (tracks.size() == 1) {
+		_savingSelection = false;
+		_selection.clear();
+		updateSelection();
+		_status->setText(QString());
+		playResolved(tracks.front());
+		return;
+	}
+	_status->setText(tr::lng_purple_playlists_saving(tr::now));
+	auto entropy = QByteArray(kPlaylistIdEntropyBytes, char(0));
+	base::RandomFill(entropy.data(), entropy.size());
+	const auto route = _route;
+	EditAccountPlaylists(&session(), {
+		.kind = PlaylistAccountEditKind::CreateHyper,
+		.entropy = std::move(entropy),
+		.songs = std::move(songs),
+		.nowMs = uint64_t(QDateTime::currentMSecsSinceEpoch()),
+	}, crl::guard(this, [=](PlaylistAccountResult result) {
+		if (_route != route) return;
+		_savingSelection = false;
+		if (result && result.edit && rosterCurrent()
+			&& std::ranges::all_of(tracks, [=](const auto &entry) { return bool(captureTrack(entry)); })) {
+			_selection.clear();
+			_status->setText(QString());
+			updateSelection();
+			PlayAccountPlaylist(&session(), result.edit->playlistId, tracks.front().document);
+			return;
+		}
+		_status->setText(result
+			? tr::lng_purple_music_track_unavailable(tr::now)
+			: tr::lng_purple_playlists_write_failed(tr::now));
+		updateSelection();
+	}));
+}
+
 void MusicSection::play(quint64 documentId) {
+	if (_savingSelection) return;
 	if (_displayedSearch != _search->getLastText().trimmed()) return;
 	if (!rosterCurrent()) {
 		refresh();
@@ -579,25 +727,9 @@ void MusicSection::play(quint64 documentId) {
 	const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
 	if (row == _rows.end() || !visible(row->peer)) return;
 	const auto entry = *row;
-	const auto peer = session().data().peer(PeerId(uint64(entry.peer)));
-	const auto token = peer->isSelf()
-		? PeerToken{ PeerTokenKind::Self, 0 }
-		: peerIsUser(peer->id)
-		? PeerToken{ PeerTokenKind::User, peerToUser(peer->id).bare }
-		: peerIsChat(peer->id)
-		? PeerToken{ PeerTokenKind::Chat, peerToChat(peer->id).bare }
-		: PeerToken{ PeerTokenKind::Channel, peerToChannel(peer->id).bare };
 	const auto route = _route;
-	const auto resolve = PlaylistResolveSong{
-		.documentId = entry.document,
-		.source = {
-			.peer = token,
-			.msg = int32_t(entry.message),
-			.username = peer->isChannel() ? peer->username() : QString(),
-		},
-	};
 	_resolver = std::make_unique<DesktopPlaylistResolver>(
-		&session(), std::vector{ resolve }, crl::guard(this, [=](auto results) {
+		&session(), std::vector{ resolveSong(entry) }, crl::guard(this, [=](auto results) {
 			if (_route != route || !rosterCurrent()) return;
 			if (results.size() == 1 && results.front().status == PlaylistSongStatus::Ready) {
 				playResolved(entry);
@@ -608,11 +740,37 @@ void MusicSection::play(quint64 documentId) {
 	_resolver->start();
 }
 
+PlaylistResolveSong MusicSection::resolveSong(const MusicIndexEntry &entry) const {
+	const auto peer = session().data().peer(PeerId(uint64(entry.peer)));
+	const auto token = peer->isSelf()
+		? PeerToken{ PeerTokenKind::Self, 0 }
+		: peerIsUser(peer->id)
+		? PeerToken{ PeerTokenKind::User, peerToUser(peer->id).bare }
+		: peerIsChat(peer->id)
+		? PeerToken{ PeerTokenKind::Chat, peerToChat(peer->id).bare }
+		: PeerToken{ PeerTokenKind::Channel, peerToChannel(peer->id).bare };
+	return {
+		.documentId = entry.document,
+		.source = {
+			.peer = token,
+			.msg = int32_t(entry.message),
+			.username = peer->isChannel() ? peer->username() : QString(),
+		},
+	};
+}
+
+std::optional<PlaylistAddSongInput> MusicSection::captureTrack(
+		const MusicIndexEntry &entry) const {
+	const auto id = FullMsgId(PeerId(uint64(entry.peer)), MsgId(entry.message));
+	return visible(entry.peer)
+		? CapturePlaylistSong(&session(), { id, entry.document })
+		: std::nullopt;
+}
+
 void MusicSection::playResolved(const MusicIndexEntry &entry) {
 	const auto id = FullMsgId(PeerId(uint64(entry.peer)), MsgId(entry.message));
 	const auto item = session().data().message(id);
-	if (!item || !visible(entry.peer)
-		|| !CapturePlaylistSong(&session(), { id, entry.document })) {
+	if (!item || !captureTrack(entry)) {
 		_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
 		return;
 	}
