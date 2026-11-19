@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
+#include "purple/hooks/music_index.h"
 #include "purple/purple_archive_service.h"
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_playlists_service.h"
@@ -540,6 +541,7 @@ void Account::logOut() {
 	}
 	Purple::StopEmojiExportAtLogout(*this);
 	Purple::StopAccountPlaylists(*this);
+	Purple::StopMusicIndex(*this);
 	Purple::RemoveArchiveAtLogout(*this);
 	_loggingOut = true;
 	if (_mtp) {
@@ -558,6 +560,7 @@ void Account::forcedLogOut() {
 	if (sessionExists()) {
 		Purple::StopEmojiExportAtLogout(*this);
 		Purple::StopAccountPlaylists(*this);
+		Purple::StopMusicIndex(*this);
 		Purple::RemoveArchiveAtLogout(*this);
 		loggedOut();
 		resetAuthorizationKeys();

@@ -7,6 +7,8 @@ project requirements and feature documentation referenced by AGENTS.md and READM
 
 Private build-machine notes live in the private purple-build repo; when it is cloned at ~/.purple-build, see ~/.purple-build/readme.md.
 
+See [Music on Desktop](music.md) for the native library and its local index.
+
 ## Build and test
 
 ### Build scheduling

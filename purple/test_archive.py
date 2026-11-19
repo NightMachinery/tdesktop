@@ -24,6 +24,7 @@ parser.add_argument('--handoff', action='store_true')
 parser.add_argument('--passive', action='store_true')
 parser.add_argument('--markdown', action='store_true')
 parser.add_argument('--markdown-source', action='store_true')
+parser.add_argument('--music-index', action='store_true')
 parser.add_argument('--build-only', action='store_true')
 parser.add_argument('--reuse-from', type=Path)
 args = parser.parse_args()
@@ -171,7 +172,9 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    objects += [compile(repo / ('purple/test_archive_markdown.cpp' if args.markdown else 'purple/test_markdown_source.cpp' if args.markdown_source else 'purple/test_archive_purge.cpp' if args.purge else 'purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp'), 'test')]
+    fixture = 'purple/test_music_index.cpp' if args.music_index else (
+        'purple/test_archive_markdown.cpp' if args.markdown else 'purple/test_markdown_source.cpp' if args.markdown_source else 'purple/test_archive_purge.cpp' if args.purge else 'purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp')
+    objects += [compile(repo / fixture, 'test')]
     for name in ['purple_desktop_archive_store', 'purple_archive_maintenance', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader', 'purple_archive_markdown', 'purple_markdown_publication', 'purple_markdown_source', *markdown_units]:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]

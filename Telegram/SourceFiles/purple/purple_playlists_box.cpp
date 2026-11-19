@@ -13,6 +13,7 @@
 #include "media/media_common.h"
 #include "media/player/media_player_instance.h"
 #include "purple/purple_config.h"
+#include "purple/purple_music_section.h"
 #include "purple/purple_playlist_download_box.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
@@ -810,6 +811,7 @@ void AddPlaylistsMenuRow(
 			ShowPlaylistsBox(controller);
 		}
 	});
+	AddMusicMenuRow(menu, controller);
 }
 
 void ShowPlaylistsBox(not_null<Window::SessionController*> controller) {

@@ -1947,3 +1947,10 @@ then skips the ordinary synchronous cache barrier. Cancelled managed readers
 discard resident partial slices. Unregistered readers retain the original
 finalization path. This seam prevents main-thread cache I/O waits at account
 retirement without duplicating native cache serialization.
+
+### Desktop Music index
+
+`main/main_account.cpp` includes `purple/hooks/music_index.h` and calls
+`StopMusicIndex` before ordinary and forced logout. This revokes the account
+worker's pending database transactions. The existing playlist menu hook in
+`window/window_main_menu.cpp` also adds the Music entry.

@@ -11,7 +11,8 @@
       "--handoff": "purple/test_archive_handoff.cpp",
       "--passive": "purple/test_archive_passive.cpp",
       "--markdown": "purple/test_archive_markdown.cpp",
-      "--markdown-source": "purple/test_markdown_source.cpp"
+      "--markdown-source": "purple/test_markdown_source.cpp",
+      "--music-index": "purple/test_music_index.cpp"
     },
     "purple/test_cases.py": {
       "copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp",
@@ -349,6 +350,24 @@
       ],
       "fixtures": [
         "purple/test_markdown_source.cpp"
+      ]
+    },
+    {
+      "name": "music-index",
+      "driver": "purple/test_archive.py",
+      "coverage": "Physical SQLite music pagination, alias visibility, durable cursor and scope transitions, revocation rollback",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--music-index",
+        "--reuse-from",
+        "{out:archive-files}"
+      ],
+      "fixtures": [
+        "purple/test_music_index.cpp"
       ]
     },
     {

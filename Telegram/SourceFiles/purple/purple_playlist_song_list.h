@@ -19,13 +19,19 @@ struct PlaylistSongListRow {
 
 class PlaylistSongList final : public Ui::RpWidget {
 public:
+	enum class Mode {
+		Playlist,
+		Library,
+	};
+
 	PlaylistSongList(
 		QWidget *parent,
 		std::vector<PlaylistSongListRow> rows,
 		uint64_t selected,
 		int scrollTop,
 		Fn<void(uint64_t)> play,
-		Fn<void(std::vector<uint64_t>)> reorder);
+		Fn<void(std::vector<uint64_t>)> reorder,
+		Mode mode = Mode::Playlist);
 	~PlaylistSongList();
 	[[nodiscard]] uint64_t selectedDocument() const;
 	[[nodiscard]] int scrollTop() const;
@@ -34,6 +40,7 @@ public:
 	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
+	void setViewportLimit(int height);
 
 protected:
 	int resizeGetHeight(int width) override;
@@ -43,6 +50,7 @@ private:
 	not_null<Ui::ScrollArea*> _scroll;
 	not_null<Rows*> _rows;
 	int _restoreScrollTop = 0;
+	int _viewportLimit = 0;
 
 };
 

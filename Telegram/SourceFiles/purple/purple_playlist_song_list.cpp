@@ -26,7 +26,8 @@ public:
 		std::vector<PlaylistSongListRow> rows,
 		uint64_t selected,
 		Fn<void(uint64_t)> play,
-		Fn<void(std::vector<uint64_t>)> reorder);
+		Fn<void(std::vector<uint64_t>)> reorder,
+		Mode mode);
 	[[nodiscard]] uint64_t selectedDocument() const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
@@ -73,6 +74,7 @@ private:
 	std::vector<PlaylistSongListRow> _data;
 	Fn<void(uint64_t)> _play;
 	Fn<void(std::vector<uint64_t>)> _reorder;
+	Mode _mode = Mode::Playlist;
 	base::Timer _autoscroll;
 	QString _checkedState;
 	std::set<uint64_t> _verifiedDownloads;
@@ -94,17 +96,23 @@ PlaylistSongList::Rows::Rows(
 		std::vector<PlaylistSongListRow> rows,
 		uint64_t selected,
 		Fn<void(uint64_t)> play,
-		Fn<void(std::vector<uint64_t>)> reorder)
+		Fn<void(std::vector<uint64_t>)> reorder,
+		Mode mode)
 : RpWidget(parent)
 , _scroll(scroll)
 , _data(std::move(rows))
 , _play(std::move(play))
 , _reorder(std::move(reorder))
+, _mode(mode)
 , _autoscroll([=] { autoscroll(); }) {
 	setFocusPolicy(Qt::StrongFocus);
 	setMouseTracking(true);
-	setAccessibleName(tr::lng_purple_playlists_title(tr::now));
-	setAccessibleDescription(tr::lng_purple_playlists_list_help(tr::now));
+	setAccessibleName(_mode == Mode::Library
+		? tr::lng_purple_music_title(tr::now)
+		: tr::lng_purple_playlists_title(tr::now));
+	if (_mode == Mode::Playlist) {
+		setAccessibleDescription(tr::lng_purple_playlists_list_help(tr::now));
+	}
 	for (auto i = 0; i < int(_data.size()); ++i) {
 		if (_data[i].documentId == selected) _selected = i;
 	}
@@ -115,7 +123,8 @@ int PlaylistSongList::Rows::rowHeight() const {
 	const auto &layout = st::mediaPlayerFileLayout;
 	return std::max(
 		layout.songPadding.top() + layout.songThumbSize + layout.songPadding.bottom(),
-		layout.songStatusTop + 2 * st::normalFont->height + layout.songPadding.bottom());
+		layout.songStatusTop + (_mode == Mode::Playlist ? 2 : 1)
+			* st::normalFont->height + layout.songPadding.bottom());
 }
 
 int PlaylistSongList::Rows::resizeGetHeight(int) {
@@ -168,7 +177,9 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 	const auto last = std::min(int(_data.size()), visible.bottom() / height + 1);
 	const auto &layout = st::mediaPlayerFileLayout;
 	const auto left = layout.songPadding.left() + layout.songThumbSize + layout.songPadding.right();
-	const auto available = std::max(0, width() - left - layout.songThumbSize - layout.songPadding.right());
+	const auto available = std::max(0, width() - left
+		- (_mode == Mode::Playlist ? layout.songThumbSize : 0)
+		- layout.songPadding.right());
 	for (auto slot = first; slot < last; ++slot) {
 		const auto index = previewRow(slot);
 		const auto &row = _data[index];
@@ -202,15 +213,17 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 			top + layout.songStatusTop,
 			width(),
 			st::normalFont->elided(details, available));
-		const auto state = row.documentId == _current
-			? tr::lng_purple_playlists_current_row(tr::now, lt_status, sourceState(index))
-			: sourceState(index);
-		p.drawTextLeft(
-			left,
-			top + layout.songStatusTop + st::normalFont->height,
-			width(),
-			st::normalFont->elided(state, available));
-		st::menuIconReorder.paintInCenter(p, handleRect(slot));
+		if (_mode == Mode::Playlist) {
+			const auto state = row.documentId == _current
+				? tr::lng_purple_playlists_current_row(tr::now, lt_status, sourceState(index))
+				: sourceState(index);
+			p.drawTextLeft(
+				left,
+				top + layout.songStatusTop + st::normalFont->height,
+				width(),
+				st::normalFont->elided(state, available));
+		}
+		if (_reorder) st::menuIconReorder.paintInCenter(p, handleRect(slot));
 		if (_dragging && slot == _target) {
 			p.fillRect(0, top, width(), st::lineWidth, st::mediaPlayerActiveFg);
 		}
@@ -238,7 +251,7 @@ void PlaylistSongList::Rows::mousePressEvent(QMouseEvent *e) {
 	setFocus(Qt::MouseFocusReason);
 	select(_pressed, false);
 	_pressPosition = e->pos();
-	_handlePressed = handleRect(_pressed).contains(e->pos());
+	_handlePressed = _reorder && handleRect(_pressed).contains(e->pos());
 	e->accept();
 }
 
@@ -292,7 +305,7 @@ void PlaylistSongList::Rows::cancelInteraction() {
 }
 
 void PlaylistSongList::Rows::submitMove(int from, int to) {
-	if (!isEnabled() || from < 0 || to < 0 || from == to
+	if (!_reorder || !isEnabled() || from < 0 || to < 0 || from == to
 		|| from >= int(_data.size()) || to >= int(_data.size())) return;
 	auto ids = std::vector<uint64_t>();
 	ids.reserve(_data.size());
@@ -334,7 +347,7 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 		e->accept();
 		return;
 	}
-	if ((e->modifiers() & Qt::AltModifier)
+	if (_reorder && (e->modifiers() & Qt::AltModifier)
 		&& (key == Qt::Key_Up || key == Qt::Key_Down)) {
 		e->accept();
 		moveSelected(key == Qt::Key_Up ? -1 : 1);
@@ -449,7 +462,9 @@ QAccessible::Role PlaylistSongList::Rows::accessibilityChildRole() const {
 QString PlaylistSongList::Rows::accessibilityChildName(int index) const {
 	if (index < 0 || index >= int(_data.size())) return {};
 	const auto &row = _data[index];
-	return row.title + u", "_q + row.performer + u", "_q + row.duration + u", "_q
+	auto label = row.title + u", "_q + row.performer + u", "_q + row.duration;
+	if (_mode == Mode::Library) return label;
+	return label + u", "_q
 		+ (row.documentId == _current ? tr::lng_purple_playlists_current_row(tr::now, lt_status, sourceState(index)) : sourceState(index));
 }
 
@@ -516,7 +531,8 @@ PlaylistSongList::PlaylistSongList(
 		uint64_t selected,
 		int scrollTop,
 		Fn<void(uint64_t)> play,
-		Fn<void(std::vector<uint64_t>)> reorder)
+		Fn<void(std::vector<uint64_t>)> reorder,
+		Mode mode)
 : RpWidget(parent)
 , _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::mediaPlayerScroll))
 , _rows(_scroll->setOwnedWidget(object_ptr<Rows>(
@@ -525,7 +541,8 @@ PlaylistSongList::PlaylistSongList(
 	std::move(rows),
 	selected,
 	std::move(play),
-	std::move(reorder))).data())
+	std::move(reorder),
+	mode)).data())
 , _restoreScrollTop(scrollTop) {
 	_scroll->show();
 }
@@ -536,7 +553,7 @@ PlaylistSongList::~PlaylistSongList() {
 
 int PlaylistSongList::resizeGetHeight(int width) {
 	const auto height = std::min(
-		st::mediaPlayerListHeightMax,
+		_viewportLimit > 0 ? _viewportLimit : st::mediaPlayerListHeightMax,
 		_rows->rowHeight() * _rows->accessibilityChildCount());
 	_scroll->setGeometry(0, 0, width, height);
 	_rows->resizeToWidth(_scroll->viewport()->width());
@@ -574,6 +591,12 @@ void PlaylistSongList::cancelInteraction() {
 
 void PlaylistSongList::focusSelected() {
 	_rows->focusSelected();
+}
+
+void PlaylistSongList::setViewportLimit(int height) {
+	if (_viewportLimit == height) return;
+	_viewportLimit = height;
+	resizeToWidth(width());
 }
 
 } // namespace Purple

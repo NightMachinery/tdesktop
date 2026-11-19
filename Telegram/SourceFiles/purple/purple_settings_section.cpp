@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_last_seen.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_media_playback.h"
+#include "purple/purple_music_section.h"
 #include "purple/purple_recording_settings.h"
 #include "purple/purple_media_reply_settings.h"
 #include "purple/purple_preset_box.h"
@@ -481,6 +482,14 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	}));
 	if (controller) {
 		const auto window = base::make_weak(controller);
+		builder.addButton({
+			.id = u"advanced/purple_music_source_folder"_q,
+			.title = tr::lng_purple_music_source(),
+			.onClick = [=] {
+				if (const auto own = window.get()) ChooseMusicSourceFolder(own);
+			},
+			.keywords = { u"music"_q, u"playlist"_q, u"folder"_q },
+		});
 		for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
 			builder.addButton({
 				.id = kind == ArchivePurgeKind::Trashbin ? u"advanced/purple_archive_trash"_q : u"advanced/purple_archive_edits"_q,

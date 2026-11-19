@@ -219,6 +219,14 @@ PRIVATE
     purple/purple_playlist_song_list.h
     purple/purple_playlists_menu.cpp
     purple/purple_playlists_menu.h
+    purple/purple_music_index.cpp
+    purple/purple_music_index.h
+    purple/purple_music_index_service.cpp
+    purple/purple_music_index_service.h
+    purple/purple_music_section.cpp
+    purple/purple_music_section.h
+    purple/purple_music_source_roster.cpp
+    purple/purple_music_source_roster.h
     purple/purple_playlists_resolve_queue.cpp
     purple/purple_playlists_resolve_queue.h
     purple/purple_playlists_resolver.cpp
@@ -274,6 +282,7 @@ PRIVATE
     purple/hooks/media_playback.h
     purple/hooks/media_recording.h
     purple/hooks/media_recording_capture.h
+    purple/hooks/music_index.h
     purple/hooks/mute.h
     purple/hooks/work_view.h
     purple/purple_peek.cpp
