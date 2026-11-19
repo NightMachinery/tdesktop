@@ -53,8 +53,10 @@
 
 #include <QtCore/QDateTime>
 #include <QtGui/QClipboard>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QTextEdit>
 #include <deque>
 
 namespace Purple {
@@ -116,6 +118,7 @@ private:
 	};
 
 	void doSetInnerFocus() override;
+	void keyPressEvent(QKeyEvent *event) override;
 	void paintEvent(QPaintEvent *event) override;
 	[[nodiscard]] bool current() const;
 	[[nodiscard]] FilterId folder() const;
@@ -206,6 +209,7 @@ MusicSection::MusicSection(
 	read(_search->getLastText().trimmed() == _displayedSearch
 		? CatalogRead::Scan : CatalogRead::Reload);
 }) {
+	_search->customUpDown(true);
 	const auto addButton = [=](rpl::producer<QString> title, Fn<void()> callback) {
 		const auto button = _content->add(::Settings::CreateButtonWithIcon(
 			_content, std::move(title), st::settingsButton, {}));
@@ -281,8 +285,9 @@ bool MusicSection::showInternal(
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &) {
 	if (!dynamic_cast<MusicMemento*>(memento.get())) return false;
-	refresh(true);
+	refresh();
 	doSetInnerFocus();
+	_search->selectAll();
 	return true;
 }
 
@@ -292,6 +297,29 @@ std::shared_ptr<Window::SectionMemento> MusicSection::createMemento() {
 
 void MusicSection::doSetInnerFocus() {
 	_search->setFocusFast();
+}
+
+void MusicSection::keyPressEvent(QKeyEvent *event) {
+	if (_list && !event->modifiers() && isVisible() && current()) {
+		if (event->key() == Qt::Key_Down
+			&& _search->rawTextEdit()->hasFocus()
+			&& !_reading
+			&& _displayedSearch == _search->getLastText().trimmed()
+			&& _list->selectedDocument()
+			&& rosterCurrent()) {
+			event->accept();
+			_list->focusSelected();
+			return;
+		}
+		const auto focus = QApplication::focusWidget();
+		if (event->key() == Qt::Key_Escape && focus
+			&& _list->isAncestorOf(focus)) {
+			event->accept();
+			doSetInnerFocus();
+			return;
+		}
+	}
+	Window::SectionWidget::keyPressEvent(event);
 }
 
 QRect MusicSection::floatPlayerAvailableRect() {

@@ -7,6 +7,8 @@ regular player. **Load more tracks** reads the next catalog page.
 You can also set the source under **Settings → Purple → Music source folder**.
 In modal Normal mode, use `SPC m m` or run `open-music` in the command palette.
 `tdesktop-cli music` opens the same screen through Local automation.
+Opening Music again while it's already visible selects the search text and
+keeps your place in the results for the same source.
 
 The first scan backfills the selected chats in pages. The screen displays
 saved results during the scan. Once you focus, scroll, or select in the list,
@@ -29,11 +31,12 @@ selected folder, its entries are removed. Search filters out chats hidden by Pur
 rechecks the account, chat, and source message before opening a track.
 
 Double-click a track to play it. Use Command-click on macOS or Ctrl-click on
-other platforms to select tracks. With the track list focused, the arrow keys
-move the cursor and Space toggles selection. Press Enter or use the playback
-button to play the selection. Two or more tracks create a playlist in Hyper,
-in the order you selected them. Repeating the same selection reuses the
-playlist while the saved sources still match.
+other platforms to select tracks. Press Down from search to focus the current
+result and Escape from the results to return to search. In the list, the
+arrow keys move the cursor and Space toggles selection. Press Enter or use
+the playback button to play the selection. Two or more tracks create a
+playlist in Hyper, in the order you selected them. Repeating the same
+selection reuses the playlist while the saved sources still match.
 
 Right-click a track and choose **Copy Org link**, or focus the track and
 press the system Copy shortcut. This copies a `purpleaudio:` Org link
