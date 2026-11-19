@@ -56,6 +56,10 @@ mode. An input method composition can still open search.
 - `[ m` and `] m` scroll the active conversation by one visible page
   toward older or newer messages. They work in the main chat, replies,
   topics, pinned messages, and scheduled messages.
+- `] ]` jumps to the newest messages in the current view, even if the last
+  page needs to load. `] u` jumps to unread messages in the conversation.
+  Telegram takes you to the newest messages if there is no unread position
+  to jump to.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command

@@ -129,6 +129,17 @@ ordered(paging, "case Action::NewerMessagesPage:", "HistoryScroll(target)",
         "scroll->height()", "scroll->scrollTop()",
         "scroll->scrollToY((action == Action::OlderMessagesPage)",
         "(top - delta)", "(top + delta)")
+assert "{ Action::LatestMessages, { Qt::Key_BracketRight, Qt::Key_BracketRight } }" in keys
+assert "{ Action::UnreadMessages, { Qt::Key_BracketRight, Qt::Key_U } }" in keys
+ordered(available, "case Action::LatestMessages: return HistoryScroll(target) != nullptr",
+        "case Action::UnreadMessages: return target.chatActions && HistoryScroll(target)")
+ordered(paging, "case Action::LatestMessages:", "case Action::UnreadMessages:",
+        "if (const auto history = target.history)", "history->peer()",
+        "history->showHistory(peer->id, unread", "ShowAtUnreadMsgId", "ShowAtTheEndMsgId",
+        "target.jumpInSection(unread", "Data::UnreadMessagePosition", "Data::MaxMessagePosition")
+ordered(keys, "section->controller() == owner", "section->purpleMessageList(focus)",
+        ".jumpInSection = [section]", "section->cornerButtonsShowAtPosition(position)",
+        ".history = history", "history->purpleMessageList()")
 for view, assignment in (
         ("history/history_widget.cpp", "_list ="),
         ("history/view/history_view_chat_section.cpp", "_inner ="),

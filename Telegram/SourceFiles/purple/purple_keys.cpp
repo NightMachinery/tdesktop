@@ -111,6 +111,8 @@ enum class Action {
 	FocusConversation,
 	OlderMessagesPage,
 	NewerMessagesPage,
+	LatestMessages,
+	UnreadMessages,
 	Help,
 	Run,
 	DescribeChord,
@@ -198,6 +200,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_history_page_older(tr::now); } },
 	{ Action::NewerMessagesPage, "history-page-newer",
 		[] { return tr::lng_purple_keys_history_page_newer(tr::now); } },
+	{ Action::LatestMessages, "history-jump-to-latest",
+		[] { return tr::lng_jump_to_bottom(tr::now); } },
+	{ Action::UnreadMessages, "history-jump-to-unread",
+		[] { return tr::lng_unread_bar_some(tr::now); } },
 	{ Action::CopyMessageLink, "message-hint-copy-link",
 		[] { return tr::lng_purple_keys_message_link(tr::now); } },
 	{ Action::ReplyToMessage, "message-hint-reply",
@@ -262,6 +268,8 @@ const Binding kBindings[] = {
 	{ Action::FocusConversation, { Qt::Key_Space, Qt::Key_W, Qt::Key_C } },
 	{ Action::OlderMessagesPage, { Qt::Key_BracketLeft, Qt::Key_M } },
 	{ Action::NewerMessagesPage, { Qt::Key_BracketRight, Qt::Key_M } },
+	{ Action::LatestMessages, { Qt::Key_BracketRight, Qt::Key_BracketRight } },
+	{ Action::UnreadMessages, { Qt::Key_BracketRight, Qt::Key_U } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -440,7 +448,9 @@ const std::vector<Binding> &Bindings() {
 struct Target {
 	QPointer<QWidget> focus;
 	Dialogs::InnerWidget *list = nullptr;
+	HistoryWidget *history = nullptr;
 	MessageHints::Target messages;
+	Fn<void(Data::MessagePosition)> jumpInSection;
 	bool folders = false;
 	bool chatActions = false;
 	Window::SessionController *controller = nullptr;
@@ -458,6 +468,9 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 			? Target{
 				.focus = focus,
 				.messages = { .section = list, .scheduled = scheduled },
+				.jumpInSection = [section](Data::MessagePosition position) {
+					section->cornerButtonsShowAtPosition(position);
+				},
 				.chatActions = chatActions,
 				.controller = owner,
 			}
@@ -484,6 +497,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					&& history->allowsPurpleKeys(focus))
 				? Target{
 					.focus = focus,
+					.history = history,
 					.messages = { .main = history->purpleMessageList() },
 					.chatActions = true,
 					.controller = owner,
@@ -565,7 +579,9 @@ bool Available(Action action, const Target &target) {
 	case Action::EditMessage:
 		return target.messages.supportsCompose(MessageHints::Action::Edit);
 	case Action::OlderMessagesPage:
-	case Action::NewerMessagesPage: return HistoryScroll(target) != nullptr;
+	case Action::NewerMessagesPage:
+	case Action::LatestMessages: return HistoryScroll(target) != nullptr;
+	case Action::UnreadMessages: return target.chatActions && HistoryScroll(target);
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
@@ -1220,6 +1236,21 @@ void Keys::dispatch(Action action, const Target &target) {
 				: (top + delta));
 		}
 		break;
+	case Action::LatestMessages:
+	case Action::UnreadMessages: {
+		const auto unread = (action == Action::UnreadMessages);
+		if (const auto history = target.history) {
+			if (const auto peer = history->peer()) {
+				history->showHistory(peer->id, unread
+					? ShowAtUnreadMsgId
+					: ShowAtTheEndMsgId);
+			}
+		} else if (target.jumpInSection) {
+			target.jumpInSection(unread
+				? Data::UnreadMessagePosition
+				: Data::MaxMessagePosition);
+		}
+	} break;
 	case Action::SelectMessage:
 		startHint(Hint::Select, tr::lng_purple_keys_message_select_empty(tr::now));
 		break;
