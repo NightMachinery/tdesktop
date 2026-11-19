@@ -71,6 +71,9 @@ ordered(dispatch, "Qt::Key_Down : Qt::Key_Up", "processKeyDispatch",
         "case Action::OpenChat:", "chooseRow()")
 assert re.search(r'\{ Action::Backgrounds, "chat-backgrounds-visibility-toggle"', keys)
 assert "{ Action::Backgrounds, { Qt::Key_Space, Qt::Key_C, Qt::Key_B } }" in keys
+assert '{ Action::OpenMusic, "open-music"' in keys
+assert "{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } }" in keys
+ordered(dispatch, "case Action::OpenMusic:", "ShowMusicSection(current)")
 stock_launch = between(read("core/shortcuts.cpp"),
                        "bool Launch(std::vector<Command>", "rpl::producer<not_null<Request*>>")
 ordered(stock_launch, "if (Paused)", "return false;", "RequestHandler", "handler()")

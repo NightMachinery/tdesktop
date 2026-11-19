@@ -5,6 +5,8 @@ Telegram chat folder for the active account. Search by title, performer, or
 filename. The newest posts appear first. Open a track to play it in the
 regular player. **Load more tracks** reads the next catalog page.
 You can also set the source under **Settings → Purple → Music source folder**.
+In modal Normal mode, use `SPC m m` or run `open-music` in the command palette.
+`tdesktop-cli music` opens the same screen through Local automation.
 
 The first scan backfills the selected chats in pages. The screen displays
 saved results during the scan. Reopen Music or use **Refresh music** to

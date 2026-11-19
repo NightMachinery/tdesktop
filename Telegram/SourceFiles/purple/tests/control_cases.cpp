@@ -87,9 +87,11 @@ void PolicyCases() {
 		Check(AuthorizeControlCommand(name, policy).code == u"unsupported"_q, "future and settings commands unavailable");
 	}
 	auto activated = -1;
+	auto musicOpenCount = 0;
 	const auto adapter = ControlWindowAdapter{
 		.list = [] { return std::vector<ControlWindow>{ {u"one"_q, true, true}, {u"two"_q, false, false} }; },
 		.activate = [&](int index) { activated = index; return index >= 0 && index < 2; },
+		.openMusic = [&] { ++musicOpenCount; return true; },
 	};
 	const auto call = [&](QString command, QJsonObject args = {}) {
 		auto result = ControlResult();
@@ -101,8 +103,22 @@ void PolicyCases() {
 	Check(call(u"window.activate"_q, {{u"index"_q, 0.5}}).code == u"bad-request"_q && activated == 1, "fractional activate never defaults to zero");
 	Check(call(u"window.activate"_q, {{u"index"_q, 5}}).code == u"not-found"_q, "missing index refusal");
 	Check(call(u"window.cycle"_q).code.isEmpty() && activated == 1, "window cycle routes adapter");
+	Check(call(u"window.open-music"_q, {{u"index"_q, 0}}).code == u"bad-request"_q
+		&& musicOpenCount == 0, "open Music accepts no arguments");
+	policy.locked = true;
+	policy.allowLocked[int(ControlLockUnit::Window)] = true;
+	Check(call(u"window.open-music"_q).code == u"locked"_q && musicOpenCount == 0,
+		"open Music requires an unlocked app");
+	policy.locked = false;
+	policy.groups[0] = false;
+	Check(call(u"window.open-music"_q).code == u"capability-off"_q && musicOpenCount == 0,
+		"open Music uses the window capability");
+	policy.groups[0] = true;
+	Check(call(u"window.open-music"_q).value.value(u"opened"_q).toBool()
+		&& musicOpenCount == 1, "open Music dispatches once");
 	const auto advertised = call(u"hello"_q).value.value(u"commands"_q).toArray();
-	Check(advertised.size() == 15 && advertised.contains(u"media.music-link"_q)
+	Check(advertised.size() == 16 && advertised.contains(u"window.open-music"_q)
+		&& advertised.contains(u"media.music-link"_q)
 		&& advertised.contains(u"media.play-music-link"_q),
 		"hello advertises implemented commands including music links");
 	auto consent = ControlConsent();

@@ -178,6 +178,7 @@ func TestCommandsAndHumanOutput(t *testing.T) {
 		{[]string{"windows"}, "window.list", `{"windows":[{"id":0,"title":"window\nname","primary":true,"active":true}]}`, `* 0`},
 		{[]string{"activate", "2"}, "window.activate", `{"activated":2}`, "activated 2\n"},
 		{[]string{"cycle"}, "window.cycle", `{"activated":0}`, "activated 0\n"},
+		{[]string{"music"}, "window.open-music", `{"opened":true}`, "opened Music\n"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			path := fakeServer(t, func(c net.Conn, req map[string]any) {

@@ -8,6 +8,7 @@
 #include "purple/purple_control_server.h"
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_music_section.h"
 #include "purple/purple_version.h"
 #include "window/window_controller.h"
 #include "settings.h"
@@ -73,6 +74,19 @@ ControlWindowAdapter WindowAdapter() {
 			const auto windows = CollectControlWindows();
 			if (index < 0 || index >= windows.size()) return false;
 			windows[index].controller->activate();
+			return true;
+		},
+		.openMusic = [] {
+			const auto window = Core::App().activeWindow();
+			const auto controller = window ? window->sessionController() : nullptr;
+			if (!controller || window->locked() || Core::App().screenIsLocked()) {
+				return false;
+			}
+			const auto weak = base::make_weak(window);
+			if (!ShowMusicSection(controller)) return false;
+			if (const auto live = weak.get()) {
+				live->activate();
+			}
 			return true;
 		},
 	};

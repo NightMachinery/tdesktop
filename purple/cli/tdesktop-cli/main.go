@@ -23,7 +23,7 @@ import (
 const lineLimit = 64 * 1024
 const callTimeout = 2 * time.Second
 
-var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|media music-link|media play-music-link TOKEN|voice now|lock|watch [media|lock|all]"
+var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|music|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|media music-link|media play-music-link TOKEN|voice now|lock|watch [media|lock|all]"
 
 type options struct {
 	socket  string
@@ -109,6 +109,8 @@ func parseOptions(args []string) (options, error) {
 		o.command = "window.list"
 	case "cycle":
 		o.command = "window.cycle"
+	case "music":
+		o.command = "window.open-music"
 	case "media", "voice":
 		if positional[0] == "media" && len(positional) >= 2 {
 			switch positional[1] {
@@ -415,6 +417,14 @@ func humanResult(command string, result json.RawMessage) (string, error) {
 			fmt.Fprintf(&output, "%s %d\t%s\n", marker, w.ID, strconv.QuoteToGraphic(w.Title))
 		}
 		return output.String(), nil
+	case "window.open-music":
+		var value struct {
+			Opened bool `json:"opened"`
+		}
+		if json.Unmarshal(result, &value) != nil || !value.Opened {
+			return "", errors.New("invalid open Music result")
+		}
+		return "opened Music\n", nil
 	case "window.activate", "window.cycle":
 		var value struct {
 			Activated *int `json:"activated"`

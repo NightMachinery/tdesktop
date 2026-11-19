@@ -6,7 +6,7 @@ allow commands. Automation starts off. A socket request cannot open a consent
 dialog, enable automation or change settings.
 
 This version supports `hello`, `ping`, `window.list`, `window.activate`,
-`window.cycle`, `emoji.render`, `media.toggle`, `media.play`, `media.pause`,
+`window.cycle`, `window.open-music`, `emoji.render`, `media.toggle`, `media.play`, `media.pause`,
 `media.now`, `media.music-link`, `media.play-music-link`, `lock`, `subscribe`
 and `unsubscribe`. Window commands keep the
 primary-first order. Lock refusal is configurable per capability as described
@@ -58,6 +58,7 @@ go build -o tdesktop-cli .
 ./tdesktop-cli windows
 ./tdesktop-cli activate 0
 ./tdesktop-cli cycle
+./tdesktop-cli music
 ./tdesktop-cli media toggle
 ./tdesktop-cli media pause --voice
 ./tdesktop-cli media now --json
@@ -87,6 +88,12 @@ Exit codes are 0 for success, 2 for automation/capability/lock refusal, 3 for no
 reachable socket, 4 for an unsupported protocol or command, and 1 for other
 errors. The CLI prints local enable instructions when automation is disabled.
 The CMake app target does not build or install this separate command.
+
+## Opening Music
+
+`tdesktop-cli music` opens the native library in the active account window
+and focuses Purple. This uses the window capability and requires an unlocked
+account window. It takes no arguments.
 
 ## Media and lock
 

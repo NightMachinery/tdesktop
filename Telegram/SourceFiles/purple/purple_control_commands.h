@@ -37,6 +37,7 @@ struct ControlWindow {
 struct ControlWindowAdapter {
 	std::function<std::vector<ControlWindow>()> list;
 	std::function<bool(int)> activate;
+	std::function<bool()> openMusic;
 };
 
 using ControlEmojiAdapter = std::function<void(

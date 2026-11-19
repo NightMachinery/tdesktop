@@ -633,10 +633,10 @@ void AddMusicMenuRow(
 	});
 }
 
-void ShowMusicSection(not_null<Window::SessionController*> controller) {
-	if (MusicWindowCurrent(controller)) {
-		controller->showSection(std::make_shared<MusicMemento>());
-	}
+bool ShowMusicSection(not_null<Window::SessionController*> controller) {
+	if (!MusicWindowCurrent(controller)) return false;
+	controller->showSection(std::make_shared<MusicMemento>());
+	return true;
 }
 
 void ChooseMusicSourceFolder(not_null<Window::SessionController*> controller) {

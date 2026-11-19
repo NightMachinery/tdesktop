@@ -24,6 +24,7 @@
 #include "purple/purple_chat_background.h"
 #include "purple/purple_config.h"
 #include "purple/purple_message_hints.h"
+#include "purple/purple_music_section.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
 #include "ui/abstract_button.h"
@@ -97,6 +98,7 @@ enum class Action {
 	OpenArchive,
 	OpenContacts,
 	OpenScheduled,
+	OpenMusic,
 	OpenChatMenu,
 	PreviewChat,
 	TogglePlayback,
@@ -161,6 +163,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_shortcuts_contacts(tr::now); } },
 	{ Action::OpenScheduled, "open-scheduled-messages",
 		[] { return tr::lng_scheduled_messages(tr::now); } },
+	{ Action::OpenMusic, "open-music",
+		[] { return tr::lng_purple_music_title(tr::now); } },
 	{ Action::OpenChatMenu, "open-chat-menu",
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
 	{ Action::PreviewChat, "preview-chat",
@@ -265,6 +269,7 @@ const Binding kBindings[] = {
 	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
+	{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } },
 	{ Action::TogglePlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_P } },
 	{ Action::StopPlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_S } },
 	{ Action::PreviousTrack, { Qt::Key_BracketLeft, Qt::Key_T } },
@@ -1190,6 +1195,9 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::OpenSettings:
 		current->showSettings();
+		break;
+	case Action::OpenMusic:
+		ShowMusicSection(current);
 		break;
 	case Action::OpenSavedMessages:
 		current->showPeerHistory(current->session().user());

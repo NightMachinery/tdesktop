@@ -9,7 +9,8 @@ namespace Purple {
 namespace {
 
 const auto Commands = std::array{
-	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q, u"emoji.render"_q,
+	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q,
+	u"window.open-music"_q, u"emoji.render"_q,
 	u"media.toggle"_q, u"media.play"_q, u"media.pause"_q, u"media.now"_q, u"lock"_q, u"subscribe"_q, u"unsubscribe"_q,
 	u"media.music-link"_q, u"media.play-music-link"_q,
 };
@@ -72,7 +73,8 @@ ControlResult AuthorizeControlCommand(const QString &command, const ControlPolic
 	}
 	if (command.startsWith(u"window."_q)) {
 		if (!policy.groups[0]) return ControlError(u"capability-off"_q, u"The window capability is disabled."_q);
-		if (!ControlAllowedWhileLocked(policy, ControlLockUnit::Window)) return ControlError(u"locked"_q, u"Window automation is unavailable while locked."_q);
+		if ((policy.locked && command == u"window.open-music"_q)
+			|| !ControlAllowedWhileLocked(policy, ControlLockUnit::Window)) return ControlError(u"locked"_q, u"Window automation is unavailable while locked."_q);
 	}
 	if (command == u"emoji.render"_q) {
 		if (!policy.groups[4]) return ControlError(u"capability-off"_q, u"The emoji capability is disabled."_q);
@@ -212,6 +214,17 @@ void DispatchControlRequest(
 	}
 	if (request.command == u"subscribe"_q || request.command == u"unsubscribe"_q) {
 		reply(ControlError(u"unsupported"_q, u"Subscriptions require a socket connection."_q));
+		return;
+	}
+
+	if (request.command == u"window.open-music"_q) {
+		if (!request.arguments.isEmpty()) {
+			reply(ControlError(u"bad-request"_q, u"window.open-music takes no arguments."_q));
+		} else if (!windows.openMusic || !windows.openMusic()) {
+			reply(ControlError(u"not-found"_q, u"No active account window for Music."_q));
+		} else {
+			reply({ QJsonObject{ { u"opened"_q, true } } });
+		}
 		return;
 	}
 	const auto list = windows.list ? windows.list() : std::vector<ControlWindow>();
