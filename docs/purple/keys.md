@@ -35,7 +35,7 @@ mode. An input method composition can still open search.
 - `SPC c u` opens Telegram's file picker when the attachment button is
   available in the current chat, reply, topic, or scheduled-message view.
   Telegram handles file selection and confirmation.
-- `SPC m m` opens the Music library and `SPC m l` opens Playlists for the
+- `SPC m m` toggles the Music library and `SPC m l` opens Playlists for the
   active account.
 - `SPC m p` toggles playback and `SPC m s` stops it. `SPC m b` and
   `SPC m f` seek by the configured step. `[ t` and `] t` move to the
@@ -129,3 +129,12 @@ The history and compose headers let Purple invoke their native file pickers
 when the corresponding attachment controls are available.
 `window/section_widget.cpp` subscribes sections to repaint changes and checks
 wallpaper visibility before painting the live background.
+
+## Open chats with the keyboard
+
+`SPC Enter` opens the chat palette in Normal mode. Search your chats, archived
+chats, channels, and contacts by name, username, phone number, or contact note.
+Use Up or Down to move and Enter to open the highlighted chat. The palette
+uses exact, case-insensitive substrings and accepts terms in any order.
+A complete `@username` or international `+phone` can also resolve on Telegram.
+Ordinary searches, including contact notes, are matched locally.

@@ -28,6 +28,8 @@
 #include "purple/purple_config.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_chat_palette.h"
+#include "purple/purple_exact_search.h"
 #include "purple/purple_playlists_box.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
@@ -131,6 +133,7 @@ enum class Action {
 	PreviousChat,
 	NextChat,
 	OpenChat,
+	ChatPalette,
 	PreviousFolder,
 	NextFolder,
 	SelectMessage,
@@ -198,6 +201,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_chat_next(tr::now); } },
 	{ Action::OpenChat, "chat-cursor-open",
 		[] { return tr::lng_purple_keys_chat_open(tr::now); } },
+	{ Action::ChatPalette, "chat-palette",
+		[] { return tr::lng_purple_chat_palette(tr::now); } },
 	{ Action::PreviousFolder, "folder-previous",
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); } },
 	{ Action::NextFolder, "folder-next",
@@ -320,6 +325,7 @@ const Binding kBindings[] = {
 	{ Action::NextChat, { Qt::Key_BracketRight, Qt::Key_C } },
 	{ Action::NextChat, { Qt::Key_J } },
 	{ Action::OpenChat, { Qt::Key_Return } },
+	{ Action::ChatPalette, { Qt::Key_Space, Qt::Key_Return } },
 	{ Action::PreviousFolder, { Qt::Key_BracketLeft, Qt::Key_F } },
 	{ Action::NextFolder, { Qt::Key_BracketRight, Qt::Key_F } },
 	{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } },
@@ -575,6 +581,9 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 			}
 			: Target();
 	};
+	if (MusicAllowsModalKeys(owner, focus)) {
+		return { .focus = focus, .controller = owner };
+	}
 	for (auto widget = focus; widget; widget = widget->parentWidget()) {
 		if (const auto dialogs = dynamic_cast<Dialogs::Widget*>(widget)) {
 			const auto list = dialogs->purpleKeysList(focus);
@@ -822,14 +831,13 @@ void PaletteBox(
 			: lines.join('\n'));
 	};
 	const auto filter = [=] {
-		const auto query = field->getLastText().trimmed();
+		const auto terms = ExactSearchTerms(field->getLastText());
 		matches->clear();
 		for (const auto command : commands) {
-			if (command->label().contains(query, Qt::CaseInsensitive)
-				|| QString::fromLatin1(command->id).contains(
-					query, Qt::CaseInsensitive)
-				|| BindingsLabel(command->action).contains(
-					query, Qt::CaseInsensitive)) {
+			const auto text = command->label() + u' '
+				+ QString::fromLatin1(command->id) + u' '
+				+ BindingsLabel(command->action);
+			if (MatchExactSearch(terms, text)) {
 				matches->push_back(command);
 			}
 		}
@@ -1285,8 +1293,12 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::OpenSettings:
 		current->showSettings();
 		break;
+	case Action::ChatPalette:
+		reset();
+		ShowChatPalette(current);
+		break;
 	case Action::OpenMusic:
-		ShowMusicSection(current);
+		ToggleMusicSection(current);
 		break;
 	case Action::OpenPlaylists:
 		reset();

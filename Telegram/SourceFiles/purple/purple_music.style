@@ -1,0 +1,51 @@
+using "ui/basic.style";
+using "ui/widgets/widgets.style";
+using "ui/layers/layers.style";
+
+purpleMusicMaxWidth: 840px;
+purpleMusicHeaderHeight: 64px;
+purpleMusicMargin: 24px;
+purpleMusicToolbarGap: 6px;
+purpleMusicSearchIconWidth: 42px;
+purpleMusicSearchIcon: icon {{ "box_search", windowSubTextFg }};
+purpleMusicSearchMargin: margins(24px, 4px, 24px, 16px);
+purpleMusicStatusMargin: margins(24px, 0px, 24px, 12px);
+purpleMusicListMargin: margins(12px, 0px, 12px, 0px);
+purpleMusicActionMargin: margins(24px, 0px, 24px, 10px);
+
+purpleMusicTitle: FlatLabel(boxTitle) {
+	style: TextStyle(semiboldTextStyle) {
+		font: font(22px semibold);
+	}
+}
+
+purpleMusicSearch: InputField(defaultInputField) {
+	textBg: windowBgOver;
+	textBgActive: windowBgOver;
+	textMargins: margins(42px, 14px, 14px, 8px);
+	placeholderMargins: margins(0px, 0px, 0px, 0px);
+	placeholderFgActive: windowSubTextFg;
+	placeholderShift: 0px;
+	placeholderScale: 0.0;
+	borderRadius: 10px;
+	border: 0px;
+	borderActive: 0px;
+	heightMin: 46px;
+	heightMax: 46px;
+}
+
+purpleMusicMore: IconButton(defaultIconButton) {
+	icon: icon {{ "title_menu_dots", boxTitleCloseFg }};
+	iconOver: icon {{ "title_menu_dots", boxTitleCloseFgOver }};
+	width: 36px;
+	height: 36px;
+}
+
+purpleMusicBack: IconButton(defaultIconButton) {
+	icon: icon {{ "box_button_back", boxTitleCloseFg }};
+	iconOver: icon {{ "box_button_back", boxTitleCloseFgOver }};
+	width: 36px;
+	height: 36px;
+	rippleAreaSize: 32px;
+	rippleAreaPosition: point(2px, 2px);
+}

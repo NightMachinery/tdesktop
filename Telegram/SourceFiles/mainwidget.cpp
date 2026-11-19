@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwidget.h"
 
+#include "purple/purple_music_section.h"
 #include "purple/hooks/recording.h"
 
 #include "api/api_updates.h"
@@ -288,6 +289,8 @@ MainWidget::MainWidget(
 , _playerPlaylist(this, _controller)
 , _changelogs(Core::Changelogs::Create(&controller->session())) {
 	Purple::AttachRecordingStrip(this, [=] { updateControlsGeometry(); });
+	Purple::MusicHideChatsValue() | rpl::skip(1)
+		| rpl::on_next([=] { updateControlsGeometry(); }, lifetime());
 	if (_dialogs) {
 		setupConnectingWidget();
 	}
@@ -2709,6 +2712,9 @@ void MainWidget::updateControlsGeometry() {
 		_thirdShadow.destroy();
 	}
 	const auto mainSectionTop = getMainSectionTop();
+	const auto musicWide = !isOneColumn() && Purple::MusicHidesChats(_mainSection.data());
+	Purple::UpdateMusicSidebar(_dialogs.get(), musicWide, !isOneColumn());
+	Purple::UpdateMusicSidebar(_sideShadow.get(), musicWide, !isOneColumn());
 	auto dialogsWidth = _dialogs
 		? int(base::SafeRound(_a_dialogsWidth.value(_dialogsWidth)))
 		: isOneColumn()
@@ -2760,6 +2766,7 @@ void MainWidget::updateControlsGeometry() {
 				width() - st::columnMinimalWidthMain);
 			_dialogs->setGeometryToLeft(0, 0, dialogsWidth, height());
 		}
+		if (musicWide) dialogsWidth = 0;
 		if (_sideShadow) {
 			_sideShadow->setGeometryToLeft(
 				dialogsWidth,
@@ -2817,6 +2824,7 @@ void MainWidget::updateControlsGeometry() {
 			_contentScrollAddToY);
 	}
 	refreshResizeAreas();
+	Purple::UpdateMusicSidebar(_firstColumnResizeArea.data(), musicWide, !isOneColumn());
 	if (_player) {
 		_player->entity()->updateDropdownsGeometry();
 	}

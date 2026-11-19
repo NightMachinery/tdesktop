@@ -6,6 +6,8 @@
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "data/data_chat_filters.h"
+#include "core/core_settings.h"
+#include "mainwidget.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
@@ -31,6 +33,7 @@
 #include "rpl/variable.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/format_values.h"
@@ -38,6 +41,7 @@
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/section_memento.h"
 #include "window/section_widget.h"
@@ -47,14 +51,17 @@
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
-#include "styles/style_settings.h"
+#include "styles/style_purple_music.h"
+#include "styles/style_widgets.h"
 #include "styles/style_window.h"
 #include "styles/style_window_main_menu.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QVariant>
 #include <QtGui/QClipboard>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
+#include "ui/painter.h"
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
@@ -64,10 +71,12 @@
 namespace Purple {
 namespace {
 
+constexpr auto kHideChatsPref = "purple.music.show-chats";
 constexpr auto kSearchPageSize = 100;
 constexpr auto kRefreshDelay = crl::time(180);
 
 rpl::event_stream<Main::Session*> MusicFolderChanges;
+rpl::event_stream<bool> MusicHideChatsChanges;
 
 QString MusicBookmarkOrgLink(const MusicBookmark &bookmark) {
 	auto label = bookmark.title;
@@ -111,6 +120,7 @@ public:
 	std::shared_ptr<Window::SectionMemento> createMemento() override;
 	QRect floatPlayerAvailableRect() override;
 	bool floatPlayerHandleWheelEvent(QEvent *) override;
+	[[nodiscard]] bool allowsModalKeys(QWidget *focus) const;
 
 private:
 	enum class CatalogRead {
@@ -135,6 +145,8 @@ private:
 	void read(CatalogRead mode);
 	void render();
 	void updateListHeight();
+	void setStatus(const QString &text);
+	void showMenu(not_null<Ui::IconButton*> button);
 	void toggleTrack(quint64 documentId);
 	void updateSelection();
 	bool playSelection();
@@ -148,10 +160,11 @@ private:
 
 	not_null<Ui::VerticalLayout*> _content;
 	not_null<Ui::InputField*> _search;
-	not_null<Ui::FlatLabel*> _status;
-	Ui::SettingsButton *_more = nullptr;
-	Ui::SettingsButton *_playChosen = nullptr;
+	not_null<Ui::SlideWrap<Ui::FlatLabel>*> _status;
+	Ui::SlideWrap<Ui::RoundButton> *_more = nullptr;
+	Ui::SlideWrap<Ui::RoundButton> *_playChosen = nullptr;
 	QPointer<PlaylistSongList> _list;
+	base::unique_qptr<Ui::PopupMenu> _menu;
 	MTP::Sender _api;
 	base::Timer _refreshTimer;
 	base::Timer _readTimer;
@@ -201,10 +214,13 @@ MusicSection::MusicSection(
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
 , _search(_content->add(object_ptr<Ui::InputField>(
 	_content,
-	st::defaultInputField,
+	st::purpleMusicSearch,
 	Ui::InputField::Mode::SingleLine,
-	tr::lng_purple_music_search())))
-, _status(_content->add(object_ptr<Ui::FlatLabel>(_content, QString(), st::boxLabel)))
+	tr::lng_purple_music_search()), st::purpleMusicSearchMargin))
+, _status(_content->add(object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
+	_content,
+	object_ptr<Ui::FlatLabel>(_content, QString(), st::boxLabel),
+	st::purpleMusicStatusMargin)))
 , _api(&session().mtp())
 , _refreshTimer([=] { refresh(); })
 , _readTimer([=] {
@@ -212,41 +228,101 @@ MusicSection::MusicSection(
 		? CatalogRead::Scan : CatalogRead::Reload);
 }) {
 	_search->customUpDown(true);
-	const auto addButton = [=](rpl::producer<QString> title, Fn<void()> callback) {
-		const auto button = _content->add(::Settings::CreateButtonWithIcon(
-			_content, std::move(title), st::settingsButton, {}));
-		button->setClickedCallback(std::move(callback));
-		return button;
-	};
-	addButton(tr::lng_purple_music_back(), [=] { controller->showBackFromStack(); });
-	addButton(tr::lng_purple_music_source(), [=] { ChooseMusicSourceFolder(controller); });
-	addButton(tr::lng_purple_music_refresh(), [=] { refresh(true); });
-	addButton(tr::lng_purple_playlists_title(), [=] {
+	const auto searchIcon = Ui::CreateChild<Ui::RpWidget>(_search);
+	searchIcon->setAttribute(Qt::WA_TransparentForMouseEvents);
+	searchIcon->paintRequest() | rpl::on_next([=] {
+		auto painter = QPainter(searchIcon);
+		st::purpleMusicSearchIcon.paintInCenter(painter, searchIcon->rect());
+	}, searchIcon->lifetime());
+	_search->sizeValue() | rpl::on_next([=](QSize size) {
+		searchIcon->resize(st::purpleMusicSearchIconWidth, size.height());
+		searchIcon->moveToLeft(0, 0, size.width());
+	}, searchIcon->lifetime());
+	searchIcon->raise();
+	const auto header = _content->insert(0, object_ptr<Ui::RpWidget>(_content));
+	header->setFixedHeight(st::purpleMusicHeaderHeight);
+	const auto back = Ui::CreateChild<Ui::IconButton>(
+		header, st::purpleMusicBack);
+	back->setAccessibleName(tr::lng_purple_music_back(tr::now));
+	back->setClickedCallback([=] { controller->showBackFromStack(); });
+	const auto title = Ui::CreateChild<Ui::FlatLabel>(
+		header, tr::lng_purple_music_title(), st::purpleMusicTitle);
+	const auto playlists = Ui::CreateChild<Ui::RoundButton>(
+		header, tr::lng_purple_playlists_title(), st::defaultLightButton);
+	playlists->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+	playlists->setClickedCallback([=] {
 		if (current()) ShowPlaylistsBox(controller);
 	});
-	_more = addButton(tr::lng_purple_music_more(), [=] {
-		read(CatalogRead::Append);
-	});
-	_more->hide();
-	_playChosen = addButton(
+	const auto menu = Ui::CreateChild<Ui::IconButton>(header, st::purpleMusicMore);
+	menu->setAccessibleName(tr::lng_purple_music_options(tr::now));
+	menu->setClickedCallback([=] { showMenu(menu); });
+	const auto placeHeader = [=] {
+		const auto center = st::purpleMusicHeaderHeight / 2;
+		const auto margin = st::purpleMusicMargin;
+		back->moveToLeft(margin - st::purpleMusicToolbarGap,
+			center - back->height() / 2, header->width());
+		menu->moveToRight(margin - st::purpleMusicToolbarGap,
+			center - menu->height() / 2, header->width());
+		const auto actionsWidth = margin + menu->width();
+		playlists->moveToRight(actionsWidth,
+			center - playlists->height() / 2, header->width());
+		const auto titleLeft = margin + back->width();
+		title->resizeToWidth(std::max(1,
+			header->width() - titleLeft - actionsWidth - playlists->width()));
+		title->moveToLeft(titleLeft, center - title->height() / 2,
+			header->width());
+	};
+	playlists->setWidthChangedCallback(placeHeader);
+	header->widthValue() | rpl::on_next(placeHeader, lifetime());
+	const auto addAction = [=](
+			rpl::producer<QString> text,
+			const style::RoundButton &buttonStyle,
+			style::align align,
+			Fn<void()> callback) {
+		const auto wrap = _content->add(object_ptr<Ui::SlideWrap<Ui::RoundButton>>(
+			_content,
+			object_ptr<Ui::RoundButton>(_content, std::move(text), buttonStyle),
+			st::purpleMusicActionMargin), align);
+		wrap->entity()->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+		wrap->entity()->setClickedCallback(std::move(callback));
+		return wrap;
+	};
+	const auto folder = addAction(tr::lng_purple_music_source(),
+		st::defaultLightButton, style::al_left,
+		[=] { ChooseMusicSourceFolder(controller); });
+	auto changes = MusicFolderChanges.events()
+		| rpl::filter([=](Main::Session *session) { return session == &this->session(); })
+		| rpl::to_empty;
+	rpl::merge(session().data().chatsFilters().changed(), std::move(changes))
+		| rpl::on_next([=] {
+			folder->toggle(!this->folder(), anim::type::instant);
+		}, lifetime());
+	folder->toggle(!this->folder(), anim::type::instant);
+	_playChosen = addAction(
 		tr::lng_purple_music_play_selected(lt_count, _selectionCount.value()
 			| rpl::map([](int count) { return float64(count); })
 			| tr::to_count()),
-		[=] { playSelection(); });
-	_playChosen->hide();
+		st::defaultActiveButton, style::al_left, [=] { playSelection(); });
+	_playChosen->hide(anim::type::instant);
+	_more = addAction(tr::lng_purple_music_more(),
+		st::defaultLightButton, style::al_right, [=] { read(CatalogRead::Append); });
+	_more->hide(anim::type::instant);
+	_status->hide(anim::type::instant);
 	widthValue() | rpl::on_next([=](int width) {
-		_content->resizeToWidth(width);
+		const auto contentWidth = std::min(width, st::purpleMusicMaxWidth);
+		_content->resizeToWidth(contentWidth);
+		_content->move((width - contentWidth) / 2, 0);
 	}, lifetime());
 	heightValue() | rpl::on_next([=] { updateListHeight(); }, lifetime());
-	_status->heightValue() | rpl::on_next([=] { updateListHeight(); }, lifetime());
+	_content->heightValue() | rpl::on_next([=] { updateListHeight(); }, lifetime());
 	_search->changes() | rpl::on_next([=] {
 		++_query;
 		_reading = false;
 		if (_search->getLastText().trimmed() != _displayedSearch) {
-			_more->hide();
+			_more->hide(anim::type::instant);
 			_readTimer.callOnce(kRefreshDelay);
 		} else {
-			_more->setVisible(_moreAvailable);
+			_more->toggle(_moreAvailable, anim::type::instant);
 		}
 	}, lifetime());
 	_search->submits() | rpl::on_next([=] {
@@ -344,6 +420,24 @@ void MusicSection::paintEvent(QPaintEvent *event) {
 	painter.fillRect(event->rect(), st::boxBg->c);
 }
 
+void MusicSection::showMenu(not_null<Ui::IconButton*> button) {
+	if (!current()) return;
+	_menu = base::make_unique_q<Ui::PopupMenu>(this, st::defaultPopupMenu);
+	_menu->addAction(tr::lng_purple_music_source(tr::now), [=] {
+		ChooseMusicSourceFolder(controller());
+	});
+	_menu->addAction(tr::lng_purple_music_refresh(tr::now), [=] { refresh(true); });
+	_menu->popup(button->mapToGlobal(QPoint(0, button->height())));
+}
+
+bool MusicSection::allowsModalKeys(QWidget *focus) const {
+	if (!current() || !isVisible() || !isAncestorOf(focus)) return false;
+	const auto layout = _search->textCursor().block().layout();
+	return (!_search->rawTextEdit()->hasFocus()
+		|| !layout
+		|| layout->preeditAreaText().isEmpty());
+}
+
 bool MusicSection::current() const {
 	return MusicWindowCurrent(controller());
 }
@@ -392,7 +486,7 @@ void MusicSection::reset(bool keepRows) {
 	_configuring = false;
 	if (_request) _api.request(base::take(_request)).cancel();
 	if (keepRows) {
-		_more->hide();
+		_more->hide(anim::type::instant);
 	} else {
 		_rows.clear();
 		_displayedSearch.clear();
@@ -414,7 +508,7 @@ void MusicSection::refresh(bool force) {
 	if (!filters.loaded() || selected <= 0
 		|| Data::IsPurpleView(selected) || filter == list.end()) {
 		reset();
-		_status->setText(filters.loaded()
+		setStatus(filters.loaded()
 			? tr::lng_purple_music_choose_source(tr::now)
 			: tr::lng_contacts_loading(tr::now));
 		return;
@@ -422,7 +516,7 @@ void MusicSection::refresh(bool force) {
 	auto peers = CaptureMusicSourceRoster(data, *filter);
 	if (!peers) {
 		reset();
-		_status->setText(tr::lng_contacts_loading(tr::now));
+		setStatus(tr::lng_contacts_loading(tr::now));
 		session().api().requestMoreDialogsIfNeeded();
 		return;
 	}
@@ -436,14 +530,14 @@ void MusicSection::refresh(bool force) {
 	_peers = *peers;
 	_visible = visiblePeers();
 	_configuring = true;
-	_status->setText(tr::lng_contacts_loading(tr::now));
+	setStatus(tr::lng_contacts_loading(tr::now));
 	const auto route = _route;
 	ConfigureMusicIndex(&session(), selected, std::move(*peers),
 		crl::guard(this, [=](std::optional<MusicIndexRoster> roster) {
 			if (!current() || _route != route || folder() != selected) return;
 			_configuring = false;
 			if (!roster) {
-				_status->setText(tr::lng_purple_music_index_error(tr::now));
+				setStatus(tr::lng_purple_music_index_error(tr::now));
 				return;
 			}
 			_scope = roster->scope;
@@ -473,7 +567,7 @@ void MusicSection::scan() {
 		_pending.pop_front();
 	}
 	if (_pending.empty()) {
-		_status->setText(_scanIncomplete
+		setStatus(_scanIncomplete
 			? tr::lng_purple_music_scan_incomplete(tr::now)
 			: QString());
 		return;
@@ -482,7 +576,7 @@ void MusicSection::scan() {
 	_pending.pop_front();
 	const auto peer = session().data().peer(PeerId(uint64(next.saved.peer)));
 	const auto route = _route;
-	_status->setText(tr::lng_purple_music_indexing(tr::now));
+	setStatus(tr::lng_purple_music_indexing(tr::now));
 	_request = _api.request(MTPmessages_Search(
 		MTP_flags(0),
 		peer->input(),
@@ -620,7 +714,7 @@ void MusicSection::read(CatalogRead mode) {
 			}
 			if (mode == CatalogRead::Scan && _snapshotHeld) return;
 			if (!result) {
-				_status->setText(tr::lng_purple_music_index_error(tr::now));
+				setStatus(tr::lng_purple_music_index_error(tr::now));
 				return;
 			}
 			if (!append) {
@@ -650,9 +744,16 @@ void MusicSection::render() {
 	const auto hadFocus = _list && focus
 		&& (focus == _list || _list->isAncestorOf(focus));
 	delete _list.data();
-	_more->setVisible(current() && _moreAvailable);
+	_more->toggle(current() && _moreAvailable, anim::type::instant);
 	updateSelection();
-	if (_rows.empty() || !current()) return;
+	if (!current()) return;
+	if (_rows.empty()) {
+		if (!_request && _scope && !_scanIncomplete) {
+			setStatus(tr::lng_purple_music_no_results(tr::now));
+		}
+		return;
+	}
+	if (!_request && !_scanIncomplete) setStatus(QString());
 	auto rows = std::vector<PlaylistSongListRow>();
 	for (const auto &track : _rows) {
 		if (!visible(track.peer)) continue;
@@ -663,10 +764,11 @@ void MusicSection::render() {
 			.duration = Ui::FormatDurationText(track.duration),
 		});
 	}
-	_list = _content->add(object_ptr<PlaylistSongList>(
+	_list = _content->insert(_content->count() - 1, object_ptr<PlaylistSongList>(
 		_content, std::move(rows), selected, top,
 		[=](uint64_t id) { play(id); },
-		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library));
+		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library),
+		st::purpleMusicListMargin);
 	_list->setSelectionActions([=](uint64_t id) { toggleTrack(id); },
 		[=] { return playSelection(); });
 	_list->setCopyOrgLinkAction(crl::guard(this, [=](uint64_t id) { copyOrgLink(id); }));
@@ -679,7 +781,12 @@ void MusicSection::render() {
 
 void MusicSection::updateListHeight() {
 	if (!_list) return;
-	_list->setViewportLimit(std::max(1, height() - _list->y()));
+	_list->setViewportLimit(std::max(1, height() - _list->y() - _more->height()));
+}
+
+void MusicSection::setStatus(const QString &text) {
+	_status->entity()->setText(text);
+	_status->toggle(!text.isEmpty(), anim::type::instant);
 }
 
 void MusicSection::toggleTrack(quint64 documentId) {
@@ -702,8 +809,8 @@ void MusicSection::toggleTrack(quint64 documentId) {
 
 void MusicSection::updateSelection() {
 	_selectionCount = int(_selection.size());
-	_playChosen->setVisible(current() && !_selection.empty());
-	_playChosen->setDisabled(_savingSelection);
+	_playChosen->toggle(current() && !_selection.empty(), anim::type::instant);
+	_playChosen->entity()->setDisabled(_savingSelection);
 	if (_list) {
 		auto chosen = std::set<uint64_t>();
 		for (const auto &entry : _selection) chosen.insert(entry.document);
@@ -729,7 +836,7 @@ bool MusicSection::playSelection() {
 	for (const auto &entry : tracks) requests.push_back(resolveSong(entry));
 	_savingSelection = true;
 	updateSelection();
-	_status->setText(tr::lng_purple_playlists_resolving(tr::now));
+	setStatus(tr::lng_purple_playlists_resolving(tr::now));
 	const auto route = _route;
 	_resolver = std::make_unique<DesktopPlaylistResolver>(
 		&session(), std::move(requests),
@@ -741,7 +848,7 @@ bool MusicSection::playSelection() {
 				})) {
 				_savingSelection = false;
 				updateSelection();
-				_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
+				setStatus(tr::lng_purple_music_track_unavailable(tr::now));
 				return;
 			}
 			saveSelection(tracks);
@@ -758,7 +865,7 @@ void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
 		if (!captured) {
 			_savingSelection = false;
 			updateSelection();
-			_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
+			setStatus(tr::lng_purple_music_track_unavailable(tr::now));
 			return;
 		}
 		songs.push_back(*captured);
@@ -767,11 +874,11 @@ void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
 		_savingSelection = false;
 		_selection.clear();
 		updateSelection();
-		_status->setText(QString());
+		setStatus(QString());
 		playResolved(tracks.front());
 		return;
 	}
-	_status->setText(tr::lng_purple_playlists_saving(tr::now));
+	setStatus(tr::lng_purple_playlists_saving(tr::now));
 	auto entropy = QByteArray(kPlaylistIdEntropyBytes, char(0));
 	base::RandomFill(entropy.data(), entropy.size());
 	const auto route = _route;
@@ -786,12 +893,12 @@ void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
 		if (result && result.edit && rosterCurrent()
 			&& std::ranges::all_of(tracks, [=](const auto &entry) { return bool(captureTrack(entry)); })) {
 			_selection.clear();
-			_status->setText(QString());
+			setStatus(QString());
 			updateSelection();
 			PlayAccountPlaylist(&session(), result.edit->playlistId, tracks.front().document);
 			return;
 		}
-		_status->setText(result
+		setStatus(result
 			? tr::lng_purple_music_track_unavailable(tr::now)
 			: tr::lng_purple_playlists_write_failed(tr::now));
 		updateSelection();
@@ -815,7 +922,7 @@ void MusicSection::play(quint64 documentId) {
 			if (results.size() == 1 && results.front().status == PlaylistSongStatus::Ready) {
 				playResolved(entry);
 			} else {
-				_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
+				setStatus(tr::lng_purple_music_track_unavailable(tr::now));
 			}
 		}));
 	_resolver->start();
@@ -888,7 +995,7 @@ void MusicSection::playResolved(const MusicIndexEntry &entry) {
 	const auto id = FullMsgId(PeerId(uint64(entry.peer)), MsgId(entry.message));
 	const auto item = session().data().message(id);
 	if (!item || !captureTrack(entry)) {
-		_status->setText(tr::lng_purple_music_track_unavailable(tr::now));
+		setStatus(tr::lng_purple_music_track_unavailable(tr::now));
 		return;
 	}
 	Media::Player::instance()->play(AudioMsgId(item->media()->document(), id));
@@ -912,6 +1019,61 @@ bool ShowMusicSection(not_null<Window::SessionController*> controller) {
 	if (!MusicWindowCurrent(controller)) return false;
 	controller->showSection(std::make_shared<MusicMemento>());
 	return true;
+}
+
+bool MusicAllowsModalKeys(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> focus) {
+	for (auto widget = focus.get(); widget; widget = widget->parentWidget()) {
+		if (const auto music = dynamic_cast<MusicSection*>(widget)) {
+			return music->controller() == controller && music->allowsModalKeys(focus);
+		}
+	}
+	return false;
+}
+
+bool ToggleMusicSection(not_null<Window::SessionController*> controller) {
+	if (!MusicWindowCurrent(controller)) return false;
+	for (const auto child : controller->content()->children()) {
+		if (const auto music = dynamic_cast<MusicSection*>(child);
+			music && music->isVisible()) {
+			controller->showBackFromStack();
+			return true;
+		}
+	}
+	return ShowMusicSection(controller);
+}
+
+void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore) {
+	if (!widget) return;
+	const auto hiddenByMusic = widget->property("purpleMusicHidden").toBool();
+	if (suppress && !widget->isHidden()) {
+		widget->setProperty("purpleMusicHidden", true);
+		widget->hide();
+	} else if (!suppress && hiddenByMusic && restore) {
+		widget->setProperty("purpleMusicHidden", QVariant());
+		widget->show();
+	}
+}
+
+bool MusicHidesChats(const Window::SectionWidget *section) {
+	return dynamic_cast<const MusicSection*>(section)
+		&& MusicHideChatsCurrent();
+}
+
+bool MusicHideChatsCurrent() {
+	return !Core::App().settings().readPref<bool>(kHideChatsPref, false);
+}
+
+rpl::producer<bool> MusicHideChatsValue() {
+	return rpl::single(MusicHideChatsCurrent()) | rpl::then(MusicHideChatsChanges.events());
+}
+
+void SetMusicHideChats(bool hide) {
+	if (hide == MusicHideChatsCurrent()) return;
+	Core::App().settings().writePref<bool>(kHideChatsPref, !hide);
+	Core::App().saveSettingsDelayed();
+	MusicHideChatsChanges.fire_copy(hide);
 }
 
 void ChooseMusicSourceFolder(not_null<Window::SessionController*> controller) {

@@ -2,10 +2,15 @@
 
 Open **Music** from the main menu and use **Music source folder** to select one
 Telegram chat folder for the active account. Search by title, performer, or
-filename. The newest posts appear first. Open a track to play it in the
+filename. Each search term matches a contiguous substring, case-insensitively,
+and terms can appear in any order. The newest posts appear first. Open a track to play it in the
 regular player. **Load more tracks** reads the next catalog page.
 You can also set the source under **Settings → Purple → Music source folder**.
-In modal Normal mode, use `SPC m m` or run `open-music` in the command palette.
+In modal Normal mode, use `SPC m m` or run `open-music` in the command palette
+to toggle Music. Press `Ctrl+[` to return to Normal from Music search.
+The chat list is hidden in Music by default. **Settings → Purple → Hide chat
+list in Music** restores the split view. The toolbar opens Playlists directly.
+The overflow menu contains the source picker and refresh.
 `tdesktop-cli music` opens the same screen through Local automation.
 Opening Music again while it's already visible selects the search text and
 keeps your place in the results for the same source.

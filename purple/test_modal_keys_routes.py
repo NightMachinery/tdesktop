@@ -73,7 +73,8 @@ assert re.search(r'\{ Action::Backgrounds, "chat-backgrounds-visibility-toggle"'
 assert "{ Action::Backgrounds, { Qt::Key_Space, Qt::Key_C, Qt::Key_B } }" in keys
 assert '{ Action::OpenMusic, "open-music"' in keys
 assert "{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } }" in keys
-ordered(dispatch, "case Action::OpenMusic:", "ShowMusicSection(current)")
+ordered(dispatch, "case Action::ChatPalette:", "ShowChatPalette(current)",
+        "case Action::OpenMusic:", "ToggleMusicSection(current)")
 for action, command, prefix, key in (
         ("OpenPlaylists", "open-playlists", "M", "L"),
         ("OpenChatInfo", "open-chat-info", "C", "I"),
@@ -132,7 +133,7 @@ ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
         "case Action::PreviousTrack:", "case Action::NextTrack:",
         "case Action::SeekBackward:", "case Action::SeekForward:",
         "HasPlaybackInSession(&target.controller->session())")
-assert keys.count(".controller = owner") == 3
+assert keys.count(".controller = owner") == 4
 accounts = between(keys, "bool CanSwitchAccount", "Dialogs::Widget *ChatsPane")
 chat_focus = between(keys, "bool Keys::ownsChatListFocus()", "KeyUse Keys::classify")
 ordered(chat_focus, "_normal", "Enabled()", "currentTarget(QApplication::focusWidget()).list")
@@ -415,5 +416,9 @@ indexed_source = between(music, "PlaylistResolveSong MusicSection::resolveSong",
                          "MusicSection::captureTrack")
 ordered(indexed_source, ".documentId = entry.document", ".source = {",
         ".msg = int32_t(entry.message)", ".since = kMinimumPlaylistStamp")
+assert "{ Action::ChatPalette, { Qt::Key_Space, Qt::Key_Return } }" in keys
+assert "MusicAllowsModalKeys(owner, focus)" in keys
+assert "MusicHidesChats(_mainSection.data())" in read("mainwidget.cpp")
+assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 
 print("Modal key, menu, visible message, nested section and chat background routes passed")

@@ -1,7 +1,7 @@
 #pragma once
 
 namespace Ui { class VerticalLayout; }
-namespace Window { class SessionController; }
+namespace Window { class SectionWidget; class SessionController; }
 
 namespace Purple {
 
@@ -10,6 +10,15 @@ void AddMusicMenuRow(
 	not_null<Window::SessionController*> controller);
 
 bool ShowMusicSection(not_null<Window::SessionController*> controller);
+bool ToggleMusicSection(not_null<Window::SessionController*> controller);
+[[nodiscard]] bool MusicAllowsModalKeys(
+	not_null<Window::SessionController*> controller,
+	not_null<QWidget*> focus);
+[[nodiscard]] bool MusicHidesChats(const Window::SectionWidget *section);
+void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore);
+[[nodiscard]] bool MusicHideChatsCurrent();
+[[nodiscard]] rpl::producer<bool> MusicHideChatsValue();
+void SetMusicHideChats(bool hide);
 void ChooseMusicSourceFolder(not_null<Window::SessionController*> controller);
 
 } // namespace Purple

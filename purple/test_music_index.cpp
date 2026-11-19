@@ -71,6 +71,12 @@ int main(int argc, char **argv) {
 		const auto list = index.page(initial, u"gLASS orCHard"_q, {7, 8}, {});
 		Check(list && list->size() == 2 && list->back().peer == 8
 			&& list->back().document == maximum, "unsigned identity and deduplication");
+		const auto exact = index.page(initial, u"artist  ORCh   glass"_q, {7, 8}, {});
+		Check(exact && exact->size() == 2 && exact->back().document == maximum, "exact substrings in any order match the same songs");
+		const auto gaps = index.page(initial, u"gass ORCh"_q, {7, 8}, {});
+		Check(gaps && gaps->empty(), "letters separated by gaps are not an exact match");
+		const auto literal = index.page(initial, u"glass %"_q, {7, 8}, {});
+		Check(literal && literal->empty(), "wildcards in the query remain literal");
 		const auto next = index.page(initial, u""_q, {7, 8}, Purple::MusicIndexCursor{110, 17});
 		Check(next && next->size() == 1 && next->front().document == maximum, "keyset continuation");
 		const auto visible = index.page(initial, u"glass"_q, {7}, {});

@@ -1,5 +1,7 @@
 #include "purple/purple_music_index.h"
 
+#include "purple/purple_exact_search.h"
+
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 
@@ -162,20 +164,24 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 		const std::vector<quint64> &visiblePeers,
 		std::optional<MusicIndexCursor> cursor) {
 	const auto result = _database.Read({
-		u"WITH visible(peer) AS (SELECT value FROM json_each(?4)) "
+		u"WITH visible(peer) AS (SELECT value FROM json_each(?4)), "
+		"terms(term) AS (SELECT value FROM json_each(?3)) "
 		"SELECT t.peer, t.message, t.document, t.posted_at, t.title, t.performer, t.duration "
 		"FROM music_occurrence AS t "
 		"WHERE (?1 IS NULL OR t.posted_at < ?1 OR (t.posted_at = ?1 AND t.document > ?2)) "
 		"AND (SELECT generation FROM music_folder WHERE id = 1) = ?6 "
-		"AND t.peer IN visible AND instr(t.search_text, ?3) > 0 "
+		"AND t.peer IN visible AND NOT EXISTS (SELECT 1 FROM terms WHERE instr(t.search_text, term) = 0) "
 		"AND NOT EXISTS (SELECT 1 FROM music_occurrence AS a "
-		"WHERE a.document = t.document AND a.peer IN visible AND instr(a.search_text, ?3) > 0 "
+		"WHERE a.document = t.document AND a.peer IN visible "
+		"AND NOT EXISTS (SELECT 1 FROM terms WHERE instr(a.search_text, term) = 0) "
 		"AND (a.posted_at > t.posted_at OR (a.posted_at = t.posted_at "
 		"AND (a.peer < t.peer OR (a.peer = t.peer AND a.message > t.message))))) "
 		"ORDER BY t.posted_at DESC, t.document LIMIT ?5"_q,
 		{ cursor ? ArchiveSqlValue(int64(cursor->postedAt)) : ArchiveSqlValue(nullptr),
 			cursor ? QString::number(cursor->document) : QString(),
-			query.toCaseFolded(), PeerRosterJson(visiblePeers), kPageSize,
+			QString::fromUtf8(QJsonDocument(QJsonArray::fromStringList(
+				ExactSearchTerms(query))).toJson(QJsonDocument::Compact)),
+			PeerRosterJson(visiblePeers), kPageSize,
 			int64(scope.generation) },
 		ArchiveSqlExpectation::Rows,
 	});

@@ -1962,3 +1962,11 @@ retirement without duplicating native cache serialization.
 `StopMusicIndex` before ordinary and forced logout. This revokes the account
 worker's pending database transactions. The existing playlist menu hook in
 `window/window_main_menu.cpp` also adds the Music entry.
+
+### Music layout and chat palette
+
+- `mainwidget.cpp` uses Purple's Music-only sidebar preference when placing the
+  chat area. The dialog width preference still belongs to the regular chat layout.
+- `boxes/peer_list_box.cpp` compares raw queries for Purple's chat palette so
+  punctuation, handles and international phone numbers reach its exact matcher.
+  The palette opens at the compact picker height.

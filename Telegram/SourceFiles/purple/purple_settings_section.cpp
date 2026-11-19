@@ -490,6 +490,15 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			},
 			.keywords = { u"music"_q, u"playlist"_q, u"folder"_q },
 		});
+		const auto hideChats = builder.addButton({
+			.id = u"advanced/purple_music_hide_chats"_q,
+			.title = tr::lng_purple_music_hide_chats(),
+			.toggled = MusicHideChatsValue(),
+			.keywords = { u"music"_q, u"sidebar"_q },
+		});
+		if (hideChats) {
+			hideChats->toggledValue() | rpl::on_next(SetMusicHideChats, hideChats->lifetime());
+		}
 		for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
 			builder.addButton({
 				.id = kind == ArchivePurgeKind::Trashbin ? u"advanced/purple_archive_trash"_q : u"advanced/purple_archive_edits"_q,

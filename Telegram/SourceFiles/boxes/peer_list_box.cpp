@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peer_list_box.h"
+#include "purple/purple_chat_palette.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_last_seen_ui.h"
 
@@ -225,7 +226,9 @@ void PeerListBox::prepare() {
 			std::clamp(
 				content()->height(),
 				st::boxMaxListHeight,
-				st::boxMaxListHeight * 3));
+				Purple::IsChatPaletteController(_controller.get())
+					? st::boxMaxListHeight
+					: st::boxMaxListHeight * 3));
 	}
 }
 
@@ -2435,7 +2438,9 @@ void PeerListContent::checkScrollForPreload() {
 
 void PeerListContent::searchQueryChanged(QString query) {
 	const auto searchWordsList = TextUtilities::PrepareSearchWords(query);
-	const auto normalizedQuery = searchWordsList.join(' ');
+	const auto normalizedQuery = Purple::IsChatPaletteController(_controller)
+		? query.trimmed()
+		: searchWordsList.join(' ');
 	if (_ignoreHiddenRowsOnSearch && !normalizedQuery.isEmpty()) {
 		_filterResults.clear();
 	}
