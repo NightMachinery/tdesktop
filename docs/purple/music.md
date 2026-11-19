@@ -16,6 +16,11 @@ tracks and resumes unfinished history. It keeps your picks while the source
 folder and its visible chats stay the same. A failed chat search leaves its
 previous results intact and reports that the scan is incomplete.
 
+After the first scan, Purple also indexes eligible new tracks it receives
+from the configured folder while the Music screen is closed. Opening Music
+again checks for tracks that arrived while the app was offline. New arrivals
+leave the history-scan cursor in place so the next scan can still fill gaps.
+
 The database stores track metadata, source message IDs, and scan cursors in
 the local Purple settings directory. Each Telegram account and environment
 has its own database. The scan never downloads audio. When you open Music

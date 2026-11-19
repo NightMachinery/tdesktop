@@ -25,6 +25,39 @@ int main(int argc, char **argv) {
 	Check(temporary.isValid(), "private fixture");
 	const auto path = temporary.filePath(u"music.sqlite"_q);
 	const auto maximum = std::numeric_limits<quint64>::max();
+	const auto arrivalsPath = temporary.filePath(u"arrivals.sqlite"_q);
+	auto arrivalScope = Purple::MusicIndexScope();
+	{
+		auto index = Purple::MusicIndex();
+		Check(index.open(arrivalsPath), "open arrival fixture");
+		Check(!index.saveArrival(42, Track(7, 90, 90, 110)), "unconfigured arrival rejected");
+		const auto scope = index.configureSources(42, {7});
+		Check(bool(scope), "configure arrival folder");
+		arrivalScope = *scope;
+		Check(index.savePage(*scope, {7}, {7, 20, 22, false},
+			{Track(7, 21, 21, 100)}), "seed history cursor");
+		Check(index.saveArrival(42, Track(7, 90, 90, 120)), "record new track independently");
+		Check(index.saveArrival(42, Track(7, 90, 90, 120)), "duplicate delivery is idempotent");
+		Check(!index.saveArrival(43, Track(7, 91, 91, 121))
+			&& !index.saveArrival(42, Track(8, 92, 92, 122)),
+			"arrival requires both applied folder and source membership");
+		const auto sources = index.sources();
+		Check(sources && sources->size() == 1 && sources->front().latest == 22
+			&& sources->front().before == 20 && !sources->front().complete,
+			"arrival advances neither history checkpoint");
+	}
+	{
+		auto index = Purple::MusicIndex();
+		Check(index.open(arrivalsPath), "reopen arrival fixture");
+		Check(index.savePage(arrivalScope, {7, 20, 22, false}, {7, 20, 90, false},
+			{Track(7, 50, 50, 110), Track(7, 90, 90, 120)}),
+			"resumed history scan still fills the arrival gap");
+		const auto list = index.page(arrivalScope, u""_q, {7, 8}, {});
+		Check(list && list->size() == 3 && list->front().document == 90,
+			"arrivals persist once and sort by posted date");
+		Check(bool(index.configureSources(43, {7})), "replace the source folder");
+		Check(!index.saveArrival(42, Track(7, 93, 93, 130)), "retired folder arrival rejected");
+	}
 	auto initial = Purple::MusicIndexScope();
 	{
 		auto index = Purple::MusicIndex();

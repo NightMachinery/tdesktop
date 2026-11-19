@@ -4,15 +4,26 @@
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "crl/crl_object_on_thread.h"
+#include "data/data_chat_filters.h"
+#include "data/data_document.h"
+#include "data/data_media_types.h"
+#include "data/data_session.h"
+#include "history/history.h"
+#include "history/history_item.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "purple/purple_archive_files.h"
 #include "purple/purple_config.h"
+#include "purple/purple_playlists_menu.h"
+#include "storage/storage_account.h"
 
 #include <QtCore/QFileInfo>
 
 namespace Purple {
 namespace {
+
+constexpr auto kMusicFolder = "purple.music.source-filter";
+rpl::event_stream<Main::Session*> MusicArrivals;
 
 class IndexWorker final {
 public:
@@ -164,6 +175,70 @@ void Request(
 }
 
 } // namespace
+
+FilterId MusicSourceFolder(not_null<Main::Session*> session) {
+	return session->local().readPref<QString>(kMusicFolder).toInt();
+}
+
+void SetMusicSourceFolder(not_null<Main::Session*> session, FilterId folder) {
+	if (MusicSourceFolder(session) == folder) return;
+	Indexes.erase(session.get());
+	session->local().writePref<QString>(kMusicFolder, QString::number(folder));
+}
+
+std::optional<MusicIndexEntry> CaptureMusicIndexEntry(not_null<HistoryItem*> item) {
+	const auto history = item->history();
+	const auto media = item->media();
+	const auto document = media ? media->document() : nullptr;
+	if (!document || !document->isSong() || item->date() <= 0
+		|| history->purpleHiddenFromView()) {
+		return std::nullopt;
+	}
+	const auto song = CapturePlaylistSong(
+		&history->session(), { item->fullId(), document->id });
+	if (!song) return std::nullopt;
+	return MusicIndexEntry{
+		.peer = history->peer->id.value,
+		.message = item->id.bare,
+		.document = document->id,
+		.postedAt = item->date(),
+		.title = song->meta.title,
+		.performer = song->meta.performer,
+		.duration = song->meta.duration,
+		.searchText = song->meta.title + u' ' + song->meta.performer
+			+ u' ' + document->filename(),
+	};
+}
+
+rpl::producer<> MusicIndexArrivals(not_null<Main::Session*> session) {
+	return MusicArrivals.events() | rpl::filter([=](Main::Session *owner) {
+		return owner == session;
+	}) | rpl::to_empty;
+}
+
+void ObserveMusicIndexArrivals(Main::Session &owner) {
+	const auto session = not_null(&owner);
+	session->data().newItemAdded() | rpl::on_next([=](not_null<HistoryItem*> item) {
+		const auto media = item->media();
+		const auto document = media ? media->document() : nullptr;
+		if (!document || !document->isSong() || !Current(session)) return;
+		const auto folder = MusicSourceFolder(session);
+		const auto &filters = session->data().chatsFilters();
+		if (folder <= 0 || Data::IsPurpleView(folder) || !filters.loaded()) return;
+		const auto &list = filters.list();
+		const auto filter = std::ranges::find(list, folder, &Data::ChatFilter::id);
+		if (filter == list.end() || !filter->contains(item->history(), true, true)) return;
+		if (const auto row = CaptureMusicIndexEntry(item)) {
+			Request(session, [folder, row = *row](MusicIndex &index) {
+				return index.saveArrival(folder, row);
+			}, Fn<void(bool)>([=](bool saved) {
+				if (saved && Current(session) && MusicSourceFolder(session) == folder) {
+					MusicArrivals.fire_copy(session.get());
+				}
+			}));
+		}
+	}, session->lifetime());
+}
 
 void StopMusicIndex(Main::Account &account) {
 	if (const auto session = account.maybeSession()) Indexes.erase(session);

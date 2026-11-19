@@ -28,6 +28,25 @@ QString PeerRosterJson(const std::vector<quint64> &peers) {
 		QJsonDocument(std::move(roster)).toJson(QJsonDocument::Compact));
 }
 
+ArchiveSqlStatement UpsertMusicOccurrence(
+		const MusicIndexEntry &row,
+		std::optional<qint64> folder = std::nullopt) {
+	return {
+		u"INSERT INTO music_occurrence "
+		"SELECT ?1,?2,?3,?4,?5,?6,?7,?8 WHERE ?9 IS NULL OR ("
+		"(SELECT filter FROM music_folder WHERE id = 1) = ?9 "
+		"AND EXISTS (SELECT 1 FROM music_source WHERE peer = ?1)) "
+		"ON CONFLICT(peer, message) DO UPDATE SET document=excluded.document, "
+		"posted_at=excluded.posted_at, title=excluded.title, performer=excluded.performer, "
+		"duration=excluded.duration, search_text=excluded.search_text"_q,
+		{ QString::number(row.peer), int64(row.message),
+			QString::number(row.document), int64(row.postedAt), row.title,
+			row.performer, int64(row.duration), row.searchText.toCaseFolded(),
+			SqlNumber(folder) },
+		ArchiveSqlExpectation::OneChange,
+	};
+}
+
 } // namespace
 
 MusicIndex::MusicIndex(std::function<bool()> current)
@@ -119,14 +138,7 @@ bool MusicIndex::savePage(
 	auto statements = std::vector<ArchiveSqlStatement>();
 	for (const auto &row : rows) {
 		if (row.peer != cursor.peer || !row.document) return false;
-		statements.emplace_back(u"INSERT INTO music_occurrence VALUES(?,?,?,?,?,?,?,?) "
-			"ON CONFLICT(peer, message) DO UPDATE SET document=excluded.document, "
-			"posted_at=excluded.posted_at, title=excluded.title, performer=excluded.performer, "
-			"duration=excluded.duration, search_text=excluded.search_text"_q,
-			std::vector<ArchiveSqlValue>{ peer, int64(row.message),
-				QString::number(row.document), int64(row.postedAt), row.title,
-				row.performer, int64(row.duration), row.searchText.toCaseFolded() },
-			ArchiveSqlExpectation::OneChange);
+		statements.push_back(UpsertMusicOccurrence(row));
 	}
 	statements.emplace_back(
 		u"UPDATE music_source SET older_before = ?, newest_seen = ?, complete = ? WHERE peer = ? "
@@ -137,6 +149,11 @@ bool MusicIndex::savePage(
 			SqlNumber(expected.before), SqlNumber(expected.latest), int64(expected.complete) },
 		ArchiveSqlExpectation::OneChange);
 	return write(std::move(statements));
+}
+
+bool MusicIndex::saveArrival(qint64 folder, const MusicIndexEntry &row) {
+	return folder > 0 && row.peer && row.document
+		&& write({ UpsertMusicOccurrence(row, folder) });
 }
 
 std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(

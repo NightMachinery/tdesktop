@@ -204,6 +204,7 @@ void Account::createSession(
 	}
 	_sessionValue = _session.get();
 	Purple::StartSessionSettings(_session.get());
+	Purple::ObserveMusicIndexArrivals(*_session);
 	Purple::RecoverLastSeenPeek(_session.get());
 
 	Ensures(_session != nullptr);

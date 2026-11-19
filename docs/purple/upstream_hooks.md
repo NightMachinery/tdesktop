@@ -96,6 +96,10 @@ the numbers.
 
 ## Playlist account lifecycle
 
+- `main/main_account.cpp` starts local Music indexing for incoming tracks
+  after the account session is available. The Music index service checks
+  folder membership, route, visibility, and the exact stored source.
+
 - `main/main_account.cpp`: one Purple include and one call before each ordinary
   and forced logout revoke playlist worker authority immediately. Queued edits,
   store closure and callback lifetime checks live in `purple_playlists_service`

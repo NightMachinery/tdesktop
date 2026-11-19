@@ -44,6 +44,7 @@ public:
 		const MusicSourceCursor &expected,
 		const MusicSourceCursor &cursor,
 		const std::vector<MusicIndexEntry> &rows);
+	[[nodiscard]] bool saveArrival(qint64 folder, const MusicIndexEntry &row);
 	[[nodiscard]] std::optional<std::vector<MusicIndexEntry>> page(
 		MusicIndexScope scope,
 		const QString &query,

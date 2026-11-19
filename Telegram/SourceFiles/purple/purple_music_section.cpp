@@ -30,7 +30,6 @@
 #include "purple/purple_playlists_service.h"
 #include "rpl/variable.h"
 #include "settings/settings_common.h"
-#include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
@@ -61,7 +60,6 @@
 namespace Purple {
 namespace {
 
-constexpr auto kMusicFolder = "purple.music.source-filter";
 constexpr auto kSearchPageSize = 100;
 constexpr auto kRefreshDelay = crl::time(180);
 
@@ -266,6 +264,11 @@ MusicSection::MusicSection(
 	MusicFolderChanges.events() | rpl::on_next([=](Main::Session *session) {
 		if (session == &this->session()) refresh();
 	}, lifetime());
+	MusicIndexArrivals(&session()) | rpl::on_next([=] {
+		if (_scope && !_snapshotHeld && !_readTimer.isActive()) {
+			_readTimer.callOnce(kRefreshDelay);
+		}
+	}, lifetime());
 	Core::App().passcodeLockChanges() | rpl::on_next([=](bool locked) {
 		if (locked) reset();
 		else refresh(true);
@@ -278,7 +281,7 @@ bool MusicSection::showInternal(
 		not_null<Window::SectionMemento*> memento,
 		const Window::SectionShow &) {
 	if (!dynamic_cast<MusicMemento*>(memento.get())) return false;
-	refresh();
+	refresh(true);
 	doSetInnerFocus();
 	return true;
 }
@@ -313,7 +316,7 @@ bool MusicSection::current() const {
 }
 
 FilterId MusicSection::folder() const {
-	return session().local().readPref<QString>(kMusicFolder).toInt();
+	return MusicSourceFolder(&session());
 }
 
 bool MusicSection::visible(quint64 peer) const {
@@ -507,23 +510,11 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 			if (next.offset && id.bare >= next.offset) continue;
 			if (!oldest || id.bare < oldest) oldest = id.bare;
 			next.newest = std::max(next.newest, qint64(id.bare));
-			const auto item = data.message(FullMsgId(peer, id));
-			const auto media = item ? item->media() : nullptr;
-			const auto document = media ? media->document() : nullptr;
-			if (!document || item->date() <= 0 || !visible(next.saved.peer)) continue;
-			const auto song = CapturePlaylistSong(&session(), { item->fullId(), document->id });
-			if (!song) continue;
-			rows.push_back({
-				.peer = next.saved.peer,
-				.message = id.bare,
-				.document = document->id,
-				.postedAt = item->date(),
-				.title = song->meta.title,
-				.performer = song->meta.performer,
-				.duration = song->meta.duration,
-				.searchText = song->meta.title + u' ' + song->meta.performer
-					+ u' ' + document->filename(),
-			});
+			if (const auto item = data.message(FullMsgId(peer, id))) {
+				if (auto row = CaptureMusicIndexEntry(item)) {
+					rows.push_back(std::move(*row));
+				}
+			}
 		}
 	});
 	if (_route != route || !_scope) return;
@@ -909,7 +900,7 @@ void ChooseMusicSourceFolder(not_null<Window::SessionController*> controller) {
 		controller->show(Ui::MakeInformBox(tr::lng_purple_music_no_folders(tr::now)));
 		return;
 	}
-	const auto folder = session.local().readPref<QString>(kMusicFolder).toInt();
+	const auto folder = MusicSourceFolder(&session);
 	const auto initial = std::ranges::find(ids, folder);
 	const auto selected = initial != ids.end() ? int(initial - ids.begin()) : -1;
 	const auto weak = base::make_weak(controller.get());
@@ -931,7 +922,7 @@ void ChooseMusicSourceFolder(not_null<Window::SessionController*> controller) {
 					== filters.end()) {
 					return;
 				}
-				session.local().writePref<QString>(kMusicFolder, QString::number(ids[index]));
+				SetMusicSourceFolder(&session, ids[index]);
 				MusicFolderChanges.fire_copy(&session);
 			},
 		});
