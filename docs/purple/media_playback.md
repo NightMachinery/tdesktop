@@ -281,8 +281,9 @@ typed findChild cannot safely use it as the queried metadata type.
 
 ## Desktop sleep timer
 
-The Desktop integration is production-compiled. Complete host and native/GUI
-qualification remain pending.
+The Desktop timer is included in signed builds and passes the host sleep
+timer checks. Playback expiry, seeking and manual resume still need checks
+in the live player and video viewer.
 
 One device-local, app-instance timer pauses Song, Voice/round, ordinary viewer
 video and PiP through pause-only paths. Calls, recordings, live streams and
@@ -306,8 +307,8 @@ pending manual advance through the normal queue; voice ends through stock UI.
 Expiry never toggles playback, rewinds or restarts it. All delayed call/voice
 resume flags are cleared before any pause. Active buffering stays user-paused.
 The timer turns off before pausing, including reentrant end updates. Manual play
-afterward has no timer. Android implementation, a PiP indicator and longer fades
-remain future work; no auto-restart, shake, episode counting or socket interface
+afterward has no timer. Android has its own device-local timer. A PiP indicator
+and longer fades remain future work on Desktop; no auto-restart, shake, episode counting or socket interface
 is included.
 
 Repeated audio slider starts refresh the same pending item without recapturing
