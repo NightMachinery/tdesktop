@@ -74,6 +74,17 @@ assert "{ Action::Backgrounds, { Qt::Key_Space, Qt::Key_C, Qt::Key_B } }" in key
 assert '{ Action::OpenMusic, "open-music"' in keys
 assert "{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } }" in keys
 ordered(dispatch, "case Action::OpenMusic:", "ShowMusicSection(current)")
+for action, command, prefix, key in (
+        ("OpenPlaylists", "open-playlists", "M", "L"),
+        ("OpenChatInfo", "open-chat-info", "C", "I"),
+        ("OpenChatMusic", "open-chat-music", "C", "A")):
+    assert f'{{ Action::{action}, "{command}"' in keys
+    assert f"{{ Action::{action}, {{ Qt::Key_Space, Qt::Key_{prefix}, Qt::Key_{key} }} }}" in keys
+ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
+ordered(dispatch, "case Action::OpenChatInfo:", "reset()",
+        "current->showPeerInfo(target.chat.thread())")
+ordered(dispatch, "case Action::OpenChatMusic:", "reset()", "Storage::SharedMediaType::MusicFile",
+        "target.chat.topic()", "Info::Memento>(topic, media)", "Info::Memento>(target.chat.peer(), media)")
 stock_launch = between(read("core/shortcuts.cpp"),
                        "bool Launch(std::vector<Command>", "rpl::producer<not_null<Request*>>")
 ordered(stock_launch, "if (Paused)", "return false;", "RequestHandler", "handler()")
@@ -144,11 +155,13 @@ ordered(keys, "section->controller() == owner", "section->purpleMessageList(focu
         ".jumpInSection = [section]", "section->cornerButtonsShowAtPosition(position)",
         ".history = history", "history->purpleMessageList()")
 assert "{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } }" in keys
-ordered(available, "case Action::OpenHistoryCalendar: return bool(target.calendarChat)")
+ordered(available, "case Action::OpenChatInfo: return target.chat.thread() != nullptr",
+        "case Action::OpenChatMusic: return target.chat.peer() != nullptr",
+        "case Action::OpenHistoryCalendar: return bool(target.chat)")
 ordered(keys, "Dialogs::Key(history->history())", "chat->activeChat().key",
-        "!id.sublist && (!id.repliesRootId || key.topic())", "target.calendarChat = key")
+        "!id.sublist && (!id.repliesRootId || key.topic())", "target.chat = key")
 ordered(dispatch, "case Action::OpenHistoryCalendar:", "reset()",
-        "current->showCalendar({ .chat = target.calendarChat })")
+        "current->showCalendar({ .chat = target.chat })")
 calendar = read("ui/boxes/calendar_box.cpp")
 ordered(calendar, "CalendarBox::Context::keyboardDate", "month.daysInMonth()",
         "_min.isValid() && date < _min", "_max.isValid() && date > _max")

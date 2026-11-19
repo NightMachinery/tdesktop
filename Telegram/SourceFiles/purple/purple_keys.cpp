@@ -13,6 +13,8 @@
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
+#include "info/info_controller.h"
+#include "info/info_memento.h"
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "main/main_account.h"
@@ -25,8 +27,10 @@
 #include "purple/purple_config.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_playlists_box.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
+#include "storage/storage_shared_media.h"
 #include "ui/abstract_button.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
@@ -99,6 +103,9 @@ enum class Action {
 	OpenContacts,
 	OpenScheduled,
 	OpenMusic,
+	OpenPlaylists,
+	OpenChatInfo,
+	OpenChatMusic,
 	OpenChatMenu,
 	PreviewChat,
 	TogglePlayback,
@@ -165,6 +172,12 @@ const Command kCommands[] = {
 		[] { return tr::lng_scheduled_messages(tr::now); } },
 	{ Action::OpenMusic, "open-music",
 		[] { return tr::lng_purple_music_title(tr::now); } },
+	{ Action::OpenPlaylists, "open-playlists",
+		[] { return tr::lng_purple_playlists_title(tr::now); } },
+	{ Action::OpenChatInfo, "open-chat-info",
+		[] { return tr::lng_purple_keys_chat_info(tr::now); } },
+	{ Action::OpenChatMusic, "open-chat-music",
+		[] { return tr::lng_purple_keys_chat_music(tr::now); } },
 	{ Action::OpenChatMenu, "open-chat-menu",
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
 	{ Action::PreviewChat, "preview-chat",
@@ -268,8 +281,11 @@ const Binding kBindings[] = {
 	{ Action::OpenContacts, { Qt::Key_Space, Qt::Key_O, Qt::Key_C } },
 	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
+	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
+	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
 	{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } },
+	{ Action::OpenPlaylists, { Qt::Key_Space, Qt::Key_M, Qt::Key_L } },
 	{ Action::TogglePlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_P } },
 	{ Action::StopPlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_S } },
 	{ Action::PreviousTrack, { Qt::Key_BracketLeft, Qt::Key_T } },
@@ -470,7 +486,7 @@ struct Target {
 	HistoryWidget *history = nullptr;
 	MessageHints::Target messages;
 	Fn<void(Data::MessagePosition)> jumpInSection;
-	Dialogs::Key calendarChat;
+	Dialogs::Key chat;
 	bool folders = false;
 	bool chatActions = false;
 	Window::SessionController *controller = nullptr;
@@ -519,7 +535,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					.focus = focus,
 					.history = history,
 					.messages = { .main = history->purpleMessageList() },
-					.calendarChat = Dialogs::Key(history->history()),
+					.chat = Dialogs::Key(history->history()),
 					.chatActions = true,
 					.controller = owner,
 				}
@@ -531,7 +547,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 				const auto key = chat->activeChat().key;
 				const auto id = chat->id();
 				if (!id.sublist && (!id.repliesRootId || key.topic())) {
-					target.calendarChat = key;
+					target.chat = key;
 				}
 			}
 			return target;
@@ -613,7 +629,9 @@ bool Available(Action action, const Target &target) {
 	case Action::NewerMessagesPage:
 	case Action::LatestMessages: return HistoryScroll(target) != nullptr;
 	case Action::UnreadMessages: return target.chatActions && HistoryScroll(target);
-	case Action::OpenHistoryCalendar: return bool(target.calendarChat);
+	case Action::OpenChatInfo: return target.chat.thread() != nullptr;
+	case Action::OpenChatMusic: return target.chat.peer() != nullptr;
+	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
@@ -1199,6 +1217,23 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::OpenMusic:
 		ShowMusicSection(current);
 		break;
+	case Action::OpenPlaylists:
+		reset();
+		ShowPlaylistsBox(current);
+		break;
+	case Action::OpenChatInfo:
+		reset();
+		current->showPeerInfo(target.chat.thread());
+		break;
+	case Action::OpenChatMusic: {
+		reset();
+		const auto media = Info::Section(Storage::SharedMediaType::MusicFile);
+		if (const auto topic = target.chat.topic()) {
+			current->showSection(std::make_shared<Info::Memento>(topic, media));
+		} else {
+			current->showSection(std::make_shared<Info::Memento>(target.chat.peer(), media));
+		}
+	} break;
 	case Action::OpenSavedMessages:
 		current->showPeerHistory(current->session().user());
 		break;
@@ -1288,7 +1323,7 @@ void Keys::dispatch(Action action, const Target &target) {
 	} break;
 	case Action::OpenHistoryCalendar:
 		reset();
-		current->showCalendar({ .chat = target.calendarChat });
+		current->showCalendar({ .chat = target.chat });
 		break;
 	case Action::SelectMessage:
 		startHint(Hint::Select, tr::lng_purple_keys_message_select_empty(tr::now));

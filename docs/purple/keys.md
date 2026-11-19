@@ -29,7 +29,10 @@ mode. An input method composition can still open search.
 - `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, and `SPC o d`
   opens Scheduled Messages in a chat that supports them.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
-- `SPC m m` opens Music in the active account.
+- In a conversation or forum topic, `SPC c i` opens its info panel and
+  `SPC c a` opens Telegram's list of music shared there.
+- `SPC m m` opens the Music library and `SPC m l` opens Playlists for the
+  active account.
 - `SPC m p` toggles playback and `SPC m s` stops it. `SPC m b` and
   `SPC m f` seek by the configured step. `[ t` and `] t` move to the
   previous or next track. These commands control the current account's

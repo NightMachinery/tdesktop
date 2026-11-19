@@ -816,6 +816,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_keys_chat_previous" = "Move chat cursor up";
 "lng_purple_keys_chat_next" = "Move chat cursor down";
 "lng_purple_keys_chat_open" = "Open highlighted chat";
+"lng_purple_keys_chat_info" = "Open chat info";
+"lng_purple_keys_chat_music" = "Open music shared in this chat";
 "lng_purple_keys_folder_previous" = "Previous folder";
 "lng_purple_keys_folder_next" = "Next folder";
 "lng_purple_keys_help" = "Modal keyboard shortcuts";
