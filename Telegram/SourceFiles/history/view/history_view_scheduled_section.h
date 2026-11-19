@@ -17,6 +17,8 @@ class History;
 enum class SendMediaType;
 struct SendingAlbum;
 
+namespace Purple { class KeyboardAttachment; }
+
 namespace ChatHelpers {
 class Show;
 } // namespace ChatHelpers
@@ -197,6 +199,8 @@ public:
 	bool cornerButtonsHas(CornerButtonType type) override;
 
 private:
+	friend class Purple::KeyboardAttachment;
+
 	void resizeEvent(QResizeEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 

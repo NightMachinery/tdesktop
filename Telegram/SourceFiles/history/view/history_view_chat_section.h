@@ -23,6 +23,8 @@ class BotKeyboard;
 enum class SendMediaType;
 struct SendingAlbum;
 
+namespace Purple { class KeyboardAttachment; }
+
 namespace SendMenu {
 struct Details;
 } // namespace SendMenu
@@ -268,6 +270,8 @@ public:
 	bool cornerButtonsHas(CornerButtonType type) override;
 
 private:
+	friend class Purple::KeyboardAttachment;
+
 	enum class Mode {
 		Sublist,
 		Replies,

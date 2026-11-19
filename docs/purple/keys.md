@@ -31,6 +31,9 @@ mode. An input method composition can still open search.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
 - In a conversation or forum topic, `SPC c i` opens its info panel and
   `SPC c a` opens Telegram's list of music shared there.
+- `SPC c u` opens Telegram's file picker when the attachment button is
+  available in the current chat, reply, topic, or scheduled-message view.
+  Telegram handles file selection and confirmation.
 - `SPC m m` opens the Music library and `SPC m l` opens Playlists for the
   active account.
 - `SPC m p` toggles playback and `SPC m s` stops it. `SPC m b` and
@@ -121,5 +124,7 @@ the same seams. Hints use the existing restrictions and clipboard helpers.
 The history and section selection callbacks preserve focus for hint selection.
 `ui/boxes/calendar_box.cpp` routes keyboard day movement through the stock
 highlight and the same single-date validation used for mouse selection.
+The history and compose headers let Purple invoke their native file pickers
+when the corresponding attachment controls are available.
 `window/section_widget.cpp` subscribes sections to repaint changes and checks
 wallpaper visibility before painting the live background.

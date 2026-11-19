@@ -112,6 +112,7 @@ struct FileChosen;
 // Purple: the hard-budget cover over the chat pane. See
 // purple/purple_screentime_cover.h.
 namespace Purple {
+class KeyboardAttachment;
 class ScreenTimeCover;
 } // namespace Purple
 
@@ -751,6 +752,7 @@ private:
 	void setEditMsgId(MsgId msgId);
 
 	friend class HistoryInner;
+	friend class Purple::KeyboardAttachment;
 	HistoryItem *getItemFromHistoryOrMigrated(MsgId genericMsgId) const;
 	void animatedScrollToItem(MsgId msgId);
 	void animatedScrollToY(int scrollTo, HistoryItem *attachTo = nullptr);

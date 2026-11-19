@@ -77,7 +77,8 @@ ordered(dispatch, "case Action::OpenMusic:", "ShowMusicSection(current)")
 for action, command, prefix, key in (
         ("OpenPlaylists", "open-playlists", "M", "L"),
         ("OpenChatInfo", "open-chat-info", "C", "I"),
-        ("OpenChatMusic", "open-chat-music", "C", "A")):
+        ("OpenChatMusic", "open-chat-music", "C", "A"),
+        ("AttachFiles", "attach-files", "C", "U")):
     assert f'{{ Action::{action}, "{command}"' in keys
     assert f"{{ Action::{action}, {{ Qt::Key_Space, Qt::Key_{prefix}, Qt::Key_{key} }} }}" in keys
 ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
@@ -85,6 +86,17 @@ ordered(dispatch, "case Action::OpenChatInfo:", "reset()",
         "current->showPeerInfo(target.chat.thread())")
 ordered(dispatch, "case Action::OpenChatMusic:", "reset()", "Storage::SharedMediaType::MusicFile",
         "target.chat.topic()", "Info::Memento>(topic, media)", "Info::Memento>(target.chat.peer(), media)")
+ordered(dispatch, "case Action::AttachFiles:", "reset()", "target.attach()")
+attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")
+ordered(attachment, "if (!CanAttach(widget)) return {};", "QPointer(widget)",
+        "if (!widget || !CanAttach(widget.data())) return;",
+        "HistoryView::ScheduledWidget", "widget->chooseAttach();",
+        "widget->chooseAttach(std::nullopt);")
+ordered(attachment, "bool ButtonAvailable", "button->isVisible()", "button->isEnabled()",
+        "!button->isDisabled()", "widget->_canSendMessages",
+        "ButtonAvailable(widget->_attachToggle.data())",
+        "widget->_canSendMessages && SectionAvailable(widget)", "!widget->_choosingAttach",
+        "widget->_composeControls", "ButtonAvailable(widget->_composeControls->_attachToggle)")
 stock_launch = between(read("core/shortcuts.cpp"),
                        "bool Launch(std::vector<Command>", "rpl::producer<not_null<Request*>>")
 ordered(stock_launch, "if (Paused)", "return false;", "RequestHandler", "handler()")
@@ -107,6 +119,7 @@ playback_owner = between(keys, "bool HasPlaybackInSession", "bool Available")
 ordered(playback_owner, "if (!session)", "player->current(player->getActiveType()).audio()",
         "document && (&document->session() == session)")
 available = between(keys, "bool Available", "bool IsSearchableAction")
+assert "case Action::AttachFiles: return bool(target.attach);" in available
 ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
         "case Action::PreviousTrack:", "case Action::NextTrack:",
         "case Action::SeekBackward:", "case Action::SeekForward:",
@@ -317,6 +330,10 @@ scope = between(keys, "Target FindTarget", "bool Available")
 ordered(scope, "section->controller() == owner", "section->purpleMessageList(focus)",
         "HistoryView::ChatWidget", "HistoryView::PinnedWidget", "HistoryView::ScheduledWidget",
         "forSection(scheduled, true)")
+ordered(scope, "history->allowsPurpleKeys(focus)", ".attach = KeyboardAttachment::From(history)",
+        "forSection(chat, false, true)", "if (target.focus)", "KeyboardAttachment::From(chat)",
+        "return forSection(pinned)", "forSection(scheduled, true)", "if (target.focus)",
+        "KeyboardAttachment::From(scheduled)")
 for section, widget, guards in (
         ("chat", "ChatWidget", ("Mode::Replies", "!_composeSearch",
                                 "!_chooseForReport", "allowsPurpleMessageKeys")),

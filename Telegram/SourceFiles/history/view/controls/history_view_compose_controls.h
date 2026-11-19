@@ -27,6 +27,8 @@ class History;
 class DocumentData;
 struct InlineBotQuery;
 
+namespace Purple { class KeyboardAttachment; }
+
 namespace style {
 struct ComposeControls;
 } // namespace style
@@ -349,6 +351,8 @@ public:
 	void undoFieldChange();
 
 private:
+	friend class Purple::KeyboardAttachment;
+
 	struct StarEffect;
 	enum class TextUpdateEvent {
 		SaveDraft = (1 << 0),

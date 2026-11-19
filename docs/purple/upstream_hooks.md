@@ -30,6 +30,10 @@ the numbers.
   `history/view/controls/history_view_compose_controls.*`: explicit nested
   section and composer focus admission, with the chat section preserving
   focus during hint selection.
+- `history/history_widget.h`, `history/view/history_view_chat_section.h`,
+  `history/view/history_view_scheduled_section.h`, and
+  `history/view/controls/history_view_compose_controls.h` grant the attachment
+  shortcut access to the native pickers and their attachment controls.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
 - `history/view/history_view_message.*`: exposes rendered body text and its

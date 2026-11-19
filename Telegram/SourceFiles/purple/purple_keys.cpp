@@ -10,6 +10,7 @@
 #include "dialogs/dialogs_inner_widget.h"
 #include "dialogs/dialogs_widget.h"
 #include "history/history_widget.h"
+#include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
@@ -36,6 +37,7 @@
 #include "ui/layers/layer_widget.h"
 #include "ui/screen_reader_mode.h"
 #include "ui/toast/toast.h"
+#include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/elastic_scroll.h"
@@ -61,8 +63,52 @@
 #include <QtWidgets/QTextEdit>
 
 #include <optional>
+#include <type_traits>
 
 namespace Purple {
+
+class KeyboardAttachment final {
+public:
+	template <typename Widget>
+	static Fn<void()> From(Widget *widget) {
+		if (!CanAttach(widget)) return {};
+		return [widget = QPointer(widget)] {
+			if (!widget || !CanAttach(widget.data())) return;
+			if constexpr (std::is_same_v<Widget, HistoryView::ScheduledWidget>) {
+				widget->chooseAttach();
+			} else {
+				widget->chooseAttach(std::nullopt);
+			}
+		};
+	}
+
+private:
+	static bool ButtonAvailable(Ui::IconButton *button) {
+		return button
+			&& button->isVisible()
+			&& button->isEnabled()
+			&& !button->isDisabled();
+	}
+
+	static bool CanAttach(HistoryWidget *widget) {
+		return widget->_canSendMessages && ButtonAvailable(widget->_attachToggle.data());
+	}
+
+	static bool CanAttach(HistoryView::ChatWidget *widget) {
+		return widget->_canSendMessages && SectionAvailable(widget);
+	}
+
+	static bool CanAttach(HistoryView::ScheduledWidget *widget) {
+		return SectionAvailable(widget);
+	}
+
+	template <typename Widget>
+	static bool SectionAvailable(Widget *widget) {
+		return !widget->_choosingAttach && widget->_composeControls
+			&& ButtonAvailable(widget->_composeControls->_attachToggle);
+	}
+};
+
 namespace {
 
 constexpr auto kEnabledPref = "purple-modal-keys-enabled";
@@ -106,6 +152,7 @@ enum class Action {
 	OpenPlaylists,
 	OpenChatInfo,
 	OpenChatMusic,
+	AttachFiles,
 	OpenChatMenu,
 	PreviewChat,
 	TogglePlayback,
@@ -178,6 +225,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_chat_info(tr::now); } },
 	{ Action::OpenChatMusic, "open-chat-music",
 		[] { return tr::lng_purple_keys_chat_music(tr::now); } },
+	{ Action::AttachFiles, "attach-files",
+		[] { return tr::lng_attach(tr::now); } },
 	{ Action::OpenChatMenu, "open-chat-menu",
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
 	{ Action::PreviewChat, "preview-chat",
@@ -283,6 +332,7 @@ const Binding kBindings[] = {
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
 	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
+	{ Action::AttachFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_U } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
 	{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } },
 	{ Action::OpenPlaylists, { Qt::Key_Space, Qt::Key_M, Qt::Key_L } },
@@ -486,6 +536,7 @@ struct Target {
 	HistoryWidget *history = nullptr;
 	MessageHints::Target messages;
 	Fn<void(Data::MessagePosition)> jumpInSection;
+	Fn<void()> attach;
 	Dialogs::Key chat;
 	bool folders = false;
 	bool chatActions = false;
@@ -535,6 +586,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					.focus = focus,
 					.history = history,
 					.messages = { .main = history->purpleMessageList() },
+					.attach = KeyboardAttachment::From(history),
 					.chat = Dialogs::Key(history->history()),
 					.chatActions = true,
 					.controller = owner,
@@ -544,6 +596,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 		if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(widget)) {
 			auto target = forSection(chat, false, true);
 			if (target.focus) {
+				target.attach = KeyboardAttachment::From(chat);
 				const auto key = chat->activeChat().key;
 				const auto id = chat->id();
 				if (!id.sublist && (!id.repliesRootId || key.topic())) {
@@ -556,7 +609,9 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 			return forSection(pinned);
 		}
 		if (const auto scheduled = dynamic_cast<HistoryView::ScheduledWidget*>(widget)) {
-			return forSection(scheduled, true);
+			auto target = forSection(scheduled, true);
+			if (target.focus) target.attach = KeyboardAttachment::From(scheduled);
+			return target;
 		}
 	}
 	return {};
@@ -631,6 +686,7 @@ bool Available(Action action, const Target &target) {
 	case Action::UnreadMessages: return target.chatActions && HistoryScroll(target);
 	case Action::OpenChatInfo: return target.chat.thread() != nullptr;
 	case Action::OpenChatMusic: return target.chat.peer() != nullptr;
+	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
@@ -1224,6 +1280,10 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::OpenChatInfo:
 		reset();
 		current->showPeerInfo(target.chat.thread());
+		break;
+	case Action::AttachFiles:
+		reset();
+		target.attach();
 		break;
 	case Action::OpenChatMusic: {
 		reset();
