@@ -50,6 +50,8 @@ ordered(routing, "QEvent::KeyRelease", "isAutoRepeat() && _held.contains(key)",
         "!target.focus || !Enabled()", "QEvent::ShortcutOverride",
         "event->accept()", "return true;", "_held.insert(key)",
         "keyEvent->isAutoRepeat()", "stroke(key, target)")
+ordered(routing, "const auto result = _hints.type", "if (!guard)",
+        "result == MessageHints::Input::Composing", "reset()")
 ordered(keys, "!Enabled()", "event->type() != QEvent::ShortcutOverride",
         "return (new Keys(window))")
 
@@ -194,17 +196,17 @@ watch = between(hints, "void MessageHints::watch", "MessageHints::Input MessageH
 for cancellation in ("_purpleHintGeometryChanges", "shownValue()", "scrollTopChanges()",
                      "itemRemoved()", "viewRemoved()", "viewLayoutChanged()"):
     assert cancellation in watch, cancellation
-pick = between(hints, "MessageHints::Input MessageHints::type", "void MessageHints::apply")
+pick = between(hints, "MessageHints::Input MessageHints::type", "MessageHints::Input MessageHints::apply")
 ordered(pick, "view.widget() != _view.data()", "view.scheduled != _scheduled",
         "&view.session() != _session.get()", "snapshot() != _entries",
         "QPointer(view.widget())", "const auto id = i->id", "const auto element = i->element",
         "const auto point = i->rect.center()", "clear();", "if (!widget)",
         "view.session().data().message(id)", "item && (view.main", "view.main->viewByItem(item)",
-        "view.section->viewForItem(item)) == element", "apply(view, item, action, point)")
-apply = between(hints, "void MessageHints::apply", "void MessageHints::clear")
+        "view.section->viewForItem(item)) == element", "return apply(view, item, action, point)")
+apply = between(hints, "MessageHints::Input MessageHints::apply", "void MessageHints::clear")
 ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
         "MessageHintMenuEvent(item, point", "main->showContextMenu", "view.section->showContextMenu",
-        "if (action == Action::Copy)", "copyContextText", "return;",
+        "if (action == Action::Copy)", "copyContextText", "return Input::Finished;",
         "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)",
         "view.section->showCopyRestriction(item)", "HistoryGroupText(group)",
         "Iv::SetRichBlocksClipboard", "section->_purpleKeepSelectionFocus, true",
@@ -213,7 +215,8 @@ ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
 assert "{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } }" in keys
 ordered(available, "case Action::CopyMessageLink:",
         "target.messages && !target.messages.scheduled")
-ordered(dispatch, "case Action::CopyMessageLink:", "? Hint::Link", "_hints.start")
+ordered(dispatch, "const auto startHint", "_hints.start", "case Action::CopyMessageLink:",
+        "startHint(Hint::Link")
 link_policy = between(hints, "bool CanCopyMessageLink", "constexpr auto kHintLetters")
 ordered(link_policy, "IsServerMsgId(item->id)", "item->hasDirectLink()",
         "!IsAnchoredEphemeral(item)")
@@ -224,6 +227,27 @@ ordered(link_apply, "view.scheduled || !CanCopyMessageLink(item)",
         "view.main->_widget->controller()", "view.section->controller()",
         "&controller->session() != &view.session()", "HistoryView::Context::History",
         "view.section->elementContext()", "HistoryView::CopyPostLink(controller, item->fullId(), context)")
+
+for action, hint, key in (("ReplyToMessage", "Reply", "R"), ("EditMessage", "Edit", "E")):
+    assert f"{{ Action::{action}, {{ Qt::Key_G, Qt::Key_S, Qt::Key_{key} }} }}" in keys
+    ordered(available, f"case Action::{action}:", f"target.messages.supportsCompose(MessageHints::Action::{hint})")
+    ordered(dispatch, f"case Action::{action}:", f"startHint(Hint::{hint}")
+compose_scope = between(hints, "bool MessageHints::Target::supportsCompose", "MessageHints::Target MessageHints::target")
+ordered(compose_scope, "!section || (scheduled && action == Action::Reply)",
+        "section->elementContext()", "Context::History", "Context::Replies",
+        "Context::ScheduledTopic && action == Action::Edit")
+compose_policy = between(hints, "bool MessageHints::canCompose", "bool MessageHints::eligible")
+ordered(compose_policy, "!view.supportsCompose(action)", "view.session().frozen()",
+        "IsAnchoredEphemeral(item)", "CanSendReply(item) || item->allowsForward()",
+        "hasSelectedItems()", "isSending()", "hasFailed()", "allowsEdit(base::unixtime::now())",
+        "channel->canEditMessages()")
+ordered(hints, "if (_action == Action::Reply || _action == Action::Edit)",
+        "return canCompose(source, item, _action)")
+ordered(apply, "if (action == Action::Reply || action == Action::Edit)",
+        "if (!canCompose(view, item, action))", "const auto id = item->fullId()",
+        "main->elementReplyTo", "view.section->replyToMessageRequestNotify",
+        "getSelectedTextRange", "main->_widget->editMessage", "view.section->editMessageRequestNotify",
+        "return Input::Composing;")
 
 scope = between(keys, "Target FindTarget", "bool Available")
 ordered(scope, "section->controller() == owner", "section->purpleMessageList(focus)",

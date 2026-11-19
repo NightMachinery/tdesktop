@@ -1,9 +1,12 @@
 #include "purple/purple_message_hints.h"
 
+#include "base/unixtime.h"
 #include "config.h"
 #include "data/components/scheduled_messages.h"
+#include "data/data_channel.h"
 #include "data/data_groups.h"
 #include "data/data_session.h"
+#include "history/history.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
@@ -137,6 +140,20 @@ Main::Session &MessageHints::Target::session() const {
 	return main ? main->session() : section->session();
 }
 
+bool MessageHints::Target::supportsCompose(Action action) const {
+	if (main) {
+		return true;
+	} else if (!section || (scheduled && action == Action::Reply)) {
+		return false;
+	}
+	using Context = HistoryView::Context;
+	const auto context = section->elementContext();
+	return (context == Context::History)
+		|| (context == Context::Replies)
+		|| (context == Context::Monoforum)
+		|| (context == Context::ScheduledTopic && action == Action::Edit);
+}
+
 MessageHints::Target MessageHints::target() const {
 	return {
 		.main = dynamic_cast<HistoryInner*>(_view.data()),
@@ -152,6 +169,29 @@ QRect MessageHints::clip() const {
 		? view.main->_visibleAreaBottom
 		: view.section->_visibleBottom;
 	return QRect(0, top, _view->width(), bottom - top).intersected(_view->rect());
+}
+
+bool MessageHints::canCompose(
+		Target view,
+		not_null<HistoryItem*> item,
+		Action action) {
+	if (!view.supportsCompose(action)
+		|| view.session().frozen()
+		|| IsAnchoredEphemeral(item)) {
+		return false;
+	} else if (action == Action::Reply) {
+		return CanSendReply(item) || item->allowsForward();
+	} else if ((view.main
+			? view.main->hasSelectedItems()
+			: view.section->hasSelectedItems())
+		|| item->isSending()
+		|| item->hasFailed()
+		|| !item->allowsEdit(base::unixtime::now())) {
+		return false;
+	}
+	const auto channel = item->history()->peer->asChannel();
+	return view.main || !channel || channel->isMegagroup()
+		|| channel->canEditMessages();
 }
 
 bool MessageHints::eligible(
@@ -181,6 +221,8 @@ bool MessageHints::eligible(
 
 	if (_action == Action::Link) {
 		return !source.scheduled && CanCopyMessageLink(item);
+	} else if (_action == Action::Reply || _action == Action::Edit) {
+		return canCompose(source, item, _action);
 	}
 
 	const auto main = source.main;
@@ -413,36 +455,58 @@ MessageHints::Input MessageHints::type(int key, Target view) {
 	if (item && (view.main
 		? view.main->viewByItem(item)
 		: view.section->viewForItem(item)) == element) {
-		apply(view, item, action, point);
+		return apply(view, item, action, point);
 	}
 	return Input::Finished;
 }
 
-void MessageHints::apply(
+MessageHints::Input MessageHints::apply(
 		Target view,
 		not_null<HistoryItem*> item,
 		Action action,
 		QPoint point) {
+	if (action == Action::Reply || action == Action::Edit) {
+		if (!canCompose(view, item, action)) {
+			return Input::Finished;
+		}
+		const auto id = item->fullId();
+		if (action == Action::Reply) {
+			if (const auto main = view.main) {
+				main->elementReplyTo({ .messageId = id });
+			} else {
+				view.section->replyToMessageRequestNotify({ .messageId = id });
+			}
+		} else if (const auto main = view.main) {
+			const auto selection = main->getSelectedTextRange(item);
+			if (!selection.empty()) {
+				main->clearSelected(true);
+			}
+			main->_widget->editMessage(item, selection);
+		} else {
+			view.section->editMessageRequestNotify(id);
+		}
+		return Input::Composing;
+	}
 	if (action == Action::Link) {
 		if (view.scheduled || !CanCopyMessageLink(item)) {
-			return;
+			return Input::Finished;
 		}
 		const auto controller = view.main
 			? view.main->_widget->controller()
 			: view.section->controller();
 		if (&controller->session() != &view.session()) {
-			return;
+			return Input::Finished;
 		}
 		const auto context = view.main
 			? HistoryView::Context::History
 			: view.section->elementContext();
 		HistoryView::CopyPostLink(controller, item->fullId(), context);
-		return;
+		return Input::Finished;
 	}
 	if (action == Action::Menu) {
 		const auto widget = view.widget();
 		if (!widget->isVisible() || !widget->visibleRegion().contains(point)) {
-			return;
+			return Input::Finished;
 		}
 		auto event = MessageHintMenuEvent(item, point, widget->mapToGlobal(point));
 		if (const auto main = view.main) {
@@ -450,12 +514,12 @@ void MessageHints::apply(
 		} else {
 			view.section->showContextMenu(&event);
 		}
-		return;
+		return Input::Finished;
 	}
 	if (const auto main = view.main) {
 		if (action == Action::Copy) {
 			main->copyContextText(item->fullId());
-			return;
+			return Input::Finished;
 		}
 		main->clearTextSelection();
 		main->changeSelectionAsGroup(
@@ -465,7 +529,7 @@ void MessageHints::apply(
 		main->_widget->updateTopBarSelection(true);
 	} else if (action == Action::Copy) {
 		if (view.section->showCopyRestriction(item)) {
-			return;
+			return Input::Finished;
 		}
 		auto &session = view.section->session();
 		if (const auto group = session.data().groups().find(item)) {
@@ -487,6 +551,7 @@ void MessageHints::apply(
 		});
 		section->selectItemAsGroup(item);
 	}
+	return Input::Finished;
 }
 
 void MessageHints::clear() {

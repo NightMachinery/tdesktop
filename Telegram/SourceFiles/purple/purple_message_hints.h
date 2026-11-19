@@ -28,9 +28,9 @@ namespace Purple {
 
 class MessageHints final {
 public:
-	enum class Action { Select, Copy, Menu, Link };
+	enum class Action { Select, Copy, Menu, Link, Reply, Edit };
 
-	enum class Input { Pending, Finished, Unknown };
+	enum class Input { Pending, Finished, Composing, Unknown };
 
 	struct Target {
 		HistoryInner *main = nullptr;
@@ -42,6 +42,7 @@ public:
 		}
 		[[nodiscard]] Ui::RpWidget *widget() const;
 		[[nodiscard]] Main::Session &session() const;
+		[[nodiscard]] bool supportsCompose(Action action) const;
 	};
 
 	MessageHints();
@@ -71,8 +72,12 @@ private:
 	[[nodiscard]] bool eligible(
 		not_null<HistoryView::Element*> view,
 		std::vector<FullMsgId> &groupIds) const;
+	[[nodiscard]] static bool canCompose(
+		Target view,
+		not_null<HistoryItem*> item,
+		Action action);
 	void watch();
-	static void apply(
+	static Input apply(
 		Target view,
 		not_null<HistoryItem*> item,
 		Action action,

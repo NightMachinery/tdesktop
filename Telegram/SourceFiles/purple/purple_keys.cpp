@@ -84,6 +84,8 @@ enum class Action {
 	CopyMessage,
 	MessageMenu,
 	CopyMessageLink,
+	ReplyToMessage,
+	EditMessage,
 	Search,
 	OpenMainMenu,
 	OpenSettings,
@@ -198,6 +200,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_history_page_newer(tr::now); } },
 	{ Action::CopyMessageLink, "message-hint-copy-link",
 		[] { return tr::lng_purple_keys_message_link(tr::now); } },
+	{ Action::ReplyToMessage, "message-hint-reply",
+		[] { return tr::lng_context_reply_msg(tr::now); } },
+	{ Action::EditMessage, "message-hint-edit",
+		[] { return tr::lng_context_edit_msg(tr::now); } },
 	{ Action::Help, "keys-help",
 		[] { return tr::lng_purple_keys_help(tr::now); } },
 	{ Action::Run, "command-search",
@@ -228,6 +234,8 @@ const Binding kBindings[] = {
 	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
 	{ Action::MessageMenu, { Qt::Key_G, Qt::Key_S, Qt::Key_M } },
 	{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } },
+	{ Action::ReplyToMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_R } },
+	{ Action::EditMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_E } },
 	{ Action::Search, { Qt::Key_Slash } },
 	{ Action::Search, { Qt::Key_Space, Qt::Key_S, Qt::Key_S } },
 	{ Action::OpenMainMenu, { Qt::Key_Space, Qt::Key_O, Qt::Key_M } },
@@ -552,6 +560,10 @@ bool Available(Action action, const Target &target) {
 	case Action::MessageMenu: return bool(target.messages);
 	case Action::CopyMessageLink:
 		return target.messages && !target.messages.scheduled;
+	case Action::ReplyToMessage:
+		return target.messages.supportsCompose(MessageHints::Action::Reply);
+	case Action::EditMessage:
+		return target.messages.supportsCompose(MessageHints::Action::Edit);
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage: return HistoryScroll(target) != nullptr;
 	case Action::Search: return !target.messages.scheduled;
@@ -962,11 +974,17 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	case KeyUse::Capture:
 		stroke(key, target);
 		break;
-	case KeyUse::Hint:
-		if (_hints.type(key, target.messages) == MessageHints::Input::Unknown) {
+	case KeyUse::Hint: {
+		const auto guard = QPointer(this);
+		const auto result = _hints.type(key, target.messages);
+		if (!guard) {
+			break;
+		} else if (result == MessageHints::Input::Composing) {
+			reset();
+		} else if (result == MessageHints::Input::Unknown) {
 			Ui::Toast::Show(_window, tr::lng_purple_keys_undefined(tr::now));
 		}
-		break;
+	} break;
 	case KeyUse::Pass:
 		break;
 	}
@@ -1094,6 +1112,14 @@ void Keys::dispatch(Action action, const Target &target) {
 				tr::lng_purple_keys_action_unavailable(tr::now));
 		}
 	};
+	using Hint = MessageHints::Action;
+	const auto startHint = [&](Hint hint, QString empty) {
+		if (_hints.start(target.messages, hint)) {
+			_normal = true;
+		} else {
+			Ui::Toast::Show(_window, std::move(empty));
+		}
+	};
 	switch (action) {
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
@@ -1195,30 +1221,23 @@ void Keys::dispatch(Action action, const Target &target) {
 		}
 		break;
 	case Action::SelectMessage:
+		startHint(Hint::Select, tr::lng_purple_keys_message_select_empty(tr::now));
+		break;
 	case Action::CopyMessage:
+		startHint(Hint::Copy, tr::lng_purple_keys_message_copy_empty(tr::now));
+		break;
 	case Action::MessageMenu:
-	case Action::CopyMessageLink: {
-		using Hint = MessageHints::Action;
-		const auto hint = (action == Action::CopyMessage)
-			? Hint::Copy
-			: (action == Action::MessageMenu)
-			? Hint::Menu
-			: (action == Action::CopyMessageLink)
-			? Hint::Link
-			: Hint::Select;
-		if (_hints.start(target.messages, hint)) {
-			_normal = true;
-		} else {
-			const auto text = (hint == Hint::Copy)
-				? tr::lng_purple_keys_message_copy_empty(tr::now)
-				: (hint == Hint::Menu)
-				? tr::lng_purple_keys_message_menu_empty(tr::now)
-				: (hint == Hint::Link)
-				? tr::lng_purple_keys_message_link_empty(tr::now)
-				: tr::lng_purple_keys_message_select_empty(tr::now);
-			Ui::Toast::Show(_window, text);
-		}
-	} break;
+		startHint(Hint::Menu, tr::lng_purple_keys_message_menu_empty(tr::now));
+		break;
+	case Action::CopyMessageLink:
+		startHint(Hint::Link, tr::lng_purple_keys_message_link_empty(tr::now));
+		break;
+	case Action::ReplyToMessage:
+		startHint(Hint::Reply, tr::lng_purple_keys_message_menu_empty(tr::now));
+		break;
+	case Action::EditMessage:
+		startHint(Hint::Edit, tr::lng_purple_keys_message_menu_empty(tr::now));
+		break;
 	case Action::Help: {
 		auto lines = QStringList{ tr::lng_purple_keys_settings_hint(tr::now) };
 		for (const auto &command : kCommands) {

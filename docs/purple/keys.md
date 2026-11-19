@@ -44,6 +44,11 @@ mode. An input method composition can still open search.
   the context menu.
   `g s m` opens the native menu for a hinted message. Use the menu to reply,
   forward, or copy a message link when those actions are available.
+- `g s r` starts a reply to a visible message, and `g s e` opens an editable
+  message in Telegram's editor. Both return to Insert so you can type right
+  away. Sending a reply or saving an edit uses the usual controls.
+  Reply works in chats and their reply threads or topics. Edit also works
+  for eligible scheduled messages.
 - `SPC a 1` through `SPC a 6` switch to another signed-in account in the
   order shown in Telegram's account list.
 - With the chat list and conversation visible, `SPC w d` focuses the chat list
