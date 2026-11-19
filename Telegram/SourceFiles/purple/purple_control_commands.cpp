@@ -11,6 +11,7 @@ namespace {
 const auto Commands = std::array{
 	u"hello"_q, u"ping"_q, u"window.list"_q, u"window.activate"_q, u"window.cycle"_q, u"emoji.render"_q,
 	u"media.toggle"_q, u"media.play"_q, u"media.pause"_q, u"media.now"_q, u"lock"_q, u"subscribe"_q, u"unsubscribe"_q,
+	u"media.music-link"_q, u"media.play-music-link"_q,
 };
 
 }
@@ -78,9 +79,14 @@ ControlResult AuthorizeControlCommand(const QString &command, const ControlPolic
 		if (!ControlAllowedWhileLocked(policy, ControlLockUnit::Emoji)) return ControlError(u"locked"_q, u"Emoji automation is unavailable while locked."_q);
 	}
 	if (command.startsWith(u"media."_q)) {
-		const auto info = command == u"media.now"_q;
+		const auto musicLink = command == u"media.music-link"_q;
+		const auto playMusicLink = command == u"media.play-music-link"_q;
+		const auto info = command == u"media.now"_q || musicLink;
 		if (!policy.groups[info ? 2 : 1]) {
 			return ControlError(u"capability-off"_q, u"This media capability is disabled."_q);
+		}
+		if (policy.locked && (musicLink || playMusicLink)) {
+			return ControlError(u"locked"_q, u"Unlock Purple to use a music link."_q);
 		}
 		const auto music = ControlAllowedWhileLocked(policy, ControlLockUnit::MusicInfo);
 		const auto voice = ControlAllowedWhileLocked(policy, ControlLockUnit::VoiceInfo);
@@ -147,6 +153,26 @@ void DispatchControlRequest(
 			reply(ControlError(u"bad-request"_q, u"lock takes no arguments."_q));
 		} else {
 			reply(media.lock ? media.lock() : ControlError(u"not-found"_q, u"Lock service unavailable."_q));
+		}
+		return;
+	}
+	if (request.command == u"media.music-link"_q) {
+		if (!request.arguments.isEmpty()) {
+			reply(ControlError(u"bad-request"_q, u"music-link takes no arguments."_q));
+		} else {
+			reply(media.musicLink ? media.musicLink()
+				: ControlError(u"not-found"_q, u"Music link service unavailable."_q));
+		}
+		return;
+	}
+	if (request.command == u"media.play-music-link"_q) {
+		const auto token = request.arguments.value(u"token"_q).toString();
+		if (request.arguments.size() != 1 || !IsControlMusicLinkToken(token)) {
+			reply(ControlError(u"bad-request"_q, u"Expected a music link token."_q));
+		} else if (media.playMusicLink) {
+			media.playMusicLink(token, request.active, std::move(reply));
+		} else {
+			reply(ControlError(u"not-found"_q, u"Music link service unavailable."_q));
 		}
 		return;
 	}

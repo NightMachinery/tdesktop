@@ -28,6 +28,8 @@ struct ControlMediaAdapter {
 	std::function<ControlResult(ControlMediaAction, std::optional<ControlMediaType>)> control;
 	std::function<void(std::optional<ControlMediaType>, std::function<bool()>, ControlReply)> now;
 	std::function<ControlResult()> lock;
+	std::function<ControlResult()> musicLink;
+	std::function<void(QString, std::function<bool()>, ControlReply)> playMusicLink;
 };
 
 [[nodiscard]] qint64 ControlMediaMilliseconds(qint64 samples, int frequency);
@@ -38,6 +40,7 @@ struct ControlMediaAdapter {
 	bool hasPasscode,
 	const std::function<bool()> &lock);
 [[nodiscard]] QString ExistingControlMediaPath(const QString &path);
+[[nodiscard]] bool IsControlMusicLinkToken(QStringView token);
 [[nodiscard]] ControlMediaAdapter AppControlMediaAdapter();
 
 }

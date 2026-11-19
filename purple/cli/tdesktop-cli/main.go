@@ -23,7 +23,7 @@ import (
 const lineLimit = 64 * 1024
 const callTimeout = 2 * time.Second
 
-var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|voice now|lock|watch [media|lock|all]"
+var usage = "usage: tdesktop-cli [--socket PATH] [--json] ping|hello|windows|activate N|cycle|emoji render ID [--px N]|media toggle|play|pause [--voice|--music]|media now|media music-link|media play-music-link TOKEN|voice now|lock|watch [media|lock|all]"
 
 type options struct {
 	socket  string
@@ -110,8 +110,25 @@ func parseOptions(args []string) (options, error) {
 	case "cycle":
 		o.command = "window.cycle"
 	case "media", "voice":
+		if positional[0] == "media" && len(positional) >= 2 {
+			switch positional[1] {
+			case "music-link":
+				if len(positional) != 2 || mediaType != "" {
+					return o, errors.New("music-link takes no arguments")
+				}
+				o.command = "media.music-link"
+				return o, nil
+			case "play-music-link":
+				if len(positional) != 3 || mediaType != "" || !musicLinkToken(positional[2]) {
+					return o, errors.New("play-music-link needs a 32-character lowercase hex token")
+				}
+				o.command = "media.play-music-link"
+				o.args["token"] = positional[2]
+				return o, nil
+			}
+		}
 		if len(positional) != 2 {
-			return o, errors.New("media needs toggle, play, pause or now; voice needs now")
+			return o, errors.New(usage)
 		}
 		action := positional[1]
 		if positional[0] == "voice" {
@@ -183,6 +200,12 @@ func parseOptions(args []string) (options, error) {
 		return o, errors.New("unexpected arguments")
 	}
 	return o, nil
+}
+
+func musicLinkToken(token string) bool {
+	return len(token) == 32 && strings.IndexFunc(token, func(ch rune) bool {
+		return (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f')
+	}) == -1
 }
 
 func platformDefaultSocket(platform, home, dataHome string, exists func(string) bool) string {
@@ -330,6 +353,29 @@ func humanResult(command string, result json.RawMessage) (string, error) {
 		return value.Type + " " + value.State + "\n", nil
 	case "media.now":
 		return humanMedia(result)
+	case "media.music-link":
+		var value struct {
+			Token string `json:"token"`
+			State string `json:"state"`
+		}
+		if json.Unmarshal(result, &value) != nil {
+			return "", errors.New("invalid music link result")
+		}
+		if value.State == "stopped" && value.Token == "" {
+			return "no current music\n", nil
+		}
+		if !musicLinkToken(value.Token) || (value.State != "playing" && value.State != "paused") {
+			return "", errors.New("invalid music link result")
+		}
+		return "purpleaudio:" + value.Token + "\n", nil
+	case "media.play-music-link":
+		var value struct {
+			Accepted bool `json:"accepted"`
+		}
+		if json.Unmarshal(result, &value) != nil || !value.Accepted {
+			return "", errors.New("invalid music playback result")
+		}
+		return "playback requested\n", nil
 	case "emoji.render":
 		var value struct {
 			Path       string `json:"path"`

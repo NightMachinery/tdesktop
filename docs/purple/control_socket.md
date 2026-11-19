@@ -7,7 +7,8 @@ dialog, enable automation or change settings.
 
 This version supports `hello`, `ping`, `window.list`, `window.activate`,
 `window.cycle`, `emoji.render`, `media.toggle`, `media.play`, `media.pause`,
-`media.now`, `lock`, `subscribe` and `unsubscribe`. Window commands keep the
+`media.now`, `media.music-link`, `media.play-music-link`, `lock`, `subscribe`
+and `unsubscribe`. Window commands keep the
 primary-first order. Lock refusal is configurable per capability as described
 below. All five capability groups start
 on: window, media.control, media.info, lock and emoji. `hello` advertises the
@@ -88,6 +89,21 @@ errors. The CLI prints local enable instructions when automation is disabled.
 The CMake app target does not build or install this separate command.
 
 ## Media and lock
+
+`tdesktop-cli media music-link --json` returns an opaque bookmark for the
+current Telegram song, with its title, performer, and playback state. It uses
+the media information capability. The bookmark is stored in the owning
+account's encrypted local preferences and stays valid across app restarts and
+cache eviction while its Telegram source remains accessible. The response
+uses `state: "stopped"` when the song player is idle.
+
+`tdesktop-cli media play-music-link TOKEN` uses the playback capability and
+asks the stock player to play the bookmarked song. It leaves window focus
+alone. Both bookmark operations require an unlocked app. Hidden or
+unavailable sources yield an error without metadata. A bookmark depends on
+the local Purple profile and can only play through the account that made it.
+The accepted response confirms dispatch to the player. Streaming can still
+fail after dispatch.
 
 `media.toggle`, `media.play` and `media.pause` belong to `media.control`.
 Their only optional argument is `type:"music"` or `type:"voice"`; omission uses

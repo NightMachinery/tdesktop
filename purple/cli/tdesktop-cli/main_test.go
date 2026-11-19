@@ -369,6 +369,8 @@ func TestMediaOptions(t *testing.T) {
 		{[]string{"media", "play", "--voice"}, "media.play", "voice"},
 		{[]string{"--music", "media", "pause"}, "media.pause", "music"},
 		{[]string{"media", "now", "--json"}, "media.now", ""},
+		{[]string{"media", "music-link", "--json"}, "media.music-link", ""},
+		{[]string{"media", "play-music-link", "0123456789012345abcdefabcdefabcd"}, "media.play-music-link", ""},
 		{[]string{"voice", "now"}, "media.now", "voice"},
 		{[]string{"lock"}, "lock", ""},
 	} {
@@ -381,6 +383,8 @@ func TestMediaOptions(t *testing.T) {
 		{"media"}, {"media", "seek"}, {"media", "play", "extra"}, {"voice", "pause"}, {"lock", "extra"},
 		{"media", "play", "--voice", "--music"}, {"media", "play", "--voice", "--voice"},
 		{"ping", "--music"}, {"voice", "now", "--voice"}, {"media", "now", "--voice"}, {"lock", "--px=1"},
+		{"media", "music-link", "--voice"}, {"media", "music-link", "unexpected"},
+		{"media", "play-music-link"}, {"media", "play-music-link", "invalid"},
 	} {
 		if _, e := parseOptions(args); e == nil {
 			t.Errorf("accepted %v", args)

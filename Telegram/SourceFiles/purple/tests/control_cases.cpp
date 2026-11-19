@@ -101,7 +101,10 @@ void PolicyCases() {
 	Check(call(u"window.activate"_q, {{u"index"_q, 0.5}}).code == u"bad-request"_q && activated == 1, "fractional activate never defaults to zero");
 	Check(call(u"window.activate"_q, {{u"index"_q, 5}}).code == u"not-found"_q, "missing index refusal");
 	Check(call(u"window.cycle"_q).code.isEmpty() && activated == 1, "window cycle routes adapter");
-	Check(call(u"hello"_q).value.value(u"commands"_q).toArray().size() == 13, "hello advertises only implemented commands");
+	const auto advertised = call(u"hello"_q).value.value(u"commands"_q).toArray();
+	Check(advertised.size() == 15 && advertised.contains(u"media.music-link"_q)
+		&& advertised.contains(u"media.play-music-link"_q),
+		"hello advertises implemented commands including music links");
 	auto consent = ControlConsent();
 	auto old = consent.begin();
 	Check(!consent.confirm(old), "enable requires first step");
@@ -225,11 +228,13 @@ void RawIntegerCases() {
 				}
 				for (const auto &entry : ControlCommandNames()) {
 					const auto command = entry.toString();
+					const auto musicLink = command == u"media.music-link"_q;
 					const auto group = command.startsWith(u"window."_q) ? 0
 						: command == u"emoji.render"_q ? 4
-						: command == u"media.now"_q ? 2
+						: (command == u"media.now"_q || musicLink) ? 2
 						: command == u"lock"_q ? 3 : 1;
-					const auto refusesLocked = group == 0;
+					const auto refusesLocked = group == 0 || musicLink
+						|| command == u"media.play-music-link"_q;
 					const auto expected = (command == u"hello"_q) ? QString()
 						: !enabled ? u"automation-disabled"_q
 						: (command == u"ping"_q || command == u"subscribe"_q || command == u"unsubscribe"_q) ? QString()

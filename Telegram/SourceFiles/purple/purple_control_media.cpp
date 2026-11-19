@@ -10,6 +10,12 @@
 
 namespace Purple {
 
+bool IsControlMusicLinkToken(QStringView token) {
+	return token.size() == 32 && std::ranges::all_of(token, [](QChar ch) {
+		return (ch >= u'0' && ch <= u'9') || (ch >= u'a' && ch <= u'f');
+	});
+}
+
 qint64 ControlMediaMilliseconds(qint64 samples, int frequency) {
 	if (samples <= 0 || frequency <= 0) return 0;
 	const auto seconds = samples / frequency;

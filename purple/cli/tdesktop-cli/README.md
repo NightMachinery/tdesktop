@@ -14,6 +14,8 @@ go build -o tdesktop-cli .
 ./tdesktop-cli media play --music
 ./tdesktop-cli media pause --voice
 ./tdesktop-cli media now --json
+./tdesktop-cli media music-link --json
+./tdesktop-cli media play-music-link TOKEN
 ./tdesktop-cli voice now
 ./tdesktop-cli lock
 ./tdesktop-cli emoji render 5339220291157500400 --px 256 --json
@@ -32,6 +34,11 @@ filename and available path. Lock refusal is configurable in Purple Settings: pl
 default to allowed while locked, voice information defaults to refused. Work Mode
 withholding still applies. `lock` requires a configured local passcode.
 No command enables automation or changes settings.
+
+Music links use `purpleaudio:TOKEN` with a 32-character lowercase hexadecimal
+token. They resolve within the Purple profile that made them. Getting a link
+requires media information and following it requires playback. Both require
+unlocking Purple.
 
 See [the control socket guide](../../../docs/purple/control_socket.md) for paths,
 capabilities, exit codes, limits and host tests. CMake does not build or install

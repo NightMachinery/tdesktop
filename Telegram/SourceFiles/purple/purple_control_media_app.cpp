@@ -3,20 +3,160 @@
 #include "purple/purple_control.h"
 #include "purple/purple_control_commands.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_playlists_menu.h"
+#include "apiwrap.h"
+#include "base/random.h"
+#include "base/weak_ptr.h"
 #include "core/application.h"
 #include "data/data_document.h"
+#include "data/data_media_types.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "main/main_account.h"
 #include "main/main_domain.h"
+#include "main/main_session.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
+#include "storage/storage_account.h"
 #include "storage/storage_domain.h"
+#include <QtCore/QDataStream>
 #include <crl/crl_async.h>
 #include <crl/crl_on_main.h>
 
 namespace Purple {
 namespace {
+
+constexpr auto kMusicLinkVersion = quint8(1);
+
+QByteArray PackMusicLink(const PlaylistMessage &source) {
+	auto bytes = QByteArray();
+	auto stream = QDataStream(&bytes, QIODevice::WriteOnly);
+	stream << kMusicLinkVersion << quint64(source.id.peer.value)
+		<< qint64(source.id.msg.bare) << quint64(source.documentId);
+	return bytes;
+}
+
+std::optional<PlaylistMessage> UnpackMusicLink(const QByteArray &bytes) {
+	auto stream = QDataStream(bytes);
+	auto version = quint8();
+	auto peer = quint64();
+	auto message = qint64();
+	auto document = quint64();
+	stream >> version >> peer >> message >> document;
+	if (stream.status() != QDataStream::Ok || !stream.atEnd()
+		|| version != kMusicLinkVersion || !peer || !document
+		|| message <= 0 || message > kMaximumPlaylistMessageId) {
+		return std::nullopt;
+	}
+	return PlaylistMessage{ FullMsgId(PeerId(peer), MsgId(message)), document };
+}
+
+std::string MusicLinkKey(const QString &token) {
+	return "purple.music.link." + token.toStdString();
+}
+
+bool LiveMusicLinkSession(Main::Session *session) {
+	return session && !session->account().loggingOut()
+		&& session->account().maybeSession() == session;
+}
+
+ControlResult MusicLinkDenied() {
+	return ControlError(u"not-found"_q, u"Music source unavailable."_q);
+}
+
+bool MusicLinkVisible(not_null<Main::Session*> session, FullMsgId source) {
+	const auto history = session->data().historyLoaded(source.peer);
+	return history ? !history->purpleHiddenFromView() : !Filtering(session);
+}
+
+ControlResult CurrentMusicLink() {
+	auto error = AuthorizeControlCommand(u"media.music-link"_q, CurrentControlPolicy(),
+		ControlMediaKind::Music, true);
+	if (!error.code.isEmpty()) return error;
+	using namespace Media::Player;
+	const auto player = instance();
+	const auto type = AudioMsgId::Type::Song;
+	const auto current = player->current(type);
+	const auto state = player->getState(type);
+	const auto document = current.audio();
+	if (!document || state.id.audio() != document
+		|| state.id.contextId() != current.contextId()
+		|| IsStoppedOrStopping(state.state)) {
+		return { QJsonObject{ { u"state"_q, u"stopped"_q } } };
+	}
+	const auto session = &document->session();
+	const auto source = PlaylistMessage{ current.contextId(), document->id };
+	if (!LiveMusicLinkSession(session) || !MusicLinkVisible(session, source.id)) {
+		return MusicLinkDenied();
+	}
+	const auto input = CapturePlaylistSong(session, source);
+	if (!input) return MusicLinkDenied();
+	auto &local = session->local();
+	const auto reverseKey = "purple.music.document." + std::to_string(document->id);
+	auto token = local.readPref<QString>(reverseKey);
+	const auto recorded = IsControlMusicLinkToken(token)
+		? UnpackMusicLink(local.readPref<QByteArray>(MusicLinkKey(token)))
+		: std::nullopt;
+	if (!recorded || recorded->documentId != document->id) {
+		auto bytes = QByteArray(16, Qt::Uninitialized);
+		base::RandomFill(bytes.data(), bytes.size());
+		token = QString::fromLatin1(bytes.toHex());
+	}
+	local.writePref<QByteArray>(MusicLinkKey(token), PackMusicLink(source));
+	local.writePref<QString>(reverseKey, token);
+	return { QJsonObject{
+		{ u"token"_q, token },
+		{ u"title"_q, input->meta.title },
+		{ u"performer"_q, input->meta.performer },
+		{ u"state"_q, IsPausedOrPausing(state.state) ? u"paused"_q : u"playing"_q },
+	} };
+}
+
+void PlayMusicLink(QString token, std::function<bool()> active, ControlReply reply) {
+	if (active && !active()) return;
+	const auto &domain = Core::App().domain();
+	for (const auto &entry : domain.accounts()) {
+		const auto session = entry.account->maybeSession();
+		if (!LiveMusicLinkSession(session)) continue;
+		const auto source = UnpackMusicLink(
+			session->local().readPref<QByteArray>(MusicLinkKey(token)));
+		if (!source) continue;
+		if (!MusicLinkVisible(session, source->id)) break;
+		const auto weak = base::make_weak(session);
+		const auto finish = [=] {
+			if (active && !active()) return;
+			auto error = AuthorizeControlCommand(u"media.play-music-link"_q,
+				CurrentControlPolicy());
+			if (!error.code.isEmpty()) {
+				reply(std::move(error));
+				return;
+			}
+			const auto live = weak.get();
+			if (!LiveMusicLinkSession(live) || !MusicLinkVisible(live, source->id)
+				|| !CapturePlaylistSong(live, *source)) {
+				reply(MusicLinkDenied());
+				return;
+			}
+			const auto item = live->data().message(source->id);
+			const auto audio = AudioMsgId(item->media()->document(), source->id);
+			const auto player = Media::Player::instance();
+			player->play(audio);
+			reply({ QJsonObject{ { u"accepted"_q, true } } });
+		};
+		if (session->data().message(source->id)) {
+			finish();
+			return;
+		}
+		const auto peer = session->data().peerLoaded(source->id.peer);
+		if (peer || !peerIsChannel(source->id.peer)) {
+			session->api().requestMessageData(peer, source->id.msg, finish);
+			return;
+		}
+		break;
+	}
+	reply(MusicLinkDenied());
+}
 
 AudioMsgId::Type PlayerType(std::optional<ControlMediaType> type) {
 	return !type ? Media::Player::instance()->getActiveType()
@@ -110,7 +250,7 @@ ControlResult LockApplication() {
 }
 
 ControlMediaAdapter AppControlMediaAdapter() {
-	return { ControlPlayback, ReadMediaInfo, LockApplication };
+	return { ControlPlayback, ReadMediaInfo, LockApplication, CurrentMusicLink, PlayMusicLink };
 }
 
 }

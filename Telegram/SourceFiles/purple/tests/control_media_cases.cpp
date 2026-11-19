@@ -116,6 +116,9 @@ void DispatchCases() {
 	auto controls = 0;
 	auto reads = 0;
 	auto locks = 0;
+	auto links = 0;
+	auto follows = 0;
+	const auto token = u"0123456789012345abcdefabcdefabcd"_q;
 	auto lastAction = ControlMediaAction::Toggle;
 	auto lastType = std::optional<ControlMediaType>();
 	const auto media = ControlMediaAdapter{
@@ -128,6 +131,15 @@ void DispatchCases() {
 			if (!active || active()) reply(ControlMediaInfo({}, {}));
 		},
 		.lock = [&] { ++locks; return ControlLock(true, [] { return true; }); },
+		.musicLink = [&] {
+			++links;
+			return ControlResult{ QJsonObject{{ u"token"_q, token }} };
+		},
+		.playMusicLink = [&](QString received, auto, auto reply) {
+			++follows;
+			Check(received == token, "opaque music link reaches player unchanged");
+			reply({ QJsonObject{{ u"accepted"_q, true }} });
+		},
 	};
 	const auto call = [&](QString cmd, QJsonObject args = {}) {
 		auto result = ControlResult();
@@ -136,6 +148,23 @@ void DispatchCases() {
 			[&](auto value) { result = value; }, {}, media);
 		return result;
 	};
+	const auto makeLink = u"media.music-link"_q;
+	const auto playLink = u"media.play-music-link"_q;
+	const auto playbackArguments = QJsonObject{{ u"token"_q, token }};
+	Check(call(makeLink).value.value(u"token"_q).toString() == token,
+		"unlocked media information can obtain a music link");
+	Check(call(playLink, playbackArguments).value.value(u"accepted"_q).toBool(),
+		"unlocked playback can follow a music link");
+	Check(call(makeLink, playbackArguments).code == u"bad-request"_q
+		&& call(playLink, {{ u"token"_q, token.toUpper() }}).code == u"bad-request"_q
+		&& call(playLink).code == u"bad-request"_q,
+		"invalid music link arguments fail before the adapter");
+	policy.locked = true;
+	Check(call(makeLink).code == u"locked"_q
+		&& call(playLink, playbackArguments).code == u"locked"_q,
+		"music links require unlock even when ordinary media is allowed");
+	policy.locked = false;
+	Check(links == 1 && follows == 1, "refused link requests have no side effects");
 	for (const auto &[cmd, action] : std::vector<std::pair<QString, ControlMediaAction>>{
 		{u"media.toggle"_q, ControlMediaAction::Toggle}, {u"media.play"_q, ControlMediaAction::Play},
 		{u"media.pause"_q, ControlMediaAction::Pause},
