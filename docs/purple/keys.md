@@ -44,6 +44,9 @@ mode. An input method composition can still open search.
   the context menu.
   `g s m` opens the native menu for a hinted message and returns to Insert.
   Move through the menu with Up and Down and choose an action with Enter.
+- `g s u` copies a visible link from message text and `g s o` opens it.
+  Type the letters on the link. Copy follows the chat's copy restrictions,
+  and opening follows Telegram's usual link handling and confirmations.
 - `g s r` starts a reply to a visible message, and `g s e` opens an editable
   message in Telegram's editor. Both return to Insert so you can type right
   away. Sending a reply or saving an edit uses the usual controls.

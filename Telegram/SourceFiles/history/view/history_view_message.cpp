@@ -964,6 +964,19 @@ QPoint Message::prepareRichPageStateRect(QPoint point, QRect &trect) const {
 	return point - trect.topLeft();
 }
 
+auto Message::purpleBodyLinkLayout() const
+-> std::pair<const Ui::Text::String*, QRect> {
+	auto rect = QRect();
+	if (richpage() || !text().hasLinks() || !prepareRichPageTextRect(rect)) {
+		return {};
+	}
+	if (const auto botTop = Get<FakeBotAboutTop>()) {
+		rect.setY(rect.y() + botTop->height);
+	}
+	rect.setWidth(std::max(textRealWidth(), rect.width()));
+	return { &text(), rect };
+}
+
 void Message::activateRichPageMedia(
 		const MediaActivation &activation,
 		ClickContext context) const {

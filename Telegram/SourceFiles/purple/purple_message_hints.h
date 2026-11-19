@@ -7,7 +7,11 @@
 #include <QtCore/QRect>
 #include <QtCore/QString>
 
+#include <memory>
+#include <optional>
+
 class QContextMenuEvent;
+class ClickHandler;
 class HistoryInner;
 class HistoryItem;
 
@@ -28,7 +32,7 @@ namespace Purple {
 
 class MessageHints final {
 public:
-	enum class Action { Select, Copy, Menu, Link, Reply, Edit };
+	enum class Action { Select, Copy, Menu, Link, Reply, Edit, CopyUrl, OpenUrl };
 
 	enum class Input { Pending, Finished, LeaveNormal, Unknown };
 
@@ -56,12 +60,22 @@ public:
 private:
 	class Overlay;
 
+	struct BodyLink {
+		FullMsgId owner;
+		QPoint itemPoint;
+		QPoint listPoint;
+		std::shared_ptr<ClickHandler> handler;
+
+		friend bool operator==(const BodyLink &, const BodyLink &) = default;
+	};
+
 	struct Entry {
 		FullMsgId id;
 		const HistoryView::Element *element = nullptr;
 		QRect rect;
 		std::vector<FullMsgId> group;
 		QString label;
+		std::optional<BodyLink> bodyLink;
 
 		friend bool operator==(const Entry &, const Entry &) = default;
 	};
@@ -76,6 +90,15 @@ private:
 		Target view,
 		not_null<HistoryItem*> item,
 		Action action);
+	[[nodiscard]] static bool canUseBodyLink(
+		Target view,
+		not_null<HistoryItem*> item,
+		Action action);
+	static Input applyBodyLink(
+		Target view,
+		not_null<const HistoryView::Element*> element,
+		Action action,
+		const BodyLink &link);
 	void watch();
 	static Input apply(
 		Target view,

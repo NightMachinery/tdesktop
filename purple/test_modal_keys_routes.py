@@ -226,14 +226,15 @@ watch = between(hints, "void MessageHints::watch", "MessageHints::Input MessageH
 for cancellation in ("_purpleHintGeometryChanges", "shownValue()", "scrollTopChanges()",
                      "itemRemoved()", "viewRemoved()", "viewLayoutChanged()"):
     assert cancellation in watch, cancellation
-pick = between(hints, "MessageHints::Input MessageHints::type", "MessageHints::Input MessageHints::apply")
+pick = between(hints, "MessageHints::Input MessageHints::type", "MessageHints::Input MessageHints::applyBodyLink")
 ordered(pick, "view.widget() != _view.data()", "view.scheduled != _scheduled",
         "&view.session() != _session.get()", "snapshot() != _entries",
         "QPointer(view.widget())", "const auto id = i->id", "const auto element = i->element",
         "const auto point = i->rect.center()", "clear();", "if (!widget)",
         "view.session().data().message(id)", "item && (view.main", "view.main->viewByItem(item)",
-        "view.section->viewForItem(item)) == element", "return apply(view, item, action, point)")
-apply = between(hints, "MessageHints::Input MessageHints::apply", "void MessageHints::clear")
+        "view.section->viewForItem(item)) == element", "? applyBodyLink(view, element, action, *bodyLink)",
+        ": apply(view, item, action, point)")
+apply = between(hints, "MessageHints::Input MessageHints::apply(", "void MessageHints::clear")
 ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
         "MessageHintMenuEvent(item, point", "main->showContextMenu", "view.section->showContextMenu",
         "return Input::LeaveNormal;",
@@ -244,6 +245,22 @@ ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
         "gsl::finally", "section->selectItemAsGroup(item)")
 
 assert "{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } }" in keys
+assert "{ Action::CopyMessageUrl, { Qt::Key_G, Qt::Key_S, Qt::Key_U } }" in keys
+assert "{ Action::OpenMessageUrl, { Qt::Key_G, Qt::Key_S, Qt::Key_O } }" in keys
+ordered(dispatch, "case Action::CopyMessageUrl:", "startHint(Hint::CopyUrl",
+        "case Action::OpenMessageUrl:", "startHint(Hint::OpenUrl")
+body_layout = between(hints, "std::vector<BodyLinkHit> VisibleBodyLinks", "QRect PlaceLinkBadge")
+ordered(body_layout, "purpleBodyLinkLayout()", "RenderedOffset(*text, entity.offset())",
+        "countHighlightRects", "part.intersected(clip)", "BodyLinkState(message, rect.center())",
+        "text->linkRangeFor(state.link) == range", "state.itemId == message->textItem()->fullId()")
+body_policy = between(hints, "bool MessageHints::canUseBodyLink", "bool MessageHints::eligible")
+ordered(body_policy, "view.session().frozen()", "IsAnchoredEphemeral(item)",
+        "action != Action::CopyUrl", "hasCopyRestriction(item)", "hasCopyRestriction(item)")
+body_apply = between(hints, "MessageHints::Input MessageHints::applyBodyLink", "MessageHints::Input MessageHints::apply(")
+ordered(body_apply, "data().message(link.owner)", "element->textItem() != owner",
+        "visibleRegion().contains(link.listPoint)", "canUseBodyLink(view, owner, action)",
+        "BodyLinkState(element, link.itemPoint)", "state.itemId != link.owner",
+        "state.link != link.handler", "copyToClipboardText()", "ActivateClickHandler")
 ordered(available, "case Action::CopyMessageLink:",
         "target.messages && !target.messages.scheduled")
 ordered(dispatch, "const auto startHint", "_hints.start", "case Action::CopyMessageLink:",

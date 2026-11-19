@@ -203,6 +203,8 @@ public:
 	TextState textState(
 		QPoint point,
 		StateRequest request) const override;
+	[[nodiscard]] auto purpleBodyLinkLayout() const
+	-> std::pair<const Ui::Text::String*, QRect>;
 	void updatePressed(QPoint point) override;
 	bool consumeHorizontalScroll(
 		QPoint position,

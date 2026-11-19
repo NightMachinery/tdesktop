@@ -84,6 +84,8 @@ enum class Action {
 	CopyMessage,
 	MessageMenu,
 	CopyMessageLink,
+	CopyMessageUrl,
+	OpenMessageUrl,
 	ReplyToMessage,
 	EditMessage,
 	Search,
@@ -209,6 +211,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_calendar(tr::now); } },
 	{ Action::CopyMessageLink, "message-hint-copy-link",
 		[] { return tr::lng_purple_keys_message_link(tr::now); } },
+	{ Action::CopyMessageUrl, "message-hint-copy-url",
+		[] { return tr::lng_context_copy_link(tr::now); } },
+	{ Action::OpenMessageUrl, "message-hint-open-url",
+		[] { return tr::lng_polls_option_open_link_title(tr::now); } },
 	{ Action::ReplyToMessage, "message-hint-reply",
 		[] { return tr::lng_context_reply_msg(tr::now); } },
 	{ Action::EditMessage, "message-hint-edit",
@@ -243,6 +249,8 @@ const Binding kBindings[] = {
 	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
 	{ Action::MessageMenu, { Qt::Key_G, Qt::Key_S, Qt::Key_M } },
 	{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } },
+	{ Action::CopyMessageUrl, { Qt::Key_G, Qt::Key_S, Qt::Key_U } },
+	{ Action::OpenMessageUrl, { Qt::Key_G, Qt::Key_S, Qt::Key_O } },
 	{ Action::ReplyToMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_R } },
 	{ Action::EditMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_E } },
 	{ Action::Search, { Qt::Key_Slash } },
@@ -585,6 +593,8 @@ bool Available(Action action, const Target &target) {
 	case Action::NextFolder: return target.folders;
 	case Action::SelectMessage:
 	case Action::CopyMessage:
+	case Action::CopyMessageUrl:
+	case Action::OpenMessageUrl:
 	case Action::MessageMenu: return bool(target.messages);
 	case Action::CopyMessageLink:
 		return target.messages && !target.messages.scheduled;
@@ -1281,6 +1291,12 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::CopyMessageLink:
 		startHint(Hint::Link, tr::lng_purple_keys_message_link_empty(tr::now));
+		break;
+	case Action::CopyMessageUrl:
+		startHint(Hint::CopyUrl, tr::lng_purple_keys_message_link_empty(tr::now));
+		break;
+	case Action::OpenMessageUrl:
+		startHint(Hint::OpenUrl, tr::lng_purple_keys_message_link_empty(tr::now));
 		break;
 	case Action::ReplyToMessage:
 		startHint(Hint::Reply, tr::lng_purple_keys_message_menu_empty(tr::now));

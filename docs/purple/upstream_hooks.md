@@ -32,6 +32,8 @@ the numbers.
   focus during hint selection.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
+- `history/view/history_view_message.*`: exposes rendered body text and its
+  bounds so Purple can place a hint on each visible link.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color

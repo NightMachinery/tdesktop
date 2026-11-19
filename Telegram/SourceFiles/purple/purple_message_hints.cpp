@@ -15,10 +15,12 @@
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_list_widget.h"
+#include "history/view/history_view_message.h"
 #include "history/view/media/history_view_media.h"
 #include "iv/iv_rich_message_html_export.h"
 #include "main/main_session.h"
 #include "mainwindow.h"
+#include "ui/basic_click_handlers.h"
 #include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/elastic_scroll.h"
@@ -29,8 +31,11 @@
 #include "styles/style_widgets.h"
 
 #include <QtGui/QContextMenuEvent>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QPainter>
 
+#include <array>
 #include <string_view>
 
 namespace Purple {
@@ -54,6 +59,100 @@ bool CanCopyMessageLink(not_null<HistoryItem*> item) {
 	return IsServerMsgId(item->id)
 		&& item->hasDirectLink()
 		&& !IsAnchoredEphemeral(item);
+}
+
+HistoryView::TextState BodyLinkState(
+		not_null<const HistoryView::Element*> element,
+		QPoint point) {
+	return element->textState(point, { .onlyMessageText = true });
+}
+
+uint16 RenderedOffset(const Ui::Text::String &text, int offset) {
+	// Exporting can expand an inline emoji beyond its rendered text length.
+	auto left = 0;
+	auto right = text.length();
+	while (left < right) {
+		const auto middle = left + (right - left) / 2;
+		if (text.toString({ 0, uint16(middle) }).size() < offset) {
+			left = middle + 1;
+		} else {
+			right = middle;
+		}
+	}
+	return uint16(left);
+}
+
+struct BodyLinkHit {
+	QRect rect;
+	ClickHandlerPtr handler;
+};
+
+std::vector<BodyLinkHit> VisibleBodyLinks(
+		not_null<HistoryView::Message*> message,
+		QRect clip) {
+	auto result = std::vector<BodyLinkHit>();
+	const auto [text, bounds] = message->purpleBodyLinkLayout();
+	if (!text || !clip.intersects(bounds)) {
+		return result;
+	}
+	const auto exported = text->toTextWithEntities();
+	for (const auto &entity : exported.entities) {
+		if (entity.type() != EntityType::Url
+			&& entity.type() != EntityType::CustomUrl) {
+			continue;
+		}
+		const auto range = TextSelection{
+			RenderedOffset(*text, entity.offset()),
+			RenderedOffset(*text, entity.offset() + entity.length()),
+		};
+		if (range.empty()) {
+			continue;
+		}
+		const auto ranges = std::array{ range };
+		const auto rects = text->countHighlightRects(ranges, {
+			.position = bounds.topLeft(),
+			.geometry = Ui::Text::SimpleGeometry(bounds.width(), 0, 0, false),
+			.clip = clip,
+		});
+		for (const auto &part : rects) {
+			const auto rect = part.intersected(clip);
+			if (rect.isEmpty()) {
+				continue;
+			}
+			const auto state = BodyLinkState(message, rect.center());
+			if (dynamic_cast<UrlClickHandler*>(state.link.get())
+				&& text->linkRangeFor(state.link) == range
+				&& state.itemId == message->textItem()->fullId()) {
+				result.push_back({ rect, state.link });
+				break;
+			}
+		}
+	}
+	return result;
+}
+
+QRect PlaceLinkBadge(
+		QRect box,
+		QSize space,
+		const std::vector<QRect> &placed) {
+	const auto overlaps = [&](const QRect &rect) {
+		return ranges::any_of(placed, [&](const QRect &other) {
+			return rect.intersects(other);
+		});
+	};
+	if (!overlaps(box)) {
+		return box;
+	}
+	for (auto dy = box.height(); dy < space.height(); dy += box.height()) {
+		for (const auto offset : { dy, -dy }) {
+			const auto other = box.translated(0, offset);
+			if (other.top() >= 0 && other.bottom() < space.height()
+				&& !overlaps(other)) {
+				return other;
+			}
+		}
+	}
+	return box;
 }
 
 constexpr auto kHintLetters = std::u16string_view(u"asdfghjkl");
@@ -99,8 +198,10 @@ protected:
 		auto p = QPainter(this);
 		p.setFont(st::defaultToast.style.font);
 		p.setPen(st::toastFg->c);
+		auto badges = std::vector<QRect>();
 		for (const auto &entry : _hints._entries) {
-			if (!entry.label.startsWith(_hints._prefix)) {
+			const auto matches = entry.label.startsWith(_hints._prefix);
+			if (!matches && !entry.bodyLink) {
 				continue;
 			}
 			const auto anchor = entry.rect.translated(-geometry().topLeft());
@@ -110,10 +211,21 @@ protected:
 				: anchor.x();
 			const auto box = QRect(
 				QPoint(std::clamp(x, 0, std::max(width() - size.width(), 0)),
-					anchor.y()),
+					std::clamp(anchor.y(), 0, std::max(height() - size.height(), 0))),
 				size);
-			_background.paint(p, box);
-			p.drawText(box, Qt::AlignCenter, entry.label);
+			const auto placed = entry.bodyLink
+				? PlaceLinkBadge(box, this->size(), badges)
+				: box;
+			if (entry.bodyLink) {
+				badges.push_back(placed);
+			}
+			if (matches) {
+				if (placed != box) {
+					p.drawLine(placed.center(), anchor.center());
+				}
+				_background.paint(p, placed);
+				p.drawText(placed, Qt::AlignCenter, entry.label);
+			}
 		}
 	}
 
@@ -194,6 +306,18 @@ bool MessageHints::canCompose(
 		|| channel->canEditMessages();
 }
 
+bool MessageHints::canUseBodyLink(
+		Target view,
+		not_null<HistoryItem*> item,
+		Action action) {
+	if (view.session().frozen() || IsAnchoredEphemeral(item)) {
+		return false;
+	}
+	return (action != Action::CopyUrl) || (view.main
+		? !view.main->hasCopyRestriction(item)
+		: !view.section->hasCopyRestriction(item));
+}
+
 bool MessageHints::eligible(
 		not_null<HistoryView::Element*> view,
 		std::vector<FullMsgId> &groupIds) const {
@@ -221,6 +345,9 @@ bool MessageHints::eligible(
 
 	if (_action == Action::Link) {
 		return !source.scheduled && CanCopyMessageLink(item);
+	} else if (_action == Action::CopyUrl || _action == Action::OpenUrl) {
+		const auto owner = view->textItem();
+		return owner && canUseBodyLink(source, owner, _action);
 	} else if (_action == Action::Reply || _action == Action::Edit) {
 		return canCompose(source, item, _action);
 	}
@@ -314,6 +441,28 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 				QRect(_view->mapToGlobal(rect.topLeft()), rect.size()))) {
 			return true;
 		}
+		if (_action == Action::CopyUrl || _action == Action::OpenUrl) {
+			const auto message = dynamic_cast<HistoryView::Message*>(element.get());
+			if (message) {
+				const auto owner = message->textItem()->fullId();
+				auto hits = VisibleBodyLinks(message, rect.translated(0, -top));
+				for (auto &hit : hits) {
+					const auto glyph = hit.rect.translated(0, top);
+					entries.push_back({
+						.id = element->data()->fullId(),
+						.element = element,
+						.rect = glyph,
+						.bodyLink = BodyLink{
+							.owner = owner,
+							.itemPoint = hit.rect.center(),
+							.listPoint = glyph.center(),
+							.handler = std::move(hit.handler),
+						},
+					});
+				}
+			}
+			return true;
+		}
 		entries.push_back({
 			.id = element->data()->fullId(),
 			.element = element,
@@ -377,7 +526,8 @@ void MessageHints::watch() {
 		return section->viewForItem(item) || ranges::any_of(
 			_entries,
 			[=](const Entry &entry) {
-				return entry.id == id || ranges::contains(entry.group, id);
+				return entry.id == id || ranges::contains(entry.group, id)
+					|| (entry.bodyLink && entry.bodyLink->owner == id);
 			});
 	};
 	const auto view = [item](not_null<const HistoryView::Element*> view) {
@@ -446,6 +596,7 @@ MessageHints::Input MessageHints::type(int key, Target view) {
 	const auto id = i->id;
 	const auto element = i->element;
 	const auto point = i->rect.center();
+	const auto bodyLink = i->bodyLink;
 	const auto action = _action;
 	clear();
 	if (!widget) {
@@ -455,9 +606,40 @@ MessageHints::Input MessageHints::type(int key, Target view) {
 	if (item && (view.main
 		? view.main->viewByItem(item)
 		: view.section->viewForItem(item)) == element) {
-		return apply(view, item, action, point);
+		return bodyLink
+			? applyBodyLink(view, element, action, *bodyLink)
+			: apply(view, item, action, point);
 	}
 	return Input::Finished;
+}
+
+MessageHints::Input MessageHints::applyBodyLink(
+		Target view,
+		not_null<const HistoryView::Element*> element,
+		Action action,
+		const BodyLink &link) {
+	const auto widget = view.widget();
+	const auto owner = view.session().data().message(link.owner);
+	if (!owner || element->textItem() != owner
+		|| !widget->visibleRegion().contains(link.listPoint)
+		|| !canUseBodyLink(view, owner, action)) {
+		return Input::Finished;
+	}
+	const auto state = BodyLinkState(element, link.itemPoint);
+	if (state.itemId != link.owner || state.link != link.handler) {
+		return Input::Finished;
+	}
+	if (action == Action::CopyUrl) {
+		const auto text = link.handler->copyToClipboardText();
+		if (!text.isEmpty()) {
+			QGuiApplication::clipboard()->setText(text);
+		}
+		return Input::Finished;
+	}
+	ActivateClickHandler(widget, link.handler, view.main
+		? view.main->prepareClickContext(Qt::LeftButton, link.owner)
+		: view.section->prepareClickContext(Qt::LeftButton, link.owner));
+	return Input::LeaveNormal;
 }
 
 MessageHints::Input MessageHints::apply(
