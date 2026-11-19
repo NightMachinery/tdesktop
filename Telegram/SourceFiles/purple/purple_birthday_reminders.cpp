@@ -222,7 +222,11 @@ void SettingsBox(
 				audience,
 				QString(),
 				st::settingsPrivacyOption),
-			st::settingsSendTypePadding);
+			st::settingsSendTypePadding + style::margins(
+				-st::lineWidth,
+				st::settingsPrivacySkipTop,
+				0,
+				0));
 		AudienceLabel(audience) | rpl::on_next([=](const QString &label) {
 			row->setText(label);
 		}, row->lifetime());
