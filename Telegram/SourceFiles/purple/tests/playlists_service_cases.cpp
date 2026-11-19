@@ -1,3 +1,4 @@
+#include "purple/purple_playlist_folders.h"
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_playlist_download_registry.h"
 #include "purple/purple_playlist_download_files.h"
@@ -575,10 +576,84 @@ void Exercise() {
 	}
 }
 
+void ExerciseFolders() {
+	Fixture fixture;
+	auto request = PlaylistAccountEdit{
+		.kind = PlaylistAccountEditKind::CreateHyper,
+		.entropy = QByteArray(kPlaylistIdEntropyBytes, 'h'),
+		.songs = {
+			{ .documentId = 18, .peer = {PeerTokenKind::Self, 0}, .msg = 5 },
+			{ .documentId = 11, .peer = {PeerTokenKind::Self, 0}, .msg = 8 },
+		},
+		.nowMs = 100,
+	};
+	const auto initial = fixture.edit(request);
+	Expect(initial && initial.edit && initial.edit->changed && initial.write,
+		"Hyper creation completes through the actual account worker");
+	if (!initial || !initial.edit) return;
+	const auto id = initial.edit->playlistId;
+	const auto placement = ReadPlaylistFolders(*initial.snapshot.state);
+	Expect(placement && placement->placements.at(id) == HyperFolderId()
+		&& PlaylistVisibleSongIds(initial.snapshot.library->playlists.at(id)) == std::vector<uint64_t>{18, 11},
+		"worker reads back the ordered playlist and Hyper placement together");
+
+	InvalidatePlaylistServices();
+	request.entropy = QByteArray(kPlaylistIdEntropyBytes, 'i');
+	request.nowMs = 200;
+	const auto duplicate = fixture.edit(request);
+	Expect(duplicate && duplicate.edit && duplicate.edit->playlistId == id
+		&& !duplicate.edit->changed && duplicate.snapshot.library->playlists.size() == 1,
+		"restart of the account worker reuses the ordered playlist");
+
+	const auto folder = *FormatPlaylistId(QByteArray(kPlaylistIdEntropyBytes, 'f'));
+	const auto added = fixture.edit({
+		.kind = PlaylistAccountEditKind::SetFolderName,
+		.title = u"Focus"_q,
+		.folderId = folder,
+		.nowMs = 300,
+	});
+	Expect(bool(added) && added.snapshot.library == duplicate.snapshot.library
+		&& ReadPlaylistFolders(*added.snapshot.state)->names.at(folder) == u"Focus"_q,
+		"folder creation writes only local state");
+	const auto createdInFolder = fixture.edit({
+		.kind = PlaylistAccountEditKind::Create,
+		.title = u"Focused songs"_q,
+		.folderId = folder,
+		.entropy = QByteArray(kPlaylistIdEntropyBytes, 'k'),
+		.nowMs = 350,
+	});
+	Expect(createdInFolder && createdInFolder.edit
+		&& ReadPlaylistFolders(*createdInFolder.snapshot.state)->placements.at(createdInFolder.edit->playlistId) == folder,
+		"ordinary playlist creation and placement commit together");
+	const auto moved = fixture.edit({
+		.kind = PlaylistAccountEditKind::MoveToFolder,
+		.playlistId = id,
+		.folderId = folder,
+		.nowMs = 400,
+	});
+	Expect(bool(moved) && ReadPlaylistFolders(*moved.snapshot.state)->placements.at(id) == folder,
+		"move existing playlist into ordinary folder");
+	const auto removed = fixture.edit({
+		.kind = PlaylistAccountEditKind::RemoveFolder,
+		.folderId = folder,
+		.nowMs = 500,
+	});
+	Expect(bool(removed) && !ReadPlaylistFolders(*removed.snapshot.state)->placements.contains(id)
+		&& removed.snapshot.library->playlists.contains(id), "remove folder with its playlist safely retained");
+
+	request.songs.back() = request.songs.front();
+	request.nowMs = 600;
+	const auto invalid = fixture.edit(request);
+	Expect(!invalid && !invalid.write && invalid.snapshot.library == removed.snapshot.library
+		&& invalid.snapshot.state == removed.snapshot.state,
+		"rejected song snapshot leaves library and folder state untouched");
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
 	QCoreApplication application(argc, argv);
+	ExerciseFolders();
 	Exercise();
 	ExerciseDownloadPruning();
 	{

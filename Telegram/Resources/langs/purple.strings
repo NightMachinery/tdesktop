@@ -762,6 +762,10 @@ docs/purple/upstream_hooks.md.
 "lng_purple_playlists_playing" = "Playing this playlist.";
 "lng_purple_playlists_exhausted" = "End of playlist.";
 "lng_purple_playlists_saving" = "Saving playlist change…";
+"lng_purple_playlist_move_to_folder" = "Move to folder";
+"lng_purple_playlist_top_level" = "Top level";
+"lng_purple_playlist_remove_folder" = "Remove folder";
+"lng_purple_playlist_remove_folder_confirm" = "Remove this folder? Its playlists will return to the top level.";
 
 "lng_purple_playlists_list_help" = "Drag a handle to reorder. Use arrow keys to select, Enter to play, or Alt+Up/Down to move the selected song.";
 "lng_purple_playlists_not_checked" = "Source not checked";

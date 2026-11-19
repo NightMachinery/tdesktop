@@ -130,6 +130,7 @@ CASES = {
             'purple/purple_playlist_download_files.cpp',
             'purple/purple_playlist_download_registry.cpp',
             'purple/purple_playlists_worker.cpp', 'purple/purple_playlists_store.cpp',
+            'purple/purple_playlist_folders.cpp',
             'purple/purple_sync_local_store.cpp', 'core:purple/purple_account_files.cpp',
             'core:purple/purple_local_choice.cpp', 'core:purple/purple_peer_token.cpp',
             'core:purple/purple_sync_json.cpp', 'core:purple/purple_playlists.cpp',

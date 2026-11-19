@@ -1,6 +1,7 @@
 #include "purple/purple_playlists_worker.h"
 
 #include "purple/purple_playlist_download_files.h"
+#include "purple/purple_playlist_folders.h"
 
 namespace Purple {
 
@@ -33,21 +34,68 @@ PlaylistAccountResult PlaylistAccountWorker::edit(
 		result.edit = PlaylistEditResult{ .error = PlaylistEditError::InvalidStamp };
 		return result;
 	}
-	result.edit = apply(*result.snapshot.library, request);
+	auto state = *result.snapshot.state;
+	const auto &library = *result.snapshot.library;
+	if (request.kind == PlaylistAccountEditKind::CreateHyper) {
+		auto folders = ReadPlaylistFolders(state);
+		auto candidate = folders
+			? PrepareHyperPlaylist(library, *folders, request.songs,
+				request.entropy, request.nowMs, _selfUserId)
+			: std::nullopt;
+		if (!candidate || !WritePlaylistFolders(state, candidate->folders)) {
+			result.edit = PlaylistEditResult{ .error = PlaylistEditError::InvalidValue };
+			return result;
+		}
+		result.edit = std::move(candidate->edit);
+		result.edit->undo = {};
+	} else if (request.kind == PlaylistAccountEditKind::SetFolderName
+		|| request.kind == PlaylistAccountEditKind::RemoveFolder
+		|| request.kind == PlaylistAccountEditKind::MoveToFolder) {
+		auto folders = ReadPlaylistFolders(state);
+		const auto changed = folders && (request.kind == PlaylistAccountEditKind::SetFolderName
+			? SetPlaylistFolderName(*folders, request.folderId, request.title)
+			: request.kind == PlaylistAccountEditKind::RemoveFolder
+			? RemovePlaylistFolder(*folders, request.folderId)
+			: MovePlaylistToFolder(*folders, library, request.playlistId, request.folderId));
+		if (!changed || !WritePlaylistFolders(state, *folders)) {
+			result.edit = PlaylistEditResult{ .error = PlaylistEditError::InvalidValue };
+			return result;
+		}
+		result.write = _store.writeLocalState(result.snapshot, state);
+		result.snapshot = read().snapshot;
+		return result;
+	} else {
+		result.edit = apply(library, request);
+		if (*result.edit && result.edit->changed
+			&& request.kind == PlaylistAccountEditKind::Create && !request.folderId.isEmpty()) {
+			auto folders = ReadPlaylistFolders(state);
+			if (!folders || !MovePlaylistToFolder(*folders, result.edit->library,
+					result.edit->playlistId, request.folderId)
+				|| !WritePlaylistFolders(state, *folders)) {
+				result.edit = PlaylistEditResult{ .error = PlaylistEditError::InvalidValue };
+				return result;
+			}
+		}
+	}
 	if (!*result.edit || !result.edit->changed) {
 		if (*result.edit && request.kind == PlaylistAccountEditKind::AddSongs) {
 			auto used = recordUse({ request.playlistId, request.nowMs });
 			used.edit = std::move(result.edit);
 			return used;
 		}
+		if (*result.edit && request.kind == PlaylistAccountEditKind::CreateHyper) {
+			auto used = recordUse({ result.edit->playlistId, request.nowMs });
+			used.edit = std::move(result.edit);
+			return used;
+		}
 		return result;
 	}
-	auto state = *result.snapshot.state;
 	state.unsyncedSince = state.unsyncedSince
 		? std::min(*state.unsyncedSince, request.nowMs)
 		: request.nowMs;
 	if (request.kind == PlaylistAccountEditKind::AddSongs
 		|| request.kind == PlaylistAccountEditKind::Create
+		|| request.kind == PlaylistAccountEditKind::CreateHyper
 		|| request.kind == PlaylistAccountEditKind::Copy) {
 		auto &recent = state.recentUse[result.edit->playlistId];
 		recent = std::max(recent, request.nowMs);
@@ -278,6 +326,11 @@ PlaylistEditResult PlaylistAccountWorker::apply(
 		return ReorderPlaylistSongs(library, id, request.documentIds, now, _selfUserId);
 	case PlaylistAccountEditKind::Undo:
 		return UndoPlaylistOperation(library, request.undo, now, _selfUserId);
+	case PlaylistAccountEditKind::CreateHyper:
+	case PlaylistAccountEditKind::SetFolderName:
+	case PlaylistAccountEditKind::RemoveFolder:
+	case PlaylistAccountEditKind::MoveToFolder:
+		break;
 	}
 	return { .error = PlaylistEditError::InvalidValue };
 }

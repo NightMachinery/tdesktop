@@ -17,6 +17,7 @@
 #include "purple/purple_playlist_download_box.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
+#include "purple/purple_playlist_folders.h"
 #include "purple/purple_playlists_service.h"
 #include "settings/settings_common.h"
 #include "ui/layers/generic_box.h"
@@ -29,6 +30,9 @@
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+
+#include "ui/boxes/confirm_box.h"
+#include "ui/boxes/single_choice_box.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QPointer>
@@ -63,6 +67,9 @@ private:
 	void receive(PlaylistAccountResult result);
 	void render();
 	void showLibrary(bool deleted);
+	void showFolder(QString folder);
+	void nameFolder(QString folder);
+	void movePlaylist();
 	void showDetail(const QString &id);
 	void name(bool rename);
 	void edit(PlaylistAccountEdit request);
@@ -88,6 +95,7 @@ private:
 	QPointer<Ui::SettingsButton> _retry;
 	QPointer<PlaylistSongList> _songList;
 	QString _playlistId;
+	QString _folder;
 	not_null<Ui::FlatLabel*> _status;
 	not_null<Ui::FlatLabel*> _playbackLabel;
 	not_null<Ui::VerticalLayout*> _rows;
@@ -379,16 +387,79 @@ void PlaylistView::render() {
 	}
 	const auto weak = base::make_weak(this);
 	const auto &library = *_snapshot->library;
+	const auto folders = ReadPlaylistFolders(*_snapshot->state);
+	const auto hyper = HyperFolderId();
+	if (!folders || (_folder != hyper && !folders->names.contains(_folder))) {
+		_folder.clear();
+	}
 	if (_playlistId.isEmpty()) {
-		button(tr::lng_purple_playlists_new(), [=] {
-			if (const auto self = weak.get()) self->name(false);
-		});
+		if (_folder != hyper) {
+			button(tr::lng_purple_playlists_new(), [=] {
+				if (const auto self = weak.get()) self->name(false);
+			});
+		}
+		if (!_deleted && folders) {
+			if (_folder.isEmpty()) {
+				if (!_message) {
+					button(tr::lng_filters_new(), [=] {
+						if (const auto self = weak.get()) self->nameFolder({});
+					});
+				}
+				auto ordered = std::vector<std::pair<QString, QString>>();
+				for (const auto &[id, title] : folders->names) ordered.emplace_back(title, id);
+				std::sort(ordered.begin(), ordered.end(), [](const auto &a, const auto &b) {
+					return a.first.localeAwareCompare(b.first) < 0;
+				});
+				for (const auto &[title, id] : ordered) {
+					button(rpl::single(title), [=] {
+						if (const auto self = weak.get()) self->showFolder(id);
+					});
+				}
+				button(rpl::single(u"Hyper"_q), [=] {
+					if (const auto self = weak.get()) self->showFolder(hyper);
+				});
+			} else {
+				const auto folder = _folder;
+				button(tr::lng_purple_playlists_back(), [=] {
+					if (const auto self = weak.get()) self->showFolder({});
+				});
+				label(rpl::single(folder == hyper ? u"Hyper"_q : folders->names.at(folder)));
+				if (!_message && folder != hyper) {
+					button(tr::lng_filters_context_edit(), [=] {
+						if (const auto self = weak.get()) self->nameFolder(folder);
+					});
+					button(tr::lng_purple_playlist_remove_folder(), [=] {
+						const auto self = weak.get();
+						if (!self || !self->current() || self->_busy) return;
+						self->_window.get()->show(Ui::MakeConfirmBox({
+							.text = tr::lng_purple_playlist_remove_folder_confirm(tr::now),
+							.confirmed = [=](Fn<void()> close) {
+								close();
+								if (const auto live = weak.get()) {
+									live->edit({
+										.kind = PlaylistAccountEditKind::RemoveFolder,
+										.folderId = folder,
+									});
+								}
+							},
+							.confirmText = tr::lng_purple_playlist_remove_folder(),
+						}));
+					});
+				}
+			}
+		}
 		if (!_message) {
 			button(_deleted ? tr::lng_purple_playlists_title() : tr::lng_purple_playlists_deleted(), [=] {
 				if (const auto self = weak.get()) self->showLibrary(!self->_deleted);
 			});
 		}
 		auto entries = ListVisiblePlaylists(library, _snapshot->state->recentUse);
+		if (!_deleted && folders) {
+			std::erase_if(entries, [&](const auto &entry) {
+				const auto i = folders->placements.find(entry.id);
+				return i == folders->placements.end() ? !_folder.isEmpty() : i->second != _folder;
+			});
+		}
 		if (_deleted) {
 			entries.clear();
 			for (const auto &[id, playlist] : library.playlists) {
@@ -460,6 +531,11 @@ void PlaylistView::render() {
 		button(tr::lng_purple_playlists_rename(), [=] {
 			if (const auto self = weak.get()) self->name(true);
 		});
+		if (folders) {
+			button(tr::lng_purple_playlist_move_to_folder(), [=] {
+				if (const auto self = weak.get()) self->movePlaylist();
+			});
+		}
 		button(tr::lng_purple_playlists_copy(), [=] {
 			if (const auto self = weak.get()) {
 				self->edit({ .kind = PlaylistAccountEditKind::Copy, .entropy = Entropy(), .source = playlist });
@@ -591,6 +667,83 @@ void PlaylistView::showLibrary(bool deleted) {
 	load();
 }
 
+void PlaylistView::showFolder(QString folder) {
+	if (!current() || _busy) return;
+	_folder = std::move(folder);
+	showLibrary(false);
+}
+
+void PlaylistView::nameFolder(QString folder) {
+	if (!current() || _busy || !_snapshot) return;
+	const auto folders = ReadPlaylistFolders(*_snapshot->state);
+	if (!folders || (!folder.isEmpty() && !folders->names.contains(folder))) return;
+	const auto weak = base::make_weak(this);
+	const auto title = folder.isEmpty() ? QString() : folders->names.at(folder);
+	const auto id = folder.isEmpty() ? FormatPlaylistId(Entropy()).value_or(QString()) : folder;
+	if (id.isEmpty()) return;
+	_window.get()->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(folder.isEmpty() ? tr::lng_filters_new() : tr::lng_filters_edit());
+		const auto field = box->addRow(object_ptr<Ui::InputField>(box,
+			st::defaultInputField, Ui::InputField::Mode::SingleLine, tr::lng_filters_new_name()));
+		field->setText(title);
+		box->setFocusCallback([=] { field->setFocusFast(); });
+		const auto submit = [=] {
+			const auto self = weak.get();
+			if (!self || !self->current() || self->_busy || !self->_snapshot) return;
+			const auto name = field->getLastText().trimmed();
+			auto currentFolders = ReadPlaylistFolders(*self->_snapshot->state);
+			if (!currentFolders || !SetPlaylistFolderName(*currentFolders, id, name)) {
+				field->showError();
+				return;
+			}
+			box->closeBox();
+			if (const auto live = weak.get(); live && live->current()) {
+				live->edit({ .kind = PlaylistAccountEditKind::SetFolderName,
+					.title = name, .folderId = id });
+			}
+		};
+		field->submits() | rpl::on_next(submit, field->lifetime());
+		box->addButton(tr::lng_settings_save(), submit);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void PlaylistView::movePlaylist() {
+	if (!current() || _busy || !_snapshot || _playlistId.isEmpty()) return;
+	const auto folders = ReadPlaylistFolders(*_snapshot->state);
+	if (!folders) return;
+	auto ids = std::vector<QString>{ QString() };
+	auto labels = std::vector<QString>{ tr::lng_purple_playlist_top_level(tr::now) };
+	const auto playlistId = _playlistId;
+	const auto current = folders->placements.find(playlistId);
+	auto index = 0;
+	for (const auto &[id, name] : folders->names) {
+		if (current != folders->placements.end() && current->second == id) {
+			index = int(ids.size());
+		}
+		ids.push_back(id);
+		labels.push_back(name);
+	}
+	if (current != folders->placements.end() && current->second == HyperFolderId()) {
+		index = -1;
+	}
+	const auto weak = base::make_weak(this);
+	_window.get()->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
+		SingleChoiceBox(box, {
+			.title = tr::lng_purple_playlist_move_to_folder(),
+			.options = labels,
+			.initialSelection = index,
+			.callback = [=](int chosen) {
+				if (const auto self = weak.get(); self && self->_playlistId == playlistId
+					&& chosen >= 0 && chosen < int(ids.size())) {
+					self->edit({ .kind = PlaylistAccountEditKind::MoveToFolder,
+						.playlistId = playlistId, .folderId = ids[chosen] });
+				}
+			},
+		});
+	}));
+}
+
 void PlaylistView::showDetail(const QString &id) {
 	if (!current() || _busy) return;
 	if (_songList) _songList->cancelInteraction();
@@ -634,7 +787,9 @@ void PlaylistView::name(bool rename) {
 				return;
 			}
 			self->edit({ .kind = rename ? PlaylistAccountEditKind::Rename : PlaylistAccountEditKind::Create,
-				.playlistId = id, .title = name, .entropy = rename ? QByteArray() : Entropy() });
+				.playlistId = id, .title = name,
+				.folderId = !rename && self->_folder != HyperFolderId() ? self->_folder : QString(),
+				.entropy = rename ? QByteArray() : Entropy() });
 			box->closeBox();
 		};
 		field->submits() | rpl::on_next(submit, field->lifetime());

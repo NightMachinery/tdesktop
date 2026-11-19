@@ -19,3 +19,8 @@ has its own database. The scan never downloads audio. When you open Music
 with a new source folder, it clears the old index. When a chat leaves the
 selected folder, its entries are removed. Search filters out chats hidden by Purple, and playback
 rechecks the account, chat, and source message before opening a track.
+
+Open **Playlists** from the main menu to create folders or move playlists
+between them. Removing a folder places its playlists back at the top level.
+Hyper holds automatically created playlists. Folder names and placement are
+saved for each account on this Desktop installation.

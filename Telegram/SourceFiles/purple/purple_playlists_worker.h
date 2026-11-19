@@ -19,12 +19,17 @@ enum class PlaylistAccountEditKind {
 	RemoveSongs,
 	ReorderSongs,
 	Undo,
+	CreateHyper,
+	SetFolderName,
+	RemoveFolder,
+	MoveToFolder,
 };
 
 struct PlaylistAccountEdit {
 	PlaylistAccountEditKind kind = PlaylistAccountEditKind::Create;
 	QString playlistId;
 	QString title;
+	QString folderId;
 	QByteArray entropy;
 	Playlist source;
 	std::vector<PlaylistAddSongInput> songs;
