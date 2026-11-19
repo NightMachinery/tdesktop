@@ -127,7 +127,7 @@ struct PlaylistContext {
 	MsgId topicRootId = 0;
 	PeerId monoforumPeerId = 0;
 };
-enum class State { Playing, Paused, Stopped, Pausing, StoppedAtEnd };
+enum class State { Playing, Paused, Stopped, Stopping, Pausing, StoppedAtEnd };
 inline bool IsStopped(State state) {
 	return state == State::Stopped || state == State::StoppedAtEnd;
 }
@@ -139,7 +139,9 @@ struct TrackState {
 inline bool IsPausedOrPausing(State state) {
 	return IsPaused(state) || state == State::Pausing;
 }
-inline bool IsStoppedOrStopping(State state) { return IsStopped(state); }
+inline bool IsStoppedOrStopping(State state) {
+	return IsStopped(state) || state == State::Stopping;
+}
 inline std::function<TrackState(AudioMsgId::Type)> GetState;
 struct PlayerPort {
 	TrackState getState(AudioMsgId::Type type) {

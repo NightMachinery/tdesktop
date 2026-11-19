@@ -1007,6 +1007,9 @@ void Instance::play(
 			pauseSongForVoice();
 		}
 		if (!call.current()) return;
+		if (audioId.type() == AudioMsgId::Type::Song) {
+			getData(AudioMsgId::Type::Song)->resumeOnVoiceEnd = false;
+		}
 		playStreamed(audioId, std::move(shared));
 	}
 	if (!call.current()) return;
@@ -1360,11 +1363,7 @@ void Instance::pauseSongForVoice() {
 	const auto current = Purple::PlaylistPlayerCallbackGuard(AudioMsgId::Type::Song);
 	if (!current()) return;
 	const auto voiceCurrent = Purple::VoicePlaybackContinuationGuard();
-	const auto state = getState(AudioMsgId::Type::Song);
-	if (!state.id
-		|| IsStopped(state.state)
-		|| IsPaused(state.state)
-		|| state.state == State::Pausing) {
+	if (!Purple::VoiceMusicInterrupted(false)) {
 		return;
 	}
 	const auto interrupted = Purple::VoiceMusicPauseGuard(
@@ -1376,9 +1375,9 @@ void Instance::pauseSongForVoice() {
 	}
 }
 
-void Instance::resumeSongAfterVoice(bool force) {
+void Instance::resumeSongAfterVoice() {
 	const auto data = getData(AudioMsgId::Type::Song);
-	if (!data->resumeOnVoiceEnd && !force) {
+	if (!data->resumeOnVoiceEnd) {
 		return;
 	}
 	data->resumeOnVoiceEnd = false;
@@ -1802,16 +1801,14 @@ void Instance::handleStreamingError(
 			DocumentSaveClickHandler::Mode::ToFile);
 	}
 	if (!current()) return;
-	const auto resumeSong = (data->type == AudioMsgId::Type::Voice)
-		&& getData(AudioMsgId::Type::Song)->resumeOnVoiceEnd;
 	emitUpdate(data->type);
 	if (!current()) return;
 	if (data->streamed && data->streamed->instance.player().failed()) {
 		clearStreamed(data);
 	}
 	if (!current()) return;
-	if (resumeSong && !data->streamed) {
-		resumeSongAfterVoice(true);
+	if (data->type == AudioMsgId::Type::Voice && !data->streamed) {
+		resumeSongAfterVoice();
 	}
 }
 

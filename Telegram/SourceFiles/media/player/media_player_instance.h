@@ -262,7 +262,7 @@ private:
 	void resumeOnCall(AudioMsgId::Type type);
 
 	void pauseSongForVoice();
-	void resumeSongAfterVoice(bool force = false);
+	void resumeSongAfterVoice();
 
 	void setCurrent(const AudioMsgId &audioId);
 	void refreshPlaylist(not_null<Data*> data);

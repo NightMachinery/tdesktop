@@ -269,9 +269,8 @@ bool VoiceMusicInterrupted(bool resumeOnVoiceEnd) {
 	if (resumeOnVoiceEnd) return true;
 	const auto state = Media::Player::instance()->getState(Type::Song);
 	return state.id
-		&& !Media::Player::IsStopped(state.state)
-		&& !Media::Player::IsPaused(state.state)
-		&& state.state != Media::Player::State::Pausing;
+		&& !Media::Player::IsStoppedOrStopping(state.state)
+		&& !Media::Player::IsPausedOrPausing(state.state);
 }
 
 void ClearVoiceMusicPause() {

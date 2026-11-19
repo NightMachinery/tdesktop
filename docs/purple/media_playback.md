@@ -80,6 +80,10 @@ queue to the other person switches it; the value lives in `settings.toml`
   interrupted music track and position paused when off. These shared settings
   use `after_voice` and `resume_music_after_voice_p` in `[playback]`.
 - As on Android, the continuation chooser applies when music was interrupted.
+  Voice playback captures a resume only for a song that was playing when
+  interrupted. A pending stop, paused song, or empty player cannot start music
+  when voice playback ends. The streaming error path also checks the live
+  interruption flag after its callbacks finish.
   Without interrupted music, the ordinary following-message queue remains in
   effect, including the private-chat ownership rule. Unheard skips outgoing
   messages and ends at a heard incoming message. Changes apply on the next

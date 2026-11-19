@@ -230,7 +230,7 @@ class Instance {
 		++songResumes;
 		songState = State::Playing;
 	}
-	void resumeSongAfterVoice(bool force = false);
+	void resumeSongAfterVoice();
 	Data voice, song;
 	bool _roundPlaying = false;
 	UpdatedPort _updatedNotifier;

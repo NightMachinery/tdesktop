@@ -441,6 +441,25 @@ int VoiceBridgeCases() {
 	plain.moveInItem(&plain.voice, 1, true);
 	expect(plain.voice.current == B,
 		   "ordinary automatic navigation still plays expected B");
+	for (const auto state : {Proposed::State::Paused, Proposed::State::Pausing,
+			Proposed::State::Stopped, Proposed::State::Stopping}) {
+		reset();
+		Proposed::Instance inactiveSong;
+		inactiveSong.songState = state;
+		inactiveSong.play(A);
+		inactiveSong.resumeSongAfterVoice();
+		expect(inactiveSong.pauses == 0 && inactiveSong.songResumes == 0,
+			   "ending voice cannot start an earlier inactive song");
+	}
+	reset();
+	Proposed::Instance replacement;
+	replacement.play(A);
+	expect(replacement.song.resumeOnVoiceEnd, "voice pauses an actually playing song");
+	DocumentData newerSong{&owner, false, false, true};
+	replacement.play(AudioMsgId(&newerSong, {}));
+	replacement.songState = Proposed::State::Paused;
+	replacement.resumeSongAfterVoice();
+	expect(replacement.songResumes == 0, "starting music explicitly discards the old voice interruption");
 	reset();
 	Proposed::Instance interrupted;
 	Purple::Config.playback.afterVoice = VoiceContinuation::Unheard;

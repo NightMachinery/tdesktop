@@ -1576,8 +1576,10 @@ no facade covers those yet.
   admission, stream and generation guards in `purple_voice_queue` and never
   revokes the Song playlist controller.
 - Voice start admission captures settings and native history/topic/sublist scope;
-  the pre-pause guard commits it only for the admitted document. Automatic item
-  and playlist moves capture their original context, recheck after next-item
+  the pre-pause guard commits it only for the admitted document. The shared
+  interruption check excludes songs already stopping or paused, and streaming
+  error cleanup uses the current resume flag. Automatic item and playlist
+  moves capture their original context, recheck after next-item
   notification and use a one-shot internal Voice token. Voice admission and
   callback guards invalidate stale outer playback updates after manual replay.
   Resume suppression checks the captured preference after clearing the native
