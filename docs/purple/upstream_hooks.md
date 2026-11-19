@@ -40,6 +40,9 @@ the numbers.
   Purple so date and service chips can adapt to the flat background.
 - `window/window_main_menu.cpp`: installs the stock Settings row navigation
   in the main menu for modal keyboard users.
+- `ui/boxes/calendar_box.cpp`: moves the stock date highlight and reuses
+  the validated single-date callback for keyboard selection. The calendar
+  keeps its existing month keys and mouse date-range selection.
 - See [keys.md](keys.md).
 
 ## Purple control socket

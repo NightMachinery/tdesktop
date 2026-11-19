@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/boxes/calendar_box.h"
 
+#include "purple/purple_keys.h"
+
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/vertical_drum_picker.h"
@@ -215,6 +217,8 @@ public:
 	[[nodiscard]] int highlightedIndex() const {
 		return _highlightedIndex;
 	}
+	[[nodiscard]] QDate keyboardDate() const;
+	void setKeyboardDate(QDate date);
 	[[nodiscard]] int rowsCount() const {
 		return _rowsCount;
 	}
@@ -322,6 +326,22 @@ void CalendarBox::Context::showMonth(QDate month) {
 bool CalendarBox::Context::showsMonthOf(QDate date) const {
 	const auto shown = _month.current();
 	return (shown.year() == date.year()) && (shown.month() == date.month());
+}
+
+QDate CalendarBox::Context::keyboardDate() const {
+	const auto month = _month.current();
+	const auto day = std::clamp(_highlighted.day(), 1, month.daysInMonth());
+	const auto date = month.addDays(day - 1);
+	return (_min.isValid() && date < _min)
+		? _min
+		: (_max.isValid() && date > _max)
+		? _max
+		: date;
+}
+
+void CalendarBox::Context::setKeyboardDate(QDate date) {
+	_highlighted = date;
+	showMonth(date);
 }
 
 void CalendarBox::Context::applyMonth(const QDate &month, bool forced) {
@@ -527,6 +547,7 @@ public:
 
 	[[nodiscard]] int countMaxHeight() const;
 	void setDateChosenCallback(Fn<void(QDate)> callback);
+	void chooseDate(int index);
 	void setDynamicImage(QDate date, std::shared_ptr<DynamicImage> image);
 	void setRequireImage(bool require);
 
@@ -540,6 +561,7 @@ protected:
 
 private:
 	void monthChanged(QDate month);
+	[[nodiscard]] bool canChooseDate(int index) const;
 	void setSelected(int selected);
 	void setPressed(int pressed);
 	void loadDynamicImages();
@@ -1000,17 +1022,9 @@ void CalendarBox::Inner::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void CalendarBox::Inner::setSelected(int selected) {
-	if (selected != kEmptySelection && !_context->isEnabled(selected)) {
-		selected = kEmptySelection;
-	}
-	if (selected != kEmptySelection && _requireImage) {
-		const auto date = _context->dateFromIndex(selected);
-		const auto it = _dynamicImageStates.find(date);
-		if (it == end(_dynamicImageStates) || !it->second.image) {
-			selected = kEmptySelection;
-		}
-	}
-	_selected = selected;
+	_selected = (selected != kEmptySelection && canChooseDate(selected))
+		? selected
+		: kEmptySelection;
 	const auto pointer = (_selected != kEmptySelection);
 	const auto force = (_mouseMoved && _cursorSetWithoutMouseMove);
 	if (_pointerCursor != pointer || force) {
@@ -1064,12 +1078,27 @@ void CalendarBox::Inner::mousePressEvent(QMouseEvent *e) {
 void CalendarBox::Inner::mouseReleaseEvent(QMouseEvent *e) {
 	auto pressed = _pressed;
 	setPressed(kEmptySelection);
-	if (pressed != kEmptySelection
-		&& pressed == _selected
-		&& !_context->selectionMode()) {
+	if (pressed != kEmptySelection && pressed == _selected) {
+		chooseDate(pressed);
+	}
+}
+
+bool CalendarBox::Inner::canChooseDate(int index) const {
+	if (!_context->isEnabled(index)) {
+		return false;
+	} else if (!_requireImage) {
+		return true;
+	}
+	const auto it = _dynamicImageStates.find(_context->dateFromIndex(index));
+	return (it != end(_dynamicImageStates)) && bool(it->second.image);
+}
+
+void CalendarBox::Inner::chooseDate(int index) {
+	if (!_context->selectionMode() && canChooseDate(index)) {
+		const auto date = _context->dateFromIndex(index);
 		crl::on_main(this, [=] {
 			const auto onstack = _dateChosenCallback;
-			onstack(_context->dateFromIndex(pressed));
+			onstack(date);
 		});
 	}
 }
@@ -1567,6 +1596,27 @@ void CalendarBox::resizeEvent(QResizeEvent *e) {
 }
 
 void CalendarBox::keyPressEvent(QKeyEvent *e) {
+	if (Purple::CalendarDayKeysEnabled() && !_context->selectionMode()) {
+		const auto offset = Purple::CalendarDayKeyOffset(*e);
+		const auto submit = (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter)
+			&& !(e->modifiers() & ~Qt::KeypadModifier);
+		if (offset || submit) {
+			const auto date = _context->keyboardDate().addDays(offset);
+			const auto index = int(_context->month().daysTo(date));
+			if (_context->isEnabled(index) && (!submit || !e->isAutoRepeat())) {
+				if (submit && index == _context->highlightedIndex()) {
+					_inner->chooseDate(index);
+				} else {
+					_watchScroll = false;
+					_context->setKeyboardDate(date);
+					setExactScroll();
+					_inner->update();
+				}
+			}
+			e->accept();
+			return;
+		}
+	}
 	if (e->key() == Qt::Key_Escape) {
 		if (_context->selectionMode()) {
 			_context->toggleSelectionMode(false);

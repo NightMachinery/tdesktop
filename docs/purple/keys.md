@@ -60,6 +60,11 @@ mode. An input method composition can still open search.
   page needs to load. `] u` jumps to unread messages in the conversation.
   Telegram takes you to the newest messages if there is no unread position
   to jump to.
+- `SPC c d` opens the history calendar in a chat or forum topic. Use
+  Shift+Left or Shift+Right to move by day, Shift+Up or Shift+Down to move
+  by week, and Enter to choose the highlighted date. Page Up and Page Down
+  still change the month. If the new month has no highlighted day, Enter
+  highlights one and a second Enter chooses it.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command
@@ -106,5 +111,7 @@ surfaces. `history/history_inner_widget.*` exposes the existing visible
 message enumeration and geometry changes. `HistoryView::ListWidget` exposes
 the same seams. Hints use the existing restrictions and clipboard helpers.
 The history and section selection callbacks preserve focus for hint selection.
+`ui/boxes/calendar_box.cpp` routes keyboard day movement through the stock
+highlight and the same single-date validation used for mouse selection.
 `window/section_widget.cpp` subscribes sections to repaint changes and checks
 wallpaper visibility before painting the live background.

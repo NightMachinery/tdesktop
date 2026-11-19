@@ -1,6 +1,7 @@
 #pragma once
 
 class QEvent;
+class QKeyEvent;
 class QObject;
 class QWidget;
 
@@ -17,6 +18,8 @@ namespace Purple {
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
 [[nodiscard]] bool ModalKeysOwnChatListFocus(QWidget *widget);
+[[nodiscard]] bool CalendarDayKeysEnabled();
+[[nodiscard]] int CalendarDayKeyOffset(const QKeyEvent &event);
 
 void InstallMainMenuKeys(
 	not_null<Ui::LayerWidget*> menu,

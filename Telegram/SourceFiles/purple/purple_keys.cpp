@@ -113,6 +113,7 @@ enum class Action {
 	NewerMessagesPage,
 	LatestMessages,
 	UnreadMessages,
+	OpenHistoryCalendar,
 	Help,
 	Run,
 	DescribeChord,
@@ -204,6 +205,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_jump_to_bottom(tr::now); } },
 	{ Action::UnreadMessages, "history-jump-to-unread",
 		[] { return tr::lng_unread_bar_some(tr::now); } },
+	{ Action::OpenHistoryCalendar, "history-open-calendar",
+		[] { return tr::lng_calendar(tr::now); } },
 	{ Action::CopyMessageLink, "message-hint-copy-link",
 		[] { return tr::lng_purple_keys_message_link(tr::now); } },
 	{ Action::ReplyToMessage, "message-hint-reply",
@@ -270,6 +273,7 @@ const Binding kBindings[] = {
 	{ Action::NewerMessagesPage, { Qt::Key_BracketRight, Qt::Key_M } },
 	{ Action::LatestMessages, { Qt::Key_BracketRight, Qt::Key_BracketRight } },
 	{ Action::UnreadMessages, { Qt::Key_BracketRight, Qt::Key_U } },
+	{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
@@ -451,6 +455,7 @@ struct Target {
 	HistoryWidget *history = nullptr;
 	MessageHints::Target messages;
 	Fn<void(Data::MessagePosition)> jumpInSection;
+	Dialogs::Key calendarChat;
 	bool folders = false;
 	bool chatActions = false;
 	Window::SessionController *controller = nullptr;
@@ -499,13 +504,22 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					.focus = focus,
 					.history = history,
 					.messages = { .main = history->purpleMessageList() },
+					.calendarChat = Dialogs::Key(history->history()),
 					.chatActions = true,
 					.controller = owner,
 				}
 				: Target();
 		}
 		if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(widget)) {
-			return forSection(chat, false, true);
+			auto target = forSection(chat, false, true);
+			if (target.focus) {
+				const auto key = chat->activeChat().key;
+				const auto id = chat->id();
+				if (!id.sublist && (!id.repliesRootId || key.topic())) {
+					target.calendarChat = key;
+				}
+			}
+			return target;
 		}
 		if (const auto pinned = dynamic_cast<HistoryView::PinnedWidget*>(widget)) {
 			return forSection(pinned);
@@ -582,6 +596,7 @@ bool Available(Action action, const Target &target) {
 	case Action::NewerMessagesPage:
 	case Action::LatestMessages: return HistoryScroll(target) != nullptr;
 	case Action::UnreadMessages: return target.chatActions && HistoryScroll(target);
+	case Action::OpenHistoryCalendar: return bool(target.calendarChat);
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
@@ -1251,6 +1266,10 @@ void Keys::dispatch(Action action, const Target &target) {
 				: Data::MaxMessagePosition);
 		}
 	} break;
+	case Action::OpenHistoryCalendar:
+		reset();
+		current->showCalendar({ .chat = target.calendarChat });
+		break;
 	case Action::SelectMessage:
 		startHint(Hint::Select, tr::lng_purple_keys_message_select_empty(tr::now));
 		break;
@@ -1370,6 +1389,23 @@ bool ModalKeysOwnChatListFocus(QWidget *widget) {
 	const auto window = dynamic_cast<MainWindow*>(widget);
 	const auto keys = window ? FindKeys(window) : nullptr;
 	return keys && keys->ownsChatListFocus();
+}
+
+bool CalendarDayKeysEnabled() {
+	return Enabled();
+}
+
+int CalendarDayKeyOffset(const QKeyEvent &event) {
+	if ((event.modifiers() & ~Qt::KeypadModifier) != Qt::ShiftModifier) {
+		return 0;
+	}
+	switch (event.key()) {
+	case Qt::Key_Left: return style::RightToLeft() ? 1 : -1;
+	case Qt::Key_Right: return style::RightToLeft() ? -1 : 1;
+	case Qt::Key_Up: return -7;
+	case Qt::Key_Down: return 7;
+	default: return 0;
+	}
 }
 
 void InstallMainMenuKeys(

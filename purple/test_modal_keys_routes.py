@@ -140,6 +140,25 @@ ordered(paging, "case Action::LatestMessages:", "case Action::UnreadMessages:",
 ordered(keys, "section->controller() == owner", "section->purpleMessageList(focus)",
         ".jumpInSection = [section]", "section->cornerButtonsShowAtPosition(position)",
         ".history = history", "history->purpleMessageList()")
+assert "{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } }" in keys
+ordered(available, "case Action::OpenHistoryCalendar: return bool(target.calendarChat)")
+ordered(keys, "Dialogs::Key(history->history())", "chat->activeChat().key",
+        "!id.sublist && (!id.repliesRootId || key.topic())", "target.calendarChat = key")
+ordered(dispatch, "case Action::OpenHistoryCalendar:", "reset()",
+        "current->showCalendar({ .chat = target.calendarChat })")
+calendar = read("ui/boxes/calendar_box.cpp")
+ordered(calendar, "CalendarBox::Context::keyboardDate", "month.daysInMonth()",
+        "_min.isValid() && date < _min", "_max.isValid() && date > _max")
+ordered(calendar, "CalendarBox::Inner::mouseReleaseEvent", "chooseDate(pressed)",
+        "bool CalendarBox::Inner::canChooseDate", "_context->isEnabled(index)",
+        "_dynamicImageStates.find", "it->second.image", "CalendarBox::Inner::chooseDate",
+        "!_context->selectionMode() && canChooseDate(index)", "_context->dateFromIndex(index)",
+        "onstack(date)")
+ordered(calendar, "CalendarBox::keyPressEvent", "Purple::CalendarDayKeysEnabled()",
+        "!_context->selectionMode()", "Purple::CalendarDayKeyOffset(*e)",
+        "_context->isEnabled(index)", "!e->isAutoRepeat()", "index == _context->highlightedIndex()",
+        "_inner->chooseDate(index)", "_context->setKeyboardDate(date)", "setExactScroll()",
+        "Qt::Key_PageUp", "goPreviousMonth()", "Qt::Key_PageDown", "goNextMonth()")
 for view, assignment in (
         ("history/history_widget.cpp", "_list ="),
         ("history/view/history_view_chat_section.cpp", "_inner ="),
