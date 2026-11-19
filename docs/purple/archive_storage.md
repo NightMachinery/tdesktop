@@ -32,8 +32,9 @@ A missing or unwrappable old key refuses the archive. It never creates a new key
 over an existing store. A copied profile binding whose native directory identity
 changed also refuses instead of silently sharing another profile's archive.
 
-The macOS adapter excludes owned directories and files from system backups and
-checks the result. Shared profile/catalogue publication is serialized across
+The macOS adapter checks each owned directory and file for backup exclusion. It
+sets and verifies the flag when needed, including when a file is replaced.
+Shared profile/catalogue publication is serialized across
 account workers, so simultaneous sign-ins cannot lose another account entry.
 Private files must belong to the current user, have no other
 user permissions, and have exactly one link. Symlinks refuse. Windows has a
@@ -43,12 +44,15 @@ Windows qualification. Parent directories are synced after publication/removal.
 All SQL preparation, binding, stepping, finalization, row/change expectations,
 commit and close results are checked. An operation acknowledges retention only
 after the exact core program commits. WAL, foreign keys and FULL synchronous
-mode are set and read back. Every connection is admitted before configuration writes: read the full-width
-format first, then the recorded fingerprint and all bounded noninternal DDL in
-one read snapshot. Format 2 requires the exact core shape. Format-1 drafts and
-fingerprint/DDL drift refuse as SchemaMismatch; future formats refuse ReadOnly.
-There is no migration or automatic discard. Explicit account-store removal and
-recreation is required to replace an incompatible draft.
+mode are set and read back. Before configuration writes, every connection reads
+the full-width format, recorded fingerprint and bounded noninternal DDL in one
+snapshot. Format 3 adds storage for unordered observations. An exact format-2
+store can upgrade in place after authenticating its account header and any
+pending maintenance. The upgrade rechecks the original schema and authority
+before committing, and keeps the existing observations and maintenance state.
+Format-1 drafts and fingerprint or DDL drift return SchemaMismatch. Future
+formats return ReadOnly. Replacing an incompatible draft requires explicit
+account-store removal and recreation.
 Version payloads above 16 KiB use authenticated SQLite-owned body chunks. A
 version above the core 4 MiB encoded limit records a retention gap instead of
 claiming success. History reads use bounded pages and a revision fence; a changed

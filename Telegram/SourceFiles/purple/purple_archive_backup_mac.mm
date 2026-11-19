@@ -12,16 +12,18 @@ bool DesktopArchiveExcludeBackup(const QString &path) {
 		}
 		const auto url = [NSURL fileURLWithPath:name];
 		NSError* error = nil;
-		if (![url setResourceValue:@YES
-							forKey:NSURLIsExcludedFromBackupKey
-							 error:&error]) {
-			return false;
-		}
-		NSNumber* excluded = nil;
-		return [url getResourceValue:&excluded
-							  forKey:NSURLIsExcludedFromBackupKey
-							   error:&error]
-			   && excluded.boolValue;
+		const auto excludedFromBackup = [&] {
+			NSNumber* excluded = nil;
+			return [url getResourceValue:&excluded
+									forKey:NSURLIsExcludedFromBackupKey
+									 error:&error]
+				&& excluded.boolValue;
+		};
+		return excludedFromBackup()
+			|| ([url setResourceValue:@YES
+									forKey:NSURLIsExcludedFromBackupKey
+									 error:&error]
+				&& excludedFromBackup());
 	}
 }
 
