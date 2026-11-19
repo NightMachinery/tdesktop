@@ -10,6 +10,8 @@ their own controls.
 In Normal mode, `SPC` means Space. A guide appears after a short pause in a
 prefix. `Esc` or `Ctrl+G` cancels the prefix. Insert mode uses the regular
 Telegram typing and input-method behavior.
+On macOS, typing a leader key in the chat list keeps focus there in Normal
+mode. An input method composition can still open search.
 
 - `SPC c b` toggles artwork behind live chats and related history sections.
   The setting is local to this installation, starts visible, and also applies

@@ -2,6 +2,7 @@
 
 class QEvent;
 class QObject;
+class QWidget;
 
 namespace Ui {
 class LayerWidget;
@@ -15,6 +16,7 @@ class SectionBuilder;
 namespace Purple {
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
+[[nodiscard]] bool ModalKeysOwnChatListFocus(QWidget *widget);
 
 void InstallMainMenuKeys(
 	not_null<Ui::LayerWidget*> menu,

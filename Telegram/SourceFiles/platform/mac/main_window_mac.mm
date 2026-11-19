@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/mac/touchbar/mac_touchbar_manager.h"
 #include "platform/platform_specific.h"
 #include "platform/platform_notifications_manager.h"
+#include "purple/purple_keys.h"
 #include "base/platform/base_platform_info.h"
 #include "base/options.h"
 #include "boxes/peer_list_controllers.h"
@@ -274,7 +275,8 @@ bool MainWindow::nativeEvent(
 		qintptr *result) {
 	if (message && eventType == "NSEvent") {
 		const auto event = static_cast<NSEvent*>(message);
-		if (PossiblyTextTypingEvent(event)) {
+		if (PossiblyTextTypingEvent(event)
+			&& !Purple::ModalKeysOwnChatListFocus(this)) {
 			Core::Sandbox::Instance().customEnterFromEventLoop([&] {
 				imeCompositionStartReceived();
 			});

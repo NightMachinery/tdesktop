@@ -730,6 +730,7 @@ class Keys final : public QObject {
 public:
 	explicit Keys(not_null<MainWindow*> window);
 	bool handle(QObject *receiver, QEvent *event);
+	[[nodiscard]] bool ownsChatListFocus() const;
 
 private:
 	[[nodiscard]] Window::SessionController *owner() const;
@@ -757,6 +758,12 @@ private:
 };
 
 constexpr auto kKeysObjectName = "purple-modal-keys";
+
+Keys *FindKeys(MainWindow *window) {
+	return static_cast<Keys*>(window->findChild<QObject*>(
+		QString::fromLatin1(kKeysObjectName),
+		Qt::FindDirectChildrenOnly));
+}
 
 Keys::Keys(not_null<MainWindow*> window)
 : QObject(window)
@@ -824,6 +831,12 @@ Target Keys::currentTarget(QObject *receiver) const {
 			&& !_window->controller().isLayerShown())
 		? FindTarget(current, focus)
 		: Target();
+}
+
+bool Keys::ownsChatListFocus() const {
+	return _normal
+		&& Enabled()
+		&& currentTarget(QApplication::focusWidget()).list;
 }
 
 KeyUse Keys::classify(const QKeyEvent &event, int key) const {
@@ -1288,11 +1301,8 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 	if (!window) {
 		return false;
 	}
-	const auto existing = window->findChild<QObject*>(
-		QString::fromLatin1(kKeysObjectName),
-		Qt::FindDirectChildrenOnly);
-	if (existing) {
-		return static_cast<Keys*>(existing)->handle(receiver, event);
+	if (const auto existing = FindKeys(window)) {
+		return existing->handle(receiver, event);
 	}
 	if (!Enabled()
 		|| (event->type() != QEvent::ShortcutOverride
@@ -1304,6 +1314,12 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	return (new Keys(window))->handle(receiver, event);
+}
+
+bool ModalKeysOwnChatListFocus(QWidget *widget) {
+	const auto window = dynamic_cast<MainWindow*>(widget);
+	const auto keys = window ? FindKeys(window) : nullptr;
+	return keys && keys->ownsChatListFocus();
 }
 
 void InstallMainMenuKeys(

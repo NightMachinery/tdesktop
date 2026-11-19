@@ -26,6 +26,12 @@ app = read("core/application.cpp")
 press = between(app, "case QEvent::KeyPress:", "case QEvent::MouseButtonPress:")
 ordered(press, "IsToggleFullScreenKey", "HandlePossibleChatSwitch",
         "Purple::HandleModalKeys", "HandleKeysLegendHotkey")
+mac_native = between(read("platform/mac/main_window_mac.mm"),
+                     "bool MainWindow::nativeEvent", "void MainWindow::hideAndDeactivate")
+ordered(mac_native, "PossiblyTextTypingEvent(event)",
+        "!Purple::ModalKeysOwnChatListFocus(this)", "imeCompositionStartReceived()")
+win_native = read("platform/win/main_window_win.cpp")
+assert "ModalKeysOwnChatListFocus" not in win_native
 assert press.count("Purple::HandleModalKeys") == 1
 
 keys = read("purple/purple_keys.cpp")
@@ -91,6 +97,11 @@ ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
         "HasPlaybackInSession(&target.controller->session())")
 assert keys.count(".controller = owner") == 3
 accounts = between(keys, "bool CanSwitchAccount", "Dialogs::Widget *ChatsPane")
+chat_focus = between(keys, "bool Keys::ownsChatListFocus()", "KeyUse Keys::classify")
+ordered(chat_focus, "_normal", "Enabled()", "currentTarget(QApplication::focusWidget()).list")
+chat_focus_hook = between(keys, "bool ModalKeysOwnChatListFocus(", "void InstallMainMenuKeys")
+ordered(chat_focus_hook, "dynamic_cast<MainWindow*>(widget)",
+        "FindKeys(window)", "keys->ownsChatListFocus()")
 ordered(accounts, "if (!controller)", "domain().orderedAccounts()", "index < int(accounts.size())",
         "accounts[index]->sessionExists()", "!= &controller->session().account()")
 for index in range(1, 7):
