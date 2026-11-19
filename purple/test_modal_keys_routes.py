@@ -78,14 +78,22 @@ for action, command, prefix, key in (
         ("OpenPlaylists", "open-playlists", "M", "L"),
         ("OpenChatInfo", "open-chat-info", "C", "I"),
         ("OpenChatMusic", "open-chat-music", "C", "A"),
+        ("OpenChatFiles", "open-chat-files", "C", "F"),
+        ("OpenChatLinks", "open-chat-links", "C", "L"),
+        ("OpenPinnedMessages", "open-pinned-messages", "C", "N"),
         ("AttachFiles", "attach-files", "C", "U")):
     assert f'{{ Action::{action}, "{command}"' in keys
     assert f"{{ Action::{action}, {{ Qt::Key_Space, Qt::Key_{prefix}, Qt::Key_{key} }} }}" in keys
 ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
 ordered(dispatch, "case Action::OpenChatInfo:", "reset()",
         "current->showPeerInfo(target.chat.thread())")
-ordered(dispatch, "case Action::OpenChatMusic:", "reset()", "Storage::SharedMediaType::MusicFile",
+shared = between(dispatch, "case Action::OpenChatMusic:", "case Action::OpenPinnedMessages:")
+ordered(shared, "case Action::OpenChatFiles:", "case Action::OpenChatLinks:", "reset()",
+        "action == Action::OpenChatMusic", "Type::MusicFile",
+        "action == Action::OpenChatFiles", "Type::File", "Type::Link",
         "target.chat.topic()", "Info::Memento>(topic, media)", "Info::Memento>(target.chat.peer(), media)")
+ordered(dispatch, "case Action::OpenPinnedMessages:", "reset()",
+        "HistoryView::PinnedMemento>", "target.chat.thread()")
 ordered(dispatch, "case Action::AttachFiles:", "reset()", "target.attach()")
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")
 ordered(attachment, "if (!CanAttach(widget)) return {};", "QPointer(widget)",
@@ -168,8 +176,10 @@ ordered(keys, "section->controller() == owner", "section->purpleMessageList(focu
         ".jumpInSection = [section]", "section->cornerButtonsShowAtPosition(position)",
         ".history = history", "history->purpleMessageList()")
 assert "{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } }" in keys
-ordered(available, "case Action::OpenChatInfo: return target.chat.thread() != nullptr",
-        "case Action::OpenChatMusic: return target.chat.peer() != nullptr",
+ordered(available, "case Action::OpenChatInfo:",
+        "case Action::OpenPinnedMessages: return target.chat.thread() != nullptr",
+        "case Action::OpenChatMusic:", "case Action::OpenChatFiles:",
+        "case Action::OpenChatLinks: return target.chat.peer() != nullptr",
         "case Action::OpenHistoryCalendar: return bool(target.chat)")
 ordered(keys, "Dialogs::Key(history->history())", "chat->activeChat().key",
         "!id.sublist && (!id.repliesRootId || key.topic())", "target.chat = key")

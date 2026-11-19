@@ -152,6 +152,9 @@ enum class Action {
 	OpenPlaylists,
 	OpenChatInfo,
 	OpenChatMusic,
+	OpenChatFiles,
+	OpenChatLinks,
+	OpenPinnedMessages,
 	AttachFiles,
 	OpenChatMenu,
 	PreviewChat,
@@ -225,6 +228,12 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_chat_info(tr::now); } },
 	{ Action::OpenChatMusic, "open-chat-music",
 		[] { return tr::lng_purple_keys_chat_music(tr::now); } },
+	{ Action::OpenChatFiles, "open-chat-files",
+		[] { return tr::lng_media_type_files(tr::now); } },
+	{ Action::OpenChatLinks, "open-chat-links",
+		[] { return tr::lng_media_type_links(tr::now); } },
+	{ Action::OpenPinnedMessages, "open-pinned-messages",
+		[] { return tr::lng_settings_events_pinned(tr::now); } },
 	{ Action::AttachFiles, "attach-files",
 		[] { return tr::lng_attach(tr::now); } },
 	{ Action::OpenChatMenu, "open-chat-menu",
@@ -332,6 +341,9 @@ const Binding kBindings[] = {
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
 	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
+	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_F } },
+	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_L } },
+	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_N } },
 	{ Action::AttachFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_U } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
 	{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } },
@@ -684,8 +696,11 @@ bool Available(Action action, const Target &target) {
 	case Action::NewerMessagesPage:
 	case Action::LatestMessages: return HistoryScroll(target) != nullptr;
 	case Action::UnreadMessages: return target.chatActions && HistoryScroll(target);
-	case Action::OpenChatInfo: return target.chat.thread() != nullptr;
-	case Action::OpenChatMusic: return target.chat.peer() != nullptr;
+	case Action::OpenChatInfo:
+	case Action::OpenPinnedMessages: return target.chat.thread() != nullptr;
+	case Action::OpenChatMusic:
+	case Action::OpenChatFiles:
+	case Action::OpenChatLinks: return target.chat.peer() != nullptr;
 	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
@@ -1285,15 +1300,28 @@ void Keys::dispatch(Action action, const Target &target) {
 		reset();
 		target.attach();
 		break;
-	case Action::OpenChatMusic: {
+	case Action::OpenChatMusic:
+	case Action::OpenChatFiles:
+	case Action::OpenChatLinks: {
 		reset();
-		const auto media = Info::Section(Storage::SharedMediaType::MusicFile);
+		using Type = Storage::SharedMediaType;
+		const auto type = (action == Action::OpenChatMusic)
+			? Type::MusicFile
+			: (action == Action::OpenChatFiles)
+			? Type::File
+			: Type::Link;
+		const auto media = Info::Section(type);
 		if (const auto topic = target.chat.topic()) {
 			current->showSection(std::make_shared<Info::Memento>(topic, media));
 		} else {
 			current->showSection(std::make_shared<Info::Memento>(target.chat.peer(), media));
 		}
 	} break;
+	case Action::OpenPinnedMessages:
+		reset();
+		current->showSection(std::make_shared<HistoryView::PinnedMemento>(
+			target.chat.thread()));
+		break;
 	case Action::OpenSavedMessages:
 		current->showPeerHistory(current->session().user());
 		break;

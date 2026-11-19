@@ -30,7 +30,8 @@ mode. An input method composition can still open search.
   opens Scheduled Messages in a chat that supports them.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
 - In a conversation or forum topic, `SPC c i` opens its info panel and
-  `SPC c a` opens Telegram's list of music shared there.
+  `SPC c n` opens its pinned messages. Use `SPC c a` for shared audio,
+  `SPC c f` for shared files, and `SPC c l` for shared links.
 - `SPC c u` opens Telegram's file picker when the attachment button is
   available in the current chat, reply, topic, or scheduled-message view.
   Telegram handles file selection and confirmation.
