@@ -118,7 +118,8 @@ ControlService::ControlService()
 }
 
 void ControlService::bindPlayerEvents() {
-	Media::Player::instance()->updatedNotifier() | rpl::on_next([=] {
+	Media::Player::instance()->updatedNotifier() | rpl::on_next([=](const auto &state) {
+		ObserveControlMusicPlayback(state);
 		_server.notify(ControlTopic::Media);
 	}, _lifetime);
 	Media::Player::instance()->trackChanged() | rpl::on_next([=] {

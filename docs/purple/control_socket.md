@@ -91,7 +91,9 @@ The CMake app target does not build or install this separate command.
 ## Media and lock
 
 `tdesktop-cli media music-link --json` returns an opaque bookmark for the
-current Telegram song, with its title, performer, and playback state. It uses
+current Telegram song, with its title, performer, and playback state.
+`last_played_ms` is the Unix time in milliseconds when that track started or
+resumed, or null if this client has no observation for it. The command uses
 the media information capability. The bookmark is stored in the owning
 account's encrypted local preferences and stays valid across app restarts and
 cache eviction while its Telegram source remains accessible. The response

@@ -21,6 +21,7 @@
 #include "storage/storage_account.h"
 #include "storage/storage_domain.h"
 #include <QtCore/QDataStream>
+#include <QtCore/QDateTime>
 #include <crl/crl_async.h>
 #include <crl/crl_on_main.h>
 
@@ -28,6 +29,9 @@ namespace Purple {
 namespace {
 
 constexpr auto kMusicLinkVersion = quint8(1);
+AudioMsgId LastMusic;
+qint64 LastMusicPlay = 0;
+bool MusicPlaying = false;
 
 QByteArray PackMusicLink(const PlaylistMessage &source) {
 	auto bytes = QByteArray();
@@ -110,6 +114,8 @@ ControlResult CurrentMusicLink() {
 		{ u"title"_q, input->meta.title },
 		{ u"performer"_q, input->meta.performer },
 		{ u"state"_q, IsPausedOrPausing(state.state) ? u"paused"_q : u"playing"_q },
+		{ u"last_played_ms"_q, state.id == LastMusic && LastMusicPlay
+			? QJsonValue(LastMusicPlay) : QJsonValue(QJsonValue::Null) },
 	} };
 }
 
@@ -247,6 +253,23 @@ ControlResult LockApplication() {
 	});
 }
 
+}
+
+void ObserveControlMusicPlayback(const Media::Player::TrackState &state) {
+	using namespace Media::Player;
+	const auto type = AudioMsgId::Type::Song;
+	if (state.id.type() != type || instance()->isSeeking(type)) return;
+	const auto changed = state.id != LastMusic;
+	if (changed) {
+		LastMusic = state.id;
+		LastMusicPlay = 0;
+	}
+	const auto playing = !IsStoppedOrStopping(state.state)
+		&& !IsPausedOrPausing(state.state);
+	if (playing && (changed || !MusicPlaying)) {
+		LastMusicPlay = QDateTime::currentMSecsSinceEpoch();
+	}
+	MusicPlaying = playing;
 }
 
 ControlMediaAdapter AppControlMediaAdapter() {

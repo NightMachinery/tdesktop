@@ -2,6 +2,8 @@
 
 #include "purple/purple_control_protocol.h"
 
+namespace Media::Player { struct TrackState; }
+
 namespace Purple {
 
 enum class ControlMediaType { Music, Voice };
@@ -41,6 +43,7 @@ struct ControlMediaAdapter {
 	const std::function<bool()> &lock);
 [[nodiscard]] QString ExistingControlMediaPath(const QString &path);
 [[nodiscard]] bool IsControlMusicLinkToken(QStringView token);
+void ObserveControlMusicPlayback(const Media::Player::TrackState &state);
 [[nodiscard]] ControlMediaAdapter AppControlMediaAdapter();
 
 }
