@@ -44,6 +44,7 @@ public:
 
 	void setViewportLimit(int height);
 	void setSelectionActions(Fn<void(uint64_t)> toggle, Fn<bool()> playSelection);
+	void setCopyOrgLinkAction(Fn<void(uint64_t)> copy);
 	void setChosenSongs(std::set<uint64_t> songs);
 
 protected:

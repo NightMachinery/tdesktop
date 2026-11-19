@@ -4,9 +4,12 @@
 #include "crl/crl_on_main.h"
 #include "lang/lang_keys.h"
 #include "ui/painter.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 
+#include <QtGui/QContextMenuEvent>
 #include <QtGui/QCursor>
+#include <QtGui/QKeySequence>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
@@ -15,6 +18,7 @@
 #include "styles/style_media_player.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_overview.h"
+#include "styles/style_widgets.h"
 
 namespace Purple {
 
@@ -35,6 +39,7 @@ public:
 	void cancelInteraction();
 	void focusSelected();
 	void setSelectionActions(Fn<void(uint64_t)> toggle, Fn<bool()> playSelection);
+	void setCopyOrgLinkAction(Fn<void(uint64_t)> copy);
 	void setChosenSongs(std::set<uint64_t> songs);
 	[[nodiscard]] int rowHeight() const;
 	QAccessible::Role accessibilityRole() override;
@@ -58,6 +63,7 @@ protected:
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseDoubleClickEvent(QMouseEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
 	void focusOutEvent(QFocusEvent *e) override;
@@ -79,6 +85,8 @@ private:
 	Fn<void(std::vector<uint64_t>)> _reorder;
 	Fn<void(uint64_t)> _toggle;
 	Fn<bool()> _playSelection;
+	Fn<void(uint64_t)> _copyOrgLink;
+	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 	std::set<uint64_t> _chosen;
 	Mode _mode = Mode::Playlist;
 	base::Timer _autoscroll;
@@ -361,6 +369,26 @@ void PlaylistSongList::Rows::mouseDoubleClickEvent(QMouseEvent *e) {
 	callback(_data[index].documentId);
 }
 
+void PlaylistSongList::Rows::contextMenuEvent(QContextMenuEvent *e) {
+	const auto keyboard = e->reason() == QContextMenuEvent::Keyboard;
+	const auto index = keyboard ? _selected : hit(e->pos());
+	if (!_copyOrgLink || index < 0 || !isEnabled()) {
+		RpWidget::contextMenuEvent(e);
+		return;
+	}
+	const auto document = _data[index].documentId;
+	setFocus(Qt::OtherFocusReason);
+	select(index);
+	_contextMenu = base::make_unique_q<Ui::PopupMenu>(this, st::popupMenuWithIcons);
+	_contextMenu->addAction(tr::lng_purple_music_copy_org_link(tr::now),
+		[copy = _copyOrgLink, document] { copy(document); },
+		&st::menuIconCopy);
+	_contextMenu->popup(keyboard
+		? mapToGlobal(QPoint(0, (index + 1) * rowHeight()))
+		: e->globalPos());
+	e->accept();
+}
+
 void PlaylistSongList::Rows::moveSelected(int delta) {
 	cancelInteraction();
 	if (_selected < 0) return;
@@ -369,6 +397,14 @@ void PlaylistSongList::Rows::moveSelected(int delta) {
 
 void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 	if (!isEnabled()) return;
+	if (_copyOrgLink && _selected >= 0 && e->matches(QKeySequence::Copy)) {
+		e->accept();
+		if (!e->isAutoRepeat()) {
+			const auto copy = _copyOrgLink;
+			copy(_data[_selected].documentId);
+		}
+		return;
+	}
 	const auto key = e->key();
 	if (key == Qt::Key_Escape && _pressed >= 0) {
 		cancelInteraction();
@@ -468,6 +504,10 @@ void PlaylistSongList::Rows::setSelectionActions(
 		Fn<bool()> playSelection) {
 	_toggle = std::move(toggle);
 	_playSelection = std::move(playSelection);
+}
+
+void PlaylistSongList::Rows::setCopyOrgLinkAction(Fn<void(uint64_t)> copy) {
+	_copyOrgLink = std::move(copy);
 }
 
 void PlaylistSongList::Rows::setChosenSongs(std::set<uint64_t> songs) {
@@ -663,6 +703,10 @@ void PlaylistSongList::setSelectionActions(
 		Fn<void(uint64_t)> toggle,
 		Fn<bool()> playSelection) {
 	_rows->setSelectionActions(std::move(toggle), std::move(playSelection));
+}
+
+void PlaylistSongList::setCopyOrgLinkAction(Fn<void(uint64_t)> copy) {
+	_rows->setCopyOrgLinkAction(std::move(copy));
 }
 
 void PlaylistSongList::setChosenSongs(std::set<uint64_t> songs) {

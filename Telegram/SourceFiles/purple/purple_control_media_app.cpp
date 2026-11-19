@@ -3,6 +3,7 @@
 #include "purple/purple_control.h"
 #include "purple/purple_control_commands.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_music_bookmark.h"
 #include "purple/purple_playlists_menu.h"
 #include "apiwrap.h"
 #include "base/random.h"
@@ -91,28 +92,12 @@ ControlResult CurrentMusicLink() {
 	}
 	const auto session = &document->session();
 	const auto source = PlaylistMessage{ current.contextId(), document->id };
-	if (!LiveMusicLinkSession(session) || !MusicLinkVisible(session, source.id)) {
-		return MusicLinkDenied();
-	}
-	const auto input = CapturePlaylistSong(session, source);
-	if (!input) return MusicLinkDenied();
-	auto &local = session->local();
-	const auto reverseKey = "purple.music.document." + std::to_string(document->id);
-	auto token = local.readPref<QString>(reverseKey);
-	const auto recorded = IsControlMusicLinkToken(token)
-		? UnpackMusicLink(local.readPref<QByteArray>(MusicLinkKey(token)))
-		: std::nullopt;
-	if (!recorded || recorded->documentId != document->id) {
-		auto bytes = QByteArray(16, Qt::Uninitialized);
-		base::RandomFill(bytes.data(), bytes.size());
-		token = QString::fromLatin1(bytes.toHex());
-	}
-	local.writePref<QByteArray>(MusicLinkKey(token), PackMusicLink(source));
-	local.writePref<QString>(reverseKey, token);
+	const auto bookmark = CaptureMusicBookmark(session, source);
+	if (!bookmark) return MusicLinkDenied();
 	return { QJsonObject{
-		{ u"token"_q, token },
-		{ u"title"_q, input->meta.title },
-		{ u"performer"_q, input->meta.performer },
+		{ u"token"_q, bookmark->token },
+		{ u"title"_q, bookmark->title },
+		{ u"performer"_q, bookmark->performer },
 		{ u"state"_q, IsPausedOrPausing(state.state) ? u"paused"_q : u"playing"_q },
 		{ u"last_played_ms"_q, state.id == LastMusic && LastMusicPlay
 			? QJsonValue(LastMusicPlay) : QJsonValue(QJsonValue::Null) },
@@ -253,6 +238,31 @@ ControlResult LockApplication() {
 	});
 }
 
+}
+
+std::optional<MusicBookmark> CaptureMusicBookmark(
+		not_null<Main::Session*> session,
+		const PlaylistMessage &source) {
+	if (Core::App().passcodeLocked()
+		|| !LiveMusicLinkSession(session) || !MusicLinkVisible(session, source.id)) {
+		return std::nullopt;
+	}
+	const auto input = CapturePlaylistSong(session, source);
+	if (!input) return std::nullopt;
+	auto &local = session->local();
+	const auto reverseKey = "purple.music.document." + std::to_string(source.documentId);
+	auto token = local.readPref<QString>(reverseKey);
+	const auto recorded = IsControlMusicLinkToken(token)
+		? UnpackMusicLink(local.readPref<QByteArray>(MusicLinkKey(token)))
+		: std::nullopt;
+	if (!recorded || recorded->documentId != source.documentId) {
+		auto bytes = QByteArray(16, Qt::Uninitialized);
+		base::RandomFill(bytes.data(), bytes.size());
+		token = QString::fromLatin1(bytes.toHex());
+	}
+	local.writePref<QByteArray>(MusicLinkKey(token), PackMusicLink(source));
+	local.writePref<QString>(reverseKey, token);
+	return MusicBookmark{ std::move(token), input->meta.title, input->meta.performer };
 }
 
 void ObserveControlMusicPlayback(const Media::Player::TrackState &state) {

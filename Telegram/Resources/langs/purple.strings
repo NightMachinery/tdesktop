@@ -714,6 +714,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_music_scan_incomplete" = "Some chats could not be indexed. Refresh to try again.";
 "lng_purple_music_indexing" = "Indexing music";
 "lng_purple_music_track_unavailable" = "This track is unavailable.";
+"lng_purple_music_copy_org_link" = "Copy Org link";
 "lng_purple_music_play_selected#one" = "Play {count} selected track";
 "lng_purple_music_play_selected#other" = "Play {count} selected tracks";
 "lng_purple_playlists_add" = "Add to playlist…";

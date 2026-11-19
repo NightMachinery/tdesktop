@@ -30,6 +30,11 @@ button to play the selection. Two or more tracks create a playlist in Hyper,
 in the order you selected them. Repeating the same selection reuses the
 playlist while the saved sources still match.
 
+Right-click a track and choose **Copy Org link**, or focus the track and
+press the system Copy shortcut. This copies a `purpleaudio:` Org link
+without starting playback. It uses the same account-local bookmarks that
+Doom's Telegram music link command creates. It stores no audio bytes.
+
 Open **Playlists** from the main menu to create folders or move playlists
 between them. Removing a folder places its playlists back at the top level.
 Hyper holds automatically created playlists. Folder names and placement are

@@ -18,6 +18,8 @@
 #include "media/player/media_player_instance.h"
 #include "mtproto/sender.h"
 #include "purple/purple_config.h"
+#include "purple/purple_copy.h"
+#include "purple/purple_music_bookmark.h"
 #include "purple/purple_music_index_service.h"
 #include "purple/purple_music_source_roster.h"
 #include "purple/purple_playlist_player.h"
@@ -33,6 +35,7 @@
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/format_values.h"
+#include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
@@ -50,6 +53,7 @@
 #include "styles/style_window_main_menu.h"
 
 #include <QtCore/QDateTime>
+#include <QtGui/QClipboard>
 #include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
 #include <deque>
@@ -62,6 +66,22 @@ constexpr auto kSearchPageSize = 100;
 constexpr auto kRefreshDelay = crl::time(180);
 
 rpl::event_stream<Main::Session*> MusicFolderChanges;
+
+QString MusicBookmarkOrgLink(const MusicBookmark &bookmark) {
+	auto label = bookmark.title;
+	if (!bookmark.performer.isEmpty()) {
+		if (!label.isEmpty()) label += u" · "_q;
+		label += bookmark.performer;
+	}
+	for (auto &ch : label) {
+		if (ch.isSpace() || ch.category() == QChar::Other_Control) ch = u' ';
+		else if (ch == u'[') ch = u'(';
+		else if (ch == u']') ch = u')';
+	}
+	label = label.simplified();
+	const auto target = u"[[purpleaudio:"_q + bookmark.token + u']';
+	return label.isEmpty() ? target + u']' : target + u'[' + label + u"]]"_q;
+}
 
 bool MusicWindowCurrent(not_null<Window::SessionController*> controller) {
 	const auto &session = controller->session();
@@ -120,6 +140,7 @@ private:
 	[[nodiscard]] std::optional<PlaylistAddSongInput> captureTrack(
 		const MusicIndexEntry &entry) const;
 	void play(quint64 documentId);
+	void copyOrgLink(quint64 documentId);
 	void playResolved(const MusicIndexEntry &entry);
 
 	not_null<Ui::VerticalLayout*> _content;
@@ -143,6 +164,7 @@ private:
 	QString _displayedSearch;
 	std::optional<MusicIndexCursor> _cursor;
 	std::unique_ptr<DesktopPlaylistResolver> _resolver;
+	std::unique_ptr<DesktopPlaylistResolver> _bookmarkResolver;
 	uint64_t _route = 0;
 	uint64_t _query = 0;
 	bool _moreAvailable = false;
@@ -323,6 +345,7 @@ void MusicSection::reset(bool keepRows) {
 	_readTimer.cancel();
 	_scope.reset();
 	_resolver.reset();
+	_bookmarkResolver.reset();
 	_pending.clear();
 	_savingSelection = false;
 	_cursor.reset();
@@ -622,6 +645,7 @@ void MusicSection::render() {
 		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library));
 	_list->setSelectionActions([=](uint64_t id) { toggleTrack(id); },
 		[=] { return playSelection(); });
+	_list->setCopyOrgLinkAction(crl::guard(this, [=](uint64_t id) { copyOrgLink(id); }));
 	_list->navigationEvents() | rpl::on_next([=] {
 		_snapshotHeld = true;
 	}, _list->lifetime());
@@ -771,6 +795,41 @@ void MusicSection::play(quint64 documentId) {
 			}
 		}));
 	_resolver->start();
+}
+
+void MusicSection::copyOrgLink(quint64 documentId) {
+	if (!rosterCurrent() || !isVisible()
+		|| _displayedSearch != _search->getLastText().trimmed()) return;
+	const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
+	if (row == _rows.end() || !visible(row->peer)) return;
+	_snapshotHeld = true;
+	const auto entry = *row;
+	const auto route = _route;
+	_bookmarkResolver = std::make_unique<DesktopPlaylistResolver>(
+		&session(), std::vector{ resolveSong(entry) }, crl::guard(this, [=](auto results) {
+			if (_route != route || !rosterCurrent() || !isVisible()
+				|| Core::App().activeWindow() != &controller()->window()
+				|| QApplication::applicationState() != Qt::ApplicationActive) {
+				return;
+			}
+			const auto source = PlaylistMessage{
+				FullMsgId(PeerId(uint64(entry.peer)), MsgId(entry.message)), entry.document,
+			};
+			const auto item = session().data().message(source.id);
+			const auto bookmark = (results.size() == 1
+					&& results.front().status == PlaylistSongStatus::Ready
+					&& visible(entry.peer) && item
+					&& (CopyRestrictionsDisabled() || item->allowsForward()))
+				? CaptureMusicBookmark(&session(), source)
+				: std::nullopt;
+			if (bookmark) {
+				QGuiApplication::clipboard()->setText(MusicBookmarkOrgLink(*bookmark));
+				Ui::Toast::Show(this, tr::lng_username_copied(tr::now));
+			} else {
+				Ui::Toast::Show(this, tr::lng_purple_music_track_unavailable(tr::now));
+			}
+		}));
+	_bookmarkResolver->start();
 }
 
 PlaylistResolveSong MusicSection::resolveSong(const MusicIndexEntry &entry) const {
