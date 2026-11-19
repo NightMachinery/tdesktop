@@ -35,6 +35,7 @@ public:
 	~PlaylistSongList();
 	[[nodiscard]] uint64_t selectedDocument() const;
 	[[nodiscard]] int scrollTop() const;
+	[[nodiscard]] rpl::producer<> navigationEvents() const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
 	void setVerifiedDownloads(std::set<uint64_t> documents);

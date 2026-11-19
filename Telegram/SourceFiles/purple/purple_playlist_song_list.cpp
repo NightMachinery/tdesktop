@@ -630,6 +630,14 @@ int PlaylistSongList::scrollTop() const {
 	return _scroll->scrollTop();
 }
 
+rpl::producer<> PlaylistSongList::navigationEvents() const {
+	return rpl::merge(
+		_scroll->scrollTopChanges() | rpl::to_empty,
+		_rows->events() | rpl::filter([](not_null<QEvent*> event) {
+			return event->type() == QEvent::FocusIn;
+		}) | rpl::to_empty);
+}
+
 void PlaylistSongList::moveSelected(int delta) {
 	_rows->moveSelected(delta);
 }

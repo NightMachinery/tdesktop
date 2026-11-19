@@ -91,6 +91,12 @@ public:
 	bool floatPlayerHandleWheelEvent(QEvent *) override;
 
 private:
+	enum class CatalogRead {
+		Reload,
+		Append,
+		Scan,
+	};
+
 	void doSetInnerFocus() override;
 	void paintEvent(QPaintEvent *event) override;
 	[[nodiscard]] bool current() const;
@@ -98,12 +104,12 @@ private:
 	[[nodiscard]] std::vector<quint64> visiblePeers() const;
 	[[nodiscard]] bool visible(quint64 peer) const;
 	[[nodiscard]] bool rosterCurrent() const;
-	void reset();
+	void reset(bool keepRows = false);
 	void refresh(bool force = false);
 	void scan();
 	void advance(Scan scan, const MTPmessages_Messages &result);
 	void addBackfill(MusicSourceCursor cursor);
-	void read(bool restart);
+	void read(CatalogRead mode);
 	void render();
 	void updateListHeight();
 	void toggleTrack(quint64 documentId);
@@ -141,7 +147,7 @@ private:
 	uint64_t _query = 0;
 	bool _moreAvailable = false;
 	bool _reading = false;
-	bool _paged = false;
+	bool _snapshotHeld = false;
 	bool _scanIncomplete = false;
 	bool _configuring = false;
 	bool _savingSelection = false;
@@ -176,7 +182,10 @@ MusicSection::MusicSection(
 , _status(_content->add(object_ptr<Ui::FlatLabel>(_content, QString(), st::boxLabel)))
 , _api(&session().mtp())
 , _refreshTimer([=] { refresh(); })
-, _readTimer([=] { read(true); }) {
+, _readTimer([=] {
+	read(_search->getLastText().trimmed() == _displayedSearch
+		? CatalogRead::Scan : CatalogRead::Reload);
+}) {
 	const auto addButton = [=](rpl::producer<QString> title, Fn<void()> callback) {
 		const auto button = _content->add(::Settings::CreateButtonWithIcon(
 			_content, std::move(title), st::settingsButton, {}));
@@ -189,7 +198,9 @@ MusicSection::MusicSection(
 	addButton(tr::lng_purple_playlists_title(), [=] {
 		if (current()) ShowPlaylistsBox(controller);
 	});
-	_more = addButton(tr::lng_purple_music_more(), [=] { read(false); });
+	_more = addButton(tr::lng_purple_music_more(), [=] {
+		read(CatalogRead::Append);
+	});
 	_more->hide();
 	_playChosen = addButton(
 		tr::lng_purple_music_play_selected(lt_count, _selectionCount.value()
@@ -205,7 +216,12 @@ MusicSection::MusicSection(
 	_search->changes() | rpl::on_next([=] {
 		++_query;
 		_reading = false;
-		_readTimer.callOnce(kRefreshDelay);
+		if (_search->getLastText().trimmed() != _displayedSearch) {
+			_more->hide();
+			_readTimer.callOnce(kRefreshDelay);
+		} else {
+			_more->setVisible(_moreAvailable);
+		}
 	}, lifetime());
 	_search->submits() | rpl::on_next([=] {
 		if (playSelection()) return;
@@ -301,24 +317,29 @@ std::vector<quint64> MusicSection::visiblePeers() const {
 	return result;
 }
 
-void MusicSection::reset() {
+void MusicSection::reset(bool keepRows) {
 	++_route;
 	++_query;
+	_readTimer.cancel();
 	_scope.reset();
 	_resolver.reset();
 	_pending.clear();
-	_rows.clear();
-	_displayedSearch.clear();
-	_selection.clear();
 	_savingSelection = false;
 	_cursor.reset();
 	_reading = false;
-	_paged = false;
+	_snapshotHeld = false;
 	_moreAvailable = false;
 	_scanIncomplete = false;
 	_configuring = false;
 	if (_request) _api.request(base::take(_request)).cancel();
-	render();
+	if (keepRows) {
+		_more->hide();
+	} else {
+		_rows.clear();
+		_displayedSearch.clear();
+		_selection.clear();
+		render();
+	}
 }
 
 void MusicSection::refresh(bool force) {
@@ -346,9 +367,12 @@ void MusicSection::refresh(bool force) {
 		session().api().requestMoreDialogsIfNeeded();
 		return;
 	}
-	if (!force && (_scope || _configuring) && _folder == selected && _peers == *peers
-		&& _visible == visiblePeers()) return;
-	reset();
+	const auto sameSource = _folder == selected && _peers == *peers
+		&& _visible == visiblePeers();
+	if (sameSource && (_configuring || _savingSelection || (!force && _scope))) {
+		return;
+	}
+	reset(sameSource);
 	_folder = selected;
 	_peers = *peers;
 	_visible = visiblePeers();
@@ -369,7 +393,7 @@ void MusicSection::refresh(bool force) {
 				if (cursor.latest) _pending.push_back({ .saved = cursor, .head = true });
 				else addBackfill(cursor);
 			}
-			read(true);
+			read(CatalogRead::Reload);
 			scan();
 		}));
 }
@@ -393,7 +417,6 @@ void MusicSection::scan() {
 		_status->setText(_scanIncomplete
 			? tr::lng_purple_music_scan_incomplete(tr::now)
 			: QString());
-		if (!_paged) read(true);
 		return;
 	}
 	const auto next = _pending.front();
@@ -499,6 +522,7 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 		if (next.newest && !saved.latest) saved.latest = next.newest;
 		saved.complete = finished;
 	}
+	const auto hasTracks = !rows.empty();
 	SaveMusicIndexPage(&session(), *_scope, next.saved, saved, std::move(rows),
 		crl::guard(this, [=](bool stored) mutable {
 			if (_route != route || !current() || folder() != _folder) return;
@@ -511,14 +535,19 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 			} else if (next.head) {
 				addBackfill(saved);
 			}
-			if (!_paged) _readTimer.callOnce(kRefreshDelay);
+			if (stored && hasTracks && !_snapshotHeld && !_readTimer.isActive()) {
+				_readTimer.callOnce(kRefreshDelay);
+			}
 			scan();
 		}));
 }
 
-void MusicSection::read(bool restart) {
+void MusicSection::read(CatalogRead mode) {
+	const auto append = mode == CatalogRead::Append;
+	const auto text = _search->getLastText().trimmed();
 	if (!current() || !_scope || folder() != _folder
-		|| (!restart && (!_moreAvailable || _reading))) {
+		|| (append && (!_moreAvailable || _reading || text != _displayedSearch))
+		|| (mode == CatalogRead::Scan && _snapshotHeld)) {
 		return;
 	}
 	if (!rosterCurrent()) {
@@ -531,11 +560,10 @@ void MusicSection::read(bool restart) {
 		return;
 	}
 	const auto query = ++_query;
-	const auto text = _search->getLastText().trimmed();
-	_paged = !restart;
+	if (mode != CatalogRead::Scan) _snapshotHeld = append;
 	_reading = true;
 	ReadMusicIndexPage(&session(), *_scope, text,
-		peers, restart ? std::nullopt : _cursor,
+		peers, append ? _cursor : std::nullopt,
 		crl::guard(this, [=](std::optional<std::vector<MusicIndexEntry>> result) {
 			if (query != _query || !current() || folder() != _folder) return;
 			_reading = false;
@@ -543,11 +571,12 @@ void MusicSection::read(bool restart) {
 				refresh();
 				return;
 			}
+			if (mode == CatalogRead::Scan && _snapshotHeld) return;
 			if (!result) {
 				_status->setText(tr::lng_purple_music_index_error(tr::now));
 				return;
 			}
-			if (restart) {
+			if (!append) {
 				_rows.clear();
 				_cursor.reset();
 			}
@@ -593,6 +622,9 @@ void MusicSection::render() {
 		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library));
 	_list->setSelectionActions([=](uint64_t id) { toggleTrack(id); },
 		[=] { return playSelection(); });
+	_list->navigationEvents() | rpl::on_next([=] {
+		_snapshotHeld = true;
+	}, _list->lifetime());
 	updateSelection();
 	if (hadFocus) _list->focusSelected();
 }
@@ -607,6 +639,7 @@ void MusicSection::toggleTrack(quint64 documentId) {
 		|| !rosterCurrent()) {
 		return;
 	}
+	_snapshotHeld = true;
 	const auto selected = std::ranges::find(_selection, documentId, &MusicIndexEntry::document);
 	if (selected != _selection.end()) {
 		_selection.erase(selected);

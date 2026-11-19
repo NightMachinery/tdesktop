@@ -9,9 +9,12 @@ In modal Normal mode, use `SPC m m` or run `open-music` in the command palette.
 `tdesktop-cli music` opens the same screen through Local automation.
 
 The first scan backfills the selected chats in pages. The screen displays
-saved results during the scan. Reopen Music or use **Refresh music** to
-check for new tracks and resume unfinished history. A failed chat search
-leaves its previous results intact and reports that the scan is incomplete.
+saved results during the scan. Once you focus, scroll, or select in the list,
+indexing leaves the displayed rows in place. Search again or use
+**Refresh music** to see the latest results. Refresh also checks for new
+tracks and resumes unfinished history. It keeps your picks while the source
+folder and its visible chats stay the same. A failed chat search leaves its
+previous results intact and reports that the scan is incomplete.
 
 The database stores track metadata, source message IDs, and scan cursors in
 the local Purple settings directory. Each Telegram account and environment
