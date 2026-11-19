@@ -45,6 +45,8 @@ without starting playback. It uses the same account-local bookmarks that
 Doom's Telegram music link command creates. It stores no audio bytes.
 
 Open **Playlists** from the main menu to create folders or move playlists
-between them. Removing a folder places its playlists back at the top level.
+between them. Use Tab and Shift+Tab to focus playlist and folder actions, then
+press Enter or Space to activate the focused action. Removing a folder places
+its playlists back at the top level.
 Hyper holds automatically created playlists. Folder names and placement are
 saved for each account on this Desktop installation.

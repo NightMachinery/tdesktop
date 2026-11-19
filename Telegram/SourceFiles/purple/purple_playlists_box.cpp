@@ -36,6 +36,8 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QPointer>
+#include <QtGui/QKeyEvent>
+#include <QtGui/QPainter>
 
 #include <algorithm>
 #include <set>
@@ -50,6 +52,70 @@ namespace Purple {
 namespace {
 
 constexpr auto kPageSize = size_t(25);
+
+class PlaylistActionButton final : public Ui::SettingsButton {
+public:
+	PlaylistActionButton(
+			not_null<QWidget*> parent,
+			not_null<Ui::GenericBox*> box,
+			rpl::producer<QString> text)
+	: SettingsButton(parent, std::move(text), st::settingsButtonNoIcon)
+	, _box(box) {
+		setFocusPolicy(Qt::TabFocus);
+	}
+
+protected:
+	void keyPressEvent(QKeyEvent *event) override {
+		if (!activationKey(event)) {
+			Ui::SettingsButton::keyPressEvent(event);
+			return;
+		}
+		if (event->modifiers() & ~Qt::KeypadModifier) {
+			event->ignore();
+			return;
+		}
+		event->accept();
+		if (!event->isAutoRepeat() && isEnabled() && !isDisabled()) {
+			clicked(Qt::NoModifier, Qt::LeftButton);
+		}
+	}
+	void keyReleaseEvent(QKeyEvent *event) override {
+		if (!activationKey(event)) {
+			Ui::SettingsButton::keyReleaseEvent(event);
+			return;
+		}
+		event->setAccepted(!(event->modifiers() & ~Qt::KeypadModifier));
+	}
+	void focusInEvent(QFocusEvent *event) override {
+		Ui::SettingsButton::focusInEvent(event);
+		_box->scrollToWidget(this);
+		update();
+	}
+	void focusOutEvent(QFocusEvent *event) override {
+		Ui::SettingsButton::focusOutEvent(event);
+		update();
+	}
+	void paintEvent(QPaintEvent *event) override {
+		Ui::SettingsButton::paintEvent(event);
+		if (!hasFocus()) {
+			return;
+		}
+		auto painter = QPainter(this);
+		const auto inset = st::lineWidth / 2.;
+		painter.setPen(QPen(st::activeButtonBg->c, st::lineWidth));
+		painter.drawRect(QRectF(rect()).adjusted(inset, inset, -inset, -inset));
+	}
+
+private:
+	[[nodiscard]] static bool activationKey(not_null<QKeyEvent*> event) {
+		const auto key = event->key();
+		return (key == Qt::Key_Return)
+			|| (key == Qt::Key_Enter)
+			|| (key == Qt::Key_Space);
+	}
+
+	const not_null<Ui::GenericBox*> _box;
+};
 
 class PlaylistView final : public base::has_weak_ptr {
 public:
@@ -345,8 +411,8 @@ void PlaylistView::label(rpl::producer<QString> text) {
 Ui::SettingsButton *PlaylistView::button(
 		rpl::producer<QString> text,
 		Fn<void()> callback) {
-	const auto result = ::Settings::AddButtonWithIcon(
-		_rows, std::move(text), st::settingsButtonNoIcon);
+	const auto result = _rows->add(object_ptr<PlaylistActionButton>(
+		_rows, _box, std::move(text)));
 	result->setClickedCallback(std::move(callback));
 	return result;
 }
