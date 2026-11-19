@@ -32,8 +32,9 @@ rechecks the account, chat, and source message before opening a track.
 
 Double-click a track to play it. Use Command-click on macOS or Ctrl-click on
 other platforms to select tracks. Press Down from search to focus the current
-result and Escape from the results to return to search. In the list, the
-arrow keys move the cursor and Space toggles selection. Press Enter or use
+result and Escape from the results to return to search. While an input method
+is composing text, Down stays in search. In the list, the arrow keys move the
+cursor and Space toggles selection. Press Enter or use
 the playback button to play the selection. Two or more tracks create a
 playlist in Hyper, in the order you selected them. Repeating the same
 selection reuses the playlist while the saved sources still match.

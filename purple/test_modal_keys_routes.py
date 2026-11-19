@@ -387,4 +387,18 @@ menu_selection = between(read("settings/settings_key_navigation.cpp"),
 ordered(menu_selection, "list()", "section->isAncestorOf", "select(entries, i)", "return;")
 assert "tr::lng_purple_keys_menu_accounts_help(tr::now)" in dispatch
 
+music = read("purple/purple_music_section.cpp")
+assert "_search->customUpDown(true);" in music
+reopen = between(music, "bool MusicSection::showInternal", "MusicSection::createMemento")
+ordered(reopen, "dynamic_cast<MusicMemento*>", "refresh();",
+        "doSetInnerFocus();", "_search->selectAll();")
+focus = between(music, "void MusicSection::keyPressEvent", "MusicSection::floatPlayerAvailableRect")
+ordered(focus, "isVisible() && current()", "Qt::Key_Down",
+        "_search->rawTextEdit()->hasFocus()", "!_reading",
+        "_displayedSearch == _search->getLastText().trimmed()",
+        "_list->selectedDocument()", "rosterCurrent()",
+        "_search->textCursor().block().layout()", "layout->preeditAreaText().isEmpty()",
+        "_list->focusSelected();", "Qt::Key_Escape", "_list->isAncestorOf(focus)",
+        "doSetInnerFocus();", "Window::SectionWidget::keyPressEvent(event);")
+
 print("Modal key, menu, visible message, nested section and chat background routes passed")

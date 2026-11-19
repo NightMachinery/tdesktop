@@ -55,6 +55,8 @@
 #include <QtGui/QClipboard>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
+#include <QtGui/QTextBlock>
+#include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 #include <deque>
@@ -307,9 +309,12 @@ void MusicSection::keyPressEvent(QKeyEvent *event) {
 			&& _displayedSearch == _search->getLastText().trimmed()
 			&& _list->selectedDocument()
 			&& rosterCurrent()) {
-			event->accept();
-			_list->focusSelected();
-			return;
+			const auto layout = _search->textCursor().block().layout();
+			if (!layout || layout->preeditAreaText().isEmpty()) {
+				event->accept();
+				_list->focusSelected();
+				return;
+			}
 		}
 		const auto focus = QApplication::focusWidget();
 		if (event->key() == Qt::Key_Escape && focus
