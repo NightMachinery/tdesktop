@@ -161,6 +161,16 @@ background = read("purple/purple_chat_background.cpp")
 ordered(background, "readPref<bool>(kVisiblePref, true)", "widget->update()",
         "color.setAlpha(255)", "writePref<bool>(kVisiblePref, visible)",
         "VisibilityChanges.fire")
+live_style = between(background, "void ApplyLiveChatBackgroundStyle", "bool PaintHiddenChatBackground")
+ordered(live_style, "if (ChatBackgroundsVisible())", "style->apply(theme)",
+        "palette.msgServiceFg()", "palette.msgServiceBg()",
+        "palette.msgServiceBgSelected()", "ReadableServiceBackground(normal",
+        "ReadableServiceBackground(selected", "style->applyCustomPalette(&palette)")
+controller = read("window/window_session_controller.cpp")
+ordered(controller, "_chatStyleTheme = _defaultChatTheme",
+        "Purple::WatchLiveChatBackgroundStyle", "_chatStyleTheme.lock()")
+ordered(controller, "void SessionController::setChatStyleTheme(",
+        "_chatStyleTheme = theme", "Purple::ApplyLiveChatBackgroundStyle")
 assert "{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } }" in keys
 assert "{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } }" in keys
 ordered(routing, "QEvent::ShortcutOverride", "case KeyUse::Hint:",

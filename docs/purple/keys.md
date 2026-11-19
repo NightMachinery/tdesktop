@@ -16,6 +16,7 @@ mode. An input method composition can still open search.
 - `SPC c b` toggles artwork behind live chats and related history sections.
   The setting is local to this installation, starts visible, and also applies
   when modal keys are disabled. Bubble colors and saved wallpapers are kept.
+  Date and service chips adjust to the flat background for readable text.
   Wallpaper choosers and standalone previews show the configured wallpaper.
 - `j` or `] c` moves the chat-list cursor down. `k` or `[ c` moves it up.
   `Enter` opens the highlighted chat.

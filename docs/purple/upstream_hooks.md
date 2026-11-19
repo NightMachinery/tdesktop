@@ -36,6 +36,8 @@ the numbers.
   accept an explicit hinted item in the native keyboard context menu path.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
+- `window/window_session_controller.cpp`: applies the live chat style through
+  Purple so date and service chips can adapt to the flat background.
 - `window/window_main_menu.cpp`: installs the stock Settings row navigation
   in the main menu for modal keyboard users.
 - See [keys.md](keys.md).

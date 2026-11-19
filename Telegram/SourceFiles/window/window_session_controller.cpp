@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 
 #include "purple/purple_window_session_controller.h"
+#include "purple/purple_chat_background.h"
 
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
@@ -1602,7 +1603,10 @@ SessionController::SessionController(
 	init();
 
 	_chatStyleTheme = _defaultChatTheme;
-	_chatStyle->apply(_defaultChatTheme.get());
+	Purple::WatchLiveChatBackgroundStyle(_chatStyle.get(), [=] {
+		const auto theme = _chatStyleTheme.lock();
+		return theme ? theme : _defaultChatTheme;
+	}, _lifetime);
 
 	pushDefaultChatBackground();
 	Theme::Background()->updates(
@@ -3664,7 +3668,7 @@ void SessionController::setChatStyleTheme(
 		return;
 	}
 	_chatStyleTheme = theme;
-	_chatStyle->apply(theme.get());
+	Purple::ApplyLiveChatBackgroundStyle(_chatStyle.get(), theme.get());
 }
 
 void SessionController::clearCachedChatThemes() {
