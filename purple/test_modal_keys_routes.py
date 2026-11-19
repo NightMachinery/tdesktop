@@ -411,4 +411,9 @@ ordered(focus, "isVisible() && current()", "Qt::Key_Down",
         "_list->focusSelected();", "Qt::Key_Escape", "_list->isAncestorOf(focus)",
         "doSetInnerFocus();", "Window::SectionWidget::keyPressEvent(event);")
 
+indexed_source = between(music, "PlaylistResolveSong MusicSection::resolveSong",
+                         "MusicSection::captureTrack")
+ordered(indexed_source, ".documentId = entry.document", ".source = {",
+        ".msg = int32_t(entry.message)", ".since = kMinimumPlaylistStamp")
+
 print("Modal key, menu, visible message, nested section and chat background routes passed")

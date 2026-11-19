@@ -871,6 +871,7 @@ PlaylistResolveSong MusicSection::resolveSong(const MusicIndexEntry &entry) cons
 			.peer = token,
 			.msg = int32_t(entry.message),
 			.username = peer->isChannel() ? peer->username() : QString(),
+			.since = kMinimumPlaylistStamp,
 		},
 	};
 }
