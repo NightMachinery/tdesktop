@@ -42,8 +42,8 @@ mode. An input method composition can still open search.
 - `g s l` copies the link to a visible message when Telegram offers a
   message link. Private channel and reply links follow the same rules as
   the context menu.
-  `g s m` opens the native menu for a hinted message. Use the menu to reply,
-  forward, or copy a message link when those actions are available.
+  `g s m` opens the native menu for a hinted message and returns to Insert.
+  Move through the menu with Up and Down and choose an action with Enter.
 - `g s r` starts a reply to a visible message, and `g s e` opens an editable
   message in Telegram's editor. Both return to Insert so you can type right
   away. Sending a reply or saving an edit uses the usual controls.

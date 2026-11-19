@@ -30,7 +30,7 @@ class MessageHints final {
 public:
 	enum class Action { Select, Copy, Menu, Link, Reply, Edit };
 
-	enum class Input { Pending, Finished, Composing, Unknown };
+	enum class Input { Pending, Finished, LeaveNormal, Unknown };
 
 	struct Target {
 		HistoryInner *main = nullptr;

@@ -51,7 +51,7 @@ ordered(routing, "QEvent::KeyRelease", "isAutoRepeat() && _held.contains(key)",
         "event->accept()", "return true;", "_held.insert(key)",
         "keyEvent->isAutoRepeat()", "stroke(key, target)")
 ordered(routing, "const auto result = _hints.type", "if (!guard)",
-        "result == MessageHints::Input::Composing", "reset()")
+        "result == MessageHints::Input::LeaveNormal", "reset()")
 ordered(keys, "!Enabled()", "event->type() != QEvent::ShortcutOverride",
         "return (new Keys(window))")
 
@@ -206,6 +206,7 @@ ordered(pick, "view.widget() != _view.data()", "view.scheduled != _scheduled",
 apply = between(hints, "MessageHints::Input MessageHints::apply", "void MessageHints::clear")
 ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
         "MessageHintMenuEvent(item, point", "main->showContextMenu", "view.section->showContextMenu",
+        "return Input::LeaveNormal;",
         "if (action == Action::Copy)", "copyContextText", "return Input::Finished;",
         "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)",
         "view.section->showCopyRestriction(item)", "HistoryGroupText(group)",
@@ -247,7 +248,7 @@ ordered(apply, "if (action == Action::Reply || action == Action::Edit)",
         "if (!canCompose(view, item, action))", "const auto id = item->fullId()",
         "main->elementReplyTo", "view.section->replyToMessageRequestNotify",
         "getSelectedTextRange", "main->_widget->editMessage", "view.section->editMessageRequestNotify",
-        "return Input::Composing;")
+        "return Input::LeaveNormal;")
 
 scope = between(keys, "Target FindTarget", "bool Available")
 ordered(scope, "section->controller() == owner", "section->purpleMessageList(focus)",

@@ -485,7 +485,7 @@ MessageHints::Input MessageHints::apply(
 		} else {
 			view.section->editMessageRequestNotify(id);
 		}
-		return Input::Composing;
+		return Input::LeaveNormal;
 	}
 	if (action == Action::Link) {
 		if (view.scheduled || !CanCopyMessageLink(item)) {
@@ -514,7 +514,7 @@ MessageHints::Input MessageHints::apply(
 		} else {
 			view.section->showContextMenu(&event);
 		}
-		return Input::Finished;
+		return Input::LeaveNormal;
 	}
 	if (const auto main = view.main) {
 		if (action == Action::Copy) {

@@ -979,7 +979,7 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		const auto result = _hints.type(key, target.messages);
 		if (!guard) {
 			break;
-		} else if (result == MessageHints::Input::Composing) {
+		} else if (result == MessageHints::Input::LeaveNormal) {
 			reset();
 		} else if (result == MessageHints::Input::Unknown) {
 			Ui::Toast::Show(_window, tr::lng_purple_keys_undefined(tr::now));
