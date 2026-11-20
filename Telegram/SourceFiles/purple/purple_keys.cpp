@@ -2,6 +2,7 @@
 
 #include "base/event_filter.h"
 #include "base/weak_ptr.h"
+#include "calls/calls_box_controller.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/shortcuts.h"
@@ -14,6 +15,7 @@
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
+#include "info/downloads/info_downloads_widget.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
 #include "lang/lang_keys.h"
@@ -150,6 +152,8 @@ enum class Action {
 	OpenSavedMessages,
 	OpenArchive,
 	OpenContacts,
+	OpenCalls,
+	OpenDownloads,
 	OpenScheduled,
 	OpenMusic,
 	OpenPlaylists,
@@ -230,6 +234,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_shortcuts_archive(tr::now); } },
 	{ Action::OpenContacts, "open-contacts",
 		[] { return tr::lng_shortcuts_contacts(tr::now); } },
+	{ Action::OpenCalls, "open-calls",
+		[] { return tr::lng_menu_calls(tr::now); } },
+	{ Action::OpenDownloads, "open-downloads",
+		[] { return tr::lng_downloads_section(tr::now); } },
 	{ Action::OpenScheduled, "open-scheduled-messages",
 		[] { return tr::lng_scheduled_messages(tr::now); } },
 	{ Action::OpenMusic, "open-music",
@@ -365,6 +373,8 @@ const Binding kBindings[] = {
 	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S } },
 	{ Action::OpenArchive, { Qt::Key_Space, Qt::Key_O, Qt::Key_A } },
 	{ Action::OpenContacts, { Qt::Key_Space, Qt::Key_O, Qt::Key_C } },
+	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_V } },
+	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_F } },
 	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
@@ -743,6 +753,8 @@ bool Available(Action action, const Target &target) {
 	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
+	case Action::OpenCalls:
+		return target.controller && !target.controller->session().supportMode();
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
 	case Action::TogglePlayback:
@@ -1370,6 +1382,14 @@ void Keys::dispatch(Action action, const Target &target) {
 		break;
 	case Action::OpenContacts:
 		launch(Native::ShowContacts);
+		break;
+	case Action::OpenCalls:
+		reset();
+		::Calls::ShowCallsBox(current);
+		break;
+	case Action::OpenDownloads:
+		reset();
+		current->showSection(Info::Downloads::Make(current->session().user()));
 		break;
 	case Action::OpenScheduled:
 		launch(Native::ShowScheduled);

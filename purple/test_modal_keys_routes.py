@@ -77,6 +77,8 @@ ordered(dispatch, "case Action::ChatPalette:", "ShowChatPalette(current)",
         "case Action::OpenMusic:", "ToggleMusicSection(current)")
 for action, command, prefix, key in (
         ("OpenPlaylists", "open-playlists", "M", "L"),
+        ("OpenCalls", "open-calls", "O", "V"),
+        ("OpenDownloads", "open-downloads", "O", "F"),
         ("OpenChatInfo", "open-chat-info", "C", "I"),
         ("OpenChatMedia", "open-chat-media", "C", "V"),
         ("OpenChatMusic", "open-chat-music", "C", "A"),
@@ -90,6 +92,9 @@ for action, command, prefix, key in (
     assert f'{{ Action::{action}, "{command}"' in keys
     assert f"{{ Action::{action}, {{ Qt::Key_Space, Qt::Key_{prefix}, Qt::Key_{key} }} }}" in keys
 ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
+ordered(dispatch, "case Action::OpenCalls:", "reset()", "::Calls::ShowCallsBox(current)",
+        "case Action::OpenDownloads:", "reset()",
+        "current->showSection(Info::Downloads::Make(current->session().user()))")
 ordered(dispatch, "case Action::OpenChatInfo:", "reset()",
         "current->showPeerInfo(target.chat.thread())")
 shared = between(dispatch, "case Action::OpenChatMedia:", "case Action::OpenPinnedMessages:")
@@ -147,6 +152,8 @@ playback_owner = between(keys, "bool HasPlaybackInSession", "bool Available")
 ordered(playback_owner, "if (!session)", "player->current(player->getActiveType()).audio()",
         "document && (&document->session() == session)")
 available = between(keys, "bool Available", "bool IsSearchableAction")
+ordered(available, "case Action::OpenCalls:",
+        "return target.controller && !target.controller->session().supportMode();")
 assert "case Action::AttachFiles: return bool(target.attach);" in available
 ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
         "case Action::PreviousTrack:", "case Action::NextTrack:",

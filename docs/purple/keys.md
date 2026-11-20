@@ -26,8 +26,9 @@ mode. An input method composition can still open search.
   opens Saved Messages. Use Up or Down to select a main menu row and Enter
   to activate it. In the main menu, `a` shows or hides the account list.
   Opening the list highlights its first available row.
-- `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, and `SPC o d`
-  opens Scheduled Messages in a chat that supports them.
+- `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, `SPC o v`
+  opens Calls, and `SPC o f` opens Telegram's Downloads view.
+  `SPC o d` opens Scheduled Messages in a chat that supports them.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
 - In a conversation or forum topic, `SPC c i` opens its info panel and
   `SPC c n` opens its pinned messages. Use `SPC c a` for shared audio,
