@@ -130,7 +130,7 @@ public:
 private:
 	[[nodiscard]] bool current() const;
 	void load(bool recordUse = false);
-	void receive(PlaylistAccountResult result);
+	void receive(PlaylistAccountResult result, bool consumingUndo = false);
 	void render();
 	void showLibrary(bool deleted);
 	void showFolder(QString folder);
@@ -375,10 +375,19 @@ void PlaylistView::load(bool recordUse) {
 	}
 }
 
-void PlaylistView::receive(PlaylistAccountResult result) {
+void PlaylistView::receive(PlaylistAccountResult result, bool consumingUndo) {
 	++_downloadGeneration;
 	_verifiedDownloads.clear();
 	const auto ok = bool(result);
+	const auto confirmedEdit = result.edit && *result.edit && result.edit->changed
+		&& (ok || (result.write && result.write->libraryCommitted
+			&& result.snapshot
+			&& result.snapshot.library == result.edit->library));
+	if (consumingUndo && (ok || confirmedEdit)) {
+		_undo.reset();
+	} else if (confirmedEdit) {
+		_undo = std::move(result.edit->undo);
+	}
 	const auto snapshotStatus = result.snapshot.status;
 	_busy = false;
 	if (result.snapshot) {
@@ -397,9 +406,6 @@ void PlaylistView::receive(PlaylistAccountResult result) {
 			&& *result.retentionStatus != PlaylistDownloadStatus::Ready
 			? tr::lng_purple_playlists_cleanup_pending(tr::now)
 			: tr::lng_purple_playlists_local_only(tr::now));
-	}
-	if (ok && result.edit && result.edit->changed) {
-		_undo = result.edit->undo;
 	}
 	render();
 }
@@ -886,13 +892,7 @@ void PlaylistView::edit(PlaylistAccountEdit request) {
 			self->_page = 0;
 		}
 		if (ok && kind == PlaylistAccountEditKind::Create && !self->_message) self->_playlistId = id;
-		self->receive(std::move(result));
-		const auto live = weak.get();
-		if (!live || !live->current() || generation != live->_generation) return;
-		if (ok && kind == PlaylistAccountEditKind::Undo) {
-			live->_undo.reset();
-			live->render();
-		}
+		self->receive(std::move(result), kind == PlaylistAccountEditKind::Undo);
 		const auto afterRender = weak.get();
 		if (!afterRender || !afterRender->current()
 			|| generation != afterRender->_generation) return;

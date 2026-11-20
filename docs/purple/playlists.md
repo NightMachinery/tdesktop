@@ -134,6 +134,8 @@ update local recent-use order without changing sync bookkeeping. Its guarded
 including valid noncanonical library files. Library edits still use the existing
 library-before-local-state durability ordering. Failed or partially durable
 writes remain errors even when the reloaded snapshot contains part of a change.
+Undo follows a committed edit when the reloaded library matches what the edit
+wrote. A committed Undo consumes the action even if the local-state write fails.
 
 The UI delegates Play, song selection, Retry and playback status to the separate
 `purple_playlist_player` adapter. UI lifetime does not own playback. The adapter
