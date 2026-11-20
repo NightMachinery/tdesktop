@@ -406,10 +406,16 @@ track. In a private fixture, flipping direction after the dialog had laid
 out moved the play icons and reorder handles to opposite sides while keeping
 the durations visible. The fixture verified row painting within fixed bounds.
 
-Native coverage still needs VoiceOver speech, a 2,000-row scroll test, drag
-across viewport edges, cancellation, concurrent membership changes, failed or
-partial writes, Undo conflicts, account or route loss, and focus following
-refreshes.
+The signed macOS app loaded a synthetic 2,000-track playlist from a separate
+configuration. Home and End reached the first and last rows. Dragging to
+either viewport edge scrolled the list and saved a single-row move. Escape
+cancelled a drag and left the library bytes unchanged. The lower-edge move
+survived a restart, and Undo restored the complete order after the upper-edge
+move.
+
+Native coverage still needs VoiceOver speech, the other drag cancellation
+paths, concurrent membership changes, failed or partial writes, Undo
+conflicts, account or route loss, and focus following refreshes.
 
 ## Player bar and hover list
 
