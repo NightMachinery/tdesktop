@@ -654,7 +654,8 @@ int PlaylistSongList::resizeGetHeight(int width) {
 		_viewportLimit > 0 ? _viewportLimit : st::mediaPlayerListHeightMax,
 		_rows->rowHeight() * _rows->accessibilityChildCount());
 	_scroll->setGeometry(0, 0, width, height);
-	_rows->resizeToWidth(_scroll->viewport()->width());
+	// Qt can defer the viewport resize while the scroll area is hidden.
+	_rows->resizeToWidth(width);
 	if (_restoreScrollTop >= 0) {
 		_scroll->scrollToY(_restoreScrollTop);
 		_restoreScrollTop = -1;

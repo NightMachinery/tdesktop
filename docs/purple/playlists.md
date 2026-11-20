@@ -391,10 +391,18 @@ icon placement. The Purple row has an extra line for source status. To
 populate the stock hover list for this comparison, play the source track
 from an ordinary chat or open it individually from Music.
 
-Native coverage still needs long and RTL metadata, a 2,000-row scroll test,
-keyboard and assistive activation, drag across viewport edges, cancellation,
-concurrent membership changes, failed or partial writes, Undo conflicts,
-account or route loss, and opening and focusing after refreshes.
+The song list uses the width supplied by its parent. Qt can defer the viewport
+resize while a modal opens, leaving rows at icon width if they read the
+viewport geometry immediately. In the signed fix candidate, a saved pair of
+long titles kept both durations visible and elided before the reorder handles
+when opened from the library and from the player. The player path also passed
+after resize and refresh. Music rendered the mixed-direction title in the
+Desktop shell's left-to-right layout.
+
+Native coverage still needs mirrored widget geometry, a 2,000-row scroll
+test, keyboard and assistive activation, drag across viewport edges,
+cancellation, concurrent membership changes, failed or partial writes, Undo
+conflicts, account or route loss, and opening and focusing after refreshes.
 
 ## Player bar and hover list
 
