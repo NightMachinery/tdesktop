@@ -35,6 +35,7 @@ assert "ModalKeysOwnChatListFocus" not in win_native
 assert press.count("Purple::HandleModalKeys") == 1
 
 keys = read("purple/purple_keys.cpp")
+defaults = between(keys, "const Binding kBindings[]", "const Binding kLegacyBindings[]")
 
 palette_navigation = between(keys, "class PaletteKeys final", "void PaletteBox(")
 ordered(palette_navigation, "KeyPress", "Qt::Key_Up", "Qt::Key_Down",
@@ -52,16 +53,18 @@ for protected in ("isSearching()", "isRecording()", "_purpleScreenTimeCover->vis
     assert protected in history, protected
 
 routing = between(keys, "bool Keys::handle", "void Keys::clearPrefix")
-ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease", "stroke(key, target)")
+ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease", "stroke(KeyStroke(*keyEvent, key), target)")
 entry = between(keys, "bool HandleModalKeys", "bool ModalKeysOwnChatListFocus")
-ordered(entry, "!Enabled()", "ModalKey(*key)", "return (new Keys(window))")
+ordered(entry, "!Enabled()", "ModalKey(*key)",
+        "MatchesNext(KeyMode::Insert, {}, stroke)", "return (new Keys(window))")
 classification = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
-ordered(classification, "event.keyCombination()", "kCtrl, Qt::Key_BracketLeft",
-        "KeyUse::Pass", "KeyUse::EnterNormal")
+ordered(classification, "event.keyCombination()", "QKeyCombination::fromCombined(stroke)",
+        "KeyUse::Pass", "KeyUse::Cancel", "MatchesNext(mode(), _prefix, stroke)",
+        "KeyUse::Capture", "if (!_normal)", "KeyUse::Pass")
 ordered(routing, "QEvent::KeyRelease", "isAutoRepeat() && _held.contains(key)",
         "!target.focus || !Enabled()", "QEvent::ShortcutOverride",
         "event->accept()", "return true;", "_held.insert(key)",
-        "keyEvent->isAutoRepeat()", "stroke(key, target)")
+        "keyEvent->isAutoRepeat()", "stroke(KeyStroke(*keyEvent, key), target)")
 ordered(routing, "const auto result = _hints.type", "if (!guard)",
         "result == MessageHints::Input::LeaveNormal", "reset()")
 ordered(keys, "!Enabled()", "event->type() != QEvent::ShortcutOverride",
@@ -87,25 +90,26 @@ assert '{ Action::OpenMusic, "open-music"' in keys
 assert "{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } }" in keys
 ordered(dispatch, "case Action::ChatPalette:", "ShowChatPalette(current)",
         "case Action::OpenMusic:", "ToggleMusicSection(current)")
-for action, command, prefix, key in (
-        ("OpenPlaylists", "open-playlists", "M", "L"),
-        ("OpenCalls", "open-calls", "O", "V"),
-        ("OpenDownloads", "open-downloads", "O", "F"),
-        ("NewGroup", "new-group", "N", "G"),
-        ("NewChannel", "new-channel", "N", "C"),
-        ("AddContact", "add-contact", "N", "P"),
-        ("OpenChatInfo", "open-chat-info", "C", "I"),
-        ("OpenChatMedia", "open-chat-media", "C", "V"),
-        ("OpenChatMusic", "open-chat-music", "C", "A"),
-        ("OpenChatFiles", "open-chat-files", "C", "F"),
-        ("OpenChatLinks", "open-chat-links", "C", "L"),
-        ("OpenChatVoice", "open-chat-voice", "C", "R"),
-        ("OpenChatGifs", "open-chat-gifs", "C", "G"),
-        ("OpenChatPolls", "open-chat-polls", "C", "O"),
-        ("OpenPinnedMessages", "open-pinned-messages", "C", "N"),
-        ("AttachFiles", "attach-files", "C", "U")):
+for action, command, chord in (
+        ("OpenPlaylists", "open-playlists", "M L"),
+        ("OpenCalls", "open-calls", "O P"),
+        ("OpenDownloads", "open-downloads", "O D"),
+        ("NewGroup", "new-group", "N G"),
+        ("NewChannel", "new-channel", "N C"),
+        ("AddContact", "add-contact", "N P"),
+        ("OpenChatInfo", "open-chat-info", "C I"),
+        ("OpenChatMedia", "open-chat-media", "C S V"),
+        ("OpenChatMusic", "open-chat-music", "C S A"),
+        ("OpenChatFiles", "open-chat-files", "C S F"),
+        ("OpenChatLinks", "open-chat-links", "C S L"),
+        ("OpenChatVoice", "open-chat-voice", "C S R"),
+        ("OpenChatGifs", "open-chat-gifs", "C S G"),
+        ("OpenChatPolls", "open-chat-polls", "C S P"),
+        ("OpenPinnedMessages", "open-pinned-messages", "C H P"),
+        ("AttachFiles", "attach-files", "C U")):
     assert f'{{ Action::{action}, "{command}"' in keys
-    assert f"{{ Action::{action}, {{ Qt::Key_Space, Qt::Key_{prefix}, Qt::Key_{key} }} }}" in keys
+    sequence = ", ".join("Qt::Key_" + key for key in ["Space", *chord.split()])
+    assert f"{{ Action::{action}, {{ {sequence} }} }}" in defaults
 ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
 ordered(dispatch, "case Action::OpenCalls:", "reset()", "::Calls::ShowCallsBox(current)",
         "case Action::OpenDownloads:", "reset()",
@@ -221,7 +225,7 @@ ordered(paging, "case Action::LatestMessages:", "case Action::UnreadMessages:",
 ordered(keys, "section->controller() == owner", "section->purpleMessageList(focus)",
         ".jumpInSection = [section]", "section->cornerButtonsShowAtPosition(position)",
         ".history = history", "history->purpleMessageList()")
-assert "{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } }" in keys
+assert "{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_D } }" in defaults
 ordered(available, "case Action::OpenChatInfo:",
         "case Action::OpenPinnedMessages: return target.chat.thread() != nullptr",
         *shared_cases, "return target.chat.peer() != nullptr",
@@ -249,26 +253,33 @@ for view, assignment in (
         ("history/view/history_view_pinned_section.cpp", "_inner ="),
         ("history/view/history_view_scheduled_section.cpp", "_inner =")):
     assert f"{assignment} _scroll->setOwnedWidget(" in read(view), view
+reader = between(keys, "QJsonDocument ReadEdnKeymap", "const std::vector<Binding> &Bindings() {")
+ordered(reader, "EDN_DEFAULT_READER_ERROR", ".max_depth = 16", "edn_read_with_options",
+        "edn_source_position", "tailOptions.eof_value = root.get()", "tail.value != root.get()",
+        "edn_map_get_key(root.get(), i)", "edn_string_get", "EDN_TYPE_NIL", "EdnKeyword(value)")
 keymap = between(keys, "std::optional<std::vector<Binding>> ParseBindings", "struct Target")
-ordered(keymap, "QJsonDocument::fromJson(bytes)", "array.size() > kEntryLimit",
-        "ranges::contains(edited, keys)", "IsHelpBinding(current->action)",
-        "if (id.isNull())", "return name == QString::fromLatin1(item.id)",
-        "command == std::end(kCommands)", "current->action = command->action",
-        "binding.keys.size() < other.keys.size()", "StartsWith(other, binding.keys)",
-        'ConfigDirectory() + u"/keys.json"_q', "info.isFile()",
-        "file.read(kByteLimit + 1)", "ParseBindings(bytes, defaults)", "return defaults")
+ordered(keymap, "QJsonDocument::fromJson(bytes)", "ReadEdnKeymap(bytes)",
+        "ranges::contains(edited, std::pair(mode, keys))", "item.mode == mode",
+        "IsHelpBinding(current->action)", "if (id.isNull())",
+        "return name == QString::fromLatin1(item.id)", "current->action = command->action",
+        "legacy && document.isArray()", "kLegacyBindings",
+        "binding.mode == other.mode", "StartsWith(other, binding.keys)",
+        "binding.action == Action::EnterNormalMode",
+        'u"/keys.edn"_q', 'u"/keys.json"_q', "info.isFile()",
+        "file.read(kByteLimit + 1)", "ParseBindings(bytes, legacy, defaults)", "return defaults")
 key_parser = between(keys, "Chord ParseChord", "bool IsHelpBinding")
-ordered(key_parser, "tokens.size() > 4", "ParseKey(token)",
-        "result.front() == Qt::Key_I", "Qt::Key_Question")
+ordered(key_parser, "tokens.size() > 4", "ParseStroke(token)",
+        "result.front() == Qt::Key_Question", "mode == KeyMode::Insert")
 assert "binding : Bindings()" in between(keys, "QString BindingsLabel", "const Command &FindCommand")
-assert "Bindings()," in between(keys, "KeyUse Keys::classify", "bool Keys::handle")
-assert "binding : Bindings()" in between(keys, "void Keys::showWhichKey", "void Keys::stroke")
-assert "binding : Bindings()" in stroke
+assert "Bindings()," in between(keys, "bool MatchesNext", "QString WhichKeyGroup")
+assert "binding.mode != mode()" in between(keys, "void Keys::showWhichKey", "void Keys::stroke")
+assert "binding.mode != mode()" in stroke
 
-bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \} \},", keys)
-chords = [tuple(keys.split(", ")) for _, keys in bindings]
-assert len(set(chords)) == len(chords)
-assert not any(a != b and b[:len(a)] == a for a in chords for b in chords)
+bindings = re.findall(r"\{ Action::(\w+), \{ ([^}]+) \}(, KeyMode::Insert)? \},", defaults)
+for mode in ("", ", KeyMode::Insert"):
+    chords = [tuple(chord.split(", ")) for _, chord, entry_mode in bindings if entry_mode == mode]
+    assert len(set(chords)) == len(chords)
+    assert not any(a != b and b[:len(a)] == a for a in chords for b in chords)
 
 painter = read("window/section_widget.cpp")
 ordered(painter, "Purple::PaintHiddenChatBackground", "theme->background().giftId",

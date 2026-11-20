@@ -570,6 +570,40 @@ target_compile_definitions(purple_sqlite PRIVATE
     SQLITE_OMIT_LOAD_EXTENSION SQLITE_OMIT_SHARED_CACHE
     SQLITE_DEFAULT_FOREIGN_KEYS=1 SQLITE_DEFAULT_MEMSTATUS=0 SQLITE_ENABLE_API_ARMOR)
 find_package(Threads REQUIRED)
+
+set(purple_edn_loc ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/purple_edn)
+add_library(purple_edn STATIC
+    ${purple_edn_loc}/src/edn.c
+    ${purple_edn_loc}/src/arena.c
+    ${purple_edn_loc}/src/simd.c
+    ${purple_edn_loc}/src/string.c
+    ${purple_edn_loc}/src/number.c
+    ${purple_edn_loc}/src/character.c
+    ${purple_edn_loc}/src/identifier.c
+    ${purple_edn_loc}/src/symbolic.c
+    ${purple_edn_loc}/src/equality.c
+    ${purple_edn_loc}/src/uniqueness.c
+    ${purple_edn_loc}/src/collection.c
+    ${purple_edn_loc}/src/tagged.c
+    ${purple_edn_loc}/src/discard.c
+    ${purple_edn_loc}/src/reader.c
+    ${purple_edn_loc}/src/metadata.c
+    ${purple_edn_loc}/src/newline_finder.c
+    ${purple_edn_loc}/src/writer.c
+    ${purple_edn_loc}/src/ryu/d2s.c)
+target_compile_features(purple_edn PRIVATE c_std_11)
+set_target_properties(purple_edn PROPERTIES C_VISIBILITY_PRESET hidden)
+target_include_directories(purple_edn PRIVATE
+    ${purple_edn_loc}/include
+    ${purple_edn_loc}/src)
+set_source_files_properties(${src_loc}/purple/purple_keys.cpp
+    PROPERTIES INCLUDE_DIRECTORIES ${purple_edn_loc}/include)
+target_link_libraries(purple_edn PRIVATE Threads::Threads)
+if (UNIX AND NOT APPLE)
+    target_link_libraries(purple_edn PRIVATE m)
+endif()
+target_link_libraries(Telegram PRIVATE purple_edn)
+
 target_link_libraries(purple_sqlite PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 target_link_libraries(Telegram PRIVATE purple_sqlite desktop-app::external_openssl_crypto)
 if (WIN32)

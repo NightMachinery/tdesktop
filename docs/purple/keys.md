@@ -3,7 +3,7 @@
 Enable **Modal keyboard shortcuts** under **Settings → Purple**. Each main
 window starts in Insert mode. With focus in the chat list or main chat, press
 `Ctrl+[` to enter Normal mode. On macOS use the physical Control key.
-Press `i` or `Esc` to return to Insert. Changing focus, chats, folders, accounts, or
+Press `i` or `Esc` to return to Insert. These are the default keys. Changing focus, chats, folders, accounts, or
 windows returns to Insert. Search, menus, dialogs, and locked windows use
 their own controls.
 
@@ -25,21 +25,21 @@ Insert mode continues to use the selected input source for text.
   `Enter` opens the highlighted chat.
 - `] f` and `[ f` select the adjacent visible folder from the main chat list.
 - `/` or `SPC s s` opens search for the current view.
-- `SPC o m` opens the main menu, `SPC o t` opens Settings, and `SPC o s`
-  opens Saved Messages. Use Up or Down to select a main menu row and Enter
+- `SPC o m` opens the main menu, `SPC o s e` opens Settings, and
+  `SPC o s a` opens Saved Messages. Use Up or Down to select a main menu row and Enter
   to activate it. In the main menu, `a` shows or hides the account list.
   Opening the list highlights its first available row.
-- `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, `SPC o v`
-  opens Calls, and `SPC o f` opens Telegram's Downloads view.
-  `SPC o d` opens Scheduled Messages in a chat that supports them.
+- `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, `SPC o p`
+  opens Calls, and `SPC o d` opens Telegram's Downloads view.
 - `SPC n g` opens New Group, `SPC n c` opens New Channel, and `SPC n p`
   opens Add Contact. Use the native dialog to enter details and confirm.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
-- In a conversation or forum topic, `SPC c i` opens its info panel and
-  `SPC c n` opens its pinned messages. Use `SPC c a` for shared audio,
-  `SPC c f` for shared files, and `SPC c l` for shared links.
-  `SPC c v` opens photos and videos, `SPC c r` opens voice and round
-  video messages, `SPC c g` opens GIFs, and `SPC c o` opens polls.
+- `SPC c i` opens information about the conversation or forum topic.
+  Use `SPC c h p` for pinned messages, `SPC c h s` for scheduled messages,
+  and `SPC c h d` for the calendar where those views are available.
+- `SPC c s` leads to shared media. Use `a` for audio, `f` for files, `l` for
+  links, `v` for photos and videos, `r` for voice and round messages,
+  `g` for GIFs, and `p` for polls.
 - `SPC c u` opens Telegram's file picker when the attachment button is
   available in the current chat, reply, topic, or scheduled-message view.
   Telegram handles file selection and confirmation.
@@ -71,7 +71,7 @@ Insert mode continues to use the selected input source for text.
   for eligible scheduled messages.
 - `SPC a 1` through `SPC a 6` switch to another signed-in account in the
   order shown in Telegram's account list.
-- With the chat list and conversation visible, `SPC w d` focuses the chat list
+- With the chat list and conversation visible, `SPC w l` focuses the chat list
   and `SPC w c` focuses the conversation. Focus changes return to Insert.
 - `[ m` and `] m` scroll the active conversation by one visible page
   toward older or newer messages. They work in the main chat, replies,
@@ -80,7 +80,7 @@ Insert mode continues to use the selected input source for text.
   page needs to load. `] u` jumps to unread messages in the conversation.
   Telegram takes you to the newest messages if there is no unread position
   to jump to.
-- `SPC c d` opens the history calendar in a chat or forum topic. Use
+- `SPC c h d` opens the history calendar in a chat or forum topic. Use
   Shift+Left or Shift+Right to move by day, Shift+Up or Shift+Down to move
   by week, and Enter to choose the highlighted date. Page Up and Page Down
   still change the month. If the new month has no highlighted day, Enter
@@ -92,33 +92,51 @@ Insert mode continues to use the selected input source for text.
   descriptions. Both leave the described action unexecuted.
 
 Menus, settings, and compose overlays use Telegram's built-in navigation.
-Alt+Space stays with the system or editor.
+By default, Alt+Space stays with the system or editor.
 ## Custom bindings
 
-Create `keys.json` beside Purple's local [settings.toml](config.md), then
-restart Purple. It uses the same `keys` and `command` fields as Telegram's
-shortcut file, with space-separated keys for modal sequences. For example,
-this moves the archive command to `SPC o r`:
+Save `keys.edn` beside Purple's local [settings.toml](config.md) and restart
+Purple. Group bindings with `:normal` and `:insert`. Each chord maps to a
+command keyword from `SPC h f`. For example:
 
-```json
-[
-  { "keys": "SPC o a", "command": null },
-  { "keys": "SPC o r", "command": "open-archived-chats" }
-]
+```clojure
+{:normal {"C-S-j" :chat-cursor-next
+          "SPC o a" nil}
+ :insert {"C-S-j" :chat-palette
+          ;; Press Option+Space, then m.
+          "M-SPC m" :open-music}}
 ```
 
-Use the command IDs from `SPC h f`. A command ID adds or replaces a binding.
-Use `null` to remove one. Help, command search, and which-key show the
-effective bindings. `SPC ?`, `SPC SPC`, `SPC h k`, and `SPC h f`
-always remain available.
+The maps overlay each mode's defaults. Use `nil` to remove a default.
+A chord may name different commands in different modes. Insert bindings start
+with Ctrl, Alt, or Super, so ordinary typing stays in the editor. For an
+Insert prefix such as `M-SPC`, a matching next key completes the chord and
+an unmatched key goes back to the editor. Escape cancels a pending chord.
+Telegram's registered shortcuts take precedence over configured modifier
+chords. Bindings apply only in chat views, the chat list, and eligible Music
+focus, with Telegram's dialogs and input-method composition keeping their
+own keys.
 
-Each sequence can contain up to four logical keys. Use letters, digits,
-`SPC`, `Enter`, brackets, slash, or a question mark after the first key.
-Sequences cannot start with `i`, which returns to Insert. Key names are
-case-insensitive.
-Keep the file under 16 KiB and at most 128 entries. Duplicate sequences,
-sequences that start another binding, and unknown command IDs cause Purple to
-log a warning and use the defaults for that run. Purple keeps this file local.
+Write consecutive strokes with spaces. Use Doom's `C-` (Control), `M-`
+(Alt or Option), `S-` (Shift), and `s-` (Super or Command). The longer
+`Ctrl+`, `Alt+`, `Shift+`, and `Super+` spellings also work.
+A stroke may use letters, digits, ASCII punctuation, arrows,
+Home, End, PageUp, PageDown, function keys, `SPC`, or `Enter`/`RET`.
+For punctuation produced with Shift, write the resulting symbol, such as
+`?` or `C-+`.
+Chords have at most four strokes. `enter-normal-mode` and `enter-insert-mode`
+are commands too. Keep an Insert binding for `enter-normal-mode`. Escape
+always exits Normal mode when no chord is pending.
+
+The built-in guide and command search show effective bindings, including
+Insert bindings. `SPC ?`, `SPC SPC`, `SPC h k`, and `SPC h f` stay available
+in Normal mode. The file limit is 16 KiB and 128 entries. Unknown modes,
+command IDs, duplicate normalized chords, or conflicting prefixes reject the
+file and use the defaults. Reuse a chord freely across different modes.
+
+If `keys.edn` is absent, existing `keys.json` files keep the older Normal
+defaults and their current overrides. Add a `keys.edn` file to adopt the new
+defaults and add an Insert map. Purple keeps the files local.
 
 ## Upstream hooks
 

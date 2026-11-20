@@ -54,6 +54,8 @@
 #include "styles/style_settings.h"
 #include "styles/style_widgets.h"
 
+#include <edn.h>
+
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
@@ -69,6 +71,7 @@
 #include <QtWidgets/QTextEdit>
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <type_traits>
 
@@ -127,8 +130,10 @@ constexpr auto kWhichKeyDelay = 300;
 constexpr auto kPaletteRows = 9;
 #ifdef Q_OS_MAC
 constexpr auto kCtrl = Qt::MetaModifier;
+constexpr auto kSuper = Qt::ControlModifier;
 #else
 constexpr auto kCtrl = Qt::ControlModifier;
+constexpr auto kSuper = Qt::MetaModifier;
 #endif // Q_OS_MAC
 
 rpl::event_stream<bool> EnabledChanges;
@@ -143,8 +148,7 @@ int ModalKey(const QKeyEvent &event) {
 		: event.key();
 #ifdef Q_OS_MAC
 	const auto modifiers = event.modifiers();
-	if (!event.timestamp() || (modifiers != Qt::NoModifier
-			&& modifiers != Qt::ShiftModifier && modifiers != kCtrl)) {
+	if (!event.timestamp()) {
 		return logical;
 	}
 	constexpr auto letters = std::to_array<quint32>({
@@ -172,7 +176,7 @@ int ModalKey(const QKeyEvent &event) {
 	} else if (native == kVK_ANSI_RightBracket) {
 		physical = Qt::Key_BracketRight;
 	} else if (native == kVK_ANSI_Slash) {
-		physical = (modifiers == Qt::ShiftModifier)
+		physical = modifiers.testFlag(Qt::ShiftModifier)
 			? Qt::Key_Question
 			: Qt::Key_Slash;
 	}
@@ -192,6 +196,8 @@ int ModalKey(const QKeyEvent &event) {
 }
 
 enum class Action {
+	EnterNormalMode,
+	EnterInsertMode,
 	Backgrounds,
 	PreviousChat,
 	NextChat,
@@ -268,6 +274,10 @@ struct Command {
 };
 
 const Command kCommands[] = {
+	{ Action::EnterNormalMode, "enter-normal-mode",
+		[] { return tr::lng_purple_keys_normal(tr::now); } },
+	{ Action::EnterInsertMode, "enter-insert-mode",
+		[] { return tr::lng_purple_keys_insert(tr::now); } },
 	{ Action::Backgrounds, "chat-backgrounds-visibility-toggle",
 		[] { return tr::lng_purple_keys_backgrounds(tr::now); } },
 	{ Action::PreviousChat, "chat-cursor-previous",
@@ -413,12 +423,24 @@ const Command kCommands[] = {
 
 using Chord = std::vector<int>;
 
+enum class KeyMode {
+	Normal,
+	Insert,
+};
+
+constexpr auto kCtrlBracket = int(kCtrl) | Qt::Key_BracketLeft;
+constexpr auto kCtrlG = int(kCtrl) | Qt::Key_G;
+
 struct Binding {
 	Action action;
 	Chord keys;
+	KeyMode mode = KeyMode::Normal;
 };
 
 const Binding kBindings[] = {
+	{ Action::EnterNormalMode, { kCtrlBracket }, KeyMode::Insert },
+	{ Action::EnterNormalMode, { kCtrlBracket } },
+	{ Action::EnterInsertMode, { Qt::Key_I } },
 	{ Action::Backgrounds, { Qt::Key_Space, Qt::Key_C, Qt::Key_B } },
 	{ Action::PreviousChat, { Qt::Key_BracketLeft, Qt::Key_C } },
 	{ Action::PreviousChat, { Qt::Key_K } },
@@ -439,26 +461,26 @@ const Binding kBindings[] = {
 	{ Action::Search, { Qt::Key_Slash } },
 	{ Action::Search, { Qt::Key_Space, Qt::Key_S, Qt::Key_S } },
 	{ Action::OpenMainMenu, { Qt::Key_Space, Qt::Key_O, Qt::Key_M } },
-	{ Action::OpenSettings, { Qt::Key_Space, Qt::Key_O, Qt::Key_T } },
-	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S } },
+	{ Action::OpenSettings, { Qt::Key_Space, Qt::Key_O, Qt::Key_S, Qt::Key_E } },
+	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S, Qt::Key_A } },
 	{ Action::OpenArchive, { Qt::Key_Space, Qt::Key_O, Qt::Key_A } },
 	{ Action::OpenContacts, { Qt::Key_Space, Qt::Key_O, Qt::Key_C } },
-	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_V } },
-	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_F } },
+	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_P } },
+	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::NewGroup, { Qt::Key_Space, Qt::Key_N, Qt::Key_G } },
 	{ Action::NewChannel, { Qt::Key_Space, Qt::Key_N, Qt::Key_C } },
 	{ Action::AddContact, { Qt::Key_Space, Qt::Key_N, Qt::Key_P } },
-	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
+	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_S } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
-	{ Action::OpenChatMedia, { Qt::Key_Space, Qt::Key_C, Qt::Key_V } },
-	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
-	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_F } },
-	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_L } },
-	{ Action::OpenChatVoice, { Qt::Key_Space, Qt::Key_C, Qt::Key_R } },
-	{ Action::OpenChatGifs, { Qt::Key_Space, Qt::Key_C, Qt::Key_G } },
-	{ Action::OpenChatPolls, { Qt::Key_Space, Qt::Key_C, Qt::Key_O } },
-	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_N } },
+	{ Action::OpenChatMedia, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_V } },
+	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_A } },
+	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_F } },
+	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_L } },
+	{ Action::OpenChatVoice, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_R } },
+	{ Action::OpenChatGifs, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_G } },
+	{ Action::OpenChatPolls, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_P } },
+	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_P } },
 	{ Action::AttachFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_U } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
 	{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } },
@@ -475,20 +497,38 @@ const Binding kBindings[] = {
 	{ Action::Account4, { Qt::Key_Space, Qt::Key_A, Qt::Key_4 } },
 	{ Action::Account5, { Qt::Key_Space, Qt::Key_A, Qt::Key_5 } },
 	{ Action::Account6, { Qt::Key_Space, Qt::Key_A, Qt::Key_6 } },
-	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_D } },
+	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_L } },
 	{ Action::FocusConversation, { Qt::Key_Space, Qt::Key_W, Qt::Key_C } },
 	{ Action::OlderMessagesPage, { Qt::Key_BracketLeft, Qt::Key_M } },
 	{ Action::NewerMessagesPage, { Qt::Key_BracketRight, Qt::Key_M } },
 	{ Action::LatestMessages, { Qt::Key_BracketRight, Qt::Key_BracketRight } },
 	{ Action::UnreadMessages, { Qt::Key_BracketRight, Qt::Key_U } },
-	{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } },
+	{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_D } },
 	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
 	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
 	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
 	{ Action::DescribeCommand, { Qt::Key_Space, Qt::Key_H, Qt::Key_F } },
 };
 
-QString KeyLabel(int key) {
+const Binding kLegacyBindings[] = {
+	{ Action::OpenSettings, { Qt::Key_Space, Qt::Key_O, Qt::Key_T } },
+	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S } },
+	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_V } },
+	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_F } },
+	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
+	{ Action::OpenChatMedia, { Qt::Key_Space, Qt::Key_C, Qt::Key_V } },
+	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
+	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_F } },
+	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_L } },
+	{ Action::OpenChatVoice, { Qt::Key_Space, Qt::Key_C, Qt::Key_R } },
+	{ Action::OpenChatGifs, { Qt::Key_Space, Qt::Key_C, Qt::Key_G } },
+	{ Action::OpenChatPolls, { Qt::Key_Space, Qt::Key_C, Qt::Key_O } },
+	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_N } },
+	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_D } },
+	{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } },
+};
+
+QString BareKeyLabel(int key) {
 	if (key == Qt::Key_Space) {
 		return u"SPC"_q;
 	} else if (key == Qt::Key_Return) {
@@ -497,6 +537,38 @@ QString KeyLabel(int key) {
 		return QString(QChar(key - Qt::Key_A + 'a'));
 	}
 	return QKeySequence(key).toString(QKeySequence::NativeText);
+}
+
+QString KeyLabel(int stroke) {
+	const auto combination = QKeyCombination::fromCombined(stroke);
+	const auto mods = combination.keyboardModifiers();
+	auto label = QString();
+	if (mods.testFlag(kCtrl)) {
+		label += u"Ctrl+"_q;
+	}
+	if (mods.testFlag(Qt::AltModifier)) {
+		label += u"Alt+"_q;
+	}
+	if (mods.testFlag(kSuper)) {
+		label += u"Super+"_q;
+	}
+	if (mods.testFlag(Qt::ShiftModifier)) {
+		label += u"Shift+"_q;
+	}
+	return label + BareKeyLabel(combination.key());
+}
+
+bool ShiftedSymbol(int key) {
+	return key >= '!' && key <= '~'
+		&& QStringView(u"!@#$%^&*()_+{}|:\"<>?~").contains(QChar(ushort(key)));
+}
+
+int KeyStroke(const QKeyEvent &event, int key) {
+	auto mods = event.modifiers() & ~Qt::KeypadModifier;
+	if (ShiftedSymbol(key)) {
+		mods &= ~Qt::ShiftModifier;
+	}
+	return QKeyCombination(mods, Qt::Key(key)).toCombined();
 }
 
 QString ChordLabel(const Chord &keys) {
@@ -513,7 +585,10 @@ QString BindingsLabel(Action action) {
 	auto result = QStringList();
 	for (const auto &binding : Bindings()) {
 		if (binding.action == action) {
-			result.push_back(ChordLabel(binding.keys));
+			const auto label = ChordLabel(binding.keys);
+			result.push_back((binding.mode == KeyMode::Insert)
+				? tr::lng_purple_keys_insert(tr::now) + u" ("_q + label + u")"_q
+				: label);
 		}
 	}
 	return result.join(u" / "_q);
@@ -533,37 +608,87 @@ bool StartsWith(const Binding &binding, const Chord &prefix) {
 int ParseKey(const QString &token) {
 	if (token.compare(u"SPC"_q, Qt::CaseInsensitive) == 0) {
 		return Qt::Key_Space;
-	} else if (token.compare(u"Enter"_q, Qt::CaseInsensitive) == 0) {
+	} else if (token.compare(u"Enter"_q, Qt::CaseInsensitive) == 0
+			|| token.compare(u"RET"_q, Qt::CaseInsensitive) == 0) {
 		return Qt::Key_Return;
 	} else if (token.size() != 1) {
+		const auto key = QKeySequence::fromString(
+			token, QKeySequence::PortableText);
+		if (key.count() == 1 && key[0].keyboardModifiers() == Qt::NoModifier) {
+			const auto value = key[0].key();
+			if ((value >= Qt::Key_F1 && value <= Qt::Key_F35)
+				|| (value >= Qt::Key_Home && value <= Qt::Key_PageDown)) {
+				return value;
+			}
+		}
 		return 0;
 	}
 	const auto key = token.front().unicode();
 	if (key >= 'a' && key <= 'z') {
 		return Qt::Key_A + (key - 'a');
-	} else if ((key >= 'A' && key <= 'Z')
-		|| (key >= '0' && key <= '9')
-		|| key == '[' || key == ']' || key == '/' || key == '?') {
+	} else if (key >= '!' && key <= '~') {
 		return key;
 	}
 	return 0;
 }
 
-Chord ParseChord(const QString &text) {
+bool HasShortcutModifier(int stroke) {
+	const auto mods = QKeyCombination::fromCombined(stroke).keyboardModifiers();
+	return (mods & (kCtrl | kSuper | Qt::AltModifier)) != Qt::NoModifier;
+}
+
+int ParseStroke(const QString &token) {
+	auto text = token;
+	auto mods = Qt::KeyboardModifiers();
+	while (text.size() > 2 && text[1] == '-') {
+		const auto prefix = text[0];
+		const auto mod = (prefix == 'C') ? kCtrl
+			: (prefix == 'M') ? Qt::AltModifier
+			: (prefix == 's') ? kSuper
+			: (prefix == 'S') ? Qt::ShiftModifier
+			: Qt::NoModifier;
+		if (!mod || (mods & mod)) {
+			return 0;
+		}
+		mods |= mod;
+		text.remove(0, 2);
+	}
+	for (auto separator = text.indexOf('+'); separator > 0;
+		separator = text.indexOf('+')) {
+		const auto part = text.left(separator).toLower();
+		const auto mod = (part == u"ctrl"_q) ? kCtrl
+			: (part == u"alt"_q) ? Qt::AltModifier
+			: (part == u"super"_q) ? kSuper
+			: (part == u"shift"_q) ? Qt::ShiftModifier
+			: Qt::NoModifier;
+		if (!mod || (mods & mod)) {
+			return 0;
+		}
+		mods |= mod;
+		text.remove(0, separator + 1);
+	}
+	const auto key = ParseKey(text);
+	if (!key || (ShiftedSymbol(key) && mods.testFlag(Qt::ShiftModifier))) {
+		return 0;
+	}
+	return QKeyCombination(mods, Qt::Key(key)).toCombined();
+}
+
+Chord ParseChord(const QString &text, KeyMode mode) {
 	const auto tokens = text.simplified().split(' ', Qt::SkipEmptyParts);
 	if (tokens.empty() || tokens.size() > 4) {
 		return {};
 	}
 	auto result = Chord();
 	for (const auto &token : tokens) {
-		const auto key = ParseKey(token);
-		if (!key) {
+		const auto key = ParseStroke(token);
+		if (!key || key == kCtrlG) {
 			return {};
 		}
 		result.push_back(key);
 	}
-	if ((result.front() == Qt::Key_I)
-		|| result.front() == Qt::Key_Question) {
+	if (result.front() == Qt::Key_Question
+		|| (mode == KeyMode::Insert && !HasShortcutModifier(result.front()))) {
 		return {};
 	}
 	return result;
@@ -574,60 +699,178 @@ bool IsHelpBinding(Action action) {
 		|| action == Action::DescribeChord || action == Action::DescribeCommand;
 }
 
+QString EdnKeyword(const edn_value_t *value) {
+	const char *name = nullptr;
+	auto size = size_t(0);
+	auto namespaceSize = size_t(0);
+	return (edn_keyword_get(value, nullptr, &namespaceSize, &name, &size)
+			&& !namespaceSize)
+		? QString::fromUtf8(name, qsizetype(size))
+		: QString();
+}
+
+QJsonDocument ReadEdnKeymap(const QByteArray &bytes) {
+	if (bytes.isEmpty() || bytes.contains('\0')) {
+		return {};
+	}
+	const auto options = edn_parse_options_t{
+		.struct_size = sizeof(edn_parse_options_t),
+		.default_reader_mode = EDN_DEFAULT_READER_ERROR,
+		.max_depth = 16,
+	};
+	const auto parsed = edn_read_with_options(
+		bytes.constData(), size_t(bytes.size()), &options);
+	const auto root = std::unique_ptr<edn_value_t, decltype(&edn_free)>(
+		parsed.value, &edn_free);
+	if (parsed.error != EDN_OK || edn_type(root.get()) != EDN_TYPE_MAP) {
+		return {};
+	}
+	auto end = size_t();
+	if (!edn_source_position(root.get(), nullptr, &end)
+		|| end > size_t(bytes.size())) {
+		return {};
+	}
+	if (end < size_t(bytes.size())) {
+		auto tailOptions = options;
+		tailOptions.eof_value = root.get();
+		const auto tail = edn_read_with_options(
+			bytes.constData() + end, size_t(bytes.size()) - end, &tailOptions);
+		if (tail.value != root.get()) {
+			edn_free(tail.value);
+			return {};
+		}
+		if (tail.error != EDN_OK) {
+			return {};
+		}
+	}
+	auto groups = QJsonObject();
+	for (auto i = size_t(0); i < edn_map_count(root.get()); ++i) {
+		const auto mode = EdnKeyword(edn_map_get_key(root.get(), i));
+		const auto map = edn_map_get_value(root.get(), i);
+		if ((mode != u"normal"_q && mode != u"insert"_q)
+			|| edn_type(map) != EDN_TYPE_MAP) {
+			return {};
+		}
+		auto entries = QJsonObject();
+		for (auto j = size_t(0); j < edn_map_count(map); ++j) {
+			auto size = size_t(0);
+			const auto key = edn_string_get(edn_map_get_key(map, j), &size);
+			if (!key) {
+				return {};
+			}
+			const auto chord = QString::fromUtf8(key, qsizetype(size));
+			const auto value = edn_map_get_value(map, j);
+			if (edn_type(value) == EDN_TYPE_NIL) {
+				entries.insert(chord, QJsonValue::Null);
+			} else {
+				const auto command = EdnKeyword(value);
+				if (command.isEmpty()) {
+					return {};
+				}
+				entries.insert(chord, command);
+			}
+		}
+		groups.insert(mode, entries);
+	}
+	return QJsonDocument(groups);
+}
+
 std::optional<std::vector<Binding>> ParseBindings(
 		const QByteArray &bytes,
+		bool legacy,
 		std::vector<Binding> result) {
-	const auto document = QJsonDocument::fromJson(bytes);
+	const auto document = legacy
+		? QJsonDocument::fromJson(bytes)
+		: ReadEdnKeymap(bytes);
 	constexpr auto kEntryLimit = 128;
-	const auto array = document.array();
-	if (!document.isArray() || array.size() > kEntryLimit) {
-		return std::nullopt;
-	}
-	auto edited = std::vector<Chord>();
-	for (const auto value : array) {
-		const auto entry = value.toObject();
-		const auto text = entry.value(u"keys"_q);
-		const auto id = entry.value(u"command"_q);
-		if (entry.size() != 2 || !text.isString()
-			|| (!id.isNull() && !id.isString())) {
-			return std::nullopt;
+	auto edited = std::vector<std::pair<KeyMode, Chord>>();
+	const auto apply = [&](KeyMode mode, const QString &text, QJsonValue id) {
+		if (!id.isNull() && !id.isString()) {
+			return false;
 		}
-		auto keys = ParseChord(text.toString());
-		if (keys.empty() || ranges::contains(edited, keys)) {
-			return std::nullopt;
+		auto keys = ParseChord(text, mode);
+		if (keys.empty()
+			|| edited.size() >= kEntryLimit
+			|| ranges::contains(edited, std::pair(mode, keys))) {
+			return false;
 		}
-		edited.push_back(keys);
-		const auto current = ranges::find(result, keys, &Binding::keys);
+		edited.emplace_back(mode, keys);
+		const auto current = ranges::find_if(result, [&](const Binding &item) {
+			return item.mode == mode && item.keys == keys;
+		});
 		if (current != end(result) && IsHelpBinding(current->action)) {
-			return std::nullopt;
+			return false;
 		}
 		if (id.isNull()) {
 			if (current != end(result)) {
 				result.erase(current);
 			}
-			continue;
+			return true;
 		}
 		const auto name = id.toString();
 		const auto command = ranges::find_if(kCommands, [&](const Command &item) {
 			return name == QString::fromLatin1(item.id);
 		});
 		if (command == std::end(kCommands)) {
-			return std::nullopt;
+			return false;
 		} else if (current != end(result)) {
 			current->action = command->action;
 		} else {
-			result.push_back({ command->action, std::move(keys) });
+			result.push_back({ command->action, std::move(keys), mode });
 		}
+		return true;
+	};
+	if (legacy && document.isArray()) {
+		for (auto &binding : result) {
+			const auto previous = ranges::find(
+				kLegacyBindings, binding.action, &Binding::action);
+			if (binding.mode == KeyMode::Normal
+				&& previous != std::end(kLegacyBindings)) {
+				binding.keys = previous->keys;
+			}
+		}
+		for (const auto value : document.array()) {
+			const auto entry = value.toObject();
+			const auto text = entry.value(u"keys"_q);
+			if (entry.size() != 2 || !text.isString()
+				|| !apply(KeyMode::Normal, text.toString(), entry.value(u"command"_q))) {
+				return std::nullopt;
+			}
+		}
+	} else if (!legacy && document.isObject()) {
+		const auto groups = document.object();
+		for (auto group = groups.begin(); group != groups.end(); ++group) {
+			if ((group.key() != u"normal"_q && group.key() != u"insert"_q)
+				|| !group.value().isObject()) {
+				return std::nullopt;
+			}
+			const auto mode = (group.key() == u"normal"_q)
+				? KeyMode::Normal
+				: KeyMode::Insert;
+			const auto entries = group.value().toObject();
+			for (auto entry = entries.begin(); entry != entries.end(); ++entry) {
+				if (!apply(mode, entry.key(), entry.value())) {
+					return std::nullopt;
+				}
+			}
+		}
+	} else {
+		return std::nullopt;
 	}
 	for (const auto &binding : result) {
 		if (ranges::any_of(result, [&](const Binding &other) {
-			return binding.keys.size() < other.keys.size()
+			return binding.mode == other.mode
+				&& binding.keys.size() < other.keys.size()
 				&& StartsWith(other, binding.keys);
 		})) {
 			return std::nullopt;
 		}
 	}
-	return result;
+	const auto canEnterNormal = ranges::any_of(result, [](const Binding &binding) {
+		return binding.mode == KeyMode::Insert
+			&& binding.action == Action::EnterNormalMode;
+	});
+	return canEnterNormal ? std::optional(std::move(result)) : std::nullopt;
 }
 
 const std::vector<Binding> &Bindings() {
@@ -635,26 +878,66 @@ const std::vector<Binding> &Bindings() {
 		auto defaults = std::vector<Binding>(
 			std::begin(kBindings),
 			std::end(kBindings));
-		const auto path = ConfigDirectory() + u"/keys.json"_q;
-		const auto info = QFileInfo(path);
+		const auto directory = ConfigDirectory();
+		auto info = QFileInfo(directory + u"/keys.edn"_q);
+		const auto legacy = !info.exists();
+		if (legacy) {
+			info.setFile(directory + u"/keys.json"_q);
+		}
 		if (!info.exists()) {
 			return defaults;
 		}
-		auto file = QFile(path);
+		auto file = QFile(info.filePath());
 		constexpr auto kByteLimit = 16 * 1024;
 		if (info.isFile() && file.open(QIODevice::ReadOnly)) {
 			const auto bytes = file.read(kByteLimit + 1);
 			if (file.error() == QFileDevice::NoError
 				&& bytes.size() <= kByteLimit) {
-				if (auto parsed = ParseBindings(bytes, defaults)) {
+				if (auto parsed = ParseBindings(bytes, legacy, defaults)) {
 					return std::move(*parsed);
 				}
 			}
 		}
-		LOG(("Purple modal keys: invalid keys.json, using default bindings."));
+		LOG(("Purple modal keys: invalid keymap, using default bindings."));
 		return defaults;
 	}();
 	return result;
+}
+
+bool MatchesNext(KeyMode mode, const Chord &prefix, int stroke) {
+	return ranges::any_of(Bindings(), [&](const Binding &binding) {
+		return binding.mode == mode
+			&& binding.keys.size() > prefix.size()
+			&& binding.keys[prefix.size()] == stroke
+			&& StartsWith(binding, prefix);
+	});
+}
+
+QString WhichKeyGroup(Chord prefix, int next) {
+	prefix.push_back(next);
+	if (prefix == Chord{ Qt::Key_Space, Qt::Key_C }) {
+		return tr::lng_purple_keys_group_chat(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_O }) {
+		return tr::lng_purple_keys_group_open(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_A }) {
+		return tr::lng_purple_keys_group_accounts(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_W }) {
+		return tr::lng_mac_menu_window(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_M }) {
+		return tr::lng_purple_music_title(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_S }) {
+		return tr::lng_shortcuts_search(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_N }) {
+		return tr::lng_create_group_create(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_H }) {
+		return tr::lng_purple_keys_help(tr::now);
+	} else if (prefix == Chord{ Qt::Key_G, Qt::Key_S }
+			|| prefix == Chord{ Qt::Key_Space, Qt::Key_C, Qt::Key_H }) {
+		return tr::lng_purple_keys_group_messages(tr::now);
+	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_C, Qt::Key_S }) {
+		return tr::lng_profile_shared_media(tr::now);
+	}
+	return u"…"_q;
 }
 
 struct Target {
@@ -998,7 +1281,6 @@ void PaletteBox(
 
 enum class KeyUse {
 	Pass,
-	EnterNormal,
 	ExitNormal,
 	Cancel,
 	Capture,
@@ -1015,6 +1297,7 @@ public:
 private:
 	[[nodiscard]] Window::SessionController *owner() const;
 	[[nodiscard]] Target currentTarget(QObject *receiver) const;
+	[[nodiscard]] KeyMode mode() const;
 	[[nodiscard]] KeyUse classify(const QKeyEvent &event, int key) const;
 	void reset();
 	void invalidate();
@@ -1119,22 +1402,24 @@ bool Keys::ownsChatListFocus() const {
 		&& currentTarget(QApplication::focusWidget()).list;
 }
 
+KeyMode Keys::mode() const {
+	return _normal ? KeyMode::Normal : KeyMode::Insert;
+}
+
 KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 	const auto mods = event.modifiers() & ~Qt::KeypadModifier;
-	if (key == Qt::Key_BracketLeft && mods == kCtrl) {
+	const auto stroke = KeyStroke(event, key);
+	const auto pending = !_prefix.empty() || _inspect || _hints.active();
+	if (HasShortcutModifier(stroke)) {
 		const auto &shortcuts = Shortcuts::KeysCurrents();
-		return (shortcuts.contains(QKeySequence(event.keyCombination()))
-			|| shortcuts.contains(QKeySequence(QKeyCombination(
-				kCtrl, Qt::Key_BracketLeft))))
-			? KeyUse::Pass
-			: KeyUse::EnterNormal;
-	} else if (!_normal) {
-		return KeyUse::Pass;
-	} else if ((key == Qt::Key_Escape && !mods)
-		|| (key == Qt::Key_G && mods == kCtrl)) {
-		return (_prefix.empty() && !_inspect && !_hints.active())
-			? KeyUse::ExitNormal
-			: KeyUse::Cancel;
+		if (shortcuts.contains(QKeySequence(event.keyCombination()))
+			|| shortcuts.contains(QKeySequence(QKeyCombination::fromCombined(stroke)))) {
+			return KeyUse::Pass;
+		}
+	}
+	if (((key == Qt::Key_Escape && !mods) || stroke == kCtrlG)
+		&& (_normal || pending)) {
+		return pending ? KeyUse::Cancel : KeyUse::ExitNormal;
 	} else if (_hints.active()) {
 		const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
 		if (!mods && (printable
@@ -1148,23 +1433,16 @@ KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 					|| (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Greek)))
 			? KeyUse::Ignore
 			: KeyUse::Pass;
-	} else if (key == Qt::Key_I && !mods && _prefix.empty() && !_inspect) {
-		return KeyUse::ExitNormal;
 	} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 		return KeyUse::Pass;
-	} else if (!mods || ((key == Qt::Key_Question || key == Qt::Key_Slash)
-			&& mods == Qt::ShiftModifier)) {
-		const auto nextBinding = ranges::any_of(
-			Bindings(),
-			[&](const Binding &binding) {
-				return binding.keys.size() > _prefix.size()
-					&& binding.keys.begin()[_prefix.size()] == key
-					&& StartsWith(binding, _prefix);
-			});
-		const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
-		if (nextBinding || ((_inspect || !_prefix.empty()) && printable)) {
-			return KeyUse::Capture;
-		}
+	}
+	const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
+	if (MatchesNext(mode(), _prefix, stroke)
+		|| ((_inspect || (_normal && pending)) && !mods && printable)) {
+		return KeyUse::Capture;
+	}
+	if (!_normal) {
+		return KeyUse::Pass;
 	}
 	return ((mods == Qt::NoModifier || mods == Qt::ShiftModifier)
 			&& (!event.text().isEmpty()
@@ -1225,23 +1503,15 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return true;
 	}
 	switch (use) {
-	case KeyUse::EnterNormal:
-		clearPrefix();
-		if (!_normal) {
-			_normal = true;
-			Ui::Toast::Show(_window, tr::lng_purple_keys_normal(tr::now));
-		}
-		break;
 	case KeyUse::ExitNormal:
-		reset();
-		Ui::Toast::Show(_window, tr::lng_purple_keys_insert(tr::now));
+		dispatch(Action::EnterInsertMode, target);
 		break;
 	case KeyUse::Cancel:
 	case KeyUse::Ignore:
 		clearPrefix();
 		break;
 	case KeyUse::Capture:
-		stroke(key, target);
+		stroke(KeyStroke(*keyEvent, key), target);
 		break;
 	case KeyUse::Hint: {
 		const auto guard = QPointer(this);
@@ -1283,14 +1553,15 @@ void Keys::invalidate() {
 
 void Keys::showWhichKey() {
 	const auto target = currentTarget(QApplication::focusWidget());
-	if (!target.focus || !_normal || !Enabled()) {
+	if (!target.focus || !Enabled() || (_prefix.empty() && !_inspect)) {
 		reset();
 		return;
 	}
 	auto lines = QStringList();
 	auto seen = QSet<int>();
 	for (const auto &binding : Bindings()) {
-		if (!StartsWith(binding, _prefix)
+		if (binding.mode != mode()
+			|| !StartsWith(binding, _prefix)
 			|| binding.keys.size() == _prefix.size()
 			|| (!_inspect && !Available(binding.action, target))) {
 			continue;
@@ -1302,21 +1573,7 @@ void Keys::showWhichKey() {
 		seen.insert(next);
 		const auto label = (binding.keys.size() == _prefix.size() + 1)
 			? FindCommand(binding.action).label()
-			: (next == Qt::Key_C)
-			? tr::lng_purple_keys_group_chat(tr::now)
-			: (next == Qt::Key_O)
-			? tr::lng_purple_keys_group_open(tr::now)
-			: (next == Qt::Key_A)
-			? tr::lng_purple_keys_group_accounts(tr::now)
-			: (next == Qt::Key_W)
-			? tr::lng_mac_menu_window(tr::now)
-			: (next == Qt::Key_M)
-			? tr::lng_media_type_media(tr::now)
-			: (next == Qt::Key_S && _prefix == Chord{ Qt::Key_Space })
-			? tr::lng_shortcuts_search(tr::now)
-			: (next == Qt::Key_S)
-			? tr::lng_purple_keys_group_messages(tr::now)
-			: tr::lng_purple_keys_help(tr::now);
+			: WhichKeyGroup(_prefix, next);
 		lines.push_back(KeyLabel(next) + u"    "_q + label);
 	}
 	if (_inspect && _prefix.empty()) {
@@ -1339,7 +1596,7 @@ void Keys::stroke(int key, const Target &target) {
 	}
 	auto more = false;
 	for (const auto &binding : Bindings()) {
-		if (!StartsWith(binding, _prefix)) {
+		if (binding.mode != mode() || !StartsWith(binding, _prefix)) {
 			continue;
 		} else if (binding.keys.size() != _prefix.size()) {
 			more = true;
@@ -1390,6 +1647,17 @@ void Keys::dispatch(Action action, const Target &target) {
 		}
 	};
 	switch (action) {
+	case Action::EnterNormalMode:
+		clearPrefix();
+		if (!_normal) {
+			_normal = true;
+			Ui::Toast::Show(_window, tr::lng_purple_keys_normal(tr::now));
+		}
+		break;
+	case Action::EnterInsertMode:
+		reset();
+		Ui::Toast::Show(_window, tr::lng_purple_keys_insert(tr::now));
+		break;
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
 		break;
@@ -1685,7 +1953,8 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	const auto key = static_cast<QKeyEvent*>(event);
-	if (key->modifiers() != kCtrl || ModalKey(*key) != Qt::Key_BracketLeft) {
+	const auto stroke = KeyStroke(*key, ModalKey(*key));
+	if (!HasShortcutModifier(stroke) || !MatchesNext(KeyMode::Insert, {}, stroke)) {
 		return false;
 	}
 	return (new Keys(window))->handle(receiver, event);
