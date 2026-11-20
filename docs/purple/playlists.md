@@ -366,9 +366,10 @@ selected row. The screen-reader list exposes virtual stable row identities,
 selection, rectangles, names and guarded main-thread focus/activation actions.
 
 A drop delegates a complete permutation to the existing typed ReorderSongs
-account edit. Pending edits disable interaction; only a confirmed returned
-snapshot replaces saved order. The existing confirmed Undo record restores it
-with the core conflict checks. Refresh and navigation are serialized with edits.
+account edit. Pending edits disable interaction, and only a confirmed snapshot
+replaces the saved order. Undo checks the values and stamps of the registers
+written by the edit. If any changed afterward, the app reports a conflict and
+preserves the newer data. Refresh and navigation are serialized with edits.
 Account, route, controller, box lifetime and reply generation guards remain.
 Playback continues using its immutable queue until another Play. No store,
 worker, playback facade or timer API changes are needed for this view.
@@ -413,9 +414,15 @@ cancelled a drag and left the library bytes unchanged. The lower-edge move
 survived a restart, and Undo restored the complete order after the upper-edge
 move.
 
-Native coverage still needs VoiceOver speech, the other drag cancellation
-paths, concurrent membership changes, failed or partial writes, Undo
-conflicts, account or route loss, and focus following refreshes.
+On Refresh, the selected track and the visible row range stayed the same
+when keyboard focus returned to the song list. A stale Undo in the earlier
+signed app overwrote a newer synthetic reorder. The shared core now has
+regression cases that refuse stale Undo and Redo while preserving unrelated
+edits.
+
+Native coverage still needs a repeat of the conflict test with the updated
+core, VoiceOver speech, the other drag cancellation paths, concurrent
+membership changes, failed or partial writes, and account or route loss.
 
 ## Player bar and hover list
 
