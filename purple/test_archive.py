@@ -104,6 +104,7 @@ if args.purge:
     (work / 'archive-purge-route.inc').write_text(extract(deleted, 'const auto current = [=]') + ';\n')
     (work / 'archive-purge-scope.inc').write_text(extract(menu, 'bool SameArchiveViewScope('))
 if args.handoff:
+    (work / 'archive-failure-toast.inc').write_text(extract(service, 'bool ArchiveFailureNeedsToast('))
     bodies = ''.join(extract(service, sign) for sign in ('void QueueArchiveRetentionGap(', 'void QueueArchiveJournalWrite(', 'void QueueArchiveLifecycleFact(', 'void QueueArchiveObservation('))
     (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession'))
     post = extract(service, 'bool Post(Task task, bool cleanup = false)')

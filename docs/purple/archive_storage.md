@@ -289,7 +289,9 @@ in the later batches; their new core APIs and format-2 projections are registere
 Runtime journal replay failure preserves its encrypted outbox evidence and
 writes a durable attention marker where storage allows. The service reports a
 visible RetentionGap with the replay reason instead of an empty Ready notice.
-History pages expose the gap after restart as well.
+History pages expose the gap after restart as well. Prior gaps stay visible
+in Archive settings without repeating the startup toast. A fresh storage or
+capture failure still warns the active account.
 
 Delayed already-available media lookup matches the authenticated historical
 version ID or observation revision. It scans bounded authenticated version
@@ -328,14 +330,14 @@ The encoded lifecycle fact is checked against a 60 KiB limit before any journal
 write. The 10 ms bound applies to waiting for the durable acknowledgement;
 snapshot preparation and ordinary thread scheduling are additional work.
 The main thread performs no new fsync or media-byte I/O and never waits for a
-network request, media copying or archive-worker completion. If acknowledgement
-misses the deadline, Telegram proceeds and the archive visibly records a retention
-gap. This is a scheduling deadline rather than a real-time kernel guarantee.
+network request, media copying or archive-worker completion. Telegram proceeds
+when the wait ends. The write remains pending until the worker knows the outcome.
+A late successful write creates no gap.
 Ordinary captures use the same bounded handoff. All journal Append, failure
 inspection and Attention IO stay on background writers; no foreground capture
 or error path takes the journal IO mutex. Admission is a nonblocking worker
-queue plus at most eight capture writers. Busy/full admission or a missed
-acknowledgement records a visible gap; admitted encrypted outbox records remain
+queue plus at most eight capture writers. Rejected admission and actual write or
+replay failures record a visible gap. Admitted encrypted outbox records remain
 replayable even when a drain notification cannot be queued. Gap tasks have a
 small reserved queue allowance. Logout still revokes immediately without joining
 these writers.
@@ -740,7 +742,19 @@ retries once with only that cache removed. Outbox admission likewise retries
 without it. The original observation and unknown metadata remain intact; optional
 presentation data cannot turn an otherwise valid capture into a retention gap.
 
-A launch diagnostic with origin 0, model 4 and no lifecycle, send-metadata or preimage flags comes from ordinary received-history observation (`ObserveArchiveMessage`, called by `History::createItem` and streamed-message adoption). It is a Baseline refused as Stale against an existing message. A changed history reload has no expected archived version/revision, so the core refuses to overwrite a retained head without that provenance. Existing versions are preserved; the new observation is not retained, so it is unsafe to classify every such refusal as harmless or suppress its coverage warning. The capture-boundary host case reproduces the diagnostic shape with current generation and increasing order, preserves the archived versions, records the two gap reasons, and proves an identical current-body reload adds no gap. Fixing missed changed baselines needs an ordering/CAS policy rather than dropping the guard.
+A history reload can return a different message body without the archived
+version, revision, and content hash needed to order it as an edit. Purple
+keeps the ordered history intact and saves an eligible reload as an encrypted
+snapshot. Open **Other snapshots** from the message's archived history to see
+these observations. A repeated snapshot is deduplicated, and a successful
+save creates no retention gap.
+
+The archive journal retries once when the snapshot commit fails. If storage
+still cannot retain it, the journal keeps its encrypted evidence and reports
+a retention gap. A stale diagnostic with origin 0, model 4, and no lifecycle,
+send metadata, or live preimage flags identifies a Baseline the ordered history
+refused. Older builds dropped conflicting reloads at that point. A gap from
+an older build can still appear after the upgrade.
 
 ### macOS profile binding across remounts
 
@@ -780,11 +794,12 @@ across journal publication. Stop cancels queued work; a replacement worker canno
 inherit it. Purge pauses and retires the initial journal before renewal, so old
 startup captures cannot acquire a fresh generation.
 
-Queued admission is not a durability acknowledgement. The existing deadline gap
-remains, and overflow, journal failures and maintenance preserve a gap or the
-first authenticated maintenance notice. Login-authority and logout-recovery
-holds retain their original status. The byte limit bounds encoded payloads,
-not all object overhead; startup admission also encodes the event on the caller.
+The startup queue holds captures in memory until the journal acknowledges
+them. The worker records failures when it cannot open the journal, append the
+capture, or replay it. Overflow and maintenance retain a gap or the first
+authenticated maintenance notice. Login-authority and logout-recovery holds
+retain their original status. The byte limit bounds encoded payloads. Startup
+admission also encodes the event on the caller.
 
 The handoff fixture runs the extracted production worker and purge entry point
 against synthetic encrypted stores. Its445 checks cover in-flight ordering,

@@ -108,6 +108,7 @@ AppPort App() { return {}; }
 }
 namespace tr { inline constexpr auto now = 0; QString lng_purple_archive_gap(int) { return {}; } }
 namespace Ui::Toast { void Show(const QString&) {} }
+#include "archive-failure-toast.inc"
 void QueueArchiveRetentionGap(not_null<ProbeSession*> session, QString reason);
 #include "archive-capture-queue.inc"
 struct NativeProbeValue {
@@ -122,6 +123,18 @@ void NativeQueueArchiveRetentionGap(not_null<ProbeSession*> session, QString rea
 void StartupOnMain(Fn<void()> call) { call(); }
 #include "archive-startup-purge.inc"
 
+
+void HistoricalGapNotice() {
+	Section = "historical gaps stay visible without repeating the startup toast";
+	const auto history = u"capture-gap"_q;
+	const auto current = u"outbox-append"_q;
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, history, {}));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, {}, history));
+	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, history));
+	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, current, history));
+	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, {}, history));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, current));
+}
 
 void Case(bool failed) {
 	Section = failed ? "foreground behind error attention fsync" : "foreground behind lifecycle fsync";
@@ -159,7 +172,8 @@ void Case(bool failed) {
 	auto started = std::chrono::steady_clock::now();
 	QueueArchiveObservation(&session, ordinary);
 	const auto foreground = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-	CHECK(foreground < 100); CHECK(!GateReleased); CHECK(!Value.failure.isEmpty());
+	CHECK(foreground < 100); CHECK(!GateReleased);
+	CHECK(failed || Value.failure.isEmpty());
 	for (auto i = 0; i != 10; ++i) {
 		auto extra = Event(Empty(), u"queued-"_q + QString::number(i), 0, u"bounded"_q,
 			ArchiveOrigin::Baseline, Key({0,123},45,1000+i));
@@ -191,6 +205,14 @@ void Case(bool failed) {
 	const auto slice = store.ReadSlice(ordinary.key, {}, u"ordinary"_q);
 	const auto version = slice ? FindArchiveVersion(slice->state, ordinary.key, u"ordinary"_q) : nullptr;
 	CHECK(version && version->content.text == u"new update"_q);
+	const auto gaps = store.database().Read({
+		u"SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM capture_gaps WHERE reason=?)"_q,
+		{u"capture-durability-deadline"_q}, ArchiveSqlExpectation::OneRow });
+	CHECK(gaps.ok);
+	if (failed) {
+		const auto attention = ReadDesktopArchiveAttention(store.directory(), store.epoch(), store.security());
+		CHECK(attention.valid && attention.present && attention.gap.reason == u"outbox-not-ready"_q);
+	}
 	CHECK(Changes.count > 0);
 	std::printf("bounded handoff error=%d initial=%lldms foreground=%lldms explicit-gap=1 ordinary-retained=1\n",
 		failed, static_cast<long long>(initial), static_cast<long long>(foreground));
@@ -300,6 +322,7 @@ int main(int argc, char **argv) {
 	NativeStartupPurgeRenewal();
 	NativeStartupReplacement();
 	NativeStartupPayload();
+	HistoricalGapNotice();
 	Case(false); Case(true);
 	return Finish();
 }
@@ -475,6 +498,7 @@ void NativeStartupInflight() {
 	NativeQueueArchiveObservation(&session, Event(Empty(), u"native-startup-first"_q,
 		0, u"before ready"_q, ArchiveOrigin::Baseline, Key({0,123},45,17000)));
 	CHECK(worker->NeedsStartupCapture());
+	CHECK(NativeValue.failure.isEmpty());
 	gate.set_value();
 	CHECK(readyFuture.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
 	if (readyFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
@@ -496,8 +520,10 @@ void NativeStartupInflight() {
 			[](const auto &v) { return v.version.id == u"native-startup-first"_q; });
 		const auto edit = std::find_if(page.versions.begin(), page.versions.end(),
 			[](const auto &v) { return v.version.id == u"native-startup-edit"_q; });
+		const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(32));
 		checked.set_value(page.versions.size() == 2 && first != page.versions.end()
-			&& edit != page.versions.end() && first->version.order < edit->version.order);
+			&& edit != page.versions.end() && first->version.order < edit->version.order
+			&& gaps.ok && gaps.rows.empty());
 	}));
 	{
 		const auto lock = std::lock_guard(GateMutex);
@@ -580,7 +606,7 @@ void NativeStartupUnavailable() {
 				const auto attention = ReadDesktopArchiveAttention(store.directory(), store.epoch(), store.security());
 				checked.set_value(store.MaintenancePending() && !store.Current()
 					&& attention.valid && attention.present
-					&& attention.gap.reason == (early ? u"capture-durability-deadline"_q : u"capture-write-unavailable"_q));
+					&& attention.gap.reason == (early ? u"capture-startup-unavailable"_q : u"capture-write-unavailable"_q));
 			} else {
 				const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(32));
 				checked.set_value(gaps.ok && !gaps.rows.empty());
