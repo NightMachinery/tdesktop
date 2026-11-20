@@ -46,6 +46,12 @@ for protected in ("isSearching()", "isRecording()", "_purpleScreenTimeCover->vis
     assert protected in history, protected
 
 routing = between(keys, "bool Keys::handle", "void Keys::clearPrefix")
+ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease", "stroke(key, target)")
+entry = between(keys, "bool HandleModalKeys", "bool ModalKeysOwnChatListFocus")
+ordered(entry, "!Enabled()", "ModalKey(*key)", "return (new Keys(window))")
+classification = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
+ordered(classification, "event.keyCombination()", "kCtrl, Qt::Key_BracketLeft",
+        "KeyUse::Pass", "KeyUse::EnterNormal")
 ordered(routing, "QEvent::KeyRelease", "isAutoRepeat() && _held.contains(key)",
         "!target.focus || !Enabled()", "QEvent::ShortcutOverride",
         "event->accept()", "return true;", "_held.insert(key)",

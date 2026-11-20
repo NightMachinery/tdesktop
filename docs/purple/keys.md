@@ -12,6 +12,9 @@ prefix. `Esc` or `Ctrl+G` cancels the prefix. Insert mode uses the regular
 Telegram typing and input-method behavior.
 On macOS, typing a leader key in the chat list keeps focus there in Normal
 mode. An input method composition can still open search.
+With a non-ASCII keyboard layout such as Persian, press the U.S. key positions
+for `Ctrl+[` and Normal mode chords. ASCII layouts use their own key labels.
+Insert mode continues to use the selected input source for text.
 
 - `SPC c b` toggles artwork behind live chats and related history sections.
   The setting is local to this installation, starts visible, and also applies

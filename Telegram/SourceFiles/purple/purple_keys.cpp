@@ -66,8 +66,13 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 
+#include <array>
 #include <optional>
 #include <type_traits>
+
+#ifdef Q_OS_MAC
+#include <Carbon/Carbon.h>
+#endif // Q_OS_MAC
 
 namespace Purple {
 
@@ -128,6 +133,60 @@ rpl::event_stream<bool> EnabledChanges;
 
 bool Enabled() {
 	return Core::App().settings().readPref<bool>(kEnabledPref);
+}
+
+int ModalKey(const QKeyEvent &event) {
+	const auto logical = (event.key() == Qt::Key_Enter)
+		? Qt::Key_Return
+		: event.key();
+#ifdef Q_OS_MAC
+	const auto modifiers = event.modifiers();
+	if (!event.timestamp() || (modifiers != Qt::NoModifier
+			&& modifiers != Qt::ShiftModifier && modifiers != kCtrl)) {
+		return logical;
+	}
+	constexpr auto letters = std::to_array<quint32>({
+		kVK_ANSI_A, kVK_ANSI_B, kVK_ANSI_C, kVK_ANSI_D, kVK_ANSI_E,
+		kVK_ANSI_F, kVK_ANSI_G, kVK_ANSI_H, kVK_ANSI_I, kVK_ANSI_J,
+		kVK_ANSI_K, kVK_ANSI_L, kVK_ANSI_M, kVK_ANSI_N, kVK_ANSI_O,
+		kVK_ANSI_P, kVK_ANSI_Q, kVK_ANSI_R, kVK_ANSI_S, kVK_ANSI_T,
+		kVK_ANSI_U, kVK_ANSI_V, kVK_ANSI_W, kVK_ANSI_X, kVK_ANSI_Y,
+		kVK_ANSI_Z,
+	});
+	constexpr auto digits = std::to_array<quint32>({
+		kVK_ANSI_0, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4,
+		kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9,
+	});
+	const auto native = event.nativeVirtualKey();
+	auto physical = logical;
+	if (const auto letter = ranges::find(letters, native);
+		letter != end(letters)) {
+		physical = Qt::Key_A + (letter - begin(letters));
+	} else if (const auto digit = ranges::find(digits, native);
+		digit != end(digits)) {
+		physical = Qt::Key_0 + (digit - begin(digits));
+	} else if (native == kVK_ANSI_LeftBracket) {
+		physical = Qt::Key_BracketLeft;
+	} else if (native == kVK_ANSI_RightBracket) {
+		physical = Qt::Key_BracketRight;
+	} else if (native == kVK_ANSI_Slash) {
+		physical = (modifiers == Qt::ShiftModifier)
+			? Qt::Key_Question
+			: Qt::Key_Slash;
+	}
+	if (physical != logical) {
+		if (const auto layout = TISCopyCurrentKeyboardLayoutInputSource()) {
+			const auto nonAscii = (TISGetInputSourceProperty(
+				layout,
+				kTISPropertyInputSourceIsASCIICapable) == kCFBooleanFalse);
+			CFRelease(layout);
+			if (nonAscii) {
+				return physical;
+			}
+		}
+	}
+#endif // Q_OS_MAC
+	return logical;
 }
 
 enum class Action {
@@ -1041,7 +1100,10 @@ bool Keys::ownsChatListFocus() const {
 KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 	const auto mods = event.modifiers() & ~Qt::KeypadModifier;
 	if (key == Qt::Key_BracketLeft && mods == kCtrl) {
-		return Shortcuts::KeysCurrents().contains(QKeySequence(event.keyCombination()))
+		const auto &shortcuts = Shortcuts::KeysCurrents();
+		return (shortcuts.contains(QKeySequence(event.keyCombination()))
+			|| shortcuts.contains(QKeySequence(QKeyCombination(
+				kCtrl, Qt::Key_BracketLeft))))
 			? KeyUse::Pass
 			: KeyUse::EnterNormal;
 	} else if (!_normal) {
@@ -1103,9 +1165,7 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	const auto keyEvent = static_cast<QKeyEvent*>(event);
-	const auto key = (keyEvent->key() == Qt::Key_Enter)
-		? Qt::Key_Return
-		: keyEvent->key();
+	const auto key = ModalKey(*keyEvent);
 	if (event->type() == QEvent::KeyRelease) {
 		return keyEvent->isAutoRepeat() ? _held.contains(key) : _held.remove(key);
 	}
@@ -1120,7 +1180,7 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		}
 		return false;
 	}
-	const auto stockLegend = (key == Qt::Key_Question
+	const auto stockLegend = (keyEvent->key() == Qt::Key_Question
 		&& target.list && _prefix.empty() && !_inspect);
 	const auto use = stockLegend ? KeyUse::Pass : classify(*keyEvent, key);
 	if (event->type() == QEvent::ShortcutOverride) {
@@ -1591,7 +1651,7 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	const auto key = static_cast<QKeyEvent*>(event);
-	if (key->key() != Qt::Key_BracketLeft || key->modifiers() != kCtrl) {
+	if (key->modifiers() != kCtrl || ModalKey(*key) != Qt::Key_BracketLeft) {
 		return false;
 	}
 	return (new Keys(window))->handle(receiver, event);
