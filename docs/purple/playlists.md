@@ -409,7 +409,9 @@ Desktop shell's left-to-right layout.
 On macOS, both rows exposed their full titles, durations, and source states
 through the accessibility tree. Tab entered the list, arrow keys moved focus
 between rows, and the second row's accessibility press action started its
-track. In a private fixture, flipping direction after the dialog had laid
+track. VoiceOver's caption panel showed the full titles, performer, duration,
+and source status for two long synthetic tracks as keyboard focus moved.
+In a private fixture, flipping direction after the dialog had laid
 out moved the play icons and reorder handles to opposite sides while keeping
 the durations visible. The fixture verified row painting within fixed bounds.
 
@@ -451,8 +453,8 @@ event also canceled the drag, whether mouse-up arrived first or the timer ran
 first. The signed macOS app still saved both an ordinary drop and a drop after
 edge autoscroll. Undo restored the full order.
 
-Native coverage still needs VoiceOver speech, a pending edit during a drag,
-and loss of a signed-in account.
+Native coverage still needs a pending edit during a drag and loss of a
+signed-in account.
 
 ## Player bar and hover list
 
