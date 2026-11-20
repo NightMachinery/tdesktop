@@ -87,6 +87,7 @@ Insert mode continues to use the selected input source for text.
   highlights one and a second Enter chooses it.
 - `SPC ?` lists bindings. `SPC SPC` opens command search. Type a command
   name, ID, or binding, use the arrow keys to select, and press Enter.
+  While you compose text with an input method, Up and Down stay with the editor.
 - `SPC h k` waits for a binding and describes it. `SPC h f` searches command
   descriptions. Both leave the described action unexecuted.
 

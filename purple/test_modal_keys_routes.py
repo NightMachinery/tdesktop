@@ -35,6 +35,12 @@ assert "ModalKeysOwnChatListFocus" not in win_native
 assert press.count("Purple::HandleModalKeys") == 1
 
 keys = read("purple/purple_keys.cpp")
+
+palette_navigation = between(keys, "class PaletteKeys final", "void PaletteBox(")
+ordered(palette_navigation, "KeyPress", "Qt::Key_Up", "Qt::Key_Down",
+        "_editor->textCursor().block().layout()",
+        "!layout->preeditAreaText().isEmpty()", "return false;",
+        "_move(key->key()")
 gate = between(keys, "Window::SessionController *Keys::owner()", "KeyUse Keys::classify")
 for protected in ("passcodeLocked()", "window.locked()", "activePopupWidget()",
                   "activeModalWidget()", "isLayerShown()", "receiver == focus"):

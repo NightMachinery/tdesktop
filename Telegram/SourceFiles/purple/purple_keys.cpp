@@ -63,6 +63,8 @@
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QTextBlock>
+#include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 
@@ -877,8 +879,9 @@ void TextBox(
 
 class PaletteKeys final : public QObject {
 public:
-	PaletteKeys(QObject *editor, Fn<void(int)> move)
-	: QObject(editor)
+	PaletteKeys(not_null<QTextEdit*> editor, Fn<void(int)> move)
+	: QObject(editor.get())
+	, _editor(editor)
 	, _move(std::move(move)) {
 		editor->installEventFilter(this);
 	}
@@ -893,10 +896,15 @@ private:
 			|| (key->key() != Qt::Key_Up && key->key() != Qt::Key_Down)) {
 			return false;
 		}
+		const auto layout = _editor->textCursor().block().layout();
+		if (layout && !layout->preeditAreaText().isEmpty()) {
+			return false;
+		}
 		_move(key->key() == Qt::Key_Up ? -1 : 1);
 		return true;
 	}
 
+	const not_null<QTextEdit*> _editor;
 	Fn<void(int)> _move;
 };
 
@@ -975,7 +983,7 @@ void PaletteBox(
 	field->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
 		submit();
 	}, box->lifetime());
-	new PaletteKeys(field->rawTextEdit().get(), [=](int offset) {
+	new PaletteKeys(field->rawTextEdit(), [=](int offset) {
 		if (!matches->empty()) {
 			*index = std::clamp(*index + offset, 0, int(matches->size()) - 1);
 			render();
