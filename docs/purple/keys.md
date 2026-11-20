@@ -32,6 +32,8 @@ mode. An input method composition can still open search.
 - In a conversation or forum topic, `SPC c i` opens its info panel and
   `SPC c n` opens its pinned messages. Use `SPC c a` for shared audio,
   `SPC c f` for shared files, and `SPC c l` for shared links.
+  `SPC c v` opens photos and videos, `SPC c r` opens voice and round
+  video messages, `SPC c g` opens GIFs, and `SPC c o` opens polls.
 - `SPC c u` opens Telegram's file picker when the attachment button is
   available in the current chat, reply, topic, or scheduled-message view.
   Telegram handles file selection and confirmation.

@@ -78,9 +78,13 @@ ordered(dispatch, "case Action::ChatPalette:", "ShowChatPalette(current)",
 for action, command, prefix, key in (
         ("OpenPlaylists", "open-playlists", "M", "L"),
         ("OpenChatInfo", "open-chat-info", "C", "I"),
+        ("OpenChatMedia", "open-chat-media", "C", "V"),
         ("OpenChatMusic", "open-chat-music", "C", "A"),
         ("OpenChatFiles", "open-chat-files", "C", "F"),
         ("OpenChatLinks", "open-chat-links", "C", "L"),
+        ("OpenChatVoice", "open-chat-voice", "C", "R"),
+        ("OpenChatGifs", "open-chat-gifs", "C", "G"),
+        ("OpenChatPolls", "open-chat-polls", "C", "O"),
         ("OpenPinnedMessages", "open-pinned-messages", "C", "N"),
         ("AttachFiles", "attach-files", "C", "U")):
     assert f'{{ Action::{action}, "{command}"' in keys
@@ -88,10 +92,25 @@ for action, command, prefix, key in (
 ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
 ordered(dispatch, "case Action::OpenChatInfo:", "reset()",
         "current->showPeerInfo(target.chat.thread())")
-shared = between(dispatch, "case Action::OpenChatMusic:", "case Action::OpenPinnedMessages:")
-ordered(shared, "case Action::OpenChatFiles:", "case Action::OpenChatLinks:", "reset()",
-        "action == Action::OpenChatMusic", "Type::MusicFile",
-        "action == Action::OpenChatFiles", "Type::File", "Type::Link",
+shared = between(dispatch, "case Action::OpenChatMedia:", "case Action::OpenPinnedMessages:")
+shared_actions = (
+    ("OpenChatMedia", "PhotoVideo"),
+    ("OpenChatMusic", "MusicFile"),
+    ("OpenChatFiles", "File"),
+    ("OpenChatLinks", "Link"),
+    ("OpenChatVoice", "RoundVoiceFile"),
+    ("OpenChatGifs", "GIF"),
+    ("OpenChatPolls", "Poll"),
+)
+commands = between(keys, "const Command kCommands[]", "const Binding kBindings[]")
+for action, media_type in shared_actions:
+    assert re.search(
+        rf'\{{ Action::{action}, [^\n]+\n[^\n]+\n\s+ChatMediaType::{media_type} \}},',
+        commands,
+    )
+shared_cases = [f"case Action::{action}:" for action, _ in shared_actions]
+ordered(dispatch, *shared_cases)
+ordered(shared, "reset()", "Info::Section(FindCommand(action).mediaType)",
         "target.chat.topic()", "Info::Memento>(topic, media)", "Info::Memento>(target.chat.peer(), media)")
 ordered(dispatch, "case Action::OpenPinnedMessages:", "reset()",
         "HistoryView::PinnedMemento>", "target.chat.thread()")
@@ -179,8 +198,7 @@ ordered(keys, "section->controller() == owner", "section->purpleMessageList(focu
 assert "{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } }" in keys
 ordered(available, "case Action::OpenChatInfo:",
         "case Action::OpenPinnedMessages: return target.chat.thread() != nullptr",
-        "case Action::OpenChatMusic:", "case Action::OpenChatFiles:",
-        "case Action::OpenChatLinks: return target.chat.peer() != nullptr",
+        *shared_cases, "return target.chat.peer() != nullptr",
         "case Action::OpenHistoryCalendar: return bool(target.chat)")
 ordered(keys, "Dialogs::Key(history->history())", "chat->activeChat().key",
         "!id.sublist && (!id.repliesRootId || key.topic())", "target.chat = key")

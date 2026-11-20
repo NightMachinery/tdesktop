@@ -154,9 +154,13 @@ enum class Action {
 	OpenMusic,
 	OpenPlaylists,
 	OpenChatInfo,
+	OpenChatMedia,
 	OpenChatMusic,
 	OpenChatFiles,
 	OpenChatLinks,
+	OpenChatVoice,
+	OpenChatGifs,
+	OpenChatPolls,
 	OpenPinnedMessages,
 	AttachFiles,
 	OpenChatMenu,
@@ -186,10 +190,13 @@ enum class Action {
 	DescribeCommand,
 };
 
+using ChatMediaType = Storage::SharedMediaType;
+
 struct Command {
 	Action action;
 	const char *id;
 	QString (*label)();
+	ChatMediaType mediaType = ChatMediaType::kCount;
 };
 
 const Command kCommands[] = {
@@ -231,12 +238,27 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_playlists_title(tr::now); } },
 	{ Action::OpenChatInfo, "open-chat-info",
 		[] { return tr::lng_purple_keys_chat_info(tr::now); } },
+	{ Action::OpenChatMedia, "open-chat-media",
+		[] { return tr::lng_media_type_media(tr::now); },
+		ChatMediaType::PhotoVideo },
 	{ Action::OpenChatMusic, "open-chat-music",
-		[] { return tr::lng_purple_keys_chat_music(tr::now); } },
+		[] { return tr::lng_purple_keys_chat_music(tr::now); },
+		ChatMediaType::MusicFile },
 	{ Action::OpenChatFiles, "open-chat-files",
-		[] { return tr::lng_media_type_files(tr::now); } },
+		[] { return tr::lng_media_type_files(tr::now); },
+		ChatMediaType::File },
 	{ Action::OpenChatLinks, "open-chat-links",
-		[] { return tr::lng_media_type_links(tr::now); } },
+		[] { return tr::lng_media_type_links(tr::now); },
+		ChatMediaType::Link },
+	{ Action::OpenChatVoice, "open-chat-voice",
+		[] { return tr::lng_media_type_audios(tr::now); },
+		ChatMediaType::RoundVoiceFile },
+	{ Action::OpenChatGifs, "open-chat-gifs",
+		[] { return tr::lng_media_type_gifs(tr::now); },
+		ChatMediaType::GIF },
+	{ Action::OpenChatPolls, "open-chat-polls",
+		[] { return tr::lng_media_type_polls(tr::now); },
+		ChatMediaType::Poll },
 	{ Action::OpenPinnedMessages, "open-pinned-messages",
 		[] { return tr::lng_settings_events_pinned(tr::now); } },
 	{ Action::AttachFiles, "attach-files",
@@ -346,9 +368,13 @@ const Binding kBindings[] = {
 	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
+	{ Action::OpenChatMedia, { Qt::Key_Space, Qt::Key_C, Qt::Key_V } },
 	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
 	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_F } },
 	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_L } },
+	{ Action::OpenChatVoice, { Qt::Key_Space, Qt::Key_C, Qt::Key_R } },
+	{ Action::OpenChatGifs, { Qt::Key_Space, Qt::Key_C, Qt::Key_G } },
+	{ Action::OpenChatPolls, { Qt::Key_Space, Qt::Key_C, Qt::Key_O } },
 	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_N } },
 	{ Action::AttachFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_U } },
 	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
@@ -707,9 +733,13 @@ bool Available(Action action, const Target &target) {
 	case Action::UnreadMessages: return target.chatActions && HistoryScroll(target);
 	case Action::OpenChatInfo:
 	case Action::OpenPinnedMessages: return target.chat.thread() != nullptr;
+	case Action::OpenChatMedia:
 	case Action::OpenChatMusic:
 	case Action::OpenChatFiles:
-	case Action::OpenChatLinks: return target.chat.peer() != nullptr;
+	case Action::OpenChatLinks:
+	case Action::OpenChatVoice:
+	case Action::OpenChatGifs:
+	case Action::OpenChatPolls: return target.chat.peer() != nullptr;
 	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
@@ -1312,17 +1342,15 @@ void Keys::dispatch(Action action, const Target &target) {
 		reset();
 		target.attach();
 		break;
+	case Action::OpenChatMedia:
 	case Action::OpenChatMusic:
 	case Action::OpenChatFiles:
-	case Action::OpenChatLinks: {
+	case Action::OpenChatLinks:
+	case Action::OpenChatVoice:
+	case Action::OpenChatGifs:
+	case Action::OpenChatPolls: {
 		reset();
-		using Type = Storage::SharedMediaType;
-		const auto type = (action == Action::OpenChatMusic)
-			? Type::MusicFile
-			: (action == Action::OpenChatFiles)
-			? Type::File
-			: Type::Link;
-		const auto media = Info::Section(type);
+		const auto media = Info::Section(FindCommand(action).mediaType);
 		if (const auto topic = target.chat.topic()) {
 			current->showSection(std::make_shared<Info::Memento>(topic, media));
 		} else {
