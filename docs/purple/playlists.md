@@ -416,13 +416,15 @@ move.
 
 On Refresh, the selected track and the visible row range stayed the same
 when keyboard focus returned to the song list. A stale Undo in the earlier
-signed app overwrote a newer synthetic reorder. The shared core now has
-regression cases that refuse stale Undo and Redo while preserving unrelated
-edits.
+signed app overwrote a newer synthetic reorder. The updated signed app
+showed the conflict and preserved the newer file byte for byte. An
+uncontested Undo on the same build restored all 2,000 tracks to their
+previous positions. Shared core tests also cover conflicting Redo and
+preservation of unrelated edits.
 
-Native coverage still needs a repeat of the conflict test with the updated
-core, VoiceOver speech, the other drag cancellation paths, concurrent
-membership changes, failed or partial writes, and account or route loss.
+Native coverage still needs VoiceOver speech, the other drag cancellation
+paths, concurrent membership changes, failed or partial writes, and account
+or route loss.
 
 ## Player bar and hover list
 
