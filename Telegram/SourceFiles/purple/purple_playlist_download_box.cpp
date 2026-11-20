@@ -141,7 +141,7 @@ void DownloadView::start() {
 	_startButton = add(tr::lng_purple_playlist_download_all(), [weak] {
 		if (const auto self = weak.get()) self->startJob(false);
 	});
-	_retryButton = add(tr::lng_purple_playlists_retry(), [weak] {
+	_retryButton = add(tr::lng_purple_playlist_download_retry(), [weak] {
 		if (const auto self = weak.get()) self->startJob(true);
 	});
 	_stopButton = add(tr::lng_purple_playlist_stop_download(), [weak] {

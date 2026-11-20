@@ -522,8 +522,8 @@ The playlist's Downloads action opens stock GenericBox, SettingsButton and
 Radiobutton controls. Keep downloaded offers On, Off and Use default, displaying
 the current app-wide default. Changes appear only after the account worker has
 confirmed the local-state write. Download all starts a box-owned job; closing the
-box or Stop downloading cancels that job while retaining completed files. Retry
-is explicit and is available for failed or busy rows after the job ends.
+box or Stop downloading cancels that job while retaining completed files.
+Retry downloads is available for failed or busy rows after the job ends.
 
 Remove downloads now asks for confirmation and uses the owned-file inventory.
 Other playlists, including Recently deleted, retain their references. User

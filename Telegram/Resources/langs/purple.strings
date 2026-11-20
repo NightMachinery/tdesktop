@@ -789,6 +789,7 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_playlist_downloads" = "Downloads";
 "lng_purple_playlist_download_default" = "Use default ({status})";
+"lng_purple_playlist_download_retry" = "Retry downloads";
 "lng_purple_playlist_stop_download" = "Stop downloading";
 "lng_purple_playlist_download_stopped" = "Downloading stopped. Completed downloads are kept.";
 "lng_purple_playlist_download_local" = "These download settings apply to this playlist on this device.";
