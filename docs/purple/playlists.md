@@ -399,10 +399,17 @@ when opened from the library and from the player. The player path also passed
 after resize and refresh. Music rendered the mixed-direction title in the
 Desktop shell's left-to-right layout.
 
-Native coverage still needs mirrored widget geometry, a 2,000-row scroll
-test, keyboard and assistive activation, drag across viewport edges,
-cancellation, concurrent membership changes, failed or partial writes, Undo
-conflicts, account or route loss, and opening and focusing after refreshes.
+On macOS, both rows exposed their full titles, durations, and source states
+through the accessibility tree. Tab entered the list, arrow keys moved focus
+between rows, and the second row's accessibility press action started its
+track. In a private fixture, flipping direction after the dialog had laid
+out moved the play icons and reorder handles to opposite sides while keeping
+the durations visible. The fixture verified row painting within fixed bounds.
+
+Native coverage still needs VoiceOver speech, a 2,000-row scroll test, drag
+across viewport edges, cancellation, concurrent membership changes, failed or
+partial writes, Undo conflicts, account or route loss, and focus following
+refreshes.
 
 ## Player bar and hover list
 
