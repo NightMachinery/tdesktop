@@ -433,8 +433,14 @@ uncontested Undo on the same build restored all 2,000 tracks to their
 previous positions. Shared core tests also cover conflicting Redo and
 preservation of unrelated edits.
 
+On macOS, blocking the synthetic library write left both files unchanged. A
+retry saved the order. Blocking only the local-state file left the new order
+on disk and showed the save warning. Undo restored the prior order while the
+warning stayed visible. After storage recovered, a new edit saved its local
+sync marker. An Undo against a newer reorder still preserved the newer file.
+
 Native coverage still needs VoiceOver speech, drag cancellation on disable or
-mouse-grab loss, failed or partial writes, and account or route loss.
+mouse-grab loss, and account or route loss.
 
 ## Player bar and hover list
 
