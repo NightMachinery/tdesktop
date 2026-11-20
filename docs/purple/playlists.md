@@ -386,8 +386,10 @@ does not scan sources or start downloads; download controls are separate.
 
 The signed macOS app rendered a two-track playlist in light and dark modes.
 The light-mode check included 800- and 680-pixel logical window widths.
-For a side-by-side comparison with the stock player rows, start the stock
-track directly from its chat so the stock hover list is populated.
+A side-by-side capture of the same track showed matching title styling and
+icon placement. The Purple row has an extra line for source status. To
+populate the stock hover list for this comparison, play the source track
+from an ordinary chat or open it individually from Music.
 
 Native coverage still needs long and RTL metadata, a 2,000-row scroll test,
 keyboard and assistive activation, drag across viewport edges, cancellation,
