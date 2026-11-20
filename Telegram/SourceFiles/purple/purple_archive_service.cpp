@@ -30,8 +30,10 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QLocale>
 #include <QtCore/QThread>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -1446,6 +1448,23 @@ void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessage
 	}
 }
 
+QString FormatArchiveSize(uint64_t bytes) {
+	constexpr auto units = std::array{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
+	auto unit = size_t(0);
+	auto divisor = uint64_t(1);
+	while (bytes / divisor >= 1024 && unit + 1 < units.size()) {
+		divisor *= 1024;
+		++unit;
+	}
+	const auto whole = bytes / divisor;
+	const auto fraction = (bytes % divisor) * 10 / divisor;
+	const auto number = QLocale().toString(
+		double(whole) + double(fraction) / 10,
+		'f',
+		fraction ? 1 : 0);
+	return number + ' ' + QString::fromLatin1(units[unit]);
+}
+
 QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	if (Retired.contains(session.get())) {
 		return tr::lng_purple_archive_removal_pending(tr::now);
@@ -1458,7 +1477,10 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 		return tr::lng_purple_archive_purge_held(tr::now);
 	}
 	// WHY: a gap row is permanent, so showing only the gap text would hide the usage for the store's whole life.
-	const auto usage = [&] { return tr::lng_purple_archive_usage(tr::now, lt_size, QString::number(value.bytes)); };
+	const auto usage = [&] {
+		return tr::lng_purple_archive_usage(
+			tr::now, lt_size, FormatArchiveSize(value.bytes));
+	};
 	if (value.status == DesktopArchiveStatus::RetentionGap
 		|| (value.status == DesktopArchiveStatus::Ready && !value.failure.isEmpty())) {
 		return tr::lng_purple_archive_gap(tr::now) + u"\n"_q + usage();

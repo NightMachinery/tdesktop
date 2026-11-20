@@ -53,6 +53,7 @@ void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessage
 	QString path, uint64_t size,
 	std::optional<DesktopArchiveSourceIdentity> source = std::nullopt);
 void RemoveArchiveAtLogout(Main::Account &account);
+[[nodiscard]] QString FormatArchiveSize(uint64_t bytes);
 [[nodiscard]] QString ArchiveStorageSummary(not_null<Main::Session*> session);
 [[nodiscard]] rpl::producer<> ArchiveStorageChanges();
 void ReadArchiveVersions(not_null<Main::Session*> session, ArchiveMessageKey key,

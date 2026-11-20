@@ -250,7 +250,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_auto_context_changed" = "Automatic sync stopped because this account's settings source, Work Mode or account context changed. Check the account again.";
 
 "lng_purple_archive_storage" = "Message archive for this account";
-"lng_purple_archive_usage" = "At least {size} bytes in encrypted archive files. Removed on logout. No expiry.";
+"lng_purple_archive_usage" = "At least {size} in encrypted archive files. Removed on logout. No expiry.";
 "lng_purple_archive_gap" = "Some observations could not be retained. History may be incomplete.";
 "lng_purple_archive_opening" = "Opening local encrypted archive…";
 "lng_purple_archive_unavailable" = "Archive unavailable: local data or its key could not be safely opened. New observations are not retained. To recover, use Discard this account's archive and start fresh in Purple settings.";
@@ -335,7 +335,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_archive_query_schema" = "This archive has an unsupported schema. It has not been changed.";
 "lng_purple_archive_query_failed" = "The archive could not be authenticated or read. This is a retention gap, not an empty archive. Refresh to try again.";
 "lng_purple_archive_deleted_counts" = "Tracked messages: {messages}; deleted: {deleted}; versions: {versions}; prior versions: {prior}; complete attachments: {owned}/{total}; distinct blobs: {blobs}.";
-"lng_purple_archive_logical_usage" = "Verified logical retained bytes: {size}. This excludes physical database, WAL and staging overhead and is not a promise of freed space.";
+"lng_purple_archive_logical_usage" = "Verified logical retained size: {size}. This excludes physical database, WAL and staging overhead and is not a promise of freed space.";
 "lng_purple_archive_usage_pending" = "The retained-size scan is incomplete. Continue to scan the next bounded page.";
 "lng_purple_archive_refresh_available" = "Newer observations are available. Refresh to include them.";
 "lng_purple_archive_deleted_history" = "View edit history for message {id}";

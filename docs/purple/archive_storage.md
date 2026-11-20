@@ -546,8 +546,9 @@ Unavailable rather than zero. Logical retained size scans at most 128 unique
 referenced blobs per request, authenticates Complete frames and canonical uint64
 sizes, and checks summation overflow. Continue advances an incomplete scan.
 Logical bytes include the scoped retained archive, not only deleted bodies.
-Physical database/WAL/SHM/staging usage remains separate; neither value predicts
-space freed by a purge. Bodyless tombstones say no body was captured. Badges and
+Physical database/WAL/SHM/staging usage remains separate. The Archive settings
+and deleted-message view show sizes in bytes, KiB, MiB, GiB, or larger units,
+rounded down to one decimal place. Neither size predicts space freed by a purge. Bodyless tombstones say no body was captured. Badges and
 times describe observed deletion/expiry/consumption, without inventing an actor,
 exact server deletion time or Markdown source. History and owned Open/Save carry
 the full authenticated row key and media generations from the displayed page.

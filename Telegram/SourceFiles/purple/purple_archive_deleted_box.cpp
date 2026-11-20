@@ -209,7 +209,8 @@ void ShowArchiveDeleted(not_null<Window::SessionController*> controller,
 					lt_versions, QString::number(page.counts[2]), lt_prior, QString::number(page.counts[3]),
 					lt_owned, QString::number(page.counts[5]), lt_total, QString::number(page.counts[4]),
 					lt_blobs, QString::number(page.counts[6]));
-				totals += u"\n"_q + tr::lng_purple_archive_logical_usage(tr::now, lt_size, QString::number(page.logicalBytes));
+				totals += u"\n"_q + tr::lng_purple_archive_logical_usage(
+					tr::now, lt_size, FormatArchiveSize(page.logicalBytes));
 				if (!page.logicalComplete) {
 					totals += u"\n"_q + tr::lng_purple_archive_usage_pending(tr::now);
 				}
