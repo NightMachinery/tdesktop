@@ -32,6 +32,8 @@ Insert mode continues to use the selected input source for text.
 - `SPC o a` opens Archived Chats, `SPC o c` opens Contacts, `SPC o v`
   opens Calls, and `SPC o f` opens Telegram's Downloads view.
   `SPC o d` opens Scheduled Messages in a chat that supports them.
+- `SPC n g` opens New Group, `SPC n c` opens New Channel, and `SPC n p`
+  opens Add Contact. Use the native dialog to enter details and confirm.
 - `SPC c m` opens the chat menu. `SPC c p` previews a chat from the chat list.
 - In a conversation or forum topic, `SPC c i` opens its info panel and
   `SPC c n` opens its pinned messages. Use `SPC c a` for shared audio,

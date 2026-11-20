@@ -213,6 +213,9 @@ enum class Action {
 	OpenContacts,
 	OpenCalls,
 	OpenDownloads,
+	NewGroup,
+	NewChannel,
+	AddContact,
 	OpenScheduled,
 	OpenMusic,
 	OpenPlaylists,
@@ -297,6 +300,12 @@ const Command kCommands[] = {
 		[] { return tr::lng_menu_calls(tr::now); } },
 	{ Action::OpenDownloads, "open-downloads",
 		[] { return tr::lng_downloads_section(tr::now); } },
+	{ Action::NewGroup, "new-group",
+		[] { return tr::lng_create_group_title(tr::now); } },
+	{ Action::NewChannel, "new-channel",
+		[] { return tr::lng_create_channel_title(tr::now); } },
+	{ Action::AddContact, "add-contact",
+		[] { return tr::lng_profile_add_contact(tr::now); } },
 	{ Action::OpenScheduled, "open-scheduled-messages",
 		[] { return tr::lng_scheduled_messages(tr::now); } },
 	{ Action::OpenMusic, "open-music",
@@ -434,6 +443,9 @@ const Binding kBindings[] = {
 	{ Action::OpenContacts, { Qt::Key_Space, Qt::Key_O, Qt::Key_C } },
 	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_V } },
 	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_F } },
+	{ Action::NewGroup, { Qt::Key_Space, Qt::Key_N, Qt::Key_G } },
+	{ Action::NewChannel, { Qt::Key_Space, Qt::Key_N, Qt::Key_C } },
+	{ Action::AddContact, { Qt::Key_Space, Qt::Key_N, Qt::Key_P } },
 	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
 	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
 	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
@@ -813,6 +825,8 @@ bool Available(Action action, const Target &target) {
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
 	case Action::OpenCalls:
+	case Action::NewGroup:
+	case Action::NewChannel:
 		return target.controller && !target.controller->session().supportMode();
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
@@ -1450,6 +1464,18 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::OpenDownloads:
 		reset();
 		current->showSection(Info::Downloads::Make(current->session().user()));
+		break;
+	case Action::NewGroup:
+		reset();
+		current->showNewGroup();
+		break;
+	case Action::NewChannel:
+		reset();
+		current->showNewChannel();
+		break;
+	case Action::AddContact:
+		reset();
+		current->showAddContact();
 		break;
 	case Action::OpenScheduled:
 		launch(Native::ShowScheduled);
