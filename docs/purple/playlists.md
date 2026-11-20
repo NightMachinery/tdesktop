@@ -439,8 +439,12 @@ on disk and showed the save warning. Undo restored the prior order while the
 warning stayed visible. After storage recovered, a new edit saved its local
 sync marker. An Undo against a newer reorder still preserved the newer file.
 
+A routing file change in the isolated profile closed the open playlist during
+an active drag. Releasing the mouse left the library and local state unchanged.
+Reopening with the refreshed route allowed a reorder to save and exposed Undo.
+
 Native coverage still needs VoiceOver speech, drag cancellation on disable or
-mouse-grab loss, and account or route loss.
+mouse-grab loss, and loss of a signed-in account.
 
 ## Player bar and hover list
 
