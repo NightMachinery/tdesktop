@@ -17,6 +17,8 @@ the numbers.
 
 - `core/application.cpp`: key admission, shortcut override, paired key release,
   window deactivation, and IME hooks delegate to Purple's per-window state.
+  Shortcut override also lets focused, editable playlist rows claim Alt+Up/Down.
+  The playlist hook accepts delivery through the owning native window on macOS.
 - `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility

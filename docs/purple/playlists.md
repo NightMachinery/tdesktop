@@ -361,9 +361,11 @@ uses those font metrics. Library pagination remains unchanged.
 Handle drag previews an in-memory insertion, with edge autoscroll. Escape,
 focus/window loss, hiding, disabled/pending state and mouse-grab loss cancel
 without a write. Arrow/Home/End/Page keys select, Enter/Space plays, and
-Alt+Up/Down or the two stock Move buttons submit a reorder. Remove acts on the
-selected row. The screen-reader list exposes virtual stable row identities,
-selection, rectangles, names and guarded main-thread focus/activation actions.
+Alt+Up/Down reorders while the editable track list has focus. These keys keep
+their chat-navigation binding elsewhere. The Move buttons also submit a reorder.
+Remove acts on the selected row. The screen-reader list exposes stable row
+identities, selection, rectangles, names and guarded main-thread focus and
+activation actions.
 
 A drop delegates a complete permutation to the existing typed ReorderSongs
 account edit. Pending edits disable interaction, and only a confirmed snapshot

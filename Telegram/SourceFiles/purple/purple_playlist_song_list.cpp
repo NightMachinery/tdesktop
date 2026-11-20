@@ -10,6 +10,7 @@
 #include <QtGui/QContextMenuEvent>
 #include <QtGui/QCursor>
 #include <QtGui/QKeySequence>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
@@ -33,6 +34,7 @@ public:
 		Fn<void(std::vector<uint64_t>)> reorder,
 		Mode mode);
 	[[nodiscard]] uint64_t selectedDocument() const;
+	[[nodiscard]] int reorderDelta(const QKeyEvent &event) const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
 	void setVerifiedDownloads(std::set<uint64_t> documents);
@@ -389,6 +391,31 @@ void PlaylistSongList::Rows::contextMenuEvent(QContextMenuEvent *e) {
 	e->accept();
 }
 
+int PlaylistSongList::Rows::reorderDelta(const QKeyEvent &event) const {
+	if (!_reorder || _selected < 0
+		|| (event.modifiers() & ~Qt::KeypadModifier) != Qt::AltModifier) {
+		return 0;
+	}
+	if (event.key() == Qt::Key_Up) return -1;
+	if (event.key() == Qt::Key_Down) return 1;
+	return 0;
+}
+
+bool PlaylistSongList::ReserveReorderShortcut(
+		QObject *receiver,
+		QKeyEvent *event) {
+	const auto rows = dynamic_cast<Rows*>(QApplication::focusWidget());
+	// Cocoa delivers the shortcut override to the window before the widget.
+	if (!rows || (receiver != rows && receiver != rows->window()->windowHandle())
+		|| !rows->isEnabled()
+		|| !rows->isVisible() || !rows->isActiveWindow()
+		|| QApplication::activePopupWidget() || !rows->reorderDelta(*event)) {
+		return false;
+	}
+	event->accept();
+	return true;
+}
+
 void PlaylistSongList::Rows::moveSelected(int delta) {
 	cancelInteraction();
 	if (_selected < 0) return;
@@ -411,10 +438,9 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 		e->accept();
 		return;
 	}
-	if (_reorder && (e->modifiers() & Qt::AltModifier)
-		&& (key == Qt::Key_Up || key == Qt::Key_Down)) {
+	if (const auto delta = reorderDelta(*e)) {
 		e->accept();
-		moveSelected(key == Qt::Key_Up ? -1 : 1);
+		moveSelected(delta);
 		return;
 	}
 	const auto size = int(_data.size());

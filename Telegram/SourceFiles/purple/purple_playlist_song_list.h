@@ -24,6 +24,10 @@ public:
 		Library,
 	};
 
+	[[nodiscard]] static bool ReserveReorderShortcut(
+		QObject *receiver,
+		QKeyEvent *event);
+
 	PlaylistSongList(
 		QWidget *parent,
 		std::vector<PlaylistSongListRow> rows,

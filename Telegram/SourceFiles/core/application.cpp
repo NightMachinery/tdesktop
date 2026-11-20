@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "purple/purple_app_services.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_playlist_song_list.h"
 #include "base/unixtime.h"
 #include "core/core_screenshot_protection.h"
 #include "core/core_settings.h"
@@ -774,8 +775,10 @@ bool Application::eventFilter(QObject *object, QEvent *e) {
 		// Ctrl+Tab/Ctrl+Shift+Tab chat switch is a special shortcut case,
 		// because it not only does an action on the shortcut activation,
 		// but also keeps the UI visible until you release the Ctrl key.
-		Shortcuts::HandlePossibleChatSwitch(static_cast<QKeyEvent*>(e));
-		if (Purple::HandleModalKeys(object, e)) {
+		const auto event = static_cast<QKeyEvent*>(e);
+		Shortcuts::HandlePossibleChatSwitch(event);
+		if (Purple::PlaylistSongList::ReserveReorderShortcut(object, event)
+			|| Purple::HandleModalKeys(object, e)) {
 			return true;
 		}
 
