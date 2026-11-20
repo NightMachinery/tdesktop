@@ -445,8 +445,14 @@ A routing file change in the isolated profile closed the open playlist during
 an active drag. Releasing the mouse left the library and local state unchanged.
 Reopening with the refreshed route allowed a reorder to save and exposed Undo.
 
-Native coverage still needs VoiceOver speech, drag cancellation on disable or
-mouse-grab loss, and loss of a signed-in account.
+An offscreen Qt fixture linked the shipped row widget. Disabling the list or
+sending an ungrab event canceled its preview. Releasing the grab without that
+event also canceled the drag, whether mouse-up arrived first or the timer ran
+first. The signed macOS app still saved both an ordinary drop and a drop after
+edge autoscroll. Undo restored the full order.
+
+Native coverage still needs VoiceOver speech, a pending edit during a drag,
+and loss of a signed-in account.
 
 ## Player bar and hover list
 
