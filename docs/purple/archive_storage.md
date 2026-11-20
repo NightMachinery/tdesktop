@@ -484,7 +484,10 @@ The worker checks the durable login/store fence before resolving or writing
 a part. If the first part arrives before its observation is committed, the
 worker replays the durable outbox and rechecks authority before looking up the
 exact binding again. A missing authenticated binding is reported separately
-from a failed write.
+from a failed write. A complete repeat of the same captured media snapshot
+records a fresh observation and keeps the existing revision, so it can share
+bytes already staged by that revision. Actual edits and changed snapshots
+still pass through the regular revision and staging checks.
 Catalogue SQL checks memory liveness per statement and row. Each bounded staging
 step authenticates its addressed generation, and fresh durable authority is
 checked immediately before publishing bytes and before catalogue COMMIT. These

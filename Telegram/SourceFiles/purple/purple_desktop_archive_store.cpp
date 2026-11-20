@@ -709,6 +709,12 @@ class DesktopArchiveStore::Impl {
 		ArchiveGeneration generation;
 	};
 	std::deque<MediaObservation> mediaObservations;
+	void RememberMediaObservation(MediaObservation observation) {
+		if (mediaObservations.size() == kRecentMediaObservationLimit) {
+			mediaObservations.pop_front();
+		}
+		mediaObservations.push_back(std::move(observation));
+	}
 	std::shared_ptr<std::atomic<bool>> journalAdmission;
 	uint64_t journalGeneration = 0;
 	QJsonObject journalDeleteGenerations;
@@ -2005,8 +2011,12 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 				const auto &before = previous->versions.back();
 				const auto &after = message->versions.back();
 				const auto hash = ArchiveContentHash(after.content);
-				if (before.id == after.id && before.revision != after.revision
-					&& after.revision == event.id && ArchiveContentHash(before.content) == hash) {
+				const auto sameVersion = before.id == after.id
+					&& ArchiveContentHash(before.content) == hash;
+				if (sameVersion && before.revision == after.revision && event.order > previous->order) {
+					_impl->RememberMediaObservation({event.key, event.id, after.id,
+						after.revision, hash, event.generation});
+				} else if (sameVersion && before.revision != after.revision && after.revision == event.id) {
 					auto &observations = _impl->mediaObservations;
 					for (auto &entry : observations) {
 						if (entry.key == event.key && entry.version == before.id
@@ -2016,10 +2026,7 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 						}
 					}
 					if (before.revision != before.id) {
-						if (observations.size() == kRecentMediaObservationLimit) {
-							observations.pop_front();
-						}
-						observations.push_back({event.key, before.revision, before.id,
+						_impl->RememberMediaObservation({event.key, before.revision, before.id,
 							after.revision, hash, event.generation});
 					}
 				}

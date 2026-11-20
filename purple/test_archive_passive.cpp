@@ -274,6 +274,7 @@ int main(int argc, char **argv) {
 	const auto contentHash = ArchiveContentHash(*baseline.content);
 	const auto persist = [&](const QString &id) {
 		baseline.id = id;
+		baseline.observation.transport.insert(u"fixtureReceipt"_q, id);
 		Value.journal->BindCaptureGeneration(baseline);
 		return Value.journal->Append(baseline) && Value.journal->Drain(store);
 	};
@@ -314,6 +315,39 @@ int main(int argc, char **argv) {
 	CHECK(persist(u"fourth806"_q));
 	CHECK(resolve(u"edit806"_q) == u"first806"_q);
 	CHECK(!resolve(u"second806"_q));
+
+	Section = "an identical baseline keeps audio already staged";
+	const auto activeKey = Key({0,123},45,807);
+	const auto activeIdentity = u"document:807"_q;
+	auto active = Event(Empty(), u"first807"_q, 0, u"ongoing audio"_q,
+		ArchiveOrigin::Baseline, activeKey);
+	active.content->media.push_back({activeIdentity, u"document"_q});
+	Value.journal->BindCaptureGeneration(active);
+	CHECK(Value.journal->Append(active) && Value.journal->Drain(store));
+	const auto chunk = QByteArray(kArchiveMediaChunkBytes, 't');
+	const auto activeHash = ArchiveContentHash(*active.content);
+	{
+		const auto sink = ArchiveStreamSink(&streaming.owner.value, {
+			activeKey, active.id, activeHash, activeIdentity, u"document"_q},
+			uint64_t(chunk.size()) + 1);
+		sink(0, chunk);
+		Value.worker->Run(store);
+		CHECK(store.StagingCountersForTest().cachedStreams == 1);
+		active.id = u"repeat807"_q;
+		++active.observation.observedAt;
+		CHECK(Value.journal->Append(active) && Value.journal->Drain(store));
+		CHECK(store.ObservedMediaVersion(activeKey, active.id, activeHash, activeIdentity)
+			== u"first807"_q);
+		sink(uint64_t(chunk.size()), QByteArray("x"));
+		Value.worker->Run(store);
+		auto streamed = QByteArray();
+		CHECK(store.ReadMedia(activeKey, u"first807"_q, activeIdentity,
+			[&](const QByteArray &part) { streamed += part; return true; }));
+		CHECK(streamed == chunk + "x");
+		const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(32));
+		CHECK(gaps.ok && gaps.rows.empty());
+	}
+	Value.worker->Run(store);
 
 	CHECK(store.Close());
 	const auto pending = Value.worker->tasks.size();
