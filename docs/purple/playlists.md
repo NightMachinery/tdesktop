@@ -260,9 +260,14 @@ stays exhausted; ordinary chat playback retains the timer's existing fallback.
 Song callback scopes defer a synchronous successor until native mutation ends,
 and a stream delivery token rejects retired callbacks. Guard checks after end
 notification and timer publication prevent the old frame from consuming or
-clearing the successor. Held seek intent remains item-bound; timer expiry blocks
-automatic resume while explicit Play can resume. This composition is production-compiled and host-qualified. Real streaming
-traces remain required.
+clearing the successor. Held seek intent remains item-bound. Timer expiry blocks
+automatic resume, and explicit Play can resume.
+
+A signed macOS build verified the end-of-track behavior with a two-song saved
+playlist. The first track advanced automatically with the timer off. With
+**End of this track** armed, it stopped at the end and explicit Play advanced
+once to the second track. The callback and pending-work races have host test
+coverage.
 
 ## Sleep expiry and pending playback
 
