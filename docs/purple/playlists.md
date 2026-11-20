@@ -416,6 +416,13 @@ cancelled a drag and left the library bytes unchanged. The lower-edge move
 survived a restart, and Undo restored the complete order after the upper-edge
 move.
 
+In the same synthetic playlist, Tab moved focus away during an active drag.
+The preview reverted before mouse release and the saved order stayed the same.
+Minimizing and restoring the window during a second drag produced the same
+result. In a separate check, a newer local file removed the drop target
+during the drag. The app refused the stale drop, showed the edit failure,
+and displayed the updated membership while preserving the newer file.
+
 On Refresh, the selected track and the visible row range stayed the same
 when keyboard focus returned to the song list. A stale Undo in the earlier
 signed app overwrote a newer synthetic reorder. The updated signed app
@@ -424,9 +431,8 @@ uncontested Undo on the same build restored all 2,000 tracks to their
 previous positions. Shared core tests also cover conflicting Redo and
 preservation of unrelated edits.
 
-Native coverage still needs VoiceOver speech, the other drag cancellation
-paths, concurrent membership changes, failed or partial writes, and account
-or route loss.
+Native coverage still needs VoiceOver speech, drag cancellation on disable or
+mouse-grab loss, failed or partial writes, and account or route loss.
 
 ## Player bar and hover list
 
