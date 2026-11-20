@@ -52,6 +52,7 @@ struct ProbeWorker {
 		std::mutex mutex;
 		std::condition_variable condition;
 		std::deque<QueuedTask> tasks;
+		size_t queuedStreams = 0;
 		uint64_t startupBytes = 0;
 		std::atomic<int> startupCount = 0;
 		std::atomic<bool> startupFailed = false;
@@ -311,6 +312,7 @@ void NativeStartupUnavailable();
 void NativeStartupPurgeRenewal();
 void NativeStartupReplacement();
 void NativeStartupPayload();
+void NativeStreamAdmission();
 
 int main(int argc, char **argv) {
 	auto app = QCoreApplication(argc, argv);
@@ -322,6 +324,7 @@ int main(int argc, char **argv) {
 	NativeStartupPurgeRenewal();
 	NativeStartupReplacement();
 	NativeStartupPayload();
+	NativeStreamAdmission();
 	HistoricalGapNotice();
 	Case(false); Case(true);
 	return Finish();
@@ -770,4 +773,56 @@ void NativeStartupPayload() {
 	CHECK(readyCount == 1); CHECK(!worker->NeedsStartupCapture());
 	CHECK(worker->Stop(false)); CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
 	std::printf("ARCHIVE_STARTUP_LARGE_PAYLOAD=2 chars=3600000 elapsed_ms=%lld\n", static_cast<long long>(elapsed));
+}
+
+void NativeStreamAdmission() {
+	Section = "stream bursts preserve regular worker capacity and FIFO order";
+	using Result = NativeStartupWorker::StreamAdmission;
+	auto temporary = QTemporaryDir();
+	auto options = StartupOptions(temporary.path());
+	auto entered = std::promise<void>();
+	auto enteredFuture = entered.get_future();
+	auto release = std::promise<void>();
+	auto releaseFuture = release.get_future().share();
+	options.authorityReady = [&] {
+		entered.set_value();
+		releaseFuture.wait();
+		return true;
+	};
+	const auto order = std::make_shared<std::vector<int>>();
+	auto done = std::promise<void>();
+	auto finished = done.get_future();
+	auto worker = std::make_shared<NativeStartupWorker>(
+		std::move(options),
+		[](DesktopArchiveStatus, QString, uint64_t) {},
+		[](auto) {});
+	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+	CHECK(worker->Post([order](DesktopArchiveStore &) {
+		order->push_back(-1);
+	}));
+	for (auto i = 0; i != 128; ++i) {
+		CHECK(worker->PostStream([order, i](DesktopArchiveStore &) {
+			order->push_back(i);
+		}, 128 * 1024) == Result::Queued);
+	}
+	CHECK(worker->PostStream([](DesktopArchiveStore &) {}, 0) == Result::Full);
+	CHECK(worker->Post([order, &done](DesktopArchiveStore &) {
+		order->push_back(128);
+		done.set_value();
+	}));
+	release.set_value();
+	const auto drained = finished.wait_for(std::chrono::seconds(30))
+		== std::future_status::ready;
+	CHECK(drained);
+	if (drained) {
+		CHECK(order->size() == 130);
+		for (auto i = 0; i != int(order->size()); ++i) {
+			CHECK((*order)[i] == i - 1);
+		}
+		CHECK(worker->PostStream([](DesktopArchiveStore &) {}, 128 * 1024)
+			== Result::Queued);
+	}
+	CHECK(worker->Stop(false));
+	CHECK(worker->PostStream([](DesktopArchiveStore &) {}, 0) == Result::Retired);
+	CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
 }

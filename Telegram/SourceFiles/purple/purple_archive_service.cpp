@@ -275,7 +275,8 @@ class ArchiveWorker final {
 	~ArchiveWorker() { Stop(false); }
 	bool Post(Task task, bool cleanup = false) {
 		const auto lock = std::unique_lock(_state->mutex, std::try_to_lock);
-		if (!lock.owns_lock() || _state->cancelled || _state->tasks.size() >= (cleanup ? 80 : 64)) {
+		if (!lock.owns_lock() || _state->cancelled
+			|| _state->tasks.size() - _state->queuedStreams >= (cleanup ? 80 : 64)) {
 			return false;
 		}
 		_state->tasks.push_back({
@@ -283,6 +284,28 @@ class ArchiveWorker final {
 					const std::shared_ptr<DesktopArchiveJournal> &) { task(store); }, 0});
 		_state->condition.notify_one();
 		return true;
+	}
+	enum class StreamAdmission { Queued, Retired, Full };
+	StreamAdmission PostStream(Task task, uint64_t bytes) {
+		constexpr auto kPendingBytes = uint64_t(16 * 1024 * 1024);
+		constexpr auto kPendingParts = 128;
+		const auto lock = std::lock_guard(_state->mutex);
+		if (_state->cancelled) {
+			return StreamAdmission::Retired;
+		}
+		if (_state->pendingStreams >= kPendingParts
+			|| bytes > kPendingBytes - _state->streamBytes) {
+			return StreamAdmission::Full;
+		}
+		_state->tasks.push_back({
+			[task = std::move(task)](DesktopArchiveStore &store,
+					const std::shared_ptr<DesktopArchiveJournal> &) { task(store); },
+			0, bytes });
+		_state->streamBytes += bytes;
+		++_state->queuedStreams;
+		++_state->pendingStreams;
+		_state->condition.notify_one();
+		return StreamAdmission::Queued;
 	}
 	bool NeedsStartupCapture() const { return _state->startupCount.load() != 0; }
 	bool StartupFailed() const { return _state->startupFailed.load(); }
@@ -292,7 +315,8 @@ class ArchiveWorker final {
 		const auto lock = std::unique_lock(_state->mutex, std::try_to_lock);
 		if (!bytes || *bytes > 4 * 1024 * 1024 || !lock.owns_lock()
 			|| _state->cancelled || _state->startupFailed || _state->purgeRequested
-			|| _state->tasks.size() >= 64 || _state->startupCount >= 32
+			|| _state->tasks.size() - _state->queuedStreams >= 64
+			|| _state->startupCount >= 32
 			|| *bytes > 16 * 1024 * 1024 - _state->startupBytes) {
 			return false;
 		}
@@ -391,8 +415,13 @@ class ArchiveWorker final {
 					_state->startupBytes -= task.startupBytes;
 					--_state->startupCount;
 				}
+				if (task.streamBytes) {
+					_state->streamBytes -= *task.streamBytes;
+					--_state->pendingStreams;
+				}
 			}
 			_state->tasks.clear();
+			_state->queuedStreams = 0;
 		}
 		_state->condition.notify_all();
 		return true;
@@ -404,6 +433,7 @@ class ArchiveWorker final {
 		std::function<void(DesktopArchiveStore &,
 			const std::shared_ptr<DesktopArchiveJournal> &)> run;
 		uint64_t startupBytes = 0;
+		std::optional<uint64_t> streamBytes;
 	};
 	struct State {
 		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report;
@@ -412,6 +442,9 @@ class ArchiveWorker final {
 		std::condition_variable condition;
 		std::deque<QueuedTask> tasks;
 		uint64_t startupBytes = 0;
+		uint64_t streamBytes = 0;
+		size_t queuedStreams = 0;
+		int pendingStreams = 0;
 		std::atomic<int> startupCount = 0;
 		std::atomic<bool> startupFailed = false;
 		std::atomic<bool> startupHeld = false;
@@ -625,6 +658,9 @@ class ArchiveWorker final {
 				} else {
 					task = std::move(state->tasks.front());
 					state->tasks.pop_front();
+					if (task.streamBytes) {
+						--state->queuedStreams;
+					}
 				}
 			}
 			const auto now = std::chrono::steady_clock::now();
@@ -641,10 +677,19 @@ class ArchiveWorker final {
 				state->delivery->fetch_add(1);
 			}
 			task.run(store, startupJournal);
-			if (task.startupBytes) {
+			if (task.streamBytes) {
+				task.run = {};
+			}
+			if (task.startupBytes || task.streamBytes) {
 				const auto lock = std::lock_guard(state->mutex);
-				state->startupBytes -= task.startupBytes;
-				--state->startupCount;
+				if (task.startupBytes) {
+					state->startupBytes -= task.startupBytes;
+					--state->startupCount;
+				}
+				if (task.streamBytes) {
+					state->streamBytes -= *task.streamBytes;
+					--state->pendingStreams;
+				}
 			}
 			store.PruneStreams();
 			maintenanceMore = store.MaintenancePending() && !store.MaintenanceHeld();
@@ -1091,7 +1136,6 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 	auto &value = For(session);
 	const auto worker = value.worker;
 	const auto journal = value.journal;
-	const auto pending = std::make_shared<std::atomic<uint64_t>>(0);
 	const auto binding = std::make_shared<std::optional<ArchiveStagingBinding>>();
 	const auto owned = std::make_shared<bool>(false);
 	const auto streamActive = std::make_shared<std::atomic<bool>>(true);
@@ -1100,21 +1144,15 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 		worker->PruneStreamsSoon();
 	});
 	const auto weak = base::make_weak(session.get());
-	return [weak, worker, journal, pending, binding, owned, streamActive, retirement, observation = std::move(observation), size](uint64_t offset, QByteArray bytes) {
+	return [weak, worker, journal, binding, owned, streamActive, retirement, observation = std::move(observation), size](uint64_t offset, QByteArray bytes) {
 		if (!weak || Retired.contains(weak.get()) || !journal || !journal->CaptureAllowed() || !journal->access().active
 			|| !journal->access().active()
 			|| bytes.size() > kArchiveMediaChunkBytes || offset > size || uint64_t(bytes.size()) > size - offset) {
 			return;
 		}
 		const auto count = uint64_t(bytes.size());
-		if (pending->fetch_add(count) + count > 8 * 1024 * 1024) {
-			pending->fetch_sub(count);
-			QueueArchiveRetentionGap(weak.get(), u"stream-queue-full"_q);
-			return;
-		}
-		const auto accepted = worker->Post([journal, pending, binding, owned, streamActive, observation, size, offset,
-			bytes = std::move(bytes), count](DesktopArchiveStore &store) {
-			const auto release = gsl::finally([&] { pending->fetch_sub(count); });
+		const auto admission = worker->PostStream([journal, binding, owned, streamActive, observation, size, offset,
+			bytes = std::move(bytes)](DesktopArchiveStore &store) {
 			if (*owned || !streamActive->load() || !journal->CaptureAllowed() || !journal->access().current() || !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
 				return;
 			}
@@ -1132,7 +1170,8 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 			}
 			if (!*binding || !store.StreamPart(**binding, offset, bytes, streamActive)) {
 				static_cast<void>(store.Gap(observation.observation + u":stream"_q,
-					u"stream-incomplete"_q, base::unixtime::now()));
+					*binding ? u"stream-incomplete"_q : u"stream-binding-unavailable"_q,
+					base::unixtime::now()));
 			} else {
 				const auto slice = store.ReadSlice(observation.key, {}, (**binding).source.version);
 				const auto version = slice ? FindArchiveVersion(slice->state, observation.key,
@@ -1145,9 +1184,8 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 						(**binding).source.version, observation.identity));
 				}
 			}
-		});
-		if (!accepted) {
-			pending->fetch_sub(count);
+		}, count);
+		if (admission == decltype(admission)::Full) {
 			QueueArchiveRetentionGap(weak.get(), u"stream-queue-full"_q);
 		}
 	};

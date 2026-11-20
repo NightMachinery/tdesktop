@@ -42,8 +42,13 @@ struct ProbeDocument {
 	void setOtherQualities(std::vector<int>) {}
 };
 struct ProbeWorker {
+	enum class StreamAdmission { Queued, Retired, Full };
 	std::deque<std::function<void(DesktopArchiveStore&)>> tasks;
 	bool Post(std::function<void(DesktopArchiveStore&)> task) { tasks.push_back(std::move(task)); return true; }
+	StreamAdmission PostStream(std::function<void(DesktopArchiveStore&)> task, uint64_t) {
+		Post(std::move(task));
+		return StreamAdmission::Queued;
+	}
 	void PruneStreamsSoon() { Post([](DesktopArchiveStore &store) { store.PruneStreams(); }); }
 	void Run(DesktopArchiveStore &store) { while (!tasks.empty()) { auto task = std::move(tasks.front()); tasks.pop_front(); task(store); store.PruneStreams(); } }
 };

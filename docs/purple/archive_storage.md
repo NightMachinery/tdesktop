@@ -468,8 +468,15 @@ queue. They do not launch a GUI or qualify native window activation events.
 
 ### Streaming staging cost and connection lifetime
 
-The passive loader's GUI callback admits parts using only a memory flag. The
-worker checks the durable login/store fence before resolving or writing a part.
+The passive loader's GUI callback checks memory-only admission and appends
+under a short queue mutex. The account worker shares FIFO order with other
+archive work and reserves separate capacity for pending stream parts. Up to
+128 parts and 16 MiB of stream bytes may be pending, including the active
+part. Regular capture and cleanup retain their own queue budgets. A busy
+mutex does not discard a part. A full stream budget reports a retention gap.
+The worker checks the durable login/store fence before resolving or writing
+a part. A missing authenticated binding is reported separately from a failed
+write.
 Catalogue SQL checks memory liveness per statement and row. Each bounded staging
 step authenticates its addressed generation, and fresh durable authority is
 checked immediately before publishing bytes and before catalogue COMMIT. These
@@ -487,7 +494,9 @@ flag and sets a coalesced worker wakeup flag. This requires neither a queue slot
 nor a GUI-thread mutex; each queued task also prunes retired streams. No GUI destructor waits for disk or worker completion. Eviction
 does not remove durable staging bytes; normal authenticated recovery still runs.
 
-The lifecycle fixture counts actual fence reads, catalogue opens and proof queries
+The handoff fixture fills the stream budget while the worker is blocked and
+verifies FIFO order and reserved regular admission. The lifecycle fixture
+counts actual fence reads, catalogue opens and proof queries
 for 2 MiB inputs in 64/128 KiB arrivals, including finalization. It requires at
 least tenfold reductions in fence/proof counts and one open. The passive fixture
 runs the literal production callback and requires zero GUI fence reads. Existing
