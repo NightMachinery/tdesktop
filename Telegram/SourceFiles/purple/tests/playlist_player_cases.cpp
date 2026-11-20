@@ -9,6 +9,20 @@
 
 namespace Purple::PlayerProbe {
 
+struct AudioMsgId {
+	enum class Type { Song, Voice };
+
+	int document = 0;
+	int message = 0;
+	Type kind = Type::Song;
+	int stream = 0;
+
+	int audio() const { return document; }
+	int contextId() const { return message; }
+	Type type() const { return kind; }
+	bool operator==(const AudioMsgId &) const = default;
+};
+
 #include "playlist-player-queue.inc"
 
 } // namespace Purple::PlayerProbe
@@ -25,6 +39,22 @@ int main() {
 			std::cerr << name << '\n';
 		}
 	};
+	{
+		using Id = PlayerProbe::AudioMsgId;
+		const auto requested = Id{ 1, 2, Id::Type::Song, 0 };
+		const auto decoded = Id{ 1, 2, Id::Type::Song, 17 };
+		const auto restarted = Id{ 1, 2, Id::Type::Song, 18 };
+		expect(requested != decoded && SamePlaylistPlaybackSource(requested, decoded),
+			"starting native decoding preserves playlist ownership");
+		expect(decoded != restarted && SamePlaylistPlaybackSource(decoded, restarted),
+			"a new stream for the same source preserves playlist ownership");
+		expect(!SamePlaylistPlaybackSource(decoded, Id{ 1, 3, Id::Type::Song, 17 }),
+			"the same document in another message cannot take over the playlist");
+		expect(!SamePlaylistPlaybackSource(decoded, Id{ 4, 2, Id::Type::Song, 17 }),
+			"a replaced document cannot take over the playlist");
+		expect(!SamePlaylistPlaybackSource(decoded, Id{ 1, 2, Id::Type::Voice, 17 }),
+			"another playback type cannot take over the playlist");
+	}
 	{
 		auto cursor = PlaylistCursor();
 		cursor.reset(4, 0);

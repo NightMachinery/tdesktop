@@ -196,8 +196,11 @@ Download controls are described below. Sync and sharing remain follow-ups.
 The status producer and start/retry/stop API capture the selected session,
 account and routing authority. UI/controller destruction does not own ongoing
 playback. Service route invalidation, account retirement, session destruction,
-player shutdown and unrelated song takeover invalidate old callbacks. The
-expected AudioMsgId is installed before synchronous stock play callbacks.
+player shutdown and unrelated song takeover invalidate old callbacks. Before
+calling the stock player, the controller captures the expected document,
+source message and audio type. It keeps ownership when the decoder allocates
+a new stream ID for that source. Stream callbacks still use the native stream
+generation to reject updates from an older stream.
 The account service invalidates playback before retiring workers and stops the
 captured session on logout. A live controller subscribes to data-clear notification. Previously retired
 controllers have already removed that subscription; their retained resolvers may

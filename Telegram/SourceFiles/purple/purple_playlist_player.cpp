@@ -43,6 +43,14 @@ namespace {
 using Type = AudioMsgId::Type;
 constexpr auto kResolveWindow = std::size_t(4);
 
+[[nodiscard]] bool SamePlaylistPlaybackSource(
+		const AudioMsgId &a,
+		const AudioMsgId &b) {
+	return a.audio() == b.audio()
+		&& a.contextId() == b.contextId()
+		&& a.type() == b.type();
+}
+
 std::optional<std::size_t> PlaylistIndexForDocument(
 		const std::vector<PlaylistResolveSong> &songs,
 		uint64_t documentId) {
@@ -417,6 +425,7 @@ public:
 private:
 	[[nodiscard]] bool bound() const;
 	[[nodiscard]] bool check(const Fn<bool()> &admission);
+	[[nodiscard]] bool matchesCurrent(const AudioMsgId &current) const;
 	void observe();
 	void updateModes();
 	[[nodiscard]] std::optional<PlaylistSongResolution> resolutionForCurrent(
@@ -569,6 +578,11 @@ bool PlaylistPlayback::check(const Fn<bool()> &admission) {
 	return true;
 }
 
+bool PlaylistPlayback::matchesCurrent(const AudioMsgId &current) const {
+	return SamePlaylistPlaybackSource(current, _expected)
+		|| (_switching && SamePlaylistPlaybackSource(current, _transitionFrom));
+}
+
 bool PlaylistPlayback::belongsTo(Main::Session *session) const {
 	return session && _session.get() == session;
 }
@@ -630,8 +644,7 @@ void PlaylistPlayback::pauseForExpiry() {
 	if (_retired) return;
 	_pausedForExpiry = true;
 	const auto current = Media::Player::instance()->current(Type::Song);
-	const auto owned = _ownsCurrent && (current == _expected
-		|| (_switching && current == _transitionFrom));
+	const auto owned = _ownsCurrent && matchesCurrent(current);
 	const auto playing = owned && current.audio()
 		? std::find_if(_songs.begin(), _songs.end(), [&](const auto &song) {
 			return song.documentId == current.audio()->id;
@@ -723,7 +736,8 @@ void PlaylistPlayback::retire(bool stopOwned, bool immediate) {
 	if (immediate) _retiringResolvers.clear();
 	_lifetime.destroy();
 	const auto player = Media::Player::instance();
-	const auto stop = stopOwned && _ownsCurrent && player->current(Type::Song) == _expected;
+	const auto stop = stopOwned && _ownsCurrent
+		&& SamePlaylistPlaybackSource(player->current(Type::Song), _expected);
 	_ownsCurrent = false;
 	if (stop) {
 		const auto internal = PlaylistPlayerInternalCallGuard(
@@ -741,7 +755,7 @@ void PlaylistPlayback::observe() {
 	}
 	const auto player = Media::Player::instance();
 	const auto current = player->current(Type::Song);
-	if (current != _expected && !(_switching && current == _transitionFrom)) {
+	if (!matchesCurrent(current)) {
 		retire(false);
 	} else {
 		updateModes();
@@ -775,7 +789,7 @@ void PlaylistPlayback::start() {
 	player->updatedNotifier() | rpl::on_next([weak](const Media::Player::TrackState &state) {
 		const auto self = weak.lock();
 		if (self && state.id.type() == Type::Song && self->bound()
-			&& state.id == self->_expected && self->_ownsCurrent
+			&& SamePlaylistPlaybackSource(state.id, self->_expected) && self->_ownsCurrent
 			&& state.state == Media::Player::State::StoppedAtError) {
 			self->cancel();
 			self->publish(PlaylistPlaybackPhase::RetryRequired, PlaylistPlaybackProblem::PlaybackRejected);
@@ -924,8 +938,7 @@ void PlaylistPlayback::updateModes() {
 	if (!_loaded || _orderMode == mode) return;
 	const auto player = Media::Player::instance();
 	const auto current = player->current(Type::Song);
-	const auto owned = _ownsCurrent && current.audio() && (current == _expected
-		|| (_switching && current == _transitionFrom));
+	const auto owned = _ownsCurrent && current.audio() && matchesCurrent(current);
 	const auto selected = owned ? current.audio()->id
 		: _cursor.index() ? _songs[*_cursor.index()].documentId : _selected.value_or(0);
 	const auto sourceStatus = _status.documentId == selected
@@ -1149,14 +1162,15 @@ void PlaylistPlayback::play(const PlaylistSongResolution &resolution) {
 	if (!Handoffs->current(handoff)) {
 		if (!_retired && !admission() && bound()) {
 			_expected = player->current(Type::Song);
-			_ownsCurrent = _expected == audio || (ownedOutgoing && _expected == outgoing);
+			_ownsCurrent = SamePlaylistPlaybackSource(_expected, audio)
+				|| (ownedOutgoing && SamePlaylistPlaybackSource(_expected, outgoing));
 		} else if (!_retired) {
 			retire(false);
 		}
 		return;
 	}
 	if (!check(admission)) return;
-	if (player->current(Type::Song) != audio) {
+	if (!SamePlaylistPlaybackSource(player->current(Type::Song), audio)) {
 		_expected = player->current(Type::Song);
 		_ownsCurrent = false;
 		publish(
@@ -1184,7 +1198,7 @@ bool PlaylistPlayback::owns(const AudioMsgId &current) {
 	} else if (!bound()) {
 		retire(true);
 		return false;
-	} else if (current != _expected && !(_switching && current == _transitionFrom)) {
+	} else if (!matchesCurrent(current)) {
 		retire(false);
 		return false;
 	}
@@ -1196,8 +1210,7 @@ bool PlaylistPlayback::claimsShuffle(const AudioMsgId &current) {
 }
 
 bool PlaylistPlayback::claimsUi(const AudioMsgId &current) const {
-	return _ownsCurrent && bound() && (current == _expected
-		|| (_switching && current == _transitionFrom));
+	return _ownsCurrent && bound() && matchesCurrent(current);
 }
 
 bool PlaylistPlayback::move(int delta, bool autonext) {
