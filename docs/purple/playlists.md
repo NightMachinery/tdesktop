@@ -384,13 +384,15 @@ invented downloaded mark. Current means a delivered playlist row whose document
 still matches the native Song player, including a paused item. The list itself
 does not scan sources or start downloads; download controls are separate.
 
-Production compilation has passed. A real 2,000-row performance/GUI pass remains
-required:
-long and RTL metadata, light/dark comparison with stock player rows, keyboard
-and assistive activation, drag across viewport edges, cancellation, concurrent
-membership changes, failed/partial writes, Undo conflict, account/route loss,
-and opening/focusing rows after refreshed snapshots. Static source checks do
-not establish rendering, smooth scrolling or service/streaming behavior.
+The signed macOS app rendered a two-track playlist in light and dark modes.
+The light-mode check included 800- and 680-pixel logical window widths.
+For a side-by-side comparison with the stock player rows, start the stock
+track directly from its chat so the stock hover list is populated.
+
+Native coverage still needs long and RTL metadata, a 2,000-row scroll test,
+keyboard and assistive activation, drag across viewport edges, cancellation,
+concurrent membership changes, failed or partial writes, Undo conflicts,
+account or route loss, and opening and focusing after refreshes.
 
 ## Player bar and hover list
 
@@ -546,10 +548,13 @@ presence alone never creates a downloaded mark, and opening the list does not
 hash every song.
 
 These controls use the owned-transfer adapter's terminal progress and read-only
-Verify API. Production compilation and host worker integration pass; actual cloud
-transfers and stock light/dark/RTL/accessibility comparisons remain unverified.
-Managed-cache completion is covered by a real encrypted-cache fixture, while
-application behavior and Windows file handling need separate qualification.
+Verify API. On the signed macOS app, two files downloaded successfully, matched
+the owned inventory and verified again after a restart. Cancel preserved the
+copies, and confirmed removal cleared them. The updated Retry downloads label
+and footer controls were visible in both light and dark mode. RTL and
+screen-reader navigation still need native checks. Managed-cache completion is
+covered by an encrypted-cache fixture. Windows file handling and broader cache
+behavior still need application checks.
 
 The complete 66-gate host campaign includes `cases-playlist-download-policy`,
 `cases-playlist-owned-files` and `cases-playlist-managed-cache`, preserving the
