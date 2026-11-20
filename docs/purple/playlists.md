@@ -453,8 +453,12 @@ event also canceled the drag, whether mouse-up arrived first or the timer ran
 first. The signed macOS app still saved both an ordinary drop and a drop after
 edge autoscroll. Undo restored the full order.
 
-Native coverage still needs a pending edit during a drag and loss of a
-signed-in account.
+In the signed app, Option+Up submitted an edit during an active downward
+drag. The app emitted a saving notification to accessibility clients. The
+mouse release left the keyboard order intact, and Undo restored all 2,000
+positions.
+
+Native coverage still needs loss of a signed-in account.
 
 ## Player bar and hover list
 
