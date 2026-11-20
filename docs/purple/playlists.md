@@ -362,7 +362,9 @@ uses those font metrics. Library pagination remains unchanged.
 
 Handle drag previews an in-memory insertion, with edge autoscroll. Escape,
 focus/window loss, hiding, disabled/pending state and mouse-grab loss cancel
-without a write. Arrow/Home/End/Page keys select, Enter/Space plays, and
+without a write. Both autoscroll and mouse release check ownership of the grab
+because Qt can release it without sending an ungrab event.
+Arrow/Home/End/Page keys select, Enter/Space plays, and
 Alt+Up/Down reorders while the editable track list has focus. These keys keep
 their chat-navigation binding elsewhere. The Move buttons also submit a reorder.
 Remove acts on the selected row. The screen-reader list exposes stable row

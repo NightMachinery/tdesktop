@@ -298,7 +298,8 @@ void PlaylistSongList::Rows::updateDrag() {
 }
 
 void PlaylistSongList::Rows::autoscroll() {
-	if (!_dragging || !isEnabled() || !isVisible() || !window()->isActiveWindow()) {
+	if (!_dragging || QWidget::mouseGrabber() != this
+		|| !isEnabled() || !isVisible() || !window()->isActiveWindow()) {
 		cancelInteraction();
 		return;
 	}
@@ -338,7 +339,7 @@ void PlaylistSongList::Rows::mouseReleaseEvent(QMouseEvent *e) {
 	if (e->button() != Qt::LeftButton) return;
 	const auto from = _pressed;
 	const auto to = _target;
-	const auto drag = _dragging;
+	const auto drag = _dragging && QWidget::mouseGrabber() == this;
 	const auto play = !_handlePressed && from >= 0 && hit(e->pos()) == from;
 	cancelInteraction();
 	if (!isEnabled()) return;
