@@ -1153,12 +1153,28 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 		const auto count = uint64_t(bytes.size());
 		const auto admission = worker->PostStream([journal, binding, owned, streamActive, observation, size, offset,
 			bytes = std::move(bytes)](DesktopArchiveStore &store) {
-			if (*owned || !streamActive->load() || !journal->CaptureAllowed() || !journal->access().current() || !CanRunArchiveWork(journal->access().epoch, store.epoch())) {
+			const auto current = [&] {
+				return streamActive->load()
+					&& journal->CaptureAllowed()
+					&& journal->access().current()
+					&& CanRunArchiveWork(journal->access().epoch, store.epoch());
+			};
+			if (*owned || !current()) {
 				return;
 			}
 			if (!*binding) {
-				const auto version = store.ObservedMediaVersion(observation.key, observation.observation,
-					observation.contentHash, observation.identity);
+				const auto resolve = [&] {
+					return store.ObservedMediaVersion(observation.key,
+						observation.observation, observation.contentHash, observation.identity);
+				};
+				auto version = resolve();
+				if (!version) {
+					// The first part can reach the worker before the observation's replay task.
+					if (!journal->Drain(store) || !current()) {
+						return;
+					}
+					version = resolve();
+				}
 				if (version) {
 					*binding = store.StageStream(observation.key, *version, observation.identity, size);
 					if (!*binding && store.ReadMedia(observation.key, *version, observation.identity,

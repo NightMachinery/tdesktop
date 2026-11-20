@@ -475,8 +475,10 @@ archive work and reserves separate capacity for pending stream parts. Up to
 part. Regular capture and cleanup retain their own queue budgets. A busy
 mutex does not discard a part. A full stream budget reports a retention gap.
 The worker checks the durable login/store fence before resolving or writing
-a part. A missing authenticated binding is reported separately from a failed
-write.
+a part. If the first part arrives before its observation is committed, the
+worker replays the durable outbox and rechecks authority before looking up the
+exact binding again. A missing authenticated binding is reported separately
+from a failed write.
 Catalogue SQL checks memory liveness per statement and row. Each bounded staging
 step authenticates its addressed generation, and fresh durable authority is
 checked immediately before publishing bytes and before catalogue COMMIT. These

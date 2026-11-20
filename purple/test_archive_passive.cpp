@@ -243,6 +243,28 @@ int main(int argc, char **argv) {
 	}
 	Value.worker->Run(store);
 	CHECK(store.StagingCountersForTest().cachedStreams == 0);
+	Section = "first stream part can precede observation replay";
+	auto pendingObservation = Event(Empty(), u"v805"_q, 0, u"observed"_q,
+		ArchiveOrigin::Baseline, Key({0,123},45,805));
+	pendingObservation.content->media.push_back({u"document:555"_q,u"document"_q});
+	Value.journal->BindCaptureGeneration(pendingObservation);
+	CHECK(Value.journal->Append(pendingObservation));
+	CHECK(store.Versions(pendingObservation.key).versions.empty());
+	{
+		const auto sink = ArchiveStreamSink(&streaming.owner.value, {
+			pendingObservation.key, pendingObservation.id,
+			ArchiveContentHash(*pendingObservation.content),
+			u"document:555"_q, u"document"_q}, 3);
+		const auto before = store.StagingCountersForTest().fenceReads;
+		sink(0, QByteArray("abc"));
+		CHECK(store.StagingCountersForTest().fenceReads == before);
+		Value.worker->Run(store);
+		CHECK(Owned(store,805));
+		const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(32));
+		CHECK(gaps.ok && gaps.rows.empty());
+	}
+	Value.worker->Run(store);
+
 	CHECK(store.Close());
 	const auto pending = Value.worker->tasks.size();
 	const auto beforeClose = store.StagingCountersForTest().fenceReads;
