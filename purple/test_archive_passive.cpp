@@ -265,6 +265,56 @@ int main(int argc, char **argv) {
 	}
 	Value.worker->Run(store);
 
+	Section = "an identical baseline preserves the original stream observation";
+	const auto repeatedKey = Key({0,123},45,806);
+	const auto identity = u"document:806"_q;
+	auto baseline = Event(Empty(), u"first806"_q, 0, u"same audio"_q,
+		ArchiveOrigin::Baseline, repeatedKey);
+	baseline.content->media.push_back({identity, u"document"_q});
+	const auto contentHash = ArchiveContentHash(*baseline.content);
+	const auto persist = [&](const QString &id) {
+		baseline.id = id;
+		Value.journal->BindCaptureGeneration(baseline);
+		return Value.journal->Append(baseline) && Value.journal->Drain(store);
+	};
+	CHECK(persist(u"first806"_q));
+	CHECK(persist(u"second806"_q));
+	const auto resolve = [&](const QString &id) {
+		return store.ObservedMediaVersion(repeatedKey, id, contentHash, identity);
+	};
+	CHECK(resolve(u"second806"_q) == u"first806"_q);
+	{
+		const auto sink = ArchiveStreamSink(&streaming.owner.value, {
+			repeatedKey, u"second806"_q, contentHash, identity, u"document"_q}, 3);
+		CHECK(persist(u"third806"_q));
+		CHECK(resolve(u"second806"_q) == u"first806"_q);
+		CHECK(!resolve(u"unobserved806"_q));
+		CHECK(!store.ObservedMediaVersion(repeatedKey, u"second806"_q,
+			QString(64, 'f'), identity));
+		CHECK(!store.ObservedMediaVersion(repeatedKey, u"second806"_q,
+			contentHash, u"document:555"_q));
+		CHECK(!store.ObservedMediaVersion(Key({0,123},45,805), u"second806"_q,
+			contentHash, identity));
+		sink(0, QByteArray("def"));
+		Value.worker->Run(store);
+		auto streamed = QByteArray();
+		CHECK(store.ReadMedia(repeatedKey, u"first806"_q, identity,
+			[&](const QByteArray &part) { streamed += part; return true; }));
+		CHECK(streamed == "def");
+		const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(32));
+		CHECK(gaps.ok && gaps.rows.empty());
+	}
+	Value.worker->Run(store);
+	auto edit = baseline;
+	edit.id = u"edit806"_q;
+	edit.origin = ArchiveOrigin::AuthoritativeEdit;
+	Value.journal->BindCaptureGeneration(edit);
+	CHECK(Value.journal->Append(edit) && Value.journal->Drain(store));
+	CHECK(!resolve(u"second806"_q));
+	CHECK(persist(u"fourth806"_q));
+	CHECK(resolve(u"edit806"_q) == u"first806"_q);
+	CHECK(!resolve(u"second806"_q));
+
 	CHECK(store.Close());
 	const auto pending = Value.worker->tasks.size();
 	const auto beforeClose = store.StagingCountersForTest().fenceReads;
@@ -272,6 +322,7 @@ int main(int argc, char **argv) {
 	CHECK(store.StagingCountersForTest().fenceReads == beforeClose);
 	CHECK(Value.worker->tasks.size() == pending);
 	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(!resolve(u"edit806"_q));
 	CHECK(store.Remove());
 
 	Section = "purge commit revokes GUI admission without fence reads";

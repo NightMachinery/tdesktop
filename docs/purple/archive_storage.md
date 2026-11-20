@@ -297,6 +297,12 @@ Delayed already-available media lookup matches the authenticated historical
 version ID or observation revision. It scans bounded authenticated version
 pages under one revision fence, then checks exact content hash, media identity,
 account and current epoch again. Plaintext index hints alone never select it.
+When an identical baseline advances a version's revision, the open store
+records which revision it replaced. This bounded local cache lets a delayed
+stream find its version across repeated identical baselines. The lookup
+requires the authenticated receipt, matching purge generation, exact content
+hash and media identity. An authoritative edit ends the chain of baselines.
+Closing the store clears these bindings.
 
 Short send acknowledgements are captured only after local message-ID adoption
 and acknowledged fields are applied. Their observed baseline remains Partial;

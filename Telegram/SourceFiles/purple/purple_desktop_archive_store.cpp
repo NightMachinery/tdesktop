@@ -15,12 +15,15 @@
 #include <QtCore/QLockFile>
 #include <algorithm>
 #include <atomic>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <set>
 
 namespace Purple {
 namespace {
+
+constexpr auto kRecentMediaObservationLimit = size_t(512);
 
 auto &CatalogueMutex = *new std::mutex();
 auto &ReleasedLocksMutex = *new std::mutex();
@@ -697,6 +700,15 @@ class DesktopArchiveStore::Impl {
 		std::shared_ptr<std::atomic<bool>> active;
 	};
 	std::map<QString, StreamEntry> streams;
+	struct MediaObservation {
+		ArchiveMessageKey key;
+		QString revision;
+		QString version;
+		QString currentRevision;
+		QString contentHash;
+		ArchiveGeneration generation;
+	};
+	std::deque<MediaObservation> mediaObservations;
 	std::shared_ptr<std::atomic<bool>> journalAdmission;
 	uint64_t journalGeneration = 0;
 	QJsonObject journalDeleteGenerations;
@@ -875,6 +887,7 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 	self.failure.clear();
 	self.admissionFailure.clear();
 	self.journalRenewal.reset();
+	self.mediaObservations.clear();
 	self.maintenancePending = false;
 	self.garbagePending = true;
 	self.garbageHeld = false;
@@ -1272,6 +1285,7 @@ bool DesktopArchiveStore::Close() {
 	_impl->journalRenewal.reset();
 	_impl->RevokeJournalAdmission();
 	_impl->streams.clear();
+	_impl->mediaObservations.clear();
 	ExpireHistory(true);
 	if (!ExpireDeletedViews(true)) {
 		return false;
@@ -1395,6 +1409,7 @@ bool DesktopArchiveStore::Remove(int maximumActions) {
 	}
 	auto &self = *_impl;
 	self.streams.clear();
+	self.mediaObservations.clear();
 	if (!self.lock || !self.lock->isLocked() || self.layout.store.isEmpty()) {
 		return false;
 	}
@@ -1982,6 +1997,34 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 						  || completion.status == ArchiveCommitStatus::AlreadyApplied;
 		result.status = result.retained ? DesktopArchiveStatus::Ready
 										: DesktopArchiveStatus::Invalid;
+		if (result.retained && event.origin == ArchiveOrigin::Baseline
+			&& event.content && !event.content->media.empty()) {
+			const auto previous = FindArchiveMessage(slice->state, event.key);
+			const auto message = FindArchiveMessage(completion.state, event.key);
+			if (previous && !previous->versions.empty() && message && !message->versions.empty()) {
+				const auto &before = previous->versions.back();
+				const auto &after = message->versions.back();
+				const auto hash = ArchiveContentHash(after.content);
+				if (before.id == after.id && before.revision != after.revision
+					&& after.revision == event.id && ArchiveContentHash(before.content) == hash) {
+					auto &observations = _impl->mediaObservations;
+					for (auto &entry : observations) {
+						if (entry.key == event.key && entry.version == before.id
+							&& entry.currentRevision == before.revision
+							&& entry.generation == event.generation) {
+							entry.currentRevision = after.revision;
+						}
+					}
+					if (before.revision != before.id) {
+						if (observations.size() == kRecentMediaObservationLimit) {
+							observations.pop_front();
+						}
+						observations.push_back({event.key, before.revision, before.id,
+							after.revision, hash, event.generation});
+					}
+				}
+			}
+		}
 		return result;
 	}
 	_impl->failure = result.reason;
@@ -2153,8 +2196,35 @@ std::optional<QString> DesktopArchiveStore::ObservedMediaVersion(
 	if (!message || message->versions.empty()) {
 		return {};
 	}
+	const auto matchesMedia = [&](const ArchiveVersion &version) {
+		return ArchiveContentHash(version.content) == contentHash
+			&& std::any_of(version.media.begin(), version.media.end(),
+				[&](const auto &entry) { return entry.identity == identity; })
+			&& Current();
+	};
 	auto selected = message->versions.back();
 	if (selected.id != observationId && selected.revision != observationId) {
+		const auto &observations = _impl->mediaObservations;
+		const auto known = std::find_if(observations.rbegin(), observations.rend(),
+			[&](const auto &entry) {
+				return entry.key == key && entry.revision == observationId
+					&& entry.contentHash == contentHash;
+			});
+		if (known != observations.rend()) {
+			slice = ReadSlice(key, observationId, known->version);
+			const auto retained = slice ? FindArchiveMessage(slice->state, key) : nullptr;
+			const auto version = retained
+				? FindArchiveVersion(slice->state, key, known->version)
+				: nullptr;
+			return version
+				&& version->revision == known->currentRevision
+				&& known->generation == ArchiveGenerationFor(slice->state, key.chat)
+				&& std::any_of(retained->receipts.begin(), retained->receipts.end(),
+					[&](const auto &entry) { return entry.id == observationId; })
+				&& matchesMedia(*version)
+				? std::optional(version->id)
+				: std::nullopt;
+		}
 		auto before = QString();
 		auto revision = std::optional<uint64_t>();
 		auto versionId = QString();
@@ -2192,10 +2262,7 @@ std::optional<QString> DesktopArchiveStore::ObservedMediaVersion(
 		selected = *version;
 	}
 	return (selected.id == observationId || selected.revision == observationId)
-				   && ArchiveContentHash(selected.content) == contentHash
-				   && std::any_of(selected.media.begin(), selected.media.end(),
-					   [&](const auto &entry) { return entry.identity == identity; })
-				   && Current()
+			   && matchesMedia(selected)
 			   ? std::optional(selected.id)
 			   : std::nullopt;
 }
