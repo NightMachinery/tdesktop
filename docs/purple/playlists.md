@@ -690,6 +690,16 @@ regression revokes authority immediately after a successful fsync and verifies
 that no final link is created; removing only the final guard fails the unchanged
 assertions. Application cancellation timing remains unverified.
 
+## Android stock player verification
+
+The Android playlist deck and chat playback banner both open Telegram's
+stock audio player. On signed Android `df8985b61`, one tap on each opened
+that player with the same retained track still playing. The stock player
+window took focus within 0.27 seconds from the deck and 0.66 seconds from
+the banner. The first fully drawn screenshots finished at 3.23 and 3.66
+seconds respectively, including capture and transfer time. Track changes
+during a deck tap still need coverage.
+
 ## Shared download policy
 
 Desktop and Android compile the same download inventory codec and two-active-job
