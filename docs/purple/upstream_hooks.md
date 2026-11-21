@@ -60,8 +60,9 @@ the numbers.
 - `window/window_lock_widgets.cpp`: sends system unlock requests through
   Purple's native focus check. The visible lock window must be the AppKit
   key window in the active application when the deferred request runs.
-  One system prompt can be pending across all Purple windows. The Touch ID
-  button can retry after focus returns, and the app passcode remains available.
+  Purple attaches the biometric sheet to that native window. One request can
+  be pending across all Purple windows. The Touch ID button can retry after
+  focus returns, and the app passcode remains available.
 
 ## Purple control socket
 

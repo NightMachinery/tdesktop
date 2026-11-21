@@ -28,11 +28,11 @@ Passcode Lock was then turned off and the account remained logged in.
 
 ## Touch ID on macOS
 
-App activation and keyboard focus are separate on macOS. Purple checks for
-the visible lock screen's native key window when the deferred system unlock
-request runs. A single system prompt can be pending across Purple's windows.
-If you switch away before the prompt opens, return to the lock screen and
-click its Touch ID button, or enter your Purple passcode.
+Purple checks that the lock screen is visible and has keyboard focus before
+requesting system authentication. Touch ID and Apple Watch use a macOS sheet
+attached to that lock window. Only one request can be pending across Purple's
+windows. Switching away cancels the sheet. You can retry from the lock screen
+or enter your Purple passcode.
 
-The native prompt still uses macOS device-owner authentication, including
-the system password fallback. See [upstream hooks](upstream_hooks.md#macos-passcode-unlock).
+The sheet offers the system password through the standard macOS authentication
+dialog. See [upstream hooks](upstream_hooks.md#macos-passcode-unlock).
