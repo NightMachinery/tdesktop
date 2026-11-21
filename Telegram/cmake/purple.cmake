@@ -407,6 +407,7 @@ PRIVATE
     purple/purple_sync_review_box.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
+    purple/purple_system_unlock.h
     purple/purple_translation_policy.cpp
     purple/purple_translation_policy.h
     purple/purple_ui_witness.cpp
@@ -424,6 +425,7 @@ PRIVATE
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_system_unlock_mac.mm)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_webp_paste_mac.mm)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_ui_witness_mac.mm purple/purple_archive_backup_mac.mm)
 endif()

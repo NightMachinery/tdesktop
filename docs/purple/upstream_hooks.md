@@ -55,6 +55,14 @@ the numbers.
   keeps its existing month keys and mouse date-range selection.
 - See [keys.md](keys.md).
 
+## macOS passcode unlock
+
+- `window/window_lock_widgets.cpp`: sends system unlock requests through
+  Purple's native focus check. The visible lock window must be the AppKit
+  key window in the active application when the deferred request runs.
+  One system prompt can be pending across all Purple windows. The Touch ID
+  button can retry after focus returns, and the app passcode remains available.
+
 ## Purple control socket
 
 - `core/sandbox.cpp`: remove only the CTRL include and command branch;

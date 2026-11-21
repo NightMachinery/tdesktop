@@ -25,3 +25,14 @@ On Android, the signed APK from source `5e428532` with core `e7bf8544` was
 tested on a disposable emulator account. A text passcode set as `qwer` unlocked
 with Persian keyboard input `ضصثق`, and the exact ASCII `qwer` unlocked too.
 Passcode Lock was then turned off and the account remained logged in.
+
+## Touch ID on macOS
+
+App activation and keyboard focus are separate on macOS. Purple checks for
+the visible lock screen's native key window when the deferred system unlock
+request runs. A single system prompt can be pending across Purple's windows.
+If you switch away before the prompt opens, return to the lock screen and
+click its Touch ID button, or enter your Purple passcode.
+
+The native prompt still uses macOS device-owner authentication, including
+the system password fallback. See [upstream hooks](upstream_hooks.md#macos-passcode-unlock).

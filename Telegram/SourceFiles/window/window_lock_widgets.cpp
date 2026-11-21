@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_slide_animation.h"
 #include "window/window_session_controller.h"
 #include "main/main_domain.h"
+#include "purple/purple_system_unlock.h"
 #include "styles/style_layers.h"
 #include "styles/style_passcode_box.h"
 #include "styles/style_window_lock_widgets.h"
@@ -244,7 +245,7 @@ void PasscodeLockWidget::suggestSystemUnlock() {
 					}
 				});
 			};
-			SuggestSystemUnlock(
+			Purple::SuggestSystemUnlock(
 				this,
 				(::Platform::IsWindows()
 					? tr::lng_passcode_winhello_unlock(tr::now)
