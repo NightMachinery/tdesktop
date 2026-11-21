@@ -61,8 +61,8 @@ the numbers.
   Purple's native focus check. The visible lock window must be the AppKit
   key window in the active application when the deferred request runs.
   Purple attaches the biometric sheet to that native window. One request can
-  be pending across all Purple windows. The Touch ID button can retry after
-  focus returns, and the app passcode remains available.
+  be pending across all Purple windows. The sheet's passcode button returns
+  focus to the existing passcode field.
 
 ## Purple control socket
 

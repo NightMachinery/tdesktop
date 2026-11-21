@@ -6,7 +6,6 @@
 #include <AppKit/AppKit.h>
 #include <LocalAuthentication/LocalAuthentication.h>
 #include <LocalAuthenticationEmbeddedUI/LAAuthenticationView.h>
-#include <QtCore/QPointer>
 #include <QtWidgets/QWidget>
 
 namespace Purple {
@@ -20,7 +19,6 @@ struct EmbeddedPrompt {
 		[alert release];
 	}
 
-	QPointer<QWidget> parent;
 	Fn<void(Result)> done;
 	LAContext *context = nil;
 	NSAlert *alert = nil;
@@ -56,8 +54,7 @@ void StartSystemPrompt(
 
 void Finish(
 		const std::shared_ptr<EmbeddedPrompt> &prompt,
-		Result result,
-		QString passwordReason = {}) {
+		Result result) {
 	if (ActivePrompt != prompt) {
 		return;
 	}
@@ -68,19 +65,7 @@ void Finish(
 	[prompt->context invalidate];
 	const auto sheet = prompt->alert.window;
 	[sheet.sheetParent endSheet:sheet];
-	if (passwordReason.isEmpty()) {
-		prompt->done(result);
-	} else {
-		SystemPromptPending = true;
-		crl::on_main([prompt, reason = std::move(passwordReason)] {
-			SystemPromptPending = false;
-			if (const auto parent = prompt->parent.data(); parent && KeyWindow(parent)) {
-				StartSystemPrompt(parent, reason, std::move(prompt->done));
-			} else {
-				prompt->done(Result::Cancelled);
-			}
-		});
-	}
+	prompt->done(result);
 }
 
 } // namespace
@@ -88,7 +73,8 @@ void Finish(
 void SuggestSystemUnlock(
 		not_null<QWidget*> parent,
 		const QString &text,
-		Fn<void(base::SystemUnlockResult)> done) {
+		Fn<void(base::SystemUnlockResult)> done,
+		Fn<void()> usePasscode) {
 	if (ActivePrompt || SystemPromptPending || !KeyWindow(parent)) {
 		done(Result::Cancelled);
 		return;
@@ -111,7 +97,6 @@ void SuggestSystemUnlock(
 	}
 	const auto prompt = std::make_shared<EmbeddedPrompt>();
 	ActivePrompt = prompt;
-	prompt->parent = parent.get();
 	prompt->done = std::move(done);
 	prompt->context = context;
 	prompt->alert = [[NSAlert alloc] init];
@@ -120,13 +105,17 @@ void SuggestSystemUnlock(
 	alert.messageText = Q2NSString(touchId
 		? tr::lng_settings_use_touchid(tr::now)
 		: tr::lng_settings_use_applewatch(tr::now));
-	const auto view = [[LAAuthenticationView alloc] initWithContext:context];
+	alert.informativeText = Q2NSString(touchId
+		? tr::lng_purple_unlock_touchid_hint(tr::now)
+		: tr::lng_purple_unlock_watch_hint(tr::now));
+	const auto view = [[LAAuthenticationView alloc]
+		initWithContext:context controlSize:NSControlSizeSmall];
 	view.frame = NSMakeRect(0, 0, view.fittingSize.width, view.fittingSize.height);
 	alert.accessoryView = view;
 	[view release];
-	const auto cancel = [alert addButtonWithTitle:Q2NSString(tr::lng_cancel(tr::now))];
-	cancel.keyEquivalent = @"\033";
-	[alert addButtonWithTitle:Q2NSString(tr::lng_settings_use_systempwd(tr::now))];
+	const auto passcode = [alert addButtonWithTitle:Q2NSString(
+		tr::lng_purple_unlock_use_passcode(tr::now))];
+	passcode.keyEquivalent = @"\033";
 	const auto weak = std::weak_ptr(prompt);
 	prompt->destroyed = QObject::connect(parent.get(), &QObject::destroyed, [weak] {
 		if (const auto strong = weak.lock()) {
@@ -155,9 +144,11 @@ void SuggestSystemUnlock(
 			}
 		}];
 	[alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
-		if (const auto strong = weak.lock()) {
-			Finish(strong, Result::Cancelled,
-				(response == NSAlertSecondButtonReturn) ? text : QString());
+		if (const auto strong = weak.lock(); strong && strong == ActivePrompt) {
+			Finish(strong, Result::Cancelled);
+			if (response == NSAlertFirstButtonReturn) {
+				crl::on_main(usePasscode);
+			}
 		}
 	}];
 	crl::on_main([weak, text] {

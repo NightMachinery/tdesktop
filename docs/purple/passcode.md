@@ -34,5 +34,7 @@ attached to that lock window. Only one request can be pending across Purple's
 windows. Switching away cancels the sheet. You can retry from the lock screen
 or enter your Purple passcode.
 
-The sheet offers the system password through the standard macOS authentication
-dialog. See [upstream hooks](upstream_hooks.md#macos-passcode-unlock).
+**Use Purple passcode** or Escape dismisses the sheet and returns the keyboard
+to Purple's passcode field. If biometrics and Apple Watch are unavailable,
+system unlock can still use the standard macOS authentication dialog.
+See [upstream hooks](upstream_hooks.md#macos-passcode-unlock).

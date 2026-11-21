@@ -250,7 +250,12 @@ void PasscodeLockWidget::suggestSystemUnlock() {
 				(::Platform::IsWindows()
 					? tr::lng_passcode_winhello_unlock(tr::now)
 					: tr::lng_passcode_touchid_unlock(tr::now)),
-				done);
+				done,
+				[weak] {
+					if (const auto strong = weak.get()) {
+						strong->setInnerFocus();
+					}
+				});
 		}, _systemUnlockSuggested);
 	});
 }

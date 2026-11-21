@@ -861,3 +861,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_music_options" = "Music options";
 "lng_purple_music_hide_chats" = "Hide chat list in Music";
 "lng_purple_music_no_results" = "No tracks found";
+
+"lng_purple_unlock_use_passcode" = "Use Purple passcode";
+"lng_purple_unlock_touchid_hint" = "Rest a finger on the Touch ID sensor.";
+"lng_purple_unlock_watch_hint" = "Confirm on your Apple Watch.";
