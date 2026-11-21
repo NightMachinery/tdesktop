@@ -6,7 +6,10 @@ and row spacing as **Last Seen & Online**. **My Contacts** includes eligible
 Telegram contacts. **Everybody** also includes other people whose birthday
 Purple has received from Telegram and can still see. The app uses the ordinary
 birthdays request and its existing peer data. It does not scan chats or request
-dates from accounts that have kept them private.
+dates from accounts that have kept them private. Use **Always Remind** with
+**Nobody** to get reminders only for the people you choose. It also adds
+selected people to the **My Contacts** audience. **Never Remind** takes
+priority when someone appears on both lists.
 
 Click the chat-list banner to see the people with birthdays today. Select a
 person to open Telegram's gift chooser or their chat. **Never Remind** excludes
@@ -15,6 +18,6 @@ Remove the person from **Never Remind** in the settings to resume reminders.
 Closing the banner hides birthday reminders for the rest of the local day.
 The banner and its recipient list respect the current Work Mode visibility.
 
-The audience and exclusions are stored in the account's local Desktop
+The audience and both lists are stored in the account's local Desktop
 preferences. Each signed-in account has its own rules. Telegram's public
 birthday privacy and manual gifting are independent of those rules.

@@ -12,7 +12,8 @@ docs/purple/upstream_hooks.md.
 "lng_purple_settings_title" = "Purple";
 "lng_purple_birthday_reminders" = "Birthday Reminders";
 "lng_purple_birthday_who" = "Whose birthdays should Purple remind you about?";
-"lng_purple_birthday_audience_about" = "Everybody includes people Purple knows whose birthday is visible to you. The Never Remind list applies to every choice.";
+"lng_purple_birthday_audience_about" = "Always Remind includes selected people even when you choose Nobody. Never Remind takes priority. Purple can only remind you about birthdays visible to you.";
+"lng_purple_birthday_always" = "Always Remind";
 "lng_purple_birthday_never" = "Never Remind";
 "lng_purple_birthday_banner_about" = "View birthday reminders";
 "lng_purple_birthday_empty" = "No birthdays to show.";

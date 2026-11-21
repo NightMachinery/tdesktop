@@ -45,6 +45,7 @@ enum class Audience {
 };
 
 constexpr auto kAudience = "purple-birthday-audience";
+constexpr auto kAlways = "purple-birthday-always";
 constexpr auto kNever = "purple-birthday-never";
 constexpr auto kHiddenDay = "purple-birthday-hidden-day";
 
@@ -78,9 +79,11 @@ void WriteAudience(not_null<Main::Session*> session, Audience audience) {
 	Changes.fire_copy(session.get());
 }
 
-base::flat_set<UserId> Excluded(not_null<Main::Session*> session) {
+base::flat_set<UserId> ReadReminderList(
+		not_null<Main::Session*> session,
+		const char *key) {
 	auto result = base::flat_set<UserId>();
-	const auto stored = session->local().readPref<QByteArray>(kNever);
+	const auto stored = session->local().readPref<QByteArray>(key);
 	for (const auto &entry : stored.split(',')) {
 		const auto id = entry.toULongLong();
 		if (id) {
@@ -90,14 +93,15 @@ base::flat_set<UserId> Excluded(not_null<Main::Session*> session) {
 	return result;
 }
 
-void WriteExcluded(
+void WriteReminderList(
 		not_null<Main::Session*> session,
-		const base::flat_set<UserId> &excluded) {
+		const char *key,
+		const base::flat_set<UserId> &people) {
 	auto encoded = QList<QByteArray>();
-	for (const auto id : excluded) {
+	for (const auto id : people) {
 		encoded.push_back(QByteArray::number(id.bare));
 	}
-	session->local().writePref<QByteArray>(kNever, encoded.join(','));
+	session->local().writePref<QByteArray>(key, encoded.join(','));
 	Changes.fire_copy(session.get());
 }
 
@@ -105,8 +109,22 @@ QByteArray Today() {
 	return QByteArray::number(QDate::currentDate().toJulianDay());
 }
 
-bool Enabled(not_null<Main::Session*> session) {
-	return (ReadAudience(session) != Audience::Nobody)
+struct ReminderRules {
+	Audience audience;
+	base::flat_set<UserId> always;
+	base::flat_set<UserId> never;
+};
+
+ReminderRules ReadRules(not_null<Main::Session*> session) {
+	return {
+		.audience = ReadAudience(session),
+		.always = ReadReminderList(session, kAlways),
+		.never = ReadReminderList(session, kNever),
+	};
+}
+
+bool Enabled(not_null<Main::Session*> session, const ReminderRules &rules) {
+	return (rules.audience != Audience::Nobody || !rules.always.empty())
 		&& (session->local().readPref<QByteArray>(kHiddenDay) != Today());
 }
 
@@ -118,24 +136,38 @@ bool Eligible(not_null<UserData*> user) {
 		&& !user->isBlocked();
 }
 
-bool Matches(
-		not_null<UserData*> user,
-		Audience audience,
-		const base::flat_set<UserId> &excluded) {
+bool Matches(not_null<UserData*> user, const ReminderRules &rules) {
+	const auto id = peerToUser(user->id);
 	return Eligible(user)
-		&& (audience == Audience::Everyone || user->isContact())
-		&& !excluded.contains(peerToUser(user->id))
+		&& !rules.never.contains(id)
+		&& (rules.always.contains(id)
+			|| rules.audience == Audience::Everyone
+			|| (rules.audience == Audience::Contacts && user->isContact()))
 		&& Data::IsBirthdayToday(user->birthday());
 }
 
-class ExclusionsController final : public ChatsListBoxController {
-public:
-	explicit ExclusionsController(
+std::vector<UserId> CollectReminderUsers(
 		not_null<Main::Session*> session,
-		std::vector<not_null<PeerData*>> selected)
+		const ReminderRules &rules) {
+	auto people = std::vector<UserId>();
+	session->data().enumerateUsers([&](not_null<UserData*> user) {
+		if (Matches(user, rules) && PickerVisible(user)) {
+			people.push_back(peerToUser(user->id));
+		}
+	});
+	return people;
+}
+
+class ReminderListController final : public ChatsListBoxController {
+public:
+	ReminderListController(
+		not_null<Main::Session*> session,
+		std::vector<not_null<PeerData*>> selected,
+		rpl::producer<QString> title)
 	: ChatsListBoxController(session)
 	, _session(session)
-	, _selected(std::move(selected)) {
+	, _selected(std::move(selected))
+	, _title(std::move(title)) {
 	}
 
 	Main::Session &session() const override {
@@ -148,7 +180,7 @@ public:
 
 private:
 	void prepareViewHook() override {
-		delegate()->peerListSetTitle(tr::lng_purple_birthday_never());
+		delegate()->peerListSetTitle(std::move(_title));
 		delegate()->peerListAddSelectedPeers(_selected);
 	}
 
@@ -161,12 +193,16 @@ private:
 
 	const not_null<Main::Session*> _session;
 	std::vector<not_null<PeerData*>> _selected;
+	rpl::producer<QString> _title;
 
 };
 
-void EditExclusions(not_null<Window::SessionController*> window) {
+void EditReminderList(
+		not_null<Window::SessionController*> window,
+		const char *key,
+		rpl::producer<QString> title) {
 	const auto session = &window->session();
-	const auto original = Excluded(session);
+	const auto original = ReadReminderList(session, key);
 	auto selected = std::vector<not_null<PeerData*>>();
 	for (const auto id : original) {
 		selected.push_back(session->data().user(id));
@@ -177,7 +213,7 @@ void EditExclusions(not_null<Window::SessionController*> window) {
 			for (const auto peer : box->collectSelectedRows()) {
 				checked.insert(peerToUser(peer->id));
 			}
-			auto next = Excluded(session);
+			auto next = ReadReminderList(session, key);
 			for (const auto id : original) {
 				if (!checked.contains(id)) {
 					next.remove(id);
@@ -189,13 +225,16 @@ void EditExclusions(not_null<Window::SessionController*> window) {
 				}
 			}
 			box->closeBox();
-			WriteExcluded(session, next);
+			WriteReminderList(session, key, next);
 		});
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	};
 	window->show(
 		Box<PeerListBox>(
-			std::make_unique<ExclusionsController>(session, std::move(selected)),
+			std::make_unique<ReminderListController>(
+				session,
+				std::move(selected),
+				std::move(title)),
 			std::move(init)),
 		Ui::LayerOption::KeepOther);
 }
@@ -232,15 +271,21 @@ void SettingsBox(
 		}, row->lifetime());
 	}
 	Ui::AddDividerText(layout, tr::lng_purple_birthday_audience_about());
-	auto neverCount = rpl::single(rpl::empty)
-		| rpl::then(BirthdayReminderChanges(session))
-		| rpl::map([=] { return QString::number(Excluded(session).size()); });
-	::Settings::AddButtonWithLabel(
-		layout,
-		tr::lng_purple_birthday_never(),
-		std::move(neverCount),
-		st::settingsButtonNoIcon
-	)->setClickedCallback([=] { EditExclusions(window); });
+	const auto addList = [&](const char *key, rpl::producer<QString> title) {
+		auto count = rpl::single(rpl::empty)
+			| rpl::then(BirthdayReminderChanges(session))
+			| rpl::map([=] {
+				return QString::number(ReadReminderList(session, key).size());
+			});
+		::Settings::AddButtonWithLabel(
+			layout,
+			rpl::duplicate(title),
+			std::move(count),
+			st::settingsButtonNoIcon
+		)->setClickedCallback([=] { EditReminderList(window, key, title); });
+	};
+	addList(kAlways, tr::lng_purple_birthday_always());
+	addList(kNever, tr::lng_purple_birthday_never());
 	box->addButton(tr::lng_settings_save(), [=] {
 		if (group->current() != initial) {
 			WriteAudience(session, group->current());
@@ -283,9 +328,9 @@ public:
 	}
 
 	void rowRightActionClicked(not_null<PeerListRow*> row) override {
-		auto excluded = Excluded(_session);
+		auto excluded = ReadReminderList(_session, kNever);
 		excluded.insert(peerToUser(row->peer()->id));
-		WriteExcluded(_session, excluded);
+		WriteReminderList(_session, kNever, excluded);
 	}
 
 private:
@@ -356,8 +401,8 @@ rpl::producer<> BirthdayReminderChanges(not_null<Main::Session*> session) {
 
 bool BirthdayReminderFor(not_null<UserData*> user) {
 	const auto session = &user->session();
-	return Enabled(session)
-		&& Matches(user, ReadAudience(session), Excluded(session));
+	const auto rules = ReadRules(session);
+	return Enabled(session, rules) && Matches(user, rules);
 }
 
 rpl::producer<bool> BirthdayReminderValue(not_null<UserData*> user) {
@@ -368,24 +413,18 @@ rpl::producer<bool> BirthdayReminderValue(not_null<UserData*> user) {
 }
 
 bool BirthdayRemindersAvailable(not_null<Main::Session*> session) {
-	return Enabled(session)
+	const auto rules = ReadRules(session);
+	return Enabled(session, rules)
 		&& (!session->promoSuggestions().knownBirthdaysToday()
-			|| !BirthdayReminderUsers(session).empty());
+			|| !CollectReminderUsers(session, rules).empty());
 }
 
 std::vector<UserId> BirthdayReminderUsers(not_null<Main::Session*> session) {
-	if (!Enabled(session)) {
+	const auto rules = ReadRules(session);
+	if (!Enabled(session, rules)) {
 		return {};
 	}
-	const auto audience = ReadAudience(session);
-	const auto excluded = Excluded(session);
-	auto people = std::vector<UserId>();
-	session->data().enumerateUsers([&](not_null<UserData*> user) {
-		if (Matches(user, audience, excluded) && PickerVisible(user)) {
-			people.push_back(peerToUser(user->id));
-		}
-	});
-	return people;
+	return CollectReminderUsers(session, rules);
 }
 
 void HideBirthdayRemindersToday(not_null<Main::Session*> session) {
