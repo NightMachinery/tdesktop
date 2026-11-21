@@ -95,6 +95,11 @@ Menus, settings, and compose overlays use Telegram's built-in navigation.
 By default, Alt+Space stays with the system or editor.
 ## Custom bindings
 
+Purple ships the [default keymap](../../Telegram/Resources/purple/default-keys.edn)
+as a bundled EDN resource. Use it to look up the default chords and
+command names for each mode. Your local file can contain just the
+bindings you want to change.
+
 Save `keys.edn` beside Purple's local [settings.toml](config.md) and restart
 Purple. Group bindings with `:normal` and `:insert`. Each chord maps to a
 command keyword from `SPC h f`. For example:

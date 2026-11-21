@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/purple">
+        <file>default-keys.edn</file>
+    </qresource>
+</RCC>

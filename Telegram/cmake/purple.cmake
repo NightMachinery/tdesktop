@@ -422,6 +422,8 @@ PRIVATE
     purple/purple_user_privacy.h
 )
 
+nice_target_sources(Telegram ${res_loc} PRIVATE purple/keymaps.qrc)
+
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)

@@ -1,0 +1,71 @@
+; Built-in Purple Desktop keymap. Local keys.edn entries overlay this map.
+{:normal {"C-[" :enter-normal-mode
+          "i" :enter-insert-mode
+          "SPC c b" :chat-backgrounds-visibility-toggle
+          "[ c" :chat-cursor-previous
+          "k" :chat-cursor-previous
+          "] c" :chat-cursor-next
+          "j" :chat-cursor-next
+          "RET" :chat-cursor-open
+          "SPC RET" :chat-palette
+          "[ f" :folder-previous
+          "] f" :folder-next
+          "g s s" :message-hint-select
+          "g s y" :message-hint-copy-text
+          "g s m" :message-hint-menu
+          "g s l" :message-hint-copy-link
+          "g s u" :message-hint-copy-url
+          "g s o" :message-hint-open-url
+          "g s r" :message-hint-reply
+          "g s e" :message-hint-edit
+          "/" :search-messages
+          "SPC s s" :search-messages
+          "SPC o m" :open-main-menu
+          "SPC o s e" :open-settings
+          "SPC o s a" :open-saved-messages
+          "SPC o a" :open-archived-chats
+          "SPC o c" :open-contacts
+          "SPC o p" :open-calls
+          "SPC o d" :open-downloads
+          "SPC n g" :new-group
+          "SPC n c" :new-channel
+          "SPC n p" :add-contact
+          "SPC c h s" :open-scheduled-messages
+          "SPC c m" :open-chat-menu
+          "SPC c i" :open-chat-info
+          "SPC c s v" :open-chat-media
+          "SPC c s a" :open-chat-music
+          "SPC c s f" :open-chat-files
+          "SPC c s l" :open-chat-links
+          "SPC c s r" :open-chat-voice
+          "SPC c s g" :open-chat-gifs
+          "SPC c s p" :open-chat-polls
+          "SPC c h p" :open-pinned-messages
+          "SPC c u" :attach-files
+          "SPC c p" :preview-chat
+          "SPC m m" :open-music
+          "SPC m l" :open-playlists
+          "SPC m p" :playback-toggle
+          "SPC m s" :playback-stop
+          "[ t" :playback-previous-track
+          "] t" :playback-next-track
+          "SPC m b" :playback-seek-backward
+          "SPC m f" :playback-seek-forward
+          "SPC a 1" :switch-account-1
+          "SPC a 2" :switch-account-2
+          "SPC a 3" :switch-account-3
+          "SPC a 4" :switch-account-4
+          "SPC a 5" :switch-account-5
+          "SPC a 6" :switch-account-6
+          "SPC w l" :focus-chat-list
+          "SPC w c" :focus-conversation
+          "[ m" :history-page-older
+          "] m" :history-page-newer
+          "] ]" :history-jump-to-latest
+          "] u" :history-jump-to-unread
+          "SPC c h d" :history-open-calendar
+          "SPC ?" :keys-help
+          "SPC SPC" :command-search
+          "SPC h k" :key-describe
+          "SPC h f" :command-describe}
+ :insert {"C-[" :enter-normal-mode}}

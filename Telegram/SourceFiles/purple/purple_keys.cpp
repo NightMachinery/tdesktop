@@ -428,86 +428,12 @@ enum class KeyMode {
 	Insert,
 };
 
-constexpr auto kCtrlBracket = int(kCtrl) | Qt::Key_BracketLeft;
 constexpr auto kCtrlG = int(kCtrl) | Qt::Key_G;
 
 struct Binding {
 	Action action;
 	Chord keys;
 	KeyMode mode = KeyMode::Normal;
-};
-
-const Binding kBindings[] = {
-	{ Action::EnterNormalMode, { kCtrlBracket }, KeyMode::Insert },
-	{ Action::EnterNormalMode, { kCtrlBracket } },
-	{ Action::EnterInsertMode, { Qt::Key_I } },
-	{ Action::Backgrounds, { Qt::Key_Space, Qt::Key_C, Qt::Key_B } },
-	{ Action::PreviousChat, { Qt::Key_BracketLeft, Qt::Key_C } },
-	{ Action::PreviousChat, { Qt::Key_K } },
-	{ Action::NextChat, { Qt::Key_BracketRight, Qt::Key_C } },
-	{ Action::NextChat, { Qt::Key_J } },
-	{ Action::OpenChat, { Qt::Key_Return } },
-	{ Action::ChatPalette, { Qt::Key_Space, Qt::Key_Return } },
-	{ Action::PreviousFolder, { Qt::Key_BracketLeft, Qt::Key_F } },
-	{ Action::NextFolder, { Qt::Key_BracketRight, Qt::Key_F } },
-	{ Action::SelectMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_S } },
-	{ Action::CopyMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_Y } },
-	{ Action::MessageMenu, { Qt::Key_G, Qt::Key_S, Qt::Key_M } },
-	{ Action::CopyMessageLink, { Qt::Key_G, Qt::Key_S, Qt::Key_L } },
-	{ Action::CopyMessageUrl, { Qt::Key_G, Qt::Key_S, Qt::Key_U } },
-	{ Action::OpenMessageUrl, { Qt::Key_G, Qt::Key_S, Qt::Key_O } },
-	{ Action::ReplyToMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_R } },
-	{ Action::EditMessage, { Qt::Key_G, Qt::Key_S, Qt::Key_E } },
-	{ Action::Search, { Qt::Key_Slash } },
-	{ Action::Search, { Qt::Key_Space, Qt::Key_S, Qt::Key_S } },
-	{ Action::OpenMainMenu, { Qt::Key_Space, Qt::Key_O, Qt::Key_M } },
-	{ Action::OpenSettings, { Qt::Key_Space, Qt::Key_O, Qt::Key_S, Qt::Key_E } },
-	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S, Qt::Key_A } },
-	{ Action::OpenArchive, { Qt::Key_Space, Qt::Key_O, Qt::Key_A } },
-	{ Action::OpenContacts, { Qt::Key_Space, Qt::Key_O, Qt::Key_C } },
-	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_P } },
-	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
-	{ Action::NewGroup, { Qt::Key_Space, Qt::Key_N, Qt::Key_G } },
-	{ Action::NewChannel, { Qt::Key_Space, Qt::Key_N, Qt::Key_C } },
-	{ Action::AddContact, { Qt::Key_Space, Qt::Key_N, Qt::Key_P } },
-	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_S } },
-	{ Action::OpenChatMenu, { Qt::Key_Space, Qt::Key_C, Qt::Key_M } },
-	{ Action::OpenChatInfo, { Qt::Key_Space, Qt::Key_C, Qt::Key_I } },
-	{ Action::OpenChatMedia, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_V } },
-	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_A } },
-	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_F } },
-	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_L } },
-	{ Action::OpenChatVoice, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_R } },
-	{ Action::OpenChatGifs, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_G } },
-	{ Action::OpenChatPolls, { Qt::Key_Space, Qt::Key_C, Qt::Key_S, Qt::Key_P } },
-	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_P } },
-	{ Action::AttachFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_U } },
-	{ Action::PreviewChat, { Qt::Key_Space, Qt::Key_C, Qt::Key_P } },
-	{ Action::OpenMusic, { Qt::Key_Space, Qt::Key_M, Qt::Key_M } },
-	{ Action::OpenPlaylists, { Qt::Key_Space, Qt::Key_M, Qt::Key_L } },
-	{ Action::TogglePlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_P } },
-	{ Action::StopPlayback, { Qt::Key_Space, Qt::Key_M, Qt::Key_S } },
-	{ Action::PreviousTrack, { Qt::Key_BracketLeft, Qt::Key_T } },
-	{ Action::NextTrack, { Qt::Key_BracketRight, Qt::Key_T } },
-	{ Action::SeekBackward, { Qt::Key_Space, Qt::Key_M, Qt::Key_B } },
-	{ Action::SeekForward, { Qt::Key_Space, Qt::Key_M, Qt::Key_F } },
-	{ Action::Account1, { Qt::Key_Space, Qt::Key_A, Qt::Key_1 } },
-	{ Action::Account2, { Qt::Key_Space, Qt::Key_A, Qt::Key_2 } },
-	{ Action::Account3, { Qt::Key_Space, Qt::Key_A, Qt::Key_3 } },
-	{ Action::Account4, { Qt::Key_Space, Qt::Key_A, Qt::Key_4 } },
-	{ Action::Account5, { Qt::Key_Space, Qt::Key_A, Qt::Key_5 } },
-	{ Action::Account6, { Qt::Key_Space, Qt::Key_A, Qt::Key_6 } },
-	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_L } },
-	{ Action::FocusConversation, { Qt::Key_Space, Qt::Key_W, Qt::Key_C } },
-	{ Action::OlderMessagesPage, { Qt::Key_BracketLeft, Qt::Key_M } },
-	{ Action::NewerMessagesPage, { Qt::Key_BracketRight, Qt::Key_M } },
-	{ Action::LatestMessages, { Qt::Key_BracketRight, Qt::Key_BracketRight } },
-	{ Action::UnreadMessages, { Qt::Key_BracketRight, Qt::Key_U } },
-	{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_H, Qt::Key_D } },
-	{ Action::Help, { Qt::Key_Space, Qt::Key_Question } },
-	{ Action::Run, { Qt::Key_Space, Qt::Key_Space } },
-	{ Action::DescribeChord, { Qt::Key_Space, Qt::Key_H, Qt::Key_K } },
-	{ Action::DescribeCommand, { Qt::Key_Space, Qt::Key_H, Qt::Key_F } },
 };
 
 const Binding kLegacyBindings[] = {
@@ -875,9 +801,12 @@ std::optional<std::vector<Binding>> ParseBindings(
 
 const std::vector<Binding> &Bindings() {
 	static const auto result = [] {
-		auto defaults = std::vector<Binding>(
-			std::begin(kBindings),
-			std::end(kBindings));
+		auto bundled = QFile(u":/purple/default-keys.edn"_q);
+		const auto loaded = bundled.open(QIODevice::ReadOnly);
+		Expects(loaded);
+		auto parsed = ParseBindings(bundled.readAll(), false, {});
+		Expects(parsed.has_value());
+		auto defaults = std::move(*parsed);
 		const auto directory = ConfigDirectory();
 		auto info = QFileInfo(directory + u"/keys.edn"_q);
 		const auto legacy = !info.exists();
