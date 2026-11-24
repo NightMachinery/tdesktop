@@ -2358,8 +2358,6 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 	const auto weakSession = base::make_weak(&current->session());
 	const auto peerId = forum->peer()->id;
 	auto updates = rpl::merge(
-		forum->chatsListChanges(),
-		forum->chatsListLoadedEvents(),
 		forum->topicDestroyed() | rpl::to_empty,
 		forum->topicsList()->unreadStateChanges() | rpl::to_empty,
 		forum->topicsList()->fullSize().changes() | rpl::to_empty);
@@ -2398,6 +2396,14 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 				liveForum->requestTopics();
 			}
 		},
+		.onReload = [weakSession, peerId] {
+			const auto s = weakSession.get();
+			const auto peer = s ? s->data().peerLoaded(peerId) : nullptr;
+			if (const auto liveForum = peer ? peer->forum() : nullptr) {
+				liveForum->reloadTopics();
+			}
+		},
+		.pageUpdates = forum->chatsListChanges(),
 		.updates = std::move(updates),
 		.destroyed = forum->destroyed(),
 		.onOpenTopic = [guard, weakCtrl, peerId](MsgId rootId) {

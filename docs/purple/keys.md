@@ -211,9 +211,12 @@ on the modal status line and cheatsheet footer.
     proxy, weather requests are skipped automatically whenever an in-app proxy
     is enabled.
 - **Forum groups and threaded bots:** `SPC b t` / `, t` opens the live-updating
-  topic picker for the current forum group or threaded bot (refreshes as pages
-  arrive and loads more automatically on scroll, filter, or `L` / `g r`),
-  `SPC b T` / `, T` opens it filtered to unread topics, `SPC b n`/`N` (`, n`/`N`,
+  topic picker for the current forum group or threaded bot. It loads more as
+  you approach the end of the results or filter them. `L` loads a page and
+  `g r` refreshes the list, including after a failed load. The loading indicator
+  clears after ten seconds if no page arrives. An empty or duplicate page
+  pauses automatic loading. `SPC b T` / `, T` opens it filtered to unread
+  topics, `SPC b n`/`N` (`, n`/`N`,
   `] T`/`[ T`) cycle topics, `] U` jumps to the next unread topic, `SPC b l` /
   `, b` toggles the last viewed topic, `SPC b c` / `, c` creates a new forum
   topic or reserves a new bot thread, and `SPC b h` / `, h` / `g ^` opens or

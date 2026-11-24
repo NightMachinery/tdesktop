@@ -26,6 +26,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
+#include <QtCore/QTimer>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QKeyEvent>
@@ -3071,9 +3072,23 @@ public:
 			maybeRequestMore();
 		}, lifetime());
 
+		_loadTimeout.setSingleShot(true);
+		connect(&_loadTimeout, &QTimer::timeout, this, [=] {
+			_autoLoadPaused = true;
+			refreshFromSource(/*preserveScroll=*/true);
+		});
+		std::move(_config.pageUpdates) | rpl::on_next([=] {
+			refreshFromSource(/*preserveScroll=*/true);
+			if (_awaitingPage) {
+				_autoLoadPaused = ranges::none_of(_config.items, [&](const auto &item) {
+					return !_rootsBeforeLoad.contains(item.rootId.bare);
+				});
+				finishLoading();
+			}
+			QTimer::singleShot(0, this, [=] { maybeRequestMore(); });
+		}, lifetime());
 		if (_config.updates) {
 			std::move(_config.updates) | rpl::on_next([=] {
-				_loadingMore = false;
 				refreshFromSource(/*preserveScroll=*/true);
 			}, lifetime());
 		}
@@ -3084,6 +3099,7 @@ public:
 		}
 
 		_filter->changes() | rpl::on_next([=] {
+			_autoLoadPaused = false;
 			refilter(/*preserveScroll=*/false, MsgId(0));
 			maybeRequestMore();
 		}, lifetime());
@@ -3168,8 +3184,13 @@ protected:
 				moveSelection(-int(_visible.size()));
 				return;
 			} else if (key == Qt::Key_R && !mods) {
+				_autoLoadPaused = true;
+				finishLoading();
 				refreshFromSource(/*preserveScroll=*/true);
-				requestMore();
+				if (_config.onReload) {
+					startLoading();
+					_config.onReload();
+				}
 				return;
 			}
 		}
@@ -3205,6 +3226,7 @@ protected:
 			return;
 		} else if (key == Qt::Key_U && !mods) {
 			_unreadOnly = !_unreadOnly;
+			_autoLoadPaused = false;
 			refilter(/*preserveScroll=*/false, MsgId(0));
 			maybeRequestMore();
 			return;
@@ -3287,7 +3309,7 @@ protected:
 				out += u"  ·  c new"_q;
 			}
 			if (_hasMore) {
-				out += _loadingMore ? u"  ·  loading..."_q : u"  ·  L more"_q;
+				out += _loadTimeout.isActive() ? u"  ·  loading..."_q : u"  ·  L more"_q;
 			}
 			out += u"  ·  g r refresh  ·  q close"_q;
 			return out;
@@ -3311,26 +3333,39 @@ private:
 		auto snap = _config.onRefresh();
 		_config.items = std::move(snap.items);
 		_hasMore = snap.hasMore;
-		if (!_hasMore) {
-			_loadingMore = false;
-		}
 		refilter(preserveScroll, keepRootId);
 	}
 
+	void startLoading() {
+		constexpr auto kLoadTimeout = crl::time(10000);
+		_autoLoadPaused = false;
+		_awaitingPage = true;
+		_rootsBeforeLoad.clear();
+		for (const auto &item : _config.items) {
+			_rootsBeforeLoad.insert(item.rootId.bare);
+		}
+		_loadTimeout.start(kLoadTimeout);
+		_rows->setStatus(true, true);
+		update();
+	}
+
+	void finishLoading() {
+		_awaitingPage = false;
+		_loadTimeout.stop();
+		_rows->setStatus(_hasMore, false);
+		update();
+	}
+
 	void requestMore() {
-		if (!_hasMore || _loadingMore || !_config.onLoadMore) {
+		if (!_hasMore || _loadTimeout.isActive() || !_config.onLoadMore) {
 			return;
 		}
-		_loadingMore = true;
-		if (_rows) {
-			_rows->setStatus(_hasMore, _loadingMore);
-		}
-		update();
+		startLoading();
 		_config.onLoadMore();
 	}
 
 	void maybeRequestMore() {
-		if (!_hasMore || _loadingMore || !_config.onLoadMore) {
+		if (_autoLoadPaused || !_hasMore || _loadTimeout.isActive() || !_config.onLoadMore) {
 			return;
 		}
 		const auto maxTop = _scroll->scrollTopMax();
@@ -3376,7 +3411,7 @@ private:
 		}
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
-			_rows->setStatus(_hasMore, _loadingMore);
+			_rows->setStatus(_hasMore, _loadTimeout.isActive());
 		}
 		if (!preserveScroll) {
 			_scroll->scrollToY(0);
@@ -3419,7 +3454,10 @@ private:
 	TopicPickerConfig _config;
 	bool _unreadOnly = false;
 	bool _hasMore = false;
-	bool _loadingMore = false;
+	QTimer _loadTimeout;
+	QSet<int64> _rootsBeforeLoad;
+	bool _awaitingPage = false;
+	bool _autoLoadPaused = false;
 	bool _pendingG = false;
 	std::vector<int> _visible;
 	Ui::PeerUserpicView _parentAvatar;

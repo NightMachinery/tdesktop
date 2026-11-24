@@ -304,15 +304,17 @@ ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScre
         "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
 ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
-ordered(keys, "void Keys::showTopicPicker", "chatsListChanges()", "chatsListLoadedEvents()",
-        "CreateTopicPickerLayer", "onRefresh", "onLoadMore", "requestTopics()",
+ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh",
+        "onLoadMore", "requestTopics()", "onReload", "reloadTopics()", "pageUpdates",
         "reserveNewBotTopic", "NewForumTopicBox")
 ordered(keys, "avatarSession", "avatarPeerId")
 
 keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
-ordered(keys_ui, "class TopicPickerLayer final", "refreshFromSource", "requestMore", "maybeRequestMore")
+ordered(keys_ui, "class TopicPickerLayer final", "QTimer::timeout", "_config.pageUpdates",
+        "_rootsBeforeLoad.contains", "QTimer::singleShot(0, this, [=] { maybeRequestMore(); })",
+        "Qt::Key_R && !mods", "finishLoading()", "_config.onReload()")
 ordered(keys_ui, "class NoticeLayer final", "class NoticeHistoryLayer final",
         "CreateNoticeLayer", "CreateNoticeHistoryLayer")
 notices_cpp = read("purple/purple_notices.cpp")

@@ -217,6 +217,8 @@ struct TopicPickerConfig {
 	bool hasMore = false;
 	Fn<TopicPickerSnapshot()> onRefresh;
 	Fn<void()> onLoadMore;
+	Fn<void()> onReload;
+	rpl::producer<> pageUpdates;
 	rpl::producer<> updates;
 	rpl::producer<> destroyed;
 	Fn<void(MsgId rootId)> onOpenTopic;
