@@ -69,6 +69,11 @@ constexpr auto kCtrlMod = Qt::ControlModifier;
 	return f;
 }
 
+[[nodiscard]] bool IsRtl(const QWidget *widget) {
+	return style::RightToLeft()
+		|| (widget && widget->layoutDirection() == Qt::RightToLeft);
+}
+
 [[nodiscard]] QColor BadgeColor(BadgeKind kind) {
 	switch (kind) {
 	case BadgeKind::Normal: return QColor(0x2f, 0x7d, 0x44);
@@ -78,6 +83,7 @@ constexpr auto kCtrlMod = Qt::ControlModifier;
 	case BadgeKind::Hints: return QColor(0x7c, 0x3a, 0xed);
 	case BadgeKind::Palette: return QColor(0x6d, 0x28, 0xd9);
 	case BadgeKind::DescribeKey: return QColor(0xb4, 0x53, 0x09);
+	case BadgeKind::Help: return QColor(0x03, 0x69, 0xa1);
 	}
 	return QColor(0x2f, 0x7d, 0x44);
 }
@@ -239,7 +245,7 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 	auto p = Painter(this);
 	auto hq = PainterHighQualityEnabler(p);
 	const auto r = rect();
-	const auto rtl = style::RightToLeft();
+	const auto rtl = IsRtl(this);
 
 	const auto bg = BlendColor(st::windowBg->c, st::windowBgOver->c, 0.55);
 	p.fillRect(r, bg);
@@ -267,13 +273,16 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 	const auto monoFont = MonoFont(11, false);
 	const auto monoBold = MonoFont(11, true);
 
-	// Right-side quiet discovery cue (only if room remains).
-	const auto cue = _state.localleaderHint.isEmpty()
-		? u"SPC leader  ·  , local  ·  M-x run  ·  ? help"_q
-		: (_state.localleaderHint + u"  ·  M-x run  ·  ? help"_q);
+	// Right-side quiet discovery cue (layer-specific when a layer is open).
+	const auto cue = !_state.rightCue.isEmpty()
+		? _state.rightCue
+		: (_state.localleaderHint.isEmpty()
+			? u"SPC leader  ·  , local  ·  M-x run  ·  ? help"_q
+			: (_state.localleaderHint + u"  ·  M-x run  ·  ? help"_q));
 	const auto cueFm = QFontMetrics(uiFont);
 	const auto cueW = cueFm.horizontalAdvance(cue);
-	if (rightX - leftX > cueW + 240) {
+	const auto minMiddle = _state.rightCue.isEmpty() ? 240 : 120;
+	if (rightX - leftX > cueW + minMiddle) {
 		p.setFont(uiFont);
 		p.setPen(st::windowSubTextFg);
 		const auto cueRect = rtl
@@ -373,6 +382,53 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 // WhichKeyOverlay
 // ---------------------------------------------------------------------------
 
+namespace {
+
+[[nodiscard]] int MeasureWhichKeyCapsWidth(
+		const QStringList &keys,
+		const Ui::KeysLegend::St &st,
+		const QFontMetrics &sepFm) {
+	if (keys.isEmpty()) {
+		return 0;
+	}
+	const auto sepW = sepFm.horizontalAdvance(u"/"_q);
+	auto total = 0;
+	for (auto i = 0; i < keys.size(); ++i) {
+		if (i > 0) {
+			total += sepW + 4;
+		}
+		total += Ui::KeysLegend::MakeCap(keys[i], st).width;
+	}
+	return total;
+}
+
+void PaintWhichKeyCaps(
+		QPainter &p,
+		const QStringList &keys,
+		int x,
+		int centerY,
+		const Ui::KeysLegend::St &st,
+		const QFontMetrics &sepFm) {
+	const auto sepW = sepFm.horizontalAdvance(u"/"_q);
+	auto cursor = x;
+	for (auto i = 0; i < keys.size(); ++i) {
+		if (i > 0) {
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			p.drawText(
+				QRect(cursor + 2, centerY - st.capHeight / 2, sepW, st.capHeight),
+				Qt::AlignCenter,
+				u"/"_q);
+			cursor += sepW + 4;
+		}
+		const auto cap = Ui::KeysLegend::MakeCap(keys[i], st);
+		Ui::KeysLegend::PaintCap(p, cap, cursor, centerY - cap.height / 2, st);
+		cursor += cap.width;
+	}
+}
+
+} // namespace
+
 WhichKeyOverlay::WhichKeyOverlay(not_null<QWidget*> parent)
 : RpWidget(parent) {
 	setFocusPolicy(Qt::NoFocus);
@@ -388,31 +444,43 @@ int WhichKeyOverlay::computeHeight(int availWidth, int maxHeight) const {
 	constexpr auto kHeaderH = 38;
 	constexpr auto kPadY = 12;
 	constexpr auto kRowH = 26;
+	constexpr auto kSectionGap = 13;
 	const auto cols = computeColumns(availWidth);
-	const auto count = int(_state.entries.size());
-	const auto rows = std::max(1, (count + cols - 1) / cols);
-	const auto desired = kHeaderH + 2 * kPadY + rows * kRowH;
+	const auto groupRows = _state.groups.empty()
+		? 0
+		: (int(_state.groups.size()) + cols - 1) / cols;
+	const auto leafRows = _state.leaves.empty()
+		? 0
+		: (int(_state.leaves.size()) + cols - 1) / cols;
+	const auto gap = (groupRows > 0 && leafRows > 0) ? kSectionGap : 0;
+	const auto totalRows = std::max(1, groupRows + leafRows);
+	const auto desired = kHeaderH + 2 * kPadY + totalRows * kRowH + gap;
 	return std::min(desired, std::max(kHeaderH + 2 * kPadY + kRowH, maxHeight));
 }
 
 void WhichKeyOverlay::setState(WhichKeyState state) {
 	_state = std::move(state);
 	const auto st = CapStyle();
+	const auto sepFm = QFontMetrics(st::normalFont);
 	auto maxCap = st.capMinWidth;
-	for (const auto &entry : _state.entries) {
-		maxCap = std::max(maxCap, Ui::KeysLegend::MakeCap(entry.key, st).width);
-	}
-	_capColumnWidth = std::clamp(maxCap, 28, 72);
+	const auto scan = [&](const std::vector<WhichKeyEntry> &list) {
+		for (const auto &entry : list) {
+			maxCap = std::max(maxCap, MeasureWhichKeyCapsWidth(entry.keys, st, sepFm));
+		}
+	};
+	scan(_state.groups);
+	scan(_state.leaves);
+	_capColumnWidth = std::clamp(maxCap, 28, 96);
 	update();
 }
 
 void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
-	if (_state.entries.empty()) {
+	if (_state.groups.empty() && _state.leaves.empty()) {
 		hide();
 		return;
 	}
 	const auto drawerW = std::min(availableAboveStatusBar.width(), 1120);
-	const auto maxH = std::max(140, int(availableAboveStatusBar.height() * 0.42));
+	const auto maxH = std::max(140, int(availableAboveStatusBar.height() * 0.44));
 	const auto drawerH = computeHeight(drawerW, maxH);
 	_columns = computeColumns(drawerW);
 	_columnWidth = std::max(1, (drawerW - 36 - (_columns - 1) * 18) / _columns);
@@ -432,7 +500,8 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 	auto hq = PainterHighQualityEnabler(p);
 	const auto r = rect();
 	const auto st = CapStyle();
-	const auto rtl = style::RightToLeft();
+	const auto sepFm = QFontMetrics(st::normalFont);
+	const auto rtl = IsRtl(this);
 
 	// Elevated rounded-top drawer surface.
 	constexpr auto kRadius = 10.0;
@@ -500,49 +569,71 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 		p.drawText(QRect(drawX, 0, hintW, kHeaderH), Qt::AlignVCenter | Qt::AlignLeft, hint);
 	}
 
-	// Balanced multi-column continuation grid.
+	// Balanced multi-column continuation grid: groups block, divider, then leaf commands block.
 	constexpr auto kPadX = 18;
 	constexpr auto kPadY = 10;
 	constexpr auto kRowH = 26;
 	constexpr auto kColGap = 18;
-	const auto maxRows = std::max(1, (r.height() - kHeaderH - 2 * kPadY) / kRowH);
-	const auto maxVisible = maxRows * _columns;
-	const auto count = std::min(int(_state.entries.size()), maxVisible);
+	constexpr auto kSectionGap = 13;
+	const auto bottomLimit = r.height() - kPadY;
+	const auto arrowGlyph = rtl ? u"\u2190"_q : u"\u2192"_q;
 
-	for (auto i = 0; i < count; ++i) {
-		const auto &entry = _state.entries[i];
-		const auto col = i % _columns;
-		const auto row = i / _columns;
-		const auto colX = rtl
-			? (r.width() - kPadX - (col + 1) * _columnWidth - col * kColGap)
-			: (kPadX + col * (_columnWidth + kColGap));
-		const auto rowY = kHeaderH + kPadY + row * kRowH;
-		const auto midY = rowY + kRowH / 2;
+	const auto paintBlock = [&](const std::vector<WhichKeyEntry> &list, int startY) -> int {
+		if (list.empty()) {
+			return startY;
+		}
+		const auto rows = (int(list.size()) + _columns - 1) / _columns;
+		for (auto i = 0; i < int(list.size()); ++i) {
+			const auto col = i / rows;
+			const auto row = i % rows;
+			const auto rowY = startY + row * kRowH;
+			if (col >= _columns || rowY + kRowH > bottomLimit + 2) {
+				continue;
+			}
+			const auto &entry = list[i];
+			const auto colX = rtl
+				? (r.width() - kPadX - (col + 1) * _columnWidth - col * kColGap)
+				: (kPadX + col * (_columnWidth + kColGap));
+			const auto midY = rowY + kRowH / 2;
 
-		const auto cap = Ui::KeysLegend::MakeCap(entry.key, st);
-		const auto capX = rtl
-			? (colX + _columnWidth - cap.width)
-			: (colX + (_capColumnWidth - cap.width));
-		Ui::KeysLegend::PaintCap(p, cap, capX, midY - cap.height / 2, st);
+			const auto capsW = MeasureWhichKeyCapsWidth(entry.keys, st, sepFm);
+			const auto capX = rtl
+				? (colX + _columnWidth - capsW)
+				: (colX + (_capColumnWidth - capsW));
+			PaintWhichKeyCaps(p, entry.keys, capX, midY, st, sepFm);
 
-		const auto arrowX = rtl
-			? (colX + _columnWidth - _capColumnWidth - 18)
-			: (colX + _capColumnWidth + 6);
-		p.setFont(st::normalFont);
-		p.setPen(st::windowSubTextFg);
-		p.drawText(QRect(arrowX, rowY, 14, kRowH), Qt::AlignCenter, u"\u2192"_q);
+			const auto arrowX = rtl
+				? (colX + _columnWidth - _capColumnWidth - 18)
+				: (colX + _capColumnWidth + 6);
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			p.drawText(QRect(arrowX, rowY, 14, kRowH), Qt::AlignCenter, arrowGlyph);
 
-		const auto labelW = std::max(24, _columnWidth - _capColumnWidth - 24);
-		const auto labelX = rtl ? colX : (colX + _capColumnWidth + 24);
-		const auto text = entry.isGroup ? (u"+"_q + entry.label) : entry.label;
-		const auto &font = entry.isGroup ? st::semiboldFont : st::normalFont;
-		p.setFont(font);
-		p.setPen(entry.isGroup ? st::windowActiveTextFg : st::windowFg);
-		const auto elided = QFontMetrics(font).elidedText(text, Qt::ElideRight, labelW);
-		p.drawText(
-			QRect(labelX, rowY, labelW, kRowH),
-			Qt::AlignVCenter | (rtl ? Qt::AlignRight : Qt::AlignLeft),
-			elided);
+			const auto labelW = std::max(24, _columnWidth - _capColumnWidth - 24);
+			const auto labelX = rtl ? colX : (colX + _capColumnWidth + 24);
+			const auto text = entry.isGroup ? (u"+"_q + entry.label) : entry.label;
+			const auto &font = entry.isGroup ? st::semiboldFont : st::normalFont;
+			p.setFont(font);
+			p.setPen(entry.isGroup ? st::windowActiveTextFg : st::windowFg);
+			const auto elided = QFontMetrics(font).elidedText(text, Qt::ElideRight, labelW);
+			p.drawText(
+				QRect(labelX, rowY, labelW, kRowH),
+				Qt::AlignVCenter | (rtl ? Qt::AlignRight : Qt::AlignLeft),
+				elided);
+		}
+		return startY + rows * kRowH;
+	};
+
+	auto curY = kHeaderH + kPadY;
+	if (!_state.groups.empty()) {
+		curY = paintBlock(_state.groups, curY);
+		if (!_state.leaves.empty() && curY + kSectionGap + kRowH <= bottomLimit + 2) {
+			p.fillRect(kPadX, curY + kSectionGap / 2, r.width() - 2 * kPadX, 1, st::boxDividerBg->c);
+			curY += kSectionGap;
+		}
+	}
+	if (!_state.leaves.empty()) {
+		paintBlock(_state.leaves, curY);
 	}
 }
 
@@ -599,7 +690,10 @@ protected:
 		auto hq = PainterHighQualityEnabler(p);
 		const auto st = CapStyle();
 		const auto sepFm = QFontMetrics(st::normalFont);
+		const auto tagFont = MonoFont(10, false);
+		const auto tagFm = QFontMetrics(tagFont);
 		const auto cardBg = BlendColor(st::windowBg->c, st::windowBgOver->c, 0.25);
+		const auto rtl = IsRtl(this);
 
 		constexpr auto kCardPad = 14;
 		constexpr auto kTitleH = 24;
@@ -607,7 +701,9 @@ protected:
 
 		for (auto i = size_t(0); i < _cards.size() && i < _layout.size(); ++i) {
 			const auto &card = _cards[i];
-			const auto rect = _layout[i];
+			const auto rect = rtl
+				? QRect(width() - _layout[i].x() - _layout[i].width(), _layout[i].y(), _layout[i].width(), _layout[i].height())
+				: _layout[i];
 			p.setPen(QPen(st::boxDividerBg->c, 1));
 			p.setBrush(cardBg);
 			p.drawRoundedRect(QRectF(rect).adjusted(.5, .5, -.5, -.5), 10, 10);
@@ -617,25 +713,50 @@ protected:
 			p.setPen(st::windowActiveTextFg);
 			p.drawText(
 				QRect(inner.x(), inner.y(), inner.width(), kTitleH),
-				Qt::AlignLeft | Qt::AlignVCenter,
-				card.title.toUpper());
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				card.title);
 			p.fillRect(inner.x(), inner.y() + kTitleH + 2, inner.width(), 1, st::boxDividerBg->c);
 
-			auto cardKeyCol = 88;
+			auto cardKeyCol = 82;
 			for (const auto &row : card.rows) {
 				cardKeyCol = std::max(
 					cardKeyCol,
 					MeasureChordsWidth(row.chords, st, sepFm) + 12);
 			}
-			cardKeyCol = std::min(cardKeyCol, std::max(88, inner.width() / 2));
+			cardKeyCol = std::min(cardKeyCol, std::max(82, int(inner.width() * 0.46)));
 
 			auto rowY = inner.y() + kTitleH + 8;
 			for (const auto &row : card.rows) {
 				const auto midY = rowY + kRowH / 2;
 				const auto usedW = MeasureChordsWidth(row.chords, st, sepFm);
-				PaintChords(p, row.chords, inner.x(), midY, st);
-				const auto textX = inner.x() + std::max(cardKeyCol, usedW + 10);
-				const auto textW = std::max(40, inner.right() - textX);
+				const auto colW = std::max(cardKeyCol, usedW + 10);
+				if (rtl) {
+					PaintChords(p, row.chords, inner.right() - usedW + 1, midY, st);
+				} else {
+					PaintChords(p, row.chords, inner.x(), midY, st);
+				}
+
+				auto tagReserve = 0;
+				if (!row.contextTag.isEmpty()) {
+					const auto tw = tagFm.horizontalAdvance(row.contextTag) + 10;
+					const auto tagRect = rtl
+						? QRect(inner.x(), midY - 9, tw, 18)
+						: QRect(inner.right() - tw + 1, midY - 9, tw, 18);
+					auto fill = BadgeColor(BadgeKind::Local);
+					fill.setAlpha(24);
+					p.setPen(Qt::NoPen);
+					p.setBrush(fill);
+					p.drawRoundedRect(tagRect, 4, 4);
+					p.setFont(tagFont);
+					p.setPen(BadgeColor(BadgeKind::Local));
+					p.drawText(tagRect, Qt::AlignCenter, row.contextTag);
+					tagReserve = tw + 8;
+				}
+
+				const auto textW = std::max(40, inner.width() - colW - tagReserve);
+				const auto textX = rtl
+					? (inner.x() + tagReserve)
+					: (inner.x() + colW);
 				p.setFont(st::normalFont);
 				p.setPen(st::windowFg);
 				const auto elided = QFontMetrics(st::normalFont).elidedText(
@@ -644,7 +765,7 @@ protected:
 					textW);
 				p.drawText(
 					QRect(textX, rowY, textW, kRowH),
-					Qt::AlignLeft | Qt::AlignVCenter,
+					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
 					elided);
 				rowY += kRowH;
 			}
@@ -740,21 +861,26 @@ protected:
 		}
 
 		auto y = 14;
+		const auto rtl = IsRtl(this);
 		const auto contentW = std::max(1, width() - 2 * kPadX);
 		for (const auto &group : _filtered) {
 			p.setFont(st::keysLegendTitleStyle.font);
 			p.setPen(st::windowActiveTextFg);
 			p.drawText(
 				QRect(kPadX, y, contentW, kSectionH - 4),
-				Qt::AlignLeft | Qt::AlignVCenter,
-				group.title.toUpper());
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				group.title);
 			p.fillRect(kPadX, y + kSectionH - 3, contentW, 1, st::boxDividerBg->c);
 			y += kSectionH;
 
 			for (const auto &row : group.rows) {
 				const auto midY = y + kRowH / 2;
 				const auto usedW = MeasureChordsWidth(row.chords, st, sepFm);
-				PaintChords(p, row.chords, kPadX, midY, st);
+				if (rtl) {
+					PaintChords(p, row.chords, width() - kPadX - usedW, midY, st);
+				} else {
+					PaintChords(p, row.chords, kPadX, midY, st);
+				}
 
 				const auto idText = row.commandId.isEmpty()
 					? QString()
@@ -762,22 +888,25 @@ protected:
 				const auto idW = idText.isEmpty()
 					? 0
 					: std::min(190, monoFm.horizontalAdvance(idText));
-				const auto labelX = kPadX + std::max(kKeyColW, usedW + 14);
-				const auto labelW = std::max(60, width() - kPadX - idW - 14 - labelX);
+				const auto keyCol = std::max(kKeyColW, usedW + 14);
+				const auto labelW = std::max(60, contentW - keyCol - (idW > 0 ? (idW + 14) : 0));
+				const auto labelX = rtl
+					? (kPadX + (idW > 0 ? (idW + 14) : 0))
+					: (kPadX + keyCol);
 
 				p.setFont(st::normalFont);
 				p.setPen(st::windowFg);
 				p.drawText(
 					QRect(labelX, y, labelW, kRowH),
-					Qt::AlignLeft | Qt::AlignVCenter,
+					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
 					QFontMetrics(st::normalFont).elidedText(row.label, Qt::ElideRight, labelW));
 
 				if (!idText.isEmpty() && idW > 0) {
 					p.setFont(monoFont);
 					p.setPen(st::windowSubTextFg);
 					p.drawText(
-						QRect(width() - kPadX - idW, y, idW, kRowH),
-						Qt::AlignRight | Qt::AlignVCenter,
+						QRect(rtl ? kPadX : (width() - kPadX - idW), y, idW, kRowH),
+						(rtl ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter,
 						monoFm.elidedText(idText, Qt::ElideRight, idW));
 				}
 				y += kRowH;
@@ -905,6 +1034,7 @@ protected:
 
 		constexpr auto kHeaderH = 58;
 		constexpr auto kFooterH = 34;
+		const auto rtl = IsRtl(this);
 
 		// Header title.
 		p.setFont(st::keysLegendHeaderStyle.font);
@@ -914,7 +1044,11 @@ protected:
 			: u"Keyboard Cheatsheet"_q;
 		const auto titleFm = QFontMetrics(st::keysLegendHeaderStyle.font);
 		const auto titleW = titleFm.horizontalAdvance(titleText);
-		p.drawText(QRect(24, 0, titleW + 8, kHeaderH), Qt::AlignLeft | Qt::AlignVCenter, titleText);
+		const auto titleX = rtl ? (width() - 24 - titleW - 8) : 24;
+		p.drawText(
+			QRect(titleX, 0, titleW + 8, kHeaderH),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+			titleText);
 
 		// Segmented tabs in header.
 		const auto tabFont = st::semiboldFont;
@@ -924,16 +1058,22 @@ protected:
 		const auto w1 = tabFm.horizontalAdvance(t1) + 22;
 		const auto w2 = tabFm.horizontalAdvance(t2) + 22;
 		const auto tabsW = w1 + w2 + 6;
-		const auto tabsRight = _close->x() - 14;
-		if (tabsRight - (24 + titleW + 18) >= tabsW) {
-			const auto tabsX = tabsRight - tabsW;
+		const auto tabsX = rtl ? (_close->x() + _close->width() + 14) : (_close->x() - 14 - tabsW);
+		const auto hasTabsRoom = rtl
+			? (tabsX + tabsW <= titleX - 18)
+			: (tabsX >= 24 + titleW + 18);
+		if (hasTabsRoom) {
 			const auto pillBg = QRect(tabsX, 14, tabsW, 30);
 			p.setPen(Qt::NoPen);
 			p.setBrush(st::windowBgOver->c);
 			p.drawRoundedRect(pillBg, 8, 8);
 
-			_tabSheetRect = QRect(tabsX + 3, 17, w1, 24);
-			_tabAllRect = QRect(tabsX + 3 + w1, 17, w2, 24);
+			_tabSheetRect = rtl
+				? QRect(tabsX + 3 + w2, 17, w1, 24)
+				: QRect(tabsX + 3, 17, w1, 24);
+			_tabAllRect = rtl
+				? QRect(tabsX + 3, 17, w2, 24)
+				: QRect(tabsX + 3 + w1, 17, w2, 24);
 
 			const auto activeRect = _showAll ? _tabAllRect : _tabSheetRect;
 			p.setBrush(st::windowBg->c);
@@ -971,8 +1111,8 @@ protected:
 		p.setPen(st::windowSubTextFg);
 		const auto leftHint = u"TAB switch view  ·  j/k scroll  ·  / filter  ·  q close"_q;
 		p.drawText(
-			QRect(20, height() - kFooterH, width() / 2, kFooterH),
-			Qt::AlignLeft | Qt::AlignVCenter,
+			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, width() / 2 - 20, kFooterH),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
 			leftHint);
 
 		if (!_data.keymapError.isEmpty() || !_data.keymapPath.isEmpty()) {
@@ -991,8 +1131,8 @@ protected:
 				: st::windowSubTextFg->c);
 			const auto avail = std::max(60, width() / 2 - 24);
 			p.drawText(
-				QRect(width() - 20 - avail, height() - kFooterH, avail, kFooterH),
-				Qt::AlignRight | Qt::AlignVCenter,
+				QRect(rtl ? 20 : (width() - 20 - avail), height() - kFooterH, avail, kFooterH),
+				(rtl ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter,
 				QFontMetrics(mono).elidedText(rightText, Qt::ElideMiddle, avail));
 		}
 	}
@@ -1002,7 +1142,11 @@ private:
 		constexpr auto kHeaderH = 58;
 		constexpr auto kFilterH = 48;
 		constexpr auto kFooterH = 34;
-		_close->moveToRight(12, (kHeaderH - _close->height()) / 2);
+		if (IsRtl(this)) {
+			_close->move(12, (kHeaderH - _close->height()) / 2);
+		} else {
+			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
+		}
 
 		const auto bodyTop = _showAll ? (kHeaderH + kFilterH) : kHeaderH;
 		_filter->setVisible(_showAll);
@@ -1023,6 +1167,9 @@ private:
 		parentResized();
 		layoutControls();
 		doSetInnerFocus();
+		if (_data.onTabChanged) {
+			_data.onTabChanged(_showAll);
+		}
 		update();
 	}
 
@@ -1105,7 +1252,11 @@ protected:
 
 	void resizeEvent(QResizeEvent *e) override {
 		LayerWidget::resizeEvent(e);
-		_close->moveToRight(10, 10);
+		if (IsRtl(this)) {
+			_close->move(10, 10);
+		} else {
+			_close->move(width() - 10 - _close->width(), 10);
+		}
 	}
 
 	void keyPressEvent(QKeyEvent *e) override {
@@ -1142,7 +1293,10 @@ protected:
 		_roundRect.paint(p, rect());
 
 		const auto st = CapStyle();
+		const auto sepFm = QFontMetrics(st::normalFont);
 		const auto mono = MonoFont(12, false);
+		const auto rtl = IsRtl(this);
+		const auto hAlign = rtl ? Qt::AlignRight : Qt::AlignLeft;
 		constexpr auto kPadX = 24;
 		auto y = 18;
 
@@ -1150,15 +1304,16 @@ protected:
 		p.setFont(st::keysLegendHeaderStyle.font);
 		p.setPen(st::windowFg);
 		p.drawText(
-			QRect(kPadX, y, width() - 2 * kPadX - 40, 28),
-			Qt::AlignLeft | Qt::AlignVCenter,
+			QRect(rtl ? (kPadX + 40) : kPadX, y, width() - 2 * kPadX - 40, 28),
+			hAlign | Qt::AlignVCenter,
 			_data.isKeyMode ? u"Describe Key"_q : u"Describe Command"_q);
 		y += 38;
 		p.fillRect(0, y - 6, width(), 1, st::boxDividerBg->c);
 
 		// Key chord header in Describe Key mode.
 		if (_data.isKeyMode && !_data.queriedChord.isEmpty()) {
-			PaintChords(p, { _data.queriedChord }, kPadX, y + 12, st);
+			const auto cw = MeasureChordsWidth({ _data.queriedChord }, st, sepFm);
+			PaintChords(p, { _data.queriedChord }, rtl ? (width() - kPadX - cw) : kPadX, y + 12, st);
 			y += 32;
 		}
 
@@ -1169,22 +1324,22 @@ protected:
 			const auto titleFm = QFontMetrics(st::semiboldFont);
 			const auto tw = titleFm.horizontalAdvance(_data.title);
 			p.drawText(QRect(kPadX, y, width() - 2 * kPadX, 24),
-				Qt::AlignLeft | Qt::AlignVCenter,
+				hAlign | Qt::AlignVCenter,
 				_data.title);
 			if (!_data.commandId.isEmpty()) {
 				p.setFont(mono);
 				p.setPen(st::windowSubTextFg);
-				p.drawText(
-					QRect(kPadX + tw + 10, y, width() - kPadX * 2 - tw - 10, 24),
-					Qt::AlignLeft | Qt::AlignVCenter,
-					u":"_q + _data.commandId);
+				const auto idRect = rtl
+					? QRect(kPadX, y, std::max(40, width() - kPadX * 2 - tw - 10), 24)
+					: QRect(kPadX + tw + 10, y, std::max(40, width() - kPadX * 2 - tw - 10), 24);
+				p.drawText(idRect, hAlign | Qt::AlignVCenter, u":"_q + _data.commandId);
 			}
 			y += 28;
 		} else {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
 			p.drawText(QRect(kPadX, y, width() - 2 * kPadX, 24),
-				Qt::AlignLeft | Qt::AlignVCenter,
+				hAlign | Qt::AlignVCenter,
 				u"This key sequence is not bound here."_q);
 			y += 28;
 		}
@@ -1203,7 +1358,7 @@ protected:
 			fill.setAlpha(26);
 			const auto fm = QFontMetrics(st::semiboldFont);
 			const auto pw = std::min(width() - 2 * kPadX, fm.horizontalAdvance(statusText) + 18);
-			const auto pill = QRect(kPadX, y, pw, 22);
+			const auto pill = QRect(rtl ? (width() - kPadX - pw) : kPadX, y, pw, 22);
 			p.setPen(Qt::NoPen);
 			p.setBrush(fill);
 			p.drawRoundedRect(pill, 5, 5);
@@ -1220,16 +1375,23 @@ protected:
 			p.setFont(st::keysLegendTitleStyle.font);
 			p.setPen(st::windowSubTextFg);
 			p.drawText(QRect(kPadX, y, width() - 2 * kPadX, 20),
-				Qt::AlignLeft | Qt::AlignVCenter,
+				hAlign | Qt::AlignVCenter,
 				heading.toUpper());
 			y += 24;
 			for (const auto &b : list) {
-				const auto usedW = PaintChords(p, { b.caps }, kPadX, y + 13, st);
+				const auto cw = MeasureChordsWidth({ b.caps }, st, sepFm);
+				const auto usedW = PaintChords(
+					p,
+					{ b.caps },
+					rtl ? (width() - kPadX - cw) : kPadX,
+					y + 13,
+					st);
 				p.setFont(st::normalFont);
 				p.setPen(st::windowSubTextFg);
+				const auto whereW = std::max(40, width() - 2 * kPadX - usedW - 12);
 				p.drawText(
-					QRect(kPadX + usedW + 12, y, width() - 2 * kPadX - usedW - 12, 26),
-					Qt::AlignLeft | Qt::AlignVCenter,
+					QRect(rtl ? kPadX : (kPadX + usedW + 12), y, whereW, 26),
+					hAlign | Qt::AlignVCenter,
 					b.where);
 				y += 28;
 			}
@@ -1242,7 +1404,7 @@ protected:
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
 			p.drawText(QRect(kPadX, y, width() - 2 * kPadX, 24),
-				Qt::AlignLeft | Qt::AlignVCenter,
+				hAlign | Qt::AlignVCenter,
 				_data.keylessOnPurpose
 					? u"No key (on purpose)  ·  run via M-x or SPC SPC"_q
 					: u"Currently unbound  ·  run via M-x or SPC SPC"_q);
@@ -1258,10 +1420,10 @@ protected:
 			const auto linkText = u"Inspect full command details (RET)"_q;
 			const auto fm = QFontMetrics(st::semiboldFont);
 			const auto lw = fm.horizontalAdvance(linkText);
-			_moreRect = QRect(kPadX, footerTop + 8, lw + 8, 24);
+			_moreRect = QRect(rtl ? (width() - kPadX - lw - 8) : kPadX, footerTop + 8, lw + 8, 24);
 			p.setFont(st::semiboldFont);
 			p.setPen(st::windowActiveTextFg);
-			p.drawText(_moreRect, Qt::AlignLeft | Qt::AlignVCenter, linkText);
+			p.drawText(_moreRect, hAlign | Qt::AlignVCenter, linkText);
 		}
 	}
 
@@ -1342,8 +1504,9 @@ protected:
 		const auto st = CapStyle();
 		const auto sepFm = QFontMetrics(st::normalFont);
 		const auto monoFont = MonoFont(11, false);
+		const auto monoBold = MonoFont(11, true);
 		const auto monoFm = QFontMetrics(monoFont);
-		const auto rtl = style::RightToLeft();
+		const auto rtl = IsRtl(this);
 
 		if (_filtered.empty()) {
 			p.setFont(st::normalFont);
@@ -1380,33 +1543,40 @@ protected:
 				}
 			}
 
-			// Right slot: keycaps or unavailable reason pill.
-			auto rightReserved = 14;
+			// Far-side slot: keycaps or unavailable reason pill.
+			auto sideReserved = 14;
 			const auto midY = rowRect.center().y() + 1;
 			if (!item.available) {
 				const auto reason = item.unavailableReason.isEmpty()
 					? u"unavailable"_q
 					: item.unavailableReason;
 				const auto rw = std::min(200, monoFm.horizontalAdvance(reason) + 14);
-				const auto pill = QRect(rowRect.right() - 10 - rw, midY - 10, rw, 20);
+				const auto pill = rtl
+					? QRect(rowRect.left() + 10, midY - 10, rw, 20)
+					: QRect(rowRect.right() - 10 - rw, midY - 10, rw, 20);
 				p.setPen(QPen(st::boxDividerBg->c, 1));
 				p.setBrush(st::windowBg->c);
 				p.drawRoundedRect(QRectF(pill).adjusted(.5, .5, -.5, -.5), 4, 4);
 				p.setFont(monoFont);
 				p.setPen(st::windowSubTextFg);
 				p.drawText(pill, Qt::AlignCenter, monoFm.elidedText(reason, Qt::ElideRight, rw - 8));
-				rightReserved = rw + 22;
+				sideReserved = rw + 22;
 			} else if (!item.chords.empty()) {
 				const auto shownChords = (item.chords.size() > 2)
 					? std::vector<QStringList>(item.chords.begin(), item.chords.begin() + 2)
 					: item.chords;
 				const auto cw = MeasureChordsWidth(shownChords, st, sepFm);
-				PaintChords(p, shownChords, rowRect.right() - 10 - cw, midY, st);
-				rightReserved = cw + 22;
+				const auto cx = rtl
+					? (rowRect.left() + 10)
+					: (rowRect.right() - 10 - cw);
+				PaintChords(p, shownChords, cx, midY, st);
+				sideReserved = cw + 22;
 			}
 
-			const auto leftX = rowRect.left() + 13;
-			const auto textW = std::max(80, rowRect.right() - rightReserved - leftX);
+			const auto textW = std::max(80, rowRect.width() - sideReserved - 13);
+			const auto leftX = rtl
+				? (rowRect.left() + sideReserved)
+				: (rowRect.left() + 13);
 			const auto spans = ModalMx::LabelMatchSpans(item.label, _tokens);
 			const auto labelColor = item.available
 				? st::windowFg->c
@@ -1424,12 +1594,16 @@ protected:
 			const auto sub = item.category.isEmpty()
 				? (u":"_q + item.id)
 				: (item.category + u"  ·  :"_q + item.id);
-			p.setFont(monoFont);
-			p.setPen(st::windowSubTextFg);
-			p.drawText(
+			const auto subSpans = ModalMx::SubtitleMatchSpans(sub, _tokens);
+			PaintHighlightedLabel(
+				p,
 				QRect(leftX, rowRect.top() + 22, textW, 15),
-				Qt::AlignLeft | Qt::AlignVCenter,
-				monoFm.elidedText(sub, Qt::ElideRight, textW));
+				sub,
+				subSpans,
+				monoFont,
+				monoBold,
+				st::windowSubTextFg->c,
+				st::windowActiveTextFg->c);
 		}
 	}
 
@@ -1554,11 +1728,9 @@ protected:
 		constexpr auto kFooterH = 30;
 		const auto badgeW = promptBadgeWidth();
 		const auto countW = 68;
-		_input->setGeometry(
-			14 + badgeW + 10,
-			10,
-			std::max(120, width() - 28 - badgeW - 10 - countW),
-			32);
+		const auto inputW = std::max(120, width() - 28 - badgeW - 10 - countW);
+		const auto inputX = IsRtl(this) ? (14 + countW) : (14 + badgeW + 10);
+		_input->setGeometry(inputX, 10, inputW, 32);
 		_scroll->setGeometry(
 			0,
 			kPromptH,
@@ -1579,13 +1751,14 @@ protected:
 
 		constexpr auto kPromptH = 52;
 		constexpr auto kFooterH = 30;
+		const auto rtl = IsRtl(this);
 
 		// Prompt pill.
 		const auto badgeText = _config.promptBadge.isEmpty()
 			? u"M-x"_q
 			: _config.promptBadge;
 		const auto badgeW = promptBadgeWidth();
-		const auto pill = QRect(14, 14, badgeW, 24);
+		const auto pill = QRect(rtl ? (width() - 14 - badgeW) : 14, 14, badgeW, 24);
 		auto accentFill = st::windowActiveTextFg->c;
 		accentFill.setAlpha(28);
 		p.setPen(Qt::NoPen);
@@ -1602,8 +1775,8 @@ protected:
 		p.setFont(MonoFont(11, false));
 		p.setPen(st::windowSubTextFg);
 		p.drawText(
-			QRect(width() - 78, 0, 64, kPromptH),
-			Qt::AlignRight | Qt::AlignVCenter,
+			QRect(rtl ? 14 : (width() - 78), 0, 64, kPromptH),
+			(rtl ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter,
 			countText);
 
 		p.fillRect(0, kPromptH - 1, width(), 1, st::boxDividerBg->c);
@@ -1617,7 +1790,7 @@ protected:
 		p.setPen(st::windowSubTextFg);
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
-			Qt::AlignLeft | Qt::AlignVCenter,
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
 			u"C-n/p move  ·  RET run  ·  M-p/n history  ·  ESC close"_q);
 	}
 

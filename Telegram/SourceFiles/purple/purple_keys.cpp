@@ -47,6 +47,7 @@
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/wrap/slide_wrap.h"
+#include "window/themes/window_theme.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
@@ -215,6 +216,7 @@ enum class Action {
 	EnterNormalMode,
 	EnterInsertMode,
 	Backgrounds,
+	ToggleNightMode,
 	MoveUp,
 	MoveDown,
 	PreviousChat,
@@ -307,6 +309,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_insert(tr::now); } },
 	{ Action::Backgrounds, "chat-backgrounds-visibility-toggle", "toggle", "",
 		[] { return tr::lng_purple_keys_backgrounds(tr::now); } },
+	{ Action::ToggleNightMode, "toggle-night-mode", "toggle", "",
+		[] { return tr::lng_menu_night_mode(tr::now); } },
 	{ Action::MoveUp, "move-up", "navigate", "Needs chat list or scrollable conversation",
 		[] { return u"Move or scroll up"_q; }, true },
 	{ Action::MoveDown, "move-down", "navigate", "Needs chat list or scrollable conversation",
@@ -1439,7 +1443,18 @@ private:
 	bool _normal = true; // Starts in Normal mode when modal keys are enabled.
 	bool _inspect = false;
 	bool _swallowNext = false;
-	bool _paletteActive = false;
+	enum class ActiveLayer {
+		None,
+		Cheatsheet,
+		AllBindings,
+		Palette,
+		DescribeCommandPicker,
+		DescribeKey,
+		DescribeCommand,
+		StockShortcuts,
+	};
+	ActiveLayer _activeLayer = ActiveLayer::None;
+	bool _describeKeyHasDetails = false;
 	QString _feedbackText;
 	bool _feedbackError = false;
 	QRect _lastBody;
@@ -1485,7 +1500,7 @@ Keys::Keys(not_null<MainWindow*> window)
 	QObject::connect(qApp, &QApplication::focusChanged, this, [=](QWidget *, QWidget *now) {
 		clearPrefix();
 		// Stay in Normal mode across eligible surfaces; reflect Insert if focus moved to an input outside Normal.
-		if (now && now->window() == _window && !_paletteActive) {
+		if (now && now->window() == _window && _activeLayer == ActiveLayer::None) {
 			refreshStatusBar();
 		}
 	});
@@ -1524,7 +1539,8 @@ Keys::Keys(not_null<MainWindow*> window)
 
 	window->controller().boxShownValue() | rpl::on_next([=](bool shown) {
 		if (!shown) {
-			_paletteActive = false;
+			_activeLayer = ActiveLayer::None;
+			_describeKeyHasDetails = false;
 		}
 		clearPrefix();
 		refreshStatusBar();
@@ -1756,12 +1772,61 @@ void Keys::refreshStatusBar() {
 	}
 	const auto target = activeTarget();
 	auto state = ModalUi::StatusState();
+	if (_activeLayer != ActiveLayer::None) {
+		switch (_activeLayer) {
+		case ActiveLayer::Cheatsheet:
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"HELP"_q;
+			state.paneLabel = u"Keyboard Cheatsheet"_q;
+			state.rightCue = u"TAB all bindings  ·  j/k scroll  ·  / filter  ·  q/ESC close"_q;
+			break;
+		case ActiveLayer::AllBindings:
+			state.badge = ModalUi::BadgeKind::Insert;
+			state.badgeText = u"FILTER"_q;
+			state.paneLabel = u"All Active Bindings"_q;
+			state.rightCue = u"TAB cheatsheet  ·  type to filter  ·  ESC close"_q;
+			break;
+		case ActiveLayer::Palette:
+			state.badge = ModalUi::BadgeKind::Palette;
+			state.badgeText = u"M-x"_q;
+			state.paneLabel = u"Command Palette"_q;
+			state.rightCue = u"C-n/p move  ·  RET run  ·  M-p/n history  ·  ESC close"_q;
+			break;
+		case ActiveLayer::DescribeCommandPicker:
+			state.badge = ModalUi::BadgeKind::Palette;
+			state.badgeText = u"SPC h f"_q;
+			state.paneLabel = u"Describe Command"_q;
+			state.rightCue = u"C-n/p move  ·  RET inspect  ·  ESC close"_q;
+			break;
+		case ActiveLayer::DescribeKey:
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"HELP"_q;
+			state.paneLabel = u"Describe Key"_q;
+			state.rightCue = _describeKeyHasDetails
+				? u"RET command details  ·  q/ESC close"_q
+				: u"q/ESC close"_q;
+			break;
+		case ActiveLayer::DescribeCommand:
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"HELP"_q;
+			state.paneLabel = u"Describe Command"_q;
+			state.rightCue = u"q/ESC close"_q;
+			break;
+		case ActiveLayer::StockShortcuts:
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"HELP"_q;
+			state.paneLabel = u"Shortcuts & Gestures"_q;
+			state.rightCue = u"ESC close"_q;
+			break;
+		case ActiveLayer::None:
+			break;
+		}
+		_statusBar->setState(std::move(state));
+		return;
+	}
 	if (_inspect) {
 		state.badge = ModalUi::BadgeKind::DescribeKey;
 		state.badgeText = u"KEY?"_q;
-	} else if (_paletteActive) {
-		state.badge = ModalUi::BadgeKind::Palette;
-		state.badgeText = u"M-x"_q;
 	} else if (_hints.active()) {
 		state.badge = ModalUi::BadgeKind::Hints;
 		state.badgeText = u"HINTS"_q;
@@ -1901,8 +1966,9 @@ KeyUse Keys::classify(
 			&& StartsWith(ll, _prefix);
 	});
 	const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
+	const auto plainOrShift = (mods == Qt::NoModifier || mods == Qt::ShiftModifier);
 	if (matchesEffective || matchesLocalleader
-			|| ((_inspect || (_normal && pending)) && !mods && printable)) {
+			|| ((_inspect || (_normal && pending)) && plainOrShift && printable)) {
 		return KeyUse::Capture;
 	}
 	if (!_normal) {
@@ -2030,7 +2096,23 @@ void Keys::showWhichKey() {
 
 	auto groups = std::vector<ModalUi::WhichKeyEntry>();
 	auto leaves = std::vector<ModalUi::WhichKeyEntry>();
+	auto leafIndexByAction = std::map<Action, size_t>();
 	auto seen = QSet<int>();
+
+	const auto keySortKey = [](const QString &k) {
+		// Group: 0 = single letters, 1 = digits, 2 = punctuation, 3 = multi-char (SPC, RET, etc.)
+		if (k.size() == 1) {
+			const auto ch = k.front();
+			if (ch.isLetter()) {
+				return std::tuple(0, k.toLower(), k.front().isUpper() ? 1 : 0);
+			}
+			if (ch.isDigit()) {
+				return std::tuple(1, k, 0);
+			}
+			return std::tuple(2, k, 0);
+		}
+		return std::tuple(3, k.toLower(), 0);
+	};
 
 	for (const auto &b : effective) {
 		if (!StartsWith(b.keys, _prefix)
@@ -2043,12 +2125,22 @@ void Keys::showWhichKey() {
 			continue;
 		}
 		seen.insert(next);
+		const auto keyLbl = KeyLabel(next);
 		if (b.keys.size() == _prefix.size() + 1) {
-			leaves.push_back({
-				.key = KeyLabel(next),
-				.label = FindCommand(b.action).label(),
-				.isGroup = false,
-			});
+			if (const auto it = leafIndexByAction.find(b.action);
+				it != leafIndexByAction.end()) {
+				auto &existing = leaves[it->second].keys;
+				if (!existing.contains(keyLbl)) {
+					existing.push_back(keyLbl);
+				}
+			} else {
+				leafIndexByAction.emplace(b.action, leaves.size());
+				leaves.push_back({
+					.keys = { keyLbl },
+					.label = FindCommand(b.action).label(),
+					.isGroup = false,
+				});
+			}
 		} else {
 			auto extended = _prefix;
 			extended.push_back(next);
@@ -2059,24 +2151,33 @@ void Keys::showWhichKey() {
 					: u"prefix"_q;
 			}
 			groups.push_back({
-				.key = KeyLabel(next),
+				.keys = { keyLbl },
 				.label = lbl,
 				.isGroup = true,
 			});
 		}
 	}
 
-	const auto sortEntry = [](const ModalUi::WhichKeyEntry &a, const ModalUi::WhichKeyEntry &b) {
-		const auto cmp = QString::compare(a.key, b.key, Qt::CaseInsensitive);
-		return (cmp != 0) ? (cmp < 0) : (a.key > b.key); // lowercase before uppercase
+	// Keep alias keys inside merged leaf entries in consistent canonical order (e.g. "SPC" / ":", "," / "RET").
+	for (auto &leaf : leaves) {
+		std::sort(leaf.keys.begin(), leaf.keys.end(), [&](const QString &a, const QString &b) {
+			if (a == u"SPC"_q) return true;
+			if (b == u"SPC"_q) return false;
+			if (a == u","_q) return true;
+			if (b == u","_q) return false;
+			return keySortKey(a) < keySortKey(b);
+		});
+	}
+
+	const auto sortEntry = [&](const ModalUi::WhichKeyEntry &a, const ModalUi::WhichKeyEntry &b) {
+		const auto ka = a.keys.isEmpty() ? QString() : a.keys.front();
+		const auto kb = b.keys.isEmpty() ? QString() : b.keys.front();
+		return keySortKey(ka) < keySortKey(kb);
 	};
 	std::sort(groups.begin(), groups.end(), sortEntry);
 	std::sort(leaves.begin(), leaves.end(), sortEntry);
 
-	auto entries = std::move(groups);
-	entries.insert(entries.end(), leaves.begin(), leaves.end());
-
-	if (entries.empty()) {
+	if (groups.empty() && leaves.empty()) {
 		hideWhichKey();
 		return;
 	}
@@ -2089,7 +2190,8 @@ void Keys::showWhichKey() {
 			: PrefixLabel(MapKind::Normal, _prefix),
 		.contextBadge = isLocal ? target.contextName : QString(),
 		.isLocal = isLocal,
-		.entries = std::move(entries),
+		.groups = std::move(groups),
+		.leaves = std::move(leaves),
 	};
 	_whichKey->setState(std::move(wk));
 	const auto above = QRect(
@@ -2216,6 +2318,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		break;
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
+		break;
+	case Action::ToggleNightMode:
+		Window::Theme::ToggleNightMode();
 		break;
 	case Action::MoveUp:
 	case Action::MoveDown:
@@ -2449,7 +2554,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		break;
 	case Action::StockShortcuts:
 		clearPrefix();
+		_activeLayer = ActiveLayer::StockShortcuts;
 		ShowKeysLegend(&_window->controller());
+		refreshStatusBar();
 		break;
 	case Action::ReloadKeymap:
 		ReloadKeymapStore();
@@ -2468,17 +2575,46 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 	}
 	const auto effective = EffectiveBindings(true, target.contextMap);
 	const auto insertEff = EffectiveBindings(false, std::nullopt);
-	const auto rowFor = [&](Action action, QString overrideLabel = {}) -> std::optional<ModalUi::HelpRow> {
+	const auto primaryLl = Keymap().localleaders.empty()
+		? Chord{ Qt::Key_Comma }
+		: Keymap().localleaders.front();
+	const auto rowFor = [&](
+			Action action,
+			QString overrideLabel = {},
+			int maxChords = 2,
+			bool skipSecondaryLocalleader = false) -> std::optional<ModalUi::HelpRow> {
 		auto chords = ChordsForAction(action, effective);
+		if (skipSecondaryLocalleader && Keymap().localleaders.size() > 1) {
+			const auto secondaryCaps = ChordCaps(Keymap().localleaders[1]);
+			chords.erase(
+				std::remove_if(chords.begin(), chords.end(), [&](const QStringList &c) {
+					return c.size() > secondaryCaps.size()
+						&& std::equal(secondaryCaps.begin(), secondaryCaps.end(), c.begin());
+				}),
+				chords.end());
+		}
 		if (chords.empty()) {
 			return std::nullopt;
 		}
-		if (chords.size() > 2) {
-			chords.resize(2);
+		// Keep cheatsheet cards cleanly aligned: prefer shortest/primary chords and cap total keycaps.
+		std::stable_sort(chords.begin(), chords.end(), [](const QStringList &a, const QStringList &b) {
+			return a.size() < b.size();
+		});
+		auto kept = std::vector<QStringList>();
+		auto totalCaps = 0;
+		for (auto &c : chords) {
+			if (int(kept.size()) >= maxChords) {
+				break;
+			}
+			if (!kept.empty() && totalCaps + c.size() > 3) {
+				break;
+			}
+			totalCaps += int(c.size());
+			kept.push_back(std::move(c));
 		}
 		const auto &cmd = FindCommand(action);
 		return ModalUi::HelpRow{
-			.chords = std::move(chords),
+			.chords = std::move(kept),
 			.label = overrideLabel.isEmpty() ? cmd.label() : std::move(overrideLabel),
 			.commandId = QString::fromLatin1(cmd.id),
 		};
@@ -2490,7 +2626,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 	// 1. Curated task-oriented cheatsheet cards (live-resolved from active EDN keymap).
 	auto cards = std::vector<ModalUi::HelpSection>();
 	{
-		auto nav = ModalUi::HelpSection{ .title = u"Navigate"_q };
+		auto nav = ModalUi::HelpSection{ .title = u"NAVIGATE"_q };
 		pushRow(nav.rows, rowFor(Action::MoveDown, u"Down (chat list or scroll)"_q));
 		pushRow(nav.rows, rowFor(Action::MoveUp, u"Up (chat list or scroll)"_q));
 		pushRow(nav.rows, rowFor(Action::NextChat, u"Next chat from any pane"_q));
@@ -2498,66 +2634,127 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		pushRow(nav.rows, rowFor(Action::HistoryHalfDown, u"Half-page scroll down"_q));
 		pushRow(nav.rows, rowFor(Action::HistoryHalfUp, u"Half-page scroll up"_q));
 		pushRow(nav.rows, rowFor(Action::LatestMessages, u"Jump to newest"_q));
-		pushRow(nav.rows, rowFor(Action::UnreadMessages, u"Jump to unread"_q));
+		pushRow(nav.rows, rowFor(Action::UnreadMessages, u"Jump to unread"_q, 1));
 		nav.rows.push_back({ .chords = { { u"5"_q, u"j"_q } }, .label = u"Count repeats motions"_q });
 		cards.push_back(std::move(nav));
 	}
 	{
-		auto leader = ModalUi::HelpSection{ .title = u"Leader (SPC)"_q };
+		auto leader = ModalUi::HelpSection{ .title = u"LEADER (SPC)"_q };
 		pushRow(leader.rows, rowFor(Action::Run, u"M-x command palette"_q));
-		pushRow(leader.rows, rowFor(Action::ChatPalette, u"Switch chat (palette)"_q));
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"b"_q } }, .label = u"+buffer / active chat"_q });
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"o"_q } }, .label = u"+open views & panels"_q });
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"n"_q } }, .label = u"+new group / channel"_q });
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"p"_q } }, .label = u"+playback & music"_q });
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"w"_q } }, .label = u"+windows & panes"_q });
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"a"_q } }, .label = u"+switch accounts (1..6)"_q });
-		leader.rows.push_back({ .chords = { { u"SPC"_q, u"h"_q } }, .label = u"+help, describe & reload"_q });
+		pushRow(leader.rows, rowFor(Action::ChatPalette, u"Switch chat (palette)"_q, 1));
+		// Dynamically derive all SPC prefix groups from the live keymap (including SPC s and SPC t).
+		auto seenPrefixKeys = QSet<int>();
+		auto livePrefixes = std::vector<int>();
+		const std::array<int, 9> preferredOrder = {
+			Qt::Key_B, Qt::Key_O, Qt::Key_N, Qt::Key_P,
+			Qt::Key_S, Qt::Key_T, Qt::Key_W, Qt::Key_A, Qt::Key_H,
+		};
+		for (const auto &b : effective) {
+			if (!b.viaLocalleader && b.keys.size() >= 3 && b.keys[0] == Qt::Key_Space) {
+				const auto k = b.keys[1];
+				if (!seenPrefixKeys.contains(k)) {
+					seenPrefixKeys.insert(k);
+					livePrefixes.push_back(k);
+				}
+			}
+		}
+		std::sort(livePrefixes.begin(), livePrefixes.end(), [&](int a, int b) {
+			const auto ia = ranges::find(preferredOrder, a) - begin(preferredOrder);
+			const auto ib = ranges::find(preferredOrder, b) - begin(preferredOrder);
+			if (ia != ib) {
+				return ia < ib;
+			}
+			return QString::compare(KeyLabel(a), KeyLabel(b), Qt::CaseInsensitive) < 0;
+		});
+		for (const auto k : livePrefixes) {
+			const auto pfx = Chord{ Qt::Key_Space, k };
+			auto lbl = PrefixLabel(MapKind::Normal, pfx);
+			if (lbl.isEmpty()) {
+				lbl = u"prefix"_q;
+			}
+			leader.rows.push_back({
+				.chords = { { u"SPC"_q, KeyLabel(k) } },
+				.label = u"+"_q + lbl,
+			});
+		}
 		cards.push_back(std::move(leader));
 	}
 	{
-		auto local = ModalUi::HelpSection{ .title = u"Localleader ("_q + FirstLocalleaderLabel() + u" / SPC m)"_q };
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"i"_q } }, .label = u"Chat info (in chat)"_q });
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"p"_q } }, .label = u"Pinned / Preview / Play"_q });
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"s"_q } }, .label = u"Scheduled / Stop"_q });
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"d"_q } }, .label = u"History calendar"_q });
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"a"_q } }, .label = u"Attach files / Archive"_q });
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"v"_q }, { FirstLocalleaderLabel(), u"f"_q } }, .label = u"Shared media / files"_q });
-		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"l"_q }, { FirstLocalleaderLabel(), u"o"_q } }, .label = u"Shared links / voice"_q });
+		auto localTitle = u"LOCALLEADER ("_q + FirstLocalleaderLabel();
+		if (Keymap().localleaders.size() > 1) {
+			localTitle += u" / "_q + ChordLabel(Keymap().localleaders[1]);
+		}
+		localTitle += u")"_q;
+		auto local = ModalUi::HelpSection{ .title = std::move(localTitle) };
+		const auto addLocalRow = [&](MapKind map, Action action, QString shortLabel = {}) {
+			for (const auto &b : Keymap().bindings) {
+				if (b.map == map && b.action == action) {
+					auto full = primaryLl;
+					full.insert(full.end(), b.keys.begin(), b.keys.end());
+					const auto ctx = (map == MapKind::Chat) ? u"chat"_q
+						: (map == MapKind::Chats) ? u"chats"_q
+						: u"music"_q;
+					local.rows.push_back({
+						.chords = { ChordCaps(full) },
+						.label = shortLabel.isEmpty() ? FindCommand(action).label() : std::move(shortLabel),
+						.commandId = QString::fromLatin1(FindCommand(action).id),
+						.contextTag = ctx,
+					});
+					return;
+				}
+			}
+		};
+		addLocalRow(MapKind::Chat, Action::OpenChatInfo, u"Chat info"_q);
+		addLocalRow(MapKind::Chat, Action::OpenPinnedMessages, u"Pinned messages"_q);
+		addLocalRow(MapKind::Chat, Action::OpenScheduled, u"Scheduled messages"_q);
+		addLocalRow(MapKind::Chat, Action::OpenHistoryCalendar, u"History calendar"_q);
+		addLocalRow(MapKind::Chat, Action::AttachFiles, u"Add attachment"_q);
+		addLocalRow(MapKind::Chat, Action::OpenChatMedia, u"Shared media"_q);
+		addLocalRow(MapKind::Chats, Action::PreviewChat, u"Chat preview"_q);
+		addLocalRow(MapKind::Chats, Action::NextFolder, u"Next folder"_q);
+		addLocalRow(MapKind::Music, Action::TogglePlayback, u"Play / pause"_q);
 		cards.push_back(std::move(local));
 	}
 	{
-		auto hints = ModalUi::HelpSection{ .title = u"Copy & Message Hints"_q };
-		pushRow(hints.rows, rowFor(Action::CopyMessage, u"Copy message text (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::CopyMessageLink, u"Copy message link (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::CopyMessageUrl, u"Copy URL in message (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::OpenMessageUrl, u"Open URL in message (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::ReplyToMessage, u"Reply to message (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::EditMessage, u"Edit message (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::SelectMessage, u"Select message (hint)"_q));
-		pushRow(hints.rows, rowFor(Action::MessageMenu, u"Message menu (hint)"_q));
+		auto hints = ModalUi::HelpSection{ .title = u"COPY & MESSAGE HINTS"_q };
+		pushRow(hints.rows, rowFor(Action::CopyMessage, u"Copy message text"_q, 1));
+		pushRow(hints.rows, rowFor(Action::CopyMessageLink, u"Copy message link"_q, 1));
+		pushRow(hints.rows, rowFor(Action::CopyMessageUrl, u"Copy URL in message"_q, 1));
+		pushRow(hints.rows, rowFor(Action::OpenMessageUrl, u"Open URL in message"_q, 2));
+		pushRow(hints.rows, rowFor(Action::ReplyToMessage, u"Reply to message"_q, 1, true));
+		pushRow(hints.rows, rowFor(Action::EditMessage, u"Edit message"_q, 1, true));
+		pushRow(hints.rows, rowFor(Action::SelectMessage, u"Select message"_q, 1));
+		pushRow(hints.rows, rowFor(Action::MessageMenu, u"Message menu"_q, 1));
 		cards.push_back(std::move(hints));
 	}
 	{
-		auto panes = ModalUi::HelpSection{ .title = u"Panes, Folders & Search"_q };
-		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q));
-		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q));
-		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q));
-		pushRow(panes.rows, rowFor(Action::NextFolder, u"Next folder"_q));
-		pushRow(panes.rows, rowFor(Action::PreviousFolder, u"Previous folder"_q));
-		pushRow(panes.rows, rowFor(Action::Search, u"Search messages"_q));
-		pushRow(panes.rows, rowFor(Action::Backgrounds, u"Toggle chat wallpaper"_q));
+		auto panes = ModalUi::HelpSection{ .title = u"PANES, FOLDERS & TOGGLES"_q };
+		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q, 1));
+		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q, 1));
+		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q, 1));
+		pushRow(panes.rows, rowFor(Action::NextFolder, u"Next folder"_q, 1, true));
+		pushRow(panes.rows, rowFor(Action::PreviousFolder, u"Previous folder"_q, 1, true));
+		pushRow(panes.rows, rowFor(Action::Search, u"Search messages"_q, 1));
+		pushRow(panes.rows, rowFor(Action::ToggleNightMode, u"Toggle night mode"_q, 1));
+		pushRow(panes.rows, rowFor(Action::Backgrounds, u"Toggle chat wallpaper"_q, 1));
 		cards.push_back(std::move(panes));
 	}
 	{
-		auto modes = ModalUi::HelpSection{ .title = u"Modes & Help"_q };
-		pushRow(modes.rows, rowFor(Action::EnterInsertMode, u"Enter Insert mode (type)"_q));
-		modes.rows.push_back({ .chords = { { u"ESC"_q }, { u"C-["_q } }, .label = u"Return to Normal / cancel"_q });
+		auto modes = ModalUi::HelpSection{ .title = u"MODES & HELP"_q };
+		pushRow(modes.rows, rowFor(Action::EnterInsertMode, u"Enter Insert mode (type)"_q, 2));
+		auto exitChords = std::vector<QStringList>{ { u"ESC"_q } };
+		for (const auto &c : ChordsForAction(Action::EnterNormalMode, insertEff)) {
+			if (exitChords.size() < 2) {
+				exitChords.push_back(c);
+			}
+		}
+		modes.rows.push_back({ .chords = std::move(exitChords), .label = u"Return to Normal / cancel"_q });
 		modes.rows.push_back({ .chords = { { u"DEL"_q } }, .label = u"Back up one key in prefix"_q });
-		pushRow(modes.rows, rowFor(Action::DescribeChord, u"Describe a key sequence"_q));
-		pushRow(modes.rows, rowFor(Action::DescribeCommand, u"Describe any command"_q));
-		pushRow(modes.rows, rowFor(Action::Help, u"All active bindings"_q));
-		pushRow(modes.rows, rowFor(Action::StockShortcuts, u"Stock Telegram shortcuts"_q));
+		pushRow(modes.rows, rowFor(Action::DescribeChord, u"Describe a key sequence"_q, 1));
+		pushRow(modes.rows, rowFor(Action::DescribeCommand, u"Describe any command"_q, 1));
+		pushRow(modes.rows, rowFor(Action::Help, u"All active bindings"_q, 1));
+		pushRow(modes.rows, rowFor(Action::StockShortcuts, u"Stock Telegram shortcuts"_q, 1));
+		pushRow(modes.rows, rowFor(Action::ReloadKeymap, u"Reload keys.edn"_q, 1));
 		cards.push_back(std::move(modes));
 	}
 
@@ -2594,20 +2791,20 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 
 	if (target.contextMap) {
 		addGrouped(
-			u"Localleader ("_q + target.contextName + u")"_q,
+			u"LOCALLEADER ("_q + target.contextName + u")"_q,
 			[](const EffectiveBinding &b) { return b.viaLocalleader; },
 			effective);
 	}
 	const std::pair<int, QString> leaderGroups[] = {
-		{ Qt::Key_B, u"Leader: SPC b (buffer / chat)"_q },
-		{ Qt::Key_O, u"Leader: SPC o (open)"_q },
-		{ Qt::Key_N, u"Leader: SPC n (new)"_q },
-		{ Qt::Key_P, u"Leader: SPC p (playback)"_q },
-		{ Qt::Key_S, u"Leader: SPC s (search)"_q },
-		{ Qt::Key_T, u"Leader: SPC t (toggle)"_q },
-		{ Qt::Key_W, u"Leader: SPC w (window)"_q },
-		{ Qt::Key_A, u"Leader: SPC a (accounts)"_q },
-		{ Qt::Key_H, u"Leader: SPC h (help)"_q },
+		{ Qt::Key_B, u"LEADER: SPC b (buffer / chat)"_q },
+		{ Qt::Key_O, u"LEADER: SPC o (open)"_q },
+		{ Qt::Key_N, u"LEADER: SPC n (new)"_q },
+		{ Qt::Key_P, u"LEADER: SPC p (playback)"_q },
+		{ Qt::Key_S, u"LEADER: SPC s (search)"_q },
+		{ Qt::Key_T, u"LEADER: SPC t (toggle)"_q },
+		{ Qt::Key_W, u"LEADER: SPC w (window)"_q },
+		{ Qt::Key_A, u"LEADER: SPC a (accounts)"_q },
+		{ Qt::Key_H, u"LEADER: SPC h (help)"_q },
 	};
 	for (const auto &[k, title] : leaderGroups) {
 		addGrouped(
@@ -2619,37 +2816,57 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 			effective);
 	}
 	addGrouped(
-		u"Leader: SPC top-level"_q,
+		u"LEADER: SPC top-level"_q,
 		[](const EffectiveBinding &b) {
 			return !b.viaLocalleader && b.keys.size() == 2 && b.keys[0] == Qt::Key_Space;
 		},
 		effective);
 	addGrouped(
-		u"Vim prefixes (g, y, [, ], C-w)"_q,
+		u"VIM PREFIXES (g, y, [, ], C-w)"_q,
 		[](const EffectiveBinding &b) {
 			return !b.viaLocalleader && b.keys.size() >= 2 && b.keys[0] != Qt::Key_Space;
 		},
 		effective);
 	addGrouped(
-		u"Single keys (Normal)"_q,
+		u"SINGLE KEYS (Normal)"_q,
 		[](const EffectiveBinding &b) {
 			return !b.viaLocalleader && b.keys.size() == 1;
 		},
 		effective);
 	addGrouped(
-		u"Insert mode"_q,
+		u"INSERT MODE"_q,
 		[](const EffectiveBinding &) { return true; },
 		insertEff);
 
+	const auto guard = QPointer(this);
+	_activeLayer = startOnAllBindings
+		? ActiveLayer::AllBindings
+		: ActiveLayer::Cheatsheet;
+	auto layer = ModalUi::CreateModalHelpLayer({
+		.startOnAllBindings = startOnAllBindings,
+		.subtitle = target.paneLabel,
+		.keymapPath = Keymap().userPath,
+		.keymapError = Keymap().error,
+		.cheatsheetCards = std::move(cards),
+		.activeBindingGroups = std::move(groups),
+		.onTabChanged = [guard](bool showingAll) {
+			if (!guard) return;
+			guard->_activeLayer = showingAll
+				? ActiveLayer::AllBindings
+				: ActiveLayer::Cheatsheet;
+			guard->refreshStatusBar();
+		},
+	});
+	layer->lifetime().add([guard] {
+		if (!guard) return;
+		if (guard->_activeLayer == ActiveLayer::Cheatsheet
+			|| guard->_activeLayer == ActiveLayer::AllBindings) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->refreshStatusBar();
+		}
+	});
 	_window->showOrHideBoxOrLayer(
-		ModalUi::CreateModalHelpLayer({
-			.startOnAllBindings = startOnAllBindings,
-			.subtitle = target.paneLabel,
-			.keymapPath = Keymap().userPath,
-			.keymapError = Keymap().error,
-			.cheatsheetCards = std::move(cards),
-			.activeBindingGroups = std::move(groups),
-		}),
+		std::move(layer),
 		Ui::LayerOption::KeepOther,
 		anim::type::normal);
 	refreshStatusBar();
@@ -2723,8 +2940,20 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 			});
 		}
 	}
+	const auto guard = QPointer(this);
+	_activeLayer = ActiveLayer::DescribeKey;
+	_describeKeyHasDetails = data.found && bool(data.onDescribeCommand);
+	auto layer = ModalUi::CreateDescribeLayer(std::move(data));
+	layer->lifetime().add([guard] {
+		if (!guard) return;
+		if (guard->_activeLayer == ActiveLayer::DescribeKey) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->_describeKeyHasDetails = false;
+			guard->refreshStatusBar();
+		}
+	});
 	_window->showOrHideBoxOrLayer(
-		ModalUi::CreateDescribeLayer(std::move(data)),
+		std::move(layer),
 		Ui::LayerOption::KeepOther,
 		anim::type::normal);
 	refreshStatusBar();
@@ -2746,8 +2975,19 @@ void Keys::showDescribeCommandResult(Action action, const Target &target) {
 		.unavailableReason = QString::fromLatin1(cmd.need),
 		.bindings = CollectCommandBindings(action),
 	};
+	const auto guard = QPointer(this);
+	_activeLayer = ActiveLayer::DescribeCommand;
+	_describeKeyHasDetails = false;
+	auto layer = ModalUi::CreateDescribeLayer(std::move(data));
+	layer->lifetime().add([guard] {
+		if (!guard) return;
+		if (guard->_activeLayer == ActiveLayer::DescribeCommand) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->refreshStatusBar();
+		}
+	});
 	_window->showOrHideBoxOrLayer(
-		ModalUi::CreateDescribeLayer(std::move(data)),
+		std::move(layer),
 		Ui::LayerOption::KeepOther,
 		anim::type::normal);
 	refreshStatusBar();
@@ -2783,57 +3023,69 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 	const auto revision = _revision;
 	const auto origin = target.focus;
 	const auto original = base::make_weak(current);
-	_paletteActive = true;
+	const auto guard = QPointer(this);
+	const auto kind = describe
+		? ActiveLayer::DescribeCommandPicker
+		: ActiveLayer::Palette;
+	_activeLayer = kind;
 	refreshStatusBar();
 
+	auto layer = ModalUi::CreateCommandPaletteLayer({
+		.promptBadge = describe ? u"SPC h f"_q : u"M-x"_q,
+		.placeholder = describe
+			? u"Describe any command (orderless, e.g. \"pin\")..."_q
+			: u"Execute command (orderless, e.g. \"opm\", M-p/n history)..."_q,
+		.describeMode = describe,
+		.items = std::move(items),
+		.history = MxHistory(),
+		.onPick = [=](int actionId, QString query) {
+			_activeLayer = ActiveLayer::None;
+			const auto action = Action(actionId);
+			MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
+			SaveMxHistory();
+			QTimer::singleShot(0, this, [=] {
+				const auto live = owner();
+				if (!Enabled() || !live || live != original.get()
+					|| revision != _revision || !origin
+					|| _window->controller().isLayerShown()) {
+					refreshStatusBar();
+					return;
+				}
+				if (describe) {
+					showDescribeCommandResult(action, FindTarget(live, origin));
+					return;
+				}
+				const auto restoredTarget = FindTarget(live, origin);
+				if (restoredTarget.focus && Available(action, restoredTarget)) {
+					origin->setFocus(Qt::OtherFocusReason);
+					const auto restored = currentTarget(origin);
+					if (restored.focus && revision == _revision) {
+						dispatch(action, restored, 1);
+					}
+				}
+				refreshStatusBar();
+			});
+		},
+		.onCancel = [=] {
+			_activeLayer = ActiveLayer::None;
+			QTimer::singleShot(0, this, [=] {
+				if (origin && fromInsert) {
+					origin->setFocus(Qt::OtherFocusReason);
+					_normal = false;
+				}
+				refreshStatusBar();
+			});
+		},
+	});
+	layer->lifetime().add([guard, kind] {
+		if (!guard) return;
+		if (guard->_activeLayer == kind) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->refreshStatusBar();
+		}
+	});
 	_window->showOrHideBoxOrLayer(
-		ModalUi::CreateCommandPaletteLayer({
-			.promptBadge = describe ? u"SPC h f"_q : u"M-x"_q,
-			.placeholder = describe
-				? u"Describe any command (orderless, e.g. \"pin\")..."_q
-				: u"Execute command (orderless, e.g. \"opm\", M-p/n history)..."_q,
-			.describeMode = describe,
-			.items = std::move(items),
-			.history = MxHistory(),
-			.onPick = [=](int actionId, QString query) {
-				_paletteActive = false;
-				const auto action = Action(actionId);
-				MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
-				SaveMxHistory();
-				QTimer::singleShot(0, this, [=] {
-					const auto live = owner();
-					if (!Enabled() || !live || live != original.get()
-						|| revision != _revision || !origin
-						|| _window->controller().isLayerShown()) {
-						refreshStatusBar();
-						return;
-					}
-					if (describe) {
-						showDescribeCommandResult(action, FindTarget(live, origin));
-						return;
-					}
-					const auto restoredTarget = FindTarget(live, origin);
-					if (restoredTarget.focus && Available(action, restoredTarget)) {
-						origin->setFocus(Qt::OtherFocusReason);
-						const auto restored = currentTarget(origin);
-						if (restored.focus && revision == _revision) {
-							dispatch(action, restored, 1);
-						}
-					}
-					refreshStatusBar();
-				});
-			},
-			.onCancel = [=] {
-				_paletteActive = false;
-				QTimer::singleShot(0, this, [=] {
-					if (origin && fromInsert) {
-						origin->setFocus(Qt::OtherFocusReason);
-						_normal = false;
-					}
-					refreshStatusBar();
-				});
-			},
-		}),
+		std::move(layer),
 		Ui::LayerOption::KeepOther,
 		anim::type::normal);
 }

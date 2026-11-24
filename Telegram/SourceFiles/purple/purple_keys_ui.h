@@ -22,6 +22,7 @@ enum class BadgeKind {
 	Hints,
 	Palette,
 	DescribeKey,
+	Help,
 };
 
 struct StatusState {
@@ -34,6 +35,7 @@ struct StatusState {
 	QString message;
 	bool messageIsError = false;
 	QString localleaderHint;
+	QString rightCue;
 };
 
 class ModalStatusBar final : public Ui::RpWidget {
@@ -53,7 +55,7 @@ private:
 };
 
 struct WhichKeyEntry {
-	QString key;
+	QStringList keys;
 	QString label;
 	bool isGroup = false;
 };
@@ -63,7 +65,8 @@ struct WhichKeyState {
 	QString title;
 	QString contextBadge;
 	bool isLocal = false;
-	std::vector<WhichKeyEntry> entries;
+	std::vector<WhichKeyEntry> groups;
+	std::vector<WhichKeyEntry> leaves;
 };
 
 class WhichKeyOverlay final : public Ui::RpWidget {
@@ -90,6 +93,7 @@ struct HelpRow {
 	std::vector<QStringList> chords;
 	QString label;
 	QString commandId;
+	QString contextTag;
 };
 
 struct HelpSection {
@@ -104,6 +108,7 @@ struct HelpData {
 	QString keymapError;
 	std::vector<HelpSection> cheatsheetCards;
 	std::vector<HelpSection> activeBindingGroups;
+	Fn<void(bool showingAll)> onTabChanged;
 };
 
 [[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateModalHelpLayer(
