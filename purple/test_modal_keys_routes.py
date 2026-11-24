@@ -317,18 +317,29 @@ ordered(keys_ui, "class TopicPickerLayer final", "QTimer::timeout", "_config.pag
         "Qt::Key_R && !mods", "finishLoading()", "_config.onReload()")
 ordered(keys_ui, "class NoticeLayer final", "class NoticeHistoryLayer final",
         "CreateNoticeLayer", "CreateNoticeHistoryLayer")
+ordered(keys, "void Keys::schedulePendingNoticeFlush", "_noticeLayers.empty()",
+        "&QObject::destroyed", "_noticePresentation == presentation", "MaybeFlushPendingNotices")
+ordered(keys, "PeekCountdownChanges()", "schedulePendingNoticeFlush()", "PeekCountdownPending()")
+wait_cpp = read("purple/purple_peek_controls.cpp")
+ordered(wait_cpp, "void PendingWait::report", ".session = session", ".background = background",
+        "_session = weak", "void PendingWait::confirm", "report(result, origin, session.get(), true)")
 notices_cpp = read("purple/purple_notices.cpp")
 ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
         "WindowMatchesAccount", "CanExposeNoticeInWindow",
-        "ResolveNoticePeerLabel", "PickerVisible",
+        "ResolveNoticePeerLabel", "peerFromUser(bare)", "peerFromChat(bare)",
+        "peerFromChannel(bare)", "PickerVisible", "ResolvePeerIdsInConfigValue",
         "ShowPurpleNotice", "Actions().erase(id)",
         "ShowPurpleAck", "MaybeFlushPendingNotices", "OpenPurpleNoticeHistory",
         "clearHistoryAndPending")
+ordered(notices_cpp, "void OpenNoticeLayerForRecord", "Store().findById(accountKey, id)",
+        "revision = rec.repeatCount", "live->repeatCount == revision", "run(&weakWin->controller())")
 config_cpp = read("purple/purple_config.cpp")
-ordered(config_cpp, "ResolveNoticePeerLabel", "ResolvePeerIdsInConfigValue",
-        "config:reload:", "ShowPurpleNotice")
+ordered(config_cpp, "PurpleNoticeWindow(session)", "hasConfigPeerIds", "ShowPurpleNotice",
+        "config:reload:")
 archive_cpp = read("purple/purple_archive_service.cpp")
-ordered(archive_cpp, "archive:removal_pending:", "archive:gap:", "archive:discard_failed:")
+ordered(archive_cpp, "void ShowArchiveRemovalPending()", ".appScoped = true",
+        "kArchiveRemovalNoticeKey", "ShowArchiveRemovalPending();", "archive:gap:",
+        "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();", "archive:discard_failed:")
 st_cover_cpp = read("purple/purple_screentime_cover.cpp")
 ordered(st_cover_cpp, "ShowPurpleAck", ".persistent = true")
 last_seen_cpp = read("purple/purple_last_seen.cpp")

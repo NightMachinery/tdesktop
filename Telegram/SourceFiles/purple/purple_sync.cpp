@@ -722,7 +722,7 @@ void SendSettingsToSavedMessages(
 	const auto target = AccountManualExportTarget(session);
 	if (!target) {
 		if (AccountSettingsNeedOwner()) {
-			ShowAccountSettingsRefusal(show, AccountSettingsNeedsOwnerText(), SessionAccountKey(session));
+			ShowAccountSettingsRefusal(show, AccountSettingsNeedsOwnerText(), session);
 		} else {
 			show->showBox(Ui::MakeInformBox(tr::lng_purple_send_settings_unavailable(tr::now)));
 		}
@@ -852,6 +852,7 @@ void ShareAccountSettingsFile(
 							.scope = u"Settings export"_q,
 							.summary = msg,
 							.severity = ModalNotices::NoticeSeverity::Error,
+							.background = true,
 							.rows = { { .label = u"Path"_q, .detail = path } },
 							.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
 						});
@@ -877,6 +878,7 @@ void ShareAccountSettingsFile(
 							.scope = u"Settings export"_q,
 							.summary = msg,
 							.severity = ModalNotices::NoticeSeverity::Error,
+							.background = true,
 							.rows = { { .label = u"Path"_q, .detail = path } },
 							.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
 						});

@@ -17,6 +17,8 @@ inline constexpr int kMaxHistoryPerAccount = 64;
 inline constexpr int kMaxPendingPerAccount = 16;
 inline constexpr int kAckDurationInfoMs = 3500;
 inline constexpr int kAckDurationErrorMs = 6500;
+inline constexpr auto kAppAccountKey = "app";
+inline constexpr auto kArchiveRemovalNoticeKey = "archive:removal_pending";
 
 enum class NoticeSeverity {
 	Info,
@@ -46,6 +48,7 @@ struct NoticeRow {
 	QString detail;
 	bool isWarning = false;
 	bool isInactive = false;
+	bool hasConfigPeerIds = false;
 };
 
 struct NoticeRecord {
@@ -119,6 +122,7 @@ struct DeliveryContext {
 	bool hasBlockingLayerOrBox = false;
 	bool inZenMode = false;
 	bool statusBarVisible = false;
+	bool canInterruptWindow = true;
 };
 
 [[nodiscard]] inline int AckDurationMs(NoticeSeverity severity) {
@@ -142,7 +146,8 @@ struct DeliveryContext {
 	}
 	if (kind == NoticeKind::Dialog) {
 		if (background
-			&& (ctx.inInsertMode
+			&& (!ctx.canInterruptWindow
+				|| ctx.inInsertMode
 				|| ctx.hasImePreedit
 				|| ctx.hasPendingPrefix
 				|| ctx.hasBlockingLayerOrBox)) {
@@ -166,7 +171,8 @@ struct DeliveryContext {
 		&& !ctx.inInsertMode
 		&& !ctx.hasImePreedit
 		&& !ctx.hasPendingPrefix
-		&& !ctx.hasBlockingLayerOrBox;
+		&& !ctx.hasBlockingLayerOrBox
+		&& ctx.canInterruptWindow;
 }
 
 [[nodiscard]] inline bool HistoryAccessible(const DeliveryContext &ctx) {
@@ -180,28 +186,8 @@ struct DeliveryContext {
 		const QString &key) {
 	const auto k = key.toCaseFolded();
 	const auto t = table.toCaseFolded();
-	if (k == QStringLiteral("members")
-		|| k == QStringLiteral("chats")
-		|| k == QStringLiteral("peers")
-		|| k == QStringLiteral("chat_ids")
-		|| k == QStringLiteral("peer_ids")
-		|| k == QStringLiteral("always")
-		|| k == QStringLiteral("never")
-		|| k == QStringLiteral("selected")
-		|| k == QStringLiteral("include")
-		|| k == QStringLiteral("exclude")) {
-		return true;
-	}
-	if ((t.startsWith(QStringLiteral("lists."))
-			|| t.startsWith(QStringLiteral("media_reply"))
-			|| t.startsWith(QStringLiteral("birthday"))
-			|| t.startsWith(QStringLiteral("screentime")))
-		&& (k.contains(QStringLiteral("chat"))
-			|| k.contains(QStringLiteral("peer"))
-			|| k.contains(QStringLiteral("member")))) {
-		return true;
-	}
-	return false;
+	return (k == QStringLiteral("members") && t.startsWith(QStringLiteral("lists.")))
+		|| (k == QStringLiteral("pinned") && t.startsWith(QStringLiteral("presets.")));
 }
 
 // Replaces numeric PeerId tokens in peer-list config values using a caller-provided
@@ -210,32 +196,27 @@ struct DeliveryContext {
 // safely fall back to their raw id.
 [[nodiscard]] inline QString ResolvePeerIdsInConfigValue(
 		const QString &rawValue,
-		const QString &table,
-		const QString &key,
 		const std::function<std::optional<QString>(uint64_t)> &lookup) {
-	if (rawValue.isEmpty() || !lookup || !IsPeerIdConfigKey(table, key)) {
+	if (rawValue.contains(u'"') || rawValue.contains(u'\'')) {
 		return rawValue;
 	}
-	static const auto kTokenRe = QRegularExpression(QStringLiteral("\\b([0-9]{5,20})\\b"));
+	static const auto kTokenRe = QRegularExpression(
+		QStringLiteral(R"((?<=[\[,])\s*\K\+?[0-9]+(?:_[0-9]+)*(?=\s*[,\]]))"));
 	QString out;
 	out.reserve(rawValue.size() + 32);
 	qsizetype lastPos = 0;
 	auto it = kTokenRe.globalMatch(rawValue);
 	while (it.hasNext()) {
 		const auto m = it.next();
-		out.append(QStringView(rawValue).mid(lastPos, m.capturedStart() - lastPos));
+		const auto token = m.capturedView();
+		const auto start = m.capturedStart();
+		out.append(QStringView(rawValue).mid(lastPos, start - lastPos));
 		bool ok = false;
-		const auto id = m.captured(1).toULongLong(&ok);
-		if (ok) {
-			if (const auto resolved = lookup(id); resolved && !resolved->isEmpty()) {
-				out.append(*resolved);
-			} else {
-				out.append(m.captured(0));
-			}
-		} else {
-			out.append(m.captured(0));
-		}
-		lastPos = m.capturedEnd();
+		auto digits = token.toString();
+		const auto id = digits.remove(u'_').toULongLong(&ok);
+		const auto resolved = (ok && id) ? lookup(id) : std::nullopt;
+		out.append(resolved ? QStringView(*resolved) : token);
+		lastPos = start + token.size();
 	}
 	out.append(QStringView(rawValue).mid(lastPos));
 	return out;
@@ -297,6 +278,10 @@ public:
 				bucket.pending.erase(bucket.pending.begin());
 				++bucket.droppedPending;
 			}
+		} else {
+			std::erase_if(bucket.pending, [=](const NoticeRecord &pending) {
+				return pending.id == assignedId;
+			});
 		}
 		return assignedId;
 	}

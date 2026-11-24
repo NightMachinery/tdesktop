@@ -22,13 +22,13 @@ namespace Purple {
 
 struct PurpleNoticeAction {
 	QString label;
-	Fn<void()> run;
+	Fn<void(not_null<Window::Controller*>)> run;
 };
 
 struct PurpleNoticeRequest {
-	Main::Session *session = nullptr;
+	std::optional<Main::Session*> session;
 	Window::Controller *window = nullptr;
-	QString accountKeyOverride;
+	bool appScoped = false;
 	QString accountLabel;
 	QString scope;
 	QString title;
@@ -42,9 +42,8 @@ struct PurpleNoticeRequest {
 };
 
 struct PurpleAckRequest {
-	Main::Session *session = nullptr;
+	std::optional<Main::Session*> session;
 	Window::Controller *window = nullptr;
-	QString accountKeyOverride;
 	QString accountLabel;
 	QString scope;
 	QString text;
@@ -63,8 +62,7 @@ void OpenPurpleNoticeHistory(not_null<::MainWindow*> window);
 [[nodiscard]] int PendingPurpleNoticeCount(Main::Session *session);
 
 [[nodiscard]] QString PurpleNoticeAccountKey(Main::Session *session);
-[[nodiscard]] std::optional<QString> ResolveNoticePeerLabel(
-	not_null<Main::Session*> session,
-	uint64_t rawId);
+[[nodiscard]] Window::Controller *PurpleNoticeWindow(
+	not_null<Main::Session*> session);
 
 } // namespace Purple

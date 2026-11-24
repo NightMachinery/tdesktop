@@ -101,6 +101,12 @@ int main() {
 		layerCtx.hasBlockingLayerOrBox = true;
 		Check(DecideDelivery(NoticeKind::Dialog, true, false, layerCtx) == DeliveryRoute::QueueDialogWithCue,
 			"open layer/box: background dialog queues with cue");
+
+		auto inactiveCtx = normal;
+		inactiveCtx.canInterruptWindow = false;
+		Check(DecideDelivery(NoticeKind::Dialog, true, false, inactiveCtx) == DeliveryRoute::QueueDialogWithCue
+			&& !ShouldFlushPendingDialog(inactiveCtx),
+			"inactive window or held key: defer background notices");
 	}
 
 	// 4. Group B visibility: status line in Normal, transient bar in Zen, stock toast fallback when box covers bar.
@@ -139,8 +145,8 @@ int main() {
 		r1.accountKey = QStringLiteral("prod:1001");
 		r1.accountLabel = QStringLiteral("Alice");
 		r1.scope = QStringLiteral("Local archive");
-		r1.summary = QStringLiteral("Removal pending");
-		r1.coalesceKey = QStringLiteral("archive:removal_pending:prod:1001");
+		r1.summary = QStringLiteral("Archive gap");
+		r1.coalesceKey = QStringLiteral("archive:gap:prod:1001");
 		r1.timestampMs = 1000;
 
 		const auto id1 = store.record(r1, true);
@@ -149,7 +155,7 @@ int main() {
 		const auto id3 = store.record(r1, true);
 		Check(id1 == id2 && id2 == id3, "coalesced archive notices reuse same record id");
 		Check(store.pendingCount(QStringLiteral("prod:1001")) == 1,
-			"five/three repeated removal_pending events produce ONE pending notice per account");
+			"three repeated archive gap events produce one pending notice per account");
 		Check(store.historyFor(QStringLiteral("prod:1001")).size() == 1
 			&& store.historyFor(QStringLiteral("prod:1001")).front().repeatCount == 3,
 			"coalesced history record tracks repeat count");
@@ -170,6 +176,27 @@ int main() {
 			"logout clears account history and pending queue");
 		Check(store.historyFor(QStringLiteral("prod:2002")).size() == 1,
 			"clearing one account does not affect another account");
+
+		const auto appKey = QString::fromLatin1(kAppAccountKey);
+		NoticeRecord removal;
+		removal.accountKey = appKey;
+		removal.summary = QStringLiteral("Removal pending");
+		removal.coalesceKey = QString::fromLatin1(kArchiveRemovalNoticeKey);
+		const auto removalId = store.record(removal, true);
+		Check(store.record(removal, true) == removalId && store.pendingCount(appKey) == 1,
+			"archive removal reports from different accounts share one app pending entry");
+		store.clearAccount(r1.accountKey);
+		const auto pendingRemoval = store.takeNextPending(appKey);
+		Check(pendingRemoval && pendingRemoval->id == removalId && pendingRemoval->repeatCount == 2,
+			"shared archive removal warning remains deliverable after logout");
+
+		other.primaryActionLabel = QStringLiteral("Open settings");
+		const auto actionableId = store.record(other, true);
+		other.primaryActionLabel.clear();
+		Check(store.record(other, false) == actionableId
+			&& store.pendingCount(other.accountKey) == 0
+			&& store.findById(other.accountKey, actionableId)->primaryActionLabel.isEmpty(),
+			"an already delivered passive update removes its stale queued action");
 
 		// Cap enforced at kMaxHistoryPerAccount.
 		for (int i = 0; i < kMaxHistoryPerAccount + 15; ++i) {
@@ -194,27 +221,26 @@ int main() {
 	// 6. Local chat-name resolution: resolves visible peer ids in peer keys, keeps hidden/unknown as raw id, ignores non-peer numbers.
 	{
 		const auto lookup = [](uint64_t id) -> std::optional<QString> {
-			if (id == 100123456) {
-				return QStringLiteral("Design Team");
+			switch (id) {
+			case 12: return QStringLiteral("User");
+			case 3456: return QStringLiteral("Group");
+			case 78901: return QStringLiteral("Channel");
+			default: return std::nullopt;
 			}
-			// 100999999 is hidden by Work Mode -> caller returns std::nullopt -> keeps raw id!
-			return std::nullopt;
 		};
 		const auto resolved = ResolvePeerIdsInConfigValue(
-			QStringLiteral("[100123456, 100999999]"),
-			QStringLiteral("lists.work"),
-			QStringLiteral("members"),
+			QStringLiteral("[12, 3_456, +78901, 100999999, -3456, -1000000078901]"),
 			lookup);
-		Check(resolved == QStringLiteral("[Design Team, 100999999]"),
-			"visible chat id resolves locally while Work-Mode-hidden chat falls back to raw id");
-
-		const auto untouched = ResolvePeerIdsInConfigValue(
-			QStringLiteral("100123456"),
-			QStringLiteral("peek"),
-			QStringLiteral("delay_seconds"),
-			lookup);
-		Check(untouched == QStringLiteral("100123456"),
-			"non-peer numeric settings are never rewritten");
+		Check(resolved == QStringLiteral("[User, Group, Channel, 100999999, -3456, -1000000078901]"),
+			"bare IDs resolve and hidden, unknown, and Bot API IDs stay literal");
+		Check(IsPeerIdConfigKey(QStringLiteral("lists.work"), QStringLiteral("members"))
+			&& IsPeerIdConfigKey(QStringLiteral("presets.work.views.list"), QStringLiteral("pinned"))
+			&& !IsPeerIdConfigKey(QStringLiteral("notifications"), QStringLiteral("preview_always"))
+			&& !IsPeerIdConfigKey(QStringLiteral("peek"), QStringLiteral("delay_seconds")),
+			"only settings storing bare IDs get bare ID lookup");
+		const auto quoted = QStringLiteral("[\"channel:78901\", \"[12]\"]");
+		Check(ResolvePeerIdsInConfigValue(quoted, lookup) == quoted,
+			"numbers in strings are never rewritten");
 	}
 
 	// 7. Plain-text copy formatting.

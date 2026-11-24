@@ -14,7 +14,6 @@
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "window/window_controller.h"
-#include "window/window_session_controller.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QPointer>
@@ -26,6 +25,8 @@
 
 namespace Purple {
 namespace {
+
+const auto kAppKey = QString::fromLatin1(ModalNotices::kAppAccountKey);
 
 struct StoredAction {
 	QString accountKey;
@@ -76,7 +77,7 @@ void PruneOrphanedActions(const QString &accountKey) {
 }
 
 void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
-	if (!session || accountKey.isEmpty() || accountKey == u"app"_q) {
+	if (!session || accountKey.isEmpty() || accountKey == kAppKey) {
 		return;
 	}
 	auto &watched = WatchedSessions();
@@ -104,7 +105,7 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 	if (!ctrl || !ctrl->widget()) {
 		return false;
 	}
-	if (accountKey == u"app"_q) {
+	if (accountKey == kAppKey) {
 		return true;
 	}
 	const auto live = ctrl->maybeSession();
@@ -149,7 +150,7 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 [[nodiscard]] bool CanExposeNoticeInWindow(
 		::MainWindow *window,
 		const QString &accountKey) {
-	if (!window) {
+	if (!window || !ModalKeysEnabled()) {
 		return false;
 	}
 	if (Core::App().passcodeLocked()
@@ -161,60 +162,120 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 	return WindowMatchesAccount(&window->controller(), accountKey);
 }
 
+[[nodiscard]] std::optional<QString> ResolveNoticePeerLabel(
+		not_null<Main::Session*> session,
+		uint64_t rawId) {
+	if (rawId > PeerId::kChatTypeMask) {
+		return std::nullopt;
+	}
+	const auto bare = BareId(rawId);
+	const auto &data = session->data();
+	const auto candidates = {
+		data.peerLoaded(peerFromUser(bare)),
+		data.peerLoaded(peerFromChat(bare)),
+		data.peerLoaded(peerFromChannel(bare)),
+	};
+	auto *peer = static_cast<PeerData*>(nullptr);
+	for (const auto candidate : candidates) {
+		if (candidate) {
+			if (peer) {
+				return std::nullopt;
+			}
+			peer = candidate;
+		}
+	}
+	if (!peer || !PickerVisible(peer)) {
+		return std::nullopt;
+	}
+	const auto name = peer->name().trimmed();
+	return name.isEmpty() ? std::nullopt : std::make_optional(name);
+}
+
+[[nodiscard]] ModalNotices::NoticeRecord ResolveNoticeLabels(
+		::MainWindow *window,
+		ModalNotices::NoticeRecord rec) {
+	if (rec.accountKey == kAppKey) {
+		return rec;
+	}
+	const auto session = not_null{ window->controller().maybeSession() };
+	rec.accountLabel = AccountLabelFor(session, rec.accountLabel);
+	const auto lookup = [=](uint64_t id) { return ResolveNoticePeerLabel(session, id); };
+	for (auto &row : rec.rows) {
+		if (row.hasConfigPeerIds) {
+			row.before = ModalNotices::ResolvePeerIdsInConfigValue(row.before, lookup);
+			row.after = ModalNotices::ResolvePeerIdsInConfigValue(row.after, lookup);
+		}
+	}
+	return rec;
+}
+
+void CopyRecord(::MainWindow *window, const ModalNotices::NoticeRecord &rec) {
+	if (!CanExposeNoticeInWindow(window, rec.accountKey)) {
+		return;
+	}
+	if (auto *cb = QGuiApplication::clipboard()) {
+		cb->setText(ResolveNoticeLabels(window, rec).plainText());
+	}
+	SetModalStatusMessage(
+		window,
+		u"Copied notice to clipboard"_q,
+		false,
+		ModalNotices::kAckDurationInfoMs,
+		false);
+}
+
 void OpenNoticeLayerForRecord(
 		not_null<::MainWindow*> window,
 		const ModalNotices::NoticeRecord &rec) {
 	if (!CanExposeNoticeInWindow(window.get(), rec.accountKey)) {
 		return;
 	}
-	auto actionLabel = rec.primaryActionLabel;
-	Fn<void()> actionRun;
-	if (!actionLabel.isEmpty()) {
-		if (const auto it = Actions().find(rec.id); it != Actions().end()) {
-			actionRun = it->second.action.run;
-		}
-	}
 	const auto weakWin = QPointer<::MainWindow>(window.get());
-	const auto accountKey = rec.accountKey;
+	const auto current = [weakWin, accountKey = rec.accountKey, id = rec.id] {
+		return CanExposeNoticeInWindow(weakWin.data(), accountKey)
+			? Store().findById(accountKey, id)
+			: std::nullopt;
+	};
 	auto guardedAction = Fn<void()>();
-	if (!actionLabel.isEmpty() && actionRun) {
-		guardedAction = [weakWin, accountKey, run = std::move(actionRun)] {
-			if (!weakWin || !CanExposeNoticeInWindow(weakWin.data(), accountKey)) {
-				return;
+	if (!rec.primaryActionLabel.isEmpty() && Actions().contains(rec.id)) {
+		guardedAction = [weakWin, current, id = rec.id, revision = rec.repeatCount] {
+			const auto live = current();
+			const auto it = Actions().find(id);
+			if (live && live->repeatCount == revision && it != Actions().end()) {
+				const auto run = it->second.action.run;
+				if (run) {
+					run(&weakWin->controller());
+				}
 			}
-			run();
 		};
 	}
 	auto layer = ModalUi::CreateNoticeLayer({
-		.record = rec,
-		.primaryActionLabel = guardedAction ? actionLabel : QString(),
+		.record = ResolveNoticeLabels(window.get(), rec),
+		.primaryActionLabel = guardedAction ? rec.primaryActionLabel : QString(),
 		.onPrimaryAction = std::move(guardedAction),
-		.onCopy = [weakWin, accountKey, text = rec.plainText()] {
-			if (!weakWin || !CanExposeNoticeInWindow(weakWin.data(), accountKey)) {
-				return;
+		.onCopy = [weakWin, current] {
+			if (const auto live = current()) {
+				CopyRecord(weakWin.data(), *live);
 			}
-			if (auto *cb = QGuiApplication::clipboard()) {
-				cb->setText(text);
-			}
-			SetModalStatusMessage(
-				weakWin.data(),
-				u"Copied notice to clipboard"_q,
-				false,
-				ModalNotices::kAckDurationInfoMs,
-				false);
 		},
 	});
 	ShowModalNoticeLayer(window, std::move(layer), /*isHistory=*/false);
 }
 
+[[nodiscard]] QString RequestAccountKey(
+		const std::optional<Main::Session*> &session,
+		bool appScoped = false) {
+	if (appScoped || !session) {
+		return kAppKey;
+	}
+	return *session ? PurpleNoticeAccountKey(*session) : QString();
+}
+
 } // namespace
 
-// Returns "app" ONLY when session == nullptr (genuinely account-free).
-// Returns empty QString when a non-null session is dead or logging out so
-// callers drop the event instead of leaking it into the shared "app" bucket.
 QString PurpleNoticeAccountKey(Main::Session *session) {
 	if (!session) {
-		return u"app"_q;
+		return kAppKey;
 	}
 	if (!SessionIsLive(session)) {
 		return QString();
@@ -223,37 +284,23 @@ QString PurpleNoticeAccountKey(Main::Session *session) {
 	return AccountKeyText(key.environment, key.userId).value_or(QString());
 }
 
-std::optional<QString> ResolveNoticePeerLabel(
-		not_null<Main::Session*> session,
-		uint64_t rawId) {
-	if (!SessionIsLive(session.get())) {
-		return std::nullopt;
-	}
-	const auto peer = session->data().peerLoaded(PeerId(rawId));
-	if (!peer) {
-		return std::nullopt;
-	}
-	// Privacy rule: hidden Work Mode chats fall back to raw ID.
-	if (!PickerVisible(peer)) {
-		return std::nullopt;
-	}
-	const auto name = peer->name().trimmed();
-	return name.isEmpty() ? std::nullopt : std::make_optional(name);
+Window::Controller *PurpleNoticeWindow(not_null<Main::Session*> session) {
+	const auto window = ResolveEligibleMainWindow(nullptr, PurpleNoticeAccountKey(session));
+	return window ? &window->controller() : nullptr;
 }
 
 void ShowPurpleNotice(PurpleNoticeRequest request) {
-	const auto accountKey = !request.accountKeyOverride.isEmpty()
-		? request.accountKeyOverride
-		: PurpleNoticeAccountKey(request.session);
+	const auto accountKey = RequestAccountKey(request.session, request.appScoped);
+	const auto session = request.appScoped ? nullptr : request.session.value_or(nullptr);
 	if (accountKey.isEmpty()) {
 		// Dead or logging-out session: drop rather than leaking to "app".
 		return;
 	}
-	EnsureLogoutHook(request.session, accountKey);
+	EnsureLogoutHook(session, accountKey);
 
 	ModalNotices::NoticeRecord rec;
 	rec.accountKey = accountKey;
-	rec.accountLabel = AccountLabelFor(request.session, request.accountLabel);
+	rec.accountLabel = AccountLabelFor(session, request.accountLabel);
 	rec.scope = request.scope;
 	rec.title = request.title;
 	rec.summary = request.summary;
@@ -281,6 +328,17 @@ void ShowPurpleNotice(PurpleNoticeRequest request) {
 		route = ModalNotices::DeliveryRoute::QueueSilentUntilAvailable;
 	}
 
+	if (!ctx.modalEnabled) {
+		if (route == ModalNotices::DeliveryRoute::StockToast && mw) {
+			if (request.fallbackToast && (!request.window || &mw->controller() == request.window)) {
+				request.fallbackToast();
+			} else if (!request.fallbackToast) {
+				mw->controller().showToast(request.summary);
+			}
+		}
+		return;
+	}
+
 	const auto enqueuePending = (route == ModalNotices::DeliveryRoute::QueueDialogWithCue
 		|| route == ModalNotices::DeliveryRoute::QueueSilentUntilAvailable);
 	const auto id = Store().record(rec, enqueuePending);
@@ -297,9 +355,6 @@ void ShowPurpleNotice(PurpleNoticeRequest request) {
 
 	switch (route) {
 	case ModalNotices::DeliveryRoute::StockToast:
-		if (mw && request.fallbackToast) {
-			request.fallbackToast();
-		}
 		return;
 	case ModalNotices::DeliveryRoute::QueueSilentUntilAvailable:
 		return;
@@ -313,6 +368,7 @@ void ShowPurpleNotice(PurpleNoticeRequest request) {
 			if (const auto stored = Store().findById(accountKey, id)) {
 				OpenNoticeLayerForRecord(mw, *stored);
 			}
+			RefreshModalNoticeIndicator(mw);
 		}
 		return;
 	case ModalNotices::DeliveryRoute::StatusLineMessage:
@@ -322,18 +378,17 @@ void ShowPurpleNotice(PurpleNoticeRequest request) {
 }
 
 void ShowPurpleAck(PurpleAckRequest request) {
-	const auto accountKey = !request.accountKeyOverride.isEmpty()
-		? request.accountKeyOverride
-		: PurpleNoticeAccountKey(request.session);
+	const auto accountKey = RequestAccountKey(request.session);
+	const auto session = request.session.value_or(nullptr);
 	if (accountKey.isEmpty()) {
 		// Dead or logging-out session: drop rather than leaking to "app".
 		return;
 	}
-	EnsureLogoutHook(request.session, accountKey);
+	EnsureLogoutHook(session, accountKey);
 
 	ModalNotices::NoticeRecord rec;
 	rec.accountKey = accountKey;
-	rec.accountLabel = AccountLabelFor(request.session, request.accountLabel);
+	rec.accountLabel = AccountLabelFor(session, request.accountLabel);
 	rec.scope = request.scope.isEmpty() ? u"Notice"_q : request.scope;
 	rec.summary = request.text;
 	rec.coalesceKey = request.coalesceKey;
@@ -342,9 +397,6 @@ void ShowPurpleAck(PurpleAckRequest request) {
 	rec.background = request.background;
 	rec.persistent = request.persistent;
 	rec.timestampMs = QDateTime::currentMSecsSinceEpoch();
-	Store().record(rec, /*enqueuePending=*/false);
-	PruneOrphanedActions(accountKey);
-
 	auto *mw = ResolveEligibleMainWindow(request.window, accountKey);
 	const auto ctx = ModalDeliveryContext(mw);
 	const auto route = ModalNotices::DecideDelivery(
@@ -353,9 +405,16 @@ void ShowPurpleAck(PurpleAckRequest request) {
 		request.persistent,
 		ctx);
 
+	if (ctx.modalEnabled) {
+		const auto id = Store().record(rec, /*enqueuePending=*/false);
+		Actions().erase(id);
+		PruneOrphanedActions(accountKey);
+	}
+
 	switch (route) {
 	case ModalNotices::DeliveryRoute::StockToast:
-		if (mw && request.fallbackToast) {
+		if (mw && request.fallbackToast
+			&& (!request.window || &mw->controller() == request.window)) {
 			request.fallbackToast();
 		}
 		return;
@@ -393,8 +452,8 @@ int PendingPurpleNoticeCount(Main::Session *session) {
 		return 0;
 	}
 	auto count = Store().pendingCount(key);
-	if (key != u"app"_q) {
-		count += Store().pendingCount(u"app"_q);
+	if (key != kAppKey) {
+		count += Store().pendingCount(kAppKey);
 	}
 	return count;
 }
@@ -412,8 +471,8 @@ void MaybeFlushPendingNotices(not_null<::MainWindow*> window) {
 	// Flush at most ONE eligible dialog per transition so multiple queued
 	// notices never cause a chain of modal interruptions.
 	auto next = Store().takeNextPending(accountKey);
-	if (!next && accountKey != u"app"_q) {
-		next = Store().takeNextPending(u"app"_q);
+	if (!next && accountKey != kAppKey) {
+		next = Store().takeNextPending(kAppKey);
 	}
 	if (!next) {
 		return;
@@ -435,8 +494,8 @@ void OpenPurpleNoticeHistory(not_null<::MainWindow*> window) {
 	const auto accountLabel = AccountLabelFor(session, u"App"_q);
 
 	auto items = Store().historyFor(accountKey);
-	if (accountKey != u"app"_q) {
-		const auto &appItems = Store().historyFor(u"app"_q);
+	if (accountKey != kAppKey) {
+		const auto &appItems = Store().historyFor(kAppKey);
 		items.insert(items.end(), appItems.begin(), appItems.end());
 		std::sort(items.begin(), items.end(), [](const auto &a, const auto &b) {
 			return a.timestampMs > b.timestampMs;
@@ -447,24 +506,19 @@ void OpenPurpleNoticeHistory(not_null<::MainWindow*> window) {
 	auto layer = ModalUi::CreateNoticeHistoryLayer({
 		.accountLabel = accountLabel,
 		.items = std::move(items),
-		.onInspect = [weakWin](ModalNotices::NoticeRecord rec) {
-			if (weakWin && CanExposeNoticeInWindow(weakWin.data(), rec.accountKey)) {
-				OpenNoticeLayerForRecord(weakWin.data(), rec);
+		.onInspect = [weakWin, accountKey](const ModalNotices::NoticeRecord &rec) {
+			if (CanExposeNoticeInWindow(weakWin.data(), accountKey)) {
+				if (const auto live = Store().findById(rec.accountKey, rec.id)) {
+					OpenNoticeLayerForRecord(weakWin.data(), *live);
+				}
 			}
 		},
-		.onCopy = [weakWin, accountKey](const QString &text) {
-			if (!weakWin || !CanExposeNoticeInWindow(weakWin.data(), accountKey)) {
-				return;
+		.onCopy = [weakWin, accountKey](const ModalNotices::NoticeRecord &rec) {
+			if (CanExposeNoticeInWindow(weakWin.data(), accountKey)) {
+				if (const auto live = Store().findById(rec.accountKey, rec.id)) {
+					CopyRecord(weakWin.data(), *live);
+				}
 			}
-			if (auto *cb = QGuiApplication::clipboard()) {
-				cb->setText(text);
-			}
-			SetModalStatusMessage(
-				weakWin.data(),
-				u"Copied notice to clipboard"_q,
-				false,
-				ModalNotices::kAckDurationInfoMs,
-				false);
 		},
 		.onClear = [weakWin, accountKey] {
 			if (!weakWin || !CanExposeNoticeInWindow(weakWin.data(), accountKey)) {
@@ -474,9 +528,9 @@ void OpenPurpleNoticeHistory(not_null<::MainWindow*> window) {
 			// so nothing cleared reappears on reopening SPC h e.
 			Store().clearHistoryAndPending(accountKey);
 			PurgeActionsForAccount(accountKey);
-			if (accountKey != u"app"_q) {
-				Store().clearHistoryAndPending(u"app"_q);
-				PurgeActionsForAccount(u"app"_q);
+			if (accountKey != kAppKey) {
+				Store().clearHistoryAndPending(kAppKey);
+				PurgeActionsForAccount(kAppKey);
 			}
 			RefreshModalNoticeIndicator(weakWin.data());
 			SetModalStatusMessage(

@@ -57,6 +57,7 @@ constexpr auto kOverrideSpans = std::array{
 // a preset does with a list is written in settings.toml beside the preset.
 void NewListBox(
 		not_null<Ui::GenericBox*> box,
+		base::weak_ptr<Main::Session> session,
 		Fn<void(QString)> create,
 		Fn<bool()> originCurrent) {
 	const auto editor = CaptureAppWideSettingsEditor(box);
@@ -86,6 +87,7 @@ void NewListBox(
 			const auto err = result.error;
 			const auto boxShow = box->uiShow();
 			ShowPurpleAck({
+				.session = session.get(),
 				.scope = u"Work Mode lists"_q,
 				.text = err,
 				.severity = ModalNotices::NoticeSeverity::Error,
@@ -233,7 +235,7 @@ void FillListsMenu(
 						: u"List editing is unavailable for the opening account. Reopen the menu."_q };
 				if (!result.ok) {
 					if (show && *show) {
-						ShowAccountSettingsRefusal(show, result.error, SessionAccountKey(not_null{ live }));
+						ShowAccountSettingsRefusal(show, result.error, live);
 					}
 				} else if (!notice.isEmpty()) {
 					const auto isMultiSentence = notice.contains(u". "_q);
@@ -325,7 +327,7 @@ void FillListsMenu(
 			return;
 		}
 		const auto scope = AccountSettingsScopeCaption(session, std::nullopt);
-		show->showBox(Box(NewListBox, [=](QString name) {
+		show->showBox(Box(NewListBox, weakSession, [=](QString name) {
 			const auto live = weakSession.get();
 			if (!live) {
 				return;

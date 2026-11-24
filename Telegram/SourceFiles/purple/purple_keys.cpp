@@ -51,6 +51,7 @@
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_notices.h"
+#include "purple/purple_peek_controls.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_playlists_box.h"
 #include "purple/purple_privacy_screen.h"
@@ -84,6 +85,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
+#include <QtGui/QInputMethodEvent>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QTextBlock>
@@ -1695,8 +1697,11 @@ private:
 		Notice,
 		NoticeHistory,
 	};
+	[[nodiscard]] ActiveLayer visibleLayer() const;
 	ActiveLayer _activeLayer = ActiveLayer::None;
-	std::vector<QPointer<Ui::LayerWidget>> _noticeLayers;
+	std::vector<std::pair<QPointer<Ui::LayerWidget>, ActiveLayer>> _noticeLayers;
+	QPointer<Ui::LayerStackWidget> _pendingFlushLayer;
+	uint64 _noticePresentation = 0;
 	bool _describeKeyHasDetails = false;
 	QString _feedbackText;
 	bool _feedbackError = false;
@@ -1754,7 +1759,7 @@ Keys::Keys(not_null<MainWindow*> window)
 		}
 		clearPrefix();
 		// Stay in Normal mode across eligible surfaces; reflect Insert if focus moved to an input outside Normal.
-		if (now && now->window() == _window && _activeLayer == ActiveLayer::None) {
+		if (now && now->window() == _window) {
 			refreshStatusBar();
 		}
 	});
@@ -1769,9 +1774,9 @@ Keys::Keys(not_null<MainWindow*> window)
 	const auto closeAllNoticeLayers = [=] {
 		auto list = std::move(_noticeLayers);
 		_noticeLayers.clear();
-		for (const auto &layer : list) {
-			if (layer) {
-				layer->closeLayer();
+		for (auto i = list.rbegin(); i != list.rend(); ++i) {
+			if (i->first) {
+				i->first->closeLayer();
 			}
 		}
 	};
@@ -1802,12 +1807,17 @@ Keys::Keys(not_null<MainWindow*> window)
 			schedulePendingNoticeFlush();
 		}
 	}, _lifetime);
+	Purple::PeekCountdownChanges() | rpl::on_next([=] {
+		schedulePendingNoticeFlush();
+	}, _lifetime);
 
 	EnabledChanges.events() | rpl::on_next([=](bool enabled) {
 		if (enabled) {
 			ReloadKeymapStore();
 			watchUserKeymap();
 			_normal = true;
+		} else {
+			closeAllNoticeLayers();
 		}
 		clearPrefix();
 		_window->updateControlsGeometry();
@@ -1823,13 +1833,14 @@ Keys::Keys(not_null<MainWindow*> window)
 	}, _lifetime);
 
 	window->controller().boxShownValue() | rpl::on_next([=](bool shown) {
+		const auto closedNotice = !shown && !_noticeLayers.empty();
 		if (!shown) {
 			_activeLayer = ActiveLayer::None;
 			_describeKeyHasDetails = false;
 		}
 		clearPrefix();
 		refreshStatusBar();
-		if (!shown) {
+		if (!shown && !closedNotice) {
 			schedulePendingNoticeFlush();
 		}
 	}, _lifetime);
@@ -1837,6 +1848,10 @@ Keys::Keys(not_null<MainWindow*> window)
 	window->controller().sessionControllerValue(
 	) | rpl::on_next([=](Window::SessionController *owner) {
 		++_revision;
+		closeAllNoticeLayers();
+		_feedbackTimer.stop();
+		_feedbackText.clear();
+		_persistentCue.clear();
 		if (_zenMode) {
 			setZenMode(false);
 		}
@@ -1847,6 +1862,7 @@ Keys::Keys(not_null<MainWindow*> window)
 		_topicHistory.clear();
 		_window->updateControlsGeometry();
 		refreshStatusBar();
+		schedulePendingNoticeFlush();
 		if (!owner) {
 			return;
 		}
@@ -1873,6 +1889,7 @@ Keys::Keys(not_null<MainWindow*> window)
 		}
 		StateChanges() | rpl::on_next([=] {
 			scheduleUnreadRefresh();
+			closeAllNoticeLayers();
 		}, _sessionLifetime);
 		refreshUnreadSummary();
 
@@ -1940,6 +1957,9 @@ void Keys::watchUserKeymap() {
 }
 
 bool Keys::eventFilter(QObject *watched, QEvent *event) {
+	if (watched == _window && event->type() == QEvent::WindowActivate) {
+		schedulePendingNoticeFlush();
+	}
 	// Clicking directly into a message composer enters Insert mode so mouse typing works immediately.
 	if (event->type() == QEvent::MouseButtonPress
 			&& Enabled()
@@ -1988,7 +2008,7 @@ bool Keys::zenNeedsTransientBar() const {
 		|| _count > 0
 		|| _inspect
 		|| _hints.active()
-		|| _activeLayer != ActiveLayer::None
+		|| visibleLayer() != ActiveLayer::None
 		|| !_feedbackText.isEmpty();
 }
 
@@ -2076,7 +2096,9 @@ void Keys::showFeedback(QString text, bool isError, int durationMs) {
 }
 
 void Keys::schedulePendingNoticeFlush() {
-	if (_flushScheduled) {
+	if (_flushScheduled || !_noticeLayers.empty() || !Enabled()
+		|| !Purple::PendingPurpleNoticeCount(
+			_window->controller().maybeSession())) {
 		return;
 	}
 	_flushScheduled = true;
@@ -2086,6 +2108,23 @@ void Keys::schedulePendingNoticeFlush() {
 			return;
 		}
 		guard->_flushScheduled = false;
+		if (!guard->_noticeLayers.empty()) {
+			return;
+		}
+		for (const auto child : guard->_window->bodyWidget()->children()) {
+			if (const auto stack = dynamic_cast<Ui::LayerStackWidget*>(child)) {
+				if (guard->_pendingFlushLayer != stack) {
+					guard->_pendingFlushLayer = stack;
+					const auto presentation = guard->_noticePresentation;
+					QObject::connect(stack, &QObject::destroyed, guard.data(), [=] {
+						if (guard && guard->_noticePresentation == presentation) {
+							guard->schedulePendingNoticeFlush();
+						}
+					});
+				}
+				return;
+			}
+		}
 		Purple::MaybeFlushPendingNotices(guard->_window);
 	});
 }
@@ -2104,6 +2143,7 @@ ModalNotices::DeliveryContext Keys::deliveryContext() const {
 	}
 	const auto hasBox = _window->controller().isLayerShown()
 		|| _activeLayer != ActiveLayer::None
+		|| Purple::PeekCountdownPending()
 		|| QApplication::activePopupWidget() != nullptr
 		|| QApplication::activeModalWidget() != nullptr;
 	return {
@@ -2116,6 +2156,7 @@ ModalNotices::DeliveryContext Keys::deliveryContext() const {
 		.hasBlockingLayerOrBox = hasBox,
 		.inZenMode = _zenMode,
 		.statusBarVisible = chromeVisible() && !_zenMode && !hasBox,
+		.canInterruptWindow = _window->isActiveWindow() && _held.isEmpty(),
 	};
 }
 
@@ -2138,6 +2179,19 @@ void Keys::setStatusMessage(
 
 void Keys::refreshNoticeIndicator() {
 	refreshStatusBar();
+	schedulePendingNoticeFlush();
+}
+
+Keys::ActiveLayer Keys::visibleLayer() const {
+	for (const auto &[layer, kind] : _noticeLayers) {
+		const auto stack = layer
+			? dynamic_cast<Ui::LayerStackWidget*>(layer->parentWidget())
+			: nullptr;
+		if (stack && stack->topShownLayer() == layer.data()) {
+			return kind;
+		}
+	}
+	return _activeLayer;
 }
 
 void Keys::showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistory) {
@@ -2147,25 +2201,16 @@ void Keys::showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistor
 	const auto guard = QPointer(this);
 	const auto kind = isHistory ? ActiveLayer::NoticeHistory : ActiveLayer::Notice;
 	const auto raw = layer.get();
-	_activeLayer = kind;
-	_noticeLayers.erase(
-		std::remove_if(_noticeLayers.begin(), _noticeLayers.end(),
-			[](const QPointer<Ui::LayerWidget> &p) { return p.isNull(); }),
-		_noticeLayers.end());
-	_noticeLayers.emplace_back(raw);
-	layer->lifetime().add([guard, kind, raw] {
+	++_noticePresentation;
+	_pendingFlushLayer = nullptr;
+	_noticeLayers.emplace_back(raw, kind);
+	layer->lifetime().add([guard, raw] {
 		if (!guard) {
 			return;
 		}
-		guard->_noticeLayers.erase(
-			std::remove_if(guard->_noticeLayers.begin(), guard->_noticeLayers.end(),
-				[raw](const QPointer<Ui::LayerWidget> &p) { return p.isNull() || p.data() == raw; }),
-			guard->_noticeLayers.end());
-		// Only clear active-layer state if no other layer remains visible on the stack,
-		// and do NOT auto-chain another pending notice (at most one dialog per transition).
-		if (guard->_activeLayer == kind && !guard->_window->controller().isLayerShown()) {
-			guard->_activeLayer = ActiveLayer::None;
-		}
+		std::erase_if(guard->_noticeLayers, [=](const auto &entry) {
+			return !entry.first || entry.first.data() == raw;
+		});
 		guard->refreshStatusBar();
 	});
 	_window->showOrHideBoxOrLayer(
@@ -2525,6 +2570,7 @@ void Keys::hideWhichKey() {
 }
 
 void Keys::clearPrefix() {
+	const auto wasPending = !_prefix.empty() || _count > 0 || _inspect || _hints.active();
 	_hints.clear();
 	_prefix.clear();
 	_frozenEffective.clear();
@@ -2533,6 +2579,9 @@ void Keys::clearPrefix() {
 	_swallowNext = false;
 	hideWhichKey();
 	refreshStatusBar();
+	if (wasPending) {
+		schedulePendingNoticeFlush();
+	}
 }
 
 void Keys::refreshStatusBar() {
@@ -2567,8 +2616,8 @@ void Keys::refreshStatusBar() {
 	state.unreadCh = _unreadSummary.ch;
 	state.unreadKnown = _unreadKnown;
 	state.zenMode = _zenMode;
-	if (_activeLayer != ActiveLayer::None) {
-		switch (_activeLayer) {
+	if (const auto layer = visibleLayer(); layer != ActiveLayer::None) {
+		switch (layer) {
 		case ActiveLayer::Cheatsheet:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
@@ -2629,7 +2678,7 @@ void Keys::refreshStatusBar() {
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"NOTICE"_q;
 			state.paneLabel = u"Purple Notice"_q;
-			state.rightCue = u"j/k scroll  ·  TAB/h/l buttons  ·  o/RET open  ·  y copy  ·  ? help  ·  q close"_q;
+			state.rightCue = u"j/k scroll  ·  TAB/h/l buttons  ·  o select action  ·  RET activate  ·  y copy  ·  q close"_q;
 			break;
 		case ActiveLayer::NoticeHistory:
 			state.badge = ModalUi::BadgeKind::Help;
@@ -2832,12 +2881,22 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return false;
 	} else if (event->type() == QEvent::InputMethod) {
 		clearPrefix();
+		if (static_cast<QInputMethodEvent*>(event)->preeditString().isEmpty()) {
+			schedulePendingNoticeFlush();
+		}
 		return false;
 	}
 	const auto keyEvent = static_cast<QKeyEvent*>(event);
 	const auto key = ModalKey(*keyEvent);
 	if (event->type() == QEvent::KeyRelease) {
-		return keyEvent->isAutoRepeat() ? _held.contains(key) : _held.remove(key);
+		if (keyEvent->isAutoRepeat()) {
+			return _held.contains(key);
+		}
+		const auto handled = _held.remove(key);
+		if (handled && _held.isEmpty()) {
+			schedulePendingNoticeFlush();
+		}
+		return handled;
 	}
 	if (keyEvent->isAutoRepeat() && _held.contains(key)) {
 		// Allow repeat for single-key repeatable motions in Normal mode? Keep non-repeat guard safe.
@@ -4284,6 +4343,7 @@ ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window) {
 		.modalEnabled = Enabled(),
 		.passcodeLocked = Core::App().passcodeLocked() || window->controller().locked(),
 		.privacyScreenActive = Purple::PrivacyScreenActiveAny() || Purple::PrivacyScreenActive(window),
+		.canInterruptWindow = false,
 	};
 }
 

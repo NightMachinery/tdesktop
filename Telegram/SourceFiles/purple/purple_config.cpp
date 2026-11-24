@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
 #include "purple/purple_notices.h"
+#include "purple/purple_privacy_screen.h"
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_media_reply_splice.h"
 #include "purple/purple_peek_controls.h"
@@ -35,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "mainwindow.h"
 #include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_local_state.h"
 #include "purple/purple_sync_local_store.h"
@@ -1715,8 +1717,6 @@ void ShowAccountListReloadNotices() {
 		if (live && !live->account().loggingOut()) { keys.push_back(SessionAccountKey(live)); }
 	}
 	const auto changes = AccountRouting().observeListReloads(keys);
-	const auto window = Core::App().activeWindow();
-	if (!window) { return; }
 	for (const auto &change : changes) {
 		auto session = static_cast<Main::Session*>(nullptr);
 		for (const auto &entry : Core::App().domain().accounts()) {
@@ -1724,6 +1724,7 @@ void ShowAccountListReloadNotices() {
 			if (live && !live->account().loggingOut() && SessionAccountKey(live) == change.account) { session = live; break; }
 		}
 		if (!session) { continue; }
+		const auto window = PurpleNoticeWindow(session);
 		const auto labels = SettingsRowLabels(session, std::nullopt);
 		auto lines = QStringList();
 		if (change.impact) { lines.push_back(labels.own + u":\n"_q + ConfigImpactDisplayText(*change.impact)); }
@@ -1740,17 +1741,20 @@ void ShowAccountListReloadNotices() {
 		const auto opening = AccountSettingsOpenTargetFor(session, SettingsOpenRole::Own);
 		const auto weakSession = base::make_weak(session);
 		const auto weakWindow = base::make_weak(window);
-		const auto current = [=] {
-			const auto live = weakSession.get();
-			return live && weakWindow && Core::App().activeWindow() == weakWindow.get()
-				&& !live->account().loggingOut() && live->account().maybeSession() == live
-				&& SessionAccountKey(live) == change.account;
-		};
 		auto text = tr::marked(lines.join('\n'));
 		if (opening) {
 			text.append(u" "_q).append(tr::lng_purple_lists_open_own(tr::now, lt_account, tr::marked(labels.own), tr::link));
 		}
-		const auto openSettings = [=] {
+		const auto openSettings = [=, account = change.account](not_null<Window::Controller*> host) {
+			const auto weakHost = base::make_weak(host.get());
+			const auto current = [=] {
+				const auto live = weakSession.get();
+				const auto window = weakHost.get();
+				return live && window && window->maybeSession() == live
+					&& !window->locked() && !PrivacyScreenActiveAny()
+					&& !live->account().loggingOut() && live->account().maybeSession() == live
+					&& SessionAccountKey(live) == account;
+			};
 			if (!opening || !current()) { return; }
 			const auto ready = PrepareAccountSettingsOpen(weakSession.get(), *opening, current);
 			if (!ready.target || !current()) { return; }
@@ -1764,9 +1768,6 @@ void ShowAccountListReloadNotices() {
 		};
 		auto rows = std::vector<ModalNotices::NoticeRow>();
 		auto hasWarning = false;
-		const auto peerLookup = [session](uint64_t rawId) {
-			return ResolveNoticePeerLabel(not_null{ session }, rawId);
-		};
 		if (change.impact && change.impact->status == ConfigImpactStatus::Ready) {
 			for (const auto &finding : change.impact->findings) {
 				const auto &key = finding.change;
@@ -1794,10 +1795,11 @@ void ShowAccountListReloadNotices() {
 					}
 					rows.push_back({
 						.label = name,
-						.before = ModalNotices::ResolvePeerIdsInConfigValue(beforeRaw, key.table, key.key, peerLookup),
-						.after = ModalNotices::ResolvePeerIdsInConfigValue(afterRaw, key.table, key.key, peerLookup),
+						.before = beforeRaw,
+						.after = afterRaw,
 						.tag = std::move(tag),
 						.isInactive = !usedHere,
+						.hasConfigPeerIds = ModalNotices::IsPeerIdConfigKey(key.table, key.key),
 					});
 				} else {
 					hasWarning = true;
@@ -1891,7 +1893,9 @@ void ShowAccountListReloadNotices() {
 					liveWin->showToast(Ui::Toast::Config{
 						.text = text,
 						.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
-							openSettings();
+							if (const auto live = weakWindow.get()) {
+								openSettings(live);
+							}
 							return false;
 						},
 						.duration = kAccountListNoticeDuration,
@@ -2188,16 +2192,20 @@ void DeleteAccountListMembersBox(
 			});
 			return;
 		}
+		const auto stockLabel = stock ? labels.own : QString();
+		const auto showStockNotice = stock;
+		const auto stockOrigin = origin;
+		const auto stockShow = show;
 		if (current()) { box->closeBox(); }
-		if (stock) {
-			const auto msg = tr::lng_purple_lists_stock_edit(tr::now, lt_account, labels.own);
+		if (const auto live = stockOrigin.get(); showStockNotice && live) {
+			const auto msg = tr::lng_purple_lists_stock_edit(tr::now, lt_account, stockLabel);
 			ShowPurpleNotice({
-				.session = origin.get(),
-				.accountLabel = labels.own,
+				.session = live,
+				.accountLabel = stockLabel,
 				.scope = u"Work Mode lists"_q,
 				.summary = msg,
 				.severity = ModalNotices::NoticeSeverity::Info,
-				.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+				.fallbackToast = [=] { if (stockShow && *stockShow) { stockShow->showToast(msg); } },
 			});
 		}
 	});
@@ -2644,16 +2652,16 @@ bool AccountSettingsNeedOwner() {
 void ShowAccountSettingsRefusal(
 		std::shared_ptr<Ui::Show> show,
 		const QString &error,
-		std::optional<AccountKey> current) {
+		not_null<Main::Session*> session,
+		Window::Controller *window) {
 	if (!show || !show->valid()) {
 		return;
 	} else if (!AccountSettingsNeedOwner()) {
-		const auto activeWin = Core::App().activeWindow();
-		const auto activeSession = activeWin ? activeWin->maybeSession() : nullptr;
+		const auto origin = dynamic_cast<::MainWindow*>(show->toastParent()->window());
 		const auto weakShow = std::weak_ptr<Ui::Show>(show);
 		ShowPurpleNotice({
-			.session = activeSession,
-			.window = activeWin,
+			.session = session.get(),
+			.window = window ? window : origin ? &origin->controller() : nullptr,
 			.scope = u"Settings"_q,
 			.summary = error,
 			.severity = ModalNotices::NoticeSeverity::Error,
@@ -2665,6 +2673,7 @@ void ShowAccountSettingsRefusal(
 		});
 		return;
 	}
+	const auto current = SessionAccountKey(session);
 	const auto weak = std::weak_ptr<Ui::Show>(show);
 	show->showBox(Ui::MakeConfirmBox({
 		.text = tr::lng_purple_settings_row_needs_owner(),

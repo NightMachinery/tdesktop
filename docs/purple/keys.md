@@ -225,18 +225,22 @@ on the modal status line and cheatsheet footer.
   detailed Purple notices (such as settings-file reload impacts, sync-chat
   problems, archive recovery warnings, and actionable errors) open in a modal
   notice layer (`j`/`k`/`gg`/`G` scroll, `Tab` or `h`/`l` between buttons,
-  `o`/`RET` open settings/action, `y` copy, `?` help, `q`/`Esc` close) with
-  readable before/after values and same-account local chat-name resolution
-  (chats hidden by Work Mode fall back to their raw ID). Background notices
-  never steal typing during Insert mode, IME preedit, a pending prefix, or
-  another open layer: they coalesce repeats, show only a status-line cue, and
-  open on return to Normal. Short acknowledgements and single-line errors go to
-  the modal status line (transient bar in Zen, or stock toast fallback when
-  covered by an open box), with errors staying longer and soft screen-time
+  `o` selects the primary action, `RET` activates the selected button, `y`
+  copies, `?` opens help, `q`/`Esc` closes). The Close button is selected on
+  arrival. Before/after values resolve bare chat IDs in the current account.
+  Hidden, unknown, ambiguous, and negative IDs remain literal. Background
+  notices coalesce and wait for the account's active window, clear of Insert
+  mode, IME preedit, pending keys, the Peek wait cover, and other layers.
+  Returning to Normal or closing a blocking box opens at most one waiting
+  notice. Short acknowledgements and single-line errors go to the modal status
+  line (transient bar in Zen, or a stock toast when covered by an open box), with errors staying longer and soft screen-time
   budget notices showing a persistent status cue. `SPC h e` reopens recent
   per-account notices in a memory-only `*Messages*` list that clears on logout
-  and is unavailable while passcode-locked or under the privacy screen. When
-  modal keys are off, stock toasts stay unchanged.
+  and is unavailable while passcode-locked or under the privacy screen.
+  Archive removal warnings contain no account details and are shared across
+  accounts, including after logout. Clearing the displayed history also
+  clears its pending notices. Stock toasts remain available with modal keys
+  off, subject to passcode and privacy checks.
 
 ## Upstream hooks
 

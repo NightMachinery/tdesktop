@@ -12,6 +12,7 @@
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "purple/purple_notices.h"
+#include "purple/purple_privacy_screen.h"
 #include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_magic_telegram.h"
 #include "settings/settings_common.h"
@@ -245,10 +246,14 @@ void ToastSyncMagicProblem(not_null<Main::Session*> session) {
 	chat->shown();
 	const auto weak = base::make_weak(controller);
 	const auto statusText = SyncMagicStatusText(session, frame);
-	const auto openSettings = [=] {
-		if (const auto strong = weak.get()) {
-			strong->show(Box(SyncMagicChatBox, &strong->session(), [=] {
-				return weak.get() != nullptr;
+	const auto weakSession = base::make_weak(session.get());
+	const auto openSettings = [=](not_null<Window::Controller*> host) {
+		const auto own = host->sessionController();
+		if (own && &own->session() == weakSession.get() && !host->locked()
+			&& !PrivacyScreenActiveAny()) {
+			const auto weakOwn = base::make_weak(own);
+			own->show(Box(SyncMagicChatBox, &own->session(), [=] {
+				return weakOwn.get() != nullptr;
 			}));
 		}
 	};
@@ -270,7 +275,9 @@ void ToastSyncMagicProblem(not_null<Main::Session*> session) {
 					.text = TextWithEntities{ statusText + ' ' }.append(
 						Ui::Text::Link(tr::lng_purple_magic_problem_open(tr::now))),
 					.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
-						openSettings();
+						if (const auto live = weak.get()) {
+							openSettings(&live->window());
+						}
 						return false;
 					},
 					.duration = kProblemToastDuration,

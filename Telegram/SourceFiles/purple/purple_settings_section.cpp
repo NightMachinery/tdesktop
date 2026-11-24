@@ -298,7 +298,7 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 				if (!selected) {
 					if (const auto window = weakController.get(); window && AccountSettingsNeedOwner()) {
 						ShowAccountSettingsRefusal(window->uiShow(), AccountSettingsNeedsOwnerText(),
-							SessionAccountKey(&window->session()));
+							&window->session(), &window->window());
 					} else if (window) {
 						window->show(Ui::MakeInformBox(tr::lng_purple_settings_open_unavailable(tr::now)));
 					}

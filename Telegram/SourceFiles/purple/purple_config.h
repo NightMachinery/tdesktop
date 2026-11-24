@@ -17,7 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class QJsonValue;
 namespace Main { class Session; }
 namespace Ui { class GenericBox; class Show; }
-namespace Window { class SessionController; }
+namespace Window { class Controller; class SessionController; }
 
 namespace Purple {
 
@@ -119,7 +119,8 @@ void ChooseSettingsOwnerBox(
 void ShowAccountSettingsRefusal(
 	std::shared_ptr<Ui::Show> show,
 	const QString &error,
-	std::optional<AccountKey> current);
+	not_null<Main::Session*> session,
+	Window::Controller *window = nullptr);
 
 
 // The write every file in that directory goes through: QSaveFile puts a

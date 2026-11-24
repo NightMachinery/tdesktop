@@ -242,7 +242,7 @@ struct NoticeHistoryConfig {
 	QString accountLabel;
 	std::vector<ModalNotices::NoticeRecord> items;
 	Fn<void(ModalNotices::NoticeRecord)> onInspect;
-	Fn<void(QString)> onCopy;
+	Fn<void(const ModalNotices::NoticeRecord &)> onCopy;
 	Fn<void()> onClear;
 };
 

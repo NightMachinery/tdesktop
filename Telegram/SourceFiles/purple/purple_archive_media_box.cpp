@@ -132,6 +132,7 @@ void ShowArchiveMedia(not_null<Window::SessionController*> controller,
 					const auto msg = tr::lng_purple_archive_attachment_failed(tr::now);
 					const auto boxShow = box->uiShow();
 					ShowPurpleAck({
+						.session = session.get(),
 						.scope = u"Local archive"_q,
 						.text = msg,
 						.severity = ModalNotices::NoticeSeverity::Error,

@@ -24,7 +24,6 @@
 #include "storage/storage_account.h"
 #include "storage/details/storage_file_utilities.h"
 #include <QtCore/QPointer>
-#include "ui/toast/toast.h"
 #include <QtCore/QBuffer>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
@@ -101,6 +100,17 @@ bool ArchiveFailureNeedsToast(DesktopArchiveStatus status,
 		&& (!failure.isEmpty()
 			|| (status != DesktopArchiveStatus::Ready
 				&& status != DesktopArchiveStatus::Disabled));
+}
+
+void ShowArchiveRemovalPending() {
+	ShowPurpleNotice({
+		.appScoped = true,
+		.scope = u"Local archive"_q,
+		.summary = tr::lng_purple_archive_removal_pending(tr::now),
+		.coalesceKey = QString::fromLatin1(ModalNotices::kArchiveRemovalNoticeKey),
+		.severity = ModalNotices::NoticeSeverity::Warning,
+		.background = true,
+	});
 }
 
 constexpr auto kLoginAuthorityPref = "purple.archive.login_authority.v1";
@@ -803,44 +813,25 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 	const auto weak = base::make_weak(session.get());
 	const auto accountKey = PurpleNoticeAccountKey(session.get());
 	const auto routing = value.routing;
-	const auto showRemovalPending = [accountKey] {
-		const auto msg = tr::lng_purple_archive_removal_pending(tr::now);
-		ShowPurpleNotice({
-			.accountKeyOverride = accountKey,
-			.scope = u"Local archive"_q,
-			.summary = msg,
-			.coalesceKey = u"archive:removal_pending:"_q + accountKey,
-			.severity = ModalNotices::NoticeSeverity::Warning,
-			.background = true,
-			.fallbackToast = [=] { Ui::Toast::Show(msg); },
-		});
-	};
 	value.worker = std::make_shared<ArchiveWorker>(
 		std::move(options),
-		[weak, accountKey, showRemovalPending, routing, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString failure, uint64_t bytes) {
-			crl::on_main([weak, accountKey, showRemovalPending, routing, app, status, failure = std::move(failure), bytes] {
+		[weak, accountKey, routing, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString failure, uint64_t bytes) {
+			crl::on_main([weak, accountKey, routing, app, status, failure = std::move(failure), bytes] {
 				if (!app) {
 					return;
 				}
+				if (status == DesktopArchiveStatus::RemovalPending) {
+					ShowArchiveRemovalPending();
+				}
 				if (!routing->load()) {
-					if (status == DesktopArchiveStatus::RemovalPending
-						&& (!weak || Retired.contains(weak.get()))) {
-						showRemovalPending();
-					}
 					return;
 				}
 				const auto live = weak.get();
 				if (!live) {
-					if (status == DesktopArchiveStatus::RemovalPending) {
-						showRemovalPending();
-					}
 					return;
 				}
 				const auto i = Sessions.find(live);
 				if (i == Sessions.end()) {
-					if (status == DesktopArchiveStatus::RemovalPending) {
-						showRemovalPending();
-					}
 					return;
 				}
 				const auto firstFailure = ArchiveFailureNeedsToast(status, failure, i->second.failure);
@@ -850,7 +841,8 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 					i->second.failure = failure;
 				}
 				i->second.bytes = bytes;
-				if (firstFailure && Core::App().domain().started()
+				if (firstFailure && status != DesktopArchiveStatus::RemovalPending
+					&& Core::App().domain().started()
 					&& Core::App().domain().active().maybeSession() == live) {
 					const auto gap = status == DesktopArchiveStatus::Ready
 						|| status == DesktopArchiveStatus::RetentionGap;
@@ -865,7 +857,6 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 							? ModalNotices::NoticeSeverity::Warning
 							: ModalNotices::NoticeSeverity::Error,
 						.background = true,
-						.fallbackToast = [=] { Ui::Toast::Show(msg); },
 					});
 				}
 				Changes.fire({});
@@ -950,19 +941,6 @@ void RemoveArchiveAtLogout(Main::Account &account) {
 			}
 		}
 	}
-	const auto accountKey = session ? PurpleNoticeAccountKey(session) : u"app"_q;
-	const auto showRemovalPending = [accountKey] {
-		const auto msg = tr::lng_purple_archive_removal_pending(tr::now);
-		ShowPurpleNotice({
-			.accountKeyOverride = accountKey,
-			.scope = u"Local archive"_q,
-			.summary = msg,
-			.coalesceKey = u"archive:removal_pending:"_q + accountKey,
-			.severity = ModalNotices::NoticeSeverity::Warning,
-			.background = true,
-			.fallbackToast = [=] { Ui::Toast::Show(msg); },
-		});
-	};
 	try {
 		auto options = Options(account);
 		options.removalStore = store;
@@ -970,17 +948,17 @@ void RemoveArchiveAtLogout(Main::Account &account) {
 			? QString::fromLatin1(QCryptographicHash::hash(authority, QCryptographicHash::Sha256).toHex())
 			: u"unavailable"_q;
 		static_cast<void>(ArchiveWorker::RemovalOnly(std::move(options), !session,
-			[showRemovalPending, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, uint64_t) {
+			[app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, uint64_t) {
 				if (status == DesktopArchiveStatus::RemovalPending) {
-					crl::on_main([showRemovalPending, app] {
+					crl::on_main([app] {
 						if (app) {
-							showRemovalPending();
+							ShowArchiveRemovalPending();
 						}
 					});
 				}
 			}));
 	} catch (const std::system_error &) {
-		showRemovalPending();
+		ShowArchiveRemovalPending();
 	}
 	Changes.fire({});
 }
@@ -1064,7 +1042,6 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 							.coalesceKey = u"archive:discard_failed:"_q + acctKey,
 							.severity = ModalNotices::NoticeSeverity::Error,
 							.background = true,
-							.fallbackToast = [=] { Ui::Toast::Show(msg); },
 						});
 					}
 					Changes.fire({});
@@ -1083,7 +1060,6 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 				.coalesceKey = u"archive:discard_failed:"_q + acctKey,
 				.severity = ModalNotices::NoticeSeverity::Error,
 				.background = true,
-				.fallbackToast = [=] { Ui::Toast::Show(msg); },
 			});
 			Changes.fire({});
 		}
@@ -1113,7 +1089,6 @@ void QueueArchiveRetentionGap(not_null<Main::Session*> session, QString reason) 
 			.coalesceKey = u"archive:gap:"_q + acctKey,
 			.severity = ModalNotices::NoticeSeverity::Warning,
 			.background = true,
-			.fallbackToast = [=] { Ui::Toast::Show(msg); },
 		});
 	}
 }

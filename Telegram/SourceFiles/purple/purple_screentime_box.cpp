@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_screentime_box.h"
 
 #include "base/unixtime.h"
+#include "base/weak_ptr.h"
 #include "core/file_utilities.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -655,6 +656,7 @@ void ExportCsv(
 			one.hidden ? u"1"_q : u"0"_q);
 	}
 	const auto show = box->uiShow();
+	const auto origin = base::make_weak(session.get());
 	FileDialog::GetWritePath(
 		box.get(),
 		u"Export screen time"_q,
@@ -666,6 +668,7 @@ void ExportCsv(
 			} else if (WriteConfigFile(path, text)) {
 				const auto msg = u"Saved to %1."_q.arg(path);
 				ShowPurpleAck({
+					.session = origin.get(),
 					.scope = u"Screen time export"_q,
 					.text = msg,
 					.severity = ModalNotices::NoticeSeverity::Info,
@@ -674,9 +677,11 @@ void ExportCsv(
 			} else {
 				const auto msg = u"Could not write %1."_q.arg(path);
 				ShowPurpleNotice({
+					.session = origin.get(),
 					.scope = u"Screen time export"_q,
 					.summary = u"Could not write screen time export file."_q,
 					.severity = ModalNotices::NoticeSeverity::Error,
+					.background = true,
 					.rows = { { .label = u"Path"_q, .detail = path } },
 					.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
 				});

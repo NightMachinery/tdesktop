@@ -3670,7 +3670,7 @@ public:
 		_buttons.push_back({ ButtonKind::Close, u"Close"_q });
 		// Focus Close on arrival so Return is harmless if the notice arrives mid-keypress.
 		_focusedButton = int(_buttons.size()) - 1;
-		_openedAtMs = QDateTime::currentMSecsSinceEpoch();
+		_openedAtMs = crl::now();
 
 		auto body = object_ptr<NoticeBodyWidget>(_scroll, _config.record);
 		_body = body.data();
@@ -3759,7 +3759,7 @@ protected:
 		// Consume held auto-repeat and the opening gesture (180 ms arrival guard)
 		// so a queued notice arriving mid-typing never triggers an action or copies.
 		if (isActionKey) {
-			const auto elapsed = QDateTime::currentMSecsSinceEpoch() - _openedAtMs;
+			const auto elapsed = crl::now() - _openedAtMs;
 			if (e->isAutoRepeat() || elapsed < 180) {
 				e->accept();
 				return;
@@ -3815,7 +3815,8 @@ protected:
 		} else if (key == Qt::Key_O && !mods) {
 			for (auto i = 0; i < int(_buttons.size()); ++i) {
 				if (_buttons[i].kind == ButtonKind::Primary) {
-					activateButton(i);
+					_focusedButton = i;
+					update();
 					return;
 				}
 			}
@@ -3881,7 +3882,7 @@ protected:
 			p.fillRect(0, helpRect.top(), width(), 1, st::boxDividerBg->c);
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			const auto helpText = u"j/k/gg/G scroll  ·  TAB or h/l buttons  ·  o/RET open  ·  y copy  ·  q/ESC close  ·  ? hide help"_q;
+			const auto helpText = u"j/k/gg/G scroll  ·  TAB/h/l buttons  ·  o select action  ·  RET activate  ·  y copy  ·  q/ESC close"_q;
 			p.drawText(
 				helpRect.adjusted(16, 0, -16, 0),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -4340,7 +4341,7 @@ protected:
 			return;
 		} else if (key == Qt::Key_Y && !mods) {
 			if (_selected >= 0 && _selected < int(_visible.size()) && _config.onCopy) {
-				_config.onCopy(_config.items[_visible[_selected]].plainText());
+				_config.onCopy(_config.items[_visible[_selected]]);
 			}
 			return;
 		} else if (key == Qt::Key_C && !mods) {
