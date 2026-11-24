@@ -76,6 +76,46 @@ SettingsFileInput OwnGoodInput(const AccountSettingsOpenTarget &target) {
 	return AccountFilePathSafe(path) ? ReadSettingsFileInput(path) : SettingsFileInput();
 }
 
+struct PreviewLayerSource {
+	SettingsLayerFileReport report;
+	QString text;
+	QString path;
+};
+
+PreviewLayerSource SelectPreviewLayerSource(
+		const SettingsFileInput &input,
+		const SettingsFileInput &good,
+		const QString &path) {
+	auto result = PreviewLayerSource();
+	result.path = path;
+	const auto text = QString::fromUtf8(input.bytes);
+	result.report.current = { path, ParseSettingsWithTrace(text, path),
+		input.state != SettingsFileState::Missing };
+	if (input.state == SettingsFileState::Readable && result.report.current.parsed.ok()) {
+		result.report.usable = true;
+		result.text = text;
+		return result;
+	}
+	if (input.state == SettingsFileState::Missing) {
+		result.report.current.parsed.error = u"Settings file is absent."_q;
+	} else if (input.state == SettingsFileState::ReadError) {
+		result.report.current.parsed.error = u"Settings file could not be read."_q;
+	}
+	if (good.state == SettingsFileState::Readable) {
+		const auto goodPath = path + u".good"_q;
+		const auto goodText = QString::fromUtf8(good.bytes);
+		result.report.good = SettingsLayerFileParse{
+			goodPath, ParseSettingsWithTrace(goodText, goodPath),
+		};
+		if (result.report.good->parsed.ok()) {
+			result.report.usable = result.report.usedGood = true;
+			result.path = goodPath;
+			result.text = goodText;
+		}
+	}
+	return result;
+}
+
 LayerSettingsResult LayersFor(
 		const SettingsEditorOpening &opening,
 		const AccountSettingsWriteTarget &target,
@@ -83,26 +123,25 @@ LayerSettingsResult LayersFor(
 	const auto &file = target.destination.file;
 	const auto &global = target.globalSource.file;
 	const auto &own = opening.ownSource->file;
-	const auto globalInput = global.path == file.path ? candidate : global.input;
-	const auto ownInput = own.path == file.path ? candidate : own.input;
-	auto options = SettingsLayerOptions();
-	options.globalPresent = globalInput.state != SettingsFileState::Missing;
-	options.accountPresent = ownInput.state != SettingsFileState::Missing;
-	options.followListMembers = opening.workMode == AccountWorkMode::Follow;
-	options.traceReads = true;
-	if (target.globalGoodInput.state == SettingsFileState::Readable) {
-		options.globalGood = SettingsLayerText{
-			QString::fromUtf8(target.globalGoodInput.bytes), global.path + u".good"_q,
-		};
+	auto globalSource = SelectPreviewLayerSource(
+		global.path == file.path ? candidate : global.input, target.globalGoodInput, global.path);
+	if (global.path == own.path) {
+		auto result = LayerSettingsResult();
+		result.effective = ParseSettingsWithTrace(globalSource.text, globalSource.path);
+		result.global = std::move(globalSource.report);
+		return result;
 	}
-	if (opening.ownGood.state == SettingsFileState::Readable) {
-		options.accountGood = SettingsLayerText{ QString::fromUtf8(opening.ownGood.bytes),
-			own.path + u".good"_q };
-	}
-	return LayerSettings(
-		QString::fromUtf8(globalInput.bytes), global.path,
-		QString::fromUtf8(ownInput.bytes), own.path,
-		options);
+	auto ownSource = SelectPreviewLayerSource(
+		own.path == file.path ? candidate : own.input, opening.ownGood, own.path);
+	auto result = LayerSettings(globalSource.text, globalSource.path, ownSource.text, ownSource.path, {
+		.followListMembers = opening.workMode == AccountWorkMode::Follow,
+		.globalPresent = globalSource.report.usable,
+		.accountPresent = ownSource.report.usable,
+		.traceReads = true,
+	});
+	result.global = std::move(globalSource.report);
+	result.account = std::move(ownSource.report);
+	return result;
 }
 
 bool Incomplete(const SettingsEditorPreview &preview) {
@@ -266,7 +305,8 @@ SettingsEditorPreparation PrepareSettingsEditorEdit(
 		if (file.path != global.path) {
 			const auto good = target->globalGoodInput;
 			const auto primary = ParseSettings(QString::fromUtf8(global.input.bytes), global.path);
-			review->_inheritedMembers = (global.input.state != SettingsFileState::Readable || !primary.ok())
+			review->_inheritedMembers = (global.input.state != SettingsFileState::Readable || !primary.ok()
+				|| primary.settings.version > kHighestSettingsVersion || !MapSettingsSource(global.input.bytes).ok())
 				&& good.state == SettingsFileState::Readable ? good.bytes : global.input.bytes;
 		}
 	}

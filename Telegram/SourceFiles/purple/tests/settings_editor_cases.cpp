@@ -204,8 +204,20 @@ void Refusals() {
 			== SettingsEditorStatus::InvalidSource);
 		CHECK(QFile::remove(f.root));
 		CHECK(!f.scalar(A, { u"premium"_q, u"enabled_p"_q }, true).review);
+		const auto missingWithRecovery = f.scalar(B, { u"last_seen"_q, u"reasons_p"_q }, true);
+		CHECK(missingWithRecovery.review && missingWithRecovery.review->preview().usesGlobalRecovery);
+		if (missingWithRecovery.review) {
+			const auto &global = missingWithRecovery.review->preview().beforeLayers.global;
+			CHECK(!global.current.present && global.good && global.good->path == f.root + u".good"_q);
+		}
 		Put(f.other + u".good"_q, "version=2\n");
 		CHECK(!f.scalar(B, { u"last_seen"_q, u"reasons_p"_q }, true).review);
+	}
+	{
+		auto f = Fixture(false);
+		Put(f.root, "version=2\n# \xc0\n[premium]\nenabled_p=true\n");
+		const auto invalid = f.scalar(A, { u"premium"_q, u"enabled_p"_q }, false);
+		CHECK(invalid.status == SettingsEditorStatus::InvalidSource && invalid.line == 0);
 	}
 	{
 		auto f = Fixture();
