@@ -14,11 +14,14 @@ never covers messages or the composer).
   search, or click directly inside the message composer to type. Ordinary
   typing, IME composition, and Telegram shortcuts work normally. Press `Esc`,
   `C-[`, or `C-g` to return to Normal mode.
-- **Transient capture badges:** the status line updates at 0 ms to `LEADER`
-  (indigo) after `SPC`, `LOCAL` with the active context name (teal, for example
-  `LOCAL · CHAT`) after `,` or `SPC m`, `HINTS` (purple) during message/URL
-  hints, `M-x` (violet) in the command palette, and `KEY?` (amber) during
-  `SPC h k`.
+- **Transient capture and layer badges:** the status line updates at 0 ms to
+  `LEADER` (indigo) after `SPC`, `LOCAL` with the active context name (teal,
+  for example `LOCAL · CHAT`) after `,` or `SPC m`, `HINTS` (purple) during
+  message/URL hints, `M-x` (violet) in the command palette, `KEY?` (amber)
+  during `SPC h k`, and `HELP` / `FILTER` while the cheatsheet, bindings list,
+  describe card, or stock shortcuts layer is open. While any layer is open, the
+  status bar replaces the Normal-mode hint with the open layer's own title and
+  active keys.
 - **Pending counts and prefixes:** numeric counts (`5j`, `2C-d`) and pending
   chords (`SPC b -`, `, -`, `y -`) echo immediately on the status line beside
   their prefix group label (`+buffer / chat`). Pressing `DEL` inside a prefix
@@ -36,10 +39,11 @@ the active layout. On macOS, `M-` (Option) chords such as `M-x`, `M-p`, and
 Pausing ~280 ms inside a prefix opens a docked which-key drawer flush above the
 modal status line (reusing stock `Ui::KeysLegend` keycaps and theme colors).
 The header displays the pending chord, group or localleader title, and
-`DEL back · ESC cancel`. The responsive multi-column grid lists only
-applicable continuations, distinguishing `+group` prefixes in accent color from
-leaf commands. Pressing `,` or `SPC m` where no context bindings apply reports
-`No local keys here` on the status line and swallows the next keystroke.
+`DEL back · ESC cancel`. The responsive multi-column grid lists only applicable continuations, placing
+`+group` prefixes in accent color above a hairline divider and merging duplicate
+alias keys (such as `SPC / :` or `, / RET`) into one command row. Pressing `,`
+or `SPC m` where no context bindings apply reports `No local keys here` on the
+status line and swallows the next keystroke.
 
 ## Keymap overview
 
@@ -69,7 +73,7 @@ with at most three strokes per chord:
     track, `p f` / `p b` seek forward/back, `p m` Music, `p l` Playlists;
     also `] t` / `[ t`).
   - `SPC s`: search (`s s` or `/` search messages, `s c` chat palette).
-  - `SPC t`: toggles (`t b` chat background artwork visibility).
+  - `SPC t`: toggles (`t b` chat background artwork visibility, `t n` Night Mode).
   - `SPC w`: panes (`w h` chats, `w l` conversation, `w w` toggle).
   - `SPC a 1` through `SPC a 6`: switch signed-in accounts.
   - `SPC h`: help (`h c` or `?` cheatsheet, `h b` or `SPC ?` all active
@@ -108,11 +112,13 @@ with at most three strokes per chord:
   it is unavailable if so, and every map where it is bound.
 - **`M-x` / `:` / `SPC :` / `SPC SPC` (Command Palette):** upper-third anchored
   layer (never jumps vertically as results narrow) with an `amx` + `orderless`
-  ranking engine: top-7 recent commands first, then invocation frequency, then
-  shorter labels, then A-Z (persisted in `mx-history.json`). Space-separated
-  query terms match in any order as substrings, safe regexes, or word
-  initialisms (`opm` for Open pinned messages), with matched characters
-  highlighted and right-aligned live keycaps. Navigate with `C-n`/`C-p`,
+  ranking engine: available commands first, then title matches ahead of
+  group/id-only matches, with `amx` top-7 recency, invocation frequency,
+  shorter labels, and A-Z breaking ties inside each tier (persisted in
+  `mx-history.json`). Space-separated query terms match in any order as
+  substrings, safe regexes, or word initialisms (`opm` for Open pinned
+  messages), highlighting matches in both the title and the category/command-id
+  subtitle alongside right-aligned live keycaps. Navigate with `C-n`/`C-p`,
   `C-j`/`C-k`, arrows, or `Tab`/`S-Tab`; step input history with `M-p`/`M-n`.
 
 ## Custom bindings (`keys.edn`)

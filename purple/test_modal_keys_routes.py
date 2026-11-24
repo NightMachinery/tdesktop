@@ -83,10 +83,34 @@ for required_ui in (
 ordered(keys_ui, "preeditAreaText().isEmpty()", "Qt::Key_Escape", "Qt::Key_Down", "Qt::Key_Up",
         "Qt::AltModifier", "stepHistory(")
 
-# Verify amx + orderless helpers exist in purple_keys_mx.h.
+# Verify amx + orderless helpers exist in purple_keys_mx.h (including title-first tiering and subtitle highlights).
 for sym in ("kRecentLimit = 7", "WordInitials", "ParseTokens", "MatchToken",
-            "LabelMatchSpans", "RankAndFilter", "StepInputHistory"):
+            "TextMatchSpans", "LabelMatchSpans", "SubtitleMatchSpans",
+            "CandidateMatchTier", "RankAndFilter", "StepInputHistory"):
     assert sym in keys_mx, sym
+assert "SubtitleMatchSpans" in keys_ui
+
+# Verify Normal-mode non-leakage guard: printable keys in Normal mode return Capture or Ignore, never Pass.
+classify = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
+ordered(classify, "if (!_normal)", "return KeyUse::Pass;",
+        "!event.text().isEmpty()", "KeyUse::Ignore", "KeyUse::Pass")
+
+# Verify which-key merges duplicate actions and keeps groups/leaves separated cleanly.
+wk = between(keys, "void Keys::showWhichKey", "void Keys::stroke")
+ordered(wk, "leafIndexByAction", ".groups = std::move(groups)", ".leaves = std::move(leaves)")
+
+# Verify active-layer status bar cues replace Normal-mode cues while a layer is open.
+status_fn = between(keys, "void Keys::refreshStatusBar", "KeyUse Keys::classify")
+for layer_case in ("ActiveLayer::Cheatsheet", "ActiveLayer::AllBindings",
+                   "ActiveLayer::Palette", "ActiveLayer::DescribeKey",
+                   "ActiveLayer::StockShortcuts", "state.rightCue"):
+    assert layer_case in status_fn, layer_case
+
+# Verify cheatsheet preserves key casing (no .toUpper() on titles) and live-derives SPC prefixes + contextTag.
+assert "card.title.toUpper()" not in keys_ui
+assert "group.title.toUpper()" not in keys_ui
+help_fn = between(keys, "void Keys::showHelpLayer", "void Keys::showDescribeKeyResult")
+ordered(help_fn, "Qt::Key_S, Qt::Key_T", ".contextTag = ctx", "onTabChanged")
 
 # Security & focus gates.
 gate = between(keys, "Window::SessionController *Keys::owner()", "bool Keys::chromeVisible")
@@ -147,6 +171,7 @@ for action, chord in (
     ("ChatPalette", "SPC RET"),
     ("ChatPalette", "SPC b b"),
     ("Backgrounds", "SPC t b"),
+    ("ToggleNightMode", "SPC t n"),
     ("OpenChatInfo", "SPC b i"),
     ("OpenChatMenu", "SPC b m"),
     ("OpenPinnedMessages", "SPC b p"),
