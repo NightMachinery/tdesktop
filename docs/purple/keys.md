@@ -76,6 +76,8 @@ with at most three strokes per chord:
   - `SPC o`: open views (`o s` Settings, `o S` Saved Messages, `o a` Archive,
     `o c` Contacts, `o p` Calls, `o d` Downloads, `o m` Main Menu, `o u` Music,
     `o l` Playlists).
+  - `SPC f e d`: Customize Purple settings. `:customize-settings` opens the
+    same view from the command palette.
   - `SPC n`: new (`n g` New Group, `n c` New Channel, `n p` Add Contact).
   - `SPC p`: playback (`p p` play/pause, `p s` stop, `p n` / `p N` next/prev
     track, `p f` / `p b` seek forward/back, `p m` Music, `p l` Playlists;

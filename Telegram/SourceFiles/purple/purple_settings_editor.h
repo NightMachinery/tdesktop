@@ -50,6 +50,7 @@ struct SettingsEditorOpening {
 	QString ownError;
 	QString appWideError;
 	SettingsFileInput ownGood;
+	SettingsFileInput globalGood;
 	bool globalSignedIn = true;
 	AccountWorkMode workMode = AccountWorkMode::Own;
 	uint64_t origin = 0;
@@ -141,6 +142,9 @@ struct SettingsEditorPreparation {
 [[nodiscard]] SettingsEditorOpening CaptureWindowSettingsEditor(
 	not_null<Window::Controller*> window,
 	std::function<bool()> editorCurrent = {});
+
+[[nodiscard]] LayerSettingsResult InspectSettingsEditor(
+	const SettingsEditorOpening &opening);
 
 [[nodiscard]] SettingsEditorPreparation PrepareSettingsEditorEdit(
 	DesktopAccountConfig &routing,

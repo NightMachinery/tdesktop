@@ -1,4 +1,5 @@
 #include "purple/purple_keys.h"
+#include "purple/purple_settings_customize.h"
 
 #include "base/event_filter.h"
 #include "base/weak_ptr.h"
@@ -270,6 +271,7 @@ enum class Action {
 	Search,
 	OpenMainMenu,
 	OpenSettings,
+	CustomizeSettings,
 	OpenSavedMessages,
 	OpenArchive,
 	OpenContacts,
@@ -394,6 +396,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_main_menu(tr::now); } },
 	{ Action::OpenSettings, "open-settings", "open", "",
 		[] { return tr::lng_menu_settings(tr::now); } },
+	{ Action::CustomizeSettings, "customize-settings", "files", "Needs an unlocked account window",
+		[] { return u"Customize Purple settings"_q; } },
 	{ Action::OpenSavedMessages, "open-saved-messages", "open", "",
 		[] { return tr::lng_saved_messages(tr::now); } },
 	{ Action::OpenArchive, "open-archived-chats", "open", "",
@@ -1453,6 +1457,8 @@ bool Available(Action action, const Target &target) {
 	case Action::NewGroup:
 	case Action::NewChannel:
 		return target.controller && !target.controller->session().supportMode();
+	case Action::CustomizeSettings:
+		return target.controller && CanCustomizeSettings(&target.controller->window());
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
 	case Action::TogglePlayback:
@@ -3382,6 +3388,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::OpenCalls:
 		clearPrefix();
 		::Calls::ShowCallsBox(current);
+		break;
+	case Action::CustomizeSettings:
+		clearPrefix();
+		ShowCustomizeSettings(&_window->controller());
 		break;
 	case Action::OpenDownloads:
 		clearPrefix();

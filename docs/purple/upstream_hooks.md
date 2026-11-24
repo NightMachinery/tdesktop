@@ -17,7 +17,8 @@ the numbers.
 
 - `core/application.cpp` and `.h`: key admission, shortcut override, paired key
   release, window deactivation, and IME hooks delegate to Purple's per-window
-  state. Shortcut override also lets focused, editable playlist rows claim
+  state. The Customize filter lets its focused controls handle text and IME
+  input ahead of global chat shortcuts. Shortcut override also lets focused, editable playlist rows claim
   Alt+Up/Down. The playlist hook accepts delivery through the owning native
   window on macOS. While Purple's privacy screen is active, `unreadBadge()`
   reports 0, `unreadBadgeChanges()` merges privacy transitions, `tg://` URLs

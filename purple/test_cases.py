@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -211,6 +212,18 @@ CASES = {
         'units': ['purple/purple_account_config.cpp', 'purple/purple_config_file.cpp',
             'purple/purple_settings_editor.cpp', CORE],
         'frameworks': ['QtCore'],
+    },
+    'settings-tree': {
+        'program': 'settings_tree_cases.cpp',
+        'units': ['purple/purple_settings_tree.cpp', CORE],
+        'frameworks': ['QtCore'],
+    },
+    'customize-keymap': {
+        'program': 'customize_keymap_cases.cpp',
+        'units': [],
+        'generated': ['customize-keymap.inc'],
+        'libraries': ['Telegram/libpurple_edn.a'],
+        'frameworks': ['QtCore', 'QtGui'],
     },
     'copy-article': {
         # The real ordinary formatter and article writer over the real RichPage
@@ -633,6 +646,23 @@ def recording_bin_include(sources):
         'st::boxRowPadding', 'QMargins(8, 8, 8, 8)')
 
 
+def customize_keymap_include(sources):
+    keys = (sources / 'purple/purple_keys.cpp').read_text()
+    modifiers = keys[keys.rindex('#ifdef Q_OS_MAC', 0, keys.index('constexpr auto kCtrl =')):
+        keys.index('rpl::event_stream<bool> EnabledChanges')]
+    action_start = keys.index('enum class Action {')
+    actions = keys[action_start:keys.index('\n};', action_start) + len('\n};')] + '\n'
+    catalog_start = keys.index('const Command kCommands[]')
+    catalog_end = keys.index('using Chord', catalog_start)
+    commands = re.findall(r'\{ Action::(\w+), "([a-z0-9-]+)"', keys[catalog_start:catalog_end])
+    catalog = 'struct Command { Action action; const char *id; };\nconst Command kCommands[] = {\n'
+    catalog += ''.join(f'\t{{ Action::{action}, "{name}" }},\n' for action, name in commands)
+    catalog += '};\n'
+    parser = keys[catalog_end:keys.index('constexpr auto kStarterKeysTemplate')]
+    fixture = (sources.parent / 'Resources/purple/default-keys.edn').read_text()
+    return modifiers + actions + catalog + parser + 'constexpr auto Bundled = R"EDN(' + fixture + ')EDN";\n'
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path)
@@ -694,6 +724,7 @@ pieces = slices(sources) if any(unit.startswith('slice:') for unit in case['unit
 for name in case.get('generated', []):
     generate = {
         'voice-queue-bridge.inc': voice_queue_include,
+        'customize-keymap.inc': customize_keymap_include,
         'playlists-service.inc': playlists_service_include,
         'playlist-player-queue.inc': playlist_player_queue_include,
         'music-listening-tracker.inc': music_listening_include,

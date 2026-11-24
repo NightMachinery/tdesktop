@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_control.h"
 #include "purple/purple_last_seen.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_settings_customize.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_media_playback.h"
 #include "purple/purple_music_section.h"
@@ -737,6 +738,15 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	BuildModalKeysSetting(builder);
+	builder.addButton({
+		.id = u"advanced/purple_customize_settings"_q,
+		.title = rpl::single(u"Customize settings…"_q),
+		.st = &st::settingsButtonNoIcon,
+		.onClick = [window = base::make_weak(&builder.controller()->window())] {
+			if (const auto live = window.get()) ShowCustomizeSettings(live);
+		},
+		.keywords = { u"purple"_q, u"settings"_q, u"customize"_q, u"file"_q },
+	});
 	BuildPrivacyScreenSetting(builder);
 	BuildEmojiExportSetting(builder);
 	BuildControlSettings(builder);

@@ -24,6 +24,7 @@ def ordered(text, *parts):
 
 app = read("core/application.cpp")
 press = between(app, "case QEvent::KeyPress:", "case QEvent::MouseButtonPress:")
+ordered(app, "bool Application::eventFilter", "Purple::FilterCustomizeSettingsInput", "HandlePossibleChatSwitch")
 ordered(press, "IsToggleFullScreenKey", "HandlePossibleChatSwitch",
         "Purple::HandleModalKeys", "HandleKeysLegendHotkey")
 mac_native = between(read("platform/mac/main_window_mac.mm"),
@@ -63,6 +64,20 @@ def bound(action, chord, text=defaults):
     assert re.search(rf'"{re.escape(chord)}"\s+:{re.escape(command_ids[action])}(?:\s|\}}|$)', text), (action, chord)
 
 
+# Customize occupies a four-stroke leaf and does not displace Calls.
+bound("CustomizeSettings", "SPC f e d")
+bound("OpenCalls", "SPC o p")
+assert len(re.findall(r'"SPC f e d"\s+:', defaults)) == 1
+assert re.search(r'"SPC f e"\s+"edit"', defaults)
+assert command_ids["CustomizeSettings"] == "customize-settings"
+ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
+ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
+customize = read("purple/purple_settings_customize.cpp")
+ordered(customize, "sessionDataAboutToBeCleared()", "retire()", "PrivacyScreenChanges()")
+ordered(customize, "QEvent::InputMethod", "preeditString()", "QEvent::KeyPress", "handleKey(")
+ordered(customize, "bool handleKey", "_preedit.contains(object)", "return false", "ShouldHandleEditorKey")
+ordered(customize, "new QPlainTextEdit", "setPlainText", "stageForm()", "PrepareWindowSettingsEditorEdit")
+assert "RequestSettingsEditorApply" not in customize
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
 for required_ui in (
@@ -269,7 +284,7 @@ for index in range(1, 7):
     assert re.search(rf"case Action::Account{index}:.*launch\(Native::ShowAccount{index}\);", dispatch)
     bound(f"Account{index}", f"SPC a {index}")
 
-# Verify context maps exist and contain shared media & local commands, with max 3 strokes everywhere.
+# Verify context maps exist and contain shared media and local commands.
 all_commands = set(command_ids.values())
 map_sections = re.findall(r':(normal|chat|chats|music|insert)\s*\{([^}]*)\}', defaults, re.S)
 assert {m for m, _ in map_sections} == {"normal", "chat", "chats", "music", "insert"}
@@ -278,7 +293,7 @@ for map_name, body in map_sections:
     chords = [tuple(c.split()) for c, _ in bindings]
     assert set(cmd for _, cmd in bindings) <= all_commands, map_name
     assert len(set(chords)) == len(chords), f"duplicate chord in :{map_name}"
-    assert all(len(c) <= 3 for c in chords), f"chord > 3 strokes in :{map_name}"
+    assert all(len(c) <= 4 for c in chords), f"chord > 4 strokes in :{map_name}"
     assert not any(a != b and b[:len(a)] == a for a in chords for b in chords), f"prefix collision in :{map_name}"
     if map_name == "insert":
         assert ('C-[',) in chords and ('M-x',) in chords

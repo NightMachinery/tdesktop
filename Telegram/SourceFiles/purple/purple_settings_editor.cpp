@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_media_reply.h"
 
 #include <QtCore/QRegularExpression>
+#include <QtCore/QStringDecoder>
 
 #include <set>
 
@@ -82,6 +83,13 @@ struct PreviewLayerSource {
 	QString path;
 };
 
+ParseResult ParseEditorSource(const QByteArray &bytes, const QString &path) {
+	auto decoder = QStringDecoder(QStringDecoder::Utf8);
+	const auto text = QString(decoder(bytes));
+	return decoder.hasError() ? ParseResult{ .error = u"Settings file is not valid UTF-8."_q }
+		: ParseSettingsWithTrace(text, path);
+}
+
 PreviewLayerSource SelectPreviewLayerSource(
 		const SettingsFileInput &input,
 		const SettingsFileInput &good,
@@ -89,7 +97,7 @@ PreviewLayerSource SelectPreviewLayerSource(
 	auto result = PreviewLayerSource();
 	result.path = path;
 	const auto text = QString::fromUtf8(input.bytes);
-	result.report.current = { path, ParseSettingsWithTrace(text, path),
+	result.report.current = { path, ParseEditorSource(input.bytes, path),
 		input.state != SettingsFileState::Missing };
 	if (input.state == SettingsFileState::Readable && result.report.current.parsed.ok()) {
 		result.report.usable = true;
@@ -104,15 +112,35 @@ PreviewLayerSource SelectPreviewLayerSource(
 	if (good.state == SettingsFileState::Readable) {
 		const auto goodPath = path + u".good"_q;
 		const auto goodText = QString::fromUtf8(good.bytes);
-		result.report.good = SettingsLayerFileParse{
-			goodPath, ParseSettingsWithTrace(goodText, goodPath),
-		};
+		result.report.good = SettingsLayerFileParse{ goodPath, ParseEditorSource(good.bytes, goodPath) };
 		if (result.report.good->parsed.ok()) {
 			result.report.usable = result.report.usedGood = true;
 			result.path = goodPath;
 			result.text = goodText;
 		}
 	}
+	return result;
+}
+
+LayerSettingsResult LayerEditorSources(
+		PreviewLayerSource globalSource,
+		PreviewLayerSource ownSource,
+		bool sameFile,
+		AccountWorkMode mode) {
+	if (sameFile) {
+		auto result = LayerSettingsResult();
+		result.effective = ParseSettingsWithTrace(globalSource.text, globalSource.path);
+		result.global = std::move(globalSource.report);
+		return result;
+	}
+	auto result = LayerSettings(globalSource.text, globalSource.path, ownSource.text, ownSource.path, {
+		.followListMembers = mode == AccountWorkMode::Follow,
+		.globalPresent = globalSource.report.usable,
+		.accountPresent = ownSource.report.usable,
+		.traceReads = true,
+	});
+	result.global = std::move(globalSource.report);
+	result.account = std::move(ownSource.report);
 	return result;
 }
 
@@ -123,25 +151,13 @@ LayerSettingsResult LayersFor(
 	const auto &file = target.destination.file;
 	const auto &global = target.globalSource.file;
 	const auto &own = opening.ownSource->file;
-	auto globalSource = SelectPreviewLayerSource(
-		global.path == file.path ? candidate : global.input, target.globalGoodInput, global.path);
-	if (global.path == own.path) {
-		auto result = LayerSettingsResult();
-		result.effective = ParseSettingsWithTrace(globalSource.text, globalSource.path);
-		result.global = std::move(globalSource.report);
-		return result;
-	}
-	auto ownSource = SelectPreviewLayerSource(
-		own.path == file.path ? candidate : own.input, opening.ownGood, own.path);
-	auto result = LayerSettings(globalSource.text, globalSource.path, ownSource.text, ownSource.path, {
-		.followListMembers = opening.workMode == AccountWorkMode::Follow,
-		.globalPresent = globalSource.report.usable,
-		.accountPresent = ownSource.report.usable,
-		.traceReads = true,
-	});
-	result.global = std::move(globalSource.report);
-	result.account = std::move(ownSource.report);
-	return result;
+	return LayerEditorSources(
+		SelectPreviewLayerSource(global.path == file.path ? candidate : global.input,
+			target.globalGoodInput, global.path),
+		SelectPreviewLayerSource(own.path == file.path ? candidate : own.input,
+			opening.ownGood, own.path),
+		global.path == own.path,
+		opening.workMode);
 }
 
 bool Incomplete(const SettingsEditorPreview &preview) {
@@ -236,8 +252,21 @@ SettingsEditorOpening CaptureSettingsEditorOpening(
 	if (result.ownSource) {
 		result.ownGood = OwnGoodInput(*result.ownSource);
 	}
+	if (result.globalSource) {
+		result.globalGood = OwnGoodInput(*result.globalSource);
+	}
 	result.workMode = routing.workMode(requester);
 	return result;
+}
+
+LayerSettingsResult InspectSettingsEditor(const SettingsEditorOpening &opening) {
+	const auto global = opening.globalSource ? opening.globalSource->file : AccountFileTarget();
+	const auto own = opening.ownSource ? opening.ownSource->file : AccountFileTarget();
+	return LayerEditorSources(
+		SelectPreviewLayerSource(global.input, opening.globalGood, global.path),
+		SelectPreviewLayerSource(own.input, opening.ownGood, own.path),
+		global.path == own.path,
+		opening.workMode);
 }
 
 SettingsEditorPreparation PrepareSettingsEditorEdit(

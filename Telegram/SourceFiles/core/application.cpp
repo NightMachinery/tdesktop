@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_app_services.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_playlist_song_list.h"
+#include "purple/purple_settings_customize.h"
 #include "base/unixtime.h"
 #include "core/core_screenshot_protection.h"
 #include "core/core_settings.h"
@@ -744,6 +745,13 @@ void Application::closeMediaViewAndPanelsForPrivacy() {
 }
 
 bool Application::eventFilter(QObject *object, QEvent *e) {
+	if (const auto handled = Purple::FilterCustomizeSettingsInput(object, e)) {
+		if (e->type() == QEvent::KeyPress) {
+			updateNonIdle();
+			_inAppKeyPressed.fire({});
+		}
+		return *handled;
+	}
 	switch (e->type()) {
 	case QEvent::KeyPress: {
 		updateNonIdle();

@@ -11,6 +11,8 @@
  {; Prefix labels for which-key and the status line.
   "SPC"   "leader"
   "SPC b" "buffer / chat"
+  "SPC f" "files"
+  "SPC f e" "edit"
   "SPC o" "open"
   "SPC n" "new"
   "SPC p" "playback"
@@ -117,6 +119,8 @@
   "SPC b l" :topic-last
   "SPC b c" :topic-create
   "SPC b h" :topic-parent
+
+  "SPC f e d" :customize-settings
 
   ; SPC o: open views and panels.
   "SPC o s" :open-settings

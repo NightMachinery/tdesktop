@@ -286,6 +286,20 @@ delivery. Work Mode and ordinary chat mutes still decide whether one is sent.
 Notification actions remain subject to the app's existing lock and preview
 rules. The operating system may separately hide previews on its lock screen.
 
+## Customize settings on Desktop
+
+Open **Settings > Purple > Customize settings…**. With modal keys enabled,
+use `SPC f e d` or the command palette’s `customize-settings` command.
+Filter by setting, source or scope. Select a row to see its effective value,
+default, write destination, and physical values from the captured files.
+
+Scalar forms stage changes in memory. Use `u` or **Undo** to reverse a staged
+change. This development slice stops at staging. Collection editing and
+reviewing and applying drafts are planned for the next slice.
+
+The `core/application.cpp` hook reserves keyboard events for the Customize
+layer so native edits and input-method composition stay in the active field.
+
 ## Typed Desktop editing backend
 
 The Desktop editor backend captures an originating window and session, the
