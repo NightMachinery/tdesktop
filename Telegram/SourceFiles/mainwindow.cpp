@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_setup_email.h"
 #include "window/window_media_preview.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_privacy_screen.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QWindow>
@@ -720,6 +721,11 @@ void MainWindow::fixOrder() {
 	if (_passcodeLock) _passcodeLock->raise();
 	if (_layer) _layer->raise();
 	raiseMediaPreview();
+	if (Purple::PrivacyScreenActive(this)
+		&& !Core::App().passcodeLocked()
+		&& !controller().locked()) {
+		Purple::RaisePrivacyScreen(this);
+	}
 }
 
 void MainWindow::raiseMediaPreview() {
@@ -776,6 +782,7 @@ void MainWindow::updateControlsGeometry() {
 			std::max(0, body.height() - modalStatusH) });
 	}
 	Purple::UpdateModalKeysLayout(this, body);
+	Purple::UpdatePrivacyScreenLayout(this, body);
 	if (_intro) _intro->setGeometry(body);
 	if (_layer) _layer->setGeometry(body);
 	if (_mediaPreview) _mediaPreview->setGeometry(body);
@@ -785,7 +792,7 @@ void MainWindow::updateControlsGeometry() {
 }
 
 void MainWindow::handleStartFiles(QStringList paths) {
-	if (controller().locked()) {
+	if (controller().locked() || Purple::PrivacyScreenActive(this)) {
 		return;
 	}
 	Core::App().hideMediaView();

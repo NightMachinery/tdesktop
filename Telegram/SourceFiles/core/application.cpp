@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/media_video_encode.h"
 #include "media/system_media_controls_manager.h"
 #include "window/notifications_manager.h"
+#include "purple/purple_privacy_screen.h"
 #include "window/themes/window_theme.h"
 #include "ui/widgets/tooltip.h"
 #include "ui/gl/gl_detection.h"
@@ -733,6 +734,15 @@ bool Application::hideMediaView() {
 	return false;
 }
 
+void Application::closeMediaViewAndPanelsForPrivacy() {
+	if (_mediaView) {
+		_mediaView->close();
+	}
+	if (_calls) {
+		_calls->hidePanelLayers();
+	}
+}
+
 bool Application::eventFilter(QObject *object, QEvent *e) {
 	switch (e->type()) {
 	case QEvent::KeyPress: {
@@ -1231,7 +1241,7 @@ bool Application::preventsQuit(QuitReason reason) {
 }
 
 int Application::unreadBadge() const {
-	return _domain->unreadBadge();
+	return Purple::PrivacyScreenActiveAny() ? 0 : _domain->unreadBadge();
 }
 
 bool Application::unreadBadgeMuted() const {
@@ -1239,7 +1249,9 @@ bool Application::unreadBadgeMuted() const {
 }
 
 rpl::producer<> Application::unreadBadgeChanges() const {
-	return _domain->unreadBadgeChanges();
+	return rpl::merge(
+		_domain->unreadBadgeChanges(),
+		Purple::PrivacyScreenChanges() | rpl::to_empty);
 }
 
 bool Application::offerLegacyLangPackSwitch() const {
@@ -1260,7 +1272,7 @@ void Application::checkStartUrls() {
 	if (_setupEmailLock.current()) {
 		return;
 	}
-	if (!Core::App().passcodeLocked()) {
+	if (!Core::App().passcodeLocked() && !Purple::PrivacyScreenActiveAny()) {
 		// WHY: tg://resolve?acc= switches the account, which shows the
 		// new main widget and re-enters here while we still iterate,
 		// so take the list out and merge whatever was added meanwhile.
@@ -1334,7 +1346,8 @@ bool Application::openLocalUrl(const QString &url, QVariant context) {
 	const auto urlTrimmed = url.trimmed();
 	const auto protocol = u"tg://"_q;
 	if (urlTrimmed.startsWith(protocol, Qt::CaseInsensitive)
-		&& !passcodeLocked()) {
+		&& !passcodeLocked()
+		&& !Purple::PrivacyScreenActiveAny()) {
 		const auto command = urlTrimmed.mid(protocol.size());
 		const auto my = context.value<ClickHandlerContext>();
 		const auto controller = my.sessionWindow.get()
@@ -1364,7 +1377,8 @@ bool Application::openCustomUrl(
 		const QVariant &context) {
 	const auto urlTrimmed = url.trimmed();
 	if (!urlTrimmed.startsWith(protocol, Qt::CaseInsensitive)
-		|| passcodeLocked()) {
+		|| passcodeLocked()
+		|| Purple::PrivacyScreenActiveAny()) {
 		return false;
 	}
 	static const auto kTagExp = QRegularExpression(
@@ -1581,7 +1595,8 @@ not_null<Window::Controller*> Application::ensureSeparateWindowFor(
 	if (const auto existing = separateWindowFor(id)) {
 		if (id.thread
 			&& id.type == Window::SeparateType::Chat
-			&& !passcodeLocked()) {
+			&& !passcodeLocked()
+			&& !Purple::PrivacyScreenActiveAny()) {
 			existing->sessionController()->showThread(
 				id.thread,
 				showAtMsgId,
@@ -1602,6 +1617,7 @@ not_null<Window::Controller*> Application::ensureSeparateWindowFor(
 	}
 	result->firstShow();
 	result->finishFirstShow();
+	Purple::SyncPrivacyScreenForWindow(result->widget());
 	return activate(result);
 }
 

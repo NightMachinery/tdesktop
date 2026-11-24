@@ -249,6 +249,8 @@ for action, chord in (
     ("UnreadBuffer", "SPC b I"),
     ("ToggleZenMode", "SPC t z"),
     ("ToggleZenMode", "SPC w m"),
+    ("TogglePrivacyScreen", "SPC t p"),
+    ("TogglePrivacyScreen", "SPC z"),
 ):
     bound(action, chord)
 for index in range(1, 7):
@@ -289,6 +291,35 @@ ordered(keys, "avatarSession", "avatarPeerId")
 keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
+
+privacy = read("purple/purple_privacy_screen.cpp")
+ordered(privacy, "ShouldFetchWeather", "Accept-Language")
+ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
+ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")
+ordered(privacy, "closeMediaViewAndPanelsForPrivacy()", "clearAllFast()",
+        "HideSecondaryTopLevelSurfaces()", "enumerateWindows",
+        "GlobalPrivacyChanges.fire(true)", "RefreshMenusAndTitles()")
+ordered(privacy, "RestoreSecondaryTopLevelSurfaces()", "GlobalPrivacyChanges.fire(false)",
+        "checkStartUrls()")
+mw_cpp = read("mainwindow.cpp")
+fix_order = between(mw_cpp, "void MainWindow::fixOrder()", "void MainWindow::raiseMediaPreview()")
+ordered(fix_order, "_setupEmailLock", "_passcodeLock", "_layer", "raiseMediaPreview()",
+        "Purple::PrivacyScreenActive(this)", "Purple::RaisePrivacyScreen(this)")
+core_app = read("core/application.cpp")
+ordered(core_app, "int Application::unreadBadge()", "Purple::PrivacyScreenActiveAny()")
+ordered(core_app, "Purple::PrivacyScreenChanges()")
+ordered(core_app, "SyncPrivacyScreenForWindow")
+notif = read("window/notifications_manager.cpp")
+ordered(notif, "getNotificationOptions", "Purple::PrivacyScreenActiveAny()")
+ordered(notif, "openNotificationMessage", "Purple::PrivacyScreenActiveAny()")
+media_overlay = read("media/view/media_view_overlay_widget.cpp")
+ordered(media_overlay, "Purple::PrivacyScreenChanges(", "_pip = nullptr;")
+media_ctrl = read("media/system_media_controls_manager.cpp")
+ordered(media_ctrl, "Purple::PrivacyScreenActiveAny()", "clearMetadata()", "Purple::PrivacyScreenChanges(")
+tray_acc = read("tray_accounts_menu.cpp")
+ordered(tray_acc, "Purple::PrivacyScreenActiveAny()")
+mac_menu = read("platform/mac/global_menu_mac.mm")
+ordered(mac_menu, "Purple::PrivacyScreenActiveAny()")
 main_w = read("mainwidget.cpp")
 ordered(main_w, "syncZenHide", "_zenThirdSectionHide", "_zenThirdShadowHide")
 ordered(main_w, "void MainWidget::destroyThirdSection()", "_zenThirdSectionHide.onWidgetDestroyed()")

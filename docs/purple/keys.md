@@ -68,6 +68,7 @@ with at most three strokes per chord:
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
   - `SPC ,`, `SPC RET`, `SPC b b`: chat switcher palette.
   - `SPC u`, `SPC b I`: unread unmuted chats buffer (iBuffer).
+  - `SPC z`, `SPC t p`: privacy screen across all Purple windows.
   - `SPC b`: active chat (`b i` info, `b m` chat menu, `b p` pinned, `b v`
     preview, `b s` scheduled, `b d` calendar, `b u` attach files, `b w`
     wallpaper toggle).
@@ -80,7 +81,7 @@ with at most three strokes per chord:
     also `] t` / `[ t`).
   - `SPC s`: search (`s s` or `/` search messages, `s c` chat palette).
   - `SPC t`: toggles (`t b` chat background artwork visibility, `t n` Night Mode,
-    `t z` Zen fullscreen chat).
+    `t z` Zen fullscreen chat, `t p` privacy screen).
   - `SPC w`: panes (`w h` chats, `w l` conversation, `w w` toggle, `w m` Zen
     fullscreen chat).
   - `SPC a 1` through `SPC a 6`: switch signed-in accounts.
@@ -174,19 +175,52 @@ on the modal status line and cheatsheet footer.
   transiently only while a prefix, count, hints, key capture, modal layer, or
   error/feedback message is active. `Esc` does not exit Zen mode; toggle `SPC t z`
   or `SPC w m` again to restore the exact prior window state and layout.
+- **Privacy screen (`SPC t p`, `SPC z`):** immediately covers all open Purple
+  windows (primary and separate chat windows) with a neutral clock and date
+  backdrop, closes media viewers and PiP windows, hides tooltips, popups,
+  already-shown notifications, and auxiliary top-level windows (call panels,
+  group call windows, Instant View, and bot web apps without ending active
+  calls), clears OS Now Playing metadata without stopping playback, suppresses
+  incoming notification previews and dock / menu-bar / window-title unread
+  badges, hides tray account items and disables macOS global menu actions, and
+  blocks modal commands, IME/drop events, notification clicks, and `tg://` links
+  from revealing a chat until dismissed (`Esc`, `q`, or Return). Dismissing
+  restores hidden auxiliary windows, badges, Now Playing metadata, menus, and
+  window titles, and runs any queued `tg://` start URLs. The privacy screen is
+  not a security lock; when a local passcode is configured, it offers a separate
+  **Lock with passcode** button that engages the passcode lock before dismissing
+  the privacy overlay so chats do not flash.
+  - **Optional weather (Settings -> Purple -> Privacy screen weather location):**
+    blank by default, making zero network requests. When a city name is set, it
+    is trimmed and capped to 80 characters, then sent directly to Open-Meteo's
+    geocoding API (`geocoding-api.open-meteo.com`) and forecast API
+    (`api.open-meteo.com`) at most once every 30 minutes (with 15-minute backoff
+    after failures), using a generic `ClockWidget/1.0` user agent, fixed
+    `Accept-Language: en-US,en;q=0.9`, and no cookies. The geocoding request
+    reveals the configured place name and your IP address directly to Open-Meteo.
+    Because `QNetworkAccessManager` does not route through Telegram's MTProto
+    proxy, weather requests are skipped automatically whenever an in-app proxy
+    is enabled.
 
 ## Upstream hooks
 
-- `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
+- `core/application.cpp` and `.h`: delegates key press, shortcut override,
+  paired key release, window deactivation, and IME events to
+  `Purple::HandleModalKeys`; suppresses `unreadBadge()`, blocks `tg://` and
+  separate-window navigation while `Purple::PrivacyScreenActiveAny()` is active,
+  syncs newly created windows to the privacy screen, and closes media view and
+  call panels when the privacy screen activates.
+- `mainwindow.cpp` and `window/main_window.cpp`: attaches the modal status line
+  and docked which-key drawer in `finishFirstShow()`, reserves status-bar height
+  beneath `_main` in `updateControlsGeometry()`, lays out and raises the privacy
+  screen above layers and below passcode lock in `fixOrder()`, and sets the
+  window title to `Clock` while the privacy screen is active.
+- `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder rail, chat list, side
   shadows, and third column while Zen fullscreen chat mode is active.
-
-- `core/application.cpp`: delegates key press, shortcut override, paired key
-  release, window deactivation, and IME events to `Purple::HandleModalKeys`.
-- `mainwindow.cpp`: attaches the modal status line and docked which-key drawer
-  in `finishFirstShow()`, reserves status-bar height beneath `_main` in
-  `updateControlsGeometry()`, and raises the modal chrome beneath lock and
-  layer overlays in `fixOrder()`.
+- `window/notifications_manager.cpp` and `media/view/media_view_overlay_widget.cpp`:
+  hides notification details and blocks notification-click chat opening while the
+  privacy screen is active, and closes active PiP windows when it activates.
 - `core/shortcuts.h`, `dialogs/dialogs_widget.*`, `history/history_widget.*`,
   `history/history_inner_widget.*`, `history/view/history_view_*`,
   `ui/boxes/calendar_box.cpp`, `window/window_main_menu.cpp`, and

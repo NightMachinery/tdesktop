@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/window_screen_reader_bar.h"
 #include "ui/painter.h"
 #include "ui/screen_reader_mode.h"
+#include "purple/purple_privacy_screen.h"
 #include "ui/ui_utility.h"
 #include "ui/unread_counter_format.h"
 #include "apiwrap.h"
@@ -889,6 +890,10 @@ void MainWindow::updateControlsGeometry() {
 
 void MainWindow::updateTitle() {
 	if (Core::Quitting()) {
+		return;
+	}
+	if (Purple::PrivacyScreenActive(this)) {
+		setTitle(u"Clock"_q);
 		return;
 	}
 

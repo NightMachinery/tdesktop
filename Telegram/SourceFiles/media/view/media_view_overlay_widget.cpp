@@ -64,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "media/view/media_view_group_thumbs.h"
 #include "media/view/media_view_pip.h"
+#include "purple/purple_privacy_screen.h"
 #include "media/view/media_view_overlay_raster.h"
 #include "media/view/media_view_overlay_opengl.h"
 #include "media/view/media_view_overlay_rhi.h"
@@ -5866,6 +5867,13 @@ void OverlayWidget::switchToPip() {
 		_streamed->instance.shared(),
 		closeAndContinue,
 		[=] { _pip = nullptr; });
+
+	Purple::PrivacyScreenChanges(
+	) | rpl::filter(
+		rpl::mappers::_1
+	) | rpl::on_next([=] {
+		_pip = nullptr;
+	}, _pip->lifetime);
 
 	if (const auto raw = _message) {
 		raw->history()->owner().itemRemoved(

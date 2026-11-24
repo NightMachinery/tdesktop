@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "purple/purple_privacy_screen.h"
 #include "styles/style_window.h"
 #include "ui/dynamic_thumbnails.h"
 
@@ -40,7 +41,7 @@ void SetupChangesSubscription(Fn<void()> callback, rpl::lifetime &lifetime) {
 }
 
 void Fill(Platform::Tray &tray) {
-	if (Core::App().passcodeLocked()) {
+	if (Core::App().passcodeLocked() || Purple::PrivacyScreenActiveAny()) {
 		return;
 	}
 	auto accounts = std::vector<not_null<Main::Account*>>();

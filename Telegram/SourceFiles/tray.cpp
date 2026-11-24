@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/version.h"
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
+#include "purple/purple_privacy_screen.h"
 #include "lang/lang_keys.h"
 
 #include <QtWidgets/QApplication>
@@ -60,6 +61,11 @@ void Tray::create() {
 		rebuildMenu();
 	}, _tray.lifetime());
 
+	Purple::PrivacyScreenChanges(
+	) | rpl::on_next([=] {
+		rebuildMenu();
+	}, _tray.lifetime());
+
 	TrayAccountsMenu::SetupChangesSubscription(
 		[=] { rebuildMenu(); },
 		_tray.lifetime());
@@ -95,7 +101,7 @@ void Tray::rebuildMenu() {
 			[=] { _minimizeMenuItemClicks.fire({}); });
 	}
 
-	if (!Core::App().passcodeLocked()) {
+	if (!Core::App().passcodeLocked() && !Purple::PrivacyScreenActiveAny()) {
 		auto notificationsText = _textUpdates.events(
 		) | rpl::map([=] {
 			return Core::App().settings().desktopNotify()

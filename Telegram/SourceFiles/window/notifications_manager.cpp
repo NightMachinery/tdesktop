@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt/qt_key_modifiers.h"
 #include "platform/platform_notifications_manager.h"
 #include "purple/purple_notification_privacy.h"
+#include "purple/purple_privacy_screen.h"
 #include "window/notifications_manager_default.h"
 #include "media/audio/media_audio_track.h"
 #include "media/audio/media_audio.h"
@@ -1088,6 +1089,7 @@ Manager::DisplayOptions Manager::getNotificationOptions(
 		HistoryItem *item,
 		Data::ItemNotificationType type) const {
 	const auto hideEverything = Core::App().passcodeLocked()
+		|| Purple::PrivacyScreenActiveAny()
 		|| forceHideDetails();
 	const auto view = Core::App().settings().notifyView();
 	const auto topic = item ? item->topic() : nullptr;
@@ -1331,7 +1333,7 @@ Window::SessionController *Manager::openNotificationMessage(
 		not_null<History*> history,
 		MsgId messageId,
 		bool openSeparated) {
-	if (Core::App().passcodeLocked()) {
+	if (Core::App().passcodeLocked() || Purple::PrivacyScreenActiveAny()) {
 		const auto window = history->session().tryResolveWindow();
 		if (window) {
 			window->widget()->showFromTray();

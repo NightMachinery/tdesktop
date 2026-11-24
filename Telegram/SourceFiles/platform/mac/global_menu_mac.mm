@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/application.h"
 #include "core/sandbox.h"
+#include "purple/purple_privacy_screen.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/main_window.h"
@@ -37,6 +38,7 @@ namespace Platform {
 namespace {
 
 struct ComputedState {
+	bool preferencesDisabled = false;
 	bool logoutDisabled = false;
 	bool undoDisabled = false;
 	bool redoDisabled = false;
@@ -79,6 +81,9 @@ private:
 
 	template <typename Callback>
 	void withActiveWindow(Callback callback) {
+		if (Purple::PrivacyScreenActiveAny()) {
+			return;
+		}
 		const auto window = resolveActiveWindow();
 		if (!window) {
 			return;
@@ -351,32 +356,35 @@ void Manager::recomputeState() {
 	widget->updateIsActive();
 	const auto controller = window->sessionController();
 	const auto logged = (controller != nullptr);
-	const auto inactive = !logged || window->locked();
+	const auto privacy = Purple::PrivacyScreenActiveAny();
+	const auto inactive = !logged || window->locked() || privacy;
 	const auto support = logged && controller->session().supportMode();
 
 	auto next = ComputedState{
-		.logoutDisabled = !logged && !Core::App().passcodeLocked(),
-		.undoDisabled = !canUndo,
-		.redoDisabled = !canRedo,
-		.cutDisabled = !canCut,
-		.copyDisabled = !canCopy,
-		.pasteDisabled = !canPaste,
-		.deleteDisabled = !canDelete,
-		.selectAllDisabled = !canSelectAll,
+		.preferencesDisabled = privacy,
+		.logoutDisabled = privacy || (!logged && !Core::App().passcodeLocked()),
+		.undoDisabled = privacy || !canUndo,
+		.redoDisabled = privacy || !canRedo,
+		.cutDisabled = privacy || !canCut,
+		.copyDisabled = privacy || !canCopy,
+		.pasteDisabled = privacy || !canPaste,
+		.deleteDisabled = privacy || !canDelete,
+		.selectAllDisabled = privacy || !canSelectAll,
 		.contactsDisabled = inactive || support,
 		.addContactDisabled = inactive,
 		.newGroupDisabled = inactive || support,
 		.newChannelDisabled = inactive || support,
 		.showTelegramDisabled = widget->isActive(),
-		.markdown = markdownState,
+		.markdown = privacy ? Ui::MarkdownEnabledState() : markdownState,
 	};
 	if (_lastState && *_lastState == next) {
 		return;
 	}
 	_lastState = next;
 
-	_markdownChanges.fire_copy(markdownState);
+	_markdownChanges.fire_copy(next.markdown);
 
+	ForceDisabled(_preferences, next.preferencesDisabled);
 	ForceDisabled(_logout, next.logoutDisabled);
 	ForceDisabled(_undo, next.undoDisabled);
 	ForceDisabled(_redo, next.redoDisabled);

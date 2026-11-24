@@ -15,18 +15,34 @@ the numbers.
 
 ## Modal keyboard shortcuts and chat backgrounds
 
-- `core/application.cpp`: key admission, shortcut override, paired key release,
-  window deactivation, and IME hooks delegate to Purple's per-window state.
-  Shortcut override also lets focused, editable playlist rows claim Alt+Up/Down.
-  The playlist hook accepts delivery through the owning native window on macOS.
-- `mainwindow.cpp`: attaches Purple's modal status line and docked which-key
-  drawer in `finishFirstShow()`, reserves the status-bar height beneath `_main`
-  in `updateControlsGeometry()`, and raises the modal chrome beneath lock and
-  layer overlays in `fixOrder()`.
+- `core/application.cpp` and `.h`: key admission, shortcut override, paired key
+  release, window deactivation, and IME hooks delegate to Purple's per-window
+  state. Shortcut override also lets focused, editable playlist rows claim
+  Alt+Up/Down. The playlist hook accepts delivery through the owning native
+  window on macOS. While Purple's privacy screen is active, `unreadBadge()`
+  reports 0, `unreadBadgeChanges()` merges privacy transitions, `tg://` URLs
+  and separate-window navigation are gated, new windows inherit the privacy
+  overlay, and `closeMediaViewAndPanelsForPrivacy()` closes media view and call
+  panels.
+- `mainwindow.cpp` and `window/main_window.cpp`: attaches Purple's modal status
+  line and docked which-key drawer in `finishFirstShow()`, reserves the
+  status-bar height beneath `_main` in `updateControlsGeometry()`, preserves
+  upstream `fixOrder()` when the privacy screen is inactive and raises the
+  privacy overlay last when active and unlocked (covering layers and media
+  preview while keeping passcode/setup-email locks and their boxes on top),
+  blocks `handleStartFiles()` while active, and replaces the window title with
+  `Clock`.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder strip, dialogs column,
   side shadows, and third column while Zen fullscreen chat mode is active,
   restoring only widgets Zen itself hid.
+- `window/notifications_manager.cpp`, `media/view/media_view_overlay_widget.cpp`,
+  `media/system_media_controls_manager.cpp`, `tray.cpp`,
+  `tray_accounts_menu.cpp`, and `platform/mac/global_menu_mac.mm`: suppresses
+  notification previews and notification-click chat navigation, closes PiP,
+  clears OS Now Playing metadata without stopping playback, hides tray account
+  actions, and disables macOS global menu actions while Purple's privacy screen
+  is active.
 - `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility

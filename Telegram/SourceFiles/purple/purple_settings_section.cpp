@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_control.h"
 #include "purple/purple_last_seen.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_privacy_screen.h"
 #include "purple/purple_media_playback.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_recording_settings.h"
@@ -736,6 +737,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	BuildModalKeysSetting(builder);
+	BuildPrivacyScreenSetting(builder);
 	BuildEmojiExportSetting(builder);
 	BuildControlSettings(builder);
 	BuildPurpleLastSeenSection(builder);

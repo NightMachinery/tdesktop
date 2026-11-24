@@ -49,6 +49,7 @@
 #include "purple/purple_music_section.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_playlists_box.h"
+#include "purple/purple_privacy_screen.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
 #include "storage/storage_shared_media.h"
@@ -239,6 +240,7 @@ enum class Action {
 	ChatPalette,
 	UnreadBuffer,
 	ToggleZenMode,
+	TogglePrivacyScreen,
 	PreviousFolder,
 	NextFolder,
 	SelectMessage,
@@ -343,6 +345,8 @@ const Command kCommands[] = {
 		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
 	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "Needs an open chat",
 		[] { return u"Toggle Zen fullscreen chat"_q; } },
+	{ Action::TogglePrivacyScreen, "toggle-privacy-screen", "toggle", "",
+		[] { return u"Toggle privacy screen"_q; } },
 	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, true },
 	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
@@ -1393,6 +1397,7 @@ bool Available(Action action, const Target &target) {
 		return Available(Action::FocusChats, target)
 			|| Available(Action::FocusConversation, target);
 	case Action::UnreadBuffer:
+	case Action::TogglePrivacyScreen:
 		return target.controller != nullptr;
 	case Action::ToggleZenMode:
 		return target.controller != nullptr
@@ -1662,6 +1667,12 @@ Keys::Keys(not_null<MainWindow*> window)
 		refreshStatusBar();
 	}, _lifetime);
 
+	Purple::PrivacyScreenChanges() | rpl::on_next([=](bool) {
+		clearPrefix();
+		_window->updateControlsGeometry();
+		refreshStatusBar();
+	}, _lifetime);
+
 	EnabledChanges.events() | rpl::on_next([=](bool enabled) {
 		if (enabled) {
 			ReloadKeymapStore();
@@ -1808,6 +1819,7 @@ Window::SessionController *Keys::owner() const {
 		&& Core::App().activeWindow() == &window
 		&& !Core::App().passcodeLocked()
 		&& !window.locked()
+		&& !Purple::PrivacyScreenActive(_window)
 		&& !QApplication::activePopupWidget()
 		&& !QApplication::activeModalWidget())
 		? window.sessionController()
@@ -1818,6 +1830,7 @@ bool Keys::chromeVisible() const {
 	return Enabled()
 		&& !Core::App().passcodeLocked()
 		&& !_window->controller().locked()
+		&& !Purple::PrivacyScreenActive(_window)
 		&& _window->controller().sessionController() != nullptr;
 }
 
@@ -2009,7 +2022,8 @@ void Keys::showUnreadBuffer(const Target &target) {
 		.onOpenChat = [guard, weakCtrl](PeerId peerId) {
 			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
 				const auto ctrl = weakCtrl.get();
-				if (!guard || !ctrl || !Enabled()) {
+				if (!guard || !ctrl || !Enabled()
+					|| Purple::PrivacyScreenActive(guard->_window)) {
 					return;
 				}
 				if (const auto peer = ctrl->session().data().peerLoaded(peerId)) {
@@ -2747,6 +2761,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		clearPrefix();
 		setZenMode(!_zenMode);
 		break;
+	case Action::TogglePrivacyScreen:
+		clearPrefix();
+		Purple::TogglePrivacyScreen(_window);
+		break;
 	case Action::OpenMusic:
 		ToggleMusicSection(current);
 		break;
@@ -3155,6 +3173,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q, 1));
 		pushRow(panes.rows, rowFor(Action::ToggleZenMode, u"Zen fullscreen chat"_q, 1));
+		pushRow(panes.rows, rowFor(Action::TogglePrivacyScreen, u"Privacy screen"_q, 1));
 		pushRow(panes.rows, rowFor(Action::ToggleNightMode, u"Toggle night mode"_q, 1));
 		pushRow(panes.rows, rowFor(Action::Backgrounds, u"Toggle chat wallpaper"_q, 1));
 		cards.push_back(std::move(panes));

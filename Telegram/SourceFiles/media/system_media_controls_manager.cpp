@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/system_media_controls_manager.h"
+
+#include "purple/purple_privacy_screen.h"
 #include "purple/hooks/media_recording.h"
 
 #include "base/platform/base_platform_system_media_controls.h"
@@ -190,7 +192,7 @@ void SystemMediaControlsManager::syncPlayerStateToControls() {
 	using namespace Media::Player;
 	const auto mediaPlayer = Media::Player::instance();
 	const auto type = ActivePlayerType();
-	if (!type) {
+	if (!type || Purple::PrivacyScreenActiveAny()) {
 		_cachedMediaView = nullptr;
 		_streamed = nullptr;
 		_controls->setEnabled(false);
@@ -228,6 +230,11 @@ SystemMediaControlsManager::SystemMediaControlsManager()
 	}
 	using TrackState = Media::Player::TrackState;
 	const auto mediaPlayer = Media::Player::instance();
+
+	Purple::PrivacyScreenChanges(
+	) | rpl::on_next([=] {
+		syncPlayerStateToControls();
+	}, _lifetime);
 
 	auto trackFilter = rpl::filter([=](const TrackState &state) {
 		const auto type = state.id.type();
