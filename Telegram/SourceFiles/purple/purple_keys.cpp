@@ -1405,6 +1405,7 @@ protected:
 
 private:
 	[[nodiscard]] Window::SessionController *owner() const;
+	[[nodiscard]] QWidget *windowFocusWidget() const;
 	[[nodiscard]] Target currentTarget(QObject *receiver) const;
 	[[nodiscard]] Target activeTarget() const;
 	[[nodiscard]] bool chromeVisible() const;
@@ -1708,10 +1709,21 @@ Target Keys::currentTarget(QObject *receiver) const {
 		: Target();
 }
 
+QWidget *Keys::windowFocusWidget() const {
+	const auto appFocus = QApplication::focusWidget();
+	if (appFocus && appFocus->window() == _window) {
+		return appFocus;
+	}
+	const auto winFocus = _window->focusWidget();
+	return (winFocus && winFocus->window() == _window && winFocus->isVisibleTo(_window))
+		? winFocus
+		: nullptr;
+}
+
 Target Keys::activeTarget() const {
-	const auto focus = QApplication::focusWidget();
+	const auto focus = windowFocusWidget();
 	const auto current = _window->controller().sessionController();
-	return (focus && focus->window() == _window && current)
+	return (focus && current)
 		? FindTarget(current, focus)
 		: Target();
 }
@@ -1849,7 +1861,7 @@ void Keys::refreshStatusBar() {
 		state.badgeText = u"LEADER"_q;
 		state.rightCue = u"DEL back  ·  ESC cancel"_q;
 	} else {
-		const auto focus = QApplication::focusWidget();
+		const auto focus = windowFocusWidget();
 		const auto inForeignInput = focus
 			&& !target.focus
 			&& focus->testAttribute(Qt::WA_InputMethodEnabled);

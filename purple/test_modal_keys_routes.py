@@ -173,6 +173,18 @@ ordered(describe_key, "guard = QPointer(this)", "origin = target.focus",
 keys_ctor = between(keys, "Keys::Keys(not_null<MainWindow*> window)", "Keys::~Keys()")
 ordered(keys_ctor, "QApplication::focusChanged", "inThisWindow", "clearPrefix()")
 
+# Status bar reflects the window's focused widget even while inactive, while dispatch stays active-only.
+win_focus = between(keys, "QWidget *Keys::windowFocusWidget", "Target Keys::activeTarget")
+ordered(win_focus, "QApplication::focusWidget()", "_window->focusWidget()", "isVisibleTo(_window)")
+active_tgt = between(keys, "Target Keys::activeTarget", "bool Keys::ownsChatListFocus")
+ordered(active_tgt, "windowFocusWidget()")
+status_refresh = between(keys, "void Keys::refreshStatusBar", "KeyUse Keys::classify")
+ordered(status_refresh, "activeTarget()", "windowFocusWidget()", "WA_InputMethodEnabled")
+current_tgt = between(keys, "Target Keys::currentTarget", "QWidget *Keys::windowFocusWidget")
+ordered(current_tgt, "QApplication::focusWidget()", "owner()")
+owner_fn = between(keys, "Window::SessionController *Keys::owner", "bool Keys::chromeVisible")
+ordered(owner_fn, "QApplication::activeWindow() == _window")
+
 dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 assert "chooseRow" not in between(dispatch, "case Action::PreviousChat:", "case Action::OpenChat:")
 ordered(dispatch, "case Action::ToggleNightMode:", "editingTheme()",
