@@ -3628,9 +3628,11 @@ public:
 		if (!_config.primaryActionLabel.isEmpty() && _config.onPrimaryAction) {
 			_buttons.push_back({ ButtonKind::Primary, _config.primaryActionLabel });
 		}
-		_buttons.push_back({ ButtonKind::Copy, u"Copy"_q });
+		_buttons.push_back({ ButtonKind::Copy, u"Copy notice"_q });
 		_buttons.push_back({ ButtonKind::Close, u"Close"_q });
-		_focusedButton = 0;
+		// Focus Close on arrival so Return is harmless if the notice arrives mid-keypress.
+		_focusedButton = int(_buttons.size()) - 1;
+		_openedAtMs = QDateTime::currentMSecsSinceEpoch();
 
 		auto body = object_ptr<NoticeBodyWidget>(_scroll, _config.record);
 		_body = body.data();
@@ -3712,6 +3714,19 @@ protected:
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
 		const auto key = PhysicalKeyForNav(*e);
+		const auto isActionKey = (key == Qt::Key_Return
+			|| key == Qt::Key_Enter
+			|| key == Qt::Key_O
+			|| key == Qt::Key_Y);
+		// Consume held auto-repeat and the opening gesture (180 ms arrival guard)
+		// so a queued notice arriving mid-typing never triggers an action or copies.
+		if (isActionKey) {
+			const auto elapsed = QDateTime::currentMSecsSinceEpoch() - _openedAtMs;
+			if (e->isAutoRepeat() || elapsed < 180) {
+				e->accept();
+				return;
+			}
+		}
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -3978,6 +3993,7 @@ private:
 	bool _pendingG = false;
 	bool _showHelp = false;
 	bool _closing = false;
+	qint64 _openedAtMs = 0;
 	QString _copiedCue;
 	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
 };

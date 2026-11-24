@@ -317,8 +317,11 @@ ordered(keys_ui, "class NoticeLayer final", "class NoticeHistoryLayer final",
         "CreateNoticeLayer", "CreateNoticeHistoryLayer")
 notices_cpp = read("purple/purple_notices.cpp")
 ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
+        "WindowMatchesAccount", "CanExposeNoticeInWindow",
         "ResolveNoticePeerLabel", "PickerVisible",
-        "ShowPurpleNotice", "ShowPurpleAck", "MaybeFlushPendingNotices", "OpenPurpleNoticeHistory")
+        "ShowPurpleNotice", "Actions().erase(id)",
+        "ShowPurpleAck", "MaybeFlushPendingNotices", "OpenPurpleNoticeHistory",
+        "clearHistoryAndPending")
 config_cpp = read("purple/purple_config.cpp")
 ordered(config_cpp, "ResolveNoticePeerLabel", "ResolvePeerIdsInConfigValue",
         "config:reload:", "ShowPurpleNotice")

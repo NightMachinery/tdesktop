@@ -1696,7 +1696,7 @@ private:
 		NoticeHistory,
 	};
 	ActiveLayer _activeLayer = ActiveLayer::None;
-	QPointer<Ui::LayerWidget> _noticeLayer;
+	std::vector<QPointer<Ui::LayerWidget>> _noticeLayers;
 	bool _describeKeyHasDetails = false;
 	QString _feedbackText;
 	bool _feedbackError = false;
@@ -1766,14 +1766,22 @@ Keys::Keys(not_null<MainWindow*> window)
 			}
 		});
 
+	const auto closeAllNoticeLayers = [=] {
+		auto list = std::move(_noticeLayers);
+		_noticeLayers.clear();
+		for (const auto &layer : list) {
+			if (layer) {
+				layer->closeLayer();
+			}
+		}
+	};
+
 	Core::App().passcodeLockValue() | rpl::on_next([=](bool locked) {
 		if (locked) {
 			if (_zenMode) {
 				setZenMode(false);
 			}
-			if (_noticeLayer) {
-				_noticeLayer->closeLayer();
-			}
+			closeAllNoticeLayers();
 		}
 		clearPrefix();
 		_window->updateControlsGeometry();
@@ -1784,8 +1792,8 @@ Keys::Keys(not_null<MainWindow*> window)
 	}, _lifetime);
 
 	Purple::PrivacyScreenChanges() | rpl::on_next([=](bool active) {
-		if (active && _noticeLayer) {
-			_noticeLayer->closeLayer();
+		if (active) {
+			closeAllNoticeLayers();
 		}
 		clearPrefix();
 		_window->updateControlsGeometry();
@@ -2138,17 +2146,27 @@ void Keys::showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistor
 	}
 	const auto guard = QPointer(this);
 	const auto kind = isHistory ? ActiveLayer::NoticeHistory : ActiveLayer::Notice;
+	const auto raw = layer.get();
 	_activeLayer = kind;
-	_noticeLayer = layer.get();
-	layer->lifetime().add([guard, kind] {
+	_noticeLayers.erase(
+		std::remove_if(_noticeLayers.begin(), _noticeLayers.end(),
+			[](const QPointer<Ui::LayerWidget> &p) { return p.isNull(); }),
+		_noticeLayers.end());
+	_noticeLayers.emplace_back(raw);
+	layer->lifetime().add([guard, kind, raw] {
 		if (!guard) {
 			return;
 		}
-		if (guard->_activeLayer == kind) {
+		guard->_noticeLayers.erase(
+			std::remove_if(guard->_noticeLayers.begin(), guard->_noticeLayers.end(),
+				[raw](const QPointer<Ui::LayerWidget> &p) { return p.isNull() || p.data() == raw; }),
+			guard->_noticeLayers.end());
+		// Only clear active-layer state if no other layer remains visible on the stack,
+		// and do NOT auto-chain another pending notice (at most one dialog per transition).
+		if (guard->_activeLayer == kind && !guard->_window->controller().isLayerShown()) {
 			guard->_activeLayer = ActiveLayer::None;
-			guard->refreshStatusBar();
-			guard->schedulePendingNoticeFlush();
 		}
+		guard->refreshStatusBar();
 	});
 	_window->showOrHideBoxOrLayer(
 		std::move(layer),

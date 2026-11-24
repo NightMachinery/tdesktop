@@ -57,6 +57,19 @@ int main() {
 			"privacy active: dialog queued silently");
 		Check(!ShouldFlushPendingDialog(priv), "privacy active: no flush");
 		Check(!HistoryAccessible(priv), "privacy active: SPC h e unavailable");
+
+		// Privacy/lock check runs BEFORE modalEnabled check: never leak stock toast while locked/private!
+		DeliveryContext modalOffLocked;
+		modalOffLocked.modalEnabled = false;
+		modalOffLocked.passcodeLocked = true;
+		Check(DecideDelivery(NoticeKind::Dialog, true, false, modalOffLocked) == DeliveryRoute::QueueSilentUntilAvailable,
+			"modal off + passcode locked: suppresses revealing stock toast fallback");
+
+		DeliveryContext modalOffPrivate;
+		modalOffPrivate.modalEnabled = false;
+		modalOffPrivate.privacyScreenActive = true;
+		Check(DecideDelivery(NoticeKind::Ack, false, false, modalOffPrivate) == DeliveryRoute::QueueSilentUntilAvailable,
+			"modal off + privacy active: suppresses revealing stock toast fallback");
 	}
 
 	// 3. NO STOLEN TYPING: background dialogs queue with cue during Insert, IME, prefix, or layer.
@@ -163,10 +176,19 @@ int main() {
 			NoticeRecord n;
 			n.accountKey = QStringLiteral("prod:2002");
 			n.summary = QStringLiteral("Entry %1").arg(i);
-			store.record(n, false);
+			store.record(n, true);
 		}
 		Check(int(store.historyFor(QStringLiteral("prod:2002")).size()) == kMaxHistoryPerAccount,
 			"per-account history is capped at kMaxHistoryPerAccount");
+		Check(store.pendingCount(QStringLiteral("prod:2002")) == kMaxPendingPerAccount
+			&& store.droppedPendingCount(QStringLiteral("prod:2002")) > 0,
+			"pending queue is capped and tracks dropped overflow count");
+
+		// Clear history also clears pending entries so nothing cleared reappears.
+		store.clearHistoryAndPending(QStringLiteral("prod:2002"));
+		Check(store.historyFor(QStringLiteral("prod:2002")).empty()
+			&& store.pendingCount(QStringLiteral("prod:2002")) == 0,
+			"clearHistoryAndPending clears both history and pending queue");
 	}
 
 	// 6. Local chat-name resolution: resolves visible peer ids in peer keys, keeps hidden/unknown as raw id, ignores non-peer numbers.

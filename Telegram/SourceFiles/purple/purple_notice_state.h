@@ -132,11 +132,13 @@ struct DeliveryContext {
 		bool background,
 		bool persistent,
 		const DeliveryContext &ctx) {
-	if (!ctx.modalEnabled) {
-		return DeliveryRoute::StockToast;
-	}
+	// Privacy/lock check comes FIRST: never show a revealing dialog, status cue,
+	// or stock toast fallback while passcode-locked or under the privacy screen.
 	if (ctx.passcodeLocked || ctx.privacyScreenActive) {
 		return DeliveryRoute::QueueSilentUntilAvailable;
+	}
+	if (!ctx.modalEnabled) {
+		return DeliveryRoute::StockToast;
 	}
 	if (kind == NoticeKind::Dialog) {
 		if (background
@@ -293,9 +295,15 @@ public:
 			bucket.pending.push_back(latest);
 			if (int(bucket.pending.size()) > kMaxPendingPerAccount) {
 				bucket.pending.erase(bucket.pending.begin());
+				++bucket.droppedPending;
 			}
 		}
 		return assignedId;
+	}
+
+	[[nodiscard]] int droppedPendingCount(const QString &accountKey) const {
+		const auto it = _accounts.find(accountKey);
+		return (it == _accounts.end()) ? 0 : it->second.droppedPending;
 	}
 
 	[[nodiscard]] std::optional<NoticeRecord> takeNextPending(
@@ -340,16 +348,15 @@ public:
 		_accounts.erase(accountKey);
 	}
 
-	void clearHistory(const QString &accountKey) {
-		if (const auto it = _accounts.find(accountKey); it != _accounts.end()) {
-			it->second.history.clear();
-		}
+	void clearHistoryAndPending(const QString &accountKey) {
+		_accounts.erase(accountKey);
 	}
 
 private:
 	struct AccountBucket {
 		std::vector<NoticeRecord> history;
 		std::vector<NoticeRecord> pending;
+		int droppedPending = 0;
 	};
 
 	uint64_t _nextId = 0;
