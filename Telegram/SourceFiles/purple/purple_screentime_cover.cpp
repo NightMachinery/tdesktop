@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_screentime.h"
 #include "purple/purple_screentime_recorder.h"
 #include "ui/painter.h"
@@ -238,10 +239,24 @@ void ScreenTimeCover::Widget::noteSoft(
 		return;
 	}
 	NoteScreenTimeNotice(index, _peer->id.value);
-	Ui::Toast::Show(
-		parentWidget(),
-		u"Screen time: the budget for %1 is spent."_q.arg(
-			TargetText(budget)));
+	const auto msg = u"Screen time: the budget for %1 is spent."_q.arg(
+		TargetText(budget));
+	const auto weakParent = QPointer<QWidget>(parentWidget());
+	ShowPurpleAck({
+		.session = &_peer->session(),
+		.scope = u"Screen time"_q,
+		.text = msg,
+		.coalesceKey = u"screentime:soft:"_q + QString::number(index)
+			+ u":"_q + QString::number(_peer->id.value),
+		.severity = ModalNotices::NoticeSeverity::Info,
+		.background = true,
+		.persistent = true,
+		.fallbackToast = [=] {
+			if (weakParent) {
+				Ui::Toast::Show(weakParent.data(), msg);
+			}
+		},
+	});
 }
 
 void ScreenTimeCover::Widget::layout() {

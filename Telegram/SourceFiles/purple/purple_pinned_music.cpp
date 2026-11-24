@@ -11,6 +11,7 @@
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_notices.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
 #include "ui/widgets/checkbox.h"
@@ -272,13 +273,29 @@ private:
 	}
 
 	void failed() {
-		toast(tr::lng_pinned_music_failed(tr::now));
+		const auto msg = tr::lng_pinned_music_failed(tr::now);
+		const auto show = _show;
+		const auto session = &_history->session();
+		ShowPurpleNotice({
+			.session = session,
+			.scope = u"Pinned songs"_q,
+			.summary = msg,
+			.coalesceKey = u"pinned_music:failed:"_q + PurpleNoticeAccountKey(session),
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.background = true,
+			.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+		});
 	}
 
 	void toast(const QString &message) {
-		if (_show && *_show) {
-			_show->showToast(message);
-		}
+		const auto show = _show;
+		ShowPurpleAck({
+			.session = &_history->session(),
+			.scope = u"Pinned songs"_q,
+			.text = message,
+			.severity = ModalNotices::NoticeSeverity::Info,
+			.fallbackToast = [=] { if (show && *show) { show->showToast(message); } },
+		});
 	}
 
 	not_null<History*> _history;

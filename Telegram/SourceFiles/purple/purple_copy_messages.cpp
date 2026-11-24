@@ -8,6 +8,7 @@
 #include "base/unixtime.h"
 #include "purple/purple_archive_capture.h"
 #include "purple/purple_config.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_markdown_delivery.h"
 #include "purple/purple_archive_markdown.h"
 #include <QtCore/QCryptographicHash>
@@ -253,7 +254,16 @@ bool CopyBatch::entriesValid() const {
 
 void CopyBatch::failed(const QString &error) {
 	if (contextValid()) {
-		_controller.get()->showToast(error);
+		const auto ctrl = _controller.get();
+		const auto weakCtrl = _controller;
+		ShowPurpleNotice({
+			.session = &ctrl->session(),
+			.window = &ctrl->window(),
+			.scope = u"Copy as Markdown"_q,
+			.summary = error,
+			.severity = ModalNotices::NoticeSeverity::Error,
+			.fallbackToast = [=] { if (const auto c = weakCtrl.get()) { c->showToast(error); } },
+		});
 	}
 	cancel();
 }

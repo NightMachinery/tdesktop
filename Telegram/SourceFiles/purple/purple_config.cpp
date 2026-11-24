@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_config.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_media_reply_splice.h"
 #include "purple/purple_peek_controls.h"
@@ -1749,22 +1750,154 @@ void ShowAccountListReloadNotices() {
 		if (opening) {
 			text.append(u" "_q).append(tr::lng_purple_lists_open_own(tr::now, lt_account, tr::marked(labels.own), tr::link));
 		}
-		window->showToast(Ui::Toast::Config{
-			.text = std::move(text),
-			.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
-				if (!opening || !current()) { return false; }
-				const auto ready = PrepareAccountSettingsOpen(weakSession.get(), *opening, current);
-				if (!ready.target || !current()) { return false; }
-				const auto target = *ready.target;
-				crl::on_main([=] {
-					if (current() && ValidateAccountSettingsOpenTarget(weakSession.get(), target)) {
-						Ui::PreventDelayedActivation();
-						Platform::File::UnsafeLaunch(target.file.path);
+		const auto openSettings = [=] {
+			if (!opening || !current()) { return; }
+			const auto ready = PrepareAccountSettingsOpen(weakSession.get(), *opening, current);
+			if (!ready.target || !current()) { return; }
+			const auto target = *ready.target;
+			crl::on_main([=] {
+				if (current() && ValidateAccountSettingsOpenTarget(weakSession.get(), target)) {
+					Ui::PreventDelayedActivation();
+					Platform::File::UnsafeLaunch(target.file.path);
+				}
+			});
+		};
+		auto rows = std::vector<ModalNotices::NoticeRow>();
+		auto hasWarning = false;
+		const auto peerLookup = [session](uint64_t rawId) {
+			return ResolveNoticePeerLabel(not_null{ session }, rawId);
+		};
+		if (change.impact && change.impact->status == ConfigImpactStatus::Ready) {
+			for (const auto &finding : change.impact->findings) {
+				const auto &key = finding.change;
+				const auto address = key.table + (key.key.isEmpty() ? QString() : u"."_q + key.key);
+				const auto name = (finding.label.isEmpty() || finding.label == address)
+					? address
+					: (finding.label + u" ("_q + address + u")"_q);
+				if (finding.kind == ConfigImpactKind::ValueChanged) {
+					const auto beforeRaw = key.beforeValue.value_or(tr::lng_purple_transfer_absent(tr::now));
+					const auto afterRaw = key.afterValue.value_or(tr::lng_purple_transfer_absent(tr::now));
+					const auto usedHere = ConfigImpactFindingUsedHere(finding);
+					auto tag = usedHere ? u"Used here"_q : u"Not used here"_q;
+					if (!usedHere) {
+						if (finding.afterUse == ConfigImpactUse::Follow || finding.beforeUse == ConfigImpactUse::Follow) {
+							tag = u"Inactive: Follow"_q;
+						} else if (finding.afterUse == ConfigImpactUse::Stock || finding.beforeUse == ConfigImpactUse::Stock) {
+							tag = u"Inactive: Stock"_q;
+						} else if (finding.afterUse == ConfigImpactUse::UndefinedList || finding.beforeUse == ConfigImpactUse::UndefinedList) {
+							tag = u"Undefined list"_q;
+						} else if (finding.afterUse == ConfigImpactUse::AppWideElsewhere || finding.beforeUse == ConfigImpactUse::AppWideElsewhere) {
+							tag = u"App-wide elsewhere"_q;
+						} else if (finding.afterUse == ConfigImpactUse::Unknown || finding.beforeUse == ConfigImpactUse::Unknown) {
+							tag = u"Effect unknown"_q;
+						}
 					}
-				});
-				return false;
+					rows.push_back({
+						.label = name,
+						.before = ModalNotices::ResolvePeerIdsInConfigValue(beforeRaw, key.table, key.key, peerLookup),
+						.after = ModalNotices::ResolvePeerIdsInConfigValue(afterRaw, key.table, key.key, peerLookup),
+						.tag = std::move(tag),
+						.isInactive = !usedHere,
+					});
+				} else {
+					hasWarning = true;
+					auto detail = QString();
+					switch (finding.kind) {
+					case ConfigImpactKind::Pinned: detail = tr::lng_purple_transfer_pin(tr::now); break;
+					case ConfigImpactKind::Unpinned: detail = tr::lng_purple_transfer_unpin(tr::now); break;
+					case ConfigImpactKind::AppWideLoss: detail = tr::lng_purple_transfer_appwide_loss(tr::now); break;
+					case ConfigImpactKind::ListLoss: detail = tr::lng_purple_transfer_list_loss(tr::now); break;
+					case ConfigImpactKind::PresetLoss: detail = tr::lng_purple_transfer_preset_loss(tr::now); break;
+					case ConfigImpactKind::ScheduleLoss: detail = tr::lng_purple_transfer_schedule_loss(tr::now); break;
+					case ConfigImpactKind::DefinedListEmptied: detail = tr::lng_purple_transfer_empty(tr::now); break;
+					case ConfigImpactKind::StrandedMembers: detail = tr::lng_purple_transfer_stranded(tr::now); break;
+					case ConfigImpactKind::UnknownRemoval: detail = tr::lng_purple_transfer_unknown(tr::now); break;
+					case ConfigImpactKind::ValueChanged: break;
+					}
+					rows.push_back({
+						.label = name,
+						.before = (finding.beforeCount >= 0) ? QString::number(finding.beforeCount) : QString(),
+						.after = (finding.afterCount >= 0) ? QString::number(finding.afterCount) : QString(),
+						.tag = u"Warning"_q,
+						.detail = std::move(detail),
+						.isWarning = true,
+					});
+				}
+			}
+		} else if (change.impact) {
+			hasWarning = true;
+			rows.push_back({
+				.label = u"Settings reload"_q,
+				.tag = u"Warning"_q,
+				.detail = ConfigImpactDisplayText(*change.impact),
+				.isWarning = true,
+			});
+		}
+		if (change.inactiveChanges) {
+			rows.push_back({
+				.label = u"Inactive app-wide changes"_q,
+				.tag = u"Not used here"_q,
+				.detail = tr::lng_purple_lists_reload_inactive(tr::now, lt_account, labels.own).arg(change.inactiveChanges),
+				.isInactive = true,
+			});
+		}
+		for (const auto &[name, count] : change.unusedMembers) {
+			hasWarning = true;
+			rows.push_back({
+				.label = name,
+				.tag = u"Undefined list"_q,
+				.detail = tr::lng_purple_lists_undefined(tr::now, lt_account, labels.own,
+					lt_list, name, lt_name, labels.global).arg(count),
+				.isWarning = true,
+			});
+		}
+		for (const auto &[name, count] : change.emptiedLists) {
+			hasWarning = true;
+			rows.push_back({
+				.label = name,
+				.tag = u"Emptied list"_q,
+				.detail = tr::lng_purple_lists_emptied(tr::now, lt_account, labels.own, lt_list, name),
+				.isWarning = true,
+			});
+		}
+		const auto scopeText = (AccountRouting().globalAccount() == change.account)
+			? u"App-wide settings reload"_q
+			: u"Account settings reload"_q;
+		const auto acctKey = PurpleNoticeAccountKey(session);
+		auto primary = std::optional<PurpleNoticeAction>();
+		if (opening) {
+			primary = PurpleNoticeAction{
+				.label = tr::lng_purple_lists_open_own(tr::now, lt_account, labels.own),
+				.run = openSettings,
+			};
+		}
+		ShowPurpleNotice({
+			.session = session,
+			.window = window,
+			.accountLabel = labels.own,
+			.scope = scopeText,
+			.summary = (rows.size() == 1)
+				? u"1 settings change reloaded."_q
+				: u"%1 settings changes reloaded."_q.arg(rows.size()),
+			.coalesceKey = u"config:reload:"_q + acctKey,
+			.severity = hasWarning
+				? ModalNotices::NoticeSeverity::Warning
+				: ModalNotices::NoticeSeverity::Info,
+			.background = true,
+			.rows = std::move(rows),
+			.primaryAction = std::move(primary),
+			.fallbackToast = [weakWindow, text = std::move(text), openSettings] {
+				if (const auto liveWin = weakWindow.get()) {
+					liveWin->showToast(Ui::Toast::Config{
+						.text = text,
+						.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
+							openSettings();
+							return false;
+						},
+						.duration = kAccountListNoticeDuration,
+					});
+				}
 			},
-			.duration = kAccountListNoticeDuration,
 		});
 	}
 }
@@ -1992,7 +2125,14 @@ void DeleteAccountListMembersBox(
 		lt_account, labels.own, lt_list, target.list, lt_name, labels.global)));
 	box->addButton(tr::lng_purple_lists_delete(), [=] {
 		if (!current()) {
-			if (show && *show) { show->showToast(tr::lng_purple_wait_context_changed(tr::now)); }
+			const auto msg = tr::lng_purple_wait_context_changed(tr::now);
+			ShowPurpleAck({
+				.session = origin.get(),
+				.scope = u"Work Mode lists"_q,
+				.text = msg,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+			});
 			return;
 		}
 		Instance().observeAccountFiles();
@@ -2002,25 +2142,64 @@ void DeleteAccountListMembersBox(
 			Instance().observeAccountFiles();
 		}
 		if (!result.ok) {
-			if (show && *show) { show->showToast(result.error); }
+			const auto err = result.error;
+			ShowPurpleNotice({
+				.session = origin.get(),
+				.accountLabel = labels.own,
+				.scope = u"Work Mode lists"_q,
+				.summary = err,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (show && *show) { show->showToast(err); } },
+			});
 			return;
 		}
 		if (!current()) {
-			if (show && *show) {
-				show->showToast(result.changed
-					? tr::lng_purple_remove_appwide_saved_incomplete(tr::now)
-					: tr::lng_purple_settings_row_changed(tr::now));
+			const auto msg = result.changed
+				? tr::lng_purple_remove_appwide_saved_incomplete(tr::now)
+				: tr::lng_purple_settings_row_changed(tr::now);
+			if (result.changed) {
+				ShowPurpleNotice({
+					.session = origin.get(),
+					.accountLabel = labels.own,
+					.scope = u"Work Mode lists"_q,
+					.summary = msg,
+					.severity = ModalNotices::NoticeSeverity::Warning,
+					.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+				});
+			} else {
+				ShowPurpleAck({
+					.session = origin.get(),
+					.scope = u"Work Mode lists"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Error,
+					.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+				});
 			}
 			return;
 		}
 		if (!result.target || !AccountRouting().validateSettingsEdit(*result.target)) {
-			box->uiShow()->showToast(tr::lng_purple_settings_row_changed(tr::now));
+			const auto msg = tr::lng_purple_settings_row_changed(tr::now);
+			ShowPurpleAck({
+				.session = origin.get(),
+				.scope = u"Work Mode lists"_q,
+				.text = msg,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+			});
 			return;
 		}
-		if (stock) {
-			box->uiShow()->showToast(tr::lng_purple_lists_stock_edit(tr::now, lt_account, labels.own));
-		}
 		if (current()) { box->closeBox(); }
+		if (stock) {
+			const auto msg = tr::lng_purple_lists_stock_edit(tr::now, lt_account, labels.own);
+			ShowPurpleNotice({
+				.session = origin.get(),
+				.accountLabel = labels.own,
+				.scope = u"Work Mode lists"_q,
+				.summary = msg,
+				.severity = ModalNotices::NoticeSeverity::Info,
+				.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+			});
+		}
 	});
 	const auto cancel = box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	box->setFocusCallback([=] { cancel->setFocus(); });
@@ -2064,7 +2243,13 @@ void ChooseAccountWorkModeBox(
 	box->addButton(tr::lng_box_ok(), [=] {
 		const auto live = origin.get();
 		if (!live) {
-			if (weakBox) { weakBox->uiShow()->showToast(tr::lng_purple_wait_account_changed(tr::now)); }
+			const auto msg = tr::lng_purple_wait_account_changed(tr::now);
+			ShowPurpleAck({
+				.scope = u"Work Mode"_q,
+				.text = msg,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (weakBox) { weakBox->uiShow()->showToast(msg); } },
+			});
 			return;
 		}
 		const auto selected = AccountWorkMode(group->current());
@@ -2463,7 +2648,21 @@ void ShowAccountSettingsRefusal(
 	if (!show || !show->valid()) {
 		return;
 	} else if (!AccountSettingsNeedOwner()) {
-		show->showToast(error);
+		const auto activeWin = Core::App().activeWindow();
+		const auto activeSession = activeWin ? activeWin->maybeSession() : nullptr;
+		const auto weakShow = std::weak_ptr<Ui::Show>(show);
+		ShowPurpleNotice({
+			.session = activeSession,
+			.window = activeWin,
+			.scope = u"Settings"_q,
+			.summary = error,
+			.severity = ModalNotices::NoticeSeverity::Error,
+			.fallbackToast = [=] {
+				if (const auto s = weakShow.lock(); s && s->valid()) {
+					s->showToast(error);
+				}
+			},
+		});
 		return;
 	}
 	const auto weak = std::weak_ptr<Ui::Show>(show);

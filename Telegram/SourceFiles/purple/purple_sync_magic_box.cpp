@@ -11,6 +11,7 @@
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_magic_telegram.h"
 #include "settings/settings_common.h"
@@ -103,7 +104,14 @@ void ChooseChatBox(
 			}
 			const auto refusal = PickRefusal(SyncMagicPickOf(chat, LocalOf(session, chat)));
 			if (!refusal.isEmpty()) {
-				box->uiShow()->showToast(refusal);
+				const auto show = box->uiShow();
+				ShowPurpleAck({
+					.session = session,
+					.scope = u"Sync chat"_q,
+					.text = refusal,
+					.severity = ModalNotices::NoticeSeverity::Error,
+					.fallbackToast = [=] { if (show && show->valid()) { show->showToast(refusal); } },
+				});
 				return;
 			}
 			box->closeBox();
@@ -135,7 +143,14 @@ void OpenChat(
 		? session->data().channelLoaded(ChannelId(chat.id))
 		: nullptr;
 	if (!controller || &controller->session() != session || !peer) {
-		show->showToast(tr::lng_purple_magic_open_failed(tr::now));
+		const auto msg = tr::lng_purple_magic_open_failed(tr::now);
+		ShowPurpleAck({
+			.session = session,
+			.scope = u"Sync chat"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Error,
+			.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+		});
 		return;
 	}
 	controller->showPeerHistory(peer);
@@ -229,18 +244,39 @@ void ToastSyncMagicProblem(not_null<Main::Session*> session) {
 	}
 	chat->shown();
 	const auto weak = base::make_weak(controller);
-	controller->uiShow()->showToast({
-		.text = TextWithEntities{ SyncMagicStatusText(session, frame) + ' ' }.append(
-			Ui::Text::Link(tr::lng_purple_magic_problem_open(tr::now))),
-		.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
-			if (const auto strong = weak.get()) {
-				strong->show(Box(SyncMagicChatBox, &strong->session(), [=] {
-					return weak.get() != nullptr;
-				}));
-			}
-			return false;
+	const auto statusText = SyncMagicStatusText(session, frame);
+	const auto openSettings = [=] {
+		if (const auto strong = weak.get()) {
+			strong->show(Box(SyncMagicChatBox, &strong->session(), [=] {
+				return weak.get() != nullptr;
+			}));
+		}
+	};
+	ShowPurpleNotice({
+		.session = session,
+		.window = &controller->window(),
+		.scope = u"Sync chat"_q,
+		.summary = statusText,
+		.coalesceKey = u"sync_magic:problem:"_q + PurpleNoticeAccountKey(session),
+		.severity = ModalNotices::NoticeSeverity::Warning,
+		.background = true,
+		.primaryAction = PurpleNoticeAction{
+			.label = tr::lng_purple_magic_problem_open(tr::now),
+			.run = openSettings,
 		},
-		.duration = kProblemToastDuration,
+		.fallbackToast = [=] {
+			if (const auto strong = weak.get()) {
+				strong->uiShow()->showToast({
+					.text = TextWithEntities{ statusText + ' ' }.append(
+						Ui::Text::Link(tr::lng_purple_magic_problem_open(tr::now))),
+					.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
+						openSettings();
+						return false;
+					},
+					.duration = kProblemToastDuration,
+				});
+			}
+		},
 	});
 }
 
@@ -312,7 +348,15 @@ void SyncMagicChatBox(
 	};
 	const auto edited = [=](SyncMagicResult result) {
 		if (result.kind == SyncMagicResult::Kind::Unavailable && live()) {
-			box->uiShow()->showToast(tr::lng_purple_magic_not_saved(tr::now));
+			const auto msg = tr::lng_purple_magic_not_saved(tr::now);
+			const auto show = box->uiShow();
+			ShowPurpleAck({
+				.session = session,
+				.scope = u"Sync chat"_q,
+				.text = msg,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+			});
 		}
 	};
 
@@ -334,7 +378,15 @@ void SyncMagicChatBox(
 		}
 		chat->list(value, crl::guard(box, [=](bool ok) {
 			if (!ok) {
-				box->uiShow()->showToast(tr::lng_purple_magic_not_saved(tr::now));
+				const auto msg = tr::lng_purple_magic_not_saved(tr::now);
+				const auto show = box->uiShow();
+				ShowPurpleAck({
+					.session = session,
+					.scope = u"Sync chat"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Error,
+					.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+				});
 			}
 			update();
 		}));
@@ -367,7 +419,15 @@ void SyncMagicChatBox(
 				}
 				SyncMagicJoin(session, crl::guard(box, [=](bool ok) {
 					if (!ok) {
-						box->uiShow()->showToast(tr::lng_purple_magic_join_failed(tr::now));
+						const auto msg = tr::lng_purple_magic_join_failed(tr::now);
+						const auto show = box->uiShow();
+						ShowPurpleAck({
+							.session = session,
+							.scope = u"Sync chat"_q,
+							.text = msg,
+							.severity = ModalNotices::NoticeSeverity::Error,
+							.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+						});
 					}
 				}));
 			}),

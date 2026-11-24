@@ -14,6 +14,7 @@
 #include "media/player/media_player_instance.h"
 #include "purple/purple_config.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_playlist_download_box.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
@@ -898,10 +899,17 @@ void PlaylistView::edit(PlaylistAccountEdit request) {
 			|| generation != afterRender->_generation) return;
 		if (ok && kind == PlaylistAccountEditKind::Create && afterRender->_message) afterRender->add(id);
 		if (ok && kind == PlaylistAccountEditKind::AddSongs) {
-			afterRender->_box->uiShow()->showToast(added
+			const auto msg = added
 				? tr::lng_purple_playlists_added(tr::now)
 				: relinked ? tr::lng_purple_playlists_relinked(tr::now)
-				: tr::lng_purple_playlists_already(tr::now));
+				: tr::lng_purple_playlists_already(tr::now);
+			const auto boxShow = afterRender->_box->uiShow();
+			ShowPurpleAck({
+				.scope = u"Playlists"_q,
+				.text = msg,
+				.severity = ModalNotices::NoticeSeverity::Info,
+				.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+			});
 		}
 	});
 }

@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
 #include "ui/widgets/buttons.h"
@@ -727,7 +728,19 @@ void LastSeenPeek::finish(const QString &reason, bool read) {
 		LOG(("Purple: Last Seen Peek with %1 - nothing read, %2."
 			).arg(QString::number(_peer), reason));
 		if (_show) {
-			_show->showToast(tr::lng_lastseen_peek_empty_result(tr::now));
+			const auto msg = tr::lng_lastseen_peek_empty_result(tr::now);
+			const auto show = _show;
+			const auto liveSession = _session.get();
+			ShowPurpleNotice({
+				.session = liveSession,
+				.scope = u"Last Seen Peek"_q,
+				.summary = msg,
+				.coalesceKey = u"lastseen:empty:"_q + PurpleNoticeAccountKey(liveSession)
+					+ u":"_q + QString::number(_peer),
+				.severity = ModalNotices::NoticeSeverity::Info,
+				.background = true,
+				.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+			});
 		}
 	}
 	if (_journaled) {
@@ -767,7 +780,14 @@ void StartPeek(
 		std::shared_ptr<Ui::Show> show) {
 	if (RunningPeek || QFileInfo::exists(JournalPath(session))
 		|| PendingRestores.contains(JournalPath(session))) {
-		show->showToast(tr::lng_lastseen_peek_running(tr::now));
+		const auto msg = tr::lng_lastseen_peek_running(tr::now);
+		ShowPurpleAck({
+			.session = session,
+			.scope = u"Last Seen Peek"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+		});
 		return;
 	}
 	RunningPeek = std::make_unique<LastSeenPeek>(session, user, show);
@@ -857,7 +877,15 @@ void ShowLastSeenPeekBox(
 		not_null<UserData*> user) {
 	const auto now = base::unixtime::now();
 	if (const auto refusal = Refusal(user); !refusal.isEmpty()) {
-		controller->showToast(refusal);
+		const auto weakCtrl = base::make_weak(controller.get());
+		ShowPurpleAck({
+			.session = &controller->session(),
+			.window = &controller->window(),
+			.scope = u"Last Seen Peek"_q,
+			.text = refusal,
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.fallbackToast = [=] { if (const auto c = weakCtrl.get()) { c->showToast(refusal); } },
+		});
 		return;
 	}
 	const auto session = &controller->session();

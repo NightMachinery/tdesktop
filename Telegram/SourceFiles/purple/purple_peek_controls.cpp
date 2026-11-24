@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_device.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_wait_key_filter.h"
 #include "ui/painter.h"
@@ -449,7 +450,19 @@ void PendingWait::report(
 		base::weak_ptr<Window::Controller> window) {
 	if (!result.error.isEmpty()) {
 		if (const auto live = window.get()) {
-			live->showToast(result.error);
+			const auto err = result.error;
+			ShowPurpleNotice({
+				.session = live->maybeSession(),
+				.window = live,
+				.scope = u"Work Mode"_q,
+				.summary = err,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] {
+					if (const auto w = window.get()) {
+						w->showToast(err);
+					}
+				},
+			});
 		}
 	}
 }

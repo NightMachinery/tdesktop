@@ -319,6 +319,15 @@ notices_cpp = read("purple/purple_notices.cpp")
 ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
         "ResolveNoticePeerLabel", "PickerVisible",
         "ShowPurpleNotice", "ShowPurpleAck", "MaybeFlushPendingNotices", "OpenPurpleNoticeHistory")
+config_cpp = read("purple/purple_config.cpp")
+ordered(config_cpp, "ResolveNoticePeerLabel", "ResolvePeerIdsInConfigValue",
+        "config:reload:", "ShowPurpleNotice")
+archive_cpp = read("purple/purple_archive_service.cpp")
+ordered(archive_cpp, "archive:removal_pending:", "archive:gap:", "archive:discard_failed:")
+st_cover_cpp = read("purple/purple_screentime_cover.cpp")
+ordered(st_cover_cpp, "ShowPurpleAck", ".persistent = true")
+last_seen_cpp = read("purple/purple_last_seen.cpp")
+ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = true")
 
 privacy = read("purple/purple_privacy_screen.cpp")
 ordered(privacy, "ShouldFetchWeather", "Accept-Language")

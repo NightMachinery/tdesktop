@@ -15,6 +15,7 @@
 #include "purple/purple_archive_files.h"
 #include "purple/purple_archive_journal.h"
 #include "purple/purple_config.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_markdown_source.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_markdown_delivery.h"
@@ -800,32 +801,45 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 			&& PersistedLoginAuthority(root, dataName, key, authority, authKeyId);
 	};
 	const auto weak = base::make_weak(session.get());
+	const auto accountKey = PurpleNoticeAccountKey(session.get());
 	const auto routing = value.routing;
+	const auto showRemovalPending = [accountKey] {
+		const auto msg = tr::lng_purple_archive_removal_pending(tr::now);
+		ShowPurpleNotice({
+			.accountKeyOverride = accountKey,
+			.scope = u"Local archive"_q,
+			.summary = msg,
+			.coalesceKey = u"archive:removal_pending:"_q + accountKey,
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.background = true,
+			.fallbackToast = [=] { Ui::Toast::Show(msg); },
+		});
+	};
 	value.worker = std::make_shared<ArchiveWorker>(
 		std::move(options),
-		[weak, routing, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString failure, uint64_t bytes) {
-			crl::on_main([weak, routing, app, status, failure = std::move(failure), bytes] {
+		[weak, accountKey, showRemovalPending, routing, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString failure, uint64_t bytes) {
+			crl::on_main([weak, accountKey, showRemovalPending, routing, app, status, failure = std::move(failure), bytes] {
 				if (!app) {
 					return;
 				}
 				if (!routing->load()) {
 					if (status == DesktopArchiveStatus::RemovalPending
 						&& (!weak || Retired.contains(weak.get()))) {
-						Ui::Toast::Show(tr::lng_purple_archive_removal_pending(tr::now));
+						showRemovalPending();
 					}
 					return;
 				}
 				const auto live = weak.get();
 				if (!live) {
 					if (status == DesktopArchiveStatus::RemovalPending) {
-						Ui::Toast::Show(tr::lng_purple_archive_removal_pending(tr::now));
+						showRemovalPending();
 					}
 					return;
 				}
 				const auto i = Sessions.find(live);
 				if (i == Sessions.end()) {
 					if (status == DesktopArchiveStatus::RemovalPending) {
-						Ui::Toast::Show(tr::lng_purple_archive_removal_pending(tr::now));
+						showRemovalPending();
 					}
 					return;
 				}
@@ -840,8 +854,19 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 					&& Core::App().domain().active().maybeSession() == live) {
 					const auto gap = status == DesktopArchiveStatus::Ready
 						|| status == DesktopArchiveStatus::RetentionGap;
-					Ui::Toast::Show(gap ? tr::lng_purple_archive_gap(tr::now)
-						: tr::lng_purple_archive_unavailable(tr::now));
+					const auto msg = gap ? tr::lng_purple_archive_gap(tr::now)
+						: tr::lng_purple_archive_unavailable(tr::now);
+					ShowPurpleNotice({
+						.session = live,
+						.scope = u"Local archive"_q,
+						.summary = msg,
+						.coalesceKey = (gap ? u"archive:gap:"_q : u"archive:unavailable:"_q) + accountKey,
+						.severity = gap
+							? ModalNotices::NoticeSeverity::Warning
+							: ModalNotices::NoticeSeverity::Error,
+						.background = true,
+						.fallbackToast = [=] { Ui::Toast::Show(msg); },
+					});
 				}
 				Changes.fire({});
 			});
@@ -925,6 +950,19 @@ void RemoveArchiveAtLogout(Main::Account &account) {
 			}
 		}
 	}
+	const auto accountKey = session ? PurpleNoticeAccountKey(session) : u"app"_q;
+	const auto showRemovalPending = [accountKey] {
+		const auto msg = tr::lng_purple_archive_removal_pending(tr::now);
+		ShowPurpleNotice({
+			.accountKeyOverride = accountKey,
+			.scope = u"Local archive"_q,
+			.summary = msg,
+			.coalesceKey = u"archive:removal_pending:"_q + accountKey,
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.background = true,
+			.fallbackToast = [=] { Ui::Toast::Show(msg); },
+		});
+	};
 	try {
 		auto options = Options(account);
 		options.removalStore = store;
@@ -932,17 +970,17 @@ void RemoveArchiveAtLogout(Main::Account &account) {
 			? QString::fromLatin1(QCryptographicHash::hash(authority, QCryptographicHash::Sha256).toHex())
 			: u"unavailable"_q;
 		static_cast<void>(ArchiveWorker::RemovalOnly(std::move(options), !session,
-			[app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, uint64_t) {
+			[showRemovalPending, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, uint64_t) {
 				if (status == DesktopArchiveStatus::RemovalPending) {
-					crl::on_main([app] {
+					crl::on_main([showRemovalPending, app] {
 						if (app) {
-							Ui::Toast::Show(tr::lng_purple_archive_removal_pending(tr::now));
+							showRemovalPending();
 						}
 					});
 				}
 			}));
 	} catch (const std::system_error &) {
-		Ui::Toast::Show(tr::lng_purple_archive_removal_pending(tr::now));
+		showRemovalPending();
 	}
 	Changes.fire({});
 }
@@ -1017,7 +1055,17 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 					} else {
 						i->second.status = DesktopArchiveStatus::Unreadable;
 						i->second.failure = u"discard-held"_q;
-						Ui::Toast::Show(tr::lng_purple_archive_discard_failed(tr::now));
+						const auto msg = tr::lng_purple_archive_discard_failed(tr::now);
+						const auto acctKey = PurpleNoticeAccountKey(live);
+						ShowPurpleNotice({
+							.session = live,
+							.scope = u"Local archive"_q,
+							.summary = msg,
+							.coalesceKey = u"archive:discard_failed:"_q + acctKey,
+							.severity = ModalNotices::NoticeSeverity::Error,
+							.background = true,
+							.fallbackToast = [=] { Ui::Toast::Show(msg); },
+						});
 					}
 					Changes.fire({});
 				});
@@ -1026,7 +1074,17 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 			active->store(false);
 			i->second.status = DesktopArchiveStatus::Unreadable;
 			i->second.failure = u"discard-worker-unavailable"_q;
-			Ui::Toast::Show(tr::lng_purple_archive_discard_failed(tr::now));
+			const auto msg = tr::lng_purple_archive_discard_failed(tr::now);
+			const auto acctKey = PurpleNoticeAccountKey(live);
+			ShowPurpleNotice({
+				.session = live,
+				.scope = u"Local archive"_q,
+				.summary = msg,
+				.coalesceKey = u"archive:discard_failed:"_q + acctKey,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.background = true,
+				.fallbackToast = [=] { Ui::Toast::Show(msg); },
+			});
 			Changes.fire({});
 		}
 	};
@@ -1046,7 +1104,17 @@ void QueueArchiveRetentionGap(not_null<Main::Session*> session, QString reason) 
 	Changes.fire({});
 	if (firstFailure && Core::App().domain().started()
 		&& Core::App().domain().active().maybeSession() == session.get()) {
-		Ui::Toast::Show(tr::lng_purple_archive_gap(tr::now));
+		const auto msg = tr::lng_purple_archive_gap(tr::now);
+		const auto acctKey = PurpleNoticeAccountKey(session.get());
+		ShowPurpleNotice({
+			.session = session.get(),
+			.scope = u"Local archive"_q,
+			.summary = msg,
+			.coalesceKey = u"archive:gap:"_q + acctKey,
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.background = true,
+			.fallbackToast = [=] { Ui::Toast::Show(msg); },
+		});
 	}
 }
 

@@ -14,6 +14,7 @@
 #include "purple/purple_archive_service.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/show.h"
 #include "ui/painter.h"
@@ -128,7 +129,14 @@ void ShowArchiveMedia(not_null<Window::SessionController*> controller,
 			const auto valid = current();
 			if (!valid || (state->access && !state->access->current())) {
 				if (valid) {
-					box->uiShow()->showToast(tr::lng_purple_archive_attachment_failed(tr::now));
+					const auto msg = tr::lng_purple_archive_attachment_failed(tr::now);
+					const auto boxShow = box->uiShow();
+					ShowPurpleAck({
+						.scope = u"Local archive"_q,
+						.text = msg,
+						.severity = ModalNotices::NoticeSeverity::Error,
+						.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+					});
 				}
 				stop();
 				box->closeBox();

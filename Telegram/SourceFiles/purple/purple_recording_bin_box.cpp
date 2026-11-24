@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_recording_bin_box.h"
 
 #include "purple/purple_config.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_recording_store.h"
 
 #include "base/unixtime.h"
@@ -160,7 +161,13 @@ void Send(
 	const auto show = box->uiShow();
 	SendRecordingBinItem(id, thread, [=](bool ok) {
 		if (!ok) {
-			show->showToast(tr::lng_purple_recording_bin_send_failed(tr::now));
+			const auto msg = tr::lng_purple_recording_bin_send_failed(tr::now);
+			ShowPurpleAck({
+				.scope = u"Recording bin"_q,
+				.text = msg,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+			});
 		}
 	});
 }
@@ -190,9 +197,17 @@ void Save(not_null<Ui::GenericBox*> box, const RecordingBinItem &item) {
 			const auto ok = bytes
 				&& file.open(QIODevice::WriteOnly)
 				&& (file.write(*bytes) == bytes->size());
-			show->showToast(ok
+			const auto msg = ok
 				? tr::lng_purple_recording_bin_saved(tr::now)
-				: tr::lng_purple_recording_bin_save_failed(tr::now));
+				: tr::lng_purple_recording_bin_save_failed(tr::now);
+			ShowPurpleAck({
+				.scope = u"Recording bin"_q,
+				.text = msg,
+				.severity = ok
+					? ModalNotices::NoticeSeverity::Info
+					: ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+			});
 		});
 }
 
@@ -211,7 +226,14 @@ void TogglePlay(
 	const auto bytes = RecordingBinMedia(item.id);
 	if (!bytes) {
 		state->rebuild();
-		box->uiShow()->showToast(tr::lng_purple_recording_bin_play_failed(tr::now));
+		const auto msg = tr::lng_purple_recording_bin_play_failed(tr::now);
+		const auto boxShow = box->uiShow();
+		ShowPurpleAck({
+			.scope = u"Recording bin"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Error,
+			.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+		});
 		return;
 	}
 	const auto round = (item.kind == Kind::Round);
@@ -222,7 +244,14 @@ void TogglePlay(
 	player->start();
 	if (!player->valid()) {
 		state->rebuild();
-		box->uiShow()->showToast(tr::lng_purple_recording_bin_play_failed(tr::now));
+		const auto msg = tr::lng_purple_recording_bin_play_failed(tr::now);
+		const auto boxShow = box->uiShow();
+		ShowPurpleAck({
+			.scope = u"Recording bin"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Error,
+			.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+		});
 		return;
 	}
 	if (round) {
@@ -352,7 +381,14 @@ void AddItem(
 					if (const auto session = weakSession.get()) {
 						Send(box, id, session->data().history(session->user()).get());
 					} else {
-						box->uiShow()->showToast(tr::lng_purple_recording_bin_send_failed(tr::now));
+						const auto msg = tr::lng_purple_recording_bin_send_failed(tr::now);
+						const auto boxShow = box->uiShow();
+						ShowPurpleAck({
+							.scope = u"Recording bin"_q,
+							.text = msg,
+							.severity = ModalNotices::NoticeSeverity::Error,
+							.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+						});
 					}
 				});
 			}

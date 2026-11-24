@@ -3,6 +3,7 @@
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "lang/lang_keys.h"
+#include "purple/purple_notices.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/color_contrast.h"
@@ -138,9 +139,16 @@ void ToggleChatBackgroundVisibility(not_null<QWidget*> window) {
 	const auto visible = !ChatBackgroundsVisible();
 	Core::App().settings().writePref<bool>(kVisiblePref, visible);
 	VisibilityChanges.fire({});
-	Ui::Toast::Show(window, visible
+	const auto msg = visible
 		? tr::lng_purple_keys_backgrounds_shown(tr::now)
-		: tr::lng_purple_keys_backgrounds_hidden(tr::now));
+		: tr::lng_purple_keys_backgrounds_hidden(tr::now);
+	const auto weakWin = QPointer<QWidget>(window.get());
+	ShowPurpleAck({
+		.scope = u"Chat backgrounds"_q,
+		.text = msg,
+		.severity = ModalNotices::NoticeSeverity::Info,
+		.fallbackToast = [=] { if (weakWin) { Ui::Toast::Show(weakWin.data(), msg); } },
+	});
 }
 
 } // namespace Purple

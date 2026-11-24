@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_sync_setup_box.h"
 
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_sync_chat_write.h"
 #include "purple/purple_sync_magic_box.h"
 #include "purple/purple_sync_magic_service.h"
@@ -967,7 +968,15 @@ void ApplyChoice(
 	}
 	auto prefix = applied.joined ? u"Joined sync."_q : QString();
 	if (applied.wroteFile) {
-		box->uiShow()->showToast(u"Settings updated from %1."_q.arg(device));
+		const auto msg = u"Settings updated from %1."_q.arg(device);
+		const auto boxShow = box->uiShow();
+		ShowPurpleAck({
+			.session = state->selectedSession.get(),
+			.scope = u"Sync across devices"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Info,
+			.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+		});
 		prefix = Joined(prefix, applied.undoAvailable
 			? u"Settings updated from %1. The previous file is in History, "
 				"and Undo puts it back."_q.arg(device)
@@ -1056,7 +1065,15 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 				SyncConfigHistoryReason::BeforeUndo, replacement);
 			if (SyncConfigUndoFinished(result)) { LastUndoFor(*state).reset(); }
 			if (result.status == SyncConfigRestoreStatus::Restored) {
-				box->uiShow()->showToast(u"Previous settings are back."_q);
+				const auto msg = u"Previous settings are back."_q;
+				const auto boxShow = box->uiShow();
+				ShowPurpleAck({
+					.session = origin.get(),
+					.scope = u"Sync across devices"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Info,
+					.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+				});
 				ReviewAgain(*state, SyncConfigUndoneText);
 			} else {
 				SetStatus(*state, SyncConfigRestoreText(result, entry));
@@ -1071,8 +1088,15 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		const SyncConfigHistoryEntry &entry,
 		const AccountTransferReview &replacement) {
 	if (Busy(*state) || !SelectedAvailable(*state)) {
-		box->uiShow()->showToast(
-			u"Wait for the check or post to finish, then try again."_q);
+		const auto msg = u"Wait for the check or post to finish, then try again."_q;
+		const auto boxShow = box->uiShow();
+		ShowPurpleAck({
+			.session = state->selectedSession.get(),
+			.scope = u"Sync across devices"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+		});
 		return false;
 	}
 	const auto result = RestoreSyncConfigHistory(
@@ -1080,7 +1104,15 @@ void ConfirmUndo(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 		SyncConfigHistoryReason::BeforeRestore, replacement);
 	if (result.status == SyncConfigRestoreStatus::Restored) {
 		LastUndoFor(*state).reset();
-		box->uiShow()->showToast(u"Settings restored."_q);
+		const auto msg = u"Settings restored."_q;
+		const auto boxShow = box->uiShow();
+		ShowPurpleAck({
+			.session = state->selectedSession.get(),
+			.scope = u"Sync across devices"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Info,
+			.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(msg); } },
+		});
 		ReviewAgain(*state, [&](bool staysLocal) {
 			return SyncConfigRestoreText(result, entry, staysLocal);
 		});

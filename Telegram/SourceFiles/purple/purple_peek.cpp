@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_state.h"
 #include "ui/layers/show.h"
@@ -147,11 +148,23 @@ void Hotkeys::apply() {
 // replacement behaviour that was always intended. There is not always a session
 // to go through, hence the fallback.
 void ShowToast(not_null<Window::Controller*> window, const QString &text) {
-	if (const auto session = window->sessionController()) {
-		session->uiShow()->showToast(text);
-	} else {
-		window->showToast(text);
-	}
+	const auto weakWin = base::make_weak(window.get());
+	ShowPurpleAck({
+		.session = window->maybeSession(),
+		.window = window.get(),
+		.scope = u"Work Mode"_q,
+		.text = text,
+		.severity = ModalNotices::NoticeSeverity::Info,
+		.fallbackToast = [=] {
+			if (const auto live = weakWin.get()) {
+				if (const auto session = live->sessionController()) {
+					session->uiShow()->showToast(text);
+				} else {
+					live->showToast(text);
+				}
+			}
+		},
+	});
 }
 
 void Hotkeys::triggerPeek() {

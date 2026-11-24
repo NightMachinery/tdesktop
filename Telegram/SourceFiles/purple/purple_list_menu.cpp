@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_preset_box.h"
 #include "ui/layers/generic_box.h"
 #include "lang/lang_keys.h"
@@ -82,7 +83,14 @@ void NewListBox(
 		}, u"a new list"_q, [=] { return weak && originCurrent(); });
 		if (!weak) { return; }
 		if (!result.ok) {
-			box->uiShow()->showToast(result.error);
+			const auto err = result.error;
+			const auto boxShow = box->uiShow();
+			ShowPurpleAck({
+				.scope = u"Work Mode lists"_q,
+				.text = err,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(err); } },
+			});
 			return;
 		}
 		create(name);
@@ -209,7 +217,13 @@ void FillListsMenu(
 
 				const auto live = weakSession.get();
 				if (!live) {
-					if (show && *show) { show->showToast(tr::lng_purple_wait_account_changed(tr::now)); }
+					const auto msg = tr::lng_purple_wait_account_changed(tr::now);
+					ShowPurpleAck({
+						.scope = u"Work Mode lists"_q,
+						.text = msg,
+						.severity = ModalNotices::NoticeSeverity::Error,
+						.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+					});
 					return;
 				}
 				const auto title = TitleResolver(not_null{ live });
@@ -221,8 +235,25 @@ void FillListsMenu(
 					if (show && *show) {
 						ShowAccountSettingsRefusal(show, result.error, SessionAccountKey(not_null{ live }));
 					}
-				} else if (!notice.isEmpty() && show && *show) {
-					show->showToast(notice);
+				} else if (!notice.isEmpty()) {
+					const auto isMultiSentence = notice.contains(u". "_q);
+					if (isMultiSentence) {
+						ShowPurpleNotice({
+							.session = live,
+							.scope = u"Work Mode lists"_q,
+							.summary = notice,
+							.severity = ModalNotices::NoticeSeverity::Info,
+							.fallbackToast = [=] { if (show && *show) { show->showToast(notice); } },
+						});
+					} else {
+						ShowPurpleAck({
+							.session = live,
+							.scope = u"Work Mode lists"_q,
+							.text = notice,
+							.severity = ModalNotices::NoticeSeverity::Info,
+							.fallbackToast = [=] { if (show && *show) { show->showToast(notice); } },
+						});
+					}
 				}
 			},
 			(member ? &st::mediaPlayerMenuCheck : nullptr));
@@ -295,16 +326,30 @@ void FillListsMenu(
 		}
 		const auto scope = AccountSettingsScopeCaption(session, std::nullopt);
 		show->showBox(Box(NewListBox, [=](QString name) {
-			if (!weakSession) {
+			const auto live = weakSession.get();
+			if (!live) {
 				return;
 			}
-			// Said out loud, because the list is real and does nothing: no
-			// preset names it yet, and there is no way to guess which one
-			// should. Ticking chats into it works from this menu immediately.
-			show->showToast(u"List '%1' created. Add it to a preset's "
+			const auto path = SettingsFilePath();
+			const auto fullMsg = u"List '%1' created. Add it to a preset's "
 				"list_order in %2 to make it do anything."_q.arg(
 					name,
-					SettingsFilePath()) + (scope.isEmpty() ? QString() : '\n' + scope));
+					path) + (scope.isEmpty() ? QString() : '\n' + scope);
+			auto rows = std::vector<ModalNotices::NoticeRow>{
+				{ .label = u"List created"_q, .detail = name },
+				{ .label = u"Settings file"_q, .detail = path },
+			};
+			if (!scope.isEmpty()) {
+				rows.push_back({ .label = u"Scope"_q, .detail = scope });
+			}
+			ShowPurpleNotice({
+				.session = live,
+				.scope = u"Work Mode lists"_q,
+				.summary = u"List '%1' created. Add it to a preset's list_order to activate it."_q.arg(name),
+				.severity = ModalNotices::NoticeSeverity::Info,
+				.rows = std::move(rows),
+				.fallbackToast = [=] { if (show && *show) { show->showToast(fullMsg); } },
+			});
 		}, Fn<bool()>([=] {
 			const auto live = weakSession.get();
 			return live && !live->account().loggingOut() && live->account().maybeSession() == live;

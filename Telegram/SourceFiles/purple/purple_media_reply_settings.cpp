@@ -9,6 +9,7 @@
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_media_reply_splice.h"
 #include "purple/purple_media_reply_adapter.h"
 #include "purple/purple_media_reply_presentation.h"
@@ -112,7 +113,18 @@ void SettingsBox(not_null<Ui::GenericBox*> box,
 	const auto save = [=](QString scope, QString key, QJsonValue value) {
 		if (!current()) return false;
 		const auto result = WriteAccountMediaReply(weakSession.get(), *target, scope, key, value, current);
-		if (!result.ok) { box->uiShow()->showToast(result.error); return false; }
+		if (!result.ok) {
+			const auto err = result.error;
+			const auto boxShow = box->uiShow();
+			ShowPurpleAck({
+				.session = weakSession.get(),
+				.scope = u"Media auto-reply"_q,
+				.text = err,
+				.severity = ModalNotices::NoticeSeverity::Error,
+				.fallbackToast = [=] { if (boxShow && boxShow->valid()) { boxShow->showToast(err); } },
+			});
+			return false;
+		}
 		box->closeBox();
 		if (const auto window = weakController.get()) window->show(Box(SettingsBox, window, row));
 		return true;

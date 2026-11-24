@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_sync.h"
 
+#include "purple/purple_notices.h"
 #include "purple/purple_sync_chat_service.h"
 #include "purple/purple_sync_magic_service.h"
 #include "purple/purple_ui_witness.h"
@@ -500,8 +501,18 @@ void ConfirmAndImport(
 			if (!current()) { return; }
 			const auto result = ImportReviewedAccountTransfer(weak.get(), *review, current);
 			if (show && *show) {
-				if (!result.ok) { show->showBox(Ui::MakeInformBox(result.error)); }
-				else { show->showToast(u"Settings imported"_q); }
+				if (!result.ok) {
+					show->showBox(Ui::MakeInformBox(result.error));
+				} else {
+					const auto msg = u"Settings imported"_q;
+					ShowPurpleAck({
+						.session = weak.get(),
+						.scope = u"Settings import"_q,
+						.text = msg,
+						.severity = ModalNotices::NoticeSeverity::Info,
+						.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+					});
+				}
 			}
 		}));
 }
@@ -543,7 +554,16 @@ void ResolveAndImport(
 			u"Could not download %1."_q.arg(SettingsFileName())));
 		return;
 	}
-	show->showToast(u"Downloading %1..."_q.arg(SettingsFileName()));
+	{
+		const auto msg = u"Downloading %1..."_q.arg(SettingsFileName());
+		ShowPurpleAck({
+			.session = &document->session(),
+			.scope = u"Settings import"_q,
+			.text = msg,
+			.severity = ModalNotices::NoticeSeverity::Info,
+			.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+		});
+	}
 
 	auto lifetime = std::make_shared<rpl::lifetime>();
 	document->session().data().sessionDataAboutToBeCleared(
@@ -567,8 +587,16 @@ void ResolveAndImport(
 		const auto content = LocalContent(media, document);
 		if (content.isEmpty()) {
 			if (!document->loading()) {
-				show->showToast(
-					u"Could not download %1."_q.arg(SettingsFileName()));
+				const auto msg = u"Could not download %1."_q.arg(SettingsFileName());
+				ShowPurpleNotice({
+					.session = session,
+					.scope = u"Settings import"_q,
+					.summary = msg,
+					.coalesceKey = u"sync:download_fail:"_q + PurpleNoticeAccountKey(session),
+					.severity = ModalNotices::NoticeSeverity::Error,
+					.background = true,
+					.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+				});
 				base::take(lifetime)->destroy();
 			}
 			return;
@@ -749,11 +777,25 @@ void SendSettingsToSavedMessages(
 				}
 				if (messageId) {
 					NoteConfirmedSend(live, content, *messageId);
-					if (show && *show) {
-						show->showToast(u"Sent to Saved Messages"_q);
-					}
-				} else if (show && *show) {
-					show->showToast(u"Could not confirm settings send"_q);
+					const auto msg = u"Sent to Saved Messages"_q;
+					ShowPurpleAck({
+						.session = live,
+						.scope = u"Settings export"_q,
+						.text = msg,
+						.severity = ModalNotices::NoticeSeverity::Info,
+						.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+					});
+				} else {
+					const auto msg = u"Could not confirm settings send"_q;
+					ShowPurpleNotice({
+						.session = live,
+						.scope = u"Settings export"_q,
+						.summary = msg,
+						.coalesceKey = u"sync:send_unconfirmed:"_q + PurpleNoticeAccountKey(live),
+						.severity = ModalNotices::NoticeSeverity::Error,
+						.background = true,
+						.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+					});
 				}
 			}));
 		},
@@ -804,16 +846,40 @@ void ShareAccountSettingsFile(
 				[=](QString &&path) {
 					if (path.isEmpty() || !current()) { return; }
 					if (!SettingsExportPathAllowed(ConfigDirectory(), path)) {
-						if (show && *show) { show->showToast(tr::lng_purple_transfer_unavailable(tr::now)); }
+						const auto msg = tr::lng_purple_transfer_unavailable(tr::now);
+						ShowPurpleNotice({
+							.session = weak.get(),
+							.scope = u"Settings export"_q,
+							.summary = msg,
+							.severity = ModalNotices::NoticeSeverity::Error,
+							.rows = { { .label = u"Path"_q, .detail = path } },
+							.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+						});
 						return;
 					}
 					const auto expected = ReadSettingsFileInput(path);
 					const auto result = WriteGuardedSettingsFile(path, expected, bytes, [=] {
 						return current() && SettingsExportPathAllowed(ConfigDirectory(), path);
 					}, true);
-					if (show && *show) {
-						show->showToast(result == GuardedFileWrite::Written
-							? tr::lng_purple_transfer_shared(tr::now) : tr::lng_purple_transfer_unavailable(tr::now));
+					if (result == GuardedFileWrite::Written) {
+						const auto msg = tr::lng_purple_transfer_shared(tr::now);
+						ShowPurpleAck({
+							.session = weak.get(),
+							.scope = u"Settings export"_q,
+							.text = msg,
+							.severity = ModalNotices::NoticeSeverity::Info,
+							.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+						});
+					} else {
+						const auto msg = tr::lng_purple_transfer_unavailable(tr::now);
+						ShowPurpleNotice({
+							.session = weak.get(),
+							.scope = u"Settings export"_q,
+							.summary = msg,
+							.severity = ModalNotices::NoticeSeverity::Error,
+							.rows = { { .label = u"Path"_q, .detail = path } },
+							.fallbackToast = [=] { if (show && *show) { show->showToast(msg); } },
+						});
 					}
 				});
 		}));

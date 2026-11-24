@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "lang/lang_keys.h"
 #include "purple/purple_build_info.h"
+#include "purple/purple_notices.h"
 #include "settings/settings_builder.h"
 #include "window/window_session_controller.h"
 
@@ -33,7 +34,16 @@ void AddVersionButton(
 		.onClick = [=] {
 			QGuiApplication::clipboard()->setText(VersionText());
 			if (controller) {
-				controller->showToast(tr::lng_text_copied(tr::now));
+				const auto msg = tr::lng_text_copied(tr::now);
+				const auto weakCtrl = base::make_weak(controller);
+				ShowPurpleAck({
+					.session = &controller->session(),
+					.window = &controller->window(),
+					.scope = u"Purple version"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Info,
+					.fallbackToast = [=] { if (const auto c = weakCtrl.get()) { c->showToast(msg); } },
+				});
 			}
 		},
 		.keywords = {

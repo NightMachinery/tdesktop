@@ -1,5 +1,6 @@
 #include "purple/purple_sleep_timer.h"
 #include "purple/hooks/playlist_player.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_playlist_player.h"
 
 #include "base/qt_signal_producer.h"
@@ -93,8 +94,15 @@ Rules::Item ItemFor(const AudioMsgId &id) {
 }
 
 void ShowNotice(const QString &text) {
-	if (const auto active = QApplication::activeWindow()) Ui::Toast::Show(active, text);
-	else Ui::Toast::Show(text);
+	ShowPurpleAck({
+		.scope = u"Sleep timer"_q,
+		.text = text,
+		.severity = ModalNotices::NoticeSeverity::Info,
+		.fallbackToast = [=] {
+			if (const auto active = QApplication::activeWindow()) Ui::Toast::Show(active, text);
+			else Ui::Toast::Show(text);
+		},
+	});
 }
 
 Controller::Controller()

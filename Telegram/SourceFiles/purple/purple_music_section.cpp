@@ -20,6 +20,7 @@
 #include "media/player/media_player_instance.h"
 #include "mtproto/sender.h"
 #include "purple/purple_config.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_music_bookmark.h"
 #include "purple/purple_music_index_service.h"
@@ -953,11 +954,26 @@ void MusicSection::copyOrgLink(quint64 documentId) {
 					&& (CopyRestrictionsDisabled() || item->allowsForward()))
 				? CaptureMusicBookmark(&session(), source)
 				: std::nullopt;
+			const auto weakSelf = QPointer<QWidget>(this);
 			if (bookmark) {
 				QGuiApplication::clipboard()->setText(MusicBookmarkOrgLink(*bookmark));
-				Ui::Toast::Show(this, tr::lng_username_copied(tr::now));
+				const auto msg = tr::lng_username_copied(tr::now);
+				ShowPurpleAck({
+					.session = &session(),
+					.scope = u"Music"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Info,
+					.fallbackToast = [=] { if (weakSelf) { Ui::Toast::Show(weakSelf.data(), msg); } },
+				});
 			} else {
-				Ui::Toast::Show(this, tr::lng_purple_music_track_unavailable(tr::now));
+				const auto msg = tr::lng_purple_music_track_unavailable(tr::now);
+				ShowPurpleAck({
+					.session = &session(),
+					.scope = u"Music"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Error,
+					.fallbackToast = [=] { if (weakSelf) { Ui::Toast::Show(weakSelf.data(), msg); } },
+				});
 			}
 		}));
 	_bookmarkResolver->start();

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_schedule.h"
 #include "purple/purple_screentime.h"
 #include "purple/purple_screentime_recorder.h"
@@ -663,9 +664,22 @@ void ExportCsv(
 			if (path.isEmpty()) {
 				return;
 			} else if (WriteConfigFile(path, text)) {
-				show->showToast(u"Saved to %1."_q.arg(path));
+				const auto msg = u"Saved to %1."_q.arg(path);
+				ShowPurpleAck({
+					.scope = u"Screen time export"_q,
+					.text = msg,
+					.severity = ModalNotices::NoticeSeverity::Info,
+					.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+				});
 			} else {
-				show->showToast(u"Could not write %1."_q.arg(path));
+				const auto msg = u"Could not write %1."_q.arg(path);
+				ShowPurpleNotice({
+					.scope = u"Screen time export"_q,
+					.summary = u"Could not write screen time export file."_q,
+					.severity = ModalNotices::NoticeSeverity::Error,
+					.rows = { { .label = u"Path"_q, .detail = path } },
+					.fallbackToast = [=] { if (show && show->valid()) { show->showToast(msg); } },
+				});
 			}
 		}));
 }
