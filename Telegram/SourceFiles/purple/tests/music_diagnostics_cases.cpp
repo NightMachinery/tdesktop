@@ -26,7 +26,6 @@ Purple::MusicDiagnosticsSnapshot ReadyMusicFolder() {
 	s.folderExists = true;
 	s.folderName = u"Music"_q;
 	s.totalChatsInFolder = 4;
-	s.visibleChatsInFolder = 4;
 	return s;
 }
 
@@ -36,7 +35,7 @@ int main(int argc, char **argv) {
 	const auto app = QCoreApplication(argc, argv);
 
 	// 1. Explicit-only Music folders (no category flags) must not block on
-	// main/archive dialog list loading (reproduces the archive deadlock root cause).
+	// main/archive dialog list loading.
 	using Flag = Data::ChatFilter::Flag;
 	Check(!Purple::MusicFilterNeedsDialogLists(Flag(0)),
 		"explicit-only folder does not require full dialog lists");
@@ -94,48 +93,26 @@ int main(int argc, char **argv) {
 			"index error reports exact reason", text);
 	}
 
-	// 5. Empty folder (no chats in scope) and Work Mode hiding all chats.
+	// 5. Empty folder (no chats in scope).
 	{
 		auto s = ReadyMusicFolder();
 		s.totalChatsInFolder = 0;
-		s.visibleChatsInFolder = 0;
 		const auto empty = Purple::DescribeMusicState(s);
 		Check(empty.contains(u"No chats in \"Music\""_q), "empty folder explained", empty);
-
-		s.workModeActive = true;
-		s.workModePreset = u"Focus"_q;
-		const auto emptyWork = Purple::DescribeMusicState(s);
-		Check(emptyWork.contains(u"Work Mode (Focus)"_q), "empty folder under work mode notes preset", emptyWork);
 	}
+
+	// 6. Scanning progress with counts and offline pause.
 	{
 		auto s = ReadyMusicFolder();
 		s.totalChatsInFolder = 5;
-		s.visibleChatsInFolder = 0;
-		s.hiddenByWorkMode = 5;
-		s.workModeActive = true;
-		s.workModePreset = u"Deep Work"_q;
-		const auto hiddenAll = Purple::DescribeMusicState(s);
-		Check(hiddenAll.contains(u"All 5 chats in \"Music\" are hidden by Work Mode (Deep Work)"_q),
-			"all chats hidden by Work Mode explained", hiddenAll);
-	}
-
-	// 6. Scanning progress with counts, partial Work Mode hidden count, and offline pause.
-	{
-		auto s = ReadyMusicFolder();
-		s.totalChatsInFolder = 5;
-		s.visibleChatsInFolder = 3;
-		s.hiddenByWorkMode = 2;
-		s.workModeActive = true;
-		s.workModePreset = u"Focus"_q;
 		s.scanning = true;
-		s.chatsToScan = 3;
-		s.chatsScanned = 1;
+		s.chatsToScan = 5;
+		s.chatsScanned = 2;
 		s.tracksIndexedInScan = 14;
 		const auto progress = Purple::DescribeMusicState(s);
-		Check(progress.contains(u"1/3 chats scanned"_q)
-			&& progress.contains(u"14 tracks found"_q)
-			&& progress.contains(u"2 of 5 chats hidden by Work Mode (Focus)"_q),
-			"scanning progress reports counts and hidden chats", progress);
+		Check(progress.contains(u"2/5 chats scanned"_q)
+			&& progress.contains(u"14 tracks found"_q),
+			"scanning progress reports counts", progress);
 		s.offline = true;
 		const auto paused = Purple::DescribeMusicState(s);
 		Check(paused.contains(u"Offline (paused)"_q), "offline scanning state", paused);
@@ -206,20 +183,12 @@ int main(int argc, char **argv) {
 			"skipped tracks report counts and reasons", skipped);
 	}
 
-	// 11. Non-empty results stay clean unless partial Work Mode hiding or errors exist.
+	// 11. Healthy non-empty list stays clean without a status banner.
 	{
 		auto s = ReadyMusicFolder();
 		s.displayedTracks = 10;
 		s.totalIndexedTracks = 10;
 		Check(Purple::DescribeMusicState(s).isEmpty(), "healthy non-empty list has no status banner");
-		s.hiddenByWorkMode = 1;
-		s.totalChatsInFolder = 5;
-		s.visibleChatsInFolder = 4;
-		s.workModeActive = true;
-		s.workModePreset = u"Focus"_q;
-		const auto partial = Purple::DescribeMusicState(s);
-		Check(partial.contains(u"1 of 5 chats hidden by Work Mode (Focus)"_q),
-			"partial Work Mode hiding warns even with tracks", partial);
 	}
 
 	// 12. User-controlled strings with QString placeholders (%1/%2/%3) must not corrupt formatting.
@@ -244,21 +213,9 @@ int main(int argc, char **argv) {
 		s.serverSearchErrors = 1;
 		s.lastServerError = u"ERR_%1"_q;
 		s.scanIncomplete = true;
-		s.hiddenByWorkMode = 1;
-		s.totalChatsInFolder = 5;
-		s.workModeActive = true;
-		s.workModePreset = u"%2Preset%1"_q;
-		const auto errWithHidden = Purple::DescribeMusicState(s);
-		Check(errWithHidden == u"Server search failed for 1 of 4 chats in \"100%2\": ERR_%1. Refresh to try again. 1 of 5 chats hidden by Work Mode (%2Preset%1)."_q,
-			"placeholder tokens in folder, error and preset stay literal", errWithHidden);
-
-		s.visibleChatsInFolder = 0;
-		s.hiddenByWorkMode = 5;
-		s.serverSearchErrors = 0;
-		s.scanIncomplete = false;
-		const auto allHidden = Purple::DescribeMusicState(s);
-		Check(allHidden == u"All 5 chats in \"100%2\" are hidden by Work Mode (%2Preset%1). Switch presets or exempt this folder to browse its music."_q,
-			"placeholder tokens in folder and preset stay literal when all hidden", allHidden);
+		const auto err = Purple::DescribeMusicState(s);
+		Check(err == u"Server search failed for 1 of 4 chats in \"100%2\": ERR_%1. Refresh to try again."_q,
+			"placeholder tokens in folder and error stay literal", err);
 	}
 
 	std::cout << "Music diagnostics and roster checks passed\n";

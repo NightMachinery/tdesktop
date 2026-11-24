@@ -108,8 +108,8 @@ uses `state: "stopped"` when the song player is idle.
 
 `tdesktop-cli media play-music-link TOKEN` uses the playback capability and
 asks the stock player to play the bookmarked song. It leaves window focus
-alone. Both bookmark operations require an unlocked app. Hidden or
-unavailable sources yield an error without metadata. A bookmark depends on
+alone. Both bookmark operations require an unlocked app and ignore Work Mode
+hiding; unavailable sources yield an error without metadata. A bookmark depends on
 the local Purple profile and can only play through the account that made it.
 The accepted response confirms dispatch to the player. Streaming can still
 fail after dispatch.
@@ -130,10 +130,11 @@ a null path. The app never downloads a file to answer this command.
 The app copies cached metadata on main, verifies a candidate regular non-link
 file on a worker, then recollects the current metadata and Work Mode visibility
 on main before replying. A path is returned only when that fresh snapshot still
-names the verified file. If Work Mode hides the current chat, the entire result
-is `hidden:true` and `file:{name,path}`. Sender, chat, MIME, timestamps, playback
-state and music metadata are withheld. Missing message context while filtering
-is treated as hidden. Paths describe a local snapshot and may disappear later.
+names the verified file. Music ignores Work Mode hiding; for voice messages, if
+Work Mode hides the current chat, the entire result is `hidden:true` and
+`file:{name,path}` (sender, chat, MIME, timestamps, and playback state are
+withheld, and missing message context while filtering is treated as hidden).
+Paths describe a local snapshot and may disappear later.
 Media information follows the actual music or voice lock switch, including
 when lock changes during an asynchronous path check. A refused result contains
 only a typed `locked` error, even when its Work Mode wire form would omit type.

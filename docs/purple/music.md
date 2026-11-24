@@ -15,18 +15,19 @@ The overflow menu contains the source picker and refresh.
 Opening Music again while it's already visible selects the search text and
 keeps your place in the results for the same source.
 
-The first scan backfills the selected chats in pages. Folders that only list
-explicit chats start indexing immediately without waiting for the full main or
-archived dialog lists; category-based folders request any unloaded main or
-archived dialogs first. The screen displays saved results during the scan and
-always explains why the list is loading or empty, including unloaded folders or
-dialog lists with counts, offline state, chats hidden by Work Mode, server
-search or local index errors, skipped audio messages, or a search filter that
-hides indexed tracks. Once you focus, scroll, or select in the list,
-indexing leaves the displayed rows in place. Search again or use
-**Refresh music** to see the latest results. Refresh also checks for new
-tracks and resumes unfinished history. It keeps your picks while the source
-folder and its visible chats stay the same. A failed chat search leaves its
+The first scan backfills the selected chats in pages. Music ignores Work Mode
+presets and includes every chat in the selected folder (while keeping passcode
+locking and protected-content rules intact). Folders that only list explicit
+chats start indexing immediately without waiting for the full main or archived
+dialog lists; category-based folders request any unloaded main or archived
+dialogs first. The screen displays saved results during the scan and always
+explains why the list is loading or empty, including unloaded folders or dialog
+lists with counts, offline state, server search or local index errors, skipped
+audio messages, or a search filter that hides indexed tracks. Once you focus,
+scroll, or select in the list, indexing leaves the displayed rows in place.
+Search again or use **Refresh music** to see the latest results. Refresh also
+checks for new tracks and resumes unfinished history. It keeps your picks while
+the source folder and its chats stay the same. A failed chat search leaves its
 previous results intact and reports the error and affected chat count.
 
 After the first scan, Purple also indexes eligible new tracks it receives
@@ -38,8 +39,9 @@ The database stores track metadata, source message IDs, and scan cursors in
 the local Purple settings directory. Each Telegram account and environment
 has its own database. The scan never downloads audio. When you open Music
 with a new source folder, it clears the old index. When a chat leaves the
-selected folder, its entries are removed. Search filters out chats hidden by Purple, and playback
-rechecks the account, chat, and source message before opening a track.
+selected folder, its entries are removed. Music ignores Work Mode hiding, and
+playback rechecks the account, folder membership, and source message before
+opening a track.
 
 Double-click a track to play it. Use Command-click on macOS or Ctrl-click on
 other platforms to select tracks. Press Down from search to focus the current

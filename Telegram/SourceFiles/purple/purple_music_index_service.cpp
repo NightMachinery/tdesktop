@@ -239,9 +239,6 @@ void SetMusicSourceFolder(not_null<Main::Session*> session, FilterId folder) {
 
 MusicIndexEntryInspection InspectMusicIndexEntry(not_null<HistoryItem*> item) {
 	const auto history = item->history();
-	if (history->purpleHiddenFromView()) {
-		return { std::nullopt, MusicSkipReason::HiddenByWorkMode };
-	}
 	if (!item->computeUnavailableReason().isEmpty()) {
 		return { std::nullopt, MusicSkipReason::Unavailable };
 	}

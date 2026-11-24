@@ -1,9 +1,11 @@
 #include "purple/purple_music_source_roster.h"
 
+#include "data/data_channel.h"
 #include "data/data_chat_filters.h"
 #include "data/data_folder.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "dialogs/dialogs_main_list.h"
 #include "dialogs/dialogs_row.h"
 #include "history/history.h"
@@ -53,6 +55,23 @@ MusicSourceRosterResult InspectMusicSourceRoster(
 	if (needsDialogs) {
 		addList(nullptr);
 		if (includeArchive) addList(archive);
+		// A Work Mode preset with hide_everywhere removes chats from chatsList(),
+		// so inspect loaded histories too and let Music ignore Work Mode.
+		const auto addHiddenFromChatList = [&](not_null<PeerData*> peer) {
+			const auto history = data.historyLoaded(peer);
+			if (!history || !history->purpleHiddenFromChatList()
+				|| peer->migrateTo() || !history->folderKnown()) {
+				return;
+			}
+			if (history->folder() && !includeArchive) return;
+			if (const auto channel = peer->asChannel(); channel && channel->haveLeft()) {
+				return;
+			}
+			add(history);
+		};
+		data.enumerateUsers([&](not_null<UserData*> user) { addHiddenFromChatList(user); });
+		data.enumerateGroups([&](not_null<PeerData*> peer) { addHiddenFromChatList(peer); });
+		data.enumerateBroadcasts([&](not_null<ChannelData*> channel) { addHiddenFromChatList(channel); });
 	}
 	for (const auto history : filter.always()) {
 		add(history);

@@ -896,7 +896,7 @@
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp"
       ],
-      "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, Work Mode hiding, offline, search filter and error reporting"
+      "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, offline, search filter and error reporting"
     },
     {
       "name": "cases-translation-exclusion",

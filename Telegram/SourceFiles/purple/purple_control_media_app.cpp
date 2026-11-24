@@ -70,11 +70,6 @@ ControlResult MusicLinkDenied() {
 	return ControlError(u"not-found"_q, u"Music source unavailable."_q);
 }
 
-bool MusicLinkVisible(not_null<Main::Session*> session, FullMsgId source) {
-	const auto history = session->data().historyLoaded(source.peer);
-	return history ? !history->purpleHiddenFromView() : !Filtering(session);
-}
-
 ControlResult CurrentMusicLink() {
 	auto error = AuthorizeControlCommand(u"media.music-link"_q, CurrentControlPolicy(),
 		ControlMediaKind::Music, true);
@@ -113,7 +108,6 @@ void PlayMusicLink(QString token, std::function<bool()> active, ControlReply rep
 		const auto source = UnpackMusicLink(
 			session->local().readPref<QByteArray>(MusicLinkKey(token)));
 		if (!source) continue;
-		if (!MusicLinkVisible(session, source->id)) break;
 		const auto weak = base::make_weak(session);
 		const auto finish = [=] {
 			if (active && !active()) return;
@@ -124,7 +118,7 @@ void PlayMusicLink(QString token, std::function<bool()> active, ControlReply rep
 				return;
 			}
 			const auto live = weak.get();
-			if (!LiveMusicLinkSession(live) || !MusicLinkVisible(live, source->id)
+			if (!LiveMusicLinkSession(live)
 				|| !CapturePlaylistSong(live, *source)) {
 				reply(MusicLinkDenied());
 				return;
@@ -172,7 +166,8 @@ ControlMediaSnapshot MediaSnapshot(std::optional<ControlMediaType> requested) {
 	result.path = document->filepath();
 	result.mime = document->mimeString();
 	const auto item = current.contextId() ? document->owner().message(current.contextId()) : nullptr;
-	result.hidden = item ? item->history()->purpleHiddenFromView() : Filtering(&document->session());
+	result.hidden = (result.type != ControlMediaType::Music)
+		&& (item ? item->history()->purpleHiddenFromView() : Filtering(&document->session()));
 	if (result.hidden) return result;
 	if (const auto song = document->song()) {
 		result.title = song->title;
@@ -243,8 +238,7 @@ ControlResult LockApplication() {
 std::optional<MusicBookmark> CaptureMusicBookmark(
 		not_null<Main::Session*> session,
 		const PlaylistMessage &source) {
-	if (Core::App().passcodeLocked()
-		|| !LiveMusicLinkSession(session) || !MusicLinkVisible(session, source.id)) {
+	if (Core::App().passcodeLocked() || !LiveMusicLinkSession(session)) {
 		return std::nullopt;
 	}
 	const auto input = CapturePlaylistSong(session, source);

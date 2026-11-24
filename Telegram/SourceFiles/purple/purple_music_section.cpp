@@ -25,7 +25,6 @@
 #include "purple/purple_config.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_copy.h"
-#include "purple/purple_gate.h"
 #include "purple/purple_music_bookmark.h"
 #include "purple/purple_music_diagnostics.h"
 #include "purple/purple_music_index_service.h"
@@ -149,8 +148,7 @@ private:
 	void paintEvent(QPaintEvent *event) override;
 	[[nodiscard]] bool current() const;
 	[[nodiscard]] FilterId folder() const;
-	[[nodiscard]] std::vector<quint64> visiblePeers() const;
-	[[nodiscard]] bool visible(quint64 peer) const;
+	[[nodiscard]] bool inRoster(quint64 peer) const;
 	[[nodiscard]] bool rosterCurrent() const;
 	void reset(bool keepRows = false);
 	void refresh(bool force = false);
@@ -192,7 +190,6 @@ private:
 	QString _folderName;
 	std::optional<MusicIndexScope> _scope;
 	std::vector<quint64> _peers;
-	std::vector<quint64> _visible;
 	std::deque<Scan> _pending;
 	std::vector<MusicIndexEntry> _rows;
 	std::vector<MusicIndexEntry> _selection;
@@ -391,8 +388,6 @@ MusicSection::MusicSection(
 	data.chatsListLoadedEvents() | rpl::on_next([=](auto) {
 		_refreshTimer.callOnce(kRefreshDelay);
 	}, lifetime());
-	rpl::merge(SettingsChanges(), StateChanges(), ActiveChanges())
-		| rpl::on_next([=] { refresh(); }, lifetime());
 	MusicFolderChanges.events() | rpl::on_next([=](Main::Session *session) {
 		if (session == &this->session()) refresh();
 	}, lifetime());
@@ -496,9 +491,8 @@ FilterId MusicSection::folder() const {
 	return MusicSourceFolder(&session());
 }
 
-bool MusicSection::visible(quint64 peer) const {
-	const auto history = session().data().historyLoaded(PeerId(uint64(peer)));
-	return history && !history->purpleHiddenFromView();
+bool MusicSection::inRoster(quint64 peer) const {
+	return ranges::contains(_peers, peer);
 }
 
 bool MusicSection::rosterCurrent() const {
@@ -509,14 +503,6 @@ bool MusicSection::rosterCurrent() const {
 	if (filter == filters.end()) return false;
 	const auto peers = CaptureMusicSourceRoster(data, *filter);
 	return peers && *peers == _peers;
-}
-
-std::vector<quint64> MusicSection::visiblePeers() const {
-	auto result = std::vector<quint64>();
-	for (const auto peer : _peers) {
-		if (visible(peer)) result.push_back(peer);
-	}
-	return result;
 }
 
 void MusicSection::reset(bool keepRows) {
@@ -582,7 +568,6 @@ void MusicSection::refresh(bool force) {
 		_folder = 0;
 		_folderName.clear();
 		_peers.clear();
-		_visible.clear();
 		updateStatus();
 		return;
 	}
@@ -592,7 +577,6 @@ void MusicSection::refresh(bool force) {
 		reset();
 		_folder = selected;
 		_peers.clear();
-		_visible.clear();
 		_waitingMainDialogs = roster.waitingMainDialogs;
 		_waitingArchiveDialogs = roster.waitingArchiveDialogs;
 		_loadedMainDialogs = roster.loadedMainDialogs;
@@ -601,12 +585,7 @@ void MusicSection::refresh(bool force) {
 		requestMissingDialogs();
 		return;
 	}
-	auto nextVisible = std::vector<quint64>();
-	for (const auto peer : roster.peers) {
-		if (visible(peer)) nextVisible.push_back(peer);
-	}
 	const auto sameSource = _folder == selected && _peers == roster.peers
-		&& _visible == nextVisible
 		&& !_waitingMainDialogs && !_waitingArchiveDialogs;
 	if (sameSource && (_configuring || _savingSelection || (!force && _scope))) {
 		updateStatus();
@@ -615,7 +594,6 @@ void MusicSection::refresh(bool force) {
 	reset(sameSource);
 	_folder = selected;
 	_peers = roster.peers;
-	_visible = std::move(nextVisible);
 	_configuring = true;
 	updateStatus();
 	const auto route = _route;
@@ -634,7 +612,7 @@ void MusicSection::refresh(bool force) {
 			_scope = result.roster->scope;
 			auto queuedPeers = std::set<quint64>();
 			for (const auto &cursor : result.roster->sources) {
-				if (!visible(cursor.peer)) continue;
+				if (!inRoster(cursor.peer)) continue;
 				if (cursor.latest) {
 					_pending.push_back({ .saved = cursor, .head = true });
 					queuedPeers.insert(cursor.peer);
@@ -662,7 +640,7 @@ void MusicSection::scan() {
 		refresh();
 		return;
 	}
-	while (!_pending.empty() && !visible(_pending.front().saved.peer)) {
+	while (!_pending.empty() && !inRoster(_pending.front().saved.peer)) {
 		_pending.pop_front();
 	}
 	_offline = IsOfflineState(session());
@@ -695,7 +673,7 @@ void MusicSection::scan() {
 		if (_route != route) return;
 		_request = 0;
 		_offline = IsOfflineState(session());
-		if (rosterCurrent() && visible(next.saved.peer)) {
+		if (rosterCurrent() && inRoster(next.saved.peer)) {
 			advance(next, result);
 		} else {
 			refresh();
@@ -754,8 +732,6 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 						break;
 					case MusicSkipReason::InvalidMetadata:
 						++_skippedInvalid;
-						break;
-					case MusicSkipReason::HiddenByWorkMode:
 						break;
 					default:
 						++_skippedUnsupported;
@@ -835,21 +811,16 @@ void MusicSection::read(CatalogRead mode) {
 		refresh();
 		return;
 	}
-	const auto peers = visiblePeers();
-	if (peers != _visible) {
-		refresh();
-		return;
-	}
 	const auto query = ++_query;
 	if (mode != CatalogRead::Scan) _snapshotHeld = append;
 	_reading = true;
 	updateStatus();
 	ReadMusicIndexPage(&session(), *_scope, text,
-		peers, append ? _cursor : std::nullopt,
+		_peers, append ? _cursor : std::nullopt,
 		crl::guard(this, [=](MusicIndexPageResult result) {
 			if (query != _query || !current() || folder() != _folder) return;
 			_reading = false;
-			if (!rosterCurrent() || peers != visiblePeers()) {
+			if (!rosterCurrent()) {
 				refresh();
 				return;
 			}
@@ -899,7 +870,7 @@ void MusicSection::render() {
 	}
 	auto rows = std::vector<PlaylistSongListRow>();
 	for (const auto &track : _rows) {
-		if (!visible(track.peer)) continue;
+		if (!inRoster(track.peer)) continue;
 		rows.push_back({
 			.documentId = track.document,
 			.title = track.title,
@@ -945,7 +916,6 @@ void MusicSection::updateStatus() {
 	const auto selected = folder();
 	const auto &list = filters.list();
 	const auto filter = std::ranges::find(list, selected, &Data::ChatFilter::id);
-	const auto workModeActive = Purple::Filtering(&session());
 	auto snapshot = MusicDiagnosticsSnapshot{
 		.filtersLoaded = filters.loaded(),
 		.folderSelected = selected > 0 && !Data::IsPurpleView(selected),
@@ -957,10 +927,6 @@ void MusicSection::updateStatus() {
 		.loadedArchiveDialogs = _loadedArchiveDialogs,
 		.offline = _offline,
 		.totalChatsInFolder = int(_peers.size()),
-		.visibleChatsInFolder = int(_visible.size()),
-		.hiddenByWorkMode = std::max(0, int(_peers.size()) - int(_visible.size())),
-		.workModeActive = workModeActive,
-		.workModePreset = workModeActive ? Purple::ViewName() : QString(),
 		.configuring = _configuring,
 		.reading = _reading,
 		.scanning = _request != 0 || !_pending.empty(),
@@ -1077,7 +1043,7 @@ void MusicSection::toggleTrack(quint64 documentId) {
 		_selection.erase(selected);
 	} else {
 		const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
-		if (row != _rows.end() && visible(row->peer)) {
+		if (row != _rows.end() && inRoster(row->peer)) {
 			_selection.push_back(*row);
 		}
 	}
@@ -1104,7 +1070,7 @@ bool MusicSection::playSelection() {
 		return true;
 	}
 	auto tracks = _selection;
-	if (!std::ranges::all_of(tracks, [=](const auto &entry) { return visible(entry.peer); })) {
+	if (!std::ranges::all_of(tracks, [=](const auto &entry) { return inRoster(entry.peer); })) {
 		refresh();
 		return true;
 	}
@@ -1197,7 +1163,7 @@ void MusicSection::play(quint64 documentId) {
 		return;
 	}
 	const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
-	if (row == _rows.end() || !visible(row->peer)) return;
+	if (row == _rows.end() || !inRoster(row->peer)) return;
 	const auto entry = *row;
 	const auto route = _route;
 	_resolver = std::make_unique<DesktopPlaylistResolver>(
@@ -1217,7 +1183,7 @@ void MusicSection::copyOrgLink(quint64 documentId) {
 	if (!rosterCurrent() || !isVisible()
 		|| _displayedSearch != _search->getLastText().trimmed()) return;
 	const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
-	if (row == _rows.end() || !visible(row->peer)) return;
+	if (row == _rows.end() || !inRoster(row->peer)) return;
 	_snapshotHeld = true;
 	const auto entry = *row;
 	const auto route = _route;
@@ -1234,7 +1200,7 @@ void MusicSection::copyOrgLink(quint64 documentId) {
 			const auto item = session().data().message(source.id);
 			const auto bookmark = (results.size() == 1
 					&& results.front().status == PlaylistSongStatus::Ready
-					&& visible(entry.peer) && item
+					&& inRoster(entry.peer) && item
 					&& (CopyRestrictionsDisabled() || item->allowsForward()))
 				? CaptureMusicBookmark(&session(), source)
 				: std::nullopt;
@@ -1286,7 +1252,7 @@ PlaylistResolveSong MusicSection::resolveSong(const MusicIndexEntry &entry) cons
 std::optional<PlaylistAddSongInput> MusicSection::captureTrack(
 		const MusicIndexEntry &entry) const {
 	const auto id = FullMsgId(PeerId(uint64(entry.peer)), MsgId(entry.message));
-	return visible(entry.peer)
+	return inRoster(entry.peer)
 		? CapturePlaylistSong(&session(), { id, entry.document })
 		: std::nullopt;
 }

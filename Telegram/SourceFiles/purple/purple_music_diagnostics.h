@@ -8,7 +8,6 @@ namespace Purple {
 enum class MusicSkipReason {
 	None,
 	NotSong,
-	HiddenByWorkMode,
 	ProtectedContent,
 	InvalidMetadata,
 	Unavailable,
@@ -26,10 +25,6 @@ struct MusicDiagnosticsSnapshot {
 	int loadedArchiveDialogs = 0;
 	bool offline = false;
 	int totalChatsInFolder = 0;
-	int visibleChatsInFolder = 0;
-	int hiddenByWorkMode = 0;
-	bool workModeActive = false;
-	QString workModePreset;
 	bool configuring = false;
 	bool reading = false;
 	bool scanning = false;
