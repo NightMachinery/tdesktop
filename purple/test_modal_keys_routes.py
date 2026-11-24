@@ -262,6 +262,7 @@ for action, chord in (
     ("TopicCreate", "SPC b c"),
     ("TopicParent", "SPC b h"),
     ("TopicParent", "g ^"),
+    ("NoticeHistory", "SPC h e"),
 ):
     bound(action, chord)
 for index in range(1, 7):
@@ -312,6 +313,12 @@ keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
 ordered(keys_ui, "class TopicPickerLayer final", "refreshFromSource", "requestMore", "maybeRequestMore")
+ordered(keys_ui, "class NoticeLayer final", "class NoticeHistoryLayer final",
+        "CreateNoticeLayer", "CreateNoticeHistoryLayer")
+notices_cpp = read("purple/purple_notices.cpp")
+ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
+        "ResolveNoticePeerLabel", "PickerVisible",
+        "ShowPurpleNotice", "ShowPurpleAck", "MaybeFlushPendingNotices", "OpenPurpleNoticeHistory")
 
 privacy = read("purple/purple_privacy_screen.cpp")
 ordered(privacy, "ShouldFetchWeather", "Accept-Language")

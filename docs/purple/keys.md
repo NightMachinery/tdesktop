@@ -218,6 +218,22 @@ on the modal status line and cheatsheet footer.
   `, b` toggles the last viewed topic, `SPC b c` / `, c` creates a new forum
   topic or reserves a new bot thread, and `SPC b h` / `, h` / `g ^` opens or
   closes the parent topic list.
+- **Evil notices and notice history (`SPC h e`):** when modal keys are enabled,
+  detailed Purple notices (such as settings-file reload impacts, sync-chat
+  problems, archive recovery warnings, and actionable errors) open in a modal
+  notice layer (`j`/`k`/`gg`/`G` scroll, `Tab` or `h`/`l` between buttons,
+  `o`/`RET` open settings/action, `y` copy, `?` help, `q`/`Esc` close) with
+  readable before/after values and same-account local chat-name resolution
+  (chats hidden by Work Mode fall back to their raw ID). Background notices
+  never steal typing during Insert mode, IME preedit, a pending prefix, or
+  another open layer: they coalesce repeats, show only a status-line cue, and
+  open on return to Normal. Short acknowledgements and single-line errors go to
+  the modal status line (transient bar in Zen, or stock toast fallback when
+  covered by an open box), with errors staying longer and soft screen-time
+  budget notices showing a persistent status cue. `SPC h e` reopens recent
+  per-account notices in a memory-only `*Messages*` list that clears on logout
+  and is unavailable while passcode-locked or under the privacy screen. When
+  modal keys are off, stock toasts stay unchanged.
 
 ## Upstream hooks
 

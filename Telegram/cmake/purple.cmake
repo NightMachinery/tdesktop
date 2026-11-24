@@ -181,6 +181,8 @@ PRIVATE
     purple/purple_keys_unread.h
     purple/purple_keys_zen.h
     purple/purple_notice_state.h
+    purple/purple_notices.cpp
+    purple/purple_notices.h
     purple/purple_privacy_screen.cpp
     purple/purple_privacy_screen.h
     purple/purple_privacy_state.h

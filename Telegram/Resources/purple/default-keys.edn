@@ -35,6 +35,7 @@
   "SPC h b" :keys-help
   "SPC h k" :key-describe
   "SPC h f" :command-describe
+  "SPC h e" :notice-history
   "SPC h s" :stock-shortcuts
   "SPC h r" :reload-keymap
   ":"       :command-search

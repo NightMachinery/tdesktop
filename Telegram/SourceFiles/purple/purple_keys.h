@@ -1,6 +1,11 @@
 #pragma once
 
+#include "purple/purple_notice_state.h"
+
 #include <QtCore/QRect>
+#include <QtCore/QString>
+
+#include <memory>
 
 class MainWindow;
 class QEvent;
@@ -39,5 +44,19 @@ void InstallMainMenuKeys(
 	not_null<Ui::SlideWrap<Ui::RpWidget>*> accounts);
 
 void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder);
+
+[[nodiscard]] bool ModalKeysEnabled();
+[[nodiscard]] ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window);
+void SetModalStatusMessage(
+	MainWindow *window,
+	QString text,
+	bool isError,
+	int durationMs,
+	bool persistent);
+void RefreshModalNoticeIndicator(MainWindow *window);
+void ShowModalNoticeLayer(
+	not_null<MainWindow*> window,
+	std::unique_ptr<Ui::LayerWidget> layer,
+	bool isHistory);
 
 } // namespace Purple

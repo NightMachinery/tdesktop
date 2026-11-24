@@ -5,6 +5,7 @@
 #include "data/data_types.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_unread.h"
+#include "purple/purple_notice_state.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/rp_widget.h"
 
@@ -224,5 +225,26 @@ struct TopicPickerConfig {
 
 [[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateTopicPickerLayer(
 	TopicPickerConfig config);
+
+struct NoticeLayerConfig {
+	ModalNotices::NoticeRecord record;
+	QString primaryActionLabel;
+	Fn<void()> onPrimaryAction;
+	Fn<void()> onCopy;
+};
+
+[[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateNoticeLayer(
+	NoticeLayerConfig config);
+
+struct NoticeHistoryConfig {
+	QString accountLabel;
+	std::vector<ModalNotices::NoticeRecord> items;
+	Fn<void(ModalNotices::NoticeRecord)> onInspect;
+	Fn<void(QString)> onCopy;
+	Fn<void()> onClear;
+};
+
+[[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateNoticeHistoryLayer(
+	NoticeHistoryConfig config);
 
 } // namespace Purple::ModalUi

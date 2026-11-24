@@ -50,6 +50,7 @@
 #include "purple/purple_keys_zen.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_playlists_box.h"
 #include "purple/purple_privacy_screen.h"
@@ -85,6 +86,8 @@
 #include <QtCore/QTimer>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
+#include <QtGui/QTextBlock>
+#include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 
@@ -315,6 +318,7 @@ enum class Action {
 	Run,
 	DescribeChord,
 	DescribeCommand,
+	NoticeHistory,
 	StockShortcuts,
 	ReloadKeymap,
 };
@@ -513,6 +517,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_describe_key(tr::now); } },
 	{ Action::DescribeCommand, "command-describe", "help", "",
 		[] { return tr::lng_purple_keys_describe_command(tr::now); } },
+	{ Action::NoticeHistory, "notice-history", "help", "Unavailable while locked or private",
+		[] { return u"Recent notices (*Messages*)"_q; } },
 	{ Action::StockShortcuts, "stock-shortcuts", "help", "",
 		[] { return u"Telegram stock shortcuts"_q; } },
 	{ Action::ReloadKeymap, "reload-keymap", "help", "",
@@ -1488,6 +1494,10 @@ bool Available(Action action, const Target &target) {
 		return ActiveForum(target) != nullptr;
 	case Action::TopicCreate:
 		return CanCreateTopicInForum(ActiveForum(target));
+	case Action::NoticeHistory:
+		return target.controller != nullptr
+			&& !Core::App().passcodeLocked()
+			&& !Purple::PrivacyScreenActiveAny();
 	default: return true;
 	}
 }
@@ -1608,6 +1618,10 @@ public:
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
 	void raiseChrome();
+	[[nodiscard]] ModalNotices::DeliveryContext deliveryContext() const;
+	void setStatusMessage(QString text, bool isError, int durationMs, bool persistent);
+	void refreshNoticeIndicator();
+	void showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistory);
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
@@ -1626,7 +1640,8 @@ private:
 	void clearPrefix();
 	void enterNormal(bool silent = true);
 	void enterInsert(bool silent = true);
-	void showFeedback(QString text, bool isError = false);
+	void showFeedback(QString text, bool isError = false, int durationMs = 0);
+	void schedulePendingNoticeFlush();
 	void scheduleUnreadRefresh();
 	void refreshUnreadSummary();
 	void setZenMode(bool enabled);
@@ -1677,11 +1692,16 @@ private:
 		StockShortcuts,
 		UnreadBuffer,
 		TopicPicker,
+		Notice,
+		NoticeHistory,
 	};
 	ActiveLayer _activeLayer = ActiveLayer::None;
+	QPointer<Ui::LayerWidget> _noticeLayer;
 	bool _describeKeyHasDetails = false;
 	QString _feedbackText;
 	bool _feedbackError = false;
+	QString _persistentCue;
+	bool _flushScheduled = false;
 	QRect _lastBody;
 	uint64 _revision = 0;
 	rpl::lifetime _sessionLifetime;
@@ -1747,18 +1767,32 @@ Keys::Keys(not_null<MainWindow*> window)
 		});
 
 	Core::App().passcodeLockValue() | rpl::on_next([=](bool locked) {
-		if (locked && _zenMode) {
-			setZenMode(false);
+		if (locked) {
+			if (_zenMode) {
+				setZenMode(false);
+			}
+			if (_noticeLayer) {
+				_noticeLayer->closeLayer();
+			}
 		}
 		clearPrefix();
 		_window->updateControlsGeometry();
 		refreshStatusBar();
+		if (!locked) {
+			schedulePendingNoticeFlush();
+		}
 	}, _lifetime);
 
-	Purple::PrivacyScreenChanges() | rpl::on_next([=](bool) {
+	Purple::PrivacyScreenChanges() | rpl::on_next([=](bool active) {
+		if (active && _noticeLayer) {
+			_noticeLayer->closeLayer();
+		}
 		clearPrefix();
 		_window->updateControlsGeometry();
 		refreshStatusBar();
+		if (!active) {
+			schedulePendingNoticeFlush();
+		}
 	}, _lifetime);
 
 	EnabledChanges.events() | rpl::on_next([=](bool enabled) {
@@ -1787,6 +1821,9 @@ Keys::Keys(not_null<MainWindow*> window)
 		}
 		clearPrefix();
 		refreshStatusBar();
+		if (!shown) {
+			schedulePendingNoticeFlush();
+		}
 	}, _lifetime);
 
 	window->controller().sessionControllerValue(
@@ -2022,10 +2059,101 @@ bool Keys::ownsChatListFocus() const {
 		&& currentTarget(QApplication::focusWidget()).list;
 }
 
-void Keys::showFeedback(QString text, bool isError) {
+void Keys::showFeedback(QString text, bool isError, int durationMs) {
 	_feedbackText = std::move(text);
 	_feedbackError = isError;
-	_feedbackTimer.start(isError ? 7000 : kFeedbackDurationMs);
+	const auto ms = (durationMs > 0) ? durationMs : (isError ? 7000 : kFeedbackDurationMs);
+	_feedbackTimer.start(ms);
+	refreshStatusBar();
+}
+
+void Keys::schedulePendingNoticeFlush() {
+	if (_flushScheduled) {
+		return;
+	}
+	_flushScheduled = true;
+	const auto guard = QPointer(this);
+	QTimer::singleShot(0, this, [guard] {
+		if (!guard) {
+			return;
+		}
+		guard->_flushScheduled = false;
+		Purple::MaybeFlushPendingNotices(guard->_window);
+	});
+}
+
+ModalNotices::DeliveryContext Keys::deliveryContext() const {
+	const auto focus = windowFocusWidget();
+	const auto target = activeTarget();
+	const auto inForeignInput = focus
+		&& !target.focus
+		&& focus->testAttribute(Qt::WA_InputMethodEnabled);
+	auto hasPreedit = false;
+	if (const auto te = qobject_cast<QTextEdit*>(focus)) {
+		if (const auto layout = te->textCursor().block().layout()) {
+			hasPreedit = !layout->preeditAreaText().isEmpty();
+		}
+	}
+	const auto hasBox = _window->controller().isLayerShown()
+		|| _activeLayer != ActiveLayer::None
+		|| QApplication::activePopupWidget() != nullptr
+		|| QApplication::activeModalWidget() != nullptr;
+	return {
+		.modalEnabled = Enabled(),
+		.passcodeLocked = Core::App().passcodeLocked() || _window->controller().locked(),
+		.privacyScreenActive = Purple::PrivacyScreenActiveAny() || Purple::PrivacyScreenActive(_window),
+		.inInsertMode = !_normal || inForeignInput,
+		.hasImePreedit = hasPreedit,
+		.hasPendingPrefix = !_prefix.empty() || _count > 0 || _inspect || _hints.active(),
+		.hasBlockingLayerOrBox = hasBox,
+		.inZenMode = _zenMode,
+		.statusBarVisible = chromeVisible() && !_zenMode && !hasBox,
+	};
+}
+
+void Keys::setStatusMessage(
+		QString text,
+		bool isError,
+		int durationMs,
+		bool persistent) {
+	if (persistent) {
+		_persistentCue = text;
+		if (_zenMode) {
+			showFeedback(std::move(text), false, ModalNotices::kAckDurationInfoMs);
+		} else {
+			refreshStatusBar();
+		}
+		return;
+	}
+	showFeedback(std::move(text), isError, durationMs);
+}
+
+void Keys::refreshNoticeIndicator() {
+	refreshStatusBar();
+}
+
+void Keys::showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistory) {
+	if (!layer) {
+		return;
+	}
+	const auto guard = QPointer(this);
+	const auto kind = isHistory ? ActiveLayer::NoticeHistory : ActiveLayer::Notice;
+	_activeLayer = kind;
+	_noticeLayer = layer.get();
+	layer->lifetime().add([guard, kind] {
+		if (!guard) {
+			return;
+		}
+		if (guard->_activeLayer == kind) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->refreshStatusBar();
+			guard->schedulePendingNoticeFlush();
+		}
+	});
+	_window->showOrHideBoxOrLayer(
+		std::move(layer),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
 	refreshStatusBar();
 }
 
@@ -2352,6 +2480,7 @@ void Keys::enterNormal(bool silent) {
 	} else {
 		refreshStatusBar();
 	}
+	schedulePendingNoticeFlush();
 }
 
 void Keys::enterInsert(bool silent) {
@@ -2472,6 +2601,18 @@ void Keys::refreshStatusBar() {
 			state.paneLabel = u"Forum / Bot Topics"_q;
 			state.rightCue = u"j/k move  ·  RET open  ·  / filter  ·  u unread  ·  q close"_q;
 			break;
+		case ActiveLayer::Notice:
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"NOTICE"_q;
+			state.paneLabel = u"Purple Notice"_q;
+			state.rightCue = u"j/k scroll  ·  TAB/h/l buttons  ·  o/RET open  ·  y copy  ·  ? help  ·  q close"_q;
+			break;
+		case ActiveLayer::NoticeHistory:
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"MESSAGES"_q;
+			state.paneLabel = u"Notice History (SPC h e)"_q;
+			state.rightCue = u"j/k move  ·  RET/o open  ·  / filter  ·  y copy  ·  c clear  ·  q close"_q;
+			break;
 		case ActiveLayer::None:
 			break;
 		}
@@ -2541,6 +2682,14 @@ void Keys::refreshStatusBar() {
 	} else if (!Keymap().error.isEmpty()) {
 		state.message = u"keys.edn invalid (defaults active): "_q + Keymap().error;
 		state.messageIsError = true;
+	} else if (const auto pendingNotices = Purple::PendingPurpleNoticeCount(
+			_window->controller().maybeSession());
+		pendingNotices > 0) {
+		state.message = (pendingNotices == 1)
+			? u"1 notice waiting (SPC h e)"_q
+			: u"%1 notices waiting (SPC h e)"_q.arg(pendingNotices);
+	} else if (!_persistentCue.isEmpty()) {
+		state.message = _persistentCue;
 	}
 
 	state.localleaderHint = u"SPC leader  ·  "_q + FirstLocalleaderLabel() + u" local"_q;
@@ -3300,6 +3449,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		ShowKeysLegend(&_window->controller());
 		refreshStatusBar();
 		break;
+	case Action::NoticeHistory:
+		clearPrefix();
+		Purple::OpenPurpleNoticeHistory(_window);
+		break;
 	case Action::ReloadKeymap:
 		ReloadKeymapStore();
 		showFeedback(Keymap().error.isEmpty()
@@ -3530,6 +3683,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		modes.rows.push_back({ .chords = { { u"DEL"_q } }, .label = u"Back up one key in prefix"_q });
 		pushRow(modes.rows, rowFor(Action::DescribeChord, u"Describe a key sequence"_q, 1));
 		pushRow(modes.rows, rowFor(Action::DescribeCommand, u"Describe any command"_q, 1));
+		pushRow(modes.rows, rowFor(Action::NoticeHistory, u"Recent notices (*Messages*)"_q, 1));
 		pushRow(modes.rows, rowFor(Action::Help, u"All active bindings"_q, 1));
 		pushRow(modes.rows, rowFor(Action::StockShortcuts, u"Stock Telegram shortcuts"_q, 1));
 		pushRow(modes.rows, rowFor(Action::ReloadKeymap, u"Reload keys.edn"_q, 1));
@@ -4085,6 +4239,60 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {
 	}
 	builder.addDividerText(tr::lng_purple_keys_settings_hint());
 	builder.addSkip();
+}
+
+bool ModalKeysEnabled() {
+	return Enabled();
+}
+
+ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window) {
+	if (!window) {
+		return {
+			.modalEnabled = Enabled(),
+			.passcodeLocked = Core::App().passcodeLocked(),
+			.privacyScreenActive = Purple::PrivacyScreenActiveAny(),
+		};
+	}
+	if (const auto keys = FindKeys(window)) {
+		return keys->deliveryContext();
+	}
+	return {
+		.modalEnabled = Enabled(),
+		.passcodeLocked = Core::App().passcodeLocked() || window->controller().locked(),
+		.privacyScreenActive = Purple::PrivacyScreenActiveAny() || Purple::PrivacyScreenActive(window),
+	};
+}
+
+void SetModalStatusMessage(
+		MainWindow *window,
+		QString text,
+		bool isError,
+		int durationMs,
+		bool persistent) {
+	if (!window) {
+		return;
+	}
+	if (const auto keys = FindKeys(window)) {
+		keys->setStatusMessage(std::move(text), isError, durationMs, persistent);
+	}
+}
+
+void RefreshModalNoticeIndicator(MainWindow *window) {
+	if (!window) {
+		return;
+	}
+	if (const auto keys = FindKeys(window)) {
+		keys->refreshNoticeIndicator();
+	}
+}
+
+void ShowModalNoticeLayer(
+		not_null<MainWindow*> window,
+		std::unique_ptr<Ui::LayerWidget> layer,
+		bool isHistory) {
+	if (const auto keys = EnsureKeys(window)) {
+		keys->showNoticeLayer(std::move(layer), isHistory);
+	}
 }
 
 } // namespace Purple

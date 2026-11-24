@@ -3432,6 +3432,1005 @@ private:
 	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
 };
 
+// ---------------------------------------------------------------------------
+// NoticeLayer & NoticeHistoryLayer (w-991c evil notices + SPC h e *Messages*)
+// ---------------------------------------------------------------------------
+
+[[nodiscard]] QColor SeverityColor(ModalNotices::NoticeSeverity severity) {
+	switch (severity) {
+	case ModalNotices::NoticeSeverity::Info: return st::windowActiveTextFg->c;
+	case ModalNotices::NoticeSeverity::Warning: return BadgeColor(BadgeKind::DescribeKey);
+	case ModalNotices::NoticeSeverity::Error: return st::attentionButtonFg->c;
+	}
+	return st::windowActiveTextFg->c;
+}
+
+[[nodiscard]] QString SeverityBadgeText(ModalNotices::NoticeSeverity severity) {
+	switch (severity) {
+	case ModalNotices::NoticeSeverity::Info: return u"NOTICE"_q;
+	case ModalNotices::NoticeSeverity::Warning: return u"WARNING"_q;
+	case ModalNotices::NoticeSeverity::Error: return u"ERROR"_q;
+	}
+	return u"NOTICE"_q;
+}
+
+class NoticeBodyWidget final : public Ui::RpWidget {
+public:
+	NoticeBodyWidget(not_null<QWidget*> parent, ModalNotices::NoticeRecord record)
+	: RpWidget(parent)
+	, _record(std::move(record)) {
+	}
+
+	void relayout(int w) {
+		const auto usable = std::max(160, w);
+		if (width() == usable && _laidOut) {
+			return;
+		}
+		_laidOut = true;
+		const auto h = computeHeight(usable);
+		resize(usable, std::max(64, h));
+		update();
+	}
+
+protected:
+	void paintEvent(QPaintEvent *) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto rtl = IsRtl(this);
+		const auto hAlign = rtl ? Qt::AlignRight : Qt::AlignLeft;
+		const auto mono = MonoFont(11, false);
+		const auto badgeFont = MonoFont(10, true);
+		constexpr auto kPadX = 18;
+		const auto contentW = std::max(120, width() - 2 * kPadX);
+		auto y = 12;
+
+		if (!_record.summary.isEmpty()) {
+			const auto fm = QFontMetrics(st::normalFont);
+			const auto flags = hAlign | Qt::TextWordWrap;
+			const auto br = fm.boundingRect(QRect(0, 0, contentW, 10000), flags, _record.summary);
+			p.setFont(st::normalFont);
+			p.setPen(st::windowFg);
+			p.drawText(QRect(kPadX, y, contentW, br.height() + 4), flags, _record.summary);
+			y += br.height() + 14;
+		}
+
+		for (const auto &row : _record.rows) {
+			const auto rowH = measureRowHeight(row, contentW);
+			const auto card = QRect(kPadX, y, contentW, rowH);
+			const auto accent = row.isWarning
+				? BadgeColor(BadgeKind::DescribeKey)
+				: (row.isInactive ? st::windowSubTextFg->c : st::windowActiveTextFg->c);
+			auto bg = BlendColor(st::windowBg->c, st::windowBgOver->c, row.isWarning ? 0.45 : 0.30);
+			p.setPen(QPen(st::boxDividerBg->c, 1));
+			p.setBrush(bg);
+			p.drawRoundedRect(QRectF(card).adjusted(.5, .5, -.5, -.5), 7, 7);
+
+			// Leading accent stripe.
+			const auto stripe = rtl
+				? QRect(card.right() - 2, card.top() + 5, 3, card.height() - 10)
+				: QRect(card.left(), card.top() + 5, 3, card.height() - 10);
+			p.setPen(Qt::NoPen);
+			p.setBrush(accent);
+			p.drawRoundedRect(stripe, 1.5, 1.5);
+
+			auto innerY = card.top() + 8;
+			const auto innerX = card.left() + 12;
+			const auto innerW = std::max(80, card.width() - 24);
+
+			auto tagW = 0;
+			if (!row.tag.isEmpty()) {
+				tagW = std::min(160, MeasureTextWidth(badgeFont, row.tag) + 12);
+				const auto tx = rtl ? innerX : (innerX + innerW - tagW);
+				const auto tagRect = QRect(tx, innerY, tagW, 18);
+				auto tFill = accent;
+				tFill.setAlpha(28);
+				p.setPen(Qt::NoPen);
+				p.setBrush(tFill);
+				p.drawRoundedRect(tagRect, 5, 5);
+				p.setFont(badgeFont);
+				p.setPen(accent);
+				p.drawText(tagRect, Qt::AlignCenter, ElideText(badgeFont, row.tag, tagW - 8));
+			}
+
+			if (!row.label.isEmpty()) {
+				const auto lw = std::max(60, innerW - (tagW > 0 ? (tagW + 8) : 0));
+				const auto lx = rtl ? (innerX + (tagW > 0 ? (tagW + 8) : 0)) : innerX;
+				const auto fm = QFontMetrics(st::semiboldFont);
+				const auto br = fm.boundingRect(QRect(0, 0, lw, 4000), hAlign | Qt::TextWordWrap, row.label);
+				p.setFont(st::semiboldFont);
+				p.setPen(row.isInactive ? st::windowSubTextFg : st::windowFg);
+				p.drawText(QRect(lx, innerY, lw, br.height() + 2), hAlign | Qt::TextWordWrap, row.label);
+				innerY += std::max(20, br.height() + 4);
+			} else if (tagW > 0) {
+				innerY += 22;
+			}
+
+			if (!row.before.isEmpty() || !row.after.isEmpty()) {
+				const auto valText = row.before + u"  ->  "_q + row.after;
+				const auto fm = QFontMetrics(mono);
+				const auto br = fm.boundingRect(QRect(0, 0, innerW, 4000), hAlign | Qt::TextWordWrap, valText);
+				p.setFont(mono);
+				p.setPen(row.isInactive ? st::windowSubTextFg : st::windowActiveTextFg);
+				p.drawText(QRect(innerX, innerY, innerW, br.height() + 2), hAlign | Qt::TextWordWrap, valText);
+				innerY += br.height() + 4;
+			}
+
+			if (!row.detail.isEmpty()) {
+				const auto fm = QFontMetrics(st::normalFont);
+				const auto br = fm.boundingRect(QRect(0, 0, innerW, 4000), hAlign | Qt::TextWordWrap, row.detail);
+				p.setFont(st::normalFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(QRect(innerX, innerY, innerW, br.height() + 2), hAlign | Qt::TextWordWrap, row.detail);
+			}
+
+			y += rowH + 8;
+		}
+	}
+
+private:
+	[[nodiscard]] int measureRowHeight(const ModalNotices::NoticeRow &row, int contentW) const {
+		const auto innerW = std::max(80, contentW - 24);
+		const auto badgeFont = MonoFont(10, true);
+		const auto mono = MonoFont(11, false);
+		auto h = 16;
+		const auto tagW = row.tag.isEmpty() ? 0 : std::min(160, MeasureTextWidth(badgeFont, row.tag) + 12);
+		if (!row.label.isEmpty()) {
+			const auto lw = std::max(60, innerW - (tagW > 0 ? (tagW + 8) : 0));
+			const auto br = QFontMetrics(st::semiboldFont).boundingRect(
+				QRect(0, 0, lw, 4000), Qt::AlignLeft | Qt::TextWordWrap, row.label);
+			h += std::max(20, br.height() + 4);
+		} else if (tagW > 0) {
+			h += 22;
+		}
+		if (!row.before.isEmpty() || !row.after.isEmpty()) {
+			const auto valText = row.before + u"  ->  "_q + row.after;
+			const auto br = QFontMetrics(mono).boundingRect(
+				QRect(0, 0, innerW, 4000), Qt::AlignLeft | Qt::TextWordWrap, valText);
+			h += br.height() + 4;
+		}
+		if (!row.detail.isEmpty()) {
+			const auto br = QFontMetrics(st::normalFont).boundingRect(
+				QRect(0, 0, innerW, 4000), Qt::AlignLeft | Qt::TextWordWrap, row.detail);
+			h += br.height() + 4;
+		}
+		return std::max(38, h);
+	}
+
+	[[nodiscard]] int computeHeight(int w) const {
+		constexpr auto kPadX = 18;
+		const auto contentW = std::max(120, w - 2 * kPadX);
+		auto y = 12;
+		if (!_record.summary.isEmpty()) {
+			const auto br = QFontMetrics(st::normalFont).boundingRect(
+				QRect(0, 0, contentW, 10000), Qt::AlignLeft | Qt::TextWordWrap, _record.summary);
+			y += br.height() + 14;
+		}
+		for (const auto &row : _record.rows) {
+			y += measureRowHeight(row, contentW) + 8;
+		}
+		return y + 8;
+	}
+
+	ModalNotices::NoticeRecord _record;
+	bool _laidOut = false;
+};
+
+class NoticeLayer final : public Ui::LayerWidget {
+public:
+	explicit NoticeLayer(NoticeLayerConfig config)
+	: _config(std::move(config))
+	, _close(Ui::CreateChild<Ui::IconButton>(this, st::boxTitleClose))
+	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
+		setFocusPolicy(Qt::StrongFocus);
+		setMouseTracking(true);
+		_close->setClickedCallback([=] { closeLayer(); });
+
+		if (!_config.primaryActionLabel.isEmpty() && _config.onPrimaryAction) {
+			_buttons.push_back({ ButtonKind::Primary, _config.primaryActionLabel });
+		}
+		_buttons.push_back({ ButtonKind::Copy, u"Copy"_q });
+		_buttons.push_back({ ButtonKind::Close, u"Close"_q });
+		_focusedButton = 0;
+
+		auto body = object_ptr<NoticeBodyWidget>(_scroll, _config.record);
+		_body = body.data();
+		_scroll->setOwnedWidget(std::move(body));
+	}
+
+protected:
+	void doSetInnerFocus() override {
+		setFocus();
+	}
+
+	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
+		const auto parentSize = parentWidget()->size();
+		const auto w = std::min(parentSize.width() - 32, 680);
+		if (_body) {
+			_body->relayout(w);
+		}
+		constexpr auto kHeaderH = 54;
+		constexpr auto kActionsH = 52;
+		const auto helpH = _showHelp ? 34 : 0;
+		const auto bodyH = _body ? _body->height() : 120;
+		const auto maxBodyH = std::max(140, int(parentSize.height() * 0.62) - kHeaderH - kActionsH - helpH);
+		const auto h = std::min(parentSize.height() - 48, kHeaderH + std::min(bodyH, maxBodyH) + helpH + kActionsH);
+		setGeometry((parentSize.width() - w) / 2, (parentSize.height() - h) / 2, w, h);
+	}
+
+	void resizeEvent(QResizeEvent *e) override {
+		LayerWidget::resizeEvent(e);
+		constexpr auto kHeaderH = 54;
+		constexpr auto kActionsH = 52;
+		const auto helpH = _showHelp ? 34 : 0;
+		if (IsRtl(this)) {
+			_close->move(12, (kHeaderH - _close->height()) / 2);
+		} else {
+			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
+		}
+		_scroll->setGeometry(0, kHeaderH, width(), std::max(60, height() - kHeaderH - kActionsH - helpH));
+		if (_body) {
+			_body->relayout(_scroll->width());
+		}
+		layoutButtonRects();
+	}
+
+	void mouseMoveEvent(QMouseEvent *e) override {
+		auto next = -1;
+		for (auto i = 0; i < int(_buttonRects.size()); ++i) {
+			if (_buttonRects[i].contains(e->pos())) {
+				next = i;
+				break;
+			}
+		}
+		if (next != _hoveredButton) {
+			_hoveredButton = next;
+			setCursor((next >= 0) ? style::cur_pointer : style::cur_default);
+			update();
+		}
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		for (auto i = 0; i < int(_buttonRects.size()); ++i) {
+			if (_buttonRects[i].contains(e->pos())) {
+				_focusedButton = i;
+				activateButton(i);
+				return;
+			}
+		}
+		LayerWidget::mousePressEvent(e);
+	}
+
+	void keyPressEvent(QKeyEvent *e) override {
+		if (_closing) {
+			return;
+		}
+		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
+		const auto key = PhysicalKeyForNav(*e);
+		if (_pendingG) {
+			_pendingG = false;
+			if (key == Qt::Key_G && !mods) {
+				_scroll->scrollToY(0);
+				return;
+			}
+		}
+		if (key == Qt::Key_Escape
+			|| (key == Qt::Key_Q && !mods)
+			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+			closeLayer();
+			return;
+		} else if (key == Qt::Key_Question || (key == Qt::Key_Slash && mods == Qt::ShiftModifier)) {
+			_showHelp = !_showHelp;
+			parentResized();
+			update();
+			return;
+		} else if (key == Qt::Key_G && !mods) {
+			_pendingG = true;
+			return;
+		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
+			_scroll->scrollToY(_scroll->scrollTopMax());
+			return;
+		} else if (key == Qt::Key_J && !mods) {
+			scrollBy(44);
+			return;
+		} else if (key == Qt::Key_K && !mods) {
+			scrollBy(-44);
+			return;
+		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
+			scrollBy(44);
+			return;
+		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
+			scrollBy(-44);
+			return;
+		} else if (key == Qt::Key_Tab && !mods) {
+			moveButton(1);
+			return;
+		} else if (key == Qt::Key_Backtab || (key == Qt::Key_Tab && mods == Qt::ShiftModifier)) {
+			moveButton(-1);
+			return;
+		} else if ((key == Qt::Key_L && !mods) || key == Qt::Key_Right) {
+			moveButton(IsRtl(this) ? -1 : 1);
+			return;
+		} else if ((key == Qt::Key_H && !mods) || key == Qt::Key_Left) {
+			moveButton(IsRtl(this) ? 1 : -1);
+			return;
+		} else if (key == Qt::Key_O && !mods) {
+			for (auto i = 0; i < int(_buttons.size()); ++i) {
+				if (_buttons[i].kind == ButtonKind::Primary) {
+					activateButton(i);
+					return;
+				}
+			}
+			return;
+		} else if (key == Qt::Key_Y && !mods) {
+			triggerCopy();
+			return;
+		} else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+			activateButton(_focusedButton);
+			return;
+		}
+		LayerWidget::keyPressEvent(e);
+	}
+
+	void paintEvent(QPaintEvent *) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		_roundRect.paint(p, rect());
+
+		p.setPen(QPen(st::boxDividerBg->c, 1));
+		p.setBrush(Qt::NoBrush);
+		p.drawRoundedRect(QRectF(rect()).adjusted(.5, .5, -.5, -.5), st::boxRadius, st::boxRadius);
+
+		constexpr auto kHeaderH = 54;
+		constexpr auto kActionsH = 52;
+		const auto helpH = _showHelp ? 34 : 0;
+		const auto rtl = IsRtl(this);
+		const auto mono = MonoFont(10, true);
+
+		// Severity badge.
+		const auto sevColor = SeverityColor(_config.record.severity);
+		auto sevText = SeverityBadgeText(_config.record.severity);
+		if (_config.record.repeatCount > 1) {
+			sevText += u" x%1"_q.arg(_config.record.repeatCount);
+		}
+		const auto bw = MeasureTextWidth(mono, sevText) + 12;
+		const auto bx = rtl ? (_close->x() + _close->width() + 10) : (_close->x() - 10 - bw);
+		const auto bRect = QRect(bx, (kHeaderH - 22) / 2, bw, 22);
+		auto bFill = sevColor;
+		bFill.setAlpha(28);
+		p.setPen(Qt::NoPen);
+		p.setBrush(bFill);
+		p.drawRoundedRect(bRect, 6, 6);
+		p.setFont(mono);
+		p.setPen(sevColor);
+		p.drawText(bRect, Qt::AlignCenter, sevText);
+
+		// Title = account + scope.
+		const auto titleW = std::max(80, width() - bw - _close->width() - 48);
+		const auto titleX = rtl ? (bx + bw + 10) : 18;
+		p.setFont(st::keysLegendHeaderStyle.font);
+		p.setPen(st::windowFg);
+		p.drawText(
+			QRect(titleX, 0, titleW, kHeaderH),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+			ElideText(st::keysLegendHeaderStyle.font, _config.record.formattedTitle(), titleW));
+		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
+
+		// Optional ? help strip.
+		if (_showHelp) {
+			const auto helpRect = QRect(0, height() - kActionsH - helpH, width(), helpH);
+			p.fillRect(helpRect, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
+			p.fillRect(0, helpRect.top(), width(), 1, st::boxDividerBg->c);
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			const auto helpText = u"j/k/gg/G scroll  ·  TAB or h/l buttons  ·  o/RET open  ·  y copy  ·  q/ESC close  ·  ? hide help"_q;
+			p.drawText(
+				helpRect.adjusted(16, 0, -16, 0),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				ElideText(st::normalFont, helpText, width() - 32));
+		}
+
+		// Footer actions bar.
+		const auto actionsTop = height() - kActionsH;
+		p.fillRect(0, actionsTop, width(), kActionsH, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.35));
+		p.fillRect(0, actionsTop, width(), 1, st::boxDividerBg->c);
+
+		if (!_copiedCue.isEmpty()) {
+			p.setFont(st::semiboldFont);
+			p.setPen(BadgeColor(BadgeKind::Normal));
+			p.drawText(
+				QRect(16, actionsTop, 140, kActionsH),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				_copiedCue);
+		} else {
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			const auto hint = u"? help"_q;
+			p.drawText(
+				QRect(rtl ? (width() - 100) : 16, actionsTop, 84, kActionsH),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				hint);
+		}
+
+		layoutButtonRects();
+		for (auto i = 0; i < int(_buttons.size()); ++i) {
+			const auto &btn = _buttons[i];
+			const auto br = _buttonRects[i];
+			const auto isFocused = (i == _focusedButton);
+			const auto isHover = (i == _hoveredButton);
+			const auto isPrimary = (btn.kind == ButtonKind::Primary);
+			if (isPrimary) {
+				auto fill = st::windowActiveTextFg->c;
+				if (!isFocused && !isHover) {
+					fill.setAlpha(220);
+				}
+				p.setPen(isFocused ? QPen(st::windowFg->c, 2) : Qt::NoPen);
+				p.setBrush(fill);
+				p.drawRoundedRect(QRectF(br).adjusted(.5, .5, -.5, -.5), 7, 7);
+				p.setFont(st::semiboldFont);
+				p.setPen(Qt::white);
+				p.drawText(br, Qt::AlignCenter, btn.label);
+			} else {
+				const auto fill = (isFocused || isHover)
+					? st::windowBgOver->c
+					: st::windowBg->c;
+				p.setPen(QPen(isFocused ? st::windowActiveTextFg->c : st::boxDividerBg->c, isFocused ? 2 : 1));
+				p.setBrush(fill);
+				p.drawRoundedRect(QRectF(br).adjusted(.5, .5, -.5, -.5), 7, 7);
+				p.setFont(st::semiboldFont);
+				p.setPen(st::windowFg);
+				p.drawText(br, Qt::AlignCenter, btn.label);
+			}
+		}
+	}
+
+private:
+	enum class ButtonKind { Primary, Copy, Close };
+	struct ButtonDef {
+		ButtonKind kind = ButtonKind::Close;
+		QString label;
+	};
+
+	void layoutButtonRects() {
+		constexpr auto kActionsH = 52;
+		constexpr auto kBtnH = 32;
+		constexpr auto kGap = 8;
+		const auto y = height() - kActionsH + (kActionsH - kBtnH) / 2;
+		const auto rtl = IsRtl(this);
+		_buttonRects.clear();
+		_buttonRects.resize(_buttons.size());
+		if (rtl) {
+			auto x = 16;
+			for (auto i = int(_buttons.size()) - 1; i >= 0; --i) {
+				const auto w = std::max(72, MeasureTextWidth(st::semiboldFont, _buttons[i].label) + 22);
+				_buttonRects[i] = QRect(x, y, w, kBtnH);
+				x += w + kGap;
+			}
+		} else {
+			auto x = width() - 16;
+			for (auto i = int(_buttons.size()) - 1; i >= 0; --i) {
+				const auto w = std::max(72, MeasureTextWidth(st::semiboldFont, _buttons[i].label) + 22);
+				x -= w;
+				_buttonRects[i] = QRect(x, y, w, kBtnH);
+				x -= kGap;
+			}
+		}
+	}
+
+	void scrollBy(int dy) {
+		const auto next = std::clamp(_scroll->scrollTop() + dy, 0, _scroll->scrollTopMax());
+		_scroll->scrollToY(next);
+	}
+
+	void moveButton(int delta) {
+		if (_buttons.empty()) {
+			return;
+		}
+		const auto n = int(_buttons.size());
+		_focusedButton = ((_focusedButton + delta) % n + n) % n;
+		update();
+	}
+
+	void triggerCopy() {
+		if (_config.onCopy) {
+			_config.onCopy();
+		}
+		_copiedCue = u"Copied"_q;
+		update();
+	}
+
+	void activateButton(int index) {
+		if (_closing || index < 0 || index >= int(_buttons.size())) {
+			return;
+		}
+		switch (_buttons[index].kind) {
+		case ButtonKind::Primary: {
+			_closing = true;
+			auto cb = std::move(_config.onPrimaryAction);
+			closeLayer();
+			if (cb) {
+				cb();
+			}
+		} break;
+		case ButtonKind::Copy:
+			triggerCopy();
+			break;
+		case ButtonKind::Close:
+			_closing = true;
+			closeLayer();
+			break;
+		}
+	}
+
+	NoticeLayerConfig _config;
+	Ui::IconButton *_close = nullptr;
+	Ui::ScrollArea *_scroll = nullptr;
+	QPointer<NoticeBodyWidget> _body;
+	std::vector<ButtonDef> _buttons;
+	std::vector<QRect> _buttonRects;
+	int _focusedButton = 0;
+	int _hoveredButton = -1;
+	bool _pendingG = false;
+	bool _showHelp = false;
+	bool _closing = false;
+	QString _copiedCue;
+	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
+};
+
+class NoticeHistoryRowsWidget final : public Ui::RpWidget {
+public:
+	NoticeHistoryRowsWidget(
+		not_null<QWidget*> parent,
+		Fn<void(int row)> onClick)
+	: RpWidget(parent)
+	, _onClick(std::move(onClick)) {
+		setMouseTracking(true);
+	}
+
+	static constexpr int kRowHeight = 46;
+
+	void setData(
+			const std::vector<ModalNotices::NoticeRecord> &items,
+			const std::vector<int> &visible,
+			int selected) {
+		_items = items;
+		_visible = visible;
+		_selected = selected;
+		_hovered = -1;
+		resize(width(), std::max(72, int(_visible.size()) * kRowHeight + 8));
+		update();
+	}
+
+	void setSelected(int selected) {
+		_selected = selected;
+		update();
+	}
+
+protected:
+	void mouseMoveEvent(QMouseEvent *e) override {
+		const auto row = (e->pos().y() - 4) / kRowHeight;
+		const auto next = (row >= 0 && row < int(_visible.size())) ? row : -1;
+		if (next != _hovered) {
+			_hovered = next;
+			setCursor((next >= 0) ? style::cur_pointer : style::cur_default);
+			update();
+		}
+	}
+
+	void leaveEventHook(QEvent *) override {
+		if (_hovered >= 0) {
+			_hovered = -1;
+			update();
+		}
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto row = (e->pos().y() - 4) / kRowHeight;
+		if (row >= 0 && row < int(_visible.size()) && _onClick) {
+			_onClick(row);
+		}
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto rtl = IsRtl(this);
+		const auto timeFont = MonoFont(10, false);
+		const auto badgeFont = MonoFont(10, true);
+
+		if (_visible.empty()) {
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			p.drawText(rect(), Qt::AlignCenter, u"No notices recorded in this session."_q);
+			return;
+		}
+
+		const auto clip = e->rect();
+		const auto first = std::max(0, (clip.top() - 4) / kRowHeight);
+		const auto till = std::min(int(_visible.size()), (clip.bottom() - 4) / kRowHeight + 2);
+
+		for (auto row = first; row < till; ++row) {
+			const auto &item = _items[_visible[row]];
+			const auto y = 4 + row * kRowHeight;
+			const auto rowRect = QRect(8, y + 1, width() - 16, kRowHeight - 2);
+			const auto isActive = (row == _selected);
+			const auto isHover = (row == _hovered);
+
+			if (isActive || isHover) {
+				auto fill = st::windowBgOver->c;
+				if (!isActive) {
+					fill.setAlpha(140);
+				}
+				p.setPen(Qt::NoPen);
+				p.setBrush(fill);
+				p.drawRoundedRect(rowRect, 7, 7);
+				if (isActive) {
+					const auto barRect = rtl
+						? QRect(rowRect.right() - 2, rowRect.top() + 6, 3, rowRect.height() - 12)
+						: QRect(rowRect.left(), rowRect.top() + 6, 3, rowRect.height() - 12);
+					p.setBrush(st::windowActiveTextFg->c);
+					p.drawRoundedRect(barRect, 1.5, 1.5);
+				}
+			}
+
+			// Severity dot.
+			const auto dotColor = SeverityColor(item.severity);
+			constexpr auto kDotSize = 8;
+			const auto dotX = rtl ? (rowRect.right() - 14 - kDotSize) : (rowRect.left() + 14);
+			p.setPen(Qt::NoPen);
+			p.setBrush(dotColor);
+			p.drawEllipse(QRect(dotX, rowRect.center().y() - kDotSize / 2, kDotSize, kDotSize));
+
+			// Far side: time + optional repeat/action badge.
+			auto farReserve = 12;
+			const auto timeStr = (item.timestampMs > 0)
+				? QDateTime::fromMSecsSinceEpoch(item.timestampMs).toString(u"HH:mm"_q)
+				: QString();
+			if (!timeStr.isEmpty()) {
+				const auto tw = MeasureTextWidth(timeFont, timeStr);
+				const auto tx = rtl ? (rowRect.left() + farReserve) : (rowRect.right() - farReserve - tw);
+				p.setFont(timeFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(QRect(tx, rowRect.top() + 4, tw, 16), Qt::AlignCenter, timeStr);
+				farReserve += tw + 10;
+			}
+			auto tagStr = QString();
+			if (item.repeatCount > 1) {
+				tagStr = u"x%1"_q.arg(item.repeatCount);
+			} else if (!item.primaryActionLabel.isEmpty()) {
+				tagStr = u"ACTION"_q;
+			}
+			if (!tagStr.isEmpty()) {
+				const auto bw = MeasureTextWidth(badgeFont, tagStr) + 10;
+				const auto bx = rtl ? (rowRect.left() + 12) : (rowRect.right() - 12 - bw);
+				const auto bRect = QRect(bx, rowRect.top() + 22, bw, 17);
+				auto bFill = dotColor;
+				bFill.setAlpha(28);
+				p.setPen(Qt::NoPen);
+				p.setBrush(bFill);
+				p.drawRoundedRect(bRect, 5, 5);
+				p.setFont(badgeFont);
+				p.setPen(dotColor);
+				p.drawText(bRect, Qt::AlignCenter, tagStr);
+				farReserve = std::max(farReserve, bw + 20);
+			}
+
+			const auto lead = 14 + kDotSize + 10;
+			const auto contentW = std::max(80, rowRect.width() - lead - farReserve - 8);
+			const auto contentX = rtl ? (rowRect.left() + farReserve + 8) : (rowRect.left() + lead);
+
+			p.setFont(st::semiboldFont);
+			p.setPen(st::windowFg);
+			p.drawText(
+				QRect(contentX, rowRect.top() + 4, contentW, 18),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				ElideText(st::semiboldFont, item.formattedTitle(), contentW));
+
+			const auto sub = !item.summary.isEmpty()
+				? item.summary
+				: (!item.rows.empty() ? item.rows.front().label : QString());
+			if (!sub.isEmpty()) {
+				p.setFont(st::normalFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(
+					QRect(contentX, rowRect.top() + 24, contentW, 16),
+					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+					ElideText(st::normalFont, sub, contentW));
+			}
+		}
+	}
+
+private:
+	std::vector<ModalNotices::NoticeRecord> _items;
+	std::vector<int> _visible;
+	Fn<void(int)> _onClick;
+	int _selected = 0;
+	int _hovered = -1;
+};
+
+class NoticeHistoryLayer final : public Ui::LayerWidget {
+public:
+	explicit NoticeHistoryLayer(NoticeHistoryConfig config)
+	: _config(std::move(config))
+	, _close(Ui::CreateChild<Ui::IconButton>(this, st::boxTitleClose))
+	, _filter(Ui::CreateChild<Ui::InputField>(
+		this,
+		st::defaultMultiSelectSearchField,
+		Ui::InputField::Mode::SingleLine,
+		rpl::single(u"Filter notices (orderless)..."_q)))
+	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
+		setFocusPolicy(Qt::StrongFocus);
+		_close->setClickedCallback([=] { closeLayer(); });
+
+		auto rows = object_ptr<NoticeHistoryRowsWidget>(
+			_scroll,
+			[=](int row) { inspectRow(row); });
+		_rows = rows.data();
+		_scroll->setOwnedWidget(std::move(rows));
+
+		_filter->changes() | rpl::on_next([=] {
+			refilter();
+		}, lifetime());
+		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
+			inspectRow(_selected);
+		}, lifetime());
+
+		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
+			if (e->type() != QEvent::KeyPress) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto k = static_cast<QKeyEvent*>(e.get());
+			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
+			if (layout && !layout->preeditAreaText().isEmpty()) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
+			const auto key = PhysicalKeyForNav(*k);
+			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (!_filter->getLastText().isEmpty()) {
+					_filter->setText(QString());
+				}
+				setFocus();
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
+				moveSelection(1);
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
+				moveSelection(-1);
+				return base::EventFilterResult::Cancel;
+			}
+			return base::EventFilterResult::Continue;
+		});
+
+		refilter();
+	}
+
+protected:
+	void doSetInnerFocus() override {
+		setFocus();
+	}
+
+	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
+		const auto parentSize = parentWidget()->size();
+		const auto w = std::min(parentSize.width() - 32, 680);
+		const auto h = std::min(parentSize.height() - 48, 560);
+		setGeometry((parentSize.width() - w) / 2, (parentSize.height() - h) / 2, w, h);
+	}
+
+	void resizeEvent(QResizeEvent *e) override {
+		LayerWidget::resizeEvent(e);
+		constexpr auto kHeaderH = 54;
+		constexpr auto kFilterH = 44;
+		constexpr auto kFooterH = 32;
+		if (IsRtl(this)) {
+			_close->move(12, (kHeaderH - _close->height()) / 2);
+		} else {
+			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
+		}
+		_filter->setGeometry(28, kHeaderH + 6, std::max(120, width() - 56), 32);
+		_scroll->setGeometry(0, kHeaderH + kFilterH, width(), std::max(60, height() - kHeaderH - kFilterH - kFooterH));
+		if (_rows) {
+			_rows->resize(_scroll->width(), _rows->height());
+		}
+	}
+
+	void keyPressEvent(QKeyEvent *e) override {
+		if (_closing) {
+			return;
+		}
+		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
+		const auto key = PhysicalKeyForNav(*e);
+		if (_pendingG) {
+			_pendingG = false;
+			if (key == Qt::Key_G && !mods) {
+				moveSelection(-int(_visible.size()));
+				return;
+			}
+		}
+		if (key == Qt::Key_Escape
+			|| (key == Qt::Key_Q && !mods)
+			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+			closeLayer();
+			return;
+		} else if (key == Qt::Key_Slash && !mods) {
+			_filter->setFocusFast();
+			return;
+		} else if (key == Qt::Key_G && !mods) {
+			_pendingG = true;
+			return;
+		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
+			moveSelection(int(_visible.size()));
+			return;
+		} else if (key == Qt::Key_J && !mods) {
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_K && !mods) {
+			moveSelection(-1);
+			return;
+		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
+			moveSelection(-1);
+			return;
+		} else if (key == Qt::Key_Y && !mods) {
+			if (_selected >= 0 && _selected < int(_visible.size()) && _config.onCopy) {
+				_config.onCopy(_config.items[_visible[_selected]].plainText());
+			}
+			return;
+		} else if (key == Qt::Key_C && !mods) {
+			if (_config.onClear) {
+				_config.onClear();
+			}
+			_config.items.clear();
+			refilter();
+			return;
+		} else if (key == Qt::Key_Return || key == Qt::Key_Enter || (key == Qt::Key_O && !mods)) {
+			inspectRow(_selected);
+			return;
+		}
+		LayerWidget::keyPressEvent(e);
+	}
+
+	void paintEvent(QPaintEvent *) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		_roundRect.paint(p, rect());
+
+		p.setPen(QPen(st::boxDividerBg->c, 1));
+		p.setBrush(Qt::NoBrush);
+		p.drawRoundedRect(QRectF(rect()).adjusted(.5, .5, -.5, -.5), st::boxRadius, st::boxRadius);
+
+		constexpr auto kHeaderH = 54;
+		constexpr auto kFilterH = 44;
+		constexpr auto kFooterH = 32;
+		const auto rtl = IsRtl(this);
+
+		const auto badgeText = u"%1 NOTICES"_q.arg(_visible.size());
+		const auto mono = MonoFont(10, true);
+		const auto bw = MeasureTextWidth(mono, badgeText) + 12;
+		const auto bx = rtl ? (_close->x() + _close->width() + 10) : (_close->x() - 10 - bw);
+		const auto bRect = QRect(bx, (kHeaderH - 22) / 2, bw, 22);
+		auto bFill = st::windowActiveTextFg->c;
+		bFill.setAlpha(28);
+		p.setPen(Qt::NoPen);
+		p.setBrush(bFill);
+		p.drawRoundedRect(bRect, 6, 6);
+		p.setFont(mono);
+		p.setPen(st::windowActiveTextFg);
+		p.drawText(bRect, Qt::AlignCenter, badgeText);
+
+		const auto title = _config.accountLabel.isEmpty()
+			? u"Notices (*Messages*)"_q
+			: (_config.accountLabel + u"  ·  Notices (*Messages*)"_q);
+		const auto titleW = std::max(80, width() - bw - _close->width() - 48);
+		const auto titleX = rtl ? (bx + bw + 10) : 18;
+		p.setFont(st::keysLegendHeaderStyle.font);
+		p.setPen(st::windowFg);
+		p.drawText(
+			QRect(titleX, 0, titleW, kHeaderH),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+			ElideText(st::keysLegendHeaderStyle.font, title, titleW));
+		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
+
+		const auto searchRect = QRect(18, kHeaderH + 6, std::max(120, width() - 36), 32);
+		p.setPen(QPen(st::boxDividerBg->c, 1));
+		p.setBrush(BlendColor(st::windowBg->c, st::windowBgOver->c, 0.35));
+		p.drawRoundedRect(QRectF(searchRect).adjusted(.5, .5, -.5, -.5), 8, 8);
+		p.fillRect(0, kHeaderH + kFilterH - 1, width(), 1, st::boxDividerBg->c);
+
+		const auto footerRect = QRect(0, height() - kFooterH, width(), kFooterH);
+		p.fillRect(footerRect.adjusted(0, 1, 0, 0), BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
+		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
+		p.setFont(st::normalFont);
+		p.setPen(st::windowSubTextFg);
+		const auto hint = u"j/k/gg/G move  ·  RET/o open  ·  / filter  ·  y copy  ·  c clear  ·  q close"_q;
+		p.drawText(
+			footerRect.adjusted(16, 0, -16, 0),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+			ElideText(st::normalFont, hint, width() - 32));
+	}
+
+private:
+	void refilter() {
+		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		_visible.clear();
+		for (auto i = 0; i < int(_config.items.size()); ++i) {
+			const auto &it = _config.items[i];
+			if (!tokens.empty()) {
+				const auto hay = it.plainText().toCaseFolded();
+				const auto init = ModalMx::WordInitials(it.formattedTitle());
+				const auto ok = std::all_of(tokens.begin(), tokens.end(), [&](const ModalMx::OrderlessToken &t) {
+					return ModalMx::MatchToken(t, hay, init);
+				});
+				if (!ok) {
+					continue;
+				}
+			}
+			_visible.push_back(i);
+		}
+		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		if (_rows) {
+			_rows->setData(_config.items, _visible, _selected);
+		}
+		_scroll->scrollToY(0);
+		update();
+	}
+
+	void moveSelection(int delta) {
+		if (_visible.empty()) {
+			return;
+		}
+		const auto n = int(_visible.size());
+		_selected = std::clamp(_selected + delta, 0, n - 1);
+		if (_rows) {
+			_rows->setSelected(_selected);
+		}
+		const auto rowTop = 4 + _selected * NoticeHistoryRowsWidget::kRowHeight;
+		const auto rowBottom = rowTop + NoticeHistoryRowsWidget::kRowHeight;
+		if (rowTop < _scroll->scrollTop()) {
+			_scroll->scrollToY(rowTop);
+		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
+			_scroll->scrollToY(rowBottom - _scroll->height());
+		}
+	}
+
+	void inspectRow(int row) {
+		if (_closing || row < 0 || row >= int(_visible.size())) {
+			return;
+		}
+		_closing = true;
+		auto rec = _config.items[_visible[row]];
+		auto cb = std::move(_config.onInspect);
+		closeLayer();
+		if (cb) {
+			cb(std::move(rec));
+		}
+	}
+
+	NoticeHistoryConfig _config;
+	std::vector<int> _visible;
+	Ui::IconButton *_close = nullptr;
+	Ui::InputField *_filter = nullptr;
+	Ui::ScrollArea *_scroll = nullptr;
+	QPointer<NoticeHistoryRowsWidget> _rows;
+	int _selected = 0;
+	bool _pendingG = false;
+	bool _closing = false;
+	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
+};
+
 } // namespace
 
 std::unique_ptr<Ui::LayerWidget> CreateModalHelpLayer(HelpData data) {
@@ -3452,6 +4451,14 @@ std::unique_ptr<Ui::LayerWidget> CreateUnreadBufferLayer(UnreadBufferConfig conf
 
 std::unique_ptr<Ui::LayerWidget> CreateTopicPickerLayer(TopicPickerConfig config) {
 	return std::make_unique<TopicPickerLayer>(std::move(config));
+}
+
+std::unique_ptr<Ui::LayerWidget> CreateNoticeLayer(NoticeLayerConfig config) {
+	return std::make_unique<NoticeLayer>(std::move(config));
+}
+
+std::unique_ptr<Ui::LayerWidget> CreateNoticeHistoryLayer(NoticeHistoryConfig config) {
+	return std::make_unique<NoticeHistoryLayer>(std::move(config));
 }
 
 } // namespace Purple::ModalUi
