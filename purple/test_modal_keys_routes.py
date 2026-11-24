@@ -113,6 +113,9 @@ assert "card.title.toUpper()" not in keys_ui
 assert "group.title.toUpper()" not in keys_ui
 assert "QApplication::isRightToLeft" not in keys_ui
 assert "return style::RightToLeft();" in keys_ui
+assert "MeasureTextWidth(" in keys_ui
+assert "ElideText(" in keys_ui
+assert "_colCapWidths" in keys_ui
 help_fn = between(keys, "void Keys::showHelpLayer", "void Keys::showDescribeKeyResult")
 ordered(help_fn, "b.viaLocalleader ? mapContextTag(b.sourceMap)",
         "Qt::Key_S, Qt::Key_T", "Available(b.action, target)",
@@ -153,7 +156,7 @@ ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_pre
 palette = between(keys, "void Keys::showPalette", "} // namespace")
 ordered(palette, "revision = _revision", "base::make_weak(current)",
         "guard = QPointer(this)", "ModalUi::CreateCommandPaletteLayer",
-        "if (!guard)", "MxHistory().record",
+        "if (!guard)", "MxHistory().record", "anim::type::instant",
         "!Enabled()", "live != original.get()", "revision != guard->_revision",
         "FindTarget(live, origin)", "guard->currentTarget(origin)",
         "guard->dispatch(action, restored", "onCancel = [guard,")

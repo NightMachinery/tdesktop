@@ -3107,6 +3107,20 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 	_activeLayer = kind;
 	refreshStatusBar();
 
+	const auto handled = std::make_shared<bool>(false);
+	const auto restoreInsertIfOrigin = [guard, revision, origin, original, fromInsert] {
+		if (!guard) {
+			return;
+		}
+		const auto live = guard->owner();
+		if (Enabled() && live && live == original.get()
+			&& revision == guard->_revision && origin && fromInsert
+			&& !guard->_window->controller().isLayerShown()) {
+			origin->setFocus(Qt::OtherFocusReason);
+			guard->_normal = false;
+		}
+		guard->refreshStatusBar();
+	};
 	auto layer = ModalUi::CreateCommandPaletteLayer({
 		.promptBadge = describe ? u"SPC h f"_q : u"M-x"_q,
 		.placeholder = describe
@@ -3115,7 +3129,8 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		.describeMode = describe,
 		.items = std::move(items),
 		.history = MxHistory(),
-		.onPick = [guard, describe, revision, origin, original](int actionId, QString query) {
+		.onPick = [guard, handled, describe, revision, origin, original](int actionId, QString query) {
+			*handled = true;
 			if (!guard) {
 				return;
 			}
@@ -3123,6 +3138,10 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			const auto action = Action(actionId);
 			MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
 			SaveMxHistory();
+			guard->_window->showOrHideBoxOrLayer(
+				v::null,
+				Ui::LayerOption::KeepOther,
+				anim::type::instant);
 			QTimer::singleShot(0, guard.data(), [guard, describe, action, revision, origin, original] {
 				if (!guard) {
 					return;
@@ -3149,30 +3168,27 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 				guard->refreshStatusBar();
 			});
 		},
-		.onCancel = [guard, revision, origin, original, fromInsert] {
+		.onCancel = [guard, handled, restoreInsertIfOrigin] {
+			*handled = true;
 			if (!guard) {
 				return;
 			}
 			guard->_activeLayer = ActiveLayer::None;
-			QTimer::singleShot(0, guard.data(), [guard, revision, origin, original, fromInsert] {
-				if (!guard) {
-					return;
-				}
-				const auto live = guard->owner();
-				if (Enabled() && live && live == original.get()
-					&& revision == guard->_revision && origin && fromInsert
-					&& !guard->_window->controller().isLayerShown()) {
-					origin->setFocus(Qt::OtherFocusReason);
-					guard->_normal = false;
-				}
-				guard->refreshStatusBar();
-			});
+			guard->_window->showOrHideBoxOrLayer(
+				v::null,
+				Ui::LayerOption::KeepOther,
+				anim::type::instant);
+			QTimer::singleShot(0, guard.data(), restoreInsertIfOrigin);
 		},
 	});
-	layer->lifetime().add([guard, kind] {
+	layer->lifetime().add([guard, kind, handled, fromInsert, restoreInsertIfOrigin] {
 		if (!guard) return;
 		if (guard->_activeLayer == kind) {
 			guard->_activeLayer = ActiveLayer::None;
+			if (!*handled && fromInsert) {
+				QTimer::singleShot(0, guard.data(), restoreInsertIfOrigin);
+				return;
+			}
 			guard->refreshStatusBar();
 		}
 	});

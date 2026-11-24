@@ -18,6 +18,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QPointer>
 #include <QtGui/QFontDatabase>
+#include <QtGui/QFontMetricsF>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainterPath>
@@ -30,6 +31,7 @@
 #endif // Q_OS_MAC
 
 #include <algorithm>
+#include <cmath>
 
 namespace Purple::ModalUi {
 namespace {
@@ -72,6 +74,32 @@ constexpr auto kCtrlMod = Qt::ControlModifier;
 
 [[nodiscard]] bool IsRtl(const QWidget *) {
 	return style::RightToLeft();
+}
+
+[[nodiscard]] int MeasureTextWidth(const QFont &font, const QString &text) {
+	if (text.isEmpty()) {
+		return 0;
+	}
+	const auto fmF = QFontMetricsF(font);
+	const auto fm = QFontMetrics(font);
+	return std::max(
+		int(std::ceil(fmF.horizontalAdvance(text))),
+		fm.horizontalAdvance(text)) + 2;
+}
+
+[[nodiscard]] QString ElideText(
+		const QFont &font,
+		const QString &text,
+		int maxWidth,
+		Qt::TextElideMode mode = Qt::ElideRight) {
+	if (maxWidth <= 0 || text.isEmpty()) {
+		return QString();
+	}
+	const auto fmF = QFontMetricsF(font);
+	if (int(std::ceil(fmF.horizontalAdvance(text))) <= maxWidth) {
+		return text;
+	}
+	return QFontMetrics(font).elidedText(text, mode, maxWidth);
 }
 
 [[nodiscard]] QColor BadgeColor(BadgeKind kind) {
@@ -186,10 +214,7 @@ void PaintHighlightedLabel(
 	if (spans.empty()) {
 		p.setFont(baseFont);
 		p.setPen(baseColor);
-		const auto elided = QFontMetrics(baseFont).elidedText(
-			label,
-			Qt::ElideRight,
-			rect.width());
+		const auto elided = ElideText(baseFont, label, rect.width());
 		p.drawText(rect, Qt::AlignLeft | Qt::AlignVCenter, elided);
 		return;
 	}
@@ -201,10 +226,9 @@ void PaintHighlightedLabel(
 			return;
 		}
 		const auto &font = hi ? boldFont : baseFont;
-		const auto fm = QFontMetrics(font);
 		const auto avail = maxX - x;
-		const auto piece = fm.elidedText(text, Qt::ElideRight, avail);
-		const auto w = fm.horizontalAdvance(piece);
+		const auto piece = ElideText(font, text, avail);
+		const auto w = int(std::ceil(QFontMetricsF(font).horizontalAdvance(piece)));
 		p.setFont(font);
 		p.setPen(hi ? highlightColor : baseColor);
 		p.drawText(QRect(x, rect.top(), avail, rect.height()),
@@ -460,18 +484,33 @@ int WhichKeyOverlay::computeHeight(int availWidth, int maxHeight) const {
 
 void WhichKeyOverlay::setState(WhichKeyState state) {
 	_state = std::move(state);
+	computeColumnCapWidths();
+	update();
+}
+
+void WhichKeyOverlay::computeColumnCapWidths() {
 	const auto st = CapStyle();
 	const auto sepFm = QFontMetrics(st::normalFont);
-	auto maxCap = st.capMinWidth;
-	const auto scan = [&](const std::vector<WhichKeyEntry> &list) {
-		for (const auto &entry : list) {
-			maxCap = std::max(maxCap, MeasureWhichKeyCapsWidth(entry.keys, st, sepFm));
+	const auto cols = std::max(1, _columns);
+	_colCapWidths.assign(cols, 28);
+	const auto scanBlock = [&](const std::vector<WhichKeyEntry> &list) {
+		if (list.empty()) {
+			return;
+		}
+		const auto rows = (int(list.size()) + cols - 1) / cols;
+		for (auto i = 0; i < int(list.size()); ++i) {
+			const auto col = i / rows;
+			if (col >= 0 && col < cols) {
+				const auto w = MeasureWhichKeyCapsWidth(list[i].keys, st, sepFm);
+				_colCapWidths[col] = std::max(_colCapWidths[col], w);
+			}
 		}
 	};
-	scan(_state.groups);
-	scan(_state.leaves);
-	_capColumnWidth = std::clamp(maxCap, 28, 96);
-	update();
+	scanBlock(_state.groups);
+	scanBlock(_state.leaves);
+	for (auto &w : _colCapWidths) {
+		w = std::clamp(w, 28, 108);
+	}
 }
 
 void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
@@ -484,6 +523,7 @@ void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
 	const auto drawerH = computeHeight(drawerW, maxH);
 	_columns = computeColumns(drawerW);
 	_columnWidth = std::max(1, (drawerW - 36 - (_columns - 1) * 18) / _columns);
+	computeColumnCapWidths();
 
 	const auto left = availableAboveStatusBar.x()
 		+ (availableAboveStatusBar.width() - drawerW) / 2;
@@ -597,25 +637,28 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 			const auto midY = rowY + kRowH / 2;
 
 			const auto capsW = MeasureWhichKeyCapsWidth(entry.keys, st, sepFm);
+			const auto colCapW = (col < int(_colCapWidths.size()))
+				? std::max(_colCapWidths[col], capsW)
+				: std::max(28, capsW);
 			const auto capX = rtl
 				? (colX + _columnWidth - capsW)
-				: (colX + (_capColumnWidth - capsW));
+				: colX;
 			PaintWhichKeyCaps(p, entry.keys, capX, midY, st, sepFm);
 
 			const auto arrowX = rtl
-				? (colX + _columnWidth - _capColumnWidth - 18)
-				: (colX + _capColumnWidth + 6);
+				? (colX + _columnWidth - colCapW - 18)
+				: (colX + colCapW + 6);
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
 			p.drawText(QRect(arrowX, rowY, 14, kRowH), Qt::AlignCenter, arrowGlyph);
 
-			const auto labelW = std::max(24, _columnWidth - _capColumnWidth - 24);
-			const auto labelX = rtl ? colX : (colX + _capColumnWidth + 24);
+			const auto labelW = std::max(24, _columnWidth - colCapW - 24);
+			const auto labelX = rtl ? colX : (colX + colCapW + 24);
 			const auto text = entry.isGroup ? (u"+"_q + entry.label) : entry.label;
 			const auto &font = entry.isGroup ? st::semiboldFont : st::normalFont;
 			p.setFont(font);
 			p.setPen(entry.isGroup ? st::windowActiveTextFg : st::windowFg);
-			const auto elided = QFontMetrics(font).elidedText(text, Qt::ElideRight, labelW);
+			const auto elided = ElideText(font, text, labelW);
 			p.drawText(
 				QRect(labelX, rowY, labelW, kRowH),
 				Qt::AlignVCenter | (rtl ? Qt::AlignRight : Qt::AlignLeft),
@@ -759,10 +802,7 @@ protected:
 					: (inner.x() + colW);
 				p.setFont(st::normalFont);
 				p.setPen(st::windowFg);
-				const auto elided = QFontMetrics(st::normalFont).elidedText(
-					row.label,
-					Qt::ElideRight,
-					textW);
+				const auto elided = ElideText(st::normalFont, row.label, textW);
 				p.drawText(
 					QRect(textX, rowY, textW, kRowH),
 					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -845,7 +885,6 @@ protected:
 		const auto st = CapStyle();
 		const auto sepFm = QFontMetrics(st::normalFont);
 		const auto monoFont = MonoFont(11, false);
-		const auto monoFm = QFontMetrics(monoFont);
 
 		constexpr auto kPadX = 24;
 		constexpr auto kSectionH = 30;
@@ -887,7 +926,7 @@ protected:
 					: (u":"_q + row.commandId);
 				const auto idW = idText.isEmpty()
 					? 0
-					: std::min(190, monoFm.horizontalAdvance(idText));
+					: std::min(280, MeasureTextWidth(monoFont, idText));
 				const auto keyCol = std::max(kKeyColW, usedW + 14);
 				const auto labelW = std::max(60, contentW - keyCol - (idW > 0 ? (idW + 14) : 0));
 				const auto labelX = rtl
@@ -899,7 +938,7 @@ protected:
 				p.drawText(
 					QRect(labelX, y, labelW, kRowH),
 					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
-					QFontMetrics(st::normalFont).elidedText(row.label, Qt::ElideRight, labelW));
+					ElideText(st::normalFont, row.label, labelW));
 
 				if (!idText.isEmpty() && idW > 0) {
 					p.setFont(monoFont);
@@ -907,7 +946,7 @@ protected:
 					p.drawText(
 						QRect(rtl ? kPadX : (width() - kPadX - idW), y, idW, kRowH),
 						(rtl ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter,
-						monoFm.elidedText(idText, Qt::ElideRight, idW));
+						ElideText(monoFont, idText, idW));
 				}
 				y += kRowH;
 			}
@@ -1136,7 +1175,7 @@ protected:
 			p.drawText(
 				QRect(rtl ? 20 : (width() - 20 - avail), height() - kFooterH, avail, kFooterH),
 				(rtl ? Qt::AlignLeft : Qt::AlignRight) | Qt::AlignVCenter,
-				QFontMetrics(mono).elidedText(rightText, Qt::ElideMiddle, avail));
+				ElideText(mono, rightText, avail, Qt::ElideMiddle));
 		}
 	}
 
@@ -1227,9 +1266,9 @@ protected:
 		}
 		const auto parentSize = parentWidget()->size();
 		const auto w = std::min(parentSize.width() - 48, 540);
-		auto h = 18 + 38; // top padding + header
+		auto h = 16 + 34 + 16; // top padding + header + body top padding
 		if (_data.isKeyMode && !_data.queriedChord.isEmpty()) {
-			h += 34;
+			h += 36;
 		}
 		h += 28; // title or unbound line
 		if (_data.found) {
@@ -1304,7 +1343,7 @@ protected:
 		const auto rtl = IsRtl(this);
 		const auto hAlign = rtl ? Qt::AlignRight : Qt::AlignLeft;
 		constexpr auto kPadX = 24;
-		auto y = 18;
+		auto y = 16;
 
 		// Header.
 		p.setFont(st::keysLegendHeaderStyle.font);
@@ -1313,14 +1352,15 @@ protected:
 			QRect(rtl ? (kPadX + 40) : kPadX, y, width() - 2 * kPadX - 40, 28),
 			hAlign | Qt::AlignVCenter,
 			_data.isKeyMode ? u"Describe Key"_q : u"Describe Command"_q);
-		y += 38;
-		p.fillRect(0, y - 6, width(), 1, st::boxDividerBg->c);
+		y += 34;
+		p.fillRect(0, y, width(), 1, st::boxDividerBg->c);
+		y += 16;
 
 		// Key chord header in Describe Key mode.
 		if (_data.isKeyMode && !_data.queriedChord.isEmpty()) {
 			const auto cw = MeasureChordsWidth({ _data.queriedChord }, st, sepFm);
-			PaintChords(p, { _data.queriedChord }, rtl ? (width() - kPadX - cw) : kPadX, y + 12, st);
-			y += 32;
+			PaintChords(p, { _data.queriedChord }, rtl ? (width() - kPadX - cw) : kPadX, y + st.capHeight / 2, st);
+			y += st.capHeight + 14;
 		}
 
 		// Title + :command-id.
@@ -1511,7 +1551,6 @@ protected:
 		const auto sepFm = QFontMetrics(st::normalFont);
 		const auto monoFont = MonoFont(11, false);
 		const auto monoBold = MonoFont(11, true);
-		const auto monoFm = QFontMetrics(monoFont);
 		const auto rtl = IsRtl(this);
 
 		if (_filtered.empty()) {
@@ -1556,7 +1595,7 @@ protected:
 				const auto reason = item.unavailableReason.isEmpty()
 					? u"unavailable"_q
 					: item.unavailableReason;
-				const auto rw = std::min(200, monoFm.horizontalAdvance(reason) + 14);
+				const auto rw = std::min(240, MeasureTextWidth(monoFont, reason) + 12);
 				const auto pill = rtl
 					? QRect(rowRect.left() + 10, midY - 10, rw, 20)
 					: QRect(rowRect.right() - 10 - rw, midY - 10, rw, 20);
@@ -1565,7 +1604,7 @@ protected:
 				p.drawRoundedRect(QRectF(pill).adjusted(.5, .5, -.5, -.5), 4, 4);
 				p.setFont(monoFont);
 				p.setPen(st::windowSubTextFg);
-				p.drawText(pill, Qt::AlignCenter, monoFm.elidedText(reason, Qt::ElideRight, rw - 8));
+				p.drawText(pill, Qt::AlignCenter, ElideText(monoFont, reason, rw - 10));
 				sideReserved = rw + 22;
 			} else if (!item.chords.empty()) {
 				const auto shownChords = (item.chords.size() > 2)
@@ -1870,18 +1909,20 @@ private:
 		const auto query = _input->getLastText();
 		auto cb = std::move(_config.onPick);
 		_config.onCancel = nullptr;
-		closeLayer();
 		if (cb) {
 			cb(actionId, query);
+		} else {
+			closeLayer();
 		}
 	}
 
 	void cancel() {
 		auto cb = std::move(_config.onCancel);
 		_config.onPick = nullptr;
-		closeLayer();
 		if (cb) {
 			cb();
+		} else {
+			closeLayer();
 		}
 	}
 
