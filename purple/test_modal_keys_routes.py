@@ -328,11 +328,17 @@ ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
         "WindowMatchesAccount", "CanExposeNoticeInWindow",
         "ResolveNoticePeerLabel", "peerFromUser(bare)", "peerFromChat(bare)",
         "peerFromChannel(bare)", "PickerVisible", "ResolvePeerIdsInConfigValue",
-        "ShowPurpleNotice", "Actions().erase(id)",
+        "void SubmitNotice", "Actions().erase(id)", "ShowPurpleNotice",
         "ShowPurpleAck", "MaybeFlushPendingNotices", "OpenPurpleNoticeHistory",
         "clearHistoryAndPending")
 ordered(notices_cpp, "void OpenNoticeLayerForRecord", "Store().findById(accountKey, id)",
         "revision = rec.repeatCount", "live->repeatCount == revision", "run(&weakWin->controller())")
+ordered(notices_cpp, "class PendingNoticeDelivery", "passcodeLockChanges()",
+        "PrivacyScreenChanges()", "ModalKeysEnabledChanges()", "sessionControllerValue()",
+        "QEvent::Hide", "QEvent::WindowActivate", "forgetExpiredAcks", "takeNextPending",
+        "ShowDeferredToast", "&QObject::destroyed")
+ordered(notices_cpp, "QWidget *ShowDeferredToast", "ToastCapture", "pending.fallbackToast()",
+        "capture.visibleToast()", "CanShowDeferredToast", "Ui::Toast::Show")
 config_cpp = read("purple/purple_config.cpp")
 ordered(config_cpp, "void Config::reloadFromDisk", "takeEditorGlobalReload", "edited && !editorEcho")
 ordered(config_cpp, "SettingsEditorOpening CaptureWindowSettingsEditor", "activeWindow() == host",

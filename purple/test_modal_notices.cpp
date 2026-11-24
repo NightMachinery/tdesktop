@@ -21,7 +21,7 @@ void Check(bool ok, const std::string &name) {
 } // namespace
 
 int main() {
-	// 1. Modal keys OFF always keeps stock toast unchanged everywhere.
+	// 1. Modal keys off uses stock toasts when the window is available.
 	{
 		DeliveryContext ctx;
 		ctx.modalEnabled = false;
@@ -138,7 +138,7 @@ int main() {
 			"Group B error stays longer than acknowledgement");
 	}
 
-	// 5. Per-account coalescing, memory-only cap, and logout clearing.
+	// 5. Per-account coalescing, bounded history, and logout clearing.
 	{
 		AccountNoticeStore store;
 		NoticeRecord r1;
@@ -186,8 +186,9 @@ int main() {
 		Check(store.record(removal, true) == removalId && store.pendingCount(appKey) == 1,
 			"archive removal reports from different accounts share one app pending entry");
 		store.clearAccount(r1.accountKey);
-		const auto pendingRemoval = store.takeNextPending(appKey);
-		Check(pendingRemoval && pendingRemoval->id == removalId && pendingRemoval->repeatCount == 2,
+		const auto pendingRemoval = store.takeNextPending(r1.accountKey, {});
+		Check(pendingRemoval && pendingRemoval->notice.record.id == removalId
+			&& pendingRemoval->notice.record.repeatCount == 2,
 			"shared archive removal warning remains deliverable after logout");
 
 		other.primaryActionLabel = QStringLiteral("Open settings");
@@ -207,15 +208,93 @@ int main() {
 		}
 		Check(int(store.historyFor(QStringLiteral("prod:2002")).size()) == kMaxHistoryPerAccount,
 			"per-account history is capped at kMaxHistoryPerAccount");
-		Check(store.pendingCount(QStringLiteral("prod:2002")) == kMaxPendingPerAccount
-			&& store.droppedPendingCount(QStringLiteral("prod:2002")) > 0,
-			"pending queue is capped and tracks dropped overflow count");
+		Check(store.pendingCount(other.accountKey) == kMaxHistoryPerAccount + 15,
+			"history overflow leaves durable pending notices queued");
+		const auto modal = DeliveryContext{ .modalEnabled = true };
+		const auto oldest = store.takeNextPending(other.accountKey, modal);
+		Check(oldest && oldest->notice.record.summary == QStringLiteral("Entry 0")
+			&& store.findById(other.accountKey, oldest->notice.record.id).has_value(),
+			"modal delivery restores actions and copy history for old pending notices");
 
 		// Clear history also clears pending entries so nothing cleared reappears.
 		store.clearHistoryAndPending(QStringLiteral("prod:2002"));
 		Check(store.historyFor(QStringLiteral("prod:2002")).empty()
 			&& store.pendingCount(QStringLiteral("prod:2002")) == 0,
 			"clearHistoryAndPending clears both history and pending queue");
+	}
+
+	{
+		AccountNoticeStore store;
+		const auto a = QStringLiteral("prod:1001");
+		const auto b = QStringLiteral("prod:2002");
+		const auto stock = DeliveryContext{};
+		const auto locked = DeliveryContext{ .passcodeLocked = true };
+		const auto hidden = DeliveryContext{ .privacyScreenActive = true };
+		const auto normal = DeliveryContext{ .modalEnabled = true, .statusBarVisible = true };
+		auto notice = NoticeRecord{
+			.accountKey = a,
+			.summary = QStringLiteral("Old"),
+			.coalesceKey = QStringLiteral("same"),
+		};
+		int fallback = 0;
+		const auto id = store.record(notice, true, [&] { fallback = 1; }, 50);
+		notice.summary = QStringLiteral("Latest");
+		Check(store.hasPendingKey(notice)
+			&& store.record(notice, true, [&] { fallback = 2; }, 100) == id,
+			"the latest coalesced event replaces its pending toast callback");
+		Check(!store.takeNextPending(a, locked) && !store.takeNextPending(a, hidden)
+			&& !store.takeNextPending(b, stock) && fallback == 0,
+			"locked, private, and other windows cannot consume an account event");
+		auto ack = NoticeRecord{
+			.accountKey = a,
+			.summary = QStringLiteral("Ack"),
+			.kind = NoticeKind::Ack,
+		};
+		const auto ackId = store.record(ack, true, {}, 110);
+		const auto first = store.takeNextPending(a, stock);
+		Check(first && first->route == DeliveryRoute::StockToast
+			&& first->notice.record.summary == QStringLiteral("Latest"),
+			"after unlock the current stock mode delivers the latest notice");
+		if (first && first->notice.fallbackToast) {
+			first->notice.fallbackToast();
+		}
+		Check(fallback == 2 && !store.isPending(a, id),
+			"only the latest fallback runs and the notice is consumed once");
+		Check(!store.takeNextPending(a, stock, true)
+			&& !store.takeNextPending(a, normal, true) && store.isPending(a, ackId),
+			"an active presentation prevents a burst even during a mode change");
+		const auto second = store.takeNextPending(a, normal);
+		Check(second && second->route == DeliveryRoute::StatusLineMessage
+			&& second->notice.record.id == ackId && !store.takeNextPending(a, stock),
+			"enabling modal keys routes the remaining ack to the status line once");
+
+		store.record(notice, true, {}, 120);
+		auto typing = normal;
+		typing.inInsertMode = true;
+		Check(!store.takeNextPending(a, typing), "modal notice waits while typing");
+		const auto afterDisable = store.takeNextPending(a, stock);
+		Check(afterDisable && afterDisable->route == DeliveryRoute::StockToast
+			&& !afterDisable->notice.fallbackToast && !store.takeNextPending(a, normal),
+			"disabling modal keys gives one stock delivery with summary when no callback survives");
+
+		const auto expired = store.record(ack, true, {}, 0);
+		const auto fresh = store.record(ack, true, {}, kPendingAckLifetimeMs - 1);
+		ack.severity = NoticeSeverity::Warning;
+		const auto warning = store.record(ack, true, {}, 0);
+		ack.severity = NoticeSeverity::Error;
+		const auto error = store.record(ack, true, {}, 0);
+		ack.severity = NoticeSeverity::Info;
+		ack.persistent = true;
+		const auto persistent = store.record(ack, true, {}, 0);
+		const auto durable = store.record(notice, true, {}, 0);
+		store.forgetExpiredAcks(kPendingAckLifetimeMs);
+		Check(!store.isPending(a, expired) && store.isPending(a, fresh)
+			&& store.isPending(a, warning) && store.isPending(a, error)
+			&& store.isPending(a, persistent) && store.isPending(a, durable),
+			"only old transient informational acknowledgements expire");
+		store.clearAccount(a);
+		Check(!store.takeNextPending(a, stock) && !store.takeNextPending(b, stock),
+			"logout drops all pending acknowledgements and notices for its account");
 	}
 
 	// 6. Local chat-name resolution: resolves visible peer ids in peer keys, keeps hidden/unknown as raw id, ignores non-peer numbers.

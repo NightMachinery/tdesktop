@@ -4328,6 +4328,10 @@ bool ModalKeysEnabled() {
 	return Enabled();
 }
 
+rpl::producer<bool> ModalKeysEnabledChanges() {
+	return EnabledChanges.events();
+}
+
 ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window) {
 	if (!window) {
 		return {

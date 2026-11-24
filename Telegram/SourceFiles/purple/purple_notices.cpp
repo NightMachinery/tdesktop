@@ -13,20 +13,27 @@
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
+#include "ui/toast/toast_widget.h"
 #include "window/window_controller.h"
+#include "window/window_session_controller.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
+#include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
+#include <QtWidgets/QApplication>
 
 #include <map>
+#include <utility>
 
 namespace Purple {
 namespace {
 
 const auto kAppKey = QString::fromLatin1(ModalNotices::kAppAccountKey);
+
+void SchedulePendingDelivery();
 
 struct StoredAction {
 	QString accountKey;
@@ -68,7 +75,8 @@ void PruneOrphanedActions(const QString &accountKey) {
 	}
 	auto &actions = Actions();
 	for (auto it = actions.begin(); it != actions.end();) {
-		if (it->second.accountKey == accountKey && !liveIds.contains(it->first)) {
+		if (it->second.accountKey == accountKey && !liveIds.contains(it->first)
+			&& !Store().isPending(accountKey, it->first)) {
 			it = actions.erase(it);
 		} else {
 			++it;
@@ -90,6 +98,7 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 		WatchedSessions().remove(raw);
 		Store().clearAccount(accountKey);
 		PurgeActionsForAccount(accountKey);
+		SchedulePendingDelivery();
 	}, session->lifetime());
 }
 
@@ -147,19 +156,21 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 	return fallback;
 }
 
+[[nodiscard]] bool CanPresentNotice(
+		::MainWindow *window,
+		const QString &accountKey) {
+	return window
+		&& !Core::App().passcodeLocked()
+		&& !window->controller().locked()
+		&& !PrivacyScreenActiveAny()
+		&& !PrivacyScreenActive(window)
+		&& WindowMatchesAccount(&window->controller(), accountKey);
+}
+
 [[nodiscard]] bool CanExposeNoticeInWindow(
 		::MainWindow *window,
 		const QString &accountKey) {
-	if (!window || !ModalKeysEnabled()) {
-		return false;
-	}
-	if (Core::App().passcodeLocked()
-		|| window->controller().locked()
-		|| Purple::PrivacyScreenActiveAny()
-		|| Purple::PrivacyScreenActive(window)) {
-		return false;
-	}
-	return WindowMatchesAccount(&window->controller(), accountKey);
+	return ModalKeysEnabled() && CanPresentNotice(window, accountKey);
 }
 
 [[nodiscard]] std::optional<QString> ResolveNoticePeerLabel(
@@ -271,6 +282,304 @@ void OpenNoticeLayerForRecord(
 	return *session ? PurpleNoticeAccountKey(*session) : QString();
 }
 
+using ModalNotices::DeliveryRoute;
+using ModalNotices::NoticeRecord;
+
+[[nodiscard]] bool CanShowDeferredToast(
+		::MainWindow *window,
+		const QString &accountKey) {
+	return CanPresentNotice(window, accountKey)
+		&& window->isVisible()
+		&& !window->isMinimized();
+}
+
+class ToastCapture final : public QObject {
+public:
+	explicit ToastCapture(const QString &accountKey) : _accountKey(accountKey) {
+		qApp->installEventFilter(this);
+	}
+
+	[[nodiscard]] QWidget *visibleToast() const {
+		if (!_toast || _toast->isHidden()) {
+			return nullptr;
+		}
+		if (!_toast->isVisible()) {
+			_toast->deleteLater();
+			return nullptr;
+		}
+		return _toast.data();
+	}
+
+private:
+	bool eventFilter(QObject *object, QEvent *event) override {
+		if (event->type() == QEvent::Show || event->type() == QEvent::ShowToParent) {
+			if (const auto toast = dynamic_cast<Ui::Toast::internal::Widget*>(object)) {
+				const auto host = dynamic_cast<::MainWindow*>(toast->window());
+				if (CanShowDeferredToast(host, _accountKey)) {
+					_toast = toast;
+				} else {
+				const auto guarded = QPointer(toast);
+				guarded->hide();
+				if (guarded) {
+					guarded->deleteLater();
+				}
+				}
+			}
+		}
+		return false;
+	}
+
+	QString _accountKey;
+	QPointer<QWidget> _toast;
+};
+
+[[nodiscard]] QWidget *ShowDeferredToast(
+		not_null<::MainWindow*> window,
+		const ModalNotices::PendingNotice &pending) {
+	if (pending.fallbackToast) {
+		// The legacy callbacks return void, and a stale show may do nothing.
+		auto capture = ToastCapture(pending.record.accountKey);
+		pending.fallbackToast();
+		if (const auto toast = capture.visibleToast()) {
+			return toast;
+		}
+	}
+	if (!CanShowDeferredToast(window.get(), pending.record.accountKey)) {
+		return nullptr;
+	}
+	const auto text = pending.record.summary.isEmpty()
+		? pending.record.formattedTitle()
+		: pending.record.summary;
+	const auto toast = Ui::Toast::Show(window->bodyWidget(), text);
+	return toast ? toast->widget().get() : nullptr;
+}
+
+void ShowStatusAck(::MainWindow *window, const NoticeRecord &record) {
+	if (CanExposeNoticeInWindow(window, record.accountKey)) {
+		SetModalStatusMessage(
+			window,
+			record.summary,
+			!record.persistent && record.severity != ModalNotices::NoticeSeverity::Info,
+			record.persistent ? 0 : ModalNotices::AckDurationMs(record.severity),
+			record.persistent);
+	}
+}
+
+class PendingNoticeDelivery final : public QObject {
+public:
+	PendingNoticeDelivery() : QObject(qApp) {
+		qApp->installEventFilter(this);
+		rpl::merge(
+			Core::App().passcodeLockChanges(),
+			PrivacyScreenChanges(),
+			ModalKeysEnabledChanges()
+		) | rpl::on_next([this] { schedule(); }, _lifetime);
+		Core::App().enumerateWindows([&](not_null<Window::Controller*> ctrl) {
+			if (const auto window = ctrl->widget()) {
+				watch(window);
+			}
+		});
+	}
+
+	void schedule() {
+		if (Core::Quitting()) {
+			return;
+		}
+		if (_toast) {
+			const auto host = dynamic_cast<::MainWindow*>(_toast->window());
+			if (!CanShowDeferredToast(host, _toastAccount)) {
+				const auto toast = std::exchange(_toast, {});
+				toast->hide();
+				if (toast) {
+					toast->deleteLater();
+				}
+			}
+		}
+		if (!_scheduled) {
+			_scheduled = true;
+			QTimer::singleShot(0, this, [this] {
+				_scheduled = false;
+				flush();
+			});
+		}
+	}
+
+private:
+	void watch(not_null<::MainWindow*> window) {
+		if (_windows.contains(window.get())) {
+			return;
+		}
+		_windows.insert(window.get());
+		const auto raw = window.get();
+		connect(raw, &QObject::destroyed, this, [this, raw] { _windows.remove(raw); });
+		window->controller().sessionControllerValue() | rpl::map([](auto session) {
+			return session ? session->session().termsLockValue() : rpl::single(false);
+		}) | rpl::flatten_latest() | rpl::on_next([this] {
+			schedule();
+		}, window->controller().lifetime());
+	}
+
+	bool eventFilter(QObject *object, QEvent *event) override {
+		const auto type = event->type();
+		if (type == QEvent::Hide && _toast && _toast.data() == object) {
+			_toast->deleteLater();
+			_toast.clear();
+			schedule();
+		} else if (type == QEvent::Show || type == QEvent::WindowActivate
+			|| type == QEvent::WindowStateChange) {
+			if (const auto window = dynamic_cast<::MainWindow*>(object)) {
+				watch(window);
+				schedule();
+			}
+		}
+		return false;
+	}
+
+	void flush() {
+		if (Core::Quitting() || Core::App().passcodeLocked() || PrivacyScreenActiveAny()) {
+			return;
+		}
+		Store().forgetExpiredAcks(crl::now());
+		const auto active = Core::App().activeWindow();
+		auto delivered = active && deliverIn(active);
+		Core::App().enumerateWindows([&](not_null<Window::Controller*> ctrl) {
+			if (!delivered && ctrl.get() != active) {
+				delivered = deliverIn(ctrl);
+			}
+		});
+	}
+
+	bool deliverIn(not_null<Window::Controller*> ctrl) {
+		const auto window = ctrl->widget();
+		if (!CanShowDeferredToast(window, kAppKey)) {
+			return false;
+		}
+		const auto accountKey = PurpleNoticeAccountKey(ctrl->maybeSession());
+		if (!Store().pendingCount(accountKey) && !Store().pendingCount(kAppKey)) {
+			return false;
+		}
+		if (ModalKeysEnabled() && window->isActiveWindow()) {
+			EnsureModalKeysAttached(window);
+		}
+		const auto ctx = ModalDeliveryContext(window);
+		const auto next = Store().takeNextPending(accountKey, ctx, _toast || _statusBusy);
+		if (!next) {
+			return false;
+		}
+		const auto &record = next->notice.record;
+		switch (next->route) {
+		case DeliveryRoute::StockToast:
+			_toast = ShowDeferredToast(window, next->notice);
+			if (_toast) {
+				_toastAccount = record.accountKey;
+				connect(_toast.data(), &QObject::destroyed, this, [this] { schedule(); });
+			} else {
+				schedule();
+			}
+			break;
+		case DeliveryRoute::OpenDialogNow:
+			OpenNoticeLayerForRecord(window, record);
+			break;
+		case DeliveryRoute::StatusLineMessage:
+		case DeliveryRoute::StatusLinePersistent:
+			ShowStatusAck(window, record);
+			_statusBusy = true;
+			QTimer::singleShot(ModalNotices::AckDurationMs(record.severity), this, [this] {
+				_statusBusy = false;
+				schedule();
+			});
+			break;
+		case DeliveryRoute::QueueDialogWithCue:
+		case DeliveryRoute::QueueSilentUntilAvailable:
+			Unexpected("Queue route for a ready Purple notice.");
+		}
+		PruneOrphanedActions(record.accountKey);
+		RefreshModalNoticeIndicator(window);
+		return true;
+	}
+
+	QSet<::MainWindow*> _windows;
+	QPointer<QWidget> _toast;
+	QString _toastAccount;
+	bool _scheduled = false;
+	bool _statusBusy = false;
+	rpl::lifetime _lifetime;
+};
+
+void SchedulePendingDelivery() {
+	static const auto delivery = new PendingNoticeDelivery();
+	delivery->schedule();
+}
+
+[[nodiscard]] Fn<void()> GuardDeferredFallback(
+		Window::Controller *origin,
+		const QString &accountKey,
+		Fn<void()> fallback) {
+	if (!origin || !fallback) {
+		return fallback;
+	}
+	const auto window = QPointer(origin->widget().get());
+	return [window, accountKey, run = std::move(fallback)] {
+		if (CanShowDeferredToast(window.data(), accountKey)) {
+			run();
+		}
+	};
+}
+
+void SubmitNotice(
+		NoticeRecord record,
+		Window::Controller *origin,
+		Fn<void()> fallback,
+		std::optional<PurpleNoticeAction> action = std::nullopt) {
+	const auto &accountKey = record.accountKey;
+	const auto window = ResolveEligibleMainWindow(origin, accountKey);
+	const auto ctx = ModalDeliveryContext(window);
+	const auto route = ModalNotices::DecideDelivery(
+		record.kind,
+		record.background,
+		record.persistent,
+		ctx);
+	const auto enqueue = !window
+		|| !CanPresentNotice(window, accountKey)
+		|| Store().hasPendingKey(record)
+		|| route == DeliveryRoute::QueueDialogWithCue;
+	if (!enqueue && route == DeliveryRoute::StockToast) {
+		if (fallback && (!origin || &window->controller() == origin)) {
+			fallback();
+		} else if (!fallback && record.kind == ModalNotices::NoticeKind::Dialog
+			&& !ctx.modalEnabled) {
+			window->controller().showToast(record.summary);
+		}
+	}
+	if (!ctx.modalEnabled && !enqueue) {
+		return;
+	}
+	const auto id = Store().record(
+		record,
+		enqueue,
+		enqueue ? GuardDeferredFallback(origin, accountKey, std::move(fallback)) : Fn<void()>(),
+		crl::now());
+	if (action) {
+		Actions()[id] = StoredAction{ accountKey, std::move(*action) };
+	} else {
+		Actions().erase(id);
+	}
+	PruneOrphanedActions(accountKey);
+	if (enqueue) {
+		SchedulePendingDelivery();
+	} else if (route == DeliveryRoute::OpenDialogNow) {
+		if (const auto stored = Store().findById(accountKey, id)) {
+			OpenNoticeLayerForRecord(window, *stored);
+		}
+	} else if (route == DeliveryRoute::StatusLineMessage
+		|| route == DeliveryRoute::StatusLinePersistent) {
+		ShowStatusAck(window, record);
+	}
+	if (window && CanExposeNoticeInWindow(window, accountKey)) {
+		RefreshModalNoticeIndicator(window);
+	}
+}
+
 } // namespace
 
 QString PurpleNoticeAccountKey(Main::Session *session) {
@@ -314,67 +623,11 @@ void ShowPurpleNotice(PurpleNoticeRequest request) {
 		rec.primaryActionLabel = request.primaryAction->label;
 	}
 
-	auto *mw = ResolveEligibleMainWindow(request.window, accountKey);
-	const auto ctx = ModalDeliveryContext(mw);
-	auto route = ModalNotices::DecideDelivery(
-		ModalNotices::NoticeKind::Dialog,
-		request.background,
-		false,
-		ctx);
-	// If modal is enabled and no window for this account exists yet, queue
-	// silently under this account rather than displaying in another account's window.
-	if (ctx.modalEnabled && !mw
-		&& route != ModalNotices::DeliveryRoute::QueueSilentUntilAvailable) {
-		route = ModalNotices::DeliveryRoute::QueueSilentUntilAvailable;
-	}
-
-	if (!ctx.modalEnabled) {
-		if (route == ModalNotices::DeliveryRoute::StockToast && mw) {
-			if (request.fallbackToast && (!request.window || &mw->controller() == request.window)) {
-				request.fallbackToast();
-			} else if (!request.fallbackToast) {
-				mw->controller().showToast(request.summary);
-			}
-		}
-		return;
-	}
-
-	const auto enqueuePending = (route == ModalNotices::DeliveryRoute::QueueDialogWithCue
-		|| route == ModalNotices::DeliveryRoute::QueueSilentUntilAvailable);
-	const auto id = Store().record(rec, enqueuePending);
-	if (request.primaryAction) {
-		Actions()[id] = StoredAction{
-			.accountKey = accountKey,
-			.action = std::move(*request.primaryAction),
-		};
-	} else {
-		// Coalesced passive update invalidates any previously stored action callback.
-		Actions().erase(id);
-	}
-	PruneOrphanedActions(accountKey);
-
-	switch (route) {
-	case ModalNotices::DeliveryRoute::StockToast:
-		return;
-	case ModalNotices::DeliveryRoute::QueueSilentUntilAvailable:
-		return;
-	case ModalNotices::DeliveryRoute::QueueDialogWithCue:
-		if (mw) {
-			RefreshModalNoticeIndicator(mw);
-		}
-		return;
-	case ModalNotices::DeliveryRoute::OpenDialogNow:
-		if (mw) {
-			if (const auto stored = Store().findById(accountKey, id)) {
-				OpenNoticeLayerForRecord(mw, *stored);
-			}
-			RefreshModalNoticeIndicator(mw);
-		}
-		return;
-	case ModalNotices::DeliveryRoute::StatusLineMessage:
-	case ModalNotices::DeliveryRoute::StatusLinePersistent:
-		break;
-	}
+	SubmitNotice(
+		std::move(rec),
+		request.window,
+		std::move(request.fallbackToast),
+		std::move(request.primaryAction));
 }
 
 void ShowPurpleAck(PurpleAckRequest request) {
@@ -397,53 +650,7 @@ void ShowPurpleAck(PurpleAckRequest request) {
 	rec.background = request.background;
 	rec.persistent = request.persistent;
 	rec.timestampMs = QDateTime::currentMSecsSinceEpoch();
-	auto *mw = ResolveEligibleMainWindow(request.window, accountKey);
-	const auto ctx = ModalDeliveryContext(mw);
-	const auto route = ModalNotices::DecideDelivery(
-		ModalNotices::NoticeKind::Ack,
-		request.background,
-		request.persistent,
-		ctx);
-
-	if (ctx.modalEnabled) {
-		const auto id = Store().record(rec, /*enqueuePending=*/false);
-		Actions().erase(id);
-		PruneOrphanedActions(accountKey);
-	}
-
-	switch (route) {
-	case ModalNotices::DeliveryRoute::StockToast:
-		if (mw && request.fallbackToast
-			&& (!request.window || &mw->controller() == request.window)) {
-			request.fallbackToast();
-		}
-		return;
-	case ModalNotices::DeliveryRoute::QueueSilentUntilAvailable:
-		return;
-	case ModalNotices::DeliveryRoute::StatusLineMessage:
-		if (mw) {
-			SetModalStatusMessage(
-				mw,
-				request.text,
-				request.severity != ModalNotices::NoticeSeverity::Info,
-				ModalNotices::AckDurationMs(request.severity),
-				/*persistent=*/false);
-		}
-		return;
-	case ModalNotices::DeliveryRoute::StatusLinePersistent:
-		if (mw) {
-			SetModalStatusMessage(
-				mw,
-				request.text,
-				false,
-				0,
-				/*persistent=*/true);
-		}
-		return;
-	case ModalNotices::DeliveryRoute::OpenDialogNow:
-	case ModalNotices::DeliveryRoute::QueueDialogWithCue:
-		break;
-	}
+	SubmitNotice(std::move(rec), request.window, std::move(request.fallbackToast));
 }
 
 int PendingPurpleNoticeCount(Main::Session *session) {
@@ -459,26 +666,10 @@ int PendingPurpleNoticeCount(Main::Session *session) {
 }
 
 void MaybeFlushPendingNotices(not_null<::MainWindow*> window) {
-	const auto ctx = ModalDeliveryContext(window.get());
-	if (!ModalNotices::ShouldFlushPendingDialog(ctx)) {
-		return;
+	if (PendingPurpleNoticeCount(window->controller().maybeSession())
+		&& ModalNotices::ShouldFlushPendingDialog(ModalDeliveryContext(window.get()))) {
+		SchedulePendingDelivery();
 	}
-	const auto session = window->controller().maybeSession();
-	const auto accountKey = PurpleNoticeAccountKey(session);
-	if (accountKey.isEmpty()) {
-		return;
-	}
-	// Flush at most ONE eligible dialog per transition so multiple queued
-	// notices never cause a chain of modal interruptions.
-	auto next = Store().takeNextPending(accountKey);
-	if (!next && accountKey != kAppKey) {
-		next = Store().takeNextPending(kAppKey);
-	}
-	if (!next) {
-		return;
-	}
-	OpenNoticeLayerForRecord(window, *next);
-	RefreshModalNoticeIndicator(window.get());
 }
 
 void OpenPurpleNoticeHistory(not_null<::MainWindow*> window) {

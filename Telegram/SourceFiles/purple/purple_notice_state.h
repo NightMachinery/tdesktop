@@ -14,7 +14,7 @@
 namespace Purple::ModalNotices {
 
 inline constexpr int kMaxHistoryPerAccount = 64;
-inline constexpr int kMaxPendingPerAccount = 16;
+inline constexpr int kPendingAckLifetimeMs = 30000;
 inline constexpr int kAckDurationInfoMs = 3500;
 inline constexpr int kAckDurationErrorMs = 6500;
 inline constexpr auto kAppAccountKey = "app";
@@ -181,6 +181,18 @@ struct DeliveryContext {
 		&& !ctx.privacyScreenActive;
 }
 
+[[nodiscard]] inline std::optional<DeliveryRoute> PendingRoute(
+		const NoticeRecord &record,
+		const DeliveryContext &ctx,
+		bool presentationBusy) {
+	if (presentationBusy || ctx.passcodeLocked || ctx.privacyScreenActive
+		|| (ctx.modalEnabled && record.kind == NoticeKind::Dialog
+			&& !ShouldFlushPendingDialog(ctx))) {
+		return std::nullopt;
+	}
+	return DecideDelivery(record.kind, false, record.persistent, ctx);
+}
+
 [[nodiscard]] inline bool IsPeerIdConfigKey(
 		const QString &table,
 		const QString &key) {
@@ -222,84 +234,110 @@ struct DeliveryContext {
 	return out;
 }
 
+struct PendingNotice {
+	NoticeRecord record;
+	std::function<void()> fallbackToast;
+	qint64 enqueuedAtMs = 0;
+};
+
+struct PendingDelivery {
+	PendingNotice notice;
+	DeliveryRoute route = DeliveryRoute::StockToast;
+};
+
 class AccountNoticeStore final {
 public:
-	uint64_t record(NoticeRecord rec, bool enqueuePending) {
+	uint64_t record(
+			NoticeRecord rec,
+			bool enqueuePending,
+			std::function<void()> fallbackToast = {},
+			qint64 now = 0) {
 		const auto key = rec.accountKey;
 		auto &bucket = _accounts[key];
-		uint64_t assignedId = 0;
-
+		auto pending = bucket.pending.end();
 		if (!rec.coalesceKey.isEmpty()) {
-			auto it = std::find_if(
-				bucket.history.begin(),
-				bucket.history.end(),
-				[&](const NoticeRecord &existing) {
-					return existing.coalesceKey == rec.coalesceKey;
-				});
-			if (it != bucket.history.end()) {
-				const auto nextRepeat = it->repeatCount + std::max(1, rec.repeatCount);
-				assignedId = it->id;
-				*it = rec;
-				it->id = assignedId;
-				it->repeatCount = nextRepeat;
-				if (it != bucket.history.begin()) {
-					auto updated = std::move(*it);
-					bucket.history.erase(it);
-					bucket.history.insert(bucket.history.begin(), std::move(updated));
-				}
+			const auto matches = [&](const NoticeRecord &existing) {
+				return existing.coalesceKey == rec.coalesceKey;
+			};
+			pending = std::find_if(bucket.pending.begin(), bucket.pending.end(),
+				[&](const PendingNotice &item) { return matches(item.record); });
+			const auto previous = std::find_if(bucket.history.begin(), bucket.history.end(), matches);
+			if (pending != bucket.pending.end()) {
+				rec.id = pending->record.id;
+				rec.repeatCount += pending->record.repeatCount;
+			} else if (previous != bucket.history.end()) {
+				rec.id = previous->id;
+				rec.repeatCount += previous->repeatCount;
 			}
 		}
-
-		if (assignedId == 0) {
-			assignedId = ++_nextId;
-			rec.id = assignedId;
-			bucket.history.insert(bucket.history.begin(), rec);
-			if (int(bucket.history.size()) > kMaxHistoryPerAccount) {
-				bucket.history.resize(kMaxHistoryPerAccount);
-			}
+		if (!rec.id) {
+			rec.id = ++_nextId;
 		}
+		remember(rec);
 
 		if (enqueuePending) {
-			const auto &latest = bucket.history.front();
-			if (!latest.coalesceKey.isEmpty()) {
-				auto pit = std::find_if(
-					bucket.pending.begin(),
-					bucket.pending.end(),
-					[&](const NoticeRecord &p) {
-						return p.coalesceKey == latest.coalesceKey;
-					});
-				if (pit != bucket.pending.end()) {
-					*pit = latest;
-					return assignedId;
-				}
+			auto item = PendingNotice{ rec, std::move(fallbackToast), now };
+			if (pending != bucket.pending.end()) {
+				*pending = std::move(item);
+			} else {
+				bucket.pending.push_back(std::move(item));
 			}
-			bucket.pending.push_back(latest);
-			if (int(bucket.pending.size()) > kMaxPendingPerAccount) {
-				bucket.pending.erase(bucket.pending.begin());
-				++bucket.droppedPending;
-			}
-		} else {
-			std::erase_if(bucket.pending, [=](const NoticeRecord &pending) {
-				return pending.id == assignedId;
+		} else if (pending != bucket.pending.end()) {
+			bucket.pending.erase(pending);
+		}
+		return rec.id;
+	}
+
+	void forgetExpiredAcks(qint64 now) {
+		for (auto &[key, bucket] : _accounts) {
+			std::erase_if(bucket.pending, [&](const PendingNotice &item) {
+				return item.record.kind == NoticeKind::Ack
+					&& item.record.severity == NoticeSeverity::Info
+					&& !item.record.persistent
+					&& now - item.enqueuedAtMs >= kPendingAckLifetimeMs;
 			});
 		}
-		return assignedId;
 	}
 
-	[[nodiscard]] int droppedPendingCount(const QString &accountKey) const {
-		const auto it = _accounts.find(accountKey);
-		return (it == _accounts.end()) ? 0 : it->second.droppedPending;
-	}
-
-	[[nodiscard]] std::optional<NoticeRecord> takeNextPending(
-			const QString &accountKey) {
-		const auto it = _accounts.find(accountKey);
-		if (it == _accounts.end() || it->second.pending.empty()) {
-			return std::nullopt;
+	[[nodiscard]] std::optional<PendingDelivery> takeNextPending(
+			const QString &accountKey,
+			const DeliveryContext &ctx,
+			bool presentationBusy = false) {
+		const auto appKey = QString::fromLatin1(kAppAccountKey);
+		for (const auto &key : { accountKey, appKey }) {
+			const auto it = _accounts.find(key);
+			if (it == _accounts.end() || it->second.pending.empty()) {
+				continue;
+			}
+			auto &pending = it->second.pending;
+			const auto route = PendingRoute(pending.front().record, ctx, presentationBusy);
+			if (!route) {
+				continue;
+			}
+			auto next = std::move(pending.front());
+			pending.erase(pending.begin());
+			if (ctx.modalEnabled && !findById(key, next.record.id)) {
+				remember(next.record);
+			}
+			return PendingDelivery{ std::move(next), *route };
 		}
-		auto next = std::move(it->second.pending.front());
-		it->second.pending.erase(it->second.pending.begin());
-		return next;
+		return std::nullopt;
+	}
+
+	[[nodiscard]] bool isPending(const QString &accountKey, uint64_t id) const {
+		const auto it = _accounts.find(accountKey);
+		return it != _accounts.end() && std::any_of(
+			it->second.pending.begin(), it->second.pending.end(),
+			[=](const PendingNotice &item) { return item.record.id == id; });
+	}
+
+	[[nodiscard]] bool hasPendingKey(const NoticeRecord &record) const {
+		const auto it = _accounts.find(record.accountKey);
+		return !record.coalesceKey.isEmpty() && it != _accounts.end()
+			&& std::any_of(it->second.pending.begin(), it->second.pending.end(),
+				[&](const PendingNotice &item) {
+					return item.record.coalesceKey == record.coalesceKey;
+				});
 	}
 
 	[[nodiscard]] int pendingCount(const QString &accountKey) const {
@@ -338,10 +376,18 @@ public:
 	}
 
 private:
+	void remember(const NoticeRecord &record) {
+		auto &history = _accounts[record.accountKey].history;
+		std::erase_if(history, [&](const NoticeRecord &item) { return item.id == record.id; });
+		history.insert(history.begin(), record);
+		if (int(history.size()) > kMaxHistoryPerAccount) {
+			history.resize(kMaxHistoryPerAccount);
+		}
+	}
+
 	struct AccountBucket {
 		std::vector<NoticeRecord> history;
-		std::vector<NoticeRecord> pending;
-		int droppedPending = 0;
+		std::vector<PendingNotice> pending;
 	};
 
 	uint64_t _nextId = 0;
