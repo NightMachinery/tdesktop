@@ -339,6 +339,13 @@ ordered(keys, "void Keys::schedulePendingNoticeFlush", "_noticeLayers.empty()",
         "&QObject::destroyed", "_noticePresentation == presentation", "MaybeFlushPendingNotices")
 ordered(keys, "PeekCountdownChanges()", "schedulePendingNoticeFlush()", "PeekCountdownPending()")
 wait_cpp = read("purple/purple_peek_controls.cpp")
+ordered(wait_cpp, "PendingWait::PendingWait()", "aboutToQuit", "_shuttingDown = true", "cancel()")
+ordered(wait_cpp, "void PendingWait::watch", "widget->lifetime().add", "_originWidget == widget.get()", "cancel()")
+ordered(wait_cpp, "void PendingWait::quietCancel", "cancel()", "void PendingWait::cancel",
+        "onResult = _onResult", "_gate.cancel()", "closeCover()", "onResult.deliver({})")
+ordered(wait_cpp, "WaitResult PendingWait::request", "if (pending())", "cancel()", "receiver.deliver({})",
+        "_onResult = receiver", "sessionDataAboutToBeCleared()", "cancel()")
+ordered(wait_cpp, "void PendingWait::tick", "presenceChanged()", "generation != _coverGeneration", "_gate.tick(now)")
 ordered(wait_cpp, "void PendingWait::report", ".session = session", ".background = background",
         "_session = weak", "void PendingWait::confirm", "report(result, origin, session.get(), true, onResult)")
 notices_cpp = read("purple/purple_notices.cpp")

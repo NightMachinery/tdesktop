@@ -5,7 +5,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <utility>
 
 namespace Purple {
 
@@ -52,6 +54,26 @@ enum class WaitOutcome { NoOp, Pending, Applied, Refused, Expired };
 struct WaitResult {
 	WaitOutcome outcome = WaitOutcome::NoOp;
 	QString error;
+};
+
+class WaitReceiver final {
+public:
+	using Callback = std::function<void(const WaitResult&)>;
+	WaitReceiver() = default;
+	explicit WaitReceiver(Callback callback)
+	: _callback(callback ? std::make_shared<Callback>(std::move(callback)) : nullptr) {
+	}
+	[[nodiscard]] explicit operator bool() const { return bool(_callback); }
+	void deliver(const WaitResult &result) const {
+		if (_callback && result.outcome != WaitOutcome::Pending) {
+			if (const auto run = std::exchange(*_callback, {})) {
+				run(result);
+			}
+		}
+	}
+
+private:
+	std::shared_ptr<Callback> _callback;
 };
 
 [[nodiscard]] bool WaitRequired(

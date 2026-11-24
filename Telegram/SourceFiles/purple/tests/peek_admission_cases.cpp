@@ -38,6 +38,27 @@ int main(int argc, char **argv) {
 			std::printf("FAIL %s\n", name);
 		}
 	};
+	for (const auto name : { "quiet cancellation", "shutdown", "session loss", "window close", "replacement" }) {
+		auto deliveries = 0;
+		auto receiver = WaitReceiver([&](const WaitResult &result) {
+			check(result.outcome == WaitOutcome::NoOp, name);
+			++deliveries;
+		});
+		const auto capturedByTick = receiver;
+		receiver.deliver({ WaitOutcome::Pending });
+		check(!deliveries, "waiting is not terminal");
+		receiver.deliver({});
+		capturedByTick.deliver({ WaitOutcome::Expired });
+		check(deliveries == 1, "late captured tick cannot redeliver cancellation");
+	}
+	auto callbacks = 0;
+	auto reentrant = WaitReceiver();
+	reentrant = WaitReceiver([&](const WaitResult &) {
+		++callbacks;
+		reentrant.deliver({});
+	});
+	reentrant.deliver({ WaitOutcome::Applied });
+	check(callbacks == 1, "receiver is consumed before reentrant completion");
 	auto temp = QTemporaryDir();
 	check(temp.isValid(), "fixture directory");
 	const auto path = temp.filePath(u"settings.toml"_q);
