@@ -245,6 +245,8 @@ for action, chord in (
     ("CopyMessage", "y y"),
     ("CopyMessageLink", "y l"),
     ("CopyMessageUrl", "y u"),
+    ("UnreadBuffer", "SPC u"),
+    ("UnreadBuffer", "SPC b I"),
 ):
     bound(action, chord)
 for index in range(1, 7):
@@ -277,8 +279,10 @@ for action, key in (
     bound(action, key, chat_body)
 
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
+ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
 ordered(keys, "avatarSession", "avatarPeerId")
 keys_ui = read("purple/purple_keys_ui.cpp")
+ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
 
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.

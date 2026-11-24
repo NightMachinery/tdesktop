@@ -67,6 +67,7 @@ with at most three strokes per chord:
 - **Leader (`SPC`):**
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
   - `SPC ,`, `SPC RET`, `SPC b b`: chat switcher palette.
+  - `SPC u`, `SPC b I`: unread unmuted chats buffer (iBuffer).
   - `SPC b`: active chat (`b i` info, `b m` chat menu, `b p` pinned, `b v`
     preview, `b s` scheduled, `b d` calendar, `b u` attach files, `b w`
     wallpaper toggle).
@@ -152,11 +153,21 @@ normalize to `S-g`. Files up to 32 KiB and 256 entries are validated atomically:
 any invalid entry keeps built-in defaults active and displays the exact reason
 on the modal status line and cheatsheet footer.
 
-## Upstream hooks
+## Unread buffer, avatars, Zen fullscreen, privacy screen, and topics
 
+- **Unread unmuted chats buffer (`SPC u`, `SPC b I`):** an iBuffer-style list of
+  chats that currently have unread unmuted notifications, showing profile
+  pictures, `DM` / `GP` / `CH` tags, unread counts, and message previews.
+  Navigate with `j`/`k`, `C-n`/`C-p`, `g g`, `G`, filter orderless with `/`,
+  refresh with `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`,
+  open with `RET` or `o`, and mark read with `r` or `x`. Marking more than one
+  chat as read asks for an explicit `y` / `RET` confirmation first because
+  marking read sends read receipts.
 - **Profile pictures in modal menus:** circular peer avatars appear beside
-  people, groups, channels, and accounts in `M-x` peer-scoped commands (and in
-  the chat palette `SPC ,`).
+  people, groups, channels, and accounts in the unread buffer (`SPC u`), chat
+  palette (`SPC ,`), and `M-x` peer-scoped commands.
+
+## Upstream hooks
 
 - `core/application.cpp`: delegates key press, shortcut override, paired key
   release, window deactivation, and IME events to `Purple::HandleModalKeys`.

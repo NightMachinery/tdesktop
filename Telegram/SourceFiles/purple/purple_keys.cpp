@@ -36,6 +36,7 @@
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "media/player/media_player_instance.h"
+#include "menu/menu_mark_as_read.h"
 #include "purple/purple_chat_background.h"
 #include "purple/purple_chat_palette.h"
 #include "purple/purple_config.h"
@@ -235,6 +236,7 @@ enum class Action {
 	NextChat,
 	OpenChat,
 	ChatPalette,
+	UnreadBuffer,
 	PreviousFolder,
 	NextFolder,
 	SelectMessage,
@@ -335,6 +337,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_chat_open(tr::now); } },
 	{ Action::ChatPalette, "chat-palette", "chats", "",
 		[] { return tr::lng_purple_chat_palette(tr::now); } },
+	{ Action::UnreadBuffer, "unread-chats-buffer", "chats", "",
+		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
 	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, true },
 	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
@@ -1275,6 +1279,45 @@ ModalUnread::UnreadSummary ComputeUnreadSummary(not_null<Main::Session*> session
 	return summary;
 }
 
+std::vector<ModalUnread::BufferItem> CollectUnreadBufferItems(
+		not_null<Main::Session*> session) {
+	auto items = std::vector<ModalUnread::BufferItem>();
+	const auto list = session->data().chatsList();
+	if (!list) {
+		return items;
+	}
+	for (const auto &row : list->indexed()->all()) {
+		const auto history = row->history();
+		if (!history) {
+			continue;
+		}
+		const auto metrics = MetricsForHistory(history);
+		if (!ModalUnread::HasUnmutedUnreadNotification(metrics)) {
+			continue;
+		}
+		const auto peer = history->peer;
+		const auto unread = history->chatListUnreadState();
+		const auto msg = history->chatListMessage();
+		auto preview = msg
+			? msg->notificationText().text.simplified()
+			: QString();
+		items.push_back({
+			.peerId = peer->id.value,
+			.title = peer->name(),
+			.username = peer->username(),
+			.preview = std::move(preview),
+			.bucket = BucketForPeer(peer),
+			.isBot = peer->isBot(),
+			.isForum = (peer->forum() != nullptr),
+			.unreadCount = ModalUnread::UnmutedUnreadBadgeCount(metrics),
+			.mentions = unread.mentions,
+			.markedUnread = (unread.marks > unread.marksMuted),
+			.lastTimestamp = int64_t(history->adjustedChatListTimeId()),
+		});
+	}
+	return items;
+}
+
 bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::MoveUp:
@@ -1345,6 +1388,8 @@ bool Available(Action action, const Target &target) {
 	case Action::FocusOtherPane:
 		return Available(Action::FocusChats, target)
 			|| Available(Action::FocusConversation, target);
+	case Action::UnreadBuffer:
+		return target.controller != nullptr;
 	default: return true;
 	}
 }
@@ -1485,6 +1530,7 @@ private:
 	void showFeedback(QString text, bool isError = false);
 	void scheduleUnreadRefresh();
 	void refreshUnreadSummary();
+	void showUnreadBuffer(const Target &target);
 	void refreshStatusBar();
 	void showWhichKey();
 	void hideWhichKey();
@@ -1523,6 +1569,7 @@ private:
 		DescribeKey,
 		DescribeCommand,
 		StockShortcuts,
+		UnreadBuffer,
 	};
 	ActiveLayer _activeLayer = ActiveLayer::None;
 	bool _describeKeyHasDetails = false;
@@ -1852,6 +1899,70 @@ void Keys::refreshUnreadSummary() {
 	}
 }
 
+void Keys::showUnreadBuffer(const Target &target) {
+	const auto current = owner();
+	if (!current) {
+		return;
+	}
+	if (!_feedbackError) {
+		_feedbackText.clear();
+		_feedbackTimer.stop();
+	}
+	const auto guard = QPointer(this);
+	const auto weakCtrl = base::make_weak(current);
+	const auto sessionWeak = base::make_weak(&current->session());
+	_activeLayer = ActiveLayer::UnreadBuffer;
+	auto layer = ModalUi::CreateUnreadBufferLayer({
+		.session = sessionWeak,
+		.items = CollectUnreadBufferItems(&current->session()),
+		.onRefresh = [sessionWeak] {
+			if (const auto s = sessionWeak.get()) {
+				return CollectUnreadBufferItems(s);
+			}
+			return std::vector<ModalUnread::BufferItem>();
+		},
+		.onOpenChat = [guard, weakCtrl](PeerId peerId) {
+			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
+				const auto ctrl = weakCtrl.get();
+				if (!guard || !ctrl || !Enabled()) {
+					return;
+				}
+				if (const auto peer = ctrl->session().data().peerLoaded(peerId)) {
+					ctrl->showPeerHistory(peer);
+				}
+			});
+		},
+		.onMarkRead = [guard, sessionWeak](std::vector<PeerId> peerIds) {
+			const auto s = sessionWeak.get();
+			if (!s) {
+				return;
+			}
+			for (const auto peerId : peerIds) {
+				if (const auto peer = s->data().peerLoaded(peerId)) {
+					if (const auto history = s->data().historyLoaded(peer)) {
+						MarkAsReadMenu::MarkAsReadThread(history);
+					}
+				}
+			}
+			if (guard) {
+				guard->scheduleUnreadRefresh();
+			}
+		},
+	});
+	layer->lifetime().add([guard] {
+		if (!guard) return;
+		if (guard->_activeLayer == ActiveLayer::UnreadBuffer) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->refreshStatusBar();
+		}
+	});
+	_window->showOrHideBoxOrLayer(
+		std::move(layer),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
+	refreshStatusBar();
+}
+
 void Keys::enterNormal(bool silent) {
 	clearPrefix();
 	_normal = true;
@@ -1950,6 +2061,12 @@ void Keys::refreshStatusBar() {
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Shortcuts & Gestures"_q;
 			state.rightCue = u"ESC close"_q;
+			break;
+		case ActiveLayer::UnreadBuffer:
+			state.badge = ModalUi::BadgeKind::Palette;
+			state.badgeText = u"UNREAD"_q;
+			state.paneLabel = u"Unread Unmuted Chats"_q;
+			state.rightCue = u"j/k move  ·  RET open  ·  m/u/* mark  ·  x read  ·  q close"_q;
 			break;
 		case ActiveLayer::None:
 			break;
@@ -2517,6 +2634,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		clearPrefix();
 		ShowChatPalette(current);
 		break;
+	case Action::UnreadBuffer:
+		clearPrefix();
+		showUnreadBuffer(target);
+		break;
 	case Action::OpenMusic:
 		ToggleMusicSection(current);
 		break;
@@ -2920,6 +3041,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 	}
 	{
 		auto panes = ModalUi::HelpSection{ .title = u"PANES, FOLDERS & TOGGLES"_q };
+		pushRow(panes.rows, rowFor(Action::UnreadBuffer, u"Unread unmuted chats"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q, 1));

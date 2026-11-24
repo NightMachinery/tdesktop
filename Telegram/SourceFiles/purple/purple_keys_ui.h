@@ -4,6 +4,7 @@
 #include "base/weak_ptr.h"
 #include "data/data_types.h"
 #include "purple/purple_keys_mx.h"
+#include "purple/purple_keys_unread.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/rp_widget.h"
 
@@ -170,5 +171,16 @@ struct PaletteConfig {
 
 [[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateCommandPaletteLayer(
 	PaletteConfig config);
+
+struct UnreadBufferConfig {
+	base::weak_ptr<Main::Session> session;
+	std::vector<ModalUnread::BufferItem> items;
+	Fn<std::vector<ModalUnread::BufferItem>()> onRefresh;
+	Fn<void(PeerId peerId)> onOpenChat;
+	Fn<void(std::vector<PeerId> peerIds)> onMarkRead;
+};
+
+[[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateUnreadBufferLayer(
+	UnreadBufferConfig config);
 
 } // namespace Purple::ModalUi

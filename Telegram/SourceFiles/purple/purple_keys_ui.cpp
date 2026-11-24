@@ -19,6 +19,7 @@
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
 
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
@@ -2025,6 +2026,689 @@ private:
 	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
 };
 
+// ---------------------------------------------------------------------------
+// UnreadBufferLayer (SPC u / SPC b I — iBuffer for unread unmuted chats)
+// ---------------------------------------------------------------------------
+
+[[nodiscard]] QString FormatShortTimestamp(int64_t unixSec) {
+	if (unixSec <= 0) {
+		return QString();
+	}
+	const auto dt = QDateTime::fromSecsSinceEpoch(unixSec);
+	const auto now = QDateTime::currentDateTime();
+	if (dt.date() == now.date()) {
+		return dt.toString(QStringLiteral("HH:mm"));
+	}
+	if (dt.daysTo(now) < 7) {
+		return dt.toString(QStringLiteral("ddd"));
+	}
+	return dt.toString(QStringLiteral("MMM d"));
+}
+
+class UnreadBufferRowsWidget final : public Ui::RpWidget {
+public:
+	UnreadBufferRowsWidget(
+		not_null<QWidget*> parent,
+		base::weak_ptr<Main::Session> session,
+		Fn<void(int row)> onClick)
+	: RpWidget(parent)
+	, _session(std::move(session))
+	, _onClick(std::move(onClick)) {
+		setMouseTracking(true);
+		if (const auto s = _session.get()) {
+			s->downloaderTaskFinished() | rpl::on_next([this] {
+				update();
+			}, lifetime());
+		}
+	}
+
+	static constexpr int kRowHeight = 46;
+
+	void setData(
+			const std::vector<ModalUnread::BufferItem> &items,
+			const std::vector<int> &visible,
+			const QSet<uint64_t> &marked,
+			int selected) {
+		_items = items;
+		_visible = visible;
+		_marked = marked;
+		_selected = selected;
+		_hovered = -1;
+		resize(width(), std::max(72, int(_visible.size()) * kRowHeight + 8));
+		update();
+	}
+
+	void setSelectionAndMarks(int selected, const QSet<uint64_t> &marked) {
+		_selected = selected;
+		_marked = marked;
+		update();
+	}
+
+protected:
+	void mouseMoveEvent(QMouseEvent *e) override {
+		const auto row = (e->pos().y() - 4) / kRowHeight;
+		const auto next = (row >= 0 && row < int(_visible.size())) ? row : -1;
+		if (next != _hovered) {
+			_hovered = next;
+			setCursor((next >= 0) ? style::cur_pointer : style::cur_default);
+			update();
+		}
+	}
+
+	void leaveEventHook(QEvent *) override {
+		if (_hovered >= 0) {
+			_hovered = -1;
+			update();
+		}
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto row = (e->pos().y() - 4) / kRowHeight;
+		if (row >= 0 && row < int(_visible.size()) && _onClick) {
+			_onClick(row);
+		}
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto rtl = IsRtl(this);
+		const auto monoFont = MonoFont(10, true);
+		const auto timeFont = MonoFont(10, false);
+
+		if (_visible.empty()) {
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			p.drawText(rect(), Qt::AlignCenter, u"No unread unmuted chats match."_q);
+			return;
+		}
+
+		const auto clip = e->rect();
+		const auto first = std::max(0, (clip.top() - 4) / kRowHeight);
+		const auto till = std::min(int(_visible.size()), (clip.bottom() - 4) / kRowHeight + 2);
+		const auto session = _session.get();
+
+		for (auto row = first; row < till; ++row) {
+			const auto &item = _items[_visible[row]];
+			const auto y = 4 + row * kRowHeight;
+			const auto rowRect = QRect(8, y + 1, width() - 16, kRowHeight - 2);
+			const auto isActive = (row == _selected);
+			const auto isHover = (row == _hovered);
+			const auto isMarked = _marked.contains(item.peerId);
+
+			if (isActive || isHover || isMarked) {
+				auto fill = st::windowBgOver->c;
+				if (!isActive && !isMarked) {
+					fill.setAlpha(140);
+				} else if (isMarked && !isActive) {
+					fill = BlendColor(st::windowBg->c, st::windowActiveTextFg->c, 0.08);
+				}
+				p.setPen(Qt::NoPen);
+				p.setBrush(fill);
+				p.drawRoundedRect(rowRect, 7, 7);
+				if (isActive) {
+					const auto barRect = rtl
+						? QRect(rowRect.right() - 2, rowRect.top() + 6, 3, rowRect.height() - 12)
+						: QRect(rowRect.left(), rowRect.top() + 6, 3, rowRect.height() - 12);
+					p.setBrush(st::windowActiveTextFg->c);
+					p.drawRoundedRect(barRect, 1.5, 1.5);
+				}
+			}
+
+			const auto midY = rowRect.center().y() + 1;
+
+			// Mark gutter (* when marked).
+			constexpr auto kMarkW = 18;
+			const auto markX = rtl
+				? (rowRect.right() - 8 - kMarkW)
+				: (rowRect.left() + 8);
+			if (isMarked) {
+				p.setFont(MonoFont(13, true));
+				p.setPen(st::windowActiveTextFg);
+				p.drawText(QRect(markX, rowRect.top(), kMarkW, rowRect.height()), Qt::AlignCenter, u"*"_q);
+			}
+
+			// Circular profile picture (28 px).
+			constexpr auto kAvatarSize = 28;
+			const auto avatarX = rtl
+				? (markX - 6 - kAvatarSize)
+				: (markX + kMarkW + 6);
+			if (session) {
+				if (const auto peer = session->data().peerLoaded(PeerId(item.peerId))) {
+					auto &view = _avatars[item.peerId];
+					peer->loadUserpic();
+					peer->paintUserpic(p, view, avatarX, midY - kAvatarSize / 2, kAvatarSize, true);
+				}
+			}
+
+			// Far side: timestamp + unread count badge + mention indicator.
+			auto farReserve = 12;
+			const auto timeStr = FormatShortTimestamp(item.lastTimestamp);
+			if (!timeStr.isEmpty()) {
+				const auto tw = MeasureTextWidth(timeFont, timeStr);
+				const auto tx = rtl
+					? (rowRect.left() + farReserve)
+					: (rowRect.right() - farReserve - tw);
+				p.setFont(timeFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(QRect(tx, rowRect.top() + 4, tw, 16), Qt::AlignCenter, timeStr);
+				farReserve += tw + 10;
+			}
+			const auto badgeStr = (item.unreadCount > 0)
+				? QString::number(item.unreadCount)
+				: (item.markedUnread ? u"●"_q : QString());
+			if (!badgeStr.isEmpty()) {
+				const auto bw = std::max(22, MeasureTextWidth(monoFont, badgeStr) + 10);
+				const auto bx = rtl
+					? (rowRect.left() + 12)
+					: (rowRect.right() - 12 - bw);
+				const auto badgeRect = QRect(bx, rowRect.top() + 22, bw, 18);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::windowActiveTextFg->c);
+				p.drawRoundedRect(badgeRect, 9, 9);
+				p.setFont(monoFont);
+				p.setPen(Qt::white);
+				p.drawText(badgeRect, Qt::AlignCenter, badgeStr);
+				farReserve = std::max(farReserve, bw + 22);
+			}
+			if (item.mentions > 0) {
+				const auto mw = 20;
+				const auto mx = rtl
+					? (rowRect.left() + farReserve)
+					: (rowRect.right() - farReserve - mw);
+				const auto mRect = QRect(mx, rowRect.top() + 22, mw, 18);
+				auto mFill = BadgeColor(BadgeKind::Local);
+				mFill.setAlpha(32);
+				p.setPen(Qt::NoPen);
+				p.setBrush(mFill);
+				p.drawRoundedRect(mRect, 9, 9);
+				p.setFont(monoFont);
+				p.setPen(BadgeColor(BadgeKind::Local));
+				p.drawText(mRect, Qt::AlignCenter, u"@"_q);
+				farReserve += mw + 8;
+			}
+
+			// Bucket pill (DM / GP / CH) + optional BOT / TOPIC tag beside title.
+			const auto tagText = ModalUnread::BucketTag(item.bucket);
+			const auto tagW = MeasureTextWidth(monoFont, tagText) + 8;
+			const auto startLead = 8 + kMarkW + 6 + kAvatarSize + 10;
+			const auto contentW = std::max(80, rowRect.width() - startLead - farReserve - 8);
+			const auto contentX = rtl
+				? (rowRect.left() + farReserve + 8)
+				: (rowRect.left() + startLead);
+
+			const auto tagX = rtl
+				? (contentX + contentW - tagW)
+				: contentX;
+			const auto tagRect = QRect(tagX, rowRect.top() + 5, tagW, 17);
+			auto tagBg = (item.bucket == ModalUnread::ChatBucket::DirectMessage)
+				? BadgeColor(BadgeKind::Insert)
+				: (item.bucket == ModalUnread::ChatBucket::Group)
+				? BadgeColor(BadgeKind::Normal)
+				: BadgeColor(BadgeKind::Leader);
+			auto tagFill = tagBg;
+			tagFill.setAlpha(28);
+			p.setPen(Qt::NoPen);
+			p.setBrush(tagFill);
+			p.drawRoundedRect(tagRect, 4, 4);
+			p.setFont(monoFont);
+			p.setPen(tagBg);
+			p.drawText(tagRect, Qt::AlignCenter, tagText);
+
+			auto extraPillW = tagW + 6;
+			const auto subTag = item.isForum
+				? u"TOPIC"_q
+				: (item.isBot ? u"BOT"_q : QString());
+			if (!subTag.isEmpty() && contentW > extraPillW + 90) {
+				const auto sw = MeasureTextWidth(monoFont, subTag) + 8;
+				const auto sx = rtl
+					? (contentX + contentW - extraPillW - sw)
+					: (contentX + extraPillW);
+				const auto sRect = QRect(sx, rowRect.top() + 5, sw, 17);
+				auto sFill = BadgeColor(BadgeKind::Local);
+				sFill.setAlpha(24);
+				p.setPen(Qt::NoPen);
+				p.setBrush(sFill);
+				p.drawRoundedRect(sRect, 4, 4);
+				p.setFont(monoFont);
+				p.setPen(BadgeColor(BadgeKind::Local));
+				p.drawText(sRect, Qt::AlignCenter, subTag);
+				extraPillW += sw + 6;
+			}
+
+			const auto titleW = std::max(40, contentW - extraPillW);
+			const auto titleX = rtl ? contentX : (contentX + extraPillW);
+			p.setFont(st::semiboldFont);
+			p.setPen(st::windowFg);
+			p.drawText(
+				QRect(titleX, rowRect.top() + 4, titleW, 19),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				ElideText(st::semiboldFont, item.title, titleW));
+
+			// Preview / @username subtitle.
+			const auto subText = !item.preview.isEmpty()
+				? item.preview
+				: (!item.username.isEmpty() ? (u"@"_q + item.username) : QString());
+			if (!subText.isEmpty()) {
+				p.setFont(st::normalFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(
+					QRect(contentX, rowRect.top() + 24, contentW, 17),
+					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+					ElideText(st::normalFont, subText, contentW));
+			}
+		}
+	}
+
+private:
+	base::weak_ptr<Main::Session> _session;
+	std::vector<ModalUnread::BufferItem> _items;
+	std::vector<int> _visible;
+	QSet<uint64_t> _marked;
+	std::map<uint64_t, Ui::PeerUserpicView> _avatars;
+	Fn<void(int)> _onClick;
+	int _selected = 0;
+	int _hovered = -1;
+};
+
+class UnreadBufferLayer final : public Ui::LayerWidget {
+public:
+	explicit UnreadBufferLayer(UnreadBufferConfig config)
+	: _config(std::move(config))
+	, _close(Ui::CreateChild<Ui::IconButton>(this, st::boxTitleClose))
+	, _filter(Ui::CreateChild<Ui::InputField>(
+		this,
+		st::defaultMultiSelectSearchField,
+		Ui::InputField::Mode::SingleLine,
+		rpl::single(u"Filter unread chats (orderless, e.g. \"dm\", \"gp\", \"bot\")..."_q)))
+	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
+		setFocusPolicy(Qt::StrongFocus);
+		_close->setClickedCallback([=] { closeLayer(); });
+
+		auto rows = object_ptr<UnreadBufferRowsWidget>(
+			_scroll,
+			_config.session,
+			[=](int row) { openRow(row); });
+		_rows = rows.data();
+		_scroll->setOwnedWidget(std::move(rows));
+
+		_filter->changes() | rpl::on_next([=] {
+			refilter();
+		}, lifetime());
+		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
+			openRow(_selected);
+		}, lifetime());
+
+		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
+			if (e->type() != QEvent::KeyPress) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto k = static_cast<QKeyEvent*>(e.get());
+			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
+			if (layout && !layout->preeditAreaText().isEmpty()) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
+			const auto key = PhysicalKeyForNav(*k);
+			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (!_filter->getLastText().isEmpty()) {
+					_filter->setText(QString());
+					setFocus();
+				} else {
+					setFocus();
+				}
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
+				moveSelection(1);
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
+				moveSelection(-1);
+				return base::EventFilterResult::Cancel;
+			}
+			return base::EventFilterResult::Continue;
+		});
+
+		refilter();
+	}
+
+protected:
+	void doSetInnerFocus() override {
+		setFocus();
+	}
+
+	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
+		const auto parentSize = parentWidget()->size();
+		const auto w = std::min(parentSize.width() - 32, 740);
+		const auto h = std::min(parentSize.height() - 48, 600);
+		setGeometry((parentSize.width() - w) / 2, (parentSize.height() - h) / 2, w, h);
+	}
+
+	void resizeEvent(QResizeEvent *e) override {
+		LayerWidget::resizeEvent(e);
+		constexpr auto kHeaderH = 54;
+		constexpr auto kFilterH = 44;
+		constexpr auto kFooterH = 32;
+		if (IsRtl(this)) {
+			_close->move(12, (kHeaderH - _close->height()) / 2);
+		} else {
+			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
+		}
+		_filter->setGeometry(28, kHeaderH + 6, std::max(120, width() - 56), 32);
+		_scroll->setGeometry(0, kHeaderH + kFilterH, width(), std::max(60, height() - kHeaderH - kFilterH - kFooterH));
+		if (_rows) {
+			_rows->resize(_scroll->width(), _rows->height());
+		}
+	}
+
+	void keyPressEvent(QKeyEvent *e) override {
+		if (_closing) {
+			return;
+		}
+		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
+		const auto key = PhysicalKeyForNav(*e);
+
+		if (!_pendingConfirmTargets.empty()) {
+			if ((key == Qt::Key_Y && !mods) || key == Qt::Key_Return || key == Qt::Key_Enter) {
+				auto targets = std::move(_pendingConfirmTargets);
+				_pendingConfirmTargets.clear();
+				executeMarkRead(std::move(targets));
+				return;
+			}
+			if ((key == Qt::Key_N && !mods)
+				|| key == Qt::Key_Escape
+				|| (key == Qt::Key_Q && !mods)
+				|| (key == Qt::Key_G && mods == kCtrlMod)) {
+				_pendingConfirmTargets.clear();
+				update();
+				return;
+			}
+			return;
+		}
+
+		if (_pendingPrefix == u'*') {
+			_pendingPrefix = {};
+			if (key == Qt::Key_D && !mods) {
+				applyMark(ModalUnread::MarkOp::MarkBucketDM);
+				return;
+			} else if (key == Qt::Key_G && !mods) {
+				applyMark(ModalUnread::MarkOp::MarkBucketGP);
+				return;
+			} else if (key == Qt::Key_C && !mods) {
+				applyMark(ModalUnread::MarkOp::MarkBucketCH);
+				return;
+			}
+			update();
+			return;
+		}
+		if (_pendingPrefix == u'g') {
+			_pendingPrefix = {};
+			if (key == Qt::Key_G && !mods) {
+				jumpSelection(0);
+				return;
+			} else if (key == Qt::Key_R && !mods) {
+				refreshItems();
+				return;
+			}
+			update();
+			return;
+		}
+
+		if (key == Qt::Key_Escape
+			|| (key == Qt::Key_Q && !mods)
+			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+			closeLayer();
+			return;
+		} else if (key == Qt::Key_Slash && !mods) {
+			_filter->setFocusFast();
+			return;
+		} else if (key == Qt::Key_J && !mods) {
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_K && !mods) {
+			moveSelection(-1);
+			return;
+		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
+			moveSelection(-1);
+			return;
+		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
+			jumpSelection(int(_visible.size()) - 1);
+			return;
+		} else if (key == Qt::Key_G && !mods) {
+			_pendingPrefix = u'g';
+			update();
+			return;
+		} else if (key == Qt::Key_Asterisk) {
+			_pendingPrefix = u'*';
+			update();
+			return;
+		} else if (key == Qt::Key_M && !mods) {
+			applyMark(ModalUnread::MarkOp::MarkOne);
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_U && !mods) {
+			applyMark(ModalUnread::MarkOp::UnmarkOne);
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_U && mods == Qt::ShiftModifier) {
+			applyMark(ModalUnread::MarkOp::UnmarkAll);
+			return;
+		} else if (key == Qt::Key_T && !mods) {
+			applyMark(ModalUnread::MarkOp::ToggleAllVisible);
+			return;
+		} else if ((key == Qt::Key_R || key == Qt::Key_X) && !mods) {
+			markTargetsRead();
+			return;
+		} else if (key == Qt::Key_Return || key == Qt::Key_Enter || (key == Qt::Key_O && !mods)) {
+			openRow(_selected);
+			return;
+		}
+		LayerWidget::keyPressEvent(e);
+	}
+
+	void paintEvent(QPaintEvent *) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		_roundRect.paint(p, rect());
+
+		constexpr auto kHeaderH = 54;
+		constexpr auto kFilterH = 44;
+		constexpr auto kFooterH = 32;
+		const auto rtl = IsRtl(this);
+
+		// Header title + count badge.
+		auto dm = 0, gp = 0, ch = 0;
+		for (const auto &it : _config.items) {
+			if (it.bucket == ModalUnread::ChatBucket::DirectMessage) ++dm;
+			else if (it.bucket == ModalUnread::ChatBucket::Group) ++gp;
+			else ++ch;
+		}
+		const auto title = u"Unread Unmuted Chats"_q;
+		p.setFont(st::keysLegendHeaderStyle.font);
+		p.setPen(st::windowFg);
+		const auto titleW = MeasureTextWidth(st::keysLegendHeaderStyle.font, title);
+		const auto titleX = rtl ? (width() - 22 - titleW) : 22;
+		p.drawText(QRect(titleX, 0, titleW, kHeaderH), (rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter, title);
+
+		const auto summary = u"DM "_q + QString::number(dm)
+			+ u" · GP "_q + QString::number(gp)
+			+ u" · CH "_q + QString::number(ch)
+			+ (_marked.isEmpty() ? QString() : (u"  ·  "_q + QString::number(_marked.size()) + u" marked"_q));
+		const auto mono = MonoFont(11, true);
+		const auto sumW = MeasureTextWidth(mono, summary) + 14;
+		const auto sumX = rtl ? (_close->x() + _close->width() + 14) : (_close->x() - 14 - sumW);
+		if ((!rtl && sumX > titleX + titleW + 12) || (rtl && sumX + sumW < titleX - 12)) {
+			const auto pill = QRect(sumX, (kHeaderH - 22) / 2, sumW, 22);
+			auto fill = st::windowActiveTextFg->c;
+			fill.setAlpha(24);
+			p.setPen(Qt::NoPen);
+			p.setBrush(fill);
+			p.drawRoundedRect(pill, 6, 6);
+			p.setFont(mono);
+			p.setPen(st::windowActiveTextFg);
+			p.drawText(pill, Qt::AlignCenter, summary);
+		}
+		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
+
+		// Filter backdrop.
+		const auto searchRect = QRect(18, kHeaderH + 6, std::max(120, width() - 36), 32);
+		p.setPen(QPen(st::boxDividerBg->c, 1));
+		p.setBrush(BlendColor(st::windowBg->c, st::windowBgOver->c, 0.35));
+		p.drawRoundedRect(QRectF(searchRect).adjusted(.5, .5, -.5, -.5), 8, 8);
+		p.fillRect(0, kHeaderH + kFilterH - 1, width(), 1, st::boxDividerBg->c);
+
+		// Footer strip (or inline read-receipt confirmation banner for multi-chat mark-read).
+		const auto footerRect = QRect(0, height() - kFooterH, width(), kFooterH);
+		if (!_pendingConfirmTargets.empty()) {
+			auto warnBg = BadgeColor(BadgeKind::DescribeKey);
+			warnBg.setAlpha(36);
+			p.fillRect(footerRect.adjusted(0, 1, 0, 0), warnBg);
+			p.fillRect(0, height() - kFooterH, width(), 1, BadgeColor(BadgeKind::DescribeKey));
+			p.setFont(st::semiboldFont);
+			p.setPen(BadgeColor(BadgeKind::DescribeKey));
+			const auto prompt = u"Mark "_q
+				+ QString::number(_pendingConfirmTargets.size())
+				+ u" chats as read (sends read receipts)?  y / RET confirm  ·  n / ESC cancel"_q;
+			p.drawText(
+				footerRect.adjusted(16, 0, -16, 0),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				ElideText(st::semiboldFont, prompt, width() - 32));
+		} else {
+			p.fillRect(footerRect.adjusted(0, 1, 0, 0), BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
+			p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			const auto hint = (_pendingPrefix == u'*')
+				? u"* d mark DMs  ·  * g mark groups  ·  * c mark channels"_q
+				: (_pendingPrefix == u'g')
+				? u"g g top  ·  g r refresh"_q
+				: u"j/k move  ·  RET open  ·  / filter  ·  m/u/U/t/* mark  ·  x read  ·  q close"_q;
+			p.drawText(
+				footerRect.adjusted(16, 0, -16, 0),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				ElideText(st::normalFont, hint, width() - 32));
+		}
+	}
+
+private:
+	void refilter() {
+		_visible = ModalUnread::FilterBufferItems(_config.items, _filter->getLastText());
+		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		if (_rows) {
+			_rows->setData(_config.items, _visible, _marked, _selected);
+		}
+		_scroll->scrollToY(0);
+		update();
+	}
+
+	void moveSelection(int delta) {
+		if (_visible.empty()) {
+			return;
+		}
+		const auto n = int(_visible.size());
+		_selected = std::clamp(_selected + delta, 0, n - 1);
+		syncSelection();
+	}
+
+	void jumpSelection(int index) {
+		if (_visible.empty()) {
+			return;
+		}
+		_selected = std::clamp(index, 0, int(_visible.size()) - 1);
+		syncSelection();
+	}
+
+	void syncSelection() {
+		if (_rows) {
+			_rows->setSelectionAndMarks(_selected, _marked);
+		}
+		const auto rowTop = 4 + _selected * UnreadBufferRowsWidget::kRowHeight;
+		const auto rowBottom = rowTop + UnreadBufferRowsWidget::kRowHeight;
+		if (rowTop < _scroll->scrollTop()) {
+			_scroll->scrollToY(rowTop);
+		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
+			_scroll->scrollToY(rowBottom - _scroll->height());
+		}
+		update();
+	}
+
+	void applyMark(ModalUnread::MarkOp op) {
+		ModalUnread::ApplyMarkOp(_marked, _config.items, _visible, _selected, op);
+		syncSelection();
+	}
+
+	void refreshItems() {
+		if (_config.onRefresh) {
+			_config.items = _config.onRefresh();
+			refilter();
+		}
+	}
+
+	void markTargetsRead() {
+		auto targets = std::vector<PeerId>();
+		if (!_marked.isEmpty()) {
+			for (const auto id : _marked) {
+				targets.push_back(PeerId(id));
+			}
+		} else if (_selected >= 0 && _selected < int(_visible.size())) {
+			targets.push_back(PeerId(_config.items[_visible[_selected]].peerId));
+		}
+		if (targets.empty()) {
+			return;
+		}
+		if (ModalUnread::NeedsMarkReadConfirmation(int(targets.size()))) {
+			_pendingConfirmTargets = std::move(targets);
+			update();
+			return;
+		}
+		executeMarkRead(std::move(targets));
+	}
+
+	void executeMarkRead(std::vector<PeerId> targets) {
+		for (const auto id : targets) {
+			_marked.remove(id.value);
+		}
+		if (_config.onMarkRead) {
+			_config.onMarkRead(std::move(targets));
+		}
+		refreshItems();
+	}
+
+	void openRow(int row) {
+		if (_closing || row < 0 || row >= int(_visible.size())) {
+			return;
+		}
+		_closing = true;
+		const auto peerId = PeerId(_config.items[_visible[row]].peerId);
+		auto cb = std::move(_config.onOpenChat);
+		closeLayer();
+		if (cb) {
+			cb(peerId);
+		}
+	}
+
+	UnreadBufferConfig _config;
+	std::vector<int> _visible;
+	QSet<uint64_t> _marked;
+	std::vector<PeerId> _pendingConfirmTargets;
+	Ui::IconButton *_close = nullptr;
+	Ui::InputField *_filter = nullptr;
+	Ui::ScrollArea *_scroll = nullptr;
+	QPointer<UnreadBufferRowsWidget> _rows;
+	int _selected = 0;
+	QChar _pendingPrefix;
+	bool _closing = false;
+	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
+};
+
 } // namespace
 
 std::unique_ptr<Ui::LayerWidget> CreateModalHelpLayer(HelpData data) {
@@ -2037,6 +2721,10 @@ std::unique_ptr<Ui::LayerWidget> CreateDescribeLayer(DescribeData data) {
 
 std::unique_ptr<Ui::LayerWidget> CreateCommandPaletteLayer(PaletteConfig config) {
 	return std::make_unique<CommandPaletteLayer>(std::move(config));
+}
+
+std::unique_ptr<Ui::LayerWidget> CreateUnreadBufferLayer(UnreadBufferConfig config) {
+	return std::make_unique<UnreadBufferLayer>(std::move(config));
 }
 
 } // namespace Purple::ModalUi

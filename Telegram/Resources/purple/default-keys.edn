@@ -43,7 +43,9 @@
   "SPC SPC" :command-search
   "SPC ,"   :chat-palette
   "SPC RET" :chat-palette
+  "SPC u"   :unread-chats-buffer
   "SPC b b" :chat-palette
+  "SPC b I" :unread-chats-buffer
 
   ; Navigation and scrolling.
   "j"       :move-down
