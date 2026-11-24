@@ -1059,6 +1059,7 @@ void MusicSection::pollConnection() {
 		_loadedArchiveDialogs = archiveCount;
 		_dialogStallTicks = 0;
 		updateStatus();
+		requestMissingDialogs();
 	} else if (++_dialogStallTicks >= 3) {
 		_dialogStallTicks = 0;
 		requestMissingDialogs();

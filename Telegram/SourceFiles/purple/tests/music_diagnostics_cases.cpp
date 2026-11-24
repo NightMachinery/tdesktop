@@ -222,6 +222,45 @@ int main(int argc, char **argv) {
 			"partial Work Mode hiding warns even with tracks", partial);
 	}
 
+	// 12. User-controlled strings with QString placeholders (%1/%2/%3) must not corrupt formatting.
+	{
+		auto s = ReadyMusicFolder();
+		s.folderName = u"100%2"_q;
+		s.displayedTracks = 0;
+		s.totalIndexedTracks = 12;
+		s.searchQuery = u"%1 %3"_q;
+		const auto filtered = Purple::DescribeMusicState(s);
+		Check(filtered == u"No tracks match \"%1 %3\" (filtered out 12 indexed tracks in \"100%2\")."_q,
+			"placeholder tokens in query and folder stay literal when filtered", filtered);
+
+		s.totalIndexedTracks = 0;
+		const auto emptyQuery = Purple::DescribeMusicState(s);
+		Check(emptyQuery == u"No tracks match \"%1 %3\" (0 tracks indexed across 4 chats in \"100%2\")."_q,
+			"placeholder tokens in query and folder stay literal with 0 tracks", emptyQuery);
+
+		s.searchQuery.clear();
+		s.chatsToScan = 4;
+		s.chatsFailed = 1;
+		s.serverSearchErrors = 1;
+		s.lastServerError = u"ERR_%1"_q;
+		s.scanIncomplete = true;
+		s.hiddenByWorkMode = 1;
+		s.totalChatsInFolder = 5;
+		s.workModeActive = true;
+		s.workModePreset = u"%2Preset%1"_q;
+		const auto errWithHidden = Purple::DescribeMusicState(s);
+		Check(errWithHidden == u"Server search failed for 1 of 4 chats in \"100%2\": ERR_%1. Refresh to try again. 1 of 5 chats hidden by Work Mode (%2Preset%1)."_q,
+			"placeholder tokens in folder, error and preset stay literal", errWithHidden);
+
+		s.visibleChatsInFolder = 0;
+		s.hiddenByWorkMode = 5;
+		s.serverSearchErrors = 0;
+		s.scanIncomplete = false;
+		const auto allHidden = Purple::DescribeMusicState(s);
+		Check(allHidden == u"All 5 chats in \"100%2\" are hidden by Work Mode (%2Preset%1). Switch presets or exempt this folder to browse its music."_q,
+			"placeholder tokens in folder and preset stay literal when all hidden", allHidden);
+	}
+
 	std::cout << "Music diagnostics and roster checks passed\n";
 	return 0;
 }
