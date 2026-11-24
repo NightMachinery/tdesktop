@@ -154,6 +154,10 @@ on the modal status line and cheatsheet footer.
 
 ## Upstream hooks
 
+- **Profile pictures in modal menus:** circular peer avatars appear beside
+  people, groups, channels, and accounts in `M-x` peer-scoped commands (and in
+  the chat palette `SPC ,`).
+
 - `core/application.cpp`: delegates key press, shortcut override, paired key
   release, window deactivation, and IME events to `Purple::HandleModalKeys`.
 - `mainwindow.cpp`: attaches the modal status line and docked which-key drawer

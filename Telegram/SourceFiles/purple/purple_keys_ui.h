@@ -1,6 +1,8 @@
 #pragma once
 
 #include "base/basic_types.h"
+#include "base/weak_ptr.h"
+#include "data/data_types.h"
 #include "purple/purple_keys_mx.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/rp_widget.h"
@@ -11,6 +13,10 @@
 
 #include <memory>
 #include <vector>
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Purple::ModalUi {
 
@@ -148,6 +154,8 @@ struct PaletteItem {
 	QString unavailableReason;
 	std::vector<QStringList> chords;
 	bool available = true;
+	base::weak_ptr<Main::Session> avatarSession;
+	PeerId avatarPeerId = 0;
 };
 
 struct PaletteConfig {

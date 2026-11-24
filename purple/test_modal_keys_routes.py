@@ -277,6 +277,9 @@ for action, key in (
     bound(action, key, chat_body)
 
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
+ordered(keys, "avatarSession", "avatarPeerId")
+keys_ui = read("purple/purple_keys_ui.cpp")
+ordered(keys_ui, "paintUserpic")
 
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")

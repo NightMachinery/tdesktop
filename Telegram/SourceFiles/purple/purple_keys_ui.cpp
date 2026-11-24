@@ -1,11 +1,15 @@
 #include "purple/purple_keys_ui.h"
 
 #include "base/event_filter.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
+#include "main/main_session.h"
 #include "ui/controls/keys_legend.h"
 #include "ui/painter.h"
 #include "ui/round_rect.h"
 #include "ui/style/style_core.h"
 #include "ui/text/text.h"
+#include "ui/userpic_view.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/scroll_area.h"
@@ -17,6 +21,7 @@
 
 #include <QtCore/QDir>
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QKeyEvent>
@@ -32,6 +37,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 namespace Purple::ModalUi {
 namespace {
@@ -1542,6 +1548,15 @@ public:
 	, _items(std::move(items))
 	, _onClick(std::move(onClick)) {
 		setMouseTracking(true);
+		auto seenSessions = QSet<Main::Session*>();
+		for (const auto &it : _items) {
+			if (const auto s = it.avatarSession.get(); s && !seenSessions.contains(s)) {
+				seenSessions.insert(s);
+				s->downloaderTaskFinished() | rpl::on_next([this] {
+					update();
+				}, lifetime());
+			}
+		}
 	}
 
 	static constexpr int kRowHeight = 42;
@@ -1666,10 +1681,26 @@ protected:
 				sideReserved = cw + 22;
 			}
 
-			const auto textW = std::max(80, rowRect.width() - sideReserved - 13);
+			auto avatarReserve = 0;
+			if (const auto session = item.avatarSession.get();
+				session && item.avatarPeerId != 0) {
+				if (const auto peer = session->data().peerLoaded(item.avatarPeerId)) {
+					constexpr auto kAvatarSize = 26;
+					const auto key = std::pair(session, item.avatarPeerId);
+					auto &view = _avatars[key];
+					peer->loadUserpic();
+					const auto ax = rtl
+						? (rowRect.right() - 12 - kAvatarSize)
+						: (rowRect.left() + 12);
+					peer->paintUserpic(p, view, ax, midY - kAvatarSize / 2, kAvatarSize, true);
+					avatarReserve = kAvatarSize + 10;
+				}
+			}
+
+			const auto textW = std::max(80, rowRect.width() - sideReserved - 13 - avatarReserve);
 			const auto leftX = rtl
 				? (rowRect.left() + sideReserved)
-				: (rowRect.left() + 13);
+				: (rowRect.left() + 13 + avatarReserve);
 			const auto spans = ModalMx::LabelMatchSpans(item.label, _tokens);
 			const auto labelColor = item.available
 				? st::windowFg->c
@@ -1702,6 +1733,7 @@ protected:
 
 private:
 	std::vector<PaletteItem> _items;
+	std::map<std::pair<Main::Session*, PeerId>, Ui::PeerUserpicView> _avatars;
 	Fn<void(int)> _onClick;
 	std::vector<int> _filtered;
 	std::vector<ModalMx::OrderlessToken> _tokens;

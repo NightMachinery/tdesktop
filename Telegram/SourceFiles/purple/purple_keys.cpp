@@ -3207,12 +3207,34 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		return;
 	}
 	const auto effective = EffectiveBindings(true, target.contextMap);
+	const auto accounts = Core::App().domain().orderedAccounts();
+	const auto activePeer = target.chat.peer()
+		? target.chat.peer()
+		: current->activeChatCurrent().peer();
 	auto items = std::vector<ModalUi::PaletteItem>();
 	for (const auto &cmd : kCommands) {
 		if (!describe && !IsSearchableAction(cmd.action)) {
 			continue;
 		}
 		const auto avail = Available(cmd.action, target);
+		auto avatarSession = base::weak_ptr<Main::Session>();
+		auto avatarPeerId = PeerId(0);
+		if (cmd.action == Action::OpenSavedMessages) {
+			avatarSession = base::make_weak(&current->session());
+			avatarPeerId = current->session().userPeerId();
+		} else if (cmd.action >= Action::Account1 && cmd.action <= Action::Account6) {
+			const auto idx = int(cmd.action) - int(Action::Account1);
+			if (idx >= 0 && idx < int(accounts.size()) && accounts[idx]->sessionExists()) {
+				avatarSession = base::make_weak(&accounts[idx]->session());
+				avatarPeerId = accounts[idx]->session().userPeerId();
+			}
+		} else if (activePeer) {
+			const auto cat = QString::fromLatin1(cmd.category);
+			if (cat == u"chat"_q || cat == u"chat media"_q || cat == u"topics"_q) {
+				avatarSession = base::make_weak(&current->session());
+				avatarPeerId = activePeer->id;
+			}
+		}
 		items.push_back({
 			.actionId = int(cmd.action),
 			.id = QString::fromLatin1(cmd.id),
@@ -3221,6 +3243,8 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			.unavailableReason = QString::fromLatin1(cmd.need),
 			.chords = ChordsForAction(cmd.action, effective),
 			.available = describe ? true : avail,
+			.avatarSession = std::move(avatarSession),
+			.avatarPeerId = avatarPeerId,
 		});
 	}
 
