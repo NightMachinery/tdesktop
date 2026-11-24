@@ -2742,13 +2742,16 @@ class TopicRowsWidget final : public Ui::RpWidget {
 public:
 	TopicRowsWidget(
 		not_null<QWidget*> parent,
-		Fn<void(int row)> onClick)
+		Fn<void(int row)> onClick,
+		Fn<void()> onLoadMoreClick)
 	: RpWidget(parent)
-	, _onClick(std::move(onClick)) {
+	, _onClick(std::move(onClick))
+	, _onLoadMoreClick(std::move(onLoadMoreClick)) {
 		setMouseTracking(true);
 	}
 
 	static constexpr int kRowHeight = 44;
+	static constexpr int kMoreRowHeight = 34;
 
 	void setData(
 			const std::vector<TopicItem> &items,
@@ -2758,7 +2761,17 @@ public:
 		_visible = visible;
 		_selected = selected;
 		_hovered = -1;
-		resize(width(), std::max(72, int(_visible.size()) * kRowHeight + 8));
+		updateHeight();
+		update();
+	}
+
+	void setStatus(bool hasMore, bool loading) {
+		if (_hasMore == hasMore && _loading == loading) {
+			return;
+		}
+		_hasMore = hasMore;
+		_loading = loading;
+		updateHeight();
 		update();
 	}
 
@@ -2769,18 +2782,31 @@ public:
 
 protected:
 	void mouseMoveEvent(QMouseEvent *e) override {
-		const auto row = (e->pos().y() - 4) / kRowHeight;
+		const auto y = e->pos().y();
+		const auto rowsBottom = 4 + int(_visible.size()) * kRowHeight;
+		if (_hasMore && !_visible.empty() && y >= rowsBottom && y < rowsBottom + kMoreRowHeight) {
+			if (_hovered != -1 || !_moreHovered) {
+				_hovered = -1;
+				_moreHovered = true;
+				setCursor(_loading ? style::cur_default : style::cur_pointer);
+				update();
+			}
+			return;
+		}
+		const auto row = (y - 4) / kRowHeight;
 		const auto next = (row >= 0 && row < int(_visible.size())) ? row : -1;
-		if (next != _hovered) {
+		if (next != _hovered || _moreHovered) {
 			_hovered = next;
+			_moreHovered = false;
 			setCursor((next >= 0) ? style::cur_pointer : style::cur_default);
 			update();
 		}
 	}
 
 	void leaveEventHook(QEvent *) override {
-		if (_hovered >= 0) {
+		if (_hovered >= 0 || _moreHovered) {
 			_hovered = -1;
+			_moreHovered = false;
 			update();
 		}
 	}
@@ -2789,7 +2815,15 @@ protected:
 		if (e->button() != Qt::LeftButton) {
 			return;
 		}
-		const auto row = (e->pos().y() - 4) / kRowHeight;
+		const auto y = e->pos().y();
+		const auto rowsBottom = 4 + int(_visible.size()) * kRowHeight;
+		if (_hasMore && !_loading && !_visible.empty()
+			&& y >= rowsBottom && y < rowsBottom + kMoreRowHeight
+			&& _onLoadMoreClick) {
+			_onLoadMoreClick();
+			return;
+		}
+		const auto row = (y - 4) / kRowHeight;
 		if (row >= 0 && row < int(_visible.size()) && _onClick) {
 			_onClick(row);
 		}
@@ -2805,7 +2839,12 @@ protected:
 		if (_visible.empty()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			p.drawText(rect(), Qt::AlignCenter, u"No matching topics."_q);
+			p.drawText(
+				rect(),
+				Qt::AlignCenter,
+				(_loading || _hasMore)
+					? u"Loading topics..."_q
+					: u"No matching topics."_q);
 			return;
 		}
 
@@ -2909,14 +2948,41 @@ protected:
 					ElideText(st::normalFont, item.preview, contentW));
 			}
 		}
+
+		if (_hasMore) {
+			const auto moreY = 4 + int(_visible.size()) * kRowHeight;
+			const auto moreRect = QRect(12, moreY + 3, width() - 24, kMoreRowHeight - 6);
+			if (_moreHovered && !_loading) {
+				p.setPen(Qt::NoPen);
+				p.setBrush(st::windowBgOver->c);
+				p.drawRoundedRect(moreRect, 6, 6);
+			}
+			p.setFont(st::semiboldFont);
+			p.setPen(_loading ? st::windowSubTextFg : st::windowActiveTextFg);
+			p.drawText(
+				moreRect,
+				Qt::AlignCenter,
+				_loading
+					? u"Loading more topics..."_q
+					: u"Load more topics  (L or scroll)"_q);
+		}
 	}
 
 private:
+	void updateHeight() {
+		const auto extra = (_hasMore && !_visible.empty()) ? kMoreRowHeight : 0;
+		resize(width(), std::max(72, int(_visible.size()) * kRowHeight + extra + 8));
+	}
+
 	std::vector<TopicItem> _items;
 	std::vector<int> _visible;
 	Fn<void(int)> _onClick;
+	Fn<void()> _onLoadMoreClick;
 	int _selected = 0;
 	int _hovered = -1;
+	bool _hasMore = false;
+	bool _loading = false;
+	bool _moreHovered = false;
 };
 
 class TopicPickerLayer final : public Ui::LayerWidget {
@@ -2924,6 +2990,7 @@ public:
 	explicit TopicPickerLayer(TopicPickerConfig config)
 	: _config(std::move(config))
 	, _unreadOnly(_config.startUnreadOnly)
+	, _hasMore(_config.hasMore)
 	, _close(Ui::CreateChild<Ui::IconButton>(this, st::boxTitleClose))
 	, _filter(Ui::CreateChild<Ui::InputField>(
 		this,
@@ -2941,12 +3008,30 @@ public:
 
 		auto rows = object_ptr<TopicRowsWidget>(
 			_scroll,
-			[=](int row) { openRow(row); });
+			[=](int row) { openRow(row); },
+			[=] { requestMore(); });
 		_rows = rows.data();
 		_scroll->setOwnedWidget(std::move(rows));
 
+		_scroll->scrolls() | rpl::on_next([=] {
+			maybeRequestMore();
+		}, lifetime());
+
+		if (_config.updates) {
+			std::move(_config.updates) | rpl::on_next([=] {
+				_loadingMore = false;
+				refreshFromSource(/*preserveScroll=*/true);
+			}, lifetime());
+		}
+		if (_config.destroyed) {
+			std::move(_config.destroyed) | rpl::on_next([=] {
+				closeLayer();
+			}, lifetime());
+		}
+
 		_filter->changes() | rpl::on_next([=] {
-			refilter();
+			refilter(/*preserveScroll=*/false, MsgId(0));
+			maybeRequestMore();
 		}, lifetime());
 		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
 			openRow(_selected);
@@ -2979,7 +3064,10 @@ public:
 			return base::EventFilterResult::Continue;
 		});
 
-		refilter();
+		refilter(/*preserveScroll=*/false, MsgId(0));
+		if (_hasMore && _visible.size() < 20) {
+			requestMore();
+		}
 	}
 
 protected:
@@ -3020,6 +3108,17 @@ protected:
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
 		const auto key = PhysicalKeyForNav(*e);
+		if (_pendingG) {
+			_pendingG = false;
+			if (key == Qt::Key_G && !mods) {
+				moveSelection(-int(_visible.size()));
+				return;
+			} else if (key == Qt::Key_R && !mods) {
+				refreshFromSource(/*preserveScroll=*/true);
+				requestMore();
+				return;
+			}
+		}
 		if (key == Qt::Key_Escape
 			|| (key == Qt::Key_Q && !mods)
 			|| (key == Qt::Key_G && mods == kCtrlMod)) {
@@ -3027,6 +3126,16 @@ protected:
 			return;
 		} else if (key == Qt::Key_Slash && !mods) {
 			_filter->setFocusFast();
+			return;
+		} else if (key == Qt::Key_G && !mods) {
+			_pendingG = true;
+			return;
+		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
+			moveSelection(int(_visible.size()));
+			maybeRequestMore();
+			return;
+		} else if (key == Qt::Key_L && mods == Qt::ShiftModifier) {
+			requestMore();
 			return;
 		} else if (key == Qt::Key_J && !mods) {
 			moveSelection(1);
@@ -3042,7 +3151,8 @@ protected:
 			return;
 		} else if (key == Qt::Key_U && !mods) {
 			_unreadOnly = !_unreadOnly;
-			refilter();
+			refilter(/*preserveScroll=*/false, MsgId(0));
+			maybeRequestMore();
 			return;
 		} else if (key == Qt::Key_C && !mods && _config.canCreate && _config.onCreateTopic) {
 			_closing = true;
@@ -3117,9 +3227,17 @@ protected:
 		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto hint = _config.canCreate
-			? u"j/k move  ·  RET open  ·  / filter  ·  u unread only  ·  c new topic  ·  q close"_q
-			: u"j/k move  ·  RET open  ·  / filter  ·  u unread only  ·  q close"_q;
+		const auto hint = [&] {
+			auto out = u"j/k move  ·  RET open  ·  / filter  ·  u unread"_q;
+			if (_config.canCreate) {
+				out += u"  ·  c new"_q;
+			}
+			if (_hasMore) {
+				out += _loadingMore ? u"  ·  loading..."_q : u"  ·  L more"_q;
+			}
+			out += u"  ·  g r refresh  ·  q close"_q;
+			return out;
+		}();
 		p.drawText(
 			footerRect.adjusted(16, 0, -16, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -3127,9 +3245,56 @@ protected:
 	}
 
 private:
-	void refilter() {
+	void refreshFromSource(bool preserveScroll) {
+		if (!_config.onRefresh) {
+			return;
+		}
+		const auto keepRootId = (_selected >= 0
+				&& _selected < int(_visible.size())
+				&& _visible[_selected] < int(_config.items.size()))
+			? _config.items[_visible[_selected]].rootId
+			: MsgId(0);
+		auto snap = _config.onRefresh();
+		_config.items = std::move(snap.items);
+		_hasMore = snap.hasMore;
+		if (!_hasMore) {
+			_loadingMore = false;
+		}
+		refilter(preserveScroll, keepRootId);
+	}
+
+	void requestMore() {
+		if (!_hasMore || _loadingMore || !_config.onLoadMore) {
+			return;
+		}
+		_loadingMore = true;
+		if (_rows) {
+			_rows->setStatus(_hasMore, _loadingMore);
+		}
+		update();
+		_config.onLoadMore();
+	}
+
+	void maybeRequestMore() {
+		if (!_hasMore || _loadingMore || !_config.onLoadMore) {
+			return;
+		}
+		const auto maxTop = _scroll->scrollTopMax();
+		const auto nearBottom = (maxTop <= 0)
+			|| (_scroll->scrollTop() + 140 >= maxTop);
+		const auto nearSelectedEnd = !_visible.empty()
+			&& (_selected + 5 >= int(_visible.size()));
+		const auto filtering = !_filter->getLastText().trimmed().isEmpty()
+			|| _unreadOnly;
+		if (nearBottom || nearSelectedEnd || filtering) {
+			requestMore();
+		}
+	}
+
+	void refilter(bool preserveScroll, MsgId keepRootId) {
 		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
 		_visible.clear();
+		auto restoredSelected = -1;
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
 			if (_unreadOnly && it.unreadCount <= 0 && it.mentions <= 0) {
@@ -3145,13 +3310,23 @@ private:
 					continue;
 				}
 			}
+			if (keepRootId != 0 && it.rootId == keepRootId) {
+				restoredSelected = int(_visible.size());
+			}
 			_visible.push_back(i);
 		}
-		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		if (restoredSelected >= 0) {
+			_selected = restoredSelected;
+		} else {
+			_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		}
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
+			_rows->setStatus(_hasMore, _loadingMore);
 		}
-		_scroll->scrollToY(0);
+		if (!preserveScroll) {
+			_scroll->scrollToY(0);
+		}
 		update();
 	}
 
@@ -3171,6 +3346,7 @@ private:
 		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
 			_scroll->scrollToY(rowBottom - _scroll->height());
 		}
+		maybeRequestMore();
 	}
 
 	void openRow(int row) {
@@ -3188,6 +3364,9 @@ private:
 
 	TopicPickerConfig _config;
 	bool _unreadOnly = false;
+	bool _hasMore = false;
+	bool _loadingMore = false;
+	bool _pendingG = false;
 	std::vector<int> _visible;
 	Ui::PeerUserpicView _parentAvatar;
 	Ui::IconButton *_close = nullptr;

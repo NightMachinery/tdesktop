@@ -303,12 +303,15 @@ ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScre
         "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
 ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
-ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "reserveNewBotTopic", "NewForumTopicBox")
+ordered(keys, "void Keys::showTopicPicker", "chatsListChanges()", "chatsListLoadedEvents()",
+        "CreateTopicPickerLayer", "onRefresh", "onLoadMore", "requestTopics()",
+        "reserveNewBotTopic", "NewForumTopicBox")
 ordered(keys, "avatarSession", "avatarPeerId")
 
 keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
+ordered(keys_ui, "class TopicPickerLayer final", "refreshFromSource", "requestMore", "maybeRequestMore")
 
 privacy = read("purple/purple_privacy_screen.cpp")
 ordered(privacy, "ShouldFetchWeather", "Accept-Language")

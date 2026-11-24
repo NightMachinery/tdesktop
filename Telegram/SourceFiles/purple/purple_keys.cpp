@@ -2174,45 +2174,85 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 	}
 	forum->preloadTopics();
 	forum->requestTopics();
+	const auto buildSnapshot = [](not_null<Data::Forum*> liveForum, MsgId activeRootId) {
+		auto snap = ModalUi::TopicPickerSnapshot();
+		snap.hasMore = !liveForum->topicsList()->loaded();
+		for (const auto topic : OrderedForumTopics(liveForum)) {
+			const auto unread = topic->chatListUnreadState();
+			const auto msg = topic->chatListMessage();
+			snap.items.push_back({
+				.rootId = topic->rootId(),
+				.title = topic->title(),
+				.preview = msg ? msg->notificationText().text.simplified() : QString(),
+				.colorId = topic->colorId(),
+				.unreadCount = unread.messages,
+				.mentions = unread.mentions,
+				.muted = (unread.messagesMuted > 0 && unread.messagesMuted >= unread.messages),
+				.pinned = topic->isPinnedDialog(FilterId(0)),
+				.closed = topic->closed(),
+				.isGeneral = topic->isGeneral(),
+				.active = (topic->rootId() == activeRootId),
+				.lastTimestamp = int64_t(topic->adjustedChatListTimeId()),
+			});
+		}
+		return snap;
+	};
 	const auto activeTopic = target.chat.topic()
 		? target.chat.topic()
 		: current->activeChatCurrent().topic();
 	const auto activeRootId = activeTopic ? activeTopic->rootId() : MsgId(0);
-	auto items = std::vector<ModalUi::TopicItem>();
-	for (const auto topic : OrderedForumTopics(forum)) {
-		const auto unread = topic->chatListUnreadState();
-		const auto msg = topic->chatListMessage();
-		items.push_back({
-			.rootId = topic->rootId(),
-			.title = topic->title(),
-			.preview = msg ? msg->notificationText().text.simplified() : QString(),
-			.colorId = topic->colorId(),
-			.unreadCount = unread.messages,
-			.mentions = unread.mentions,
-			.muted = (unread.messagesMuted > 0 && unread.messagesMuted >= unread.messages),
-			.pinned = topic->isPinnedDialog(FilterId(0)),
-			.closed = topic->closed(),
-			.isGeneral = topic->isGeneral(),
-			.active = (topic->rootId() == activeRootId),
-			.lastTimestamp = int64_t(topic->adjustedChatListTimeId()),
-		});
-	}
+	auto initial = buildSnapshot(forum, activeRootId);
 	if (!_feedbackError) {
 		_feedbackText.clear();
 		_feedbackTimer.stop();
 	}
 	const auto guard = QPointer(this);
 	const auto weakCtrl = base::make_weak(current);
+	const auto weakSession = base::make_weak(&current->session());
 	const auto peerId = forum->peer()->id;
+	auto updates = rpl::merge(
+		forum->chatsListChanges(),
+		forum->chatsListLoadedEvents(),
+		forum->topicDestroyed() | rpl::to_empty,
+		forum->topicsList()->unreadStateChanges() | rpl::to_empty,
+		forum->topicsList()->fullSize().changes() | rpl::to_empty);
 	_activeLayer = ActiveLayer::TopicPicker;
 	auto layer = ModalUi::CreateTopicPickerLayer({
-		.session = base::make_weak(&current->session()),
+		.session = weakSession,
 		.parentPeerId = peerId,
 		.parentTitle = forum->peer()->name(),
 		.isBot = (forum->bot() != nullptr),
 		.startUnreadOnly = unreadOnly,
 		.canCreate = CanCreateTopicInForum(forum),
-		.items = std::move(items),
+		.items = std::move(initial.items),
+		.hasMore = initial.hasMore,
+		.onRefresh = [weakCtrl, weakSession, peerId, buildSnapshot]() {
+			const auto s = weakSession.get();
+			if (!s) {
+				return ModalUi::TopicPickerSnapshot{};
+			}
+			const auto peer = s->data().peerLoaded(peerId);
+			const auto liveForum = peer ? peer->forum() : nullptr;
+			if (!liveForum) {
+				return ModalUi::TopicPickerSnapshot{};
+			}
+			const auto ctrl = weakCtrl.get();
+			const auto curTopic = ctrl ? ctrl->activeChatCurrent().topic() : nullptr;
+			const auto curRootId = curTopic ? curTopic->rootId() : MsgId(0);
+			return buildSnapshot(liveForum, curRootId);
+		},
+		.onLoadMore = [weakSession, peerId] {
+			const auto s = weakSession.get();
+			if (!s) {
+				return;
+			}
+			const auto peer = s->data().peerLoaded(peerId);
+			if (const auto liveForum = peer ? peer->forum() : nullptr) {
+				liveForum->requestTopics();
+			}
+		},
+		.updates = std::move(updates),
+		.destroyed = forum->destroyed(),
 		.onOpenTopic = [guard, weakCtrl, peerId](MsgId rootId) {
 			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId, rootId] {
 				const auto ctrl = weakCtrl.get();

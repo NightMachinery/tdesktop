@@ -199,6 +199,11 @@ struct TopicItem {
 	int64_t lastTimestamp = 0;
 };
 
+struct TopicPickerSnapshot {
+	std::vector<TopicItem> items;
+	bool hasMore = false;
+};
+
 struct TopicPickerConfig {
 	base::weak_ptr<Main::Session> session;
 	PeerId parentPeerId = 0;
@@ -207,6 +212,11 @@ struct TopicPickerConfig {
 	bool startUnreadOnly = false;
 	bool canCreate = false;
 	std::vector<TopicItem> items;
+	bool hasMore = false;
+	Fn<TopicPickerSnapshot()> onRefresh;
+	Fn<void()> onLoadMore;
+	rpl::producer<> updates;
+	rpl::producer<> destroyed;
 	Fn<void(MsgId rootId)> onOpenTopic;
 	Fn<void()> onCreateTopic;
 };
