@@ -21,6 +21,7 @@
 #include "main/main_session.h"
 #include "mainwindow.h"
 #include "ui/basic_click_handlers.h"
+#include "ui/painter.h"
 #include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/elastic_scroll.h"
@@ -221,10 +222,34 @@ protected:
 			}
 			if (matches) {
 				if (placed != box) {
+					p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1.5));
 					p.drawLine(placed.center(), anchor.center());
 				}
-				_background.paint(p, placed);
-				p.drawText(placed, Qt::AlignCenter, entry.label);
+				auto hq = PainterHighQualityEnabler(p);
+				p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1));
+				p.setBrush(QColor(0xff, 0xd8, 0x4a));
+				p.drawRoundedRect(QRectF(placed).adjusted(.5, .5, -.5, -.5), 4, 4);
+				const auto upper = entry.label.toUpper();
+				const auto typedLen = int(_hints._prefix.size());
+				if (typedLen > 0 && typedLen < upper.size()) {
+					const auto fm = QFontMetrics(p.font());
+					const auto typed = upper.left(typedLen);
+					const auto rest = upper.mid(typedLen);
+					const auto totalW = fm.horizontalAdvance(upper);
+					const auto typedW = fm.horizontalAdvance(typed);
+					const auto startX = placed.x() + (placed.width() - totalW) / 2;
+					p.setPen(QColor(0xb9, 0x1c, 0x1c));
+					p.drawText(QRect(startX, placed.y(), typedW, placed.height()),
+						Qt::AlignLeft | Qt::AlignVCenter,
+						typed);
+					p.setPen(QColor(0x1c, 0x19, 0x17));
+					p.drawText(QRect(startX + typedW, placed.y(), totalW - typedW, placed.height()),
+						Qt::AlignLeft | Qt::AlignVCenter,
+						rest);
+				} else {
+					p.setPen(QColor(0x1c, 0x19, 0x17));
+					p.drawText(placed, Qt::AlignCenter, upper);
+				}
 			}
 		}
 	}

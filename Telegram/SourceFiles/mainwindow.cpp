@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_setup_email.h"
 #include "window/window_media_preview.h"
+#include "purple/purple_keys.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QWindow>
@@ -141,6 +142,7 @@ void MainWindow::applyInitialWorkMode() {
 void MainWindow::finishFirstShow() {
 	applyInitialWorkMode();
 	createGlobalMenu();
+	Purple::EnsureModalKeysAttached(this);
 
 	windowActiveValue(
 	) | rpl::skip(1) | rpl::filter(
@@ -713,6 +715,7 @@ bool MainWindow::takeThirdSectionFromLayer() {
 }
 
 void MainWindow::fixOrder() {
+	Purple::RaiseModalKeysChrome(this);
 	if (_setupEmailLock) _setupEmailLock->raise();
 	if (_passcodeLock) _passcodeLock->raise();
 	if (_layer) _layer->raise();
@@ -764,13 +767,15 @@ void MainWindow::updateControlsGeometry() {
 			mainWidth -= skip;
 		}
 	}
+	const auto modalStatusH = Purple::ModalKeysStatusHeight(this);
 	if (_main) {
 		_main->setGeometry({
 			body.x() + mainLeft,
 			body.y(),
 			mainWidth,
-			body.height() });
+			std::max(0, body.height() - modalStatusH) });
 	}
+	Purple::UpdateModalKeysLayout(this, body);
 	if (_intro) _intro->setGeometry(body);
 	if (_layer) _layer->setGeometry(body);
 	if (_mediaPreview) _mediaPreview->setGeometry(body);

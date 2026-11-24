@@ -1,5 +1,8 @@
 #pragma once
 
+#include <QtCore/QRect>
+
+class MainWindow;
 class QEvent;
 class QKeyEvent;
 class QObject;
@@ -23,6 +26,11 @@ namespace Purple {
 [[nodiscard]] bool ModalKeysOwnChatListFocus(QWidget *widget);
 [[nodiscard]] bool CalendarDayKeysEnabled();
 [[nodiscard]] int CalendarDayKeyOffset(const QKeyEvent &event);
+
+void EnsureModalKeysAttached(not_null<MainWindow*> window);
+[[nodiscard]] int ModalKeysStatusHeight(not_null<MainWindow*> window);
+void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body);
+void RaiseModalKeysChrome(not_null<MainWindow*> window);
 
 void InstallMainMenuKeys(
 	not_null<Ui::LayerWidget*> menu,

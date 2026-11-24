@@ -2,6 +2,7 @@
 
 #include "base/event_filter.h"
 #include "base/weak_ptr.h"
+#include "boxes/keys_legend.h"
 #include "calls/calls_box_controller.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -24,40 +25,39 @@
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mainwidget.h"
-#include "media/player/media_player_instance.h"
 #include "mainwindow.h"
+#include "media/player/media_player_instance.h"
 #include "purple/purple_chat_background.h"
+#include "purple/purple_chat_palette.h"
 #include "purple/purple_config.h"
+#include "purple/purple_exact_search.h"
+#include "purple/purple_keys_mx.h"
+#include "purple/purple_keys_ui.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
-#include "purple/purple_chat_palette.h"
-#include "purple/purple_exact_search.h"
 #include "purple/purple_playlists_box.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
 #include "storage/storage_shared_media.h"
 #include "ui/abstract_button.h"
-#include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/screen_reader_mode.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/fields/input_field.h"
-#include "ui/widgets/labels.h"
-#include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/widgets/elastic_scroll.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
-#include "styles/style_layers.h"
 #include "styles/style_settings.h"
-#include "styles/style_widgets.h"
 
 #include <edn.h>
 
+#include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -65,12 +65,13 @@
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtGui/QKeyEvent>
-#include <QtGui/QTextBlock>
-#include <QtGui/QTextLayout>
+#include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 
+#include <algorithm>
 #include <array>
+#include <map>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -126,8 +127,10 @@ private:
 namespace {
 
 constexpr auto kEnabledPref = "purple-modal-keys-enabled";
-constexpr auto kWhichKeyDelay = 300;
-constexpr auto kPaletteRows = 9;
+constexpr auto kWhichKeyDelay = 280;
+constexpr auto kFeedbackDurationMs = 3500;
+constexpr auto kMaxCount = 200;
+constexpr auto kLineScrollPx = 84;
 #ifdef Q_OS_MAC
 constexpr auto kCtrl = Qt::MetaModifier;
 constexpr auto kSuper = Qt::ControlModifier;
@@ -137,6 +140,7 @@ constexpr auto kSuper = Qt::MetaModifier;
 #endif // Q_OS_MAC
 
 rpl::event_stream<bool> EnabledChanges;
+rpl::event_stream<> KeymapChanges;
 
 bool Enabled() {
 	return Core::App().settings().readPref<bool>(kEnabledPref);
@@ -175,12 +179,24 @@ int ModalKey(const QKeyEvent &event) {
 		physical = Qt::Key_BracketLeft;
 	} else if (native == kVK_ANSI_RightBracket) {
 		physical = Qt::Key_BracketRight;
+	} else if (native == kVK_ANSI_Comma) {
+		physical = modifiers.testFlag(Qt::ShiftModifier)
+			? Qt::Key_Less
+			: Qt::Key_Comma;
+	} else if (native == kVK_ANSI_Semicolon) {
+		physical = modifiers.testFlag(Qt::ShiftModifier)
+			? Qt::Key_Colon
+			: Qt::Key_Semicolon;
 	} else if (native == kVK_ANSI_Slash) {
 		physical = modifiers.testFlag(Qt::ShiftModifier)
 			? Qt::Key_Question
 			: Qt::Key_Slash;
 	}
 	if (physical != logical) {
+		// macOS Option mutates letters into symbols (Option-x -> ≈) even on US layouts.
+		if (modifiers.testFlag(Qt::AltModifier)) {
+			return physical;
+		}
 		if (const auto layout = TISCopyCurrentKeyboardLayoutInputSource()) {
 			const auto nonAscii = (TISGetInputSourceProperty(
 				layout,
@@ -199,6 +215,8 @@ enum class Action {
 	EnterNormalMode,
 	EnterInsertMode,
 	Backgrounds,
+	MoveUp,
+	MoveDown,
 	PreviousChat,
 	NextChat,
 	OpenChat,
@@ -253,15 +271,21 @@ enum class Action {
 	Account6,
 	FocusChats,
 	FocusConversation,
+	FocusOtherPane,
+	HistoryHalfUp,
+	HistoryHalfDown,
 	OlderMessagesPage,
 	NewerMessagesPage,
 	LatestMessages,
 	UnreadMessages,
 	OpenHistoryCalendar,
+	Cheatsheet,
 	Help,
 	Run,
 	DescribeChord,
 	DescribeCommand,
+	StockShortcuts,
+	ReloadKeymap,
 };
 
 using ChatMediaType = Storage::SharedMediaType;
@@ -269,163 +293,185 @@ using ChatMediaType = Storage::SharedMediaType;
 struct Command {
 	Action action;
 	const char *id;
+	const char *category;
+	const char *need;
 	QString (*label)();
+	bool repeatable = false;
 	ChatMediaType mediaType = ChatMediaType::kCount;
 };
 
 const Command kCommands[] = {
-	{ Action::EnterNormalMode, "enter-normal-mode",
+	{ Action::EnterNormalMode, "enter-normal-mode", "mode", "",
 		[] { return tr::lng_purple_keys_normal(tr::now); } },
-	{ Action::EnterInsertMode, "enter-insert-mode",
+	{ Action::EnterInsertMode, "enter-insert-mode", "mode", "",
 		[] { return tr::lng_purple_keys_insert(tr::now); } },
-	{ Action::Backgrounds, "chat-backgrounds-visibility-toggle",
+	{ Action::Backgrounds, "chat-backgrounds-visibility-toggle", "toggle", "",
 		[] { return tr::lng_purple_keys_backgrounds(tr::now); } },
-	{ Action::PreviousChat, "chat-cursor-previous",
-		[] { return tr::lng_purple_keys_chat_previous(tr::now); } },
-	{ Action::NextChat, "chat-cursor-next",
-		[] { return tr::lng_purple_keys_chat_next(tr::now); } },
-	{ Action::OpenChat, "chat-cursor-open",
+	{ Action::MoveUp, "move-up", "navigate", "Needs chat list or scrollable conversation",
+		[] { return u"Move or scroll up"_q; }, true },
+	{ Action::MoveDown, "move-down", "navigate", "Needs chat list or scrollable conversation",
+		[] { return u"Move or scroll down"_q; }, true },
+	{ Action::PreviousChat, "chat-cursor-previous", "chats", "Needs chat list visible",
+		[] { return tr::lng_purple_keys_chat_previous(tr::now); }, true },
+	{ Action::NextChat, "chat-cursor-next", "chats", "Needs chat list visible",
+		[] { return tr::lng_purple_keys_chat_next(tr::now); }, true },
+	{ Action::OpenChat, "chat-cursor-open", "chats", "Needs chat list focus",
 		[] { return tr::lng_purple_keys_chat_open(tr::now); } },
-	{ Action::ChatPalette, "chat-palette",
+	{ Action::ChatPalette, "chat-palette", "chats", "",
 		[] { return tr::lng_purple_chat_palette(tr::now); } },
-	{ Action::PreviousFolder, "folder-previous",
-		[] { return tr::lng_purple_keys_folder_previous(tr::now); } },
-	{ Action::NextFolder, "folder-next",
-		[] { return tr::lng_purple_keys_folder_next(tr::now); } },
-	{ Action::SelectMessage, "message-hint-select",
+	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
+		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, true },
+	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
+		[] { return tr::lng_purple_keys_folder_next(tr::now); }, true },
+	{ Action::SelectMessage, "message-hint-select", "messages", "Needs visible messages",
 		[] { return tr::lng_purple_keys_message_select(tr::now); } },
-	{ Action::CopyMessage, "message-hint-copy-text",
+	{ Action::CopyMessage, "message-hint-copy-text", "yank", "Needs visible messages",
 		[] { return tr::lng_purple_keys_message_copy(tr::now); } },
-	{ Action::Search, "search-messages",
+	{ Action::Search, "search-messages", "search", "Unavailable in scheduled messages",
 		[] { return tr::lng_shortcuts_search(tr::now); } },
-	{ Action::OpenMainMenu, "open-main-menu",
+	{ Action::OpenMainMenu, "open-main-menu", "open", "",
 		[] { return tr::lng_main_menu(tr::now); } },
-	{ Action::OpenSettings, "open-settings",
+	{ Action::OpenSettings, "open-settings", "open", "",
 		[] { return tr::lng_menu_settings(tr::now); } },
-	{ Action::OpenSavedMessages, "open-saved-messages",
+	{ Action::OpenSavedMessages, "open-saved-messages", "open", "",
 		[] { return tr::lng_saved_messages(tr::now); } },
-	{ Action::OpenArchive, "open-archived-chats",
+	{ Action::OpenArchive, "open-archived-chats", "open", "",
 		[] { return tr::lng_shortcuts_archive(tr::now); } },
-	{ Action::OpenContacts, "open-contacts",
+	{ Action::OpenContacts, "open-contacts", "open", "",
 		[] { return tr::lng_shortcuts_contacts(tr::now); } },
-	{ Action::OpenCalls, "open-calls",
+	{ Action::OpenCalls, "open-calls", "open", "Unavailable in support mode",
 		[] { return tr::lng_menu_calls(tr::now); } },
-	{ Action::OpenDownloads, "open-downloads",
+	{ Action::OpenDownloads, "open-downloads", "open", "",
 		[] { return tr::lng_downloads_section(tr::now); } },
-	{ Action::NewGroup, "new-group",
+	{ Action::NewGroup, "new-group", "new", "Unavailable in support mode",
 		[] { return tr::lng_create_group_title(tr::now); } },
-	{ Action::NewChannel, "new-channel",
+	{ Action::NewChannel, "new-channel", "new", "Unavailable in support mode",
 		[] { return tr::lng_create_channel_title(tr::now); } },
-	{ Action::AddContact, "add-contact",
+	{ Action::AddContact, "add-contact", "new", "",
 		[] { return tr::lng_profile_add_contact(tr::now); } },
-	{ Action::OpenScheduled, "open-scheduled-messages",
+	{ Action::OpenScheduled, "open-scheduled-messages", "chat", "Needs an open chat",
 		[] { return tr::lng_scheduled_messages(tr::now); } },
-	{ Action::OpenMusic, "open-music",
+	{ Action::OpenMusic, "open-music", "playback", "",
 		[] { return tr::lng_purple_music_title(tr::now); } },
-	{ Action::OpenPlaylists, "open-playlists",
+	{ Action::OpenPlaylists, "open-playlists", "playback", "",
 		[] { return tr::lng_purple_playlists_title(tr::now); } },
-	{ Action::OpenChatInfo, "open-chat-info",
+	{ Action::OpenChatInfo, "open-chat-info", "chat", "Needs an open chat",
 		[] { return tr::lng_purple_keys_chat_info(tr::now); } },
-	{ Action::OpenChatMedia, "open-chat-media",
-		[] { return tr::lng_media_type_media(tr::now); },
+	{ Action::OpenChatMedia, "open-chat-media", "chat media", "Needs an open chat",
+		[] { return tr::lng_media_type_media(tr::now); }, false,
 		ChatMediaType::PhotoVideo },
-	{ Action::OpenChatMusic, "open-chat-music",
-		[] { return tr::lng_purple_keys_chat_music(tr::now); },
+	{ Action::OpenChatMusic, "open-chat-music", "chat media", "Needs an open chat",
+		[] { return tr::lng_purple_keys_chat_music(tr::now); }, false,
 		ChatMediaType::MusicFile },
-	{ Action::OpenChatFiles, "open-chat-files",
-		[] { return tr::lng_media_type_files(tr::now); },
+	{ Action::OpenChatFiles, "open-chat-files", "chat media", "Needs an open chat",
+		[] { return tr::lng_media_type_files(tr::now); }, false,
 		ChatMediaType::File },
-	{ Action::OpenChatLinks, "open-chat-links",
-		[] { return tr::lng_media_type_links(tr::now); },
+	{ Action::OpenChatLinks, "open-chat-links", "chat media", "Needs an open chat",
+		[] { return tr::lng_media_type_links(tr::now); }, false,
 		ChatMediaType::Link },
-	{ Action::OpenChatVoice, "open-chat-voice",
-		[] { return tr::lng_media_type_audios(tr::now); },
+	{ Action::OpenChatVoice, "open-chat-voice", "chat media", "Needs an open chat",
+		[] { return tr::lng_media_type_audios(tr::now); }, false,
 		ChatMediaType::RoundVoiceFile },
-	{ Action::OpenChatGifs, "open-chat-gifs",
-		[] { return tr::lng_media_type_gifs(tr::now); },
+	{ Action::OpenChatGifs, "open-chat-gifs", "chat media", "Needs an open chat",
+		[] { return tr::lng_media_type_gifs(tr::now); }, false,
 		ChatMediaType::GIF },
-	{ Action::OpenChatPolls, "open-chat-polls",
-		[] { return tr::lng_media_type_polls(tr::now); },
+	{ Action::OpenChatPolls, "open-chat-polls", "chat media", "Needs an open chat",
+		[] { return tr::lng_media_type_polls(tr::now); }, false,
 		ChatMediaType::Poll },
-	{ Action::OpenPinnedMessages, "open-pinned-messages",
+	{ Action::OpenPinnedMessages, "open-pinned-messages", "chat", "Needs an open chat",
 		[] { return tr::lng_settings_events_pinned(tr::now); } },
-	{ Action::AttachFiles, "attach-files",
+	{ Action::AttachFiles, "attach-files", "chat", "Needs a chat you can send files to",
 		[] { return tr::lng_attach(tr::now); } },
-	{ Action::OpenChatMenu, "open-chat-menu",
+	{ Action::OpenChatMenu, "open-chat-menu", "chat", "Needs chat list or open chat",
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
-	{ Action::PreviewChat, "preview-chat",
+	{ Action::PreviewChat, "preview-chat", "chats", "Needs chat list focus",
 		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
-	{ Action::MessageMenu, "message-hint-menu",
+	{ Action::MessageMenu, "message-hint-menu", "messages", "Needs visible messages",
 		[] { return tr::lng_purple_keys_message_menu(tr::now); } },
-	{ Action::TogglePlayback, "playback-toggle",
+	{ Action::TogglePlayback, "playback-toggle", "playback", "Needs active audio in this account",
 		[] { return tr::lng_shortcuts_media_play_pause(tr::now); } },
-	{ Action::StopPlayback, "playback-stop",
+	{ Action::StopPlayback, "playback-stop", "playback", "Needs active audio in this account",
 		[] { return tr::lng_shortcuts_media_stop(tr::now); } },
-	{ Action::PreviousTrack, "playback-previous-track",
+	{ Action::PreviousTrack, "playback-previous-track", "playback", "Needs active audio in this account",
 		[] { return tr::lng_shortcuts_media_previous(tr::now); } },
-	{ Action::NextTrack, "playback-next-track",
+	{ Action::NextTrack, "playback-next-track", "playback", "Needs active audio in this account",
 		[] { return tr::lng_shortcuts_media_next(tr::now); } },
-	{ Action::SeekBackward, "playback-seek-backward",
-		[] { return tr::lng_purple_shortcuts_seek_backward(tr::now); } },
-	{ Action::SeekForward, "playback-seek-forward",
-		[] { return tr::lng_purple_shortcuts_seek_forward(tr::now); } },
-	{ Action::Account1, "switch-account-1",
+	{ Action::SeekBackward, "playback-seek-backward", "playback", "Needs active audio in this account",
+		[] { return tr::lng_purple_shortcuts_seek_backward(tr::now); }, true },
+	{ Action::SeekForward, "playback-seek-forward", "playback", "Needs active audio in this account",
+		[] { return tr::lng_purple_shortcuts_seek_forward(tr::now); }, true },
+	{ Action::Account1, "switch-account-1", "accounts", "Needs a signed-in 1st account",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(1)); } },
-	{ Action::Account2, "switch-account-2",
+	{ Action::Account2, "switch-account-2", "accounts", "Needs a signed-in 2nd account",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(2)); } },
-	{ Action::Account3, "switch-account-3",
+	{ Action::Account3, "switch-account-3", "accounts", "Needs a signed-in 3rd account",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(3)); } },
-	{ Action::Account4, "switch-account-4",
+	{ Action::Account4, "switch-account-4", "accounts", "Needs a signed-in 4th account",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(4)); } },
-	{ Action::Account5, "switch-account-5",
+	{ Action::Account5, "switch-account-5", "accounts", "Needs a signed-in 5th account",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(5)); } },
-	{ Action::Account6, "switch-account-6",
+	{ Action::Account6, "switch-account-6", "accounts", "Needs a signed-in 6th account",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(6)); } },
-	{ Action::FocusChats, "focus-chat-list",
+	{ Action::FocusChats, "focus-chat-list", "window", "Needs chat list visible",
 		[] { return tr::lng_purple_keys_focus_chats(tr::now); } },
-	{ Action::FocusConversation, "focus-conversation",
+	{ Action::FocusConversation, "focus-conversation", "window", "Needs an open conversation",
 		[] { return tr::lng_purple_keys_focus_conversation(tr::now); } },
-	{ Action::OlderMessagesPage, "history-page-older",
-		[] { return tr::lng_purple_keys_history_page_older(tr::now); } },
-	{ Action::NewerMessagesPage, "history-page-newer",
-		[] { return tr::lng_purple_keys_history_page_newer(tr::now); } },
-	{ Action::LatestMessages, "history-jump-to-latest",
+	{ Action::FocusOtherPane, "focus-other-pane", "window", "Needs two panes open",
+		[] { return u"Switch between chat list and conversation"_q; } },
+	{ Action::HistoryHalfUp, "history-half-up", "navigate", "Needs a scrollable conversation",
+		[] { return u"Scroll conversation half-page up"_q; }, true },
+	{ Action::HistoryHalfDown, "history-half-down", "navigate", "Needs a scrollable conversation",
+		[] { return u"Scroll conversation half-page down"_q; }, true },
+	{ Action::OlderMessagesPage, "history-page-older", "navigate", "Needs a scrollable conversation",
+		[] { return tr::lng_purple_keys_history_page_older(tr::now); }, true },
+	{ Action::NewerMessagesPage, "history-page-newer", "navigate", "Needs a scrollable conversation",
+		[] { return tr::lng_purple_keys_history_page_newer(tr::now); }, true },
+	{ Action::LatestMessages, "history-jump-to-latest", "navigate", "Needs a scrollable conversation",
 		[] { return tr::lng_jump_to_bottom(tr::now); } },
-	{ Action::UnreadMessages, "history-jump-to-unread",
+	{ Action::UnreadMessages, "history-jump-to-unread", "navigate", "Needs an open chat",
 		[] { return tr::lng_unread_bar_some(tr::now); } },
-	{ Action::OpenHistoryCalendar, "history-open-calendar",
+	{ Action::OpenHistoryCalendar, "history-open-calendar", "chat", "Needs an open chat",
 		[] { return tr::lng_calendar(tr::now); } },
-	{ Action::CopyMessageLink, "message-hint-copy-link",
+	{ Action::CopyMessageLink, "message-hint-copy-link", "yank", "Needs visible non-scheduled messages",
 		[] { return tr::lng_purple_keys_message_link(tr::now); } },
-	{ Action::CopyMessageUrl, "message-hint-copy-url",
+	{ Action::CopyMessageUrl, "message-hint-copy-url", "yank", "Needs visible messages",
 		[] { return tr::lng_context_copy_link(tr::now); } },
-	{ Action::OpenMessageUrl, "message-hint-open-url",
+	{ Action::OpenMessageUrl, "message-hint-open-url", "messages", "Needs visible messages",
 		[] { return tr::lng_polls_option_open_link_title(tr::now); } },
-	{ Action::ReplyToMessage, "message-hint-reply",
+	{ Action::ReplyToMessage, "message-hint-reply", "messages", "Needs a chat you can reply in",
 		[] { return tr::lng_context_reply_msg(tr::now); } },
-	{ Action::EditMessage, "message-hint-edit",
+	{ Action::EditMessage, "message-hint-edit", "messages", "Needs editable messages",
 		[] { return tr::lng_context_edit_msg(tr::now); } },
-	{ Action::Help, "keys-help",
-		[] { return tr::lng_purple_keys_help(tr::now); } },
-	{ Action::Run, "command-search",
+	{ Action::Cheatsheet, "cheatsheet", "help", "",
+		[] { return u"Keyboard cheatsheet"_q; } },
+	{ Action::Help, "keys-help", "help", "",
+		[] { return u"All active bindings"_q; } },
+	{ Action::Run, "command-search", "help", "",
 		[] { return tr::lng_purple_keys_run(tr::now); } },
-	{ Action::DescribeChord, "key-describe",
+	{ Action::DescribeChord, "key-describe", "help", "",
 		[] { return tr::lng_purple_keys_describe_key(tr::now); } },
-	{ Action::DescribeCommand, "command-describe",
+	{ Action::DescribeCommand, "command-describe", "help", "",
 		[] { return tr::lng_purple_keys_describe_command(tr::now); } },
+	{ Action::StockShortcuts, "stock-shortcuts", "help", "",
+		[] { return u"Telegram stock shortcuts"_q; } },
+	{ Action::ReloadKeymap, "reload-keymap", "help", "",
+		[] { return u"Reload keys.edn"_q; } },
 };
 
 using Chord = std::vector<int>;
 
-enum class KeyMode {
+enum class MapKind {
 	Normal,
 	Insert,
+	Chat,
+	Chats,
+	Music,
 };
 
 constexpr auto kCtrlG = int(kCtrl) | Qt::Key_G;
@@ -433,34 +479,42 @@ constexpr auto kCtrlG = int(kCtrl) | Qt::Key_G;
 struct Binding {
 	Action action;
 	Chord keys;
-	KeyMode mode = KeyMode::Normal;
+	MapKind map = MapKind::Normal;
 };
 
-const Binding kLegacyBindings[] = {
-	{ Action::OpenSettings, { Qt::Key_Space, Qt::Key_O, Qt::Key_T } },
-	{ Action::OpenSavedMessages, { Qt::Key_Space, Qt::Key_O, Qt::Key_S } },
-	{ Action::OpenCalls, { Qt::Key_Space, Qt::Key_O, Qt::Key_V } },
-	{ Action::OpenDownloads, { Qt::Key_Space, Qt::Key_O, Qt::Key_F } },
-	{ Action::OpenScheduled, { Qt::Key_Space, Qt::Key_O, Qt::Key_D } },
-	{ Action::OpenChatMedia, { Qt::Key_Space, Qt::Key_C, Qt::Key_V } },
-	{ Action::OpenChatMusic, { Qt::Key_Space, Qt::Key_C, Qt::Key_A } },
-	{ Action::OpenChatFiles, { Qt::Key_Space, Qt::Key_C, Qt::Key_F } },
-	{ Action::OpenChatLinks, { Qt::Key_Space, Qt::Key_C, Qt::Key_L } },
-	{ Action::OpenChatVoice, { Qt::Key_Space, Qt::Key_C, Qt::Key_R } },
-	{ Action::OpenChatGifs, { Qt::Key_Space, Qt::Key_C, Qt::Key_G } },
-	{ Action::OpenChatPolls, { Qt::Key_Space, Qt::Key_C, Qt::Key_O } },
-	{ Action::OpenPinnedMessages, { Qt::Key_Space, Qt::Key_C, Qt::Key_N } },
-	{ Action::FocusChats, { Qt::Key_Space, Qt::Key_W, Qt::Key_D } },
-	{ Action::OpenHistoryCalendar, { Qt::Key_Space, Qt::Key_C, Qt::Key_D } },
+struct KeymapData {
+	std::vector<Binding> bindings;
+	std::vector<Chord> localleaders;
+	std::map<std::pair<MapKind, Chord>, QString> labels;
+	QSet<Action> keyless;
+	QString userPath;
+	QString error;
 };
 
-QString BareKeyLabel(int key) {
+QString MapName(MapKind map) {
+	switch (map) {
+	case MapKind::Normal: return u"everywhere"_q;
+	case MapKind::Insert: return u"in Insert mode"_q;
+	case MapKind::Chat: return u"in a chat (after localleader)"_q;
+	case MapKind::Chats: return u"in the chat list (after localleader)"_q;
+	case MapKind::Music: return u"in Music (after localleader)"_q;
+	}
+	return u"everywhere"_q;
+}
+
+QString BareKeyLabel(int key, bool shifted = false) {
 	if (key == Qt::Key_Space) {
 		return u"SPC"_q;
 	} else if (key == Qt::Key_Return) {
-		return u"Enter"_q;
+		return u"RET"_q;
+	} else if (key == Qt::Key_Backspace) {
+		return u"DEL"_q;
+	} else if (key == Qt::Key_Escape) {
+		return u"ESC"_q;
+	} else if (key == Qt::Key_Tab) {
+		return u"TAB"_q;
 	} else if (key >= Qt::Key_A && key <= Qt::Key_Z) {
-		return QString(QChar(key - Qt::Key_A + 'a'));
+		return QString(QChar(key - Qt::Key_A + (shifted ? 'A' : 'a')));
 	}
 	return QKeySequence(key).toString(QKeySequence::NativeText);
 }
@@ -468,20 +522,36 @@ QString BareKeyLabel(int key) {
 QString KeyLabel(int stroke) {
 	const auto combination = QKeyCombination::fromCombined(stroke);
 	const auto mods = combination.keyboardModifiers();
+	const auto key = combination.key();
+	const auto isLetter = (key >= Qt::Key_A && key <= Qt::Key_Z);
 	auto label = QString();
 	if (mods.testFlag(kCtrl)) {
-		label += u"Ctrl+"_q;
+		label += u"C-"_q;
 	}
 	if (mods.testFlag(Qt::AltModifier)) {
-		label += u"Alt+"_q;
+		label += u"M-"_q;
 	}
 	if (mods.testFlag(kSuper)) {
-		label += u"Super+"_q;
+		label += u"s-"_q;
 	}
-	if (mods.testFlag(Qt::ShiftModifier)) {
-		label += u"Shift+"_q;
+	const auto shift = mods.testFlag(Qt::ShiftModifier);
+	if (shift && !isLetter) {
+		label += u"S-"_q;
 	}
-	return label + BareKeyLabel(combination.key());
+	return label + BareKeyLabel(key, shift && isLetter);
+}
+
+QStringList ChordCaps(const Chord &keys) {
+	auto caps = QStringList();
+	caps.reserve(keys.size());
+	for (const auto stroke : keys) {
+		caps.push_back(KeyLabel(stroke));
+	}
+	return caps;
+}
+
+QString ChordLabel(const Chord &keys) {
+	return ChordCaps(keys).join(u' ');
 }
 
 bool ShiftedSymbol(int key) {
@@ -497,46 +567,54 @@ int KeyStroke(const QKeyEvent &event, int key) {
 	return QKeyCombination(mods, Qt::Key(key)).toCombined();
 }
 
-QString ChordLabel(const Chord &keys) {
-	auto result = QStringList();
-	for (const auto key : keys) {
-		result.push_back(KeyLabel(key));
-	}
-	return result.join(' ');
-}
-
-const std::vector<Binding> &Bindings();
-
-QString BindingsLabel(Action action) {
-	auto result = QStringList();
-	for (const auto &binding : Bindings()) {
-		if (binding.action == action) {
-			const auto label = ChordLabel(binding.keys);
-			result.push_back((binding.mode == KeyMode::Insert)
-				? tr::lng_purple_keys_insert(tr::now) + u" ("_q + label + u")"_q
-				: label);
-		}
-	}
-	return result.join(u" / "_q);
-}
-
 const Command &FindCommand(Action action) {
 	const auto command = ranges::find(kCommands, action, &Command::action);
 	Assert(command != std::end(kCommands));
 	return *command;
 }
 
-bool StartsWith(const Binding &binding, const Chord &prefix) {
-	return binding.keys.size() >= prefix.size()
-		&& std::equal(prefix.begin(), prefix.end(), binding.keys.begin());
+std::optional<Action> FindActionById(const QString &name) {
+	const auto command = ranges::find_if(kCommands, [&](const Command &item) {
+		return name == QString::fromLatin1(item.id);
+	});
+	return (command != std::end(kCommands))
+		? std::optional(command->action)
+		: std::nullopt;
 }
 
-int ParseKey(const QString &token) {
+bool StartsWith(const Chord &full, const Chord &prefix) {
+	return full.size() >= prefix.size()
+		&& std::equal(prefix.begin(), prefix.end(), full.begin());
+}
+
+bool StartsWith(const Binding &binding, const Chord &prefix) {
+	return StartsWith(binding.keys, prefix);
+}
+
+int ParseKey(const QString &token, bool &impliedShift) {
+	impliedShift = false;
 	if (token.compare(u"SPC"_q, Qt::CaseInsensitive) == 0) {
 		return Qt::Key_Space;
 	} else if (token.compare(u"Enter"_q, Qt::CaseInsensitive) == 0
 			|| token.compare(u"RET"_q, Qt::CaseInsensitive) == 0) {
 		return Qt::Key_Return;
+	} else if (token.compare(u"DEL"_q, Qt::CaseInsensitive) == 0
+			|| token.compare(u"Backspace"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Backspace;
+	} else if (token.compare(u"<up>"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Up;
+	} else if (token.compare(u"<down>"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Down;
+	} else if (token.compare(u"<left>"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Left;
+	} else if (token.compare(u"<right>"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_Right;
+	} else if (token.compare(u"<prior>"_q, Qt::CaseInsensitive) == 0
+			|| token.compare(u"PgUp"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_PageUp;
+	} else if (token.compare(u"<next>"_q, Qt::CaseInsensitive) == 0
+			|| token.compare(u"PgDown"_q, Qt::CaseInsensitive) == 0) {
+		return Qt::Key_PageDown;
 	} else if (token.size() != 1) {
 		const auto key = QKeySequence::fromString(
 			token, QKeySequence::PortableText);
@@ -552,6 +630,9 @@ int ParseKey(const QString &token) {
 	const auto key = token.front().unicode();
 	if (key >= 'a' && key <= 'z') {
 		return Qt::Key_A + (key - 'a');
+	} else if (key >= 'A' && key <= 'Z') {
+		impliedShift = true;
+		return Qt::Key_A + (key - 'A');
 	} else if (key >= '!' && key <= '~') {
 		return key;
 	}
@@ -593,14 +674,18 @@ int ParseStroke(const QString &token) {
 		mods |= mod;
 		text.remove(0, separator + 1);
 	}
-	const auto key = ParseKey(text);
+	auto impliedShift = false;
+	const auto key = ParseKey(text, impliedShift);
 	if (!key || (ShiftedSymbol(key) && mods.testFlag(Qt::ShiftModifier))) {
 		return 0;
+	}
+	if (impliedShift) {
+		mods |= Qt::ShiftModifier;
 	}
 	return QKeyCombination(mods, Qt::Key(key)).toCombined();
 }
 
-Chord ParseChord(const QString &text, KeyMode mode) {
+Chord ParseChord(const QString &text, MapKind map) {
 	const auto tokens = text.simplified().split(' ', Qt::SkipEmptyParts);
 	if (tokens.empty() || tokens.size() > 4) {
 		return {};
@@ -613,16 +698,32 @@ Chord ParseChord(const QString &text, KeyMode mode) {
 		}
 		result.push_back(key);
 	}
-	if (result.front() == Qt::Key_Question
-		|| (mode == KeyMode::Insert && !HasShortcutModifier(result.front()))) {
+	if (map == MapKind::Insert && !HasShortcutModifier(result.front())) {
 		return {};
+	}
+	// Bare leading digits are reserved for numeric repeat counts in Normal mode.
+	if (map == MapKind::Normal) {
+		const auto first = QKeyCombination::fromCombined(result.front());
+		if (first.keyboardModifiers() == Qt::NoModifier
+			&& first.key() >= Qt::Key_0 && first.key() <= Qt::Key_9) {
+			return {};
+		}
 	}
 	return result;
 }
 
-bool IsHelpBinding(Action action) {
+bool IsProtectedHelpAction(Action action) {
 	return action == Action::Help || action == Action::Run
 		|| action == Action::DescribeChord || action == Action::DescribeCommand;
+}
+
+std::optional<MapKind> ParseMapKind(const QString &name) {
+	if (name == u"normal"_q) return MapKind::Normal;
+	if (name == u"insert"_q) return MapKind::Insert;
+	if (name == u"chat"_q) return MapKind::Chat;
+	if (name == u"chats"_q) return MapKind::Chats;
+	if (name == u"music"_q) return MapKind::Music;
+	return std::nullopt;
 }
 
 QString EdnKeyword(const edn_value_t *value) {
@@ -635,9 +736,20 @@ QString EdnKeyword(const edn_value_t *value) {
 		: QString();
 }
 
-QJsonDocument ReadEdnKeymap(const QByteArray &bytes) {
+std::optional<QString> EdnString(const edn_value_t *value) {
+	auto size = size_t(0);
+	const auto ptr = edn_string_get(value, &size);
+	return ptr ? std::optional(QString::fromUtf8(ptr, qsizetype(size))) : std::nullopt;
+}
+
+bool ParseEdnOverlay(
+		const QByteArray &bytes,
+		KeymapData &data,
+		bool isUserOverlay,
+		QString &errorOut) {
 	if (bytes.isEmpty() || bytes.contains('\0')) {
-		return {};
+		errorOut = u"empty or binary file"_q;
+		return false;
 	}
 	const auto options = edn_parse_options_t{
 		.struct_size = sizeof(edn_parse_options_t),
@@ -649,12 +761,14 @@ QJsonDocument ReadEdnKeymap(const QByteArray &bytes) {
 	const auto root = std::unique_ptr<edn_value_t, decltype(&edn_free)>(
 		parsed.value, &edn_free);
 	if (parsed.error != EDN_OK || edn_type(root.get()) != EDN_TYPE_MAP) {
-		return {};
+		errorOut = u"expected one top-level EDN map"_q;
+		return false;
 	}
 	auto end = size_t();
 	if (!edn_source_position(root.get(), nullptr, &end)
 		|| end > size_t(bytes.size())) {
-		return {};
+		errorOut = u"invalid EDN source bounds"_q;
+		return false;
 	}
 	if (end < size_t(bytes.size())) {
 		auto tailOptions = options;
@@ -663,210 +777,273 @@ QJsonDocument ReadEdnKeymap(const QByteArray &bytes) {
 			bytes.constData() + end, size_t(bytes.size()) - end, &tailOptions);
 		if (tail.value != root.get()) {
 			edn_free(tail.value);
-			return {};
+			errorOut = u"unexpected trailing form after top-level map"_q;
+			return false;
 		}
 		if (tail.error != EDN_OK) {
-			return {};
+			errorOut = u"syntax error after top-level map"_q;
+			return false;
 		}
 	}
-	auto groups = QJsonObject();
+
+	constexpr auto kEntryLimit = 256;
+	auto editedCount = 0;
+	auto seen = std::vector<std::pair<MapKind, Chord>>();
+
 	for (auto i = size_t(0); i < edn_map_count(root.get()); ++i) {
-		const auto mode = EdnKeyword(edn_map_get_key(root.get(), i));
-		const auto map = edn_map_get_value(root.get(), i);
-		if ((mode != u"normal"_q && mode != u"insert"_q)
-			|| edn_type(map) != EDN_TYPE_MAP) {
-			return {};
+		const auto topKey = EdnKeyword(edn_map_get_key(root.get(), i));
+		const auto topVal = edn_map_get_value(root.get(), i);
+		if (topKey.isEmpty()) {
+			errorOut = u"top-level key must be an unqualified keyword"_q;
+			return false;
 		}
-		auto entries = QJsonObject();
-		for (auto j = size_t(0); j < edn_map_count(map); ++j) {
-			auto size = size_t(0);
-			const auto key = edn_string_get(edn_map_get_key(map, j), &size);
-			if (!key) {
-				return {};
+		if (topKey == u"localleader"_q) {
+			if (edn_type(topVal) != EDN_TYPE_VECTOR) {
+				errorOut = u":localleader must be a vector of chord strings"_q;
+				return false;
 			}
-			const auto chord = QString::fromUtf8(key, qsizetype(size));
-			const auto value = edn_map_get_value(map, j);
-			if (edn_type(value) == EDN_TYPE_NIL) {
-				entries.insert(chord, QJsonValue::Null);
+			auto leaders = std::vector<Chord>();
+			for (auto j = size_t(0); j < edn_vector_count(topVal); ++j) {
+				const auto s = EdnString(edn_vector_get(topVal, j));
+				if (!s) {
+					errorOut = u":localleader entries must be strings"_q;
+					return false;
+				}
+				const auto chord = ParseChord(*s, MapKind::Normal);
+				if (chord.empty() || ranges::contains(leaders, chord)) {
+					errorOut = u"invalid or duplicate :localleader chord \""_q + *s + u"\""_q;
+					return false;
+				}
+				leaders.push_back(chord);
+			}
+			if (leaders.empty()) {
+				errorOut = u":localleader cannot be empty"_q;
+				return false;
+			}
+			data.localleaders = std::move(leaders);
+			continue;
+		}
+		if (topKey == u"keyless"_q) {
+			if (edn_type(topVal) != EDN_TYPE_VECTOR) {
+				errorOut = u":keyless must be a vector of command keywords"_q;
+				return false;
+			}
+			for (auto j = size_t(0); j < edn_vector_count(topVal); ++j) {
+				const auto id = EdnKeyword(edn_vector_get(topVal, j));
+				const auto act = FindActionById(id);
+				if (!act) {
+					errorOut = u":keyless unknown command :"_q + id;
+					return false;
+				}
+				data.keyless.insert(*act);
+			}
+			continue;
+		}
+		const auto mapKind = ParseMapKind(topKey);
+		if (!mapKind || edn_type(topVal) != EDN_TYPE_MAP) {
+			errorOut = u"unknown map :"_q + topKey + u" (expected :normal :insert :chat :chats :music)"_q;
+			return false;
+		}
+		for (auto j = size_t(0); j < edn_map_count(topVal); ++j) {
+			const auto chordStr = EdnString(edn_map_get_key(topVal, j));
+			if (!chordStr) {
+				errorOut = u"chord key in :"_q + topKey + u" must be a string"_q;
+				return false;
+			}
+			auto chord = ParseChord(*chordStr, *mapKind);
+			if (chord.empty()) {
+				errorOut = u"invalid chord \""_q + *chordStr + u"\" in :"_q + topKey;
+				return false;
+			}
+			if (++editedCount > kEntryLimit) {
+				errorOut = u"too many entries in keymap file"_q;
+				return false;
+			}
+			const auto val = edn_map_get_value(topVal, j);
+			if (const auto labelStr = EdnString(val)) {
+				data.labels[{ *mapKind, chord }] = *labelStr;
+				continue;
+			}
+			if (ranges::contains(seen, std::pair(*mapKind, chord))) {
+				errorOut = u"duplicate chord \""_q + *chordStr + u"\" in :"_q + topKey;
+				return false;
+			}
+			seen.emplace_back(*mapKind, chord);
+
+			const auto current = ranges::find_if(data.bindings, [&](const Binding &b) {
+				return b.map == *mapKind && b.keys == chord;
+			});
+			if (isUserOverlay && current != data.bindings.end()
+					&& IsProtectedHelpAction(current->action)) {
+				errorOut = u"cannot override protected help chord \""_q + *chordStr + u"\""_q;
+				return false;
+			}
+			if (edn_type(val) == EDN_TYPE_NIL) {
+				if (current != data.bindings.end()) {
+					data.bindings.erase(current);
+				}
+				continue;
+			}
+			const auto cmdName = EdnKeyword(val);
+			const auto action = FindActionById(cmdName);
+			if (!action) {
+				errorOut = u"unknown command :"_q + cmdName + u" on \""_q + *chordStr + u"\""_q;
+				return false;
+			}
+			if (current != data.bindings.end()) {
+				current->action = *action;
 			} else {
-				const auto command = EdnKeyword(value);
-				if (command.isEmpty()) {
-					return {};
-				}
-				entries.insert(chord, command);
+				data.bindings.push_back({ *action, std::move(chord), *mapKind });
 			}
 		}
-		groups.insert(mode, entries);
 	}
-	return QJsonDocument(groups);
-}
 
-std::optional<std::vector<Binding>> ParseBindings(
-		const QByteArray &bytes,
-		bool legacy,
-		std::vector<Binding> result) {
-	const auto document = legacy
-		? QJsonDocument::fromJson(bytes)
-		: ReadEdnKeymap(bytes);
-	constexpr auto kEntryLimit = 128;
-	auto edited = std::vector<std::pair<KeyMode, Chord>>();
-	const auto apply = [&](KeyMode mode, const QString &text, QJsonValue id) {
-		if (!id.isNull() && !id.isString()) {
-			return false;
-		}
-		auto keys = ParseChord(text, mode);
-		if (keys.empty()
-			|| edited.size() >= kEntryLimit
-			|| ranges::contains(edited, std::pair(mode, keys))) {
-			return false;
-		}
-		edited.emplace_back(mode, keys);
-		const auto current = ranges::find_if(result, [&](const Binding &item) {
-			return item.mode == mode && item.keys == keys;
-		});
-		if (current != end(result) && IsHelpBinding(current->action)) {
-			return false;
-		}
-		if (id.isNull()) {
-			if (current != end(result)) {
-				result.erase(current);
+	// Validate no command/prefix collision within any single map.
+	for (const auto &a : data.bindings) {
+		for (const auto &b : data.bindings) {
+			if (a.map == b.map && a.keys.size() < b.keys.size() && StartsWith(b, a.keys)) {
+				errorOut = u"prefix collision between \""_q + ChordLabel(a.keys)
+					+ u"\" and \""_q + ChordLabel(b.keys) + u"\""_q;
+				return false;
 			}
-			return true;
-		}
-		const auto name = id.toString();
-		const auto command = ranges::find_if(kCommands, [&](const Command &item) {
-			return name == QString::fromLatin1(item.id);
-		});
-		if (command == std::end(kCommands)) {
-			return false;
-		} else if (current != end(result)) {
-			current->action = command->action;
-		} else {
-			result.push_back({ command->action, std::move(keys), mode });
-		}
-		return true;
-	};
-	if (legacy && document.isArray()) {
-		for (auto &binding : result) {
-			const auto previous = ranges::find(
-				kLegacyBindings, binding.action, &Binding::action);
-			if (binding.mode == KeyMode::Normal
-				&& previous != std::end(kLegacyBindings)) {
-				binding.keys = previous->keys;
-			}
-		}
-		for (const auto value : document.array()) {
-			const auto entry = value.toObject();
-			const auto text = entry.value(u"keys"_q);
-			if (entry.size() != 2 || !text.isString()
-				|| !apply(KeyMode::Normal, text.toString(), entry.value(u"command"_q))) {
-				return std::nullopt;
-			}
-		}
-	} else if (!legacy && document.isObject()) {
-		const auto groups = document.object();
-		for (auto group = groups.begin(); group != groups.end(); ++group) {
-			if ((group.key() != u"normal"_q && group.key() != u"insert"_q)
-				|| !group.value().isObject()) {
-				return std::nullopt;
-			}
-			const auto mode = (group.key() == u"normal"_q)
-				? KeyMode::Normal
-				: KeyMode::Insert;
-			const auto entries = group.value().toObject();
-			for (auto entry = entries.begin(); entry != entries.end(); ++entry) {
-				if (!apply(mode, entry.key(), entry.value())) {
-					return std::nullopt;
-				}
-			}
-		}
-	} else {
-		return std::nullopt;
-	}
-	for (const auto &binding : result) {
-		if (ranges::any_of(result, [&](const Binding &other) {
-			return binding.mode == other.mode
-				&& binding.keys.size() < other.keys.size()
-				&& StartsWith(other, binding.keys);
-		})) {
-			return std::nullopt;
 		}
 	}
-	const auto canEnterNormal = ranges::any_of(result, [](const Binding &binding) {
-		return binding.mode == KeyMode::Insert
-			&& binding.action == Action::EnterNormalMode;
+	// Validate localleader chords do not collide with :normal commands or prefixes.
+	for (const auto &ll : data.localleaders) {
+		for (const auto &b : data.bindings) {
+			if (b.map == MapKind::Normal
+					&& (StartsWith(b.keys, ll) || StartsWith(ll, b.keys))) {
+				errorOut = u":localleader \""_q + ChordLabel(ll)
+					+ u"\" collides with :normal \""_q + ChordLabel(b.keys) + u"\""_q;
+				return false;
+			}
+		}
+	}
+	// Require at least one :insert binding that enters Normal mode.
+	const auto canEnterNormal = ranges::any_of(data.bindings, [](const Binding &b) {
+		return b.map == MapKind::Insert && b.action == Action::EnterNormalMode;
 	});
-	return canEnterNormal ? std::optional(std::move(result)) : std::nullopt;
+	if (!canEnterNormal) {
+		errorOut = u":insert must keep at least one binding for :enter-normal-mode"_q;
+		return false;
+	}
+	return true;
 }
 
-const std::vector<Binding> &Bindings() {
-	static const auto result = [] {
-		auto bundled = QFile(u":/purple/default-keys.edn"_q);
-		const auto loaded = bundled.open(QIODevice::ReadOnly);
-		Expects(loaded);
-		auto parsed = ParseBindings(bundled.readAll(), false, {});
-		Expects(parsed.has_value());
-		auto defaults = std::move(*parsed);
-		const auto directory = ConfigDirectory();
-		auto info = QFileInfo(directory + u"/keys.edn"_q);
-		const auto legacy = !info.exists();
-		if (legacy) {
-			info.setFile(directory + u"/keys.json"_q);
-		}
-		if (!info.exists()) {
-			return defaults;
-		}
-		auto file = QFile(info.filePath());
-		constexpr auto kByteLimit = 16 * 1024;
-		if (info.isFile() && file.open(QIODevice::ReadOnly)) {
-			const auto bytes = file.read(kByteLimit + 1);
-			if (file.error() == QFileDevice::NoError
-				&& bytes.size() <= kByteLimit) {
-				if (auto parsed = ParseBindings(bytes, legacy, defaults)) {
-					return std::move(*parsed);
-				}
-			}
-		}
-		LOG(("Purple modal keys: invalid keymap, using default bindings."));
+constexpr auto kStarterKeysTemplate =
+"; Purple Telegram modal keymap overlay (shared evilify EDN format).\n"
+"; Entries here overlay the built-in defaults and reload live on save.\n"
+"; Remove leading \";;\" to enable an example. If any entry is invalid,\n"
+"; built-in defaults stay active and the status line names the error.\n"
+";\n"
+"; Each map binds a Doom chord string to:\n"
+";   :command-id   bind chord to command (SPC h f lists every command ID)\n"
+";   nil           unbind built-in chord in that map\n"
+";   \"label\"       rename a prefix group in which-key\n"
+";\n"
+"; Maps: :normal (global), :insert (typing: C-/M-/s- first stroke only),\n"
+"; and localleader context maps after \",\" or \"SPC m\": :chat, :chats, :music.\n"
+"{\n"
+" ;; :localleader [\",\" \"SPC m\"]\n"
+" ;; :normal {\"SPC o a\" nil               ; unbind Archived Chats\n"
+" ;;          \"C-c m\"   :open-music       ; add a custom shortcut\n"
+" ;;          \"SPC b\"   \"chat\"}           ; rename a which-key prefix\n"
+" ;; :chat   {\"k\"       :open-pinned-messages}\n"
+"}\n";
+
+void EnsureStarterKeysFile(const QString &path) {
+	if (QFileInfo::exists(path)) {
+		return;
+	}
+	const auto dir = QFileInfo(path).dir();
+	if (!dir.exists()) {
+		dir.mkpath(u"."_q);
+	}
+	auto file = QFile(path);
+	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		file.write(kStarterKeysTemplate);
+	}
+}
+
+KeymapData LoadKeymapData() {
+	auto defaults = KeymapData();
+	auto bundled = QFile(u":/purple/default-keys.edn"_q);
+	const auto loaded = bundled.open(QIODevice::ReadOnly);
+	Expects(loaded);
+	auto defaultErr = QString();
+	const auto okDefault = ParseEdnOverlay(bundled.readAll(), defaults, false, defaultErr);
+	Expects(okDefault);
+
+	const auto directory = ConfigDirectory();
+	const auto userPath = directory + u"/keys.edn"_q;
+	defaults.userPath = userPath;
+	if (Enabled() && !QFileInfo::exists(directory + u"/keys.json"_q)) {
+		EnsureStarterKeysFile(userPath);
+	}
+	const auto info = QFileInfo(userPath);
+	if (!info.exists() || !info.isFile()) {
 		return defaults;
-	}();
-	return result;
-}
-
-bool MatchesNext(KeyMode mode, const Chord &prefix, int stroke) {
-	return ranges::any_of(Bindings(), [&](const Binding &binding) {
-		return binding.mode == mode
-			&& binding.keys.size() > prefix.size()
-			&& binding.keys[prefix.size()] == stroke
-			&& StartsWith(binding, prefix);
-	});
-}
-
-QString WhichKeyGroup(Chord prefix, int next) {
-	prefix.push_back(next);
-	if (prefix == Chord{ Qt::Key_Space, Qt::Key_C }) {
-		return tr::lng_purple_keys_group_chat(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_O }) {
-		return tr::lng_purple_keys_group_open(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_A }) {
-		return tr::lng_purple_keys_group_accounts(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_W }) {
-		return tr::lng_mac_menu_window(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_M }) {
-		return tr::lng_purple_music_title(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_S }) {
-		return tr::lng_shortcuts_search(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_N }) {
-		return tr::lng_create_group_create(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_H }) {
-		return tr::lng_purple_keys_help(tr::now);
-	} else if (prefix == Chord{ Qt::Key_G, Qt::Key_S }
-			|| prefix == Chord{ Qt::Key_Space, Qt::Key_C, Qt::Key_H }) {
-		return tr::lng_purple_keys_group_messages(tr::now);
-	} else if (prefix == Chord{ Qt::Key_Space, Qt::Key_C, Qt::Key_S }) {
-		return tr::lng_profile_shared_media(tr::now);
 	}
-	return u"…"_q;
+	auto file = QFile(userPath);
+	constexpr auto kByteLimit = 32 * 1024;
+	if (!file.open(QIODevice::ReadOnly)) {
+		defaults.error = u"could not open keys.edn"_q;
+		return defaults;
+	}
+	const auto bytes = file.read(kByteLimit + 1);
+	if (file.error() != QFileDevice::NoError || bytes.size() > kByteLimit) {
+		defaults.error = u"keys.edn exceeds 32 KiB limit"_q;
+		return defaults;
+	}
+	auto candidate = defaults;
+	auto userErr = QString();
+	if (ParseEdnOverlay(bytes, candidate, true, userErr)) {
+		return candidate;
+	}
+	defaults.error = userErr;
+	LOG(("Purple modal keys: invalid keys.edn (%1), using built-in defaults.").arg(userErr));
+	return defaults;
+}
+
+KeymapData &KeymapStore() {
+	static auto store = LoadKeymapData();
+	return store;
+}
+
+const KeymapData &Keymap() {
+	return KeymapStore();
+}
+
+void ReloadKeymapStore() {
+	KeymapStore() = LoadKeymapData();
+	KeymapChanges.fire({});
+}
+
+QString MxHistoryPath() {
+	return ConfigDirectory() + u"/mx-history.json"_q;
+}
+
+ModalMx::History &MxHistory() {
+	static auto history = [] {
+		auto f = QFile(MxHistoryPath());
+		if (f.open(QIODevice::ReadOnly)) {
+			return ModalMx::History::Deserialize(f.read(64 * 1024));
+		}
+		return ModalMx::History();
+	}();
+	return history;
+}
+
+void SaveMxHistory() {
+	const auto path = MxHistoryPath();
+	const auto dir = QFileInfo(path).dir();
+	if (!dir.exists()) {
+		dir.mkpath(u"."_q);
+	}
+	auto f = QFile(path);
+	if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		f.write(MxHistory().serialize());
+	}
 }
 
 struct Target {
@@ -879,12 +1056,17 @@ struct Target {
 	Dialogs::Key chat;
 	bool folders = false;
 	bool chatActions = false;
+	bool inMusic = false;
+	QString paneLabel;
+	std::optional<MapKind> contextMap;
+	QString contextName;
 	Window::SessionController *controller = nullptr;
 };
 
 Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 	const auto forSection = [=](
 			auto *section,
+			QString paneName,
 			bool scheduled = false,
 			bool chatActions = false) {
 		const auto list = (section->controller() == owner)
@@ -898,12 +1080,22 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					section->cornerButtonsShowAtPosition(position);
 				},
 				.chatActions = chatActions,
+				.paneLabel = std::move(paneName),
+				.contextMap = chatActions ? std::optional(MapKind::Chat) : std::nullopt,
+				.contextName = chatActions ? u"chat"_q : QString(),
 				.controller = owner,
 			}
 			: Target();
 	};
 	if (MusicAllowsModalKeys(owner, focus)) {
-		return { .focus = focus, .controller = owner };
+		return {
+			.focus = focus,
+			.inMusic = true,
+			.paneLabel = u"Music"_q,
+			.contextMap = MapKind::Music,
+			.contextName = u"music"_q,
+			.controller = owner,
+		};
 	}
 	for (auto widget = focus; widget; widget = widget->parentWidget()) {
 		if (const auto dialogs = dynamic_cast<Dialogs::Widget*>(widget)) {
@@ -918,6 +1110,9 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					&& !owner->openedFolder().current()
 					&& !owner->shownForum().current()
 					&& !owner->openedCommunity().current(),
+				.paneLabel = u"Chats"_q,
+				.contextMap = MapKind::Chats,
+				.contextName = u"chats"_q,
 				.controller = owner,
 			};
 		}
@@ -931,12 +1126,15 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 					.attach = KeyboardAttachment::From(history),
 					.chat = Dialogs::Key(history->history()),
 					.chatActions = true,
+					.paneLabel = u"Chat"_q,
+					.contextMap = MapKind::Chat,
+					.contextName = u"chat"_q,
 					.controller = owner,
 				}
 				: Target();
 		}
 		if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(widget)) {
-			auto target = forSection(chat, false, true);
+			auto target = forSection(chat, u"Topic"_q, false, true);
 			if (target.focus) {
 				target.attach = KeyboardAttachment::From(chat);
 				const auto key = chat->activeChat().key;
@@ -948,10 +1146,10 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 			return target;
 		}
 		if (const auto pinned = dynamic_cast<HistoryView::PinnedWidget*>(widget)) {
-			return forSection(pinned);
+			return forSection(pinned, u"Pinned"_q);
 		}
 		if (const auto scheduled = dynamic_cast<HistoryView::ScheduledWidget*>(widget)) {
-			auto target = forSection(scheduled, true);
+			auto target = forSection(scheduled, u"Scheduled"_q, true);
 			if (target.focus) target.attach = KeyboardAttachment::From(scheduled);
 			return target;
 		}
@@ -992,6 +1190,11 @@ Dialogs::Widget *ChatsPane(Window::SessionController *controller) {
 	return nullptr;
 }
 
+Dialogs::InnerWidget *ChatsInnerList(Window::SessionController *controller) {
+	const auto dialogs = ChatsPane(controller);
+	return dialogs ? dialogs->purpleKeysList(dialogs) : nullptr;
+}
+
 Ui::ElasticScroll *HistoryScroll(const Target &target) {
 	const auto list = target.messages.widget();
 	const auto scroll = list
@@ -1005,8 +1208,12 @@ Ui::ElasticScroll *HistoryScroll(const Target &target) {
 
 bool Available(Action action, const Target &target) {
 	switch (action) {
+	case Action::MoveUp:
+	case Action::MoveDown:
+		return target.list != nullptr || HistoryScroll(target) != nullptr;
 	case Action::PreviousChat:
 	case Action::NextChat:
+		return target.list != nullptr || ChatsInnerList(target.controller) != nullptr;
 	case Action::PreviewChat:
 	case Action::OpenChat: return target.list != nullptr;
 	case Action::PreviousFolder:
@@ -1022,6 +1229,8 @@ bool Available(Action action, const Target &target) {
 		return target.messages.supportsCompose(MessageHints::Action::Reply);
 	case Action::EditMessage:
 		return target.messages.supportsCompose(MessageHints::Action::Edit);
+	case Action::HistoryHalfUp:
+	case Action::HistoryHalfDown:
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage:
 	case Action::LatestMessages: return HistoryScroll(target) != nullptr;
@@ -1064,154 +1273,114 @@ bool Available(Action action, const Target &target) {
 			&& !target.controller->adaptive().isOneColumn()
 			&& target.controller->mainSectionShown()
 			&& target.controller->activeChatCurrent().thread();
+	case Action::FocusOtherPane:
+		return Available(Action::FocusChats, target)
+			|| Available(Action::FocusConversation, target);
 	default: return true;
 	}
 }
 
 bool IsSearchableAction(Action action) {
 	return action != Action::Help
+		&& action != Action::Cheatsheet
 		&& action != Action::Run
 		&& action != Action::DescribeChord
 		&& action != Action::DescribeCommand;
 }
 
-QString CommandDetail(const Command &command) {
-	return command.label() + u"\n"_q + QString::fromLatin1(command.id)
-		+ u"\n"_q + BindingsLabel(command.action);
-}
-
-void TextBox(
-		not_null<Ui::GenericBox*> box,
-		QString title,
-		QString text) {
-	box->setTitle(rpl::single(std::move(title)));
-	box->addRow(object_ptr<Ui::FlatLabel>(box, text, st::boxLabel));
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-}
-
-class PaletteKeys final : public QObject {
-public:
-	PaletteKeys(not_null<QTextEdit*> editor, Fn<void(int)> move)
-	: QObject(editor.get())
-	, _editor(editor)
-	, _move(std::move(move)) {
-		editor->installEventFilter(this);
-	}
-
-private:
-	bool eventFilter(QObject *, QEvent *event) override {
-		if (event->type() != QEvent::KeyPress) {
-			return false;
-		}
-		const auto key = static_cast<QKeyEvent*>(event);
-		if (key->modifiers() != Qt::NoModifier
-			|| (key->key() != Qt::Key_Up && key->key() != Qt::Key_Down)) {
-			return false;
-		}
-		const auto layout = _editor->textCursor().block().layout();
-		if (layout && !layout->preeditAreaText().isEmpty()) {
-			return false;
-		}
-		_move(key->key() == Qt::Key_Up ? -1 : 1);
-		return true;
-	}
-
-	const not_null<QTextEdit*> _editor;
-	Fn<void(int)> _move;
+// Builds the effective binding list for the given mode & active context:
+// localleader chords expand the active context map into effective Normal chords.
+struct EffectiveBinding {
+	Action action;
+	Chord keys;
+	MapKind sourceMap = MapKind::Normal;
+	bool viaLocalleader = false;
 };
 
-void PaletteBox(
-		not_null<Ui::GenericBox*> box,
-		bool describe,
-		std::vector<const Command*> commands,
-		Fn<void(Action, QPointer<Ui::GenericBox>)> execute) {
-	box->setTitle(describe
-		? tr::lng_purple_keys_describe_command()
-		: tr::lng_purple_keys_run());
-	const auto field = box->addRow(object_ptr<Ui::InputField>(
-		box,
-		st::defaultInputField,
-		Ui::InputField::Mode::SingleLine,
-		tr::lng_purple_keys_search()));
-	const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
-		box,
-		QString(),
-		st::boxLabel));
-	const auto index = box->lifetime().make_state<int>(0);
-	const auto matches = box->lifetime().make_state<
-		std::vector<const Command*>>();
-	const auto render = [=] {
-		auto lines = QStringList();
-		const auto count = int(matches->size());
-		const auto first = std::clamp(
-			*index - kPaletteRows / 2, 0, std::max(count - kPaletteRows, 0));
-		const auto till = std::min(first + kPaletteRows, count);
-		if (first > 0) {
-			lines.push_back(u"↑"_q);
-		}
-		for (auto i = first; i != till; ++i) {
-			const auto command = (*matches)[i];
-			lines.push_back((i == *index ? u"› "_q : u"  "_q)
-				+ command->label() + u"    "_q + BindingsLabel(command->action));
-		}
-		if (till < count) {
-			lines.push_back(u"↓"_q);
-		}
-		if (!matches->empty()) {
-			lines.push_back(u"\n"_q
-				+ QString::fromLatin1((*matches)[*index]->id));
-		}
-		label->setText(lines.isEmpty()
-			? tr::lng_purple_keys_no_matches(tr::now)
-			: lines.join('\n'));
-	};
-	const auto filter = [=] {
-		const auto terms = ExactSearchTerms(field->getLastText());
-		matches->clear();
-		for (const auto command : commands) {
-			const auto text = command->label() + u' '
-				+ QString::fromLatin1(command->id) + u' '
-				+ BindingsLabel(command->action);
-			if (MatchExactSearch(terms, text)) {
-				matches->push_back(command);
+std::vector<EffectiveBinding> EffectiveBindings(
+		bool normalMode,
+		std::optional<MapKind> contextMap) {
+	const auto &km = Keymap();
+	auto result = std::vector<EffectiveBinding>();
+	if (!normalMode) {
+		for (const auto &b : km.bindings) {
+			if (b.map == MapKind::Insert) {
+				result.push_back({ b.action, b.keys, MapKind::Insert, false });
 			}
 		}
-		*index = 0;
-		render();
-	};
-	const auto submit = [=] {
-		if (matches->empty()) {
-			return;
+		return result;
+	}
+	if (contextMap) {
+		for (const auto &ll : km.localleaders) {
+			for (const auto &b : km.bindings) {
+				if (b.map != *contextMap) {
+					continue;
+				}
+				auto combined = ll;
+				combined.insert(combined.end(), b.keys.begin(), b.keys.end());
+				result.push_back({ b.action, std::move(combined), *contextMap, true });
+			}
 		}
-		const auto action = (*matches)[*index]->action;
-		if (describe) {
-			label->setText(CommandDetail(FindCommand(action)));
-		} else {
-			execute(action, QPointer<Ui::GenericBox>(box.get()));
+	}
+	for (const auto &b : km.bindings) {
+		if (b.map == MapKind::Normal) {
+			result.push_back({ b.action, b.keys, MapKind::Normal, false });
 		}
-	};
-	filter();
-	field->changes() | rpl::on_next(filter, box->lifetime());
-	field->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
-		submit();
-	}, box->lifetime());
-	new PaletteKeys(field->rawTextEdit(), [=](int offset) {
-		if (!matches->empty()) {
-			*index = std::clamp(*index + offset, 0, int(matches->size()) - 1);
-			render();
+	}
+	return result;
+}
+
+bool IsLocalleaderPrefix(const Chord &prefix) {
+	for (const auto &ll : Keymap().localleaders) {
+		if (StartsWith(prefix, ll)) {
+			return true;
 		}
-	});
-	box->addButton(describe
-		? tr::lng_purple_keys_describe()
-		: tr::lng_purple_keys_execute(), submit);
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-	box->setFocusCallback([=] { field->setFocusFast(); });
+	}
+	return false;
+}
+
+bool IsExactLocalleader(const Chord &prefix) {
+	return ranges::contains(Keymap().localleaders, prefix);
+}
+
+QString PrefixLabel(MapKind map, const Chord &prefix) {
+	const auto &km = Keymap();
+	if (const auto it = km.labels.find({ map, prefix }); it != km.labels.end()) {
+		return it->second;
+	}
+	if (IsExactLocalleader(prefix)) {
+		return u"localleader"_q;
+	}
+	return QString();
+}
+
+std::vector<QStringList> ChordsForAction(
+		Action action,
+		const std::vector<EffectiveBinding> &effective) {
+	auto out = std::vector<QStringList>();
+	for (const auto &b : effective) {
+		if (b.action == action) {
+			auto caps = ChordCaps(b.keys);
+			if (!ranges::contains(out, caps)) {
+				out.push_back(std::move(caps));
+			}
+		}
+	}
+	return out;
+}
+
+QString FirstLocalleaderLabel() {
+	const auto &ll = Keymap().localleaders;
+	return ll.empty() ? u","_q : ChordLabel(ll.front());
 }
 
 enum class KeyUse {
 	Pass,
-	ExitNormal,
+	ExitInsertOrBackOut,
 	Cancel,
+	CountDigit,
+	PrefixBackspace,
+	SwallowEmptyLocal,
 	Capture,
 	Hint,
 	Ignore,
@@ -1220,30 +1389,60 @@ enum class KeyUse {
 class Keys final : public QObject {
 public:
 	explicit Keys(not_null<MainWindow*> window);
+	~Keys() override;
+
 	bool handle(QObject *receiver, QEvent *event);
 	[[nodiscard]] bool ownsChatListFocus() const;
+	[[nodiscard]] int statusBarHeight() const;
+	void updateLayout(QRect body);
+	void raiseChrome();
+
+protected:
+	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
 	[[nodiscard]] Window::SessionController *owner() const;
 	[[nodiscard]] Target currentTarget(QObject *receiver) const;
-	[[nodiscard]] KeyMode mode() const;
-	[[nodiscard]] KeyUse classify(const QKeyEvent &event, int key) const;
-	void reset();
-	void invalidate();
+	[[nodiscard]] Target activeTarget() const;
+	[[nodiscard]] bool chromeVisible() const;
+	[[nodiscard]] KeyUse classify(
+		const QKeyEvent &event,
+		int key,
+		const Target &target) const;
 	void clearPrefix();
+	void enterNormal(bool silent = true);
+	void enterInsert(bool silent = true);
+	void showFeedback(QString text, bool isError = false);
+	void refreshStatusBar();
 	void showWhichKey();
+	void hideWhichKey();
 	void stroke(int key, const Target &target);
-	void dispatch(Action action, const Target &target);
-	void showPalette(bool describe, const Target &target);
+	void dispatch(Action action, const Target &target, int count);
+	void showHelpLayer(bool startOnAllBindings, const Target &target);
+	void showDescribeKeyResult(const Chord &chord, const Target &target);
+	void showDescribeCommandResult(Action action, const Target &target);
+	void showPalette(bool describe, const Target &target, bool fromInsert);
+	void watchUserKeymap();
 
 	const not_null<MainWindow*> _window;
-	QTimer _timer;
+	QPointer<ModalUi::ModalStatusBar> _statusBar;
+	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
+	QTimer _whichKeyTimer;
+	QTimer _feedbackTimer;
+	QFileSystemWatcher _keymapWatcher;
 	MessageHints _hints;
-	base::weak_ptr<Ui::Toast::Instance> _whichKey;
+
 	Chord _prefix;
+	std::vector<EffectiveBinding> _frozenEffective;
+	int _count = 0;
 	QSet<int> _held;
-	bool _normal = false;
+	bool _normal = true; // Starts in Normal mode when modal keys are enabled.
 	bool _inspect = false;
+	bool _swallowNext = false;
+	bool _paletteActive = false;
+	QString _feedbackText;
+	bool _feedbackError = false;
+	QRect _lastBody;
 	uint64 _revision = 0;
 	rpl::lifetime _sessionLifetime;
 	rpl::lifetime _lifetime;
@@ -1257,35 +1456,87 @@ Keys *FindKeys(MainWindow *window) {
 		Qt::FindDirectChildrenOnly));
 }
 
+Keys *EnsureKeys(not_null<MainWindow*> window) {
+	if (const auto existing = FindKeys(window.get())) {
+		return existing;
+	}
+	return new Keys(window);
+}
+
 Keys::Keys(not_null<MainWindow*> window)
 : QObject(window)
 , _window(window) {
 	setObjectName(QString::fromLatin1(kKeysObjectName));
-	_timer.setSingleShot(true);
-	QObject::connect(&_timer, &QTimer::timeout, this, [=] { showWhichKey(); });
-	QObject::connect(qApp, &QApplication::focusChanged, this, [=] {
-		reset();
+	_statusBar = Ui::CreateChild<ModalUi::ModalStatusBar>(_window->bodyWidget());
+	_whichKey = Ui::CreateChild<ModalUi::WhichKeyOverlay>(_window->bodyWidget());
+	_whichKey->hide();
+
+	_whichKeyTimer.setSingleShot(true);
+	QObject::connect(&_whichKeyTimer, &QTimer::timeout, this, [=] { showWhichKey(); });
+	_feedbackTimer.setSingleShot(true);
+	QObject::connect(&_feedbackTimer, &QTimer::timeout, this, [=] {
+		_feedbackText.clear();
+		_feedbackError = false;
+		refreshStatusBar();
+	});
+
+	qApp->installEventFilter(this);
+
+	QObject::connect(qApp, &QApplication::focusChanged, this, [=](QWidget *, QWidget *now) {
+		clearPrefix();
+		// Stay in Normal mode across eligible surfaces; reflect Insert if focus moved to an input outside Normal.
+		if (now && now->window() == _window && !_paletteActive) {
+			refreshStatusBar();
+		}
 	});
 	QObject::connect(qGuiApp, &QGuiApplication::applicationStateChanged,
 		this, [=](Qt::ApplicationState state) {
 			if (state != Qt::ApplicationActive) {
 				_held.clear();
-				invalidate();
+				clearPrefix();
 			}
 		});
+
 	Core::App().passcodeLockValue() | rpl::on_next([=](bool) {
-		invalidate();
+		clearPrefix();
+		_window->updateControlsGeometry();
+		refreshStatusBar();
 	}, _lifetime);
-	EnabledChanges.events() | rpl::on_next([=](bool) {
-		invalidate();
+
+	EnabledChanges.events() | rpl::on_next([=](bool enabled) {
+		if (enabled) {
+			ReloadKeymapStore();
+			watchUserKeymap();
+			_normal = true;
+		}
+		clearPrefix();
+		_window->updateControlsGeometry();
+		refreshStatusBar();
 	}, _lifetime);
-	window->controller().boxShownValue() | rpl::on_next([=](bool) {
-		reset();
+
+	KeymapChanges.events() | rpl::on_next([=] {
+		clearPrefix();
+		if (!Keymap().error.isEmpty()) {
+			showFeedback(u"keys.edn error: "_q + Keymap().error, true);
+		}
+		refreshStatusBar();
 	}, _lifetime);
+
+	window->controller().boxShownValue() | rpl::on_next([=](bool shown) {
+		if (!shown) {
+			_paletteActive = false;
+		}
+		clearPrefix();
+		refreshStatusBar();
+	}, _lifetime);
+
 	window->controller().sessionControllerValue(
 	) | rpl::on_next([=](Window::SessionController *owner) {
-		invalidate();
+		++_revision;
+		clearPrefix();
 		_sessionLifetime.destroy();
+		_window->updateControlsGeometry();
+		refreshStatusBar();
 		if (!owner) {
 			return;
 		}
@@ -1295,8 +1546,79 @@ Keys::Keys(not_null<MainWindow*> window)
 			owner->openedFolder().changes() | rpl::to_empty,
 			owner->shownForum().changes() | rpl::to_empty,
 			owner->openedCommunity().changes() | rpl::to_empty
-		) | rpl::on_next([=] { invalidate(); }, _sessionLifetime);
+		) | rpl::on_next([=] {
+			// Keep Normal mode across chat/folder switches; only clear in-flight sequences.
+			++_revision;
+			clearPrefix();
+			refreshStatusBar();
+		}, _sessionLifetime);
 	}, _lifetime);
+
+	watchUserKeymap();
+	QObject::connect(&_keymapWatcher, &QFileSystemWatcher::fileChanged, this, [=](const QString &) {
+		QTimer::singleShot(80, this, [=] {
+			ReloadKeymapStore();
+			watchUserKeymap();
+			if (Keymap().error.isEmpty()) {
+				showFeedback(u"Reloaded keys.edn"_q);
+			}
+		});
+	});
+	QObject::connect(&_keymapWatcher, &QFileSystemWatcher::directoryChanged, this, [=](const QString &) {
+		if (QFileInfo::exists(Keymap().userPath)
+				&& !_keymapWatcher.files().contains(Keymap().userPath)) {
+			watchUserKeymap();
+			ReloadKeymapStore();
+		}
+	});
+
+	if (Enabled() && !Keymap().error.isEmpty()) {
+		showFeedback(u"keys.edn error: "_q + Keymap().error, true);
+	}
+	_window->updateControlsGeometry();
+	refreshStatusBar();
+}
+
+Keys::~Keys() {
+	if (qApp) {
+		qApp->removeEventFilter(this);
+	}
+}
+
+void Keys::watchUserKeymap() {
+	const auto path = Keymap().userPath;
+	if (path.isEmpty()) {
+		return;
+	}
+	const auto dir = QFileInfo(path).absolutePath();
+	if (QFileInfo::exists(dir) && !_keymapWatcher.directories().contains(dir)) {
+		_keymapWatcher.addPath(dir);
+	}
+	if (QFileInfo::exists(path) && !_keymapWatcher.files().contains(path)) {
+		_keymapWatcher.addPath(path);
+	}
+}
+
+bool Keys::eventFilter(QObject *watched, QEvent *event) {
+	// Clicking directly into a message composer enters Insert mode so mouse typing works immediately.
+	if (event->type() == QEvent::MouseButtonPress
+			&& Enabled()
+			&& _normal
+			&& watched->isWidgetType()) {
+		const auto widget = static_cast<QWidget*>(watched);
+		if (widget->window() == _window
+				&& (qobject_cast<QTextEdit*>(widget)
+					|| (widget->parentWidget()
+						&& qobject_cast<QTextEdit*>(widget->parentWidget())))) {
+			const auto target = FindTarget(owner(), qobject_cast<QTextEdit*>(widget)
+				? widget
+				: widget->parentWidget());
+			if (target.focus && target.history) {
+				enterInsert(true);
+			}
+		}
+	}
+	return QObject::eventFilter(watched, event);
 }
 
 Window::SessionController *Keys::owner() const {
@@ -1309,6 +1631,46 @@ Window::SessionController *Keys::owner() const {
 		&& !QApplication::activeModalWidget())
 		? window.sessionController()
 		: nullptr;
+}
+
+bool Keys::chromeVisible() const {
+	return Enabled()
+		&& !Core::App().passcodeLocked()
+		&& !_window->controller().locked()
+		&& _window->controller().sessionController() != nullptr;
+}
+
+int Keys::statusBarHeight() const {
+	return chromeVisible() ? ModalUi::ModalStatusBar::kHeight : 0;
+}
+
+void Keys::updateLayout(QRect body) {
+	_lastBody = body;
+	if (!_statusBar || !_whichKey) {
+		return;
+	}
+	if (!chromeVisible()) {
+		_statusBar->hide();
+		_whichKey->hide();
+		return;
+	}
+	const auto h = ModalUi::ModalStatusBar::kHeight;
+	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
+	_statusBar->show();
+	_statusBar->raise();
+	if (_whichKey->isVisible()) {
+		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
+		_whichKey->updateBounds(above);
+	}
+}
+
+void Keys::raiseChrome() {
+	if (_statusBar && _statusBar->isVisible()) {
+		_statusBar->raise();
+	}
+	if (_whichKey && _whichKey->isVisible()) {
+		_whichKey->raise();
+	}
 }
 
 Target Keys::currentTarget(QObject *receiver) const {
@@ -1325,31 +1687,160 @@ Target Keys::currentTarget(QObject *receiver) const {
 		: Target();
 }
 
+Target Keys::activeTarget() const {
+	const auto focus = QApplication::focusWidget();
+	const auto current = _window->controller().sessionController();
+	return (focus && focus->window() == _window && current)
+		? FindTarget(current, focus)
+		: Target();
+}
+
 bool Keys::ownsChatListFocus() const {
 	return _normal
 		&& Enabled()
 		&& currentTarget(QApplication::focusWidget()).list;
 }
 
-KeyMode Keys::mode() const {
-	return _normal ? KeyMode::Normal : KeyMode::Insert;
+void Keys::showFeedback(QString text, bool isError) {
+	_feedbackText = std::move(text);
+	_feedbackError = isError;
+	_feedbackTimer.start(isError ? 7000 : kFeedbackDurationMs);
+	refreshStatusBar();
 }
 
-KeyUse Keys::classify(const QKeyEvent &event, int key) const {
-	const auto mods = event.modifiers() & ~Qt::KeypadModifier;
-	const auto stroke = KeyStroke(event, key);
-	const auto pending = !_prefix.empty() || _inspect || _hints.active();
-	if (HasShortcutModifier(stroke)) {
-		const auto &shortcuts = Shortcuts::KeysCurrents();
-		if (shortcuts.contains(QKeySequence(event.keyCombination()))
-			|| shortcuts.contains(QKeySequence(QKeyCombination::fromCombined(stroke)))) {
-			return KeyUse::Pass;
+void Keys::enterNormal(bool silent) {
+	clearPrefix();
+	_normal = true;
+	if (!silent) {
+		showFeedback(tr::lng_purple_keys_normal(tr::now));
+	} else {
+		refreshStatusBar();
+	}
+}
+
+void Keys::enterInsert(bool silent) {
+	clearPrefix();
+	_normal = false;
+	if (!silent) {
+		showFeedback(tr::lng_purple_keys_insert(tr::now));
+	} else {
+		refreshStatusBar();
+	}
+}
+
+void Keys::hideWhichKey() {
+	_whichKeyTimer.stop();
+	if (_whichKey) {
+		_whichKey->hide();
+	}
+}
+
+void Keys::clearPrefix() {
+	_hints.clear();
+	_prefix.clear();
+	_frozenEffective.clear();
+	_count = 0;
+	_inspect = false;
+	_swallowNext = false;
+	hideWhichKey();
+	refreshStatusBar();
+}
+
+void Keys::refreshStatusBar() {
+	if (!_statusBar) {
+		return;
+	}
+	if (!chromeVisible()) {
+		_statusBar->hide();
+		return;
+	}
+	const auto target = activeTarget();
+	auto state = ModalUi::StatusState();
+	if (_inspect) {
+		state.badge = ModalUi::BadgeKind::DescribeKey;
+		state.badgeText = u"KEY?"_q;
+	} else if (_paletteActive) {
+		state.badge = ModalUi::BadgeKind::Palette;
+		state.badgeText = u"M-x"_q;
+	} else if (_hints.active()) {
+		state.badge = ModalUi::BadgeKind::Hints;
+		state.badgeText = u"HINTS"_q;
+	} else if (!_prefix.empty() && IsLocalleaderPrefix(_prefix)) {
+		state.badge = ModalUi::BadgeKind::Local;
+		state.badgeText = target.contextName.isEmpty()
+			? u"LOCAL"_q
+			: (u"LOCAL · "_q + target.contextName.toUpper());
+	} else if (!_prefix.empty() && _prefix.front() == Qt::Key_Space) {
+		state.badge = ModalUi::BadgeKind::Leader;
+		state.badgeText = u"LEADER"_q;
+	} else {
+		const auto focus = QApplication::focusWidget();
+		const auto inForeignInput = focus
+			&& !target.focus
+			&& focus->testAttribute(Qt::WA_InputMethodEnabled);
+		if (_normal && !inForeignInput) {
+			state.badge = ModalUi::BadgeKind::Normal;
+			state.badgeText = u"NORMAL"_q;
+		} else {
+			state.badge = ModalUi::BadgeKind::Insert;
+			state.badgeText = u"INSERT"_q;
 		}
 	}
+
+	state.paneLabel = target.paneLabel;
+	if (!target.contextName.isEmpty()) {
+		state.contextChip = FirstLocalleaderLabel() + u" "_q + target.contextName;
+	}
+
+	auto pending = QString();
+	if (_count > 0) {
+		pending += QString::number(_count);
+	}
+	if (!_prefix.empty()) {
+		if (!pending.isEmpty()) {
+			pending += u' ';
+		}
+		pending += ChordLabel(_prefix) + u" -"_q;
+		state.pendingGroup = IsLocalleaderPrefix(_prefix)
+			? (target.contextName.isEmpty() ? u"localleader"_q : target.contextName)
+			: PrefixLabel(MapKind::Normal, _prefix);
+	}
+	state.pendingText = pending;
+
+	if (!_feedbackText.isEmpty()) {
+		state.message = _feedbackText;
+		state.messageIsError = _feedbackError;
+	} else if (_inspect) {
+		state.message = tr::lng_purple_keys_capture(tr::now);
+	} else if (!Keymap().error.isEmpty()) {
+		state.message = u"keys.edn invalid (defaults active): "_q + Keymap().error;
+		state.messageIsError = true;
+	}
+
+	state.localleaderHint = u"SPC leader  ·  "_q + FirstLocalleaderLabel() + u" local"_q;
+	_statusBar->setState(std::move(state));
+}
+
+KeyUse Keys::classify(
+		const QKeyEvent &event,
+		int key,
+		const Target &target) const {
+	const auto mods = event.modifiers() & ~Qt::KeypadModifier;
+	const auto stroke = KeyStroke(event, key);
+	const auto pending = !_prefix.empty() || _count > 0 || _inspect || _hints.active() || _swallowNext;
+
+	if (_swallowNext) {
+		return KeyUse::SwallowEmptyLocal;
+	}
 	if (((key == Qt::Key_Escape && !mods) || stroke == kCtrlG)
-		&& (_normal || pending)) {
-		return pending ? KeyUse::Cancel : KeyUse::ExitNormal;
-	} else if (_hints.active()) {
+		&& (_normal || pending || target.focus)) {
+		if (pending) {
+			return KeyUse::Cancel;
+		}
+		// In Insert mode on an eligible surface, Escape returns to Normal mode!
+		return (!_normal && target.focus) ? KeyUse::ExitInsertOrBackOut : KeyUse::Pass;
+	}
+	if (_hints.active()) {
 		const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
 		if (!mods && (printable
 				|| key == Qt::Key_Return
@@ -1362,12 +1853,56 @@ KeyUse Keys::classify(const QKeyEvent &event, int key) const {
 					|| (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Greek)))
 			? KeyUse::Ignore
 			: KeyUse::Pass;
-	} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
+	}
+	if (!_prefix.empty() && key == Qt::Key_Backspace && !mods) {
+		return KeyUse::PrefixBackspace;
+	}
+	// Numeric repeat count digits in Normal mode (1-9 start count, 0 continues it).
+	if (_normal && !_inspect && _prefix.empty() && !mods
+			&& ((key >= Qt::Key_1 && key <= Qt::Key_9)
+				|| (_count > 0 && key == Qt::Key_0))) {
+		return KeyUse::CountDigit;
+	}
+	if (HasShortcutModifier(stroke)) {
+		// Allow our explicit modal modifier chords (C-[, M-x, C-d, C-u, C-w, C-j, C-k, C-f, C-b)
+		// before falling through to Telegram stock shortcuts.
+		const auto effective = !_frozenEffective.empty()
+			? _frozenEffective
+			: EffectiveBindings(_normal, target.contextMap);
+		const auto matchesModal = ranges::any_of(effective, [&](const EffectiveBinding &b) {
+			return b.keys.size() > _prefix.size()
+				&& b.keys[_prefix.size()] == stroke
+				&& StartsWith(b.keys, _prefix);
+		});
+		if (matchesModal) {
+			return KeyUse::Capture;
+		}
+		const auto &shortcuts = Shortcuts::KeysCurrents();
+		if (shortcuts.contains(QKeySequence(event.keyCombination()))
+			|| shortcuts.contains(QKeySequence(QKeyCombination::fromCombined(stroke)))) {
+			return KeyUse::Pass;
+		}
+	}
+	if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 		return KeyUse::Pass;
 	}
+
+	const auto effective = !_frozenEffective.empty()
+		? _frozenEffective
+		: EffectiveBindings(_normal, target.contextMap);
+	const auto matchesEffective = ranges::any_of(effective, [&](const EffectiveBinding &b) {
+		return b.keys.size() > _prefix.size()
+			&& b.keys[_prefix.size()] == stroke
+			&& StartsWith(b.keys, _prefix);
+	});
+	const auto matchesLocalleader = _normal && ranges::any_of(Keymap().localleaders, [&](const Chord &ll) {
+		return ll.size() > _prefix.size()
+			&& ll[_prefix.size()] == stroke
+			&& StartsWith(ll, _prefix);
+	});
 	const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
-	if (MatchesNext(mode(), _prefix, stroke)
-		|| ((_inspect || (_normal && pending)) && !mods && printable)) {
+	if (matchesEffective || matchesLocalleader
+			|| ((_inspect || (_normal && pending)) && !mods && printable)) {
 		return KeyUse::Capture;
 	}
 	if (!_normal) {
@@ -1386,11 +1921,11 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	if (event->type() == QEvent::WindowDeactivate) {
 		if (receiver == _window) {
 			_held.clear();
-			invalidate();
+			clearPrefix();
 		}
 		return false;
 	} else if (event->type() == QEvent::InputMethod) {
-		reset();
+		clearPrefix();
 		return false;
 	}
 	const auto keyEvent = static_cast<QKeyEvent*>(event);
@@ -1399,19 +1934,18 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return keyEvent->isAutoRepeat() ? _held.contains(key) : _held.remove(key);
 	}
 	if (keyEvent->isAutoRepeat() && _held.contains(key)) {
+		// Allow repeat for single-key repeatable motions in Normal mode? Keep non-repeat guard safe.
 		event->accept();
 		return true;
 	}
 	const auto target = currentTarget(receiver);
 	if (!target.focus || !Enabled()) {
 		if (receiver == QApplication::focusWidget()) {
-			reset();
+			clearPrefix();
 		}
 		return false;
 	}
-	const auto stockLegend = (keyEvent->key() == Qt::Key_Question
-		&& target.list && _prefix.empty() && !_inspect);
-	const auto use = stockLegend ? KeyUse::Pass : classify(*keyEvent, key);
+	const auto use = classify(*keyEvent, key, target);
 	if (event->type() == QEvent::ShortcutOverride) {
 		if (use != KeyUse::Pass) {
 			event->accept();
@@ -1432,10 +1966,32 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return true;
 	}
 	switch (use) {
-	case KeyUse::ExitNormal:
-		dispatch(Action::EnterInsertMode, target);
+	case KeyUse::ExitInsertOrBackOut:
+		enterNormal(true);
 		break;
 	case KeyUse::Cancel:
+		clearPrefix();
+		showFeedback(u"Canceled"_q);
+		break;
+	case KeyUse::SwallowEmptyLocal:
+		_swallowNext = false;
+		clearPrefix();
+		break;
+	case KeyUse::CountDigit:
+		_count = std::min(kMaxCount, _count * 10 + (key - Qt::Key_0));
+		refreshStatusBar();
+		break;
+	case KeyUse::PrefixBackspace:
+		if (!_prefix.empty()) {
+			_prefix.pop_back();
+		}
+		if (_prefix.empty()) {
+			clearPrefix();
+		} else {
+			refreshStatusBar();
+			showWhichKey();
+		}
+		break;
 	case KeyUse::Ignore:
 		clearPrefix();
 		break;
@@ -1448,10 +2004,13 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		if (!guard) {
 			break;
 		} else if (result == MessageHints::Input::LeaveNormal) {
-			reset();
+			enterInsert(true);
 		} else if (result == MessageHints::Input::Unknown) {
-			Ui::Toast::Show(_window, tr::lng_purple_keys_undefined(tr::now));
+			showFeedback(tr::lng_purple_keys_undefined(tr::now));
+		} else if (result == MessageHints::Input::Finished) {
+			clearPrefix();
 		}
+		refreshStatusBar();
 	} break;
 	case KeyUse::Pass:
 		break;
@@ -1459,151 +2018,230 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	return true;
 }
 
-void Keys::clearPrefix() {
-	_hints.clear();
-	_prefix.clear();
-	_inspect = false;
-	_timer.stop();
-	if (_whichKey) {
-		_whichKey->hide();
-		_whichKey = {};
-	}
-}
-
-void Keys::reset() {
-	_normal = false;
-	clearPrefix();
-}
-
-void Keys::invalidate() {
-	++_revision;
-	reset();
-}
-
 void Keys::showWhichKey() {
 	const auto target = currentTarget(QApplication::focusWidget());
-	if (!target.focus || !Enabled() || (_prefix.empty() && !_inspect)) {
-		reset();
+	if (!target.focus || !Enabled() || (_prefix.empty() && !_inspect) || !_whichKey) {
+		hideWhichKey();
 		return;
 	}
-	auto lines = QStringList();
+	const auto &effective = !_frozenEffective.empty()
+		? _frozenEffective
+		: EffectiveBindings(_normal, target.contextMap);
+
+	auto groups = std::vector<ModalUi::WhichKeyEntry>();
+	auto leaves = std::vector<ModalUi::WhichKeyEntry>();
 	auto seen = QSet<int>();
-	for (const auto &binding : Bindings()) {
-		if (binding.mode != mode()
-			|| !StartsWith(binding, _prefix)
-			|| binding.keys.size() == _prefix.size()
-			|| (!_inspect && !Available(binding.action, target))) {
+
+	for (const auto &b : effective) {
+		if (!StartsWith(b.keys, _prefix)
+			|| b.keys.size() == _prefix.size()
+			|| (!_inspect && !Available(b.action, target))) {
 			continue;
 		}
-		const auto next = binding.keys.begin()[_prefix.size()];
+		const auto next = b.keys[_prefix.size()];
 		if (seen.contains(next)) {
 			continue;
 		}
 		seen.insert(next);
-		const auto label = (binding.keys.size() == _prefix.size() + 1)
-			? FindCommand(binding.action).label()
-			: WhichKeyGroup(_prefix, next);
-		lines.push_back(KeyLabel(next) + u"    "_q + label);
+		if (b.keys.size() == _prefix.size() + 1) {
+			leaves.push_back({
+				.key = KeyLabel(next),
+				.label = FindCommand(b.action).label(),
+				.isGroup = false,
+			});
+		} else {
+			auto extended = _prefix;
+			extended.push_back(next);
+			auto lbl = PrefixLabel(MapKind::Normal, extended);
+			if (lbl.isEmpty()) {
+				lbl = IsExactLocalleader(extended)
+					? (target.contextName.isEmpty() ? u"local"_q : target.contextName)
+					: u"prefix"_q;
+			}
+			groups.push_back({
+				.key = KeyLabel(next),
+				.label = lbl,
+				.isGroup = true,
+			});
+		}
 	}
-	if (_inspect && _prefix.empty()) {
-		lines = { tr::lng_purple_keys_capture(tr::now) };
+
+	const auto sortEntry = [](const ModalUi::WhichKeyEntry &a, const ModalUi::WhichKeyEntry &b) {
+		const auto cmp = QString::compare(a.key, b.key, Qt::CaseInsensitive);
+		return (cmp != 0) ? (cmp < 0) : (a.key > b.key); // lowercase before uppercase
+	};
+	std::sort(groups.begin(), groups.end(), sortEntry);
+	std::sort(leaves.begin(), leaves.end(), sortEntry);
+
+	auto entries = std::move(groups);
+	entries.insert(entries.end(), leaves.begin(), leaves.end());
+
+	if (entries.empty()) {
+		hideWhichKey();
+		return;
 	}
-	if (!lines.isEmpty()) {
-		_whichKey = Ui::Toast::Show(_window, Ui::Toast::Config{
-			.text = { lines.join('\n') },
-			.attach = RectPart::Bottom,
-			.infinite = true,
-		});
-	}
+
+	const auto isLocal = IsLocalleaderPrefix(_prefix);
+	auto wk = ModalUi::WhichKeyState{
+		.prefixCaps = ChordCaps(_prefix),
+		.title = isLocal
+			? u"localleader"_q
+			: PrefixLabel(MapKind::Normal, _prefix),
+		.contextBadge = isLocal ? target.contextName : QString(),
+		.isLocal = isLocal,
+		.entries = std::move(entries),
+	};
+	_whichKey->setState(std::move(wk));
+	const auto above = QRect(
+		_lastBody.x(),
+		_lastBody.y(),
+		_lastBody.width(),
+		std::max(0, _lastBody.height() - statusBarHeight()));
+	_whichKey->updateBounds(above);
+	_window->fixOrder();
 }
 
 void Keys::stroke(int key, const Target &target) {
-	_prefix.push_back(key);
-	if (_whichKey) {
-		_whichKey->hide();
-		_whichKey = {};
+	if (_prefix.empty()) {
+		// Freeze effective bindings at stroke 1 so mid-chord focus/state shifts cannot change meaning.
+		_frozenEffective = EffectiveBindings(_normal, target.contextMap);
+		if (!_feedbackError && !_feedbackText.isEmpty()) {
+			_feedbackText.clear();
+			_feedbackTimer.stop();
+		}
 	}
+	_prefix.push_back(key);
+	hideWhichKey();
+
+	// If the user hit an exact localleader chord where no context bindings exist,
+	// warn cleanly and swallow the next keystroke so no stray Normal command fires.
+	if (_normal && !_inspect && IsExactLocalleader(_prefix)) {
+		const auto hasLocal = ranges::any_of(_frozenEffective, [&](const EffectiveBinding &b) {
+			return b.viaLocalleader && StartsWith(b.keys, _prefix)
+				&& Available(b.action, target);
+		});
+		if (!hasLocal) {
+			const auto label = ChordLabel(_prefix);
+			clearPrefix();
+			_swallowNext = true;
+			showFeedback(u"No local keys here ("_q + label + u")"_q);
+			return;
+		}
+	}
+
 	auto more = false;
-	for (const auto &binding : Bindings()) {
-		if (binding.mode != mode() || !StartsWith(binding, _prefix)) {
+	for (const auto &b : _frozenEffective) {
+		if (!StartsWith(b.keys, _prefix)) {
 			continue;
-		} else if (binding.keys.size() != _prefix.size()) {
+		} else if (b.keys.size() != _prefix.size()) {
 			more = true;
 			continue;
 		}
 		const auto inspect = _inspect;
+		const auto captured = _prefix;
+		const auto count = std::max(1, _count);
 		clearPrefix();
 		if (inspect) {
-			if (const auto current = owner()) {
-				current->show(Box(TextBox,
-					tr::lng_purple_keys_describe_key(tr::now),
-					CommandDetail(FindCommand(binding.action))));
-			}
-		} else if (Available(binding.action, target)) {
-			dispatch(binding.action, target);
+			showDescribeKeyResult(captured, target);
+		} else if (Available(b.action, target)) {
+			dispatch(b.action, target, count);
 		} else {
-			Ui::Toast::Show(_window,
-				tr::lng_purple_keys_action_unavailable(tr::now));
+			const auto &cmd = FindCommand(b.action);
+			showFeedback((cmd.need && *cmd.need)
+				? QString::fromLatin1(cmd.need)
+				: tr::lng_purple_keys_action_unavailable(tr::now));
 		}
 		return;
 	}
+	if (!more && _normal) {
+		more = ranges::any_of(Keymap().localleaders, [&](const Chord &ll) {
+			return ll.size() > _prefix.size() && StartsWith(ll, _prefix);
+		});
+	}
 	if (more) {
-		_timer.start(kWhichKeyDelay);
+		refreshStatusBar();
+		_whichKeyTimer.start(kWhichKeyDelay);
 	} else {
+		const auto unknown = ChordLabel(_prefix);
+		const auto inspect = _inspect;
+		const auto captured = _prefix;
 		clearPrefix();
-		Ui::Toast::Show(_window, tr::lng_purple_keys_undefined(tr::now));
+		if (inspect) {
+			showDescribeKeyResult(captured, target);
+		} else {
+			showFeedback(unknown + u" is undefined"_q);
+		}
 	}
 }
 
-void Keys::dispatch(Action action, const Target &target) {
+void Keys::dispatch(Action action, const Target &target, int count) {
 	const auto current = owner();
 	if (!current || !target.focus || !Available(action, target)) {
 		return;
 	}
+	const auto repeat = FindCommand(action).repeatable ? std::clamp(count, 1, kMaxCount) : 1;
 	using Native = Shortcuts::Command;
-	const auto launch = [window = QPointer(_window.get())](Native native) {
+	const auto launch = [this, window = QPointer(_window.get())](Native native) {
 		if (!Shortcuts::Launch(std::vector<Native>{ native }) && window) {
-			Ui::Toast::Show(window.data(),
-				tr::lng_purple_keys_action_unavailable(tr::now));
+			showFeedback(tr::lng_purple_keys_action_unavailable(tr::now));
 		}
 	};
 	using Hint = MessageHints::Action;
 	const auto startHint = [&](Hint hint, QString empty) {
 		if (_hints.start(target.messages, hint)) {
 			_normal = true;
+			refreshStatusBar();
 		} else {
-			Ui::Toast::Show(_window, std::move(empty));
+			showFeedback(std::move(empty));
+		}
+	};
+	const auto stepChatList = [&](bool down) {
+		const auto list = target.list ? target.list : ChatsInnerList(current);
+		if (!list) {
+			return;
+		}
+		for (auto i = 0; i < repeat; ++i) {
+			auto ev = QKeyEvent(QEvent::KeyPress,
+				down ? Qt::Key_Down : Qt::Key_Up,
+				Qt::NoModifier);
+			list->processKeyDispatch(&ev);
 		}
 	};
 	switch (action) {
 	case Action::EnterNormalMode:
-		clearPrefix();
-		if (!_normal) {
-			_normal = true;
-			Ui::Toast::Show(_window, tr::lng_purple_keys_normal(tr::now));
-		}
+		enterNormal(false);
 		break;
 	case Action::EnterInsertMode:
-		reset();
-		Ui::Toast::Show(_window, tr::lng_purple_keys_insert(tr::now));
+		enterInsert(false);
 		break;
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
 		break;
+	case Action::MoveUp:
+	case Action::MoveDown:
+		if (target.list) {
+			stepChatList(action == Action::MoveDown);
+		} else if (const auto scroll = HistoryScroll(target)) {
+			const auto delta = kLineScrollPx * repeat;
+			const auto top = scroll->scrollTop();
+			scroll->scrollToY((action == Action::MoveUp)
+				? std::max(0, top - delta)
+				: (top + delta));
+		}
+		break;
 	case Action::PreviousChat:
-	case Action::NextChat: {
-		auto event = QKeyEvent(QEvent::KeyPress,
-			action == Action::NextChat ? Qt::Key_Down : Qt::Key_Up,
-			Qt::NoModifier);
-		target.list->processKeyDispatch(&event);
-	} break;
+	case Action::NextChat:
+		stepChatList(action == Action::NextChat);
+		break;
 	case Action::OpenChat:
 		target.list->chooseRow();
 		break;
 	case Action::PreviousFolder:
 	case Action::NextFolder:
-		Window::CheckAndJumpToNearChatsFilter(
-			current, action == Action::NextFolder, true);
+		for (auto i = 0; i < repeat; ++i) {
+			Window::CheckAndJumpToNearChatsFilter(
+				current, action == Action::NextFolder, true);
+		}
 		break;
 	case Action::Search:
 		launch(Native::Search);
@@ -1615,22 +2253,22 @@ void Keys::dispatch(Action action, const Target &target) {
 		current->showSettings();
 		break;
 	case Action::ChatPalette:
-		reset();
+		clearPrefix();
 		ShowChatPalette(current);
 		break;
 	case Action::OpenMusic:
 		ToggleMusicSection(current);
 		break;
 	case Action::OpenPlaylists:
-		reset();
+		clearPrefix();
 		ShowPlaylistsBox(current);
 		break;
 	case Action::OpenChatInfo:
-		reset();
+		clearPrefix();
 		current->showPeerInfo(target.chat.thread());
 		break;
 	case Action::AttachFiles:
-		reset();
+		clearPrefix();
 		target.attach();
 		break;
 	case Action::OpenChatMedia:
@@ -1640,7 +2278,7 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::OpenChatVoice:
 	case Action::OpenChatGifs:
 	case Action::OpenChatPolls: {
-		reset();
+		clearPrefix();
 		const auto media = Info::Section(FindCommand(action).mediaType);
 		if (const auto topic = target.chat.topic()) {
 			current->showSection(std::make_shared<Info::Memento>(topic, media));
@@ -1649,7 +2287,7 @@ void Keys::dispatch(Action action, const Target &target) {
 		}
 	} break;
 	case Action::OpenPinnedMessages:
-		reset();
+		clearPrefix();
 		current->showSection(std::make_shared<HistoryView::PinnedMemento>(
 			target.chat.thread()));
 		break;
@@ -1663,23 +2301,23 @@ void Keys::dispatch(Action action, const Target &target) {
 		launch(Native::ShowContacts);
 		break;
 	case Action::OpenCalls:
-		reset();
+		clearPrefix();
 		::Calls::ShowCallsBox(current);
 		break;
 	case Action::OpenDownloads:
-		reset();
+		clearPrefix();
 		current->showSection(Info::Downloads::Make(current->session().user()));
 		break;
 	case Action::NewGroup:
-		reset();
+		clearPrefix();
 		current->showNewGroup();
 		break;
 	case Action::NewChannel:
-		reset();
+		clearPrefix();
 		current->showNewChannel();
 		break;
 	case Action::AddContact:
-		reset();
+		clearPrefix();
 		current->showAddContact();
 		break;
 	case Action::OpenScheduled:
@@ -1704,29 +2342,17 @@ void Keys::dispatch(Action action, const Target &target) {
 		launch(Native::MediaNext);
 		break;
 	case Action::SeekBackward:
-		launch(Native::MediaSeekBackward);
+		for (auto i = 0; i < repeat; ++i) launch(Native::MediaSeekBackward);
 		break;
 	case Action::SeekForward:
-		launch(Native::MediaSeekForward);
+		for (auto i = 0; i < repeat; ++i) launch(Native::MediaSeekForward);
 		break;
-	case Action::Account1:
-		launch(Native::ShowAccount1);
-		break;
-	case Action::Account2:
-		launch(Native::ShowAccount2);
-		break;
-	case Action::Account3:
-		launch(Native::ShowAccount3);
-		break;
-	case Action::Account4:
-		launch(Native::ShowAccount4);
-		break;
-	case Action::Account5:
-		launch(Native::ShowAccount5);
-		break;
-	case Action::Account6:
-		launch(Native::ShowAccount6);
-		break;
+	case Action::Account1: launch(Native::ShowAccount1); break;
+	case Action::Account2: launch(Native::ShowAccount2); break;
+	case Action::Account3: launch(Native::ShowAccount3); break;
+	case Action::Account4: launch(Native::ShowAccount4); break;
+	case Action::Account5: launch(Native::ShowAccount5); break;
+	case Action::Account6: launch(Native::ShowAccount6); break;
 	case Action::FocusChats:
 		if (const auto dialogs = ChatsPane(current)) {
 			dialogs->setInnerFocus(true);
@@ -1735,13 +2361,32 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::FocusConversation:
 		current->content()->activate();
 		break;
+	case Action::FocusOtherPane:
+		if (Available(Action::FocusChats, target)) {
+			if (const auto dialogs = ChatsPane(current)) {
+				dialogs->setInnerFocus(true);
+			}
+		} else if (Available(Action::FocusConversation, target)) {
+			current->content()->activate();
+		}
+		break;
+	case Action::HistoryHalfUp:
+	case Action::HistoryHalfDown:
+		if (const auto scroll = HistoryScroll(target)) {
+			const auto delta = std::max(80, scroll->height() / 2) * repeat;
+			const auto top = scroll->scrollTop();
+			scroll->scrollToY((action == Action::HistoryHalfUp)
+				? std::max(0, top - delta)
+				: (top + delta));
+		}
+		break;
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage:
 		if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = scroll->height();
+			const auto delta = scroll->height() * repeat;
 			const auto top = scroll->scrollTop();
 			scroll->scrollToY((action == Action::OlderMessagesPage)
-				? (top - delta)
+				? std::max(0, top - delta)
 				: (top + delta));
 		}
 		break;
@@ -1761,7 +2406,7 @@ void Keys::dispatch(Action action, const Target &target) {
 		}
 	} break;
 	case Action::OpenHistoryCalendar:
-		reset();
+		clearPrefix();
 		current->showCalendar({ .chat = target.chat });
 		break;
 	case Action::SelectMessage:
@@ -1788,78 +2433,409 @@ void Keys::dispatch(Action action, const Target &target) {
 	case Action::EditMessage:
 		startHint(Hint::Edit, tr::lng_purple_keys_message_menu_empty(tr::now));
 		break;
-	case Action::Help: {
-		auto lines = QStringList{
-			tr::lng_purple_keys_settings_hint(tr::now),
-			tr::lng_purple_keys_menu_accounts_help(tr::now),
-		};
-		for (const auto &command : kCommands) {
-			lines.push_back(BindingsLabel(command.action)
-				+ u"    "_q + command.label());
-		}
-		current->show(Box(TextBox,
-			tr::lng_purple_keys_help(tr::now),
-			lines.join('\n')));
-	} break;
+	case Action::Cheatsheet:
+		showHelpLayer(false, target);
+		break;
+	case Action::Help:
+		showHelpLayer(true, target);
+		break;
 	case Action::Run:
 	case Action::DescribeCommand:
-		showPalette(action == Action::DescribeCommand, target);
+		showPalette(action == Action::DescribeCommand, target, !_normal);
 		break;
 	case Action::DescribeChord:
 		_inspect = true;
-		_timer.start(kWhichKeyDelay);
+		refreshStatusBar();
+		break;
+	case Action::StockShortcuts:
+		clearPrefix();
+		ShowKeysLegend(&_window->controller());
+		break;
+	case Action::ReloadKeymap:
+		ReloadKeymapStore();
+		showFeedback(Keymap().error.isEmpty()
+			? u"Reloaded keys.edn"_q
+			: (u"keys.edn error: "_q + Keymap().error),
+			!Keymap().error.isEmpty());
 		break;
 	}
 }
 
-void Keys::showPalette(bool describe, const Target &target) {
+void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
+	if (!_feedbackError) {
+		_feedbackText.clear();
+		_feedbackTimer.stop();
+	}
+	const auto effective = EffectiveBindings(true, target.contextMap);
+	const auto insertEff = EffectiveBindings(false, std::nullopt);
+	const auto rowFor = [&](Action action, QString overrideLabel = {}) -> std::optional<ModalUi::HelpRow> {
+		auto chords = ChordsForAction(action, effective);
+		if (chords.empty()) {
+			return std::nullopt;
+		}
+		if (chords.size() > 2) {
+			chords.resize(2);
+		}
+		const auto &cmd = FindCommand(action);
+		return ModalUi::HelpRow{
+			.chords = std::move(chords),
+			.label = overrideLabel.isEmpty() ? cmd.label() : std::move(overrideLabel),
+			.commandId = QString::fromLatin1(cmd.id),
+		};
+	};
+	const auto pushRow = [](std::vector<ModalUi::HelpRow> &rows, std::optional<ModalUi::HelpRow> r) {
+		if (r) rows.push_back(std::move(*r));
+	};
+
+	// 1. Curated task-oriented cheatsheet cards (live-resolved from active EDN keymap).
+	auto cards = std::vector<ModalUi::HelpSection>();
+	{
+		auto nav = ModalUi::HelpSection{ .title = u"Navigate"_q };
+		pushRow(nav.rows, rowFor(Action::MoveDown, u"Down (chat list or scroll)"_q));
+		pushRow(nav.rows, rowFor(Action::MoveUp, u"Up (chat list or scroll)"_q));
+		pushRow(nav.rows, rowFor(Action::NextChat, u"Next chat from any pane"_q));
+		pushRow(nav.rows, rowFor(Action::OpenChat, u"Open highlighted chat"_q));
+		pushRow(nav.rows, rowFor(Action::HistoryHalfDown, u"Half-page scroll down"_q));
+		pushRow(nav.rows, rowFor(Action::HistoryHalfUp, u"Half-page scroll up"_q));
+		pushRow(nav.rows, rowFor(Action::LatestMessages, u"Jump to newest"_q));
+		pushRow(nav.rows, rowFor(Action::UnreadMessages, u"Jump to unread"_q));
+		nav.rows.push_back({ .chords = { { u"5"_q, u"j"_q } }, .label = u"Count repeats motions"_q });
+		cards.push_back(std::move(nav));
+	}
+	{
+		auto leader = ModalUi::HelpSection{ .title = u"Leader (SPC)"_q };
+		pushRow(leader.rows, rowFor(Action::Run, u"M-x command palette"_q));
+		pushRow(leader.rows, rowFor(Action::ChatPalette, u"Switch chat (palette)"_q));
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"b"_q } }, .label = u"+buffer / active chat"_q });
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"o"_q } }, .label = u"+open views & panels"_q });
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"n"_q } }, .label = u"+new group / channel"_q });
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"p"_q } }, .label = u"+playback & music"_q });
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"w"_q } }, .label = u"+windows & panes"_q });
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"a"_q } }, .label = u"+switch accounts (1..6)"_q });
+		leader.rows.push_back({ .chords = { { u"SPC"_q, u"h"_q } }, .label = u"+help, describe & reload"_q });
+		cards.push_back(std::move(leader));
+	}
+	{
+		auto local = ModalUi::HelpSection{ .title = u"Localleader ("_q + FirstLocalleaderLabel() + u" / SPC m)"_q };
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"i"_q } }, .label = u"Chat info (in chat)"_q });
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"p"_q } }, .label = u"Pinned / Preview / Play"_q });
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"s"_q } }, .label = u"Scheduled / Stop"_q });
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"d"_q } }, .label = u"History calendar"_q });
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"a"_q } }, .label = u"Attach files / Archive"_q });
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"v"_q }, { FirstLocalleaderLabel(), u"f"_q } }, .label = u"Shared media / files"_q });
+		local.rows.push_back({ .chords = { { FirstLocalleaderLabel(), u"l"_q }, { FirstLocalleaderLabel(), u"o"_q } }, .label = u"Shared links / voice"_q });
+		cards.push_back(std::move(local));
+	}
+	{
+		auto hints = ModalUi::HelpSection{ .title = u"Copy & Message Hints"_q };
+		pushRow(hints.rows, rowFor(Action::CopyMessage, u"Copy message text (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::CopyMessageLink, u"Copy message link (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::CopyMessageUrl, u"Copy URL in message (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::OpenMessageUrl, u"Open URL in message (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::ReplyToMessage, u"Reply to message (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::EditMessage, u"Edit message (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::SelectMessage, u"Select message (hint)"_q));
+		pushRow(hints.rows, rowFor(Action::MessageMenu, u"Message menu (hint)"_q));
+		cards.push_back(std::move(hints));
+	}
+	{
+		auto panes = ModalUi::HelpSection{ .title = u"Panes, Folders & Search"_q };
+		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q));
+		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q));
+		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q));
+		pushRow(panes.rows, rowFor(Action::NextFolder, u"Next folder"_q));
+		pushRow(panes.rows, rowFor(Action::PreviousFolder, u"Previous folder"_q));
+		pushRow(panes.rows, rowFor(Action::Search, u"Search messages"_q));
+		pushRow(panes.rows, rowFor(Action::Backgrounds, u"Toggle chat wallpaper"_q));
+		cards.push_back(std::move(panes));
+	}
+	{
+		auto modes = ModalUi::HelpSection{ .title = u"Modes & Help"_q };
+		pushRow(modes.rows, rowFor(Action::EnterInsertMode, u"Enter Insert mode (type)"_q));
+		modes.rows.push_back({ .chords = { { u"ESC"_q }, { u"C-["_q } }, .label = u"Return to Normal / cancel"_q });
+		modes.rows.push_back({ .chords = { { u"DEL"_q } }, .label = u"Back up one key in prefix"_q });
+		pushRow(modes.rows, rowFor(Action::DescribeChord, u"Describe a key sequence"_q));
+		pushRow(modes.rows, rowFor(Action::DescribeCommand, u"Describe any command"_q));
+		pushRow(modes.rows, rowFor(Action::Help, u"All active bindings"_q));
+		pushRow(modes.rows, rowFor(Action::StockShortcuts, u"Stock Telegram shortcuts"_q));
+		cards.push_back(std::move(modes));
+	}
+
+	// 2. Exhaustive active bindings grouped from most specific to most general.
+	auto groups = std::vector<ModalUi::HelpSection>();
+	const auto addGrouped = [&](const QString &title, const auto &pred, const std::vector<EffectiveBinding> &src) {
+		auto sec = ModalUi::HelpSection{ .title = title };
+		auto byAction = std::map<Action, std::vector<QStringList>>();
+		auto order = std::vector<Action>();
+		for (const auto &b : src) {
+			if (!pred(b)) {
+				continue;
+			}
+			if (!byAction.contains(b.action)) {
+				order.push_back(b.action);
+			}
+			auto caps = ChordCaps(b.keys);
+			if (!ranges::contains(byAction[b.action], caps)) {
+				byAction[b.action].push_back(std::move(caps));
+			}
+		}
+		for (const auto action : order) {
+			const auto &cmd = FindCommand(action);
+			sec.rows.push_back({
+				.chords = std::move(byAction[action]),
+				.label = cmd.label(),
+				.commandId = QString::fromLatin1(cmd.id),
+			});
+		}
+		if (!sec.rows.empty()) {
+			groups.push_back(std::move(sec));
+		}
+	};
+
+	if (target.contextMap) {
+		addGrouped(
+			u"Localleader ("_q + target.contextName + u")"_q,
+			[](const EffectiveBinding &b) { return b.viaLocalleader; },
+			effective);
+	}
+	const std::pair<int, QString> leaderGroups[] = {
+		{ Qt::Key_B, u"Leader: SPC b (buffer / chat)"_q },
+		{ Qt::Key_O, u"Leader: SPC o (open)"_q },
+		{ Qt::Key_N, u"Leader: SPC n (new)"_q },
+		{ Qt::Key_P, u"Leader: SPC p (playback)"_q },
+		{ Qt::Key_S, u"Leader: SPC s (search)"_q },
+		{ Qt::Key_T, u"Leader: SPC t (toggle)"_q },
+		{ Qt::Key_W, u"Leader: SPC w (window)"_q },
+		{ Qt::Key_A, u"Leader: SPC a (accounts)"_q },
+		{ Qt::Key_H, u"Leader: SPC h (help)"_q },
+	};
+	for (const auto &[k, title] : leaderGroups) {
+		addGrouped(
+			title,
+			[k](const EffectiveBinding &b) {
+				return !b.viaLocalleader && b.keys.size() >= 2
+					&& b.keys[0] == Qt::Key_Space && b.keys[1] == k;
+			},
+			effective);
+	}
+	addGrouped(
+		u"Leader: SPC top-level"_q,
+		[](const EffectiveBinding &b) {
+			return !b.viaLocalleader && b.keys.size() == 2 && b.keys[0] == Qt::Key_Space;
+		},
+		effective);
+	addGrouped(
+		u"Vim prefixes (g, y, [, ], C-w)"_q,
+		[](const EffectiveBinding &b) {
+			return !b.viaLocalleader && b.keys.size() >= 2 && b.keys[0] != Qt::Key_Space;
+		},
+		effective);
+	addGrouped(
+		u"Single keys (Normal)"_q,
+		[](const EffectiveBinding &b) {
+			return !b.viaLocalleader && b.keys.size() == 1;
+		},
+		effective);
+	addGrouped(
+		u"Insert mode"_q,
+		[](const EffectiveBinding &) { return true; },
+		insertEff);
+
+	_window->showOrHideBoxOrLayer(
+		ModalUi::CreateModalHelpLayer({
+			.startOnAllBindings = startOnAllBindings,
+			.subtitle = target.paneLabel,
+			.keymapPath = Keymap().userPath,
+			.keymapError = Keymap().error,
+			.cheatsheetCards = std::move(cards),
+			.activeBindingGroups = std::move(groups),
+		}),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
+	refreshStatusBar();
+}
+
+namespace {
+
+[[nodiscard]] std::vector<ModalUi::DescribeBinding> CollectCommandBindings(Action action) {
+	auto out = std::vector<ModalUi::DescribeBinding>();
+	for (const auto &b : Keymap().bindings) {
+		if (b.action != action) {
+			continue;
+		}
+		if (b.map == MapKind::Chat || b.map == MapKind::Chats || b.map == MapKind::Music) {
+			for (const auto &ll : Keymap().localleaders) {
+				auto full = ll;
+				full.insert(full.end(), b.keys.begin(), b.keys.end());
+				out.push_back({
+					.caps = ChordCaps(full),
+					.where = MapName(b.map),
+				});
+			}
+		} else {
+			out.push_back({
+				.caps = ChordCaps(b.keys),
+				.where = MapName(b.map),
+			});
+		}
+	}
+	return out;
+}
+
+} // namespace
+
+void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
+	if (!_feedbackError) {
+		_feedbackText.clear();
+		_feedbackTimer.stop();
+	}
+	const auto effective = EffectiveBindings(_normal, target.contextMap);
+	auto data = ModalUi::DescribeData{
+		.isKeyMode = true,
+		.queriedChord = ChordCaps(chord),
+	};
+	const auto it = ranges::find_if(effective, [&](const EffectiveBinding &b) {
+		return b.keys == chord;
+	});
+	if (it != end(effective)) {
+		const auto &cmd = FindCommand(it->action);
+		data.found = true;
+		data.title = cmd.label();
+		data.commandId = QString::fromLatin1(cmd.id);
+		data.availableHere = Available(it->action, target);
+		data.keylessOnPurpose = Keymap().keyless.contains(it->action);
+		data.unavailableReason = QString::fromLatin1(cmd.need);
+		data.bindings = CollectCommandBindings(it->action);
+		const auto targetAction = it->action;
+		data.onDescribeCommand = [this, targetAction, target] {
+			showDescribeCommandResult(targetAction, target);
+		};
+	}
+	// List anywhere else this chord is bound to a different command across other maps.
+	for (const auto &b : Keymap().bindings) {
+		if (b.keys == chord) {
+			if (data.found && it != end(effective) && b.action == it->action) {
+				continue;
+			}
+			data.elsewhere.push_back({
+				.caps = ChordCaps(b.keys),
+				.where = FindCommand(b.action).label() + u" ("_q + MapName(b.map) + u")"_q,
+			});
+		}
+	}
+	_window->showOrHideBoxOrLayer(
+		ModalUi::CreateDescribeLayer(std::move(data)),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
+	refreshStatusBar();
+}
+
+void Keys::showDescribeCommandResult(Action action, const Target &target) {
+	if (!_feedbackError) {
+		_feedbackText.clear();
+		_feedbackTimer.stop();
+	}
+	const auto &cmd = FindCommand(action);
+	auto data = ModalUi::DescribeData{
+		.isKeyMode = false,
+		.title = cmd.label(),
+		.commandId = QString::fromLatin1(cmd.id),
+		.found = true,
+		.availableHere = Available(action, target),
+		.keylessOnPurpose = Keymap().keyless.contains(action),
+		.unavailableReason = QString::fromLatin1(cmd.need),
+		.bindings = CollectCommandBindings(action),
+	};
+	_window->showOrHideBoxOrLayer(
+		ModalUi::CreateDescribeLayer(std::move(data)),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
+	refreshStatusBar();
+}
+
+void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
+	if (!_feedbackError) {
+		_feedbackText.clear();
+		_feedbackTimer.stop();
+	}
 	const auto current = owner();
 	if (!current) {
 		return;
 	}
-	auto commands = std::vector<const Command*>();
-	for (const auto &command : kCommands) {
-		if (describe || (IsSearchableAction(command.action)
-				&& Available(command.action, target))) {
-			commands.push_back(&command);
+	const auto effective = EffectiveBindings(true, target.contextMap);
+	auto items = std::vector<ModalUi::PaletteItem>();
+	for (const auto &cmd : kCommands) {
+		if (!describe && !IsSearchableAction(cmd.action)) {
+			continue;
 		}
+		const auto avail = Available(cmd.action, target);
+		items.push_back({
+			.actionId = int(cmd.action),
+			.id = QString::fromLatin1(cmd.id),
+			.label = cmd.label(),
+			.category = QString::fromLatin1(cmd.category),
+			.unavailableReason = QString::fromLatin1(cmd.need),
+			.chords = ChordsForAction(cmd.action, effective),
+			.available = describe ? true : avail,
+		});
 	}
+
 	const auto revision = _revision;
 	const auto origin = target.focus;
 	const auto original = base::make_weak(current);
-	current->show(Box(PaletteBox, describe, std::move(commands),
-		Fn<void(Action, QPointer<Ui::GenericBox>)>([=](
-				Action action,
-				QPointer<Ui::GenericBox> box) {
-			QTimer::singleShot(0, this, [=] {
-				const auto focus = QApplication::focusWidget();
-				const auto layer = box ? box->parentWidget() : nullptr;
-				const auto stack = layer
-					? dynamic_cast<Ui::LayerStackWidget*>(layer->parentWidget())
-					: nullptr;
-				if (!stack || stack->topShownLayer() != layer
-					|| !box->isVisible() || !focus
-					|| (focus != layer && !layer->isAncestorOf(focus))
-					|| owner() != original.get()) {
-					return;
-				}
-				_window->controller().hideLayer(anim::type::instant);
-				const auto current = owner();
-				if (!Enabled() || !current || current != original.get()
-					|| revision != _revision || !origin
-					|| _window->controller().isLayerShown()) {
-					return;
-				}
-				const auto target = FindTarget(current, origin);
-				if (target.focus && Available(action, target)) {
-					origin->setFocus(Qt::OtherFocusReason);
-					const auto restored = currentTarget(origin);
-					if (restored.focus && revision == _revision) {
-						dispatch(action, restored);
+	_paletteActive = true;
+	refreshStatusBar();
+
+	_window->showOrHideBoxOrLayer(
+		ModalUi::CreateCommandPaletteLayer({
+			.promptBadge = describe ? u"SPC h f"_q : u"M-x"_q,
+			.placeholder = describe
+				? u"Describe any command (orderless, e.g. \"pin\")..."_q
+				: u"Execute command (orderless, e.g. \"opm\", M-p/n history)..."_q,
+			.describeMode = describe,
+			.items = std::move(items),
+			.history = MxHistory(),
+			.onPick = [=](int actionId, QString query) {
+				_paletteActive = false;
+				const auto action = Action(actionId);
+				MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
+				SaveMxHistory();
+				QTimer::singleShot(0, this, [=] {
+					const auto live = owner();
+					if (!Enabled() || !live || live != original.get()
+						|| revision != _revision || !origin
+						|| _window->controller().isLayerShown()) {
+						refreshStatusBar();
+						return;
 					}
-				}
-			});
-		})));
+					if (describe) {
+						showDescribeCommandResult(action, FindTarget(live, origin));
+						return;
+					}
+					const auto restoredTarget = FindTarget(live, origin);
+					if (restoredTarget.focus && Available(action, restoredTarget)) {
+						origin->setFocus(Qt::OtherFocusReason);
+						const auto restored = currentTarget(origin);
+						if (restored.focus && revision == _revision) {
+							dispatch(action, restored, 1);
+						}
+					}
+					refreshStatusBar();
+				});
+			},
+			.onCancel = [=] {
+				_paletteActive = false;
+				QTimer::singleShot(0, this, [=] {
+					if (origin && fromInsert) {
+						origin->setFocus(Qt::OtherFocusReason);
+						_normal = false;
+					}
+					refreshStatusBar();
+				});
+			},
+		}),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
 }
 
 } // namespace
@@ -1881,12 +2857,7 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 			&& event->type() != QEvent::KeyPress)) {
 		return false;
 	}
-	const auto key = static_cast<QKeyEvent*>(event);
-	const auto stroke = KeyStroke(*key, ModalKey(*key));
-	if (!HasShortcutModifier(stroke) || !MatchesNext(KeyMode::Insert, {}, stroke)) {
-		return false;
-	}
-	return (new Keys(window))->handle(receiver, event);
+	return EnsureKeys(window)->handle(receiver, event);
 }
 
 bool ModalKeysOwnChatListFocus(QWidget *widget) {
@@ -1909,6 +2880,27 @@ int CalendarDayKeyOffset(const QKeyEvent &event) {
 	case Qt::Key_Up: return -7;
 	case Qt::Key_Down: return 7;
 	default: return 0;
+	}
+}
+
+void EnsureModalKeysAttached(not_null<MainWindow*> window) {
+	EnsureKeys(window);
+}
+
+int ModalKeysStatusHeight(not_null<MainWindow*> window) {
+	const auto keys = FindKeys(window.get());
+	return keys ? keys->statusBarHeight() : 0;
+}
+
+void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body) {
+	if (const auto keys = FindKeys(window.get())) {
+		keys->updateLayout(body);
+	}
+}
+
+void RaiseModalKeysChrome(not_null<MainWindow*> window) {
+	if (const auto keys = FindKeys(window.get())) {
+		keys->raiseChrome();
 	}
 }
 
