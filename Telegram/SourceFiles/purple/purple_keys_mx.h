@@ -55,9 +55,9 @@ struct History {
 		for (const auto &line : inputs) {
 			inp.append(line);
 		}
-		root.insert(u"recent"_q, rec);
-		root.insert(u"counts"_q, cnt);
-		root.insert(u"inputs"_q, inp);
+		root.insert(QStringLiteral("recent"), rec);
+		root.insert(QStringLiteral("counts"), cnt);
+		root.insert(QStringLiteral("inputs"), inp);
 		return QJsonDocument(root).toJson(QJsonDocument::Compact);
 	}
 
@@ -68,19 +68,19 @@ struct History {
 			return result;
 		}
 		const auto root = doc.object();
-		for (const auto &v : root.value(u"recent"_q).toArray()) {
+		for (const auto &v : root.value(QStringLiteral("recent")).toArray()) {
 			if (const auto s = v.toString(); !s.isEmpty()
 					&& result.recent.size() < kRecentLimit) {
 				result.recent.push_back(s);
 			}
 		}
-		const auto cnt = root.value(u"counts"_q).toObject();
+		const auto cnt = root.value(QStringLiteral("counts")).toObject();
 		for (auto it = cnt.begin(); it != cnt.end(); ++it) {
 			if (const auto n = it.value().toInt(); n > 0) {
 				result.counts.insert(it.key(), n);
 			}
 		}
-		for (const auto &v : root.value(u"inputs"_q).toArray()) {
+		for (const auto &v : root.value(QStringLiteral("inputs")).toArray()) {
 			if (const auto s = v.toString(); !s.isEmpty()
 					&& result.inputs.size() < kInputHistoryLimit) {
 				result.inputs.push_back(s);
@@ -171,21 +171,22 @@ struct HighlightSpan {
 	int length = 0;
 };
 
-[[nodiscard]] inline std::vector<HighlightSpan> LabelMatchSpans(
-		const QString &label,
-		const std::vector<OrderlessToken> &tokens) {
-	if (label.isEmpty() || tokens.empty()) {
+[[nodiscard]] inline std::vector<HighlightSpan> TextMatchSpans(
+		const QString &text,
+		const std::vector<OrderlessToken> &tokens,
+		bool matchInitials = true) {
+	if (text.isEmpty() || tokens.empty()) {
 		return {};
 	}
-	auto marks = std::vector<bool>(label.size(), false);
-	const auto lowered = label.toLower();
+	auto marks = std::vector<bool>(text.size(), false);
+	const auto lowered = text.toLower();
 	for (const auto &token : tokens) {
 		if (token.lowered.isEmpty()) {
 			continue;
 		}
 		if (const auto pos = lowered.indexOf(token.lowered); pos >= 0) {
 			const auto till = std::min(
-				int(label.size()),
+				int(text.size()),
 				int(pos + token.lowered.size()));
 			for (auto i = int(pos); i < till; ++i) {
 				marks[i] = true;
@@ -193,11 +194,11 @@ struct HighlightSpan {
 			continue;
 		}
 		if (token.hasRegex) {
-			const auto m = token.regex.match(label);
+			const auto m = token.regex.match(text);
 			if (m.hasMatch() && m.capturedLength() > 0) {
 				const auto from = std::max(0, int(m.capturedStart()));
 				const auto till = std::min(
-					int(label.size()),
+					int(text.size()),
 					int(m.capturedEnd()));
 				for (auto i = from; i < till; ++i) {
 					marks[i] = true;
@@ -205,12 +206,15 @@ struct HighlightSpan {
 				continue;
 			}
 		}
-		const auto initials = WordInitials(label);
+		if (!matchInitials) {
+			continue;
+		}
+		const auto initials = WordInitials(text);
 		if (const auto ipos = initials.indexOf(token.lowered); ipos >= 0) {
 			auto wordIdx = 0;
 			auto atStart = true;
-			for (auto i = 0; i < label.size(); ++i) {
-				if (label[i].isLetterOrNumber()) {
+			for (auto i = 0; i < text.size(); ++i) {
+				if (text[i].isLetterOrNumber()) {
 					if (atStart) {
 						if (wordIdx >= ipos
 								&& wordIdx < ipos + token.lowered.size()) {
@@ -241,6 +245,18 @@ struct HighlightSpan {
 	return spans;
 }
 
+[[nodiscard]] inline std::vector<HighlightSpan> LabelMatchSpans(
+		const QString &label,
+		const std::vector<OrderlessToken> &tokens) {
+	return TextMatchSpans(label, tokens, true);
+}
+
+[[nodiscard]] inline std::vector<HighlightSpan> SubtitleMatchSpans(
+		const QString &subtitle,
+		const std::vector<OrderlessToken> &tokens) {
+	return TextMatchSpans(subtitle, tokens, false);
+}
+
 struct Candidate {
 	int payloadIndex = 0;
 	QString id;
@@ -250,6 +266,35 @@ struct Candidate {
 	bool available = true;
 };
 
+// Returns -1 if the candidate does not match all tokens; otherwise:
+//   0 = empty query
+//   3 = every token matches the title (label or its word initials)
+//   2 = at least one token matches the title, remaining tokens match metadata
+//   1 = matched only via group/category, :command-id, or key chord text
+[[nodiscard]] inline int CandidateMatchTier(
+		const Candidate &it,
+		const std::vector<OrderlessToken> &tokens) {
+	if (tokens.empty()) {
+		return 0;
+	}
+	const auto labelFolded = it.label.toCaseFolded();
+	const auto initials = WordInitials(it.label);
+	const auto fullHay = (it.label + u' ' + it.id + u' '
+		+ it.category + u' ' + it.keysText).toCaseFolded();
+	auto titleMatches = 0;
+	for (const auto &t : tokens) {
+		if (MatchToken(t, labelFolded, initials)) {
+			++titleMatches;
+		} else if (!MatchToken(t, fullHay, initials)) {
+			return -1;
+		}
+	}
+	if (titleMatches == int(tokens.size())) {
+		return 3;
+	}
+	return (titleMatches > 0) ? 2 : 1;
+}
+
 [[nodiscard]] inline std::vector<int> RankAndFilter(
 		const std::vector<Candidate> &items,
 		const History &history,
@@ -258,11 +303,27 @@ struct Candidate {
 	for (auto i = 0; i < history.recent.size() && i < kRecentLimit; ++i) {
 		recentRank.insert(history.recent[i], i);
 	}
-	const auto amxLess = [&](int a, int b) {
-		const auto &ca = items[a];
-		const auto &cb = items[b];
+	const auto tokens = ParseTokens(query);
+	struct Scored {
+		int index = 0;
+		int tier = 0;
+	};
+	auto scored = std::vector<Scored>();
+	scored.reserve(items.size());
+	for (auto i = 0; i < int(items.size()); ++i) {
+		const auto tier = CandidateMatchTier(items[i], tokens);
+		if (tier >= 0) {
+			scored.push_back({ i, tier });
+		}
+	}
+	std::stable_sort(scored.begin(), scored.end(), [&](const Scored &sa, const Scored &sb) {
+		const auto &ca = items[sa.index];
+		const auto &cb = items[sb.index];
 		if (ca.available != cb.available) {
 			return ca.available;
+		}
+		if (sa.tier != sb.tier) {
+			return sa.tier > sb.tier;
 		}
 		const auto ra = recentRank.value(ca.id, kRecentLimit);
 		const auto rb = recentRank.value(cb.id, kRecentLimit);
@@ -280,44 +341,11 @@ struct Candidate {
 			return ca.label.size() < cb.label.size();
 		}
 		return QString::compare(ca.label, cb.label, Qt::CaseInsensitive) < 0;
-	};
-
-	const auto tokens = ParseTokens(query);
+	});
 	auto matched = std::vector<int>();
-	matched.reserve(items.size());
-	for (auto i = 0; i < int(items.size()); ++i) {
-		if (tokens.empty()) {
-			matched.push_back(i);
-			continue;
-		}
-		const auto &it = items[i];
-		const auto hay = (it.label + u' ' + it.id + u' '
-			+ it.category + u' ' + it.keysText).toCaseFolded();
-		const auto initials = WordInitials(it.label);
-		const auto ok = std::all_of(
-			tokens.begin(),
-			tokens.end(),
-			[&](const OrderlessToken &t) {
-				return MatchToken(t, hay, initials);
-			});
-		if (ok) {
-			matched.push_back(i);
-		}
-	}
-	if (tokens.empty()) {
-		std::stable_sort(matched.begin(), matched.end(), amxLess);
-	} else {
-		std::stable_sort(matched.begin(), matched.end(), [&](int a, int b) {
-			const auto &ca = items[a];
-			const auto &cb = items[b];
-			if (ca.available != cb.available) {
-				return ca.available;
-			}
-			if (ca.label.size() != cb.label.size()) {
-				return ca.label.size() < cb.label.size();
-			}
-			return amxLess(a, b);
-		});
+	matched.reserve(scored.size());
+	for (const auto &s : scored) {
+		matched.push_back(s.index);
 	}
 	return matched;
 }
