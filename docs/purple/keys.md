@@ -19,9 +19,9 @@ never covers messages or the composer).
   for example `LOCAL · CHAT`) after `,` or `SPC m`, `HINTS` (purple) during
   message/URL hints, `M-x` (violet) in the command palette, `KEY?` (amber)
   during `SPC h k`, and `HELP` / `FILTER` while the cheatsheet, bindings list,
-  describe card, or stock shortcuts layer is open. While any layer is open, the
-  status bar replaces the Normal-mode hint with the open layer's own title and
-  active keys.
+  describe card, or stock shortcuts layer is open. While a prefix, which-key
+  drawer, hint capture, or layer is open, the status bar replaces the
+  Normal-mode hint on its right side with that surface's active keys.
 - **Pending counts and prefixes:** numeric counts (`5j`, `2C-d`) and pending
   chords (`SPC b -`, `, -`, `y -`) echo immediately on the status line beside
   their prefix group label (`+buffer / chat`). Pressing `DEL` inside a prefix

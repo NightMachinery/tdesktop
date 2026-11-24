@@ -40,6 +40,7 @@
 #include "settings/settings_key_navigation.h"
 #include "storage/storage_shared_media.h"
 #include "ui/abstract_button.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/screen_reader_mode.h"
 #include "ui/toast/toast.h"
@@ -1827,17 +1828,21 @@ void Keys::refreshStatusBar() {
 	if (_inspect) {
 		state.badge = ModalUi::BadgeKind::DescribeKey;
 		state.badgeText = u"KEY?"_q;
+		state.rightCue = u"ESC cancel"_q;
 	} else if (_hints.active()) {
 		state.badge = ModalUi::BadgeKind::Hints;
 		state.badgeText = u"HINTS"_q;
+		state.rightCue = u"DEL back  ·  ESC cancel"_q;
 	} else if (!_prefix.empty() && IsLocalleaderPrefix(_prefix)) {
 		state.badge = ModalUi::BadgeKind::Local;
 		state.badgeText = target.contextName.isEmpty()
 			? u"LOCAL"_q
 			: (u"LOCAL · "_q + target.contextName.toUpper());
+		state.rightCue = u"DEL back  ·  ESC cancel"_q;
 	} else if (!_prefix.empty() && _prefix.front() == Qt::Key_Space) {
 		state.badge = ModalUi::BadgeKind::Leader;
 		state.badgeText = u"LEADER"_q;
+		state.rightCue = u"DEL back  ·  ESC cancel"_q;
 	} else {
 		const auto focus = QApplication::focusWidget();
 		const auto inForeignInput = focus
@@ -1849,6 +1854,9 @@ void Keys::refreshStatusBar() {
 		} else {
 			state.badge = ModalUi::BadgeKind::Insert;
 			state.badgeText = u"INSERT"_q;
+		}
+		if (!_prefix.empty()) {
+			state.rightCue = u"DEL back  ·  ESC cancel"_q;
 		}
 	}
 
@@ -2320,7 +2328,17 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		ToggleChatBackgroundVisibility(_window);
 		break;
 	case Action::ToggleNightMode:
-		Window::Theme::ToggleNightMode();
+		if (Window::Theme::Background()->editingTheme()) {
+			current->show(Ui::MakeInformBox(
+				tr::lng_theme_editor_cant_change_theme()));
+			break;
+		}
+		Window::Theme::ToggleNightModeWithConfirmation(
+			&_window->controller(),
+			[] {
+				Window::Theme::ToggleNightMode();
+				Window::Theme::KeepApplied();
+			});
 		break;
 	case Action::MoveUp:
 	case Action::MoveDown:
@@ -2578,45 +2596,79 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 	const auto primaryLl = Keymap().localleaders.empty()
 		? Chord{ Qt::Key_Comma }
 		: Keymap().localleaders.front();
+	const auto mapContextTag = [](MapKind map) -> QString {
+		switch (map) {
+		case MapKind::Chat: return u"chat"_q;
+		case MapKind::Chats: return u"chats"_q;
+		case MapKind::Music: return u"music"_q;
+		default: return {};
+		}
+	};
 	const auto rowFor = [&](
 			Action action,
 			QString overrideLabel = {},
 			int maxChords = 2,
 			bool skipSecondaryLocalleader = false) -> std::optional<ModalUi::HelpRow> {
-		auto chords = ChordsForAction(action, effective);
-		if (skipSecondaryLocalleader && Keymap().localleaders.size() > 1) {
-			const auto secondaryCaps = ChordCaps(Keymap().localleaders[1]);
-			chords.erase(
-				std::remove_if(chords.begin(), chords.end(), [&](const QStringList &c) {
-					return c.size() > secondaryCaps.size()
-						&& std::equal(secondaryCaps.begin(), secondaryCaps.end(), c.begin());
-				}),
-				chords.end());
+		struct TaggedChord {
+			QStringList caps;
+			QString contextTag;
+		};
+		auto candidates = std::vector<TaggedChord>();
+		const auto secondaryCaps = (skipSecondaryLocalleader && Keymap().localleaders.size() > 1)
+			? ChordCaps(Keymap().localleaders[1])
+			: QStringList();
+		for (const auto &b : effective) {
+			if (b.action != action) {
+				continue;
+			}
+			auto caps = ChordCaps(b.keys);
+			if (!secondaryCaps.isEmpty()
+				&& caps.size() > secondaryCaps.size()
+				&& std::equal(secondaryCaps.begin(), secondaryCaps.end(), caps.begin())) {
+				continue;
+			}
+			const auto dup = ranges::any_of(candidates, [&](const TaggedChord &c) {
+				return c.caps == caps;
+			});
+			if (!dup) {
+				candidates.push_back({
+					.caps = std::move(caps),
+					.contextTag = b.viaLocalleader ? mapContextTag(b.sourceMap) : QString(),
+				});
+			}
 		}
-		if (chords.empty()) {
+		if (candidates.empty()) {
 			return std::nullopt;
 		}
 		// Keep cheatsheet cards cleanly aligned: prefer shortest/primary chords and cap total keycaps.
-		std::stable_sort(chords.begin(), chords.end(), [](const QStringList &a, const QStringList &b) {
-			return a.size() < b.size();
+		std::stable_sort(candidates.begin(), candidates.end(), [](const TaggedChord &a, const TaggedChord &b) {
+			return a.caps.size() < b.caps.size();
 		});
 		auto kept = std::vector<QStringList>();
+		auto keptTag = QString();
+		auto allLocalSameTag = true;
 		auto totalCaps = 0;
-		for (auto &c : chords) {
+		for (auto &c : candidates) {
 			if (int(kept.size()) >= maxChords) {
 				break;
 			}
-			if (!kept.empty() && totalCaps + c.size() > 3) {
+			if (!kept.empty() && totalCaps + c.caps.size() > 3) {
 				break;
 			}
-			totalCaps += int(c.size());
-			kept.push_back(std::move(c));
+			if (kept.empty()) {
+				keptTag = c.contextTag;
+			} else if (c.contextTag != keptTag) {
+				allLocalSameTag = false;
+			}
+			totalCaps += int(c.caps.size());
+			kept.push_back(std::move(c.caps));
 		}
 		const auto &cmd = FindCommand(action);
 		return ModalUi::HelpRow{
 			.chords = std::move(kept),
 			.label = overrideLabel.isEmpty() ? cmd.label() : std::move(overrideLabel),
 			.commandId = QString::fromLatin1(cmd.id),
+			.contextTag = allLocalSameTag ? std::move(keptTag) : QString(),
 		};
 	};
 	const auto pushRow = [](std::vector<ModalUi::HelpRow> &rows, std::optional<ModalUi::HelpRow> r) {
@@ -2650,7 +2702,8 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 			Qt::Key_S, Qt::Key_T, Qt::Key_W, Qt::Key_A, Qt::Key_H,
 		};
 		for (const auto &b : effective) {
-			if (!b.viaLocalleader && b.keys.size() >= 3 && b.keys[0] == Qt::Key_Space) {
+			if (!b.viaLocalleader && b.keys.size() >= 3 && b.keys[0] == Qt::Key_Space
+					&& Available(b.action, target)) {
 				const auto k = b.keys[1];
 				if (!seenPrefixKeys.contains(k)) {
 					seenPrefixKeys.insert(k);
@@ -2760,12 +2813,16 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 
 	// 2. Exhaustive active bindings grouped from most specific to most general.
 	auto groups = std::vector<ModalUi::HelpSection>();
-	const auto addGrouped = [&](const QString &title, const auto &pred, const std::vector<EffectiveBinding> &src) {
+	const auto addGrouped = [&](
+			const QString &title,
+			const auto &pred,
+			const std::vector<EffectiveBinding> &src,
+			bool requireAvailable = true) {
 		auto sec = ModalUi::HelpSection{ .title = title };
 		auto byAction = std::map<Action, std::vector<QStringList>>();
 		auto order = std::vector<Action>();
 		for (const auto &b : src) {
-			if (!pred(b)) {
+			if (!pred(b) || (requireAvailable && !Available(b.action, target))) {
 				continue;
 			}
 			if (!byAction.contains(b.action)) {
@@ -2836,7 +2893,8 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 	addGrouped(
 		u"INSERT MODE"_q,
 		[](const EffectiveBinding &) { return true; },
-		insertEff);
+		insertEff,
+		false);
 
 	const auto guard = QPointer(this);
 	_activeLayer = startOnAllBindings

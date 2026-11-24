@@ -99,18 +99,23 @@ ordered(classify, "if (!_normal)", "return KeyUse::Pass;",
 wk = between(keys, "void Keys::showWhichKey", "void Keys::stroke")
 ordered(wk, "leafIndexByAction", ".groups = std::move(groups)", ".leaves = std::move(leaves)")
 
-# Verify active-layer status bar cues replace Normal-mode cues while a layer is open.
+# Verify active-layer and prefix/which-key status bar cues replace Normal-mode cues.
 status_fn = between(keys, "void Keys::refreshStatusBar", "KeyUse Keys::classify")
 for layer_case in ("ActiveLayer::Cheatsheet", "ActiveLayer::AllBindings",
                    "ActiveLayer::Palette", "ActiveLayer::DescribeKey",
-                   "ActiveLayer::StockShortcuts", "state.rightCue"):
+                   "ActiveLayer::StockShortcuts", "state.rightCue",
+                   'u"DEL back  ·  ESC cancel"_q'):
     assert layer_case in status_fn, layer_case
 
-# Verify cheatsheet preserves key casing (no .toUpper() on titles) and live-derives SPC prefixes + contextTag.
+# Verify cheatsheet preserves key casing, derives live-available SPC prefixes, and tags localleader rows.
 assert "card.title.toUpper()" not in keys_ui
 assert "group.title.toUpper()" not in keys_ui
+assert "QApplication::isRightToLeft" not in keys_ui
+assert "return style::RightToLeft();" in keys_ui
 help_fn = between(keys, "void Keys::showHelpLayer", "void Keys::showDescribeKeyResult")
-ordered(help_fn, "Qt::Key_S, Qt::Key_T", ".contextTag = ctx", "onTabChanged")
+ordered(help_fn, "b.viaLocalleader ? mapContextTag(b.sourceMap)",
+        "Qt::Key_S, Qt::Key_T", "Available(b.action, target)",
+        ".contextTag = ctx", "requireAvailable && !Available(b.action, target)", "onTabChanged")
 
 # Security & focus gates.
 gate = between(keys, "Window::SessionController *Keys::owner()", "bool Keys::chromeVisible")
@@ -152,6 +157,9 @@ ordered(palette, "revision = _revision", "base::make_weak(current)",
 
 dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 assert "chooseRow" not in between(dispatch, "case Action::PreviousChat:", "case Action::OpenChat:")
+ordered(dispatch, "case Action::ToggleNightMode:", "editingTheme()",
+        "ToggleNightModeWithConfirmation", "Window::Theme::ToggleNightMode();",
+        "Window::Theme::KeepApplied();")
 ordered(dispatch, "case Action::OpenChat:", "chooseRow()")
 
 # Verify Doom-aligned SPC leader + localleader (, / SPC m) bindings and zero 4-stroke chords.

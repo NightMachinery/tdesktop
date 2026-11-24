@@ -69,9 +69,8 @@ constexpr auto kCtrlMod = Qt::ControlModifier;
 	return f;
 }
 
-[[nodiscard]] bool IsRtl(const QWidget *widget) {
-	return style::RightToLeft()
-		|| (widget && widget->layoutDirection() == Qt::RightToLeft);
+[[nodiscard]] bool IsRtl(const QWidget *) {
+	return style::RightToLeft();
 }
 
 [[nodiscard]] QColor BadgeColor(BadgeKind kind) {
@@ -288,7 +287,7 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 		const auto cueRect = rtl
 			? QRect(leftX, 1, cueW, r.height() - 1)
 			: QRect(rightX - cueW, 1, cueW, r.height() - 1);
-		p.drawText(cueRect, Qt::AlignVCenter | Qt::AlignLeft, cue);
+		p.drawText(cueRect, Qt::AlignVCenter | (rtl ? Qt::AlignRight : Qt::AlignLeft), cue);
 		if (rtl) {
 			leftX += cueW + 14;
 		} else {
