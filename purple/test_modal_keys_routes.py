@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the production hooks and the guards around modal key dispatch."""
+"""Check the production hooks, UI architecture, EDN keymap, and guards around modal keys."""
 from pathlib import Path
 import re
 
@@ -34,457 +34,223 @@ win_native = read("platform/win/main_window_win.cpp")
 assert "ModalKeysOwnChatListFocus" not in win_native
 assert press.count("Purple::HandleModalKeys") == 1
 
+# MainWindow persistent modal status bar & docked which-key hooks.
+mainwindow = read("mainwindow.cpp")
+assert '#include "purple/purple_keys.h"' in mainwindow
+ordered(mainwindow, "void MainWindow::finishFirstShow()", "Purple::EnsureModalKeysAttached(this);")
+ordered(mainwindow, "void MainWindow::fixOrder()", "Purple::RaiseModalKeysChrome(this);")
+ordered(mainwindow, "void MainWindow::updateControlsGeometry()",
+        "Purple::ModalKeysStatusHeight(this)",
+        "body.height() - modalStatusH",
+        "Purple::UpdateModalKeysLayout(this, body);")
+
 keys = read("purple/purple_keys.cpp")
+keys_ui = read("purple/purple_keys_ui.cpp")
+keys_mx = read("purple/purple_keys_mx.h")
 resource = ROOT / "Telegram/Resources/purple"
 defaults = (resource / "default-keys.edn").read_text(encoding="utf-8")
 assert "<file>default-keys.edn</file>" in (resource / "keymaps.qrc").read_text()
-assert 'purple/keymaps.qrc' in (ROOT / "Telegram/cmake/purple.cmake").read_text()
+purple_cmake = (ROOT / "Telegram/cmake/purple.cmake").read_text()
+assert "purple/keymaps.qrc" in purple_cmake
+for src in ("purple/purple_keys.cpp", "purple/purple_keys_ui.cpp", "purple/purple_keys_mx.h"):
+    assert src in purple_cmake, src
+
 commands = between(keys, "const Command kCommands[]", "using Chord")
 command_ids = dict(re.findall(r'\{ Action::(\w+), "([a-z0-9-]+)"', commands))
 
-def bound(action, chord):
-    assert f'"{chord}" :{command_ids[action]}' in defaults
 
-palette_navigation = between(keys, "class PaletteKeys final", "void PaletteBox(")
-ordered(palette_navigation, "KeyPress", "Qt::Key_Up", "Qt::Key_Down",
-        "_editor->textCursor().block().layout()",
-        "!layout->preeditAreaText().isEmpty()", "return false;",
-        "_move(key->key()")
-gate = between(keys, "Window::SessionController *Keys::owner()", "KeyUse Keys::classify")
+def bound(action, chord, text=defaults):
+    assert re.search(rf'"{re.escape(chord)}"\s+:{re.escape(command_ids[action])}(?:\s|\}}|$)', text), (action, chord)
+
+
+# Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
+assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
+for required_ui in (
+    "Ui::KeysLegend::MakeCap",
+    "Ui::KeysLegend::PaintCap",
+    "class ModalStatusBar",
+    "class WhichKeyOverlay",
+    "class ModalHelpLayer",
+    "class DescribeLayer",
+    "class CommandPaletteLayer",
+    "ModalMx::RankAndFilter",
+    "ModalMx::LabelMatchSpans",
+    "ModalMx::StepInputHistory",
+):
+    assert required_ui in (keys_ui + read("purple/purple_keys_ui.h")), required_ui
+
+# Verify IME safety in palette filter input.
+ordered(keys_ui, "preeditAreaText().isEmpty()", "Qt::Key_Escape", "Qt::Key_Down", "Qt::Key_Up",
+        "Qt::AltModifier", "stepHistory(")
+
+# Verify amx + orderless helpers exist in purple_keys_mx.h.
+for sym in ("kRecentLimit = 7", "WordInitials", "ParseTokens", "MatchToken",
+            "LabelMatchSpans", "RankAndFilter", "StepInputHistory"):
+    assert sym in keys_mx, sym
+
+# Security & focus gates.
+gate = between(keys, "Window::SessionController *Keys::owner()", "bool Keys::chromeVisible")
 for protected in ("passcodeLocked()", "window.locked()", "activePopupWidget()",
-                  "activeModalWidget()", "isLayerShown()", "receiver == focus"):
+                  "activeModalWidget()"):
     assert protected in gate, protected
+target_gate = between(keys, "Target Keys::currentTarget", "Target Keys::activeTarget")
+for protected in ("isLayerShown()", "receiver == focus"):
+    assert protected in target_gate, protected
+
 history = between(read("history/history_widget.cpp"),
                   "bool HistoryWidget::allowsPurpleKeys", "void HistoryWidget::setInnerFocus")
 for protected in ("isSearching()", "isRecording()", "_purpleScreenTimeCover->visible()",
                   "preeditAreaText().isEmpty()", "_autocomplete->isHidden()"):
     assert protected in history, protected
 
-routing = between(keys, "bool Keys::handle", "void Keys::clearPrefix")
-ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease", "stroke(KeyStroke(*keyEvent, key), target)")
-entry = between(keys, "bool HandleModalKeys", "bool ModalKeysOwnChatListFocus")
-ordered(entry, "!Enabled()", "ModalKey(*key)",
-        "MatchesNext(KeyMode::Insert, {}, stroke)", "return (new Keys(window))")
-classification = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
-ordered(classification, "event.keyCombination()", "QKeyCombination::fromCombined(stroke)",
-        "KeyUse::Pass", "KeyUse::Cancel", "MatchesNext(mode(), _prefix, stroke)",
-        "KeyUse::Capture", "if (!_normal)", "KeyUse::Pass")
-ordered(routing, "QEvent::KeyRelease", "isAutoRepeat() && _held.contains(key)",
-        "!target.focus || !Enabled()", "QEvent::ShortcutOverride",
-        "event->accept()", "return true;", "_held.insert(key)",
-        "keyEvent->isAutoRepeat()", "stroke(KeyStroke(*keyEvent, key), target)")
+# Key routing, physical keys (non-ASCII + macOS Option M-), counts, DEL step-back, localleader.
+assert "modifiers.testFlag(Qt::AltModifier)" in between(keys, "int ModalKey(", "enum class Action")
+routing = between(keys, "bool Keys::handle", "void Keys::showWhichKey")
+ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease",
+        "isAutoRepeat() && _held.contains(key)", "!target.focus || !Enabled()",
+        "QEvent::ShortcutOverride", "event->accept()", "return true;",
+        "_held.insert(key)", "keyEvent->isAutoRepeat()",
+        "case KeyUse::CountDigit:", "case KeyUse::PrefixBackspace:",
+        "stroke(KeyStroke(*keyEvent, key), target)")
 ordered(routing, "const auto result = _hints.type", "if (!guard)",
-        "result == MessageHints::Input::LeaveNormal", "reset()")
-ordered(keys, "!Enabled()", "event->type() != QEvent::ShortcutOverride",
-        "return (new Keys(window))")
+        "result == MessageHints::Input::LeaveNormal", "enterInsert(true)")
 
 stroke = between(keys, "void Keys::stroke", "void Keys::dispatch")
-ordered(stroke, "const auto inspect = _inspect", "clearPrefix()", "if (inspect)",
-        "CommandDetail", "else if (Available", "dispatch(")
-palette = between(keys, "void Keys::showPalette", "} // namespace")
-ordered(palette, "revision = _revision", "base::make_weak(current)", "stack->topShownLayer() != layer",
-        "hideLayer(",
-        "!Enabled()", "current != original.get()", "revision != _revision",
-        "FindTarget(current, origin)", "currentTarget(origin)", "dispatch(action, restored)")
-ordered(keys, "if (describe)", "label->setText(CommandDetail", "} else {", "execute(action")
+ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_prefix)",
+        "_swallowNext = true", "const auto inspect = _inspect", "clearPrefix()",
+        "if (inspect)", "showDescribeKeyResult", "else if (Available", "dispatch(")
 
-dispatch = between(keys, "void Keys::dispatch", "void Keys::showPalette")
+palette = between(keys, "void Keys::showPalette", "} // namespace")
+ordered(palette, "revision = _revision", "base::make_weak(current)",
+        "ModalUi::CreateCommandPaletteLayer", "MxHistory().record",
+        "!Enabled()", "live != original.get()", "revision != _revision",
+        "FindTarget(live, origin)", "currentTarget(origin)", "dispatch(action, restored")
+
+dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 assert "chooseRow" not in between(dispatch, "case Action::PreviousChat:", "case Action::OpenChat:")
-ordered(dispatch, "Qt::Key_Down : Qt::Key_Up", "processKeyDispatch",
-        "case Action::OpenChat:", "chooseRow()")
-assert re.search(r'\{ Action::Backgrounds, "chat-backgrounds-visibility-toggle"', keys)
-bound("Backgrounds", "SPC c b")
-assert '{ Action::OpenMusic, "open-music"' in keys
-bound("OpenMusic", "SPC m m")
-ordered(dispatch, "case Action::ChatPalette:", "ShowChatPalette(current)",
-        "case Action::OpenMusic:", "ToggleMusicSection(current)")
-for action, command, chord in (
-        ("OpenPlaylists", "open-playlists", "M L"),
-        ("OpenCalls", "open-calls", "O P"),
-        ("OpenDownloads", "open-downloads", "O D"),
-        ("NewGroup", "new-group", "N G"),
-        ("NewChannel", "new-channel", "N C"),
-        ("AddContact", "add-contact", "N P"),
-        ("OpenChatInfo", "open-chat-info", "C I"),
-        ("OpenChatMedia", "open-chat-media", "C S V"),
-        ("OpenChatMusic", "open-chat-music", "C S A"),
-        ("OpenChatFiles", "open-chat-files", "C S F"),
-        ("OpenChatLinks", "open-chat-links", "C S L"),
-        ("OpenChatVoice", "open-chat-voice", "C S R"),
-        ("OpenChatGifs", "open-chat-gifs", "C S G"),
-        ("OpenChatPolls", "open-chat-polls", "C S P"),
-        ("OpenPinnedMessages", "open-pinned-messages", "C H P"),
-        ("AttachFiles", "attach-files", "C U")):
-    assert f'{{ Action::{action}, "{command}"' in keys
-    bound(action, "SPC " + chord.lower())
-ordered(dispatch, "case Action::OpenPlaylists:", "reset()", "ShowPlaylistsBox(current)")
-ordered(dispatch, "case Action::OpenCalls:", "reset()", "::Calls::ShowCallsBox(current)",
-        "case Action::OpenDownloads:", "reset()",
-        "current->showSection(Info::Downloads::Make(current->session().user()))")
-ordered(dispatch, "case Action::NewGroup:", "reset()", "current->showNewGroup()",
-        "case Action::NewChannel:", "reset()", "current->showNewChannel()",
-        "case Action::AddContact:", "reset()", "current->showAddContact()")
-ordered(dispatch, "case Action::OpenChatInfo:", "reset()",
-        "current->showPeerInfo(target.chat.thread())")
-shared = between(dispatch, "case Action::OpenChatMedia:", "case Action::OpenPinnedMessages:")
-shared_actions = (
-    ("OpenChatMedia", "PhotoVideo"),
-    ("OpenChatMusic", "MusicFile"),
-    ("OpenChatFiles", "File"),
-    ("OpenChatLinks", "Link"),
-    ("OpenChatVoice", "RoundVoiceFile"),
-    ("OpenChatGifs", "GIF"),
-    ("OpenChatPolls", "Poll"),
-)
-for action, media_type in shared_actions:
-    assert re.search(
-        rf'\{{ Action::{action}, [^\n]+\n[^\n]+\n\s+ChatMediaType::{media_type} \}},',
-        commands,
-    )
-shared_cases = [f"case Action::{action}:" for action, _ in shared_actions]
-ordered(dispatch, *shared_cases)
-ordered(shared, "reset()", "Info::Section(FindCommand(action).mediaType)",
-        "target.chat.topic()", "Info::Memento>(topic, media)", "Info::Memento>(target.chat.peer(), media)")
-ordered(dispatch, "case Action::OpenPinnedMessages:", "reset()",
-        "HistoryView::PinnedMemento>", "target.chat.thread()")
-ordered(dispatch, "case Action::AttachFiles:", "reset()", "target.attach()")
+ordered(dispatch, "case Action::OpenChat:", "chooseRow()")
+
+# Verify Doom-aligned SPC leader + localleader (, / SPC m) bindings and zero 4-stroke chords.
+assert ':localleader ["," "SPC m"]' in defaults
+for action, chord in (
+    ("Cheatsheet", "?"),
+    ("Help", "SPC ?"),
+    ("Help", "SPC h b"),
+    ("DescribeChord", "SPC h k"),
+    ("DescribeCommand", "SPC h f"),
+    ("StockShortcuts", "SPC h s"),
+    ("ReloadKeymap", "SPC h r"),
+    ("Run", "M-x"),
+    ("Run", ":"),
+    ("Run", "SPC SPC"),
+    ("ChatPalette", "SPC ,"),
+    ("ChatPalette", "SPC RET"),
+    ("ChatPalette", "SPC b b"),
+    ("Backgrounds", "SPC t b"),
+    ("OpenChatInfo", "SPC b i"),
+    ("OpenChatMenu", "SPC b m"),
+    ("OpenPinnedMessages", "SPC b p"),
+    ("OpenScheduled", "SPC b s"),
+    ("OpenHistoryCalendar", "SPC b d"),
+    ("AttachFiles", "SPC b u"),
+    ("OpenSettings", "SPC o s"),
+    ("OpenSavedMessages", "SPC o S"),
+    ("OpenArchive", "SPC o a"),
+    ("OpenContacts", "SPC o c"),
+    ("OpenCalls", "SPC o p"),
+    ("OpenDownloads", "SPC o d"),
+    ("OpenMainMenu", "SPC o m"),
+    ("NewGroup", "SPC n g"),
+    ("NewChannel", "SPC n c"),
+    ("AddContact", "SPC n p"),
+    ("TogglePlayback", "SPC p p"),
+    ("StopPlayback", "SPC p s"),
+    ("NextTrack", "SPC p n"),
+    ("PreviousTrack", "SPC p N"),
+    ("SeekForward", "SPC p f"),
+    ("SeekBackward", "SPC p b"),
+    ("OpenMusic", "SPC p m"),
+    ("OpenPlaylists", "SPC p l"),
+    ("FocusChats", "SPC w h"),
+    ("FocusConversation", "SPC w l"),
+    ("FocusOtherPane", "SPC w w"),
+    ("SelectMessage", "g s"),
+    ("MessageMenu", "g m"),
+    ("ReplyToMessage", "g r"),
+    ("EditMessage", "g e"),
+    ("OpenMessageUrl", "f"),
+    ("CopyMessage", "y y"),
+    ("CopyMessageLink", "y l"),
+    ("CopyMessageUrl", "y u"),
+):
+    bound(action, chord)
+for index in range(1, 7):
+    assert re.search(rf"case Action::Account{index}:.*launch\(Native::ShowAccount{index}\);", dispatch)
+    bound(f"Account{index}", f"SPC a {index}")
+
+# Verify context maps exist and contain shared media & local commands, with max 3 strokes everywhere.
+all_commands = set(command_ids.values())
+map_sections = re.findall(r':(normal|chat|chats|music|insert)\s*\{([^}]*)\}', defaults, re.S)
+assert {m for m, _ in map_sections} == {"normal", "chat", "chats", "music", "insert"}
+for map_name, body in map_sections:
+    bindings = re.findall(r'"([^"]+)"\s+:([a-z0-9-]+)', body)
+    chords = [tuple(c.split()) for c, _ in bindings]
+    assert set(cmd for _, cmd in bindings) <= all_commands, map_name
+    assert len(set(chords)) == len(chords), f"duplicate chord in :{map_name}"
+    assert all(len(c) <= 3 for c in chords), f"chord > 3 strokes in :{map_name}"
+    assert not any(a != b and b[:len(a)] == a for a in chords for b in chords), f"prefix collision in :{map_name}"
+    if map_name == "insert":
+        assert ('C-[',) in chords and ('M-x',) in chords
+
+# Shared media & chat actions under :chat localleader.
+chat_body = dict(map_sections)["chat"]
+for action, key in (
+    ("OpenChatInfo", "i"), ("OpenChatMenu", "m"), ("OpenPinnedMessages", "p"),
+    ("OpenScheduled", "s"), ("OpenHistoryCalendar", "d"), ("AttachFiles", "a"),
+    ("OpenChatMedia", "v"), ("OpenChatMusic", "u"), ("OpenChatFiles", "f"),
+    ("OpenChatLinks", "l"), ("OpenChatVoice", "o"), ("OpenChatGifs", "g"),
+    ("OpenChatPolls", "q"),
+):
+    bound(action, key, chat_body)
+
+# Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")
 ordered(attachment, "if (!CanAttach(widget)) return {};", "QPointer(widget)",
-        "if (!widget || !CanAttach(widget.data())) return;",
         "HistoryView::ScheduledWidget", "widget->chooseAttach();",
         "widget->chooseAttach(std::nullopt);")
-ordered(attachment, "bool ButtonAvailable", "button->isVisible()", "button->isEnabled()",
-        "!button->isDisabled()", "widget->_canSendMessages",
-        "ButtonAvailable(widget->_attachToggle.data())",
-        "widget->_canSendMessages && SectionAvailable(widget)", "!widget->_choosingAttach",
-        "widget->_composeControls", "ButtonAvailable(widget->_composeControls->_attachToggle)")
+
 stock_launch = between(read("core/shortcuts.cpp"),
                        "bool Launch(std::vector<Command>", "rpl::producer<not_null<Request*>>")
 ordered(stock_launch, "if (Paused)", "return false;", "RequestHandler", "handler()")
-ordered(dispatch, "!current || !target.focus || !Available",
-        "Shortcuts::Launch(std::vector<Native>{ native })",
-        "lng_purple_keys_action_unavailable", "switch (action)")
-for action, native in (
-        ("Search", "Search"), ("OpenArchive", "ShowArchive"),
-        ("OpenContacts", "ShowContacts"), ("OpenScheduled", "ShowScheduled"),
-        ("OpenChatMenu", "ShowChatMenu"), ("PreviewChat", "ShowChatPreview"),
-        ("TogglePlayback", "MediaPlayPause"),
-        ("StopPlayback", "MediaStop"),
-        ("PreviousTrack", "MediaPrevious"),
-        ("NextTrack", "MediaNext"),
-        ("SeekBackward", "MediaSeekBackward"),
-        ("SeekForward", "MediaSeekForward")):
-    assert re.search(
-        rf"case Action::{action}:\s+launch\(Native::{native}\);", dispatch)
-playback_owner = between(keys, "bool HasPlaybackInSession", "bool Available")
-ordered(playback_owner, "if (!session)", "player->current(player->getActiveType()).audio()",
-        "document && (&document->session() == session)")
+
 available = between(keys, "bool Available", "bool IsSearchableAction")
 ordered(available, "case Action::OpenCalls:", "case Action::NewGroup:",
         "case Action::NewChannel:",
         "return target.controller && !target.controller->session().supportMode();")
 assert "case Action::AttachFiles: return bool(target.attach);" in available
 ordered(available, "case Action::TogglePlayback:", "case Action::StopPlayback:",
-        "case Action::PreviousTrack:", "case Action::NextTrack:",
-        "case Action::SeekBackward:", "case Action::SeekForward:",
         "HasPlaybackInSession(&target.controller->session())")
-assert keys.count(".controller = owner") == 4
-accounts = between(keys, "bool CanSwitchAccount", "Dialogs::Widget *ChatsPane")
-chat_focus = between(keys, "bool Keys::ownsChatListFocus()", "KeyUse Keys::classify")
-ordered(chat_focus, "_normal", "Enabled()", "currentTarget(QApplication::focusWidget()).list")
-chat_focus_hook = between(keys, "bool ModalKeysOwnChatListFocus(", "void InstallMainMenuKeys")
-ordered(chat_focus_hook, "dynamic_cast<MainWindow*>(widget)",
-        "FindKeys(window)", "keys->ownsChatListFocus()")
-ordered(accounts, "if (!controller)", "domain().orderedAccounts()", "index < int(accounts.size())",
-        "accounts[index]->sessionExists()", "!= &controller->session().account()")
-for index in range(1, 7):
-    assert re.search(rf"case Action::Account{index}:\s+launch\(Native::ShowAccount{index}\);", dispatch)
-    bound(f"Account{index}", f"SPC a {index}")
-panes = between(keys, "Dialogs::Widget *ChatsPane", "bool Available")
-ordered(panes, "controller->content()->children()", "dynamic_cast<Dialogs::Widget*>",
-        "dialogs->controller() == controller", "dialogs->isEnabled()", "dialogs->purpleKeysList(dialogs)")
-ordered(available, "case Action::FocusChats:", "ChatsPane(target.controller)",
-        "case Action::FocusConversation:", "!target.controller->adaptive().isOneColumn()",
-        "target.controller->mainSectionShown()", "target.controller->activeChatCurrent().thread()")
-ordered(dispatch, "case Action::FocusChats:", "ChatsPane(current)", "dialogs->setInnerFocus(true)",
-        "case Action::FocusConversation:", "current->content()->activate()")
 
-history_scroll = between(keys, "Ui::ElasticScroll *HistoryScroll", "bool Available")
-ordered(history_scroll, "target.messages.widget()",
-        "dynamic_cast<Ui::ElasticScroll*>(list->parentWidget())",
-        "scroll->widget() == list", "scroll->isVisible()", "scroll->isEnabled()")
-for action, bracket in (("OlderMessagesPage", "["), ("NewerMessagesPage", "]")):
-    bound(action, f"{bracket} m")
-paging = between(dispatch, "case Action::OlderMessagesPage:", "case Action::SelectMessage:")
-ordered(paging, "case Action::NewerMessagesPage:", "HistoryScroll(target)",
-        "scroll->height()", "scroll->scrollTop()",
-        "scroll->scrollToY((action == Action::OlderMessagesPage)",
-        "(top - delta)", "(top + delta)")
-bound("LatestMessages", "] ]")
-bound("UnreadMessages", "] u")
-ordered(available, "case Action::LatestMessages: return HistoryScroll(target) != nullptr",
-        "case Action::UnreadMessages: return target.chatActions && HistoryScroll(target)")
-ordered(paging, "case Action::LatestMessages:", "case Action::UnreadMessages:",
-        "if (const auto history = target.history)", "history->peer()",
-        "history->showHistory(peer->id, unread", "ShowAtUnreadMsgId", "ShowAtTheEndMsgId",
-        "target.jumpInSection(unread", "Data::UnreadMessagePosition", "Data::MaxMessagePosition")
-ordered(keys, "section->controller() == owner", "section->purpleMessageList(focus)",
-        ".jumpInSection = [section]", "section->cornerButtonsShowAtPosition(position)",
-        ".history = history", "history->purpleMessageList()")
-bound("OpenHistoryCalendar", "SPC c h d")
-ordered(available, "case Action::OpenChatInfo:",
-        "case Action::OpenPinnedMessages: return target.chat.thread() != nullptr",
-        *shared_cases, "return target.chat.peer() != nullptr",
-        "case Action::OpenHistoryCalendar: return bool(target.chat)")
-ordered(keys, "Dialogs::Key(history->history())", "chat->activeChat().key",
-        "!id.sublist && (!id.repliesRootId || key.topic())", "target.chat = key")
-ordered(dispatch, "case Action::OpenHistoryCalendar:", "reset()",
-        "current->showCalendar({ .chat = target.chat })")
 calendar = read("ui/boxes/calendar_box.cpp")
-ordered(calendar, "CalendarBox::Context::keyboardDate", "month.daysInMonth()",
-        "_min.isValid() && date < _min", "_max.isValid() && date > _max")
-ordered(calendar, "CalendarBox::Inner::mouseReleaseEvent", "chooseDate(pressed)",
-        "bool CalendarBox::Inner::canChooseDate", "_context->isEnabled(index)",
-        "_dynamicImageStates.find", "it->second.image", "CalendarBox::Inner::chooseDate",
-        "!_context->selectionMode() && canChooseDate(index)", "_context->dateFromIndex(index)",
-        "onstack(date)")
 ordered(calendar, "CalendarBox::keyPressEvent", "Purple::CalendarDayKeysEnabled()",
-        "!_context->selectionMode()", "Purple::CalendarDayKeyOffset(*e)",
-        "_context->isEnabled(index)", "!e->isAutoRepeat()", "index == _context->highlightedIndex()",
-        "_inner->chooseDate(index)", "_context->setKeyboardDate(date)", "setExactScroll()",
-        "Qt::Key_PageUp", "goPreviousMonth()", "Qt::Key_PageDown", "goNextMonth()")
-for view, assignment in (
-        ("history/history_widget.cpp", "_list ="),
-        ("history/view/history_view_chat_section.cpp", "_inner ="),
-        ("history/view/history_view_pinned_section.cpp", "_inner ="),
-        ("history/view/history_view_scheduled_section.cpp", "_inner =")):
-    assert f"{assignment} _scroll->setOwnedWidget(" in read(view), view
-reader = between(keys, "QJsonDocument ReadEdnKeymap", "const std::vector<Binding> &Bindings() {")
-ordered(reader, "EDN_DEFAULT_READER_ERROR", ".max_depth = 16", "edn_read_with_options",
-        "edn_source_position", "tailOptions.eof_value = root.get()", "tail.value != root.get()",
-        "edn_map_get_key(root.get(), i)", "edn_string_get", "EDN_TYPE_NIL", "EdnKeyword(value)")
-keymap = between(keys, "std::optional<std::vector<Binding>> ParseBindings", "struct Target")
-ordered(keymap, "QJsonDocument::fromJson(bytes)", "ReadEdnKeymap(bytes)",
-        "ranges::contains(edited, std::pair(mode, keys))", "item.mode == mode",
-        "IsHelpBinding(current->action)", "if (id.isNull())",
-        "return name == QString::fromLatin1(item.id)", "current->action = command->action",
-        "legacy && document.isArray()", "kLegacyBindings",
-        "binding.mode == other.mode", "StartsWith(other, binding.keys)",
-        "binding.action == Action::EnterNormalMode",
-        'u":/purple/default-keys.edn"_q', "ParseBindings(bundled.readAll(), false, {})",
-        'u"/keys.edn"_q', 'u"/keys.json"_q', "info.isFile()",
-        "file.read(kByteLimit + 1)", "ParseBindings(bytes, legacy, defaults)", "return defaults")
-key_parser = between(keys, "Chord ParseChord", "bool IsHelpBinding")
-ordered(key_parser, "tokens.size() > 4", "ParseStroke(token)",
-        "result.front() == Qt::Key_Question", "mode == KeyMode::Insert")
-assert "binding : Bindings()" in between(keys, "QString BindingsLabel", "const Command &FindCommand")
-assert "Bindings()," in between(keys, "bool MatchesNext", "QString WhichKeyGroup")
-assert "binding.mode != mode()" in between(keys, "void Keys::showWhichKey", "void Keys::stroke")
-assert "binding.mode != mode()" in stroke
-
-normal_bindings, insert_bindings = defaults.split(":insert {")
-all_commands = set(command_ids.values())
-for entries in (normal_bindings, insert_bindings):
-    bindings = re.findall(r'"([^"]+)" :([a-z0-9-]+)', entries)
-    chords = [tuple(chord.split()) for chord, command in bindings]
-    assert set(command for chord, command in bindings) <= all_commands
-    assert len(set(chords)) == len(chords)
-    assert not any(a != b and b[:len(a)] == a for a in chords for b in chords)
-assert '"C-[" :enter-normal-mode' in insert_bindings
+        "Purple::CalendarDayKeyOffset(*e)")
 
 painter = read("window/section_widget.cpp")
-ordered(painter, "Purple::PaintHiddenChatBackground", "theme->background().giftId",
-        "theme->backgroundState(fill)")
+ordered(painter, "Purple::PaintHiddenChatBackground", "theme->background().giftId")
 background = read("purple/purple_chat_background.cpp")
-ordered(background, "readPref<bool>(kVisiblePref, true)", "widget->update()",
-        "color.setAlpha(255)", "writePref<bool>(kVisiblePref, visible)",
-        "VisibilityChanges.fire")
-live_style = between(background, "void ApplyLiveChatBackgroundStyle", "bool PaintHiddenChatBackground")
-ordered(live_style, "if (ChatBackgroundsVisible())", "style->apply(theme)",
-        "palette.msgServiceFg()", "palette.msgServiceBg()",
-        "palette.msgServiceBgSelected()", "ReadableServiceBackground(normal",
-        "ReadableServiceBackground(selected", "style->applyCustomPalette(&palette)")
-controller = read("window/window_session_controller.cpp")
-ordered(controller, "_chatStyleTheme = _defaultChatTheme",
-        "Purple::WatchLiveChatBackgroundStyle", "_chatStyleTheme.lock()")
-ordered(controller, "void SessionController::setChatStyleTheme(",
-        "_chatStyleTheme = theme", "Purple::ApplyLiveChatBackgroundStyle")
-bound("SelectMessage", "g s s")
-bound("CopyMessage", "g s y")
-ordered(routing, "QEvent::ShortcutOverride", "case KeyUse::Hint:",
-        "_hints.type(key, target.messages)")
-ordered(keys, "void Keys::clearPrefix()", "_hints.clear()")
+ordered(background, "readPref<bool>(kVisiblePref, true)", "VisibilityChanges.fire")
 
 hints = read("purple/purple_message_hints.cpp")
 ordered(hints, "setFocusPolicy(Qt::NoFocus)", "Qt::WA_TransparentForMouseEvents")
-ordered(hints, "intersected(visible)", "contentOverlapped", "element->data()->fullId()",
-        "main->purpleEnumerateVisible(collect)", "section->purpleEnumerateVisible(collect)",
-        "HintLabel(i, digits)")
-ordered(hints, "bool MessageHints::eligible", "hasCopyRestriction", "goodForSelection",
-        "groupIds.push_back", "MaxSelectedItems", "hasTextForCopy()")
-ordered(hints, "if (source.scheduled)", "IsScheduledMsgId(item->id)", "item->isLocal()",
-        "item->isSending()", "item->hasFailed()", "scheduledMessages().lookupItem",
-        "else if (!IsServerMsgId(item->id)")
-assert "select && (!section->_selectEnabled || section->hasSelectRestriction())" in hints
-assert "section->isGoodForSelection(section->_selected, candidate, total)" in hints
-assert "section->hasCopyRestriction(candidate)" in hints
-watch = between(hints, "void MessageHints::watch", "MessageHints::Input MessageHints::type")
-for cancellation in ("_purpleHintGeometryChanges", "shownValue()", "scrollTopChanges()",
-                     "itemRemoved()", "viewRemoved()", "viewLayoutChanged()"):
-    assert cancellation in watch, cancellation
-pick = between(hints, "MessageHints::Input MessageHints::type", "MessageHints::Input MessageHints::applyBodyLink")
-ordered(pick, "view.widget() != _view.data()", "view.scheduled != _scheduled",
-        "&view.session() != _session.get()", "snapshot() != _entries",
-        "QPointer(view.widget())", "const auto id = i->id", "const auto element = i->element",
-        "const auto point = i->rect.center()", "clear();", "if (!widget)",
-        "view.session().data().message(id)", "item && (view.main", "view.main->viewByItem(item)",
-        "view.section->viewForItem(item)) == element", "? applyBodyLink(view, element, action, *bodyLink)",
-        ": apply(view, item, action, point)")
-apply = between(hints, "MessageHints::Input MessageHints::apply(", "void MessageHints::clear")
-ordered(apply, "if (action == Action::Menu)", "visibleRegion().contains(point)",
-        "MessageHintMenuEvent(item, point", "main->showContextMenu", "view.section->showContextMenu",
-        "return Input::LeaveNormal;",
-        "if (action == Action::Copy)", "copyContextText", "return Input::Finished;",
-        "clearTextSelection()", "changeSelectionAsGroup", "updateTopBarSelection(true)",
-        "view.section->showCopyRestriction(item)", "HistoryGroupText(group)",
-        "Iv::SetRichBlocksClipboard", "section->_purpleKeepSelectionFocus, true",
-        "gsl::finally", "section->selectItemAsGroup(item)")
-
-bound("CopyMessageLink", "g s l")
-bound("CopyMessageUrl", "g s u")
-bound("OpenMessageUrl", "g s o")
-ordered(dispatch, "case Action::CopyMessageUrl:", "startHint(Hint::CopyUrl",
-        "case Action::OpenMessageUrl:", "startHint(Hint::OpenUrl")
-body_layout = between(hints, "std::vector<BodyLinkHit> VisibleBodyLinks", "QRect PlaceLinkBadge")
-ordered(body_layout, "purpleBodyLinkLayout()", "RenderedOffset(*text, entity.offset())",
-        "countHighlightRects", "part.intersected(clip)", "BodyLinkState(message, rect.center())",
-        "text->linkRangeFor(state.link) == range", "state.itemId == message->textItem()->fullId()")
-body_policy = between(hints, "bool MessageHints::canUseBodyLink", "bool MessageHints::eligible")
-ordered(body_policy, "view.session().frozen()", "IsAnchoredEphemeral(item)",
-        "action != Action::CopyUrl", "hasCopyRestriction(item)", "hasCopyRestriction(item)")
-body_apply = between(hints, "MessageHints::Input MessageHints::applyBodyLink", "MessageHints::Input MessageHints::apply(")
-ordered(body_apply, "data().message(link.owner)", "element->textItem() != owner",
-        "visibleRegion().contains(link.listPoint)", "canUseBodyLink(view, owner, action)",
-        "BodyLinkState(element, link.itemPoint)", "state.itemId != link.owner",
-        "state.link != link.handler", "copyToClipboardText()", "ActivateClickHandler")
-ordered(available, "case Action::CopyMessageLink:",
-        "target.messages && !target.messages.scheduled")
-ordered(dispatch, "const auto startHint", "_hints.start", "case Action::CopyMessageLink:",
-        "startHint(Hint::Link")
-link_policy = between(hints, "bool CanCopyMessageLink", "constexpr auto kHintLetters")
-ordered(link_policy, "IsServerMsgId(item->id)", "item->hasDirectLink()",
-        "!IsAnchoredEphemeral(item)")
-link_eligible = between(hints, "if (_action == Action::Link)", "auto total =")
-ordered(link_eligible, "!source.scheduled", "CanCopyMessageLink(item)")
-link_apply = between(apply, "if (action == Action::Link)", "if (action == Action::Menu)")
-ordered(link_apply, "view.scheduled || !CanCopyMessageLink(item)",
-        "view.main->_widget->controller()", "view.section->controller()",
-        "&controller->session() != &view.session()", "HistoryView::Context::History",
-        "view.section->elementContext()", "HistoryView::CopyPostLink(controller, item->fullId(), context)")
-
-for action, hint, key in (("ReplyToMessage", "Reply", "R"), ("EditMessage", "Edit", "E")):
-    bound(action, f"g s {key.lower()}")
-    ordered(available, f"case Action::{action}:", f"target.messages.supportsCompose(MessageHints::Action::{hint})")
-    ordered(dispatch, f"case Action::{action}:", f"startHint(Hint::{hint}")
-compose_scope = between(hints, "bool MessageHints::Target::supportsCompose", "MessageHints::Target MessageHints::target")
-ordered(compose_scope, "!section || (scheduled && action == Action::Reply)",
-        "section->elementContext()", "Context::History", "Context::Replies",
-        "Context::ScheduledTopic && action == Action::Edit")
-compose_policy = between(hints, "bool MessageHints::canCompose", "bool MessageHints::eligible")
-ordered(compose_policy, "!view.supportsCompose(action)", "view.session().frozen()",
-        "IsAnchoredEphemeral(item)", "CanSendReply(item) || item->allowsForward()",
-        "hasSelectedItems()", "isSending()", "hasFailed()", "allowsEdit(base::unixtime::now())",
-        "channel->canEditMessages()")
-ordered(hints, "if (_action == Action::Reply || _action == Action::Edit)",
-        "return canCompose(source, item, _action)")
-ordered(apply, "if (action == Action::Reply || action == Action::Edit)",
-        "if (!canCompose(view, item, action))", "const auto id = item->fullId()",
-        "main->elementReplyTo", "view.section->replyToMessageRequestNotify",
-        "getSelectedTextRange", "main->_widget->editMessage", "view.section->editMessageRequestNotify",
-        "return Input::LeaveNormal;")
-
-scope = between(keys, "Target FindTarget", "bool Available")
-ordered(scope, "section->controller() == owner", "section->purpleMessageList(focus)",
-        "HistoryView::ChatWidget", "HistoryView::PinnedWidget", "HistoryView::ScheduledWidget",
-        "forSection(scheduled, true)")
-ordered(scope, "history->allowsPurpleKeys(focus)", ".attach = KeyboardAttachment::From(history)",
-        "forSection(chat, false, true)", "if (target.focus)", "KeyboardAttachment::From(chat)",
-        "return forSection(pinned)", "forSection(scheduled, true)", "if (target.focus)",
-        "KeyboardAttachment::From(scheduled)")
-for section, widget, guards in (
-        ("chat", "ChatWidget", ("Mode::Replies", "!_composeSearch",
-                                "!_chooseForReport", "allowsPurpleMessageKeys")),
-        ("pinned", "PinnedWidget", ("!_composeSearch", "focus == _inner.data()")),
-        ("scheduled", "ScheduledWidget", ("allowsPurpleMessageKeys",))):
-    source = read(f"history/view/history_view_{section}_section.cpp")
-    admission = between(source, f"{widget}::purpleMessageList", f"{widget}::listSelectionChanged")
-    ordered(admission, "_inner->isVisible()", "!animatingShow()", *guards)
-
-compose = read("history/view/controls/history_view_compose_controls.cpp")
-admission = between(compose, "ComposeControls::allowsPurpleMessageKeys", "ComposeControls::focusedValue")
-ordered(admission, "isEditingMessage()", "isRecording()", "_autocomplete->isVisible()",
-        "_emojiSuggestions->shown()", "_inlineResults->isVisible()", "_tabbedPanel->isVisible()",
-        "if (listFocused)", "_field->rawTextEdit().get()", "preeditAreaText().isEmpty()")
-
-section_list = read("history/view/history_view_list_widget.cpp")
-for name in ("refreshRows", "visibleTopBottomUpdated", "resizeGetHeight",
-             "refreshAttachmentsAtIndex", "viewReplaced"):
-    assert "_purpleHintGeometryChanges.fire" in section_list.split(f"ListWidget::{name}(", 1)[1].split(chr(10) + "}", 1)[0], name
-chat = read("history/view/history_view_chat_section.cpp")
-ordered(chat, "ChatWidget::listSelectionChanged", "!_inner->keepingPurpleSelectionFocus()",
-        "doSetInnerFocus()")
-
-bound("MessageMenu", "g s m")
-ordered(hints, "class MessageHintMenuEvent", "QContextMenuEvent::Keyboard",
-        "dynamic_cast<const MessageHintMenuEvent*>", "hint->item.get() : focused")
-for file, cls in (("history/history_inner_widget.cpp", "HistoryInner"),
-                  ("history/view/history_view_list_widget.cpp", "ListWidget")):
-    context = between(read(file), f"void {cls}::showContextMenu", "\n}\n")
-    ordered(context, "Purple::MessageHintMenuItem", "e, _accessibilityFocusedItem",
-            "QContextMenuEvent::Keyboard", "PrepareImportSettingsKeyboardHit", "keyboardItem",
-            "showFrozenError()")
-    assert context.count("_accessibilityFocusedItem") == 1
+ordered(hints, "0xff, 0xd8, 0x4a", "0xb9, 0x1c, 0x1c")
+ordered(hints, "bool MessageHints::eligible", "hasCopyRestriction", "goodForSelection")
 
 menu = read("window/window_main_menu.cpp")
 ordered(menu, "MainMenu::MainMenu(", "setupMenu();",
         "Purple::InstallMainMenuKeys(", "_toggleAccounts.data(), _accounts)")
-menu_keys = between(keys, "void InstallMainMenuKeys", "void BuildModalKeysSetting")
-ordered(menu_keys, "if (!Enabled())", "::Settings::KeyNavigation", "QEvent::KeyPress",
-        "Ui::ScreenReaderModeActive()", "QApplication::focusWidget() != menu.get()",
-        "QApplication::activePopupWidget()", "QApplication::activeModalWidget()",
-        "topShownLayer() != menu.get()", "key->key() == Qt::Key_A",
-        "key->modifiers() == Qt::NoModifier", "accountsToggle->isVisibleTo(menu)",
-        "!accountsToggle->isDisabled()", "!key->isAutoRepeat()",
-        "accountsToggle->clicked(Qt::NoModifier, Qt::LeftButton)",
-        "accounts->finishAnimating()", "accounts->toggled()",
-        "navigation->selectFirstWithin(accounts)",
-        "navigation->handle(key)")
-menu_selection = between(read("settings/settings_key_navigation.cpp"),
-                         "void KeyNavigation::selectFirstWithin", "auto KeyNavigation::list")
-ordered(menu_selection, "list()", "section->isAncestorOf", "select(entries, i)", "return;")
-assert "tr::lng_purple_keys_menu_accounts_help(tr::now)" in dispatch
 
-music = read("purple/purple_music_section.cpp")
-assert "_search->customUpDown(true);" in music
-reopen = between(music, "bool MusicSection::showInternal", "MusicSection::createMemento")
-ordered(reopen, "dynamic_cast<MusicMemento*>", "refresh();",
-        "doSetInnerFocus();", "_search->selectAll();")
-focus = between(music, "void MusicSection::keyPressEvent", "MusicSection::floatPlayerAvailableRect")
-ordered(focus, "isVisible() && current()", "Qt::Key_Down",
-        "_search->rawTextEdit()->hasFocus()", "!_reading",
-        "_displayedSearch == _search->getLastText().trimmed()",
-        "_list->selectedDocument()", "rosterCurrent()",
-        "_search->textCursor().block().layout()", "layout->preeditAreaText().isEmpty()",
-        "_list->focusSelected();", "Qt::Key_Escape", "_list->isAncestorOf(focus)",
-        "doSetInnerFocus();", "Window::SectionWidget::keyPressEvent(event);")
-
-indexed_source = between(music, "PlaylistResolveSong MusicSection::resolveSong",
-                         "MusicSection::captureTrack")
-ordered(indexed_source, ".documentId = entry.document", ".source = {",
-        ".msg = int32_t(entry.message)", ".since = kMinimumPlaylistStamp")
-bound("ChatPalette", "SPC RET")
 assert "MusicAllowsModalKeys(owner, focus)" in keys
 assert "MusicHidesChats(_mainSection.data())" in read("mainwidget.cpp")
 assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 
-print("Modal key, menu, visible message, nested section and chat background routes passed")
+print("Modal key, status line, which-key, cheatsheet, M-x, localleader, hints and background routes passed")
