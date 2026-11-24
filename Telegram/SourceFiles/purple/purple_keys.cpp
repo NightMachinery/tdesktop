@@ -3,6 +3,7 @@
 #include "base/event_filter.h"
 #include "base/weak_ptr.h"
 #include "boxes/keys_legend.h"
+#include "boxes/peers/edit_forum_topic_box.h"
 #include "calls/calls_box_controller.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -11,6 +12,8 @@
 #include "data/data_chat.h"
 #include "data/data_document.h"
 #include "data/data_folder.h"
+#include "data/data_forum.h"
+#include "data/data_forum_topic.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "dialogs/dialogs_indexed_list.h"
@@ -241,6 +244,14 @@ enum class Action {
 	UnreadBuffer,
 	ToggleZenMode,
 	TogglePrivacyScreen,
+	TopicPalette,
+	TopicUnreadPalette,
+	TopicNext,
+	TopicPrevious,
+	TopicNextUnread,
+	TopicLast,
+	TopicCreate,
+	TopicParent,
 	PreviousFolder,
 	NextFolder,
 	SelectMessage,
@@ -347,6 +358,22 @@ const Command kCommands[] = {
 		[] { return u"Toggle Zen fullscreen chat"_q; } },
 	{ Action::TogglePrivacyScreen, "toggle-privacy-screen", "toggle", "",
 		[] { return u"Toggle privacy screen"_q; } },
+	{ Action::TopicPalette, "topic-palette", "topics", "Needs a forum group or threaded bot",
+		[] { return u"Switch topic"_q; } },
+	{ Action::TopicUnreadPalette, "topic-unread-palette", "topics", "Needs a forum group or threaded bot",
+		[] { return u"Switch unread topic"_q; } },
+	{ Action::TopicNext, "topic-next", "topics", "Needs a forum group or threaded bot",
+		[] { return u"Next topic"_q; }, true },
+	{ Action::TopicPrevious, "topic-previous", "topics", "Needs a forum group or threaded bot",
+		[] { return u"Previous topic"_q; }, true },
+	{ Action::TopicNextUnread, "topic-next-unread", "topics", "Needs a forum group or threaded bot",
+		[] { return u"Next unread topic"_q; } },
+	{ Action::TopicLast, "topic-last", "topics", "Needs a previous topic in this forum",
+		[] { return u"Last viewed topic"_q; } },
+	{ Action::TopicCreate, "topic-create", "topics", "Needs a forum or threaded bot where you can create topics",
+		[] { return u"New topic"_q; } },
+	{ Action::TopicParent, "topic-parent", "topics", "Needs a forum group or threaded bot",
+		[] { return u"Show forum topic list"_q; } },
 	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, true },
 	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
@@ -1232,6 +1259,39 @@ Ui::ElasticScroll *HistoryScroll(const Target &target) {
 		: nullptr;
 }
 
+Data::Forum *ActiveForum(const Target &target) {
+	if (const auto topic = target.chat.topic()) {
+		return topic->forum();
+	}
+	if (const auto peer = target.chat.peer()) {
+		if (const auto forum = peer->forum()) {
+			return forum;
+		}
+	}
+	if (target.controller) {
+		if (const auto shown = target.controller->shownForum().current()) {
+			return shown;
+		}
+		const auto active = target.controller->activeChatCurrent();
+		if (const auto topic = active.topic()) {
+			return topic->forum();
+		}
+		if (const auto peer = active.peer()) {
+			if (const auto forum = peer->forum()) {
+				return forum;
+			}
+		}
+	}
+	return nullptr;
+}
+
+bool CanCreateTopicInForum(Data::Forum *forum) {
+	if (!forum) {
+		return false;
+	}
+	return (forum->bot() != nullptr) || forum->peer()->canCreateTopics();
+}
+
 ModalUnread::ChatBucket BucketForPeer(not_null<PeerData*> peer) {
 	if (peer->isUser()) {
 		return ModalUnread::ChatBucket::DirectMessage;
@@ -1326,6 +1386,20 @@ std::vector<ModalUnread::BufferItem> CollectUnreadBufferItems(
 	return items;
 }
 
+std::vector<Data::ForumTopic*> OrderedForumTopics(not_null<Data::Forum*> forum) {
+	auto out = std::vector<Data::ForumTopic*>();
+	const auto list = forum->topicsList();
+	if (!list) {
+		return out;
+	}
+	for (const auto &row : list->indexed()->all()) {
+		if (const auto topic = row->topic(); topic && !topic->creating()) {
+			out.push_back(topic);
+		}
+	}
+	return out;
+}
+
 bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::MoveUp:
@@ -1404,6 +1478,16 @@ bool Available(Action action, const Target &target) {
 			&& (target.controller->purpleZenHidden()
 				|| target.chat
 				|| target.controller->activeChatCurrent().thread() != nullptr);
+	case Action::TopicPalette:
+	case Action::TopicUnreadPalette:
+	case Action::TopicNext:
+	case Action::TopicPrevious:
+	case Action::TopicNextUnread:
+	case Action::TopicLast:
+	case Action::TopicParent:
+		return ActiveForum(target) != nullptr;
+	case Action::TopicCreate:
+		return CanCreateTopicInForum(ActiveForum(target));
 	default: return true;
 	}
 }
@@ -1547,6 +1631,8 @@ private:
 	void refreshUnreadSummary();
 	void setZenMode(bool enabled);
 	void showUnreadBuffer(const Target &target);
+	void showTopicPicker(bool unreadOnly, const Target &target);
+	void stepTopic(const Target &target, int delta, bool unreadOnly);
 	void refreshStatusBar();
 	void showWhichKey();
 	void hideWhichKey();
@@ -1579,6 +1665,7 @@ private:
 	base::weak_ptr<Window::SessionController> _zenController;
 	ModalUnread::UnreadSummary _unreadSummary;
 	bool _unreadKnown = false;
+	std::map<PeerId, std::pair<MsgId, MsgId>> _topicHistory;
 	enum class ActiveLayer {
 		None,
 		Cheatsheet,
@@ -1589,6 +1676,7 @@ private:
 		DescribeCommand,
 		StockShortcuts,
 		UnreadBuffer,
+		TopicPicker,
 	};
 	ActiveLayer _activeLayer = ActiveLayer::None;
 	bool _describeKeyHasDetails = false;
@@ -1711,11 +1799,25 @@ Keys::Keys(not_null<MainWindow*> window)
 		_sessionLifetime.destroy();
 		_unreadKnown = false;
 		_unreadSummary = {};
+		_topicHistory.clear();
 		_window->updateControlsGeometry();
 		refreshStatusBar();
 		if (!owner) {
 			return;
 		}
+		const auto recordActiveTopic = [=] {
+			const auto active = owner->activeChatCurrent();
+			if (const auto topic = active.topic()) {
+				const auto peerId = topic->peer()->id;
+				const auto rootId = topic->rootId();
+				auto &slot = _topicHistory[peerId];
+				if (slot.first != rootId) {
+					slot.second = slot.first;
+					slot.first = rootId;
+				}
+			}
+		};
+		recordActiveTopic();
 		if (const auto chatsList = owner->session().data().chatsList()) {
 			rpl::merge(
 				chatsList->unreadStateChanges() | rpl::to_empty,
@@ -1728,6 +1830,7 @@ Keys::Keys(not_null<MainWindow*> window)
 			scheduleUnreadRefresh();
 		}, _sessionLifetime);
 		refreshUnreadSummary();
+
 		rpl::merge(
 			owner->activeChatEntryChanges() | rpl::to_empty,
 			owner->activeChatsFilter() | rpl::to_empty,
@@ -1737,6 +1840,7 @@ Keys::Keys(not_null<MainWindow*> window)
 		) | rpl::on_next([=] {
 			// Keep Normal mode across chat/folder switches; only clear in-flight sequences.
 			++_revision;
+			recordActiveTopic();
 			if (_zenMode && !owner->activeChatCurrent().thread()) {
 				setZenMode(false);
 			}
@@ -2062,6 +2166,143 @@ void Keys::showUnreadBuffer(const Target &target) {
 	refreshStatusBar();
 }
 
+void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
+	const auto current = owner();
+	const auto forum = ActiveForum(target);
+	if (!current || !forum) {
+		return;
+	}
+	forum->preloadTopics();
+	forum->requestTopics();
+	const auto activeTopic = target.chat.topic()
+		? target.chat.topic()
+		: current->activeChatCurrent().topic();
+	const auto activeRootId = activeTopic ? activeTopic->rootId() : MsgId(0);
+	auto items = std::vector<ModalUi::TopicItem>();
+	for (const auto topic : OrderedForumTopics(forum)) {
+		const auto unread = topic->chatListUnreadState();
+		const auto msg = topic->chatListMessage();
+		items.push_back({
+			.rootId = topic->rootId(),
+			.title = topic->title(),
+			.preview = msg ? msg->notificationText().text.simplified() : QString(),
+			.colorId = topic->colorId(),
+			.unreadCount = unread.messages,
+			.mentions = unread.mentions,
+			.muted = (unread.messagesMuted > 0 && unread.messagesMuted >= unread.messages),
+			.pinned = topic->isPinnedDialog(FilterId(0)),
+			.closed = topic->closed(),
+			.isGeneral = topic->isGeneral(),
+			.active = (topic->rootId() == activeRootId),
+			.lastTimestamp = int64_t(topic->adjustedChatListTimeId()),
+		});
+	}
+	if (!_feedbackError) {
+		_feedbackText.clear();
+		_feedbackTimer.stop();
+	}
+	const auto guard = QPointer(this);
+	const auto weakCtrl = base::make_weak(current);
+	const auto peerId = forum->peer()->id;
+	_activeLayer = ActiveLayer::TopicPicker;
+	auto layer = ModalUi::CreateTopicPickerLayer({
+		.session = base::make_weak(&current->session()),
+		.parentPeerId = peerId,
+		.parentTitle = forum->peer()->name(),
+		.isBot = (forum->bot() != nullptr),
+		.startUnreadOnly = unreadOnly,
+		.canCreate = CanCreateTopicInForum(forum),
+		.items = std::move(items),
+		.onOpenTopic = [guard, weakCtrl, peerId](MsgId rootId) {
+			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId, rootId] {
+				const auto ctrl = weakCtrl.get();
+				if (!guard || !ctrl || !Enabled()
+					|| Purple::PrivacyScreenActive(guard->_window)) {
+					return;
+				}
+				const auto peer = ctrl->session().data().peerLoaded(peerId);
+				const auto liveForum = peer ? peer->forum() : nullptr;
+				if (const auto topic = liveForum ? liveForum->topicFor(rootId) : nullptr) {
+					ctrl->showThread(topic);
+				}
+			});
+		},
+		.onCreateTopic = [guard, weakCtrl, peerId] {
+			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
+				const auto ctrl = weakCtrl.get();
+				if (!guard || !ctrl || !Enabled()
+					|| Purple::PrivacyScreenActive(guard->_window)) {
+					return;
+				}
+				const auto peer = ctrl->session().data().peerLoaded(peerId);
+				const auto liveForum = peer ? peer->forum() : nullptr;
+				if (!liveForum) {
+					return;
+				}
+				if (liveForum->bot()) {
+					if (const auto topic = liveForum->reserveNewBotTopic()) {
+						ctrl->showThread(topic);
+					}
+				} else if (peer->canCreateTopics()) {
+					ctrl->show(Box(NewForumTopicBox, ctrl, liveForum->history()));
+				}
+			});
+		},
+	});
+	layer->lifetime().add([guard] {
+		if (!guard) return;
+		if (guard->_activeLayer == ActiveLayer::TopicPicker) {
+			guard->_activeLayer = ActiveLayer::None;
+			guard->refreshStatusBar();
+		}
+	});
+	_window->showOrHideBoxOrLayer(
+		std::move(layer),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
+	refreshStatusBar();
+}
+
+void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
+	const auto current = owner();
+	const auto forum = ActiveForum(target);
+	if (!current || !forum) {
+		return;
+	}
+	forum->preloadTopics();
+	const auto topics = OrderedForumTopics(forum);
+	if (topics.empty()) {
+		showFeedback(u"No topics loaded yet"_q);
+		return;
+	}
+	const auto activeTopic = target.chat.topic()
+		? target.chat.topic()
+		: current->activeChatCurrent().topic();
+	auto idx = -1;
+	for (auto i = 0; i < int(topics.size()); ++i) {
+		if (topics[i] == activeTopic) {
+			idx = i;
+			break;
+		}
+	}
+	const auto n = int(topics.size());
+	if (unreadOnly) {
+		for (auto step = 1; step <= n; ++step) {
+			const auto cand = topics[((idx < 0 ? -1 : idx) + step) % n];
+			const auto u = cand->chatListUnreadState();
+			if (u.messages > u.messagesMuted || u.mentions > 0 || u.marks > u.marksMuted) {
+				current->showThread(cand);
+				return;
+			}
+		}
+		showFeedback(u"No unread topics"_q);
+		return;
+	}
+	const auto base = (idx < 0) ? (delta > 0 ? -1 : 0) : idx;
+	const auto nextIdx = ((base + delta) % n + n) % n;
+	current->showThread(topics[nextIdx]);
+}
+
 void Keys::enterNormal(bool silent) {
 	clearPrefix();
 	_normal = true;
@@ -2183,6 +2424,12 @@ void Keys::refreshStatusBar() {
 			state.badgeText = u"UNREAD"_q;
 			state.paneLabel = u"Unread Unmuted Chats"_q;
 			state.rightCue = u"j/k move  ·  RET open  ·  m/u/* mark  ·  x read  ·  q close"_q;
+			break;
+		case ActiveLayer::TopicPicker:
+			state.badge = ModalUi::BadgeKind::Local;
+			state.badgeText = u"TOPICS"_q;
+			state.paneLabel = u"Forum / Bot Topics"_q;
+			state.rightCue = u"j/k move  ·  RET open  ·  / filter  ·  u unread  ·  q close"_q;
 			break;
 		case ActiveLayer::None:
 			break;
@@ -2765,6 +3012,56 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		clearPrefix();
 		Purple::TogglePrivacyScreen(_window);
 		break;
+	case Action::TopicPalette:
+		clearPrefix();
+		showTopicPicker(false, target);
+		break;
+	case Action::TopicUnreadPalette:
+		clearPrefix();
+		showTopicPicker(true, target);
+		break;
+	case Action::TopicNext:
+		stepTopic(target, repeat, false);
+		break;
+	case Action::TopicPrevious:
+		stepTopic(target, -repeat, false);
+		break;
+	case Action::TopicNextUnread:
+		stepTopic(target, 1, true);
+		break;
+	case Action::TopicLast:
+		if (const auto forum = ActiveForum(target)) {
+			const auto it = _topicHistory.find(forum->peer()->id);
+			const auto prevId = (it != _topicHistory.end()) ? it->second.second : MsgId(0);
+			if (const auto topic = prevId ? forum->topicFor(prevId) : nullptr) {
+				current->showThread(topic);
+			} else {
+				showFeedback(u"No previous topic in this forum"_q);
+			}
+		}
+		break;
+	case Action::TopicCreate:
+		if (const auto forum = ActiveForum(target)) {
+			clearPrefix();
+			if (forum->bot()) {
+				if (const auto topic = forum->reserveNewBotTopic()) {
+					current->showThread(topic);
+				}
+			} else if (forum->peer()->canCreateTopics()) {
+				current->show(Box(NewForumTopicBox, current, forum->history()));
+			}
+		}
+		break;
+	case Action::TopicParent:
+		if (const auto forum = ActiveForum(target)) {
+			clearPrefix();
+			if (current->shownForum().current() == forum && !target.chat.topic()) {
+				current->closeForum();
+			} else {
+				current->showForum(forum);
+			}
+		}
+		break;
 	case Action::OpenMusic:
 		ToggleMusicSection(current);
 		break;
@@ -3149,6 +3446,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		addLocalRow(MapKind::Chat, Action::OpenHistoryCalendar, u"History calendar"_q);
 		addLocalRow(MapKind::Chat, Action::AttachFiles, u"Add attachment"_q);
 		addLocalRow(MapKind::Chat, Action::OpenChatMedia, u"Shared media"_q);
+		addLocalRow(MapKind::Chat, Action::TopicPalette, u"Switch topic"_q);
 		addLocalRow(MapKind::Chats, Action::PreviewChat, u"Chat preview"_q);
 		addLocalRow(MapKind::Chats, Action::NextFolder, u"Next folder"_q);
 		addLocalRow(MapKind::Music, Action::TogglePlayback, u"Play / pause"_q);

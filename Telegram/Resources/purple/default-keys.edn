@@ -75,6 +75,9 @@
   "] u"     :history-jump-to-unread
   "[ t"     :playback-previous-track
   "] t"     :playback-next-track
+  "[ T"     :topic-previous
+  "] T"     :topic-next
+  "] U"     :topic-next-unread
 
   ; Search and quick URL hint.
   "/"       :search-messages
@@ -89,6 +92,7 @@
   "g e"     :message-hint-edit
   "g o"     :message-hint-open-url
   "g u"     :history-jump-to-unread
+  "g ^"     :topic-parent
 
   ; y: yank / copy (all copyable artifacts live under y).
   "y y"     :message-hint-copy-text
@@ -105,6 +109,13 @@
   "SPC b d" :history-open-calendar
   "SPC b u" :attach-files
   "SPC b w" :chat-backgrounds-visibility-toggle
+  "SPC b t" :topic-palette
+  "SPC b T" :topic-unread-palette
+  "SPC b n" :topic-next
+  "SPC b N" :topic-previous
+  "SPC b l" :topic-last
+  "SPC b c" :topic-create
+  "SPC b h" :topic-parent
 
   ; SPC o: open views and panels.
   "SPC o s" :open-settings
@@ -171,7 +182,14 @@
   "l" :open-chat-links
   "o" :open-chat-voice
   "g" :open-chat-gifs
-  "q" :open-chat-polls}
+  "q" :open-chat-polls
+  "t" :topic-palette
+  "T" :topic-unread-palette
+  "n" :topic-next
+  "N" :topic-previous
+  "b" :topic-last
+  "c" :topic-create
+  "h" :topic-parent}
 
  :chats
  {"p" :preview-chat

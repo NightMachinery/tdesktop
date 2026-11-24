@@ -184,4 +184,34 @@ struct UnreadBufferConfig {
 [[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateUnreadBufferLayer(
 	UnreadBufferConfig config);
 
+struct TopicItem {
+	MsgId rootId = 0;
+	QString title;
+	QString preview;
+	int32 colorId = 0;
+	int unreadCount = 0;
+	int mentions = 0;
+	bool muted = false;
+	bool pinned = false;
+	bool closed = false;
+	bool isGeneral = false;
+	bool active = false;
+	int64_t lastTimestamp = 0;
+};
+
+struct TopicPickerConfig {
+	base::weak_ptr<Main::Session> session;
+	PeerId parentPeerId = 0;
+	QString parentTitle;
+	bool isBot = false;
+	bool startUnreadOnly = false;
+	bool canCreate = false;
+	std::vector<TopicItem> items;
+	Fn<void(MsgId rootId)> onOpenTopic;
+	Fn<void()> onCreateTopic;
+};
+
+[[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateTopicPickerLayer(
+	TopicPickerConfig config);
+
 } // namespace Purple::ModalUi

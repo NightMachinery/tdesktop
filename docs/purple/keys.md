@@ -71,7 +71,8 @@ with at most three strokes per chord:
   - `SPC z`, `SPC t p`: privacy screen across all Purple windows.
   - `SPC b`: active chat (`b i` info, `b m` chat menu, `b p` pinned, `b v`
     preview, `b s` scheduled, `b d` calendar, `b u` attach files, `b w`
-    wallpaper toggle).
+    wallpaper toggle, `b t` switch topic, `b T` unread topics, `b n`/`b N`
+    next/previous topic, `b l` last topic, `b c` new topic, `b h` topic list).
   - `SPC o`: open views (`o s` Settings, `o S` Saved Messages, `o a` Archive,
     `o c` Contacts, `o p` Calls, `o d` Downloads, `o m` Main Menu, `o u` Music,
     `o l` Playlists).
@@ -91,8 +92,11 @@ with at most three strokes per chord:
 - **Localleader (`,` and `SPC m`):**
   - In a chat or topic (`:chat`): `, i` info, `, m` menu, `, p` pinned, `, s`
     scheduled, `, d` calendar, `, a` attach, `, r` reply hint, `, e` edit hint,
-    and 2-stroke shared media (`, v` media, `, u` music, `, f` files, `, l`
-    links, `, o` voice/round, `, g` GIFs, `, q` polls).
+    2-stroke shared media (`, v` media, `, u` music, `, f` files, `, l` links,
+    `, o` voice/round, `, g` GIFs, `, q` polls), and topic commands (`, t`
+    switch topic, `, T` unread topics, `, n`/`N` next/prev topic, `, b` last
+    topic, `, c` new topic, `, h` parent topic list). Also `] T`, `[ T`, `] U`
+    (next unread topic), and `g ^` (parent topic list).
   - In the chat list (`:chats`): `, p` preview, `, m` chat menu, `, a` archive,
     `, f` / `, F` next/previous folder.
   - In Music (`:music`): `, p` play/pause, `, s` stop, `, n` / `, N` next/prev
@@ -168,7 +172,8 @@ on the modal status line and cheatsheet footer.
   marking read sends read receipts.
 - **Profile pictures in modal menus:** circular peer avatars appear beside
   people, groups, channels, and accounts in the unread buffer (`SPC u`), chat
-  palette (`SPC ,`), and `M-x` peer-scoped commands.
+  palette (`SPC ,`), topic picker header (`SPC b t`), and peer-scoped commands
+  in `M-x`.
 - **Zen fullscreen chat (`SPC t z`, `SPC w m`):** puts the window into real OS
   fullscreen and hides the folder rail, chat list, info sidebar, and modal
   status bar so only the current conversation is visible. The status bar appears
@@ -201,6 +206,13 @@ on the modal status line and cheatsheet footer.
     Because `QNetworkAccessManager` does not route through Telegram's MTProto
     proxy, weather requests are skipped automatically whenever an in-app proxy
     is enabled.
+- **Forum groups and threaded bots:** `SPC b t` / `, t` opens the topic picker
+  for the current forum group or threaded bot, `SPC b T` / `, T` opens it
+  filtered to unread topics, `SPC b n`/`N` (`, n`/`N`, `] T`/`[ T`) cycle
+  topics, `] U` jumps to the next unread topic, `SPC b l` / `, b` toggles the
+  last viewed topic, `SPC b c` / `, c` creates a new forum topic or reserves a
+  new bot thread, and `SPC b h` / `, h` / `g ^` opens or closes the parent topic
+  list.
 
 ## Upstream hooks
 

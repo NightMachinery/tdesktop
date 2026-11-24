@@ -251,6 +251,17 @@ for action, chord in (
     ("ToggleZenMode", "SPC w m"),
     ("TogglePrivacyScreen", "SPC t p"),
     ("TogglePrivacyScreen", "SPC z"),
+    ("TopicPalette", "SPC b t"),
+    ("TopicUnreadPalette", "SPC b T"),
+    ("TopicNext", "SPC b n"),
+    ("TopicPrevious", "SPC b N"),
+    ("TopicNext", "] T"),
+    ("TopicPrevious", "[ T"),
+    ("TopicNextUnread", "] U"),
+    ("TopicLast", "SPC b l"),
+    ("TopicCreate", "SPC b c"),
+    ("TopicParent", "SPC b h"),
+    ("TopicParent", "g ^"),
 ):
     bound(action, chord)
 for index in range(1, 7):
@@ -279,15 +290,22 @@ for action, key in (
     ("OpenChatMedia", "v"), ("OpenChatMusic", "u"), ("OpenChatFiles", "f"),
     ("OpenChatLinks", "l"), ("OpenChatVoice", "o"), ("OpenChatGifs", "g"),
     ("OpenChatPolls", "q"),
+    ("TopicPalette", "t"), ("TopicUnreadPalette", "T"),
+    ("TopicNext", "n"), ("TopicPrevious", "N"),
+    ("TopicLast", "b"), ("TopicCreate", "c"), ("TopicParent", "h"),
 ):
     bound(action, key, chat_body)
 
+# Phase 2 routes: unread status counts, avatars, iBuffer read-receipt confirm,
+# real fullscreen Zen mode with transient status bar, app-wide privacy screen, and topics.
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
 ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScreen()",
         "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
 ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
+ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "reserveNewBotTopic", "NewForumTopicBox")
 ordered(keys, "avatarSession", "avatarPeerId")
+
 keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")

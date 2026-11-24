@@ -2063,6 +2063,13 @@ private:
 	return dt.toString(QStringLiteral("MMM d"));
 }
 
+[[nodiscard]] QColor TopicColorFromId(int32 colorId) {
+	if (colorId > 0) {
+		return QColor((colorId >> 16) & 0xff, (colorId >> 8) & 0xff, colorId & 0xff);
+	}
+	return QColor(0x3b, 0x82, 0xf6);
+}
+
 class UnreadBufferRowsWidget final : public Ui::RpWidget {
 public:
 	UnreadBufferRowsWidget(
@@ -2727,6 +2734,471 @@ private:
 	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
 };
 
+// ---------------------------------------------------------------------------
+// TopicPickerLayer (Forum Groups & Threaded Bots)
+// ---------------------------------------------------------------------------
+
+class TopicRowsWidget final : public Ui::RpWidget {
+public:
+	TopicRowsWidget(
+		not_null<QWidget*> parent,
+		Fn<void(int row)> onClick)
+	: RpWidget(parent)
+	, _onClick(std::move(onClick)) {
+		setMouseTracking(true);
+	}
+
+	static constexpr int kRowHeight = 44;
+
+	void setData(
+			const std::vector<TopicItem> &items,
+			const std::vector<int> &visible,
+			int selected) {
+		_items = items;
+		_visible = visible;
+		_selected = selected;
+		_hovered = -1;
+		resize(width(), std::max(72, int(_visible.size()) * kRowHeight + 8));
+		update();
+	}
+
+	void setSelected(int selected) {
+		_selected = selected;
+		update();
+	}
+
+protected:
+	void mouseMoveEvent(QMouseEvent *e) override {
+		const auto row = (e->pos().y() - 4) / kRowHeight;
+		const auto next = (row >= 0 && row < int(_visible.size())) ? row : -1;
+		if (next != _hovered) {
+			_hovered = next;
+			setCursor((next >= 0) ? style::cur_pointer : style::cur_default);
+			update();
+		}
+	}
+
+	void leaveEventHook(QEvent *) override {
+		if (_hovered >= 0) {
+			_hovered = -1;
+			update();
+		}
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		if (e->button() != Qt::LeftButton) {
+			return;
+		}
+		const auto row = (e->pos().y() - 4) / kRowHeight;
+		if (row >= 0 && row < int(_visible.size()) && _onClick) {
+			_onClick(row);
+		}
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto rtl = IsRtl(this);
+		const auto monoFont = MonoFont(10, true);
+		const auto timeFont = MonoFont(10, false);
+
+		if (_visible.empty()) {
+			p.setFont(st::normalFont);
+			p.setPen(st::windowSubTextFg);
+			p.drawText(rect(), Qt::AlignCenter, u"No matching topics."_q);
+			return;
+		}
+
+		const auto clip = e->rect();
+		const auto first = std::max(0, (clip.top() - 4) / kRowHeight);
+		const auto till = std::min(int(_visible.size()), (clip.bottom() - 4) / kRowHeight + 2);
+
+		for (auto row = first; row < till; ++row) {
+			const auto &item = _items[_visible[row]];
+			const auto y = 4 + row * kRowHeight;
+			const auto rowRect = QRect(8, y + 1, width() - 16, kRowHeight - 2);
+			const auto isActive = (row == _selected);
+			const auto isHover = (row == _hovered);
+
+			if (isActive || isHover) {
+				auto fill = st::windowBgOver->c;
+				if (!isActive) {
+					fill.setAlpha(140);
+				}
+				p.setPen(Qt::NoPen);
+				p.setBrush(fill);
+				p.drawRoundedRect(rowRect, 7, 7);
+				if (isActive) {
+					const auto barRect = rtl
+						? QRect(rowRect.right() - 2, rowRect.top() + 6, 3, rowRect.height() - 12)
+						: QRect(rowRect.left(), rowRect.top() + 6, 3, rowRect.height() - 12);
+					p.setBrush(st::windowActiveTextFg->c);
+					p.drawRoundedRect(barRect, 1.5, 1.5);
+				}
+			}
+
+			const auto midY = rowRect.center().y() + 1;
+			constexpr auto kIconSize = 24;
+			const auto iconX = rtl
+				? (rowRect.right() - 12 - kIconSize)
+				: (rowRect.left() + 12);
+			const auto iconRect = QRect(iconX, midY - kIconSize / 2, kIconSize, kIconSize);
+			const auto dotColor = item.isGeneral
+				? st::windowSubTextFg->c
+				: TopicColorFromId(item.colorId);
+			auto dotFill = dotColor;
+			dotFill.setAlpha(36);
+			p.setPen(QPen(dotColor, 1));
+			p.setBrush(dotFill);
+			p.drawRoundedRect(QRectF(iconRect).adjusted(.5, .5, -.5, -.5), 7, 7);
+			p.setFont(MonoFont(11, true));
+			p.setPen(dotColor);
+			const auto glyph = item.isGeneral
+				? u"#"_q
+				: (item.title.isEmpty() ? u"T"_q : item.title.left(1).toUpper());
+			p.drawText(iconRect, Qt::AlignCenter, glyph);
+
+			// Far side: timestamp + unread badge.
+			auto farReserve = 12;
+			const auto timeStr = FormatShortTimestamp(item.lastTimestamp);
+			if (!timeStr.isEmpty()) {
+				const auto tw = MeasureTextWidth(timeFont, timeStr);
+				const auto tx = rtl ? (rowRect.left() + farReserve) : (rowRect.right() - farReserve - tw);
+				p.setFont(timeFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(QRect(tx, rowRect.top() + 4, tw, 16), Qt::AlignCenter, timeStr);
+				farReserve += tw + 10;
+			}
+			if (item.unreadCount > 0 || item.mentions > 0) {
+				const auto badgeStr = (item.unreadCount > 0)
+					? QString::number(item.unreadCount)
+					: u"@"_q;
+				const auto bw = std::max(22, MeasureTextWidth(monoFont, badgeStr) + 10);
+				const auto bx = rtl ? (rowRect.left() + 12) : (rowRect.right() - 12 - bw);
+				const auto badgeRect = QRect(bx, rowRect.top() + 21, bw, 18);
+				p.setPen(Qt::NoPen);
+				p.setBrush(item.muted ? st::windowSubTextFg->c : st::windowActiveTextFg->c);
+				p.drawRoundedRect(badgeRect, 9, 9);
+				p.setFont(monoFont);
+				p.setPen(Qt::white);
+				p.drawText(badgeRect, Qt::AlignCenter, badgeStr);
+				farReserve = std::max(farReserve, bw + 22);
+			}
+
+			const auto lead = 12 + kIconSize + 10;
+			const auto contentW = std::max(80, rowRect.width() - lead - farReserve - 8);
+			const auto contentX = rtl ? (rowRect.left() + farReserve + 8) : (rowRect.left() + lead);
+
+			auto titleText = item.title;
+			if (item.active) titleText += u"  ·  current"_q;
+			if (item.pinned) titleText += u"  ·  pinned"_q;
+			if (item.closed) titleText += u"  ·  closed"_q;
+			p.setFont(st::semiboldFont);
+			p.setPen(item.closed ? st::windowSubTextFg : st::windowFg);
+			p.drawText(
+				QRect(contentX, rowRect.top() + 4, contentW, 18),
+				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+				ElideText(st::semiboldFont, titleText, contentW));
+
+			if (!item.preview.isEmpty()) {
+				p.setFont(st::normalFont);
+				p.setPen(st::windowSubTextFg);
+				p.drawText(
+					QRect(contentX, rowRect.top() + 23, contentW, 16),
+					(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+					ElideText(st::normalFont, item.preview, contentW));
+			}
+		}
+	}
+
+private:
+	std::vector<TopicItem> _items;
+	std::vector<int> _visible;
+	Fn<void(int)> _onClick;
+	int _selected = 0;
+	int _hovered = -1;
+};
+
+class TopicPickerLayer final : public Ui::LayerWidget {
+public:
+	explicit TopicPickerLayer(TopicPickerConfig config)
+	: _config(std::move(config))
+	, _unreadOnly(_config.startUnreadOnly)
+	, _close(Ui::CreateChild<Ui::IconButton>(this, st::boxTitleClose))
+	, _filter(Ui::CreateChild<Ui::InputField>(
+		this,
+		st::defaultMultiSelectSearchField,
+		Ui::InputField::Mode::SingleLine,
+		rpl::single(u"Filter topics (orderless)..."_q)))
+	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
+		setFocusPolicy(Qt::StrongFocus);
+		_close->setClickedCallback([=] { closeLayer(); });
+		if (const auto s = _config.session.get()) {
+			s->downloaderTaskFinished() | rpl::on_next([this] {
+				update();
+			}, lifetime());
+		}
+
+		auto rows = object_ptr<TopicRowsWidget>(
+			_scroll,
+			[=](int row) { openRow(row); });
+		_rows = rows.data();
+		_scroll->setOwnedWidget(std::move(rows));
+
+		_filter->changes() | rpl::on_next([=] {
+			refilter();
+		}, lifetime());
+		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
+			openRow(_selected);
+		}, lifetime());
+
+		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
+			if (e->type() != QEvent::KeyPress) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto k = static_cast<QKeyEvent*>(e.get());
+			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
+			if (layout && !layout->preeditAreaText().isEmpty()) {
+				return base::EventFilterResult::Continue;
+			}
+			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
+			const auto key = PhysicalKeyForNav(*k);
+			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (!_filter->getLastText().isEmpty()) {
+					_filter->setText(QString());
+				}
+				setFocus();
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
+				moveSelection(1);
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
+				moveSelection(-1);
+				return base::EventFilterResult::Cancel;
+			}
+			return base::EventFilterResult::Continue;
+		});
+
+		refilter();
+	}
+
+protected:
+	void doSetInnerFocus() override {
+		setFocus();
+	}
+
+	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
+		const auto parentSize = parentWidget()->size();
+		const auto w = std::min(parentSize.width() - 32, 660);
+		const auto h = std::min(parentSize.height() - 48, 560);
+		setGeometry((parentSize.width() - w) / 2, (parentSize.height() - h) / 2, w, h);
+	}
+
+	void resizeEvent(QResizeEvent *e) override {
+		LayerWidget::resizeEvent(e);
+		constexpr auto kHeaderH = 54;
+		constexpr auto kFilterH = 44;
+		constexpr auto kFooterH = 32;
+		if (IsRtl(this)) {
+			_close->move(12, (kHeaderH - _close->height()) / 2);
+		} else {
+			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
+		}
+		_filter->setGeometry(28, kHeaderH + 6, std::max(120, width() - 56), 32);
+		_scroll->setGeometry(0, kHeaderH + kFilterH, width(), std::max(60, height() - kHeaderH - kFilterH - kFooterH));
+		if (_rows) {
+			_rows->resize(_scroll->width(), _rows->height());
+		}
+	}
+
+	void keyPressEvent(QKeyEvent *e) override {
+		if (_closing) {
+			return;
+		}
+		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
+		const auto key = PhysicalKeyForNav(*e);
+		if (key == Qt::Key_Escape
+			|| (key == Qt::Key_Q && !mods)
+			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+			closeLayer();
+			return;
+		} else if (key == Qt::Key_Slash && !mods) {
+			_filter->setFocusFast();
+			return;
+		} else if (key == Qt::Key_J && !mods) {
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_K && !mods) {
+			moveSelection(-1);
+			return;
+		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
+			moveSelection(1);
+			return;
+		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
+			moveSelection(-1);
+			return;
+		} else if (key == Qt::Key_U && !mods) {
+			_unreadOnly = !_unreadOnly;
+			refilter();
+			return;
+		} else if (key == Qt::Key_C && !mods && _config.canCreate && _config.onCreateTopic) {
+			_closing = true;
+			auto cb = std::move(_config.onCreateTopic);
+			closeLayer();
+			cb();
+			return;
+		} else if (key == Qt::Key_Return || key == Qt::Key_Enter || (key == Qt::Key_O && !mods)) {
+			openRow(_selected);
+			return;
+		}
+		LayerWidget::keyPressEvent(e);
+	}
+
+	void paintEvent(QPaintEvent *) override {
+		auto p = Painter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		_roundRect.paint(p, rect());
+
+		constexpr auto kHeaderH = 54;
+		constexpr auto kFilterH = 44;
+		constexpr auto kFooterH = 32;
+		const auto rtl = IsRtl(this);
+
+		// Parent peer avatar in header.
+		constexpr auto kAvatarSize = 28;
+		auto leadX = 18;
+		if (const auto s = _config.session.get(); s && _config.parentPeerId != 0) {
+			if (const auto peer = s->data().peerLoaded(_config.parentPeerId)) {
+				peer->loadUserpic();
+				const auto ax = rtl ? (width() - leadX - kAvatarSize) : leadX;
+				peer->paintUserpic(p, _parentAvatar, ax, (kHeaderH - kAvatarSize) / 2, kAvatarSize, true);
+				leadX += kAvatarSize + 10;
+			}
+		}
+
+		const auto badgeText = _unreadOnly
+			? u"UNREAD ONLY"_q
+			: (_config.isBot ? u"BOT THREADS"_q : u"TOPICS"_q);
+		const auto mono = MonoFont(10, true);
+		const auto bw = MeasureTextWidth(mono, badgeText) + 12;
+		const auto bx = rtl ? (_close->x() + _close->width() + 12) : (_close->x() - 12 - bw);
+		const auto bRect = QRect(bx, (kHeaderH - 22) / 2, bw, 22);
+		auto bColor = _unreadOnly ? BadgeColor(BadgeKind::Local) : st::windowActiveTextFg->c;
+		auto bFill = bColor;
+		bFill.setAlpha(28);
+		p.setPen(Qt::NoPen);
+		p.setBrush(bFill);
+		p.drawRoundedRect(bRect, 6, 6);
+		p.setFont(mono);
+		p.setPen(bColor);
+		p.drawText(bRect, Qt::AlignCenter, badgeText);
+
+		const auto titleW = std::max(80, width() - leadX - bw - _close->width() - 36);
+		const auto titleX = rtl ? (bx + bw + 10) : leadX;
+		p.setFont(st::keysLegendHeaderStyle.font);
+		p.setPen(st::windowFg);
+		p.drawText(
+			QRect(titleX, 0, titleW, kHeaderH),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+			ElideText(st::keysLegendHeaderStyle.font, _config.parentTitle, titleW));
+		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
+
+		const auto searchRect = QRect(18, kHeaderH + 6, std::max(120, width() - 36), 32);
+		p.setPen(QPen(st::boxDividerBg->c, 1));
+		p.setBrush(BlendColor(st::windowBg->c, st::windowBgOver->c, 0.35));
+		p.drawRoundedRect(QRectF(searchRect).adjusted(.5, .5, -.5, -.5), 8, 8);
+		p.fillRect(0, kHeaderH + kFilterH - 1, width(), 1, st::boxDividerBg->c);
+
+		const auto footerRect = QRect(0, height() - kFooterH, width(), kFooterH);
+		p.fillRect(footerRect.adjusted(0, 1, 0, 0), BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
+		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
+		p.setFont(st::normalFont);
+		p.setPen(st::windowSubTextFg);
+		const auto hint = _config.canCreate
+			? u"j/k move  ·  RET open  ·  / filter  ·  u unread only  ·  c new topic  ·  q close"_q
+			: u"j/k move  ·  RET open  ·  / filter  ·  u unread only  ·  q close"_q;
+		p.drawText(
+			footerRect.adjusted(16, 0, -16, 0),
+			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
+			ElideText(st::normalFont, hint, width() - 32));
+	}
+
+private:
+	void refilter() {
+		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		_visible.clear();
+		for (auto i = 0; i < int(_config.items.size()); ++i) {
+			const auto &it = _config.items[i];
+			if (_unreadOnly && it.unreadCount <= 0 && it.mentions <= 0) {
+				continue;
+			}
+			if (!tokens.empty()) {
+				const auto hay = (it.title + u' ' + it.preview).toCaseFolded();
+				const auto init = ModalMx::WordInitials(it.title);
+				const auto ok = std::all_of(tokens.begin(), tokens.end(), [&](const ModalMx::OrderlessToken &t) {
+					return ModalMx::MatchToken(t, hay, init);
+				});
+				if (!ok) {
+					continue;
+				}
+			}
+			_visible.push_back(i);
+		}
+		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		if (_rows) {
+			_rows->setData(_config.items, _visible, _selected);
+		}
+		_scroll->scrollToY(0);
+		update();
+	}
+
+	void moveSelection(int delta) {
+		if (_visible.empty()) {
+			return;
+		}
+		const auto n = int(_visible.size());
+		_selected = std::clamp(_selected + delta, 0, n - 1);
+		if (_rows) {
+			_rows->setSelected(_selected);
+		}
+		const auto rowTop = 4 + _selected * TopicRowsWidget::kRowHeight;
+		const auto rowBottom = rowTop + TopicRowsWidget::kRowHeight;
+		if (rowTop < _scroll->scrollTop()) {
+			_scroll->scrollToY(rowTop);
+		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
+			_scroll->scrollToY(rowBottom - _scroll->height());
+		}
+	}
+
+	void openRow(int row) {
+		if (_closing || row < 0 || row >= int(_visible.size())) {
+			return;
+		}
+		_closing = true;
+		const auto rootId = _config.items[_visible[row]].rootId;
+		auto cb = std::move(_config.onOpenTopic);
+		closeLayer();
+		if (cb) {
+			cb(rootId);
+		}
+	}
+
+	TopicPickerConfig _config;
+	bool _unreadOnly = false;
+	std::vector<int> _visible;
+	Ui::PeerUserpicView _parentAvatar;
+	Ui::IconButton *_close = nullptr;
+	Ui::InputField *_filter = nullptr;
+	Ui::ScrollArea *_scroll = nullptr;
+	QPointer<TopicRowsWidget> _rows;
+	int _selected = 0;
+	bool _closing = false;
+	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
+};
+
 } // namespace
 
 std::unique_ptr<Ui::LayerWidget> CreateModalHelpLayer(HelpData data) {
@@ -2743,6 +3215,10 @@ std::unique_ptr<Ui::LayerWidget> CreateCommandPaletteLayer(PaletteConfig config)
 
 std::unique_ptr<Ui::LayerWidget> CreateUnreadBufferLayer(UnreadBufferConfig config) {
 	return std::make_unique<UnreadBufferLayer>(std::move(config));
+}
+
+std::unique_ptr<Ui::LayerWidget> CreateTopicPickerLayer(TopicPickerConfig config) {
+	return std::make_unique<TopicPickerLayer>(std::move(config));
 }
 
 } // namespace Purple::ModalUi
