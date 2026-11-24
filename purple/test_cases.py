@@ -163,6 +163,14 @@ CASES = {
         'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'Foundation', 'AppKit'],
     },
+    'music-diagnostics': {
+        'program': 'music_diagnostics_cases.cpp',
+        'syntax_units': ['purple/purple_music_source_roster.cpp',
+            'purple/purple_music_index_service.cpp', 'purple/purple_music_section.cpp'],
+        'units': ['purple/purple_music_diagnostics.cpp'],
+        'libraries': [],
+        'frameworks': ['QtCore'],
+    },
     'sync-auto-service': {
         'program': 'sync_auto_service_cases.cpp',
         'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc', 'sync-pickup.inc'],

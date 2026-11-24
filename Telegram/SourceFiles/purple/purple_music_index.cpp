@@ -30,6 +30,13 @@ QString PeerRosterJson(const std::vector<quint64> &peers) {
 		QJsonDocument(std::move(roster)).toJson(QJsonDocument::Compact));
 }
 
+QString FormatSqlError(const char *op, const DesktopArchiveSqlResult &result) {
+	return u"%1 failed (%2, sqlite %3)"_q
+		.arg(QLatin1String(op))
+		.arg(result.failure.isEmpty() ? u"unknown"_q : result.failure)
+		.arg(result.code);
+}
+
 ArchiveSqlStatement UpsertMusicOccurrence(
 		const MusicIndexEntry &row,
 		std::optional<qint64> folder = std::nullopt) {
@@ -56,7 +63,18 @@ MusicIndex::MusicIndex(std::function<bool()> current)
 }
 
 bool MusicIndex::open(const QString &path) {
-	return _database.Open(path, true).ok && _database.Configure().ok && write({
+	_lastError.clear();
+	const auto opened = _database.Open(path, true);
+	if (!opened.ok) {
+		_lastError = FormatSqlError("sqlite open", opened);
+		return false;
+	}
+	const auto configured = _database.Configure();
+	if (!configured.ok) {
+		_lastError = FormatSqlError("sqlite configure", configured);
+		return false;
+	}
+	return write({
 		{ u"CREATE TABLE IF NOT EXISTS music_folder(id INTEGER PRIMARY KEY CHECK(id = 1), "
 		  "filter INTEGER NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 0))"_q },
 		{ u"INSERT OR IGNORE INTO music_folder VALUES(1, 0, 0)"_q,
@@ -80,6 +98,7 @@ bool MusicIndex::open(const QString &path) {
 std::optional<MusicIndexScope> MusicIndex::configureSources(
 		qint64 folder,
 		const std::vector<quint64> &peers) {
+	_lastError.clear();
 	const auto json = PeerRosterJson(peers);
 	const auto configured = write({
 		{ u"UPDATE music_folder SET generation = generation + 1 "
@@ -101,11 +120,17 @@ std::optional<MusicIndexScope> MusicIndex::configureSources(
 		u"SELECT generation FROM music_folder WHERE id = 1"_q,
 		{}, ArchiveSqlExpectation::Rows,
 	});
-	if (!state.ok || state.rows.empty()) return std::nullopt;
+	if (!state.ok || state.rows.empty()) {
+		_lastError = state.ok
+			? u"music_folder state row missing"_q
+			: FormatSqlError("sqlite read generation", state);
+		return std::nullopt;
+	}
 	return MusicIndexScope{ std::get<int64>(state.rows.front()[0]) };
 }
 
 std::optional<std::vector<MusicSourceCursor>> MusicIndex::sources() {
+	_lastError.clear();
 	auto after = QString();
 	auto sources = std::vector<MusicSourceCursor>();
 	while (true) {
@@ -114,7 +139,10 @@ std::optional<std::vector<MusicSourceCursor>> MusicIndex::sources() {
 			"WHERE peer > ? ORDER BY peer LIMIT ?"_q,
 			{ after, kPageSize }, ArchiveSqlExpectation::Rows,
 		});
-		if (!result.ok) return std::nullopt;
+		if (!result.ok) {
+			_lastError = FormatSqlError("sqlite read sources", result);
+			return std::nullopt;
+		}
 		for (const auto &row : result.rows) {
 			sources.push_back({
 				.peer = std::get<QString>(row[0]).toULongLong(),
@@ -133,13 +161,18 @@ bool MusicIndex::savePage(
 		const MusicSourceCursor &expected,
 		const MusicSourceCursor &cursor,
 		const std::vector<MusicIndexEntry> &rows) {
+	_lastError.clear();
 	if (rows.size() > kPageSize || !cursor.peer || expected.peer != cursor.peer) {
+		_lastError = u"invalid page arguments"_q;
 		return false;
 	}
 	const auto peer = QString::number(cursor.peer);
 	auto statements = std::vector<ArchiveSqlStatement>();
 	for (const auto &row : rows) {
-		if (row.peer != cursor.peer || !row.document) return false;
+		if (row.peer != cursor.peer || !row.document) {
+			_lastError = u"invalid track entry"_q;
+			return false;
+		}
 		statements.push_back(UpsertMusicOccurrence(row));
 	}
 	statements.emplace_back(
@@ -154,6 +187,7 @@ bool MusicIndex::savePage(
 }
 
 bool MusicIndex::saveArrival(qint64 folder, const MusicIndexEntry &row) {
+	_lastError.clear();
 	return folder > 0 && row.peer && row.document
 		&& write({ UpsertMusicOccurrence(row, folder) });
 }
@@ -163,6 +197,7 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 		const QString &query,
 		const std::vector<quint64> &visiblePeers,
 		std::optional<MusicIndexCursor> cursor) {
+	_lastError.clear();
 	const auto result = _database.Read({
 		u"WITH visible(peer) AS (SELECT value FROM json_each(?4)), "
 		"terms(term) AS (SELECT value FROM json_each(?3)) "
@@ -185,7 +220,10 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 			int64(scope.generation) },
 		ArchiveSqlExpectation::Rows,
 	});
-	if (!result.ok) return std::nullopt;
+	if (!result.ok) {
+		_lastError = FormatSqlError("sqlite read page", result);
+		return std::nullopt;
+	}
 	auto rows = std::vector<MusicIndexEntry>();
 	for (const auto &row : result.rows) {
 		rows.push_back({
@@ -201,14 +239,42 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 	return rows;
 }
 
+std::optional<qint64> MusicIndex::count(
+		MusicIndexScope scope,
+		const std::vector<quint64> &visiblePeers) {
+	_lastError.clear();
+	const auto result = _database.Read({
+		u"WITH visible(peer) AS (SELECT value FROM json_each(?1)) "
+		"SELECT COUNT(DISTINCT document) FROM music_occurrence "
+		"WHERE (SELECT generation FROM music_folder WHERE id = 1) = ?2 "
+		"AND peer IN visible"_q,
+		{ PeerRosterJson(visiblePeers), int64(scope.generation) },
+		ArchiveSqlExpectation::OneRow,
+	});
+	if (!result.ok || result.rows.empty() || result.rows.front().empty()) {
+		_lastError = result.ok
+			? u"sqlite count returned no row"_q
+			: FormatSqlError("sqlite count", result);
+		return std::nullopt;
+	}
+	return std::get<int64>(result.rows.front()[0]);
+}
+
 bool MusicIndex::write(std::vector<ArchiveSqlStatement> statements) {
-	if (_current && !_current()) return false;
+	if (_current && !_current()) {
+		_lastError = u"index authority revoked"_q;
+		return false;
+	}
 	statements.insert(statements.begin(), { u"BEGIN IMMEDIATE"_q });
 	statements.emplace_back(u"COMMIT"_q);
-	return _database.Execute({
+	const auto result = _database.Execute({
 		.status = ArchiveSqlStatus::Ready,
 		.statements = std::move(statements),
-	}, _current).committed;
+	}, _current);
+	if (!result.committed) {
+		_lastError = FormatSqlError("sqlite write", result);
+	}
+	return result.committed;
 }
 
 } // namespace Purple

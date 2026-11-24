@@ -15,13 +15,19 @@ The overflow menu contains the source picker and refresh.
 Opening Music again while it's already visible selects the search text and
 keeps your place in the results for the same source.
 
-The first scan backfills the selected chats in pages. The screen displays
-saved results during the scan. Once you focus, scroll, or select in the list,
+The first scan backfills the selected chats in pages. Folders that only list
+explicit chats start indexing immediately without waiting for the full main or
+archived dialog lists; category-based folders request any unloaded main or
+archived dialogs first. The screen displays saved results during the scan and
+always explains why the list is loading or empty, including unloaded folders or
+dialog lists with counts, offline state, chats hidden by Work Mode, server
+search or local index errors, skipped audio messages, or a search filter that
+hides indexed tracks. Once you focus, scroll, or select in the list,
 indexing leaves the displayed rows in place. Search again or use
 **Refresh music** to see the latest results. Refresh also checks for new
 tracks and resumes unfinished history. It keeps your picks while the source
 folder and its visible chats stay the same. A failed chat search leaves its
-previous results intact and reports that the scan is incomplete.
+previous results intact and reports the error and affected chat count.
 
 After the first scan, Purple also indexes eligible new tracks it receives
 from the configured folder while the Music screen is closed. Opening Music

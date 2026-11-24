@@ -14,13 +14,26 @@
 
 namespace Purple {
 
-std::optional<std::vector<quint64>> CaptureMusicSourceRoster(
+MusicSourceRosterResult InspectMusicSourceRoster(
 		Data::Session &data,
 		const Data::ChatFilter &filter) {
+	auto result = MusicSourceRosterResult();
 	const auto archive = data.folderLoaded(Data::Folder::kId);
-	const auto includeArchive = archive && !(filter.flags() & Data::ChatFilter::Flag::NoArchived);
-	if (!data.chatsListLoaded() || (includeArchive && !data.chatsListLoaded(archive))) {
-		return std::nullopt;
+	result.loadedMainDialogs = int(data.chatsList(nullptr)->indexed()->size());
+	result.loadedArchiveDialogs = archive
+		? int(data.chatsList(archive)->indexed()->size())
+		: 0;
+	const auto needsDialogs = MusicFilterNeedsDialogLists(filter.flags());
+	const auto includeArchive = needsDialogs
+		&& archive
+		&& !(filter.flags() & Data::ChatFilter::Flag::NoArchived);
+	if (needsDialogs) {
+		result.waitingMainDialogs = !data.chatsListLoaded();
+		result.waitingArchiveDialogs = includeArchive
+			&& !data.chatsListLoaded(archive);
+		if (result.waitingMainDialogs || result.waitingArchiveDialogs) {
+			return result;
+		}
 	}
 	auto peers = std::set<quint64>();
 	const auto add = [&](not_null<History*> history) {
@@ -37,12 +50,26 @@ std::optional<std::vector<quint64>> CaptureMusicSourceRoster(
 			}
 		}
 	};
-	addList(nullptr);
-	if (includeArchive) addList(archive);
+	if (needsDialogs) {
+		addList(nullptr);
+		if (includeArchive) addList(archive);
+	}
 	for (const auto history : filter.always()) {
 		add(history);
 	}
-	return std::vector<quint64>(peers.begin(), peers.end());
+	result.ready = true;
+	result.peers.assign(peers.begin(), peers.end());
+	return result;
+}
+
+std::optional<std::vector<quint64>> CaptureMusicSourceRoster(
+		Data::Session &data,
+		const Data::ChatFilter &filter) {
+	auto inspected = InspectMusicSourceRoster(data, filter);
+	if (!inspected.ready) {
+		return std::nullopt;
+	}
+	return std::move(inspected.peers);
 }
 
 } // namespace Purple

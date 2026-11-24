@@ -15,8 +15,11 @@
 #include "purple/purple_archive_files.h"
 #include "purple/purple_config.h"
 #include "purple/purple_playlists_menu.h"
+#include "purple/purple_playlists_policy.h"
+#include "purple/purple_user_control.h"
 #include "storage/storage_account.h"
 
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 
 namespace Purple {
@@ -33,29 +36,52 @@ public:
 	, _live(std::move(live)) {
 	}
 
-	MusicIndex *index() {
-		if (!_live->load()) return nullptr;
-		if (_index) return current() ? _index.get() : nullptr;
+	MusicIndex *index(QString *errorOut = nullptr) {
+		const auto fail = [&](QString reason) -> MusicIndex* {
+			_lastError = std::move(reason);
+			if (errorOut) *errorOut = _lastError;
+			return nullptr;
+		};
+		if (!_live->load()) return fail(u"music index worker stopped"_q);
+		if (_index) {
+			return current()
+				? _index.get()
+				: fail(u"music index directory permissions or identity changed"_q);
+		}
+		if (!QFileInfo::exists(_root) && !QDir().mkpath(_root)) {
+			return fail(u"could not create Purple config directory"_q);
+		}
 		_canonical = QFileInfo(_root).canonicalFilePath();
-		if (_canonical.isEmpty()) return nullptr;
+		if (_canonical.isEmpty()) {
+			return fail(u"Purple config directory path is unavailable"_q);
+		}
 		_library = _canonical + u"/music-index"_q;
 		_directory = _library + u'/' + _key;
-		if (!DesktopArchiveDirectory(_library)
-			|| !DesktopArchiveDirectory(_directory)) {
-			return nullptr;
+		if (!DesktopArchiveDirectory(_library)) {
+			return fail(u"music-index directory failed privacy or backup-exclusion check"_q);
+		}
+		if (!DesktopArchiveDirectory(_directory)) {
+			return fail(u"account music-index directory failed privacy or backup-exclusion check"_q);
 		}
 		_path = _directory + u"/library.sqlite"_q;
 		const auto existing = QFileInfo(_path);
 		if (!existing.exists() && !existing.isSymLink()
 			&& !DesktopArchiveWrite(_path, {})) {
-			return nullptr;
+			return fail(u"could not create library.sqlite privately"_q);
 		}
 		_libraryIdentity = DesktopArchiveIdentity(_library);
 		_directoryIdentity = DesktopArchiveIdentity(_directory);
 		_fileIdentity = DesktopArchiveIdentity(_path);
-		if (!current()) return nullptr;
+		if (!current()) {
+			return fail(u"library.sqlite failed ownership or 0600/0700 privacy check"_q);
+		}
 		auto index = std::make_unique<MusicIndex>([=] { return current(); });
-		if (!index->open(_path)) return nullptr;
+		if (!index->open(_path)) {
+			return fail(index->lastError().isEmpty()
+				? u"could not open library.sqlite"_q
+				: index->lastError());
+		}
+		_lastError.clear();
 		_index = std::move(index);
 		return _index.get();
 	}
@@ -85,6 +111,7 @@ private:
 	QByteArray _libraryIdentity;
 	QByteArray _directoryIdentity;
 	QByteArray _fileIdentity;
+	QString _lastError;
 	std::unique_ptr<MusicIndex> _index;
 
 };
@@ -116,6 +143,20 @@ bool Current(not_null<Main::Session*> session) {
 		&& session->account().maybeSession() == session;
 }
 
+QString CurrentUnavailableReason(not_null<Main::Session*> session) {
+	if (Core::App().passcodeLocked()) return u"app is passcode locked"_q;
+	if (session->account().loggingOut()) return u"account is logging out"_q;
+	if (session->account().maybeSession() != session) return u"session changed"_q;
+	const auto account = SessionAccountKey(session);
+	if (!AccountKeyText(account.environment, account.userId)) {
+		return u"account identity is unavailable"_q;
+	}
+	if (ConfigDirectory().isEmpty()) {
+		return u"Purple config directory is unset"_q;
+	}
+	return u"music index unavailable"_q;
+}
+
 AccountIndex *For(not_null<Main::Session*> session) {
 	if (!Current(session)) return nullptr;
 	const auto account = SessionAccountKey(session);
@@ -137,14 +178,15 @@ AccountIndex *For(not_null<Main::Session*> session) {
 	return it->second.get();
 }
 
-template <typename Operation, typename Result>
+template <typename Operation, typename MakeError, typename Result>
 void Request(
 		not_null<Main::Session*> session,
 		Operation operation,
+		MakeError makeError,
 		Fn<void(Result)> done) {
 	const auto service = For(session);
 	if (!service) {
-		done(Result());
+		done(makeError(CurrentUnavailableReason(session)));
 		return;
 	}
 	const auto weak = base::make_weak(session.get());
@@ -153,21 +195,30 @@ void Request(
 	const auto live = service->live;
 	service->worker.with([
 		weak, account, root, live,
-		operation = std::move(operation), done = std::move(done)
+		operation = std::move(operation),
+		makeError = std::move(makeError),
+		done = std::move(done)
 	](IndexWorker &worker) mutable {
-		const auto index = worker.index();
-		auto result = index ? operation(*index) : Result();
-		if (!worker.current()) result = Result();
+		auto openError = QString();
+		const auto index = worker.index(&openError);
+		auto result = index
+			? operation(*index)
+			: makeError(openError.isEmpty() ? u"music index unavailable"_q : openError);
+		if (index && !worker.current()) {
+			result = makeError(u"music index revoked during operation"_q);
+		}
 		crl::on_main([
 			weak, account, root, live,
-			result = std::move(result), done = std::move(done)
+			result = std::move(result),
+			makeError = std::move(makeError),
+			done = std::move(done)
 		]() mutable {
 			const auto session = weak.get();
 			if (!session) return;
 			if (!live->load() || !Current(session)
 				|| SessionAccountKey(session) != account
 				|| ConfigDirectory() != root) {
-				result = Result();
+				result = makeError(u"session or config changed during index request"_q);
 			}
 			done(std::move(result));
 		});
@@ -186,28 +237,75 @@ void SetMusicSourceFolder(not_null<Main::Session*> session, FilterId folder) {
 	session->local().writePref<QString>(kMusicFolder, QString::number(folder));
 }
 
-std::optional<MusicIndexEntry> CaptureMusicIndexEntry(not_null<HistoryItem*> item) {
+MusicIndexEntryInspection InspectMusicIndexEntry(not_null<HistoryItem*> item) {
 	const auto history = item->history();
+	if (history->purpleHiddenFromView()) {
+		return { std::nullopt, MusicSkipReason::HiddenByWorkMode };
+	}
+	if (!item->computeUnavailableReason().isEmpty()) {
+		return { std::nullopt, MusicSkipReason::Unavailable };
+	}
 	const auto media = item->media();
 	const auto document = media ? media->document() : nullptr;
-	if (!document || !document->isSong() || item->date() <= 0
-		|| history->purpleHiddenFromView()) {
-		return std::nullopt;
+	if (!document || !document->isSong() || item->date() <= 0) {
+		return { std::nullopt, MusicSkipReason::NotSong };
 	}
-	const auto song = CapturePlaylistSong(
-		&history->session(), { item->fullId(), document->id });
-	if (!song) return std::nullopt;
-	return MusicIndexEntry{
-		.peer = history->peer->id.value,
-		.message = item->id.bare,
-		.document = document->id,
-		.postedAt = item->date(),
-		.title = song->meta.title,
-		.performer = song->meta.performer,
-		.duration = song->meta.duration,
-		.searchText = song->meta.title + u' ' + song->meta.performer
-			+ u' ' + document->filename(),
+	if (item->id.bare <= 0 || item->id.bare > kMaximumPlaylistMessageId) {
+		return { std::nullopt, MusicSkipReason::Other };
+	}
+	const auto candidate = PlaylistSongCandidate{
+		.documentId = document->id,
+		.messageId = int32_t(item->id.bare),
+		.hasAudioAttribute = document->isSong(),
+		.isVoiceMessage = document->isVoiceMessage(),
+		.isRegularServerMessage = item->isRegular(),
+		.isMainMessageMedia = dynamic_cast<Data::MediaFile*>(media) != nullptr,
+		.isScheduled = item->isScheduled(),
+		.isLocalUnsent = item->isLocal() || item->isSending(),
+		.isSponsored = item->isSponsored(),
+		.hasSelfDestructTimer = bool(media->ttlSeconds()) || bool(item->ttlDestroyAt()),
+		.isProtectedContent = !item->allowsForward(),
 	};
+	const auto qualified = QualifySong(candidate, SaveRestrictionsDisabled());
+	if (!qualified) {
+		if (qualified.reason == SongQualificationReason::ProtectedContentRestricted) {
+			return { std::nullopt, MusicSkipReason::ProtectedContent };
+		}
+		if (qualified.reason == SongQualificationReason::MissingAudioAttribute
+			|| qualified.reason == SongQualificationReason::VoiceMessage
+			|| qualified.reason == SongQualificationReason::NotMainMessageMedia) {
+			return { std::nullopt, MusicSkipReason::NotSong };
+		}
+		return { std::nullopt, MusicSkipReason::Other };
+	}
+	const auto songData = document->song();
+	const auto meta = PrepareSongMeta({
+		.title = songData ? songData->title : QString(),
+		.performer = songData ? songData->performer : QString(),
+		.fileName = document->filename(),
+		.durationSeconds = document->duration() / 1000,
+	});
+	if (!meta) {
+		return { std::nullopt, MusicSkipReason::InvalidMetadata };
+	}
+	return {
+		MusicIndexEntry{
+			.peer = history->peer->id.value,
+			.message = item->id.bare,
+			.document = document->id,
+			.postedAt = item->date(),
+			.title = meta.meta.title,
+			.performer = meta.meta.performer,
+			.duration = meta.meta.duration,
+			.searchText = meta.meta.title + u' ' + meta.meta.performer
+				+ u' ' + document->filename(),
+		},
+		MusicSkipReason::None,
+	};
+}
+
+std::optional<MusicIndexEntry> CaptureMusicIndexEntry(not_null<HistoryItem*> item) {
+	return InspectMusicIndexEntry(item).entry;
 }
 
 rpl::producer<> MusicIndexArrivals(not_null<Main::Session*> session) {
@@ -229,13 +327,16 @@ void ObserveMusicIndexArrivals(Main::Session &owner) {
 		const auto filter = std::ranges::find(list, folder, &Data::ChatFilter::id);
 		if (filter == list.end() || !filter->contains(item->history(), true, true)) return;
 		if (const auto row = CaptureMusicIndexEntry(item)) {
-			Request(session, [folder, row = *row](MusicIndex &index) {
-				return index.saveArrival(folder, row);
-			}, Fn<void(bool)>([=](bool saved) {
-				if (saved && Current(session) && MusicSourceFolder(session) == folder) {
-					MusicArrivals.fire_copy(session.get());
-				}
-			}));
+			Request(session,
+				[folder, row = *row](MusicIndex &index) {
+					return index.saveArrival(folder, row);
+				},
+				[](QString) { return false; },
+				Fn<void(bool)>([=](bool saved) {
+					if (saved && Current(session) && MusicSourceFolder(session) == folder) {
+						MusicArrivals.fire_copy(session.get());
+					}
+				}));
 		}
 	}, session->lifetime());
 }
@@ -248,17 +349,24 @@ void ConfigureMusicIndex(
 		not_null<Main::Session*> session,
 		qint64 folder,
 		std::vector<quint64> peers,
-		Fn<void(std::optional<MusicIndexRoster>)> done) {
-	Request(session, [folder, peers = std::move(peers)](MusicIndex &index)
-	-> std::optional<MusicIndexRoster> {
-		const auto scope = index.configureSources(folder, peers);
-		if (scope) {
-			if (auto sources = index.sources()) {
-				return MusicIndexRoster{ *scope, std::move(*sources) };
+		Fn<void(MusicIndexConfigureResult)> done) {
+	Request(session,
+		[folder, peers = std::move(peers)](MusicIndex &index) -> MusicIndexConfigureResult {
+			const auto scope = index.configureSources(folder, peers);
+			if (!scope) {
+				return { std::nullopt, index.lastError().isEmpty()
+					? u"configureSources failed"_q : index.lastError() };
 			}
-		}
-		return std::nullopt;
-	}, std::move(done));
+			if (auto sources = index.sources()) {
+				return { MusicIndexRoster{ *scope, std::move(*sources) }, QString() };
+			}
+			return { std::nullopt, index.lastError().isEmpty()
+				? u"sources read failed"_q : index.lastError() };
+		},
+		[](QString error) -> MusicIndexConfigureResult {
+			return { std::nullopt, std::move(error) };
+		},
+		std::move(done));
 }
 
 void SaveMusicIndexPage(
@@ -267,10 +375,16 @@ void SaveMusicIndexPage(
 		MusicSourceCursor expected,
 		MusicSourceCursor next,
 		std::vector<MusicIndexEntry> rows,
-		Fn<void(bool)> done) {
-	Request(session, [scope, expected, next, rows = std::move(rows)](MusicIndex &index) {
-		return index.savePage(scope, expected, next, rows);
-	}, std::move(done));
+		Fn<void(MusicIndexSaveResult)> done) {
+	Request(session,
+		[scope, expected, next, rows = std::move(rows)](MusicIndex &index) -> MusicIndexSaveResult {
+			const auto ok = index.savePage(scope, expected, next, rows);
+			return { ok, ok ? QString() : index.lastError() };
+		},
+		[](QString error) -> MusicIndexSaveResult {
+			return { false, std::move(error) };
+		},
+		std::move(done));
 }
 
 void ReadMusicIndexPage(
@@ -279,11 +393,28 @@ void ReadMusicIndexPage(
 		QString query,
 		std::vector<quint64> visiblePeers,
 		std::optional<MusicIndexCursor> cursor,
-		Fn<void(std::optional<std::vector<MusicIndexEntry>>)> done) {
-	Request(session, [scope, query = std::move(query),
-		visiblePeers = std::move(visiblePeers), cursor](MusicIndex &index) {
-		return index.page(scope, query, visiblePeers, cursor);
-	}, std::move(done));
+		Fn<void(MusicIndexPageResult)> done) {
+	Request(session,
+		[scope, query = std::move(query),
+			visiblePeers = std::move(visiblePeers), cursor](MusicIndex &index)
+		-> MusicIndexPageResult {
+			auto rows = index.page(scope, query, visiblePeers, cursor);
+			if (!rows) {
+				return { false, {}, 0, index.lastError().isEmpty()
+					? u"page read failed"_q : index.lastError() };
+			}
+			const auto total = index.count(scope, visiblePeers);
+			return {
+				true,
+				std::move(*rows),
+				total.value_or(qint64(0)),
+				QString(),
+			};
+		},
+		[](QString error) -> MusicIndexPageResult {
+			return { false, {}, 0, std::move(error) };
+		},
+		std::move(done));
 }
 
 } // namespace Purple

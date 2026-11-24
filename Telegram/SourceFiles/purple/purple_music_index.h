@@ -50,11 +50,16 @@ public:
 		const QString &query,
 		const std::vector<quint64> &visiblePeers,
 		std::optional<MusicIndexCursor> cursor);
+	[[nodiscard]] std::optional<qint64> count(
+		MusicIndexScope scope,
+		const std::vector<quint64> &visiblePeers);
+	[[nodiscard]] QString lastError() const { return _lastError; }
 
 private:
 	[[nodiscard]] bool write(std::vector<ArchiveSqlStatement> statements);
 	DesktopArchiveSqlite _database;
 	std::function<bool()> _current;
+	QString _lastError;
 
 };
 

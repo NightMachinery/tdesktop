@@ -237,6 +237,8 @@ PRIVATE
     purple/purple_playlist_folders.h
     purple/purple_playlists_menu.cpp
     purple/purple_playlists_menu.h
+    purple/purple_music_diagnostics.cpp
+    purple/purple_music_diagnostics.h
     purple/purple_music_index.cpp
     purple/purple_music_index.h
     purple/purple_music_index_service.cpp

@@ -1,6 +1,7 @@
 #include "purple/purple_music_index.cpp"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
 #include <cstdlib>
 #include <iostream>
@@ -23,13 +24,15 @@ int main(int argc, char **argv) {
 	const auto app = QCoreApplication(argc, argv);
 	auto temporary = QTemporaryDir();
 	Check(temporary.isValid(), "private fixture");
-	const auto path = temporary.filePath(u"music.sqlite"_q);
+	const auto dir = QFileInfo(temporary.path()).canonicalFilePath();
+	Check(!dir.isEmpty(), "canonical fixture dir");
+	const auto path = dir + u"/music.sqlite"_q;
 	const auto maximum = std::numeric_limits<quint64>::max();
-	const auto arrivalsPath = temporary.filePath(u"arrivals.sqlite"_q);
+	const auto arrivalsPath = dir + u"/arrivals.sqlite"_q;
 	auto arrivalScope = Purple::MusicIndexScope();
 	{
 		auto index = Purple::MusicIndex();
-		Check(index.open(arrivalsPath), "open arrival fixture");
+		Check(index.open(arrivalsPath), ("open arrival fixture: " + index.lastError().toStdString()).c_str());
 		Check(!index.saveArrival(42, Track(7, 90, 90, 110)), "unconfigured arrival rejected");
 		const auto scope = index.configureSources(42, {7});
 		Check(bool(scope), "configure arrival folder");
@@ -84,8 +87,15 @@ int main(int argc, char **argv) {
 			&& visible->front().document == maximum, "hidden recent alias cannot hide visible track");
 		const auto hidden = index.page(initial, u""_q, {}, {});
 		Check(hidden && hidden->empty(), "no visible source returns no rows");
+		const auto totalBoth = index.count(initial, {7, 8});
+		Check(totalBoth && *totalBoth == 2, "count deduplicates distinct visible tracks");
+		const auto totalOne = index.count(initial, {7});
+		Check(totalOne && *totalOne == 1, "count respects visible peer subset");
+		const auto totalHidden = index.count(initial, {});
+		Check(totalHidden && *totalHidden == 0, "count with no visible peers is zero");
 		Check(!index.savePage(initial, {8, 11, 13, false}, {8, 10, 13, false}, {Track(8, 11, 22, 120), Track(8, 0, 23, 121)}),
 			"invalid page rejected");
+		Check(!index.lastError().isEmpty(), "failed write records diagnostic error");
 
 		Check(!index.savePage(initial, {8}, {8, 10, 14, true}, {Track(8, 14, 24, 122)}),
 			"older scanner cannot update a newer cursor or add its rows");
@@ -156,7 +166,7 @@ int main(int argc, char **argv) {
 	{
 		auto remaining = 100;
 		auto index = Purple::MusicIndex([&] { return --remaining > 0; });
-		Check(index.open(temporary.filePath(u"authority.sqlite"_q)), "open with authority");
+		Check(index.open(dir + u"/authority.sqlite"_q), "open with authority");
 		const auto scope = index.configureSources(42, {7});
 		Check(bool(scope), "source with authority");
 		remaining = 2;
