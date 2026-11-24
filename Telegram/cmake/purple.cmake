@@ -182,6 +182,7 @@ PRIVATE
     purple/purple_keys_zen.h
     purple/purple_privacy_screen.cpp
     purple/purple_privacy_screen.h
+    purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
     purple/purple_message_hints.cpp
     purple/purple_message_hints.h

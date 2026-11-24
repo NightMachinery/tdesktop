@@ -314,11 +314,13 @@ privacy = read("purple/purple_privacy_screen.cpp")
 ordered(privacy, "ShouldFetchWeather", "Accept-Language")
 ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
 ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")
+ordered(privacy, "class PrivacyAppFilter final", "passcodeLockValue()", "QEvent::Show",
+        "ClassifyTopLevelSurface", "SuppressTopLevelWidget")
 ordered(privacy, "closeMediaViewAndPanelsForPrivacy()", "clearAllFast()",
         "HideSecondaryTopLevelSurfaces()", "enumerateWindows",
         "GlobalPrivacyChanges.fire(true)", "RefreshMenusAndTitles()")
-ordered(privacy, "RestoreSecondaryTopLevelSurfaces()", "GlobalPrivacyChanges.fire(false)",
-        "checkStartUrls()")
+ordered(privacy, "SurfaceState.onDismiss(", "RestoreSecondaryTopLevelSurfaces()",
+        "GlobalPrivacyChanges.fire(false)", "checkStartUrls()")
 mw_cpp = read("mainwindow.cpp")
 fix_order = between(mw_cpp, "void MainWindow::fixOrder()", "void MainWindow::raiseMediaPreview()")
 ordered(fix_order, "_setupEmailLock", "_passcodeLock", "_layer", "raiseMediaPreview()",

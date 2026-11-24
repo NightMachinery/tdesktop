@@ -1380,7 +1380,7 @@ std::vector<ModalUnread::BufferItem> CollectUnreadBufferItems(
 			.unreadCount = ModalUnread::UnmutedUnreadBadgeCount(metrics),
 			.mentions = unread.mentions,
 			.markedUnread = (unread.marks > unread.marksMuted),
-			.lastTimestamp = int64_t(history->adjustedChatListTimeId()),
+			.lastTimestamp = int64_t(history->chatListTimeId()),
 		});
 	}
 	return items;

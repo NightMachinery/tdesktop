@@ -6,6 +6,7 @@
 #include "core/core_settings_proxy.h"
 #include "main/main_domain.h"
 #include "mainwindow.h"
+#include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
 #include "settings/settings_builder.h"
 #include "storage/storage_domain.h"
@@ -20,6 +21,7 @@
 #include "window/main_window.h"
 #include "window/notifications_manager.h"
 #include "window/window_controller.h"
+#include "window/window_session_controller.h"
 
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
@@ -36,6 +38,7 @@
 #include <QtNetwork/QNetworkRequest>
 #include <QtWidgets/QApplication>
 
+#include <algorithm>
 #include <vector>
 
 namespace Purple {
@@ -44,9 +47,77 @@ namespace {
 constexpr auto kPrivacyOverlayName = "purple-privacy-overlay";
 
 rpl::event_stream<> WeatherChanges;
-bool GlobalPrivacyActive = false;
+PrivacyState::SurfaceTracker SurfaceState;
 rpl::event_stream<bool> GlobalPrivacyChanges;
 std::vector<QPointer<QWidget>> HiddenTopLevelWindows;
+bool RestoringTopLevels = false;
+
+class PrivacyOverlayWidget;
+PrivacyOverlayWidget *FindOverlay(const ::Window::MainWindow *window);
+void SyncAppFilterInstallation();
+void RestoreSecondaryTopLevelSurfaces();
+
+void PruneHiddenTopLevels() {
+	HiddenTopLevelWindows.erase(
+		std::remove_if(
+			HiddenTopLevelWindows.begin(),
+			HiddenTopLevelWindows.end(),
+			[](const QPointer<QWidget> &w) { return w.isNull(); }),
+		HiddenTopLevelWindows.end());
+}
+
+[[nodiscard]] bool HasHiddenTopLevels() {
+	PruneHiddenTopLevels();
+	return !HiddenTopLevelWindows.empty();
+}
+
+[[nodiscard]] bool IsRecordedHidden(const QWidget *widget) {
+	return std::any_of(
+		HiddenTopLevelWindows.begin(),
+		HiddenTopLevelWindows.end(),
+		[widget](const QPointer<QWidget> &w) { return w.data() == widget; });
+}
+
+void RecordHiddenTopLevel(QWidget *widget) {
+	if (!widget || IsRecordedHidden(widget)) {
+		return;
+	}
+	HiddenTopLevelWindows.emplace_back(widget);
+}
+
+[[nodiscard]] bool ShouldKeepTopLevelHidden(const QWidget *widget) {
+	if (!widget || !widget->isWindow() || RestoringTopLevels) {
+		return false;
+	}
+	const auto isMain = (dynamic_cast<const ::Window::MainWindow*>(widget) != nullptr);
+	const auto action = PrivacyState::ClassifyTopLevelSurface(
+		true,
+		isMain,
+		widget->windowType());
+	if (action == PrivacyState::TopLevelAction::Ignore) {
+		return false;
+	}
+	if (SurfaceState.shouldSuppressNewSurfaces()) {
+		return true;
+	}
+	return SurfaceState.shouldKeepRecordedHidden() && IsRecordedHidden(widget);
+}
+
+void SuppressTopLevelWidget(QWidget *widget, PrivacyState::TopLevelAction action) {
+	if (!widget || RestoringTopLevels) {
+		return;
+	}
+	if (action == PrivacyState::TopLevelAction::HideAndRecordRestore) {
+		RecordHiddenTopLevel(widget);
+	}
+	widget->hide();
+	const auto weak = QPointer<QWidget>(widget);
+	QTimer::singleShot(0, widget, [weak] {
+		if (weak && weak->isVisible() && ShouldKeepTopLevelHidden(weak.data())) {
+			weak->hide();
+		}
+	});
+}
 
 class WeatherStore final : public QObject {
 public:
@@ -224,21 +295,8 @@ public:
 		_backdrop->setInteractiveHint(
 			QStringLiteral("Press ESC or q to return"));
 		_returnButton->setClickedCallback([=] { DismissPrivacyScreen(); });
-		_lockButton->setClickedCallback([=] {
-			if (Core::App().domain().local().hasLocalPasscode()) {
-				// Lock first so passcode covers every window before privacy dismisses (no chat flash).
-				Core::App().lockByPasscode();
-				DismissPrivacyScreen();
-			}
-		});
+		_lockButton->setClickedCallback([=] { triggerLockWithPasscode(); });
 		_lockButton->hide();
-		qApp->installEventFilter(this);
-	}
-
-	~PrivacyOverlayWidget() override {
-		if (qApp) {
-			qApp->removeEventFilter(this);
-		}
 	}
 
 	void activate(QRect body) {
@@ -276,27 +334,13 @@ public:
 		return _active;
 	}
 
-protected:
-	void resizeEvent(QResizeEvent *e) override {
-		RpWidget::resizeEvent(e);
-		_backdrop->setGeometry(rect());
-		layoutButtons();
-	}
-
-	bool eventFilter(QObject *watched, QEvent *event) override {
+	bool filterWindowEvent(QWidget *widget, QEvent *event) {
 		if (!_active) {
-			return RpWidget::eventFilter(watched, event);
-		}
-		if (!watched || !watched->isWidgetType()) {
-			return RpWidget::eventFilter(watched, event);
-		}
-		const auto widget = static_cast<QWidget*>(watched);
-		if (widget->window() != _window) {
-			return RpWidget::eventFilter(watched, event);
+			return false;
 		}
 		// Never block the passcode/setup-email lock screen or its boxes when locked.
 		if (Core::App().passcodeLocked() || _window->controller().locked()) {
-			return RpWidget::eventFilter(watched, event);
+			return false;
 		}
 
 		const auto type = event->type();
@@ -305,7 +349,7 @@ protected:
 		if (type == QEvent::WindowActivate) {
 			raise();
 			setFocus(Qt::OtherFocusReason);
-			return RpWidget::eventFilter(watched, event);
+			return false;
 		}
 		if (type == QEvent::FocusIn && !insideOverlay) {
 			setFocus(Qt::OtherFocusReason);
@@ -324,7 +368,7 @@ protected:
 			&& type != QEvent::KeyRelease
 			&& type != QEvent::ShortcutOverride
 			&& type != QEvent::Shortcut) {
-			return RpWidget::eventFilter(watched, event);
+			return false;
 		}
 		if (type == QEvent::ShortcutOverride || type == QEvent::Shortcut) {
 			event->accept();
@@ -335,16 +379,38 @@ protected:
 		}
 		const auto *ke = static_cast<QKeyEvent*>(event);
 		const auto mods = ke->modifiers() & ~Qt::KeypadModifier;
-		if (!ke->isAutoRepeat()
-			&& ((ke->key() == Qt::Key_Escape && !mods)
-				|| (ke->key() == Qt::Key_Q && !mods))) {
-			DismissPrivacyScreen();
+		if (!ke->isAutoRepeat() && !mods) {
+			if (ke->key() == Qt::Key_Escape || ke->key() == Qt::Key_Q) {
+				DismissPrivacyScreen();
+			} else if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
+				if (_lockButton->hasFocus() && _lockButton->isVisible()) {
+					triggerLockWithPasscode();
+				} else {
+					DismissPrivacyScreen();
+				}
+			}
 		}
 		// Swallow every keystroke while privacy screen is active.
 		return true;
 	}
 
+protected:
+	void resizeEvent(QResizeEvent *e) override {
+		RpWidget::resizeEvent(e);
+		_backdrop->setGeometry(rect());
+		layoutButtons();
+	}
+
 private:
+	void triggerLockWithPasscode() {
+		if (Core::App().domain().local().hasLocalPasscode()) {
+			// Lock first so passcode covers every window before privacy dismisses (no chat flash).
+			// Hidden auxiliary surfaces stay hidden until passcode unlock.
+			Core::App().lockByPasscode();
+			DismissPrivacyScreen();
+		}
+	}
+
 	void layoutButtons() {
 		const auto rw = std::max(120, _returnButton->width());
 		_returnButton->resize(rw, _returnButton->height());
@@ -369,13 +435,104 @@ private:
 	bool _active = false;
 };
 
+// Single app-level event filter for privacy screen input hardening and
+// live interception of auxiliary top-level surfaces shown after activation.
+class PrivacyAppFilter final : public QObject {
+public:
+	static PrivacyAppFilter &Instance() {
+		static auto *instance = new PrivacyAppFilter(qApp);
+		return *instance;
+	}
+
+	void ensurePasscodeSubscription() {
+		if (_subscribedPasscode) {
+			return;
+		}
+		_subscribedPasscode = true;
+		Core::App().passcodeLockValue() | rpl::on_next([](bool locked) {
+			const auto shouldRestore = SurfaceState.onPasscodeLockChanged(
+				locked,
+				HasHiddenTopLevels());
+			if (shouldRestore) {
+				RestoreSecondaryTopLevelSurfaces();
+			}
+			SyncAppFilterInstallation();
+		}, _lifetime);
+	}
+
+	void setInstalled(bool installed) {
+		if (!qApp || _installed == installed) {
+			return;
+		}
+		_installed = installed;
+		if (installed) {
+			qApp->installEventFilter(this);
+		} else {
+			qApp->removeEventFilter(this);
+		}
+	}
+
+protected:
+	bool eventFilter(QObject *watched, QEvent *event) override {
+		if (!watched || !watched->isWidgetType()) {
+			return QObject::eventFilter(watched, event);
+		}
+		auto *widget = static_cast<QWidget*>(watched);
+		const auto type = event->type();
+
+		if (!RestoringTopLevels
+			&& widget->isWindow()
+			&& (type == QEvent::Show || type == QEvent::WindowActivate)) {
+			const auto isMain = (dynamic_cast<::Window::MainWindow*>(widget) != nullptr);
+			const auto action = PrivacyState::ClassifyTopLevelSurface(
+				true,
+				isMain,
+				widget->windowType());
+			if (action != PrivacyState::TopLevelAction::Ignore
+				&& (SurfaceState.shouldSuppressNewSurfaces()
+					|| (SurfaceState.shouldKeepRecordedHidden()
+						&& IsRecordedHidden(widget)))) {
+				SuppressTopLevelWidget(widget, action);
+				return false;
+			}
+		}
+
+		if (SurfaceState.privacyActive) {
+			if (auto *mainWindow = dynamic_cast<::Window::MainWindow*>(widget->window())) {
+				if (auto *overlay = FindOverlay(mainWindow); overlay && overlay->active()) {
+					if (overlay->filterWindowEvent(widget, event)) {
+						return true;
+					}
+				}
+			}
+		}
+		return QObject::eventFilter(watched, event);
+	}
+
+private:
+	explicit PrivacyAppFilter(QObject *parent) : QObject(parent) {}
+
+	bool _installed = false;
+	bool _subscribedPasscode = false;
+	rpl::lifetime _lifetime;
+};
+
+void SyncAppFilterInstallation() {
+	PrivacyAppFilter::Instance().setInstalled(SurfaceState.needsAppFilter());
+}
+
 PrivacyOverlayWidget *FindOverlay(const ::Window::MainWindow *window) {
-	if (!window || !window->bodyWidget()) {
+	if (!window) {
 		return nullptr;
 	}
-	return window->bodyWidget()->findChild<PrivacyOverlayWidget*>(
-		QString::fromLatin1(kPrivacyOverlayName),
-		Qt::FindDirectChildrenOnly);
+	const auto body = const_cast<::Window::MainWindow*>(window)->bodyWidget();
+	if (!body) {
+		return nullptr;
+	}
+	return dynamic_cast<PrivacyOverlayWidget*>(
+		body->findChild<QWidget*>(
+			QString::fromLatin1(kPrivacyOverlayName),
+			Qt::FindDirectChildrenOnly));
 }
 
 PrivacyOverlayWidget *EnsureOverlay(not_null<::MainWindow*> window) {
@@ -396,41 +553,42 @@ void HideSecondaryTopLevelSurfaces() {
 			break;
 		}
 	}
-	HiddenTopLevelWindows.clear();
+	PruneHiddenTopLevels();
 	for (auto *w : QApplication::topLevelWidgets()) {
 		if (!w || !w->isVisible()) {
 			continue;
 		}
-		if (dynamic_cast<::Window::MainWindow*>(w)) {
-			continue;
-		}
-		const auto wt = w->windowType();
-		if (wt == Qt::Popup || wt == Qt::ToolTip) {
-			w->hide();
+		const auto isMain = (dynamic_cast<::Window::MainWindow*>(w) != nullptr);
+		const auto action = PrivacyState::ClassifyTopLevelSurface(
+			true,
+			isMain,
+			w->windowType());
+		if (action == PrivacyState::TopLevelAction::Ignore) {
 			continue;
 		}
 		// Hide auxiliary Purple windows (call panels, group call windows, Instant View,
 		// bot web apps, custom notifications) without closing or ending active calls.
-		HiddenTopLevelWindows.emplace_back(w);
-		w->hide();
+		SuppressTopLevelWidget(w, action);
 	}
 }
 
 void RestoreSecondaryTopLevelSurfaces() {
 	auto list = std::move(HiddenTopLevelWindows);
 	HiddenTopLevelWindows.clear();
+	RestoringTopLevels = true;
 	for (const auto &weak : list) {
 		if (weak) {
 			weak->show();
 		}
 	}
+	RestoringTopLevels = false;
 }
 
 void RefreshMenusAndTitles() {
 	Core::App().tray().updateIconCounters();
-	Core::App().updateWindowTitles();
 	Core::App().enumerateWindows([](not_null<Window::Controller*> ctrl) {
 		if (const auto w = ctrl->widget()) {
+			w->updateTitle();
 			w->updateGlobalMenu();
 		}
 	});
@@ -550,7 +708,7 @@ void PrivacyBackdropWidget::paintEvent(QPaintEvent *) {
 }
 
 bool PrivacyScreenActiveAny() {
-	return GlobalPrivacyActive;
+	return SurfaceState.privacyActive;
 }
 
 rpl::producer<bool> PrivacyScreenChanges() {
@@ -558,7 +716,7 @@ rpl::producer<bool> PrivacyScreenChanges() {
 }
 
 bool PrivacyScreenActive(const ::Window::MainWindow *window) {
-	if (GlobalPrivacyActive) {
+	if (SurfaceState.privacyActive) {
 		return true;
 	}
 	const auto overlay = FindOverlay(window);
@@ -566,18 +724,20 @@ bool PrivacyScreenActive(const ::Window::MainWindow *window) {
 }
 
 void SyncPrivacyScreenForWindow(not_null<::MainWindow*> window) {
-	if (!GlobalPrivacyActive || !window->bodyWidget()) {
+	if (!SurfaceState.privacyActive || !window->bodyWidget()) {
 		return;
 	}
 	EnsureOverlay(window)->activate(window->bodyWidget()->rect());
 }
 
 void TogglePrivacyScreen(not_null<::MainWindow*> window) {
-	if (GlobalPrivacyActive) {
+	if (SurfaceState.privacyActive) {
 		DismissPrivacyScreen();
 		return;
 	}
-	GlobalPrivacyActive = true;
+	PrivacyAppFilter::Instance().ensurePasscodeSubscription();
+	SurfaceState.onActivate(Core::App().passcodeLocked());
+	SyncAppFilterInstallation();
 	Core::App().closeMediaViewAndPanelsForPrivacy();
 	Core::App().notifications().clearAllFast();
 	HideSecondaryTopLevelSurfaces();
@@ -595,10 +755,13 @@ void TogglePrivacyScreen(not_null<::MainWindow*> window) {
 }
 
 void DismissPrivacyScreen() {
-	if (!GlobalPrivacyActive) {
+	if (!SurfaceState.privacyActive) {
 		return;
 	}
-	GlobalPrivacyActive = false;
+	const auto locked = Core::App().passcodeLocked();
+	const auto shouldRestoreNow = SurfaceState.onDismiss(
+		locked,
+		HasHiddenTopLevels());
 	Core::App().enumerateWindows([](not_null<Window::Controller*> ctrl) {
 		if (const auto w = ctrl->widget()) {
 			if (auto *overlay = FindOverlay(w)) {
@@ -606,11 +769,14 @@ void DismissPrivacyScreen() {
 			}
 		}
 	});
-	RestoreSecondaryTopLevelSurfaces();
+	if (shouldRestoreNow) {
+		RestoreSecondaryTopLevelSurfaces();
+	}
+	SyncAppFilterInstallation();
 	GlobalPrivacyChanges.fire(false);
 	RefreshMenusAndTitles();
 	Core::App().notifications().updateAll();
-	if (!Core::App().passcodeLocked()) {
+	if (!locked) {
 		Core::App().checkStartUrls();
 	}
 }
@@ -639,7 +805,7 @@ void BuildPrivacyScreenSetting(::Settings::Builder::SectionBuilder &builder) {
 		.id = u"advanced/purple_privacy_weather"_q,
 		.title = rpl::single(QStringLiteral("Privacy screen weather location")),
 		.st = &st::settingsButtonNoIcon,
-		.rightText = rpl::single(labelText())
+		.label = rpl::single(labelText())
 			| rpl::then(WeatherChanges.events() | rpl::map(labelText)),
 		.keywords = { u"privacy"_q, u"clock"_q, u"weather"_q, u"lock"_q },
 	});

@@ -1,3 +1,4 @@
+#include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
 
 #include <iostream>
@@ -6,6 +7,7 @@
 namespace {
 
 using namespace Purple::PrivacyWeather;
+using namespace Purple::PrivacyState;
 
 int gChecks = 0;
 int gFailures = 0;
@@ -92,6 +94,72 @@ int main() {
 		"stale snapshot at refresh interval refetches");
 	Check(ShouldFetchWeather(QStringLiteral("Tokyo"), QStringLiteral("London"), false, true, false, QString(), t0, t0 + 1000, false),
 		"changing configured location fetches immediately despite previous city failure");
+
+	// 7. Top-level surface classification.
+	Check(ClassifyTopLevelSurface(false, false, Qt::Widget) == TopLevelAction::Ignore,
+		"non-window child widgets are ignored");
+	Check(ClassifyTopLevelSurface(true, true, Qt::Window) == TopLevelAction::Ignore,
+		"MainWindow instances are covered by overlay, not hidden as auxiliary");
+	Check(ClassifyTopLevelSurface(true, false, Qt::Popup) == TopLevelAction::HideEphemeral,
+		"popups are hidden without recording for restore");
+	Check(ClassifyTopLevelSurface(true, false, Qt::ToolTip) == TopLevelAction::HideEphemeral,
+		"tooltips are hidden without recording for restore");
+	Check(ClassifyTopLevelSurface(true, false, Qt::Window) == TopLevelAction::HideAndRecordRestore,
+		"auxiliary windows (call panels, Instant View, web apps) are hidden and recorded");
+	Check(ClassifyTopLevelSurface(true, false, Qt::Dialog) == TopLevelAction::HideAndRecordRestore,
+		"auxiliary dialogs are hidden and recorded");
+
+	// 8. SurfaceTracker: normal activate -> dismiss restores immediately.
+	{
+		SurfaceTracker st;
+		Check(!st.needsAppFilter(), "idle tracker needs no app filter");
+		st.onActivate(false);
+		Check(st.needsAppFilter() && st.shouldSuppressNewSurfaces(),
+			"active privacy installs filter and suppresses new top-levels");
+		Check(st.onDismiss(false, true), "unlocked dismiss restores hidden surfaces immediately");
+		Check(!st.needsAppFilter(), "unlocked dismiss uninstalls app filter");
+	}
+
+	// 9. SurfaceTracker: Lock with passcode (lockByPasscode -> DismissPrivacyScreen) keeps
+	// hidden IV/web app/call windows hidden until passcode unlocks.
+	{
+		SurfaceTracker st;
+		st.onActivate(false);
+		Check(!st.onPasscodeLockChanged(true, true), "locking while active does not restore");
+		Check(!st.onDismiss(true, true), "dismissing while locked defers restore until unlock");
+		Check(st.shouldKeepRecordedHidden() && st.needsAppFilter(),
+			"recorded hidden surfaces remain suppressed and filter stays installed while locked");
+		Check(!st.shouldSuppressNewSurfaces(),
+			"after privacy dismisses onto lock, new-surface suppression flag is false");
+		Check(st.onPasscodeLockChanged(false, true),
+			"unlocking passcode restores deferred hidden surfaces");
+		Check(!st.needsAppFilter(), "after unlock restore, app filter is uninstalled");
+	}
+
+	// 10. SurfaceTracker: Lock with passcode when NO auxiliary windows were hidden uninstalls filter cleanly.
+	{
+		SurfaceTracker st;
+		st.onActivate(false);
+		Check(!st.onPasscodeLockChanged(true, false), "locking with no hidden windows");
+		Check(!st.onDismiss(true, false), "dismissing while locked with no hidden windows");
+		Check(!st.needsAppFilter(), "no hidden surfaces -> no filter needed while locked");
+		Check(!st.onPasscodeLockChanged(false, false), "unlocking has nothing to restore");
+	}
+
+	// 11. SurfaceTracker: auto-lock while privacy active, then unlock while privacy still active,
+	// then dismiss privacy -> surfaces stay hidden until BOTH unlocked and privacy dismissed.
+	{
+		SurfaceTracker st;
+		st.onActivate(false);
+		Check(!st.onPasscodeLockChanged(true, true), "auto-lock while privacy active keeps surfaces hidden");
+		Check(st.shouldSuppressNewSurfaces() && st.shouldKeepRecordedHidden(),
+			"incoming call/IV still caught while privacy active during auto-lock");
+		Check(!st.onPasscodeLockChanged(false, true),
+			"unlocking while privacy still active does NOT restore yet");
+		Check(st.needsAppFilter(), "filter remains installed while privacy still active");
+		Check(st.onDismiss(false, true), "dismissing privacy after unlock restores surfaces");
+		Check(!st.needsAppFilter(), "filter removed after full dismiss");
+	}
 
 	std::cout << gChecks << " checks, " << gFailures << " failures\n";
 	return gFailures ? 1 : 0;

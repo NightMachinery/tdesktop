@@ -185,16 +185,20 @@ on the modal status line and cheatsheet footer.
   backdrop, closes media viewers and PiP windows, hides tooltips, popups,
   already-shown notifications, and auxiliary top-level windows (call panels,
   group call windows, Instant View, and bot web apps without ending active
-  calls), clears OS Now Playing metadata without stopping playback, suppresses
+  calls), intercepts any newly shown auxiliary top-level surfaces (such as an
+  incoming call panel, async Instant View, web app, or popup) through a single
+  app-level filter while active so incoming calls remain answerable after
+  dismissal, clears OS Now Playing metadata without stopping playback, suppresses
   incoming notification previews and dock / menu-bar / window-title unread
   badges, hides tray account items and disables macOS global menu actions, and
   blocks modal commands, IME/drop events, notification clicks, and `tg://` links
   from revealing a chat until dismissed (`Esc`, `q`, or Return). Dismissing
-  restores hidden auxiliary windows, badges, Now Playing metadata, menus, and
-  window titles, and runs any queued `tg://` start URLs. The privacy screen is
-  not a security lock; when a local passcode is configured, it offers a separate
-  **Lock with passcode** button that engages the passcode lock before dismissing
-  the privacy overlay so chats do not flash.
+  restores hidden auxiliary windows (or defers restoring them until passcode
+  unlock when locked via **Lock with passcode** or auto-lock), badges, Now
+  Playing metadata, menus, and window titles, and runs any queued `tg://` start
+  URLs. The privacy screen is not a security lock; when a local passcode is
+  configured, it offers a separate **Lock with passcode** button that engages
+  the passcode lock before dismissing the privacy overlay so chats do not flash.
   - **Optional weather (Settings -> Purple -> Privacy screen weather location):**
     blank by default, making zero network requests. When a city name is set, it
     is trimmed and capped to 80 characters, then sent directly to Open-Meteo's
