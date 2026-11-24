@@ -1061,7 +1061,6 @@ struct Target {
 	Dialogs::Key chat;
 	bool folders = false;
 	bool chatActions = false;
-	bool inMusic = false;
 	QString paneLabel;
 	std::optional<MapKind> contextMap;
 	QString contextName;
@@ -1095,7 +1094,6 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 	if (MusicAllowsModalKeys(owner, focus)) {
 		return {
 			.focus = focus,
-			.inMusic = true,
 			.paneLabel = u"Music"_q,
 			.contextMap = MapKind::Music,
 			.contextName = u"music"_q,
@@ -1498,7 +1496,12 @@ Keys::Keys(not_null<MainWindow*> window)
 
 	qApp->installEventFilter(this);
 
-	QObject::connect(qApp, &QApplication::focusChanged, this, [=](QWidget *, QWidget *now) {
+	QObject::connect(qApp, &QApplication::focusChanged, this, [=](QWidget *old, QWidget *now) {
+		const auto inThisWindow = (old && old->window() == _window)
+			|| (now && now->window() == _window);
+		if (!inThisWindow) {
+			return;
+		}
 		clearPrefix();
 		// Stay in Normal mode across eligible surfaces; reflect Insert if focus moved to an input outside Normal.
 		if (now && now->window() == _window && _activeLayer == ActiveLayer::None) {
@@ -1621,6 +1624,7 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 	if (event->type() == QEvent::MouseButtonPress
 			&& Enabled()
 			&& _normal
+			&& !_window->controller().isLayerShown()
 			&& watched->isWidgetType()) {
 		const auto widget = static_cast<QWidget*>(watched);
 		if (widget->window() == _window
@@ -1769,6 +1773,7 @@ void Keys::refreshStatusBar() {
 	}
 	if (!chromeVisible()) {
 		_statusBar->hide();
+		hideWhichKey();
 		return;
 	}
 	const auto target = activeTarget();
@@ -1982,9 +1987,15 @@ KeyUse Keys::classify(
 	if (!_normal) {
 		return KeyUse::Pass;
 	}
-	return ((mods == Qt::NoModifier || mods == Qt::ShiftModifier)
+	const auto normalTextMods = (mods == Qt::NoModifier
+		|| mods == Qt::ShiftModifier
+		|| mods == Qt::AltModifier
+		|| mods == (Qt::AltModifier | Qt::ShiftModifier));
+	return (normalTextMods
 			&& (!event.text().isEmpty()
 				|| (key >= Qt::Key_Dead_Grave && key <= Qt::Key_Dead_Greek)
+				|| key == Qt::Key_Return
+				|| key == Qt::Key_Enter
 				|| key == Qt::Key_Backspace
 				|| key == Qt::Key_Delete))
 		? KeyUse::Ignore
@@ -2902,7 +2913,6 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		: ActiveLayer::Cheatsheet;
 	auto layer = ModalUi::CreateModalHelpLayer({
 		.startOnAllBindings = startOnAllBindings,
-		.subtitle = target.paneLabel,
 		.keymapPath = Keymap().userPath,
 		.keymapError = Keymap().error,
 		.cheatsheetCards = std::move(cards),
@@ -2972,6 +2982,9 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 	const auto it = ranges::find_if(effective, [&](const EffectiveBinding &b) {
 		return b.keys == chord;
 	});
+	const auto guard = QPointer(this);
+	const auto origin = target.focus;
+	const auto original = base::make_weak(target.controller);
 	if (it != end(effective)) {
 		const auto &cmd = FindCommand(it->action);
 		data.found = true;
@@ -2982,8 +2995,15 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 		data.unavailableReason = QString::fromLatin1(cmd.need);
 		data.bindings = CollectCommandBindings(it->action);
 		const auto targetAction = it->action;
-		data.onDescribeCommand = [this, targetAction, target] {
-			showDescribeCommandResult(targetAction, target);
+		data.onDescribeCommand = [guard, targetAction, origin, original] {
+			if (!guard) {
+				return;
+			}
+			const auto live = guard->_window->controller().sessionController();
+			const auto liveTarget = (live && live == original.get() && origin)
+				? FindTarget(live, origin)
+				: Target();
+			guard->showDescribeCommandResult(targetAction, liveTarget);
 		};
 	}
 	// List anywhere else this chord is bound to a different command across other maps.
@@ -2998,7 +3018,6 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 			});
 		}
 	}
-	const auto guard = QPointer(this);
 	_activeLayer = ActiveLayer::DescribeKey;
 	_describeKeyHasDetails = data.found && bool(data.onDescribeCommand);
 	auto layer = ModalUi::CreateDescribeLayer(std::move(data));
@@ -3096,42 +3115,57 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		.describeMode = describe,
 		.items = std::move(items),
 		.history = MxHistory(),
-		.onPick = [=](int actionId, QString query) {
-			_activeLayer = ActiveLayer::None;
+		.onPick = [guard, describe, revision, origin, original](int actionId, QString query) {
+			if (!guard) {
+				return;
+			}
+			guard->_activeLayer = ActiveLayer::None;
 			const auto action = Action(actionId);
 			MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
 			SaveMxHistory();
-			QTimer::singleShot(0, this, [=] {
-				const auto live = owner();
+			QTimer::singleShot(0, guard.data(), [guard, describe, action, revision, origin, original] {
+				if (!guard) {
+					return;
+				}
+				const auto live = guard->owner();
 				if (!Enabled() || !live || live != original.get()
-					|| revision != _revision || !origin
-					|| _window->controller().isLayerShown()) {
-					refreshStatusBar();
+					|| revision != guard->_revision || !origin
+					|| guard->_window->controller().isLayerShown()) {
+					guard->refreshStatusBar();
 					return;
 				}
 				if (describe) {
-					showDescribeCommandResult(action, FindTarget(live, origin));
+					guard->showDescribeCommandResult(action, FindTarget(live, origin));
 					return;
 				}
 				const auto restoredTarget = FindTarget(live, origin);
 				if (restoredTarget.focus && Available(action, restoredTarget)) {
 					origin->setFocus(Qt::OtherFocusReason);
-					const auto restored = currentTarget(origin);
-					if (restored.focus && revision == _revision) {
-						dispatch(action, restored, 1);
+					const auto restored = guard->currentTarget(origin);
+					if (restored.focus && revision == guard->_revision) {
+						guard->dispatch(action, restored, 1);
 					}
 				}
-				refreshStatusBar();
+				guard->refreshStatusBar();
 			});
 		},
-		.onCancel = [=] {
-			_activeLayer = ActiveLayer::None;
-			QTimer::singleShot(0, this, [=] {
-				if (origin && fromInsert) {
-					origin->setFocus(Qt::OtherFocusReason);
-					_normal = false;
+		.onCancel = [guard, revision, origin, original, fromInsert] {
+			if (!guard) {
+				return;
+			}
+			guard->_activeLayer = ActiveLayer::None;
+			QTimer::singleShot(0, guard.data(), [guard, revision, origin, original, fromInsert] {
+				if (!guard) {
+					return;
 				}
-				refreshStatusBar();
+				const auto live = guard->owner();
+				if (Enabled() && live && live == original.get()
+					&& revision == guard->_revision && origin && fromInsert
+					&& !guard->_window->controller().isLayerShown()) {
+					origin->setFocus(Qt::OtherFocusReason);
+					guard->_normal = false;
+				}
+				guard->refreshStatusBar();
 			});
 		},
 	});

@@ -90,10 +90,11 @@ for sym in ("kRecentLimit = 7", "WordInitials", "ParseTokens", "MatchToken",
     assert sym in keys_mx, sym
 assert "SubtitleMatchSpans" in keys_ui
 
-# Verify Normal-mode non-leakage guard: printable keys in Normal mode return Capture or Ignore, never Pass.
+# Verify Normal-mode non-leakage guard: printable, Option/Alt text, Return/Enter, Backspace/Delete return Capture or Ignore, never Pass.
 classify = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
 ordered(classify, "if (!_normal)", "return KeyUse::Pass;",
-        "!event.text().isEmpty()", "KeyUse::Ignore", "KeyUse::Pass")
+        "Qt::AltModifier", "!event.text().isEmpty()",
+        "Qt::Key_Return", "Qt::Key_Enter", "KeyUse::Ignore", "KeyUse::Pass")
 
 # Verify which-key merges duplicate actions and keeps groups/leaves separated cleanly.
 wk = between(keys, "void Keys::showWhichKey", "void Keys::stroke")
@@ -151,9 +152,20 @@ ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_pre
 
 palette = between(keys, "void Keys::showPalette", "} // namespace")
 ordered(palette, "revision = _revision", "base::make_weak(current)",
-        "ModalUi::CreateCommandPaletteLayer", "MxHistory().record",
-        "!Enabled()", "live != original.get()", "revision != _revision",
-        "FindTarget(live, origin)", "currentTarget(origin)", "dispatch(action, restored")
+        "guard = QPointer(this)", "ModalUi::CreateCommandPaletteLayer",
+        "if (!guard)", "MxHistory().record",
+        "!Enabled()", "live != original.get()", "revision != guard->_revision",
+        "FindTarget(live, origin)", "guard->currentTarget(origin)",
+        "guard->dispatch(action, restored", "onCancel = [guard,")
+
+describe_key = between(keys, "void Keys::showDescribeKeyResult", "void Keys::showDescribeCommandResult")
+ordered(describe_key, "guard = QPointer(this)", "origin = target.focus",
+        "original = base::make_weak(target.controller)",
+        "onDescribeCommand = [guard, targetAction, origin, original]",
+        "FindTarget(live, origin)")
+
+keys_ctor = between(keys, "Keys::Keys(not_null<MainWindow*> window)", "Keys::~Keys()")
+ordered(keys_ctor, "QApplication::focusChanged", "inThisWindow", "clearPrefix()")
 
 dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 assert "chooseRow" not in between(dispatch, "case Action::PreviousChat:", "case Action::OpenChat:")

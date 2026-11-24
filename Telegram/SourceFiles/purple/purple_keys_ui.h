@@ -103,7 +103,6 @@ struct HelpSection {
 
 struct HelpData {
 	bool startOnAllBindings = false;
-	QString subtitle;
 	QString keymapPath;
 	QString keymapError;
 	std::vector<HelpSection> cheatsheetCards;
@@ -124,7 +123,6 @@ struct DescribeData {
 	QStringList queriedChord;
 	QString title;
 	QString commandId;
-	QString description;
 	bool found = false;
 	bool availableHere = false;
 	bool keylessOnPurpose = false;

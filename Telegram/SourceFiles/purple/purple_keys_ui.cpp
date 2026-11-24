@@ -16,6 +16,7 @@
 #include "styles/style_widgets.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QPointer>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
@@ -971,6 +972,9 @@ protected:
 	}
 
 	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
 		const auto parentSize = parentWidget()->size();
 		const auto margin = (parentSize.width() < st::keysLegendCompactWidth) ? 8 : 32;
 		const auto w = std::min(parentSize.width() - 2 * margin, _showAll ? 820 : 1020);
@@ -1193,7 +1197,7 @@ private:
 	Ui::ScrollArea *_scroll = nullptr;
 	Ui::IconButton *_close = nullptr;
 	Ui::InputField *_filter = nullptr;
-	ActiveBindingsList *_bindingsWidget = nullptr;
+	QPointer<ActiveBindingsList> _bindingsWidget;
 	QRect _tabSheetRect;
 	QRect _tabAllRect;
 	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
@@ -1218,6 +1222,9 @@ protected:
 	}
 
 	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
 		const auto parentSize = parentWidget()->size();
 		const auto w = std::min(parentSize.width() - 48, 540);
 		auto h = 18 + 38; // top padding + header
@@ -1441,10 +1448,10 @@ class PaletteRowsWidget final : public Ui::RpWidget {
 public:
 	PaletteRowsWidget(
 		not_null<QWidget*> parent,
-		const std::vector<PaletteItem> &items,
+		std::vector<PaletteItem> items,
 		Fn<void(int rowIndex)> onClick)
 	: RpWidget(parent)
-	, _items(items)
+	, _items(std::move(items))
 	, _onClick(std::move(onClick)) {
 		setMouseTracking(true);
 	}
@@ -1607,7 +1614,7 @@ protected:
 	}
 
 private:
-	const std::vector<PaletteItem> &_items;
+	std::vector<PaletteItem> _items;
 	Fn<void(int)> _onClick;
 	std::vector<int> _filtered;
 	std::vector<ModalMx::OrderlessToken> _tokens;
@@ -1703,6 +1710,9 @@ protected:
 	}
 
 	void parentResized() override {
+		if (!parentWidget()) {
+			return;
+		}
 		const auto parentSize = parentWidget()->size();
 		const auto w = std::min(parentSize.width() - 32, 640);
 		constexpr auto kPromptH = 52;
@@ -1880,7 +1890,7 @@ private:
 	std::vector<int> _filtered;
 	Ui::InputField *_input = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;
-	PaletteRowsWidget *_rows = nullptr;
+	QPointer<PaletteRowsWidget> _rows;
 	int _selected = 0;
 	int _historyPos = -1;
 	QString _draft;
