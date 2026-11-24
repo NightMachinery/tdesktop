@@ -7,6 +7,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <QtCore/QTextBoundaryFinder>
 
 #include <algorithm>
 #include <utility>
@@ -348,6 +349,17 @@ struct Candidate {
 		matched.push_back(s.index);
 	}
 	return matched;
+}
+
+[[nodiscard]] inline QString FirstGrapheme(const QString &raw) {
+	const auto trimmed = raw.trimmed();
+	if (trimmed.isEmpty()) {
+		return QString();
+	}
+	auto finder = QTextBoundaryFinder(QTextBoundaryFinder::Grapheme, trimmed);
+	finder.toStart();
+	const auto end = finder.toNextBoundary();
+	return (end > 0) ? trimmed.left(end) : trimmed;
 }
 
 } // namespace Purple::ModalMx

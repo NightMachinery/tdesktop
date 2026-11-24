@@ -126,6 +126,19 @@ int main() {
 			"History JSON serialize/deserialize round-trips losslessly");
 	}
 
+	// 8. Grapheme-safe FirstGrapheme (ASCII, surrogate pair emoji, ZWJ sequence, combining mark).
+	{
+		Expect(FirstGrapheme(Q("  backend ")) == Q("b"), "FirstGrapheme handles trimmed ASCII");
+		Expect(FirstGrapheme(Q("\xF0\x9F\x94\xA5 Alerts")) == Q("\xF0\x9F\x94\xA5"),
+			"FirstGrapheme preserves surrogate-pair emoji intact");
+		Expect(FirstGrapheme(Q("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7 Family"))
+			== Q("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7"),
+			"FirstGrapheme preserves ZWJ emoji cluster intact");
+		Expect(FirstGrapheme(Q("e\xCC\x81""clair")) == Q("e\xCC\x81"),
+			"FirstGrapheme preserves base + combining accent");
+		Expect(FirstGrapheme(Q("   ")).isEmpty(), "FirstGrapheme returns empty on whitespace");
+	}
+
 	std::cout << Checks << " checks, " << Failures << " failures\n";
 	return Failures ? 1 : 0;
 }

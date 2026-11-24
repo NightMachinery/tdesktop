@@ -188,6 +188,7 @@ struct TopicItem {
 	MsgId rootId = 0;
 	QString title;
 	QString preview;
+	DocumentId iconId = 0;
 	int32 colorId = 0;
 	int unreadCount = 0;
 	int mentions = 0;

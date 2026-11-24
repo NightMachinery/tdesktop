@@ -1,9 +1,12 @@
 #include "purple/purple_keys_ui.h"
 
 #include "base/event_filter.h"
+#include "data/data_forum_topic.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "main/main_session.h"
+#include <crl/crl_time.h>
 #include "ui/controls/keys_legend.h"
 #include "ui/painter.h"
 #include "ui/round_rect.h"
@@ -2742,9 +2745,11 @@ class TopicRowsWidget final : public Ui::RpWidget {
 public:
 	TopicRowsWidget(
 		not_null<QWidget*> parent,
+		base::weak_ptr<Main::Session> session,
 		Fn<void(int row)> onClick,
 		Fn<void()> onLoadMoreClick)
 	: RpWidget(parent)
+	, _session(std::move(session))
 	, _onClick(std::move(onClick))
 	, _onLoadMoreClick(std::move(onLoadMoreClick)) {
 		setMouseTracking(true);
@@ -2882,20 +2887,63 @@ protected:
 				? (rowRect.right() - 12 - kIconSize)
 				: (rowRect.left() + 12);
 			const auto iconRect = QRect(iconX, midY - kIconSize / 2, kIconSize, kIconSize);
-			const auto dotColor = item.isGeneral
-				? st::windowSubTextFg->c
-				: TopicColorFromId(item.colorId);
-			auto dotFill = dotColor;
-			dotFill.setAlpha(36);
-			p.setPen(QPen(dotColor, 1));
-			p.setBrush(dotFill);
-			p.drawRoundedRect(QRectF(iconRect).adjusted(.5, .5, -.5, -.5), 7, 7);
-			p.setFont(MonoFont(11, true));
-			p.setPen(dotColor);
-			const auto glyph = item.isGeneral
-				? u"#"_q
-				: (item.title.isEmpty() ? u"T"_q : item.title.left(1).toUpper());
-			p.drawText(iconRect, Qt::AlignCenter, glyph);
+			auto paintedRealIcon = false;
+			if (item.iconId != 0) {
+				if (const auto s = _session.get()) {
+					auto &emoji = _customIcons[item.iconId];
+					if (!emoji) {
+						emoji = s->data().customEmojiManager().create(
+							item.iconId,
+							[this] { update(); },
+							Data::CustomEmojiManager::SizeTag::Normal);
+					}
+					if (emoji) {
+						const auto ratio = style::DevicePixelRatio();
+						const auto frameSize = Data::FrameSizeFromTag(
+							Data::CustomEmojiManager::SizeTag::Normal) / std::max(1, ratio);
+						const auto pos = QPoint(
+							iconRect.x() + (iconRect.width() - frameSize) / 2,
+							iconRect.y() + (iconRect.height() - frameSize) / 2);
+						emoji->paint(p, {
+							.textColor = st::windowFg->c,
+							.now = crl::now(),
+							.position = pos,
+							.paused = false,
+						});
+						paintedRealIcon = true;
+					}
+				}
+			}
+			if (!paintedRealIcon && item.isGeneral) {
+				const auto fg = st::windowSubTextFg->c;
+				if (_generalIcon.isNull() || _generalIconColor != fg) {
+					_generalIcon = Data::ForumTopicGeneralIconFrame(kIconSize, fg);
+					_generalIconColor = fg;
+				}
+				p.drawImage(iconRect.topLeft(), _generalIcon);
+				paintedRealIcon = true;
+			}
+			if (!paintedRealIcon) {
+				auto &bubble = _topicBubbles[item.colorId];
+				if (bubble.isNull()) {
+					bubble = Data::ForumTopicIconBackground(item.colorId, kIconSize);
+				}
+				if (!bubble.isNull()) {
+					p.drawImage(iconRect.topLeft(), bubble);
+				} else {
+					const auto dotColor = TopicColorFromId(item.colorId);
+					auto dotFill = dotColor;
+					dotFill.setAlpha(36);
+					p.setPen(QPen(dotColor, 1));
+					p.setBrush(dotFill);
+					p.drawRoundedRect(QRectF(iconRect).adjusted(.5, .5, -.5, -.5), 7, 7);
+				}
+				const auto first = ModalMx::FirstGrapheme(item.title);
+				const auto glyph = first.isEmpty() ? u"T"_q : first.toUpper();
+				p.setFont(st::semiboldFont);
+				p.setPen(bubble.isNull() ? TopicColorFromId(item.colorId) : Qt::white);
+				p.drawText(iconRect.adjusted(0, -1, 0, -1), Qt::AlignCenter, glyph);
+			}
 
 			// Far side: timestamp + unread badge.
 			auto farReserve = 12;
@@ -2974,6 +3022,11 @@ private:
 		resize(width(), std::max(72, int(_visible.size()) * kRowHeight + extra + 8));
 	}
 
+	base::weak_ptr<Main::Session> _session;
+	std::map<DocumentId, std::unique_ptr<Ui::Text::CustomEmoji>> _customIcons;
+	std::map<int32, QImage> _topicBubbles;
+	QImage _generalIcon;
+	QColor _generalIconColor;
 	std::vector<TopicItem> _items;
 	std::vector<int> _visible;
 	Fn<void(int)> _onClick;
@@ -3008,6 +3061,7 @@ public:
 
 		auto rows = object_ptr<TopicRowsWidget>(
 			_scroll,
+			_config.session,
 			[=](int row) { openRow(row); },
 			[=] { requestMore(); });
 		_rows = rows.data();

@@ -2184,6 +2184,7 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 				.rootId = topic->rootId(),
 				.title = topic->title(),
 				.preview = msg ? msg->notificationText().text.simplified() : QString(),
+				.iconId = topic->iconId(),
 				.colorId = topic->colorId(),
 				.unreadCount = unread.messages,
 				.mentions = unread.mentions,
