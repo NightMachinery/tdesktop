@@ -362,6 +362,54 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 		advance(chipW, 10);
 	}
 
+	// Unread unmuted CHATS breakdown pill: DM / GP / CH.
+	if (_state.unreadKnown && _state.pendingText.isEmpty() && remaining() > 120) {
+		struct BucketPart {
+			QString text;
+			bool active = false;
+		};
+		const std::array<BucketPart, 3> parts = { {
+			{ u"DM "_q + QString::number(_state.unreadDm), _state.unreadDm > 0 },
+			{ u"GP "_q + QString::number(_state.unreadGp), _state.unreadGp > 0 },
+			{ u"CH "_q + QString::number(_state.unreadCh), _state.unreadCh > 0 },
+		} };
+		const auto sep = u" · "_q;
+		const auto sepW = MeasureTextWidth(monoFont, sep) - 2;
+		auto innerW = 0;
+		std::array<int, 3> partW = {};
+		for (auto i = 0; i < 3; ++i) {
+			partW[i] = MeasureTextWidth(parts[i].active ? monoBold : monoFont, parts[i].text) - 1;
+			innerW += partW[i];
+			if (i > 0) {
+				innerW += sepW;
+			}
+		}
+		const auto pillW = innerW + 14;
+		if (pillW <= remaining()) {
+			const auto pillRect = slotRect(pillW).adjusted(0, 4, 0, -4);
+			p.setPen(QPen(st::boxDividerBg->c, 1));
+			p.setBrush(st::windowBg->c);
+			p.drawRoundedRect(QRectF(pillRect).adjusted(.5, .5, -.5, -.5), 4, 4);
+			auto px = pillRect.left() + 7;
+			for (auto i = 0; i < 3; ++i) {
+				if (i > 0) {
+					p.setFont(monoFont);
+					p.setPen(st::windowSubTextFg);
+					p.drawText(QRect(px, pillRect.top(), sepW, pillRect.height()), Qt::AlignCenter, sep);
+					px += sepW;
+				}
+				p.setFont(parts[i].active ? monoBold : monoFont);
+				p.setPen(parts[i].active ? st::windowActiveTextFg : st::windowSubTextFg);
+				p.drawText(
+					QRect(px, pillRect.top(), partW[i], pillRect.height()),
+					Qt::AlignCenter,
+					parts[i].text);
+				px += partW[i];
+			}
+			advance(pillW, 10);
+		}
+	}
+
 	// 0ms live pending count/chord echo chip.
 	if (!_state.pendingText.isEmpty() && remaining() > 48) {
 		const auto fm = QFontMetrics(monoBold);

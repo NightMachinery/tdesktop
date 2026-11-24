@@ -178,6 +178,7 @@ PRIVATE
     purple/purple_keys_mx.h
     purple/purple_keys_ui.cpp
     purple/purple_keys_ui.h
+    purple/purple_keys_unread.h
     purple/purple_message_hints.cpp
     purple/purple_message_hints.h
     purple/purple_instant_replaces.cpp

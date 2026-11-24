@@ -28,6 +28,11 @@ never covers messages or the composer).
   backs up one stroke; `Esc` or `C-g` cancels. Unknown endings report
   `<chord> is undefined` on the status line and never fall through to Normal
   mode. Unavailable commands report what they need.
+- **Unread unmuted chat counter:** the status line shows a live `DM N · GP M · CH K`
+  pill counting unread unmuted chats (not messages), broken down into direct
+  messages and bots (`DM`), groups and forum groups (`GP`), and channels (`CH`).
+  Muted chats without mentions, archived chats, Saved Messages, and chats hidden
+  by the active Work Mode preset are excluded.
 
 With a non-ASCII keyboard layout such as Persian, Normal mode chords and
 `C-[` follow physical U.S. key positions while Insert mode continues typing in

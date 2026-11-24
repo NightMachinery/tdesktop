@@ -7,10 +7,19 @@
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/shortcuts.h"
+#include "data/data_channel.h"
+#include "data/data_chat.h"
 #include "data/data_document.h"
+#include "data/data_folder.h"
+#include "data/data_session.h"
 #include "data/data_user.h"
+#include "dialogs/dialogs_indexed_list.h"
 #include "dialogs/dialogs_inner_widget.h"
+#include "dialogs/dialogs_main_list.h"
+#include "dialogs/dialogs_row.h"
 #include "dialogs/dialogs_widget.h"
+#include "history/history.h"
+#include "history/history_item.h"
 #include "history/history_widget.h"
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_chat_section.h"
@@ -33,8 +42,10 @@
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
+#include "purple/purple_keys_unread.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_picker.h"
 #include "purple/purple_playlists_box.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
@@ -1209,6 +1220,61 @@ Ui::ElasticScroll *HistoryScroll(const Target &target) {
 		: nullptr;
 }
 
+ModalUnread::ChatBucket BucketForPeer(not_null<PeerData*> peer) {
+	if (peer->isUser()) {
+		return ModalUnread::ChatBucket::DirectMessage;
+	}
+	if (peer->isBroadcast()) {
+		return ModalUnread::ChatBucket::Channel;
+	}
+	return ModalUnread::ChatBucket::Group;
+}
+
+ModalUnread::UnreadChatMetrics MetricsForHistory(not_null<History*> history) {
+	const auto unread = history->chatListUnreadState();
+	const auto peer = history->peer;
+	return ModalUnread::UnreadChatMetrics{
+		.chats = unread.chats,
+		.chatsMuted = unread.chatsMuted,
+		.marks = unread.marks,
+		.marksMuted = unread.marksMuted,
+		.messages = unread.messages,
+		.messagesMuted = unread.messagesMuted,
+		.mentions = unread.mentions,
+		.reactions = unread.reactions,
+		.reactionsMuted = unread.reactionsMuted,
+		.polls = unread.polls,
+		.pollsMuted = unread.pollsMuted,
+		.archived = (history->folder() != nullptr),
+		.hiddenByPreset = !PickerVisible(peer),
+		.isSelf = peer->isSelf(),
+	};
+}
+
+ModalUnread::UnreadSummary ComputeUnreadSummary(not_null<Main::Session*> session) {
+	auto summary = ModalUnread::UnreadSummary();
+	const auto list = session->data().chatsList();
+	if (!list) {
+		return summary;
+	}
+	for (const auto &row : list->indexed()->all()) {
+		const auto history = row->history();
+		if (!history) {
+			continue;
+		}
+		const auto metrics = MetricsForHistory(history);
+		if (!ModalUnread::HasUnmutedUnreadNotification(metrics)) {
+			continue;
+		}
+		switch (BucketForPeer(history->peer)) {
+		case ModalUnread::ChatBucket::DirectMessage: ++summary.dm; break;
+		case ModalUnread::ChatBucket::Group: ++summary.gp; break;
+		case ModalUnread::ChatBucket::Channel: ++summary.ch; break;
+		}
+	}
+	return summary;
+}
+
 bool Available(Action action, const Target &target) {
 	switch (action) {
 	case Action::MoveUp:
@@ -1417,6 +1483,8 @@ private:
 	void enterNormal(bool silent = true);
 	void enterInsert(bool silent = true);
 	void showFeedback(QString text, bool isError = false);
+	void scheduleUnreadRefresh();
+	void refreshUnreadSummary();
 	void refreshStatusBar();
 	void showWhichKey();
 	void hideWhichKey();
@@ -1433,6 +1501,7 @@ private:
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
 	QTimer _whichKeyTimer;
 	QTimer _feedbackTimer;
+	QTimer _unreadRefreshTimer;
 	QFileSystemWatcher _keymapWatcher;
 	MessageHints _hints;
 
@@ -1443,6 +1512,8 @@ private:
 	bool _normal = true; // Starts in Normal mode when modal keys are enabled.
 	bool _inspect = false;
 	bool _swallowNext = false;
+	ModalUnread::UnreadSummary _unreadSummary;
+	bool _unreadKnown = false;
 	enum class ActiveLayer {
 		None,
 		Cheatsheet,
@@ -1493,6 +1564,10 @@ Keys::Keys(not_null<MainWindow*> window)
 		_feedbackText.clear();
 		_feedbackError = false;
 		refreshStatusBar();
+	});
+	_unreadRefreshTimer.setSingleShot(true);
+	QObject::connect(&_unreadRefreshTimer, &QTimer::timeout, this, [=] {
+		refreshUnreadSummary();
 	});
 
 	qApp->installEventFilter(this);
@@ -1556,11 +1631,25 @@ Keys::Keys(not_null<MainWindow*> window)
 		++_revision;
 		clearPrefix();
 		_sessionLifetime.destroy();
+		_unreadKnown = false;
+		_unreadSummary = {};
 		_window->updateControlsGeometry();
 		refreshStatusBar();
 		if (!owner) {
 			return;
 		}
+		if (const auto chatsList = owner->session().data().chatsList()) {
+			rpl::merge(
+				chatsList->unreadStateChanges() | rpl::to_empty,
+				owner->session().data().chatsListChanges() | rpl::to_empty
+			) | rpl::on_next([=] {
+				scheduleUnreadRefresh();
+			}, _sessionLifetime);
+		}
+		StateChanges() | rpl::on_next([=] {
+			scheduleUnreadRefresh();
+		}, _sessionLifetime);
+		refreshUnreadSummary();
 		rpl::merge(
 			owner->activeChatEntryChanges() | rpl::to_empty,
 			owner->activeChatsFilter() | rpl::to_empty,
@@ -1741,6 +1830,28 @@ void Keys::showFeedback(QString text, bool isError) {
 	refreshStatusBar();
 }
 
+void Keys::scheduleUnreadRefresh() {
+	if (!_unreadRefreshTimer.isActive()) {
+		_unreadRefreshTimer.start(80);
+	}
+}
+
+void Keys::refreshUnreadSummary() {
+	const auto controller = _window->controller().sessionController();
+	if (!controller) {
+		_unreadKnown = false;
+		_unreadSummary = {};
+		return;
+	}
+	const auto next = ComputeUnreadSummary(&controller->session());
+	const auto changed = !_unreadKnown || (next != _unreadSummary);
+	_unreadKnown = true;
+	_unreadSummary = next;
+	if (changed) {
+		refreshStatusBar();
+	}
+}
+
 void Keys::enterNormal(bool silent) {
 	clearPrefix();
 	_normal = true;
@@ -1790,6 +1901,10 @@ void Keys::refreshStatusBar() {
 	}
 	const auto target = activeTarget();
 	auto state = ModalUi::StatusState();
+	state.unreadDm = _unreadSummary.dm;
+	state.unreadGp = _unreadSummary.gp;
+	state.unreadCh = _unreadSummary.ch;
+	state.unreadKnown = _unreadKnown;
 	if (_activeLayer != ActiveLayer::None) {
 		switch (_activeLayer) {
 		case ActiveLayer::Cheatsheet:

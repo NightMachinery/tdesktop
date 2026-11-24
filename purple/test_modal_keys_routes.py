@@ -276,6 +276,8 @@ for action, key in (
 ):
     bound(action, key, chat_body)
 
+ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
+
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")
 ordered(attachment, "if (!CanAttach(widget)) return {};", "QPointer(widget)",

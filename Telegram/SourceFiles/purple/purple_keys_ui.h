@@ -36,6 +36,10 @@ struct StatusState {
 	bool messageIsError = false;
 	QString localleaderHint;
 	QString rightCue;
+	int unreadDm = 0;
+	int unreadGp = 0;
+	int unreadCh = 0;
+	bool unreadKnown = false;
 };
 
 class ModalStatusBar final : public Ui::RpWidget {
