@@ -11,6 +11,7 @@
 #include "purple/purple_config.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_editor.h"
+#include "purple/purple_settings_draft.h"
 #include "purple/purple_settings_tree.h"
 #include "styles/style_keys_legend.h"
 #include "styles/style_layers.h"
@@ -378,10 +379,15 @@ private:
 		if (!sameSession()) {
 			retire();
 		} else if (!visibleContent()) {
+			if (_pages->currentWidget() == _sheetPage && !_editingKey.isEmpty()) {
+				_pausedForm = true;
+				_formFocus = QApplication::focusWidget();
+				if (_choice) _choice->hidePopup();
+			}
 			_coverMessage->setText(u"Settings hidden while locked"_q);
 			_coverClose->hide();
 			_pages->setCurrentWidget(_covered);
-			clearSheet();
+			if (!_pausedForm) clearSheet();
 		} else {
 			const auto wasCovered = _pages->currentWidget() == _covered;
 			QTimer::singleShot(0, this, [this, wasCovered] {
@@ -391,8 +397,13 @@ private:
 					_resumeRefused = _draftStale || !_opening.current;
 					if (_resumeRefused) {
 						_coverMessage->setText(u"The source changed while settings were hidden. Close and reopen Customize to see the current settings."_q);
+						_coverClose->setText(u"Discard draft and close"_q);
 						_coverClose->show();
 						_coverClose->setFocus();
+					} else if (_pausedForm && SettingsDraft::CanRestoreForm(sameSession(), !_draftStale)) {
+						_pausedForm = false;
+						_pages->setCurrentWidget(_sheetPage);
+						if (_formFocus && _sheet->isAncestorOf(_formFocus)) _formFocus->setFocus();
 					} else {
 						_pages->setCurrentWidget(_browser);
 						_tree->setFocus();
@@ -413,6 +424,7 @@ private:
 			const auto key = _opening.requester;
 			_accountId = AccountKeyText(key.environment, key.userId).value_or(QString());
 		}
+		_draftStale = false;
 	}
 
 	void refreshFromDisk() {
@@ -422,21 +434,18 @@ private:
 			return;
 		}
 		_needsRefresh = false;
-		if (_frames.empty()) {
-			_draftStale = false;
-			if (_editingKey.isEmpty()) {
+		if (_editingKey.isEmpty() && !_frames.current()) {
+			if (!WindowSettingsEditorOpeningMatches(_opening)) {
+				_frames.clear();
 				capture();
 				rebuild();
-			} else {
-				_needsRefresh = true;
 			}
 			return;
 		}
-		const auto check = PrepareWindowSettingsEditorEdit(_opening, _frames.back().edits);
-		_draftStale = !check.review;
+		_draftStale = !WindowSettingsEditorOpeningMatches(_opening);
 		if (_draftStale) {
-			AnnounceError(_feedback, StatusText(check));
-			if (_pages->currentWidget() == _sheetPage) returnToTree();
+			AnnounceError(_formStatus ? _formStatus : _feedback,
+				u"The settings source changed. Your input is kept until you leave this form."_q);
 		}
 	}
 
@@ -446,7 +455,7 @@ private:
 
 	void rebuild(bool revealSelection = false) {
 		if (!visibleContent() || !_opening.current) return;
-		const auto frame = _frames.empty() ? nullptr : &_frames.back();
+		const auto frame = _frames.current();
 		const auto layers = frame ? frame->review->preview().afterLayers : InspectSettingsEditor(_opening);
 		const auto source = [&](const std::optional<AccountSettingsOpenTarget> &target,
 				const SettingsFileInput &good, const SettingsLayerFileReport &report, bool writable) {
@@ -545,7 +554,8 @@ private:
 	}
 
 	bool changed(const Row &row) const {
-		return !_frames.empty() && std::any_of(_frames.back().edits.begin(), _frames.back().edits.end(),
+		const auto frame = _frames.current();
+		return frame && std::any_of(frame->edits.begin(), frame->edits.end(),
 			[&](const SettingsEdit &edit) { return edit.address == row.address; });
 	}
 
@@ -553,7 +563,7 @@ private:
 		const auto row = selected();
 		_edit->setEnabled(row && row->editable);
 		_reset->setEnabled(row && row->editable && SettingsTree::CanReset(*row->descriptor));
-		_undo->setEnabled(!_frames.empty());
+		_undo->setEnabled(_frames.canUndo());
 		_clear->setEnabled(filtering());
 		if (!row) {
 			_inspector->clear();
@@ -744,6 +754,10 @@ private:
 	}
 
 	void clearSheet() {
+		_pausedForm = false;
+		_formFocus.clear();
+		_formExit.clear();
+		_formBaseline.reset();
 		_editingKey.clear();
 		_preedit.clear();
 		_capture = false;
@@ -774,7 +788,7 @@ private:
 		}
 		_pages->setCurrentWidget(_browser);
 		_tree->setFocus();
-		if (_needsRefresh) refreshFromDisk();
+		if (_needsRefresh || _draftStale) refreshFromDisk();
 	}
 
 	void showHelp() {
@@ -877,10 +891,46 @@ private:
 		}
 		const auto cancel = Button(_sheet, u"Cancel"_q);
 		addSheetWidget(cancel);
-		connect(cancel, &QPushButton::clicked, this, [this] { returnToTree(); });
+		connect(cancel, &QPushButton::clicked, this, [this] { closeForm(); });
+		_formBaseline = formValue();
 		_sheetLayout->addStretch();
 		_pages->setCurrentWidget(_sheetPage);
 		focus->setFocus();
+	}
+
+	SettingsDraft::FormValue formValue() const {
+		if (_bool) return _bool->checkedId();
+		if (_multi) return _multi->toPlainText();
+		if (_choice) return _choice->currentText();
+		return _line ? _line->text() : QString();
+	}
+
+	void closeForm() {
+		if (!_formBaseline || !SettingsDraft::NeedsDiscardConfirmation(*_formBaseline, formValue())) {
+			returnToTree();
+			return;
+		}
+		if (_formExit) {
+			_formExit->hide();
+			_formExit->deleteLater();
+			_formExit.clear();
+			return;
+		}
+		const auto panel = new QWidget(_sheet);
+		const auto layout = new QVBoxLayout(panel);
+		layout->addWidget(Label(panel, u"Discard the text in this form?"_q));
+		const auto keep = Button(panel, u"Keep editing"_q);
+		const auto discard = Button(panel, u"Discard input"_q);
+		for (const auto button : { keep, discard }) {
+			layout->addWidget(button);
+			button->installEventFilter(this);
+		}
+		_formExit = panel;
+		addSheetWidget(panel);
+		connect(keep, &QPushButton::clicked, this, [this] { closeForm(); });
+		connect(discard, &QPushButton::clicked, this, [this] { returnToTree(); });
+		keep->setFocus();
+		_sheetPage->ensureWidgetVisible(keep);
 	}
 
 	void addStepControls(const Row &row) {
@@ -1017,49 +1067,63 @@ private:
 		}
 	}
 
-	void stage(const Row &row, std::optional<SettingScalar> value) {
+	void stage(Row row, std::optional<SettingScalar> value) {
 		if (!visibleContent()) return;
-		auto edits = _frames.empty() ? std::vector<SettingsEdit>() : _frames.back().edits;
+		const auto frame = _frames.current();
+		auto edits = frame ? frame->edits : std::vector<SettingsEdit>();
 		const auto existing = std::find_if(edits.begin(), edits.end(), [&](const SettingsEdit &edit) {
 			return edit.address == row.address;
 		});
-		if (existing == edits.end() && !_frames.empty()
-			&& _frames.back().review->preview().route == SettingsEditorRoute::Peek) {
+		if (existing == edits.end() && frame && frame->review->preview().route == SettingsEditorRoute::Peek) {
 			AnnounceError(_formStatus ? _formStatus : _feedback, u"Stage each Peek timing change separately."_q);
 			return;
 		}
 		auto change = SettingsEdit{ row.address, std::move(value) };
 		if (existing == edits.end()) edits.push_back(std::move(change));
 		else *existing = std::move(change);
-		auto prepared = PrepareWindowSettingsEditorEdit(_opening, edits);
+		const auto guard = QPointer(this);
+		const auto opening = _opening;
+		const auto previous = frame ? frame->review : nullptr;
+		auto prepared = PrepareWindowSettingsEditorEdit(opening, edits);
+		if (!guard || !visibleContent() || opening.origin != _opening.origin) return;
 		if (prepared.status == Status::Unchanged) {
-			_frames.clear();
+			_frames.push(std::nullopt);
 		} else if (!prepared.review) {
 			AnnounceError(_formStatus ? _formStatus : _feedback, StatusText(prepared));
 			return;
 		} else {
-			if (!_frames.empty() && _frames.back().review->preview().after == prepared.review->preview().after) {
+			if (previous && previous->preview().after == prepared.review->preview().after) {
 				returnToTree();
 				return;
 			}
-			_frames.push_back({ std::move(edits), std::move(prepared.review) });
+			_frames.push(Draft{ std::move(edits), std::move(prepared.review) });
 		}
 		_anchor = filtering() ? row.key : QString();
 		_selection = row.key;
 		returnToTree();
+		if (!guard) return;
+		recaptureCleanDraft();
 		rebuild();
 		describeDraft(prepared.status);
 	}
 
 	void describeDraft(Status status = Status::Ready) {
-		_feedback->setText(_frames.empty() ? u"No staged edits."_q
+		const auto frame = _frames.current();
+		_feedback->setText(!frame ? u"No staged edits."_q
 			: status == Status::IncompleteTrace ? u"Staged. Some effective reads could not be verified."_q
-			: u"%1 staged · %2"_q.arg(_frames.back().edits.size()).arg(_frames.back().review->preview().path));
+			: u"%1 staged · %2"_q.arg(frame->edits.size()).arg(frame->review->preview().path));
+	}
+
+	void recaptureCleanDraft() {
+		if (!SettingsDraft::ShouldRecapture(_draftStale, _frames.current())) return;
+		_frames.clear();
+		capture();
 	}
 
 	void undo() {
-		if (!_frames.empty()) {
-			_frames.pop_back();
+		if (_frames.canUndo()) {
+			_frames.undo();
+			recaptureCleanDraft();
 			rebuild();
 		}
 		describeDraft();
@@ -1067,8 +1131,8 @@ private:
 
 	void back() {
 		if (_pages->currentWidget() == _sheetPage) {
-			returnToTree();
-		} else if (!visibleContent() || _frames.empty()) {
+			closeForm();
+		} else if (!visibleContent() || _resumeRefused || !_frames.current()) {
 			closeLayer();
 		} else {
 			clearSheet();
@@ -1114,7 +1178,7 @@ private:
 	QVBoxLayout *_sheetLayout;
 	SettingsEditorOpening _opening;
 	std::vector<Row> _rows;
-	std::vector<Draft> _frames;
+	SettingsDraft::History<Draft> _frames;
 	QSet<QString> _expanded;
 	QSet<QObject*> _preedit;
 	QString _editingKey;
@@ -1129,6 +1193,10 @@ private:
 	QLabel *_formStatus = nullptr;
 	QPushButton *_record = nullptr;
 	QPushButton *_cancelCapture = nullptr;
+	QPointer<QWidget> _formFocus;
+	QPointer<QWidget> _formExit;
+	std::optional<SettingsDraft::FormValue> _formBaseline;
+	bool _pausedForm = false;
 	bool _capture = false;
 	bool _needsRefresh = false;
 	bool _retired = false;

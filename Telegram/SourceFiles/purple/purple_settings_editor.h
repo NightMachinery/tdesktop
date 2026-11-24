@@ -146,6 +146,12 @@ struct SettingsEditorPreparation {
 [[nodiscard]] LayerSettingsResult InspectSettingsEditor(
 	const SettingsEditorOpening &opening);
 
+[[nodiscard]] bool SettingsEditorOpeningMatches(
+	DesktopAccountConfig &routing,
+	const SettingsEditorOpening &opening);
+[[nodiscard]] bool WindowSettingsEditorOpeningMatches(
+	const SettingsEditorOpening &opening);
+
 [[nodiscard]] SettingsEditorPreparation PrepareSettingsEditorEdit(
 	DesktopAccountConfig &routing,
 	const SettingsEditorOpening &opening,

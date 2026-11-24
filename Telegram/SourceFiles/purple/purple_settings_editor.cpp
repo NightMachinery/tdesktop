@@ -269,6 +269,20 @@ LayerSettingsResult InspectSettingsEditor(const SettingsEditorOpening &opening) 
 		opening.workMode);
 }
 
+bool SettingsEditorOpeningMatches(
+		DesktopAccountConfig &routing,
+		const SettingsEditorOpening &opening) {
+	const auto matches = [&](const auto &source, SettingsOpenRole role, const auto &good) {
+		return source ? routing.validateOpen(*source) && OwnGoodInput(*source) == good
+			: !routing.openTarget(opening.requester, role);
+	};
+	return (!opening.current || opening.current())
+		&& routing.workMode(opening.requester) == opening.workMode
+		&& matches(opening.ownSource, SettingsOpenRole::Own, opening.ownGood)
+		&& matches(opening.globalSource, SettingsOpenRole::AppWide, opening.globalGood)
+		&& (!opening.current || opening.current());
+}
+
 SettingsEditorPreparation PrepareSettingsEditorEdit(
 		DesktopAccountConfig &routing,
 		const SettingsEditorOpening &opening,

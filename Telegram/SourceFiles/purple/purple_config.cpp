@@ -1113,6 +1113,10 @@ SettingsEditorPreparation PrepareWindowSettingsEditorEdit(
 	return PrepareSettingsEditorEdit(AccountRouting(), opening, std::move(intent));
 }
 
+bool WindowSettingsEditorOpeningMatches(const SettingsEditorOpening &opening) {
+	return opening.current && SettingsEditorOpeningMatches(AccountRouting(), opening);
+}
+
 void RequestSettingsEditorApply(
 		not_null<Window::Controller*> window,
 		std::shared_ptr<SettingsEditorReview> review,

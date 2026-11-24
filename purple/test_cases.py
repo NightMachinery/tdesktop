@@ -221,6 +221,11 @@ CASES = {
         'syntax_units': ['purple/tests/settings_color_sheet_fixture.cpp'],
         'frameworks': ['QtCore', 'QtGui'],
     },
+    'settings-drafts': {
+        'program': 'settings_draft_cases.cpp',
+        'units': [],
+        'frameworks': ['QtCore'],
+    },
     'customize-keymap': {
         'program': 'customize_keymap_cases.cpp',
         'units': [],
