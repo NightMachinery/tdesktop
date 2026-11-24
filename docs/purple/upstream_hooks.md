@@ -2005,3 +2005,16 @@ worker's pending database transactions. The existing playlist menu hook in
 - `boxes/peer_list_box.cpp` compares raw queries for Purple's chat palette so
   punctuation, handles and international phone numbers reach its exact matcher.
   The palette opens at the compact picker height.
+
+### Purple version in menu footer and About box
+
+- `window/window_main_menu.cpp`: includes `purple/purple_version.h` and calls
+  `Purple::SetupMainMenuVersion(_version, controller)` after upstream's version
+  link setup to display the short Purple version next to the upstream version
+  with click-to-copy for the full version line.
+- `window/window_main_menu_helpers.cpp`: includes `purple/purple_version.h` and
+  calls `Purple::VersionTooltip(...)` in `AddVersionLabel` so hovering the
+  footer shows the full Purple version alongside build date and Qt version.
+- `boxes/about_box.cpp`: includes `purple/purple_version.h` and calls
+  `Purple::AddAboutVersion(layout, box)` below the upstream version button. See
+  [version.md](version.md).

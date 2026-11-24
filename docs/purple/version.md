@@ -6,14 +6,17 @@ version it is built on. Desktop shows it as one line:
     Purple 1.0.0 (864b1934d3+dirty, core 337829e+dirty)
 
 Clicking the line copies it to the clipboard and shows "Text copied to
-clipboard." It appears in two places:
+clipboard." It appears in four places:
 
 - at the bottom of the main Settings page, below the help rows;
-- as the first row of Settings > Purple.
+- as the first row of Settings > Purple;
+- in the main menu footer next to the upstream Telegram Desktop version
+  (`Version 7.3.3 · Purple 1.0.0 – About`), with the full version line in the
+  footer tooltip and click-to-copy on the Purple link;
+- in the About box, directly below the upstream Telegram Desktop version, using
+  the full version line with click-to-copy.
 
 Settings search finds it under "purple", "version", "commit" and "build".
-Telegram's own version is not in Settings on desktop: it is in the main menu
-footer and in the About box, and the Purple line is not shown there.
 
 ## The three parts
 
@@ -85,3 +88,12 @@ commit, a core directory that is not a checkout, and no git at all.
   search but never drawn.
 - `Telegram/SourceFiles/settings/sections/settings_advanced.cpp`: an include
   and `Purple::AddVersionRow(builder)` in the existing Purple section.
+- `Telegram/SourceFiles/window/window_main_menu.cpp`: an include and
+  `Purple::SetupMainMenuVersion(_version, controller)` after the upstream
+  version link setup, placing the short Purple version next to the upstream
+  version with click-to-copy for the full version line.
+- `Telegram/SourceFiles/window/window_main_menu_helpers.cpp`: an include and
+  `Purple::VersionTooltip(...)` in `AddVersionLabel` so hovering the menu
+  footer shows the full Purple version alongside build date and Qt version.
+- `Telegram/SourceFiles/boxes/about_box.cpp`: an include and
+  `Purple::AddAboutVersion(layout, box)` below the upstream version button.

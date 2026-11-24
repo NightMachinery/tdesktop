@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_main_menu.h"
+#include "purple/purple_version.h"
 
 #include "apiwrap.h"
 #include "base/event_filter.h"
@@ -419,6 +420,7 @@ MainMenu::MainMenu(
 		std::make_shared<LambdaClickHandler>([=] {
 			controller->show(Box(AboutBox));
 		}));
+	Purple::SetupMainMenuVersion(_version, controller);
 
 	rpl::combine(
 		_toggleAccounts->rightSkipValue(),

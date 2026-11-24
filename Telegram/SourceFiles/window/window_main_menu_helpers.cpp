@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_main_menu_helpers.h"
+#include "purple/purple_version.h"
 
 #include "apiwrap.h"
 #include "base/platform/base_platform_info.h"
@@ -46,13 +47,9 @@ namespace Window {
 	if constexpr (!Platform::IsMacStoreBuild()
 		&& !Platform::IsWindowsStoreBuild()) {
 		Ui::InstallTooltip(label, [] {
-			if constexpr (Platform::IsLinux()) {
-				return u"Qt version: %1."_q.arg(QT_VERSION_STR);
-			} else {
-				return u"Build date: %1.\nQt version: %2."_q
-					.arg(__DATE__)
-					.arg(QT_VERSION_STR);
-			}
+			return Purple::VersionTooltip(
+				QString::fromLatin1(__DATE__),
+				QString::fromLatin1(QT_VERSION_STR));
 		});
 	}
 	return label;

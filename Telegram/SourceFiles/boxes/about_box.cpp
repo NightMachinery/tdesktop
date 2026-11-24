@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/about_box.h"
+#include "purple/purple_version.h"
 
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
@@ -113,6 +114,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 			File::OpenUrl(Core::App().changelogLink());
 		}
 	});
+	Purple::AddAboutVersion(layout, box);
 
 	Ui::AddSkip(layout, st::aboutTopSkip);
 

@@ -27,7 +27,9 @@ void Check(bool ok, int line) {
 } // namespace
 
 int main() {
+	using Purple::FormatShortVersion;
 	using Purple::FormatVersion;
+	using Purple::FormatVersionTooltip;
 
 	CHECK(FormatVersion(
 		u"1.0.0"_q, u"864b1934d3"_q, false, u"337829e"_q, false)
@@ -44,6 +46,22 @@ int main() {
 	CHECK(FormatVersion(
 		u"1.0.0"_q, u"unknown"_q, false, u"unknown"_q, false)
 		== u"Purple 1.0.0 (unknown, core unknown)"_q);
+
+	CHECK(FormatShortVersion(u"1.0.0"_q) == u"Purple 1.0.0"_q);
+	CHECK(FormatShortVersion(u"1.2.3"_q) == u"Purple 1.2.3"_q);
+
+	CHECK(FormatVersionTooltip(
+		u"Purple 1.0.0 (864b1934d3, core 337829e)"_q,
+		u"Nov 24 2026"_q,
+		u"6.11.2"_q,
+		false)
+		== u"Purple 1.0.0 (864b1934d3, core 337829e)\nBuild date: Nov 24 2026.\nQt version: 6.11.2."_q);
+	CHECK(FormatVersionTooltip(
+		u"Purple 1.0.0 (864b1934d3, core 337829e)"_q,
+		u"Nov 24 2026"_q,
+		u"6.11.2"_q,
+		true)
+		== u"Purple 1.0.0 (864b1934d3, core 337829e)\nQt version: 6.11.2."_q);
 
 	std::printf("%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
