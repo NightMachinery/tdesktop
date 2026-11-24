@@ -538,6 +538,9 @@ PRIVATE
     purple/purple_screentime.h
     purple/purple_settings.cpp
     purple/purple_settings.h
+    purple/purple_settings_edit.cpp
+    purple/purple_settings_edit.h
+    purple/purple_setting_keys.inc
     purple/purple_splice.cpp
     purple/purple_splice.h
     purple/purple_state.cpp
@@ -576,6 +579,7 @@ set_source_files_properties(
     ${purple_core_loc}/purple/purple_media_reply_splice.cpp
     ${purple_core_loc}/purple/purple_config_diff.cpp
     ${purple_core_loc}/purple/purple_settings.cpp
+    ${purple_core_loc}/purple/purple_settings_edit.cpp
     ${purple_core_loc}/purple/purple_splice.cpp
     ${purple_core_loc}/purple/purple_state.cpp
     PROPERTIES INCLUDE_DIRECTORIES ${purple_core_loc}/tomlplusplus)
