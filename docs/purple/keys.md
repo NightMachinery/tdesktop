@@ -79,8 +79,10 @@ with at most three strokes per chord:
     track, `p f` / `p b` seek forward/back, `p m` Music, `p l` Playlists;
     also `] t` / `[ t`).
   - `SPC s`: search (`s s` or `/` search messages, `s c` chat palette).
-  - `SPC t`: toggles (`t b` chat background artwork visibility, `t n` Night Mode).
-  - `SPC w`: panes (`w h` chats, `w l` conversation, `w w` toggle).
+  - `SPC t`: toggles (`t b` chat background artwork visibility, `t n` Night Mode,
+    `t z` Zen fullscreen chat).
+  - `SPC w`: panes (`w h` chats, `w l` conversation, `w w` toggle, `w m` Zen
+    fullscreen chat).
   - `SPC a 1` through `SPC a 6`: switch signed-in accounts.
   - `SPC h`: help (`h c` or `?` cheatsheet, `h b` or `SPC ?` all active
     bindings, `h k` describe key, `h f` describe command, `h s` Telegram stock
@@ -166,8 +168,18 @@ on the modal status line and cheatsheet footer.
 - **Profile pictures in modal menus:** circular peer avatars appear beside
   people, groups, channels, and accounts in the unread buffer (`SPC u`), chat
   palette (`SPC ,`), and `M-x` peer-scoped commands.
+- **Zen fullscreen chat (`SPC t z`, `SPC w m`):** puts the window into real OS
+  fullscreen and hides the folder rail, chat list, info sidebar, and modal
+  status bar so only the current conversation is visible. The status bar appears
+  transiently only while a prefix, count, hints, key capture, modal layer, or
+  error/feedback message is active. `Esc` does not exit Zen mode; toggle `SPC t z`
+  or `SPC w m` again to restore the exact prior window state and layout.
 
 ## Upstream hooks
+
+- `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
+  `window/window_session_controller.*`: hides the folder rail, chat list, side
+  shadows, and third column while Zen fullscreen chat mode is active.
 
 - `core/application.cpp`: delegates key press, shortcut override, paired key
   release, window deactivation, and IME events to `Purple::HandleModalKeys`.

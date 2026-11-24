@@ -47,6 +47,7 @@ struct StatusState {
 	int unreadGp = 0;
 	int unreadCh = 0;
 	bool unreadKnown = false;
+	bool zenMode = false;
 };
 
 class ModalStatusBar final : public Ui::RpWidget {

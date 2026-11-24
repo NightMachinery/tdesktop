@@ -247,6 +247,8 @@ for action, chord in (
     ("CopyMessageUrl", "y u"),
     ("UnreadBuffer", "SPC u"),
     ("UnreadBuffer", "SPC b I"),
+    ("ToggleZenMode", "SPC t z"),
+    ("ToggleZenMode", "SPC w m"),
 ):
     bound(action, chord)
 for index in range(1, 7):
@@ -279,11 +281,17 @@ for action, key in (
     bound(action, key, chat_body)
 
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
+ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScreen()",
+        "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
+ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
 ordered(keys, "avatarSession", "avatarPeerId")
 keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
+main_w = read("mainwidget.cpp")
+ordered(main_w, "syncZenHide", "_zenThirdSectionHide", "_zenThirdShadowHide")
+ordered(main_w, "void MainWidget::destroyThirdSection()", "_zenThirdSectionHide.onWidgetDestroyed()")
 
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")

@@ -369,6 +369,24 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 		advance(chipW, 10);
 	}
 
+	// Compact ZEN mode indicator pill.
+	if (_state.zenMode && remaining() > 44) {
+		const auto zenText = u"ZEN"_q;
+		const auto zenW = MeasureTextWidth(monoBold, zenText) + 10;
+		if (zenW <= remaining()) {
+			const auto zenRect = slotRect(zenW).adjusted(0, 4, 0, -4);
+			auto fill = BadgeColor(BadgeKind::Leader);
+			fill.setAlpha(30);
+			p.setPen(Qt::NoPen);
+			p.setBrush(fill);
+			p.drawRoundedRect(zenRect, 4, 4);
+			p.setFont(monoBold);
+			p.setPen(BadgeColor(BadgeKind::Leader));
+			p.drawText(zenRect, Qt::AlignCenter, zenText);
+			advance(zenW, 8);
+		}
+	}
+
 	// Unread unmuted CHATS breakdown pill: DM / GP / CH.
 	if (_state.unreadKnown && _state.pendingText.isEmpty() && remaining() > 120) {
 		struct BucketPart {

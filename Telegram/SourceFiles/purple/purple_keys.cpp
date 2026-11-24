@@ -44,6 +44,7 @@
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_keys_unread.h"
+#include "purple/purple_keys_zen.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_picker.h"
@@ -237,6 +238,7 @@ enum class Action {
 	OpenChat,
 	ChatPalette,
 	UnreadBuffer,
+	ToggleZenMode,
 	PreviousFolder,
 	NextFolder,
 	SelectMessage,
@@ -339,6 +341,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_chat_palette(tr::now); } },
 	{ Action::UnreadBuffer, "unread-chats-buffer", "chats", "",
 		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
+	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "Needs an open chat",
+		[] { return u"Toggle Zen fullscreen chat"_q; } },
 	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, true },
 	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
@@ -1390,6 +1394,11 @@ bool Available(Action action, const Target &target) {
 			|| Available(Action::FocusConversation, target);
 	case Action::UnreadBuffer:
 		return target.controller != nullptr;
+	case Action::ToggleZenMode:
+		return target.controller != nullptr
+			&& (target.controller->purpleZenHidden()
+				|| target.chat
+				|| target.controller->activeChatCurrent().thread() != nullptr);
 	default: return true;
 	}
 }
@@ -1520,6 +1529,7 @@ private:
 	[[nodiscard]] Target currentTarget(QObject *receiver) const;
 	[[nodiscard]] Target activeTarget() const;
 	[[nodiscard]] bool chromeVisible() const;
+	[[nodiscard]] bool zenNeedsTransientBar() const;
 	[[nodiscard]] KeyUse classify(
 		const QKeyEvent &event,
 		int key,
@@ -1530,6 +1540,7 @@ private:
 	void showFeedback(QString text, bool isError = false);
 	void scheduleUnreadRefresh();
 	void refreshUnreadSummary();
+	void setZenMode(bool enabled);
 	void showUnreadBuffer(const Target &target);
 	void refreshStatusBar();
 	void showWhichKey();
@@ -1558,6 +1569,9 @@ private:
 	bool _normal = true; // Starts in Normal mode when modal keys are enabled.
 	bool _inspect = false;
 	bool _swallowNext = false;
+	bool _zenMode = false;
+	ModalZen::WindowStateSnapshot _zenSavedWindow;
+	base::weak_ptr<Window::SessionController> _zenController;
 	ModalUnread::UnreadSummary _unreadSummary;
 	bool _unreadKnown = false;
 	enum class ActiveLayer {
@@ -1639,7 +1653,10 @@ Keys::Keys(not_null<MainWindow*> window)
 			}
 		});
 
-	Core::App().passcodeLockValue() | rpl::on_next([=](bool) {
+	Core::App().passcodeLockValue() | rpl::on_next([=](bool locked) {
+		if (locked && _zenMode) {
+			setZenMode(false);
+		}
 		clearPrefix();
 		_window->updateControlsGeometry();
 		refreshStatusBar();
@@ -1676,6 +1693,9 @@ Keys::Keys(not_null<MainWindow*> window)
 	window->controller().sessionControllerValue(
 	) | rpl::on_next([=](Window::SessionController *owner) {
 		++_revision;
+		if (_zenMode) {
+			setZenMode(false);
+		}
 		clearPrefix();
 		_sessionLifetime.destroy();
 		_unreadKnown = false;
@@ -1706,6 +1726,9 @@ Keys::Keys(not_null<MainWindow*> window)
 		) | rpl::on_next([=] {
 			// Keep Normal mode across chat/folder switches; only clear in-flight sequences.
 			++_revision;
+			if (_zenMode && !owner->activeChatCurrent().thread()) {
+				setZenMode(false);
+			}
 			clearPrefix();
 			refreshStatusBar();
 		}, _sessionLifetime);
@@ -1798,8 +1821,17 @@ bool Keys::chromeVisible() const {
 		&& _window->controller().sessionController() != nullptr;
 }
 
+bool Keys::zenNeedsTransientBar() const {
+	return !_prefix.empty()
+		|| _count > 0
+		|| _inspect
+		|| _hints.active()
+		|| _activeLayer != ActiveLayer::None
+		|| !_feedbackText.isEmpty();
+}
+
 int Keys::statusBarHeight() const {
-	return chromeVisible() ? ModalUi::ModalStatusBar::kHeight : 0;
+	return (chromeVisible() && !_zenMode) ? ModalUi::ModalStatusBar::kHeight : 0;
 }
 
 void Keys::updateLayout(QRect body) {
@@ -1812,10 +1844,13 @@ void Keys::updateLayout(QRect body) {
 		_whichKey->hide();
 		return;
 	}
+	const auto showBar = !_zenMode || zenNeedsTransientBar();
 	const auto h = ModalUi::ModalStatusBar::kHeight;
 	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
-	_statusBar->show();
-	_statusBar->raise();
+	_statusBar->setVisible(showBar);
+	if (showBar) {
+		_statusBar->raise();
+	}
 	if (_whichKey->isVisible()) {
 		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
 		_whichKey->updateBounds(above);
@@ -1895,6 +1930,56 @@ void Keys::refreshUnreadSummary() {
 	_unreadKnown = true;
 	_unreadSummary = next;
 	if (changed) {
+		refreshStatusBar();
+	}
+}
+
+void Keys::setZenMode(bool enabled) {
+	const auto controller = _window->controller().sessionController();
+	if (enabled == _zenMode) {
+		return;
+	}
+	if (enabled) {
+		if (!controller || !controller->activeChatCurrent().thread()) {
+			return;
+		}
+		_zenSavedWindow = {
+			.wasFullScreen = _window->isFullScreen(),
+			.wasMaximized = _window->windowState().testFlag(Qt::WindowMaximized),
+			.normalGeometry = _window->normalGeometry(),
+		};
+		_zenController = base::make_weak(controller);
+		_zenMode = true;
+		controller->setPurpleZenHidden(true);
+		if (!_window->isFullScreen()) {
+			_window->showFullScreen();
+		}
+		_window->updateControlsGeometry();
+		if (controller->content()) {
+			controller->content()->activate();
+		}
+		refreshStatusBar();
+	} else {
+		_zenMode = false;
+		if (const auto prev = _zenController.get()) {
+			prev->setPurpleZenHidden(false);
+		}
+		if (controller && controller != _zenController.get()) {
+			controller->setPurpleZenHidden(false);
+		}
+		_zenController = nullptr;
+		const auto restore = ModalZen::PlanWindowRestore(
+			_zenSavedWindow,
+			_window->isFullScreen());
+		if (restore == ModalZen::RestoreWindowAction::ShowMaximized) {
+			_window->showMaximized();
+		} else if (restore == ModalZen::RestoreWindowAction::ShowNormalAndRestoreGeometry) {
+			_window->showNormal();
+			if (_zenSavedWindow.normalGeometry.isValid()) {
+				_window->setGeometry(_zenSavedWindow.normalGeometry);
+			}
+		}
+		_window->updateControlsGeometry();
 		refreshStatusBar();
 	}
 }
@@ -2010,12 +2095,29 @@ void Keys::refreshStatusBar() {
 		hideWhichKey();
 		return;
 	}
+	const auto showBar = !_zenMode || zenNeedsTransientBar();
+	if (!showBar) {
+		_statusBar->hide();
+		hideWhichKey();
+		return;
+	}
+	if (!_lastBody.isEmpty()) {
+		const auto h = ModalUi::ModalStatusBar::kHeight;
+		_statusBar->setGeometry(
+			_lastBody.x(),
+			_lastBody.y() + _lastBody.height() - h,
+			_lastBody.width(),
+			h);
+	}
+	_statusBar->show();
+	_statusBar->raise();
 	const auto target = activeTarget();
 	auto state = ModalUi::StatusState();
 	state.unreadDm = _unreadSummary.dm;
 	state.unreadGp = _unreadSummary.gp;
 	state.unreadCh = _unreadSummary.ch;
 	state.unreadKnown = _unreadKnown;
+	state.zenMode = _zenMode;
 	if (_activeLayer != ActiveLayer::None) {
 		switch (_activeLayer) {
 		case ActiveLayer::Cheatsheet:
@@ -2457,11 +2559,14 @@ void Keys::showWhichKey() {
 		.leaves = std::move(leaves),
 	};
 	_whichKey->setState(std::move(wk));
+	const auto barH = (_statusBar && _statusBar->isVisible())
+		? ModalUi::ModalStatusBar::kHeight
+		: statusBarHeight();
 	const auto above = QRect(
 		_lastBody.x(),
 		_lastBody.y(),
 		_lastBody.width(),
-		std::max(0, _lastBody.height() - statusBarHeight()));
+		std::max(0, _lastBody.height() - barH));
 	_whichKey->updateBounds(above);
 	_window->fixOrder();
 }
@@ -2637,6 +2742,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::UnreadBuffer:
 		clearPrefix();
 		showUnreadBuffer(target);
+		break;
+	case Action::ToggleZenMode:
+		clearPrefix();
+		setZenMode(!_zenMode);
 		break;
 	case Action::OpenMusic:
 		ToggleMusicSection(current);
@@ -3045,9 +3154,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q, 1));
-		pushRow(panes.rows, rowFor(Action::NextFolder, u"Next folder"_q, 1, true));
-		pushRow(panes.rows, rowFor(Action::PreviousFolder, u"Previous folder"_q, 1, true));
-		pushRow(panes.rows, rowFor(Action::Search, u"Search messages"_q, 1));
+		pushRow(panes.rows, rowFor(Action::ToggleZenMode, u"Zen fullscreen chat"_q, 1));
 		pushRow(panes.rows, rowFor(Action::ToggleNightMode, u"Toggle night mode"_q, 1));
 		pushRow(panes.rows, rowFor(Action::Backgrounds, u"Toggle chat wallpaper"_q, 1));
 		cards.push_back(std::move(panes));

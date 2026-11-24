@@ -40,6 +40,10 @@ public:
 		not_null<SessionController*> session);
 	~FiltersMenu();
 
+	void setHiddenForZen(bool hidden) {
+		_outer.setVisible(!hidden);
+	}
+
 private:
 	void setup();
 	void refresh();

@@ -2056,6 +2056,9 @@ void SessionController::toggleFiltersMenu(bool enabled) {
 		_filters = std::make_unique<FiltersMenu>(
 			widget()->bodyWidget(),
 			this);
+		if (_purpleZenHidden) {
+			_filters->setHiddenForZen(true);
+		}
 	} else {
 		_filters = nullptr;
 	}
@@ -3321,7 +3324,19 @@ not_null<MainWidget*> SessionController::content() const {
 }
 
 int SessionController::filtersWidth() const {
-	return _filters ? st::windowFiltersWidth : 0;
+	return (_filters && !_purpleZenHidden) ? st::windowFiltersWidth : 0;
+}
+
+void SessionController::setPurpleZenHidden(bool hidden) {
+	if (_purpleZenHidden == hidden) {
+		return;
+	}
+	_purpleZenHidden = hidden;
+	if (_filters) {
+		_filters->setHiddenForZen(hidden);
+	}
+	_filtersMenuChanged.fire({});
+	widget()->updateControlsGeometry();
 }
 
 bool SessionController::enoughSpaceForFilters() const {

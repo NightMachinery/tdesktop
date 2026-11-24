@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "media/player/media_player_float.h"
 #include "mtproto/sender.h"
+#include "purple/purple_keys_zen.h"
 
 class HistoryWidget;
 class StackItem;
@@ -354,6 +355,8 @@ private:
 
 	const base::unique_qptr<Ui::PlainShadow> _sideShadow;
 	object_ptr<Ui::PlainShadow> _thirdShadow = { nullptr };
+	Purple::ModalZen::ZenWidgetHideState _zenThirdSectionHide;
+	Purple::ModalZen::ZenWidgetHideState _zenThirdShadowHide;
 	object_ptr<Ui::ResizeArea> _firstColumnResizeArea = { nullptr };
 	object_ptr<Ui::ResizeArea> _thirdColumnResizeArea = { nullptr };
 

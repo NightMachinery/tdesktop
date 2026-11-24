@@ -2710,11 +2710,25 @@ void MainWidget::updateControlsGeometry() {
 	} else {
 		destroyThirdSection();
 		_thirdShadow.destroy();
+		_zenThirdShadowHide.onWidgetDestroyed();
 	}
 	const auto mainSectionTop = getMainSectionTop();
 	const auto musicWide = !isOneColumn() && Purple::MusicHidesChats(_mainSection.data());
-	Purple::UpdateMusicSidebar(_dialogs.get(), musicWide, !isOneColumn());
-	Purple::UpdateMusicSidebar(_sideShadow.get(), musicWide, !isOneColumn());
+	const auto zenWide = !isOneColumn() && _controller->purpleZenHidden();
+	const auto hideChats = musicWide || zenWide;
+	Purple::UpdateMusicSidebar(_dialogs.get(), hideChats, !isOneColumn());
+	Purple::UpdateMusicSidebar(_sideShadow.get(), hideChats, !isOneColumn());
+	const auto syncZenHide = [](auto &state, QWidget *w, bool hide) {
+		using Action = Purple::ModalZen::ZenWidgetHideState::Action;
+		const auto act = state.sync(w != nullptr, w && !w->isHidden(), hide);
+		if (act == Action::Hide && w) {
+			w->hide();
+		} else if (act == Action::Show && w) {
+			w->show();
+		}
+	};
+	syncZenHide(_zenThirdSectionHide, _thirdSection.data(), zenWide);
+	syncZenHide(_zenThirdShadowHide, _thirdShadow.data(), zenWide);
 	auto dialogsWidth = _dialogs
 		? int(base::SafeRound(_a_dialogsWidth.value(_dialogsWidth)))
 		: isOneColumn()
@@ -2749,8 +2763,8 @@ void MainWidget::updateControlsGeometry() {
 			_contentScrollAddToY);
 		if (_hider) _hider->setGeometry(0, 0, dialogsWidth, height());
 	} else {
-		auto thirdSectionWidth = _thirdSection ? _thirdColumnWidth : 0;
-		if (_thirdSection) {
+		auto thirdSectionWidth = (_thirdSection && !zenWide) ? _thirdColumnWidth : 0;
+		if (_thirdSection && !zenWide) {
 			auto thirdSectionTop = getThirdSectionTop();
 			_thirdSection->setGeometry(
 				width() - thirdSectionWidth,
@@ -2766,7 +2780,7 @@ void MainWidget::updateControlsGeometry() {
 				width() - st::columnMinimalWidthMain);
 			_dialogs->setGeometryToLeft(0, 0, dialogsWidth, height());
 		}
-		if (musicWide) dialogsWidth = 0;
+		if (hideChats) dialogsWidth = 0;
 		if (_sideShadow) {
 			_sideShadow->setGeometryToLeft(
 				dialogsWidth,
@@ -2774,7 +2788,7 @@ void MainWidget::updateControlsGeometry() {
 				st::lineWidth,
 				shadowHeight);
 		}
-		if (_thirdShadow) {
+		if (_thirdShadow && !zenWide) {
 			_thirdShadow->setGeometryToLeft(
 				width() - thirdSectionWidth - st::lineWidth,
 				shadowTop,
@@ -2841,10 +2855,12 @@ void MainWidget::destroyThirdSection() {
 		}
 	}
 	_thirdSection.destroy();
+	_zenThirdSectionHide.onWidgetDestroyed();
 }
 
 void MainWidget::refreshResizeAreas() {
-	if (!isOneColumn() && _dialogs) {
+	const auto zen = _controller->purpleZenHidden();
+	if (!isOneColumn() && !zen && _dialogs) {
 		ensureFirstColumnResizeAreaCreated();
 		_firstColumnResizeArea->setGeometryToLeft(
 			_history->x(),
@@ -2855,7 +2871,7 @@ void MainWidget::refreshResizeAreas() {
 		_firstColumnResizeArea.destroy();
 	}
 
-	if (isThreeColumn() && _thirdSection) {
+	if (isThreeColumn() && !zen && _thirdSection) {
 		ensureThirdColumnResizeAreaCreated();
 		_thirdColumnResizeArea->setGeometryToLeft(
 			_thirdSection->x(),

@@ -134,11 +134,13 @@
   ; SPC t: toggles.
   "SPC t b" :chat-backgrounds-visibility-toggle
   "SPC t n" :toggle-night-mode
+  "SPC t z" :toggle-chat-zen-mode
 
   ; SPC w and C-w: panes.
   "SPC w h" :focus-chat-list
   "SPC w l" :focus-conversation
   "SPC w w" :focus-other-pane
+  "SPC w m" :toggle-chat-zen-mode
   "C-w h"   :focus-chat-list
   "C-w l"   :focus-conversation
   "C-w w"   :focus-other-pane

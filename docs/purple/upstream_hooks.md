@@ -23,6 +23,10 @@ the numbers.
   drawer in `finishFirstShow()`, reserves the status-bar height beneath `_main`
   in `updateControlsGeometry()`, and raises the modal chrome beneath lock and
   layer overlays in `fixOrder()`.
+- `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
+  `window/window_session_controller.*`: hides the folder strip, dialogs column,
+  side shadows, and third column while Zen fullscreen chat mode is active,
+  restoring only widgets Zen itself hid.
 - `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
