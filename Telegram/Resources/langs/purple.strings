@@ -814,7 +814,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_after_voice_about" = "Applies when voice or video messages interrupt music. New choices take effect when you start a message. Turning music resume off keeps the interrupted track paused.";
 
 "lng_purple_keys_settings" = "Modal keyboard shortcuts";
-"lng_purple_keys_settings_hint" = "By default, Ctrl+[ enters Normal mode in the chat list or a conversation. Esc returns to typing. SPC ? shows commands, and keys.edn lets you change bindings.";
+"lng_purple_keys_settings_hint" = "Starts in Normal mode with a bottom modal status line. Press i to type, Esc or Ctrl+[ to return to Normal, SPC for leader, , or SPC m for localleader, ? for the cheatsheet, and M-x or SPC SPC for commands. Customize bindings in keys.edn.";
 "lng_purple_keys_normal" = "Normal mode";
 "lng_purple_keys_insert" = "Insert mode";
 "lng_purple_keys_backgrounds" = "Toggle chat backgrounds";

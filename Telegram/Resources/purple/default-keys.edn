@@ -1,71 +1,187 @@
-; Built-in Purple Desktop keymap. Local keys.edn entries overlay this map.
-{:normal {"C-[" :enter-normal-mode
-          "i" :enter-insert-mode
-          "SPC c b" :chat-backgrounds-visibility-toggle
-          "[ c" :chat-cursor-previous
-          "k" :chat-cursor-previous
-          "] c" :chat-cursor-next
-          "j" :chat-cursor-next
-          "RET" :chat-cursor-open
-          "SPC RET" :chat-palette
-          "[ f" :folder-previous
-          "] f" :folder-next
-          "g s s" :message-hint-select
-          "g s y" :message-hint-copy-text
-          "g s m" :message-hint-menu
-          "g s l" :message-hint-copy-link
-          "g s u" :message-hint-copy-url
-          "g s o" :message-hint-open-url
-          "g s r" :message-hint-reply
-          "g s e" :message-hint-edit
-          "/" :search-messages
-          "SPC s s" :search-messages
-          "SPC o m" :open-main-menu
-          "SPC o s e" :open-settings
-          "SPC o s a" :open-saved-messages
-          "SPC o a" :open-archived-chats
-          "SPC o c" :open-contacts
-          "SPC o p" :open-calls
-          "SPC o d" :open-downloads
-          "SPC n g" :new-group
-          "SPC n c" :new-channel
-          "SPC n p" :add-contact
-          "SPC c h s" :open-scheduled-messages
-          "SPC c m" :open-chat-menu
-          "SPC c i" :open-chat-info
-          "SPC c s v" :open-chat-media
-          "SPC c s a" :open-chat-music
-          "SPC c s f" :open-chat-files
-          "SPC c s l" :open-chat-links
-          "SPC c s r" :open-chat-voice
-          "SPC c s g" :open-chat-gifs
-          "SPC c s p" :open-chat-polls
-          "SPC c h p" :open-pinned-messages
-          "SPC c u" :attach-files
-          "SPC c p" :preview-chat
-          "SPC m m" :open-music
-          "SPC m l" :open-playlists
-          "SPC m p" :playback-toggle
-          "SPC m s" :playback-stop
-          "[ t" :playback-previous-track
-          "] t" :playback-next-track
-          "SPC m b" :playback-seek-backward
-          "SPC m f" :playback-seek-forward
-          "SPC a 1" :switch-account-1
-          "SPC a 2" :switch-account-2
-          "SPC a 3" :switch-account-3
-          "SPC a 4" :switch-account-4
-          "SPC a 5" :switch-account-5
-          "SPC a 6" :switch-account-6
-          "SPC w l" :focus-chat-list
-          "SPC w c" :focus-conversation
-          "[ m" :history-page-older
-          "] m" :history-page-newer
-          "] ]" :history-jump-to-latest
-          "] u" :history-jump-to-unread
-          "SPC c h d" :history-open-calendar
-          "SPC ?" :keys-help
-          "SPC SPC" :command-search
-          "SPC h k" :key-describe
-          "SPC h f" :command-describe}
- :insert {"C-[" :enter-normal-mode}}
+; Built-in Purple Desktop keymap (shared evilify EDN format).
+; Local ~/.purple-telegram/keys.edn overlays this file: an entry there
+; replaces the matching chord in the same map, and nil removes it.
+;
+; Rules: every command has a home in a Doom-aligned SPC group, a Vim prefix
+; (g, y, [, ], C-w), or a context map after the localleader ("," or "SPC m").
+; Short keys reuse their group letter and never commit irreversible actions.
+{:localleader ["," "SPC m"]
+
+ :normal
+ {; Prefix labels for which-key and the status line.
+  "SPC"   "leader"
+  "SPC b" "buffer / chat"
+  "SPC o" "open"
+  "SPC n" "new"
+  "SPC p" "playback"
+  "SPC s" "search"
+  "SPC t" "toggle"
+  "SPC w" "window"
+  "SPC a" "accounts"
+  "SPC h" "help"
+  "g"     "go / hints"
+  "y"     "yank"
+  "["     "previous"
+  "]"     "next"
+  "C-w"   "window"
+
+  ; Mode, help, and command palette.
+  "i"       :enter-insert-mode
+  "a"       :enter-insert-mode
+  "C-["     :enter-normal-mode
+  "?"       :cheatsheet
+  "SPC ?"   :keys-help
+  "SPC h c" :cheatsheet
+  "SPC h b" :keys-help
+  "SPC h k" :key-describe
+  "SPC h f" :command-describe
+  "SPC h s" :stock-shortcuts
+  "SPC h r" :reload-keymap
+  ":"       :command-search
+  "M-x"     :command-search
+  "SPC :"   :command-search
+  "SPC SPC" :command-search
+  "SPC ,"   :chat-palette
+  "SPC RET" :chat-palette
+  "SPC b b" :chat-palette
+
+  ; Navigation and scrolling.
+  "j"       :move-down
+  "k"       :move-up
+  "J"       :chat-cursor-next
+  "K"       :chat-cursor-previous
+  "C-j"     :chat-cursor-next
+  "C-k"     :chat-cursor-previous
+  "RET"     :chat-cursor-open
+  "o"       :chat-cursor-open
+  "l"       :focus-conversation
+  "h"       :focus-chat-list
+  "C-d"     :history-half-down
+  "C-u"     :history-half-up
+  "C-f"     :history-page-newer
+  "C-b"     :history-page-older
+  "G"       :history-jump-to-latest
+  "g g"     :history-page-older
+  "[ c"     :chat-cursor-previous
+  "] c"     :chat-cursor-next
+  "[ f"     :folder-previous
+  "] f"     :folder-next
+  "[ m"     :history-page-older
+  "] m"     :history-page-newer
+  "] ]"     :history-jump-to-latest
+  "] u"     :history-jump-to-unread
+  "[ t"     :playback-previous-track
+  "] t"     :playback-next-track
+
+  ; Search and quick URL hint.
+  "/"       :search-messages
+  "f"       :message-hint-open-url
+  "SPC s s" :search-messages
+  "SPC s c" :chat-palette
+
+  ; g: go and visible message hints.
+  "g s"     :message-hint-select
+  "g m"     :message-hint-menu
+  "g r"     :message-hint-reply
+  "g e"     :message-hint-edit
+  "g o"     :message-hint-open-url
+  "g u"     :history-jump-to-unread
+
+  ; y: yank / copy (all copyable artifacts live under y).
+  "y y"     :message-hint-copy-text
+  "y m"     :message-hint-copy-text
+  "y l"     :message-hint-copy-link
+  "y u"     :message-hint-copy-url
+
+  ; SPC b: buffer / active chat.
+  "SPC b i" :open-chat-info
+  "SPC b m" :open-chat-menu
+  "SPC b p" :open-pinned-messages
+  "SPC b v" :preview-chat
+  "SPC b s" :open-scheduled-messages
+  "SPC b d" :history-open-calendar
+  "SPC b u" :attach-files
+  "SPC b w" :chat-backgrounds-visibility-toggle
+
+  ; SPC o: open views and panels.
+  "SPC o s" :open-settings
+  "SPC o S" :open-saved-messages
+  "SPC o a" :open-archived-chats
+  "SPC o c" :open-contacts
+  "SPC o p" :open-calls
+  "SPC o d" :open-downloads
+  "SPC o m" :open-main-menu
+  "SPC o u" :open-music
+  "SPC o l" :open-playlists
+
+  ; SPC n: new / create.
+  "SPC n g" :new-group
+  "SPC n c" :new-channel
+  "SPC n p" :add-contact
+
+  ; SPC p: playback and music.
+  "SPC p p" :playback-toggle
+  "SPC p s" :playback-stop
+  "SPC p n" :playback-next-track
+  "SPC p N" :playback-previous-track
+  "SPC p f" :playback-seek-forward
+  "SPC p b" :playback-seek-backward
+  "SPC p m" :open-music
+  "SPC p l" :open-playlists
+
+  ; SPC t: toggles.
+  "SPC t b" :chat-backgrounds-visibility-toggle
+
+  ; SPC w and C-w: panes.
+  "SPC w h" :focus-chat-list
+  "SPC w l" :focus-conversation
+  "SPC w w" :focus-other-pane
+  "C-w h"   :focus-chat-list
+  "C-w l"   :focus-conversation
+  "C-w w"   :focus-other-pane
+
+  ; SPC a: accounts.
+  "SPC a 1" :switch-account-1
+  "SPC a 2" :switch-account-2
+  "SPC a 3" :switch-account-3
+  "SPC a 4" :switch-account-4
+  "SPC a 5" :switch-account-5
+  "SPC a 6" :switch-account-6}
+
+ ; Context maps: typed after localleader ("," or "SPC m").
+ :chat
+ {"i" :open-chat-info
+  "m" :open-chat-menu
+  "p" :open-pinned-messages
+  "s" :open-scheduled-messages
+  "d" :history-open-calendar
+  "a" :attach-files
+  "r" :message-hint-reply
+  "e" :message-hint-edit
+  "v" :open-chat-media
+  "u" :open-chat-music
+  "f" :open-chat-files
+  "l" :open-chat-links
+  "o" :open-chat-voice
+  "g" :open-chat-gifs
+  "q" :open-chat-polls}
+
+ :chats
+ {"p" :preview-chat
+  "m" :open-chat-menu
+  "a" :open-archived-chats
+  "f" :folder-next
+  "F" :folder-previous}
+
+ :music
+ {"p" :playback-toggle
+  "s" :playback-stop
+  "n" :playback-next-track
+  "N" :playback-previous-track
+  "f" :playback-seek-forward
+  "b" :playback-seek-backward
+  "l" :open-playlists}
+
+ :insert
+ {"C-[" :enter-normal-mode
+  "M-x" :command-search}}
