@@ -2018,3 +2018,20 @@ worker's pending database transactions. The existing playlist menu hook in
 - `boxes/about_box.cpp`: includes `purple/purple_version.h` and calls
   `Purple::AddAboutVersion(layout, box)` below the upstream version button. See
   [version.md](version.md).
+
+### Per-chat translation exclusion
+
+- `history/view/history_view_translate_bar.cpp`: includes
+  `purple/purple_translation_policy.h`, checks `Purple::ChatTranslationDisabled`
+  on `Purple::ChatTranslationExcludedChanges`, and adds the exclude action to
+  the bar menu via `Purple::AddTranslateBarExcludeAction`.
+- `history/view/history_view_translate_tracker.cpp`: gates `_trackingLanguage`
+  on `!Purple::ChatTranslationExcludedValue(peer)`.
+- `history/history.cpp`: guards `History::translateOfferFrom` with
+  `Purple::ChatTranslationExcluded(peer)` via the existing `purple/hooks/history.h`
+  facade.
+- `window/window_peer_menu.cpp`: delegates the chat menu toggle to
+  `Purple::AddPeerTranslateMenuAction` at the start of `Filler::addTranslate`.
+- `boxes/language_box.cpp`: adds the **Don't Translate Chats** row in
+  `LanguageBox::setupTop` via `Purple::AddExcludedTranslationChatsRow`. See
+  [translation.md](translation.md).

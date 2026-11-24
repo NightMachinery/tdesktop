@@ -38,6 +38,7 @@
       "sync-auto-service": "Telegram/SourceFiles/purple/tests/sync_auto_service_cases.cpp",
       "music-listening": "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp",
       "music-diagnostics": "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp",
+      "translation-exclusion": "Telegram/SourceFiles/purple/tests/translation_exclusion_cases.cpp",
       "playlists-store": "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp",
       "playlists-service": "Telegram/SourceFiles/purple/tests/playlists_service_cases.cpp",
       "playlists-resolver": "Telegram/SourceFiles/purple/tests/playlists_resolver_cases.cpp",
@@ -896,6 +897,23 @@
         "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp"
       ],
       "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, Work Mode hiding, offline, search filter and error reporting"
+    },
+    {
+      "name": "cases-translation-exclusion",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "translation-exclusion"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/translation_exclusion_cases.cpp"
+      ],
+      "coverage": "Per-chat Don't Translate This Chat exclusion serialization, migration handling, and suppression policy"
     },
     {
       "name": "cases-playlists-store",

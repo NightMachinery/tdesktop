@@ -866,3 +866,12 @@ docs/purple/upstream_hooks.md.
 "lng_purple_unlock_use_passcode" = "Use Purple passcode";
 "lng_purple_unlock_touchid_hint" = "Rest a finger on the Touch ID sensor.";
 "lng_purple_unlock_watch_hint" = "Confirm on your Apple Watch.";
+
+"lng_purple_translate_dont_chat" = "Don't Translate This Chat";
+"lng_purple_translate_allow_chat" = "Allow Translation for This Chat";
+"lng_purple_translate_excluded_chats" = "Don't Translate Chats";
+"lng_purple_translate_excluded_none" = "None";
+"lng_purple_translate_excluded_count#one" = "{count} chat";
+"lng_purple_translate_excluded_count#other" = "{count} chats";
+"lng_purple_translate_excluded_toast" = "Translation disabled for this chat.";
+"lng_purple_translate_allowed_toast" = "Translation enabled for this chat.";

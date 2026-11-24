@@ -28,5 +28,6 @@ void UnreadThingEdge(
 	not_null<Data::Thread*> thread,
 	HistoryUnreadThings::Type type);
 void ForgetHistory(const History *history);
+[[nodiscard]] bool ChatTranslationExcluded(not_null<PeerData*> peer);
 
 } // namespace Purple

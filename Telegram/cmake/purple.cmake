@@ -422,6 +422,7 @@ PRIVATE
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
     purple/purple_system_unlock.h
+    purple/purple_translation_exclusions.h
     purple/purple_translation_policy.cpp
     purple/purple_translation_policy.h
     purple/purple_ui_witness.cpp

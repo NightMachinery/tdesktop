@@ -57,6 +57,12 @@ void AddPinnedMusicAction(
 	bool sublist,
 	const Ui::Menu::MenuCallback &addAction);
 [[nodiscard]] bool TranslationPremiumAvailable(not_null<PeerData*> peer);
+[[nodiscard]] bool AddPeerTranslateMenuAction(
+	not_null<Window::SessionController*> controller,
+	not_null<PeerData*> peer,
+	bool topic,
+	bool sublist,
+	const Ui::Menu::MenuCallback &addAction);
 [[nodiscard]] bool TogglePinnedInView(
 	not_null<Window::SessionController*> controller,
 	not_null<Dialogs::Entry*> entry,

@@ -70,7 +70,8 @@ void TranslateTracker::setup() {
 		Core::App().settings().translateChatEnabledValue(),
 		Purple::TranslationPremiumValue(&_history->session()),
 		std::move(autoTranslationValue),
-		_1 && (_2 || _3));
+		Purple::ChatTranslationExcludedValue(peer),
+		_1 && (_2 || _3) && !_4);
 	_trackingLanguage.value() | rpl::on_next([=](bool tracking) {
 		_trackingLifetime.destroy();
 

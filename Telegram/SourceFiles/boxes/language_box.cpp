@@ -1672,6 +1672,7 @@ void LanguageBox::setupTop(not_null<Ui::VerticalLayout*> container) {
 	translateSkip->setClickedCallback([=] {
 		uiShow()->showBox(Ui::EditSkipTranslationLanguages());
 	});
+	Purple::AddExcludedTranslationChatsRow(container, _controller);
 	Ui::AddSkip(container);
 	Ui::AddDividerText(container, tr::lng_translate_settings_about());
 }

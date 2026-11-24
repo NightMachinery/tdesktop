@@ -4607,6 +4607,9 @@ bool History::isTopPromoted() const {
 }
 
 void History::translateOfferFrom(LanguageId id) {
+	if (id && Purple::ChatTranslationExcluded(peer)) {
+		id = {};
+	}
 	if (!id) {
 		if (translatedTo()) {
 			_translation->offerFrom(id);

@@ -6,10 +6,13 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_chat_menus.h"
+#include "purple/purple_translation_policy.h"
 
 #include "base/weak_ptr.h"
 #include "boxes/premium_limits_box.h"
 #include "chat_helpers/compose/compose_show.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_chat_filters.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -108,6 +111,41 @@ void AddPinnedMusicAction(
 
 bool TranslationPremiumAvailable(not_null<PeerData*> peer) {
 	return peer->session().premium() || LocalPremium();
+}
+
+bool AddPeerTranslateMenuAction(
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer,
+		bool topic,
+		bool sublist,
+		const Ui::Menu::MenuCallback &addAction) {
+	const auto excluded = ChatTranslationExcluded(peer);
+	if (topic || sublist) {
+		return excluded;
+	}
+	if (excluded) {
+		addAction(
+			tr::lng_purple_translate_allow_chat(tr::now),
+			[=] {
+				SetChatTranslationExcluded(peer, false);
+				controller->showToast(
+					tr::lng_purple_translate_allowed_toast(tr::now));
+			},
+			&st::menuIconTranslate);
+		return true;
+	}
+	const auto &settings = Core::App().settings();
+	if (settings.translateButtonEnabled() || settings.translateChatEnabled()) {
+		addAction(
+			tr::lng_purple_translate_dont_chat(tr::now),
+			[=] {
+				SetChatTranslationExcluded(peer, true);
+				controller->showToast(
+					tr::lng_purple_translate_excluded_toast(tr::now));
+			},
+			&st::menuIconBlock);
+	}
+	return false;
 }
 
 bool TogglePinnedInView(

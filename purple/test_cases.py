@@ -171,6 +171,16 @@ CASES = {
         'libraries': [],
         'frameworks': ['QtCore'],
     },
+    'translation-exclusion': {
+        'program': 'translation_exclusion_cases.cpp',
+        'syntax_units': ['purple/purple_translation_policy.cpp',
+            'purple/purple_chat_menus.cpp',
+            'history/view/history_view_translate_bar.cpp',
+            'history/view/history_view_translate_tracker.cpp'],
+        'units': [],
+        'libraries': [],
+        'frameworks': ['QtCore'],
+    },
     'sync-auto-service': {
         'program': 'sync_auto_service_cases.cpp',
         'generated': ['sync-auto-service.inc', 'sync-setup-status.inc', 'sync-first-use-boundary.inc', 'sync-pickup.inc'],

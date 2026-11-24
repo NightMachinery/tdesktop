@@ -1091,6 +1091,14 @@ void Filler::addExportChat() {
 }
 
 void Filler::addTranslate() {
+	if (Purple::AddPeerTranslateMenuAction(
+			_controller,
+			_peer,
+			_topic,
+			_sublist,
+			_addAction)) {
+		return;
+	}
 	if (_peer->translationFlag() != PeerData::TranslationFlag::Disabled
 		|| !Purple::TranslationPremiumAvailable(_peer)
 		|| !Core::App().settings().translateChatEnabled()) {

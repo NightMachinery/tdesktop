@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_translate_bar.h"
+#include "purple/purple_translation_policy.h"
 
 #include "boxes/translate_box.h"
 #include "ui/boxes/about_cocoon_box.h"
@@ -374,14 +375,17 @@ void TranslateBar::setup(not_null<History*> history) {
 				| Data::HistoryUpdate::Flag::TranslateFrom)),
 		history->session().changes().peerFlagsValue(
 			history->peer,
-			Data::PeerUpdate::Flag::TranslationDisabled)
+			Data::PeerUpdate::Flag::TranslationDisabled),
+		rpl::single(rpl::empty)
+			| rpl::then(Purple::ChatTranslationExcludedChanges(
+				&history->session()))
 	) | rpl::map([=](
 			LanguageId to,
 			const auto&,
+			const auto&,
 			const auto&) {
-		using Flag = PeerData::TranslationFlag;
 		const auto automatic = history->peer->autoTranslation();
-		return (history->peer->translationFlag() != Flag::Enabled)
+		return Purple::ChatTranslationDisabled(history->peer)
 			? rpl::single(QString())
 			: history->translatedTo()
 			? (automatic
@@ -475,6 +479,14 @@ void TranslateBar::showMenu(base::unique_qptr<Ui::PopupMenu> menu) {
 			addToIgnoreList,
 			&st::menuIconBlock);
 	}
+	Purple::AddTranslateBarExcludeAction(
+		_menu.get(),
+		history->peer,
+		[=](TextWithEntities text, const QString &button, Fn<void()> cb) {
+			if (guard) {
+				showToast(std::move(text), button, std::move(cb));
+			}
+		});
 	const auto hideBar = [=] {
 		showHiddenToast(history->peer);
 
