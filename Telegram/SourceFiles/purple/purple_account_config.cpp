@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_account_config.h"
+#include "purple/purple_settings_edit.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_config_diff.h"
 #include "purple/purple_state.h"
@@ -216,7 +217,8 @@ QString SettingsInputProblem(const SettingsFileInput &input, const QString &path
 	}
 	if (input.state == SettingsFileState::Missing) { return {}; }
 	const auto text = QString::fromUtf8(input.bytes);
-	if (text.toUtf8() != input.bytes) {
+	const auto bytes = input.bytes.startsWith("\xef\xbb\xbf") ? input.bytes.mid(3) : input.bytes;
+	if (text.toUtf8() != bytes) {
 		return u"The settings file is not valid UTF-8. Repair it before editing."_q;
 	}
 	const auto parsed = ParseSettings(text, path);
@@ -229,8 +231,9 @@ QString SettingsInputProblem(const SettingsFileInput &input, const QString &path
 bool RowInputUsable(const SettingsFileInput &input, const QString &path) {
 	if (input.state == SettingsFileState::Missing) { return true; }
 	const auto text = QString::fromUtf8(input.bytes);
+	const auto bytes = input.bytes.startsWith("\xef\xbb\xbf") ? input.bytes.mid(3) : input.bytes;
 	const auto parsed = ParseSettings(text, path);
-	return input.state == SettingsFileState::Readable && text.toUtf8() == input.bytes
+	return input.state == SettingsFileState::Readable && text.toUtf8() == bytes
 		&& parsed.ok() && parsed.settings.version <= kHighestSettingsVersion;
 }
 
@@ -1004,7 +1007,8 @@ SettingsOpenResult DesktopAccountConfig::prepareInput(
 		const QByteArray &bytes,
 		const std::function<bool()> &originCurrent,
 		bool *published,
-		bool allowRoot) {
+		bool allowRoot,
+		const std::function<void()> &afterPublish) {
 	if (!originCurrent || !originCurrent() || !validateOpen(target)) {
 		return {};
 	}
@@ -1039,6 +1043,7 @@ SettingsOpenResult DesktopAccountConfig::prepareInput(
 		return { logicalCurrent() ? SettingsOpenStatus::CreateError : SettingsOpenStatus::Changed };
 	}
 	if (published) { *published = true; }
+	if (afterPublish) { afterPublish(); }
 	forgetAccountSave(target.file.account);
 	(void)observeAccountSave(target.file.account);
 	invalidate();
@@ -1370,20 +1375,42 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 		const AccountSettingsWriteTarget &target,
 		const std::function<SpliceResult(const QString&)> &splice,
 		const std::function<bool()> &originCurrent) {
+	if (!splice) { return { .error = u"Settings changed. Try again."_q }; }
+	return writeSettingsBytes(target, [&](const QByteArray &source) {
+		const auto result = splice(QString::fromUtf8(source));
+		auto bytes = result.text.toUtf8();
+		if (source.startsWith("\xef\xbb\xbf") && !bytes.startsWith("\xef\xbb\xbf")) {
+			bytes.prepend("\xef\xbb\xbf");
+		}
+		return SettingsEditResult{
+			.bytes = std::move(bytes),
+			.status = !result.ok() ? SettingsEditStatus::InvalidValue
+				: result.changed ? SettingsEditStatus::Changed : SettingsEditStatus::Unchanged,
+			.error = result.error,
+		};
+	}, originCurrent);
+}
+
+AccountSettingsEditResult DesktopAccountConfig::writeSettingsBytes(
+		const AccountSettingsWriteTarget &target,
+		const std::function<SettingsEditResult(const QByteArray&)> &splice,
+		const std::function<bool()> &originCurrent,
+		std::optional<uint64_t> editorOrigin) {
 	const auto current = [&] {
 		return originCurrent && originCurrent() && validateSettingsEdit(target);
 	};
 	if (!splice || !current()) { return { .error = u"Settings changed. Try again."_q }; }
 	const auto &destination = target.destination;
 	const auto &file = destination.file;
-	const auto text = file.input.state == SettingsFileState::Missing
-		? QString::fromUtf8(NewAccountSettingsText()) : QString::fromUtf8(file.input.bytes);
-	const auto result = splice(text);
+	const auto source = file.input.state == SettingsFileState::Missing
+		? NewAccountSettingsText() : file.input.bytes;
+	const auto result = splice(source);
 	if (!result.ok()) { return { .error = result.error }; }
 	if (!current()) { return { .error = u"Settings changed. Try again."_q }; }
-	if (!result.changed) { return { .ok = true, .target = target }; }
-	const auto bytes = result.text.toUtf8();
-	if (!ParseSettings(result.text, file.path).ok()) {
+	if (result.status == SettingsEditStatus::Unchanged) { return { .ok = true, .target = target }; }
+	const auto &bytes = result.bytes;
+	const auto after = SettingsFileInput{ SettingsFileState::Readable, bytes };
+	if (!SettingsInputProblem(after, file.path).isEmpty()) {
 		return { .error = u"The edited settings do not parse."_q };
 	}
 	const auto paths = files(file.account);
@@ -1396,18 +1423,31 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 		});
 	};
 	const auto created = file.input.state == SettingsFileState::Missing;
+	const auto operation = editorOrigin ? ++_nextEditorOperation : 0;
+	auto recorded = false;
+	const auto recordEditorSave = [&] {
+		if (!operation || OwnerInput(file.path) != after) { return; }
+		const auto identity = ChoiceFileIdentity(file.path);
+		if (identity.isEmpty()) { return; }
+		const auto save = EditorSave{ operation, *editorOrigin, destination, after, identity };
+		_editorSaves[file.path] = save;
+		if (file.account == destination.global) { _editorGlobalSave = save; }
+		recorded = true;
+	};
 	if (created) {
 		auto published = false;
 		const auto ready = prepareInput(destination, bytes, [&] {
 			return originCurrent && originCurrent() && unchangedDependencies()
 				&& (target.globalSource.file.path == file.path || validateOpen(target.globalSource))
 				&& OwnerInput(target.globalSource.file.path + u".good"_q) == target.globalGoodInput;
-		}, &published);
+		}, &published, false, recordEditorSave);
 		if (!ready.target || ready.status != SettingsOpenStatus::Created) {
+			if (published && !recorded) { recordEditorSave(); }
 			return { .changed = published, .created = published,
 				.error = published
 					? u"The account settings file was saved, but the edit did not finish safely. Review it before trying again."_q
-					: u"The account settings file could not be created safely."_q };
+					: u"The account settings file could not be created safely."_q,
+				.operation = published ? operation : 0 };
 		}
 	} else {
 		const auto backup = OwnerInput(paths->backup);
@@ -1423,6 +1463,7 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 		}) != GuardedFileWrite::Written) {
 			return { .error = u"Settings changed or could not be written."_q };
 		}
+		recordEditorSave();
 		invalidate();
 		watch();
 	}
@@ -1435,7 +1476,8 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 		|| expected->destination.ownerInput != destination.ownerInput
 		|| expected->destination.file.generation != destination.file.generation
 		|| (target.globalSource.file.path != file.path && !validateOpen(target.globalSource))) {
-		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
+		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q,
+			.operation = operation };
 	}
 	const auto committedCurrent = [&] {
 		return originCurrent && originCurrent() && validateSettingsEdit(*expected);
@@ -1445,7 +1487,8 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 		|| WriteGuardedSettingsFile(paths->good, good, bytes, committedCurrent, true)
 			!= GuardedFileWrite::Written) {
 		return { .changed = true, .created = created,
-			.error = u"Settings saved, but the last-good copy could not be updated."_q };
+			.error = u"Settings saved, but the last-good copy could not be updated."_q,
+			.operation = operation };
 	}
 	auto committed = *expected;
 	committed.identities[paths->good] = ChoiceFileIdentity(paths->good);
@@ -1454,9 +1497,11 @@ AccountSettingsEditResult DesktopAccountConfig::writeSettingsEdit(
 	}
 	if (_changed) { _changed(); }
 	if (!originCurrent() || !validateSettingsEdit(committed)) {
-		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q };
+		return { .changed = true, .created = created, .error = u"Settings context changed after writing."_q,
+			.operation = operation };
 	}
-	return { .ok = true, .changed = true, .created = created, .target = committed };
+	return { .ok = true, .changed = true, .created = created, .target = committed,
+		.operation = operation };
 }
 
 std::optional<AccountListEditTarget> DesktopAccountConfig::listEditTarget(
@@ -1740,15 +1785,48 @@ AccountListReloadChange DescribeAccountListReload(
 	return result;
 }
 
+bool DesktopAccountConfig::matchesEditorSave(
+		const EditorSave &save,
+		const QString &path,
+		const SettingsFileInput &before,
+		const SettingsFileInput &after) const {
+	const auto &destination = save.destination;
+	return save.operation && before != after
+		&& destination.file.path == path
+		&& destination.file.generation == _routingGeneration
+		&& destination.global == globalAccount()
+		&& destination.file.input == before
+		&& save.after == after
+		&& ChoiceFileIdentity(path) == save.identity;
+}
+
+bool DesktopAccountConfig::takeEditorGlobalReload(
+		const QString &path,
+		const SettingsFileInput &before,
+		const SettingsFileInput &after) {
+	if (before == after) { return false; }
+	const auto save = std::exchange(_editorGlobalSave, std::nullopt);
+	return save && path == globalSettingsPath()
+		&& matchesEditorSave(*save, path, before, after);
+}
+
 std::vector<AccountListReloadChange> DesktopAccountConfig::observeListReloads(
 		const std::vector<AccountKey> &accounts) {
 	auto result = std::vector<AccountListReloadChange>();
 	const auto global = globalAccount();
-	const auto globalBytes = ObservedSettingsBytes(globalSettingsPath());
+	const auto globalPath = globalSettingsPath();
+	const auto globalBytes = ObservedSettingsBytes(globalPath);
 	if (!global || !globalBytes) { return result; }
+	const auto globalInput = OwnerInput(globalPath);
+	const auto globalSave = _editorSaves.extract(globalPath);
+	const auto editorGlobal = _listObservationGlobal == global
+		&& !globalSave.empty()
+		&& *globalBytes == globalSave.mapped().after.bytes
+		&& matchesEditorSave(globalSave.mapped(), globalPath, _listObservationGlobalInput, globalInput);
 	if (_listObservationGlobal != global) {
 		_listObservationGlobal = global;
 		_listObservations.clear();
+		_listObservationInputs.clear();
 	}
 	for (const auto &key : accounts) {
 		const auto name = AccountKeyText(key.environment, key.userId);
@@ -1756,8 +1834,23 @@ std::vector<AccountListReloadChange> DesktopAccountConfig::observeListReloads(
 		if (!name || !paths) { continue; }
 		const auto bytes = ObservedSettingsBytes(paths->settings);
 		if (!bytes) { continue; }
+		const auto ownInput = paths->settings == globalPath ? globalInput : OwnerInput(paths->settings);
+		const auto ownSave = _editorSaves.extract(paths->settings);
 		const auto before = _listObservations.find(*name);
 		if (before != _listObservations.end()) {
+			const auto editorOwn = (paths->settings == globalPath && editorGlobal)
+				|| (!ownSave.empty() && ownSave.mapped().destination.file.account == key
+					&& *bytes == ownSave.mapped().after.bytes
+					&& matchesEditorSave(ownSave.mapped(), paths->settings,
+					_listObservationInputs.at(*name), ownInput));
+			const auto globalChanged = _listObservationGlobalBytes != *globalBytes;
+			const auto ownChanged = before->second != *bytes;
+			if ((editorGlobal || editorOwn)
+				&& (!globalChanged || editorGlobal) && (!ownChanged || editorOwn)) {
+				_listObservations[*name] = *bytes;
+				_listObservationInputs[*name] = ownInput;
+				continue;
+			}
 			auto change = DescribeAccountListReload(_listObservationGlobalBytes, *globalBytes, before->second, *bytes);
 			change.account = key;
 			auto input = ConfigImpactInput();
@@ -1782,8 +1875,10 @@ std::vector<AccountListReloadChange> DesktopAccountConfig::observeListReloads(
 			}
 		}
 		_listObservations[*name] = *bytes;
+		_listObservationInputs[*name] = ownInput;
 	}
 	_listObservationGlobalBytes = *globalBytes;
+	_listObservationGlobalInput = globalInput;
 	return result;
 }
 

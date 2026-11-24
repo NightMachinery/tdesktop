@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_privacy_screen.h"
+#include "purple/purple_settings_editor.h"
 #include "purple/purple_playlists_service.h"
 #include "purple/purple_media_reply_splice.h"
 #include "purple/purple_peek_controls.h"
@@ -646,7 +647,10 @@ void Config::reloadFromDisk() {
 	reloadStateFromDisk();
 	ShowAccountListReloadNotices();
 
-	const auto input = ReadSettingsFileInput(SettingsFilePath());
+	const auto path = SettingsFilePath();
+	const auto input = ReadSettingsFileInput(path);
+	const auto editorEcho = (_settingsPath == path)
+		&& AccountRouting().takeEditorGlobalReload(path, _diskInput, input);
 	if (input == _diskInput && _settingsPath == SettingsFilePath()) {
 		if (std::exchange(_accountRefreshPending, false)) {
 			_changes.fire({});
@@ -664,7 +668,7 @@ void Config::reloadFromDisk() {
 	applyInput(input);
 	autoSendLater();
 	flushGlobalChoiceState();
-	if (edited && editedPath == SettingsFilePath()
+	if (edited && !editorEcho && editedPath == SettingsFilePath()
 		&& editedAccount == AccountRouting().globalAccount()
 		&& _problems.error.isEmpty() && !_usingLastGoodSettings) {
 		ShowOfflineGlobalEditBulletin();
@@ -1056,6 +1060,139 @@ WriteResult WriteSettingsFromEditor(
 	const auto result = WriteSettingsGuarded(*editor->target, std::move(splice), what, current);
 	if (result.ok) { editor->target = result.target; }
 	return result;
+}
+
+SettingsEditorOpening CaptureWindowSettingsEditor(
+		not_null<Window::Controller*> window,
+		std::function<bool()> editorCurrent) {
+	const auto session = window->maybeSession();
+	if (!session) {
+		return {};
+	}
+	const auto weakWindow = base::make_weak(window.get());
+	const auto weakSession = base::make_weak(session);
+	const auto key = SessionAccountKey(session);
+	const auto current = [=] {
+		const auto host = weakWindow.get();
+		const auto live = weakSession.get();
+		return host && live && Core::App().activeWindow() == host
+			&& host->maybeSession() == live && !host->locked()
+			&& !Core::App().screenIsLocked() && !PrivacyScreenActiveAny()
+			&& !live->account().loggingOut() && live->account().maybeSession() == live
+			&& SessionAccountKey(live) == key
+			&& (!editorCurrent || editorCurrent());
+	};
+	if (!current()) {
+		return {};
+	}
+	auto result = CaptureSettingsEditorOpening(AccountRouting(), key);
+	static auto nextOrigin = uint64_t(0);
+	result.origin = ++nextOrigin;
+	result.current = current;
+	result.windowCurrent = [=](Window::Controller *candidate) {
+		return current() && candidate == weakWindow.get();
+	};
+	if (const auto global = AccountRouting().globalAccount()) {
+		result.globalSignedIn = std::any_of(
+			Core::App().domain().accounts().begin(),
+			Core::App().domain().accounts().end(),
+			[&](const auto &entry) {
+				const auto live = entry.account->maybeSession();
+				return live && !entry.account->loggingOut() && SessionAccountKey(live) == *global;
+			});
+	}
+	return result;
+}
+
+SettingsEditorPreparation PrepareWindowSettingsEditorEdit(
+		const SettingsEditorOpening &opening,
+		SettingsEditorIntent intent) {
+	if (!opening.current) {
+		return { .status = SettingsEditorStatus::Unavailable };
+	}
+	return PrepareSettingsEditorEdit(AccountRouting(), opening, std::move(intent));
+}
+
+void RequestSettingsEditorApply(
+		not_null<Window::Controller*> window,
+		std::shared_ptr<SettingsEditorReview> review,
+		std::function<void(SettingsEditorApplyResult)> completed) {
+	using Status = SettingsEditorStatus;
+	if (!completed) {
+		return;
+	}
+	if (!review || !review->_opening.windowCurrent
+		|| !review->_opening.windowCurrent(window.get())
+		|| review->_consumed || !review->validate(AccountRouting())) {
+		completed({ .status = Status::StaleRevision,
+			.error = u"The settings file or opening window changed. Review again."_q });
+		return;
+	}
+	if (review->_waiting) {
+		completed({ .status = Status::Waiting });
+		return;
+	}
+	const auto apply = [review](const std::function<bool()> &current, bool fromWait) {
+		Instance().observeAccountFiles();
+		auto result = review->commit(AccountRouting(), current, fromWait);
+		if (result.status == Status::Saved || result.status == Status::SavedWithFollowUpError) {
+			Instance().refreshAccountRows();
+			Instance().observeAccountFiles();
+			if (result.status == Status::Saved && !current()) {
+				result.status = Status::SavedWithFollowUpError;
+				result.error = u"Settings context changed after writing."_q;
+			}
+		}
+		return result;
+	};
+	if (review->_preview.route != SettingsEditorRoute::Peek) {
+		completed(apply(review->_opening.current, false));
+		return;
+	}
+
+	const auto &before = review->_preview.physicalBefore.settings;
+	const auto &after = review->_preview.physicalAfter.settings;
+	const auto prepared = std::make_shared<std::optional<SettingsEditorApplyResult>>();
+	const auto reported = std::make_shared<bool>(false);
+	const auto finish = [=](const WaitResult &wait) {
+		if (wait.outcome == WaitOutcome::Pending || std::exchange(*reported, true)) {
+			return;
+		}
+		review->_waiting = false;
+		auto result = prepared->value_or(SettingsEditorApplyResult{
+			.status = wait.outcome == WaitOutcome::Refused ? Status::StaleRevision : Status::Cancelled,
+			.error = wait.error,
+		});
+		completed(std::move(result));
+	};
+	const auto editor = std::make_shared<AppWideSettingsEditorState>(
+		AppWideSettingsEditorState{ review->_target, review->_opening.current });
+	const auto delay = PeekWaitDelaySeconds(after);
+	review->_waiting = true;
+	const auto result = RequestWait({
+		.action = WaitAction::ChangePeekOption,
+		.session = window->maybeSession(),
+		.seconds = delay,
+		.editor = editor,
+		.onlyTightening = delay >= PeekWaitDelaySeconds(before)
+			&& (!PeekExitHiddenChats(before) || PeekExitHiddenChats(after))
+			&& PeekReadyTimeoutSeconds(after) <= PeekReadyTimeoutSeconds(before),
+		.writesSettings = true,
+		.validate = [=] {
+			return !review->_consumed && review->validate(AccountRouting())
+				? QString() : u"Settings changed. Review the Peek edit again."_q;
+		},
+		.apply = [=](const std::function<bool()> &current) {
+			*prepared = apply(current, true);
+			return prepared->value().error;
+		},
+		.onResult = finish,
+	});
+	if (result.outcome == WaitOutcome::Pending && !*reported) {
+		completed({ .status = Status::Waiting });
+	} else {
+		finish(result);
+	}
 }
 
 std::optional<AccountListEditTarget> AccountListEditFor(

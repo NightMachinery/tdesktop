@@ -286,6 +286,22 @@ delivery. Work Mode and ordinary chat mutes still decide whether one is sent.
 Notification actions remain subject to the app's existing lock and preview
 rules. The operating system may separately hide previews on its lock screen.
 
+## Typed Desktop editing backend
+
+The Desktop editor backend captures an originating window and session, the
+account and app-wide file routes, and their opening bytes. Preparation uses
+the shared settings schema and pure splices to produce a physical diff,
+effective values, and reader warnings. It can report incomplete provenance
+alongside a valid review. Each Apply replays the reviewed operation through
+one guarded writer and compares the resulting bytes before replacement.
+
+Own and file-local fields, account rows, media replies, and list membership
+use their existing account admission rules. Peek timing changes go through
+the existing wait and confirmation gate, including resets. A failed recovery
+copy refresh can follow a successful primary replacement, which the apply
+result reports separately. The reload observer skips the exact transition
+recorded at the writer boundary and continues reporting unrelated changes.
+
 ## Schema
 
 `version` at the top of the file is the schema the file is written to. It is

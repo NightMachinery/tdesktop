@@ -322,7 +322,7 @@ ordered(keys, "void Keys::schedulePendingNoticeFlush", "_noticeLayers.empty()",
 ordered(keys, "PeekCountdownChanges()", "schedulePendingNoticeFlush()", "PeekCountdownPending()")
 wait_cpp = read("purple/purple_peek_controls.cpp")
 ordered(wait_cpp, "void PendingWait::report", ".session = session", ".background = background",
-        "_session = weak", "void PendingWait::confirm", "report(result, origin, session.get(), true)")
+        "_session = weak", "void PendingWait::confirm", "report(result, origin, session.get(), true, onResult)")
 notices_cpp = read("purple/purple_notices.cpp")
 ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
         "WindowMatchesAccount", "CanExposeNoticeInWindow",
@@ -334,6 +334,11 @@ ordered(notices_cpp, "sessionDataAboutToBeCleared", "clearAccount",
 ordered(notices_cpp, "void OpenNoticeLayerForRecord", "Store().findById(accountKey, id)",
         "revision = rec.repeatCount", "live->repeatCount == revision", "run(&weakWin->controller())")
 config_cpp = read("purple/purple_config.cpp")
+ordered(config_cpp, "void Config::reloadFromDisk", "takeEditorGlobalReload", "edited && !editorEcho")
+ordered(config_cpp, "SettingsEditorOpening CaptureWindowSettingsEditor", "activeWindow() == host",
+        "host->maybeSession() == live", "!host->locked()", "!PrivacyScreenActiveAny()", "!live->account().loggingOut()")
+ordered(config_cpp, "void RequestSettingsEditorApply", "_opening.windowCurrent", "review->commit",
+        "RequestWait({", "WaitAction::ChangePeekOption", "apply(current, true)", ".onResult = finish")
 ordered(config_cpp, "PurpleNoticeWindow(session)", "hasConfigPeerIds", "ShowPurpleNotice",
         "config:reload:")
 archive_cpp = read("purple/purple_archive_service.cpp")

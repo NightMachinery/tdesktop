@@ -64,6 +64,7 @@ struct WaitRequest {
 	std::function<QString()> validate;
 	std::function<QString(const std::function<bool()>&)> apply;
 	std::function<void()> finished;
+	std::function<void(const WaitResult&)> onResult;
 };
 
 WaitResult RequestWait(WaitRequest request);

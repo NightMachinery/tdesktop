@@ -149,11 +149,13 @@ private:
 		const WaitResult &result,
 		base::weak_ptr<Window::Controller> window,
 		Main::Session *session,
-		bool background);
+		bool background,
+		const std::function<void(const WaitResult&)> &receiver);
 
 	std::vector<not_null<Ui::RpWidget*>> _widgets;
 	base::weak_ptr<Window::Controller> _window;
 	base::weak_ptr<Main::Session> _session;
+	std::function<void(const WaitResult&)> _onResult;
 	WaitGate _gate;
 	WaitPresence _presence;
 	bool _coverHidden = false;
@@ -433,6 +435,7 @@ void PendingWait::closeCover() {
 	const auto focus = std::exchange(_previousFocus, nullptr);
 	_window = nullptr;
 	_session = nullptr;
+	_onResult = nullptr;
 	_presence.reset();
 	_coverHidden = false;
 	CloseWaitCover(cover, focus);
@@ -447,15 +450,22 @@ void PendingWait::quietCancel() {
 }
 
 void PendingWait::cancel() {
+	const auto onResult = _onResult;
 	_gate.cancel();
 	closeCover();
+	if (onResult) { onResult({}); }
 }
 
 void PendingWait::report(
 		const WaitResult &result,
 		base::weak_ptr<Window::Controller> window,
 		Main::Session *session,
-		bool background) {
+		bool background,
+		const std::function<void(const WaitResult&)> &receiver) {
+	if (receiver) {
+		if (result.outcome != WaitOutcome::Pending) { receiver(result); }
+		return;
+	}
 	if (!result.error.isEmpty()) {
 		if (const auto live = window.get()) {
 			const auto err = result.error;
@@ -496,7 +506,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 	if (!window || !session || window->maybeSession() != session) {
 		const auto result = WaitResult{ WaitOutcome::Refused,
 			tr::lng_purple_wait_account_changed(tr::now) };
-		report(result, origin, session, false);
+		report(result, origin, session, false, request.onResult);
 		return result;
 	}
 	const auto workMode = WorkModeWait(request.action);
@@ -591,7 +601,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 	const auto before = validateAt(true);
 	if (!before.isEmpty()) {
 		const auto result = WaitResult{ WaitOutcome::Refused, before };
-		report(result, origin, weak.get(), false);
+		report(result, origin, weak.get(), false, request.onResult);
 		return result;
 	}
 	auto delay = PeekWaitDelaySeconds(ActiveSettings());
@@ -599,7 +609,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 		if (seconds < 0) {
 			const auto result = WaitResult{ WaitOutcome::Refused,
 				tr::lng_purple_wait_delay_invalid(tr::now) };
-			report(result, origin, weak.get(), false);
+			report(result, origin, weak.get(), false, request.onResult);
 			return result;
 		}
 		delay = std::max(delay, seconds);
@@ -610,7 +620,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 		if (!request.toBypass && !ActiveSettings().preset(request.preset)) {
 			const auto result = WaitResult{ WaitOutcome::Refused,
 				tr::lng_purple_wait_settings_changed(tr::now) };
-			report(result, origin, weak.get(), false);
+			report(result, origin, weak.get(), false, request.onResult);
 			return result;
 		}
 	} else if (action == WaitAction::StartPeek || action == WaitAction::ExtendPeek) {
@@ -618,7 +628,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 			QDateTime::currentSecsSinceEpoch(), seconds);
 		if (refusal != PeekRequestRefusal::None) {
 			const auto result = WaitResult{ WaitOutcome::Refused, PeekRefusalText(refusal) };
-			report(result, origin, weak.get(), false);
+			report(result, origin, weak.get(), false, request.onResult);
 			return result;
 		}
 	}
@@ -676,6 +686,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 	if (result.outcome == WaitOutcome::Pending) {
 		_window = origin;
 		_session = weak;
+		_onResult = request.onResult;
 		_previousFocus = QApplication::focusWidget();
 		_presence.reset();
 		_coverHidden = false;
@@ -711,7 +722,7 @@ WaitResult PendingWait::request(WaitRequest request) {
 		_changes.fire({});
 		tick();
 	}
-	report(result, origin, weak.get(), false);
+	report(result, origin, weak.get(), false, request.onResult);
 	return result;
 }
 
@@ -746,16 +757,18 @@ void PendingWait::confirm() {
 	}
 	const auto origin = _window;
 	const auto session = _session;
+	const auto onResult = _onResult;
 	const auto result = _gate.confirm(WaitClockNow());
 	if (!pending()) {
 		closeCover();
 	}
-	report(result, origin, session.get(), true);
+	report(result, origin, session.get(), true, onResult);
 }
 
 void PendingWait::tick() {
 	const auto origin = _window;
 	const auto session = _session;
+	const auto onResult = _onResult;
 	// The activation and lock signals come first; this is the backstop, and
 	// what ends a settle window or shows the cover again after a lock.
 	presenceChanged();
@@ -763,10 +776,10 @@ void PendingWait::tick() {
 	const auto now = WaitClockNow();
 	const auto result = _gate.tick(now);
 	render(now);
-	if (quietGeneration == _quietFocusGeneration
+	if (onResult || (quietGeneration == _quietFocusGeneration
 		&& QGuiApplication::applicationState() == Qt::ApplicationActive
-		&& !Core::App().passcodeLocked() && !Core::App().screenIsLocked()) {
-		report(result, origin, session.get(), true);
+		&& !Core::App().passcodeLocked() && !Core::App().screenIsLocked())) {
+		report(result, origin, session.get(), true, onResult);
 	}
 }
 

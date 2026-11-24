@@ -19,6 +19,7 @@
       "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp",
       "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp",
       "account-routing-file": "Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp",
+      "settings-editor": "Telegram/SourceFiles/purple/tests/settings_editor_cases.cpp",
       "sync-diag": "Telegram/SourceFiles/purple/tests/sync_diag_cases.cpp",
       "sync-magic-chat": "Telegram/SourceFiles/purple/tests/sync_magic_chat_cases.cpp",
       "storage-passcode": "Telegram/SourceFiles/purple/tests/storage_passcode_cases.cpp",
@@ -444,6 +445,23 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-settings-editor",
+      "driver": "purple/test_cases.py",
+      "coverage": "Typed settings routes, guarded review and apply, recovery results and exact reload provenance",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "settings-editor"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/settings_editor_cases.cpp"
       ]
     },
     {

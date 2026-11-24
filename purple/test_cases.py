@@ -206,6 +206,12 @@ CASES = {
             'purple/purple_sync_local_store.cpp', 'purple/purple_sync_account_recovery.cpp', 'purple/purple_sync_config_review.cpp', CORE],
         'frameworks': ['QtCore'],
     },
+    'settings-editor': {
+        'program': 'settings_editor_cases.cpp',
+        'units': ['purple/purple_account_config.cpp', 'purple/purple_config_file.cpp',
+            'purple/purple_settings_editor.cpp', CORE],
+        'frameworks': ['QtCore'],
+    },
     'copy-article': {
         # The real ordinary formatter and article writer over the real RichPage
         # model, lib_ui text and the IV inline-object and link codecs.

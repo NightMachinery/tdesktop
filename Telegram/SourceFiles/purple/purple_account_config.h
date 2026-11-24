@@ -21,6 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 
+struct SettingsEditResult;
+
 [[nodiscard]] bool AccountSyncRecordSupported(const QByteArray &record);
 [[nodiscard]] bool AccountFilePathSafe(const QString &path);
 [[nodiscard]] bool SettingsExportPathAllowed(const QString &root, const QString &path);
@@ -171,6 +173,7 @@ struct AccountSettingsEditResult {
 	bool created = false;
 	QString error;
 	std::optional<AccountSettingsWriteTarget> target;
+	uint64_t operation = 0;
 };
 
 struct AccountListEditTarget {
@@ -350,6 +353,15 @@ public:
 		const AccountSettingsWriteTarget &target,
 		const std::function<SpliceResult(const QString&)> &splice,
 		const std::function<bool()> &originCurrent);
+	[[nodiscard]] AccountSettingsEditResult writeSettingsBytes(
+		const AccountSettingsWriteTarget &target,
+		const std::function<SettingsEditResult(const QByteArray&)> &splice,
+		const std::function<bool()> &originCurrent,
+		std::optional<uint64_t> editorOrigin = std::nullopt);
+	[[nodiscard]] bool takeEditorGlobalReload(
+		const QString &path,
+		const SettingsFileInput &before,
+		const SettingsFileInput &after);
 	[[nodiscard]] std::optional<AccountListEditTarget> listEditTarget(
 		const AccountKey &requester, const QString &list, QString *error = nullptr);
 	[[nodiscard]] AccountSettingsEditResult writeListMember(
@@ -430,10 +442,23 @@ private:
 		const QByteArray &bytes,
 		const std::function<bool()> &originCurrent,
 		bool *published = nullptr,
-		bool allowRoot = false);
+		bool allowRoot = false,
+		const std::function<void()> &afterPublish = {});
 	[[nodiscard]] bool persistPlan(const AccountOwnerStartupPlan &plan,
 		SettingsFileInput local, SettingsFileInput record, bool accountsPresent);
 	[[nodiscard]] QString absolute(const QString &relative) const;
+	struct EditorSave {
+		uint64_t operation = 0;
+		uint64_t origin = 0;
+		AccountSettingsOpenTarget destination;
+		SettingsFileInput after;
+		QByteArray identity;
+	};
+	[[nodiscard]] bool matchesEditorSave(
+		const EditorSave &save,
+		const QString &path,
+		const SettingsFileInput &before,
+		const SettingsFileInput &after) const;
 
 	QString _root;
 	std::optional<AccountKey> _owner;
@@ -451,7 +476,12 @@ private:
 	std::map<QString, SettingsFileInput> _modernSaveObservations;
 	std::optional<AccountKey> _listObservationGlobal;
 	QByteArray _listObservationGlobalBytes;
+	SettingsFileInput _listObservationGlobalInput;
 	std::map<QString, QByteArray> _listObservations;
+	std::map<QString, SettingsFileInput> _listObservationInputs;
+	std::map<QString, EditorSave> _editorSaves;
+	std::optional<EditorSave> _editorGlobalSave;
+	uint64_t _nextEditorOperation = 0;
 	bool _persistFailed = false;
 	bool _watching = false;
 	bool _detached = false;

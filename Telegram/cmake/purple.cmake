@@ -132,6 +132,8 @@ PRIVATE
     purple/purple_article_markdown.h
     purple/purple_config.cpp
     purple/purple_config.h
+    purple/purple_settings_editor.cpp
+    purple/purple_settings_editor.h
     purple/purple_config_file.cpp
     purple/purple_config_file.h
     purple/purple_device.cpp
