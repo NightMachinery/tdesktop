@@ -3108,6 +3108,22 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 	refreshStatusBar();
 
 	const auto handled = std::make_shared<bool>(false);
+	const auto palettePtr = std::make_shared<QPointer<Ui::LayerWidget>>();
+	const auto closePalettePosted = [guard, palettePtr] {
+		if (!guard || !*palettePtr) {
+			return;
+		}
+		const auto raw = palettePtr->data();
+		const auto stack = dynamic_cast<Ui::LayerStackWidget*>(raw->parentWidget());
+		if (stack && stack->topShownLayer() == raw) {
+			guard->_window->showOrHideBoxOrLayer(
+				v::null,
+				Ui::LayerOption::KeepOther,
+				anim::type::instant);
+		} else {
+			raw->closeLayer();
+		}
+	};
 	const auto restoreInsertIfOrigin = [guard, revision, origin, original, fromInsert] {
 		if (!guard) {
 			return;
@@ -3129,7 +3145,9 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		.describeMode = describe,
 		.items = std::move(items),
 		.history = MxHistory(),
-		.onPick = [guard, handled, describe, revision, origin, original](int actionId, QString query) {
+		.onPick = [guard, handled, closePalettePosted, describe, revision, origin, original](
+				int actionId,
+				QString query) {
 			*handled = true;
 			if (!guard) {
 				return;
@@ -3138,14 +3156,12 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			const auto action = Action(actionId);
 			MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
 			SaveMxHistory();
-			guard->_window->showOrHideBoxOrLayer(
-				v::null,
-				Ui::LayerOption::KeepOther,
-				anim::type::instant);
-			QTimer::singleShot(0, guard.data(), [guard, describe, action, revision, origin, original] {
+			// Defer layer destruction until after the input/mouse/event-filter handler unwinds.
+			QTimer::singleShot(0, guard.data(), [guard, closePalettePosted, describe, action, revision, origin, original] {
 				if (!guard) {
 					return;
 				}
+				closePalettePosted();
 				const auto live = guard->owner();
 				if (!Enabled() || !live || live != original.get()
 					|| revision != guard->_revision || !origin
@@ -3168,19 +3184,23 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 				guard->refreshStatusBar();
 			});
 		},
-		.onCancel = [guard, handled, restoreInsertIfOrigin] {
+		.onCancel = [guard, handled, closePalettePosted, restoreInsertIfOrigin] {
 			*handled = true;
 			if (!guard) {
 				return;
 			}
 			guard->_activeLayer = ActiveLayer::None;
-			guard->_window->showOrHideBoxOrLayer(
-				v::null,
-				Ui::LayerOption::KeepOther,
-				anim::type::instant);
-			QTimer::singleShot(0, guard.data(), restoreInsertIfOrigin);
+			// Defer layer destruction until after the key/event-filter handler unwinds.
+			QTimer::singleShot(0, guard.data(), [guard, closePalettePosted, restoreInsertIfOrigin] {
+				if (!guard) {
+					return;
+				}
+				closePalettePosted();
+				restoreInsertIfOrigin();
+			});
 		},
 	});
+	*palettePtr = layer.get();
 	layer->lifetime().add([guard, kind, handled, fromInsert, restoreInsertIfOrigin] {
 		if (!guard) return;
 		if (guard->_activeLayer == kind) {

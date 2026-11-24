@@ -1898,13 +1898,14 @@ private:
 	}
 
 	void activateRow(int rowIndex) {
-		if (rowIndex < 0 || rowIndex >= int(_filtered.size())) {
+		if (_closing || rowIndex < 0 || rowIndex >= int(_filtered.size())) {
 			return;
 		}
 		const auto &item = _config.items[_filtered[rowIndex]];
 		if (!_config.describeMode && !item.available) {
 			return;
 		}
+		_closing = true;
 		const auto actionId = item.actionId;
 		const auto query = _input->getLastText();
 		auto cb = std::move(_config.onPick);
@@ -1917,6 +1918,10 @@ private:
 	}
 
 	void cancel() {
+		if (_closing) {
+			return;
+		}
+		_closing = true;
 		auto cb = std::move(_config.onCancel);
 		_config.onPick = nullptr;
 		if (cb) {
@@ -1936,6 +1941,7 @@ private:
 	int _historyPos = -1;
 	QString _draft;
 	bool _steppingHistory = false;
+	bool _closing = false;
 	Ui::RoundRect _roundRect{ st::boxRadius, st::windowBg };
 };
 

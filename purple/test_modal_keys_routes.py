@@ -155,8 +155,11 @@ ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_pre
 
 palette = between(keys, "void Keys::showPalette", "} // namespace")
 ordered(palette, "revision = _revision", "base::make_weak(current)",
-        "guard = QPointer(this)", "ModalUi::CreateCommandPaletteLayer",
-        "if (!guard)", "MxHistory().record", "anim::type::instant",
+        "guard = QPointer(this)", "closePalettePosted",
+        "stack->topShownLayer() == raw", "anim::type::instant",
+        "ModalUi::CreateCommandPaletteLayer",
+        "if (!guard)", "MxHistory().record", "QTimer::singleShot(0, guard.data()",
+        "closePalettePosted();",
         "!Enabled()", "live != original.get()", "revision != guard->_revision",
         "FindTarget(live, origin)", "guard->currentTarget(origin)",
         "guard->dispatch(action, restored", "onCancel = [guard,")
