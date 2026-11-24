@@ -44,6 +44,7 @@
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QVBoxLayout>
 
+#include <tuple>
 #include <utility>
 
 namespace Purple {
@@ -138,7 +139,9 @@ public:
 	, _browser(new QWidget(_pages))
 	, _sheetPage(new QScrollArea(_pages))
 	, _sheet(new QWidget(_sheetPage))
-	, _covered(Label(_pages, u"Settings hidden while locked"_q))
+	, _covered(new QWidget(_pages))
+	, _coverMessage(Label(_covered, u"Settings hidden while locked"_q))
+	, _coverClose(Button(_covered, u"Close"_q))
 	, _title(Label(_browser, u"Customize Purple settings"_q))
 	, _subject(Label(_browser))
 	, _filter(new QLineEdit(_browser))
@@ -159,10 +162,18 @@ public:
 		_sheetPage->setWidgetResizable(true);
 		_sheetPage->setFrameShape(QFrame::NoFrame);
 		_sheetPage->setWidget(_sheet);
-		for (const auto page : { _browser, static_cast<QWidget*>(_sheetPage), static_cast<QWidget*>(_covered) }) {
+		for (const auto page : { _browser, static_cast<QWidget*>(_sheetPage), _covered }) {
 			_pages->addWidget(page);
 		}
-		_covered->setAlignment(Qt::AlignCenter);
+		const auto cover = new QVBoxLayout(_covered);
+		cover->addStretch();
+		_coverMessage->setAlignment(Qt::AlignCenter);
+		cover->addWidget(_coverMessage);
+		cover->addWidget(_coverClose, 0, Qt::AlignCenter);
+		cover->addStretch();
+		_coverClose->hide();
+		_coverClose->installEventFilter(this);
+		connect(_coverClose, &QPushButton::clicked, this, [this] { back(); });
 		setupBrowser();
 
 		connect(_filter, &QLineEdit::textChanged, this, [this] {
@@ -245,6 +256,7 @@ protected:
 
 	void doSetInnerFocus() override {
 		if (_pages->currentWidget() == _browser) _tree->setFocus();
+		else if (_resumeRefused && visibleContent()) _coverClose->setFocus();
 	}
 
 	void keyPressEvent(QKeyEvent *event) override {
@@ -366,6 +378,8 @@ private:
 		if (!sameSession()) {
 			retire();
 		} else if (!visibleContent()) {
+			_coverMessage->setText(u"Settings hidden while locked"_q);
+			_coverClose->hide();
 			_pages->setCurrentWidget(_covered);
 			clearSheet();
 		} else {
@@ -374,8 +388,15 @@ private:
 				if (!visibleContent()) return;
 				refreshFromDisk();
 				if (wasCovered && !_needsRefresh) {
-					_pages->setCurrentWidget(_browser);
-					_tree->setFocus();
+					_resumeRefused = _draftStale || !_opening.current;
+					if (_resumeRefused) {
+						_coverMessage->setText(u"The source changed while settings were hidden. Close and reopen Customize to see the current settings."_q);
+						_coverClose->show();
+						_coverClose->setFocus();
+					} else {
+						_pages->setCurrentWidget(_browser);
+						_tree->setFocus();
+					}
 				}
 			});
 		}
@@ -402,6 +423,7 @@ private:
 		}
 		_needsRefresh = false;
 		if (_frames.empty()) {
+			_draftStale = false;
 			if (_editingKey.isEmpty()) {
 				capture();
 				rebuild();
@@ -411,7 +433,8 @@ private:
 			return;
 		}
 		const auto check = PrepareWindowSettingsEditorEdit(_opening, _frames.back().edits);
-		if (check.status == Status::StaleRevision || check.status == Status::Unavailable) {
+		_draftStale = !check.review;
+		if (_draftStale) {
 			AnnounceError(_feedback, StatusText(check));
 			if (_pages->currentWidget() == _sheetPage) returnToTree();
 		}
@@ -545,7 +568,7 @@ private:
 				Isolate(row->defaultValue)));
 		}
 		for (const auto &physical : row->physical) {
-			auto raw = physical.raw.simplified();
+			auto raw = physical.raw;
 			if (raw.size() > 110) raw = raw.left(109) + u'…';
 			lines.push_back(u"%1 · %2, line %3  %4"_q.arg(physical.file,
 				Isolate(QFileInfo(physical.path).fileName())).arg(physical.line).arg(Isolate(raw)));
@@ -726,7 +749,9 @@ private:
 		_capture = false;
 		delete std::exchange(_bool, nullptr);
 		_line = nullptr;
-		_choice = nullptr;
+		if (const auto choice = std::exchange(_choice, nullptr)) {
+			choice->hidePopup();
+		}
 		_multi = nullptr;
 		_formStatus = nullptr;
 		_record = nullptr;
@@ -742,6 +767,11 @@ private:
 
 	void returnToTree() {
 		clearSheet();
+		if (_resumeRefused) {
+			_pages->setCurrentWidget(_covered);
+			_coverClose->setFocus();
+			return;
+		}
 		_pages->setCurrentWidget(_browser);
 		_tree->setFocus();
 		if (_needsRefresh) refreshFromDisk();
@@ -822,6 +852,7 @@ private:
 			if (IsHotkey(descriptor)) addCaptureControls();
 			if (descriptor.codec == SettingCodec::Duration) {
 				_line->setPlaceholderText(u"Duration, e.g. 5m or off"_q);
+				addDurationControls(descriptor);
 			} else if (SettingsTree::IsSecondsInteger(descriptor.id)) {
 				_line->setPlaceholderText(u"Seconds, e.g. 300 or 5m"_q);
 			} else if (descriptor.codec == SettingCodec::Time) {
@@ -868,6 +899,39 @@ private:
 				}
 			});
 		}
+	}
+
+	void addDurationControls(const SettingDescriptor &descriptor) {
+		const auto controls = new QWidget(_sheet);
+		const auto layout = new QHBoxLayout(controls);
+		layout->setContentsMargins({});
+		for (const auto &[label, suffix, seconds] : {
+			std::tuple{ u"Seconds"_q, u"s"_q, 1 },
+			std::tuple{ u"Minutes"_q, u"m"_q, 60 },
+			std::tuple{ u"Hours"_q, u"h"_q, 3600 },
+		}) {
+			const auto button = Button(controls, label);
+			layout->addWidget(button);
+			button->installEventFilter(this);
+			connect(button, &QPushButton::clicked, this, [this, suffix, seconds] {
+				const auto current = _line->text().trimmed();
+				auto units = false;
+				const auto count = current.toInt(&units);
+				if (units && count >= 0) {
+					_line->setText(QString::number(count) + suffix);
+				} else if (const auto value = ParseDuration(current); value && *value % seconds == 0) {
+					_line->setText(QString::number(*value / seconds) + suffix);
+				} else {
+					AnnounceError(_formStatus, u"Enter a whole number in the chosen unit."_q);
+				}
+			});
+		}
+		const auto off = Button(controls, u"Off"_q);
+		layout->addWidget(off);
+		off->setEnabled(SettingsTree::Decode(descriptor, u"off"_q).has_value());
+		off->installEventFilter(this);
+		connect(off, &QPushButton::clicked, this, [this] { _line->setText(u"off"_q); });
+		addSheetWidget(controls);
 	}
 
 	void addCaptureControls() {
@@ -1033,7 +1097,9 @@ private:
 	QWidget *_browser;
 	QScrollArea *_sheetPage;
 	QWidget *_sheet;
-	QLabel *_covered;
+	QWidget *_covered;
+	QLabel *_coverMessage;
+	QPushButton *_coverClose;
 	QLabel *_title;
 	QLabel *_subject;
 	QLineEdit *_filter;
@@ -1066,6 +1132,8 @@ private:
 	bool _capture = false;
 	bool _needsRefresh = false;
 	bool _retired = false;
+	bool _draftStale = false;
+	bool _resumeRefused = false;
 };
 
 } // namespace

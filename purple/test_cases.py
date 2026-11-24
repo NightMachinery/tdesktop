@@ -215,8 +215,11 @@ CASES = {
     },
     'settings-tree': {
         'program': 'settings_tree_cases.cpp',
-        'units': ['purple/purple_settings_tree.cpp', CORE],
-        'frameworks': ['QtCore'],
+        'units': ['purple/purple_settings_tree.cpp', 'core:purple/purple_settings.cpp',
+            'core:purple/purple_settings_edit.cpp', 'core:purple/purple_media_reply.cpp',
+            'core:purple/purple_peer_token.cpp'],
+        'syntax_units': ['purple/tests/settings_color_sheet_fixture.cpp'],
+        'frameworks': ['QtCore', 'QtGui'],
     },
     'customize-keymap': {
         'program': 'customize_keymap_cases.cpp',

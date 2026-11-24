@@ -38,7 +38,7 @@ size_t Section(const SettingAddress &address, bool known) {
 }
 
 QString SpellKey(const QString &key) {
-	static const auto bare = QRegularExpression(u"^[A-Za-z0-9_-]+$"_q);
+	static const auto bare = QRegularExpression(u"^[A-Za-z0-9_-]+\\z"_q);
 	if (bare.match(key).hasMatch()) {
 		return key;
 	}
@@ -504,7 +504,7 @@ EditorKey ShouldHandleEditorKey(bool preedit, bool submit, bool singleLineOrExpl
 }
 
 std::optional<Rgb> ParseFixtureColor(const QString &hex) {
-	static const auto pattern = QRegularExpression(u"^#[0-9a-fA-F]{6}$"_q);
+	static const auto pattern = QRegularExpression(u"^#[0-9a-fA-F]{6}\\z"_q);
 	if (!pattern.match(hex).hasMatch()) return std::nullopt;
 	return Rgb{ hex.mid(1, 2).toInt(nullptr, 16), hex.mid(3, 2).toInt(nullptr, 16),
 		hex.mid(5, 2).toInt(nullptr, 16) };

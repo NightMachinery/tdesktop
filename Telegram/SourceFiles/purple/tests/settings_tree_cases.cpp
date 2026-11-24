@@ -1,5 +1,9 @@
 #include "purple/purple_settings_tree.h"
 
+#include <QtGui/QInputMethodEvent>
+#include <QtGui/QTextCursor>
+#include <QtGui/QTextDocument>
+
 #include <iostream>
 
 namespace {
@@ -59,6 +63,8 @@ int main() {
 	Check(View(rows, {}, QStringLiteral("zzz none"), peek).rows.size() > 1, "draft can keep the selected anchor until movement");
 	Check(TomlPath({ QStringLiteral("lists"), QStringLiteral("a.b"), size_t(0), QStringLiteral("title") })
 		== QStringLiteral("lists.\"a.b\".title"), "clipboard path quotes keys and leaves ordinal out");
+	Check(TomlPath({ QStringLiteral("key\n") }) == QStringLiteral("\"key\\u000a\""),
+		"clipboard path escapes a trailing newline in a quoted key");
 	Check(Address({ QStringLiteral("a"), size_t(9), QStringLiteral("b") })
 		!= Address({ QStringLiteral("a"), QStringLiteral("9"), QStringLiteral("b") }), "ordinals and literal keys differ");
 
@@ -91,15 +97,26 @@ int main() {
 	Check(badDays != badRows.end() && badDays->invalid && badDays->effective.toInt() == 90,
 		"invalid raw value stays visible alongside the reader fallback");
 	Check(ShouldHandleEditorKey(false, true, true, false) == EditorKey::Stage, "plain Return stages single line");
-	Check(ShouldHandleEditorKey(true, true, true, false) == EditorKey::Native, "preedit owns Return");
-	Check(ShouldHandleEditorKey(true, false, true, true) == EditorKey::Native, "preedit owns Escape");
+	const auto composition = QInputMethodEvent(QStringLiteral("仮"), {});
+	const auto preedit = !composition.preeditString().isEmpty();
+	Check(ShouldHandleEditorKey(preedit, true, true, false) == EditorKey::Native, "preedit owns Return");
+	Check(ShouldHandleEditorKey(preedit, false, true, true) == EditorKey::Native, "preedit owns Escape");
 	Check(ShouldHandleEditorKey(false, true, false, false) == EditorKey::Native, "multiline Return stays native");
 	Check(ShouldHandleEditorKey(false, false, true, false) == EditorKey::Native, "native text undo stays native");
+	auto document = QTextDocument();
+	document.setPlainText(QStringLiteral("Existing reply"));
+	auto caret = QTextCursor(&document);
+	caret.movePosition(QTextCursor::End);
+	caret.insertText(QStringLiteral("\nTemporary edit"));
+	Check(document.isUndoAvailable(), "Qt records native multiline input for undo");
+	document.undo();
+	Check(document.toPlainText() == QStringLiteral("Existing reply"), "native document undo leaves staged settings alone");
 
 	const auto color = ParseFixtureColor(QStringLiteral("#365A90"));
 	Check(color == Rgb{ 54, 90, 144 }, "fixture hex to RGB");
 	Check(color && EditFixtureColor(*color, 0, -100) == Rgb{ 0, 90, 144 }, "fixture channel clamps at zero");
 	Check(!ParseFixtureColor(QStringLiteral("#11223344")), "fixture RGB rejects alpha");
+	Check(!ParseFixtureColor(QStringLiteral("#365A90\n")), "fixture RGB requires exactly six digits");
 	Check(color && FixtureColorHex(*color) == QStringLiteral("#365A90"), "fixture RGB formats hex");
 	std::cout << Checks << " checks, " << Failures << " failures\n";
 	return Failures ? 1 : 0;

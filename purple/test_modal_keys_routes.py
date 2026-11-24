@@ -74,6 +74,9 @@ ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
 ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
 customize = read("purple/purple_settings_customize.cpp")
 ordered(customize, "sessionDataAboutToBeCleared()", "retire()", "PrivacyScreenChanges()")
+ordered(customize, "void protectionChanged()", "setCurrentWidget(_covered)",
+        "refreshFromDisk()", "_resumeRefused = _draftStale", "_coverClose->show()",
+        "setCurrentWidget(_browser)")
 ordered(customize, "QEvent::InputMethod", "preeditString()", "QEvent::KeyPress", "handleKey(")
 ordered(customize, "bool handleKey", "_preedit.contains(object)", "return false", "ShouldHandleEditorKey")
 ordered(customize, "new QPlainTextEdit", "setPlainText", "stageForm()", "PrepareWindowSettingsEditorEdit")
