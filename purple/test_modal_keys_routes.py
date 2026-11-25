@@ -484,6 +484,14 @@ ordered(menu, "MainMenu::MainMenu(", "setupMenu();",
         "Purple::InstallMainMenuKeys(", "_toggleAccounts.data(), _accounts)")
 
 assert "MusicAllowsModalKeys(owner, focus)" in keys
+music = read("purple/purple_music_section.cpp")
+ordered(music, "void MusicSection::doSetInnerFocus", "ModalKeysInNormal", "setFocus()", "_search->setFocusFast()")
+ordered(keys, "&QApplication::focusChanged", "MusicSearchContains(current, now)", "enterInsert(true)")
+ordered(keys, "void Keys::enterNormal", "_normal = true", "FocusMusicSearch(current, windowFocusWidget(), false)")
+dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
+ordered(dispatch, "case Action::EnterInsertMode:", "enterInsert(false)", "FocusMusicSearch(current, target.focus, true)")
+ordered(dispatch, "case Action::Search:", "MapKind::Music", "enterInsert(true)",
+        "FocusMusicSearch(current, target.focus, true)", "launch(Native::Search)")
 assert "MusicHidesChats(_mainSection.data())" in read("mainwidget.cpp")
 assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 

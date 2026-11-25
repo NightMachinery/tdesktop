@@ -14,6 +14,13 @@ bool ToggleMusicSection(not_null<Window::SessionController*> controller);
 [[nodiscard]] bool MusicAllowsModalKeys(
 	not_null<Window::SessionController*> controller,
 	not_null<QWidget*> focus);
+[[nodiscard]] bool MusicSearchContains(
+	not_null<Window::SessionController*> controller,
+	QWidget *focus);
+void FocusMusicSearch(
+	not_null<Window::SessionController*> controller,
+	QWidget *focus,
+	bool search);
 [[nodiscard]] bool MusicHidesChats(const Window::SectionWidget *section);
 void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore);
 [[nodiscard]] bool MusicHideChatsCurrent();

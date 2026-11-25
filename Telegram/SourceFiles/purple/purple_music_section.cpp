@@ -23,6 +23,7 @@
 #include "mtproto/mtp_instance.h"
 #include "mtproto/sender.h"
 #include "purple/purple_config.h"
+#include "purple/purple_keys.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_music_bookmark.h"
@@ -135,6 +136,8 @@ public:
 	QRect floatPlayerAvailableRect() override;
 	bool floatPlayerHandleWheelEvent(QEvent *) override;
 	[[nodiscard]] bool allowsModalKeys(QWidget *focus) const;
+	[[nodiscard]] bool searchContains(QWidget *widget) const;
+	void focusSearch(bool search);
 
 private:
 	enum class CatalogRead {
@@ -265,6 +268,7 @@ MusicSection::MusicSection(
 		? CatalogRead::Scan : CatalogRead::Reload);
 })
 , _connectionTimer([=] { pollConnection(); }) {
+	setFocusPolicy(Qt::StrongFocus);
 	_search->customUpDown(true);
 	const auto searchIcon = Ui::CreateChild<Ui::RpWidget>(_search);
 	searchIcon->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -419,7 +423,11 @@ std::shared_ptr<Window::SectionMemento> MusicSection::createMemento() {
 }
 
 void MusicSection::doSetInnerFocus() {
-	_search->setFocusFast();
+	if (ModalKeysInNormal(controller()->window().widget())) {
+		setFocus();
+	} else {
+		_search->setFocusFast();
+	}
 }
 
 void MusicSection::keyPressEvent(QKeyEvent *event) {
@@ -476,11 +484,24 @@ void MusicSection::showMenu(not_null<Ui::IconButton*> button) {
 }
 
 bool MusicSection::allowsModalKeys(QWidget *focus) const {
-	if (!current() || !isVisible() || !isAncestorOf(focus)) return false;
+	if (!current() || !isVisible() || (focus != this && !isAncestorOf(focus))) return false;
 	const auto layout = _search->textCursor().block().layout();
 	return (!_search->rawTextEdit()->hasFocus()
 		|| !layout
 		|| layout->preeditAreaText().isEmpty());
+}
+
+bool MusicSection::searchContains(QWidget *widget) const {
+	return widget && (widget == _search.get() || _search->isAncestorOf(widget));
+}
+
+void MusicSection::focusSearch(bool search) {
+	if (!current() || !isVisible()) return;
+	if (search) {
+		_search->setFocusFast();
+	} else if (searchContains(QApplication::focusWidget())) {
+		setFocus();
+	}
 }
 
 bool MusicSection::current() const {
@@ -1270,6 +1291,17 @@ void MusicSection::playResolved(const MusicIndexEntry &entry) {
 	Media::Player::instance()->play(AudioMsgId(item->media()->document(), id));
 }
 
+MusicSection *MusicForWidget(
+		not_null<Window::SessionController*> controller,
+		QWidget *focus) {
+	for (auto widget = focus; widget; widget = widget->parentWidget()) {
+		if (const auto music = dynamic_cast<MusicSection*>(widget)) {
+			return music->controller() == controller ? music : nullptr;
+		}
+	}
+	return nullptr;
+}
+
 } // namespace
 
 void AddMusicMenuRow(
@@ -1293,12 +1325,24 @@ bool ShowMusicSection(not_null<Window::SessionController*> controller) {
 bool MusicAllowsModalKeys(
 		not_null<Window::SessionController*> controller,
 		not_null<QWidget*> focus) {
-	for (auto widget = focus.get(); widget; widget = widget->parentWidget()) {
-		if (const auto music = dynamic_cast<MusicSection*>(widget)) {
-			return music->controller() == controller && music->allowsModalKeys(focus);
-		}
+	const auto music = MusicForWidget(controller, focus);
+	return music && music->allowsModalKeys(focus);
+}
+
+bool MusicSearchContains(
+		not_null<Window::SessionController*> controller,
+		QWidget *focus) {
+	const auto music = MusicForWidget(controller, focus);
+	return music && music->searchContains(focus);
+}
+
+void FocusMusicSearch(
+		not_null<Window::SessionController*> controller,
+		QWidget *focus,
+		bool search) {
+	if (const auto music = MusicForWidget(controller, focus)) {
+		music->focusSearch(search);
 	}
-	return false;
 }
 
 bool ToggleMusicSection(not_null<Window::SessionController*> controller) {

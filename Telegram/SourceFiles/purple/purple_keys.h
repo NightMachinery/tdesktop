@@ -46,6 +46,7 @@ void InstallMainMenuKeys(
 void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder);
 
 [[nodiscard]] bool ModalKeysEnabled();
+[[nodiscard]] bool ModalKeysInNormal(not_null<MainWindow*> window);
 [[nodiscard]] rpl::producer<bool> ModalKeysEnabledChanges();
 [[nodiscard]] ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window);
 void SetModalStatusMessage(

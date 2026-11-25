@@ -1642,6 +1642,7 @@ public:
 
 	bool handle(QObject *receiver, QEvent *event);
 	[[nodiscard]] bool ownsChatListFocus() const;
+	[[nodiscard]] bool isNormal() const { return _normal; }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
 	void raiseChrome();
@@ -1782,6 +1783,13 @@ Keys::Keys(not_null<MainWindow*> window)
 		if (!inThisWindow) {
 			return;
 		}
+		if (Enabled() && _normal && now && now->window() == _window
+			&& !_window->controller().isLayerShown()) {
+			if (const auto current = owner(); current && MusicSearchContains(current, now)) {
+				enterInsert(true);
+				return;
+			}
+		}
 		clearPrefix();
 		// Stay in Normal mode across eligible surfaces; reflect Insert if focus moved to an input outside Normal.
 		if (now && now->window() == _window) {
@@ -1840,7 +1848,7 @@ Keys::Keys(not_null<MainWindow*> window)
 		if (enabled) {
 			ReloadKeymapStore();
 			watchUserKeymap();
-			_normal = true;
+			enterNormal(true);
 		} else {
 			closeAllNoticeLayers();
 		}
@@ -2559,6 +2567,9 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 void Keys::enterNormal(bool silent) {
 	clearPrefix();
 	_normal = true;
+	if (const auto current = owner()) {
+		FocusMusicSearch(current, windowFocusWidget(), false);
+	}
 	if (!silent) {
 		showFeedback(tr::lng_purple_keys_normal(tr::now));
 	} else {
@@ -3234,6 +3245,7 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		break;
 	case Action::EnterInsertMode:
 		enterInsert(false);
+		FocusMusicSearch(current, target.focus, true);
 		break;
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
@@ -3278,7 +3290,12 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		}
 		break;
 	case Action::Search:
-		launch(Native::Search);
+		if (target.contextMap == MapKind::Music) {
+			enterInsert(true);
+			FocusMusicSearch(current, target.focus, true);
+		} else {
+			launch(Native::Search);
+		}
 		break;
 	case Action::OpenMainMenu:
 		_window->showMainMenu();
@@ -4342,6 +4359,11 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {
 
 bool ModalKeysEnabled() {
 	return Enabled();
+}
+
+bool ModalKeysInNormal(not_null<MainWindow*> window) {
+	const auto keys = FindKeys(window.get());
+	return Enabled() && (!keys || keys->isNormal());
 }
 
 rpl::producer<bool> ModalKeysEnabledChanges() {
